@@ -612,7 +612,7 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 				continue
 			}
 			b.WriteByte(' ')
-			b.WriteString(attr.Name)
+			b.WriteString(ast.HTMLAttrName(attr.Name))
 			if val != "true" {
 				b.WriteString(`="`)
 				b.WriteString(escape.HTML(val))
@@ -621,7 +621,7 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 			continue
 		}
 		b.WriteByte(' ')
-		b.WriteString(attr.Name)
+		b.WriteString(ast.HTMLAttrName(attr.Name))
 		if attr.Value != nil {
 			b.WriteString(`="`)
 			b.WriteString(escape.HTML(val))
@@ -683,7 +683,7 @@ func (e *SSREval) renderMetaElement(el *ast.JSXElement, tag string) string {
 				continue
 			}
 			b.WriteByte(' ')
-			b.WriteString(attr.Name)
+			b.WriteString(ast.HTMLAttrName(attr.Name))
 			if val != "true" {
 				b.WriteString(`="`)
 				b.WriteString(escape.HTML(val))
@@ -692,7 +692,7 @@ func (e *SSREval) renderMetaElement(el *ast.JSXElement, tag string) string {
 			continue
 		}
 		b.WriteByte(' ')
-		b.WriteString(attr.Name)
+		b.WriteString(ast.HTMLAttrName(attr.Name))
 		b.WriteString(`="`)
 		b.WriteString(escape.HTML(val))
 		b.WriteByte('"')

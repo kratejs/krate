@@ -9,8 +9,12 @@ import (
 	"krate-compiler/internal/fsutil"
 )
 
-// classAttrRe matches className="..." / class="..." attributes in source files.
-var classAttrRe = regexp.MustCompile(`(?:className|class)\s*=\s*["'` + "`" + `]([^"'` + "`" + `]*)["'` + "`" + `]`)
+// classAttrRe matches className="..." / class="..." string-literal attributes.
+var classAttrRe = regexp.MustCompile(`(?:className|class)\s*=\s*["']([^"']*)["']`)
+
+// classAttrTemplateRe matches className={`...`} template-literal attributes.
+// The template body may span multiple lines and contain ${...} interpolations.
+var classAttrTemplateRe = regexp.MustCompile("(?:className|class)\\s*=\\s*\\{\\s*`([^`]*)`\\s*}")
 
 // TailwindScanner extracts Tailwind utility class names from source files.
 type TailwindScanner struct {
@@ -43,11 +47,47 @@ func (s *TailwindScanner) ScanClasses(dirs []string) map[string]bool {
 					classes[c] = true
 				}
 			}
+			tplMatches := classAttrTemplateRe.FindAllStringSubmatch(string(data), -1)
+			for _, m := range tplMatches {
+				for _, c := range strings.Fields(stripTemplateInterpolations(m[1])) {
+					if strings.HasPrefix(c, "{") || strings.HasPrefix(c, "`") {
+						continue
+					}
+					classes[c] = true
+				}
+			}
 			return nil
 		})
 	}
 
 	return classes
+}
+
+// stripTemplateInterpolations removes ${...} segments from a template literal
+// body so only the static class-name text remains. Nested braces inside the
+// interpolation (e.g. ${spanMap[props.label] ?? ""}) are skipped correctly.
+func stripTemplateInterpolations(s string) string {
+	var b strings.Builder
+	i := 0
+	for i < len(s) {
+		if i+1 < len(s) && s[i] == '$' && s[i+1] == '{' {
+			depth := 1
+			i += 2
+			for i < len(s) && depth > 0 {
+				switch s[i] {
+				case '{':
+					depth++
+				case '}':
+					depth--
+				}
+				i++
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
 }
 
 // TailwindGenerator converts class names to CSS rules.

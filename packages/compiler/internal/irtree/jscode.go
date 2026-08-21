@@ -9,7 +9,8 @@ import (
 
 // generateExprJS converts an AST expression to a JavaScript source string.
 // Used for handler bodies, effect expressions, and complex slot expressions.
-func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {	if expr == nil {
+func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
+	if expr == nil {
 		return ""
 	}
 	switch e := expr.(type) {
@@ -293,6 +294,25 @@ func renderStmtJS(stmt ast.Stmt, signals map[string]ast.Expr) string {
 			return "continue " + s.Label + ";"
 		}
 		return "continue;"
+	case *ast.SwitchStmt:
+		var b strings.Builder
+		b.WriteString("switch(")
+		b.WriteString(generateExprJS(s.Discriminant, signals))
+		b.WriteString("){")
+		for _, c := range s.Cases {
+			if c.Test != nil {
+				b.WriteString("case ")
+				b.WriteString(generateExprJS(c.Test, signals))
+				b.WriteString(":")
+			} else {
+				b.WriteString("default:")
+			}
+			for _, stmt := range c.Body {
+				b.WriteString(renderStmtJS(stmt, signals))
+			}
+		}
+		b.WriteString("}")
+		return b.String()
 	default:
 		return ""
 	}

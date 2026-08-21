@@ -191,7 +191,7 @@ func TestBuildLocalIconsFolder(t *testing.T) {
 	if !strings.Contains(html, `<path d="M4 6h16M4 12h16M4 18h16"/>`) {
 		t.Errorf("expected local menu icon inlined, got:\n%.800s", html)
 	}
-	if !strings.Contains(html, `className=big`) {
+	if !strings.Contains(html, `class=big`) {
 		t.Errorf("expected forwarded class attr on custom32, got:\n%.800s", html)
 	}
 	if !strings.Contains(html, `viewBox="0 0 32 32"`) {

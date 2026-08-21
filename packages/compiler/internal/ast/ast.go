@@ -229,6 +229,18 @@ type JSXAttr struct {
 
 func (j *JSXAttr) Pos() Pos { return j.Position }
 
+// HTMLAttrName maps a JSX attribute name to its HTML attribute name, translating
+// React-style aliases (className, htmlFor) to their DOM equivalents (class, for).
+func HTMLAttrName(name string) string {
+	switch name {
+	case "className":
+		return "class"
+	case "htmlFor":
+		return "for"
+	}
+	return name
+}
+
 type Param struct {
     Position Pos
     Name     string

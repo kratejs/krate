@@ -549,12 +549,15 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFile string, runtimeJ
 
 			os.MkdirAll(pageDir, 0755)
 
-			// 1. Construct structural HTML wrapper in memory
+			// 1. Construct structural HTML wrapper in memory.
+			// A page links the global stylesheet when it has its own imported CSS
+			// OR when a merged stylesheet (e.g. Tailwind-generated) was written.
+			hasCSS := r.HasCSS || cssFile != ""
 			var html string
 			if r.LoadingHTML != "" {
-				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, r.HasCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode)
+				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, hasCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode)
 			} else {
-				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.HasCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode)
+				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, hasCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode)
 			}
 
 			// 2. CSP meta tag injection
@@ -1604,7 +1607,7 @@ func (b *Builder) iconResolver(iconName string, attrs []*ast.JSXAttr) (string, b
 			continue
 		}
 		b2.WriteByte(' ')
-		b2.WriteString(attr.Name)
+		b2.WriteString(ast.HTMLAttrName(attr.Name))
 		b2.WriteString(`="`)
 		b2.WriteString(escape.HTMLAttr(val))
 		b2.WriteByte('"')
