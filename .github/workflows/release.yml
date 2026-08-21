@@ -11,6 +11,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+        npm_config_frozen_lockfile: "false"
     steps:
       - uses: actions/checkout@v4
 
@@ -31,15 +33,15 @@ jobs:
           version: 11.9.0
           run_install: false
 
+      - name: Sync package versions
+        run: node scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
+
       - name: Install JS dependencies
         # --no-frozen-lockfile: @krate/core's optional platform packages
         # (@krate/core-win32-x64, etc.) are published by THIS release, so the
         # committed lockfile can never contain them (pnpm omits unresolvable
         # optional deps). Frozen mode would therefore always fail here.
         run: pnpm install --no-frozen-lockfile
-
-      - name: Sync package versions
-        run: node scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
 
       - name: Build JS packages
         run: pnpm -r build
