@@ -1,0 +1,83 @@
+.krate-alert-dialog-content-wrapper {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.krate-alert-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  animation: krate-fade-in 0.15s ease;
+}
+.krate-alert-dialog-content {
+  position: relative;
+  z-index: 1001;
+  width: 90vw;
+  max-width: 440px;
+  padding: 24px;
+  border-radius: 12px;
+  background: var(--krate-card-bg, #111113);
+  border: 1px solid var(--krate-border, #27272a);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  animation: krate-scale-in 0.15s ease;
+}
+.krate-alert-dialog-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--krate-text, #fafafa);
+  margin-bottom: 8px;
+}
+.krate-alert-dialog-description {
+  font-size: 0.9rem;
+  color: var(--krate-text-muted, #a1a1aa);
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+.krate-alert-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.krate-alert-dialog-action {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.krate-alert-dialog-action:focus-visible {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: 2px;
+}
+.krate-alert-dialog-action-confirm {
+  background: var(--krate-primary, #3b82f6);
+  color: #fff;
+}
+.krate-alert-dialog-action-confirm:hover {
+  background: var(--krate-primary-hover, #2563eb);
+}
+.krate-alert-dialog-action-cancel {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--krate-text, #fafafa);
+  border: 1px solid var(--krate-border, #27272a);
+}
+.krate-alert-dialog-action-cancel:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+@keyframes krate-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes krate-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}

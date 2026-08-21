@@ -1,0 +1,37 @@
+{
+  "name": "krate",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Go-native site generator with signal-based reactivity.",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "homepage": "https://github.com/kratejs/krate",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kratejs/krate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kratejs/krate/issues"
+  },
+  "keywords": [
+    "ssg",
+    "static-site-generator",
+    "go",
+    "typescript",
+    "tsx",
+    "jsx",
+    "signals",
+    "compiler"
+  ],
+  "scripts": {
+    "build": "pnpm -r build",
+    "build:platforms": "node scripts/build-platform-packages.mjs",
+    "dev": "cd packages/compiler && go run ./cmd/krate dev ../../examples",
+    "test": "cd packages/compiler && go test ./...",
+    "test:compiler": "cd packages/compiler && go test ./... -v",
+    "vet": "cd packages/compiler && go vet ./..."
+  }
+}

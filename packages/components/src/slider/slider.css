@@ -1,0 +1,53 @@
+.krate-slider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 20px;
+  touch-action: none;
+  user-select: none;
+}
+.krate-slider-track {
+  position: relative;
+  flex-grow: 1;
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+.krate-slider-range {
+  position: absolute;
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--krate-primary, #3b82f6);
+}
+.krate-slider-thumb {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--krate-text, #fafafa);
+  border: 2px solid var(--krate-primary, #3b82f6);
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  transition: box-shadow 0.15s, transform 0.1s;
+}
+.krate-slider-thumb:hover {
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15);
+}
+.krate-slider-thumb:focus-visible {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: 2px;
+}
+.krate-slider-thumb:active {
+  cursor: grabbing;
+  transform: translate(-50%, -50%) scale(1.1);
+}
+.krate-slider-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.krate-slider-disabled .krate-slider-thumb {
+  cursor: not-allowed;
+}

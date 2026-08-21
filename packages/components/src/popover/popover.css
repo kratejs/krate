@@ -1,0 +1,47 @@
+.krate-popover {
+  position: relative;
+  display: inline-block;
+}
+.krate-popover-trigger {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.krate-popover-trigger:focus-visible {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: 2px;
+}
+.krate-popover-content {
+  position: absolute;
+  z-index: 1000;
+  min-width: 260px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--krate-card-bg, #111113);
+  border: 1px solid var(--krate-border, #27272a);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.krate-popover-content-bottom {
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+.krate-popover-content-top {
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+.krate-popover-align-start {
+  left: 0;
+  transform: none;
+}
+.krate-popover-align-end {
+  right: 0;
+  left: auto;
+  transform: none;
+}
+.krate-popover[data-state="closed"] > .krate-popover-content {
+  display: none;
+}

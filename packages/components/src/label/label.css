@@ -1,0 +1,17 @@
+.krate-label {
+  display: inline-block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--krate-text, #fafafa);
+  cursor: default;
+  user-select: none;
+  line-height: 1.4;
+}
+.krate-label-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.krate-label-required {
+  color: var(--krate-danger, #ef4444);
+  margin-left: 2px;
+}

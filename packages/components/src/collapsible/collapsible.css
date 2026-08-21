@@ -1,0 +1,19 @@
+.krate-collapsible {
+  width: 100%;
+}
+.krate-collapsible-trigger {
+  cursor: pointer;
+}
+.krate-collapsible-content {
+  overflow: hidden;
+  transition: max-height 0.2s ease;
+}
+.krate-collapsible-content[data-state="closed"],
+.krate-collapsible[data-state="closed"] > .krate-collapsible-content {
+  max-height: 0;
+}
+.krate-collapsible-content-inner {
+  padding-top: 8px;
+  color: var(--krate-text-muted, #a1a1aa);
+  line-height: 1.6;
+}

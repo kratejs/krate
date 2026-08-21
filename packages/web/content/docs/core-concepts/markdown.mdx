@@ -1,0 +1,104 @@
+---
+title: Markdown & MDX
+order: 7
+---
+
+# Markdown & MDX
+
+Content pages can be authored in Markdown (`.md`) or MDX (`.mdx`) — Markdown
+with embedded JSX components. Both compile to static HTML at build time.
+
+## Frontmatter
+
+Each content page starts with YAML frontmatter:
+
+```md
+---
+title: My Page
+order: 2
+sidebar: guides
+keywords: [setup, install]
+---
+
+# Content starts here
+```
+
+| Key | Purpose |
+|-----|---------|
+| `title` | Page title (used in the sidebar and `<title>`) |
+| `order` | Sort order within a directory (default `999`) |
+| `sidebar` | Sidebar section override, or `[...]` JSON for a fully custom sidebar |
+| `keywords` | Explicit search keywords for the search index |
+
+## Markdown features
+
+The markdown renderer supports:
+
+- **GFM** — tables, task lists, autolinks, strikethrough
+- **Heading anchors** — every heading gets an `id` for deep-linking and TOC
+- **Admonitions**
+
+:::note
+This is a note. Admonitions are enabled with `admonitions: true` in the
+markdown config.
+:::
+
+:::warning
+This is a warning callout.
+:::
+
+:::tip
+Admonition types include `note`, `tip`, `warning`, and `danger`.
+:::
+
+- **Syntax highlighting** — fenced code blocks are highlighted at build time:
+
+```tsx
+export default function Hello() {
+  return <h1>Hello, MDX!</h1>;
+}
+```
+
+- **Math** — optional KaTeX-style math (`math: true` in the markdown config).
+
+## MDX
+
+MDX lets you embed JSX directly in your content. The docs plugin re-inserts
+JSX blocks back into the rendered HTML, so components can be used inline:
+
+```mdx
+# A page with a component
+
+Here is a callout rendered from JSX:
+
+<div class="callout">
+  <strong>Heads up!</strong> You can mix Markdown and JSX in one file.
+</div>
+```
+
+MDX files can also **import components**:
+
+```mdx
+import { Callout } from '../../components/callout';
+
+<Callout type="tip">Imports work too.</Callout>
+```
+
+## Configuration
+
+```typescript
+markdown: {
+  gfm: true,
+  headingAnchors: true,
+  admonitions: true,
+  codeHighlight: true,
+  math: false,
+}
+```
+
+## How it works
+
+1. The markdown source is parsed with frontmatter extracted.
+2. Markdown is rendered to HTML; JSX blocks are preserved as segments.
+3. The docs plugin (or a `.mdx` page) re-inserts the JSX segments and compiles
+   the result through the normal TSX pipeline.

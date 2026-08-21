@@ -1,0 +1,15 @@
+.krate-aspect-ratio {
+  width: 100%;
+  overflow: hidden;
+}
+.krate-aspect-ratio-content {
+  position: absolute;
+  inset: 0;
+}
+.krate-aspect-ratio-content > img,
+.krate-aspect-ratio-content > video,
+.krate-aspect-ratio-content > iframe {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

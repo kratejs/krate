@@ -1,0 +1,46 @@
+.krate-aside {
+    margin: 24px 0;
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: 1px solid #27272a;
+    border-left-width: 4px;
+    background: var(--krate-aside-bg, #111113);
+}
+.krate-aside-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-top: 4px;
+    margin-bottom: 8px;
+    color: var(--krate-text, #fafafa);
+}
+.krate-aside-content {
+    color: var(--krate-text-muted, #b9b9b9);
+    line-height: 1.6;
+}
+.krate-aside-content p {
+    margin: 0;
+    margin-bottom: 4px;
+}
+.krate-aside-note {
+    border-left-color: #3b82f6;
+    background: var(--krate-aside-note-bg, #111113);
+}
+.krate-aside-tip {
+    border-left-color: #10b981;
+    background: var(--krate-aside-tip-bg, #111113);
+}
+.krate-aside-warning {
+    border-left-color: #f59e0b;
+    background: var(--krate-aside-warning-bg, #111113);
+}
+.krate-aside-danger {
+    border-left-color: #ef4444;
+    background: var(--krate-aside-danger-bg, #111113);
+}
+.krate-aside-caution {
+    border-left-color: #f97316;
+    background: var(--krate-aside-caution-bg, #111113);
+}

@@ -1,0 +1,51 @@
+.krate-checkbox-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+.krate-checkbox {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1.5px solid var(--krate-border, #3f3f46);
+  background: transparent;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.krate-checkbox:hover {
+  border-color: var(--krate-text-muted, #71717a);
+}
+.krate-checkbox:focus-visible {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: 2px;
+}
+.krate-checkbox-checked {
+  background: var(--krate-primary, #3b82f6);
+  border-color: var(--krate-primary, #3b82f6);
+}
+.krate-checkbox-checked:hover {
+  background: var(--krate-primary-hover, #2563eb);
+  border-color: var(--krate-primary-hover, #2563eb);
+}
+.krate-checkbox:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.krate-checkbox-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.krate-checkbox-label {
+  font-size: 0.875rem;
+  color: var(--krate-text, #fafafa);
+  cursor: pointer;
+  user-select: none;
+}

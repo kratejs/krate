@@ -1,0 +1,92 @@
+.krate-toast-provider {
+  position: relative;
+}
+.krate-toast-viewport {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+}
+.krate-toast {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--krate-card-bg, #111113);
+  border: 1px solid var(--krate-border, #27272a);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  animation: krate-toast-slide-in 0.2s ease;
+}
+.krate-toast[data-state="closed"] {
+  animation: krate-toast-slide-out 0.15s ease forwards;
+}
+.krate-toast-success {
+  border-left: 3px solid #10b981;
+}
+.krate-toast-destructive {
+  border-left: 3px solid #ef4444;
+}
+.krate-toast-content {
+  flex: 1;
+  color: var(--krate-text, #fafafa);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.krate-toast-title {
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+.krate-toast-description {
+  color: var(--krate-text-muted, #a1a1aa);
+  font-size: 0.8rem;
+}
+.krate-toast-close {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--krate-text-muted, #71717a);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.krate-toast-close:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--krate-text, #fafafa);
+}
+.krate-toast-action {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--krate-primary, #3b82f6);
+  border: 1px solid var(--krate-border, #27272a);
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.krate-toast-action:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+@keyframes krate-toast-slide-in {
+  from { transform: translateX(calc(100% + 16px)); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes krate-toast-slide-out {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(calc(100% + 16px)); opacity: 0; }
+}

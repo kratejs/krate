@@ -1,0 +1,16 @@
+{
+  "name": "krate-examples",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@types/node": "^26.1.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "@krate/components": "workspace:*",
+    "@krate/core": "workspace:*",
+    "@krate/runtime": "workspace:*",
+    "lucide-react": "^1.23.0",
+    "radix-ui": "^1.6.2",
+    "tailwind-merge": "^3.6.0"
+  }
+}

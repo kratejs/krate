@@ -1,0 +1,25 @@
+.krate-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.krate-progress-track {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.krate-progress-indicator {
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--krate-primary, #3b82f6);
+  transition: width 0.3s ease;
+}
+.krate-progress-label {
+  font-size: 0.8rem;
+  color: var(--krate-text-muted, #a1a1aa);
+  text-align: right;
+}

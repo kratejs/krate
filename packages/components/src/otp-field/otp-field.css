@@ -1,0 +1,32 @@
+.krate-otp-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.krate-otp-field-input {
+  all: unset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 52px;
+  text-align: center;
+  font-size: 1.25rem;
+  font-weight: 600;
+  font-family: "SF Mono", "Fira Code", monospace;
+  color: var(--krate-text, #fafafa);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1.5px solid var(--krate-border, #3f3f46);
+  border-radius: 8px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  caret-color: var(--krate-primary, #3b82f6);
+}
+.krate-otp-field-input:focus {
+  outline: none;
+  border-color: var(--krate-primary, #3b82f6);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+.krate-otp-field-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -1,0 +1,47 @@
+.krate-tabs {
+  margin: 24px 0;
+  border: 1px solid var(--krate-border, #27272a);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--krate-card-bg, #111113);
+}
+.krate-tabs-list {
+  display: flex;
+  border-bottom: 1px solid var(--krate-border, #27272a);
+  background: var(--krate-tabs-bg, rgba(255,255,255,0.03));
+  padding: 0 8px;
+}
+.krate-tabs-trigger {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--krate-text-muted, #a1a1aa);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
+  white-space: nowrap;
+  user-select: none;
+}
+.krate-tabs-trigger:hover {
+  color: var(--krate-text, #fafafa);
+}
+.krate-tabs-trigger[data-state="active"] {
+  color: var(--krate-text, #fafafa);
+  border-bottom-color: var(--krate-primary, #3b82f6);
+}
+.krate-tabs-trigger:focus-visible {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: -2px;
+}
+.krate-tabs-content {
+  padding: 16px;
+  color: var(--krate-text-muted, #a1a1aa);
+  line-height: 1.6;
+}
+.krate-tabs-content[data-state="inactive"] {
+  display: none;
+}

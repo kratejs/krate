@@ -1,0 +1,54 @@
+.krate-context-menu {
+  position: relative;
+  display: inline-block;
+}
+.krate-context-menu-trigger {
+  cursor: default;
+}
+.krate-context-menu-content {
+  position: fixed;
+  left: var(--cm-x, 0);
+  top: var(--cm-y, 0);
+  min-width: 180px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--krate-card-bg, #111113);
+  border: 1px solid var(--krate-border, #27272a);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 9999;
+}
+.krate-context-menu[data-state="closed"] > .krate-context-menu-content {
+  display: none;
+}
+.krate-context-menu-label {
+  padding: 6px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--krate-text-muted, #71717a);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.krate-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  color: var(--krate-text, #fafafa);
+  cursor: pointer;
+  transition: background 0.1s;
+  outline: none;
+}
+.krate-context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.krate-context-menu-item-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.krate-context-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--krate-border, #27272a);
+}

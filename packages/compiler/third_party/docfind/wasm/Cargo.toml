@@ -1,0 +1,12 @@
+[package]
+name = "docfind-wasm"
+version = "0.5.1"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+docfind_core = { path = "../core", features = ["wasm"] }
+serde_json = "1.0.145"
+dlmalloc = { version = "0.2", features = ["global"] }

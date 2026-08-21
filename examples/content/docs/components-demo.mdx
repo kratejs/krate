@@ -1,0 +1,48 @@
+---
+title: Component Library Demo
+---
+
+import { Card, CardGrid, Aside, Steps, Step, LinkCard, Code } from '@krate/components'
+
+# Component Library Demo
+
+This page demonstrates the Starlight-like component library.
+
+<Card title="Hello World">
+  This is a card component with a title and children.
+</Card>
+
+<LinkCard title="Link" icon="lucide:lightbulb" href="https://google.com">
+  Description
+</LinkCard>
+
+<CardGrid>
+  <Card title="Card One">First card</Card>
+  <Card title="Card Two">Second card</Card>
+</CardGrid>
+
+<Aside type="tip" title="Pro Tip">
+  This is an aside/callout component.
+</Aside>
+
+<Aside type="note" title="Pro Tip">
+  This is an aside/callout component.
+</Aside>
+
+:::note
+test
+:::
+
+<Steps>
+  <Step>First step content</Step>
+  <Step>Second step content</Step>
+  <Step>Third step content</Step>
+</Steps>
+
+```javascript
+const a = 'x';
+```
+
+<Code title="test" lang="javascript">
+const a = 'x';
+</Code>

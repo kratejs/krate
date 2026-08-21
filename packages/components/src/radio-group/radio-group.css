@@ -1,0 +1,61 @@
+.krate-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.krate-radio-group[data-orientation="horizontal"] {
+  flex-direction: row;
+  gap: 16px;
+}
+.krate-radio-group-item {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--krate-border, #3f3f46);
+  background: transparent;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.krate-radio-group-item:hover {
+  border-color: var(--krate-text-muted, #71717a);
+}
+.krate-radio-group-item:focus-visible {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: 2px;
+}
+.krate-radio-group-item[data-state="checked"] {
+  border-color: var(--krate-primary, #3b82f6);
+}
+.krate-radio-group-item-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.krate-radio-group-item-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+.krate-radio-group-item-indicator-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--krate-primary, #3b82f6);
+  transform: scale(0);
+  transition: transform 0.15s ease;
+}
+.krate-radio-group-item[data-state="checked"] > .krate-radio-group-item-indicator > .krate-radio-group-item-indicator-dot {
+  transform: scale(1);
+}
+.krate-radio-group-label {
+  font-size: 0.875rem;
+  color: var(--krate-text, #fafafa);
+  cursor: pointer;
+  user-select: none;
+}

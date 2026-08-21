@@ -1,0 +1,56 @@
+{
+  "name": "@krate/core",
+  "version": "0.1.0",
+  "description": "The Krate CLI — a Go-native static site generator with signal-based reactivity.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://github.com/kratejs/krate",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kratejs/krate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kratejs/krate/issues"
+  },
+  "keywords": [
+    "ssg",
+    "static-site-generator",
+    "go",
+    "typescript",
+    "tsx",
+    "jsx",
+    "signals",
+    "compiler",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "krate": "./bin/krate.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "bin",
+    "dist",
+    "install.js"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "postinstall": "node ./install.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "^5.5.0"
+  },
+  "optionalDependencies": {
+    "@krate/core-darwin-arm64": "0.0.1",
+    "@krate/core-darwin-x64": "0.0.1",
+    "@krate/core-linux-arm64": "0.0.1",
+    "@krate/core-linux-x64": "0.0.1",
+    "@krate/core-linux-x64-musl": "0.0.1",
+    "@krate/core-win32-arm64": "0.0.1",
+    "@krate/core-win32-x64": "0.0.1"
+  }
+}

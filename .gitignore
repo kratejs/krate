@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+out/
+
+# Krate build cache / generated files
+.krate/
+
+# Go build outputs
+*.exe
+*.exe~
+krate
+krate.exe
+packages/compiler/bin/
+packages/core/bin/krate
+packages/core/bin/krate.exe
+
+# Rust build outputs (vendored docfind)
+target/
+packages/compiler/third_party/docfind/target/
+
+# Generated platform packages (created by scripts/build-platform-packages.mjs)
+dist-platform/
+
+# npm / pnpm artifacts
+.pnpm-debug.log*
+.npm/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test / coverage
+coverage/
+*.test.js.snap
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+.fingerprint/
+packages/compiler/third_party/*/target/

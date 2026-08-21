@@ -1,0 +1,40 @@
+.krate-link-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 24px 0;
+  padding: 16px 20px;
+  border: 1px solid var(--krate-border, #27272a);
+  border-radius: 8px;
+  background: var(--krate-card-bg, #111113);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.krate-link-card:hover {
+  border-color: var(--krate-primary, #FF9800);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+}
+.krate-link-card-content {
+  flex: 1;
+}
+.krate-link-card-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--krate-text, #fafafa);
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+.krate-link-card-description {
+  font-size: 0.85rem;
+  color: var(--krate-text-muted, #b9b9b9);
+  line-height: 1.5;
+}
+.krate-link-card-description p {
+  margin: 0;
+  margin-bottom: 4px;
+}
+.krate-link-card-icon {
+  margin-left: 12px;
+  color: var(--krate-text-muted, #b9b9b9);
+}

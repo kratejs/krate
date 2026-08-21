@@ -1,0 +1,13 @@
+.krate-separator {
+  flex-shrink: 0;
+  background: var(--krate-border, #27272a);
+}
+.krate-separator-horizontal {
+  height: 1px;
+  width: 100%;
+}
+.krate-separator-vertical {
+  width: 1px;
+  height: 100%;
+  align-self: stretch;
+}

@@ -1,0 +1,63 @@
+{
+  "name": "@krate/runtime",
+  "version": "0.1.0",
+  "description": "Client-side runtime for Krate — signals, hydration, SPA router, resources, and context.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://github.com/kratejs/krate",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kratejs/krate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kratejs/krate/issues"
+  },
+  "keywords": [
+    "signals",
+    "reactive",
+    "ssg",
+    "hydration",
+    "jsx-runtime",
+    "state"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./server/jsx-runtime": {
+      "types": "./dist/server-jsx-runtime.d.ts",
+      "default": "./dist/server-jsx-runtime.js"
+    },
+    "./jsx-runtime": {
+      "types": "./dist/jsx-runtime.d.ts",
+      "default": "./dist/jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./dist/jsx-dev-runtime.d.ts",
+      "default": "./dist/jsx-dev-runtime.js"
+    },
+    "./jsx-types": {
+      "types": "./dist/jsx-types.d.ts",
+      "default": "./dist/jsx-types.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc && node bundle.cjs",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.5.0"
+  }
+}

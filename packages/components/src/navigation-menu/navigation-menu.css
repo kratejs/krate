@@ -1,0 +1,77 @@
+.krate-navigation-menu {
+  position: relative;
+  z-index: 100;
+}
+.krate-navigation-menu-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.krate-navigation-menu-item {
+  position: relative;
+}
+.krate-navigation-menu-trigger {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--krate-text-muted, #a1a1aa);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.krate-navigation-menu-trigger:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--krate-text, #fafafa);
+}
+.krate-navigation-menu-trigger:focus-visible {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: 2px;
+}
+.krate-navigation-menu-trigger-icon {
+  transition: transform 0.2s ease;
+}
+.krate-navigation-menu-item[data-state="open"] > .krate-navigation-menu-trigger > .krate-navigation-menu-trigger-icon {
+  transform: rotate(180deg);
+}
+.krate-navigation-menu-content {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  min-width: 200px;
+  padding: 8px;
+  margin-top: 8px;
+  border-radius: 8px;
+  background: var(--krate-card-bg, #111113);
+  border: 1px solid var(--krate-border, #27272a);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.krate-navigation-menu-link {
+  display: block;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  color: var(--krate-text-muted, #a1a1aa);
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+.krate-navigation-menu-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--krate-text, #fafafa);
+}
+.krate-navigation-menu-item[data-state="closed"] > .krate-navigation-menu-content {
+  display: none;
+}
+.krate-navigation-menu-viewport {
+  position: absolute;
+  left: 0;
+  right: 0;
+}

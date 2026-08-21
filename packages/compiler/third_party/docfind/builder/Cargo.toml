@@ -1,0 +1,14 @@
+[package]
+name = "docfind-builder"
+version = "0.5.1"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+docfind_core = { path = "../core", features = ["cli"] }
+serde_json = "1.0.145"
+dlmalloc = { version = "0.2", features = ["global"] }
+wasm-encoder = { version = "0.240.0", features = ["wasmparser"] }
+wasmparser = "0.240.0"

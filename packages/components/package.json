@@ -1,0 +1,78 @@
+{
+  "name": "@krate/components",
+  "version": "0.1.0",
+  "description": "Built-in component library for Krate sites.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/kratejs/krate",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kratejs/krate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kratejs/krate/issues"
+  },
+  "keywords": [
+    "krate",
+    "components",
+    "ui",
+    "ssg",
+    "tsx"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./accordion": "./src/accordion/accordion.tsx",
+    "./alert-dialog": "./src/alert-dialog/alert-dialog.tsx",
+    "./aside": "./src/aside/aside.tsx",
+    "./aspect-ratio": "./src/aspect-ratio/aspect-ratio.tsx",
+    "./avatar": "./src/avatar/avatar.tsx",
+    "./card": "./src/card/card.tsx",
+    "./card-grid": "./src/card-grid/card-grid.tsx",
+    "./checkbox": "./src/checkbox/checkbox.tsx",
+    "./code": "./src/code/code.tsx",
+    "./collapsible": "./src/collapsible/collapsible.tsx",
+    "./context-menu": "./src/context-menu/context-menu.tsx",
+    "./dialog": "./src/dialog/dialog.tsx",
+    "./dropdown-menu": "./src/dropdown-menu/dropdown-menu.tsx",
+    "./file-tree": "./src/file-tree/file-tree.tsx",
+    "./form": "./src/form/form.tsx",
+    "./hover-card": "./src/hover-card/hover-card.tsx",
+    "./label": "./src/label/label.tsx",
+    "./link-button": "./src/link-button/link-button.tsx",
+    "./link-card": "./src/link-card/link-card.tsx",
+    "./menu-bar": "./src/menu-bar/menu-bar.tsx",
+    "./navigation-menu": "./src/navigation-menu/navigation-menu.tsx",
+    "./otp-field": "./src/otp-field/otp-field.tsx",
+    "./password-toggle-field": "./src/password-toggle-field/password-toggle-field.tsx",
+    "./popover": "./src/popover/popover.tsx",
+    "./progress": "./src/progress/progress.tsx",
+    "./radio-group": "./src/radio-group/radio-group.tsx",
+    "./scroll-area": "./src/scroll-area/scroll-area.tsx",
+    "./select": "./src/select/select.tsx",
+    "./separator": "./src/separator/separator.tsx",
+    "./slider": "./src/slider/slider.tsx",
+    "./steps": "./src/steps/steps.tsx",
+    "./switch": "./src/switch/switch.tsx",
+    "./tabs": "./src/tabs/tabs.tsx",
+    "./toast": "./src/toast/toast.tsx",
+    "./toggle": "./src/toggle/toggle.tsx",
+    "./toggle-group": "./src/toggle-group/toggle-group.tsx",
+    "./toolbar": "./src/toolbar/toolbar.tsx",
+    "./tooltip": "./src/tooltip/tooltip.tsx",
+    "./visually-hidden": "./src/visually-hidden/visually-hidden.tsx"
+  },
+  "files": [
+    "*.ts",
+    "*.tsx",
+    "*.css"
+  ],
+  "peerDependencies": {
+    "@krate/runtime": "^0.0.1"
+  },
+  "devDependencies": {
+    "@krate/runtime": "workspace:*"
+  }
+}

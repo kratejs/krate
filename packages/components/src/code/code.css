@@ -1,0 +1,57 @@
+.krate-code-block {
+  margin: 20px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--krate-code-bg, #0d1117);
+  border: 1px solid var(--krate-border, #27272a);
+}
+.krate-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: var(--krate-code-title-bg, #161b22);
+  border-bottom: 1px solid var(--krate-border, #27272a);
+  min-height: 36px;
+}
+.krate-code-title {
+  color: var(--krate-code-title-text, #8b949e);
+  font-size: 0.8rem;
+  font-family: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+}
+.krate-code-copy {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--krate-code-title-text, #8b949e);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.15s, color 0.15s;
+}
+.krate-code-copy:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--krate-text, #fafafa);
+}
+.krate-code-copy:focus-visible {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: -2px;
+}
+.krate-code-copy-icon {
+  font-size: 0.85rem;
+}
+.krate-code-block pre {
+  margin: 0;
+  padding: 16px;
+  overflow-x: auto;
+  border-radius: 0 0 8px 8px;
+  border: 0;
+}
+.krate-code-block code {
+  color: var(--krate-code-text, #e6edf3);
+  font-family: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}

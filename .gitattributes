@@ -1,0 +1,26 @@
+# Normalize line endings
+* text=auto
+
+# Go
+*.go text eol=lf
+
+# TypeScript / JavaScript
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.cjs text eol=lf
+*.mjs text eol=lf
+*.d.ts text eol=lf
+*.json text eol=lf
+
+# Config / docs
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.css text eol=lf
+*.svg text eol=lf
+*.sh text eol=lf
+
+# Windows scripts
+*.ps1 text eol=crlf
+*.bat text eol=crlf

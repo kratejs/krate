@@ -1,0 +1,67 @@
+.krate-file-tree {
+  margin: 20px 0;
+  border: 1px solid var(--krate-border, #27272a);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--krate-card-bg, #0d1117);
+}
+.krate-file-tree-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--krate-code-title-bg, #161b22);
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--krate-text, #fafafa);
+  border-bottom: 1px solid var(--krate-border, #27272a);
+}
+.krate-file-tree-header-icon {
+  display: inline-flex;
+  color: var(--krate-primary, #3b82f6);
+}
+.krate-file-tree-content {
+  padding: 4px 0;
+}
+.krate-file-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 16px;
+  font-size: 0.875rem;
+  color: var(--krate-text-muted, #a1a1aa);
+  font-family: "SF Mono", "Fira Code", "Fira Mono", monospace;
+  line-height: 1.6;
+}
+.krate-file-tree-item-icon {
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+.krate-file-tree-item-name {
+  flex: 1;
+}
+.krate-file-tree-folder-trigger {
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.krate-file-tree-folder-trigger:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.krate-file-tree-chevron {
+  display: inline-flex;
+  transition: transform 0.2s ease;
+}
+.krate-file-tree-folder-open > .krate-file-tree-folder-trigger > .krate-file-tree-chevron {
+  transform: rotate(90deg);
+}
+.krate-file-tree-children {
+  padding-left: 20px;
+  overflow: hidden;
+  transition: max-height 0.2s ease;
+}
+.krate-file-tree-children-closed {
+  max-height: 0;
+  padding: 0;
+  overflow: hidden;
+}

@@ -1,0 +1,59 @@
+.krate-accordion {
+  width: 100%;
+  margin: 24px 0;
+}
+.krate-accordion-item {
+  border: 1px solid var(--krate-border, #27272a);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 8px;
+  background: var(--krate-card-bg, #111113);
+}
+.krate-accordion-item:last-child {
+  margin-bottom: 0;
+}
+.krate-accordion-trigger {
+  all: unset;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 16px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--krate-text, #fafafa);
+  cursor: pointer;
+  transition: background 0.15s;
+  box-sizing: border-box;
+}
+.krate-accordion-trigger:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.krate-accordion-trigger:focus-visible {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: -2px;
+}
+.krate-accordion-trigger-text {
+  flex: 1;
+  text-align: left;
+}
+.krate-accordion-trigger-icon {
+  display: inline-flex;
+  transition: transform 0.2s ease;
+  color: var(--krate-text-muted, #a1a1aa);
+}
+.krate-accordion-item[data-state="open"] > .krate-accordion-trigger > .krate-accordion-trigger-icon {
+  transform: rotate(180deg);
+}
+.krate-accordion-content {
+  overflow: hidden;
+  transition: max-height 0.2s ease;
+}
+.krate-accordion-content[data-state="closed"] {
+  max-height: 0;
+}
+.krate-accordion-content-inner {
+  padding: 0 16px 16px;
+  color: var(--krate-text-muted, #a1a1aa);
+  line-height: 1.6;
+}

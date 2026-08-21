@@ -1,0 +1,48 @@
+.krate-steps {
+  margin: 24px 0;
+  padding-left: 0;
+  counter-reset: krate-step;
+  border-left: 2px solid var(--krate-border, #27272a);
+}
+.krate-step {
+  position: relative;
+  padding: 0 0 32px 32px;
+  counter-increment: krate-step;
+}
+.krate-step:last-child {
+  padding-bottom: 0;
+}
+.krate-step-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.krate-step-number {
+  position: absolute;
+  left: -16px;
+  top: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--krate-primary, #111113);
+  color: var(--krate-text, #fafafa);
+  border: 1px solid var(--krate-border, #27272a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.krate-step-number::after {
+  content: counter(krate-step);
+}
+.krate-step-title {
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--krate-text, #fafafa);
+}
+.krate-step-content {
+  color: var(--krate-text-muted, #b9b9b9);
+  line-height: 1.6;
+}

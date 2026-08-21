@@ -1,0 +1,23 @@
+.krate-card {
+  margin: 24px 0;
+  border: 1px solid var(--krate-border, #27272a);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--krate-card-bg, #111113);
+  transition: box-shadow 0.2s ease;
+}
+.krate-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.krate-card-title {
+  padding: 12px 16px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border-bottom: 1px solid var(--krate-border, #27272a);
+  color: var(--krate-text, #fafafa);
+}
+.krate-card-body {
+  padding: 16px;
+  color: var(--krate-text-muted, #b9b9b9);
+  line-height: 1.6;
+}

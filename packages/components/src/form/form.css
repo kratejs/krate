@@ -1,0 +1,68 @@
+.krate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+}
+.krate-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.krate-form-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--krate-text, #fafafa);
+}
+.krate-form-required {
+  color: var(--krate-danger, #ef4444);
+  margin-left: 2px;
+}
+.krate-form-control {
+  display: flex;
+  flex-direction: column;
+}
+.krate-form-input,
+.krate-form-textarea {
+  all: unset;
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--krate-border, #3f3f46);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--krate-text, #fafafa);
+  font-size: 0.875rem;
+  font-family: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  box-sizing: border-box;
+}
+.krate-form-input::placeholder,
+.krate-form-textarea::placeholder {
+  color: var(--krate-text-muted, #52525b);
+}
+.krate-form-input:focus,
+.krate-form-textarea:focus {
+  outline: none;
+  border-color: var(--krate-primary, #3b82f6);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+.krate-form-input:disabled,
+.krate-form-textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.krate-form-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+.krate-form-description {
+  font-size: 0.8rem;
+  color: var(--krate-text-muted, #71717a);
+  margin: 0;
+}
+.krate-form-error {
+  font-size: 0.8rem;
+  color: var(--krate-danger, #ef4444);
+  margin: 0;
+}
