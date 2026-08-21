@@ -12,7 +12,6 @@ out/
 # Go build outputs
 *.exe
 *.exe~
-krate
 krate.exe
 packages/compiler/bin/
 packages/core/bin/krate
