@@ -51,12 +51,15 @@
       "default": "./dist/jsx-types.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc && node bundle.cjs",
     "dev": "tsc --watch"
   },
   "devDependencies": {
+    "@types/node": "^26.2.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.5.0"
   }
