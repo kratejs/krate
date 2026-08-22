@@ -269,6 +269,85 @@ func TestBuildEscapesStringBinaryConcat(t *testing.T) {
 	}
 }
 
+func TestBuildHandlerIdentifierReferences(t *testing.T) {
+	// onClick={fn} should work the same as onClick={() => fn()} for local
+	// function declarations, const arrow functions, and module-level functions.
+	tests := []struct {
+		name       string
+		src        string
+		wantBody   string
+		wantVar    string // expected extra var hoisting the function into scope
+	}{
+		{
+			name: "local function declaration",
+			src: `function Counter() {
+  const [c, setC] = createSignal(0);
+  function toggle() { setC(c() + 1); }
+  return <button onClick={toggle}>{c()}</button>;
+}
+export default function App() { return <div><Counter/></div>; }`,
+			wantBody: "function(){setC((c() + 1));}",
+		},
+		{
+			name: "local const arrow",
+			src: `function Counter() {
+  const [c, setC] = createSignal(0);
+  const toggle = () => setC(c() + 1);
+  return <button onClick={toggle}>{c()}</button>;
+}
+export default function App() { return <div><Counter/></div>; }`,
+			wantBody: "()=>setC((c() + 1))",
+		},
+		{
+			name: "module-level function",
+			src: `function toggle() { return 1; }
+function Counter() {
+  const [c, setC] = createSignal(0);
+  return <button onClick={toggle}>{c()}</button>;
+}
+export default function App() { return <div><Counter/></div>; }`,
+			wantBody: "toggle",
+			wantVar:  "function toggle(){return 1;}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tree := annotateAndBuild(t, tt.src)
+			var comp *irtree.ComponentSlot
+			for _, child := range tree.Root.Children {
+				if cs, ok := child.(*irtree.ComponentSlot); ok {
+					comp = cs
+					break
+				}
+			}
+			if comp == nil {
+				t.Fatal("expected ComponentSlot")
+			}
+			if len(comp.Component.Handlers) != 1 {
+				t.Fatalf("expected 1 handler, got %d", len(comp.Component.Handlers))
+			}
+			if comp.Component.Handlers[0].Event != "click" {
+				t.Errorf("expected click handler, got %q", comp.Component.Handlers[0].Event)
+			}
+			if comp.Component.Handlers[0].Body != tt.wantBody {
+				t.Errorf("handler body = %q, want %q", comp.Component.Handlers[0].Body, tt.wantBody)
+			}
+			if tt.wantVar != "" {
+				found := false
+				for _, ev := range comp.Component.ExtraVars {
+					if ev == tt.wantVar {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("expected extra var %q, got %v", tt.wantVar, comp.Component.ExtraVars)
+				}
+			}
+		})
+	}
+}
+
 func TestBuildMetaSlotKeepsScriptRaw(t *testing.T) {
 	// Inline <Script>{`var x = a < b;`}</Script> must stay raw (not escaped).
 	tree := annotateAndBuild(t, "export default function App() {\n\treturn <Script>{`var x = a < b;`}</Script>;\n}")

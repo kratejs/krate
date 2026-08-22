@@ -2345,6 +2345,13 @@ func (b *builder) extractHandlerBody(expr ast.Expr) string {
 			if fn := findLocalFunction(e.Name, b.localFnBody); fn != nil {
 				return renderFnAsHandler(fn, b.sigMap())
 			}
+			if arrow := findLocalConstFn(e.Name, b.localFnBody); arrow != nil {
+				return renderArrowFn(arrow, b.sigMap())
+			}
+		}
+
+		if _, ok := b.functions[e.Name]; ok && !b.ann.UsedComponents[e.Name] {
+			return e.Name
 		}
 		return ""
 	case *ast.MemberExpr:
@@ -2362,6 +2369,23 @@ func findLocalFunction(name string, body []ast.Stmt) *ast.FnDecl {
 	for _, stmt := range body {
 		if fn, ok := stmt.(*ast.FnDecl); ok && fn.Name == name {
 			return fn
+		}
+	}
+	return nil
+}
+
+func findLocalConstFn(name string, body []ast.Stmt) *ast.ArrowFn {
+	for _, stmt := range body {
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok {
+			continue
+		}
+		for _, decl := range vs.Decls {
+			if decl.Name == name && decl.Init != nil {
+				if arrow, ok := decl.Init.(*ast.ArrowFn); ok {
+					return arrow
+				}
+			}
 		}
 	}
 	return nil
