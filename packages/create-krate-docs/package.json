@@ -1,0 +1,41 @@
+{
+  "name": "create-krate-docs",
+  "version": "0.1.0",
+  "description": "Scaffold a new Krate documentation site.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://github.com/kratejs/krate",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kratejs/krate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kratejs/krate/issues"
+  },
+  "keywords": [
+    "krate",
+    "create-krate-docs",
+    "docs",
+    "documentation",
+    "ssg",
+    "static-site-generator",
+    "scaffold"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "create-krate-docs": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "^5.5.0"
+  }
+}

@@ -62,7 +62,7 @@ jobs:
       - name: Publish npm packages
         run: |
           set -e
-          for dir in packages/runtime packages/components packages/core; do
+          for dir in packages/runtime packages/components packages/core packages/create-krate-app packages/create-krate-docs; do
             echo "Publishing $(basename "$dir")..."
             (cd "$dir" && pnpm publish --access public --no-git-checks)
           done

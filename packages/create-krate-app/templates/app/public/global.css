@@ -1,0 +1,254 @@
+:root {
+  --bg: #0b0e14;
+  --bg-soft: #11151f;
+  --card: #161b28;
+  --border: #232a3a;
+  --text: #e6e9f0;
+  --text-muted: #98a2b8;
+  --accent: #00add8;
+  --accent-soft: rgba(0, 173, 216, 0.12);
+  --radius: 10px;
+  --max-width: 1080px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    monospace;
+  font-size: 0.9em;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+/* ─── Layout shell ─────────────────────────────────────────────── */
+
+.site-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.site-navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: var(--max-width);
+  width: 100%;
+  margin: 0 auto;
+  padding: 1rem 1.5rem;
+}
+
+.site-navbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text);
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.site-navbar-brand:hover {
+  text-decoration: none;
+}
+
+.site-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
+}
+
+.site-nav {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.site-nav a {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.site-nav a:hover {
+  color: var(--text);
+}
+
+.site-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding: 1.5rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.site-footer-inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ─── Hero ─────────────────────────────────────────────────────── */
+
+.hero {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 4rem 1.5rem 2rem;
+  text-align: center;
+}
+
+.hero-badge {
+  display: inline-block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(0, 173, 216, 0.3);
+  border-radius: 999px;
+  padding: 0.3rem 0.9rem;
+  margin-bottom: 1.25rem;
+}
+
+.hero-title {
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  line-height: 1.1;
+  margin: 0 0 1rem;
+}
+
+.hero-subtitle {
+  max-width: 640px;
+  margin: 0 auto 2rem;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-bottom: 2.5rem;
+}
+
+/* ─── Buttons ──────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-block;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border-radius: 8px;
+  padding: 0.6rem 1.25rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: #00c0ee;
+  text-decoration: none;
+}
+
+.btn-secondary {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-soft);
+  text-decoration: none;
+}
+
+/* ─── Demo card ────────────────────────────────────────────────── */
+
+.demo {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+.demo-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem;
+  max-width: 420px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.demo-count {
+  font-size: 3rem;
+  font-weight: 800;
+  margin: 0.5rem 0 1.25rem;
+}
+
+.demo-controls {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.demo-controls .btn {
+  min-width: 44px;
+}
+
+/* ─── 404 ──────────────────────────────────────────────────────── */
+
+.not-found {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 5rem 1.5rem;
+  text-align: center;
+}
+
+.not-found-code {
+  font-size: 5rem;
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.not-found h1 {
+  margin: 0.5rem 0;
+}
+
+.not-found p {
+  color: var(--text-muted);
+  margin: 0 0 1.5rem;
+}

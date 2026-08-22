@@ -26,6 +26,8 @@ const manifests = [
   join(root, 'packages', 'core', 'package.json'),
   join(root, 'packages', 'runtime', 'package.json'),
   join(root, 'packages', 'components', 'package.json'),
+  join(root, 'packages', 'create-krate-app', 'package.json'),
+  join(root, 'packages', 'create-krate-docs', 'package.json'),
 ];
 
 for (const file of manifests) {

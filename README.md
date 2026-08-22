@@ -45,8 +45,9 @@ pnpm add -g @krate/core
 ### Create a project
 
 ```sh
-mkdir my-app && cd my-app
-krate init
+krate init my-app
+# or
+npx create-krate-app@latest my-app
 ```
 
 Add a page:
@@ -198,7 +199,7 @@ same factory pattern: `import demoPlugin from './plugins/my-plugin'` then
 | `krate build [dir]` | Production build (`--watch`, `--out-dir`, `--config`) |
 | `krate dev [dir]` | Build + dev server (port 3000) + hot reload |
 | `krate serve [dir]` | Build + static HTTP server |
-| `krate init [dir]` | Scaffold a config |
+| `krate init [dir]` | Scaffold a new project (alias: `create`) |
 | `krate version` | Print version |
 
 ## Architecture

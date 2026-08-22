@@ -1,0 +1,42 @@
+{
+  "name": "create-krate-app",
+  "version": "0.1.0",
+  "description": "Scaffold a new Krate app in seconds.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://github.com/kratejs/krate",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kratejs/krate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kratejs/krate/issues"
+  },
+  "keywords": [
+    "krate",
+    "create-krate-app",
+    "ssg",
+    "static-site-generator",
+    "scaffold",
+    "typescript",
+    "tsx",
+    "signals"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "create-krate-app": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "^5.5.0"
+  }
+}
