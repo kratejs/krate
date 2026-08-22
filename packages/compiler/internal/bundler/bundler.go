@@ -350,11 +350,10 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 }
 
 // isKrateRuntime reports whether an absolute path points into the krate client
-// runtime package (node_modules/@krate/runtime or node_modules/krate-runtime).
+// runtime package (node_modules/@krate/runtime).
 func isKrateRuntime(abs string) bool {
 	norm := filepath.ToSlash(abs)
-	return strings.Contains(norm, "/node_modules/@krate/runtime/") ||
-		strings.Contains(norm, "/node_modules/krate-runtime/")
+	return strings.Contains(norm, "/node_modules/@krate/runtime/")
 }
 
 func (b *Bundler) collectImports(prog *ast.Program, mod *Module) {
@@ -525,7 +524,7 @@ func resolvePathAlias(imp string, aliases []pathAlias, tsBaseDir string) string 
 }
 
 // resolveKratePackage resolves krate/* and @krate/* imports via node_modules.
-// Walks up from importerDir looking for node_modules/@krate/{name}/ or node_modules/krate-{name}/.
+// Walks up from importerDir looking for node_modules/@krate/{name}/.
 func resolveKratePackage(importerDir, imp string) string {
 	name := ""
 	if strings.HasPrefix(imp, "krate/") {
@@ -547,22 +546,6 @@ func resolveKratePackage(importerDir, imp string) string {
 				filepath.Join(pkgDir, "index.ts"),
 				filepath.Join(pkgDir, "index.jsx"),
 				filepath.Join(pkgDir, "index.js"),
-			}
-			for _, c := range candidates {
-				if fileExists(c) {
-					return c
-				}
-			}
-		}
-
-		// Try unscoped package: node_modules/krate-{name}/
-		pkgDir2 := filepath.Join(dir, "node_modules", "krate-"+name)
-		if _, err := os.Stat(pkgDir2); err == nil {
-			candidates := []string{
-				filepath.Join(pkgDir2, "index.tsx"),
-				filepath.Join(pkgDir2, "index.ts"),
-				filepath.Join(pkgDir2, "index.jsx"),
-				filepath.Join(pkgDir2, "index.js"),
 			}
 			for _, c := range candidates {
 				if fileExists(c) {

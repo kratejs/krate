@@ -29,7 +29,7 @@ func loadRuntimeFromDisk(projectRoot string) string {
 	)
 
 	// 3. node_modules fallback (for published packages)
-	candidateDirs = append(candidateDirs, "node_modules/krate-runtime/dist")
+	candidateDirs = append(candidateDirs, "node_modules/@krate/runtime/dist")
 
 	// 4. Binary-relative path (works when installed as a Go binary)
 	candidateDirs = append(candidateDirs, filepath.Join(filepath.Dir(os.Args[0]), "..", "runtime", "dist"))
