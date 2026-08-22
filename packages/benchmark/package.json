@@ -1,0 +1,25 @@
+{
+  "name": "@krate/benchmark",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Benchmarks for Krate: build time and API throughput versus other web frameworks.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://github.com/kratejs/krate",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kratejs/krate.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "bench": "node src/run.mjs",
+    "bench:build": "node src/run.mjs build",
+    "bench:api": "node src/run.mjs api",
+    "report": "node src/run.mjs report"
+  },
+  "devDependencies": {
+    "autocannon": "^8.0.0"
+  }
+}

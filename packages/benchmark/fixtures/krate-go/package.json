@@ -1,0 +1,18 @@
+{
+  "name": "bench-krate-go",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "krate dev",
+    "build": "krate build",
+    "serve": "krate serve"
+  },
+  "dependencies": {
+    "@krate/core": "latest",
+    "@krate/runtime": "latest"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}

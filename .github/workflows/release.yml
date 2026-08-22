@@ -44,7 +44,7 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Build JS packages
-        run: pnpm -r --filter "!@krate/web" build
+        run: pnpm -r --filter "!@krate/web" --filter "!@krate/benchmark" build
 
       - name: Generate platform packages
         run: node scripts/build-platform-packages.mjs

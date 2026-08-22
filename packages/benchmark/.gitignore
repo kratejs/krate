@@ -1,0 +1,17 @@
+# Generated results (gitignored) — see results/latest.md / latest.json
+results/
+
+# Installed framework dependencies inside copied work trees
+.work/
+
+# Fixture build output / caches
+fixtures/*/node_modules/
+fixtures/*/dist/
+fixtures/*/.next/
+fixtures/*/.astro/
+fixtures/*/.svelte-kit/
+fixtures/*/build/
+fixtures/*/.krate/
+
+# Krate benchmark CLI binary cache
+.krate-bench/
