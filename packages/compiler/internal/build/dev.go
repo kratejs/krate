@@ -151,16 +151,28 @@ func updateFileMap(m map[string]time.Time, root string, cfg *config.Config) {
 		".git":         true,
 		".krate":       true,
 	}
-
-	absOut, _ := filepath.Abs(cfg.OutDir)
+	outDir := filepath.Clean(cfg.OutDir)
 
 	fsutil.WalkExt(root, extensions, skipDirs, func(path string, info os.FileInfo) error {
-		absPath, _ := filepath.Abs(path)
-		if absPath != absOut {
-			m[path] = info.ModTime()
+		// Ignore anything inside the build output directory: rebuilding writes
+		// here, and treating those writes as changes would loop forever.
+		if isWithin(path, outDir) {
+			return nil
 		}
+		m[path] = info.ModTime()
 		return nil
 	})
+}
+
+func isWithin(path, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func findChanges(prev, curr map[string]time.Time) []string {
