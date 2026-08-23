@@ -13,6 +13,6 @@
     "test:docs": "krate build"
   },
   "devDependencies": {
-    "@krate/core": "workspace:*"
+    "@krate/core": "latest"
   }
 }

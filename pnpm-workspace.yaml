@@ -2,4 +2,4 @@ packages:
   - packages/*
   - examples
 allowBuilds:
-  esbuild: false
+  '@krate/core': true
