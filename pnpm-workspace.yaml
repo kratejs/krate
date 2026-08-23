@@ -1,5 +1,15 @@
 packages:
   - packages/*
   - examples
+
 allowBuilds:
   '@krate/core': true
+  esbuild: true
+
+supportedArchitectures:
+  os:
+    - current
+    - linux
+  cpu:
+    - current
+    - x64
