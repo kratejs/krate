@@ -12,7 +12,7 @@
     "preview": "krate serve",
     "test:docs": "krate build"
   },
-  "dependencies": {
+  "devDependencies": {
     "@krate/core": "latest",
     "@krate/runtime": "latest"
   },

@@ -90,7 +90,7 @@ importers:
         version: 5.9.3
 
   packages/web:
-    dependencies:
+    devDependencies:
       '@krate/core':
         specifier: latest
         version: 0.1.4
