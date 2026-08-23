@@ -90,8 +90,21 @@ importers:
         version: 5.9.3
 
   packages/web:
-    devDependencies:
+    dependencies:
       '@krate/core':
+        specifier: latest
+        version: 0.1.4
+      '@krate/runtime':
+        specifier: latest
+        version: 0.1.4
+    optionalDependencies:
+      '@krate/core-darwin-arm64':
+        specifier: latest
+        version: 0.1.4
+      '@krate/core-linux-x64':
+        specifier: latest
+        version: 0.1.4
+      '@krate/core-win32-x64':
         specifier: latest
         version: 0.1.4
 
@@ -321,6 +334,10 @@ packages:
     resolution: {integrity: sha512-K0BG4/qsw3kG7S6cwdyGJ28scbEJjmvXookTu35xRaH3WTug/9Fub5Trto2TFH6FEUgkv2U5XYgxRylgAMCpXw==}
     engines: {node: '>=20'}
     hasBin: true
+
+  '@krate/runtime@0.1.4':
+    resolution: {integrity: sha512-ZBdRNRt1fu5jetVedCzPB2A8t+5imN+miVdoqiwTKUctNjPYPG67zPK79Lofok7tPVXfmoy520VO+Dv9UZRu5A==}
+    engines: {node: '>=20'}
 
   '@minimistjs/subarg@1.0.0':
     resolution: {integrity: sha512-Q/ONBiM2zNeYUy0mVSO44mWWKYM3UHuEK43PKIOzJCbvUnPoMH1K+gk3cf1kgnCVJFlWmddahQQCmrmBGlk9jQ==}
@@ -1492,6 +1509,8 @@ snapshots:
       '@krate/core-linux-x64-musl': 0.1.4
       '@krate/core-win32-arm64': 0.1.4
       '@krate/core-win32-x64': 0.1.4
+
+  '@krate/runtime@0.1.4': {}
 
   '@minimistjs/subarg@1.0.0':
     dependencies:
