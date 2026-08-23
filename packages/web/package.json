@@ -15,10 +15,5 @@
   "devDependencies": {
     "@krate/core": "latest",
     "@krate/runtime": "latest"
-  },
-  "optionalDependencies": {
-    "@krate/core-linux-x64": "latest",
-    "@krate/core-darwin-arm64": "latest",
-    "@krate/core-win32-x64": "latest"
   }
 }

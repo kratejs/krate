@@ -97,16 +97,6 @@ importers:
       '@krate/runtime':
         specifier: latest
         version: 0.1.4
-    optionalDependencies:
-      '@krate/core-darwin-arm64':
-        specifier: latest
-        version: 0.1.4
-      '@krate/core-linux-x64':
-        specifier: latest
-        version: 0.1.4
-      '@krate/core-win32-x64':
-        specifier: latest
-        version: 0.1.4
 
 packages:
 

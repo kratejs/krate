@@ -9,7 +9,10 @@ allowBuilds:
 supportedArchitectures:
   os:
     - current
+    - win32
     - linux
+    - darwin
   cpu:
     - current
     - x64
+    - arm64
