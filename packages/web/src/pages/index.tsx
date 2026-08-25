@@ -1,3 +1,5 @@
+import { Code } from "@krate/components";
+
 export default function Home() {
   return (
     <>

@@ -49,6 +49,12 @@ type SSREval struct {
 	// container must then inject it raw instead of escaping again.
 	childrenIsHTML bool
 
+	// childrenRawText holds the unescaped text of the current component frame's
+	// call-site children (text + evaluated expressions, no HTML escaping). It
+	// lets compile-time processors like <SyntaxHighlight> chroma-highlighting
+	// operate on the original code instead of already-escaped HTML.
+	childrenRawText string
+
 	// evalJS is an optional hook (wired by the build to the embedded QuickJS
 	// engine) that evaluates a self-contained JS expression with full built-ins
 	// (Date, Math, String, Number, ...). When set, calls to global built-ins the
@@ -532,19 +538,62 @@ func (e *SSREval) resolveIconName(el *ast.JSXElement) string {
 	return ""
 }
 
-// evalSyntaxHighlight evaluates a <SyntaxHighlight> element: extracts the lang
-// attribute and children text, then runs chroma at build time.
-func (e *SSREval) evalSyntaxHighlight(el *ast.JSXElement) string {
+// isStaticExpr reports whether expr evaluates to a compile-time-known value:
+// literals, identifiers/props resolved through the current bindings, and pure
+// operator combinations of those. Calls, JSX, and unbound identifiers are not.
+func (e *SSREval) isStaticExpr(expr ast.Expr) bool {
+	switch t := expr.(type) {
+	case *ast.Literal:
+		return true
+	case *ast.Identifier:
+		if isChildrenRef(expr) {
+			return e.childrenRawText != ""
+		}
+		if _, bound := e.bindings[t.Name]; bound {
+			return true
+		}
+		_, isArr := e.arrays[t.Name]
+		return isArr
+	case *ast.MemberExpr:
+		if id, ok := t.Object.(*ast.Identifier); ok && id.Name == "props" {
+			if prop, ok := t.Property.(*ast.Identifier); ok {
+				_, bound := e.bindings[prop.Name]
+				return bound
+			}
+		}
+		return false
+	case *ast.TemplateExpr:
+		for _, p := range t.Parts {
+			if !e.isStaticExpr(p) {
+				return false
+			}
+		}
+		return true
+	case *ast.BinaryExpr:
+		return e.isStaticExpr(t.Left) && e.isStaticExpr(t.Right)
+	case *ast.UnaryExpr:
+		return e.isStaticExpr(t.Arg)
+	case *ast.ConditionalExpr:
+		return e.isStaticExpr(t.Test) && e.isStaticExpr(t.Consequent) && e.isStaticExpr(t.Alternate)
+	case *ast.TypeAssertion:
+		return e.isStaticExpr(t.Expr)
+	}
+	return false
+}
+
+// tryEvalSyntaxHighlight renders <SyntaxHighlight> as compile-time chroma
+// HTML. A {children} passthrough resolves from the current frame's raw
+// call-site text so chroma sees the original code. ok=false when any part of
+// the content isn't statically known — the caller then renders a plain code
+// block through the standard children rules instead of highlighting
+// placeholder values.
+func (e *SSREval) tryEvalSyntaxHighlight(el *ast.JSXElement) (string, bool) {
 	lang := ""
 	for _, attr := range el.Opening.Attributes {
 		if attr.Spread || attr.Value == nil || attr.Name != "lang" {
 			continue
 		}
-		if lit, ok := attr.Value.(*ast.Literal); ok {
-			lang = lit.Value
-		} else {
-			lang = e.eval(attr.Value)
-		}
+		lang = e.eval(attr.Value)
 	}
 
 	var code strings.Builder
@@ -553,19 +602,53 @@ func (e *SSREval) evalSyntaxHighlight(el *ast.JSXElement) string {
 		case *ast.JSXText:
 			code.WriteString(c.Value)
 		case *ast.JSXExprContainer:
+			if !e.isStaticExpr(c.Expression) {
+				return "", false
+			}
+			if isChildrenRef(c.Expression) {
+				code.WriteString(e.childrenRawText)
+				continue
+			}
 			code.WriteString(e.eval(c.Expression))
+		default:
+			return "", false
 		}
 	}
 
 	codeStr := strings.TrimSpace(code.String())
 	normalizedLang := syntaxhighlight.NormalizeLanguage(lang)
-
-	if normalizedLang != "" {
-		highlighted := syntaxhighlight.Highlight(codeStr, normalizedLang)
-		return "<pre class=\"chroma\"><code class=\"language-" + lang + "\">" + highlighted + "</code></pre>"
+	if normalizedLang == "" {
+		return "<pre><code>" + escape.HTML(codeStr) + "</code></pre>", true
 	}
-	escaped := escape.HTML(codeStr)
-	return "<pre><code>" + escaped + "</code></pre>"
+	highlighted := syntaxhighlight.Highlight(codeStr, normalizedLang)
+	return "<pre class=\"chroma\"><code class=\"language-" + escape.HTML(lang) + "\">" + highlighted + "</code></pre>", true
+}
+
+// evalPlainCodeBlock renders a <SyntaxHighlight> whose content isn't
+// statically known as a plain code block. Children go through the standard
+// JSX text rules (text escaped, rendered markup injected raw), mirroring the
+// tree builder's dynamic fallback.
+func (e *SSREval) evalPlainCodeBlock(el *ast.JSXElement) string {
+	lang := ""
+	for _, attr := range el.Opening.Attributes {
+		if attr.Spread || attr.Value == nil || attr.Name != "lang" {
+			continue
+		}
+		lang = e.eval(attr.Value)
+	}
+
+	var b strings.Builder
+	b.WriteString("<pre class=\"chroma\"><code class=\"language-" + escape.HTML(lang) + "\">")
+	for _, child := range el.Children {
+		switch c := child.(type) {
+		case *ast.JSXText:
+			b.WriteString(escape.HTML(c.Value))
+		case *ast.JSXExprContainer:
+			b.WriteString(e.escapeContainerValue(c.Expression))
+		}
+	}
+	b.WriteString("</code></pre>")
+	return b.String()
 }
 
 func (e *SSREval) evalJSX(el *ast.JSXElement) string {
@@ -597,9 +680,14 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		}
 	}
 
-	// <SyntaxHighlight lang="...">code</SyntaxHighlight> — compile-time chroma highlighting
+	// <SyntaxHighlight lang="...">code</SyntaxHighlight> — compile-time chroma
+	// highlighting when the content is statically known; a plain code block
+	// through the standard children rules otherwise.
 	if name == "SyntaxHighlight" {
-		return e.evalSyntaxHighlight(el)
+		if html, ok := e.tryEvalSyntaxHighlight(el); ok {
+			return html
+		}
+		return e.evalPlainCodeBlock(el)
 	}
 
 	// Uppercase = component — resolve and evaluate recursively
@@ -826,16 +914,28 @@ func (e *SSREval) evalComponentFn(fn *ast.FnDecl, el *ast.JSXElement) string {
 
 	// Also pass {children} content from the JSX call site
 	var childrenContent strings.Builder
+	var childrenRaw strings.Builder
 	for _, child := range el.Children {
 		switch c := child.(type) {
 		case *ast.JSXText:
 			childrenContent.WriteString(c.Value)
+			childrenRaw.WriteString(c.Value)
 		case *ast.JSXExprContainer:
-			childrenContent.WriteString(e.escapeContainerValue(c.Expression))
+			v := e.eval(c.Expression)
+			// Raw variant first: no HTML escaping, so compile-time processors
+			// (<SyntaxHighlight>) see the original code text.
+			if e.childrenIsHTML && isChildrenRef(c.Expression) {
+				childrenRaw.WriteString(stripArraySep(v))
+			} else {
+				childrenRaw.WriteString(v)
+			}
+			childrenContent.WriteString(e.escapeContainerValueEvaluated(c.Expression, v))
 		case *ast.JSXElementChild:
 			childrenContent.WriteString(e.evalJSX(c.Element))
+			childrenRaw.WriteString(e.evalJSX(c.Element))
 		case *ast.JSXFragmentChild:
 			childrenContent.WriteString(e.evalFragment(c.Fragment))
+			childrenRaw.WriteString(e.evalFragment(c.Fragment))
 		}
 	}
 	if childrenContent.Len() > 0 {
@@ -853,6 +953,16 @@ func (e *SSREval) evalComponentFn(fn *ast.FnDecl, el *ast.JSXElement) string {
 		e.childrenIsHTML = true
 	}
 	defer func() { e.childrenIsHTML = savedChildrenIsHTML }()
+
+	// Same scoping for the raw children text: it belongs to this component
+	// frame only and must not leak into nested component calls.
+	savedChildrenRaw := e.childrenRawText
+	if preRenderedChildren {
+		e.childrenRawText = childrenRaw.String()
+	} else {
+		e.childrenRawText = ""
+	}
+	defer func() { e.childrenRawText = savedChildrenRaw }()
 
 	e.BindLocalVars(fn.Body)
 
@@ -911,7 +1021,12 @@ func (e *SSREval) evalFragment(frag *ast.JSXFragment) string {
 // expressions (template literals, strings, concatenations) are HTML-escaped so
 // `<Code>{`return <h1>x</h1>`}</Code>` can't leak real markup.
 func (e *SSREval) escapeContainerValue(expr ast.Expr) string {
-	v := e.eval(expr)
+	return e.escapeContainerValueEvaluated(expr, e.eval(expr))
+}
+
+// escapeContainerValueEvaluated is escapeContainerValue with a pre-evaluated
+// value so callers that also need the raw value avoid evaluating twice.
+func (e *SSREval) escapeContainerValueEvaluated(expr ast.Expr, v string) string {
 	if e.childrenIsHTML && isChildrenRef(expr) {
 		// The children binding was already rendered (and escaped) by the
 		// emitter's slot pipeline — injecting it raw is correct.

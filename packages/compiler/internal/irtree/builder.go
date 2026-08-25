@@ -279,6 +279,19 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 				node.ExtraVars = append(node.ExtraVars, fnJS)
 			}
 		}
+
+		// Auto-promote to TierStatic: if the component has no signals,
+		// effects, memos, handlers, attr bindings, or extra vars, it is
+		// purely static (props-in, JSX-out) and can be SSR-evaluated at
+		// build time with zero client JS. This covers layout components
+		// ({children} passthrough), presentational components, and any
+		// function that only composes JSX from its props.
+		if len(node.Signals) == 0 && len(node.Effects) == 0 &&
+			len(node.Memos) == 0 && len(node.ExtraVars) == 0 &&
+			len(node.Handlers) == 0 && len(node.AttrBindings) == 0 {
+			tier = TierStatic
+			node.Tier = TierStatic
+		}
 	}
 	b.pendingHandlers = savedHandlers
 	b.pendingAttrs = savedAttrs
@@ -685,6 +698,49 @@ func isLocalHref(href string) bool {
 
 // ─── buildSyntaxHighlightSlots — <SyntaxHighlight> → chroma-highlighted HTML ──
 
+// isChildrenPlaceholderExpr reports whether expr is the {children} /
+// {props.children} passthrough placeholder.
+func isChildrenPlaceholderExpr(e ast.Expr) bool {
+	switch t := e.(type) {
+	case *ast.Identifier:
+		return t.Name == "children"
+	case *ast.MemberExpr:
+		if id, ok := t.Object.(*ast.Identifier); ok && id.Name == "props" {
+			if pid, ok := t.Property.(*ast.Identifier); ok && pid.Name == "children" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// resolveCallSiteChildrenText extracts compile-time text from the current
+// component's call-site children (e.g. the template literal passed to
+// <Code>{`...code...`}</Code>). Returns ok=false when there are no call-site
+// children or any part is dynamic (signal refs, unresolved identifiers, JSX
+// elements) — the caller must then fall back to hydration-based rendering.
+func (b *builder) resolveCallSiteChildrenText() (string, bool) {
+	if len(b.callSiteChildren) == 0 {
+		return "", false
+	}
+	var sb strings.Builder
+	for _, child := range b.callSiteChildren {
+		switch c := child.(type) {
+		case *ast.JSXText:
+			sb.WriteString(c.Value)
+		case *ast.JSXExprContainer:
+			if c.Expression == nil || b.referencesSignal(c.Expression) || !b.testFullyKnown(c.Expression) {
+				return "", false
+			}
+			sb.WriteString(evalConstWithSignals(c.Expression, b.sigMap(), b.localProps))
+		default:
+			// JSX elements / fragments at the call site can't become plain text.
+			return "", false
+		}
+	}
+	return sb.String(), true
+}
+
 func (b *builder) buildSyntaxHighlightSlots(el *ast.JSXElement, parentID string) []SlotNode {
 	lang := ""
 	for _, attr := range el.Opening.Attributes {
@@ -706,6 +762,16 @@ func (b *builder) buildSyntaxHighlightSlots(el *ast.JSXElement, parentID string)
 		case *ast.JSXText:
 			code.WriteString(c.Value)
 		case *ast.JSXExprContainer:
+			// {children} passthrough inside a component body: the actual code
+			// text lives at the component's call site (e.g.
+			// <Code lang="tsx">{`...code...`}</Code>). Resolve it from the
+			// call-site children so compile-time chroma highlighting applies.
+			if isChildrenPlaceholderExpr(c.Expression) && b.hasCallSiteChildren() {
+				if text, ok := b.resolveCallSiteChildrenText(); ok {
+					code.WriteString(text)
+					continue
+				}
+			}
 			val := evalConstWithSignals(c.Expression, b.sigMap(), b.localProps)
 			if id, ok := c.Expression.(*ast.Identifier); ok && val == id.Name {
 				// Unresolvable identifier — can't highlight at compile time.
@@ -924,6 +990,11 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 			// may contain interactive components that need their own hydration.
 			savedCS := b.callSiteChildren
 			b.callSiteChildren = el.Children
+			// When the call-site children are fully static text, keep the raw
+			// text so SSREval can chroma-highlight <SyntaxHighlight> content.
+			if text, ok := b.resolveCallSiteChildrenText(); ok {
+				childNode.CallSiteChildrenText = text
+			}
 			childNode.Children = b.buildCallSiteChildSlots(el.Children, string(childID))
 			b.callSiteChildren = savedCS
 
@@ -959,6 +1030,15 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	childNode.CallSiteChildren = el.Children
 	childNode.CallSiteSlots = b.buildCallSiteChildSlots(el.Children, string(childID))
 	b.callSiteChildren = savedCallSite
+
+	// Auto-promoted SSR-evaluated components need prop bindings so that
+	// {props.X} resolves at build time during SSREval. The bindings are
+	// built from call-site attrs (not node.Props which is the raw AST)
+	// and the component's parameter names.
+	if childNode.IsSSREval && childNode.SSREvalBindings == nil {
+		paramNames := extractParamNames(childFn)
+		childNode.SSREvalBindings = buildPropBindings(paramNames, attrs, b.sigMap())
+	}
 
 	// Hoist props for handlers that reference props.X. The props object
 	// values may reference THIS component's signals (e.g. checked={checked1()}),
@@ -1392,7 +1472,7 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 		// return the variable name as literal text ("inputElements").
 		// First check for a for-loop-built JSX array so components like
 		// OTPField can render their imperatively-pushed element lists.
-		if _, ok := ec.Expression.(*ast.Identifier); ok {
+		if id, ok := ec.Expression.(*ast.Identifier); ok {
 			if nodes := b.tryResolveForLoopArray(ec.Expression, parentID); len(nodes) > 0 {
 				return nodes
 			}
@@ -1400,8 +1480,16 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 			// value at build time; render them statically instead of deferring
 			// to a hydration binding that would reference an out-of-scope
 			// identifier (which would render the raw name as text).
-			if id := ec.Expression.(*ast.Identifier); id.Name != "children" {
+			if id.Name != "children" {
 				if v, isConst := b.moduleConsts[id.Name]; isConst {
+					if doEscape {
+						return []SlotNode{&StaticHTML{HTML: escape.HTML(v)}}
+					}
+					return []SlotNode{&StaticHTML{HTML: v}}
+				}
+				// Local variables resolved via collectLocalVars (var X = expr)
+				// have known values at build time; render statically.
+				if v, ok := b.localProps[id.Name]; ok {
 					if doEscape {
 						return []SlotNode{&StaticHTML{HTML: escape.HTML(v)}}
 					}
@@ -1658,14 +1746,20 @@ func (b *builder) testFullyKnown(e ast.Expr) bool {
 		if _, ok := b.sigMap()[x.Name]; ok {
 			return true
 		}
-		_, ok := b.localProps[x.Name]
-		return ok
+		if _, ok := b.localProps[x.Name]; ok {
+			return true
+		}
+		if _, ok := b.moduleConsts[x.Name]; ok {
+			return true
+		}
+		return false
 	case *ast.CallExpr:
 		if id, ok := x.Callee.(*ast.Identifier); ok {
 			if _, ok := b.sigMap()[id.Name]; ok {
 				return true
 			}
-			if id.Name == "String" && len(x.Args) == 1 {
+			// Pure built-in constructors: String(), Number(), Boolean()
+			if (id.Name == "String" || id.Name == "Number" || id.Name == "Boolean") && len(x.Args) == 1 {
 				return b.testFullyKnown(x.Args[0])
 			}
 		}
@@ -1690,6 +1784,20 @@ func (b *builder) testFullyKnown(e ast.Expr) bool {
 	case *ast.TemplateExpr:
 		for _, p := range x.Parts {
 			if !b.testFullyKnown(p) {
+				return false
+			}
+		}
+		return true
+	case *ast.ArrayExpr:
+		for _, el := range x.Elements {
+			if el != nil && !b.testFullyKnown(el) {
+				return false
+			}
+		}
+		return true
+	case *ast.ObjectExpr:
+		for _, prop := range x.Properties {
+			if !prop.Spread && prop.Value != nil && !b.testFullyKnown(prop.Value) {
 				return false
 			}
 		}
@@ -2281,8 +2389,9 @@ func (b *builder) collectEffectJS(body []ast.Stmt) []string {
 func (b *builder) collectMemoJS(body []ast.Stmt) []string {
 	var memos []string
 	for _, stmt := range body {
-		if varStmt, ok := stmt.(*ast.VarStmt); ok {
-			for _, decl := range varStmt.Decls {
+		switch s := stmt.(type) {
+		case *ast.VarStmt:
+			for _, decl := range s.Decls {
 				if decl.IsDestructuring && decl.Init != nil {
 					if call, ok := decl.Init.(*ast.CallExpr); ok {
 						if id, ok := call.Callee.(*ast.Identifier); ok && id.Name == "createMemo" {
@@ -2291,6 +2400,15 @@ func (b *builder) collectMemoJS(body []ast.Stmt) []string {
 								memos = append(memos, "createMemo("+js+")")
 							}
 						}
+					}
+				}
+			}
+		case *ast.ExprStmt:
+			if call, ok := s.Expression.(*ast.CallExpr); ok {
+				if id, ok := call.Callee.(*ast.Identifier); ok && id.Name == "createMemo" {
+					if len(call.Args) >= 1 {
+						js := generateExprJS(call.Args[0], b.sigMap())
+						memos = append(memos, "createMemo("+js+")")
 					}
 				}
 			}
@@ -2780,8 +2898,9 @@ func isOnEvent(name string) bool {
 // componentNeedsClient reports whether a signal-less component must be built
 // as a client component (through the tree path) instead of being flattened by
 // the SSR evaluator. That is the case when it receives a function prop (which
-// can only run as a live handler) or its return JSX contains event handlers
-// (e.g. a reusable <Button onClick={props.onClick}> wrapper).
+// can only run as a live handler), a signal-valued prop (which must stay
+// reactive), or its return JSX contains event handlers (e.g. a reusable
+// <Button onClick={props.onClick}> wrapper).
 func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr) bool {
 	for _, expr := range attrs {
 		switch e := expr.(type) {
@@ -2793,6 +2912,11 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 					return true
 				}
 			}
+		}
+		// Signal-valued props: <Child value={count()} /> means the child
+		// must stay reactive even if it has no local signals.
+		if b.referencesSignal(expr) {
+			return true
 		}
 	}
 	if ret := findReturnStmt(fn.Body); ret != nil {

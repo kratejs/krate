@@ -398,8 +398,19 @@ func (b *Builder) BuildAll() error {
 	// Write global CSS with hash-based naming
 	cssFile := b.writeGlobalCSS(mergedCSS)
 
-	// Write shared runtime chunk (extracted from per-page bundles)
-	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.Cfg.ShouldMinifyJS(), b.Root)
+	// Write shared runtime chunk only if at least one page needs client JS.
+	// Fully static sites (no signals/handlers anywhere) ship zero JavaScript.
+	anyPageHasJS := false
+	for _, r := range results {
+		if r.HasJS {
+			anyPageHasJS = true
+			break
+		}
+	}
+	runtimeJS := ""
+	if anyPageHasJS {
+		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.Cfg.ShouldMinifyJS(), b.Root)
+	}
 
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, cssFile, runtimeJS)

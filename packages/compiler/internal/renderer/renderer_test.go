@@ -779,3 +779,21 @@ export default function Page() {
 		}
 	}
 }
+
+// ─── <SyntaxHighlight> compile-time chroma ───────────────────────────────────
+
+func TestSSREvalSyntaxHighlightHighlightsStaticCallSiteChildren(t *testing.T) {
+	// A signal-less (SSR-evaluated) wrapper passing {children} through to
+	// <SyntaxHighlight>: the call-site code text is static, so chroma must
+	// highlight it at build time.
+	src := `function Shell(props) {
+	return <div><SyntaxHighlight lang={props.lang}>{props.children}</SyntaxHighlight></div>;
+}
+export default function Page() {
+	return <Shell lang="js">{` + "`const x = 1;`" + `}</Shell>;
+}`
+	result, _ := fullPipeline(t, src)
+	if !strings.Contains(result.HTML, "language-js") || !strings.Contains(result.HTML, "<span") {
+		t.Errorf("expected chroma-highlighted output for static children, got:\n%s", result.HTML)
+	}
+}

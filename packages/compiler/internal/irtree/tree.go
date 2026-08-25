@@ -262,6 +262,12 @@ type ComponentNode struct {
 	// with properly-rendered (and hydrated) child component output.
 	CallSiteSlots []SlotNode
 
+	// CallSiteChildrenText holds the compile-time text of the call-site
+	// children when they are fully static (e.g. the template literal passed to
+	// <Code>{`...`}</Code>). SSREval uses it so <SyntaxHighlight> can chroma-
+	// highlight the original code instead of already-rendered HTML.
+	CallSiteChildrenText string
+
 	// ReturnSlots stores the tree-processed slots of the component's own
 	// return-statement JSX. Used by SSREval components so interactive client
 	// components nested inside a signal-less wrapper are still emitted through

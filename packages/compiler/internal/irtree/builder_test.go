@@ -365,3 +365,53 @@ func TestBuildMetaSlotKeepsScriptRaw(t *testing.T) {
 		t.Error("expected raw (unescaped) script content in MetaSlot")
 	}
 }
+
+// ─── <SyntaxHighlight> compile-time chroma through {children} ────────────────
+
+func findStaticHTML(children []irtree.SlotNode, pred func(string) bool) bool {
+	for _, child := range children {
+		switch n := child.(type) {
+		case *irtree.StaticHTML:
+			if pred(n.HTML) {
+				return true
+			}
+		case *irtree.ComponentSlot:
+			if n.Component != nil {
+				if findStaticHTML(n.Component.Children, pred) ||
+					findStaticHTML(n.Component.ReturnSlots, pred) {
+					return true
+				}
+			}
+		case *irtree.ConditionalSlot:
+			if findStaticHTML(n.Consequent, pred) || findStaticHTML(n.Alternate, pred) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestSyntaxHighlightHighlightsCallSiteChildren(t *testing.T) {
+	// Mirrors <Code lang="tsx">{`...code...`}</Code>: a client component
+	// (signal + handler) wrapping <SyntaxHighlight>{children}</SyntaxHighlight>
+	// must run the Go chroma highlighter over the call-site code at build time.
+	src := `function Code(props) {
+	const [copied, setCopied] = createSignal(false);
+	return (
+		<div>
+			<button onClick={() => setCopied(true)}>{copied() ? "y" : "n"}</button>
+			<SyntaxHighlight lang={props.lang}>{props.children}</SyntaxHighlight>
+		</div>
+	);
+}
+export default function Page() {
+	return <Code lang="tsx">{` + "`function App() { return <h1>Hi</h1>; }`" + `}</Code>;
+}`
+	tree := annotateAndBuild(t, src)
+	found := findStaticHTML(tree.Root.Children, func(html string) bool {
+		return strings.Contains(html, "language-tsx") && strings.Contains(html, "<span")
+	})
+	if !found {
+		t.Error("expected chroma-highlighted HTML for static call-site children of <SyntaxHighlight>")
+	}
+}

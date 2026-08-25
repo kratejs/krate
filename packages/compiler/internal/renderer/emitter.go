@@ -341,6 +341,12 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 			// Children were rendered through the slot pipeline (text escaped,
 			// elements hydrated) — a `{children}` container must inject them raw.
 			eval.childrenIsHTML = true
+			// When the call-site children were fully static text, SSREval also
+			// gets the raw text so <SyntaxHighlight> chroma-highlights the
+			// original code instead of the rendered HTML.
+			if node.CallSiteChildrenText != "" {
+				eval.childrenRawText = node.CallSiteChildrenText
+			}
 		}
 	}
 
