@@ -100,6 +100,7 @@ func injectServerGlobals(source string) string {
 	needsLink := strings.Contains(source, "<Link") || strings.Contains(source, "Link>")
 	needsImage := strings.Contains(source, "<Image") || strings.Contains(source, "Image>")
 	needsIcon := strings.Contains(source, "<Icon") || strings.Contains(source, "Icon>")
+	needsSyntaxHighlight := strings.Contains(source, "<SyntaxHighlight") || strings.Contains(source, "SyntaxHighlight>")
 
 	var names []string
 	if needsHead {
@@ -122,6 +123,9 @@ func injectServerGlobals(source string) string {
 	}
 	if needsIcon {
 		names = append(names, "Icon")
+	}
+	if needsSyntaxHighlight {
+		names = append(names, "SyntaxHighlight")
 	}
 
 	if len(names) == 0 {

@@ -42,7 +42,7 @@ func protectRawContent(html string) rawBlocks {
 	for i < len(html) {
 		tagStart := -1
 		tagLen := 0
-		for _, tag := range []string{"<script", "<style"} {
+		for _, tag := range []string{"<script", "<style", "<pre"} {
 			if strings.HasPrefix(lower[i:], tag) {
 				chAfter := html[i+len(tag)]
 				if chAfter == '>' || chAfter == ' ' || chAfter == '\t' || chAfter == '\n' || chAfter == '\r' {

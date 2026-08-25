@@ -295,11 +295,15 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				if b, ok := v.(bool); ok {
 					cfg.Markdown.Admonitions = b
 				}
-			case "codeHighlight":
-				if b, ok := v.(bool); ok {
-					cfg.Markdown.CodeHighlight = b
-				}
-			case "math":
+		case "codeHighlight":
+			if b, ok := v.(bool); ok {
+				cfg.Markdown.CodeHighlight = b
+			}
+		case "codeTheme":
+			if s, ok := v.(string); ok {
+				cfg.Markdown.CodeTheme = s
+			}
+		case "math":
 				if b, ok := v.(bool); ok {
 					cfg.Markdown.Math = b
 				}

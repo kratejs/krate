@@ -251,6 +251,14 @@ export function Icon(_props: { name?: string; [key: string]: any }): JSXNode {
   return raw("<span></span>");
 }
 
+// SyntaxHighlight — renders a <pre><code> block (Go compiler handles chroma highlighting at build time).
+export function SyntaxHighlight(props: { lang?: string; children?: any }): JSXNode {
+  const lang = props.lang || "";
+  const code = props.children != null ? String(props.children) : "";
+  const cls = lang ? `chroma language-${lang}` : "chroma";
+  return raw(`<pre class="chroma"><code class="${escapeHTML(cls)}">${escapeHTML(code)}</code></pre>`);
+}
+
 // ── Data Fetching (server-side) ───────────────────────────────────────────────
 
 export interface GetServerSidePropsContext {

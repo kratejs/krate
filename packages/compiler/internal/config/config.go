@@ -150,6 +150,7 @@ func Default() *Config {
 		PublicDir: "public",
 		Minify:    true,
 		Sourcemap: false,
+		Markdown:  markdown.DefaultConfig(),
 	}
 }
 

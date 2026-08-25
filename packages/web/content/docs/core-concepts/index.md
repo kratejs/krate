@@ -17,7 +17,7 @@ is different from React, Next.js, or Astro in three important ways:
 
 ## The pipeline
 
-```
+```sh
 Source (.tsx/.ts/.md/.mdx)
         │
         ▼

@@ -48,10 +48,14 @@
   overflow-x: auto;
   border-radius: 0 0 8px 8px;
   border: 0;
+  white-space: pre;
 }
 .krate-code-block code {
   color: var(--krate-code-text, #e6edf3);
   font-family: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
   font-size: 0.875rem;
   line-height: 1.6;
+  white-space: pre;
+  display: block;
+  overflow-x: auto;
 }

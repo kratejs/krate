@@ -1032,6 +1032,7 @@ declare global {
   function Head(props: { children?: any }): JSX.Element;
   function Suspense(props: { children?: any; fallback?: any }): JSX.Element;
   function Link(props: JSX.LinkProps): JSX.Element;
+  function SyntaxHighlight(props: { lang?: string; children?: any }): JSX.Element;
   interface HTMLImageElement {
     __jsxProps: JSX.ImageProps;
   }

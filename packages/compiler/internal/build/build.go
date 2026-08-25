@@ -27,6 +27,7 @@ import (
 	"krate-compiler/internal/plugin"
 	"krate-compiler/internal/reactive"
 	"krate-compiler/internal/renderer"
+	"krate-compiler/internal/syntaxhighlight"
 )
 
 type cssModuleBinding struct {
@@ -189,6 +190,14 @@ func (b *Builder) BuildPages(pages []string) error {
 			fmt.Fprintf(os.Stderr, "  %sTailwind error:%s %v\n", cYellow, cReset, err)
 		} else if twCSS != "" {
 			mergedCSS = mergeCSS(mergedCSS, twCSS, cssRuleSeen)
+		}
+	}
+
+	// Inject chroma syntax highlighting CSS if code highlighting is enabled
+	if b.Cfg.Markdown.CodeHighlight {
+		chromaCSS := syntaxhighlight.CSSForTheme(b.Cfg.Markdown.CodeTheme)
+		if chromaCSS != "" {
+			mergedCSS = chromaCSS + "\n" + mergedCSS
 		}
 	}
 
@@ -378,6 +387,14 @@ func (b *Builder) BuildAll() error {
 		}
 	}
 
+	// Inject chroma syntax highlighting CSS if code highlighting is enabled
+	if b.Cfg.Markdown.CodeHighlight {
+		chromaCSS := syntaxhighlight.CSSForTheme(b.Cfg.Markdown.CodeTheme)
+		if chromaCSS != "" {
+			mergedCSS = chromaCSS + "\n" + mergedCSS
+		}
+	}
+
 	// Write global CSS with hash-based naming
 	cssFile := b.writeGlobalCSS(mergedCSS)
 
@@ -398,9 +415,20 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sImage copy error:%s %v\n", cYellow, cReset, err)
 	}
 
-	// Append docs-specific component CSS to docs-styles.css if present
-	if docsCSS != "" {
-		b.writeDocsCSS(docsCSS)
+	// Append docs-specific component CSS + chroma CSS to docs-styles.css
+	if docsCSS != "" || b.Cfg.Markdown.CodeHighlight {
+		extra := docsCSS
+		if b.Cfg.Markdown.CodeHighlight {
+			chromaCSS := syntaxhighlight.CSSForTheme(b.Cfg.Markdown.CodeTheme)
+			if chromaCSS != "" {
+				if extra != "" {
+					extra = chromaCSS + "\n" + extra
+				} else {
+					extra = chromaCSS
+				}
+			}
+		}
+		b.writeDocsCSS(extra)
 	}
 
 	if err := b.BuildAllAPI(); err != nil {

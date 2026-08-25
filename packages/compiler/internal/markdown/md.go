@@ -7,6 +7,7 @@ import (
 
 	"krate-compiler/internal/escape"
 	"krate-compiler/internal/icons"
+	"krate-compiler/internal/syntaxhighlight"
 )
 
 // RenderToHTML converts Markdown source to HTML using the given config.
@@ -345,6 +346,13 @@ func renderParagraph(b block, cfg Config) string {
 
 func renderCodeBlock(b block, cfg Config) string {
 	code := strings.Join(b.lines, "\n")
+
+	if cfg.CodeHighlight && b.info != "" {
+		lang := syntaxhighlight.NormalizeLanguage(b.info)
+		highlighted := syntaxhighlight.Highlight(code, lang)
+		return fmt.Sprintf("<pre class=\"chroma\"><code class=\"language-%s\">%s</code></pre>\n", b.info, highlighted)
+	}
+
 	code = escape.HTML(code)
 	if b.info != "" {
 		return fmt.Sprintf("<pre><code class=\"language-%s\">%s</code></pre>\n", b.info, code)

@@ -14,19 +14,20 @@ export default function Code(props: CodeProps) {
   var title = props.title || "";
   var showCopy = props.showCopy !== false;
   var [copied, setCopied] = createSignal(false);
-  var codeRef: HTMLElement | null = null;
+  var wrapRef: HTMLElement | null = null;
 
   onMount(function () {
-    if (!codeRef) return;
-    var el = codeRef;
-    if (typeof el.textContent === "string" && el.textContent.length > 0) {
-      el.setAttribute("data-code", el.textContent);
+    if (!wrapRef) return;
+    var codeEl = wrapRef.querySelector("code");
+    if (codeEl && typeof codeEl.textContent === "string" && codeEl.textContent.length > 0) {
+      codeEl.setAttribute("data-code", codeEl.textContent);
     }
   });
 
   function handleCopy() {
-    if (!codeRef) return;
-    var text = codeRef.textContent || "";
+    if (!wrapRef) return;
+    var codeEl = wrapRef.querySelector("code");
+    var text = codeEl ? codeEl.textContent || "" : "";
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(text).then(function () {
         setCopied(true);
@@ -36,7 +37,7 @@ export default function Code(props: CodeProps) {
   }
 
   return (
-    <div class="krate-code-block">
+    <div class="krate-code-block" ref={wrapRef}>
       {title !== "" || showCopy ? (
         <div class="krate-code-header">
           {title !== "" ? <div class="krate-code-title">{title}</div> : <div class="krate-code-title"></div>}
@@ -51,7 +52,7 @@ export default function Code(props: CodeProps) {
           ) : null}
         </div>
       ) : null}
-      <pre><code ref={codeRef} class={lang !== "" ? "language-" + lang : ""}>{children}</code></pre>
+      <SyntaxHighlight lang={lang}>{children}</SyntaxHighlight>
     </div>
   );
 }

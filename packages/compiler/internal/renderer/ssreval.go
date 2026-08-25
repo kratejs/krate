@@ -7,6 +7,7 @@ import (
 	"krate-compiler/internal/ast"
 	"krate-compiler/internal/escape"
 	"krate-compiler/internal/irtree"
+	"krate-compiler/internal/syntaxhighlight"
 )
 
 // SSREval is a lightweight SSR evaluator that produces HTML output only.
@@ -531,6 +532,42 @@ func (e *SSREval) resolveIconName(el *ast.JSXElement) string {
 	return ""
 }
 
+// evalSyntaxHighlight evaluates a <SyntaxHighlight> element: extracts the lang
+// attribute and children text, then runs chroma at build time.
+func (e *SSREval) evalSyntaxHighlight(el *ast.JSXElement) string {
+	lang := ""
+	for _, attr := range el.Opening.Attributes {
+		if attr.Spread || attr.Value == nil || attr.Name != "lang" {
+			continue
+		}
+		if lit, ok := attr.Value.(*ast.Literal); ok {
+			lang = lit.Value
+		} else {
+			lang = e.eval(attr.Value)
+		}
+	}
+
+	var code strings.Builder
+	for _, child := range el.Children {
+		switch c := child.(type) {
+		case *ast.JSXText:
+			code.WriteString(c.Value)
+		case *ast.JSXExprContainer:
+			code.WriteString(e.eval(c.Expression))
+		}
+	}
+
+	codeStr := strings.TrimSpace(code.String())
+	normalizedLang := syntaxhighlight.NormalizeLanguage(lang)
+
+	if normalizedLang != "" {
+		highlighted := syntaxhighlight.Highlight(codeStr, normalizedLang)
+		return "<pre class=\"chroma\"><code class=\"language-" + lang + "\">" + highlighted + "</code></pre>"
+	}
+	escaped := escape.HTML(codeStr)
+	return "<pre><code>" + escaped + "</code></pre>"
+}
+
 func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 	name := el.Opening.Name
 
@@ -558,6 +595,11 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 				return html
 			}
 		}
+	}
+
+	// <SyntaxHighlight lang="...">code</SyntaxHighlight> — compile-time chroma highlighting
+	if name == "SyntaxHighlight" {
+		return e.evalSyntaxHighlight(el)
 	}
 
 	// Uppercase = component — resolve and evaluate recursively

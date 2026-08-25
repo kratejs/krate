@@ -10,6 +10,7 @@ import (
 	"krate-compiler/internal/ast"
 	"krate-compiler/internal/escape"
 	"krate-compiler/internal/sigutil"
+	"krate-compiler/internal/syntaxhighlight"
 )
 
 // Build constructs a ComponentTree from a parsed program and its annotations.
@@ -521,6 +522,8 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 	case "Link":
 		b.hasLinks = true
 		return b.buildLinkSlots(el, parentID)
+	case "SyntaxHighlight":
+		return b.buildSyntaxHighlightSlots(el, parentID)
 	case "Icon", "Image":
 		return []SlotNode{&StaticHTML{HTML: ""}}
 	}
@@ -678,6 +681,80 @@ func isLocalHref(href string) bool {
 		return false
 	}
 	return true
+}
+
+// ─── buildSyntaxHighlightSlots — <SyntaxHighlight> → chroma-highlighted HTML ──
+
+func (b *builder) buildSyntaxHighlightSlots(el *ast.JSXElement, parentID string) []SlotNode {
+	lang := ""
+	for _, attr := range el.Opening.Attributes {
+		if attr.Spread || attr.Value == nil {
+			continue
+		}
+		if attr.Name == "lang" {
+			lang = evalConstWithSignals(attr.Value, b.sigMap(), b.localProps)
+		}
+	}
+
+	normalizedLang := syntaxhighlight.NormalizeLanguage(lang)
+
+	// Try to extract children text content for compile-time highlighting.
+	var code strings.Builder
+	canHighlight := true
+	for _, child := range el.Children {
+		switch c := child.(type) {
+		case *ast.JSXText:
+			code.WriteString(c.Value)
+		case *ast.JSXExprContainer:
+			val := evalConstWithSignals(c.Expression, b.sigMap(), b.localProps)
+			if id, ok := c.Expression.(*ast.Identifier); ok && val == id.Name {
+				// Unresolvable identifier — can't highlight at compile time.
+				canHighlight = false
+				break
+			}
+			if val != "" {
+				code.WriteString(val)
+			}
+		}
+	}
+
+	if canHighlight {
+		codeStr := strings.TrimSpace(code.String())
+		var html strings.Builder
+		if normalizedLang != "" {
+			highlighted := syntaxhighlight.Highlight(codeStr, normalizedLang)
+			fmt.Fprintf(&html, "<pre class=\"chroma\"><code class=\"language-%s\">%s</code></pre>", lang, highlighted)
+		} else {
+			escaped := escape.HTML(codeStr)
+			fmt.Fprintf(&html, "<pre><code>%s</code></pre>", escaped)
+		}
+		return []SlotNode{&StaticHTML{HTML: html.String()}}
+	}
+
+	// Children are dynamic (e.g. {children} in a component body). Emit the
+	// <pre><code> wrapper as static HTML, build children as normal slot nodes,
+	// then close the tags. Chroma highlighting is skipped — the server stub
+	// applies plain escaping.
+	openTag := "<pre class=\"chroma\"><code class=\"language-" + escape.HTML(lang) + "\">"
+	closeTag := "</code></pre>"
+
+	var result []SlotNode
+	result = append(result, &StaticHTML{HTML: openTag})
+
+	for _, child := range el.Children {
+		switch c := child.(type) {
+		case *ast.JSXText:
+			if c.Value != "" {
+				result = append(result, &StaticHTML{HTML: escape.HTML(c.Value)})
+			}
+		case *ast.JSXExprContainer:
+			childNodes := b.buildExprContainerChildren(c, parentID)
+			result = append(result, childNodes...)
+		}
+	}
+
+	result = append(result, &StaticHTML{HTML: closeTag})
+	return result
 }
 
 // ─── buildMetaSlot — Head/Script/Style content ──────────────────────────────

@@ -17,6 +17,8 @@ export default defineConfig({
     gfm: true,
     headingAnchors: true,
     admonitions: true,
+    codeHighlight: true,
+    codeTheme: "github-dark",
   },
   tailwind: {
     enabled: true,

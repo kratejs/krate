@@ -463,8 +463,9 @@ func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]string, se
 		} else {
 			jsxStr.WriteString(">")
 			if jsx.Children != "" {
-				childHTML := RenderToHTML(jsx.Children, DefaultConfig())
-				jsxStr.WriteString(childHTML)
+				// JSX children are kept as raw text — not processed as markdown.
+				// MDX treats content inside JSX components as JSX, not markdown.
+				jsxStr.WriteString(jsx.Children)
 			}
 			jsxStr.WriteString("</")
 			jsxStr.WriteString(jsx.Tag)
