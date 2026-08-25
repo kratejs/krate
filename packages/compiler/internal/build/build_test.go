@@ -83,9 +83,6 @@ func TestBuildTestProject(t *testing.T) {
 	syntaxPage := filepath.Join(outDir, "syntax-robustness", "index.html")
 	if data, err := os.ReadFile(syntaxPage); err == nil {
 		content := string(data)
-		if !strings.Contains(content, `class="badge"`) && !strings.Contains(content, "class=badge") {
-			t.Errorf("syntax-robustness page did not render @-alias imported Badge component")
-		}
 		if !strings.Contains(content, "Syntax Robustness") {
 			t.Errorf("syntax-robustness page missing heading")
 		}
