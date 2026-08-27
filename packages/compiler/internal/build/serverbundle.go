@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
 )
@@ -30,62 +31,77 @@ func CompileServerBundles(results []*PageResult, root, outDir string) map[string
 	_ = os.MkdirAll(bundleDir, 0755)
 
 	bundles := make(map[string]string, len(ssrPages))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	pool := newWorkerPool(buildWorkerLimit())
 
 	for _, page := range ssrPages {
-		absSource := filepath.Join(root, page.SourcePath)
-		sourceData, err := os.ReadFile(absSource)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %sWarning: cannot read %s for server bundle:%s %v\n", cYellow, page.SourcePath, cReset, err)
-			continue
-		}
+		page := page
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pool.acquire()
+			defer pool.release()
 
-		// Inject Head/Suspense/Script/Style imports at the top of the file
-		// so pages can use them as globals (matching krate compiler behavior)
-		injectedSource := injectServerGlobals(string(sourceData))
-
-		// Compile with esbuild — use stdin so esbuild resolves relative imports
-		// from the project root (AbsWorkingDir) rather than a temp file location
-		route := page.OutName
-		if route == "." || route == "" {
-			route = "index"
-		}
-		outName := strings.TrimPrefix(route, "/") + ".server.mjs"
-		outPath := filepath.Join(bundleDir, outName)
-
-		result := api.Build(api.BuildOptions{
-			AbsWorkingDir:   root,
-			Bundle:          true,
-			Format:          api.FormatESModule,
-			Platform:        api.PlatformNode,
-			Outfile:         outPath,
-			Write:           true,
-			JSX:             api.JSXAutomatic,
-			JSXSideEffects:  false,
-			JSXImportSource: "@krate/runtime/server",
-			TsconfigRaw:     `{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@krate/runtime/server" } }`,
-			Packages:        api.PackagesExternal,
-			External: []string{
-				"@krate/runtime",
-				"@krate/runtime/*",
-			},
-			Stdin: &api.StdinOptions{
-				Loader:     api.LoaderTSX,
-				Contents:   injectedSource,
-				ResolveDir: filepath.Dir(absSource),
-				Sourcefile: filepath.Base(absSource),
-			},
-		})
-
-		if len(result.Errors) > 0 {
-			for _, e := range result.Errors {
-				fmt.Fprintf(os.Stderr, "  %sServer bundle error (%s):%s %s\n", cYellow, page.SourcePath, cReset, e.Text)
+			absSource := filepath.Join(root, page.SourcePath)
+			sourceData, err := os.ReadFile(absSource)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  %sWarning: cannot read %s for server bundle:%s %v\n", cYellow, page.SourcePath, cReset, err)
+				return
 			}
-			continue
-		}
 
-		relBundle, _ := filepath.Rel(outDir, outPath)
-		bundles[page.SourcePath] = relBundle
+			// Inject Head/Suspense/Script/Style imports at the top of the file
+			// so pages can use them as globals (matching krate compiler behavior)
+			injectedSource := injectServerGlobals(string(sourceData))
+
+			// Compile with esbuild — use stdin so esbuild resolves relative imports
+			// from the project root (AbsWorkingDir) rather than a temp file location
+			route := page.OutName
+			if route == "." || route == "" {
+				route = "index"
+			}
+			outName := strings.TrimPrefix(route, "/") + ".server.mjs"
+			outPath := filepath.Join(bundleDir, outName)
+
+			result := api.Build(api.BuildOptions{
+				AbsWorkingDir:   root,
+				Bundle:          true,
+				Format:          api.FormatESModule,
+				Platform:        api.PlatformNode,
+				Outfile:         outPath,
+				Write:           true,
+				JSX:             api.JSXAutomatic,
+				JSXSideEffects:  false,
+				JSXImportSource: "@krate/runtime/server",
+				TsconfigRaw:     `{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@krate/runtime/server" } }`,
+				Packages:        api.PackagesExternal,
+				External: []string{
+					"@krate/runtime",
+					"@krate/runtime/*",
+				},
+				Stdin: &api.StdinOptions{
+					Loader:     api.LoaderTSX,
+					Contents:   injectedSource,
+					ResolveDir: filepath.Dir(absSource),
+					Sourcefile: filepath.Base(absSource),
+				},
+			})
+
+			if len(result.Errors) > 0 {
+				for _, e := range result.Errors {
+					fmt.Fprintf(os.Stderr, "  %sServer bundle error (%s):%s %s\n", cYellow, page.SourcePath, cReset, e.Text)
+				}
+				return
+			}
+
+			relBundle, _ := filepath.Rel(outDir, outPath)
+			mu.Lock()
+			bundles[page.SourcePath] = relBundle
+			mu.Unlock()
+		}()
 	}
+
+	wg.Wait()
 
 	return bundles
 }

@@ -118,11 +118,14 @@ func (b *Builder) BuildPages(pages []string) error {
 
 	resultsCh := make(chan pageBuildResult, len(pages))
 	var wg sync.WaitGroup
+	pool := newWorkerPool(buildWorkerLimit())
 
 	for _, page := range pages {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
+			pool.acquire()
+			defer pool.release()
 			fmt.Printf("  %s▶%s %s\n", cCyan, cReset, p)
 			result, rawCSS, err := b.buildPage(p)
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
@@ -278,11 +281,14 @@ func (b *Builder) BuildAll() error {
 	totalPages := len(pages) + len(routes)
 	resultsCh := make(chan pageBuildResult, totalPages)
 	var wg sync.WaitGroup
+	pool := newWorkerPool(buildWorkerLimit())
 
 	for _, page := range pages {
 		wg.Add(1)
 		go func(p string) {
 			defer wg.Done()
+			pool.acquire()
+			defer pool.release()
 			fmt.Printf("  %s▶%s %s\n", cCyan, cReset, p)
 			result, rawCSS, err := b.buildPage(p)
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
@@ -293,6 +299,8 @@ func (b *Builder) BuildAll() error {
 		wg.Add(1)
 		go func(r plugin.Route) {
 			defer wg.Done()
+			pool.acquire()
+			defer pool.release()
 			fmt.Printf("  %s▶%s %s (route)%s\n", cGreen, cReset, r.Path, cReset)
 			result, rawCSS, err := b.buildRoute(r)
 			resultsCh <- pageBuildResult{result, rawCSS, err, "(route) " + r.Path}
@@ -576,10 +584,13 @@ func (b *Builder) writeDocsCSS(docsCSS string) {
 // and saves to disk in a single parallel step (Zero Disk-I/O Amplification Fix)
 func (b *Builder) writeHTMLPages(results []*PageResult, cssFile string, runtimeJSFile string) {
 	var wg sync.WaitGroup
+	pool := newWorkerPool(buildWorkerLimit())
 	for _, r := range results {
 		wg.Add(1)
 		go func(r *PageResult) {
 			defer wg.Done()
+			pool.acquire()
+			defer pool.release()
 
 			pageDir := b.Cfg.OutDir
 			if r.OutName != "." {
@@ -974,6 +985,18 @@ type layoutEmitCacheEntry struct {
 var layoutEmitCache sync.Map
 var loadingEmitCache sync.Map
 
+// emitCacheLocks maps a layout/loading path to the mutex serializing its
+// bundle→emit pipeline. Concurrent buildPage goroutines sharing the same layout
+// all miss the cache at once; the mutex makes the first goroutine do the work
+// while the rest wait and then read the filled cache (singleflight without a
+// new dependency).
+var emitCacheLocks sync.Map
+
+func emitCacheLock(path string) *sync.Mutex {
+	mu, _ := emitCacheLocks.LoadOrStore(path, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
+
 func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props map[string]string) (*renderer.EmitResult, string, error) {
 	var css string
 
@@ -987,6 +1010,26 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	}
 
 	// Cache hit: reuse the layout skeleton and inject the page content.
+	if cached, ok := layoutEmitCache.Load(layoutPath); ok {
+		entry := cached.(*layoutEmitCacheEntry)
+		if entry.modTime.Equal(modTime) {
+			return &renderer.EmitResult{
+				HTML:       strings.Replace(entry.html, "<!--__children__-->", content, -1),
+				HeadHTML:   entry.headHTML,
+				ScriptHTML: entry.scriptHTML,
+				StyleHTML:  entry.styleHTML,
+			}, entry.css, nil
+		}
+	}
+
+	// Serialize concurrent misses for the same layout so the expensive
+	// bundle/annotate/emit pipeline runs exactly once per layout version.
+	lock := emitCacheLock(layoutPath)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Re-check the cache after acquiring the lock: another goroutine may have
+	// filled it while we waited.
 	if cached, ok := layoutEmitCache.Load(layoutPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
 		if entry.modTime.Equal(modTime) {
@@ -1186,6 +1229,18 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	if info, err := os.Stat(loadingPath); err == nil {
 		modTime = info.ModTime()
 	}
+	if cached, ok := loadingEmitCache.Load(loadingPath); ok {
+		entry := cached.(*layoutEmitCacheEntry)
+		if entry.modTime.Equal(modTime) {
+			return entry.html
+		}
+	}
+
+	// Serialize concurrent misses for the same loading component, then re-check
+	// the cache once the lock is held.
+	lock := emitCacheLock(loadingPath)
+	lock.Lock()
+	defer lock.Unlock()
 	if cached, ok := loadingEmitCache.Load(loadingPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
 		if entry.modTime.Equal(modTime) {
@@ -2004,11 +2059,14 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(routes))
 	apiSrcDir := filepath.Join(b.Root, "src", "api")
+	pool := newWorkerPool(buildWorkerLimit())
 
 	for _, route := range routes {
 		wg.Add(1)
 		go func(r string) {
 			defer wg.Done()
+			pool.acquire()
+			defer pool.release()
 			fmt.Printf("  %s▶ API%s %s\n", cGreen, cReset, filepath.Base(r))
 			if err := b.compileSingleRoute(r, apiSrcDir); err != nil {
 				fmt.Fprintf(os.Stderr, "  %s✗ API Error:%s %s: %v\n", cRed, cReset, r, err)
