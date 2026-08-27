@@ -341,6 +341,8 @@ declare global {
       useMap?: string;
       width?: number | string;
       fetchPriority?: 'high' | 'low' | 'auto';
+      onLoad?: EventHandler<Event>;
+      onError?: EventHandler<Event>;
     }
 
     interface InputHTMLAttributes extends Omit<HTMLAttributes, 'onChange' | 'onInput'> {
@@ -425,6 +427,7 @@ declare global {
       name?: string;
       popovertarget?: string;
       popovertargetaction?: 'toggle' | 'show' | 'hide';
+      required?: boolean | string;
       type?: 'submit' | 'reset' | 'button';
       value?: string;
       onClick?: (event: MouseEvent & { target: HTMLButtonElement; currentTarget: HTMLButtonElement }) => void;
@@ -989,6 +992,8 @@ declare global {
       wbr: HTMLAttributes;
       line: SVGAttributes;
       path: SVGAttributes;
+      polyline: SVGAttributes;
+      polygon: SVGAttributes;
       circle: SVGAttributes;
       rect: SVGAttributes;
       g: SVGAttributes;
