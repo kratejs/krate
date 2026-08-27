@@ -60,15 +60,15 @@ export function Accordion(props: AccordionProps) {
             var next: string[];
             if (accType === "single") {
               if (isOpen) {
-                next = accCollapsible ? [] : [value];
+                next = accCollapsible ? [] : [value!];
               } else {
-                next = [value];
+                next = [value!];
               }
             } else {
               if (isOpen) {
                 next = prev.filter(function (v) { return v !== value; });
               } else {
-                next = prev.concat([value]);
+                next = prev.concat([value!]);
               }
             }
             if (root) {

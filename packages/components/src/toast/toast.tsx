@@ -5,6 +5,7 @@ export interface ToastProps {
   children?: any;
   variant?: 'default' | 'success' | 'destructive';
   duration?: number;
+  key?: any;
   onClose?: () => void;
 }
 
@@ -50,6 +51,7 @@ export function ToastProvider(props: ToastProviderProps) {
 }
 
 export interface ToastViewportProps {
+  children?: any;
 }
 
 export function ToastViewport(props: ToastViewportProps) {

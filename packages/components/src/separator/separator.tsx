@@ -3,6 +3,7 @@ import './separator.css';
 export interface SeparatorProps {
   orientation?: 'horizontal' | 'vertical';
   decorative?: boolean;
+  style?: string;
 }
 
 export function Separator(props: SeparatorProps) {

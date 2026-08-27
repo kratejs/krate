@@ -125,7 +125,7 @@ export function Slider(props: SliderProps) {
           class="krate-slider-thumb"
           style={"left: " + ((value() - min) / (max - min)) * 100 + "%;"}
           role="slider"
-          tabindex={props.disabled ? -1 : 0}
+          tabIndex={props.disabled ? -1 : 0}
           aria-valuemin={min}
           aria-valuemax={max}
           aria-valuenow={value()}

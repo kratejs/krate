@@ -123,6 +123,7 @@ export function NavigationMenuIndicator(props: NavigationMenuIndicatorProps) {
 }
 
 export interface NavigationMenuViewportProps {
+  children?: any;
 }
 
 export function NavigationMenuViewport(props: NavigationMenuViewportProps) {

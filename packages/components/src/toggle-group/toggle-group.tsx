@@ -1,15 +1,28 @@
 import './toggle-group.css';
 import { createSignal, createEffect } from '@krate/runtime';
 
-export interface ToggleGroupProps {
+interface ToggleGroupBaseProps {
   children?: any;
   type?: 'single' | 'multiple';
-  value?: string | string[];
-  defaultValue?: string | string[];
-  onValueChange?: (value: string | string[]) => void;
   orientation?: 'horizontal' | 'vertical';
   size?: 'sm' | 'md' | 'lg';
 }
+
+export interface ToggleGroupSingleProps extends ToggleGroupBaseProps {
+  type?: 'single';
+  value?: string;
+  defaultValue?: string;
+  onValueChange?: (value: string) => void;
+}
+
+export interface ToggleGroupMultipleProps extends ToggleGroupBaseProps {
+  type?: 'multiple';
+  value?: string[];
+  defaultValue?: string[];
+  onValueChange?: (value: string[]) => void;
+}
+
+export type ToggleGroupProps = ToggleGroupSingleProps | ToggleGroupMultipleProps;
 
 export function ToggleGroup(props: ToggleGroupProps) {
   var type = props.type || "single";
@@ -56,7 +69,7 @@ export function ToggleGroup(props: ToggleGroupProps) {
           var current = selected() as string;
           var next = current === value ? "" : value;
           setSelected(next);
-          if (props.onValueChange) props.onValueChange(next);
+          if (props.onValueChange) (props.onValueChange as (value: string) => void)(next);
           if (root) syncItems(root, next);
         } else {
           var currentArr = selected() as string[];
@@ -68,7 +81,7 @@ export function ToggleGroup(props: ToggleGroupProps) {
             nextArr = currentArr.concat([value]);
           }
           setSelected(nextArr);
-          if (props.onValueChange) props.onValueChange(nextArr);
+          if (props.onValueChange) (props.onValueChange as (value: string[]) => void)(nextArr);
           if (root) syncItems(root, nextArr);
         }
       }
