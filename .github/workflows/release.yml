@@ -12,7 +12,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     env:
-        npm_config_frozen_lockfile: "false"
+      npm_config_frozen_lockfile: "false"
     steps:
       - uses: actions/checkout@v4
 
@@ -33,14 +33,26 @@ jobs:
           version: 11.9.0
           run_install: false
 
+      - name: Determine npm dist-tag
+        id: tag
+        shell: bash
+        run: |
+            VERSION="${GITHUB_REF_NAME#v}"
+            if [[ "$VERSION" == *"-"* ]]; then
+            # Takes everything after the first '-' and strips trailing dots/numbers
+            PRERELEASE_STR="${VERSION#*-}"
+            TAG_NAME="${PRERELEASE_STR%%.*}"
+            echo "dist_tag=${TAG_NAME:-beta}" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+            else
+            echo "dist_tag=latest" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+            fi
+
       - name: Sync package versions
         run: node scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
 
       - name: Install JS dependencies
-        # --no-frozen-lockfile: @krate/core's optional platform packages
-        # (@krate/core-win32-x64, etc.) are published by THIS release, so the
-        # committed lockfile can never contain them (pnpm omits unresolvable
-        # optional deps). Frozen mode would therefore always fail here.
         run: pnpm install --no-frozen-lockfile
 
       - name: Build JS packages
@@ -53,8 +65,8 @@ jobs:
         run: |
           set -e
           for pkg in core-win32-x64 core-win32-arm64 core-linux-x64 core-linux-x64-musl core-linux-arm64 core-darwin-x64 core-darwin-arm64; do
-            echo "Publishing @krate/$pkg..."
-            (cd "dist-platform/$pkg" && pnpm publish --access public --no-git-checks)
+            echo "Publishing @krate/$pkg with tag ${{ steps.tag.outputs.dist_tag }}..."
+            (cd "dist-platform/$pkg" && pnpm publish --access public --no-git-checks --tag "${{ steps.tag.outputs.dist_tag }}")
           done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -63,8 +75,8 @@ jobs:
         run: |
           set -e
           for dir in packages/runtime packages/components packages/core packages/create-krate-app packages/create-krate-docs; do
-            echo "Publishing $(basename "$dir")..."
-            (cd "$dir" && pnpm publish --access public --no-git-checks)
+            echo "Publishing $(basename "$dir") with tag ${{ steps.tag.outputs.dist_tag }}..."
+            (cd "$dir" && pnpm publish --access public --no-git-checks --tag "${{ steps.tag.outputs.dist_tag }}")
           done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -73,3 +85,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ steps.tag.outputs.prerelease }}
