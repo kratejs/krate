@@ -245,9 +245,6 @@ func wrapInPageShell(absOut, route, dynamicHTML string) string {
 	return prefix + dynamicHTML + suffix
 }
 
-// splitPageShell splits a static page into prefix (up to <main>) and suffix (after </main>).
-// Returns ("", "") if the static file can't be read.
-// If stylesheet is provided, generates a minimal shell when the static file is missing.
 // serveStaticRuntimePage serves a streaming page from its build-time static
 // HTML (server components frozen) and resolves the runtime component krate-id
 // placeholders via the embedded QuickJS runtime. Returns true if the page was
@@ -324,6 +321,9 @@ func serveStaticRuntimePage(w http.ResponseWriter, flusher http.Flusher, absOut,
 	return true
 }
 
+// splitPageShell splits a static page into prefix (up to <main>) and suffix (after </main>).
+// Returns ("", "") if the static file can't be read.
+// If stylesheet is provided, generates a minimal shell when the static file is missing.
 func splitPageShell(absOut, route, dynamicHTML string, stylesheet string, runtimeJSFile string) (prefix, suffix string) {
 	relPath := strings.TrimPrefix(route, "/")
 	if relPath == "" {
