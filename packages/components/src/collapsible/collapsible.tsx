@@ -8,7 +8,7 @@ export interface CollapsibleProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-export default function Collapsible(props: CollapsibleProps) {
+export function Collapsible(props: CollapsibleProps) {
   var [open, setOpen] = createSignal(props.defaultOpen || false);
 
   createEffect(function () {

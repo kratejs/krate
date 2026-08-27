@@ -4,7 +4,7 @@ export interface VisuallyHiddenProps {
   children?: any;
 }
 
-export default function VisuallyHidden(props: VisuallyHiddenProps) {
+export function VisuallyHidden(props: VisuallyHiddenProps) {
   var children = props.children || "";
   return (
     <span class="krate-visually-hidden">

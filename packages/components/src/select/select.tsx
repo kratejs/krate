@@ -10,7 +10,7 @@ export interface SelectProps {
   placeholder?: string;
 }
 
-export default function Select(props: SelectProps) {
+export function Select(props: SelectProps) {
   var placeholder = props.placeholder || "Select...";
   var [open, setOpen] = createSignal(false);
   var [selectedValue, setSelectedValue] = createSignal(props.defaultValue || "");

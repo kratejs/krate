@@ -7,7 +7,7 @@ export interface PopoverProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-export default function Popover(props: PopoverProps) {
+export function Popover(props: PopoverProps) {
   var [open, setOpen] = createSignal(false);
   var rootRef: HTMLElement | null = null;
 

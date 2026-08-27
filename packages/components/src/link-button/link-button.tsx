@@ -9,7 +9,7 @@ export interface LinkButtonProps {
   iconPosition?: 'left' | 'right';
 }
 
-export default function LinkButton(props: LinkButtonProps) {
+export function LinkButton(props: LinkButtonProps) {
   var children = props.children || "";
   var href = props.href || "#";
   var variant = props.variant || "primary";

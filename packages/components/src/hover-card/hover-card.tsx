@@ -7,7 +7,7 @@ export interface HoverCardProps {
   closeDelay?: number;
 }
 
-export default function HoverCard(props: HoverCardProps) {
+export function HoverCard(props: HoverCardProps) {
   var openDelay = props.openDelay || 200;
   var closeDelay = props.closeDelay || 150;
   var [open, setOpen] = createSignal(false);

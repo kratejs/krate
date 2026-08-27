@@ -5,7 +5,7 @@ export interface ToolbarProps {
   orientation?: 'horizontal' | 'vertical';
 }
 
-export default function Toolbar(props: ToolbarProps) {
+export function Toolbar(props: ToolbarProps) {
   return (
     <div
       class="krate-toolbar"

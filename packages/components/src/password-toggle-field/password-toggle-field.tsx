@@ -10,7 +10,7 @@ export interface PasswordToggleFieldProps {
   showToggle?: boolean;
 }
 
-export default function PasswordToggleField(props: PasswordToggleFieldProps) {
+export function PasswordToggleField(props: PasswordToggleFieldProps) {
   var [visible, setVisible] = createSignal(false);
 
   function toggle() {

@@ -7,7 +7,7 @@ export interface AlertDialogProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-export default function AlertDialog(props: AlertDialogProps) {
+export function AlertDialog(props: AlertDialogProps) {
   var [open, setOpen] = createSignal(props.open || false);
 
   createEffect(function () {

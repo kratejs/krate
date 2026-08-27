@@ -5,7 +5,7 @@ export interface NavigationMenuProps {
   children?: any;
 }
 
-export default function NavigationMenu(props: NavigationMenuProps) {
+export function NavigationMenu(props: NavigationMenuProps) {
   return (
     <nav class="krate-navigation-menu" role="navigation">
       {props.children}

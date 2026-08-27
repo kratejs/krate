@@ -11,7 +11,7 @@ export interface ToggleProps {
   children?: any;
 }
 
-export default function Toggle(props: ToggleProps) {
+export function Toggle(props: ToggleProps) {
   var [pressed, setPressed] = createSignal(props.defaultPressed || false);
 
   createEffect(function () {

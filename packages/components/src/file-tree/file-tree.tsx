@@ -6,7 +6,7 @@ export interface FileTreeProps {
   defaultOpen?: boolean;
 }
 
-export default function FileTree(props: FileTreeProps) {
+export function FileTree(props: FileTreeProps) {
   var children = props.children || "";
   return (
     <div class="krate-file-tree">

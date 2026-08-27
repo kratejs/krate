@@ -7,7 +7,7 @@ export interface DialogProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-export default function Dialog(props: DialogProps) {
+export function Dialog(props: DialogProps) {
   var [open, setOpen] = createSignal(props.open || false);
   var rootRef: HTMLElement | null = null;
 

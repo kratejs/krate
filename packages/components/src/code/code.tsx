@@ -8,7 +8,7 @@ export interface CodeProps {
   showCopy?: boolean;
 }
 
-export default function Code(props: CodeProps) {
+export function Code(props: CodeProps) {
   var children = props.children || "";
   var lang = props.lang || "";
   var title = props.title || "";

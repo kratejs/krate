@@ -7,7 +7,7 @@ export interface LinkCardProps {
   children?: any;
 }
 
-export default function LinkCard(props: LinkCardProps) {
+export function LinkCard(props: LinkCardProps) {
   var title = props.title || "";
   var href = props.href || "#";
   var icon = props.icon || "";

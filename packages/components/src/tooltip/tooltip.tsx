@@ -5,7 +5,7 @@ export interface TooltipProps {
   children?: any;
 }
 
-export default function Tooltip(props: TooltipProps) {
+export function Tooltip(props: TooltipProps) {
   var [open, setOpen] = createSignal(false);
   var hoverTimer: any = null;
 

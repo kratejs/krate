@@ -13,7 +13,7 @@ export interface CheckboxProps {
   children?: any;
 }
 
-export default function Checkbox(props: CheckboxProps) {
+export function Checkbox(props: CheckboxProps) {
   var [checked, setChecked] = createSignal(props.defaultChecked || false);
 
   createEffect(function () {

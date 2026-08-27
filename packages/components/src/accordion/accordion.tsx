@@ -10,7 +10,7 @@ export interface AccordionProps {
   collapsible?: boolean;
 }
 
-export default function Accordion(props: AccordionProps) {
+export function Accordion(props: AccordionProps) {
   var type = props.type || "single";
   var collapsible = props.collapsible || false;
   var rootRef: HTMLElement | null = null;

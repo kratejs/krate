@@ -9,7 +9,7 @@ export interface TabsProps {
   orientation?: 'horizontal' | 'vertical';
 }
 
-export default function Tabs(props: TabsProps) {
+export function Tabs(props: TabsProps) {
   var orientation = props.orientation || "horizontal";
   var [active, setActive] = createSignal(props.defaultValue || "");
 

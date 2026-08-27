@@ -9,7 +9,7 @@ export interface AvatarProps {
   size?: 'sm' | 'md' | 'lg';
 }
 
-export default function Avatar(props: AvatarProps) {
+export function Avatar(props: AvatarProps) {
   var src = props.src || "";
   var alt = props.alt || "";
   var fallback = props.fallback || "?";

@@ -5,7 +5,7 @@ export interface CardProps {
   children?: any;
 }
 
-export default function Card(props: CardProps) {
+export function Card(props: CardProps) {
   var title = props.title || "";
   var children = props.children || "";
   return (

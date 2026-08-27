@@ -7,7 +7,7 @@ export interface ProgressProps {
   getValueLabel?: (value: number, max: number) => string;
 }
 
-export default function Progress(props: ProgressProps) {
+export function Progress(props: ProgressProps) {
   var max = props.max || 100;
   var [value, setValue] = createSignal(props.value || 0);
 

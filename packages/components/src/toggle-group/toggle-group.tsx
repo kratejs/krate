@@ -11,7 +11,7 @@ export interface ToggleGroupProps {
   size?: 'sm' | 'md' | 'lg';
 }
 
-export default function ToggleGroup(props: ToggleGroupProps) {
+export function ToggleGroup(props: ToggleGroupProps) {
   var type = props.type || "single";
   var [selected, setSelected] = createSignal<string | string[]>(
     type === "single"

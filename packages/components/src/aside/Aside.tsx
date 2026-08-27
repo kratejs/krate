@@ -21,7 +21,7 @@ function AsideIcon(props: { type: string }) {
   }
 }
 
-export default function Aside(props: AsideProps) {
+export function Aside(props: AsideProps) {
   var children = props.children || "";
   var type = props.type || "note";
   var title = props.title || "";

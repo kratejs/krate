@@ -12,7 +12,7 @@ export interface SliderProps {
   orientation?: 'horizontal' | 'vertical';
 }
 
-export default function Slider(props: SliderProps) {
+export function Slider(props: SliderProps) {
   var min = props.min || 0;
   var max = props.max || 100;
   var step = props.step || 1;

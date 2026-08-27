@@ -10,7 +10,7 @@ export interface OTPFieldProps {
   onComplete?: (value: string) => void;
 }
 
-export default function OTPField(props: OTPFieldProps) {
+export function OTPField(props: OTPFieldProps) {
   var length = props.length || 6;
   var [values, setValues] = createSignal<string[]>(["", "", "", "", "", ""]);
 

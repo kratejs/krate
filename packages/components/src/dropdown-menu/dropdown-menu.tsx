@@ -5,7 +5,7 @@ export interface DropdownMenuProps {
   children?: any;
 }
 
-export default function DropdownMenu(props: DropdownMenuProps) {
+export function DropdownMenu(props: DropdownMenuProps) {
   var [open, setOpen] = createSignal(false);
   var rootRef: HTMLElement | null = null;
 

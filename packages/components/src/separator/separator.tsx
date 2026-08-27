@@ -5,7 +5,7 @@ export interface SeparatorProps {
   decorative?: boolean;
 }
 
-export default function Separator(props: SeparatorProps) {
+export function Separator(props: SeparatorProps) {
   var orientation = props.orientation || "horizontal";
 
   return (

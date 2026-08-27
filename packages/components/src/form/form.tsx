@@ -7,7 +7,7 @@ export interface FormProps {
   className?: string;
 }
 
-export default function Form(props: FormProps) {
+export function Form(props: FormProps) {
   var className = "krate-form" + (props.className ? " " + props.className : "");
 
   function handleSubmit(e: Event) {

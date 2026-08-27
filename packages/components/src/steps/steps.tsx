@@ -4,7 +4,7 @@ export interface StepsProps {
   children?: any;
 }
 
-export default function Steps(props: StepsProps) {
+export function Steps(props: StepsProps) {
   var children = props.children || "";
   return (
     <div class="krate-steps">

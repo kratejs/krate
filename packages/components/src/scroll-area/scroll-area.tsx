@@ -8,7 +8,7 @@ export interface ScrollAreaProps {
   scrollbarSize?: number;
 }
 
-export default function ScrollArea(props: ScrollAreaProps) {
+export function ScrollArea(props: ScrollAreaProps) {
   var orientation = props.orientation || "vertical";
   var maxHeight = props.maxHeight || "300px";
   var scrollbarSize = props.scrollbarSize || 8;

@@ -6,7 +6,6 @@
     "moduleResolution": "bundler",
     "jsx": "preserve",
     "jsxImportSource": "@krate/runtime",
-    "types": ["node"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

@@ -10,7 +10,7 @@ export interface RadioGroupProps {
   orientation?: 'horizontal' | 'vertical';
 }
 
-export default function RadioGroup(props: RadioGroupProps) {
+export function RadioGroup(props: RadioGroupProps) {
   var [selected, setSelected] = createSignal(props.defaultValue || "");
   var rootRef: HTMLElement | null = null;
 

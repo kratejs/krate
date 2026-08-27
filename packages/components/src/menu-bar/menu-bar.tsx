@@ -5,7 +5,7 @@ export interface MenuBarProps {
   children?: any;
 }
 
-export default function MenuBar(props: MenuBarProps) {
+export function MenuBar(props: MenuBarProps) {
   return (
     <div class="krate-menu-bar" role="menubar">
       {props.children}

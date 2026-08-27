@@ -8,7 +8,7 @@ export interface ToastProps {
   onClose?: () => void;
 }
 
-export default function Toast(props: ToastProps) {
+export function Toast(props: ToastProps) {
   var [visible, setVisible] = createSignal(true);
 
   function handleClose() {

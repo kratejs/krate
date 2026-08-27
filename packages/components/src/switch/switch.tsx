@@ -11,7 +11,7 @@ export interface SwitchProps {
   id?: string;
 }
 
-export default function Switch(props: SwitchProps) {
+export function Switch(props: SwitchProps) {
   var [checked, setChecked] = createSignal(props.defaultChecked || false);
 
   createEffect(function () {

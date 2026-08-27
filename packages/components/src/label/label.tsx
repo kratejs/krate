@@ -7,7 +7,7 @@ export interface LabelProps {
   required?: boolean;
 }
 
-export default function Label(props: LabelProps) {
+export function Label(props: LabelProps) {
   return (
     <label
       class={"krate-label" + (props.disabled ? " krate-label-disabled" : "")}

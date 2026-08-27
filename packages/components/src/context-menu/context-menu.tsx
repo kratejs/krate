@@ -5,7 +5,7 @@ export interface ContextMenuProps {
   children?: any;
 }
 
-export default function ContextMenu(props: ContextMenuProps) {
+export function ContextMenu(props: ContextMenuProps) {
   var [open, setOpen] = createSignal(false);
   var [menuPos, setMenuPos] = createSignal({ x: 0, y: 0 });
 
