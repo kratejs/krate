@@ -280,6 +280,41 @@ func TestHydrationJSStaticPage(t *testing.T) {
 	}
 }
 
+func TestHydrationJSWithRef(t *testing.T) {
+	src := `function Code() {
+  var wrapRef = null;
+  onMount(function () {
+    if (!wrapRef) return;
+    var codeEl = wrapRef.querySelector("code");
+    if (codeEl && typeof codeEl.textContent === "string") {
+      codeEl.setAttribute("data-code", codeEl.textContent);
+    }
+  });
+  function handleCopy() {
+    if (!wrapRef) return;
+    var codeEl = wrapRef.querySelector("code");
+    var text = codeEl ? codeEl.textContent || "" : "";
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+    }
+  }
+  return <div class="code-block" ref={wrapRef}><button onClick={handleCopy}>Copy</button></div>;
+}
+export default function Page() {
+  return <Code />;
+}`
+	result, js := fullPipeline(t, src)
+	if !strings.Contains(result.HTML, `data-k="k:`) {
+		t.Errorf("expected ref target element to carry a data-k slot id, got:\n%s", result.HTML)
+	}
+	if !strings.Contains(js, "kbindRef") {
+		t.Errorf("expected hydration JS to emit kbindRef, got:\n%s", js)
+	}
+	if !strings.Contains(js, "onMount(") {
+		t.Errorf("expected hydration JS to emit onMount, got:\n%s", js)
+	}
+}
+
 // ─── New pipeline: Component tiers ───────────────────────────────────────────
 
 func TestServerComponentRendering(t *testing.T) {

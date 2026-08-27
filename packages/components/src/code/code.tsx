@@ -28,7 +28,7 @@ export default function Code(props: CodeProps) {
     if (!wrapRef) return;
     var codeEl = wrapRef.querySelector("code");
     var text = codeEl ? codeEl.textContent || "" : "";
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
+    if (navigator?.clipboard) {
       navigator.clipboard.writeText(text).then(function () {
         setCopied(true);
         setTimeout(function () { setCopied(false); }, 2000);

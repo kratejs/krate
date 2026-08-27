@@ -58,6 +58,7 @@ type builder struct {
 	slotIDMap        map[string]SlotID   // logical ID → compact ID
 	pendingHandlers  []HandlerDecl       // accumulated during buildSlotNodes
 	pendingAttrs     []AttrBinding       // accumulated during buildSlotNodes
+	pendingRefs      []RefBinding        // accumulated during buildSlotNodes
 	pendingPropsRegs []string            // __krate_props["id"]={...} registrations for child components
 	slotCounts       map[string]int      // per-parent dynamic-slot counters for sibling disambiguation
 	localFnBody      []ast.Stmt          // body of current component function for handler resolution
@@ -177,6 +178,10 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	savedAttrs := b.pendingAttrs
 	b.pendingAttrs = nil
 
+	// Save parent's pending ref bindings for the same reason
+	savedRefs := b.pendingRefs
+	b.pendingRefs = nil
+
 	// Save parent's pending props registrations for the same reason
 	savedPropsRegs := b.pendingPropsRegs
 	b.pendingPropsRegs = nil
@@ -262,6 +267,7 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	if tier == TierClient {
 		node.Handlers = b.pendingHandlers
 		node.AttrBindings = b.pendingAttrs
+		node.RefBindings = b.pendingRefs
 		// Props registrations for child components must run in this
 		// component's scope (their values reference this component's
 		// signals), and before child component IIFEs read the registry.
@@ -288,13 +294,15 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 		// function that only composes JSX from its props.
 		if len(node.Signals) == 0 && len(node.Effects) == 0 &&
 			len(node.Memos) == 0 && len(node.ExtraVars) == 0 &&
-			len(node.Handlers) == 0 && len(node.AttrBindings) == 0 {
+			len(node.Handlers) == 0 && len(node.AttrBindings) == 0 &&
+			len(node.RefBindings) == 0 {
 			tier = TierStatic
 			node.Tier = TierStatic
 		}
 	}
 	b.pendingHandlers = savedHandlers
 	b.pendingAttrs = savedAttrs
+	b.pendingRefs = savedRefs
 	b.pendingPropsRegs = savedPropsRegs
 
 	return node
@@ -1205,16 +1213,23 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 	// (e.g. build-time markdown). When statically resolvable, the whole element
 	// becomes a single StaticHTML slot so the value is never HTML-escaped.
 	if rawHTML, ok := b.evalInnerHTMLAttr(el); ok {
-		openingTag := b.buildElementOpening(el, nil, nil, string(id))
+		openingTag := b.buildElementOpening(el, nil, nil, nil, string(id))
 		return []SlotNode{&StaticHTML{HTML: openingTag + ">" + rawHTML + "</" + el.Opening.Name + ">"}}
 	}
 
 	// Process attributes: handlers, bindings, static attrs
+	var refs []RefBinding
 	for _, attr := range el.Opening.Attributes {
 		if attr.Spread {
 			continue
 		}
 		if attr.Name == "ref" {
+			if attr.Value != nil {
+				target := generateExprJS(attr.Value, b.sigMap())
+				if target != "" {
+					refs = append(refs, RefBinding{ElementSlotID: id, Target: target})
+				}
+			}
 			continue
 		}
 		if isOnEvent(attr.Name) {
@@ -1233,6 +1248,7 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 	// Accumulate handlers for the component node
 	b.pendingHandlers = append(b.pendingHandlers, handlers...)
 	b.pendingAttrs = append(b.pendingAttrs, attrs...)
+	b.pendingRefs = append(b.pendingRefs, refs...)
 
 	// Process children
 	for _, child := range el.Children {
@@ -1267,7 +1283,7 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 		}
 	}
 
-	openingTag := b.buildElementOpening(el, handlers, attrs, string(id))
+	openingTag := b.buildElementOpening(el, handlers, attrs, refs, string(id))
 	closingTag := "</" + el.Opening.Name + ">"
 
 	// Self-closing: void HTML elements can use />, others need full </tagName>
@@ -1324,16 +1340,16 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 }
 
 // buildElementOpening builds the opening tag string with attributes.
-func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl, attrs []AttrBinding, elementSlotID string) string {
+func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl, attrs []AttrBinding, refs []RefBinding, elementSlotID string) string {
 	var buf strings.Builder
 	name := el.Opening.Name
 
 	buf.WriteByte('<')
 	buf.WriteString(name)
 
-	// Emit data-k attribute for elements with handlers or dynamic attribute bindings
-	// so the hydration code can find them via querySelector.
-	if len(handlers) > 0 || len(attrs) > 0 {
+	// Emit data-k attribute for elements with handlers, refs, or dynamic
+	// attribute bindings so the hydration code can find them via querySelector.
+	if len(handlers) > 0 || len(attrs) > 0 || len(refs) > 0 {
 		buf.WriteString(` data-k="k:`)
 		buf.WriteString(elementSlotID)
 		buf.WriteByte('"')
@@ -2372,10 +2388,18 @@ func (b *builder) collectEffectJS(body []ast.Stmt) []string {
 	for _, stmt := range body {
 		if exprStmt, ok := stmt.(*ast.ExprStmt); ok {
 			if call, ok := exprStmt.Expression.(*ast.CallExpr); ok {
-				if id, ok := call.Callee.(*ast.Identifier); ok && id.Name == "createEffect" {
-					if len(call.Args) >= 1 {
-						js := generateExprJS(call.Args[0], b.sigMap())
-						effects = append(effects, "createEffect("+js+")")
+				if id, ok := call.Callee.(*ast.Identifier); ok {
+					switch id.Name {
+					case "createEffect":
+						if len(call.Args) >= 1 {
+							js := generateExprJS(call.Args[0], b.sigMap())
+							effects = append(effects, "createEffect("+js+")")
+						}
+					case "onMount":
+						if len(call.Args) >= 1 {
+							js := generateExprJS(call.Args[0], b.sigMap())
+							effects = append(effects, "onMount("+js+")")
+						}
 					}
 				}
 			}

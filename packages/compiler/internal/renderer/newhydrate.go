@@ -32,6 +32,7 @@ window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(func
 window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var a=n.nextSibling,b=a?a.nextSibling:null;if(!a||!b)return;__safe(function(){createEffect(function(){var v=(get());if(v){a.style.display='';b.style.display='none';}else{a.style.display='none';b.style.display='';}});});};
 window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)n.removeAttribute(attr);else if(v===true)n.setAttribute(attr,'');else n.setAttribute(attr,String(v));});});};
 window.kbindHandler=function(id,prop,fn){var n=findSlot(id);if(n)__safe(function(){n[prop]=fn;});};
+window.kbindRef=function(id,set){var n=findSlot(id);if(n)set(n);};
 })();
 `
 
@@ -104,6 +105,17 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		for _, ev := range sig.ExtraVars {
 			b.WriteString(ev)
 			b.WriteString(";\n")
+		}
+
+		// Refs: assign the live DOM node to the referenced variable. Runs after
+		// the extra vars are declared and before effects/memos that read them,
+		// so an onMount/handler can safely use the ref'd element.
+		for _, rb := range sig.RefBindings {
+			b.WriteString("kbindRef(")
+			b.WriteString(strconv.Quote(string(rb.ElementSlotID)))
+			b.WriteString(",el=>{")
+			b.WriteString(rb.Target)
+			b.WriteString("=el;})\n")
 		}
 
 		for i, memo := range sig.Memos {

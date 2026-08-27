@@ -463,6 +463,7 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		Tier:         node.Tier,
 		Signals:      node.Signals,
 		Handlers:     node.Handlers,
+		RefBindings:  node.RefBindings,
 		Effects:      node.Effects,
 		Memos:        node.Memos,
 		ExtraVars:    node.ExtraVars,

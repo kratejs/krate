@@ -207,6 +207,15 @@ type HandlerDecl struct {
 	Signals      []string
 }
 
+// ─── RefBinding — ref={someVar} on an element ──────────────────────────────
+// RefBinding captures an element's `ref` attribute so the hydration bundle can
+// assign the live DOM node to the referenced variable after the page loads.
+// Target is the JS variable expression to assign (e.g. "wrapRef").
+type RefBinding struct {
+	ElementSlotID SlotID
+	Target        string
+}
+
 // ─── SignalDecl — per-instance signal declaration ──────────────────────────
 type SignalDecl struct {
 	Name       string
@@ -231,6 +240,7 @@ type ComponentNode struct {
 	Signals    []SignalDecl
 	AttrBindings []AttrBinding
 	Handlers   []HandlerDecl
+	RefBindings []RefBinding
 	Effects    []string
 	Memos      []string
 	ExtraVars  []string
@@ -303,6 +313,7 @@ type ComponentSignature struct {
 	Tier        ComponentTier
 	Signals     []SignalDecl
 	Handlers    []HandlerDecl
+	RefBindings []RefBinding
 	Effects     []string
 	Memos       []string
 	ExtraVars   []string
