@@ -1,5 +1,4 @@
 import './global.css';
-import { Link } from '@krate/runtime';
 
 export default function Layout(children) {
   return (

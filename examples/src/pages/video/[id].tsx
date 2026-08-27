@@ -1,6 +1,3 @@
-import { Head } from '@krate/runtime'
-import { Link } from '@krate/runtime'
-
 interface VideoProps {
   params?: { id: string }
 }
