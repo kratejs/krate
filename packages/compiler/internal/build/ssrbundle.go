@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
 )
@@ -33,44 +34,59 @@ func CompileSSRPageBundles(results []*PageResult, root, outDir string) map[strin
 
 	bundles := make(map[string]string, len(ssrPages))
 
+	// Write the shared shim file once up front. The content is constant, so all
+	// worker goroutines only READ it via the OnLoad plugin hook — no concurrent
+	// writes to the same path.
+	shimPath := filepath.Join(bundleDir, "_tmp_shim.js")
+	if err := os.WriteFile(shimPath, []byte(ssrPageShimCode), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "  %sSSR bundle shim write error:%s %v\n", cRed, cReset, err)
+		return nil
+	}
+	defer os.Remove(shimPath)
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	pool := newWorkerPool(buildWorkerLimit())
+
 	for _, page := range ssrPages {
-		absSource := filepath.Join(root, page.SourcePath)
-		sourceData, err := os.ReadFile(absSource)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %sWarning: cannot read %s for SSR bundle:%s %v\n", cYellow, page.SourcePath, cReset, err)
-			continue
-		}
+		page := page
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pool.acquire()
+			defer pool.release()
 
-		injectedSource := injectServerGlobals(string(sourceData))
+			absSource := filepath.Join(root, page.SourcePath)
+			sourceData, err := os.ReadFile(absSource)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  %sWarning: cannot read %s for SSR bundle:%s %v\n", cYellow, page.SourcePath, cReset, err)
+				return
+			}
 
-		route := page.OutName
-		if route == "." || route == "" {
-			route = "index"
-		}
-		outName := strings.TrimPrefix(route, "/") + ".ssr.js"
-		outPath := filepath.Join(bundleDir, outName)
+			injectedSource := injectServerGlobals(string(sourceData))
 
-		// Write shim to a temp file for the esbuild plugin
-		shimPath := filepath.Join(bundleDir, "_tmp_shim.js")
-		if err := os.WriteFile(shimPath, []byte(ssrPageShimCode), 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sSSR bundle shim write error:%s %v\n", cRed, cReset, err)
-			continue
-		}
+			route := page.OutName
+			if route == "." || route == "" {
+				route = "index"
+			}
+			outName := strings.TrimPrefix(route, "/") + ".ssr.js"
+			outPath := filepath.Join(bundleDir, outName)
 
-		// Write temp source NEXT TO the original source file so relative imports resolve correctly.
-		// e.g. src/pages/foo.tsx → src/pages/_tmp_ssr_foo.tsx
-		sourceDir := filepath.Dir(absSource)
-		tmpBase := "_tmp_ssr_" + filepath.Base(absSource)
-		tmpSource := filepath.Join(sourceDir, tmpBase)
-		if err := os.WriteFile(tmpSource, []byte(injectedSource), 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sSSR bundle source write error:%s %v\n", cRed, cReset, err)
-			continue
-		}
+			// Write temp source NEXT TO the original source file so relative imports resolve correctly.
+			// e.g. src/pages/foo.tsx → src/pages/_tmp_ssr_foo.tsx
+			sourceDir := filepath.Dir(absSource)
+			tmpBase := "_tmp_ssr_" + filepath.Base(absSource)
+			tmpSource := filepath.Join(sourceDir, tmpBase)
+			if err := os.WriteFile(tmpSource, []byte(injectedSource), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "  %sSSR bundle source write error:%s %v\n", cRed, cReset, err)
+				return
+			}
+			defer os.Remove(tmpSource)
 
-		// Create wrapper entry that imports the temp source and exposes __krate_* globals.
-		// The wrapper is passed via Stdin with ResolveDir = sourceDir so all relative
-		// imports resolve from the source file's directory.
-		wrapperCode := fmt.Sprintf(`import * as __mod from './%s';
+			// Create wrapper entry that imports the temp source and exposes __krate_* globals.
+			// The wrapper is passed via Stdin with ResolveDir = sourceDir so all relative
+			// imports resolve from the source file's directory.
+			wrapperCode := fmt.Sprintf(`import * as __mod from './%s';
 var __Comp = __mod.default;
 if (!__Comp) {
   var __keys = Object.keys(__mod);
@@ -92,74 +108,75 @@ globalThis.__krate_renderPage = function(__propsJSON) {
 };
 `, tmpBase)
 
-		// Compile with esbuild: IIFE format, all deps bundled, JSX automatic transform.
-		// Stdin + ResolveDir ensures relative imports resolve from the source directory.
-		result := api.Build(api.BuildOptions{
-			Bundle:            true,
-			Format:            api.FormatIIFE,
-			Platform:          api.PlatformBrowser,
-			Outfile:           outPath,
-			Write:             true,
-			LogLevel:          api.LogLevelError,
-			JSX:               api.JSXAutomatic,
-			JSXSideEffects:    false,
-			JSXImportSource:   "@krate/runtime",
-			TsconfigRaw:       `{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@krate/runtime" } }`,
-			MinifyWhitespace:  true,
-			MinifyIdentifiers: true,
-			MinifySyntax:      true,
-			Stdin: &api.StdinOptions{
-				Contents:   wrapperCode,
-				ResolveDir: sourceDir,
-				Sourcefile: "_tmp_wrapper.mjs",
-				Loader:     api.LoaderJS,
-			},
-			Plugins: []api.Plugin{
-				{
-					Name: "krate-ssr-shim",
-					Setup: func(build api.PluginBuild) {
-						build.OnResolve(api.OnResolveOptions{Filter: `^@krate/runtime`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
-							return api.OnResolveResult{
-								Path:      shimPath,
-								Namespace: "krate-shim",
-							}, nil
-						})
-						build.OnLoad(api.OnLoadOptions{Filter: `\.`, Namespace: "krate-shim"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-							data, err := os.ReadFile(args.Path)
-							if err != nil {
-								return api.OnLoadResult{}, err
-							}
-							content := string(data)
-							return api.OnLoadResult{
-								Contents: &content,
-								Loader:   api.LoaderJS,
-							}, nil
-						})
+			// Compile with esbuild: IIFE format, all deps bundled, JSX automatic transform.
+			// Stdin + ResolveDir ensures relative imports resolve from the source directory.
+			result := api.Build(api.BuildOptions{
+				Bundle:            true,
+				Format:            api.FormatIIFE,
+				Platform:          api.PlatformBrowser,
+				Outfile:           outPath,
+				Write:             true,
+				LogLevel:          api.LogLevelError,
+				JSX:               api.JSXAutomatic,
+				JSXSideEffects:    false,
+				JSXImportSource:   "@krate/runtime",
+				TsconfigRaw:       `{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@krate/runtime" } }`,
+				MinifyWhitespace:  true,
+				MinifyIdentifiers: true,
+				MinifySyntax:      true,
+				Stdin: &api.StdinOptions{
+					Contents:   wrapperCode,
+					ResolveDir: sourceDir,
+					Sourcefile: "_tmp_wrapper.mjs",
+					Loader:     api.LoaderJS,
+				},
+				Plugins: []api.Plugin{
+					{
+						Name: "krate-ssr-shim",
+						Setup: func(build api.PluginBuild) {
+							build.OnResolve(api.OnResolveOptions{Filter: `^@krate/runtime`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+								return api.OnResolveResult{
+									Path:      shimPath,
+									Namespace: "krate-shim",
+								}, nil
+							})
+							build.OnLoad(api.OnLoadOptions{Filter: `\.`, Namespace: "krate-shim"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+								data, err := os.ReadFile(args.Path)
+								if err != nil {
+									return api.OnLoadResult{}, err
+								}
+								content := string(data)
+								return api.OnLoadResult{
+									Contents: &content,
+									Loader:   api.LoaderJS,
+								}, nil
+							})
+						},
 					},
 				},
-			},
-		})
+			})
 
-		os.Remove(tmpSource)
-
-		if len(result.Errors) > 0 {
-			for _, e := range result.Errors {
-				fmt.Fprintf(os.Stderr, "  %sSSR bundle error (%s):%s %s\n", cYellow, page.SourcePath, cReset, e.Text)
+			if len(result.Errors) > 0 {
+				for _, e := range result.Errors {
+					fmt.Fprintf(os.Stderr, "  %sSSR bundle error (%s):%s %s\n", cYellow, page.SourcePath, cReset, e.Text)
+				}
+				return
 			}
-			continue
-		}
 
-		info, err := os.Stat(outPath)
-		if err != nil || info.Size() == 0 {
-			fmt.Fprintf(os.Stderr, "  %sSSR bundle output missing or empty (%s):%s\n", cYellow, page.SourcePath, cReset)
-			continue
-		}
+			info, err := os.Stat(outPath)
+			if err != nil || info.Size() == 0 {
+				fmt.Fprintf(os.Stderr, "  %sSSR bundle output missing or empty (%s):%s\n", cYellow, page.SourcePath, cReset)
+				return
+			}
 
-		relBundle, _ := filepath.Rel(outDir, outPath)
-		bundles[page.SourcePath] = relBundle
+			relBundle, _ := filepath.Rel(outDir, outPath)
+			mu.Lock()
+			bundles[page.SourcePath] = relBundle
+			mu.Unlock()
+		}()
 	}
 
-	os.Remove(filepath.Join(bundleDir, "_tmp_shim.js"))
+	wg.Wait()
 
 	return bundles
 }
