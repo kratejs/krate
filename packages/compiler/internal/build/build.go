@@ -1559,18 +1559,54 @@ func (b *Builder) transformIconExpr(expr ast.Expr) ast.Expr {
 
 	switch e := expr.(type) {
 	case *ast.JSXElement:
-		if e.Opening.Name == "Icon" {
+		if e.Opening.Name == "Icon" && iconNameIsLiteral(e) {
 			return b.compileIconToSVG(e)
 		}
 
 		for i, child := range e.Children {
-			if elChild, ok := child.(*ast.JSXElementChild); ok {
-				elChild.Element = b.transformIconExpr(elChild.Element).(*ast.JSXElement)
-				e.Children[i] = elChild
+			switch c := child.(type) {
+			case *ast.JSXElementChild:
+				c.Element = b.transformIconExpr(c.Element).(*ast.JSXElement)
+				e.Children[i] = c
+			case *ast.JSXExprContainer:
+				if c.Expression != nil {
+					c.Expression = b.transformIconExpr(c.Expression)
+				}
+			}
+		}
+	case *ast.ConditionalExpr:
+		e.Consequent = b.transformIconExpr(e.Consequent)
+		e.Alternate = b.transformIconExpr(e.Alternate)
+	case *ast.JSXFragment:
+		for i, child := range e.Children {
+			switch c := child.(type) {
+			case *ast.JSXElementChild:
+				c.Element = b.transformIconExpr(c.Element).(*ast.JSXElement)
+				e.Children[i] = c
+			case *ast.JSXExprContainer:
+				if c.Expression != nil {
+					c.Expression = b.transformIconExpr(c.Expression)
+				}
 			}
 		}
 	}
 	return expr
+}
+
+// iconNameIsLiteral reports whether an <Icon> element's `name` attribute is a
+// static string literal — the only form transformIconExpr can resolve to an
+// SVG at build time. Icons with a dynamic name (e.g. name={icon} or a ternary)
+// are deliberately left untouched so the SSREval/runtime path can resolve them
+// against the real prop values instead of falling back to an empty name error.
+func iconNameIsLiteral(el *ast.JSXElement) bool {
+	for _, attr := range el.Opening.Attributes {
+		if attr.Spread || attr.Name != "name" {
+			continue
+		}
+		_, ok := attr.Value.(*ast.Literal)
+		return ok
+	}
+	return false
 }
 
 func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
