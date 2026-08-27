@@ -12,7 +12,7 @@
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 .krate-link-card:hover {
-  border-color: var(--krate-primary, #FF9800);
+  border-color: var(--krate-primary, #3b82f6);
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
 }
 .krate-link-card-content {

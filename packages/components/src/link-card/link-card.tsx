@@ -17,7 +17,7 @@ export default function LinkCard(props: LinkCardProps) {
         <div class="krate-link-card-title">{title}</div>
         <div class="krate-link-card-description">{props.children}</div>
       </div>
-      {icon !== "" ? <Icon class="krate-link-card-icon" name={icon} /> : null}
+      {icon !== "" ? <Icon class="krate-link-card-icon" name={icon} height="16" width="16" /> : null}
     </a>
   );
 }

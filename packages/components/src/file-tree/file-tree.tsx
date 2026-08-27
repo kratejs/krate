@@ -12,9 +12,7 @@ export default function FileTree(props: FileTreeProps) {
     <div class="krate-file-tree">
       <div class="krate-file-tree-header">
         <span class="krate-file-tree-header-icon">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>
-          </svg>
+          <Icon name="tabler:folder" width="14" height="14" />
         </span>
         <span>Files</span>
       </div>
@@ -32,9 +30,12 @@ export interface FileTreeItemProps {
 
 export function FileTreeItem(props: FileTreeItemProps) {
   var children = props.children || "";
+  var icon = props.icon || "tabler:file";
   return (
     <div class="krate-file-tree-item">
-      <span class="krate-file-tree-item-icon">{props.icon || "📄"}</span>
+      <span class="krate-file-tree-item-icon">
+        <Icon name={icon} width="14" height="14" />
+      </span>
       <span class="krate-file-tree-item-name">{children}</span>
     </div>
   );
@@ -58,11 +59,15 @@ export function FileTreeFolder(props: FileTreeFolderProps) {
     <div class={"krate-file-tree-folder" + (open() ? " krate-file-tree-folder-open" : "")}>
       <div class="krate-file-tree-item krate-file-tree-folder-trigger" onClick={toggle}>
         <span class="krate-file-tree-item-icon krate-file-tree-chevron">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="m9 18 6-6-6-6"/>
-          </svg>
+          <Icon name="tabler:chevron-right" width="12" height="12" />
         </span>
-        <span class="krate-file-tree-item-icon">{open() ? "📂" : "📁"}</span>
+        <span class="krate-file-tree-item-icon">
+          {open() ? 
+            <Icon name="tabler:folder-open" width="14" height="14" />
+           : 
+            <Icon name="tabler:folder" width="14" height="14" />
+          }
+        </span>
         <span class="krate-file-tree-item-name">{props.name || ""}</span>
       </div>
       <div class={"krate-file-tree-children" + (open() ? "" : " krate-file-tree-children-closed")}>

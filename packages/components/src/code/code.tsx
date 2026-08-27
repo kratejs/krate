@@ -42,11 +42,11 @@ export default function Code(props: CodeProps) {
         <div class="krate-code-header">
           {title !== "" ? <div class="krate-code-title">{title}</div> : <div class="krate-code-title"></div>}
           {showCopy ? (
-            <button class="krate-code-copy" onClick={handleCopy} type="button">
+            <button class="krate-code-copy" onClick={handleCopy} type="button" aria-label={copied() ? "Copied" : "Copy code"}>
               {copied() ? (
-                <span class="krate-code-copy-icon">&#10003;</span>
+                <Icon name="tabler:check" width="14" height="14" />
               ) : (
-                <span class="krate-code-copy-icon">&#128203;</span>
+                <Icon name="tabler:copy" width="14" height="14" />
               )}
             </button>
           ) : null}

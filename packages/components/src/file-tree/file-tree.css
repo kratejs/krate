@@ -34,7 +34,10 @@
   line-height: 1.6;
 }
 .krate-file-tree-item-icon {
-  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--krate-text-muted, #a1a1aa);
   flex-shrink: 0;
 }
 .krate-file-tree-item-name {

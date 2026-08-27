@@ -102,17 +102,17 @@ function App() {
       {/* ===== FileTree ===== */}
       <Section title="FileTree">
         <FileTree>
-          <FileTreeItem icon="📄">package.json</FileTreeItem>
+          <FileTreeItem icon="tabler:file">package.json</FileTreeItem>
           <FileTreeFolder name="src" defaultOpen={true}>
-            <FileTreeItem icon="📄">index.tsx</FileTreeItem>
-            <FileTreeItem icon="📄">app.tsx</FileTreeItem>
+            <FileTreeItem icon="tabler:file">index.tsx</FileTreeItem>
+            <FileTreeItem icon="tabler:file">app.tsx</FileTreeItem>
             <FileTreeFolder name="components" defaultOpen={true}>
-              <FileTreeItem icon="📄">button.tsx</FileTreeItem>
-              <FileTreeItem icon="📄">card.tsx</FileTreeItem>
+              <FileTreeItem icon="tabler:file">button.tsx</FileTreeItem>
+              <FileTreeItem icon="tabler:file">card.tsx</FileTreeItem>
             </FileTreeFolder>
           </FileTreeFolder>
           <FileTreeFolder name="public">
-            <FileTreeItem icon="📄">favicon.ico</FileTreeItem>
+            <FileTreeItem>favicon.ico</FileTreeItem>
           </FileTreeFolder>
         </FileTree>
       </Section>

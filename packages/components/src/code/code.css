@@ -39,9 +39,6 @@
   outline: 2px solid var(--krate-primary, #3b82f6);
   outline-offset: -2px;
 }
-.krate-code-copy-icon {
-  font-size: 0.85rem;
-}
 .krate-code-block pre {
   margin: 0;
   padding: 16px;

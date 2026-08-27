@@ -2,7 +2,7 @@
     margin: 24px 0;
     padding: 12px 20px;
     border-radius: 8px;
-    border: 1px solid #27272a;
+    border: 1px solid var(--krate-border, #27272a);
     border-left-width: 4px;
     background: var(--krate-aside-bg, #111113);
 }

@@ -25,7 +25,7 @@
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  background: var(--krate-primary, #111113);
+  background: var(--krate-card-bg, #111113);
   color: var(--krate-text, #fafafa);
   border: 1px solid var(--krate-border, #27272a);
   display: flex;

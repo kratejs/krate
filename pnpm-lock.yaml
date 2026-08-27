@@ -92,7 +92,7 @@ importers:
   packages/web:
     devDependencies:
       '@krate/components':
-        specifier: ^0.1.5
+        specifier: latest
         version: 0.1.5(@krate/runtime@0.1.5)
       '@krate/core':
         specifier: latest
