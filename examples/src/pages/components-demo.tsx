@@ -720,7 +720,7 @@ function SwitchGroup() {
 }
 
 function ToastGroup() {
-  var [toasts, setToasts] = createSignal([]);
+  var [toasts, setToasts] = createSignal<{ id: number; title: string; desc: string }[]>([]);
   var idCounter = 0;
 
   function showToast() {
@@ -735,7 +735,7 @@ function ToastGroup() {
     }, 4000);
   }
 
-  function closeToast(id) {
+  function closeToast(id: number) {
     setToasts(function (prev) {
       return prev.filter(function (t) { return t.id !== id; });
     });
