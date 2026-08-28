@@ -35,9 +35,6 @@ export default defineConfig({
 | `pagesDir` | `string` | `src/pages` | Pages directory |
 | `publicDir` | `string` | `public` | Static assets directory |
 | `minify` | `boolean` | `true` | Enable all minification |
-| `minifyHTML` | `boolean` | inherits `minify` | HTML minification |
-| `minifyCSS` | `boolean` | inherits `minify` | CSS minification |
-| `minifyJS` | `boolean` | inherits `minify` | JS minification |
 | `sourcemap` | `boolean` | `false` | Write per-page sourcemaps (`index.<hash>.js.map`) |
 | `emitReact` | `boolean` | `false` | React compatibility mode (rewrites React → krate) |
 

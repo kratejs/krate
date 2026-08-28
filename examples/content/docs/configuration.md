@@ -1,4 +1,4 @@
-﻿---
+---
 title: Configuration
 order: 3
 ---
@@ -28,9 +28,6 @@ export default {
 | `pagesDir` | string | `src/pages` | Pages directory |
 | `publicDir` | string | `public` | Static files directory |
 | `minify` | bool | `true` | Enable all minification |
-| `minifyHTML` | bool | â€” | HTML minification |
-| `minifyCSS` | bool | â€” | CSS minification |
-| `minifyJS` | bool | â€” | JS minification |
 | `emitReact` | bool | `false` | Emit React-compatible JSX |
 | `sourcemap` | bool | `false` | Generate source maps |
 
