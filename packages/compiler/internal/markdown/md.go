@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"krate-compiler/internal/escape"
-	"krate-compiler/internal/icons"
 	"krate-compiler/internal/syntaxhighlight"
 )
 
@@ -33,7 +32,6 @@ const (
 	bOrderedList
 	bTable
 	bThematicBreak
-	bAdmonition
 	bHTML
 	bBlank
 )
@@ -75,33 +73,6 @@ func parseBlocks(lines []string, cfg Config) []block {
 			blocks = append(blocks, block{typ: bThematicBreak})
 			i++
 			continue
-		}
-
-		// Admonition
-		if cfg.Admonitions {
-		if m := admonRe.FindStringSubmatch(line); m != nil {
-			typ := m[1]
-			var adLines []string
-			i++
-			// Extract only the colon prefix from the match for the closer
-			cols := len(m[0]) - len(strings.TrimLeft(m[0], ":"))
-			closer := strings.Repeat(":", cols)
-			for i < len(lines) {
-				trimmed := strings.TrimSpace(lines[i])
-				if trimmed == closer {
-					i++
-					break
-				}
-					adLines = append(adLines, lines[i])
-					i++
-				}
-				blocks = append(blocks, block{
-					typ:   bAdmonition,
-					info:  typ,
-					lines: adLines,
-				})
-				continue
-			}
 		}
 
 	// Fenced code block
@@ -318,8 +289,6 @@ func renderBlock(b block, cfg Config) string {
 		return renderTable(b, cfg)
 	case bThematicBreak:
 		return "<hr>\n"
-	case bAdmonition:
-		return renderAdmonition(b, cfg)
 	case bHTML:
 		return strings.Join(b.lines, "\n") + "\n"
 	default:
@@ -412,42 +381,6 @@ func renderTable(b block, cfg Config) string {
 	}
 	out.WriteString("</tbody>\n</table>\n")
 	return out.String()
-}
-
-func renderAdmonition(b block, cfg Config) string {
-	typ := b.info
-
-	var title = b.info
-	if (title == "" || title == "note" || title == "tip" || title == "warning" || title == "danger" || title == "caution") {
-		if (typ == "tip") {
-			title = "Tip";
-		} else if (typ == "warning") {
-			title = "Warning";
-		} else if (typ == "danger") {
-			title = "Danger";
-		} else if (typ == "caution") {
-			title = "Caution";
-		} else {
-			title = "Note";
-		}
-	}
-	var icon = "tabler:info-circle";
-	if (typ == "tip") {
-		icon = "tabler:bulb";
-	} else if (typ == "warning") {
-		icon = "tabler:alert-triangle";
-	} else if (typ == "danger") {
-		icon = "tabler:skull";
-	} else if (typ == "caution") {
-		icon = "tabler:alert-circle";
-	}
-	iconBody, err := icons.GetIconContent(cfg.Root, icon)
-	if err != nil || iconBody == "" {
-		iconBody = ""
-	}
-	ic := fmt.Sprintf("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">%s</svg>", iconBody)
-	content := RenderToHTML(strings.Join(b.lines, "\n"), cfg)
-	return fmt.Sprintf("<div class=\"krate-aside krate-aside-%s\"><div class=\"krate-aside-title\">%s%s</div><div class=\"krate-aside-content\">%s</div></div>\n", typ, ic, title, content)
 }
 
 func slugify(text string) string {

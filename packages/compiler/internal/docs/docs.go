@@ -115,7 +115,7 @@ func Scan(cfg Config) ([]Page, error) {
 
 // ParseMD parses a .md file, extracting frontmatter and rendering markdown.
 func ParseMD(src string, cfg markdown.Config) (html, title string, order int, sidebar string, keywords []string) {
-	fm := ExtractFrontmatter(src)
+	fm, segments := markdown.ParseMDXSegments(src, cfg)
 	if t, ok := fm["title"]; ok {
 		title = t
 	}
@@ -128,27 +128,26 @@ func ParseMD(src string, cfg markdown.Config) (html, title string, order int, si
 	}
 	sidebar = fm["sidebar"]
 	keywords = ParseKeywords(fm["keywords"])
-	body := StripFrontmatter(src)
-	html = markdown.RenderToHTML(body, cfg)
+	html = markdown.RenderSegmentsToHTML(segments)
 	return
 }
 
 // ParseMDX parses an .mdx file, extracting frontmatter and rendering with JSX support.
 func ParseMDX(src string, cfg markdown.Config) (html, title string, order int, sidebar string, keywords []string) {
-	result := markdown.ParseMDX(src, cfg)
-	html = result.ReinsertJSXBlocks()
-	if t, ok := result.Frontmatter["title"]; ok {
+	fm, segments := markdown.ParseMDXSegments(src, cfg)
+	html = markdown.RenderSegmentsToHTML(segments)
+	if t, ok := fm["title"]; ok {
 		title = t
 	}
 	order = 999
-	if oStr, ok := result.Frontmatter["order"]; ok {
+	if oStr, ok := fm["order"]; ok {
 		oStr = strings.TrimSpace(oStr)
 		if n, err := strconv.Atoi(oStr); err == nil {
 			order = n
 		}
 	}
-	sidebar = result.Frontmatter["sidebar"]
-	keywords = ParseKeywords(result.Frontmatter["keywords"])
+	sidebar = fm["sidebar"]
+	keywords = ParseKeywords(fm["keywords"])
 	return
 }
 

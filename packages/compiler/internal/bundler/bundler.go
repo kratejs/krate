@@ -250,10 +250,13 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 			}
 			tsxSource = generateMDXBundleTSX(path, src, result, mcfg)
 		} else {
-			// Plain .md pages are rendered to HTML by buildMarkdownPage directly;
-			// the module AST here is only needed for import discovery, so skip the
-			// redundant markdown render (markdown.RenderToHTML would run twice).
-			tsxSource = `export default "";`
+			// Plain .md pages are routed through the same MDX-style TSX bundle so
+			// fenced code blocks render as the <Code> component.
+			result := markdown.ParseMDX(src, mcfg)
+			if len(result.Frontmatter) > 0 {
+				b.frontmatter = result.Frontmatter
+			}
+			tsxSource = generateMDXBundleTSX(path, src, result, mcfg)
 		}
 
 		tokens := lexer.New(tsxSource).Tokenize()
@@ -644,6 +647,12 @@ func generateMDXBundleTSX(path, src string, result *markdown.MDXResult, mcfg mar
 		sb.WriteString(imp)
 		sb.WriteString("\n")
 	}
+	if markdown.HasCodeSegments(segments) {
+		sb.WriteString("import { Code } from \"@krate/components\";\n")
+	}
+	if markdown.HasAsideSegments(segments) {
+		sb.WriteString("import { Aside } from \"@krate/components\";\n")
+	}
 	sb.WriteString("\nexport default function MDXContent() {\n")
 	sb.WriteString("  return (\n")
 	sb.WriteString("    <div class=\"md-content\">\n")
@@ -652,13 +661,23 @@ func generateMDXBundleTSX(path, src string, result *markdown.MDXResult, mcfg mar
 		if seg.HTML != "" {
 			jsxHTML := markdown.HTMLToJSX(seg.HTML)
 			escaped := escapeBundleTemplateLit(jsxHTML)
-			sb.WriteString("      {`")
+			sb.WriteString("      <div dangerouslySetInnerHTML={{__html: `")
 			sb.WriteString(escaped)
-			sb.WriteString("`}\n")
+			sb.WriteString("`}} />\n")
 		}
 		if seg.JSX != "" {
 			sb.WriteString("      ")
 			sb.WriteString(seg.JSX)
+			sb.WriteString("\n")
+		}
+		if seg.Code != nil {
+			sb.WriteString("      ")
+			sb.WriteString(markdown.BuildCodeJSX(seg.Code.Lang, seg.Code.Code))
+			sb.WriteString("\n")
+		}
+		if seg.Aside != nil {
+			sb.WriteString("      ")
+			sb.WriteString(markdown.BuildAsideJSX(seg.Aside))
 			sb.WriteString("\n")
 		}
 	}

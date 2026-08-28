@@ -726,13 +726,6 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		fmt.Fprintf(os.Stderr, "  %s⚡%s %s → streaming (global override)\n", cCyan, cReset, filepath.Base(page))
 	}
 
-	// Handle plain Markdown pages directly (skip JSX renderer).
-	// MDX files now generate proper TSX with imports and JSX, so they go through
-	// the regular rendering pipeline below.
-	if strings.HasSuffix(page, ".md") {
-		return b.buildMarkdownPage(page, bundle)
-	}
-
 	b.TransformUniversalIcons(entryModule.Program)
 	b.TransformUniversalImages(entryModule.Program)
 

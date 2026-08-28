@@ -966,34 +966,66 @@ func (e *SSREval) evalComponentFn(fn *ast.FnDecl, el *ast.JSXElement) string {
 
 	e.BindLocalVars(fn.Body)
 
+	// Resolve if/else-if/else chains where each branch ends in a return (e.g.
+	// <AsideIcon> whose body is `if ... return <svg> ... else if ... else`).
+	// Such bodies have no top-level return statement, so they'd previously be
+	// dropped by the no-top-level-return guard below.
+	if v, ok := e.evalBranchReturns(fn.Body); ok {
+		e.bindings = savedBindings
+		return v
+	}
+
+	// Handle if-return patterns with a following main return:
+	//   if (!hasPrev && !hasNext) return <span />;
+	//   return <div>...</div>;
 	ret := findReturnStmtIn(fn.Body)
 	if ret == nil || ret.Value == nil {
 		e.bindings = savedBindings
 		return ""
 	}
 
-	// Handle if-return patterns: if (!hasPrev && !hasNext) return <span />;
-	for _, stmt := range fn.Body {
-		if ifStmt, ok := stmt.(*ast.IfStmt); ok {
-			condVal := e.eval(ifStmt.Test)
-			if condVal != "" && condVal != "false" && condVal != "null" && condVal != "undefined" && condVal != "0" {
-				// Condition is truthy → execute consequent (the early return)
-				for _, consequent := range ifStmt.Consequent {
-					if retStmt, ok := consequent.(*ast.ReturnStmt); ok && retStmt.Value != nil {
-						result := e.eval(retStmt.Value)
-						e.bindings = savedBindings
-						return result
-					}
-				}
-			}
-			// Condition is falsy → skip consequent, fall through to main return
-		}
-	}
-
 	result := e.eval(ret.Value)
 
 	e.bindings = savedBindings
 	return result
+}
+
+// evalBranchReturns resolves a return value from an if/else-if/else chain whose
+// branches each end in a return, preferring the first truthy branch and falling
+// back to the else branch. This supports signal-less components whose function
+// body has no top-level return statement (e.g. an SVG helper that returns from
+// each if/else branch). Returns ok=false when no branch resolves to a return.
+func (e *SSREval) evalBranchReturns(stmts []ast.Stmt) (string, bool) {
+	for _, stmt := range stmts {
+		if ifStmt, ok := stmt.(*ast.IfStmt); ok {
+			condVal := e.eval(ifStmt.Test)
+			truthy := condVal != "" && condVal != "false" && condVal != "null" && condVal != "undefined" && condVal != "0"
+			if truthy {
+				if v, ok := e.returnFromConsequent(ifStmt.Consequent); ok {
+					return v, true
+				}
+				if v, ok := e.evalBranchReturns(ifStmt.Consequent); ok {
+					return v, true
+				}
+			} else if v, ok := e.evalBranchReturns(ifStmt.Alternate); ok {
+				return v, true
+			}
+		} else if retStmt, ok := stmt.(*ast.ReturnStmt); ok && retStmt.Value != nil {
+			return e.eval(retStmt.Value), true
+		}
+	}
+	return "", false
+}
+
+// returnFromConsequent extracts the direct return value from an if-consequent
+// statement list, if it ends in a return.
+func (e *SSREval) returnFromConsequent(consequent []ast.Stmt) (string, bool) {
+	for _, stmt := range consequent {
+		if retStmt, ok := stmt.(*ast.ReturnStmt); ok && retStmt.Value != nil {
+			return e.eval(retStmt.Value), true
+		}
+	}
+	return "", false
 }
 
 func (e *SSREval) evalFragment(frag *ast.JSXFragment) string {

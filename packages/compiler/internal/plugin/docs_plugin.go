@@ -198,18 +198,23 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, page docs.Page, layoutRel, s
 
 	var mdxImports []string
 	var segments []markdown.MDXSegment
-	if strings.HasSuffix(page.SourcePath, ".mdx") {
-		if data, err := os.ReadFile(page.SourcePath); err == nil {
-			src := string(data)
-			mdxImports = markdown.ExtractImports(src)
-			mdCfg := mdConfig
-			_, segments = markdown.ParseMDXSegments(src, mdCfg)
-		}
+	if data, err := os.ReadFile(page.SourcePath); err == nil {
+		src := string(data)
+		mdxImports = markdown.ExtractImports(src)
+		_, segments = markdown.ParseMDXSegments(src, mdConfig)
 	}
+	useCode := markdown.HasCodeSegments(segments)
+	useAside := markdown.HasAsideSegments(segments)
 
 	for _, imp := range mdxImports {
 		sb.WriteString(imp)
 		sb.WriteString("\n")
+	}
+	if useCode {
+		sb.WriteString("import { Code } from \"@krate/components\";\n")
+	}
+	if useAside {
+		sb.WriteString("import { Aside } from \"@krate/components\";\n")
 	}
 
 	genDir := filepath.Join(ctx.Root, ".krate", "gen", "docs")
@@ -312,6 +317,16 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, page docs.Page, layoutRel, s
 			if seg.JSX != "" {
 				sb.WriteString("        ")
 				sb.WriteString(seg.JSX)
+				sb.WriteString("\n")
+			}
+			if seg.Code != nil {
+				sb.WriteString("        ")
+				sb.WriteString(markdown.BuildCodeJSX(seg.Code.Lang, seg.Code.Code))
+				sb.WriteString("\n")
+			}
+			if seg.Aside != nil {
+				sb.WriteString("        ")
+				sb.WriteString(markdown.BuildAsideJSX(seg.Aside))
 				sb.WriteString("\n")
 			}
 		}

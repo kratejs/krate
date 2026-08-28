@@ -720,7 +720,7 @@ function SwitchGroup() {
 }
 
 function ToastGroup() {
-  var [toasts, setToasts] = createSignal<{ id: number; title: string; desc: string }[]>([]);
+  var [toasts, setToasts] = createSignal([]);
   var idCounter = 0;
 
   function showToast() {
