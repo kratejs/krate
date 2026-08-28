@@ -67,7 +67,8 @@
   "files": [
     "*.ts",
     "*.tsx",
-    "*.css"
+    "*.css",
+    "src"
   ],
   "peerDependencies": {
     "@krate/runtime": "^0.0.1"
