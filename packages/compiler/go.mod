@@ -5,6 +5,7 @@ go 1.26.1
 require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/evanw/esbuild v0.28.1
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/skrashevich/go-webp v0.1.0
 	github.com/tetratelabs/wazero v1.12.0
 	golang.org/x/image v0.44.0
