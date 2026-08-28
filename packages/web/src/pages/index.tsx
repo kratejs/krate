@@ -21,7 +21,7 @@ export default function Home() {
           <a class="btn btn-primary" href="/docs/">Read the docs</a>
           <a class="btn btn-secondary" href="/docs/getting-started/">Getting started</a>
         </div>
-        <div class="hero-code"><SyntaxHighlight lang="typescript">{`export default function Counter() {
+        <div class="hero-code"><Code lang="typescript" showCopy title="counter.tsx">{`export default function Counter() {
   const [count, setCount] = createSignal(0);
   return (
     <div>
@@ -29,7 +29,7 @@ export default function Home() {
       <button onClick={() => setCount(c => c + 1)}>+</button>
     </div>
   );
-}`}</SyntaxHighlight></div>
+}`}</Code></div>
       </section>
 
       <section class="features">
@@ -62,10 +62,10 @@ export default function Home() {
       <section class="cta-band">
         <h2>Build something great.</h2>
         <p>Install the CLI and scaffold a project in seconds.</p>
-        <SyntaxHighlight lang="bash">{`npm install -g @krate/core
+        <Code lang="bash" showCopy>{`npm install -g @krate/core
 mkdir my-app && cd my-app
 krate init
-krate dev`}</SyntaxHighlight>
+krate dev`}</Code>
         <a class="btn btn-primary" href="/docs/getting-started/">Get started</a>
       </section>
     </>

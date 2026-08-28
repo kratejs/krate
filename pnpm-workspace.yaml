@@ -6,6 +6,18 @@ allowBuilds:
   '@krate/core': true
   'esbuild': true
 
+minimumReleaseAgeExclude:
+  - '@krate/components@0.2.0 || 0.2.1'
+  - '@krate/core-darwin-arm64@0.2.0 || 0.2.1'
+  - '@krate/core-darwin-x64@0.2.0 || 0.2.1'
+  - '@krate/core-linux-arm64@0.2.0 || 0.2.1'
+  - '@krate/core-linux-x64-musl@0.2.0 || 0.2.1'
+  - '@krate/core-linux-x64@0.2.0 || 0.2.1'
+  - '@krate/core-win32-arm64@0.2.0 || 0.2.1'
+  - '@krate/core-win32-x64@0.2.0 || 0.2.1'
+  - '@krate/core@0.2.0 || 0.2.1'
+  - '@krate/runtime@0.2.0 || 0.2.1'
+
 supportedArchitectures:
   os:
     - current

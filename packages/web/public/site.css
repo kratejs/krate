@@ -189,13 +189,9 @@ pre {
     border-color: var(--color-primary);
 }
 
-.hero-code {
-    max-width: 680px;
-    margin: 0 auto;
-    padding: 1.25rem 1.5rem;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    background: var(--color-muted-bg);
+.hero-code .krate-code-block {
+    max-width: 640px;
+    margin: 1.5rem auto 2rem;
     text-align: left;
     overflow-x: auto;
 }
@@ -254,13 +250,9 @@ pre {
     color: var(--color-muted);
 }
 
-.cta-band pre {
+.cta-band .krate-code-block {
     max-width: 640px;
     margin: 1.5rem auto 2rem;
-    padding: 1rem 1.25rem;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    background: var(--color-muted-bg);
     text-align: left;
     overflow-x: auto;
 }
