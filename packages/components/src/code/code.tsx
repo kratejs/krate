@@ -12,7 +12,7 @@ export function Code(props: CodeProps) {
   var children = props.children || "";
   var lang = props.lang || "";
   var title = props.title || "";
-  var showCopy = props.showCopy !== false;
+  var showCopy = props.showCopy || true;
   var [copied, setCopied] = createSignal(false);
   var wrapRef: HTMLElement | null = null;
 
