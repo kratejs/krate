@@ -1,8 +1,8 @@
-import SidebarNav from "./docs/SidebarNav";
-import TOCNav from "./docs/TOCNav";
-import Breadcrumbs from "./docs/Breadcrumbs";
-import PrevNext from "./docs/PrevNext";
-import SocialLinks from "./docs/SocialLinks";
+import SidebarNav from "@/components/docs/SidebarNav";
+import TOCNav from "@/components/docs/TOCNav";
+import Breadcrumbs from "@/components/docs/Breadcrumbs";
+import PrevNext from "@/components/docs/PrevNext";
+import SocialLinks from "@/components/docs/SocialLinks";
 
 interface SidebarItem {
   title: string;
