@@ -2,7 +2,7 @@
 
 Scaffold a new [Krate](https://github.com/kratejs/krate) documentation site in
 seconds. Ships with the same look and feel as the official
-[kratejs.dev](https://kratejs.dev) docs — sidebar, table of contents,
+[krate.js.org](https://krate.js.org) docs — sidebar, table of contents,
 breadcrumbs, prev/next navigation, dark/light theme, and WASM search.
 
 ```bash

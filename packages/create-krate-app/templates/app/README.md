@@ -44,6 +44,6 @@ Open [http://localhost:3000](http://localhost:3000) to see your app.
 
 ## Learn more
 
-- [Krate documentation](https://kratejs.dev/docs/)
-- [Getting started guide](https://kratejs.dev/docs/getting-started/)
+- [Krate documentation](https://krate.js.org/docs/)
+- [Getting started guide](https://krate.js.org/docs/getting-started/)
 - [GitHub](https://github.com/kratejs/krate)

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Built-in component library for Krate sites.",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/kratejs/krate",
+  "homepage": "https://krate.js.org",
   "repository": {
     "type": "git",
     "url": "https://github.com/kratejs/krate.git"

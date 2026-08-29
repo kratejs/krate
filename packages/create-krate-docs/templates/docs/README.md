@@ -2,11 +2,11 @@
 
 A documentation site scaffolded with
 [`create-krate-docs`](https://www.npmjs.com/package/create-krate-docs) and
-powered by the Krate [`docs` plugin](https://kratejs.dev/docs/features/plugins/).
+powered by the Krate [`docs` plugin](https://krate.js.org/docs/features/plugins/).
 
 It ships with a sidebar, table of contents, breadcrumbs, prev/next navigation,
 light/dark theme, and WASM-powered full-text search — the same experience as the
-official [kratejs.dev](https://kratejs.dev) docs.
+official [krate.js.org](https://krate.js.org) docs.
 
 ## Getting started
 
@@ -64,6 +64,6 @@ sitemap at your real domain, and tune search.
 
 ## Learn more
 
-- [Krate documentation](https://kratejs.dev/docs/)
-- [Customizing the docs site](https://kratejs.dev/docs/guides/customizing-docs/)
+- [Krate documentation](https://krate.js.org/docs/)
+- [Customizing the docs site](https://krate.js.org/docs/guides/customizing-docs/)
 - [GitHub](https://github.com/kratejs/krate)

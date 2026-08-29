@@ -23,7 +23,7 @@ export default function Home() {
           <a class="btn btn-primary" href="/about">Learn more</a>
           <a
             class="btn btn-secondary"
-            href="https://kratejs.dev/docs/getting-started/"
+            href="https://krate.js.org/docs/getting-started/"
           >
             Read the docs
           </a>

@@ -4,7 +4,7 @@
   "description": "Scaffold a new Krate documentation site.",
   "license": "Apache-2.0",
   "type": "module",
-  "homepage": "https://github.com/kratejs/krate",
+  "homepage": "https://krate.js.org",
   "repository": {
     "type": "git",
     "url": "https://github.com/kratejs/krate.git"

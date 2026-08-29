@@ -20,13 +20,13 @@ export default defineConfig({
   },
 
   seo: {
-    baseUrl: "https://kratejs.dev",
+    baseUrl: "https://krate.js.org",
     siteName: "Krate",
     description: "A Go-native static site generator with signal-based reactivity.",
   },
 
   plugins: [
-    sitemap({ baseUrl: "https://kratejs.dev", changeFreq: "daily", priority: "0.8" }),
+    sitemap({ baseUrl: "https://krate.js.org", changeFreq: "daily", priority: "0.8" }),
     docs({
       contentDir: "content/docs",
       title: "Krate Docs",
