@@ -1897,11 +1897,48 @@ func (b *Builder) compileImageToPicture(orig *ast.JSXElement) *ast.JSXElement {
 		sizes = "(max-width: 768px) 100vw, 50vw"
 	}
 
+	// Vector sources (e.g. SVG) are passed through as-is: no decoding, no
+	// responsive variants, no compression. Emit a plain <img> pointing at the
+	// original file.
+	if len(result.WebP) == 0 && len(result.Fallback) == 0 {
+		imgAttrs := []*ast.JSXAttr{
+			{Name: "src", Value: &ast.Literal{Kind: ast.StringLit, Value: result.Src}},
+			{Name: "alt", Value: &ast.Literal{Kind: ast.StringLit, Value: alt}},
+			{Name: "loading", Value: &ast.Literal{Kind: ast.StringLit, Value: loading}},
+			{Name: "decoding", Value: &ast.Literal{Kind: ast.StringLit, Value: "async"}},
+		}
+		if result.Width > 0 {
+			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "width", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Width)}})
+		}
+		if result.Height > 0 {
+			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "height", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Height)}})
+		}
+		if className != "" {
+			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "className", Value: &ast.Literal{Kind: ast.StringLit, Value: className}})
+		}
+		if priority {
+			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "fetchpriority", Value: &ast.Literal{Kind: ast.StringLit, Value: "high"}})
+		}
+		imgAttrs = append(imgAttrs, extraAttrs...)
+		return &ast.JSXElement{
+			Position: orig.Position,
+			Opening:  &ast.JSXOpening{Name: "img", Attributes: imgAttrs, SelfClosing: true},
+			Children: []ast.JSXChild{
+				&ast.JSXText{Value: fmt.Sprintf("Your browser does not support the image element. Original: %s", src)},
+			},
+		}
+	}
+
 	// CLS mitigation: reserve the intrinsic aspect ratio so the browser can
-	// size the image before it loads, plus a blurred LQIP background.
-	style := fmt.Sprintf("width:100%%;height:auto;aspect-ratio:%d/%d", result.Width, result.Height)
-	if result.Placeholder != "" {
-		style += ";background-image:url(" + result.Placeholder + ");background-size:cover;background-position:center"
+	// size the image before it loads, plus a blurred LQIP background. Vectors
+	// (e.g. SVG) are passed through without decoding, so they may not know
+	// their intrinsic dimensions — don't force an aspect-ratio in that case.
+	style := ""
+	if result.Width > 0 && result.Height > 0 {
+		style = fmt.Sprintf("width:100%%;height:auto;aspect-ratio:%d/%d", result.Width, result.Height)
+		if result.Placeholder != "" {
+			style += ";background-image:url(" + result.Placeholder + ");background-size:cover;background-position:center"
+		}
 	}
 
 	pictureAttrs := []*ast.JSXAttr{}
@@ -1940,12 +1977,18 @@ func (b *Builder) compileImageToPicture(orig *ast.JSXElement) *ast.JSXElement {
 
 	imgAttrs := []*ast.JSXAttr{
 		{Name: "src", Value: &ast.Literal{Kind: ast.StringLit, Value: result.Src}},
-		{Name: "width", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Width)}},
-		{Name: "height", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Height)}},
 		{Name: "alt", Value: &ast.Literal{Kind: ast.StringLit, Value: alt}},
 		{Name: "loading", Value: &ast.Literal{Kind: ast.StringLit, Value: loading}},
 		{Name: "decoding", Value: &ast.Literal{Kind: ast.StringLit, Value: "async"}},
-		{Name: "style", Value: &ast.Literal{Kind: ast.StringLit, Value: style}},
+	}
+	if result.Width > 0 {
+		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "width", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Width)}})
+	}
+	if result.Height > 0 {
+		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "height", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Height)}})
+	}
+	if style != "" {
+		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "style", Value: &ast.Literal{Kind: ast.StringLit, Value: style}})
 	}
 	if priority {
 		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "fetchpriority", Value: &ast.Literal{Kind: ast.StringLit, Value: "high"}})

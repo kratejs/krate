@@ -312,9 +312,54 @@ func writeFileAtomic(path string, data []byte) error {
 // responsive variants plus an optional blur placeholder. Variants are written
 // to <root>/.krate/cache/images/ (copied to the build output by the build step)
 // and referenced by absolute /_krate/images/... URLs.
+// vectorFormats are image formats that are passed through as-is rather than
+// decoded, converted, or compressed (responsive variants only apply to raster
+// sources).
+// passthroughFormats are image formats that are passed through as-is rather
+// than decoded, converted, or compressed (responsive variants only apply to
+// raster sources we know how to process).
+var passthroughFormats = map[string]string{
+	".svg":  "image/svg+xml",
+	".svgz": "image/svg+xml",
+	".avif": "image/avif",
+	".ico":  "image/x-icon",
+	".cur":  "image/x-icon",
+	".bmp":  "image/bmp",
+	".tif":  "image/tiff",
+	".tiff": "image/tiff",
+	".heic": "image/heic",
+	".heif": "image/heif",
+}
+
+// aspectRatio returns the width/height ratio, or 0 when height is unknown.
+func aspectRatio(w, h int) float64 {
+	if h <= 0 {
+		return 0
+	}
+	return float64(w) / float64(h)
+}
+
+// isPassthroughSrc reports whether the source file is a passthrough format
+// (e.g. SVG) that should not be decoded.
+func isPassthroughSrc(srcPath string) (bool, string) {
+	ext := strings.ToLower(filepath.Ext(srcPath))
+	mime, ok := passthroughFormats[ext]
+	return ok, mime
+}
+
 func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder bool) (*ImageResult, error) {
 	if quality <= 0 {
 		quality = 82
+	}
+
+	origW, origH := 0, 0
+	if vector, mime := isPassthroughSrc(srcPath); vector {
+		return &ImageResult{
+			Width:        reqW,
+			Height:       reqH,
+			AspectRatio:  aspectRatio(reqW, reqH),
+			FallbackMime: mime,
+		}, nil
 	}
 
 	f, err := os.Open(srcPath)
@@ -329,8 +374,8 @@ func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder
 	}
 
 	bounds := img.Bounds()
-	origW := bounds.Dx()
-	origH := bounds.Dy()
+	origW = bounds.Dx()
+	origH = bounds.Dy()
 
 	outDir := getCacheDir(root)
 	os.MkdirAll(outDir, 0755)
