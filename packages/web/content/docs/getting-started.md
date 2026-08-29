@@ -27,14 +27,12 @@ pnpm add -g @krate/core
 ## Create a project
 
 ```sh
-krate init my-app
-# or, using the create-krate-app scaffold directly:
 npx create-krate-app@latest my-app
 ```
 
-`krate init` (alias `krate create`) scaffolds a complete project — including
-`krate.config.ts`, `tsconfig.json`, `package.json`, a landing page, a layout, and
-a 404 page. With no directory it prompts for a name.
+`create-krate-app` scaffolds a complete project — including `krate.config.ts`,
+`tsconfig.json`, `package.json`, a landing page, a layout, and a 404 page. With
+no directory it prompts for a name.
 
 Add a page:
 

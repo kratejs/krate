@@ -12,7 +12,6 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate build [dir]` | Production build |
 | `krate dev [dir]` | Build + dev server (port 3000) + hot reload |
 | `krate serve [dir]` | Build + static HTTP server (production preview) |
-| `krate init [dir]` | Scaffold a new project (alias: `create`) |
 | `krate version` | Print the version |
 
 ## `krate build`
@@ -29,6 +28,7 @@ krate build ./my-site
 | `--config <path>` | Path to a config file (default `krate.config.ts`) |
 | `--out-dir <path>` | Override the output directory |
 | `--watch` | Rebuild when files change |
+| `--verbose` | Print diagnostic detail during the build (e.g. reactive validation warnings) |
 
 During the build the compiler:
 
@@ -60,28 +60,6 @@ krate serve
 ```
 
 Useful for previewing `dist/` exactly as a static host would serve it.
-
-## `krate init`
-
-Scaffolds a brand-new Krate project by delegating to
-[`create-krate-app`](https://www.npmjs.com/package/create-krate-app). `create` is
-an alias for `init`.
-
-```sh
-krate init my-app
-# or
-krate create my-app
-```
-
-With no directory it prompts for a name:
-
-```sh
-krate init
-```
-
-The scaffolded project includes a `krate.config.ts`, `tsconfig.json`,
-`package.json` (with `dev`/`build`/`serve` scripts), a landing page, a layout, a
-404 page, a signal-powered `Counter` example, and global styles.
 
 ## `krate version`
 
