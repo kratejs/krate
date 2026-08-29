@@ -172,47 +172,11 @@ async function renderPage(req: RenderRequest): Promise<RenderResponse> {
   try {
     const mod = await loadPageModule(page);
 
-    let props: Record<string, any> = {};
-    let redirect: string | undefined;
-    let notFound = false;
-
-    // Run data-fetching hooks. getServerSideProps runs here (per-request);
-    // getStaticProps normally runs at build time but is honored here so SSR /
-    // streaming pages with async props render real data instead of {}.
-    const dataFn = (mod as any).getServerSideProps || (mod as any).getStaticProps;
-    if (typeof dataFn === "function") {
-      try {
-        const data = await dataFn({
-          params: req.params,
-          query: req.query,
-          headers: req.headers,
-          method: req.method,
-          url: req.url,
-        });
-        if (data && typeof data === "object") {
-          if (data.notFound) {
-            notFound = true;
-          } else if (data.redirect) {
-            redirect =
-              typeof data.redirect === "string"
-                ? data.redirect
-                : data.redirect.destination || data.redirect;
-          } else if (data.props && typeof data.props === "object") {
-            props = data.props;
-          }
-        }
-      } catch (err: any) {
-        console.error(`[krate] ${dataFn.name || "getServerSideProps"} failed for ${req.route}:`, err);
-        return { html: "", status: 500 };
-      }
-    }
-
-    if (notFound) {
-      return { html: "", status: 404, notFound: true };
-    }
-    if (redirect) {
-      return { html: "", status: 302, redirect };
-    }
+    // Page-level data fetching (getStaticProps/getServerSideProps) has been
+    // removed; per-request data is provided by server components (@server),
+    // runtime components (@runtime), and middleware instead. The default export
+    // is rendered here with no injected page props.
+    const props: Record<string, any> = {};
 
     // Get the default export (the component)
     const Component = mod.default;

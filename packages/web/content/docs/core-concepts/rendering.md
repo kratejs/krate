@@ -3,11 +3,11 @@ title: Rendering
 order: 5
 ---
 
-# Rendering: SSG, SSR, ISR & Streaming
+# Rendering: SSG & Streaming
 
-Krate is **SSG-first**: every page is pre-rendered to static HTML at build
-time. On top of that base, pages can opt into server-side rendering (SSR),
-incremental static regeneration (ISR), or Suspense-based streaming.
+Krate is **SSG-first**: every page is pre-rendered to static HTML at build time.
+On top of that base, pages can opt into Streaming SSR — including per-request
+data via runtime components.
 
 ## SSG (default)
 
@@ -21,46 +21,9 @@ The page is rendered once at build time. The output is a static HTML file plus
 a hydration bundle. This is the fastest and most portable mode — it works on
 any static host.
 
-## Build-time props (`getStaticProps`)
-
-```tsx
-// Sync: evaluated by the compiler from the AST
-export function getStaticProps() {
-  return { props: { title: "Hello" } };
-}
-
-// Async: executed via an npx tsx bootstrap at build time
-export async function getStaticProps() {
-  const res = await fetch('https://api.example.com/data');
-  return { props: { data: await res.json() } };
-}
-```
-
-`getStaticProps` returns `{ props }`, which is passed to the page component.
-
-## SSR (`getServerSideProps`)
-
-```tsx
-export async function getServerSideProps(ctx) {
-  const data = await fetch('https://api.example.com/item/' + ctx.params.id);
-  return { props: { item: await data.json() } };
-}
-```
-
-Pages exporting `getServerSideProps` render **per request** in the Node
-renderer sidecar. The HTML is served dynamically instead of from a static file.
-
-## ISR (`getStaticProps` + `revalidate`)
-
-```tsx
-export async function getStaticProps() {
-  return { props: { ... }, revalidate: 60 }; // seconds
-}
-```
-
-The page is built statically, but the renderer revalidates it after the
-specified interval, serving a cached copy in the meantime. The in-memory cache
-size is configurable via `ssr.maxCacheSize`.
+Server components (`// @server`) are evaluated at build time and their output is
+baked into the static HTML, so build-time data needs no special page-level
+function. See [Data Fetching](/docs/features/data-fetching/).
 
 ## Streaming SSR
 
@@ -70,6 +33,16 @@ components, or when `ssr.streaming` forces all pages into streaming mode:
 1. **Phase 1 (fallback)** — renders the page with fallback content.
 2. **Phase 2 (resolved)** — streams resolved content via
    `<!--suspense-resolved:N-->` markers with chunked transfer encoding.
+
+This is the recommended path for per-request data, which lives in runtime
+components (`// @runtime`):
+
+```tsx
+// @runtime
+export default function PriceTag({ price }) {
+  return <span>{price}</span>;
+}
+```
 
 ```tsx
 // Force ALL pages to streaming SSR
@@ -84,20 +57,24 @@ Or opt in per page:
 export const config = { streaming: true };
 ```
 
-## How SSR/ISR works
+## How streaming works
 
 - Pages are built to static HTML where possible.
-- The **Node renderer server** handles SSR/ISR/streaming requests and caches
-  ISR pages in memory.
+- Pages with runtime components are compiled into server bundles and rendered
+  at request time by the Node renderer server.
+- The renderer resolves runtime component props and streams resolved content
+  through Suspense boundaries.
 - `manifest.json` records each page's mode and metadata.
-- Server bundles are compiled for pages that need dynamic rendering.
 
-## Choosing a mode
+## Choosing an approach
 
-| Need | Mode |
-|------|------|
+| Need | Approach |
+|------|----------|
 | Static content, fastest | SSG (default) |
-| Data at build time | `getStaticProps` |
-| Per-request data | `getServerSideProps` |
-| Static + periodic refresh | ISR (`revalidate`) |
-| Server-rendered components streamed in | Streaming SSR |
+| Data at build time | Server component (`@server`) |
+| Per-request data | Runtime component (`@runtime`) + Streaming SSR |
+| Static + dynamic route URLs | `generateStaticParams` |
+
+See [Component Tiers](/docs/core-concepts/component-tiers/) for how server and
+runtime components work, and [Data Fetching](/docs/features/data-fetching/) for
+the full data model.

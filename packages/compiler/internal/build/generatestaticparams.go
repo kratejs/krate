@@ -17,6 +17,45 @@ import (
 	"krate-compiler/internal/tsexec"
 )
 
+// injectStaticParams seeds the root page component with concrete dynamic-route
+// params so a statically generated page ([id].tsx via generateStaticParams)
+// can render them. Params are exposed to the component's SSR evaluation via:
+//   - `params` — a JSON object (e.g. { params } destructuring → params.id)
+//   - each param key — a direct binding (e.g. { id } destructuring → id)
+//
+// Only pure, signal-less root components are SSREval'd this way; interactive
+// (client) roots keep their normal hydration-driven emission.
+func injectStaticParams(tree *irtree.ComponentTree, params map[string]string) {
+	root := tree.Root
+	if root == nil || params == nil || len(params) == 0 {
+		return
+	}
+	if root.Tier != irtree.TierStatic && root.Tier != irtree.TierServer {
+		// Interactive roots render their params reactively via the served props
+		// script; injecting static bindings here would conflict with hydration.
+		return
+	}
+	bindings := make(map[string]string, len(params)+1)
+	objStr := make([]string, 0, len(params))
+	for k, v := range params {
+		bindings[k] = v
+		bv, _ := json.Marshal(v)
+		objStr = append(objStr, fmt.Sprintf("%q:%s", k, bv))
+	}
+	bindings["params"] = "{" + strings.Join(objStr, ",") + "}"
+	if len(bindings) > 0 {
+		if len(root.SSREvalBindings) > 0 {
+			for k, v := range root.SSREvalBindings {
+				if _, ok := bindings[k]; !ok {
+					bindings[k] = v
+				}
+			}
+		}
+		root.SSREvalBindings = bindings
+		root.IsSSREval = true
+	}
+}
+
 // extractParamNames extracts parameter names from a dynamic route filename.
 // e.g. "video/[id].tsx" → ["id"], "user/[username]/posts/[postId].tsx" → ["username", "postId"]
 func extractParamNames(pagePath, pagesDir string) []string {
@@ -186,7 +225,8 @@ func (b *Builder) resolveStaticParamsPages(pages []string) []staticParamsPage {
 	return expanded
 }
 
-// buildStaticParamsPage builds a single page with specific params injected via setStaticProps.
+// buildStaticParamsPage builds a single page with its params injected into the
+// page component's props (via injectStaticParams).
 func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, string, error) {
 	bnd := bundler.New(b.Root)
 	bnd.SetEmitReact(b.Cfg.EmitReact)
@@ -219,6 +259,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	tree := irtree.Build(entryModule.Program, ann)
+	injectStaticParams(tree, spp.Params)
 	emitter := renderer.NewEmitter()
 	emitter.IconResolver = b.iconResolver
 	emitter.EvalJS = b.jsExprEvaluator()

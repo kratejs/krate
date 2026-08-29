@@ -5,33 +5,64 @@ order: 3
 
 # Data Fetching
 
-Krate offers two complementary data-fetching models: build-time props and
-client-side resources.
+Krate offers complementary data-fetching models: build-time and serve-time data
+via component tiers, route params via `generateStaticParams`, and client-side
+resources.
 
-## Build-time data (`getStaticProps`)
+## Build-time data (server components)
 
-```typescript
-// Sync — object-literal returns are extracted from the AST
-export function getStaticProps() {
-  return { props: { title: "Hello" } };
-}
-
-// Async — detected via an await heuristic, executed via `npx tsx`
-export async function getStaticProps() {
-  const res = await fetch('https://api.example.com/data');
-  return { props: { data: await res.json() } };
-}
-```
-
-Props are passed to the page component:
+Mark a component with `// @server` (or a `*.server.tsx` file). It is evaluated
+at **build time** and its HTML is baked into the page with zero client
+JavaScript:
 
 ```tsx
-export default function Page({ data }) {
-  return <pre>{JSON.stringify(data, null, 2)}</pre>;
+// @server
+export default function ServerTime() {
+  return <time>{new Date().toUTCString()}</time>;
 }
 ```
 
-Combine with `revalidate` for ISR (see [Rendering](/docs/core-concepts/rendering/)).
+Because server components run at build time, they can `fetch` external data and
+render the result — ideal for data that doesn't change per request.
+
+## Per-request data (runtime components)
+
+Mark a component with `// @runtime` (or a `*.runtime.tsx` file). It is evaluated
+at **request time** via the embedded QuickJS runtime and streamed to the client
+through a Suspense boundary:
+
+```tsx
+// @runtime
+export default function PriceTag({ price }) {
+  return <span>{formatCurrency(price)}</span>;
+}
+```
+
+Runtime components cover the "changes per request" case that previously used
+page-level server-side data functions.
+
+## Dynamic route params (`generateStaticParams`)
+
+For statically-built dynamic routes, `generateStaticParams` pre-generates the
+concrete URLs, and each param value is passed to the page component as `params`:
+
+```tsx
+// src/pages/video/[id].tsx
+export default function VideoPage({ params }) {
+  return <h1>Video {params.id}</h1>;
+}
+
+export function generateStaticParams() {
+  return [
+    { id: "abc-123" },
+    { id: "def-456" },
+  ];
+}
+```
+
+Each `{ id: ... }` set is expanded into a static page (`/video/abc-123`,
+`/video/def-456`) whose component renders with `params.id` set to the matching
+value. Directly destructured params (`{ id }`) work the same way.
 
 ## Client-side data (`createResource`)
 
@@ -63,11 +94,8 @@ export default function User({ id }) {
 }
 ```
 
-## Server data (`getServerSideProps`)
+## Other request-time concerns
 
-For per-request data, use `getServerSideProps` — rendered by the Node sidecar.
-See [Rendering](/docs/core-concepts/rendering/).
-
-## API routes
-
-For your own JSON endpoints, see [API Routes](/docs/features/api-routes/).
+Per-request redirects and headers are handled by `middleware.ts`, which runs
+before page rendering. For your own JSON endpoints, see
+[API Routes](/docs/features/api-routes/).

@@ -10,7 +10,7 @@ A tour of the features that ship with Krate beyond the core compiler.
 | Feature | Description |
 |---------|-------------|
 | [Built-in Components](/docs/features/built-in-components/) | `<Head>`, `<Script>`, `<Style>`, `<Link>`, `<Icon>`, `<Image>` |
-| [Data Fetching](/docs/features/data-fetching/) | `getStaticProps`, `createResource`, API routes |
+| [Data Fetching](/docs/features/data-fetching/) | Component tiers, `generateStaticParams`, `createResource`, API routes |
 | [API Routes](/docs/features/api-routes/) | TypeScript and Go endpoints in one namespace |
 | [Plugin System](/docs/features/plugins/) | Go hooks + JS community plugins via QuickJS |
 | [Search](/docs/features/search/) | WASM-powered docs search (Microsoft docfind) |

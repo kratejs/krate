@@ -79,22 +79,25 @@ export default function Counter() {
 
 ## Data fetching
 
-Pages can declare build-time props with `getStaticProps`:
+Krate provides data through component tiers rather than page-level data
+functions:
 
 ```tsx
-export async function getStaticProps() {
-  const res = await fetch('https://api.example.com/data');
-  return { props: { data: await res.json() } };
-}
-
-export default function Page({ data }) {
-  return <pre>{JSON.stringify(data, null, 2)}</pre>;
+// @server — evaluated at build time, HTML baked in
+export default function ServerTime() {
+  return <time>{new Date().toUTCString()}</time>;
 }
 ```
 
-Synchronous `getStaticProps` (object literal returns) is evaluated by the
-compiler directly; asynchronous ones run through an `npx tsx` bootstrap at
-build time.
+```tsx
+// @runtime — evaluated per request, streamed via Suspense
+export default function PriceTag({ price }) {
+  return <span>{price}</span>;
+}
+```
+
+Dynamic route pages receive their params as props via `generateStaticParams`.
+See [Data Fetching](/docs/features/data-fetching/) for the full model.
 
 ## Layouts
 

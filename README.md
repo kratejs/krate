@@ -22,7 +22,7 @@ bundler subprocess, no Node.js required for core compilation.
 - **File-based routing** — `src/pages/` maps to URLs, with nested routes, dynamic segments (`[param]`), and `_layout.tsx` layouts.
 - **Component tiers** — static, client, server (`@server`), and runtime (`@runtime`, via embedded QuickJS) components in one page.
 - **Full CSS pipeline** — CSS Modules (FNV-32a scoping), Go-native Tailwind, minification, `@import` inlining.
-- **SSR, ISR & streaming** — `getStaticProps`, `getServerSideProps`, revalidate-based ISR, and Suspense-based streaming SSR.
+- **SSR, ISR & streaming** — revalidate-based ISR, and Suspense-based streaming SSR.
 - **No external bundler** — esbuild is only used for a few auxiliary tasks (API routes, runtime component bundles); core compilation is 100% custom Go.
 - **SPA router** — client-side navigation with DOM tree reconciliation (state, focus, and scroll survive transitions).
 - **Plugin system** — Go plugin hooks plus community plugins written in JavaScript, executed inside the embedded QuickJS runtime.
@@ -87,16 +87,24 @@ export default function Counter() {
 
 ### Data fetching
 
-```tsx
-export async function getStaticProps() {
-  const res = await fetch('https://api.example.com/data');
-  return { props: { data: await res.json() } };
-}
+Build-time data lives in server components; per-request data in runtime
+components:
 
-export default function Page({ data }) {
-  return <pre>{JSON.stringify(data, null, 2)}</pre>;
+```tsx
+// @server — evaluated at build time, HTML baked in
+export default function ServerTime() {
+  return <time>{new Date().toUTCString()}</time>;
 }
 ```
+
+```tsx
+// @runtime — evaluated per request, streamed via Suspense
+export default function PriceTag({ price }) {
+  return <span>{price}</span>;
+}
+```
+
+Dynamic route pages receive their params via `generateStaticParams`.
 
 ### Layouts
 

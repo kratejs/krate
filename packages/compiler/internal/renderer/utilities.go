@@ -119,14 +119,54 @@ func extractJSONProp(objStr, prop string) string {
 			depth++
 		} else if ch == '}' || ch == ']' {
 			if depth == 0 {
-				return objStr[i:j]
+				return unquoteJSONPropValue(objStr[i:j])
 			}
 			depth--
 		} else if ch == ',' && depth == 0 {
-			return objStr[i:j]
+			return unquoteJSONPropValue(objStr[i:j])
 		}
 	}
-	return objStr[i:]
+	return unquoteJSONPropValue(objStr[i:])
+}
+
+// unquoteJSONPropValue normalizes an extracted JSON property value. Numeric,
+// boolean, and null values pass through as-is; JSON string values have their
+// surrounding quotes removed (and escapes resolved) so they render as plain
+// text in SSR output (e.g. params.id → abc-123 rather than "abc-123").
+func unquoteJSONPropValue(v string) string {
+	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
+		var sb strings.Builder
+		for i := 1; i < len(v)-1; i++ {
+			c := v[i]
+			if c == '\\' && i+1 < len(v)-1 {
+				i++
+				next := v[i]
+				switch next {
+				case 'n':
+					sb.WriteByte('\n')
+				case 't':
+					sb.WriteByte('\t')
+				case 'r':
+					sb.WriteByte('\r')
+				case '\\', '"', '/':
+					sb.WriteByte(next)
+				case 'u':
+					// Skip \uXXXX sequences (rare in params); leave as-is marker.
+					sb.WriteString("\\u")
+					if i+4 < len(v) {
+						sb.WriteString(v[i+1 : i+5])
+						i += 4
+					}
+				default:
+					sb.WriteByte(next)
+				}
+				continue
+			}
+			sb.WriteByte(c)
+		}
+		return sb.String()
+	}
+	return v
 }
 
 // ─── Number helpers ──────────────────────────────────────────────────────────

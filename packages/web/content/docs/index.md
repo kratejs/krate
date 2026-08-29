@@ -21,7 +21,7 @@ Tailwind generator — is 100% custom Go, and builds run in milliseconds.
 - **File-based routing** — `src/pages/` maps to URLs, with nested routes, dynamic segments (`[param]`), and `_layout.tsx` layouts.
 - **Component tiers** — static, client, server (`@server`), and runtime (`@runtime`, via embedded QuickJS) components in one page.
 - **Full CSS pipeline** — CSS Modules (FNV-32a scoping), Go-native Tailwind, minification, and `@import` inlining.
-- **SSR, ISR & streaming** — `getStaticProps`, `getServerSideProps`, revalidate-based ISR, and Suspense-based streaming SSR.
+- **Streaming SSR** — Suspense-based streaming SSR with per-request data via runtime components.
 - **SPA router** — client-side navigation with DOM tree reconciliation; state, focus, and scroll survive transitions.
 - **Plugin system** — Go plugin hooks plus community plugins written in JavaScript, executed inside the embedded QuickJS runtime.
 - **WASM docs search** — the docs plugin ships a search bar powered by Microsoft's docfind, with the index embedded into a WASM module at build time.

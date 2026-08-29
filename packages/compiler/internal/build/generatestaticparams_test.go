@@ -6,7 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"krate-compiler/internal/annotator"
+	"krate-compiler/internal/bundler"
 	"krate-compiler/internal/config"
+	"krate-compiler/internal/irtree"
+	"krate-compiler/internal/renderer"
 )
 
 func TestExtractParamNames(t *testing.T) {
@@ -181,5 +185,50 @@ export function generateStaticParams() {
 	}
 	if expanded[1].Params["id"] != "xyz" {
 		t.Errorf("expanded[1].Params[id] = %q, want %q", expanded[1].Params["id"], "xyz")
+	}
+}
+
+func TestInjectStaticParams(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "params object",
+			src:  "export default function VideoPage({ params }: { params: { id: string } }) {\n  return <div>Video {params.id}</div>;\n}",
+			want: "<div>Video abc-123</div>",
+		},
+		{
+			name: "direct destructure",
+			src:  "export default function VideoPage({ id }: { id: string }) {\n  return <div>Video {id}</div>;\n}",
+			want: "<div>Video abc-123</div>",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			pagesDir := filepath.Join(tmpDir, "src", "pages")
+			pagePath := filepath.Join(pagesDir, "video", "[id].tsx")
+			os.MkdirAll(filepath.Dir(pagePath), 0755)
+			if err := os.WriteFile(pagePath, []byte(tc.src), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			bnd := bundler.New(tmpDir)
+			bundle, err := bnd.Bundle(pagePath)
+			if err != nil {
+				t.Fatalf("bundle: %v", err)
+			}
+			ent := findEntryModule(bundle.Modules)
+			ann := annotator.Annotate(ent.Program, nil, pagePath, ent.SourceCode)
+			tree := irtree.Build(ent.Program, ann)
+			injectStaticParams(tree, map[string]string{"id": "abc-123"})
+			em := renderer.NewEmitter()
+			res := em.Emit(tree)
+			if res.HTML != tc.want {
+				t.Errorf("HTML = %q, want %q", res.HTML, tc.want)
+			}
+		})
 	}
 }

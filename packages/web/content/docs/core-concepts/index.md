@@ -62,9 +62,8 @@ Every page is pre-rendered at build time. Depending on the page's exports and
 config, the final HTML can be:
 
 - **SSG** (default) — static HTML, no runtime data.
-- **SSR** — rendered per request by a Node sidecar (`getServerSideProps`).
-- **ISR** — static with revalidation (`getStaticProps` + `revalidate`).
-- **Streaming** — Suspense-based two-phase rendering (runtime components).
+- **Streaming** — Suspense-based two-phase rendering (runtime components),
+  which also covers per-request data.
 
 See [Rendering](/docs/core-concepts/rendering/) for details.
 
@@ -79,6 +78,6 @@ runtime — that determine how and where they render. See
 | [Reactivity](/docs/core-concepts/reactivity/) | Signals, effects, memos, context, resources |
 | [Routing & Layouts](/docs/core-concepts/routing/) | File-based routing, dynamic routes, layouts |
 | [Component Tiers](/docs/core-concepts/component-tiers/) | Static / client / server / runtime |
-| [Rendering](/docs/core-concepts/rendering/) | SSG, SSR, ISR, streaming |
+| [Rendering](/docs/core-concepts/rendering/) | SSG & streaming |
 | [Styling](/docs/core-concepts/styling/) | CSS Modules, Tailwind, the CSS pipeline |
 | [Markdown & MDX](/docs/core-concepts/markdown/) | Content authoring |

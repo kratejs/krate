@@ -28,8 +28,9 @@ export default function VideoPage({ params }) {
 }
 ```
 
-For a statically-built dynamic route you can provide
-`generateStaticParams`, or use `getServerSideProps` to render per-request.
+For a statically-built dynamic route, provide `generateStaticParams` to expand
+the route into concrete pages. Each param value is passed to the component as
+`params` (so `params.id` matches the `[id]` segment):
 
 ## Layouts
 
