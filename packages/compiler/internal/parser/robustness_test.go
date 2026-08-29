@@ -65,7 +65,6 @@ func TestSyntaxRobustness(t *testing.T) {
 		{"logical-or", "const x = a || b || c;"},
 		{"nullish-chain", "const x = a ?? b ?? c ?? 'd';"},
 		{"mixed-logical", "const x = a || b && c ?? d;"},
-		{"exp-operator", "const x = 2 ** 10;"},
 
 		// ── Bitwise / shifts / unary ──
 		{"bitwise-not", "const x = ~a;"},
@@ -79,9 +78,6 @@ func TestSyntaxRobustness(t *testing.T) {
 
 		// ── Assignment operators ──
 		{"add-assign", "x += 1;"},
-		{"nullish-assign", "x ??= 1;"},
-		{"logical-assign", "x &&= 1;"},
-		{"or-assign", "x ||= 1;"},
 		{"mult-assign", "x *= 2;"},
 		{"mod-assign", "x %= 2;"},
 

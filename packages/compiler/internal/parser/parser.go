@@ -159,7 +159,9 @@ var precMap = map[lexer.Kind]int{
 	lexer.SUB_ASSIGN:   precAssign,
 	lexer.MUL_ASSIGN:   precAssign,
 	lexer.DIV_ASSIGN:   precAssign,
-	lexer.MOD_ASSIGN:   precAssign,
+	lexer.MOD_ASSIGN:    precAssign,
+	lexer.SHL_ASSIGN:    precAssign,
+	lexer.SHR_ASSIGN:    precAssign,
 	lexer.QUEST:        precCond,
 	lexer.NULLISH:      precOr,
 	lexer.OR:           precOr,
@@ -263,6 +265,12 @@ func (p *Parser) parseStmt() ast.Stmt {
 	case lexer.AT:
 		p.next()
 		_ = p.parseExpr(precLowest)
+		return nil
+	case lexer.Error:
+		// The lexer emitted an Error token for an unlexable character. Surface
+		// it instead of silently skipping it.
+		p.errWithMsg("unexpected character or token while parsing", "Krate could not interpret this input")
+		p.next()
 		return nil
 	default:
 		expr := p.parseExpr(precLowest)
@@ -1280,6 +1288,14 @@ func (p *Parser) parseInfix(left ast.Expr) ast.Expr {
 		return &ast.BinaryExpr{Left: left, Op: "-", Right: p.parseExpr(precTerm)}
 	case lexer.STAR:
 		p.next()
+		if p.peek().Kind == lexer.STAR {
+			// `2 ** 10` lexes as two STAR tokens; without this guard it would be
+			// mangled into `(2 * nil) * 10` and emitted as incorrect code.
+			p.errWithMsg("exponentiation operator ** is not supported", "use Math.pow(a, b) or a * a instead")
+			p.next()
+			_ = p.parseExpr(precFactor)
+			return left
+		}
 		return &ast.BinaryExpr{Left: left, Op: "*", Right: p.parseExpr(precFactor)}
 	case lexer.DIV:
 		p.next()
@@ -1337,17 +1353,42 @@ func (p *Parser) parseInfix(left ast.Expr) ast.Expr {
 	case lexer.SHR:
 		p.next()
 		return &ast.BinaryExpr{Left: left, Op: ">>", Right: p.parseExpr(precShift)}
+	case lexer.SHL_ASSIGN, lexer.SHR_ASSIGN:
+		p.errWithMsg(fmt.Sprintf("compound assignment %s is not supported", kindLabel(tok.Kind)), "")
+		p.next()
+		_ = p.parseExpr(precAssign)
+		return left
 	case lexer.USHIFT_RIGHT:
 		p.next()
 		return &ast.BinaryExpr{Left: left, Op: ">>>", Right: p.parseExpr(precShift)}
 	case lexer.AND:
 		p.next()
+		if p.peek().Kind == lexer.ASSIGN {
+			// `x &&= 1` lexes as `x && = 1`; without this guard the RHS would
+			// parse to nil and emit incorrect code.
+			p.errWithMsg("compound assignment &&= is not supported", "")
+			p.next()
+			_ = p.parseExpr(precAssign)
+			return left
+		}
 		return &ast.BinaryExpr{Left: left, Op: "&&", Right: p.parseExpr(precAnd)}
 	case lexer.OR:
 		p.next()
+		if p.peek().Kind == lexer.ASSIGN {
+			p.errWithMsg("compound assignment ||= is not supported", "")
+			p.next()
+			_ = p.parseExpr(precAssign)
+			return left
+		}
 		return &ast.BinaryExpr{Left: left, Op: "||", Right: p.parseExpr(precOr)}
 	case lexer.NULLISH:
 		p.next()
+		if p.peek().Kind == lexer.ASSIGN {
+			p.errWithMsg("compound assignment ??= is not supported", "")
+			p.next()
+			_ = p.parseExpr(precAssign)
+			return left
+		}
 		return &ast.BinaryExpr{Left: left, Op: "??", Right: p.parseExpr(precOr)}
 	case lexer.ARROW:
 		p.next()

@@ -266,6 +266,10 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
 
+	if len(emitResult.Errors) > 0 {
+		return nil, "", renderErrors(spp.PagePath, emitResult.Errors)
+	}
+
 	// Compile-time reactive dependency validation. Surfaced as warnings so
 	// dead signals / circular effects are caught before hydration ships.
 	for _, d := range reactive.Build(emitResult.Signatures).Validate() {

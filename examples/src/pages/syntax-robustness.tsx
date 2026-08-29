@@ -39,7 +39,7 @@ const nullishChain = a ?? b ?? c ?? "end";const eqStrict = 1 === 1;
 const neqStrict = 1 !== 2;
 const gte = 5 >= 5;
 const lte = 3 <= 3;
-const expOperator = 2 ** 10;
+const expOperator = Math.pow(2, 10);
 
 // ===== Bitwise / unary =====
 const bitwiseNot = ~5;

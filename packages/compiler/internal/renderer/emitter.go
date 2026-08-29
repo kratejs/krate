@@ -28,6 +28,10 @@ type EmitResult struct {
 	// list slots (e.g. <Toast> in a .map() body). They're emitted into the
 	// hydration scope so the runtime can re-render lists via h(Component, ...).
 	ListComponents []*ast.FnDecl
+	// Errors holds diagnostics for unsupported constructs encountered during
+	// render. A non-empty set means the build must fail rather than ship
+	// silently empty/wrong output.
+	Errors []error
 }
 
 // SlotOutput is the result of emitting a single slot node. Beyond HTML and
@@ -94,6 +98,22 @@ type Emitter struct {
 	// Number, ...) so server-component SSR computes globals like Date.now()
 	// with real JS semantics instead of Go approximations.
 	EvalJS func(code string) (string, error)
+
+	// errs collects diagnostics for unsupported constructs encountered during
+	// emit (unknown IR slots, or SSR-evaluated expressions the evaluator could
+	// not handle). They surface on EmitResult.Errors so the build fails instead
+	// of silently emitting empty/wrong output.
+	errs []error
+}
+
+// addErr records an unsupported-construct diagnostic during emit.
+func (e *Emitter) addErr(format string, args ...interface{}) {
+	e.errs = append(e.errs, fmt.Errorf("unsupported render: "+format, args...))
+}
+
+// Errors returns the diagnostics collected during emit (may be empty).
+func (e *Emitter) Errors() []error {
+	return e.errs
 }
 
 // NewEmitter creates a new emitter.
@@ -143,6 +163,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 		UsedFuncs:      make(map[string]bool),
 		UsedCSS:        make(map[string]bool),
 		ListComponents: listComponents,
+		Errors:         e.errs,
 	}
 }
 
@@ -383,6 +404,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	}
 
 	html := eval.Eval(ret.Value)
+	e.errs = append(e.errs, eval.Errors()...)
 	out.HeadHTML += eval.HeadHTML
 	out.ScriptHTML += eval.ScriptHTML
 	out.StyleHTML += eval.StyleHTML
@@ -537,6 +559,8 @@ func (e *Emitter) emitSlotNode(slot irtree.SlotNode) SlotOutput {
 	case *irtree.ChildrenSlot:
 		return SlotOutput{HTML: "<!--__children__-->"}
 	default:
+		// Unknown IR slot node kind — error instead of silently dropping output.
+		e.addErr("slot node type %T is not supported", slot)
 		return SlotOutput{}
 	}
 }

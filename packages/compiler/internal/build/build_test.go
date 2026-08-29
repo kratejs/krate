@@ -185,3 +185,44 @@ func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
 }
+
+// TestBuildRejectsUnsupportedRenderSyntax verifies that a page whose
+// SSR-evaluated component uses an expression Krate cannot statically evaluate
+// (e.g. `this`) fails the build with a clear render error instead of silently
+// emitting empty/wrong output.
+func TestBuildRejectsUnsupportedRenderSyntax(t *testing.T) {
+	pkgDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectRoot := filepath.Clean(filepath.Join(pkgDir, "..", "..", "..", "..", "examples"))
+	if _, err := os.Stat(projectRoot); os.IsNotExist(err) {
+		t.Skipf("examples not found at %s", projectRoot)
+	}
+
+	cfg, err := config.Load(projectRoot)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+
+	pagePath := filepath.Join(cfg.PagesDir, "_render_error.tsx")
+	src := `function Bad(props) {
+  return <div>{this}</div>;
+}
+export default function Page() {
+  return <Bad />;
+}`
+	if err := os.WriteFile(pagePath, []byte(src), 0644); err != nil {
+		t.Fatalf("writing scratch page: %v", err)
+	}
+	defer os.Remove(pagePath)
+
+	b := New(projectRoot, cfg)
+	_, _, err = b.buildPage(pagePath)
+	if err == nil {
+		t.Fatal("expected buildPage to return a render error for unsupported syntax, got nil")
+	}
+	if !strings.Contains(err.Error(), "render failed") {
+		t.Errorf("expected render-failed error, got: %v", err)
+	}
+}

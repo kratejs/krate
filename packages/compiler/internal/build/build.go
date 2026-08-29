@@ -761,6 +761,10 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
 
+	if len(emitResult.Errors) > 0 {
+		return nil, "", renderErrors(page, emitResult.Errors)
+	}
+
 	// Compile-time reactive dependency validation. Surfaced as warnings so
 	// dead signals / circular effects are caught before hydration ships.
 	for _, d := range reactive.Build(emitResult.Signatures).Validate() {
@@ -1073,6 +1077,10 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
 
+	if len(emitResult.Errors) > 0 {
+		return nil, "", renderErrors(layoutPath, emitResult.Errors)
+	}
+
 	// Compile-time reactive dependency validation. Surfaced as warnings so
 	// dead signals / circular effects are caught before hydration ships.
 	for _, d := range reactive.Build(emitResult.Signatures).Validate() {
@@ -1117,7 +1125,20 @@ func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*
 	emitter := renderer.NewEmitter()
 	result := emitter.Emit(tree)
 
+	if len(result.Errors) > 0 {
+		return nil, renderErrors(page, result.Errors)
+	}
+
 	return result, nil
+}
+
+// renderErrors folds renderer diagnostics into a single clear build error.
+func renderErrors(page string, errs []error) error {
+	msgs := make([]string, 0, len(errs))
+	for _, e := range errs {
+		msgs = append(msgs, e.Error())
+	}
+	return fmt.Errorf("render failed (%s): %s", page, strings.Join(msgs, "; "))
 }
 
 // mergeCSS merges new CSS into the accumulated CSS, deduplicating by individual rule.

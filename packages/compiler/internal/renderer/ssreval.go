@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -61,6 +62,22 @@ type SSREval struct {
 	// Go evaluator can't handle statically (e.g. Date.now()) are delegated to
 	// it, producing a genuine JS-engine value at SSR/compile time.
 	evalJS func(code string) (string, error)
+
+	// errs collects diagnostics raised when an expression construct that Krate
+	// does not support is encountered during evaluation. Instead of silently
+	// emitting empty/wrong output, the emitter surfaces these so the build
+	// fails with a clear message.
+	errs []error
+}
+
+// addErr records an unsupported-construct diagnostic during evaluation.
+func (e *SSREval) addErr(format string, args ...interface{}) {
+	e.errs = append(e.errs, fmt.Errorf("unsupported expression: "+format, args...))
+}
+
+// Errors returns the diagnostics collected during evaluation (may be empty).
+func (e *SSREval) Errors() []error {
+	return e.errs
 }
 
 // SetEvalJS installs the expression-evaluation hook backed by the embedded
@@ -242,6 +259,9 @@ func (e *SSREval) Eval(expr ast.Expr) string {
 		}
 		return ""
 	default:
+		// An expression construct Krate's SSR evaluator does not support. Error
+		// instead of silently rendering empty output.
+		e.addErr("%s expression nodes are not supported", strings.TrimPrefix(fmt.Sprintf("%T", ex), "*ast."))
 		return ""
 	}
 }
