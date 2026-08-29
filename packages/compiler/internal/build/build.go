@@ -382,7 +382,12 @@ func (b *Builder) BuildAll() error {
 		}
 	}
 
-	staticParamPages := b.resolveStaticParamsPages(pages)
+	staticParamPages, gspErr := b.resolveStaticParamsPages(pages)
+	if gspErr != nil {
+		fmt.Fprintf(os.Stderr, "  %s✗ Error:%s %v\n", cRed, cReset, gspErr)
+		failureMessages = append(failureMessages, "  "+gspErr.Error())
+		errorCount++
+	}
 	if len(staticParamPages) > 0 {
 		fmt.Printf("  %s⚡%s Building %d statically generated pages from generateStaticParams\n", cCyan, cReset, len(staticParamPages))
 		for _, spp := range staticParamPages {

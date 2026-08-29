@@ -167,7 +167,10 @@ export function generateStaticParams() {
 		pagePath,
 	}
 
-	expanded := b.resolveStaticParamsPages(pages)
+	expanded, err := b.resolveStaticParamsPages(pages)
+	if err != nil {
+		t.Fatalf("resolveStaticParamsPages: %v", err)
+	}
 
 	if len(expanded) != 2 {
 		t.Fatalf("expected 2 expanded pages, got %d", len(expanded))

@@ -160,9 +160,13 @@ func isDynamicRoute(pagePath, pagesDir string) bool {
 }
 
 // resolveStaticParamsPages expands dynamic routes using generateStaticParams.
-// It returns additional pages to build, each with concrete param values.
-func (b *Builder) resolveStaticParamsPages(pages []string) []staticParamsPage {
+// It returns additional pages to build, each with concrete param values, plus
+// any errors encountered while resolving dynamic routes (bundling or executing
+// generateStaticParams). A dynamic route that lacks generateStaticParams is
+// left to runtime resolution and is not an error.
+func (b *Builder) resolveStaticParamsPages(pages []string) ([]staticParamsPage, error) {
 	var expanded []staticParamsPage
+	var errs []string
 
 	for _, page := range pages {
 		if !isDynamicRoute(page, b.Cfg.PagesDir) {
@@ -177,7 +181,7 @@ func (b *Builder) resolveStaticParamsPages(pages []string) []staticParamsPage {
 
 		bundle, err := bnd.Bundle(page)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %sWarning: failed to bundle %s for generateStaticParams: %v%s\n", cYellow, page, err, cReset)
+			errs = append(errs, fmt.Sprintf("failed to bundle %s for generateStaticParams: %v", page, err))
 			continue
 		}
 
@@ -194,7 +198,7 @@ func (b *Builder) resolveStaticParamsPages(pages []string) []staticParamsPage {
 
 		paramSets, err := executeGenerateStaticParams(page)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %s✗ generateStaticParams error (%s):%s %v\n", cRed, filepath.Base(page), cReset, err)
+			errs = append(errs, fmt.Sprintf("generateStaticParams (%s): %v", filepath.Base(page), err))
 			continue
 		}
 
@@ -222,7 +226,11 @@ func (b *Builder) resolveStaticParamsPages(pages []string) []staticParamsPage {
 		}
 	}
 
-	return expanded
+	if len(errs) > 0 {
+		return expanded, fmt.Errorf("generateStaticParams resolution failed:\n  %s", strings.Join(errs, "\n  "))
+	}
+
+	return expanded, nil
 }
 
 // buildStaticParamsPage builds a single page with its params injected into the
