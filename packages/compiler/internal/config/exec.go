@@ -106,3 +106,33 @@ func endOfLine(s string, from int) int {
 	}
 	return len(s)
 }
+
+// configUsesModules reports whether a config source relies on imports/requires
+// that the static parser cannot handle. When true, the only viable way to load
+// the config is via JS execution.
+func configUsesModules(src string) bool {
+	for _, line := range strings.Split(src, "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "import ") {
+			return true
+		}
+		// require(...) is a common way to pull in packages; it can appear
+		// mid-line (e.g. `const cfg = require('@krate/config')`).
+		if strings.Contains(line, "require(") {
+			return true
+		}
+	}
+	return false
+}
+
+// configNotExecutableError builds the error surfaced when a module-based config
+// could not be executed. It explains the likely dependency problem while
+// preserving the underlying execution error for context.
+func configNotExecutableError(tsPath string, err error) error {
+	return fmt.Errorf(
+		"parsing config %s: config uses imports/requires but could not be executed. "+
+			"This usually means packages aren't installed correctly — run `npm install` in the project root. "+
+			"Underlying error: %w",
+		tsPath, err,
+	)
+}

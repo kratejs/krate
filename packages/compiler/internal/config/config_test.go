@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -529,5 +530,40 @@ func TestWriteBootstrapResolvesPluginModules(t *testing.T) {
 		if !strings.Contains(content, want) {
 			t.Errorf("bootstrap missing %q:\n%s", want, content)
 		}
+	}
+}
+
+func TestConfigUsesModules(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"import statement", "import { defineConfig } from '@krate/config';\nexport default {}", true},
+		{"require call", "const cfg = require('@krate/config');\nexport default {}", true},
+		{"from line", "export default {};\nfrom 'x'", false},
+		{"plain literal", "export default { entry: 'src/app.tsx' }", false},
+		{"window text not import", "export default { script: 'import {}' }", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := configUsesModules(tt.src); got != tt.want {
+				t.Errorf("configUsesModules() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigNotExecutableError(t *testing.T) {
+	err := configNotExecutableError("krate.config.ts", fmt.Errorf("execution failed:\nCannot find module '@krate/config'"))
+	msg := err.Error()
+	if !strings.Contains(msg, "npm install") {
+		t.Errorf("error should mention running npm install, got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "krate.config.ts") {
+		t.Errorf("error should include config path, got:\n%s", msg)
+	}
+	if !strings.Contains(msg, "Cannot find module") {
+		t.Errorf("error should preserve underlying cause, got:\n%s", msg)
 	}
 }

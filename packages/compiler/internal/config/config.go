@@ -170,15 +170,22 @@ func Load(root string, configPath ...string) (*Config, error) {
 	}
 
 	if _, err := os.Stat(tsPath); err == nil {
+		data, readErr := os.ReadFile(tsPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("reading config %s: %w", tsPath, readErr)
+		}
 		// Try JS execution first (resolves imports, plugin factories, etc.)
 		if err := executeTSConfig(tsPath, cfg); err != nil {
-			// Fall back to static parse if npx/Node.js isn't available
-			data, readErr := os.ReadFile(tsPath)
-			if readErr != nil {
-				return nil, fmt.Errorf("reading config: %w", readErr)
+			// A config that uses module imports cannot be handled by the static
+			// parser. Falling back to it would only produce a misleading
+			// "expected export, got import" error — so surface the real reason
+			// (most commonly: packages aren't installed correctly).
+			if configUsesModules(string(data)) {
+				return nil, configNotExecutableError(tsPath, err)
 			}
+			// Otherwise fall back to static parse (simple literal configs).
 			if parseErr := parseTSConfig(string(data), cfg); parseErr != nil {
-				return nil, fmt.Errorf("parsing config: %w", parseErr)
+				return nil, fmt.Errorf("parsing config %s: %w", tsPath, parseErr)
 			}
 		}
 	}
