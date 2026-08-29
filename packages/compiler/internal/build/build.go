@@ -64,6 +64,7 @@ type Builder struct {
 	Root     string
 	Cfg      *config.Config
 	DevMode  bool
+	Verbose  bool
 	depGraph map[string][]string // file path → page source paths that depend on it
 	pageDeps map[string][]string // page source path → files it depends on
 	depMu    sync.Mutex          // protects depGraph/pageDeps
@@ -96,6 +97,18 @@ func findKrateRoot(projectRoot string) string {
 		dir = parent
 	}
 	return ""
+}
+
+// printReactiveDiags surfaces reactive validation diagnostics. These are
+// informational ("reads no signals / runs exactly once, may be intended") and
+// are only shown in verbose mode to keep the default build output quiet.
+func (b *Builder) printReactiveDiags(diags []reactive.Diagnostic) {
+	if !b.Verbose {
+		return
+	}
+	for _, d := range diags {
+		fmt.Fprintf(os.Stderr, "  %s⚠ %s%s\n", cYellow, d.Message, cReset)
+	}
 }
 
 // BuildPages rebuilds only the specified pages (by source path).
@@ -767,9 +780,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	// Compile-time reactive dependency validation. Surfaced as warnings so
 	// dead signals / circular effects are caught before hydration ships.
-	for _, d := range reactive.Build(emitResult.Signatures).Validate() {
-		fmt.Fprintf(os.Stderr, "  %s⚠ %s%s\n", cYellow, d.Message, cReset)
-	}
+	b.printReactiveDiags(reactive.Build(emitResult.Signatures).Validate())
 
 	// Include the runtime component props script (krate-id → props JSON) so
 	// serve-time rendering can resolve runtime component props from the page.
@@ -1083,9 +1094,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 
 	// Compile-time reactive dependency validation. Surfaced as warnings so
 	// dead signals / circular effects are caught before hydration ships.
-	for _, d := range reactive.Build(emitResult.Signatures).Validate() {
-		fmt.Fprintf(os.Stderr, "  %s⚠ %s%s\n", cYellow, d.Message, cReset)
-	}
+	b.printReactiveDiags(reactive.Build(emitResult.Signatures).Validate())
 
 	css = layoutBundle.CSS
 

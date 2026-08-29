@@ -29,6 +29,7 @@ type cliFlags struct {
 	ConfigPath string
 	OutDir     string
 	Watch      bool
+	Verbose    bool
 }
 
 func main() {
@@ -41,6 +42,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  --config <path>   Path to config file (default: project/krate.config.ts)\n")
 		fmt.Fprintf(os.Stderr, "  --out-dir <path>  Override output directory\n")
 		fmt.Fprintf(os.Stderr, "  --watch           Rebuild on file changes\n")
+		fmt.Fprintf(os.Stderr, "  --verbose         Print diagnostic details (e.g. reactive validation)\n")
 		os.Exit(1)
 	}
 
@@ -72,6 +74,8 @@ func parseFlags(args []string) (cliFlags, []string) {
 			i++
 		case args[i] == "--watch":
 			flags.Watch = true
+		case args[i] == "--verbose":
+			flags.Verbose = true
 		case strings.HasPrefix(args[i], "-"):
 			fmt.Fprintf(os.Stderr, "%sUnknown flag:%s %s\n", cRed, cReset, args[i])
 			os.Exit(1)
@@ -118,6 +122,7 @@ func runBuild(flags cliFlags, args []string) {
 
 	start := time.Now()
 	builder := build.New(root, cfg)
+	builder.Verbose = flags.Verbose
 	if err := builder.BuildAll(); err != nil {
 		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
@@ -151,6 +156,7 @@ func runDev(flags cliFlags, args []string) {
 	start := time.Now()
 
 	builder := build.New(root, cfg)
+	builder.Verbose = flags.Verbose
 	builder.DevMode = true
 	if err := builder.BuildAll(); err != nil {
 		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
@@ -184,6 +190,7 @@ func runServe(flags cliFlags, args []string) {
 	start := time.Now()
 
 	builder := build.New(root, cfg)
+	builder.Verbose = flags.Verbose
 	if err := builder.BuildAll(); err != nil {
 		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
 		os.Exit(1)

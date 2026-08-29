@@ -272,9 +272,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 
 	// Compile-time reactive dependency validation. Surfaced as warnings so
 	// dead signals / circular effects are caught before hydration ships.
-	for _, d := range reactive.Build(emitResult.Signatures).Validate() {
-		fmt.Fprintf(os.Stderr, "  %s⚠ %s%s\n", cYellow, d.Message, cReset)
-	}
+	b.printReactiveDiags(reactive.Build(emitResult.Signatures).Validate())
 
 	layoutPath := findLayout(spp.PagePath, b.Cfg.PagesDir)
 	if layoutPath != "" {
