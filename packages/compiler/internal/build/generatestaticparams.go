@@ -100,7 +100,7 @@ func executeGenerateStaticParams(pagePath string) ([]map[string]string, error) {
 	}
 
 	content := fmt.Sprintf(
-		`import mod from '%s';
+		`import * as mod from '%s';
 const fn = mod.generateStaticParams || (mod.default && mod.default.generateStaticParams);
 if (typeof fn !== 'function') {
   process.stderr.write('generateStaticParams is not a function\n');

@@ -2,6 +2,14 @@ interface VideoProps {
   params?: { id: string }
 }
 
+export function generateStaticParams() {
+  return [
+    { id: 'abc123' },
+    { id: 'demo-42' },
+    { id: 'hello-world' },
+  ]
+}
+
 export default function VideoPage(props: VideoProps) {
   const videoId = props.params?.id || 'unknown'
 
