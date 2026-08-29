@@ -318,10 +318,12 @@ func (b *Builder) BuildAll() error {
 	cssRuleSeen := make(map[string]bool)
 	docsCSSRuleSeen := make(map[string]bool)
 	errorCount := 0
+	var failureMessages []string
 
 	for res := range resultsCh {
 		if res.err != nil {
-			fmt.Fprintf(os.Stderr, "\n  %s✗ Error:%s %v\n", cRed, cReset, res.err)
+			fmt.Fprintf(os.Stderr, "\n  %s✗ Error (%s):%s %v\n", cRed, res.page, cReset, res.err)
+			failureMessages = append(failureMessages, fmt.Sprintf("  %s: %v", res.page, res.err))
 			errorCount++
 			continue
 		}
@@ -373,7 +375,10 @@ func (b *Builder) BuildAll() error {
 		for _, spp := range staticParamPages {
 			result, rawCSS, err := b.buildStaticParamsPage(spp)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  %s✗ Error building static params page (%s):%s %v\n", cRed, spp.OutPath, cReset, err)
+				msg := fmt.Sprintf("generateStaticParams page %s: %v", spp.OutPath, err)
+				fmt.Fprintf(os.Stderr, "  %s✗ Error:%s %v\n", cRed, cReset, msg)
+				failureMessages = append(failureMessages, "  "+msg)
+				errorCount++
 				continue
 			}
 			results = append(results, result)
@@ -452,7 +457,8 @@ func (b *Builder) BuildAll() error {
 
 	if err := b.BuildAllAPI(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sAPI Build error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		failureMessages = append(failureMessages, "  API: "+err.Error())
+		errorCount++
 	}
 
 	b.BuildMiddleware()
@@ -520,6 +526,10 @@ func (b *Builder) BuildAll() error {
 	}
 	if err := plugin.RunCommunityPlugins("AfterBuild", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterBuildCtx); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (AfterBuild):%s %v\n", cYellow, cReset, err)
+	}
+
+	if errorCount > 0 {
+		return fmt.Errorf("build failed: %d error(s):\n%s", errorCount, strings.Join(failureMessages, "\n"))
 	}
 
 	return nil
@@ -676,12 +686,12 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)
 	bundle, err := bnd.Bundle(page)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("bundling page %s: %w", page, err)
 	}
 
 	entryModule := findEntryModule(bundle.Modules)
 	if entryModule == nil || entryModule.Program == nil {
-		return nil, "", fmt.Errorf("no entry module found")
+		return nil, "", fmt.Errorf("page %s has no entry module (no default export found); a page must export a default component", page)
 	}
 
 	// Collect dependencies for partial reloads
