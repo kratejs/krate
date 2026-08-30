@@ -13,6 +13,19 @@ import (
 	"krate-compiler/internal/syntaxhighlight"
 )
 
+// resourceSentinel marks a localSignals entry as a createResource getter so
+// evalConstWithSignals can resolve its status members (.loading/.state/.error)
+// during SSR while the getter itself is still treated as reactive.
+var resourceSentinel = &ast.Identifier{Name: "__krate_resource__"}
+
+// isResourceSentinel reports whether expr is the resource getter marker.
+func isResourceSentinel(expr ast.Expr) bool {
+	if id, ok := expr.(*ast.Identifier); ok {
+		return id.Name == "__krate_resource__"
+	}
+	return false
+}
+
 // Build constructs a ComponentTree from a parsed program and its annotations.
 func Build(prog *ast.Program, ann *Annotations) *ComponentTree {
 	entryFn := ann.Functions[ann.EntryPoint]
@@ -163,6 +176,7 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 		node.Effects = b.collectEffectJS(fn.Body)
 		node.Memos = b.collectMemoJS(fn.Body)
 		node.ExtraVars = b.collectExtraVarJS(fn.Body)
+		node.ExtraVars = append(node.ExtraVars, b.collectResourceJS(fn.Body)...)
 	}
 
 	// Reset element tag counters for fresh walk
@@ -205,6 +219,26 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 			}
 		}
 		b.localSignals = merged
+	}
+
+	// Named memos (const doubled = createMemo(() => ...)) are treated as local
+	// reactive getters: mapping the getter to its arrow body expression lets
+	// JSX text reads like {doubled()} resolve to a reactive text binding with a
+	// computed SSR initial value (b.sigMap() is consulted for both reactivity
+	// detection and initial evaluation).
+	if tier == TierClient && b.localSignals != nil {
+		for name, arrow := range b.collectNamedMemos(fn.Body) {
+			if bodyExpr := arrowBodyExpr(arrow); bodyExpr != nil {
+				b.localSignals[name] = bodyExpr
+			}
+		}
+		// Resource getters (const [user, actions] = createResource(...)) are
+		// registered as reactive getters with a sentinel initial expression so
+		// reads like {user.loading} / {user.state} resolve their correct initial
+		// value during SSR while still emitting live bindings at hydration.
+		for _, name := range b.collectResourceNames(fn.Body) {
+			b.localSignals[name] = resourceSentinel
+		}
 	}
 
 	// Set component-local props: resolved call-site attribute values so that
@@ -2383,32 +2417,154 @@ func (b *builder) collectBodySignalUses(body []ast.Stmt, decls []SignalDecl) []s
 
 // ─── collectEffectJS from function body ────────────────────────────────────
 
+// collectEffectJS walks the component body for createEffect / onMount calls and
+// returns their rendered JS. It recurses into control-flow bodies (if/loops/
+// switch/try/blocks) so effects nested inside conditionals are still emitted —
+// a top-level-only walk silently drops them, leaving the callback to never run
+// during hydration.
 func (b *builder) collectEffectJS(body []ast.Stmt) []string {
 	var effects []string
+	var walk func(stmts []ast.Stmt)
+	walk = func(stmts []ast.Stmt) {
+		for _, stmt := range stmts {
+			switch s := stmt.(type) {
+			case *ast.ExprStmt:
+				if call, ok := s.Expression.(*ast.CallExpr); ok {
+					if id, ok := call.Callee.(*ast.Identifier); ok {
+						switch id.Name {
+						case "createEffect":
+							if len(call.Args) >= 1 {
+								js := generateExprJS(call.Args[0], b.sigMap())
+								effects = append(effects, "createEffect("+js+")")
+							}
+						case "onMount":
+							if len(call.Args) >= 1 {
+								js := generateExprJS(call.Args[0], b.sigMap())
+								effects = append(effects, "onMount("+js+")")
+							}
+						}
+					}
+				}
+			case *ast.BlockStmt:
+				walk(s.Body)
+			case *ast.IfStmt:
+				walk(s.Consequent)
+				walk(s.Alternate)
+			case *ast.ForStmt:
+				walk(s.Body)
+			case *ast.WhileStmt:
+				walk(s.Body)
+			case *ast.DoWhileStmt:
+				walk(s.Body)
+			case *ast.SwitchStmt:
+				for _, c := range s.Cases {
+					walk(c.Body)
+				}
+			case *ast.TryStmt:
+				walk(s.Body)
+				if s.Catch != nil {
+					walk(s.Catch.Body)
+				}
+				walk(s.Finally)
+			}
+		}
+	}
+	walk(body)
+	return effects
+}
+
+// ─── collectResourceJS from function body ──────────────────────────────────
+
+// collectResourceJS walks the component body for createResource declarations
+// (const [user, actions] = createResource(...)) and returns their full
+// declaration statements. These are emitted as extra vars so the resource
+// getter and actions object are in scope at hydration time — slot bindings and
+// handlers reference user()/user.loading/actions.refetch() and would otherwise
+// throw ReferenceError because createResource was previously dropped entirely.
+func (b *builder) collectResourceJS(body []ast.Stmt) []string {
+	var out []string
 	for _, stmt := range body {
-		if exprStmt, ok := stmt.(*ast.ExprStmt); ok {
-			if call, ok := exprStmt.Expression.(*ast.CallExpr); ok {
-				if id, ok := call.Callee.(*ast.Identifier); ok {
-					switch id.Name {
-					case "createEffect":
-						if len(call.Args) >= 1 {
-							js := generateExprJS(call.Args[0], b.sigMap())
-							effects = append(effects, "createEffect("+js+")")
-						}
-					case "onMount":
-						if len(call.Args) >= 1 {
-							js := generateExprJS(call.Args[0], b.sigMap())
-							effects = append(effects, "onMount("+js+")")
-						}
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok {
+			continue
+		}
+		for _, decl := range vs.Decls {
+			if decl.Init == nil {
+				continue
+			}
+			call, ok := decl.Init.(*ast.CallExpr)
+			if !ok {
+				continue
+			}
+			id, ok := call.Callee.(*ast.Identifier)
+			if !ok || id.Name != "createResource" {
+				continue
+			}
+			out = append(out, renderStmtJS(&ast.VarStmt{Kind: vs.Kind, Decls: []*ast.VarDecl{decl}}, b.sigMap()))
+		}
+	}
+	return out
+}
+
+// collectResourceNames returns the getter names of createResource declarations
+// (the first destructured name, e.g. `user` in const [user, actions] = ...).
+func (b *builder) collectResourceNames(body []ast.Stmt) []string {
+	var out []string
+	for _, stmt := range body {
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok {
+			continue
+		}
+		for _, decl := range vs.Decls {
+			if decl.IsDestructuring && len(decl.Names) >= 1 && decl.Init != nil {
+				if call, ok := decl.Init.(*ast.CallExpr); ok {
+					if id, ok := call.Callee.(*ast.Identifier); ok && id.Name == "createResource" {
+						out = append(out, decl.Names[0])
 					}
 				}
 			}
 		}
 	}
-	return effects
+	return out
 }
 
 // ─── collectMemoJS from function body ──────────────────────────────────────
+
+// collectNamedMemos walks the component body for non-destructuring
+// `const <name> = createMemo(<arrowFn>)` declarations and returns a map of
+// memo getter name -> arrow function. These are registered as local signals
+// so JSX reads like {doubled()} become reactive text bindings (() => doubled())
+// with a computed SSR initial value, and the declaration itself is emitted as
+// an extra var so the getter is in scope at hydration time.
+func (b *builder) collectNamedMemos(body []ast.Stmt) map[string]*ast.ArrowFn {
+	memos := make(map[string]*ast.ArrowFn)
+	for _, stmt := range body {
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok {
+			continue
+		}
+		for _, decl := range vs.Decls {
+			if decl.IsDestructuring || decl.Init == nil {
+				continue
+			}
+			call, ok := decl.Init.(*ast.CallExpr)
+			if !ok {
+				continue
+			}
+			id, ok := call.Callee.(*ast.Identifier)
+			if !ok || id.Name != "createMemo" {
+				continue
+			}
+			if len(call.Args) < 1 {
+				continue
+			}
+			if arrow, ok := call.Args[0].(*ast.ArrowFn); ok {
+				memos[decl.Name] = arrow
+			}
+		}
+	}
+	return memos
+}
 
 func (b *builder) collectMemoJS(body []ast.Stmt) []string {
 	var memos []string
@@ -2452,8 +2608,13 @@ func (b *builder) collectExtraVarJS(body []ast.Stmt) []string {
 				if decl.Init != nil {
 					if call, ok := decl.Init.(*ast.CallExpr); ok {
 						if id, ok := call.Callee.(*ast.Identifier); ok {
+							// createMemo stays an extra var so the named getter
+							// (const doubled = createMemo(...)) is declared with
+							// its real name, letting slot bindings reference it
+							// as () => doubled(). Signals/resources/effects are
+							// handled by their own collection passes.
 							switch id.Name {
-							case "createSignal", "createResource", "createMemo", "createEffect":
+							case "createSignal", "createResource", "createEffect":
 								continue
 							}
 						}
@@ -3433,6 +3594,9 @@ func evalConstWithSignals(expr ast.Expr, signals map[string]ast.Expr, props map[
 	case *ast.CallExpr:
 		if id, ok := e.Callee.(*ast.Identifier); ok {
 			if initial, ok := signals[id.Name]; ok {
+				if isResourceSentinel(initial) {
+					return "" // resource getter: no data resolved during SSR
+				}
 				return evalConstWithSignals(initial, signals, props)
 			}
 			if id.Name == "String" && len(e.Args) == 1 {
@@ -3441,6 +3605,9 @@ func evalConstWithSignals(expr ast.Expr, signals map[string]ast.Expr, props map[
 		}
 		return ""
 	case *ast.Identifier:
+		if e.Name == "__krate_resource__" {
+			return "" // resource sentinel: no data resolved during SSR
+		}
 		if initial, ok := signals[e.Name]; ok {
 			return evalConstWithSignals(initial, signals, props)
 		}
@@ -3508,6 +3675,20 @@ func evalConstWithSignals(expr ast.Expr, signals map[string]ast.Expr, props map[
 				if v, ok := props[prop.Name]; ok {
 					return v
 				}
+			}
+		} else if id, ok := e.Object.(*ast.Identifier); ok {
+			if initial, ok := signals[id.Name]; ok && isResourceSentinel(initial) {
+				if prop, ok := e.Property.(*ast.Identifier); ok {
+					switch prop.Name {
+					case "loading":
+						return "true"
+					case "state":
+						return "unresolved"
+					case "error":
+						return ""
+					}
+				}
+				return ""
 			}
 		}
 		return ""

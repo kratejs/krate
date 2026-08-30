@@ -732,8 +732,8 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error AfterParse (%s):%s %v\n", cYellow, page, cReset, err)
 	}
 
-	// Detect rendering mode (SSR/ISR/Streaming) from AST exports
-	renderMode, revalidate := detectRenderMode(entryModule.Program)
+	// Detect rendering mode (SSR/ISR/Streaming) from AST exports + <Suspense> usage
+	renderMode, revalidate := detectRenderMode(entryModule.Program, entryModule.SourceCode)
 
 	// If the page imports any runtime components, force streaming mode.
 	// Runtime components (*.runtime.tsx) must be rendered at request time,

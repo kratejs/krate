@@ -78,10 +78,17 @@ export function createResource<T, S = void>(
     });
   });
 
-  const resource: ResourceReturn<T> = Object.assign(data, {
-    get loading() { return loading(); },
-    get error() { return error(); },
-    get state() { return state(); },
+  // Note: use Object.defineProperties, NOT Object.assign, for these getters.
+  // Object.assign evaluates source getters via [[Set]] and copies the *value*
+  // as a plain data property, snapshotting state/loading/error once at creation
+  // so they never track reactive updates. defineProperties installs live accessors.
+  const resource = function (): T | undefined {
+    return data();
+  } as ResourceReturn<T>;
+  Object.defineProperties(resource, {
+    loading: { get: () => loading() },
+    error: { get: () => error() },
+    state: { get: () => state() },
   });
 
   const actions: ResourceActions<T> = {

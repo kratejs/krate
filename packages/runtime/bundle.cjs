@@ -17,6 +17,7 @@ const esbuild = require('esbuild');
 const RUNTIME_ENTRY = `
 export * from './src/signal';
 export * from './src/dom';
+export * from './src/resource';
 export * from './src/jsx-runtime';
 export * from './src/reconcile';
 export * from './src/router';
@@ -25,6 +26,7 @@ export * from './src/router';
 const HYDRATE_ENTRY = `
 export * from './src/signal';
 export * from './src/dom';
+export * from './src/resource';
 export * from './src/reconcile';
 export * from './src/router';
 `;

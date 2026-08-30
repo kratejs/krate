@@ -122,24 +122,30 @@ func generateCSPMeta(scriptHTML, styleHTML, hydrationJS, directive string) strin
 		styleHashes = append(styleHashes, sha256Base64(inline))
 	}
 
-	if len(scriptHashes) == 0 && len(styleHashes) == 0 {
-		return ""
-	}
-
+	// A base 'self' policy is meaningful even with no inline assets, so CSP is
+	// always enforced once enabled. Inline assets, when present, are allowlisted
+	// individually via their SHA-256 hashes.
 	var directives []string
 	directives = append(directives, "default-src 'self'")
 
-	if len(scriptHashes) > 0 {
-		directives = append(directives, "script-src 'self' "+strings.Join(scriptHashes, " "))
+	scriptSrc := "script-src 'self'"
+	for _, h := range scriptHashes {
+		scriptSrc += " " + h
 	}
-	if len(styleHashes) > 0 {
-		directives = append(directives, "style-src 'self' "+strings.Join(styleHashes, " "))
+	directives = append(directives, scriptSrc)
+
+	styleSrc := "style-src 'self'"
+	for _, h := range styleHashes {
+		styleSrc += " " + h
 	}
+	directives = append(directives, styleSrc)
 
 	return fmt.Sprintf("<meta http-equiv=\"Content-Security-Policy\" content=\"%s\">\n", strings.Join(directives, "; "))
 }
 
 // extractInlineContent finds content between <tag>...</tag> tags (inline, not src).
+// Tags that reference external assets (src= or href= attributes) are skipped so
+// their empty content is not hashed into a meaningless CSP directive.
 func extractInlineContent(html, tag string) []string {
 	var results []string
 	lower := strings.ToLower(html)
@@ -158,17 +164,31 @@ func extractInlineContent(html, tag string) []string {
 		if tagEnd < 0 {
 			break
 		}
+		openTag := html[start : start+tagEnd]
 		contentStart := start + tagEnd + 1
 		closeIdx := strings.Index(lower[contentStart:], searchClose)
 		if closeIdx < 0 {
 			break
 		}
 		content := html[contentStart : contentStart+closeIdx]
-		results = append(results, content)
+		// Skip external references: the tag points at a src/href, so its body is
+		// not inline content to hash.
+		if !referencesExternalAsset(openTag) {
+			if content != "" {
+				results = append(results, content)
+			}
+		}
 		pos = contentStart + closeIdx + len(searchClose)
 	}
 
 	return results
+}
+
+// referencesExternalAsset reports whether a tag's opening markup points at an
+// external resource via a src or href attribute.
+func referencesExternalAsset(openTag string) bool {
+	lower := strings.ToLower(openTag)
+	return strings.Contains(lower, "src=") || strings.Contains(lower, "href=")
 }
 
 func sha256Base64(content string) string {

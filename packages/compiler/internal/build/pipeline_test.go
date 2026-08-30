@@ -532,6 +532,68 @@ func TestPageScriptSrc(t *testing.T) {
 	}
 }
 
+// TestBuildNestedEffectsEmitted verifies createEffect/onMount calls inside
+// control-flow bodies (e.g. an if block) are still collected into the page's
+// hydration JS. A top-level-only walk drops them, so the callback would never
+// run on the client.
+func TestBuildNestedEffectsEmitted(t *testing.T) {
+	outDir := buildTestProject(t)
+	dir := filepath.Join(outDir, "effect-demo")
+	jsFiles, err := filepath.Glob(filepath.Join(dir, "index.*.js"))
+	if err != nil || len(jsFiles) == 0 {
+		t.Fatalf("no hydration JS found for effect-demo: %v", err)
+	}
+	js := readOut(t, outDir, filepath.ToSlash(jsFiles[0][len(outDir)+1:]))
+	if !strings.Contains(js, "onMount(") {
+		t.Errorf("expected onMount emitted, got:\n%.600s", js)
+	}
+	if !strings.Contains(js, "createEffect(") {
+		t.Errorf("expected createEffect emitted (even inside if-block), got:\n%.600s", js)
+	}
+}
+
+// TestBuildMemoEmitted verifies a createMemo declaration and its reactive getter
+// binding are both present in a page's hydration JS — without the declaration
+// the getter reference (e.g. doubled()) would throw ReferenceError.
+func TestBuildMemoEmitted(t *testing.T) {
+	outDir := buildTestProject(t)
+	dir := filepath.Join(outDir, "memo-demo")
+	jsFiles, err := filepath.Glob(filepath.Join(dir, "index.*.js"))
+	if err != nil || len(jsFiles) == 0 {
+		t.Fatalf("no hydration JS found for memo-demo: %v", err)
+	}
+	js := readOut(t, outDir, filepath.ToSlash(jsFiles[0][len(outDir)+1:]))
+	if !strings.Contains(js, "createMemo(") {
+		t.Errorf("expected createMemo declaration emitted, got:\n%.600s", js)
+	}
+	if !strings.Contains(js, "()=>r())") && !strings.Contains(js, "()=>i())") {
+		t.Errorf("expected reactive memo getter binding emitted, got:\n%.600s", js)
+	}
+}
+
+// TestBuildResourceEmitted verifies a createResource declaration (getter +
+// actions) is emitted into the page hydration JS and that references to the
+// resource getter/actions (loading/state/refetch) resolve against it — no
+// ReferenceError and no internal sentinel leaked into the output.
+func TestBuildResourceEmitted(t *testing.T) {
+	outDir := buildTestProject(t)
+	dir := filepath.Join(outDir, "resource-demo")
+	jsFiles, err := filepath.Glob(filepath.Join(dir, "index.*.js"))
+	if err != nil || len(jsFiles) == 0 {
+		t.Fatalf("no hydration JS found for resource-demo: %v", err)
+	}
+	js := readOut(t, outDir, filepath.ToSlash(jsFiles[0][len(outDir)+1:]))
+	if !strings.Contains(js, "createResource(") {
+		t.Errorf("expected createResource declaration emitted, got:\n%.600s", js)
+	}
+	if strings.Contains(js, "__krate_resource__") {
+		t.Errorf("internal resource sentinel leaked into hydration JS:\n%.600s", js)
+	}
+	if !strings.Contains(js, ".refetch()") {
+		t.Errorf("expected resource actions.refetch referenced, got:\n%.600s", js)
+	}
+}
+
 func writePNG(t *testing.T, path string, img image.Image) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

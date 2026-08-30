@@ -213,6 +213,22 @@ func (p *Parser) ParseProgram() *ast.Program {
 }
 
 func (p *Parser) parseStmt() ast.Stmt {
+	// Bare `async function name() {...}` declaration at statement level (not
+	// preceded by `export`). The `export async function` combos are handled in
+	// parseExport; here we consume the `async` keyword and delegate to
+	// parseFnDecl (which expects the current token to be `function`).
+	if p.peek().Kind == lexer.Async {
+		// The lexer emits Whitespace tokens, so scan past them to find the
+		// token following `async` without advancing p.pos.
+		nextPos := p.pos + 1
+		for nextPos < len(p.tokens) && p.tokens[nextPos].Kind == lexer.Whitespace {
+			nextPos++
+		}
+		if nextPos < len(p.tokens) && p.tokens[nextPos].Kind == lexer.Function {
+			p.next() // consume `async`, now at `function`
+			return p.parseFnDecl()
+		}
+	}
 	switch p.peek().Kind {
 	case lexer.Import:
 		return p.parseImport()

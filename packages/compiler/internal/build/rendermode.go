@@ -41,24 +41,22 @@ type PageMeta struct {
 	Revalidate int       `json:"revalidate,omitempty"` // ISR revalidation interval in seconds
 }
 
-// detectRenderMode inspects a page's AST to determine its rendering mode.
-// Returns the mode and revalidation interval.
-func detectRenderMode(prog *ast.Program) (RenderMode, int) {
+// detectRenderMode inspects a page's AST and source to determine its rendering
+// mode. Returns the mode and revalidation interval.
+func detectRenderMode(prog *ast.Program, source string) (RenderMode, int) {
+	// Explicit opt-in: export const config = { streaming: true }
 	for _, stmt := range prog.Body {
-		exp, ok := stmt.(*ast.ExportStmt)
-		if !ok {
-			continue
-		}
-
-		// Detect: export const config = { streaming: true }
-		if vs, ok := exp.Declaration.(*ast.VarStmt); ok {
-			for _, d := range vs.Decls {
-				if d.Name == "config" && d.Init != nil {
-					if obj, ok := d.Init.(*ast.ObjectExpr); ok {
-						for _, prop := range obj.Properties {
-							if prop.Key == "streaming" {
-								if lit, ok := prop.Value.(*ast.Literal); ok && lit.Kind == ast.BoolLit && lit.Value == "true" {
-									return RenderStreaming, 0
+		if exp, ok := stmt.(*ast.ExportStmt); ok {
+			// Detect: export const config = { streaming: true }
+			if vs, ok := exp.Declaration.(*ast.VarStmt); ok {
+				for _, d := range vs.Decls {
+					if d.Name == "config" && d.Init != nil {
+						if obj, ok := d.Init.(*ast.ObjectExpr); ok {
+							for _, prop := range obj.Properties {
+								if prop.Key == "streaming" {
+									if lit, ok := prop.Value.(*ast.Literal); ok && lit.Kind == ast.BoolLit && lit.Value == "true" {
+										return RenderStreaming, 0
+									}
 								}
 							}
 						}
@@ -66,6 +64,12 @@ func detectRenderMode(prog *ast.Program) (RenderMode, int) {
 				}
 			}
 		}
+	}
+
+	// Using <Suspense> implies a streaming boundary — resolved fallbacks are
+	// swapped in at request time, so such pages cannot be statically baked.
+	if hasSuspenseBoundaries(source) {
+		return RenderStreaming, 0
 	}
 
 	return RenderSSG, 0

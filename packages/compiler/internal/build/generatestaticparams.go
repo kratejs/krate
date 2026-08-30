@@ -251,7 +251,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		return nil, "", fmt.Errorf("no entry module found")
 	}
 
-	renderMode, revalidate := detectRenderMode(entryModule.Program)
+	renderMode, revalidate := detectRenderMode(entryModule.Program, entryModule.SourceCode)
 
 	// Global streaming override: if configured, force all pages to stream.
 	if b.Cfg.SSR.Streaming && renderMode != RenderStreaming {

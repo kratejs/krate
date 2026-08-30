@@ -176,6 +176,8 @@ func TestSyntaxRobustness(t *testing.T) {
 		{"export-const", "export const x = 1;"},
 		{"export-function", "export function foo() {}"},
 		{"export-async", "export async function foo() {}"},
+		{"bare-async-fn", "async function load() { return await fetch('/api'); }"},
+		{"bare-async-fn-jsx", "async function Slow() { return <div class=\"slow\">Slow loaded</div>; } export default function F() { return <Slow />; }"},
 
 		// ── TSX / JSX ──
 		{"jsx-nested", "export default function F() { return <div><span>a</span><span>b</span></div>; }"},
