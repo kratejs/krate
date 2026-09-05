@@ -248,9 +248,22 @@ export function initRouter(): void {
 
     // Load new scripts, then rehydrate
     loadScripts(scripts, url).then(() => {
-      rehydrate();
-      // Re-observe new prefetch links after hydration
-      observePrefetchLinks();
+      try {
+        rehydrate();
+        observePrefetchLinks();
+      } catch (err) {
+        // Hydration threw (e.g. a page-side error or a compiler emission bug).
+        // Rather than leave the route half-mounted against a live SPA DOM,
+        // fall back to a full page load of the SSR HTML. The optional global
+        // hook lets embedders be notified; a throw inside the hook is ignored.
+        try {
+          const hook = (globalThis as any).__krate_onHydrationError;
+          if (typeof hook === 'function') hook(err);
+        } catch {
+          /* ignore hook failures */
+        }
+        location.href = url;
+      }
     });
 
     endTransition();

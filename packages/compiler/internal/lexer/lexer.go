@@ -248,7 +248,7 @@ func (l *Lexer) Tokenize() []Token {
 		l.start = l.pos
 		ch := l.next()
 
-		if unicode.IsSpace(ch) {
+		if unicode.IsSpace(ch) || ch == '\ufeff' {
 			l.emit(Whitespace)
 			continue
 		}

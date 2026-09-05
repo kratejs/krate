@@ -497,3 +497,20 @@ type AwaitExpr struct {
 func (a *AwaitExpr) node()   {}
 func (a *AwaitExpr) expr()   {}
 func (a *AwaitExpr) Pos() Pos { return a.Position }
+
+type DynamicImport struct {
+	Position Pos
+	Arg      Expr
+}
+
+func (d *DynamicImport) node()   {}
+func (d *DynamicImport) expr()   {}
+func (d *DynamicImport) Pos() Pos { return d.Position }
+
+type ImportMetaExpr struct {
+	Position Pos
+}
+
+func (im *ImportMetaExpr) node()   {}
+func (im *ImportMetaExpr) expr()   {}
+func (im *ImportMetaExpr) Pos() Pos { return im.Position }

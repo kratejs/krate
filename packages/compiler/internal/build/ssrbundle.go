@@ -245,14 +245,14 @@ return'';
 function createSignal(initial){var v=initial;return[function(){return v;},function(n){v=n;}];}
 function createEffect(fn){return function(){};}
 function createMemo(fn){return fn;}
-function onMount(fn){try{fn();}catch(e){}}
+function onMount(){}
 function onCleanup(fn){}
 function createContext(def){return{Provider:function(p){return p.children;},useContext:function(){return def;},defaultValue:def};}
 function createResource(){return[function(){return undefined;},{mutate:function(){},refetch:function(){}}];}
 function h(tag,props){var ch=[];for(var i=2;i<arguments.length;i++)ch.push(arguments[i]);props=props||{};props.children=ch.length<=1?ch[0]:ch;return jsx(tag,props);}
 function mount(){}
 function hydrate(){}
-function useRef(){return{current:null};}
+function useRef(initial){return{current:initial===undefined?null:initial};}
 function useCallback(fn){return fn;}
 function forwardRef(fn){return fn;}
 function createElement(tag,props){var ch=[];for(var i=2;i<arguments.length;i++)ch.push(arguments[i]);props=props||{};props.children=ch.length<=1?ch[0]:ch;return jsx(tag,props);}

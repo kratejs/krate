@@ -2,6 +2,11 @@ const context: Array<EffectState> = [];
 const mountQueue: Array<() => void> = [];
 let mountScheduled = false;
 const allEffects = new Set<EffectState>();
+// Top-level onCleanup registrations (called outside an effect body) are scoped
+// to the page/root and run when disposeAll() executes on route change. This
+// gives component-level cleanup semantics: a component's top-level onCleanup
+// registers once when its hydration IIFE runs and is invoked on unmount.
+const rootCleanups: Array<() => void> = [];
 
 // Pending effects scheduled to re-run in the next microtask. Writes batch
 // subscriber re-runs into a single flush so N writes in a loop (or one write
@@ -48,6 +53,14 @@ export function disposeAll(): void {
     disposeEffect(effect);
   }
   allEffects.clear();
+  for (const cleanup of rootCleanups) {
+    try {
+      cleanup();
+    } catch {
+      // Cleanup errors must not prevent remaining cleanups or DOM swap.
+    }
+  }
+  rootCleanups.length = 0;
   pending.length = 0;
   flushScheduled = false;
 }
@@ -159,6 +172,10 @@ export function onCleanup(fn: () => void): void {
   const current = context[context.length - 1];
   if (current) {
     current.cleanups.push(fn);
+  } else {
+    // No active effect: treat as a root/component-level cleanup, run on
+    // disposeAll() (route change / page teardown).
+    rootCleanups.push(fn);
   }
 }
 
@@ -210,8 +227,43 @@ export function createMemo<T>(fn: () => T): () => T {
   return get;
 }
 
+/** A mutable ref object. `current` starts as `initial` and is assigned the
+ * DOM element when passed as `ref={refObj}` on an element. */
+export interface RefObject<T> {
+  current: T;
+}
+
+/** A ref that may be a plain callback or a `{current}` object. */
+export type Ref<T> = RefCallback<T> | RefObject<T | null>;
+
+/** A callback-style ref: invoked with the element (or null on cleanup). */
+export type RefCallback<T> = (el: T) => void;
+
+/** Result type of the {@link useRef} hook's component-level ref: an object
+ * whose `current` is set by `ref={refObj}` bindings. */
+export type UseRefResult<T> = RefObject<T>;
+
+/**
+ * Create a mutable ref object. Unlike React, `useRef` always allocates a
+ * fresh `{current: initial}` object; Krate components run their body once per
+ * mount (client) and once per evaluation (SSR), so the object naturally
+ * persists for the component's lifetime without additional bookkeeping.
+ *
+ * Pass the object as `ref={myRef}` on a DOM element to have `.current` set to
+ * the element, or read/write `.current` directly for imperative handles.
+ */
+export function useRef<T>(initial: T): UseRefResult<T> {
+  return { current: initial };
+}
+
+/**
+ * Pass `ref` through a forwarding component to the underlying element or
+ * component. The ref may be either a callback or a `{current}` object; both
+ * are invoked/assigned with the forwarded element.
+ */
 export function forwardRef<P>(
-  renderFn: (props: P, ref: (el: Element) => void) => Node | null | undefined
-): (props: P & { ref?: (el: Element) => void }) => Node | null | undefined {
-  return (props: P & { ref?: (el: Element) => void }) => renderFn(props, props.ref || (() => {}));
+  renderFn: (props: P, ref: Ref<Element>) => Node | null | undefined
+): (props: P & { ref?: Ref<Element> }) => Node | null | undefined {
+  return (props: P & { ref?: Ref<Element> }) =>
+    renderFn(props, props.ref || ((() => {}) as RefCallback<Element>));
 }

@@ -102,6 +102,10 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 		return generateExprJS(e.Expr, signals)
 	case *ast.AwaitExpr:
 		return "await " + generateExprJS(e.Arg, signals)
+	case *ast.DynamicImport:
+		return "import(" + generateExprJS(e.Arg, signals) + ")"
+	case *ast.ImportMetaExpr:
+		return "import.meta"
 	case *ast.ThisExpr:
 		return "this"
 	case *ast.JSXElement:

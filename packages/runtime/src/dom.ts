@@ -136,6 +136,7 @@ function setAttr(el: Element, key: string, value: unknown): void {
     (el as any)[handlerKey] = value;
   } else if (key === 'ref') {
     if (typeof value === 'function') value(el);
+    else if (value && typeof value === 'object' && 'current' in value) (value.current as unknown) = el;
   } else if (key === 'key') {
     // key is metadata only, not set as attribute
   } else if (value !== null && value !== undefined && value !== false) {

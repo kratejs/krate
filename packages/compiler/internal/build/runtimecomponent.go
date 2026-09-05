@@ -72,7 +72,7 @@ function Style(){return'';}
 function Link(p){p=p||{};var attrs={};for(var k in p)attrs[k]=p[k];var href=p.href||'';var ext=/^(https?:|mailto:|tel:|#|javascript:|\/\/)/.test(href)||p.target==='_blank'||p.download!==undefined;if(ext){attrs['data-krate-external']='';}else{attrs['data-krate-link']='';if(p.prefetch!==false)attrs['data-prefetch']='';if(p.replace)attrs['data-krate-replace']='';if(p.scroll===false)attrs['data-krate-scroll']='false';}if(p.target==='_blank'&&!p.rel)attrs.rel='noopener noreferrer';return jsx('a',attrs);}
 function Image(p){return jsx('img',p);}
 function Icon(){return'';}
-function useRef(){return{current:null};}
+function useRef(initial){return{current:initial===undefined?null:initial};}
 function useCallback(fn){return fn;}
 function forwardRef(fn){return fn;}
 function createElement(tag,props){var ch=[];for(var i=2;i<arguments.length;i++)ch.push(arguments[i]);props=props||{};props.children=ch.length<=1?ch[0]:ch;return jsx(tag,props);}

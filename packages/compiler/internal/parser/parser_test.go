@@ -214,6 +214,41 @@ func TestNewExpression(t *testing.T) {
 	}
 }
 
+func TestDynamicImport(t *testing.T) {
+	prog, errs := parse(t, "const x = import('./widget.js');")
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	decl := firstVarDecl(t, prog)
+	di, ok := decl.Init.(*ast.DynamicImport)
+	if !ok {
+		t.Fatalf("expected DynamicImport, got %T", decl.Init)
+	}
+	lit, ok := di.Arg.(*ast.Literal)
+	if !ok || lit.Kind != ast.StringLit {
+		t.Fatalf("expected string literal arg, got %#v", di.Arg)
+	}
+}
+
+func TestImportMeta(t *testing.T) {
+	prog, errs := parse(t, "const u = new URL('../scenes/model.gltf', import.meta.url);")
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	decl := firstVarDecl(t, prog)
+	ne, ok := decl.Init.(*ast.NewExpr)
+	if !ok {
+		t.Fatalf("expected NewExpr, got %T", decl.Init)
+	}
+	me, ok := ne.Args[1].(*ast.MemberExpr)
+	if !ok {
+		t.Fatalf("expected MemberExpr for import.meta.url, got %T", ne.Args[1])
+	}
+	if _, ok := me.Object.(*ast.ImportMetaExpr); !ok {
+		t.Fatalf("expected ImportMetaExpr, got %T", me.Object)
+	}
+}
+
 func TestAwaitExpression(t *testing.T) {
 	prog, errs := parse(t, "const x = await fetch('/api');")
 	if len(errs) > 0 {

@@ -107,6 +107,26 @@ func (p *Parser) peek() lexer.Token {
 	return p.tokens[p.pos]
 }
 
+// peekN returns the kind of the Nth non-whitespace token ahead of the current
+// position without consuming it (peekN(0) is the current token, mirroring
+// peek().Kind). Used for cheap disambiguation lookahead.
+func (p *Parser) peekN(kindCount int) lexer.Kind {
+	i := p.pos
+	seen := 0
+	for i < len(p.tokens) {
+		if p.tokens[i].Kind == lexer.Whitespace {
+			i++
+			continue
+		}
+		if seen == kindCount {
+			return p.tokens[i].Kind
+		}
+		seen++
+		i++
+	}
+	return lexer.EOF
+}
+
 func (p *Parser) next() lexer.Token {
 	p.skipWS()
 	tok := p.peek()
@@ -231,6 +251,12 @@ func (p *Parser) parseStmt() ast.Stmt {
 	}
 	switch p.peek().Kind {
 	case lexer.Import:
+		// Distinguish a static import statement (`import x from '...'`) from a
+		// dynamic import expression used as a statement
+		// (`import('./m.js').then(...)`) by checking for the paren form.
+		if p.peekN(1) == lexer.LPAREN {
+			return p.parseDynamicImportStmt()
+		}
 		return p.parseImport()
 	case lexer.Export:
 		return p.parseExport()
@@ -374,9 +400,25 @@ func (p *Parser) parseEnumDecl() ast.Stmt {
 	return nil
 }
 
+func (p *Parser) parseDynamicImportStmt() ast.Stmt {
+	expr := p.parseExpr(precLowest)
+	if expr != nil {
+		p.match(lexer.SEMI)
+		return &ast.ExprStmt{Position: expr.Pos(), Expression: expr}
+	}
+	p.next()
+	return nil
+}
+
 func (p *Parser) parseImport() ast.Stmt {
 	pos := tokPos(p.next())
 	stmt := &ast.ImportStmt{Position: pos}
+
+	// Skip `type` in `import type {...}` — type-only imports carry no runtime
+	// binding, so they can be ignored by the hydration pipeline.
+	if isIdentifierToken(p.peek().Kind) && p.peek().Value == "type" {
+		p.next()
+	}
 
 	if isIdentifierToken(p.peek().Kind) {
 		stmt.Default = p.next().Value
@@ -736,6 +778,8 @@ func (p *Parser) parseFnDecl() ast.Stmt {
 		Name:     name,
 	}
 
+	p.skipTypeParams()
+
 	p.expect(lexer.LPAREN)
 	fn.Params = p.parseParamList()
 	p.expect(lexer.RPAREN)
@@ -848,6 +892,19 @@ func (p *Parser) parseParamList() []*ast.Param {
 	for p.peek().Kind != lexer.RPAREN && p.peek().Kind != lexer.EOF {
 		param := &ast.Param{}
 
+		// A `this` parameter (`method(this: Counter)`) is compile-time only —
+		// skip it and its annotation entirely.
+		if isIdentifierToken(p.peek().Kind) && p.peek().Value == "this" {
+			p.next()
+			if p.peek().Kind == lexer.COLON {
+				p.skipTypeAnnotation(false)
+			}
+			if !p.match(lexer.COMMA) {
+				break
+			}
+			continue
+		}
+
 		if p.match(lexer.LBRACE) {
 			param.Name = "{...}"
 			for p.peek().Kind != lexer.RBRACE && p.peek().Kind != lexer.EOF {
@@ -945,6 +1002,22 @@ func (p *Parser) parsePrefix() ast.Expr {
 		return &ast.Identifier{Name: "async"}
 	}
 
+	if tok.Kind == lexer.Import {
+		// `import.meta` (module metadata read) vs dynamic import `import('./m.js')`.
+		if p.peekN(1) == lexer.DOT {
+			p.next() // consume `import`
+			p.next() // consume `.`
+			p.next() // consume `meta`
+			return &ast.ImportMetaExpr{Position: tokPos(tok)}
+		}
+		// Dynamic import expression: `import('./module.js')`.
+		p.next()
+		p.expect(lexer.LPAREN)
+		arg := p.parseExpr(precLowest)
+		p.expect(lexer.RPAREN)
+		return &ast.DynamicImport{Position: tokPos(tok), Arg: arg}
+	}
+
 	if isIdentifierToken(tok.Kind) {
 		p.next()
 		return &ast.Identifier{Position: tokPos(tok), Name: tok.Value}
@@ -988,6 +1061,12 @@ func (p *Parser) parsePrefix() ast.Expr {
 		return &ast.Literal{Position: tokPos(tok), Kind: ast.RegexpLit, Value: tok.Value}
 
 	case lexer.LT:
+		// `<T>expr` angle-bracket type assertion (e.g. `<string>foo`) — only
+		// distinguished from JSX when the bracketed name is a primitive type
+		// keyword, which never names a JSX element.
+		if p.pos+1 < len(p.tokens) && isPrimitiveTypeKeyword(p.tokens[p.pos+1].Kind) {
+			return p.parseTypeAssertion()
+		}
 		return p.parseJSXElement()
 
 	case lexer.LPAREN:
@@ -1919,6 +1998,38 @@ func (p *Parser) parseJSXAttr() *ast.JSXAttr {
 	return nil
 }
 
+// skipTypeParams skips a generic type-parameter list (`<T, U extends X>`)
+// if one is present at the current position. These are pure compile-time
+// syntax and carry no runtime meaning for hydration generation.
+func (p *Parser) skipTypeParams() {
+	if p.peek().Kind != lexer.LT {
+		return
+	}
+	depth := 0
+	for {
+		tok := p.peek()
+		if tok.Kind == lexer.EOF {
+			return
+		}
+		switch tok.Kind {
+		case lexer.LT:
+			depth++
+		case lexer.GT:
+			depth--
+			if depth <= 0 {
+				p.next()
+				return
+			}
+		case lexer.SHL:
+			p.next()
+			continue
+		case lexer.SEMI:
+			return
+		}
+		p.next()
+	}
+}
+
 func (p *Parser) skipTypeAnnotation(beforeBrace bool, stopAtArrow ...bool) {
 	if p.peek().Kind != lexer.COLON {
 		return
@@ -1959,6 +2070,35 @@ func isUpper(s string) bool {
 		return false
 	}
 	return unicode.IsUpper(rune(s[0]))
+}
+
+// isPrimitiveTypeKeyword reports whether a token names a primitive type that
+// can open an angle-bracket type assertion (`<T>`). These never name JSX
+// elements, so a leading `<` of this form is unambiguous.
+func isPrimitiveTypeKeyword(k lexer.Kind) bool {
+	switch k {
+	case lexer.String_, lexer.Number_, lexer.Boolean_, lexer.Any_, lexer.Unknown_, lexer.Never_, lexer.Symbol_, lexer.Void_:
+		return true
+	}
+	return false
+}
+
+// parseTypeAssertion parses an angle-bracket type assertion `<T>expr`, where
+// the leading `<` is already consumed. The cast itself is compile-time only;
+// the embedded runtime expression is preserved.
+func (p *Parser) parseTypeAssertion() ast.Expr {
+	pos := tokPos(p.peek())
+	p.next() // consume `<`
+	// Consume the type reference up to the closing `>`.
+	for p.peek().Kind != lexer.GT && p.peek().Kind != lexer.EOF && p.peek().Kind != lexer.SEMI {
+		p.next()
+	}
+	p.expect(lexer.GT)
+	expr := p.parseExpr(precUnary)
+	if expr == nil {
+		return nil
+	}
+	return &ast.TypeAssertion{Position: pos, Expr: expr}
 }
 
 func tokPos(tok lexer.Token) ast.Pos {

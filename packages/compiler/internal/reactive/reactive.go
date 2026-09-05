@@ -403,6 +403,9 @@ func scanExprForSignals(g *Graph, e *EffectNode, expr ast.Expr, deferred bool) {
 		scanStmtForSignals(g, e, x.Body, true)
 	case *ast.AwaitExpr:
 		scanExprForSignals(g, e, x.Arg, deferred)
+	case *ast.DynamicImport:
+		scanExprForSignals(g, e, x.Arg, deferred)
+	case *ast.ImportMetaExpr:
 	case *ast.NewExpr:
 		scanExprForSignals(g, e, x.Callee, deferred)
 		for _, arg := range x.Args {

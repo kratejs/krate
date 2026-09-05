@@ -315,6 +315,58 @@ export default function Page() {
 	}
 }
 
+func TestHydrationJSWithTopLevelOnCleanup(t *testing.T) {
+	src := `function Widget() {
+  onCleanup(function () {
+    window.clearAll();
+  });
+  return <div>widget</div>;
+}
+export default function Page() {
+  return <Widget />;
+}`
+	_, js := fullPipeline(t, src)
+	if !strings.Contains(js, "onCleanup(") {
+		t.Errorf("expected hydration JS to emit top-level onCleanup, got:\n%s", js)
+	}
+}
+
+func TestHydrationJSWithDynamicImport(t *testing.T) {
+	src := `function Widget() {
+  createEffect(function () {
+    import("./widget.js").then(function (m) { window.setTitle(m.title); });
+  });
+  return <div>widget</div>;
+}
+export default function Page() {
+  return <Widget />;
+}`
+	_, js := fullPipeline(t, src)
+	if !strings.Contains(js, "import('./widget.js')") {
+		t.Errorf("expected hydration JS to emit dynamic import, got:\n%s", js)
+	}
+}
+
+func TestHydrationJSWithImportMetaURL(t *testing.T) {
+	src := `function Widget() {
+  createEffect(function () {
+    var banner = new URL("../assets/banner.png", import.meta.url);
+    window.setBanner(banner.href);
+  });
+  return <div>widget</div>;
+}
+export default function Page() {
+  return <Widget />;
+}`
+	_, js := fullPipeline(t, src)
+	if !strings.Contains(js, "import.meta.url") {
+		t.Errorf("expected hydration JS to emit import.meta.url, got:\n%s", js)
+	}
+	if !strings.Contains(js, "new URL(") {
+		t.Errorf("expected hydration JS to emit new URL, got:\n%s", js)
+	}
+}
+
 // ─── New pipeline: Component tiers ───────────────────────────────────────────
 
 func TestServerComponentRendering(t *testing.T) {

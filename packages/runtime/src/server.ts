@@ -33,9 +33,10 @@ export function onCleanup(_fn: () => void): void {
   // No-op on server
 }
 
-export function onMount(fn: () => void): void {
-  // On server, run immediately (synchronous)
-  fn();
+export function onMount(_fn: () => void): void {
+  // No-op on server: onMount callbacks (DOM setup, WebGL renderers, timers) are
+  // client-only. Running them during SSR would touch a DOM that doesn't exist
+  // and crash.
 }
 
 // ── JSX Runtime (server: renders to HTML strings) ─────────────────────────────

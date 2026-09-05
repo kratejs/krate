@@ -1,5 +1,5 @@
-export { createSignal, createEffect, createMemo, onCleanup, onMount, forwardRef, disposeAll } from './signal.js';
-export { h, mount, hydrate, insert, clearNodes } from './dom.js';
+export { createSignal, createEffect, createMemo, onCleanup, onMount, forwardRef, useRef, disposeAll } from './signal.js';
+export { h, mount, hydrate, insert, clearNodes, disposeNode } from './dom.js';
 export { Fragment, jsx, jsxs } from './jsx-runtime.js';
 export { initRouter, reinitRouter } from './router.js';
 export { createContext, resetContexts } from './context.js';
@@ -7,5 +7,6 @@ export { createResource } from './resource.js';
 export type { Context } from './context.js';
 export type { ResourceReturn, ResourceActions } from './resource.js';
 export type { Component, PropsWithChildren, ComponentProps, RefCallback } from './dom.js';
+export type { RefObject, Ref, UseRefResult } from './signal.js';
 import './jsx-types.js';
 import './css-modules.js';

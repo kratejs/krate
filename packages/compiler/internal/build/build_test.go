@@ -9,6 +9,44 @@ import (
 	"krate-compiler/internal/config"
 )
 
+func TestSubstituteImportMetaURL(t *testing.T) {
+	js := "const base = new URL('../models/', import.meta.url);"
+	got := substituteImportMetaURL(js, "demo", "index.ab12cd.js")
+	want := "const base = new URL('../models/', \"/demo/index.ab12cd.js\");"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	if !strings.Contains(substituteImportMetaURL("no import.meta here", "x", "y.js"), "import.meta") {
+		t.Fatal("must be a no-op when import.meta.url is absent")
+	}
+}
+
+func TestWriteAssetFiles(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "asset.png")
+	if err := os.WriteFile(src, []byte("png-bytes"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.OutDir = filepath.Join(root, "dist")
+	b := New(root, cfg)
+	assets := map[string]string{src: "/assets/logo-x1y2z3.png"}
+	if err := b.writeAssetFiles(assets); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(cfg.OutDir, "assets", "logo-x1y2z3.png"))
+	if err != nil {
+		t.Fatalf("copied asset missing: %v", err)
+	}
+	if string(data) != "png-bytes" {
+		t.Fatalf("asset contents mismatch: %q", data)
+	}
+	// Idempotent second pass must not error.
+	if err := b.writeAssetFiles(assets); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+}
+
 func TestBuildTestProject(t *testing.T) {
 	// Find the examples project root relative to this package
 	pkgDir, err := os.Getwd()

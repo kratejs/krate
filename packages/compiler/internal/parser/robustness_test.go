@@ -193,6 +193,28 @@ func TestSyntaxRobustness(t *testing.T) {
 		{"jsx-template-attr", "export default function F() { return <div title={`hello ${name}`}>x</div>; }"},
 		{"jsx-handler", "export default function F() { const [v, sv] = createSignal(0); return <button onClick={() => { sv(v() + 1); }}>x</button>; }"},
 		{"jsx-spread-plus-attr", "export default function F() { return <div {...{ class: 'c', 'data-x': '1' }} />; }"},
+
+		// ── Generic type parameters / assertions ──
+		{"generic-fn-decl-simple", "function id<T>(x: T): T { return x; }"},
+		{"generic-fn-decl-extends", "function id<T extends object>(x: T): T { return x; }"},
+		{"generic-fn-decl-multi", "function pick<K extends string, V>(k: K, v: V): V { return v; }"},
+		{"generic-fn-decl-default", "function noop<T = string>() { return null; }"},
+		{"angle-bracket-cast-primitive", "const cast = <string>generic({ x: 1 }).x;"},
+		{"angle-bracket-cast-union", "const v = <number | string>raw;"},
+		{"as-const-in-array-destructure", "const [a, , c = 'd' as const] = tup;"},
+		{"satisfies-operator", "const lvl = Level.High satisfies Level;"},
+
+		// ── type-only imports / exports ──
+		{"import-type-named", "import type { FC } from 'krate';"},
+		{"import-type-default", "import type Foo from 'foo';"},
+		{"import-type-namespace", "import type * as Types from 'types';"},
+
+		// ── class members ──
+		{"class-fields", "class Counter { label = 'c'; static kind = 'k'; }"},
+		{"class-getter", "class Counter { get value() { return this.label; } }"},
+		{"class-method-this-param", "class Counter { method(this: Counter): string { return 'm'; } }"},
+		{"class-method-generic", "class Box { wrap<T>(v: T): T { return v; } }"},
+		{"class-new-fields", "export default function F() { const c = new Counter(); c.label = 'x'; return <div>{c.label}</div>; }"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

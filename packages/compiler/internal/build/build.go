@@ -68,6 +68,10 @@ type Builder struct {
 	depGraph map[string][]string // file path → page source paths that depend on it
 	pageDeps map[string][]string // page source path → files it depends on
 	depMu    sync.Mutex          // protects depGraph/pageDeps
+
+	workerMu sync.Mutex
+	workers  map[string]string // worker source path → hashed site URL (/workers/…)
+	workerEsm map[string]bool  // worker source path → built as ES module
 }
 
 func New(root string, cfg *config.Config) *Builder {
@@ -445,6 +449,13 @@ func (b *Builder) BuildAll() error {
 
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, cssFile, runtimeJS)
+
+	// Compile and emit any registered web workers to /workers/.
+	if err := b.writeWorkerBundles(); err != nil {
+		fmt.Fprintf(os.Stderr, "  %sWorker bundle error:%s %v\n", cYellow, cReset, err)
+		failureMessages = append(failureMessages, "  workers: "+err.Error())
+		errorCount++
+	}
 
 	if b.Cfg.PublicDir != "" {
 		if info, err := os.Stat(b.Cfg.PublicDir); err == nil && info.IsDir() {
@@ -850,8 +861,14 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			finalJS := strings.TrimSpace(hydrationJS)
 			jsHash := hashContent([]byte(finalJS))
 			jsFile = "index." + jsHash + ".js"
+			finalJS = substituteImportMetaURL(finalJS, outName, jsFile)
 			jsPath := filepath.Join(pageDir, jsFile)
 			os.WriteFile(jsPath, []byte(finalJS), 0644)
+
+			// Keep the CSP hash and any other ingest in sync with the bytes
+			// actually written (which may differ from hydrationJS if
+			// import.meta.url was substituted).
+			hydrationJS = finalJS
 
 			if b.Cfg.Sourcemap {
 				sm := generateSourcemap(finalJS, hydrationJS, page)
@@ -862,6 +879,11 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			hydrationJS = ""
 		}
 	}
+
+	if err := b.writeAssetFiles(bundle.AssetFiles); err != nil {
+		return nil, "", fmt.Errorf("writing assets for %s: %w", page, err)
+	}
+	b.registerWorkers(bundle.WorkerFiles, bundle.WorkerEsm)
 
 	printResult(outName, jsFile)
 
@@ -1549,6 +1571,153 @@ func hashContent(data []byte) string {
 		v /= 36
 	}
 	return string(buf[:])
+}
+
+// registerWorkers collects worker registrations from a page bundle into the
+// build-wide worker set. Safe to call concurrently from page goroutines.
+func (b *Builder) registerWorkers(files map[string]string, esm map[string]bool) {
+	if len(files) == 0 {
+		return
+	}
+	b.workerMu.Lock()
+	defer b.workerMu.Unlock()
+	if b.workers == nil {
+		b.workers = make(map[string]string)
+		b.workerEsm = make(map[string]bool)
+	}
+	for src, url := range files {
+		b.workers[src] = url
+	}
+	for src, isEsm := range esm {
+		if isEsm {
+			b.workerEsm[src] = true
+		}
+	}
+}
+
+// writeWorkerBundles compiles every registered worker source into the output
+// directory at its hashed /workers/… URL. Workers are produced with esbuild so
+// their own relative imports are bundled into a single browser-safe file.
+func (b *Builder) writeWorkerBundles() error {
+	b.workerMu.Lock()
+	workers := make(map[string]string, len(b.workers))
+	for src, url := range b.workers {
+		workers[src] = url
+	}
+	esm := make(map[string]bool, len(b.workerEsm))
+	for src, v := range b.workerEsm {
+		if v {
+			esm[src] = true
+		}
+	}
+	b.workerMu.Unlock()
+
+	if len(workers) == 0 {
+		return nil
+	}
+
+	built := make(map[string]string)
+	for src, url := range workers {
+		rel := strings.TrimPrefix(url, "/")
+		if rel == "" || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		outPath := filepath.Join(b.Cfg.OutDir, filepath.FromSlash(rel))
+		if _, err := os.Stat(outPath); err == nil {
+			built[src] = url
+			continue
+		}
+		parent := filepath.Dir(outPath)
+		if err := os.MkdirAll(parent, 0755); err != nil {
+			return err
+		}
+
+loader := api.LoaderJS
+		ext := strings.ToLower(filepath.Ext(src))
+		switch ext {
+		case ".ts":
+			loader = api.LoaderTS
+		case ".tsx":
+			loader = api.LoaderTSX
+		case ".jsx":
+			loader = api.LoaderJSX
+		}
+
+		format := api.FormatIIFE
+		if esm[src] {
+			format = api.FormatESModule
+		}
+
+		result := api.Build(api.BuildOptions{
+			AbsWorkingDir:    b.Root,
+			EntryPoints:      []string{src},
+			Bundle:           true,
+			Format:           format,
+			Platform:         api.PlatformBrowser,
+			Target:           api.ES2020,
+			Outfile:          outPath,
+			Write:            true,
+			Loader:           map[string]api.Loader{ext: loader},
+			MinifyWhitespace: b.Cfg.ShouldMinifyJS(),
+			LogLevel:         api.LogLevelSilent,
+		})
+		if len(result.Errors) > 0 {
+			msgs := make([]string, 0, len(result.Errors))
+			for _, e := range result.Errors {
+				msgs = append(msgs, e.Text)
+			}
+			return fmt.Errorf("worker bundle (%s): %s", src, strings.Join(msgs, "; "))
+		}
+		built[src] = url
+	}
+
+	// Emit a tiny index of emitted workers for tooling/debugging.
+	if len(built) > 0 {
+		idx, _ := json.MarshalIndent(built, "", "  ")
+		os.WriteFile(filepath.Join(b.Cfg.OutDir, "workers.json"), idx, 0644)
+	}
+	return nil
+}
+
+// substituteImportMetaURL replaces `import.meta.url` in generated hydration JS
+// with the URL of the page's own hydration script. Hydration scripts are plain
+// classic <script> files where `import.meta` would be a SyntaxError, but
+// `new URL('../x', import.meta.url)` is a common way to reference assets
+// relative to the current module — substituting the script's real served URL
+// keeps those resolutions working. jsFile is the hashed script filename.
+func substituteImportMetaURL(hydrationJS, outName, jsFile string) string {
+	if !strings.Contains(hydrationJS, "import.meta.url") {
+		return hydrationJS
+	}
+	return strings.ReplaceAll(hydrationJS, "import.meta.url", strconv.Quote(pageScriptSrc(outName, jsFile)))
+}
+
+// writeAssetFiles copies every registered asset into the output directory at
+// its hashed /assets/… URL path. Safe to call once per page build: the copy is
+// content-addressed so repeated writes are idempotent.
+func (b *Builder) writeAssetFiles(assets map[string]string) error {
+	for src, url := range assets {
+		rel := strings.TrimPrefix(url, "/")
+		if rel == "" || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		dst := filepath.Join(b.Cfg.OutDir, filepath.FromSlash(rel))
+		parent := filepath.Dir(dst)
+		if err := os.MkdirAll(parent, 0755); err != nil {
+			return err
+		}
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, data, 0644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func printResult(outName, jsFile string) {

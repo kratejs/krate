@@ -3,11 +3,11 @@ package bundler
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
-	"strings"
-
 	"sort"
+	"strings"
 
 	"krate-compiler/internal/ast"
 	"krate-compiler/internal/css"
@@ -43,6 +43,9 @@ type Bundle struct {
 	Modules     []*Module
 	CSS         string
 	CSSModules  map[string]*CSSModuleInfo
+	AssetFiles  map[string]string // resolved source path → hashed site URL (/assets/…)
+	WorkerFiles map[string]string // worker source path → hashed site URL (/workers/…)
+	WorkerEsm   map[string]bool   // worker source path → true when built with `type: 'module'`
 	Frontmatter map[string]string // .mdx frontmatter, if any
 }
 
@@ -52,6 +55,9 @@ type Bundler struct {
 	order             []*Module
 	css               []string
 	cssModules        map[string]*CSSModuleInfo
+	assets            map[string]string // resolved source path → hashed site URL
+	workers           map[string]string // worker source path → hashed site URL (/workers/…)
+	workerEsm         map[string]bool   // worker source path → built as ES module
 	frontmatter       map[string]string // from .mdx frontmatter
 	emitReact         bool
 	pathAliases       []pathAlias
@@ -60,6 +66,18 @@ type Bundler struct {
 	runtimeComponents []string
 	serverDirs        []string
 	runtimeDirs       []string
+}
+
+// assetExtensions are file extensions that get copied to /assets/ with a
+// content-hashed name and replaced by their URL string wherever imported.
+var assetExtensions = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
+	".avif": true, ".svg": true, ".ico": true, ".bmp": true,
+	".wasm": true, ".glb": true, ".gltf": true, ".obj": true, ".mtl": true,
+	".bin": true, ".hdr": true, ".exr": true,
+	".mp4": true, ".webm": true, ".ogv": true, ".mp3": true, ".wav": true,
+	".ogg": true, ".flac": true,
+	".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
 }
 
 // pathAlias is an internal representation of a TypeScript path alias.
@@ -80,8 +98,11 @@ var reactNames = map[string]string{
 
 func New(root string) *Bundler {
 	return &Bundler{
-		root: root,
-		seen: make(map[string]bool),
+		root:    root,
+		seen:    make(map[string]bool),
+		assets:  make(map[string]string),
+		workers: make(map[string]string),
+		workerEsm: make(map[string]bool),
 	}
 }
 
@@ -146,6 +167,14 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	// "styles is not defined").
 	b.rewriteCSSModuleRefs()
 
+	// Rewrite asset imports (`import logo from './logo.png'`) to their hashed
+	// site URL literal so both SSR HTML and hydration JS use the copied file.
+	b.rewriteAssetImportRefs()
+
+	// Rewrite `new Worker('./x.ts')` (and `new Worker(new URL(..., import.meta.url))`)
+	// to the hashed /workers/… URL the worker is emitted at.
+	b.rewriteWorkerRefs()
+
 	if err := b.CheckCompositionRules(); err != nil {
 		return nil, err
 	}
@@ -155,6 +184,9 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		Modules:     b.order,
 		CSS:         strings.Join(b.css, "\n"),
 		CSSModules:  b.cssModules,
+		AssetFiles:  b.assets,
+		WorkerFiles: b.workers,
+		WorkerEsm:   b.workerEsm,
 		Frontmatter: b.frontmatter,
 	}, nil
 }
@@ -288,6 +320,18 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 
 	if !strings.HasSuffix(path, ".tsx") && !strings.HasSuffix(path, ".ts") &&
 		!strings.HasSuffix(path, ".jsx") && !strings.HasSuffix(path, ".js") {
+		if assetExtensions[strings.ToLower(filepath.Ext(path))] {
+			data, err := os.ReadFile(abs)
+			if err != nil {
+				return fmt.Errorf("reading %s: %w", path, err)
+			}
+			base := filepath.Base(path)
+			ext := filepath.Ext(base)
+			name := strings.TrimSuffix(base, ext)
+			hash := hashBytes(data)
+			url := "/assets/" + name + "-" + hash + ext
+			b.assets[abs] = url
+		}
 		b.order = append(b.order, &Module{
 			Path:       path,
 			IsExternal: true,
@@ -967,6 +1011,9 @@ func rewriteExpr(expr ast.Expr, imports map[string]string, reactAlias string) as
 		}
 	case *ast.AwaitExpr:
 		e.Arg = rewriteExpr(e.Arg, imports, reactAlias)
+	case *ast.DynamicImport:
+		e.Arg = rewriteExpr(e.Arg, imports, reactAlias)
+	case *ast.ImportMetaExpr:
 	case *ast.JSXElement:
 		if e.Opening != nil {
 			for _, attr := range e.Opening.Attributes {
@@ -1192,6 +1239,9 @@ func rewriteCSSModuleExpr(expr ast.Expr, locals map[string]map[string]string) as
 		}
 	case *ast.AwaitExpr:
 		e.Arg = rewriteCSSModuleExpr(e.Arg, locals)
+	case *ast.DynamicImport:
+		e.Arg = rewriteCSSModuleExpr(e.Arg, locals)
+	case *ast.ImportMetaExpr:
 	case *ast.JSXElement:
 		if e.Opening != nil {
 			for _, attr := range e.Opening.Attributes {
@@ -1224,6 +1274,560 @@ func rewriteCSSModuleJSXChild(child ast.JSXChild, locals map[string]map[string]s
 		return c
 	}
 	return child
+}
+
+// rewriteAssetImportRefs replaces imported-asset binding reads with their
+// hashed site URL literal across every bundled module. Each module's
+// `import logo from './logo.png'` binds a local name (logo) to an asset file;
+// bare reads of that local name are swapped for the resolved /assets/… URL so
+// the irtree builder and hydration codegen emit the real URL instead of a
+// reference to a runtime import that never exists.
+func (b *Bundler) rewriteAssetImportRefs() {
+	for _, mod := range b.order {
+		if mod.Program == nil {
+			continue
+		}
+		localVars := map[string]string{}
+		for _, stmt := range mod.Program.Body {
+			imp, ok := stmt.(*ast.ImportStmt)
+			if !ok || imp.Default == "" {
+				continue
+			}
+			src := strings.Trim(imp.Source, "\"'")
+			resolved := src
+			if !filepath.IsAbs(resolved) {
+				resolved = filepath.Join(b.root, resolved)
+			}
+			if strings.HasPrefix(src, ".") {
+				modDir := filepath.Dir(mod.Path)
+				resolved = filepath.Join(modDir, src)
+				if !filepath.IsAbs(resolved) {
+					resolved = filepath.Join(b.root, resolved)
+				}
+			}
+			resolved = filepath.Clean(resolved)
+			if url, ok := b.assets[resolved]; ok {
+				localVars[imp.Default] = url
+			}
+		}
+		if len(localVars) == 0 {
+			continue
+		}
+		rewriteAssetRefsStmts(mod.Program.Body, localVars)
+	}
+}
+
+func rewriteAssetRefsStmts(stmts []ast.Stmt, locals map[string]string) {
+	for _, stmt := range stmts {
+		rewriteAssetRefsStmt(stmt, locals)
+	}
+}
+
+func rewriteAssetRefsStmt(stmt ast.Stmt, locals map[string]string) {
+	if stmt == nil {
+		return
+	}
+	switch s := stmt.(type) {
+	case *ast.ReturnStmt:
+		s.Value = rewriteAssetRefsExpr(s.Value, locals)
+	case *ast.VarStmt:
+		for _, decl := range s.Decls {
+			if decl.Init != nil {
+				decl.Init = rewriteAssetRefsExpr(decl.Init, locals)
+			}
+		}
+	case *ast.ExprStmt:
+		s.Expression = rewriteAssetRefsExpr(s.Expression, locals)
+	case *ast.FnDecl:
+		for _, p := range s.Params {
+			if p.Default != nil {
+				p.Default = rewriteAssetRefsExpr(p.Default, locals)
+			}
+		}
+		rewriteAssetRefsStmts(s.Body, locals)
+	case *ast.ExportStmt:
+		if s.Declaration != nil {
+			rewriteAssetRefsStmt(s.Declaration, locals)
+		}
+	case *ast.IfStmt:
+		s.Test = rewriteAssetRefsExpr(s.Test, locals)
+		rewriteAssetRefsStmts(s.Consequent, locals)
+		rewriteAssetRefsStmts(s.Alternate, locals)
+	case *ast.ForStmt:
+		if s.Init != nil {
+			rewriteAssetRefsStmt(s.Init, locals)
+		}
+		s.Test = rewriteAssetRefsExpr(s.Test, locals)
+		s.Update = rewriteAssetRefsExpr(s.Update, locals)
+		rewriteAssetRefsStmts(s.Body, locals)
+	case *ast.WhileStmt:
+		s.Test = rewriteAssetRefsExpr(s.Test, locals)
+		rewriteAssetRefsStmts(s.Body, locals)
+	case *ast.DoWhileStmt:
+		s.Test = rewriteAssetRefsExpr(s.Test, locals)
+		rewriteAssetRefsStmts(s.Body, locals)
+	case *ast.SwitchStmt:
+		s.Discriminant = rewriteAssetRefsExpr(s.Discriminant, locals)
+		for _, c := range s.Cases {
+			c.Test = rewriteAssetRefsExpr(c.Test, locals)
+			rewriteAssetRefsStmts(c.Body, locals)
+		}
+	case *ast.TryStmt:
+		rewriteAssetRefsStmts(s.Body, locals)
+		if s.Catch != nil {
+			rewriteAssetRefsStmts(s.Catch.Body, locals)
+		}
+		rewriteAssetRefsStmts(s.Finally, locals)
+	}
+}
+
+// rewriteAssetRefsExpr replaces bare Identifier reads that shadow-resolve to an
+// asset import binding with the bound URL string literal.
+func rewriteAssetRefsExpr(expr ast.Expr, locals map[string]string) ast.Expr {
+	if expr == nil {
+		return nil
+	}
+	switch e := expr.(type) {
+	case *ast.Identifier:
+		if url, ok := locals[e.Name]; ok && e.Name != "undefined" {
+			return &ast.Literal{Kind: ast.StringLit, Value: url}
+		}
+		return e
+	case *ast.MemberExpr:
+		e.Object = rewriteAssetRefsExpr(e.Object, locals)
+		if e.Computed {
+			e.Property = rewriteAssetRefsExpr(e.Property, locals)
+		}
+		return e
+	case *ast.CallExpr:
+		e.Callee = rewriteAssetRefsExpr(e.Callee, locals)
+		for i, arg := range e.Args {
+			e.Args[i] = rewriteAssetRefsExpr(arg, locals)
+		}
+		return e
+	case *ast.NewExpr:
+		e.Callee = rewriteAssetRefsExpr(e.Callee, locals)
+		for i, arg := range e.Args {
+			e.Args[i] = rewriteAssetRefsExpr(arg, locals)
+		}
+		return e
+	case *ast.AwaitExpr:
+		e.Arg = rewriteAssetRefsExpr(e.Arg, locals)
+		return e
+	case *ast.DynamicImport:
+		e.Arg = rewriteAssetRefsExpr(e.Arg, locals)
+		return e
+	case *ast.ImportMetaExpr:
+		return e
+	case *ast.UnaryExpr:
+		e.Arg = rewriteAssetRefsExpr(e.Arg, locals)
+		return e
+	case *ast.BinaryExpr:
+		e.Left = rewriteAssetRefsExpr(e.Left, locals)
+		e.Right = rewriteAssetRefsExpr(e.Right, locals)
+		return e
+	case *ast.ConditionalExpr:
+		e.Test = rewriteAssetRefsExpr(e.Test, locals)
+		e.Consequent = rewriteAssetRefsExpr(e.Consequent, locals)
+		e.Alternate = rewriteAssetRefsExpr(e.Alternate, locals)
+		return e
+	case *ast.TypeAssertion:
+		e.Expr = rewriteAssetRefsExpr(e.Expr, locals)
+		return e
+	case *ast.ThisExpr:
+		return e
+	case *ast.ArrowFn:
+		for i, p := range e.Params {
+			if p.Default != nil {
+				e.Params[i].Default = rewriteAssetRefsExpr(p.Default, locals)
+			}
+		}
+		rewriteAssetRefsStmts(e.Body, locals)
+		return e
+	case *ast.ArrayExpr:
+		for i, el := range e.Elements {
+			e.Elements[i] = rewriteAssetRefsExpr(el, locals)
+		}
+		return e
+	case *ast.ObjectExpr:
+		for _, prop := range e.Properties {
+			if prop.Value != nil {
+				prop.Value = rewriteAssetRefsExpr(prop.Value, locals)
+			}
+		}
+		return e
+	case *ast.TemplateExpr:
+		for i, p := range e.Parts {
+			e.Parts[i] = rewriteAssetRefsExpr(p, locals)
+		}
+		return e
+	case *ast.JSXElement:
+		if e.Opening != nil {
+			for _, attr := range e.Opening.Attributes {
+				if attr.Value != nil {
+					attr.Value = rewriteAssetRefsExpr(attr.Value, locals)
+				}
+			}
+		}
+		for i, child := range e.Children {
+			e.Children[i] = rewriteAssetJSXChild(child, locals)
+		}
+		return e
+	case *ast.JSXFragment:
+		for i, child := range e.Children {
+			e.Children[i] = rewriteAssetJSXChild(child, locals)
+		}
+		return e
+	}
+	return expr
+}
+
+func rewriteAssetJSXChild(child ast.JSXChild, locals map[string]string) ast.JSXChild {
+	switch c := child.(type) {
+	case *ast.JSXExprContainer:
+		c.Expression = rewriteAssetRefsExpr(c.Expression, locals)
+		return c
+	case *ast.JSXElementChild:
+		c.Element = rewriteAssetRefsExpr(c.Element, locals).(*ast.JSXElement)
+		return c
+	case *ast.JSXFragmentChild:
+		c.Fragment = rewriteAssetRefsExpr(c.Fragment, locals).(*ast.JSXFragment)
+		return c
+	}
+	return child
+}
+
+// workerSourceExts are the source extensions a `new Worker(...)` target may
+// have. Anything else in a Worker call is left untouched.
+var workerSourceExts = map[string]bool{".ts": true, ".tsx": true, ".js": true, ".jsx": true}
+
+// rewriteWorkerRefs scans every bundled module for `new Worker(...)` /
+// `Worker(...)` calls whose first argument is a string literal or
+// `new URL(<literal>, import.meta.url)`. The referenced source file is
+// registered as a worker (emitted at /workers/<name>-<hash>.js) and the
+// argument is rewritten to its URL so both the hydration JS and the browser
+// load the bundled worker instead of a stray source file.
+func (b *Bundler) rewriteWorkerRefs() {
+	for _, mod := range b.order {
+		if mod.Program == nil {
+			continue
+		}
+		for _, stmt := range mod.Program.Body {
+			rewriteWorkerStmt(stmt, b, mod.Path)
+		}
+	}
+}
+
+func rewriteWorkerStmt(stmt ast.Stmt, b *Bundler, importer string) {
+	if stmt == nil {
+		return
+	}
+	switch s := stmt.(type) {
+	case *ast.ReturnStmt:
+		s.Value = rewriteWorkerExpr(s.Value, b, importer)
+	case *ast.VarStmt:
+		for _, decl := range s.Decls {
+			if decl.Init != nil {
+				decl.Init = rewriteWorkerExpr(decl.Init, b, importer)
+			}
+		}
+	case *ast.ExprStmt:
+		s.Expression = rewriteWorkerExpr(s.Expression, b, importer)
+	case *ast.FnDecl:
+		for _, p := range s.Params {
+			if p.Default != nil {
+				p.Default = rewriteWorkerExpr(p.Default, b, importer)
+			}
+		}
+		for _, body := range s.Body {
+			rewriteWorkerStmt(body, b, importer)
+		}
+	case *ast.ExportStmt:
+		if s.Declaration != nil {
+			rewriteWorkerStmt(s.Declaration, b, importer)
+		}
+	case *ast.IfStmt:
+		s.Test = rewriteWorkerExpr(s.Test, b, importer)
+		rewriteWorkerStmts(s.Consequent, b, importer)
+		rewriteWorkerStmts(s.Alternate, b, importer)
+	case *ast.ForStmt:
+		if s.Init != nil {
+			rewriteWorkerStmt(s.Init, b, importer)
+		}
+		s.Test = rewriteWorkerExpr(s.Test, b, importer)
+		s.Update = rewriteWorkerExpr(s.Update, b, importer)
+		rewriteWorkerStmts(s.Body, b, importer)
+	case *ast.WhileStmt:
+		s.Test = rewriteWorkerExpr(s.Test, b, importer)
+		rewriteWorkerStmts(s.Body, b, importer)
+	case *ast.DoWhileStmt:
+		s.Test = rewriteWorkerExpr(s.Test, b, importer)
+		rewriteWorkerStmts(s.Body, b, importer)
+	case *ast.SwitchStmt:
+		s.Discriminant = rewriteWorkerExpr(s.Discriminant, b, importer)
+		for _, c := range s.Cases {
+			c.Test = rewriteWorkerExpr(c.Test, b, importer)
+			rewriteWorkerStmts(c.Body, b, importer)
+		}
+	case *ast.TryStmt:
+		rewriteWorkerStmts(s.Body, b, importer)
+		if s.Catch != nil {
+			rewriteWorkerStmts(s.Catch.Body, b, importer)
+		}
+		rewriteWorkerStmts(s.Finally, b, importer)
+	}
+}
+
+func rewriteWorkerStmts(stmts []ast.Stmt, b *Bundler, importer string) {
+	for _, stmt := range stmts {
+		rewriteWorkerStmt(stmt, b, importer)
+	}
+}
+
+// rewriteWorkerExpr walks an expression, rewriting Worker constructor calls.
+// It recurses through every expression position so `new Worker(...)` can appear
+// anywhere (assignment, arrow body, prop value, JSX attr, etc.).
+func rewriteWorkerExpr(expr ast.Expr, b *Bundler, importer string) ast.Expr {
+	if expr == nil {
+		return nil
+	}
+	switch e := expr.(type) {
+	case *ast.NewExpr:
+		if isWorkerCallee(e.Callee) {
+			rewriteWorkerCallee(&e.Args, e.Args, b, importer)
+			return e
+		}
+		e.Callee = rewriteWorkerExpr(e.Callee, b, importer)
+		for i, arg := range e.Args {
+			e.Args[i] = rewriteWorkerExpr(arg, b, importer)
+		}
+		return e
+	case *ast.CallExpr:
+		if isWorkerCallee(e.Callee) {
+			rewriteWorkerCallee(&e.Args, e.Args, b, importer)
+			return e
+		}
+		e.Callee = rewriteWorkerExpr(e.Callee, b, importer)
+		for i, arg := range e.Args {
+			e.Args[i] = rewriteWorkerExpr(arg, b, importer)
+		}
+		return e
+	case *ast.Identifier:
+		return e
+	case *ast.MemberExpr:
+		e.Object = rewriteWorkerExpr(e.Object, b, importer)
+		if e.Computed {
+			e.Property = rewriteWorkerExpr(e.Property, b, importer)
+		}
+		return e
+	case *ast.AwaitExpr:
+		e.Arg = rewriteWorkerExpr(e.Arg, b, importer)
+		return e
+	case *ast.DynamicImport:
+		e.Arg = rewriteWorkerExpr(e.Arg, b, importer)
+		return e
+	case *ast.ImportMetaExpr:
+		return e
+	case *ast.UnaryExpr:
+		e.Arg = rewriteWorkerExpr(e.Arg, b, importer)
+		return e
+	case *ast.BinaryExpr:
+		e.Left = rewriteWorkerExpr(e.Left, b, importer)
+		e.Right = rewriteWorkerExpr(e.Right, b, importer)
+		return e
+	case *ast.ConditionalExpr:
+		e.Test = rewriteWorkerExpr(e.Test, b, importer)
+		e.Consequent = rewriteWorkerExpr(e.Consequent, b, importer)
+		e.Alternate = rewriteWorkerExpr(e.Alternate, b, importer)
+		return e
+	case *ast.TypeAssertion:
+		e.Expr = rewriteWorkerExpr(e.Expr, b, importer)
+		return e
+	case *ast.ThisExpr:
+		return e
+	case *ast.ArrowFn:
+		for i, p := range e.Params {
+			if p.Default != nil {
+				e.Params[i].Default = rewriteWorkerExpr(p.Default, b, importer)
+			}
+		}
+		rewriteWorkerStmts(e.Body, b, importer)
+		return e
+	case *ast.ArrayExpr:
+		for i, el := range e.Elements {
+			e.Elements[i] = rewriteWorkerExpr(el, b, importer)
+		}
+		return e
+	case *ast.ObjectExpr:
+		for _, prop := range e.Properties {
+			if prop.Value != nil {
+				prop.Value = rewriteWorkerExpr(prop.Value, b, importer)
+			}
+		}
+		return e
+	case *ast.TemplateExpr:
+		for i, p := range e.Parts {
+			e.Parts[i] = rewriteWorkerExpr(p, b, importer)
+		}
+		return e
+	case *ast.JSXElement:
+		if e.Opening != nil {
+			for _, attr := range e.Opening.Attributes {
+				if attr.Value != nil {
+					attr.Value = rewriteWorkerExpr(attr.Value, b, importer)
+				}
+			}
+		}
+		for i, child := range e.Children {
+			e.Children[i] = rewriteWorkerJSXChild(child, b, importer)
+		}
+		return e
+	case *ast.JSXFragment:
+		for i, child := range e.Children {
+			e.Children[i] = rewriteWorkerJSXChild(child, b, importer)
+		}
+		return e
+	}
+	return expr
+}
+
+func rewriteWorkerJSXChild(child ast.JSXChild, b *Bundler, importer string) ast.JSXChild {
+	switch c := child.(type) {
+	case *ast.JSXExprContainer:
+		c.Expression = rewriteWorkerExpr(c.Expression, b, importer)
+		return c
+	case *ast.JSXElementChild:
+		c.Element = rewriteWorkerExpr(c.Element, b, importer).(*ast.JSXElement)
+		return c
+	case *ast.JSXFragmentChild:
+		c.Fragment = rewriteWorkerExpr(c.Fragment, b, importer).(*ast.JSXFragment)
+		return c
+	}
+	return child
+}
+
+func isWorkerCallee(callee ast.Expr) bool {
+	switch c := callee.(type) {
+	case *ast.Identifier:
+		return c.Name == "Worker"
+	case *ast.MemberExpr:
+		if c.Computed {
+			return false
+		}
+		if prop, ok := c.Property.(*ast.Identifier); ok && prop.Name == "Worker" {
+			if obj, ok := c.Object.(*ast.Identifier); ok {
+				return obj.Name == "window" || obj.Name == "self" || obj.Name == "globalThis"
+			}
+		}
+	}
+	return false
+}
+
+// rewriteWorkerCallee resolves the first Worker argument to a registered worker
+// URL and replaces the argument with it.
+func rewriteWorkerCallee(args *[]ast.Expr, original []ast.Expr, b *Bundler, importer string) {
+	if len(original) == 0 {
+		return
+	}
+	candidate := ""
+	switch arg := original[0].(type) {
+	case *ast.Literal:
+		if arg.Kind == ast.StringLit {
+			candidate = arg.Value
+		}
+	case *ast.NewExpr:
+		if urlCallee, ok := arg.Callee.(*ast.Identifier); ok && urlCallee.Name == "URL" && len(arg.Args) > 0 {
+			if lit, ok := arg.Args[0].(*ast.Literal); ok && lit.Kind == ast.StringLit {
+				candidate = lit.Value
+			}
+		}
+	}
+	if candidate == "" {
+		return
+	}
+	abs := resolveWorkerPath(importer, candidate, b.root)
+	if abs == "" {
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(abs))
+	if !workerSourceExts[ext] {
+		return
+	}
+	url, ok := b.workers[abs]
+	if !ok {
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			return
+		}
+		base := filepath.Base(abs)
+		name := strings.TrimSuffix(base, ext)
+		url = "/workers/" + name + "-" + hashBytes(data) + ".js"
+		b.workers[abs] = url
+	}
+	if workerOptionsModuleStyle(original) {
+		b.workerEsm[abs] = true
+	}
+	(*args)[0] = &ast.Literal{Kind: ast.StringLit, Value: url}
+}
+
+// workerOptionsModuleStyle reports whether the Worker options object opts into
+// `{ type: 'module' }` (an ES-module worker).
+func workerOptionsModuleStyle(args []ast.Expr) bool {
+	if len(args) < 2 {
+		return false
+	}
+	obj, ok := args[1].(*ast.ObjectExpr)
+	if !ok {
+		return false
+	}
+	for _, prop := range obj.Properties {
+		if prop.Spread || prop.Shorthand {
+			continue
+		}
+		if prop.Key != "type" {
+			continue
+		}
+		if lit, ok := prop.Value.(*ast.Literal); ok && lit.Kind == ast.StringLit && lit.Value == "module" {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveWorkerPath resolves a Worker argument target to an absolute source
+// path, appending common source extensions when the literal has none.
+func resolveWorkerPath(importer, candidate, root string) string {
+	abs := candidate
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(filepath.Dir(importer), abs)
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(root, abs)
+		}
+	}
+	abs = filepath.Clean(abs)
+	if fileExists(abs) {
+		return abs
+	}
+	for _, ext := range []string{".ts", ".tsx", ".js", ".jsx"} {
+		if fileExists(abs + ext) {
+			return abs + ext
+		}
+	}
+	return ""
+}
+
+// hashBytes returns a short content hash used to fingerprint copied assets.
+func hashBytes(data []byte) string {
+	h := fnv.New32a()
+	h.Write(data)
+	v := h.Sum32()
+	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+	var buf [6]byte
+	for i := 5; i >= 0; i-- {
+		buf[i] = chars[v%36]
+		v /= 36
+	}
+	return string(buf[:])
 }
 
 func jsonToAST(data []byte) *ast.Program {

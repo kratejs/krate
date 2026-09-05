@@ -313,14 +313,20 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 			finalJS := strings.TrimSpace(hydrationJS)
 			jsHash := hashContent([]byte(finalJS))
 			jsFile = "index." + jsHash + ".js"
+			finalJS = substituteImportMetaURL(finalJS, spp.OutPath, jsFile)
 			jsPath := filepath.Join(pageDir, jsFile)
 			os.WriteFile(jsPath, []byte(finalJS), 0644)
+			hydrationJS = finalJS
 		} else {
 			hydrationJS = ""
 		}
 	}
 
 	relSrc, _ := filepath.Rel(b.Root, spp.PagePath)
+	if err := b.writeAssetFiles(bundle.AssetFiles); err != nil {
+		return nil, "", fmt.Errorf("writing assets for %s: %w", spp.PagePath, err)
+	}
+	b.registerWorkers(bundle.WorkerFiles, bundle.WorkerEsm)
 	return &PageResult{
 		Page:        spp.PagePath,
 		OutName:     spp.OutPath,

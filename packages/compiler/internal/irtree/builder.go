@@ -77,6 +77,7 @@ type builder struct {
 	localFnBody      []ast.Stmt          // body of current component function for handler resolution
 	localSignals     map[string]ast.Expr // component-local signal context (name → initial expr)
 	localProps       map[string]string   // component-local resolved props (name → value)
+	refObjectVars    map[string]bool     // component-local names bound to a useRef {current:...} object
 	callSiteChildren []ast.JSXChild      // call-site children of the current component
 	moduleConsts     map[string]string   // module-level const values (name → resolved literal)
 }
@@ -204,6 +205,11 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	savedLocalFnBody := b.localFnBody
 	b.localFnBody = fn.Body
 
+	// Track which local variables are useRef {current:...} objects so a
+	// `ref={myRef}` binding assigns `.current` instead of clobbering the object.
+	savedRefObjectVars := b.refObjectVars
+	b.refObjectVars = collectRefObjectVars(fn.Body)
+
 	// Set component-local signal context: component's own signals take
 	// precedence over the global annotation map so signal reads resolve to
 	// the correct initial value even with name collisions across components.
@@ -296,6 +302,7 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	b.localFnBody = savedLocalFnBody
 	b.localSignals = savedLocalSignals
 	b.localProps = savedLocalProps
+	b.refObjectVars = savedRefObjectVars
 
 	// Read accumulated handlers from slot building walk
 	if tier == TierClient {
@@ -1183,6 +1190,10 @@ func substitutePropExprs(expr ast.Expr, props map[string]ast.Expr) ast.Expr {
 		return &ast.NewExpr{Position: e.Position, Callee: substitutePropExprs(e.Callee, props), Args: substitutePropExprList(e.Args, props)}
 	case *ast.AwaitExpr:
 		return &ast.AwaitExpr{Position: e.Position, Arg: substitutePropExprs(e.Arg, props)}
+	case *ast.DynamicImport:
+		return &ast.DynamicImport{Position: e.Position, Arg: substitutePropExprs(e.Arg, props)}
+	case *ast.ImportMetaExpr:
+		return &ast.ImportMetaExpr{Position: e.Position}
 	default:
 		// Identifiers, literals, arrow functions, this, etc. are returned as-is.
 		return expr
@@ -1261,6 +1272,12 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 			if attr.Value != nil {
 				target := generateExprJS(attr.Value, b.sigMap())
 				if target != "" {
+					// ref={refObj} where refObj is a useRef {current:...} object
+					// must assign refObj.current = el, not refObj = el (which
+					// would clobber the stable ref object the user reads later).
+					if id, ok := attr.Value.(*ast.Identifier); ok && b.refObjectVars != nil && b.refObjectVars[id.Name] {
+						target += ".current"
+					}
 					refs = append(refs, RefBinding{ElementSlotID: id, Target: target})
 				}
 			}
@@ -2260,6 +2277,40 @@ func (b *builder) collectSignalDecls(body []ast.Stmt) []SignalDecl {
 	return decls
 }
 
+// collectRefObjectVars returns the set of local variable names bound to a
+// useRef object — either a `{current: ...}` object literal (the React-compat
+// rewrite of useRef()) or a `useRef(...)` call (native @krate/runtime). A
+// `ref={myRef}` binding on such a variable must assign `.current` rather than
+// reassign the variable itself.
+func collectRefObjectVars(body []ast.Stmt) map[string]bool {
+	refs := make(map[string]bool)
+	for _, stmt := range body {
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok {
+			continue
+		}
+		for _, decl := range vs.Decls {
+			if decl == nil || decl.Name == "" || decl.Init == nil {
+				continue
+			}
+			switch init := decl.Init.(type) {
+			case *ast.ObjectExpr:
+				for _, prop := range init.Properties {
+					if prop != nil && !prop.Spread && prop.Key == "current" {
+						refs[decl.Name] = true
+						break
+					}
+				}
+			case *ast.CallExpr:
+				if id, ok := init.Callee.(*ast.Identifier); ok && id.Name == "useRef" {
+					refs[decl.Name] = true
+				}
+			}
+		}
+	}
+	return refs
+}
+
 // collectBodySignalUses returns every signal that is read (signalName()) or
 // written (setSignalName(...)) anywhere in a component function body — inside
 // named helper functions, control flow, early returns, and nested JSX. These
@@ -2323,6 +2374,9 @@ func (b *builder) collectBodySignalUses(body []ast.Stmt, decls []SignalDecl) []s
 			walkStmt(v.Body)
 		case *ast.AwaitExpr:
 			walkExpr(v.Arg)
+		case *ast.DynamicImport:
+			walkExpr(v.Arg)
+		case *ast.ImportMetaExpr:
 		case *ast.NewExpr:
 			walkExpr(v.Callee)
 			for _, a := range v.Args {
@@ -2441,6 +2495,13 @@ func (b *builder) collectEffectJS(body []ast.Stmt) []string {
 							if len(call.Args) >= 1 {
 								js := generateExprJS(call.Args[0], b.sigMap())
 								effects = append(effects, "onMount("+js+")")
+							}
+						case "onCleanup":
+							// Top-level onCleanup registers a root-scoped cleanup
+							// that runs on unmount (disposeAll at route change).
+							if len(call.Args) >= 1 {
+								js := generateExprJS(call.Args[0], b.sigMap())
+								effects = append(effects, "onCleanup("+js+")")
 							}
 						}
 					}
@@ -3087,6 +3148,9 @@ func isOnEvent(name string) bool {
 // reactive), or its return JSX contains event handlers (e.g. a reusable
 // <Button onClick={props.onClick}> wrapper).
 func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr) bool {
+	if hasLifecycleCall(fn.Body) {
+		return true
+	}
 	for _, expr := range attrs {
 		switch e := expr.(type) {
 		case *ast.ArrowFn:
@@ -3108,6 +3172,68 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 		return hasEventHandlerExpr(ret.Value)
 	}
 	return false
+}
+
+// hasLifecycleCall reports whether a component body contains a top-level
+// createEffect / onMount / onCleanup call. Signal-less components that register
+// lifecycle callbacks must still be client-rendered so those callbacks are
+// emitted into the hydration bundle — otherwise they'd be SSR-evaluated and the
+// effects silently dropped.
+func hasLifecycleCall(body []ast.Stmt) bool {
+	var walk func(stmts []ast.Stmt) bool
+	walk = func(stmts []ast.Stmt) bool {
+		for _, stmt := range stmts {
+			switch s := stmt.(type) {
+			case *ast.ExprStmt:
+				if call, ok := s.Expression.(*ast.CallExpr); ok {
+					if id, ok := call.Callee.(*ast.Identifier); ok {
+						switch id.Name {
+						case "createEffect", "onMount", "onCleanup":
+							return true
+						}
+					}
+				}
+			case *ast.BlockStmt:
+				if walk(s.Body) {
+					return true
+				}
+			case *ast.IfStmt:
+				if walk(s.Consequent) || walk(s.Alternate) {
+					return true
+				}
+			case *ast.ForStmt:
+				if walk(s.Body) {
+					return true
+				}
+			case *ast.WhileStmt:
+				if walk(s.Body) {
+					return true
+				}
+			case *ast.DoWhileStmt:
+				if walk(s.Body) {
+					return true
+				}
+			case *ast.SwitchStmt:
+				for _, c := range s.Cases {
+					if walk(c.Body) {
+						return true
+					}
+				}
+			case *ast.TryStmt:
+				if walk(s.Body) {
+					return true
+				}
+				if s.Catch != nil && walk(s.Catch.Body) {
+					return true
+				}
+				if walk(s.Finally) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return walk(body)
 }
 
 // hasEventHandlerExpr reports whether a JSX expression tree contains any on*

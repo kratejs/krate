@@ -415,3 +415,50 @@ export default function Page() {
 		t.Error("expected chroma-highlighted HTML for static call-site children of <SyntaxHighlight>")
 	}
 }
+
+// ─── useRef object refs ──────────────────────────────────────────────────────
+
+func TestRefBindingUseRefObjectAssignsCurrent(t *testing.T) {
+	src := `export default function App() {
+	const inputRef = { current: null };
+	return <input ref={inputRef} />;
+}`
+	tree := annotateAndBuild(t, src)
+	refs := tree.Root.RefBindings
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 ref binding, got %d: %+v", len(refs), refs)
+	}
+	if refs[0].Target != "inputRef.current" {
+		t.Errorf("expected target inputRef.current for ref={inputRef}, got %q", refs[0].Target)
+	}
+}
+
+func TestRefBindingPlainVarAssignsVariable(t *testing.T) {
+	src := `export default function App() {
+	let el;
+	return <input ref={el} />;
+}`
+	tree := annotateAndBuild(t, src)
+	refs := tree.Root.RefBindings
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 ref binding, got %d: %+v", len(refs), refs)
+	}
+	if refs[0].Target != "el" {
+		t.Errorf("expected target el for plain var ref, got %q", refs[0].Target)
+	}
+}
+
+func TestRefBindingUseRefCallAssignsCurrent(t *testing.T) {
+	src := `export default function App() {
+	const inputRef = useRef(null);
+	return <input ref={inputRef} />;
+}`
+	tree := annotateAndBuild(t, src)
+	refs := tree.Root.RefBindings
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 ref binding, got %d: %+v", len(refs), refs)
+	}
+	if refs[0].Target != "inputRef.current" {
+		t.Errorf("expected target inputRef.current for ref={inputRef} from useRef(null), got %q", refs[0].Target)
+	}
+}
