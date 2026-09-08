@@ -34,9 +34,11 @@ unchanged.
 
 ## JavaScript plugins (QuickJS)
 
-A community plugin is a plain JS module executed inside Krate's embedded
+A community plugin is a plain JS/TS module executed inside Krate's embedded
 QuickJS runtime — no subprocess. It lives in local project code and is wired in
-from `krate.config.ts`:
+from `krate.config.ts`. Modules may be `.js`, `.mjs`, `.cjs`, or TypeScript
+`.ts`/`.tsx` — esbuild transpiles TS before the bundle runs in QuickJS, and a
+plugin *directory* resolves `index.ts` as its entry point just like `index.js`:
 
 ```ts
 import demoPlugin from './plugins/krate-plugin-demo';
@@ -45,12 +47,16 @@ export default {
 };
 ```
 
-```javascript
-export const hooks = {
-  BeforeBuild(ctx, options, krate) {
+```ts
+// plugins/krate-plugin-demo/index.ts
+import { definePlugin, definePluginHooks } from '@krate/plugin';
+import type { Krate, PluginOutput } from '@krate/plugin';
+
+export const hooks = definePluginHooks({
+  BeforeBuild(ctx, options, krate: Krate): PluginOutput {
     return { files: [{ path: 'demo-notice.txt', content: 'hi' }] };
   },
-  AfterRender(ctx, options, krate) {
+  AfterRender(ctx, options, krate: Krate): PluginOutput {
     return {
       html: '<b>' + ctx.html,
       headHTML: '<meta name=generator content=demo>',
@@ -58,27 +64,33 @@ export const hooks = {
     };
   },
   // A serve hook mutates the incoming request or outgoing buffered response.
-  ServeRequest(ctx, options, krate) {
+  ServeRequest(ctx) {
     if (ctx.path === '/__demo') {
       return { action: 'respond', status: 200, body: 'hello', headers: {} };
     }
     return { action: 'continue' };
   },
-  ServeResponse(ctx, options, krate) {
+  ServeResponse(ctx) {
     return { body: ctx.body + '<!-- served -->', headers: { ...ctx.headers, 'x-demo': '1' } };
   },
-};
+});
 
-export default function demoPlugin(options) {
-  return {
+export default function demoPlugin(options: { greeting?: string } = {}) {
+  return definePlugin({
     name: 'demo',
     order: 10,
     module: typeof import.meta !== 'undefined' && import.meta.url ? import.meta.url : '',
-    options: options || {},
-  };
+    options,
+  });
 }
 ```
 
+- **`@krate/plugin`** — import the SDK package for typed contexts, outputs, and
+  descriptors. `definePluginHooks` type-checks every hook's `ctx`; `definePlugin`
+  types the factory's descriptor; `Krate` types the `{ root, outDir, version }`
+  third argument. The helpers are compile-time only and erase to nothing when
+  the plugin is bundled for QuickJS, so plain `.js` plugins keep working without
+  the package.
 - **Signature** — every hook receives `(ctx, options, krate)`: `ctx` is the
   JSON-serialized context (lowercase fields like `ctx.html`, `ctx.page`,
   `ctx.outName`, `ctx.headHTML`, `ctx.rawCSS`), `options` is the per-plugin
@@ -131,8 +143,8 @@ export const hooks = {
   into the program Krate renders. Re-encoding and structural edits are supported;
   returning an invalid doc is a build error.
 
-See `examples/plugins/krate-plugin-demo/index.js` for a complete implementation
-of every build hook.
+See `examples/plugins/krate-plugin-demo/index.ts` for a complete, type-checked
+implementation of every build hook.
 
 ## Go plugins (go-plugin)
 

@@ -13,44 +13,64 @@ no stdin/stdout protocol — **or** Go plugins run as a subprocess over HashiCor
 
 ## Community plugin protocol
 
-Community JS plugins are JavaScript modules executed inside the embedded
-QuickJS runtime (`modernc.org/quickjs`). The module is bundled with esbuild
-into a self-contained IIFE and its hooks are called directly from Go.
+Community JS plugins are JavaScript **or TypeScript** modules executed inside
+the embedded QuickJS runtime (`modernc.org/quickjs`). The module is bundled with
+esbuild (which transpiles `.ts`/`.tsx`) into a self-contained IIFE and its hooks
+are called directly from Go. Plugin modules may be plain `.js`, `.mjs`, `.cjs`
+or TypeScript `.ts`/`.tsx`; a plugin *directory* resolves its entry point in the
+same order (`index.js`, `index.ts`, `plugin.tsx`, ...).
 
-```javascript
-// plugins/my-plugin/index.js
-export const hooks = {
-  BeforeBuild(ctx, options, krate) {
+Plugins can be authored with full type-safety via the
+**`@krate/plugin`** package, which ships typed hook contexts, outputs, and
+descriptors plus compile-time-only helpers (`definePlugin`, `definePluginHooks`,
+`defineGoPlugin`). The helpers are erased when the module is bundled, so they
+add no runtime cost inside QuickJS.
+
+```ts
+// plugins/my-plugin/index.ts
+import { definePlugin, definePluginHooks } from "@krate/plugin";
+import type { Krate, PluginOutput } from "@krate/plugin";
+
+interface MyPluginOptions {
+  greeting?: string;
+}
+
+export const hooks = definePluginHooks({
+  BeforeBuild(ctx, options, krate: Krate): PluginOutput {
     return { files: [{ path: "note.txt", content: "hi" }] };
   },
-  AfterRender(ctx, options, krate) {
+  AfterRender(ctx, options, krate: Krate): PluginOutput {
     return {
       html: "<b>" + ctx.html,
       headHTML: "<meta ...>",
       rawCSS: ".x{}",
     };
   },
-};
+});
 
-export default function myPlugin(options) {
-  return {
+export default function myPlugin(options: MyPluginOptions = {}) {
+  return definePlugin({
     name: "my-plugin",
     order: 20,
     module: typeof import.meta !== "undefined" && import.meta.url ? import.meta.url : "",
-    options: options || {},
-  };
+    options,
+  });
 }
 ```
 
 - **Hook signature** — every hook receives `(ctx, options, krate)` where `ctx`
   is the JSON-serialized hook context (lowercase fields like `ctx.html`,
   `ctx.page`, `ctx.outName`, `ctx.headHTML`, `ctx.rawCSS`) and `krate` is
-  `{ root, outDir, version }`.
+  `{ root, outDir, version }`. The `@krate/plugin` types name these
+  `BuildContext`, `ParseContext`, `MarkdownContext`, `RenderContext`,
+  `PageContext`, `BuildResultContext`, `ServeRequestContext`, and
+  `ServeResponseContext`.
 - **Return value** — hooks return `{ files, routes, generatedPages, html,
-  headHTML, rawCSS, scripts, metaTags, ast }` (all optional; may be a Promise).
-  `files` are written into the output directory (path traversal is rejected),
-  `routes` become static HTML pages, `generatedPages` feed the page pipeline,
-  and `html`/`headHTML`/`rawCSS`/`scripts`/`metaTags` mutate the hook context.
+  headHTML, rawCSS, scripts, metaTags, ast }` (all optional; may be a Promise;
+  `PluginOutput` in `@krate/plugin`). `files` are written into the output
+  directory (path traversal is rejected), `routes` become static HTML pages,
+  `generatedPages` feed the page pipeline, and
+  `html`/`headHTML`/`rawCSS`/`scripts`/`metaTags` mutate the hook context.
   At `AfterParse`, `ctx.program` is the kind-tagged AST document; mutate it and
   return it as `ast` to rewrite the tree (same capability as Go plugins).
 - **Runtime capabilities** — bundled plugins can use `import fs from 'fs'` /
@@ -108,7 +128,9 @@ export default defineConfig({
 
 Each factory returns a **serializable descriptor**: `{ name, order, options }`
 (built-ins), `{ name, order, module, options }` (JS community plugins), or
-`{ name, order, module, runtime: "go", hooks, binaries }` (Go plugins).
+`{ name, order, module, runtime: "go", hooks, binaries }` (Go plugins). The
+`@krate/plugin` helpers type each shape: `definePlugin` for JS community
+plugins, `defineGoPlugin` for Go-plugin descriptors.
 
 ## Built-in plugins
 
