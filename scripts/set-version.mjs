@@ -5,10 +5,10 @@
  * Usage:
  *   node scripts/set-version.mjs <version>
  *
- * Updates packages/core, packages/runtime, and packages/components, and
- * aligns @krate/core's optionalDependencies (the platform packages) to the
- * same version. Also keeps @krate/components' peerDependency on
- * @krate/runtime in lockstep.
+ * Updates packages/core, packages/runtime, packages/components,
+ * packages/plugin, and the create-krate scaffolds, and aligns @krate/core's
+ * optionalDependencies (the platform packages) to the same version. Also keeps
+ * @krate/components' peerDependency on @krate/runtime in lockstep.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -26,6 +26,7 @@ const manifests = [
   join(root, 'packages', 'core', 'package.json'),
   join(root, 'packages', 'runtime', 'package.json'),
   join(root, 'packages', 'components', 'package.json'),
+  join(root, 'packages', 'plugin', 'package.json'),
   join(root, 'packages', 'create-krate-app', 'package.json'),
   join(root, 'packages', 'create-krate-docs', 'package.json'),
 ];
