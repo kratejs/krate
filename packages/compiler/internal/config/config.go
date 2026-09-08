@@ -17,8 +17,9 @@ type DevServer struct {
 
 // PluginConfig represents a plugin entry from the krate config file.
 // For built-in plugins, only Name is needed (matches Go-side init() registration).
-// For community plugins, Module points to a JavaScript file (.js/.mjs/.cjs) that
-// is bundled and executed inside the embedded QuickJS runtime. The module must
+// For community plugins, Module points to a JavaScript or TypeScript module
+// (.js/.mjs/.cjs/.ts/.tsx) that is bundled (esbuild transpiles the TS) and
+// executed inside the embedded QuickJS runtime. The module must
 // export a default object { name, order, hooks: { BeforeBuild(ctx, options,
 // krate) {...}, ... } } or a factory function (options) => that object.
 // Order controls execution priority (lower runs first, default 50).

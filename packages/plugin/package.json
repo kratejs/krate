@@ -1,0 +1,44 @@
+{
+  "name": "@krate/plugin",
+  "version": "0.1.0",
+  "description": "TypeScript types and helpers for writing Krate plugins (JS community plugins, Go plugin descriptors, and docs themes).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://krate.js.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kratejs/krate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kratejs/krate/issues"
+  },
+  "keywords": [
+    "krate",
+    "plugin",
+    "sdk",
+    "ssg",
+    "typescript",
+    "theme"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "^5.5.0"
+  }
+}

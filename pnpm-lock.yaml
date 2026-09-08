@@ -16,6 +16,9 @@ importers:
       '@krate/core':
         specifier: workspace:*
         version: link:../packages/core
+      '@krate/plugin':
+        specifier: workspace:*
+        version: link:../packages/plugin
       '@krate/runtime':
         specifier: workspace:*
         version: link:../packages/runtime
@@ -69,6 +72,15 @@ importers:
         version: 5.9.3
 
   packages/create-krate-docs:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.43
+        version: 20.19.43
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
+  packages/plugin:
     devDependencies:
       '@types/node':
         specifier: ^20.19.43

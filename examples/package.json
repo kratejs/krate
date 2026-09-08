@@ -8,6 +8,7 @@
     "clsx": "^2.1.1",
     "@krate/components": "workspace:*",
     "@krate/core": "workspace:*",
+    "@krate/plugin": "workspace:*",
     "@krate/runtime": "workspace:*",
     "lucide-react": "^1.23.0",
     "radix-ui": "^1.6.2",

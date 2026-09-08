@@ -231,13 +231,13 @@ func resolveJSPluginPath(module, root string) (string, error) {
 	}
 
 	if fi, err := os.Stat(p); err == nil && fi.IsDir() {
-		for _, name := range []string{"index.js", "index.mjs", "index.cjs", "plugin.js", "plugin.mjs", "plugin.cjs"} {
+		for _, name := range []string{"index.js", "index.mjs", "index.cjs", "index.ts", "index.tsx", "plugin.js", "plugin.mjs", "plugin.cjs", "plugin.ts", "plugin.tsx"} {
 			cand := filepath.Join(p, name)
 			if fi2, err := os.Stat(cand); err == nil && !fi2.IsDir() {
 				return cand, nil
 			}
 		}
-		return "", fmt.Errorf("no plugin entry point found in directory %s (expected index.js, index.mjs, or index.cjs)", module)
+		return "", fmt.Errorf("no plugin entry point found in directory %s (expected index.js, index.mjs, index.cjs, index.ts, or index.tsx)", module)
 	}
 
 	if fi, err := os.Stat(p); err == nil && !fi.IsDir() {

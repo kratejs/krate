@@ -63,6 +63,47 @@ export default {
 	}
 }
 
+// TestJSPluginTypeScriptEntry verifies a plugin directory whose entry point is
+// index.ts (not index.js) resolves and runs inside the JS runtime.
+func TestJSPluginTypeScriptEntry(t *testing.T) {
+	root := t.TempDir()
+	outDir := filepath.Join(root, "dist")
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	pluginDir := filepath.Join(root, "plugins", "test-plugin")
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "index.ts"), []byte(`
+export default {
+  name: "test-plugin",
+  order: 10,
+  hooks: {
+    BeforeBuild(ctx, options, krate) {
+      return { files: [{ path: "ts.txt", content: "ts entry works" }] };
+    },
+  },
+};
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.PluginConfig{Name: "test-plugin", Module: "plugins/test-plugin"}
+
+	ctx := &BuildHookCtx{Root: root, OutDir: outDir, Pages: []string{"index.tsx"}}
+	if err := RunCommunityPlugins("BeforeBuild", []config.PluginConfig{cfg}, root, outDir, ctx); err != nil {
+		t.Fatalf("RunCommunityPlugins with .ts entry: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outDir, "ts.txt"))
+	if err != nil {
+		t.Fatalf("plugin with .ts entry did not write ts.txt: %v", err)
+	}
+	if want := "ts entry works"; string(data) != want {
+		t.Errorf("ts.txt = %q, want %q", data, want)
+	}
+}
+
 func TestJSPluginAfterMarkdownParseModifiesHTML(t *testing.T) {
 	root, outDir, cfg := writeTestPlugin(t, `
 export default {

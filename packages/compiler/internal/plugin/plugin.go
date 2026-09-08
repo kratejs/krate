@@ -356,8 +356,9 @@ func RunAfterBuild(ctx *BuildResultHookCtx) error {
 // RunCommunityPlugins runs all configured community plugins for the given hook.
 // pluginConfig is the full plugins list from config; hookName identifies which
 // hook is being executed; hookCtx is the JSON-serializable context for the hook.
-// Community plugins are JavaScript modules (config plugins[].module points to a
-// .js/.mjs/.cjs file) executed inside the embedded QuickJS runtime.
+// Community plugins are JavaScript/TypeScript modules (config plugins[].module
+// points to a .js/.mjs/.cjs/.ts/.tsx file) executed inside the embedded QuickJS
+// runtime; esbuild transpiles TS entries before evaluation.
 func RunCommunityPlugins(hookName string, plugins []config.PluginConfig, root, outDir string, hookCtx interface{}) error {
 	for _, pc := range plugins {
 		if pc.Module == "" {
