@@ -221,6 +221,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	errorCount := 0
 
 	b.Cfg.Markdown.Root = b.Root
+	b.resetBuildCaches()
 
 	// A dynamic-route template (e.g. video/[id].tsx) is not the page that gets
 	// served: its concrete URLs are the generateStaticParams expansions. Rebuild
@@ -351,6 +352,7 @@ func (b *Builder) BuildAll() error {
 	defer b.ClosePlugins()
 
 	b.Cfg.Markdown.Root = b.Root
+	b.resetBuildCaches()
 
 	// Generate `.krate/tsconfig.json` so `npx tsx` bootstraps (config load,
 	// generateStaticParams) resolve `krate/content` and the project's path
@@ -1307,7 +1309,7 @@ func (b *Builder) buildRoute(route plugin.Route) (result *PageResult, rawCSS str
 
 	// Use our new shared pipeline
 	// This works for plugins because we pass route.Data (the props) directly
-	layoutRes, rawCSS, err := b.executeLayoutPipeline(route.Layout, route.Content, route.Data)
+	layoutRes, rawCSS, _, err := b.executeLayoutPipeline(route.Layout, route.Content, route.Data)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1331,12 +1333,46 @@ func (b *Builder) buildRoute(route plugin.Route) (result *PageResult, rawCSS str
 }
 
 // layoutEmitCacheEntry is the layout skeleton (pre-children-injection) keyed by
-// layout path + modtime. The layout is content-independent of its pages, so the
-// expensive bundle/annotate/emit pipeline runs once per layout version instead
-// of once per page.
+// layout path + the modtimes of every file in the layout's module graph. The
+// layout is content-independent of its pages, so the expensive
+// bundle/annotate/emit pipeline runs once per layout version instead of once per
+// page. deps records the layout's full module graph so that editing a component
+// the layout imports (which leaves the layout file itself untouched) is detected
+// and forces a rebuild instead of reusing a stale skeleton.
 type layoutEmitCacheEntry struct {
-	modTime                                    time.Time
 	html, headHTML, scriptHTML, styleHTML, css string
+	deps                                       []string
+	depTimes                                   map[string]time.Time
+}
+
+// layoutCacheFresh reports whether every file the layout was built from is
+// still unchanged. A missing file, or any modtime change, invalidates the entry.
+func layoutCacheFresh(e *layoutEmitCacheEntry) bool {
+	if e == nil {
+		return false
+	}
+	for _, dep := range e.deps {
+		info, err := os.Stat(dep)
+		if err != nil {
+			return false
+		}
+		if !info.ModTime().Equal(e.depTimes[dep]) {
+			return false
+		}
+	}
+	return true
+}
+
+// resetBuildCaches clears the in-process layout/loading emit caches. They are
+// only valid within a single build pass: a long-lived `krate dev` process would
+// otherwise keep serving a layout rendered before a component it imports was
+// edited, and would keep negative-caching a `_layout.tsx`/`loading.tsx` that was
+// created after the first build. Cleared in place (sync.Map.Clear) so it is safe
+// even if a build goroutine from a previous pass is still winding down.
+func (b *Builder) resetBuildCaches() {
+	layoutEmitCache.Clear()
+	loadingEmitCache.Clear()
+	layoutCache.Clear()
 }
 
 var layoutEmitCache sync.Map
@@ -1354,28 +1390,31 @@ func emitCacheLock(path string) *sync.Mutex {
 	return mu.(*sync.Mutex)
 }
 
-func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props map[string]string) (*renderer.EmitResult, string, error) {
+// executeLayoutPipeline renders (or reuses) a layout and injects page content.
+// It returns the emitted result, the layout's CSS, and the full set of files the
+// layout was built from (its module graph), so callers can record them as page
+// dependencies — editing a component a layout imports must rebuild the pages the
+// layout wraps, even though the layout file itself is unchanged.
+func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props map[string]string) (*renderer.EmitResult, string, []string, error) {
 	var css string
 
 	if layoutPath == "" {
-		return &renderer.EmitResult{HTML: content}, "", nil
+		return &renderer.EmitResult{HTML: content}, "", nil, nil
 	}
 
-	var modTime time.Time
-	if info, err := os.Stat(layoutPath); err == nil {
-		modTime = info.ModTime()
-	}
-
-	// Cache hit: reuse the layout skeleton and inject the page content.
+	// Cache hit: reuse the layout skeleton and inject the page content. The
+	// cache is only valid while every file in the layout's module graph is
+	// unchanged; a stale entry (e.g. an imported component edited during a
+	// long-lived `krate dev` process) is ignored and re-rendered.
 	if cached, ok := layoutEmitCache.Load(layoutPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
-		if entry.modTime.Equal(modTime) {
+		if layoutCacheFresh(entry) {
 			return &renderer.EmitResult{
 				HTML:       strings.Replace(entry.html, "<!--__children__-->", content, -1),
 				HeadHTML:   entry.headHTML,
 				ScriptHTML: entry.scriptHTML,
 				StyleHTML:  entry.styleHTML,
-			}, entry.css, nil
+			}, entry.css, entry.deps, nil
 		}
 	}
 
@@ -1389,26 +1428,30 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	// filled it while we waited.
 	if cached, ok := layoutEmitCache.Load(layoutPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
-		if entry.modTime.Equal(modTime) {
+		if layoutCacheFresh(entry) {
 			return &renderer.EmitResult{
 				HTML:       strings.Replace(entry.html, "<!--__children__-->", content, -1),
 				HeadHTML:   entry.headHTML,
 				ScriptHTML: entry.scriptHTML,
 				StyleHTML:  entry.styleHTML,
-			}, entry.css, nil
+			}, entry.css, entry.deps, nil
 		}
 	}
 
 	bnd := b.newBundler()
 	layoutBundle, err := bnd.Bundle(layoutPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("bundling layout %s: %w", layoutPath, err)
+		return nil, "", nil, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
 	}
 
 	layoutModule := findEntryModule(layoutBundle.Modules)
 	if layoutModule == nil || layoutModule.Program == nil {
-		return nil, "", fmt.Errorf("layout module invalid or empty: %s", layoutPath)
+		return nil, "", nil, fmt.Errorf("layout module invalid or empty: %s", layoutPath)
 	}
+
+	// The layout's full module graph is both its cache-invalidation key and a
+	// dependency of every page it wraps.
+	layoutDeps := layoutDepPaths(layoutPath, layoutBundle)
 
 	b.TransformUniversalIcons(layoutModule.Program)
 	b.TransformUniversalImages(layoutModule.Program)
@@ -1421,7 +1464,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	annotator.ReclassifyTiers(ann, b.Cfg)
 	tree := irtree.Build(layoutModule.Program, ann)
 	if len(tree.Errors) > 0 {
-		return nil, "", renderErrors(layoutPath, tree.Errors)
+		return nil, "", nil, renderErrors(layoutPath, tree.Errors)
 	}
 	emitter := renderer.NewEmitter()
 	emitter.IconResolver = b.iconResolver
@@ -1430,7 +1473,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	renderer.EmitMeta(tree, emitResult)
 
 	if len(emitResult.Errors) > 0 {
-		return nil, "", renderErrors(layoutPath, emitResult.Errors)
+		return nil, "", nil, renderErrors(layoutPath, emitResult.Errors)
 	}
 
 	// Compile-time reactive dependency validation. Surfaced as warnings so
@@ -1448,12 +1491,13 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	}
 
 	layoutEmitCache.Store(layoutPath, &layoutEmitCacheEntry{
-		modTime:    modTime,
 		html:       emitResult.HTML,
 		headHTML:   emitResult.HeadHTML,
 		scriptHTML: emitResult.ScriptHTML,
 		styleHTML:  emitResult.StyleHTML,
 		css:        css,
+		deps:       layoutDeps,
+		depTimes:   modTimesOf(layoutDeps),
 	})
 
 	// Inject page content at {children} slot
@@ -1462,7 +1506,41 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		HeadHTML:   emitResult.HeadHTML,
 		ScriptHTML: emitResult.ScriptHTML,
 		StyleHTML:  emitResult.StyleHTML,
-	}, css, nil
+	}, css, layoutDeps, nil
+}
+
+// layoutDepPaths returns the absolute paths of every real file in a layout's
+// module graph, including the layout entry itself. External/bare module
+// specifiers (node builtins, `react`, virtual modules) are skipped: they have no
+// filesystem modtime and would otherwise keep the layout cache permanently
+// stale.
+func layoutDepPaths(layoutPath string, bundle *bundler.Bundle) []string {
+	deps := []string{layoutPath}
+	seen := map[string]bool{layoutPath: true}
+	for _, mod := range bundle.Modules {
+		if mod == nil || mod.IsExternal || mod.Path == "" || seen[mod.Path] {
+			continue
+		}
+		if !filepath.IsAbs(mod.Path) {
+			continue
+		}
+		seen[mod.Path] = true
+		deps = append(deps, mod.Path)
+	}
+	return deps
+}
+
+// modTimesOf stats each path, returning a path→modtime map used to detect
+// changes to a cached layout's dependencies. Paths that cannot be statted are
+// omitted so layoutCacheFresh treats them as changed.
+func modTimesOf(paths []string) map[string]time.Time {
+	out := make(map[string]time.Time, len(paths))
+	for _, p := range paths {
+		if info, err := os.Stat(p); err == nil {
+			out[p] = info.ModTime()
+		}
+	}
+	return out
 }
 
 // ─── New IR Tree Pipeline ──────────────────────────────────────────────────
@@ -1534,13 +1612,11 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 		return ""
 	}
 
-	var modTime time.Time
-	if info, err := os.Stat(loadingPath); err == nil {
-		modTime = info.ModTime()
-	}
+	// Cache hit: reuse the rendered loading fallback only while every file in
+	// its module graph is unchanged.
 	if cached, ok := loadingEmitCache.Load(loadingPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
-		if entry.modTime.Equal(modTime) {
+		if layoutCacheFresh(entry) {
 			return entry.html
 		}
 	}
@@ -1552,7 +1628,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	defer lock.Unlock()
 	if cached, ok := loadingEmitCache.Load(loadingPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
-		if entry.modTime.Equal(modTime) {
+		if layoutCacheFresh(entry) {
 			return entry.html
 		}
 	}
@@ -1566,6 +1642,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	if entryModule == nil || entryModule.Program == nil {
 		return ""
 	}
+	deps := layoutDepPaths(loadingPath, bundle)
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, loadingPath, entryModule.SourceCode)
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
@@ -1582,8 +1659,9 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	emitResult := emitter.Emit(tree)
 
 	loadingEmitCache.Store(loadingPath, &layoutEmitCacheEntry{
-		modTime: modTime,
-		html:    emitResult.HTML,
+		html:     emitResult.HTML,
+		deps:     deps,
+		depTimes: modTimesOf(deps),
 	})
 	return emitResult.HTML
 }
@@ -1648,7 +1726,7 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 	var css string
 	var used []string
 	for _, layoutPath := range findLayoutStack(page, b.Cfg.PagesDir) {
-		layoutRes, layoutCSS, err := b.executeLayoutPipeline(layoutPath, emitResult.HTML, nil)
+		layoutRes, layoutCSS, layoutDeps, err := b.executeLayoutPipeline(layoutPath, emitResult.HTML, nil)
 		if err != nil {
 			continue
 		}
@@ -1657,7 +1735,9 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 		emitResult.ScriptHTML = emitResult.ScriptHTML + layoutRes.ScriptHTML
 		emitResult.StyleHTML = emitResult.StyleHTML + layoutRes.StyleHTML
 		css += layoutCSS
-		used = append(used, layoutPath)
+		// Record the layout's full module graph (not just the layout file) so
+		// editing a component the layout imports rebuilds every wrapped page.
+		used = append(used, layoutDeps...)
 	}
 	return css, used
 }
