@@ -334,7 +334,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
-	tree := irtree.Build(entryModule.Program, ann)
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme})
 	if len(tree.Errors) > 0 {
 		return nil, "", renderErrors(spp.PagePath, tree.Errors)
 	}
@@ -342,6 +342,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	emitter := renderer.NewEmitter()
 	emitter.IconResolver = b.iconResolver
 	emitter.EvalJS = b.jsExprEvaluator()
+	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
 

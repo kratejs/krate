@@ -1,5 +1,14 @@
 import { createEffect } from './signal.js';
 
+// React-style event names whose DOM event differs from lowercasing. onFocus/
+// onBlur use the bubbling focusin/focusout; onChange uses input (per-keystroke).
+const EVENT_ALIASES: Record<string, string> = {
+  doubleclick: 'dblclick',
+  focus: 'focusin',
+  blur: 'focusout',
+  change: 'input',
+};
+
 export type Component<P = {}> = (props: P) => Node | null | undefined;
 
 export type PropsWithChildren<P = {}> = P & { children?: unknown[] };
@@ -118,8 +127,11 @@ function setAttr(el: Element, key: string, value: unknown): void {
       Object.assign((el as HTMLElement).style, value);
     }
   } else if (key.startsWith('on') && typeof value === 'function') {
-    // Store handler reference on element for cleanup on re-render
-    const eventKey = key.slice(2).toLowerCase();
+    // Store handler reference on element for cleanup on re-render.
+    // Normalise React-style event names to their DOM equivalents (matching the
+    // compiler's static path).
+    const raw = key.slice(2).toLowerCase();
+    const eventKey = EVENT_ALIASES[raw] || raw;
     const handlerKey = `__krate_${eventKey}`;
     const prevHandler = (el as any)[handlerKey];
     if (prevHandler) {
@@ -127,6 +139,14 @@ function setAttr(el: Element, key: string, value: unknown): void {
     }
     el.addEventListener(eventKey, value as EventListener);
     (el as any)[handlerKey] = value;
+  } else if (key === 'value' || key === 'checked' || key === 'selected') {
+    // Form-control state is a DOM property, not an attribute: setting the
+    // attribute after user interaction has no effect.
+    if (key === 'value') {
+      (el as any).value = value == null || value === false ? '' : value;
+    } else {
+      (el as any)[key] = !!value;
+    }
   } else if (key === 'ref') {
     if (typeof value === 'function') value(el);
     else if (value && typeof value === 'object' && 'current' in value) (value.current as unknown) = el;

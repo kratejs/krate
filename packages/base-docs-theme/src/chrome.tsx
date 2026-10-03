@@ -543,7 +543,7 @@ export function Breadcrumbs(props: BreadcrumbsProps) {
           {item.isLast ? (
             <span class="current">{item.label}</span>
           ) : (
-            <a href={`/docs${item.url}`}>{item.label}</a>
+            <a href={item.url}>{item.label}</a>
           )}
         </span>
       ))}

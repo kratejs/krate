@@ -91,6 +91,16 @@ type Emitter struct {
 	// in prop-driven components fold to static class strings during SSREval.
 	cvaFactories map[string]*irtree.CVASpec
 
+	// contextDefaults holds module-wide `const X = createContext(v)` defaults so
+	// `X.useContext()` folds during SSREval (no Provider exists at build time).
+	contextDefaults map[string]string
+
+	// CodeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
+	// during SSREval. It must match the stylesheet generated for the same theme
+	// (syntaxhighlight.CSSForTheme). Wire it from the build; empty selects the
+	// default theme.
+	CodeTheme string
+
 	// errs collects diagnostics for unsupported constructs encountered during
 	// emit (unknown IR slots, or SSR-evaluated expressions the evaluator could
 	// not handle). They surface on EmitResult.Errors so the build fails instead
@@ -117,6 +127,7 @@ func NewEmitter() *Emitter {
 func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	e.functions = tree.Functions
 	e.cvaFactories = tree.CVAFactories
+	e.contextDefaults = tree.ContextDefaults
 	output := e.emitNode(tree.Root)
 
 	// Merge subtree-local metadata and orphans collected during emit.
@@ -301,6 +312,10 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	if e.cvaFactories != nil {
 		eval.SetCVAFactories(e.cvaFactories)
 	}
+	if e.contextDefaults != nil {
+		eval.SetContextDefaults(e.contextDefaults)
+	}
+	eval.SetCodeTheme(e.CodeTheme)
 	if node.RestProps != nil && node.RestPropsName != "" {
 		eval.SetRestProps(map[string]map[string]ast.Expr{node.RestPropsName: node.RestProps})
 	}
@@ -372,22 +387,35 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	// items={props.sidebarItems}/> needs `sidebarItems` bound in the parent's
 	// SSREval context). Routing them through a fresh emitSSREvaluated loses
 	// those bindings and they render empty.
-	var returnSlots []*irtree.ComponentSlot
+	// Index the component's own return slots by component NAME so the hook can
+	// match the element SSREval is currently evaluating. Matching by call order
+	// alone is wrong: SSREval visits every uppercase child (including
+	// signal-less ones that it must evaluate itself), so a preceding signal-less
+	// child would otherwise consume a client child's slot and render the wrong
+	// component (or drop its hydration).
+	returnSlots := map[string][]*irtree.ComponentSlot{}
 	for _, child := range node.ReturnSlots {
-		if slot, ok := child.(*irtree.ComponentSlot); ok {
-			if slot.Component != nil && slot.Component.Tier == irtree.TierClient {
-				returnSlots = append(returnSlots, slot)
-			}
+		if slot, ok := child.(*irtree.ComponentSlot); ok && slot.Component != nil {
+			returnSlots[slot.Component.Name] = append(returnSlots[slot.Component.Name], slot)
 		}
 	}
 	if len(returnSlots) > 0 {
-		idx := 0
+		used := map[string]int{}
 		eval.interactiveEmit = func(el *ast.JSXElement) (string, bool) {
-			if idx >= len(returnSlots) {
+			name := el.Opening.Name
+			queue := returnSlots[name]
+			i := used[name]
+			if i >= len(queue) {
 				return "", false
 			}
-			out := e.emitComponentSlot(returnSlots[idx])
-			idx++
+			used[name] = i + 1
+			slot := queue[i]
+			// Signal-less children stay in the parent's SSREval flow so they
+			// inherit the parent's prop bindings.
+			if slot.Component.Tier != irtree.TierClient {
+				return "", false
+			}
+			out := e.emitComponentSlot(slot)
 			sigs = append(sigs, out.Signatures...)
 			return out.HTML, true
 		}
@@ -596,6 +624,7 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 	}
 
 	outputs := make([]SlotOutput, len(slots))
+	subErrs := make([][]error, len(slots))
 	base := append([]irtree.SlotID{}, e.clientStack...)
 	var wg sync.WaitGroup
 	for i := range slots {
@@ -606,19 +635,27 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 			sub.functions = e.functions
 			sub.IconResolver = e.IconResolver
 			sub.EvalJS = e.EvalJS
+			// Propagate build-wide tables so SSREval in this branch folds cva
+			// variants and context defaults exactly like the sequential path.
+			sub.cvaFactories = e.cvaFactories
+			sub.contextDefaults = e.contextDefaults
+			sub.CodeTheme = e.CodeTheme
 			sub.clientStack = append([]irtree.SlotID{}, base...)
 			outputs[idx] = sub.emitSlotNode(slots[idx])
+			subErrs[idx] = sub.errs
 		}(i)
 	}
 	wg.Wait()
 
-	for _, out := range outputs {
+	for i, out := range outputs {
 		merged.HTML += out.HTML
 		merged.Signatures = append(merged.Signatures, out.Signatures...)
 		merged.HeadHTML += out.HeadHTML
 		merged.ScriptHTML += out.ScriptHTML
 		merged.StyleHTML += out.StyleHTML
 		merged.Orphans = append(merged.Orphans, out.Orphans...)
+		// Diagnostics raised in a parallel branch must still fail the build.
+		e.errs = append(e.errs, subErrs[i]...)
 	}
 	return merged
 }

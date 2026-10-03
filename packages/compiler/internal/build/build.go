@@ -127,6 +127,12 @@ type Builder struct {
 	// the generated krate-env.d.ts bridge.
 	contentModuleDTS string
 
+	// stateOnce/stateScript cache the durable SSR state payload injected into
+	// every page as `window.__KRATE_STATE__` (from krate.state.json). Signals
+	// created with `{ persist }` prefer this server-chosen value on hydration.
+	stateOnce   sync.Once
+	stateScript string
+
 	// tsxTsconfig is the absolute path to the generated `.krate/tsconfig.json`
 	// used by `npx tsx` bootstraps so user source resolves Krate aliases
 	// (krate/content) and the project's own path aliases.
@@ -871,6 +877,37 @@ func pageRendersCode(html string) bool {
 // and saves to disk in a single parallel step (Zero Disk-I/O Amplification Fix)
 // cssFiles are extra global stylesheets (e.g. Tailwind) linked on every page in
 // addition to each page's own stylesheet (r.CSSFile).
+// durableStateScript returns the `<script>window.__KRATE_STATE__=…</script>`
+// tag for the project's durable state, read once from `krate.state.json` (or
+// `.krate/state.json`). Returns "" when neither exists or the JSON is invalid.
+// Signals created with `{ persist }` prefer this server-chosen value over
+// browser storage on hydration, so SSR and client agree.
+func (b *Builder) durableStateScript() string {
+	b.stateOnce.Do(func() {
+		for _, name := range []string{"krate.state.json", filepath.Join(".krate", "state.json")} {
+			data, err := os.ReadFile(filepath.Join(b.Root, name))
+			if err != nil || len(data) == 0 {
+				continue
+			}
+			if !json.Valid(data) {
+				continue
+			}
+			// Escape characters that could terminate the inline <script> or
+			// break the JS (json.Valid does not escape them). `\u003c` etc. are
+			// valid inside JSON strings and JS source alike.
+			state := string(data)
+			state = strings.ReplaceAll(state, "<", "\\u003c")
+			state = strings.ReplaceAll(state, ">", "\\u003e")
+			state = strings.ReplaceAll(state, "&", "\\u0026")
+			state = strings.ReplaceAll(state, "\u2028", "\\u2028")
+			state = strings.ReplaceAll(state, "\u2029", "\\u2029")
+			b.stateScript = "<script>window.__KRATE_STATE__=" + state + "</script>"
+			return
+		}
+	})
+	return b.stateScript
+}
+
 func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runtimeJSFile string) {
 	var wg sync.WaitGroup
 	pool := newWorkerPool(buildWorkerLimit())
@@ -918,6 +955,13 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				if seoTags != "" {
 					html = strings.Replace(html, "</head>", seoTags+"</head>", 1)
 				}
+			}
+
+			// 2c. Durable SSR state (window.__KRATE_STATE__): a page-level
+			// payload that persisted signals prefer on hydration, so the
+			// hydrated value matches what the server rendered.
+			if state := b.durableStateScript(); state != "" {
+				html = strings.Replace(html, "</head>", state+"</head>", 1)
 			}
 
 			// 3. Minify code in memory
@@ -1073,7 +1117,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	tree := irtree.Build(entryModule.Program, ann)
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme})
 	// CSS primitive declarations that cannot be compiled to CSS are hard errors
 	// (there is no fallback to client signals).
 	if len(tree.Errors) > 0 {
@@ -1093,6 +1137,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	}
 	regions := enumerateRegions(tree)
 	emitter := renderer.NewEmitter()
+	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.IconResolver = b.iconResolver
 	emitter.EvalJS = b.jsExprEvaluator()
 	emitResult := emitter.Emit(tree)
@@ -1462,11 +1507,12 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	annotator.MergeModuleFunctions(ann, extraLayoutPrograms)
 	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	tree := irtree.Build(layoutModule.Program, ann)
+	tree := irtree.BuildWithOptions(layoutModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme})
 	if len(tree.Errors) > 0 {
 		return nil, "", nil, renderErrors(layoutPath, tree.Errors)
 	}
 	emitter := renderer.NewEmitter()
+	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.IconResolver = b.iconResolver
 	emitter.EvalJS = b.jsExprEvaluator()
 	emitResult := emitter.Emit(tree)
@@ -1556,11 +1602,12 @@ func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*
 
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, page, entryModule.SourceCode)
 
-	tree := irtree.Build(entryModule.Program, ann)
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme})
 	if len(tree.Errors) > 0 {
 		return nil, renderErrors(page, tree.Errors)
 	}
 	emitter := renderer.NewEmitter()
+	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	result := emitter.Emit(tree)
 
 	if len(result.Errors) > 0 {
@@ -1647,7 +1694,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
-	tree := irtree.Build(entryModule.Program, ann)
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme})
 	if len(tree.Errors) > 0 {
 		for _, e := range tree.Errors {
 			fmt.Fprintf(os.Stderr, "  %s✗ Error (loading %s):%s %v\n", cRed, loadingPath, cReset, e)
@@ -1655,6 +1702,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 		return ""
 	}
 	emitter := renderer.NewEmitter()
+	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.EvalJS = b.jsExprEvaluator()
 	emitResult := emitter.Emit(tree)
 

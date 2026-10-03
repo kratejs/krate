@@ -38,7 +38,12 @@ func JSString(s string) string {
 	s = strings.ReplaceAll(s, "\n", `\n`)
 	s = strings.ReplaceAll(s, "\r", `\r`)
 	s = strings.ReplaceAll(s, "\t", `\t`)
-	s = strings.ReplaceAll(s, "\x00", `\0`)
+	// \x00 (not \0) so a following digit cannot form a legacy octal escape.
+	s = strings.ReplaceAll(s, "\x00", `\x00`)
+	// U+2028/U+2029 are line terminators in older JS engines and would break a
+	// single-line string literal.
+	s = strings.ReplaceAll(s, "\u2028", `\u2028`)
+	s = strings.ReplaceAll(s, "\u2029", `\u2029`)
 	return s
 }
 

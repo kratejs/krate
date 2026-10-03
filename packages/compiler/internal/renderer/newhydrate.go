@@ -19,7 +19,7 @@ const HydrationBootstrapJS = `
 window.__krateErrs=[];
 window.__krate_props={};
 window.$esc=function(v){var d=document.createElement('div');d.textContent=v;return d.innerHTML};
-window.__safe=function(fn){try{return fn();}catch(e){try{window.__krateErrs.push(String(e&&e.message));}catch(_){}return null;}};
+window.__safe=function(fn){try{return fn();}catch(e){try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}return null;}};
 (function(){
 var __root=document.getElementById('root')||document.body;
 var __cache=new Map();
@@ -27,12 +27,14 @@ function scan(){__cache.clear();var w=document.createTreeWalker(__root,NodeFilte
 scan();
 window.findSlot=function(id){var el=__root.querySelector('[data-k="k:'+id+'"]');if(el)return el;return __cache.get(id)||null;};
 window.refreshSlots=scan;
-window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}});});};
-window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){n.parentNode.removeChild(n.nextSibling);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],n.nextSibling);}else n.parentNode.insertBefore(v,n.nextSibling);});});};
-window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var a=n.nextSibling,b=a?a.nextSibling:null;if(!a||!b)return;__safe(function(){createEffect(function(){var v=(get());if(v){a.style.display='';b.style.display='none';}else{a.style.display='none';b.style.display='';}});});};
+window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}});});};
+window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);});});};
+window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var a=n.nextSibling,b=a?a.nextSibling:null;if(!a||!b)return;var v=(get());if(v){a.style.display='';b.style.display='none';}else{a.style.display='none';b.style.display='';}});});};
 window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)n.removeAttribute(attr);else if(v===true)n.setAttribute(attr,'');else n.setAttribute(attr,String(v));});});};
+window.kbindProp=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(attr==='value'){n.value=v==null||v===false?'':String(v);}else{n[attr]=!!v;}});});};
 window.kbindHandler=function(id,prop,fn){var n=findSlot(id);if(n)__safe(function(){n[prop]=fn;});};
-window.kbindRef=function(id,set){var n=findSlot(id);if(n)set(n);};
+window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);});};
+window.kbindRef=function(id,set){var n=findSlot(id);if(n)__safe(function(){set(n);});};
 })();
 `
 
@@ -111,13 +113,20 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 				val = s.RawInit
 			} else if s.IsString {
 				val = "'" + escapeJSString(val) + "'"
-			} else if isBareStringToken(val) {
-				// Resolved string initial values that weren't type-inferred as
-				// strings (e.g. props.x || "") must still be emitted as quoted
-				// literals or they reference an undefined global at runtime.
+			} else if !isJSNumberOrKeyword(val) {
+				// Any resolved value that is not a recognised JS number/keyword
+				// literal is string data whose type wasn't inferred (e.g.
+				// "Hello world", "1.2.3", "NaN"). Quote it, or the emitted
+				// createSignal(...) is invalid JS / references an undefined
+				// global.
 				val = "'" + escapeJSString(val) + "'"
 			}
 			factory := "createSignal(" + val + ")"
+			if s.OptionsJS != "" {
+				// Preserve the signal's options (e.g. `{ persist: 'key' }`) so
+				// the runtime can restore/persist the value across reloads.
+				factory = "createSignal(" + val + "," + s.OptionsJS + ")"
+			}
 			if s.FactoryJS != "" {
 				// Reactive primitives whose setter is not a plain write (e.g.
 				// createReducer) emit their full factory call instead.
@@ -160,6 +169,14 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			if rb.Callback != "" {
 				b.WriteString(",")
 				b.WriteString(rb.Callback)
+			} else if rb.Adaptive {
+				// Handles every ref shape: a callback function, a {current} ref
+				// object, or a plain variable that should be assigned the node.
+				b.WriteString(",el=>{var _r=")
+				b.WriteString(rb.Target)
+				b.WriteString(";if(typeof _r==='function')_r(el);else if(_r&&typeof _r==='object')_r.current=el;else{")
+				b.WriteString(rb.Target)
+				b.WriteString("=el;}}")
 			} else {
 				b.WriteString(",el=>{")
 				b.WriteString(rb.Target)
@@ -208,8 +225,26 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			}
 		}
 
-		// Event handlers: find element by slot ID, set __krate_{event}_{slotID}
+		// Event handlers. Delegated (bubbling) handlers set a property that the
+		// shared delegated listener invokes; capture-phase and non-bubbling
+		// events get a direct listener on the element.
 		for _, h := range sig.Handlers {
+			if h.Direct {
+				b.WriteString("kbindEvent(")
+				b.WriteString(strconv.Quote(string(h.ElementSlotID)))
+				b.WriteString(",")
+				b.WriteString(strconv.Quote(h.Event))
+				b.WriteString(",")
+				b.WriteString(h.Body)
+				b.WriteString(",")
+				if h.Capture {
+					b.WriteString("true")
+				} else {
+					b.WriteString("false")
+				}
+				b.WriteString(");\n")
+				continue
+			}
 			propName := "__krate_" + h.Event + "_" + sanitizeHandlerProp(string(h.ElementSlotID))
 			b.WriteString("kbindHandler(")
 			b.WriteString(strconv.Quote(string(h.ElementSlotID)))
@@ -229,7 +264,13 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			if exprJS == "" {
 				continue
 			}
-			b.WriteString("kbindAttr(")
+			// value/checked/selected are DOM properties, not attributes: setting
+			// the attribute after interaction has no effect.
+			if isFormPropertyAttr(a.AttrName) {
+				b.WriteString("kbindProp(")
+			} else {
+				b.WriteString("kbindAttr(")
+			}
 			b.WriteString(strconv.Quote(string(a.ElementSlotID)))
 			b.WriteString(",")
 			b.WriteString(strconv.Quote(a.AttrName))
@@ -246,6 +287,10 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	var handlerEvents []string
 	for _, sig := range result.Signatures {
 		for _, h := range sig.Handlers {
+			// Direct (capture / non-bubbling) handlers have their own listeners.
+			if h.Direct {
+				continue
+			}
 			if !seenEvents[h.Event] {
 				seenEvents[h.Event] = true
 				handlerEvents = append(handlerEvents, h.Event)
@@ -255,16 +300,20 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 
 	if len(handlerEvents) > 0 {
 		b.WriteString("if(typeof __krate_del_cleanup==='function')__krate_del_cleanup();\n")
-		b.WriteString("var __krate_del_root=document.querySelector('#root');\n")
+		// Same root resolution as the slot bootstrap (fall back to body), so a
+		// non-#root container still works.
+		b.WriteString("var __krate_del_root=document.getElementById('root')||document.body;\n")
 		b.WriteString("var __krate_del_fns=[];\n")
 		b.WriteString("function __krate_del_add(ev,fn){__krate_del_root.addEventListener(ev,fn);__krate_del_fns.push({ev:ev,fn:fn});}\n")
 		for _, ev := range handlerEvents {
-			// Event delegation: walk up from target, check for __krate_{event}_{any} property
+			// Event delegation: walk up from the target and invoke EVERY handler
+			// on the path (bubbling), stopping only if the handler called
+			// stopPropagation() (which sets e.cancelBubble).
 			b.WriteString("__krate_del_add('")
 			b.WriteString(ev)
-			b.WriteString("',e=>{var _n=e.target;while(_n&&_n!==document){var _found=false;for(var _k in _n){if(_k.indexOf('__krate_")
+			b.WriteString("',e=>{var _n=e.target;while(_n&&_n!==document){for(var _k in _n){if(_k.indexOf('__krate_")
 			b.WriteString(ev)
-			b.WriteString("_')===0){_n[_k](e);_found=true;break;}}if(_found)break;_n=_n.parentNode;}});\n")
+			b.WriteString("_')===0){_n[_k](e);break;}}if(e.cancelBubble)return;_n=_n.parentNode;}});\n")
 		}
 		b.WriteString("__krate_del_cleanup=function(){for(var i=0;i<__krate_del_fns.length;i++){__krate_del_root.removeEventListener(__krate_del_fns[i].ev,__krate_del_fns[i].fn);}__krate_del_fns=[];};\n")
 	}
@@ -290,6 +339,33 @@ func sanitizeHandlerProp(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// isFormPropertyAttr reports whether an attribute is really a DOM property on
+// form controls (value/checked/selected) that must be set via the property, not
+// the attribute, to reflect programmatic updates after user interaction.
+func isFormPropertyAttr(name string) bool {
+	switch name {
+	case "value", "checked", "selected":
+		return true
+	}
+	return false
+}
+
+// isJSNumberOrKeyword reports whether v is a valid JS numeric literal or a
+// boolean/null keyword, and therefore safe to emit unquoted.
+func isJSNumberOrKeyword(v string) bool {
+	switch v {
+	case "true", "false", "null", "undefined", "NaN", "Infinity", "-Infinity":
+		return true
+	}
+	if v == "" {
+		return false
+	}
+	if _, err := strconv.ParseFloat(v, 64); err == nil {
+		return true
+	}
+	return false
 }
 
 // isBareStringToken reports whether v is a bare JS identifier that is not a

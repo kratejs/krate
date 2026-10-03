@@ -18,6 +18,40 @@ setValue(next)        // set value (triggers subscribers)
 setValue(prev => ...) // functional update
 ```
 
+#### Persistent state (`persist`)
+
+Pass a `persist` option to survive reloads. The value is read from storage when
+the signal is created and written on every change. This is SSR-safe (storage is
+only touched in the browser) and syncs across tabs by default.
+
+```typescript
+// localStorage under the key "count"
+const [count, setCount] = createSignal(0, { persist: 'count' })
+
+// sessionStorage, or full control
+const [theme, setTheme] = createSignal('light', {
+  persist: {
+    key: 'theme',
+    store: 'session',            // 'local' (default) | 'session' | 'memory' | Storage
+    serialize: JSON.stringify,   // optional
+    deserialize: JSON.parse,     // optional
+    sync: false,                 // cross-tab sync (default true for 'local')
+  },
+})
+```
+
+If storage is unavailable (private mode, quota exceeded) the signal falls back
+to an in-memory store instead of throwing; clear a stored value with
+`clearPersisted`.
+
+#### Durable SSR state
+
+When a page embeds `window.__KRATE_STATE__` (a JSON object keyed by persistence
+key), that server-chosen value takes precedence over browser storage on the
+first hydration, so the hydrated value matches what the server rendered. A
+project can provide it with a `krate.state.json` file at the root, which the
+build injects into every page.
+
 ### `createCSSChoice` / `createCSSToggle` / `createCSSFlags`
 
 Zero-JS state compiled to hidden inputs + `:has()` CSS. `createCSSChoice` is a

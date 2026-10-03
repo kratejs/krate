@@ -59,7 +59,32 @@ export default function Hello() {
 }
 ```
 
-- **Math** — optional KaTeX-style math (`math: true` in the markdown config).
+- **Math** — with `math: true`, `$inline$` and `$$display$$` spans are wrapped
+  in `.krate-math` elements so a math renderer (KaTeX/MathJax auto-render) or
+  custom CSS can pick them up. Code spans/blocks are never touched:
+
+  ```text
+  The identity $e^{i\pi} + 1 = 0$ is famous.
+
+  $$\int_0^1 x\,dx = \tfrac{1}{2}$$
+  ```
+
+## Component directives
+
+Import a component, then wrap content in it with a `:::component` directive —
+the body is rendered as Markdown and passed to the component as HTML:
+
+```mdx
+import { Card, Steps, Step } from '@krate/components';
+
+:::component Card title="Getting started"
+Krate **compiles** Markdown into your components, with full Markdown inside.
+:::
+```
+
+Directives are expanded to real component JSX at build time, so they appear in
+the output as static HTML with no client runtime. This works for any imported
+component (`:::component Steps`, `:::component Aside type="tip"`, …).
 
 ## MDX
 

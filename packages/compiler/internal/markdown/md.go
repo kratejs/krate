@@ -17,7 +17,74 @@ func RenderToHTML(src string, cfg Config) string {
 	for _, b := range blocks {
 		out.WriteString(renderBlock(b, cfg))
 	}
+	html := out.String()
+	if cfg.Math {
+		html = wrapMath(html)
+	}
+	return html
+}
+
+// mathBlockRe matches a display-math span `$$...$$`; mathInlineRe matches an
+// inline `$...$` that is not just whitespace and does not span lines.
+var (
+	mathBlockRe  = regexp.MustCompile(`\$\$([^$]+?)\$\$`)
+	mathInlineRe = regexp.MustCompile(`\$([^\s$][^$\n]*?[^\s$]|[^\s$])\$`)
+)
+
+// wrapMath wraps TeX delimiters in `.krate-math` spans so a math renderer
+// (KaTeX/MathJax auto-render) or the theme's CSS can pick them up. Code blocks
+// and inline code are skipped so `$` in code samples is left untouched.
+func wrapMath(html string) string {
+	var out strings.Builder
+	i := 0
+	for i < len(html) {
+		next := strings.IndexByte(html[i:], '<')
+		if next < 0 {
+			out.WriteString(wrapMathInText(html[i:]))
+			break
+		}
+		if next > 0 {
+			out.WriteString(wrapMathInText(html[i : i+next]))
+		}
+		tagStart := i + next
+		// Copy <pre> ... </pre> and <code> ... </code> regions verbatim so math
+		// delimiters inside code are never wrapped. The open tag is detected
+		// here (not only at the loop top) because preceding text was just
+		// copied, which would otherwise consume the tag generically.
+		if tag := mathSkipTag(html, tagStart); tag != "" {
+			closeTag := "</" + tag + ">"
+			if end := strings.Index(html[tagStart:], closeTag); end >= 0 {
+				out.WriteString(html[tagStart : tagStart+end+len(closeTag)])
+				i = tagStart + end + len(closeTag)
+				continue
+			}
+		}
+		end := strings.IndexByte(html[tagStart:], '>')
+		if end < 0 {
+			out.WriteString(html[tagStart:])
+			break
+		}
+		out.WriteString(html[tagStart : tagStart+end+1])
+		i = tagStart + end + 1
+	}
 	return out.String()
+}
+
+// mathSkipTag returns the tag name when html[i:] begins a <pre>/<code> open tag.
+func mathSkipTag(html string, i int) string {
+	for _, tag := range []string{"pre", "code"} {
+		if strings.HasPrefix(html[i:], "<"+tag) {
+			return tag
+		}
+	}
+	return ""
+}
+
+// wrapMathInText wraps math delimiters in a run of text (no tags).
+func wrapMathInText(text string) string {
+	text = mathBlockRe.ReplaceAllString(text, `<span class="krate-math krate-math-block">$$$1$$</span>`)
+	text = mathInlineRe.ReplaceAllString(text, `<span class="krate-math krate-math-inline">$$$1$$</span>`)
+	return text
 }
 
 type blockType int
@@ -318,7 +385,7 @@ func renderCodeBlock(b block, cfg Config) string {
 
 	if cfg.CodeHighlight && b.info != "" {
 		lang := syntaxhighlight.NormalizeLanguage(b.info)
-		highlighted := syntaxhighlight.Highlight(code, lang)
+		highlighted := syntaxhighlight.HighlightTheme(code, lang, cfg.CodeTheme)
 		return fmt.Sprintf("<pre class=\"chroma\"><code class=\"language-%s\">%s</code></pre>\n", b.info, highlighted)
 	}
 

@@ -6,6 +6,9 @@
   align-items: center;
   justify-content: center;
 }
+.krate-dialog[data-state="closed"] .krate-dialog-content-wrapper {
+  display: none;
+}
 .krate-dialog-overlay {
   position: fixed;
   inset: 0;

@@ -24,6 +24,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/kratedocs"
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
+	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
 	"github.com/kratejs/krate/packages/compiler/internal/routetypes"
 )
 
@@ -42,6 +43,7 @@ type Service struct {
 	env     map[string]string
 	verbose bool
 	builder *build.Builder
+	policy  *Policy
 
 	// runMu serializes write operations and build/check (which swap os.Stdout
 	// during stdout capture) so concurrent requests never race.
@@ -56,6 +58,7 @@ func NewService(opts Options) *Service {
 		env:     opts.Env,
 		verbose: opts.Verbose,
 		builder: newBuilder(opts),
+		policy:  loadPolicy(opts.Root),
 	}
 }
 
@@ -160,6 +163,72 @@ func (s *Service) Register(srv *Server) {
 		}, "route"),
 		Annotations: destructiveToolAnnotations("Edit Page Source"),
 		Handler:     s.toolEditPage,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "list_files",
+		Description: "List project files (project-relative paths), skipping node_modules/.git/dist by default. Filter with glob (supports * and **). Use this to discover components, styles, and assets before reading or editing.",
+		InputSchema: objSchema(map[string]any{
+			"dir":           strSchema("Directory to list, relative to the project root (default: the whole project)"),
+			"glob":          strSchema("Optional path glob filter, e.g. src/components/**/*.tsx"),
+			"recursive":     boolSchema("Recurse into subdirectories (default true)"),
+			"includeDenied": boolSchema("Include paths the policy denies (default false)"),
+		}),
+		Annotations: readOnlyAnnotations("List Files"),
+		Handler:     s.toolListFiles,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "read_file",
+		Description: "Read any project file by project-relative path. Returns text content (with a language hint) or a binary marker. Sensitive paths (environment files, keys) are refused unless allowed in .krate/mcp.json.",
+		InputSchema: objSchema(map[string]any{
+			"path": strSchema("Project-relative path, e.g. src/components/ui/button.tsx"),
+		}, "path"),
+		Annotations: readOnlyAnnotations("Read File"),
+		Handler:     s.toolReadFile,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "create_file",
+		Description: "Create a new project file. Refuses to overwrite an existing file (use edit_page to modify), respects the write policy, and parse-gates editable source. Returns a unified diff unless apply=true.",
+		InputSchema: objSchema(map[string]any{
+			"path":    strSchema("Project-relative path to create"),
+			"content": strSchema("Full file content"),
+			"apply":   boolSchema("Write the file (default false: dry-run)"),
+		}, "path", "content"),
+		Annotations: additiveToolAnnotations("Create File"),
+		Handler:     s.toolCreateFile,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "delete_file",
+		Description: "Delete a project file (files only). Respects the write policy. Returns a preview unless apply=true.",
+		InputSchema: objSchema(map[string]any{
+			"path":  strSchema("Project-relative path to delete"),
+			"apply": boolSchema("Delete the file (default false: dry-run)"),
+		}, "path"),
+		Annotations: destructiveToolAnnotations("Delete File"),
+		Handler:     s.toolDeleteFile,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "move_file",
+		Description: "Move or rename a project file. Respects the write policy for both endpoints. Returns a preview unless apply=true.",
+		InputSchema: objSchema(map[string]any{
+			"from":  strSchema("Current project-relative path"),
+			"to":    strSchema("New project-relative path"),
+			"apply": boolSchema("Perform the move (default false: dry-run)"),
+		}, "from", "to"),
+		Annotations: destructiveToolAnnotations("Move File"),
+		Handler:     s.toolMoveFile,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "create_component",
+		Description: "Scaffold a Krate component (client, static, or server) under src/components/<kebab-name>/, optionally with a companion .css file. Returns a unified diff unless apply=true. Use read_file/edit_page for further changes.",
+		InputSchema: objSchema(map[string]any{
+			"name":    strSchema("PascalCase component name, e.g. StatusBadge"),
+			"kind":    enumSchema("Component tier (default client)", "client", "static", "server"),
+			"dir":     strSchema("Base directory (default src/components)"),
+			"withCss": boolSchema("Also create a companion CSS file (default false)"),
+			"apply":   boolSchema("Write the file(s) (default false: dry-run)"),
+		}, "name"),
+		Annotations: additiveToolAnnotations("Create Component"),
+		Handler:     s.toolCreateComponent,
 	})
 	srv.RegisterTool(Tool{
 		Name:        "read_content",
@@ -830,21 +899,56 @@ func (s *Service) toolEditPage(ctx context.Context, args map[string]any) (ToolRe
 
 // resolveEditTarget anchors a tool target: "/route" resolves through the page
 // builder so dynamic and typed routes work; anything else is treated as a
-// project-relative path. Absolute paths and ".." escapes are rejected.
+// project-relative path. Absolute paths and traversal outside the root are
+// rejected, and symlinked directories are resolved so a link cannot redirect a
+// write outside the project.
 func (s *Service) resolveEditTarget(target string) (abs, rel string, err error) {
 	if target == "" {
 		return "", "", fmt.Errorf("empty route")
 	}
-	clean := filepath.ToSlash(strings.TrimPrefix(target, "/"))
-	if filepath.IsAbs(clean) || strings.Contains(clean, "..") {
+	if filepath.IsAbs(target) {
 		return "", "", fmt.Errorf("invalid path: %s", target)
 	}
 	if strings.HasPrefix(target, "/") {
-		return s.resolveSource(target)
+		abs, rel, err = s.resolveSource(target)
+		if err != nil {
+			return "", "", err
+		}
+		if s.policy != nil && !s.policy.writable(rel) {
+			return "", "", fmt.Errorf("refusing to edit %s: it %s", rel, s.policy.deniedReason(rel))
+		}
+		return abs, rel, nil
 	}
-	abs = filepath.Join(s.root, filepath.FromSlash(clean))
+	abs, rel, err = s.resolveProjectPath(target)
+	if err != nil {
+		return "", "", err
+	}
+	if s.policy != nil && !s.policy.writable(rel) {
+		return "", "", fmt.Errorf("refusing to edit %s: it %s", rel, s.policy.deniedReason(rel))
+	}
+	return abs, rel, nil
+}
+
+// resolveProjectPath turns a project-relative target into an absolute path and
+// slash rel, rejecting absolute paths, NUL bytes, and symlink escapes. It does
+// not consult the write policy (read tools still call denied separately).
+func (s *Service) resolveProjectPath(target string) (abs, rel string, err error) {
+	if target == "" {
+		return "", "", fmt.Errorf("empty path")
+	}
+	if filepath.IsAbs(target) {
+		return "", "", fmt.Errorf("invalid path: %s", target)
+	}
+	clean := filepath.ToSlash(target)
+	if strings.Contains(clean, "\x00") {
+		return "", "", fmt.Errorf("invalid path: %s", target)
+	}
+	abs, err = pluginapi.SafeJoin(s.root, clean)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid path (outside the project): %s", target)
+	}
 	pr, relErr := filepath.Rel(s.root, abs)
-	if relErr != nil || pr == ".." || strings.HasPrefix(pr, ".."+string(filepath.Separator)) {
+	if relErr != nil {
 		return "", "", fmt.Errorf("invalid path (outside the project): %s", target)
 	}
 	return abs, filepath.ToSlash(pr), nil
@@ -1633,21 +1737,11 @@ func isEditablePageExt(rel string) bool {
 		strings.HasSuffix(l, ".js") || strings.HasSuffix(l, ".jsx")
 }
 
+// listContentFiles returns markdown entries under dir as dir-relative slugs.
+// It delegates to walkContentFiles so nested entries (guides/index.md vs
+// index.md) keep distinct slugs instead of colliding on the bare filename.
 func listContentFiles(dir string) ([]string, error) {
-	var files []string
-	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if ext := strings.ToLower(filepath.Ext(path)); ext == ".md" || ext == ".mdx" {
-			files = append(files, filepath.Base(path))
-		}
-		return nil
-	})
-	return files, err
+	return walkContentFiles(dir)
 }
 
 // walkContentFiles returns markdown files under dir as slash-separated paths

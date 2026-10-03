@@ -1,11 +1,12 @@
 import { defineDocsTheme } from "@krate/plugin";
 
 /**
- * Options for the base docs theme. Reserved for forward compatibility — the
- * layout currently renders the stock light/dark theme that Krate ships in the
- * examples and docs sites.
+ * Options for the base docs theme.
  */
 export interface BaseDocsThemeOptions {
+  /** localStorage key used to persist the light/dark choice (default `theme`). */
+  themeStorageKey?: string;
+  /** Forward-compatible escape hatch for future options. */
   [key: string]: unknown;
 }
 

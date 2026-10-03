@@ -2,8 +2,8 @@ package docs
 
 import (
 	"fmt"
+	"html"
 	"strings"
-	"unicode"
 
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 )
@@ -165,15 +165,7 @@ func stripInlineHTML(s string) string {
 			out.WriteRune(r)
 		}
 	}
-	return strings.TrimSpace(out.String())
-}
-
-// HasLetters checks if a string contains any letter characters.
-func HasLetters(s string) bool {
-	for _, r := range s {
-		if unicode.IsLetter(r) {
-			return true
-		}
-	}
-	return false
+	// Decode entities so a heading `Components &amp; helpers` yields the plain
+	// text `Components & helpers` in the TOC/search index (not `&amp;`).
+	return strings.TrimSpace(html.UnescapeString(out.String()))
 }

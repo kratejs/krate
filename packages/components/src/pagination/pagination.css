@@ -1,0 +1,47 @@
+.krate-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 0.875rem;
+}
+.krate-pagination-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.krate-pagination-link,
+.krate-pagination-page {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  color: var(--krate-text, #fafafa);
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+.krate-pagination-link:hover,
+.krate-pagination-page:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.krate-pagination-active {
+  background: var(--krate-primary, #3b82f6);
+  color: #fff;
+  font-weight: 600;
+}
+.krate-pagination-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.krate-pagination-link:focus-visible,
+.krate-pagination-page:focus-visible {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: 2px;
+}

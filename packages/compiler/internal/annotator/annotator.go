@@ -569,6 +569,16 @@ func MergeModuleFunctions(ann *irtree.Annotations, modules []ModuleSource) {
 					ann.CVAFactories[name] = spec
 				}
 			}
+			// Merge context defaults so `X.useContext()` in the entry module can
+			// fold against `createContext` bindings from imported modules.
+			if ann.ContextDefaults == nil {
+				ann.ContextDefaults = make(map[string]string)
+			}
+			for name, def := range irtree.CollectContextDefaults(mod.Program) {
+				if _, exists := ann.ContextDefaults[name]; !exists {
+					ann.ContextDefaults[name] = def
+				}
+			}
 		}
 	}
 	// Re-walk used components to pick up newly discovered functions. The used

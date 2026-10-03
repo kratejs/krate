@@ -15,7 +15,8 @@
  *   node scripts/sync-krate-docs.mjs --check   # exit 1 if out of sync
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -44,15 +45,38 @@ function listMarkdown(dir, base = dir) {
   return out.sort();
 }
 
+/** Hash every markdown file's contents, keyed by relative path. */
+function hashMarkdown(dir) {
+  const map = new Map();
+  for (const rel of listMarkdown(dir)) {
+    const data = readFileSync(join(dir, rel));
+    map.set(rel, createHash('sha256').update(data).digest('hex'));
+  }
+  return map;
+}
+
 if (check) {
   const want = listMarkdown(src);
-  const got = existsSync(dest)
-    ? listMarkdown(dest)
-    : [];
-  const same = want.length === got.length && want.every((f, i) => f === got[i]);
-  if (!same) {
+  const got = existsSync(dest) ? listMarkdown(dest) : [];
+
+  // Compare the file set AND the content of every file, so edits that keep the
+  // same filenames (content drift) are caught, not just adds/removes/renames.
+  const added = want.filter((f) => !got.includes(f));
+  const removed = got.filter((f) => !want.includes(f));
+  const wantHash = hashMarkdown(src);
+  const gotHash = existsSync(dest) ? hashMarkdown(dest) : new Map();
+  const changed = want.filter(
+    (f) => gotHash.has(f) && wantHash.get(f) !== gotHash.get(f),
+  );
+
+  if (added.length || removed.length || changed.length) {
+    const detail = [];
+    if (added.length) detail.push(`added: ${added.join(', ')}`);
+    if (removed.length) detail.push(`removed: ${removed.join(', ')}`);
+    if (changed.length) detail.push(`modified: ${changed.join(', ')}`);
     console.error(
-      'sync-krate-docs: compiler docs are out of date. Run `node scripts/sync-krate-docs.mjs`.',
+      'sync-krate-docs: compiler docs are out of date ' +
+        `(${detail.join('; ')}). Run \`node scripts/sync-krate-docs.mjs\`.`,
     );
     process.exit(1);
   }

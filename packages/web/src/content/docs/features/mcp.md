@@ -65,6 +65,12 @@ The shape is the same, under the client's own key:
 | `create_page` | Create a page from a template; returns a diff (dry-run by default) |
 | `edit_ast` | Replace a page's AST with an edited document; returns a diff |
 | `edit_page` | Edit any project file's source directly (full replace or find+replace); returns a diff |
+| `list_files` | List project files (skips `node_modules`/`.git`/`dist`), with an optional `glob` |
+| `read_file` | Read any project file by path (text + language, or a binary marker) |
+| `create_file` | Create a new file (refuses to overwrite; parse-gated); returns a diff |
+| `delete_file` | Delete a file (files only); preview unless `apply` |
+| `move_file` | Move/rename a file; preview unless `apply` |
+| `create_component` | Scaffold a component (`client`/`static`/`server`, optional CSS); returns a diff |
 | `create_content` | Create an entry in a content collection, validated against its schema; returns a diff |
 | `edit_content` | Edit a content entry (full replace, frontmatter rewrite, or find+replace); schema-checked |
 
@@ -107,12 +113,55 @@ are ranked, and each hit carries a short `excerpt`, a `slug`, and a `resource`
 It does **not** scan the current project's content; use
 `read_content`/`krate://content` for that.
 
+### File tools
+
+The file tools let the agent discover and manage arbitrary project files
+(components, styles, assets), not just pages:
+
+- **`list_files`** lists project-relative paths (skipping `node_modules`,
+  `.git`, `dist`, …). Filter with `glob` (`src/components/**/*.tsx`), scope with
+  `dir`, and set `includeDenied: true` to see policy-denied paths.
+- **`read_file`** returns a file's text with a language hint (or a `binary`
+  marker). Sensitive paths are refused (see the policy below).
+- **`create_file`**, **`delete_file`**, and **`move_file`** round out the
+  lifecycle. `create_file` refuses to overwrite (use `edit_page` to modify) and
+  parse-gates editable source; all three default to a dry-run preview.
+- **`create_component`** scaffolds a component under
+  `src/components/<kebab-name>/`: `kind` selects `client` (imports the runtime),
+  `static`, or `server`; `withCss: true` adds a companion `.css` file. Continue
+  with `edit_page` for changes.
+
 ### Write tools
 
-`create_page`, `edit_ast`, `edit_page`, `create_content`, and `edit_content`
+`create_page`, `edit_ast`, `edit_page`, `create_file`, `delete_file`,
+`move_file`, `create_component`, `create_content`, and `edit_content`
 **default to a dry-run** that returns a unified diff. Pass `"apply": true` to
 write. This gives the agent (and you) an approval step before anything changes
 on disk.
+
+### Permissions (`.krate/mcp.json`)
+
+By default the agent may read and write any project file **except** a small set
+of sensitive paths — environment files (`.env*`), private keys (`*.pem`,
+`*.key`, `id_rsa`, …), `.git/`, npm/pypi/netrc credential files, and the policy
+file itself. Those require an explicit `allow` entry. A committed policy at
+`.krate/mcp.json` customises this:
+
+```json
+{
+  "allow": ["config/public.env"],
+  "deny": ["src/generated/**"],
+  "readOnly": ["krate.config.ts"]
+}
+```
+
+- **`allow`** overrides the default-deny list (e.g. permit one checked-in
+  `.env.example`).
+- **`deny`** always wins, even over `allow`.
+- **`readOnly`** permits reading but never writing.
+
+Every write also rejects absolute paths and traversal outside the project root,
+resolving symlinks so a symlinked directory cannot redirect a write elsewhere.
 
 - **`create_page`** scaffolds a page from a template — `static` (default),
   `content-list`, `detail`, and `blank` (raw source override). For

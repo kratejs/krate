@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -83,11 +84,34 @@ type SSREval struct {
 	// tagAliases maps a local `const X = <tag expr>` binding to its tag
 	// expression, so `<X/>` resolves to the concrete tag when it folds.
 	tagAliases map[string]ast.Expr
+
+	// jsxBindings marks local names bound to a JSX value (`const chip = <span/>`)
+	// so `{chip}` is injected as markup instead of being HTML-escaped.
+	jsxBindings map[string]bool
+
+	// contextDefaults maps a module-level `const X = createContext(v)` binding to
+	// its literal default v, so `X.useContext()` folds at build time.
+	contextDefaults map[string]string
+
+	// codeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
+	// during SSREval, so inline highlighted blocks match the generated
+	// stylesheet. Empty selects the default theme.
+	codeTheme string
+}
+
+// SetCodeTheme installs the chroma theme for compile-time code highlighting.
+func (e *SSREval) SetCodeTheme(theme string) {
+	e.codeTheme = theme
 }
 
 // SetCVAFactories installs the module-wide cva factory table.
 func (e *SSREval) SetCVAFactories(factories map[string]*irtree.CVASpec) {
 	e.cvaFactories = factories
+}
+
+// SetContextDefaults installs the module-wide context-default table.
+func (e *SSREval) SetContextDefaults(defaults map[string]string) {
+	e.contextDefaults = defaults
 }
 
 // SetRestProps installs the rest-parameter attribute map for spread expansion.
@@ -159,9 +183,10 @@ const maxEvalDepth = 10
 // NewSSREval creates a new SSR evaluator.
 func NewSSREval(functions map[string]*ast.FnDecl) *SSREval {
 	return &SSREval{
-		bindings:  make(map[string]string),
-		arrays:    make(map[string][]string),
-		functions: functions,
+		bindings:    make(map[string]string),
+		arrays:      make(map[string][]string),
+		jsxBindings: make(map[string]bool),
+		functions:   functions,
 	}
 }
 
@@ -184,7 +209,11 @@ func (e *SSREval) BindLocalVars(body []ast.Stmt) {
 		case *ast.VarStmt:
 			for _, decl := range s.Decls {
 				if decl.Name != "" && decl.Init != nil {
-					if arr, ok := decl.Init.(*ast.ArrayExpr); ok && hasJSX(arr) {
+					// Array literals are registered as arrays (not scalar
+					// bindings). An EMPTY array is registered too so a following
+					// `for (...) { name.push(<JSX/>) }` can append to it — the
+					// common `var items = []; for (...) items.push(<X/>)` pattern.
+					if arr, ok := decl.Init.(*ast.ArrayExpr); ok && (hasJSX(arr) || len(arr.Elements) == 0) {
 						var elems []string
 						for _, el := range arr.Elements {
 							elems = append(elems, e.eval(el))
@@ -197,6 +226,11 @@ func (e *SSREval) BindLocalVars(body []ast.Stmt) {
 					if isTagExpr(decl.Init) {
 						e.tagAliases[decl.Name] = decl.Init
 					}
+					// A local bound to JSX (`const chip = <span/>`) must render as
+					// markup when read, not as escaped text.
+					if e.isHTMLProducing(decl.Init) {
+						e.jsxBindings[decl.Name] = true
+					}
 					e.bindings[decl.Name] = e.eval(decl.Init)
 				}
 			}
@@ -206,7 +240,7 @@ func (e *SSREval) BindLocalVars(body []ast.Stmt) {
 			if vs, ok := s.Declaration.(*ast.VarStmt); ok {
 				for _, decl := range vs.Decls {
 					if decl.Name != "" && decl.Init != nil {
-						if arr, ok := decl.Init.(*ast.ArrayExpr); ok && hasJSX(arr) {
+						if arr, ok := decl.Init.(*ast.ArrayExpr); ok && (hasJSX(arr) || len(arr.Elements) == 0) {
 							var elems []string
 							for _, el := range arr.Elements {
 								elems = append(elems, e.eval(el))
@@ -595,12 +629,27 @@ func (e *SSREval) evalBinaryExpr(expr *ast.BinaryExpr) string {
 		return left + right
 	case "/":
 		if isNumericStr(left) && isNumericStr(right) {
-			return trimFloatStr(toFloat(left) / toFloat(right))
+			r := toFloat(right)
+			if r == 0 {
+				// Match JS: x/0 is +/-Infinity (x=0 gives NaN).
+				if toFloat(left) == 0 {
+					return "NaN"
+				}
+				if left != "" && left[0] == '-' {
+					return "-Infinity"
+				}
+				return "Infinity"
+			}
+			return trimFloatStr(toFloat(left) / r)
 		}
 		return left + right
 	case "%":
 		if isNumericStr(left) && isNumericStr(right) {
-			return trimFloatStr(float64(int(toFloat(left)) % int(toFloat(right))))
+			r := toFloat(right)
+			if r == 0 {
+				return "NaN" // JS x % 0 is NaN; never divide by zero in Go.
+			}
+			return trimFloatStr(math.Mod(toFloat(left), r))
 		}
 		return left + right
 	case "<", ">", "<=", ">=":
@@ -735,14 +784,11 @@ func (e *SSREval) evalMemberExpr(expr *ast.MemberExpr) string {
 				if val := extractJSONProp(v, prop); val != "" {
 					return val
 				}
-				// Property is missing from the object — return "" so ternary
-				// tests like `item.indexURL ? ... : ...` correctly pick the
-				// alternate branch instead of treating the whole object as the
-				// property value.
-				if strings.HasPrefix(v, "{") {
-					return ""
-				}
-				return v
+				// Property is missing (or the binding is not an object): return
+				// "" so `item.name` on a plain string (and `item.x ? … : …`)
+				// resolves to undefined/empty instead of rendering the whole
+				// binding value.
+				return ""
 			}
 			return v
 		}
@@ -803,6 +849,14 @@ func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 		// .toString()
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "toString" {
 			return e.eval(mem.Object)
+		}
+		// `X.useContext()` → the context default (no Provider at build time).
+		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "useContext" {
+			if id, ok := mem.Object.(*ast.Identifier); ok && e.contextDefaults != nil {
+				if def, found := e.contextDefaults[id.Name]; found {
+					return def
+				}
+			}
 		}
 		// .toUpperCase()
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "toUpperCase" {
@@ -1110,7 +1164,7 @@ func (e *SSREval) tryEvalSyntaxHighlight(el *ast.JSXElement) (string, bool) {
 	if normalizedLang == "" {
 		return "<pre><code>" + escape.HTML(codeStr) + "</code></pre>", true
 	}
-	highlighted := syntaxhighlight.Highlight(codeStr, normalizedLang)
+	highlighted := syntaxhighlight.HighlightTheme(codeStr, normalizedLang, e.codeTheme)
 	return "<pre class=\"chroma\"><code class=\"language-" + escape.HTML(lang) + "\">" + highlighted + "</code></pre>", true
 }
 
@@ -1668,6 +1722,18 @@ func (e *SSREval) isHTMLProducing(expr ast.Expr) bool {
 	switch t := expr.(type) {
 	case *ast.JSXElement, *ast.JSXFragment:
 		return true
+	case *ast.Identifier:
+		// An identifier bound to a JSX-built array (e.g. `var items = [];
+		// for (...) items.push(<li/>)`) or to a JSX value (`const chip = <b/>`)
+		// evaluates to HTML markup.
+		if _, isArr := e.arrays[t.Name]; isArr {
+			return true
+		}
+		return e.jsxBindings[t.Name]
+	case *ast.MemberExpr:
+		// A prop/local member whose resolved value is markup (e.g.
+		// `{props.body}` where body={<b/>}) is HTML, not text.
+		return strings.HasPrefix(strings.TrimSpace(e.eval(t)), "<")
 	case *ast.ArrayExpr:
 		for _, el := range t.Elements {
 			if e.isHTMLProducing(el) {
@@ -1863,10 +1929,33 @@ func (e *SSREval) evalObjectExpr(expr *ast.ObjectExpr) string {
 		if prop.Spread {
 			continue
 		}
+		key := prop.Key
+		// Quote keys that are not valid identifiers (e.g. "a-b").
+		if !isIdentString(key) {
+			key = strconv.Quote(key)
+		}
 		val := e.eval(prop.Value)
-		parts = append(parts, prop.Key+`:`+val)
+		parts = append(parts, key+`:`+val)
 	}
 	return "{" + strings.Join(parts, ",") + "}"
+}
+
+// isIdentString reports whether s is a valid JS identifier.
+func isIdentString(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if i == 0 {
+			if !(ch == '_' || ch == '$' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+				return false
+			}
+		} else if !(ch == '_' || ch == '$' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+			return false
+		}
+	}
+	return true
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────

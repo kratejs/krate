@@ -1,0 +1,92 @@
+.krate-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 0.9rem;
+  font-family: inherit;
+  line-height: 1.2;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s, border-color 0.15s;
+}
+.krate-button:active {
+  transform: scale(0.97);
+}
+.krate-button:focus-visible {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: 2px;
+}
+.krate-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.krate-button-sm {
+  padding: 4px 12px;
+  font-size: 0.8rem;
+}
+.krate-button-md {
+  padding: 8px 16px;
+  font-size: 0.9rem;
+}
+.krate-button-lg {
+  padding: 12px 24px;
+  font-size: 1rem;
+}
+.krate-button-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+.krate-button-primary {
+  background: var(--krate-primary, #3b82f6);
+  color: #fff;
+}
+.krate-button-primary:hover {
+  background: var(--krate-primary-hover, #2563eb);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+.krate-button-secondary {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--krate-text, #fafafa);
+  border-color: var(--krate-border, #27272a);
+}
+.krate-button-secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.krate-button-outline {
+  background: transparent;
+  color: var(--krate-text, #fafafa);
+  border-color: var(--krate-border, #3f3f46);
+}
+.krate-button-outline:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--krate-text-muted, #a1a1aa);
+}
+.krate-button-ghost {
+  background: transparent;
+  color: var(--krate-text, #fafafa);
+}
+.krate-button-ghost:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.krate-button-destructive {
+  background: var(--krate-danger, #ef4444);
+  color: #fff;
+}
+.krate-button-destructive:hover {
+  background: #dc2626;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+.krate-button-link {
+  background: transparent;
+  color: var(--krate-primary, #3b82f6);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  padding: 0;
+}

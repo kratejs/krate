@@ -13,6 +13,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/content"
 	"github.com/kratejs/krate/packages/compiler/internal/docs"
+	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 )
@@ -149,7 +150,12 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 		return nil
 	}
 
+	// A global `sidebar` option overrides the auto-generated tree; otherwise the
+	// tree is derived from the page directory/frontmatter metadata.
 	sections := docs.BuildSidebarTree(pages)
+	if len(opts.Sidebar) > 0 {
+		sections = opts.Sidebar
+	}
 
 	p.writeAssets(ctx, sections, pages, opts)
 
@@ -670,18 +676,37 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, page docs.Page, layoutRel, s
 	// alongside the layout's title composition works.
 	sb.WriteString("      <Head>\n")
 	if page.Description != "" {
-		sb.WriteString("        <meta name=\"description\" content=\"")
-		sb.WriteString(jsAttrEscape(page.Description))
-		sb.WriteString("\" />\n")
-		sb.WriteString("        <meta property=\"og:description\" content=\"")
-		sb.WriteString(jsAttrEscape(page.Description))
-		sb.WriteString("\" />\n")
+		sb.WriteString("        <meta name=\"description\" content=")
+		sb.WriteString(jsxAttrExpr(page.Description))
+		sb.WriteString(" />\n")
+		sb.WriteString("        <meta property=\"og:description\" content=")
+		sb.WriteString(jsxAttrExpr(page.Description))
+		sb.WriteString(" />\n")
 	}
 	for _, ht := range page.Head {
 		sb.WriteString("        ")
 		sb.WriteString(headTagJSX(ht))
 		sb.WriteString("\n")
 	}
+	// Pre-paint theme script: apply the persisted/preferred colour scheme before
+	// the stylesheet paints, so the page never flashes the wrong theme. Runs
+	// before the hydration bundle; the layout later reconciles the signal.
+	themeKey := "theme"
+	if len(themeOptions) > 0 {
+		var to struct {
+			ThemeStorageKey string `json:"themeStorageKey"`
+		}
+		if json.Unmarshal(themeOptions, &to) == nil && to.ThemeStorageKey != "" {
+			themeKey = to.ThemeStorageKey
+		}
+	}
+	keyJSON, _ := json.Marshal(themeKey)
+	prepaint := "(function(){try{var k=" + string(keyJSON) +
+		";var s=localStorage.getItem(k);if(s!=='dark'&&s!=='light'){s=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}" +
+		"document.documentElement.setAttribute('data-theme',s);}catch(e){}})();"
+	sb.WriteString("        <script>{`")
+	sb.WriteString(escapeTemplateLit(prepaint))
+	sb.WriteString("`}</script>\n")
 	sb.WriteString("      </Head>\n")
 
 	sb.WriteString("      <DocsLayout {...docsProps} >")
@@ -689,8 +714,12 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, page docs.Page, layoutRel, s
 		sb.WriteString("\n      <div class=\"md-content\" data-pagefind-body>\n")
 		for _, seg := range segments {
 			if seg.HTML != "" {
+				html := seg.HTML
+				if mdConfig.HeadingAnchors {
+					html = docs.InjectHeadingAnchors(html)
+				}
 				sb.WriteString("        <div dangerouslySetInnerHTML={{__html: `")
-				sb.WriteString(escapeTemplateLit(seg.HTML))
+				sb.WriteString(escapeTemplateLit(html))
 				sb.WriteString("`}} />\n")
 			}
 			if seg.JSX != "" {
@@ -712,6 +741,9 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, page docs.Page, layoutRel, s
 		sb.WriteString("      </div>\n")
 	} else {
 		content := page.Content
+		if mdConfig.HeadingAnchors {
+			content = docs.InjectHeadingAnchors(content)
+		}
 		sb.WriteString("<div class=\"md-content\" data-pagefind-body dangerouslySetInnerHTML={{__html: `")
 		sb.WriteString(escapeTemplateLit(content))
 		sb.WriteString("`}} />")
@@ -726,19 +758,21 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, page docs.Page, layoutRel, s
 }
 
 func escapeTemplateLit(s string) string {
+	// Order matters: escape backslashes first so the escapes introduced for the
+	// backtick and interpolation below are not themselves doubled.
+	s = strings.ReplaceAll(s, "\\", "\\\\")
 	s = strings.ReplaceAll(s, "`", "\\`")
 	s = strings.ReplaceAll(s, "${", "\\${")
 	return s
 }
 
-// jsAttrEscape escapes a value for use inside a double-quoted JSX attribute in
-// generated TSX. The krate lexer reads JSX attribute strings verbatim (no HTML
-// entity decoding), so only the two delimiters that would break the token are
-// escaped — exactly like a double-quoted JS string.
-func jsAttrEscape(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	return s
+// jsxAttrExpr renders an attribute value as a JS string EXPRESSION (`{ "..." }`).
+// The krate lexer reads JSX attribute strings verbatim (no escape decoding), so
+// a value containing a quote would otherwise need a backslash that survives into
+// the AST. An expression-based string literal is decoded by UnescapeJSString,
+// so quotes/ampersands/backslashes round-trip exactly.
+func jsxAttrExpr(s string) string {
+	return "{" + escape.JSStringDQ(s) + "}"
 }
 
 func isVoidHeadTag(tag string) bool {
@@ -764,9 +798,8 @@ func headTagJSX(t docs.HeadTag) string {
 	for _, k := range keys {
 		sb.WriteString(" ")
 		sb.WriteString(k)
-		sb.WriteString("=\"")
-		sb.WriteString(jsAttrEscape(t.Attrs[k]))
-		sb.WriteString("\"")
+		sb.WriteString("=")
+		sb.WriteString(jsxAttrExpr(t.Attrs[k]))
 	}
 	if isVoidHeadTag(t.Tag) {
 		sb.WriteString(" />")

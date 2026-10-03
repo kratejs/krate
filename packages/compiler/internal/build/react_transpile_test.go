@@ -354,6 +354,298 @@ func TestNamespaceReexportBarrel(t *testing.T) {
 	}
 }
 
+// TestUseContextTranspile verifies React's createContext/useContext lower to
+// the Krate context API (Ctx.useContext()) end to end through the bundler.
+func TestUseContextTranspile(t *testing.T) {
+	root := t.TempDir()
+	mkdir := func(rel string) string {
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		return full
+	}
+	page := `
+		import { createContext, useContext } from 'react';
+		const ThemeCtx = createContext('light');
+		export default function Page() {
+			const theme = useContext(ThemeCtx);
+			return <div>{theme}</div>;
+		}
+	`
+	if err := os.WriteFile(mkdir("src/pages/index.tsx"), []byte(page), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	b := New(root, cfg)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	html, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), "light") {
+		t.Errorf("context default should render:\n%s", html)
+	}
+	// The client runtime chunk must actually ship createContext, or hydration
+	// would throw a ReferenceError (regression: it was absent from the bundle).
+	assertRuntimeBundleHasContext(t)
+}
+
+// assertRuntimeBundleHasContext loads the built runtime chunk and checks the
+// context API is present. Skips when the runtime dist hasn't been bundled.
+func assertRuntimeBundleHasContext(t *testing.T) {
+	t.Helper()
+	root := findCompilerRoot(t)
+	if root == "" {
+		t.Skip("compiler root not found")
+	}
+	runtimeDir := filepath.Join(filepath.Dir(root), "runtime", "dist")
+	for _, name := range []string{"krate-hydrate.js", "krate-runtime.js"} {
+		data, err := os.ReadFile(filepath.Join(runtimeDir, name))
+		if err != nil {
+			continue
+		}
+		if !strings.Contains(string(data), "createContext") {
+			t.Errorf("%s does not ship createContext", name)
+		}
+		return
+	}
+	t.Skip("runtime bundle not built")
+}
+
+// findCompilerRoot locates the packages/compiler directory from the test file.
+func findCompilerRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil &&
+			strings.HasSuffix(filepath.ToSlash(dir), "packages/compiler") {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// TestSignalPersistOptionsEmitted verifies `createSignal(v, { persist })`
+// preserves the options argument in the hydration bundle.
+func TestSignalPersistOptionsEmitted(t *testing.T) {
+	page := `
+		import { createSignal } from '@krate/runtime';
+		export default function Page() {
+			const [n, setN] = createSignal(0, { persist: 'count' });
+			return <button onClick={() => setN(n() + 1)}>{n()}</button>;
+		}
+	`
+	_, js := buildReactPage(t, page)
+	if !strings.Contains(js, "createSignal(0,{persist:'count'})") {
+		t.Errorf("signal options were dropped:\n%s", js)
+	}
+}
+
+// TestDurableStateInjected verifies a krate.state.json payload is injected as
+// window.__KRATE_STATE__ so persisted signals hydrate the server value.
+func TestDurableStateInjected(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "src/pages/index.tsx", `
+		import { createSignal } from '@krate/runtime';
+		export default function Page() {
+			const [n, setN] = createSignal(0, { persist: 'count' });
+			return <button onClick={() => setN(n() + 1)}>{n()}</button>;
+		}
+	`)
+	writeFileRel(t, root, "krate.state.json", `{"count":5}`)
+
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.Minify = false
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	html, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), `window.__KRATE_STATE__={"count":5}`) {
+		t.Errorf("durable state not injected:\n%s", html)
+	}
+}
+
+func writeFileRel(t *testing.T, root, rel, content string) {
+	t.Helper()
+	full := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestModuleConstPropToClientComponent verifies a module-level const array
+// passed as a prop to a client component is inlined into the hydration props
+// registry (not emitted as a bare identifier, which threw ReferenceError), and
+// that the component reads the prop at runtime.
+func TestModuleConstPropToClientComponent(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "src/components/list.tsx", `
+		import { createSignal } from '@krate/runtime';
+		export function List(props: { items: any[] }) {
+			const [active, setActive] = createSignal(0);
+			return (
+				<ul onClick={() => setActive(active() + 1)}>
+					{props.items.map((it: any) => <li>{it.label}</li>)}
+				</ul>
+			);
+		}
+	`)
+	writeFileRel(t, root, "src/pages/index.tsx", `
+		import { List } from '../components/list';
+		const menuItems = [{ label: 'Home' }, { label: 'About' }];
+		export default function Page() {
+			return <List items={menuItems} />;
+		}
+	`)
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.Minify = false
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	jsFiles, _ := filepath.Glob(filepath.Join(cfg.OutDir, "index.*.js"))
+	if len(jsFiles) == 0 {
+		t.Fatal("no hydration bundle emitted")
+	}
+	js, _ := os.ReadFile(jsFiles[0])
+	src := string(js)
+	if strings.Contains(src, "menuItems") {
+		t.Errorf("module const leaked as a bare identifier into hydration JS:\n%s", src)
+	}
+	if !strings.Contains(src, "items:[{label:'Home'},{label:'About'}]") {
+		t.Errorf("module const value not inlined into the props registry:\n%s", src)
+	}
+	if !strings.Contains(src, `var props=__krate_props[`) || !strings.Contains(src, "props.items.map") {
+		t.Errorf("component should read the prop from the registry at runtime, got:\n%s", src)
+	}
+}
+
+// TestUndefinedAttributesOmitted verifies props that resolve to undefined are
+// omitted from static HTML instead of rendering value="undefined" (React
+// semantics).
+func TestUndefinedAttributesOmitted(t *testing.T) {
+	page := `
+		function Field(props: any) {
+			return <input value={props.value} name={props.name} placeholder="Name" />;
+		}
+		export default function Page() {
+			return <Field />;
+		}
+	`
+	html, _ := buildReactPage(t, page)
+	if strings.Contains(html, "undefined") {
+		t.Errorf("undefined attribute leaked into HTML:\n%s", html)
+	}
+	if !strings.Contains(html, `placeholder="Name"`) {
+		t.Errorf("defined attribute missing:\n%s", html)
+	}
+}
+
+// TestForLoopArrayRenders verifies the `var x = []; for (...) x.push(<el/>)`
+// pattern renders as real markup (not escaped text) for an SSREvaluated
+// component.
+func TestForLoopArrayRenders(t *testing.T) {
+	page := `
+		function List(props: any) {
+			var items = [];
+			for (var i = 1; i <= props.count; i++) {
+				items.push(<li>{i}</li>);
+			}
+			return <ul>{items}</ul>;
+		}
+		export default function Page() {
+			return <List count={3} />;
+		}
+	`
+	html, _ := buildReactPage(t, page)
+	if !strings.Contains(html, "<li>1</li>") || !strings.Contains(html, "<li>3</li>") {
+		t.Errorf("for-loop array did not render items:\n%s", html)
+	}
+	if strings.Contains(html, "&lt;li&gt;") {
+		t.Errorf("for-loop array markup was escaped:\n%s", html)
+	}
+}
+
+// TestClientComponentReadsLocationSearch verifies a client component that reads
+// the URL query in onMount (and listens for SPA navigation) compiles that logic
+// into the hydration bundle, and that a reactive list over a signal-derived
+// function is emitted as a re-render binding.
+func TestClientComponentReadsLocationSearch(t *testing.T) {
+	page := `
+		import { createSignal, onMount } from '@krate/runtime';
+		export default function Page() {
+			const [p, setP] = createSignal(1);
+			onMount(() => {
+				const m = new RegExp('[?&]page=(\\d+)').exec(window.location.search);
+				if (m) setP(parseInt(m[1], 10));
+				window.addEventListener('krate:navigate', () => {});
+			});
+			function pages() {
+				var out = [];
+				for (var i = 1; i <= 3; i++) {
+					out.push(i);
+				}
+				return out;
+			}
+			return <a href={'?page=' + p()}>{pages().map((n) => <span>{n === p() ? 'x' : ''}</span>)}</a>;
+		}
+	`
+	_, js := buildReactPage(t, page)
+	if !strings.Contains(js, "location.search") {
+		t.Errorf("URL query read not emitted:\n%s", js)
+	}
+	if !strings.Contains(js, "krate:navigate") {
+		t.Errorf("SPA navigation listener not emitted:\n%s", js)
+	}
+	if !strings.Contains(js, "kbindContent") {
+		t.Errorf("reactive list binding not emitted:\n%s", js)
+	}
+}
+
+// TestLocalFunctionInAttrBindingEmitted verifies a local helper referenced only
+// from an attribute binding (e.g. href={'?p=' + prev()}) is emitted into the
+// hydration scope instead of throwing ReferenceError.
+func TestLocalFunctionInAttrBindingEmitted(t *testing.T) {
+	page := `
+		import { createSignal } from '@krate/runtime';
+		export default function Page() {
+			const [n, setN] = createSignal(2);
+			function prev() {
+				return n() > 1 ? n() - 1 : 1;
+			}
+			return <a href={'?p=' + prev()} onClick={() => setN(n() + 1)}>x</a>;
+		}
+	`
+	_, js := buildReactPage(t, page)
+	if !strings.Contains(js, "function prev(") {
+		t.Errorf("local helper not emitted into hydration scope:\n%s", js)
+	}
+	if !strings.Contains(js, "prev()") {
+		t.Errorf("attribute binding should call the helper:\n%s", js)
+	}
+}
+
 // TestReactStyleObjectBuild verifies a literal style object folds to CSS.
 func TestReactStyleObjectBuild(t *testing.T) {
 	page := `

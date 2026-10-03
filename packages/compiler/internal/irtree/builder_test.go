@@ -461,8 +461,8 @@ func TestRefBindingUseRefObjectAssignsCurrent(t *testing.T) {
 	if len(refs) != 1 {
 		t.Fatalf("expected 1 ref binding, got %d: %+v", len(refs), refs)
 	}
-	if refs[0].Target != "inputRef.current" {
-		t.Errorf("expected target inputRef.current for ref={inputRef}, got %q", refs[0].Target)
+	if refs[0].Target != "inputRef" || !refs[0].Adaptive {
+		t.Errorf("expected adaptive target inputRef for ref={inputRef}, got %q adaptive=%v", refs[0].Target, refs[0].Adaptive)
 	}
 }
 
@@ -491,8 +491,8 @@ func TestRefBindingUseRefCallAssignsCurrent(t *testing.T) {
 	if len(refs) != 1 {
 		t.Fatalf("expected 1 ref binding, got %d: %+v", len(refs), refs)
 	}
-	if refs[0].Target != "inputRef.current" {
-		t.Errorf("expected target inputRef.current for ref={inputRef} from useRef(null), got %q", refs[0].Target)
+	if refs[0].Target != "inputRef" || !refs[0].Adaptive {
+		t.Errorf("expected adaptive target inputRef for ref={inputRef} from useRef(null), got %q adaptive=%v", refs[0].Target, refs[0].Adaptive)
 	}
 }
 

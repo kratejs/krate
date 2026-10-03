@@ -32,6 +32,57 @@ func WithinRoot(root, p string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
+// SafeJoin joins rel onto root and verifies the result is inside root both
+// lexically and after resolving symlinks. The final path component may not
+// exist yet (writes), so symlinks are resolved on the deepest existing
+// ancestor — this catches a symlinked directory inside the project that points
+// outside it before a file is written through it.
+//
+// It returns the absolute path to use for the operation.
+func SafeJoin(root, rel string) (string, error) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolving root: %w", err)
+	}
+	joined := filepath.Clean(filepath.Join(rootAbs, filepath.FromSlash(rel)))
+	if !WithinRoot(rootAbs, joined) {
+		return "", fmt.Errorf("path %q escapes the project root", rel)
+	}
+
+	// Resolve symlinks on the deepest existing ancestor of the target and
+	// re-check containment. This prevents a symlinked directory within the
+	// root from redirecting a write outside it.
+	probe := joined
+	for {
+		resolved, rerr := filepath.EvalSymlinks(probe)
+		if rerr == nil {
+			if !WithinRootEval(rootAbs, resolved) {
+				return "", fmt.Errorf("path %q escapes the project root via a symlink", rel)
+			}
+			break
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			break
+		}
+		probe = parent
+	}
+	return joined, nil
+}
+
+// WithinRootEval is WithinRoot but also resolves symlinks on both root and p so
+// a symlinked root (e.g. /tmp -> /private/tmp on macOS) does not cause a false
+// negative. Non-existent paths are compared lexically.
+func WithinRootEval(root, p string) bool {
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	}
+	return WithinRoot(root, p)
+}
+
 // isPathLike reports whether spec is an explicit relative path ("./", "../")
 // rather than a bare package specifier.
 func isPathLike(spec string) bool {

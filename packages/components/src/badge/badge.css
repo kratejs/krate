@@ -1,0 +1,41 @@
+.krate-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.krate-badge-sm {
+  font-size: 0.6875rem;
+  padding: 2px 8px;
+}
+.krate-badge-default {
+  background: var(--krate-primary, #3b82f6);
+  color: #fff;
+}
+.krate-badge-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--krate-text, #fafafa);
+}
+.krate-badge-outline {
+  background: transparent;
+  border-color: var(--krate-border, #3f3f46);
+  color: var(--krate-text-muted, #a1a1aa);
+}
+.krate-badge-success {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+.krate-badge-warning {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+}
+.krate-badge-destructive {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}

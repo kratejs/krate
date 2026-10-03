@@ -1,0 +1,32 @@
+.krate-breadcrumb {
+  font-size: 0.85rem;
+}
+.krate-breadcrumb-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.krate-breadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+}
+.krate-breadcrumb-link {
+  color: var(--krate-text-muted, #a1a1aa);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.krate-breadcrumb-link:hover {
+  color: var(--krate-text, #fafafa);
+}
+.krate-breadcrumb-page {
+  color: var(--krate-text, #fafafa);
+  font-weight: 500;
+}
+.krate-breadcrumb-separator {
+  color: var(--krate-text-muted, #52525b);
+  user-select: none;
+}

@@ -1,0 +1,116 @@
+.krate-sheet-content-wrapper {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+.krate-sheet[data-state="closed"] .krate-sheet-content-wrapper {
+  display: none;
+}
+.krate-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  animation: krate-sheet-fade-in 0.15s ease;
+}
+.krate-sheet-content {
+  position: fixed;
+  z-index: 1001;
+  background: var(--krate-card-bg, #111113);
+  border: 1px solid var(--krate-border, #27272a);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  padding: 24px;
+  overflow-y: auto;
+  color: var(--krate-text, #fafafa);
+}
+.krate-sheet-right {
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 360px;
+  max-width: 90vw;
+  border-right: none;
+  animation: krate-sheet-slide-right 0.2s ease;
+}
+.krate-sheet-left {
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 360px;
+  max-width: 90vw;
+  animation: krate-sheet-slide-left 0.2s ease;
+}
+.krate-sheet-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  max-height: 90vh;
+  animation: krate-sheet-slide-top 0.2s ease;
+}
+.krate-sheet-bottom {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  max-height: 90vh;
+  animation: krate-sheet-slide-bottom 0.2s ease;
+}
+.krate-sheet-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.krate-sheet-description {
+  font-size: 0.9rem;
+  color: var(--krate-text-muted, #a1a1aa);
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+.krate-sheet-trigger {
+  all: unset;
+  cursor: pointer;
+}
+.krate-sheet-close {
+  all: unset;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  color: var(--krate-text-muted, #71717a);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.krate-sheet-close:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--krate-text, #fafafa);
+}
+.krate-sheet-close:focus-visible {
+  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline-offset: 2px;
+}
+@keyframes krate-sheet-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes krate-sheet-slide-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes krate-sheet-slide-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+@keyframes krate-sheet-slide-top {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(0); }
+}
+@keyframes krate-sheet-slide-bottom {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}

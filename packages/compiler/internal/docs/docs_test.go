@@ -308,6 +308,24 @@ func TestSidebarTreeNavConfig(t *testing.T) {
 	}
 }
 
+// TestBuildBreadcrumbsAbsoluteURLs verifies breadcrumb URLs include the docs
+// base path (like sidebar and prev/next links) rather than being base-relative.
+func TestBuildBreadcrumbsAbsoluteURLs(t *testing.T) {
+	crumbs := BuildBreadcrumbs("guides/react-compatibility")
+	if len(crumbs) != 2 {
+		t.Fatalf("crumbs = %+v", crumbs)
+	}
+	if crumbs[0].URL != "/docs/guides/" {
+		t.Errorf("crumb[0].URL = %q, want /docs/guides/", crumbs[0].URL)
+	}
+	if crumbs[1].URL != "/docs/guides/react-compatibility/" {
+		t.Errorf("crumb[1].URL = %q, want /docs/guides/react-compatibility/", crumbs[1].URL)
+	}
+	if !crumbs[1].IsLast {
+		t.Error("final crumb should be last")
+	}
+}
+
 func containsTitle(items []SidebarItem, title string) bool {
 	for _, it := range items {
 		if it.Title == title {

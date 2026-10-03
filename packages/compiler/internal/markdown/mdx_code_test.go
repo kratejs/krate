@@ -77,7 +77,7 @@ Trailing.`
 
 	// Verify BuildCodeJSX output.
 	jsx := BuildCodeJSX("tsx", "const x = 1;\n// `backtick` and ${interp}")
-	if !strings.HasPrefix(jsx, "<Code lang=\"tsx\">") {
+	if !strings.HasPrefix(jsx, `<Code lang={"tsx"}>`) {
 		t.Errorf("BuildCodeJSX prefix wrong: %q", jsx)
 	}
 }
@@ -169,7 +169,7 @@ Tail.`
 	// BuildAsideJSX emits an <Aside> with type/title and dangerouslySetInnerHTML.
 	ad := &AsideSegment{Type: "warning", Title: "Warning", InnerHTML: "<p>hi</p>"}
 	jsx := BuildAsideJSX(ad)
-	if !strings.HasPrefix(jsx, "<Aside type=\"warning\" title=\"Warning\">") {
+	if !strings.HasPrefix(jsx, `<Aside type={"warning"} title={"Warning"}>`) {
 		t.Errorf("BuildAsideJSX prefix wrong: %q", jsx)
 	}
 	if !strings.Contains(jsx, "dangerouslySetInnerHTML") {

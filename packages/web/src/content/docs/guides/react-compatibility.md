@@ -238,11 +238,16 @@ following are intentionally not implemented and will not behave like React:
   library, which reimplements the common UI primitives natively.
 - **`React.Children.*`**, `cloneElement`, and `isValidElement`. Use the
   `children` prop directly.
-- **React's `onChange` / `onFocus` / `onBlur` remapping.** Krate uses native
-  event names; `onInput` fires on input, `onFocus`/`onBlur` map to the native
-  focusing events rather than React's normalized behavior.
 - **Rules-of-hooks and call-order semantics.** Components run once per mount, so
   there is no hook ordering to preserve.
+
+Event props follow React semantics: events **bubble** (a child handler does not
+stop an ancestor handler unless it calls `stopPropagation()`), `onChange` maps to
+`input`, `onFocus`/`onBlur` map to the bubbling `focusin`/`focusout`, and
+non-bubbling events (`onMouseEnter`/`onMouseLeave`, `onScroll`, …) are attached
+directly. `onClickCapture`-style capture handlers are supported. Controlled
+`value`/`checked` bind by DOM property, so programmatic updates work after the
+user has interacted.
 
 If you rely on these, write the component in Krate's own style — see
 [Reactivity](/docs/core-concepts/reactivity/) and

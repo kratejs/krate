@@ -75,7 +75,12 @@ type Annotations struct {
 	// its resolved spec, across the entry and all imported modules. Used to fold
 	// shadcn/ui variant calls to static class strings.
 	CVAFactories map[string]*CVASpec
+	// ContextDefaults maps a module-level `const X = createContext(v)` binding to
+	// the literal default v, so `X.useContext()` folds during SSR.
+	ContextDefaults map[string]string
 }
+
+// (Annotations continues below.)
 
 // ─── SlotNode interface ────────────────────────────────────────────────────
 // Every child of a ComponentNode implements this interface. The emitter
@@ -237,6 +242,11 @@ type HandlerDecl struct {
 	Event         string
 	Body          string
 	Signals       []string
+	// Capture attaches a capture-phase listener (onClickCapture). Direct
+	// attaches a listener on the element itself (capture handlers and
+	// non-bubbling events), bypassing the delegated bubble-phase listener.
+	Capture bool
+	Direct  bool
 }
 
 // ─── RefBinding — ref={someVar} on an element ──────────────────────────────
@@ -252,6 +262,11 @@ type RefBinding struct {
 	// When set, the callback receives the mounted element directly and no
 	// assignment wrapper is generated. Mutually exclusive with Target.
 	Callback string
+	// Adaptive marks an identifier ref whose runtime value may be either a
+	// `{current}` ref object or a callback (e.g. a ref forwarded through props
+	// or params). The emitted setter invokes it as a function or assigns
+	// `.current` accordingly.
+	Adaptive bool
 }
 
 // ─── SignalDecl — per-instance signal declaration ──────────────────────────
@@ -271,6 +286,10 @@ type SignalDecl struct {
 	// whose setter is not a plain createSignal write (e.g. createReducer's
 	// reducer dispatch). Empty for ordinary signals.
 	FactoryJS string
+	// OptionsJS is the second-argument source for `createSignal(value, options)`
+	// (e.g. `{ persist: 'key' }`), emitted verbatim so runtime persistence
+	// survives hydration. Empty when the signal has no options.
+	OptionsJS string
 }
 
 // ─── ComponentNode — a single component instance in the tree ───────────────
@@ -367,6 +386,9 @@ type ComponentTree struct {
 	// CVAFactories holds module-wide `const X = cva(...)` specs so the emitter
 	// can fold variant calls in prop-driven (SSREval) components.
 	CVAFactories map[string]*CVASpec
+	// ContextDefaults holds module-wide `const X = createContext(v)` defaults so
+	// the emitter can fold `X.useContext()` during SSREval.
+	ContextDefaults map[string]string
 
 	// CSSSignalsCSS is the generated stylesheet for every CSS signal scope
 	// compiled into this tree (empty when none). The build appends it to the

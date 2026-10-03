@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"html"
 	"strings"
 	"unicode"
 
@@ -2279,7 +2280,9 @@ func normalizeJSXText(text string) string {
 			b.WriteString(trimmed)
 		}
 	}
-	return b.String()
+	// Decode HTML character references in JSX text (React/Babel do this), so
+	// `&rsaquo;` renders as `›` in both SSR and the client `h()` path.
+	return html.UnescapeString(b.String())
 }
 
 // splitJSXLines splits a string on \n and \r (handling \r\n) into its lines.

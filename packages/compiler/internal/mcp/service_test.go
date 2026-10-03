@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -106,7 +107,7 @@ func TestInitializeAndToolsList(t *testing.T) {
 	for _, tool := range tools {
 		names[tool.(map[string]any)["name"].(string)] = true
 	}
-	for _, want := range []string{"list_routes", "read_page", "read_content", "create_content", "edit_content", "create_page", "edit_ast", "edit_page", "build", "check", "search_docs"} {
+	for _, want := range []string{"list_routes", "read_page", "read_content", "create_content", "edit_content", "create_page", "edit_ast", "edit_page", "build", "check", "search_docs", "list_files", "read_file", "create_file", "delete_file", "move_file", "create_component"} {
 		if !names[want] {
 			t.Errorf("missing tool %q", want)
 		}
@@ -290,7 +291,9 @@ func TestToolAnnotations(t *testing.T) {
 	resp := mustResp(t, serve(t, svc, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)[0])
 	want := map[string]bool{
 		"list_routes": false, "read_page": false, "read_content": false, "search_docs": false,
+		"list_files": false, "read_file": false,
 		"create_page": false, "edit_ast": true, "edit_page": true,
+		"create_file": false, "delete_file": true, "move_file": true, "create_component": false,
 		"create_content": false, "edit_content": true,
 		"build": false, "check": false,
 	}
@@ -505,6 +508,29 @@ func TestEditPageRejectsTraversal(t *testing.T) {
 	}
 }
 
+// TestEditPageRejectsSymlinkEscape verifies a symlinked directory inside the
+// project pointing outside it cannot be used to write outside the root.
+func TestEditPageRejectsSymlinkEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation is privileged on Windows CI")
+	}
+	svc := newTestService(t, map[string]string{"src/pages/index.tsx": "export default function Page() { return <h1>Hi</h1>; }"})
+	outside := t.TempDir()
+	link := filepath.Join(svc.root, "link")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	text := toolText(t, serve(t, svc, call("edit_page", map[string]any{
+		"route": "link/evil.tsx", "content": "export default function Page() { return null; }\n", "apply": true,
+	}))[0])
+	if !strings.Contains(text, "invalid path") && !strings.Contains(text, "escapes") {
+		t.Fatalf("expected symlink escape rejection, got %s", text)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "evil.tsx")); err == nil {
+		t.Fatalf("symlink escape wrote outside the root")
+	}
+}
+
 func TestEditPagePreservesCRLF(t *testing.T) {
 	svc := newTestService(t, map[string]string{
 		"src/pages/index.tsx": "export default function Page() { return <h1>Hi</h1>; }\r\n",
@@ -518,6 +544,25 @@ func TestEditPagePreservesCRLF(t *testing.T) {
 	}
 	if strings.Contains(string(data), "<h1>Hi</h1>") {
 		t.Errorf("expected replacement applied, got %q", data)
+	}
+}
+
+// TestListContentFilesKeepsNestedPaths verifies nested content entries keep
+// distinct dir-relative slugs instead of colliding on the bare filename.
+func TestListContentFilesKeepsNestedPaths(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "index.md", "---\ntitle: A\n---\n")
+	writeFile(t, dir, "guides/index.md", "---\ntitle: B\n---\n")
+	files, err := listContentFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(files, ",")
+	if !strings.Contains(joined, "index.md") || !strings.Contains(joined, "guides/index.md") {
+		t.Fatalf("nested slugs collided or missing: %v", files)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %v", files)
 	}
 }
 

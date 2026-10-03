@@ -9,7 +9,7 @@ order: 3
 on the Krate runtime.
 
 ```tsx
-import { Card, CardGrid, Button, Aside, Steps, Tabs, Tooltip } from '@krate/components';
+import { Button, Card, CardGrid, Badge, Aside, Steps, Tabs, Tooltip } from '@krate/components';
 ```
 
 ## Layout & content
@@ -20,11 +20,18 @@ import { Card, CardGrid, Button, Aside, Steps, Tabs, Tooltip } from '@krate/comp
 | `CardGrid` | Responsive grid of cards |
 | `LinkCard` | Card that renders as a link |
 | `LinkButton` | Button that renders as a link |
+| `Button` | `<button>` with variants, sizes, and `asChild` |
+| `Badge` | Small status/label pill (variants + sizes) |
 | `Code` | Inline/code block with highlighting |
 | `Aside` | Callout / aside box |
+| `Alert` | Inline alert with title/description and variants |
 | `FileTree` | File tree display |
 | `Steps` / `Step` | Ordered steps with numbered indicators |
 | `Tabs` | Tabbed panels |
+| `Table` | Accessible table (`TableHeader`/`TableBody`/`TableRow`/`TableHead`/`TableCell`/`TableCaption`/`TableFooter`) |
+| `Breadcrumb` | Breadcrumb trail (`BreadcrumbList`/`BreadcrumbItem`/`BreadcrumbLink`/`BreadcrumbPage`/`BreadcrumbSeparator`) |
+| `Pagination` | Prev/next + page links (pair with `paginationRange`) |
+| `Skeleton` | CSS shimmer placeholder |
 
 ## Form controls
 
@@ -35,6 +42,8 @@ import { Card, CardGrid, Button, Aside, Steps, Tabs, Tooltip } from '@krate/comp
 | `Switch` | Toggle switch |
 | `Slider` | Range slider |
 | `Select` | Select dropdown |
+| `Input` | Text input |
+| `Textarea` | Multi-line text input |
 | `Label` | Form label |
 | `Form` | Form container |
 | `OTPField` | One-time-password input |
@@ -50,6 +59,8 @@ import { Card, CardGrid, Button, Aside, Steps, Tabs, Tooltip } from '@krate/comp
 | `Dialog` | Modal dialog |
 | `AlertDialog` | Confirmation dialog |
 | `Popover` | Floating popover |
+| `Sheet` | Edge-anchored dialog/drawer (`SheetTrigger`/`SheetContent`/`SheetClose`/`SheetTitle`/`SheetDescription`) |
+| `Command` | Filterable command list / palette |
 | `HoverCard` | Card revealed on hover |
 | `DropdownMenu` | Menu triggered by a button |
 | `ContextMenu` | Right-click menu |

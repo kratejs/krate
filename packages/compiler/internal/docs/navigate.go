@@ -45,13 +45,18 @@ func NormalizePagePath(path string) string {
 	return strings.TrimSuffix(path, "/index")
 }
 
+// DocsBasePath is the URL prefix the docs plugin mounts pages under. It is the
+// single source of truth for absolute docs URLs (sidebar, prev/next links, and
+// breadcrumbs) so they agree.
+const DocsBasePath = "/docs"
+
 // PageURL returns the full URL for a docs page path.
 func PageURL(path string) string {
 	normalized := NormalizePagePath(path)
 	if normalized == "" {
-		return "/docs/"
+		return DocsBasePath + "/"
 	}
-	return "/docs/" + normalized + "/"
+	return DocsBasePath + "/" + normalized + "/"
 }
 
 // BuildSidebarTree builds a recursive sidebar tree from pages.
@@ -223,7 +228,7 @@ func BuildBreadcrumbs(path string) []Breadcrumb {
 		isLast := (i == len(parts)-1)
 		result = append(result, Breadcrumb{
 			Label:  label,
-			URL:    accum,
+			URL:    DocsBasePath + accum + "/",
 			IsLast: isLast,
 		})
 	}

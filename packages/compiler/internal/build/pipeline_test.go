@@ -58,7 +58,8 @@ func TestBuildLayoutChildrenInjection(t *testing.T) {
 	if !strings.Contains(html, `<nav>`) {
 		t.Errorf("expected layout nav in page, got:\n%.400s", html)
 	}
-	if !strings.Contains(html, `&copy; 2026`) {
+	// JSX text entities are decoded (React semantics), so `&copy;` renders as ©.
+	if !strings.Contains(html, "\u00a9 2026") {
 		t.Errorf("expected layout footer in page, got:\n%.400s", html)
 	}
 	if !strings.Contains(html, `class=layout`) {

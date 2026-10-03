@@ -1,0 +1,27 @@
+.krate-textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  line-height: 1.5;
+  color: var(--krate-text, #fafafa);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--krate-border, #3f3f46);
+  border-radius: 6px;
+  resize: vertical;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.krate-textarea::placeholder {
+  color: var(--krate-text-muted, #71717a);
+}
+.krate-textarea:focus {
+  outline: none;
+  border-color: var(--krate-primary, #3b82f6);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+.krate-textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

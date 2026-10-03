@@ -15,10 +15,21 @@ var formatter = html.New(
 	html.WithLineNumbers(false),
 )
 
-// Highlight returns HTML with CSS class annotations for the given code and language.
-// If lang is empty or unrecognized, the code is returned HTML-escaped as plain text.
-// Returns only the inner token spans — callers wrap in <pre>/<code> as needed.
-func Highlight(code string, lang string) string {
+// DefaultTheme is the chroma theme name used when none is configured. It is
+// shared with CSSForTheme so the class output and the generated CSS agree.
+const DefaultTheme = "github-dark"
+
+// Highlight returns HTML with CSS class annotations for the given code and
+// language, using the default theme. Callers that know the configured code
+// theme should use HighlightTheme so the emitted classes match the CSS.
+func Highlight(code, lang string) string {
+	return HighlightTheme(code, lang, DefaultTheme)
+}
+
+// HighlightTheme is Highlight with an explicit chroma theme. The theme affects
+// the token→class mapping, so it must match the stylesheet produced by
+// CSSForTheme or the highlighted code is styled (or unstyled) incorrectly.
+func HighlightTheme(code, lang, theme string) string {
 	lexer := chroma.Lexer(nil)
 	if lang != "" {
 		l := lexers.Get(lang)
@@ -35,8 +46,13 @@ func Highlight(code string, lang string) string {
 		return escapeHTML(code)
 	}
 
+	style := styles.Get(theme)
+	if style == nil {
+		style = styles.Get(DefaultTheme)
+	}
+
 	var buf bytes.Buffer
-	if err := formatter.Format(&buf, styles.Get("monokai"), iter); err != nil {
+	if err := formatter.Format(&buf, style, iter); err != nil {
 		return escapeHTML(code)
 	}
 
@@ -72,7 +88,7 @@ func stripWrapper(s string) string {
 // The returned CSS targets the class-based output from the HTML formatter.
 func CSSForTheme(theme string) string {
 	if theme == "" {
-		theme = "github-dark"
+		theme = DefaultTheme
 	}
 
 	style := styles.Get(theme)

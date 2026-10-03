@@ -65,18 +65,21 @@ interface BaseDocsLayoutProps {
   tocLabel?: string;
   editUrl?: string;
   tags?: string[];
+  options?: { themeStorageKey?: string };
 }
 
 export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
   const pageTitle = props.pageTitle;
   const siteTitle = props.siteTitle;
+  const themeOptions = props.options || {};
+  const themeKey = themeOptions.themeStorageKey || "theme";
   const tocItems = props.tocItems || [];
   const showToc = !props.tocHidden && tocItems.length > 0;
   const tocHeading = props.tocLabel || "On this page";
   const description = props.description;
   const editUrl = props.editUrl;
-  const hasTags = props.tags && props.tags.length > 0;
-  const tags = props.tags;
+  const tags = props.tags || [];
+  const hasTags = tags.length > 0;
   const isHero = props.template === "hero";
   const heroTitle = props.hero && props.hero.title ? props.hero.title : pageTitle;
   const heroTagline = props.hero && props.hero.tagline;
@@ -96,7 +99,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
   onMount(function () {
     var saved = "";
     try {
-      saved = localStorage.getItem("theme") || "";
+      saved = localStorage.getItem(themeKey) || "";
     } catch (e) {}
     var dark = saved === "dark";
     if (!dark && saved !== "light") {
@@ -174,7 +177,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
     var next = theme() === "dark" ? "light" : "dark";
     setTheme(next);
     try {
-      localStorage.setItem("theme", next);
+      localStorage.setItem(themeKey, next);
     } catch (e) {}
   }
 

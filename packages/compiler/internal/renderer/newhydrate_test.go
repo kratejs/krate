@@ -158,6 +158,15 @@ func TestHydrationIncludesEscSanitizer(t *testing.T) {
 	}
 }
 
+// TestKbindContentPreservesArrayOrder verifies the shared content binding
+// inserts list items in source order (a single moving insertBefore reference
+// would reverse them).
+func TestKbindContentPreservesArrayOrder(t *testing.T) {
+	if !strings.Contains(HydrationBootstrapJS, "var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref)") {
+		t.Error("kbindContent should insert array items before a captured reference to keep order")
+	}
+}
+
 // ─── Per-component scoped IIFEs ─────────────────────────────────────────────
 
 func TestHydrationPerComponentScopes(t *testing.T) {

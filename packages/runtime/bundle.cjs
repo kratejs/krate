@@ -22,6 +22,8 @@ export * from './src/jsx-runtime';
 export * from './src/reconcile';
 export * from './src/router';
 export * from './src/class-helpers';
+export * from './src/context';
+export * from './src/storage';
 `;
 
 const HYDRATE_ENTRY = `
@@ -31,6 +33,8 @@ export * from './src/resource';
 export * from './src/reconcile';
 export * from './src/router';
 export * from './src/class-helpers';
+export * from './src/context';
+export * from './src/storage';
 `;
 
 async function buildBundle(outFile, entry) {

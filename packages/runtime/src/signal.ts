@@ -1,3 +1,23 @@
+import { resetContexts } from './context.js';
+import {
+  resolvePersist,
+  readDurableState,
+  readPersisted,
+  writePersisted,
+  subscribePersist,
+  type PersistSpec,
+  type ResolvedPersist,
+} from './storage.js';
+
+/** Options accepted by createSignal. */
+export interface SignalOptions<T> {
+  /**
+   * Persist the signal's value. A string is a storage key; an object customizes
+   * the key, store (local/session/memory), serialization, and cross-tab sync.
+   */
+  persist?: PersistSpec<T>;
+}
+
 const context: Array<EffectState> = [];
 const mountQueue: Array<() => void> = [];
 let mountScheduled = false;
@@ -63,6 +83,9 @@ export function disposeAll(): void {
   rootCleanups.length = 0;
   pending.length = 0;
   flushScheduled = false;
+  // Reset every context stack to its default so provider values from the page
+  // being torn down cannot leak into the next SPA navigation.
+  resetContexts();
 }
 
 /** ARIA role presets and raw overrides accepted by every CSS primitive. */
@@ -214,8 +237,28 @@ export function createCSSStack<K extends string>(
   ];
 }
 
-export function createSignal<T>(initial: T): [() => T, (next: T | ((prev: T) => T)) => void] {
+export function createSignal<T>(
+  initial: T,
+  options?: SignalOptions<T>,
+): [() => T, (next: T | ((prev: T) => T)) => void] {
   let value = initial;
+
+  // Resolve persistence up front. The server-chosen durable state wins over
+  // browser storage so hydration matches the server-rendered value.
+  let persist: ResolvedPersist<T> | null = null;
+  if (options?.persist) {
+    persist = resolvePersist(options.persist);
+    const durable = readDurableState<T>(persist.key, persist.deserialize);
+    if (durable.found) {
+      value = durable.value as T;
+    } else {
+      const stored = readPersisted<T>(persist);
+      if (stored.found) {
+        value = stored.value as T;
+      }
+    }
+  }
+
   const subs = new Set<EffectState>();
 
   const read = (): T => {
@@ -227,32 +270,58 @@ export function createSignal<T>(initial: T): [() => T, (next: T | ((prev: T) => 
     return value;
   };
 
+  const notify = (): void => {
+    const list = Array.from(subs);
+    for (const effect of list) {
+      if (effect.disposed) {
+        // Lazy cleanup for effects that were disposed without unsubscribing.
+        subs.delete(effect);
+        continue;
+      }
+      if (effect.running) {
+        // A feedback loop that writes its own dependencies gets one
+        // re-run after the current run; further iterations are dropped to
+        // guarantee termination.
+        effect.rerun = true;
+        continue;
+      }
+      if (!effect.queued) {
+        effect.queued = true;
+        pending.push(effect);
+      }
+    }
+    scheduleFlush();
+  };
+
   const write = (next: T | ((prev: T) => T)): void => {
     const resolved = typeof next === 'function' ? (next as (prev: T) => T)(value) : next;
     if (resolved !== value) {
       value = resolved;
-      const list = Array.from(subs);
-      for (const effect of list) {
-        if (effect.disposed) {
-          // Lazy cleanup for effects that were disposed without unsubscribing.
-          subs.delete(effect);
-          continue;
-        }
-        if (effect.running) {
-          // A feedback loop that writes its own dependencies gets one
-          // re-run after the current run; further iterations are dropped to
-          // guarantee termination.
-          effect.rerun = true;
-          continue;
-        }
-        if (!effect.queued) {
-          effect.queued = true;
-          pending.push(effect);
-        }
+      if (persist) {
+        writePersisted(persist, value);
       }
-      scheduleFlush();
+      notify();
     }
   };
+
+  // Cross-tab synchronization: another tab changing the same key updates this
+  // signal's value (without re-persisting). Unsubscribed on page teardown.
+  if (persist && persist.sync) {
+    const p = persist;
+    const unsubscribe = subscribePersist<T>(p, (raw) => {
+      if (raw === null) return;
+      try {
+        const incoming = p.deserialize(raw);
+        if (incoming !== value) {
+          value = incoming;
+          notify();
+        }
+      } catch {
+        // Ignore malformed external updates.
+      }
+    });
+    onCleanup(unsubscribe);
+  }
 
   return [read, write];
 }
