@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -90,6 +91,15 @@ func BuildManifest(results []*PageResult, cssFile string, runtimeJS string) *Man
 			m.Regions[meta.Route] = regs
 		}
 	}
+
+	// Pages are collected in concurrent-build completion order; sort by route so
+	// manifest.json is byte-identical across builds (stable output hashing).
+	sort.Slice(m.Pages, func(i, j int) bool {
+		if m.Pages[i].Route != m.Pages[j].Route {
+			return m.Pages[i].Route < m.Pages[j].Route
+		}
+		return m.Pages[i].Source < m.Pages[j].Source
+	})
 
 	return m
 }

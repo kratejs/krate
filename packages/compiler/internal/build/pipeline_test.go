@@ -1,6 +1,7 @@
 package build
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
@@ -27,18 +29,38 @@ func testProjectPath(t *testing.T) string {
 	return root
 }
 
+// buildTestProject builds the shared examples/ project once per test process
+// and reuses the output. Many integration tests need the built site; rebuilding
+// it for each is by far the dominant cost (and under -race it exceeded the Go
+// test timeout). The examples sources are not mutated between tests, so a single
+// build is sound.
+var (
+	e2eBuildOnce sync.Once
+	e2eBuildDir  string
+	e2eBuildErr  error
+)
+
 func buildTestProject(t *testing.T) string {
 	t.Helper()
+	// Resolve the path per call so requireE2E's skip logic still applies.
 	root := testProjectPath(t)
-	cfg, err := config.Load(root)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+
+	e2eBuildOnce.Do(func() {
+		cfg, err := config.Load(root)
+		if err != nil {
+			e2eBuildErr = fmt.Errorf("config.Load: %w", err)
+			return
+		}
+		if err := New(root, cfg).BuildAll(); err != nil {
+			e2eBuildErr = fmt.Errorf("BuildAll: %w", err)
+			return
+		}
+		e2eBuildDir = cfg.OutDir
+	})
+	if e2eBuildErr != nil {
+		t.Fatal(e2eBuildErr)
 	}
-	b := New(root, cfg)
-	if err := b.BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
-	}
-	return cfg.OutDir
+	return e2eBuildDir
 }
 
 func readOut(t *testing.T, outDir, rel string) string {
