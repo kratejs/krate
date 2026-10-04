@@ -123,6 +123,11 @@ jobs:
       - name: Install JS dependencies
         run: pnpm install --no-frozen-lockfile
 
+      # The examples config imports the workspace @krate/core package, whose
+      # entry point is the built dist/, so build the JS packages first.
+      - name: Build JS packages
+        run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
+
       - name: Go build
         run: go build ./...
         working-directory: packages/compiler
