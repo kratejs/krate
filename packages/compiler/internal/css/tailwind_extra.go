@@ -37,7 +37,153 @@ func generateExtraCSS(cls string, theme TailwindTheme) string {
 	if css, ok := backgroundExtraUtility(cls, theme); ok {
 		return css
 	}
+	if css, ok := miscUtility(cls, theme); ok {
+		return css
+	}
 	return ""
+}
+
+// miscUtility covers remaining standard families not handled elsewhere: SVG
+// fill/stroke, text overflow, logical spacing, background clip/origin, scroll
+// snap, tables, and forced-colors.
+func miscUtility(cls string, theme TailwindTheme) (string, bool) {
+	if rest, ok := strings.CutPrefix(cls, "fill-"); ok {
+		switch rest {
+		case "none":
+			return "fill: none;", true
+		case "current":
+			return "fill: currentColor;", true
+		}
+		if v, isArb := unwrapArbitrary(rest); isArb {
+			return "fill: " + v + ";", true
+		}
+		if v, ok := colorValue(rest, "", theme); ok {
+			return "fill: " + v + ";", true
+		}
+	}
+	if rest, ok := strings.CutPrefix(cls, "stroke-"); ok {
+		switch rest {
+		case "none":
+			return "stroke: none;", true
+		case "current":
+			return "stroke: currentColor;", true
+		}
+		if v, isArb := unwrapArbitrary(rest); isArb {
+			return "stroke: " + v + ";", true
+		}
+		if n, err := strconv.Atoi(rest); err == nil {
+			return "stroke-width: " + strconv.Itoa(n) + ";", true
+		}
+		if v, ok := colorValue(rest, "", theme); ok {
+			return "stroke: " + v + ";", true
+		}
+	}
+	if rest, ok := strings.CutPrefix(cls, "placeholder-"); ok {
+		if v, isArb := unwrapArbitrary(rest); isArb {
+			return "color: " + v + ";", true
+		}
+		if v, ok := colorValue(rest, "", theme); ok {
+			return "color: " + v + ";", true
+		}
+	}
+	if v, ok := logicalSpacing(cls, theme); ok {
+		return v, true
+	}
+	switch cls {
+	case "text-ellipsis":
+		return "text-overflow: ellipsis;", true
+	case "text-clip":
+		return "text-overflow: clip;", true
+	case "bg-none":
+		return "background-image: none;", true
+	case "table-auto":
+		return "table-layout: auto;", true
+	case "table-fixed":
+		return "table-layout: fixed;", true
+	case "border-collapse":
+		return "border-collapse: collapse;", true
+	case "border-separate":
+		return "border-collapse: separate;", true
+	case "caption-top":
+		return "caption-side: top;", true
+	case "caption-bottom":
+		return "caption-side: bottom;", true
+	case "forced-color-adjust-auto":
+		return "forced-color-adjust: auto;", true
+	case "forced-color-adjust-none":
+		return "forced-color-adjust: none;", true
+	}
+	if rest, ok := strings.CutPrefix(cls, "bg-clip-"); ok {
+		switch rest {
+		case "border":
+			return "background-clip: border-box;", true
+		case "padding":
+			return "background-clip: padding-box;", true
+		case "content":
+			return "background-clip: content-box;", true
+		case "text":
+			return "-webkit-background-clip: text; background-clip: text;", true
+		}
+	}
+	if rest, ok := strings.CutPrefix(cls, "bg-origin-"); ok {
+		switch rest {
+		case "border":
+			return "background-origin: border-box;", true
+		case "padding":
+			return "background-origin: padding-box;", true
+		case "content":
+			return "background-origin: content-box;", true
+		}
+	}
+	if rest, ok := strings.CutPrefix(cls, "snap-"); ok {
+		switch rest {
+		case "none":
+			return "scroll-snap-type: none;", true
+		case "x":
+			return "scroll-snap-type: x var(--tw-scroll-snap-strictness, proximity);", true
+		case "y":
+			return "scroll-snap-type: y var(--tw-scroll-snap-strictness, proximity);", true
+		case "both":
+			return "scroll-snap-type: both var(--tw-scroll-snap-strictness, proximity);", true
+		case "mandatory":
+			return "--tw-scroll-snap-strictness: mandatory;", true
+		case "proximity":
+			return "--tw-scroll-snap-strictness: proximity;", true
+		case "start":
+			return "scroll-snap-align: start;", true
+		case "end":
+			return "scroll-snap-align: end;", true
+		case "center":
+			return "scroll-snap-align: center;", true
+		case "align-none":
+			return "scroll-snap-align: none;", true
+		case "normal":
+			return "scroll-snap-stop: normal;", true
+		case "always":
+			return "scroll-snap-stop: always;", true
+		}
+	}
+	return "", false
+}
+
+// logicalSpacing resolves inline-start/end padding and margin utilities
+// (ps/pe/ms/me) to their logical properties.
+func logicalSpacing(cls string, theme TailwindTheme) (string, bool) {
+	type entry struct{ prefix, prop string }
+	for _, e := range []entry{
+		{"ps-", "padding-inline-start"}, {"pe-", "padding-inline-end"},
+		{"ms-", "margin-inline-start"}, {"me-", "margin-inline-end"},
+	} {
+		rest, ok := strings.CutPrefix(cls, e.prefix)
+		if !ok {
+			continue
+		}
+		if v, isArb := unwrapArbitrary(rest); isArb {
+			return e.prop + ": " + v + ";", true
+		}
+		return e.prop + ": " + spacingValue(rest, theme) + ";", true
+	}
+	return "", false
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +306,9 @@ func filterScaleValue(cls string, theme TailwindTheme, backdrop bool) (string, b
 		}
 		if v, ok := scale[rest]; ok {
 			if v == "" {
-				return applyFilter(name, "none", backdrop), true
+				// Empty override, not `none`: `none` would cancel the whole
+				// `filter:` chain (e.g. `filter: none var(--tw-brightness,)`).
+				return applyFilter(name, "", backdrop), true
 			}
 			return applyFilter(name, filterNamedValue(name, v), backdrop), true
 		}
@@ -255,6 +403,19 @@ func blendUtility(cls string) (string, bool) {
 		return "background-blend-mode: " + v + ";", true
 	}
 	return "", false
+}
+
+// fontVariantNumeric maps a Tailwind numeric-variant class to the CSS variable
+// it sets and the value, so multiple utilities compose.
+var fontVariantNumeric = map[string][2]string{
+	"ordinal":            {"ordinal", "ordinal"},
+	"slashed-zero":       {"slashed-zero", "slashed-zero"},
+	"lining-nums":        {"numeric-figure", "lining-nums"},
+	"oldstyle-nums":      {"numeric-figure", "oldstyle-nums"},
+	"proportional-nums":  {"numeric-spacing", "proportional-nums"},
+	"tabular-nums":       {"numeric-spacing", "tabular-nums"},
+	"diagonal-fractions": {"numeric-fraction", "diagonal-fractions"},
+	"stacked-fractions":  {"numeric-fraction", "stacked-fractions"},
 }
 
 // ---------------------------------------------------------------------------
@@ -470,24 +631,10 @@ func typographyExtraUtility(cls string, theme TailwindTheme) (string, bool) {
 			return "font-stretch: " + rest + ";", true
 		}
 	}
-	// Font variant numeric.
-	switch cls {
-	case "ordinal":
-		return "font-variant-numeric: ordinal;", true
-	case "slashed-zero":
-		return "font-variant-numeric: slashed-zero;", true
-	case "lining-nums":
-		return "font-variant-numeric: lining-nums;", true
-	case "oldstyle-nums":
-		return "font-variant-numeric: oldstyle-nums;", true
-	case "proportional-nums":
-		return "font-variant-numeric: proportional-nums;", true
-	case "tabular-nums":
-		return "font-variant-numeric: tabular-nums;", true
-	case "diagonal-fractions":
-		return "font-variant-numeric: diagonal-fractions;", true
-	case "stacked-fractions":
-		return "font-variant-numeric: stacked-fractions;", true
+	// Font variant numeric. Composed through variables (Tailwind's model) so
+	// e.g. `ordinal tabular-nums` combine instead of overwriting each other.
+	if pair, ok := fontVariantNumeric[cls]; ok {
+		return "--tw-" + pair[0] + ": " + pair[1] + "; font-variant-numeric: var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,);", true
 	}
 	// Font feature settings (arbitrary).
 	if v, ok := unwrapArbitrary(strings.TrimPrefix(cls, "font-feature-settings-")); ok && strings.HasPrefix(cls, "font-feature-settings-") {
@@ -809,19 +956,27 @@ func borderExtraUtility(cls string, theme TailwindTheme) (string, bool) {
 			return "outline-color: " + v + ";", true
 		}
 	}
-	// Border spacing.
-	if rest, ok := strings.CutPrefix(cls, "border-spacing-"); ok {
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return "border-spacing: " + v + ";", true
-		}
-		v := spacingValue(rest, theme)
-		return "border-spacing: " + v + " " + v + ";", true
-	}
+	// Border spacing. `border-spacing-x`/`-y` are not real CSS properties, so
+	// compose through variables (matching Tailwind) rather than emitting them.
+	const borderSpacingCompose = " border-spacing: var(--tw-border-spacing-x,0) var(--tw-border-spacing-y,0);"
 	if rest, ok := strings.CutPrefix(cls, "border-spacing-x-"); ok {
-		return "border-spacing-x: " + spacingValue(rest, theme) + ";", true
+		if v, isArb := unwrapArbitrary(rest); isArb {
+			return "--tw-border-spacing-x: " + v + ";" + borderSpacingCompose, true
+		}
+		return "--tw-border-spacing-x: " + spacingValue(rest, theme) + ";" + borderSpacingCompose, true
 	}
 	if rest, ok := strings.CutPrefix(cls, "border-spacing-y-"); ok {
-		return "border-spacing-y: " + spacingValue(rest, theme) + ";", true
+		if v, isArb := unwrapArbitrary(rest); isArb {
+			return "--tw-border-spacing-y: " + v + ";" + borderSpacingCompose, true
+		}
+		return "--tw-border-spacing-y: " + spacingValue(rest, theme) + ";" + borderSpacingCompose, true
+	}
+	if rest, ok := strings.CutPrefix(cls, "border-spacing-"); ok {
+		v := spacingValue(rest, theme)
+		if isArb, ok := unwrapArbitrary(rest); ok {
+			v = isArb
+		}
+		return "--tw-border-spacing-x: " + v + "; --tw-border-spacing-y: " + v + ";" + borderSpacingCompose, true
 	}
 	return "", false
 }

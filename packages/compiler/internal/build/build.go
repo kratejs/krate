@@ -792,10 +792,14 @@ func (b *Builder) tailwindOptions() css.TailwindOptions {
 	}
 }
 
-// expandTailwindApply expands `@apply` directives in user CSS using the merged
-// Tailwind theme (no-op when Tailwind is disabled). Unsupported utilities
-// (variants, descendant selectors, unknown classes) are reported with a warning.
-func (b *Builder) expandTailwindApply(cssText string) string {
+// processCSSDirectives handles Tailwind build-time directives in authored CSS:
+// `@tailwind` is stripped (Krate generates utilities itself) and `@layer` is
+// unwrapped to its inner rules. When Tailwind is enabled, plain `@apply`
+// utilities are expanded; unsupported ones are reported with a warning.
+func (b *Builder) processCSSDirectives(cssText string) string {
+	// `@layer` is left intact: it is valid CSS and unwrapping it would change
+	// the authored cascade.
+	cssText = css.StripAtTailwind(cssText)
 	if !b.Cfg.Tailwind.Enabled || !strings.Contains(cssText, "@apply") {
 		return cssText
 	}
@@ -818,7 +822,9 @@ func (b *Builder) tailwindCSS() string {
 	}
 	opts := b.tailwindOptions()
 	twCfg := css.LoadTailwindConfigWithOptions(b.Root, opts)
-	twCSS, err := css.GenerateTailwindWithOptions(b.Root, twCfg, opts)
+	// v4 CSS-first config: merge `@theme { --… }` variables found in project CSS.
+	atTheme := css.ScanAtTheme(b.Root, opts)
+	twCSS, err := css.GenerateTailwindWithTheme(b.Root, twCfg, opts, atTheme)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  %sTailwind error:%s %v\n", cYellow, cReset, err)
 		return ""
@@ -832,7 +838,7 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 		processedCSS := mergedCSS
 		// Inline @import directives before minification
 		processedCSS = css.InlineImports(processedCSS, b.Root)
-		processedCSS = b.expandTailwindApply(processedCSS)
+		processedCSS = b.processCSSDirectives(processedCSS)
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
 		}
@@ -867,7 +873,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 			}
 		}
 		processedCSS := css.InlineImports(pageCss, b.Root)
-		processedCSS = b.expandTailwindApply(processedCSS)
+		processedCSS = b.processCSSDirectives(processedCSS)
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
 		}

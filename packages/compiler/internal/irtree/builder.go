@@ -716,9 +716,11 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 // `compute` as well.
 func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stmt) []*ast.FnDecl {
 	candidates := make(map[string]*ast.FnDecl)
+	localFns := make(map[string]bool)
 	for _, stmt := range body {
 		if fn, ok := stmt.(*ast.FnDecl); ok {
 			candidates[fn.Name] = fn
+			localFns[fn.Name] = true
 		}
 	}
 	// Module-level functions (non-component helpers declared at the top level
@@ -746,6 +748,18 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 				referenced[name] = true
 				queue = append(queue, name)
 			}
+		}
+	}
+
+	// Always emit the component's own local function declarations. Parts of the
+	// body are emitted verbatim (e.g. a `for` loop that builds an element array
+	// and references a local handler by name), which the reference scan below
+	// cannot see; without this a local handler like `handleInputEvent` would be
+	// undefined at hydration time.
+	for name := range localFns {
+		if !referenced[name] {
+			referenced[name] = true
+			queue = append(queue, name)
 		}
 	}
 

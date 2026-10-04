@@ -55,8 +55,10 @@ func colorValue(key, alpha string, theme TailwindTheme) (string, bool) {
 		}
 		return v, true
 	}
-	// shade form: <name>-<shade>
-	if name, shade, ok := splitColorShade(key); ok {
+	// shade form: <name>-<shade>. Shade names may be numeric (500) or custom
+	// (light), so split on the last hyphen rather than requiring digits.
+	if i := strings.LastIndexByte(key, '-'); i > 0 {
+		name, shade := key[:i], key[i+1:]
 		if shades, ok := theme.Colors[name]; ok {
 			if hex, ok := shades[shade]; ok {
 				if a, ok := resolveAlpha(alpha); ok {
@@ -64,6 +66,15 @@ func colorValue(key, alpha string, theme TailwindTheme) (string, bool) {
 				}
 				return hex, true
 			}
+		}
+	}
+	// flat / DEFAULT: `bg-brand` → colors.brand.DEFAULT
+	if shades, ok := theme.Colors[key]; ok {
+		if hex, ok := shades["DEFAULT"]; ok {
+			if a, ok := resolveAlpha(alpha); ok {
+				return withAlpha(hex, a), true
+			}
+			return hex, true
 		}
 	}
 	// arbitrary: [#ff0000]/[rgb(...)]
@@ -75,25 +86,6 @@ func colorValue(key, alpha string, theme TailwindTheme) (string, bool) {
 		return val, true
 	}
 	return "", false
-}
-
-// splitColorShade splits "blue-500" into ("blue","500"); a non-shade key returns
-// ok=false.
-func splitColorShade(key string) (name, shade string, ok bool) {
-	i := strings.LastIndexByte(key, '-')
-	if i <= 0 {
-		return "", "", false
-	}
-	name, shade = key[:i], key[i+1:]
-	if shade == "" {
-		return "", "", false
-	}
-	for _, r := range shade {
-		if r < '0' || r > '9' {
-			return "", "", false
-		}
-	}
-	return name, shade, true
 }
 
 // withAlpha converts a hex or rgb color to an `rgb(r g b / a)` form when the
@@ -113,6 +105,21 @@ func withAlpha(color, alpha string) string {
 		return color
 	}
 	return "rgb(" + strconv.Itoa(int(r)) + " " + strconv.Itoa(int(g)) + " " + strconv.Itoa(int(b)) + " / " + alpha + ")"
+}
+
+// transparentVersion returns the color at zero alpha, used as the automatic
+// fallback for gradient stops (Tailwind emits the same hue at 0 alpha rather
+// than plain `transparent`, which would fade toward black). Returns
+// `transparent` for color forms it cannot rewrite.
+func transparentVersion(color string) string {
+	if a := withAlpha(color, "0"); a != color {
+		return a
+	}
+	c := strings.TrimSpace(color)
+	if strings.HasPrefix(c, "rgb(") && strings.HasSuffix(c, ")") {
+		return strings.TrimSuffix(c, ")") + " / 0)"
+	}
+	return "transparent"
 }
 
 // negateValue returns the negated form of a length/number value, preserving

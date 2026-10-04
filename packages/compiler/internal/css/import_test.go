@@ -3,6 +3,7 @@ package css
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -243,4 +244,28 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+func TestInlineImportsMediaPrelude(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "base.css"), []byte("body{margin:0}"), 0644)
+	out := InlineImports("@import \"base.css\" screen and (min-width: 600px);", dir)
+	if !strings.Contains(out, "@media screen and (min-width: 600px)") {
+		t.Fatalf("media prelude not applied: %s", out)
+	}
+	if !strings.Contains(out, "body{margin:0}") {
+		t.Fatalf("import not inlined: %s", out)
+	}
+}
+
+func TestInlineImportsLayerPrelude(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "base.css"), []byte(".x{color:red}"), 0644)
+	out := InlineImports("@import \"base.css\" layer(base);", dir)
+	if strings.Contains(out, "layer(base)") {
+		t.Fatalf("layer prelude leaked: %s", out)
+	}
+	if !strings.Contains(out, ".x{color:red}") {
+		t.Fatalf("import not inlined: %s", out)
+	}
 }

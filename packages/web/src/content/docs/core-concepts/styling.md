@@ -32,10 +32,14 @@ export default function Card() {
 - Class names are hashed: `className` → `className_<fnv32a_hash>`.
 - The hash is **FNV-32a of the absolute file path** (6-char base36), so it's
   deterministic per file and stable across builds.
+- Scoping is tokenizer-based: strings, comments, `url(...)`, attribute
+  selectors, and `:global(...)` are handled correctly. `:global(.x)` stays
+  unscoped (the wrapper is removed), and `composes:` local names are mapped.
 
 ## Tailwind CSS
 
-Krate's Tailwind is **Go-native** — no PostCSS, no Node at build time.
+Krate's Tailwind is **Go-native** — no PostCSS, no Node at build time — and
+follows the **Tailwind v4 CSS-first** model.
 
 ```typescript
 tailwind: {
@@ -46,6 +50,33 @@ tailwind: {
   darkMode: "media",          // "media" | "class" | "selector"
 }
 ```
+
+### CSS-first `@theme`
+
+Define design tokens directly in CSS; Krate reads `@theme { --… }` blocks from
+your stylesheets and generates the matching utilities (no `tailwind.config.ts`
+needed for these):
+
+```css
+@theme {
+  --color-brand-500: #ff4d4d;
+  --spacing-7: 1.75rem;
+  --radius-xl: 1rem;
+  --breakpoint-3xl: 120rem;
+}
+/* now: bg-brand-500, p-7, rounded-xl, 3xl:… all work */
+```
+
+Supported namespaces: `--color-*` (incl. `DEFAULT` and `name-<shade>`),
+`--spacing-*`, `--radius-*`, `--shadow-*`, `--opacity-*`, `--leading-*`,
+`--breakpoint-*`, `--font-*`.
+
+### `@apply`
+
+`@apply` is supported in your CSS. Plain utilities are expanded in place;
+variant/descendant/unknown utilities cannot be represented as plain
+declarations and are reported as build warnings. `@tailwind` directives are
+stripped and `@layer { … }` blocks are unwrapped (Krate owns the layer order).
 
 - A **candidate scanner** extracts Tailwind tokens from every string and
   template literal in the scanned files, so classes inside
@@ -87,27 +118,39 @@ Supported features:
 
 ### Differences from Tailwind
 
-Krate implements a **documented subset**; it is not byte-identical to the
-Tailwind CLI. Notably: JS plugins, the `@tailwindcss/*` plugin ecosystem, and
-`@apply` are not supported. Unrecognized classes produce no rule (enable
+Krate implements Tailwind's utility and variant syntax but is not byte-identical
+to the Tailwind CLI. **JS plugins** and the `@tailwindcss/*` plugin ecosystem
+remain out of scope. Unrecognized classes produce no rule (enable
 `tailwind.strict` to surface them).
 
-## Global CSS
+## Global CSS & code splitting
 
-Plain CSS imported or referenced in pages is collected, deduplicated at the
-rule level, and written as a single hashed `styles.<hash>.css`.
+Plain CSS imported or referenced in pages is collected, then **split at the
+rule level**:
+
+- Rules used by **two or more pages** are written once to a shared
+  `styles.<hash>.css` chunk, linked before per-page CSS on every page.
+- Rules **unique to a page** go into that page's own hashed chunk.
+
+So a component library imported across many pages ships once, not per page.
+Chunk order is deterministic (shared chunk sorted by canonical rule), so
+hashes are stable across builds.
 
 ## The CSS processing pipeline
 
-1. **Collect** CSS from all pages.
-2. **Merge** with deduplication (rule-level).
-3. **Inline `@import`** recursively (circular-safe, depth limit 10).
-4. **Minify** — comment stripping, whitespace collapsing, `rgba()`/`rgb()`
-   (both comma and space syntax) → hex, hex shortening, zero-unit removal,
-   `calc()` simplification, and duplicate-declaration removal. The minifier
-   preserves vendor-prefixed fallbacks (e.g. `display:-webkit-box` before
-   `display:flex`) and case-sensitive custom properties.
-5. **Hash-based filename** — `styles.<hash>.css`.
+1. **Collect** CSS per page from its module graph (module CSS, layout CSS,
+   CSS-signal rules), in source/import order.
+2. **Inline `@import`** recursively, relative to each file's own directory
+   (circular-safe, depth limit 10); a trailing media/`supports`/`layer` prelude
+   is honoured, not leaked.
+3. **Resolve `url(...)`** assets relative to the sheet, content-hash and copy
+   them to `/assets/…`, and rewrite the URL.
+4. **Handle directives** — strip `@tailwind`, unwrap `@layer`, expand `@apply`.
+5. **Minify** (string/URL/comment aware) — whitespace collapse, `rgba()`/`rgb()`
+   → hex, hex shortening, zero-unit removal, `calc()` simplification, empty-rule
+   and duplicate-declaration removal. Preserves strings, `url()`, `data:` URIs,
+   `/*!` license comments, vendor-prefixed fallbacks, and `!important`.
+6. **Chunk** into shared + per-page stylesheets (above) and hash filenames.
 
 ## Custom properties & theming
 

@@ -6,6 +6,7 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -244,8 +245,17 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 			return fmt.Errorf("reading %s: %w", path, err)
 		}
 
+		// Inline @imports here, relative to THIS file's directory. Inlining
+		// later on the concatenated page CSS loses per-file origin, so a
+		// first-level `@import "./tokens.css"` would resolve against the wrong
+		// directory.
+		inlined := css.InlineImports(string(data), filepath.Dir(abs))
+		// Resolve and hash `url(...)` assets relative to this sheet so CSS images
+		// and fonts are content-addressed and copied like JS-imported assets.
+		inlined = b.rewriteCSSUrls(inlined, filepath.Dir(abs))
+
 		if strings.Contains(path, ".module.") {
-			scopedCSS, mapping, err := css.ProcessModule(abs, string(data))
+			scopedCSS, mapping, err := css.ProcessModule(abs, inlined)
 			if err != nil {
 				return fmt.Errorf("processing css module %s: %w", path, err)
 			}
@@ -256,7 +266,7 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 				Mappings:     mapping,
 			}
 		} else {
-			b.css = append(b.css, string(data))
+			b.css = append(b.css, inlined)
 		}
 
 		b.order = append(b.order, &Module{
@@ -931,6 +941,68 @@ func rewriteCSSModuleJSXChild(child ast.JSXChild, locals map[string]map[string]s
 		return c
 	}
 	return child
+}
+
+// cssURLRe matches `url(...)` references in CSS (quoted or bare).
+var cssURLRe = regexp.MustCompile(`url\(\s*(['"]?)([^'")]+)(['"]?)\s*\)`)
+
+// rewriteCSSUrls resolves relative `url(...)` references in a stylesheet
+// against the sheet's directory, registers each asset in the bundle's asset map
+// (content-hashed, served from /assets/), and rewrites the URL. External URLs,
+// data URIs, fragments, `var(...)` and root-absolute paths are left untouched.
+func (b *Bundler) rewriteCSSUrls(cssText, cssDir string) string {
+	return cssURLRe.ReplaceAllStringFunc(cssText, func(m string) string {
+		sub := cssURLRe.FindStringSubmatch(m)
+		if len(sub) < 4 {
+			return m
+		}
+		quote := sub[1]
+		ref := strings.TrimSpace(sub[2])
+		if ref == "" || isExternalCSSURL(ref) {
+			return m
+		}
+		frag := ""
+		if i := strings.IndexAny(ref, "?#"); i >= 0 {
+			frag = ref[i:]
+			ref = ref[:i]
+		}
+		if ref == "" {
+			return m
+		}
+		abs := filepath.Clean(filepath.Join(cssDir, filepath.FromSlash(ref)))
+		if rel, err := filepath.Rel(b.root, abs); err != nil || rel == ".." ||
+			strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return m
+		}
+		if _, err := os.Stat(abs); err != nil {
+			return m
+		}
+		url, ok := b.assets[abs]
+		if !ok {
+			data, err := os.ReadFile(abs)
+			if err != nil {
+				return m
+			}
+			base := filepath.Base(abs)
+			ext := filepath.Ext(base)
+			name := strings.TrimSuffix(base, ext)
+			url = "/assets/" + name + "-" + hashBytes(data) + ext
+			b.assets[abs] = url
+		}
+		return "url(" + quote + url + frag + quote + ")"
+	})
+}
+
+// isExternalCSSURL reports whether a CSS url() target is not a project-relative
+// file path.
+func isExternalCSSURL(ref string) bool {
+	l := strings.ToLower(ref)
+	for _, p := range []string{"http://", "https://", "//", "data:", "blob:", "#", "var("} {
+		if strings.HasPrefix(l, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // rewriteAssetImportRefs replaces imported-asset binding reads with their

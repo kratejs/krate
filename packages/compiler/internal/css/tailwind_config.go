@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -255,16 +256,12 @@ func resolveScanDirs(root string, opts TailwindOptions) []string {
 	return dirs
 }
 
-// StripTailwindDirectives removes @tailwind and @apply directives from CSS.
-func StripTailwindDirectives(css string) string {
-	var result strings.Builder
-	for _, line := range strings.Split(css, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "@tailwind") || strings.HasPrefix(trimmed, "@apply") {
-			continue
-		}
-		result.WriteString(line)
-		result.WriteByte('\n')
-	}
-	return strings.TrimSpace(result.String())
+// atTailwindRe matches a `@tailwind base|components|utilities;` directive.
+var atTailwindRe = regexp.MustCompile(`(?m)^[ \t]*@tailwind[^;{}]*;[ \t]*\r?\n?`)
+
+// StripAtTailwind removes `@tailwind base|components|utilities;` directives.
+// Krate generates Tailwind output itself, so a leftover directive would ship as
+// an invalid at-rule.
+func StripAtTailwind(css string) string {
+	return atTailwindRe.ReplaceAllString(css, "")
 }

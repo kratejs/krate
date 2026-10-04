@@ -273,6 +273,26 @@ func TestBasePathPrefixesAssets(t *testing.T) {
 	}
 }
 
+// TestLocalFunctionInLoopArrayHoisted verifies a local handler referenced only
+// from an element array built in a loop is still emitted into the hydration
+// scope (it is not visible to the handler/attribute reference scan).
+func TestLocalFunctionInLoopArrayHoisted(t *testing.T) {
+	page := `
+		import { createSignal } from '@krate/runtime';
+		export default function Page() {
+			const [n, setN] = createSignal(0);
+			function handleIt() { setN(n() + 1); }
+			var els = [];
+			for (var i = 0; i < 3; i++) { els.push(<button onClick={handleIt}>{n()}</button>); }
+			return <div>{els}</div>;
+		}
+	`
+	_, js := buildReactPage(t, page)
+	if !strings.Contains(js, "function handleIt") {
+		t.Errorf("local function referenced from a loop-built array was not hoisted:\n%s", js)
+	}
+}
+
 // TestBareBooleanPropForwarded verifies a bare boolean prop reaches the child.
 func TestBareBooleanPropForwarded(t *testing.T) {
 	page := `

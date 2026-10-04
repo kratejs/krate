@@ -1,6 +1,10 @@
 package css
 
-import "strings"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
 
 // variant is one parsed modifier applied to a utility. Exactly one of the
 // selector or at-rule fields is set, per kind.
@@ -130,13 +134,23 @@ func resolveVariant(v string, theme TailwindTheme) (variant, bool) {
 		return variant{kind: "ancestor", sel: "[dir='ltr'] PLACEHOLDER"}, true
 	}
 
-	// Group / peer (optionally named: group/item-hover).
+	// Group / peer (optionally named: group/item-hover). Group uses a
+	// descendant combinator; peer uses the general-sibling combinator (`~`),
+	// since only a preceding sibling can observe the peer's state.
 	if kind, name, state, ok := parseGroupPeer(v); ok {
-		cls := "." + EscapeClass(kind)
+		base := "." + EscapeClass(kind)
 		if name != "" {
-			cls += "\\/" + EscapeClass(name)
+			base += "\\/" + EscapeClass(name)
 		}
-		return variant{kind: "ancestor", sel: cls + ":" + state + " PLACEHOLDER"}, true
+		stateSel, ok := groupPeerStateSelector(state)
+		if !ok {
+			return variant{}, false
+		}
+		combinator := " "
+		if kind == "peer" {
+			combinator = " ~ "
+		}
+		return variant{kind: "ancestor", sel: base + stateSel + combinator + "PLACEHOLDER"}, true
 	}
 
 	// data-* / aria-* / has-*.
@@ -229,6 +243,25 @@ func resolveContainerVariant(v string, theme TailwindTheme) (variant, bool) {
 		return variant{kind: "media", at: "(max-width: calc(" + width + " - 0.1px))"}, true
 	}
 	return variant{kind: "media", at: "(min-width: " + width + ")"}, true
+}
+
+// groupPeerStateSelector converts a group/peer state token into a selector
+// fragment. `checked` → `:checked`; `aria-checked` → `[aria-checked='true']`;
+// `data-open` → `[data-open]`; `has-[...]` → `:has(...)`.
+func groupPeerStateSelector(state string) (string, bool) {
+	if sel, ok := parseAttrVariant(state); ok {
+		return sel, true
+	}
+	if sel, ok := pseudoVariants[state]; ok {
+		return sel, true
+	}
+	if sel, ok := nthVariants(state); ok {
+		return sel, true
+	}
+	if state == "" {
+		return "", false
+	}
+	return ":" + state, true
 }
 
 // parseGroupPeer recognizes group-<state>/peer-<state> and the named forms
@@ -353,6 +386,76 @@ func applyVariants(baseSel string, vs []variant) (string, []variant) {
 		ats[i], ats[j] = ats[j], ats[i]
 	}
 	return sel, ats
+}
+
+// variantOrderKey returns a sort key reproducing Tailwind's cascade order:
+// base utilities first, then state/pseudo variants, then dark, supports, and
+// finally responsive breakpoints in ascending width. Within a category the
+// variant tokens and class name break ties deterministically, so output is
+// byte-stable. Prefixing the rank (zero-padded) is what fixes the previous
+// inversion where every @media rule sorted before every base rule.
+func variantOrderKey(cls string, variants []variant, ats []variant) string {
+	rank, sub := 0, ""
+	if len(ats) > 0 {
+		rank, sub = atRuleOrder(ats[0])
+	} else if len(variants) > 0 {
+		rank = 1
+	}
+	return fmt.Sprintf("%02d:%s|%s|%s", rank, sub, variantTokensKey(variants), EscapeClass(cls))
+}
+
+// atRuleOrder ranks an at-rule variant: dark (2) < supports (3) < min-width
+// breakpoints ascending (4) < max-width (5) < feature/orientation queries (6) <
+// other (7).
+func atRuleOrder(a variant) (int, string) {
+	if a.kind == "supports" {
+		return 3, a.at
+	}
+	at := a.at
+	switch {
+	case strings.Contains(at, "min-width"):
+		return 4, fmt.Sprintf("%012d", firstPx(at))
+	case strings.Contains(at, "max-width"):
+		return 5, fmt.Sprintf("%012d", firstPx(at))
+	case strings.Contains(at, "prefers-color-scheme"):
+		return 2, at
+	case strings.Contains(at, "hover:"), strings.Contains(at, "pointer:"),
+		strings.Contains(at, "orientation:"), strings.Contains(at, "any-hover:"),
+		strings.Contains(at, "any-pointer:"), strings.Contains(at, "prefers-contrast:"):
+		return 6, at
+	default:
+		return 7, at
+	}
+}
+
+// firstPx extracts the leading integer pixel value from a media condition
+// (e.g. "(min-width: 640px)" → 640). Returns 0 when none is found.
+func firstPx(at string) int {
+	start := -1
+	for i := 0; i < len(at); i++ {
+		if at[i] >= '0' && at[i] <= '9' {
+			if start < 0 {
+				start = i
+			}
+		} else if start >= 0 {
+			n, _ := strconv.Atoi(at[start:i])
+			return n
+		}
+	}
+	if start >= 0 {
+		n, _ := strconv.Atoi(at[start:])
+		return n
+	}
+	return 0
+}
+
+// variantTokensKey renders the resolved variants as a stable secondary key.
+func variantTokensKey(vs []variant) string {
+	parts := make([]string, 0, len(vs))
+	for _, v := range vs {
+		parts = append(parts, v.kind+":"+v.sel+v.at)
+	}
+	return strings.Join(parts, ",")
 }
 
 // wrapAtRules wraps a selector/declaration block in the given at-rules

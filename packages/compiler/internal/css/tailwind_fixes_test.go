@@ -124,7 +124,7 @@ func TestArbitraryTypedUtilities(t *testing.T) {
 		"duration-[2s]":                              "transition-duration: 2s;",
 		"ease-[cubic-bezier(0.1,0.2,0.3,0.4)]":       "transition-timing-function: cubic-bezier(0.1,0.2,0.3,0.4);",
 		"ring-offset-[3px]":                          "--tw-ring-offset-width: 3px;",
-		"shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)]": "box-shadow: 0 35px 60px -15px rgba(0,0,0,0.3);",
+		"shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)]": "--tw-shadow: 0 35px 60px -15px rgba(0,0,0,0.3);",
 	}
 	for cls, want := range tests {
 		got := gen(t, cls)
@@ -215,7 +215,7 @@ func TestDivideBareAndReverse(t *testing.T) {
 }
 
 func TestShadow2xlAndNone(t *testing.T) {
-	if got := gen(t, "shadow-2xl"); !strings.Contains(got, "box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);") {
+	if got := gen(t, "shadow-2xl"); !strings.Contains(got, "--tw-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);") {
 		t.Errorf("shadow-2xl rejected: %s", got)
 	}
 	if got := gen(t, "shadow-none"); !strings.Contains(got, "box-shadow: none;") {
@@ -390,7 +390,7 @@ func TestTypographyFamilies(t *testing.T) {
 		"italic":                  "font-style: italic;",
 		"not-italic":              "font-style: normal;",
 		"overline":                "text-decoration-line: overline;",
-		"tabular-nums":            "font-variant-numeric: tabular-nums;",
+		"tabular-nums":            "--tw-numeric-spacing: tabular-nums;",
 		"decoration-wavy":         "text-decoration-style: wavy;",
 		"decoration-2":            "text-decoration-thickness: 2px;",
 		"underline-offset-4":      "text-underline-offset: 4px;",
@@ -445,7 +445,7 @@ func TestBorderExtras(t *testing.T) {
 		"outline-dashed":   "outline-style: dashed;",
 		"outline-offset-4": "outline-offset: 4px;",
 		"outline-blue-500": "outline-color: #3b82f6;",
-		"border-spacing-2": "border-spacing: 0.5rem 0.5rem;",
+		"border-spacing-2": "--tw-border-spacing-x: 0.5rem; --tw-border-spacing-y: 0.5rem;",
 		"border-s-2":       "border-inline-start-width: 2px;",
 	}
 	for cls, want := range tests {

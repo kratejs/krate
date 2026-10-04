@@ -51,7 +51,7 @@ function App() {
       <div class="card p-6 m-4 bg-white rounded-xl shadow-lg">
         <h1 class="text-2xl font-bold text-gray-800">Krate Framework</h1>
         <p class="mt-2 text-gray-600">A fast, lightweight web framework with a Go compiler. JSX/TSX pages compile to static HTML with client-side hydration.</p>
-        <div class="flex flex-wrap gap-4 mt-4">
+        <div class="flex flex-wrap gap-4 mt-4 text-gray-600">
           <div class="flex-1 p-3 bg-blue-50 rounded-lg"><strong>Signals</strong><br/>Fine-grained reactivity</div>
           <div class="flex-1 p-3 bg-blue-50 rounded-lg"><strong>SSR</strong><br/>Server-rendered HTML</div>
           <div class="flex-1 p-3 bg-blue-50 rounded-lg"><strong>Hydration</strong><br/>Interactive UI</div>

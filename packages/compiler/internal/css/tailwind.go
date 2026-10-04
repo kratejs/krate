@@ -352,15 +352,19 @@ func classToRule(cls string, theme TailwindTheme) (text, key string) {
 	}
 
 	sel, ats := applyVariants(EscapeClass(cls), variants)
-	// Utilities that target child/sibling elements append a descendant suffix.
+	// Utilities that target child/sibling/pseudo elements append a suffix.
 	if suffix := selectorSuffix(base); suffix != "" {
-		sel += " " + suffix
+		if strings.HasPrefix(suffix, "::") {
+			sel += suffix
+		} else {
+			sel += " " + suffix
+		}
 	}
 	text = wrapAtRules(sel, strings.TrimSpace(css), ats)
 
-	// Sort key: at-rule conditions then variant tokens then selector, so
-	// media/variant blocks stay grouped and ordered deterministically.
-	key = atKey(ats) + "|" + strings.Join(variantTokens, ":") + "|" + EscapeClass(cls)
+	// Sort key reproduces Tailwind's cascade order (base before variants,
+	// responsive ascending) so later, more specific utilities win.
+	key = variantOrderKey(cls, variants, ats)
 	return text, key
 }
 
@@ -486,8 +490,10 @@ func validDeclarationBlock(css string) bool {
 // validCSSValue rejects bare identifier values that are not valid keywords, and
 // values containing characters that cannot appear in a CSS value.
 func validCSSValue(val string) bool {
-	// A value must not contain selectors/braces/raw quotes.
-	if strings.ContainsAny(val, "{}<>\"") {
+	// A value must not contain braces/angle brackets. Quotes are permitted:
+	// quoted font stacks and content values are valid declaration values and
+	// are written to a stylesheet (never interpolated into HTML or a selector).
+	if strings.ContainsAny(val, "{}<>") {
 		return false
 	}
 	// A bare word (no digits, units, %, functions, or punctuation) is valid
@@ -624,6 +630,25 @@ func fractionPercent(key string) (string, bool) {
 // so multiple transform utilities compose instead of clobbering each other.
 const transformCompose = "translate(var(--tw-translate-x,0),var(--tw-translate-y,0)) rotate(var(--tw-rotate,0)) skewX(var(--tw-skew-x,0)) skewY(var(--tw-skew-y,0)) scaleX(var(--tw-scale-x,1)) scaleY(var(--tw-scale-y,1))"
 
+// shadowCompose emits the box-shadow from the composed shadow/ring variables so
+// shadows and rings stack and a `shadow-<color>` utility can override the color.
+const shadowCompose = "box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);"
+
+// shadowColorRe matches the color components of a shadow value so they can be
+// swapped for `var(--tw-shadow-color)`.
+var shadowColorRe = regexp.MustCompile(`rgba?\([^)]*\)|hsla?\([^)]*\)|#[0-9a-fA-F]{3,8}`)
+
+// shadowRule emits an (uncolored) shadow, plus its colorable variant.
+func shadowRule(val string) string {
+	colored := shadowColorRe.ReplaceAllString(val, "var(--tw-shadow-color)")
+	return "--tw-shadow: " + val + "; --tw-shadow-colored: " + colored + "; " + shadowCompose
+}
+
+// shadowColorRule applies a shadow color and switches to the colorable shadow.
+func shadowColorRule(color string) string {
+	return "--tw-shadow-color: " + color + "; --tw-shadow: var(--tw-shadow-colored); " + shadowCompose
+}
+
 // usesContentHook reports whether any variant is the ::before/::after
 // pseudo-element, which requires the `content` property to render.
 func usesContentHook(variants []variant) bool {
@@ -649,6 +674,8 @@ func selectorSuffix(base string) string {
 		base == "divide-x", base == "divide-y",
 		strings.HasPrefix(base, "divide-x-"), strings.HasPrefix(base, "divide-y-"):
 		return "> :not([hidden]) ~ :not([hidden])"
+	case strings.HasPrefix(base, "placeholder-"):
+		return "::placeholder"
 	}
 	return ""
 }
@@ -679,18 +706,6 @@ func minWidthValue(key string, theme TailwindTheme) string {
 		return v
 	}
 	return sizingValue(key, theme)
-}
-
-// atKey builds a deterministic ordering key for a rule's at-rules.
-func atKey(ats []variant) string {
-	var b strings.Builder
-	for _, a := range ats {
-		b.WriteString(a.kind)
-		b.WriteByte(':')
-		b.WriteString(a.at)
-		b.WriteByte(';')
-	}
-	return b.String()
 }
 
 // addImportant appends !important to every declaration in a CSS declaration
@@ -1484,42 +1499,52 @@ func generateCSS(cls string, theme TailwindTheme) string {
 		}
 	}
 
-	// Shadow (named scale incl. `2xl`, `none`, arbitrary, and the default).
+	// Shadow (named scale incl. `2xl`, `none`, arbitrary color/shadow, the
+	// default, and colored shadows). Shadows compose through `--tw-shadow` so a
+	// `shadow-<color>` overrides the color while keeping the shadow geometry.
+	if cls == "shadow-none" {
+		return "box-shadow: none;"
+	}
 	if v, hint, isArb := arbitraryValue(strings.TrimPrefix(cls, "shadow-")); isArb &&
 		strings.HasPrefix(cls, "shadow-") {
 		switch hint {
 		case "color":
-			return "--tw-shadow-color: " + v + ";"
+			return shadowColorRule(v)
 		case "shadow":
-			return "box-shadow: " + v + ";"
+			return shadowRule(v)
 		}
 		if looksLikeColor(v) {
-			return "--tw-shadow-color: " + v + ";"
+			return shadowColorRule(v)
 		}
-		return "box-shadow: " + v + ";"
+		return shadowRule(v)
 	}
-	if match := regexp.MustCompile(`^shadow-([a-z0-9]+)$`).FindStringSubmatch(cls); match != nil {
-		if val, ok := theme.Shadows[match[1]]; ok {
+	if rest, ok := strings.CutPrefix(cls, "shadow-"); ok {
+		if val, ok := theme.Shadows[rest]; ok {
 			if val == "none" {
 				return "box-shadow: none;"
 			}
-			return fmt.Sprintf("box-shadow: %s;", val)
+			return shadowRule(val)
+		}
+		if cv, ok := colorValue(rest, "", theme); ok {
+			return shadowColorRule(cv)
 		}
 	}
 	if cls == "shadow" {
 		if val, ok := theme.Shadows[""]; ok {
-			return fmt.Sprintf("box-shadow: %s;", val)
+			return shadowRule(val)
 		}
-		return "box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);"
-	}
-	if cls == "shadow-none" {
-		return "box-shadow: none;"
+		return shadowRule("0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)")
 	}
 
 	// Text size (Tailwind numeric)
 	if match := regexp.MustCompile(`^text-(\w+)$`).FindStringSubmatch(cls); match != nil {
 		if val, ok := theme.TextSizes[match[1]]; ok {
-			return val
+			// A configured size may be a bare value ("0.875rem") or a full
+			// declaration block (the built-in defaults).
+			if strings.Contains(val, ":") {
+				return val
+			}
+			return "font-size: " + val + ";"
 		}
 	}
 
@@ -1746,8 +1771,12 @@ func generateCSS(cls string, theme TailwindTheme) string {
 
 	// Transform: composed via CSS variables so utilities stack instead of
 	// overwriting each other (translate/rotate/skew/scale).
-	if cls == "transform" || cls == "transform-gpu" {
+	if cls == "transform" {
 		return "transform: " + transformCompose + ";"
+	}
+	if cls == "transform-gpu" {
+		// Force a compositing layer via translate3d, matching Tailwind.
+		return "transform: " + transform3DCompose + ";"
 	}
 	if cls == "transform-none" {
 		return "transform: none;"
@@ -1994,10 +2023,12 @@ func generateCSS(cls string, theme TailwindTheme) string {
 	// Gradient color stops: from-*, via-*, to-*. Accept named colors, shade
 	// colors, alpha modifiers (from-indigo-400/50), and arbitrary values.
 	if stop, ok := gradientStop(cls, "from", theme); ok {
-		return "--tw-gradient-from: " + stop + "; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);"
+		// Provide the automatic `--tw-gradient-to` fallback (same hue at 0
+		// alpha) so `from-*` works without an explicit `to-*`.
+		return "--tw-gradient-from: " + stop + "; --tw-gradient-to: " + transparentVersion(stop) + "; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);"
 	}
 	if stop, ok := gradientStop(cls, "via", theme); ok {
-		return "--tw-gradient-stops: var(--tw-gradient-from), " + stop + ", var(--tw-gradient-to);"
+		return "--tw-gradient-to: " + transparentVersion(stop) + "; --tw-gradient-stops: var(--tw-gradient-from), " + stop + ", var(--tw-gradient-to);"
 	}
 	if stop, ok := gradientStop(cls, "to", theme); ok {
 		return "--tw-gradient-to: " + stop + ";"

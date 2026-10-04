@@ -46,25 +46,6 @@ func Collect(dir string) ([]*Asset, error) {
 	return assets, err
 }
 
-func ProcessModule(path, content string) (scopedCSS string, mapping map[string]string, err error) {
-	hash := hashPath(path)
-	seen := make(map[string]bool)
-	mapping = make(map[string]string)
-
-	scoped := classSelector.ReplaceAllStringFunc(content, func(match string) string {
-		name := match[1:]
-		if seen[name] {
-			return "." + mapping[name]
-		}
-		seen[name] = true
-		scoped := name + "_" + hash
-		mapping[name] = scoped
-		return "." + scoped
-	})
-
-	return scoped, mapping, nil
-}
-
 func hashPath(path string) string {
 	h := fnv.New32a()
 	h.Write([]byte(path))
@@ -78,43 +59,11 @@ func hashPath(path string) string {
 	return string(buf[:])
 }
 
-func Minify(css string) string {
-	var b strings.Builder
-	b.Grow(len(css))
-	i := 0
-	inBlock := false
-	wasSpace := false
-	n := len(css)
-
-	for i < n {
-		ch := css[i]
-		switch {
-		case ch == '/' && i+1 < n && css[i+1] == '*':
-			inBlock = true
-			i += 2
-		case ch == '*' && i+1 < n && css[i+1] == '/':
-			inBlock = false
-			i += 2
-		case inBlock:
-			i++
-		case ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r':
-			if !wasSpace {
-				b.WriteByte(' ')
-				wasSpace = true
-			}
-			i++
-		case ch == '{' || ch == '}' || ch == ';' || ch == ',':
-			b.WriteByte(ch)
-			wasSpace = false
-			i++
-		default:
-			b.WriteByte(ch)
-			wasSpace = false
-			i++
-		}
-	}
-
-	minified := strings.TrimSpace(b.String())
+func Minify(cssText string) string {
+	// Protect strings, url(...) and /*! license comments so the whitespace and
+	// value-level transforms cannot corrupt their contents; restore at the end.
+	p := &cssLiteralProtector{}
+	minified := collapseCSS(p.protect(cssText))
 
 	minified = rgbaToHex(minified)
 	minified = shortenHexColors(minified)
@@ -124,7 +73,7 @@ func Minify(css string) string {
 	minified = removeEmptyRules(minified)
 	minified = removeDuplicateDeclarations(minified)
 
-	return minified
+	return strings.TrimSpace(p.restore(minified))
 }
 
 // shortenHexColors shortens #rrggbb to #rgb when possible, and #rrggbbaa to #rgba.
@@ -389,6 +338,11 @@ func deduplicateBody(body string) string {
 			entries = append(entries, entry{key, val})
 			continue
 		}
+		// An earlier `!important` declaration wins over a later non-important
+		// one; otherwise the cascade would change.
+		if hasImportant(entries[pos].val) && !hasImportant(val) {
+			continue
+		}
 		entries[pos].val = val
 	}
 
@@ -402,6 +356,13 @@ func deduplicateBody(body string) string {
 		b.WriteString(e.val)
 	}
 	return b.String()
+}
+
+// hasImportant reports whether a declaration value carries `!important`,
+// tolerating surrounding whitespace (`! important`).
+func hasImportant(val string) bool {
+	v := strings.ReplaceAll(strings.ToLower(val), " ", "")
+	return strings.Contains(v, "!important")
 }
 
 // isVendorPrefixedValue reports whether a declaration value begins with a

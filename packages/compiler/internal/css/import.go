@@ -7,7 +7,9 @@ import (
 	"strings"
 )
 
-var importRe = regexp.MustCompile(`@import\s+(?:url\()?["']([^"']+)["']\)?\s*;?`)
+// importRe captures the target path and the optional prelude (media query,
+// `layer(...)`, `supports(...)`) that follows it.
+var importRe = regexp.MustCompile(`@import\s+(?:url\()?["']([^"']+)["']\)?([^;]*);?`)
 
 // InlineImports resolves and inlines @import directives in CSS content.
 // basePath is the directory containing the CSS file, used to resolve relative
@@ -97,11 +99,30 @@ func inlineImportsDepth(css, basePath, rootPath string, visited map[string]bool,
 		// is always enforced against the original project root.
 		importedCSS = inlineImportsDepth(importedCSS, importDir, rootPath, visited, depth+1)
 
-		result.WriteString(importedCSS)
+		// Honour a trailing media/supports prelude instead of leaking it as
+		// stray text (e.g. `@import "x.css" screen and (min-width: 600px);`).
+		result.WriteString(wrapImportPrelude(matches[2], importedCSS))
 		remaining = remaining[loc[1]:]
 	}
 
 	return result.String()
+}
+
+// wrapImportPrelude applies an `@import` prelude to the inlined content:
+// `supports(...)` → `@supports`, a media query → `@media`, and `layer(...)` /
+// `layer` → no wrapper (Krate unwraps layers elsewhere).
+func wrapImportPrelude(prelude, css string) string {
+	p := strings.TrimSpace(prelude)
+	if p == "" {
+		return css
+	}
+	if p == "layer" || strings.HasPrefix(p, "layer(") || strings.HasPrefix(p, "layer ") {
+		return css
+	}
+	if strings.HasPrefix(p, "supports(") {
+		return "@supports " + p[len("supports"):] + "{" + css + "}"
+	}
+	return "@media " + p + "{" + css + "}"
 }
 
 // isExternalImport reports whether the import target is a URL or otherwise not
