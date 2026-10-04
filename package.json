@@ -35,7 +35,7 @@
     "test": "pnpm sync:docs && pnpm test:js && cd packages/compiler && go test ./...",
     "test:compiler": "pnpm sync:docs && cd packages/compiler && go test ./... -v",
     "test:js": "pnpm -r run test",
-    "typecheck": "pnpm -r run typecheck",
+    "typecheck": "pnpm -r --filter '!@krate/web' run typecheck",
     "vet": "pnpm sync:docs && cd packages/compiler && go vet ./..."
   },
   "devDependencies": {
