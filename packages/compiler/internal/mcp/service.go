@@ -906,9 +906,9 @@ func (s *Service) resolveEditTarget(target string) (abs, rel string, err error) 
 	if target == "" {
 		return "", "", fmt.Errorf("empty route")
 	}
-	if filepath.IsAbs(target) {
-		return "", "", fmt.Errorf("invalid path: %s", target)
-	}
+	// A leading "/" is a site route, not a filesystem path. Check this before
+	// filepath.IsAbs: on Unix platforms IsAbs("/about") is true, but "/about"
+	// is a route that must resolve through the page builder.
 	if strings.HasPrefix(target, "/") {
 		abs, rel, err = s.resolveSource(target)
 		if err != nil {
