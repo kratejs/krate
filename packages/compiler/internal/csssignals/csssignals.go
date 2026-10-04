@@ -913,9 +913,8 @@ func (a *Analyzer) registerPanels(expr ast.Expr) {
 		if e == nil {
 			return
 		}
-		if _, ok := a.MatchPanel(e); ok {
-			// Registered (or deduped to an existing condition).
-		}
+		// Registers the panel (or dedupes it to an existing condition).
+		a.MatchPanel(e)
 		for _, child := range e.Children {
 			a.registerPanelChild(child)
 		}

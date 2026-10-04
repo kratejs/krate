@@ -11,7 +11,7 @@ func TestCompileRuntimeComponents(t *testing.T) {
 	// Create a temp project directory
 	tmpDir := t.TempDir()
 	srcDir := filepath.Join(tmpDir, "src")
-	os.MkdirAll(srcDir, 0755)
+	_ = os.MkdirAll(srcDir, 0755)
 	outDir := filepath.Join(tmpDir, "dist")
 
 	// Create a simple runtime component (plain JS, no JSX, to avoid needing the full shim in test)
@@ -63,7 +63,7 @@ func TestCompileRuntimeComponents(t *testing.T) {
 func TestCompileRuntimeComponentsWithDirective(t *testing.T) {
 	tmpDir := t.TempDir()
 	srcDir := filepath.Join(tmpDir, "src")
-	os.MkdirAll(srcDir, 0755)
+	_ = os.MkdirAll(srcDir, 0755)
 	outDir := filepath.Join(tmpDir, "dist")
 
 	// Create a runtime component using the @runtime directive
@@ -88,7 +88,7 @@ export default function Badge(props) {
 
 func TestCompileRuntimeComponentsEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.MkdirAll(filepath.Join(tmpDir, "src"), 0755)
+	_ = os.MkdirAll(filepath.Join(tmpDir, "src"), 0755)
 	outDir := filepath.Join(tmpDir, "dist")
 
 	bundles := CompileRuntimeComponents(tmpDir, outDir, nil, nil, nil)
@@ -100,17 +100,17 @@ func TestCompileRuntimeComponentsEmpty(t *testing.T) {
 func TestCompileRuntimeComponentsSkipsNonRuntime(t *testing.T) {
 	tmpDir := t.TempDir()
 	srcDir := filepath.Join(tmpDir, "src")
-	os.MkdirAll(srcDir, 0755)
+	_ = os.MkdirAll(srcDir, 0755)
 	outDir := filepath.Join(tmpDir, "dist")
 
 	// Regular component (no directive, no .runtime suffix)
 	regularSrc := `export default function Regular() { return '<div>'; }`
-	os.WriteFile(filepath.Join(srcDir, "Regular.tsx"), []byte(regularSrc), 0644)
+	_ = os.WriteFile(filepath.Join(srcDir, "Regular.tsx"), []byte(regularSrc), 0644)
 
 	// Server component (not runtime)
 	serverSrc := `// @server
 export default function Server() { return '<div>'; }`
-	os.WriteFile(filepath.Join(srcDir, "Server.tsx"), []byte(serverSrc), 0644)
+	_ = os.WriteFile(filepath.Join(srcDir, "Server.tsx"), []byte(serverSrc), 0644)
 
 	bundles := CompileRuntimeComponents(tmpDir, outDir, nil, nil, nil)
 	if len(bundles) != 0 {
@@ -121,7 +121,7 @@ export default function Server() { return '<div>'; }`
 func TestCompileRuntimeComponentWithJSX(t *testing.T) {
 	tmpDir := t.TempDir()
 	srcDir := filepath.Join(tmpDir, "src")
-	os.MkdirAll(srcDir, 0755)
+	_ = os.MkdirAll(srcDir, 0755)
 	outDir := filepath.Join(tmpDir, "dist")
 
 	// Create a runtime component with JSX (uses the automatic JSX transform)
@@ -154,7 +154,7 @@ func TestCompileRuntimeComponentsMultiple(t *testing.T) {
 	tmpDir := t.TempDir()
 	srcDir := filepath.Join(tmpDir, "src")
 	compDir := filepath.Join(srcDir, "components")
-	os.MkdirAll(compDir, 0755)
+	_ = os.MkdirAll(compDir, 0755)
 	outDir := filepath.Join(tmpDir, "dist")
 
 	components := map[string]string{
@@ -164,7 +164,7 @@ func TestCompileRuntimeComponentsMultiple(t *testing.T) {
 	}
 
 	for name, src := range components {
-		os.WriteFile(filepath.Join(compDir, name), []byte(src), 0644)
+		_ = os.WriteFile(filepath.Join(compDir, name), []byte(src), 0644)
 	}
 
 	bundles := CompileRuntimeComponents(tmpDir, outDir, nil, nil, nil)

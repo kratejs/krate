@@ -62,7 +62,7 @@ func runCustomRule(bundle, mod string, cfg Config, p *Page) ([]Finding, error) {
 	}
 	defer rt.Close()
 	if len(cfg.Env) > 0 {
-		rt.SetEnv(cfg.Env)
+		_ = rt.SetEnv(cfg.Env)
 	}
 	rt.SetLogPrefix("[check:" + filepath.Base(mod) + "]")
 

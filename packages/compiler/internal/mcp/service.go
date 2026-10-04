@@ -1567,11 +1567,6 @@ func routeToPageFile(route string) (string, error) {
 	return route + ".tsx", nil
 }
 
-func defaultPageTemplate(name string) string {
-	component := "Page"
-	return "export default function " + component + "() {\n  return (\n    <main>\n      <h1>" + component + "</h1>\n    </main>\n  );\n}\n"
-}
-
 func defaultLayoutTemplate() string {
 	return "import './global.css';\n\nexport default function Layout(children) {\n" +
 		"  return (\n    <div class=\"layout\">\n" +

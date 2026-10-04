@@ -32,7 +32,6 @@ var (
 	spaceYRe      = regexp.MustCompile(`^space-y-(.+)$`)
 	gridColsRe    = regexp.MustCompile(`^grid-cols-(\d+)$`)
 	colSpanRe     = regexp.MustCompile(`^col-span-(\d+)$`)
-	orderRe       = regexp.MustCompile(`^order-(\d+)$`)
 )
 
 // TailwindScanner extracts Tailwind utility class names from source files.
@@ -62,7 +61,7 @@ func (s *TailwindScanner) ScanClasses(dirs []string) map[string]bool {
 	}
 
 	for _, dir := range dirs {
-		fsutil.WalkExt(dir, exts, skipDirs, func(path string, _ os.FileInfo) error {
+		_ = fsutil.WalkExt(dir, exts, skipDirs, func(path string, _ os.FileInfo) error {
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return nil
@@ -239,33 +238,6 @@ func stringLiterals(src string) []string {
 		i++
 	}
 	return out
-}
-
-// stripTemplateInterpolations removes ${...} segments from a template literal
-// body so only the static class-name text remains. Nested braces inside the
-// interpolation (e.g. ${spanMap[props.label] ?? ""}) are skipped correctly.
-func stripTemplateInterpolations(s string) string {
-	var b strings.Builder
-	i := 0
-	for i < len(s) {
-		if i+1 < len(s) && s[i] == '$' && s[i+1] == '{' {
-			depth := 1
-			i += 2
-			for i < len(s) && depth > 0 {
-				switch s[i] {
-				case '{':
-					depth++
-				case '}':
-					depth--
-				}
-				i++
-			}
-			continue
-		}
-		b.WriteByte(s[i])
-		i++
-	}
-	return b.String()
 }
 
 // TailwindGenerator converts class names to CSS rules.
@@ -651,19 +623,6 @@ func fractionPercent(key string) (string, bool) {
 // transformCompose is the shared transform value built from the --tw-* variables
 // so multiple transform utilities compose instead of clobbering each other.
 const transformCompose = "translate(var(--tw-translate-x,0),var(--tw-translate-y,0)) rotate(var(--tw-rotate,0)) skewX(var(--tw-skew-x,0)) skewY(var(--tw-skew-y,0)) scaleX(var(--tw-scale-x,1)) scaleY(var(--tw-scale-y,1))"
-
-// scalePercent converts a Tailwind scale key to a unitless scale factor:
-// "95" → "0.95", "100" → "1", "110" → "1.1".
-func scalePercent(key string) string {
-	if strings.HasPrefix(key, "[") && strings.HasSuffix(key, "]") {
-		return key[1 : len(key)-1]
-	}
-	// Numeric scale keys are percentages in Tailwind.
-	if f, err := strconv.ParseFloat(key, 64); err == nil {
-		return strconv.FormatFloat(f/100, 'f', -1, 64)
-	}
-	return key
-}
 
 // usesContentHook reports whether any variant is the ::before/::after
 // pseudo-element, which requires the `content` property to render.

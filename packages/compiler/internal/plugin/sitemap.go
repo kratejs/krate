@@ -19,7 +19,7 @@ type SitemapPluginOptions struct {
 }
 
 func init() {
-	Register(&HookFunc{name: "sitemap", order: 100, hooks: PluginHooks{
+	_ = Register(&HookFunc{name: "sitemap", order: 100, hooks: PluginHooks{
 		AfterBuild: generateSitemap,
 	}})
 }
@@ -34,7 +34,7 @@ func generateSitemap(ctx *BuildResultHookCtx) error {
 				configured = true
 				if pc.Options != nil {
 					data, _ := json.Marshal(pc.Options)
-					json.Unmarshal(data, opts)
+					_ = json.Unmarshal(data, opts)
 				}
 				break
 			}

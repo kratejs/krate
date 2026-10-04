@@ -213,7 +213,7 @@ func TestInjectStaticParams(t *testing.T) {
 			tmpDir := t.TempDir()
 			pagesDir := filepath.Join(tmpDir, "src", "pages")
 			pagePath := filepath.Join(pagesDir, "video", "[id].tsx")
-			os.MkdirAll(filepath.Dir(pagePath), 0755)
+			_ = os.MkdirAll(filepath.Dir(pagePath), 0755)
 			if err := os.WriteFile(pagePath, []byte(tc.src), 0644); err != nil {
 				t.Fatal(err)
 			}

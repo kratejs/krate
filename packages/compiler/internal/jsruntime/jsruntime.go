@@ -18,9 +18,8 @@ const (
 
 // Runtime wraps a quickjs VM with krate-specific Web API polyfills
 type Runtime struct {
-	vm          *quickjs.VM
-	projectRoot string // root directory for fs.readFile resolution
-	logPrefix   string // optional prefix for console output (e.g. "[plugin:demo]")
+	vm        *quickjs.VM
+	logPrefix string // optional prefix for console output (e.g. "[plugin:demo]")
 }
 
 // SetLogPrefix sets a prefix prepended to every console line. Plugin hosts set

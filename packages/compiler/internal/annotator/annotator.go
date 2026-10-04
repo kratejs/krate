@@ -309,11 +309,6 @@ func hasSuspenseInExpr(expr ast.Expr) bool {
 
 // ─── AST walking helpers (ported from renderer) ────────────────────────────
 
-// collectFunctions walks function bodies recording declarations.
-func collectFunctions(body []ast.Stmt, dest map[string]*ast.FnDecl) {
-	collectFunctionsWithSource(body, dest, nil, nil, "", "")
-}
-
 // collectFunctionsWithSource walks function bodies recording declarations and,
 // when sourcePath/rawSource are non-empty, records the module source each
 // function came from so tier classification uses the component's own file.

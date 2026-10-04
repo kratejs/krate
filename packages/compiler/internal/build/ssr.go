@@ -84,7 +84,7 @@ func (s *SSRServer) Start() error {
 	// Load manifest for route lookup
 	data, _ := os.ReadFile(manifestPath)
 	s.manifest = &ServerManifest{}
-	json.Unmarshal(data, s.manifest)
+	_ = json.Unmarshal(data, s.manifest)
 
 	runtimeCmd, runtimeArgs, err := ssrRuntimeCommand(s.runtime, rendererPath)
 	if err != nil {
@@ -121,7 +121,7 @@ func (s *SSRServer) Start() error {
 
 	// Wait for server to be ready
 	go func() {
-		s.cmd.Wait()
+		_ = s.cmd.Wait()
 		s.mu.Lock()
 		s.running = false
 		s.mu.Unlock()

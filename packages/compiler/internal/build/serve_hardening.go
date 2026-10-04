@@ -41,10 +41,6 @@ const (
 	serverWriteTimeout = 60 * time.Second
 	serverIdleTimeout  = 120 * time.Second
 
-	// maxRequestBodyBytes caps how much of a request body Krate will read for
-	// API routes and middleware. Protects against unbounded memory use.
-	maxRequestBodyBytes = 4 << 20 // 4 MiB
-
 	// shutdownGrace bounds graceful shutdown before the server is forced closed.
 	shutdownGrace = 15 * time.Second
 )
@@ -233,7 +229,7 @@ func panicRecoveryMiddleware(logger *slog.Logger, next http.Handler) http.Handle
 				if strings.HasPrefix(r.URL.Path, "/api/") {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusInternalServerError)
-					io.WriteString(w, `{"error":"Internal Server Error"}`)
+					_, _ = io.WriteString(w, `{"error":"Internal Server Error"}`)
 					return
 				}
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)

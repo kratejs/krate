@@ -343,8 +343,8 @@ export default function VideoPage(props) {
 		t.Fatalf("starting renderer: %v", err)
 	}
 	defer func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}()
 
 	base := fmt.Sprintf("http://localhost:%d", port)
@@ -596,8 +596,8 @@ func TestRegionSidecarE2E(t *testing.T) {
 		t.Fatalf("starting renderer: %v", err)
 	}
 	defer func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}()
 
 	base := fmt.Sprintf("http://localhost:%d", port)
@@ -720,8 +720,8 @@ func TestNestedRuntimeSuspenseSidecarE2E(t *testing.T) {
 		t.Fatalf("starting renderer: %v", err)
 	}
 	defer func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}()
 
 	base := fmt.Sprintf("http://localhost:%d", port)
@@ -796,7 +796,7 @@ export default function V(props: any) {
 	// server). Link the monorepo package into the temp project so node resolves
 	// it at import time, like a real installed dependency.
 	nodeModules := filepath.Join(root, "node_modules")
-	os.MkdirAll(nodeModules, 0755)
+	_ = os.MkdirAll(nodeModules, 0755)
 	if err := linkRuntimePackage(t, filepath.Join(nodeModules, "@krate")); err != nil {
 		t.Fatal(err)
 	}
@@ -828,8 +828,8 @@ export default function V(props: any) {
 		t.Fatalf("starting renderer: %v", err)
 	}
 	defer func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}()
 
 	base := fmt.Sprintf("http://localhost:%d", port)
@@ -909,7 +909,7 @@ export default function VideoPage(props: any) {
 	outDir := cfg.OutDir
 
 	nodeModules := filepath.Join(root, "node_modules")
-	os.MkdirAll(nodeModules, 0755)
+	_ = os.MkdirAll(nodeModules, 0755)
 	if err := linkRuntimePackage(t, filepath.Join(nodeModules, "@krate")); err != nil {
 		t.Fatal(err)
 	}
@@ -941,8 +941,8 @@ export default function VideoPage(props: any) {
 		t.Fatalf("starting renderer: %v", err)
 	}
 	defer func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}()
 
 	base := fmt.Sprintf("http://localhost:%d", port)

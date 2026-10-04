@@ -433,7 +433,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 			jsFile = "index." + jsHash + ".js"
 			finalJS = substituteImportMetaURL(finalJS, spp.OutPath, jsFile, b.Cfg.BaseURLPath())
 			jsPath := filepath.Join(pageDir, jsFile)
-			os.WriteFile(jsPath, []byte(finalJS), 0644)
+			_ = os.WriteFile(jsPath, []byte(finalJS), 0644)
 			hydrationJS = finalJS
 		} else {
 			hydrationJS = ""

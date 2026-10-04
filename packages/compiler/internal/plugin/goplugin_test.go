@@ -216,7 +216,7 @@ func TestGoPluginDiscoveryAndRouting(t *testing.T) {
 	// Build an npm-style package with a JS descriptor and a bin/ directory.
 	pkgDir := t.TempDir()
 	binDir := filepath.Join(pkgDir, "bin")
-	os.MkdirAll(binDir, 0755)
+	_ = os.MkdirAll(binDir, 0755)
 	binName := "fixtureplugin"
 	if runtime.GOOS == "windows" {
 		binName += ".exe"

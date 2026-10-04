@@ -1034,10 +1034,3 @@ func (l *Lexer) readRegex() {
 	}
 	l.emit(Error)
 }
-
-func (l *Lexer) skipToNewline() {
-	for l.pos < len(l.src) && l.src[l.pos] != '\n' {
-		l.pos++
-		l.col++
-	}
-}

@@ -91,10 +91,10 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string) str
 	filename := "chunks/runtime." + hash + ".js"
 
 	chunksDir := filepath.Join(outDir, "chunks")
-	os.MkdirAll(chunksDir, 0755)
+	_ = os.MkdirAll(chunksDir, 0755)
 
 	relPath := filename
-	os.WriteFile(filepath.Join(outDir, relPath), []byte(runtimeToWrite), 0644)
+	_ = os.WriteFile(filepath.Join(outDir, relPath), []byte(runtimeToWrite), 0644)
 
 	return relPath
 }

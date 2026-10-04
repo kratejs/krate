@@ -43,7 +43,7 @@ func RunBootstrap(name, content, cwd string, timeout time.Duration, env []string
 // user source, since tsx honors compilerOptions.paths.
 func RunBootstrapOpts(name, content, cwd string, timeout time.Duration, env []string, tsconfig string) (stdout []byte, stderr string, err error) {
 	buf := make([]byte, 8)
-	rand.Read(buf)
+	_, _ = rand.Read(buf)
 	suffix := hex.EncodeToString(buf)
 
 	path := filepath.Join(os.TempDir(), name+"-"+suffix+".mjs")

@@ -33,7 +33,7 @@ func TestMarkdownPageRouting(t *testing.T) {
 	// Use a JS community plugin advertising an AfterMarkdownParse hook so it
 	// runs through the same community-plugin path as the broken-Go test above.
 	pluginDir := filepath.Join(root, "plugins", "markdown-wrapsub")
-	os.MkdirAll(pluginDir, 0755)
+	_ = os.MkdirAll(pluginDir, 0755)
 	src := `
 export default {
   name: "markdown-wrapsub",

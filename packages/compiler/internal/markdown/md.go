@@ -29,6 +29,8 @@ func RenderToHTML(src string, cfg Config) string {
 var (
 	mathBlockRe  = regexp.MustCompile(`\$\$([^$]+?)\$\$`)
 	mathInlineRe = regexp.MustCompile(`\$([^\s$][^$\n]*?[^\s$]|[^\s$])\$`)
+	// orderedListRe matches an ordered-list marker at the start of a line.
+	orderedListRe = regexp.MustCompile(`^\d+\.\s+`)
 )
 
 // wrapMath wraps TeX delimiters in `.krate-math` spans so a math renderer
@@ -231,12 +233,12 @@ func parseBlocks(lines []string, cfg Config) []block {
 		}
 
 		// Ordered list
-		if matched, _ := regexp.MatchString(`^\d+\.\s+`, line); matched {
+		if orderedListRe.MatchString(line) {
 			var items []block
 			var itemLines []string
 			for i < len(lines) {
 				l := lines[i]
-				if matched2, _ := regexp.MatchString(`^\d+\.\s+`, l); matched2 {
+				if orderedListRe.MatchString(l) {
 					if len(itemLines) > 0 {
 						items = append(items, block{typ: bParagraph, lines: itemLines})
 					}

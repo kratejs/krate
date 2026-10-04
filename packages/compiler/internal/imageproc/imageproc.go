@@ -378,7 +378,7 @@ func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder
 	origH = bounds.Dy()
 
 	outDir := getCacheDir(root)
-	os.MkdirAll(outDir, 0755)
+	_ = os.MkdirAll(outDir, 0755)
 
 	data, _ := os.ReadFile(srcPath)
 	cacheKey := ComputeCacheKey(data)

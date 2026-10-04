@@ -46,7 +46,7 @@ type SocialLink struct {
 }
 
 func init() {
-	Register(&DocsPlugin{})
+	_ = Register(&DocsPlugin{})
 }
 
 type DocsPlugin struct{}
@@ -171,7 +171,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 	genDir := filepath.Join(ctx.Root, ".krate", "gen", "docs")
 
 	os.RemoveAll(genDir)
-	os.MkdirAll(genDir, 0755)
+	_ = os.MkdirAll(genDir, 0755)
 
 	// Resolve the docs layout/theme once up front. The result is either a bare
 	// npm specifier (kept as-is so CSS/sub-components flow through the bundler
@@ -183,7 +183,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 
 	// Generate the SearchBar component once into the gen dir (shared by all pages)
 	if searchEnabled {
-		os.WriteFile(filepath.Join(genDir, "SearchBar.tsx"), []byte(generateSearchBarTSX()), 0644)
+		_ = os.WriteFile(filepath.Join(genDir, "SearchBar.tsx"), []byte(generateSearchBarTSX()), 0644)
 	}
 
 	var themeOptions json.RawMessage
@@ -225,8 +225,8 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 			}
 			tsxSource := p.generateTSX(ctx, page, fileLayoutRel, searchBarRel, sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, opts, themeOptions, cfg.Markdown)
 
-			os.MkdirAll(filepath.Dir(tsxPath), 0755)
-			os.WriteFile(tsxPath, []byte(tsxSource), 0644)
+			_ = os.MkdirAll(filepath.Dir(tsxPath), 0755)
+			_ = os.WriteFile(tsxPath, []byte(tsxSource), 0644)
 
 			route := docs.NormalizePagePath(page.Path)
 			if route == "" {
@@ -260,22 +260,6 @@ func trimComponentExt(s string) string {
 	s = strings.TrimSuffix(s, ".jsx")
 	s = strings.TrimSuffix(s, ".js")
 	return s
-}
-
-func resolveLayoutImport(genDir, root, layout string) string {
-	if layout == "" {
-		return ""
-	}
-	layoutPath := filepath.Join(root, trimComponentExt(layout))
-	rel, err := filepath.Rel(genDir, layoutPath)
-	if err != nil {
-		return layout
-	}
-	rel = filepath.ToSlash(rel)
-	if !strings.HasPrefix(rel, ".") {
-		rel = "./" + rel
-	}
-	return rel
 }
 
 // resolvedDocsTheme is the outcome of resolving the docs plugin's layout/theme
@@ -813,11 +797,11 @@ func headTagJSX(t docs.HeadTag) string {
 
 func (p *DocsPlugin) writeAssets(ctx *BuildHookCtx, sections []docs.SidebarItem, pages []docs.Page, opts *DocsPluginOptions) {
 	outDir := filepath.Join(ctx.OutDir, "docs")
-	os.MkdirAll(filepath.Join(outDir, "data"), 0755)
+	_ = os.MkdirAll(filepath.Join(outDir, "data"), 0755)
 
 	sidebarData, _ := json.Marshal(sections)
-	os.WriteFile(filepath.Join(outDir, "data/sidebar.json"), sidebarData, 0644)
+	_ = os.WriteFile(filepath.Join(outDir, "data/sidebar.json"), sidebarData, 0644)
 
 	searchData, _ := json.Marshal(docs.BuildSearchIndex(pages))
-	os.WriteFile(filepath.Join(outDir, "data/search-index.json"), searchData, 0644)
+	_ = os.WriteFile(filepath.Join(outDir, "data/search-index.json"), searchData, 0644)
 }

@@ -43,7 +43,7 @@ func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir strin
 	}
 	defer rt.Close()
 
-	rt.SetEnv(environ.Current)
+	_ = rt.SetEnv(environ.Current)
 
 	// Attribute all console/log output to this plugin.
 	rt.SetLogPrefix("[plugin:" + pc.Name + "]")
@@ -118,14 +118,14 @@ func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir strin
 
 	if msg.Pending {
 		rt.DrainJobs()
-		readScript := fmt.Sprintf(`
+		readScript := `
 (function() {
   if (typeof __krateError === 'string' && __krateError) {
     return JSON.stringify({ error: __krateError });
   }
   return JSON.stringify({ result: __krateResult });
 })()
-`)
+`
 		res2, err := rt.Execute(readScript)
 		if err != nil {
 			return fmt.Errorf("resolving async %s hook: %w", hookName, err)
@@ -143,7 +143,7 @@ func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir strin
 	}
 
 	var output communityOutput
-	if msg.Result != nil && len(msg.Result) > 0 {
+	if len(msg.Result) > 0 {
 		if err := json.Unmarshal(msg.Result, &output); err != nil {
 			return fmt.Errorf("invalid plugin result JSON: %w", err)
 		}

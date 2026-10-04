@@ -148,7 +148,7 @@ func runJSManifest(module string) (goPluginDescriptor, error) {
 		return goPluginDescriptor{}, fmt.Errorf("creating JS runtime for manifest: %w", err)
 	}
 	defer rt.Close()
-	rt.SetEnv(environ.Current)
+	_ = rt.SetEnv(environ.Current)
 	// Prelude a CommonJS shim so descriptor files written as
 	// `module.exports = ...` (the documented Go-plugin shape) load even when
 	// esbuild leaves the `module.exports` assignment unwrapped — which happens

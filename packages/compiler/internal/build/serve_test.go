@@ -163,18 +163,18 @@ func TestMatchDynamicRoute(t *testing.T) {
 func TestFindDynamicRoutes(t *testing.T) {
 	dir := t.TempDir()
 	// Create static page directory
-	os.MkdirAll(filepath.Join(dir, "about"), 0755)
-	os.WriteFile(filepath.Join(dir, "about", "index.html"), []byte("<html>about</html>"), 0644)
+	_ = os.MkdirAll(filepath.Join(dir, "about"), 0755)
+	_ = os.WriteFile(filepath.Join(dir, "about", "index.html"), []byte("<html>about</html>"), 0644)
 
 	// Create dynamic route directory
 	dynDir := filepath.Join(dir, "video", "[id]")
-	os.MkdirAll(dynDir, 0755)
-	os.WriteFile(filepath.Join(dynDir, "index.html"), []byte("<html>video</html>"), 0644)
+	_ = os.MkdirAll(dynDir, 0755)
+	_ = os.WriteFile(filepath.Join(dynDir, "index.html"), []byte("<html>video</html>"), 0644)
 
 	// Create another dynamic route
 	dynDir2 := filepath.Join(dir, "user", "[username]", "posts", "[postId]")
-	os.MkdirAll(dynDir2, 0755)
-	os.WriteFile(filepath.Join(dynDir2, "index.html"), []byte("<html>post</html>"), 0644)
+	_ = os.MkdirAll(dynDir2, 0755)
+	_ = os.WriteFile(filepath.Join(dynDir2, "index.html"), []byte("<html>post</html>"), 0644)
 
 	routes := findDynamicRoutes(dir)
 	// Only dirs with index.html: video/[id] and user/[username]/posts/[postId]
@@ -198,10 +198,10 @@ func TestFindDynamicRoutes(t *testing.T) {
 
 func TestStaticRouteExists(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "items", "alpha"), 0755)
-	os.WriteFile(filepath.Join(dir, "items", "alpha", "index.html"), []byte("<html>static alpha</html>"), 0644)
-	os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>home</html>"), 0644)
-	os.WriteFile(filepath.Join(dir, "favicon.ico"), []byte("x"), 0644)
+	_ = os.MkdirAll(filepath.Join(dir, "items", "alpha"), 0755)
+	_ = os.WriteFile(filepath.Join(dir, "items", "alpha", "index.html"), []byte("<html>static alpha</html>"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>home</html>"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "favicon.ico"), []byte("x"), 0644)
 
 	cases := []struct {
 		path string
@@ -228,10 +228,10 @@ func TestStaticRouteExists(t *testing.T) {
 // and runtime-component regions being frozen at their build timestamp.
 func TestShouldServeStatic(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "cached", "known"), 0755)
-	os.WriteFile(filepath.Join(dir, "cached", "known", "index.html"), []byte("<html>baked</html>"), 0644)
-	os.MkdirAll(filepath.Join(dir, "items", "alpha"), 0755)
-	os.WriteFile(filepath.Join(dir, "items", "alpha", "index.html"), []byte("<html>alpha</html>"), 0644)
+	_ = os.MkdirAll(filepath.Join(dir, "cached", "known"), 0755)
+	_ = os.WriteFile(filepath.Join(dir, "cached", "known", "index.html"), []byte("<html>baked</html>"), 0644)
+	_ = os.MkdirAll(filepath.Join(dir, "items", "alpha"), 0755)
+	_ = os.WriteFile(filepath.Join(dir, "items", "alpha", "index.html"), []byte("<html>alpha</html>"), 0644)
 
 	mkPage := func(mode string) *ManifestPage {
 		return &ManifestPage{Mode: mode, Route: "/cached/[id]"}
@@ -266,11 +266,11 @@ func TestShouldServeStatic(t *testing.T) {
 func TestStaticBeatsDynamicRoute(t *testing.T) {
 	dir := t.TempDir()
 	static := filepath.Join(dir, "items", "alpha")
-	os.MkdirAll(static, 0755)
-	os.WriteFile(filepath.Join(static, "index.html"), []byte("<html>STATIC ALPHA</html>"), 0644)
+	_ = os.MkdirAll(static, 0755)
+	_ = os.WriteFile(filepath.Join(static, "index.html"), []byte("<html>STATIC ALPHA</html>"), 0644)
 	dyn := filepath.Join(dir, "items", "[id]")
-	os.MkdirAll(dyn, 0755)
-	os.WriteFile(filepath.Join(dyn, "index.html"), []byte("<html>DYNAMIC TEMPLATE</html>"), 0644)
+	_ = os.MkdirAll(dyn, 0755)
+	_ = os.WriteFile(filepath.Join(dyn, "index.html"), []byte("<html>DYNAMIC TEMPLATE</html>"), 0644)
 
 	routes := findDynamicRoutes(dir)
 	var pattern string
@@ -297,8 +297,8 @@ func TestStaticBeatsDynamicRoute(t *testing.T) {
 
 func TestFindDynamicRoutesEmpty(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "about"), 0755)
-	os.WriteFile(filepath.Join(dir, "about", "index.html"), []byte("<html>about</html>"), 0644)
+	_ = os.MkdirAll(filepath.Join(dir, "about"), 0755)
+	_ = os.WriteFile(filepath.Join(dir, "about", "index.html"), []byte("<html>about</html>"), 0644)
 
 	routes := findDynamicRoutes(dir)
 	if len(routes) != 0 {

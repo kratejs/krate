@@ -154,9 +154,9 @@ func TestFindLayoutStack(t *testing.T) {
 		t.Fatal(err)
 	}
 	rootLayout := filepath.Join(pagesDir, "_layout.tsx")
-	os.WriteFile(rootLayout, []byte("root"), 0644)
+	_ = os.WriteFile(rootLayout, []byte("root"), 0644)
 	blogLayout := filepath.Join(pagesDir, "blog", "_layout.tsx")
-	os.WriteFile(blogLayout, []byte("blog"), 0644)
+	_ = os.WriteFile(blogLayout, []byte("blog"), 0644)
 
 	stack := findLayoutStack(filepath.Join(pagesDir, "blog", "post.tsx"), pagesDir)
 	if len(stack) != 2 || stack[0] != blogLayout || stack[1] != rootLayout {

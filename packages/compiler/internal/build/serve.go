@@ -472,18 +472,18 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, absOut, route
 	// flushing after each splice so the page streams progressively.
 	cursor := 0
 	for _, b := range boundaries {
-		w.Write([]byte(shell[cursor:b.openEnd]))
+		_, _ = w.Write([]byte(shell[cursor:b.openEnd]))
 		if html, ok := regionHTML[b.id]; ok {
-			w.Write([]byte(html))
+			_, _ = w.Write([]byte(html))
 		} else if b.kind == "suspense" {
 			// Region render failed or no frame — keep the baked content.
-			w.Write([]byte(shell[b.fbStart:b.fbEnd]))
+			_, _ = w.Write([]byte(shell[b.fbStart:b.fbEnd]))
 		}
 		// Standalone runtime regions with no frame leave the empty slot empty.
 		flush()
 		cursor = b.fbEnd
 	}
-	w.Write([]byte(shell[cursor:]))
+	_, _ = w.Write([]byte(shell[cursor:]))
 	flush()
 
 	return res
@@ -659,7 +659,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 				if err != nil {
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusRequestEntityTooLarge)
-					io.WriteString(w, `{"error":"Request Entity Too Large"}`)
+					_, _ = io.WriteString(w, `{"error":"Request Entity Too Large"}`)
 					return
 				}
 				body = string(b)
@@ -680,7 +680,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 				w.WriteHeader(result.Status)
 			}
 			if result.Body != "" {
-				w.Write([]byte(result.Body))
+				_, _ = w.Write([]byte(result.Body))
 			}
 			return
 		}
@@ -715,13 +715,13 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 			resp, err := sidecarClient.Do(proxyReq)
 			if err != nil {
 				w.WriteHeader(502)
-				w.Write([]byte(`{"error":"SSR renderer unavailable"}`))
+				_, _ = w.Write([]byte(`{"error":"SSR renderer unavailable"}`))
 				return
 			}
 			defer resp.Body.Close()
 			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
 			w.WriteHeader(resp.StatusCode)
-			io.Copy(w, resp.Body)
+			_, _ = io.Copy(w, resp.Body)
 		})
 	}
 
@@ -765,7 +765,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					w.WriteHeader(200)
-					w.Write([]byte(pageHTML))
+					_, _ = w.Write([]byte(pageHTML))
 					return
 				}
 			}
@@ -781,7 +781,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 		if buf.status == http.StatusNotFound {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusNotFound)
-			w.Write(custom404)
+			_, _ = w.Write(custom404)
 			return
 		}
 		// Non-404: forward the buffered response
@@ -790,7 +790,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 		}
 		w.WriteHeader(buf.status)
 		body := buf.body.Bytes()
-		w.Write(body)
+		_, _ = w.Write(body)
 	})
 
 	// SSE endpoint for live reload (dev mode only)
@@ -983,7 +983,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					w.Header().Del("Cache-Control")
 					w.WriteHeader(404)
-					w.Write(custom404)
+					_, _ = w.Write(custom404)
 				} else {
 					http.NotFound(w, r)
 				}
@@ -1008,11 +1008,10 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 			relPath = relPath + "/index.html"
 		}
 		if data, err := os.ReadFile(filepath.Join(absOut, relPath)); err == nil {
-			w.Write(data)
+			_, _ = w.Write(data)
 			return
 		}
 		handlerWith404.ServeHTTP(w, r)
-		return
 	})
 
 	// Redirect/rewrite middleware — applies config-based URL transformations
@@ -1084,7 +1083,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 				}
 				w.WriteHeader(result.Status)
 				if result.Body != "" {
-					w.Write([]byte(result.Body))
+					_, _ = w.Write([]byte(result.Body))
 				}
 				return
 			}
@@ -1142,7 +1141,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 			}
 			w.WriteHeader(middlewareResult.Status)
 			if middlewareResult.Body != "" {
-				w.Write([]byte(middlewareResult.Body))
+				_, _ = w.Write([]byte(middlewareResult.Body))
 			}
 			return
 		}
@@ -1176,17 +1175,17 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, "ok\n")
+		_, _ = io.WriteString(w, "ok\n")
 	})
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		if ssrStarted && !ssr.IsRunning() {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			io.WriteString(w, "ssr-unavailable\n")
+			_, _ = io.WriteString(w, "ssr-unavailable\n")
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, "ready\n")
+		_, _ = io.WriteString(w, "ready\n")
 	})
 
 	// Wrap the mux so every route (including /api/, /__krate/, health) gets
@@ -1400,7 +1399,7 @@ func openBrowser(url string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sWarning: could not open browser: %v%s\n", cYellow, err, cReset)
 	} else {
-		proc.Release()
+		_ = proc.Release()
 	}
 }
 
@@ -1515,7 +1514,7 @@ func normalizeRoutePattern(p string) string {
 // index.html are included (leaf route templates).
 func findDynamicRoutes(absOut string) []dynamicRoute {
 	var routes []dynamicRoute
-	filepath.Walk(absOut, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(absOut, func(path string, info os.FileInfo, err error) error {
 		if err != nil || !info.IsDir() {
 			return nil
 		}

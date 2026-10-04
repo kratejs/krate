@@ -719,7 +719,7 @@ export default {
 
 	// Verbose on: krate.log and console.log now appear, still prefixed.
 	SetVerbose(true)
-	stdout, stderr = captureOutput(t, func() {
+	stdout, _ = captureOutput(t, func() {
 		if err := RunCommunityPlugins("BeforeBuild", []config.PluginConfig{cfg}, root, outDir, ctx); err != nil {
 			t.Fatalf("RunCommunityPlugins (verbose): %v", err)
 		}
@@ -749,7 +749,7 @@ func TestHookTrace(t *testing.T) {
 	}
 
 	SetVerbose(true)
-	stdout, stderr = captureOutput(t, func() {
+	_, stderr = captureOutput(t, func() {
 		traceHook("demo", "BeforeBuild", 12*time.Millisecond, nil)
 		traceHook("demo", "AfterRender", 3*time.Millisecond, errTraceTest)
 	})

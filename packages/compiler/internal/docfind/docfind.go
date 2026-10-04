@@ -211,7 +211,7 @@ func Search(ctx context.Context, documents []Document, query string, maxResults 
 		}
 	}
 	if free != nil {
-		defer free.Call(ctx, qPtr[0], uint64(len(qBytes)))
+		defer func() { _, _ = free.Call(ctx, qPtr[0], uint64(len(qBytes))) }()
 	}
 
 	outPtr, err := alloc.Call(ctx, 8)

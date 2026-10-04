@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	Register(&HookFunc{name: "robots", order: 101, hooks: PluginHooks{
+	_ = Register(&HookFunc{name: "robots", order: 101, hooks: PluginHooks{
 		AfterBuild: generateRobotsTxt,
 	}})
 }

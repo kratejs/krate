@@ -65,7 +65,7 @@ func (s *fakeRegionsSidecar) serve() {
 					break
 				}
 				if strings.HasPrefix(line, "Content-Length:") {
-					fmt.Sscanf(line, "Content-Length: %d", &contentLength)
+					_, _ = fmt.Sscanf(line, "Content-Length: %d", &contentLength)
 				}
 			}
 			if contentLength > 0 {
@@ -76,9 +76,9 @@ func (s *fakeRegionsSidecar) serve() {
 				s.mu.Unlock()
 			}
 			resp := "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson; charset=utf-8\r\nConnection: close\r\n\r\n"
-			c.Write([]byte(resp))
+			_, _ = c.Write([]byte(resp))
 			for _, f := range s.frames {
-				c.Write([]byte(f + "\n"))
+				_, _ = c.Write([]byte(f + "\n"))
 			}
 		}(conn)
 	}

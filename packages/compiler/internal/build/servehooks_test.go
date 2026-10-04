@@ -83,7 +83,7 @@ func TestServeHooksGoPlugin(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(200)
-		w.Write([]byte("<h1>hello</h1>"))
+		_, _ = w.Write([]byte("<h1>hello</h1>"))
 	})
 
 	root := t.TempDir()
@@ -124,7 +124,7 @@ func TestServeHooksGoPlugin(t *testing.T) {
 func TestServeHooksNoHooksConfig(t *testing.T) {
 	root := t.TempDir()
 	pluginDir := filepath.Join(root, "plugins", "no-serve-hooks")
-	os.MkdirAll(pluginDir, 0755)
+	_ = os.MkdirAll(pluginDir, 0755)
 	js := `export default {
   name: "no-serve-hooks",
   hooks: {
@@ -140,7 +140,7 @@ func TestServeHooksNoHooksConfig(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(200)
-		w.Write([]byte("<h1>intact</h1>"))
+		_, _ = w.Write([]byte("<h1>intact</h1>"))
 	})
 
 	h := wirePluginServeHandlers(root, &config.Config{Plugins: []config.PluginConfig{cfg}}, next)
@@ -162,7 +162,7 @@ func TestServeHooksNoHooksConfig(t *testing.T) {
 func TestServeResponseContentLengthReconciled(t *testing.T) {
 	root := t.TempDir()
 	pluginDir := filepath.Join(root, "plugins", "js-clen")
-	os.MkdirAll(pluginDir, 0755)
+	_ = os.MkdirAll(pluginDir, 0755)
 	js := `export default {
   name: "js-clen",
   hooks: {
@@ -183,7 +183,7 @@ func TestServeResponseContentLengthReconciled(t *testing.T) {
 		// buffering; the plugin then rewrites the body to a different length.
 		w.Header().Set("Content-Length", "99999")
 		w.WriteHeader(200)
-		w.Write([]byte(body))
+		_, _ = w.Write([]byte(body))
 	})
 
 	h := wirePluginServeHandlers(root, &config.Config{Plugins: []config.PluginConfig{cfg}}, next)
@@ -203,9 +203,9 @@ func TestServeResponseContentLengthReconciled(t *testing.T) {
 func TestServeHooksJSPlugin(t *testing.T) {
 	root := t.TempDir()
 	out := filepath.Join(root, "dist")
-	os.MkdirAll(out, 0755)
+	_ = os.MkdirAll(out, 0755)
 	pluginDir := filepath.Join(root, "plugins", "js-serve")
-	os.MkdirAll(pluginDir, 0755)
+	_ = os.MkdirAll(pluginDir, 0755)
 	js := `export default {
   name: "js-serve",
   order: 10,
@@ -229,7 +229,7 @@ func TestServeHooksJSPlugin(t *testing.T) {
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
-		w.Write([]byte("<p>js body</p>"))
+		_, _ = w.Write([]byte("<p>js body</p>"))
 	})
 
 	t.Run("ServeResponse buffers and rewrites", func(t *testing.T) {

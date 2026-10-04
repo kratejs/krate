@@ -492,7 +492,6 @@ var rgbRe = regexp.MustCompile(`rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3}
 var rgbSpaceRe = regexp.MustCompile(`rgb\(\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*(?:/\s*([0-9.]+)\s*)?\)`)
 var calcRe = regexp.MustCompile(`calc\(([^()]*(?:\([^()]*\)[^()]*)*)\)`)
 var trailingSemiRe = regexp.MustCompile(`;\s*\}`)
-var blockCommentRe = regexp.MustCompile(`/\*[\s\S]*?\*/`)
 
 func Bundle(assets []*Asset) string {
 	var b strings.Builder

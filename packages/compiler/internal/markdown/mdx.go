@@ -151,17 +151,17 @@ func isJSXStart(s string) bool {
 	if strings.HasPrefix(s, "</") || strings.HasPrefix(s, "<!") || strings.HasPrefix(s, "<?") {
 		return false
 	}
-	// Only uppercase component names are JSX blocks
-	for _, r := range s[1:] {
-		if r == ' ' || r == '>' || r == '/' {
-			return false
-		}
-		if unicode.IsUpper(r) || r == '_' {
-			return true
-		}
+	// Only uppercase component names are JSX blocks: the first character after
+	// "<" decides.
+	rs := []rune(s[1:])
+	if len(rs) == 0 {
 		return false
 	}
-	return false
+	r := rs[0]
+	if r == ' ' || r == '>' || r == '/' {
+		return false
+	}
+	return unicode.IsUpper(r) || r == '_'
 }
 
 func extractJSXTag(lines []string, start int) (tag, attrs, rest string, endLine int) {

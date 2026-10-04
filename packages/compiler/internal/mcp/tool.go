@@ -426,23 +426,6 @@ func argBool(args map[string]any, key string, def bool) bool {
 	return def
 }
 
-// argStringSlice extracts a []string argument (strings or []any of strings).
-func argStringSlice(args map[string]any, key string) []string {
-	switch v := args[key].(type) {
-	case []string:
-		return v
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	return nil
-}
-
 // argStringMap extracts a map[string]any argument.
 func argStringMap(args map[string]any, key string) map[string]any {
 	if m, ok := args[key].(map[string]any); ok {

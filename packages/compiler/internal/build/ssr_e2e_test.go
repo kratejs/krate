@@ -128,8 +128,8 @@ export default function VideoPage(props) {
 		t.Fatalf("starting renderer: %v", err)
 	}
 	defer func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}()
 
 	base := fmt.Sprintf("http://localhost:%d", port)

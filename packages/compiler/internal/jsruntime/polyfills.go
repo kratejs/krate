@@ -259,13 +259,6 @@ func (r *Runtime) injectTextEncoding() error {
 	return err
 }
 
-// fetchResponse holds the result of a fetch call
-type fetchResponse struct {
-	StatusCode int
-	Headers    map[string]string
-	Body       string
-}
-
 // injectFetch adds the fetch API
 func (r *Runtime) injectFetch() error {
 	// Register Go fetch implementation

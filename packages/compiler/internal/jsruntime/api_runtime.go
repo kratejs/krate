@@ -62,18 +62,18 @@ func stripExports(code string) string {
 			if part == "" {
 				continue
 			}
-			// Check for "local as exported"
+			// Check for "local as exported". A plain name (no "as") is already
+			// a global from its function/const declaration, so skip it.
 			asParts := strings.SplitN(part, " as ", 2)
-			if len(asParts) == 2 {
-				local := strings.TrimSpace(asParts[0])
-				exported := strings.TrimSpace(asParts[1])
-				if exported == "default" {
-					bindings = append(bindings, fmt.Sprintf("var __default = %s;", local))
-				} else {
-					bindings = append(bindings, fmt.Sprintf("var %s = %s;", exported, local))
-				}
+			if len(asParts) != 2 {
+				continue
+			}
+			local := strings.TrimSpace(asParts[0])
+			exported := strings.TrimSpace(asParts[1])
+			if exported == "default" {
+				bindings = append(bindings, fmt.Sprintf("var __default = %s;", local))
 			} else {
-				// Plain name â€” already a global from function/const declaration
+				bindings = append(bindings, fmt.Sprintf("var %s = %s;", exported, local))
 			}
 		}
 		// Replace the entire export block with the bindings
@@ -149,7 +149,7 @@ func (a *APIRouteRuntime) Execute(req APIRequest) APIResult {
 	}
 	defer rt.Close()
 
-	rt.SetEnv(a.env)
+	_ = rt.SetEnv(a.env)
 
 	code, err := os.ReadFile(targetFile)
 	if err != nil {

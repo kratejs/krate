@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"html"
 	"strings"
-	"unicode"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
@@ -2429,13 +2428,6 @@ func (p *Parser) skipTypeAnnotation(beforeBrace bool, stopAtArrow ...bool) {
 		}
 		p.next()
 	}
-}
-
-func isUpper(s string) bool {
-	if len(s) == 0 {
-		return false
-	}
-	return unicode.IsUpper(rune(s[0]))
 }
 
 // isPrimitiveTypeKeyword reports whether a token names a primitive type that

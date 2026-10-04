@@ -101,11 +101,7 @@ func (m *Manifest) SetRuntimeComponents(bundles []RuntimeComponentBundle) {
 	}
 	m.RuntimeComponents = make([]RuntimeComponentMeta, 0, len(bundles))
 	for _, b := range bundles {
-		m.RuntimeComponents = append(m.RuntimeComponents, RuntimeComponentMeta{
-			Name:       b.Name,
-			SourcePath: b.SourcePath,
-			BundlePath: b.BundlePath,
-		})
+		m.RuntimeComponents = append(m.RuntimeComponents, RuntimeComponentMeta(b))
 	}
 	linkRegionBundles(m, bundles)
 }

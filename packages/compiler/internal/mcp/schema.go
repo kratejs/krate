@@ -25,16 +25,8 @@ func numSchema(desc string) map[string]any {
 	return map[string]any{"type": "number", "description": desc}
 }
 
-func intSchema(desc string) map[string]any {
-	return map[string]any{"type": "integer", "description": desc}
-}
-
 func boolSchema(desc string) map[string]any {
 	return map[string]any{"type": "boolean", "description": desc}
-}
-
-func arrSchema(desc string, items map[string]any) map[string]any {
-	return map[string]any{"type": "array", "description": desc, "items": items}
 }
 
 func objOnlySchema(desc string) map[string]any {

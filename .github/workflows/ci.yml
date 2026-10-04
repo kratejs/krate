@@ -56,12 +56,14 @@ jobs:
         run: go vet ./...
         working-directory: packages/compiler
 
+      # Build the linter with the project's Go toolchain (from go.mod) so its
+      # analysis Go version matches the targeted version. A prebuilt binary is
+      # built with an older Go and refuses to load the config.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          working-directory: packages/compiler
-          args: --timeout=5m
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+          "$(go env GOPATH)/bin/golangci-lint" run --timeout=5m
+        working-directory: packages/compiler
 
       - name: Check embedded docs are in sync
         run: node scripts/sync-krate-docs.mjs --check
@@ -103,6 +105,23 @@ jobs:
         with:
           go-version-file: packages/compiler/go.mod
           cache: true
+
+      # The integration tests load examples/krate.config.ts, which imports the
+      # workspace @krate/core package, so the JS workspace must be linked.
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --no-frozen-lockfile
 
       - name: Go build
         run: go build ./...

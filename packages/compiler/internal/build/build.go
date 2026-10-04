@@ -31,11 +31,6 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
 
-type cssModuleBinding struct {
-	LocalVar string
-	Mappings map[string]string
-}
-
 type PageResult struct {
 	Page          string
 	OutName       string
@@ -629,7 +624,7 @@ func (b *Builder) BuildAll() error {
 
 	if b.Cfg.PublicDir != "" {
 		if info, err := os.Stat(b.Cfg.PublicDir); err == nil && info.IsDir() {
-			copyDirToOut(b.Cfg.PublicDir, b.Cfg.OutDir)
+			_ = copyDirToOut(b.Cfg.PublicDir, b.Cfg.OutDir)
 		}
 	}
 
@@ -846,7 +841,7 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 			cssHash := hashContent(processedBytes)
 			cssFile = "styles." + cssHash + ".css"
 			cssPath := filepath.Join(b.Cfg.OutDir, cssFile)
-			os.WriteFile(cssPath, processedBytes, 0644)
+			_ = os.WriteFile(cssPath, processedBytes, 0644)
 		}
 	}
 	return cssFile
@@ -884,7 +879,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		cssFile := "styles." + cssHash + ".css"
 		r.CSSFile = cssFile
 		if !written[cssFile] {
-			os.WriteFile(filepath.Join(b.Cfg.OutDir, cssFile), processedBytes, 0644)
+			_ = os.WriteFile(filepath.Join(b.Cfg.OutDir, cssFile), processedBytes, 0644)
 			written[cssFile] = true
 		}
 	}
@@ -947,7 +942,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				pageDir = filepath.Join(b.Cfg.OutDir, r.OutName)
 			}
 
-			os.MkdirAll(pageDir, 0755)
+			_ = os.MkdirAll(pageDir, 0755)
 
 			// 1. Construct structural HTML wrapper in memory.
 			// A page links its own stylesheet (r.CSSFile) first, then any
@@ -1004,7 +999,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			} else {
 				htmlPath = filepath.Join(pageDir, "index.html")
 			}
-			os.WriteFile(htmlPath, []byte(html), 0644)
+			_ = os.WriteFile(htmlPath, []byte(html), 0644)
 		}(r)
 	}
 	wg.Wait()
@@ -1308,16 +1303,16 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			jsFile = "index." + jsHash + ".js"
 			finalJS = substituteImportMetaURL(finalJS, outName, jsFile, b.Cfg.BaseURLPath())
 			jsPath := filepath.Join(pageDir, jsFile)
-			os.WriteFile(jsPath, []byte(finalJS), 0644)
+			_ = os.WriteFile(jsPath, []byte(finalJS), 0644)
 
 			if b.Cfg.Sourcemap {
 				// The hydration bundle is compiler-generated, so the "source" is
 				// the page file; embed both the generated code and the page
 				// label so devtools can show a coherent (if synthetic) file.
 				sm := generateSourcemap(finalJS, outName, hydrationJS)
-				os.WriteFile(jsPath+".map", []byte(sm), 0644)
+				_ = os.WriteFile(jsPath+".map", []byte(sm), 0644)
 				finalJS = appendSourceMappingURL(finalJS, jsFile+".map")
-				os.WriteFile(jsPath, []byte(finalJS), 0644)
+				_ = os.WriteFile(jsPath, []byte(finalJS), 0644)
 			}
 
 			// Keep the CSP hash and any other ingest in sync with the bytes
@@ -1664,7 +1659,7 @@ func findPages(dir string) ([]string, error) {
 
 	var pages []string
 	exts := map[string]bool{".tsx": true, ".ts": true, ".jsx": true, ".js": true, ".md": true, ".mdx": true}
-	fsutil.WalkExt(dir, exts, nil, func(path string, _ os.FileInfo) error {
+	_ = fsutil.WalkExt(dir, exts, nil, func(path string, _ os.FileInfo) error {
 		base := filepath.Base(path)
 		if !strings.HasPrefix(base, "_") {
 			pages = append(pages, path)
@@ -1854,29 +1849,6 @@ func findLayoutFile(pagePath, pagesDir string, names []string) string {
 // layoutCache caches findLayout results to avoid repeated os.Stat calls.
 var layoutCache sync.Map
 
-func extractCSSModuleBindings(prog *ast.Program, entryPath string, cssModules map[string]*bundler.CSSModuleInfo) []cssModuleBinding {
-	var bindings []cssModuleBinding
-	entryDir := filepath.Dir(entryPath)
-	for _, stmt := range prog.Body {
-		imp, ok := stmt.(*ast.ImportStmt)
-		if !ok || imp.Default == "" {
-			continue
-		}
-		src := strings.Trim(imp.Source, "\"'")
-		if !strings.Contains(src, ".module.css") {
-			continue
-		}
-		resolved := filepath.Clean(filepath.Join(entryDir, src))
-		if info, ok := cssModules[resolved]; ok {
-			bindings = append(bindings, cssModuleBinding{
-				LocalVar: imp.Default,
-				Mappings: info.Mappings,
-			})
-		}
-	}
-	return bindings
-}
-
 // BuildMiddleware compiles middleware.ts (if present) to .krate/middleware.js.
 func (b *Builder) BuildMiddleware() {
 	middlewarePaths := []string{
@@ -1900,7 +1872,7 @@ func (b *Builder) BuildMiddleware() {
 	fmt.Printf("  %s▶ Middleware%s %s\n", cGreen, cReset, filepath.Base(middlewarePath))
 
 	outDir := filepath.Join(b.Root, ".krate")
-	os.MkdirAll(outDir, 0755)
+	_ = os.MkdirAll(outDir, 0755)
 	outPath := filepath.Join(outDir, "middleware.js")
 
 	result := api.Build(api.BuildOptions{
@@ -1921,17 +1893,8 @@ func (b *Builder) BuildMiddleware() {
 	}
 
 	if len(result.OutputFiles) > 0 {
-		os.WriteFile(outPath, result.OutputFiles[0].Contents, 0644)
+		_ = os.WriteFile(outPath, result.OutputFiles[0].Contents, 0644)
 	}
-}
-func extractLiteralValue(expr ast.Expr) string {
-	switch e := expr.(type) {
-	case *ast.Literal:
-		return e.Value
-	case *ast.Identifier:
-		return e.Name
-	}
-	return ""
 }
 
 // extractBuildComponentName extracts the component name from a file path for server component marking.
@@ -2155,7 +2118,7 @@ func (b *Builder) writeWorkerBundles() error {
 	// Emit a tiny index of emitted workers for tooling/debugging.
 	if len(built) > 0 {
 		idx, _ := json.MarshalIndent(built, "", "  ")
-		os.WriteFile(filepath.Join(b.Cfg.OutDir, "workers.json"), idx, 0644)
+		_ = os.WriteFile(filepath.Join(b.Cfg.OutDir, "workers.json"), idx, 0644)
 	}
 	return nil
 }

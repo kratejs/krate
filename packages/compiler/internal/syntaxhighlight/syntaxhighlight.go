@@ -106,11 +106,7 @@ func CSSForTheme(theme string) string {
 
 // AvailableThemes returns a list of built-in chroma theme names.
 func AvailableThemes() []string {
-	var names []string
-	for _, s := range styles.Names() {
-		names = append(names, s)
-	}
-	return names
+	return append([]string(nil), styles.Names()...)
 }
 
 // NormalizeLanguage normalizes common language aliases to chroma lexer names.

@@ -61,7 +61,7 @@ func runJSServeHook(module, hookName, root string, payload map[string]interface{
 		return nil, fmt.Errorf("creating JS runtime: %w", err)
 	}
 	defer rt.Close()
-	rt.SetEnv(environ.Current)
+	_ = rt.SetEnv(environ.Current)
 	if _, err := rt.Execute(bundleCode); err != nil {
 		return nil, fmt.Errorf("loading plugin bundle: %w", err)
 	}

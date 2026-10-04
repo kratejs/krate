@@ -267,7 +267,7 @@ func TestMergeImportAliasesMapsLocalBindingToDeclaredDefault(t *testing.T) {
 	dir := t.TempDir()
 	entryFile := filepath.Join(dir, "entry.tsx")
 	themeFile := filepath.Join(dir, "theme", "layout.tsx")
-	os.MkdirAll(filepath.Dir(themeFile), 0755)
+	_ = os.MkdirAll(filepath.Dir(themeFile), 0755)
 
 	// The theme's component is named NightLayout, but the page imports it as
 	// DocsLayout. Without aliasing, the resolver (which keys merged module
@@ -279,8 +279,8 @@ export default function Page() {
 	themeSrc := `export default function NightLayout(props: any) {
   return <div class="docs-page">{props.pageTitle}</div>;
 }`
-	os.WriteFile(entryFile, []byte(pageSrc), 0644)
-	os.WriteFile(themeFile, []byte(themeSrc), 0644)
+	_ = os.WriteFile(entryFile, []byte(pageSrc), 0644)
+	_ = os.WriteFile(themeFile, []byte(themeSrc), 0644)
 
 	entryMod := ModuleSource{Program: parseProg(t, pageSrc), Path: entryFile, RawSource: pageSrc}
 	themeMod := ModuleSource{Program: parseProg(t, themeSrc), Path: themeFile, RawSource: themeSrc}
@@ -307,7 +307,7 @@ export default function Page() {
 func TestBuildImportAliasesIgnoresUnresolvableBindings(t *testing.T) {
 	dir := t.TempDir()
 	aFile := filepath.Join(dir, "a.tsx")
-	os.WriteFile(aFile, []byte(`import Sidebar from "./missing/layout";`), 0644)
+	_ = os.WriteFile(aFile, []byte(`import Sidebar from "./missing/layout";`), 0644)
 	mod := ModuleSource{Program: parseProg(t, `import Sidebar from "./missing/layout";`), Path: aFile, RawSource: ""}
 	aliases := BuildImportAliases([]ModuleSource{mod, mod})
 	if len(aliases) != 0 {

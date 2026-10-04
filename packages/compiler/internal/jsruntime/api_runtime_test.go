@@ -67,7 +67,7 @@ func TestStripExports(t *testing.T) {
 func TestAPIRouteExecute(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	// Create a simple API route
 	routeCode := `
@@ -79,7 +79,7 @@ function GET(request) {
 	};
 }
 `
-	os.WriteFile(filepath.Join(apiDir, "test.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "test.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{
@@ -102,14 +102,14 @@ function GET(request) {
 func TestAPIRouteProcessEnv(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	routeCode := `
 function GET(request) {
 	return { status: 200, text: function() { return process.env.KRATE_TEST_ENV || 'missing'; } };
 }
 `
-	os.WriteFile(filepath.Join(apiDir, "env.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "env.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	rt.SetEnv(map[string]string{"KRATE_TEST_ENV": "api-env"})
@@ -126,7 +126,7 @@ function GET(request) {
 func TestAPIRouteNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{
@@ -146,7 +146,7 @@ func TestAPIRouteNotFound(t *testing.T) {
 func TestAPIRouteHeadersInstanceNotLeaked(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	routeCode := `
 function GET(request) {
@@ -185,12 +185,12 @@ function GET(request) {
 func TestAPIRoutePathTraversalRejected(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	// A legit route inside the API dir.
-	os.WriteFile(filepath.Join(apiDir, "secret.js"), []byte("function GET() { return 'secret'; }"), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "secret.js"), []byte("function GET() { return 'secret'; }"), 0644)
 	// A decoy outside the API dir that must never be reached.
-	os.WriteFile(filepath.Join(tmpDir, "outside.js"), []byte("function GET() { return 'outside'; }"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "outside.js"), []byte("function GET() { return 'outside'; }"), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 
@@ -222,7 +222,7 @@ func TestAPIRoutePathTraversalRejected(t *testing.T) {
 func TestAPIRouteMethodDispatch(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	routeCode := `
 function GET(request) {
@@ -232,7 +232,7 @@ function POST(request) {
 	return { status: 201, text: function() { return 'POST'; } };
 }
 `
-	os.WriteFile(filepath.Join(apiDir, "methods.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "methods.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 
@@ -258,7 +258,7 @@ function POST(request) {
 func TestAPIRouteDefaultExport(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	// Simulate esbuild ESM output: export { handler as default }
 	routeCode := `
@@ -267,7 +267,7 @@ function handler(request) {
 }
 export { handler as default };
 `
-	os.WriteFile(filepath.Join(apiDir, "default.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "default.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{
@@ -283,14 +283,14 @@ export { handler as default };
 func TestAPIRouteJSONReturn(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	routeCode := `
 function GET(request) {
 	return { name: "test", value: 42 };
 }
 `
-	os.WriteFile(filepath.Join(apiDir, "json.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "json.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{
@@ -310,14 +310,14 @@ function GET(request) {
 func TestAPIRouteError(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	routeCode := `
 function GET(request) {
 	throw new Error('handler crashed');
 }
 `
-	os.WriteFile(filepath.Join(apiDir, "error.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "error.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{
@@ -336,7 +336,7 @@ function GET(request) {
 func TestAPIRouteLegacyHandler(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	routeCode := `
 function handler(req, res) {
@@ -346,7 +346,7 @@ function handler(req, res) {
 }
 export { handler as default };
 `
-	os.WriteFile(filepath.Join(apiDir, "legacy.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "legacy.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{
@@ -368,11 +368,11 @@ export { handler as default };
 func TestAPIRouteEsbuildMinified(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	// This is exactly what esbuild produces for videos.ts with minification
 	routeCode := `var n=[{id:"abc123",title:"Intro to Krate",duration:300},{id:"demo-42",title:"Advanced Patterns",duration:600}];function s(o){let e=new URL(o.url).searchParams.get("id");if(e){let i=n.find(r=>r.id===e);return i?Response.json(i):Response.json({error:"Video not found"},{status:404})}return Response.json({videos:n,count:n.length})}async function d(o){let t=await o.json();if(!t.title||!t.duration)return Response.json({error:"title and duration are required"},{status:400});let e={id:"vid-"+Date.now(),title:t.title,duration:t.duration};return n.push(e),Response.json(e,{status:201})}export{s as GET,d as POST};`
-	os.WriteFile(filepath.Join(apiDir, "videos.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "videos.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 

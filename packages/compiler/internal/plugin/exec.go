@@ -99,7 +99,7 @@ func applyPluginOutput(hookName string, output *communityOutput, outDir string, 
 		} else {
 			for _, gp := range output.GeneratedPages {
 				if gp.Path != "" {
-					os.MkdirAll(filepath.Dir(gp.Path), 0755)
+					_ = os.MkdirAll(filepath.Dir(gp.Path), 0755)
 				}
 			}
 		}

@@ -90,7 +90,7 @@ func TestProcessImageGeneratesWebpAndFallback(t *testing.T) {
 	root := t.TempDir()
 	srcRel := filepath.Join("public", "photo.png")
 	srcPath := filepath.Join(root, srcRel)
-	os.MkdirAll(filepath.Dir(srcPath), 0755)
+	_ = os.MkdirAll(filepath.Dir(srcPath), 0755)
 	writeTestPNG(t, srcPath, testImage(1600, 1000))
 
 	res, err := ProcessImage(root, srcPath, 800, 500, 82, true)
@@ -137,7 +137,7 @@ func TestProcessImageGeneratesWebpAndFallback(t *testing.T) {
 func TestProcessImageNoPlaceholder(t *testing.T) {
 	root := t.TempDir()
 	srcPath := filepath.Join(root, "public", "photo.png")
-	os.MkdirAll(filepath.Dir(srcPath), 0755)
+	_ = os.MkdirAll(filepath.Dir(srcPath), 0755)
 	writeTestPNG(t, srcPath, testImage(640, 360))
 
 	res, err := ProcessImage(root, srcPath, 0, 0, 0, false)

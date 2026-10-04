@@ -697,7 +697,6 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 			len(node.PreSignalVars) == 0 &&
 			len(node.Handlers) == 0 && len(node.AttrBindings) == 0 &&
 			len(node.RefBindings) == 0 {
-			tier = TierStatic
 			node.Tier = TierStatic
 		}
 	}
@@ -5097,7 +5096,7 @@ func isAttrBinding(attr *ast.JSXAttr) bool {
 // funcPropAliasOf returns "Y" when the local variable `name` is declared as
 // `var name = props.Y` and Y is one of the function props. Returns "" otherwise.
 func funcPropAliasOf(body []ast.Stmt, name string, funcProps map[string]bool) string {
-	if funcProps == nil || len(funcProps) == 0 {
+	if len(funcProps) == 0 {
 		return ""
 	}
 	for _, stmt := range body {
@@ -6346,250 +6345,6 @@ func updateTextSlotInitials(children []SlotNode, signals []SignalDecl) {
 
 // ─── SSR-evaluated child components ────────────────────────────────────────
 
-// evalExprWithBindings evaluates an expression with variable bindings for list item rendering.
-func evalExprWithBindings(expr ast.Expr, bindings map[string]string) string {
-	if expr == nil {
-		return ""
-	}
-	switch e := expr.(type) {
-	case *ast.Literal:
-		return e.Value
-	case *ast.Identifier:
-		if v, ok := bindings[e.Name]; ok {
-			return v
-		}
-		return ""
-	case *ast.JSXElement:
-		return evalJSXWithBindings(e, bindings)
-	case *ast.JSXFragment:
-		var b strings.Builder
-		for _, child := range e.Children {
-			switch c := child.(type) {
-			case *ast.JSXText:
-				b.WriteString(c.Value)
-			case *ast.JSXExprContainer:
-				b.WriteString(evalExprWithBindings(c.Expression, bindings))
-			case *ast.JSXElementChild:
-				b.WriteString(evalJSXWithBindings(c.Element, bindings))
-			case *ast.JSXFragmentChild:
-				b.WriteString(evalExprWithBindings(c.Fragment, bindings))
-			}
-		}
-		return b.String()
-	case *ast.BinaryExpr:
-		left := evalExprWithBindings(e.Left, bindings)
-		right := evalExprWithBindings(e.Right, bindings)
-		if e.Op == "+" || e.Op == "-" {
-			return left + right
-		}
-		return left + " " + e.Op + " " + right
-	case *ast.TemplateExpr:
-		var b strings.Builder
-		for i, raw := range e.Raw {
-			b.WriteString(raw)
-			if i < len(e.Parts) {
-				b.WriteString(evalExprWithBindings(e.Parts[i], bindings))
-			}
-		}
-		return b.String()
-	case *ast.CallExpr:
-		// Class helpers fold to a literal class string so a prop-driven
-		// (SSREval) component's `className={cn(...)}` renders correctly.
-		if id, ok := e.Callee.(*ast.Identifier); ok && (id.Name == "cn" || id.Name == "clsx") {
-			var tokens []string
-			for _, arg := range e.Args {
-				toks, ok := evalClassValueWithBindings(arg, bindings)
-				if !ok {
-					return ""
-				}
-				tokens = append(tokens, toks...)
-			}
-			return strings.Join(tokens, " ")
-		}
-		return ""
-	case *ast.MemberExpr:
-		return evalMemberExprWithBindings(e, bindings)
-	case *ast.UnaryExpr:
-		if e.Op == "!" {
-			val := evalExprWithBindings(e.Arg, bindings)
-			if val == "" || val == "false" {
-				return "true"
-			}
-			return "false"
-		}
-		return evalExprWithBindings(e.Arg, bindings)
-	case *ast.ConditionalExpr:
-		test := evalExprWithBindings(e.Test, bindings)
-		if test != "" && test != "false" {
-			return evalExprWithBindings(e.Consequent, bindings)
-		}
-		return evalExprWithBindings(e.Alternate, bindings)
-	default:
-		return ""
-	}
-}
-
-func evalJSXWithBindings(el *ast.JSXElement, bindings map[string]string) string {
-	name := el.Opening.Name
-	var b strings.Builder
-	b.WriteByte('<')
-	b.WriteString(name)
-	for _, attr := range el.Opening.Attributes {
-		if attr.Spread {
-			continue
-		}
-		if attr.Value == nil {
-			b.WriteByte(' ')
-			b.WriteString(ast.HTMLAttrName(attr.Name))
-			continue
-		}
-		val := evalExprWithBindings(attr.Value, bindings)
-		if isBooleanAttr(attr.Name) {
-			if val == "true" {
-				b.WriteByte(' ')
-				b.WriteString(ast.HTMLAttrName(attr.Name))
-			}
-			continue
-		}
-		if !isStringLiteral(attr.Value) && (val == "undefined" || val == "null") {
-			continue
-		}
-		b.WriteByte(' ')
-		b.WriteString(ast.HTMLAttrName(attr.Name))
-		b.WriteString(`="`)
-		b.WriteString(escape.HTML(val))
-		b.WriteByte('"')
-	}
-	if el.Opening.SelfClosing {
-		if isVoidElement(el.Opening.Name) {
-			b.WriteString(" />")
-		} else {
-			b.WriteString("></")
-			b.WriteString(el.Opening.Name)
-			b.WriteByte('>')
-		}
-		return b.String()
-	}
-	b.WriteByte('>')
-	for _, child := range el.Children {
-		switch c := child.(type) {
-		case *ast.JSXText:
-			b.WriteString(c.Value)
-		case *ast.JSXExprContainer:
-			v := evalExprWithBindings(c.Expression, bindings)
-			if !isStringLiteral(c.Expression) && (v == "undefined" || v == "null") {
-				continue
-			}
-			b.WriteString(v)
-		case *ast.JSXElementChild:
-			b.WriteString(evalJSXWithBindings(c.Element, bindings))
-		case *ast.JSXFragmentChild:
-			b.WriteString(evalExprWithBindings(c.Fragment, bindings))
-		}
-	}
-	b.WriteString("</")
-	b.WriteString(name)
-	b.WriteByte('>')
-	return b.String()
-}
-
-// evalClassValueWithBindings flattens one cn/clsx argument against SSREval
-// bindings. It mirrors foldClassValue but resolves identifiers through the
-// prop-binding map instead of the signal/props tables.
-func evalClassValueWithBindings(expr ast.Expr, bindings map[string]string) ([]string, bool) {
-	switch e := expr.(type) {
-	case *ast.Literal:
-		switch e.Kind {
-		case ast.StringLit:
-			if e.Value == "" {
-				return nil, true
-			}
-			return []string{e.Value}, true
-		case ast.NumberLit:
-			return []string{e.Value}, true
-		default:
-			return nil, true
-		}
-	case *ast.Identifier:
-		v, ok := bindings[e.Name]
-		if !ok {
-			return nil, true // absent prop → known falsy
-		}
-		if v == "" || v == "undefined" || v == "null" || v == "false" {
-			return nil, true
-		}
-		return []string{v}, true
-	case *ast.TemplateExpr:
-		v := evalExprWithBindings(expr, bindings)
-		if v == "" {
-			return nil, true
-		}
-		return []string{v}, true
-	case *ast.ArrayExpr:
-		var out []string
-		for _, el := range e.Elements {
-			if el == nil {
-				continue
-			}
-			toks, ok := evalClassValueWithBindings(el, bindings)
-			if !ok {
-				return nil, false
-			}
-			out = append(out, toks...)
-		}
-		return out, true
-	case *ast.ObjectExpr:
-		var out []string
-		for _, prop := range e.Properties {
-			if prop == nil || prop.Spread || prop.Key == "" {
-				return nil, false
-			}
-			v := evalExprWithBindings(prop.Value, bindings)
-			if v != "" && v != "false" && v != "undefined" && v != "null" && v != "0" {
-				out = append(out, prop.Key)
-			}
-		}
-		return out, true
-	case *ast.BinaryExpr:
-		if e.Op == "&&" {
-			left := evalExprWithBindings(e.Left, bindings)
-			if left == "" || left == "false" || left == "undefined" || left == "null" {
-				return nil, true
-			}
-			return evalClassValueWithBindings(e.Right, bindings)
-		}
-		return nil, false
-	case *ast.ConditionalExpr:
-		test := evalExprWithBindings(e.Test, bindings)
-		if test != "" && test != "false" && test != "undefined" && test != "null" {
-			return evalClassValueWithBindings(e.Consequent, bindings)
-		}
-		return evalClassValueWithBindings(e.Alternate, bindings)
-	default:
-		return nil, false
-	}
-}
-
-func evalMemberExprWithBindings(expr *ast.MemberExpr, bindings map[string]string) string {
-	prop := ""
-	if id, ok := expr.Property.(*ast.Identifier); ok {
-		prop = id.Name
-	}
-	if id, ok := expr.Object.(*ast.Identifier); ok {
-		if v, ok := bindings[id.Name]; ok {
-			if prop == "length" {
-				return itoa(len(v))
-			}
-			return v
-		}
-	}
-	obj := evalExprWithBindings(expr.Object, bindings)
-	if prop == "length" && obj != "" {
-		return itoa(len(obj))
-	}
-	return ""
-}
-
 // extractPropsAST extracts raw AST expressions from JSX attributes.
 func extractPropsAST(el *ast.JSXElement) map[string]ast.Expr {
 	props := make(map[string]ast.Expr)
@@ -6646,16 +6401,6 @@ func (b *builder) expandSpreadAttrs(attrs []*ast.JSXAttr) ([]*ast.JSXAttr, bool)
 		}
 	}
 	return out, expanded
-}
-
-// expandRestChildren returns the call-site children of the enclosing component
-// when a rest spread is forwarded onto an intrinsic element (React's props
-// object carries `children`). Returns nil when there are no call-site children.
-func (b *builder) restChildren() []ast.JSXChild {
-	if b.callSiteChildren == nil {
-		return nil
-	}
-	return b.callSiteChildren
 }
 
 // restAttrs resolves a spread value expression to the attribute map of a known

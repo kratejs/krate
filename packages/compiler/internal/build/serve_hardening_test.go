@@ -15,7 +15,7 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 	cfg := config.Default()
 	cfg.SEO.BaseURL = "https://example.com"
 	h := securityHeadersMiddleware(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
@@ -62,7 +62,7 @@ func TestCORSMiddlewareAllowAllAndPreflight(t *testing.T) {
 	cfg.CORS.Enabled = true
 	cfg.CORS.MaxAge = 600
 	h := corsMiddleware(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 
 	rec := httptest.NewRecorder()
@@ -239,7 +239,7 @@ func TestRequestIDMiddleware(t *testing.T) {
 func TestGzipMiddlewareCompressesText(t *testing.T) {
 	h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(strings.Repeat("hello ", 100)))
+		_, _ = w.Write([]byte(strings.Repeat("hello ", 100)))
 	}))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -262,7 +262,7 @@ func TestGzipMiddlewareCompressesText(t *testing.T) {
 func TestGzipMiddlewareSkipsBinary(t *testing.T) {
 	h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write([]byte{0x89, 0x50, 0x4e, 0x47})
+		_, _ = w.Write([]byte{0x89, 0x50, 0x4e, 0x47})
 	}))
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
