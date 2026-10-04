@@ -6,13 +6,74 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
+)
+
+// Default request body caps (bytes). API requests may be larger than page
+// form/middleware payloads.
+const (
+	defaultMaxBodyBytes    int64 = 1 << 20  // 1 MiB
+	defaultMaxAPIBodyBytes int64 = 25 << 20 // 25 MiB
 )
 
 type DevServer struct {
 	Port int  `json:"port"`
 	Open bool `json:"open"`
+}
+
+// ServerConfig holds production/preview (`krate serve`) server settings. When
+// Port is 0, Serve falls back to DevServer.Port (then 3000) for compatibility
+// with projects that only configure devServer.
+type ServerConfig struct {
+	// Host is the bind address (default "" = all interfaces).
+	Host string `json:"host,omitempty"`
+	// Port is the listen port. 0 falls back to devServer.port (then 3000).
+	Port int `json:"port,omitempty"`
+	// MaxBodySize caps request bodies in bytes. 0 uses defaults (1 MiB for
+	// pages/middleware, larger for API routes).
+	MaxBodySize int64 `json:"maxBodySize,omitempty"`
+}
+
+// CORSConfig configures cross-origin resource sharing headers. Disabled by
+// default (the framework serves same-origin by default).
+type CORSConfig struct {
+	Enabled     bool     `json:"enabled,omitempty"`
+	Origins     []string `json:"origins,omitempty"` // default ["*"]
+	Methods     []string `json:"methods,omitempty"`
+	Headers     []string `json:"headers,omitempty"`
+	Credentials bool     `json:"credentials,omitempty"`
+	MaxAge      int      `json:"maxAge,omitempty"` // seconds
+}
+
+// SidecarConfig is a custom API sidecar: a user-provided HTTP service that owns
+// some or all `/api/*` routes. In supervised mode, Command (+Args/Port) starts
+// and manages the process; in proxy-only mode, Target points at an
+// already-running service. Requests are always forwarded first; a 404 falls
+// through to Krate's built-in Go/TS/QuickJS API handlers, so the sidecar can own
+// exactly the routes it wants (including dynamic segments like /users/[id]) with
+// no route declaration needed.
+type SidecarConfig struct {
+	// Command starts a supervised sidecar process (e.g. "node", "go", "python").
+	// When set, Krate launches and stops it with the server.
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Cwd     string            `json:"cwd,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	// Port the sidecar listens on. Required in supervised mode; with Target
+	// empty it also defines the proxy target (http://127.0.0.1:<port>).
+	Port int `json:"port,omitempty"`
+	// Target is a base URL for proxy-only mode, e.g. "http://localhost:8080".
+	Target string `json:"target,omitempty"`
+	// Prefix is the path prefix the sidecar owns (default "/api"). Requests
+	// under it are forwarded first.
+	Prefix string `json:"prefix,omitempty"`
+}
+
+// APIConfig groups API-related configuration.
+type APIConfig struct {
+	Sidecar *SidecarConfig `json:"sidecar,omitempty"`
 }
 
 // PluginConfig represents a plugin entry from the krate config file.
@@ -169,6 +230,9 @@ type Config struct {
 	MinifyJS    bool            `json:"minifyJS,omitempty"`
 	Sourcemap   bool            `json:"sourcemap"`
 	DevServer   DevServer       `json:"devServer"`
+	Server      ServerConfig    `json:"server,omitempty"`
+	CORS        CORSConfig      `json:"cors,omitempty"`
+	API         APIConfig       `json:"api,omitempty"`
 	Plugins     []PluginConfig  `json:"plugins,omitempty"`
 	Markdown    markdown.Config `json:"markdown,omitempty"`
 	Tailwind    TailwindCfg     `json:"tailwind,omitempty"`
@@ -181,6 +245,11 @@ type Config struct {
 	Rewrites    []Rewrite       `json:"rewrites,omitempty"`    // config-based rewrites
 	SEO         SEOConfig       `json:"seo,omitempty"`         // SEO metadata (baseUrl, siteName, description)
 	Robots      RobotsConfig    `json:"robots,omitempty"`      // robots.txt config
+
+	// BasePath is the URL path prefix the whole site is served under (e.g.
+	// "/docs"). Empty means root. Used for emitted asset URLs and the SPA
+	// router so the site works when hosted under a sub-path.
+	BasePath string `json:"basePath,omitempty"`
 
 	// Output selects the site output mode. "" (default) allows request-time
 	// rendering (SSR/ISR/streaming + dynamic route fallbacks). "static" makes
@@ -221,6 +290,48 @@ type Config struct {
 func (c *Config) ShouldMinifyHTML() bool { return c.MinifyHTML || c.Minify }
 func (c *Config) ShouldMinifyCSS() bool  { return c.MinifyCSS || c.Minify }
 func (c *Config) ShouldMinifyJS() bool   { return c.MinifyJS || c.Minify }
+
+// ServerPort returns the listen port for `krate serve`: server.port, else
+// devServer.port, else 3000.
+func (c *Config) ServerPort() int {
+	if c.Server.Port != 0 {
+		return c.Server.Port
+	}
+	if c.DevServer.Port != 0 {
+		return c.DevServer.Port
+	}
+	return 3000
+}
+
+// MaxBodyBytes returns the request body cap for general (page/middleware)
+// requests, honoring server.maxBodySize when set.
+func (c *Config) MaxBodyBytes() int64 {
+	if c.Server.MaxBodySize > 0 {
+		return c.Server.MaxBodySize
+	}
+	return defaultMaxBodyBytes
+}
+
+// MaxAPIBodyBytes returns the request body cap for API requests (larger default).
+func (c *Config) MaxAPIBodyBytes() int64 {
+	if c.Server.MaxBodySize > 0 {
+		return c.Server.MaxBodySize
+	}
+	return defaultMaxAPIBodyBytes
+}
+
+// BaseURLPath returns BasePath normalized to either "" or "/prefix" (no trailing
+// slash). Used for asset URLs and the SPA router base.
+func (c *Config) BaseURLPath() string {
+	p := strings.TrimSpace(c.BasePath)
+	if p == "" || p == "/" {
+		return ""
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return strings.TrimRight(p, "/")
+}
 
 func Default() *Config {
 	return &Config{

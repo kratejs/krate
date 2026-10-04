@@ -1,8 +1,8 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
-	"sort"
 	"strconv"
 
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
@@ -66,22 +66,19 @@ func (p *configParser) parseRoot(cfg *Config) error {
 	return nil
 }
 
-// recordUnknownKeys appends a warning for each top-level key not present in
-// knownTopLevelKeys. Called after a successful static parse so typos surface.
+// recordUnknownKeys appends a warning for each unrecognized top-level or nested
+// key. Called after a successful static parse so typos surface, mirroring the
+// JS-executed path (UnknownKeyWarnings).
 func recordUnknownKeys(obj []configProp) {
-	var unknown []string
+	m := make(map[string]interface{}, len(obj))
 	for _, prop := range obj {
-		if prop.key == "validate" {
-			continue
-		}
-		if !knownTopLevelKeys[prop.key] {
-			unknown = append(unknown, prop.key)
-		}
+		m[prop.key] = prop.val
 	}
-	sort.Strings(unknown)
-	for _, k := range unknown {
-		Warnings = append(Warnings, fmt.Sprintf("unknown config key %q (ignored)", k))
+	data, err := json.Marshal(m)
+	if err != nil {
+		return
 	}
+	Warnings = append(Warnings, UnknownKeyWarnings(data)...)
 }
 
 type configProp struct {
@@ -231,6 +228,91 @@ func parseNumber(s string) (interface{}, error) {
 	return nil, fmt.Errorf("invalid number %q", s)
 }
 
+// configInt coerces a parsed numeric config value to int.
+func configInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	}
+	return 0, false
+}
+
+// configInt64 coerces a parsed numeric config value to int64.
+func configInt64(v interface{}) (int64, bool) {
+	switch n := v.(type) {
+	case int64:
+		return n, true
+	case float64:
+		return int64(n), true
+	case int:
+		return int64(n), true
+	}
+	return 0, false
+}
+
+// configStrings appends the string items of a parsed array to dst.
+func configStrings(dst []string, v interface{}) []string {
+	arr, ok := v.([]interface{})
+	if !ok {
+		return dst
+	}
+	for _, item := range arr {
+		if s, ok := item.(string); ok {
+			dst = append(dst, s)
+		}
+	}
+	return dst
+}
+
+// parseSidecar builds a SidecarConfig from a statically parsed object.
+func parseSidecar(v interface{}) (*SidecarConfig, error) {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("expected object, got %T", v)
+	}
+	sc := &SidecarConfig{}
+	for k, raw := range m {
+		switch k {
+		case "command":
+			if s, ok := raw.(string); ok {
+				sc.Command = s
+			}
+		case "args":
+			sc.Args = configStrings(sc.Args, raw)
+		case "cwd":
+			if s, ok := raw.(string); ok {
+				sc.Cwd = s
+			}
+		case "env":
+			if em, ok := raw.(map[string]interface{}); ok {
+				sc.Env = make(map[string]string, len(em))
+				for ek, ev := range em {
+					if es, ok := ev.(string); ok {
+						sc.Env[ek] = es
+					}
+				}
+			}
+		case "port":
+			if n, ok := configInt(raw); ok {
+				sc.Port = n
+			}
+		case "target":
+			if s, ok := raw.(string); ok {
+				sc.Target = s
+			}
+		case "prefix":
+			if s, ok := raw.(string); ok {
+				sc.Prefix = s
+			}
+		}
+	}
+	return sc, nil
+}
+
 func applyConfigProp(cfg *Config, key string, val interface{}) error {
 	switch key {
 	case "entry":
@@ -287,6 +369,72 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return fmt.Errorf("expected boolean, got %T", val)
 		}
 		cfg.Sourcemap = b
+	case "basePath":
+		s, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("expected string, got %T", val)
+		}
+		cfg.BasePath = s
+	case "server":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "host":
+				if s, ok := v.(string); ok {
+					cfg.Server.Host = s
+				}
+			case "port":
+				if n, ok := configInt(v); ok {
+					cfg.Server.Port = n
+				}
+			case "maxBodySize":
+				if n, ok := configInt64(v); ok {
+					cfg.Server.MaxBodySize = n
+				}
+			}
+		}
+	case "cors":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "enabled":
+				if b, ok := v.(bool); ok {
+					cfg.CORS.Enabled = b
+				}
+			case "origins":
+				cfg.CORS.Origins = configStrings(cfg.CORS.Origins, v)
+			case "methods":
+				cfg.CORS.Methods = configStrings(cfg.CORS.Methods, v)
+			case "headers":
+				cfg.CORS.Headers = configStrings(cfg.CORS.Headers, v)
+			case "credentials":
+				if b, ok := v.(bool); ok {
+					cfg.CORS.Credentials = b
+				}
+			case "maxAge":
+				if n, ok := configInt(v); ok {
+					cfg.CORS.MaxAge = n
+				}
+			}
+		}
+	case "api":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		if sc, ok := m["sidecar"]; ok && sc != nil {
+			parsed, err := parseSidecar(sc)
+			if err != nil {
+				return fmt.Errorf("api.sidecar: %w", err)
+			}
+			cfg.API.Sidecar = parsed
+		}
 	case "devServer":
 		m, ok := val.(map[string]interface{})
 		if !ok {

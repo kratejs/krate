@@ -38,6 +38,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "postinstall": "node ./install.js"
   },
   "dependencies": {

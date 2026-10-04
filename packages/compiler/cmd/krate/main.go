@@ -52,12 +52,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// `krate <command> --help` prints command-specific usage.
+	if len(args) >= 2 && (args[1] == "--help" || args[1] == "-h") {
+		printCommandUsage(os.Stdout, args[0])
+		return
+	}
+
 	switch args[0] {
 	case "build":
 		runBuild(flags, args)
 	case "dev":
 		runDev(flags, args)
-	case "serve":
+	case "serve", "preview", "start":
 		runServe(flags, args)
 	case "types":
 		runTypes(flags, args)
@@ -65,6 +71,8 @@ func main() {
 		runCheck(flags, args)
 	case "clean":
 		runClean(flags, args)
+	case "doctor":
+		runDoctor(flags, args)
 	case "plugin":
 		runPlugin(flags, args)
 	case "mcp":
@@ -72,11 +80,47 @@ func main() {
 	case "version", "--version", "-v":
 		fmt.Println("krate v" + version)
 	case "help", "--help", "-h":
-		printUsage(os.Stdout)
+		printHelpCommand(os.Stdout, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "%sUnknown command:%s %s\n", cRed, cReset, args[0])
 		fmt.Fprintf(os.Stderr, "Run %skrate help%s for usage.\n", cCyan, cReset)
 		os.Exit(1)
+	}
+}
+
+// printCommandUsage prints usage for a single command.
+func printCommandUsage(w io.Writer, cmd string) {
+	switch cmd {
+	case "build":
+		fmt.Fprintf(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--watch]\n\n")
+		fmt.Fprintf(w, "Compile the project to static output (and SSR/server bundles when needed).\n")
+	case "dev":
+		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--verbose]\n\n")
+		fmt.Fprintf(w, "Start the dev server with file watching and live reload.\n")
+	case "serve", "preview", "start":
+		fmt.Fprintf(w, "Usage: krate %s [dir] [--config <path>]\n\n", cmd)
+		fmt.Fprintf(w, "Build, then serve the output (preview production locally).\n")
+		fmt.Fprintf(w, "`preview` and `start` are aliases for `serve`.\n")
+	case "types":
+		fmt.Fprintf(w, "Usage: krate types [dir]\n\n")
+		fmt.Fprintf(w, "Generate route/content TypeScript declarations (krate-env.d.ts, .krate/types).\n")
+	case "check":
+		fmt.Fprintf(w, "Usage: krate check [dir]\n\n")
+		fmt.Fprintf(w, "Run compiler-enforced quality gates (a11y/SEO/perf) on the built output.\n")
+	case "clean":
+		fmt.Fprintf(w, "Usage: krate clean [dir]\n\n")
+		fmt.Fprintf(w, "Remove build output (dist) and the compiler cache (.krate/cache).\n")
+	case "doctor":
+		fmt.Fprintf(w, "Usage: krate doctor [dir]\n\n")
+		fmt.Fprintf(w, "Print a diagnostic summary of the project and toolchain.\n")
+	case "plugin":
+		fmt.Fprintf(w, "Usage: krate plugin add <package> [dir]\n\n")
+		fmt.Fprintf(w, "Manage Krate plugins.\n")
+	case "mcp":
+		fmt.Fprintf(w, "Usage: krate mcp [dir]\n\n")
+		fmt.Fprintf(w, "Run the MCP server (Model Context Protocol) over stdio.\n")
+	default:
+		printUsage(w)
 	}
 }
 
@@ -85,14 +129,15 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "Commands:\n")
 	fmt.Fprintf(w, "  build     Build the project for production\n")
 	fmt.Fprintf(w, "  dev       Start the development server with hot reload\n")
-	fmt.Fprintf(w, "  serve     Build, then serve for preview\n")
+	fmt.Fprintf(w, "  serve     Build, then serve for preview (aliases: preview, start)\n")
 	fmt.Fprintf(w, "  types     Generate route/content TypeScript declarations\n")
 	fmt.Fprintf(w, "  check     Run compiler-enforced quality gates (a11y/SEO/perf)\n")
 	fmt.Fprintf(w, "  clean     Remove build output (dist) and the compiler cache (.krate/cache)\n")
+	fmt.Fprintf(w, "  doctor    Print a diagnostic summary of the project and toolchain\n")
 	fmt.Fprintf(w, "  plugin    Manage plugins (add <pkg>)\n")
 	fmt.Fprintf(w, "  mcp       Run the MCP server (Model Context Protocol)\n")
 	fmt.Fprintf(w, "  version   Print the version\n")
-	fmt.Fprintf(w, "  help      Print this help\n\n")
+	fmt.Fprintf(w, "  help      Print this help, or `krate help <command>`\n\n")
 	fmt.Fprintf(w, "Flags:\n")
 	fmt.Fprintf(w, "  --config <path>   Path to config file (default: project/krate.config.ts)\n")
 	fmt.Fprintf(w, "  --out-dir <path>  Override output directory\n")

@@ -512,10 +512,7 @@ func Serve(root string, cfg *config.Config, startTime time.Time) error {
 }
 
 func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime time.Time) error {
-	port := cfg.DevServer.Port
-	if port == 0 {
-		port = 3000
-	}
+	port := cfg.ServerPort()
 	apiPort := port + 1
 
 	// Load embedded middleware runtime if configured (default: quickjs)
@@ -593,8 +590,56 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 
 	sidecarURL, _ := url.Parse(fmt.Sprintf("http://localhost:%d", apiPort))
 	apiProxy := httputil.NewSingleHostReverseProxy(sidecarURL)
+	apiProxy.Transport = newSidecarTransport()
 
+	// Optional user-provided API sidecar. Requests it owns are forwarded first;
+	// a 404 falls through to the built-in Go/TS/QuickJS routes below.
+	customSidecar, err := newAPISidecar(root, cfg)
+	if err != nil {
+		return err
+	}
+	if customSidecar != nil {
+		if err := customSidecar.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "  %s⚠ API sidecar not started:%s %v\n", cYellow, cReset, err)
+		} else {
+			target := cfg.API.Sidecar.Target
+			if target == "" {
+				target = fmt.Sprintf("http://127.0.0.1:%d", cfg.API.Sidecar.Port)
+			}
+			mode := "proxy"
+			if cfg.API.Sidecar.Command != "" {
+				mode = "supervised"
+			}
+			fmt.Printf("  %s⚡%s API sidecar (%s) %s → %s%s%s\n", cCyan, cReset, mode, customSidecar.Prefix(), cCyan, target, cReset)
+		}
+	}
+
+	// Non-/api sidecar prefixes get their own subtree handler. A 404 from the
+	// sidecar is surfaced as a real 404 (no built-in routes exist off /api).
+	if customSidecar != nil && customSidecar.Prefix() != "/api" {
+		p := customSidecar.Prefix()
+		customSidecarHandler := func(w http.ResponseWriter, r *http.Request) {
+			if customSidecar.Handle(w, r) {
+				return
+			}
+			http.NotFound(w, r)
+		}
+		mux.HandleFunc(p+"/", customSidecarHandler)
+		mux.HandleFunc(p, customSidecarHandler)
+	}
+
+	apiBodyLimit := cfg.MaxAPIBodyBytes()
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, apiBodyLimit)
+		}
+
+		// Custom sidecar first (default /api prefix): owns the routes it
+		// responds to; a 404 falls through to the built-ins.
+		if customSidecar != nil && customSidecar.Prefix() == "/api" && customSidecar.Handle(w, r) {
+			return
+		}
+
 		// Go API routes take precedence (max-performance compiled sidecar)
 		if goAPI != nil && goAPI.Active() && goAPI.RouteMatches(r.Method, r.URL.Path) {
 			goAPI.Proxy(w, r)
@@ -610,7 +655,13 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 
 			var body string
 			if r.Method != "GET" && r.Method != "HEAD" {
-				b, _ := readBodyLimited(r)
+				b, err := readBodyLimited(r)
+				if err != nil {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusRequestEntityTooLarge)
+					io.WriteString(w, `{"error":"Request Entity Too Large"}`)
+					return
+				}
 				body = string(b)
 			}
 
@@ -1117,7 +1168,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 		// Preview/static serving: gzip compressible assets.
 		top = gzipMiddleware(top)
 	}
-	mux.Handle("/", loggingMiddleware(top))
+	mux.Handle("/", bodyLimitMiddleware(cfg.MaxBodyBytes(), loggingMiddleware(top)))
 
 	// Health/readiness endpoints. /healthz is liveness (always 200 while the
 	// process serves); /readyz additionally requires the SSR sidecar when one
@@ -1140,7 +1191,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 
 	// Wrap the mux so every route (including /api/, /__krate/, health) gets
 	// request IDs, security headers, and panic recovery.
-	var rootHandler http.Handler = requestIDMiddleware(securityHeadersMiddleware(cfg, panicRecoveryMiddleware(Logger, mux)))
+	var rootHandler http.Handler = requestIDMiddleware(basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, mux)))))
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
@@ -1217,6 +1268,10 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 		if goAPI != nil {
 			goAPI.Close()
 			fmt.Printf("  %s✓%s Go API sidecar stopped\n", cGreen, cReset)
+		}
+		if customSidecar != nil {
+			customSidecar.Stop()
+			fmt.Printf("  %s✓%s API sidecar stopped\n", cGreen, cReset)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()

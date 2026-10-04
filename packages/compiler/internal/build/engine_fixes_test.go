@@ -244,6 +244,35 @@ func TestNullStringLiteralRenders(t *testing.T) {
 	}
 }
 
+// TestBasePathPrefixesAssets verifies Emitted asset URLs are prefixed with the
+// configured base path so the site works when hosted under a sub-path.
+func TestBasePathPrefixesAssets(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "src/pages/index.tsx", `
+		import { createSignal } from '@krate/runtime';
+		export default function Page() {
+			const [n, setN] = createSignal(0);
+			return <button onClick={() => setN(n() + 1)}>{n()}</button>;
+		}
+	`)
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.Minify = false
+	cfg.BasePath = "/docs"
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	html, _ := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if !strings.Contains(string(html), `src="/docs/index`) {
+		t.Errorf("expected base-path-prefixed hydration script:\n%s", html)
+	}
+	// The page script must not also be referenced at the site root.
+	if strings.Contains(string(html), `src="/index.`) {
+		t.Errorf("hydration script not base-path-prefixed:\n%s", html)
+	}
+}
+
 // TestBareBooleanPropForwarded verifies a bare boolean prop reaches the child.
 func TestBareBooleanPropForwarded(t *testing.T) {
 	page := `

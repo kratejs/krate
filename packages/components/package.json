@@ -81,10 +81,17 @@
     "*.css",
     "src"
   ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
   "peerDependencies": {
     "@krate/runtime": "^0.0.1"
   },
   "devDependencies": {
-    "@krate/runtime": "workspace:*"
+    "@krate/runtime": "workspace:*",
+    "esbuild": "^0.28.0",
+    "happy-dom": "^20.14.5",
+    "vitest": "^5.0.3"
   }
 }

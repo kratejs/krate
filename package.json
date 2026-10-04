@@ -32,11 +32,15 @@
     "sync:docs": "node scripts/sync-krate-docs.mjs",
     "check:docs": "node scripts/sync-krate-docs.mjs --check",
     "dev": "cd packages/compiler && go run ./cmd/krate dev ../../examples",
-    "test": "pnpm sync:docs && cd packages/compiler && go test ./...",
+    "test": "pnpm sync:docs && pnpm test:js && cd packages/compiler && go test ./...",
     "test:compiler": "pnpm sync:docs && cd packages/compiler && go test ./... -v",
+    "test:js": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
     "vet": "pnpm sync:docs && cd packages/compiler && go vet ./..."
   },
   "devDependencies": {
-    "tsx": "^4.19.0"
+    "happy-dom": "^20.14.5",
+    "tsx": "^4.19.0",
+    "vitest": "^5.0.3"
   }
 }

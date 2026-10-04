@@ -32,6 +32,45 @@ export interface DevServerConfig {
   open?: boolean;
 }
 
+export interface ServerConfig {
+  /** Bind address for `krate serve` (default: all interfaces). */
+  host?: string;
+  /** Listen port for `krate serve` (falls back to devServer.port, then 3000). */
+  port?: number;
+  /** Request body cap in bytes (default: 1 MiB pages, 25 MiB API). */
+  maxBodySize?: number;
+}
+
+export interface CORSConfig {
+  enabled?: boolean;
+  /** Allowed origins (default ["*"]). */
+  origins?: string[];
+  methods?: string[];
+  headers?: string[];
+  credentials?: boolean;
+  /** Preflight cache seconds. */
+  maxAge?: number;
+}
+
+/** A custom API sidecar that owns some/all `/api/*` routes. */
+export interface SidecarConfig {
+  /** Supervised mode: command to spawn (e.g. "node", "go", "python"). */
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  /** Port the sidecar listens on (required in supervised mode). */
+  port?: number;
+  /** Proxy-only mode: base URL of an already-running service. */
+  target?: string;
+  /** Path prefix owned by the sidecar (default "/api"). */
+  prefix?: string;
+}
+
+export interface APIConfig {
+  sidecar?: SidecarConfig;
+}
+
 export interface PluginConfig {
   /** Unique plugin name. Built-ins: "sitemap", "docs". */
   name: string;
@@ -49,6 +88,16 @@ export interface PluginConfig {
 export interface TailwindConfig {
   enabled?: boolean;
   scanDirs?: string[];
+  /** Tailwind-style content globs (takes precedence over scanDirs). */
+  content?: string[] | { files: string[] };
+  /** Enable the base reset. */
+  preflight?: boolean;
+  /** Warn on classes that produced no rule. */
+  strict?: boolean;
+  /** "media" (default) | "class" | "selector". */
+  darkMode?: string;
+  /** Run tailwind.config via `npx tsx` instead of static parse. */
+  executeConfig?: boolean;
 }
 
 export interface CSPConfig {
@@ -58,10 +107,14 @@ export interface CSPConfig {
 }
 
 export interface MarkdownConfig {
+  /** Root directory for relative links/images (default: project root). */
+  root?: string;
   gfm?: boolean;
   headingAnchors?: boolean;
   admonitions?: boolean;
   codeHighlight?: boolean;
+  /** chroma theme for syntax highlighting (default "github-dark"). */
+  codeTheme?: string;
   math?: boolean;
 }
 
@@ -73,7 +126,6 @@ export interface SSRConfig {
   maxCacheSize?: number;
   middlewareRuntime?: RuntimeName;
   apiRuntime?: RuntimeName;
-  serverComponentRuntime?: RuntimeName;
   ssrRuntime?: "quickjs" | "node" | "bun" | "deno";
   /** Force ALL pages to render in streaming SSR mode (Suspense-based). */
   streaming?: boolean;
@@ -169,7 +221,15 @@ export interface KrateConfig {
   sourcemap?: boolean;
   /** @deprecated React-to-krate transpilation is always enabled; accepted but ignored. */
   emitReact?: boolean;
+  /**
+   * URL path prefix the whole site is served under (e.g. "/docs"). Empty =
+   * root. Used for emitted asset URLs and the SPA router.
+   */
+  basePath?: string;
   devServer?: DevServerConfig;
+  server?: ServerConfig;
+  cors?: CORSConfig;
+  api?: APIConfig;
   plugins?: PluginConfig[];
   tailwind?: TailwindConfig;
   csp?: CSPConfig;

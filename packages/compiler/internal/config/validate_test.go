@@ -71,3 +71,50 @@ func TestApplyConfigPropEmitReactNoOp(t *testing.T) {
 		}
 	}
 }
+
+// TestUnknownKeyWarningsNested verifies typos inside nested config objects are
+// reported, not just top-level ones.
+func TestUnknownKeyWarningsNested(t *testing.T) {
+	raw := []byte(`{"ssr":{"timoout":5},"api":{"sidecar":{"prot":8080}},"markdown":{"codeThm":"x"}}`)
+	warnings := UnknownKeyWarnings(raw)
+	joined := strings.Join(warnings, "\n")
+	for _, want := range []string{"ssr.timoout", "api.sidecar.prot", "markdown.codeThm"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("expected warning for %s, got:\n%s", want, joined)
+		}
+	}
+}
+
+// TestValidateServerAndSidecar verifies bounds checks for the new server/cors/
+// api.sidecar/basePath config.
+func TestValidateServerAndSidecar(t *testing.T) {
+	c := Default()
+	c.Server.Port = 70000
+	if _, err := c.Validate(); err == nil {
+		t.Error("expected error for out-of-range server.port")
+	}
+
+	c = Default()
+	c.BasePath = "docs"
+	if _, err := c.Validate(); err == nil {
+		t.Error("expected error for basePath without leading /")
+	}
+
+	c = Default()
+	c.API.Sidecar = &SidecarConfig{Command: "node"}
+	if _, err := c.Validate(); err == nil {
+		t.Error("expected error for supervised sidecar without port")
+	}
+
+	c = Default()
+	c.API.Sidecar = &SidecarConfig{Target: "not-a-url"}
+	if _, err := c.Validate(); err == nil {
+		t.Error("expected error for invalid sidecar target")
+	}
+
+	c = Default()
+	c.API.Sidecar = &SidecarConfig{Command: "node", Port: 8080}
+	if _, err := c.Validate(); err != nil {
+		t.Errorf("valid supervised sidecar should pass: %v", err)
+	}
+}

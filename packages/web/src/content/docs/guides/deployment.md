@@ -46,7 +46,30 @@ COPY --from=build /app/dist /usr/share/nginx/html
 ```
 
 For SSR/ISR/API deployments, use a Node base image and run `krate serve` as the
-container command instead of nginx.
+container command instead of nginx:
+
+```dockerfile
+FROM node:20-slim
+WORKDIR /app
+COPY . .
+RUN npm install -g @krate/core && krate build
+ENV KRATE_SERVE_PORT=3000
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD node -e "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["krate", "serve"]
+```
+
+### Health & readiness
+
+The server exposes two probes that stay at the root even under a `basePath`:
+
+- `GET /healthz` - liveness; returns `200 ok` while the process serves.
+- `GET /readyz` - readiness; returns `503 ssr-unavailable` while an expected SSR
+  sidecar is down, otherwise `200 ready`.
+
+Wire these into your orchestrator (Kubernetes `livenessProbe`/`readinessProbe`,
+Docker `HEALTHCHECK`, load-balancer health checks).
 
 ## CI
 

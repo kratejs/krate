@@ -86,3 +86,32 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 Go routes require the Go toolchain at build time and should stick to the
 stdlib plus the `krate-goapi/runtime` helper package.
+
+## Custom API sidecar
+
+You can run your own HTTP service (any language) and let Krate forward `/api/*`
+to it. Krate forwards the request first; if your service returns `404`, the
+request falls through to Krate's built-in Go/TS/QuickJS routes, and finally to a
+`404` if nothing matches. Because the sidecar sees the full path, it can own
+dynamic routes itself (`/api/users/123`, `/api/blog/2024/hello`) with no route
+declaration:
+
+```typescript
+// krate.config.ts
+export default defineConfig({
+  api: {
+    sidecar: {
+      // Supervised: Krate starts/stops the process and restarts it if it exits.
+      command: "node",
+      args: ["server.js"],
+      port: 8080,
+      // ...or attach to an already-running service:
+      // target: "http://127.0.0.1:8080",
+    },
+  },
+});
+```
+
+The sidecar process receives `PORT` and `KRATE_API_SIDECAR_PORT` in its
+environment. Set `prefix` (default `/api`) to give the sidecar a different
+subtree. See [Config Reference](/docs/reference/config/#api-sidecar).

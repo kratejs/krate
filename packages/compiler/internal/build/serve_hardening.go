@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -52,6 +53,134 @@ const (
 // renderer, API/middleware). It has a bounded timeout so a wedged sidecar can't
 // hang a request goroutine forever.
 var sidecarClient = &http.Client{Timeout: 30 * time.Second}
+
+// newSidecarTransport builds a reverse-proxy transport with bounded dial and
+// response-header timeouts, so a hung upstream cannot pin a request forever.
+func newSidecarTransport() *http.Transport {
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+	}
+}
+
+// basePathMiddleware mounts the whole site under a URL prefix (e.g. "/docs").
+// Requests under the prefix are stripped before routing; requests outside it are
+// redirected (GET/HEAD) or 404'd. Internal endpoints and health probes stay at
+// the root so orchestration is unaffected.
+func basePathMiddleware(basePath string, next http.Handler) http.Handler {
+	if basePath == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if strings.HasPrefix(p, "/__krate/") || p == "/healthz" || p == "/readyz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		switch {
+		case p == basePath || p == basePath+"/":
+			r.URL.Path = "/"
+		case strings.HasPrefix(p, basePath+"/"):
+			r.URL.Path = p[len(basePath):]
+		default:
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				dest := basePath + p
+				if !strings.HasPrefix(p, "/") {
+					dest = basePath + "/" + p
+				}
+				http.Redirect(w, r, dest, http.StatusTemporaryRedirect)
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
+		r.URL.RawPath = ""
+		next.ServeHTTP(w, r)
+	})
+}
+
+// bodyLimitMiddleware caps the request body via http.MaxBytesReader, which also
+// makes over-limit reads fail (a handler can return 413) instead of silently
+// truncating.
+func bodyLimitMiddleware(limit int64, next http.Handler) http.Handler {
+	if limit <= 0 {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// corsMiddleware applies the configured CORS policy. Disabled by default.
+func corsMiddleware(cfg *config.Config, next http.Handler) http.Handler {
+	c := cfg.CORS
+	if !c.Enabled {
+		return next
+	}
+	origins := c.Origins
+	if len(origins) == 0 {
+		origins = []string{"*"}
+	}
+	allowAll := len(origins) == 1 && origins[0] == "*"
+	methods := strings.Join(nonEmpty(c.Methods, []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}), ", ")
+	headers := strings.Join(nonEmpty(c.Headers, []string{"Content-Type", "Authorization"}), ", ")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		allowed := ""
+		switch {
+		case allowAll && !c.Credentials:
+			allowed = "*"
+		case origin != "" && originAllowed(origin, origins):
+			allowed = origin
+			w.Header().Add("Vary", "Origin")
+		}
+		if allowed != "" {
+			h := w.Header()
+			h.Set("Access-Control-Allow-Origin", allowed)
+			h.Set("Access-Control-Allow-Methods", methods)
+			h.Set("Access-Control-Allow-Headers", headers)
+			if c.Credentials {
+				h.Set("Access-Control-Allow-Credentials", "true")
+			}
+			if c.MaxAge > 0 {
+				h.Set("Access-Control-Max-Age", strconv.Itoa(c.MaxAge))
+			}
+		}
+		// Preflight: short-circuit (only when it is actually a preflight).
+		if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// originAllowed reports whether origin matches any allowed pattern (exact, or a
+// "*" entry).
+func originAllowed(origin string, origins []string) bool {
+	for _, o := range origins {
+		if o == "*" || strings.EqualFold(o, origin) {
+			return true
+		}
+	}
+	return false
+}
+
+func nonEmpty(v, fallback []string) []string {
+	if len(v) == 0 {
+		return fallback
+	}
+	return v
+}
 
 // newHTTPServer builds the main server with hardened timeouts.
 func newHTTPServer(handler http.Handler) *http.Server {
@@ -303,7 +432,9 @@ func dialSidecar(port int, readTimeout time.Duration) (net.Conn, error) {
 	return conn, nil
 }
 
-// readBodyLimited reads at most maxRequestBodyBytes from r.Body.
+// readBodyLimited reads the request body. Callers must have wrapped r.Body with
+// http.MaxBytesReader (the /api/ handler does) so this is bounded and returns an
+// error on overflow instead of truncating silently.
 func readBodyLimited(r *http.Request) ([]byte, error) {
-	return io.ReadAll(io.LimitReader(r.Body, maxRequestBodyBytes))
+	return io.ReadAll(r.Body)
 }

@@ -13,13 +13,18 @@ import (
 
 func TestSubstituteImportMetaURL(t *testing.T) {
 	js := "const base = new URL('../models/', import.meta.url);"
-	got := substituteImportMetaURL(js, "demo", "index.ab12cd.js")
+	got := substituteImportMetaURL(js, "demo", "index.ab12cd.js", "")
 	want := "const base = new URL('../models/', \"/demo/index.ab12cd.js\");"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
-	if !strings.Contains(substituteImportMetaURL("no import.meta here", "x", "y.js"), "import.meta") {
+	if !strings.Contains(substituteImportMetaURL("no import.meta here", "x", "y.js", ""), "import.meta") {
 		t.Fatal("must be a no-op when import.meta.url is absent")
+	}
+	// basePath is applied so relative imports resolve under the sub-path.
+	withBase := substituteImportMetaURL(js, "demo", "index.ab12cd.js", "/docs")
+	if !strings.Contains(withBase, `"/docs/demo/index.ab12cd.js"`) {
+		t.Fatalf("basePath not applied: %q", withBase)
 	}
 }
 

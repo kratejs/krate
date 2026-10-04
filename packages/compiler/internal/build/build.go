@@ -785,14 +785,9 @@ func (b *Builder) affectedPages(changedFiles []string) []string {
 	return pages
 }
 
-// tailwindCSS generates the site-global Tailwind stylesheet honoring the
-// tailwind config (scanDirs/content, darkMode, preflight, strict). Returns ""
-// when Tailwind is disabled or no classes were found.
-func (b *Builder) tailwindCSS() string {
-	if !b.Cfg.Tailwind.Enabled {
-		return ""
-	}
-	opts := css.TailwindOptions{
+// tailwindOptions builds the Tailwind options from config.
+func (b *Builder) tailwindOptions() css.TailwindOptions {
+	return css.TailwindOptions{
 		ScanDirs:         b.Cfg.Tailwind.ScanDirs,
 		ContentOverrides: b.Cfg.Tailwind.Content,
 		Preflight:        b.Cfg.Tailwind.Preflight,
@@ -800,6 +795,33 @@ func (b *Builder) tailwindCSS() string {
 		DarkMode:         b.Cfg.Tailwind.DarkMode,
 		ExecuteConfig:    b.Cfg.Tailwind.ExecuteConfig,
 	}
+}
+
+// expandTailwindApply expands `@apply` directives in user CSS using the merged
+// Tailwind theme (no-op when Tailwind is disabled). Unsupported utilities
+// (variants, descendant selectors, unknown classes) are reported with a warning.
+func (b *Builder) expandTailwindApply(cssText string) string {
+	if !b.Cfg.Tailwind.Enabled || !strings.Contains(cssText, "@apply") {
+		return cssText
+	}
+	opts := b.tailwindOptions()
+	gen := css.NewTailwindGenerator()
+	gen.MergeConfig(css.LoadTailwindConfigWithOptions(b.Root, opts))
+	out, unresolved := css.ExpandApply(cssText, gen.Theme)
+	if len(unresolved) > 0 {
+		fmt.Fprintf(os.Stderr, "  %sTailwind @apply: could not expand %s%s\n", cYellow, strings.Join(unresolved, ", "), cReset)
+	}
+	return out
+}
+
+// tailwindCSS generates the site-global Tailwind stylesheet honoring the
+// tailwind config (scanDirs/content, darkMode, preflight, strict). Returns ""
+// when Tailwind is disabled or no classes were found.
+func (b *Builder) tailwindCSS() string {
+	if !b.Cfg.Tailwind.Enabled {
+		return ""
+	}
+	opts := b.tailwindOptions()
 	twCfg := css.LoadTailwindConfigWithOptions(b.Root, opts)
 	twCSS, err := css.GenerateTailwindWithOptions(b.Root, twCfg, opts)
 	if err != nil {
@@ -815,6 +837,7 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 		processedCSS := mergedCSS
 		// Inline @import directives before minification
 		processedCSS = css.InlineImports(processedCSS, b.Root)
+		processedCSS = b.expandTailwindApply(processedCSS)
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
 		}
@@ -849,6 +872,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 			}
 		}
 		processedCSS := css.InlineImports(pageCss, b.Root)
+		processedCSS = b.expandTailwindApply(processedCSS)
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
 		}
@@ -936,9 +960,9 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			pageCSS = append(pageCSS, cssFiles...)
 			var html string
 			if r.LoadingHTML != "" {
-				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode)
+				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, b.Cfg.BaseURLPath())
 			} else {
-				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode)
+				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, b.Cfg.BaseURLPath())
 			}
 
 			// 2. CSP meta tag injection
@@ -1282,7 +1306,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			finalJS := strings.TrimSpace(hydrationJS)
 			jsHash := hashContent([]byte(finalJS))
 			jsFile = "index." + jsHash + ".js"
-			finalJS = substituteImportMetaURL(finalJS, outName, jsFile)
+			finalJS = substituteImportMetaURL(finalJS, outName, jsFile, b.Cfg.BaseURLPath())
 			jsPath := filepath.Join(pageDir, jsFile)
 			os.WriteFile(jsPath, []byte(finalJS), 0644)
 
@@ -2235,11 +2259,11 @@ func (b *Builder) writeDynamicChunkBundles() error {
 // `new URL('../x', import.meta.url)` is a common way to reference assets
 // relative to the current module — substituting the script's real served URL
 // keeps those resolutions working. jsFile is the hashed script filename.
-func substituteImportMetaURL(hydrationJS, outName, jsFile string) string {
+func substituteImportMetaURL(hydrationJS, outName, jsFile, basePath string) string {
 	if !strings.Contains(hydrationJS, "import.meta.url") {
 		return hydrationJS
 	}
-	return strings.ReplaceAll(hydrationJS, "import.meta.url", strconv.Quote(pageScriptSrc(outName, jsFile)))
+	return strings.ReplaceAll(hydrationJS, "import.meta.url", strconv.Quote(pageScriptSrc(outName, jsFile, basePath)))
 }
 
 // writeAssetFiles copies every registered asset into the output directory at

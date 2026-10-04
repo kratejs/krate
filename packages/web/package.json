@@ -10,6 +10,7 @@
     "build": "krate build",
     "serve": "krate serve",
     "preview": "krate serve",
+    "typecheck": "tsc --noEmit",
     "test:docs": "krate build"
   },
   "devDependencies": {

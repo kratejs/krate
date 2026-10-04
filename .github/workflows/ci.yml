@@ -56,6 +56,13 @@ jobs:
         run: go vet ./...
         working-directory: packages/compiler
 
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: packages/compiler
+          args: --timeout=5m
+
       - name: Check embedded docs are in sync
         run: node scripts/sync-krate-docs.mjs --check
 
@@ -69,11 +76,41 @@ jobs:
           fi
         working-directory: packages/compiler
 
-      - name: Go test
-        run: go test ./...
+      - name: TypeScript type-check
+        run: pnpm run typecheck
+
+      - name: JS unit tests (Vitest)
+        run: pnpm run test:js
+
+      - name: Go test (race)
+        run: go test -race ./...
         working-directory: packages/compiler
         env:
           KRATE_REQUIRE_E2E: "1"
+
+  go-matrix:
+    name: Go (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/compiler/go.mod
+          cache: true
+
+      - name: Go build
+        run: go build ./...
+        working-directory: packages/compiler
+
+      - name: Go test
+        run: go test ./...
+        working-directory: packages/compiler
 
   fuzz:
     name: Fuzz

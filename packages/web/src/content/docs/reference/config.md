@@ -233,6 +233,76 @@ fails on findings at or above `failOn`. `krate check` runs the same rules
 against the emitted output. See
 [Quality Checks](/docs/features/quality-checks/).
 
+## Base path
+
+```typescript
+basePath: "/docs",   // serve the whole site under a sub-path (default: "")
+```
+
+When set, the build prefixes emitted asset URLs (page hydration scripts,
+runtime chunks, stylesheets) with the base path, and `krate serve` mounts the
+site under it (requests outside the prefix are redirected into it). Relative
+dynamic imports resolve against the prefixed script URL. Author your own links
+with the prefix (or use relative URLs).
+
+## Server
+
+```typescript
+server: {
+  host: "",             // bind address (default: all interfaces)
+  port: 3000,           // falls back to devServer.port, then 3000
+  maxBodySize: 1048576, // request body cap in bytes (0 = defaults)
+},
+```
+
+`krate serve` uses `server.port` (or `devServer.port`). Request bodies are capped
+(1 MiB for pages/middleware, 25 MiB for API routes by default). `GET /healthz`
+is a liveness probe; `GET /readyz` is readiness (fails while an expected SSR
+sidecar is down). Both stay reachable at the root even under a `basePath`.
+
+## CORS
+
+```typescript
+cors: {
+  enabled: false,                       // default: same-origin only
+  origins: ["https://app.example"],     // ["*"] when omitted
+  methods: ["GET", "POST"],
+  headers: ["Content-Type"],
+  credentials: false,
+  maxAge: 600,
+},
+```
+
+Preflight `OPTIONS` requests are answered automatically when enabled.
+
+## API sidecar
+
+Forward `/api/*` to your own HTTP service. Requests are forwarded first, and a
+`404` falls through to Krate's built-in Go/TS/QuickJS routes, so the sidecar can
+own exactly the routes it wants (including dynamic segments like
+`/users/[id]`) with no route declarations.
+
+```typescript
+api: {
+  sidecar: {
+    // Supervised: Krate launches and stops the process.
+    command: "node", args: ["server.js"], port: 8080,
+    // ...or proxy-only for an already-running service:
+    // target: "http://127.0.0.1:8080",
+    prefix: "/api",   // path prefix the sidecar owns (default "/api")
+  },
+},
+```
+
+See [API Routes](/docs/features/api-routes/#custom-api-sidecar).
+
+## Tailwind `@apply`
+
+Plain utility `@apply` is expanded in your CSS (`p-4`, `font-bold`, ...).
+Variant (`hover:*`, `md:*`), descendant-selector (`space-x-*`) and unknown
+utilities cannot be expressed as plain declarations; they are reported as build
+warnings and left unexpanded.
+
 ## Validation
 
 ```typescript

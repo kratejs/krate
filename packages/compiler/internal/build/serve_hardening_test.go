@@ -45,6 +45,139 @@ func TestSecurityHeadersNoHSTSForHTTP(t *testing.T) {
 	}
 }
 
+func TestCORSMiddlewareDisabledByDefault(t *testing.T) {
+	cfg := config.Default()
+	h := corsMiddleware(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Origin", "https://a.example")
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("CORS header should be absent when disabled, got %q", got)
+	}
+}
+
+func TestCORSMiddlewareAllowAllAndPreflight(t *testing.T) {
+	cfg := config.Default()
+	cfg.CORS.Enabled = true
+	cfg.CORS.MaxAge = 600
+	h := corsMiddleware(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Origin", "https://a.example")
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("Allow-Origin = %q, want *", got)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("OPTIONS", "/api/x", nil)
+	req.Header.Set("Origin", "https://a.example")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("preflight code = %d, want 204", rec.Code)
+	}
+	if got := rec.Header().Get("Access-Control-Max-Age"); got != "600" {
+		t.Errorf("Max-Age = %q, want 600", got)
+	}
+}
+
+func TestCORSMiddlewareExplicitOrigins(t *testing.T) {
+	cfg := config.Default()
+	cfg.CORS.Enabled = true
+	cfg.CORS.Origins = []string{"https://ok.example"}
+	cfg.CORS.Credentials = true
+	h := corsMiddleware(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Origin", "https://ok.example")
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "https://ok.example" {
+		t.Errorf("Allow-Origin = %q", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Errorf("Allow-Credentials = %q", got)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("disallowed origin got Allow-Origin %q", got)
+	}
+}
+
+func TestBasePathMiddleware(t *testing.T) {
+	var gotPath string
+	h := basePathMiddleware("/docs", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Prefixed path is stripped before routing.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/docs/about/", nil))
+	if gotPath != "/about/" {
+		t.Errorf("stripped path = %q, want /about/", gotPath)
+	}
+
+	// The mount root maps to "/".
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/docs/", nil))
+	if gotPath != "/" {
+		t.Errorf("root path = %q, want /", gotPath)
+	}
+
+	// Non-prefixed GET redirects into the mount.
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/about/", nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Errorf("redirect code = %d, want 307", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/docs/about/" {
+		t.Errorf("redirect location = %q, want /docs/about/", loc)
+	}
+
+	// Health stays at the root.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
+	if gotPath != "/healthz" {
+		t.Errorf("health path = %q, want /healthz", gotPath)
+	}
+}
+
+func TestBodyLimitMiddleware(t *testing.T) {
+	h := bodyLimitMiddleware(8, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/", strings.NewReader("123456789"))
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("over-limit body code = %d, want 413", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/", strings.NewReader("12345"))
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("within-limit body code = %d, want 200", rec.Code)
+	}
+}
+
 func TestCSPHeaderEmittedWhenEnabled(t *testing.T) {
 	cfg := config.Default()
 	cfg.CSP.Enabled = true
