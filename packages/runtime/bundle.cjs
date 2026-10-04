@@ -37,14 +37,17 @@ export * from './src/context';
 export * from './src/storage';
 `;
 
-async function buildBundle(outFile, entry) {
+// Dev-only overlay + toolbar. Loaded by `krate dev` only, never in production.
+const DEV_ENTRY = `import './src/dev-overlay';`;
+
+async function buildBundle(outFile, entry, minify = true) {
   const result = await esbuild.build({
     stdin: { contents: entry, resolveDir: __dirname, sourcefile: 'krate-entry.ts' },
     bundle: true,
     write: false,
     format: 'iife',
     globalName: '__krate_exports',
-    minify: true,
+    minify,
     treeShaking: true,
     // Matches the .browserslistrc baseline (ES2020); the compiler emits ES2020
     // for hydration chunks and workers too.
@@ -66,7 +69,8 @@ async function main() {
   fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
   await buildBundle('krate-runtime.js', RUNTIME_ENTRY);
   await buildBundle('krate-hydrate.js', HYDRATE_ENTRY);
-  console.log('Runtime bundled! (krate-runtime.js + krate-hydrate.js)');
+  await buildBundle('krate-dev.js', DEV_ENTRY, false);
+  console.log('Runtime bundled! (krate-runtime.js + krate-hydrate.js + krate-dev.js)');
 }
 
 main().catch((err) => {

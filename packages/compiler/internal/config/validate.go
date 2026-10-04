@@ -12,7 +12,7 @@ import (
 // recognize, so typos inside nested config objects surface too (JSON unmarshal
 // otherwise drops them silently).
 var knownNestedKeys = map[string]map[string]bool{
-	"devServer": {"port": true, "open": true},
+	"devServer": {"port": true, "open": true, "overlay": true, "toolbar": true, "editor": true},
 	"server":    {"host": true, "port": true, "maxBodySize": true},
 	"cors":      {"enabled": true, "origins": true, "methods": true, "headers": true, "credentials": true, "maxAge": true},
 	"api":       {"sidecar": true},

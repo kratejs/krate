@@ -473,6 +473,10 @@ type ForInStmt struct {
 	Right    Expr
 	Body     []Stmt
 	IsForOf  bool
+	// Keyword is the declaration keyword of the loop binding ("const", "let",
+	// "var"), or "" for a bare assignment target such as `for (x in obj)`. The
+	// parser records it so codegen can reproduce the original binding form.
+	Keyword string
 }
 
 func (f *ForInStmt) node()    {}

@@ -14,6 +14,12 @@ func annotateWith(prog *ast.Program, cfg *config.Config, path, raw string) *irtr
 	return annotator.Annotate(prog, cfg, path, raw)
 }
 
+// normalizeJS strips all whitespace so tests compare generated JS by tokens
+// rather than by the exact (readable) formatting the printer emits.
+func normalizeJS(s string) string {
+	return strings.Join(strings.Fields(s), "")
+}
+
 func configWithRuntime(names ...string) *config.Config {
 	return &config.Config{RuntimeComponents: names}
 }
@@ -362,8 +368,9 @@ export default function App() { return <div><Counter/></div>; }`,
 			}
 			if tt.wantVar != "" {
 				found := false
+				want := normalizeJS(tt.wantVar)
 				for _, ev := range comp.Component.ExtraVars {
-					if ev == tt.wantVar {
+					if normalizeJS(ev) == want {
 						found = true
 					}
 				}

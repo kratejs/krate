@@ -343,13 +343,13 @@ func TestRenderComponentFnTryCatchFinally(t *testing.T) {
 		t.Fatalf("expected FnDecl, got %T", fn.Declaration)
 	}
 	js := irtree.RenderComponentFnJS(fdecl)
-	if !strings.Contains(js, "try{") {
+	if !strings.Contains(js, "try {") {
 		t.Errorf("expected try block in rendered JS:\n%s", js)
 	}
-	if !strings.Contains(js, "catch(e){") {
+	if !strings.Contains(js, "catch (e) {") {
 		t.Errorf("expected catch block in rendered JS:\n%s", js)
 	}
-	if !strings.Contains(js, "finally{") {
+	if !strings.Contains(js, "finally {") {
 		t.Errorf("expected finally block in rendered JS:\n%s", js)
 	}
 	if !strings.Contains(js, "run()") || !strings.Contains(js, "handle(e)") || !strings.Contains(js, "cleanup()") {

@@ -21,7 +21,21 @@ const (
 type DevServer struct {
 	Port int  `json:"port"`
 	Open bool `json:"open"`
+	// Overlay toggles the dev error overlay (default true). A pointer so an
+	// explicit `false` is distinguishable from "unset".
+	Overlay *bool `json:"overlay,omitempty"`
+	// Toolbar toggles the dev toolbar (default true).
+	Toolbar *bool `json:"toolbar,omitempty"`
+	// Editor is the command used by the overlay's "open in editor" action
+	// (default "code", i.e. VS Code). May include flags, e.g. "code -g".
+	Editor string `json:"editor,omitempty"`
 }
+
+// OverlayEnabled reports whether the dev error overlay is enabled (default on).
+func (d DevServer) OverlayEnabled() bool { return d.Overlay == nil || *d.Overlay }
+
+// ToolbarEnabled reports whether the dev toolbar is enabled (default on).
+func (d DevServer) ToolbarEnabled() bool { return d.Toolbar == nil || *d.Toolbar }
 
 // ServerConfig holds production/preview (`krate serve`) server settings. When
 // Port is 0, Serve falls back to DevServer.Port (then 3000) for compatibility

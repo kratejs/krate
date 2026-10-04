@@ -457,6 +457,24 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 					return fmt.Errorf("devServer.open: expected boolean, got %T", v)
 				}
 				cfg.DevServer.Open = b
+			case "overlay":
+				b, ok := v.(bool)
+				if !ok {
+					return fmt.Errorf("devServer.overlay: expected boolean, got %T", v)
+				}
+				cfg.DevServer.Overlay = &b
+			case "toolbar":
+				b, ok := v.(bool)
+				if !ok {
+					return fmt.Errorf("devServer.toolbar: expected boolean, got %T", v)
+				}
+				cfg.DevServer.Toolbar = &b
+			case "editor":
+				s, ok := v.(string)
+				if !ok {
+					return fmt.Errorf("devServer.editor: expected string, got %T", v)
+				}
+				cfg.DevServer.Editor = s
 			}
 		}
 	case "emitReact":

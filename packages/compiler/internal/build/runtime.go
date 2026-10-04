@@ -8,7 +8,16 @@ import (
 )
 
 func loadRuntimeFromDisk(projectRoot string) string {
-	names := []string{"krate-hydrate.js", "krate-runtime.js"}
+	return loadNamedBundleFromDisk(projectRoot, "krate-hydrate.js", "krate-runtime.js")
+}
+
+// loadDevBundleFromDisk loads the dev-only overlay/toolbar bundle
+// (krate-dev.js) from the @krate/runtime dist directory, if present.
+func loadDevBundleFromDisk(projectRoot string) string {
+	return loadNamedBundleFromDisk(projectRoot, "krate-dev.js")
+}
+
+func loadNamedBundleFromDisk(projectRoot string, names ...string) string {
 
 	// Build candidate directories relative to the project root.
 	// findKrateRoot walks up from projectRoot to locate the compiler package.
@@ -96,5 +105,29 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string) str
 	relPath := filename
 	_ = os.WriteFile(filepath.Join(outDir, relPath), []byte(runtimeToWrite), 0644)
 
+	return relPath
+}
+
+// devFallbackJS is written as chunks/krate-dev.js when the @krate/runtime dev
+// bundle is unavailable (e.g. a stripped install), so dev mode still gets
+// reload + error logging.
+const devFallbackJS = `(function(){var s=new EventSource('/__krate/hotreload');` +
+	`s.addEventListener('reload',function(){location.reload()});` +
+	`s.addEventListener('build-error',function(e){try{console.error('Krate build failed',JSON.parse(e.data).diagnostics)}catch(_){}});` +
+	`s.addEventListener('client-error',function(e){try{console.error('Krate client error',JSON.parse(e.data).clientError)}catch(_){}});})();`
+
+// writeDevChunk writes the dev-only overlay/toolbar script to a fixed path
+// (chunks/krate-dev.js) so dev HTML can reference it without threading a hashed
+// name through the page pipeline. It is intentionally unminified and only
+// written in dev mode.
+func writeDevChunk(outDir, projectRoot string) string {
+	content := loadDevBundleFromDisk(projectRoot)
+	if content == "" {
+		content = devFallbackJS
+	}
+	chunksDir := filepath.Join(outDir, "chunks")
+	_ = os.MkdirAll(chunksDir, 0755)
+	relPath := "chunks/krate-dev.js"
+	_ = os.WriteFile(filepath.Join(outDir, relPath), []byte(content), 0644)
 	return relPath
 }

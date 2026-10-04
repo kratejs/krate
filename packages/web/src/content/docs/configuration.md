@@ -58,8 +58,13 @@ is accepted but ignored.
 devServer: {
   port: 3000,
   open: true,
+  overlay: true,   // dev error overlay (default true)
+  toolbar: true,   // dev toolbar (default true)
+  editor: "code",  // editor command for "open in editor"
 }
 ```
+
+See [Error Handling](/docs/guides/error-handling/) for what the overlay shows.
 
 ## Tailwind CSS
 

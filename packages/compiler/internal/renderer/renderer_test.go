@@ -391,7 +391,8 @@ export default function Page() {
 	if strings.Contains(js, "=el;}))") || strings.Contains(js, "}=el;") {
 		t.Errorf("callback ref must not be wrapped as an assignment target:\n%s", js)
 	}
-	if !strings.Contains(js, "(el)=>{rootRef = el;}") && !strings.Contains(js, "(el)=>{(rootRef = el);}") {
+	flat := strings.Join(strings.Fields(js), "")
+	if !strings.Contains(flat, "(el)=>{rootRef=el;}") && !strings.Contains(flat, "(el)=>{(rootRef=el);}") {
 		t.Errorf("expected the arrow callback passed to kbindRef, got:\n%s", js)
 	}
 }

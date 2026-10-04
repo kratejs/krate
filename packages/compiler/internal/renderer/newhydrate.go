@@ -82,7 +82,11 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		if sig.Tier != irtree.TierClient {
 			continue
 		}
-		b.WriteString("(function(){\n")
+		// Label each scope with its component so the readable dev output can be
+		// traced back to a source component. Stripped by minification in prod.
+		b.WriteString("// component ")
+		b.WriteString(string(sig.ComponentID))
+		b.WriteString("\n(function(){\n")
 
 		// The component's own props object declaration must precede signal
 		// initializers: signal RawInits like `createSignal(props.x || "")`

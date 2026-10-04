@@ -9,11 +9,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 )
 
-const liveReloadScript = `<script>(function(){function n(s){return s.replace(/\/+$/,'')||'/'}function m(p){var a=n(location.pathname).split('/'),b=n(p).split('/');for(var i=0;i<b.length;i++){var s=b[i];if(s.charAt(0)==='['){if(s.indexOf('[...')===0)return true;continue}if(s!==a[i])return false}return a.length===b.length}var s=new EventSource('/__krate/hotreload');s.addEventListener('reload',function(e){try{var d=JSON.parse(e.data);if(d.pages&&!d.pages.some(m))return}catch(_){}var b=document.getElementById('krate-build-error');if(b)b.remove();location.reload()});s.addEventListener('build-error',function(e){try{var d=JSON.parse(e.data),old=document.getElementById('krate-build-error');if(old)old.remove();var box=document.createElement('div');box.id='krate-build-error';box.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(9,9,11,0.92);color:#fafafa;font-family:Menlo,Monaco,"Courier New",monospace;overflow:auto;padding:32px;box-sizing:border-box';var items=(d.errors||[]).map(function(m){return '<pre style="white-space:pre-wrap;word-break:break-word;margin:0 0 16px;color:#fecaca">'+String(m).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</pre>'}).join('');box.innerHTML='<div style="max-width:900px;margin:0 auto"><div style="color:#e74c3c;font-size:18px;font-weight:bold;margin-bottom:16px">Build failed</div>'+items+'<div style="color:#7f8c8d;font-size:12px">Fix the error and save — the overlay clears on the next successful build.</div></div>';document.body.appendChild(box)}catch(_){}})})();
-// Dev Error Overlay
-(function(){function e(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}function o(t,m,f,s){var d=document.getElementById('krate-error-overlay');if(d)return;d=document.createElement('div');d.id='krate-error-overlay';var l='';if(f){var p=[e(f.file||'')];if(f.line)p.push('line '+f.line);if(f.col)p.push('col '+f.col);var c=(f.file||'')+(f.line?':'+f.line:'')+(f.col?':'+f.col:'');l='<div style="background:rgba(52,152,219,0.15);border:1px solid rgba(52,152,219,0.3);border-radius:6px;padding:10px 14px;margin-top:12px;font-size:13px;cursor:pointer" onclick="navigator.clipboard.writeText(\''+e(c)+'\');this.style.borderColor=\'#2ecc71\'" title="Click to copy">'+p.join(' ')+'</div>'}d.style.cssText='all:initial;position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,0.85);color:#ecf0f1;font-family:Menlo,Monaco,"Courier New",monospace;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';d.innerHTML='<div style="background:#1a1a2e;border:1px solid #e74c3c;border-radius:8px;padding:24px 32px;max-width:800px;max-height:80vh;overflow:auto;box-shadow:0 8px 32px rgba(231,76,60,0.3);width:90%;position:relative"><button style="position:absolute;top:16px;right:16px;background:#e74c3c;color:#fff;border:none;border-radius:4px;padding:6px 12px;cursor:pointer;font-size:14px;font-family:inherit" onclick="this.parentNode.parentNode.remove()">X</button><div style="color:#e74c3c;font-size:18px;font-weight:bold;margin-bottom:12px">'+e(t)+'</div><div style="color:#ecf0f1;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word">'+e(m)+'</div>'+l+(s?'<div style="color:#95a5a6;font-size:12px;line-height:1.5;margin-top:12px;white-space:pre-wrap;max-height:300px;overflow-y:auto">'+e(s)+'</div>':'')+'<div style="color:#7f8c8d;font-size:11px;margin-top:16px">Press Esc to dismiss</div></div>';document.body.appendChild(d);document.addEventListener('keydown',function h(ev){if(ev.key==='Escape'&&d.parentNode){d.remove();document.removeEventListener('keydown',h)}})}window.addEventListener('error',function(e){e.preventDefault();var t=e.error&&e.error.name||'Runtime Error';var m=e.message||'Unknown error';var l={};var s='';if(e.error&&e.error.stack){s=e.error.stack;var r=s.match(/at\s+(?:(\S+)\s+\()?(.+?):(\d+):(\d+)/);if(r){l.file=r[2];l.line=r[3];l.col=r[4]}}if(!l.file&&e.filename){l.file=e.filename;l.line=e.lineno;l.col=e.colno}o(t,m,l,s)});window.addEventListener('unhandledrejection',function(e){e.preventDefault();var r=e.reason;var t='Unhandled Promise Rejection';var m=r instanceof Error?r.message:String(r);var s=r instanceof Error?r.stack:'';o(t,m,null,s)})})()</script>`
-
-func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, basePath string) string {
+func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, basePath string) string {
 	var b strings.Builder
 
 	b.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
@@ -59,8 +55,16 @@ func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []s
 	}
 
 	if devMode {
-		b.WriteString(liveReloadScript)
-		b.WriteByte('\n')
+		// The dev overlay + toolbar live in a separate, dev-only bundle. The
+		// inline bootstrap carries only the config the bundle needs so it can
+		// start before the bundle finishes loading.
+		if devBootstrap == "" {
+			devBootstrap = `{"sse":"/__krate/hotreload"}`
+		}
+		b.WriteString("<script>window.__KRATE_DEV__=")
+		b.WriteString(devBootstrap)
+		b.WriteString(";</script>\n")
+		b.WriteString(fmt.Sprintf("<script src=\"%s\"></script>\n", assetHref(basePath, "chunks/krate-dev.js")))
 	}
 
 	b.WriteString("</body>\n</html>\n")
@@ -77,8 +81,8 @@ func assetHref(basePath, asset string) string {
 }
 
 // generateHTMLWithLoading is like generateHTML but includes a loading template for SPA transitions.
-func generateHTMLWithLoading(bodyHTML, headHTML, scriptHTML, styleHTML, loadingHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, basePath string) string {
-	html := generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML, cssFiles, jsFile, runtimeJSFile, route, devMode, basePath)
+func generateHTMLWithLoading(bodyHTML, headHTML, scriptHTML, styleHTML, loadingHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, basePath string) string {
+	html := generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML, cssFiles, jsFile, runtimeJSFile, route, devMode, devBootstrap, basePath)
 	if loadingHTML != "" {
 		loadingTemplate := "<template data-krate-loading>" + loadingHTML + "</template>"
 		html = strings.Replace(html, "</div>\n</body>", loadingTemplate+"</div>\n</body>", 1)

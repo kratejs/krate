@@ -47,8 +47,16 @@ React syntax is always transpiled to Krate signals and effects; the former
 devServer: {
   port: 3000,
   open: true,
+  overlay: true,   // show the dev error overlay (default true)
+  toolbar: true,   // show the dev toolbar (default true)
+  editor: "code",  // editor command for "open in editor" (default "code" = VS Code)
 }
 ```
+
+`editor` may include flags (for example `"code -g"`). It is used by the
+overlay's location links and by `GET /__krate/open`. In development, generated
+JavaScript is served unminified (with component comments) so devtools are
+readable; production output stays minified.
 
 ## Tailwind CSS
 

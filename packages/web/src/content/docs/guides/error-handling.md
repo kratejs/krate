@@ -38,11 +38,33 @@ Request-time pages are rendered by the Node SSR sidecar. If a page throws:
 A page can declare a custom error surface by exporting an error page at
 `src/pages/500.tsx` (and `404.tsx` for not-found). `krate build` bakes these.
 
+## The dev overlay and toolbar
+
+`krate dev` injects a dev-only overlay bundle (`chunks/krate-dev.js`). It is
+never included in production HTML. It shows:
+
+- **Build/compile errors** as structured diagnostics — `file:line:col`, the
+  source line with a caret, and the hint — streamed over Server-Sent Events.
+- **Runtime errors** (uncaught exceptions, unhandled rejections, hydration
+  failures), forwarded to the dev server and logged to the terminal as
+  `[browser] …` so multi-tab sessions stay in sync.
+
+Each diagnostic has an **Open in editor** button (and a clickable location
+link); configure the command with `devServer.editor`. Press `Esc` to dismiss;
+the overlay clears on the next successful build. A small toolbar (bottom of the
+page) shows build status, the current route (updated on client-side navigation),
+and a reload button. Toggle either with `devServer.overlay` /
+`devServer.toolbar`.
+
+If the **initial** build fails, the dev server still starts and the overlay
+shows the error — fix the file and save to recover.
+
 ## Client-side errors
 
 Hydration errors are caught and reported:
 
-- **Dev:** an overlay shows the error message and stack (`error-overlay.ts`).
+- **Dev:** the overlay shows the message and stack; the error is also sent to the
+  dev server.
 - **Prod:** set a global hook to forward errors to your telemetry:
 
 ```ts

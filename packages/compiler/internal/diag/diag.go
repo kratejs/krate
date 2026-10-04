@@ -4,6 +4,7 @@
 package diag
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -11,12 +12,26 @@ import (
 // Diagnostic is a single source-located diagnostic (parse error, bundler
 // error, etc.). It satisfies error so it can be returned from any stage.
 type Diagnostic struct {
-	File    string
-	Line    int
-	Col     int
-	Message string
-	Hint    string
-	Source  string // the offending source line, for caret rendering
+	File    string `json:"file,omitempty"`
+	Line    int    `json:"line,omitempty"`
+	Col     int    `json:"col,omitempty"`
+	Message string `json:"message"`
+	Hint    string `json:"hint,omitempty"`
+	Source  string `json:"source,omitempty"` // the offending source line, for caret rendering
+}
+
+// FromError extracts a Diagnostic from an error, unwrapping as needed. Non-
+// Diagnostic errors are converted to a Diagnostic carrying only the message, so
+// every build error can be surfaced to the browser overlay as structured data.
+func FromError(err error) (Diagnostic, bool) {
+	if err == nil {
+		return Diagnostic{}, false
+	}
+	var d Diagnostic
+	if !errors.As(err, &d) {
+		return Diagnostic{Message: err.Error()}, false
+	}
+	return d, true
 }
 
 func (d Diagnostic) Error() string {

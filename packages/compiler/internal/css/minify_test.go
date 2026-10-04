@@ -42,3 +42,22 @@ func TestMinifyImportantWins(t *testing.T) {
 		t.Errorf("later non-important value should be discarded: %s", out)
 	}
 }
+
+func TestMinifyKeepsRulesAfterCommentWithApostrophe(t *testing.T) {
+	// A quote inside a comment must not be treated as a string start: doing so
+	// swallows the rest of the stylesheet (regression for the dev/docs theme
+	// losing its later rules).
+	in := "/* doesn't reintroduce the old size */\n.a { color: red; }\n.b { color: blue; }\n"
+	out := Minify(in)
+	if !strings.Contains(out, ".a") || !strings.Contains(out, ".b") {
+		t.Fatalf("minify dropped rules after an apostrophe comment: %q", out)
+	}
+}
+
+func TestMinifyKeepsRulesAfterUrlInComment(t *testing.T) {
+	in := "/* see url(foo) for details */\n.a { color: red; }\n"
+	out := Minify(in)
+	if !strings.Contains(out, ".a") {
+		t.Fatalf("minify dropped rule after a comment containing url(: %q", out)
+	}
+}

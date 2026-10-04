@@ -502,8 +502,8 @@ func replaceTitle(shell, title string) string {
 }
 
 // ServeDev starts an HTTP server with live reload SSE + request logging.
-func ServeDev(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime time.Time) error {
-	return serve(root, cfg, reload, startTime)
+func ServeDev(root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
+	return serve(root, cfg, hub, startTime)
 }
 
 // Serve starts an HTTP server with request logging (production preview).
@@ -511,7 +511,7 @@ func Serve(root string, cfg *config.Config, startTime time.Time) error {
 	return serve(root, cfg, nil, startTime)
 }
 
-func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime time.Time) error {
+func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
 	port := cfg.ServerPort()
 	apiPort := port + 1
 
@@ -793,8 +793,9 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 		_, _ = w.Write(body)
 	})
 
-	// SSE endpoint for live reload (dev mode only)
-	if reload != nil {
+	// Dev-only live-reload SSE + overlay endpoints. The hub broadcasts every
+	// event to all connected tabs and retains the latest build state.
+	if hub != nil {
 		mux.HandleFunc("/__krate/hotreload", func(w http.ResponseWriter, r *http.Request) {
 			flusher, ok := w.(http.Flusher)
 			if !ok {
@@ -810,13 +811,23 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 			fmt.Fprintf(w, "event: connected\ndata: {}\n\n")
 			flusher.Flush()
 
+			ch, cancel := hub.Subscribe()
+			defer cancel()
+
+			// Catch a late subscriber up with the current build state, so a tab
+			// opened after a failed initial build still shows the error.
+			if cur, ok := hub.Current(); ok && len(cur.Diagnostics) > 0 {
+				writeBuildError(w, cur)
+				flusher.Flush()
+			}
+
 			// Heartbeat keeps intermediaries from idle-closing the stream.
 			heartbeat := time.NewTicker(25 * time.Second)
 			defer heartbeat.Stop()
 
 			for {
 				select {
-				case ev, ok := <-reload:
+				case ev, ok := <-ch:
 					if !ok {
 						return
 					}
@@ -844,12 +855,16 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 						}
 					}
 
-					// Build errors take priority: tell the client to show them
-					// instead of reloading (a reload would show stale output).
-					if len(ev.Errors) > 0 {
-						errJSON, _ := json.Marshal(map[string][]string{"errors": ev.Errors})
-						fmt.Fprintf(w, "event: build-error\ndata: %s\n\n", errJSON)
-					} else if len(routes) > 0 {
+					switch {
+					case ev.Type == "client-error" && ev.ClientError != nil:
+						data, _ := json.Marshal(ev)
+						fmt.Fprintf(w, "event: client-error\ndata: %s\n\n", data)
+					case len(ev.Diagnostics) > 0:
+						// Build errors take priority: tell the client to show
+						// them instead of reloading (a reload would show stale
+						// output).
+						writeBuildError(w, ev)
+					case len(routes) > 0:
 						// Partial reload: send affected page routes
 						data := `{"pages":[`
 						for i, r := range routes {
@@ -860,7 +875,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 						}
 						data += `]}`
 						fmt.Fprintf(w, "event: reload\ndata: %s\n\n", data)
-					} else {
+					default:
 						fmt.Fprintf(w, "event: reload\ndata: {}\n\n")
 					}
 					flusher.Flush()
@@ -871,6 +886,57 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 					return
 				}
 			}
+		})
+
+		// Runtime errors reported by the browser. Logged to the terminal and
+		// rebroadcast to every tab so multi-tab sessions stay in sync.
+		mux.HandleFunc("/__krate/client-error", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			var ce ClientError
+			if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&ce); err != nil {
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+			if ce.Message != "" {
+				loc := ce.URL
+				if ce.Line > 0 {
+					loc = fmt.Sprintf("%s:%d:%d", ce.URL, ce.Line, ce.Col)
+				}
+				fmt.Fprintf(os.Stderr, "%s[browser]%s %s %s\n", cRed, cReset, ce.Message, loc)
+			}
+			hub.Publish(DevEvent{Type: "client-error", ClientError: &ce})
+			w.WriteHeader(http.StatusNoContent)
+		})
+
+		// Status for the dev toolbar: fanned-out build state without SSE.
+		mux.HandleFunc("/__krate/status", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if cur, ok := hub.Current(); ok {
+				_ = json.NewEncoder(w).Encode(cur)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(DevEvent{Type: "status", BuildOK: true})
+		})
+
+		// Open a file in the developer's editor. The path is validated against
+		// the project root so the endpoint cannot be used to launch arbitrary
+		// files.
+		mux.HandleFunc("/__krate/open", func(w http.ResponseWriter, r *http.Request) {
+			file := r.URL.Query().Get("file")
+			line := r.URL.Query().Get("line")
+			rel, ok := safeProjectPath(root, file)
+			if !ok {
+				http.Error(w, "invalid path", http.StatusBadRequest)
+				return
+			}
+			if err := openInEditor(cfg.DevServer.Editor, rel, line); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		})
 	}
 
@@ -1163,7 +1229,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 	if len(cfg.Plugins) > 0 {
 		top = wirePluginServeHandlers(root, cfg, top)
 	}
-	if reload == nil {
+	if hub == nil {
 		// Preview/static serving: gzip compressible assets.
 		top = gzipMiddleware(top)
 	}
@@ -1199,7 +1265,7 @@ func serve(root string, cfg *config.Config, reload <-chan ReloadEvent, startTime
 
 	addr := listener.Addr().(*net.TCPAddr)
 	label := "dev"
-	if reload == nil {
+	if hub == nil {
 		label = "serve"
 	}
 	fmt.Printf("%s  %s server → %shttp://localhost:%d%s %s(started in %s)%s\n", cGreen, label, cCyan, addr.Port, cReset, cGray, time.Since(startTime).Round(time.Millisecond), cReset)

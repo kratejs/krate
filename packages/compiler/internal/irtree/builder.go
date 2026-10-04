@@ -80,6 +80,17 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 	root := builder.buildComponentNode(entryFn, "")
 	root.SourceFile = ann.SourceFile
 
+	// Validate that every construct in the module's functions is supported by
+	// the JS code generator. Unsupported nodes become hard build errors rather
+	// than being silently dropped from the emitted hydration/SSR code.
+	for _, fn := range ann.Functions {
+		builder.codegenErrs = append(builder.codegenErrs, codegenIssues(fn)...)
+	}
+
+	errs := make([]error, 0, len(builder.cssErrs)+len(builder.codegenErrs))
+	errs = append(errs, builder.cssErrs...)
+	errs = append(errs, builder.codegenErrs...)
+
 	return &ComponentTree{
 		Root:            root,
 		HasLinks:        builder.hasLinks,
@@ -89,7 +100,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		ContextDefaults: builder.contextDefaults,
 		CSSSignalsCSS:   builder.cssStylesheet(),
 		NeedsCSSARIA:    builder.cssNeedsARIA,
-		Errors:          builder.cssErrs,
+		Errors:          errs,
 	}
 }
 
@@ -176,6 +187,10 @@ type builder struct {
 	// replaced with createSignal by the author — silently hydrating it would
 	// ship behaviour the author did not ask for.
 	cssErrs []error
+	// codegenErrs collects hard errors for AST constructs the JS code generator
+	// does not support. They fail the build so no construct is silently dropped
+	// from emitted hydration/SSR code.
+	codegenErrs []error
 }
 
 func (b *builder) collectCSSScope(s *csssignals.Scope) {

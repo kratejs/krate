@@ -30,6 +30,12 @@ export interface DevServerConfig {
   port?: number;
   /** Open the browser on start (default: false). */
   open?: boolean;
+  /** Show the dev error overlay (default: true). */
+  overlay?: boolean;
+  /** Show the dev toolbar (default: true). */
+  toolbar?: boolean;
+  /** Editor command for the overlay's "open in editor" action (default: "code"). */
+  editor?: string;
 }
 
 export interface ServerConfig {

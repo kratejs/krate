@@ -632,11 +632,22 @@ func (p *Parser) parseForStmt() ast.Stmt {
 
 	if p.peek().Kind == lexer.In_ || p.peek().Kind == lexer.Of {
 		isForOf := p.peek().Kind == lexer.Of
+		keyword := ""
+		if vs, ok := init.(*ast.VarStmt); ok {
+			switch vs.Kind {
+			case ast.VarConst:
+				keyword = "const"
+			case ast.VarLet:
+				keyword = "let"
+			default:
+				keyword = "var"
+			}
+		}
 		p.next()
 		right := p.parseExpr(precLowest)
 		p.expect(lexer.RPAREN)
 		body := p.parseBlock()
-		return &ast.ForInStmt{Position: pos, Left: forInitToExpr(init), Right: right, Body: body, IsForOf: isForOf}
+		return &ast.ForInStmt{Position: pos, Left: forInitToExpr(init), Right: right, Body: body, IsForOf: isForOf, Keyword: keyword}
 	}
 
 	p.match(lexer.SEMI)

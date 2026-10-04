@@ -139,6 +139,30 @@ type Builder struct {
 	staticOnlyMu     sync.Mutex
 }
 
+// shouldMinifyJS reports whether generated JavaScript should be minified.
+// Development builds emit readable JS (newlines, indentation, component
+// comments) so devtools and view-source are usable; production still minifies.
+func (b *Builder) shouldMinifyJS() bool {
+	return b.Cfg.ShouldMinifyJS() && !b.DevMode
+}
+
+// devBootstrapJSON is the config the dev overlay bundle reads from
+// window.__KRATE_DEV__ (endpoints + feature toggles).
+func (b *Builder) devBootstrapJSON() string {
+	cfg := map[string]interface{}{
+		"sse":     "/__krate/hotreload",
+		"errors":  "/__krate/client-error",
+		"open":    "/__krate/open",
+		"overlay": b.Cfg.DevServer.OverlayEnabled(),
+		"toolbar": b.Cfg.DevServer.ToolbarEnabled(),
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 func New(root string, cfg *config.Config) *Builder {
 	// Set KrateRoot so the bundler can resolve krate/* virtual packages
 	bundler.KrateRoot = findKrateRoot(root)
@@ -219,7 +243,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 		return nil, nil
 	}
 
-	errorCount := 0
+	var pageErrs []error
 
 	b.Cfg.Markdown.Root = b.Root
 	b.resetBuildCaches()
@@ -231,7 +255,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	concrete, gspErr := b.resolveStaticParamsPages(pages)
 	if gspErr != nil {
 		fmt.Fprintf(os.Stderr, "  %s✗ Error:%s %v\n", cRed, cReset, gspErr)
-		errorCount++
+		pageErrs = append(pageErrs, gspErr)
 	}
 
 	type pageBuildResult struct {
@@ -279,7 +303,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	for res := range resultsCh {
 		if res.err != nil {
 			fmt.Fprintf(os.Stderr, "\n  %s✗ Error:%s %v\n", cRed, cReset, res.err)
-			errorCount++
+			pageErrs = append(pageErrs, res.err)
 			continue
 		}
 		result := res.result
@@ -309,11 +333,17 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	}
 
 	if len(results) == 0 {
+		if len(pageErrs) > 0 {
+			return nil, &multiError{summary: fmt.Sprintf("build failed: no pages built successfully (%d error(s))", len(pageErrs)), errs: pageErrs}
+		}
 		return nil, fmt.Errorf("no pages built successfully")
 	}
 
 	// Write shared runtime chunk (extracted from per-page bundles)
-	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.Cfg.ShouldMinifyJS(), b.Root)
+	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root)
+	if b.DevMode {
+		writeDevChunk(b.Cfg.OutDir, b.Root)
+	}
 
 	// Per-page stylesheets: each page links only the CSS its own module graph
 	// imported (deduplicated across pages sharing identical CSS).
@@ -338,6 +368,13 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 
 	if perrs := b.drainPluginErrs(); len(perrs) > 0 {
 		return results, fmt.Errorf("build failed: %d plugin error(s):\n  %s", len(perrs), strings.Join(perrs, "\n  "))
+	}
+
+	// Surface page failures even when some pages succeeded, so a dev rebuild
+	// with a mix of good and bad pages still reports the errors (and the
+	// browser overlay shows them) instead of silently succeeding.
+	if len(pageErrs) > 0 {
+		return results, &multiError{summary: fmt.Sprintf("build failed: %d page error(s)", len(pageErrs)), errs: pageErrs}
 	}
 
 	return results, nil
@@ -471,11 +508,13 @@ func (b *Builder) BuildAll() error {
 	var results []*PageResult
 	errorCount := 0
 	var failureMessages []string
+	var failureErrs []error
 
 	for res := range resultsCh {
 		if res.err != nil {
 			fmt.Fprintf(os.Stderr, "\n  %s✗ Error (%s):%s %v\n", cRed, res.page, cReset, res.err)
 			failureMessages = append(failureMessages, fmt.Sprintf("  %s: %v", res.page, res.err))
+			failureErrs = append(failureErrs, res.err)
 			errorCount++
 			continue
 		}
@@ -510,6 +549,7 @@ func (b *Builder) BuildAll() error {
 	if gspErr != nil {
 		fmt.Fprintf(os.Stderr, "  %s✗ Error:%s %v\n", cRed, cReset, gspErr)
 		failureMessages = append(failureMessages, "  "+gspErr.Error())
+		failureErrs = append(failureErrs, gspErr)
 		errorCount++
 	}
 	if len(staticParamPages) > 0 {
@@ -520,6 +560,7 @@ func (b *Builder) BuildAll() error {
 				msg := fmt.Sprintf("generateStaticParams page %s: %v", spp.OutPath, err)
 				fmt.Fprintf(os.Stderr, "  %s✗ Error:%s %v\n", cRed, cReset, msg)
 				failureMessages = append(failureMessages, "  "+msg)
+				failureErrs = append(failureErrs, fmt.Errorf("generateStaticParams page %s: %w", spp.OutPath, err))
 				errorCount++
 				continue
 			}
@@ -580,7 +621,10 @@ func (b *Builder) BuildAll() error {
 	}
 	runtimeJS := ""
 	if anyPageHasJS {
-		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.Cfg.ShouldMinifyJS(), b.Root)
+		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root)
+	}
+	if b.DevMode {
+		writeDevChunk(b.Cfg.OutDir, b.Root)
 	}
 
 	// Per-page stylesheets: each page links only the CSS its own module graph
@@ -604,6 +648,7 @@ func (b *Builder) BuildAll() error {
 		if err := b.runQualityChecks(results, runtimeJS); err != nil {
 			fmt.Fprintf(os.Stderr, "  %s✗ Checks:%s %v\n", cRed, cReset, err)
 			failureMessages = append(failureMessages, "  checks: "+err.Error())
+			failureErrs = append(failureErrs, err)
 			errorCount++
 		}
 	}
@@ -612,6 +657,7 @@ func (b *Builder) BuildAll() error {
 	if err := b.writeWorkerBundles(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sWorker bundle error:%s %v\n", cYellow, cReset, err)
 		failureMessages = append(failureMessages, "  workers: "+err.Error())
+		failureErrs = append(failureErrs, err)
 		errorCount++
 	}
 
@@ -619,6 +665,7 @@ func (b *Builder) BuildAll() error {
 	if err := b.writeDynamicChunkBundles(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sDynamic import chunk error:%s %v\n", cYellow, cReset, err)
 		failureMessages = append(failureMessages, "  chunks: "+err.Error())
+		failureErrs = append(failureErrs, err)
 		errorCount++
 	}
 
@@ -636,6 +683,7 @@ func (b *Builder) BuildAll() error {
 	if err := b.BuildAllAPI(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sAPI Build error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  API: "+err.Error())
+		failureErrs = append(failureErrs, err)
 		errorCount++
 	}
 
@@ -738,11 +786,17 @@ func (b *Builder) BuildAll() error {
 	perrs := b.drainPluginErrs()
 	if len(perrs) > 0 {
 		failureMessages = append(failureMessages, perrs...)
+		for _, pe := range perrs {
+			failureErrs = append(failureErrs, fmt.Errorf("%s", pe))
+		}
 		errorCount += len(perrs)
 	}
 
 	if errorCount > 0 {
-		return fmt.Errorf("build failed: %d error(s):\n%s", errorCount, strings.Join(failureMessages, "\n"))
+		return &multiError{
+			summary: fmt.Sprintf("build failed: %d error(s):\n%s", errorCount, strings.Join(failureMessages, "\n")),
+			errs:    failureErrs,
+		}
 	}
 
 	return nil
@@ -959,11 +1013,15 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				pageCSS = append(pageCSS, r.CSSFile)
 			}
 			pageCSS = append(pageCSS, cssFiles...)
+			devBootstrap := ""
+			if b.DevMode {
+				devBootstrap = b.devBootstrapJSON()
+			}
 			var html string
 			if r.LoadingHTML != "" {
-				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, b.Cfg.BaseURLPath())
+				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, b.Cfg.BaseURLPath())
 			} else {
-				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, b.Cfg.BaseURLPath())
+				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, b.Cfg.BaseURLPath())
 			}
 
 			// 2. CSP meta tag injection
@@ -1299,7 +1357,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
 		if strings.TrimSpace(hydrationJS) != "" {
 			hasJS = true
-			if b.Cfg.ShouldMinifyJS() {
+			if b.shouldMinifyJS() {
 				hydrationJS = minifyJS(hydrationJS)
 			}
 
@@ -1642,13 +1700,18 @@ func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*
 	return result, nil
 }
 
-// renderErrors folds renderer diagnostics into a single clear build error.
+// renderErrors folds renderer diagnostics into a single clear build error while
+// preserving the individual diagnostics for structured display.
 func renderErrors(page string, errs []error) error {
 	msgs := make([]string, 0, len(errs))
 	for _, e := range errs {
 		msgs = append(msgs, e.Error())
 	}
-	return fmt.Errorf("render failed (%s): %s", page, strings.Join(msgs, "; "))
+	return &renderError{
+		page:    page,
+		summary: fmt.Sprintf("render failed (%s): %s", page, strings.Join(msgs, "; ")),
+		errs:    errs,
+	}
 }
 
 func findPages(dir string) ([]string, error) {

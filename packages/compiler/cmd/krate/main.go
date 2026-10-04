@@ -241,17 +241,23 @@ func runBuild(flags cliFlags, args []string) {
 	fmt.Printf("%s%s  Done! (built in %s)%s\n", cBold, cGreen, time.Since(start).Round(time.Millisecond), cReset)
 
 	if flags.Watch {
-		reload := make(chan build.ReloadEvent, 1)
+		hub := build.NewDevHub()
 		errc := make(chan error, 1)
 		go func() {
-			if err := build.Watch(builder, 500*time.Millisecond, reload); err != nil {
+			if err := build.Watch(builder, 500*time.Millisecond, hub); err != nil {
 				errc <- err
 			}
 		}()
 		go func() {
-			for ev := range reload {
-				if len(ev.Errors) > 0 {
-					fmt.Printf("\n%s%s  Build failed:%s %v (%s)\n", cBold, cRed, cReset, ev.Errors, time.Now().Format("15:04:05"))
+			events, cancel := hub.Subscribe()
+			defer cancel()
+			for ev := range events {
+				if len(ev.Diagnostics) > 0 {
+					msgs := make([]string, 0, len(ev.Diagnostics))
+					for _, d := range ev.Diagnostics {
+						msgs = append(msgs, d.Error())
+					}
+					fmt.Printf("\n%s%s  Build failed:%s %v (%s)\n", cBold, cRed, cReset, msgs, time.Now().Format("15:04:05"))
 					continue
 				}
 				fmt.Printf("\n%s%s  Rebuilt:%s %v (%s)\n", cBold, cCyan, cReset, ev.Routes, time.Now().Format("15:04:05"))
@@ -274,22 +280,26 @@ func runDev(flags cliFlags, args []string) {
 	builder.Verbose = flags.Verbose
 	builder.DevMode = true
 	builder.Env = env
+
+	hub := build.NewDevHub()
 	if err := builder.BuildAll(); err != nil {
+		// A failed initial build must not kill the dev server: keep serving and
+		// publish the diagnostics so the browser overlay shows them (and the
+		// watcher can recover on the next save).
 		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		hub.Publish(build.DevEvent{Type: "reload", Diagnostics: build.DiagnosticsFromError(err)})
 	}
 
-	reload := make(chan build.ReloadEvent, 1)
 	errc := make(chan error, 2)
 
 	go func() {
-		if err := build.ServeDev(root, cfg, reload, start); err != nil {
+		if err := build.ServeDev(root, cfg, hub, start); err != nil {
 			errc <- err
 		}
 	}()
 
 	go func() {
-		if err := build.Watch(builder, 500*time.Millisecond, reload); err != nil {
+		if err := build.Watch(builder, 500*time.Millisecond, hub); err != nil {
 			errc <- err
 		}
 	}()

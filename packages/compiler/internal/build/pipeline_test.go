@@ -156,7 +156,7 @@ func TestGenerateHTMLDevModePreservesInlineScripts(t *testing.T) {
 	style := `<style>.a{color:red}</style>`
 	html := generateHTML(
 		"<div>body</div>", "<title>t</title>", inline, style,
-		[]string{}, "", "runtime.js", "/", true, "",
+		[]string{}, "", "runtime.js", "/", true, "", "",
 	)
 	if !strings.Contains(html, `console.log("inline")`) {
 		t.Errorf("dev-mode HTML dropped inline script:\n%s", html)
@@ -268,7 +268,7 @@ func TestBuildLocalIconsFolderMissing(t *testing.T) {
 func TestGenerateHTMLMinifiedNotDev(t *testing.T) {
 	html := generateHTML(
 		"<div>body</div>", "<title>t</title>", "", "",
-		[]string{}, "", "", "/", false, "",
+		[]string{}, "", "", "/", false, "", "",
 	)
 	if strings.Contains(html, "__krate/hotreload") {
 		t.Errorf("production HTML should not include dev hot-reload script:\n%s", html)

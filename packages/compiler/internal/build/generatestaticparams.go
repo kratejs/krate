@@ -425,7 +425,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
 		if strings.TrimSpace(hydrationJS) != "" {
 			hasJS = true
-			if b.Cfg.ShouldMinifyJS() {
+			if b.shouldMinifyJS() {
 				hydrationJS = minifyJS(hydrationJS)
 			}
 			finalJS := strings.TrimSpace(hydrationJS)
