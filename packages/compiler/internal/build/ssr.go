@@ -18,17 +18,19 @@ import (
 
 // SSRServer manages the SSR sidecar renderer process (node/bun/deno).
 type SSRServer struct {
-	port         int
-	root         string
-	runtime      string // "node" (default) | "bun" | "deno"
-	env          []string
-	cmd          *exec.Cmd
-	done         chan struct{} // closed when the sidecar process exits
-	mu           sync.Mutex
-	running      bool
-	manifest     *ServerManifest
-	timeout      int // per-render timeout (ms); 0 = sidecar default
-	maxCacheSize int // ISR cache entries; 0 = sidecar default
+	port          int
+	root          string
+	runtime       string // "node" (default) | "bun" | "deno"
+	env           []string
+	cmd           *exec.Cmd
+	done          chan struct{} // closed when the sidecar process exits
+	mu            sync.Mutex
+	running       bool
+	manifest      *ServerManifest
+	timeout       int // per-render timeout (ms); 0 = sidecar default
+	maxCacheSize  int // ISR cache entries; 0 = sidecar default
+	ppr           bool
+	pprRevalidate int
 }
 
 // SetTuning configures the render timeout (ms) and ISR cache size exported to
@@ -38,6 +40,15 @@ func (s *SSRServer) SetTuning(timeoutMs, maxCacheSize int) {
 	defer s.mu.Unlock()
 	s.timeout = timeoutMs
 	s.maxCacheSize = maxCacheSize
+}
+
+// SetPPR configures partial-prerendering region caching for non-ISR pages,
+// exported to the sidecar via KRATE_PPR / KRATE_PPR_REVALIDATE.
+func (s *SSRServer) SetPPR(enabled bool, revalidate int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ppr = enabled
+	s.pprRevalidate = revalidate
 }
 
 // SetEnv provides environment variables for the sidecar process.
@@ -104,6 +115,12 @@ func (s *SSRServer) Start() error {
 	}
 	if s.maxCacheSize > 0 {
 		env = append(env, fmt.Sprintf("KRATE_SSR_MAX_CACHE=%d", s.maxCacheSize))
+	}
+	if s.ppr {
+		env = append(env, "KRATE_PPR=1")
+		if s.pprRevalidate > 0 {
+			env = append(env, fmt.Sprintf("KRATE_PPR_REVALIDATE=%d", s.pprRevalidate))
+		}
 	}
 
 	s.cmd = exec.Command(runtimeCmd, runtimeArgs...)

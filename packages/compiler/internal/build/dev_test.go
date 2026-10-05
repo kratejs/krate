@@ -136,14 +136,14 @@ func TestWriteDevChunkFallback(t *testing.T) {
 }
 
 func TestGenerateHTMLInjectsDevBundle(t *testing.T) {
-	dev := generateHTML("<div></div>", "", "", "", nil, "", "", "/", true, `{"sse":"/__krate/hotreload"}`, "")
+	dev := generateHTML("<div></div>", "", "", "", nil, "", "", "/", true, `{"sse":"/__krate/hotreload"}`, "", "")
 	if !strings.Contains(dev, "__KRATE_DEV__") {
 		t.Errorf("dev HTML missing bootstrap:\n%s", dev)
 	}
 	if !strings.Contains(dev, "chunks/krate-dev.js") {
 		t.Errorf("dev HTML missing dev bundle script:\n%s", dev)
 	}
-	prod := generateHTML("<div></div>", "", "", "", nil, "", "", "/", false, "", "")
+	prod := generateHTML("<div></div>", "", "", "", nil, "", "", "/", false, "", "", "")
 	if strings.Contains(prod, "krate-dev.js") || strings.Contains(prod, "__KRATE_DEV__") {
 		t.Errorf("production HTML must not include dev tooling:\n%s", prod)
 	}

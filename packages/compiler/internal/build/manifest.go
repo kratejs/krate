@@ -86,6 +86,7 @@ func BuildManifest(results []*PageResult, cssFile string, runtimeJS string) *Man
 					SourcePath: reg.SourcePath,
 					Props:      reg.Props,
 					Suspense:   reg.Suspense,
+					Revalidate: reg.Revalidate,
 				})
 			}
 			m.Regions[meta.Route] = regs

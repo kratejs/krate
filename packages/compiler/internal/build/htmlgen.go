@@ -9,7 +9,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 )
 
-func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, basePath string) string {
+func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string) string {
 	var b strings.Builder
 
 	b.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
@@ -30,6 +30,14 @@ func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []s
 
 	for _, cssFile := range cssFiles {
 		b.WriteString(fmt.Sprintf("<link rel=\"stylesheet\" href=\"%s\">\n", assetHref(basePath, cssFile)))
+	}
+
+	// Site runtime config + View Transitions CSS (base path, SPA behavior).
+	if runtimeHead != "" {
+		b.WriteString(runtimeHead)
+		if !strings.HasSuffix(runtimeHead, "\n") {
+			b.WriteByte('\n')
+		}
 	}
 
 	b.WriteString("</head>\n<body>\n")
@@ -81,8 +89,8 @@ func assetHref(basePath, asset string) string {
 }
 
 // generateHTMLWithLoading is like generateHTML but includes a loading template for SPA transitions.
-func generateHTMLWithLoading(bodyHTML, headHTML, scriptHTML, styleHTML, loadingHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, basePath string) string {
-	html := generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML, cssFiles, jsFile, runtimeJSFile, route, devMode, devBootstrap, basePath)
+func generateHTMLWithLoading(bodyHTML, headHTML, scriptHTML, styleHTML, loadingHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string) string {
+	html := generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML, cssFiles, jsFile, runtimeJSFile, route, devMode, devBootstrap, runtimeHead, basePath)
 	if loadingHTML != "" {
 		loadingTemplate := "<template data-krate-loading>" + loadingHTML + "</template>"
 		html = strings.Replace(html, "</div>\n</body>", loadingTemplate+"</div>\n</body>", 1)

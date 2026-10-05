@@ -146,6 +146,31 @@ func (b *Builder) shouldMinifyJS() bool {
 	return b.Cfg.ShouldMinifyJS() && !b.DevMode
 }
 
+// runtimeCommonHead returns the per-page <head> extras: the site runtime config
+// (window.__KRATE_CFG__) for the SPA router, and the View Transitions CSS when
+// enabled. Emitted on every page (production and dev).
+func (b *Builder) runtimeCommonHead() string {
+	var sb strings.Builder
+	cfg := map[string]interface{}{"basePath": b.Cfg.BaseURLPath()}
+	if b.Cfg.ViewTransitions == "off" {
+		cfg["viewTransitions"] = false
+	} else {
+		cfg["viewTransitions"] = "auto"
+	}
+	if data, err := json.Marshal(cfg); err == nil {
+		sb.WriteString("<script>window.__KRATE_CFG__=")
+		sb.Write(data)
+		sb.WriteString(";</script>\n")
+	}
+	if b.Cfg.ViewTransitions != "off" {
+		sb.WriteString("<style>@view-transition{navigation:auto}")
+		sb.WriteString("@media (prefers-reduced-motion: reduce){")
+		sb.WriteString("::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}")
+		sb.WriteString("</style>\n")
+	}
+	return sb.String()
+}
+
 // devBootstrapJSON is the config the dev overlay bundle reads from
 // window.__KRATE_DEV__ (endpoints + feature toggles).
 func (b *Builder) devBootstrapJSON() string {
@@ -1017,19 +1042,20 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			if b.DevMode {
 				devBootstrap = b.devBootstrapJSON()
 			}
+			runtimeHead := b.runtimeCommonHead()
 			var html string
 			if r.LoadingHTML != "" {
-				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, b.Cfg.BaseURLPath())
+				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
 			} else {
-				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, b.Cfg.BaseURLPath())
+				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
 			}
 
-			// 2. CSP meta tag injection
-			if b.Cfg.CSP.Enabled {
-				cspMeta := generateCSPMeta(r.ScriptHTML, r.StyleHTML, r.HydrationJS, b.Cfg.CSP.Directive)
-				if cspMeta != "" {
-					html = strings.Replace(html, "</head>", cspMeta+"</head>", 1)
-				}
+			// 2. Durable SSR state (window.__KRATE_STATE__): a page-level
+			// payload that persisted signals prefer on hydration, so the
+			// hydrated value matches what the server rendered. Inserted before
+			// the CSP hash pass so its inline script is allow-listed.
+			if state := b.durableStateScript(); state != "" {
+				html = strings.Replace(html, "</head>", state+"</head>", 1)
 			}
 
 			// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
@@ -1040,11 +1066,16 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				}
 			}
 
-			// 2c. Durable SSR state (window.__KRATE_STATE__): a page-level
-			// payload that persisted signals prefer on hydration, so the
-			// hydrated value matches what the server rendered.
-			if state := b.durableStateScript(); state != "" {
-				html = strings.Replace(html, "</head>", state+"</head>", 1)
+			// 2c. CSP meta tag injection. Hash against the FULLY ASSEMBLED
+			// document so every inline script/style — including the runtime
+			// config (`__KRATE_CFG__`), View Transitions CSS, and durable state
+			// — is allow-listed. External (src/href) tags are skipped by the
+			// extractor, and `script-src 'self'` covers the hashed bundles.
+			if b.Cfg.CSP.Enabled {
+				cspMeta := generateCSPMeta(html, html, r.HydrationJS, b.Cfg.CSP.Directive)
+				if cspMeta != "" {
+					html = strings.Replace(html, "</head>", cspMeta+"</head>", 1)
+				}
 			}
 
 			// 3. Minify code in memory
@@ -1219,6 +1250,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		injectDynamicRoutePlaceholders(tree, extractParamNames(page, b.Cfg.PagesDir))
 	}
 	regions := enumerateRegions(tree)
+	for i := range regions {
+		regions[i].Revalidate = regionRevalidate(b.Root, regions[i].SourcePath)
+	}
 	emitter := renderer.NewEmitter()
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.IconResolver = b.iconResolver

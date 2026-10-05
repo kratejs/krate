@@ -10,6 +10,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/docfind"
 	"github.com/kratejs/krate/packages/compiler/internal/frontmatter"
+	"github.com/kratejs/krate/packages/compiler/internal/gitinfo"
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/pluginutil"
 )
@@ -68,6 +69,11 @@ type Page struct {
 	// Phase 4 — search/org
 	Tags       []string `json:"tags,omitempty"`
 	Categories []string `json:"categories,omitempty"`
+
+	// Phase 5 — dates (RFC3339 or YYYY-MM-DD strings). Date is the published
+	// date; Updated is the last-modified date (frontmatter, else git).
+	Date    string `json:"date,omitempty"`
+	Updated string `json:"updated,omitempty"`
 }
 
 // TocConfig controls the page's table of contents.
@@ -123,6 +129,9 @@ type Config struct {
 	ContentDir string          // relative to project root
 	Root       string          // absolute project root
 	MDConfig   markdown.Config // markdown rendering config
+	// GitLastUpdated fills Page.Updated from the file's last git commit when
+	// frontmatter does not set it.
+	GitLastUpdated bool
 }
 
 // Scan walks the content directory and parses all .md/.mdx files.
@@ -161,6 +170,11 @@ func Scan(cfg Config) ([]Page, error) {
 			}
 		}
 
+		updated := fm.Updated
+		if updated == "" && cfg.GitLastUpdated {
+			updated = gitinfo.LastCommit(cfg.Root, absPath)
+		}
+
 		pages = append(pages, Page{
 			Path:          pagePath,
 			Title:         fm.Title,
@@ -184,6 +198,8 @@ func Scan(cfg Config) ([]Page, error) {
 			EditURL:       fm.EditURL,
 			Tags:          fm.Tags,
 			Categories:    fm.Categories,
+			Date:          fm.Date,
+			Updated:       updated,
 		})
 		return nil
 	})
@@ -400,6 +416,8 @@ type Frontmatter struct {
 	EditURL       string
 	Tags          []string
 	Categories    []string
+	Date          string
+	Updated       string
 }
 
 func decodeFrontmatter(fm map[string]any) *Frontmatter {
@@ -424,6 +442,11 @@ func decodeFrontmatter(fm map[string]any) *Frontmatter {
 	f.Keywords = frontmatter.StringSlice(fm["keywords"])
 	f.Tags = frontmatter.StringSlice(fm["tags"])
 	f.Categories = frontmatter.StringSlice(fm["categories"])
+	f.Date = frontmatter.String(fm["date"])
+	f.Updated = frontmatter.String(fm["lastUpdated"])
+	if f.Updated == "" {
+		f.Updated = frontmatter.String(fm["updated"])
+	}
 	f.Badge = decodeBadge(fm["badge"])
 
 	// sidebar (legacy section / custom array / new object form)

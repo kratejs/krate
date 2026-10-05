@@ -20,6 +20,57 @@ const SCROLL_HISTORY_MAX = 50;
  */
 const RUNTIME_CHUNK_RE = /\/chunks\/runtime\.[^/]+\.js$/;
 
+/** Site config injected by the compiler (`window.__KRATE_CFG__`). */
+interface KrateRuntimeConfig {
+  basePath?: string;
+  viewTransitions?: boolean | 'auto';
+}
+
+function runtimeConfig(): KrateRuntimeConfig {
+  return ((globalThis as any).__KRATE_CFG__ as KrateRuntimeConfig) || {};
+}
+
+/** Normalizes the configured base path to "" or "/prefix" (no trailing slash). */
+function basePath(): string {
+  const bp = runtimeConfig().basePath || '';
+  if (!bp || bp === '/') return '';
+  return '/' + bp.replace(/^\/+|\/+$/g, '');
+}
+
+/** Strips the base path from a pathname so route comparisons are consistent. */
+function stripBase(pathname: string): string {
+  const bp = basePath();
+  if (bp && (pathname === bp || pathname.startsWith(bp + '/'))) {
+    const rest = pathname.slice(bp.length);
+    return rest === '' ? '/' : rest;
+  }
+  return pathname;
+}
+
+// Set during initRouter so the exported `navigate()` can drive the SPA router.
+let navigateImpl: ((url: string, opts?: NavigateOptions) => void) | null = null;
+
+export interface NavigateOptions {
+  replace?: boolean;
+  scroll?: boolean;
+  /** State stored on the new history entry. */
+  state?: unknown;
+}
+
+/**
+ * Programmatic SPA navigation. Falls back to a full page load when the router
+ * has not initialized (e.g. before hydration). Returns false when handled
+ * client-side, true when a full navigation was triggered.
+ */
+export function navigate(url: string, opts: NavigateOptions = {}): boolean {
+  if (navigateImpl) {
+    navigateImpl(url, opts);
+    return false;
+  }
+  if (typeof location !== 'undefined') location.href = url;
+  return true;
+}
+
 export function initRouter(): void {
   if (typeof document === 'undefined') return;
 
@@ -158,6 +209,7 @@ export function initRouter(): void {
   // page fetch is in flight, so navigation doesn't feel artificially delayed.
   let loadingOverlay: Node | null = null;
   function beginTransition(): void {
+    if (supportsViewTransitions()) return; // native View Transition handles it
     const oldContent = findContentRoot(document);
     const loadingTemplate = document.querySelector('template[data-krate-loading]') as HTMLTemplateElement | null;
     if (loadingTemplate && loadingTemplate.content && oldContent) {
@@ -173,6 +225,7 @@ export function initRouter(): void {
   }
 
   function endTransition(): void {
+    if (supportsViewTransitions()) return; // opacity was never touched
     if (loadingOverlay && loadingOverlay.parentNode) {
       loadingOverlay.parentNode.removeChild(loadingOverlay);
     }
@@ -195,6 +248,112 @@ export function initRouter(): void {
     }
   }
 
+  function dispatchNavEvent(name: string, url: string): void {
+    try {
+      window.dispatchEvent(new CustomEvent(name, { detail: { url } }));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Whether native View Transitions should wrap the SPA mutation. */
+  function supportsViewTransitions(): boolean {
+    if (runtimeConfig().viewTransitions === false) return false;
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      try {
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+      } catch {
+        /* ignore */
+      }
+    }
+    return typeof (document as any).startViewTransition === 'function';
+  }
+
+  /** Diff stylesheet <link>s by absolute URL (base-path and format safe). */
+  function reconcileStylesheets(doc: Document): void {
+    const newStyles = doc.querySelectorAll('link[rel="stylesheet"]');
+    const newHrefs = new Set<string>();
+    newStyles.forEach((s) => {
+      const href = s.getAttribute('href');
+      if (href) newHrefs.add(new URL(href, location.origin).href);
+    });
+    document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => {
+      const abs = (l as HTMLLinkElement).href;
+      if (abs && !newHrefs.has(abs)) l.remove();
+    });
+    const existing = new Set<string>();
+    document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => existing.add((l as HTMLLinkElement).href));
+    newStyles.forEach((s) => {
+      const href = s.getAttribute('href');
+      if (!href) return;
+      const abs = new URL(href, location.origin).href;
+      if (!existing.has(abs)) {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = abs;
+        document.head.appendChild(link);
+      }
+    });
+  }
+
+  /**
+   * Apply `data-view-transition="name"` to `view-transition-name`. Persistent
+   * chrome (navbar/sidebar) keeps its name across mutations so it morphs
+   * instead of cross-fading. Runs at init and after every swap.
+   */
+  function applyViewTransitionNames(root: ParentNode): void {
+    root.querySelectorAll('[data-view-transition]').forEach((el) => {
+      const name = (el as HTMLElement).getAttribute('data-view-transition');
+      if (name) (el as HTMLElement).style.viewTransitionName = name;
+    });
+  }
+
+  /** Move focus to the content root after navigation (a11y). */
+  function focusContent(): void {
+    const root = findContentRoot(document) as HTMLElement | null;
+    if (!root) return;
+    if (!root.hasAttribute('tabindex')) root.setAttribute('tabindex', '-1');
+    try {
+      root.focus({ preventScroll: true });
+    } catch {
+      try {
+        root.focus();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /**
+   * Inject Speculation Rules so the browser prefetches same-origin links ahead
+   * of hover, where supported. Falls back to the JS prefetch path elsewhere.
+   */
+  function setupSpeculationRules(): void {
+    const supports = (HTMLScriptElement as any).supports;
+    if (typeof supports !== 'function' || !supports('speculationrules')) return;
+    try {
+      const script = document.createElement('script');
+      script.type = 'speculationrules';
+      script.textContent = JSON.stringify({
+        prefetch: [
+          {
+            where: {
+              and: [
+                { href_matches: '/*' },
+                { not: { href_matches: '/__krate/*' } },
+                { not: { href_matches: '/api/*' } },
+              ],
+            },
+            eagerness: 'moderate',
+          },
+        ],
+      });
+      document.head.appendChild(script);
+    } catch {
+      /* ignore */
+    }
+  }
+
   function swapContent(
     html: string,
     url: string,
@@ -212,51 +371,43 @@ export function initRouter(): void {
       return;
     }
 
-    const newTitle = doc.querySelector('title');
-    if (newTitle) document.title = newTitle.textContent || '';
+    dispatchNavEvent('krate:navigate-start', url);
 
-    // Dispose all active effects before replacing DOM
-    if (typeof (globalThis as any).disposeAll === 'function') {
-      (globalThis as any).disposeAll();
+    // The single synchronous DOM mutation point. Wrapped in a View Transition
+    // when the browser supports it, so the SPA morph is animated natively.
+    const runMutation = () => {
+      const newTitle = doc.querySelector('title');
+      if (newTitle) document.title = newTitle.textContent || '';
+
+      // Dispose all active effects before replacing DOM
+      if (typeof (globalThis as any).disposeAll === 'function') {
+        (globalThis as any).disposeAll();
+      }
+
+      // Strip stale hydration handler props so kept nodes don't retain
+      // closures bound to disposed signals; hydration re-sets them below.
+      stripHandlerProps(oldContent);
+
+      // Diff the live content against the parsed new page instead of wiping
+      // it via innerHTML, so unchanged nodes keep their state (focus, scroll,
+      // media playback, CSS animations) across navigation.
+      reconcileTrees(oldContent, newContent);
+      reconcileStylesheets(doc);
+      applyViewTransitionNames(document);
+    };
+
+    if (supportsViewTransitions()) {
+      try {
+        const vt = (document as any).startViewTransition(runMutation);
+        if (vt && vt.finished && typeof vt.finished.catch === 'function') {
+          vt.finished.catch(() => {});
+        }
+      } catch {
+        runMutation();
+      }
+    } else {
+      runMutation();
     }
-
-    // Strip stale hydration handler props so kept nodes don't retain
-    // closures bound to disposed signals; hydration re-sets them below.
-    stripHandlerProps(oldContent);
-
-    // Diff the live content against the parsed new page instead of wiping
-    // it via innerHTML, so unchanged nodes keep their state (focus, scroll,
-    // media playback, CSS animations) across navigation.
-    reconcileTrees(oldContent, newContent);
-
-    // Diff and remove old stylesheets not present in new page
-    const newStyles = doc.querySelectorAll('link[rel="stylesheet"]');
-    const newHrefs = new Set<string>();
-    newStyles.forEach((s) => {
-      const href = s.getAttribute('href');
-      if (href) newHrefs.add(href);
-    });
-
-    document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => {
-      const href = (l as HTMLLinkElement).getAttribute('href');
-      if (href && !newHrefs.has(href)) {
-        l.remove();
-      }
-    });
-
-    const existingHrefs = new Set<string>();
-    document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => {
-      existingHrefs.add((l as HTMLLinkElement).href);
-    });
-    newStyles.forEach((s) => {
-      const href = s.getAttribute('href');
-      if (href && !existingHrefs.has(href)) {
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = href;
-        document.head.appendChild(link);
-      }
-    });
 
     // Load new scripts, then rehydrate
     loadScripts(scripts, url).then(() => {
@@ -297,9 +448,11 @@ export function initRouter(): void {
     }
 
     applyScroll(url, { restoreScroll, scroll });
+    if (!restoreScroll) focusContent();
     updateActiveLinks();
 
     window.dispatchEvent(new CustomEvent('krate:navigate', { detail: { url } }));
+    dispatchNavEvent('krate:navigate-end', url);
     notifyNavigation(url);
   }
 
@@ -333,7 +486,7 @@ export function initRouter(): void {
 
   // Mark the link matching the current route with aria-current="page".
   function updateActiveLinks(): void {
-    const path = location.pathname;
+    const path = stripBase(location.pathname);
     document.querySelectorAll('a[data-krate-link]').forEach((a) => {
       const href = a.getAttribute('href');
       if (!href) {
@@ -342,7 +495,7 @@ export function initRouter(): void {
       }
       let target = href;
       try {
-        target = new URL(href, location.origin).pathname;
+        target = stripBase(new URL(href, location.origin).pathname);
       } catch {
         return;
       }
@@ -553,7 +706,24 @@ export function initRouter(): void {
   window.addEventListener('popstate', popstateHandler);
 
   setupPrefetch();
+  setupSpeculationRules();
   updateActiveLinks();
+  applyViewTransitionNames(document);
+
+  // Expose the SPA navigation to `navigate()` (and any embedded UI).
+  navigateImpl = (url: string, opts: NavigateOptions = {}) => {
+    let sameOrigin = true;
+    try {
+      sameOrigin = new URL(url, location.href).origin === location.origin;
+    } catch {
+      sameOrigin = false;
+    }
+    if (!sameOrigin) {
+      location.href = url;
+      return;
+    }
+    fetchAndSwap(new URL(url, location.href).href, opts);
+  };
 
   // Mark the initially-loaded page scripts as disposable so they're removed and
   // re-executed against the fresh DOM when the user navigates back to this
@@ -568,6 +738,7 @@ export function initRouter(): void {
     document.removeEventListener('click', clickHandler);
     window.removeEventListener('popstate', popstateHandler);
     cleanupPrefetch();
+    navigateImpl = null;
   };
 }
 

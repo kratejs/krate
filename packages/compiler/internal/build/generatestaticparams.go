@@ -393,6 +393,16 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		emitResult.HTML = mdCtx.HTML
 	}
 
+	// Dynamic regions + the coarse page-region wrap, mirroring buildPage so
+	// generateStaticParams pages PPR-stream consistently with their template.
+	regions := enumerateRegions(tree)
+	for i := range regions {
+		regions[i].Revalidate = regionRevalidate(b.Root, regions[i].SourcePath)
+	}
+	if renderMode == RenderSSR || renderMode == RenderISR {
+		emitResult.HTML = "<!--suspense:page-->" + emitResult.HTML + "<!--/suspense:page-->"
+	}
+
 	layoutPath := findLayout(spp.PagePath, b.Cfg.PagesDir)
 	var deps []string
 	if layoutPath != "" {
@@ -464,5 +474,6 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		Revalidate:  revalidate,
 		SourcePath:  relSrc,
 		Program:     entryModule.Program,
+		Regions:     regions,
 	}, bundle.CSS, nil
 }

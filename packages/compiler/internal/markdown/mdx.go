@@ -1,8 +1,10 @@
 package markdown
 
 import (
+	"fmt"
 	"html"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -297,6 +299,14 @@ type seqMarker struct {
 // expected to be imported in the MDX frontmatter/imports.
 var directiveRe = regexp.MustCompile(`^:::\s*component\s+([A-Za-z_][A-Za-z0-9_.]*)\s*(.*)$`)
 
+// containerDirectiveRe matches the built-in container directives that lower to
+// @krate/components primitives: card, steps (+ nested ::step), tabs (+ ::tab),
+// and code-group (fenced code blocks become tabs).
+var containerDirectiveRe = regexp.MustCompile(`^:::\s*(card|steps|tabs|code-group)\b\s*(.*)$`)
+
+// itemDirectiveRe matches a nested item marker inside :::steps / :::tabs.
+var itemDirectiveRe = regexp.MustCompile(`^::\s*(step|tab)\b\s*(.*)$`)
+
 type jsxBlockT struct {
 	Tag       string
 	Attrs     string
@@ -368,6 +378,29 @@ func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]any, segme
 	for i < len(lines) {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
+
+		// Built-in container directives (:::card / :::steps / :::tabs /
+		// :::code-group) lower to @krate/components primitives.
+		if m := containerDirectiveRe.FindStringSubmatch(trimmed); m != nil {
+			kind := m[1]
+			arg := strings.TrimSpace(m[2])
+			var outer []string
+			j := i + 1
+			for ; j < len(lines); j++ {
+				if strings.TrimSpace(lines[j]) == ":::" {
+					break
+				}
+				outer = append(outer, lines[j])
+			}
+			jsx := renderContainerDirective(kind, arg, outer, cfg)
+			placeholder := makePlaceholder("DIRECTIVE", directiveIdx)
+			processed.WriteString(placeholder)
+			processed.WriteByte('\n')
+			markers = append(markers, seqMarker{placeholder: placeholder, rawJSX: jsx})
+			directiveIdx++
+			i = j + 1
+			continue
+		}
 
 		// Component directive (:::component Name attr="x" ... :::) → the named
 		// component wrapping markdown-rendered body content. Checked before
@@ -747,4 +780,220 @@ func collectFencedCode(lines []string, i int) (lang string, code []string, next 
 		i++
 	}
 	return lang, code, i
+}
+
+// --- Built-in container directives ------------------------------------------
+
+type directiveItem struct {
+	title    string
+	bodyHTML string
+}
+
+// renderContainerDirective lowers :::card / :::steps / :::tabs / :::code-group
+// to @krate/components JSX. Nested items use ::step / ::tab markers; code-group
+// items are fenced code blocks.
+func renderContainerDirective(kind, arg string, lines []string, cfg Config) string {
+	switch kind {
+	case "card":
+		inner := RenderToHTML(strings.Join(lines, "\n"), cfg)
+		return wrapDirectiveComponent("Card", arg, inner)
+	case "steps":
+		items := splitDirectiveItems(lines, "step", cfg)
+		var b strings.Builder
+		b.WriteString("<Steps>")
+		for _, it := range items {
+			b.WriteString("<Step")
+			if it.title != "" {
+				b.WriteString(" title=" + jsxQuote(it.title))
+			}
+			b.WriteString(">")
+			b.WriteString(directiveInner(it.bodyHTML))
+			b.WriteString("</Step>")
+		}
+		b.WriteString("</Steps>")
+		return b.String()
+	case "tabs":
+		return renderTabsJSX(splitDirectiveItems(lines, "tab", cfg))
+	case "code-group":
+		return renderCodeGroupJSX(parseCodeGroup(lines))
+	}
+	return ""
+}
+
+func splitDirectiveItems(lines []string, marker string, cfg Config) []directiveItem {
+	var items []directiveItem
+	var body []string
+	var cur *directiveItem
+	flush := func() {
+		if cur != nil {
+			cur.bodyHTML = RenderToHTML(strings.Join(body, "\n"), cfg)
+			items = append(items, *cur)
+			body = nil
+		}
+	}
+	for _, ln := range lines {
+		if m := itemDirectiveRe.FindStringSubmatch(strings.TrimSpace(ln)); m != nil && m[1] == marker {
+			flush()
+			cur = &directiveItem{title: strings.TrimSpace(m[2])}
+			continue
+		}
+		if cur != nil {
+			body = append(body, ln)
+		}
+	}
+	flush()
+	if len(items) == 0 {
+		items = append(items, directiveItem{bodyHTML: RenderToHTML(strings.Join(lines, "\n"), cfg)})
+	}
+	return items
+}
+
+func renderTabsJSX(items []directiveItem) string {
+	type norm struct{ label, value, html string }
+	var list []norm
+	used := map[string]bool{}
+	for i, it := range items {
+		label := it.title
+		if label == "" {
+			label = fmt.Sprintf("Tab %d", i+1)
+		}
+		val := budgetSlug(label, i)
+		for used[val] {
+			val += "-" + runeToStr(i)
+		}
+		used[val] = true
+		list = append(list, norm{label, val, it.bodyHTML})
+	}
+	var b strings.Builder
+	b.WriteString("<Tabs defaultValue=" + jsxQuote(list[0].value) + ">")
+	b.WriteString("<TabsList>")
+	for _, n := range list {
+		b.WriteString("<TabsTrigger value=" + jsxQuote(n.value) + ">" + escape.HTML(n.label) + "</TabsTrigger>")
+	}
+	b.WriteString("</TabsList>")
+	for _, n := range list {
+		b.WriteString("<TabsContent value=" + jsxQuote(n.value) + ">" + directiveInner(n.html) + "</TabsContent>")
+	}
+	b.WriteString("</Tabs>")
+	return b.String()
+}
+
+type codeGroupItem struct {
+	lang string
+	code string
+}
+
+func parseCodeGroup(lines []string) []codeGroupItem {
+	var items []codeGroupItem
+	for i := 0; i < len(lines); {
+		if fenceRe.MatchString(strings.TrimSpace(lines[i])) {
+			lang, codeLines, next := collectFencedCode(lines, i)
+			items = append(items, codeGroupItem{lang: lang, code: strings.Join(codeLines, "\n")})
+			i = next
+			continue
+		}
+		i++
+	}
+	return items
+}
+
+func renderCodeGroupJSX(items []codeGroupItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	val := func(i int) string {
+		if items[i].lang == "" {
+			return "code-" + runeToStr(i)
+		}
+		return items[i].lang + "-" + runeToStr(i)
+	}
+	var b strings.Builder
+	b.WriteString("<Tabs defaultValue=" + jsxQuote(val(0)) + ">")
+	b.WriteString("<TabsList>")
+	for i, it := range items {
+		label := it.lang
+		if label == "" {
+			label = fmt.Sprintf("Code %d", i+1)
+		}
+		b.WriteString("<TabsTrigger value=" + jsxQuote(val(i)) + ">" + escape.HTML(label) + "</TabsTrigger>")
+	}
+	b.WriteString("</TabsList>")
+	for i, it := range items {
+		b.WriteString("<TabsContent value=" + jsxQuote(val(i)) + ">" + BuildCodeJSX(it.lang, it.code) + "</TabsContent>")
+	}
+	b.WriteString("</Tabs>")
+	return b.String()
+}
+
+func wrapDirectiveComponent(name, title, innerHTML string) string {
+	var b strings.Builder
+	b.WriteString("<" + name)
+	if title != "" {
+		b.WriteString(" title=" + jsxQuote(title))
+	}
+	b.WriteString(">")
+	b.WriteString(directiveInner(innerHTML))
+	b.WriteString("</" + name + ">")
+	return b.String()
+}
+
+// directiveInner wraps rendered markdown as dangerouslySetInnerHTML.
+func directiveInner(html string) string {
+	return "<div class=\"krate-directive-body\" dangerouslySetInnerHTML={{__html: `" +
+		escapeTemplateLiteral(html) + "`}} />"
+}
+
+func jsxQuote(s string) string { return "\"" + escape.HTMLAttr(s) + "\"" }
+
+// budgetSlug slugifies a label for use as a tab value (deterministic).
+func budgetSlug(label string, idx int) string {
+	var b strings.Builder
+	prev := false
+	for _, r := range strings.ToLower(label) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prev = false
+		} else if !prev && b.Len() > 0 {
+			b.WriteByte('-')
+			prev = true
+		}
+	}
+	s := strings.Trim(b.String(), "-")
+	if s == "" {
+		return "tab-" + runeToStr(idx)
+	}
+	return s
+}
+
+// DirectiveComponents returns the @krate/components names used by built-in
+// container directives in src, so the docs plugin can auto-import them.
+func DirectiveComponents(src string) []string {
+	used := map[string]bool{}
+	add := func(names ...string) {
+		for _, n := range names {
+			used[n] = true
+		}
+	}
+	for _, ln := range strings.Split(src, "\n") {
+		m := containerDirectiveRe.FindStringSubmatch(strings.TrimSpace(ln))
+		if m == nil {
+			continue
+		}
+		switch m[1] {
+		case "card":
+			add("Card")
+		case "steps":
+			add("Steps", "Step")
+		case "tabs":
+			add("Tabs", "TabsList", "TabsTrigger", "TabsContent")
+		case "code-group":
+			add("Tabs", "TabsList", "TabsTrigger", "TabsContent", "Code")
+		}
+	}
+	out := make([]string, 0, len(used))
+	for n := range used {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }

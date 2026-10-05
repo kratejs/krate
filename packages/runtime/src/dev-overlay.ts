@@ -39,16 +39,19 @@ interface DevConfig {
   open?: string;
   overlay?: boolean;
   toolbar?: boolean;
+  basePath?: string;
 }
 
 function devConfig(): Required<DevConfig> {
   const raw = (window as any).__KRATE_DEV__ as DevConfig | undefined;
+  const runtime = (window as any).__KRATE_CFG__ as DevConfig | undefined;
   return {
     sse: raw?.sse ?? '/__krate/hotreload',
     errors: raw?.errors ?? '/__krate/client-error',
     open: raw?.open ?? '/__krate/open',
     overlay: raw?.overlay ?? true,
     toolbar: raw?.toolbar ?? true,
+    basePath: raw?.basePath ?? runtime?.basePath ?? '',
   };
 }
 
@@ -65,9 +68,21 @@ function norm(p: string): string {
   return p.replace(/\/+$/, '') || '/';
 }
 
-/** Route matcher: a segment starting with `[` matches anything; `[...x]` matches the rest. */
-function routeMatches(pattern: string): boolean {
-  const a = norm(location.pathname).split('/');
+/** Strips the configured base path so match patterns (unprefixed) line up. */
+function stripBase(pathname: string, basePath: string): string {
+  if (basePath && (pathname === basePath || pathname.startsWith(basePath + '/'))) {
+    const rest = pathname.slice(basePath.length);
+    return rest === '' ? '/' : rest;
+  }
+  return pathname;
+}
+
+/**
+ * Route matcher: a segment starting with `[` matches anything; `[...x]` matches
+ * the rest. Exported (pure) for testing.
+ */
+export function routeMatches(pattern: string, pathname: string, basePath = ''): boolean {
+  const a = norm(stripBase(pathname, basePath)).split('/');
   const b = norm(pattern).split('/');
   for (let i = 0; i < b.length; i++) {
     const s = b[i];
@@ -326,7 +341,13 @@ class KrateDev {
     sse.addEventListener('reload', (e) => {
       try {
         const d = JSON.parse((e as MessageEvent).data);
-        if (d.pages && Array.isArray(d.pages) && !d.pages.some(routeMatches)) return;
+        if (
+          d.pages &&
+          Array.isArray(d.pages) &&
+          !d.pages.some((p: string) => routeMatches(p, location.pathname, this.cfg.basePath))
+        ) {
+          return;
+        }
       } catch {
         /* full reload */
       }

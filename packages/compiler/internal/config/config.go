@@ -265,6 +265,18 @@ type Config struct {
 	// router so the site works when hosted under a sub-path.
 	BasePath string `json:"basePath,omitempty"`
 
+	// ViewTransitions controls the View Transitions API integration. "" or
+	// "auto" (default) enables it (same-document SPA morphs + a cross-document
+	// @view-transition rule); "off" disables it.
+	ViewTransitions string `json:"-"`
+
+	// PPR enables Partial Prerendering region caching for non-ISR pages: every
+	// dynamic region is cached with PPRRevalidate seconds and revalidated in
+	// the background (stale-while-revalidate). Per-region `export const
+	// revalidate` directives override the window.
+	PPR           bool `json:"-"`
+	PPRRevalidate int  `json:"-"`
+
 	// Output selects the site output mode. "" (default) allows request-time
 	// rendering (SSR/ISR/streaming + dynamic route fallbacks). "static" makes
 	// the build fully static: dynamic routes render only the params returned by

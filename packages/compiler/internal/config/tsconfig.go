@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 )
@@ -375,6 +376,45 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return fmt.Errorf("expected string, got %T", val)
 		}
 		cfg.BasePath = s
+	case "viewTransitions":
+		switch v := val.(type) {
+		case bool:
+			if v {
+				cfg.ViewTransitions = "auto"
+			} else {
+				cfg.ViewTransitions = "off"
+			}
+		case string:
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "", "auto", "on", "true":
+				cfg.ViewTransitions = "auto"
+			case "off", "false", "none":
+				cfg.ViewTransitions = "off"
+			default:
+				return fmt.Errorf("viewTransitions: expected \"auto\" or \"off\", got %q", v)
+			}
+		default:
+			return fmt.Errorf("viewTransitions: expected boolean or string, got %T", val)
+		}
+	case "ppr":
+		switch v := val.(type) {
+		case bool:
+			cfg.PPR = v
+		case map[string]interface{}:
+			cfg.PPR = true
+			if n, ok := v["revalidate"]; ok {
+				switch rv := n.(type) {
+				case int64:
+					cfg.PPRRevalidate = int(rv)
+				case float64:
+					cfg.PPRRevalidate = int(rv)
+				default:
+					return fmt.Errorf("ppr.revalidate: expected number, got %T", n)
+				}
+			}
+		default:
+			return fmt.Errorf("ppr: expected boolean or object, got %T", val)
+		}
 	case "server":
 		m, ok := val.(map[string]interface{})
 		if !ok {

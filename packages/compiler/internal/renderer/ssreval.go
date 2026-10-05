@@ -1195,6 +1195,65 @@ func (e *SSREval) evalPlainCodeBlock(el *ast.JSXElement) string {
 	return b.String()
 }
 
+// evalLink renders the built-in <Link> as an <a> with the SPA/prefetch data
+// attributes the client router consumes. The generic element path then renders
+// it (attributes evaluated against the current bindings).
+func (e *SSREval) evalLink(el *ast.JSXElement) string {
+	prefetch := "true"
+	replace := ""
+	external := false
+	scrollFalse := false
+	var out []*ast.JSXAttr
+	for _, a := range el.Opening.Attributes {
+		if a.Spread {
+			out = append(out, a)
+			continue
+		}
+		switch a.Name {
+		case "prefetch":
+			if a.Value != nil {
+				prefetch = e.eval(a.Value)
+			}
+		case "replace":
+			if a.Value == nil {
+				replace = "true"
+			} else {
+				replace = e.eval(a.Value)
+			}
+		case "external":
+			external = true
+		case "scroll":
+			if lit, ok := a.Value.(*ast.Literal); ok && lit.Value == "false" {
+				scrollFalse = true
+			}
+		case "className":
+			out = append(out, &ast.JSXAttr{Name: "class", Value: a.Value})
+		default:
+			out = append(out, a)
+		}
+	}
+	if external {
+		out = append(out, &ast.JSXAttr{Name: "data-krate-external", Value: nil})
+	} else {
+		out = append(out, &ast.JSXAttr{Name: "data-krate-link", Value: nil})
+		if prefetch != "false" {
+			out = append(out, &ast.JSXAttr{Name: "data-prefetch", Value: nil})
+		}
+		if replace == "true" {
+			out = append(out, &ast.JSXAttr{Name: "data-krate-replace", Value: nil})
+		}
+		if scrollFalse {
+			out = append(out, &ast.JSXAttr{Name: "data-krate-scroll", Value: &ast.Literal{Kind: ast.StringLit, Value: "false"}})
+		}
+	}
+	clone := &ast.JSXElement{
+		Opening:  &ast.JSXOpening{Name: "a", Attributes: out, SelfClosing: el.Opening.SelfClosing},
+		Children: el.Children,
+		Closing:  &ast.JSXClosing{Name: "a"},
+	}
+	return e.evalJSX(clone)
+}
+
 func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 	// `showIf`/`visibleIf` sugar: {test && <el/>}. Signal-less components reach
 	// this path, so the test must be evaluated statically against the bindings
@@ -1254,6 +1313,13 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 			return html
 		}
 		return e.evalPlainCodeBlock(el)
+	}
+
+	// Built-in <Link>: lower to an <a> carrying the SPA/prefetch data
+	// attributes so signal-less components (theme chrome, breadcrumbs, prev/
+	// next) render real anchors instead of an unknown component.
+	if name == "Link" {
+		return e.evalLink(el)
 	}
 
 	// <Slot> (the `asChild` primitive): render its single child element with

@@ -32,6 +32,11 @@ type Config struct {
 	// Root and Env are carried to custom (plugin) rules.
 	Root string
 	Env  map[string]string
+
+	// Routes is the set of known site routes (leading slash; stored both with
+	// and without a trailing slash) used by the broken-link rule. Populated by
+	// the build pipeline before Run; empty disables the rule.
+	Routes map[string]bool
 }
 
 // customModules resolves configured custom rule paths against Root.

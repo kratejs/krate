@@ -36,6 +36,9 @@ The markdown renderer supports:
 
 - **GFM** — tables, task lists, autolinks, strikethrough
 - **Heading anchors** — every heading gets an `id` for deep-linking and TOC
+- **Definition lists** — a term line followed by `: definition` lines
+- **Footnotes** — `[^1]` references with `[^1]: text` definitions
+- **Emoji shortcodes** — `:rocket:` → 🚀 (outside code spans)
 - **Admonitions**
 
 :::note
@@ -60,8 +63,9 @@ export default function Hello() {
 ```
 
 - **Math** — with `math: true`, `$inline$` and `$$display$$` spans are wrapped
-  in `.krate-math` elements so a math renderer (KaTeX/MathJax auto-render) or
-  custom CSS can pick them up. Code spans/blocks are never touched:
+  in `.krate-math` elements. In the docs plugin, KaTeX is loaded from a CDN and
+  auto-renders them; elsewhere the spans are left for your own renderer/CSS.
+  Code spans/blocks are never touched:
 
   ```text
   The identity $e^{i\pi} + 1 = 0$ is famous.
@@ -85,6 +89,28 @@ Krate **compiles** Markdown into your components, with full Markdown inside.
 Directives are expanded to real component JSX at build time, so they appear in
 the output as static HTML with no client runtime. This works for any imported
 component (`:::component Steps`, `:::component Aside type="tip"`, …).
+
+### Built-in directives
+
+Four container directives lower to `@krate/components` without any import (the
+docs plugin auto-imports them):
+
+- `:::card Title` … `:::` — wraps the body in a `Card`.
+- `:::steps` with nested `::step Title` items — a `Steps` list.
+- `:::tabs` with nested `::tab Label` items — a `Tabs` panel.
+- `:::code-group` with fenced code blocks — one tab per language.
+
+```mdx
+:::steps
+::step Install
+Run `npm install`.
+::step Build
+Run `krate build`.
+:::
+```
+
+The `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent`, `Steps`, `Step`, `Card`,
+and `Code` components are imported automatically when their directive is used.
 
 ## MDX
 

@@ -65,7 +65,18 @@ interface BaseDocsLayoutProps {
   tocLabel?: string;
   editUrl?: string;
   tags?: string[];
+  categories?: string[];
+  date?: string;
+  lastUpdated?: string;
   options?: { themeStorageKey?: string };
+}
+
+function taxonomySlug(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
@@ -80,6 +91,9 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
   const editUrl = props.editUrl;
   const tags = props.tags || [];
   const hasTags = tags.length > 0;
+  const categories = props.categories || [];
+  const hasCategories = categories.length > 0;
+  const lastUpdated = props.lastUpdated || "";
   const isHero = props.template === "hero";
   const heroTitle = props.hero && props.hero.title ? props.hero.title : pageTitle;
   const heroTagline = props.hero && props.hero.tagline;
@@ -188,7 +202,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
       </Head>
 
       <header class="docs-navbar">
-        <a class="navbar-title" href="/docs/">{siteTitle}</a>
+            <Link className="navbar-title" href="/docs/">{siteTitle}</Link>
         <div class="navbar-actions">
           <div class="navbar-social-links">
             <SocialLinks links={props.socialLinks} />
@@ -246,22 +260,30 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
               {heroActions && (
                 <div class="docs-hero-actions">
                   {heroActions.map((action) => (
-                    <a
-                      class={`docs-hero-action${action.variant ? " docs-hero-action-" + action.variant : ""}`}
+                    <Link
+                      className={`docs-hero-action${action.variant ? " docs-hero-action-" + action.variant : ""}`}
                       href={action.link}
                     >
                       {action.text}
-                    </a>
+                    </Link>
                   ))}
                 </div>
               )}
             </section>
           )}
           <div class="docs-content">{props.children}</div>
-          {hasTags && (
+          {(hasTags || hasCategories) && (
             <div class="docs-tags">
-              {tags.map((tag) => (<span class="docs-tag">{tag}</span>))}
+              {tags.map((tag) => (
+                <Link className="docs-tag" href={"/docs/tags/" + taxonomySlug(tag) + "/"}>{tag}</Link>
+              ))}
+              {categories.map((cat) => (
+                <Link className="docs-tag docs-category" href={"/docs/categories/" + taxonomySlug(cat) + "/"}>{cat}</Link>
+              ))}
             </div>
+          )}
+          {lastUpdated !== "" && (
+            <p class="docs-last-updated">Last updated: {lastUpdated.slice(0, 10)}</p>
           )}
           <PrevNext
             prevTitle={props.prevTitle}

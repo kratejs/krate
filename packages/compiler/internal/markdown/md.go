@@ -11,17 +11,117 @@ import (
 
 // RenderToHTML converts Markdown source to HTML using the given config.
 func RenderToHTML(src string, cfg Config) string {
-	lines := strings.Split(src, "\n")
+	body, footnotes := extractFootnotes(src)
+	lines := strings.Split(body, "\n")
 	blocks := parseBlocks(lines, cfg)
 	var out strings.Builder
 	for _, b := range blocks {
 		out.WriteString(renderBlock(b, cfg))
 	}
 	html := out.String()
+	if len(footnotes) > 0 {
+		html = renderFootnotes(html, footnotes, cfg)
+	}
 	if cfg.Math {
 		html = wrapMath(html)
 	}
 	return html
+}
+
+// ─── Footnotes ──────────────────────────────────────────────────────────────
+
+type footnoteDef struct {
+	id   string
+	text string
+}
+
+var footnoteDefRe = regexp.MustCompile(`^\[\^([^\]]+)\]:\s*(.*)$`)
+var footnoteRefRe = regexp.MustCompile(`\[\^([^\]]+)\]`)
+
+// extractFootnotes pulls `[^id]: text` definitions out of the source, returning
+// the remaining body and the definitions in document order.
+func extractFootnotes(src string) (string, []footnoteDef) {
+	lines := strings.Split(src, "\n")
+	var out []string
+	var defs []footnoteDef
+	inFence := false
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		// Footnote definitions inside fenced code blocks are code, not defs.
+		if fenceRe.MatchString(trimmed) {
+			inFence = !inFence
+			out = append(out, lines[i])
+			continue
+		}
+		if inFence {
+			out = append(out, lines[i])
+			continue
+		}
+		m := footnoteDefRe.FindStringSubmatch(lines[i])
+		if m == nil {
+			out = append(out, lines[i])
+			continue
+		}
+		text := m[2]
+		// Continuation lines are indented.
+		for i+1 < len(lines) && (strings.HasPrefix(lines[i+1], "    ") || strings.HasPrefix(lines[i+1], "\t")) {
+			text += " " + strings.TrimSpace(lines[i+1])
+			i++
+		}
+		defs = append(defs, footnoteDef{id: m[1], text: strings.TrimSpace(text)})
+	}
+	return strings.Join(out, "\n"), defs
+}
+
+// renderFootnotes replaces `[^id]` references with numbered links and appends a
+// footnotes section. Unreferenced definitions are omitted.
+func renderFootnotes(html string, defs []footnoteDef, cfg Config) string {
+	byID := map[string]footnoteDef{}
+	for _, d := range defs {
+		byID[d.id] = d
+	}
+	numbers := map[string]int{}
+	order := []string{}
+	html = footnoteRefRe.ReplaceAllStringFunc(html, func(match string) string {
+		id := footnoteRefRe.FindStringSubmatch(match)[1]
+		if _, ok := byID[id]; !ok {
+			return match
+		}
+		n, ok := numbers[id]
+		if !ok {
+			n = len(order) + 1
+			numbers[id] = n
+			order = append(order, id)
+		}
+		return fmt.Sprintf(`<sup class="krate-footnote-ref" id="fnref-%s"><a href="#fn-%s">%d</a></sup>`, id, id, n)
+	})
+	if len(order) == 0 {
+		return html
+	}
+	var b strings.Builder
+	b.WriteString(html)
+	b.WriteString("<section class=\"krate-footnotes\">\n<ol>\n")
+	for _, id := range order {
+		d := byID[id]
+		b.WriteString(fmt.Sprintf("<li id=\"fn-%s\">%s <a class=\"krate-footnote-back\" href=\"#fnref-%s\" aria-label=\"Back to reference\">\u21a9</a></li>\n",
+			id, renderInline(d.text, cfg), id))
+	}
+	b.WriteString("</ol>\n</section>\n")
+	return b.String()
+}
+
+func renderDefinitionList(b block, cfg Config) string {
+	var out strings.Builder
+	out.WriteString("<dl>\n<dt>")
+	out.WriteString(renderInline(b.info, cfg))
+	out.WriteString("</dt>\n")
+	for _, def := range b.items {
+		out.WriteString("<dd>")
+		out.WriteString(renderInline(strings.Join(def.lines, " "), cfg))
+		out.WriteString("</dd>\n")
+	}
+	out.WriteString("</dl>\n")
+	return out.String()
 }
 
 // mathBlockRe matches a display-math span `$$...$$`; mathInlineRe matches an
@@ -103,6 +203,7 @@ const (
 	bThematicBreak
 	bHTML
 	bBlank
+	bDefinitionList
 )
 
 type block struct {
@@ -277,6 +378,24 @@ func parseBlocks(lines []string, cfg Config) []block {
 			continue
 		}
 
+		// Definition list: a term line followed by one or more `: definition`.
+		if i+1 < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[i+1]), ": ") {
+			term := strings.TrimSpace(line)
+			var defs []block
+			j := i + 1
+			for j < len(lines) {
+				d := strings.TrimSpace(lines[j])
+				if !strings.HasPrefix(d, ": ") {
+					break
+				}
+				defs = append(defs, block{typ: bParagraph, lines: []string{strings.TrimSpace(strings.TrimPrefix(d, ":"))}})
+				j++
+			}
+			blocks = append(blocks, block{typ: bDefinitionList, info: term, items: defs})
+			i = j
+			continue
+		}
+
 		// Raw HTML block (line starts with <)
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "<") && !strings.HasPrefix(trimmed, "</") {
@@ -360,6 +479,8 @@ func renderBlock(b block, cfg Config) string {
 		return "<hr>\n"
 	case bHTML:
 		return strings.Join(b.lines, "\n") + "\n"
+	case bDefinitionList:
+		return renderDefinitionList(b, cfg)
 	default:
 		return ""
 	}

@@ -646,7 +646,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		p.next()
 		right := p.parseExpr(precLowest)
 		p.expect(lexer.RPAREN)
-		body := p.parseBlock()
+		body := p.parseBlockOrStmt()
 		return &ast.ForInStmt{Position: pos, Left: forInitToExpr(init), Right: right, Body: body, IsForOf: isForOf, Keyword: keyword}
 	}
 
@@ -664,7 +664,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	}
 	p.expect(lexer.RPAREN)
 
-	body := p.parseBlock()
+	body := p.parseBlockOrStmt()
 	return &ast.ForStmt{Position: pos, Init: init, Test: test, Update: update, Body: body}
 }
 
@@ -688,13 +688,13 @@ func (p *Parser) parseWhileStmt() ast.Stmt {
 	p.expect(lexer.LPAREN)
 	test := p.parseExpr(precLowest)
 	p.expect(lexer.RPAREN)
-	body := p.parseBlock()
+	body := p.parseBlockOrStmt()
 	return &ast.WhileStmt{Position: pos, Test: test, Body: body}
 }
 
 func (p *Parser) parseDoWhileStmt() ast.Stmt {
 	pos := tokPos(p.next())
-	body := p.parseBlock()
+	body := p.parseBlockOrStmt()
 	p.expect(lexer.While_)
 	p.expect(lexer.LPAREN)
 	test := p.parseExpr(precLowest)
@@ -1046,6 +1046,21 @@ func (p *Parser) parseBlock() []ast.Stmt {
 	body := p.parseStmtList(lexer.RBRACE)
 	p.expect(lexer.RBRACE)
 	return body
+}
+
+// parseBlockOrStmt parses a control-flow body that may be either a
+// brace-delimited block or a single unbraced statement (`for (…) x++;`,
+// `while (…) if (y) z();`). The single statement is wrapped in a one-element
+// list so callers keep the []Stmt shape.
+func (p *Parser) parseBlockOrStmt() []ast.Stmt {
+	if p.peek().Kind == lexer.LBRACE {
+		return p.parseBlock()
+	}
+	stmt := p.parseStmt()
+	if stmt == nil {
+		return nil
+	}
+	return []ast.Stmt{stmt}
 }
 
 func (p *Parser) parseStmtList(end lexer.Kind) []ast.Stmt {

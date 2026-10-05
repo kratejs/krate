@@ -18,24 +18,29 @@ class FakeEventSource {
   }
 }
 
+let routeMatches: typeof import('./dev-overlay').routeMatches;
+
+// File-level setup: globals must exist BEFORE the overlay module auto-inits on
+// import, and the export is captured from the same module instance.
+beforeAll(async () => {
+  (globalThis as any).EventSource = FakeEventSource;
+  (window as any).__KRATE_DEV__ = {
+    sse: '/__krate/hotreload',
+    errors: '/__krate/client-error',
+    open: '/__krate/open',
+    overlay: true,
+    toolbar: true,
+  };
+  const mod = await import('./dev-overlay');
+  routeMatches = mod.routeMatches;
+});
+
 function devRoot(): ShadowRoot | null {
   const host = document.getElementById('krate-dev-root');
   return host ? host.shadowRoot : null;
 }
 
 describe('dev-overlay', () => {
-  beforeAll(async () => {
-    (globalThis as any).EventSource = FakeEventSource;
-    (window as any).__KRATE_DEV__ = {
-      sse: '/__krate/hotreload',
-      errors: '/__krate/client-error',
-      open: '/__krate/open',
-      overlay: true,
-      toolbar: true,
-    };
-    await import('./dev-overlay');
-  });
-
   it('mounts a shadow-root host with a toolbar', () => {
     const shadow = devRoot();
     expect(shadow).toBeTruthy();
@@ -88,5 +93,20 @@ describe('dev-overlay', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     const overlay = devRoot()!.querySelector('.overlay') as HTMLElement;
     expect(overlay.hidden).toBe(true);
+  });
+});
+
+describe('routeMatches', () => {
+  it('matches unprefixed patterns against a base-path URL', () => {
+    expect(routeMatches('/about', '/docs/about', '/docs')).toBe(true);
+    expect(routeMatches('/about', '/docs/other', '/docs')).toBe(false);
+    expect(routeMatches('/', '/docs/', '/docs')).toBe(true);
+  });
+
+  it('matches root deployment and dynamic segments', () => {
+    expect(routeMatches('/about', '/about', '')).toBe(true);
+    expect(routeMatches('/blog/[slug]', '/blog/hello', '')).toBe(true);
+    expect(routeMatches('/blog/[slug]', '/blog/hello/x', '')).toBe(false);
+    expect(routeMatches('/docs/[...rest]', '/docs/a/b/c', '')).toBe(true);
   });
 });

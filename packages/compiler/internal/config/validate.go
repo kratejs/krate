@@ -40,6 +40,7 @@ var knownTopLevelKeys = map[string]bool{
 	"entry": true, "outDir": true, "pagesDir": true, "publicDir": true,
 	"minify": true, "minifyHTML": true, "minifyCSS": true, "minifyJS": true,
 	"sourcemap": true, "devServer": true, "plugins": true, "emitReact": true,
+	"viewTransitions": true, "ppr": true,
 	"markdown": true, "tailwind": true, "csp": true, "runtime": true, "ssr": true,
 	"pathAliases": true, "tsBaseDir": true, "redirects": true, "rewrites": true,
 	"seo": true, "robots": true, "output": true, "serverComponents": true,

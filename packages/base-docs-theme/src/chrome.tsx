@@ -15,6 +15,8 @@ interface SidebarItem {
 interface SidebarSectionProps {
   item: SidebarItem;
   currentPath: string;
+  /** Ancestor-derived key used to persist this section's open/closed state. */
+  parentKey?: string;
 }
 
 function sectionHasActive(item: SidebarItem, currentPath: string): boolean {
@@ -36,34 +38,35 @@ function SidebarSection(props: SidebarSectionProps) {
   const isCollapsible = item.collapsible;
   const containsActive = sectionHasActive(item, currentPath);
   const open = !isCollapsible || item.expanded || containsActive;
+  const navKey = (props.parentKey ? props.parentKey + "/" : "") + (item.indexURL || item.title);
 
   if (!hasChildren && item.url) {
     return (
-      <a
-        class={`sidebar-link${containsActive ? ' active' : ''}`}
+      <Link
+        className={`sidebar-link${containsActive ? ' active' : ''}`}
         href={item.url}
       >
         {item.icon && <span class="sidebar-icon"><Icon name={item.icon} width="16" height="16" /></span>}
         <span class="sidebar-label">{item.title}</span>
         {item.badge && <span class={`sidebar-badge${item.badge.variant ? " sidebar-badge-" + item.badge.variant : ""}`}>{item.badge.text}</span>}
-      </a>
+      </Link>
     );
   }
 
   const sectionClass = `sidebar-section${isCollapsible ? ' sidebar-collapsible' : ' sidebar-section-static'}${open ? ' open' : ' collapsed'}${containsActive ? ' active' : ''}`;
 
   return (
-    <div class={sectionClass}>
+    <div class={sectionClass} data-nav-key={navKey}>
       <div class="sidebar-section-row">
         {item.indexURL ? (
-          <a
-            class={`sidebar-section-link${item.indexURL === currentPath ? ' active' : ''}`}
+          <Link
+            className={`sidebar-section-link${item.indexURL === currentPath ? ' active' : ''}`}
             href={item.indexURL}
           >
             {item.icon && <span class="sidebar-icon"><Icon name={item.icon} width="16" height="16" /></span>}
             <span class="sidebar-label">{item.title}</span>
             {item.badge && <span class={`sidebar-badge${item.badge.variant ? " sidebar-badge-" + item.badge.variant : ""}`}>{item.badge.text}</span>}
-          </a>
+          </Link>
         ) : (
           <span class="sidebar-section-link">
             {item.icon && <span class="sidebar-icon"><Icon name={item.icon} width="16" height="16" /></span>}
@@ -84,7 +87,7 @@ function SidebarSection(props: SidebarSectionProps) {
       </div>
       <div class="sidebar-section-children">
         {item.children && item.children.map((child) => (
-          <SidebarSection item={child} currentPath={currentPath} />
+          <SidebarSection item={child} currentPath={currentPath} parentKey={navKey} />
         ))}
       </div>
     </div>
@@ -145,12 +148,51 @@ export function SidebarNav(props: SidebarNavProps) {
       }
     }
 
+    // Folder (section) open/closed state persists across reloads + SPA
+    // navigation, keyed by the section's ancestor path.
+    var STORAGE_PREFIX = "krate-docs-nav:";
+    function readNavState(key: string): string | null {
+      try {
+        return window.localStorage.getItem(STORAGE_PREFIX + key);
+      } catch (e) {
+        return null;
+      }
+    }
+    function writeNavState(key: string, open: boolean) {
+      try {
+        window.localStorage.setItem(STORAGE_PREFIX + key, open ? "open" : "closed");
+      } catch (e) {
+        /* storage unavailable (private mode) — ignore */
+      }
+    }
+    function restoreNavState() {
+      var sections = el.querySelectorAll(".sidebar-collapsible[data-nav-key]");
+      for (var i = 0; i < sections.length; i++) {
+        var section = sections[i] as HTMLElement;
+        // Always reveal the section that contains the current page.
+        if (section.classList.contains("active")) {
+          setSectionOpen(section, true);
+          continue;
+        }
+        var key = section.getAttribute("data-nav-key");
+        if (!key) continue;
+        var stored = readNavState(key);
+        if (stored === "open") setSectionOpen(section, true);
+        else if (stored === "closed") setSectionOpen(section, false);
+      }
+    }
+
     function onClick(e: MouseEvent) {
       var target = e.target as HTMLElement;
       var toggle = target.closest(".sidebar-section-toggle") as HTMLElement | null;
       if (toggle) {
         var section = toggle.closest(".sidebar-collapsible") as HTMLElement | null;
-        if (section) setSectionOpen(section, !section.classList.contains("open"));
+        if (section) {
+          var willOpen = !section.classList.contains("open");
+          setSectionOpen(section, willOpen);
+          var key = section.getAttribute("data-nav-key");
+          if (key) writeNavState(key, willOpen);
+        }
         return;
       }
       var link = target.closest("a[href]") as HTMLElement | null;
@@ -159,6 +201,7 @@ export function SidebarNav(props: SidebarNavProps) {
 
     el.addEventListener("click", onClick);
     refreshActive();
+    restoreNavState();
   });
 
   return (
@@ -237,6 +280,13 @@ export function TOCNav(props: TOCNavProps) {
 
     function ensureIndicatorSvg() {
       if (indicatorSvg) return;
+      // SPA navigation re-runs this component against the kept <nav> element,
+      // so a previous mount's manually-appended indicator would otherwise
+      // accumulate. Remove any stale indicator before creating a fresh one.
+      var stale = nav.querySelectorAll(".toc-indicator-svg");
+      for (var s = 0; s < stale.length; s++) {
+        stale[s].remove();
+      }
       var ns = "http://www.w3.org/2000/svg";
       var svg = document.createElementNS(ns, "svg");
       svg.setAttribute("class", "toc-indicator-svg");
@@ -543,7 +593,7 @@ export function Breadcrumbs(props: BreadcrumbsProps) {
           {item.isLast ? (
             <span class="current">{item.label}</span>
           ) : (
-            <a href={item.url}>{item.label}</a>
+            <Link href={item.url}>{item.label}</Link>
           )}
         </span>
       ))}
@@ -571,16 +621,16 @@ export function PrevNext(props: PrevNextProps) {
   return (
     <div class="docs-nav">
       {hasPrev && (
-        <a class="nav-prev" href={prevLink}>
+        <Link className="nav-prev" href={prevLink}>
           <span class="nav-direction">Previous</span>
           <span class="nav-title">{prevTitle}</span>
-        </a>
+        </Link>
       )}
       {hasNext && (
-        <a class="nav-next" href={nextLink}>
+        <Link className="nav-next" href={nextLink}>
           <span class="nav-direction">Next</span>
           <span class="nav-title">{nextTitle}</span>
-        </a>
+        </Link>
       )}
     </div>
   );

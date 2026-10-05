@@ -457,10 +457,22 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, absOut, route
 		shell = replaceTitle(shell, res.titleOverride)
 	}
 
-	// The caller owns response headers (Content-Type, cache headers) and sets
-	// them before calling this function. The 200 status is committed implicitly
-	// by the first body write below; this function only writes the body,
-	// flushing after each splice so the page streams progressively.
+	// Status headers must be set BEFORE the first body write below: the caller's
+	// post-return Set calls would otherwise be silently dropped once the body is
+	// committed. All region frames have been read by now, so the page-region
+	// cache/render status is known.
+	if res.renderErr != "" {
+		w.Header().Set("X-Krate-Error", "render")
+	}
+	if res.isISR && res.cacheStatus != "" {
+		w.Header().Set("X-Krate-Cache", strings.ToUpper(res.cacheStatus))
+	}
+
+	// The caller owns the remaining response headers (Content-Type, cache
+	// headers) and sets them before calling this function. The 200 status is
+	// committed implicitly by the first body write below; this function only
+	// writes the body, flushing after each splice so the page streams
+	// progressively.
 	flush := func() {
 		if flusher != nil {
 			flusher.Flush()
@@ -697,6 +709,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	ssr := NewSSRServer(root, ssrPort, cfg.SSR.SSRRuntime)
 	ssr.SetEnv(environ.Current)
 	ssr.SetTuning(cfg.SSR.Timeout, cfg.SSR.MaxCacheSize)
+	ssr.SetPPR(cfg.PPR, cfg.PPRRevalidate)
 	ssrStarted := false
 	if err := ssr.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %s⚠ SSR renderer not started:%s %v\n", cYellow, cReset, err)

@@ -120,6 +120,12 @@ export interface DocsLayoutProps<Options = DocsThemeOptions> {
   editUrl?: string;
   /** Page tags (rendered as chips + included in search). */
   tags?: string[];
+  /** Page categories (rendered as chips linking to category indexes). */
+  categories?: string[];
+  /** Published date (frontmatter `date`, ISO string). */
+  date?: string;
+  /** Last-updated date (frontmatter `lastUpdated` or git commit date). */
+  lastUpdated?: string;
   /** Rendered markdown content. */
   children?: unknown;
   /** Theme options forwarded when the descriptor declares them. */

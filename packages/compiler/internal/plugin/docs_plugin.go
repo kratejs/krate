@@ -27,6 +27,9 @@ type DocsPluginOptions struct {
 	Links        []SocialLink       `json:"links"`
 	Search       *DocsSearchOptions `json:"search"`
 	EditLinkBase string             `json:"editLinkBase"`
+	// LastUpdated fills each page's "last updated" date from git history when
+	// frontmatter omits it (default: true). Set false to skip git lookups.
+	LastUpdated *bool `json:"lastUpdated,omitempty"`
 }
 
 // DocsThemeDescriptor mirrors the shape a docs theme factory returns
@@ -129,9 +132,10 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 	}
 
 	scanCfg := docs.Config{
-		ContentDir: opts.ContentDir,
-		Root:       ctx.Root,
-		MDConfig:   cfg.Markdown,
+		ContentDir:     opts.ContentDir,
+		Root:           ctx.Root,
+		MDConfig:       cfg.Markdown,
+		GitLastUpdated: opts.LastUpdated == nil || *opts.LastUpdated,
 	}
 
 	pages, err := docs.Scan(scanCfg)
@@ -223,7 +227,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 			if searchEnabled {
 				searchBarRel = searchBarImportRel(tsxPath, genDir)
 			}
-			tsxSource := p.generateTSX(ctx, page, fileLayoutRel, searchBarRel, sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, opts, themeOptions, cfg.Markdown)
+			tsxSource := p.generateTSX(ctx, cfg, page, fileLayoutRel, searchBarRel, sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, opts, themeOptions, cfg.Markdown)
 
 			_ = os.MkdirAll(filepath.Dir(tsxPath), 0755)
 			_ = os.WriteFile(tsxPath, []byte(tsxSource), 0644)
@@ -247,6 +251,10 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 		if ctx.GeneratedPages != nil {
 			*ctx.GeneratedPages = append(*ctx.GeneratedPages, GeneratedPage{Path: res.tsxPath, Route: res.route})
 		}
+	}
+
+	if err := generateTaxonomyPages(ctx, genDir, theme, opts, pages, sections); err != nil {
+		return fmt.Errorf("generating tag/category pages: %w", err)
 	}
 
 	return nil
@@ -494,7 +502,7 @@ func applyNavOverride(override *docs.NavOverride, autoTitle, autoLink string) (t
 	return title, link, link != ""
 }
 
-func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, page docs.Page, layoutRel, searchBarRel string, sections []docs.SidebarItem, tocItems []docs.TOCItem, breadcrumbs []docs.Breadcrumb, prevTitle, prevLink, nextTitle, nextLink string, opts *DocsPluginOptions, themeOptions json.RawMessage, mdConfig markdown.Config) string {
+func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page docs.Page, layoutRel, searchBarRel string, sections []docs.SidebarItem, tocItems []docs.TOCItem, breadcrumbs []docs.Breadcrumb, prevTitle, prevLink, nextTitle, nextLink string, opts *DocsPluginOptions, themeOptions json.RawMessage, mdConfig markdown.Config) string {
 	prevTitle, prevLink, prevOk := applyNavOverride(page.Prev, prevTitle, prevLink)
 	nextTitle, nextLink, nextOk := applyNavOverride(page.Next, nextTitle, nextLink)
 	siteTitle := opts.Title
@@ -505,10 +513,11 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, page docs.Page, layoutRel, s
 
 	var mdxImports []string
 	var segments []markdown.MDXSegment
+	var rawSrc string
 	if data, err := os.ReadFile(page.SourcePath); err == nil {
-		src := string(data)
-		mdxImports = markdown.ExtractImports(src)
-		_, segments = markdown.ParseMDXSegments(src, mdConfig)
+		rawSrc = string(data)
+		mdxImports = markdown.ExtractImports(rawSrc)
+		_, segments = markdown.ParseMDXSegments(rawSrc, mdConfig)
 	}
 	useCode := markdown.HasCodeSegments(segments)
 	useAside := markdown.HasAsideSegments(segments)
@@ -517,11 +526,25 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, page docs.Page, layoutRel, s
 		sb.WriteString(imp)
 		sb.WriteString("\n")
 	}
+
+	// Auto-import the built-in components referenced by the page: Code/Aside
+	// segments plus the components lowered from :::directives.
+	imported := map[string]bool{}
+	addImport := func(name string) {
+		if imported[name] {
+			return
+		}
+		imported[name] = true
+		sb.WriteString("import { " + name + " } from \"@krate/components\";\n")
+	}
 	if useCode {
-		sb.WriteString("import { Code } from \"@krate/components\";\n")
+		addImport("Code")
 	}
 	if useAside {
-		sb.WriteString("import { Aside } from \"@krate/components\";\n")
+		addImport("Aside")
+	}
+	for _, comp := range markdown.DirectiveComponents(rawSrc) {
+		addImport(comp)
 	}
 
 	if layoutRel != "" {
@@ -612,6 +635,24 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, page docs.Page, layoutRel, s
 		sb.WriteString(string(tagsJSON))
 		sb.WriteString(",\n")
 	}
+	if len(page.Categories) > 0 {
+		catsJSON := marshalJSONArray(page.Categories)
+		sb.WriteString("    categories: ")
+		sb.WriteString(string(catsJSON))
+		sb.WriteString(",\n")
+	}
+	if page.Date != "" {
+		dateJSON, _ := json.Marshal(page.Date)
+		sb.WriteString("    date: ")
+		sb.WriteString(string(dateJSON))
+		sb.WriteString(",\n")
+	}
+	if page.Updated != "" {
+		updatedJSON, _ := json.Marshal(page.Updated)
+		sb.WriteString("    lastUpdated: ")
+		sb.WriteString(string(updatedJSON))
+		sb.WriteString(",\n")
+	}
 
 	if prevOk {
 		prevTitleJSON, _ := json.Marshal(prevTitle)
@@ -667,6 +708,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, page docs.Page, layoutRel, s
 		sb.WriteString(jsxAttrExpr(page.Description))
 		sb.WriteString(" />\n")
 	}
+	sb.WriteString(docsHeadExtras(cfg, page, opts.Title))
 	for _, ht := range page.Head {
 		sb.WriteString("        ")
 		sb.WriteString(headTagJSX(ht))

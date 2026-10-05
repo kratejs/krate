@@ -63,6 +63,9 @@ func renderInline(text string, cfg Config) string {
 		text = strikeRe.ReplaceAllString(text, "<del>$1</del>")
 	}
 
+	// Emoji shortcodes (`:smile:` → 😄), outside inline code spans.
+	text = replaceEmoji(text)
+
 	// Autolinks (GFM) — skip URLs already inside HTML attributes (e.g.
 	// href="...") to avoid double-wrapping in <a> tags.
 	if cfg.GFM {
@@ -120,4 +123,88 @@ func safeURL(dest string) bool {
 	// it matches the RFC 3986 scheme grammar ([a-zA-Z][a-zA-Z0-9+.-]*). Only a
 	// scheme-like prefix is treated as a scheme to reject.
 	return !schemeRe.MatchString(scheme)
+}
+
+// --- Emoji shortcodes -------------------------------------------------------
+
+var emojiRe = regexp.MustCompile(`:([a-z0-9_+-]+):`)
+var codeSpanRe = regexp.MustCompile(`(?s)<code>.*?</code>`)
+
+// emojiMap is a small built-in set of common GitHub-style shortcodes. Unknown
+// names are left untouched.
+var emojiMap = map[string]string{
+	"smile":                "\U0001F604",
+	"grin":                 "\U0001F601",
+	"joy":                  "\U0001F602",
+	"laughing":             "\U0001F606",
+	"wink":                 "\U0001F609",
+	"heart":                "\u2764\uFE0F",
+	"thumbsup":             "\U0001F44D",
+	"+1":                   "\U0001F44D",
+	"thumbsdown":           "\U0001F44E",
+	"-1":                   "\U0001F44E",
+	"fire":                 "\U0001F525",
+	"rocket":               "\U0001F680",
+	"sparkles":             "\u2728",
+	"star":                 "\u2B50",
+	"tada":                 "\U0001F389",
+	"warning":              "\u26A0\uFE0F",
+	"bulb":                 "\U0001F4A1",
+	"memo":                 "\U0001F4DD",
+	"book":                 "\U0001F4D6",
+	"books":                "\U0001F4DA",
+	"link":                 "\U0001F517",
+	"lock":                 "\U0001F512",
+	"key":                  "\U0001F511",
+	"gear":                 "\u2699\uFE0F",
+	"zap":                  "\u26A1",
+	"bug":                  "\U0001F41B",
+	"package":              "\U0001F4E6",
+	"wrench":               "\U0001F527",
+	"hammer":               "\U0001F528",
+	"check":                "\u2705",
+	"white_check_mark":     "\u2705",
+	"x":                    "\u274C",
+	"warning2":             "\u26A0\uFE0F",
+	"information_source":   "\u2139\uFE0F",
+	"question":             "\u2753",
+	"eyes":                 "\U0001F440",
+	"clap":                 "\U0001F44F",
+	"raised_hands":         "\U0001F64C",
+	"wave":                 "\U0001F44B",
+	"point_right":          "\U0001F449",
+	"point_left":           "\U0001F448",
+	"heavy_check_mark":     "\u2714\uFE0F",
+	"arrow_right":          "\u27A1\uFE0F",
+	"arrow_left":           "\u2B05\uFE0F",
+	"computer":             "\U0001F4BB",
+	"globe_with_meridians": "\U0001F310",
+	"construction":         "\U0001F6A7",
+	"recycle":              "\u267B\uFE0F",
+}
+
+// replaceEmoji substitutes known `:shortcode:` tokens outside inline code.
+func replaceEmoji(text string) string {
+	if !strings.Contains(text, ":") {
+		return text
+	}
+	var b strings.Builder
+	last := 0
+	for _, loc := range codeSpanRe.FindAllStringIndex(text, -1) {
+		b.WriteString(emojiReplace(text[last:loc[0]]))
+		b.WriteString(text[loc[0]:loc[1]])
+		last = loc[1]
+	}
+	b.WriteString(emojiReplace(text[last:]))
+	return b.String()
+}
+
+func emojiReplace(s string) string {
+	return emojiRe.ReplaceAllStringFunc(s, func(m string) string {
+		name := m[1 : len(m)-1]
+		if e, ok := emojiMap[name]; ok {
+			return e
+		}
+		return m
+	})
 }

@@ -41,6 +41,7 @@ func (b *Builder) runQualityChecks(results []*PageResult, runtimeJSFile string) 
 	}
 
 	pages := b.checkPages(results, runtimeJSFile)
+	cfg.Routes = routeSet(pages)
 	findings, err := check.Run(cfg, pages)
 	if err != nil {
 		return fmt.Errorf("running checks: %w", err)
@@ -120,6 +121,7 @@ func (b *Builder) CheckSite(useDefaults bool) ([]check.Finding, check.Config, er
 	if err != nil {
 		return nil, cfg, err
 	}
+	cfg.Routes = routeSet(pages)
 	findings, err := check.Run(cfg, pages)
 	if err != nil {
 		return nil, cfg, err
@@ -273,4 +275,21 @@ func readManifestPages(outDir string) (manifestInfo, error) {
 		return m, err
 	}
 	return m, nil
+}
+
+// routeSet builds the normalized route inventory (with and without trailing
+// slashes) used by the broken-link rule.
+func routeSet(pages []check.Page) map[string]bool {
+	set := map[string]bool{}
+	for _, p := range pages {
+		r := p.Route
+		if r == "" {
+			r = "/"
+		}
+		trimmed := strings.TrimSuffix(r, "/")
+		set[r] = true
+		set[trimmed] = true
+		set[trimmed+"/"] = true
+	}
+	return set
 }

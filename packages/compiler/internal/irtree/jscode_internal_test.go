@@ -87,3 +87,41 @@ func TestCodegenIssuesCleanForSupportedConstructs(t *testing.T) {
 		t.Errorf("unexpected codegen issues for supported constructs: %v", issues)
 	}
 }
+
+func TestClientLinkLowering(t *testing.T) {
+	prog := parseForTest(t, `function App() {
+		return <Link href="/about" className="nav">About</Link>;
+	}`)
+	fn, ok := prog.Body[0].(*ast.FnDecl)
+	if !ok {
+		t.Fatalf("expected FnDecl, got %T", prog.Body[0])
+	}
+	got := flat(RenderComponentFnJS(fn))
+	for _, want := range []string{"h('a',{", "'data-krate-link':true", "'data-prefetch':(true)", "class:'nav'", "'About'"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("client <Link> lowering missing %q in: %s", want, got)
+		}
+	}
+}
+
+func TestClientLinkExternalAndPrefetchOff(t *testing.T) {
+	prog := parseForTest(t, `function App() {
+		return <Link href="https://x.test" external>X</Link>;
+	}`)
+	fn := prog.Body[0].(*ast.FnDecl)
+	got := flat(RenderComponentFnJS(fn))
+	if !strings.Contains(got, "'data-krate-external':true") {
+		t.Errorf("external <Link> not lowered: %s", got)
+	}
+	if strings.Contains(got, "'data-krate-link':true") {
+		t.Errorf("external <Link> must not get data-krate-link: %s", got)
+	}
+
+	pf := parseForTest(t, `function App() {
+		return <Link href="/a" prefetch={false}>A</Link>;
+	}`)
+	got2 := flat(RenderComponentFnJS(pf.Body[0].(*ast.FnDecl)))
+	if !strings.Contains(got2, "'data-prefetch':(false)") {
+		t.Errorf("prefetch={false} not preserved: %s", got2)
+	}
+}

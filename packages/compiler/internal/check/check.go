@@ -137,13 +137,17 @@ var builtinRules = []builtinRule{
 	{"a11y/tabindex", CategoryA11y, Warning, rulePositiveTabindex},
 	{"a11y/aria-role", CategoryA11y, Warning, ruleARIARole},
 	{"a11y/color-contrast", CategoryA11y, Warning, ruleColorContrast},
+	{"a11y/broken-anchor", CategoryA11y, Warning, ruleBrokenAnchor},
 
 	// ── seo ───────────────────────────────────────────────────────────────
 	{"seo/title", CategorySEO, Error, ruleTitle},
 	{"seo/description", CategorySEO, Warning, ruleDescription},
 	{"seo/canonical", CategorySEO, Warning, ruleCanonical},
 	{"seo/og", CategorySEO, Warning, ruleOpenGraph},
+	{"seo/og-image", CategorySEO, Warning, ruleOGImage},
 	{"seo/lang", CategorySEO, Warning, ruleLang},
+	{"seo/broken-link", CategorySEO, Warning, ruleBrokenLink},
+	{"seo/duplicate-meta", CategorySEO, Warning, ruleDuplicateMeta},
 
 	// ── perf ──────────────────────────────────────────────────────────────
 	{"perf/js-budget", CategoryPerf, Warning, ruleJSBudget},
@@ -195,6 +199,18 @@ func Run(cfg Config, pages []Page) ([]Finding, error) {
 				}
 				findings = append(findings, f)
 			}
+		}
+	}
+
+	// Cross-page rules run once over the whole site.
+	if active, override := cfg.rulePolicy("seo/duplicate-meta", CategorySEO); active {
+		for _, f := range duplicateMetaFindings(pages) {
+			f.Rule = "seo/duplicate-meta"
+			f.Category = CategorySEO
+			if override != Off {
+				f.Severity = override
+			}
+			findings = append(findings, f)
 		}
 	}
 

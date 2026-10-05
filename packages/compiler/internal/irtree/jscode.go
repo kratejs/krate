@@ -594,6 +594,13 @@ func arrowBodyExpr(arrow *ast.ArrowFn) ast.Expr {
 func generateJSXJS(el *ast.JSXElement, signals map[string]ast.Expr) string {
 	var b strings.Builder
 	name := el.Opening.Name
+	// The built-in <Link> lowers to an <a> carrying the SPA/prefetch data
+	// attributes — in the client codegen as well as the server/IR path. Without
+	// this, a client component using <Link> would emit `h(Link, …)` and throw
+	// "Link is not defined" at hydration.
+	if name == "Link" {
+		return generateLinkJSX(el, signals)
+	}
 	// Uppercase tag names are components — reference them as function refs so
 	// the runtime `h()` invokes the component rather than creating a DOM
 	// element with a bogus tag like <Toast>.
@@ -637,6 +644,92 @@ func generateJSXJS(el *ast.JSXElement, signals map[string]ast.Expr) string {
 	}
 
 	// Children
+	for _, child := range el.Children {
+		b.WriteString(",")
+		switch c := child.(type) {
+		case *ast.JSXText:
+			b.WriteString("'")
+			b.WriteString(escape.JSString(c.Value))
+			b.WriteString("'")
+		case *ast.JSXExprContainer:
+			b.WriteString(generateExprJS(c.Expression, signals))
+		case *ast.JSXElementChild:
+			b.WriteString(generateJSXJS(c.Element, signals))
+		case *ast.JSXFragmentChild:
+			b.WriteString(generateJSXFragmentJS(c.Fragment, signals))
+		}
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// generateLinkJSX lowers the built-in <Link> to an <a> with the SPA navigation
+// and prefetch data attributes the runtime router looks for. The router filters
+// non-local links at runtime (origin/scheme), so `data-krate-link` is always
+// emitted for internal handling; `external` opts out explicitly.
+func generateLinkJSX(el *ast.JSXElement, signals map[string]ast.Expr) string {
+	prefetch := "true"
+	replace := ""
+	external := false
+	scrollFalse := false
+	var props []string
+	for _, attr := range el.Opening.Attributes {
+		if attr.Spread {
+			props = append(props, "..."+generateExprJS(attr.Value, signals))
+			continue
+		}
+		var val string
+		if attr.Value != nil {
+			val = generateExprJS(attr.Value, signals)
+		}
+		switch attr.Name {
+		case "prefetch":
+			if attr.Value != nil {
+				prefetch = val
+			}
+		case "replace":
+			if attr.Value == nil {
+				replace = "true"
+			} else {
+				replace = val
+			}
+		case "external":
+			external = true
+		case "scroll":
+			if lit, ok := attr.Value.(*ast.Literal); ok && lit.Value == "false" {
+				scrollFalse = true
+			} else if attr.Value != nil {
+				props = append(props, "'data-krate-scroll':("+val+")===false?'false':undefined")
+			}
+		default:
+			key := attr.Name
+			if key == "className" {
+				key = "class"
+			}
+			if attr.Value == nil {
+				props = append(props, jsObjectKey(key)+":true")
+			} else {
+				props = append(props, jsObjectKey(key)+":"+val)
+			}
+		}
+	}
+	if external {
+		props = append(props, "'data-krate-external':true")
+	} else {
+		props = append(props, "'data-krate-link':true")
+		props = append(props, "'data-prefetch':("+prefetch+")")
+		if replace != "" {
+			props = append(props, "'data-krate-replace':("+replace+")")
+		}
+		if scrollFalse {
+			props = append(props, "'data-krate-scroll':'false'")
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("h('a',{")
+	b.WriteString(strings.Join(props, ","))
+	b.WriteString("}")
 	for _, child := range el.Children {
 		b.WriteString(",")
 		switch c := child.(type) {

@@ -266,6 +266,22 @@ the new page's hydration JS then rebinds the kept nodes. Emits a
 `reinitRouter()` tears down and re-registers the router listeners — useful
 after a full page replacement or for HMR in dev.
 
+Programmatic navigation:
+
+```typescript
+import { navigate } from '@krate/runtime'
+navigate('/about', { replace: false, scroll: true })
+```
+
+`navigate` returns `false` when handled client-side and `true` when it fell back
+to a full page load (router not initialized, or a cross-origin URL). The router
+also emits `krate:navigate-start` before the DOM mutation and
+`krate:navigate-end` after it — a pairing that powers View Transitions and
+progress UI — plus `krate:navigate` after history/scroll updates. Elements with
+`data-view-transition="name"` are given a matching `view-transition-name`, and
+the router wraps the mutation in `document.startViewTransition` when supported
+(honoring `prefers-reduced-motion`).
+
 ## Context
 
 ```typescript

@@ -65,11 +65,15 @@ krate check && echo "quality gates passed"
 | `a11y/tabindex` | a11y | warning | positive `tabindex` (breaks focus order) |
 | `a11y/aria-role` | a11y | warning | unknown/invalid ARIA `role` value |
 | `a11y/color-contrast` | a11y | warning | inline text/background contrast below 4.5:1 |
+| `a11y/broken-anchor` | a11y | warning | in-page `#id` link with no matching `id` |
 | `seo/title` | seo | error | missing `<title>` or title over 60 characters |
 | `seo/description` | seo | warning | missing/over-long meta description |
 | `seo/canonical` | seo | warning | missing `<link rel="canonical">` |
 | `seo/og` | seo | warning | missing Open Graph tags (`og:title`/`og:type`/`og:url`) |
+| `seo/og-image` | seo | warning | missing or relative `og:image` |
 | `seo/lang` | seo | warning | `<html>` missing `lang` |
+| `seo/broken-link` | seo | warning | internal link to an unknown route |
+| `seo/duplicate-meta` | seo | warning | title/description shared across pages |
 | `perf/js-budget` | perf | warning | route JS over `budget.js` |
 | `perf/image-dims` | perf | warning | `<img>` missing `width`/`height` (layout shift) |
 

@@ -34,6 +34,9 @@ interface RegionMeta {
   bundlePath?: string;
   suspense?: boolean;
   props?: Record<string, any>;
+  /** Per-region revalidate seconds (PPR cache directive). 0/undefined falls
+   *  back to the page's ISR cadence, or no caching for non-ISR pages. */
+  revalidate?: number;
 }
 
 interface ServerManifest {
@@ -174,6 +177,11 @@ const isrCache = new ISRCache(parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10
 // renderTimeoutMs bounds a single renderToString call so one pathological page
 // cannot pin the sidecar. 0 disables the bound.
 const renderTimeoutMs = parseInt(process.env.KRATE_SSR_TIMEOUT || "", 10) || 5000;
+
+// Partial Prerendering: cache dynamic regions on non-ISR pages with this
+// window (overridable per region via `export const revalidate`).
+const pprEnabled = process.env.KRATE_PPR === "1";
+const pprRevalidate = parseInt(process.env.KRATE_PPR_REVALIDATE || "", 10) || 60;
 
 // withRenderTimeout rejects if p does not settle within renderTimeoutMs. The
 // underlying render keeps running (JS cannot cancel it), but the request fails
@@ -477,21 +485,54 @@ const regionCache = new Map<string, { html: string; timestamp: number }>();
 const regionRevalidation = new Map<string, number>();
 const inFlightRegionRevalidations = new Map<string, Promise<void>>();
 
+// Region cache is bounded (FIFO eviction) so a long-lived sidecar cannot grow
+// without limit across many dynamic region variants.
+const REGION_CACHE_MAX = parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512;
+
+function regionCacheSet(key: string, html: string): void {
+  if (regionCache.size >= REGION_CACHE_MAX && !regionCache.has(key)) {
+    const oldest = regionCache.keys().next().value;
+    if (oldest !== undefined) regionCache.delete(oldest);
+  }
+  regionCache.set(key, { html, timestamp: Date.now() });
+}
+
+function clearRegionCache(): void {
+  regionCache.clear();
+  regionRevalidation.clear();
+}
+
+function clearRegionCacheForRoute(route: string): void {
+  const prefix = route + "::";
+  for (const key of Array.from(regionCache.keys())) {
+    if (key.startsWith(prefix)) regionCache.delete(key);
+  }
+}
+
 function regionCacheKey(page: ManifestPage, regionId: string, req: RenderRequest): string {
   return variantKey({ route: page.route + "::" + regionId, params: req.params, query: req.query });
 }
 
-function renderRegionFresh(region: RegionMeta, req: RenderRequest): string {
+// regionInterval resolves a region's cache window: its own revalidate directive
+// wins, else the page's ISR cadence; non-ISR pages with no directive are 0.
+function regionInterval(page: ManifestPage, region: RegionMeta): number {
+  if (region.revalidate && region.revalidate > 0) return region.revalidate;
+  if (page.mode === "isr") return page.revalidate || 60;
+  if (pprEnabled) return pprRevalidate;
+  return 0;
+}
+
+function renderRegionFresh(region: RegionMeta, req: RenderRequest): Promise<string> {
   const render = loadRuntimeRenderer(region.bundlePath!);
-  return render(JSON.stringify(regionProps(region, req)));
+  return withRenderTimeout(Promise.resolve().then(() => render(JSON.stringify(regionProps(region, req)))));
 }
 
 function revalidateRegionInBackground(page: ManifestPage, region: RegionMeta, req: RenderRequest, key: string) {
   if (inFlightRegionRevalidations.has(key)) return;
   const p = (async () => {
     try {
-      const html = renderRegionFresh(region, req);
-      regionCache.set(key, { html, timestamp: Date.now() });
+      const html = await renderRegionFresh(region, req);
+      regionCacheSet(key, html);
       console.log(`[krate-ssr] Revalidated region ${key} (SWR)`);
     } catch (err: any) {
       console.error(`[krate-ssr] Region SWR revalidation failed ${key}:`, err.message);
@@ -510,8 +551,10 @@ async function renderRegion(page: ManifestPage, region: RegionMeta, req: RenderR
   }
 
   const key = regionCacheKey(page, region.id, req);
-  if (page.mode === "isr") {
-    const interval = page.revalidate || 60;
+  const interval = regionInterval(page, region);
+  const cacheable = interval > 0;
+
+  if (cacheable) {
     regionRevalidation.set(key, interval);
     const cached = regionCache.get(key);
     const stale = cached && (Date.now() - cached.timestamp) / 1000 > interval;
@@ -525,12 +568,12 @@ async function renderRegion(page: ManifestPage, region: RegionMeta, req: RenderR
   }
 
   try {
-    const html = renderRegionFresh(region, req);
-    if (page.mode === "isr") {
-      regionCache.set(key, { html, timestamp: Date.now() });
+    const html = await renderRegionFresh(region, req);
+    if (cacheable) {
+      regionCacheSet(key, html);
     }
     const frame: Record<string, any> = { type: "region", id: region.id, status: 200, html };
-    if (page.mode === "isr") frame.cacheStatus = "miss";
+    if (cacheable) frame.cacheStatus = "miss";
     return frame;
   } catch (err: any) {
     console.error(`[krate-ssr] Region render failed ${page.route}::${region.id}:`, err.message);
@@ -622,6 +665,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const { route: targetRoute } = JSON.parse(body);
       isrCache.deleteRoute(targetRoute);
+      clearRegionCacheForRoute(targetRoute);
       // Trigger re-render of the base variant.
       const page = findPage(targetRoute);
       if (page) {
@@ -647,6 +691,7 @@ const server = http.createServer(async (req, res) => {
       const { route: targetRoute } = JSON.parse(body);
       const page = findPage(targetRoute);
       const refreshed = page && page.mode === "isr" ? await refreshRouteVariants(page) : 0;
+      clearRegionCacheForRoute(targetRoute);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, refreshed }));
     } catch (err: any) {
@@ -675,6 +720,7 @@ const server = http.createServer(async (req, res) => {
       // re-read on demand, so clearing all of them is cheap and avoids tracking
       // which component maps to which route here.
       runtimeBundleCache.clear();
+      clearRegionCache();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
     } catch (err: any) {

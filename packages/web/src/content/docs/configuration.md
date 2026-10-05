@@ -66,6 +66,16 @@ devServer: {
 
 See [Error Handling](/docs/guides/error-handling/) for what the overlay shows.
 
+## View transitions & partial prerendering
+
+```typescript
+viewTransitions: "auto", // native View Transitions for SPA + full-page navs
+ppr: { revalidate: 60 }, // cache dynamic regions on non-ISR pages
+```
+
+See the [config reference](/docs/reference/config/#view-transitions) for
+details, and [Rendering](/docs/core-concepts/rendering/) for the region model.
+
 ## Tailwind CSS
 
 ```typescript

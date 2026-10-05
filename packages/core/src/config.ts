@@ -232,6 +232,18 @@ export interface KrateConfig {
    * root. Used for emitted asset URLs and the SPA router.
    */
   basePath?: string;
+  /**
+   * View Transitions API integration. `true`/`"auto"` (default) enables
+   * same-document SPA morphs and the cross-document `@view-transition` rule;
+   * `false`/`"off"` disables it.
+   */
+  viewTransitions?: boolean | "auto" | "off";
+  /**
+   * Partial prerendering: cache dynamic regions on non-ISR pages with
+   * stale-while-revalidate. `true` uses the default window; an object sets it.
+   * Only enable for regions that do NOT depend on per-request cookies/sessions.
+   */
+  ppr?: boolean | { revalidate?: number };
   devServer?: DevServerConfig;
   server?: ServerConfig;
   cors?: CORSConfig;
@@ -295,11 +307,39 @@ export function defineConfig(config: KrateConfig): KrateConfig {
   return config;
 }
 
+export interface FeedPluginOptions {
+  /** e.g. "https://example.com" (falls back to `seo.baseUrl`). */
+  baseUrl?: string;
+  /** Docs content directory (defaults to the docs plugin's `contentDir`). */
+  contentDir?: string;
+  /** Feed title (defaults to the docs title or `seo.siteName`). */
+  title?: string;
+  /** Feed description (defaults to `seo.description`). */
+  description?: string;
+  /** Feed language (default "en"). */
+  language?: string;
+  /** Which feeds to emit: "rss" | "atom" | "json" | "all" (default "all"). */
+  type?: "rss" | "atom" | "json" | "all";
+  /** Maximum number of items (default 20). */
+  count?: number;
+  /** URL prefix docs are mounted under (default "/docs"). */
+  pathPrefix?: string;
+}
+
 /**
  * Built-in sitemap plugin. Generates `sitemap.xml` after the build.
  */
 export function sitemap(options: SitemapPluginOptions): PluginConfig {
   return { name: "sitemap", options };
+}
+
+/**
+ * Built-in feed plugin. Generates `feed.xml` (RSS), `atom.xml`, and
+ * `feed.json` from the docs content, and adds `<link rel="alternate">` feed
+ * discovery plus JSON-LD structured data to docs pages.
+ */
+export function feed(options: FeedPluginOptions = {}): PluginConfig {
+  return { name: "feed", options };
 }
 
 /**
@@ -382,11 +422,21 @@ export type CheckRuleId =
   | "a11y/img-alt"
   | "a11y/heading-order"
   | "a11y/accessible-name"
+  | "a11y/duplicate-id"
+  | "a11y/landmark"
+  | "a11y/form-label"
+  | "a11y/tabindex"
+  | "a11y/aria-role"
+  | "a11y/color-contrast"
+  | "a11y/broken-anchor"
   | "seo/title"
   | "seo/description"
   | "seo/canonical"
   | "seo/og"
+  | "seo/og-image"
   | "seo/lang"
+  | "seo/broken-link"
+  | "seo/duplicate-meta"
   | "perf/js-budget"
   | "perf/image-dims";
 

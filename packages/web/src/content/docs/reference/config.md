@@ -89,9 +89,15 @@ markdown: {
   headingAnchors: true,
   admonitions: true,
   codeHighlight: true,
-  math: false,
+  math: false,          // load KaTeX (CDN) and render $…$ / $$…$$
 }
 ```
+
+Beyond GFM (tables, task lists, strikethrough, autolinks), the renderer supports
+definition lists, footnotes (`[^1]`), emoji shortcodes (`:rocket:`), and
+component directives — `:::card`, `:::steps` (`::step`), `:::tabs` (`::tab`),
+and `:::code-group`. The `Tabs`/`Steps`/`Card`/`Code` components are auto-imported
+for the docs plugin; elsewhere `:::component Name` wraps arbitrary components.
 
 ## Runtime
 
@@ -131,13 +137,55 @@ the sidecar, which resolves only the page's dynamic regions against the baked
 static shell; the embedded QuickJS runtime is used for middleware, API routes,
 and community plugins.
 
+## Partial prerendering (PPR)
+
+```typescript
+ppr: true,              // cache dynamic regions on non-ISR pages
+ppr: { revalidate: 60 } // …with a custom window (seconds)
+```
+
+Dynamic regions (Suspense primaries + `@runtime` components) are already spliced
+into the baked shell. PPR additionally caches each region independently with
+stale-while-revalidate. Per-region directives win: add
+`export const revalidate = 30` to a `*.runtime.tsx` component to give just that
+region a 30-second window. Region caches are bounded, persisted with the ISR
+cache, and invalidated per route.
+
+:::warning
+Region cache keys include the route, parameters, and query — **not cookies,
+headers, or sessions**. Do not enable `ppr` for regions that render
+per-user/per-session content, or one user's output can be served to another.
+:::
+
+## View Transitions
+
+```typescript
+viewTransitions: "auto", // "auto" (default) | "off" | true | false
+```
+
+When enabled, the SPA router wraps each navigation in the native View
+Transitions API (`document.startViewTransition`), and every page emits the
+cross-document `@view-transition { navigation: auto }` rule so full-page loads
+morph too. Mark persistent chrome with `data-view-transition="name"` to morph it
+instead of cross-fading. Reduced-motion preferences are respected.
+
 ## Plugins
 
 ```typescript
+import { sitemap, feed, docs } from "@krate/core";
+
 plugins: [
-  { name: "sitemap", order: 10, options: { baseUrl: "https://..." } },
+  sitemap({ baseUrl: "https://example.com" }),
+  feed({ baseUrl: "https://example.com", type: "all", count: 20 }),
+  docs({ contentDir: "src/content/docs", title: "Docs" }),
 ]
 ```
+
+The `feed` plugin emits `feed.xml` (RSS), `atom.xml`, and `feed.json` from the
+docs content and adds `<link rel="alternate">` discovery plus JSON-LD
+structured data to docs pages. The docs plugin also renders tag/category index
+pages (`/docs/tags/<slug>/`, `/docs/categories/<slug>/`) and fills each page's
+"last updated" date from git history (disable with `docs({ lastUpdated: false })`).
 
 ## Redirects & rewrites
 
@@ -238,8 +286,11 @@ checks: {
 
 When a `checks` object is present, `krate build` runs the quality gates and
 fails on findings at or above `failOn`. `krate check` runs the same rules
-against the emitted output. See
-[Quality Checks](/docs/features/quality-checks/).
+against the emitted output. Alongside the a11y/SEO/perf rules, Krate checks
+`seo/broken-link` (internal links resolve to a known route),
+`a11y/broken-anchor` (in-page `#id` targets exist), `seo/og-image` (absolute
+Open Graph image), and `seo/duplicate-meta` (unique titles/descriptions across
+pages). See [Quality Checks](/docs/features/quality-checks/).
 
 ## Base path
 
