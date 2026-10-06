@@ -185,10 +185,10 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 		return err
 	}
 
-	// Generate the SearchBar component once into the gen dir (shared by all pages)
-	if searchEnabled {
-		_ = os.WriteFile(filepath.Join(genDir, "SearchBar.tsx"), []byte(generateSearchBarTSX()), 0644)
-	}
+	// Search is a THEME concern: the plugin emits the index + `search.js`
+	// (which exposes the headless `window.__krateSearch` API), and the theme
+	// renders its own UI (e.g. `<DocsSearch />`) wherever it likes. No widget
+	// markup or default styling is injected into pages.
 
 	var themeOptions json.RawMessage
 	if theme != nil {
@@ -223,11 +223,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 
 			tsxPath := filepath.Join(genDir, page.Path+".tsx")
 			fileLayoutRel := theme.importSpecifier(filepath.Dir(tsxPath))
-			var searchBarRel string
-			if searchEnabled {
-				searchBarRel = searchBarImportRel(tsxPath, genDir)
-			}
-			tsxSource := p.generateTSX(ctx, cfg, page, fileLayoutRel, searchBarRel, sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, opts, themeOptions, cfg.Markdown)
+			tsxSource := p.generateTSX(ctx, cfg, page, fileLayoutRel, searchEnabled, sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, opts, themeOptions, cfg.Markdown)
 
 			_ = os.MkdirAll(filepath.Dir(tsxPath), 0755)
 			_ = os.WriteFile(tsxPath, []byte(tsxSource), 0644)
@@ -502,7 +498,7 @@ func applyNavOverride(override *docs.NavOverride, autoTitle, autoLink string) (t
 	return title, link, link != ""
 }
 
-func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page docs.Page, layoutRel, searchBarRel string, sections []docs.SidebarItem, tocItems []docs.TOCItem, breadcrumbs []docs.Breadcrumb, prevTitle, prevLink, nextTitle, nextLink string, opts *DocsPluginOptions, themeOptions json.RawMessage, mdConfig markdown.Config) string {
+func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page docs.Page, layoutRel string, searchEnabled bool, sections []docs.SidebarItem, tocItems []docs.TOCItem, breadcrumbs []docs.Breadcrumb, prevTitle, prevLink, nextTitle, nextLink string, opts *DocsPluginOptions, themeOptions json.RawMessage, mdConfig markdown.Config) string {
 	prevTitle, prevLink, prevOk := applyNavOverride(page.Prev, prevTitle, prevLink)
 	nextTitle, nextLink, nextOk := applyNavOverride(page.Next, nextTitle, nextLink)
 	siteTitle := opts.Title
@@ -549,9 +545,6 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 
 	if layoutRel != "" {
 		sb.WriteString(fmt.Sprintf("import DocsLayout from \"%s\";\n", layoutRel))
-	}
-	if searchBarRel != "" {
-		sb.WriteString(fmt.Sprintf("import SearchBar from \"%s\";\n", searchBarRel))
 	}
 
 	sb.WriteString("\n")
@@ -692,14 +685,16 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	sb.WriteString("  };\n")
 	sb.WriteString("  return (\n")
 	sb.WriteString("    <>\n")
-	if searchBarRel != "" {
-		sb.WriteString("      <SearchBar />\n")
-	}
 
 	// Per-page <Head>: meta description/OG tags plus any frontmatter head tags.
 	// Krate merges multiple <Head> blocks (page + layout), so emitting ours
 	// alongside the layout's title composition works.
 	sb.WriteString("      <Head>\n")
+	// Load the headless search module (defines `window.__krateSearch`) so the
+	// theme's search UI can query the index. The theme owns all markup/styles.
+	if searchEnabled {
+		sb.WriteString("        <script src=\"/docs/search/search.js\" defer={true}></script>\n")
+	}
 	if page.Description != "" {
 		sb.WriteString("        <meta name=\"description\" content=")
 		sb.WriteString(jsxAttrExpr(page.Description))

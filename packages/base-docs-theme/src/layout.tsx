@@ -1,4 +1,5 @@
 import { SidebarNav, TOCNav, Breadcrumbs, PrevNext, SocialLinks } from "./chrome";
+import { DocsSearch } from "./search";
 import { createSignal, createEffect, onMount, onCleanup } from "@krate/runtime";
 import "./theme.css";
 
@@ -199,11 +200,16 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
     <div class={`docs-page${showToc ? "" : " docs-page-no-toc"}`}>
       <Head>
         <title>{pageTitle} - {siteTitle}</title>
+        <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+        <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
       </Head>
+
+      <a class="skip-link" href="#main">Skip to content</a>
 
       <header class="docs-navbar">
             <Link className="navbar-title" href="/docs/">{siteTitle}</Link>
         <div class="navbar-actions">
+          <DocsSearch />
           <div class="navbar-social-links">
             <SocialLinks links={props.socialLinks} />
           </div>
@@ -250,7 +256,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
       </nav>
 
       <div class="docs-body">
-        <main class="docs-main">
+        <main class="docs-main" id="main">
           <Breadcrumbs items={props.breadcrumbs} />
           {description && <p class="docs-description">{description}</p>}
           {isHero && (

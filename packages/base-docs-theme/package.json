@@ -16,7 +16,14 @@
     "ssg"
   ],
   "main": "./src/index.ts",
-  "module": "./src/layout.tsx",
+  "module": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./layout": "./src/layout.tsx",
+    "./chrome": "./src/chrome.tsx",
+    "./shell": "./src/shell.tsx",
+    "./theme.css": "./src/theme.css"
+  },
   "files": [
     "src"
   ],

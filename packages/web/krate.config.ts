@@ -8,6 +8,8 @@ export default defineConfig({
   publicDir: "public",
   minify: true,
 
+  viewTransitions: "auto",
+
   devServer: {
     port: 3000,
     open: false,
@@ -28,6 +30,15 @@ export default defineConfig({
 
   plugins: [
     sitemap({ baseUrl: "https://krate.js.org", changeFreq: "daily", priority: "0.8" }),
+    { name: "robots", options: { allow: "/" } },
+    {
+      name: "feed",
+      options: {
+        baseUrl: "https://krate.js.org",
+        title: "Krate Docs",
+        description: "Guides and reference for the Krate Go-native web framework.",
+      },
+    },
     docs({
       contentDir: "src/content/docs",
       title: "Krate Docs",

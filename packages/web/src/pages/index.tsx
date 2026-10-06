@@ -1,4 +1,5 @@
 import { Code } from "@krate/components";
+import { CounterDemo } from "../components/counter-demo";
 
 export default function Home() {
   return (
@@ -57,6 +58,51 @@ export default function Home() {
           <h3>JS & Go API routes</h3>
           <p>Write API routes in TypeScript or Go; both compile into the same <code>/api/*</code> namespace.</p>
         </a>
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">Reactivity, live</h2>
+        <p class="section-lede">
+          This counter is a real Krate client component. Signals update the DOM
+          directly — no virtual DOM, no React runtime.
+        </p>
+        <div class="hero-actions" style="margin-bottom:1.5rem">
+          <CounterDemo />
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">How Krate compares</h2>
+        <p class="section-lede">
+          A Go-native compiler with whole-program knowledge, a signal runtime,
+          and a static-first default.
+        </p>
+        <div class="table-wrap">
+          <table class="compare">
+            <thead>
+              <tr><th>Capability</th><th>Krate</th><th>Astro</th><th>Next.js</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Compiler language</td><td>Go (custom lexer/parser)</td><td>Vite/esbuild</td><td>SWC/Turbopack</td></tr>
+              <tr><td>Client runtime by default</td><td class="yes">Zero JS</td><td>Per-island</td><td>React runtime</td></tr>
+              <tr><td>Interactivity with no JS</td><td class="yes">CSS signals</td><td class="no">No</td><td class="no">No</td></tr>
+              <tr><td>Node required to build</td><td class="yes">No</td><td>Yes</td><td>Yes</td></tr>
+              <tr><td>SSR / ISR / streaming</td><td class="yes">Yes (sidecar)</td><td>Yes</td><td>Yes</td></tr>
+              <tr><td>Agent-native (MCP)</td><td class="yes">Yes</td><td class="no">No</td><td class="no">No</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">Built for speed</h2>
+        <p class="section-lede">Measured on the Krate examples site.</p>
+        <div class="stats">
+          <div class="stat"><div class="stat-value">~10ms</div><div class="stat-label">Incremental rebuild</div></div>
+          <div class="stat"><div class="stat-value">0 kB</div><div class="stat-label">JS on static pages</div></div>
+          <div class="stat"><div class="stat-value">1</div><div class="stat-label">Binary, no Node</div></div>
+          <div class="stat"><div class="stat-value">ES2020</div><div class="stat-label">Output baseline</div></div>
+        </div>
       </section>
 
       <section class="cta-band">

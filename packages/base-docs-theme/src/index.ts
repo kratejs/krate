@@ -1,5 +1,21 @@
 import { defineDocsTheme } from "@krate/plugin";
 
+export {
+  defineSite,
+  SiteHeader,
+  SiteFooter,
+  HomeLayout,
+  ThemeToggle,
+} from "./shell";
+export type {
+  SiteConfig,
+  SiteNavLink,
+  SiteSocial,
+  SiteFooterColumn,
+} from "./shell";
+export { DocsSearch, DocsSearchComponent } from "./search";
+export type { DocsSearchProps } from "./search";
+
 /**
  * Options for the base docs theme.
  */

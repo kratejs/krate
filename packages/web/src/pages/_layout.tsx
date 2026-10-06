@@ -1,34 +1,45 @@
-export default function SiteLayout({ children }: { children: any }) {
-  return (
-    <div class="site-shell">
-      <Head>
-        <link rel="stylesheet" href="/site.css" />
-      </Head>
+import { HomeLayout } from "@krate/base-docs-theme/shell";
 
-      <header class="site-navbar">
-        <a class="site-navbar-brand" href="/">
-          <span class="site-logo">k</span>
-          <span class="site-navbar-name">krate</span>
-        </a>
-        <nav class="site-nav">
-          <a href="/docs/">Docs</a>
-          <a href="/docs/features/plugins/">Plugins</a>
-          <a href="/docs/reference/runtime-api/">Runtime API</a>
-          <a href="/docs/guides/contributing/">Contributing</a>
-          <a href="https://github.com/kratejs/krate" class="site-nav-github">
-            GitHub
-          </a>
-        </nav>
-      </header>
+const site = {
+  brand: { text: "krate", href: "/", logo: "k" },
+  nav: [
+    { label: "Docs", href: "/docs/" },
+    { label: "Plugins", href: "/docs/features/plugins/" },
+    { label: "Runtime API", href: "/docs/reference/runtime-api/" },
+    { label: "Contributing", href: "/docs/guides/contributing/" },
+  ],
+  social: [
+    { icon: "lucide:github", url: "https://github.com/kratejs/krate", name: "GitHub" },
+  ],
+  footerNote: "© 2026 kratejs",
+  footerLicense: "Apache-2.0 · Built with Krate",
+  footerColumns: [
+    {
+      title: "Docs",
+      links: [
+        { label: "Getting started", href: "/docs/getting-started/" },
+        { label: "Core concepts", href: "/docs/core-concepts/" },
+        { label: "Configuration", href: "/docs/configuration/" },
+      ],
+    },
+    {
+      title: "Features",
+      links: [
+        { label: "Routing", href: "/docs/core-concepts/routing/" },
+        { label: "Styling", href: "/docs/core-concepts/styling/" },
+        { label: "API routes", href: "/docs/features/api-routes/" },
+      ],
+    },
+    {
+      title: "Community",
+      links: [
+        { label: "GitHub", href: "https://github.com/kratejs/krate", external: true },
+        { label: "Contributing", href: "/docs/guides/contributing/" },
+      ],
+    },
+  ],
+};
 
-      <main>{children}</main>
-
-      <footer class="site-footer">
-        <div class="site-footer-inner">
-          <span>© 2026 kratejs</span>
-          <span>Apache-2.0 · Built with Krate</span>
-        </div>
-      </footer>
-    </div>
-  );
+export default function SiteLayout(props: { children: any }) {
+  return <HomeLayout site={site}>{props.children}</HomeLayout>;
 }

@@ -10,6 +10,10 @@
 (function () {
     "use strict";
 
+    // Idempotent: the script is re-loaded on SPA navigation. Re-binding would
+    // duplicate the document/window listeners below.
+    if (window.__krateSearch && window.__krateSearch.__krate) return;
+
     var SEARCH_BASE = "/docs/search/";
     var INDEX_JSON = "/docs/data/search-index.json";
     var PAGE_FIND_BASE = "/pagefind/";
@@ -208,32 +212,32 @@
         highlight();
     }
 
+    // Headless query: loads the engine on demand and resolves normalized hits
+    // ({href,title,body,category}). Shared by the built-in widget and the
+    // window.__krateSearch API so custom components render their own results.
+    function queryEngine(query, max) {
+        var limit = max || MAX_RESULTS;
+        if (!query) return Promise.resolve([]);
+        return loadEngine().then(function () {
+            if (mode === "pagefind") {
+                return searchPagefind(query, limit).catch(function () { return searchJSON(query, limit); });
+            }
+            if (mode === "docfind") {
+                return Promise.resolve(docfind(query, limit)).catch(function () { return searchJSON(query, limit); });
+            }
+            return Promise.resolve(searchJSON(query, limit));
+        });
+    }
+
     function runSearch(query) {
         if (!query) {
             setState("idle", "Start typing to search the documentation");
             return;
         }
         setState("loading", "Searching…");
-        loadEngine().then(function () {
+        queryEngine(query, MAX_RESULTS).then(function (results) {
             if (input && input.value.trim() !== query) return;
-            var run;
-            if (mode === "pagefind") {
-                run = searchPagefind(query, MAX_RESULTS);
-            } else if (mode === "docfind") {
-                run = docfind(query, MAX_RESULTS);
-            } else {
-                renderResults(searchJSON(query, MAX_RESULTS));
-                return;
-            }
-            return run
-                .then(function (results) {
-                    if (input && input.value.trim() !== query) return;
-                    renderResults(results);
-                })
-                .catch(function () {
-                    if (input && input.value.trim() !== query) return;
-                    renderResults(searchJSON(query, MAX_RESULTS));
-                });
+            renderResults(results);
         });
     }
 
@@ -310,4 +314,24 @@
         close();
         if (timer) window.clearTimeout(timer);
     });
+
+    // ── Headless search API ────────────────────────────────────────────────
+    // Custom components query the same index the built-in widget uses, with no
+    // fixed markup or positioning. `search("query", { limit })` resolves to an
+    // array of { href, title, body, category }.
+    var api = {
+        __krate: true,
+        ready: function () { return loadEngine(); },
+        search: function (query, opts) {
+            return queryEngine(query, (opts && opts.limit) || MAX_RESULTS);
+        },
+        engine: function () { return mode; },
+        maxResults: MAX_RESULTS,
+        open: open,
+        close: close,
+    };
+    window.__krateSearch = api;
+    try {
+        window.dispatchEvent(new CustomEvent("krate:search-ready", { detail: api }));
+    } catch (e) {}
 })();

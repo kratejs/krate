@@ -15,8 +15,23 @@
     --max-width: 1120px;
 }
 
+/* Dark palette: honour an explicit `data-theme` (from the theme toggle) or the
+   OS preference when the user has not chosen. */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --color-bg: #09090b;
+    --color-fg: #fafafa;
+    --color-muted: #a1a1aa;
+    --color-muted-bg: #18181b;
+    --color-border: #27272a;
+    --color-primary: #f97316;
+    --color-accent-bg: rgba(249, 115, 22, 0.12);
+    --color-accent-border: rgba(249, 115, 22, 0.3);
+}
+
 @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
+        color-scheme: dark;
         --color-bg: #09090b;
         --color-fg: #fafafa;
         --color-muted: #a1a1aa;
@@ -297,4 +312,79 @@ pre {
     .site-navbar-name {
         display: none;
     }
+}
+
+/* ---- Header actions (social + theme toggle) ---- */
+.site-navbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: 1rem;
+}
+
+.site-navbar-actions .social-link,
+.site-navbar-actions .theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    color: var(--color-muted);
+    background: transparent;
+    cursor: pointer;
+}
+.site-navbar-actions .social-link { border-color: var(--color-border); }
+.site-navbar-actions .social-link:hover,
+.site-navbar-actions .theme-toggle:hover { color: var(--color-fg); border-color: var(--color-border); }
+
+/* Show one glyph depending on the active theme. */
+.theme-toggle svg { display: none; }
+:root[data-theme="dark"] .theme-toggle svg:first-child { display: block; }
+:root[data-theme="light"] .theme-toggle svg:last-child { display: block; }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .theme-toggle svg:first-child { display: block; }
+    :root:not([data-theme="dark"]) .theme-toggle svg:last-child { display: none; }
+}
+
+/* ---- Footer columns ---- */
+.site-footer-inner { flex-direction: column; align-items: stretch; gap: 2rem; }
+.site-footer-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1.5rem;
+}
+.site-footer-column { display: flex; flex-direction: column; gap: 0.5rem; }
+.site-footer-column-title {
+    font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--color-fg);
+}
+.site-footer-column a { color: var(--color-muted); font-size: 0.9rem; }
+.site-footer-column a:hover { color: var(--color-fg); }
+.site-footer-meta {
+    display: flex; justify-content: space-between; gap: 1rem;
+    padding-top: 1.5rem; border-top: 1px solid var(--color-border);
+    color: var(--color-muted); font-size: 0.85rem;
+}
+
+/* ---- Comparison / benchmark / demo blocks ---- */
+.section { max-width: var(--max-width); margin: 0 auto; padding: 3rem 1.5rem; }
+.section-title { font-size: 1.9rem; letter-spacing: -0.02em; margin: 0 0 0.5rem; text-align: center; }
+.section-lede { color: var(--color-muted); text-align: center; max-width: 640px; margin: 0 auto 2rem; }
+.compare { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+.compare th, .compare td { padding: 0.65rem 1rem; border-bottom: 1px solid var(--color-border); text-align: left; }
+.compare th { font-weight: 600; }
+.compare td.yes { color: #16a34a; font-weight: 700; }
+.compare td.no { color: var(--color-muted); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; }
+.stat { padding: 1.25rem; border: 1px solid var(--color-border); border-radius: var(--radius); text-align: center; }
+.stat-value { font-size: 1.8rem; font-weight: 800; color: var(--color-primary); }
+.stat-label { color: var(--color-muted); font-size: 0.85rem; }
+.demo { display: flex; align-items: center; justify-content: center; gap: 1rem; padding: 1.5rem; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-muted-bg); }
+.demo button { padding: 0.4rem 0.9rem; border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-bg); color: var(--color-fg); cursor: pointer; font: inherit; }
+.demo-value { font-size: 1.4rem; font-weight: 700; min-width: 3ch; text-align: center; }
+
+@media (max-width: 640px) {
+    .site-footer-meta { flex-direction: column; }
 }

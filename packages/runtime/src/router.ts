@@ -1,8 +1,9 @@
-import { reconcileTrees } from './reconcile.js';
-
 let initialized = false;
 let pendingAbort: AbortController | undefined;
 let routerCleanup: (() => void) | null = null;
+// Monotonic navigation sequence: a slower, superseded fetch must never apply
+// its HTML over a newer navigation.
+let navSeq = 0;
 
 /** Cache for prefetched page HTML keyed by URL (bounded LRU). */
 const prefetchCache = new Map<string, string>();
@@ -78,7 +79,13 @@ export function initRouter(): void {
   if (initialized) return;
   initialized = true;
 
-  const CONTENT_SEL = '.docs-content, main, #root';
+  // Reconcile from the app root so navigation between DIFFERENT shells (the
+  // marketing layout's <main> and the docs layout's `.docs-page`) swaps the
+  // whole shell instead of reconciling mismatched tree shapes (which dropped
+  // the docs navbar/sidebar while still loading its CSS). Within one shell the
+  // diff preserves unchanged nodes (sidebar/TOC) by key, so docs↔docs stays
+  // cheap.
+  const CONTENT_SEL = '#root, main, .docs-content';
   const TRANSITION_MS = 150;
   const PREFETCH_DELAY = 200;
   let notFoundHTML: string | null = null;
@@ -189,20 +196,6 @@ export function initRouter(): void {
       prefetchPage(url);
     }, PREFETCH_DELAY);
     prefetchTimers.set(a, timer);
-  }
-
-  function stripHandlerProps(root: Element): void {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-    let node = walker.nextNode();
-    while (node) {
-      const el = node as Element;
-      for (const key of Object.keys(el)) {
-        if (key.indexOf('__krate_') === 0) {
-          delete (el as any)[key];
-        }
-      }
-      node = walker.nextNode();
-    }
   }
 
   // Begin the visual transition (fade out + optional loading overlay) while a
@@ -354,6 +347,25 @@ export function initRouter(): void {
     }
   }
 
+  // The app shell lives in `#root` on every page (see generateHTML), so it is
+  // the one stable swap target. Heuristic per-page content roots made different
+  // shells/page shapes reconcile incorrectly (dropping the navbar); swapping
+  // the whole shell is always correct and the new page's own scripts hydrate it.
+  function appRoot(doc: Document): HTMLElement {
+    return (doc.getElementById('root') || doc.body) as HTMLElement;
+  }
+
+  // Document-level <head> tags that change per page and must follow a swap.
+  const HEAD_SYNC_SEL =
+    'meta[name="description"], meta[property^="og:"], meta[name^="twitter:"], link[rel="canonical"], script[type="application/ld+json"]';
+
+  function reconcileHeadMeta(doc: Document): void {
+    document.head.querySelectorAll(HEAD_SYNC_SEL).forEach((el) => el.remove());
+    doc.head.querySelectorAll(HEAD_SYNC_SEL).forEach((el) => {
+      document.head.appendChild(document.importNode(el, true));
+    });
+  }
+
   function swapContent(
     html: string,
     url: string,
@@ -364,8 +376,8 @@ export function initRouter(): void {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
 
-    const newContent = findContentRoot(doc);
-    const oldContent = findContentRoot(document);
+    const newContent = appRoot(doc);
+    const oldContent = appRoot(document);
     if (!newContent || !oldContent) {
       location.href = url;
       return;
@@ -384,15 +396,15 @@ export function initRouter(): void {
         (globalThis as any).disposeAll();
       }
 
-      // Strip stale hydration handler props so kept nodes don't retain
-      // closures bound to disposed signals; hydration re-sets them below.
-      stripHandlerProps(oldContent);
+      // Replace the entire app shell. This is deterministic for ANY page pair
+      // (docs↔docs, marketing↔docs, different layouts): no structural mismatch
+      // can drop chrome. The new page's scripts re-hydrate below, and View
+      // Transitions keep the visual transition smooth.
+      const nodes = Array.from(newContent.childNodes).map((n) => document.importNode(n, true));
+      oldContent.replaceChildren(...nodes);
 
-      // Diff the live content against the parsed new page instead of wiping
-      // it via innerHTML, so unchanged nodes keep their state (focus, scroll,
-      // media playback, CSS animations) across navigation.
-      reconcileTrees(oldContent, newContent);
       reconcileStylesheets(doc);
+      reconcileHeadMeta(doc);
       applyViewTransitionNames(document);
     };
 
@@ -619,6 +631,8 @@ export function initRouter(): void {
     url: string,
     opts: { replace?: boolean; scroll?: boolean; restoreScroll?: boolean } = {}
   ): void {
+    const seq = ++navSeq;
+
     // Check prefetch cache first — already-loaded content swaps instantly.
     const cached = prefetchCache.get(url);
     if (cached) {
@@ -643,9 +657,11 @@ export function initRouter(): void {
       signal,
     })
       .then((res) => {
+        if (seq !== navSeq) return; // superseded by a newer navigation
         if (!res.ok) {
           const page = res.status >= 500 ? fetchErrorPage() : fetchNotFoundPage();
           return page.then((html) => {
+            if (seq !== navSeq) return;
             if (html) {
               // Error pages contain full layout — full page replacement
               replacePage(html, url);
@@ -655,6 +671,7 @@ export function initRouter(): void {
           });
         }
         return res.text().then((html) => {
+          if (seq !== navSeq) return; // superseded while reading the body
           const parser = new DOMParser();
           const doc = parser.parseFromString(html, 'text/html');
           swapContent(html, url, extractScripts(doc, url), opts);

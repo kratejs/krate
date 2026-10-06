@@ -622,13 +622,13 @@ export function PrevNext(props: PrevNextProps) {
     <div class="docs-nav">
       {hasPrev && (
         <Link className="nav-prev" href={prevLink}>
-          <span class="nav-direction">Previous</span>
+          <span class="nav-label">Previous</span>
           <span class="nav-title">{prevTitle}</span>
         </Link>
       )}
       {hasNext && (
         <Link className="nav-next" href={nextLink}>
-          <span class="nav-direction">Next</span>
+          <span class="nav-label">Next</span>
           <span class="nav-title">{nextTitle}</span>
         </Link>
       )}
