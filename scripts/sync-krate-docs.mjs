@@ -16,7 +16,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,6 +25,31 @@ const src = join(root, 'packages', 'web', 'src', 'content', 'docs');
 const dest = join(root, 'packages', 'compiler', 'internal', 'kratedocs', 'docs');
 const gitkeep = '.gitkeep';
 const check = process.argv.includes('--check');
+
+// i18n locales and old doc versions live in top-level subdirectories of the
+// docs content dir. The embedded framework docs are the DEFAULT locale at the
+// CURRENT version, so those directories must not be synced.
+function readExcludedDirs() {
+  const ex = new Set();
+  const cfgPath = join(root, 'packages', 'web', 'krate.config.ts');
+  if (!existsSync(cfgPath)) return ex;
+  const txt = readFileSync(cfgPath, 'utf8');
+  const arr = (key) =>
+    [...txt.matchAll(new RegExp(`${key}\\s*:\\s*\\[([^\\]]*)\\]`, 'g'))].flatMap((m) =>
+      m[1]
+        .split(',')
+        .map((s) => s.trim().replace(/['"]/g, ''))
+        .filter(Boolean),
+    );
+  const str = (key) => (txt.match(new RegExp(`${key}\\s*:\\s*['"]([^'"]+)['"]`)) || [])[1];
+  const defaultLocale = str('defaultLocale');
+  for (const l of arr('locales')) if (l !== defaultLocale) ex.add(l);
+  const currentVersion = str('current');
+  for (const v of arr('versions')) if (v !== currentVersion) ex.add(v);
+  return ex;
+}
+
+const excluded = readExcludedDirs();
 
 if (!existsSync(src)) {
   console.error(`sync-krate-docs: source not found: ${src}`);
@@ -35,6 +60,7 @@ if (!existsSync(src)) {
 function listMarkdown(dir, base = dir) {
   const out = [];
   for (const name of readdirSync(dir)) {
+    if (dir === base && excluded.has(name)) continue;
     const full = join(dir, name);
     if (statSync(full).isDirectory()) {
       out.push(...listMarkdown(full, base));
@@ -94,7 +120,12 @@ if (existsSync(dest)) {
 } else {
   mkdirSync(dest, { recursive: true });
 }
-cpSync(src, dest, { recursive: true });
+const files = listMarkdown(src);
+for (const rel of files) {
+  const target = join(dest, rel);
+  mkdirSync(dirname(target), { recursive: true });
+  copyFileSync(join(src, rel), target);
+}
 console.log(
-  `sync-krate-docs: copied ${listMarkdown(src).length} files -> ${relative(root, dest)}`,
+  `sync-krate-docs: copied ${files.length} files -> ${relative(root, dest)}`,
 );

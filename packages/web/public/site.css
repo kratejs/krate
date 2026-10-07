@@ -304,14 +304,76 @@ pre {
     line-height: 1;
 }
 
-@media (max-width: 640px) {
-    .site-nav {
-        gap: 0.75rem;
+@media (max-width: 760px) {
+    /* Wrap the header instead of letting the nav + actions overflow the page:
+       brand and actions share the first row, links flow onto their own row. */
+    .site-navbar {
+        flex-wrap: wrap;
+        height: auto;
+        min-height: 56px;
+        padding: 0.5rem 1rem;
+        gap: 0.5rem 1rem;
     }
 
-    .site-navbar-name {
-        display: none;
+    .site-nav {
+        order: 3;
+        flex-basis: 100%;
+        margin-left: 0;
+        gap: 0.5rem 1rem;
+        flex-wrap: wrap;
     }
+
+    .site-nav a {
+        font-size: 0.85rem;
+    }
+
+    .site-navbar-actions {
+        margin-left: auto;
+    }
+
+    .hero {
+        padding: 3rem 1rem 2rem;
+    }
+
+    .section,
+    .features,
+    .cta-band {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    .hero-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .hero-actions .btn {
+        justify-content: center;
+    }
+}
+
+/* Scrollable wrappers must never widen the page (the docs theme defines
+   .table-wrap but marketing pages only load site.css). */
+.table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Code blocks (from the Code component) must never widen the page. */
+.krate-code-block {
+    max-width: 100%;
+}
+
+.krate-code-block pre {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.hero-code .krate-code-block,
+.cta-band .krate-code-block {
+    max-width: 100%;
 }
 
 /* ---- Header actions (social + theme toggle) ---- */

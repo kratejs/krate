@@ -122,6 +122,8 @@ export interface MarkdownConfig {
   /** chroma theme for syntax highlighting (default "github-dark"). */
   codeTheme?: string;
   math?: boolean;
+  /** Render ```` ```mermaid ```` code blocks as diagrams (loads Mermaid from a CDN). */
+  mermaid?: boolean;
 }
 
 export type RuntimeName = "quickjs" | "node" | "bun" | "deno";
@@ -244,6 +246,25 @@ export interface KrateConfig {
    * Only enable for regions that do NOT depend on per-request cookies/sessions.
    */
   ppr?: boolean | { revalidate?: number };
+  /**
+   * Multi-language docs. Locales live in subdirectories of the docs content dir
+   * (`src/content/docs/<locale>/…`); the default locale is unprefixed
+   * (`/docs/…`) and others are path-prefixed (`/fr/docs/…`).
+   */
+  i18n?: {
+    defaultLocale?: string;
+    locales?: string[];
+    routing?: "prefix";
+  };
+  /**
+   * Versioned docs. Versions live in subdirectories
+   * (`src/content/docs/<version>/…`); the current version is unprefixed.
+   */
+  versions?: {
+    current?: string;
+    versions?: string[];
+    banner?: boolean;
+  };
   devServer?: DevServerConfig;
   server?: ServerConfig;
   cors?: CORSConfig;

@@ -22,6 +22,15 @@ export type { DocsSearchProps } from "./search";
 export interface BaseDocsThemeOptions {
   /** localStorage key used to persist the light/dark choice (default `theme`). */
   themeStorageKey?: string;
+  /**
+   * "Was this helpful?" feedback. Thumbs up/down open a prefilled GitHub issue
+   * (or discussion when `discussions` is true) on the given `owner/repo`.
+   */
+  feedback?: {
+    repo: string;
+    discussions?: boolean;
+    label?: string;
+  };
   /** Forward-compatible escape hatch for future options. */
   [key: string]: unknown;
 }

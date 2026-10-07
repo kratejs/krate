@@ -301,6 +301,24 @@ func docsHeadExtras(cfg *config.Config, page docs.Page, siteTitle string) string
 		sb.WriteString("        <script>{`document.addEventListener('DOMContentLoaded',function(){if(window.renderMathInElement){renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],ignoredTags:['pre','code','script','style'],throwOnError:false});}});`}</script>\n")
 	}
 
+	// Mermaid: load the renderer and (re)render diagrams on load + SPA nav.
+	if cfg.Markdown.Mermaid {
+		script := "import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';" +
+			"function __krateTheme(){return document.documentElement.getAttribute('data-theme')==='dark'?'dark':'neutral';}" +
+			"var __krateThemeSeen=__krateTheme();" +
+			"function __krateMermaidRun(){" +
+			"document.querySelectorAll('.mermaid').forEach(function(el){if(!el.getAttribute('data-src')){el.setAttribute('data-src',el.textContent);}});" +
+			"document.querySelectorAll('.mermaid').forEach(function(el){if(el.getAttribute('data-processed')){el.removeAttribute('data-processed');var s=el.getAttribute('data-src');if(s!=null){el.textContent=s;}}});" +
+			"mermaid.initialize({startOnLoad:false,theme:__krateTheme()});" +
+			"try{var __p=mermaid.run({querySelector:'.mermaid'});if(__p&&__p.catch){__p.catch(function(){});}}catch(e){}}" +
+			"if(document.readyState!=='loading'){__krateMermaidRun();}else{document.addEventListener('DOMContentLoaded',__krateMermaidRun);}" +
+			"window.addEventListener('krate:navigate',function(){setTimeout(__krateMermaidRun,60);});" +
+			"new MutationObserver(function(){var t=__krateTheme();if(t===__krateThemeSeen){return;}__krateThemeSeen=t;__krateMermaidRun();}).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});"
+		sb.WriteString("        <script type=\"module\">{`")
+		sb.WriteString(escapeTemplateLit(script))
+		sb.WriteString("`}</script>\n")
+	}
+
 	if fo := parseFeedOptions(cfg); fo != nil {
 		feedBase := baseURL
 		if feedBase == "" {

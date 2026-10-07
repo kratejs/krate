@@ -41,6 +41,19 @@ func TestUnknownKeyWarnings(t *testing.T) {
 	}
 }
 
+// TestMarkdownMermaidAccepted verifies markdown.mermaid is a recognized nested
+// key (no unknown-key warning) now that the markdown config supports it.
+func TestMarkdownMermaidAccepted(t *testing.T) {
+	raw := []byte(`{"entry":"x","markdown":{"mermaid":true}}`)
+	if w := UnknownKeyWarnings(raw); len(w) != 0 {
+		t.Errorf("markdown.mermaid should be accepted, got warnings: %v", w)
+	}
+	raw = []byte(`{"entry":"x","markdown":{"mermaidTypo":true}}`)
+	if w := UnknownKeyWarnings(raw); len(w) != 1 {
+		t.Errorf("expected a warning for an unknown markdown key, got: %v", w)
+	}
+}
+
 func TestUnknownKeyWarningsIgnoresValidate(t *testing.T) {
 	raw := []byte(`{"entry":"x","validate":"function"}`)
 	if w := UnknownKeyWarnings(raw); len(w) != 0 {

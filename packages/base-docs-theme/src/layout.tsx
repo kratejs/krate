@@ -46,6 +46,22 @@ interface HeroData {
   actions?: HeroAction[];
 }
 
+interface AltLink {
+  code?: string;
+  label: string;
+  url: string;
+}
+
+interface I18nProps {
+  locale?: string;
+  defaultLocale?: string;
+  version?: string;
+  currentVersion?: string;
+  locales?: AltLink[];
+  versions?: AltLink[];
+  versionBanner?: boolean;
+}
+
 interface BaseDocsLayoutProps {
   pageTitle: string;
   siteTitle: string;
@@ -69,7 +85,28 @@ interface BaseDocsLayoutProps {
   categories?: string[];
   date?: string;
   lastUpdated?: string;
-  options?: { themeStorageKey?: string };
+  authors?: string[];
+  i18n?: I18nProps;
+  options?: {
+    themeStorageKey?: string;
+    feedback?: { repo: string; discussions?: boolean; label?: string };
+  };
+}
+
+function feedbackURL(fb: { repo: string; discussions?: boolean }, title: string, positive: boolean): string {
+  const kind = fb.discussions ? "discussions/new" : "issues/new";
+  const heading = (positive ? "Docs feedback (helpful): " : "Docs feedback (not helpful): ") + title;
+  const body = "Page: " + title;
+  return (
+    "https://github.com/" +
+    fb.repo +
+    "/" +
+    kind +
+    "?title=" +
+    encodeURIComponent(heading) +
+    "&body=" +
+    encodeURIComponent(body)
+  );
 }
 
 function taxonomySlug(name: string): string {
@@ -79,6 +116,8 @@ function taxonomySlug(name: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
+
+
 
 export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
   const pageTitle = props.pageTitle;
@@ -95,6 +134,16 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
   const categories = props.categories || [];
   const hasCategories = categories.length > 0;
   const lastUpdated = props.lastUpdated || "";
+  const i18n = props.i18n || {};
+  const localeLinks = i18n.locales || [];
+  const versionLinks = i18n.versions || [];
+  const activeVersion = i18n.version || i18n.currentVersion;
+  let currentVersionURL = "";
+  if (i18n.versions) {
+    for (const v of i18n.versions) {
+      if (v.code === i18n.currentVersion) currentVersionURL = v.url;
+    }
+  }
   const isHero = props.template === "hero";
   const heroTitle = props.hero && props.hero.title ? props.hero.title : pageTitle;
   const heroTagline = props.hero && props.hero.tagline;
@@ -104,6 +153,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
   const [tocOpen, setTocOpen] = createSignal(false);
 
   var themeBtnRef: HTMLElement | null = null;
+  var themeSideBtnRef: HTMLElement | null = null;
   var sideBtnRef: HTMLElement | null = null;
   var overlayRef: HTMLElement | null = null;
   var sidebarRef: HTMLElement | null = null;
@@ -146,9 +196,14 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
     if (typeof document !== "undefined" && document.documentElement) {
       document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
     }
+    var label = isDark ? "Switch to light mode" : "Switch to dark mode";
     if (themeBtnRef) {
-      themeBtnRef.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
+      themeBtnRef.setAttribute("aria-label", label);
       themeBtnRef.setAttribute("data-theme-state", isDark ? "dark" : "light");
+    }
+    if (themeSideBtnRef) {
+      themeSideBtnRef.setAttribute("aria-label", label);
+      themeSideBtnRef.setAttribute("data-theme-state", isDark ? "dark" : "light");
     }
   });
 
@@ -206,9 +261,51 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
 
       <a class="skip-link" href="#main">Skip to content</a>
 
+      {i18n.versionBanner && (
+        <div class="docs-version-banner">
+          <span>You're viewing an older version ({i18n.version}).</span>
+          {currentVersionURL && (
+            <Link class="docs-version-banner-link" href={currentVersionURL}>
+              Go to the latest
+            </Link>
+          )}
+        </div>
+      )}
+
       <header class="docs-navbar">
             <Link className="navbar-title" href="/docs/">{siteTitle}</Link>
         <div class="navbar-actions">
+          <div class="navbar-switchers">
+            {versionLinks.length > 1 && (
+              <details class="krate-switcher krate-version-switcher">
+                <summary aria-label="Change version">
+                  <Icon name="tabler:versions" width="16" height="16" />
+                  <span class="krate-switcher-current">{activeVersion}</span>
+                </summary>
+                <div class="krate-switcher-menu">
+                  {versionLinks.map((v) => (
+                    <Link class={v.code === activeVersion ? "active" : ""} href={v.url}>
+                      {v.label}
+                    </Link>
+                  ))}
+                </div>
+              </details>
+            )}
+            {localeLinks.length > 1 && (
+              <details class="krate-switcher">
+                <summary aria-label="Change language">
+                  <Icon name="tabler:world" width="16" height="16" />
+                </summary>
+                <div class="krate-switcher-menu">
+                  {localeLinks.map((l) => (
+                    <Link class={l.code === i18n.locale ? "active" : ""} href={l.url}>
+                      {l.label}
+                    </Link>
+                  ))}
+                </div>
+              </details>
+            )}
+          </div>
           <DocsSearch />
           <div class="navbar-social-links">
             <SocialLinks links={props.socialLinks} />
@@ -251,6 +348,41 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
               <Icon name="tabler:x" width="18" height="18" />
             </button>
           </div>
+          <div class="sidebar-switchers">
+            {versionLinks.length > 1 && (
+              <details class="krate-switcher krate-version-switcher">
+                <summary aria-label="Change version">
+                  <Icon name="tabler:versions" width="16" height="16" />
+                  <span class="krate-switcher-current">{activeVersion}</span>
+                </summary>
+                <div class="krate-switcher-menu">
+                  {versionLinks.map((v) => (
+                    <Link class={v.code === activeVersion ? "active" : ""} href={v.url}>
+                      {v.label}
+                    </Link>
+                  ))}
+                </div>
+              </details>
+            )}
+            {localeLinks.length > 1 && (
+              <details class="krate-switcher">
+                <summary aria-label="Change language">
+                  <Icon name="tabler:world" width="16" height="16" />
+                </summary>
+                <div class="krate-switcher-menu">
+                  {localeLinks.map((l) => (
+                    <Link class={l.code === i18n.locale ? "active" : ""} href={l.url}>
+                      {l.label}
+                    </Link>
+                  ))}
+                </div>
+              </details>
+            )}
+            <button class="theme-toggle" ref={themeSideBtnRef} aria-label="Toggle color theme" type="button" onClick={toggleTheme}>
+              <Icon name="tabler:sun" width="16" height="16" />
+              <Icon name="tabler:moon" width="16" height="16" />
+            </button>
+          </div>
         </div>
         <SidebarNav items={props.sidebarItems} currentPath={props.currentPath} onNavigate={closeNav} />
       </nav>
@@ -291,18 +423,50 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
           {lastUpdated !== "" && (
             <p class="docs-last-updated">Last updated: {lastUpdated.slice(0, 10)}</p>
           )}
+          {props.authors && props.authors.length > 0 && (
+            <p class="docs-contributors">
+              <span>Contributors:</span> {props.authors.join(", ")}
+            </p>
+          )}
           <PrevNext
             prevTitle={props.prevTitle}
             prevLink={props.prevLink}
             nextTitle={props.nextTitle}
             nextLink={props.nextLink}
           />
-          {editUrl && (
-            <a class="docs-edit-link" href={editUrl}>
-              <Icon name="tabler:pencil" width="14" height="14" />
-              <span>Edit this page</span>
-            </a>
-          )}
+          <div class="docs-page-footer">
+            {editUrl && (
+              <a class="docs-edit-link" href={editUrl}>
+                <Icon name="tabler:pencil" width="14" height="14" />
+                <span>Edit this page</span>
+              </a>
+            )}
+            {themeOptions.feedback && (
+              <div class="docs-feedback">
+                <span class="docs-feedback-label">
+                  {themeOptions.feedback.label || "Was this helpful?"}
+                </span>
+                <a
+                  class="docs-feedback-btn"
+                  href={feedbackURL(themeOptions.feedback, pageTitle, true)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Yes, this page was helpful"
+                >
+                  👍
+                </a>
+                <a
+                  class="docs-feedback-btn"
+                  href={feedbackURL(themeOptions.feedback, pageTitle, false)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="No, this page was not helpful"
+                >
+                  👎
+                </a>
+              </div>
+            )}
+          </div>
         </main>
 
         {showToc && (

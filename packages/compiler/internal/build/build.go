@@ -2396,6 +2396,28 @@ func (b *Builder) walkAndTransformIcons(node ast.Node) {
 		n.Value = b.transformIconExpr(n.Value)
 	case *ast.ExprStmt:
 		n.Expression = b.transformIconExpr(n.Expression)
+	case *ast.ArrowFn:
+		for _, stmt := range n.Body {
+			b.walkAndTransformIcons(stmt)
+		}
+	case *ast.IfStmt:
+		b.walkAndTransformIcons(n.Test)
+		for _, s := range n.Consequent {
+			b.walkAndTransformIcons(s)
+		}
+		for _, s := range n.Alternate {
+			b.walkAndTransformIcons(s)
+		}
+	case *ast.BlockStmt:
+		for _, s := range n.Body {
+			b.walkAndTransformIcons(s)
+		}
+	case *ast.VarStmt:
+		for _, d := range n.Decls {
+			if d.Init != nil {
+				d.Init = b.transformIconExpr(d.Init)
+			}
+		}
 	}
 }
 
@@ -2422,6 +2444,7 @@ func (b *Builder) transformIconExpr(expr ast.Expr) ast.Expr {
 			}
 		}
 	case *ast.ConditionalExpr:
+		e.Test = b.transformIconExpr(e.Test)
 		e.Consequent = b.transformIconExpr(e.Consequent)
 		e.Alternate = b.transformIconExpr(e.Alternate)
 	case *ast.JSXFragment:
@@ -2435,6 +2458,21 @@ func (b *Builder) transformIconExpr(expr ast.Expr) ast.Expr {
 					c.Expression = b.transformIconExpr(c.Expression)
 				}
 			}
+		}
+	case *ast.BinaryExpr:
+		// `{cond && <Icon .../>}` (and other operators) — recurse both sides so
+		// icons inside short-circuit guards still compile to SVG.
+		e.Left = b.transformIconExpr(e.Left)
+		e.Right = b.transformIconExpr(e.Right)
+	case *ast.CallExpr:
+		// `{items.map((x) => <Icon .../>)}` and similar call-argument JSX.
+		e.Callee = b.transformIconExpr(e.Callee)
+		for i := range e.Args {
+			e.Args[i] = b.transformIconExpr(e.Args[i])
+		}
+	case *ast.ArrowFn:
+		for _, stmt := range e.Body {
+			b.walkAndTransformIcons(stmt)
 		}
 	}
 	return expr

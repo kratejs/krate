@@ -126,6 +126,16 @@ export interface DocsLayoutProps<Options = DocsThemeOptions> {
   date?: string;
   /** Last-updated date (frontmatter `lastUpdated` or git commit date). */
   lastUpdated?: string;
+  /** i18n / versioning context (switchers + old-version banner). */
+  i18n?: {
+    locale?: string;
+    defaultLocale?: string;
+    version?: string;
+    currentVersion?: string;
+    locales?: { code?: string; label: string; url: string }[];
+    versions?: { code?: string; label: string; url: string }[];
+    versionBanner?: boolean;
+  };
   /** Rendered markdown content. */
   children?: unknown;
   /** Theme options forwarded when the descriptor declares them. */

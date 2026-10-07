@@ -74,6 +74,18 @@ type Page struct {
 	// date; Updated is the last-modified date (frontmatter, else git).
 	Date    string `json:"date,omitempty"`
 	Updated string `json:"updated,omitempty"`
+
+	// Authors lists recent contributors to the source file (from git), most
+	// recent first. Populated when Config.GitLastUpdated is set.
+	Authors []string `json:"authors,omitempty"`
+
+	// Phase 6 — i18n/versioning. Locale is the page's locale ("" when i18n is
+	// not configured); Version is its docs version ("" when unversioned); URL is
+	// the page's absolute site URL, set by the docs plugin (locale/version
+	// aware).
+	Locale  string `json:"locale,omitempty"`
+	Version string `json:"version,omitempty"`
+	URL     string `json:"url,omitempty"`
 }
 
 // TocConfig controls the page's table of contents.
@@ -171,8 +183,12 @@ func Scan(cfg Config) ([]Page, error) {
 		}
 
 		updated := fm.Updated
-		if updated == "" && cfg.GitLastUpdated {
-			updated = gitinfo.LastCommit(cfg.Root, absPath)
+		var authors []string
+		if cfg.GitLastUpdated {
+			if updated == "" {
+				updated = gitinfo.LastCommit(cfg.Root, absPath)
+			}
+			authors = gitinfo.LastAuthors(cfg.Root, absPath, 5)
 		}
 
 		pages = append(pages, Page{
@@ -200,6 +216,7 @@ func Scan(cfg Config) ([]Page, error) {
 			Categories:    fm.Categories,
 			Date:          fm.Date,
 			Updated:       updated,
+			Authors:       authors,
 		})
 		return nil
 	})

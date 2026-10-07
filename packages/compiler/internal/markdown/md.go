@@ -506,6 +506,11 @@ func renderParagraph(b block, cfg Config) string {
 func renderCodeBlock(b block, cfg Config) string {
 	code := strings.Join(b.lines, "\n")
 
+	// Mermaid diagrams render client-side from the raw source text.
+	if cfg.Mermaid && strings.EqualFold(strings.TrimSpace(b.info), "mermaid") {
+		return "<pre class=\"mermaid\">" + escape.HTML(code) + "</pre>\n"
+	}
+
 	if cfg.CodeHighlight && b.info != "" {
 		lang := syntaxhighlight.NormalizeLanguage(b.info)
 		highlighted := syntaxhighlight.HighlightTheme(code, lang, cfg.CodeTheme)

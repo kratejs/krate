@@ -5651,6 +5651,62 @@ func (b *builder) foldCVACall(call *ast.CallExpr) (string, bool) {
 	return spec.Fold(selection, extra), true
 }
 
+// constArrayItems parses a const-folded array value into its element strings.
+// Values arrive either as the internal \x1f-joined form (arrays built in
+// evaluated code) or as a JS array-literal source string (arrays from props /
+// consts, e.g. `['a','b']`). String elements are unquoted so `arr.join(", ")`
+// yields the element text rather than its quoted source form.
+func constArrayItems(v string) ([]string, bool) {
+	if v == "" {
+		return nil, true
+	}
+	if strings.Contains(v, "\x1f") {
+		return strings.Split(v, "\x1f"), true
+	}
+	if !strings.HasPrefix(strings.TrimSpace(v), "[") {
+		return nil, false
+	}
+	arr, ok := constSourceToAST(v).(*ast.ArrayExpr)
+	if !ok {
+		return nil, false
+	}
+	out := make([]string, 0, len(arr.Elements))
+	for _, el := range arr.Elements {
+		out = append(out, evalConst(el))
+	}
+	return out, true
+}
+
+// sliceConstBounds resolves JS Array/String.prototype.slice arguments
+// (negative offsets and an omitted end) to a clamped [start, end) range.
+func sliceConstBounds(start, end int, hasEnd bool, n int) (int, int) {
+	if start < 0 {
+		start += n
+		if start < 0 {
+			start = 0
+		}
+	}
+	if start > n {
+		start = n
+	}
+	if !hasEnd {
+		end = n
+	}
+	if end < 0 {
+		end += n
+		if end < 0 {
+			end = 0
+		}
+	}
+	if end > n {
+		end = n
+	}
+	if end < start {
+		end = start
+	}
+	return start, end
+}
+
 func evalConst(expr ast.Expr) string {
 	if expr == nil {
 		return ""
@@ -5828,6 +5884,50 @@ func evalConstWithSignals(expr ast.Expr, signals map[string]ast.Expr, props map[
 		}
 		return e.Value
 	case *ast.CallExpr:
+		// Array.prototype.join: fold `arr.join(sep)` to a string when `arr` is a
+		// statically-known array (an array literal, a prop binding such as
+		// `props.authors`, or a signal initial). Without this the join only
+		// resolves during hydration, so a client component's build-time static
+		// HTML renders "" and diverges from the hydrated output.
+		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
+			if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "join" {
+				arr := evalConstWithSignals(mem.Object, signals, props)
+				sep := ","
+				if len(e.Args) == 1 {
+					if s := evalConstWithSignals(e.Args[0], signals, props); s != "" {
+						sep = s
+					}
+				}
+				if items, ok := constArrayItems(arr); ok {
+					return strings.Join(items, sep)
+				}
+			}
+			// String/Array.prototype.slice: fold `x.slice(a, b?)` so static text
+			// such as `{lastUpdated.slice(0, 10)}` renders at build time instead
+			// of collapsing to "" (it never re-renders during hydration).
+			if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "slice" {
+				obj := evalConstWithSignals(mem.Object, signals, props)
+				start, end, hasEnd := 0, 0, false
+				if len(e.Args) >= 1 {
+					if n, err := strconv.Atoi(strings.TrimSpace(evalConstWithSignals(e.Args[0], signals, props))); err == nil {
+						start = n
+					}
+				}
+				if len(e.Args) >= 2 {
+					if n, err := strconv.Atoi(strings.TrimSpace(evalConstWithSignals(e.Args[1], signals, props))); err == nil {
+						end = n
+						hasEnd = true
+					}
+				}
+				if items, ok := constArrayItems(obj); ok {
+					s, en := sliceConstBounds(start, end, hasEnd, len(items))
+					return strings.Join(items[s:en], "\x1f")
+				}
+				runes := []rune(obj)
+				s, en := sliceConstBounds(start, end, hasEnd, len(runes))
+				return string(runes[s:en])
+			}
+		}
 		// `Ctx.useContext()` folds to the context default (no Provider exists
 		// during SSG). The default was seeded under a reserved key above.
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {

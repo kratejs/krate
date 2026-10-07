@@ -48,10 +48,12 @@ dist/
    streams the chunks it needs. If Pagefind can't load (offline, or a dev build),
    the UI automatically falls back to the JSON index.
 
-> **In development**, `krate dev` builds the docfind WASM index instead of
-> running Pagefind, because Pagefind's index is a whole-site post-build pass that
-> dev's incremental rebuilds don't re-run. Search therefore works identically
-> while you write, and switches to Pagefind in production.
+:::note
+**In development**, `krate dev` builds the docfind WASM index instead of running
+Pagefind, because Pagefind's index is a whole-site post-build pass that dev's
+incremental rebuilds don't re-run. Search therefore works identically while you
+write, and switches to Pagefind in production.
+:::
 
 ## Configuration
 
@@ -119,8 +121,10 @@ docs({ search: { engine: "pagefind" } }) // the default
   modal, so the look, `Ctrl/Cmd+K`, keyboard navigation, and `.krate-search-*`
   theming are identical across engines. Pagefind's own component UI is not used.
 
-> `krate build --watch` incremental rebuilds do not re-run the Pagefind
-> indexer — run a full `krate build` to refresh the index.
+:::note
+`krate build --watch` incremental rebuilds do not re-run the Pagefind indexer —
+run a full `krate build` to refresh the index.
+:::
 
 ### docfind
 

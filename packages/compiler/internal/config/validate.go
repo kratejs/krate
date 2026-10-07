@@ -17,10 +17,12 @@ var knownNestedKeys = map[string]map[string]bool{
 	"cors":      {"enabled": true, "origins": true, "methods": true, "headers": true, "credentials": true, "maxAge": true},
 	"api":       {"sidecar": true},
 	"ssr":       {"rendererPort": true, "timeout": true, "maxCacheSize": true, "middlewareRuntime": true, "apiRuntime": true, "ssrRuntime": true, "streaming": true},
-	"markdown":  {"root": true, "gfm": true, "headingAnchors": true, "admonitions": true, "codeHighlight": true, "codeTheme": true, "math": true},
+	"markdown":  {"root": true, "gfm": true, "headingAnchors": true, "admonitions": true, "codeHighlight": true, "codeTheme": true, "math": true, "mermaid": true},
 	"tailwind":  {"enabled": true, "scanDirs": true, "content": true, "preflight": true, "strict": true, "darkMode": true, "executeConfig": true},
 	"csp":       {"enabled": true, "directive": true},
 	"seo":       {"baseUrl": true, "siteName": true, "description": true, "image": true},
+	"i18n":      {"defaultLocale": true, "locales": true, "routing": true},
+	"versions":  {"current": true, "versions": true, "banner": true},
 	"robots":    {"allow": true, "disallow": true, "sitemap": true},
 }
 
@@ -44,6 +46,7 @@ var knownTopLevelKeys = map[string]bool{
 	"markdown": true, "tailwind": true, "csp": true, "runtime": true, "ssr": true,
 	"pathAliases": true, "tsBaseDir": true, "redirects": true, "rewrites": true,
 	"seo": true, "robots": true, "output": true, "serverComponents": true,
+	"i18n": true, "versions": true,
 	"runtimeComponents": true, "serverDirs": true, "runtimeDirs": true,
 	"content": true, "checks": true,
 }

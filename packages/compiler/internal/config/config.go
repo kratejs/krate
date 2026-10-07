@@ -233,6 +233,40 @@ type RobotsConfig struct {
 	Sitemap  string `json:"sitemap,omitempty"`  // e.g. "https://example.com/sitemap.xml"
 }
 
+// I18nConfig configures multi-language docs. Locales live in subdirectories of
+// the docs content dir (e.g. src/content/docs/fr/…); the default locale is
+// unprefixed (/docs/…) and other locales are path-prefixed (/fr/docs/…).
+type I18nConfig struct {
+	// DefaultLocale is the unprefixed locale (e.g. "en").
+	DefaultLocale string `json:"defaultLocale,omitempty"`
+	// Locales lists every locale, including the default (e.g. ["en","fr","ja"]).
+	Locales []string `json:"locales,omitempty"`
+	// Routing is the URL strategy; only "prefix" is supported.
+	Routing string `json:"routing,omitempty"`
+}
+
+// Enabled reports whether multi-language docs are configured.
+func (c I18nConfig) Enabled() bool { return len(c.Locales) > 0 }
+
+// VersionsConfig configures versioned docs. Each version lives in a
+// subdirectory of the docs content dir (src/content/docs/<version>/…); the
+// current version is mounted unprefixed.
+type VersionsConfig struct {
+	// Current is the unprefixed version (e.g. "v2").
+	Current string `json:"current,omitempty"`
+	// Versions lists every version, newest first (e.g. ["v2","v1"]).
+	Versions []string `json:"versions,omitempty"`
+	// Banner shows an "old version" banner when viewing a non-current version.
+	// A nil pointer defaults to true.
+	Banner *bool `json:"banner,omitempty"`
+}
+
+// Enabled reports whether versioned docs are configured.
+func (c VersionsConfig) Enabled() bool { return len(c.Versions) > 0 }
+
+// BannerEnabled reports whether the old-version banner is on (default true).
+func (c VersionsConfig) BannerEnabled() bool { return c.Banner == nil || *c.Banner }
+
 type Config struct {
 	Entry       string          `json:"entry"`
 	OutDir      string          `json:"outDir"`
@@ -259,6 +293,8 @@ type Config struct {
 	Rewrites    []Rewrite       `json:"rewrites,omitempty"`    // config-based rewrites
 	SEO         SEOConfig       `json:"seo,omitempty"`         // SEO metadata (baseUrl, siteName, description)
 	Robots      RobotsConfig    `json:"robots,omitempty"`      // robots.txt config
+	I18n        I18nConfig      `json:"i18n,omitempty"`        // multi-language docs
+	Versions    VersionsConfig  `json:"versions,omitempty"`    // versioned docs
 
 	// BasePath is the URL path prefix the whole site is served under (e.g.
 	// "/docs"). Empty means root. Used for emitted asset URLs and the SPA

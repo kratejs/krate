@@ -10,6 +10,12 @@ export default defineConfig({
 
   viewTransitions: "auto",
 
+  i18n: {
+    defaultLocale: "en",
+    locales: ["en", "fr"],
+    routing: "prefix",
+  },
+
   devServer: {
     port: 3000,
     open: false,
@@ -20,6 +26,7 @@ export default defineConfig({
     headingAnchors: true,
     admonitions: true,
     codeHighlight: true,
+    mermaid: true,
   },
 
   seo: {
@@ -42,7 +49,9 @@ export default defineConfig({
     docs({
       contentDir: "src/content/docs",
       title: "Krate Docs",
-      theme: baseDocsTheme(),
+      theme: baseDocsTheme({
+        feedback: { repo: "kratejs/krate", label: "Was this page helpful?" },
+      }),
       editLinkBase: "https://github.com/kratejs/krate/blob/main/packages/web",
       search: {
         enabled: true,

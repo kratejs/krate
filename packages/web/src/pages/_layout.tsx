@@ -33,6 +33,10 @@ const site = {
     {
       title: "Community",
       links: [
+        { label: "Blog", href: "/blog/" },
+        { label: "Showcase", href: "/showcase/" },
+        { label: "Roadmap", href: "/roadmap/" },
+        { label: "Changelog", href: "/changelog/" },
         { label: "GitHub", href: "https://github.com/kratejs/krate", external: true },
         { label: "Contributing", href: "/docs/guides/contributing/" },
       ],

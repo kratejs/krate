@@ -218,14 +218,16 @@ A namespace import (`import * as Card`) and a namespace re-export barrel
 (`export * as Card from './card'`) both resolve `<Card.Root>` to the declared
 `Root` function. This is the same shape Radix components use.
 
-> **Note.** The published `@radix-ui/react-*` npm packages ship **compiled
-> JavaScript only** (no source), built on `react/jsx-runtime`, `React.*`, and
-> internal `@radix-ui/*` packages. Running those exact files would require a
-> React runtime — which Krate deliberately does not ship. Instead, use the
-> built-in [`@krate/components`](/docs/reference/component-library/) library,
-> which reimplements the common Radix/shadcn primitives as Krate source with the
-> same compound API, or copy the relevant component into your project. Both
-> compile to static HTML with no client runtime.
+:::note
+The published `@radix-ui/react-*` npm packages ship **compiled JavaScript only**
+(no source), built on `react/jsx-runtime`, `React.*`, and internal `@radix-ui/*`
+packages. Running those exact files would require a React runtime — which Krate
+deliberately does not ship. Instead, use the built-in
+[`@krate/components`](/docs/reference/component-library/) library, which
+reimplements the common Radix/shadcn primitives as Krate source with the same
+compound API, or copy the relevant component into your project. Both compile to
+static HTML with no client runtime.
+:::
 
 ## What is not supported
 

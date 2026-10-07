@@ -59,6 +59,41 @@ func PageURL(path string) string {
 	return DocsBasePath + "/" + normalized + "/"
 }
 
+// pagePathURL returns a page's URL, preferring the plugin-computed (locale- and
+// version-aware) URL when present.
+func pagePathURL(p Page) string {
+	if p.URL != "" {
+		return p.URL
+	}
+	return PageURL(p.Path)
+}
+
+// LocaleURL returns the absolute URL for a docs page in a locale. The default
+// locale is unprefixed (/docs/…); other locales are path-prefixed
+// (/fr/docs/…).
+func LocaleURL(locale, defaultLocale, path string) string {
+	base := PageURL(path)
+	if locale == "" || locale == defaultLocale {
+		return base
+	}
+	return "/" + locale + base
+}
+
+// BuildBreadcrumbsURL is BuildBreadcrumbs with a locale prefix applied to every
+// non-default locale's crumb URLs.
+func BuildBreadcrumbsURL(locale, defaultLocale, path string) []Breadcrumb {
+	crumbs := BuildBreadcrumbs(path)
+	if locale == "" || locale == defaultLocale {
+		return crumbs
+	}
+	for i := range crumbs {
+		if crumbs[i].URL != "" {
+			crumbs[i].URL = "/" + locale + crumbs[i].URL
+		}
+	}
+	return crumbs
+}
+
 // BuildSidebarTree builds a recursive sidebar tree from pages.
 // Pages are grouped by their directory structure — each subdirectory
 // becomes a nested SidebarItem with Children, supporting infinite nesting.
@@ -81,7 +116,7 @@ func BuildSidebarTree(pages []Page) []SidebarItem {
 	navByURL := make(map[string]*SidebarNavConfig)
 	badgeByURL := make(map[string]*Badge)
 	for _, p := range pages {
-		url := PageURL(p.Path)
+		url := pagePathURL(p)
 		if p.SidebarCfg != nil {
 			navByURL[url] = p.SidebarCfg
 		}
@@ -124,7 +159,7 @@ func BuildSidebarTree(pages []Page) []SidebarItem {
 		}
 		linkItem := SidebarItem{
 			Title: title,
-			URL:   PageURL(p.Path),
+			URL:   pagePathURL(p),
 			Icon:  icon,
 			Badge: badge,
 		}
@@ -255,6 +290,13 @@ func PathToTitle(path string) string {
 // Values already set by frontmatter (sidebar: {collapsible, defaultOpen}) are
 // preserved and OR'd with the auto-derived values.
 func EnrichSidebarItems(items []SidebarItem, currentPath string) []SidebarItem {
+	return EnrichSidebarItemsURL(items, PageURL(currentPath))
+}
+
+// EnrichSidebarItemsURL is EnrichSidebarItems keyed by the current page's full
+// (locale/version-aware) URL, so active/expanded state is correct under i18n
+// and versioning.
+func EnrichSidebarItemsURL(items []SidebarItem, activeURL string) []SidebarItem {
 	if len(items) == 0 {
 		return items
 	}
@@ -263,10 +305,10 @@ func EnrichSidebarItems(items []SidebarItem, currentPath string) []SidebarItem {
 		out[i] = item
 		out[i].IndexURL = sidebarIndexURLNav(item)
 		out[i].Collapsible = item.Collapsible || (len(item.Children) > 0 && out[i].IndexURL != "")
-		out[i].Expanded = item.Expanded || sidebarItemActiveNav(item, currentPath)
+		out[i].Expanded = item.Expanded || sidebarItemActiveNav(item, activeURL)
 		if len(item.Children) > 0 {
 			filtered := filterSidebarIndexChildNav(item.Children, out[i].IndexURL)
-			out[i].Children = EnrichSidebarItems(filtered, currentPath)
+			out[i].Children = EnrichSidebarItemsURL(filtered, activeURL)
 		}
 	}
 	return out
@@ -307,12 +349,12 @@ func sidebarIndexURLNav(item SidebarItem) string {
 	return ""
 }
 
-func sidebarItemActiveNav(item SidebarItem, currentPath string) bool {
-	if item.Active || (item.URL != "" && item.URL == PageURL(currentPath)) {
+func sidebarItemActiveNav(item SidebarItem, activeURL string) bool {
+	if item.Active || (item.URL != "" && item.URL == activeURL) {
 		return true
 	}
 	for _, child := range item.Children {
-		if sidebarItemActiveNav(child, currentPath) {
+		if sidebarItemActiveNav(child, activeURL) {
 			return true
 		}
 	}

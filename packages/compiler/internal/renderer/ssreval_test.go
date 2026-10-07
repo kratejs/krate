@@ -72,3 +72,22 @@ export default function Page() {
 		t.Errorf("expected false showIf to elide the element, got: %s", result.HTML)
 	}
 }
+
+// TestStringSliceFoldsAtSSR verifies `str.slice(a, b)` folds to the sliced
+// substring in emitted HTML. The SSR const evaluators previously ignored
+// `.slice`, so the text rendered empty (e.g. the docs "Last updated" line).
+func TestStringSliceFoldsAtSSR(t *testing.T) {
+	src := `function Meta(props) {
+  return <p class="updated">{props.updated.slice(0, 10)}</p>;
+}
+export default function Page() {
+  return <Meta updated="2026-09-12T19:48:40+01:00" />;
+}`
+	result, _ := fullPipeline(t, src)
+	if !strings.Contains(result.HTML, "2026-09-12") {
+		t.Fatalf("expected sliced date in HTML, got:\n%s", result.HTML)
+	}
+	if strings.Contains(result.HTML, "T19:48") {
+		t.Fatalf("slice must trim the timestamp, got:\n%s", result.HTML)
+	}
+}

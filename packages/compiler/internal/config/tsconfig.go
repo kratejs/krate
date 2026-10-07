@@ -314,6 +314,17 @@ func parseSidecar(v interface{}) (*SidecarConfig, error) {
 	return sc, nil
 }
 
+// interfaceStrings converts a parsed JSON array of values to []string.
+func interfaceStrings(arr []interface{}) []string {
+	out := make([]string, 0, len(arr))
+	for _, v := range arr {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func applyConfigProp(cfg *Config, key string, val interface{}) error {
 	switch key {
 	case "entry":
@@ -551,6 +562,10 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				if b, ok := v.(bool); ok {
 					cfg.Markdown.Math = b
 				}
+			case "mermaid":
+				if b, ok := v.(bool); ok {
+					cfg.Markdown.Mermaid = b
+				}
 			}
 		}
 	case "tailwind":
@@ -766,6 +781,34 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return fmt.Errorf("expected object, got %T", val)
 		}
 		cfg.Checks = m
+	case "i18n":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		if s, ok := m["defaultLocale"].(string); ok {
+			cfg.I18n.DefaultLocale = s
+		}
+		if arr, ok := m["locales"].([]interface{}); ok {
+			cfg.I18n.Locales = interfaceStrings(arr)
+		}
+		if s, ok := m["routing"].(string); ok {
+			cfg.I18n.Routing = s
+		}
+	case "versions":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		if s, ok := m["current"].(string); ok {
+			cfg.Versions.Current = s
+		}
+		if arr, ok := m["versions"].([]interface{}); ok {
+			cfg.Versions.Versions = interfaceStrings(arr)
+		}
+		if b, ok := m["banner"].(bool); ok {
+			cfg.Versions.Banner = &b
+		}
 	case "output":
 		s, ok := val.(string)
 		if !ok {

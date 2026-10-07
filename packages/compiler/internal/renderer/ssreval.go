@@ -776,9 +776,7 @@ func (e *SSREval) evalMemberExpr(expr *ast.MemberExpr) string {
 		// Try to extract property from binding value
 		if v, found := e.bindings[id.Name]; found {
 			if prop == "length" && v != "" {
-				// Array length: count \x1f-separated items
-				parts := strings.Split(v, "\x1f")
-				return itoa(len(parts))
+				return itoa(len(arrayItems(v)))
 			}
 			if prop != "" {
 				if val := extractJSONProp(v, prop); val != "" {
@@ -800,8 +798,7 @@ func (e *SSREval) evalMemberExpr(expr *ast.MemberExpr) string {
 	}
 	// .length on evaluated value
 	if prop == "length" && obj != "" {
-		parts := strings.Split(obj, "\x1f")
-		return itoa(len(parts))
+		return itoa(len(arrayItems(obj)))
 	}
 	// Try to extract property from evaluated object string
 	if prop != "" {
@@ -830,12 +827,11 @@ func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 		}
 		// .join()
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "join" {
-			arr := e.eval(mem.Object)
 			sep := ", "
 			if len(expr.Args) == 1 {
 				sep = e.eval(expr.Args[0])
 			}
-			return strings.ReplaceAll(arr, "\x1f", sep)
+			return strings.Join(arrayItems(e.eval(mem.Object)), sep)
 		}
 		// .filter()
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "filter" && len(expr.Args) == 1 {
@@ -843,8 +839,7 @@ func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 		}
 		// .length
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "length" {
-			arr := e.eval(mem.Object)
-			return itoa(len(strings.Split(arr, "\x1f")))
+			return itoa(len(arrayItems(e.eval(mem.Object))))
 		}
 		// .toString()
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "toString" {
@@ -865,6 +860,31 @@ func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 		// .toLowerCase()
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "toLowerCase" {
 			return strings.ToLower(e.eval(mem.Object))
+		}
+		// .slice(start, end?) — strings (runes) and arrays (either \x1f-joined
+		// or a JS array literal from a serialized binding).
+		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "slice" {
+			obj := e.eval(mem.Object)
+			start, end, hasEnd := 0, 0, false
+			if len(expr.Args) >= 1 {
+				if n, err := strconv.Atoi(strings.TrimSpace(e.eval(expr.Args[0]))); err == nil {
+					start = n
+				}
+			}
+			if len(expr.Args) >= 2 {
+				if n, err := strconv.Atoi(strings.TrimSpace(e.eval(expr.Args[1]))); err == nil {
+					end = n
+					hasEnd = true
+				}
+			}
+			if strings.Contains(obj, "\x1f") || strings.HasPrefix(strings.TrimSpace(obj), "[") {
+				items := arrayItems(obj)
+				s, en := sliceBounds(start, end, hasEnd, len(items))
+				return strings.Join(items[s:en], "\x1f")
+			}
+			runes := []rune(obj)
+			s, en := sliceBounds(start, end, hasEnd, len(runes))
+			return string(runes[s:en])
 		}
 	}
 	// Class helpers (cn/clsx) fold to a literal class string when every
@@ -895,6 +915,36 @@ func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 		return e.delegateJS(expr)
 	}
 	return ""
+}
+
+// sliceBounds resolves JS Array/String.prototype.slice arguments (negative
+// offsets and an omitted end are supported) to a clamped [start, end) range.
+func sliceBounds(start, end int, hasEnd bool, n int) (int, int) {
+	if start < 0 {
+		start += n
+		if start < 0 {
+			start = 0
+		}
+	}
+	if start > n {
+		start = n
+	}
+	if !hasEnd {
+		end = n
+	}
+	if end < 0 {
+		end += n
+		if end < 0 {
+			end = 0
+		}
+	}
+	if end > n {
+		end = n
+	}
+	if end < start {
+		end = start
+	}
+	return start, end
 }
 
 // evalCVACall resolves a cva factory call to its class string using the current
@@ -1903,15 +1953,10 @@ func (e *SSREval) evalArrayMap(arrExpr ast.Expr, callback ast.Expr) string {
 	if arrVal == "" {
 		return ""
 	}
-	// Split by separator (used by array rendering). Prop bindings arrive as
-	// JS-array-literal strings (e.g. `[{title:'Welcome',url:'/docs/'}]`) from
-	// buildPropBindings/evalConst, while code-built arrays use \x1f. Handle both.
-	var items []string
-	if strings.HasPrefix(arrVal, "[") {
-		items = splitJSArrayLiteral(arrVal)
-	} else {
-		items = strings.Split(arrVal, "\x1f")
-	}
+	// Prop bindings arrive as JS-array-literal strings
+	// (e.g. `[{title:'Welcome',url:'/docs/'}]`) from buildPropBindings/evalConst,
+	// while code-built arrays use \x1f. arrayItems handles both.
+	items := arrayItems(arrVal)
 	bodyExpr := arrowBodyExpr(arrow)
 	if bodyExpr == nil {
 		return ""
@@ -1934,6 +1979,45 @@ func (e *SSREval) evalArrayMap(arrExpr ast.Expr, callback ast.Expr) string {
 		e.bindings = savedBindings
 	}
 	return strings.Join(results, "\x1f")
+}
+
+// arrayItems splits an array binding value into its elements regardless of how
+// it was produced. Arrays built in evaluated code are stored as \x1f-joined
+// strings; arrays arriving from props/consts are serialized as JS array
+// literals (e.g. `['a','b']` or `[{title:'x'}]`). Both forms are handled here so
+// `.join`, `.length`, and `.map` agree on what an array is. String elements of a
+// literal form are unquoted so `items.map((s) => <li>{s}</li>)` renders `a`, not
+// `'a'`.
+func arrayItems(v string) []string {
+	if v == "" {
+		return nil
+	}
+	if strings.HasPrefix(strings.TrimSpace(v), "[") {
+		raw := splitJSArrayLiteral(v)
+		items := make([]string, 0, len(raw))
+		for _, el := range raw {
+			items = append(items, unquoteJSString(el))
+		}
+		return items
+	}
+	return strings.Split(v, "\x1f")
+}
+
+// unquoteJSString removes a matching pair of single/double/backtick quotes and
+// the common escapes, so serialized string elements render as their text value.
+func unquoteJSString(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return s
+	}
+	q := s[0]
+	if (q != '\'' && q != '"' && q != '`') || s[len(s)-1] != q {
+		return s
+	}
+	body := s[1 : len(s)-1]
+	body = strings.ReplaceAll(body, `\\`, `\`)
+	body = strings.ReplaceAll(body, `\`+string(q), string(q))
+	return body
 }
 
 // splitJSArrayLiteral splits a JS array-literal string into its top-level

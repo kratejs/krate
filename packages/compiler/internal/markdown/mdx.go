@@ -471,15 +471,26 @@ func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]any, segme
 			continue
 		}
 
-		// Fenced code block → <Code> segment.
+		// Fenced code block → <Code> segment (or a Mermaid diagram).
 		if fenceRe.MatchString(trimmed) {
 			lang, codeLines, next := collectFencedCode(lines, i)
+			code := strings.Join(codeLines, "\n")
+			if cfg.Mermaid && strings.EqualFold(strings.TrimSpace(lang), "mermaid") {
+				jsx := "<pre class=\"mermaid\">{`" + escapeTemplateLiteral(code) + "`}</pre>"
+				placeholder := makePlaceholder("DIRECTIVE", directiveIdx)
+				processed.WriteString(placeholder)
+				processed.WriteByte('\n')
+				markers = append(markers, seqMarker{placeholder: placeholder, rawJSX: jsx})
+				directiveIdx++
+				i = next
+				continue
+			}
 			placeholder := makePlaceholder("CODE", codeIdx)
 			processed.WriteString(placeholder)
 			processed.WriteByte('\n')
 			markers = append(markers, seqMarker{
 				placeholder: placeholder,
-				code:        &codeBlockT{Lang: lang, Code: strings.Join(codeLines, "\n")},
+				code:        &codeBlockT{Lang: lang, Code: code},
 			})
 			codeIdx++
 			i = next

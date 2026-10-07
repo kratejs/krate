@@ -40,6 +40,24 @@
     /* Brand Accent Colors (Requested) */
     --color-primary: #f97316;
     --color-primary-hover: #ea580c;
+
+    /* Bridge for @krate/components (Aside/admonitions, Card, Steps, Tabs, Code,
+       Avatar). Those components consume `--krate-*` tokens with dark defaults;
+       mapping them here makes every library component follow the docs palette in
+       both light and dark mode. Values reference `--color-*`, so they resolve
+       correctly under the dark / prefers-color-scheme overrides below. */
+    --krate-primary: var(--color-primary);
+    --krate-primary-hover: var(--color-primary-hover);
+    --krate-text: var(--color-fg);
+    --krate-text-muted: var(--color-text-main);
+    --krate-border: var(--color-border);
+    --krate-card-bg: color-mix(in srgb, var(--color-bg) 96%, var(--color-fg));
+    --krate-tabs-bg: var(--color-muted-bg);
+    --krate-danger: #ef4444;
+    --krate-code-bg: var(--color-pre-bg);
+    --krate-code-text: var(--color-pre-fg);
+    --krate-code-title-bg: color-mix(in srgb, var(--color-pre-bg) 82%, #ffffff 6%);
+    --krate-code-title-text: #9ca3af;
 }
 
 :root[data-theme="dark"] {
@@ -168,6 +186,12 @@ a:hover {
     margin-left: auto;
 }
 
+.navbar-switchers {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
 .navbar-title {
     font-size: 0.875rem;
     font-weight: 600;
@@ -282,6 +306,27 @@ a:hover {
     gap: 0.375rem;
     flex-wrap: wrap;
     min-width: 0;
+}
+
+/* i18n/version switchers live in the drawer on mobile (see .navbar-switchers).
+   The whole sidebar header is hidden on desktop, so these follow it. */
+.sidebar-switchers {
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.9rem;
+}
+
+/* Overlay (don't push sibling items down) but stay inside the drawer. */
+.sidebar-switchers .krate-switcher-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: auto;
+    min-width: 150px;
+    width: max-content;
+    max-width: 70vw;
 }
 
 .sidebar::-webkit-scrollbar {
@@ -433,6 +478,10 @@ a:hover {
 .docs-main {
     flex: 1;
     min-width: 0;
+    /* Explicit width so auto margins can't size this flex item to max-content
+       (which happens in the mobile column layout below and blows the page out
+       to the widest code line). */
+    width: 100%;
     padding: 2.5rem 2rem 4rem;
     padding-bottom: max(4rem, env(safe-area-inset-bottom));
     max-width: 840px;
@@ -582,13 +631,34 @@ a:hover {
     text-decoration-color: var(--color-primary);
 }
 
-.docs-content img {
+.docs-content img,
+.docs-content video {
     max-width: 100%;
     height: auto;
     border-radius: var(--radius);
     margin: 1.5rem 0;
     border: 1px solid var(--color-border);
     box-shadow: var(--docs-shadow);
+}
+
+/* Long unbreakable tokens (URLs, hashes, inline code, headings) must wrap
+   rather than force the page wider than the viewport. `anywhere` also shrinks
+   min-content size, which keeps flex/grid children from blowing out. */
+.docs-content {
+    overflow-wrap: anywhere;
+    min-width: 0;
+}
+
+.docs-content :is(h1, h2, h3, h4, h5, h6) {
+    overflow-wrap: anywhere;
+}
+
+.docs-content :not(pre) > code {
+    overflow-wrap: anywhere;
+}
+
+.docs-content :is(pre, .krate-code-block, .table-wrap, table, img, video) {
+    max-width: 100%;
 }
 
 .docs-content table {
@@ -630,12 +700,17 @@ a:hover {
 }
 
 .docs-content blockquote {
-    border-left: 3px solid var(--color-primary);
     margin: 1.5rem 0;
-    padding: 0.75rem 1.25rem;
+    padding: 0.85rem 1.1rem;
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-primary);
+    border-radius: var(--radius);
     background: var(--color-muted-bg);
-    border-radius: 0 var(--radius) var(--radius) 0;
+    color: var(--color-text-main);
 }
+
+.docs-content blockquote > :first-child { margin-top: 0; }
+.docs-content blockquote > :last-child { margin-bottom: 0; }
 
 /* Modern Minimalist Anchors */
 .docs-content .heading-anchor {
@@ -1013,8 +1088,23 @@ a:hover {
     }
 
     .docs-main {
+        /* Full width: auto margins must not size this column-flex item to
+           max-content (that would blow the page out to the widest code line). */
+        width: 100%;
         padding: 1.5rem 1.5rem 3rem;
         padding-bottom: max(3rem, env(safe-area-inset-bottom));
+    }
+
+    .navbar-actions {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    /* Version/language switchers and the theme toggle move into the drawer on
+       small screens; the navbar keeps only the search + menu controls. */
+    .navbar-switchers,
+    .docs-navbar .theme-toggle {
+        display: none;
     }
 
     .docs-content h1 { font-size: 1.85rem; }
@@ -1057,6 +1147,7 @@ a:hover {
 
 @media (max-width: 767px) {
     .docs-navbar {
+        gap: 0.5rem;
         padding: 0 1rem;
         padding-left: max(1rem, env(safe-area-inset-left));
         padding-right: max(1rem, env(safe-area-inset-right));
@@ -1067,6 +1158,57 @@ a:hover {
     .docs-main {
         padding: 1.5rem 1rem 3rem;
         padding-bottom: max(3rem, env(safe-area-inset-bottom));
+    }
+
+    /* Let the actions row shrink instead of pushing the menu button offscreen. */
+    .navbar-title {
+        font-size: 0.8rem;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .navbar-actions {
+        flex: 1 1 auto;
+        min-width: 0;
+        gap: 0.4rem;
+    }
+    .navbar-switchers .krate-switcher {
+        flex-shrink: 0;
+    }
+    .krate-docs-search {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+    .krate-docs-search-input {
+        width: 100%;
+    }
+    .docs-hero-title {
+        font-size: 1.9rem;
+    }
+    .docs-hero {
+        padding: 1.25rem 0 1rem;
+    }
+
+    /* Stack prev/next full-width so long titles aren't cramped side-by-side. */
+    .docs-nav {
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    .docs-nav a {
+        max-width: 100%;
+    }
+    .docs-nav .nav-next {
+        align-items: flex-start;
+        text-align: left;
+    }
+
+    /* Keep the trailing breadcrumb from overflowing. */
+    .breadcrumbs .current {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 65vw;
     }
 }
 
@@ -1304,6 +1446,74 @@ a.docs-tag:hover { color: var(--color-text-main); border-color: var(--color-mute
 
 .krate-directive-body > :first-child { margin-top: 0; }
 .krate-directive-body > :last-child { margin-bottom: 0; }
+
+/* --- Admonitions (:::note/tip/warning/danger/caution → <Aside>) ----------
+   The component ships dark defaults; tint each variant from the docs palette
+   so it reads correctly in light mode too. */
+.docs-content .krate-aside {
+    margin: 1.5rem 0;
+    padding: 0.85rem 1.1rem;
+    border: 1px solid var(--color-border);
+    border-left: 4px solid var(--aside-accent, var(--color-primary));
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--aside-accent, var(--color-primary)) 9%, var(--color-bg));
+}
+
+/* `note` is neutral: an off-brand blue is the only cold colour on an otherwise
+   monochrome + orange page, so it reads as "broken". Neutral keeps the
+   informational tone without fighting the palette. */
+.docs-content .krate-aside-note { --aside-accent: var(--color-muted); }
+.docs-content .krate-aside-tip { --aside-accent: #10b981; }
+.docs-content .krate-aside-warning { --aside-accent: #f59e0b; }
+.docs-content .krate-aside-danger { --aside-accent: #ef4444; }
+.docs-content .krate-aside-caution { --aside-accent: #f97316; }
+
+.docs-content .krate-aside-title {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0 0 0.4rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-fg);
+}
+
+.docs-content .krate-aside-title svg { color: var(--aside-accent, var(--color-primary)); flex: 0 0 auto; }
+.docs-content .krate-aside-content { color: var(--color-text-main); line-height: 1.7; }
+.docs-content .krate-aside-content > :first-child { margin-top: 0; }
+.docs-content .krate-aside-content > :last-child { margin-bottom: 0; }
+
+/* --- Container directives (:::card / :::steps / :::tabs / :::code-group) --- */
+.docs-content .krate-card,
+.docs-content .krate-tabs {
+    background: var(--krate-card-bg);
+    border-color: var(--color-border);
+}
+
+.docs-content .krate-card-title {
+    border-bottom-color: var(--color-border);
+    color: var(--color-fg);
+}
+
+.docs-content .krate-card-body { color: var(--color-text-main); }
+
+.docs-content .krate-steps { border-left-color: var(--color-border); }
+
+.docs-content .krate-step-number {
+    background: var(--docs-accent-bg);
+    color: var(--color-primary);
+    border-color: var(--docs-accent-border);
+}
+
+.docs-content .krate-step-title { color: var(--color-fg); }
+.docs-content .krate-step-content { color: var(--color-text-main); }
+
+.docs-content .krate-tabs-list {
+    background: var(--color-muted-bg);
+    border-bottom-color: var(--color-border);
+}
+
+.docs-content .krate-tabs-content { color: var(--color-text-main); }
 /* --- Polish: contrast, focus, typography, motion ----------------------- */
 :root, :root[data-theme="light"] { --color-link: #c2410c; }
 :root[data-theme="dark"] { --color-link: #fb923c; }
@@ -1399,4 +1609,100 @@ a.docs-tag:hover { color: var(--color-text-main); border-color: var(--color-mute
 .krate-docs-search-title { display: block; font-weight: 600; font-size: 0.9rem; }
 .krate-docs-search-snippet { display: block; font-size: 0.78rem; color: var(--color-muted); margin-top: 0.15rem; }
 .krate-docs-search-empty { padding: 0.75rem; color: var(--color-muted); font-size: 0.85rem; }
-@media (max-width: 1023px) { .krate-docs-search-input { width: 150px; } }
+@media (max-width: 1023px) {
+    /* Keep the search input flexible so it shares leftover navbar space. */
+    .krate-docs-search { flex: 1 1 auto; min-width: 0; }
+    .krate-docs-search-input { width: 100%; min-width: 0; }
+    .krate-switcher > summary { min-width: 44px; min-height: 44px; }
+
+    /* Results drop from the navbar as a full-width sheet instead of a narrow
+       popover anchored to the (mid-navbar) input, which ran off-screen. */
+    .krate-docs-search-results {
+        position: fixed;
+        top: var(--header-height);
+        left: 0;
+        right: 0;
+        width: auto;
+        max-height: 60vh;
+        border-radius: 0 0 var(--radius) var(--radius);
+        border-left: 0;
+        border-right: 0;
+    }
+}
+/* --- i18n / versioning chrome ----------------------------------------- */
+.docs-version-banner {
+  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  padding: 0.45rem 1rem; background: var(--docs-accent-bg);
+  border-bottom: 1px solid var(--docs-accent-border);
+  color: var(--color-text-main); font-size: 0.85rem;
+}
+.docs-version-banner-link { color: var(--color-link); font-weight: 600; }
+.krate-switcher { position: relative; }
+.krate-switcher > summary {
+  list-style: none; cursor: pointer; display: inline-flex; align-items: center;
+  justify-content: center;
+  gap: 0.3rem; height: 32px; padding: 0 0.5rem;
+  border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-muted);
+}
+.krate-switcher > summary::-webkit-details-marker { display: none; }
+.krate-switcher[open] > summary { color: var(--color-text-main); border-color: var(--color-primary); }
+.krate-switcher-current { font-size: 0.8rem; font-weight: 600; }
+.krate-switcher:not([open]) > .krate-switcher-menu { display: none; }
+.krate-switcher-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; min-width: 160px;
+  background: var(--color-bg); border: 1px solid var(--color-border);
+  border-radius: var(--radius); box-shadow: var(--docs-shadow); padding: 0.3rem;
+  z-index: 200; display: flex; flex-direction: column;
+}
+.krate-switcher-menu a { padding: 0.4rem 0.6rem; border-radius: 6px; color: var(--color-text-main); text-decoration: none; font-size: 0.85rem; }
+.krate-switcher-menu a:hover { background: var(--color-muted-bg); }
+.krate-switcher-menu a.active { color: var(--color-primary); font-weight: 600; }
+/* --- Mermaid diagrams ------------------------------------------------- */
+.mermaid { margin: 1.5rem 0; text-align: center; overflow-x: auto; }
+.mermaid svg { max-width: 100%; height: auto; }pre.mermaid { background: transparent; border: 0; padding: 0; color: inherit; }
+/* --- Page footer (edit link + feedback) ------------------------------- */
+.docs-page-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap; margin-top: 1.75rem;
+}
+.docs-feedback { display: inline-flex; align-items: center; gap: 0.5rem; color: var(--color-muted); font-size: 0.85rem; }
+.docs-feedback-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border: 1px solid var(--color-border);
+  border-radius: var(--radius); text-decoration: none; font-size: 0.95rem;
+}
+.docs-feedback-btn:hover { border-color: var(--color-primary); background: var(--color-muted-bg); }.docs-contributors { margin-top: 0.5rem; color: var(--color-muted); font-size: 0.85rem; }
+.docs-contributors span { font-weight: 600; color: var(--color-fg); }
+
+/* --- Reading polish ---------------------------------------------------- */
+
+/* Balance headings and avoid orphaned words in prose. */
+.docs-content :is(h1, h2, h3) { text-wrap: balance; }
+.docs-content :is(p, li) { text-wrap: pretty; }
+
+/* Heading anchors are hover-only by default, which hides them on touch. */
+@media (hover: none) {
+    .docs-content .heading-anchor { opacity: 0.45; }
+}
+.docs-content .heading-anchor:focus-visible { opacity: 1; }
+
+/* Make permalink targets obvious. */
+.docs-content :is(h2, h3, h4):target { color: var(--color-primary); }
+
+/* Zebra rows + sticky header for long tables (scroll inside .table-wrap). */
+.docs-content tbody tr:nth-child(even) { background: var(--color-muted-bg); }
+.table-wrap { max-height: 70vh; }
+.table-wrap thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--color-muted-bg);
+}
+
+/* Subtle indicator on off-site links. */
+.docs-content a[href^="http"]:not(.heading-anchor):not(.docs-tag)::after {
+    content: "\2197";
+    margin-left: 0.15em;
+    font-size: 0.75em;
+    color: var(--color-muted);
+}
