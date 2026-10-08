@@ -1,5 +1,6 @@
 ---
 title: Image Optimization
+description: Compile-time, WebP-first responsive images with the Image component.
 order: 3
 ---
 

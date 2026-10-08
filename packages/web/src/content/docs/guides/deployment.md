@@ -1,5 +1,6 @@
 ---
 title: Deployment
+description: Ship a Krate site to static hosts, Node, or Docker.
 order: 3
 ---
 

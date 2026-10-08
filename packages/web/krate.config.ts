@@ -35,6 +35,11 @@ export default defineConfig({
     description: "A Go-native static site generator with signal-based reactivity.",
   },
 
+  redirects: [
+    { source: "/docs/guides/contributing/", destination: "/docs/contributing/", permanent: true },
+    { source: "/docs/guides/diagrams/", destination: "/docs/core-concepts/markdown/", permanent: true },
+  ],
+
   plugins: [
     sitemap({ baseUrl: "https://krate.js.org", changeFreq: "daily", priority: "0.8" }),
     { name: "robots", options: { allow: "/" } },

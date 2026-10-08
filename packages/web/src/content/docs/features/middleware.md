@@ -1,5 +1,6 @@
 ---
 title: Middleware
+description: Intercept requests before a page renders.
 order: 9
 ---
 

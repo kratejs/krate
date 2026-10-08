@@ -1,5 +1,6 @@
 ---
 title: Routing & Layouts
+description: File-based routing, dynamic segments, and nested layouts.
 order: 3
 ---
 

@@ -1,5 +1,6 @@
 ---
 title: Component Library
+description: The @krate/components UI kit.
 order: 3
 ---
 

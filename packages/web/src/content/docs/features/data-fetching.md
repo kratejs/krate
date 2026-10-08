@@ -1,5 +1,6 @@
 ---
 title: Data Fetching
+description: Fetch data at build time, per request, or on the client.
 order: 4
 ---
 

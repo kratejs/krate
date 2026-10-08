@@ -23,5 +23,5 @@ consultez la [documentation anglaise](/docs/).
 
 Vous voulez aider ? Ouvrez une pull request ajoutant les fichiers sous
 `packages/web/src/content/docs/<locale>/` (par exemple `fr/`), puis traduisez les
-pages une par une. Le [guide de contribution](/docs/guides/contributing/) décrit
+pages une par une. Le [guide de contribution](/docs/contributing/) décrit
 le processus.

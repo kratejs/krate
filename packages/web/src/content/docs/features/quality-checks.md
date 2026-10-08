@@ -1,6 +1,6 @@
 ---
 title: Quality Checks
-order: 13
+order: 14
 description: Compiler-enforced accessibility, SEO, and performance gates.
 sidebar:
   label: Quality Checks

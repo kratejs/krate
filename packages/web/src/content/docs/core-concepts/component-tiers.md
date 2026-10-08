@@ -1,5 +1,6 @@
 ---
 title: Component Tiers
+description: Static, client, server, and runtime components — where each runs.
 order: 4
 ---
 

@@ -1,5 +1,6 @@
 ---
 title: Browser Support
+description: Supported browsers and the JavaScript baseline Krate emits.
 order: 8
 ---
 

@@ -17,7 +17,6 @@ Practical, end-to-end walkthroughs.
 |-------|----------------|
 | [Customizing the Docs Site](/docs/guides/customizing-docs/) | Theming and extending the docs plugin |
 | [Deployment](/docs/guides/deployment/) | Ship to static hosts, Node, and Docker |
-| [Contributing](/docs/guides/contributing/) | Build the compiler, run the tests, open PRs |
 | [Creating Plugins](/docs/guides/creating-plugins/) | Write Go or JavaScript plugins |
 | [Error Handling](/docs/guides/error-handling/) | Handle build, render, and client errors |
 | [Troubleshooting](/docs/guides/troubleshooting/) | Fix common errors |

@@ -1,11 +1,26 @@
 ---
 title: Contributing
-order: 4
+order: 1
+description: Build Krate from source, run the tests, and understand how the compiler works.
+sidebar:
+  label: Contributing
+  order: 5
+  collapsible: true
+  defaultOpen: true
 ---
 
 # Contributing
 
 Krate is built in the open. Contributions are welcome!
+
+This section covers the development workflow and how Krate works internally. If
+you just want to build a site, start with [Getting Started](/docs/getting-started/).
+
+| Page | What it covers |
+|------|----------------|
+| [Architecture](/docs/contributing/architecture/) | The compiler pipeline, markdown, CSS, search, and typed-routes internals |
+| [Rendering internals](/docs/contributing/rendering/) | Static shells, regions, and the SSR/ISR sidecar |
+| [Writing docs](/docs/contributing/docs/) | Authoring, frontmatter, and style conventions for this site |
 
 ## Repository layout
 
@@ -44,26 +59,16 @@ go test ./internal/build/ -v               # full project build integration test
 go vet ./...
 ```
 
-Test suites:
+Test suites of note:
 
-- `internal/lexer/lexer_test.go` — 20+ lexer unit tests
-- `internal/parser/parser_test.go` — 22 parser unit tests + edge cases
-- `internal/renderer/renderer_test.go` — 20+ renderer unit tests
-- `internal/css/*` — CSS DCE, minification, and @import tests
+- `internal/lexer/lexer_test.go` — lexer unit tests
+- `internal/parser/parser_test.go` — parser unit tests + edge cases
+- `internal/renderer/renderer_test.go` — renderer unit tests
+- `internal/css/*` — CSS DCE, minification, and `@import` tests
 - `internal/build/build_test.go` — full project build integration test
 - `internal/plugin/jsplugin_test.go` — JS community plugin runtime (QuickJS)
 - `internal/docfind/docfind_test.go` — in-process WASM index build + search
 - `internal/build/goapi_test.go` — Go API sidecar build + serve tests
-
-## The docs website
-
-This site lives in `packages/web`. Docs content is markdown under
-`src/content/docs/`. Rebuild it to verify plugin changes:
-
-```sh
-cd packages/web
-krate build
-```
 
 ## CI/CD
 

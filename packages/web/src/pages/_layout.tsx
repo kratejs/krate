@@ -6,7 +6,7 @@ const site = {
     { label: "Docs", href: "/docs/" },
     { label: "Plugins", href: "/docs/features/plugins/" },
     { label: "Runtime API", href: "/docs/reference/runtime-api/" },
-    { label: "Contributing", href: "/docs/guides/contributing/" },
+    { label: "Contributing", href: "/docs/contributing/" },
   ],
   social: [
     { icon: "lucide:github", url: "https://github.com/kratejs/krate", name: "GitHub" },
@@ -38,7 +38,7 @@ const site = {
         { label: "Roadmap", href: "/roadmap/" },
         { label: "Changelog", href: "/changelog/" },
         { label: "GitHub", href: "https://github.com/kratejs/krate", external: true },
-        { label: "Contributing", href: "/docs/guides/contributing/" },
+        { label: "Contributing", href: "/docs/contributing/" },
       ],
     },
   ],

@@ -20,4 +20,5 @@ Deep reference material for the Krate APIs.
 |------|--------|
 | [Runtime API](/docs/reference/runtime-api/) | Every export from `@krate/runtime` |
 | [Component Library](/docs/reference/component-library/) | The `@krate/components` UI kit |
+| [Config Reference](/docs/reference/config/) | Every `krate.config.ts` key, with types and defaults |
 | [Config Reference](/docs/reference/config/) | Every `krate.config.ts` option |

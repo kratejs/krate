@@ -1,5 +1,6 @@
 ---
 title: Built-in Components
+description: Script, Style, Link, Icon, and Image components provided by Krate.
 order: 2
 ---
 

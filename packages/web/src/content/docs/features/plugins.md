@@ -1,5 +1,6 @@
 ---
 title: Plugin System
+description: Extend Krate with Go hooks or JavaScript/TypeScript plugins.
 order: 6
 ---
 

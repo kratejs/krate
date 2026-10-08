@@ -1,13 +1,14 @@
 ---
 title: Styling
 order: 6
+description: Style pages with CSS Modules, a Go-native Tailwind, and a built-in CSS pipeline.
 ---
 
 # Styling
 
-Krate ships a full CSS pipeline: CSS Modules, Go-native Tailwind, rule-level
-deduplication, minification, and `@import` inlining. There is no PostCSS and no
-external CSS tooling.
+Krate ships a CSS pipeline built into the compiler: CSS Modules, Go-native
+Tailwind, rule-level deduplication, minification, and `@import` inlining. No
+PostCSS or extra tooling is required.
 
 ## CSS Modules
 
@@ -125,32 +126,13 @@ remain out of scope. Unrecognized classes produce no rule (enable
 
 ## Global CSS & code splitting
 
-Plain CSS imported or referenced in pages is collected, then **split at the
-rule level**:
-
-- Rules used by **two or more pages** are written once to a shared
-  `styles.<hash>.css` chunk, linked before per-page CSS on every page.
-- Rules **unique to a page** go into that page's own hashed chunk.
-
-So a component library imported across many pages ships once, not per page.
-Chunk order is deterministic (shared chunk sorted by canonical rule), so
-hashes are stable across builds.
-
-## The CSS processing pipeline
-
-1. **Collect** CSS per page from its module graph (module CSS, layout CSS,
-   CSS-signal rules), in source/import order.
-2. **Inline `@import`** recursively, relative to each file's own directory
-   (circular-safe, depth limit 10); a trailing media/`supports`/`layer` prelude
-   is honoured, not leaked.
-3. **Resolve `url(...)`** assets relative to the sheet, content-hash and copy
-   them to `/assets/…`, and rewrite the URL.
-4. **Handle directives** — strip `@tailwind`, unwrap `@layer`, expand `@apply`.
-5. **Minify** (string/URL/comment aware) — whitespace collapse, `rgba()`/`rgb()`
-   → hex, hex shortening, zero-unit removal, `calc()` simplification, empty-rule
-   and duplicate-declaration removal. Preserves strings, `url()`, `data:` URIs,
-   `/*!` license comments, vendor-prefixed fallbacks, and `!important`.
-6. **Chunk** into shared + per-page stylesheets (above) and hash filenames.
+Plain CSS imported or referenced in pages is collected and split at the
+**rule level**: rules used by two or more pages are written once to a shared
+`styles.<hash>.css` chunk, and page-unique rules go into that page's own hashed
+chunk. A component library imported across many pages therefore ships once, not
+per page. Chunk order is deterministic, so hashes are stable across builds. See
+[Contributing → Architecture](/docs/contributing/architecture/#css-pipeline) for
+the full processing steps.
 
 ## Custom properties & theming
 

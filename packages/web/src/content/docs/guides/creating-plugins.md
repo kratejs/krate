@@ -1,5 +1,6 @@
 ---
 title: Creating Plugins
+description: Write Go or JavaScript plugins for Krate.
 order: 6
 badge:
   text: Beta

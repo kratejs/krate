@@ -1,6 +1,7 @@
 ---
 title: Markdown & MDX
 order: 7
+description: Author content in Markdown or MDX — GFM, admonitions, math, diagrams, and components.
 ---
 
 # Markdown & MDX
@@ -72,6 +73,17 @@ export default function Hello() {
 
   $$\int_0^1 x\,dx = \tfrac{1}{2}$$
   ```
+
+## Diagrams
+
+With `mermaid: true`, fenced `mermaid` blocks render as diagrams:
+
+```mermaid
+graph TD
+  A[Source TSX] --> B[Go compiler]
+  B --> C[Static HTML]
+  B --> D[Hydration JS]
+```
 
 ## Component directives
 
@@ -147,9 +159,5 @@ markdown: {
 }
 ```
 
-## How it works
-
-1. The markdown source is parsed with frontmatter extracted.
-2. Markdown is rendered to HTML; JSX blocks are preserved as segments.
-3. The docs plugin (or a `.mdx` page) re-inserts the JSX segments and compiles
-   the result through the normal TSX pipeline.
+For how Markdown and MDX are parsed and compiled, see
+[Contributing → Architecture](/docs/contributing/architecture/).

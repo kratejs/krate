@@ -1,6 +1,7 @@
 ---
 title: Search
 order: 7
+description: Full-text docs search with three interchangeable backends — Pagefind, docfind, or JSON.
 tags:
   - search
   - pagefind
@@ -24,29 +25,10 @@ Rust-based engine) and a classic JSON index. **docfind is what Krate uses during
 development builds** (see [Engines](#engines)), and it remains available for
 production if you'd rather not depend on Node.
 
-## How it works
-
-1. **At build time**, the docs plugin renders every documentation page to HTML
-   and tags the content region with `data-pagefind-body`.
-2. **After a production build**, the docs plugin runs the Pagefind indexer
-   (`npx pagefind`) over the output directory. Pagefind writes a chunked search
-   bundle to `pagefind/`:
-
-```
-dist/
-  pagefind/           # chunked index + Pagefind runtime (search-time fetches)
-  docs/
-    search/
-      search.js       # Krate's search UI (trigger, modal, keyboard nav)
-      search.css      # search UI styles
-    data/
-      search-index.json # classic JSON fallback (always written)
-```
-
-3. **In the browser**, pressing the search button (or **Ctrl/Cmd+K**) opens a
-   command-palette-style dialog. Typing queries the Pagefind index locally and
-   streams the chunks it needs. If Pagefind can't load (offline, or a dev build),
-   the UI automatically falls back to the JSON index.
+Pressing the search button (or **Ctrl/Cmd+K**) opens a command-palette-style
+dialog. Typing queries the configured engine locally and streams the chunks it
+needs; if the engine can't load (offline, or a dev build) the UI falls back to
+the JSON index automatically.
 
 :::note
 **In development**, `krate dev` builds the docfind WASM index instead of running
@@ -141,7 +123,9 @@ self-contained, pure-Go build:
 docs({ search: { engine: "docfind" } })
 ```
 
-See [No subprocess, no temp files](#no-subprocess-no-temp-files) below.
+The index is built in-process and embedded into a WASM module — no CLI
+dependency and no temp files. See
+[Contributing → Architecture](/docs/contributing/architecture/#docs-search).
 
 ### json
 
@@ -162,13 +146,6 @@ keywords: [reactive, createSignal, createEffect, createMemo, state]
 ```
 
 Keywords are weighted highest, then title words, then body phrases.
-
-## No subprocess, no temp files (docfind)
-
-The docfind index build runs inside the krate process. The Rust builder module is
-compiled once and `go:embed`-ed into the krate binary; documents are passed
-through WASM memory directly. There's no `docfind` CLI dependency at build time
-and no `documents.json` written to disk.
 
 ## Customizing the UI
 

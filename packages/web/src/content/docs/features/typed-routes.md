@@ -1,7 +1,7 @@
 ---
 title: Typed Routes & Content
 description: End-to-end TypeScript safety for links, route params, and content collections.
-order: 12
+order: 13
 ---
 
 # Typed Routes & Content
@@ -278,17 +278,5 @@ a plugin (for example the [docs plugin](/docs/features/plugins/)), run
 `krate build` to include those routes in the generated declarations.
 :::
 
-## How it works
-
-- Routes come from the page tree (`src/pages/**`), including plugin-generated
-  pages and dynamic `[param]` segments. Error pages (`404`/`500`) are excluded.
-- Collection entries are discovered under each collection's `dir`; frontmatter
-  is parsed with the same mini-YAML parser used by the docs plugin, and each
-  entry's body is rendered through the markdown pipeline.
-- `getCollection(...)` chains are evaluated and inlined as literal arrays before
-  rendering, so collection-driven lists and single-entry reads bake into the
-  page.
-- Route/params types are advisory: `krate-env.d.ts` imports them and augments
-  the runtime. If generation fails, the build warns rather than stopping.
-- Content **schema violations are build errors**, because they indicate a
-  content bug.
+For how route and collection types are generated, see
+[Contributing → Architecture](/docs/contributing/architecture/#typed-routes--content).

@@ -1,5 +1,6 @@
 ---
 title: Analytics
+description: Add analytics snippets and hook into SPA route changes.
 order: 11
 ---
 

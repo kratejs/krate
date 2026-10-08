@@ -1,5 +1,6 @@
 ---
 title: Redirects & Rewrites
+description: Redirect and rewrite URLs from your config.
 order: 8
 ---
 

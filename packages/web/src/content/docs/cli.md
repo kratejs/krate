@@ -1,5 +1,6 @@
 ---
 title: CLI Reference
+description: Reference for every krate CLI command.
 order: 4
 ---
 

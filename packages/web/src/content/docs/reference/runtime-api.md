@@ -1,5 +1,6 @@
 ---
 title: Runtime API
+description: Every export from @krate/runtime.
 order: 2
 ---
 

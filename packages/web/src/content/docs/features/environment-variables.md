@@ -1,5 +1,6 @@
 ---
 title: Environment Variables
+description: .env files, precedence, and process.env access.
 order: 10
 ---
 

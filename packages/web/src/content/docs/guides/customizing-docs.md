@@ -1,5 +1,6 @@
 ---
 title: Customizing the Docs Site
+description: Theme and extend the docs plugin.
 order: 2
 ---
 

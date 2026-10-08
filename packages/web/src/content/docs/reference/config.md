@@ -1,6 +1,7 @@
 ---
 title: Config Reference
 order: 4
+description: Every krate.config.ts key, with types and defaults.
 ---
 
 # Config Reference
@@ -38,8 +39,8 @@ unused utility classes never ship. There are no per-feature CSS config toggles.
 sourcemap: false,             // Write per-page sourcemaps (index.<hash>.js.map)
 ```
 
-React syntax is always transpiled to Krate signals and effects; the former
-`emitReact` option is accepted but ignored.
+React syntax is always transpiled to Krate signals and effects; no config is
+required.
 
 ## Dev server
 

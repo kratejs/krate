@@ -1,5 +1,6 @@
 ---
 title: API Routes
+description: TypeScript and Go API endpoints under /api.
 order: 5
 badge:
   text: New

@@ -1,6 +1,6 @@
 ---
 title: MCP Server (Agent-Native)
-order: 14
+order: 15
 description: Expose the Krate compiler to AI agents over the Model Context Protocol with `krate mcp`.
 sidebar:
   label: MCP Server
@@ -261,12 +261,6 @@ An agent asked to add a pricing page can:
 Because the server holds the compiler in-process, each step is fast and the
 agent never has to invoke a shell.
 
-## Implementation notes
-
-- **No MCP SDK dependency.** The protocol surface is implemented directly with
-  `encoding/json`.
-- **Stdout is reserved** for protocol frames; any incidental compiler output is
-  redirected to stderr, and build/check output is captured.
-- **Paths are anchored** to the project root and traversal is rejected.
-- **Environment values never cross the bridge**, matching the compiler's
-  existing discipline for `.env` handling.
+For how the server is implemented (no SDK dependency, stdout discipline, path
+anchoring), see
+[Contributing → Architecture](/docs/contributing/architecture/#mcp-server).

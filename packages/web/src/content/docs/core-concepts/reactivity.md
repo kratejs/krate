@@ -1,5 +1,6 @@
 ---
 title: Reactivity
+description: Signals, effects, memos, context, and async resources in the Krate runtime.
 order: 2
 ---
 
