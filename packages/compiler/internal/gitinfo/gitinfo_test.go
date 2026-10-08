@@ -42,8 +42,22 @@ func TestGitRootIsCachedPerRoot(t *testing.T) {
 	if !Available(repo) {
 		t.Fatal("git repo root not detected — root cache is leaking across projects")
 	}
-	if got := LastCommit(repo, filepath.Join("docs", "a.md")); got == "" {
-		t.Fatal("LastCommit returned empty for a committed file")
+	rel := filepath.Join("docs", "a.md")
+	if got := LastCommit(repo, rel); got == "" {
+		t.Fatal("LastCommit returned empty for a committed file (relative path)")
+	}
+	// Absolute paths must resolve to the same commit, even though git's
+	// resolved top-level can differ from root (symlinked temp dirs on macOS,
+	// short/case-variant paths on Windows).
+	absCommit := LastCommit(repo, filepath.Join(repo, rel))
+	if absCommit == "" {
+		t.Fatal("LastCommit returned empty for a committed file (absolute path)")
+	}
+	if absCommit != LastCommit(repo, rel) {
+		t.Fatalf("absolute vs relative LastCommit disagree: %q != %q", absCommit, LastCommit(repo, rel))
+	}
+	if got := LastAuthors(repo, filepath.Join(repo, rel), 3); len(got) == 0 {
+		t.Fatal("LastAuthors returned none for a committed file")
 	}
 	if got := LastCommit(nonRepo, "a.md"); got != "" {
 		t.Fatalf("LastCommit for a non-repo root = %q, want empty", got)

@@ -52,23 +52,36 @@ func Available(root string) bool {
 	return ok
 }
 
+// repoRelPath returns path relative to root (slash-separated) for use as a git
+// pathspec. Absolute paths are made relative to root; relative paths are taken
+// as-is. Deliberately never relative to git's resolved top-level: that path can
+// differ from root (macOS /var → /private/var symlink, Windows short 8.3 paths
+// or case) and a mismatched pathspec matches nothing.
+func repoRelPath(root, path string) string {
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return ""
+		}
+		path = rel
+	}
+	return filepath.ToSlash(path)
+}
+
 // LastCommit returns the committer date (RFC3339) of the last commit touching
 // path, or "" when git is unavailable or the file is untracked/unchanged.
-// Results are cached per (root, repository-relative path).
+// Results are cached per (root, root-relative path).
 func LastCommit(root, path string) string {
-	gr, ok := gitRoot(root)
-	if !ok {
+	if _, ok := gitRoot(root); !ok {
 		return ""
 	}
-	abs := path
-	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(root, path)
-	}
-	rel, err := filepath.Rel(gr, abs)
-	if err != nil {
+	rel := repoRelPath(root, path)
+	if rel == "" {
 		return ""
 	}
-	rel = filepath.ToSlash(rel)
 	key := root + "\x00" + rel
 
 	mu.Lock()
@@ -78,7 +91,9 @@ func LastCommit(root, path string) string {
 	}
 	mu.Unlock()
 
-	out, err := exec.Command("git", "-C", gr, "log", "-1", "--format=%cI", "--", rel).Output()
+	// `-C root` makes git interpret the pathspec relative to root, so the
+	// pathspec and the working directory always agree.
+	out, err := exec.Command("git", "-C", root, "log", "-1", "--format=%cI", "--", rel).Output()
 	val := strings.TrimSpace(string(out))
 	if err != nil {
 		val = ""
@@ -98,19 +113,13 @@ func LastAuthors(root, path string, n int) []string {
 	if n <= 0 {
 		return nil
 	}
-	gr, ok := gitRoot(root)
-	if !ok {
+	if _, ok := gitRoot(root); !ok {
 		return nil
 	}
-	abs := path
-	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(root, path)
-	}
-	rel, err := filepath.Rel(gr, abs)
-	if err != nil {
+	rel := repoRelPath(root, path)
+	if rel == "" {
 		return nil
 	}
-	rel = filepath.ToSlash(rel)
 	key := root + "\x00" + rel + "\x00" + itoa(n)
 
 	mu.Lock()
@@ -120,7 +129,7 @@ func LastAuthors(root, path string, n int) []string {
 	}
 	mu.Unlock()
 
-	out, err := exec.Command("git", "-C", gr, "log", "-n", itoa(n*4), "--format=%an", "--", rel).Output()
+	out, err := exec.Command("git", "-C", root, "log", "-n", itoa(n*4), "--format=%an", "--", rel).Output()
 	var names []string
 	if err == nil {
 		seen := map[string]bool{}
