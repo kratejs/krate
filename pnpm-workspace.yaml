@@ -7,17 +7,17 @@ allowBuilds:
   'esbuild': true
 
 minimumReleaseAgeExclude:
-  - '@krate/components@0.4.0-beta.1 || 0.4.0-beta.2'
-  - '@krate/core-darwin-arm64@0.4.0-beta.1 || 0.4.0-beta.2'
-  - '@krate/core-darwin-x64@0.4.0-beta.1'
-  - '@krate/core-linux-arm64@0.4.0-beta.1 || 0.4.0-beta.2'
-  - '@krate/core-linux-x64-musl@0.4.0-beta.1'
-  - '@krate/core-linux-x64@0.4.0-beta.1 || 0.4.0-beta.2'
-  - '@krate/core-win32-arm64@0.4.0-beta.1 || 0.4.0-beta.2'
-  - '@krate/core-win32-x64@0.4.0-beta.1 || 0.4.0-beta.2'
-  - '@krate/core@0.4.0-beta.1 || 0.4.0-beta.2'
-  - '@krate/plugin@0.4.0-beta.1 || 0.4.0-beta.2'
-  - '@krate/runtime@0.4.0-beta.1 || 0.4.0-beta.2'
+  - '@krate/components@0.4.0-beta.1 || 0.4.0-beta.2 || 0.4.0-rc.4'
+  - '@krate/core-darwin-arm64@0.4.0-beta.1 || 0.4.0-beta.2 || 0.4.0-rc.4'
+  - '@krate/core-darwin-x64@0.4.0-beta.1 || 0.4.0-rc.4'
+  - '@krate/core-linux-arm64@0.4.0-beta.1 || 0.4.0-beta.2 || 0.4.0-rc.4'
+  - '@krate/core-linux-x64-musl@0.4.0-beta.1 || 0.4.0-rc.4'
+  - '@krate/core-linux-x64@0.4.0-beta.1 || 0.4.0-beta.2 || 0.4.0-rc.4'
+  - '@krate/core-win32-arm64@0.4.0-beta.1 || 0.4.0-beta.2 || 0.4.0-rc.4'
+  - '@krate/core-win32-x64@0.4.0-beta.1 || 0.4.0-beta.2 || 0.4.0-rc.4'
+  - '@krate/core@0.4.0-beta.1 || 0.4.0-beta.2 || 0.4.0-rc.4'
+  - '@krate/plugin@0.4.0-beta.1 || 0.4.0-beta.2 || 0.4.0-rc.4'
+  - '@krate/runtime@0.4.0-beta.1 || 0.4.0-beta.2 || 0.4.0-rc.4'
 
 supportedArchitectures:
   os:
