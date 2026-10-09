@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
@@ -376,6 +377,33 @@ func (r *Runtime) SetEnv(env map[string]string) error {
 
 // injectWebAPIs adds URL, Headers, and Response web standard APIs
 func (r *Runtime) injectWebAPIs() error {
+	// URL resolution is delegated to Go (net/url) so the JS shim can implement
+	// `new URL(relative, base)` without recursing into its own constructor.
+	if err := r.RegisterFunc("_go_resolveURL", func(args []any) (any, error) {
+		if len(args) < 1 {
+			return "", nil
+		}
+		ref, _ := args[0].(string)
+		base := ""
+		if len(args) > 1 {
+			base, _ = args[1].(string)
+		}
+		if base == "" {
+			return ref, nil
+		}
+		bu, err := url.Parse(base)
+		if err != nil {
+			return ref, nil
+		}
+		ru, err := url.Parse(ref)
+		if err != nil {
+			return ref, nil
+		}
+		return bu.ResolveReference(ru).String(), nil
+	}); err != nil {
+		return err
+	}
+
 	_, err := r.Execute(`
 		class URLSearchParams {
 			constructor(init) {
@@ -431,12 +459,13 @@ func (r *Runtime) injectWebAPIs() error {
 
 		class URL {
 			constructor(url, base) {
-				if (base) {
-					this._href = new URL(url, base).href;
+				if (base !== undefined && base !== null && base !== '') {
+					var baseHref = (base && typeof base === 'object' && base.href) ? base.href : String(base);
+					this._href = String(_go_resolveURL(String(url), baseHref));
 				} else {
-					this._href = url;
+					this._href = String(url);
 				}
-				var match = this._href.match(/^(https?:)\/\/([^\/:]+)(:\d+)?(\/[^\?]*)?(\?.*)?(#.*)?$/);
+				var match = this._href.match(/^(https?:)\/\/([^\/:]+)(:\d+)?(\/[^?#]*)?(\?[^#]*)?(#.*)?$/);
 				if (match) {
 					this.protocol = match[1];
 					this.hostname = match[2];

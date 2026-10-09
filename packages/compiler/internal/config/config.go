@@ -505,16 +505,14 @@ func Load(root string, configPath ...string) (*Config, error) {
 		if readErr != nil {
 			return nil, fmt.Errorf("reading config %s: %w", tsPath, readErr)
 		}
-		// Try JS execution first (resolves imports, plugin factories, etc.)
-		if err := executeTSConfig(tsPath, cfg); err != nil {
-			// A config that uses module imports cannot be handled by the static
-			// parser. Falling back to it would only produce a misleading
-			// "expected export, got import" error — so surface the real reason
-			// (most commonly: packages aren't installed correctly).
+		// Evaluate the config in the embedded runtime (esbuild + QuickJS): it
+		// resolves imports and runs plugin factories without a Node/tsx
+		// subprocess. Simple literal configs the embedded path cannot run fall
+		// back to the static parser.
+		if err := executeEmbeddedTSConfig(tsPath, cfg); err != nil {
 			if configUsesModules(string(data)) {
 				return nil, configNotExecutableError(tsPath, err)
 			}
-			// Otherwise fall back to static parse (simple literal configs).
 			if parseErr := parseTSConfig(string(data), cfg); parseErr != nil {
 				return nil, fmt.Errorf("parsing config %s: %w", tsPath, parseErr)
 			}

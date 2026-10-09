@@ -575,29 +575,19 @@ func TestEndOfLine(t *testing.T) {
 	}
 }
 
-// TestWriteBootstrapResolvesPluginModules verifies the generated config
+// TestConfigEvalBootstrapResolvesPluginModules verifies the embedded config
 // bootstrap converts file:// plugin module URLs (as returned by plugin
-// factories via import.meta.url) into filesystem paths before serialization.
-func TestWriteBootstrapResolvesPluginModules(t *testing.T) {
-	bootstrapPath := filepath.Join(t.TempDir(), "bootstrap.mjs")
-	content := configBootstrapContent(filepath.Join("C:", "proj", "krate.config.ts"))
-	if err := os.WriteFile(bootstrapPath, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(bootstrapPath)
-
-	data, err := os.ReadFile(bootstrapPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	content = string(data)
-
+// factories via import.meta.url) into filesystem paths, surfaces validate()
+// errors, and re-exports the config object.
+func TestConfigEvalBootstrapResolvesPluginModules(t *testing.T) {
+	content := configEvalBootstrap("./krate.config.ts")
 	for _, want := range []string{
-		`fileURLToPath`,
-		`p.module.startsWith('file://')`,
-		`p.module = fileURLToPath(p.module);`,
-		`theme.module = fileURLToPath(theme.module);`,
-		`JSON.stringify(config)`,
+		`__krateFileURLToPath`,
+		`p.module.indexOf('file://') === 0`,
+		`p.module = __krateFileURLToPath(p.module);`,
+		`theme.module = __krateFileURLToPath(theme.module);`,
+		`globalThis.__krateConfig = config;`,
+		validatePrefix,
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("bootstrap missing %q:\n%s", want, content)
