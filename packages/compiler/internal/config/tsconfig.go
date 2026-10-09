@@ -568,6 +568,103 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				}
 			}
 		}
+	case "goApi":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "enabled":
+				if b, ok := v.(bool); ok {
+					cfg.GoAPI.Enabled = &b
+				}
+			case "module":
+				if s, ok := v.(string); ok {
+					cfg.GoAPI.Module = s
+				}
+			case "tidy":
+				if b, ok := v.(bool); ok {
+					cfg.GoAPI.Tidy = &b
+				}
+			case "deps":
+				arr, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("goApi.deps: expected array, got %T", v)
+				}
+				for _, item := range arr {
+					om, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					var dep GoAPIDep
+					if s, ok := om["path"].(string); ok {
+						dep.Path = s
+					}
+					if s, ok := om["version"].(string); ok {
+						dep.Version = s
+					}
+					cfg.GoAPI.Deps = append(cfg.GoAPI.Deps, dep)
+				}
+			case "replaces":
+				arr, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("goApi.replaces: expected array, got %T", v)
+				}
+				for _, item := range arr {
+					om, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					var rp GoAPIReplace
+					if s, ok := om["from"].(string); ok {
+						rp.From = s
+					}
+					if s, ok := om["to"].(string); ok {
+						rp.To = s
+					}
+					cfg.GoAPI.Replaces = append(cfg.GoAPI.Replaces, rp)
+				}
+			}
+		}
+	case "dce":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "css":
+				if b, ok := v.(bool); ok {
+					cfg.Dce.CSS = &b
+				}
+			case "js":
+				if b, ok := v.(bool); ok {
+					cfg.Dce.JS = &b
+				}
+			case "aggressive":
+				if b, ok := v.(bool); ok {
+					cfg.Dce.Aggressive = &b
+				}
+			}
+		}
+	case "fonts":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "preload":
+				if b, ok := v.(bool); ok {
+					cfg.Fonts.Preload = &b
+				}
+			case "display":
+				if s, ok := v.(string); ok {
+					cfg.Fonts.Display = s
+				}
+			}
+		}
 	case "tailwind":
 		m, ok := val.(map[string]interface{})
 		if !ok {

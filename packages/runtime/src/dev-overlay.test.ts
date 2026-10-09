@@ -18,7 +18,7 @@ class FakeEventSource {
   }
 }
 
-let routeMatches: typeof import('./dev-overlay').routeMatches;
+let overlay: typeof import('./dev-overlay');
 
 // File-level setup: globals must exist BEFORE the overlay module auto-inits on
 // import, and the export is captured from the same module instance.
@@ -31,8 +31,7 @@ beforeAll(async () => {
     overlay: true,
     toolbar: true,
   };
-  const mod = await import('./dev-overlay');
-  routeMatches = mod.routeMatches;
+  overlay = await import('./dev-overlay');
 });
 
 function devRoot(): ShadowRoot | null {
@@ -98,15 +97,52 @@ describe('dev-overlay', () => {
 
 describe('routeMatches', () => {
   it('matches unprefixed patterns against a base-path URL', () => {
-    expect(routeMatches('/about', '/docs/about', '/docs')).toBe(true);
-    expect(routeMatches('/about', '/docs/other', '/docs')).toBe(false);
-    expect(routeMatches('/', '/docs/', '/docs')).toBe(true);
+    expect(overlay.routeMatches('/about', '/docs/about', '/docs')).toBe(true);
+    expect(overlay.routeMatches('/about', '/docs/other', '/docs')).toBe(false);
+    expect(overlay.routeMatches('/', '/docs/', '/docs')).toBe(true);
   });
 
   it('matches root deployment and dynamic segments', () => {
-    expect(routeMatches('/about', '/about', '')).toBe(true);
-    expect(routeMatches('/blog/[slug]', '/blog/hello', '')).toBe(true);
-    expect(routeMatches('/blog/[slug]', '/blog/hello/x', '')).toBe(false);
-    expect(routeMatches('/docs/[...rest]', '/docs/a/b/c', '')).toBe(true);
+    expect(overlay.routeMatches('/about', '/about', '')).toBe(true);
+    expect(overlay.routeMatches('/blog/[slug]', '/blog/hello', '')).toBe(true);
+    expect(overlay.routeMatches('/blog/[slug]', '/blog/hello/x', '')).toBe(false);
+    expect(overlay.routeMatches('/docs/[...rest]', '/docs/a/b/c', '')).toBe(true);
+  });
+});
+
+describe('source-map symbolication', () => {
+  it('decodes Base64 VLQ deltas', () => {
+    expect(overlay.decodeVLQ('AAAA')).toEqual([0, 0, 0, 0]);
+    expect(overlay.decodeVLQ('CAAA')).toEqual([1, 0, 0, 0]);
+  });
+
+  it('decodes mappings with cumulative source line deltas', () => {
+    const lines = overlay.decodeMappings('AAAA;AACA');
+    expect(lines).toHaveLength(2);
+    expect(lines[0][0]).toMatchObject({ genCol: 0, src: 0, srcLine: 0, srcCol: 0 });
+    expect(lines[1][0]).toMatchObject({ genCol: 0, src: 0, srcLine: 1, srcCol: 0 });
+  });
+
+  it('parses V8 and path-only stack frames', () => {
+    const a = overlay.parseStackFrame('    at foo (http://localhost:3000/index.abc.js:12:34)');
+    expect(a).toMatchObject({ url: 'http://localhost:3000/index.abc.js', line: 12, col: 34 });
+    const b = overlay.parseStackFrame('    at bar (/index.abc.js:5:6)');
+    expect(b).toMatchObject({ url: '/index.abc.js', line: 5, col: 6 });
+    expect(overlay.parseStackFrame('plain message')).toBeNull();
+  });
+
+  it('remaps a frame using a fetched map', async () => {
+    (globalThis as any).fetch = async () => ({
+      ok: true,
+      json: async () => ({ version: 3, sources: ['src/foo.ts'], mappings: 'AAAA;AACA' }),
+    });
+    const out = await overlay.symbolicateStack('Error: x\n    at foo (http://localhost:3000/index.abc.js:2:1)');
+    expect(out).toContain('src/foo.ts:2:1');
+  });
+
+  it('leaves the stack unchanged when no map is available', async () => {
+    (globalThis as any).fetch = async () => ({ ok: false, json: async () => ({}) });
+    const stack = '    at foo (http://localhost:3000/missing.js:1:1)';
+    expect(await overlay.symbolicateStack(stack)).toBe(stack);
   });
 });

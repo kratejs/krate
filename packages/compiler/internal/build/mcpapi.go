@@ -120,6 +120,24 @@ func (b *Builder) RouteList() ([]RouteSummary, error) {
 	return out, nil
 }
 
+// PageGraph returns copies of the page→dependencies graph recorded during a
+// build on this Builder (empty when it never built). pageDeps is keyed by the
+// page's absolute source path; depGraph maps each depended-on file to the pages
+// that reference it.
+func (b *Builder) PageGraph() (pageDeps map[string][]string, depGraph map[string][]string) {
+	b.depMu.Lock()
+	defer b.depMu.Unlock()
+	pageDeps = make(map[string][]string, len(b.pageDeps))
+	for k, v := range b.pageDeps {
+		pageDeps[k] = append([]string(nil), v...)
+	}
+	depGraph = make(map[string][]string, len(b.depGraph))
+	for k, v := range b.depGraph {
+		depGraph[k] = append([]string(nil), v...)
+	}
+	return pageDeps, depGraph
+}
+
 // PageDetail loads a page by route ("/about") or by source path. It parses the
 // source into a kind-tagged AST document and attaches the rendered HTML from
 // dist/ when available. Equivalent to PageDetailFor(.., FormatAll).

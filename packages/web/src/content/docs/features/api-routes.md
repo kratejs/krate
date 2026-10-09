@@ -85,8 +85,51 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-Go routes require the Go toolchain at build time and should stick to the
-stdlib plus the `krate-goapi/runtime` helper package.
+Go routes require the Go toolchain at build time.
+
+### Packages, helpers, and dependencies
+
+The `src/api` tree is preserved when it is compiled: a file that defines no
+handler is treated as a **helper** and keeps its package clause, so sibling and
+internal packages stay importable at `krate-goapi/routes/<dir>`:
+
+```go
+// src/api/lib/util.go
+package lib
+
+func Message() string { return "hi" }
+
+// src/api/hello.go
+package api
+
+import (
+	"net/http"
+
+	"krate-goapi/routes/lib"
+	"krate-goapi/runtime"
+)
+
+func GET(w http.ResponseWriter, r *http.Request) {
+	runtime.WriteJSON(w, 200, map[string]interface{}{"msg": lib.Message()})
+}
+```
+
+Third-party modules are declared under `goApi` (or via a project-root `go.mod`,
+which is merged — its `require`/`replace`/`exclude` directives are copied and
+relative `replace` paths rebased):
+
+```typescript
+// krate.config.ts
+goApi: {
+  deps: [{ path: "github.com/google/uuid", version: "v1.6.0" }],
+  replaces: [{ from: "example.com/local", to: "../local" }],
+},
+```
+
+A `src/api/go.mod` (with an optional `go.sum`) is used verbatim for full
+control. The compiled sidecar binary is cached by the content of `src/api` and
+the module config, so unchanged routes skip `go build`. See
+[Config Reference](/docs/reference/config/#go-api-sidecar).
 
 ## Custom API sidecar
 

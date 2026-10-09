@@ -26,6 +26,11 @@ minifyCSS: false,             // CSS minification (inherits minify)
 minifyJS: false,              // JS minification (inherits minify)
 ```
 
+Minification only controls whitespace/size optimizations. **Duplicate
+declarations within a rule (including same-name CSS custom properties) are
+always folded to the last value**, whether or not minification is enabled —
+formatting is preserved when it is off.
+
 ## CSS
 
 CSS is merged across pages (rule-level deduplication), `@import`s are inlined,
@@ -292,6 +297,56 @@ against the emitted output. Alongside the a11y/SEO/perf rules, Krate checks
 `a11y/broken-anchor` (in-page `#id` targets exist), `seo/og-image` (absolute
 Open Graph image), and `seo/duplicate-meta` (unique titles/descriptions across
 pages). See [Quality Checks](/docs/features/quality-checks/).
+
+## Dead-code elimination (DCE)
+
+```typescript
+dce: {
+  css: true,          // prune unused CSS-module rules (default true)
+  js: true,           // JS dead-code elimination (default true)
+  aggressive: false,  // EXPERIMENTAL: also drop local helpers the scan can't prove unused
+},
+```
+
+CSS DCE removes `.module.css` rules whose scoped class never appears in the
+page's HTML (global, Tailwind, and component styles are never touched). JS DCE
+is conservative by default. Disable both with `--no-dce`.
+
+:::warning
+**Experimental:** `dce.aggressive` additionally drops local helper functions the
+reference scan cannot prove are used. This can remove a function that is only
+referenced from a part of the component body the scan does not inspect, so it is
+off by default and may change behavior. Leave it off unless you have verified the
+output; use `--no-dce` to disable DCE entirely.
+:::
+
+## Fonts
+
+```typescript
+fonts: {
+  preload: true,      // <link rel="preload"> for @font-face fonts (default true)
+  display: "swap",    // default font-display injected when a face omits it ("off" to skip)
+},
+```
+
+## Go API sidecar
+
+```typescript
+goApi: {
+  module: "krate-goapi",                 // module path for the generated module
+  deps: [{ path: "github.com/x/y", version: "v1.2.3" }],
+  replaces: [{ from: "example.com/x", to: "../local/x" }],
+  tidy: false,                           // run `go mod tidy` before building
+},
+```
+
+Go routes in `src/api/**/*.go` compile into a sidecar binary. The `src/api` tree
+is preserved: helper packages (files with no HTTP handler) keep their package
+and are importable as `krate-goapi/routes/<dir>`, while each route file is
+compiled into its own generated package. A project-root `go.mod` is merged (its
+`require`/`replace`/`exclude` directives are copied and relative `replace` paths
+rebased); a `src/api/go.mod` is used verbatim. See
+[API routes](/docs/features/api-routes/).
 
 ## Base path
 

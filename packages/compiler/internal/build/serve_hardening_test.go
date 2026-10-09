@@ -279,10 +279,12 @@ func TestHashedAssetDetection(t *testing.T) {
 		"/index.abc123.js":          true,
 		"/chunks/runtime.x1y2z3.js": true,
 		"/assets/logo-abc123.png":   true,
+		"/index.abc123.js.map":      true,
 		"/about/index.html":         false,
 		"/about/":                   false,
 		"/main.js":                  false,
 		"/site.css":                 false,
+		"/main.js.map":              false,
 	}
 	for p, want := range cases {
 		if got := isHashedAsset(p); got != want {

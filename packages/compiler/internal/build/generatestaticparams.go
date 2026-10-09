@@ -334,7 +334,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme})
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme, AggressiveDCE: b.aggressiveDCE()})
 	if len(tree.Errors) > 0 {
 		return nil, "", renderErrors(spp.PagePath, tree.Errors)
 	}
@@ -456,6 +456,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 	b.registerWorkers(bundle.WorkerFiles, bundle.WorkerEsm)
 	b.registerDynamicChunks(bundle.DynImportFiles)
+	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
 	return &PageResult{
 		Page:        spp.PagePath,
 		OutName:     spp.OutPath,
@@ -466,8 +467,8 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		HydrationJS: hydrationJS,
 		HasJS:       hasJS,
 		JSFile:      jsFile,
-		HasCSS:      bundle.CSS != "",
-		CSS:         bundle.CSS,
+		HasCSS:      pageCSS != "",
+		CSS:         pageCSS,
 		UsedCSS:     emitResult.UsedCSS,
 		UsedFuncs:   emitResult.UsedFuncs,
 		Mode:        renderMode,

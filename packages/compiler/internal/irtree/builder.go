@@ -45,6 +45,12 @@ type BuildOptions struct {
 	// Use a character outside the base62 alphabet (e.g. "_") so it can never
 	// clash with an unprefixed ID.
 	IDPrefix string
+	// AggressiveDCE drops local helper functions the reference scan cannot
+	// prove are used, instead of conservatively emitting every local function
+	// declaration. It can shrink hydration bundles but risks dropping a
+	// function referenced only from verbatim-emitted body fragments, so it is
+	// opt-in (config `dce.aggressive`).
+	AggressiveDCE bool
 }
 
 // Build constructs a ComponentTree from a parsed program and its annotations
@@ -82,6 +88,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
 		codeTheme:        codeTheme,
 		idPrefix:         opts.IDPrefix,
+		aggressiveDCE:    opts.AggressiveDCE,
 	}
 
 	root := builder.buildComponentNode(entryFn, "")
@@ -166,6 +173,7 @@ type builder struct {
 	contextDefaults  map[string]string   // module-level `const X = createContext(v)` defaults
 	codeTheme        string              // chroma theme for compile-time <Code> highlighting
 	idPrefix         string              // namespace for compact slot IDs (merged builds)
+	aggressiveDCE    bool                // drop unreferenced local functions (opt-in)
 	suspenseCount    int                 // monotonic counter for stable StreamID generation
 
 	// cssIndex assigns stable, page-unique indices to (component, var) scope
@@ -778,11 +786,14 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	// body are emitted verbatim (e.g. a `for` loop that builds an element array
 	// and references a local handler by name), which the reference scan below
 	// cannot see; without this a local handler like `handleInputEvent` would be
-	// undefined at hydration time.
-	for name := range localFns {
-		if !referenced[name] {
-			referenced[name] = true
-			queue = append(queue, name)
+	// undefined at hydration time. DCE's aggressive mode opts out of this and
+	// relies solely on the reference scan.
+	if !b.aggressiveDCE {
+		for name := range localFns {
+			if !referenced[name] {
+				referenced[name] = true
+				queue = append(queue, name)
+			}
 		}
 	}
 

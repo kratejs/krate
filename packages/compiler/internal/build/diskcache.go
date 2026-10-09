@@ -110,10 +110,42 @@ func (c *buildDiskCache) setContentHash(contentHash string) {
 	c.mu.Unlock()
 }
 
-// fingerprintFor is the build-wide cache namespace: compiler version + the
-// resolved config + the content-collection hash.
+// diskCacheSchema is bumped whenever the shape or the semantics of cached page
+// output change (e.g. new emit passes such as DCE or source maps) so entries
+// written by an older pipeline can never be replayed.
+var diskCacheSchema = "2"
+
+var (
+	buildStampOnce  sync.Once
+	buildStampValue string
+)
+
+// compilerBuildStamp identifies the running compiler by the content hash of its
+// own executable. Unlike the embedded semantic version — which is "dev" for
+// every unstamped local `go build` — this changes the moment the compiler is
+// rebuilt, so a development binary can never replay output produced by a
+// different compiler, while identical binaries (repeat builds, released
+// compilers, the same binary copied between paths) still share cache entries.
+// Falls back to the semantic version if the executable can't be read.
+func compilerBuildStamp() string {
+	buildStampOnce.Do(func() {
+		if exe, err := os.Executable(); err == nil {
+			if data, rerr := os.ReadFile(exe); rerr == nil {
+				sum := sha256.Sum256(data)
+				buildStampValue = hex.EncodeToString(sum[:])
+			}
+		}
+		if buildStampValue == "" {
+			buildStampValue = krateversion.Value
+		}
+	})
+	return buildStampValue
+}
+
+// fingerprintFor is the build-wide cache namespace: compiler build stamp +
+// cache schema + the resolved config + the content-collection hash.
 func (c *buildDiskCache) fingerprintFor(contentHash string) string {
-	sum := sha256.Sum256([]byte(krateversion.Value + "\x00" + c.cfgHash + "\x00" + contentHash))
+	sum := sha256.Sum256([]byte(compilerBuildStamp() + "\x00" + diskCacheSchema + "\x00" + c.cfgHash + "\x00" + contentHash))
 	return hex.EncodeToString(sum[:])
 }
 

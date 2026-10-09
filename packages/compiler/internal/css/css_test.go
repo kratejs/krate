@@ -150,6 +150,59 @@ func TestRemoveDuplicateDeclarations(t *testing.T) {
 	}
 }
 
+func TestRemoveDuplicateDeclarationsPreservesFormatting(t *testing.T) {
+	tests := []struct {
+		name, input, expected string
+	}{
+		{
+			name:     "folds duplicate, keeps newlines",
+			input:    "a {\n  color: red;\n  color: blue;\n}\n",
+			expected: "a {\n  color: blue;\n}\n",
+		},
+		{
+			name:     "folds duplicate custom property",
+			input:    "a {\n  --x: 1rem;\n  --x: 2rem;\n}\n",
+			expected: "a {\n  --x: 2rem;\n}\n",
+		},
+		{
+			name:     "case-distinct custom properties are preserved",
+			input:    "a {\n  --Foo: 1;\n  --foo: 2;\n}\n",
+			expected: "a {\n  --Foo: 1;\n  --foo: 2;\n}\n",
+		},
+		{
+			name:     "vendor-prefixed fallback preserved",
+			input:    "a {\n  display: -webkit-box;\n  display: flex;\n}\n",
+			expected: "a {\n  display: -webkit-box;\n  display: flex;\n}\n",
+		},
+		{
+			name:     "earlier important wins",
+			input:    "a {\n  color: red !important;\n  color: blue;\n}\n",
+			expected: "a {\n  color: red !important;\n}\n",
+		},
+		{
+			name:     "comment survives a folded declaration",
+			input:    "a {\n  /* keep */\n  color: red;\n  color: blue;\n}\n",
+			expected: "a {\n  /* keep */\n  color: blue;\n}\n",
+		},
+		{
+			name:     "no duplicates is a no-op",
+			input:    "a {\n  color: red;\n  margin: 0;\n}\n",
+			expected: "a {\n  color: red;\n  margin: 0;\n}\n",
+		},
+		{
+			name:     "recurses into at-rules",
+			input:    "@media (x) {\n  a {\n    color: red;\n    color: blue;\n  }\n}\n",
+			expected: "@media (x) {\n  a {\n    color: blue;\n  }\n}\n",
+		},
+	}
+	for _, tt := range tests {
+		got := RemoveDuplicateDeclarations(tt.input)
+		if got != tt.expected {
+			t.Errorf("%s: RemoveDuplicateDeclarations(%q) = %q, want %q", tt.name, tt.input, got, tt.expected)
+		}
+	}
+}
+
 func TestMinifyIntegration(t *testing.T) {
 	input := `
 		/* Full test */

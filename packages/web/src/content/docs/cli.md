@@ -15,6 +15,7 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate serve [dir]` | Build + static HTTP server (production preview) |
 | `krate types [dir]` | Generate route/content TypeScript declarations only |
 | `krate check [dir]` | Build and run quality gates (a11y/SEO/perf); non-zero on failure |
+| `krate deploy [dir]` | Build, then write host adapter files (`--target`) |
 | `krate clean [dir]` | Remove build output and the compiler cache |
 | `krate mcp [dir]` | Start the MCP (Model Context Protocol) server over stdio |
 | `krate version` | Print the version |
@@ -35,12 +36,14 @@ krate build ./my-site
 | `--watch` | Rebuild when files change |
 | `--verbose` | Print diagnostic detail during the build (e.g. reactive validation warnings) |
 | `--profile` | Print per-phase build timings and disk-cache hits/misses |
+| `--sourcemap` | Emit source maps for generated JS (also disables the build cache) |
+| `--no-dce` | Disable CSS/JS dead-code elimination |
 
 During the build the compiler:
 
 1. Runs plugin `BeforeBuild` hooks (the docs plugin generates pages here).
 2. Builds every page in parallel (SSR evaluation + hydration codegen).
-3. Merges and deduplicates CSS, inlines `@import`s, and runs minification.
+3. Merges CSS, inlines `@import`s, folds duplicate declarations (always), and runs minification when enabled.
 4. Writes hashed JS chunks, the shared runtime chunk, and `manifest.json`.
 5. Copies `publicDir` assets, compiles API routes, middleware, and runtime components.
 
@@ -99,6 +102,25 @@ krate check
 
 See [Quality Checks](/docs/features/quality-checks/) for configuration and the
 built-in rule list.
+
+## `krate deploy`
+
+Builds the site and writes host adapter files so `outDir` can be uploaded as-is:
+
+```sh
+krate deploy --target netlify
+krate deploy --target vercel
+krate deploy --target cloudflare
+krate deploy --target gh-pages
+```
+
+| Target | Files written |
+|--------|---------------|
+| `netlify`, `cloudflare` | `_redirects` (from `redirects`/`rewrites`) |
+| `vercel` | `vercel.json` (redirects + rewrites) |
+| `gh-pages` | `.nojekyll`, `404.html` |
+
+See [Deployment](/docs/guides/deployment/) for details.
 
 ## `krate clean`
 

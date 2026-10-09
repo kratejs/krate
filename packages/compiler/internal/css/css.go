@@ -250,14 +250,25 @@ func removeTrailingSemicolons(css string) string {
 // independently so nested rules never bleed declarations into one another.
 func removeDuplicateDeclarations(css string) string {
 	var out strings.Builder
-	scanRules(&out, css)
+	scanRules(&out, css, deduplicateBody)
 	return out.String()
 }
 
-// scanRules walks a CSS chunk, locating rules and their bodies. When a body
-// contains nested rules (an at-rule container) it recurses so only LEAF rules
-// are deduped; rule ordering, whitespace and at-rule structure are preserved.
-func scanRules(out *strings.Builder, css string) {
+// RemoveDuplicateDeclarations folds duplicate declarations within each rule,
+// keeping the last value, while preserving the original formatting (whitespace,
+// newlines, comments). Unlike css.Minify it performs no whitespace or value
+// optimization, so it is safe to apply when minification is disabled.
+func RemoveDuplicateDeclarations(css string) string {
+	var out strings.Builder
+	scanRules(&out, css, dedupeBodyPreservingText)
+	return out.String()
+}
+
+// scanRules walks a CSS chunk, locating rules and their bodies and applying
+// dedupe to each leaf rule body. When a body contains nested rules (an at-rule
+// container) it recurses so only LEAF rules are deduped; rule ordering,
+// whitespace and at-rule structure are preserved.
+func scanRules(out *strings.Builder, css string, dedupe func(string) string) {
 	for i := 0; i < len(css); {
 		open := strings.IndexByte(css[i:], '{')
 		if open < 0 {
@@ -274,9 +285,9 @@ func scanRules(out *strings.Builder, css string) {
 		out.WriteByte('{')
 		body := css[open+1 : closeBrace]
 		if deep {
-			scanRules(out, body)
+			scanRules(out, body, dedupe)
 		} else {
-			out.WriteString(deduplicateBody(body))
+			out.WriteString(dedupe(body))
 		}
 		out.WriteByte('}')
 		i = closeBrace + 1
@@ -358,6 +369,92 @@ func deduplicateBody(body string) string {
 	return b.String()
 }
 
+// dedupeBodyPreservingText folds duplicate declarations in a rule body keeping
+// the last value, but preserves the original text of the kept declarations and
+// any surrounding whitespace, newlines, and comments (unlike deduplicateBody,
+// which reconstructs a compact `prop:val` form). The same key and exception
+// rules apply: standard properties are case-insensitive, custom properties are
+// case-sensitive, vendor-prefixed earlier values survive, and an earlier
+// `!important` beats a later non-important declaration.
+func dedupeBodyPreservingText(body string) string {
+	// Each item keeps its leading trivia (whitespace + comments) separate from
+	// the declaration core so folding a duplicate never discards a comment.
+	type item struct {
+		prefix string
+		core   string
+		prop   string
+		val    string
+	}
+	segments := splitDecls(body)
+	items := make([]item, 0, len(segments))
+	index := make(map[string]int) // property key → position in items
+
+	for _, raw := range segments {
+		prefix, core := splitLeadingTrivia(raw)
+		prop, val, hasColon := parseDecl(stripCSSComments(core))
+		if !hasColon || prop == "" {
+			items = append(items, item{prefix: raw}) // whitespace/comment passthrough
+			continue
+		}
+		key := prop
+		if !strings.HasPrefix(prop, "--") {
+			key = strings.ToLower(prop)
+		}
+		pos, exists := index[key]
+		if !exists {
+			index[key] = len(items)
+			items = append(items, item{prefix: prefix, core: core, prop: prop, val: val})
+			continue
+		}
+		existing := items[pos]
+		// Keep a vendor-prefixed earlier value when the new value differs.
+		if isVendorPrefixedValue(existing.val) && existing.val != val {
+			items = append(items, item{prefix: prefix, core: core, prop: prop, val: val})
+			index[key] = len(items) - 1
+			continue
+		}
+		// An earlier `!important` wins over a later non-important declaration.
+		if hasImportant(existing.val) && !hasImportant(val) {
+			continue
+		}
+		// Keep the first position (and its trivia) but adopt the last value.
+		items[pos].core = core
+		items[pos].prop = prop
+		items[pos].val = val
+	}
+
+	var b strings.Builder
+	for i, it := range items {
+		if i > 0 {
+			b.WriteByte(';')
+		}
+		b.WriteString(it.prefix)
+		b.WriteString(it.core)
+	}
+	return b.String()
+}
+
+// splitLeadingTrivia splits a rule-body segment into leading whitespace/comments
+// and the declaration core that follows.
+func splitLeadingTrivia(s string) (prefix, core string) {
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			i++
+			continue
+		}
+		if c == '/' && i+1 < len(s) && s[i+1] == '*' {
+			if j := strings.Index(s[i+2:], "*/"); j >= 0 {
+				i += 2 + j + 2
+				continue
+			}
+		}
+		break
+	}
+	return s[:i], s[i:]
+}
+
 // hasImportant reports whether a declaration value carries `!important`,
 // tolerating surrounding whitespace (`! important`).
 func hasImportant(val string) bool {
@@ -395,6 +492,14 @@ func splitDecls(body string) []string {
 		switch c {
 		case '\'', '"':
 			quote = c
+		case '/':
+			// Skip comments so a ';' inside one never splits a declaration.
+			if i+1 < len(body) && body[i+1] == '*' {
+				if j := strings.Index(body[i+2:], "*/"); j >= 0 {
+					i += 2 + j + 1
+					continue
+				}
+			}
 		case '(':
 			paren++
 		case ')':
@@ -412,6 +517,43 @@ func splitDecls(body string) []string {
 		decls = append(decls, body[start:])
 	}
 	return decls
+}
+
+// stripCSSComments removes /* … */ comments outside string literals. It is used
+// only to derive a declaration's property name/value for deduplication, never
+// for the emitted text (which keeps comments verbatim).
+func stripCSSComments(s string) string {
+	if !strings.Contains(s, "/*") {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c == '/' && i+1 < len(s) && s[i+1] == '*' {
+			if j := strings.Index(s[i+2:], "*/"); j >= 0 {
+				i += 2 + j + 2
+				b.WriteByte(' ')
+				continue
+			}
+			break
+		}
+		b.WriteByte(c)
+		if c == '"' || c == '\'' {
+			quote := c
+			i++
+			for i < len(s) {
+				b.WriteByte(s[i])
+				if s[i] == quote && s[i-1] != '\\' {
+					i++
+					break
+				}
+				i++
+			}
+			continue
+		}
+		i++
+	}
+	return b.String()
 }
 
 // parseDecl splits one declaration at its first top-level ':' (outside quotes

@@ -24,6 +24,9 @@ var knownNestedKeys = map[string]map[string]bool{
 	"i18n":      {"defaultLocale": true, "locales": true, "routing": true},
 	"versions":  {"current": true, "versions": true, "banner": true},
 	"robots":    {"allow": true, "disallow": true, "sitemap": true},
+	"dce":       {"css": true, "js": true, "aggressive": true},
+	"fonts":     {"preload": true, "display": true},
+	"goApi":     {"enabled": true, "module": true, "deps": true, "replaces": true, "tidy": true},
 }
 
 // knownSidecarKeys is the recognized nested key set for api.sidecar.
@@ -46,7 +49,7 @@ var knownTopLevelKeys = map[string]bool{
 	"markdown": true, "tailwind": true, "csp": true, "runtime": true, "ssr": true,
 	"pathAliases": true, "tsBaseDir": true, "redirects": true, "rewrites": true,
 	"seo": true, "robots": true, "output": true, "serverComponents": true,
-	"i18n": true, "versions": true,
+	"i18n": true, "versions": true, "dce": true, "fonts": true, "goApi": true,
 	"runtimeComponents": true, "serverDirs": true, "runtimeDirs": true,
 	"content": true, "checks": true,
 }

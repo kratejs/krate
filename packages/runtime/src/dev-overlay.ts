@@ -77,6 +77,149 @@ function stripBase(pathname: string, basePath: string): string {
   return pathname;
 }
 
+// ─── source-map symbolication ───────────────────────────────────────────────
+// When the build enables source maps (`--sourcemap` / `sourcemap: true`), the
+// overlay decodes them so runtime stack traces point at real source locations
+// instead of minified bundle offsets. Fetches fail silently when maps are
+// absent, so this is always safe to run.
+
+interface MapSegment {
+  genCol: number;
+  src: number;
+  srcLine: number;
+  srcCol: number;
+}
+
+interface DecodedMap {
+  sources: string[];
+  lines: MapSegment[][];
+}
+
+const B64_VLQ = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/** Decodes a Base64 VLQ mapping segment into a delta array. */
+export function decodeVLQ(str: string): number[] {
+  const out: number[] = [];
+  let shift = 0;
+  let value = 0;
+  for (let i = 0; i < str.length; i++) {
+    const digit = B64_VLQ.indexOf(str[i]);
+    if (digit === -1) continue;
+    const cont = (digit & 32) !== 0;
+    value += (digit & 31) << shift;
+    if (cont) {
+      shift += 5;
+      continue;
+    }
+    const neg = (value & 1) === 1;
+    value >>= 1;
+    out.push(neg ? -value : value);
+    value = 0;
+    shift = 0;
+  }
+  return out;
+}
+
+/** Decodes a v3 `mappings` string into per-generated-line segments. */
+export function decodeMappings(mappings: string): MapSegment[][] {
+  const lines: MapSegment[][] = [];
+  let src = 0;
+  let srcLine = 0;
+  let srcCol = 0;
+  for (const line of mappings.split(';')) {
+    const segs: MapSegment[] = [];
+    let genCol = 0;
+    if (line) {
+      for (const part of line.split(',')) {
+        if (!part) continue;
+        const nums = decodeVLQ(part);
+        genCol += nums[0] || 0;
+        if (nums.length >= 4) {
+          src += nums[1];
+          srcLine += nums[2];
+          srcCol += nums[3];
+          segs.push({ genCol, src, srcLine, srcCol });
+        }
+      }
+    }
+    lines.push(segs);
+  }
+  return lines;
+}
+
+const mapCache = new Map<string, Promise<DecodedMap | null>>();
+
+async function loadSourceMap(url: string): Promise<DecodedMap | null> {
+  const cached = mapCache.get(url);
+  if (cached) return cached;
+  const p = (async () => {
+    try {
+      if (/^[a-z]+:\/\//i.test(url) && !url.startsWith(location.origin)) return null;
+      const res = await fetch(url + '.map');
+      if (!res.ok) return null;
+      const json = await res.json();
+      if (!json || typeof json.mappings !== 'string') return null;
+      return { sources: (json.sources as string[]) || [], lines: decodeMappings(json.mappings) } as DecodedMap;
+    } catch {
+      return null;
+    }
+  })();
+  mapCache.set(url, p);
+  return p;
+}
+
+interface StackFrame {
+  prefix: string;
+  url: string;
+  line: number;
+  col: number;
+  suffix: string;
+}
+
+/** Parses a V8/Firefox stack line into its script location, if present. */
+export function parseStackFrame(line: string): StackFrame | null {
+  const patterns = [
+    /^(.*?)((?:https?:)?\/\/[^\s)]+|\/[^\s):]+):(\d+):(\d+)(.*)$/,
+  ];
+  for (const re of patterns) {
+    const m = re.exec(line);
+    if (!m) continue;
+    return { prefix: m[1], url: m[2], line: Number(m[3]), col: Number(m[4]), suffix: m[5] };
+  }
+  return null;
+}
+
+function remapLocation(map: DecodedMap, line: number, col: number): { source: string; line: number; col: number } | null {
+  const segs = map.lines[line - 1];
+  if (!segs || segs.length === 0) return null;
+  let best: MapSegment | null = null;
+  for (const s of segs) {
+    if (s.genCol <= col - 1) best = s;
+    else break;
+  }
+  if (!best) best = segs[0];
+  const source = map.sources[best.src] || '';
+  return { source, line: best.srcLine + 1, col: best.srcCol + 1 };
+}
+
+/** Rewrites each mappable frame of a stack trace to its original location. */
+export async function symbolicateStack(stack: string): Promise<string> {
+  if (!stack || stack.indexOf('.js') === -1) return stack;
+  const lines = stack.split('\n');
+  const out = await Promise.all(
+    lines.map(async (line) => {
+      const frame = parseStackFrame(line);
+      if (!frame) return line;
+      const map = await loadSourceMap(frame.url);
+      if (!map) return line;
+      const loc = remapLocation(map, frame.line, frame.col);
+      if (!loc) return line;
+      return frame.prefix + loc.source + ':' + loc.line + ':' + loc.col + frame.suffix;
+    }),
+  );
+  return out.join('\n');
+}
+
 /**
  * Route matcher: a segment starting with `[` matches anything; `[...x]` matches
  * the rest. Exported (pure) for testing.
@@ -366,7 +509,9 @@ class KrateDev {
     sse.addEventListener('client-error', (e) => {
       try {
         const d = JSON.parse((e as MessageEvent).data) as DevEvent;
-        if (d.clientError) this.addRuntime('Runtime Error', d.clientError.message, d.clientError.stack);
+        if (!d.clientError) return;
+        const err = d.clientError;
+        this.addRuntime('Runtime Error', err.message, err.stack);
       } catch {
         /* ignore */
       }
@@ -376,15 +521,16 @@ class KrateDev {
   private captureRuntimeErrors(): void {
     window.addEventListener('error', (e: ErrorEvent) => {
       const stack = e.error?.stack || '';
+      const message = e.message || 'Unknown error';
       this.report({
-        message: e.message || 'Unknown error',
+        message,
         stack,
         url: e.filename,
         line: e.lineno,
         col: e.colno,
         kind: 'error',
       });
-      this.addRuntime('Runtime Error', e.message || 'Unknown error', stack);
+      this.addRuntime('Runtime Error', message, stack);
     });
     window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
       const reason = e.reason;
@@ -412,9 +558,20 @@ class KrateDev {
   }
 
   private addRuntime(title: string, message: string, stack?: string): void {
-    this.runtimeErrors.push({ title, message, stack });
+    const entry = { title, message, stack };
+    this.runtimeErrors.push(entry);
     this.setStatus(false);
     this.render();
+    // Render immediately with the raw stack, then upgrade in place if a source
+    // map lets us point at the original location.
+    if (stack) {
+      void symbolicateStack(stack).then((mapped) => {
+        if (mapped && mapped !== stack) {
+          entry.stack = mapped;
+          this.render();
+        }
+      });
+    }
   }
 
   private setStatus(ok: boolean): void {

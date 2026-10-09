@@ -28,6 +28,21 @@ func TestDiskCacheEnabledGates(t *testing.T) {
 	}
 }
 
+func TestDiskCacheSchemaInvalidates(t *testing.T) {
+	c := newBuildDiskCache(t.TempDir(), "cfghash", true)
+	before := c.fingerprintFor("content")
+	old := diskCacheSchema
+	diskCacheSchema = old + ".1"
+	after := c.fingerprintFor("content")
+	diskCacheSchema = old
+	if before == after {
+		t.Fatal("fingerprint must change when the cache schema changes")
+	}
+	if old == "" {
+		t.Fatal("diskCacheSchema must be non-empty")
+	}
+}
+
 func TestDiskCacheReplayAndInvalidation(t *testing.T) {
 	t.Setenv("KRATE_NO_BUILD_CACHE", "")
 

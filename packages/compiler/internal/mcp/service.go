@@ -120,6 +120,15 @@ func (s *Service) Register(srv *Server) {
 		Annotations: rebuildToolAnnotations("Run Quality Checks"),
 		Handler:     s.toolCheck,
 	})
+	srv.RegisterTool(Tool{
+		Name:        "explain",
+		Description: "Explain a route from the compiled site graph: render mode, source, dependencies, dependents, and emitted output files. Builds the site to populate the graph.",
+		InputSchema: objSchema(map[string]any{
+			"route": strSchema("Route path, e.g. /about"),
+		}, "route"),
+		Annotations: readOnlyAnnotations("Explain Route"),
+		Handler:     s.toolExplain,
+	})
 
 	// ── write tools (dry-run by default) ──────────────────────────────────
 	srv.RegisterTool(Tool{
@@ -306,6 +315,13 @@ func (s *Service) Register(srv *Server) {
 		MIMEType:    "application/json",
 		Read:        s.readConfigResource,
 	})
+	srv.RegisterResource(Resource{
+		URI:         "krate://graph",
+		Name:        "graph",
+		Description: "The compiled site graph: routes with mode, dependencies, dependents, and emitted output files (JSON).",
+		MIMEType:    "application/json",
+		Read:        s.readGraphResource,
+	})
 	srv.RegisterResourceTemplate(&ResourceTemplate{
 		URITemplate: "krate://page/{route}",
 		Name:        "page",
@@ -338,6 +354,7 @@ func (s *Service) Register(srv *Server) {
 	srv.RegisterCompletion("ref/prompt", "publish-content", "collection", s.completeCollections)
 	srv.RegisterCompletion("ref/tool", "edit_page", "route", s.completeRoutes)
 	srv.RegisterCompletion("ref/tool", "read_page", "route", s.completeRoutes)
+	srv.RegisterCompletion("ref/tool", "explain", "route", s.completeRoutes)
 	srv.RegisterCompletion("ref/tool", "read_content", "collection", s.completeCollections)
 	srv.RegisterCompletion("ref/tool", "read_content", "slug", s.completeContentSlugs)
 	srv.RegisterCompletion("ref/tool", "create_content", "collection", s.completeCollections)
@@ -525,6 +542,134 @@ func (s *Service) toolCheck(ctx context.Context, _ map[string]any) (ToolResult, 
 		"failing":  check.Failing(findings, cfg.FailOn),
 		"findings": views,
 	})
+}
+
+// ── site graph / explain ─────────────────────────────────────────────────────
+
+// graphNode is one route in the compiled site graph.
+type graphNode struct {
+	Route        string   `json:"route"`
+	Source       string   `json:"source,omitempty"`
+	Mode         string   `json:"mode"`
+	Params       []string `json:"params,omitempty"`
+	Built        bool     `json:"built"`
+	Dependencies []string `json:"dependencies,omitempty"`
+	Dependents   []string `json:"dependents,omitempty"`
+	Outputs      []string `json:"outputs,omitempty"`
+}
+
+// siteGraph is the full compiled-site model.
+type siteGraph struct {
+	Routes []graphNode         `json:"routes"`
+	Files  map[string][]string `json:"files,omitempty"` // file → routes that depend on it
+}
+
+func (s *Service) toolExplain(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
+	target, rerr := requireString(args, "route")
+	if rerr != nil {
+		return ToolResult{}, rerr
+	}
+	graph, buildOut, rerr := s.assembleSiteGraph(ctx)
+	if rerr != nil {
+		return ErrorResult(rerr.Message + "\n\n" + buildOut), nil
+	}
+	want := routetypes.Normalize(target)
+	for _, n := range graph.Routes {
+		if n.Route == want {
+			return JSONResult(n)
+		}
+	}
+	return ErrorResult(fmt.Sprintf("route %q not found in the built site", target)), nil
+}
+
+func (s *Service) readGraphResource(ctx context.Context, uri string) (ResourceContents, *rpcError) {
+	graph, buildOut, rerr := s.assembleSiteGraph(ctx)
+	if rerr != nil {
+		return ResourceContents{}, Errorf("%s\n\n%s", rerr.Message, buildOut)
+	}
+	return jsonResource(uri, graph)
+}
+
+// assembleSiteGraph builds the site (populating the dependency graph) and
+// assembles the site model. The build's captured stdout is returned alongside
+// any error so callers can surface diagnostics.
+func (s *Service) assembleSiteGraph(ctx context.Context) (*siteGraph, string, *rpcError) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", Errorf("cancelled")
+	}
+	b := newBuilder(Options{Root: s.root, Cfg: s.cfg, Env: s.env, Verbose: s.verbose})
+	s.runMu.Lock()
+	out, err := captureStdout(func() error { return b.BuildAll() })
+	s.runMu.Unlock()
+	if err != nil {
+		return nil, out, Errorf("build failed: %v", err)
+	}
+
+	routes, err := b.RouteList()
+	if err != nil {
+		return nil, out, Errorf("listing routes: %v", err)
+	}
+	pageDeps, depGraph := b.PageGraph()
+
+	nodes := make([]graphNode, 0, len(routes))
+	for _, r := range routes {
+		n := graphNode{Route: r.Route, Source: filepath.ToSlash(r.Source), Mode: r.Mode, Params: r.Params, Built: r.Built}
+		abs := ""
+		if r.Source != "" {
+			abs = filepath.Join(s.root, filepath.FromSlash(r.Source))
+		}
+		if abs != "" {
+			if deps, ok := pageDeps[abs]; ok {
+				n.Dependencies = s.relPaths(deps)
+			}
+			if deps, ok := depGraph[abs]; ok {
+				n.Dependents = s.relPaths(deps)
+			}
+		}
+		n.Outputs = s.routeOutputs(r.Route)
+		nodes = append(nodes, n)
+	}
+
+	files := make(map[string][]string, len(depGraph))
+	for f, pages := range depGraph {
+		files[s.rel(f)] = s.relPaths(pages)
+	}
+	return &siteGraph{Routes: nodes, Files: files}, out, nil
+}
+
+// relPaths maps a list of paths to project-relative, slash-separated paths.
+func (s *Service) relPaths(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, s.rel(p))
+	}
+	return out
+}
+
+// rel converts a path to project-relative, slash-separated form when possible.
+func (s *Service) rel(p string) string {
+	if rel, err := filepath.Rel(s.root, p); err == nil && !strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(p)
+}
+
+// routeOutputs lists the files emitted under a route's output directory.
+func (s *Service) routeOutputs(route string) []string {
+	outName := strings.Trim(route, "/")
+	dir := filepath.Join(s.cfg.OutDir, filepath.FromSlash(outName))
+	var outs []string
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if rel, rerr := filepath.Rel(s.cfg.OutDir, p); rerr == nil {
+			outs = append(outs, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	sort.Strings(outs)
+	return outs
 }
 
 // ── write tools ─────────────────────────────────────────────────────────────

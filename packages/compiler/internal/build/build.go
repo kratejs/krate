@@ -99,6 +99,10 @@ type Builder struct {
 	// evaluate and report the same findings twice.
 	SkipQualityChecks bool
 
+	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
+	// in the global stylesheet; injected into every page head.
+	fontPreloadHTML string
+
 	workerMu  sync.Mutex
 	workers   map[string]string // worker source path → hashed site URL (/workers/…)
 	workerEsm map[string]bool   // worker source path → built as ES module
@@ -189,6 +193,9 @@ func (b *Builder) runtimeCommonHead() string {
 		sb.WriteString("@media (prefers-reduced-motion: reduce){")
 		sb.WriteString("::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}")
 		sb.WriteString("</style>\n")
+	}
+	if b.fontPreloadHTML != "" {
+		sb.WriteString(b.fontPreloadHTML)
 	}
 	return sb.String()
 }
@@ -840,7 +847,7 @@ func (b *Builder) BuildAll() error {
 	manifest.StaticOnlyRoutes = append([]string(nil), b.staticOnlyRoutes...)
 
 	// Compile server bundles for SSR/ISR/streaming pages
-	serverBundles := CompileServerBundles(results, b.Root, b.Cfg.OutDir)
+	serverBundles := CompileServerBundles(results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap)
 	if len(serverBundles) > 0 {
 		fmt.Printf("  %s⚡%s Compiled %d server bundles\n", cCyan, cReset, len(serverBundles))
 		// Stage the bundled SSR renderer driver so `krate serve` runs it with
@@ -1043,8 +1050,14 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 		// Inline @import directives before minification
 		processedCSS = css.InlineImports(processedCSS, b.Root)
 		processedCSS = b.processCSSDirectives(processedCSS)
+		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
+		if b.Cfg.Fonts.PreloadEnabled() {
+			b.fontPreloadHTML = fontPreloadHTML(collectFontURLs(processedCSS), b.Cfg.BaseURLPath())
+		}
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
+		} else {
+			processedCSS = css.RemoveDuplicateDeclarations(processedCSS)
 		}
 		if strings.TrimSpace(processedCSS) != "" {
 			processedBytes := []byte(processedCSS)
@@ -1102,8 +1115,11 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 
 		processedCSS := css.InlineImports(pageCss, b.Root)
 		processedCSS = b.processCSSDirectives(processedCSS)
+		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
+		} else {
+			processedCSS = css.RemoveDuplicateDeclarations(processedCSS)
 		}
 		if strings.TrimSpace(processedCSS) == "" {
 			memo[key] = processed{file: ""}
@@ -1383,7 +1399,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme})
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme, AggressiveDCE: b.aggressiveDCE()})
 	// CSS primitive declarations that cannot be compiled to CSS are hard errors
 	// (there is no fallback to client signals).
 	if len(tree.Errors) > 0 {
@@ -1509,6 +1525,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	// generateStaticParams are built separately and write normally.
 	if staticOnly {
 		b.recordDeps(page, deps)
+		pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
 		return &PageResult{
 			Page:              page,
 			OutName:           outName,
@@ -1516,9 +1533,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			HeadHTML:          emitResult.HeadHTML,
 			ScriptHTML:        emitResult.ScriptHTML,
 			StyleHTML:         emitResult.StyleHTML,
-			HasCSS:            bundle.CSS != "",
+			HasCSS:            pageCSS != "",
 			IsErrorPage:       pageBase == "404" || pageBase == "500",
-			CSS:               bundle.CSS,
+			CSS:               pageCSS,
 			UsedCSS:           emitResult.UsedCSS,
 			UsedFuncs:         emitResult.UsedFuncs,
 			Mode:              renderMode,
@@ -1542,15 +1559,25 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	hasJS := false
 	needsHydrate := len(emitResult.Signatures) > 0
 	if needsHydrate {
-		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
-		if strings.TrimSpace(hydrationJS) != "" {
+		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		if rawJS != "" {
 			hasJS = true
+			finalJS := rawJS
+			mapJSON := ""
 			if b.shouldMinifyJS() {
-				hydrationJS = minifyJS(hydrationJS)
+				if b.Cfg.Sourcemap {
+					// Minify with esbuild's own map so the minified output can be
+					// decoded back to the generated code. The hydration bundle is
+					// compiler-generated (no literal user TSX), so `sources` labels
+					// it as such rather than pretending to be the page source.
+					finalJS, mapJSON = minifyJSWithMap(rawJS, "krate-hydration.js")
+				} else {
+					finalJS = minifyJS(rawJS)
+				}
 			}
 
 			// Write page-specific hydration code only (runtime is in a shared chunk)
-			finalJS := strings.TrimSpace(hydrationJS)
+			finalJS = strings.TrimSpace(finalJS)
 			jsHash := hashContent([]byte(finalJS))
 			jsFile = "index." + jsHash + ".js"
 			finalJS = substituteImportMetaURL(finalJS, outName, jsFile, b.Cfg.BaseURLPath())
@@ -1558,10 +1585,12 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			_ = fsutil.WriteFileIfChanged(jsPath, []byte(finalJS), 0644)
 
 			if b.Cfg.Sourcemap {
-				// The hydration bundle is compiler-generated, so the "source" is
-				// the page file; embed both the generated code and the page
-				// label so devtools can show a coherent (if synthetic) file.
-				sm := generateSourcemap(finalJS, outName, hydrationJS)
+				sm := mapJSON
+				if sm == "" {
+					// Unminified output: emit a valid line-level map with the
+					// generated code embedded so devtools shows a coherent file.
+					sm = generateSourcemap(finalJS, "krate-hydration.js", finalJS)
+				}
 				_ = os.WriteFile(jsPath+".map", []byte(sm), 0644)
 				finalJS = appendSourceMappingURL(finalJS, jsFile+".map")
 				_ = fsutil.WriteFileIfChanged(jsPath, []byte(finalJS), 0644)
@@ -1587,6 +1616,8 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	loadingHTML := b.renderLoadingComponent(page)
 
+	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
+
 	// Return data structures without triggering an intermediate disk write
 	result := &PageResult{
 		Page:        page,
@@ -1598,9 +1629,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		HydrationJS: hydrationJS,
 		HasJS:       hasJS,
 		JSFile:      jsFile,
-		HasCSS:      bundle.CSS != "",
+		HasCSS:      pageCSS != "",
 		IsErrorPage: pageBase == "404" || pageBase == "500",
-		CSS:         bundle.CSS,
+		CSS:         pageCSS,
 		UsedCSS:     emitResult.UsedCSS,
 		UsedFuncs:   emitResult.UsedFuncs,
 		LoadingHTML: loadingHTML,
@@ -1958,8 +1989,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
 	annotator.ReclassifyTiers(ann, b.Cfg)
 	tree := irtree.BuildWithOptions(layoutModule.Program, ann, irtree.BuildOptions{
-		CodeTheme: b.Cfg.Markdown.CodeTheme,
-		IDPrefix:  layoutIDPrefix(layoutPath),
+		CodeTheme:     b.Cfg.Markdown.CodeTheme,
+		IDPrefix:      layoutIDPrefix(layoutPath),
+		AggressiveDCE: b.aggressiveDCE(),
 	})
 	if len(tree.Errors) > 0 {
 		return nil, "", nil, renderErrors(layoutPath, tree.Errors)
@@ -2061,7 +2093,7 @@ func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*
 
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, page, entryModule.SourceCode)
 
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme})
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme, AggressiveDCE: b.aggressiveDCE()})
 	if len(tree.Errors) > 0 {
 		return nil, renderErrors(page, tree.Errors)
 	}
@@ -2158,7 +2190,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme})
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme, AggressiveDCE: b.aggressiveDCE()})
 	if len(tree.Errors) > 0 {
 		for _, e := range tree.Errors {
 			fmt.Fprintf(os.Stderr, "  %s✗ Error (loading %s):%s %v\n", cRed, loadingPath, cReset, e)
@@ -3429,6 +3461,7 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) error {
 		Packages:    api.PackagesExternal, // Keeps third-party node_modules completely external
 		Outfile:     outPath,
 		Write:       true,
+		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),
 		Metafile:    true, // Generates the dep-graph string in-memory
 	}
 

@@ -267,6 +267,65 @@ func (c VersionsConfig) Enabled() bool { return len(c.Versions) > 0 }
 // BannerEnabled reports whether the old-version banner is on (default true).
 func (c VersionsConfig) BannerEnabled() bool { return c.Banner == nil || *c.Banner }
 
+// DceCfg configures dead-code elimination for emitted CSS and JS. Both default
+// on (conservative). Aggressive additionally drops local helper functions the
+// reference scan cannot prove are unused, which is riskier.
+type DceCfg struct {
+	CSS        *bool `json:"css,omitempty"`
+	JS         *bool `json:"js,omitempty"`
+	Aggressive *bool `json:"aggressive,omitempty"`
+}
+
+func (d DceCfg) CSSEnabled() bool        { return d.CSS == nil || *d.CSS }
+func (d DceCfg) JSEnabled() bool         { return d.JS == nil || *d.JS }
+func (d DceCfg) AggressiveEnabled() bool { return d.Aggressive != nil && *d.Aggressive }
+
+// GoAPIDep is a third-party module required by Go API routes.
+type GoAPIDep struct {
+	Path    string `json:"path"`
+	Version string `json:"version"`
+}
+
+// GoAPIReplace is a `replace` directive for the generated Go API module.
+type GoAPIReplace struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// GoAPICfg configures the Go API sidecar build (src/api/*.go).
+type GoAPICfg struct {
+	Enabled  *bool          `json:"enabled,omitempty"`
+	Module   string         `json:"module,omitempty"`
+	Deps     []GoAPIDep     `json:"deps,omitempty"`
+	Replaces []GoAPIReplace `json:"replaces,omitempty"`
+	Tidy     *bool          `json:"tidy,omitempty"`
+}
+
+func (g GoAPICfg) EnabledOrDefault() bool { return g.Enabled == nil || *g.Enabled }
+
+// FontsCfg configures web-font handling. Preload emits `<link rel="preload">`
+// for fonts declared in the global stylesheet; Display sets the default
+// `font-display` applied to `@font-face` blocks that omit it.
+type FontsCfg struct {
+	Preload *bool  `json:"preload,omitempty"`
+	Display string `json:"display,omitempty"`
+}
+
+func (f FontsCfg) PreloadEnabled() bool { return f.Preload == nil || *f.Preload }
+
+// DisplayValue returns the `font-display` keyword to inject, or "" to leave
+// `@font-face` blocks untouched. Defaults to "swap"; "off"/"none" disables it.
+func (f FontsCfg) DisplayValue() string {
+	v := f.Display
+	if v == "" {
+		v = "swap"
+	}
+	if v == "off" || v == "none" {
+		return ""
+	}
+	return v
+}
+
 type Config struct {
 	Entry       string          `json:"entry"`
 	OutDir      string          `json:"outDir"`
@@ -295,6 +354,9 @@ type Config struct {
 	Robots      RobotsConfig    `json:"robots,omitempty"`      // robots.txt config
 	I18n        I18nConfig      `json:"i18n,omitempty"`        // multi-language docs
 	Versions    VersionsConfig  `json:"versions,omitempty"`    // versioned docs
+	Dce         DceCfg          `json:"dce,omitempty"`         // CSS/JS dead-code elimination
+	Fonts       FontsCfg        `json:"fonts,omitempty"`       // web-font preload + font-display
+	GoAPI       GoAPICfg        `json:"goApi,omitempty"`       // Go API sidecar module/deps
 
 	// BasePath is the URL path prefix the whole site is served under (e.g.
 	// "/docs"). Empty means root. Used for emitted asset URLs and the SPA

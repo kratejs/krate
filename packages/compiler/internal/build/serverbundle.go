@@ -15,7 +15,7 @@ import (
 //   - JSX automatic transform using @krate/runtime/jsx-runtime
 //   - Head, Suspense, Script, Style imported from @krate/runtime/server
 //   - All dependencies bundled (except node_modules externals)
-func CompileServerBundles(results []*PageResult, root, outDir string) map[string]string {
+func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap bool) map[string]string {
 	// Collect non-SSG pages
 	var ssrPages []*PageResult
 	for _, r := range results {
@@ -70,6 +70,7 @@ func CompileServerBundles(results []*PageResult, root, outDir string) map[string
 				Platform:        api.PlatformNode,
 				Outfile:         outPath,
 				Write:           true,
+				Sourcemap:       sourceMapMode(sourcemap),
 				JSX:             api.JSXAutomatic,
 				JSXSideEffects:  false,
 				JSXImportSource: "@krate/runtime/server",

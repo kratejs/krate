@@ -390,6 +390,11 @@ func isHashedAsset(urlPath string) bool {
 	if i := strings.IndexByte(p, '#'); i >= 0 {
 		p = p[:i]
 	}
+	// A source map describes a content-hashed asset (index.<hash>.js.map), so
+	// cache it under the same policy as its subject.
+	if strings.HasSuffix(p, ".map") {
+		p = strings.TrimSuffix(p, ".map")
+	}
 	switch strings.ToLower(filepathExt(p)) {
 	case ".css", ".js", ".mjs", ".woff2", ".woff", ".png", ".jpg", ".jpeg",
 		".gif", ".webp", ".avif", ".svg", ".ico", ".wasm":

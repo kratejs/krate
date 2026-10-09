@@ -12,6 +12,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/build"
 	"github.com/kratejs/krate/packages/compiler/internal/check"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/deploy"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/mcp"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
@@ -38,6 +39,9 @@ type cliFlags struct {
 	Watch      bool
 	Verbose    bool
 	Profile    bool
+	Sourcemap  bool
+	NoDCE      bool
+	Target     string
 }
 
 func main() {
@@ -70,6 +74,8 @@ func main() {
 		runTypes(flags, args)
 	case "check":
 		runCheck(flags, args)
+	case "deploy":
+		runDeploy(flags, args)
 	case "clean":
 		runClean(flags, args)
 	case "doctor":
@@ -108,6 +114,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "check":
 		fmt.Fprintf(w, "Usage: krate check [dir]\n\n")
 		fmt.Fprintf(w, "Run compiler-enforced quality gates (a11y/SEO/perf) on the built output.\n")
+	case "deploy":
+		fmt.Fprintf(w, "Usage: krate deploy [dir] [--target netlify|vercel|cloudflare|gh-pages]\n\n")
+		fmt.Fprintf(w, "Build the site and write host adapter files (e.g. _redirects, vercel.json).\n")
 	case "clean":
 		fmt.Fprintf(w, "Usage: krate clean [dir]\n\n")
 		fmt.Fprintf(w, "Remove build output (dist) and the compiler cache (.krate/cache).\n")
@@ -133,6 +142,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  serve     Build, then serve for preview (aliases: preview, start)\n")
 	fmt.Fprintf(w, "  types     Generate route/content TypeScript declarations\n")
 	fmt.Fprintf(w, "  check     Run compiler-enforced quality gates (a11y/SEO/perf)\n")
+	fmt.Fprintf(w, "  deploy    Build and write host adapter files (netlify/vercel/...)\n")
 	fmt.Fprintf(w, "  clean     Remove build output (dist) and the compiler cache (.krate/cache)\n")
 	fmt.Fprintf(w, "  doctor    Print a diagnostic summary of the project and toolchain\n")
 	fmt.Fprintf(w, "  plugin    Manage plugins (add <pkg>)\n")
@@ -145,6 +155,9 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --watch           Rebuild on file changes\n")
 	fmt.Fprintf(w, "  --verbose         Print diagnostic details (e.g. reactive validation)\n")
 	fmt.Fprintf(w, "  --profile         Print per-phase build timings and disk-cache hits/misses\n")
+	fmt.Fprintf(w, "  --sourcemap       Emit source maps for generated JS\n")
+	fmt.Fprintf(w, "  --no-dce          Disable CSS/JS dead-code elimination\n")
+	fmt.Fprintf(w, "  --target <name>   Deploy adapter target (netlify|vercel|cloudflare|gh-pages)\n")
 }
 
 func parseFlags(args []string) (cliFlags, []string) {
@@ -158,12 +171,19 @@ func parseFlags(args []string) (cliFlags, []string) {
 		case args[i] == "--out-dir" && i+1 < len(args):
 			flags.OutDir = args[i+1]
 			i++
+		case args[i] == "--target" && i+1 < len(args):
+			flags.Target = args[i+1]
+			i++
 		case args[i] == "--watch":
 			flags.Watch = true
 		case args[i] == "--verbose":
 			flags.Verbose = true
 		case args[i] == "--profile":
 			flags.Profile = true
+		case args[i] == "--sourcemap":
+			flags.Sourcemap = true
+		case args[i] == "--no-dce":
+			flags.NoDCE = true
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
 			// than rejecting them as unknown flags.
@@ -205,6 +225,14 @@ func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 		} else {
 			cfg.OutDir = filepath.Join(root, flags.OutDir)
 		}
+	}
+	if flags.Sourcemap {
+		cfg.Sourcemap = true
+	}
+	if flags.NoDCE {
+		off := false
+		cfg.Dce.CSS = &off
+		cfg.Dce.JS = &off
 	}
 
 	return root, cfg
@@ -336,6 +364,39 @@ func runServe(flags cliFlags, args []string) {
 	if err := build.Serve(root, cfg, start); err != nil {
 		fmt.Fprintf(os.Stderr, "%sServe error:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
+	}
+}
+
+// runDeploy builds the site and writes host-specific adapter files so the
+// output can be uploaded to a static host as-is.
+func runDeploy(flags cliFlags, args []string) {
+	root, cfg := resolveConfig(flags, args)
+	env := loadProjectEnv(root, "production", flags.Verbose)
+
+	target := flags.Target
+	if target == "" {
+		target = "netlify"
+	}
+
+	fmt.Printf("%s%s  Building %s \u2192 %s%s\n", cBold, cCyan, root, cfg.OutDir, cReset)
+	builder := build.New(root, cfg)
+	builder.Verbose = flags.Verbose
+	builder.Env = env
+	if err := builder.BuildAll(); err != nil {
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+
+	files, err := deploy.Emit(target, cfg, cfg.OutDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sDeploy error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+	fmt.Printf("%s%s  %s adapter ready%s (%d file(s))\n", cBold, cGreen, target, cReset, len(files))
+	for _, f := range files {
+		if rel, err := filepath.Rel(cfg.OutDir, f); err == nil {
+			fmt.Printf("    %s%s%s\n", cGray, filepath.ToSlash(rel), cReset)
+		}
 	}
 }
 

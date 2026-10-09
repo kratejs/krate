@@ -749,6 +749,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	}
 
 	handlerWith404 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Source maps are JSON; set the type explicitly since `.map` has no
+		// standard mime entry on every platform (FileServer only sets a type
+		// when one isn't already present).
+		if strings.HasSuffix(r.URL.Path, ".map") {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		}
 		// Hashed assets (styles.<hash>.css, index.<hash>.js, chunks/*.<hash>.js,
 		// assets/<name>-<hash>.*) are content-addressed, so they can be cached
 		// immutably. HTML must never be, since it changes per build.

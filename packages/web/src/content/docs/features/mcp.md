@@ -62,6 +62,7 @@ The shape is the same, under the client's own key:
 | `search_docs` | Search Krate's built-in framework docs (ranked, via the docfind engine); returns slugs, excerpts, and optional full text |
 | `build` | Build the site; returns diagnostics and a per-route summary |
 | `check` | Run the quality gates (a11y/SEO/perf); builds first when needed |
+| `explain` | Explain a route from the compiled site graph: mode, source, dependencies, dependents, and emitted output files |
 | `create_page` | Create a page from a template; returns a diff (dry-run by default) |
 | `edit_ast` | Replace a page's AST with an edited document; returns a diff |
 | `edit_page` | Edit any project file's source directly (full replace or find+replace); returns a diff |
@@ -213,6 +214,7 @@ Resources provide pull-based context an agent can attach automatically.
 | `krate://content` | Effective content collections (configured `content:` plus plugin-contributed, e.g. docs) and their entries, with each collection's schema fields |
 | `krate://manifest` | The built site manifest (empty when unbuilt) |
 | `krate://config` | The resolved Krate config (relative paths, no env values) |
+| `krate://graph` | The compiled site graph: routes with mode, dependencies, dependents, and emitted output files (JSON) |
 
 `krate://page/{route}` and `krate://docs/{slug}` are **resource templates**,
 advertised through `resources/templates/list`. The server also provides

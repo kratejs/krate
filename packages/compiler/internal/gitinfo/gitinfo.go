@@ -74,6 +74,21 @@ func indexFor(root string) *Index {
 	return ix
 }
 
+// canonicalPath resolves symlinks and (on Windows) short/case-variant path
+// components so paths originating from different sources — t.TempDir, `git
+// rev-parse --show-toplevel` (/private/var vs /var on macOS; long vs 8.3 names
+// on Windows) — compare equal under filepath.Rel. Falls back to a cleaned path
+// when the target cannot be resolved (e.g. a not-yet-created file).
+func canonicalPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return filepath.Clean(p)
+}
+
 // buildIndex runs one `git log --name-only` pass and records, for each file,
 // its most recent committer date and up to a few recent authors.
 func buildIndex(root string) *Index {
@@ -82,7 +97,10 @@ func buildIndex(root string) *Index {
 	if !ok || gr == "" {
 		return ix
 	}
-	ix.gr = gr
+	// Normalize both the git top-level and the project root so relative paths
+	// computed against either agree.
+	ix.gr = canonicalPath(gr)
+	ix.root = canonicalPath(root)
 
 	// Cap history so enormous repos stay bounded; files untouched in the last
 	// 10000 commits simply report no git metadata (as an untracked file would).
@@ -139,6 +157,9 @@ func (ix *Index) relSlash(path string) string {
 	if !filepath.IsAbs(abs) {
 		abs = filepath.Join(ix.root, path)
 	}
+	// Canonicalize so the path matches the (already canonical) git top-level
+	// even when callers pass a symlinked or short/case-variant root.
+	abs = canonicalPath(abs)
 	rel, err := filepath.Rel(ix.gr, abs)
 	if err != nil {
 		return ""

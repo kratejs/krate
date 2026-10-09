@@ -20,6 +20,22 @@ dist/          ← deploy this
 Any static host works. The output has no server runtime dependency — pages are
 pre-rendered HTML with hashed JS/CSS assets.
 
+### Host adapters (`krate deploy`)
+
+`krate deploy` builds the site and writes the small host-specific config files
+that static hosts need (redirects, 404 handling), so you can upload `dist/`
+unchanged:
+
+```sh
+krate deploy --target netlify     # _redirects
+krate deploy --target cloudflare  # _redirects
+krate deploy --target vercel      # vercel.json
+krate deploy --target gh-pages    # .nojekyll + 404.html
+```
+
+Redirects and rewrites come from your `redirects`/`rewrites` config, so the
+same rules drive `krate serve` and the deployed host.
+
 ## Node servers (SSR / ISR / API routes / middleware)
 
 If your site uses SSR, ISR, streaming, JS API routes, or middleware, you need
