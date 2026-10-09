@@ -86,13 +86,13 @@ export function ThemeToggle(props: { storageKey?: string }) {
 
   return (
     <button class="theme-toggle" ref={btnRef} aria-label="Toggle colour theme" type="button" onClick={toggle}>
-      <Icon name="tabler:sun" width="16" height="16" />
-      <Icon name="tabler:moon" width="16" height="16" />
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313-12.454z"/></svg>
     </button>
   );
 }
 
-export function SiteHeader(props: { site: SiteConfig; currentPath?: string }) {
+export function SiteHeader(props: { site: SiteConfig; currentPath?: string; children?: any }) {
   const site = props.site || {};
   const brand = site.brand || DEFAULT_BRAND;
   const nav = site.nav || [];
@@ -115,7 +115,7 @@ export function SiteHeader(props: { site: SiteConfig; currentPath?: string }) {
             <Icon name={s.icon} width="18" height="18" />
           </a>
         ))}
-        <ThemeToggle storageKey={site.themeStorageKey} />
+        {props.children}
       </div>
     </header>
   );
@@ -162,7 +162,9 @@ export function HomeLayout(props: { site: SiteConfig; currentPath?: string; chil
       <Head>
         <link rel="stylesheet" href="/site.css" />
       </Head>
-      <SiteHeader site={props.site} currentPath={props.currentPath} />
+      <SiteHeader site={props.site} currentPath={props.currentPath}>
+        <ThemeToggle />
+      </SiteHeader>
       <main>{props.children}</main>
       <SiteFooter site={props.site} />
     </div>

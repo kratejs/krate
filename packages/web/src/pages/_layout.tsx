@@ -1,4 +1,4 @@
-import { HomeLayout } from "@krate/base-docs-theme/shell";
+import { SiteHeader, SiteFooter, ThemeToggle } from "@krate/base-docs-theme/shell";
 
 const site = {
   brand: { text: "krate", href: "/", logo: "k" },
@@ -45,5 +45,16 @@ const site = {
 };
 
 export default function SiteLayout(props: { children: any }) {
-  return <HomeLayout site={site}>{props.children}</HomeLayout>;
+  return (
+    <div class="site-shell">
+      <Head>
+        <link rel="stylesheet" href="/site.css" />
+      </Head>
+      <SiteHeader site={site}>
+        <ThemeToggle />
+      </SiteHeader>
+      <main>{props.children}</main>
+      <SiteFooter site={site} />
+    </div>
+  );
 }

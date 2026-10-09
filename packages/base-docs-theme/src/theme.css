@@ -1658,8 +1658,51 @@ a.docs-tag:hover { color: var(--color-text-main); border-color: var(--color-mute
 .krate-switcher-menu a:hover { background: var(--color-muted-bg); }
 .krate-switcher-menu a.active { color: var(--color-primary); font-weight: 600; }
 /* --- Mermaid diagrams ------------------------------------------------- */
+/* Mermaid stamps an inline `max-width: <natural>px` on the SVG; override it so
+   diagrams use the content width instead of rendering tiny and "zoomed out". */
 .mermaid { margin: 1.5rem 0; text-align: center; overflow-x: auto; }
-.mermaid svg { max-width: 100%; height: auto; }pre.mermaid { background: transparent; border: 0; padding: 0; color: inherit; }
+.mermaid svg { max-width: 100% !important; height: auto; }
+
+/* The fenced block is `<pre class="mermaid">`. The generic plain-code rule
+   (`.docs-content :not(.krate-code-block) > pre`) is more specific than
+   `pre.mermaid`, so it would keep the code box (border/padding/background/
+   white-space). Force the diagram box to be a plain, centred block. */
+pre.mermaid,
+.docs-content pre.mermaid {
+    background: transparent !important;
+    border: 0 !important;
+    padding: 0 !important;
+    margin: 1.5rem 0 !important;
+    font-size: inherit !important;
+    line-height: normal !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    color: inherit !important;
+    text-align: center;
+}
+
+/* Mermaid measures and renders its labels itself. The prose rules above
+   (`overflow-wrap: anywhere`, `text-wrap: pretty`, heading/paragraph margins)
+   leak into the diagram and change label metrics — making Mermaid lay out
+   enormous nodes (a 4-node graph became ~3257x4193 in Firefox) and detach
+   edges. Neutralise the inherited text-flow for *everything* inside a diagram,
+   including SVG <text>/<tspan> (which the earlier reset missed). */
+.mermaid,
+.mermaid * {
+    overflow-wrap: normal !important;
+    word-break: normal !important;
+    text-wrap: auto !important;
+    letter-spacing: normal !important;
+    word-spacing: normal !important;
+}
+
+.mermaid :is(p, span, div, foreignObject, ul, ol, li, .nodeLabel, .edgeLabel, .label) {
+    margin: 0;
+    padding: 0;
+    line-height: 1.2 !important;
+    color: inherit;
+    font-size: inherit;
+}
 /* --- Page footer (edit link + feedback) ------------------------------- */
 .docs-page-footer {
   display: flex; align-items: center; justify-content: space-between;

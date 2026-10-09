@@ -1503,8 +1503,22 @@ func (b *Builder) buildRoute(route plugin.Route) (result *PageResult, rawCSS str
 // and forces a rebuild instead of reusing a stale skeleton.
 type layoutEmitCacheEntry struct {
 	html, headHTML, scriptHTML, styleHTML, css string
-	deps                                       []string
-	depTimes                                   map[string]time.Time
+	// Client hydration metadata, merged into each wrapped page so the layout's
+	// interactive components hydrate (their JS is generated alongside the page's).
+	signatures     []irtree.ComponentSignature
+	listComponents []*ast.FnDecl
+	hasLinks       bool
+	deps           []string
+	depTimes       map[string]time.Time
+}
+
+// layoutIDPrefix returns a stable, collision-free namespace for a layout's
+// compact slot IDs. It starts with "_" (outside the base62 alphabet the page
+// builder uses) so a merged layout + page can never share a data-k ID.
+func layoutIDPrefix(layoutPath string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(filepath.ToSlash(layoutPath)))
+	return "_l" + strconv.FormatUint(uint64(h.Sum32()), 36) + "_"
 }
 
 // layoutCacheFresh reports whether every file the layout was built from is
@@ -1572,10 +1586,13 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		entry := cached.(*layoutEmitCacheEntry)
 		if layoutCacheFresh(entry) {
 			return &renderer.EmitResult{
-				HTML:       strings.Replace(entry.html, "<!--__children__-->", content, -1),
-				HeadHTML:   entry.headHTML,
-				ScriptHTML: entry.scriptHTML,
-				StyleHTML:  entry.styleHTML,
+				HTML:           strings.Replace(entry.html, "<!--__children__-->", content, -1),
+				HeadHTML:       entry.headHTML,
+				ScriptHTML:     entry.scriptHTML,
+				StyleHTML:      entry.styleHTML,
+				Signatures:     entry.signatures,
+				ListComponents: entry.listComponents,
+				HasLinks:       entry.hasLinks,
 			}, entry.css, entry.deps, nil
 		}
 	}
@@ -1592,10 +1609,13 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		entry := cached.(*layoutEmitCacheEntry)
 		if layoutCacheFresh(entry) {
 			return &renderer.EmitResult{
-				HTML:       strings.Replace(entry.html, "<!--__children__-->", content, -1),
-				HeadHTML:   entry.headHTML,
-				ScriptHTML: entry.scriptHTML,
-				StyleHTML:  entry.styleHTML,
+				HTML:           strings.Replace(entry.html, "<!--__children__-->", content, -1),
+				HeadHTML:       entry.headHTML,
+				ScriptHTML:     entry.scriptHTML,
+				StyleHTML:      entry.styleHTML,
+				Signatures:     entry.signatures,
+				ListComponents: entry.listComponents,
+				HasLinks:       entry.hasLinks,
 			}, entry.css, entry.deps, nil
 		}
 	}
@@ -1624,7 +1644,10 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	annotator.MergeModuleFunctions(ann, extraLayoutPrograms)
 	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	tree := irtree.BuildWithOptions(layoutModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme})
+	tree := irtree.BuildWithOptions(layoutModule.Program, ann, irtree.BuildOptions{
+		CodeTheme: b.Cfg.Markdown.CodeTheme,
+		IDPrefix:  layoutIDPrefix(layoutPath),
+	})
 	if len(tree.Errors) > 0 {
 		return nil, "", nil, renderErrors(layoutPath, tree.Errors)
 	}
@@ -1654,21 +1677,27 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	}
 
 	layoutEmitCache.Store(layoutPath, &layoutEmitCacheEntry{
-		html:       emitResult.HTML,
-		headHTML:   emitResult.HeadHTML,
-		scriptHTML: emitResult.ScriptHTML,
-		styleHTML:  emitResult.StyleHTML,
-		css:        css,
-		deps:       layoutDeps,
-		depTimes:   modTimesOf(layoutDeps),
+		html:           emitResult.HTML,
+		headHTML:       emitResult.HeadHTML,
+		scriptHTML:     emitResult.ScriptHTML,
+		styleHTML:      emitResult.StyleHTML,
+		signatures:     emitResult.Signatures,
+		listComponents: emitResult.ListComponents,
+		hasLinks:       emitResult.HasLinks,
+		css:            css,
+		deps:           layoutDeps,
+		depTimes:       modTimesOf(layoutDeps),
 	})
 
 	// Inject page content at {children} slot
 	return &renderer.EmitResult{
-		HTML:       strings.Replace(emitResult.HTML, "<!--__children__-->", content, -1),
-		HeadHTML:   emitResult.HeadHTML,
-		ScriptHTML: emitResult.ScriptHTML,
-		StyleHTML:  emitResult.StyleHTML,
+		HTML:           strings.Replace(emitResult.HTML, "<!--__children__-->", content, -1),
+		HeadHTML:       emitResult.HeadHTML,
+		ScriptHTML:     emitResult.ScriptHTML,
+		StyleHTML:      emitResult.StyleHTML,
+		Signatures:     emitResult.Signatures,
+		ListComponents: emitResult.ListComponents,
+		HasLinks:       emitResult.HasLinks,
 	}, css, layoutDeps, nil
 }
 
@@ -1904,6 +1933,14 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 		emitResult.HeadHTML = emitResult.HeadHTML + layoutRes.HeadHTML
 		emitResult.ScriptHTML = emitResult.ScriptHTML + layoutRes.ScriptHTML
 		emitResult.StyleHTML = emitResult.StyleHTML + layoutRes.StyleHTML
+		// Carry the layout's client components into the page so its interactivity
+		// hydrates. Their compact slot IDs are namespaced (IDPrefix) so they can't
+		// collide with the page's.
+		emitResult.Signatures = append(emitResult.Signatures, layoutRes.Signatures...)
+		emitResult.ListComponents = append(emitResult.ListComponents, layoutRes.ListComponents...)
+		if layoutRes.HasLinks {
+			emitResult.HasLinks = true
+		}
 		css += layoutCSS
 		// Record the layout's full module graph (not just the layout file) so
 		// editing a component the layout imports rebuilds every wrapped page.

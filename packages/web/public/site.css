@@ -13,6 +13,11 @@
     --color-accent-border: rgba(249, 115, 22, 0.2);
     --radius: 10px;
     --max-width: 1120px;
+    /* Shared chrome tokens — keep the marketing header identical to the docs
+       header (see base-docs-theme theme.css). */
+    --header-height: 56px;
+    --blur-intensity: 12px;
+    --navbar-bg: rgba(255, 255, 255, 0.75);
 }
 
 /* Dark palette: honour an explicit `data-theme` (from the theme toggle) or the
@@ -27,6 +32,7 @@
     --color-primary: #f97316;
     --color-accent-bg: rgba(249, 115, 22, 0.12);
     --color-accent-border: rgba(249, 115, 22, 0.3);
+    --navbar-bg: rgba(9, 9, 11, 0.8);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -40,6 +46,7 @@
         --color-primary: #f97316;
         --color-accent-bg: rgba(249, 115, 22, 0.12);
         --color-accent-border: rgba(249, 115, 22, 0.3);
+        --navbar-bg: rgba(9, 9, 11, 0.8);
     }
 }
 
@@ -86,12 +93,14 @@ pre {
     z-index: 100;
     display: flex;
     align-items: center;
-    gap: 1.5rem;
-    height: 56px;
+    gap: 1rem;
+    height: var(--header-height);
     padding: 0 1.5rem;
-    background: color-mix(in srgb, var(--color-bg) 82%, transparent);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    padding-left: max(1.5rem, env(safe-area-inset-left));
+    padding-right: max(1.5rem, env(safe-area-inset-right));
+    background: var(--navbar-bg);
+    backdrop-filter: blur(var(--blur-intensity));
+    -webkit-backdrop-filter: blur(var(--blur-intensity));
     border-bottom: 1px solid var(--color-border);
 }
 
@@ -392,14 +401,18 @@ pre {
     width: 32px;
     height: 32px;
     border-radius: 8px;
-    border: 1px solid transparent;
+    border: 1px solid var(--color-border);
     color: var(--color-muted);
     background: transparent;
     cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
-.site-navbar-actions .social-link { border-color: var(--color-border); }
 .site-navbar-actions .social-link:hover,
-.site-navbar-actions .theme-toggle:hover { color: var(--color-fg); border-color: var(--color-border); }
+.site-navbar-actions .theme-toggle:hover {
+    color: var(--color-fg);
+    background: var(--color-muted-bg);
+    border-color: var(--color-border);
+}
 
 /* Show one glyph depending on the active theme. */
 .theme-toggle svg { display: none; }

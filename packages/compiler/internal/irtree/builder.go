@@ -39,6 +39,12 @@ type BuildOptions struct {
 	// at build time. It must match the stylesheet generated for the same theme
 	// (syntaxhighlight.CSSForTheme). Empty selects the default theme.
 	CodeTheme string
+	// IDPrefix namespaces the compact slot IDs emitted into data-k markers and
+	// hydration JS. It must be set when a build is merged with another build
+	// (e.g. a layout merged into a page) so the two ID spaces can't collide.
+	// Use a character outside the base62 alphabet (e.g. "_") so it can never
+	// clash with an unprefixed ID.
+	IDPrefix string
 }
 
 // Build constructs a ComponentTree from a parsed program and its annotations
@@ -75,6 +81,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		cvaFactories:     mergeCVAFactories(ann.CVAFactories, prog),
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
 		codeTheme:        codeTheme,
+		idPrefix:         opts.IDPrefix,
 	}
 
 	root := builder.buildComponentNode(entryFn, "")
@@ -158,6 +165,7 @@ type builder struct {
 	cvaFactories     map[string]*CVASpec // module-level `const X = cva(...)` factories
 	contextDefaults  map[string]string   // module-level `const X = createContext(v)` defaults
 	codeTheme        string              // chroma theme for compile-time <Code> highlighting
+	idPrefix         string              // namespace for compact slot IDs (merged builds)
 	suspenseCount    int                 // monotonic counter for stable StreamID generation
 
 	// cssIndex assigns stable, page-unique indices to (component, var) scope
@@ -284,7 +292,7 @@ func (b *builder) assignSlotID(logical SlotID) SlotID {
 		return compact
 	}
 	b.slotCounter++
-	compact := SlotID(toBase62(b.slotCounter))
+	compact := SlotID(b.idPrefix + toBase62(b.slotCounter))
 	b.slotIDMap[string(logical)] = compact
 	return compact
 }
