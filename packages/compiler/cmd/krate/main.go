@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -42,6 +43,7 @@ type cliFlags struct {
 	Sourcemap  bool
 	NoDCE      bool
 	Target     string
+	JSON       bool
 }
 
 func main() {
@@ -74,6 +76,8 @@ func main() {
 		runTypes(flags, args)
 	case "check":
 		runCheck(flags, args)
+	case "inspect":
+		runInspect(flags, args)
 	case "deploy":
 		runDeploy(flags, args)
 	case "clean":
@@ -117,6 +121,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "deploy":
 		fmt.Fprintf(w, "Usage: krate deploy [dir] [--target netlify|vercel|cloudflare|gh-pages]\n\n")
 		fmt.Fprintf(w, "Build the site and write host adapter files (e.g. _redirects, vercel.json).\n")
+	case "inspect":
+		fmt.Fprintf(w, "Usage: krate inspect [dir] [--json]\n\n")
+		fmt.Fprintf(w, "Build the site and print its model (routes, sources, modes, deps, outputs).\n")
 	case "clean":
 		fmt.Fprintf(w, "Usage: krate clean [dir]\n\n")
 		fmt.Fprintf(w, "Remove build output (dist) and the compiler cache (.krate/cache).\n")
@@ -142,6 +149,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  serve     Build, then serve for preview (aliases: preview, start)\n")
 	fmt.Fprintf(w, "  types     Generate route/content TypeScript declarations\n")
 	fmt.Fprintf(w, "  check     Run compiler-enforced quality gates (a11y/SEO/perf)\n")
+	fmt.Fprintf(w, "  inspect   Print the compiled site model (--json for machine-readable)\n")
 	fmt.Fprintf(w, "  deploy    Build and write host adapter files (netlify/vercel/...)\n")
 	fmt.Fprintf(w, "  clean     Remove build output (dist) and the compiler cache (.krate/cache)\n")
 	fmt.Fprintf(w, "  doctor    Print a diagnostic summary of the project and toolchain\n")
@@ -158,6 +166,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --sourcemap       Emit source maps for generated JS\n")
 	fmt.Fprintf(w, "  --no-dce          Disable CSS/JS dead-code elimination\n")
 	fmt.Fprintf(w, "  --target <name>   Deploy adapter target (netlify|vercel|cloudflare|gh-pages)\n")
+	fmt.Fprintf(w, "  --json            Machine-readable output (krate inspect)\n")
 }
 
 func parseFlags(args []string) (cliFlags, []string) {
@@ -184,6 +193,8 @@ func parseFlags(args []string) (cliFlags, []string) {
 			flags.Sourcemap = true
 		case args[i] == "--no-dce":
 			flags.NoDCE = true
+		case args[i] == "--json":
+			flags.JSON = true
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
 			// than rejecting them as unknown flags.
@@ -398,6 +409,74 @@ func runDeploy(flags cliFlags, args []string) {
 			fmt.Printf("    %s%s%s\n", cGray, filepath.ToSlash(rel), cReset)
 		}
 	}
+}
+
+// runInspect builds the site and emits its machine-readable model (routes,
+// sources, render modes, dependencies, emitted files). `--json` prints the
+// model as JSON on stdout with build chatter suppressed so the output is
+// pipeable.
+func runInspect(flags cliFlags, args []string) {
+	root, cfg := resolveConfig(flags, args)
+	env := loadProjectEnv(root, "production", flags.Verbose)
+
+	builder := build.New(root, cfg)
+	builder.Verbose = flags.Verbose
+	builder.Env = env
+
+	var buildErr error
+	withSuppressedStdout(func() { buildErr = builder.BuildAll() })
+	if buildErr != nil {
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, buildErr)
+		os.Exit(1)
+	}
+	graph, err := builder.SiteGraph()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sInspect error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+
+	if flags.JSON {
+		data, err := json.MarshalIndent(graph, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%sInspect error:%s %v\n", cRed, cReset, err)
+			os.Exit(1)
+		}
+		fmt.Println(string(data))
+		return
+	}
+
+	fmt.Printf("%s%s  %s%s\n", cBold, cCyan, root, cReset)
+	fmt.Printf("  %d route(s)\n\n", len(graph.Routes))
+	for _, r := range graph.Routes {
+		note := ""
+		if !r.Built {
+			note = " (unbuilt)"
+		}
+		fmt.Printf("  %-7s %-44s %s%s\n", r.Mode, r.Route, r.Source, note)
+	}
+}
+
+// withSuppressedStdout runs fn with os.Stdout redirected to a pipe that is
+// drained to io.Discard, so library build chatter never corrupts structured
+// stdout output.
+func withSuppressedStdout(fn func()) {
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		fn()
+		return
+	}
+	os.Stdout = w
+	drained := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, r)
+		close(drained)
+	}()
+	fn()
+	_ = w.Close()
+	<-drained
+	os.Stdout = old
+	_ = r.Close()
 }
 
 // runTypes generates route and content TypeScript declarations without running

@@ -15,6 +15,7 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate serve [dir]` | Build + static HTTP server (production preview) |
 | `krate types [dir]` | Generate route/content TypeScript declarations only |
 | `krate check [dir]` | Build and run quality gates (a11y/SEO/perf); non-zero on failure |
+| `krate inspect [dir]` | Build and print the compiled site model (`--json`) |
 | `krate deploy [dir]` | Build, then write host adapter files (`--target`) |
 | `krate clean [dir]` | Remove build output and the compiler cache |
 | `krate mcp [dir]` | Start the MCP (Model Context Protocol) server over stdio |
@@ -102,6 +103,40 @@ krate check
 
 See [Quality Checks](/docs/features/quality-checks/) for configuration and the
 built-in rule list.
+
+## `krate inspect`
+
+Builds the site and prints its machine-readable model — every route with its
+render mode, source file, dependency/dependent edges, and emitted output files:
+
+```sh
+krate inspect            # human-readable listing
+krate inspect --json     # machine-readable (pipeable; build chatter suppressed)
+```
+
+The `--json` form emits a single JSON document on stdout:
+
+```json
+{
+  "root": ".",
+  "routes": [
+    {
+      "route": "/about",
+      "source": "src/pages/about.tsx",
+      "mode": "ssg",
+      "built": true,
+      "dependencies": ["src/pages/about.tsx", "src/_layout.tsx"],
+      "outputs": ["about/index.html"],
+      "bytes": 5120
+    }
+  ],
+  "files": { "src/pages/about.tsx": ["/about"] }
+}
+```
+
+`files` maps each depended-on source file to the routes that reference it (what
+links here). The same model backs the MCP `explain` tool and the
+`krate://graph` resource — see [MCP Server](/docs/features/mcp/).
 
 ## `krate deploy`
 

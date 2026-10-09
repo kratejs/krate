@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/kratejs/krate/packages/compiler/internal/build"
 )
 
 func TestAssembleSiteGraph(t *testing.T) {
@@ -20,7 +22,7 @@ func TestAssembleSiteGraph(t *testing.T) {
 		t.Fatalf("expected at least 2 routes, got %d", len(graph.Routes))
 	}
 
-	var about *graphNode
+	var about *build.SiteGraphRoute
 	for i := range graph.Routes {
 		if graph.Routes[i].Route == "/about" {
 			about = &graph.Routes[i]
