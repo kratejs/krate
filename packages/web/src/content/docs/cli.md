@@ -15,6 +15,7 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate serve [dir]` | Build + static HTTP server (production preview) |
 | `krate types [dir]` | Generate route/content TypeScript declarations only |
 | `krate check [dir]` | Build and run quality gates (a11y/SEO/perf); non-zero on failure |
+| `krate clean [dir]` | Remove build output and the compiler cache |
 | `krate mcp [dir]` | Start the MCP (Model Context Protocol) server over stdio |
 | `krate version` | Print the version |
 
@@ -33,6 +34,7 @@ krate build ./my-site
 | `--out-dir <path>` | Override the output directory |
 | `--watch` | Rebuild when files change |
 | `--verbose` | Print diagnostic detail during the build (e.g. reactive validation warnings) |
+| `--profile` | Print per-phase build timings and disk-cache hits/misses |
 
 During the build the compiler:
 
@@ -41,6 +43,25 @@ During the build the compiler:
 3. Merges and deduplicates CSS, inlines `@import`s, and runs minification.
 4. Writes hashed JS chunks, the shared runtime chunk, and `manifest.json`.
 5. Copies `publicDir` assets, compiles API routes, middleware, and runtime components.
+
+## Build caching
+
+`krate build` keeps a cross-run cache under `.krate/cache/build/`. On a rebuild,
+any page whose inputs (source, imports, layouts, generated content, and config)
+are byte-for-byte unchanged is replayed from the cache — bundling, compilation
+and emit are skipped — which makes repeat and CI builds dramatically faster.
+
+The cache is transparent and always produces identical output. It is disabled
+automatically when a page can't be faithfully replayed:
+
+- when `sourcemap` is enabled,
+- when a native plugin registers per-page hooks (`AfterParse`,
+  `AfterMarkdownParse`, `AfterRender`, `AfterPage`), or
+- when any community (JS/TS) plugin is configured, since its hooks can't be
+  statically verified.
+
+Set `KRATE_NO_BUILD_CACHE=1` to force a clean build, and run `krate clean` to
+remove the cache.
 
 ## `krate dev`
 
@@ -78,6 +99,14 @@ krate check
 
 See [Quality Checks](/docs/features/quality-checks/) for configuration and the
 built-in rule list.
+
+## `krate clean`
+
+Removes the output directory (`dist`) and the compiler cache (`.krate/cache`):
+
+```sh
+krate clean
+```
 
 ## `krate version`
 

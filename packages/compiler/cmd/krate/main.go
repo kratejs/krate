@@ -93,7 +93,7 @@ func main() {
 func printCommandUsage(w io.Writer, cmd string) {
 	switch cmd {
 	case "build":
-		fmt.Fprintf(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--watch]\n\n")
+		fmt.Fprintf(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--watch] [--profile]\n\n")
 		fmt.Fprintf(w, "Compile the project to static output (and SSR/server bundles when needed).\n")
 	case "dev":
 		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--verbose]\n\n")
@@ -144,6 +144,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --out-dir <path>  Override output directory\n")
 	fmt.Fprintf(w, "  --watch           Rebuild on file changes\n")
 	fmt.Fprintf(w, "  --verbose         Print diagnostic details (e.g. reactive validation)\n")
+	fmt.Fprintf(w, "  --profile         Print per-phase build timings and disk-cache hits/misses\n")
 }
 
 func parseFlags(args []string) (cliFlags, []string) {

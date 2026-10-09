@@ -445,6 +445,20 @@ func DefaultContributedCollections(cfg *config.Config) map[string]content.Collec
 // Community plugin helpers
 // ---------------------------------------------------------------------------
 
+// HasPerPageHooks reports whether any registered native plugin implements a
+// hook that runs per page (AfterParse/AfterMarkdownParse/AfterRender/AfterPage).
+// When true, page output may depend on plugin side effects the disk build cache
+// cannot replay, so callers disable page-level caching.
+func HasPerPageHooks() bool {
+	for _, p := range DefaultRegistry.Sorted() {
+		h := p.Hooks()
+		if h.AfterParse != nil || h.AfterMarkdownParse != nil || h.AfterRender != nil || h.AfterPage != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // RunCommunityPlugins runs all configured community plugins for the given hook.
 // pluginConfig is the full plugins list from config; hookName identifies which
 // hook is being executed; hookCtx is the JSON-serializable context for the hook.

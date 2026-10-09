@@ -1,6 +1,8 @@
 package build
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -154,6 +156,9 @@ type Builder struct {
 	// transformOnce guards the in-place universal transforms so a shared
 	// (cached) AST is transformed exactly once per build, never concurrently.
 	transformOnce sync.Map
+
+	// diskCache persists per-page outputs across runs (see diskcache.go).
+	diskCache *buildDiskCache
 }
 
 // shouldMinifyJS reports whether generated JavaScript should be minified.
@@ -208,6 +213,19 @@ func (b *Builder) devBootstrapJSON() string {
 func New(root string, cfg *config.Config) *Builder {
 	// Set KrateRoot so the bundler can resolve krate/* virtual packages
 	bundler.KrateRoot = findKrateRoot(root)
+	// Normalise the project root into the config once, at construction. Builds
+	// derive this lazily; doing it here keeps the config stable across builds so
+	// the disk-cache config hash (and any other consumer) doesn't churn.
+	cfg.Markdown.Root = root
+	cfgHash := ""
+	if data, err := json.Marshal(cfg); err == nil {
+		sum := sha256.Sum256(data)
+		cfgHash = hex.EncodeToString(sum[:])
+	}
+	// The disk cache is only safe for pure builds: per-page plugin hooks can
+	// inject output the cache cannot replay, and sourcemap sidecars aren't
+	// captured.
+	enabled := diskCacheEnabled(cfg.Sourcemap, plugin.HasPerPageHooks(), hasCommunityPlugins(cfg))
 	return &Builder{
 		Root:        root,
 		Cfg:         cfg,
@@ -215,7 +233,20 @@ func New(root string, cfg *config.Config) *Builder {
 		pageDeps:    make(map[string][]string),
 		Prof:        NewProfiler(false),
 		moduleCache: bundler.NewModuleCache(),
+		diskCache:   newBuildDiskCache(root, cfgHash, enabled),
 	}
+}
+
+// hasCommunityPlugins reports whether any configured plugin is a community
+// (JS/TS module) plugin, whose hooks the disk cache can't statically reason
+// about.
+func hasCommunityPlugins(cfg *config.Config) bool {
+	for _, p := range cfg.Plugins {
+		if p.Module != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ensureTransformed applies the universal AST transforms (icons, images, spread
@@ -338,7 +369,6 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 
 	var pageErrs []error
 
-	b.Cfg.Markdown.Root = b.Root
 	b.resetBuildCaches()
 
 	// A dynamic-route template (e.g. video/[id].tsx) is not the page that gets
@@ -483,7 +513,6 @@ func (b *Builder) BuildAll() error {
 	}
 	defer b.ClosePlugins()
 
-	b.Cfg.Markdown.Root = b.Root
 	b.resetBuildCaches()
 
 	// Generate `.krate/tsconfig.json` so `npx tsx` bootstraps (config load,
@@ -564,9 +593,13 @@ func (b *Builder) BuildAll() error {
 	stopContent()
 	// Cached module ASTs have their getCollection calls inlined, so a content
 	// change must invalidate the parse cache; source-only changes keep it.
-	if ch := b.contentHashOf(); ch != b.cacheContentHash {
+	ch := b.contentHashOf()
+	if ch != b.cacheContentHash {
 		b.moduleCache = bundler.NewModuleCache()
 		b.cacheContentHash = ch
+	}
+	if b.diskCache != nil {
+		b.diskCache.setContentHash(ch)
 	}
 	for _, w := range cres.Warnings {
 		fmt.Fprintf(os.Stderr, "  %sWarning: content:%s %v\n", cYellow, cReset, w)
@@ -902,6 +935,9 @@ func (b *Builder) BuildAll() error {
 		errorCount += len(perrs)
 	}
 
+	if b.diskCache != nil && b.diskCache.enabled && (b.Prof.Enabled() || b.Verbose) {
+		fmt.Fprintf(os.Stderr, "  build cache: %s\n", b.diskCache.string())
+	}
 	if b.Prof.Enabled() {
 		b.Prof.Report(os.Stderr)
 	}
@@ -1247,6 +1283,9 @@ func (b *Builder) newBundler() *bundler.Bundler {
 
 func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	defer b.phase("page:total")()
+	if pr, css, ok := b.tryDiskReplay(page); ok {
+		return pr, css, nil
+	}
 	stopBundle := b.phase("page:bundle")
 	bnd := b.newBundler()
 	bundle, err := bnd.Bundle(page)
@@ -1499,6 +1538,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	jsFile := ""
 	hydrationJS := ""
+	var jsBytes []byte
 	hasJS := false
 	needsHydrate := len(emitResult.Signatures) > 0
 	if needsHydrate {
@@ -1531,6 +1571,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			// actually written (which may differ from hydrationJS if
 			// import.meta.url was substituted or a sourcemap comment appended).
 			hydrationJS = finalJS
+			jsBytes = []byte(finalJS)
 		} else {
 			hydrationJS = ""
 		}
@@ -1547,7 +1588,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	loadingHTML := b.renderLoadingComponent(page)
 
 	// Return data structures without triggering an intermediate disk write
-	return &PageResult{
+	result := &PageResult{
 		Page:        page,
 		OutName:     outName,
 		HTML:        emitResult.HTML,
@@ -1573,8 +1614,158 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		StaticOnly:        staticOnly,
 		IsDynamicTemplate: isDynRoute,
 		Program:           entryModule.Program,
-	}, bundle.CSS, nil
+	}
+	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes)
+	return result, bundle.CSS, nil
 }
+
+// tryDiskReplay returns a cached PageResult for page when every input file is
+// unchanged since it was written, replaying the page's disk side effects
+// (hydration JS, asset copies, worker/chunk registration, dep graph).
+func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
+	c := b.diskCache
+	if c == nil || !c.enabled {
+		return nil, "", false
+	}
+	// Dynamic-route templates bake param placeholders and are cheap; keep them
+	// off the cache to avoid replaying placeholder injection.
+	if isDynamicRoute(page, b.Cfg.PagesDir) {
+		return nil, "", false
+	}
+	e, ok := c.load(page)
+	if !ok || e.Key == "" {
+		c.markMiss()
+		return nil, "", false
+	}
+	key, _, _, ok := c.computeKey(e.Deps)
+	if !ok || key != e.Key {
+		c.markMiss()
+		return nil, "", false
+	}
+
+	pageDir := filepath.Join(b.Cfg.OutDir, e.OutName)
+	_ = os.MkdirAll(pageDir, 0755)
+	if len(e.JSBytes) > 0 && e.JSFile != "" {
+		_ = fsutil.WriteFileIfChanged(filepath.Join(pageDir, e.JSFile), e.JSBytes, 0644)
+	}
+	if len(e.AssetFiles) > 0 {
+		_ = b.writeAssetFiles(e.AssetFiles)
+	}
+	b.registerWorkers(e.WorkerFiles, trueSet(e.WorkerEsm))
+	b.registerDynamicChunks(e.DynImports)
+	b.recordDeps(page, e.Deps)
+	c.markHit()
+
+	return &PageResult{
+		Page:        page,
+		OutName:     e.OutName,
+		HTML:        e.HTML,
+		HeadHTML:    e.HeadHTML,
+		ScriptHTML:  e.ScriptHTML,
+		StyleHTML:   e.StyleHTML,
+		HydrationJS: e.HydrationJS,
+		HasJS:       e.HasJS,
+		JSFile:      e.JSFile,
+		HasCSS:      e.HasCSS,
+		IsErrorPage: e.IsErrorPage,
+		CSS:         e.CSS,
+		UsedCSS:     setFromSlice(e.UsedCSS),
+		UsedFuncs:   setFromSlice(e.UsedFuncs),
+		LoadingHTML: e.LoadingHTML,
+		Mode:        RenderMode(e.Mode),
+		Revalidate:  e.Revalidate,
+		SourcePath:  e.SourcePath,
+
+		DynamicParams:     e.DynamicParams,
+		StaticOnly:        e.StaticOnly,
+		IsDynamicTemplate: e.IsDynamicTemplate,
+		// Program is intentionally nil: AST-based checks are skipped for cached
+		// pages (their inputs — and therefore findings — are unchanged).
+	}, e.CSS, true
+}
+
+// maybeStoreDiskPage persists a freshly built page result when caching is
+// enabled and the page is a plain SSG page.
+func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, bundle *bundler.Bundle, jsBytes []byte) {
+	c := b.diskCache
+	if c == nil || !c.enabled || bundle == nil {
+		return
+	}
+	if r.Mode != RenderSSG || len(r.Regions) > 0 || r.Program == nil {
+		return
+	}
+	if isDynamicRoute(page, b.Cfg.PagesDir) {
+		return
+	}
+	absDeps := make([]string, 0, len(deps)+1)
+	for _, d := range deps {
+		if !filepath.IsAbs(d) {
+			d = filepath.Join(b.Root, d)
+		}
+		absDeps = append(absDeps, filepath.Clean(d))
+	}
+	key, sorted, hashes, ok := c.computeKey(absDeps)
+	if !ok {
+		return
+	}
+	c.save(page, &diskPageEntry{
+		Key:         key,
+		OutName:     r.OutName,
+		HTML:        r.HTML,
+		HeadHTML:    r.HeadHTML,
+		ScriptHTML:  r.ScriptHTML,
+		StyleHTML:   r.StyleHTML,
+		HydrationJS: r.HydrationJS,
+		JSFile:      r.JSFile,
+		JSBytes:     jsBytes,
+		CSS:         r.CSS,
+		HasJS:       r.HasJS,
+		HasCSS:      r.HasCSS,
+		IsErrorPage: r.IsErrorPage,
+		UsedCSS:     sliceFromSet(r.UsedCSS),
+		UsedFuncs:   sliceFromSet(r.UsedFuncs),
+		LoadingHTML: r.LoadingHTML,
+		Mode:        int(r.Mode),
+		Revalidate:  r.Revalidate,
+		SourcePath:  r.SourcePath,
+
+		DynamicParams:     r.DynamicParams,
+		StaticOnly:        r.StaticOnly,
+		IsDynamicTemplate: r.IsDynamicTemplate,
+
+		Deps:        sorted,
+		DepHashes:   hashes,
+		AssetFiles:  bundle.AssetFiles,
+		WorkerFiles: bundle.WorkerFiles,
+		WorkerEsm:   sliceFromSet(bundle.WorkerEsm),
+		DynImports:  bundle.DynImportFiles,
+	})
+}
+
+func sliceFromSet(m map[string]bool) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func setFromSlice(s []string) map[string]bool {
+	if len(s) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(s))
+	for _, k := range s {
+		out[k] = true
+	}
+	return out
+}
+
+func trueSet(s []string) map[string]bool { return setFromSlice(s) }
 
 // buildRoute generates a full HTML page from a plugin-generated virtual route.
 func (b *Builder) buildRoute(route plugin.Route) (result *PageResult, rawCSS string, err error) {
