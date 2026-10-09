@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/css"
@@ -27,6 +28,29 @@ type Module struct {
 	IsExternal     bool
 	ComponentClass ComponentClass // server, runtime, or client component
 	SourceCode     string         // raw source for directive scanning
+	// Rewritable is true when a per-bundle rewrite pass (CSS-module refs, asset
+	// imports, workers, dynamic imports) may mutate this module's AST. Such
+	// modules are never shared via the parse cache (the rewrites are not
+	// idempotent), so caching stays safe for the rewrite-free majority.
+	Rewritable bool
+}
+
+// moduleNeedsRewrite reports whether any per-bundle rewrite pass could touch a
+// module with this source/import set. Conservative: false negatives would leave
+// a rewrite unapplied, so the checks bias toward "true".
+func moduleNeedsRewrite(src string, imports []string) bool {
+	if strings.Contains(src, "Worker") || strings.Contains(src, "import(") {
+		return true
+	}
+	for _, imp := range imports {
+		if assetExtensions[strings.ToLower(filepath.Ext(imp))] {
+			return true
+		}
+		if strings.HasSuffix(imp, ".module.css") {
+			return true
+		}
+	}
+	return false
 }
 
 type CSSModuleInfo struct {
@@ -70,6 +94,15 @@ type Bundler struct {
 	// route manifests) so pages can import build-time data without a real
 	// package on disk.
 	virtualModules map[string]string
+
+	// cache memoizes per-file parse results. Shared across bundles in a build
+	// so shared modules are parsed once instead of once per page. May be nil.
+	cache *ModuleCache
+}
+
+// SetModuleCache attaches a shared parse cache. A nil cache disables caching.
+func (b *Bundler) SetModuleCache(c *ModuleCache) {
+	b.cache = c
 }
 
 // assetExtensions are file extensions that get copied to /assets/ with a
@@ -99,6 +132,7 @@ func New(root string) *Bundler {
 		workerEsm:      make(map[string]bool),
 		dynImports:     make(map[string]string),
 		virtualModules: make(map[string]string),
+		cache:          NewModuleCache(),
 	}
 }
 
@@ -239,154 +273,69 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 		abs = filepath.Join(b.root, path)
 	}
 
-	if strings.HasSuffix(path, ".css") {
-		data, err := os.ReadFile(abs)
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", path, err)
+	// Stat once so cached entries can be validated cheaply.
+	var mtime time.Time
+	var size int64
+	statOK := false
+	if !isExternalPkg {
+		if fi, err := os.Stat(abs); err == nil && !fi.IsDir() {
+			mtime, size, statOK = fi.ModTime(), fi.Size(), true
 		}
-
-		// Inline @imports here, relative to THIS file's directory. Inlining
-		// later on the concatenated page CSS loses per-file origin, so a
-		// first-level `@import "./tokens.css"` would resolve against the wrong
-		// directory.
-		inlined := css.InlineImports(string(data), filepath.Dir(abs))
-		// Resolve and hash `url(...)` assets relative to this sheet so CSS images
-		// and fonts are content-addressed and copied like JS-imported assets.
-		inlined = b.rewriteCSSUrls(inlined, filepath.Dir(abs))
-
-		if strings.Contains(path, ".module.") {
-			scopedCSS, mapping, err := css.ProcessModule(abs, inlined)
-			if err != nil {
-				return fmt.Errorf("processing css module %s: %w", path, err)
-			}
-			b.css = append(b.css, scopedCSS)
-			b.cssModules[abs] = &CSSModuleInfo{
-				ResolvedPath: abs,
-				ScopedCSS:    scopedCSS,
-				Mappings:     mapping,
-			}
-		} else {
-			b.css = append(b.css, inlined)
-		}
-
-		b.order = append(b.order, &Module{
-			Path:  path,
-			IsCSS: true,
-		})
-		return nil
 	}
 
-	if strings.HasSuffix(path, ".json") {
-		data, err := os.ReadFile(abs)
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", path, err)
-		}
-		mod := &Module{
-			Path:    path,
-			Program: jsonToAST(data),
-			IsEntry: isEntry,
-		}
-		b.collectImports(mod.Program, mod)
-		b.order = append(b.order, mod)
-		for _, imp := range mod.Imports {
-			resolved := b.resolveImportForModule(path, imp)
-			if resolved != "" {
-				if err := b.resolveModule(resolved, false); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
+	switch {
+	case strings.HasSuffix(path, ".css"):
+		return b.resolveCSSModule(path, abs, mtime, size, statOK)
+	case strings.HasSuffix(path, ".json"):
+		return b.resolveJSONModule(path, abs, mtime, size, statOK, isEntry)
+	case strings.HasSuffix(path, ".md"), strings.HasSuffix(path, ".mdx"):
+		return b.resolveMarkdownModule(path, abs, mtime, size, statOK, isEntry)
 	}
 
-	if strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".mdx") {
-		data, err := os.ReadFile(abs)
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", path, err)
-		}
-
-		src := string(data)
-		mcfg := markdown.DefaultConfig()
-		var tsxSource string
-
-		if strings.HasSuffix(path, ".mdx") {
-			result := markdown.ParseMDX(src, mcfg)
-			if len(result.Frontmatter) > 0 {
-				b.frontmatter = result.Frontmatter
-			}
-			tsxSource = generateMDXBundleTSX(path, src, result, mcfg)
-		} else {
-			// Plain .md pages are routed through the same MDX-style TSX bundle so
-			// fenced code blocks render as the <Code> component.
-			result := markdown.ParseMDX(src, mcfg)
-			if len(result.Frontmatter) > 0 {
-				b.frontmatter = result.Frontmatter
-			}
-			tsxSource = generateMDXBundleTSX(path, src, result, mcfg)
-		}
-
-		tokens := lexer.New(tsxSource).Tokenize()
-		p := parser.New(tokens)
-		p.Filename = path
-		prog := p.ParseProgram()
-		if errs := p.Errors(); len(errs) > 0 {
-			return fmt.Errorf("%s: %s", path, parser.FormatDiagnostics(errs))
-		}
-
-		RewriteReact(prog)
-
-		mod := &Module{
-			Path:    path,
-			Program: prog,
-			IsEntry: isEntry,
-		}
-		b.collectImports(prog, mod)
-		b.order = append(b.order, mod)
-		for _, imp := range mod.Imports {
-			resolved := b.resolveImportForModule(path, imp)
-			if resolved != "" {
-				if err := b.resolveModule(resolved, false); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-
-	if !strings.HasSuffix(path, ".tsx") && !strings.HasSuffix(path, ".ts") &&
-		!strings.HasSuffix(path, ".mts") && !strings.HasSuffix(path, ".jsx") &&
-		!strings.HasSuffix(path, ".js") && !strings.HasSuffix(path, ".mjs") &&
-		!strings.HasSuffix(path, ".cjs") {
+	if !isSourceExt(path) {
 		if assetExtensions[strings.ToLower(filepath.Ext(path))] {
-			data, err := os.ReadFile(abs)
-			if err != nil {
-				return fmt.Errorf("reading %s: %w", path, err)
-			}
-			base := filepath.Base(path)
-			ext := filepath.Ext(base)
-			name := strings.TrimSuffix(base, ext)
-			hash := hashBytes(data)
-			url := "/assets/" + name + "-" + hash + ext
-			b.assets[abs] = url
+			return b.resolveAssetModule(path, abs, mtime, size, statOK)
 		}
-		b.order = append(b.order, &Module{
-			Path:       path,
-			IsExternal: true,
-		})
+		b.order = append(b.order, &Module{Path: path, IsExternal: true})
 		return nil
 	}
 
 	// The krate client runtime is provided at runtime by the shared chunk
 	// (its exports — createSignal, h, initRouter, etc. — are window globals).
 	// Its AST is never referenced by the compiler's emitted code, so skip
-	// reading/lexing/parsing it entirely. This avoids re-parsing ~160 KB of
-	// runtime JS for every page that imports it.
+	// reading/lexing/parsing it entirely.
 	if isKrateRuntime(abs) {
-		b.order = append(b.order, &Module{
-			Path:       path,
-			IsExternal: true,
-		})
+		b.order = append(b.order, &Module{Path: path, IsExternal: true})
 		return nil
+	}
+
+	return b.resolveTSXModule(path, abs, mtime, size, statOK, isEntry)
+}
+
+// isSourceExt reports whether a path is a JS/TS source file the bundler parses.
+func isSourceExt(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".tsx", ".ts", ".mts", ".jsx", ".js", ".mjs", ".cjs":
+		return true
+	}
+	return false
+}
+
+func (b *Bundler) resolveCSSModule(path, abs string, mtime time.Time, size int64, statOK bool) error {
+	if statOK {
+		if e, ok := b.cache.getCSS(abs, mtime, size); ok {
+			if e.isModule {
+				b.css = append(b.css, e.css)
+				b.cssModules[abs] = &CSSModuleInfo{ResolvedPath: abs, ScopedCSS: e.css, Mappings: e.mapping}
+			} else {
+				b.css = append(b.css, e.css)
+			}
+			for k, v := range e.assets {
+				b.assets[k] = v
+			}
+			b.order = append(b.order, &Module{Path: path, IsCSS: true})
+			return nil
+		}
 	}
 
 	data, err := os.ReadFile(abs)
@@ -394,31 +343,67 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 		return fmt.Errorf("reading %s: %w", path, err)
 	}
 
-	src := string(data)
-	tokens := lexer.New(src).Tokenize()
-	p := parser.New(tokens)
-	p.Filename = path
-	p.SetSource(src)
-	prog := p.ParseProgram()
+	// Inline @imports here, relative to THIS file's directory. Inlining later on
+	// the concatenated page CSS loses per-file origin, so a first-level
+	// `@import "./tokens.css"` would resolve against the wrong directory.
+	inlined := css.InlineImports(string(data), filepath.Dir(abs))
+	// Resolve and hash `url(...)` assets relative to this sheet so CSS images
+	// and fonts are content-addressed and copied like JS-imported assets.
+	inlined, assets := b.rewriteCSSUrls(inlined, filepath.Dir(abs))
 
-	if len(p.Errors()) > 0 {
-		return fmt.Errorf("%s", parser.FormatDiagnostics(p.Errors()))
+	isModule := strings.Contains(path, ".module.")
+	entry := &cssEntry{mtime: mtime, size: size, isModule: isModule, assets: assets}
+	if isModule {
+		scopedCSS, mapping, err := css.ProcessModule(abs, inlined)
+		if err != nil {
+			return fmt.Errorf("processing css module %s: %w", path, err)
+		}
+		b.css = append(b.css, scopedCSS)
+		b.cssModules[abs] = &CSSModuleInfo{ResolvedPath: abs, ScopedCSS: scopedCSS, Mappings: mapping}
+		entry.css = scopedCSS
+		entry.mapping = mapping
+	} else {
+		b.css = append(b.css, inlined)
+		entry.css = inlined
 	}
-
-	RewriteReact(prog)
-
-	mod := &Module{
-		Path:       path,
-		Program:    prog,
-		IsEntry:    isEntry,
-		SourceCode: src,
+	if statOK {
+		b.cache.putCSS(abs, entry)
 	}
-	// Classify server/runtime components
-	mod.ComponentClass = ClassifyComponent(src, path, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs)
+	b.order = append(b.order, &Module{Path: path, IsCSS: true})
+	return nil
+}
 
+func (b *Bundler) resolveJSONModule(path, abs string, mtime time.Time, size int64, statOK bool, isEntry bool) error {
+	cacheable := statOK && !isEntry
+	if cacheable {
+		if e, ok := b.cache.getProgram(abs, mtime, size); ok {
+			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry}
+			mod.Imports = append([]string(nil), e.imports...)
+			b.order = append(b.order, mod)
+			for _, imp := range mod.Imports {
+				resolved := b.resolveImportForModule(path, imp)
+				if resolved != "" {
+					if err := b.resolveModule(resolved, false); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	prog := jsonToAST(data)
+	mod := &Module{Path: path, Program: prog, IsEntry: isEntry}
 	b.collectImports(prog, mod)
 	b.order = append(b.order, mod)
-
+	if cacheable {
+		b.cache.putProgram(abs, &programEntry{
+			mtime: mtime, size: size, program: prog, imports: append([]string(nil), mod.Imports...),
+		})
+	}
 	for _, imp := range mod.Imports {
 		resolved := b.resolveImportForModule(path, imp)
 		if resolved != "" {
@@ -427,7 +412,155 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 			}
 		}
 	}
+	return nil
+}
 
+func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size int64, statOK bool, isEntry bool) error {
+	if statOK {
+		if e, ok := b.cache.getProgram(abs, mtime, size); ok {
+			if len(e.frontmatter) > 0 {
+				b.frontmatter = e.frontmatter
+			}
+			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry}
+			mod.Imports = append([]string(nil), e.imports...)
+			b.order = append(b.order, mod)
+			for _, imp := range mod.Imports {
+				resolved := b.resolveImportForModule(path, imp)
+				if resolved != "" {
+					if err := b.resolveModule(resolved, false); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}
+	}
+
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	src := string(data)
+	mcfg := markdown.DefaultConfig()
+	result := markdown.ParseMDX(src, mcfg)
+	if len(result.Frontmatter) > 0 {
+		b.frontmatter = result.Frontmatter
+	}
+	tsxSource := generateMDXBundleTSX(path, src, result, mcfg)
+
+	tokens := lexer.New(tsxSource).Tokenize()
+	p := parser.New(tokens)
+	p.Filename = path
+	prog := p.ParseProgram()
+	if errs := p.Errors(); len(errs) > 0 {
+		return fmt.Errorf("%s: %s", path, parser.FormatDiagnostics(errs))
+	}
+	RewriteReact(prog)
+
+	mod := &Module{Path: path, Program: prog, IsEntry: isEntry}
+	b.collectImports(prog, mod)
+	mod.Rewritable = moduleNeedsRewrite(tsxSource, mod.Imports)
+	b.order = append(b.order, mod)
+	if statOK && !mod.Rewritable {
+		b.cache.putProgram(abs, &programEntry{
+			mtime: mtime, size: size, program: prog,
+			imports: append([]string(nil), mod.Imports...), frontmatter: result.Frontmatter,
+		})
+	}
+	for _, imp := range mod.Imports {
+		resolved := b.resolveImportForModule(path, imp)
+		if resolved != "" {
+			if err := b.resolveModule(resolved, false); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (b *Bundler) resolveAssetModule(path, abs string, mtime time.Time, size int64, statOK bool) error {
+	if statOK {
+		if e, ok := b.cache.getAsset(abs, mtime, size); ok {
+			b.assets[abs] = e.url
+			b.order = append(b.order, &Module{Path: path, IsExternal: true})
+			return nil
+		}
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	url := "/assets/" + name + "-" + hashBytes(data) + ext
+	b.assets[abs] = url
+	if statOK {
+		b.cache.putAsset(abs, &assetEntry{mtime: mtime, size: size, url: url})
+	}
+	b.order = append(b.order, &Module{Path: path, IsExternal: true})
+	return nil
+}
+
+func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64, statOK bool, isEntry bool) error {
+	// Entry modules are never cached: pages/layouts mutate their own entry AST
+	// (plugins may replace it; universal transforms run in place), so sharing an
+	// entry program would leak mutations across builds. Shared imports are the
+	// hot cost and are cached.
+	cacheable := statOK && !isEntry
+	if cacheable {
+		if e, ok := b.cache.getProgram(abs, mtime, size); ok {
+			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry, SourceCode: e.source, ComponentClass: e.compClass}
+			mod.Imports = append([]string(nil), e.imports...)
+			b.order = append(b.order, mod)
+			for _, imp := range mod.Imports {
+				resolved := b.resolveImportForModule(path, imp)
+				if resolved != "" {
+					if err := b.resolveModule(resolved, false); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}
+	}
+
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	src := string(data)
+	tokens := lexer.New(src).Tokenize()
+	p := parser.New(tokens)
+	p.Filename = path
+	p.SetSource(src)
+	prog := p.ParseProgram()
+	if len(p.Errors()) > 0 {
+		return fmt.Errorf("%s", parser.FormatDiagnostics(p.Errors()))
+	}
+	RewriteReact(prog)
+
+	mod := &Module{Path: path, Program: prog, IsEntry: isEntry, SourceCode: src}
+	mod.ComponentClass = ClassifyComponent(src, path, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs)
+	b.collectImports(prog, mod)
+	// Modules a rewrite pass may mutate are parsed fresh per bundle (never
+	// shared), since those rewrites are not idempotent.
+	mod.Rewritable = moduleNeedsRewrite(src, mod.Imports)
+	b.order = append(b.order, mod)
+	if cacheable && !mod.Rewritable {
+		b.cache.putProgram(abs, &programEntry{
+			mtime: mtime, size: size, program: prog, source: src,
+			imports: append([]string(nil), mod.Imports...), compClass: mod.ComponentClass,
+		})
+	}
+	for _, imp := range mod.Imports {
+		resolved := b.resolveImportForModule(path, imp)
+		if resolved != "" {
+			if err := b.resolveModule(resolved, false); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -725,7 +858,7 @@ func escapeBundleTemplateLit(s string) string {
 // runtime import.
 func (b *Bundler) rewriteCSSModuleRefs() {
 	for _, mod := range b.order {
-		if mod.Program == nil {
+		if mod.Program == nil || !mod.Rewritable {
 			continue
 		}
 		localVars := map[string]map[string]string{} // local import name → class→hash
@@ -950,8 +1083,12 @@ var cssURLRe = regexp.MustCompile(`url\(\s*(['"]?)([^'")]+)(['"]?)\s*\)`)
 // against the sheet's directory, registers each asset in the bundle's asset map
 // (content-hashed, served from /assets/), and rewrites the URL. External URLs,
 // data URIs, fragments, `var(...)` and root-absolute paths are left untouched.
-func (b *Bundler) rewriteCSSUrls(cssText, cssDir string) string {
-	return cssURLRe.ReplaceAllStringFunc(cssText, func(m string) string {
+// rewriteCSSUrls resolves and content-hashes `url(...)` assets relative to the
+// sheet's directory, returning the rewritten CSS and the assets it referenced
+// (source path → hashed site URL) so the mapping can be cached and replayed.
+func (b *Bundler) rewriteCSSUrls(cssText, cssDir string) (string, map[string]string) {
+	used := make(map[string]string)
+	out := cssURLRe.ReplaceAllStringFunc(cssText, func(m string) string {
 		sub := cssURLRe.FindStringSubmatch(m)
 		if len(sub) < 4 {
 			return m
@@ -989,8 +1126,10 @@ func (b *Bundler) rewriteCSSUrls(cssText, cssDir string) string {
 			url = "/assets/" + name + "-" + hashBytes(data) + ext
 			b.assets[abs] = url
 		}
+		used[abs] = url
 		return "url(" + quote + url + frag + quote + ")"
 	})
+	return out, used
 }
 
 // isExternalCSSURL reports whether a CSS url() target is not a project-relative
@@ -1013,7 +1152,7 @@ func isExternalCSSURL(ref string) bool {
 // reference to a runtime import that never exists.
 func (b *Bundler) rewriteAssetImportRefs() {
 	for _, mod := range b.order {
-		if mod.Program == nil {
+		if mod.Program == nil || !mod.Rewritable {
 			continue
 		}
 		localVars := map[string]string{}
@@ -1238,7 +1377,7 @@ var workerSourceExts = map[string]bool{".ts": true, ".tsx": true, ".js": true, "
 // load the bundled worker instead of a stray source file.
 func (b *Bundler) rewriteWorkerRefs() {
 	for _, mod := range b.order {
-		if mod.Program == nil {
+		if mod.Program == nil || !mod.Rewritable {
 			continue
 		}
 		for _, stmt := range mod.Program.Body {
@@ -1557,7 +1696,7 @@ var dynamicImportSourceExts = map[string]bool{".ts": true, ".tsx": true, ".js": 
 // instead of a stray source file (which would 404 or be unreachable).
 func (b *Bundler) rewriteDynamicImportRefs() {
 	for _, mod := range b.order {
-		if mod.Program == nil {
+		if mod.Program == nil || !mod.Rewritable {
 			continue
 		}
 		for _, stmt := range mod.Program.Body {

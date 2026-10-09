@@ -37,6 +37,7 @@ type cliFlags struct {
 	OutDir     string
 	Watch      bool
 	Verbose    bool
+	Profile    bool
 }
 
 func main() {
@@ -160,6 +161,8 @@ func parseFlags(args []string) (cliFlags, []string) {
 			flags.Watch = true
 		case args[i] == "--verbose":
 			flags.Verbose = true
+		case args[i] == "--profile":
+			flags.Profile = true
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
 			// than rejecting them as unknown flags.
@@ -233,6 +236,9 @@ func runBuild(flags cliFlags, args []string) {
 	builder := build.New(root, cfg)
 	builder.Verbose = flags.Verbose
 	builder.Env = env
+	if flags.Profile {
+		builder.Prof = build.NewProfiler(true)
+	}
 	if err := builder.BuildAll(); err != nil {
 		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
 		os.Exit(1)

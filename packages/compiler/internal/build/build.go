@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
+	"github.com/kratejs/krate/packages/compiler/internal/tsexec"
 )
 
 type PageResult struct {
@@ -137,6 +139,21 @@ type Builder struct {
 	// whose params are closed, so the manifest and server can 404 unknown params.
 	staticOnlyRoutes []string
 	staticOnlyMu     sync.Mutex
+
+	// Prof accumulates per-phase wall-clock timings when --profile is set.
+	// Safe for concurrent use from parallel page goroutines.
+	Prof *Profiler
+
+	// moduleCache shares parsed modules across every Bundler in the build so
+	// shared theme/component/runtime modules are parsed once, not once per page.
+	moduleCache *bundler.ModuleCache
+	// cacheContentHash keys the module cache's validity: when content
+	// collections change, cached ASTs (whose getCollection calls were inlined)
+	// must be re-parsed, so the cache is reset.
+	cacheContentHash string
+	// transformOnce guards the in-place universal transforms so a shared
+	// (cached) AST is transformed exactly once per build, never concurrently.
+	transformOnce sync.Map
 }
 
 // shouldMinifyJS reports whether generated JavaScript should be minified.
@@ -192,11 +209,62 @@ func New(root string, cfg *config.Config) *Builder {
 	// Set KrateRoot so the bundler can resolve krate/* virtual packages
 	bundler.KrateRoot = findKrateRoot(root)
 	return &Builder{
-		Root:     root,
-		Cfg:      cfg,
-		depGraph: make(map[string][]string),
-		pageDeps: make(map[string][]string),
+		Root:        root,
+		Cfg:         cfg,
+		depGraph:    make(map[string][]string),
+		pageDeps:    make(map[string][]string),
+		Prof:        NewProfiler(false),
+		moduleCache: bundler.NewModuleCache(),
 	}
+}
+
+// ensureTransformed applies the universal AST transforms (icons, images, spread
+// flattening, content inlining) to prog exactly once per build. Cached module
+// ASTs are shared across concurrent page builds, so these in-place mutations
+// must be serialized per program.
+func (b *Builder) ensureTransformed(prog *ast.Program) {
+	if prog == nil {
+		return
+	}
+	v, _ := b.transformOnce.LoadOrStore(prog, &sync.Once{})
+	v.(*sync.Once).Do(func() {
+		b.TransformUniversalIcons(prog)
+		b.TransformUniversalImages(prog)
+		b.FlattenComponentSpreadAttrs(prog)
+		b.InlineContent(prog)
+	})
+}
+
+// contentHashOf returns a stable hash of the build's content collections. It is
+// used to invalidate the module cache when content changes (cached ASTs have
+// their getCollection calls inlined).
+func (b *Builder) contentHashOf() string {
+	if len(b.contentCollections) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(b.contentCollections))
+	for name := range b.contentCollections {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	h := fnv.New64a()
+	for _, name := range names {
+		h.Write([]byte(name))
+		h.Write([]byte{0})
+		for _, e := range b.contentCollections[name] {
+			// json.Marshal sorts map keys, so the hash is deterministic.
+			data, _ := json.Marshal(e)
+			h.Write(data)
+			h.Write([]byte{'\n'})
+		}
+	}
+	return strconv.FormatUint(h.Sum64(), 16)
+}
+
+// phase records a build phase when profiling is enabled; the returned function
+// ends the phase. Callers use `defer b.phase("name")()`.
+func (b *Builder) phase(name string) func() {
+	return b.Prof.Phase(name)
 }
 
 // pluginFailed records a plugin hook error so the overall build fails with a
@@ -406,6 +474,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 }
 
 func (b *Builder) BuildAll() error {
+	defer b.phase("build:total")()
 	if err := os.RemoveAll(b.Cfg.OutDir); err != nil {
 		return fmt.Errorf("cleaning output dir: %w", err)
 	}
@@ -435,6 +504,7 @@ func (b *Builder) BuildAll() error {
 	}
 
 	// Run BeforeBuild hooks (docs plugin generates .krategen/ pages here)
+	stopPlugins := b.phase("build:plugins-before")
 	genPages := make([]plugin.GeneratedPage, 0)
 	beforeBuildCtx := &plugin.BuildHookCtx{
 		Root:           b.Root,
@@ -476,6 +546,7 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (GenerateRoutes):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
+	stopPlugins()
 
 	type pageBuildResult struct {
 		result *PageResult
@@ -488,7 +559,15 @@ func (b *Builder) BuildAll() error {
 	// frontmatter, emits `.krate/types/content.d.ts`, and codegens the
 	// `krate/content` module pages can import. Schema violations are build
 	// errors (a content bug); IO problems are warnings.
+	stopContent := b.phase("build:content")
 	cres := b.prepareContent()
+	stopContent()
+	// Cached module ASTs have their getCollection calls inlined, so a content
+	// change must invalidate the parse cache; source-only changes keep it.
+	if ch := b.contentHashOf(); ch != b.cacheContentHash {
+		b.moduleCache = bundler.NewModuleCache()
+		b.cacheContentHash = ch
+	}
 	for _, w := range cres.Warnings {
 		fmt.Fprintf(os.Stderr, "  %sWarning: content:%s %v\n", cYellow, cReset, w)
 	}
@@ -497,6 +576,7 @@ func (b *Builder) BuildAll() error {
 	}
 
 	totalPages := len(pages) + len(routes)
+	stopPages := b.phase("build:pages")
 	resultsCh := make(chan pageBuildResult, totalPages)
 	var wg sync.WaitGroup
 	pool := newWorkerPool(buildWorkerLimit())
@@ -569,6 +649,7 @@ func (b *Builder) BuildAll() error {
 		result.HTML = afterPageCtx.HTML
 		result.HeadHTML = afterPageCtx.HeadHTML
 	}
+	stopPages()
 
 	staticParamPages, gspErr := b.resolveStaticParamsPages(pages)
 	if gspErr != nil {
@@ -635,6 +716,7 @@ func (b *Builder) BuildAll() error {
 		}
 	}
 
+	stopWrite := b.phase("build:write")
 	// Write shared runtime chunk only if at least one page needs client JS.
 	// Fully static sites (no signals/handlers anywhere) ship zero JavaScript.
 	anyPageHasJS := false
@@ -666,6 +748,7 @@ func (b *Builder) BuildAll() error {
 
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, globalCSS, runtimeJS)
+	stopWrite()
 
 	// Compiler-enforced quality gates (opt-in via `checks` in krate.config.ts).
 	// Runs against the final HTML so rules see exactly what ships.
@@ -705,6 +788,7 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sImage copy error:%s %v\n", cYellow, cReset, err)
 	}
 
+	stopTools := b.phase("build:tools")
 	if err := b.BuildAllAPI(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sAPI Build error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  API: "+err.Error())
@@ -741,6 +825,7 @@ func (b *Builder) BuildAll() error {
 		fmt.Printf("  %s⚡%s Compiled %d runtime components\n", cCyan, cReset, len(runtimeCompBundles))
 	}
 	manifest.SetRuntimeComponents(runtimeCompBundles)
+	stopTools()
 
 	if err := WriteManifest(manifest, b.Cfg.OutDir, serverBundles); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sWarning: failed to write manifest:%s %v\n", cYellow, cReset, err)
@@ -815,6 +900,10 @@ func (b *Builder) BuildAll() error {
 			failureErrs = append(failureErrs, fmt.Errorf("%s", pe))
 		}
 		errorCount += len(perrs)
+	}
+
+	if b.Prof.Enabled() {
+		b.Prof.Report(os.Stderr)
 	}
 
 	if errorCount > 0 {
@@ -926,7 +1015,7 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 			cssHash := hashContent(processedBytes)
 			cssFile = "styles." + cssHash + ".css"
 			cssPath := filepath.Join(b.Cfg.OutDir, cssFile)
-			_ = os.WriteFile(cssPath, processedBytes, 0644)
+			_ = fsutil.WriteFileIfChanged(cssPath, processedBytes, 0644)
 		}
 	}
 	return cssFile
@@ -940,31 +1029,56 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 // code. Returns the set of stylesheet filenames written.
 func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 	written := make(map[string]bool)
+	// Memoize the expensive inline+directive+minify pipeline: many pages share
+	// byte-identical CSS (the docs theme is linked on every page), so process
+	// each distinct input once.
+	type processed struct {
+		file string
+		data []byte
+	}
+	memo := make(map[string]processed)
+	var chromaCSS string
+	chromaLoaded := false
 	for _, r := range results {
 		if r.CSS == "" && !pageRendersCode(r.HTML) {
 			continue
 		}
 		pageCss := r.CSS
 		if b.Cfg.Markdown.CodeHighlight && pageRendersCode(r.HTML) {
-			chromaCSS := syntaxhighlight.CSSForTheme(b.Cfg.Markdown.CodeTheme)
+			if !chromaLoaded {
+				chromaCSS = syntaxhighlight.CSSForTheme(b.Cfg.Markdown.CodeTheme)
+				chromaLoaded = true
+			}
 			if chromaCSS != "" {
 				pageCss = chromaCSS + "\n" + pageCss
 			}
 		}
+
+		key := hashContent([]byte(pageCss))
+		if p, ok := memo[key]; ok {
+			r.CSSFile = p.file
+			if !written[p.file] {
+				_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, p.file), p.data, 0644)
+				written[p.file] = true
+			}
+			continue
+		}
+
 		processedCSS := css.InlineImports(pageCss, b.Root)
 		processedCSS = b.processCSSDirectives(processedCSS)
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
 		}
 		if strings.TrimSpace(processedCSS) == "" {
+			memo[key] = processed{file: ""}
 			continue
 		}
 		processedBytes := []byte(processedCSS)
-		cssHash := hashContent(processedBytes)
-		cssFile := "styles." + cssHash + ".css"
+		cssFile := "styles." + hashContent(processedBytes) + ".css"
+		memo[key] = processed{file: cssFile, data: processedBytes}
 		r.CSSFile = cssFile
 		if !written[cssFile] {
-			_ = os.WriteFile(filepath.Join(b.Cfg.OutDir, cssFile), processedBytes, 0644)
+			_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, cssFile), processedBytes, 0644)
 			written[cssFile] = true
 		}
 	}
@@ -1094,7 +1208,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			} else {
 				htmlPath = filepath.Join(pageDir, "index.html")
 			}
-			_ = os.WriteFile(htmlPath, []byte(html), 0644)
+			_ = fsutil.WriteFileIfChanged(htmlPath, []byte(html), 0644)
 		}(r)
 	}
 	wg.Wait()
@@ -1127,12 +1241,16 @@ func (b *Builder) newBundler() *bundler.Bundler {
 	if b.contentMods != nil {
 		bnd.SetVirtualModules(b.contentMods)
 	}
+	bnd.SetModuleCache(b.moduleCache)
 	return bnd
 }
 
 func (b *Builder) buildPage(page string) (*PageResult, string, error) {
+	defer b.phase("page:total")()
+	stopBundle := b.phase("page:bundle")
 	bnd := b.newBundler()
 	bundle, err := bnd.Bundle(page)
+	stopBundle()
 	if err != nil {
 		return nil, "", fmt.Errorf("bundling page %s: %w", page, err)
 	}
@@ -1208,10 +1326,8 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	// arbitrary params. Only meaningful for dynamic routes.
 	staticOnly := isDynRoute && !allowDynamic
 
-	b.TransformUniversalIcons(entryModule.Program)
-	b.TransformUniversalImages(entryModule.Program)
-	b.FlattenComponentSpreadAttrs(entryModule.Program)
-	b.InlineContent(entryModule.Program)
+	stopCompile := b.phase("page:compile")
+	b.ensureTransformed(entryModule.Program)
 
 	// ─── New pipeline: Annotate → Build IR → Emit ──────────────────────────
 	// Transform <Icon>/<Image> in imported component modules too. These are
@@ -1222,10 +1338,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, page, entryModule.SourceCode)
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	for _, mp := range extraPrograms {
-		b.TransformUniversalIcons(mp.Program)
-		b.TransformUniversalImages(mp.Program)
-		b.FlattenComponentSpreadAttrs(mp.Program)
-		b.InlineContent(mp.Program)
+		b.ensureTransformed(mp.Program)
 	}
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
@@ -1259,6 +1372,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	emitter.EvalJS = b.jsExprEvaluator()
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
+	stopCompile()
 
 	if len(emitResult.Errors) > 0 {
 		return nil, "", renderErrors(page, emitResult.Errors)
@@ -1401,7 +1515,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			jsFile = "index." + jsHash + ".js"
 			finalJS = substituteImportMetaURL(finalJS, outName, jsFile, b.Cfg.BaseURLPath())
 			jsPath := filepath.Join(pageDir, jsFile)
-			_ = os.WriteFile(jsPath, []byte(finalJS), 0644)
+			_ = fsutil.WriteFileIfChanged(jsPath, []byte(finalJS), 0644)
 
 			if b.Cfg.Sourcemap {
 				// The hydration bundle is compiler-generated, so the "source" is
@@ -1410,7 +1524,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 				sm := generateSourcemap(finalJS, outName, hydrationJS)
 				_ = os.WriteFile(jsPath+".map", []byte(sm), 0644)
 				finalJS = appendSourceMappingURL(finalJS, jsFile+".map")
-				_ = os.WriteFile(jsPath, []byte(finalJS), 0644)
+				_ = fsutil.WriteFileIfChanged(jsPath, []byte(finalJS), 0644)
 			}
 
 			// Keep the CSP hash and any other ingest in sync with the bytes
@@ -1549,6 +1663,13 @@ func (b *Builder) resetBuildCaches() {
 	layoutEmitCache.Clear()
 	loadingEmitCache.Clear()
 	layoutCache.Clear()
+	// Re-arm the per-program transform guard for this build. The parsed module
+	// cache persists across builds; re-running the (idempotent) transforms on
+	// already-transformed ASTs is a no-op, and the guard keeps it race-free.
+	b.transformOnce = sync.Map{}
+	// tsx bootstrap results may depend on user source that changed since the
+	// last build, so drop any memoized outputs.
+	tsexec.Invalidate()
 }
 
 var layoutEmitCache sync.Map
@@ -1635,12 +1756,13 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	// dependency of every page it wraps.
 	layoutDeps := layoutDepPaths(layoutPath, layoutBundle)
 
-	b.TransformUniversalIcons(layoutModule.Program)
-	b.TransformUniversalImages(layoutModule.Program)
-	b.FlattenComponentSpreadAttrs(layoutModule.Program)
+	b.ensureTransformed(layoutModule.Program)
 
 	ann := annotator.Annotate(layoutModule.Program, b.Cfg, layoutPath, layoutModule.SourceCode)
 	extraLayoutPrograms := moduleSources(layoutBundle.Modules, layoutModule)
+	for _, mp := range extraLayoutPrograms {
+		b.ensureTransformed(mp.Program)
+	}
 	annotator.MergeModuleFunctions(ann, extraLayoutPrograms)
 	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
 	annotator.ReclassifyTiers(ann, b.Cfg)

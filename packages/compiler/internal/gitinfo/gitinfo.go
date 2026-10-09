@@ -16,10 +16,8 @@ type rootInfo struct {
 }
 
 var (
-	mu      sync.Mutex
-	roots   = map[string]rootInfo{} // project root ��' resolved git top-level
-	paths   = map[string]string{}   // root\x00repo-relative path ��' commit date
-	authors = map[string][]string{} // root\x00rel\x00n ��' author names
+	mu    sync.Mutex
+	roots = map[string]rootInfo{} // project root → resolved git top-level
 )
 
 // gitRoot resolves the repository top-level for a project root. Results are
@@ -52,57 +50,140 @@ func Available(root string) bool {
 	return ok
 }
 
-// repoRelPath returns path relative to root (slash-separated) for use as a git
-// pathspec. Absolute paths are made relative to root; relative paths are taken
-// as-is. Deliberately never relative to git's resolved top-level: that path can
-// differ from root (macOS /var → /private/var symlink, Windows short 8.3 paths
-// or case) and a mismatched pathspec matches nothing.
-func repoRelPath(root, path string) string {
-	if path == "" {
+// Index holds per-file git metadata computed in a single `git log` pass, so a
+// build reads commit dates/authors for every page without spawning a git
+// process per file.
+type Index struct {
+	root    string
+	gr      string
+	last    map[string]string   // repo-relative slash path → committer date
+	authors map[string][]string // repo-relative slash path → authors (recent first)
+}
+
+// indexCache holds one Index per project root for the process lifetime.
+var indexCache sync.Map
+
+// indexFor returns the (lazily built, cached) git index for root. It is always
+// safe to call; a non-repo root yields an empty index.
+func indexFor(root string) *Index {
+	if v, ok := indexCache.Load(root); ok {
+		return v.(*Index)
+	}
+	ix := buildIndex(root)
+	indexCache.Store(root, ix)
+	return ix
+}
+
+// buildIndex runs one `git log --name-only` pass and records, for each file,
+// its most recent committer date and up to a few recent authors.
+func buildIndex(root string) *Index {
+	ix := &Index{root: root, last: map[string]string{}, authors: map[string][]string{}}
+	gr, ok := gitRoot(root)
+	if !ok || gr == "" {
+		return ix
+	}
+	ix.gr = gr
+
+	// Cap history so enormous repos stay bounded; files untouched in the last
+	// 10000 commits simply report no git metadata (as an untracked file would).
+	out, err := exec.Command("git", "-C", gr, "log", "--no-merges", "-n", "10000",
+		"--name-only", "--format=%x1e%cI%x1f%an").Output()
+	if err != nil {
+		return ix
+	}
+
+	const maxAuthors = 5
+	var curDate, curAuthor string
+	for _, line := range strings.Split(string(out), "\n") {
+		if line == "" {
+			continue
+		}
+		if line[0] == '\x1e' {
+			rest := line[1:]
+			var date, author string
+			if i := strings.IndexByte(rest, '\x1f'); i >= 0 {
+				date, author = rest[:i], rest[i+1:]
+			} else {
+				date = rest
+			}
+			curDate, curAuthor = strings.TrimSpace(date), strings.TrimSpace(author)
+			continue
+		}
+		file := line
+		if _, seen := ix.last[file]; !seen {
+			ix.last[file] = curDate
+		}
+		if curAuthor != "" && len(ix.authors[file]) < maxAuthors {
+			dup := false
+			for _, a := range ix.authors[file] {
+				if a == curAuthor {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				ix.authors[file] = append(ix.authors[file], curAuthor)
+			}
+		}
+	}
+	return ix
+}
+
+// relSlash resolves path (absolute, or relative to the project root) to a
+// repo-relative slash path for index lookups. Returns "" when unresolvable.
+func (ix *Index) relSlash(path string) string {
+	if ix.gr == "" {
 		return ""
 	}
-	if filepath.IsAbs(path) {
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return ""
-		}
-		path = rel
+	abs := path
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(ix.root, path)
 	}
-	return filepath.ToSlash(path)
+	rel, err := filepath.Rel(ix.gr, abs)
+	if err != nil {
+		return ""
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return ""
+	}
+	return rel
+}
+
+// LastCommit returns the committer date (RFC3339) of the last commit touching
+// path, or "" when unknown.
+func (ix *Index) LastCommit(path string) string {
+	rel := ix.relSlash(path)
+	if rel == "" {
+		return ""
+	}
+	return ix.last[rel]
+}
+
+// Authors returns up to n distinct recent authors of path (most recent first).
+func (ix *Index) Authors(path string, n int) []string {
+	if n <= 0 {
+		return nil
+	}
+	rel := ix.relSlash(path)
+	if rel == "" {
+		return nil
+	}
+	a := ix.authors[rel]
+	if len(a) > n {
+		a = a[:n]
+	}
+	return append([]string(nil), a...)
 }
 
 // LastCommit returns the committer date (RFC3339) of the last commit touching
 // path, or "" when git is unavailable or the file is untracked/unchanged.
-// Results are cached per (root, root-relative path).
+// Backed by a single-pass per-root index (built once per process).
 func LastCommit(root, path string) string {
 	if _, ok := gitRoot(root); !ok {
 		return ""
 	}
-	rel := repoRelPath(root, path)
-	if rel == "" {
-		return ""
-	}
-	key := root + "\x00" + rel
-
-	mu.Lock()
-	if v, ok := paths[key]; ok {
-		mu.Unlock()
-		return v
-	}
-	mu.Unlock()
-
-	// `-C root` makes git interpret the pathspec relative to root, so the
-	// pathspec and the working directory always agree.
-	out, err := exec.Command("git", "-C", root, "log", "-1", "--format=%cI", "--", rel).Output()
-	val := strings.TrimSpace(string(out))
-	if err != nil {
-		val = ""
-	}
-
-	mu.Lock()
-	paths[key] = val
-	mu.Unlock()
-	return val
+	return indexFor(root).LastCommit(path)
 }
 
 // LastAuthors returns up to n distinct author names from the most recent
@@ -116,60 +197,5 @@ func LastAuthors(root, path string, n int) []string {
 	if _, ok := gitRoot(root); !ok {
 		return nil
 	}
-	rel := repoRelPath(root, path)
-	if rel == "" {
-		return nil
-	}
-	key := root + "\x00" + rel + "\x00" + itoa(n)
-
-	mu.Lock()
-	if v, ok := authors[key]; ok {
-		mu.Unlock()
-		return v
-	}
-	mu.Unlock()
-
-	out, err := exec.Command("git", "-C", root, "log", "-n", itoa(n*4), "--format=%an", "--", rel).Output()
-	var names []string
-	if err == nil {
-		seen := map[string]bool{}
-		for _, line := range strings.Split(string(out), "\n") {
-			name := strings.TrimSpace(line)
-			if name == "" || seen[name] {
-				continue
-			}
-			seen[name] = true
-			names = append(names, name)
-			if len(names) >= n {
-				break
-			}
-		}
-	}
-
-	mu.Lock()
-	authors[key] = names
-	mu.Unlock()
-	return names
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		b[i] = '-'
-	}
-	return string(b[i:])
+	return indexFor(root).Authors(path, n)
 }

@@ -12,8 +12,30 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 )
+
+// resultCache memoizes identical bootstrap runs within a single build/session.
+// Callers Invalidate() at the start of each build so results can never go stale
+// across edits (a bootstrap may import user source that changed).
+var (
+	resultMu    sync.Mutex
+	resultCache = map[string][]byte{}
+)
+
+// Invalidate clears the bootstrap result cache. Call once at the start of a
+// build.
+func Invalidate() {
+	resultMu.Lock()
+	resultCache = map[string][]byte{}
+	resultMu.Unlock()
+}
+
+func bootstrapKey(name, content, cwd, tsconfig string, env []string) string {
+	return name + "\x00" + content + "\x00" + cwd + "\x00" + tsconfig + "\x00" + strings.Join(env, "\x00")
+}
 
 // ImportPath converts an absolute filesystem path to a file:// URL suitable for
 // ESM imports on all platforms (required for Windows).
@@ -42,6 +64,14 @@ func RunBootstrap(name, content, cwd string, timeout time.Duration, env []string
 // `krate/content` -> a codegen'd module) resolve inside bootstraps that import
 // user source, since tsx honors compilerOptions.paths.
 func RunBootstrapOpts(name, content, cwd string, timeout time.Duration, env []string, tsconfig string) (stdout []byte, stderr string, err error) {
+	key := bootstrapKey(name, content, cwd, tsconfig, env)
+	resultMu.Lock()
+	if out, ok := resultCache[key]; ok {
+		resultMu.Unlock()
+		return out, "", nil
+	}
+	resultMu.Unlock()
+
 	buf := make([]byte, 8)
 	_, _ = rand.Read(buf)
 	suffix := hex.EncodeToString(buf)
@@ -85,5 +115,8 @@ func RunBootstrapOpts(name, content, cwd string, timeout time.Duration, env []st
 		}
 		return nil, "", fmt.Errorf("execution: %w", err)
 	}
+	resultMu.Lock()
+	resultCache[key] = out
+	resultMu.Unlock()
 	return out, "", nil
 }

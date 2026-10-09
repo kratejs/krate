@@ -6,7 +6,9 @@ import (
 	"html"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/kratejs/krate/packages/compiler/internal/docfind"
 	"github.com/kratejs/krate/packages/compiler/internal/frontmatter"
@@ -153,75 +155,110 @@ func Scan(cfg Config) ([]Page, error) {
 		return nil, nil
 	}
 
-	var pages []Page
-
-	err := pluginutil.WalkMD(absDir, func(absPath, relPath string) error {
-		data, err := os.ReadFile(absPath)
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", absPath, err)
-		}
-
-		pagePath := strings.TrimSuffix(relPath, filepath.Ext(relPath))
-
-		var htmlContent string
-		var fm *Frontmatter
-		if strings.HasSuffix(absPath, ".mdx") {
-			htmlContent, fm = ParseMDX(string(data), cfg.MDConfig)
-		} else {
-			htmlContent, fm = ParseMD(string(data), cfg.MDConfig)
-		}
-
-		if fm.Title == "" {
-			fm.Title = PathToTitle(relPath)
-		}
-
-		dirPart := fm.Sidebar
-		if dirPart == "" {
-			if idx := strings.LastIndex(pagePath, "/"); idx > 0 {
-				dirPart = pagePath[:idx]
-			}
-		}
-
-		updated := fm.Updated
-		var authors []string
-		if cfg.GitLastUpdated {
-			if updated == "" {
-				updated = gitinfo.LastCommit(cfg.Root, absPath)
-			}
-			authors = gitinfo.LastAuthors(cfg.Root, absPath, 5)
-		}
-
-		pages = append(pages, Page{
-			Path:          pagePath,
-			Title:         fm.Title,
-			Order:         fm.Order,
-			Content:       htmlContent,
-			Dir:           dirPart,
-			Sidebar:       fm.Sidebar,
-			SourcePath:    absPath,
-			Keywords:      fm.Keywords,
-			CustomSidebar: fm.CustomSidebar,
-			Description:   fm.Description,
-			Toc:           fm.Toc,
-			Hero:          fm.Hero,
-			Template:      fm.Template,
-			Head:          fm.Head,
-			Prev:          fm.Prev,
-			Next:          fm.Next,
-			SidebarCfg:    fm.SidebarConfig,
-			Badge:         fm.Badge,
-			Draft:         fm.Draft,
-			EditURL:       fm.EditURL,
-			Tags:          fm.Tags,
-			Categories:    fm.Categories,
-			Date:          fm.Date,
-			Updated:       updated,
-			Authors:       authors,
-		})
+	// Collect the file list first so parsing can run concurrently while staying
+	// deterministic (results are written back by index).
+	absPaths := []string{}
+	relPaths := []string{}
+	if err := pluginutil.WalkMD(absDir, func(absPath, relPath string) error {
+		absPaths = append(absPaths, absPath)
+		relPaths = append(relPaths, relPath)
 		return nil
-	})
+	}); err != nil {
+		return nil, err
+	}
 
-	return pages, err
+	pages := make([]Page, len(absPaths))
+	errs := make([]error, len(absPaths))
+	pool := make(chan struct{}, runtime.GOMAXPROCS(0))
+	var wg sync.WaitGroup
+	for i := range absPaths {
+		wg.Add(1)
+		pool <- struct{}{}
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-pool }()
+			p, err := scanPage(cfg, absPaths[i], relPaths[i])
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			pages[i] = p
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return pages, nil
+}
+
+// scanPage parses a single content file into a Page (frontmatter, body, and
+// optional git metadata). Safe to run concurrently.
+func scanPage(cfg Config, absPath, relPath string) (Page, error) {
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return Page{}, fmt.Errorf("reading %s: %w", absPath, err)
+	}
+
+	pagePath := strings.TrimSuffix(relPath, filepath.Ext(relPath))
+
+	var htmlContent string
+	var fm *Frontmatter
+	if strings.HasSuffix(absPath, ".mdx") {
+		htmlContent, fm = ParseMDX(string(data), cfg.MDConfig)
+	} else {
+		htmlContent, fm = ParseMD(string(data), cfg.MDConfig)
+	}
+
+	if fm.Title == "" {
+		fm.Title = PathToTitle(relPath)
+	}
+
+	dirPart := fm.Sidebar
+	if dirPart == "" {
+		if idx := strings.LastIndex(pagePath, "/"); idx > 0 {
+			dirPart = pagePath[:idx]
+		}
+	}
+
+	updated := fm.Updated
+	var authors []string
+	if cfg.GitLastUpdated {
+		if updated == "" {
+			updated = gitinfo.LastCommit(cfg.Root, absPath)
+		}
+		authors = gitinfo.LastAuthors(cfg.Root, absPath, 5)
+	}
+
+	return Page{
+		Path:          pagePath,
+		Title:         fm.Title,
+		Order:         fm.Order,
+		Content:       htmlContent,
+		Dir:           dirPart,
+		Sidebar:       fm.Sidebar,
+		SourcePath:    absPath,
+		Keywords:      fm.Keywords,
+		CustomSidebar: fm.CustomSidebar,
+		Description:   fm.Description,
+		Toc:           fm.Toc,
+		Hero:          fm.Hero,
+		Template:      fm.Template,
+		Head:          fm.Head,
+		Prev:          fm.Prev,
+		Next:          fm.Next,
+		SidebarCfg:    fm.SidebarConfig,
+		Badge:         fm.Badge,
+		Draft:         fm.Draft,
+		EditURL:       fm.EditURL,
+		Tags:          fm.Tags,
+		Categories:    fm.Categories,
+		Date:          fm.Date,
+		Updated:       updated,
+		Authors:       authors,
+	}, nil
 }
 
 // ParseMD parses a .md file, extracting frontmatter and rendering markdown.
