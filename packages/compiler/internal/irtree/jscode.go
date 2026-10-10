@@ -84,7 +84,7 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 		// Preserve real JS semantics for `&&` (falsy left operand is returned
 		// unchanged rather than collapsed to ''). The runtime and SSR renderer
 		// both skip false/null/undefined, so conditional JSX still renders
-		// nothing when the guard fails — matching React.
+		// nothing when the guard fails - matching React.
 		return "(" + left + " " + e.Op + " " + right + ")"
 	case *ast.UnaryExpr:
 		arg := generateExprJS(e.Arg, signals)
@@ -595,13 +595,13 @@ func generateJSXJS(el *ast.JSXElement, signals map[string]ast.Expr) string {
 	var b strings.Builder
 	name := el.Opening.Name
 	// The built-in <Link> lowers to an <a> carrying the SPA/prefetch data
-	// attributes — in the client codegen as well as the server/IR path. Without
-	// this, a client component using <Link> would emit `h(Link, …)` and throw
+	// attributes - in the client codegen as well as the server/IR path. Without
+	// this, a client component using <Link> would emit `h(Link, ...)` and throw
 	// "Link is not defined" at hydration.
 	if name == "Link" {
 		return generateLinkJSX(el, signals)
 	}
-	// Uppercase tag names are components — reference them as function refs so
+	// Uppercase tag names are components - reference them as function refs so
 	// the runtime `h()` invokes the component rather than creating a DOM
 	// element with a bogus tag like <Toast>.
 	if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {

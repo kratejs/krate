@@ -51,7 +51,7 @@ type Page struct {
 	Keywords      []string      `json:"keywords,omitempty"`
 	CustomSidebar []SidebarItem `json:"customSidebar"`
 
-	// Phase 1 — content fields
+	// Phase 1 - content fields
 	Description string       `json:"description,omitempty"`
 	Toc         TocConfig    `json:"-"`
 	Hero        *HeroConfig  `json:"-"`
@@ -60,19 +60,19 @@ type Page struct {
 	Prev        *NavOverride `json:"-"`
 	Next        *NavOverride `json:"-"`
 
-	// Phase 2 — navigation surface
+	// Phase 2 - navigation surface
 	SidebarCfg *SidebarNavConfig `json:"-"`
 	Badge      *Badge            `json:"badge,omitempty"`
 
-	// Phase 3 — workflow
+	// Phase 3 - workflow
 	Draft   bool   `json:"draft,omitempty"`
 	EditURL string `json:"editUrl,omitempty"`
 
-	// Phase 4 — search/org
+	// Phase 4 - search/org
 	Tags       []string `json:"tags,omitempty"`
 	Categories []string `json:"categories,omitempty"`
 
-	// Phase 5 — dates (RFC3339 or YYYY-MM-DD strings). Date is the published
+	// Phase 5 - dates (RFC3339 or YYYY-MM-DD strings). Date is the published
 	// date; Updated is the last-modified date (frontmatter, else git).
 	Date    string `json:"date,omitempty"`
 	Updated string `json:"updated,omitempty"`
@@ -81,7 +81,7 @@ type Page struct {
 	// recent first. Populated when Config.GitLastUpdated is set.
 	Authors []string `json:"authors,omitempty"`
 
-	// Phase 6 — i18n/versioning. Locale is the page's locale ("" when i18n is
+	// Phase 6 - i18n/versioning. Locale is the page's locale ("" when i18n is
 	// not configured); Version is its docs version ("" when unversioned); URL is
 	// the page's absolute site URL, set by the docs plugin (locale/version
 	// aware).
@@ -391,10 +391,10 @@ func dedupeNonEmpty(slices ...[]string) []string {
 }
 
 // StripHTMLTags removes HTML tags from a string, keeping the document's line
-// structure: block-level tags (p, li, headings, table cells, …) become line
+// structure: block-level tags (p, li, headings, table cells, ...) become line
 // breaks, and intra-line whitespace is collapsed. This keeps extracted text
 // readable (paragraphs stay separate) and prevents adjacent blocks from running
-// together, e.g. "<td>File</td><td>When loaded</td>" → "File\nWhen loaded".
+// together, e.g. "<td>File</td><td>When loaded</td>" -> "File\nWhen loaded".
 func StripHTMLTags(s string) string {
 	var out strings.Builder
 	var tag strings.Builder

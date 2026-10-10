@@ -55,7 +55,7 @@ func resolveVersions(c config.VersionsConfig) (versions []string, cur string) {
 
 // docsLocaleDir resolves the content directory for a (locale, version) pair:
 // non-default locale and/or non-current version live in subdirectories
-// (src/content/docs/<locale>/<version>/…).
+// (src/content/docs/<locale>/<version>/...).
 func docsLocaleDir(base, locale, defaultLocale, version, currentVersion string) string {
 	dir := base
 	if locale != "" && locale != defaultLocale {
@@ -145,7 +145,7 @@ func docsRoute(locale, defaultLocale, version, currentVersion, path string) stri
 }
 
 // localeSwitchLinks builds the LocaleSwitcher entries for a page from a
-// translation map (locale → URL), falling back to each locale's docs root.
+// translation map (locale -> URL), falling back to each locale's docs root.
 func localeSwitchLinks(locales []string, defaultLocale string, byLocale map[string]string) []altLink {
 	out := make([]altLink, 0, len(locales))
 	for _, loc := range locales {

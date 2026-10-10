@@ -11,7 +11,7 @@ import (
 
 // TestMarkdownPageRouting verifies AfterMarkdownParse runs for markdown pages in
 // src/pages. Markdown pages flow through the normal bundler/emitter pipeline (the
-// bundler synthesizes an MDX-style TSX bundle), so the hook previously never ran —
+// bundler synthesizes an MDX-style TSX bundle), so the hook previously never ran -
 // regression for the "AfterMarkdownParse wiring" report item.
 func TestMarkdownPageRouting(t *testing.T) {
 	root := t.TempDir()

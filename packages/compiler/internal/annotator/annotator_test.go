@@ -29,7 +29,7 @@ func entryTier(t *testing.T, ann *irtree.Annotations) irtree.ComponentTier {
 	return ann.ComponentTiers[ann.EntryPoint]
 }
 
-// ─── Tier classification priority ───────────────────────────────────────────
+// Tier classification priority
 
 func TestClassifyDirectivePriority(t *testing.T) {
 	src := `// @server
@@ -83,11 +83,11 @@ export default function App() { return <Button label="x" />; }`
 	}
 }
 
-// ─── Per-module source classification ───────────────────────────────────────
+// Per-module source classification
 
 func TestClassifyExportedConstArrow(t *testing.T) {
 	// `export const Live = () => ...` lands in ExportStmt.Declaration as a
-	// VarStmt — it must be collected just like `const Live = () => ...`.
+	// VarStmt - it must be collected just like `const Live = () => ...`.
 	src := `export const Live = ({ name }: any) => <p>live {name}</p>;
 export default function App() { return <Live name="world" />; }`
 	ann := Annotate(parseProg(t, src), &config.Config{}, "src/Live.tsx", src)
@@ -202,7 +202,7 @@ func TestMergeModuleFunctionsCollectsSignals(t *testing.T) {
 	}
 }
 
-// ─── Streaming / Suspense detection ─────────────────────────────────────────
+// Streaming / Suspense detection
 
 func TestDetectSuspenseUsage(t *testing.T) {
 	src := `import { Suspense } from '@krate/runtime/server';
@@ -261,7 +261,7 @@ function Other() { return <div/>; }`
 	}
 }
 
-// ─── Import-binding aliases ──────────────────────────────────────────────────
+// Import-binding aliases
 
 func TestMergeImportAliasesMapsLocalBindingToDeclaredDefault(t *testing.T) {
 	dir := t.TempDir()

@@ -149,7 +149,7 @@ type SSRConfig struct {
 	// Streaming forces ALL pages to render in streaming SSR mode,
 	// regardless of per-page `export const config = { streaming: true }`.
 	// When enabled, every page goes through the server renderer with
-	// Suspense-based streaming (fallback → resolved replacement).
+	// Suspense-based streaming (fallback -> resolved replacement).
 	Streaming bool `json:"streaming,omitempty"`
 }
 
@@ -234,8 +234,8 @@ type RobotsConfig struct {
 }
 
 // I18nConfig configures multi-language docs. Locales live in subdirectories of
-// the docs content dir (e.g. src/content/docs/fr/…); the default locale is
-// unprefixed (/docs/…) and other locales are path-prefixed (/fr/docs/…).
+// the docs content dir (e.g. src/content/docs/fr/...); the default locale is
+// unprefixed (/docs/...) and other locales are path-prefixed (/fr/docs/...).
 type I18nConfig struct {
 	// DefaultLocale is the unprefixed locale (e.g. "en").
 	DefaultLocale string `json:"defaultLocale,omitempty"`
@@ -249,7 +249,7 @@ type I18nConfig struct {
 func (c I18nConfig) Enabled() bool { return len(c.Locales) > 0 }
 
 // VersionsConfig configures versioned docs. Each version lives in a
-// subdirectory of the docs content dir (src/content/docs/<version>/…); the
+// subdirectory of the docs content dir (src/content/docs/<version>/...); the
 // current version is mounted unprefixed.
 type VersionsConfig struct {
 	// Current is the unprefixed version (e.g. "v2").

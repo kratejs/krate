@@ -11,7 +11,6 @@ import (
 // runtime chunk instead of being emitted into every page's JS. It defines the
 // slot lookup helpers, the XSS sanitizer, and the compact binding helpers
 // (kbind*) that per-page hydration scripts call.
-//
 // It runs once per page load. On SPA navigation the router swaps in the new
 // page's DOM and re-runs that page's hydration script, which calls
 // refreshSlots() to rebuild the comment-marker cache against the new DOM.
@@ -77,7 +76,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		}
 	}
 
-	// ─── Per-component scoped IIFEs ───────────────────────────────────
+	// Per-component scoped IIFEs
 	for _, sig := range result.Signatures {
 		if sig.Tier != irtree.TierClient {
 			continue
@@ -286,7 +285,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		b.WriteString("})();\n")
 	}
 
-	// ─── Event delegation ─────────────────────────────────────────────
+	// Event delegation
 	seenEvents := map[string]bool{}
 	var handlerEvents []string
 	for _, sig := range result.Signatures {
@@ -322,7 +321,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		b.WriteString("__krate_del_cleanup=function(){for(var i=0;i<__krate_del_fns.length;i++){__krate_del_root.removeEventListener(__krate_del_fns[i].ev,__krate_del_fns[i].fn);}__krate_del_fns=[];};\n")
 	}
 
-	// ─── Router ───────────────────────────────────────────────────────
+	// Router
 	b.WriteString("if(typeof reinitRouter==='function'){reinitRouter();}else if(typeof initRouter==='function'){initRouter();}\n")
 
 	b.WriteString("})();\n")

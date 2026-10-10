@@ -112,8 +112,8 @@ func isDigits(s string) bool {
 	return true
 }
 
-// formatRem formats a numeric spacing multiple (n × 0.25rem) without float
-// noise: 13 → "3.25rem", 13.5 → "3.375rem", 0.5 → "0.125rem".
+// formatRem formats a numeric spacing multiple (n x 0.25rem) without float
+// noise: 13 -> "3.25rem", 13.5 -> "3.375rem", 0.5 -> "0.125rem".
 func formatRem(n float64) string {
 	return strconv.FormatFloat(n/4, 'f', -1, 64) + "rem"
 }
@@ -130,8 +130,8 @@ func angleValue(key string) (string, bool) {
 	return "", false
 }
 
-// scaleFactor resolves a scale key to a unitless factor: "95" → "0.95",
-// "110" → "1.1", "[1.7]" → "1.7".
+// scaleFactor resolves a scale key to a unitless factor: "95" -> "0.95",
+// "110" -> "1.1", "[1.7]" -> "1.7".
 func scaleFactor(key string) string {
 	if v, ok := unwrapArbitrary(key); ok {
 		return v

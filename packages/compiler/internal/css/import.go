@@ -13,7 +13,7 @@ var importRe = regexp.MustCompile(`@import\s+(?:url\()?["']([^"']+)["']\)?([^;]*
 
 // InlineImports resolves and inlines @import directives in CSS content.
 // basePath is the directory containing the CSS file, used to resolve relative
-// paths. All resolved imports must remain inside basePath (the project root) —
+// paths. All resolved imports must remain inside basePath (the project root) -
 // traversal above it is treated as invalid and left un-inlined.
 // It handles circular imports via a visited set and has a max depth of 10.
 func InlineImports(css, basePath string) string {
@@ -109,8 +109,8 @@ func inlineImportsDepth(css, basePath, rootPath string, visited map[string]bool,
 }
 
 // wrapImportPrelude applies an `@import` prelude to the inlined content:
-// `supports(...)` → `@supports`, a media query → `@media`, and `layer(...)` /
-// `layer` → no wrapper (Krate unwraps layers elsewhere).
+// `supports(...)` -> `@supports`, a media query -> `@media`, and `layer(...)` /
+// `layer` -> no wrapper (Krate unwraps layers elsewhere).
 func wrapImportPrelude(prelude, css string) string {
 	p := strings.TrimSpace(prelude)
 	if p == "" {

@@ -132,7 +132,7 @@ func (g *goAPISupervisor) watch() {
 		case <-ticker.C:
 			routes, modTime, err := loadGoAPIManifest(g.manifestPath)
 			if err != nil {
-				// Manifest gone → no Go routes anymore → stop the sidecar.
+				// Manifest gone -> no Go routes anymore -> stop the sidecar.
 				if os.IsNotExist(err) {
 					g.mu.Lock()
 					g.routes = nil

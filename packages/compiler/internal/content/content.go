@@ -2,7 +2,6 @@
 // (authored in `content.config.ts` via `defineContent`) is validated against
 // the frontmatter of markdown/mdx entries, and TypeScript declarations are
 // generated so content is fully typed.
-//
 // The package is pure (no filesystem access) for testability; the build
 // pipeline wires config loading, directory walking, and file writing.
 package content
@@ -38,7 +37,7 @@ type Collection struct {
 	// Dir is the collection's directory, relative to the project root.
 	Dir string `json:"dir"`
 	// Schema maps field names to fields. A nil/empty schema means "no
-	// validation" — entries are still typed with a permissive data shape.
+	// validation" - entries are still typed with a permissive data shape.
 	Schema map[string]Field `json:"-"`
 }
 
@@ -277,7 +276,6 @@ func Generate(cfg *Config, entries map[string][]Entry) string {
 // rendered html, frontmatter data) as literals plus a typed `getCollection`.
 // Because the entries are compile-time constants, `getCollection("blog")`
 // folds into static HTML during SSR.
-//
 // The signature returns a JavaScript module body; it is emitted with a `.ts`
 // extension so the bundler parses and folds it like any other source.
 func GenerateModule(cfg *Config, entries map[string][]Entry) string {

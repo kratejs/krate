@@ -1,8 +1,7 @@
-// docfind.js — minimal browser glue for the docfind search WASM module
+// docfind.js - minimal browser glue for the docfind search WASM module
 // (raw C-ABI, no wasm-bindgen). Written by krate's docs plugin build and
 // served alongside docfind_bg.wasm (the module produced at build time with
 // the docs index embedded into it).
-//
 // Usage:
 //   import search from "/docs/search/docfind.js";
 //   const docs = await search("signals", 8);
@@ -74,7 +73,7 @@ export default async function search(query, maxResults) {
   try {
     const code = instance.exports.docfind_search(ptr, len, max, outPtr, outPtr + 4);
     if (code !== 0) throw new Error("docfind search failed");
-    // Memory may have grown during the call — always re-read the buffer.
+    // Memory may have grown during the call - always re-read the buffer.
     const view = new DataView(memory.buffer);
     const resPtr = view.getUint32(outPtr, true);
     const resLen = view.getUint32(outPtr + 4, true);

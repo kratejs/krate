@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// ─── Slot bindings in hydration JS ──────────────────────────────────────────
+// Slot bindings in hydration JS
 
 func TestHydrationSignalNonConstantInitializer(t *testing.T) {
 	src := `export default function Page() {
@@ -79,7 +79,7 @@ func TestHydrationConditionalSlotBinding(t *testing.T) {
 	}
 }
 
-// ─── Attribute bindings ─────────────────────────────────────────────────────
+// Attribute bindings
 
 func TestHydrationAttrBindings(t *testing.T) {
 	src := `export default function Page() {
@@ -101,7 +101,7 @@ func TestHydrationAttrBindings(t *testing.T) {
 	}
 }
 
-// ─── Handler properties & delegation ────────────────────────────────────────
+// Handler properties & delegation
 
 func TestHydrationHandlerPropNaming(t *testing.T) {
 	src := `export default function Page() {
@@ -142,7 +142,7 @@ func TestHydrationEventDelegationDistinctness(t *testing.T) {
 	}
 }
 
-// ─── XSS sanitizer presence ─────────────────────────────────────────────────
+// XSS sanitizer presence
 
 func TestHydrationIncludesEscSanitizer(t *testing.T) {
 	src := `export default function Page() {
@@ -167,7 +167,7 @@ func TestKbindContentPreservesArrayOrder(t *testing.T) {
 	}
 }
 
-// ─── Per-component scoped IIFEs ─────────────────────────────────────────────
+// Per-component scoped IIFEs
 
 func TestHydrationPerComponentScopes(t *testing.T) {
 	src := `function Counter() {
@@ -189,7 +189,7 @@ export default function Page() {
 	}
 }
 
-// ─── Router / reinit ────────────────────────────────────────────────────────
+// Router / reinit
 
 func TestHydrationRouterInit(t *testing.T) {
 	src := `export default function Page() {
@@ -201,7 +201,7 @@ func TestHydrationRouterInit(t *testing.T) {
 	}
 }
 
-// ─── Unit: handler property sanitization ────────────────────────────────────
+// Unit: handler property sanitization
 
 func TestSanitizeHandlerProp(t *testing.T) {
 	cases := map[string]string{

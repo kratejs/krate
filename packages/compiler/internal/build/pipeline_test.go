@@ -80,7 +80,7 @@ func TestBuildLayoutChildrenInjection(t *testing.T) {
 	if !strings.Contains(html, `<nav>`) {
 		t.Errorf("expected layout nav in page, got:\n%.400s", html)
 	}
-	// JSX text entities are decoded (React semantics), so `&copy;` renders as ©.
+	// JSX text entities are decoded (React semantics), so `&copy;` renders as .
 	if !strings.Contains(html, "\u00a9 2026") {
 		t.Errorf("expected layout footer in page, got:\n%.400s", html)
 	}
@@ -107,7 +107,7 @@ func TestBuildMixedTierPage(t *testing.T) {
 	outDir := buildTestProject(t)
 	html := readOut(t, outDir, filepath.Join("server-runtime-demo", "index.html"))
 
-	// Server components are evaluated by QuickJS at build time → a real
+	// Server components are evaluated by QuickJS at build time -> a real
 	// millisecond epoch timestamp is baked into the static HTML.
 	tsRe := regexp.MustCompile(`Compiled at build time: (\d{13})`)
 	m := tsRe.FindStringSubmatch(html)
@@ -115,7 +115,7 @@ func TestBuildMixedTierPage(t *testing.T) {
 		t.Fatalf("expected a 13-digit QuickJS Date.now() timestamp baked at build, got:\n%.600s", html)
 	}
 
-	// Runtime components are NOT baked — each becomes a region splice marker
+	// Runtime components are NOT baked - each becomes a region splice marker
 	// (<!--region:region-<slotID>--><!--/region:region-<slotID>-->) that the
 	// sidecar fills at request time.
 	if !strings.Contains(html, "<!--region:") {
@@ -383,7 +383,7 @@ func TestBuildImageResponsive(t *testing.T) {
 	}
 	var webpFound bool
 	// Each variant must carry a hex cache-key tag followed by a width, e.g.
-	// `<tag>_640.webp` — the "tag verification" that the emitted filenames are
+	// `<tag>_640.webp` - the "tag verification" that the emitted filenames are
 	// content-hashed (cache key) rather than unversioned.
 	tagRe := regexp.MustCompile(`^[0-9a-f]{16}_\d+\.webp$`)
 	for _, e := range entries {
@@ -475,12 +475,12 @@ func TestBuildLinkOutput(t *testing.T) {
 		t.Errorf("docs link should not prefetch: %q", docs)
 	}
 
-	// replace → history.replaceState.
+	// replace -> history.replaceState.
 	if faq := byHref("/faq"); !strings.Contains(faq, "data-krate-replace") {
 		t.Errorf("faq link missing data-krate-replace: %q", faq)
 	}
 
-	// scroll={false} → data-krate-scroll="false".
+	// scroll={false} -> data-krate-scroll="false".
 	if blog := byHref("/blog"); !strings.Contains(blog, `data-krate-scroll="false"`) {
 		t.Errorf("blog link missing data-krate-scroll: %q", blog)
 	}
@@ -580,7 +580,7 @@ func TestBuildNestedEffectsEmitted(t *testing.T) {
 }
 
 // TestBuildMemoEmitted verifies a createMemo declaration and its reactive getter
-// binding are both present in a page's hydration JS — without the declaration
+// binding are both present in a page's hydration JS - without the declaration
 // the getter reference (e.g. doubled()) would throw ReferenceError.
 func TestBuildMemoEmitted(t *testing.T) {
 	outDir := buildTestProject(t)
@@ -600,7 +600,7 @@ func TestBuildMemoEmitted(t *testing.T) {
 
 // TestBuildResourceEmitted verifies a createResource declaration (getter +
 // actions) is emitted into the page hydration JS and that references to the
-// resource getter/actions (loading/state/refetch) resolve against it — no
+// resource getter/actions (loading/state/refetch) resolve against it - no
 // ReferenceError and no internal sentinel leaked into the output.
 func TestBuildResourceEmitted(t *testing.T) {
 	outDir := buildTestProject(t)

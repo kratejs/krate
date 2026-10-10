@@ -1,7 +1,7 @@
 /**
  * Hook context types for Krate JS plugins.
  *
- * These mirror the JSON that Krate actually sends to a plugin hook — the same
+ * These mirror the JSON that Krate actually sends to a plugin hook - the same
  * wire shapes used by the Go-side hook contexts (internal/plugin/*.go). A JS
  * hook is invoked as `fn(ctx, options, krate)` where `ctx` is one of these.
  *

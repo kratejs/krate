@@ -26,7 +26,7 @@ var jsPluginBundleCache sync.Map // absPath -> bundle string or error
 const pluginGlobal = "__kratePlugin"
 
 // runJSPluginHook executes a JS community plugin hook inside an embedded
-// QuickJS VM — no subprocess, no stdin/stdout. The plugin module is bundled
+// QuickJS VM - no subprocess, no stdin/stdout. The plugin module is bundled
 // with esbuild into a self-contained IIFE and evaluated in a fresh VM. Hooks
 // are invoked as fn(ctx, options, krate) where ctx is the JSON-serialized hook
 // context and the return value is a { files, routes, generatedPages, html,

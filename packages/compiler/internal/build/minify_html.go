@@ -27,7 +27,7 @@ func minifyHTML(html string) string {
 	return restoreRawContent(s, rawBlocks)
 }
 
-// ─── Raw content protection ──────────────────────────────────────────────────
+// Raw content protection
 
 type rawBlocks struct {
 	protected string
@@ -72,7 +72,7 @@ func protectRawContent(html string) rawBlocks {
 		closeTag := "</" + tagName[1:] + ">"
 		closeIdx := strings.Index(lower[openEnd+1:], closeTag)
 		if closeIdx == -1 {
-			// No closing tag — write as-is
+			// No closing tag - write as-is
 			result.WriteString(html[tagStart:])
 			break
 		}
@@ -101,7 +101,7 @@ func restoreRawContent(html string, rb rawBlocks) string {
 	return result
 }
 
-// ─── Stripped-down helpers
+// Stripped-down helpers
 
 // stripHTMLComments removes HTML comments except hydration markers (<!--k:...-->).
 func stripHTMLComments(html string) string {
@@ -253,9 +253,9 @@ func removeOptionalQuotes(s string) string {
 					attrQuote = ch
 					dropQuotes = false
 				}
-				// Empty value (="") — never drop quotes; dropping creates a bare name=
+				// Empty value (="") - never drop quotes; dropping creates a bare name=
 				// which the HTML parser may merge with the next attribute
-				// (e.g. onerror="" onload="" → onerror=onload=)
+				// (e.g. onerror="" onload="" -> onerror=onload=)
 			} else if inAttr && ch == attrQuote {
 				inAttr = false
 				if dropQuotes {

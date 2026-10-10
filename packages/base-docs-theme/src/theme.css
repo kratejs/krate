@@ -556,7 +556,7 @@ a:hover {
     overflow-wrap: break-word;
 }
 
-/* Inline code chips only — never code inside a fenced block, so the Code
+/* Inline code chips only - never code inside a fenced block, so the Code
    component and syntax-highlighted blocks keep their own styling. */
 .docs-content :not(pre) > code {
     background: var(--color-muted-bg);
@@ -1447,7 +1447,7 @@ a.docs-tag:hover { color: var(--color-text-main); border-color: var(--color-mute
 .krate-directive-body > :first-child { margin-top: 0; }
 .krate-directive-body > :last-child { margin-bottom: 0; }
 
-/* --- Admonitions (:::note/tip/warning/danger/caution → <Aside>) ----------
+/* --- Admonitions (:::note/tip/warning/danger/caution -> <Aside>) ----------
    The component ships dark defaults; tint each variant from the docs palette
    so it reads correctly in light mode too. */
 .docs-content .krate-aside {

@@ -229,7 +229,7 @@ func (s *Scope) varsCSS() string {
 
 // toggleCSS emits the rules for a single checkbox. Two panel wrappers may be
 // used: the "on" wrapper (shown when checked) and the "off" wrapper (shown when
-// not) — either or both may be absent in the markup.
+// not) - either or both may be absent in the markup.
 func (s *Scope) toggleCSS() string {
 	var b strings.Builder
 	cb := s.CheckboxClass("")

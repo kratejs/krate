@@ -107,8 +107,8 @@ export function definePlugin<Options = Record<string, unknown>>(
 }
 
 /**
- * Type helper for authoring a JS plugin's `hooks`. Runtime no-op — erased at
- * build — but gives full type-checking + intellisense for every hook's ctx.
+ * Type helper for authoring a JS plugin's `hooks`. Runtime no-op - erased at
+ * build - but gives full type-checking + intellisense for every hook's ctx.
  *
  * Pass your plugin's options type as the generic so the second hook argument
  * (`options`) is typed:

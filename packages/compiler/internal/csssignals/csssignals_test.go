@@ -393,7 +393,7 @@ func TestAnalyzeUnknownRole(t *testing.T) {
 	}
 }
 
-// ─── Hard-error cases (no fallback) ─────────────────────────────────────────
+// Hard-error cases (no fallback)
 
 func TestErrorNonLabelableTrigger(t *testing.T) {
 	src := `export default function T() {
@@ -455,7 +455,7 @@ func TestNoPrimitivesIsNotAnError(t *testing.T) {
 	}
 }
 
-// ─── CSS generation ─────────────────────────────────────────────────────────
+// CSS generation
 
 func TestStylesheetChoiceWellFormed(t *testing.T) {
 	css := Stylesheet(analyze(t, tabSrc).Scopes(), nil)

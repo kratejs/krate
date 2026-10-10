@@ -19,10 +19,9 @@ type CleanResult struct {
 
 // Clean removes the project's generated output: the build output directory
 // (dist) and the compiler cache (.krate/cache). It is deliberately scoped to
-// those two paths — the rest of .krate (types, generated pages, sidecar
+// those two paths - the rest of .krate (types, generated pages, sidecar
 // manifests) is regenerated on demand by build/dev and is left in place so a
 // clean does not invalidate editor types unnecessarily.
-//
 // A path is only removed when it resolves to within the project root, so a
 // misconfigured outDir can never delete an unrelated directory.
 func Clean(root string, cfg *config.Config) (*CleanResult, error) {

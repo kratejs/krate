@@ -7,16 +7,14 @@ import (
 // FlattenComponentSpreadAttrs rewrites JSX spread attributes that resolve to a
 // statically-known object literal into plain attributes before the annotator /
 // irtree stages consume call-site props.
-//
 // The docs plugin generates pages that call <DocsLayout {...docsProps}> where
 // `const docsProps = {...}` is declared in the same page function. The irtree
 // call-site prop extraction (extractPropsAST / buildPropBindings) skips spread
 // attributes, so those props silently vanished and the theme layout rendered
 // empty. This pass inlines the const object's properties onto the element so
 // the rest of the pipeline sees exactly what `extractPropsAST` expects.
-//
-// Only spreads resolvable to an object literal — inline <Comp {...{a: 1}}> or
-// a same-function `const o = {...}` — are flattened. Identifiers bound to
+// Only spreads resolvable to an object literal - inline <Comp {...{a: 1}}> or
+// a same-function `const o = {...}` - are flattened. Identifiers bound to
 // anything else, member accesses, calls, etc. are left untouched so they keep
 // the pre-existing (skip) behavior.
 func (b *Builder) FlattenComponentSpreadAttrs(prog *ast.Program) {

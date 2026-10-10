@@ -17,7 +17,7 @@ export type RefCallback = (el: Element) => void;
 /** Extracts the Props type from a Component. */
 export type ComponentProps<C> = C extends Component<infer P> ? P : never;
 
-// ─── per-node effect tracking ────────────────────────────────────────────────
+// per-node effect tracking
 // Reactive props/children create effects that must be disposed when the node is
 // removed from the DOM (list items, conditional branches, SPA reconciliation).
 // Without this, effects and their closures accumulate for the page's lifetime.
@@ -45,7 +45,7 @@ export function disposeNode(node: Node): void {
   }
 }
 
-// ─── comment-marker DOM traversal ───────────────────────────────────────────
+// comment-marker DOM traversal
 
 /**
  * Find the matching end comment marker for a start marker.
@@ -95,7 +95,7 @@ export function insert(parent: Node, value: unknown, startMarker: Node): void {
     clearNodes(startMarker, endMarker);
     insertBefore(parent, value, endMarker);
   } else {
-    // No end marker found — append at end
+    // No end marker found - append at end
     insertBefore(parent, value, null);
   }
 }
@@ -226,11 +226,11 @@ export function mount(fn: () => Node, container: string | HTMLElement): void {
 export function hydrate(fn: () => Node, container: string | HTMLElement): void {
   const el = getContainer(container);
   if (el.childNodes.length === 0) {
-    // Empty container — fall back to mount behavior
+    // Empty container - fall back to mount behavior
     el.appendChild(fn());
     return;
   }
-  // SSR content exists — run the component to set up effects/signals.
+  // SSR content exists - run the component to set up effects/signals.
   // The freshly-built tree is only used to establish reactive subscriptions;
   // it is not attached to the DOM, so dispose its effects to avoid leaks.
   const tree = fn();

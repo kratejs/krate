@@ -35,9 +35,9 @@ func effectiveOrder(p Page) int {
 }
 
 // NormalizePagePath strips trailing "/index" from a page path for URL generation.
-// "index" → ""
-// "guides/index" → "guides"
-// "guides/advanced" → "guides/advanced"
+// "index" -> ""
+// "guides/index" -> "guides"
+// "guides/advanced" -> "guides/advanced"
 func NormalizePagePath(path string) string {
 	if path == "index" || path == "" {
 		return ""
@@ -69,8 +69,8 @@ func pagePathURL(p Page) string {
 }
 
 // LocaleURL returns the absolute URL for a docs page in a locale. The default
-// locale is unprefixed (/docs/…); other locales are path-prefixed
-// (/fr/docs/…).
+// locale is unprefixed (/docs/...); other locales are path-prefixed
+// (/fr/docs/...).
 func LocaleURL(locale, defaultLocale, path string) string {
 	base := PageURL(path)
 	if locale == "" || locale == defaultLocale {
@@ -95,9 +95,8 @@ func BuildBreadcrumbsURL(locale, defaultLocale, path string) []Breadcrumb {
 }
 
 // BuildSidebarTree builds a recursive sidebar tree from pages.
-// Pages are grouped by their directory structure — each subdirectory
+// Pages are grouped by their directory structure - each subdirectory
 // becomes a nested SidebarItem with Children, supporting infinite nesting.
-//
 // Frontmatter navigation metadata (`sidebar: {...}` and top-level `badge`) is
 // applied here: `hidden` pages are dropped from the nav (still renderable and
 // searchable), `label` overrides the displayed title, `order` overrides the
@@ -209,7 +208,7 @@ func BuildSidebarTree(pages []Page) []SidebarItem {
 			}
 		}
 		// Stable sort: sections after links, sections alphabetically,
-		// links preserve insertion order (from SortPages: Dir→Order→Title)
+		// links preserve insertion order (from SortPages: Dir->Order->Title)
 		sort.SliceStable(n.item.Children, func(i, j int) bool {
 			hasChildrenI := len(n.item.Children[i].Children) > 0
 			hasChildrenJ := len(n.item.Children[j].Children) > 0
@@ -245,7 +244,7 @@ func firstNonEmpty(a, b string) string {
 }
 
 // BuildBreadcrumbs returns the breadcrumb trail as a slice.
-// Index pages (e.g. "guides/index") produce breadcrumbs ending at the directory name ("Guides") — no "Index" crumb.
+// Index pages (e.g. "guides/index") produce breadcrumbs ending at the directory name ("Guides") - no "Index" crumb.
 func BuildBreadcrumbs(path string) []Breadcrumb {
 	path = NormalizePagePath(path)
 	if path == "" {

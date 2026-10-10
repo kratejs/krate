@@ -1,11 +1,9 @@
 // Package check implements compiler-enforced quality gates: static analysis
 // rules over a page's AST and its resolved output (final HTML + JS weight).
-//
 // Built-in rule categories are accessibility (a11y), SEO, and performance
 // (perf). Rules run after a build, so they inspect exactly what would ship.
 // Findings reuse internal/diag for consistent `file:line:col` formatting, and
 // the same rule set backs the `krate check` CLI command.
-//
 // Custom rules can be authored in TypeScript/JavaScript and run inside the
 // embedded QuickJS runtime (see custom.go); no Node is required.
 package check
@@ -70,7 +68,7 @@ type Page struct {
 	// RelSource is the source file path relative to the project root.
 	RelSource string
 	// HTML is the final, fully assembled document (head + body, post-SEO
-	// injection, post-minify) — exactly what is written to disk.
+	// injection, post-minify) - exactly what is written to disk.
 	HTML string
 	// JSBytes is this route's total client JS weight (page hydration + shared
 	// runtime chunk), in bytes.
@@ -127,7 +125,7 @@ type builtinRule struct {
 // builtinRules is the static rule registry. Ordering only affects output; all
 // rules are independent.
 var builtinRules = []builtinRule{
-	// ── a11y ──────────────────────────────────────────────────────────────
+	// a11y
 	{"a11y/img-alt", CategoryA11y, Error, ruleImgAlt},
 	{"a11y/heading-order", CategoryA11y, Warning, ruleHeadingOrder},
 	{"a11y/accessible-name", CategoryA11y, Warning, ruleAccessibleName},
@@ -139,7 +137,7 @@ var builtinRules = []builtinRule{
 	{"a11y/color-contrast", CategoryA11y, Warning, ruleColorContrast},
 	{"a11y/broken-anchor", CategoryA11y, Warning, ruleBrokenAnchor},
 
-	// ── seo ───────────────────────────────────────────────────────────────
+	// seo
 	{"seo/title", CategorySEO, Error, ruleTitle},
 	{"seo/description", CategorySEO, Warning, ruleDescription},
 	{"seo/canonical", CategorySEO, Warning, ruleCanonical},
@@ -149,7 +147,7 @@ var builtinRules = []builtinRule{
 	{"seo/broken-link", CategorySEO, Warning, ruleBrokenLink},
 	{"seo/duplicate-meta", CategorySEO, Warning, ruleDuplicateMeta},
 
-	// ── perf ──────────────────────────────────────────────────────────────
+	// perf
 	{"perf/js-budget", CategoryPerf, Warning, ruleJSBudget},
 	{"perf/image-dims", CategoryPerf, Warning, ruleImageDims},
 }

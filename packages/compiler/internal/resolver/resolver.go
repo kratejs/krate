@@ -1,6 +1,5 @@
 // Package resolver provides the shared node_modules package resolution used by
 // the bundler (bare import specifiers) and the docs plugin (npm docs themes).
-//
 // Resolution mirrors Node's `exports`/`module`/`main` fallback: a package's
 // entry file is picked from package.json `exports` (the `import`/`default`
 // condition) when present, then `module`, then `main`, then a top-level
@@ -281,7 +280,7 @@ func splitSpec(spec string) (pkg, sub string) {
 }
 
 // PackageDir resolves a package directory's entry file: package.json `exports`
-// (import/default), then `module`, then `main`, then a top-level index.* — or ""
+// (import/default), then `module`, then `main`, then a top-level index.* - or ""
 // if none exist. Kept for callers that already have a package directory.
 func PackageDir(pkgDir string) string {
 	return resolvePackage(pkgDir, "")

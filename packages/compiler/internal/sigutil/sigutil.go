@@ -12,19 +12,19 @@ type CSSKind int
 const (
 	// CSSKindNone is a non-CSS reactive declaration (createSignal/createResource).
 	CSSKindNone CSSKind = iota
-	// CSSKindChoice is `createCSSChoice(initial, options?)` — a radio group.
+	// CSSKindChoice is `createCSSChoice(initial, options?)` - a radio group.
 	CSSKindChoice
-	// CSSKindToggle is `createCSSToggle(initial)` — a single checkbox.
+	// CSSKindToggle is `createCSSToggle(initial)` - a single checkbox.
 	CSSKindToggle
-	// CSSKindFlags is `createCSSFlags([...])` — independent checkboxes.
+	// CSSKindFlags is `createCSSFlags([...])` - independent checkboxes.
 	CSSKindFlags
-	// CSSKindGroup is `createCSSGroup(initial|null, opts?)` — an optional radio
+	// CSSKindGroup is `createCSSGroup(initial|null, opts?)` - an optional radio
 	// group: a choice with an explicit "closed" (null) sentinel option.
 	CSSKindGroup
-	// CSSKindRange is `createCSSRange(initial, {min,max,step})` — a discrete
+	// CSSKindRange is `createCSSRange(initial, {min,max,step})` - a discrete
 	// radio chain over integer values.
 	CSSKindRange
-	// CSSKindStack is `createCSSStack([...])` — a declared navigation tree with
+	// CSSKindStack is `createCSSStack([...])` - a declared navigation tree with
 	// push/pop/clear methods (a stack of nested radio levels).
 	CSSKindStack
 )
@@ -84,7 +84,7 @@ type Decl struct {
 // Find walks a statement list for reactive declarations. When recurse is true,
 // control-flow bodies and nested blocks are walked too (the annotator's
 // scoping); when false only top-level statements are inspected (the IR
-// builder's scoping — signals declared in blocks are out of hydration scope).
+// builder's scoping - signals declared in blocks are out of hydration scope).
 func Find(body []ast.Stmt, recurse bool) []Decl {
 	var out []Decl
 	var walk func([]ast.Stmt)
@@ -111,7 +111,7 @@ func Find(body []ast.Stmt, recurse bool) []Decl {
 						}
 					case "createReducer":
 						// Reducer state getter: the initial value is the second
-						// argument (reducer, initial) — the third for the
+						// argument (reducer, initial) - the third for the
 						// optional init function form.
 						if len(decl.Names) >= 2 && len(call.Args) >= 2 {
 							out = append(out, Decl{Name: decl.Names[0], Setter: decl.Names[1], Initial: call.Args[1], Factory: "createReducer", Args: call.Args})

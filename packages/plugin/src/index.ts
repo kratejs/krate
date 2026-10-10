@@ -1,8 +1,8 @@
 /**
- * @krate/plugin — TypeScript types and helpers for writing Krate plugins.
+ * @krate/plugin - TypeScript types and helpers for writing Krate plugins.
  *
  * Covers JS community plugins (typed hook contexts + outputs) and Go-plugin
- * npm descriptors (runtime + binaries). Helpers are compile-time no-ops — they
+ * npm descriptors (runtime + binaries). Helpers are compile-time no-ops - they
  * are erased when the plugin is bundled into Krate's embedded runtime.
  */
 

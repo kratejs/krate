@@ -6,8 +6,8 @@
  * compiler's generated hydration scripts (and SPA router) can reference them
  * as globals.
  *
- * - krate-runtime.js — signals + DOM + JSX runtime + SPA router
- * - krate-hydrate.js  — same minus the JSX runtime (used for SSG hydration)
+ * - krate-runtime.js - signals + DOM + JSX runtime + SPA router
+ * - krate-hydrate.js - same minus the JSX runtime (used for SSG hydration)
  *
  * esbuild minification here is complemented by the compiler, which re-minifies
  * the shared chunk with its embedded esbuild when writing dist/chunks/.

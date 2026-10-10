@@ -13,7 +13,7 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-// ─── request-line formatting ────────────────────────────────────────────────
+// request-line formatting
 
 // colorStatus renders an HTTP status code with a severity colour: green for
 // 2xx, cyan for 3xx, yellow for 4xx, red for 5xx.
@@ -76,7 +76,7 @@ func isTTY(f *os.File) bool {
 	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
 }
 
-// ─── pretty slog handler ────────────────────────────────────────────────────
+// pretty slog handler
 
 // requestLogMsg is the record message used by the request-logging middleware.
 // The handler special-cases it to render a compact request line.

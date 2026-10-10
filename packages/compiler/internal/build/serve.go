@@ -286,10 +286,10 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, absOut, route
 	shell := string(data)
 
 	// Only pages with region splice markers use this path. Marker kinds:
-	//   <!--suspense:ID-->...<!--/suspense:ID--> — Suspense boundary or the
+	// <!--suspense:ID-->...<!--/suspense:ID--> - Suspense boundary or the
 	//       coarse page region; the inner content is baked (fallback / stale
 	//       body) and kept if the region render fails or is skipped.
-	//   <!--region:ID--><!--/region:ID--> — standalone runtime component; empty
+	// <!--region:ID--><!--/region:ID--> - standalone runtime component; empty
 	//       slot filled by the region render.
 	opens := regionOpenRe.FindAllStringSubmatchIndex(shell, -1)
 	if len(opens) == 0 {
@@ -316,7 +316,7 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, absOut, route
 		closeMarker := "<!--/" + kind + ":" + id + "-->"
 		rel := strings.Index(shell[openEnd:], closeMarker)
 		if rel < 0 {
-			// Malformed marker pair — bail to the non-region path.
+			// Malformed marker pair - bail to the non-region path.
 			res.served = false
 			return res
 		}
@@ -424,7 +424,7 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, absOut, route
 					continue
 				}
 				if frame.NotFound {
-					// Sidecar couldn't match — treat as no render (keep baked).
+					// Sidecar couldn't match - treat as no render (keep baked).
 					framesLeft--
 					continue
 				}
@@ -432,7 +432,7 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, absOut, route
 			regionHTML[frame.ID] = frame.HTML
 			framesLeft--
 		case "skip":
-			// Sidecar has no renderer for this marker — keep baked content.
+			// Sidecar has no renderer for this marker - keep baked content.
 			framesLeft--
 		case "error":
 			if frame.ID != "" {
@@ -488,7 +488,7 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, absOut, route
 		if html, ok := regionHTML[b.id]; ok {
 			_, _ = w.Write([]byte(html))
 		} else if b.kind == "suspense" {
-			// Region render failed or no frame — keep the baked content.
+			// Region render failed or no frame - keep the baked content.
 			_, _ = w.Write([]byte(shell[b.fbStart:b.fbEnd]))
 		}
 		// Standalone runtime regions with no frame leave the empty slot empty.
@@ -503,7 +503,7 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, absOut, route
 
 // replaceTitle swaps the baked <title> content in a shell for a freshly
 // rendered one. Minified shells may have unquoted/empty titles; a simple
-// scan/replace on the first <title>…</title> span is sufficient.
+// scan/replace on the first <title>...</title> span is sufficient.
 func replaceTitle(shell, title string) string {
 	re := regexp.MustCompile(`(?i)<title[^>]*>[\s\S]*?</title>`)
 	loc := re.FindStringIndex(shell)
@@ -718,7 +718,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		fmt.Printf("  %s⚡%s SSR renderer → %shttp://localhost:%d%s\n", cCyan, cReset, cCyan, ssrPort, cReset)
 	}
 
-	// SSR/ISR/Streaming route handler — intercepts before static file server
+	// SSR/ISR/Streaming route handler - intercepts before static file server
 	if ssrStarted {
 		mux.HandleFunc("/__krate/ssr/", func(w http.ResponseWriter, r *http.Request) {
 			// Forward internal SSR endpoints to the renderer
@@ -767,7 +767,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// A concrete static file beats any dynamic [param] pattern: /items/alpha
 		// must resolve to the static page, not the /items/[id] template.
 		if !staticRouteExists(absOut, r.URL.Path) {
-			// Check dynamic routes — if a URL matches a [param] pattern, serve the template
+			// Check dynamic routes - if a URL matches a [param] pattern, serve the template
 			for _, dr := range dynRoutes {
 				if staticOnlyRoutes[normalizeRoutePattern(dr.pattern)] {
 					// Static-only route: valid params were baked at build time and
@@ -959,7 +959,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		})
 	}
 
-	// SSR/ISR/Streaming page handler — proxies dynamic pages to the Node.js renderer
+	// SSR/ISR/Streaming page handler - proxies dynamic pages to the Node.js renderer
 	var ssrPageHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !ssrStarted {
 			handlerWith404.ServeHTTP(w, r)
@@ -974,13 +974,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Match the URL against route patterns to extract dynamic params (e.g.
 		// [id]). For a dynamic-route page the shell and the region render live
 		// under the CANONICAL pattern route (e.g. "video/[id]/index.html" +
-		// manifest route "/video/[id]"), not the concrete URL — the sidecar
+		// manifest route "/video/[id]"), not the concrete URL - the sidecar
 		// resolves the pattern and keys ISR cache variants by params. So the
 		// canonical route is what everything downstream uses.
 		page, params := ssr.FindPageForRoute(route)
 
 		// Request-time pages (ssr/isr/streaming) MUST go through the sidecar
-		// even when a concrete static file was baked at build time — a
+		// even when a concrete static file was baked at build time - a
 		// pre-generated ISR variant (generateStaticParams) or a streaming shell
 		// still needs request-time rendering/revalidation. Serving the static
 		// file would freeze it at the build timestamp forever (no revalidate,
@@ -1082,7 +1082,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 
 		// No region markers in the shell: this page is fully static (its body
-		// was baked with nothing request-time to render — e.g. a page the global
+		// was baked with nothing request-time to render - e.g. a page the global
 		// streaming override marked dynamic but that contains no dynamic
 		// regions). Serve the baked shell directly; there is nothing to fetch
 		// from the sidecar.
@@ -1099,7 +1099,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		handlerWith404.ServeHTTP(w, r)
 	})
 
-	// Redirect/rewrite middleware — applies config-based URL transformations
+	// Redirect/rewrite middleware - applies config-based URL transformations
 	var redirectRewriteHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
@@ -1129,7 +1129,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		ssrPageHandler.ServeHTTP(w, r)
 	})
 
-	// User middleware handler — calls middleware.ts via embedded quickjs or sidecar
+	// User middleware handler - calls middleware.ts via embedded quickjs or sidecar
 	middlewareFile := filepath.Join(root, ".krate", "middleware.js")
 	var middlewareHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip __krate internal endpoints and API routes
@@ -1289,7 +1289,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	}
 	fmt.Printf("%s  %s server → %shttp://localhost:%d%s %s(started in %s)%s\n", cGreen, label, cCyan, addr.Port, cReset, cGray, time.Since(startTime).Round(time.Millisecond), cReset)
 
-	// Start ISR background revalidation — one timer per page, each route
+	// Start ISR background revalidation - one timer per page, each route
 	// revalidating on its own cadence (previously every ISR page was revalidated
 	// together on the shortest interval, stampeding every request at once). The
 	// refresh is non-destructive: the sidecar re-renders each cached variant in
@@ -1512,7 +1512,7 @@ func rewriteDestination(path, source, destination string) string {
 }
 
 // staticRouteExists reports whether the output dir holds a concrete static
-// file for the URL path — in which case dynamic [param] routing must give way.
+// file for the URL path - in which case dynamic [param] routing must give way.
 func staticRouteExists(absOut, urlPath string) bool {
 	up, err := url.PathUnescape(urlPath)
 	if err != nil {
@@ -1538,11 +1538,10 @@ func staticRouteExists(absOut, urlPath string) bool {
 
 // shouldServeStatic reports whether a request should be answered from the
 // baked static build instead of the request-time (sidecar) pipeline.
-//
 // A concrete static file always wins for SSG pages (or unmatched routes) so it
 // can shadow a sibling dynamic [param] template. But a page the manifest
 // registers as ssr/isr/streaming MUST NOT be served statically even when the
-// build baked a concrete file for it — a pre-generated ISR variant
+// build baked a concrete file for it - a pre-generated ISR variant
 // (generateStaticParams) or a streaming shell still needs request-time
 // rendering/revalidation, and serving the baked bytes would freeze the page at
 // its build timestamp (no revalidate, no fresh region content).
@@ -1645,7 +1644,7 @@ func matchDynamicRoute(urlPath, pattern string) (map[string]string, bool) {
 // request: it injects the matched params for client-side access and replaces
 // every build-time sentinel (see dynamicParamSentinel) with the matched URL
 // segment. Because the template is built with sentinels wherever the param is
-// read — body text, <title>, and meta attributes — a single replacement pass
+// read - body text, <title>, and meta attributes - a single replacement pass
 // covers the whole page. Values are HTML-escaped, which is correct in both
 // text and double-quoted attribute contexts.
 func applyDynamicRouteParams(templateHTML string, params map[string]string) string {

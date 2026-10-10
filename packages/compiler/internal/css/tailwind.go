@@ -371,7 +371,7 @@ func classToRule(cls string, theme TailwindTheme) (text, key string) {
 // borderWidthCSS resolves a border width utility (sides and shorthands) so all
 // forms emit a consistent, visible border (width + solid style). It only matches
 // width forms: `border`, `border-2`, `border-t`, `border-t-2`, `border-t-[3px]`,
-// `border-x-2`, etc. — never colors (`border-red-500`) or styles.
+// `border-x-2`, etc. - never colors (`border-red-500`) or styles.
 func borderWidthCSS(cls string) string {
 	width := func(v string) string {
 		if v == "" {
@@ -507,14 +507,14 @@ func validCSSValue(val string) bool {
 			return true
 		}
 		// Accept any identifier-shaped keyword (e.g. `isolate`, `break-spaces`,
-		// `tabular-nums`, `preserve-3d`) — CSS keywords are lowercase idents.
+		// `tabular-nums`, `preserve-3d`) - CSS keywords are lowercase idents.
 		return cssIdentifierRe.MatchString(val)
 	}
 	return true
 }
 
 // isBareKeyword reports whether val contains no digits, units, %, functions or
-// other value punctuation — i.e. it can only be a keyword or identifier.
+// other value punctuation - i.e. it can only be a keyword or identifier.
 func isBareKeyword(val string) bool {
 	for _, r := range val {
 		switch {
@@ -540,7 +540,7 @@ var keywordWhitelist = map[string]bool{
 }
 
 // negateCSS generates the positive form of a utility and negates the numeric
-// values in its declarations (for `-mt-4`, `-translate-x-1/2`, `-top-2`, …).
+// values in its declarations (for `-mt-4`, `-translate-x-1/2`, `-top-2`, ...).
 func negateCSS(positive string, theme TailwindTheme) string {
 	css := generateCSS(positive, theme)
 	if css == "" {
@@ -619,7 +619,7 @@ func fractionPercent(key string) (string, bool) {
 		return "", false
 	}
 	pct := num / den * 100
-	// Tailwind rounds repeating fractions to 6 decimal places (1/3 → 33.333333%).
+	// Tailwind rounds repeating fractions to 6 decimal places (1/3 -> 33.333333%).
 	s := strconv.FormatFloat(pct, 'f', 6, 64)
 	s = strings.TrimRight(s, "0")
 	s = strings.TrimRight(s, ".")
@@ -1147,7 +1147,7 @@ func generateCSS(cls string, theme TailwindTheme) string {
 		return fmt.Sprintf("max-height: %s;", heightValue(match[1], theme))
 	}
 
-	// Size shorthand: size-4 → width + height.
+	// Size shorthand: size-4 -> width + height.
 	if match := regexp.MustCompile(`^size-(.+)$`).FindStringSubmatch(cls); match != nil {
 		v := sizingValue(match[1], theme)
 		return fmt.Sprintf("width: %s; height: %s;", v, v)
@@ -1257,7 +1257,7 @@ func generateCSS(cls string, theme TailwindTheme) string {
 		return "font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;"
 	}
 
-	// Line height: numeric maps through the spacing scale (leading-6 → 1.5rem).
+	// Line height: numeric maps through the spacing scale (leading-6 -> 1.5rem).
 	if match := leadingRe.FindStringSubmatch(cls); match != nil {
 		key := match[1]
 		if v, ok := theme.LineHeight[key]; ok {
@@ -1455,7 +1455,7 @@ func generateCSS(cls string, theme TailwindTheme) string {
 		return fmt.Sprintf("outline-width: %spx;", match[1])
 	}
 
-	// Border radius (base). `rounded` (no suffix) → theme default ("").
+	// Border radius (base). `rounded` (no suffix) -> theme default ("").
 	if cls == "rounded" {
 		return "border-radius: " + radiusValue("", theme) + ";"
 	}
@@ -1812,7 +1812,7 @@ func generateCSS(cls string, theme TailwindTheme) string {
 		return "transform-origin: " + match[1] + ";"
 	}
 
-	// Ring (box-shadow ring) — width, color, offset, inset.
+	// Ring (box-shadow ring) - width, color, offset, inset.
 	if cls == "ring" {
 		return "--tw-ring-offset-shadow: var(--tw-ring-inset, ) 0 0 0 var(--tw-ring-offset-width,0px) var(--tw-ring-offset-color,#fff); --tw-ring-shadow: var(--tw-ring-inset, ) 0 0 0 calc(3px + var(--tw-ring-offset-width,0px)) var(--tw-ring-color,rgb(59 130 246 / 0.5)); box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000);"
 	}
@@ -2054,8 +2054,8 @@ func generateCSS(cls string, theme TailwindTheme) string {
 }
 
 // spacingValue resolves a spacing key. The named scale wins; otherwise any
-// numeric key is a multiple of the 0.25rem spacing base (p-13 → 3.25rem,
-// p-13.5 → 3.375rem), matching Tailwind's JIT behavior.
+// numeric key is a multiple of the 0.25rem spacing base (p-13 -> 3.25rem,
+// p-13.5 -> 3.375rem), matching Tailwind's JIT behavior.
 func spacingValue(key string, theme TailwindTheme) string {
 	if val, ok := theme.Spacing[key]; ok {
 		return val

@@ -2,7 +2,6 @@
 // exposes to both JavaScript and Go plugins: resolving/reading files against the
 // project root and node_modules, and writing static assets into the project
 // root. Every function anchors paths to the project root and rejects traversal.
-//
 // The JavaScript capability host functions (internal/plugin) and the public Go
 // SDK (pluginsdk) both delegate here so the security guards live in one place.
 package pluginapi
@@ -35,9 +34,8 @@ func WithinRoot(root, p string) bool {
 // SafeJoin joins rel onto root and verifies the result is inside root both
 // lexically and after resolving symlinks. The final path component may not
 // exist yet (writes), so symlinks are resolved on the deepest existing
-// ancestor — this catches a symlinked directory inside the project that points
+// ancestor - this catches a symlinked directory inside the project that points
 // outside it before a file is written through it.
-//
 // It returns the absolute path to use for the operation.
 func SafeJoin(root, rel string) (string, error) {
 	rootAbs, err := filepath.Abs(root)
@@ -91,13 +89,14 @@ func isPathLike(spec string) bool {
 }
 
 // Resolve turns a plugin file specifier into an absolute path.
-//
 //   - Absolute paths are cleaned and must live under root.
 //   - Explicit relative paths ("./", "../") resolve against root and must stay
 //     inside it.
-//   - Bare specifiers resolve through node_modules (walking up from root) —
-//     including subpaths like "pkg/styles/x.css" and "@scope/pkg/src/y" — and
-//     otherwise fall back to a root-relative file.
+//
+// - Bare specifiers resolve through node_modules (walking up from root) -
+// including subpaths like "pkg/styles/x.css" and "@scope/pkg/src/y" - and
+//
+//	otherwise fall back to a root-relative file.
 //
 // The resolved path must exist. Traversal outside root is rejected.
 func Resolve(root, spec string) (string, error) {

@@ -138,7 +138,7 @@ export interface CSSPrimitiveOptions<T extends string | number> extends CSSARIAO
  * every `createCSSChoice` declaration at build time into hidden radio inputs +
  * `:has()` CSS, so it is **never** emitted to the client at runtime. Reading the
  * getter as JSX text (`{tab()}`) compiles to a live value driven by the
- * inherited `--krate-current` custom property — still zero JS. Custom `vars`
+ * inherited `--krate-current` custom property - still zero JS. Custom `vars`
  * publish more inheritable properties for computed text/themes.
  *
  * If a component cannot be compiled to CSS the build does not fall back; it
@@ -190,7 +190,7 @@ export function createCSSFlags<K extends string>(
 }
 
 /**
- * Zero-JS optional radio group (`createCSSGroup`) — an accordion, disclosure,
+ * Zero-JS optional radio group (`createCSSGroup`) - an accordion, disclosure,
  * dialog, menu, or popover. `null` means "closed". Compiler-erased like the
  * other CSS primitives; the runtime body is a type-checking shim only.
  */
@@ -202,7 +202,7 @@ export function createCSSGroup<T extends string | number>(
 }
 
 /**
- * Zero-JS discrete range (`createCSSRange`) — a stepped slider, stepper, or
+ * Zero-JS discrete range (`createCSSRange`) - a stepped slider, stepper, or
  * progress indicator. Values are integers from `min` to `max` by `step`.
  * Compiler-erased; the runtime body is a type-checking shim only.
  */
@@ -221,7 +221,7 @@ export interface CSSStackActions<K extends string> {
 }
 
 /**
- * Zero-JS navigation stack (`createCSSStack`) — a declared tree of nested
+ * Zero-JS navigation stack (`createCSSStack`) - a declared tree of nested
  * panels for drill-down menus and multi-level drawers. The compiler infers the
  * tree from where each literal `push('node')` appears; `top()` reads the
  * deepest open node. Compiler-erased; the runtime body is a shim only.
@@ -447,7 +447,7 @@ export function createMemo<T>(fn: () => T): () => T {
 
 /**
  * Reducer state primitive: a `createSignal` whose setter applies a reducer.
- * Returns `[getter, dispatch]` — the getter contract matches `createSignal`, so
+ * Returns `[getter, dispatch]` - the getter contract matches `createSignal`, so
  * compiler slot bindings read it as `getter()` and hydration treats it like any
  * other signal. Used both directly and as the lowering target for React's
  * `useReducer`.

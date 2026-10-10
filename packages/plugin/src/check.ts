@@ -3,7 +3,7 @@
  *
  * A custom rule module (referenced from `checks.custom` in krate.config.ts)
  * exports a `check(page, krate)` function returning findings. Modules run in
- * Krate's embedded QuickJS runtime at check time — no Node, no subprocess.
+ * Krate's embedded QuickJS runtime at check time - no Node, no subprocess.
  *
  * ```ts
  * import { defineCheckRule } from "@krate/plugin";

@@ -83,7 +83,7 @@ export function initRouter(): void {
   // marketing layout's <main> and the docs layout's `.docs-page`) swaps the
   // whole shell instead of reconciling mismatched tree shapes (which dropped
   // the docs navbar/sidebar while still loading its CSS). Within one shell the
-  // diff preserves unchanged nodes (sidebar/TOC) by key, so docs↔docs stays
+  // diff preserves unchanged nodes (sidebar/TOC) by key, so docs<->docs stays
   // cheap.
   const CONTENT_SEL = '#root, main, .docs-content';
   const TRANSITION_MS = 150;
@@ -397,7 +397,7 @@ export function initRouter(): void {
       }
 
       // Replace the entire app shell. This is deterministic for ANY page pair
-      // (docs↔docs, marketing↔docs, different layouts): no structural mismatch
+      // (docs<->docs, marketing<->docs, different layouts): no structural mismatch
       // can drop chrome. The new page's scripts re-hydrate below, and View
       // Transitions keep the visual transition smooth.
       const nodes = Array.from(newContent.childNodes).map((n) => document.importNode(n, true));
@@ -537,7 +537,7 @@ export function initRouter(): void {
       const s = document.createElement('script');
       const resolved = resolveSrc(src, baseUrl);
       s.src = resolved;
-      // Only page scripts are disposable across navigations — the shared
+      // Only page scripts are disposable across navigations - the shared
       // runtime chunk stays in place.
       if (!RUNTIME_CHUNK_RE.test(resolved)) s.setAttribute('data-krate-spa', '');
       s.onload = () => resolve();
@@ -633,7 +633,7 @@ export function initRouter(): void {
   ): void {
     const seq = ++navSeq;
 
-    // Check prefetch cache first — already-loaded content swaps instantly.
+    // Check prefetch cache first - already-loaded content swaps instantly.
     const cached = prefetchCache.get(url);
     if (cached) {
       const parser = new DOMParser();
@@ -663,7 +663,7 @@ export function initRouter(): void {
           return page.then((html) => {
             if (seq !== navSeq) return;
             if (html) {
-              // Error pages contain full layout — full page replacement
+              // Error pages contain full layout - full page replacement
               replacePage(html, url);
             } else {
               location.href = url;
@@ -693,7 +693,7 @@ export function initRouter(): void {
   }
 
   const clickHandler = (e: MouseEvent) => {
-    // Never intercept modified clicks (cmd/ctrl/shift/alt or middle button) —
+    // Never intercept modified clicks (cmd/ctrl/shift/alt or middle button) -
     // they should open in a new tab or trigger browser behavior.
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = (e.target as HTMLElement).closest('a[data-krate-link]') as HTMLAnchorElement | null;

@@ -1,5 +1,4 @@
 // Package astprint renders an *ast.Program back to TypeScript/JSX source.
-//
 // The Krate parser is intentionally lossy: it drops type-only constructs
 // (interfaces, type aliases, enums, classes) and all type annotations, because
 // they carry no runtime meaning for hydration. This printer therefore only
@@ -43,7 +42,7 @@ func (p *printer) line(n int, s string) {
 	p.b.WriteString("\n")
 }
 
-// ── statements ──────────────────────────────────────────────────────────────
+// statements
 
 func (p *printer) stmt(s ast.Stmt, depth int) {
 	switch v := s.(type) {
@@ -147,7 +146,7 @@ func (p *printer) export(e *ast.ExportStmt, depth int) {
 			p.line(depth, "export default "+p.expr(es.Expression)+";")
 			return
 		}
-		// `export default function ...` — print the declaration with a prefix.
+		// `export default function ...` - print the declaration with a prefix.
 		p.exported(e.Declaration, depth, "export default ")
 	case e.Declaration != nil:
 		p.exported(e.Declaration, depth, "export ")
@@ -289,7 +288,7 @@ func (p *printer) tryStmt(t *ast.TryStmt, depth int) {
 	p.line(depth, "}")
 }
 
-// ── helpers for statement text ──────────────────────────────────────────────
+// helpers for statement text
 
 func printImport(i *ast.ImportStmt) string {
 	var parts []string

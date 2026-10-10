@@ -16,12 +16,11 @@ import (
 
 // buildDiskCache persists per-page build outputs across runs so a rebuild with
 // unchanged inputs can skip bundling + compilation + emit entirely.
-//
 // A page is keyed by a fingerprint of its transitive input files (source,
 // imports, layouts, loading, CSS, assets), the build config, the codegen'd
 // content hash, and the compiler version. When every input's content hash is
-// unchanged the cached PageResult is replayed (its side effects — hydration JS,
-// asset copies, worker/chunk registration, dep graph — are re-applied) and the
+// unchanged the cached PageResult is replayed (its side effects - hydration JS,
+// asset copies, worker/chunk registration, dep graph - are re-applied) and the
 // page pipeline is skipped.
 type buildDiskCache struct {
 	dir         string
@@ -79,7 +78,7 @@ type diskPageEntry struct {
 // diskCacheEnabled reports whether the cross-run page cache is active. It is
 // disabled by KRATE_NO_BUILD_CACHE, when sourcemaps are enabled (their sidecar
 // bytes aren't replayed), when a native plugin has per-page hooks, and when any
-// community (JS/TS) plugin is configured — we can't statically prove it lacks
+// community (JS/TS) plugin is configured - we can't statically prove it lacks
 // per-page hooks, so page output could not be replayed faithfully.
 func diskCacheEnabled(sourcemap, hasPerPageHooks, hasCommunityPlugins bool) bool {
 	if os.Getenv("KRATE_NO_BUILD_CACHE") != "" {
@@ -121,8 +120,8 @@ var (
 )
 
 // compilerBuildStamp identifies the running compiler by the content hash of its
-// own executable. Unlike the embedded semantic version — which is "dev" for
-// every unstamped local `go build` — this changes the moment the compiler is
+// own executable. Unlike the embedded semantic version - which is "dev" for
+// every unstamped local `go build` - this changes the moment the compiler is
 // rebuilt, so a development binary can never replay output produced by a
 // different compiler, while identical binaries (repeat builds, released
 // compilers, the same binary copied between paths) still share cache entries.

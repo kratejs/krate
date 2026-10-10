@@ -10,7 +10,7 @@ import (
 )
 
 // TestBuildPageDynamicImport verifies that `import('./widget.ts')` in a page is
-// resolved: the hydration JS references a hashed /chunks/… URL and a real
+// resolved: the hydration JS references a hashed /chunks/... URL and a real
 // esbuild-bundled ES module is emitted (including the chunk's own imports).
 func TestBuildPageDynamicImport(t *testing.T) {
 	root := t.TempDir()

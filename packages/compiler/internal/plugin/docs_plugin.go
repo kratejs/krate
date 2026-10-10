@@ -141,9 +141,9 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 	}
 	var bundles []docsBundle
 	var allPages []docs.Page
-	localeAlts := map[string]map[string]string{}  // version\x00path → locale → URL
-	versionAlts := map[string]map[string]string{} // locale\x00path → version → URL
-	versionRoot := map[string]string{}            // locale\x00version → landing URL
+	localeAlts := map[string]map[string]string{}  // version\x00path -> locale -> URL
+	versionAlts := map[string]map[string]string{} // locale\x00path -> version -> URL
+	versionRoot := map[string]string{}            // locale\x00version -> landing URL
 
 	gitLast := opts.LastUpdated == nil || *opts.LastUpdated
 	exclude := excludedSegments(locales, defaultLocale, versions, currentVersion)
@@ -258,7 +258,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 
 			// The build derives a generated page's route from its path under
 			// .krate/gen, so the file path must mirror the final route exactly
-			// (e.g. route "fr/docs/getting-started" → .krate/gen/fr/docs/getting-started.tsx).
+			// (e.g. route "fr/docs/getting-started" -> .krate/gen/fr/docs/getting-started.tsx).
 			route := docsRoute(page.Locale, defaultLocale, page.Version, currentVersion, page.Path)
 			tsxPath := filepath.Join(genRoot, filepath.FromSlash(route)+".tsx")
 
@@ -310,8 +310,8 @@ func trimComponentExt(s string) string {
 
 // resolvedDocsTheme is the outcome of resolving the docs plugin's layout/theme
 // option. Exactly one of module/spec is set:
-//   - module: absolute layout file path — emit a relative import from each page.
-//   - spec:   bare npm specifier — keep it as-is so the theme's CSS and
+//   - module: absolute layout file path - emit a relative import from each page.
+//   - spec: bare npm specifier - keep it as-is so the theme's CSS and
 //     sub-components flow through the bundler's node_modules resolution.
 type resolvedDocsTheme struct {
 	module  string
@@ -395,7 +395,6 @@ func themeLayoutConflict(root, layout, themeName, themePath string) error {
 // resolveDocsTheme resolves the docs plugin's layout/theme options into an
 // importable layout component. It honors both the legacy `layout` option and
 // the `theme` alias:
-//
 //   - theme (""| nothing) + layout -> root-relative file, like today.
 //   - theme "./path" (or "/abs")  -> alias of layout; error if both are set and
 //     resolve to different components.

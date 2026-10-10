@@ -423,7 +423,7 @@ func TestAPIRouteEsbuildMinified(t *testing.T) {
 		t.Errorf("Expected 201, got %d", result.Status)
 	}
 
-	// Test POST with missing fields → 400
+	// Test POST with missing fields -> 400
 	result = rt.Execute(APIRequest{
 		Method:  "POST",
 		Path:    "/api/videos",

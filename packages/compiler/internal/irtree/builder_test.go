@@ -28,7 +28,7 @@ func configWithServer(names ...string) *config.Config {
 	return &config.Config{ServerComponents: names}
 }
 
-// ─── Fragment children ───────────────────────────────────────────────────────
+// Fragment children
 
 func TestBuildFragmentFlattensMixedChildren(t *testing.T) {
 	tree := annotateAndBuild(t, `export default function App() {
@@ -70,7 +70,7 @@ func TestBuildFragmentEscapesTextExpression(t *testing.T) {
 	}
 }
 
-// ─── Keyed list slots ────────────────────────────────────────────────────────
+// Keyed list slots
 
 func TestBuildKeyedListWithLiteralArray(t *testing.T) {
 	tree := annotateAndBuild(t, `export default function App() {
@@ -152,7 +152,7 @@ func TestBuildListSlotSubstitutesIndexParam(t *testing.T) {
 	}
 }
 
-// ─── Nested components ───────────────────────────────────────────────────────
+// Nested components
 
 func TestBuildNestedComponentSlot(t *testing.T) {
 	src := `function Header() { return <h1>hi</h1>; }
@@ -204,7 +204,7 @@ export default function App() { return <div><Counter /></div>; }`
 	}
 }
 
-// ─── Runtime / server tier components ────────────────────────────────────────
+// Runtime / server tier components
 
 func TestBuildRuntimeComponentSlotIsPlaceholder(t *testing.T) {
 	src := `function RuntimeWidget(props) { return <div>{props.label}</div>; }
@@ -262,7 +262,7 @@ export default function App() { return <div><ServerWidget title="t" /></div>; }`
 	}
 }
 
-// ─── Text escaping in static value slots ────────────────────────────────────
+// Text escaping in static value slots
 
 func TestBuildEscapesTemplateLiteralInTextPosition(t *testing.T) {
 	// Mirrors the <Code>{`function App() { return <h1>Hello</h1>; }`}</Code> case:
@@ -400,7 +400,7 @@ func TestBuildMetaSlotKeepsScriptRaw(t *testing.T) {
 	}
 }
 
-// ─── <SyntaxHighlight> compile-time chroma through {children} ────────────────
+// <SyntaxHighlight> compile-time chroma through {children}
 
 func findStaticHTML(children []irtree.SlotNode, pred func(string) bool) bool {
 	for _, child := range children {
@@ -456,7 +456,7 @@ export default function Page() {
 	}
 }
 
-// ─── useRef object refs ──────────────────────────────────────────────────────
+// useRef object refs
 
 func TestRefBindingUseRefObjectAssignsCurrent(t *testing.T) {
 	src := `export default function App() {
@@ -578,7 +578,7 @@ func TestBuildSuspenseBoundaryStaticFallback(t *testing.T) {
 }
 
 func TestBuildSuspenseBoundaryRuntimePrimary(t *testing.T) {
-	// Primary is a runtime-tier component (via config) → ModeRegion + Primary.
+	// Primary is a runtime-tier component (via config) -> ModeRegion + Primary.
 	src := `function Live() { return <p>live</p>; }
 export default function App() {
 	return <Suspense fallback={<span>loading</span>}><Live /></Suspense>;
@@ -611,7 +611,7 @@ export default function App() {
 }
 
 func TestBuildSuspenseBoundaryDefaultNoFallback(t *testing.T) {
-	// No fallback, empty boundary → ModeDefault, empty fallback.
+	// No fallback, empty boundary -> ModeDefault, empty fallback.
 	tree := annotateAndBuild(t, `export default function App() {
 	return <Suspense></Suspense>;
 }`)
@@ -635,7 +635,7 @@ func TestBuildSuspenseBoundaryDefaultNoFallback(t *testing.T) {
 func TestBuildSuspenseBoundaryNestedRuntimeRegion(t *testing.T) {
 	// A runtime component nested inside a non-runtime wrapper element: the
 	// static wrappers are baked as the boundary's resolved content and the
-	// nested runtime component becomes its own standalone region — a boundary
+	// nested runtime component becomes its own standalone region - a boundary
 	// alone has no component/bundle identity the sidecar could render, so it
 	// must not be deferred as an anonymous whole.
 	src := `function Live() { return <p>live</p>; }
@@ -695,7 +695,7 @@ func findConditional(children []irtree.SlotNode) bool {
 }
 
 // TestBuildPropsGuardLengthFolds verifies that guards reading a prop array's
-// `.length` (e.g. `{props.actions && props.actions.length > 0 && <div>…</div>}`)
+// `.length` (e.g. `{props.actions && props.actions.length > 0 && <div>...</div>}`)
 // fold at build time so SSR renders the real markup instead of an empty
 // hydration-only ConditionalSlot wrapper. Regression: resolveMemberChainValue
 // could not hop `.length` over a resolved array literal, so the guard leaked
@@ -763,7 +763,7 @@ export default function App() {
 }`)
 	}
 
-	// tocHidden: true → negation false → nothing renders.
+	// tocHidden: true -> negation false -> nothing renders.
 	hidden := build(t, `tocHidden={true}`)
 	if findStaticHTML(hidden.Root.Children, func(html string) bool {
 		return strings.Contains(html, `class="toc"`)
@@ -774,7 +774,7 @@ export default function App() {
 		t.Error("expected negated guard to fold, got a ConditionalSlot")
 	}
 
-	// no tocHidden → undefined is falsy → !undefined is true → TOC renders.
+	// no tocHidden -> undefined is falsy -> !undefined is true -> TOC renders.
 	visible := build(t, ``)
 	if !findStaticHTML(visible.Root.Children, func(html string) bool {
 		return strings.Contains(html, `class="toc"`)
@@ -786,7 +786,7 @@ export default function App() {
 	}
 }
 
-// ─── showIf / visibleIf sugar ────────────────────────────────────────────────
+// showIf / visibleIf sugar
 
 // TestShowIfStaticTruthyFolds verifies that a `showIf` whose test is statically
 // true renders the element (with the attribute stripped) and does not produce a

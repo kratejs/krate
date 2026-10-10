@@ -1,6 +1,6 @@
 // Package jseval evaluates TypeScript/JavaScript in-process: it bundles an entry
 // module (resolving imports) with esbuild and runs it in the embedded QuickJS
-// runtime — no Node, no tsx, no subprocess. It backs build-time evaluation of
+// runtime - no Node, no tsx, no subprocess. It backs build-time evaluation of
 // user TS such as krate.config.ts and tailwind.config.ts.
 package jseval
 

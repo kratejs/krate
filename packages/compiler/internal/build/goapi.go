@@ -343,13 +343,12 @@ func parseGoRoute(apiSrcDir, file string, src []byte) (goRoute, bool, error) {
 
 // writeGoAPIModule resolves and writes .krate/goapi/go.mod (plus go.sum when
 // available), returning the module path used for import rewriting.
-//
 // Precedence:
-//  1. src/api/go.mod — copied verbatim (full user control).
-//  2. project-root go.mod — module path kept (default "krate-goapi"), copying
+//  1. src/api/go.mod - copied verbatim (full user control).
+//  2. project-root go.mod - module path kept (default "krate-goapi"), copying
 //     the root's go version and require/replace/exclude directives, rebasing
 //     relative replace targets for the deeper directory.
-//  3. generated module — "krate-goapi" + config deps/replaces.
+//  3. generated module - "krate-goapi" + config deps/replaces.
 func writeGoAPIModule(modDir, apiSrcDir, root string, cfg config.GoAPICfg) (string, error) {
 	modulePath := cfg.Module
 	if modulePath == "" {

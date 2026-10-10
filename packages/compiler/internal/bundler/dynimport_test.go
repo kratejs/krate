@@ -11,7 +11,7 @@ import (
 
 // TestDynamicImportRewrite verifies that `import('./widget.ts')` resolves and
 // registers the target in DynImportFiles, and rewrites the import argument to
-// its hashed /chunks/… URL so the built page fetches the bundled module.
+// its hashed /chunks/... URL so the built page fetches the bundled module.
 func TestDynamicImportRewrite(t *testing.T) {
 	tmp := t.TempDir()
 	pagesDir := filepath.Join(tmp, "src", "pages")

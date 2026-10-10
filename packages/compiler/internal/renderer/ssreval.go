@@ -211,7 +211,7 @@ func (e *SSREval) BindLocalVars(body []ast.Stmt) {
 				if decl.Name != "" && decl.Init != nil {
 					// Array literals are registered as arrays (not scalar
 					// bindings). An EMPTY array is registered too so a following
-					// `for (...) { name.push(<JSX/>) }` can append to it — the
+					// `for (...) { name.push(<JSX/>) }` can append to it - the
 					// common `var items = []; for (...) items.push(<X/>)` pattern.
 					if arr, ok := decl.Init.(*ast.ArrayExpr); ok && (hasJSX(arr) || len(arr.Elements) == 0) {
 						var elems []string
@@ -588,7 +588,7 @@ func (e *SSREval) Eval(expr ast.Expr) string {
 	case *ast.ObjectExpr:
 		return e.evalObjectExpr(ex)
 	case *ast.NewExpr:
-		// `new Date(...)` etc. — delegated to QuickJS so real constructors run.
+		// `new Date(...)` etc. - delegated to QuickJS so real constructors run.
 		if root := globalRoot(ex.Callee); globalBuiltins[root] {
 			return e.delegateJS(ex)
 		}
@@ -605,7 +605,7 @@ func (e *SSREval) eval(expr ast.Expr) string {
 	return e.Eval(expr)
 }
 
-// ─── Binary ────────────────────────────────────────────────────────────────
+// Binary
 
 func (e *SSREval) evalBinaryExpr(expr *ast.BinaryExpr) string {
 	left := e.eval(expr.Left)
@@ -721,7 +721,7 @@ func boolStr(b bool) string {
 	return "false"
 }
 
-// ─── Unary ─────────────────────────────────────────────────────────────────
+// Unary
 
 func (e *SSREval) evalUnaryExpr(expr *ast.UnaryExpr) string {
 	if expr.Op == "!" {
@@ -737,7 +737,7 @@ func (e *SSREval) evalUnaryExpr(expr *ast.UnaryExpr) string {
 	return e.eval(expr.Arg)
 }
 
-// ─── Conditional ───────────────────────────────────────────────────────────
+// Conditional
 
 func (e *SSREval) evalConditional(expr *ast.ConditionalExpr) string {
 	test := e.eval(expr.Test)
@@ -747,7 +747,7 @@ func (e *SSREval) evalConditional(expr *ast.ConditionalExpr) string {
 	return e.eval(expr.Alternate)
 }
 
-// ─── Member ────────────────────────────────────────────────────────────────
+// Member
 
 func (e *SSREval) evalMemberExpr(expr *ast.MemberExpr) string {
 	prop := ""
@@ -755,8 +755,8 @@ func (e *SSREval) evalMemberExpr(expr *ast.MemberExpr) string {
 		prop = id.Name
 	}
 
-	// Direct binding lookup: props.breadcrumbs → bindings["breadcrumbs"]
-	// Only applies when the object is `props` — a bare `item.url` must NOT
+	// Direct binding lookup: props.breadcrumbs -> bindings["breadcrumbs"]
+	// Only applies when the object is `props` - a bare `item.url` must NOT
 	// resolve from a top-level "url" binding (which could be a leftover prop
 	// from another component) but from the `item` object binding instead.
 	if prop != "" {
@@ -783,7 +783,7 @@ func (e *SSREval) evalMemberExpr(expr *ast.MemberExpr) string {
 					return val
 				}
 				// Property is missing (or the binding is not an object): return
-				// "" so `item.name` on a plain string (and `item.x ? … : …`)
+				// "" so `item.name` on a plain string (and `item.x ? ... : ...`)
 				// resolves to undefined/empty instead of rendering the whole
 				// binding value.
 				return ""
@@ -811,7 +811,7 @@ func (e *SSREval) evalMemberExpr(expr *ast.MemberExpr) string {
 
 // extractJSONProp is defined in eval.go and shared across the package.
 
-// ─── Call ──────────────────────────────────────────────────────────────────
+// Call
 
 func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 	// JSON.stringify
@@ -845,7 +845,7 @@ func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "toString" {
 			return e.eval(mem.Object)
 		}
-		// `X.useContext()` → the context default (no Provider at build time).
+		// `X.useContext()` -> the context default (no Provider at build time).
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "useContext" {
 			if id, ok := mem.Object.(*ast.Identifier); ok && e.contextDefaults != nil {
 				if def, found := e.contextDefaults[id.Name]; found {
@@ -861,7 +861,7 @@ func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "toLowerCase" {
 			return strings.ToLower(e.eval(mem.Object))
 		}
-		// .slice(start, end?) — strings (runes) and arrays (either \x1f-joined
+		// .slice(start, end?) - strings (runes) and arrays (either \x1f-joined
 		// or a JS array literal from a serialized binding).
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "slice" {
 			obj := e.eval(mem.Object)
@@ -1101,7 +1101,7 @@ func (e *SSREval) evalClassValue(expr ast.Expr) ([]string, bool) {
 	}
 }
 
-// ─── Template ──────────────────────────────────────────────────────────────
+// Template
 
 func (e *SSREval) evalTemplateExpr(expr *ast.TemplateExpr) string {
 	var b strings.Builder
@@ -1114,7 +1114,7 @@ func (e *SSREval) evalTemplateExpr(expr *ast.TemplateExpr) string {
 	return b.String()
 }
 
-// ─── JSX ───────────────────────────────────────────────────────────────────
+// JSX
 
 // resolveIconName evaluates the `name` attribute of an <Icon> element through
 // the eval bindings (props + local vars). Returns "" when the name is a
@@ -1178,7 +1178,7 @@ func (e *SSREval) isStaticExpr(expr ast.Expr) bool {
 // tryEvalSyntaxHighlight renders <SyntaxHighlight> as compile-time chroma
 // HTML. A {children} passthrough resolves from the current frame's raw
 // call-site text so chroma sees the original code. ok=false when any part of
-// the content isn't statically known — the caller then renders a plain code
+// the content isn't statically known - the caller then renders a plain code
 // block through the standard children rules instead of highlighting
 // placeholder values.
 func (e *SSREval) tryEvalSyntaxHighlight(el *ast.JSXElement) (string, bool) {
@@ -1355,7 +1355,7 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		}
 	}
 
-	// <SyntaxHighlight lang="...">code</SyntaxHighlight> — compile-time chroma
+	// <SyntaxHighlight lang="...">code</SyntaxHighlight> - compile-time chroma
 	// highlighting when the content is statically known; a plain code block
 	// through the standard children rules otherwise.
 	if name == "SyntaxHighlight" {
@@ -1378,11 +1378,11 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		if html, ok := e.evalSlot(el); ok {
 			return html
 		}
-		// No single element child — render children alone.
+		// No single element child - render children alone.
 		return e.evalChildren(el.Children)
 	}
 
-	// Uppercase = component — resolve and evaluate recursively
+	// Uppercase = component - resolve and evaluate recursively
 	if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
 		if e.interactiveEmit != nil {
 			if html, handled := e.interactiveEmit(el); handled {
@@ -1394,7 +1394,7 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 				return e.evalComponentFn(fn, el)
 			}
 		}
-		// Unknown component — skip
+		// Unknown component - skip
 		return ""
 	}
 
@@ -1425,7 +1425,7 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		if attr.Value != nil {
 			val = e.eval(attr.Value)
 		} else {
-			// Bare attribute like <input disabled /> — boolean true
+			// Bare attribute like <input disabled /> - boolean true
 			val = "true"
 		}
 		// A prop that resolved to undefined/null is omitted entirely (React
@@ -1484,7 +1484,7 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 
 	b.WriteByte('>')
 	if hasRawInnerHTML {
-		// The dangerouslySetInnerHTML value is pre-rendered markup — inject
+		// The dangerouslySetInnerHTML value is pre-rendered markup - inject
 		// it verbatim, ignoring children.
 		b.WriteString(rawInnerHTML)
 	} else {
@@ -1628,7 +1628,7 @@ func (e *SSREval) evalComponentFn(fn *ast.FnDecl, el *ast.JSXElement) string {
 			}
 			for _, param := range fn.Params {
 				if param.Name == "{...}" {
-					// Destructured param — map attr name directly
+					// Destructured param - map attr name directly
 					val := e.eval(attr.Value)
 					e.bindings[attr.Name] = val
 				} else if param.Name == attr.Name {
@@ -1787,7 +1787,7 @@ func (e *SSREval) evalFragment(frag *ast.JSXFragment) string {
 	return b.String()
 }
 
-// ─── JSX text escaping ──────────────────────────────────────────────────────
+// JSX text escaping
 
 // escapeContainerValue returns the evaluated value of a JSXExprContainer in a
 // text position. Element-producing expressions (JSX, .map() of JSX, ternaries
@@ -1803,7 +1803,7 @@ func (e *SSREval) escapeContainerValue(expr ast.Expr) string {
 func (e *SSREval) escapeContainerValueEvaluated(expr ast.Expr, v string) string {
 	if e.childrenIsHTML && isChildrenRef(expr) {
 		// The children binding was already rendered (and escaped) by the
-		// emitter's slot pipeline — injecting it raw is correct.
+		// emitter's slot pipeline - injecting it raw is correct.
 		return stripArraySep(v)
 	}
 	if e.isHTMLProducing(expr) {
@@ -1860,7 +1860,7 @@ func (e *SSREval) isHTMLProducing(expr ast.Expr) bool {
 	case *ast.ConditionalExpr:
 		return e.isHTMLProducing(t.Consequent) || e.isHTMLProducing(t.Alternate)
 	case *ast.BinaryExpr:
-		// `left && <el/>`, `left || <el/>` — the right operand can be markup.
+		// `left && <el/>`, `left || <el/>` - the right operand can be markup.
 		return e.isHTMLProducing(t.Right)
 	case *ast.CallExpr:
 		// `.map()` produces markup only when the callback body produces markup
@@ -1888,7 +1888,7 @@ func (e *SSREval) isHTMLProducing(expr ast.Expr) bool {
 	return false
 }
 
-// ─── Built-in delegation to QuickJS ─────────────────────────────────────────
+// Built-in delegation to QuickJS
 
 // globalBuiltins are ECMAScript globals that the Go SSR evaluator does not
 // implement. Calls/constructors rooted at these names are delegated to the
@@ -1934,7 +1934,7 @@ func (e *SSREval) delegateJS(expr ast.Expr) string {
 	return v
 }
 
-// ─── Array ─────────────────────────────────────────────────────────────────
+// Array
 
 func (e *SSREval) evalArrayExpr(expr *ast.ArrayExpr) string {
 	var parts []string
@@ -2027,7 +2027,7 @@ func unquoteJSString(s string) string {
 func splitJSArrayLiteral(s string) []string {
 	s = strings.TrimSpace(s)
 	if len(s) < 2 || s[0] != '[' || s[len(s)-1] != ']' {
-		// Not a well-formed array literal — fall back to whole string.
+		// Not a well-formed array literal - fall back to whole string.
 		if s == "" {
 			return nil
 		}
@@ -2071,7 +2071,7 @@ func splitJSArrayLiteral(s string) []string {
 	return items
 }
 
-// ─── Object ────────────────────────────────────────────────────────────────
+// Object
 
 func (e *SSREval) evalObjectExpr(expr *ast.ObjectExpr) string {
 	var parts []string
@@ -2108,6 +2108,6 @@ func isIdentString(s string) bool {
 	return true
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+// Helpers
 
 // stringLiteralValue is already defined in eval.go.

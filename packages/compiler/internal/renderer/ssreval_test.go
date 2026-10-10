@@ -22,7 +22,7 @@ func TestSSREvalUnsupportedExpressionErrors(t *testing.T) {
 
 // TestEmitUnsupportedExpressionFailsBuild verifies that a page whose
 // SSR-evaluated component uses an unsupported expression surfaces an error on
-// EmitResult.Errors — the build must fail rather than ship empty output.
+// EmitResult.Errors - the build must fail rather than ship empty output.
 func TestEmitUnsupportedExpressionFailsBuild(t *testing.T) {
 	// `{this}` appears in the return JSX of a signal-less (SSR-evaluated)
 	// component. The evaluator cannot resolve `this` at compile time.

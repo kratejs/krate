@@ -62,7 +62,7 @@ func themeOption(spec string) json.RawMessage {
 func TestResolveDocsThemeNoTheme(t *testing.T) {
 	root, _, p := newDocsFixture(t)
 
-	// Nothing set → no layout at all.
+	// Nothing set -> no layout at all.
 	got, err := p.resolveDocsTheme(root, &DocsPluginOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -71,7 +71,7 @@ func TestResolveDocsThemeNoTheme(t *testing.T) {
 		t.Errorf("expected nil theme when nothing set, got %+v", got)
 	}
 
-	// Legacy layout alone → root-relative component path.
+	// Legacy layout alone -> root-relative component path.
 	got, err = p.resolveDocsTheme(root, &DocsPluginOptions{Layout: "src/components/docs-layout.tsx"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -129,7 +129,7 @@ func TestResolveDocsThemeStringPath(t *testing.T) {
 func TestResolveDocsThemeBareSpecifier(t *testing.T) {
 	root, _, p := newDocsFixture(t)
 
-	// Missing package → error.
+	// Missing package -> error.
 	_, err := p.resolveDocsTheme(root, &DocsPluginOptions{Theme: themeOption("missing-theme")})
 	if err == nil {
 		t.Fatal("expected error for unresolvable theme package")
@@ -138,7 +138,7 @@ func TestResolveDocsThemeBareSpecifier(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	// Installed package → bare specifier emitted (module entry from `main`).
+	// Installed package -> bare specifier emitted (module entry from `main`).
 	writeThemePkg(t, root, "night-theme", map[string]interface{}{"main": "layout.js"})
 	got, err := p.resolveDocsTheme(root, &DocsPluginOptions{Theme: themeOption("night-theme")})
 	if err != nil {
@@ -164,7 +164,7 @@ func TestResolveDocsThemeBareSpecifier(t *testing.T) {
 		t.Errorf("spec = %q, want %q", got.spec, "@scope/pref-theme")
 	}
 
-	// Bare specifier with a layout set → conflict.
+	// Bare specifier with a layout set -> conflict.
 	writeThemePkg(t, root, "other-theme", map[string]interface{}{"main": "layout.js"})
 	_, err = p.resolveDocsTheme(root, &DocsPluginOptions{
 		Layout: "src/components/docs-layout.tsx",
@@ -233,7 +233,7 @@ func TestResolveDocsThemeDescriptor(t *testing.T) {
 		t.Errorf("spec = %q, want %q", got.spec, "pkg-theme")
 	}
 
-	// Descriptor with neither module nor layout → error.
+	// Descriptor with neither module nor layout -> error.
 	desc4 := DocsThemeDescriptor{Name: "empty-theme"}
 	data4, _ := json.Marshal(desc4)
 	_, err = p.resolveDocsTheme(root, &DocsPluginOptions{Theme: data4})
@@ -244,7 +244,7 @@ func TestResolveDocsThemeDescriptor(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	// Descriptor bare module + layout set → conflict.
+	// Descriptor bare module + layout set -> conflict.
 	_, err = p.resolveDocsTheme(root, &DocsPluginOptions{
 		Layout: "src/components/docs-layout.tsx",
 		Theme:  data3,

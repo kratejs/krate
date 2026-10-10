@@ -1,4 +1,4 @@
-// @krate/runtime/server-renderer — Node.js HTTP server for SSR/ISR/Streaming
+// @krate/runtime/server-renderer - Node.js HTTP server for SSR/ISR/Streaming
 // Receives render requests from the Go server and returns HTML.
 
 import http from "node:http";
@@ -17,7 +17,7 @@ function setupStream(res: http.ServerResponse) {
   }
 }
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// Types
 
 interface ManifestPage {
   route: string;
@@ -79,7 +79,7 @@ interface RenderResponse {
   cacheStatus?: CacheStatus;
 }
 
-// ── ISR Cache (variant-aware, SWR, persisted) ────────────────────────────────
+// ISR Cache (variant-aware, SWR, persisted)
 
 // A page's cache key is the route plus its per-request variant (params +
 // query). Two dynamic-route requests (e.g. /video/a and /video/b) render
@@ -197,7 +197,7 @@ function withRenderTimeout<T>(p: Promise<T>): Promise<T> {
   });
 }
 
-// ISR cache persistence — survives renderer restarts so a bounce doesn't
+// ISR cache persistence - survives renderer restarts so a bounce doesn't
 // cold-render every ISR variant. Written debounced (coalesced) to the build
 // output dir (.krate/isr-cache.json), overridable via KRATE_ISR_CACHE.
 let isrCacheFile = process.env.KRATE_ISR_CACHE || "";
@@ -236,7 +236,7 @@ function loadIsrCache() {
   }
 }
 
-// ── Page Module Loader ───────────────────────────────────────────────────────
+// Page Module Loader
 
 const moduleCache = new Map<string, any>();
 
@@ -268,7 +268,7 @@ async function loadPageModule(page: ManifestPage): Promise<any> {
   }
 }
 
-// ── Renderer ─────────────────────────────────────────────────────────────────
+// Renderer
 
 let manifest: ServerManifest | null = null;
 let projectRoot = "";
@@ -298,7 +298,7 @@ function buildProps(req: RenderRequest): Record<string, any> {
   return props;
 }
 
-// renderFresh renders a page component and — for ISR pages — stores the result.
+// renderFresh renders a page component and - for ISR pages - stores the result.
 // Extracted so background revalidation shares exactly the same render path.
 async function renderFresh(page: ManifestPage, req: RenderRequest): Promise<RenderResponse> {
   try {
@@ -365,7 +365,7 @@ function revalidateInBackground(page: ManifestPage, req: RenderRequest) {
 // keeping the entries in place. This is the non-destructive counterpart of
 // /__krate/ssr/revalidate (which clears a route). The Go server's periodic ISR
 // timer calls this so cached pages stay fresh without evicting dynamic
-// variants — eviction would turn a request that should be a HIT into a MISS.
+// variants - eviction would turn a request that should be a HIT into a MISS.
 const inFlightRouteRefreshes = new Map<string, Promise<number>>();
 
 function refreshRouteVariants(page: ManifestPage): Promise<number> {
@@ -439,12 +439,11 @@ async function renderPage(req: RenderRequest): Promise<RenderResponse> {
   return response;
 }
 
-// ── Region rendering (static-first) ──────────────────────────────────────────
-//
+// Region rendering (static-first)
 // The Go server owns the page: it serves the build-time static shell with the
-// <!—suspense:ID—> markers and baked fallbacks, then asks the sidecar to render
+// <!-suspense:ID-> markers and baked fallbacks, then asks the sidecar to render
 // ONLY the page's dynamic regions. Each region is rendered by its compiled
-// runtime component bundle (server-components/<Name>.runtime.js — an IIFE that
+// runtime component bundle (server-components/<Name>.runtime.js - an IIFE that
 // defines globalThis.__krate_render(propsJSON)) with the build-time baked props,
 // so nothing is re-derived at request time.
 
@@ -614,7 +613,7 @@ function extractTitle(html: string): string {
   return match ? match[1].trim() : "";
 }
 
-// ── HTTP Server ──────────────────────────────────────────────────────────────
+// HTTP Server
 
 const PORT = parseInt(process.env.KRATE_SSR_PORT || "3100", 10);
 const manifestPath = process.env.KRATE_MANIFEST || "";
@@ -730,7 +729,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ── /__krate/regions — render ONLY a page's dynamic regions ───────────────
+  // /__krate/regions - render ONLY a page's dynamic regions
   // One NDJSON frame per region, written as its own chunk so the Go server
   // forwards each region progressively and splices it into the static shell.
   // The Go server sends the splice markers it parsed from the shell; the
@@ -780,7 +779,7 @@ const server = http.createServer(async (req, res) => {
           if (region) {
             writeJsonLine(res, await renderRegion(page, region, renderReq));
           } else {
-            // Unknown region id — keep the baked content by sending no frame.
+            // Unknown region id - keep the baked content by sending no frame.
             writeJsonLine(res, { type: "skip", id: r.id });
           }
         }
@@ -794,7 +793,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ── Direct page requests (non-proxied) ──────────────────────────────────
+  // Direct page requests (non-proxied)
   // Collect request headers
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(req.headers)) {

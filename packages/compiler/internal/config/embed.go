@@ -11,7 +11,7 @@ import (
 )
 
 // executeEmbeddedTSConfig evaluates a module-based config in-process via
-// jseval (esbuild bundle + embedded QuickJS) — no Node or `npx tsx` subprocess.
+// jseval (esbuild bundle + embedded QuickJS) - no Node or `npx tsx` subprocess.
 func executeEmbeddedTSConfig(configPath string, cfg *Config) error {
 	root := filepath.Dir(configPath)
 

@@ -1,7 +1,7 @@
-// @krate/runtime/server — Server-side rendering runtime
+// @krate/runtime/server - Server-side rendering runtime
 // Provides the same API as the client runtime but renders to HTML strings.
 
-// ── Signal (server: returns initial value, no reactivity) ──────────────────────
+// Signal (server: returns initial value, no reactivity)
 
 export function createSignal<T>(initial: T): [() => T, (v: T | ((prev: T) => T)) => void] {
   let value = initial;
@@ -13,7 +13,7 @@ export function createSignal<T>(initial: T): [() => T, (v: T | ((prev: T) => T))
 }
 
 export function createEffect(_fn: () => void): () => void {
-  // No-op on server — effects only run on client
+  // No-op on server - effects only run on client
   return () => {};
 }
 
@@ -39,7 +39,7 @@ export function onMount(_fn: () => void): void {
   // and crash.
 }
 
-// ── JSX Runtime (server: renders to HTML strings) ─────────────────────────────
+// JSX Runtime (server: renders to HTML strings)
 
 interface RawHTML { __raw: string; }
 function raw(html: string): RawHTML { return { __raw: html }; }
@@ -68,7 +68,7 @@ export function jsx(type: string | Function, props: Record<string, any>, _key?: 
 
 export const jsxs = jsx;
 
-// ── HTML Rendering ────────────────────────────────────────────────────────────
+// HTML Rendering
 
 const VOID_ELEMENTS = new Set([
   "area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -136,7 +136,7 @@ function renderElement(el: JSXElement): string {
   return `<${tag}${attrs}>${inner}</${tag}>`;
 }
 
-// ── Streaming SSR via Suspense ────────────────────────────────────────────────
+// Streaming SSR via Suspense
 
 // Use globalThis for boundary counter so it's shared between the unbundled
 // server-renderer and esbuild-bundled page components (each gets its own copy).
@@ -176,15 +176,15 @@ export function Suspense(props: SuspenseProps): JSXNode {
   );
 }
 
-// ── Built-in Components (server stubs) ────────────────────────────────────────
+// Built-in Components (server stubs)
 
-// Head — renders children into the page head at build time.
+// Head - renders children into the page head at build time.
 // On the server, we just render children; the build pipeline extracts them.
 export function Head(props: { children?: JSXNode }): JSXNode {
   return props.children ?? "";
 }
 
-// Script — renders a <script> tag.
+// Script - renders a <script> tag.
 export function Script(props: { src?: string; children?: string }): JSXNode {
   if (props.src) {
     return `<script src="${escapeHTML(props.src)}"></script>`;
@@ -192,12 +192,12 @@ export function Script(props: { src?: string; children?: string }): JSXNode {
   return `<script>${props.children ?? ""}</script>`;
 }
 
-// Style — renders a <style> tag.
+// Style - renders a <style> tag.
 export function Style(props: { children?: string }): JSXNode {
   return `<style>${props.children ?? ""}</style>`;
 }
 
-// Link — renders an <a> tag wired for SPA navigation (server renderer).
+// Link - renders an <a> tag wired for SPA navigation (server renderer).
 export function Link(props: {
   href?: string;
   prefetch?: boolean;
@@ -236,7 +236,7 @@ export function Link(props: {
   return raw(`<a ${attrs.join(" ")}>${inner}</a>`);
 }
 
-// Image — renders an <img> tag (server stub; Go compiler handles full responsive output at build time).
+// Image - renders an <img> tag (server stub; Go compiler handles full responsive output at build time).
 export function Image(props: { src?: string; alt?: string; width?: number; height?: number; [key: string]: any }): JSXNode {
   const { src = "", alt = "", width, height, ...rest } = props;
   const attrs: string[] = [];
@@ -247,12 +247,12 @@ export function Image(props: { src?: string; alt?: string; width?: number; heigh
   return raw(`<img ${attrs.join(" ")} />`);
 }
 
-// Icon — renders an empty span placeholder (Go compiler handles SVG fetching at build time).
+// Icon - renders an empty span placeholder (Go compiler handles SVG fetching at build time).
 export function Icon(_props: { name?: string; [key: string]: any }): JSXNode {
   return raw("<span></span>");
 }
 
-// SyntaxHighlight — renders a <pre><code> block (Go compiler handles chroma highlighting at build time).
+// SyntaxHighlight - renders a <pre><code> block (Go compiler handles chroma highlighting at build time).
 export function SyntaxHighlight(props: { lang?: string; children?: any }): JSXNode {
   const lang = props.lang || "";
   const code = props.children != null ? String(props.children) : "";

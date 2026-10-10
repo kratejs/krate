@@ -24,7 +24,7 @@ type Parser struct {
 	// droppedTypes counts type-only constructs the parser intentionally
 	// discards (interfaces, type aliases, enums, classes, annotations,
 	// generics, `as`/angle-bracket casts). A non-zero count means the AST
-	// cannot reproduce the original source — used by tooling that round-trips
+	// cannot reproduce the original source - used by tooling that round-trips
 	// the AST back to source (see internal/astprint and the MCP edit_ast tool).
 	droppedTypes int
 
@@ -430,7 +430,7 @@ func (p *Parser) parseInterfaceDecl() ast.Stmt {
 		}
 	}
 heritage:
-	// `interface X extends A, B<C> ...` — skip the heritage clause up to the
+	// `interface X extends A, B<C> ...` - skip the heritage clause up to the
 	// body brace. Without this the `extends` clause is parsed as an expression
 	// statement and the interface body's `?:` members error.
 	if p.match(lexer.Extends_) {
@@ -526,7 +526,7 @@ func (p *Parser) parseImport() ast.Stmt {
 	pos := tokPos(p.next())
 	stmt := &ast.ImportStmt{Position: pos}
 
-	// Skip `type` in `import type {...}` — type-only imports carry no runtime
+	// Skip `type` in `import type {...}` - type-only imports carry no runtime
 	// binding, so they can be ignored by the hydration pipeline.
 	if isIdentifierToken(p.peek().Kind) && p.peek().Value == "type" {
 		p.next()
@@ -601,7 +601,7 @@ func (p *Parser) parseNamedImports(named *[]ast.NamedImport) {
 // decodeStringToken turns a lexer String token (raw source text including the
 // delimiter quotes) into its runtime value: the delimiters are stripped and
 // escape sequences are decoded. JSX attribute strings intentionally do NOT use
-// this — JSX does not process backslash escapes.
+// this - JSX does not process backslash escapes.
 func decodeStringToken(raw string) string {
 	if len(raw) >= 2 {
 		raw = raw[1 : len(raw)-1]
@@ -841,7 +841,7 @@ func (p *Parser) parseExport() ast.Stmt {
 		p.next()
 		exp.StarReexport = true
 		if p.match(lexer.As) && isIdentifierToken(p.peek().Kind) {
-			// `export * as Name from 'x'` — a namespace re-export. Record the
+			// `export * as Name from 'x'` - a namespace re-export. Record the
 			// namespace binding so downstream alias resolution can address
 			// `Name.<Export>` (mirrors `import * as Name`).
 			exp.Namespace = p.next().Value
@@ -865,7 +865,7 @@ func (p *Parser) parseExport() ast.Stmt {
 			p.match(lexer.SEMI)
 			break
 		}
-		// export { name } from 'source' — named re-export
+		// export { name } from 'source' - named re-export
 		names := p.parseExportNames()
 		if p.match(lexer.From) && p.peek().Kind == lexer.String {
 			exp.ReexportSource = p.next().Value
@@ -874,7 +874,7 @@ func (p *Parser) parseExport() ast.Stmt {
 		p.match(lexer.SEMI)
 	default:
 		if exp.Default {
-			// `export default <expression>` — object/call/literal/JSX/identifier.
+			// `export default <expression>` - object/call/literal/JSX/identifier.
 			// Previously non-identifier expression defaults were dropped
 			// silently; represent them as an ExprStmt so config descriptors
 			// (e.g. `export default defineContent({...})`) survive parsing.
@@ -1049,8 +1049,8 @@ func (p *Parser) parseBlock() []ast.Stmt {
 }
 
 // parseBlockOrStmt parses a control-flow body that may be either a
-// brace-delimited block or a single unbraced statement (`for (…) x++;`,
-// `while (…) if (y) z();`). The single statement is wrapped in a one-element
+// brace-delimited block or a single unbraced statement (`for (...) x++;`,
+// `while (...) if (y) z();`). The single statement is wrapped in a one-element
 // list so callers keep the []Stmt shape.
 func (p *Parser) parseBlockOrStmt() []ast.Stmt {
 	if p.peek().Kind == lexer.LBRACE {
@@ -1208,7 +1208,7 @@ func (p *Parser) parseParamList() []*ast.Param {
 	for p.peek().Kind != lexer.RPAREN && p.peek().Kind != lexer.EOF {
 		param := &ast.Param{}
 
-		// A `this` parameter (`method(this: Counter)`) is compile-time only —
+		// A `this` parameter (`method(this: Counter)`) is compile-time only -
 		// skip it and its annotation entirely.
 		if isIdentifierToken(p.peek().Kind) && p.peek().Value == "this" {
 			p.next()
@@ -1244,7 +1244,7 @@ func (p *Parser) parseParamList() []*ast.Param {
 			break
 		}
 
-		// Optional parameter marker (`name?: Type`) — skip the `?`.
+		// Optional parameter marker (`name?: Type`) - skip the `?`.
 		p.match(lexer.QUEST)
 
 		if p.peek().Kind == lexer.COLON {
@@ -1394,7 +1394,7 @@ func (p *Parser) parsePrefix() ast.Expr {
 		return &ast.Literal{Position: tokPos(tok), Kind: ast.RegexpLit, Value: tok.Value}
 
 	case lexer.LT:
-		// `<T>expr` angle-bracket type assertion (e.g. `<string>foo`) — only
+		// `<T>expr` angle-bracket type assertion (e.g. `<string>foo`) - only
 		// distinguished from JSX when the bracketed name is a primitive type
 		// keyword, which never names a JSX element.
 		if p.pos+1 < len(p.tokens) && isPrimitiveTypeKeyword(p.tokens[p.pos+1].Kind) {
@@ -1614,7 +1614,7 @@ func (p *Parser) isArrowFunction() bool {
 	// Quick check: if no ARROW token exists ahead, this is not an arrow function.
 	// arrowFrom[i] is the index of the first ARROW token at or after i (-1 when
 	// none), precomputed in one pass so this check is O(1) rather than O(n) per
-	// parenthesized expression — otherwise a paren-heavy file is O(n²).
+	// parenthesized expression - otherwise a paren-heavy file is O(n).
 	if p.arrowFrom == nil {
 		p.arrowFrom = make([]int, len(p.tokens)+1)
 		next := -1
@@ -1771,7 +1771,7 @@ func (p *Parser) parseInfix(left ast.Expr) ast.Expr {
 		return &ast.BinaryExpr{Left: left, Op: ">=", Right: p.parseExpr(precCompare)}
 	case lexer.In_:
 		if p.noIn {
-			// Inside a `for` initializer, `in` is not a binary operator — it
+			// Inside a `for` initializer, `in` is not a binary operator - it
 			// begins the for-in clause. Stop so the caller can handle it.
 			return nil
 		}
@@ -1925,7 +1925,7 @@ func (p *Parser) parseFnExpr() ast.Expr {
 	p.next()
 	fn := &ast.ArrowFn{Async: false}
 	// A function expression may carry a name (`function Foo() {}`). It is only
-	// visible inside the body, so it is consumed and ignored — matching how the
+	// visible inside the body, so it is consumed and ignored - matching how the
 	// compiler treats unnamed function expressions. Compiled library output
 	// (e.g. Radix UI's `__name(function Foo() {...}, "Foo")`) relies on this.
 	if isIdentifierToken(p.peek().Kind) {
@@ -2144,7 +2144,7 @@ func (p *Parser) parseJSXElement() ast.Expr {
 
 	for {
 		// rawPeek so whitespace before inline text isn't consumed: the text
-		// between elements is handled by parseJSXChild → parseJSXText.
+		// between elements is handled by parseJSXChild -> parseJSXText.
 		tok := p.rawPeek()
 		if tok.Kind == lexer.LT_SLASH {
 			p.next()
@@ -2306,7 +2306,7 @@ func normalizeJSXText(text string) string {
 		}
 	}
 	// Decode HTML character references in JSX text (React/Babel do this), so
-	// `&rsaquo;` renders as `›` in both SSR and the client `h()` path.
+	// `&rsaquo;` renders as `` in both SSR and the client `h()` path.
 	return html.UnescapeString(b.String())
 }
 

@@ -50,7 +50,7 @@ func generateSitemap(ctx *BuildResultHookCtx) error {
 		}
 	}
 	if baseURL == "" {
-		// Not configured — skip silently. Only error when the user explicitly
+		// Not configured - skip silently. Only error when the user explicitly
 		// opted into the sitemap plugin but forgot a base URL.
 		if !configured {
 			return nil

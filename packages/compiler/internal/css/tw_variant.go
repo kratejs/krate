@@ -70,7 +70,7 @@ func resolveVariant(v string, theme TailwindTheme) (variant, bool) {
 		if strings.Contains(inner, "&") {
 			return variant{kind: "ancestor", sel: strings.ReplaceAll(inner, "&", "PLACEHOLDER")}, true
 		}
-		// Bare selector fragment, e.g. [dir=rtl] → ancestor.
+		// Bare selector fragment, e.g. [dir=rtl] -> ancestor.
 		return variant{kind: "ancestor", sel: inner + " PLACEHOLDER"}, true
 	}
 
@@ -246,8 +246,8 @@ func resolveContainerVariant(v string, theme TailwindTheme) (variant, bool) {
 }
 
 // groupPeerStateSelector converts a group/peer state token into a selector
-// fragment. `checked` → `:checked`; `aria-checked` → `[aria-checked='true']`;
-// `data-open` → `[data-open]`; `has-[...]` → `:has(...)`.
+// fragment. `checked` -> `:checked`; `aria-checked` -> `[aria-checked='true']`;
+// `data-open` -> `[data-open]`; `has-[...]` -> `:has(...)`.
 func groupPeerStateSelector(state string) (string, bool) {
 	if sel, ok := parseAttrVariant(state); ok {
 		return sel, true
@@ -429,7 +429,7 @@ func atRuleOrder(a variant) (int, string) {
 }
 
 // firstPx extracts the leading integer pixel value from a media condition
-// (e.g. "(min-width: 640px)" → 640). Returns 0 when none is found.
+// (e.g. "(min-width: 640px)" -> 640). Returns 0 when none is found.
 func firstPx(at string) int {
 	start := -1
 	for i := 0; i < len(at); i++ {

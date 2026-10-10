@@ -26,7 +26,7 @@ func loadNamedBundleFromDisk(projectRoot string, names ...string) string {
 	// 1. From project root, walk up to find the krate compiler directory
 	krateRoot := findKrateRoot(projectRoot)
 	if krateRoot != "" {
-		// krateRoot = packages/compiler — runtime is at packages/runtime/dist/
+		// krateRoot = packages/compiler - runtime is at packages/runtime/dist/
 		monorepoRoot := filepath.Dir(krateRoot)
 		candidateDirs = append(candidateDirs, filepath.Join(monorepoRoot, "packages", "runtime", "dist"))
 	}

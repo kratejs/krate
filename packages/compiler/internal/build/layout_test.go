@@ -12,7 +12,7 @@ import (
 // TestFindLayoutGeneratedPageNestedFallback verifies that a page generated under
 // .krate/gen resolves its nearest _layout within the gen tree, and that a gen
 // page with no gen-tree layout stays unwrapped (returns "") rather than being
-// forced into the app root layout — generated pages bring their own layout.
+// forced into the app root layout - generated pages bring their own layout.
 func TestFindLayoutGeneratedPageNestedFallback(t *testing.T) {
 	root := t.TempDir()
 	pagesDir := filepath.Join(root, "src", "pages")
@@ -44,7 +44,7 @@ func TestFindLayoutGeneratedPageNestedFallback(t *testing.T) {
 	}
 
 	// A gen page with no gen-local layout must NOT fall back to pages/_layout.tsx
-	// — it stays unwrapped (the app root layout belongs to regular pages only).
+	// - it stays unwrapped (the app root layout belongs to regular pages only).
 	orphan := filepath.Join(root, ".krate", "gen", "misc", "page.tsx")
 	if err := os.MkdirAll(filepath.Dir(orphan), 0755); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestFindLayoutRegularPage(t *testing.T) {
 
 // TestNestedLayoutComposition builds a project with a root _layout (nav shell)
 // and a blog/_layout (section shell) and verifies a blog page is wrapped by
-// BOTH — root wrapper outside the child layout — not just the nearest child.
+// BOTH - root wrapper outside the child layout - not just the nearest child.
 // Regression for the "nested layout composition" report area: only the nearest
 // layout was applied, so the root nav/footer vanished under a section layout.
 func TestNestedLayoutComposition(t *testing.T) {
@@ -171,7 +171,7 @@ func TestFindLayoutStack(t *testing.T) {
 }
 
 // TestPageToOutputNestedIndex verifies a nested index page maps to its parent
-// route (blog/index.tsx → /blog) so /blog/ serves it instead of exposing the
+// route (blog/index.tsx -> /blog) so /blog/ serves it instead of exposing the
 // odd /blog/index URL (or a directory listing at /blog/).
 func TestPageToOutputNestedIndex(t *testing.T) {
 	root := t.TempDir()

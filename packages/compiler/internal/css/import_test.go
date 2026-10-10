@@ -47,7 +47,7 @@ func TestInlineImportsCircular(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "b.css"), []byte(bCSS), 0644)
 
 	result := InlineImports(aCSS, dir)
-	// Should not infinite loop — circular import is skipped
+	// Should not infinite loop - circular import is skipped
 	if !contains(result, ".a { color: red; }") {
 		t.Errorf("expected .a content, got: %s", result)
 	}
@@ -127,7 +127,7 @@ func TestInlineImportsMaxDepth(t *testing.T) {
 	mainCSS := `@import "level1.css";
 .main {}`
 	result := InlineImports(mainCSS, dir)
-	// Should stop at depth 10 — the deep import should still be inlined
+	// Should stop at depth 10 - the deep import should still be inlined
 	if !contains(result, ".deep { color: red; }") {
 		t.Errorf("expected deep content inlined, got: %s", result)
 	}
@@ -203,7 +203,7 @@ func TestInlineImportsNestedRelativeWithinRoot(t *testing.T) {
 	_ = os.MkdirAll(sub, 0755)
 
 	// main at root imports a nested file, which climbs back up two levels to a
-	// shared file — still inside the project root.
+	// shared file - still inside the project root.
 	_ = os.WriteFile(filepath.Join(dir, "shared.css"), []byte(".shared { color: green; }"), 0644)
 	_ = os.WriteFile(filepath.Join(sub, "nested.css"), []byte(`@import "../../shared.css";
 .nested {}`), 0644)

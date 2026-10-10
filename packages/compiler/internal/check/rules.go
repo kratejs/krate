@@ -7,7 +7,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-// ─── a11y ──────────────────────────────────────────────────────────────────
+// a11y
 
 // ruleImgAlt flags <img> elements with a missing or empty alt attribute. An
 // explicit alt="" is valid for decorative images, but a *missing* alt is the
@@ -29,7 +29,7 @@ func ruleImgAlt(p *Page, _ *Config) []Finding {
 	return out
 }
 
-// ruleHeadingOrder checks that heading levels do not skip (e.g. h1 → h3) and
+// ruleHeadingOrder checks that heading levels do not skip (e.g. h1 -> h3) and
 // that a page has exactly one h1.
 func ruleHeadingOrder(p *Page, _ *Config) []Finding {
 	d, err := parseHTML(p.HTML)
@@ -110,7 +110,7 @@ func ruleAccessibleName(p *Page, _ *Config) []Finding {
 	return out
 }
 
-// ─── seo ───────────────────────────────────────────────────────────────────
+// seo
 
 func ruleTitle(p *Page, _ *Config) []Finding {
 	d, err := parseHTML(p.HTML)
@@ -205,7 +205,7 @@ func ruleLang(p *Page, _ *Config) []Finding {
 	return nil
 }
 
-// ─── perf ──────────────────────────────────────────────────────────────────
+// perf
 
 func ruleJSBudget(p *Page, cfg *Config) []Finding {
 	if cfg.JSBudgetBytes <= 0 || p.JSBytes <= cfg.JSBudgetBytes {
@@ -242,7 +242,7 @@ func ruleImageDims(p *Page, _ *Config) []Finding {
 	return out
 }
 
-// ─── helpers ───────────────────────────────────────────────────────────────
+// helpers
 
 type interfaceNode struct {
 	tag  string

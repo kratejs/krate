@@ -50,7 +50,7 @@ interface TimerProps { initial?: number };
 // 		<Popover.Trigger>More info</Popover.Trigger>
 // 		<Popover.Portal>
 // 			<Popover.Content>
-// 				Some more info…
+// 				Some more info...
 // 				<Popover.Arrow />
 // 			</Popover.Content>
 // 		</Popover.Portal>

@@ -63,7 +63,6 @@ func JSStringDQ(s string) string {
 // raw source text into their literal characters. The lexer stores the raw text
 // between the quotes with escapes intact, so a token like `a\nb` becomes the
 // two-character sequence backslash-n; this turns it into an actual newline.
-//
 // Handled: \n \r \t \b \f \v \0 \\ \' \" \` \xNN \uXXXX \u{...} \<newline>
 // (line continuation). Unknown escapes keep the backslash so no information is
 // lost on inputs the decoder does not understand.
@@ -131,7 +130,7 @@ func UnescapeJSString(s string) string {
 			b.WriteByte('\\')
 		case 'u':
 			if i+2 < len(s) && s[i+2] == '{' {
-				// \u{1F600} — consume up to the closing brace.
+				// \u{1F600} - consume up to the closing brace.
 				end := strings.IndexByte(s[i+3:], '}')
 				if end >= 0 {
 					if v, ok := decodeHex(s[i+3 : i+3+end]); ok {

@@ -244,7 +244,7 @@ func filterUtility(cls string, theme TailwindTheme) (string, bool) {
 	case "sepia-0":
 		return filterVar("sepia", "sepia(0)"), true
 	}
-	// grayscale/invert/sepia numeric steps are percentages (grayscale-50 → 50%).
+	// grayscale/invert/sepia numeric steps are percentages (grayscale-50 -> 50%).
 	for _, name := range []string{"grayscale", "invert", "sepia"} {
 		rest, ok := strings.CutPrefix(cls, name+"-")
 		if !ok {

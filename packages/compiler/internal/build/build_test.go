@@ -148,7 +148,7 @@ func TestBuildTestProject(t *testing.T) {
 	// Dynamic-route regression: the reusable [id] template must be built with a
 	// replaceable sentinel (not a leaked variable name or a folded literal), so
 	// the server can substitute the matched URL segment anywhere the param is
-	// read — body text, <title>, and meta attributes.
+	// read - body text, <title>, and meta attributes.
 	templatePath := filepath.Join(outDir, "video", "[id]", "index.html")
 	if data, err := os.ReadFile(templatePath); err == nil {
 		content := string(data)

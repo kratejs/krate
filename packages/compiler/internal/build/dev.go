@@ -15,7 +15,6 @@ import (
 
 // Watch watches the builder's project root for filesystem changes using native
 // OS events (inotify, FSEvents, kqueue, ReadDirectoryChangesW via fsnotify).
-//
 // It takes the Builder that ran the initial build rather than constructing a
 // fresh one: page builds populate the dependency graph on the builder (see
 // recordDeps), and a brand-new Builder would start with an empty graph, so
@@ -311,7 +310,7 @@ func managedPath(path string, outDir string) bool {
 
 // internalName reports whether base is a krate-private or dotfile name. The
 // compiler treats leading '_' (private pages/APIs/runtime components) and '.'
-// (dotfiles) as internal everywhere, so the watcher must not rebuild on them —
+// (dotfiles) as internal everywhere, so the watcher must not rebuild on them -
 // the SSR bundler, for one, writes transient _tmp_*.tsx sources into the
 // source tree during each rebuild.
 func internalName(path string) bool {

@@ -14,7 +14,7 @@ func annotateWithRuntime(prog *ast.Program, raw string) *irtree.Annotations {
 	return annotator.Annotate(prog, &config.Config{RuntimeComponents: []string{"RuntimeWidget"}}, "page.tsx", raw)
 }
 
-// ─── emitSSREvaluated ───────────────────────────────────────────────────────
+// emitSSREvaluated
 
 func TestEmitSSREvaluatedWithPropBindings(t *testing.T) {
 	src := `function Card(props) {
@@ -64,8 +64,8 @@ func TestEmitSSREvaluatedDateNow(t *testing.T) {
 export default function Page() {
   return <ServerTime />;
 }`
-	// ServerTime is signal-less → SSR-evaluated. Without the QuickJS hook,
-	// Date.now() is an unsupported built-in → "".
+	// ServerTime is signal-less -> SSR-evaluated. Without the QuickJS hook,
+	// Date.now() is an unsupported built-in -> "".
 	result, _ := fullPipeline(t, src)
 	if strings.Contains(result.HTML, "built 1") && !strings.Contains(result.HTML, "Date.now") {
 		t.Log("Date.now evaluated")
@@ -120,7 +120,7 @@ export default function Page() {
 	}
 }
 
-// ─── Meta slots ─────────────────────────────────────────────────────────────
+// Meta slots
 
 func TestEmitMultipleMetaSlots(t *testing.T) {
 	src := `export default function Page() {
@@ -165,7 +165,7 @@ export default function Page() {
 
 // TestEmitMetaCallSiteHeadInWrapper guards the call-site <Head> case: a <Head>
 // passed as a CHILD into a signal-less wrapper is not part of the wrapper's own
-// return JSX, so SSREval does not capture it — EmitMeta must still walk the
+// return JSX, so SSREval does not capture it - EmitMeta must still walk the
 // wrapper's call-site children to hoist it. Regression guard for the meta-dedup
 // fix, which only skips the eval'd own-return tree.
 func TestEmitMetaCallSiteHeadInWrapper(t *testing.T) {
@@ -212,7 +212,7 @@ func TestEmitRootLocalFoldsInHead(t *testing.T) {
 	}
 }
 
-// ─── emitClient edge cases ──────────────────────────────────────────────────
+// emitClient edge cases
 
 func TestEmitClientCollectsChildComponentSignatures(t *testing.T) {
 	src := `function Counter() {
@@ -265,7 +265,7 @@ func TestEmitExprSlotEscapesInitial(t *testing.T) {
 	}
 }
 
-// ─── Runtime component emission ─────────────────────────────────────────────
+// Runtime component emission
 
 func TestEmitRuntimeRegionMarkers(t *testing.T) {
 	src := `function RuntimeWidget(props) { return <div>{props.label}</div>; }
@@ -372,7 +372,7 @@ func slotBindingEqual(a, b irtree.SlotBinding) bool {
 	return true
 }
 
-// ─── Suspense slot emission ─────────────────────────────────────────────────
+// Suspense slot emission
 
 func TestEmitSuspenseSlot(t *testing.T) {
 	fb := []irtree.SlotNode{&irtree.StaticHTML{HTML: `<div class="loading">Loading...</div>`}}

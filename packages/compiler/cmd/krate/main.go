@@ -544,7 +544,7 @@ func runCheck(flags cliFlags, args []string) {
 
 // runClean removes generated output (the build output directory and the
 // compiler cache) so the next build starts from scratch. Only those paths are
-// touched — generated types and sidecar manifests under .krate are left in
+// touched - generated types and sidecar manifests under .krate are left in
 // place, since they are regenerated on demand.
 func runClean(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)

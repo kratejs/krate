@@ -13,12 +13,12 @@ type Manifest struct {
 	Pages             []PageMeta             `json:"pages"`
 	Stylesheet        string                 `json:"stylesheet,omitempty"`        // global CSS filename
 	RuntimeJS         string                 `json:"runtimeJS,omitempty"`         // shared runtime chunk path (relative to outDir)
-	Routes            map[string]PageMeta    `json:"-"`                           // URL route → PageMeta (in-memory only)
+	Routes            map[string]PageMeta    `json:"-"`                           // URL route -> PageMeta (in-memory only)
 	RuntimeComponents []RuntimeComponentMeta `json:"runtimeComponents,omitempty"` // runtime server components
 	// Regions maps each server-rendered page route to its dynamic regions.
 	Regions map[string][]RegionMeta `json:"regions,omitempty"`
 	// StaticOnlyRoutes lists dynamic route patterns (e.g. "/blog/[slug]") whose
-	// parameters are closed — the server must 404 for params not baked at build
+	// parameters are closed - the server must 404 for params not baked at build
 	// time. Populated from `output: "static"` or `dynamicParams = false`.
 	StaticOnlyRoutes []string `json:"staticOnlyRoutes,omitempty"`
 }
@@ -57,7 +57,7 @@ func BuildManifest(results []*PageResult, cssFile string, runtimeJS string) *Man
 	}
 
 	for _, r := range results {
-		// Skip error pages (404/500) from manifest — they're served directly
+		// Skip error pages (404/500) from manifest - they're served directly
 		if r.IsErrorPage {
 			continue
 		}
@@ -121,7 +121,7 @@ func (m *Manifest) SetRuntimeComponents(bundles []RuntimeComponentBundle) {
 // runtime component bundle that backs it. A suspense-primary region renders
 // that single runtime component, so the per-runtime-component bundle (a
 // self-contained __krate_render IIFE) is exactly the renderer the sidecar
-// needs — no per-region esbuild pass required.
+// needs - no per-region esbuild pass required.
 func linkRegionBundles(m *Manifest, bundles []RuntimeComponentBundle) {
 	if m == nil || len(bundles) == 0 {
 		return

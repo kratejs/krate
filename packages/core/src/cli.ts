@@ -53,7 +53,7 @@ async function main() {
 
   // Commands handled by the JS wrapper itself (cross-platform scaffolding) or
   // that need no Go binary. Everything else is forwarded to the native binary so
-  // the two command lists cannot drift — a missing entry here was previously
+  // the two command lists cannot drift - a missing entry here was previously
   // swallowing `krate types` and `krate check`.
   switch (cmd) {
     case 'init':

@@ -17,7 +17,7 @@ function Section(props: { title: string; note?: string; children?: any }) {
   );
 }
 
-/* ── createCSSToggle: show/hide, with live text ──────────────────────────── */
+/* createCSSToggle: show/hide, with live text */
 function ToggleDemo() {
   const [on, setOn] = createCSSToggle(false);
 
@@ -39,7 +39,7 @@ function ToggleDemo() {
   );
 }
 
-/* ── createCSSToggle as a switch (native role=switch) ────────────────────── */
+/* createCSSToggle as a switch (native role=switch) */
 function SwitchDemo() {
   const [dark, setDark] = createCSSToggle(false, { as: 'switch', label: 'Dark mode' });
 
@@ -58,7 +58,7 @@ function SwitchDemo() {
   );
 }
 
-/* ── createCSSChoice: tabs, segmented controls ───────────────────────────── */
+/* createCSSChoice: tabs, segmented controls */
 function ChoiceDemo() {
   const [view, setView] = createCSSChoice('grid', ['grid', 'list', 'table']);
 
@@ -77,7 +77,7 @@ function ChoiceDemo() {
   );
 }
 
-/* ── createCSSChoice with an explicit tabs ARIA role ─────────────────────── */
+/* createCSSChoice with an explicit tabs ARIA role */
 function TabsAriaDemo() {
   const [tab, setTab] = createCSSChoice('overview', { as: 'tabs', label: 'Project sections' });
 
@@ -95,7 +95,7 @@ function TabsAriaDemo() {
   );
 }
 
-/* ── createCSSFlags: filter chips, column toggles ────────────────────────── */
+/* createCSSFlags: filter chips, column toggles */
 function FlagsDemo() {
   const [filters, setFilter] = createCSSFlags(['vegan', 'glutenFree', 'spicy']);
 
@@ -115,7 +115,7 @@ function FlagsDemo() {
   );
 }
 
-/* ── compound showIf across scopes ───────────────────────────────────────── */
+/* compound showIf across scopes */
 function CompoundDemo() {
   const [plan, setPlan] = createCSSChoice('free', ['free', 'pro']);
   const [admin, setAdmin] = createCSSToggle(false);
@@ -138,7 +138,7 @@ function CompoundDemo() {
   );
 }
 
-/* ── createCSSGroup: single-open accordion (radio + null sentinel) ───────── */
+/* createCSSGroup: single-open accordion (radio + null sentinel) */
 function GroupDemo() {
   const [open, setOpen] = createCSSGroup(null, { as: 'accordion', label: 'FAQ' });
 
@@ -165,7 +165,7 @@ function GroupDemo() {
   );
 }
 
-/* ── createCSSGroup as a dropdown menu role ──────────────────────────────── */
+/* createCSSGroup as a dropdown menu role */
 function MenuDemo() {
   const [open, setOpen] = createCSSGroup(null, { as: 'menu', label: 'Actions' });
 
@@ -182,7 +182,7 @@ function MenuDemo() {
   );
 }
 
-/* ── createCSSRange: stepper, progress, stepped slider ───────────────────── */
+/* createCSSRange: stepper, progress, stepped slider */
 function RangeDemo() {
   const [level, setLevel] = createCSSRange(2, { min: 0, max: 5, step: 1 });
 
@@ -202,7 +202,7 @@ function RangeDemo() {
   );
 }
 
-/* ── createCSSStack: drill-down navigation ───────────────────────────────── */
+/* createCSSStack: drill-down navigation */
 function StackDemo() {
   const [stack, { push, pop, clear }] = createCSSStack(['home']);
 

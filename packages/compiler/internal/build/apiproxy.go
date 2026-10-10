@@ -22,7 +22,6 @@ import (
 var errSidecarFallthrough = errors.New("api sidecar: fall through")
 
 // apiSidecar is a user-provided HTTP service that owns some/all API routes.
-//
 // Two modes:
 //   - supervised: SidecarConfig.Command is set; Krate starts the process (with
 //     Cwd/Env/Args) and restarts it if it exits.
@@ -31,7 +30,7 @@ var errSidecarFallthrough = errors.New("api sidecar: fall through")
 // Requests under the configured Prefix (default "/api") are always forwarded
 // first. A 404 (or an unreachable sidecar) falls through to Krate's own Go/TS/
 // QuickJS API routes, so the sidecar can implement exactly the routes it wants
-// — including dynamic segments like `/users/[id]` — with no route declarations.
+// - including dynamic segments like `/users/[id]` - with no route declarations.
 type apiSidecar struct {
 	config *config.SidecarConfig
 	prefix string

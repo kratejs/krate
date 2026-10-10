@@ -77,7 +77,7 @@ function stripBase(pathname: string, basePath: string): string {
   return pathname;
 }
 
-// ─── source-map symbolication ───────────────────────────────────────────────
+// source-map symbolication
 // When the build enables source maps (`--sourcemap` / `sourcemap: true`), the
 // overlay decodes them so runtime stack traces point at real source locations
 // instead of minified bundle offsets. Fetches fail silently when maps are
@@ -253,7 +253,7 @@ const STYLE = `
 :host { all: initial; }
 * { box-sizing: border-box; }
 
-/* ── palette ─────────────────────────────────────────────────────────── */
+/* palette */
 :host {
   --red: #f87171;
   --green: #34d399;
@@ -264,7 +264,7 @@ const STYLE = `
   --muted: #9ca3af;
 }
 
-/* ── toolbar ─────────────────────────────────────────────────────────── */
+/* toolbar */
 .toolbar {
   position: fixed; left: 50%; bottom: 0; z-index: 2147483001;
   transform: translate(-50%, 54%);
@@ -305,7 +305,7 @@ const STYLE = `
   max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* ── overlay ─────────────────────────────────────────────────────────── */
+/* overlay */
 .overlay {
   position: fixed; inset: 0; z-index: 2147483000;
   background: rgba(9, 9, 11, 0.72); backdrop-filter: blur(6px);

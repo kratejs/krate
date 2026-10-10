@@ -51,7 +51,7 @@ func TestRewriteDestination(t *testing.T) {
 		destination string
 		want        string
 	}{
-		// Non-wildcard — simple passthrough
+		// Non-wildcard - simple passthrough
 		{"/old", "/old", "/new", "/new"},
 		{"/old/page", "/old", "/new", "/new"},
 
@@ -224,7 +224,7 @@ func TestStaticRouteExists(t *testing.T) {
 // TestShouldServeStatic verifies the ssrPageHandler routing decision: a static
 // file wins only for SSG pages / unmatched routes. A manifest-registered
 // ssr/isr/streaming page must ALWAYS go through the sidecar even when a
-// pre-generated (baked) file exists — regression for pre-generated ISR variants
+// pre-generated (baked) file exists - regression for pre-generated ISR variants
 // and runtime-component regions being frozen at their build timestamp.
 func TestShouldServeStatic(t *testing.T) {
 	dir := t.TempDir()
@@ -243,17 +243,17 @@ func TestShouldServeStatic(t *testing.T) {
 		page *ManifestPage
 		want bool
 	}{
-		// SSG page with a concrete static file → static wins (beats sibling
+		// SSG page with a concrete static file -> static wins (beats sibling
 		// dynamic [param] template).
 		{"ssg static file present", "/items/alpha", &ManifestPage{Mode: "ssg"}, true},
-		// SSG page with NO static file → not static (falls to dynamic template).
+		// SSG page with NO static file -> not static (falls to dynamic template).
 		{"ssg no static file", "/items/beta", &ManifestPage{Mode: "ssg"}, false},
-		// Pre-generated ISR variant: static file EXISTS but page is ISR → must
+		// Pre-generated ISR variant: static file EXISTS but page is ISR -> must
 		// NOT be served statically (goes to the sidecar for revalidation).
 		{"isr pre-generated variant", "/cached/known", mkPage("isr"), false},
 		{"ssr page with baked shell", "/cached/known", mkPage("ssr"), false},
 		{"streaming page with baked shell", "/cached/known", mkPage("streaming"), false},
-		// Unmatched route with a static file → static.
+		// Unmatched route with a static file -> static.
 		{"unknown route static", "/cached/known", nil, true},
 	}
 	for _, tc := range cases {
@@ -289,7 +289,7 @@ func TestStaticBeatsDynamicRoute(t *testing.T) {
 	if staticRouteExists(dir, "/items/alpha") != true {
 		t.Error("static /items/alpha must exist so the handler skips the dynamic template")
 	}
-	// The pattern still matches the URL — precedence comes from the gate above.
+	// The pattern still matches the URL - precedence comes from the gate above.
 	if _, ok := matchDynamicRoute("/items/alpha", pattern); !ok {
 		t.Error("items/[id] pattern should still match /items/alpha; the static gate is the precedence mechanism")
 	}

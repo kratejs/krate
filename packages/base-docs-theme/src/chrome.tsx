@@ -162,7 +162,7 @@ export function SidebarNav(props: SidebarNavProps) {
       try {
         window.localStorage.setItem(STORAGE_PREFIX + key, open ? "open" : "closed");
       } catch (e) {
-        /* storage unavailable (private mode) — ignore */
+        /* storage unavailable (private mode) - ignore */
       }
     }
     function restoreNavState() {
@@ -259,7 +259,7 @@ export function TOCNav(props: TOCNavProps) {
     var currentDir = "down";
     var lastScrollTop = 0;
 
-    // ─── SVG rail indicator ─────────────────────────────────────────────
+    // SVG rail indicator
     var indicatorSvg: SVGSVGElement | null = null;
     var railPath: SVGPathElement | null = null;
     var linePath: SVGPathElement | null = null;

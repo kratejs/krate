@@ -50,7 +50,7 @@ export function AlertDialog(props: AlertDialogProps) {
 
   createEffect(function () {
     // handleClick opens the dialog from the trigger, so it must be attached
-    // even while the dialog is closed — otherwise the trigger can never open it.
+    // even while the dialog is closed - otherwise the trigger can never open it.
     document.addEventListener("click", handleClick);
     return function () {
       document.removeEventListener("click", handleClick);

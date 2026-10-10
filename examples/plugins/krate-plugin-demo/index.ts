@@ -1,30 +1,22 @@
-// krate-plugin-demo — a community plugin written in TypeScript.
-//
-// Community plugins run inside krate's embedded QuickJS runtime — no
+// krate-plugin-demo - a community plugin written in TypeScript.
+// Community plugins run inside krate's embedded QuickJS runtime - no
 // subprocess, no stdin/stdout protocol. The plugin module is bundled with
 // esbuild (which handles .ts) and evaluated in a fresh VM per hook.
-//
 // A community plugin exports:
-//   - `hooks` — the lifecycle hooks (BeforeBuild, AfterParse, AfterRender, ...)
+// - `hooks` - the lifecycle hooks (BeforeBuild, AfterParse, AfterRender, ...)
 //   - a `default` factory that returns a serializable descriptor used in the
 //     config, e.g. `demoPlugin({ greeting: '...' })`:
-//
 //       import demoPlugin from './plugins/krate-plugin-demo';
 //       export default { plugins: [demoPlugin({ greeting: 'Hi' })] };
-//
 // The factory result `{ name, module, options }` is what lands in the config.
 // `module` points back at this file so the compiler can bundle it for QuickJS.
-//
 // Each hook receives (ctx, options, krate) where ctx is the JSON-serialized
 // hook context, options is the per-plugin options object, and krate is the
 // richer build context ({ root, outDir, pagesDir, config, dev, pages, version })
 // with capability methods (resolveFile, readFile, emitFile, writeFileToRoot,
 // injectHead, injectCSS). Hooks return a result object:
-//
 //   { files, routes, generatedPages, html, headHTML, rawCSS, scripts, metaTags }
-//
 // (all fields optional; hooks may also return a Promise).
-//
 // This demo dogfoods the capabilities: krate.emitFile for output files,
 // krate.injectHead / krate.injectCSS for head/CSS injection, typed hooks via
 // definePluginHooks<DemoPluginOptions>, and krate.log / krate.warn for output.
@@ -148,7 +140,7 @@ export default function demoPlugin(options: DemoPluginOptions = {}) {
     order: 10,
     // Point back at this file so the compiler can bundle it. In the Node/tsx
     // config bootstrap this is the real file:// URL; inside the esbuild IIFE
-    // (QuickJS) it's empty, which is fine — the compiler already resolved it.
+    // (QuickJS) it's empty, which is fine - the compiler already resolved it.
     module: typeof import.meta !== "undefined" && import.meta.url ? import.meta.url : "",
     options,
   });

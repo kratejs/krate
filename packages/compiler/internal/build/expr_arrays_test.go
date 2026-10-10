@@ -30,7 +30,7 @@ func buildExprProject(t *testing.T, files map[string]string) string {
 	return string(data)
 }
 
-// TestBuildArrayJoinFolds verifies `arr.join(sep)` is folded at build time —
+// TestBuildArrayJoinFolds verifies `arr.join(sep)` is folded at build time -
 // including when the array arrives as a component prop (the docs contributors
 // case). Before the fix the join returned the raw array-literal source (or ""
 // for a client component) instead of the joined text.
@@ -51,7 +51,7 @@ export default function Page() {
 }
 
 // TestBuildArrayJoinFoldsClient verifies the same fold happens for a CLIENT
-// component (signals), rendered into static HTML at build — the exact path the
+// component (signals), rendered into static HTML at build - the exact path the
 // docs theme layout takes.
 func TestBuildArrayJoinFoldsClient(t *testing.T) {
 	out := buildExprProject(t, map[string]string{

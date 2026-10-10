@@ -110,7 +110,7 @@ func TestStreamRegionPageSplicesFrames(t *testing.T) {
 	route := "/live"
 
 	// Static shell with one suspense boundary whose baked fallback is the
-	// loading text — matches what the compiler emits for a runtime primary.
+	// loading text - matches what the compiler emits for a runtime primary.
 	shell := `<!DOCTYPE html><html><body><div id=root>` +
 		`<!--suspense:1-1--><span>loading</span><!--/suspense:1-1-->` +
 		`</div></body></html>`
@@ -281,7 +281,7 @@ func TestStreamRegionPageKeepsFallbackOnError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Sidecar reports a region error frame — the baked fallback must remain.
+	// Sidecar reports a region error frame - the baked fallback must remain.
 	sidecar := newFakeRegionsSidecar(t, []string{
 		`{"type":"error","id":"9-1","status":500,"error":"boom"}`,
 		`{"type":"end","count":1}`,

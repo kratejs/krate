@@ -24,7 +24,7 @@ func TestGitRootIsCachedPerRoot(t *testing.T) {
 		t.Skip("git not installed")
 	}
 
-	nonRepo := t.TempDir() // queried FIRST — must not poison the repo root
+	nonRepo := t.TempDir() // queried FIRST - must not poison the repo root
 	repo := t.TempDir()
 	git(t, repo, "init")
 	if err := os.MkdirAll(filepath.Join(repo, "docs"), 0755); err != nil {
@@ -65,7 +65,7 @@ func TestGitRootIsCachedPerRoot(t *testing.T) {
 }
 
 // TestLastCommitThroughSymlinkedRoot covers the CI case where the project root
-// is a symlink (macOS /var → /private/var) or otherwise non-canonical relative
+// is a symlink (macOS /var -> /private/var) or otherwise non-canonical relative
 // to git's resolved top-level: git metadata must still resolve for both
 // relative and absolute paths.
 func TestLastCommitThroughSymlinkedRoot(t *testing.T) {

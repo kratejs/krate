@@ -19,7 +19,7 @@ import (
 
 // TestSSRDynamicRouteParamsE2E boots the staged SSR renderer driver against a
 // dynamic route ([id]) manifest and verifies that params extracted by the Go
-// server are injected into the page component's props at render time — not
+// server are injected into the page component's props at render time - not
 // dropped as the placeholder/officially-empty props.
 func TestSSRDynamicRouteParamsE2E(t *testing.T) {
 	node, err := exec.LookPath("node")
@@ -72,7 +72,7 @@ export default function VideoPage(props) {
 							// bare `@krate/runtime/server`
 							return api.OnResolveResult{Path: serverTS}, nil
 						}
-						// subpath like "jsx-runtime" → try server-<name>.ts then <name>.ts
+						// subpath like "jsx-runtime" -> try server-<name>.ts then <name>.ts
 						candidates := []string{
 							filepath.Join(runtimeSrc, "server-"+spec+".ts"),
 							filepath.Join(runtimeSrc, spec+".ts"),

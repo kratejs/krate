@@ -169,7 +169,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 
 // collectListComponentFuncs walks the component tree for ListSlots and returns
 // the client component FnDecls their map bodies reference (deduplicated, in a
-// stable order). Only client-tier components are included — static/server
+// stable order). Only client-tier components are included - static/server
 // components are SSR-evaluated and don't exist as runtime functions.
 func collectListComponentFuncs(root *irtree.ComponentNode, functions map[string]*ast.FnDecl) []*ast.FnDecl {
 	seen := make(map[string]bool)
@@ -289,7 +289,7 @@ func (e *Emitter) emitNode(node *irtree.ComponentNode) SlotOutput {
 	}
 }
 
-// ─── emitStatic — static component SSR ─────────────────────────────────────
+// emitStatic - static component SSR
 
 func (e *Emitter) emitStatic(node *irtree.ComponentNode) SlotOutput {
 	var out SlotOutput
@@ -299,7 +299,7 @@ func (e *Emitter) emitStatic(node *irtree.ComponentNode) SlotOutput {
 	return out
 }
 
-// ─── emitSSREvaluated — prop-driven components evaluated at build time ────
+// emitSSREvaluated - prop-driven components evaluated at build time
 
 func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	if node.Fn == nil {
@@ -351,7 +351,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		out.StyleHTML += childrenOut.StyleHTML
 		// Conditional/list slots in call-site children (e.g. {items().map(...)}
 		// inside a signal-less wrapper like ToastViewport) reference the
-		// CALLER's signals — register an orphan binding so the re-render effect
+		// CALLER's signals - register an orphan binding so the re-render effect
 		// is attached to the signature that owns those signals.
 		owner := irtree.SlotID("")
 		if len(e.clientStack) > 0 {
@@ -366,7 +366,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 			bindings["children"] = childrenHTML.String()
 			eval.SetBindings(bindings)
 			// Children were rendered through the slot pipeline (text escaped,
-			// elements hydrated) — a `{children}` container must inject them raw.
+			// elements hydrated) - a `{children}` container must inject them raw.
 			eval.childrenIsHTML = true
 			// When the call-site children were fully static text, SSREval also
 			// gets the raw text so <SyntaxHighlight> chroma-highlights the
@@ -382,7 +382,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	// also be emitted through the tree path so they keep their hydration
 	// markers. The hook consumes ReturnSlots in document order as SSREval
 	// encounters them. Only CLIENT-tier components are routed through the tree
-	// path — signal-less (SSREval'd) children must stay in the parent's eval
+	// path - signal-less (SSREval'd) children must stay in the parent's eval
 	// flow so they inherit the parent's prop bindings (e.g. <SidebarNav
 	// items={props.sidebarItems}/> needs `sidebarItems` bound in the parent's
 	// SSREval context). Routing them through a fresh emitSSREvaluated loses
@@ -454,7 +454,7 @@ func findReturnStmtIn(body []ast.Stmt) *ast.ReturnStmt {
 	return nil
 }
 
-// ─── emitServer — server component SSR ─────────────────────────────────────
+// emitServer - server component SSR
 
 func (e *Emitter) emitServer(node *irtree.ComponentNode) SlotOutput {
 	var out SlotOutput
@@ -466,7 +466,7 @@ func (e *Emitter) emitServer(node *irtree.ComponentNode) SlotOutput {
 	return out
 }
 
-// ─── emitClient — client component SSR + scoped hydration metadata ─────────
+// emitClient - client component SSR + scoped hydration metadata
 
 func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 	var out SlotOutput
@@ -531,7 +531,7 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 	return out
 }
 
-// ─── emitRuntime — runtime component splice marker ────────────────────────
+// emitRuntime - runtime component splice marker
 
 func (e *Emitter) emitRuntime(node *irtree.ComponentNode) SlotOutput {
 	// Standalone runtime components (not inside a <Suspense> boundary) become
@@ -546,7 +546,7 @@ func (e *Emitter) emitRuntime(node *irtree.ComponentNode) SlotOutput {
 	}
 }
 
-// ─── emitMetaSlot — Head/Script/Style content routing ──────────────────────
+// emitMetaSlot - Head/Script/Style content routing
 
 func (e *Emitter) emitMetaSlot(s *irtree.MetaSlot) SlotOutput {
 	var out SlotOutput
@@ -556,7 +556,7 @@ func (e *Emitter) emitMetaSlot(s *irtree.MetaSlot) SlotOutput {
 	return out
 }
 
-// ─── emitSlotNode — type-switch dispatch for SlotNode ──────────────────────
+// emitSlotNode - type-switch dispatch for SlotNode
 
 func (e *Emitter) emitSlotNode(slot irtree.SlotNode) SlotOutput {
 	if slot == nil {
@@ -582,20 +582,20 @@ func (e *Emitter) emitSlotNode(slot irtree.SlotNode) SlotOutput {
 	case *irtree.ChildrenSlot:
 		return SlotOutput{HTML: "<!--__children__-->"}
 	default:
-		// Unknown IR slot node kind — error instead of silently dropping output.
+		// Unknown IR slot node kind - error instead of silently dropping output.
 		e.addErr("slot node type %T is not supported", slot)
 		return SlotOutput{}
 	}
 }
 
-// ─── Slot emitters ─────────────────────────────────────────────────────────
+// Slot emitters
 
 func (e *Emitter) emitStaticHTML(s *irtree.StaticHTML) SlotOutput {
 	return SlotOutput{HTML: s.HTML}
 }
 
 // mergeSlotOutput concatenates a child output into an accumulator in document
-// order. Runtime props are NOT merged here — only parallel emit re-keys them.
+// order. Runtime props are NOT merged here - only parallel emit re-keys them.
 func mergeSlotOutput(acc *SlotOutput, out SlotOutput) {
 	acc.HTML += out.HTML
 	acc.Signatures = append(acc.Signatures, out.Signatures...)
@@ -800,7 +800,7 @@ func (e *Emitter) emitSuspenseSlot(s *irtree.SuspenseSlot) SlotOutput {
 		mergeSlotOutput(&out, e.emitSlotNode(child))
 	}
 
-	// ModeStatic: the primary was resolved at build time — bake it inside the
+	// ModeStatic: the primary was resolved at build time - bake it inside the
 	// markers so the shell contains the real resolved content (no streaming
 	// round-trip needed). ModeRegion/Default keep the fallback baked in.
 	inner := out.HTML
@@ -820,7 +820,7 @@ func (e *Emitter) emitSuspenseSlot(s *irtree.SuspenseSlot) SlotOutput {
 	return out
 }
 
-// ─── EmitMeta — extract Head/Script/Style content from tree ────────────────
+// EmitMeta - extract Head/Script/Style content from tree
 
 // EmitMeta walks the tree and extracts Head/Script/Style content,
 // routing MetaSlot children to the appropriate EmitResult fields.
@@ -832,16 +832,15 @@ func EmitMeta(tree *irtree.ComponentTree, result *EmitResult) {
 }
 
 // walkMetaSlots recursively walks ComponentNode children looking for MetaSlots.
-//
 // A component's own-return <Head>/<Script>/<Style> is captured by SSREval while
 // the component's return JSX is evaluated (into EmitResult via the emitter's
 // headHTML/scriptHTML/styleHTML accumulators). For the page ROOT, node.Children
 // ARE that own-return tree, so walking them here would append the same content a
-// second time — and, when the root was SSREval'd with injected prop bindings
+// second time - and, when the root was SSREval'd with injected prop bindings
 // (generateStaticParams params, dynamic-route sentinels), with stale
 // pre-binding values. Child SSREval nodes keep their own-return tree in
 // ReturnSlots, so their Children are CALL-SITE slots, which SSREval does not
-// capture — a call-site <Head> passed into a signal-less wrapper must still be
+// capture - a call-site <Head> passed into a signal-less wrapper must still be
 // walked. Non-evaluated nodes are never captured by SSREval, so their own-return
 // Children are walked as before.
 func walkMetaSlots(node *irtree.ComponentNode, result *EmitResult) {
@@ -879,7 +878,7 @@ func walkMetaSlots(node *irtree.ComponentNode, result *EmitResult) {
 	}
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+// Helpers
 
 func collectChildIDs(children []irtree.SlotNode) []irtree.SlotID {
 	var ids []irtree.SlotID

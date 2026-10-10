@@ -17,12 +17,12 @@ type rootInfo struct {
 
 var (
 	mu    sync.Mutex
-	roots = map[string]rootInfo{} // project root → resolved git top-level
+	roots = map[string]rootInfo{} // project root -> resolved git top-level
 )
 
 // gitRoot resolves the repository top-level for a project root. Results are
-// cached PER ROOT (not process-wide) so multi-project processes — the MCP
-// server, plugin builds, or tests that build several temp projects — resolve
+// cached PER ROOT (not process-wide) so multi-project processes - the MCP
+// server, plugin builds, or tests that build several temp projects - resolve
 // each project's own repository.
 func gitRoot(root string) (string, bool) {
 	mu.Lock()
@@ -56,8 +56,8 @@ func Available(root string) bool {
 type Index struct {
 	root    string
 	gr      string
-	last    map[string]string   // repo-relative slash path → committer date
-	authors map[string][]string // repo-relative slash path → authors (recent first)
+	last    map[string]string   // repo-relative slash path -> committer date
+	authors map[string][]string // repo-relative slash path -> authors (recent first)
 }
 
 // indexCache holds one Index per project root for the process lifetime.
@@ -75,9 +75,9 @@ func indexFor(root string) *Index {
 }
 
 // canonicalPath resolves symlinks and (on Windows) short/case-variant path
-// components so paths originating from different sources — t.TempDir, `git
+// components so paths originating from different sources - t.TempDir, `git
 // rev-parse --show-toplevel` (/private/var vs /var on macOS; long vs 8.3 names
-// on Windows) — compare equal under filepath.Rel. Falls back to a cleaned path
+// on Windows) - compare equal under filepath.Rel. Falls back to a cleaned path
 // when the target cannot be resolved (e.g. a not-yet-created file).
 func canonicalPath(p string) string {
 	if p == "" {

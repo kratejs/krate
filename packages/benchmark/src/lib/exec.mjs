@@ -13,7 +13,7 @@ export const pkgRoot = join(__dirname, '..', '..');
 
 export const exists = existsSync;
 
-// ─── Windows command shims ──────────────────────────────────────────────────
+// Windows command shims
 // On Windows, `npm`, `npx`, `pnpm`, etc. are `.cmd` shims that cannot be spawned
 // directly (CreateProcess can't run .cmd). We detect them and route through
 // `cmd.exe` via `shell: true` with a manually quoted command line; real `.exe`

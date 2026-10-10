@@ -31,7 +31,7 @@ function flattenClass(value: ClassValue, out: string[]): void {
   }
 }
 
-/** `clsx` — conditional class names from strings, arrays, and objects. */
+/** `clsx` - conditional class names from strings, arrays, and objects. */
 export function clsx(...inputs: ClassValue[]): string {
   const out: string[] = [];
   for (const input of inputs) flattenClass(input, out);
@@ -65,7 +65,7 @@ export function twMerge(...inputs: ClassValue[]): string {
 function tailwindPropertyKey(token: string): string {
   let t = token;
   let prefix = '';
-  // Strip a variant chain (hover:, md:, focus: — anything before the last `:`).
+  // Strip a variant chain (hover:, md:, focus: - anything before the last `:`).
   const colon = t.lastIndexOf(':');
   if (colon >= 0) {
     prefix = t.slice(0, colon + 1);
@@ -77,7 +77,7 @@ function tailwindPropertyKey(token: string): string {
   return prefix + base + (scale && /[0-9]/.test(scale) ? '-' + scale : '');
 }
 
-/** `cn` — `twMerge` over `clsx`, the shadcn/ui convention. */
+/** `cn` - `twMerge` over `clsx`, the shadcn/ui convention. */
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(...inputs));
 }
@@ -137,7 +137,7 @@ function matchesCompound(
 }
 
 /**
- * `Slot` — renders its single child element instead of wrapping it, merging the
+ * `Slot` - renders its single child element instead of wrapping it, merging the
  * Slot's own props onto that child. This is the `asChild` mechanic from
  * shadcn/radix: `<Slot className="x"><a /></Slot>` returns the `<a>` with `x`
  * merged onto it.
@@ -200,7 +200,7 @@ function kebab(name: string): string {
 }
 
 /**
- * `cloneElement` — apply extra props (and optional replacement children) to an
+ * `cloneElement` - apply extra props (and optional replacement children) to an
  * existing node and return it. Used by `Slot`/`asChild` and by libraries that
  * clone a single child.
  */

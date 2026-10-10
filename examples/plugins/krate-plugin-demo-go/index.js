@@ -1,19 +1,14 @@
-// krate-plugin-demo-go — a community plugin written in Go.
-//
+// krate-plugin-demo-go - a community plugin written in Go.
 // This file is the plugin's npm-style descriptor. When Krate loads the plugin it
 // bundles this module and runs the factory once to discover the plugin's
-// runtime and per-platform binaries (the manifest is static — no Node builtins).
-//
+// runtime and per-platform binaries (the manifest is static - no Node builtins).
 //   - runtime:   'go' routes this plugin through the Go subprocess host.
 //   - binaries:  a map from GOOS-GOARCH to the plugin binary shipped in this
 //                package (relative to the package root).
-//
 // The plugin author builds one binary per platform and places them under bin/.
 // Krate picks the binary matching the host, spawns it via HashiCorp go-plugin
 // (net/rpc), and keeps it alive across dev hot-reloads.
-//
 // To wire into krate.config.ts:
-//
 //	import demoGoPlugin from 'krate-plugin-demo-go';
 //	export default { plugins: [demoGoPlugin()] };
 module.exports = function() {

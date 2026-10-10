@@ -27,7 +27,7 @@ func Highlight(code, lang string) string {
 }
 
 // HighlightTheme is Highlight with an explicit chroma theme. The theme affects
-// the token→class mapping, so it must match the stylesheet produced by
+// the token->class mapping, so it must match the stylesheet produced by
 // CSSForTheme or the highlighted code is styled (or unstyled) incorrectly.
 func HighlightTheme(code, lang, theme string) string {
 	lexer := chroma.Lexer(nil)
@@ -58,7 +58,7 @@ func HighlightTheme(code, lang, theme string) string {
 
 	raw := buf.String()
 	// Strip the outer <pre class="chroma"><code>...</code></pre> wrapper that
-	// chroma's HTML formatter adds by default — callers provide their own.
+	// chroma's HTML formatter adds by default - callers provide their own.
 	raw = stripWrapper(raw)
 	return raw
 }

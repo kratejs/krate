@@ -46,11 +46,11 @@ type APIResult struct {
 func stripExports(code string) string {
 	// Phase 1: Whole-text regex replacements for multi-line patterns
 
-	// export { X as default }; â†’ var __default = X;
+	// export { X as default }; -> var __default = X;
 	reMultiLineAsDefault := regexp.MustCompile(`export\s*\{\s*(\w+)\s+as\s+(\w+)\s*\}\s*;?`)
 	code = reMultiLineAsDefault.ReplaceAllString(code, "var __default = $1;")
 
-	// export { a as X, b as Y }; â†’ var X = a; var Y = b;
+	// export { a as X, b as Y }; -> var X = a; var Y = b;
 	// Handle multi-name export blocks with as-clauses
 	reExportAsBlock := regexp.MustCompile(`export\s*\{([^}]*)\}`)
 	if m := reExportAsBlock.FindStringSubmatch(code); m != nil {
@@ -91,10 +91,10 @@ func stripExports(code string) string {
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// export default ... â†’ need special handling
+		// export default ... -> need special handling
 		if reExportDefaultDecl.MatchString(trimmed) {
 			stripped := reExportDefaultDecl.ReplaceAllString(trimmed, "")
-			// "export default function(...)" â†’ "function _default(...)"
+			// "export default function(...)" -> "function _default(...)"
 			reAnonFunc := regexp.MustCompile(`^function\s*\(`)
 			if reAnonFunc.MatchString(stripped) {
 				stripped = "function _default(" + strings.TrimPrefix(stripped, "function(")
@@ -104,7 +104,7 @@ func stripExports(code string) string {
 			continue
 		}
 
-		// export const/let/var/function/class â†’ const/let/var/function/class
+		// export const/let/var/function/class -> const/let/var/function/class
 		if reExportDecl.MatchString(trimmed) {
 			result = append(result, reExportDecl.ReplaceAllString(trimmed, "$1 "))
 			continue

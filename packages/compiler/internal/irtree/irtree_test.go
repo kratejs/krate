@@ -43,7 +43,7 @@ func getEntryTier(t *testing.T, ann *irtree.Annotations) irtree.ComponentTier {
 	return irtree.TierUnknown
 }
 
-// ─── Annotator Tests ───────────────────────────────────────────────────────
+// Annotator Tests
 
 func TestAnnotateDefaultIsClient(t *testing.T) {
 	prog := parseProg(t, `export default function App() { return <div>hi</div>; }`)
@@ -137,7 +137,7 @@ export default function App() { return <div>hi</div>; }`)
 	}
 }
 
-// ─── IR Tree Builder Tests ─────────────────────────────────────────────────
+// IR Tree Builder Tests
 
 func TestBuildSimpleElement(t *testing.T) {
 	tree := annotateAndBuild(t, `export default function App() { return <div>hello</div>; }`)

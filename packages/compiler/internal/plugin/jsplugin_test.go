@@ -259,7 +259,7 @@ export default {
 };
 `)
 
-	// Plugin only implements AfterRender — running AfterPage should be a no-op.
+	// Plugin only implements AfterRender - running AfterPage should be a no-op.
 	ctx := &PageHookCtx{Page: "p.tsx", OutName: "p", HTML: "orig", HeadHTML: ""}
 	if err := RunCommunityPlugins("AfterPage", []config.PluginConfig{cfg}, root, outDir, ctx); err != nil {
 		t.Fatalf("RunCommunityPlugins: %v", err)

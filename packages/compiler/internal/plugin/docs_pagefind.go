@@ -22,7 +22,7 @@ const pagefindTimeout = 4 * time.Minute
 
 // afterBuild runs site-wide post-build work. Today this is the opt-in Pagefind
 // indexer: Pagefind indexes built HTML, so it must run after every page has been
-// written. Any failure is a warning (the client falls back to docfind/JSON) —
+// written. Any failure is a warning (the client falls back to docfind/JSON) -
 // Pagefind is an enhancement, never a hard build requirement.
 func (p *DocsPlugin) afterBuild(ctx *BuildResultHookCtx) error {
 	cfg, ok := ctx.Config.(*config.Config)

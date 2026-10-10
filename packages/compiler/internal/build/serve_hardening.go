@@ -189,7 +189,7 @@ func newHTTPServer(handler http.Handler) *http.Server {
 	}
 }
 
-// ─── request IDs + logging ──────────────────────────────────────────────────
+// request IDs + logging
 
 var requestSeq atomic.Uint64
 
@@ -239,7 +239,7 @@ func panicRecoveryMiddleware(logger *slog.Logger, next http.Handler) http.Handle
 	})
 }
 
-// ─── security headers (1.4) ─────────────────────────────────────────────────
+// security headers (1.4)
 
 // securityHeadersMiddleware applies safe defaults. Nothing here breaks static
 // sites; HSTS is only emitted for https base URLs.
@@ -279,7 +279,7 @@ func buildCSPHeader(cfg *config.Config) string {
 	return "frame-ancestors 'none'"
 }
 
-// ─── compression (4.3, static path) ─────────────────────────────────────────
+// compression (4.3, static path)
 
 // compressibleType reports whether a content type benefits from gzip. Already
 // compressed formats (images, fonts, wasm, zip) are excluded.
@@ -374,7 +374,7 @@ func (g *gzipResponseWriter) close() {
 	}
 }
 
-// ─── streaming helpers ──────────────────────────────────────────────────────
+// streaming helpers
 
 // hashedAssetRe matches content-hashed asset filenames: a `.<hash>.` segment
 // before the extension (e.g. index.abc123.js, styles.abc123.css) or a

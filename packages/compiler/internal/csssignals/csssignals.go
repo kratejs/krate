@@ -1,15 +1,12 @@
 // Package csssignals implements the compiler-side analysis for the zero-JS CSS
 // primitives:
-//
-//   - createCSSChoice(initial, options?) — a radio group (tabs, segments).
-//   - createCSSToggle(initial)           — a single checkbox (on/off).
-//   - createCSSFlags([...])              — independent checkboxes.
-//
+// - createCSSChoice(initial, options?) - a radio group (tabs, segments).
+// - createCSSToggle(initial) - a single checkbox (on/off).
+// - createCSSFlags([...]) - independent checkboxes.
 // They compile to hidden `<input>` controllers, `<label>` triggers, and
-// `:has()` CSS — no client JavaScript. This package owns the analysis (which
+// `:has()` CSS - no client JavaScript. This package owns the analysis (which
 // declarations are transformable, the option universe, matching
 // triggers/panels) and the generated stylesheet. It never mutates the AST.
-//
 // Unlike a fallback design, an un-transformable declaration is a hard error: a
 // declaration that cannot be expressed in CSS must be replaced with
 // `createSignal` by the author, because silently hydrating it would ship
@@ -264,7 +261,6 @@ func rangeOptions(min, max, step string) ([]string, bool) {
 type indexFor func(component, variable string) int
 
 // Analyze inspects a component body for CSS signal declarations.
-//
 // When no declaration is present, HaveAny reports false and Errors is empty.
 // When a declaration is present but not compilable, Errors lists the reasons
 // (the build must fail; there is no fallback).
@@ -1042,7 +1038,7 @@ func getterName(call *ast.CallExpr) (string, bool) {
 	case *ast.Identifier:
 		return callee.Name, true
 	case *ast.MemberExpr:
-		// `stack.top()` — the property may be "top"/"peek"; the object is the
+		// `stack.top()` - the property may be "top"/"peek"; the object is the
 		// scope variable.
 		if id, ok := callee.Object.(*ast.Identifier); ok {
 			if prop, ok := callee.Property.(*ast.Identifier); ok && (prop.Name == "top" || prop.Name == "peek") {
@@ -1132,7 +1128,7 @@ func (a *Analyzer) negate(terms [][]*Atom) [][]*Atom {
 // mergeTerm dedupes atoms within one AND-term and drops the term when it
 // contains an atom and its negation (an impossible conjunction).
 func (a *Analyzer) mergeTerm(atoms []*Atom) []*Atom {
-	saw := make(map[string]*Atom, len(atoms)) // abs-key → first atom (records polarity)
+	saw := make(map[string]*Atom, len(atoms)) // abs-key -> first atom (records polarity)
 	out := make([]*Atom, 0, len(atoms))
 	for _, at := range atoms {
 		abs := a.atomAbsKey(at)

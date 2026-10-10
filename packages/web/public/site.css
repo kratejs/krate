@@ -13,7 +13,7 @@
     --color-accent-border: rgba(249, 115, 22, 0.2);
     --radius: 10px;
     --max-width: 1120px;
-    /* Shared chrome tokens — keep the marketing header identical to the docs
+    /* Shared chrome tokens - keep the marketing header identical to the docs
        header (see base-docs-theme theme.css). */
     --header-height: 56px;
     --blur-intensity: 12px;

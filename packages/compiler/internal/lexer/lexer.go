@@ -239,7 +239,7 @@ type Lexer struct {
 	tmplBraceStack []int
 	// jsxStack tracks the lexer's JSX context. Inside JSX text, `/`, `/*`,
 	// `//`, quotes and backticks are literal characters rather than division,
-	// comments, string/regex/template delimiters — otherwise a JSX text child
+	// comments, string/regex/template delimiters - otherwise a JSX text child
 	// like `<code>/api/*</code>` or `<code>/about</code>` would swallow the
 	// rest of the line. An empty stack means plain JavaScript.
 	jsxStack []jsxFrame
@@ -565,7 +565,7 @@ func (l *Lexer) emit(kind Kind) {
 	}
 }
 
-// ─── JSX context helpers ─────────────────────────────────────────────────────
+// JSX context helpers
 
 func (l *Lexer) jsxTop() (jsxFrame, bool) {
 	n := len(l.jsxStack)
@@ -593,9 +593,8 @@ func (l *Lexer) inJSXBrace() bool {
 // atJSXTagStart reports whether a `<` at the current point opens a JSX element
 // or fragment. Inside an element's children region every `<` starts a tag
 // (a literal `<` in JSX text is invalid and must be escaped). Otherwise `<`
-// only starts JSX in an expression position — a value on the left (identifier,
-// literal, `)`, `]`, `}`, template end, …) makes it a comparison instead.
-//
+// only starts JSX in an expression position - a value on the left (identifier,
+// literal, `)`, `]`, `}`, template end, ...) makes it a comparison instead.
 // Angle-bracket type assertions (`<string>foo`) are also ruled out: the parser
 // treats `<` followed by a primitive type keyword as a cast, never JSX, so the
 // lexer must not open a tag frame for them (doing so would leak JSX-text state
@@ -609,7 +608,7 @@ func (l *Lexer) atJSXTagStart() bool {
 		// there, not a cast (the parser's JSX child path has no assertion rule).
 		return true
 	}
-	// Outside children, `<` only starts JSX in an expression position — and
+	// Outside children, `<` only starts JSX in an expression position - and
 	// never for a primitive type name, which the parser reads as a cast.
 	if isPrimitiveTypeName(l.peekWord()) {
 		return false
@@ -624,7 +623,7 @@ func (l *Lexer) atJSXTagStart() bool {
 
 // looksLikeTypeParams reports whether the `<` at l.pos-1 opens a generic
 // type-parameter list rather than a JSX element. The signal is a `,` or
-// `extends` after the first identifier and before the matching `>` — neither
+// `extends` after the first identifier and before the matching `>` - neither
 // can appear in a JSX opening tag. In `.tsx` TypeScript only accepts these
 // unambiguous forms (bare `<T>(...)` is JSX), so the heuristic is safe.
 func (l *Lexer) looksLikeTypeParams() bool {
@@ -662,7 +661,7 @@ func isTagNameStart(ch rune) bool {
 }
 
 // isPrimitiveTypeName reports whether name is a TypeScript primitive type
-// keyword — the names that turn `<name>expr` into a type assertion rather than
+// keyword - the names that turn `<name>expr` into a type assertion rather than
 // a JSX element. Mirrors the parser's isPrimitiveTypeKeyword.
 func isPrimitiveTypeName(name string) bool {
 	switch name {
@@ -762,21 +761,20 @@ func (l *Lexer) readString(quote rune) {
 }
 
 // readTemplate reads the body of a template literal.
-//
 // It is called in three situations:
 //  1. From the main loop when a backtick is encountered (opening a template).
 //     At entry, l.start points at the character AFTER the opening backtick.
-//  2. From the main loop when a `}` closes a `${ ... }` interpolation — in
+//  2. From the main loop when a `}` closes a `${ ... }` interpolation - in
 //     which case we resume reading template-string text. l.start again points
 //     just past the `}`.
 //  3. (Not directly, but logically) the caller guarantees l.start is set so
 //     the emitted token spans only the template body text.
 //
 // The emitted token kind depends on how the run terminates:
-//   - `${` → TEMPLATE_START (the text before `${` becomes its value; the `${`
+//   - `${` -> TEMPLATE_START (the text before `${` becomes its value; the `${`
 //     is consumed but NOT part of the value). The `${` opens an interpolation,
 //     so we push a brace-depth entry for it.
-//   - closing backtick → TEMPLATE_END (the text up to but not including the
+//   - closing backtick -> TEMPLATE_END (the text up to but not including the
 //     backtick becomes its value; the backtick is consumed).
 func (l *Lexer) readTemplate() {
 	l.start = l.pos
@@ -829,7 +827,6 @@ func (l *Lexer) incTemplateBrace() {
 // innermost template interpolation (brace depth 0), it pops that scope and
 // returns true so the caller resumes template-string reading. Otherwise it
 // decrements the depth and returns false (the `}` is a normal RBRACE).
-//
 // The `}` has already been consumed by the main loop's next() before this is
 // called, so l.pos is just past the `}`.
 func (l *Lexer) closeTemplateBrace() bool {
@@ -968,7 +965,7 @@ func kindName(k Kind) string {
 }
 
 // isValueEnd reports whether the given previous-token kind is a position where
-// a string literal cannot legally begin — i.e. the previous token ended a
+// a string literal cannot legally begin - i.e. the previous token ended a
 // value/expression. In JSX text this matters for apostrophes in contractions
 // ("doesn't") and quotes directly after values ("5\" screen"): they must be
 // lexed as literal characters, not as the start of an (unterminated) string
@@ -1027,7 +1024,7 @@ func (l *Lexer) readRegex() {
 			return
 		}
 		if ch == '\n' {
-			// Unterminated regex — emit as Error to avoid hanging
+			// Unterminated regex - emit as Error to avoid hanging
 			l.emit(Error)
 			return
 		}

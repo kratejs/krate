@@ -11,7 +11,7 @@ import (
 
 // TestWorkerRewrite verifies `new Worker('./x.ts')` and the
 // `new Worker(new URL(...), { type: 'module' })` form register the target in
-// WorkerFiles and rewrite the worker argument to its hashed /workers/… URL.
+// WorkerFiles and rewrite the worker argument to its hashed /workers/... URL.
 func TestWorkerRewrite(t *testing.T) {
 	tmp := t.TempDir()
 	pagesDir := filepath.Join(tmp, "src", "pages")

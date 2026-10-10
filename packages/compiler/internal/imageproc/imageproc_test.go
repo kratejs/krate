@@ -114,7 +114,7 @@ func TestProcessImageGeneratesWebpAndFallback(t *testing.T) {
 		}
 	}
 
-	// Source is opaque PNG → fallback stays PNG.
+	// Source is opaque PNG -> fallback stays PNG.
 	if res.FallbackMime != "image/png" {
 		t.Errorf("FallbackMime = %q, want image/png", res.FallbackMime)
 	}

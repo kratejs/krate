@@ -175,7 +175,7 @@ func ToNative(v any) any {
 // EvaluateExpr evaluates a self-contained JS expression in a fresh QuickJS VM
 // and returns its String() representation. Because QuickJS is a full ECMAScript
 // engine, every built-in (Date, Math, String, Number, Array, Object, ...) is
-// available — so SSR evaluation of globals like Date.now() produces a genuine
+// available - so SSR evaluation of globals like Date.now() produces a genuine
 // JS-engine value rather than a Go approximation. Returns an error when the
 // expression throws (e.g. it references an identifier that isn't defined).
 func EvaluateExpr(code string) (string, error) {

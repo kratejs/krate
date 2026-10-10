@@ -11,7 +11,7 @@ import (
 
 // TestBuildPageAssetImport is an end-to-end check that importing a non-code
 // file (e.g. an image) in a page: (1) rewrites the imported binding to a hashed
-// /assets/… URL literal in the hydration JS, and (2) copies the file into the
+// /assets/... URL literal in the hydration JS, and (2) copies the file into the
 // output directory at that URL.
 func TestBuildPageAssetImport(t *testing.T) {
 	root := t.TempDir()

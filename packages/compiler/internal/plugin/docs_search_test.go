@@ -121,7 +121,7 @@ func TestSearchConfigEngineValidation(t *testing.T) {
 	if engine != "pagefind" {
 		t.Errorf("engine = %q, want pagefind for unknown engine", engine)
 	}
-	// No search options at all → pagefind default.
+	// No search options at all -> pagefind default.
 	_, engine, _ = searchConfig(&DocsPluginOptions{})
 	if engine != "pagefind" {
 		t.Errorf("engine = %q, want pagefind default", engine)

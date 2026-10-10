@@ -15,7 +15,7 @@ func rewriteSrc(t *testing.T, src string) string {
 	return astprint.Print(prog)
 }
 
-// ─── React.* namespace ──────────────────────────────────────────────────────
+// React.* namespace
 
 func TestRewriteReactNamespaceUseState(t *testing.T) {
 	out := rewriteSrc(t, `
@@ -63,7 +63,7 @@ func TestRewriteReactCreateElementToH(t *testing.T) {
 	}
 }
 
-// ─── bare-read auto-call ────────────────────────────────────────────────────
+// bare-read auto-call
 
 func TestRewriteReactBareReadInExpression(t *testing.T) {
 	out := rewriteSrc(t, `
@@ -150,7 +150,7 @@ func TestRewriteReactAlreadyCalledNotDoubled(t *testing.T) {
 	}
 }
 
-// ─── structural lowerings ───────────────────────────────────────────────────
+// structural lowerings
 
 func TestRewriteReactUseRefObject(t *testing.T) {
 	out := rewriteSrc(t, `
@@ -209,7 +209,7 @@ func TestRewriteReactUseContextLowered(t *testing.T) {
 	}
 }
 
-// ─── style objects ──────────────────────────────────────────────────────────
+// style objects
 
 func TestRewriteReactStyleObject(t *testing.T) {
 	out := rewriteSrc(t, `
@@ -236,7 +236,7 @@ func TestRewriteReactStyleObjectNonLiteralUntouched(t *testing.T) {
 	}
 }
 
-// ─── useReducer ─────────────────────────────────────────────────────────────
+// useReducer
 
 func TestRewriteReactUseReducer(t *testing.T) {
 	out := rewriteSrc(t, `
@@ -270,7 +270,7 @@ func TestRewriteReactNamespaceUseReducer(t *testing.T) {
 	}
 }
 
-// ─── Fragment ───────────────────────────────────────────────────────────────
+// Fragment
 
 func TestRewriteReactFragmentNamedImport(t *testing.T) {
 	out := rewriteSrc(t, `
@@ -299,7 +299,7 @@ func TestRewriteReactFragmentNamespace(t *testing.T) {
 	}
 }
 
-// ─── useId ──────────────────────────────────────────────────────────────────
+// useId
 
 func TestRewriteReactUseIdMarker(t *testing.T) {
 	out := rewriteSrc(t, `
@@ -317,7 +317,7 @@ func TestRewriteReactUseIdMarker(t *testing.T) {
 	}
 }
 
-// ─── no React import ────────────────────────────────────────────────────────
+// no React import
 
 func TestRewriteReactNoReactLeavesKrateCodeAlone(t *testing.T) {
 	out := rewriteSrc(t, `

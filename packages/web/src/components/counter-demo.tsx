@@ -2,7 +2,7 @@ import { createSignal } from "@krate/runtime";
 
 /**
  * A live, hydrated demo for the landing page. This is a real Krate client
- * component: it ships a tiny hydration bundle and reacts with signals — the
+ * component: it ships a tiny hydration bundle and reacts with signals - the
  * same primitive the marketing copy describes.
  */
 export function CounterDemo() {

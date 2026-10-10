@@ -258,7 +258,7 @@ keywords: alpha,beta
 	if fm["title"] != "Demo" {
 		t.Errorf("title = %#v", fm["title"])
 	}
-	// order was a string in the old parser; now a number — docs decodes both.
+	// order was a string in the old parser; now a number - docs decodes both.
 	if fm["order"] != int64(999) {
 		t.Errorf("order = %#v", fm["order"])
 	}

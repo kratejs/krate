@@ -12,7 +12,6 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	webpenc "github.com/skrashevich/go-webp"
@@ -52,7 +51,7 @@ type ImageResult struct {
 }
 
 func getCacheDir(root string) string {
-	// Computed per call — the cache must be scoped to the current project root.
+	// Computed per call - the cache must be scoped to the current project root.
 	return filepath.Join(root, ".krate", "cache", "images")
 }
 
@@ -83,7 +82,7 @@ func DecodeImage(r *os.File) (image.Image, string, error) {
 }
 
 // EncodeWebP encodes img as a lossy WebP image at the given quality (0-100).
-// Uses a pure-Go VP8 encoder — no cgo, no libwebp dependency.
+// Uses a pure-Go VP8 encoder - no cgo, no libwebp dependency.
 func EncodeWebP(img image.Image, quality int) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := webpenc.Encode(&buf, img, &webpenc.Options{Lossy: true, Quality: float32(quality)}); err != nil {
@@ -455,11 +454,4 @@ func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder
 		FallbackMime: fallbackMime,
 		Placeholder:  placeholder,
 	}, nil
-}
-
-func ParseIntAttr(val string) int {
-	val = strings.TrimSpace(val)
-	val = strings.Trim(val, "\"'")
-	v, _ := strconv.Atoi(val)
-	return v
 }

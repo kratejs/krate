@@ -22,7 +22,7 @@ func renderInline(text string, cfg Config) string {
 
 	// Images (before links). The URL is entity-escaped before this runs, so a
 	// scheme hidden behind entities (e.g. javascript&#58;) can never reach the
-	// browser as a colon — but a literal javascript:/data: href would. Reject
+	// browser as a colon - but a literal javascript:/data: href would. Reject
 	// script-capable schemes outright.
 	text = imageRe.ReplaceAllStringFunc(text, func(match string) string {
 		parts := imageRe.FindStringSubmatch(match)
@@ -63,10 +63,10 @@ func renderInline(text string, cfg Config) string {
 		text = strikeRe.ReplaceAllString(text, "<del>$1</del>")
 	}
 
-	// Emoji shortcodes (`:smile:` → 😄), outside inline code spans.
+	// Emoji shortcodes (`:smile:` -> ), outside inline code spans.
 	text = replaceEmoji(text)
 
-	// Autolinks (GFM) — skip URLs already inside HTML attributes (e.g.
+	// Autolinks (GFM) - skip URLs already inside HTML attributes (e.g.
 	// href="...") to avoid double-wrapping in <a> tags.
 	if cfg.GFM {
 		var buf strings.Builder
@@ -78,7 +78,7 @@ func renderInline(text string, cfg Config) string {
 				break
 			}
 			// If the character before the match is a quote, this URL lives
-			// inside an HTML attribute — leave it alone.
+			// inside an HTML attribute - leave it alone.
 			if loc[0] > 0 && (rest[loc[0]-1] == '"' || rest[loc[0]-1] == '\'') {
 				buf.WriteString(rest[:loc[1]])
 				rest = rest[loc[1]:]

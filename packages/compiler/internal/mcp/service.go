@@ -75,7 +75,7 @@ func newBuilder(opts Options) *build.Builder {
 // Register installs every tool, resource, template, prompt, and completion on
 // the MCP server.
 func (s *Service) Register(srv *Server) {
-	// ── read tools ────────────────────────────────────────────────────────
+	// read tools
 	srv.RegisterTool(Tool{
 		Name:        "list_routes",
 		Description: "List every route in the project with its source file, render mode, and dynamic params.",
@@ -130,7 +130,7 @@ func (s *Service) Register(srv *Server) {
 		Handler:     s.toolExplain,
 	})
 
-	// ── write tools (dry-run by default) ──────────────────────────────────
+	// write tools (dry-run by default)
 	srv.RegisterTool(Tool{
 		Name:        "create_page",
 		Description: "Create a new page from a template (static, content-list, detail) + optional content entry and layout. Returns a unified diff unless apply=true.",
@@ -280,7 +280,7 @@ func (s *Service) Register(srv *Server) {
 		Handler:     s.toolEditContent,
 	})
 
-	// ── resources ─────────────────────────────────────────────────────────
+	// resources
 	srv.RegisterResource(Resource{
 		URI:         "krate://routes",
 		Name:        "routes",
@@ -339,13 +339,13 @@ func (s *Service) Register(srv *Server) {
 		Read:        s.readDocsTemplate,
 	})
 
-	// ── prompts ───────────────────────────────────────────────────────────
+	// prompts
 	srv.RegisterPrompt(s.promptAddPage())
 	srv.RegisterPrompt(s.promptPublishContent())
 	srv.RegisterPrompt(s.promptFixChecks())
 	srv.RegisterPrompt(s.promptExplore())
 
-	// ── completions ───────────────────────────────────────────────────────
+	// completions
 	srv.RegisterCompletion("ref/resource", "krate://page/{route}", "route", s.completeRoutes)
 	srv.RegisterCompletion("ref/resource", "krate://docs/{slug}", "slug", s.completeDocSlugs)
 	srv.RegisterCompletion("ref/prompt", "add-page", "template", s.completeTemplates)
@@ -363,7 +363,7 @@ func (s *Service) Register(srv *Server) {
 	srv.RegisterCompletion("ref/tool", "edit_content", "slug", s.completeContentSlugs)
 }
 
-// ── read tools ──────────────────────────────────────────────────────────────
+// read tools
 
 func (s *Service) toolListRoutes(ctx context.Context, _ map[string]any) (ToolResult, *rpcError) {
 	routes, err := s.builder.RouteList()
@@ -544,7 +544,7 @@ func (s *Service) toolCheck(ctx context.Context, _ map[string]any) (ToolResult, 
 	})
 }
 
-// ── site graph / explain ─────────────────────────────────────────────────────
+// site graph / explain
 
 func (s *Service) toolExplain(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
 	target, rerr := requireString(args, "route")
@@ -593,7 +593,7 @@ func (s *Service) assembleSiteGraph(ctx context.Context) (*build.SiteGraph, stri
 	return graph, out, nil
 }
 
-// ── write tools ─────────────────────────────────────────────────────────────
+// write tools
 
 // pageTemplate describes how create_page scaffolds a page.
 type pageTemplate string
@@ -1280,7 +1280,7 @@ func validateContentSlug(slug string) error {
 	return nil
 }
 
-// ── resources ───────────────────────────────────────────────────────────────
+// resources
 
 func (s *Service) readContentResource(ctx context.Context, uri string) (ResourceContents, *rpcError) {
 	type entry struct {
@@ -1452,7 +1452,7 @@ func (s *Service) readDocsTemplate(ctx context.Context, uri string, params map[s
 	return ResourceContents{URI: uri, MIMEType: "text/markdown", Text: doc.Markdown}, nil
 }
 
-// ── completions ─────────────────────────────────────────────────────────────
+// completions
 
 func (s *Service) completeRoutes(ctx context.Context, _ string) ([]string, error) {
 	routes, err := s.builder.RouteList()
@@ -1512,7 +1512,7 @@ func (s *Service) completeContentSlugs(ctx context.Context, _ string) ([]string,
 	return nil, nil
 }
 
-// ── prompts ─────────────────────────────────────────────────────────────────
+// prompts
 
 func (s *Service) promptAddPage() *Prompt {
 	return &Prompt{
@@ -1579,7 +1579,7 @@ func (s *Service) promptExplore() *Prompt {
 	}
 }
 
-// ── helpers ─────────────────────────────────────────────────────────────────
+// helpers
 
 // runBuild runs a full build with stdout captured so the JSON-RPC stream stays
 // clean. A fresh Builder is used because BuildAll closes plugin subprocesses
@@ -1680,7 +1680,7 @@ func humanizeRoute(p string) string {
 	return strings.Join(parts, " ")
 }
 
-// routeFromRel converts a page rel path into its route prefix (e.g. blog/[slug].tsx → /blog).
+// routeFromRel converts a page rel path into its route prefix (e.g. blog/[slug].tsx -> /blog).
 func routeFromRel(rel string) string {
 	rel = strings.TrimPrefix(rel, "/")
 	dir := filepath.Dir(filepath.FromSlash(rel))
@@ -1832,7 +1832,7 @@ func walkContentFiles(dir string) ([]string, error) {
 // excerpt returns a snippet of text around the earliest query term match. The
 // window is snapped outward to word boundaries and ellipses are only added when
 // text was actually dropped on that side, so a match at the start of the page
-// has no leading "…".
+// has no leading "...".
 func excerpt(text, query string, n int) string {
 	if text == "" {
 		return ""

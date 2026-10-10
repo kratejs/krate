@@ -36,7 +36,7 @@ func ParseTailwindConfigStatic(path string) (*TailwindConfig, bool) {
 	// Top-level theme keys replace defaults; `extend` keys merge.
 	override, extend := splitThemeBlocks(themeSrc)
 	// `extend` must merge onto the built-in scale for every key, so each call
-	// passes the current (already-defaulted) theme value as the merge base —
+	// passes the current (already-defaulted) theme value as the merge base -
 	// this also covers borderRadius/boxShadow/fontSize/fontWeight, which
 	// previously had no base and so discarded the whole default scale.
 	applyThemeKey("spacing", override, extend, &cfg.Theme.Spacing)
@@ -51,7 +51,7 @@ func ParseTailwindConfigStatic(path string) (*TailwindConfig, bool) {
 	applyThemeKey("fontSize", override, extend, &cfg.Theme.TextSizes)
 	applyThemeKey("fontWeight", override, extend, &cfg.Theme.FontWeights)
 
-	// Colors: nested map (name → shade → value). Replaced when top-level.
+	// Colors: nested map (name -> shade -> value). Replaced when top-level.
 	if colors, ok := parseColorMap(override, "colors"); ok {
 		cfg.Theme.Colors = colors
 	} else if colors, ok := parseColorMap(extend, "colors"); ok {
@@ -162,7 +162,7 @@ func parseColorMap(src, key string) (map[string]map[string]string, bool) {
 	return out, len(out) > 0
 }
 
-// topLevelEntries splits an object body (`a: 1, b: { ... }`) into its key →
+// topLevelEntries splits an object body (`a: 1, b: { ... }`) into its key ->
 // raw-value pairs, honouring nested braces, brackets, parens, and strings.
 func topLevelEntries(body string) map[string]string {
 	out := map[string]string{}

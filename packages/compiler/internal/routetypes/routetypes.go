@@ -1,7 +1,6 @@
 // Package routetypes generates TypeScript declaration files describing a
 // project's route surface. The generated `.d.ts` gives `<Link href>`, route
 // params, and navigation code end-to-end type safety without any runtime cost.
-//
 // It is a pure string generator (no filesystem access) so it is trivially
 // testable and reusable by the build pipeline, the MCP server, and tooling.
 package routetypes
@@ -98,7 +97,7 @@ func Dedupe(routes []Route) []Route {
 
 // Generate renders the route declarations as a TypeScript module body. The
 // output exports `StaticRoute`, `DynamicRoute`, `Route`, `RouteParams`, and
-// `routes`. It does NOT augment any globals — see Bridge for that.
+// `routes`. It does NOT augment any globals - see Bridge for that.
 func Generate(routes []Route) string {
 	uniq := Dedupe(routes)
 

@@ -62,7 +62,7 @@ var rolePresets = map[string]Role{
 }
 
 // defaultRoleFor returns the preset used when no `as` is given. The empty Role
-// means "emit no ARIA" — the native radio/checkbox semantics are already
+// means "emit no ARIA" - the native radio/checkbox semantics are already
 // correct and keep the output zero-JS.
 func defaultRoleFor(kind Kind) Role {
 	return Role{}

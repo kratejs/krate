@@ -34,7 +34,7 @@ type fileEntry struct {
 // runCommunityHook executes a configured community plugin for the given hook.
 // The plugin is dispatched by runtime: descriptors returning runtime "go" are
 // launched as Go subprocesses, everything else runs as JavaScript inside the
-// embedded QuickJS runtime — no subprocess and no stdin/stdout protocol.
+// embedded QuickJS runtime - no subprocess and no stdin/stdout protocol.
 func runCommunityHook(hookName string, pc config.PluginConfig, root, outDir string, env CommunityEnv, hookCtx interface{}) error {
 	start := time.Now()
 	var err error

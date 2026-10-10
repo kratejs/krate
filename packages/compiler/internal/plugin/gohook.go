@@ -151,7 +151,7 @@ func runJSManifest(module string) (goPluginDescriptor, error) {
 	_ = rt.SetEnv(environ.Current)
 	// Prelude a CommonJS shim so descriptor files written as
 	// `module.exports = ...` (the documented Go-plugin shape) load even when
-	// esbuild leaves the `module.exports` assignment unwrapped — which happens
+	// esbuild leaves the `module.exports` assignment unwrapped - which happens
 	// when the file also references `import.meta` (esbuild then treats it as
 	// ESM and does NOT convert the CJS export to the __kratePlugin global).
 	// Pure ESM bundles ignore the shim and still set __kratePlugin; pure CJS

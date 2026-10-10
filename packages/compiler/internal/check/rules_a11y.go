@@ -9,7 +9,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-// ─── a11y: duplicate ids ────────────────────────────────────────────────────
+// a11y: duplicate ids
 
 // ruleDuplicateID flags repeated id attributes, which break label/aria
 // references and fragment links.
@@ -36,7 +36,7 @@ func ruleDuplicateID(p *Page, _ *Config) []Finding {
 	return out
 }
 
-// ─── a11y: landmarks ────────────────────────────────────────────────────────
+// a11y: landmarks
 
 // ruleLandmark flags pages whose entire content lives outside a landmark
 // region, which makes screen-reader navigation harder.
@@ -71,7 +71,7 @@ func ruleLandmark(p *Page, _ *Config) []Finding {
 	}}
 }
 
-// ─── a11y: form labels ──────────────────────────────────────────────────────
+// a11y: form labels
 
 // ruleFormLabel flags form controls without an associated label (a <label>
 // wrapping or referencing them, aria-label, aria-labelledby, or a title).
@@ -141,7 +141,7 @@ func descendantControls(n *html.Node) []*html.Node {
 	return out
 }
 
-// ─── a11y: positive tabindex ────────────────────────────────────────────────
+// a11y: positive tabindex
 
 // rulePositiveTabindex flags tabindex > 0, which overrides natural focus order
 // and is almost always a mistake.
@@ -166,7 +166,7 @@ func rulePositiveTabindex(p *Page, _ *Config) []Finding {
 	return out
 }
 
-// ─── a11y: valid ARIA roles ────────────────────────────────────────────────
+// a11y: valid ARIA roles
 
 // validARIALandmarkRoles is a subset of the ARIA role list used for validation.
 // Only roles commonly misused on generic elements are checked; unknown roles
@@ -217,7 +217,7 @@ func ruleARIARole(p *Page, _ *Config) []Finding {
 	return out
 }
 
-// ─── a11y: inline style contrast (heuristic) ────────────────────────────────
+// a11y: inline style contrast (heuristic)
 
 // ruleColorContrast is a best-effort check for the common inline case: a
 // `color` and a `background` on the same element whose contrast ratio is below

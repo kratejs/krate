@@ -15,7 +15,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 )
 
-// ─── Test helpers ────────────────────────────────────────────────────────────
+// Test helpers
 
 func parseProg(t *testing.T, src string) *ast.Program {
 	t.Helper()
@@ -56,7 +56,7 @@ func fullPipelineWithReact(t *testing.T, src string) (*EmitResult, string) {
 	return result, hydrationJS
 }
 
-// ─── Shared utility tests ────────────────────────────────────────────────────
+// Shared utility tests
 
 func TestEscapeHTML(t *testing.T) {
 	tests := []struct {
@@ -175,7 +175,7 @@ func TestToFloat(t *testing.T) {
 	}
 }
 
-// ─── New pipeline: HTML output tests ─────────────────────────────────────────
+// New pipeline: HTML output tests
 
 func TestRenderSimpleHTML(t *testing.T) {
 	result, _ := fullPipeline(t, `export default function Page() { return <div>hello</div>; }`)
@@ -240,7 +240,7 @@ func TestRenderNestedElements(t *testing.T) {
 	}
 }
 
-// ─── New pipeline: Signal detection ──────────────────────────────────────────
+// New pipeline: Signal detection
 
 func TestSignalDetection(t *testing.T) {
 	result, _ := fullPipeline(t, `export default function Page() { const [count, setCount] = createSignal(0); return <div>{count()}</div>; }`)
@@ -374,7 +374,7 @@ export default function Page() {
 
 func TestHydrationJSCallbackRef(t *testing.T) {
 	// Callback refs (ref={(el) => { rootRef = el; }}) must be emitted as the
-	// callback itself — kbindRef(id, (el)=>{...}) — NOT wrapped as an assignment
+	// callback itself - kbindRef(id, (el)=>{...}) - NOT wrapped as an assignment
 	// target (kbindRef(id, el=>{(el)=>{...}=el;})) which is a syntax error.
 	src := `function Widget() {
   var [count, setCount] = createSignal(0);
@@ -527,7 +527,7 @@ export default function Page() {
 	}
 }
 
-// ─── New pipeline: Component tiers ───────────────────────────────────────────
+// New pipeline: Component tiers
 
 func TestServerComponentRendering(t *testing.T) {
 	src := `// @server
@@ -587,7 +587,7 @@ export default Page;`
 	}
 }
 
-// ─── New pipeline: React interop (always on, via bundler.RewriteReact) ───────
+// New pipeline: React interop (always on, via bundler.RewriteReact)
 
 func TestReactInteropSignalDetection(t *testing.T) {
 	src := `import { useState } from 'react';
@@ -696,7 +696,7 @@ func TestReactInteropHandlerWithCreateSignal(t *testing.T) {
 	}
 }
 
-// ─── New pipeline: Hydration correctness ─────────────────────────────────────
+// New pipeline: Hydration correctness
 
 func TestHandlerIndicesUnique(t *testing.T) {
 	src := `
@@ -801,7 +801,7 @@ func TestStringSignalInitialValue(t *testing.T) {
 	}
 }
 
-// ─── New pipeline: Complex scenarios ─────────────────────────────────────────
+// New pipeline: Complex scenarios
 
 func TestMultiComponentHandlerMangling(t *testing.T) {
 	src := `function CompA(props) {
@@ -1027,7 +1027,7 @@ export default function Page() {
 	}
 }
 
-// ─── <SyntaxHighlight> compile-time chroma ───────────────────────────────────
+// <SyntaxHighlight> compile-time chroma
 
 func TestSSREvalSyntaxHighlightHighlightsStaticCallSiteChildren(t *testing.T) {
 	// A signal-less (SSR-evaluated) wrapper passing {children} through to

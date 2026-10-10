@@ -1,11 +1,11 @@
 /**
  * Types + helpers for authoring Krate docs themes.
  *
- * A docs theme is a layout component that owns the whole docs shell — navbar,
+ * A docs theme is a layout component that owns the whole docs shell - navbar,
  * sidebar, TOC, breadcrumbs, prev/next, social links (the "chrome"). The docs
  * plugin resolves it via the `theme` option in krate.config.ts and renders
  * every generated docs page through it, passing a single typed
- * {@link DocsLayoutProps} object. Helper functions are compile-time no-ops —
+ * {@link DocsLayoutProps} object. Helper functions are compile-time no-ops -
  * they are erased when the theme is bundled into Krate's embedded runtime.
  */
 
@@ -182,7 +182,7 @@ export interface DocsThemeDescriptor<Options = DocsThemeOptions> {
    * and renders every docs page through it. Filled by the factory.
    */
   module?: string;
-  /** Alias of `module` — a root-relative component path, like `layout`. */
+  /** Alias of `module` - a root-relative component path, like `layout`. */
   layout?: string;
   /** Options forwarded to the layout component as `props.options`. */
   options?: Options;

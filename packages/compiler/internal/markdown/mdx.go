@@ -333,13 +333,13 @@ func makePlaceholder(prefix string, idx int) string {
 // ParseMDXSegments parses MDX (or plain Markdown) and returns ordered segments
 // (HTML + JSX blocks + code blocks) suitable for generating TSX source code.
 // JSX blocks are returned as raw JSX strings, and fenced code blocks are
-// returned as Code segments that render the <Code> component — both are
+// returned as Code segments that render the <Code> component - both are
 // embedded directly in TSX output.
 func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]any, segments []MDXSegment) {
 	frontmatter, body := extractFrontmatter(src)
 
 	// Strip import lines from the body so they don't render as markdown text.
-	// Lines inside fenced code blocks are preserved — an "import ..." line used
+	// Lines inside fenced code blocks are preserved - an "import ..." line used
 	// as a code sample must not be hoisted or removed from its block.
 	bodyLines := strings.Split(body, "\n")
 	var bodyWithoutImports []string
@@ -402,7 +402,7 @@ func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]any, segme
 			continue
 		}
 
-		// Component directive (:::component Name attr="x" ... :::) → the named
+		// Component directive (:::component Name attr="x" ... :::) -> the named
 		// component wrapping markdown-rendered body content. Checked before
 		// admonitions so `:::component` isn't read as an admonition type.
 		if m := directiveRe.FindStringSubmatch(trimmed); m != nil {
@@ -438,7 +438,7 @@ func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]any, segme
 			continue
 		}
 
-		// Admonition (:::type ... / :::::: ) → <Aside> segment. Disabled when
+		// Admonition (:::type ... / :::::: ) -> <Aside> segment. Disabled when
 		// the markdown config turns admonitions off, in which case the block is
 		// rendered as ordinary markdown.
 		if m := admonRe.FindStringSubmatch(trimmed); m != nil && strings.HasPrefix(trimmed, ":") && cfg.Admonitions {
@@ -471,7 +471,7 @@ func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]any, segme
 			continue
 		}
 
-		// Fenced code block → <Code> segment (or a Mermaid diagram).
+		// Fenced code block -> <Code> segment (or a Mermaid diagram).
 		if fenceRe.MatchString(trimmed) {
 			lang, codeLines, next := collectFencedCode(lines, i)
 			code := strings.Join(codeLines, "\n")
@@ -587,7 +587,7 @@ func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]any, segme
 
 	// Clean up <p> wrappers around placeholders. The markdown renderer wraps
 	// inline content in <p> tags, but block placeholders should be block-level.
-	// e.g., <p>__KRATE_..._0__</p> → __KRATE_..._0__
+	// e.g., <p>__KRATE_..._0__</p> -> __KRATE_..._0__
 	for _, m := range markers {
 		html = strings.ReplaceAll(html, "<p>"+m.placeholder+"</p>", m.placeholder)
 	}
@@ -729,7 +729,7 @@ func buildJSXString(jsx *jsxBlockT) string {
 	} else {
 		jsxStr.WriteString(">")
 		if jsx.Children != "" {
-			// JSX children are kept as raw text — not processed as markdown.
+			// JSX children are kept as raw text - not processed as markdown.
 			// MDX treats content inside JSX components as JSX, not markdown.
 			jsxStr.WriteString(jsx.Children)
 		}

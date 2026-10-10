@@ -5,23 +5,15 @@ import (
 	"hash/fnv"
 	"os"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 )
 
-var classSelector = regexp.MustCompile(`\.([a-zA-Z_][a-zA-Z0-9_-]*)`)
-
 type Asset struct {
 	Path     string
 	Content  string
 	IsModule bool
-}
-
-type ModuleMapping struct {
-	LocalVar string
-	Mappings map[string]string
 }
 
 func Collect(dir string) ([]*Asset, error) {
@@ -98,9 +90,9 @@ func shortenHexColors(css string) string {
 // bytes must never be rewritten by value-level transforms like removeZeroUnits.
 var customPropRe = regexp.MustCompile(`(?:^|[;{})\s])--[a-zA-Z0-9_-]+\s*:\s*[^;}]*`)
 
-// removeZeroUnits removes units from 0 values (0px → 0), EXCEPT inside custom
+// removeZeroUnits removes units from 0 values (0px -> 0), EXCEPT inside custom
 // property values. Rewriting `--x: 0rem` to `--x: 0` changes the substituted
-// value — calc(1rem + var(--x)) is only valid when --x carries a unit — so
+// value - calc(1rem + var(--x)) is only valid when --x carries a unit - so
 // custom property declarations are stashed and restored verbatim.
 func removeZeroUnits(css string) string {
 	type placeholder struct {
@@ -179,8 +171,8 @@ func parseByte(s string) uint8 {
 	return uint8(n)
 }
 
-// simplifyCalc simplifies calc() expressions: calc(0 + X) → X, calc(X + 0) → X,
-// calc(X * 1) → X, calc(X * 0) → 0, etc. Whitespace around operators is
+// simplifyCalc simplifies calc() expressions: calc(0 + X) -> X, calc(X + 0) -> X,
+// calc(X * 1) -> X, calc(X * 0) -> 0, etc. Whitespace around operators is
 // optional for `*` and tolerated around `+`/`-`, since minified input may be
 // space-free. Substitutions are re-applied until a fixed point so nested
 // simplifications fully collapse.
@@ -317,7 +309,6 @@ func matchBrace(css string, open int) (closeBrace int, deep bool) {
 
 // deduplicateBody removes duplicate declarations within a rule, keeping the
 // last value for each property. Two cases must be preserved verbatim:
-//
 //   - Vendor-prefixed fallbacks: `display:-webkit-box;display:flex` keeps both,
 //     because dropping the prefixed value breaks older browsers.
 //   - Custom-property names: `--Foo` and `--foo` are distinct (custom
@@ -325,7 +316,7 @@ func matchBrace(css string, open int) (closeBrace int, deep bool) {
 func deduplicateBody(body string) string {
 	type entry struct{ prop, val string }
 	var entries []entry
-	index := make(map[string]int) // key → position in entries
+	index := make(map[string]int) // key -> position in entries
 
 	for _, raw := range splitDecls(body) {
 		prop, val, hasColon := parseDecl(raw)
@@ -387,7 +378,7 @@ func dedupeBodyPreservingText(body string) string {
 	}
 	segments := splitDecls(body)
 	items := make([]item, 0, len(segments))
-	index := make(map[string]int) // property key → position in items
+	index := make(map[string]int) // property key -> position in items
 
 	for _, raw := range segments {
 		prefix, core := splitLeadingTrivia(raw)
@@ -519,7 +510,7 @@ func splitDecls(body string) []string {
 	return decls
 }
 
-// stripCSSComments removes /* … */ comments outside string literals. It is used
+// stripCSSComments removes /* ... */ comments outside string literals. It is used
 // only to derive a declaration's property name/value for deduplication, never
 // for the emitted text (which keeps comments verbatim).
 func stripCSSComments(s string) string {
@@ -595,56 +586,3 @@ var rgbRe = regexp.MustCompile(`rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3}
 var rgbSpaceRe = regexp.MustCompile(`rgb\(\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*(?:/\s*([0-9.]+)\s*)?\)`)
 var calcRe = regexp.MustCompile(`calc\(([^()]*(?:\([^()]*\)[^()]*)*)\)`)
 var trailingSemiRe = regexp.MustCompile(`;\s*\}`)
-
-func Bundle(assets []*Asset) string {
-	var b strings.Builder
-	for _, a := range assets {
-		if !a.IsModule {
-			b.WriteString(a.Content)
-			b.WriteByte('\n')
-		}
-	}
-	return b.String()
-}
-
-func ExtractClassNames(css string) []string {
-	seen := make(map[string]bool)
-	matches := classSelector.FindAllStringSubmatch(css, -1)
-	var result []string
-	for _, m := range matches {
-		if !seen[m[1]] {
-			seen[m[1]] = true
-			result = append(result, m[1])
-		}
-	}
-	sort.Strings(result)
-	return result
-}
-
-func GenerateMapping(path string, classNames []string) map[string]string {
-	hash := hashPath(path)
-	mapping := make(map[string]string, len(classNames))
-	for _, name := range classNames {
-		mapping[name] = name + "_" + hash
-	}
-	return mapping
-}
-
-func ScopeCSS(content string, mapping map[string]string) string {
-	return classSelector.ReplaceAllStringFunc(content, func(match string) string {
-		name := match[1:]
-		if scoped, ok := mapping[name]; ok {
-			return "." + scoped
-		}
-		return match
-	})
-}
-
-func VerifyMapping(mapping map[string]string) error {
-	for orig, scoped := range mapping {
-		if !strings.HasPrefix(scoped, orig+"_") {
-			return fmt.Errorf("invalid scoped name %q for class %q", scoped, orig)
-		}
-	}
-	return nil
-}

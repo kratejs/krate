@@ -2,7 +2,7 @@
  * Typed configuration helpers for Krate.
  *
  * Use `defineConfig` in `krate.config.ts` to get full type-checking of every
- * supported config key — unknown or misspelled keys will fail to compile.
+ * supported config key - unknown or misspelled keys will fail to compile.
  *
  * ```ts
  * import { defineConfig, sitemap, docs } from '@krate/core';
@@ -176,9 +176,9 @@ export interface DocsPluginOptions {
    */
   layout?: string;
   /**
-   * Docs theme — the component every generated docs page is rendered through.
+   * Docs theme - the component every generated docs page is rendered through.
    * Like {@link layout}: a root-relative file path (`./` or `/`) or an npm
-   * package name (a docs theme installed from a registry) — or a theme
+   * package name (a docs theme installed from a registry) - or a theme
    * descriptor returned by a theme factory (bare object). `theme` and
    * `layout` are aliases: set only one unless both resolve to the same
    * component.
@@ -248,8 +248,8 @@ export interface KrateConfig {
   ppr?: boolean | { revalidate?: number };
   /**
    * Multi-language docs. Locales live in subdirectories of the docs content dir
-   * (`src/content/docs/<locale>/…`); the default locale is unprefixed
-   * (`/docs/…`) and others are path-prefixed (`/fr/docs/…`).
+   * (`src/content/docs/<locale>/...`); the default locale is unprefixed
+   * (`/docs/...`) and others are path-prefixed (`/fr/docs/...`).
    */
   i18n?: {
     defaultLocale?: string;
@@ -258,7 +258,7 @@ export interface KrateConfig {
   };
   /**
    * Versioned docs. Versions live in subdirectories
-   * (`src/content/docs/<version>/…`); the current version is unprefixed.
+   * (`src/content/docs/<version>/...`); the current version is unprefixed.
    */
   versions?: {
     current?: string;
@@ -371,7 +371,7 @@ export function docs(options: DocsPluginOptions = {}): PluginConfig {
   return { name: "docs", order: 10, options };
 }
 
-// ─── Content collections ─────────────────────────────────────────────────────
+// Content collections
 
 /** Shorthand field types accepted in a collection schema. */
 export type ContentFieldType =
@@ -405,7 +405,7 @@ export interface ContentCollection {
 export type ContentConfig = Record<string, ContentCollection>;
 
 /**
- * Define typed content collections. Optional identity helper — you can also
+ * Define typed content collections. Optional identity helper - you can also
  * pass a plain object to `defineConfig({ content: {...} })`; it exists purely
  * for type-checking and editor assistance.
  *
@@ -433,7 +433,7 @@ export function defineContent(config: ContentConfig): ContentConfig {
   return config;
 }
 
-// ─── Quality gates (checks) ─────────────────────────────────────────────────
+// Quality gates (checks)
 
 /** Severity for a check rule or category. `false` disables it. */
 export type CheckSeverity = "error" | "warning" | "off" | boolean;

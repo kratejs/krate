@@ -16,14 +16,14 @@ type TOCItem struct {
 }
 
 // ExtractTOC parses rendered HTML and extracts the default heading range
-// (h2–h3) for the TOC sidebar.
+// (h2-h3) for the TOC sidebar.
 func ExtractTOC(html string) []TOCItem {
 	return ExtractTOCLevels(html, 2, 3)
 }
 
 // ExtractTOCLevels parses rendered HTML and extracts headings with levels in
-// the inclusive [minLevel, maxLevel] range (2–6). Levels outside 1–6 and an
-// empty range are clamped to the defaults (2–3).
+// the inclusive [minLevel, maxLevel] range (2-6). Levels outside 1-6 and an
+// empty range are clamped to the defaults (2-3).
 func ExtractTOCLevels(html string, minLevel, maxLevel int) []TOCItem {
 	if minLevel < 2 {
 		minLevel = 2

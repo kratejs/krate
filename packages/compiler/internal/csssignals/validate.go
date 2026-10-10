@@ -22,13 +22,13 @@ func isIntrinsic(name string) bool {
 }
 
 // validate returns the first reason the component cannot be compiled, or "".
-//
 // The rules:
 //   - State may be READ only as a panel condition inside showIf/visibleIf.
 //   - State may be WRITTEN only from an onClick trigger calling the setter.
 //   - A trigger must be a labelable element with a static class.
 //   - A panel/scope anchor must have a static class.
-//   - Anything else (text, dynamic attribute, nested function, …) is rejected.
+//
+// - Anything else (text, dynamic attribute, nested function, ...) is rejected.
 func (a *Analyzer) validate(body []ast.Stmt) string {
 	names := a.names()
 	ret := findReturnStmt(body)

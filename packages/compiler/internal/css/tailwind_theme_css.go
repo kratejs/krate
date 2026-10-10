@@ -15,7 +15,7 @@ var atThemeRe = regexp.MustCompile(`(?s)@theme\s*(?:[^{]*)\{([^}]*)\}`)
 var themeVarRe = regexp.MustCompile(`--([a-zA-Z0-9-]+)\s*:\s*([^;{}]+);?`)
 
 // ExtractAtTheme returns the custom properties declared in `@theme` blocks,
-// keyed without the leading `--` (e.g. "color-brand-500" → "#f00").
+// keyed without the leading `--` (e.g. "color-brand-500" -> "#f00").
 func ExtractAtTheme(cssText string) map[string]string {
 	out := map[string]string{}
 	for _, m := range atThemeRe.FindAllStringSubmatch(cssText, -1) {

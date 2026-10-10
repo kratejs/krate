@@ -22,7 +22,7 @@ func parseTest(t *testing.T, src string) *ast.Program {
 func TestDetectRenderModeSuspenseAutoStreaming(t *testing.T) {
 	// A page that uses <Suspense> but has no explicit
 	// `export const config = { streaming: true }` must still be detected as
-	// streaming — the resolved fallback is swapped in per request.
+	// streaming - the resolved fallback is swapped in per request.
 	src := `import { Suspense } from '@krate/runtime/server';
 export default function P() {
   return <Suspense fallback={<span>loading</span>}><section>x</section></Suspense>;
@@ -48,7 +48,7 @@ func TestDetectRenderModeSuspenseNestedInExpression(t *testing.T) {
 
 func TestDetectRenderModeSuspenseStringNoFalsePositive(t *testing.T) {
 	// A page that merely mentions "<Suspense" inside a string or a commented-out
-	// block must NOT be treated as streaming — only a real JSX element counts.
+	// block must NOT be treated as streaming - only a real JSX element counts.
 	// This is the regression case for the old string-scan implementation.
 	src := `const note = "Do not use <Suspense here, it is only a mention";
 export default function P() {
@@ -114,7 +114,7 @@ export default function P() { return <div>x</div>; }`
 }
 
 func TestDetectRenderModeISRBeatsStreaming(t *testing.T) {
-	// isr has highest precedence — a page can't be both.
+	// isr has highest precedence - a page can't be both.
 	src := `export const config = { streaming: true, isr: true };
 export default function P() { return <div>x</div>; }`
 	mode, _ := detectRenderMode(parseTest(t, src))

@@ -120,7 +120,7 @@ func (b *Builder) RouteList() ([]RouteSummary, error) {
 	return out, nil
 }
 
-// PageGraph returns copies of the page→dependencies graph recorded during a
+// PageGraph returns copies of the page->dependencies graph recorded during a
 // build on this Builder (empty when it never built). pageDeps is keyed by the
 // page's absolute source path; depGraph maps each depended-on file to the pages
 // that reference it.

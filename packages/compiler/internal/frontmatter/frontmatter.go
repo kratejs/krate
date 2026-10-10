@@ -1,8 +1,7 @@
 // Package frontmatter parses YAML-style frontmatter found at the top of krate
 // markdown/MDX doc files. It is a deliberately small, dependency-free subset of
-// YAML — a single source of truth shared by the markdown renderer and the docs
+// YAML - a single source of truth shared by the markdown renderer and the docs
 // plugin (docs package), which both previously carried separate flat parsers.
-//
 // Supported YAML subset:
 //
 //	---
@@ -24,7 +23,6 @@
 // Supported: scalars (string / number / bool / null), double and single quoted
 // strings, inline `[a, b]` arrays and `{k: v}` objects, indented object blocks,
 // and `- item` list blocks (including maps of key/value pairs as list items).
-//
 // Unsupported YAML (by design): anchors (`&name`) and aliases (`*name`),
 // merge keys (`<<`), block scalar folding (`|`, `>`), multi-document streams
 // (`---`/`...` separators inside the block), flow-format nesting of arrays
@@ -391,7 +389,7 @@ func splitOutsideQuotes(s string, sep byte) []string {
 
 // splitSimpleKeyValue is splitKeyValue restricted to "simple" keys (used for
 // `- key: value` list items): the key must not start with a flow marker or
-// quote and must contain no spaces — so `- [meta, {...}]` is a scalar element,
+// quote and must contain no spaces - so `- [meta, {...}]` is a scalar element,
 // not a malformed map entry.
 func splitSimpleKeyValue(s string) (key, value string, ok bool) {
 	key, value, ok = splitKeyValue(s)

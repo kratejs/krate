@@ -1,26 +1,24 @@
 // Package mcp implements `krate mcp`, an MCP (Model Context Protocol) server
 // that exposes the Krate compiler to agents over JSON-RPC 2.0.
-//
 // Transport is stdio by default (one JSON object per line over stdin/stdout),
 // which is what Claude Desktop/Code, Cursor, VS Code, and opencode expect. The
 // dispatcher is transport-agnostic so an HTTP mode can be layered on later.
-//
 // There is no MCP SDK dependency: the protocol surface Krate needs
 // (initialize, tools/list, tools/call, resources/list, resources/read,
 // resources/templates/list, prompts/list, prompts/get, completions/complete,
 // notifications) is implemented directly with encoding/json.
-//
 // Protocol details:
-//
 //   - Initialize negotiates the client's protocol version against the set of
-//     versions this server supports (2024-11-05 … 2025-11-25) and advertises
-//     capabilities (tools, resources, prompts, completions) plus instructions.
-//   - Tool handlers run in goroutines but execute under a single mutex, so the
-//     read loop stays live to observe notifications (e.g. cancelled) while a
-//     long operation is running, without letting build/check output capture
-//     overlap.
-//   - notifications/cancelled marks the referenced request; clients receive a
-//     -32800 (RequestCancelled) error rather than a result.
+//
+// versions this server supports (2024-11-05 ... 2025-11-25) and advertises
+//
+//	  capabilities (tools, resources, prompts, completions) plus instructions.
+//	- Tool handlers run in goroutines but execute under a single mutex, so the
+//	  read loop stays live to observe notifications (e.g. cancelled) while a
+//	  long operation is running, without letting build/check output capture
+//	  overlap.
+//	- notifications/cancelled marks the referenced request; clients receive a
+//	  -32800 (RequestCancelled) error rather than a result.
 package mcp
 
 import (

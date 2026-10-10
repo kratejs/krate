@@ -6,7 +6,7 @@ import (
 )
 
 // splitColorModifier splits a color utility's value into the color key and an
-// optional alpha modifier: "blue-500/50" → ("blue-500", "50"); "blue-500" →
+// optional alpha modifier: "blue-500/50" -> ("blue-500", "50"); "blue-500" ->
 // ("blue-500", ""). Bracketed values may contain `/`, so brackets are honoured.
 func splitColorModifier(v string) (color, alpha string) {
 	depth := 0
@@ -28,7 +28,7 @@ func splitColorModifier(v string) (color, alpha string) {
 }
 
 // resolveAlpha resolves an alpha modifier to a CSS color-alpha component:
-// "50" → "0.5", "[0.42]" → "0.42", "75" → "0.75". Returns ok=false for a
+// "50" -> "0.5", "[0.42]" -> "0.42", "75" -> "0.75". Returns ok=false for a
 // non-numeric modifier.
 func resolveAlpha(a string) (string, bool) {
 	if a == "" {
@@ -68,7 +68,7 @@ func colorValue(key, alpha string, theme TailwindTheme) (string, bool) {
 			}
 		}
 	}
-	// flat / DEFAULT: `bg-brand` → colors.brand.DEFAULT
+	// flat / DEFAULT: `bg-brand` -> colors.brand.DEFAULT
 	if shades, ok := theme.Colors[key]; ok {
 		if hex, ok := shades["DEFAULT"]; ok {
 			if a, ok := resolveAlpha(alpha); ok {
@@ -123,7 +123,7 @@ func transparentVersion(color string) string {
 }
 
 // negateValue returns the negated form of a length/number value, preserving
-// units: "1rem" → "-1rem", "0" → "-0" (rendered "0").
+// units: "1rem" -> "-1rem", "0" -> "-0" (rendered "0").
 func negateValue(v string) string {
 	if v == "" {
 		return v

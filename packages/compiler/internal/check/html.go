@@ -99,7 +99,7 @@ func textContent(n *html.Node) string {
 	return strings.TrimSpace(b.String())
 }
 
-// maxHeadingLevel returns the deepest heading level (1–6) present, and the
+// maxHeadingLevel returns the deepest heading level (1-6) present, and the
 // heading levels in document order.
 func headingLevels(d *document) []int {
 	var levels []int

@@ -10,11 +10,10 @@ import (
 // ModuleCache memoizes per-file parse results across every Bundler in a build.
 // Bundles previously re-read, re-lexed, and re-parsed each imported module once
 // per page (the docs theme/components/runtime were parsed once per page), so a
-// build was O(pages × modules). Sharing this cache makes it O(modules).
-//
+// build was O(pages x modules). Sharing this cache makes it O(modules).
 // Cached values are immutable after creation. The parsed *ast.Program is shared
 // by reference across bundles; callers must treat it as read-only for shared
-// (non-entry) modules — see the once-per-module transform guard in the build.
+// (non-entry) modules - see the once-per-module transform guard in the build.
 type ModuleCache struct {
 	mu       sync.Mutex
 	programs map[string]*programEntry
@@ -38,7 +37,7 @@ type cssEntry struct {
 	css      string
 	mapping  map[string]string
 	isModule bool
-	// assets are the `url(...)` assets this sheet references (source path →
+	// assets are the `url(...)` assets this sheet references (source path ->
 	// hashed URL), replayed into every bundle that reuses the cached CSS.
 	assets map[string]string
 }

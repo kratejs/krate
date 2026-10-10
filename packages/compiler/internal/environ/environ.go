@@ -1,8 +1,7 @@
 // Package environ loads project `.env` files and exposes the resolved set to
 // the rest of the compiler. Values are build/serve-time only and must never
 // reach client HTML/JS/hydration.
-//
-// Precedence (increasing): `.env` → `.env.<mode>` → `.env.local` →
+// Precedence (increasing): `.env` -> `.env.<mode>` -> `.env.local` ->
 // `.env.<mode>.local`. Shell environment always wins over files (dotenv
 // `override=false` semantics).
 package environ

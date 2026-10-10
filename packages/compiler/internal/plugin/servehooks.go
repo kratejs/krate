@@ -81,8 +81,8 @@ func runServeRequestHooks(plugins []config.PluginConfig, root, url, method, path
 // mergeServeResponse applies a plugin's ServeResponse result onto the running
 // response, overriding only the fields the plugin actually returned. A result
 // that returns nothing (no status, no headers, no body) leaves the response
-// untouched, so plugins without a ServeResponse hook — or those that return
-// { action: 'continue' } — never wipe the body.
+// untouched, so plugins without a ServeResponse hook - or those that return
+// { action: 'continue' } - never wipe the body.
 func mergeServeResponse(out *ServeResponseResult, res ServeResponseResult) {
 	if res.Status > 0 {
 		out.Status = res.Status

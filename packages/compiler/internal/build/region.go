@@ -71,11 +71,10 @@ type RegionMeta struct {
 
 // enumerateRegions walks a page's IR tree and collects every dynamic region in
 // deterministic (tree) order:
-//
-//   - A ModeRegion SuspenseSlot → one region for the boundary. If it has a
+//   - A ModeRegion SuspenseSlot -> one region for the boundary. If it has a
 //     top-level runtime primary, the primary identity is captured; otherwise the
 //     whole boundary is re-rendered (ComponentName empty, keyed by StreamID).
-//   - Standalone TierRuntime ComponentNode → one region per instance.
+//   - Standalone TierRuntime ComponentNode -> one region per instance.
 func enumerateRegions(tree *irtree.ComponentTree) []Region {
 	if tree == nil || tree.Root == nil {
 		return nil
@@ -102,7 +101,7 @@ func walkSlotRegions(slot irtree.SlotNode, emit func(Region)) {
 	switch s := slot.(type) {
 	case *irtree.ComponentSlot:
 		if s.Component != nil && s.Component.Tier == irtree.TierRuntime {
-			// Standalone runtime component — one region per instance.
+			// Standalone runtime component - one region per instance.
 			emit(Region{
 				ID:            "region-" + string(s.ID),
 				ComponentName: s.Component.Name,
@@ -132,7 +131,7 @@ func walkSlotRegions(slot irtree.SlotNode, emit func(Region)) {
 					Suspense: true,
 				})
 			}
-			// The boundary renders as one unit — do not descend into its
+			// The boundary renders as one unit - do not descend into its
 			// baked content (standalone nested regions surface separately when
 			// the boundary itself is re-rendered).
 			return

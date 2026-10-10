@@ -70,9 +70,6 @@ func DefaultConfig() Config {
 	}
 }
 
-// Disabled returns an inactive config.
-func Disabled() Config { return Config{} }
-
 // rulePolicy resolves whether a rule runs and any severity override. It applies,
 // in order: ignore list, per-rule override, then category override.
 func (c *Config) rulePolicy(id, category string) (active bool, override Severity) {
@@ -130,7 +127,7 @@ func FromMap(m map[string]any, root string, env map[string]string) (Config, erro
 		if !ok {
 			continue
 		}
-		// `true` means "enabled with the built-in default severity" — leave the
+		// `true` means "enabled with the built-in default severity" - leave the
 		// category absent so rulePolicy falls through to each rule's default.
 		if b, isBool := v.(bool); isBool {
 			if b {

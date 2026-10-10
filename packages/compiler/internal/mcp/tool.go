@@ -314,7 +314,7 @@ func expandURITemplate(tmpl, uri string) (map[string]string, bool) {
 }
 
 func splitTemplateSegments(tmpl string) []string {
-	// "krate://page/{route}" → ["krate:", "", "page", "{route}"]
+	// "krate://page/{route}" -> ["krate:", "", "page", "{route}"]
 	return splitPath(tmpl)
 }
 

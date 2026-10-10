@@ -30,7 +30,7 @@ var customBundleCache sync.Map // absPath -> string or error
 //
 // where page is { route, source, html, jsBytes, ast } and a finding is
 // { rule, message, severity?, line?, col?, hint? }. Rules run in the embedded
-// QuickJS runtime — no Node, no subprocess.
+// QuickJS runtime - no Node, no subprocess.
 func runCustomRules(cfg Config, pages []Page) ([]Finding, error) {
 	mods := cfg.customModules()
 	if len(mods) == 0 {

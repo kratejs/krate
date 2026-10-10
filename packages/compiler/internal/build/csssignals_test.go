@@ -204,7 +204,7 @@ func TestBuildCSSSignalsGroup(t *testing.T) {
 	if !strings.Contains(html, "aria-expanded") {
 		t.Errorf("expected aria-expanded on trigger:\n%.900s", html)
 	}
-	// Accordion needs synthesized aria-expanded → tiny runtime is injected, but
+	// Accordion needs synthesized aria-expanded -> tiny runtime is injected, but
 	// not the page hydration bundle.
 	if !strings.Contains(html, "addEventListener") {
 		t.Errorf("expected the ARIA synchroniser script:\n%.900s", html)
@@ -461,7 +461,7 @@ export default function Tabs() {
 	}
 }
 
-// ─── Hard-error cases ───────────────────────────────────────────────────────
+// Hard-error cases
 
 func TestBuildCSSSignalsErrorsAreFatal(t *testing.T) {
 	cases := map[string]string{

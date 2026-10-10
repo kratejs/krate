@@ -6,7 +6,7 @@
  * the krate://docs/{slug} resource.
  *
  * The destination directory (packages/compiler/internal/kratedocs/docs) is
- * gitignored (except its committed .gitkeep) and regenerated on every build —
+ * gitignored (except its committed .gitkeep) and regenerated on every build -
  * do not edit it by hand. Edit the source under packages/web/src/content/docs
  * instead.
  *

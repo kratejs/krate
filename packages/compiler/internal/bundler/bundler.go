@@ -64,10 +64,10 @@ type Bundle struct {
 	Modules        []*Module
 	CSS            string
 	CSSModules     map[string]*CSSModuleInfo
-	AssetFiles     map[string]string // resolved source path → hashed site URL (/assets/…)
-	WorkerFiles    map[string]string // worker source path → hashed site URL (/workers/…)
-	WorkerEsm      map[string]bool   // worker source path → true when built with `type: 'module'`
-	DynImportFiles map[string]string // dynamic-import source path → hashed site URL (/chunks/…)
+	AssetFiles     map[string]string // resolved source path -> hashed site URL (/assets/...)
+	WorkerFiles    map[string]string // worker source path -> hashed site URL (/workers/...)
+	WorkerEsm      map[string]bool   // worker source path -> true when built with `type: 'module'`
+	DynImportFiles map[string]string // dynamic-import source path -> hashed site URL (/chunks/...)
 	Frontmatter    map[string]any    // .mdx frontmatter, if any
 }
 
@@ -77,10 +77,10 @@ type Bundler struct {
 	order             []*Module
 	css               []string
 	cssModules        map[string]*CSSModuleInfo
-	assets            map[string]string // resolved source path → hashed site URL
-	workers           map[string]string // worker source path → hashed site URL (/workers/…)
-	workerEsm         map[string]bool   // worker source path → built as ES module
-	dynImports        map[string]string // dynamic-import source path → hashed site URL (/chunks/…)
+	assets            map[string]string // resolved source path -> hashed site URL
+	workers           map[string]string // worker source path -> hashed site URL (/workers/...)
+	workerEsm         map[string]bool   // worker source path -> built as ES module
+	dynImports        map[string]string // dynamic-import source path -> hashed site URL (/chunks/...)
 	frontmatter       map[string]any    // from .mdx frontmatter
 	pathAliases       []pathAlias
 	tsBaseDir         string
@@ -225,10 +225,10 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	b.rewriteAssetImportRefs()
 
 	// Rewrite `new Worker('./x.ts')` (and `new Worker(new URL(..., import.meta.url))`)
-	// to the hashed /workers/… URL the worker is emitted at.
+	// to the hashed /workers/... URL the worker is emitted at.
 	b.rewriteWorkerRefs()
 
-	// Rewrite `import('./x.ts')` to the hashed /chunks/… URL the module is
+	// Rewrite `import('./x.ts')` to the hashed /chunks/... URL the module is
 	// emitted at, so dynamic imports are reachable in the built site instead of
 	// pointing at a stray source file.
 	b.rewriteDynamicImportRefs()
@@ -301,7 +301,7 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 	}
 
 	// The krate client runtime is provided at runtime by the shared chunk
-	// (its exports — createSignal, h, initRouter, etc. — are window globals).
+	// (its exports - createSignal, h, initRouter, etc. - are window globals).
 	// Its AST is never referenced by the compiler's emitted code, so skip
 	// reading/lexing/parsing it entirely.
 	if isKrateRuntime(abs) {
@@ -852,7 +852,7 @@ func escapeBundleTemplateLit(s string) string {
 // rewriteCSSModuleRefs replaces CSS module member expressions (styles.card)
 // with their hashed literal values across every bundled module. Each module's
 // import statement binds a local name (styles) to a *.module.css file whose
-// class→hash mapping was collected during resolution; member reads on that
+// class->hash mapping was collected during resolution; member reads on that
 // local name are swapped for the resolved class name so the irtree builder and
 // hydration codegen emit the real value instead of a reference to the undefined
 // runtime import.
@@ -861,7 +861,7 @@ func (b *Bundler) rewriteCSSModuleRefs() {
 		if mod.Program == nil || !mod.Rewritable {
 			continue
 		}
-		localVars := map[string]map[string]string{} // local import name → class→hash
+		localVars := map[string]map[string]string{} // local import name -> class->hash
 		for _, stmt := range mod.Program.Body {
 			imp, ok := stmt.(*ast.ImportStmt)
 			if !ok || imp.Default == "" {
@@ -1085,7 +1085,7 @@ var cssURLRe = regexp.MustCompile(`url\(\s*(['"]?)([^'")]+)(['"]?)\s*\)`)
 // data URIs, fragments, `var(...)` and root-absolute paths are left untouched.
 // rewriteCSSUrls resolves and content-hashes `url(...)` assets relative to the
 // sheet's directory, returning the rewritten CSS and the assets it referenced
-// (source path → hashed site URL) so the mapping can be cached and replayed.
+// (source path -> hashed site URL) so the mapping can be cached and replayed.
 func (b *Bundler) rewriteCSSUrls(cssText, cssDir string) (string, map[string]string) {
 	used := make(map[string]string)
 	out := cssURLRe.ReplaceAllStringFunc(cssText, func(m string) string {
@@ -1147,7 +1147,7 @@ func isExternalCSSURL(ref string) bool {
 // rewriteAssetImportRefs replaces imported-asset binding reads with their
 // hashed site URL literal across every bundled module. Each module's
 // `import logo from './logo.png'` binds a local name (logo) to an asset file;
-// bare reads of that local name are swapped for the resolved /assets/… URL so
+// bare reads of that local name are swapped for the resolved /assets/... URL so
 // the irtree builder and hydration codegen emit the real URL instead of a
 // reference to a runtime import that never exists.
 func (b *Bundler) rewriteAssetImportRefs() {
@@ -1777,7 +1777,7 @@ func rewriteDynamicImportStmts(stmts []ast.Stmt, b *Bundler, importer string) {
 
 // rewriteDynamicImportExpr walks an expression, rewriting `import(<literal>)`
 // arguments. It recurses through every expression position so a dynamic import
-// can appear anywhere (effect bodies, event handlers, JSX expr containers, …).
+// can appear anywhere (effect bodies, event handlers, JSX expr containers, ...).
 func rewriteDynamicImportExpr(expr ast.Expr, b *Bundler, importer string) ast.Expr {
 	if expr == nil {
 		return nil

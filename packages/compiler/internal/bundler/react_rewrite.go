@@ -9,7 +9,7 @@ import (
 // reactNames maps a React API name to the krate runtime identifier that
 // replaces it. Every target is an existing global in the shared runtime chunk
 // (createSignal, createEffect, createMemo, useRef, useCallback, forwardRef,
-// createContext, h) — React compatibility is a pure compiler concern and adds
+// createContext, h) - React compatibility is a pure compiler concern and adds
 // no runtime code.
 var reactNames = map[string]string{
 	"useState":           "createSignal",
@@ -55,7 +55,7 @@ func reactAPI(name string) bool {
 	return structuralReactAPIs[name]
 }
 
-// ─── scopes ─────────────────────────────────────────────────────────────────
+// scopes
 
 // scope tracks per-function reactive getter bindings for the bare-read pass so
 // `count` (React style) becomes `count()` while shadowed names are untouched.
@@ -95,7 +95,7 @@ func (s *scope) isGetter(name string) bool {
 	return false
 }
 
-// ─── context ────────────────────────────────────────────────────────────────
+// context
 
 type reactCtx struct {
 	imports map[string]string // local name -> React API name
@@ -143,7 +143,7 @@ func (c *reactCtx) callAPI(callee ast.Expr) (string, bool) {
 	return "", false
 }
 
-// ─── entry point ────────────────────────────────────────────────────────────
+// entry point
 
 // RewriteReact transpiles React source to krate equivalents. It runs on every
 // module (no opt-in): React imports and `React.*` member calls are mapped to
@@ -354,7 +354,7 @@ func (c *reactCtx) isReactiveFactory(init ast.Expr) bool {
 	return false
 }
 
-// ─── expression rewriting ───────────────────────────────────────────────────
+// expression rewriting
 
 // rewriteExpr rewrites an expression in value position: bare reads of reactive
 // getters become calls.
@@ -444,7 +444,7 @@ func (c *reactCtx) rewriteIdentifier(e *ast.Identifier, sc *scope, valuePos bool
 			e.Name = target
 			return e
 		}
-		// Structural API used as a value (e.g. `memo`) — leave the local name;
+		// Structural API used as a value (e.g. `memo`) - leave the local name;
 		// call sites are handled by rewriteCall.
 		return e
 	}
@@ -578,7 +578,7 @@ func (c *reactCtx) rewriteJSXChild(child ast.JSXChild, sc *scope) ast.JSXChild {
 	return child
 }
 
-// ─── style objects ──────────────────────────────────────────────────────────
+// style objects
 
 // unitlessStyleProps are CSS properties whose numeric values must not get a px
 // suffix (matching React's unitless allowlist).

@@ -49,7 +49,7 @@ code {
   padding: 0.1em 0.35em;
 }
 
-/* ─── Layout shell ─────────────────────────────────────────────── */
+/* Layout shell */
 
 .site-shell {
   min-height: 100vh;
@@ -121,7 +121,7 @@ code {
   justify-content: space-between;
 }
 
-/* ─── Hero ─────────────────────────────────────────────────────── */
+/* Hero */
 
 .hero {
   max-width: var(--max-width);
@@ -162,7 +162,7 @@ code {
   margin-bottom: 2.5rem;
 }
 
-/* ─── Buttons ──────────────────────────────────────────────────── */
+/* Buttons */
 
 .btn {
   display: inline-block;
@@ -195,7 +195,7 @@ code {
   text-decoration: none;
 }
 
-/* ─── Demo card ────────────────────────────────────────────────── */
+/* Demo card */
 
 .demo {
   max-width: var(--max-width);
@@ -229,7 +229,7 @@ code {
   min-width: 44px;
 }
 
-/* ─── 404 ──────────────────────────────────────────────────────── */
+/* 404 */
 
 .not-found {
   max-width: var(--max-width);

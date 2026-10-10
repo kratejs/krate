@@ -216,7 +216,7 @@ func TestRegexLiteral(t *testing.T) {
 
 func TestJSXTextLeadingSlashIsNotRegex(t *testing.T) {
 	// Regression: a `/` after a tag's `>` used to be lexed as a regex literal,
-	// swallowing the rest of the line (`<code>/about</code>` → regex
+	// swallowing the rest of the line (`<code>/about</code>` -> regex
 	// "/about</") and erasing the closing tags.
 	toks := tokens("<code>/about</code>")
 	want := []struct {

@@ -30,7 +30,7 @@ func TestResolvePathAliasExactMatch(t *testing.T) {
 
 func TestResolvePathAliasWildcard(t *testing.T) {
 	dir := t.TempDir()
-	// Create target file — alias "./*" resolves relative to tsBaseDir (dir)
+	// Create target file - alias "./*" resolves relative to tsBaseDir (dir)
 	compDir := filepath.Join(dir, "components")
 	_ = os.MkdirAll(compDir, 0755)
 	_ = os.WriteFile(filepath.Join(compDir, "Button.tsx"), []byte("export default function Button() {}"), 0644)
@@ -67,7 +67,7 @@ func TestResolvePathAliasWithExtension(t *testing.T) {
 
 func TestResolvePathAliasDirectoryIndex(t *testing.T) {
 	dir := t.TempDir()
-	// Create directory with index.tsx — alias resolves relative to tsBaseDir (dir)
+	// Create directory with index.tsx - alias resolves relative to tsBaseDir (dir)
 	compDir := filepath.Join(dir, "components", "Card")
 	_ = os.MkdirAll(compDir, 0755)
 	_ = os.WriteFile(filepath.Join(compDir, "index.tsx"), []byte("export default function Card() {}"), 0644)
@@ -171,7 +171,7 @@ func TestResolveImportForModuleNoAlias(t *testing.T) {
 	dir := t.TempDir()
 	b := New(dir)
 
-	// No aliases configured — should still work for standard resolution
+	// No aliases configured - should still work for standard resolution
 	result := b.resolveImportForModule(filepath.Join(dir, "main.tsx"), "nonexistent")
 	if result != "" {
 		t.Errorf("expected empty for nonexistent module without aliases, got %s", result)

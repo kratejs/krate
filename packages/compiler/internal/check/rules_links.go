@@ -9,7 +9,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-// ─── broken links & anchors ─────────────────────────────────────────────────
+// broken links & anchors
 
 // ruleBrokenLink flags internal links whose destination is not a known route.
 // Requires cfg.Routes (the site route inventory), so it is a no-op when the
@@ -183,7 +183,7 @@ func truncate(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-// ─── helpers ───────────────────────────────────────────────────────────────
+// helpers
 
 func isInternalPageLink(href string) bool {
 	lower := strings.ToLower(href)

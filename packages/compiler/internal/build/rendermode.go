@@ -10,13 +10,13 @@ import (
 type RenderMode int
 
 const (
-	// RenderSSG — pre-rendered at build time (default, current behavior).
+	// RenderSSG - pre-rendered at build time (default, current behavior).
 	RenderSSG RenderMode = iota
-	// RenderSSR — rendered on every request via Node.js runtime.
+	// RenderSSR - rendered on every request via Node.js runtime.
 	RenderSSR
-	// RenderISR — pre-rendered at build, revalidated in background after `revalidate` seconds.
+	// RenderISR - pre-rendered at build, revalidated in background after `revalidate` seconds.
 	RenderISR
-	// RenderStreaming — SSR with Suspense-based streaming via HTTP chunked encoding.
+	// RenderStreaming - SSR with Suspense-based streaming via HTTP chunked encoding.
 	RenderStreaming
 )
 
@@ -66,10 +66,9 @@ type pageConfig struct {
 
 // detectRenderMode inspects a page's AST to determine its rendering mode.
 // Returns the mode and revalidation interval.
-//
 // Precedence: explicit `isr` > `ssr` > `streaming` (config or <Suspense>).
-// ISR/SSR were previously unreachable — nothing in the build ever produced
-// them — so wiring the config keys here is what makes them real.
+// ISR/SSR were previously unreachable - nothing in the build ever produced
+// them - so wiring the config keys here is what makes them real.
 func detectRenderMode(prog *ast.Program) (RenderMode, int) {
 	cfg := parsePageConfig(prog)
 
@@ -85,7 +84,7 @@ func detectRenderMode(prog *ast.Program) (RenderMode, int) {
 		return RenderStreaming, 0
 	}
 
-	// Using <Suspense> implies a streaming boundary — resolved fallbacks are
+	// Using <Suspense> implies a streaming boundary - resolved fallbacks are
 	// swapped in at request time, so such pages cannot be statically baked.
 	if usesSuspense(prog) {
 		return RenderStreaming, 0
@@ -183,7 +182,6 @@ func boolPropTrue(v ast.Expr) bool {
 
 // dynamicParamsAllowed reports whether a page (typically a dynamic route) may
 // render params outside those returned by generateStaticParams.
-//
 // Resolution: a page-level `export const dynamicParams` always wins; otherwise
 // the global static output mode (`output: "static"`) closes the set, and SSG
 // is the default (dynamic fallback allowed). Request-time modes (ssr/isr/
@@ -198,7 +196,7 @@ func dynamicParamsAllowed(prog *ast.Program, staticMode bool) bool {
 
 // usesSuspense reports whether the page AST contains a <Suspense> JSX element
 // anywhere (nested inside functions, conditionals, arrays, etc.). This is an
-// AST-based check — a prior string scan (`strings.Contains(source, "<Suspense")`)
+// AST-based check - a prior string scan (`strings.Contains(source, "<Suspense")`)
 // could misfire on comments and string literals.
 func usesSuspense(prog *ast.Program) bool {
 	found := false

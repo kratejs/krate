@@ -61,7 +61,7 @@ func TestOptionalCallKeepsCall(t *testing.T) {
 }
 
 func TestOptionalChainCallAtTail(t *testing.T) {
-	// `a?.b?.()` — the tail must be an optional call on a?.b.
+	// `a?.b?.()` - the tail must be an optional call on a?.b.
 	e := firstExpr(t, "const x = a?.b?.();")
 	c, ok := e.(*ast.CallExpr)
 	if !ok || !c.Optional {

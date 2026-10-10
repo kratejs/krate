@@ -27,7 +27,7 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 	// 1. Collect all function declarations
 	collectFunctionsWithSource(prog.Body, ann.Functions, ann.ComponentSources, ann.ComponentRaw, sourceFile, rawSource)
 
-	// 2. Find default export → entry point
+	// 2. Find default export -> entry point
 	ann.EntryPoint = FindDefaultExport(prog.Body)
 
 	// 3. Walk used-component graph
@@ -65,7 +65,6 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 // 3. Config name lists (serverComponents, runtimeComponents)
 // 4. Config directory lists (serverDirs, runtimeDirs)
 // 5. Default: TierClient
-//
 // Each function is classified using its OWN module's source file and raw text
 // (recorded by collectFunctionsWithSource), so a page-level `// @server`
 // directive doesn't leak onto imported *.runtime.tsx components.
@@ -307,7 +306,7 @@ func hasSuspenseInExpr(expr ast.Expr) bool {
 	return false
 }
 
-// ─── AST walking helpers (ported from renderer) ────────────────────────────
+// AST walking helpers (ported from renderer)
 
 // collectFunctionsWithSource walks function bodies recording declarations and,
 // when sourcePath/rawSource are non-empty, records the module source each
@@ -330,7 +329,7 @@ func collectFunctionsWithSource(body []ast.Stmt, dest map[string]*ast.FnDecl, so
 				case *ast.FnDecl:
 					record(decl)
 				case *ast.VarStmt:
-					// `export const Live = () => <p/>` — the parser stores the
+					// `export const Live = () => <p/>` - the parser stores the
 					// variable statement in ExportStmt.Declaration, so named
 					// arrow/function-expression components exported like this
 					// get the same treatment as plain FnDecl components.
@@ -596,9 +595,9 @@ func MergeModuleFunctions(ann *irtree.Annotations, modules []ModuleSource) {
 
 // MergeImportAliases makes imported components resolvable under their local
 // binding names. Bundled modules' function declarations are merged into one map
-// keyed by declared name, so without aliasing a renamed import — e.g.
+// keyed by declared name, so without aliasing a renamed import - e.g.
 // `import FooLayout from "./theme/layout"` where the theme declares
-// `export default function NightLayout` — renders nothing: `<FooLayout>` has no
+// `export default function NightLayout` - renders nothing: `<FooLayout>` has no
 // matching entry. Aliasing each import local to the function it actually
 // resolves to fixes that, so page/theme authors can name exports freely.
 // entry is the page's own module (its imports are the ones that matter most).

@@ -14,7 +14,7 @@ import (
 type SiteGraph struct {
 	Root   string              `json:"root"`
 	Routes []SiteGraphRoute    `json:"routes"`
-	Files  map[string][]string `json:"files,omitempty"` // file → routes that depend on it
+	Files  map[string][]string `json:"files,omitempty"` // file -> routes that depend on it
 }
 
 // SiteGraphRoute is one route in a SiteGraph.

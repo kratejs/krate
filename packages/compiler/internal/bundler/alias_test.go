@@ -8,14 +8,14 @@ import (
 )
 
 // TestAliasImportResolution verifies that the `@/*` TypeScript path alias
-// resolves through the full Bundle() pipeline — the same path a real page
-// build takes — so users can import from the project source root (e.g.
+// resolves through the full Bundle() pipeline - the same path a real page
+// build takes - so users can import from the project source root (e.g.
 // `@/lib/helpers`, `@/components/badge`) without the compiler failing to find
 // the module. Components live under `@/components/*`
 func TestAliasImportResolution(t *testing.T) {
 	root := t.TempDir()
 
-	// tsconfig paths: `@/*` → `./*` with baseUrl `./src`.
+	// tsconfig paths: `@/*` -> `./*` with baseUrl `./src`.
 	tsconfig := `{
 		"compilerOptions": {
 			"baseUrl": "./src",
@@ -135,7 +135,7 @@ func TestNonAliasScopeDoesNotResolve(t *testing.T) {
 		filepath.Join(root, "src"),
 	)
 
-	// `@components/badge` is not an alias and is not a resolvable module — the
+	// `@components/badge` is not an alias and is not a resolvable module - the
 	// bundled modules must NOT include the badge component under that name.
 	bundle, err := b.Bundle(page)
 	if err != nil {

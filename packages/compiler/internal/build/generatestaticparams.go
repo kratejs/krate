@@ -21,9 +21,8 @@ import (
 // injectStaticParams seeds the root page component with concrete dynamic-route
 // params so a statically generated page ([id].tsx via generateStaticParams)
 // can render them. Params are exposed to the component's SSR evaluation via:
-//   - `params` — a JSON object (e.g. { params } destructuring → params.id)
-//   - each param key — a direct binding (e.g. { id } destructuring → id)
-//
+// - `params` - a JSON object (e.g. { params } destructuring -> params.id)
+// - each param key - a direct binding (e.g. { id } destructuring -> id)
 // Only pure, signal-less root components are SSREval'd this way; interactive
 // (client) roots keep their normal hydration-driven emission.
 func injectStaticParams(tree *irtree.ComponentTree, params map[string]string) {
@@ -61,7 +60,7 @@ func injectStaticParams(tree *irtree.ComponentTree, params map[string]string) {
 // dynamic-route parameter in a statically built template. The dev/preview
 // server replaces each sentinel with the matched URL segment at request time
 // (see serve.go handleDynamicRoute), so text, <title>, and attribute positions
-// all carry a real value — not just signal-bound text nodes.
+// all carry a real value - not just signal-bound text nodes.
 const dynamicParamSentinelPrefix = "__KRATE_PARAM_"
 
 // dynamicParamSentinel returns the unique token emitted for the named route
@@ -73,7 +72,6 @@ func dynamicParamSentinel(name string) string {
 // injectDynamicRoutePlaceholders binds each dynamic-route [param] to a unique
 // sentinel so a statically built template's evaluated output (body text, title,
 // meta attributes) contains a marker the server substitutes per request.
-//
 // Mirrors injectStaticParams: it SSREval's the root with the sentinel bindings,
 // and only for pure static/server roots. Interactive client roots render params
 // reactively after hydration and must not be frozen to a sentinel.
@@ -104,7 +102,7 @@ func injectDynamicRoutePlaceholders(tree *irtree.ComponentTree, paramNames []str
 }
 
 // extractParamNames extracts parameter names from a dynamic route filename.
-// e.g. "video/[id].tsx" → ["id"], "user/[username]/posts/[postId].tsx" → ["username", "postId"]
+// e.g. "video/[id].tsx" -> ["id"], "user/[username]/posts/[postId].tsx" -> ["username", "postId"]
 func extractParamNames(pagePath, pagesDir string) []string {
 	rel, err := filepath.Rel(pagesDir, pagePath)
 	if err != nil {
@@ -300,20 +298,13 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		Page:    spp.PagePath,
 		Program: entryModule.Program,
 	}
-	if err := plugin.RunAfterParse(parseCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sAfterParse plugin error (%s):%s %v\n", cYellow, spp.PagePath, cReset, err)
-		b.pluginFailed(fmt.Errorf("AfterParse (%s): %v", spp.PagePath, err))
-	}
-	if err := plugin.RunCommunityPlugins("AfterParse", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, parseCtx, b.communityEnv()); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error AfterParse (%s):%s %v\n", cYellow, spp.PagePath, cReset, err)
-		b.pluginFailed(fmt.Errorf("AfterParse (%s): %v", spp.PagePath, err))
-	}
+	b.runPageHook("AfterParse", spp.PagePath, parseCtx, func() error { return plugin.RunAfterParse(parseCtx) })
 	entryModule.Program = parseCtx.Program
 
 	renderMode, revalidate := detectRenderMode(entryModule.Program)
 
 	// Global streaming override: if configured, all *static* pages stream.
-	// Explicit ssr/isr opts win — forcing them to streaming would silently
+	// Explicit ssr/isr opts win - forcing them to streaming would silently
 	// defeat a page author's per-page config.
 	if b.Cfg.SSR.Streaming && renderMode == RenderSSG {
 		renderMode = RenderStreaming
@@ -329,7 +320,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	substituteParamBindings(entryModule.Program, spp.Params)
 	b.InlineContent(entryModule.Program)
 
-	// ─── New pipeline: Annotate → Build IR → Emit ──────────────────────────
+	// New pipeline: Annotate -> Build IR -> Emit
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, spp.PagePath, entryModule.SourceCode)
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
@@ -363,14 +354,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		HasJS:    len(emitResult.Signatures) > 0,
 		RawCSS:   bundle.CSS,
 	}
-	if err := plugin.RunAfterRender(renderCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sAfterRender plugin error (%s):%s %v\n", cYellow, spp.PagePath, cReset, err)
-		b.pluginFailed(fmt.Errorf("AfterRender (%s): %v", spp.PagePath, err))
-	}
-	if err := plugin.RunCommunityPlugins("AfterRender", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, renderCtx, b.communityEnv()); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error AfterRender (%s):%s %v\n", cYellow, spp.PagePath, cReset, err)
-		b.pluginFailed(fmt.Errorf("AfterRender (%s): %v", spp.PagePath, err))
-	}
+	b.runPageHook("AfterRender", spp.PagePath, renderCtx, func() error { return plugin.RunAfterRender(renderCtx) })
 	emitResult.HTML = renderCtx.HTML
 	emitResult.HeadHTML = renderCtx.HeadHTML
 	bundle.CSS = renderCtx.RawCSS
@@ -382,14 +366,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 			HTML:  emitResult.HTML,
 			Route: spp.OutPath,
 		}
-		if err := plugin.RunAfterMarkdownParse(mdCtx); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sAfterMarkdownParse plugin error (%s):%s %v\n", cYellow, spp.PagePath, cReset, err)
-			b.pluginFailed(fmt.Errorf("AfterMarkdownParse (%s): %v", spp.PagePath, err))
-		}
-		if err := plugin.RunCommunityPlugins("AfterMarkdownParse", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, mdCtx, b.communityEnv()); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sCommunity plugin error AfterMarkdownParse (%s):%s %v\n", cYellow, spp.PagePath, cReset, err)
-			b.pluginFailed(fmt.Errorf("AfterMarkdownParse (%s): %v", spp.PagePath, err))
-		}
+		b.runPageHook("AfterMarkdownParse", spp.PagePath, mdCtx, func() error { return plugin.RunAfterMarkdownParse(mdCtx) })
 		emitResult.HTML = mdCtx.HTML
 	}
 

@@ -9,7 +9,7 @@ import (
 )
 
 // BenchmarkBundleSharedGraph bundles N entry modules that all import the same
-// large shared module — the shape that dominated builds before the module cache
+// large shared module - the shape that dominated builds before the module cache
 // (every page re-parsed the shared theme/components/runtime graph).
 func BenchmarkBundleSharedGraph(b *testing.B) {
 	dir := b.TempDir()

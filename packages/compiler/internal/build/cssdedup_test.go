@@ -43,7 +43,7 @@ func TestBuildDedupesDeclarationsWithoutMinify(t *testing.T) {
 
 func TestBuildDedupesDeclarationsWithMinify(t *testing.T) {
 	css := buildDedupFixture(t, true)
-	// rgb(1,2,3)→#010203 and rgb(4,5,6)→#040506; the first must be gone.
+	// rgb(1,2,3)->#010203 and rgb(4,5,6)->#040506; the first must be gone.
 	if strings.Contains(css, "010203") || strings.Contains(css, "rgb(1") {
 		t.Fatalf("duplicate declaration not folded when minify is on:\n%s", css)
 	}

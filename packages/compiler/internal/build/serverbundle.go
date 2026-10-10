@@ -54,7 +54,7 @@ func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 			// so pages can use them as globals (matching krate compiler behavior)
 			injectedSource := injectServerGlobals(string(sourceData))
 
-			// Compile with esbuild — use stdin so esbuild resolves relative imports
+			// Compile with esbuild - use stdin so esbuild resolves relative imports
 			// from the project root (AbsWorkingDir) rather than a temp file location
 			route := page.OutName
 			if route == "." || route == "" {

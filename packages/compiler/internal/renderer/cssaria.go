@@ -2,10 +2,9 @@
 // synthesized state the user agent does not maintain on a native control (tabs,
 // listbox, disclosure/dialog/popover). It is injected ONLY when such a role is
 // used, so every other CSS-signal page stays fully zero-JS.
-//
 // It derives aria-selected / aria-expanded from the checked state of the native
-// radio/checkbox each trigger labels — the same state the `:has()` stylesheet
-// already tracks — so there is no per-interaction bookkeeping.
+// radio/checkbox each trigger labels - the same state the `:has()` stylesheet
+// already tracks - so there is no per-interaction bookkeeping.
 package renderer
 
 // CSSARIAJS is the minified synchroniser (one delegated change listener plus an

@@ -18,9 +18,8 @@ import (
 // data. After inlining, existing build-time folding (`collectLocalVars`,
 // `.map()` resolution, member-chain const folding) renders collection content
 // into static HTML with no runtime work.
-//
-// It also rewrites direct collection imports — `import { blog } from
-// "krate/content"` — but those are less common; the primary API is
+// It also rewrites direct collection imports - `import { blog } from
+// "krate/content"` - but those are less common; the primary API is
 // getCollection.
 func (b *Builder) InlineContent(prog *ast.Program) {
 	if prog == nil || len(b.contentCollections) == 0 {

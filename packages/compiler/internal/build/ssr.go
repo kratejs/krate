@@ -3,6 +3,7 @@ package build
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,6 +16,11 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
 )
+
+// errSSRNotRunning is the shared sentinel returned by SSR operations that need a
+// live sidecar renderer. Callers start one by building a page that requires
+// SSR/ISR/streaming (or by running `krate serve`).
+var errSSRNotRunning = errors.New("SSR renderer not running (start it by building a page that requires SSR, or run `krate serve`)")
 
 // SSRServer manages the SSR sidecar renderer process (node/bun/deno).
 type SSRServer struct {
@@ -214,7 +220,7 @@ func (s *SSRServer) IsRunning() bool {
 // which re-renders cached variants in place without evicting them.
 func (s *SSRServer) RevalidatePage(route string) error {
 	if !s.IsRunning() {
-		return fmt.Errorf("SSR renderer not running")
+		return errSSRNotRunning
 	}
 
 	body, _ := json.Marshal(map[string]string{"route": route})
@@ -234,11 +240,11 @@ func (s *SSRServer) RevalidatePage(route string) error {
 // RefreshPage triggers a non-destructive time-based ISR refresh for a route:
 // every cached variant is re-rendered in place, so cached dynamic variants stay
 // fresh instead of being evicted. The periodic ISR timer uses this rather than
-// RevalidatePage — invalidation would clear dynamic variants and turn the next
+// RevalidatePage - invalidation would clear dynamic variants and turn the next
 // request into a cache miss.
 func (s *SSRServer) RefreshPage(route string) error {
 	if !s.IsRunning() {
-		return fmt.Errorf("SSR renderer not running")
+		return errSSRNotRunning
 	}
 
 	body, _ := json.Marshal(map[string]string{"route": route})
@@ -391,7 +397,7 @@ func findServerRendererSource(root string) string {
 		filepath.Join(root, "packages", "runtime", "src", "server-renderer.ts"),
 		// Monorepo from compiler dir
 		filepath.Join(root, "..", "runtime", "src", "server-renderer.ts"),
-		// npm installed — the published @krate/runtime ships only compiled dist/,
+		// npm installed - the published @krate/runtime ships only compiled dist/,
 		// so the renderer lives at dist/server-renderer.js (never src/).
 		filepath.Join(root, "node_modules", "@krate", "runtime", "dist", "server-renderer.js"),
 		// npm installed via a nested/hosted workspace root

@@ -1,8 +1,7 @@
 // Package kratedocs embeds Krate's own framework documentation (the content
-// that powers the docs site) into the compiler so tooling — notably the MCP
-// search_docs tool and the krate://docs/{slug} resource — can answer questions
+// that powers the docs site) into the compiler so tooling - notably the MCP
+// search_docs tool and the krate://docs/{slug} resource - can answer questions
 // about Krate itself, independent of the project it is running in.
-//
 // The docs/ directory is generated at build time from
 // packages/web/src/content/docs by scripts/sync-krate-docs.mjs and is
 // gitignored; a checked-in .gitkeep keeps the embed compilable before the sync

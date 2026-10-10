@@ -16,7 +16,6 @@ import (
 // is exactly what makes dev mode feel slow. Instead, only the artifacts owned by
 // the rebuilt pages are refreshed, and their entries are merged into the
 // on-disk manifests so the running sidecar sees them.
-//
 // Specifically:
 //   - a rebuilt page whose mode is not SSG gets its server bundle recompiled
 //     (CompileServerBundles re-emits the same deterministic bundle path), and
@@ -110,7 +109,7 @@ func (b *Builder) mergeManifests(cssFile, runtimeJS string, serverBundles map[st
 	manifestPath := filepath.Join(b.Cfg.OutDir, "manifest.json")
 	serverManifestPath := filepath.Join(b.Cfg.OutDir, "server-manifest.json")
 
-	// ── Full manifest ────────────────────────────────────────────────────────
+	// Full manifest
 	var man Manifest
 	if data, err := os.ReadFile(manifestPath); err == nil {
 		_ = json.Unmarshal(data, &man)
@@ -131,7 +130,7 @@ func (b *Builder) mergeManifests(cssFile, runtimeJS string, serverBundles map[st
 		return fmt.Errorf("writing manifest.json: %w", err)
 	}
 
-	// ── Server manifest (read by the Node sidecar) ────────────────────────────
+	// Server manifest (read by the Node sidecar)
 	var sm ServerManifest
 	if data, err := os.ReadFile(serverManifestPath); err == nil {
 		_ = json.Unmarshal(data, &sm)

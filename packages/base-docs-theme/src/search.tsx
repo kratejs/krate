@@ -1,7 +1,7 @@
 import { createSignal, onMount, onCleanup } from "@krate/runtime";
 
 /**
- * Headless docs search — the theme places this wherever it wants and styles it
+ * Headless docs search - the theme places this wherever it wants and styles it
  * entirely with its own CSS. The plugin only provides the index + the
  * `window.__krateSearch` API ({ search(query, { limit }) => Promise<Hit[]> },
  * with Hit = { href, title, body, category }). No markup is injected by the

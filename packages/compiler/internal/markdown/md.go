@@ -29,7 +29,7 @@ func RenderToHTML(src string, cfg Config) string {
 	return html
 }
 
-// ─── Footnotes ──────────────────────────────────────────────────────────────
+// Footnotes
 
 type footnoteDef struct {
 	id   string

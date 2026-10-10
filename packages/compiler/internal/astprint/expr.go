@@ -288,7 +288,7 @@ func (p *printer) newExpr(n *ast.NewExpr) string {
 	return "new " + p.expr(n.Callee) + "(" + strings.Join(args, ", ") + ")"
 }
 
-// ── JSX ─────────────────────────────────────────────────────────────────────
+// JSX
 
 func (p *printer) jsxElement(el *ast.JSXElement) string {
 	if el == nil || el.Opening == nil {

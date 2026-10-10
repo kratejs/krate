@@ -1,13 +1,11 @@
 // Package docfind embeds Microsoft's docfind WASM document-search engine into
-// krate and drives it entirely in-process — no subprocess and no temporary
+// krate and drives it entirely in-process - no subprocess and no temporary
 // JSON files on disk.
-//
 // Two WASM modules are embedded:
-//
-//   - search.wasm — the browser-facing search module. An index is embedded into
+//   - search.wasm - the browser-facing search module. An index is embedded into
 //     it at docs-build time; the result is written to the output directory as
 //     `docfind_bg.wasm` next to the hand-written `docfind.js` glue.
-//   - builder.wasm — the build-time module that builds a search index from a
+//   - builder.wasm - the build-time module that builds a search index from a
 //     JSON document array and embeds it into `search.wasm` (passed as a
 //     template), producing the final module.
 //

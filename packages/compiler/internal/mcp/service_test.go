@@ -1037,7 +1037,7 @@ func TestSearchDocsSearchesFrameworkDocs(t *testing.T) {
 		t.Errorf("full content suspiciously short (%d); maxChars may be truncating it", len(fullBody))
 	}
 
-	// A project-only term yields nothing — proof the search is Krate's docs.
+	// A project-only term yields nothing - proof the search is Krate's docs.
 	none := serve(t, svc, call("search_docs", map[string]any{"query": "zzyzx-only-in-project"}))[0]
 	if got := toolText(t, none); strings.Contains(got, "zzyzx") {
 		t.Errorf("framework search leaked project content: %s", got)

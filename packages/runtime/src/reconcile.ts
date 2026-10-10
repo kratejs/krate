@@ -136,7 +136,7 @@ export function conditional(
   });
 }
 
-// ─── Tree reconciliation (SPA navigation) ───────────────────────────────────
+// Tree reconciliation (SPA navigation)
 // Diffs a live DOM subtree against a freshly-parsed one, patching only what
 // changed. Unchanged nodes are kept in place so their state survives navigation:
 // element listeners attached at hydration (`__krate_<event>` props), media
@@ -292,7 +292,7 @@ function reconcileChildren(parent: Node, newParent: Node): void {
         parent.insertBefore(placedNode, anchor);
       }
     } else {
-      // Keyed but not present in old tree → insert new
+      // Keyed but not present in old tree -> insert new
       placedNode = document.importNode(newChild, true);
       parent.insertBefore(placedNode, anchor);
     }
