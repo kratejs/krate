@@ -1,15 +1,14 @@
 package css
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
+
+	"github.com/kratejs/krate/packages/compiler/internal/jseval"
 )
 
 // TailwindConfig represents the tailwind.config.ts/js parsed values.
@@ -31,7 +30,8 @@ type TailwindOptions struct {
 	Strict bool
 	// DarkMode overrides the config's dark-mode strategy.
 	DarkMode string
-	// ExecuteConfig forces `npx tsx` config execution instead of static parse.
+	// ExecuteConfig forces in-process config evaluation (esbuild + QuickJS)
+	// instead of the static parser.
 	ExecuteConfig bool
 }
 
@@ -52,9 +52,9 @@ func findTailwindConfig(root string) string {
 }
 
 // LoadTailwindConfig loads a tailwind.config file. It prefers a static parse
-// (no Node required); when `execute` is true or the static parse yields no
-// theme, it falls back to executing the config via `npx tsx`. On any failure it
-// returns defaults (a diagnostic is surfaced by the caller).
+// (no JS runtime required); when `execute` is true or the static parse yields no
+// theme, it evaluates the config in-process (esbuild + QuickJS). On any failure
+// it returns defaults (a diagnostic is surfaced by the caller).
 func LoadTailwindConfig(root string) *TailwindConfig {
 	return LoadTailwindConfigWithOptions(root, TailwindOptions{})
 }
@@ -93,32 +93,31 @@ func LoadTailwindConfigWithOptions(root string, opts TailwindOptions) *TailwindC
 	return cfg
 }
 
-// executeTailwindConfig runs the config via `npx --yes tsx`.
+// executeTailwindConfig evaluates the config in-process via jseval (esbuild
+// bundle + embedded QuickJS) — no Node/`npx tsx`. It returns ok=false when the
+// config can't be bundled or executed, so the caller falls back to the static
+// parser.
 func executeTailwindConfig(root, configPath string) (*TailwindConfig, bool) {
-	bootstrap := fmt.Sprintf(`import cfg from "%s"; console.log(JSON.stringify({theme:cfg.theme||{},darkMode:cfg.darkMode||""}));`, configPath)
-	tmpDir, err := os.MkdirTemp("", "krate-tailwind-*")
+	rel, err := filepath.Rel(root, configPath)
 	if err != nil {
 		return nil, false
 	}
-	defer os.RemoveAll(tmpDir)
+	spec := "./" + filepath.ToSlash(rel)
+	bootstrap := fmt.Sprintf(`import cfg from %q;
+var c = (cfg && cfg.default) ? cfg.default : cfg;
+globalThis.%s = { theme: (c && c.theme) || {}, darkMode: (c && c.darkMode) || "" };`, spec, jseval.ResultGlobal)
 
-	tmpFile := filepath.Join(tmpDir, "bootstrap.mjs")
-	if err := os.WriteFile(tmpFile, []byte(bootstrap), 0644); err != nil {
-		return nil, false
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "npx", "--yes", "tsx", tmpFile)
-	cmd.Dir = root
-	output, err := cmd.Output()
+	data, err := jseval.Eval(jseval.Options{
+		Source:     bootstrap,
+		ResolveDir: root,
+		Sourcefile: "krate-tailwind-bootstrap.ts",
+	})
 	if err != nil {
 		return nil, false
 	}
 
 	var parsed TailwindConfig
-	if err := json.Unmarshal(output, &parsed); err != nil {
+	if err := json.Unmarshal(data, &parsed); err != nil {
 		return nil, false
 	}
 	return &parsed, true

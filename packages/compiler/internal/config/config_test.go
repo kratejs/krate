@@ -586,7 +586,7 @@ func TestConfigEvalBootstrapResolvesPluginModules(t *testing.T) {
 		`p.module.indexOf('file://') === 0`,
 		`p.module = __krateFileURLToPath(p.module);`,
 		`theme.module = __krateFileURLToPath(theme.module);`,
-		`globalThis.__krateConfig = config;`,
+		`globalThis.__krateEvalResult = config;`,
 		validatePrefix,
 	} {
 		if !strings.Contains(content, want) {
