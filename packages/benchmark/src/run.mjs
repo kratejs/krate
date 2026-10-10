@@ -6,7 +6,7 @@
 //   node src/run.mjs all   [same flags]
 //   node src/run.mjs report
 import os from 'node:os';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BUILD_FRAMEWORKS, API_FRAMEWORKS, npxCmd, exeName } from './lib/frameworks.mjs';
 import {
@@ -130,16 +130,44 @@ function fixtureDir(id) {
   return join(pkgRoot, 'fixtures', id);
 }
 
+// depsAreFresh reports whether the fixture's installed dependencies match its
+// package.json/lockfile. A stamp written after each successful install is
+// compared against those inputs, so a changed dependency list triggers a
+// reinstall while unchanged fixtures are skipped.
+function depsAreFresh(dir) {
+  const stamp = join(dir, 'node_modules', '.krate-bench-stamp');
+  if (!existsSync(stamp)) return false;
+  try {
+    const stampMs = statSync(stamp).mtimeMs;
+    const newest = Math.max(
+      ...['package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock']
+        .map((f) => join(dir, f))
+        .filter(existsSync)
+        .map((f) => statSync(f).mtimeMs),
+    );
+    return newest <= stampMs;
+  } catch {
+    return false;
+  }
+}
+
 async function maybeInstall(fw, opts) {
   if (!fw.install) return true;
-  if (existsSync(join(fixtureDir(fw.fixture), 'node_modules'))) return true;
+  const dir = fixtureDir(fw.fixture);
+  if (depsAreFresh(dir)) return true;
   log(`installing ${fw.name} (${opts.pm})...`);
-  const pmCmd = opts.pm === 'npm' ? 'npm' : opts.pm;
-  const res = await run(pmCmd, ['install'], { cwd: fixtureDir(fw.fixture) });
+  // --ignore-scripts: no fixture needs lifecycle scripts, and pnpm otherwise
+  // fails the install with ERR_PNPM_IGNORED_BUILDS (exit non-zero).
+  const args = ['install', '--ignore-scripts'];
+  // Fixtures live inside the monorepo, so pnpm would otherwise operate on the
+  // workspace root and never create the fixture's own node_modules.
+  if (opts.pm === 'pnpm') args.push('--ignore-workspace');
+  const res = await run(opts.pm, args, { cwd: dir });
   if (res.code !== 0) {
     warn(`install failed for ${fw.name}:\n${res.stderr.slice(-500)}`);
     return false;
   }
+  writeFileSync(join(dir, 'node_modules', '.krate-bench-stamp'), String(Date.now()));
   return true;
 }
 
