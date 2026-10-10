@@ -401,7 +401,7 @@ func assertRuntimeBundleHasContext(t *testing.T) {
 	t.Helper()
 	root := findCompilerRoot(t)
 	if root == "" {
-		t.Skip("compiler root not found")
+		requireE2E(t, "compiler root not found")
 	}
 	runtimeDir := filepath.Join(filepath.Dir(root), "runtime", "dist")
 	for _, name := range []string{"krate-hydrate.js", "krate-runtime.js"} {
@@ -414,7 +414,7 @@ func assertRuntimeBundleHasContext(t *testing.T) {
 		}
 		return
 	}
-	t.Skip("runtime bundle not built")
+	requireE2E(t, "runtime bundle not built")
 }
 
 // findCompilerRoot locates the packages/compiler directory from the test file.

@@ -63,7 +63,7 @@ When upgrading across a minor:
 Pin the previous version explicitly:
 
 ```sh
-npm install @krate/core@0.4.0-beta.4 @krate/runtime@0.4.0-beta.4 @krate/components@0.4.0-beta.4
+npm install @krate/core@0.4.0-rc.4 @krate/runtime@0.4.0-rc.4 @krate/components@0.4.0-rc.4
 ```
 
 If a build broke after an upgrade, delete stale caches and rebuild:

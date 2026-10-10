@@ -95,7 +95,7 @@ docs({ search: { engine: "pagefind" } }) // the default
   every incremental edit.
 - **Node + network required.** The first run downloads the Pagefind binary. If
   `npx` or the download fails, Krate prints a warning and the client falls back
-  to docfind/JSON — the build never fails.
+  to the built-in JSON search index — the build never fails.
 - **Scoped indexing.** The docs content wrapper is tagged with
   `data-pagefind-body`, so page chrome (navbar, sidebar, table of contents, the
   search dialog) is not indexed. Use `pagefind.excludeSelectors` for extras.

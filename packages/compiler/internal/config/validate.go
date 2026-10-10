@@ -52,6 +52,7 @@ var knownTopLevelKeys = map[string]bool{
 	"i18n": true, "versions": true, "dce": true, "fonts": true, "goApi": true,
 	"runtimeComponents": true, "serverDirs": true, "runtimeDirs": true,
 	"content": true, "checks": true,
+	"server": true, "cors": true, "api": true, "basePath": true,
 }
 
 // Validate performs semantic/bounds checks that JSON typing alone can't. It

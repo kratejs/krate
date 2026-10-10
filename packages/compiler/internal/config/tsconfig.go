@@ -486,6 +486,60 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			}
 			cfg.API.Sidecar = parsed
 		}
+	case "seo":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			s, _ := v.(string)
+			switch k {
+			case "baseUrl":
+				cfg.SEO.BaseURL = s
+			case "siteName":
+				cfg.SEO.SiteName = s
+			case "description":
+				cfg.SEO.Description = s
+			case "image":
+				cfg.SEO.Image = s
+			}
+		}
+	case "robots":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			s, _ := v.(string)
+			switch k {
+			case "allow":
+				cfg.Robots.Allow = s
+			case "disallow":
+				cfg.Robots.Disallow = s
+			case "sitemap":
+				cfg.Robots.Sitemap = s
+			}
+		}
+	case "runtime":
+		if s, ok := val.(string); ok {
+			cfg.Runtime = s
+		}
+	case "tsBaseDir":
+		if s, ok := val.(string); ok {
+			cfg.TSBaseDir = s
+		}
+	case "pathAliases":
+		if data, err := json.Marshal(val); err == nil {
+			_ = cfg.PathAliases.UnmarshalJSON(data)
+		}
+	case "serverComponents":
+		cfg.ServerComponents = configStrings(cfg.ServerComponents, val)
+	case "runtimeComponents":
+		cfg.RuntimeComponents = configStrings(cfg.RuntimeComponents, val)
+	case "serverDirs":
+		cfg.ServerDirs = configStrings(cfg.ServerDirs, val)
+	case "runtimeDirs":
+		cfg.RuntimeDirs = configStrings(cfg.RuntimeDirs, val)
 	case "devServer":
 		m, ok := val.(map[string]interface{})
 		if !ok {

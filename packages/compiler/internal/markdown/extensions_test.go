@@ -18,6 +18,22 @@ func TestFootnotes(t *testing.T) {
 	}
 }
 
+// TestHeadingAnchorAmpersand verifies headings with `&` produce a clean slug
+// (no `amp` entity remnant) so TOC links and hand-written anchors resolve.
+func TestHeadingAnchorAmpersand(t *testing.T) {
+	html := RenderToHTML("## Static output & dynamic params\n", DefaultConfig())
+	if !strings.Contains(html, `id="static-output-dynamic-params"`) {
+		t.Errorf("expected clean slug, got:\n%s", html)
+	}
+	if strings.Contains(html, `id="static-output-amp`) {
+		t.Errorf("slug leaked an entity remnant:\n%s", html)
+	}
+	html = RenderToHTML("## Typed routes & content\n", DefaultConfig())
+	if !strings.Contains(html, `id="typed-routes-content"`) {
+		t.Errorf("expected clean slug, got:\n%s", html)
+	}
+}
+
 func TestDefinitionList(t *testing.T) {
 	html := RenderToHTML("Term\n: A definition\n", DefaultConfig())
 	for _, want := range []string{"<dl>", "<dt>Term</dt>", "<dd>A definition</dd>"} {

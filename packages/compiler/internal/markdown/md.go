@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"fmt"
+	"html"
 	"regexp"
 	"strings"
 
@@ -579,6 +580,11 @@ func renderTable(b block, cfg Config) string {
 }
 
 func slugify(text string) string {
+	// Headings are slugged from their rendered inline HTML, which escapes
+	// entities (e.g. `&` -> `&amp;`). Decode first so the slug reflects the
+	// visible text ("static output & dynamic params" -> static-output-dynamic-params)
+	// rather than an `amp`-laden remnant.
+	text = html.UnescapeString(text)
 	lower := strings.ToLower(text)
 	re := regexp.MustCompile(`[^a-z0-9\s-]`)
 	clean := re.ReplaceAllString(lower, "")

@@ -98,6 +98,70 @@ func TestUnknownKeyWarningsNested(t *testing.T) {
 	}
 }
 
+// TestKnownTopLevelKeysNoSpuriousWarnings verifies documented top-level keys
+// (server, cors, api, basePath, seo, robots, runtime, tsBaseDir, pathAliases,
+// and the component/dir lists) are recognized and never warn as unknown.
+func TestKnownTopLevelKeysNoSpuriousWarnings(t *testing.T) {
+	raw := []byte(`{
+		"entry":"x",
+		"server":{"port":3000},
+		"cors":{"enabled":true},
+		"api":{"sidecar":{"port":3000}},
+		"basePath":"/docs",
+		"seo":{"baseUrl":"https://x"},
+		"robots":{"allow":"/"},
+		"runtime":"quickjs",
+		"tsBaseDir":".",
+		"pathAliases":{"@/*":["./src/*"]},
+		"serverComponents":["A"],
+		"runtimeComponents":["B"],
+		"serverDirs":["d"],
+		"runtimeDirs":["e"]
+	}`)
+	if w := UnknownKeyWarnings(raw); len(w) != 0 {
+		t.Errorf("documented keys should not warn, got: %v", w)
+	}
+}
+
+// TestApplyConfigPropNewKeys verifies the static parser now recognizes the
+// documented keys it previously dropped silently.
+func TestApplyConfigPropNewKeys(t *testing.T) {
+	cfg := Default()
+	props := map[string]interface{}{
+		"seo":               map[string]interface{}{"baseUrl": "https://x", "siteName": "S", "description": "D", "image": "I"},
+		"robots":            map[string]interface{}{"allow": "/", "disallow": "/admin", "sitemap": "https://x/sitemap.xml"},
+		"runtime":           "quickjs",
+		"tsBaseDir":         "/base",
+		"pathAliases":       map[string]interface{}{"@/*": []interface{}{"./src/*"}},
+		"serverComponents":  []interface{}{"A"},
+		"runtimeComponents": []interface{}{"B"},
+		"serverDirs":        []interface{}{"s"},
+		"runtimeDirs":       []interface{}{"r"},
+	}
+	for k, v := range props {
+		if err := applyConfigProp(cfg, k, v); err != nil {
+			t.Fatalf("applyConfigProp(%s): %v", k, err)
+		}
+	}
+	if cfg.SEO.BaseURL != "https://x" || cfg.SEO.SiteName != "S" || cfg.SEO.Description != "D" || cfg.SEO.Image != "I" {
+		t.Errorf("seo not applied: %+v", cfg.SEO)
+	}
+	if cfg.Robots.Allow != "/" || cfg.Robots.Disallow != "/admin" || cfg.Robots.Sitemap != "https://x/sitemap.xml" {
+		t.Errorf("robots not applied: %+v", cfg.Robots)
+	}
+	if cfg.Runtime != "quickjs" || cfg.TSBaseDir != "/base" {
+		t.Errorf("runtime/tsBaseDir not applied: %q %q", cfg.Runtime, cfg.TSBaseDir)
+	}
+	if len(cfg.ServerComponents) != 1 || cfg.ServerComponents[0] != "A" ||
+		len(cfg.RuntimeComponents) != 1 || cfg.RuntimeComponents[0] != "B" ||
+		len(cfg.ServerDirs) != 1 || len(cfg.RuntimeDirs) != 1 {
+		t.Errorf("component/dir lists not applied: %v %v %v %v", cfg.ServerComponents, cfg.RuntimeComponents, cfg.ServerDirs, cfg.RuntimeDirs)
+	}
+	if len(cfg.PathAliases) != 1 || cfg.PathAliases[0].Prefix != "@/*" {
+		t.Errorf("pathAliases not applied: %+v", cfg.PathAliases)
+	}
+}
+
 // TestValidateServerAndSidecar verifies bounds checks for the new server/cors/
 // api.sidecar/basePath config.
 func TestValidateServerAndSidecar(t *testing.T) {

@@ -46,6 +46,6 @@ every key and its default.
 | Content | `content`, `pathAliases`, `tsBaseDir` | [Content collections](/docs/reference/config/#content-collections) |
 | Server | `server`, `basePath`, `redirects`, `rewrites` | [Server](/docs/reference/config/#server) |
 | Security | `csp`, `cors` | [Content Security Policy](/docs/reference/config/#content-security-policy) |
-| SEO | `seo`, `robots` | [SEO & robots](/docs/reference/config/#seo-amp-robots) |
+| SEO | `seo`, `robots` | [SEO & robots](/docs/reference/config/#seo-robots) |
 | Checks | `checks` | [Quality checks](/docs/reference/config/#quality-checks) |
 | Plugins | `plugins` | [Plugins](/docs/reference/config/#plugins) |

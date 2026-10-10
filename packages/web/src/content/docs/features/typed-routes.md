@@ -279,4 +279,4 @@ a plugin (for example the [docs plugin](/docs/features/plugins/)), run
 :::
 
 For how route and collection types are generated, see
-[Contributing → Architecture](/docs/contributing/architecture/#typed-routes--content).
+[Contributing → Architecture](/docs/contributing/architecture/#typed-routes-content).

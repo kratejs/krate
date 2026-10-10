@@ -524,7 +524,7 @@ func TestRuntimeChunkIncludesReconcile(t *testing.T) {
 	root := filepath.Clean(filepath.Join(pkgDir, "..", "..", "..", ".."))
 	rt := loadRuntimeFromDisk(root)
 	if rt == "" {
-		t.Skip("runtime dist not available in this environment")
+		requireE2E(t, "runtime dist not available in this environment")
 	}
 	for _, want := range []string{
 		"reconcileTrees",

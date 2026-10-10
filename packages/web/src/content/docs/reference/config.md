@@ -273,7 +273,7 @@ output: "static",   // default: request-time rendering allowed
 returned by `generateStaticParams` (unknown params 404), and SSR/ISR/streaming
 are disabled. Individual pages can re-enable dynamic params with
 `export const dynamicParams = true`. See
-[Static output & dynamic params](/docs/features/typed-routes/#static-output--dynamic-params).
+[Static output & dynamic params](/docs/features/typed-routes/#static-output-dynamic-params).
 
 ## Quality checks
 

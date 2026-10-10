@@ -30,41 +30,42 @@ export function reconcile<T>(
   }
 
   if (keyFn) {
-    // Keyed reconciliation
-    const keyMap = new Map<string | number, Node>();
+    // Keyed reconciliation: reuse the existing node for a key still present
+    // (preserving DOM state such as focus/scroll), create nodes only for new
+    // keys, then drop stale nodes and reorder.
+    const existingByKey = new Map<string | number, Node>();
     for (const child of existing) {
       const key = (child as any).__k;
-      if (key != null) keyMap.set(key, child);
+      if (key != null && !existingByKey.has(key)) existingByKey.set(key, child);
     }
 
     const newNodes: Node[] = [];
-    const usedKeys = new Set<string | number>();
-
     for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const key = keyFn(item);
-      usedKeys.add(key);
-
-      const newNode = mapFn(item, i);
-      (newNode as any).__k = key;
-      newNodes.push(newNode);
+      const key = keyFn(items[i]);
+      let node = existingByKey.get(key);
+      if (node) {
+        // Consume the key so a later duplicate key falls back to a fresh node.
+        existingByKey.delete(key);
+      } else {
+        node = mapFn(items[i], i);
+        (node as any).__k = key;
+      }
+      newNodes.push(node);
     }
 
-    // Remove nodes whose keys are no longer present
-    for (const [key, child] of keyMap) {
-      if (!usedKeys.has(key) && child.parentNode === parent) {
+    // Remove nodes whose keys are no longer present.
+    for (const child of existingByKey.values()) {
+      if (child.parentNode === parent) {
         disposeNode(child);
         parent.removeChild(child);
       }
     }
 
-    // Reorder: insert nodes in the correct order before endMarker
+    // Reorder: insert nodes in the correct order before endMarker.
     for (let i = 0; i < newNodes.length; i++) {
-      const newNode = newNodes[i];
-      // Find the node that should be before this one
       const prevNode = i === 0 ? startMarker : newNodes[i - 1];
-      if (newNode !== prevNode.nextSibling) {
-        parent.insertBefore(newNode, prevNode.nextSibling);
+      if (newNodes[i] !== prevNode.nextSibling) {
+        parent.insertBefore(newNodes[i], prevNode.nextSibling);
       }
     }
   } else {
