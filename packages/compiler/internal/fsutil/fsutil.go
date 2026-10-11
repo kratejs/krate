@@ -16,7 +16,70 @@ func WriteFileIfChanged(path string, data []byte, perm os.FileMode) error {
 	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, data) {
 		return nil
 	}
-	return os.WriteFile(path, data, perm)
+	return WriteFileAtomic(path, data, perm)
+}
+
+// WriteFileAtomic writes data to path via a sibling temp file and an atomic
+// rename, so a crash or concurrent reader never observes a half-written file.
+// The parent directory is created only when missing, and an existing target's
+// file mode is preserved.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	if fi, err := os.Stat(path); err == nil {
+		perm = fi.Mode().Perm()
+	}
+
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
+
+// WithinDir reports whether target is base itself or lies inside it. Both paths
+// are cleaned and compared lexically; a ".." that escapes is rejected. Used to
+// keep plugin/compiler writes inside the output or project directory.
+func WithinDir(base, target string) bool {
+	baseAbs, err := filepath.Abs(base)
+	if err != nil {
+		return false
+	}
+	targetAbs, err := filepath.Abs(target)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(baseAbs, targetAbs)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 // WalkExt walks root and invokes fn for every regular file whose extension is

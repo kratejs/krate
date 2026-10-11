@@ -11,6 +11,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
 
 // Watch watches the builder's project root for filesystem changes using native
@@ -158,6 +159,14 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 // and rebuilds exactly what depends on them, falling back to a full rebuild when
 // nothing matches dependency tracking. Rebuilt routes are sent to reload.
 func (b *Builder) processChanges(changed []string, hub *DevHub) {
+	// A panic during an incremental rebuild must not kill the dev server; report
+	// it and keep watching.
+	defer func() {
+		if rec := recover(); rec != nil {
+			fmt.Fprintf(os.Stderr, "  %sDev rebuild error:%s %v\n", cRed, cReset, safe.Recover(rec))
+		}
+	}()
+
 	// Go files outside src/api/ are not krate-managed; ignore them so they
 	// don't trigger a full rebuild.
 	var filtered []string

@@ -31,6 +31,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
+	"github.com/kratejs/krate/packages/compiler/internal/safe"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 	"github.com/kratejs/krate/packages/compiler/internal/tsexec"
 )
@@ -327,6 +328,17 @@ func (b *Builder) drainPluginErrs() []string {
 	return errs
 }
 
+// recoverPage runs a page/route build, converting a panic into an error so a
+// single bad page cannot crash the whole build.
+func recoverPage(fn func() (*PageResult, string, error)) (result *PageResult, rawCSS string, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = safe.Recover(rec)
+		}
+	}()
+	return fn()
+}
+
 // runPageHook runs a page-level hook: the native hook (when native is non-nil)
 // followed by the same-named community plugin hook. Both are best-effort - a
 // failure is logged and recorded so the build exits non-zero, but rendering
@@ -334,12 +346,14 @@ func (b *Builder) drainPluginErrs() []string {
 // the identical AfterParse / AfterRender / AfterMarkdownParse dispatch.
 func (b *Builder) runPageHook(name, page string, ctx any, native func() error) {
 	if native != nil {
-		if err := native(); err != nil {
+		if err := safe.Run(native); err != nil {
 			fmt.Fprintf(os.Stderr, "  %s%s plugin error (%s):%s %v\n", cYellow, name, page, cReset, err)
 			b.pluginFailed(fmt.Errorf("%s (%s): %v", name, page, err))
 		}
 	}
-	if err := plugin.RunCommunityPlugins(name, b.Cfg.Plugins, b.Root, b.Cfg.OutDir, ctx, b.communityEnv()); err != nil {
+	if err := safe.Run(func() error {
+		return plugin.RunCommunityPlugins(name, b.Cfg.Plugins, b.Root, b.Cfg.OutDir, ctx, b.communityEnv())
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error %s (%s):%s %v\n", cYellow, name, page, cReset, err)
 		b.pluginFailed(fmt.Errorf("%s (%s): %v", name, page, err))
 	}
@@ -424,7 +438,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 			pool.acquire()
 			defer pool.release()
 			fmt.Printf("  %s▶%s %s\n", cCyan, cReset, p)
-			result, rawCSS, err := b.buildPage(p)
+			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildPage(p) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
 		}(page)
 	}
@@ -436,7 +450,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 			pool.acquire()
 			defer pool.release()
 			fmt.Printf("  %s▶%s %s\n", cCyan, cReset, s.OutPath)
-			result, rawCSS, err := b.buildStaticParamsPage(s)
+			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildStaticParamsPage(s) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, s.OutPath}
 		}(spp)
 	}
@@ -528,8 +542,37 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	return results, nil
 }
 
+// guardOutDir refuses truly destructive output directories so the build's output
+// wipe can never delete the user's sources: a filesystem root or an outDir equal
+// to the project root are hard errors. An outDir that merely *contains* the
+// project root (e.g. a monorepo parent) is allowed but warned about. Set
+// KRATE_ALLOW_UNSAFE_OUTDIR=1 to bypass the check entirely.
+func (b *Builder) guardOutDir() error {
+	if os.Getenv("KRATE_ALLOW_UNSAFE_OUTDIR") != "" {
+		return nil
+	}
+	outAbs, err1 := filepath.Abs(b.Cfg.OutDir)
+	rootAbs, err2 := filepath.Abs(b.Root)
+	if err1 != nil || err2 != nil {
+		return nil
+	}
+	if filepath.Dir(outAbs) == outAbs {
+		return fmt.Errorf("refusing to build: outDir %s is a filesystem root (set KRATE_ALLOW_UNSAFE_OUTDIR=1 to override)", outAbs)
+	}
+	if outAbs == rootAbs {
+		return fmt.Errorf("refusing to build: outDir equals the project root (%s)", outAbs)
+	}
+	if fsutil.WithinDir(outAbs, rootAbs) {
+		fmt.Fprintf(os.Stderr, "  %s⚠ outDir %s contains the project root; the build will wipe it%s\n", cYellow, outAbs, cReset)
+	}
+	return nil
+}
+
 func (b *Builder) BuildAll() error {
 	defer b.phase("build:total")()
+	if err := b.guardOutDir(); err != nil {
+		return err
+	}
 	if err := os.RemoveAll(b.Cfg.OutDir); err != nil {
 		return fmt.Errorf("cleaning output dir: %w", err)
 	}
@@ -646,7 +689,7 @@ func (b *Builder) BuildAll() error {
 			pool.acquire()
 			defer pool.release()
 			fmt.Printf("  %s▶%s %s\n", cCyan, cReset, p)
-			result, rawCSS, err := b.buildPage(p)
+			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildPage(p) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
 		}(page)
 	}
@@ -658,7 +701,7 @@ func (b *Builder) BuildAll() error {
 			pool.acquire()
 			defer pool.release()
 			fmt.Printf("  %s▶%s %s (route)%s\n", cGreen, cReset, r.Path, cReset)
-			result, rawCSS, err := b.buildRoute(r)
+			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildRoute(r) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, "(route) " + r.Path}
 		}(route)
 	}
@@ -1205,6 +1248,11 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
+			defer func() {
+				if rec := recover(); rec != nil {
+					b.pluginFailed(safe.Recover(rec))
+				}
+			}()
 
 			pageDir := b.Cfg.OutDir
 			if r.OutName != "." {
@@ -1588,7 +1636,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 					// generated code embedded so devtools shows a coherent file.
 					sm = generateSourcemap(finalJS, "krate-hydration.js", finalJS)
 				}
-				_ = os.WriteFile(jsPath+".map", []byte(sm), 0644)
+				_ = fsutil.WriteFileAtomic(jsPath+".map", []byte(sm), 0644)
 				finalJS = appendSourceMappingURL(finalJS, jsFile+".map")
 				_ = fsutil.WriteFileIfChanged(jsPath, []byte(finalJS), 0644)
 			}
@@ -2375,7 +2423,7 @@ func (b *Builder) BuildMiddleware() {
 	}
 
 	if len(result.OutputFiles) > 0 {
-		_ = os.WriteFile(outPath, result.OutputFiles[0].Contents, 0644)
+		_ = fsutil.WriteFileAtomic(outPath, result.OutputFiles[0].Contents, 0644)
 	}
 }
 
@@ -2600,7 +2648,7 @@ func (b *Builder) writeWorkerBundles() error {
 	// Emit a tiny index of emitted workers for tooling/debugging.
 	if len(built) > 0 {
 		idx, _ := json.MarshalIndent(built, "", "  ")
-		_ = os.WriteFile(filepath.Join(b.Cfg.OutDir, "workers.json"), idx, 0644)
+		_ = fsutil.WriteFileAtomic(filepath.Join(b.Cfg.OutDir, "workers.json"), idx, 0644)
 	}
 	return nil
 }
@@ -2732,7 +2780,7 @@ func (b *Builder) writeAssetFiles(assets map[string]string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(dst, data, 0644); err != nil {
+		if err := fsutil.WriteFileAtomic(dst, data, 0644); err != nil {
 			return err
 		}
 	}
@@ -3426,7 +3474,14 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 			pool.acquire()
 			defer pool.release()
 			fmt.Printf("  %s▶ API%s %s\n", cGreen, cReset, filepath.Base(r))
-			meta, err := b.compileSingleRoute(r, apiSrcDir)
+			meta, err := func() (m apiRouteMeta, err error) {
+				err = safe.Run(func() error {
+					var e error
+					m, e = b.compileSingleRoute(r, apiSrcDir)
+					return e
+				})
+				return
+			}()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "  %s✗ API Error:%s %s: %v\n", cRed, cReset, r, err)
 				errCh <- err
@@ -3603,6 +3658,6 @@ func (b *Builder) mergeAPIRouteMeta(updates map[string]apiRouteMeta) {
 		return
 	}
 	if data, err := json.MarshalIndent(list, "", "  "); err == nil {
-		_ = os.WriteFile(manifestPath, data, 0644)
+		_ = fsutil.WriteFileAtomic(manifestPath, data, 0644)
 	}
 }

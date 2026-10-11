@@ -25,8 +25,10 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
+	"github.com/kratejs/krate/packages/compiler/internal/execx"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
+	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
 
 const apiServerScriptContent = `import http from 'node:http';
@@ -576,8 +578,15 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	}
 	needNodeSidecar := sidecarNeedsNode(apiRTOption, middlewareRTOption, middlewareRT, middlewarePath, nodeOnlyRoutes)
 
+	var nodeAPICmdMu sync.Mutex
+	var nodeAPICmd *exec.Cmd
 	if needNodeSidecar {
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					_ = safe.Recover(r)
+				}
+			}()
 			scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
 			_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
 			_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
@@ -597,12 +606,16 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath)
 			}
 
+			execx.ConfigureTree(cmd)
 			cmd.Env = append(os.Environ(),
 				fmt.Sprintf("KRATE_API_WORKERS=%d", nodeWorkers),
 				fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hub != nil)),
 			)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
+			nodeAPICmdMu.Lock()
+			nodeAPICmd = cmd
+			nodeAPICmdMu.Unlock()
 			_ = cmd.Run()
 		}()
 	}
@@ -1361,6 +1374,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				isrWg.Add(1)
 				go func() {
 					defer isrWg.Done()
+					defer func() {
+						if r := recover(); r != nil {
+							_ = safe.Recover(r)
+						}
+					}()
 					interval := time.Duration(page.Revalidate) * time.Second
 					if interval <= 0 {
 						interval = defaultISRRevalidate * time.Second
@@ -1397,6 +1415,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	go func() {
 		<-sigCh
 		fmt.Printf("\n%sShutting down...%s\n", cGray, cReset)
+		defer func() {
+			if r := recover(); r != nil {
+				_ = safe.Recover(r)
+			}
+		}()
 		// Stop ISR revalidation goroutine
 		isrCloseOnce.Do(func() { close(isrDone) })
 		if ssrStarted {
@@ -1410,6 +1433,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		if customSidecar != nil {
 			customSidecar.Stop()
 			fmt.Printf("  %s✓%s API sidecar stopped\n", cGreen, cReset)
+		}
+		nodeAPICmdMu.Lock()
+		nc := nodeAPICmd
+		nodeAPICmdMu.Unlock()
+		if nc != nil && nc.Process != nil {
+			execx.KillTree(nc)
+			fmt.Printf("  %s✓%s Node API sidecar stopped\n", cGreen, cReset)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()

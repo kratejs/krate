@@ -112,6 +112,18 @@ func (c *Config) Validate() (warnings []string, err error) {
 	if c.SSR.MaxCacheSize < 0 {
 		return nil, fmt.Errorf("ssr.maxCacheSize must be >= 0, got %d", c.SSR.MaxCacheSize)
 	}
+	if c.SSR.APIWorkers < 0 {
+		return nil, fmt.Errorf("ssr.apiWorkers must be >= 0, got %d", c.SSR.APIWorkers)
+	}
+	if c.SSR.NodeWorkers < 0 {
+		return nil, fmt.Errorf("ssr.nodeWorkers must be >= 0, got %d", c.SSR.NodeWorkers)
+	}
+	if c.SSR.APIWorkers > 4096 || c.SSR.NodeWorkers > 4096 {
+		warnings = append(warnings, "ssr worker counts above 4096 are likely a mistake")
+	}
+	if c.SSR.Timeout > 600000 {
+		warnings = append(warnings, "ssr.timeout above 600000ms (10m) is unusually large")
+	}
 	if c.SSR.Streaming && c.Output == "static" {
 		warnings = append(warnings, "ssr.streaming is ignored when output is \"static\"")
 	}

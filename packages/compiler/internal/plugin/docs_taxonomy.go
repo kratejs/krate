@@ -10,6 +10,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/docs"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 )
 
 // taxonomyEntry is one tag or category with its member pages.
@@ -48,7 +49,7 @@ func generateTaxonomyPages(ctx *BuildHookCtx, genDir string, theme *resolvedDocs
 				return err
 			}
 			src := buildTaxonomyTSX(theme, opts, tsxPath, kind, e, sections)
-			if err := os.WriteFile(tsxPath, []byte(src), 0644); err != nil {
+			if err := fsutil.WriteFileAtomic(tsxPath, []byte(src), 0644); err != nil {
 				return err
 			}
 			if ctx.GeneratedPages != nil {

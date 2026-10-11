@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
+	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
 
 // CompileServerBundles compiles SSR/ISR/streaming pages into self-contained ESM bundles
@@ -42,6 +43,11 @@ func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
+			defer func() {
+				if r := recover(); r != nil {
+					_ = safe.Recover(r) // prints the stack; this page is skipped
+				}
+			}()
 
 			absSource := filepath.Join(root, page.SourcePath)
 			sourceData, err := os.ReadFile(absSource)

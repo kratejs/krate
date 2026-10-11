@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/kratejs/krate/packages/compiler/internal/execx"
 )
 
 // runPlugin implements `krate plugin <subcommand>`. Currently the only
@@ -50,7 +53,9 @@ func runPluginAdd(flags cliFlags, pkg string, rest []string) {
 	pm, installArgs := detectPackageManager(absRoot, "add", pkg)
 	fmt.Printf("%s%s  Installing %s with %s...%s\n", cBold, cCyan, pkg, pm, cReset)
 
-	cmd := exec.Command(pm, installArgs...)
+	ctx, cancel := context.WithTimeout(context.Background(), execx.Timeout("KRATE_INSTALL_TIMEOUT", 30*time.Minute))
+	defer cancel()
+	cmd := execx.Command(ctx, pm, installArgs...)
 	cmd.Dir = absRoot
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

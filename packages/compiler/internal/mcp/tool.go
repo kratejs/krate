@@ -214,7 +214,16 @@ func (s *Server) callTool(raw json.RawMessage, op *pendingOp) (any, *rpcError) {
 	if params.Arguments == nil {
 		params.Arguments = map[string]any{}
 	}
-	result, rerr := tool.Handler(op.ctx, params.Arguments)
+	var result ToolResult
+	var rerr *rpcError
+	func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				rerr = &rpcError{Code: codeInternalError, Message: fmt.Sprintf("tool %s panicked: %v", params.Name, rec)}
+			}
+		}()
+		result, rerr = tool.Handler(op.ctx, params.Arguments)
+	}()
 	if rerr != nil {
 		return nil, rerr
 	}

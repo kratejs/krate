@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kratejs/krate/packages/compiler/internal/execx"
 )
 
 // resultCache memoizes identical bootstrap runs within a single build/session.
@@ -90,21 +92,15 @@ func RunBootstrapOpts(name, content, cwd string, timeout time.Duration, env []st
 		args = append(args, "--tsconfig", tsconfig)
 	}
 	args = append(args, path)
-	cmd := exec.CommandContext(ctx, "npx", args...)
+	cmd := execx.Command(ctx, "npx", args...)
 	cmd.Dir = cwd
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
 	}
-	configureProcessTree(cmd)
-	// A timeout must not outlive itself. On Windows `npx` is a shim that spawns
-	// a child `node`; killing only the shim leaves the child holding the
-	// stdout/stderr pipes open, so cmd.Wait() would block forever even after the
-	// deadline. Kill the whole tree and bound the post-kill I/O wait.
-	cmd.Cancel = func() error {
-		killProcessTree(cmd)
-		return nil
-	}
-	cmd.WaitDelay = 10 * time.Second
+	// execx.Command wires process-tree termination and a bounded post-kill wait:
+	// on Windows `npx` is a shim that spawns a child `node`; killing only the
+	// shim would leave the child holding the stdout/stderr pipes open, so
+	// cmd.Wait() would block forever even after the deadline.
 	out, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {

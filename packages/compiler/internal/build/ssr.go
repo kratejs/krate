@@ -15,6 +15,7 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
+	"github.com/kratejs/krate/packages/compiler/internal/execx"
 )
 
 // errSSRNotRunning is the shared sentinel returned by SSR operations that need a
@@ -197,7 +198,7 @@ func (s *SSRServer) Stop() {
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
-			_ = cmd.Process.Kill()
+			execx.KillTree(cmd)
 			<-done
 		}
 	}

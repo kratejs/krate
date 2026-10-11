@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/execx"
 )
 
 // errSidecarFallthrough signals that the API sidecar returned 404 (or was
@@ -159,6 +160,7 @@ func (s *apiSidecar) supervise() {
 func (s *apiSidecar) newCmd() *exec.Cmd {
 	args := append([]string{}, s.config.Args...)
 	cmd := exec.Command(s.config.Command, args...)
+	execx.ConfigureTree(cmd)
 	cwd := s.config.Cwd
 	if cwd == "" {
 		cwd = s.root
@@ -194,7 +196,7 @@ func (s *apiSidecar) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cmd != nil && s.cmd.Process != nil {
-		_ = s.cmd.Process.Kill()
+		execx.KillTree(s.cmd)
 	}
 }
 

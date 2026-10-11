@@ -13,6 +13,7 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
 
 // ResultGlobal is the global the entry assigns its result to. Eval returns its
@@ -39,7 +40,13 @@ type Options struct {
 // runtime, returning the JSON value assigned to globalThis.__krateEvalResult.
 // It returns an error when the source cannot be bundled or executed, so callers
 // can fall back to a static path.
-func Eval(opts Options) (json.RawMessage, error) {
+func Eval(opts Options) (out json.RawMessage, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = safe.Recover(r)
+		}
+	}()
+
 	bundle, err := bundle(opts)
 	if err != nil {
 		return nil, err

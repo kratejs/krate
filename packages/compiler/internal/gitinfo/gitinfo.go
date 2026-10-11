@@ -4,10 +4,13 @@
 package gitinfo
 
 import (
-	"os/exec"
+	"context"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/kratejs/krate/packages/compiler/internal/execx"
 )
 
 type rootInfo struct {
@@ -34,7 +37,7 @@ func gitRoot(root string) (string, bool) {
 		roots[root] = rootInfo{}
 		return "", false
 	}
-	out, err := exec.Command("git", "-C", root, "rev-parse", "--show-toplevel").Output()
+	out, err := execx.Output(context.Background(), execx.Timeout("KRATE_GIT_TIMEOUT", 30*time.Second), "", nil, "git", "-C", root, "rev-parse", "--show-toplevel")
 	var ri rootInfo
 	if err == nil {
 		ri.dir = strings.TrimSpace(string(out))
@@ -104,8 +107,8 @@ func buildIndex(root string) *Index {
 
 	// Cap history so enormous repos stay bounded; files untouched in the last
 	// 10000 commits simply report no git metadata (as an untracked file would).
-	out, err := exec.Command("git", "-C", gr, "log", "--no-merges", "-n", "10000",
-		"--name-only", "--format=%x1e%cI%x1f%an").Output()
+	out, err := execx.Output(context.Background(), execx.Timeout("KRATE_GIT_TIMEOUT", 60*time.Second), "", nil, "git", "-C", gr, "log", "--no-merges", "-n", "10000",
+		"--name-only", "--format=%x1e%cI%x1f%an")
 	if err != nil {
 		return ix
 	}

@@ -11,6 +11,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kratejs/krate/packages/compiler/internal/execx"
+	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
 
 // goAPISupervisor manages the compiled Go API sidecar subprocess. It starts
@@ -98,6 +101,7 @@ func (g *goAPISupervisor) spawn() error {
 	g.stop()
 
 	cmd := exec.Command(g.binPath)
+	execx.ConfigureTree(cmd)
 	cmd.Env = append(os.Environ(), g.env...)
 	cmd.Env = append(cmd.Env, fmt.Sprintf("KRATE_GOAPI_PORT=%d", g.port))
 	cmd.Stdout = os.Stdout
@@ -115,7 +119,7 @@ func (g *goAPISupervisor) stop() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.cmd != nil && g.cmd.Process != nil {
-		_ = g.cmd.Process.Kill()
+		execx.KillTree(g.cmd)
 		_, _ = g.cmd.Process.Wait()
 		g.cmd = nil
 	}
@@ -130,31 +134,38 @@ func (g *goAPISupervisor) watch() {
 		case <-g.stopCh:
 			return
 		case <-ticker.C:
-			routes, modTime, err := loadGoAPIManifest(g.manifestPath)
-			if err != nil {
-				// Manifest gone -> no Go routes anymore -> stop the sidecar.
-				if os.IsNotExist(err) {
-					g.mu.Lock()
-					g.routes = nil
-					g.mu.Unlock()
-					g.stop()
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						_ = safe.Recover(r) // print + keep watching
+					}
+				}()
+				routes, modTime, err := loadGoAPIManifest(g.manifestPath)
+				if err != nil {
+					// Manifest gone -> no Go routes anymore -> stop the sidecar.
+					if os.IsNotExist(err) {
+						g.mu.Lock()
+						g.routes = nil
+						g.mu.Unlock()
+						g.stop()
+					}
+					return
 				}
-				continue
-			}
-			g.mu.Lock()
-			changed := !modTime.Equal(g.lastMod)
-			if changed {
-				g.lastMod = modTime
-				g.routes = routes
-			}
-			g.mu.Unlock()
-			if changed {
-				if err := g.spawn(); err != nil {
-					fmt.Fprintf(os.Stderr, "  %s⚠ Go API sidecar restart failed:%s %v\n", cYellow, cReset, err)
-					continue
+				g.mu.Lock()
+				changed := !modTime.Equal(g.lastMod)
+				if changed {
+					g.lastMod = modTime
+					g.routes = routes
 				}
-				fmt.Printf("  %s⚡%s Go API sidecar restarted (%d routes)\n", cCyan, cReset, len(routes))
-			}
+				g.mu.Unlock()
+				if changed {
+					if err := g.spawn(); err != nil {
+						fmt.Fprintf(os.Stderr, "  %s⚠ Go API sidecar restart failed:%s %v\n", cYellow, cReset, err)
+						return
+					}
+					fmt.Printf("  %s⚡%s Go API sidecar restarted (%d routes)\n", cCyan, cReset, len(routes))
+				}
+			}()
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,8 +13,10 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/execx"
 )
 
 // goAPIMethods are the HTTP method handler names a Go route file may define,
@@ -549,18 +552,15 @@ func (b *Builder) buildGoAPIBinary(binPath string) error {
 	}
 
 	if cfg := b.Cfg.GoAPI; cfg.Tidy != nil && *cfg.Tidy {
-		tidy := exec.Command("go", "mod", "tidy")
-		tidy.Dir = modDir
-		if out, err := tidy.CombinedOutput(); err != nil {
-			return fmt.Errorf("go mod tidy failed:\n%s%w", string(out), err)
+		out, stderr, err := execx.Run(context.Background(), execx.Timeout("KRATE_GOAPI_TIDY_TIMEOUT", 10*time.Minute), modDir, nil, "go", "mod", "tidy")
+		if err != nil {
+			return fmt.Errorf("go mod tidy failed:\n%s%s%w", string(out), string(stderr), err)
 		}
 	}
 
-	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/server")
-	cmd.Dir = modDir
-	out, err := cmd.CombinedOutput()
+	out, stderr, err := execx.Run(context.Background(), execx.Timeout("KRATE_GOAPI_TIMEOUT", 15*time.Minute), modDir, nil, "go", "build", "-o", binPath, "./cmd/server")
 	if err != nil {
-		return fmt.Errorf("compiling Go API sidecar failed (add goApi.deps/goApi.replaces or goApi.tidy for third-party modules):\n%s%w", string(out), err)
+		return fmt.Errorf("compiling Go API sidecar failed (add goApi.deps/goApi.replaces or goApi.tidy for third-party modules):\n%s%s%w", string(out), string(stderr), err)
 	}
 
 	if err := os.MkdirAll(cacheDir, 0755); err == nil {

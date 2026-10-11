@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
 
@@ -103,7 +104,7 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string) str
 	_ = os.MkdirAll(chunksDir, 0755)
 
 	relPath := filename
-	_ = os.WriteFile(filepath.Join(outDir, relPath), []byte(runtimeToWrite), 0644)
+	_ = fsutil.WriteFileAtomic(filepath.Join(outDir, relPath), []byte(runtimeToWrite), 0644)
 
 	return relPath
 }
@@ -128,6 +129,6 @@ func writeDevChunk(outDir, projectRoot string) string {
 	chunksDir := filepath.Join(outDir, "chunks")
 	_ = os.MkdirAll(chunksDir, 0755)
 	relPath := "chunks/krate-dev.js"
-	_ = os.WriteFile(filepath.Join(outDir, relPath), []byte(content), 0644)
+	_ = fsutil.WriteFileAtomic(filepath.Join(outDir, relPath), []byte(content), 0644)
 	return relPath
 }

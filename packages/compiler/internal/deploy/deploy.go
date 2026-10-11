@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 )
 
 // Targets lists the supported deploy adapters.
@@ -49,7 +50,7 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 		fmt.Fprintf(&b, "%s\t%s\t200\n", r.Source, r.Destination)
 	}
 	p := filepath.Join(outDir, "_redirects")
-	if err := os.WriteFile(p, []byte(b.String()), 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(p, []byte(b.String()), 0644); err != nil {
 		return nil, fmt.Errorf("writing _redirects: %w", err)
 	}
 	return []string{p}, nil
@@ -90,7 +91,7 @@ func emitVercel(cfg *config.Config, outDir string) ([]string, error) {
 		return nil, err
 	}
 	p := filepath.Join(outDir, "vercel.json")
-	if err := os.WriteFile(p, append(data, '\n'), 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(p, append(data, '\n'), 0644); err != nil {
 		return nil, fmt.Errorf("writing vercel.json: %w", err)
 	}
 	return []string{p}, nil
@@ -102,7 +103,7 @@ func emitGitHubPages(outDir string) ([]string, error) {
 	var written []string
 
 	nojekyll := filepath.Join(outDir, ".nojekyll")
-	if err := os.WriteFile(nojekyll, nil, 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(nojekyll, nil, 0644); err != nil {
 		return nil, fmt.Errorf("writing .nojekyll: %w", err)
 	}
 	written = append(written, nojekyll)
@@ -111,7 +112,7 @@ func emitGitHubPages(outDir string) ([]string, error) {
 	if _, err := os.Stat(dest); os.IsNotExist(err) {
 		src := filepath.Join(outDir, "404", "index.html")
 		if data, err := os.ReadFile(src); err == nil {
-			if err := os.WriteFile(dest, data, 0644); err != nil {
+			if err := fsutil.WriteFileAtomic(dest, data, 0644); err != nil {
 				return nil, fmt.Errorf("writing 404.html: %w", err)
 			}
 			written = append(written, dest)

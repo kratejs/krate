@@ -37,7 +37,30 @@ type Parser struct {
 	// ARROW token at or after i, or -1. It makes isArrowFunction's "is there an
 	// arrow ahead" check O(1) instead of O(n) per call.
 	arrowFrom []int
+
+	// depth tracks the recursive-descent nesting depth so pathologically nested
+	// input (thousands of unbalanced parens/braces/JSX tags) is rejected with a
+	// diagnostic instead of exhausting the goroutine stack.
+	depth int
 }
+
+// maxParseDepth bounds recursive-descent nesting. Real code stays far below it;
+// a fuzzer/attacker input that exceeds it is a hard parse error.
+const maxParseDepth = 10000
+
+// parseDepthError is the sentinel panic used to unwind out of deep recursion; it
+// is recovered in ParseProgram.
+type parseDepthError struct{}
+
+// enter increments the nesting depth and aborts parsing when it is exceeded.
+func (p *Parser) enter() {
+	p.depth++
+	if p.depth > maxParseDepth {
+		panic(parseDepthError{})
+	}
+}
+
+func (p *Parser) leave() { p.depth-- }
 
 func New(tokens []lexer.Token) *Parser {
 	return &Parser{tokens: tokens}
@@ -264,8 +287,17 @@ var precMap = map[lexer.Kind]int{
 	lexer.As:           precAs,
 }
 
-func (p *Parser) ParseProgram() *ast.Program {
-	prog := &ast.Program{}
+func (p *Parser) ParseProgram() (prog *ast.Program) {
+	prog = &ast.Program{}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(parseDepthError); ok {
+				p.errs = append(p.errs, fmt.Errorf("input nesting too deep (exceeded %d levels)", maxParseDepth))
+				return
+			}
+			panic(r)
+		}
+	}()
 	for p.peek().Kind != lexer.EOF {
 		pos := p.pos
 		stmt := p.parseStmt()
@@ -280,6 +312,13 @@ func (p *Parser) ParseProgram() *ast.Program {
 }
 
 func (p *Parser) parseStmt() ast.Stmt {
+	p.enter()
+	s := p.parseStmtInner()
+	p.leave()
+	return s
+}
+
+func (p *Parser) parseStmtInner() ast.Stmt {
 	// Bare `async function name() {...}` declaration at statement level (not
 	// preceded by `export`). The `export async function` combos are handled in
 	// parseExport; here we consume the `async` keyword and delegate to
@@ -1307,6 +1346,18 @@ func (p *Parser) parseExpr(prec int) ast.Expr {
 }
 
 func (p *Parser) parsePrefix() ast.Expr {
+	// Guarded at the recursion chokepoint (parens/arrays/objects recurse back
+	// into parseExpr) rather than in parseExpr itself, so the depth counter is
+	// only touched per leaf rather than per precedence level. Manual (not defer)
+	// decrement keeps the hot path cheap; a deeper overflow panics and unwinds
+	// past this frame to ParseProgram anyway.
+	p.enter()
+	e := p.parsePrefixInner()
+	p.leave()
+	return e
+}
+
+func (p *Parser) parsePrefixInner() ast.Expr {
 	tok := p.peek()
 
 	// `async` is a contextual keyword but isIdentifierToken() treats it as a
@@ -2090,6 +2141,13 @@ func (p *Parser) parseTemplateExpr() ast.Expr {
 }
 
 func (p *Parser) parseJSXElement() ast.Expr {
+	p.enter()
+	e := p.parseJSXElementInner()
+	p.leave()
+	return e
+}
+
+func (p *Parser) parseJSXElementInner() ast.Expr {
 	if p.peek().Kind == lexer.LT_SLASH {
 		return nil
 	}

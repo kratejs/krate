@@ -84,3 +84,27 @@ client HTML, JavaScript, or hydration payloads**. Do not put secrets in values
 you render into a page component tree; only server-only contexts (API routes,
 server components, plugins) may read them. Krate logs only that a given env
 file was found/loaded — never its values.
+
+## Compiler tuning variables
+
+These are read from the shell environment (not `.env`) and tune robustness
+limits. All are optional.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `KRATE_DEBUG` | unset | Re-throw internal panics with their original stack instead of reporting them as build errors. |
+| `KRATE_EXEC_TIMEOUT` | unset | Fallback timeout for external processes without a specific override (Go duration, e.g. `90s`). |
+| `KRATE_GOAPI_TIMEOUT` | `15m` | Timeout for `go build` of the Go API sidecar. |
+| `KRATE_GOAPI_TIDY_TIMEOUT` | `10m` | Timeout for `go mod tidy` when `goApi.tidy` is enabled. |
+| `KRATE_GIT_TIMEOUT` | `60s` | Timeout for `git` reads used by `lastUpdated`/sitemap. |
+| `KRATE_INSTALL_TIMEOUT` | `30m` | Timeout for `krate plugin add` package installs. |
+| `KRATE_JS_MEMORY_MB` | `32` | Embedded QuickJS heap limit. |
+| `KRATE_JS_STACK_KB` | `256` | Embedded QuickJS stack limit. |
+| `KRATE_JS_TIMEOUT` | `30s` | Embedded QuickJS eval timeout. |
+| `KRATE_PLUGIN_MAX_FILES` | `10000` | Max files a single plugin hook may emit. |
+| `KRATE_PLUGIN_MAX_FILE_BYTES` | `67108864` | Max size of a single plugin-emitted file. |
+| `KRATE_ALLOW_UNSAFE_OUTDIR` | unset | Allow an `outDir` that is a filesystem root or the project root (normally refused). |
+
+Set a timeout to `0` (or `off`) to disable it. Other operational variables
+include `KRATE_NO_BUILD_CACHE` (skip the disk build cache) and
+`KRATE_REQUIRE_E2E=1` (turn environment-missing test skips into failures).

@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/execx"
 )
 
 // runDoctor prints a diagnostic summary of the project and toolchain, so setup
@@ -53,9 +57,60 @@ func runDoctor(flags cliFlags, args []string) {
 		fmt.Printf("  %s· go%s         not found (optional; only for src/api/*.go)\n", cGray, cReset)
 	}
 
+	// Node version (the sidecars need 20+).
+	if _, err := exec.LookPath("node"); err == nil {
+		if out, err := execx.Output(context.Background(), 5*time.Second, "", nil, "node", "--version"); err == nil {
+			v := strings.TrimSpace(string(out))
+			if nodeVersionAtLeast(v, 20) {
+				fmt.Printf("  %s✓ node%s       %s\n", cGreen, cReset, v)
+			} else {
+				fmt.Printf("  %s⚠ node%s       %s (Krate sidecars need Node 20+)\n", cYellow, cReset, v)
+			}
+		}
+	}
+
+	// Dependencies: the config imports @krate/core.
+	if _, err := os.Stat(filepath.Join(root, "node_modules", "@krate", "core", "package.json")); err == nil {
+		fmt.Printf("  %s✓ deps%s       @krate/core present\n", cGreen, cReset)
+	} else {
+		fmt.Printf("  %s· deps%s       @krate/core not found (run your package manager install)\n", cGray, cReset)
+	}
+
+	// Cache directory writability.
+	cacheDir := filepath.Join(root, ".krate", "cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		fmt.Printf("  %s⚠ cache%s      cannot create %s: %v\n", cYellow, cReset, cacheDir, err)
+	} else {
+		probe := filepath.Join(cacheDir, ".doctor-write-test")
+		if err := os.WriteFile(probe, []byte("ok"), 0o644); err == nil {
+			_ = os.Remove(probe)
+			fmt.Printf("  %s✓ cache%s      writable (%s)\n", cGreen, cReset, cacheDir)
+		} else {
+			fmt.Printf("  %s⚠ cache%s      not writable: %v\n", cYellow, cReset, err)
+		}
+	}
+
 	// Key files.
 	reportFile(root, "tsconfig.json")
 	reportFile(root, "krate.state.json")
+}
+
+// nodeVersionAtLeast reports whether a `node --version` string (e.g. "v20.11.1")
+// is at least major.minor.
+func nodeVersionAtLeast(v string, major int) bool {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	parts := strings.SplitN(v, ".", 2)
+	if len(parts) == 0 {
+		return false
+	}
+	n := 0
+	for _, r := range parts[0] {
+		if r < '0' || r > '9' {
+			break
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n >= major
 }
 
 func configPathFor(root, explicit string) string {

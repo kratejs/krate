@@ -5,12 +5,32 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/astjson"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
+	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
+
+// pluginLimits returns the per-hook plugin output caps, overridable via
+// KRATE_PLUGIN_MAX_FILES / KRATE_PLUGIN_MAX_FILE_BYTES.
+func pluginLimits() (maxFiles, maxFileBytes int) {
+	maxFiles, maxFileBytes = 10000, 64<<20
+	if v := os.Getenv("KRATE_PLUGIN_MAX_FILES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxFiles = n
+		}
+	}
+	if v := os.Getenv("KRATE_PLUGIN_MAX_FILE_BYTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxFileBytes = n
+		}
+	}
+	return maxFiles, maxFileBytes
+}
 
 // communityOutput is the JSON result shape a JS plugin hook returns.
 type communityOutput struct {
@@ -37,12 +57,12 @@ type fileEntry struct {
 // embedded QuickJS runtime - no subprocess and no stdin/stdout protocol.
 func runCommunityHook(hookName string, pc config.PluginConfig, root, outDir string, env CommunityEnv, hookCtx interface{}) error {
 	start := time.Now()
-	var err error
-	if isGoPlugin(pc) {
-		err = runGoPluginHook(hookName, pc, root, outDir, env, hookCtx)
-	} else {
-		err = runJSPluginHook(hookName, pc, root, outDir, env, hookCtx)
-	}
+	err := safe.Run(func() error {
+		if isGoPlugin(pc) {
+			return runGoPluginHook(hookName, pc, root, outDir, env, hookCtx)
+		}
+		return runJSPluginHook(hookName, pc, root, outDir, env, hookCtx)
+	})
 	traceHook(pc.Name, hookName, time.Since(start), err)
 	return err
 }
@@ -51,18 +71,24 @@ func runCommunityHook(hookName string, pc config.PluginConfig, root, outDir stri
 // modifications back to the typed hook context. Path traversal protection keeps
 // all plugin writes inside the output directory.
 func applyPluginOutput(hookName string, output *communityOutput, outDir string, hookCtx interface{}) error {
-	outDirClean := filepath.Clean(outDir)
+	// Bound a runaway plugin so it cannot exhaust memory or fill the disk. The
+	// limits are deliberately generous and overridable:
+	// KRATE_PLUGIN_MAX_FILES (default 10000), KRATE_PLUGIN_MAX_FILE_BYTES
+	// (default 64 MiB).
+	maxFiles, maxFileBytes := pluginLimits()
+	if len(output.Files) > maxFiles {
+		return fmt.Errorf("plugin produced too many files (%d > %d; raise KRATE_PLUGIN_MAX_FILES if intended)", len(output.Files), maxFiles)
+	}
 
 	for _, f := range output.Files {
+		if len(f.Content) > maxFileBytes {
+			return fmt.Errorf("plugin file %s exceeds the size limit (%d bytes; raise KRATE_PLUGIN_MAX_FILE_BYTES if intended)", f.Path, len(f.Content))
+		}
 		fullPath := filepath.Join(outDir, f.Path)
-		fullPath = filepath.Clean(fullPath)
-		if !strings.HasPrefix(fullPath, outDirClean+string(filepath.Separator)) && fullPath != outDirClean {
+		if !fsutil.WithinDir(outDir, fullPath) {
 			return fmt.Errorf("plugin attempted path traversal: %s resolves outside output directory", f.Path)
 		}
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-			return fmt.Errorf("creating directory for %s: %w", f.Path, err)
-		}
-		if err := os.WriteFile(fullPath, []byte(f.Content), 0644); err != nil {
+		if err := fsutil.WriteFileAtomic(fullPath, []byte(f.Content), 0644); err != nil {
 			return fmt.Errorf("writing %s: %w", f.Path, err)
 		}
 	}
@@ -73,8 +99,7 @@ func applyPluginOutput(hookName string, output *communityOutput, outDir string, 
 			routePath = "."
 		}
 		pageDir := filepath.Join(outDir, routePath)
-		pageDir = filepath.Clean(pageDir)
-		if !strings.HasPrefix(pageDir, outDirClean+string(filepath.Separator)) && pageDir != outDirClean {
+		if !fsutil.WithinDir(outDir, pageDir) {
 			return fmt.Errorf("plugin attempted path traversal: route %s resolves outside output directory", r.Path)
 		}
 		title := r.Title
@@ -82,11 +107,8 @@ func applyPluginOutput(hookName string, output *communityOutput, outDir string, 
 			title = "Krate"
 		}
 		html := "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>" + title + "</title>\n</head>\n<body>\n<div id=\"root\">" + r.Content + "</div>\n</body>\n</html>\n"
-		if err := os.MkdirAll(pageDir, 0755); err != nil {
-			return fmt.Errorf("creating directory for route %s: %w", r.Path, err)
-		}
 		htmlPath := filepath.Join(pageDir, "index.html")
-		if err := os.WriteFile(htmlPath, []byte(html), 0644); err != nil {
+		if err := fsutil.WriteFileAtomic(htmlPath, []byte(html), 0644); err != nil {
 			return fmt.Errorf("writing route %s: %w", r.Path, err)
 		}
 	}

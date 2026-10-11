@@ -3,7 +3,6 @@ package plugin
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path"
 	"sort"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/docs"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 )
 
 // FeedPluginOptions holds typed configuration for the feed plugin.
@@ -148,7 +148,7 @@ func generateFeeds(ctx *BuildResultHookCtx) error {
 		kind = "all"
 	}
 	write := func(name, content string) error {
-		if err := os.WriteFile(path.Join(ctx.OutDir, name), []byte(content), 0644); err != nil {
+		if err := fsutil.WriteFileAtomic(path.Join(ctx.OutDir, name), []byte(content), 0644); err != nil {
 			return fmt.Errorf("writing %s: %w", name, err)
 		}
 		return nil
