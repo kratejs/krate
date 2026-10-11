@@ -89,7 +89,7 @@ func bundle(opts Options) (string, error) {
 		Platform: api.PlatformNode,
 		Write:    false,
 		LogLevel: api.LogLevelSilent,
-		Plugins:  []api.Plugin{importMetaPreserver()},
+		Plugins:  []api.Plugin{krateResolver(), importMetaPreserver()},
 	})
 	if len(result.Errors) > 0 {
 		var sb strings.Builder
