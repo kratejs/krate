@@ -16,6 +16,7 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/execx"
+	"github.com/kratejs/krate/packages/compiler/internal/tsexec"
 )
 
 // errSSRNotRunning is the shared sentinel returned by SSR operations that need a
@@ -108,6 +109,15 @@ func (s *SSRServer) Start() error {
 	if err != nil {
 		s.mu.Unlock()
 		return err
+	}
+
+	// The legacy unstaged path launches the renderer via `npx tsx`, which shares
+	// tsx's npx install dir with every other npx caller. Hold the machine-wide
+	// npx lock across the install + startup so concurrent renderers/builds don't
+	// race on the same install (ENOTEMPTY). Released when Start returns.
+	if runtimeCmd == "npx" {
+		release := tsexec.AcquireExecLock(4 * time.Minute)
+		defer release()
 	}
 
 	env := os.Environ()

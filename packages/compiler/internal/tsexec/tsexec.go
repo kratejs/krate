@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,41 @@ func Invalidate() {
 
 func bootstrapKey(name, content, cwd, tsconfig string, env []string) string {
 	return name + "\x00" + content + "\x00" + cwd + "\x00" + tsconfig + "\x00" + strings.Join(env, "\x00")
+}
+
+// execLockPath is a machine-wide lock serialising `npx tsx` invocations.
+//
+// npx installs the requested package into a shared cache dir
+// (`$npm_config_cache/_npx/<hash>`), and that install is not concurrency-safe:
+// two processes installing at once race on the same rename and one fails with
+// ENOTEMPTY. Concurrent build workers, parallel `go test` package binaries, and
+// multiple builds on one machine all trigger it (seen on macOS CI). One lock
+// held for the duration of the exec fixes it portably, with no extra dependency.
+var execLockPath = filepath.Join(os.TempDir(), "krate-npx-exec.lock")
+
+// AcquireExecLock takes the machine-wide npx lock, removing a lock left behind
+// by a crashed process once it is stale. It gives up (returning a no-op release)
+// after maxWait so a wedged holder can never deadlock a build. Exported so other
+// npx callers (e.g. the SSR renderer's tsx launch) can share the same lock.
+func AcquireExecLock(maxWait time.Duration) (release func()) {
+	const staleAfter = 10 * time.Minute
+	deadline := time.Now().Add(maxWait)
+	for {
+		f, err := os.OpenFile(execLockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, _ = f.WriteString(strconv.Itoa(os.Getpid()))
+			_ = f.Close()
+			return func() { _ = os.Remove(execLockPath) }
+		}
+		if fi, serr := os.Stat(execLockPath); serr == nil && time.Since(fi.ModTime()) > staleAfter {
+			_ = os.Remove(execLockPath)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return func() {}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // ImportPath converts an absolute filesystem path to a file:// URL suitable for
@@ -83,6 +119,11 @@ func RunBootstrapOpts(name, content, cwd string, timeout time.Duration, env []st
 		return nil, "", fmt.Errorf("writing bootstrap: %w", err)
 	}
 	defer os.Remove(path)
+
+	// Serialise the npx invocation across processes so concurrent installs of
+	// tsx don't collide in the shared npx cache dir (ENOTEMPTY on macOS CI).
+	release := AcquireExecLock(4 * time.Minute)
+	defer release()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
