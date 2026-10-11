@@ -46,6 +46,12 @@ const HOT = process.env.KRATE_API_HOT === '1';
 // Cluster across cores so the Node API sidecar uses more than one thread.
 const WORKERS = Math.max(1, parseInt(process.env.KRATE_API_WORKERS || '1', 10) || 1);
 
+// Per-process caches so a request does no filesystem probing and no module
+// re-import: URL path -> resolved route file, and file -> imported namespace.
+// The module cache is bypassed in dev (HOT) so edits are picked up.
+const fileCache = new Map();
+const moduleCache = new Map();
+
 let middlewareModule = null;
 if (MIDDLEWARE_PATH && fs.existsSync(MIDDLEWARE_PATH)) {
   try {
@@ -104,7 +110,6 @@ const server = http.createServer(async (req, res) => {
     
     const relativePath = urlPath.replace(/^\/api/, '');
     
-    let targetFile = null;
     const extensions = ['.ts', '.js', '.tsx', '.jsx'];
 
     // Build a path relative to API_DIR, rejecting any attempt to escape it.
@@ -129,17 +134,23 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ error: "Invalid API route path: " + urlPath }));
     }
     
-    for (const ext of extensions) {
-      const fileCheck = path.join(API_DIR, ...cleanRel) + ext;
-      if (fs.existsSync(fileCheck) && !fs.statSync(fileCheck).isDirectory()) {
-        targetFile = fileCheck;
-        break;
+    const cleanKey = cleanRel.join('/');
+    let targetFile = fileCache.get(cleanKey);
+    if (targetFile === undefined) {
+      targetFile = null;
+      for (const ext of extensions) {
+        const fileCheck = path.join(API_DIR, ...cleanRel) + ext;
+        if (fs.existsSync(fileCheck) && !fs.statSync(fileCheck).isDirectory()) {
+          targetFile = fileCheck;
+          break;
+        }
+        const indexCheck = path.join(API_DIR, ...cleanRel, 'index' + ext);
+        if (fs.existsSync(indexCheck)) {
+          targetFile = indexCheck;
+          break;
+        }
       }
-      const indexCheck = path.join(API_DIR, ...cleanRel, 'index' + ext);
-      if (fs.existsSync(indexCheck)) {
-        targetFile = indexCheck;
-        break;
-      }
+      fileCache.set(cleanKey, targetFile);
     }
 
     if (!targetFile) {
@@ -148,7 +159,11 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ error: "API Route Not Found: " + urlPath }));
     }
 
-    const routeModule = await import(pathToFileURL(targetFile).href + (HOT ? '?t=' + Date.now() : ''));
+    let routeModule = moduleCache.get(targetFile);
+    if (!routeModule || HOT) {
+      routeModule = await import(pathToFileURL(targetFile).href + (HOT ? '?t=' + Date.now() : ''));
+      if (!HOT) moduleCache.set(targetFile, routeModule);
+    }
     const method = req.method.toUpperCase();
 
     // Check for named method exports (GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD)
