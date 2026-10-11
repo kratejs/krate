@@ -133,7 +133,35 @@ body {
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    caret-color: var(--color-primary);
     transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Browser surfaces carry the design too: scrollbars, selection, tabular data. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+}
+
+*::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+    background-color: var(--color-border);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-muted);
 }
 
 /* Lock background scrolling while the mobile drawer or TOC sheet is open. */
@@ -701,9 +729,8 @@ a:hover {
 
 .docs-content blockquote {
     margin: 1.5rem 0;
-    padding: 0.85rem 1.1rem;
+    padding: 0.9rem 1.15rem;
     border: 1px solid var(--color-border);
-    border-left: 3px solid var(--color-primary);
     border-radius: var(--radius);
     background: var(--color-muted-bg);
     color: var(--color-text-main);
@@ -1452,9 +1479,8 @@ a.docs-tag:hover { color: var(--color-text-main); border-color: var(--color-mute
    so it reads correctly in light mode too. */
 .docs-content .krate-aside {
     margin: 1.5rem 0;
-    padding: 0.85rem 1.1rem;
-    border: 1px solid var(--color-border);
-    border-left: 4px solid var(--aside-accent, var(--color-primary));
+    padding: 0.9rem 1.1rem;
+    border: 1px solid color-mix(in srgb, var(--aside-accent, var(--color-primary)) 34%, var(--color-border));
     border-radius: var(--radius);
     background: color-mix(in srgb, var(--aside-accent, var(--color-primary)) 9%, var(--color-bg));
 }

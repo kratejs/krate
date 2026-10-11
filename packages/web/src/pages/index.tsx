@@ -10,7 +10,6 @@ export default function Home() {
       </Head>
 
       <section class="hero">
-        <div class="hero-badge">Signal-based · SSG-first · Go-native</div>
         <h1 class="hero-title">Web applications with the power of a compiler.</h1>
         <p class="hero-subtitle">
           Krate compiles TSX/JSX into static HTML at build time and ships a tiny
@@ -22,7 +21,8 @@ export default function Home() {
           <a class="btn btn-primary" href="/docs/">Read the docs</a>
           <a class="btn btn-secondary" href="/docs/getting-started/">Getting started</a>
         </div>
-        <div class="hero-code"><Code lang="typescript" showCopy title="counter.tsx">{`export default function Counter() {
+        <div class="hero-demo">
+          <div class="hero-demo-code"><Code lang="typescript" showCopy title="counter.tsx">{`export default function Counter() {
   const [count, setCount] = createSignal(0);
   return (
     <div>
@@ -31,6 +31,12 @@ export default function Home() {
     </div>
   );
 }`}</Code></div>
+          <div class="hero-demo-live">
+            <span class="hero-demo-live-label">Live preview</span>
+            <CounterDemo />
+            <span class="hero-demo-live-note">Signals update the DOM directly — no virtual DOM.</span>
+          </div>
+        </div>
       </section>
 
       <section class="features">
@@ -58,17 +64,6 @@ export default function Home() {
           <h3>JS & Go API routes</h3>
           <p>Write API routes in TypeScript or Go; both compile into the same <code>/api/*</code> namespace.</p>
         </a>
-      </section>
-
-      <section class="section">
-        <h2 class="section-title">Reactivity, live</h2>
-        <p class="section-lede">
-          This counter is a real Krate client component. Signals update the DOM
-          directly — no virtual DOM, no React runtime.
-        </p>
-        <div class="hero-actions" style="margin-bottom:1.5rem">
-          <CounterDemo />
-        </div>
       </section>
 
       <section class="section">

@@ -1,13 +1,15 @@
 .krate-card {
   margin: 24px 0;
   border: 1px solid var(--krate-border, #e4e4e7);
-  border-radius: 8px;
+  border-radius: var(--krate-radius-lg, 12px);
   overflow: hidden;
   background: var(--krate-card-bg, #ffffff);
-  transition: box-shadow 0.2s ease;
+  box-shadow: var(--krate-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.06)), var(--krate-hairline, none);
+  transition: box-shadow 0.2s var(--krate-ease-in-out, ease), border-color 0.2s var(--krate-ease-in-out, ease);
 }
 .krate-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-color: var(--krate-border-strong, #d4d4d8);
+  box-shadow: var(--krate-shadow-md, 0 2px 4px rgba(24, 24, 27, 0.05), 0 10px 24px -8px rgba(24, 24, 27, 0.12)), var(--krate-hairline, none);
 }
 .krate-card-title {
   padding: 12px 16px;

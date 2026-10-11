@@ -4,27 +4,36 @@
   justify-content: center;
   gap: 8px;
   padding: 8px 16px;
-  border-radius: 6px;
-  font-weight: 500;
+  border-radius: var(--krate-radius-sm, 6px);
+  font-weight: 600;
   font-size: 0.9rem;
   font-family: inherit;
-  line-height: 1.2;
+  line-height: 1;
   border: 1px solid transparent;
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
-  transition: background 0.15s, transform 0.1s, box-shadow 0.15s, border-color 0.15s;
+  background: transparent;
+  color: var(--krate-text, #09090b);
+  transition: background-color 0.16s var(--krate-ease-in-out, ease),
+    border-color 0.16s var(--krate-ease-in-out, ease),
+    color 0.16s var(--krate-ease-in-out, ease),
+    box-shadow 0.16s var(--krate-ease-in-out, ease),
+    transform 0.16s var(--krate-ease-out, ease);
 }
 .krate-button:active {
-  transform: scale(0.97);
+  transform: translateY(1px) scale(0.99);
 }
 .krate-button:focus-visible {
-  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #3b82f6);
   outline-offset: 2px;
 }
-.krate-button:disabled {
+.krate-button:disabled,
+.krate-button[aria-disabled='true'] {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 .krate-button-sm {
   padding: 4px 12px;
@@ -45,19 +54,22 @@
 }
 .krate-button-primary {
   background: var(--krate-primary, #3b82f6);
-  color: #fff;
+  color: var(--krate-primary-fg, #fff);
+  box-shadow: var(--krate-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.06));
 }
 .krate-button-primary:hover {
   background: var(--krate-primary-hover, #2563eb);
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+  color: var(--krate-primary-fg, #fff);
+  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--krate-primary, #3b82f6) 65%, transparent);
 }
 .krate-button-secondary {
-  background: var(--krate-surface-hover, #e4e4e7);
+  background: var(--krate-surface, #f4f4f5);
   color: var(--krate-text, #09090b);
   border-color: var(--krate-border, #e4e4e7);
 }
 .krate-button-secondary:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--krate-surface-hover, #e4e4e7);
+  border-color: var(--krate-border-strong, #d4d4d8);
 }
 .krate-button-outline {
   background: transparent;
@@ -66,7 +78,7 @@
 }
 .krate-button-outline:hover {
   background: var(--krate-surface-hover, #e4e4e7);
-  border-color: var(--krate-text-muted, #71717a);
+  border-color: var(--krate-border-strong, #d4d4d8);
 }
 .krate-button-ghost {
   background: transparent;
@@ -78,10 +90,11 @@
 .krate-button-destructive {
   background: var(--krate-danger, #ef4444);
   color: #fff;
+  box-shadow: var(--krate-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.06));
 }
 .krate-button-destructive:hover {
-  background: #dc2626;
-  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+  background: var(--krate-danger-hover, #dc2626);
+  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--krate-danger, #ef4444) 60%, transparent);
 }
 .krate-button-link {
   background: transparent;
@@ -89,4 +102,7 @@
   text-decoration: underline;
   text-underline-offset: 4px;
   padding: 0;
+}
+.krate-button-link:hover {
+  color: var(--krate-primary-hover, #2563eb);
 }
