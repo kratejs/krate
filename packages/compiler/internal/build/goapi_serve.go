@@ -1,8 +1,10 @@
 package build
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -23,7 +25,10 @@ type goAPISupervisor struct {
 	binPath      string
 	manifestPath string
 	port         int
-	env          []string
+	// socket, when set, is an AF_UNIX socket the sidecar listens on; the proxy
+	// dials it instead of the loopback TCP port.
+	socket string
+	env    []string
 
 	proxy     *httputil.ReverseProxy
 	stopCh    chan struct{}
@@ -45,6 +50,24 @@ func newGoAPISupervisor(binPath, manifestPath string, port int) *goAPISupervisor
 		port:         port,
 		proxy:        httputil.NewSingleHostReverseProxy(target),
 		stopCh:       make(chan struct{}),
+	}
+}
+
+// SetSocket makes the supervisor talk to the sidecar over an AF_UNIX socket at
+// path (passed to the child as KRATE_GOAPI_SOCKET) instead of loopback TCP.
+func (g *goAPISupervisor) SetSocket(path string) {
+	if path == "" {
+		return
+	}
+	g.socket = path
+	g.proxy.Transport = &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", path)
+		},
+		MaxIdleConns:        200,
+		MaxIdleConnsPerHost: 128,
+		IdleConnTimeout:     90 * time.Second,
 	}
 }
 
@@ -103,6 +126,9 @@ func (g *goAPISupervisor) spawn() error {
 	cmd := exec.Command(g.binPath)
 	execx.ConfigureTree(cmd)
 	cmd.Env = append(os.Environ(), g.env...)
+	if g.socket != "" {
+		cmd.Env = append(cmd.Env, "KRATE_GOAPI_SOCKET="+g.socket)
+	}
 	cmd.Env = append(cmd.Env, fmt.Sprintf("KRATE_GOAPI_PORT=%d", g.port))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -122,6 +148,11 @@ func (g *goAPISupervisor) stop() {
 		execx.KillTree(g.cmd)
 		_, _ = g.cmd.Process.Wait()
 		g.cmd = nil
+	}
+	// The killed child cannot unlink its own socket; remove it here so the next
+	// spawn can bind cleanly.
+	if g.socket != "" {
+		_ = os.Remove(g.socket)
 	}
 }
 

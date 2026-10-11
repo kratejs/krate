@@ -43,6 +43,11 @@ transparently forwarded to the sidecar.
   `ssr.apiIsolation: true` to run every request in a fresh VM instead.
 - The Node sidecar runs `node:cluster` across `ssr.nodeWorkers` processes, and
   imports each route once (module cache) in production.
+- Set `ssr.apiRuntime: "bun"` to run the JS/TS routes in a **Bun sidecar** using
+  `Bun.serve` (no Node `http` stack, no cluster shim) — the fastest of the
+  sidecar options. `ssr.apiRuntime: "node"` (or `"deno"`) uses the Node `http`
+  sidecar instead. The top-level `runtime: "bun"` selects the same Bun server
+  when no explicit `apiRuntime` is set.
 - Go API routes (`src/api/*.go`) remain the fastest option; the sidecar binary
   is a compiled Go server.
 
@@ -74,8 +79,10 @@ export default function handler(req, res) {
 ## Go routes
 
 Go routes (`src/api/*.go`) are compiled into a dedicated Go sidecar binary
-(`.krate/goapi-server[.exe]`, port `+2`) for maximum performance and true
-concurrency.
+(`.krate/goapi-server[.exe]`) for maximum performance and true concurrency. The
+main server reaches it over an **AF_UNIX socket** (`.krate/run/goapi.sock`)
+rather than a loopback port, so no port is consumed and the hop skips the TCP
+stack; it falls back to a loopback port only if the socket cannot be created.
 
 ```go
 // src/api/hello.go — GET /api/hello

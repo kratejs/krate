@@ -137,14 +137,17 @@ ssr: {
 - **`middlewareRuntime`** and **`apiRuntime`** (`"quickjs"` | `"node"` |
   `"bun"` | `"deno"`) choose which runtime executes middleware and API routes.
   `"quickjs"` (default) uses the embedded QuickJS runtime with no Node.js
-  dependency; `"node"`/`"bun"`/`"deno"` use a sidecar process.
+  dependency; `"node"`/`"deno"` use the Node `http` sidecar; **`"bun"` uses a
+  Bun-native sidecar built on `Bun.serve`** (no Node http stack, no cluster
+  shim) — the fastest JS/TS sidecar option.
+- **`nodeWorkers`** forks that many Node worker processes (`cluster`) for the
+  API sidecar when `apiRuntime` (or `middlewareRuntime`) is
+  `node`/`bun`/`deno`. (Ignored by the Bun sidecar, which is single-process.)
 - **`apiWorkers`** sizes the embedded QuickJS API worker pool. Workers are
   long-lived VMs that each load a route once and reuse it, so module state
   persists across requests (Node semantics) and requests run in parallel.
 - **`apiIsolation`** runs every API request in a fresh VM (no shared module
   state). Slower; dev uses it automatically so route edits are picked up.
-- **`nodeWorkers`** forks that many Node worker processes (`cluster`) for the
-  API sidecar when `apiRuntime` (or `middlewareRuntime`) is `node`/`bun`/`deno`.
 
 Page-level rendering is opted into per page via
 `export const config = { isr | ssr | streaming, revalidate }` — see

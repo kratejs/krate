@@ -238,6 +238,148 @@ if (WORKERS > 1 && cluster.isPrimary) {
   });
 }`
 
+// apiServerBunScriptContent is the Bun-native API sidecar: it uses Bun.serve
+// instead of node:http, so it skips the Node http stack (and its cluster shim)
+// for higher throughput. It serves the same dist/api-node ESM routes and the
+// /__krate/middleware endpoint. Selected by ssr.apiRuntime: "bun" (or the
+// top-level runtime: "bun").
+const apiServerBunScriptContent = `import path from 'node:path';
+import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import process from 'node:process';
+
+const API_DIR = path.resolve(process.argv[2] || './src/api');
+const PORT = parseInt(process.argv[3] || '3001', 10);
+const MIDDLEWARE_PATH = process.argv[4] ? path.resolve(process.argv[4]) : '';
+const HOT = process.env.KRATE_API_HOT === '1';
+
+const fileCache = new Map();
+const moduleCache = new Map();
+
+let middlewareModule = null;
+if (MIDDLEWARE_PATH) {
+  try { middlewareModule = await import(pathToFileURL(MIDDLEWARE_PATH).href); } catch {}
+}
+
+function json(body, status) { return Response.json(body, { status: status || 200 }); }
+
+function sanitize(p) {
+  let rel = p || '/';
+  try { rel = decodeURIComponent(rel); } catch { return null; }
+  if (rel.includes('\0') || rel.includes('\\')) return null;
+  const clean = [];
+  for (const seg of rel.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') return null;
+    clean.push(seg);
+  }
+  return clean;
+}
+
+function resolveFile(clean) {
+  const key = clean.join('/');
+  if (fileCache.has(key)) return fileCache.get(key);
+  let target = null;
+  const exts = ['.ts', '.js', '.tsx', '.jsx'];
+  for (const ext of exts) {
+    const fileCheck = path.join(API_DIR, ...clean) + ext;
+    if (fs.existsSync(fileCheck) && !fs.statSync(fileCheck).isDirectory()) { target = fileCheck; break; }
+    const indexCheck = path.join(API_DIR, ...clean, 'index' + ext);
+    if (fs.existsSync(indexCheck)) { target = indexCheck; break; }
+  }
+  fileCache.set(key, target);
+  return target;
+}
+
+async function loadModule(file) {
+  if (!HOT) { const cached = moduleCache.get(file); if (cached) return cached; }
+  const mod = await import(pathToFileURL(file).href + (HOT ? '?t=' + Date.now() : ''));
+  if (!HOT) moduleCache.set(file, mod);
+  return mod;
+}
+
+async function handleMiddleware(req) {
+  if (!middlewareModule || !middlewareModule.middleware) return json({ action: 'continue' });
+  try {
+    const result = await middlewareModule.middleware(req);
+    if (result && typeof result.status === 'number') {
+      const headers = {};
+      for (const [k, v] of result.headers.entries()) headers[k] = v;
+      const body = result.status === 204 ? null : await result.text();
+      return json({ status: result.status, headers, body });
+    }
+    return json({ action: 'continue' });
+  } catch (e) { return json({ action: 'continue', error: e.message }); }
+}
+
+async function toResponse(out) {
+  if (out instanceof Response) return out;
+  if (out && typeof out.status === 'number') {
+    const headers = {};
+    if (out.headers && typeof out.headers.entries === 'function') {
+      for (const [k, v] of out.headers.entries()) headers[k] = v;
+    } else if (out.headers) {
+      for (const k in out.headers) if (k[0] !== '_' && typeof out.headers[k] === 'string') headers[k] = out.headers[k];
+    }
+    let body = null;
+    if (out.status !== 204 && typeof out.text === 'function') body = await out.text();
+    return new Response(body, { status: out.status, headers });
+  }
+  if (out !== undefined && out !== null) return Response.json(out);
+  return new Response(null, { status: 204 });
+}
+
+async function legacyInvoke(fn, req, url) {
+  const headers = {};
+  for (const [k, v] of req.headers.entries()) headers[k] = v;
+  let bodyStr = '';
+  if (req.method !== 'GET' && req.method !== 'HEAD') { try { bodyStr = await req.text(); } catch {} }
+  return await new Promise((resolve) => {
+    let finished = false;
+    const outHeaders = {};
+    let outBody = '';
+    const nodeReq = { url: url.href, method: req.method, headers, body: bodyStr, socket: { remoteAddress: '127.0.0.1' } };
+    const res = {
+      statusCode: 200,
+      setHeader(k, v) { outHeaders[k] = String(v); },
+      getHeader(k) { return outHeaders[k]; },
+      removeHeader(k) { delete outHeaders[k]; },
+      write(c) { outBody += c; },
+      end(c) { if (c) outBody += c; finished = true; resolve(new Response(outBody, { status: res.statusCode || 200, headers: outHeaders })); },
+      on() {},
+    };
+    try {
+      const out = fn(nodeReq, res);
+      if (out && typeof out.then === 'function') {
+        out.then(() => { if (!finished) resolve(new Response(outBody, { status: res.statusCode || 200, headers: outHeaders })); });
+      } else if (!finished) {
+        resolve(new Response(outBody, { status: res.statusCode || 200, headers: outHeaders }));
+      }
+    } catch (e) { resolve(json({ error: e.message }, 500)); }
+  });
+}
+
+Bun.serve({
+  port: PORT,
+  async fetch(req) {
+    const url = new URL(req.url);
+    const urlPath = url.pathname;
+    if (urlPath === '/__krate/middleware') return handleMiddleware(req);
+    const clean = sanitize(urlPath.replace(/^\/api/, ''));
+    if (clean === null) return json({ error: 'Invalid API route path: ' + urlPath }, 400);
+    const file = resolveFile(clean);
+    if (!file) return json({ error: 'API Route Not Found: ' + urlPath }, 404);
+    let mod;
+    try { mod = await loadModule(file); } catch (e) { return json({ error: 'Internal Server Error', details: e.message }, 500); }
+    const fn = mod[req.method.toUpperCase()] || mod.default;
+    if (typeof fn !== 'function') return json({ error: 'API route must export a handler function (GET, POST, etc. or default).' }, 500);
+    try {
+      if (fn.length >= 2) return await legacyInvoke(fn, req, url);
+      return await toResponse(await fn(req));
+    } catch (e) { return json({ error: 'Internal Server Error', details: e.message }, 500); }
+  },
+});`
+
 const (
 	cReset  = "\033[0m"
 	cRed    = "\033[31m"
@@ -581,28 +723,42 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	var nodeAPICmdMu sync.Mutex
 	var nodeAPICmd *exec.Cmd
 	if needNodeSidecar {
+		// An explicit node-family apiRuntime selects the sidecar command;
+		// otherwise fall back to the project's top-level runtime.
+		sidecarRuntime := strings.ToLower(cfg.Runtime)
+		if isNodeFamilyRuntime(apiRTOption) {
+			sidecarRuntime = apiRTOption
+		}
+		fmt.Printf("  %s⚡%s API sidecar (%s) → %shttp://localhost:%d%s\n", cCyan, cReset, sidecarRuntime, cCyan, apiPort, cReset)
+
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					_ = safe.Recover(r)
 				}
 			}()
-			scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
-			_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
-			_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
 
 			portStr := fmt.Sprintf("%d", apiPort)
 			var cmd *exec.Cmd
 
-			runtimeOpt := strings.ToLower(cfg.Runtime)
-			switch runtimeOpt {
+			switch sidecarRuntime {
 			case "bun":
-				cmd = exec.Command("bun", "run", scriptPath, nodeAPIDir, portStr, middlewarePath)
+				// Bun-native server (Bun.serve): skips the Node http stack.
+				bunPath := filepath.Join(root, ".krate", "api-server.bun.mjs")
+				_ = os.MkdirAll(filepath.Dir(bunPath), 0755)
+				_ = os.WriteFile(bunPath, []byte(apiServerBunScriptContent), 0644)
+				cmd = exec.Command("bun", "run", bunPath, nodeAPIDir, portStr, middlewarePath)
 
 			case "deno":
+				scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
+				_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
+				_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
 				cmd = exec.Command("deno", "run", "--allow-net", "--allow-read", "--allow-sys", "--allow-env", scriptPath, nodeAPIDir, portStr, middlewarePath)
 
 			default:
+				scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
+				_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
+				_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
 				cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath)
 			}
 
@@ -627,9 +783,19 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if _, err := os.Stat(goAPIManifestPath); err == nil {
 		goAPIPort := port + 2
 		goAPI = newGoAPISupervisor(goAPIServerBinPath(root), goAPIManifestPath, goAPIPort)
+		// Prefer an AF_UNIX socket so the sidecar needs no port and the hop
+		// skips the loopback TCP stack. Fall back to the TCP port only if the
+		// socket directory can't be created.
+		goAPISocket := filepath.Join(root, ".krate", "run", "goapi.sock")
+		if err := os.MkdirAll(filepath.Dir(goAPISocket), 0o700); err == nil {
+			_ = os.Remove(goAPISocket)
+			goAPI.SetSocket(goAPISocket)
+		}
 		goAPI.SetEnv(environ.KVList(environ.Current))
 		if err := goAPI.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "  %s⚠ Go API sidecar not started:%s %v\n", cYellow, cReset, err)
+		} else if goAPI.socket != "" {
+			fmt.Printf("  %s⚡%s Go API → %s%s%s\n", cCyan, cReset, cCyan, goAPI.socket, cReset)
 		} else {
 			fmt.Printf("  %s⚡%s Go API → %shttp://localhost:%d%s\n", cCyan, cReset, cCyan, goAPIPort, cReset)
 		}
