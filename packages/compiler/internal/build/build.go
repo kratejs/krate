@@ -3416,6 +3416,9 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 	apiSrcDir := filepath.Join(b.Root, "src", "api")
 	pool := newWorkerPool(buildWorkerLimit())
 
+	var metaMu sync.Mutex
+	metas := make(map[string]apiRouteMeta, len(routes))
+
 	for _, route := range routes {
 		wg.Add(1)
 		go func(r string) {
@@ -3423,10 +3426,15 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 			pool.acquire()
 			defer pool.release()
 			fmt.Printf("  %s▶ API%s %s\n", cGreen, cReset, filepath.Base(r))
-			if err := b.compileSingleRoute(r, apiSrcDir); err != nil {
+			meta, err := b.compileSingleRoute(r, apiSrcDir)
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "  %s✗ API Error:%s %s: %v\n", cRed, cReset, r, err)
 				errCh <- err
+				return
 			}
+			metaMu.Lock()
+			metas[meta.File] = meta
+			metaMu.Unlock()
 		}(route)
 	}
 
@@ -3435,69 +3443,166 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 	if len(errCh) > 0 {
 		return <-errCh
 	}
+	b.mergeAPIRouteMeta(metas)
 	return nil
 }
 
-func (b *Builder) compileSingleRoute(file string, apiSrcDir string) error {
+// apiRouteMeta records one compiled JS API route so the dev/prod server can
+// route Node-only routes (those importing external modules / node builtins that
+// the embedded QuickJS runtime cannot run) to the Node sidecar.
+type apiRouteMeta struct {
+	// File is the out-dir relative output, e.g. "users/[id].js".
+	File string `json:"file"`
+	// NodeOnly is true when the bundle still has external imports.
+	NodeOnly bool `json:"nodeOnly"`
+}
+
+func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMeta, error) {
 	relPath, err := filepath.Rel(apiSrcDir, file)
 	if err != nil {
-		return err
+		return apiRouteMeta{}, err
 	}
 	outName := strings.TrimSuffix(relPath, filepath.Ext(relPath)) + ".js"
-	outPath := filepath.Join(b.Cfg.OutDir, "api", outName)
 
-	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
-		return err
+	// Two artifacts so each runtime gets the shape it wants:
+	//   dist/api/<name>.js       IIFE + bundled  -> embedded QuickJS
+	//   dist/api-node/<name>.js  ESM  + externals -> Node sidecar
+	quickjsPath := filepath.Join(b.Cfg.OutDir, "api", outName)
+	nodePath := filepath.Join(b.Cfg.OutDir, "api-node", outName)
+	for _, p := range []string{quickjsPath, nodePath} {
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			return apiRouteMeta{}, err
+		}
 	}
 
-	opts := api.BuildOptions{
+	// QuickJS artifact: IIFE with a global name so the runtime loads it with a
+	// plain eval and reads exports off `__krate_route` (no runtime regex
+	// export-stripping); deps are bundled so the route is self-contained.
+	quickjsOpts := api.BuildOptions{
 		EntryPoints: []string{file},
 		Bundle:      true,
 		Platform:    api.PlatformNode,
-		Format:      api.FormatESModule,   // Compiles cleanly to ES modules matching your runner
-		Packages:    api.PackagesExternal, // Keeps third-party node_modules completely external
-		Outfile:     outPath,
+		Format:      api.FormatIIFE,
+		GlobalName:  "__krate_route",
+		Outfile:     quickjsPath,
 		Write:       true,
 		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),
-		Metafile:    true, // Generates the dep-graph string in-memory
+		Metafile:    true,
+	}
+	// Node artifact: ESM with third-party packages external (Node resolves them
+	// from node_modules at runtime, including native addons).
+	nodeOpts := api.BuildOptions{
+		EntryPoints: []string{file},
+		Bundle:      true,
+		Platform:    api.PlatformNode,
+		Format:      api.FormatESModule,
+		Packages:    api.PackagesExternal,
+		Outfile:     nodePath,
+		Write:       true,
+		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),
+		Metafile:    true,
 	}
 
 	if b.Cfg.ShouldMinifyJS() {
-		opts.MinifyWhitespace = true
-		opts.MinifyIdentifiers = true
-		opts.MinifySyntax = true
+		quickjsOpts.MinifyWhitespace = true
+		quickjsOpts.MinifyIdentifiers = true
+		quickjsOpts.MinifySyntax = true
+		nodeOpts.MinifyWhitespace = true
+		nodeOpts.MinifyIdentifiers = true
+		nodeOpts.MinifySyntax = true
 	}
 
-	result := api.Build(opts)
-
-	if len(result.Errors) > 0 {
-		formatted := api.FormatMessages(result.Errors, api.FormatMessagesOptions{
-			Kind:  api.ErrorMessage,
-			Color: true, // Retains your pretty terminal compiler colors
-		})
-		var sb strings.Builder
-		for _, msg := range formatted {
-			sb.WriteString(msg)
-		}
-		return fmt.Errorf("esbuild compilation failed:\n%s", sb.String())
+	quickjsResult := api.Build(quickjsOpts)
+	if len(quickjsResult.Errors) > 0 {
+		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(quickjsResult.Errors))
+	}
+	nodeResult := api.Build(nodeOpts)
+	if len(nodeResult.Errors) > 0 {
+		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(nodeResult.Errors))
 	}
 
-	// Extract dependency tracking from the in-memory metafile string
-	if result.Metafile != "" {
+	meta := apiRouteMeta{File: filepath.ToSlash(outName)}
+
+	// Node-only = imports still external after bundling (node builtins / native
+	// deps the embedded runtime cannot provide). Package deps that bundle cleanly
+	// stay embedded, so dep-using routes still run in QuickJS.
+	if quickjsResult.Metafile != "" {
 		type esbuildMeta struct {
-			Inputs map[string]interface{} `json:"inputs"`
+			Inputs  map[string]interface{} `json:"inputs"`
+			Outputs map[string]struct {
+				Imports []struct {
+					External bool `json:"external"`
+				} `json:"imports"`
+			} `json:"outputs"`
 		}
-		var meta esbuildMeta
-		if err := json.Unmarshal([]byte(result.Metafile), &meta); err == nil {
+		var m esbuildMeta
+		if err := json.Unmarshal([]byte(quickjsResult.Metafile), &m); err == nil {
 			var deps []string
-			for inputPath := range meta.Inputs {
+			for inputPath := range m.Inputs {
 				// Convert to pristine workspace absolute paths for the file watcher
 				deps = append(deps, filepath.Clean(filepath.Join(b.Root, inputPath)))
 			}
 			// Re-inject back into your framework's reactive watch graph
 			b.recordDeps(file, deps)
+
+			for _, out := range m.Outputs {
+				for _, imp := range out.Imports {
+					if imp.External {
+						meta.NodeOnly = true
+					}
+				}
+			}
 		}
 	}
 
-	return nil
+	return meta, nil
+}
+
+// formatEsbuildErrors renders esbuild messages into a single styled string.
+func formatEsbuildErrors(errs []api.Message) string {
+	formatted := api.FormatMessages(errs, api.FormatMessagesOptions{
+		Kind:  api.ErrorMessage,
+		Color: true, // Retains your pretty terminal compiler colors
+	})
+	var sb strings.Builder
+	for _, msg := range formatted {
+		sb.WriteString(msg)
+	}
+	return sb.String()
+}
+
+// mergeAPIRouteMeta writes/updates `.krate/api-routes.json`, preserving entries
+// for routes not touched by this (possibly incremental) build.
+func (b *Builder) mergeAPIRouteMeta(updates map[string]apiRouteMeta) {
+	if len(updates) == 0 {
+		return
+	}
+	manifestPath := filepath.Join(b.Root, ".krate", "api-routes.json")
+	merged := map[string]apiRouteMeta{}
+	if data, err := os.ReadFile(manifestPath); err == nil {
+		var existing []apiRouteMeta
+		if json.Unmarshal(data, &existing) == nil {
+			for _, m := range existing {
+				merged[m.File] = m
+			}
+		}
+	}
+	for k, v := range updates {
+		merged[k] = v
+	}
+	files := make([]string, 0, len(merged))
+	for f := range merged {
+		files = append(files, f)
+	}
+	sort.Strings(files)
+	list := make([]apiRouteMeta, 0, len(files))
+	for _, f := range files {
+		list = append(list, merged[f])
+	}
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0755); err != nil {
+		return
+	}
+	if data, err := json.MarshalIndent(list, "", "  "); err == nil {
+		_ = os.WriteFile(manifestPath, data, 0644)
+	}
 }

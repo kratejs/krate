@@ -24,8 +24,27 @@ Route mapping follows the page convention:
 
 ## JS/TS routes
 
-JS/TS routes are compiled to JS and served via a Node.js sidecar (port 3001)
-or the embedded QuickJS runtime.
+JS/TS routes are compiled and served by the **embedded QuickJS runtime** by
+default (no Node.js process) or by a Node/Bun/Deno sidecar when configured.
+
+Each route is compiled twice: a self-contained IIFE bundle for the embedded
+runtime and an ESM output for the Node sidecar. Routes that import a Node
+built-in or a native module that cannot be bundled are marked **Node-only** and
+transparently forwarded to the sidecar.
+
+### Runtime model and performance
+
+- The embedded runtime keeps a **pool of long-lived VMs** (`ssr.apiWorkers`,
+  default `min(NumCPU, 8)`). Each worker loads a route module once and reuses it,
+  so a request is a single handler call rather than a fresh VM plus a full
+  re-evaluation. Requests run in parallel across workers.
+- **Module state persists per worker across requests** (the same semantics as
+  Node/Next: a module's top-level state survives between requests). Set
+  `ssr.apiIsolation: true` to run every request in a fresh VM instead.
+- The Node sidecar runs `node:cluster` across `ssr.nodeWorkers` processes, and
+  imports each route once (module cache) in production.
+- Go API routes (`src/api/*.go`) remain the fastest option; the sidecar binary
+  is a compiled Go server.
 
 ### Modern pattern (recommended): named method exports
 

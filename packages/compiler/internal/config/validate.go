@@ -16,7 +16,7 @@ var knownNestedKeys = map[string]map[string]bool{
 	"server":    {"host": true, "port": true, "maxBodySize": true},
 	"cors":      {"enabled": true, "origins": true, "methods": true, "headers": true, "credentials": true, "maxAge": true},
 	"api":       {"sidecar": true},
-	"ssr":       {"rendererPort": true, "timeout": true, "maxCacheSize": true, "middlewareRuntime": true, "apiRuntime": true, "ssrRuntime": true, "streaming": true},
+	"ssr":       {"rendererPort": true, "timeout": true, "maxCacheSize": true, "middlewareRuntime": true, "apiRuntime": true, "apiWorkers": true, "apiIsolation": true, "nodeWorkers": true, "ssrRuntime": true, "streaming": true},
 	"markdown":  {"root": true, "gfm": true, "headingAnchors": true, "admonitions": true, "codeHighlight": true, "codeTheme": true, "math": true, "mermaid": true},
 	"tailwind":  {"enabled": true, "scanDirs": true, "content": true, "preflight": true, "strict": true, "darkMode": true, "executeConfig": true},
 	"csp":       {"enabled": true, "directive": true},

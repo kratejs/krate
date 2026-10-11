@@ -318,20 +318,6 @@ func isCSSFactory(name string) bool {
 	return false
 }
 
-// elementReferencesCSS reports whether a component element mentions any
-// choice name (it cannot be rewritten).
-func elementReferencesCSS(el *ast.JSXElement, names map[string]bool) bool {
-	for _, attr := range el.Opening.Attributes {
-		if attr == nil || attr.Value == nil {
-			continue
-		}
-		if referencesCSS(attr.Value, names) {
-			return true
-		}
-	}
-	return false
-}
-
 func findReturnStmt(body []ast.Stmt) *ast.ReturnStmt {
 	for _, stmt := range body {
 		if ret, ok := stmt.(*ast.ReturnStmt); ok {

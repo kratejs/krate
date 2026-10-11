@@ -406,7 +406,6 @@ func analyzeBody(component string, body []ast.Stmt, index indexFor, partsOptions
 				}
 			}
 			options := append([]string(nil), d.Options...)
-			closed := initial == closedOption
 			for _, o := range inferOptions(body, d.Name, d.Setter, "") {
 				if o == "" || o == closedOption {
 					continue
@@ -416,7 +415,7 @@ func analyzeBody(component string, body []ast.Stmt, index indexFor, partsOptions
 				}
 			}
 			initial, options = a.useParts(initial, options, true)
-			closed = initial == closedOption
+			closed := initial == closedOption
 			if !contains(options, closedOption) {
 				options = append(options, closedOption)
 			}

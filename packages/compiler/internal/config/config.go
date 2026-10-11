@@ -142,6 +142,19 @@ type SSRConfig struct {
 	// APIRuntime controls which runtime executes API routes.
 	// "quickjs" (default) = embedded, "node"/"bun"/"deno" = sidecar.
 	APIRuntime string `json:"apiRuntime,omitempty"`
+	// APIWorkers is the size of the embedded QuickJS API worker pool. The pool
+	// runs that many requests concurrently and reuses VMs, so module state
+	// persists across requests (Node/Next semantics). Default: min(NumCPU, 8).
+	// Ignored when APIIsolation is set.
+	APIWorkers int `json:"apiWorkers,omitempty"`
+	// APIIsolation runs every API request in a fresh VM, so no module state is
+	// shared between requests. Slower; used automatically in dev so edits are
+	// picked up. Default false.
+	APIIsolation bool `json:"apiIsolation,omitempty"`
+	// NodeWorkers forks this many Node worker processes for the API sidecar
+	// (node/bun/deno runtimes) to use more than one CPU. Default:
+	// min(NumCPU, 8).
+	NodeWorkers int `json:"nodeWorkers,omitempty"`
 	// SSRRuntime selects which runtime launches the SSR sidecar renderer.
 	// "node" (default) = plain node on the staged driver, "bun" = `bun run`,
 	// "deno" = `deno run --allow-net --allow-read --allow-env --allow-sys`.

@@ -34,10 +34,17 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
+import cluster from 'node:cluster';
 
 const API_DIR = path.resolve(process.argv[2] || './src/api');
 const PORT = parseInt(process.argv[3] || '3001', 10);
 const MIDDLEWARE_PATH = path.resolve(process.argv[4] || '');
+
+// In dev, route modules are re-imported with a cache-busting query so edits
+// take effect; in production we rely on Node's own module cache (imported once).
+const HOT = process.env.KRATE_API_HOT === '1';
+// Cluster across cores so the Node API sidecar uses more than one thread.
+const WORKERS = Math.max(1, parseInt(process.env.KRATE_API_WORKERS || '1', 10) || 1);
 
 let middlewareModule = null;
 if (MIDDLEWARE_PATH && fs.existsSync(MIDDLEWARE_PATH)) {
@@ -141,7 +148,7 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ error: "API Route Not Found: " + urlPath }));
     }
 
-    const routeModule = await import(pathToFileURL(targetFile).href + '?t=' + Date.now());
+    const routeModule = await import(pathToFileURL(targetFile).href + (HOT ? '?t=' + Date.now() : ''));
     const method = req.method.toUpperCase();
 
     // Check for named method exports (GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD)
@@ -206,8 +213,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-});`
+if (WORKERS > 1 && cluster.isPrimary) {
+  for (let i = 0; i < WORKERS; i++) cluster.fork();
+  cluster.on('exit', () => { cluster.fork(); });
+} else {
+  server.listen(PORT, () => {
+  });
+}`
 
 const (
 	cReset  = "\033[0m"
@@ -534,33 +546,51 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		middlewareRT = jsruntime.LoadMiddlewareRuntime(root)
 	}
 
-	go func() {
-		scriptPath := filepath.Join(root, ".krate", "api-server.js")
-		_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
-		_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
+	// The embedded QuickJS runtime serves JS/TS API routes in-process by
+	// default, so the Node API sidecar only needs to start when it is actually
+	// selected (apiRuntime / middlewareRuntime is node/bun/deno) or when a route
+	// uses external imports the embedded runtime cannot run.
+	apiDir := filepath.Join(cfg.OutDir, "api")
+	nodeAPIDir := filepath.Join(cfg.OutDir, "api-node")
+	middlewarePath := filepath.Join(root, ".krate", "middleware.js")
+	apiRTOption := strings.ToLower(cfg.SSR.APIRuntime)
+	nodeOnlyRoutes := loadNodeOnlyAPIRoutes(root)
+	nodeWorkers := cfg.SSR.NodeWorkers
+	if nodeWorkers <= 0 {
+		nodeWorkers = jsruntime.DefaultAPIWorkers()
+	}
+	needNodeSidecar := sidecarNeedsNode(apiRTOption, middlewareRTOption, middlewareRT, middlewarePath, nodeOnlyRoutes)
 
-		apiDir := filepath.Join(cfg.OutDir, "api")
-		middlewarePath := filepath.Join(root, ".krate", "middleware.js")
+	if needNodeSidecar {
+		go func() {
+			scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
+			_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
+			_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
 
-		portStr := fmt.Sprintf("%d", apiPort)
-		var cmd *exec.Cmd
+			portStr := fmt.Sprintf("%d", apiPort)
+			var cmd *exec.Cmd
 
-		runtimeOpt := strings.ToLower(cfg.Runtime)
-		switch runtimeOpt {
-		case "bun":
-			cmd = exec.Command("bun", "run", scriptPath, apiDir, portStr, middlewarePath)
+			runtimeOpt := strings.ToLower(cfg.Runtime)
+			switch runtimeOpt {
+			case "bun":
+				cmd = exec.Command("bun", "run", scriptPath, nodeAPIDir, portStr, middlewarePath)
 
-		case "deno":
-			cmd = exec.Command("deno", "run", "--allow-net", "--allow-read", "--allow-sys", "--allow-env", scriptPath, apiDir, portStr, middlewarePath)
+			case "deno":
+				cmd = exec.Command("deno", "run", "--allow-net", "--allow-read", "--allow-sys", "--allow-env", scriptPath, nodeAPIDir, portStr, middlewarePath)
 
-		default:
-			cmd = exec.Command("node", scriptPath, apiDir, portStr, middlewarePath)
-		}
+			default:
+				cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath)
+			}
 
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
-	}()
+			cmd.Env = append(os.Environ(),
+				fmt.Sprintf("KRATE_API_WORKERS=%d", nodeWorkers),
+				fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hub != nil)),
+			)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			_ = cmd.Run()
+		}()
+	}
 
 	// Start the Go API sidecar if Go API routes were compiled during the build.
 	// Go routes take precedence over JS routes for the same /api path.
@@ -591,12 +621,14 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	// Load embedded API route runtime if configured (default: quickjs)
 	var apiRT *jsruntime.APIRouteRuntime
-	apiRTOption := strings.ToLower(cfg.SSR.APIRuntime)
 	if apiRTOption == "" || apiRTOption == "quickjs" {
-		apiDir := filepath.Join(cfg.OutDir, "api")
 		if _, err := os.Stat(apiDir); err == nil {
 			apiRT = jsruntime.NewAPIRouteRuntime(apiDir)
 			apiRT.SetEnv(environ.Current)
+			// Dev picks up route edits by running each request in a fresh VM;
+			// production reuses stateful workers for throughput.
+			isolation := cfg.SSR.APIIsolation || hub != nil
+			apiRT.SetPool(cfg.SSR.APIWorkers, isolation)
 		}
 	}
 
@@ -655,6 +687,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Go API routes take precedence (max-performance compiled sidecar)
 		if goAPI != nil && goAPI.Active() && goAPI.RouteMatches(r.Method, r.URL.Path) {
 			goAPI.Proxy(w, r)
+			return
+		}
+
+		// Routes that need Node (external imports the embedded runtime cannot
+		// run) are forwarded to the Node sidecar even when QuickJS is default.
+		if apiRT != nil && nodeOnlyRoutes[apiRT.ResolveFile(r.URL.Path)] {
+			apiProxy.ServeHTTP(w, r)
 			return
 		}
 
@@ -1575,6 +1614,66 @@ func loadStaticOnlyRoutes(absOut string) map[string]bool {
 		out[normalizeRoutePattern(r)] = true
 	}
 	return out
+}
+
+// loadNodeOnlyAPIRoutes reads .krate/api-routes.json and returns the set of
+// out-dir-relative route files that require the Node runtime (they import
+// external modules the embedded QuickJS runtime cannot run).
+func loadNodeOnlyAPIRoutes(root string) map[string]bool {
+	out := map[string]bool{}
+	data, err := os.ReadFile(filepath.Join(root, ".krate", "api-routes.json"))
+	if err != nil {
+		return out
+	}
+	var list []struct {
+		File     string `json:"file"`
+		NodeOnly bool   `json:"nodeOnly"`
+	}
+	if json.Unmarshal(data, &list) != nil {
+		return out
+	}
+	for _, m := range list {
+		if m.NodeOnly {
+			out[m.File] = true
+		}
+	}
+	return out
+}
+
+// sidecarNeedsNode reports whether the Node API sidecar must be started: the
+// user selected a Node-family runtime for API routes or middleware, at least one
+// route needs Node, or middleware exists that the embedded runtime did not load.
+func sidecarNeedsNode(apiRTOption, middlewareRTOption string, middlewareRT *jsruntime.MiddlewareRuntime, middlewarePath string, nodeOnly map[string]bool) bool {
+	if isNodeFamilyRuntime(apiRTOption) || isNodeFamilyRuntime(middlewareRTOption) {
+		return true
+	}
+	if len(nodeOnly) > 0 {
+		return true
+	}
+	if middlewareRT == nil {
+		if _, err := os.Stat(middlewarePath); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// isNodeFamilyRuntime reports whether a configured runtime name is a Node-family
+// sidecar (node/bun/deno) rather than the embedded QuickJS runtime.
+func isNodeFamilyRuntime(rt string) bool {
+	switch strings.ToLower(rt) {
+	case "node", "bun", "deno":
+		return true
+	default:
+		return false
+	}
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // normalizeRoutePattern canonicalizes a route/pattern for comparison: leading

@@ -3,6 +3,7 @@ package jsruntime
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -433,5 +434,91 @@ func TestAPIRouteEsbuildMinified(t *testing.T) {
 	t.Logf("POST /api/videos (bad): status=%d body=%s", result.Status, result.Body)
 	if result.Status != 400 {
 		t.Errorf("Expected 400, got %d", result.Status)
+	}
+}
+
+// TestAPIRouteIIFEOutput verifies the runtime loads the build's IIFE output
+// (`var __krate_route = (() => { ... return { GET } })();`) with no regex
+// export-stripping.
+func TestAPIRouteIIFEOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	apiDir := filepath.Join(tmpDir, "api")
+	_ = os.MkdirAll(apiDir, 0755)
+
+	code := `var __krate_route = (() => {
+  function GET(request) { return Response.json({ ok: true, id: 7 }); }
+  function POST(request) { return Response.json({ created: true }, { status: 201 }); }
+  return { GET, POST };
+})();`
+	_ = os.WriteFile(filepath.Join(apiDir, "iife.js"), []byte(code), 0644)
+
+	rt := NewAPIRouteRuntime(apiDir)
+
+	get := rt.Execute(APIRequest{Method: "GET", Path: "/api/iife"})
+	if get.Status != 200 || get.Body != `{"ok":true,"id":7}` {
+		t.Fatalf("GET: status=%d body=%s error=%s", get.Status, get.Body, get.Error)
+	}
+	if get.Headers["content-type"] != "application/json" {
+		t.Errorf("GET: content-type = %q", get.Headers["content-type"])
+	}
+
+	post := rt.Execute(APIRequest{Method: "POST", Path: "/api/iife"})
+	if post.Status != 201 || post.Body != `{"created":true}` {
+		t.Fatalf("POST: status=%d body=%s error=%s", post.Status, post.Body, post.Error)
+	}
+}
+
+// TestAPIRoutePoolConcurrent exercises the shared pool under load: many
+// concurrent requests must all succeed with bounded workers.
+func TestAPIRoutePoolConcurrent(t *testing.T) {
+	tmpDir := t.TempDir()
+	apiDir := filepath.Join(tmpDir, "api")
+	_ = os.MkdirAll(apiDir, 0755)
+
+	code := `var n = 0;
+function GET(request) { n++; return Response.json({ n: n }); }`
+	_ = os.WriteFile(filepath.Join(apiDir, "count.js"), []byte(code), 0644)
+
+	rt := NewAPIRouteRuntime(apiDir)
+	rt.SetPool(4, false)
+
+	var wg sync.WaitGroup
+	errCh := make(chan string, 64)
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := rt.Execute(APIRequest{Method: "GET", Path: "/api/count"})
+			if r.Status != 200 {
+				errCh <- r.Body
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for msg := range errCh {
+		t.Errorf("concurrent request failed: %s", msg)
+	}
+}
+
+// TestAPIRouteIsolationFreshState verifies isolation mode runs each request in a
+// fresh VM, so module state does not leak between requests.
+func TestAPIRouteIsolationFreshState(t *testing.T) {
+	tmpDir := t.TempDir()
+	apiDir := filepath.Join(tmpDir, "api")
+	_ = os.MkdirAll(apiDir, 0755)
+
+	code := `var n = 0;
+function GET(request) { n++; return Response.json({ n: n }); }`
+	_ = os.WriteFile(filepath.Join(apiDir, "iso.js"), []byte(code), 0644)
+
+	rt := NewAPIRouteRuntime(apiDir)
+	rt.SetPool(4, true)
+
+	for i := 0; i < 3; i++ {
+		r := rt.Execute(APIRequest{Method: "GET", Path: "/api/iso"})
+		if r.Status != 200 || r.Body != `{"n":1}` {
+			t.Fatalf("request %d: status=%d body=%s (expected fresh state)", i, r.Status, r.Body)
+		}
 	}
 }

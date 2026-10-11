@@ -828,6 +828,24 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				if s, ok := v.(string); ok {
 					cfg.SSR.APIRuntime = s
 				}
+			case "apiWorkers":
+				switch n := v.(type) {
+				case int64:
+					cfg.SSR.APIWorkers = int(n)
+				case float64:
+					cfg.SSR.APIWorkers = int(n)
+				}
+			case "apiIsolation":
+				if b, ok := v.(bool); ok {
+					cfg.SSR.APIIsolation = b
+				}
+			case "nodeWorkers":
+				switch n := v.(type) {
+				case int64:
+					cfg.SSR.NodeWorkers = int(n)
+				case float64:
+					cfg.SSR.NodeWorkers = int(n)
+				}
 			case "ssrRuntime":
 				if s, ok := v.(string); ok {
 					cfg.SSR.SSRRuntime = s

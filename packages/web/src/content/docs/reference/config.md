@@ -122,19 +122,29 @@ ssr: {
   maxCacheSize: 128,          // ISR in-memory cache size
   middlewareRuntime: "quickjs",  // middleware.ts runtime
   apiRuntime: "quickjs",        // API route runtime
+  apiWorkers: 8,                // embedded QuickJS API worker pool (default min(NumCPU, 8))
+  apiIsolation: false,          // true = fresh VM per request (no shared state; slower)
+  nodeWorkers: 8,               // Node sidecar worker processes (cluster)
 }
 ```
 
-- **`ssrRuntime`** — which runtime launches the SSR sidecar that renders
+- **`ssrRuntime`** - which runtime launches the SSR sidecar that renders
   SSR/ISR/streaming regions. `"node"` (default) runs the staged renderer driver
   with plain `node`; `"bun"` runs it with `bun run`; `"deno"` runs it with
   `deno run --allow-net --allow-read --allow-env --allow-sys`.
-- **`streaming`** — forces all *static* (SSG) pages into streaming mode.
+- **`streaming`** - forces all *static* (SSG) pages into streaming mode.
   Explicit per-page `isr`/`ssr` config still wins.
 - **`middlewareRuntime`** and **`apiRuntime`** (`"quickjs"` | `"node"` |
   `"bun"` | `"deno"`) choose which runtime executes middleware and API routes.
   `"quickjs"` (default) uses the embedded QuickJS runtime with no Node.js
   dependency; `"node"`/`"bun"`/`"deno"` use a sidecar process.
+- **`apiWorkers`** sizes the embedded QuickJS API worker pool. Workers are
+  long-lived VMs that each load a route once and reuse it, so module state
+  persists across requests (Node semantics) and requests run in parallel.
+- **`apiIsolation`** runs every API request in a fresh VM (no shared module
+  state). Slower; dev uses it automatically so route edits are picked up.
+- **`nodeWorkers`** forks that many Node worker processes (`cluster`) for the
+  API sidecar when `apiRuntime` (or `middlewareRuntime`) is `node`/`bun`/`deno`.
 
 Page-level rendering is opted into per page via
 `export const config = { isr | ssr | streaming, revalidate }` — see

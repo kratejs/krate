@@ -82,6 +82,18 @@ func (r *Runtime) Execute(code string) (any, error) {
 	return r.vm.Eval(code, EvalGlobal)
 }
 
+// Compile compiles JavaScript to quickjs bytecode for later evaluation with
+// EvalBytecode. Caching bytecode lets a long-lived VM skip re-parsing a script
+// on every call.
+func (r *Runtime) Compile(code string, flags int) ([]byte, error) {
+	return r.vm.Compile(code, flags)
+}
+
+// EvalBytecode evaluates previously compiled quickjs bytecode.
+func (r *Runtime) EvalBytecode(bytecode []byte) (any, error) {
+	return r.vm.EvalBytecode(bytecode)
+}
+
 // DrainJobs executes pending promise jobs (microtasks). Call after Execute to resolve promises.
 func (r *Runtime) DrainJobs() {
 	for {

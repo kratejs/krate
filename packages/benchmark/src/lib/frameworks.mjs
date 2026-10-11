@@ -130,6 +130,38 @@ export const API_FRAMEWORKS = [
     path: '/api/json',
   },
   {
+    id: 'krate-ts-node',
+    name: 'Krate — TS API route (node)',
+    fixture: 'krate',
+    install: true,
+    async prepare(ctx) {
+      const res = await run(ctx.krateBin, ['build'], { cwd: ctx.workDir });
+      if (res.code !== 0) throw new Error(res.stderr || 'krate build failed');
+    },
+    async start(ctx, port) {
+      const cfgPath = join(ctx.workDir, '.krate', 'bench-serve-node-config.ts');
+      await writeText(
+        cfgPath,
+        [
+          'export default {',
+          "  entry: 'src/pages/index.tsx',",
+          "  outDir: 'dist',",
+          "  pagesDir: 'src/pages',",
+          "  publicDir: 'public',",
+          '  minify: true,',
+          `  devServer: { port: ${port}, open: false },`,
+          "  ssr: { apiRuntime: 'node', nodeWorkers: 8 },",
+          '};',
+          '',
+        ].join('\n'),
+      );
+      return spawnProcess(ctx.krateBin, ['serve', '--config', cfgPath, '.'], {
+        cwd: ctx.workDir,
+      });
+    },
+    path: '/api/json',
+  },
+  {
     id: 'nextjs',
     name: 'Next.js — route handler',
     fixture: 'next',
