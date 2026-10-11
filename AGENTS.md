@@ -100,8 +100,6 @@ docs) into hard failures. CI sets it on all OSes.
   `packages/web/src/content/docs/`, then `pnpm sync:docs` + `pnpm check:docs`.
 - Do not commit `dist/`, `.krate/`, or the generated embedded docs
   (`packages/compiler/internal/kratedocs/docs`).
-- The `TODO*.md` / `PLAN.md` files at the repo root are working planning notes;
-  they are intentionally **not committed**.
 
 ## Conventions
 
