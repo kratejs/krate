@@ -296,6 +296,18 @@ func (e *Emitter) emitStatic(node *irtree.ComponentNode) SlotOutput {
 	for _, child := range node.Children {
 		mergeSlotOutput(&out, e.emitSlotNode(child))
 	}
+	// A static component built through the tree path may render {props.children}
+	// (e.g. a context-providing root or a scope-part component); fill the
+	// placeholder with its call-site slots, like emitClient.
+	if strings.Contains(out.HTML, "<!--__children__-->") && len(node.CallSiteSlots) > 0 {
+		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
+		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", callSiteOut.HTML)
+		out.Signatures = append(out.Signatures, callSiteOut.Signatures...)
+		out.Orphans = append(out.Orphans, callSiteOut.Orphans...)
+		out.HeadHTML += callSiteOut.HeadHTML
+		out.ScriptHTML += callSiteOut.ScriptHTML
+		out.StyleHTML += callSiteOut.StyleHTML
+	}
 	return out
 }
 
@@ -487,7 +499,7 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 	// retain their data-k/data-kh hydration markers.
 	if strings.Contains(out.HTML, "<!--__children__-->") && len(node.CallSiteSlots) > 0 {
 		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
-		out.HTML = strings.Replace(out.HTML, "<!--__children__-->", callSiteOut.HTML, 1)
+		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", callSiteOut.HTML)
 		out.Signatures = append(out.Signatures, callSiteOut.Signatures...)
 		out.Orphans = append(out.Orphans, callSiteOut.Orphans...)
 		out.HeadHTML += callSiteOut.HeadHTML

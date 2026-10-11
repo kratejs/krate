@@ -1,64 +1,37 @@
 import './tabs.css';
-import { createSignal, createEffect } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSChoice, type CSSScope } from '@krate/runtime';
+
+const TabsCtx = createScope<string>();
 
 export interface TabsProps {
-  children?: any;
+  /** Literal initial tab value (which panel is shown first). */
   defaultValue?: string;
-  value?: string;
-  onValueChange?: (value: string) => void;
-  orientation?: 'horizontal' | 'vertical';
+  children?: any;
 }
 
+/**
+ * Tabs. Zero JS: the root declares a CSS scope and provides it via context; the
+ * parts read it and their `{...scope.trigger/panel(value)}` spreads compile to
+ * hidden radios + `:has()` CSS.
+ *
+ * ```tsx
+ * <Tabs defaultValue="a">
+ *   <Tabs.List>
+ *     <Tabs.Trigger value="a">A</Tabs.Trigger>
+ *   </Tabs.List>
+ *   <Tabs.Content value="a">Panel</Tabs.Content>
+ * </Tabs>
+ * ```
+ *
+ * Option values must be literals so the compiler can enumerate them; for
+ * data-driven options use the native `<Select>`.
+ */
 export function Tabs(props: TabsProps) {
-  var orientation = props.orientation || "horizontal";
-  var [active, setActive] = createSignal(props.defaultValue || "");
-  var rootRef: HTMLElement | null = null;
-
-  createEffect(function () {
-    if (props.value !== undefined) {
-      setActive(props.value);
-    }
-  });
-
-  function handleChange(val: string) {
-    setActive(val);
-    if (props.onValueChange) {
-      props.onValueChange(val);
-    }
-  }
-
-  function handleClick(e: MouseEvent) {
-    var trigger = (e.target as HTMLElement).closest("[data-krate-tabs-trigger]");
-    if (trigger) {
-      var value = trigger.getAttribute("data-value");
-      if (value) {
-        handleChange(value);
-      }
-    }
-  }
-
-  createEffect(function () {
-    var tabs = rootRef;
-    if (!tabs) return;
-    var activeValue = active();
-    var triggers = tabs.querySelectorAll("[data-krate-tabs-trigger]");
-    for (var i = 0; i < triggers.length; i++) {
-      var el = triggers[i] as HTMLElement;
-      var val = el.getAttribute("data-value");
-      el.setAttribute("data-state", val === activeValue ? "active" : "inactive");
-    }
-    var contents = tabs.querySelectorAll("[data-krate-tabs-content]");
-    for (var i = 0; i < contents.length; i++) {
-      var el = contents[i] as HTMLElement;
-      var val = el.getAttribute("data-value");
-      el.setAttribute("data-state", val === activeValue ? "active" : "inactive");
-    }
-  });
-
+  const tab = createCSSChoice<string>('', { as: 'tabs' });
   return (
-    <div ref={(el) => { rootRef = el as HTMLElement; }} class="krate-tabs" data-orientation={orientation} data-state="active" data-active-tab={active()} onClick={handleClick}>
-      {props.children}
-    </div>
+    <TabsCtx.Provider value={tab}>
+      <div class="krate-tabs">{props.children}</div>
+    </TabsCtx.Provider>
   );
 }
 
@@ -66,48 +39,48 @@ export interface TabsListProps {
   children?: any;
 }
 
+/** @deprecated Use `Tabs.List` instead. */
 export function TabsList(props: TabsListProps) {
-  return (
-    <div class="krate-tabs-list" role="tablist">
-      {props.children}
-    </div>
-  );
+  return <div class="krate-tabs-list">{props.children}</div>;
 }
 
 export interface TabsTriggerProps {
-  children?: any;
   value?: string;
+  children?: any;
 }
 
+/** @deprecated Use `Tabs.Trigger` instead. */
 export function TabsTrigger(props: TabsTriggerProps) {
-  var value = props.value || "";
+  const tab = TabsCtx.use();
   return (
-    <button
-      class="krate-tabs-trigger"
-      role="tab"
-      data-value={value}
-      data-krate-tabs-trigger="true"
-    >
+    <button class="krate-tabs-trigger" type="button" {...tab.trigger(props.value)}>
       {props.children}
     </button>
   );
 }
 
 export interface TabsContentProps {
-  children?: any;
   value?: string;
+  children?: any;
 }
 
+/** @deprecated Use `Tabs.Content` instead. */
 export function TabsContent(props: TabsContentProps) {
-  var value = props.value || "";
+  const tab = TabsCtx.use();
   return (
-    <div
-      class="krate-tabs-content"
-      role="tabpanel"
-      data-value={value}
-      data-krate-tabs-content="true"
-    >
+    <div class="krate-tabs-content" {...tab.panel(props.value)}>
       {props.children}
     </div>
   );
 }
+
+/** Namespaced compound parts (Radix-style). */
+export interface Tabs {
+  List: typeof TabsList;
+  Trigger: typeof TabsTrigger;
+  Content: typeof TabsContent;
+}
+
+Tabs.List = TabsList;
+Tabs.Trigger = TabsTrigger;
+Tabs.Content = TabsContent;

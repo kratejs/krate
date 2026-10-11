@@ -1,72 +1,25 @@
 import './checkbox.css';
-import { createSignal, createEffect } from '@krate/runtime';
+import { createCSSToggle } from '@krate/runtime';
 
 export interface CheckboxProps {
-  checked?: boolean;
-  defaultChecked?: boolean;
-  onCheckedChange?: (checked: boolean) => void;
-  disabled?: boolean;
-  required?: boolean;
-  name?: string;
-  value?: string;
-  id?: string;
   children?: any;
 }
 
+/**
+ * Checkbox. Zero JS: compiles to a hidden checkbox plus `:has()` CSS. The
+ * initial state is fixed at build time (uncontrolled); use a native
+ * `<input type="checkbox">` when you need a submitted, per-instance value.
+ */
 export function Checkbox(props: CheckboxProps) {
-  var [checked, setChecked] = createSignal(props.defaultChecked || false);
-
-  createEffect(function () {
-    if (props.checked !== undefined) {
-      setChecked(props.checked);
-    }
-  });
-
-  function toggle() {
-    if (props.disabled) return;
-    var next = !checked();
-    setChecked(next);
-    if (props.onCheckedChange) {
-      props.onCheckedChange(next);
-    }
-  }
-
-  function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === " " || e.key === "Enter") {
-      e.preventDefault();
-      toggle();
-    }
-  }
-
+  const [checked, setChecked] = createCSSToggle(false);
   return (
-    <span class="krate-checkbox-wrapper">
-      <button
-        class={"krate-checkbox" + (checked() ? " krate-checkbox-checked" : "")}
-        role="checkbox"
-        type="button"
-        aria-checked={checked() ? "true" : "false"}
-        data-state={checked() ? "checked" : "unchecked"}
-        disabled={props.disabled}
-        id={props.id || ""}
-        name={props.name || ""}
-        value={props.value || ""}
-        required={props.required}
-        onClick={toggle}
-        onKeyDown={handleKeyDown}
-      >
-        <span class="krate-checkbox-indicator">
-          {checked() ? (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12"/>
-            </svg>
-          ) : null}
-        </span>
-      </button>
-      {props.children ? (
-        <label class="krate-checkbox-label" onClick={toggle}>
-          {props.children}
-        </label>
-      ) : null}
-    </span>
+    <button class="krate-checkbox" type="button" onClick={() => setChecked(!checked())}>
+      <span class="krate-checkbox-box" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m5 12 5 5L20 7" />
+        </svg>
+      </span>
+      <span class="krate-checkbox-label">{props.children}</span>
+    </button>
   );
 }

@@ -1,107 +1,73 @@
 import './popover.css';
-import { createSignal, createEffect, onCleanup } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+
+const PopoverCtx = createScope<string | null>();
 
 export interface PopoverProps {
+  label?: string;
   children?: any;
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
 }
 
+/** Popover. Zero JS via a context-provided CSS scope. */
 export function Popover(props: PopoverProps) {
-  var [open, setOpen] = createSignal(false);
-  var rootRef: HTMLElement | null = null;
-
-  createEffect(function () {
-    if (props.open !== undefined) {
-      setOpen(props.open);
-    }
-  });
-
-  function toggle() {
-    var next = !open();
-    setOpen(next);
-    if (props.onOpenChange) {
-      props.onOpenChange(next);
-    }
-  }
-
-  function close() {
-    setOpen(false);
-    if (props.onOpenChange) {
-      props.onOpenChange(false);
-    }
-  }
-
-  function handleClick(e: MouseEvent) {
-    var target = e.target as HTMLElement;
-    var root = target.closest("[data-krate-popover]") as HTMLElement;
-    if (root) rootRef = root;
-
-    var trigger = target.closest("[data-krate-popover-trigger]");
-    if (trigger) {
-      toggle();
-      return;
-    }
-  }
-
-  function handleClickOutside(e: MouseEvent) {
-    var r = rootRef;
-    if (r && !r.contains(e.target as Node)) {
-      close();
-    }
-  }
-
-  createEffect(function () {
-    var outsideTimer: any = null;
-    if (open()) {
-      outsideTimer = setTimeout(function () {
-        document.addEventListener("click", handleClickOutside);
-      }, 0);
-    }
-    return function () {
-      if (outsideTimer) clearTimeout(outsideTimer);
-      document.removeEventListener("click", handleClickOutside);
-    };
-  });
-
+  const open = createCSSGroup<string>(null, { as: 'popover', label: props.label });
   return (
-    <div class="krate-popover" data-krate-popover="true" data-state={open() ? "open" : "closed"} onClick={handleClick}>
-      {props.children}
-    </div>
+    <PopoverCtx.Provider value={open}>
+      <div class="krate-popover">{props.children}</div>
+    </PopoverCtx.Provider>
   );
 }
 
 export interface PopoverTriggerProps {
+  value?: string;
   children?: any;
 }
 
+/** @deprecated Use `Popover.Trigger` instead. */
 export function PopoverTrigger(props: PopoverTriggerProps) {
+  const open = PopoverCtx.use();
   return (
-    <button class="krate-popover-trigger" type="button" aria-haspopup="dialog" data-krate-popover-trigger="true">
+    <button class="krate-popover-trigger" type="button" {...open.trigger(props.value)}>
       {props.children}
     </button>
   );
 }
 
 export interface PopoverContentProps {
+  value?: string;
   children?: any;
-  align?: 'start' | 'center' | 'end';
-  side?: 'top' | 'bottom';
-  sideOffset?: number;
 }
 
+/** @deprecated Use `Popover.Content` instead. */
 export function PopoverContent(props: PopoverContentProps) {
-  var children = props.children || "";
-  var align = props.align || "center";
-  var side = props.side || "bottom";
-
-  var className = "krate-popover-content krate-popover-content-" + side;
-  if (align === "end") className += " krate-popover-align-end";
-  else if (align === "start") className += " krate-popover-align-start";
-
+  const open = PopoverCtx.use();
   return (
-    <div class={className} role="dialog" aria-modal="true" data-krate-popover-content="true">
-      {children}
+    <div class="krate-popover-content" {...open.panel(props.value)}>
+      {props.children}
     </div>
   );
 }
+
+export interface PopoverCloseProps {
+  children?: any;
+}
+
+/** @deprecated Use `Popover.Close` instead. */
+export function PopoverClose(props: PopoverCloseProps) {
+  const open = PopoverCtx.use();
+  return (
+    <button class="krate-popover-close" type="button" aria-label="Close" {...open.close()}>
+      {props.children}
+    </button>
+  );
+}
+
+export interface Popover {
+  Trigger: typeof PopoverTrigger;
+  Content: typeof PopoverContent;
+  Close: typeof PopoverClose;
+}
+
+Popover.Trigger = PopoverTrigger;
+Popover.Content = PopoverContent;
+Popover.Close = PopoverClose;

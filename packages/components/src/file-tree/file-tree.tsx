@@ -1,78 +1,66 @@
 import './file-tree.css';
-import { createSignal, createEffect, onMount } from '@krate/runtime';
+
 
 export interface FileTreeProps {
   children?: any;
-  defaultOpen?: boolean;
 }
 
+/** File tree container. Zero JS (folders use native `<details>`). */
 export function FileTree(props: FileTreeProps) {
-  var children = props.children || "";
-  return (
-    <div class="krate-file-tree">
-      <div class="krate-file-tree-header">
-        <span class="krate-file-tree-header-icon">
-          <Icon name="tabler:folder" width="14" height="14" />
-        </span>
-        <span>Files</span>
-      </div>
-      <div class="krate-file-tree-content">
-        {children}
-      </div>
-    </div>
-  );
+  return <div class="krate-file-tree">{props.children}</div>;
 }
 
 export interface FileTreeItemProps {
   children?: any;
-  icon?: string;
 }
 
+/** @deprecated Use `FileTree.Item` instead. */
 export function FileTreeItem(props: FileTreeItemProps) {
-  var children = props.children || "";
-  var icon = props.icon || "tabler:file";
   return (
     <div class="krate-file-tree-item">
-      <span class="krate-file-tree-item-icon">
-        <Icon name={icon} width="14" height="14" />
+      <span class="krate-file-tree-icon" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+        </svg>
       </span>
-      <span class="krate-file-tree-item-name">{children}</span>
+      <span class="krate-file-tree-name">{props.children}</span>
     </div>
   );
 }
 
 export interface FileTreeFolderProps {
-  children?: any;
   name?: string;
   defaultOpen?: boolean;
+  children?: any;
 }
 
+/** @deprecated Use `FileTree.Folder` instead. */
 export function FileTreeFolder(props: FileTreeFolderProps) {
-  var children = props.children || "";
-  var [open, setOpen] = createSignal(props.defaultOpen !== false);
-
-  function toggle() {
-    setOpen(!open());
-  }
-
   return (
-    <div class={"krate-file-tree-folder" + (open() ? " krate-file-tree-folder-open" : "")}>
-      <div class="krate-file-tree-item krate-file-tree-folder-trigger" onClick={toggle}>
-        <span class="krate-file-tree-item-icon krate-file-tree-chevron">
-          <Icon name="tabler:chevron-right" width="12" height="12" />
+    <details class="krate-file-tree-folder" open={props.defaultOpen}>
+      <summary class="krate-file-tree-folder-header">
+        <span class="krate-file-tree-chevron" aria-hidden="true">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m9 18 6-6-6-6" />
+          </svg>
         </span>
-        <span class="krate-file-tree-item-icon">
-          {open() ? 
-            <Icon name="tabler:folder-open" width="14" height="14" />
-           : 
-            <Icon name="tabler:folder" width="14" height="14" />
-          }
+        <span class="krate-file-tree-icon" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+          </svg>
         </span>
-        <span class="krate-file-tree-item-name">{props.name || ""}</span>
-      </div>
-      <div class={"krate-file-tree-children" + (open() ? "" : " krate-file-tree-children-closed")}>
-        {children}
-      </div>
-    </div>
+        <span class="krate-file-tree-name">{props.name}</span>
+      </summary>
+      <div class="krate-file-tree-children">{props.children}</div>
+    </details>
   );
 }
+
+export interface FileTree {
+  Item: typeof FileTreeItem;
+  Folder: typeof FileTreeFolder;
+}
+
+FileTree.Item = FileTreeItem;
+FileTree.Folder = FileTreeFolder;

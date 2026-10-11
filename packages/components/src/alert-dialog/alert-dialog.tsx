@@ -1,112 +1,49 @@
 import './alert-dialog.css';
-import { createSignal, createEffect } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+
+const AlertDialogCtx = createScope<string | null>();
 
 export interface AlertDialogProps {
+  label?: string;
   children?: any;
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
 }
 
+/** Confirmation dialog. Zero JS via a context-provided CSS scope (`as: 'modal'`). */
 export function AlertDialog(props: AlertDialogProps) {
-  var [open, setOpen] = createSignal(props.open || false);
-
-  createEffect(function () {
-    if (props.open !== undefined) {
-      setOpen(props.open);
-    }
-  });
-
-  function close() {
-    setOpen(false);
-    if (props.onOpenChange) {
-      props.onOpenChange(false);
-    }
-  }
-
-  function handleClick(e: MouseEvent) {
-    var trigger = (e.target as HTMLElement).closest("[data-krate-alert-dialog-trigger]");
-    if (trigger) {
-      setOpen(true);
-      if (props.onOpenChange) {
-        props.onOpenChange(true);
-      }
-      return;
-    }
-    var action = (e.target as HTMLElement).closest("[data-krate-alert-dialog-action]");
-    if (action) {
-      close();
-      return;
-    }
-    var cancel = (e.target as HTMLElement).closest("[data-krate-alert-dialog-cancel]");
-    if (cancel) {
-      close();
-      return;
-    }
-    var wrapper = (e.target as HTMLElement).closest("[data-krate-alert-dialog-content-wrapper]");
-    if (wrapper && (e.target as HTMLElement).classList.contains("krate-alert-dialog-content-wrapper")) {
-      close();
-    }
-  }
-
-  createEffect(function () {
-    // handleClick opens the dialog from the trigger, so it must be attached
-    // even while the dialog is closed - otherwise the trigger can never open it.
-    document.addEventListener("click", handleClick);
-    return function () {
-      document.removeEventListener("click", handleClick);
-    };
-  });
-
+  const open = createCSSGroup<string>(null, { as: 'modal', label: props.label });
   return (
-    <div class="krate-alert-dialog" data-state={open() ? "open" : "closed"}>
-      {props.children}
-    </div>
+    <AlertDialogCtx.Provider value={open}>
+      <div class="krate-alert-dialog">{props.children}</div>
+    </AlertDialogCtx.Provider>
   );
 }
 
 export interface AlertDialogTriggerProps {
+  value?: string;
   children?: any;
 }
 
+/** @deprecated Use `AlertDialog.Trigger` instead. */
 export function AlertDialogTrigger(props: AlertDialogTriggerProps) {
+  const open = AlertDialogCtx.use();
   return (
-    <button class="krate-alert-dialog-trigger" type="button" data-krate-alert-dialog-trigger="true">
+    <button class="krate-alert-dialog-trigger" type="button" {...open.trigger(props.value)}>
       {props.children}
     </button>
   );
 }
 
-export interface AlertDialogPortalProps {
-  children?: any;
-}
-
-export function AlertDialogPortal(props: AlertDialogPortalProps) {
-  return (<div class="krate-alert-dialog-portal">{props.children}</div>);
-}
-
-export interface AlertDialogOverlayProps {
-  children?: any;
-}
-
-export function AlertDialogOverlay(props: AlertDialogOverlayProps) {
-  return (
-    <div class="krate-alert-dialog-overlay">
-      {props.children}
-    </div>
-  );
-}
-
 export interface AlertDialogContentProps {
+  value?: string;
   children?: any;
 }
 
+/** @deprecated Use `AlertDialog.Content` instead. */
 export function AlertDialogContent(props: AlertDialogContentProps) {
+  const open = AlertDialogCtx.use();
   return (
-    <div class="krate-alert-dialog-content-wrapper" data-krate-alert-dialog-content-wrapper="true">
-      <div class="krate-alert-dialog-overlay"></div>
-      <div class="krate-alert-dialog-content" role="alertdialog">
-        {props.children}
-      </div>
+    <div class="krate-alert-dialog-content" role="alertdialog" {...open.panel(props.value)}>
+      {props.children}
     </div>
   );
 }
@@ -115,30 +52,29 @@ export interface AlertDialogTitleProps {
   children?: any;
 }
 
+/** @deprecated Use `AlertDialog.Title` instead. */
 export function AlertDialogTitle(props: AlertDialogTitleProps) {
-  return (
-    <div class="krate-alert-dialog-title">{props.children}</div>
-  );
+  return <h2 class="krate-alert-dialog-title">{props.children}</h2>;
 }
 
 export interface AlertDialogDescriptionProps {
   children?: any;
 }
 
+/** @deprecated Use `AlertDialog.Description` instead. */
 export function AlertDialogDescription(props: AlertDialogDescriptionProps) {
-  return (
-    <div class="krate-alert-dialog-description">{props.children}</div>
-  );
+  return <p class="krate-alert-dialog-description">{props.children}</p>;
 }
 
 export interface AlertDialogActionProps {
   children?: any;
-  onClick?: () => void;
 }
 
+/** @deprecated Use `AlertDialog.Action` instead. */
 export function AlertDialogAction(props: AlertDialogActionProps) {
+  const open = AlertDialogCtx.use();
   return (
-    <button class="krate-alert-dialog-action krate-alert-dialog-action-confirm" type="button" data-krate-alert-dialog-action="true" onClick={props.onClick}>
+    <button class="krate-alert-dialog-action" type="button" {...open.close()}>
       {props.children}
     </button>
   );
@@ -146,13 +82,30 @@ export function AlertDialogAction(props: AlertDialogActionProps) {
 
 export interface AlertDialogCancelProps {
   children?: any;
-  onClick?: () => void;
 }
 
+/** @deprecated Use `AlertDialog.Cancel` instead. */
 export function AlertDialogCancel(props: AlertDialogCancelProps) {
+  const open = AlertDialogCtx.use();
   return (
-    <button class="krate-alert-dialog-action krate-alert-dialog-action-cancel" type="button" data-krate-alert-dialog-cancel="true" onClick={props.onClick}>
+    <button class="krate-alert-dialog-cancel" type="button" {...open.close()}>
       {props.children}
     </button>
   );
 }
+
+export interface AlertDialog {
+  Trigger: typeof AlertDialogTrigger;
+  Content: typeof AlertDialogContent;
+  Title: typeof AlertDialogTitle;
+  Description: typeof AlertDialogDescription;
+  Action: typeof AlertDialogAction;
+  Cancel: typeof AlertDialogCancel;
+}
+
+AlertDialog.Trigger = AlertDialogTrigger;
+AlertDialog.Content = AlertDialogContent;
+AlertDialog.Title = AlertDialogTitle;
+AlertDialog.Description = AlertDialogDescription;
+AlertDialog.Action = AlertDialogAction;
+AlertDialog.Cancel = AlertDialogCancel;

@@ -5,9 +5,9 @@
   padding: 8px 12px;
   font-size: 0.9rem;
   font-family: inherit;
-  color: var(--krate-text, #fafafa);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--krate-border, #3f3f46);
+  color: var(--krate-text, #09090b);
+  background: var(--krate-surface, #f4f4f5);
+  border: 1px solid var(--krate-border, #e4e4e7);
   border-radius: 6px;
   transition: border-color 0.15s, box-shadow 0.15s;
 }

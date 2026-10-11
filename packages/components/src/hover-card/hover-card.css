@@ -7,35 +7,25 @@
 }
 .krate-hover-card-content {
   position: absolute;
+  top: calc(100% + 8px);
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
   z-index: 1000;
   width: 320px;
   padding: 16px;
   border-radius: 8px;
-  background: var(--krate-card-bg, #111113);
-  border: 1px solid var(--krate-border, #27272a);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-  color: var(--krate-text-muted, #a1a1aa);
+  background: var(--krate-card-bg, #ffffff);
+  border: 1px solid var(--krate-border, #e4e4e7);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  color: var(--krate-text-muted, #71717a);
   font-size: 0.875rem;
   line-height: 1.5;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
 }
-.krate-hover-card-content-bottom {
-  top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-}
-.krate-hover-card-content-top {
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-}
-.krate-hover-card-align-center {
-  left: 50%;
-  transform: translateX(-50%);
-}
-.krate-hover-card-align-end {
-  right: 0;
-  left: auto;
-}
-.krate-hover-card[data-state="closed"] > .krate-hover-card-content {
-  display: none;
+.krate-hover-card:hover > .krate-hover-card-content,
+.krate-hover-card:focus-within > .krate-hover-card-content {
+  opacity: 1;
+  visibility: visible;
 }

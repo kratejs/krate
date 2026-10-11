@@ -26,6 +26,7 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 
 	// 1. Collect all function declarations
 	collectFunctionsWithSource(prog.Body, ann.Functions, ann.ComponentSources, ann.ComponentRaw, sourceFile, rawSource)
+	collectMemberComponents(prog.Body, ann.Functions)
 
 	// 2. Find default export -> entry point
 	ann.EntryPoint = FindDefaultExport(prog.Body)
@@ -360,6 +361,62 @@ func collectFunctionsWithSource(body []ast.Stmt, dest map[string]*ast.FnDecl, so
 	}
 }
 
+// collectMemberComponents registers plain member assignments (`Root.Part =
+// PartFn`) so dotted JSX tags like `<Root.Part>` resolve to the assigned
+// component — the general mechanism behind namespaced compound APIs.
+func collectMemberComponents(body []ast.Stmt, functions map[string]*ast.FnDecl) {
+	for _, stmt := range body {
+		switch s := stmt.(type) {
+		case *ast.ExprStmt:
+			assign, ok := s.Expression.(*ast.BinaryExpr)
+			if !ok || assign.Op != "=" {
+				continue
+			}
+			member, ok := assign.Left.(*ast.MemberExpr)
+			if !ok || member.Computed {
+				continue
+			}
+			obj, ok := member.Object.(*ast.Identifier)
+			if !ok {
+				continue
+			}
+			prop, ok := member.Property.(*ast.Identifier)
+			if !ok {
+				continue
+			}
+			tag := obj.Name + "." + prop.Name
+			if rhs, ok := assign.Right.(*ast.Identifier); ok {
+				if fn := functions[rhs.Name]; fn != nil {
+					if _, exists := functions[tag]; !exists {
+						functions[tag] = fn
+					}
+				}
+			}
+		case *ast.BlockStmt:
+			collectMemberComponents(s.Body, functions)
+		case *ast.ForStmt:
+			collectMemberComponents(s.Body, functions)
+		case *ast.WhileStmt:
+			collectMemberComponents(s.Body, functions)
+		case *ast.DoWhileStmt:
+			collectMemberComponents(s.Body, functions)
+		case *ast.IfStmt:
+			collectMemberComponents(s.Consequent, functions)
+			collectMemberComponents(s.Alternate, functions)
+		case *ast.SwitchStmt:
+			for _, c := range s.Cases {
+				collectMemberComponents(c.Body, functions)
+			}
+		case *ast.TryStmt:
+			collectMemberComponents(s.Body, functions)
+			if s.Catch != nil {
+				collectMemberComponents(s.Catch.Body, functions)
+			}
+			collectMemberComponents(s.Finally, functions)
+		}
+	}
+}
+
 // recordComponentVarDecls registers named function-expression/arrow components
 // from a variable statement (e.g. `const Live = () => <p/>`). Component names
 // start with an uppercase letter, mirroring how JSX resolves identifiers.
@@ -553,6 +610,7 @@ func MergeModuleFunctions(ann *irtree.Annotations, modules []ModuleSource) {
 	for _, mod := range modules {
 		if mod.Program != nil {
 			collectFunctionsWithSource(mod.Program.Body, ann.Functions, ann.ComponentSources, ann.ComponentRaw, mod.Path, mod.RawSource)
+			collectMemberComponents(mod.Program.Body, ann.Functions)
 			// Merge module-level cva factories so variant calls in the entry
 			// module can fold against factories defined in imported modules.
 			if ann.CVAFactories == nil {

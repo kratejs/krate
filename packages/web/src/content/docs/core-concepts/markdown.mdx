@@ -91,7 +91,7 @@ Import a component, then wrap content in it with a `:::component` directive —
 the body is rendered as Markdown and passed to the component as HTML:
 
 ```mdx
-import { Card, Steps, Step } from '@krate/components';
+import { Card, Steps } from '@krate/components';
 
 :::component Card title="Getting started"
 Krate **compiles** Markdown into your components, with full Markdown inside.
@@ -121,7 +121,7 @@ Run `krate build`.
 :::
 ```
 
-The `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent`, `Steps`, `Step`, `Card`,
+The `Tabs` (`Tabs.List`/`Tabs.Trigger`/`Tabs.Content`), `Steps` (`Steps.Step`), `Card`,
 and `Code` components are imported automatically when their directive is used.
 
 ## MDX

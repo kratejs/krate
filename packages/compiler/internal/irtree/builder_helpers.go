@@ -62,6 +62,12 @@ func applyLocalStmts(stmts []ast.Stmt, locals, working map[string]string, sigMap
 				if name == "" || name == "children" || decl.IsDestructuring {
 					continue
 				}
+				// A first-class scope handle is compile-time state, never a
+				// runtime local. (A `Ctx.useContext()` read that is NOT a scope
+				// handle still folds to the context default here.)
+				if isCSSFactoryCall(decl.Init) {
+					continue
+				}
 				if decl.Init != nil {
 					// useId() resolves to a per-instance build-time literal so
 					// SSR and hydration agree without runtime state.
@@ -130,11 +136,11 @@ func isContextRead(expr ast.Expr) bool {
 		return false
 	}
 	if id, ok := call.Callee.(*ast.Identifier); ok {
-		return id.Name == "useContext"
+		return id.Name == "useContext" || id.Name == "use"
 	}
 	if mem, ok := call.Callee.(*ast.MemberExpr); ok {
 		if prop, ok := mem.Property.(*ast.Identifier); ok {
-			return prop.Name == "useContext"
+			return prop.Name == "useContext" || prop.Name == "use"
 		}
 	}
 	return false

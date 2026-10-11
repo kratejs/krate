@@ -60,9 +60,10 @@ func (a *Analyzer) validateJSX(el *ast.JSXElement, names map[string]bool) string
 		return ""
 	}
 	if !isIntrinsic(el.Opening.Name) {
-		if elementReferencesCSS(el, names) {
-			return "CSS state is used on a component element (" + el.Opening.Name + "); use a native HTML element"
-		}
+		// A scope handle is a first-class value: it may be passed to a child
+		// component as a prop, and the child resolves `props.scope.trigger(...)`
+		// / `.panel(...)` against it. Nothing else is legal on a component
+		// element, but those references are fine.
 		return ""
 	}
 
@@ -125,6 +126,9 @@ func (a *Analyzer) validateJSX(el *ast.JSXElement, names map[string]bool) string
 		case *ast.JSXExprContainer:
 			if _, ok := a.MatchText(c.Expression); ok {
 				continue // live text: driven by --krate-current, zero JS
+			}
+			if isScopeHelperCall(c.Expression, names) {
+				continue // scope handle: x.current() live text
 			}
 			if referencesCSS(c.Expression, names) {
 				return "the state is rendered as text; only showIf panels and onClick triggers are supported"
@@ -275,6 +279,33 @@ func (a *Analyzer) validateStmts(stmts []ast.Stmt, skip *ast.ReturnStmt, names m
 		}
 	}
 	return ""
+}
+
+// isScopeHelperCall reports whether expr is `X.<helper>(...)` where X is one of
+// the component's scope vars — the first-class scope-handle API (`x.current()`
+// live text; `x.trigger/panel/close` are normally spreads).
+func isScopeHelperCall(expr ast.Expr, names map[string]bool) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	mem, ok := call.Callee.(*ast.MemberExpr)
+	if !ok || mem.Computed {
+		return false
+	}
+	id, ok := mem.Object.(*ast.Identifier)
+	if !ok || !names[id.Name] {
+		return false
+	}
+	prop, ok := mem.Property.(*ast.Identifier)
+	if !ok {
+		return false
+	}
+	switch prop.Name {
+	case "current", "trigger", "panel", "close", "is", "on", "off":
+		return true
+	}
+	return false
 }
 
 // isCSSFactory reports whether a callee name is one of the CSS signal factories.

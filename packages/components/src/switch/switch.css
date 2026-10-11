@@ -2,24 +2,26 @@
   all: unset;
   display: inline-flex;
   align-items: center;
+  gap: 8px;
   width: 42px;
   height: 24px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid var(--krate-border, #3f3f46);
+  background: var(--krate-surface-hover, #e4e4e7);
+  border: 1px solid var(--krate-border, #e4e4e7);
   padding: 2px;
   cursor: pointer;
   transition: background 0.2s, border-color 0.2s;
+  box-sizing: border-box;
   flex-shrink: 0;
 }
 .krate-switch:hover {
-  border-color: var(--krate-text-muted, #52525b);
+  border-color: var(--krate-text-muted, #71717a);
 }
 .krate-switch:focus-visible {
-  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #3b82f6);
   outline-offset: 2px;
 }
-.krate-switch-checked {
+.krate-switch:has(input:checked) {
   background: var(--krate-primary, #3b82f6);
   border-color: var(--krate-primary, #3b82f6);
 }
@@ -32,10 +34,10 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   transition: transform 0.2s ease;
 }
-.krate-switch-checked > .krate-switch-thumb {
+.krate-switch:has(input:checked) > .krate-switch-thumb {
   transform: translateX(18px);
 }
-.krate-switch:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+:root[dir='rtl'] .krate-switch:has(input:checked) > .krate-switch-thumb,
+[dir='rtl'] .krate-switch:has(input:checked) > .krate-switch-thumb {
+  transform: translateX(-18px);
 }

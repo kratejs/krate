@@ -175,6 +175,21 @@ type builder struct {
 	// cssAnalyzers memoizes per-component CSS signal analysis (nil entries for
 	// components without any CSS signal declaration).
 	cssAnalyzers map[*ast.FnDecl]*csssignals.Analyzer
+	// scopeOverrides holds call-site option universes for compound scope-root
+	// components (their namespaced parts): fn -> options/initial. Consulted by
+	// cssAnalyzer so controllers/classes match the exact set of call-site parts.
+	scopeOverrides map[*ast.FnDecl]scopeSpec
+	// scopeHandles maps a local identifier (or `props.<name>`) to the CSS scope
+	// it holds, so `x.trigger(v)` / `x.panel(v)` / `x.close()` spreads resolve
+	// anywhere in any component (a handle can be passed to children as a prop).
+	scopeHandles map[string]scopeRef
+	// pendingScopeProps carries the parent's scope-valued props into the child
+	// component build so `props.<name>` resolves to the same handle.
+	pendingScopeProps map[string]scopeRef
+	// contextScopes maps an active context name (as provided by a
+	// `<Ctx.Provider value={scope}>` subtree) to the scope handle it carries, so
+	// `const s = Ctx.useContext()` inside a descendant resolves `s.trigger(...)`.
+	contextScopes map[string]scopeRef
 	// cssSignals is the analyzer for the component currently being walked, and
 	// cssToken its per-instance token. Both are nil/"" outside a CSS signal
 	// component. They drive trigger/panel interception in buildJSXSlot and the
@@ -257,7 +272,7 @@ func (b *builder) cssAnalyzer(fn *ast.FnDecl) *csssignals.Analyzer {
 	if b.cssIndex == nil {
 		b.cssIndex = make(map[string]int)
 	}
-	a := csssignals.Analyze(fn.Name, fn.Body, func(component, variable string) int {
+	indexFn := func(component, variable string) int {
 		key := component + "\x00" + variable
 		if idx, ok := b.cssIndex[key]; ok {
 			return idx
@@ -265,7 +280,13 @@ func (b *builder) cssAnalyzer(fn *ast.FnDecl) *csssignals.Analyzer {
 		idx := len(b.cssIndex)
 		b.cssIndex[key] = idx
 		return idx
-	})
+	}
+	var a *csssignals.Analyzer
+	if spec, ok := b.scopeOverrides[fn]; ok && len(spec.options) > 0 {
+		a = csssignals.AnalyzeParts(fn.Name, fn.Body, indexFn, spec.options, spec.initial)
+	} else {
+		a = csssignals.Analyze(fn.Name, fn.Body, indexFn)
+	}
 	b.cssAnalyzers[fn] = a
 	return a
 }

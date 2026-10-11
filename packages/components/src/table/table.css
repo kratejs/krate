@@ -1,39 +1,39 @@
 .krate-table-wrap {
   width: 100%;
   overflow-x: auto;
-  border: 1px solid var(--krate-border, #27272a);
+  border: 1px solid var(--krate-border, #e4e4e7);
   border-radius: 8px;
 }
 .krate-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.875rem;
-  color: var(--krate-text, #fafafa);
+  color: var(--krate-text, #09090b);
 }
 .krate-table-caption {
   caption-side: bottom;
   padding: 8px;
-  color: var(--krate-text-muted, #a1a1aa);
+  color: var(--krate-text-muted, #71717a);
   font-size: 0.8rem;
 }
 .krate-table-head {
   text-align: left;
   padding: 10px 14px;
   font-weight: 600;
-  color: var(--krate-text-muted, #a1a1aa);
-  border-bottom: 1px solid var(--krate-border, #27272a);
+  color: var(--krate-text-muted, #71717a);
+  border-bottom: 1px solid var(--krate-border, #e4e4e7);
   white-space: nowrap;
 }
 .krate-table-cell {
   padding: 10px 14px;
-  border-bottom: 1px solid var(--krate-border, #27272a);
+  border-bottom: 1px solid var(--krate-border, #e4e4e7);
   vertical-align: middle;
 }
 .krate-table-row:last-child .krate-table-cell {
   border-bottom: none;
 }
 .krate-table-body .krate-table-row:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--krate-surface, #f4f4f5);
 }
 .krate-table-footer .krate-table-cell {
   font-weight: 600;

@@ -60,6 +60,15 @@ type Decl struct {
 	AriaAttrs map[string]string
 	// Label is an optional accessible label for the scope container.
 	Label string
+	// FormName, when set, is the `name` the hidden controllers submit under.
+	FormName string
+	// Disabled lists options whose controller input is disabled.
+	Disabled []string
+	// Anchor positions the panel relative to its trigger via CSS anchor
+	// positioning (e.g. "bottom-start"); "" = none.
+	Anchor string
+	// Transition fades/slides panels on show.
+	Transition bool
 	// Min/Max/Step are the literal numeric bounds for createCSSRange.
 	Min, Max, Step string
 	// Tree maps each stack node to its parent ("" for the root) and Nodes lists
@@ -93,7 +102,7 @@ func Find(body []ast.Stmt, recurse bool) []Decl {
 			switch s := stmt.(type) {
 			case *ast.VarStmt:
 				for _, decl := range s.Decls {
-					if !decl.IsDestructuring || decl.Init == nil {
+					if decl.Init == nil {
 						continue
 					}
 					call, ok := decl.Init.(*ast.CallExpr)
@@ -104,63 +113,79 @@ func Find(body []ast.Stmt, recurse bool) []Decl {
 					if !ok {
 						continue
 					}
+					names := decl.Names
+					if !decl.IsDestructuring {
+						if decl.Name == "" {
+							continue
+						}
+						// A handle-form declaration: `const tab = createCSSChoice(...)`.
+						names = []string{decl.Name}
+					}
 					switch id.Name {
 					case "createSignal":
-						if len(decl.Names) >= 2 && len(call.Args) >= 1 {
-							out = append(out, Decl{Name: decl.Names[0], Setter: decl.Names[1], Initial: call.Args[0], Factory: "createSignal", Args: call.Args})
+						if len(names) >= 2 && len(call.Args) >= 1 {
+							out = append(out, Decl{Name: names[0], Setter: names[1], Initial: call.Args[0], Factory: "createSignal", Args: call.Args})
 						}
 					case "createReducer":
 						// Reducer state getter: the initial value is the second
 						// argument (reducer, initial) - the third for the
 						// optional init function form.
-						if len(decl.Names) >= 2 && len(call.Args) >= 2 {
-							out = append(out, Decl{Name: decl.Names[0], Setter: decl.Names[1], Initial: call.Args[1], Factory: "createReducer", Args: call.Args})
+						if len(names) >= 2 && len(call.Args) >= 2 {
+							out = append(out, Decl{Name: names[0], Setter: names[1], Initial: call.Args[1], Factory: "createReducer", Args: call.Args})
 						}
 					case "createResource":
-						if len(decl.Names) >= 1 && len(call.Args) >= 1 {
-							out = append(out, Decl{Name: decl.Names[0], Initial: call.Args[0], IsResource: true})
+						if len(names) >= 1 && len(call.Args) >= 1 {
+							out = append(out, Decl{Name: names[0], Initial: call.Args[0], IsResource: true})
 						}
 					case "createCSSChoice":
-						if len(decl.Names) >= 2 && len(call.Args) >= 1 {
+						if len(names) >= 1 && len(call.Args) >= 1 {
 							d := Decl{
-								Name:     decl.Names[0],
-								Setter:   decl.Names[1],
+								Name:     names[0],
+								Setter:   setterOf(names),
 								Initial:  call.Args[0],
 								CSSKind:  CSSKindChoice,
-								Names:    append([]string(nil), decl.Names...),
+								Names:    append([]string(nil), names...),
 								RestName: decl.RestName,
 							}
 							if len(call.Args) >= 2 {
 								d.Options, d.As, d.Aria, d.AriaAttrs, d.Label = parseCSSOptions(call.Args[1], true)
 							}
 							d.Vars, d.VarErr = literalVarsInArgs(call.Args[1:])
+							d.FormName = objectStringProp(call.Args[1:], "name")
+							d.Disabled = objectStringArrayProp(call.Args[1:], "disabled")
+							d.Anchor = objectStringProp(call.Args[1:], "anchor")
+							d.Transition = objectBoolProp(call.Args[1:], "transition")
 							out = append(out, d)
 						}
 					case "createCSSToggle":
-						if len(decl.Names) >= 2 && len(call.Args) >= 1 {
+						if len(names) >= 1 && len(call.Args) >= 1 {
 							d := Decl{
-								Name:     decl.Names[0],
-								Setter:   decl.Names[1],
+								Name:     names[0],
+								Setter:   setterOf(names),
 								Initial:  call.Args[0],
 								CSSKind:  CSSKindToggle,
 								Options:  []string{"on"},
-								Names:    append([]string(nil), decl.Names...),
+								Names:    append([]string(nil), names...),
 								RestName: decl.RestName,
 							}
 							if len(call.Args) >= 2 {
 								_, d.As, d.Aria, d.AriaAttrs, d.Label = parseCSSOptions(call.Args[1], false)
 							}
 							d.Vars, d.VarErr = literalVarsInArgs(call.Args[1:])
+							d.FormName = objectStringProp(call.Args[1:], "name")
+							d.Disabled = objectStringArrayProp(call.Args[1:], "disabled")
+							d.Anchor = objectStringProp(call.Args[1:], "anchor")
+							d.Transition = objectBoolProp(call.Args[1:], "transition")
 							out = append(out, d)
 						}
 					case "createCSSFlags":
-						if len(decl.Names) >= 2 && len(call.Args) >= 1 {
+						if len(names) >= 1 && len(call.Args) >= 1 {
 							d := Decl{
-								Name:     decl.Names[0],
-								Setter:   decl.Names[1],
+								Name:     names[0],
+								Setter:   setterOf(names),
 								Initial:  nil,
 								CSSKind:  CSSKindFlags,
-								Names:    append([]string(nil), decl.Names...),
+								Names:    append([]string(nil), names...),
 								RestName: decl.RestName,
 							}
 							d.Options, d.As, d.Aria, d.AriaAttrs, d.Label = parseCSSOptions(call.Args[0], true)
@@ -168,32 +193,40 @@ func Find(body []ast.Stmt, recurse bool) []Decl {
 								_, d.As, d.Aria, d.AriaAttrs, d.Label = parseCSSOptions(call.Args[1], false)
 							}
 							d.Vars, d.VarErr = literalVarsInArgs(call.Args)
+							d.FormName = objectStringProp(call.Args[1:], "name")
+							d.Disabled = objectStringArrayProp(call.Args[1:], "disabled")
+							d.Anchor = objectStringProp(call.Args[1:], "anchor")
+							d.Transition = objectBoolProp(call.Args[1:], "transition")
 							out = append(out, d)
 						}
 					case "createCSSGroup":
-						if len(decl.Names) >= 2 && len(call.Args) >= 1 {
+						if len(names) >= 1 && len(call.Args) >= 1 {
 							d := Decl{
-								Name:     decl.Names[0],
-								Setter:   decl.Names[1],
+								Name:     names[0],
+								Setter:   setterOf(names),
 								Initial:  call.Args[0],
 								CSSKind:  CSSKindGroup,
-								Names:    append([]string(nil), decl.Names...),
+								Names:    append([]string(nil), names...),
 								RestName: decl.RestName,
 							}
 							if len(call.Args) >= 2 {
 								d.Options, d.As, d.Aria, d.AriaAttrs, d.Label = parseCSSOptions(call.Args[1], true)
 							}
 							d.Vars, d.VarErr = literalVarsInArgs(call.Args[1:])
+							d.FormName = objectStringProp(call.Args[1:], "name")
+							d.Disabled = objectStringArrayProp(call.Args[1:], "disabled")
+							d.Anchor = objectStringProp(call.Args[1:], "anchor")
+							d.Transition = objectBoolProp(call.Args[1:], "transition")
 							out = append(out, d)
 						}
 					case "createCSSRange":
-						if len(decl.Names) >= 2 && len(call.Args) >= 1 {
+						if len(names) >= 1 && len(call.Args) >= 1 {
 							d := Decl{
-								Name:     decl.Names[0],
-								Setter:   decl.Names[1],
+								Name:     names[0],
+								Setter:   setterOf(names),
 								Initial:  call.Args[0],
 								CSSKind:  CSSKindRange,
-								Names:    append([]string(nil), decl.Names...),
+								Names:    append([]string(nil), names...),
 								RestName: decl.RestName,
 							}
 							if len(call.Args) >= 2 {
@@ -201,23 +234,31 @@ func Find(body []ast.Stmt, recurse bool) []Decl {
 								d.Min, d.Max, d.Step = literalNumProp(call.Args[1], "min"), literalNumProp(call.Args[1], "max"), literalNumProp(call.Args[1], "step")
 							}
 							d.Vars, d.VarErr = literalVarsInArgs(call.Args[1:])
+							d.FormName = objectStringProp(call.Args[1:], "name")
+							d.Disabled = objectStringArrayProp(call.Args[1:], "disabled")
+							d.Anchor = objectStringProp(call.Args[1:], "anchor")
+							d.Transition = objectBoolProp(call.Args[1:], "transition")
 							out = append(out, d)
 						}
 					case "createCSSStack":
-						if len(decl.Names) >= 2 && len(call.Args) >= 1 {
+						if len(names) >= 1 && len(call.Args) >= 1 {
 							d := Decl{
-								Name:     decl.Names[0],
-								Setter:   decl.Names[1],
+								Name:     names[0],
+								Setter:   setterOf(names),
 								Initial:  nil,
 								CSSKind:  CSSKindStack,
 								Options:  literalStringOptions(call.Args[0]),
-								Names:    append([]string(nil), decl.Names...),
+								Names:    append([]string(nil), names...),
 								RestName: decl.RestName,
 							}
 							if len(call.Args) >= 2 {
 								_, d.As, d.Aria, d.AriaAttrs, d.Label = parseCSSOptions(call.Args[1], false)
 							}
 							d.Vars, d.VarErr = literalVarsInArgs(call.Args[1:])
+							d.FormName = objectStringProp(call.Args[1:], "name")
+							d.Disabled = objectStringArrayProp(call.Args[1:], "disabled")
+							d.Anchor = objectStringProp(call.Args[1:], "anchor")
+							d.Transition = objectBoolProp(call.Args[1:], "transition")
 							out = append(out, d)
 						}
 					}
@@ -434,6 +475,70 @@ func literalVarsProp(expr ast.Expr) (vars map[string]map[string]string, err stri
 		vars[prop.Key] = vals
 	}
 	return vars, ""
+}
+
+// objectStringProp returns the string value of `key` from the first options
+// object among the arguments, or "".
+func objectStringProp(args []ast.Expr, key string) string {
+	for _, a := range args {
+		obj, ok := a.(*ast.ObjectExpr)
+		if !ok {
+			continue
+		}
+		for _, p := range obj.Properties {
+			if p != nil && p.Key == key {
+				if v, ok := literalStringValue(p.Value); ok {
+					return v
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// objectBoolProp returns the boolean value of `key` from the first options
+// object among the arguments.
+func objectBoolProp(args []ast.Expr, key string) bool {
+	for _, a := range args {
+		obj, ok := a.(*ast.ObjectExpr)
+		if !ok {
+			continue
+		}
+		for _, p := range obj.Properties {
+			if p != nil && p.Key == key {
+				if lit, ok := p.Value.(*ast.Literal); ok && lit.Kind == ast.BoolLit {
+					return lit.Value == "true"
+				}
+			}
+		}
+	}
+	return false
+}
+
+// objectStringArrayProp returns the string values of `key` from the first
+// options object among the arguments, or nil.
+func objectStringArrayProp(args []ast.Expr, key string) []string {
+	for _, a := range args {
+		obj, ok := a.(*ast.ObjectExpr)
+		if !ok {
+			continue
+		}
+		for _, p := range obj.Properties {
+			if p != nil && p.Key == key {
+				return literalStringOptions(p.Value)
+			}
+		}
+	}
+	return nil
+}
+
+// setterOf returns the second destructured name when present, or "" for a
+// handle-form declaration (`const tab = createCSSChoice(...)` has no setter).
+func setterOf(names []string) string {
+	if len(names) >= 2 {
+		return names[1]
+	}
+	return ""
 }
 
 // literalVarsInArgs scans the trailing option arguments of a factory call for a

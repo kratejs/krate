@@ -15,6 +15,11 @@ categories:
 
 # Getting Started
 
+:::warning Active development
+Krate is under **active development** and is not yet stable. APIs, generated
+output, and configuration may change between releases.
+:::
+
 This guide walks you through installing the Krate CLI, scaffolding a project,
 and building your first page.
 

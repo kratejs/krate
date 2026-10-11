@@ -7,8 +7,10 @@ import (
 )
 
 // activeTriggerDecl is the declaration block applied to a selected trigger.
-// Themes override it via the --krate-css-active* custom properties.
-const activeTriggerDecl = "color:var(--krate-css-active-fg,inherit);border-bottom:2px solid var(--krate-css-active,#3b82f6);font-weight:600"
+// Themes override the colours via --krate-css-active*; components read the
+// inherited --krate-active (0/1) and --krate-active-color hooks to render their
+// own selected visuals (radio dots, tab underlines, toggle fills) with zero JS.
+const activeTriggerDecl = "color:var(--krate-css-active-fg,inherit);font-weight:600;--krate-active:1;--krate-active-color:var(--krate-css-active,var(--krate-primary,#f97316));--krate-active-bg:color-mix(in srgb,var(--krate-css-active,var(--krate-primary,#f97316)) 15%,transparent)"
 
 // HiddenCSS is the base rule for the visually-hidden controller inputs. They
 // stay focusable (unlike display:none) so keyboard navigation and screen readers
@@ -29,6 +31,9 @@ func Stylesheet(scopes []*Scope, conditions []*Condition) string {
 	b.WriteByte('\n')
 	for _, s := range scopes {
 		b.WriteString(s.css())
+		b.WriteString(s.focusCSS())
+		b.WriteString(s.anchorCSS())
+		b.WriteString(s.transitionCSS())
 	}
 	for _, c := range sortedConditions(conditions) {
 		if c.needsExplicitRule() {
@@ -39,7 +44,139 @@ func Stylesheet(scopes []*Scope, conditions []*Condition) string {
 		b.WriteString(LiveTextCSS)
 		b.WriteByte('\n')
 	}
+	b.WriteString(disabledCSS(scopes))
+	b.WriteString(noHasFallback(scopes, conditions))
 	return b.String()
+}
+
+// triggerSel matches the trigger for an option whether it is a descendant of the
+// scope anchor or the anchor element itself (a single-element toggle, where the
+// scope class and trigger class share one element).
+func (s *Scope) triggerSel(ctrl, state, option string) string {
+	t := s.TriggerClass(option)
+	return "." + s.Class + ":has(." + ctrl + state + ") ." + t + ",." + s.Class + "." + t + ":has(." + ctrl + state + ")"
+}
+
+// focusCSS shows a focus ring on a trigger's visible label when its (hidden)
+// controller input has keyboard focus, since the label itself is not focused.
+func (s *Scope) focusCSS() string {
+	var b strings.Builder
+	for _, opt := range s.Options {
+		ctrl := s.CheckboxClass(opt)
+		if s.isChoiceLike() {
+			ctrl = s.RadioClass(opt)
+		}
+		b.WriteString(s.triggerSel(ctrl, ":focus-visible", opt))
+		b.WriteString("{outline:2px solid var(--krate-focus-ring,#f97316);outline-offset:2px}\n")
+	}
+	return b.String()
+}
+
+// anchorCSS positions each option's panel relative to its trigger using CSS
+// anchor positioning (progressive: ignored by browsers without support, which
+// fall back to the component's own positioning).
+func (s *Scope) anchorCSS() string {
+	if s.Anchor == "" {
+		return ""
+	}
+	decl := anchorDecl(s.Anchor)
+	if decl == "" {
+		return ""
+	}
+	var b strings.Builder
+	alt := s.TriggerAltClass("")
+	for _, opt := range s.Options {
+		if opt == s.Sentinel {
+			continue
+		}
+		anchor := "--" + s.Class + "-" + sanitizeToken(opt)
+		b.WriteString("." + s.Class + " ." + s.TriggerClass(opt) + ":not(." + alt + "){anchor-name:" + anchor + "}\n")
+		b.WriteString("." + s.Class + " ." + s.PanelWrapperClass(opt, false) + ">*{position-anchor:" + anchor + ";" + decl + "}\n")
+	}
+	return b.String()
+}
+
+// anchorDecl returns the anchor()-based positioning for a side.
+func anchorDecl(side string) string {
+	switch side {
+	case "bottom":
+		return "top:anchor(bottom);justify-self:anchor-center"
+	case "bottom-start":
+		return "top:anchor(bottom);left:anchor(left)"
+	case "bottom-end":
+		return "top:anchor(bottom);right:anchor(right)"
+	case "top":
+		return "bottom:anchor(top);justify-self:anchor-center"
+	case "top-start":
+		return "bottom:anchor(top);left:anchor(left)"
+	case "top-end":
+		return "bottom:anchor(top);right:anchor(right)"
+	case "right":
+		return "left:anchor(right);align-self:anchor-center"
+	case "left":
+		return "right:anchor(left);align-self:anchor-center"
+	}
+	return ""
+}
+
+// transitionCSS fades/slides a panel when it becomes rendered (open). Close is
+// not animated (the wrapper is display:none); this is a progressive enhancement.
+func (s *Scope) transitionCSS() string {
+	if !s.Transition {
+		return ""
+	}
+	var b strings.Builder
+	for _, opt := range s.Options {
+		if opt == s.Sentinel {
+			continue
+		}
+		child := "." + s.Class + " ." + s.PanelWrapperClass(opt, false) + ">*"
+		b.WriteString(child + "{transition:opacity .18s ease,translate .18s ease}\n")
+		b.WriteString("@starting-style{" + child + "{opacity:0;translate:0 -.25rem}}\n")
+	}
+	return b.String()
+}
+
+// disabledCSS dims triggers whose option's controller input is disabled.
+func disabledCSS(scopes []*Scope) string {
+	var parts []string
+	for _, s := range scopes {
+		for _, opt := range s.Disabled {
+			parts = append(parts, "."+s.Class+" ."+s.TriggerClass(opt))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, ",") + "{pointer-events:none;opacity:.5}\n"
+}
+
+// noHasFallback reveals every panel wrapper when the browser does not support
+// `:has()`, so content stays visible (the interactive reveal degrades to
+// "everything shown") instead of every panel being display:none. It is a no-op
+// on browsers that support `:has()` (2023+).
+func noHasFallback(scopes []*Scope, conditions []*Condition) string {
+	set := make(map[string]bool)
+	for _, s := range scopes {
+		for _, opt := range s.Options {
+			set["."+s.Class+" ."+s.PanelWrapperClass(opt, false)] = true
+			set["."+s.Class+" ."+s.PanelWrapperClass(opt, true)] = true
+		}
+	}
+	for _, c := range conditions {
+		if o := c.owningScope(); o != nil {
+			set["."+o.Class+" ."+c.Class] = true
+		}
+	}
+	if len(set) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(set))
+	for k := range set {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return "@supports not selector(:has(*)){" + strings.Join(keys, ",") + "{display:contents}}\n"
 }
 
 // sortedConditions returns a deterministic copy ordered by owning scope index
@@ -191,8 +328,25 @@ func (s *Scope) choiceCSS() string {
 	b.WriteString("{display:contents}\n")
 
 	for _, opt := range s.Options {
-		b.WriteString("." + s.Class + ":has(." + s.RadioClass(opt) + ":checked) ." + s.TriggerClass(opt))
+		b.WriteString(s.triggerSel(s.RadioClass(opt), ":checked", opt))
 		b.WriteString("{" + activeTriggerDecl + "}\n")
+	}
+	// Group scopes emit a second "close" label per option, shown only while the
+	// option is selected, so a repeat click closes the group.
+	if s.Kind == KindGroup {
+		for _, opt := range s.Options {
+			if opt == s.Sentinel {
+				continue
+			}
+			b.WriteString("." + s.Class + " ." + s.TriggerAltClass(opt) + "{display:none}\n")
+		}
+		for _, opt := range s.Options {
+			if opt == s.Sentinel {
+				continue
+			}
+			b.WriteString("." + s.Class + ":has(." + s.RadioClass(opt) + ":checked) ." + s.TriggerAltClass(opt) + "{display:inline-flex;" + activeTriggerDecl + "}\n")
+			b.WriteString("." + s.Class + ":has(." + s.RadioClass(opt) + ":checked) ." + s.TriggerClass(opt) + ":not(." + s.TriggerAltClass(opt) + "){display:none}\n")
+		}
 	}
 	b.WriteString(s.varsCSS())
 	return b.String()
@@ -239,7 +393,7 @@ func (s *Scope) toggleCSS() string {
 	b.WriteString("." + s.Class + ":has(." + cb + ":checked) ." + on)
 	b.WriteString(",." + s.Class + ":not(:has(." + cb + ":checked)) ." + off)
 	b.WriteString("{display:contents}\n")
-	b.WriteString("." + s.Class + ":has(." + cb + ":checked) ." + s.TriggerClass(""))
+	b.WriteString(s.triggerSel(cb, ":checked", ""))
 	b.WriteString("{" + activeTriggerDecl + "}\n")
 	b.WriteString(s.toggleVarsCSS(cb))
 	return b.String()
@@ -298,7 +452,7 @@ func (s *Scope) flagsCSS() string {
 		b.WriteString("." + s.Class + ":has(." + cb + ":checked) ." + on)
 		b.WriteString(",." + s.Class + ":not(:has(." + cb + ":checked)) ." + off)
 		b.WriteString("{display:contents}\n")
-		b.WriteString("." + s.Class + ":has(." + cb + ":checked) ." + s.TriggerClass(opt))
+		b.WriteString(s.triggerSel(cb, ":checked", opt))
 		b.WriteString("{" + activeTriggerDecl + "}\n")
 	}
 	return b.String()

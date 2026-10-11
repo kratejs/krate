@@ -415,3 +415,59 @@ footer {
   color: var(--text);
   font-weight: 600;
 }
+
+/* @krate/components ships the base-docs-theme as its default theme; the examples
+   page is dark, so just request the dark scheme and let the library defaults
+   apply unchanged. */
+html:root {
+  color-scheme: dark;
+}
+
+/* Modern demo page spacing */
+.zerojs-demo,
+.interactive-demo,
+.tabs-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.zerojs-demo h1,
+.interactive-demo h1,
+.tabs-demo h1 {
+  margin-bottom: 0.25rem;
+}
+.zerojs-demo section,
+.interactive-demo section,
+.tabs-demo section {
+  padding: 1.25rem 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.zerojs-demo h2,
+.interactive-demo h2,
+.tabs-demo h2 {
+  font-size: 1.05rem;
+  margin-bottom: 0;
+  color: var(--primary);
+}
+.demo-section-content {
+  gap: 16px;
+}
+
+/* Space out clustered controls (buttons, toggles, inputs) on the demo pages. */
+.ui-demo section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ui-demo .hero-actions,
+.ui-demo div[style*='display: flex'] {
+  row-gap: 10px;
+  column-gap: 10px;
+  flex-wrap: wrap;
+}
+

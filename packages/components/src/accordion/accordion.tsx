@@ -1,137 +1,138 @@
 import './accordion.css';
-import { createSignal, createEffect } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSGroup, createCSSFlags, type CSSScope, type CSSFlagsScope } from '@krate/runtime';
+
+const AccordionCtx = createScope<string | null>();
+const AccordionMultiCtx = createScopeFlags<string>();
 
 export interface AccordionProps {
+  /** Literal initial open item value. */
+  defaultValue?: string;
+  label?: string;
   children?: any;
-  type?: 'single' | 'multiple';
-  defaultValue?: string[];
-  value?: string[];
-  onValueChange?: (value: string[]) => void;
-  collapsible?: boolean;
 }
 
+/**
+ * Single-open accordion. Zero JS via a CSS scope provided through context.
+ *
+ * ```tsx
+ * <Accordion defaultValue="q1">
+ *   <Accordion.Item>
+ *     <Accordion.Trigger value="q1">Question</Accordion.Trigger>
+ *     <Accordion.Content value="q1">Answer</Accordion.Content>
+ *   </Accordion.Item>
+ * </Accordion>
+ * ```
+ */
 export function Accordion(props: AccordionProps) {
-  var type = props.type || "single";
-  var collapsible = props.collapsible || false;
-  var rootRef: HTMLElement | null = null;
-  var [openItems, setOpenItems] = createSignal<string[]>(props.defaultValue || []);
-
-  createEffect(function () {
-    if (props.value !== undefined) {
-      setOpenItems(props.value);
-    }
-  });
-
-  createEffect(function () {
-    var open = openItems();
-    var root = rootRef;
-    if (root) {
-      syncDOM(root, open);
-    }
-  });
-
-  function syncDOM(root: HTMLElement, open: string[]) {
-    var items = root.querySelectorAll("[data-krate-accordion-item]");
-    for (var i = 0; i < items.length; i++) {
-      var el = items[i] as HTMLElement;
-      var val = el.getAttribute("data-value");
-      var isOpen = open.indexOf(val!) >= 0;
-      el.setAttribute("data-state", isOpen ? "open" : "closed");
-      var content = el.querySelector("[data-krate-accordion-content]") as HTMLElement;
-      if (content) {
-        content.setAttribute("data-state", isOpen ? "open" : "closed");
-      }
-    }
-  }
-
-  function handleClick(e: MouseEvent) {
-    var trigger = (e.target as HTMLElement).closest("[data-krate-accordion-trigger]");
-    if (trigger) {
-      var item = trigger.closest("[data-krate-accordion-item]");
-      if (item) {
-        var value = item.getAttribute("data-value");
-        var root = (e.target as HTMLElement).closest("[data-krate-accordion]") as HTMLElement;
-        if (root) rootRef = root;
-        var accType = root ? root.getAttribute("data-type") : "single";
-        var accCollapsible = root ? root.getAttribute("data-collapsible") === "true" : false;
-        var isOpen = item.getAttribute("data-state") === "open";
-        if (value) {
-          setOpenItems(function (prev) {
-            var next: string[];
-            if (accType === "single") {
-              if (isOpen) {
-                next = accCollapsible ? [] : [value!];
-              } else {
-                next = [value!];
-              }
-            } else {
-              if (isOpen) {
-                next = prev.filter(function (v) { return v !== value; });
-              } else {
-                next = prev.concat([value!]);
-              }
-            }
-            if (root) {
-              syncDOM(root, next);
-            }
-            return next;
-          });
-        }
-      }
-    }
-  }
-
+  const open = createCSSGroup<string>(null, { as: 'accordion', label: props.label });
   return (
-    <div ref={(el) => { rootRef = el as HTMLElement; }} class="krate-accordion" data-krate-accordion="true" data-type={type} data-collapsible={collapsible} onClick={handleClick}>
-      {props.children}
-    </div>
+    <AccordionCtx.Provider value={open}>
+      <div class="krate-accordion">{props.children}</div>
+    </AccordionCtx.Provider>
+  );
+}
+
+export interface AccordionMultipleProps {
+  label?: string;
+  children?: any;
+}
+
+/** Multiple-open accordion: each item toggles independently (checkboxes). */
+export function AccordionMultiple(props: AccordionMultipleProps) {
+  const open = createCSSFlags<string>([], { as: 'accordion', label: props.label });
+  return (
+    <AccordionMultiCtx.Provider value={open}>
+      <div class="krate-accordion">{props.children}</div>
+    </AccordionMultiCtx.Provider>
   );
 }
 
 export interface AccordionItemProps {
   children?: any;
-  value?: string;
 }
 
+/** @deprecated Use `Accordion.Item` instead. */
+/** @deprecated Use `AccordionMultiple.Item` instead. */
 export function AccordionItem(props: AccordionItemProps) {
-  var value = props.value || "";
-  return (
-    <div class="krate-accordion-item" data-value={value} data-state="closed" data-krate-accordion-item="true">
-      {props.children}
-    </div>
-  );
+  return <div class="krate-accordion-item">{props.children}</div>;
 }
 
 export interface AccordionTriggerProps {
+  value?: string;
   children?: any;
-  icon?: string;
 }
 
+/** @deprecated Use `Accordion.Trigger` instead. */
 export function AccordionTrigger(props: AccordionTriggerProps) {
-  var children = props.children || "";
+  const open = AccordionCtx.use();
   return (
-    <div class="krate-accordion-trigger" data-krate-accordion-trigger="true">
-      <span class="krate-accordion-trigger-text">{children}</span>
-      <span class="krate-accordion-trigger-icon">
+    <button class="krate-accordion-trigger" type="button" {...open.trigger(props.value)}>
+      <span class="krate-accordion-trigger-text">{props.children}</span>
+      <span class="krate-accordion-trigger-icon" aria-hidden="true">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="m6 9 6 6 6-6"/>
+          <path d="m6 9 6 6 6-6" />
         </svg>
       </span>
-    </div>
+    </button>
+  );
+}
+
+/** @deprecated Use `AccordionMultiple.Trigger` instead. */
+export function AccordionMultipleTrigger(props: AccordionTriggerProps) {
+  const open = AccordionMultiCtx.use();
+  return (
+    <button class="krate-accordion-trigger" type="button" {...open.trigger(props.value as string)}>
+      <span class="krate-accordion-trigger-text">{props.children}</span>
+      <span class="krate-accordion-trigger-icon" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </span>
+    </button>
   );
 }
 
 export interface AccordionContentProps {
+  value?: string;
   children?: any;
 }
 
+/** @deprecated Use `Accordion.Content` instead. */
 export function AccordionContent(props: AccordionContentProps) {
-  var children = props.children || "";
+  const open = AccordionCtx.use();
   return (
-    <div class="krate-accordion-content" data-state="closed" data-krate-accordion-content="true">
-      <div class="krate-accordion-content-inner">
-        {children}
-      </div>
+    <div class="krate-accordion-content" {...open.panel(props.value)}>
+      <div class="krate-accordion-content-inner">{props.children}</div>
     </div>
   );
 }
+
+/** @deprecated Use `AccordionMultiple.Content` instead. */
+export function AccordionMultipleContent(props: AccordionContentProps) {
+  const open = AccordionMultiCtx.use();
+  return (
+    <div class="krate-accordion-content" {...open.panel(props.value as string)}>
+      <div class="krate-accordion-content-inner">{props.children}</div>
+    </div>
+  );
+}
+
+export interface Accordion {
+  Item: typeof AccordionItem;
+  Trigger: typeof AccordionTrigger;
+  Content: typeof AccordionContent;
+}
+
+Accordion.Item = AccordionItem;
+Accordion.Trigger = AccordionTrigger;
+Accordion.Content = AccordionContent;
+
+export interface AccordionMultiple {
+  Item: typeof AccordionItem;
+  Trigger: typeof AccordionMultipleTrigger;
+  Content: typeof AccordionMultipleContent;
+}
+
+AccordionMultiple.Item = AccordionItem;
+AccordionMultiple.Trigger = AccordionMultipleTrigger;
+AccordionMultiple.Content = AccordionMultipleContent;

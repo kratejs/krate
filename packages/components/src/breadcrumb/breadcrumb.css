@@ -15,18 +15,18 @@
   align-items: center;
 }
 .krate-breadcrumb-link {
-  color: var(--krate-text-muted, #a1a1aa);
+  color: var(--krate-text-muted, #71717a);
   text-decoration: none;
   transition: color 0.15s;
 }
 .krate-breadcrumb-link:hover {
-  color: var(--krate-text, #fafafa);
+  color: var(--krate-text, #09090b);
 }
 .krate-breadcrumb-page {
-  color: var(--krate-text, #fafafa);
+  color: var(--krate-text, #09090b);
   font-weight: 500;
 }
 .krate-breadcrumb-separator {
-  color: var(--krate-text-muted, #52525b);
+  color: var(--krate-text-muted, #71717a);
   user-select: none;
 }

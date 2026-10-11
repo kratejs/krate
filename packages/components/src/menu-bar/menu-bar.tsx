@@ -1,91 +1,48 @@
 import './menu-bar.css';
-import { createSignal } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+
+const MenuBarCtx = createScope<string | null>();
 
 export interface MenuBarProps {
+  label?: string;
   children?: any;
 }
 
+/** Menu bar. Zero JS: one radio group whose selected option is the open menu. */
 export function MenuBar(props: MenuBarProps) {
+  const open = createCSSGroup<string>(null, { as: 'menubar', label: props.label });
   return (
-    <div class="krate-menu-bar" role="menubar">
-      {props.children}
-    </div>
-  );
-}
-
-export interface MenuBarMenuProps {
-  children?: any;
-}
-
-export function MenuBarMenu(props: MenuBarMenuProps) {
-  var [open, setOpen] = createSignal(false);
-  var rootRef: HTMLElement | null = null;
-
-  function registerCloseListener(root: HTMLElement) {
-    if ((root as any).__krateMenuBarClose) return;
-    (root as any).__krateMenuBarClose = true;
-    root.addEventListener("krate:menu-bar-close", function () {
-      setOpen(false);
-    });
-  }
-
-  function handleClick(e: MouseEvent) {
-    var root = (e.target as HTMLElement).closest(".krate-menu-bar-menu") as HTMLElement;
-    if (root) {
-      rootRef = root;
-      registerCloseListener(root);
-    }
-
-    var trigger = (e.target as HTMLElement).closest("[data-krate-menu-bar-trigger]");
-    if (trigger) {
-      var next = !open();
-      if (next && root) {
-        var bar = root.closest(".krate-menu-bar") as HTMLElement;
-        if (bar) {
-          var menus = bar.querySelectorAll(".krate-menu-bar-menu");
-          for (var i = 0; i < menus.length; i++) {
-            var sibling = menus[i] as HTMLElement;
-            if (sibling !== root && sibling.getAttribute("data-state") === "open") {
-              sibling.dispatchEvent(new CustomEvent("krate:menu-bar-close"));
-            }
-          }
-        }
-      }
-      setOpen(next);
-      return;
-    }
-    var item = (e.target as HTMLElement).closest("[data-krate-menu-bar-item]");
-    if (item && open()) {
-      setOpen(false);
-    }
-  }
-
-  return (
-    <div class="krate-menu-bar-menu" data-state={open() ? "open" : "closed"} onClick={handleClick}>
-      {props.children}
-    </div>
+    <MenuBarCtx.Provider value={open}>
+      <div class="krate-menu-bar">{props.children}</div>
+    </MenuBarCtx.Provider>
   );
 }
 
 export interface MenuBarTriggerProps {
+  value?: string;
   children?: any;
 }
 
+/** @deprecated Use `MenuBar.Trigger` instead. */
 export function MenuBarTrigger(props: MenuBarTriggerProps) {
+  const open = MenuBarCtx.use();
   return (
-    <button class="krate-menu-bar-trigger" type="button" role="menuitem" data-krate-menu-bar-trigger="true">
+    <button class="krate-menu-bar-trigger" type="button" {...open.trigger(props.value)}>
       {props.children}
     </button>
   );
 }
 
 export interface MenuBarContentProps {
+  value?: string;
   children?: any;
 }
 
+/** @deprecated Use `MenuBar.Content` instead. */
 export function MenuBarContent(props: MenuBarContentProps) {
+  const open = MenuBarCtx.use();
   return (
-    <div class="krate-menu-bar-content" role="menu" data-krate-menu-bar-content="true">
+    <div class="krate-menu-bar-content" {...open.panel(props.value)}>
       {props.children}
     </div>
   );
@@ -93,21 +50,20 @@ export function MenuBarContent(props: MenuBarContentProps) {
 
 export interface MenuBarItemProps {
   children?: any;
-  disabled?: boolean;
 }
 
+/** @deprecated Use `MenuBar.Item` instead. */
 export function MenuBarItem(props: MenuBarItemProps) {
+  const open = MenuBarCtx.use();
   return (
-    <div class={"krate-menu-bar-item" + (props.disabled ? " krate-menu-bar-item-disabled" : "")} role="menuitem" data-krate-menu-bar-item="true">
+    <button class="krate-menu-bar-item" type="button" {...open.close()}>
       {props.children}
-    </div>
+    </button>
   );
 }
 
-export interface MenuBarSeparatorProps {
-}
-
-export function MenuBarSeparator(props: MenuBarSeparatorProps) {
+/** @deprecated Use `MenuBar.Separator` instead. */
+export function MenuBarSeparator() {
   return <div class="krate-menu-bar-separator" role="separator" />;
 }
 
@@ -115,6 +71,21 @@ export interface MenuBarLabelProps {
   children?: any;
 }
 
+/** @deprecated Use `MenuBar.Label` instead. */
 export function MenuBarLabel(props: MenuBarLabelProps) {
   return <div class="krate-menu-bar-label">{props.children}</div>;
 }
+
+export interface MenuBar {
+  Trigger: typeof MenuBarTrigger;
+  Content: typeof MenuBarContent;
+  Item: typeof MenuBarItem;
+  Separator: typeof MenuBarSeparator;
+  Label: typeof MenuBarLabel;
+}
+
+MenuBar.Trigger = MenuBarTrigger;
+MenuBar.Content = MenuBarContent;
+MenuBar.Item = MenuBarItem;
+MenuBar.Separator = MenuBarSeparator;
+MenuBar.Label = MenuBarLabel;

@@ -81,6 +81,13 @@ func (b *builder) buildCSSTriggerAt(el *ast.JSXElement, t csssignals.Trigger, no
 	if t.StackAction == "pop" {
 		return b.buildStackPopTrigger(clone, t, node)
 	}
+	// A group trigger whose option is already selected must close the group on a
+	// second click. A single <label for=radio> can't uncheck a radio, so emit a
+	// second label (shown only while the option is checked) pointing at the
+	// closed sentinel.
+	if t.Scope.Kind == csssignals.KindGroup && t.Scope.Sentinel == "" && t.Option != "" {
+		return b.buildGroupTrigger(clone, t)
+	}
 	appendClass(clone, t.Scope.TriggerClass(t.Option))
 	// A null/closed group option has no controller input; clicking it cannot
 	// point at one, so close via the sentinel's hidden radio.
@@ -90,6 +97,28 @@ func (b *builder) buildCSSTriggerAt(el *ast.JSXElement, t csssignals.Trigger, no
 	})
 	b.applyTriggerARIA(clone, t)
 	return clone
+}
+
+// buildGroupTrigger returns two labels for a group option: a primary "select"
+// label and an alternate "close" label (pointing at the closed sentinel) shown
+// while the option is checked.
+func (b *builder) buildGroupTrigger(base *ast.JSXElement, t csssignals.Trigger) ast.Expr {
+	s := t.Scope
+	selectLabel := shallowCloneJSX(base)
+	appendClass(selectLabel, s.TriggerClass(t.Option))
+	selectLabel.Opening.Attributes = append(selectLabel.Opening.Attributes, strJSXAttr("for", s.ControlID(b.cssToken, t.Option)))
+	b.applyTriggerARIA(selectLabel, t)
+
+	closeLabel := shallowCloneJSX(base)
+	appendClass(closeLabel, s.TriggerClass(t.Option))
+	appendClass(closeLabel, s.TriggerAltClass(t.Option))
+	closeLabel.Opening.Attributes = append(closeLabel.Opening.Attributes, strJSXAttr("for", s.ControlID(b.cssToken, s.Sentinel)))
+	b.applyTriggerARIA(closeLabel, t)
+
+	return &ast.JSXFragment{Children: []ast.JSXChild{
+		&ast.JSXElementChild{Element: selectLabel},
+		&ast.JSXElementChild{Element: closeLabel},
+	}}
 }
 
 // buildRangeStepper rewrites a `setR(r() + 1)` / `setR(r() - 1)` trigger into a
@@ -145,6 +174,9 @@ func (b *builder) buildStackPopTrigger(clone *ast.JSXElement, t csssignals.Trigg
 // the scope's resolved role. Zero-JS presets only; stateful attributes
 // (aria-selected/aria-expanded) are left to the micro-runtime.
 func (b *builder) applyTriggerARIA(clone *ast.JSXElement, t csssignals.Trigger) {
+	if t.Scope.IsDisabled(t.Option) {
+		clone.Opening.Attributes = append(clone.Opening.Attributes, strJSXAttr("aria-disabled", "true"))
+	}
 	r := t.Scope.Role
 	if r.Trigger == "" {
 		return
@@ -156,8 +188,13 @@ func (b *builder) applyTriggerARIA(clone *ast.JSXElement, t csssignals.Trigger) 
 		clone.Opening.Attributes = append(clone.Opening.Attributes, strJSXAttr("aria-haspopup", r.Haspopup))
 	}
 	if r.SyncExpanded {
-		// Initial state only; the micro-runtime keeps it in sync.
-		clone.Opening.Attributes = append(clone.Opening.Attributes, strJSXAttr("aria-expanded", "false"))
+		// Initial state reflects whether this option starts selected; the
+		// micro-runtime keeps it in sync afterwards.
+		expanded := "false"
+		if t.Option == t.Scope.Initial {
+			expanded = "true"
+		}
+		clone.Opening.Attributes = append(clone.Opening.Attributes, strJSXAttr("aria-expanded", expanded))
 	}
 	_ = t
 }
@@ -292,6 +329,7 @@ func (b *builder) prepareCSSRoot(ret ast.Expr, scopes []*csssignals.Scope, token
 		}
 		if merged {
 			clone.Children = append(b.controllerChildren(scopes, token), clone.Children...)
+			applyContainerARIA(clone, scopes)
 			return clone
 		}
 	}
@@ -304,11 +342,32 @@ func (b *builder) prepareCSSRoot(ret ast.Expr, scopes []*csssignals.Scope, token
 		}
 		classNames.WriteString(s.ScopeClass())
 	}
-	return wrapWithScopeAnchor(
+	wrapper := wrapWithScopeAnchor(
 		[]ast.JSXChild{exprChild(inner)},
 		classNames.String(),
 		b.controllerChildren(scopes, token),
 	)
+	applyContainerARIA(wrapper, scopes)
+	return wrapper
+}
+
+// applyContainerARIA stamps the first scope's structural container ARIA (role,
+// orientation, label) onto the scope anchor. Stateful attributes stay with the
+// ARIA synchroniser.
+func applyContainerARIA(el *ast.JSXElement, scopes []*csssignals.Scope) {
+	for _, s := range scopes {
+		if s.Role.Container == "" {
+			continue
+		}
+		el.Opening.Attributes = append(el.Opening.Attributes, strJSXAttr("role", s.Role.Container))
+		if s.Role.Orientation != "" {
+			el.Opening.Attributes = append(el.Opening.Attributes, strJSXAttr("aria-orientation", s.Role.Orientation))
+		}
+		if s.Label != "" {
+			el.Opening.Attributes = append(el.Opening.Attributes, strJSXAttr("aria-label", s.Label))
+		}
+		return
+	}
 }
 
 // controllerChildren builds the hidden controller inputs for a component
@@ -340,14 +399,23 @@ func controllerInput(s *csssignals.Scope, token, opt, inputType string, checked 
 	} else {
 		class += " " + s.CheckboxClass(opt)
 	}
+	// A `name` option routes the submitted value under a friendly key; the id
+	// always stays unique per instance/option for label wiring.
+	name := s.ControlName(token, opt)
+	if s.FormName != "" {
+		name = s.FormName
+	}
 	attrs := []*ast.JSXAttr{
 		strJSXAttr("type", inputType),
 		strJSXAttr("class", class),
-		strJSXAttr("name", s.ControlName(token, opt)),
+		strJSXAttr("name", name),
 		strJSXAttr("id", s.ControlID(token, opt)),
 	}
 	if s.IsChoiceLike() {
 		attrs = append(attrs, strJSXAttr("value", opt))
+	}
+	if s.IsDisabled(opt) {
+		attrs = append(attrs, &ast.JSXAttr{Name: "disabled", Value: &ast.Literal{Kind: ast.BoolLit, Value: "true"}})
 	}
 	if checked {
 		attrs = append(attrs, &ast.JSXAttr{Name: "checked", Value: &ast.Literal{Kind: ast.BoolLit, Value: "true"}})
@@ -378,7 +446,10 @@ func exprChild(expr ast.Expr) ast.JSXChild {
 // (shallow element copies) so mutation never affects the shared AST.
 func shallowCloneJSX(el *ast.JSXElement) *ast.JSXElement {
 	opening := *el.Opening
-	opening.Attributes = append([]*ast.JSXAttr(nil), el.Opening.Attributes...)
+	// Deep-copy attributes so appendClass/ARIA mutations never write through to
+	// the shared component AST (library modules are parsed once and reused across
+	// pages, so a shared class literal would accumulate scope classes).
+	opening.Attributes = deepCloneAttrs(el.Opening.Attributes)
 	clone := *el
 	clone.Opening = &opening
 	if el.Closing != nil {

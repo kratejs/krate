@@ -3,16 +3,16 @@
   flex-direction: column;
   width: 100%;
   max-width: 520px;
-  border: 1px solid var(--krate-border, #27272a);
+  border: 1px solid var(--krate-border, #e4e4e7);
   border-radius: 10px;
-  background: var(--krate-card-bg, #111113);
+  background: var(--krate-card-bg, #ffffff);
   overflow: hidden;
 }
 .krate-command-input {
   border: none;
-  border-bottom: 1px solid var(--krate-border, #27272a);
+  border-bottom: 1px solid var(--krate-border, #e4e4e7);
   background: transparent;
-  color: var(--krate-text, #fafafa);
+  color: var(--krate-text, #09090b);
   font-family: inherit;
   font-size: 0.95rem;
   padding: 12px 16px;
@@ -36,7 +36,7 @@
   padding: 8px 10px;
   border-radius: 6px;
   font-size: 0.875rem;
-  color: var(--krate-text, #fafafa);
+  color: var(--krate-text, #09090b);
   cursor: pointer;
 }
 .krate-command-item[aria-selected="true"] {

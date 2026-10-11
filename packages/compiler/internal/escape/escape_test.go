@@ -79,3 +79,20 @@ func TestUnescapeJSString(t *testing.T) {
 		}
 	}
 }
+
+func TestTemplateRaw(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"a\\nb", "a\nb"},            // escape -> newline
+		{"a\\\\nb", "a\\nb"},         // literal backslash-n preserved
+		{"a\\tb", "a\tb"},            // tab
+		{"say \\`hi\\`", "say `hi`"}, // escaped backtick
+		{"\\x41\\u0042\\u{43}", "ABC"},
+		{"plain", "plain"},
+		{"a\\\nb", "ab"}, // line continuation
+	}
+	for _, c := range cases {
+		if got := TemplateRaw(c.in); got != c.want {
+			t.Errorf("TemplateRaw(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

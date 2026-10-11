@@ -1,83 +1,72 @@
-.krate-alert-dialog-content-wrapper {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.krate-alert-dialog {
+  display: inline-block;
 }
-.krate-alert-dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  animation: krate-fade-in 0.15s ease;
+.krate-alert-dialog-trigger {
+  cursor: pointer;
 }
 .krate-alert-dialog-content {
-  position: relative;
+  position: fixed;
+  inset: 0;
+  margin: auto;
   z-index: 1001;
   width: 90vw;
-  max-width: 440px;
+  max-width: 420px;
+  height: fit-content;
   padding: 24px;
   border-radius: 12px;
-  background: var(--krate-card-bg, #111113);
-  border: 1px solid var(--krate-border, #27272a);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
-  animation: krate-scale-in 0.15s ease;
+  background: var(--krate-card-bg, #ffffff);
+  border: 1px solid var(--krate-border, #e4e4e7);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
 }
 .krate-alert-dialog-title {
   font-size: 1.1rem;
   font-weight: 600;
-  color: var(--krate-text, #fafafa);
-  margin-bottom: 8px;
+  color: var(--krate-text, #09090b);
+  margin: 0 0 4px;
 }
 .krate-alert-dialog-description {
   font-size: 0.9rem;
-  color: var(--krate-text-muted, #a1a1aa);
+  color: var(--krate-text-muted, #71717a);
   line-height: 1.5;
-  margin-bottom: 24px;
+  margin: 0 0 20px;
 }
-.krate-alert-dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+.krate-alert-dialog-action,
+.krate-alert-dialog-cancel {
+  cursor: pointer;
 }
-.krate-alert-dialog-action {
-  all: unset;
+
+.krate-alert-dialog-action,
+.krate-alert-dialog-cancel {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 8px 16px;
   border-radius: 6px;
+  border: 1px solid transparent;
   font-size: 0.875rem;
   font-weight: 500;
+  font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s, opacity 0.15s;
 }
-.krate-alert-dialog-action:focus-visible {
-  outline: 2px solid var(--krate-primary, #3b82f6);
-  outline-offset: 2px;
-}
-.krate-alert-dialog-action-confirm {
+.krate-alert-dialog-action {
   background: var(--krate-primary, #3b82f6);
-  color: #fff;
+  color: var(--krate-primary-fg, #ffffff);
 }
-.krate-alert-dialog-action-confirm:hover {
+.krate-alert-dialog-action:hover {
   background: var(--krate-primary-hover, #2563eb);
 }
-.krate-alert-dialog-action-cancel {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--krate-text, #fafafa);
-  border: 1px solid var(--krate-border, #27272a);
+.krate-alert-dialog-cancel {
+  background: var(--krate-surface, #f4f4f5);
+  color: var(--krate-text, #09090b);
+  border-color: var(--krate-border, #e4e4e7);
 }
-.krate-alert-dialog-action-cancel:hover {
-  background: rgba(255, 255, 255, 0.1);
+.krate-alert-dialog-cancel:hover {
+  background: var(--krate-surface-hover, #e4e4e7);
 }
-@keyframes krate-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+.krate-alert-dialog-action:focus-visible,
+.krate-alert-dialog-cancel:focus-visible {
+  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline-offset: 2px;
 }
-@keyframes krate-scale-in {
-  from { opacity: 0; transform: scale(0.96); }
-  to { opacity: 1; transform: scale(1); }
-}
+
+.krate-alert-dialog-content { display: flex; flex-direction: column; gap: 8px; }

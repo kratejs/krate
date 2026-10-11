@@ -1,81 +1,55 @@
 import './tooltip.css';
-import { createSignal, createEffect, onCleanup } from '@krate/runtime';
+
 
 export interface TooltipProps {
   children?: any;
 }
 
+/**
+ * Tooltip. Pure CSS (shows on hover and keyboard focus), so it needs no
+ * JavaScript and no signals.
+ *
+ * ```tsx
+ * <Tooltip>
+ *   <Tooltip.Trigger>Hover me</Tooltip.Trigger>
+ *   <Tooltip.Content>Hint</Tooltip.Content>
+ * </Tooltip>
+ * ```
+ */
 export function Tooltip(props: TooltipProps) {
-  var [open, setOpen] = createSignal(false);
-  var hoverTimer: any = null;
-
-  function handleMouseOver(e: MouseEvent) {
-    var related = e.relatedTarget as HTMLElement;
-    var root = (e.target as HTMLElement).closest("[data-krate-tooltip-root]") as HTMLElement;
-    if (!root) return;
-    if (related && root.contains(related)) return;
-    hoverTimer = setTimeout(function () {
-      setOpen(true);
-    }, 200);
-  }
-
-  function handleMouseOut(e: MouseEvent) {
-    var related = e.relatedTarget as HTMLElement;
-    var root = (e.target as HTMLElement).closest("[data-krate-tooltip-root]") as HTMLElement;
-    if (!root) return;
-    if (related && root.contains(related)) return;
-    if (hoverTimer) {
-      clearTimeout(hoverTimer);
-      hoverTimer = null;
-    }
-    setOpen(false);
-  }
-
-  onCleanup(function () {
-    if (hoverTimer) clearTimeout(hoverTimer);
-  });
-
-  return (
-    <div
-      class="krate-tooltip-root"
-      data-state={open() ? "open" : "closed"}
-      data-krate-tooltip-root="true"
-      onMouseOver={handleMouseOver}
-      onMouseOut={handleMouseOut}
-    >
-      {props.children}
-    </div>
-  );
+  return <span class="krate-tooltip">{props.children}</span>;
 }
 
 export interface TooltipTriggerProps {
   children?: any;
 }
 
+/** @deprecated Use `Tooltip.Trigger` instead. */
 export function TooltipTrigger(props: TooltipTriggerProps) {
   return (
-    <div class="krate-tooltip-trigger">
+    <span class="krate-tooltip-trigger" tabIndex={0}>
       {props.children}
-    </div>
+    </span>
   );
 }
 
 export interface TooltipContentProps {
   children?: any;
-  side?: 'top' | 'bottom' | 'left' | 'right';
-  sideOffset?: number;
 }
 
+/** @deprecated Use `Tooltip.Content` instead. */
 export function TooltipContent(props: TooltipContentProps) {
-  var side = props.side || "top";
-  var sideOffset = props.sideOffset || 4;
-
-  var className = "krate-tooltip-content krate-tooltip-content-" + side;
-
   return (
-    <div class={className} style={"--tooltip-offset: " + sideOffset + "px;"}>
+    <span class="krate-tooltip-content" role="tooltip">
       {props.children}
-      <div class="krate-tooltip-arrow" />
-    </div>
+    </span>
   );
 }
+
+export interface Tooltip {
+  Trigger: typeof TooltipTrigger;
+  Content: typeof TooltipContent;
+}
+
+Tooltip.Trigger = TooltipTrigger;
+Tooltip.Content = TooltipContent;

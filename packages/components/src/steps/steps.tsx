@@ -18,6 +18,7 @@ export interface StepProps {
   title?: string;
 }
 
+/** @deprecated Use `Steps.Step` instead. */
 export function Step(props: StepProps) {
   var children = props.children || "";
   var title = props.title || "";
@@ -33,3 +34,9 @@ export function Step(props: StepProps) {
     </div>
   );
 }
+
+export interface Steps {
+  Step: typeof Step;
+}
+
+Steps.Step = Step;

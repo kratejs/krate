@@ -22,6 +22,11 @@ categories:
   - general
 ---
 
+:::warning Active development
+Krate is under **active development** and is not yet stable. APIs, generated
+output, and configuration may change between releases.
+:::
+
 **Krate** compiles TSX/JSX pages into static HTML at build time and generates a
 tiny hydration bundle that makes pages interactive on the client. Builds run in
 milliseconds on a single Go binary — no bundler subprocess and no Node.js

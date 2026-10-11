@@ -152,8 +152,8 @@ export interface CSSPrimitiveOptions<T extends string | number> extends CSSARIAO
 export function createCSSChoice<T extends string | number>(
   initial: T,
   _options?: readonly T[] | CSSPrimitiveOptions<T>,
-): [() => T, (next: T) => void] {
-  return createSignal<T>(initial);
+): CSSScope<T> {
+  return withScopeHelpers(createSignal<T>(initial));
 }
 
 /**
@@ -165,8 +165,8 @@ export function createCSSChoice<T extends string | number>(
 export function createCSSToggle(
   initial: boolean,
   _options?: CSSARIAOptions & { vars?: { on?: string; off?: string } },
-): [() => boolean, (next: boolean) => void] {
-  return createSignal<boolean>(initial);
+): CSSScope<boolean> {
+  return withScopeHelpers(createSignal<boolean>(initial));
 }
 
 /**
@@ -174,10 +174,19 @@ export function createCSSToggle(
  * getter object keyed by flag name plus a setter. Compiler-erased like
  * `createCSSChoice`.
  */
+export type CSSFlagsScope<K extends string> = [
+  Record<K, () => boolean>,
+  (flag: K, value: boolean) => void,
+] & {
+  trigger: (flag: K) => Record<string, unknown>;
+  panel: (flag: K) => Record<string, unknown>;
+  close: () => Record<string, unknown>;
+};
+
 export function createCSSFlags<K extends string>(
   flags: readonly K[],
   _options?: CSSARIAOptions & { vars?: Record<string, Partial<Record<K, string>>> },
-): [Record<K, () => boolean>, (flag: K, value: boolean) => void] {
+): CSSFlagsScope<K> {
   const getters = {} as Record<K, () => boolean>;
   for (const flag of flags) {
     const [get] = createSignal(false);
@@ -186,7 +195,11 @@ export function createCSSFlags<K extends string>(
   // No-op: the compiler compiles flags to checkboxes, so this body is only a
   // type-checking/server-evaluation shim.
   const set = (_flag: K, _value: boolean): void => {};
-  return [getters, set];
+  const scope = [getters, set] as CSSFlagsScope<K>;
+  scope.trigger = (flag: K) => ({ 'data-krate-scope': 'trigger', value: flag });
+  scope.panel = (flag: K) => ({ 'data-krate-scope': 'panel', value: flag });
+  scope.close = () => ({ 'data-krate-scope': 'close' });
+  return scope;
 }
 
 /**
@@ -197,8 +210,8 @@ export function createCSSFlags<K extends string>(
 export function createCSSGroup<T extends string | number>(
   initial: T | null,
   _options?: readonly T[] | CSSPrimitiveOptions<T>,
-): [() => T | null, (next: T | null) => void] {
-  return createSignal<T | null>(initial);
+): CSSScope<T | null> {
+  return withScopeHelpers(createSignal<T | null>(initial));
 }
 
 /**
@@ -209,8 +222,44 @@ export function createCSSGroup<T extends string | number>(
 export function createCSSRange(
   initial: number,
   _options: CSSARIAOptions & { min?: number; max?: number; step?: number },
-): [() => number, (next: number) => void] {
-  return createSignal<number>(initial);
+): CSSScope<number> {
+  return withScopeHelpers(createSignal<number>(initial));
+}
+
+/**
+ * A first-class CSS-scope handle. It is the `[getter, setter]` tuple returned by
+ * the CSS primitives (so destructuring keeps working) with helpers that the Krate
+ * compiler expands inline, anywhere in any component:
+ *
+ * ```tsx
+ * const tab = createCSSChoice('a', ['a', 'b']);
+ * <button {...tab.trigger('a')}>A</button>
+ * <div   {...tab.panel('a')}>Panel A</div>
+ * <button {...tab.close()}>Close</button>
+ * ```
+ *
+ * The helpers return a marker spread at runtime; the compiler rewrites them to
+ * the `<label for>` / `:has()`-toggled wrapper markup. A handle is a plain
+ * value, so it can be passed to child components as a prop.
+ */
+export type CSSScope<T> = [() => T, (next: T) => void] & {
+  /** Spread on the trigger element; selects `value`. */
+  trigger: (value?: T) => Record<string, unknown>;
+  /** Spread on a panel element; shows it when `value` is selected. */
+  panel: (value?: T) => Record<string, unknown>;
+  /** Spread on an element that closes the scope (groups/dialogs/popovers). */
+  close: () => Record<string, unknown>;
+  /** The current selected value (live, via `--krate-current`). */
+  current: () => T;
+};
+
+function withScopeHelpers<T>(result: [() => T, (next: T) => void]): CSSScope<T> {
+  const scope = result as CSSScope<T>;
+  scope.trigger = (value?: T) => ({ 'data-krate-scope': 'trigger', value });
+  scope.panel = (value?: T) => ({ 'data-krate-scope': 'panel', value });
+  scope.close = () => ({ 'data-krate-scope': 'close' });
+  scope.current = () => result[0]();
+  return scope;
 }
 
 /** Actions destructured from a `createCSSStack` result. */

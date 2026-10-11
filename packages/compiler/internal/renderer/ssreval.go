@@ -846,7 +846,7 @@ func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 			return e.eval(mem.Object)
 		}
 		// `X.useContext()` -> the context default (no Provider at build time).
-		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "useContext" {
+		if prop, ok := mem.Property.(*ast.Identifier); ok && (prop.Name == "useContext" || prop.Name == "use") {
 			if id, ok := mem.Object.(*ast.Identifier); ok && e.contextDefaults != nil {
 				if def, found := e.contextDefaults[id.Name]; found {
 					return def
@@ -1106,7 +1106,7 @@ func (e *SSREval) evalClassValue(expr ast.Expr) ([]string, bool) {
 func (e *SSREval) evalTemplateExpr(expr *ast.TemplateExpr) string {
 	var b strings.Builder
 	for i, raw := range expr.Raw {
-		b.WriteString(raw)
+		b.WriteString(escape.TemplateRaw(raw))
 		if i < len(expr.Parts) {
 			b.WriteString(e.eval(expr.Parts[i]))
 		}

@@ -19,13 +19,13 @@
   color: #fff;
 }
 .krate-badge-secondary {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--krate-text, #fafafa);
+  background: var(--krate-surface-hover, #e4e4e7);
+  color: var(--krate-text, #09090b);
 }
 .krate-badge-outline {
   background: transparent;
-  border-color: var(--krate-border, #3f3f46);
-  color: var(--krate-text-muted, #a1a1aa);
+  border-color: var(--krate-border, #e4e4e7);
+  color: var(--krate-text-muted, #71717a);
 }
 .krate-badge-success {
   background: rgba(34, 197, 94, 0.15);

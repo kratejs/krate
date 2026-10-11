@@ -7,7 +7,7 @@
   height: 40px;
   border-radius: 50%;
   overflow: hidden;
-  background: var(--krate-avatar-bg, rgba(255, 255, 255, 0.08));
+  background: var(--krate-avatar-bg, var(--krate-surface-hover, #e4e4e7));
   color: var(--krate-avatar-text, #a1a1aa);
   flex-shrink: 0;
 }

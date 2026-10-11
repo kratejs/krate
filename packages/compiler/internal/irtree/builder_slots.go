@@ -22,6 +22,20 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 		return &ComponentNode{Name: "_nil", Tier: TierStatic}
 	}
 
+	// Scope handles are component-scoped: only this component's own declarations
+	// and its scope-valued props are visible while building it.
+	savedHandles := b.scopeHandles
+	savedPendingScope := b.pendingScopeProps
+	b.scopeHandles = make(map[string]scopeRef)
+	// A component that provides a CSS scope via context must render its
+	// call-site children through the slot tree (not SSR-eval), so it stays off
+	// the static tier like part roots.
+	_, _, providesScope := providedScopeContext(fn)
+	defer func() {
+		b.scopeHandles = savedHandles
+		b.pendingScopeProps = savedPendingScope
+	}()
+
 	id := joinSlotID(parentID, fn.Name)
 	tier := b.ann.ComponentTiers[fn.Name]
 	if tier == TierUnknown {
@@ -339,6 +353,18 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 			}
 		}
 
+		// Scope-valued props from the parent are visible to this component
+		// whether or not it declares its own scope.
+		for k, ref := range b.pendingScopeProps {
+			b.scopeHandles[k] = ref
+		}
+		b.pendingScopeProps = nil
+		// Context-provided scope handles (`const s = Ctx.useContext()`).
+		b.registerContextReads(fn)
+		// Scope handles are compile-time state: never emit them as runtime vars.
+		node.PreSignalVars = dropVarDecls(node.PreSignalVars, b.scopeHandles)
+		node.ExtraVars = dropVarDecls(node.ExtraVars, b.scopeHandles)
+
 		savedChoice, savedToken := b.cssSignals, b.cssToken
 		retExpr := returnStmt.Value
 		if analyzer != nil && analyzer.OK() {
@@ -347,6 +373,7 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 			for _, s := range analyzer.Scopes() {
 				b.collectCSSScope(s)
 			}
+			b.registerScopeLocals(fn, analyzer, b.cssToken)
 			for _, c := range analyzer.Conditions() {
 				b.collectCSSCondition(c)
 			}
@@ -407,7 +434,7 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 			len(node.Memos) == 0 && len(node.ExtraVars) == 0 &&
 			len(node.PreSignalVars) == 0 &&
 			len(node.Handlers) == 0 && len(node.AttrBindings) == 0 &&
-			len(node.RefBindings) == 0 {
+			len(node.RefBindings) == 0 && !providesScope {
 			node.Tier = TierStatic
 		}
 	}
@@ -682,6 +709,15 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 	// display:contents wrapper), which is then built by the normal slot pipeline
 	// so children nested components, lists, conditionals render as usual.
 	// This runs before the showIf handling below, which the panel rewrite removes.
+	// First-class scope handles: `<el {...scope.trigger('a')}>` /
+	// `{...scope.panel('a')}` / `{...scope.close()}` expand to the zero-JS
+	// trigger/panel/close markup, anywhere in any component.
+	if isIntrinsicTag(el) {
+		if rewritten := b.rewriteScopeSpread(el); rewritten != nil {
+			return b.buildSlotNodes(rewritten, parentID)
+		}
+	}
+
 	if b.cssSignals != nil && b.cssSignals.OK() && isIntrinsicTag(el) {
 		if rewritten := b.rewriteCSSSignalElement(el); rewritten != nil {
 			return b.buildSlotNodes(rewritten, parentID)
@@ -726,6 +762,27 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		opening.Name = alias
 		cloned.Opening = &opening
 		return b.buildSlotNodes(&cloned, parentID)
+	}
+
+	// Context provider: render children (a display:contents passthrough). When
+	// the provided `value` is a CSS scope handle, make it the active scope for
+	// the subtree so descendant `Ctx.useContext()` reads resolve to it.
+	if strings.HasSuffix(name, ".Provider") {
+		ctx := strings.TrimSuffix(name, ".Provider")
+		var valueExpr ast.Expr
+		for _, attr := range el.Opening.Attributes {
+			if attr != nil && attr.Name == "value" {
+				valueExpr = attr.Value
+			}
+		}
+		saved := b.contextScopes
+		if ref, ok := b.resolveScopeExpr(valueExpr); ok {
+			b.contextScopes = cloneScopeMap(saved)
+			b.contextScopes[ctx] = ref
+		}
+		slots := b.buildFragmentSlots(&ast.JSXFragment{Children: el.Children}, parentID)
+		b.contextScopes = saved
+		return slots
 	}
 
 	// Uppercase = component
@@ -1370,6 +1427,30 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 
 	childID := joinSlotID(parentID, childName)
 
+	// Scope root: resolve its option universe from the call site (an explicit
+	// literal `options` array, or the descendant `value` literals) before it is
+	// built, so its controller inputs match the parts.
+	if b.declaresCSSTScope(childFn) {
+		if spec := b.collectScopeSpec(el); len(spec.options) > 0 {
+			b.setScopeOverride(childFn, spec)
+		}
+	}
+	// Context-providing component: if its return wraps a scope handle in
+	// `<Ctx.Provider value={handle}>`, make that scope active while building the
+	// call-site children, so descendant `Ctx.useContext()` reads resolve.
+	provCtx := ""
+	var provRef scopeRef
+	provOK := false
+	if ctxName, localVar, ok := providedScopeContext(childFn); ok {
+		if a := b.cssAnalyzer(childFn); a != nil && a.OK() {
+			if sc := a.ScopeByVar(localVar); sc != nil {
+				provCtx = ctxName
+				provRef = scopeRef{analyzer: a, scope: sc, token: b.cssTokenFor(childID, childName)}
+				provOK = true
+			}
+		}
+	}
+
 	// Runtime-tier components are NOT rendered at build time. The emitter
 	// produces a krate-id placeholder + props entry so the serve-time renderer
 	// evaluates them (via QuickJS/streaming) at request time with fresh values.
@@ -1401,8 +1482,9 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	// CSS signal components must go through buildComponentNode so their
 	// analyzer is installed and triggers/panels are rewritten. A panels-only
 	// component has no signals/handlers and would otherwise take the SSREval
-	// shortcut, which bypasses the interception and breaks the panels.
-	if len(childSignals) == 0 && !b.cssSignalsOK(childFn) {
+	// shortcut, which bypasses the interception and breaks the panels. The same
+	// applies to components using first-class scope-handle spreads.
+	if len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) {
 		if !b.componentNeedsClient(childFn, attrs) {
 			// Inline signal-derived props: a signal-less component that renders
 			// a parent's signal value (e.g. <Display value={display()}/>) must
@@ -1522,13 +1604,32 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	savedCallSite := b.callSiteChildren
 	b.callSiteChildren = el.Children
 
+	// Flow any scope-valued props (e.g. scope={tab}) into the child build so its
+	// `props.scope.trigger(...)` spreads resolve to the parent's handle.
+	scopeProps := make(map[string]scopeRef)
+	for name, expr := range attrs {
+		if ref, ok := b.resolveScopeExpr(expr); ok {
+			scopeProps["props."+name] = ref
+			scopeProps[name] = ref
+		}
+	}
+	b.pendingScopeProps = scopeProps
+
 	childNode := b.buildComponentNode(childFn, string(childID))
 	b.localProps = savedProps
 	b.localFuncProps = savedFuncProps
 	b.restProps = savedRestProps
 	childNode.Props = extractProps(el)
 	childNode.CallSiteChildren = el.Children
-	childNode.CallSiteSlots = b.buildCallSiteChildSlots(el.Children, string(childID))
+	if provOK {
+		saved := b.contextScopes
+		b.contextScopes = cloneScopeMap(saved)
+		b.contextScopes[provCtx] = provRef
+		childNode.CallSiteSlots = b.buildCallSiteChildSlots(el.Children, string(childID))
+		b.contextScopes = saved
+	} else {
+		childNode.CallSiteSlots = b.buildCallSiteChildSlots(el.Children, string(childID))
+	}
 	b.callSiteChildren = savedCallSite
 
 	// Auto-promoted SSR-evaluated components need prop bindings so that
@@ -2013,6 +2114,12 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 		if _, ok := b.cssSignals.MatchText(ec.Expression); ok {
 			return []SlotNode{&StaticHTML{HTML: `<span class="krc-live"></span>`}}
 		}
+	}
+	// Live text via a scope handle: `{scope.current()}` renders the selected
+	// value through the inherited `--krate-current` custom property.
+	if name, ref, _, ok := b.helperCall(ec.Expression); ok && name == "current" {
+		ref.scope.LiveText = true
+		return []SlotNode{&StaticHTML{HTML: `<span class="krc-live"></span>`}}
 	}
 
 	// .map() call - always try to resolve at build time (even without signals)
@@ -3838,6 +3945,11 @@ func (b *builder) collectExtraVarJS(body []ast.Stmt) (pre, post []string) {
 					// emitting `var x=Ctx.useContext()` would reference an
 					// undefined context object at hydration time.
 					if isContextRead(decl.Init) {
+						continue
+					}
+					// A first-class scope handle is compile-time state, never a
+					// runtime local.
+					if isCSSFactoryCall(decl.Init) {
 						continue
 					}
 					if call, ok := decl.Init.(*ast.CallExpr); ok {

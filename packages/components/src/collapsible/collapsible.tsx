@@ -1,66 +1,69 @@
 import './collapsible.css';
-import { createSignal, createEffect } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+
+const CollapsibleCtx = createScope<string | null>();
 
 export interface CollapsibleProps {
+  /** Literal initial open state value (the trigger/content `value`). */
+  defaultValue?: string;
+  label?: string;
   children?: any;
-  open?: boolean;
-  defaultOpen?: boolean;
-  onOpenChange?: (open: boolean) => void;
 }
 
+/**
+ * Disclosure (single open/close). Zero JS via a context-provided CSS scope. Use
+ * a shared literal `value` on the trigger and content:
+ *
+ * ```tsx
+ * <Collapsible defaultValue="content">
+ *   <Collapsible.Trigger value="content">Toggle</Collapsible.Trigger>
+ *   <Collapsible.Content value="content">Body</Collapsible.Content>
+ * </Collapsible>
+ * ```
+ */
 export function Collapsible(props: CollapsibleProps) {
-  var [open, setOpen] = createSignal(props.defaultOpen || false);
-
-  createEffect(function () {
-    if (props.open !== undefined) {
-      setOpen(props.open);
-    }
-  });
-
-  function toggle() {
-    var next = !open();
-    setOpen(next);
-    if (props.onOpenChange) {
-      props.onOpenChange(next);
-    }
-  }
-
-  function handleClick(e: MouseEvent) {
-    var trigger = (e.target as HTMLElement).closest("[data-krate-collapsible-trigger]");
-    if (trigger) {
-      toggle();
-    }
-  }
-
+  const open = createCSSGroup<string>(null, { as: 'disclosure', label: props.label });
   return (
-    <div class="krate-collapsible" data-state={open() ? "open" : "closed"} onClick={handleClick}>
-      {props.children}
-    </div>
+    <CollapsibleCtx.Provider value={open}>
+      <div class="krate-collapsible">{props.children}</div>
+    </CollapsibleCtx.Provider>
   );
 }
 
 export interface CollapsibleTriggerProps {
+  value?: string;
   children?: any;
 }
 
+/** @deprecated Use `Collapsible.Trigger` instead. */
 export function CollapsibleTrigger(props: CollapsibleTriggerProps) {
+  const open = CollapsibleCtx.use();
   return (
-    <div class="krate-collapsible-trigger" data-krate-collapsible-trigger="true">
+    <button class="krate-collapsible-trigger" type="button" {...open.trigger(props.value)}>
+      {props.children}
+    </button>
+  );
+}
+
+export interface CollapsibleContentProps {
+  value?: string;
+  children?: any;
+}
+
+/** @deprecated Use `Collapsible.Content` instead. */
+export function CollapsibleContent(props: CollapsibleContentProps) {
+  const open = CollapsibleCtx.use();
+  return (
+    <div class="krate-collapsible-content" {...open.panel(props.value)}>
       {props.children}
     </div>
   );
 }
 
-export interface CollapsibleContentProps {
-  children?: any;
+export interface Collapsible {
+  Trigger: typeof CollapsibleTrigger;
+  Content: typeof CollapsibleContent;
 }
 
-export function CollapsibleContent(props: CollapsibleContentProps) {
-  return (
-    <div class="krate-collapsible-content" data-krate-collapsible-content="true">
-      <div class="krate-collapsible-content-inner">
-        {props.children}
-      </div>
-    </div>
-  );
-}
+Collapsible.Trigger = CollapsibleTrigger;
+Collapsible.Content = CollapsibleContent;

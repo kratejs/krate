@@ -6,25 +6,9 @@ import {
   Skeleton,
   Alert,
   Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-  TableCaption,
   Breadcrumb,
-  BreadcrumbList,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
   Pagination,
   Sheet,
-  SheetTrigger,
-  SheetContent,
-  SheetTitle,
-  SheetDescription,
-  SheetClose,
   Command,
 } from '@krate/components';
 
@@ -78,39 +62,39 @@ export default function UIDemo() {
       <section>
         <h2>Breadcrumb</h2>
         <Breadcrumb>
-          <BreadcrumbList>
-            <BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem><BreadcrumbLink href="/docs">Docs</BreadcrumbLink></BreadcrumbItem>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem><BreadcrumbPage>Components</BreadcrumbPage></BreadcrumbItem>
-          </BreadcrumbList>
+          <Breadcrumb.List>
+            <Breadcrumb.Item><Breadcrumb.Link href="/">Home</Breadcrumb.Link></Breadcrumb.Item>
+            <Breadcrumb.Separator />
+            <Breadcrumb.Item><Breadcrumb.Link href="/docs">Docs</Breadcrumb.Link></Breadcrumb.Item>
+            <Breadcrumb.Separator />
+            <Breadcrumb.Item><Breadcrumb.Page>Components</Breadcrumb.Page></Breadcrumb.Item>
+          </Breadcrumb.List>
         </Breadcrumb>
       </section>
 
       <section>
         <h2>Table</h2>
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <TableRow>
-              <TableCell>Ada</TableCell>
-              <TableCell>Engineer</TableCell>
-              <TableCell><Badge variant="success">Active</Badge></TableCell>
-            </TableRow>
-            <TableRow>
-              <TableCell>Grace</TableCell>
-              <TableCell>Compiler</TableCell>
-              <TableCell><Badge variant="warning">Away</Badge></TableCell>
-            </TableRow>
-          </TableBody>
-          <TableCaption>Team members</TableCaption>
+          <Table.Header>
+            <Table.Row>
+              <Table.Head>Name</Table.Head>
+              <Table.Head>Role</Table.Head>
+              <Table.Head>Status</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            <Table.Row>
+              <Table.Cell>Ada</Table.Cell>
+              <Table.Cell>Engineer</Table.Cell>
+              <Table.Cell><Badge variant="success">Active</Badge></Table.Cell>
+            </Table.Row>
+            <Table.Row>
+              <Table.Cell>Grace</Table.Cell>
+              <Table.Cell>Compiler</Table.Cell>
+              <Table.Cell><Badge variant="warning">Away</Badge></Table.Cell>
+            </Table.Row>
+          </Table.Body>
+          <Table.Caption>Team members</Table.Caption>
         </Table>
       </section>
 
@@ -128,12 +112,12 @@ export default function UIDemo() {
       <section>
         <h2>Sheet</h2>
         <Sheet>
-          <SheetTrigger>Open settings</SheetTrigger>
-          <SheetContent side="right">
-            <SheetTitle>Settings</SheetTitle>
-            <SheetDescription>Adjust your preferences.</SheetDescription>
-            <SheetClose />
-          </SheetContent>
+          <Sheet.Trigger value="settings">Open settings</Sheet.Trigger>
+          <Sheet.Content value="settings" side="right">
+            <Sheet.Title>Settings</Sheet.Title>
+            <Sheet.Description>Adjust your preferences.</Sheet.Description>
+            <Sheet.Close>Close</Sheet.Close>
+          </Sheet.Content>
         </Sheet>
       </section>
 

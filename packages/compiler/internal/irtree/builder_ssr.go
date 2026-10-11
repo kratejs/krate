@@ -269,7 +269,7 @@ func evalConst(expr ast.Expr) string {
 	case *ast.TemplateExpr:
 		var b strings.Builder
 		for i, raw := range e.Raw {
-			b.WriteString(raw)
+			b.WriteString(escape.TemplateRaw(raw))
 			if i < len(e.Parts) {
 				b.WriteString(evalConst(e.Parts[i]))
 			}
@@ -416,7 +416,7 @@ func evalConstWithSignals(expr ast.Expr, signals map[string]ast.Expr, props map[
 		// `Ctx.useContext()` folds to the context default (no Provider exists
 		// during SSG). The default was seeded under a reserved key above.
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
-			if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "useContext" {
+			if prop, ok := mem.Property.(*ast.Identifier); ok && (prop.Name == "useContext" || prop.Name == "use") {
 				if id, ok := mem.Object.(*ast.Identifier); ok {
 					if v, found := props[contextMarkerPrefix+id.Name]; found {
 						return v
@@ -426,7 +426,7 @@ func evalConstWithSignals(expr ast.Expr, signals map[string]ast.Expr, props map[
 		}
 		if id, ok := e.Callee.(*ast.Identifier); ok {
 			// `useContext(Ctx)` (the @krate/runtime form) folds to the default.
-			if id.Name == "useContext" && len(e.Args) == 1 {
+			if (id.Name == "useContext" || id.Name == "use") && len(e.Args) == 1 {
 				if arg, ok := e.Args[0].(*ast.Identifier); ok {
 					if v, found := props[contextMarkerPrefix+arg.Name]; found {
 						return v
@@ -568,7 +568,7 @@ func evalConstWithSignals(expr ast.Expr, signals map[string]ast.Expr, props map[
 	case *ast.TemplateExpr:
 		var buf strings.Builder
 		for i, raw := range e.Raw {
-			buf.WriteString(raw)
+			buf.WriteString(escape.TemplateRaw(raw))
 			if i < len(e.Parts) {
 				buf.WriteString(evalConstWithSignals(e.Parts[i], signals, props))
 			}
@@ -854,7 +854,7 @@ func operandLeaks(expr ast.Expr, signals map[string]ast.Expr, props map[string]s
 	case *ast.CallExpr:
 		// Context reads fold to their default and never leak.
 		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
-			if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "useContext" {
+			if prop, ok := mem.Property.(*ast.Identifier); ok && (prop.Name == "useContext" || prop.Name == "use") {
 				if id, ok := mem.Object.(*ast.Identifier); ok {
 					if _, found := props[contextMarkerPrefix+id.Name]; found {
 						return false
@@ -863,7 +863,7 @@ func operandLeaks(expr ast.Expr, signals map[string]ast.Expr, props map[string]s
 			}
 		}
 		if id, ok := e.Callee.(*ast.Identifier); ok {
-			if id.Name == "useContext" && len(e.Args) == 1 {
+			if (id.Name == "useContext" || id.Name == "use") && len(e.Args) == 1 {
 				if arg, ok := e.Args[0].(*ast.Identifier); ok {
 					if _, found := props[contextMarkerPrefix+arg.Name]; found {
 						return false

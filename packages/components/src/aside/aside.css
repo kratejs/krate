@@ -2,7 +2,7 @@
     margin: 24px 0;
     padding: 12px 20px;
     border-radius: 8px;
-    border: 1px solid var(--krate-border, #27272a);
+    border: 1px solid var(--krate-border, #e4e4e7);
     border-left-width: 4px;
     background: var(--krate-aside-bg, #111113);
 }
@@ -14,10 +14,10 @@
     font-size: 0.9rem;
     margin-top: 4px;
     margin-bottom: 8px;
-    color: var(--krate-text, #fafafa);
+    color: var(--krate-text, #09090b);
 }
 .krate-aside-content {
-    color: var(--krate-text-muted, #b9b9b9);
+    color: var(--krate-text-muted, #71717a);
     line-height: 1.6;
 }
 .krate-aside-content p,

@@ -71,3 +71,11 @@ If a build broke after an upgrade, delete stale caches and rebuild:
 ```sh
 rm -rf dist .krate
 ```
+
+## Component library: namespaced parts
+
+`@krate/components` uses a namespaced compound API: `Tabs.Trigger`,
+`Breadcrumb.List`, `Table.Row`, `Steps.Step`, `Form.Field`, `FileTree.Folder`,
+and so on. The older flat exports (`TabsTrigger`, `BreadcrumbList`, `TableRow`,
+`Step`, `FormField`, `FileTreeItem`, …) still work as **deprecated aliases**, but
+prefer the namespaced form — it is what the docs and examples use.
