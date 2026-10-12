@@ -387,6 +387,23 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return fmt.Errorf("expected string, got %T", val)
 		}
 		cfg.BasePath = s
+	case "compat":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "mode":
+				if s, ok := v.(string); ok {
+					cfg.Compat.Mode = s
+				}
+			case "userAgent":
+				if b, ok := v.(bool); ok {
+					cfg.Compat.UserAgent = b
+				}
+			}
+		}
 	case "viewTransitions":
 		switch v := val.(type) {
 		case bool:

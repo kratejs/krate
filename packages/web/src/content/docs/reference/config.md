@@ -288,6 +288,35 @@ are disabled. Individual pages can re-enable dynamic params with
 `export const dynamicParams = true`. See
 [Static output & dynamic params](/docs/features/typed-routes/#static-output-dynamic-params).
 
+## Browser compatibility
+
+```typescript
+compat: {
+  mode: "modern",     // "modern" (default) | "legacy" | "hybrid"
+  userAgent: false,   // hybrid only: emit a UA-selectable legacy document
+},
+```
+
+Controls how CSS Signals are emitted for browser support (see
+[Browser Support](/docs/core-concepts/browser-support/)):
+
+- **`modern`** (default) — `:has()` selectors, zero client JS for CSS-signal
+  pages. Requires `:has()` (Chrome/Edge 105+, Safari 15.4+, Firefox 121+).
+- **`legacy`** — emits class-based selectors plus a tiny scoped shim instead of
+  `:has()`, so interactive CSS-signal pages work on browsers without it.
+- **`hybrid`** — emits both, each wrapped in `@supports selector(:has(*))`, and
+  feature-gates the shim. Modern browsers keep the zero-JS `:has()` path; legacy
+  browsers get the shim. One document, no server involvement.
+
+`userAgent: true` (hybrid only) additionally writes per-page sibling documents
+(`index.modern.html` and `index.legacy.html`), each linking a **variant-only**
+stylesheet (modern-only / legacy-only). `krate serve` sends the matching sibling
+to User-Agent-classified visitors, preferring Chromium's `Sec-CH-UA` client hint
+(requested via `Accept-CH`) over the `User-Agent` string, and sets
+`Vary: User-Agent, Sec-CH-UA`. The default
+document stays the full hybrid, so static hosts (which cannot select per
+request) still serve a document that works everywhere.
+
 ## Quality checks
 
 ```typescript

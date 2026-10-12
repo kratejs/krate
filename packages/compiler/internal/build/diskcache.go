@@ -55,13 +55,17 @@ type diskPageEntry struct {
 	CSS         string
 	HasJS       bool
 	HasCSS      bool
-	IsErrorPage bool
-	UsedCSS     []string
-	UsedFuncs   []string
-	LoadingHTML string
-	Mode        int
-	Revalidate  int
-	SourcePath  string
+	// HasCSSSignals records whether the page emitted CSS-signal rules. It drives
+	// the per-variant stylesheet split and the UA sibling documents, so a cache
+	// replay without it would silently skip them.
+	HasCSSSignals bool
+	IsErrorPage   bool
+	UsedCSS       []string
+	UsedFuncs     []string
+	LoadingHTML   string
+	Mode          int
+	Revalidate    int
+	SourcePath    string
 
 	DynamicParams     bool
 	StaticOnly        bool
@@ -112,7 +116,7 @@ func (c *buildDiskCache) setContentHash(contentHash string) {
 // diskCacheSchema is bumped whenever the shape or the semantics of cached page
 // output change (e.g. new emit passes such as DCE or source maps) so entries
 // written by an older pipeline can never be replayed.
-var diskCacheSchema = "2"
+var diskCacheSchema = "3"
 
 var (
 	buildStampOnce  sync.Once

@@ -227,6 +227,11 @@ Requires `:has()` (2023+: Chrome/Edge 105+, Safari 15.4+, Firefox 121+). Krate
 emits a `@supports not selector(:has(*))` fallback that **reveals all panels**
 (static, non-interactive) so content is never blank on older browsers.
 
+For full interactivity on older engines, set a compat mode: `compat: { mode:
+"legacy" }` compiles the same scopes to class-based CSS driven by a tiny scoped
+shim, and `compat: { mode: "hybrid" }` ships both and picks at runtime. See
+[Browser Support](/docs/core-concepts/browser-support/).
+
 ## Limits
 
 CSS Signals express a fixed, enumerated state with no JS. Reach for

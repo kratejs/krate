@@ -981,6 +981,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		fmt.Printf("  %s⚡%s Dynamic routes: %d patterns\n", cCyan, cReset, len(dynRoutes))
 	}
 
+	// Opt-in User-Agent document selection (compat.mode hybrid + userAgent).
+	uaOn := uaOptIn(cfg.Compat)
+
 	handlerWith404 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Source maps are JSON; set the type explicitly since `.map` has no
 		// standard mime entry on every platform (FileServer only sets a type
@@ -995,6 +998,28 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else if strings.HasSuffix(r.URL.Path, ".html") || strings.HasSuffix(r.URL.Path, "/") || r.URL.Path == "" {
 			w.Header().Set("Cache-Control", "no-cache")
+		}
+
+		// Opt-in UA variant: serve the modern or legacy sibling document to
+		// classified visitors (the default document stays the full hybrid).
+		// Vary/Accept-CH apply only to HTML documents so cached hashed assets
+		// are not fragmented per visitor.
+		if uaOn && isHTMLDocRequest(r.URL.Path) {
+			w.Header().Add("Vary", "User-Agent")
+			w.Header().Add("Vary", "Sec-CH-UA")
+			w.Header().Set("Accept-CH", "Sec-CH-UA")
+			kind := "modern"
+			if uaPrefersLegacyDoc(r.UserAgent(), r.Header.Get("Sec-CH-UA")) {
+				kind = "legacy"
+			}
+			if sp := siblingDocPath(absOut, r.URL.Path, kind); sp != "" {
+				if data, err := os.ReadFile(sp); err == nil {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.Header().Set("Cache-Control", "no-cache")
+					_, _ = w.Write(data)
+					return
+				}
+			}
 		}
 
 		// A concrete static file beats any dynamic [param] pattern: /items/alpha

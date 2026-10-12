@@ -394,6 +394,15 @@ type ComponentTree struct {
 	// compiled into this tree (empty when none). The build appends it to the
 	// page's own CSS so it lands in the hashed external stylesheet.
 	CSSSignalsCSS string
+	// HasCSSSignals is true when the tree compiled at least one CSS signal scope
+	// or condition. Unlike scanning the emitted CSS for a class prefix, this is
+	// authoritative and drives the per-variant stylesheet split and UA siblings.
+	HasCSSSignals bool
+	// NoJSFallbackCSS is the `@supports not selector(:has(*))` reveal-all rule
+	// (empty when none). The build wraps it in <noscript> for legacy/hybrid
+	// modes so panels stay visible when scripting is disabled on engines that
+	// also lack :has().
+	NoJSFallbackCSS string
 	// NeedsCSSARIA is true when a CSS signal scope uses a role that requires the
 	// tiny ARIA micro-runtime (tabs/listbox/disclosure) to keep synthesized
 	// aria-selected/aria-expanded in sync. False means the page stays zero-JS.

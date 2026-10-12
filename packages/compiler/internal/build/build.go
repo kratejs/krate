@@ -46,10 +46,13 @@ type PageResult struct {
 	HydrationJS   string
 	JSFile        string
 	CSSFile       string
+	CSSModernFile string // modern-only stylesheet for the UA sibling (hybrid+userAgent)
+	CSSLegacyFile string // legacy-only stylesheet for the UA sibling (hybrid+userAgent)
 	CSS           string // this page's own imported CSS (before minification/hashing)
 	RuntimeJSFile string // shared runtime chunk path (relative to outDir), e.g. "chunks/runtime.abc.js"
 	HasJS         bool
 	HasCSS        bool
+	HasCSSSignals bool // page emitted CSS-signal rules (drives the legacy sibling)
 	IsErrorPage   bool
 	UsedCSS       map[string]bool
 	UsedFuncs     map[string]bool
@@ -1143,12 +1146,45 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 	// byte-identical CSS (the docs theme is linked on every page), so process
 	// each distinct input once.
 	type processed struct {
-		file string
-		data []byte
+		file       string
+		data       []byte
+		modernFile string
+		modernData []byte
+		legacyFile string
+		legacyData []byte
 	}
 	memo := make(map[string]processed)
 	var chromaCSS string
 	chromaLoaded := false
+
+	// Per-variant stylesheets: in hybrid+userAgent mode the UA sibling should
+	// download only the legacy signal rules (and the default document only the
+	// modern rules), so split the hybrid stylesheet per variant.
+	variants := b.legacyDocEnabled()
+
+	write := func(file string, data []byte) {
+		if file == "" || written[file] {
+			return
+		}
+		_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, file), data, 0644)
+		written[file] = true
+	}
+	process := func(pageCss string) (string, []byte) {
+		processedCSS := css.InlineImports(pageCss, b.Root)
+		processedCSS = b.processCSSDirectives(processedCSS)
+		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
+		if b.Cfg.ShouldMinifyCSS() {
+			processedCSS = css.Minify(processedCSS)
+		} else {
+			processedCSS = css.RemoveDuplicateDeclarations(processedCSS)
+		}
+		bs := []byte(processedCSS)
+		if strings.TrimSpace(processedCSS) == "" {
+			return "", nil
+		}
+		return "styles." + hashContent(bs) + ".css", bs
+	}
+
 	for _, r := range results {
 		if r.CSS == "" && !pageRendersCode(r.HTML) {
 			continue
@@ -1165,34 +1201,31 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		}
 
 		key := hashContent([]byte(pageCss))
-		if p, ok := memo[key]; ok {
-			r.CSSFile = p.file
-			if !written[p.file] {
-				_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, p.file), p.data, 0644)
-				written[p.file] = true
+		p, ok := memo[key]
+		if !ok {
+			p.file, p.data = process(pageCss)
+			if variants && r.HasCSSSignals {
+				modernRaw, legacyRaw := splitVariantCSS(pageCss)
+				p.modernFile, p.modernData = process(modernRaw)
+				if p.modernFile != "" {
+					p.modernFile = strings.TrimSuffix(p.modernFile, ".css") + ".modern.css"
+				}
+				p.legacyFile, p.legacyData = process(legacyRaw)
+				if p.legacyFile != "" {
+					p.legacyFile = strings.TrimSuffix(p.legacyFile, ".css") + ".legacy.css"
+				}
 			}
-			continue
+			memo[key] = p
 		}
-
-		processedCSS := css.InlineImports(pageCss, b.Root)
-		processedCSS = b.processCSSDirectives(processedCSS)
-		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
-		if b.Cfg.ShouldMinifyCSS() {
-			processedCSS = css.Minify(processedCSS)
-		} else {
-			processedCSS = css.RemoveDuplicateDeclarations(processedCSS)
+		r.CSSFile = p.file
+		write(p.file, p.data)
+		if p.modernFile != "" {
+			r.CSSModernFile = p.modernFile
+			write(p.modernFile, p.modernData)
 		}
-		if strings.TrimSpace(processedCSS) == "" {
-			memo[key] = processed{file: ""}
-			continue
-		}
-		processedBytes := []byte(processedCSS)
-		cssFile := "styles." + hashContent(processedBytes) + ".css"
-		memo[key] = processed{file: cssFile, data: processedBytes}
-		r.CSSFile = cssFile
-		if !written[cssFile] {
-			_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, cssFile), processedBytes, 0644)
-			written[cssFile] = true
+		if p.legacyFile != "" {
+			r.CSSLegacyFile = p.legacyFile
+			write(p.legacyFile, p.legacyData)
 		}
 	}
 	return written
@@ -1270,6 +1303,16 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				pageCSS = append(pageCSS, r.CSSFile)
 			}
 			pageCSS = append(pageCSS, cssFiles...)
+			// UA siblings link a variant-only stylesheet when the build emitted
+			// one (hybrid+userAgent); otherwise they share the page sheet.
+			legacyPageCSS := pageCSS
+			if r.CSSLegacyFile != "" {
+				legacyPageCSS = append([]string{r.CSSLegacyFile}, cssFiles...)
+			}
+			modernPageCSS := pageCSS
+			if r.CSSModernFile != "" {
+				modernPageCSS = append([]string{r.CSSModernFile}, cssFiles...)
+			}
 			devBootstrap := ""
 			if b.DevMode {
 				devBootstrap = b.devBootstrapJSON()
@@ -1282,39 +1325,58 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
 			}
 
-			// 2. Durable SSR state (window.__KRATE_STATE__): a page-level
-			// payload that persisted signals prefer on hydration, so the
-			// hydrated value matches what the server rendered. Inserted before
-			// the CSP hash pass so its inline script is allow-listed.
-			if state := b.durableStateScript(); state != "" {
-				html = strings.Replace(html, "</head>", state+"</head>", 1)
-			}
-
-			// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
-			if b.Cfg.SEO.BaseURL != "" {
-				seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO.BaseURL, b.Cfg.SEO.SiteName, b.Cfg.SEO.Description, b.Cfg.SEO.Image)
-				if seoTags != "" {
-					html = strings.Replace(html, "</head>", seoTags+"</head>", 1)
+			// Opt-in UA variants: sibling documents so `krate serve` can send a
+			// smaller, variant-only document to User-Agent-classified visitors.
+			// The default document stays the full hybrid (works on any host).
+			legacyHTML := ""
+			modernHTML := ""
+			if b.legacyDocEnabled() && r.HasCSSSignals && !r.IsErrorPage {
+				// Swap the gated shim for the unconditional one (legacy) or drop
+				// it entirely (modern) so each sibling ships only what it needs.
+				baseScript := strings.ReplaceAll(r.ScriptHTML, hybridShimScriptTag(), "")
+				legacyScriptHTML := baseScript + legacyShimScriptTag()
+				if r.LoadingHTML != "" {
+					legacyHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, r.LoadingHTML, legacyPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
+					modernHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, r.LoadingHTML, modernPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
+				} else {
+					legacyHTML = generateHTML(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, legacyPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
+					modernHTML = generateHTML(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, modernPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
 				}
 			}
 
-			// 2c. CSP meta tag injection. Hash against the FULLY ASSEMBLED
-			// document so every inline script/style - including the runtime
-			// config (`__KRATE_CFG__`), View Transitions CSS, and durable state
-			// - is allow-listed. External (src/href) tags are skipped by the
-			// extractor, and `script-src 'self'` covers the hashed bundles.
-			if b.Cfg.CSP.Enabled {
-				cspMeta := generateCSPMeta(html, html, r.HydrationJS, b.Cfg.CSP.Directive)
-				if cspMeta != "" {
-					html = strings.Replace(html, "</head>", cspMeta+"</head>", 1)
+			// finish applies the head injections + minify shared by the default
+			// and legacy documents. CSP hashes the fully assembled document, so
+			// each variant's inline scripts are allow-listed individually.
+			finish := func(h string) string {
+				// 2. Durable SSR state (window.__KRATE_STATE__): a page-level
+				// payload that persisted signals prefer on hydration, so the
+				// hydrated value matches what the server rendered.
+				if state := b.durableStateScript(); state != "" {
+					h = strings.Replace(h, "</head>", state+"</head>", 1)
 				}
+				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
+				if b.Cfg.SEO.BaseURL != "" {
+					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO.BaseURL, b.Cfg.SEO.SiteName, b.Cfg.SEO.Description, b.Cfg.SEO.Image)
+					if seoTags != "" {
+						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
+					}
+				}
+				// 2c. CSP meta tag injection. Hash against the FULLY ASSEMBLED
+				// document so every inline script/style is allow-listed.
+				if b.Cfg.CSP.Enabled {
+					cspMeta := generateCSPMeta(h, h, r.HydrationJS, b.Cfg.CSP.Directive)
+					if cspMeta != "" {
+						h = strings.Replace(h, "</head>", cspMeta+"</head>", 1)
+					}
+				}
+				// 3. Minify code in memory
+				if b.Cfg.ShouldMinifyHTML() {
+					h = minifyHTML(h)
+				}
+				return h
 			}
 
-			// 3. Minify code in memory
-			if b.Cfg.ShouldMinifyHTML() {
-				html = minifyHTML(html)
-			}
-
+			html = finish(html)
 			r.FinalHTML = html
 
 			// 4. Single Write to physical media
@@ -1327,6 +1389,12 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				htmlPath = filepath.Join(pageDir, "index.html")
 			}
 			_ = fsutil.WriteFileIfChanged(htmlPath, []byte(html), 0644)
+			if legacyHTML != "" {
+				_ = fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.legacy.html"), []byte(finish(legacyHTML)), 0644)
+			}
+			if modernHTML != "" {
+				_ = fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.modern.html"), []byte(finish(modernHTML)), 0644)
+			}
 		}(r)
 	}
 	wg.Wait()
@@ -1458,7 +1526,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme, AggressiveDCE: b.aggressiveDCE()})
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, b.irBuildOptions())
 	// CSS primitive declarations that cannot be compiled to CSS are hard errors
 	// (there is no fallback to client signals).
 	if len(tree.Errors) > 0 {
@@ -1537,12 +1605,20 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		emitResult.HTML = "<!--suspense:page-->" + emitResult.HTML + "<!--/suspense:page-->"
 	}
 
-	layoutCSS, layoutFiles := b.applyLayoutStack(page, emitResult)
+	layoutCSS, layoutFiles, layoutHasSignals := b.applyLayoutStack(page, emitResult)
 	bundle.CSS += layoutCSS
 	// Generated CSS signal rules land in the page's own hashed stylesheet, after
 	// layout CSS so author styles can override the defaults.
 	if choiceCSS != "" {
 		bundle.CSS += choiceCSS
+		// Legacy/hybrid modes drive the class-based stylesheet with a scoped
+		// shim; modern mode stays zero-JS.
+		emitResult.ScriptHTML += b.compatShimHTML()
+		// No-JS legacy engines (no :has(), scripting off) need the reveal-all
+		// fallback, since the shim cannot run.
+		if b.needsNoJSFallback() {
+			emitResult.StyleHTML += noJSFallbackHTML(tree.NoJSFallbackCSS)
+		}
 	}
 	// ARIA roles that need synthesized state (tabs/listbox/disclosure) inject a
 	// tiny inline synchroniser. Every other CSS-signal page stays zero-JS.
@@ -1579,6 +1655,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			ScriptHTML:        emitResult.ScriptHTML,
 			StyleHTML:         emitResult.StyleHTML,
 			HasCSS:            pageCSS != "",
+			HasCSSSignals:     tree.HasCSSSignals || layoutHasSignals,
 			IsErrorPage:       pageBase == "404" || pageBase == "500",
 			CSS:               pageCSS,
 			UsedCSS:           emitResult.UsedCSS,
@@ -1665,21 +1742,22 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	// Return data structures without triggering an intermediate disk write
 	result := &PageResult{
-		Page:        page,
-		OutName:     outName,
-		HTML:        emitResult.HTML,
-		HeadHTML:    emitResult.HeadHTML,
-		ScriptHTML:  emitResult.ScriptHTML,
-		StyleHTML:   emitResult.StyleHTML,
-		HydrationJS: hydrationJS,
-		HasJS:       hasJS,
-		JSFile:      jsFile,
-		HasCSS:      pageCSS != "",
-		IsErrorPage: pageBase == "404" || pageBase == "500",
-		CSS:         pageCSS,
-		UsedCSS:     emitResult.UsedCSS,
-		UsedFuncs:   emitResult.UsedFuncs,
-		LoadingHTML: loadingHTML,
+		Page:          page,
+		OutName:       outName,
+		HTML:          emitResult.HTML,
+		HeadHTML:      emitResult.HeadHTML,
+		ScriptHTML:    emitResult.ScriptHTML,
+		StyleHTML:     emitResult.StyleHTML,
+		HydrationJS:   hydrationJS,
+		HasJS:         hasJS,
+		JSFile:        jsFile,
+		HasCSS:        pageCSS != "",
+		HasCSSSignals: tree.HasCSSSignals || layoutHasSignals,
+		IsErrorPage:   pageBase == "404" || pageBase == "500",
+		CSS:           pageCSS,
+		UsedCSS:       emitResult.UsedCSS,
+		UsedFuncs:     emitResult.UsedFuncs,
+		LoadingHTML:   loadingHTML,
 
 		Mode:       renderMode,
 		Revalidate: revalidate,
@@ -1733,24 +1811,25 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 	c.markHit()
 
 	return &PageResult{
-		Page:        page,
-		OutName:     e.OutName,
-		HTML:        e.HTML,
-		HeadHTML:    e.HeadHTML,
-		ScriptHTML:  e.ScriptHTML,
-		StyleHTML:   e.StyleHTML,
-		HydrationJS: e.HydrationJS,
-		HasJS:       e.HasJS,
-		JSFile:      e.JSFile,
-		HasCSS:      e.HasCSS,
-		IsErrorPage: e.IsErrorPage,
-		CSS:         e.CSS,
-		UsedCSS:     setFromSlice(e.UsedCSS),
-		UsedFuncs:   setFromSlice(e.UsedFuncs),
-		LoadingHTML: e.LoadingHTML,
-		Mode:        RenderMode(e.Mode),
-		Revalidate:  e.Revalidate,
-		SourcePath:  e.SourcePath,
+		Page:          page,
+		OutName:       e.OutName,
+		HTML:          e.HTML,
+		HeadHTML:      e.HeadHTML,
+		ScriptHTML:    e.ScriptHTML,
+		StyleHTML:     e.StyleHTML,
+		HydrationJS:   e.HydrationJS,
+		HasJS:         e.HasJS,
+		JSFile:        e.JSFile,
+		HasCSS:        e.HasCSS,
+		HasCSSSignals: e.HasCSSSignals,
+		IsErrorPage:   e.IsErrorPage,
+		CSS:           e.CSS,
+		UsedCSS:       setFromSlice(e.UsedCSS),
+		UsedFuncs:     setFromSlice(e.UsedFuncs),
+		LoadingHTML:   e.LoadingHTML,
+		Mode:          RenderMode(e.Mode),
+		Revalidate:    e.Revalidate,
+		SourcePath:    e.SourcePath,
 
 		DynamicParams:     e.DynamicParams,
 		StaticOnly:        e.StaticOnly,
@@ -1785,25 +1864,26 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		return
 	}
 	c.save(page, &diskPageEntry{
-		Key:         key,
-		OutName:     r.OutName,
-		HTML:        r.HTML,
-		HeadHTML:    r.HeadHTML,
-		ScriptHTML:  r.ScriptHTML,
-		StyleHTML:   r.StyleHTML,
-		HydrationJS: r.HydrationJS,
-		JSFile:      r.JSFile,
-		JSBytes:     jsBytes,
-		CSS:         r.CSS,
-		HasJS:       r.HasJS,
-		HasCSS:      r.HasCSS,
-		IsErrorPage: r.IsErrorPage,
-		UsedCSS:     sliceFromSet(r.UsedCSS),
-		UsedFuncs:   sliceFromSet(r.UsedFuncs),
-		LoadingHTML: r.LoadingHTML,
-		Mode:        int(r.Mode),
-		Revalidate:  r.Revalidate,
-		SourcePath:  r.SourcePath,
+		Key:           key,
+		OutName:       r.OutName,
+		HTML:          r.HTML,
+		HeadHTML:      r.HeadHTML,
+		ScriptHTML:    r.ScriptHTML,
+		StyleHTML:     r.StyleHTML,
+		HydrationJS:   r.HydrationJS,
+		JSFile:        r.JSFile,
+		JSBytes:       jsBytes,
+		CSS:           r.CSS,
+		HasJS:         r.HasJS,
+		HasCSS:        r.HasCSS,
+		HasCSSSignals: r.HasCSSSignals,
+		IsErrorPage:   r.IsErrorPage,
+		UsedCSS:       sliceFromSet(r.UsedCSS),
+		UsedFuncs:     sliceFromSet(r.UsedFuncs),
+		LoadingHTML:   r.LoadingHTML,
+		Mode:          int(r.Mode),
+		Revalidate:    r.Revalidate,
+		SourcePath:    r.SourcePath,
 
 		DynamicParams:     r.DynamicParams,
 		StaticOnly:        r.StaticOnly,
@@ -1852,7 +1932,7 @@ func (b *Builder) buildRoute(route plugin.Route) (result *PageResult, rawCSS str
 
 	// Use our new shared pipeline
 	// This works for plugins because we pass route.Data (the props) directly
-	layoutRes, rawCSS, _, err := b.executeLayoutPipeline(route.Layout, route.Content, route.Data)
+	layoutRes, rawCSS, _, _, err := b.executeLayoutPipeline(route.Layout, route.Content, route.Data)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1884,6 +1964,9 @@ func (b *Builder) buildRoute(route plugin.Route) (result *PageResult, rawCSS str
 // and forces a rebuild instead of reusing a stale skeleton.
 type layoutEmitCacheEntry struct {
 	html, headHTML, scriptHTML, styleHTML, css string
+	// hasSignals records whether the layout (and its components) compiled any
+	// CSS signal rules, so wrapped pages know to emit UA siblings/fallbacks.
+	hasSignals bool
 	// Client hydration metadata, merged into each wrapped page so the layout's
 	// interactive components hydrate (their JS is generated alongside the page's).
 	signatures     []irtree.ComponentSignature
@@ -1959,11 +2042,11 @@ func emitCacheLock(path string) *sync.Mutex {
 // layout was built from (its module graph), so callers can record them as page
 // dependencies - editing a component a layout imports must rebuild the pages the
 // layout wraps, even though the layout file itself is unchanged.
-func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props map[string]string) (*renderer.EmitResult, string, []string, error) {
+func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props map[string]string) (*renderer.EmitResult, string, []string, bool, error) {
 	var css string
 
 	if layoutPath == "" {
-		return &renderer.EmitResult{HTML: content}, "", nil, nil
+		return &renderer.EmitResult{HTML: content}, "", nil, false, nil
 	}
 
 	// Cache hit: reuse the layout skeleton and inject the page content. The
@@ -1981,7 +2064,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 				Signatures:     entry.signatures,
 				ListComponents: entry.listComponents,
 				HasLinks:       entry.hasLinks,
-			}, entry.css, entry.deps, nil
+			}, entry.css, entry.deps, entry.hasSignals, nil
 		}
 	}
 
@@ -2004,19 +2087,19 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 				Signatures:     entry.signatures,
 				ListComponents: entry.listComponents,
 				HasLinks:       entry.hasLinks,
-			}, entry.css, entry.deps, nil
+			}, entry.css, entry.deps, entry.hasSignals, nil
 		}
 	}
 
 	bnd := b.newBundler()
 	layoutBundle, err := bnd.Bundle(layoutPath)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
+		return nil, "", nil, false, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
 	}
 
 	layoutModule := findEntryModule(layoutBundle.Modules)
 	if layoutModule == nil || layoutModule.Program == nil {
-		return nil, "", nil, fmt.Errorf("layout module invalid or empty: %s (ensure the layout has a default export)", layoutPath)
+		return nil, "", nil, false, fmt.Errorf("layout module invalid or empty: %s (ensure the layout has a default export)", layoutPath)
 	}
 
 	// The layout's full module graph is both its cache-invalidation key and a
@@ -2033,13 +2116,11 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	annotator.MergeModuleFunctions(ann, extraLayoutPrograms)
 	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	tree := irtree.BuildWithOptions(layoutModule.Program, ann, irtree.BuildOptions{
-		CodeTheme:     b.Cfg.Markdown.CodeTheme,
-		IDPrefix:      layoutIDPrefix(layoutPath),
-		AggressiveDCE: b.aggressiveDCE(),
-	})
+	opts := b.irBuildOptions()
+	opts.IDPrefix = layoutIDPrefix(layoutPath)
+	tree := irtree.BuildWithOptions(layoutModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
-		return nil, "", nil, renderErrors(layoutPath, tree.Errors)
+		return nil, "", nil, false, renderErrors(layoutPath, tree.Errors)
 	}
 	emitter := renderer.NewEmitter()
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
@@ -2049,7 +2130,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	renderer.EmitMeta(tree, emitResult)
 
 	if len(emitResult.Errors) > 0 {
-		return nil, "", nil, renderErrors(layoutPath, emitResult.Errors)
+		return nil, "", nil, false, renderErrors(layoutPath, emitResult.Errors)
 	}
 
 	// Compile-time reactive dependency validation. Surfaced as warnings so
@@ -2061,6 +2142,10 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	// construction and appended to the layout's own module CSS.
 	if tree.CSSSignalsCSS != "" {
 		css += tree.CSSSignalsCSS
+		emitResult.ScriptHTML += b.compatShimHTML()
+		if b.needsNoJSFallback() {
+			emitResult.StyleHTML += noJSFallbackHTML(tree.NoJSFallbackCSS)
+		}
 	}
 	if tree.NeedsCSSARIA {
 		emitResult.ScriptHTML += "<script>" + renderer.CSSARIAJS + "</script>"
@@ -2075,6 +2160,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		listComponents: emitResult.ListComponents,
 		hasLinks:       emitResult.HasLinks,
 		css:            css,
+		hasSignals:     tree.HasCSSSignals,
 		deps:           layoutDeps,
 		depTimes:       modTimesOf(layoutDeps),
 	})
@@ -2088,7 +2174,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		Signatures:     emitResult.Signatures,
 		ListComponents: emitResult.ListComponents,
 		HasLinks:       emitResult.HasLinks,
-	}, css, layoutDeps, nil
+	}, css, layoutDeps, tree.HasCSSSignals, nil
 }
 
 // layoutDepPaths returns the absolute paths of every real file in a layout's
@@ -2138,7 +2224,7 @@ func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*
 
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, page, entryModule.SourceCode)
 
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme, AggressiveDCE: b.aggressiveDCE()})
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, b.irBuildOptions())
 	if len(tree.Errors) > 0 {
 		return nil, renderErrors(page, tree.Errors)
 	}
@@ -2235,7 +2321,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme, AggressiveDCE: b.aggressiveDCE()})
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, b.irBuildOptions())
 	if len(tree.Errors) > 0 {
 		for _, e := range tree.Errors {
 			fmt.Fprintf(os.Stderr, "  %s✗ Error (loading %s):%s %v\n", cRed, loadingPath, cReset, e)
@@ -2311,14 +2397,16 @@ func findLayoutStack(pagePath, pagesDir string) []string {
 // skipped so the page still emits unwrapped. Returns the CSS contributed by the
 // applied layouts and the layout paths used, so the caller can record them as
 // page dependencies (a layout edit must rebuild every page it wraps).
-func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult) (string, []string) {
+func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult) (string, []string, bool) {
 	var css string
 	var used []string
+	hasSignals := false
 	for _, layoutPath := range findLayoutStack(page, b.Cfg.PagesDir) {
-		layoutRes, layoutCSS, layoutDeps, err := b.executeLayoutPipeline(layoutPath, emitResult.HTML, nil)
+		layoutRes, layoutCSS, layoutDeps, layoutHasSignals, err := b.executeLayoutPipeline(layoutPath, emitResult.HTML, nil)
 		if err != nil {
 			continue
 		}
+		hasSignals = hasSignals || layoutHasSignals
 		emitResult.HTML = layoutRes.HTML
 		emitResult.HeadHTML = emitResult.HeadHTML + layoutRes.HeadHTML
 		emitResult.ScriptHTML = emitResult.ScriptHTML + layoutRes.ScriptHTML
@@ -2336,7 +2424,7 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 		// editing a component the layout imports rebuilds every wrapped page.
 		used = append(used, layoutDeps...)
 	}
-	return css, used
+	return css, used, hasSignals
 }
 
 var (

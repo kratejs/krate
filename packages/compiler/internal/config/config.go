@@ -339,6 +339,29 @@ func (f FontsCfg) DisplayValue() string {
 	return v
 }
 
+// CompatConfig selects the browser-compatibility output mode. In "legacy" and
+// "hybrid" modes, CSS Signals compile to class-based CSS plus a tiny scoped
+// shim instead of :has(), so the same page works on browsers without :has().
+type CompatConfig struct {
+	// Mode is "modern" (default), "legacy", or "hybrid". "hybrid" emits both
+	// the :has() rules and the legacy rules, selected at runtime by a feature
+	// query, so modern browsers keep zero-JS CSS signals.
+	Mode string `json:"mode,omitempty"`
+	// UserAgent (hybrid only) additionally emits a legacy-optimized document
+	// that `krate serve`/SSR may select from the User-Agent header, so strictly
+	// legacy visitors download less. Opt-in; ignored by static hosts.
+	UserAgent bool `json:"userAgent,omitempty"`
+}
+
+// ModeOrDefault returns the normalized compat mode (default "modern").
+func (c CompatConfig) ModeOrDefault() string {
+	m := strings.ToLower(strings.TrimSpace(c.Mode))
+	if m == "" {
+		return "modern"
+	}
+	return m
+}
+
 type Config struct {
 	Entry       string          `json:"entry"`
 	OutDir      string          `json:"outDir"`
@@ -370,6 +393,7 @@ type Config struct {
 	Dce         DceCfg          `json:"dce,omitempty"`         // CSS/JS dead-code elimination
 	Fonts       FontsCfg        `json:"fonts,omitempty"`       // web-font preload + font-display
 	GoAPI       GoAPICfg        `json:"goApi,omitempty"`       // Go API sidecar module/deps
+	Compat      CompatConfig    `json:"compat,omitempty"`      // browser compatibility output mode
 
 	// BasePath is the URL path prefix the whole site is served under (e.g.
 	// "/docs"). Empty means root. Used for emitted asset URLs and the SPA

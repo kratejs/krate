@@ -10,63 +10,141 @@ import (
 // Themes override the colours via --krate-css-active*; components read the
 // inherited --krate-active (0/1) and --krate-active-color hooks to render their
 // own selected visuals (radio dots, tab underlines, toggle fills) with zero JS.
-const activeTriggerDecl = "color:var(--krate-css-active-fg,inherit);font-weight:600;--krate-active:1;--krate-active-color:var(--krate-css-active,var(--krate-primary,#f97316));--krate-active-bg:color-mix(in srgb,var(--krate-css-active,var(--krate-primary,#f97316)) 15%,transparent)"
+//
+// --krate-active-bg is emitted twice: a static fallback first, then the
+// color-mix() value. Browsers without color-mix() (e.g. Chrome < 111) keep the
+// fallback; modern browsers take the color-mix() value.
+const activeTriggerDecl = "color:var(--krate-css-active-fg,inherit);font-weight:600;--krate-active:1;--krate-active-color:var(--krate-css-active,var(--krate-primary,#f97316));--krate-active-bg:#f9731626;--krate-active-bg:color-mix(in srgb,var(--krate-css-active,var(--krate-primary,#f97316)) 15%,transparent)"
 
 // HiddenCSS is the base rule for the visually-hidden controller inputs. They
 // stay focusable (unlike display:none) so keyboard navigation and screen readers
 // keep working.
 const HiddenCSS = "." + HiddenClass + "{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;clip:rect(0 0 0 0);overflow:hidden;white-space:nowrap}"
 
-// Stylesheet returns the generated stylesheet for scopes and their matched
+// focusMarkerCSS is the legacy focus ring: the scoped shim marks the trigger
+// label of the focused controller input with the `krc-f` class (legacy mode has
+// no :has() to express "trigger of the focused input").
+const focusMarkerCSS = ".krc-f{outline:2px solid var(--krate-focus-ring,#f97316);outline-offset:2px}"
+
+// Stylesheet returns the generated stylesheet in the default (modern) mode.
+func Stylesheet(scopes []*Scope, conditions []*Condition) string {
+	return StylesheetMode(scopes, conditions, StyleModern)
+}
+
+// StylesheetMode returns the generated stylesheet for scopes and their matched
 // conditions, in a deterministic order so the page's content hash is stable.
 // Returns "" when empty. Conditions whose wrapper is hidden/shown by the
 // per-scope rules (single positive choice atom, any single toggle/flag atom)
 // are canonical and are not double-emitted.
-func Stylesheet(scopes []*Scope, conditions []*Condition) string {
+//
+// modern emits :has()-based selectors plus a reveal-all fallback. legacy emits
+// class-based selectors (driven by the scoped shim) instead. hybrid emits both,
+// each wrapped in @supports selector(:has(*)), so a browser picks its path with
+// no server involvement.
+func StylesheetMode(scopes []*Scope, conditions []*Condition, mode StyleMode) string {
 	if len(scopes) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString(HiddenCSS)
 	b.WriteByte('\n')
+	switch mode {
+	case StyleLegacy:
+		b.WriteString(stateCSS(scopes, conditions, StyleLegacy))
+		b.WriteString(tailCSS(scopes))
+	case StyleHybrid:
+		b.WriteString(CompatModernPrefix)
+		b.WriteString(stateCSS(scopes, conditions, StyleModern))
+		b.WriteString("}\n")
+		b.WriteString(CompatLegacyPrefix)
+		b.WriteString(stateCSS(scopes, conditions, StyleLegacy))
+		b.WriteString("}\n")
+		b.WriteString(tailCSS(scopes))
+	default:
+		b.WriteString(stateCSS(scopes, conditions, StyleModern))
+		b.WriteString(tailCSS(scopes))
+		b.WriteString(NoHasFallback(scopes, conditions))
+	}
+	return b.String()
+}
+
+// stateCSS emits the state-dependent rules (per-scope rules + non-canonical
+// condition rules) for one selector mode.
+func stateCSS(scopes []*Scope, conditions []*Condition, mode StyleMode) string {
+	var b strings.Builder
 	for _, s := range scopes {
-		b.WriteString(s.css())
-		b.WriteString(s.focusCSS())
-		b.WriteString(s.anchorCSS())
+		b.WriteString(s.css(mode))
+		b.WriteString(s.focusCSS(mode))
+		b.WriteString(s.anchorCSS(mode))
 		b.WriteString(s.transitionCSS())
+	}
+	if mode == StyleLegacy {
+		b.WriteString(focusMarkerCSS)
+		b.WriteByte('\n')
 	}
 	for _, c := range sortedConditions(conditions) {
 		if c.needsExplicitRule() {
-			b.WriteString(c.css())
+			b.WriteString(c.css(mode))
 		}
 	}
+	return b.String()
+}
+
+// tailCSS emits the mode-independent rules appended after the state rules.
+func tailCSS(scopes []*Scope) string {
+	var b strings.Builder
 	if UsesLiveText(scopes) {
 		b.WriteString(LiveTextCSS)
 		b.WriteByte('\n')
 	}
 	b.WriteString(disabledCSS(scopes))
-	b.WriteString(noHasFallback(scopes, conditions))
 	return b.String()
+}
+
+// stateFrag returns the state selector fragment appended after the scope root
+// class, matching when the controller `ctrl` is checked (or not) in the given
+// mode. Modern uses :has()/:not(:has()); legacy relies on the scoped shim
+// mirroring the input's checked state onto a root class (`<ctrl>-on`).
+func (s *Scope) stateFrag(mode StyleMode, ctrl string, negated bool) string {
+	if mode == StyleLegacy {
+		if negated {
+			return ":not(." + ctrl + "-on)"
+		}
+		return "." + ctrl + "-on"
+	}
+	if negated {
+		return ":not(:has(." + ctrl + ":checked))"
+	}
+	return ":has(." + ctrl + ":checked)"
 }
 
 // triggerSel matches the trigger for an option whether it is a descendant of the
 // scope anchor or the anchor element itself (a single-element toggle, where the
 // scope class and trigger class share one element).
-func (s *Scope) triggerSel(ctrl, state, option string) string {
+func (s *Scope) triggerSel(mode StyleMode, ctrl, option string) string {
 	t := s.TriggerClass(option)
-	return "." + s.Class + ":has(." + ctrl + state + ") ." + t + ",." + s.Class + "." + t + ":has(." + ctrl + state + ")"
+	if mode == StyleLegacy {
+		return "." + s.Class + "." + ctrl + "-on ." + t + ",." + s.Class + "." + t + "." + ctrl + "-on"
+	}
+	return "." + s.Class + ":has(." + ctrl + ":checked) ." + t + ",." + s.Class + "." + t + ":has(." + ctrl + ":checked)"
 }
 
 // focusCSS shows a focus ring on a trigger's visible label when its (hidden)
 // controller input has keyboard focus, since the label itself is not focused.
-func (s *Scope) focusCSS() string {
+// Legacy mode has no :has(): the scoped shim marks the label with `krc-f`
+// (see focusMarkerCSS) instead.
+func (s *Scope) focusCSS(mode StyleMode) string {
+	if mode == StyleLegacy {
+		return ""
+	}
 	var b strings.Builder
 	for _, opt := range s.Options {
 		ctrl := s.CheckboxClass(opt)
 		if s.isChoiceLike() {
 			ctrl = s.RadioClass(opt)
 		}
-		b.WriteString(s.triggerSel(ctrl, ":focus-visible", opt))
+		t := s.TriggerClass(opt)
+		b.WriteString("." + s.Class + ":has(." + ctrl + ":focus-visible) ." + t + ",." + s.Class + "." + t + ":has(." + ctrl + ":focus-visible)")
 		b.WriteString("{outline:2px solid var(--krate-focus-ring,#f97316);outline-offset:2px}\n")
 	}
 	return b.String()
@@ -74,9 +152,10 @@ func (s *Scope) focusCSS() string {
 
 // anchorCSS positions each option's panel relative to its trigger using CSS
 // anchor positioning (progressive: ignored by browsers without support, which
-// fall back to the component's own positioning).
-func (s *Scope) anchorCSS() string {
-	if s.Anchor == "" {
+// fall back to the component's own positioning). Legacy browsers lack anchor
+// positioning entirely, so the component's own positioning applies.
+func (s *Scope) anchorCSS(mode StyleMode) string {
+	if s.Anchor == "" || mode == StyleLegacy {
 		return ""
 	}
 	decl := anchorDecl(s.Anchor)
@@ -151,11 +230,34 @@ func disabledCSS(scopes []*Scope) string {
 	return strings.Join(parts, ",") + "{pointer-events:none;opacity:.5}\n"
 }
 
-// noHasFallback reveals every panel wrapper when the browser does not support
+// NoHasFallback reveals every panel wrapper when the browser does not support
 // `:has()`, so content stays visible (the interactive reveal degrades to
 // "everything shown") instead of every panel being display:none. It is a no-op
-// on browsers that support `:has()` (2023+).
-func noHasFallback(scopes []*Scope, conditions []*Condition) string {
+// on browsers that support `:has()` (2023+). Used for the hybrid <noscript>
+// fallback, where a modern browser with scripting off must keep native `:has()`.
+func NoHasFallback(scopes []*Scope, conditions []*Condition) string {
+	sel := revealSelectorSet(scopes, conditions)
+	if sel == "" {
+		return ""
+	}
+	return "@supports not selector(:has(*)){" + sel + "{display:contents}}\n"
+}
+
+// RevealCSS is the unconditional reveal-all rule. Legacy mode never uses
+// `:has()` (it drives state with the shim), so its <noscript> fallback must not
+// be gated on :has() - otherwise a modern browser with scripting off would keep
+// every panel hidden.
+func RevealCSS(scopes []*Scope, conditions []*Condition) string {
+	sel := revealSelectorSet(scopes, conditions)
+	if sel == "" {
+		return ""
+	}
+	return sel + "{display:contents}\n"
+}
+
+// revealSelectorSet returns the sorted, comma-joined selectors of every panel
+// wrapper and condition wrapper (empty when none).
+func revealSelectorSet(scopes []*Scope, conditions []*Condition) string {
 	set := make(map[string]bool)
 	for _, s := range scopes {
 		for _, opt := range s.Options {
@@ -176,7 +278,7 @@ func noHasFallback(scopes []*Scope, conditions []*Condition) string {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	return "@supports not selector(:has(*)){" + strings.Join(keys, ",") + "{display:contents}}\n"
+	return strings.Join(keys, ",")
 }
 
 // sortedConditions returns a deterministic copy ordered by owning scope index
@@ -207,7 +309,7 @@ func (c *Condition) needsExplicitRule() bool {
 // css emits the hide + show rules for a non-canonical condition. The wrapper is
 // hidden by default, then shown when any DNF term matches: one selector-list
 // entry per AND-term.
-func (c *Condition) css() string {
+func (c *Condition) css(mode StyleMode) string {
 	owner := c.owningScope()
 	var b strings.Builder
 	b.WriteString("." + owner.Class + " ." + c.Class + "{display:none}\n")
@@ -217,7 +319,7 @@ func (c *Condition) css() string {
 		}
 		b.WriteString("." + owner.Class)
 		for _, at := range term {
-			b.WriteString(at.selector())
+			b.WriteString(at.selector(mode))
 		}
 		b.WriteString(" ." + c.Class)
 	}
@@ -225,13 +327,21 @@ func (c *Condition) css() string {
 	return b.String()
 }
 
-// selector is the :has()/:not(:has()) fragment for an atom, relative to the
-// scope anchor element.
-func (at *Atom) selector() string {
-	if at.Negated {
-		return ":not(:has(" + at.controllerSel() + ":checked))"
+// selector is the state fragment for an atom, relative to the scope anchor
+// element: :has()/:not(:has()) in modern mode, or the shim-driven class in
+// legacy mode.
+func (at *Atom) selector(mode StyleMode) string {
+	ctrl := at.controllerSel()
+	if mode == StyleLegacy {
+		if at.Negated {
+			return ":not(" + ctrl + "-on)"
+		}
+		return ctrl + "-on"
 	}
-	return ":has(" + at.controllerSel() + ":checked)"
+	if at.Negated {
+		return ":not(:has(" + ctrl + ":checked))"
+	}
+	return ":has(" + ctrl + ":checked)"
 }
 
 // controllerSel is the class selector of the atom's controller input.
@@ -243,18 +353,18 @@ func (at *Atom) controllerSel() string {
 }
 
 // css emits the rules for a single scope.
-func (s *Scope) css() string {
+func (s *Scope) css(mode StyleMode) string {
 	switch s.Kind {
 	case KindChoice, KindGroup:
-		return s.choiceCSS()
+		return s.choiceCSS(mode)
 	case KindRange:
-		return s.rangeCSS()
+		return s.rangeCSS(mode)
 	case KindStack:
-		return s.stackCSS()
+		return s.stackCSS(mode)
 	case KindToggle:
-		return s.toggleCSS()
+		return s.toggleCSS(mode)
 	case KindFlags:
-		return s.flagsCSS()
+		return s.flagsCSS(mode)
 	}
 	return ""
 }
@@ -262,8 +372,8 @@ func (s *Scope) css() string {
 // rangeCSS emits the choice rules plus a proportional fill rule for a progress
 // indicator: the fill width is the checked index's percentage of the range.
 // Each stepper group shows only the label for the currently-checked index.
-func (s *Scope) rangeCSS() string {
-	css := s.choiceCSS()
+func (s *Scope) rangeCSS(mode StyleMode) string {
+	css := s.choiceCSS(mode)
 	n := len(s.Options)
 	if n < 2 {
 		return css
@@ -272,14 +382,14 @@ func (s *Scope) rangeCSS() string {
 	b.WriteString(css)
 	for i, opt := range s.Options {
 		pct := round1(float64(i) * 100 / float64(n-1))
-		b.WriteString("." + s.Class + ":has(." + s.RadioClass(opt) + ":checked) ." + ClassPrefix + "-fill{width:" + pct + "%}\n")
+		b.WriteString("." + s.Class + s.stateFrag(mode, s.RadioClass(opt), false) + " ." + ClassPrefix + "-fill{width:" + pct + "%}\n")
 	}
 	// Steppers: one label per index; only the label whose index is checked is
 	// shown (nth-child matches the option order).
 	for _, dir := range []string{"inc", "dec"} {
 		b.WriteString("." + s.Class + " ." + s.Class + "-st-" + dir + ">*{display:none}\n")
 		for i, opt := range s.Options {
-			b.WriteString("." + s.Class + ":has(." + s.RadioClass(opt) + ":checked) ." + s.Class + "-st-" + dir + ">*:nth-child(" + strconv.Itoa(i+1) + "){display:inline-block}\n")
+			b.WriteString("." + s.Class + s.stateFrag(mode, s.RadioClass(opt), false) + " ." + s.Class + "-st-" + dir + ">*:nth-child(" + strconv.Itoa(i+1) + "){display:inline-block}\n")
 		}
 	}
 	return b.String()
@@ -287,7 +397,7 @@ func (s *Scope) rangeCSS() string {
 
 // stackCSS emits the choice rules; each level's panel visibility is expressed
 // by the ordinary panel conditions, so the base rules cover it.
-func (s *Scope) stackCSS() string { return s.choiceCSS() }
+func (s *Scope) stackCSS(mode StyleMode) string { return s.choiceCSS(mode) }
 
 // round1 formats a float with one decimal place, trimming a trailing ".0".
 func round1(f float64) string {
@@ -306,7 +416,7 @@ func (s *Scope) PanelWrapperClass(option string, negated bool) string {
 }
 
 // choiceCSS emits the rules for a radio group.
-func (s *Scope) choiceCSS() string {
+func (s *Scope) choiceCSS(mode StyleMode) string {
 	var b strings.Builder
 
 	// Every option's panel wrapper is hidden by default; the selected option's
@@ -323,12 +433,12 @@ func (s *Scope) choiceCSS() string {
 		if i > 0 {
 			b.WriteString(",")
 		}
-		b.WriteString("." + s.Class + ":has(." + s.RadioClass(opt) + ":checked) ." + s.PanelWrapperClass(opt, false))
+		b.WriteString("." + s.Class + s.stateFrag(mode, s.RadioClass(opt), false) + " ." + s.PanelWrapperClass(opt, false))
 	}
 	b.WriteString("{display:contents}\n")
 
 	for _, opt := range s.Options {
-		b.WriteString(s.triggerSel(s.RadioClass(opt), ":checked", opt))
+		b.WriteString(s.triggerSel(mode, s.RadioClass(opt), opt))
 		b.WriteString("{" + activeTriggerDecl + "}\n")
 	}
 	// Group scopes emit a second "close" label per option, shown only while the
@@ -344,11 +454,11 @@ func (s *Scope) choiceCSS() string {
 			if opt == s.Sentinel {
 				continue
 			}
-			b.WriteString("." + s.Class + ":has(." + s.RadioClass(opt) + ":checked) ." + s.TriggerAltClass(opt) + "{display:inline-flex;" + activeTriggerDecl + "}\n")
-			b.WriteString("." + s.Class + ":has(." + s.RadioClass(opt) + ":checked) ." + s.TriggerClass(opt) + ":not(." + s.TriggerAltClass(opt) + "){display:none}\n")
+			b.WriteString("." + s.Class + s.stateFrag(mode, s.RadioClass(opt), false) + " ." + s.TriggerAltClass(opt) + "{display:inline-flex;" + activeTriggerDecl + "}\n")
+			b.WriteString("." + s.Class + s.stateFrag(mode, s.RadioClass(opt), false) + " ." + s.TriggerClass(opt) + ":not(." + s.TriggerAltClass(opt) + "){display:none}\n")
 		}
 	}
-	b.WriteString(s.varsCSS())
+	b.WriteString(s.varsCSS(mode))
 	return b.String()
 }
 
@@ -357,7 +467,7 @@ func (s *Scope) choiceCSS() string {
 // the stable, author-facing `--krate-current` (the quoted option token); an
 // author's `vars` add more properties. Values are emitted verbatim (authors
 // quote strings for `content:` themselves).
-func (s *Scope) varsCSS() string {
+func (s *Scope) varsCSS(mode StyleMode) string {
 	if !s.isChoiceLike() {
 		return ""
 	}
@@ -376,7 +486,7 @@ func (s *Scope) varsCSS() string {
 				decl.WriteString(k + ":" + v + ";")
 			}
 		}
-		b.WriteString("." + s.Class + ":has(." + s.RadioClass(opt) + ":checked){" + decl.String() + "}\n")
+		b.WriteString("." + s.Class + s.stateFrag(mode, s.RadioClass(opt), false) + "{" + decl.String() + "}\n")
 	}
 	return b.String()
 }
@@ -384,23 +494,23 @@ func (s *Scope) varsCSS() string {
 // toggleCSS emits the rules for a single checkbox. Two panel wrappers may be
 // used: the "on" wrapper (shown when checked) and the "off" wrapper (shown when
 // not) - either or both may be absent in the markup.
-func (s *Scope) toggleCSS() string {
+func (s *Scope) toggleCSS(mode StyleMode) string {
 	var b strings.Builder
 	cb := s.CheckboxClass("")
 	on, off := s.PanelWrapperClass("on", false), s.PanelWrapperClass("on", true)
 
 	b.WriteString("." + s.Class + " ." + on + ",." + s.Class + " ." + off + "{display:none}\n")
-	b.WriteString("." + s.Class + ":has(." + cb + ":checked) ." + on)
-	b.WriteString(",." + s.Class + ":not(:has(." + cb + ":checked)) ." + off)
+	b.WriteString("." + s.Class + s.stateFrag(mode, cb, false) + " ." + on)
+	b.WriteString(",." + s.Class + s.stateFrag(mode, cb, true) + " ." + off)
 	b.WriteString("{display:contents}\n")
-	b.WriteString(s.triggerSel(cb, ":checked", ""))
+	b.WriteString(s.triggerSel(mode, cb, ""))
 	b.WriteString("{" + activeTriggerDecl + "}\n")
-	b.WriteString(s.toggleVarsCSS(cb))
+	b.WriteString(s.toggleVarsCSS(mode, cb))
 	return b.String()
 }
 
 // toggleVarsCSS emits the two-state custom properties for a toggle's on/off.
-func (s *Scope) toggleVarsCSS(cb string) string {
+func (s *Scope) toggleVarsCSS(mode StyleMode, cb string) string {
 	var b strings.Builder
 	onDecl := "--krate-current:\"on\";"
 	offDecl := "--krate-current:\"off\";"
@@ -412,8 +522,8 @@ func (s *Scope) toggleVarsCSS(cb string) string {
 			offDecl += k + ":" + v + ";"
 		}
 	}
-	b.WriteString("." + s.Class + ":has(." + cb + ":checked){" + onDecl + "}\n")
-	b.WriteString("." + s.Class + ":not(:has(." + cb + ":checked)){" + offDecl + "}\n")
+	b.WriteString("." + s.Class + s.stateFrag(mode, cb, false) + "{" + onDecl + "}\n")
+	b.WriteString("." + s.Class + s.stateFrag(mode, cb, true) + "{" + offDecl + "}\n")
 	return b.String()
 }
 
@@ -443,16 +553,16 @@ func UsesLiveText(scopes []*Scope) bool {
 }
 
 // flagsCSS emits the rules for independent checkboxes.
-func (s *Scope) flagsCSS() string {
+func (s *Scope) flagsCSS(mode StyleMode) string {
 	var b strings.Builder
 	for _, opt := range s.Options {
 		on, off := s.PanelWrapperClass(opt, false), s.PanelWrapperClass(opt, true)
 		cb := s.CheckboxClass(opt)
 		b.WriteString("." + s.Class + " ." + on + ",." + s.Class + " ." + off + "{display:none}\n")
-		b.WriteString("." + s.Class + ":has(." + cb + ":checked) ." + on)
-		b.WriteString(",." + s.Class + ":not(:has(." + cb + ":checked)) ." + off)
+		b.WriteString("." + s.Class + s.stateFrag(mode, cb, false) + " ." + on)
+		b.WriteString(",." + s.Class + s.stateFrag(mode, cb, true) + " ." + off)
 		b.WriteString("{display:contents}\n")
-		b.WriteString(s.triggerSel(cb, ":checked", opt))
+		b.WriteString(s.triggerSel(mode, cb, opt))
 		b.WriteString("{" + activeTriggerDecl + "}\n")
 	}
 	return b.String()

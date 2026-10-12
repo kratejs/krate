@@ -44,6 +44,9 @@ type BuildOptions struct {
 	// function referenced only from verbatim-emitted body fragments, so it is
 	// opt-in (config `dce.aggressive`).
 	AggressiveDCE bool
+	// Compat selects how CSS-signal stylesheets are emitted (modern/legacy/
+	// hybrid) for browser compatibility. The zero value is StyleModern.
+	Compat csssignals.StyleMode
 }
 
 // Build constructs a ComponentTree from a parsed program and its annotations
@@ -82,6 +85,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		codeTheme:        codeTheme,
 		idPrefix:         opts.IDPrefix,
 		aggressiveDCE:    opts.AggressiveDCE,
+		compat:           opts.Compat,
 	}
 
 	root := builder.buildComponentNode(entryFn, "")
@@ -98,6 +102,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 	errs = append(errs, builder.cssErrs...)
 	errs = append(errs, builder.codegenErrs...)
 
+	cssSignals, noJSFallback := builder.cssStylesheets()
 	return &ComponentTree{
 		Root:            root,
 		HasLinks:        builder.hasLinks,
@@ -105,17 +110,21 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		Functions:       ann.Functions,
 		CVAFactories:    builder.cvaFactories,
 		ContextDefaults: builder.contextDefaults,
-		CSSSignalsCSS:   builder.cssStylesheet(),
+		CSSSignalsCSS:   cssSignals,
+		HasCSSSignals:   len(builder.cssCollected) > 0 || len(builder.cssConditions) > 0,
+		NoJSFallbackCSS: noJSFallback,
 		NeedsCSSARIA:    builder.cssNeedsARIA,
 		Errors:          errs,
 	}
 }
 
-// cssStylesheet returns the generated CSS signal stylesheet with scopes and
-// compound-show conditions collected during the build (empty when none).
-func (b *builder) cssStylesheet() string {
+// cssStylesheets returns the generated CSS signal stylesheet (mode-aware) and
+// the no-JS fallback (empty when the tree has no CSS signals). Legacy mode never
+// uses :has(), so its fallback is unconditional; hybrid must gate on :has() so a
+// modern browser with scripting off keeps native :has() behavior.
+func (b *builder) cssStylesheets() (stylesheet, noJSFallback string) {
 	if len(b.cssCollected) == 0 && len(b.cssConditions) == 0 {
-		return ""
+		return "", ""
 	}
 	scopes := make([]*csssignals.Scope, 0, len(b.cssCollected))
 	for _, s := range b.cssCollected {
@@ -129,7 +138,13 @@ func (b *builder) cssStylesheet() string {
 		}
 		return conditions[i].ExprIdx < conditions[j].ExprIdx
 	})
-	return csssignals.Stylesheet(scopes, conditions)
+	stylesheet = csssignals.StylesheetMode(scopes, conditions, b.compat)
+	if b.compat == csssignals.StyleLegacy {
+		noJSFallback = csssignals.RevealCSS(scopes, conditions)
+	} else {
+		noJSFallback = csssignals.NoHasFallback(scopes, conditions)
+	}
+	return stylesheet, noJSFallback
 }
 
 // builder holds state during IR construction.
@@ -156,18 +171,19 @@ type builder struct {
 	// the call-site attributes it collects (attr name -> expression). Used to
 	// expand `{...props}` spreads on intrinsic elements.
 	restProps        map[string]map[string]ast.Expr
-	localFuncProps   map[string]bool     // component-local prop names whose values are function references
-	refObjectVars    map[string]bool     // component-local names bound to a useRef {current:...} object
-	refCallbackVars  map[string]bool     // component-local names bound to a function (callback-ref targets)
-	callSiteChildren []ast.JSXChild      // call-site children of the current component
-	moduleConsts     map[string]string   // module-level const values (name -> resolved literal)
-	moduleConstInits map[string]ast.Expr // module-level const initializers (name -> expr)
-	cvaFactories     map[string]*CVASpec // module-level `const X = cva(...)` factories
-	contextDefaults  map[string]string   // module-level `const X = createContext(v)` defaults
-	codeTheme        string              // chroma theme for compile-time <Code> highlighting
-	idPrefix         string              // namespace for compact slot IDs (merged builds)
-	aggressiveDCE    bool                // drop unreferenced local functions (opt-in)
-	suspenseCount    int                 // monotonic counter for stable StreamID generation
+	localFuncProps   map[string]bool      // component-local prop names whose values are function references
+	refObjectVars    map[string]bool      // component-local names bound to a useRef {current:...} object
+	refCallbackVars  map[string]bool      // component-local names bound to a function (callback-ref targets)
+	callSiteChildren []ast.JSXChild       // call-site children of the current component
+	moduleConsts     map[string]string    // module-level const values (name -> resolved literal)
+	moduleConstInits map[string]ast.Expr  // module-level const initializers (name -> expr)
+	cvaFactories     map[string]*CVASpec  // module-level `const X = cva(...)` factories
+	contextDefaults  map[string]string    // module-level `const X = createContext(v)` defaults
+	codeTheme        string               // chroma theme for compile-time <Code> highlighting
+	idPrefix         string               // namespace for compact slot IDs (merged builds)
+	aggressiveDCE    bool                 // drop unreferenced local functions (opt-in)
+	suspenseCount    int                  // monotonic counter for stable StreamID generation
+	compat           csssignals.StyleMode // CSS-signal stylesheet mode (modern/legacy/hybrid)
 
 	// cssIndex assigns stable, page-unique indices to (component, var) scope
 	// pairs so classes/CSS are deterministic across builds.

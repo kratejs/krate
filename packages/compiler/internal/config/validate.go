@@ -27,6 +27,7 @@ var knownNestedKeys = map[string]map[string]bool{
 	"dce":       {"css": true, "js": true, "aggressive": true},
 	"fonts":     {"preload": true, "display": true},
 	"goApi":     {"enabled": true, "module": true, "deps": true, "replaces": true, "tidy": true},
+	"compat":    {"mode": true, "userAgent": true},
 }
 
 // knownSidecarKeys is the recognized nested key set for api.sidecar.
@@ -53,6 +54,7 @@ var knownTopLevelKeys = map[string]bool{
 	"runtimeComponents": true, "serverDirs": true, "runtimeDirs": true,
 	"content": true, "checks": true,
 	"server": true, "cors": true, "api": true, "basePath": true,
+	"compat": true,
 }
 
 // Validate performs semantic/bounds checks that JSON typing alone can't. It
@@ -78,6 +80,14 @@ func (c *Config) Validate() (warnings []string, err error) {
 		if strings.HasSuffix(bp, "/") {
 			warnings = append(warnings, fmt.Sprintf("basePath %q should not end with /", bp))
 		}
+	}
+	switch c.Compat.ModeOrDefault() {
+	case "modern", "legacy", "hybrid":
+	default:
+		return nil, fmt.Errorf("compat.mode must be \"modern\", \"legacy\", or \"hybrid\", got %q", c.Compat.Mode)
+	}
+	if c.Compat.UserAgent && c.Compat.ModeOrDefault() != "hybrid" {
+		warnings = append(warnings, "compat.userAgent only applies to compat.mode \"hybrid\"; ignored")
 	}
 	if c.CORS.Enabled && c.CORS.Credentials {
 		for _, o := range c.CORS.Origins {

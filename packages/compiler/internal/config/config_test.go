@@ -375,6 +375,47 @@ func TestParseTSConfigSSRStreamingFalse(t *testing.T) {
 	}
 }
 
+func TestParseTSConfigCompat(t *testing.T) {
+	src := `export default {
+		compat: { mode: "hybrid", userAgent: true },
+	}`
+	cfg := &Config{}
+	if err := parseTSConfig(src, cfg); err != nil {
+		t.Fatalf("parseTSConfig: %v", err)
+	}
+	if cfg.Compat.Mode != "hybrid" {
+		t.Errorf("Compat.Mode = %q, want hybrid", cfg.Compat.Mode)
+	}
+	if !cfg.Compat.UserAgent {
+		t.Error("Compat.UserAgent = false, want true")
+	}
+	if got := cfg.Compat.ModeOrDefault(); got != "hybrid" {
+		t.Errorf("ModeOrDefault = %q, want hybrid", got)
+	}
+}
+
+func TestCompatValidate(t *testing.T) {
+	if _, err := (&Config{Compat: CompatConfig{Mode: "nope"}}).Validate(); err == nil {
+		t.Error("expected error for invalid compat.mode")
+	}
+	warnings, err := (&Config{Compat: CompatConfig{Mode: "modern", UserAgent: true}}).Validate()
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "compat.userAgent") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a compat.userAgent warning, got %v", warnings)
+	}
+	if got := (CompatConfig{}).ModeOrDefault(); got != "modern" {
+		t.Errorf("empty ModeOrDefault = %q, want modern", got)
+	}
+}
+
 func TestParseTSConfigDefaults(t *testing.T) {
 	src := `export default { entry: "src/app.tsx", outDir: "build" }`
 	cfg := Default()

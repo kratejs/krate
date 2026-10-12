@@ -325,7 +325,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, irtree.BuildOptions{CodeTheme: b.Cfg.Markdown.CodeTheme, AggressiveDCE: b.aggressiveDCE()})
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, b.irBuildOptions())
 	if len(tree.Errors) > 0 {
 		return nil, "", renderErrors(spp.PagePath, tree.Errors)
 	}
@@ -383,7 +383,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	layoutPath := findLayout(spp.PagePath, b.Cfg.PagesDir)
 	var deps []string
 	if layoutPath != "" {
-		layoutCSS, layoutFiles := b.applyLayoutStack(spp.PagePath, emitResult)
+		layoutCSS, layoutFiles, _ := b.applyLayoutStack(spp.PagePath, emitResult)
 		bundle.CSS += layoutCSS
 		deps = append(deps, layoutFiles...)
 	}
