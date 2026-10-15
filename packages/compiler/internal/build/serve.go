@@ -26,6 +26,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/execx"
+	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
@@ -434,6 +435,106 @@ type regionPageResult struct {
 	renderErr string
 }
 
+// regionBoundary is one splice marker and its nested markers.
+type regionBoundary struct {
+	openStart int
+	openEnd   int
+	fbEnd     int // start of the closing marker (end of baked inner content)
+	id        string
+	kind      string // "suspense" | "region"
+	children  []*regionBoundary
+}
+
+// regionShell is a parsed baked shell. ok is false when the file had no markers
+// or a mismatched marker pair (caller falls back to the static path).
+type regionShell struct {
+	modTime time.Time
+	size    int64
+	shell   string
+	roots   []*regionBoundary
+	all     []*regionBoundary
+	ok      bool
+}
+
+// regionShellCache memoizes parsed shells by path so the hot path skips the disk
+// read and marker parse. It reloads when the file's size/mtime changes (dev
+// rebuilds rewrite the shell).
+type regionShellCache struct {
+	mu sync.Mutex
+	m  map[string]*regionShell
+}
+
+func newRegionShellCache() *regionShellCache {
+	return &regionShellCache{m: map[string]*regionShell{}}
+}
+
+func (c *regionShellCache) load(absPath string) (*regionShell, error) {
+	fi, err := os.Stat(absPath)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	if e, ok := c.m[absPath]; ok && e.size == fi.Size() && e.modTime.Equal(fi.ModTime()) {
+		c.mu.Unlock()
+		return e, nil
+	}
+	c.mu.Unlock()
+
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, err
+	}
+	e := parseRegionShell(string(data))
+	e.size = fi.Size()
+	e.modTime = fi.ModTime()
+
+	c.mu.Lock()
+	c.m[absPath] = e
+	c.mu.Unlock()
+	return e, nil
+}
+
+// parseRegionShell extracts the nested marker tree. Marker kinds:
+//
+//	<!--suspense:ID-->...<!--/suspense:ID-->  Suspense boundary / coarse page region
+//	<!--region:ID--><!--/region:ID-->          standalone runtime component
+func parseRegionShell(shell string) *regionShell {
+	e := &regionShell{shell: shell}
+	opens := regionOpenRe.FindAllStringSubmatchIndex(shell, -1)
+	if len(opens) == 0 {
+		return e
+	}
+	e.ok = true
+	var stack []*regionBoundary
+	for _, m := range opens {
+		kind := shell[m[2]:m[3]]
+		id := shell[m[4]:m[5]]
+		openEnd := m[1]
+		closeMarker := "<!--/" + kind + ":" + id + "-->"
+		rel := strings.Index(shell[openEnd:], closeMarker)
+		if rel < 0 {
+			// Malformed marker pair - bail to the non-region path.
+			e.ok = false
+			return e
+		}
+		b := &regionBoundary{openStart: m[0], openEnd: openEnd, fbEnd: openEnd + rel, id: id, kind: kind}
+		// Markers nest (a runtime component inside an SSR/ISR page region), so
+		// build a tree: a boundary is a child of the nearest still-open one.
+		for len(stack) > 0 && stack[len(stack)-1].fbEnd <= b.openStart {
+			stack = stack[:len(stack)-1]
+		}
+		if len(stack) > 0 {
+			parent := stack[len(stack)-1]
+			parent.children = append(parent.children, b)
+		} else {
+			e.roots = append(e.roots, b)
+		}
+		stack = append(stack, b)
+		e.all = append(e.all, b)
+	}
+	return e
+}
+
 // streamRegionPage serves a page with the static-first architecture: the
 // build-time static shell (suspense/region splice markers + baked content) is
 // read from disk and streamed to the browser, and each dynamic region's HTML is
@@ -442,7 +543,7 @@ type regionPageResult struct {
 // SSR/ISR pages the shell carries a single coarse "page" region whose render
 // replaces the whole baked body. Returns the page-region result (served=false
 // when the shell had no region markers and the caller should use another path).
-func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, absOut, route string, ssrPort int, params, query, headers map[string]string) regionPageResult {
+func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error)) regionPageResult {
 	res := regionPageResult{}
 	relPath := strings.TrimPrefix(route, "/")
 	if relPath == "" {
@@ -450,79 +551,144 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, absOut, route
 	} else {
 		relPath = relPath + "/index.html"
 	}
-	data, err := os.ReadFile(filepath.Join(absOut, relPath))
-	if err != nil {
+	// The baked shell + its parsed marker tree are cached per route; only a
+	// missing/malformed shell falls through to the non-region path.
+	e, err := shells.load(filepath.Join(absOut, relPath))
+	if err != nil || e == nil || !e.ok {
 		return res
 	}
-	shell := string(data)
-
-	// Only pages with region splice markers use this path. Marker kinds:
-	// <!--suspense:ID-->...<!--/suspense:ID--> - Suspense boundary or the
-	//       coarse page region; the inner content is baked (fallback / stale
-	//       body) and kept if the region render fails or is skipped.
-	// <!--region:ID--><!--/region:ID--> - standalone runtime component; empty
-	//       slot filled by the region render.
-	opens := regionOpenRe.FindAllStringSubmatchIndex(shell, -1)
-	if len(opens) == 0 {
-		return res
-	}
+	shell := e.shell
+	roots := e.roots
+	all := e.all
 	res.served = true
-
-	type boundary struct {
-		openEnd int // index just past the opening marker's "-->"
-		id      string
-		kind    string // "suspense" | "region"
-		fbStart int    // start of inner content (for suspense: baked content)
-		fbEnd   int    // end of inner content (start of closing marker)
-	}
-	var boundaries []boundary
-	for _, m := range opens {
-		openTag := shell[m[0]:m[1]]
-		kind := "region"
-		if strings.HasPrefix(openTag, "<!--suspense:") {
-			kind = "suspense"
-		}
-		id := shell[m[4]:m[5]]
-		openEnd := m[1]
-		closeMarker := "<!--/" + kind + ":" + id + "-->"
-		rel := strings.Index(shell[openEnd:], closeMarker)
-		if rel < 0 {
-			// Malformed marker pair - bail to the non-region path.
-			res.served = false
-			return res
-		}
-		boundaries = append(boundaries, boundary{
-			openEnd: openEnd,
-			id:      id,
-			kind:    kind,
-			fbStart: openEnd,
-			fbEnd:   openEnd + rel,
-		})
-	}
 
 	// The marker id "page" denotes a coarse whole-page region (SSR/ISR shell);
 	// its frame carries the page's ISR cache status for the caller's headers.
 
-	// Open a raw TCP connection to the sidecar and POST /__krate/regions. The
-	// read deadline bounds how long we wait for region frames so a stalled
-	// sidecar can't pin this request goroutine forever.
-	conn, err := dialSidecar(ssrPort, 30*time.Second)
-	if err != nil {
-		res.served = false
-		return res
-	}
-	defer conn.Close()
-
-	// Send the explicit splice list so the sidecar knows each marker's kind
-	// without reading the manifest for standalone runtime comps.
-	regionList := make([]map[string]string, 0, len(boundaries))
-	for _, b := range boundaries {
+	// Partition splice markers into Go-host regions and Node-sidecar regions.
+	// Region HTML is merged by id regardless of which engine rendered it. The
+	// marker id "page" (SSR/ISR shell) also carries the page ISR cache status.
+	regionHTML := make(map[string]string, len(all))
+	regionList := make([]map[string]string, 0, len(all))
+	var goReq []goRenderRegion
+	reqCtx, _ := json.Marshal(map[string]any{
+		"method": "GET", "url": route, "params": params, "query": query, "headers": headers,
+	})
+	for _, b := range all {
+		if gr, ok := goRenders[b.id]; ok {
+			gr.Request = string(reqCtx)
+			goReq = append(goReq, gr)
+			continue
+		}
 		kind := "component"
 		if b.kind == "suspense" && b.id == "page" {
 			kind = "page"
 		}
 		regionList = append(regionList, map[string]string{"id": b.id, "kind": kind})
 	}
+
+	// Only involve the Node SSR sidecar when it has something to render. A page
+	// whose regions are all Go (or static) is served by the Go server + Go host
+	// alone - no node/bun process, no extra hop.
+	if len(regionList) > 0 {
+		if err := fetchNodeRegions(ssrPort, route, params, query, headers, regionList, regionHTML, &res); err != nil {
+			res.served = false
+			return res
+		}
+	}
+
+	// Render runtime Go-component regions via the Go host and merge their HTML.
+	if len(goReq) > 0 && renderGo != nil {
+		if goHTML, gerr := renderGo(goReq); gerr == nil {
+			for id, h := range goHTML {
+				regionHTML[id] = h
+			}
+		}
+	}
+
+	// Resolve Go-component placeholders inside region HTML (an SSR page bundle
+	// emits these for runtime-tier Go components and any server-tier component
+	// it could not inline) by rendering them through the Go host, forwarding the
+	// request context. Each marker carries its own revalidate window.
+	if renderGo != nil {
+		for id, h := range regionHTML {
+			if strings.Contains(h, "krate-go:") {
+				regionHTML[id] = resolveGoMarkers(h, string(reqCtx), renderGo)
+			}
+		}
+	}
+
+	// A page-region render that 404s (unknown dynamic variant) or redirects is
+	// surfaced to the caller instead of streaming the shell.
+	if res.notFound {
+		res.served = true
+		return res
+	}
+
+	// Apply title override from the page-region render to the baked head.
+	if res.titleOverride != "" {
+		shell = replaceTitle(shell, res.titleOverride)
+	}
+
+	// Status headers must be set BEFORE the first body write below: the caller's
+	// post-return Set calls would otherwise be silently dropped once the body is
+	// committed. All region frames have been read by now, so the page-region
+	// cache/render status is known.
+	if res.renderErr != "" {
+		w.Header().Set("X-Krate-Error", "render")
+	}
+	if res.isISR && res.cacheStatus != "" {
+		w.Header().Set("X-Krate-Cache", strings.ToUpper(res.cacheStatus))
+	}
+
+	// The caller owns the remaining response headers (Content-Type, cache
+	// headers) and sets them before calling this function. The 200 status is
+	// committed implicitly by the first body write below; this function only
+	// writes the body, flushing after each splice so the page streams
+	// progressively.
+	flush := func() {
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	// Write the shell, replacing each marker block's inner content with its
+	// region HTML (or the baked content when the region render failed/skipped),
+	// flushing after each splice so the page streams progressively. Nested
+	// markers are spliced recursively: when a parent region is replaced its
+	// baked body (and any markers inside it) is discarded, but when a suspense
+	// region keeps its baked fallback, markers nested inside are still spliced.
+	var writeSpan func(lo, hi int, children []*regionBoundary)
+	writeSpan = func(lo, hi int, children []*regionBoundary) {
+		cursor := lo
+		for _, b := range children {
+			_, _ = w.Write([]byte(shell[cursor:b.openEnd]))
+			if html, ok := regionHTML[b.id]; ok {
+				_, _ = w.Write([]byte(html))
+			} else if b.kind == "suspense" {
+				// Keep the baked body but splice any markers nested inside it.
+				writeSpan(b.openEnd, b.fbEnd, b.children)
+			}
+			// Standalone runtime regions with no frame leave the empty slot empty.
+			cursor = b.fbEnd
+			flush()
+		}
+		_, _ = w.Write([]byte(shell[cursor:hi]))
+	}
+	writeSpan(0, len(shell), roots)
+	flush()
+
+	return res
+}
+
+// fetchNodeRegions POSTs the region list to the Node SSR sidecar's
+// /__krate/regions endpoint, reads the NDJSON frames, and merges the returned
+// HTML into regionHTML (setting page-region metadata on res). Only called when
+// the page has at least one Node-rendered region, so a Go-only page never pays
+// for a Node hop. It reuses the pooled keep-alive sidecar client (no per-request
+// TCP handshake) and bounds the whole exchange so a stalled sidecar can't pin the
+// request goroutine forever.
+func fetchNodeRegions(ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, regionHTML map[string]string, res *regionPageResult) error {
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"route":   route,
 		"url":     route,
@@ -532,40 +698,24 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, absOut, route
 		"query":   query,
 		"regions": regionList,
 	})
-	httpReq := fmt.Sprintf("POST /__krate/regions HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", ssrPort, len(reqBody))
-	if _, err := conn.Write([]byte(httpReq)); err != nil {
-		res.served = false
-		return res
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/__krate/regions", ssrPort), bytes.NewReader(reqBody))
+	if err != nil {
+		return err
 	}
-	if _, err := conn.Write(reqBody); err != nil {
-		res.served = false
-		return res
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := regionClient.Do(req)
+	if err != nil {
+		return err
 	}
-
-	tcpBuf := bufio.NewReaderSize(conn, 256)
-
-	// Read status line (e.g., "HTTP/1.1 200 OK\r\n")
-	if _, err := tcpBuf.ReadString('\n'); err != nil {
-		res.served = false
-		return res
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("ssr regions: unexpected status %d", resp.StatusCode)
 	}
 
-	// Read headers until empty line.
-	for {
-		line, err := tcpBuf.ReadString('\n')
-		if err != nil {
-			res.served = false
-			return res
-		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			break
-		}
-	}
+	tcpBuf := bufio.NewReaderSize(resp.Body, 256)
 
 	// Read one NDJSON line per region, collecting region HTML + page metadata.
-	regionHTML := make(map[string]string, len(boundaries))
-	framesLeft := len(boundaries)
+	framesLeft := len(regionList)
 	for framesLeft > 0 {
 		line, err := tcpBuf.ReadBytes('\n')
 		if err != nil {
@@ -615,61 +765,7 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, absOut, route
 			framesLeft = 0
 		}
 	}
-
-	// A page-region render that 404s (unknown dynamic variant) or redirects is
-	// surfaced to the caller instead of streaming the shell.
-	if res.notFound {
-		res.served = true
-		return res
-	}
-
-	// Apply title override from the page-region render to the baked head.
-	if res.titleOverride != "" {
-		shell = replaceTitle(shell, res.titleOverride)
-	}
-
-	// Status headers must be set BEFORE the first body write below: the caller's
-	// post-return Set calls would otherwise be silently dropped once the body is
-	// committed. All region frames have been read by now, so the page-region
-	// cache/render status is known.
-	if res.renderErr != "" {
-		w.Header().Set("X-Krate-Error", "render")
-	}
-	if res.isISR && res.cacheStatus != "" {
-		w.Header().Set("X-Krate-Cache", strings.ToUpper(res.cacheStatus))
-	}
-
-	// The caller owns the remaining response headers (Content-Type, cache
-	// headers) and sets them before calling this function. The 200 status is
-	// committed implicitly by the first body write below; this function only
-	// writes the body, flushing after each splice so the page streams
-	// progressively.
-	flush := func() {
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-
-	// Write the shell, replacing each marker block's inner content with its
-	// region HTML (or the baked content when the region render failed/skipped),
-	// flushing after each splice so the page streams progressively.
-	cursor := 0
-	for _, b := range boundaries {
-		_, _ = w.Write([]byte(shell[cursor:b.openEnd]))
-		if html, ok := regionHTML[b.id]; ok {
-			_, _ = w.Write([]byte(html))
-		} else if b.kind == "suspense" {
-			// Region render failed or no frame - keep the baked content.
-			_, _ = w.Write([]byte(shell[b.fbStart:b.fbEnd]))
-		}
-		// Standalone runtime regions with no frame leave the empty slot empty.
-		flush()
-		cursor = b.fbEnd
-	}
-	_, _ = w.Write([]byte(shell[cursor:]))
-	flush()
-
-	return res
+	return nil
 }
 
 // replaceTitle swaps the baked <title> content in a shell for a freshly
@@ -779,7 +875,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Start the Go API sidecar if Go API routes were compiled during the build.
 	// Go routes take precedence over JS routes for the same /api path.
 	var goAPI *goAPISupervisor
-	goAPIManifestPath := filepath.Join(root, ".krate", "goapi-routes.json")
+	goAPIManifestPath := gohost.RoutesManifestPath(root)
 	if _, err := os.Stat(goAPIManifestPath); err == nil {
 		goAPIPort := port + 2
 		goAPI = newGoAPISupervisor(goAPIServerBinPath(root), goAPIManifestPath, goAPIPort)
@@ -812,6 +908,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Load the build manifest to learn which dynamic routes are closed
 	// (static-only: unknown params must 404, not serve the [param] template).
 	staticOnlyRoutes := loadStaticOnlyRoutes(absOut)
+	goRegionsByRoute := loadGoRegions(absOut)
+	// Parsed baked shells (per route) so the region hot path skips the disk read
+	// and marker parse. Reloads automatically when a dev rebuild rewrites a shell.
+	regionShells := newRegionShellCache()
 
 	// Load embedded API route runtime if configured (default: quickjs)
 	var apiRT *jsruntime.APIRouteRuntime
@@ -934,7 +1034,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		apiProxy.ServeHTTP(w, r)
 	})
 
-	// Start SSR renderer server if there are SSR/ISR/streaming pages
+	// Load the SSR manifest for route lookup (server-manifest.json). The Node
+	// renderer process only starts when a page/region actually needs it - a site
+	// whose request-time regions are all Go is served by the Go server + Go host
+	// alone (no node/bun process).
 	ssrPort := cfg.SSR.RendererPort
 	if ssrPort == 0 {
 		ssrPort = port + 10
@@ -943,8 +1046,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	ssr.SetEnv(environ.Current)
 	ssr.SetTuning(cfg.SSR.Timeout, cfg.SSR.MaxCacheSize)
 	ssr.SetPPR(cfg.PPR, cfg.PPRRevalidate)
+	ssr.SetRendererWorkers(cfg.SSR.RendererWorkers)
 	ssrStarted := false
-	if err := ssr.Start(); err != nil {
+	if err := ssr.LoadManifest(); err != nil {
+		// No request-time pages: nothing routes through the renderer.
+	} else if !ssr.NeedsNodeRenderer() {
+		fmt.Printf("  %s⚡%s SSR renderer skipped (all request-time regions render on the Go host)\n", cCyan, cReset)
+	} else if err := ssr.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %s⚠ SSR renderer not started:%s %v\n", cYellow, cReset, err)
 	} else {
 		ssrStarted = true
@@ -1219,7 +1327,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	// SSR/ISR/Streaming page handler - proxies dynamic pages to the Node.js renderer
 	var ssrPageHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !ssrStarted {
+		// Gate on the manifest (route lookup), not the Node process: a page whose
+		// regions are all Go renders without any Node renderer running.
+		if !ssr.HasManifest() {
 			handlerWith404.ServeHTTP(w, r)
 			return
 		}
@@ -1302,7 +1412,21 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			w.Header().Set("Cache-Control", "no-store")
 		}
 
-		rr := streamRegionPage(w, flusher, absOut, route, ssrPort, params, query, headers)
+		var routeGo map[string]goRenderRegion
+		if goRegionsByRoute != nil {
+			routeGo = goRegionsByRoute[route]
+		}
+		var renderGo func([]goRenderRegion) (map[string]string, error)
+		if goAPI != nil && goAPI.Active() {
+			renderGo = goAPI.Render
+		}
+		// 0 when no Node renderer runs: streamRegionPage only dials the sidecar
+		// if the page has a region it must render.
+		regionPort := 0
+		if ssrStarted {
+			regionPort = ssrPort
+		}
+		rr := streamRegionPage(w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo)
 		if rr.served {
 			if rr.renderErr != "" {
 				// The page-region render failed; the baked body was served as a
@@ -1703,16 +1827,15 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(lrw, r)
 
-		// Request line rendered by prettyHandler. The request ID is attached by
-		// the outer requestIDMiddleware so logs can be correlated with responses;
-		// it is emitted as an attribute for the structured fallback path.
-		Logger.Info("request",
-			"id", requestIDFrom(r.Context()),
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", lrw.statusCode,
-			"duration", time.Since(start),
-		)
+		// Emitted off the request path: the entry is queued and written by a
+		// background goroutine so high-throughput serving doesn't block on stdout.
+		emitAccessLog(accessRecord{
+			id:       requestIDFrom(r.Context()),
+			method:   r.Method,
+			path:     r.URL.Path,
+			status:   lrw.statusCode,
+			duration: time.Since(start),
+		})
 	})
 }
 
@@ -1848,6 +1971,37 @@ func loadStaticOnlyRoutes(absOut string) map[string]bool {
 	}
 	for _, r := range m.StaticOnlyRoutes {
 		out[normalizeRoutePattern(r)] = true
+	}
+	return out
+}
+
+// loadGoRegions reads manifest.json and returns, per route, the runtime
+// Go-component regions (region id -> render request) so the server can route
+// them to the Go host instead of the Node SSR sidecar.
+func loadGoRegions(absOut string) map[string]map[string]goRenderRegion {
+	data, err := os.ReadFile(filepath.Join(absOut, "manifest.json"))
+	if err != nil {
+		return nil
+	}
+	var m Manifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	out := map[string]map[string]goRenderRegion{}
+	for route, regs := range m.Regions {
+		for _, r := range regs {
+			if r.Runtime != "go" {
+				continue
+			}
+			propsJSON, _ := json.Marshal(r.Props)
+			if out[route] == nil {
+				out[route] = map[string]goRenderRegion{}
+			}
+			out[route][r.ID] = goRenderRegion{ID: r.ID, Name: r.Component, Props: string(propsJSON), Revalidate: r.Revalidate}
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

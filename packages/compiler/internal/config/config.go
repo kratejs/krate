@@ -159,6 +159,11 @@ type SSRConfig struct {
 	// "node" (default) = plain node on the staged driver, "bun" = `bun run`,
 	// "deno" = `deno run --allow-net --allow-read --allow-env --allow-sys`.
 	SSRRuntime string `json:"ssrRuntime,omitempty"`
+	// RendererWorkers forks this many SSR renderer processes (node cluster) so
+	// page/region rendering uses more than one CPU. Default 1 (single process).
+	// Region/ISR caches are per-worker, and ISR disk persistence is disabled when
+	// clustered.
+	RendererWorkers int `json:"rendererWorkers,omitempty"`
 	// Streaming forces ALL pages to render in streaming SSR mode,
 	// regardless of per-page `export const config = { streaming: true }`.
 	// When enabled, every page goes through the server renderer with
@@ -316,6 +321,91 @@ type GoAPICfg struct {
 
 func (g GoAPICfg) EnabledOrDefault() bool { return g.Enabled == nil || *g.Enabled }
 
+// GoDep is a third-party module required by the generated Go module.
+type GoDep struct {
+	Path    string `json:"path"`
+	Version string `json:"version"`
+}
+
+// GoExclude is an `exclude` directive for the generated Go module.
+type GoExclude struct {
+	Path    string `json:"path"`
+	Version string `json:"version"`
+}
+
+// GoReplace is a `replace` directive for the generated Go module.
+type GoReplace struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// GoCfg configures the unified Go module that hosts API routes (src/api/*.go)
+// and Go components (src/components/*.go). It folds in and supersedes the older
+// goApi config (see EffectiveGo).
+type GoCfg struct {
+	Enabled       *bool       `json:"enabled,omitempty"`
+	Module        string      `json:"module,omitempty"`
+	Deps          []GoDep     `json:"deps,omitempty"`
+	Replaces      []GoReplace `json:"replaces,omitempty"`
+	Exclude       []GoExclude `json:"exclude,omitempty"`
+	Tidy          *bool       `json:"tidy,omitempty"`
+	ComponentDirs []string    `json:"componentDirs,omitempty"`
+	APIDirs       []string    `json:"apiDirs,omitempty"`
+	APIEnabled    *bool       `json:"apiEnabled,omitempty"`
+}
+
+func (g GoCfg) EnabledOrDefault() bool { return g.Enabled == nil || *g.Enabled }
+func (g GoCfg) APIEnabledOrDefault() bool {
+	if g.APIEnabled != nil {
+		return *g.APIEnabled
+	}
+	return true
+}
+func (g GoCfg) TidyOrDefault() bool { return g.Tidy != nil && *g.Tidy }
+
+// ComponentDirList returns the component search dirs (default src/components).
+func (g GoCfg) ComponentDirList() []string {
+	if len(g.ComponentDirs) > 0 {
+		return g.ComponentDirs
+	}
+	return []string{"src/components"}
+}
+
+// APIDirList returns the API route search dirs (default src/api).
+func (g GoCfg) APIDirList() []string {
+	if len(g.APIDirs) > 0 {
+		return g.APIDirs
+	}
+	return []string{"src/api"}
+}
+
+// EffectiveGo returns the unified Go config, folding in legacy goApi values for
+// any field the `go` block leaves unset.
+func (c *Config) EffectiveGo() GoCfg {
+	g := c.Go
+	legacy := c.GoAPI
+	if g.Enabled == nil {
+		g.Enabled = legacy.Enabled
+	}
+	if g.Module == "" {
+		g.Module = legacy.Module
+	}
+	if len(g.Deps) == 0 && len(legacy.Deps) > 0 {
+		for _, d := range legacy.Deps {
+			g.Deps = append(g.Deps, GoDep(d))
+		}
+	}
+	if len(g.Replaces) == 0 && len(legacy.Replaces) > 0 {
+		for _, r := range legacy.Replaces {
+			g.Replaces = append(g.Replaces, GoReplace(r))
+		}
+	}
+	if g.Tidy == nil {
+		g.Tidy = legacy.Tidy
+	}
+	return g
+}
+
 // FontsCfg configures web-font handling. Preload emits `<link rel="preload">`
 // for fonts declared in the global stylesheet; Display sets the default
 // `font-display` applied to `@font-face` blocks that omit it.
@@ -392,7 +482,8 @@ type Config struct {
 	Versions    VersionsConfig  `json:"versions,omitempty"`    // versioned docs
 	Dce         DceCfg          `json:"dce,omitempty"`         // CSS/JS dead-code elimination
 	Fonts       FontsCfg        `json:"fonts,omitempty"`       // web-font preload + font-display
-	GoAPI       GoAPICfg        `json:"goApi,omitempty"`       // Go API sidecar module/deps
+	GoAPI       GoAPICfg        `json:"goApi,omitempty"`       // Go API sidecar module/deps (legacy; see Go)
+	Go          GoCfg           `json:"go,omitempty"`          // unified Go module: API routes + components
 	Compat      CompatConfig    `json:"compat,omitempty"`      // browser compatibility output mode
 
 	// BasePath is the URL path prefix the whole site is served under (e.g.
@@ -592,6 +683,9 @@ func (c *Config) Resolve(root string) {
 	if !filepath.IsAbs(c.PublicDir) {
 		c.PublicDir = filepath.Join(root, c.PublicDir)
 	}
+	// Fold the legacy goApi block into the unified go config once, so the rest
+	// of the codebase reads a single normalized field (c.Go).
+	c.Go = c.EffectiveGo()
 }
 
 // LoadTSConfigPaths reads tsconfig.json and extracts compilerOptions.paths

@@ -50,6 +50,7 @@ Notes:
 |------|----------|
 | `.krate/types/routes.d.ts` | `StaticRoute`, `DynamicRoute`, `Route`, `RouteParams` |
 | `.krate/types/content.d.ts` | Typed entries for configured collections |
+| `.krate/types/**/*.krate.d.ts` | Go component declarations so `import { X } from "./x.go"` type-checks |
 | `.krate/gen/content.ts` | Build-time content data (`getCollection`) |
 
 Regenerate after adding pages or content:
@@ -57,6 +58,9 @@ Regenerate after adding pages or content:
 ```sh
 krate types
 ```
+
+For Go components, run `krate go:init` once — it adds `.krate/types` to your
+`tsconfig` `include` (see [Go Components](/docs/features/go-components/)).
 
 See [Typed Routes & Content](/docs/features/typed-routes/) for usage.
 

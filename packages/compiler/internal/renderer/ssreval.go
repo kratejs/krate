@@ -97,6 +97,18 @@ type SSREval struct {
 	// during SSREval, so inline highlighted blocks match the generated
 	// stylesheet. Empty selects the default theme.
 	codeTheme string
+
+	// goComponents maps imported Go component names to their refs, and goEnqueue
+	// records a build-time render request, returning a splice marker. Set by the
+	// emitter; the build renders all requests in one Go host call.
+	goComponents map[string]irtree.GoComponentRef
+	goEnqueue    func(callID, name, propsJSON string) string
+}
+
+// SetGoComponents installs the Go-component table + enqueue hook.
+func (e *SSREval) SetGoComponents(comps map[string]irtree.GoComponentRef, enqueue func(callID, name, propsJSON string) string) {
+	e.goComponents = comps
+	e.goEnqueue = enqueue
 }
 
 // SetCodeTheme installs the chroma theme for compile-time code highlighting.
@@ -1389,6 +1401,9 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 				return html
 			}
 		}
+		if ref, ok := e.goComponents[name]; ok && e.goEnqueue != nil {
+			return e.evalGoComponent(el, ref)
+		}
 		if e.functions != nil {
 			if fn := e.functions[name]; fn != nil {
 				return e.evalComponentFn(fn, el)
@@ -1595,6 +1610,28 @@ func (e *SSREval) evalChildren(children []ast.JSXChild) string {
 		}
 	}
 	return b.String()
+}
+
+// evalGoComponent enqueues a build-time render for an imported Go component: it
+// serializes props to JSON, renders children to HTML, and returns a splice
+// marker the build replaces with the host's output.
+func (e *SSREval) evalGoComponent(el *ast.JSXElement, ref irtree.GoComponentRef) string {
+	props := map[string]string{}
+	for _, attr := range el.Opening.Attributes {
+		if attr == nil || attr.Spread || attr.Name == "" {
+			continue
+		}
+		if attr.Value == nil {
+			props[attr.Name] = "true"
+			continue
+		}
+		props[attr.Name] = irtree.SerializeJSON(attr.Value, func(x ast.Expr) (string, bool) {
+			return e.eval(x), true
+		})
+	}
+	childHTML := e.evalChildren(el.Children)
+	callID := irtree.GoCallID(el.Position.Line, el.Position.Col, ref.Func)
+	return e.goEnqueue(callID, ref.Func, goPropsJSON(props, childHTML))
 }
 
 // evalComponentFn evaluates a component function with props extracted from JSX attributes.

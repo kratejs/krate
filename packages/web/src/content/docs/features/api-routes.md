@@ -84,6 +84,25 @@ main server reaches it over an **AF_UNIX socket** (`.krate/run/goapi.sock`)
 rather than a loopback port, so no port is consumed and the hop skips the TCP
 stack; it falls back to a loopback port only if the socket cannot be created.
 
+### Quick start (Go routes)
+
+1. **Install the Go toolchain** (1.21+) and make sure `go` is on `PATH`. Go
+   routes are compiled with `go build` at build time.
+2. **Add a file** under `src/api` (the default `go.apiDirs`). No config is
+   required for the default layout; add the [`go` block](/docs/reference/config/#go-components--api-routes)
+   only to change paths or pull in third-party modules.
+3. **Set up editor intellisense** (optional but recommended):
+
+   ```sh
+   krate go:init
+   ```
+
+   This writes a `go.mod` + `go.work`, vendors the helper module under
+   `.krate/goext`, and adds `.krate/types` to your `tsconfig.json` so
+   `goimports`/gopls resolve the `goext/runtime` import.
+
+4. Run `krate dev` and hit the route.
+
 ```go
 // src/api/hello.go — GET /api/hello
 package api
@@ -91,7 +110,7 @@ package api
 import (
 	"net/http"
 
-	"krate-goapi/runtime"
+	runtime "github.com/kratejs/krate/packages/compiler/goext/runtime"
 )
 
 func GET(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +132,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 Go routes require the Go toolchain at build time.
 
+The helper packages live at real import paths
+(`github.com/kratejs/krate/packages/compiler/goext/runtime` and
+`.../goext/krate`) so `goimports`/gopls provide intellisense. Run `krate go:init`
+once to write a project `go.mod` + `go.work` and vendor the helper module under
+`.krate/goext`, so the imports also resolve offline at build time. `krate doctor`
+reports whether the setup is complete.
+
 ### Packages, helpers, and dependencies
 
 The `src/api` tree is preserved when it is compiled: a file that defines no
@@ -132,7 +158,7 @@ import (
 	"net/http"
 
 	"krate-goapi/routes/lib"
-	"krate-goapi/runtime"
+	runtime "github.com/kratejs/krate/packages/compiler/goext/runtime"
 )
 
 func GET(w http.ResponseWriter, r *http.Request) {
@@ -140,13 +166,13 @@ func GET(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-Third-party modules are declared under `goApi` (or via a project-root `go.mod`,
+Third-party modules are declared under `go` (or via a project-root `go.mod`,
 which is merged — its `require`/`replace`/`exclude` directives are copied and
 relative `replace` paths rebased):
 
 ```typescript
 // krate.config.ts
-goApi: {
+go: {
   deps: [{ path: "github.com/google/uuid", version: "v1.6.0" }],
   replaces: [{ from: "example.com/local", to: "../local" }],
 },
@@ -155,7 +181,7 @@ goApi: {
 A `src/api/go.mod` (with an optional `go.sum`) is used verbatim for full
 control. The compiled sidecar binary is cached by the content of `src/api` and
 the module config, so unchanged routes skip `go build`. See
-[Config Reference](/docs/reference/config/#go-api-sidecar).
+[Config Reference](/docs/reference/config/#go-components--api-routes).
 
 ## Custom API sidecar
 

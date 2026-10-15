@@ -2,6 +2,8 @@ package renderer
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -28,6 +30,9 @@ type EmitResult struct {
 	// render. A non-empty set means the build must fail rather than ship
 	// silently empty/wrong output.
 	Errors []error
+	// GoRenders are build-time Go-component render requests; the build renders
+	// them via the Go host and substitutes HTML at the markers.
+	GoRenders []irtree.GoRenderRequest
 }
 
 // SlotOutput is the result of emitting a single slot node. Beyond HTML and
@@ -40,6 +45,7 @@ type SlotOutput struct {
 	ScriptHTML string
 	StyleHTML  string
 	Orphans    []orphanBinding
+	GoRenders  []irtree.GoRenderRequest
 }
 
 // parallelMinChildren is the smallest sibling list worth spawning goroutines
@@ -87,6 +93,10 @@ type Emitter struct {
 	// with real JS semantics instead of Go approximations.
 	EvalJS func(code string) (string, error)
 
+	// GoComponents maps imported Go component names to their refs. Wired by the
+	// build pipeline; SSREval renders them via the shared goCollector.
+	GoComponents map[string]irtree.GoComponentRef
+
 	// cvaFactories holds module-wide `const X = cva(...)` specs so variant calls
 	// in prop-driven components fold to static class strings during SSREval.
 	cvaFactories map[string]*irtree.CVASpec
@@ -106,6 +116,33 @@ type Emitter struct {
 	// not handle). They surface on EmitResult.Errors so the build fails instead
 	// of silently emitting empty/wrong output.
 	errs []error
+
+	// goCollector accumulates build-time Go-component render requests from both
+	// the slot path and SSREval, so the whole page is rendered in one host call.
+	goCollector *goRenderCollector
+}
+
+// goRenderCollector accumulates Go-component render requests and hands out
+// unique marker ids. Shared across the parallel sub-emitters of one page.
+type goRenderCollector struct {
+	mu   sync.Mutex
+	n    int
+	reqs []irtree.GoRenderRequest
+}
+
+func (c *goRenderCollector) enqueue(callID, name, props string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n++
+	id := "g" + strconv.Itoa(c.n)
+	c.reqs = append(c.reqs, irtree.GoRenderRequest{ID: id, Name: name, Props: props, CallID: callID})
+	return irtree.GoRenderMarker(id)
+}
+
+func (c *goRenderCollector) snapshot() []irtree.GoRenderRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]irtree.GoRenderRequest(nil), c.reqs...)
 }
 
 // addErr records an unsupported-construct diagnostic during emit.
@@ -120,7 +157,7 @@ func (e *Emitter) Errors() []error {
 
 // NewEmitter creates a new emitter.
 func NewEmitter() *Emitter {
-	return &Emitter{}
+	return &Emitter{goCollector: &goRenderCollector{}}
 }
 
 // Emit walks the ComponentTree and produces an EmitResult.
@@ -164,6 +201,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 		UsedCSS:        make(map[string]bool),
 		ListComponents: listComponents,
 		Errors:         e.errs,
+		GoRenders:      append(output.GoRenders, e.goCollector.snapshot()...),
 	}
 }
 
@@ -320,6 +358,12 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	eval := NewSSREval(e.functions)
 	if e.EvalJS != nil {
 		eval.SetEvalJS(e.EvalJS)
+	}
+	if len(e.GoComponents) > 0 {
+		collector := e.goCollector
+		eval.SetGoComponents(e.GoComponents, func(callID, name, propsJSON string) string {
+			return collector.enqueue(callID, name, propsJSON)
+		})
 	}
 	if e.cvaFactories != nil {
 		eval.SetCVAFactories(e.cvaFactories)
@@ -546,20 +590,64 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 // emitRuntime - runtime component splice marker
 
 func (e *Emitter) emitRuntime(node *irtree.ComponentNode) SlotOutput {
-	// Standalone runtime components (not inside a <Suspense> boundary) become
-	// their own dynamic region. The shell carries an empty splice slot keyed by
-	// the region ID (region-<slotID>, matching the build's region registry); the
-	// Go server asks the SSR sidecar to render the component and splices the
-	// HTML in at request time. The component's build-time resolved props live in
-	// the region registry (RegionMeta.Props), so nothing is serialized inline.
+	// Runtime Go components are baked as a region; their (static) children are
+	// rendered now and passed to the host as the `children` prop per request.
+	if node.Runtime == "go" && len(node.Children) > 0 {
+		childOut := e.emitSlotsParallel(node.Children)
+		if childOut.HTML != "" {
+			if node.RuntimeProps == nil {
+				node.RuntimeProps = map[string]any{}
+			}
+			node.RuntimeProps["children"] = childOut.HTML
+		}
+	}
 	id := "region-" + string(node.ID)
 	return SlotOutput{
 		HTML: fmt.Sprintf(`<!--region:%s--><!--/region:%s-->`, id, id),
 	}
 }
 
-// emitMetaSlot - Head/Script/Style content routing
+// emitGoComponentSlot renders an imported Go component's children, records a
+// build-time render request, and emits a marker the build replaces with the
+// host's HTML.
+func (e *Emitter) emitGoComponentSlot(s *irtree.GoComponentSlot) SlotOutput {
+	childOut := e.emitSlotsParallel(s.Children)
+	id := string(s.ID)
+	props := goPropsJSON(s.Props, childOut.HTML)
+	return SlotOutput{
+		HTML:       fmt.Sprintf("<!--krate-gocomp:%s-->", id),
+		Signatures: childOut.Signatures,
+		HeadHTML:   childOut.HeadHTML,
+		ScriptHTML: childOut.ScriptHTML,
+		StyleHTML:  childOut.StyleHTML,
+		GoRenders: append(childOut.GoRenders, irtree.GoRenderRequest{
+			ID:     id,
+			Name:   s.Ref.Func,
+			Props:  props,
+			CallID: irtree.GoCallID(s.Pos.Line, s.Pos.Col, s.Ref.Func),
+		}),
+	}
+}
 
+// goPropsJSON merges the JSON-encoded attr props with the rendered children
+// under the `children` key.
+func goPropsJSON(props map[string]string, childrenHTML string) string {
+	keys := make([]string, 0, len(props))
+	for k := range props {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys)+1)
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%q", k)+":"+props[k])
+	}
+	if childrenHTML != "" {
+		parts = append(parts, fmt.Sprintf("%q", "children")+":"+fmt.Sprintf("%q", childrenHTML))
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
+// emitMetaSlot - Head/Script/Style content routing
 func (e *Emitter) emitMetaSlot(s *irtree.MetaSlot) SlotOutput {
 	var out SlotOutput
 	for _, child := range s.Children {
@@ -587,6 +675,8 @@ func (e *Emitter) emitSlotNode(slot irtree.SlotNode) SlotOutput {
 		return e.emitListSlot(s)
 	case *irtree.ComponentSlot:
 		return e.emitComponentSlot(s)
+	case *irtree.GoComponentSlot:
+		return e.emitGoComponentSlot(s)
 	case *irtree.SuspenseSlot:
 		return e.emitSuspenseSlot(s)
 	case *irtree.MetaSlot:
@@ -615,6 +705,7 @@ func mergeSlotOutput(acc *SlotOutput, out SlotOutput) {
 	acc.ScriptHTML += out.ScriptHTML
 	acc.StyleHTML += out.StyleHTML
 	acc.Orphans = append(acc.Orphans, out.Orphans...)
+	acc.GoRenders = append(acc.GoRenders, out.GoRenders...)
 }
 
 // emitSlotsParallel emits sibling slots concurrently using fresh sub-emitters.
@@ -647,6 +738,8 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 			sub.functions = e.functions
 			sub.IconResolver = e.IconResolver
 			sub.EvalJS = e.EvalJS
+			sub.GoComponents = e.GoComponents
+			sub.goCollector = e.goCollector
 			// Propagate build-wide tables so SSREval in this branch folds cva
 			// variants and context defaults exactly like the sequential path.
 			sub.cvaFactories = e.cvaFactories
@@ -666,6 +759,7 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 		merged.ScriptHTML += out.ScriptHTML
 		merged.StyleHTML += out.StyleHTML
 		merged.Orphans = append(merged.Orphans, out.Orphans...)
+		merged.GoRenders = append(merged.GoRenders, out.GoRenders...)
 		// Diagnostics raised in a parallel branch must still fail the build.
 		e.errs = append(e.errs, subErrs[i]...)
 	}

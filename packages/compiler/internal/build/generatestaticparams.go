@@ -341,6 +341,18 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		return nil, "", renderErrors(spp.PagePath, emitResult.Errors)
 	}
 
+	// Render imported server-tier Go components via the Go host and inline their
+	// HTML (mirrors buildPage); keep the call-site->HTML map for SSR baking.
+	var goBaked map[string]string
+	if len(emitResult.GoRenders) > 0 {
+		rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
+		if gerr != nil {
+			return nil, "", gerr
+		}
+		emitResult.HTML = substituteGoRenders(emitResult.HTML, rendered)
+		goBaked = goBakedMap(emitResult.GoRenders, rendered)
+	}
+
 	// Compile-time reactive dependency validation. Surfaced as warnings so
 	// dead signals / circular effects are caught before hydration ships.
 	b.printReactiveDiags(reactive.Build(emitResult.Signatures).Validate())
@@ -453,5 +465,6 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		SourcePath:  relSrc,
 		Program:     entryModule.Program,
 		Regions:     regions,
+		GoBaked:     goBaked,
 	}, bundle.CSS, nil
 }

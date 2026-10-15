@@ -2,11 +2,27 @@
 // Receives render requests from the Go server and returns HTML.
 
 import http from "node:http";
+import cluster from "node:cluster";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { pathToFileURL } from "node:url";
 import { renderToString } from "./server.js";
+
+// Cluster across cores: page/region rendering is independent per request, so N
+// workers scale it past a single core. Krate sets KRATE_SSR_WORKERS from
+// ssr.rendererWorkers. Region/ISR caches are per-worker and ISR disk persistence
+// is disabled when clustered (the primary never serves).
+const SSR_WORKERS = Math.max(1, parseInt(process.env.KRATE_SSR_WORKERS || "1", 10) || 1);
+const isClusterPrimary = SSR_WORKERS > 1 && cluster.isPrimary;
+if (isClusterPrimary) {
+  for (let i = 0; i < SSR_WORKERS; i++) cluster.fork();
+  cluster.on("exit", (worker) => {
+    console.log(`[krate-ssr] worker ${worker.process.pid} exited; restarting`);
+    cluster.fork();
+  });
+  console.log(`[krate-ssr] primary supervising ${SSR_WORKERS} workers`);
+}
 
 // Force TCP_NODELAY on socket to prevent Nagle buffering chunks together.
 // Must be called BEFORE the first write for it to take effect.
@@ -208,6 +224,9 @@ function isrCachePath(): string {
 }
 
 function scheduleIsrPersist() {
+  // Clustered: multiple workers would race on the same cache file; keep the ISR
+  // cache in memory only.
+  if (SSR_WORKERS > 1) return;
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     persistTimer = null;
@@ -854,6 +873,10 @@ const server = http.createServer(async (req, res) => {
   res.end(result.html);
 });
 
-server.listen(PORT, () => {
-  console.log(`[krate-ssr] Renderer server listening on port ${PORT}`);
-});
+if (isClusterPrimary) {
+  // The primary only supervises; workers own the listening socket.
+} else {
+  server.listen(PORT, () => {
+    console.log(`[krate-ssr] Renderer server listening on port ${PORT}`);
+  });
+}

@@ -19,6 +19,7 @@ A tour of the features that ship with Krate beyond the core compiler.
 | [Image Optimization](/docs/features/image-optimization/) | Compile-time WebP-first `<picture>` pipeline |
 | [Data Fetching](/docs/features/data-fetching/) | Component tiers, ISR/SSR page data, `generateStaticParams`, `createResource`, API routes |
 | [API Routes](/docs/features/api-routes/) | TypeScript and Go endpoints in one namespace |
+| [Go Components](/docs/features/go-components/) | Server and runtime components written in Go, importing any Go package |
 | [Plugin System](/docs/features/plugins/) | Go plugin hooks + JS/TS community plugins via QuickJS, typed with `@krate/plugin` |
 | [Search](/docs/features/search/) | Docs search bar: Pagefind (default, recommended), docfind WASM, or JSON |
 | [Redirects & Rewrites](/docs/features/redirects-rewrites/) | URL manipulation from config |

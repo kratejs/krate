@@ -698,6 +698,104 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				}
 			}
 		}
+	case "go":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "enabled":
+				if b, ok := v.(bool); ok {
+					cfg.Go.Enabled = &b
+				}
+			case "module":
+				if s, ok := v.(string); ok {
+					cfg.Go.Module = s
+				}
+			case "tidy":
+				if b, ok := v.(bool); ok {
+					cfg.Go.Tidy = &b
+				}
+			case "apiEnabled":
+				if b, ok := v.(bool); ok {
+					cfg.Go.APIEnabled = &b
+				}
+			case "componentDirs", "apiDirs":
+				arr, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("go.%s: expected array, got %T", k, v)
+				}
+				var dirs []string
+				for _, item := range arr {
+					if s, ok := item.(string); ok {
+						dirs = append(dirs, s)
+					}
+				}
+				if k == "componentDirs" {
+					cfg.Go.ComponentDirs = dirs
+				} else {
+					cfg.Go.APIDirs = dirs
+				}
+			case "deps":
+				arr, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("go.deps: expected array, got %T", v)
+				}
+				for _, item := range arr {
+					om, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					var dep GoDep
+					if s, ok := om["path"].(string); ok {
+						dep.Path = s
+					}
+					if s, ok := om["version"].(string); ok {
+						dep.Version = s
+					}
+					cfg.Go.Deps = append(cfg.Go.Deps, dep)
+				}
+			case "replaces":
+				arr, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("go.replaces: expected array, got %T", v)
+				}
+				for _, item := range arr {
+					om, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					var rp GoReplace
+					if s, ok := om["from"].(string); ok {
+						rp.From = s
+					}
+					if s, ok := om["to"].(string); ok {
+						rp.To = s
+					}
+					cfg.Go.Replaces = append(cfg.Go.Replaces, rp)
+				}
+			case "exclude":
+				arr, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("go.exclude: expected array, got %T", v)
+				}
+				for _, item := range arr {
+					om, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					var ex GoExclude
+					if s, ok := om["path"].(string); ok {
+						ex.Path = s
+					}
+					if s, ok := om["version"].(string); ok {
+						ex.Version = s
+					}
+					cfg.Go.Exclude = append(cfg.Go.Exclude, ex)
+				}
+			}
+		}
 	case "dce":
 		m, ok := val.(map[string]interface{})
 		if !ok {
@@ -866,6 +964,13 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			case "ssrRuntime":
 				if s, ok := v.(string); ok {
 					cfg.SSR.SSRRuntime = s
+				}
+			case "rendererWorkers":
+				switch n := v.(type) {
+				case int64:
+					cfg.SSR.RendererWorkers = int(n)
+				case float64:
+					cfg.SSR.RendererWorkers = int(n)
 				}
 			case "streaming":
 				if b, ok := v.(bool); ok {

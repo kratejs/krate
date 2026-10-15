@@ -98,6 +98,28 @@ type StaticHTML struct {
 func (s *StaticHTML) slotNode()     {}
 func (s *StaticHTML) GetID() SlotID { return "" }
 
+// GoComponentRef identifies an imported Go component (a `<Card>` where Card comes
+// from `./card.go`).
+type GoComponentRef struct {
+	File string        // absolute path of the component's .go file
+	Func string        // exported Go function name
+	Tier ComponentTier // TierServer (build-time) or TierRuntime (per request)
+}
+
+// GoComponentSlot renders an imported Go component. Server-tier slots are
+// rendered at build time by the Go host (batch); runtime-tier slots become
+// request-time regions.
+type GoComponentSlot struct {
+	ID       SlotID
+	Ref      GoComponentRef
+	Props    map[string]string // attr name -> JSON-encoded value ("" for children)
+	Children []SlotNode
+	Pos      ast.Pos // JSX tag-name position at the call site (for SSR baking)
+}
+
+func (s *GoComponentSlot) slotNode()     {}
+func (s *GoComponentSlot) GetID() SlotID { return s.ID }
+
 // TextSlot - simple signal read: {count()}
 type TextSlot struct {
 	ID      SlotID
@@ -303,6 +325,9 @@ type ComponentNode struct {
 	// (prop name -> value). These are serialized into the page's runtime props
 	// script so the serve-time renderer can pass them to the component.
 	RuntimeProps map[string]any
+	// Runtime selects the region render engine for a runtime-tier node: "" (Node
+	// SSR sidecar) or "go" (Go host, rendered via /__krate/gorender).
+	Runtime string
 
 	Signals      []SignalDecl
 	AttrBindings []AttrBinding

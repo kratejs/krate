@@ -416,6 +416,82 @@ func TestCompatValidate(t *testing.T) {
 	}
 }
 
+func TestParseTSConfigGo(t *testing.T) {
+	src := `export default {
+		go: {
+			module: "myapp",
+			tidy: true,
+			componentDirs: ["src/components", "src/lib"],
+			apiEnabled: false,
+			deps: [{ path: "github.com/x/y", version: "v1.2.3" }],
+			replaces: [{ from: "github.com/x/y", to: "../y" }],
+			exclude: [{ path: "github.com/a/b", version: "v9.9.9" }],
+		},
+	}`
+	cfg := &Config{}
+	if err := parseTSConfig(src, cfg); err != nil {
+		t.Fatalf("parseTSConfig: %v", err)
+	}
+	if cfg.Go.Module != "myapp" {
+		t.Errorf("Go.Module = %q", cfg.Go.Module)
+	}
+	if !cfg.Go.TidyOrDefault() {
+		t.Error("Go.Tidy should be true")
+	}
+	if got := cfg.Go.ComponentDirList(); len(got) != 2 || got[0] != "src/components" {
+		t.Errorf("ComponentDirList = %v", got)
+	}
+	if cfg.Go.APIEnabledOrDefault() {
+		t.Error("apiEnabled false should disable API")
+	}
+	if len(cfg.Go.Deps) != 1 || cfg.Go.Deps[0].Path != "github.com/x/y" {
+		t.Errorf("Deps = %v", cfg.Go.Deps)
+	}
+	if len(cfg.Go.Replaces) != 1 || cfg.Go.Replaces[0].To != "../y" {
+		t.Errorf("Replaces = %v", cfg.Go.Replaces)
+	}
+	if len(cfg.Go.Exclude) != 1 || cfg.Go.Exclude[0].Path != "github.com/a/b" {
+		t.Errorf("Exclude = %v", cfg.Go.Exclude)
+	}
+}
+
+func TestEffectiveGoFoldsLegacyGoAPI(t *testing.T) {
+	enabled := true
+	cfg := &Config{GoAPI: GoAPICfg{
+		Enabled:  &enabled,
+		Module:   "legacy",
+		Deps:     []GoAPIDep{{Path: "github.com/x/y", Version: "v1.0.0"}},
+		Replaces: []GoAPIReplace{{From: "github.com/x/y", To: "../y"}},
+	}}
+	g := cfg.EffectiveGo()
+	if g.Module != "legacy" {
+		t.Errorf("EffectiveGo.Module = %q, want legacy", g.Module)
+	}
+	if len(g.Deps) != 1 || g.Deps[0].Path != "github.com/x/y" {
+		t.Errorf("EffectiveGo.Deps = %v", g.Deps)
+	}
+	if len(g.Replaces) != 1 || g.Replaces[0].From != "github.com/x/y" {
+		t.Errorf("EffectiveGo.Replaces = %v", g.Replaces)
+	}
+	// A `go` block overrides the legacy values for the fields it sets.
+	cfg.Go.Module = "unified"
+	if got := cfg.EffectiveGo().Module; got != "unified" {
+		t.Errorf("go.module should win, got %q", got)
+	}
+}
+
+func TestUnknownKeyWarningsGoItems(t *testing.T) {
+	raw := []byte(`{"go":{"deps":[{"path":"x","versoin":"v1"}],"replaces":[{"from":"a","too":"b"}]}}`)
+	warnings := UnknownKeyWarnings(raw)
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "go.deps.versoin") {
+		t.Errorf("expected a go.deps item-key warning, got: %v", warnings)
+	}
+	if !strings.Contains(joined, "go.replaces.too") {
+		t.Errorf("expected a go.replaces item-key warning, got: %v", warnings)
+	}
+}
+
 func TestParseTSConfigDefaults(t *testing.T) {
 	src := `export default { entry: "src/app.tsx", outDir: "build" }`
 	cfg := Default()

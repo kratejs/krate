@@ -14,6 +14,7 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate dev [dir]` | Build + dev server (port 3000) + hot reload |
 | `krate serve [dir]` | Build + static HTTP server (production preview) |
 | `krate types [dir]` | Generate route/content TypeScript declarations only |
+| `krate go:init [dir]` | Set up `go.mod`/`go.work` + vendored helpers for Go intellisense |
 | `krate check [dir]` | Build and run quality gates (a11y/SEO/perf); non-zero on failure |
 | `krate inspect [dir]` | Build and print the compiled site model (`--json`) |
 | `krate deploy [dir]` | Build, then write host adapter files (`--target`) |
@@ -164,6 +165,25 @@ Removes the output directory (`dist`) and the compiler cache (`.krate/cache`):
 ```sh
 krate clean
 ```
+
+## `krate go:init`
+
+Sets up the Go workspace so editors resolve the helper imports
+(`github.com/kratejs/krate/packages/compiler/goext/...`) for Go API routes and
+Go components. It:
+
+- vendors the helper module under `.krate/goext`,
+- writes a project `go.mod` (only when one is absent) and a `go.work`,
+- adds `.krate/types` to your `tsconfig.json` `include`.
+
+```sh
+krate go:init
+```
+
+Safe to run repeatedly; it never overwrites an existing `go.mod`, `go.work`, or
+user-authored workspace. See
+[Go Components](/docs/features/go-components/) and
+[API Routes](/docs/features/api-routes/).
 
 ## `krate version`
 

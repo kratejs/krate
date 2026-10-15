@@ -10,34 +10,6 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
-func TestSplitGoMod(t *testing.T) {
-	content := "module example.com/app\n\ngo 1.23\n\nrequire (\n\tgithub.com/x/y v1.2.3\n)\n\nreplace github.com/a/b => ../b\n"
-	ver, directives := splitGoMod(content)
-	if ver != "1.23" {
-		t.Fatalf("version = %q, want 1.23", ver)
-	}
-	if strings.Contains(directives, "module ") || strings.Contains(directives, "go 1.23") {
-		t.Fatalf("module/go clauses leaked into directives:\n%s", directives)
-	}
-	if !strings.Contains(directives, "github.com/x/y v1.2.3") {
-		t.Fatalf("require directive lost:\n%s", directives)
-	}
-}
-
-func TestRebaseGoModReplacePaths(t *testing.T) {
-	in := "require github.com/x/y v1.2.3\nreplace github.com/a/b => ../b\nreplace example.com/c => ./vendor/c\nreplace example.com/abs => /abs/path"
-	out := rebaseGoModReplacePaths(in)
-	if !strings.Contains(out, "replace github.com/a/b => ../../../b") {
-		t.Fatalf("../b not rebased:\n%s", out)
-	}
-	if !strings.Contains(out, "replace example.com/c => ../../vendor/c") {
-		t.Fatalf("./vendor/c not rebased:\n%s", out)
-	}
-	if !strings.Contains(out, "replace example.com/abs => /abs/path") {
-		t.Fatalf("absolute replace path must be untouched:\n%s", out)
-	}
-}
-
 func TestWriteGoAPIModuleRootMerge(t *testing.T) {
 	root := t.TempDir()
 	apiSrc := filepath.Join(root, "src", "api")
@@ -51,7 +23,7 @@ func TestWriteGoAPIModuleRootMerge(t *testing.T) {
 	writeFileRel(t, root, "go.mod", "module example.com/app\n\ngo 1.23\n\nrequire github.com/x/y v1.2.3\n\nreplace github.com/a/b => ../b\n")
 	writeFileRel(t, root, "go.sum", "github.com/x/y v1.2.3 h1:abc\n")
 
-	cfg := config.GoAPICfg{}
+	cfg := config.GoCfg{}
 	modulePath, err := writeGoAPIModule(modDir, apiSrc, root, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -81,7 +53,7 @@ func TestGoAPISiblingPackageAndCache(t *testing.T) {
 	root := t.TempDir()
 	writeFileRel(t, root, "src/api/lib/util.go", "package lib\n\nfunc Message() string { return \"hi from lib\" }\n")
 	writeFileRel(t, root, "src/api/hello.go",
-		"package api\n\nimport (\n\t\"net/http\"\n\n\t\"krate-goapi/routes/lib\"\n\t\"krate-goapi/runtime\"\n)\n\n"+
+		"package api\n\nimport (\n\t\"net/http\"\n\n\t\"krate-goapi/routes/lib\"\n\t\"github.com/kratejs/krate/packages/compiler/goext/runtime\"\n)\n\n"+
 			"func GET(w http.ResponseWriter, r *http.Request) {\n\truntime.WriteJSON(w, 200, map[string]string{\"msg\": lib.Message()})\n}\n")
 
 	cfg := config.Default()

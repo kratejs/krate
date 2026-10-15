@@ -8,6 +8,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
+	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 	"github.com/kratejs/krate/packages/compiler/internal/routetypes"
 )
 
@@ -42,6 +43,12 @@ func GenerateTypes(root string, cfg *config.Config) []error {
 	cres := b.prepareContent()
 	errs = append(errs, cres.Warnings...)
 	errs = append(errs, cres.Validation...)
+	// Go component declarations (used by `import { X } from "./x.go"`).
+	if _, typeFiles, gerr := gohost.ScanComponents(cfg.Go.ComponentDirList(), root); gerr != nil {
+		errs = append(errs, gerr)
+	} else {
+		gohost.WriteTypes(root, typeFiles)
+	}
 	if len(errs) == 0 {
 		return nil
 	}

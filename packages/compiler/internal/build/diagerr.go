@@ -10,7 +10,7 @@ import (
 // errLocRe finds a `path:line:col` location (Windows or POSIX) inside an error
 // message whose underlying error carried no structured diagnostic. Source
 // extensions are required so arbitrary `a:b:c` text is not misparsed.
-var errLocRe = regexp.MustCompile(`((?:[A-Za-z]:)?[^\s]*\.(?:tsx|ts|jsx|js|mjs|cjs|mdx|md|css)):(\d+):(\d+)`)
+var errLocRe = regexp.MustCompile(`((?:[A-Za-z]:)?[^\s]*\.(?:tsx|ts|jsx|js|mjs|cjs|mdx|md|css|go)):(\d+):(\d+)`)
 
 // diagnosticFromText parses a `file:line:col` prefix out of a plain error
 // string so build errors that were flattened to strings still surface a

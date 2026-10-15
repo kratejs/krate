@@ -125,6 +125,7 @@ ssr: {
   apiWorkers: 8,                // embedded QuickJS API worker pool (default min(NumCPU, 8))
   apiIsolation: false,          // true = fresh VM per request (no shared state; slower)
   nodeWorkers: 8,               // Node sidecar worker processes (cluster)
+  rendererWorkers: 1,           // SSR renderer worker processes (cluster; default 1)
 }
 ```
 
@@ -143,6 +144,11 @@ ssr: {
 - **`nodeWorkers`** forks that many Node worker processes (`cluster`) for the
   API sidecar when `apiRuntime` (or `middlewareRuntime`) is
   `node`/`bun`/`deno`. (Ignored by the Bun sidecar, which is single-process.)
+- **`rendererWorkers`** forks that many Node worker processes (`cluster`) for the
+  SSR renderer, so page/region rendering uses more than one CPU. Default `1`
+  (single process). Region and ISR caches are per-worker, and ISR disk
+  persistence is disabled while clustered. Irrelevant when all request-time
+  regions render on the Go host (Go components).
 - **`apiWorkers`** sizes the embedded QuickJS API worker pool. Workers are
   long-lived VMs that each load a route once and reuse it, so module state
   persists across requests (Node semantics) and requests run in parallel.
@@ -371,23 +377,40 @@ fonts: {
 },
 ```
 
-## Go API sidecar
+## Go (components & API routes)
 
 ```typescript
-goApi: {
-  module: "krate-goapi",                 // module path for the generated module
+go: {
+  enabled: true,                          // default true
+  module: "krate-goapi",                  // module path when none is provided
   deps: [{ path: "github.com/x/y", version: "v1.2.3" }],
   replaces: [{ from: "example.com/x", to: "../local/x" }],
-  tidy: false,                           // run `go mod tidy` before building
+  exclude: [{ path: "github.com/a/b", version: "v9.9.9" }],
+  tidy: false,                            // run `go mod tidy` before building
+  componentDirs: ["src/components"],      // scanned for *.go components
+  apiDirs: ["src/api"],                   // Go API routes (first dir is used)
+  apiEnabled: true,                       // build Go API routes
 },
 ```
 
-Go routes in `src/api/**/*.go` compile into a sidecar binary. The `src/api` tree
-is preserved: helper packages (files with no HTTP handler) keep their package
-and are importable as `krate-goapi/routes/<dir>`, while each route file is
-compiled into its own generated package. A project-root `go.mod` is merged (its
-`require`/`replace`/`exclude` directives are copied and relative `replace` paths
-rebased); a `src/api/go.mod` is used verbatim. See
+`go` configures the unified Go host that compiles **Go API routes**
+(`src/api/**/*.go`) and **Go components** (`componentDirs/**/*.go`, see
+[Go Components](/docs/features/go-components/)) into one binary. It supersedes
+the older `goApi` block (still accepted; its values are folded into `go`).
+
+Go is **enabled by default** with `componentDirs: ["src/components"]` and
+`apiDirs: ["src/api"]`, so no config is needed for the default layout. Run
+`krate go:init` once to set up editor intellisense (a project `go.mod` +
+`go.work`, the vendored helpers under `.krate/goext`, and `.krate/types` in your
+`tsconfig.json`). Go requires the Go toolchain at build time.
+
+Source trees are preserved: helper files keep their package, and each route file
+compiles into its own generated package. A `src/api/go.mod` or
+`src/components/go.mod` is used verbatim; otherwise a project-root `go.mod` is
+merged (its `require`/`replace`/`exclude` directives are copied and relative
+`replace` paths rebased), falling back to a generated module. The helper
+packages (`krate`, `runtime`) are vendored under `.krate/goext` and imported via
+their real paths (`github.com/kratejs/krate/packages/compiler/goext/...`). See
 [API routes](/docs/features/api-routes/).
 
 ## Base path

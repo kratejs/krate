@@ -44,6 +44,42 @@ export function onMount(_fn: () => void): void {
 interface RawHTML { __raw: string; }
 function raw(html: string): RawHTML { return { __raw: html }; }
 
+// goComponent is the SSR bridge for Go-authored components (see the compiler's
+// server-bundle esbuild plugin). A server-tier component inlines its build-time
+// baked HTML when the call site was annotated with __krateGoId; otherwise (and
+// always for runtime-tier) it emits a marker the Go server resolves by calling
+// the Go host at request time. revalidate is the component file's cache window,
+// carried in the marker so the Go server needn't look it up by name.
+export function goComponent(
+  name: string,
+  tier: string,
+  baked: Record<string, string> | null | undefined,
+  props: Record<string, any> | undefined,
+  revalidate = 0
+): JSXNode {
+  const p = props || {};
+  const id = p.__krateGoId as string | undefined;
+  if (tier === "server" && baked && id && Object.prototype.hasOwnProperty.call(baked, id)) {
+    return raw(baked[id]);
+  }
+  const rest: Record<string, any> = {};
+  for (const k in p) {
+    if (k !== "__krateGoId" && k !== "children") rest[k] = p[k];
+  }
+  if (p.children != null) {
+    const kids = renderToString(p.children);
+    if (kids !== "") rest["children"] = kids;
+  }
+  return raw("<!--krate-go:" + name + ":" + (revalidate > 0 ? revalidate : 0) + ":" + base64url(JSON.stringify(rest)) + "-->");
+}
+
+function base64url(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 type JSXNode = string | number | boolean | null | undefined | JSXNode[] | JSXElement | RawHTML;
 
 interface JSXElement {

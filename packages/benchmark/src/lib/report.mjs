@@ -69,6 +69,42 @@ export function renderMarkdown(results) {
     lines.push('');
   }
 
+  if (results.ssr?.length) {
+    const levels =
+      results.ssrMeta?.connectionsList?.length
+        ? results.ssrMeta.connectionsList
+        : [...new Set(results.ssr.map((r) => r.connections).filter(Boolean))];
+    lines.push('## SSR page throughput (higher is better)');
+    lines.push('');
+    lines.push(
+      'A streaming page whose only dynamic content is one runtime-tier component, served by ' +
+        '`krate serve` · requests/sec · ' +
+        `${Math.round((results.ssrMeta?.durationMs ?? 5000) / 1000)}s per level`,
+    );
+    lines.push('');
+    const targets = [];
+    const byId = new Map();
+    for (const r of results.ssr) {
+      if (!byId.has(r.id)) {
+        byId.set(r.id, { name: r.name, impl: r.impl, sidecar: r.sidecar, levels: new Map() });
+        targets.push(r.id);
+      }
+      byId.get(r.id).levels.set(r.connections, r);
+    }
+    lines.push(`| Target | Renderer | ${levels.map((l) => `${l} conn`).join(' | ')} |`);
+    lines.push(`|--------|----------|${levels.map(() => '--------:').join('|')}|`);
+    for (const id of targets) {
+      const t = byId.get(id);
+      const renderer = t.impl === 'go' ? 'Go host' : `${t.sidecar ?? 'node'} SSR`;
+      const cells = levels.map((l) => {
+        const r = t.levels.get(l);
+        return r ? r.rps.toLocaleString() : '—';
+      });
+      lines.push(`| ${t.name} | ${renderer} | ${cells.join(' | ')} |`);
+    }
+    lines.push('');
+  }
+
   lines.push('## Methodology');
   lines.push('');
   lines.push(
@@ -80,6 +116,11 @@ export function renderMarkdown(results) {
     '- **API**: each server is built, warmed up, then load-tested with a fixed ' +
       'concurrency of keep-alive connections for a fixed window; requests per second and ' +
       'latency percentiles are measured.',
+  );
+  lines.push(
+    '- **SSR**: a streaming page rendering one runtime-tier component is warmed up, then ' +
+      'load-tested the same way. TSX components render on the Node SSR sidecar (node vs bun); ' +
+      'Go components render on the compiled Go host with no Node renderer in the path.',
   );
   lines.push('- Hardware and toolchain versions are captured in the raw JSON output.');
   lines.push('');

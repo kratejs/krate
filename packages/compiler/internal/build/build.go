@@ -24,6 +24,8 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/css"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
+	"github.com/kratejs/krate/packages/compiler/internal/gohost"
+	"github.com/kratejs/krate/packages/compiler/internal/gotsgen"
 	"github.com/kratejs/krate/packages/compiler/internal/icons"
 	"github.com/kratejs/krate/packages/compiler/internal/imageproc"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
@@ -86,6 +88,11 @@ type PageResult struct {
 	// Program is the page's parsed (and plugin-transformed) AST. Consumed by
 	// compiler-enforced quality checks; nil for plugin-generated routes.
 	Program *ast.Program
+
+	// GoBaked maps a Go-component call-site id (irtree.GoCallID) to its
+	// build-time rendered HTML. Consumed by CompileServerBundles so an SSR page
+	// bundle can inline server-tier Go components instead of calling the host.
+	GoBaked map[string]string
 }
 
 type Builder struct {
@@ -97,6 +104,15 @@ type Builder struct {
 	depGraph map[string][]string // file path -> page source paths that depend on it
 	pageDeps map[string][]string // page source path -> files it depends on
 	depMu    sync.Mutex          // protects depGraph/pageDeps
+
+	// goHostMu serialises Go host scaffolding/compilation so concurrent page
+	// builds that lazily need the host (e.g. incremental dev rebuilds) don't
+	// race on the generated module dir.
+	goHostMu sync.Mutex
+	// goParseMu guards goParseCache: parsed `.go` component files, cached per
+	// build so each is parsed once instead of once per page/layout.
+	goParseMu    sync.Mutex
+	goParseCache map[string][]gotsgen.Component
 
 	// SkipQualityChecks suppresses the in-build quality gates so callers that
 	// run their own check pass (e.g. `krate check`, which re-reads dist/) don't
@@ -677,6 +693,12 @@ func (b *Builder) BuildAll() error {
 	}
 	for _, ve := range cres.Validation {
 		fmt.Fprintf(os.Stderr, "  %sContent error:%s %v\n", cRed, cReset, ve)
+	}
+
+	// Build the Go host (API routes + components) before pages, so pages that
+	// import Go components can render them through the host at build time.
+	if err := b.BuildAllGoAPI(); err != nil {
+		return err
 	}
 
 	totalPages := len(pages) + len(routes)
@@ -1484,6 +1506,16 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		}
 	}
 
+	// A page that imports a runtime-tier Go component must stream: its region is
+	// rendered per request by the Go host (via /__krate/gorender).
+	pageGoComponents := b.collectGoComponents(bundle, b.Root)
+	for _, ref := range pageGoComponents {
+		if ref.Tier == irtree.TierRuntime && renderMode == RenderSSG {
+			renderMode = RenderStreaming
+			break
+		}
+	}
+
 	// Global streaming override: if configured, all *static* pages stream.
 	// Explicit ssr/isr opts win - forcing them to streaming would silently
 	// defeat a page author's per-page config.
@@ -1526,7 +1558,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, b.irBuildOptions())
+	pageOpts := b.irBuildOptions()
+	pageOpts.GoComponents = pageGoComponents
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, pageOpts)
 	// CSS primitive declarations that cannot be compiled to CSS are hard errors
 	// (there is no fallback to client signals).
 	if len(tree.Errors) > 0 {
@@ -1544,16 +1578,30 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	if isDynamicRoute(page, b.Cfg.PagesDir) {
 		injectDynamicRoutePlaceholders(tree, extractParamNames(page, b.Cfg.PagesDir))
 	}
-	regions := enumerateRegions(tree)
-	for i := range regions {
-		regions[i].Revalidate = regionRevalidate(b.Root, regions[i].SourcePath)
-	}
 	emitter := renderer.NewEmitter()
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.IconResolver = b.iconResolver
 	emitter.EvalJS = b.jsExprEvaluator()
+	emitter.GoComponents = pageOpts.GoComponents
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
+	// Render imported Go components (server tier, slot path + SSREval'd) via the
+	// Go host in one batch, then inline their HTML at the emitted markers.
+	var goBaked map[string]string
+	if len(emitResult.GoRenders) > 0 {
+		rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
+		if gerr != nil {
+			return nil, "", gerr
+		}
+		emitResult.HTML = substituteGoRenders(emitResult.HTML, rendered)
+		goBaked = goBakedMap(emitResult.GoRenders, rendered)
+	}
+	// Regions are enumerated after emit so runtime Go components can carry their
+	// build-rendered children (set during emitRuntime) in RegionMeta.Props.
+	regions := enumerateRegions(tree)
+	for i := range regions {
+		regions[i].Revalidate = regionRevalidate(b.Root, regions[i].SourcePath)
+	}
 	stopCompile()
 
 	if len(emitResult.Errors) > 0 {
@@ -1668,6 +1716,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			StaticOnly:        true,
 			IsDynamicTemplate: true,
 			Program:           entryModule.Program,
+			GoBaked:           goBaked,
 		}, bundle.CSS, nil
 	}
 
@@ -1768,6 +1817,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		StaticOnly:        staticOnly,
 		IsDynamicTemplate: isDynRoute,
 		Program:           entryModule.Program,
+		GoBaked:           goBaked,
 	}
 	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes)
 	return result, bundle.CSS, nil
@@ -2020,6 +2070,8 @@ func (b *Builder) resetBuildCaches() {
 	// tsx bootstrap results may depend on user source that changed since the
 	// last build, so drop any memoized outputs.
 	tsexec.Invalidate()
+	// Go component parses are per-build.
+	b.goParseCache = nil
 }
 
 var layoutEmitCache sync.Map
@@ -2118,6 +2170,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	annotator.ReclassifyTiers(ann, b.Cfg)
 	opts := b.irBuildOptions()
 	opts.IDPrefix = layoutIDPrefix(layoutPath)
+	opts.GoComponents = b.collectGoComponents(layoutBundle, b.Root)
 	tree := irtree.BuildWithOptions(layoutModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		return nil, "", nil, false, renderErrors(layoutPath, tree.Errors)
@@ -2126,8 +2179,16 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.IconResolver = b.iconResolver
 	emitter.EvalJS = b.jsExprEvaluator()
+	emitter.GoComponents = opts.GoComponents
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
+	if len(emitResult.GoRenders) > 0 {
+		rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
+		if gerr != nil {
+			return nil, "", nil, false, gerr
+		}
+		emitResult.HTML = substituteGoRenders(emitResult.HTML, rendered)
+	}
 
 	if len(emitResult.Errors) > 0 {
 		return nil, "", nil, false, renderErrors(layoutPath, emitResult.Errors)
@@ -3503,7 +3564,7 @@ func evalAttrString(expr ast.Expr) (string, bool) {
 }
 
 func (b *Builder) BuildAllAPI() error {
-	apiSrcDir := filepath.Join(b.Root, "src", "api")
+	apiSrcDir := filepath.Join(b.Root, filepath.FromSlash(gohost.DefaultAPIDir))
 	if _, err := os.Stat(apiSrcDir); os.IsNotExist(err) {
 		return nil // No API directory present, skip silently
 	}
@@ -3549,7 +3610,7 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(routes))
-	apiSrcDir := filepath.Join(b.Root, "src", "api")
+	apiSrcDir := filepath.Join(b.Root, filepath.FromSlash(gohost.DefaultAPIDir))
 	pool := newWorkerPool(buildWorkerLimit())
 
 	var metaMu sync.Mutex

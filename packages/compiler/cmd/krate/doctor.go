@@ -13,6 +13,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/execx"
+	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 )
 
 // runDoctor prints a diagnostic summary of the project and toolchain, so setup
@@ -52,9 +53,32 @@ func runDoctor(flags cliFlags, args []string) {
 	checkTool("node", "API/SSR sidecar + tsx config execution")
 	checkTool("npx", "tsx config bootstrap")
 	if _, err := exec.LookPath("go"); err == nil {
-		fmt.Printf("  %s✓ go%s         available (Go API routes)\n", cGreen, cReset)
+		fmt.Printf("  %s✓ go%s         available (Go API routes + components)\n", cGreen, cReset)
+		if out, err := execx.Output(context.Background(), 5*time.Second, "", nil, "go", "version"); err == nil {
+			fmt.Printf("  %s   %s\n", "          ", strings.TrimSpace(string(out)))
+		}
 	} else {
-		fmt.Printf("  %s· go%s         not found (optional; only for src/api/*.go)\n", cGray, cReset)
+		fmt.Printf("  %s· go%s         not found (optional; only for src/api/*.go and Go components)\n", cGray, cReset)
+	}
+	if cfg != nil {
+		apiGo := countGoFiles(root, []string{gohost.DefaultAPIDir})
+		compGo := countGoFiles(root, cfg.Go.ComponentDirList())
+		if compGo > 0 {
+			fmt.Printf("  go comps     %d file(s) under %s\n", compGo, strings.Join(cfg.Go.ComponentDirList(), ", "))
+		}
+		if apiGo+compGo > 0 {
+			if v, ok := gohost.ModuleGoVersion(root); ok {
+				fmt.Printf("  go.mod       go %s\n", v)
+			}
+			if gohost.GoextVendored(root) {
+				fmt.Printf("  %s✓ goext%s      vendored (.krate/goext)\n", cGreen, cReset)
+			} else {
+				fmt.Printf("  %s· goext%s      not vendored (run `krate go:init`)\n", cGray, cReset)
+			}
+			if gohost.SetupMissing(root) {
+				fmt.Printf("  %s· go:init%s    run `krate go:init` for editor intellisense\n", cGray, cReset)
+			}
+		}
 	}
 
 	// Node version (the sidecars need 20+).
@@ -166,6 +190,27 @@ func reportFile(root, name string) {
 	} else {
 		fmt.Printf("  %s· %s%s (none)\n", cGray, name, cReset)
 	}
+}
+
+// countGoFiles counts non-underscore `.go` files under the given directories.
+func countGoFiles(root string, dirs []string) int {
+	n := 0
+	for _, d := range dirs {
+		abs := d
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(root, d)
+		}
+		_ = filepath.WalkDir(abs, func(p string, e os.DirEntry, err error) error {
+			if err != nil || e.IsDir() {
+				return nil
+			}
+			if strings.HasSuffix(p, ".go") && !strings.HasPrefix(e.Name(), "_") {
+				n++
+			}
+			return nil
+		})
+	}
+	return n
 }
 
 // printHelpCommand handles `krate help [command]`.

@@ -16,7 +16,7 @@ var knownNestedKeys = map[string]map[string]bool{
 	"server":    {"host": true, "port": true, "maxBodySize": true},
 	"cors":      {"enabled": true, "origins": true, "methods": true, "headers": true, "credentials": true, "maxAge": true},
 	"api":       {"sidecar": true},
-	"ssr":       {"rendererPort": true, "timeout": true, "maxCacheSize": true, "middlewareRuntime": true, "apiRuntime": true, "apiWorkers": true, "apiIsolation": true, "nodeWorkers": true, "ssrRuntime": true, "streaming": true},
+	"ssr":       {"rendererPort": true, "timeout": true, "maxCacheSize": true, "middlewareRuntime": true, "apiRuntime": true, "apiWorkers": true, "apiIsolation": true, "nodeWorkers": true, "ssrRuntime": true, "rendererWorkers": true, "streaming": true},
 	"markdown":  {"root": true, "gfm": true, "headingAnchors": true, "admonitions": true, "codeHighlight": true, "codeTheme": true, "math": true, "mermaid": true},
 	"tailwind":  {"enabled": true, "scanDirs": true, "content": true, "preflight": true, "strict": true, "darkMode": true, "executeConfig": true},
 	"csp":       {"enabled": true, "directive": true},
@@ -27,6 +27,7 @@ var knownNestedKeys = map[string]map[string]bool{
 	"dce":       {"css": true, "js": true, "aggressive": true},
 	"fonts":     {"preload": true, "display": true},
 	"goApi":     {"enabled": true, "module": true, "deps": true, "replaces": true, "tidy": true},
+	"go":        {"enabled": true, "module": true, "deps": true, "replaces": true, "exclude": true, "tidy": true, "componentDirs": true, "apiDirs": true, "apiEnabled": true},
 	"compat":    {"mode": true, "userAgent": true},
 }
 
@@ -54,7 +55,7 @@ var knownTopLevelKeys = map[string]bool{
 	"runtimeComponents": true, "serverDirs": true, "runtimeDirs": true,
 	"content": true, "checks": true,
 	"server": true, "cors": true, "api": true, "basePath": true,
-	"compat": true,
+	"compat": true, "go": true,
 }
 
 // Validate performs semantic/bounds checks that JSON typing alone can't. It
@@ -128,7 +129,10 @@ func (c *Config) Validate() (warnings []string, err error) {
 	if c.SSR.NodeWorkers < 0 {
 		return nil, fmt.Errorf("ssr.nodeWorkers must be >= 0, got %d", c.SSR.NodeWorkers)
 	}
-	if c.SSR.APIWorkers > 4096 || c.SSR.NodeWorkers > 4096 {
+	if c.SSR.RendererWorkers < 0 {
+		return nil, fmt.Errorf("ssr.rendererWorkers must be >= 0, got %d", c.SSR.RendererWorkers)
+	}
+	if c.SSR.APIWorkers > 4096 || c.SSR.NodeWorkers > 4096 || c.SSR.RendererWorkers > 4096 {
 		warnings = append(warnings, "ssr worker counts above 4096 are likely a mistake")
 	}
 	if c.SSR.Timeout > 600000 {
@@ -189,6 +193,13 @@ func UnknownKeyWarnings(raw []byte) []string {
 			}
 		}
 	}
+	// go.deps / go.replaces / go.exclude array item keys (typos in the object
+	// items are otherwise silently dropped).
+	if rawGo, ok := m["go"]; ok {
+		unknown = append(unknown, unknownArrayItemKeys("go.deps", rawGo, "deps", []string{"path", "version"})...)
+		unknown = append(unknown, unknownArrayItemKeys("go.replaces", rawGo, "replaces", []string{"from", "to"})...)
+		unknown = append(unknown, unknownArrayItemKeys("go.exclude", rawGo, "exclude", []string{"path", "version"})...)
+	}
 	sort.Strings(unknown)
 	var out []string
 	for _, k := range unknown {
@@ -209,6 +220,37 @@ func unknownNestedKeys(parent string, known map[string]bool, raw json.RawMessage
 	for k := range obj {
 		if !known[k] {
 			out = append(out, parent+"."+k)
+		}
+	}
+	return out
+}
+
+// unknownArrayItemKeys returns unrecognized keys inside a named array field of
+// the parent object (e.g. go.deps[].path). Non-array/non-object values are
+// ignored.
+func unknownArrayItemKeys(parent string, raw json.RawMessage, field string, known []string) []string {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	rawArr, ok := obj[field]
+	if !ok {
+		return nil
+	}
+	var arr []map[string]json.RawMessage
+	if err := json.Unmarshal(rawArr, &arr); err != nil {
+		return nil
+	}
+	knownSet := make(map[string]bool, len(known))
+	for _, k := range known {
+		knownSet[k] = true
+	}
+	var out []string
+	for _, item := range arr {
+		for k := range item {
+			if !knownSet[k] {
+				out = append(out, parent+"."+k)
+			}
 		}
 	}
 	return out

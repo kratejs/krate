@@ -26,19 +26,20 @@ var errSSRNotRunning = errors.New("SSR renderer not running (start it by buildin
 
 // SSRServer manages the SSR sidecar renderer process (node/bun/deno).
 type SSRServer struct {
-	port          int
-	root          string
-	runtime       string // "node" (default) | "bun" | "deno"
-	env           []string
-	cmd           *exec.Cmd
-	done          chan struct{} // closed when the sidecar process exits
-	mu            sync.Mutex
-	running       bool
-	manifest      *ServerManifest
-	timeout       int // per-render timeout (ms); 0 = sidecar default
-	maxCacheSize  int // ISR cache entries; 0 = sidecar default
-	ppr           bool
-	pprRevalidate int
+	port            int
+	root            string
+	runtime         string // "node" (default) | "bun" | "deno"
+	env             []string
+	cmd             *exec.Cmd
+	done            chan struct{} // closed when the sidecar process exits
+	mu              sync.Mutex
+	running         bool
+	manifest        *ServerManifest
+	timeout         int // per-render timeout (ms); 0 = sidecar default
+	maxCacheSize    int // ISR cache entries; 0 = sidecar default
+	ppr             bool
+	pprRevalidate   int
+	rendererWorkers int
 }
 
 // SetTuning configures the render timeout (ms) and ISR cache size exported to
@@ -59,6 +60,14 @@ func (s *SSRServer) SetPPR(enabled bool, revalidate int) {
 	s.pprRevalidate = revalidate
 }
 
+// SetRendererWorkers sets the number of clustered SSR renderer processes
+// (node cluster). 1 (the default) keeps a single process.
+func (s *SSRServer) SetRendererWorkers(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rendererWorkers = n
+}
+
 // SetEnv provides environment variables for the sidecar process.
 func (s *SSRServer) SetEnv(env map[string]string) {
 	s.env = environ.KVList(env)
@@ -75,6 +84,60 @@ func NewSSRServer(root string, port int, runtime string) *SSRServer {
 		root:    root,
 		runtime: runtime,
 	}
+}
+
+// LoadManifest reads dist/server-manifest.json for route lookup without
+// spawning the sidecar process. It lets request-time pages whose regions are all
+// rendered by the Go host be served without starting a Node/bun renderer.
+func (s *SSRServer) LoadManifest() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadManifestLocked()
+}
+
+// loadManifestLocked reads the server manifest into s.manifest. The caller must
+// hold s.mu.
+func (s *SSRServer) loadManifestLocked() error {
+	manifestPath := filepath.Join(s.root, "dist", "server-manifest.json")
+	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+		return fmt.Errorf("server-manifest.json not found in dist/ - no SSR/ISR pages to render")
+	}
+	data, _ := os.ReadFile(manifestPath)
+	s.manifest = &ServerManifest{}
+	_ = json.Unmarshal(data, s.manifest)
+	return nil
+}
+
+// HasManifest reports whether the server manifest has been loaded.
+func (s *SSRServer) HasManifest() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.manifest != nil
+}
+
+// NeedsNodeRenderer reports whether any request-time page or region must be
+// rendered by the Node/bun sidecar: an SSR/ISR coarse page region, or any region
+// whose engine is not the Go host. When false, the site is served by the Go
+// server + Go host alone. Requires the manifest to be loaded.
+func (s *SSRServer) NeedsNodeRenderer() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.manifest == nil {
+		return false
+	}
+	for _, p := range s.manifest.Pages {
+		if p.Mode == "ssr" || p.Mode == "isr" {
+			return true
+		}
+	}
+	for _, regs := range s.manifest.Regions {
+		for _, r := range regs {
+			if r.Runtime != "go" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Start launches the SSR renderer server process under the configured runtime
@@ -94,16 +157,11 @@ func (s *SSRServer) Start() error {
 		return fmt.Errorf("krate SSR renderer not found — ensure @krate/runtime is installed")
 	}
 
-	manifestPath := filepath.Join(s.root, "dist", "server-manifest.json")
-	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+	if err := s.loadManifestLocked(); err != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("server-manifest.json not found in dist/ — no SSR/ISR pages to render")
+		return err
 	}
-
-	// Load manifest for route lookup
-	data, _ := os.ReadFile(manifestPath)
-	s.manifest = &ServerManifest{}
-	_ = json.Unmarshal(data, s.manifest)
+	manifestPath := filepath.Join(s.root, "dist", "server-manifest.json")
 
 	runtimeCmd, runtimeArgs, err := ssrRuntimeCommand(s.runtime, rendererPath)
 	if err != nil {
@@ -132,6 +190,9 @@ func (s *SSRServer) Start() error {
 	}
 	if s.maxCacheSize > 0 {
 		env = append(env, fmt.Sprintf("KRATE_SSR_MAX_CACHE=%d", s.maxCacheSize))
+	}
+	if s.rendererWorkers > 1 {
+		env = append(env, fmt.Sprintf("KRATE_SSR_WORKERS=%d", s.rendererWorkers))
 	}
 	if s.ppr {
 		env = append(env, "KRATE_PPR=1")

@@ -15,6 +15,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/deploy"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
+	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 	"github.com/kratejs/krate/packages/compiler/internal/mcp"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	krateversion "github.com/kratejs/krate/packages/compiler/internal/version"
@@ -74,6 +75,8 @@ func main() {
 		runServe(flags, args)
 	case "types":
 		runTypes(flags, args)
+	case "go:init":
+		runGoInit(flags, args)
 	case "check":
 		runCheck(flags, args)
 	case "inspect":
@@ -115,6 +118,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "types":
 		fmt.Fprintf(w, "Usage: krate types [dir]\n\n")
 		fmt.Fprintf(w, "Generate route/content TypeScript declarations (krate-env.d.ts, .krate/types).\n")
+	case "go:init":
+		fmt.Fprintf(w, "Usage: krate go:init [dir]\n\n")
+		fmt.Fprintf(w, "Set up go.mod/go.work and vendored helpers for Go component intellisense.\n")
 	case "check":
 		fmt.Fprintf(w, "Usage: krate check [dir]\n\n")
 		fmt.Fprintf(w, "Run compiler-enforced quality gates (a11y/SEO/perf) on the built output.\n")
@@ -148,6 +154,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  dev       Start the development server with hot reload\n")
 	fmt.Fprintf(w, "  serve     Build, then serve for preview (aliases: preview, start)\n")
 	fmt.Fprintf(w, "  types     Generate route/content TypeScript declarations\n")
+	fmt.Fprintf(w, "  go:init   Set up go.mod/go.work for Go component intellisense\n")
 	fmt.Fprintf(w, "  check     Run compiler-enforced quality gates (a11y/SEO/perf)\n")
 	fmt.Fprintf(w, "  inspect   Print the compiled site model (--json for machine-readable)\n")
 	fmt.Fprintf(w, "  deploy    Build and write host adapter files (netlify/vercel/...)\n")
@@ -493,6 +500,22 @@ func runTypes(flags cliFlags, args []string) {
 	}
 
 	fmt.Printf("%s%s  Types written to %s%s\n", cBold, cGreen, filepath.Join(root, ".krate", "types"), cReset)
+}
+
+// runGoInit sets up the Go workspace (go.mod/go.work + vendored helpers) so
+// editors resolve the goext import path for Go API routes and components.
+func runGoInit(flags cliFlags, args []string) {
+	root, _ := resolveConfig(flags, args)
+	notes, err := gohost.Init(root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sGo workspace error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+	fmt.Printf("%s%s  Go workspace ready for %s%s\n", cBold, cGreen, root, cReset)
+	for _, n := range notes {
+		fmt.Printf("  - %s\n", n)
+	}
+	fmt.Printf("  Run %skrate doctor%s to verify.\n", cCyan, cReset)
 }
 
 // runCheck builds the site and runs the compiler-enforced quality gates,

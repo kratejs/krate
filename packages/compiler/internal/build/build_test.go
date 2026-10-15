@@ -93,7 +93,9 @@ func TestBuildTestProject(t *testing.T) {
 		{path: filepath.Join(outDir, "test", "index.html")},
 		{path: filepath.Join(outDir, "video", "[id]", "index.html"), contains: []string{"<!DOCTYPE html>", "video"}},
 		{path: filepath.Join(outDir, "syntax-robustness", "index.html"), contains: []string{"<!DOCTYPE html>", "Syntax Robustness"}},
-		{path: filepath.Join(outDir, "manifest.json"), contains: []string{"\"pages\""}},
+		{path: filepath.Join(outDir, "go-component", "index.html"), contains: []string{"<!DOCTYPE html>", "krate-go-badge", "go-native"}},
+		{path: filepath.Join(outDir, "server-runtime-demo", "index.html"), contains: []string{"go-server-time", "Go build time"}},
+		{path: filepath.Join(outDir, "manifest.json"), contains: []string{"\"pages\"", "\"runtime\": \"go\"", "\"component\": \"GoRuntimeTime\""}},
 	}
 
 	for _, c := range checks {

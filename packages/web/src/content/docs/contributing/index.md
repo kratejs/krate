@@ -68,7 +68,7 @@ Test suites of note:
 - `internal/build/build_test.go` — full project build integration test
 - `internal/plugin/jsplugin_test.go` — JS community plugin runtime (QuickJS)
 - `internal/docfind/docfind_test.go` — in-process WASM index build + search
-- `internal/build/goapi_test.go` — Go API sidecar build + serve tests
+- `internal/gohost/*_test.go` — Go host (API routes + components) build, scan, and render tests
 
 ## CI/CD
 

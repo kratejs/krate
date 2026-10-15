@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "jsx": "preserve",
     "jsxImportSource": "@krate/runtime",
+    "allowArbitraryExtensions": true,
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -14,5 +15,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", ".krate/types"]
 }

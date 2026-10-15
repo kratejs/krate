@@ -47,6 +47,9 @@ type BuildOptions struct {
 	// Compat selects how CSS-signal stylesheets are emitted (modern/legacy/
 	// hybrid) for browser compatibility. The zero value is StyleModern.
 	Compat csssignals.StyleMode
+	// GoComponents maps imported local names to Go components (from `.go`
+	// imports), so the builder lowers <Card/> into a GoComponentSlot.
+	GoComponents map[string]GoComponentRef
 }
 
 // Build constructs a ComponentTree from a parsed program and its annotations
@@ -86,6 +89,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		idPrefix:         opts.IDPrefix,
 		aggressiveDCE:    opts.AggressiveDCE,
 		compat:           opts.Compat,
+		goComponents:     opts.GoComponents,
 	}
 
 	root := builder.buildComponentNode(entryFn, "")
@@ -171,19 +175,20 @@ type builder struct {
 	// the call-site attributes it collects (attr name -> expression). Used to
 	// expand `{...props}` spreads on intrinsic elements.
 	restProps        map[string]map[string]ast.Expr
-	localFuncProps   map[string]bool      // component-local prop names whose values are function references
-	refObjectVars    map[string]bool      // component-local names bound to a useRef {current:...} object
-	refCallbackVars  map[string]bool      // component-local names bound to a function (callback-ref targets)
-	callSiteChildren []ast.JSXChild       // call-site children of the current component
-	moduleConsts     map[string]string    // module-level const values (name -> resolved literal)
-	moduleConstInits map[string]ast.Expr  // module-level const initializers (name -> expr)
-	cvaFactories     map[string]*CVASpec  // module-level `const X = cva(...)` factories
-	contextDefaults  map[string]string    // module-level `const X = createContext(v)` defaults
-	codeTheme        string               // chroma theme for compile-time <Code> highlighting
-	idPrefix         string               // namespace for compact slot IDs (merged builds)
-	aggressiveDCE    bool                 // drop unreferenced local functions (opt-in)
-	suspenseCount    int                  // monotonic counter for stable StreamID generation
-	compat           csssignals.StyleMode // CSS-signal stylesheet mode (modern/legacy/hybrid)
+	localFuncProps   map[string]bool           // component-local prop names whose values are function references
+	refObjectVars    map[string]bool           // component-local names bound to a useRef {current:...} object
+	refCallbackVars  map[string]bool           // component-local names bound to a function (callback-ref targets)
+	callSiteChildren []ast.JSXChild            // call-site children of the current component
+	moduleConsts     map[string]string         // module-level const values (name -> resolved literal)
+	moduleConstInits map[string]ast.Expr       // module-level const initializers (name -> expr)
+	cvaFactories     map[string]*CVASpec       // module-level `const X = cva(...)` factories
+	contextDefaults  map[string]string         // module-level `const X = createContext(v)` defaults
+	codeTheme        string                    // chroma theme for compile-time <Code> highlighting
+	idPrefix         string                    // namespace for compact slot IDs (merged builds)
+	aggressiveDCE    bool                      // drop unreferenced local functions (opt-in)
+	suspenseCount    int                       // monotonic counter for stable StreamID generation
+	compat           csssignals.StyleMode      // CSS-signal stylesheet mode (modern/legacy/hybrid)
+	goComponents     map[string]GoComponentRef // imported Go components (local name -> ref)
 
 	// cssIndex assigns stable, page-unique indices to (component, var) scope
 	// pairs so classes/CSS are deterministic across builds.

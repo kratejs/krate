@@ -50,6 +50,20 @@ const (
 // hang a request goroutine forever.
 var sidecarClient = &http.Client{Timeout: 30 * time.Second}
 
+// regionClient talks to the SSR renderer's /__krate/regions endpoint. Its
+// transport keeps a large pool of idle keep-alive connections so a clustered
+// renderer (ssr.rendererWorkers) actually receives traffic on every worker - the
+// default transport's 2-per-host idle pool would pin requests to one or two.
+var regionClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http.Transport{
+		DialContext:         (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		MaxIdleConns:        512,
+		MaxIdleConnsPerHost: 256,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
+
 // newSidecarTransport builds a reverse-proxy transport with bounded dial and
 // response-header timeouts, so a hung upstream cannot pin a request forever.
 func newSidecarTransport() *http.Transport {
@@ -419,17 +433,6 @@ func filepathExt(p string) string {
 func setStreamingDeadline(w http.ResponseWriter, d time.Duration) {
 	rc := http.NewResponseController(w)
 	_ = rc.SetWriteDeadline(time.Now().Add(d))
-}
-
-// dialSidecar opens a bounded TCP connection for the region stream and sets a
-// read deadline so a stalled sidecar can't block the request goroutine forever.
-func dialSidecar(port int, readTimeout time.Duration) (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 5*time.Second)
-	if err != nil {
-		return nil, err
-	}
-	_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
-	return conn, nil
 }
 
 // readBodyLimited reads the request body. Callers must have wrapped r.Body with

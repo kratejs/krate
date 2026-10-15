@@ -167,3 +167,41 @@ func newLogger(verbose bool) *slog.Logger {
 	}
 	return slog.New(newPrettyHandler(os.Stdout, level, colorEnabled()))
 }
+
+// accessRecord is one request-log entry, emitted asynchronously so the hot
+// request path never blocks on stdout.
+type accessRecord struct {
+	id       string
+	method   string
+	path     string
+	status   int
+	duration time.Duration
+}
+
+var (
+	accessOnce sync.Once
+	accessCh   chan accessRecord
+)
+
+// emitAccessLog enqueues a request record for asynchronous emission. It never
+// blocks: when logging is disabled (KRATE_NO_ACCESS_LOG) or the buffer is full,
+// the record is dropped.
+func emitAccessLog(rec accessRecord) {
+	accessOnce.Do(func() {
+		if os.Getenv("KRATE_NO_ACCESS_LOG") != "" {
+			return
+		}
+		accessCh = make(chan accessRecord, 8192)
+		go func() {
+			for r := range accessCh {
+				Logger.Info("request",
+					"id", r.id, "method", r.method, "path", r.path,
+					"status", r.status, "duration", r.duration)
+			}
+		}()
+	})
+	select {
+	case accessCh <- rec:
+	default:
+	}
+}

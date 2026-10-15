@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"krate-goapi/runtime"
+	"github.com/kratejs/krate/packages/compiler/goext/runtime"
 )
 
 // GET handles GET /api/hello - a simple Go API route.

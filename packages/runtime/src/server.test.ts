@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { jsx, renderToString } from './server';
+import { jsx, renderToString, goComponent } from './server';
 
 describe('renderToString', () => {
   it('renders nested elements and escapes text', () => {
@@ -28,5 +28,30 @@ describe('renderToString', () => {
 
   it('passes raw HTML through without escaping', () => {
     expect(renderToString({ __raw: '<b>hi</b>' } as any)).toBe('<b>hi</b>');
+  });
+});
+
+describe('goComponent', () => {
+  it('inlines baked HTML for an annotated server-tier call site', () => {
+    const baked = { 'gc3_5_Badge': '<span class="badge">Hi</span>' };
+    const node = goComponent('Badge', 'server', baked, { __krateGoId: 'gc3_5_Badge', label: 'Hi' });
+    expect(renderToString(node)).toBe('<span class="badge">Hi</span>');
+  });
+
+  it('emits a marker for runtime-tier calls, encoding props + children', () => {
+    const node = goComponent('Clock', 'runtime', null, { zone: 'UTC', children: ['a ', jsx('b', { children: 'c' })] }, 45);
+    const html = renderToString(node);
+    const m = html.match(/^<!--krate-go:Clock:(\d+):([A-Za-z0-9_-]+)-->$/);
+    expect(m).not.toBeNull();
+    expect(m![1]).toBe('45');
+    const b64 = m![2].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+    expect(payload.zone).toBe('UTC');
+    expect(payload.children).toBe('a <b>c</b>');
+  });
+
+  it('falls back to a marker when a server call site is not in the baked map', () => {
+    const node = goComponent('Badge', 'server', {}, { __krateGoId: 'missing', label: 'Hi' });
+    expect(renderToString(node)).toMatch(/^<!--krate-go:Badge:0:/);
   });
 });

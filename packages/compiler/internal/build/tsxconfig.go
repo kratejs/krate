@@ -67,6 +67,7 @@ func (b *Builder) writeTsxTsconfig() (string, error) {
 		"    \"moduleResolution\": \"bundler\",\n" +
 		"    \"jsx\": \"preserve\",\n" +
 		"    \"jsxImportSource\": \"@krate/runtime\",\n" +
+		"    \"allowArbitraryExtensions\": true,\n" +
 		"    \"strict\": false,\n" +
 		"    \"skipLibCheck\": true,\n" +
 		"    \"baseUrl\": \"..\",\n" +

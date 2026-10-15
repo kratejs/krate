@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"krate-goapi/runtime"
+	"github.com/kratejs/krate/packages/compiler/goext/runtime"
 )
 
 // Handler handles all methods on /api/users/{id} and reads the dynamic segment.

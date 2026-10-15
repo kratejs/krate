@@ -94,8 +94,8 @@ limits. All are optional.
 |----------|---------|--------|
 | `KRATE_DEBUG` | unset | Re-throw internal panics with their original stack instead of reporting them as build errors. |
 | `KRATE_EXEC_TIMEOUT` | unset | Fallback timeout for external processes without a specific override (Go duration, e.g. `90s`). |
-| `KRATE_GOAPI_TIMEOUT` | `15m` | Timeout for `go build` of the Go API sidecar. |
-| `KRATE_GOAPI_TIDY_TIMEOUT` | `10m` | Timeout for `go mod tidy` when `goApi.tidy` is enabled. |
+| `KRATE_GOAPI_TIMEOUT` | `15m` | Timeout for `go build` of the Go host (API routes + components). |
+| `KRATE_GOAPI_TIDY_TIMEOUT` | `10m` | Timeout for `go mod tidy` when `go.tidy` is enabled. |
 | `KRATE_GIT_TIMEOUT` | `60s` | Timeout for `git` reads used by `lastUpdated`/sitemap. |
 | `KRATE_INSTALL_TIMEOUT` | `30m` | Timeout for `krate plugin add` package installs. |
 | `KRATE_JS_MEMORY_MB` | `32` | Embedded QuickJS heap limit. |

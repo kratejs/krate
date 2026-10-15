@@ -166,7 +166,31 @@ func TestBuildServerModesManifestE2E(t *testing.T) {
 	if info, err := os.Stat(filepath.Join(outDir, ".krate", "ssr-bundles")); err == nil && info.IsDir() {
 		t.Error(".krate/ssr-bundles (orphaned QuickJS SSR) still exists")
 	}
+	// Only pages that need the Node renderer (SSR/ISR, or any non-Go dynamic
+	// region) get a compiled server bundle; a streaming page with no dynamic
+	// regions is served statically and has none.
+	var bundleManifest Manifest
+	if data, err := os.ReadFile(filepath.Join(outDir, "manifest.json")); err == nil {
+		_ = json.Unmarshal(data, &bundleManifest)
+	}
+	needsNode := func(route, mode string) bool {
+		if mode == "ssr" || mode == "isr" {
+			return true
+		}
+		for _, reg := range bundleManifest.Regions[route] {
+			if reg.Runtime != "go" {
+				return true
+			}
+		}
+		return false
+	}
 	for _, p := range srvMan.Pages {
+		if !needsNode(p.Route, p.Mode) {
+			if p.BundlePath != "" {
+				t.Errorf("route %s has a server bundle but does not need the Node renderer", p.Route)
+			}
+			continue
+		}
 		if p.BundlePath == "" {
 			t.Errorf("route %s has empty bundlePath", p.Route)
 			continue

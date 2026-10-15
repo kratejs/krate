@@ -155,6 +155,25 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 	}
 }
 
+// isManagedGoFile reports whether a Go file is one krate compiles (an API route
+// under src/api or a Go component under a configured component dir).
+func (b *Builder) isManagedGoFile(p string) bool {
+	slash := filepath.ToSlash(p)
+	if strings.Contains(slash, "src/api/") {
+		return true
+	}
+	for _, d := range b.Cfg.Go.ComponentDirList() {
+		dd := strings.Trim(filepath.ToSlash(d), "/")
+		if dd == "" {
+			continue
+		}
+		if strings.Contains(slash, "/"+dd+"/") || strings.HasSuffix(slash, "/"+dd) {
+			return true
+		}
+	}
+	return false
+}
+
 // processChanges routes a batch of changed files through the dependency graph
 // and rebuilds exactly what depends on them, falling back to a full rebuild when
 // nothing matches dependency tracking. Rebuilt routes are sent to reload.
@@ -167,11 +186,11 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 		}
 	}()
 
-	// Go files outside src/api/ are not krate-managed; ignore them so they
-	// don't trigger a full rebuild.
+	// Only krate-managed Go files (API routes + Go components) trigger
+	// rebuilds; other .go files in the project are ignored.
 	var filtered []string
 	for _, p := range changed {
-		if strings.HasSuffix(p, ".go") && !strings.Contains(filepath.ToSlash(p), "src/api/") {
+		if strings.HasSuffix(p, ".go") && !b.isManagedGoFile(p) {
 			continue
 		}
 		filtered = append(filtered, p)
@@ -187,11 +206,11 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 	var goAPIChanged bool
 
 	for _, p := range changed {
+		if strings.HasSuffix(p, ".go") {
+			goAPIChanged = true
+			continue
+		}
 		if strings.Contains(filepath.ToSlash(p), "src/api/") {
-			if strings.HasSuffix(p, ".go") {
-				goAPIChanged = true
-				continue
-			}
 			// Only compile files that are direct endpoints (ignore private
 			// files starting with '_').
 			if !strings.HasPrefix(filepath.Base(p), "_") && (strings.HasSuffix(p, ".ts") || strings.HasSuffix(p, ".js")) {

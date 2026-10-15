@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -787,6 +788,10 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 
 	// Uppercase = component
 	if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
+		// Go component imported from a `.go` file (import { Card } from "./card.go").
+		if ref, ok := b.goComponents[name]; ok {
+			return b.buildGoComponentSlot(el, ref, parentID)
+		}
 		if slots := b.buildComponentSlot(el, parentID); len(slots) > 0 {
 			return slots
 		}
@@ -1414,6 +1419,90 @@ func (b *builder) evalInnerHTMLAttr(el *ast.JSXElement) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// buildGoComponentSlot lowers `<Card/>` where Card is a Go component imported
+// from a `.go` file. Props are const-evaluated to JSON string values; children
+// are built as slots and rendered by the emitter (passed as the `children`
+// prop). Server-tier refs are rendered at build time by the Go host; runtime
+// refs become request-time regions.
+func (b *builder) buildGoComponentSlot(el *ast.JSXElement, ref GoComponentRef, parentID string) []SlotNode {
+	childID := joinSlotID(parentID, el.Opening.Name)
+	instanceIdx := b.instanceCounts[el.Opening.Name]
+	b.instanceCounts[el.Opening.Name]++
+	id := SlotID(string(childID) + "_c" + itoa(instanceIdx))
+
+	// Runtime-tier Go components become request-time regions rendered by the Go
+	// host (region-<id> splice marker). Children are rendered at build time and
+	// passed to the region as the `children` prop.
+	if ref.Tier == TierRuntime {
+		rtProps := map[string]any{}
+		for _, attr := range el.Opening.Attributes {
+			if attr == nil {
+				continue
+			}
+			if attr.Spread {
+				b.codegenErrs = append(b.codegenErrs, fmt.Errorf("Go component <%s>: spread props are not supported; pass explicit props", el.Opening.Name))
+				continue
+			}
+			if attr.Name == "" {
+				continue
+			}
+			if attr.Value == nil {
+				rtProps[attr.Name] = true
+				continue
+			}
+			rtProps[attr.Name] = json.RawMessage(b.constJSON(attr.Value))
+		}
+		var children []SlotNode
+		if len(el.Children) > 0 {
+			children = b.buildFragmentSlots(&ast.JSXFragment{Children: el.Children}, string(id))
+		}
+		return []SlotNode{&ComponentSlot{
+			ID: id,
+			Component: &ComponentNode{
+				ID:           id,
+				Name:         ref.Func,
+				Tier:         TierRuntime,
+				Runtime:      "go",
+				SourceFile:   ref.File,
+				RuntimeProps: rtProps,
+				Children:     children,
+			},
+		}}
+	}
+
+	props := map[string]string{}
+	for _, attr := range el.Opening.Attributes {
+		if attr == nil {
+			continue
+		}
+		if attr.Spread {
+			b.codegenErrs = append(b.codegenErrs, fmt.Errorf("Go component <%s>: spread props are not supported; pass explicit props", el.Opening.Name))
+			continue
+		}
+		if attr.Name == "" {
+			continue
+		}
+		if attr.Value == nil {
+			props[attr.Name] = "true"
+			continue
+		}
+		props[attr.Name] = b.constJSON(attr.Value)
+	}
+	var children []SlotNode
+	if len(el.Children) > 0 {
+		children = b.buildFragmentSlots(&ast.JSXFragment{Children: el.Children}, string(id))
+	}
+	return []SlotNode{&GoComponentSlot{ID: id, Ref: ref, Props: props, Children: children, Pos: el.Position}}
+}
+
+// constJSON serializes a call-site prop expression to JSON, resolving
+// signal/prop reads to their build-time values.
+func (b *builder) constJSON(expr ast.Expr) string {
+	return SerializeJSON(expr, func(e ast.Expr) (string, bool) {
+		return evalConstWithSignals(e, b.sigMap(), b.localProps), true
+	})
 }
 
 // buildComponentSlot - recursive component build

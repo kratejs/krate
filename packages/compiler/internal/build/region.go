@@ -13,6 +13,10 @@ import (
 // cache directive (PPR per-region cache window).
 var revalidateRe = regexp.MustCompile(`(?m)^\s*export\s+const\s+revalidate\s*(?::\s*number\s*)?=\s*(\d+)`)
 
+// revalidateCommentRe matches a Go component's `// krate:revalidate N` cache
+// directive (the Go equivalent of the TS `export const revalidate`).
+var revalidateCommentRe = regexp.MustCompile(`(?m)^\s*//\s*krate:revalidate\s+(\d+)`)
+
 // regionRevalidate reads a region's per-region revalidate directive from its
 // source file, defaulting to 0 (no region-specific window).
 func regionRevalidate(root, sourcePath string) int {
@@ -28,6 +32,9 @@ func regionRevalidate(root, sourcePath string) int {
 		return 0
 	}
 	m := revalidateRe.FindSubmatch(data)
+	if m == nil {
+		m = revalidateCommentRe.FindSubmatch(data)
+	}
 	if m == nil {
 		return 0
 	}
@@ -52,6 +59,8 @@ type Region struct {
 	Props map[string]any `json:"props,omitempty"`
 	// Suspense indicates the region is a Suspense primary/boundary (streamed).
 	Suspense bool `json:"suspense,omitempty"`
+	// Runtime is the render engine: "" (Node SSR sidecar) or "go" (Go host).
+	Runtime string `json:"runtime,omitempty"`
 	// Revalidate is the region's own cache window in seconds (from
 	// `export const revalidate = N` in the runtime component). 0 falls back to
 	// the page's ISR cadence (PPR directives).
@@ -66,6 +75,7 @@ type RegionMeta struct {
 	BundlePath string         `json:"bundlePath,omitempty"`
 	Props      map[string]any `json:"props,omitempty"`
 	Suspense   bool           `json:"suspense,omitempty"`
+	Runtime    string         `json:"runtime,omitempty"`
 	Revalidate int            `json:"revalidate,omitempty"`
 }
 
@@ -107,6 +117,7 @@ func walkSlotRegions(slot irtree.SlotNode, emit func(Region)) {
 				ComponentName: s.Component.Name,
 				SourcePath:    s.Component.SourceFile,
 				Props:         s.Component.RuntimeProps,
+				Runtime:       s.Component.Runtime,
 			})
 			return
 		}

@@ -166,6 +166,40 @@ lazy/eager loading, blur placeholders, and `aspect-ratio`-based CLS mitigation.
 `<Link>` renders an SPA-enabled `<a>` with prefetching, `replace`, `scroll`,
 hash scrolling, and `aria-current` for the active route.
 
+## Using Go
+
+Server and runtime components, and API routes, can also be written in **Go**.
+Install the Go toolchain, run `krate go:init` once for editor intellisense, then
+drop a `.server.go` / `.runtime.go` component under `src/components` or a route
+under `src/api`:
+
+```go
+// src/components/badge.server.go
+package components
+
+import kr "github.com/kratejs/krate/packages/compiler/goext/krate"
+
+type BadgeProps struct {
+    Label string `json:"label"`
+}
+
+// krate:component server
+func Badge(p BadgeProps) kr.Node {
+    return kr.Span(kr.Class("badge"), kr.Text(p.Label))
+}
+```
+
+```tsx
+import { Badge } from "@/components/badge.server.go";
+
+export default function Page() {
+  return <Badge label="Go!" />;
+}
+```
+
+See [Go Components](/docs/features/go-components/) and
+[API Routes](/docs/features/api-routes/) for the full guide.
+
 ## Next steps
 
 - Explore [Configuration](/docs/configuration/) for the full config surface.
