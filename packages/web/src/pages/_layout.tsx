@@ -6,6 +6,7 @@ const site = {
     { label: "Docs", href: "/docs/" },
     { label: "Plugins", href: "/docs/features/plugins/" },
     { label: "Runtime API", href: "/docs/reference/runtime-api/" },
+    { label: "Blog", href: "/blog/" },
     { label: "Contributing", href: "/docs/contributing/" },
   ],
   social: [
@@ -27,6 +28,7 @@ const site = {
       links: [
         { label: "Routing", href: "/docs/core-concepts/routing/" },
         { label: "Styling", href: "/docs/core-concepts/styling/" },
+        { label: "Go components", href: "/docs/features/go-components/" },
         { label: "API routes", href: "/docs/features/api-routes/" },
       ],
     },
@@ -48,12 +50,22 @@ export default function SiteLayout(props: { children: any }) {
   return (
     <div class="site-shell">
       <Head>
+        <link rel="manifest" href="/site.webmanifest" />
+        <link rel="preload" href="/fonts/inter.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
+        <link rel="preload" href="/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
         <link rel="stylesheet" href="/site.css" />
       </Head>
+      <a class="skip-link" href="#main">
+        Skip to content
+      </a>
       <SiteHeader site={site}>
+        <a class="site-search" href="/docs/" aria-label="Search the documentation">
+          <span>Search</span>
+          <kbd>Ctrl K</kbd>
+        </a>
         <ThemeToggle />
       </SiteHeader>
-      <main>{props.children}</main>
+      <main id="main">{props.children}</main>
       <SiteFooter site={site} />
     </div>
   );

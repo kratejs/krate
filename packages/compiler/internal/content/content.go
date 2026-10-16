@@ -367,11 +367,12 @@ func GenerateModuleDTS(cfg *Config) string {
 	b.WriteString("declare module \"krate/content\" {\n")
 	b.WriteString(ifaces.String())
 	if len(names) > 0 {
-		var union []string
-		for _, n := range names {
-			union = append(union, tsString(n))
+		// Per-name overloads so `getCollection("blog")` is typed as BlogEntry[]
+		// (not a union across every collection).
+		for i, n := range names {
+			b.WriteString("  export function getCollection(name: " + tsString(n) + "): " + entryNames[i] + "[];\n")
 		}
-		b.WriteString("  export function getCollection(name: " + strings.Join(union, " | ") + "): (" + strings.Join(entryNames, " | ") + ")[];\n")
+		b.WriteString("  export function getCollection(name: string): (" + strings.Join(entryNames, " | ") + ")[];\n")
 		for i, n := range names {
 			b.WriteString("  export const " + constName(n) + ": " + entryNames[i] + "[];\n")
 		}

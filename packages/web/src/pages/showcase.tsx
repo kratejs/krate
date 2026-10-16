@@ -20,6 +20,7 @@ export default function Showcase() {
       </Head>
       <h1 class="section-title">Showcase</h1>
       <p class="section-lede">Sites and apps built with Krate.</p>
+      <h2 class="sr-only">Projects</h2>
       <div class="features">
         {PROJECTS.map((p) => (
           <a class="feature-card" href={p.url}>

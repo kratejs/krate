@@ -25,3 +25,4 @@ Practical, end-to-end walkthroughs.
 | [Testing](/docs/guides/testing/) | Test logic, components, and pages |
 | [TypeScript Setup](/docs/guides/typescript-setup/) | Configure tsconfig and typed routes |
 | [Upgrading](/docs/guides/upgrading/) | Keep packages in sync and upgrade safely |
+| [Internationalization](/docs/guides/internationalization/) | Serve the docs in multiple languages |

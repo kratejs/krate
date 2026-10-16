@@ -262,23 +262,31 @@ func generateSEOTags(headHTML, route, baseURL, siteName, defaultDescription, def
 	if !strings.Contains(headHTML, "og:description") && desc != "" {
 		tags = append(tags, fmt.Sprintf("<meta property=\"og:description\" content=\"%s\">", escape.HTMLAttr(desc)))
 	}
-	if !strings.Contains(headHTML, "og:image") && defaultImage != "" {
-		img := defaultImage
-		if !strings.HasPrefix(img, "http") {
-			img = baseURL + "/" + strings.TrimPrefix(img, "/")
-		}
-		tags = append(tags, fmt.Sprintf("<meta property=\"og:image\" content=\"%s\">", img))
+	// Resolve the default OG image once (absolute URL when a base is set).
+	ogImage := defaultImage
+	if ogImage != "" && !strings.HasPrefix(ogImage, "http") {
+		ogImage = baseURL + "/" + strings.TrimPrefix(ogImage, "/")
+	}
+	if !strings.Contains(headHTML, "og:image") && ogImage != "" {
+		tags = append(tags, fmt.Sprintf("<meta property=\"og:image\" content=\"%s\">", ogImage))
 	}
 
-	// Twitter Card tags
+	// Twitter Card tags. A large card when a social image is configured.
 	if !strings.Contains(headHTML, "twitter:card") {
-		tags = append(tags, "<meta name=\"twitter:card\" content=\"summary\">")
+		card := "summary"
+		if ogImage != "" {
+			card = "summary_large_image"
+		}
+		tags = append(tags, fmt.Sprintf("<meta name=\"twitter:card\" content=\"%s\">", card))
 	}
 	if !strings.Contains(headHTML, "twitter:title") && title != "" {
 		tags = append(tags, fmt.Sprintf("<meta name=\"twitter:title\" content=\"%s\">", escape.HTMLAttr(title)))
 	}
 	if !strings.Contains(headHTML, "twitter:description") && desc != "" {
 		tags = append(tags, fmt.Sprintf("<meta name=\"twitter:description\" content=\"%s\">", escape.HTMLAttr(desc)))
+	}
+	if ogImage != "" && !strings.Contains(headHTML, "twitter:image") {
+		tags = append(tags, fmt.Sprintf("<meta name=\"twitter:image\" content=\"%s\">", ogImage))
 	}
 
 	if len(tags) == 0 {
@@ -316,17 +324,19 @@ func extractMetaAttr(headHTML, name string) string {
 	if idx < 0 {
 		return ""
 	}
-	// Find content="..." after the name attribute
+	// Find content= after the name attribute, then read the opening quote that
+	// actually delimits the value (either " or ').
 	after := headHTML[idx:]
-	contentIdx := strings.Index(strings.ToLower(after), "content=\"")
-	if contentIdx < 0 {
-		contentIdx = strings.Index(strings.ToLower(after), "content='")
-	}
-	if contentIdx < 0 {
+	eq := strings.Index(strings.ToLower(after), "content=")
+	if eq < 0 {
 		return ""
 	}
-	start := contentIdx + len("content=\"")
-	quote := after[contentIdx+len("content") : contentIdx+len("content")+1]
+	q := eq + len("content=")
+	if q >= len(after) || (after[q] != '"' && after[q] != '\'') {
+		return ""
+	}
+	quote := after[q : q+1]
+	start := q + 1
 	end := strings.Index(after[start:], quote)
 	if end < 0 {
 		return ""

@@ -1,4 +1,4 @@
-import { defineConfig, docs, sitemap } from '@krate/core';
+import { defineConfig, defineContent, docs, sitemap } from '@krate/core';
 import { baseDocsTheme } from '@krate/base-docs-theme';
 
 export default defineConfig({
@@ -9,12 +9,6 @@ export default defineConfig({
   minify: true,
 
   viewTransitions: "auto",
-
-  i18n: {
-    defaultLocale: "en",
-    locales: ["en", "fr"],
-    routing: "prefix",
-  },
 
   devServer: {
     port: 3000,
@@ -33,12 +27,28 @@ export default defineConfig({
     baseUrl: "https://krate.js.org",
     siteName: "Krate",
     description: "A Go-native static site generator with signal-based reactivity.",
+    image: "https://krate.js.org/og.png",
   },
 
   redirects: [
     { source: "/docs/guides/contributing/", destination: "/docs/contributing/", permanent: true },
     { source: "/docs/guides/diagrams/", destination: "/docs/core-concepts/markdown/", permanent: true },
   ],
+
+  content: defineContent({
+    blog: {
+      dir: "src/content/blog",
+      schema: {
+        title: { type: "string", required: true },
+        description: { type: "string", required: true },
+        date: { type: "date", required: true },
+        author: "string",
+        tags: "string[]",
+        draft: "boolean",
+        order: { type: "number", required: true },
+      },
+    },
+  }),
 
   plugins: [
     sitemap({ baseUrl: "https://krate.js.org", changeFreq: "daily", priority: "0.8" }),
@@ -64,7 +74,7 @@ export default defineConfig({
         maxResults: 8,
       },
       links: [
-        { icon: "lucide:github", url: "https://github.com/kratejs/krate" },
+        { icon: "lucide:github", url: "https://github.com/kratejs/krate", name: "GitHub" },
       ],
     }),
   ],

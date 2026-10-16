@@ -15,8 +15,8 @@
   },
   "devDependencies": {
     "@krate/base-docs-theme": "workspace:*",
-    "@krate/components": "0.4.0-rc.4",
-    "@krate/core": "0.4.0-rc.4",
-    "@krate/runtime": "0.4.0-rc.4"
+    "@krate/components": "0.4.0-rc.6",
+    "@krate/core": "0.4.0-rc.6",
+    "@krate/runtime": "0.4.0-rc.6"
   }
 }

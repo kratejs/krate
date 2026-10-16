@@ -270,6 +270,9 @@ declare global {
       writingSuggestions?: 'mark' | 'suggestion';
       inputMode?: 'none' | 'text' | 'tel' | 'url' | 'email' | 'numeric' | 'decimal' | 'search';
       placeholder?: string;
+      // Raw HTML injected verbatim (trusted). Used by Markdown/MDX rendering and
+      // content-collection bodies: `dangerouslySetInnerHTML={{ __html: html }}`.
+      dangerouslySetInnerHTML?: { __html: string };
     }
 
     interface AnchorHTMLAttributes extends HTMLAttributes {

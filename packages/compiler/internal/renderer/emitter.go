@@ -653,6 +653,12 @@ func (e *Emitter) emitMetaSlot(s *irtree.MetaSlot) SlotOutput {
 	for _, child := range s.Children {
 		mergeSlotOutput(&out, e.emitSlotNode(child))
 	}
+	// <Head> children are routed into the document <head> by walkMetaSlots; they
+	// must not also render into the body. <Script>/<Style> keep their body HTML
+	// (valid there, and captured separately into Script/Style fields).
+	if strings.EqualFold(s.ComponentName, "Head") {
+		out.HTML = ""
+	}
 	return out
 }
 

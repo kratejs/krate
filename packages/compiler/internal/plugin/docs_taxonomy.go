@@ -89,6 +89,12 @@ func buildTaxonomyTSX(theme *resolvedDocsTheme, opts *DocsPluginOptions, tsxPath
 	currentJSON, _ := json.Marshal(kind + "/" + e.Slug)
 	sidebarJSON := marshalJSONArray(sections)
 	socialJSON := marshalJSONArray(opts.Links)
+	// A meta description so taxonomy pages are not "no description" (search + SEO).
+	desc := "Documentation pages tagged " + e.Name + "."
+	if kind == "categories" {
+		desc = "Documentation pages in the " + e.Name + " category."
+	}
+	descJSON, _ := json.Marshal(desc)
 
 	sb.WriteString("export default function TaxonomyPage() {\n")
 	sb.WriteString("  const docsProps = {\n")
@@ -102,7 +108,11 @@ func buildTaxonomyTSX(theme *resolvedDocsTheme, opts *DocsPluginOptions, tsxPath
 	sb.WriteString("    currentPath: " + string(currentJSON) + ",\n")
 	sb.WriteString("  };\n")
 	sb.WriteString("  return (\n")
-	sb.WriteString("    <DocsLayout {...docsProps}>\n")
+	sb.WriteString("    <>\n")
+	sb.WriteString("      <Head>\n")
+	sb.WriteString("        <meta name=\"description\" content={" + string(descJSON) + "} />\n")
+	sb.WriteString("      </Head>\n")
+	sb.WriteString("      <DocsLayout {...docsProps}>\n")
 	sb.WriteString("      <div class=\"md-content\">\n")
 	sb.WriteString("        <h1>" + escape.HTML(title) + "</h1>\n")
 	sb.WriteString("        <ul class=\"taxonomy-list\">\n")
@@ -112,7 +122,8 @@ func buildTaxonomyTSX(theme *resolvedDocsTheme, opts *DocsPluginOptions, tsxPath
 	}
 	sb.WriteString("        </ul>\n")
 	sb.WriteString("      </div>\n")
-	sb.WriteString("    </DocsLayout>\n")
+	sb.WriteString("      </DocsLayout>\n")
+	sb.WriteString("    </>\n")
 	sb.WriteString("  );\n")
 	sb.WriteString("}\n")
 	return sb.String()

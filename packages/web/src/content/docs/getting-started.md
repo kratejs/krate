@@ -4,7 +4,7 @@ order: 2
 description: Install the Krate CLI, scaffold a project, and build your first interactive page.
 head:
   - - meta
-    - name: og:type
+    - property: og:type
       content: article
 tags:
   - install

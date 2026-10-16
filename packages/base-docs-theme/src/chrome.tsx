@@ -653,7 +653,7 @@ export function SocialLinks(props: SocialLinksProps) {
   return (
     <span>
       {links.map((link) => (
-        <a class="social-link" href={link.url}>
+        <a class="social-link" href={link.url} aria-label={link.name} title={link.name}>
           <Icon name={link.icon} width="20" height="20" />
         </a>
       ))}

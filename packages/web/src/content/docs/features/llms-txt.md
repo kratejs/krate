@@ -32,8 +32,8 @@ export default defineConfig({
 
 `krate build` then writes two files into `outDir`:
 
-- **`llms.txt`** - a Markdown index: the site title and description, then each
-  page grouped by section as `- [Title](url): description`.
+- **`llms.txt`** - a Markdown index: the site title and description, then a
+  bullet per page grouped by section (page title, URL, and description).
 - **`llms-full.txt`** - the same header followed by every page's raw content.
 
 `baseUrl`, `title`, and `description` fall back to `seo.baseUrl`,
