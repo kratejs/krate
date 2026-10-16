@@ -88,7 +88,7 @@ func buildTaxonomyTSX(theme *resolvedDocsTheme, opts *DocsPluginOptions, tsxPath
 	siteJSON, _ := json.Marshal(opts.Title)
 	currentJSON, _ := json.Marshal(kind + "/" + e.Slug)
 	sidebarJSON := marshalJSONArray(sections)
-	socialJSON := marshalJSONArray(opts.Links)
+	socialJSON := marshalJSONArray(socialLinksWithNames(opts.Links))
 	// A meta description so taxonomy pages are not "no description" (search + SEO).
 	desc := "Documentation pages tagged " + e.Name + "."
 	if kind == "categories" {
