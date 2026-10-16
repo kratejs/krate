@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strings"
 	"time"
 
@@ -45,6 +46,8 @@ type cliFlags struct {
 	NoDCE      bool
 	Target     string
 	JSON       bool
+	CPUProfile string
+	MemProfile string
 }
 
 func main() {
@@ -106,7 +109,7 @@ func main() {
 func printCommandUsage(w io.Writer, cmd string) {
 	switch cmd {
 	case "build":
-		fmt.Fprintf(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--watch] [--profile]\n\n")
+		fmt.Fprintf(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--watch] [--profile] [--cpuprofile <path>] [--memprofile <path>]\n\n")
 		fmt.Fprintf(w, "Compile the project to static output (and SSR/server bundles when needed).\n")
 	case "dev":
 		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--verbose]\n\n")
@@ -170,6 +173,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --watch           Rebuild on file changes\n")
 	fmt.Fprintf(w, "  --verbose         Print diagnostic details (e.g. reactive validation)\n")
 	fmt.Fprintf(w, "  --profile         Print per-phase build timings and disk-cache hits/misses\n")
+	fmt.Fprintf(w, "  --cpuprofile <p>  Write a Go CPU profile to <p> (pprof)\n")
+	fmt.Fprintf(w, "  --memprofile <p>  Write a Go heap profile to <p> (pprof)\n")
 	fmt.Fprintf(w, "  --sourcemap       Emit source maps for generated JS\n")
 	fmt.Fprintf(w, "  --no-dce          Disable CSS/JS dead-code elimination\n")
 	fmt.Fprintf(w, "  --target <name>   Deploy adapter target (netlify|vercel|cloudflare|gh-pages)\n")
@@ -196,6 +201,12 @@ func parseFlags(args []string) (cliFlags, []string) {
 			flags.Verbose = true
 		case args[i] == "--profile":
 			flags.Profile = true
+		case args[i] == "--cpuprofile" && i+1 < len(args):
+			flags.CPUProfile = args[i+1]
+			i++
+		case args[i] == "--memprofile" && i+1 < len(args):
+			flags.MemProfile = args[i+1]
+			i++
 		case args[i] == "--sourcemap":
 			flags.Sourcemap = true
 		case args[i] == "--no-dce":
@@ -286,8 +297,17 @@ func runBuild(flags cliFlags, args []string) {
 	if flags.Profile {
 		builder.Prof = build.NewProfiler(true)
 	}
-	if err := builder.BuildAll(); err != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+	stopCPU := func() {}
+	if flags.CPUProfile != "" {
+		stopCPU = startCPUProfile(flags.CPUProfile)
+	}
+	buildErr := builder.BuildAll()
+	stopCPU()
+	if flags.MemProfile != "" {
+		writeHeapProfile(flags.MemProfile)
+	}
+	if buildErr != nil {
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, buildErr)
 		os.Exit(1)
 	}
 
@@ -320,6 +340,42 @@ func runBuild(flags cliFlags, args []string) {
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
 	}
+}
+
+// startCPUProfile begins a CPU profile written to path and returns a stop
+// function. If profiling cannot start it prints a warning and returns a no-op.
+func startCPUProfile(path string) func() {
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sWarning: cannot create cpu profile %s:%s %v\n", cYellow, path, cReset, err)
+		return func() {}
+	}
+	if err := pprof.StartCPUProfile(f); err != nil {
+		_ = f.Close()
+		fmt.Fprintf(os.Stderr, "%sWarning: cannot start cpu profile:%s %v\n", cYellow, cReset, err)
+		return func() {}
+	}
+	return func() {
+		pprof.StopCPUProfile()
+		_ = f.Close()
+		fmt.Printf("  %s·%s CPU profile written to %s\n", cGreen, cReset, path)
+	}
+}
+
+// writeHeapProfile writes a heap profile to path (after a GC).
+func writeHeapProfile(path string) {
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sWarning: cannot create mem profile %s:%s %v\n", cYellow, path, cReset, err)
+		return
+	}
+	defer f.Close()
+	runtime.GC()
+	if err := pprof.WriteHeapProfile(f); err != nil {
+		fmt.Fprintf(os.Stderr, "%sWarning: cannot write mem profile:%s %v\n", cYellow, cReset, err)
+		return
+	}
+	fmt.Printf("  %s·%s heap profile written to %s\n", cGreen, cReset, path)
 }
 
 func runDev(flags cliFlags, args []string) {
