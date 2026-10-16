@@ -19,7 +19,7 @@ func TestResolvePathAliasExactMatch(t *testing.T) {
 	// Also create index.ts
 	_ = os.WriteFile(filepath.Join(utilsDir, "index.ts"), []byte("export const x = 1"), 0644)
 
-	result := resolvePathAlias("@utils", aliases, dir)
+	result := resolvePathAlias("@utils", aliases, dir, fileExists)
 	if result == "" {
 		t.Fatal("expected to resolve @utils, got empty string")
 	}
@@ -39,7 +39,7 @@ func TestResolvePathAliasWildcard(t *testing.T) {
 		{prefix: "@/*", targets: []string{"./*"}},
 	}
 
-	result := resolvePathAlias("@/components/Button", aliases, dir)
+	result := resolvePathAlias("@/components/Button", aliases, dir, fileExists)
 	if result == "" {
 		t.Fatal("expected to resolve @/components/Button, got empty string")
 	}
@@ -59,7 +59,7 @@ func TestResolvePathAliasWithExtension(t *testing.T) {
 		{prefix: "@/*", targets: []string{"./*"}},
 	}
 
-	result := resolvePathAlias("@/components/Button", aliases, dir)
+	result := resolvePathAlias("@/components/Button", aliases, dir, fileExists)
 	if result == "" {
 		t.Fatal("expected to resolve @/components/Button with extension")
 	}
@@ -76,7 +76,7 @@ func TestResolvePathAliasDirectoryIndex(t *testing.T) {
 		{prefix: "@/*", targets: []string{"./*"}},
 	}
 
-	result := resolvePathAlias("@/components/Card", aliases, dir)
+	result := resolvePathAlias("@/components/Card", aliases, dir, fileExists)
 	if result == "" {
 		t.Fatal("expected to resolve @/components/Card to directory index")
 	}
@@ -92,7 +92,7 @@ func TestResolvePathAliasNoMatch(t *testing.T) {
 		{prefix: "@/*", targets: []string{"./*"}},
 	}
 
-	result := resolvePathAlias("lodash", aliases, dir)
+	result := resolvePathAlias("lodash", aliases, dir, fileExists)
 	if result != "" {
 		t.Errorf("expected empty for non-matching alias, got %s", result)
 	}
@@ -104,7 +104,7 @@ func TestResolvePathAliasFileNotFound(t *testing.T) {
 		{prefix: "@/*", targets: []string{"./*"}},
 	}
 
-	result := resolvePathAlias("@/nonexistent/File", aliases, dir)
+	result := resolvePathAlias("@/nonexistent/File", aliases, dir, fileExists)
 	if result != "" {
 		t.Errorf("expected empty for nonexistent file, got %s", result)
 	}
@@ -120,7 +120,7 @@ func TestResolvePathAliasMultipleTargets(t *testing.T) {
 		{prefix: "@app", targets: []string{"./primary/index.ts", "./fallback/index.ts"}},
 	}
 
-	result := resolvePathAlias("@app", aliases, dir)
+	result := resolvePathAlias("@app", aliases, dir, fileExists)
 	if result == "" {
 		t.Fatal("expected to resolve via fallback target")
 	}
@@ -137,7 +137,7 @@ func TestResolvePathAliasAbsoluteTarget(t *testing.T) {
 		{prefix: "@abs", targets: []string{targetDir + "/mod.ts"}},
 	}
 
-	result := resolvePathAlias("@abs", aliases, dir)
+	result := resolvePathAlias("@abs", aliases, dir, fileExists)
 	if result == "" {
 		t.Fatal("expected to resolve absolute target")
 	}

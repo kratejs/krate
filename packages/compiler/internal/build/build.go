@@ -2072,6 +2072,11 @@ func (b *Builder) resetBuildCaches() {
 	tsexec.Invalidate()
 	// Go component parses are per-build.
 	b.goParseCache = nil
+	// Filesystem-existence and import-resolution memos are per-build: a file
+	// added/removed between dev rebuilds must not be served from a stale entry.
+	// The parse cache is keyed by mtime+size, so it stays valid and is kept.
+	b.moduleCache.ResetResolver()
+	bundler.ResetResolveCache()
 }
 
 var layoutEmitCache sync.Map

@@ -170,20 +170,54 @@ func (b *Bundler) SetServerComponents(server []string, runtime []string, serverD
 	b.runtimeDirs = runtimeDirs
 }
 
+// resolverCacheEnabled gates the filesystem/import resolution memo. Set
+// KRATE_NO_RESOLVER_CACHE to disable it (used to A/B resolver caching).
+var resolverCacheEnabled = os.Getenv("KRATE_NO_RESOLVER_CACHE") == ""
+
+// fileExists reports whether path exists, memoizing os.Stat results on the
+// shared build cache so repeated probes (extension guessing, node_modules
+// walks) don't re-hit the filesystem across pages.
+func (b *Bundler) fileExists(path string) bool {
+	if b.cache == nil || !resolverCacheEnabled {
+		return resolver.Exists(path)
+	}
+	if v, ok := b.cache.res.existsResult(path); ok {
+		return v
+	}
+	v := resolver.Exists(path)
+	b.cache.res.putExists(path, v)
+	return v
+}
+
 // resolveImportForModule resolves an import, checking virtual modules and path
-// aliases first.
+// aliases first. Results are memoized per (importer dir, specifier) on the
+// shared build cache, so the same import from the same directory (very common
+// across pages) does no filesystem work after the first resolution.
 func (b *Bundler) resolveImportForModule(importer, imp string) string {
+	if b.cache == nil || !resolverCacheEnabled {
+		return b.resolveImportForModuleUncached(importer, imp)
+	}
+	key := filepath.Dir(importer) + "\x00" + imp
+	if v, ok := b.cache.res.importResult(key); ok {
+		return v
+	}
+	v := b.resolveImportForModuleUncached(importer, imp)
+	b.cache.res.putImport(key, v)
+	return v
+}
+
+func (b *Bundler) resolveImportForModuleUncached(importer, imp string) string {
 	if b.virtualModules != nil {
 		if path, ok := b.virtualModules[imp]; ok {
 			return path
 		}
 	}
-	resolved := resolveImport(importer, imp)
+	resolved := resolveImport(importer, imp, b.fileExists)
 	if resolved != "" {
 		return resolved
 	}
 	if len(b.pathAliases) > 0 && b.tsBaseDir != "" {
-		resolved = resolvePathAlias(imp, b.pathAliases, b.tsBaseDir)
+		resolved = resolvePathAlias(imp, b.pathAliases, b.tsBaseDir, b.fileExists)
 		if resolved != "" {
 			return resolved
 		}
@@ -192,7 +226,7 @@ func (b *Bundler) resolveImportForModule(importer, imp string) string {
 		// `@/*: ["./src/*"]`). When baseUrl resolution misses, try the root the
 		// tsconfig lives in.
 		if b.root != "" && b.root != b.tsBaseDir {
-			resolved = resolvePathAlias(imp, b.pathAliases, b.root)
+			resolved = resolvePathAlias(imp, b.pathAliases, b.root, b.fileExists)
 			if resolved != "" {
 				return resolved
 			}
@@ -257,7 +291,7 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 	}
 	abs = filepath.Clean(abs)
 
-	isExternalPkg := !filepath.IsAbs(path) && !fileExists(filepath.Join(b.root, path))
+	isExternalPkg := !filepath.IsAbs(path) && !b.fileExists(filepath.Join(b.root, path))
 
 	seenKey := abs
 	if isExternalPkg {
@@ -641,23 +675,53 @@ var KrateRoot string
 // ResolveImport resolves an import path to an absolute file path. Exported for
 // consumers (e.g. the annotator's import-binding resolution) that need the same
 // relative/node_modules/index resolution rules the bundler applies.
-func ResolveImport(importer, imp string) string {
-	return resolveImport(importer, imp)
+// resolveMemo is the process-wide resolution memo for callers that don't hold a
+// Bundler (the annotator's alias builder). It is reset once per build
+// (ResetResolveCache) so cross-build file changes aren't served from a stale
+// negative entry; within a build it is shared safely by the build's parallel
+// page workers.
+var resolveMemo = newResolverMemo()
+
+// ResetResolveCache clears the process-wide resolution memo. Call once per
+// build, before bundling.
+func ResetResolveCache() { resolveMemo.reset() }
+
+func memoizedExists(path string) bool {
+	if v, ok := resolveMemo.existsResult(path); ok {
+		return v
+	}
+	v := resolver.Exists(path)
+	resolveMemo.putExists(path, v)
+	return v
 }
 
-// resolveImport resolves an import path to an absolute file path.
-func resolveImport(importer, imp string) string {
+func ResolveImport(importer, imp string) string {
+	if !resolverCacheEnabled {
+		return resolveImport(importer, imp, resolver.Exists)
+	}
+	key := filepath.Dir(importer) + "\x00" + imp
+	if v, ok := resolveMemo.importResult(key); ok {
+		return v
+	}
+	v := resolveImport(importer, imp, memoizedExists)
+	resolveMemo.putImport(key, v)
+	return v
+}
+
+// resolveImport resolves an import path to an absolute file path. exists is the
+// filesystem probe (memoized by the caller's build cache).
+func resolveImport(importer, imp string, exists func(string) bool) string {
 	dir := filepath.Dir(importer)
 
 	if strings.HasPrefix(imp, ".") || strings.HasPrefix(imp, "..") {
 		resolved := filepath.Clean(filepath.Join(dir, imp))
 
-		if fileExists(resolved) {
+		if exists(resolved) {
 			info, err := os.Stat(resolved)
 			if err == nil && info.IsDir() {
 				for _, index := range []string{"index.tsx", "index.ts", "index.mts", "index.jsx", "index.js", "index.mjs", "index.cjs", "index.md", "index.mdx"} {
 					candidate := filepath.Join(resolved, index)
-					if fileExists(candidate) {
+					if exists(candidate) {
 						return candidate
 					}
 				}
@@ -668,7 +732,7 @@ func resolveImport(importer, imp string) string {
 		extensions := []string{".tsx", ".ts", ".mts", ".jsx", ".js", ".mjs", ".cjs", ".md", ".mdx", ".css", ".json"}
 		for _, ext := range extensions {
 			candidate := resolved + ext
-			if fileExists(candidate) {
+			if exists(candidate) {
 				return candidate
 			}
 		}
@@ -676,7 +740,7 @@ func resolveImport(importer, imp string) string {
 	}
 
 	// Resolve krate/* virtual packages (e.g., krate/components)
-	if resolved := resolveKratePackage(dir, imp); resolved != "" {
+	if resolved := resolveKratePackage(dir, imp, exists); resolved != "" {
 		return resolved
 	}
 
@@ -685,7 +749,7 @@ func resolveImport(importer, imp string) string {
 
 // resolvePathAlias tries to resolve an import using TypeScript path aliases.
 // Returns the resolved absolute path, or "" if no alias matched.
-func resolvePathAlias(imp string, aliases []pathAlias, tsBaseDir string) string {
+func resolvePathAlias(imp string, aliases []pathAlias, tsBaseDir string, exists func(string) bool) string {
 	for _, alias := range aliases {
 		prefix := alias.prefix
 		// Handle wildcard patterns like "@/*"
@@ -704,12 +768,12 @@ func resolvePathAlias(imp string, aliases []pathAlias, tsBaseDir string) string 
 					}
 					targetPath = filepath.Clean(targetPath)
 
-					if fileExists(targetPath) {
+					if exists(targetPath) {
 						info, err := os.Stat(targetPath)
 						if err == nil && info.IsDir() {
 							for _, index := range []string{"index.tsx", "index.ts", "index.jsx", "index.js"} {
 								candidate := filepath.Join(targetPath, index)
-								if fileExists(candidate) {
+								if exists(candidate) {
 									return candidate
 								}
 							}
@@ -721,7 +785,7 @@ func resolvePathAlias(imp string, aliases []pathAlias, tsBaseDir string) string 
 					extensions := []string{".tsx", ".ts", ".mts", ".jsx", ".js", ".mjs", ".cjs", ".css", ".json"}
 					for _, ext := range extensions {
 						candidate := targetPath + ext
-						if fileExists(candidate) {
+						if exists(candidate) {
 							return candidate
 						}
 					}
@@ -736,7 +800,7 @@ func resolvePathAlias(imp string, aliases []pathAlias, tsBaseDir string) string 
 						targetPath = filepath.Join(tsBaseDir, targetPath)
 					}
 					targetPath = filepath.Clean(targetPath)
-					if fileExists(targetPath) {
+					if exists(targetPath) {
 						return targetPath
 					}
 				}
@@ -748,7 +812,7 @@ func resolvePathAlias(imp string, aliases []pathAlias, tsBaseDir string) string 
 
 // resolveKratePackage resolves krate/* and @krate/* imports via node_modules.
 // Walks up from importerDir looking for node_modules/@krate/{name}/.
-func resolveKratePackage(importerDir, imp string) string {
+func resolveKratePackage(importerDir, imp string, exists func(string) bool) string {
 	name := ""
 	if strings.HasPrefix(imp, "krate/") {
 		name = strings.TrimPrefix(imp, "krate/")
@@ -771,7 +835,7 @@ func resolveKratePackage(importerDir, imp string) string {
 				filepath.Join(pkgDir, "index.js"),
 			}
 			for _, c := range candidates {
-				if fileExists(c) {
+				if exists(c) {
 					return c
 				}
 			}

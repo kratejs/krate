@@ -19,6 +19,79 @@ type ModuleCache struct {
 	programs map[string]*programEntry
 	css      map[string]*cssEntry
 	assets   map[string]*assetEntry
+	res      *resolverMemo
+}
+
+// resolverMemo memoizes filesystem-existence probes and import resolutions for a
+// build. It is shared across every Bundler in the build (like the parse cache),
+// so pages don't repeat the same os.Stat probes and node_modules walks. It is
+// reset at the start of each build (file adds/removes between dev rebuilds must
+// not be served from a stale negative entry); the parse cache is unaffected.
+type resolverMemo struct {
+	mu      sync.Mutex
+	exists  map[string]bool
+	imports map[string]string
+}
+
+func newResolverMemo() *resolverMemo {
+	return &resolverMemo{exists: map[string]bool{}, imports: map[string]string{}}
+}
+
+func (m *resolverMemo) existsResult(path string) (bool, bool) {
+	if m == nil {
+		return false, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.exists[path]
+	return v, ok
+}
+
+func (m *resolverMemo) putExists(path string, v bool) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.exists[path] = v
+	m.mu.Unlock()
+}
+
+func (m *resolverMemo) importResult(key string) (string, bool) {
+	if m == nil {
+		return "", false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.imports[key]
+	return v, ok
+}
+
+func (m *resolverMemo) putImport(key, v string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.imports[key] = v
+	m.mu.Unlock()
+}
+
+func (m *resolverMemo) reset() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.exists = map[string]bool{}
+	m.imports = map[string]string{}
+	m.mu.Unlock()
+}
+
+// ResetResolver clears the filesystem-existence and import-resolution memo so a
+// new build re-probes the filesystem. Call once per build.
+func (c *ModuleCache) ResetResolver() {
+	if c == nil {
+		return
+	}
+	c.res.reset()
 }
 
 type programEntry struct {
@@ -55,6 +128,7 @@ func NewModuleCache() *ModuleCache {
 		programs: make(map[string]*programEntry),
 		css:      make(map[string]*cssEntry),
 		assets:   make(map[string]*assetEntry),
+		res:      newResolverMemo(),
 	}
 }
 
