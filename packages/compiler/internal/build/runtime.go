@@ -3,10 +3,28 @@ package build
 import (
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
+
+// runtimeBundleMemo caches loadNamedBundleFromDisk results (hits and misses)
+// within a build. The runtime chunk is written on multiple build paths and each
+// call otherwise probes several candidate directories with os.ReadFile. Cleared
+// per build via resetRuntimeBundleMemo so a rebuilt runtime or a newly added dev
+// bundle is picked up on the next build.
+var runtimeBundleMemo = struct {
+	mu sync.Mutex
+	m  map[string]string
+}{m: make(map[string]string)}
+
+func resetRuntimeBundleMemo() {
+	runtimeBundleMemo.mu.Lock()
+	defer runtimeBundleMemo.mu.Unlock()
+	runtimeBundleMemo.m = make(map[string]string)
+}
 
 func loadRuntimeFromDisk(projectRoot string) string {
 	return loadNamedBundleFromDisk(projectRoot, "krate-hydrate.js", "krate-runtime.js")
@@ -19,6 +37,22 @@ func loadDevBundleFromDisk(projectRoot string) string {
 }
 
 func loadNamedBundleFromDisk(projectRoot string, names ...string) string {
+	memoKey := projectRoot + "\x00" + strings.Join(names, "\x00")
+	runtimeBundleMemo.mu.Lock()
+	if v, ok := runtimeBundleMemo.m[memoKey]; ok {
+		runtimeBundleMemo.mu.Unlock()
+		return v
+	}
+	runtimeBundleMemo.mu.Unlock()
+
+	body := probeNamedBundleFromDisk(projectRoot, names)
+	runtimeBundleMemo.mu.Lock()
+	runtimeBundleMemo.m[memoKey] = body
+	runtimeBundleMemo.mu.Unlock()
+	return body
+}
+
+func probeNamedBundleFromDisk(projectRoot string, names []string) string {
 
 	// Build candidate directories relative to the project root.
 	// findKrateRoot walks up from projectRoot to locate the compiler package.

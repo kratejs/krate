@@ -2077,6 +2077,8 @@ func (b *Builder) resetBuildCaches() {
 	// The parse cache is keyed by mtime+size, so it stays valid and is kept.
 	b.moduleCache.ResetResolver()
 	bundler.ResetResolveCache()
+	// Runtime/dev bundle disk lookups are memoized per build.
+	resetRuntimeBundleMemo()
 }
 
 var layoutEmitCache sync.Map
