@@ -10,8 +10,10 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/annotator"
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/jseval"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
@@ -136,17 +138,65 @@ func hasGenerateStaticParams(prog *ast.Program) bool {
 	return false
 }
 
-// executeGenerateStaticParams runs the page's generateStaticParams via npx tsx
-// and returns the parsed param combinations. tsconfig, when non-empty, is the
-// generated `.krate/tsconfig.json` passed to tsx so `krate/content` and the
-// project's path aliases resolve inside the user's module.
-func executeGenerateStaticParams(pagePath string, env []string, tsconfig string) ([]map[string]string, error) {
+// executeGenerateStaticParams runs the page's generateStaticParams and returns
+// the parsed param combinations. It evaluates the function on the embedded
+// esbuild+QuickJS runtime first (no Node, no `npx tsx`, no npx install lock),
+// and falls back to `npx tsx` when the module can't be bundled or executed that
+// way - e.g. it imports a Node built-in, which esbuild leaves external and
+// QuickJS cannot resolve. bnd supplies the bundler's resolution rules (virtual
+// modules such as `krate/content`, tsconfig path aliases, krate/* packages);
+// tsconfig is passed to the tsx fallback so those resolve there too.
+func (b *Builder) executeGenerateStaticParams(pagePath string, bnd *bundler.Bundler, tsconfig string) ([]map[string]string, error) {
 	abs, err := filepath.Abs(pagePath)
 	if err != nil {
 		return nil, err
 	}
 
-	content := fmt.Sprintf(
+	if raw, eerr := b.gspEmbedded(abs, bnd); eerr == nil {
+		if sets, perr := parseParamSets(raw); perr == nil {
+			return sets, nil
+		}
+	}
+
+	output, _, err := tsexec.RunBootstrapOpts("krate-gsp-bootstrap", gspBootstrapTSX(tsexec.ImportPath(abs)), filepath.Dir(abs), 30*time.Second, environ.KVList(b.Env), tsconfig)
+	if err != nil {
+		return nil, fmt.Errorf("generateStaticParams execution: %w", err)
+	}
+	return parseParamSets(output)
+}
+
+// gspEmbedded evaluates the page's generateStaticParams on the embedded
+// esbuild+QuickJS runtime and returns its JSON result. bnd is consulted to
+// resolve imports esbuild can't see (krate/content, path aliases).
+func (b *Builder) gspEmbedded(abs string, bnd *bundler.Bundler) (json.RawMessage, error) {
+	entry := fmt.Sprintf(`import * as mod from %q;
+const fn = mod.generateStaticParams || (mod.default && mod.default.generateStaticParams);
+if (typeof fn !== "function") { throw new Error("generateStaticParams is not a function"); }
+Promise.resolve(fn()).then(function (r) { globalThis.%s = r; }, function () {});
+`, filepath.ToSlash(abs), jseval.ResultGlobal)
+
+	resolve := func(importer, spec string) (string, bool) {
+		if bnd != nil {
+			if p := bnd.Resolve(importer, spec); p != "" {
+				return p, true
+			}
+		}
+		return "", false
+	}
+
+	return jseval.Eval(jseval.Options{
+		Source:        entry,
+		ResolveDir:    filepath.Dir(abs),
+		Env:           b.Env,
+		Await:         true,
+		ResolveImport: resolve,
+	})
+}
+
+// gspBootstrapTSX is the `npx tsx` fallback bootstrap: it imports the page and
+// prints the JSON result of generateStaticParams.
+func gspBootstrapTSX(importPath string) string {
+	return fmt.Sprintf(
 		`import * as mod from '%s';
 const fn = mod.generateStaticParams || (mod.default && mod.default.generateStaticParams);
 if (typeof fn !== 'function') {
@@ -156,36 +206,34 @@ if (typeof fn !== 'function') {
 const result = await fn();
 console.log(JSON.stringify(result));
 `,
-		tsexec.ImportPath(abs),
+		importPath,
 	)
+}
 
-	output, _, err := tsexec.RunBootstrapOpts("krate-gsp-bootstrap", content, filepath.Dir(abs), 30*time.Second, env, tsconfig)
-	if err != nil {
-		return nil, fmt.Errorf("generateStaticParams execution: %w", err)
-	}
-
+// parseParamSets decodes the JSON array of param objects, coercing non-string
+// values (numbers, etc.) to their JSON string form.
+func parseParamSets(raw []byte) ([]map[string]string, error) {
 	var paramSets []map[string]string
-	if err := json.Unmarshal(output, &paramSets); err != nil {
-		// Try as array of interfaces
-		var rawSets []map[string]interface{}
-		if err2 := json.Unmarshal(output, &rawSets); err2 != nil {
-			return nil, fmt.Errorf("parsing generateStaticParams output: %w\nraw: %s", err, string(output))
-		}
-		for _, raw := range rawSets {
-			ps := make(map[string]string)
-			for k, v := range raw {
-				switch val := v.(type) {
-				case string:
-					ps[k] = val
-				default:
-					b, _ := json.Marshal(val)
-					ps[k] = string(b)
-				}
-			}
-			paramSets = append(paramSets, ps)
-		}
+	if err := json.Unmarshal(raw, &paramSets); err == nil {
+		return paramSets, nil
 	}
-
+	var rawSets []map[string]interface{}
+	if err2 := json.Unmarshal(raw, &rawSets); err2 != nil {
+		return nil, fmt.Errorf("parsing generateStaticParams output: %w\nraw: %s", err2, string(raw))
+	}
+	for _, rawSet := range rawSets {
+		ps := make(map[string]string)
+		for k, v := range rawSet {
+			switch val := v.(type) {
+			case string:
+				ps[k] = val
+			default:
+				b, _ := json.Marshal(val)
+				ps[k] = string(b)
+			}
+		}
+		paramSets = append(paramSets, ps)
+	}
 	return paramSets, nil
 }
 
@@ -240,7 +288,7 @@ func (b *Builder) resolveStaticParamsPages(pages []string) ([]staticParamsPage, 
 
 		fmt.Printf("  %s⚡%s generateStaticParams: %s\n", cCyan, cReset, filepath.Base(page))
 
-		paramSets, err := executeGenerateStaticParams(page, environ.KVList(b.Env), b.tsxTsconfig)
+		paramSets, err := b.executeGenerateStaticParams(page, bnd, b.tsxTsconfig)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("generateStaticParams (%s): %v", filepath.Base(page), err))
 			continue

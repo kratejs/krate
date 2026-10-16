@@ -2,6 +2,7 @@ package build
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -108,7 +109,12 @@ export function generateStaticParams() {
 		t.Fatal(err)
 	}
 
-	paramSets, err := executeGenerateStaticParams(pagePath, nil, "")
+	cfg := config.Default()
+	cfg.PagesDir = pagesDir
+	cfg.OutDir = filepath.Join(tmpDir, "dist")
+	b := New(tmpDir, cfg)
+
+	paramSets, err := b.executeGenerateStaticParams(pagePath, b.newBundler(), "")
 	if err != nil {
 		t.Fatalf("executeGenerateStaticParams: %v", err)
 	}
@@ -122,6 +128,49 @@ export function generateStaticParams() {
 	}
 	if paramSets[1]["id"] != "def-456" {
 		t.Errorf("paramSets[1][id] = %q, want %q", paramSets[1]["id"], "def-456")
+	}
+}
+
+// TestExecuteGenerateStaticParamsNodeFallback covers the hybrid: a
+// generateStaticParams that imports a Node built-in can't run on the embedded
+// QuickJS runtime (esbuild leaves the built-in external), so it must fall back
+// to `npx tsx` and still resolve.
+func TestExecuteGenerateStaticParamsNodeFallback(t *testing.T) {
+	for _, tool := range []string{"node", "npx"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s not available", tool)
+		}
+	}
+	tmpDir := t.TempDir()
+	pagesDir := filepath.Join(tmpDir, "src", "pages")
+	if err := os.MkdirAll(pagesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	pageContent := `import { homedir } from "node:os";
+export function generateStaticParams() {
+  return [{ id: homedir() ? "ok" : "no" }];
+}
+`
+	pagePath := filepath.Join(pagesDir, "video", "[id].tsx")
+	if err := os.MkdirAll(filepath.Dir(pagePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pagePath, []byte(pageContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	cfg.PagesDir = pagesDir
+	cfg.OutDir = filepath.Join(tmpDir, "dist")
+	b := New(tmpDir, cfg)
+
+	paramSets, err := b.executeGenerateStaticParams(pagePath, b.newBundler(), "")
+	if err != nil {
+		t.Fatalf("executeGenerateStaticParams (node fallback): %v", err)
+	}
+	if len(paramSets) != 1 || paramSets[0]["id"] != "ok" {
+		t.Fatalf("unexpected param sets: %+v", paramSets)
 	}
 }
 

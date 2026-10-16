@@ -206,6 +206,14 @@ func (b *Bundler) resolveImportForModule(importer, imp string) string {
 	return v
 }
 
+// Resolve resolves an import specifier the way the bundler does (virtual
+// modules, relative paths, tsconfig path aliases, and krate/* packages),
+// returning "" when it cannot be resolved. Exposed so in-process evaluation
+// (e.g. generateStaticParams) shares the bundler's resolution rules.
+func (b *Bundler) Resolve(importer, spec string) string {
+	return b.resolveImportForModule(importer, spec)
+}
+
 func (b *Bundler) resolveImportForModuleUncached(importer, imp string) string {
 	if b.virtualModules != nil {
 		if path, ok := b.virtualModules[imp]; ok {

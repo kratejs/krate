@@ -34,6 +34,13 @@ type Options struct {
 	Loader api.Loader
 	// Env, when non-empty, is exposed to the script as process.env.
 	Env map[string]string
+	// ResolveImport, when set, is consulted before esbuild for every import
+	// specifier. Returning ok=true resolves it to an absolute file path (used to
+	// map `krate/content` and tsconfig path aliases, which esbuild can't see).
+	ResolveImport func(importer, spec string) (string, bool)
+	// Await drains the QuickJS job queue after the module evaluates, so a result
+	// assigned from a resolved Promise becomes visible.
+	Await bool
 }
 
 // Eval bundles the entry (resolving imports) and runs it in the embedded QuickJS
@@ -64,6 +71,9 @@ func Eval(opts Options) (out json.RawMessage, err error) {
 	if _, err := rt.ExecuteModule(bundle); err != nil {
 		return nil, err
 	}
+	if opts.Await {
+		rt.DrainJobs()
+	}
 	res, err := rt.Execute(`JSON.stringify(globalThis.` + ResultGlobal + ` ?? null)`)
 	if err != nil {
 		return nil, err
@@ -84,6 +94,11 @@ func bundle(opts Options) (string, error) {
 	if loader == api.LoaderNone {
 		loader = api.LoaderTS
 	}
+	plugins := []api.Plugin{}
+	if opts.ResolveImport != nil {
+		plugins = append(plugins, resolveForwarder(opts.ResolveImport))
+	}
+	plugins = append(plugins, krateResolver(), importMetaPreserver())
 	result := api.Build(api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   opts.Source,
@@ -96,7 +111,7 @@ func bundle(opts Options) (string, error) {
 		Platform: api.PlatformNode,
 		Write:    false,
 		LogLevel: api.LogLevelSilent,
-		Plugins:  []api.Plugin{krateResolver(), importMetaPreserver()},
+		Plugins:  plugins,
 	})
 	if len(result.Errors) > 0 {
 		var sb strings.Builder

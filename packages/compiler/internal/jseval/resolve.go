@@ -10,6 +10,27 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 )
 
+// resolveForwarder lets a caller resolve import specifiers esbuild can't see -
+// virtual modules (`krate/content`) and tsconfig path aliases - to absolute
+// file paths. Returning ok=false defers to esbuild's own resolver (relative
+// paths, node_modules) and to krateResolver (@krate/*).
+func resolveForwarder(fn func(importer, spec string) (string, bool)) api.Plugin {
+	return api.Plugin{
+		Name: "krate-forward-resolve",
+		Setup: func(pb api.PluginBuild) {
+			pb.OnResolve(api.OnResolveOptions{Filter: `.*`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if args.Namespace != "" && args.Namespace != "file" {
+					return api.OnResolveResult{}, nil
+				}
+				if path, ok := fn(args.Importer, args.Path); ok {
+					return api.OnResolveResult{Path: path, Namespace: "file"}, nil
+				}
+				return api.OnResolveResult{}, nil
+			})
+		},
+	}
+}
+
 // krateResolver resolves bare `@krate/*` imports through Go instead of esbuild's
 // own resolver. esbuild can fail to read Windows junctions (a monorepo
 // `npm install` links node_modules/@krate/core as a junction), which surfaces as
