@@ -151,3 +151,75 @@ func TestProcessImageNoPlaceholder(t *testing.T) {
 		t.Errorf("intrinsic Width/Height = %d/%d, want 640/360", res.Width, res.Height)
 	}
 }
+
+func TestProcessImageVariantOrder(t *testing.T) {
+	root := t.TempDir()
+	srcPath := filepath.Join(root, "public", "photo.png")
+	_ = os.MkdirAll(filepath.Dir(srcPath), 0755)
+	writeTestPNG(t, srcPath, testImage(1600, 1000))
+
+	res, err := ProcessImage(root, srcPath, 0, 0, 82, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Parallel generation must still preserve ascending srcset order.
+	for i := 1; i < len(res.WebP); i++ {
+		if res.WebP[i-1].Width >= res.WebP[i].Width {
+			t.Fatalf("webp widths not ascending: %+v", res.WebP)
+		}
+	}
+	if n := len(res.WebP); n == 0 || res.WebP[n-1].Width != 1600 {
+		t.Fatalf("expected the original width last, got %+v", res.WebP)
+	}
+}
+
+func TestProcessImageMetaCacheReuse(t *testing.T) {
+	root := t.TempDir()
+	cacheDir := filepath.Join(root, ".krate", "cache", "images")
+	srcPath := filepath.Join(root, "public", "photo.png")
+	_ = os.MkdirAll(filepath.Dir(srcPath), 0755)
+	writeTestPNG(t, srcPath, testImage(1600, 1000))
+
+	res1, err := ProcessImage(root, srcPath, 800, 500, 82, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metas, _ := filepath.Glob(filepath.Join(cacheDir, "*.meta.json"))
+	if len(metas) != 1 {
+		t.Fatalf("expected a cached meta file, got %v", metas)
+	}
+
+	// Deleting a variant forces a cache miss and regeneration.
+	victim := filepath.Join(cacheDir, filepath.Base(res1.WebP[0].FilePath))
+	if err := os.Remove(victim); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ProcessImage(root, srcPath, 800, 500, 82, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Errorf("deleted variant was not regenerated: %v", err)
+	}
+
+	// A different display size reuses the cached variants (same paths) and only
+	// recomputes the display box.
+	res2, err := ProcessImage(root, srcPath, 400, 0, 82, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res2.Width != 400 || res2.Height != 250 {
+		t.Errorf("display dims = %d/%d, want 400/250", res2.Width, res2.Height)
+	}
+	if len(res2.WebP) != len(res1.WebP) || res2.WebP[0].FilePath != res1.WebP[0].FilePath {
+		t.Errorf("cached variants not reused: %+v", res2.WebP)
+	}
+
+	// A different quality must not collide with the cached variants.
+	resQ, err := ProcessImage(root, srcPath, 800, 500, 60, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resQ.WebP[0].FilePath == res1.WebP[0].FilePath {
+		t.Errorf("quality not encoded in variant name: %s", resQ.WebP[0].FilePath)
+	}
+}

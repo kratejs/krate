@@ -4,17 +4,20 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	webpenc "github.com/skrashevich/go-webp"
+	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/webp"
 )
 
@@ -118,75 +121,43 @@ func hasAlpha(img image.Image) bool {
 	return false
 }
 
-func ResizeBilinear(img image.Image, targetW, targetH int) image.Image {
-	bounds := img.Bounds()
-	srcW := bounds.Dx()
-	srcH := bounds.Dy()
-
-	if targetW == srcW && targetH == srcH {
-		dst := image.NewRGBA(bounds)
-		draw.Draw(dst, bounds, img, bounds.Min, draw.Src)
-		return dst
+// resize scales img to targetW×targetH using Catmull-Rom resampling
+// (golang.org/x/image/draw). This replaces a hand-rolled bilinear loop with a
+// faster, higher-quality filter.
+func resize(img image.Image, targetW, targetH int) *image.RGBA {
+	if targetW < 1 {
+		targetW = 1
 	}
-
+	if targetH < 1 {
+		targetH = 1
+	}
 	dst := image.NewRGBA(image.Rect(0, 0, targetW, targetH))
-
-	for y := 0; y < targetH; y++ {
-		for x := 0; x < targetW; x++ {
-			srcXf := float64(x) * float64(srcW-1) / float64(targetW-1)
-			srcYf := float64(y) * float64(srcH-1) / float64(targetH-1)
-
-			x0 := int(srcXf)
-			y0 := int(srcYf)
-			x1 := x0 + 1
-			y1 := y0 + 1
-
-			if x1 >= srcW {
-				x1 = srcW - 1
-			}
-			if y1 >= srcH {
-				y1 = srcH - 1
-			}
-
-			fx := srcXf - float64(x0)
-			fy := srcYf - float64(y0)
-
-			c00 := img.At(bounds.Min.X+x0, bounds.Min.Y+y0)
-			c10 := img.At(bounds.Min.X+x1, bounds.Min.Y+y0)
-			c01 := img.At(bounds.Min.X+x0, bounds.Min.Y+y1)
-			c11 := img.At(bounds.Min.X+x1, bounds.Min.Y+y1)
-
-			r, g, b, a := bilinearBlend(c00, c10, c01, c11, fx, fy)
-			dst.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: a})
-		}
-	}
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), img, img.Bounds(), xdraw.Src, nil)
 	return dst
 }
 
-func bilinearBlend(c00, c10, c01, c11 color.Color, fx, fy float64) (uint8, uint8, uint8, uint8) {
-	r00, g00, b00, a00 := c00.RGBA()
-	r10, g10, b10, a10 := c10.RGBA()
-	r01, g01, b01, a01 := c01.RGBA()
-	r11, g11, b11, a11 := c11.RGBA()
-
-	topR := lerp(int(r00), int(r10), fx)
-	topG := lerp(int(g00), int(g10), fx)
-	topB := lerp(int(b00), int(b10), fx)
-	topA := lerp(int(a00), int(a10), fx)
-
-	botR := lerp(int(r01), int(r11), fx)
-	botG := lerp(int(g01), int(g11), fx)
-	botB := lerp(int(b01), int(b11), fx)
-	botA := lerp(int(a01), int(a11), fx)
-
-	return uint8(lerp(topR, botR, fy) >> 8),
-		uint8(lerp(topG, botG, fy) >> 8),
-		uint8(lerp(topB, botB, fy) >> 8),
-		uint8(lerp(topA, botA, fy) >> 8)
+// variantWorkers bounds per-image resize/encode concurrency. Page builds already
+// run in parallel, so keep this modest to avoid oversubscribing the CPU.
+func variantWorkers() int {
+	n := runtime.GOMAXPROCS(0)
+	if n > 4 {
+		n = 4
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
-func lerp(a, b int, t float64) int {
-	return int(float64(a)*(1-t) + float64(b)*t)
+// widthQuality lowers the encode quality for small variants (which are shown on
+// small screens and hide artifacts well), keeping larger variants at base.
+func widthQuality(base, width int) int {
+	if width < 768 {
+		if q := base - 8; q >= 50 {
+			return q
+		}
+	}
+	return base
 }
 
 // boxBlur applies a separable box blur to an RGBA image.
@@ -254,7 +225,7 @@ func GeneratePlaceholder(img image.Image) string {
 	if ph < 1 {
 		ph = 1
 	}
-	tiny := ResizeBilinear(img, pw, ph).(*image.RGBA)
+	tiny := resize(img, pw, ph)
 	blurred := boxBlur(tiny, 2)
 
 	var data []byte
@@ -346,12 +317,71 @@ func isPassthroughSrc(srcPath string) (bool, string) {
 	return ok, mime
 }
 
+// imageMeta is the cached outcome of processing one source image, stored beside
+// the variants so a later build can return the result without decoding, resizing
+// or re-encoding. Variants are named by (cacheKey, quality, width); the meta by
+// (cacheKey, quality).
+type imageMeta struct {
+	OrigW          int           `json:"origW"`
+	OrigH          int           `json:"origH"`
+	FallbackMime   string        `json:"fallbackMime"`
+	HasPlaceholder bool          `json:"hasPlaceholder"`
+	Placeholder    string        `json:"placeholder,omitempty"`
+	WebP           []SrcsetEntry `json:"webp"`
+	Fallback       []SrcsetEntry `json:"fallback"`
+}
+
+func imageMetaPath(outDir, cacheKey string, quality int) string {
+	return filepath.Join(outDir, fmt.Sprintf("%s_q%d.meta.json", cacheKey, quality))
+}
+
+// loadImageMeta returns a cached result for the source when the meta exists, the
+// requested placeholder is present, and every referenced variant file still
+// exists on disk.
+func loadImageMeta(outDir, cacheKey string, quality int, wantPlaceholder bool) (*ImageResult, bool) {
+	data, err := os.ReadFile(imageMetaPath(outDir, cacheKey, quality))
+	if err != nil {
+		return nil, false
+	}
+	var m imageMeta
+	if json.Unmarshal(data, &m) != nil || m.OrigW <= 0 || m.OrigH <= 0 {
+		return nil, false
+	}
+	if wantPlaceholder && !m.HasPlaceholder {
+		return nil, false
+	}
+	for _, e := range append(append([]SrcsetEntry{}, m.WebP...), m.Fallback...) {
+		if _, err := os.Stat(filepath.Join(outDir, filepath.Base(e.FilePath))); err != nil {
+			return nil, false
+		}
+	}
+	return &ImageResult{
+		WebP:         m.WebP,
+		Fallback:     m.Fallback,
+		Width:        m.OrigW,
+		Height:       m.OrigH,
+		FallbackMime: m.FallbackMime,
+		Placeholder:  m.Placeholder,
+	}, true
+}
+
+// displayDims applies a requested width/height while preserving aspect ratio.
+func displayDims(origW, origH, reqW, reqH int) (int, int) {
+	switch {
+	case reqW > 0:
+		return reqW, ComputeHeight(origW, origH, reqW)
+	case reqH > 0:
+		return ComputeHeight(origH, origW, reqH), reqH
+	default:
+		return origW, origH
+	}
+}
+
 func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder bool) (*ImageResult, error) {
 	if quality <= 0 {
 		quality = 82
 	}
 
-	origW, origH := 0, 0
 	if vector, mime := isPassthroughSrc(srcPath); vector {
 		return &ImageResult{
 			Width:        reqW,
@@ -361,26 +391,41 @@ func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder
 		}, nil
 	}
 
+	outDir := getCacheDir(root)
+
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading image %s: %w", srcPath, err)
+	}
+	cacheKey := ComputeCacheKey(data)
+
+	// Cache hit: reuse the previous result without decoding/resizing/encoding.
+	if res, ok := loadImageMeta(outDir, cacheKey, quality, wantPlaceholder); ok {
+		outW, outH := displayDims(res.Width, res.Height, reqW, reqH)
+		res.Width, res.Height = outW, outH
+		res.AspectRatio = aspectRatio(outW, outH)
+		// The placeholder is caller-gated: a source cached with a placeholder must
+		// not leak it into a usage that opted out (placeholder="empty").
+		if !wantPlaceholder {
+			res.Placeholder = ""
+		}
+		return res, nil
+	}
+
 	f, err := os.Open(srcPath)
 	if err != nil {
 		return nil, fmt.Errorf("opening image %s: %w", srcPath, err)
 	}
-	defer f.Close()
-
 	img, origFmt, err := DecodeImage(f)
+	_ = f.Close()
 	if err != nil {
 		return nil, fmt.Errorf("decoding image %s: %w", srcPath, err)
 	}
 
 	bounds := img.Bounds()
-	origW = bounds.Dx()
-	origH = bounds.Dy()
+	origW, origH := bounds.Dx(), bounds.Dy()
 
-	outDir := getCacheDir(root)
 	_ = os.MkdirAll(outDir, 0755)
-
-	data, _ := os.ReadFile(srcPath)
-	cacheKey := ComputeCacheKey(data)
 
 	alpha := hasAlpha(img)
 	fallbackMime := "image/jpeg"
@@ -391,48 +436,69 @@ func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder
 	}
 
 	srcsetWidths := ComputeSrcsetWidths(origW)
-	var webpSet, fallbackSet []SrcsetEntry
 
-	for _, sw := range srcsetWidths {
-		sh := ComputeHeight(origW, origH, sw)
-		resized := ResizeBilinear(img, sw, sh)
-
-		webpBytes, err := EncodeWebP(resized, quality)
-		if err != nil {
-			return nil, fmt.Errorf("encoding %dw webp: %w", sw, err)
-		}
-		webpName := fmt.Sprintf("%s_%d.webp", cacheKey, sw)
-		if err := writeFileAtomic(filepath.Join(outDir, webpName), webpBytes); err != nil {
-			return nil, fmt.Errorf("writing %s: %w", webpName, err)
-		}
-		webpSet = append(webpSet, SrcsetEntry{Width: sw, FilePath: outputPrefix + "/" + webpName})
-
-		var fbBytes []byte
-		if fallbackExt == ".png" {
-			fbBytes, err = EncodePNG(resized)
-		} else {
-			fbBytes, err = EncodeJPEG(resized, quality)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("encoding %dw fallback: %w", sw, err)
-		}
-		fbName := fmt.Sprintf("%s_%d%s", cacheKey, sw, fallbackExt)
-		if err := writeFileAtomic(filepath.Join(outDir, fbName), fbBytes); err != nil {
-			return nil, fmt.Errorf("writing %s: %w", fbName, err)
-		}
-		fallbackSet = append(fallbackSet, SrcsetEntry{Width: sw, FilePath: outputPrefix + "/" + fbName})
+	// Generate variants in parallel (bounded): decode once, then resize + encode
+	// each width concurrently. img is only read, so concurrent Scale is safe.
+	type variantResult struct {
+		webp SrcsetEntry
+		fb   SrcsetEntry
+		err  error
 	}
+	results := make([]variantResult, len(srcsetWidths))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, variantWorkers())
+	for i, sw := range srcsetWidths {
+		i, sw := i, sw
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
 
-	// Display dimensions: honor the requested width (or height) but always
-	// preserve the image's intrinsic aspect ratio so the layout box matches the
-	// rendered pixels (no distortion) and CLS is mitigated via aspect-ratio.
-	outW, outH := origW, origH
-	if reqW > 0 {
-		outW = reqW
-		outH = ComputeHeight(origW, origH, reqW)
-	} else if reqH > 0 {
-		outH = reqH
-		outW = ComputeHeight(origH, origW, reqH)
+			sh := ComputeHeight(origW, origH, sw)
+			resized := resize(img, sw, sh)
+			q := widthQuality(quality, sw)
+
+			webpBytes, werr := EncodeWebP(resized, q)
+			if werr != nil {
+				results[i].err = fmt.Errorf("encoding %dw webp: %w", sw, werr)
+				return
+			}
+			webpName := fmt.Sprintf("%s_q%d_%d.webp", cacheKey, quality, sw)
+			if werr := writeFileAtomic(filepath.Join(outDir, webpName), webpBytes); werr != nil {
+				results[i].err = fmt.Errorf("writing %s: %w", webpName, werr)
+				return
+			}
+			results[i].webp = SrcsetEntry{Width: sw, FilePath: outputPrefix + "/" + webpName}
+
+			var fbBytes []byte
+			var ferr error
+			if fallbackExt == ".png" {
+				fbBytes, ferr = EncodePNG(resized)
+			} else {
+				fbBytes, ferr = EncodeJPEG(resized, q)
+			}
+			if ferr != nil {
+				results[i].err = fmt.Errorf("encoding %dw fallback: %w", sw, ferr)
+				return
+			}
+			fbName := fmt.Sprintf("%s_q%d_%d%s", cacheKey, quality, sw, fallbackExt)
+			if ferr := writeFileAtomic(filepath.Join(outDir, fbName), fbBytes); ferr != nil {
+				results[i].err = fmt.Errorf("writing %s: %w", fbName, ferr)
+				return
+			}
+			results[i].fb = SrcsetEntry{Width: sw, FilePath: outputPrefix + "/" + fbName}
+		}()
+	}
+	wg.Wait()
+
+	var webpSet, fallbackSet []SrcsetEntry
+	for i := range results {
+		if results[i].err != nil {
+			return nil, results[i].err
+		}
+		webpSet = append(webpSet, results[i].webp)
+		fallbackSet = append(fallbackSet, results[i].fb)
 	}
 
 	placeholder := ""
@@ -440,17 +506,28 @@ func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder
 		placeholder = GeneratePlaceholder(img)
 	}
 
-	aspect := 1.0
-	if outH > 0 {
-		aspect = float64(outW) / float64(outH)
+	// Persist the result so a later build skips decode/resize/encode.
+	meta := imageMeta{
+		OrigW:          origW,
+		OrigH:          origH,
+		FallbackMime:   fallbackMime,
+		HasPlaceholder: placeholder != "",
+		Placeholder:    placeholder,
+		WebP:           webpSet,
+		Fallback:       fallbackSet,
 	}
+	if metaBytes, merr := json.Marshal(meta); merr == nil {
+		_ = writeFileAtomic(imageMetaPath(outDir, cacheKey, quality), metaBytes)
+	}
+
+	outW, outH := displayDims(origW, origH, reqW, reqH)
 
 	return &ImageResult{
 		WebP:         webpSet,
 		Fallback:     fallbackSet,
 		Width:        outW,
 		Height:       outH,
-		AspectRatio:  aspect,
+		AspectRatio:  aspectRatio(outW, outH),
 		FallbackMime: fallbackMime,
 		Placeholder:  placeholder,
 	}, nil
