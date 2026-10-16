@@ -1,135 +1,73 @@
 import './navigation-menu.css';
-import { createSignal, createEffect, onCleanup } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+
+const NavigationMenuCtx = createScope<string | null>();
 
 export interface NavigationMenuProps {
+  label?: string;
   children?: any;
 }
 
+/** Navigation menu. Zero JS: one radio group whose selected option is open. */
 export function NavigationMenu(props: NavigationMenuProps) {
+  const open = createCSSGroup<string>(null, { as: 'menu', label: props.label });
   return (
-    <nav class="krate-navigation-menu" role="navigation">
-      {props.children}
-    </nav>
-  );
-}
-
-export interface NavigationMenuListProps {
-  children?: any;
-}
-
-export function NavigationMenuList(props: NavigationMenuListProps) {
-  return (
-    <ul class="krate-navigation-menu-list">
-      {props.children}
-    </ul>
-  );
-}
-
-export interface NavigationMenuItemProps {
-  children?: any;
-}
-
-export function NavigationMenuItem(props: NavigationMenuItemProps) {
-  var [open, setOpen] = createSignal(false);
-  var rootRef: HTMLElement | null = null;
-
-  function registerCloseListener(root: HTMLElement) {
-    if ((root as any).__krateNavMenuClose) return;
-    (root as any).__krateNavMenuClose = true;
-    root.addEventListener("krate:navigation-menu-close", function () {
-      setOpen(false);
-    });
-  }
-
-  function handleClick(e: MouseEvent) {
-    var root = (e.target as HTMLElement).closest(".krate-navigation-menu-item") as HTMLElement;
-    if (root) {
-      rootRef = root;
-      registerCloseListener(root);
-    }
-
-    var trigger = (e.target as HTMLElement).closest("[data-krate-navigation-menu-trigger]");
-    if (trigger) {
-      var next = !open();
-      if (next && root) {
-        var list = root.closest(".krate-navigation-menu-list") as HTMLElement;
-        if (list) {
-          var items = list.querySelectorAll(".krate-navigation-menu-item");
-          for (var i = 0; i < items.length; i++) {
-            var sibling = items[i] as HTMLElement;
-            if (sibling !== root && sibling.getAttribute("data-state") === "open") {
-              sibling.dispatchEvent(new CustomEvent("krate:navigation-menu-close"));
-            }
-          }
-        }
-      }
-      setOpen(next);
-      return;
-    }
-  }
-
-  return (
-    <li class="krate-navigation-menu-item" data-state={open() ? "open" : "closed"} onClick={handleClick}>
-      {props.children}
-    </li>
+    <NavigationMenuCtx.Provider value={open}>
+      <div class="krate-navigation-menu">{props.children}</div>
+    </NavigationMenuCtx.Provider>
   );
 }
 
 export interface NavigationMenuTriggerProps {
+  value?: string;
   children?: any;
 }
 
+/** @deprecated Use `NavigationMenu.Trigger` instead. */
 export function NavigationMenuTrigger(props: NavigationMenuTriggerProps) {
+  const open = NavigationMenuCtx.use();
   return (
-    <button class="krate-navigation-menu-trigger" type="button" aria-haspopup="menu" data-krate-navigation-menu-trigger="true">
+    <button class="krate-navigation-menu-trigger" type="button" {...open.trigger(props.value)}>
       {props.children}
-      <svg class="krate-navigation-menu-trigger-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="m6 9 6 6 6-6"/>
-      </svg>
     </button>
   );
 }
 
 export interface NavigationMenuContentProps {
+  value?: string;
   children?: any;
 }
 
+/** @deprecated Use `NavigationMenu.Content` instead. */
 export function NavigationMenuContent(props: NavigationMenuContentProps) {
+  const open = NavigationMenuCtx.use();
   return (
-    <div class="krate-navigation-menu-content" data-krate-navigation-menu-content="true">
+    <div class="krate-navigation-menu-content" {...open.panel(props.value)}>
       {props.children}
     </div>
   );
 }
 
 export interface NavigationMenuLinkProps {
-  children?: any;
   href?: string;
+  children?: any;
 }
 
+/** @deprecated Use `NavigationMenu.Link` instead. */
 export function NavigationMenuLink(props: NavigationMenuLinkProps) {
   return (
-    <a class="krate-navigation-menu-link" href={props.href || "#"}>
+    <a class="krate-navigation-menu-link" href={props.href}>
       {props.children}
     </a>
   );
 }
 
-export interface NavigationMenuIndicatorProps {
+export interface NavigationMenu {
+  Trigger: typeof NavigationMenuTrigger;
+  Content: typeof NavigationMenuContent;
+  Link: typeof NavigationMenuLink;
 }
 
-export function NavigationMenuIndicator(props: NavigationMenuIndicatorProps) {
-  return <div class="krate-navigation-menu-indicator" />;
-}
-
-export interface NavigationMenuViewportProps {
-  children?: any;
-}
-
-export function NavigationMenuViewport(props: NavigationMenuViewportProps) {
-  return (
-    <div class="krate-navigation-menu-viewport">
-      {props.children}
-    </div>
-  );
-}
+NavigationMenu.Trigger = NavigationMenuTrigger;
+NavigationMenu.Content = NavigationMenuContent;
+NavigationMenu.Link = NavigationMenuLink;

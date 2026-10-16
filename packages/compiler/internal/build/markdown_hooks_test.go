@@ -11,7 +11,7 @@ import (
 
 // TestMarkdownPageRouting verifies AfterMarkdownParse runs for markdown pages in
 // src/pages. Markdown pages flow through the normal bundler/emitter pipeline (the
-// bundler synthesizes an MDX-style TSX bundle), so the hook previously never ran —
+// bundler synthesizes an MDX-style TSX bundle), so the hook previously never ran -
 // regression for the "AfterMarkdownParse wiring" report item.
 func TestMarkdownPageRouting(t *testing.T) {
 	root := t.TempDir()
@@ -33,7 +33,7 @@ func TestMarkdownPageRouting(t *testing.T) {
 	// Use a JS community plugin advertising an AfterMarkdownParse hook so it
 	// runs through the same community-plugin path as the broken-Go test above.
 	pluginDir := filepath.Join(root, "plugins", "markdown-wrapsub")
-	os.MkdirAll(pluginDir, 0755)
+	_ = os.MkdirAll(pluginDir, 0755)
 	src := `
 export default {
   name: "markdown-wrapsub",

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -12,10 +13,14 @@ type Manifest struct {
 	Pages             []PageMeta             `json:"pages"`
 	Stylesheet        string                 `json:"stylesheet,omitempty"`        // global CSS filename
 	RuntimeJS         string                 `json:"runtimeJS,omitempty"`         // shared runtime chunk path (relative to outDir)
-	Routes            map[string]PageMeta    `json:"-"`                           // URL route → PageMeta (in-memory only)
+	Routes            map[string]PageMeta    `json:"-"`                           // URL route -> PageMeta (in-memory only)
 	RuntimeComponents []RuntimeComponentMeta `json:"runtimeComponents,omitempty"` // runtime server components
 	// Regions maps each server-rendered page route to its dynamic regions.
 	Regions map[string][]RegionMeta `json:"regions,omitempty"`
+	// StaticOnlyRoutes lists dynamic route patterns (e.g. "/blog/[slug]") whose
+	// parameters are closed - the server must 404 for params not baked at build
+	// time. Populated from `output: "static"` or `dynamicParams = false`.
+	StaticOnlyRoutes []string `json:"staticOnlyRoutes,omitempty"`
 }
 
 // RuntimeComponentMeta describes a compiled runtime component bundle.
@@ -36,10 +41,10 @@ type ManifestPage struct {
 
 // ServerManifest is the on-disk format read by the Node.js renderer server.
 type ServerManifest struct {
-	Pages             []ManifestPage         `json:"pages"`
-	Stylesheet        string                 `json:"stylesheet,omitempty"`
-	RuntimeJS         string                 `json:"runtimeJS,omitempty"`         // shared runtime chunk path
-	RuntimeComponents []RuntimeComponentMeta `json:"runtimeComponents,omitempty"` // runtime server components
+	Pages             []ManifestPage          `json:"pages"`
+	Stylesheet        string                  `json:"stylesheet,omitempty"`
+	RuntimeJS         string                  `json:"runtimeJS,omitempty"`         // shared runtime chunk path
+	RuntimeComponents []RuntimeComponentMeta  `json:"runtimeComponents,omitempty"` // runtime server components
 	Regions           map[string][]RegionMeta `json:"regions,omitempty"`
 }
 
@@ -52,15 +57,17 @@ func BuildManifest(results []*PageResult, cssFile string, runtimeJS string) *Man
 	}
 
 	for _, r := range results {
-		// Skip error pages (404/500) from manifest — they're served directly
+		// Skip error pages (404/500) from manifest - they're served directly
 		if r.IsErrorPage {
 			continue
 		}
 		meta := PageMeta{
-			Route:      routeFromOutName(r.OutName),
-			Source:     r.SourcePath,
-			Mode:       r.Mode,
-			Revalidate: r.Revalidate,
+			Route:         routeFromOutName(r.OutName),
+			Source:        r.SourcePath,
+			Mode:          r.Mode,
+			Revalidate:    r.Revalidate,
+			DynamicParams: r.DynamicParams,
+			StaticOnly:    r.StaticOnly,
 		}
 		m.Pages = append(m.Pages, meta)
 		m.Routes[meta.Route] = meta
@@ -79,11 +86,22 @@ func BuildManifest(results []*PageResult, cssFile string, runtimeJS string) *Man
 					SourcePath: reg.SourcePath,
 					Props:      reg.Props,
 					Suspense:   reg.Suspense,
+					Runtime:    reg.Runtime,
+					Revalidate: reg.Revalidate,
 				})
 			}
 			m.Regions[meta.Route] = regs
 		}
 	}
+
+	// Pages are collected in concurrent-build completion order; sort by route so
+	// manifest.json is byte-identical across builds (stable output hashing).
+	sort.Slice(m.Pages, func(i, j int) bool {
+		if m.Pages[i].Route != m.Pages[j].Route {
+			return m.Pages[i].Route < m.Pages[j].Route
+		}
+		return m.Pages[i].Source < m.Pages[j].Source
+	})
 
 	return m
 }
@@ -95,11 +113,7 @@ func (m *Manifest) SetRuntimeComponents(bundles []RuntimeComponentBundle) {
 	}
 	m.RuntimeComponents = make([]RuntimeComponentMeta, 0, len(bundles))
 	for _, b := range bundles {
-		m.RuntimeComponents = append(m.RuntimeComponents, RuntimeComponentMeta{
-			Name:       b.Name,
-			SourcePath: b.SourcePath,
-			BundlePath: b.BundlePath,
-		})
+		m.RuntimeComponents = append(m.RuntimeComponents, RuntimeComponentMeta(b))
 	}
 	linkRegionBundles(m, bundles)
 }
@@ -108,7 +122,7 @@ func (m *Manifest) SetRuntimeComponents(bundles []RuntimeComponentBundle) {
 // runtime component bundle that backs it. A suspense-primary region renders
 // that single runtime component, so the per-runtime-component bundle (a
 // self-contained __krate_render IIFE) is exactly the renderer the sidecar
-// needs — no per-region esbuild pass required.
+// needs - no per-region esbuild pass required.
 func linkRegionBundles(m *Manifest, bundles []RuntimeComponentBundle) {
 	if m == nil || len(bundles) == 0 {
 		return

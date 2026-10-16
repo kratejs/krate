@@ -2,11 +2,12 @@ package parser
 
 import (
 	"fmt"
+	"html"
 	"strings"
-	"unicode"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 )
 
@@ -19,11 +20,54 @@ type Parser struct {
 	errs     []error
 	Filename string
 	srcLines []string
+
+	// droppedTypes counts type-only constructs the parser intentionally
+	// discards (interfaces, type aliases, enums, classes, annotations,
+	// generics, `as`/angle-bracket casts). A non-zero count means the AST
+	// cannot reproduce the original source - used by tooling that round-trips
+	// the AST back to source (see internal/astprint and the MCP edit_ast tool).
+	droppedTypes int
+
+	// noIn disables `in` as a binary operator while parsing a `for` statement's
+	// initializer, so `for (x in obj)` is not consumed as `x in obj` and the
+	// for-in branch is reachable. It is set only around that init expression.
+	noIn bool
+
+	// arrowFrom is a lazily built index: arrowFrom[i] is the index of the first
+	// ARROW token at or after i, or -1. It makes isArrowFunction's "is there an
+	// arrow ahead" check O(1) instead of O(n) per call.
+	arrowFrom []int
+
+	// depth tracks the recursive-descent nesting depth so pathologically nested
+	// input (thousands of unbalanced parens/braces/JSX tags) is rejected with a
+	// diagnostic instead of exhausting the goroutine stack.
+	depth int
 }
+
+// maxParseDepth bounds recursive-descent nesting. Real code stays far below it;
+// a fuzzer/attacker input that exceeds it is a hard parse error.
+const maxParseDepth = 10000
+
+// parseDepthError is the sentinel panic used to unwind out of deep recursion; it
+// is recovered in ParseProgram.
+type parseDepthError struct{}
+
+// enter increments the nesting depth and aborts parsing when it is exceeded.
+func (p *Parser) enter() {
+	p.depth++
+	if p.depth > maxParseDepth {
+		panic(parseDepthError{})
+	}
+}
+
+func (p *Parser) leave() { p.depth-- }
 
 func New(tokens []lexer.Token) *Parser {
 	return &Parser{tokens: tokens}
 }
+
+// DroppedTypes reports how many type-only constructs the parse discarded.
+func (p *Parser) DroppedTypes() int { return p.droppedTypes }
 
 func (p *Parser) SetSource(src string) {
 	p.srcLines = strings.Split(src, "\n")
@@ -134,6 +178,32 @@ func (p *Parser) next() lexer.Token {
 	return tok
 }
 
+// newlineBefore reports whether a line break separates the given (already
+// consumed) token from the upcoming token. Used for automatic semicolon
+// insertion (ASI) in restricted productions (return/throw/break/continue and
+// postfix ++/--).
+func (p *Parser) newlineBefore(prev lexer.Token) bool {
+	next := p.peek()
+	return next.Kind != lexer.EOF && next.Line > prev.Line
+}
+
+// newlineAfterPrev reports whether a line break separates the token before pos
+// from the token at pos. Used to decide whether a postfix operator attaches to
+// the preceding operand.
+func (p *Parser) newlineAfterPrev(pos int) bool {
+	if pos <= 0 || pos >= len(p.tokens) {
+		return false
+	}
+	j := pos - 1
+	for j >= 0 && p.tokens[j].Kind == lexer.Whitespace {
+		j--
+	}
+	if j < 0 {
+		return false
+	}
+	return p.tokens[pos].Line > p.tokens[j].Line
+}
+
 func (p *Parser) match(kind lexer.Kind) bool {
 	if p.peek().Kind == kind {
 		p.next()
@@ -217,8 +287,17 @@ var precMap = map[lexer.Kind]int{
 	lexer.As:           precAs,
 }
 
-func (p *Parser) ParseProgram() *ast.Program {
-	prog := &ast.Program{}
+func (p *Parser) ParseProgram() (prog *ast.Program) {
+	prog = &ast.Program{}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(parseDepthError); ok {
+				p.errs = append(p.errs, fmt.Errorf("input nesting too deep (exceeded %d levels)", maxParseDepth))
+				return
+			}
+			panic(r)
+		}
+	}()
 	for p.peek().Kind != lexer.EOF {
 		pos := p.pos
 		stmt := p.parseStmt()
@@ -233,6 +312,13 @@ func (p *Parser) ParseProgram() *ast.Program {
 }
 
 func (p *Parser) parseStmt() ast.Stmt {
+	p.enter()
+	s := p.parseStmtInner()
+	p.leave()
+	return s
+}
+
+func (p *Parser) parseStmtInner() ast.Stmt {
 	// Bare `async function name() {...}` declaration at statement level (not
 	// preceded by `export`). The `export async function` combos are handled in
 	// parseExport; here we consume the `async` keyword and delegate to
@@ -291,7 +377,9 @@ func (p *Parser) parseStmt() ast.Stmt {
 	case lexer.Enum_:
 		return p.parseEnumDecl()
 	case lexer.Type_:
-		if p.pos+1 < len(p.tokens) && isIdentifierToken(p.tokens[p.pos+1].Kind) {
+		// peekN(1) skips Whitespace, so the lookahead sees the alias name even
+		// when `type` is followed by a space (the common case).
+		if isIdentifierToken(p.peekN(1)) {
 			return p.parseTypeAliasDecl()
 		}
 		p.next()
@@ -326,6 +414,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 }
 
 func (p *Parser) parseClassDecl() ast.Stmt {
+	p.droppedTypes++
 	p.next()
 	if isIdentifierToken(p.peek().Kind) {
 		p.next()
@@ -349,9 +438,69 @@ func (p *Parser) parseClassDecl() ast.Stmt {
 }
 
 func (p *Parser) parseInterfaceDecl() ast.Stmt {
+	p.droppedTypes++
 	p.next()
 	if isIdentifierToken(p.peek().Kind) {
 		p.next()
+	}
+	// Skip generic type parameters (`interface A<T, U extends V> ...`) so the
+	// heritage clause and body are reached.
+	if p.peek().Kind == lexer.LT {
+		depth := 0
+		for p.peek().Kind != lexer.EOF {
+			switch p.peek().Kind {
+			case lexer.LT:
+				depth++
+			case lexer.GT:
+				depth--
+				if depth == 0 {
+					p.next()
+					goto heritage
+				}
+			case lexer.SHR: // `>>` closes two levels
+				depth -= 2
+				p.next()
+				if depth <= 0 {
+					goto heritage
+				}
+				continue
+			}
+			p.next()
+		}
+	}
+heritage:
+	// `interface X extends A, B<C> ...` - skip the heritage clause up to the
+	// body brace. Without this the `extends` clause is parsed as an expression
+	// statement and the interface body's `?:` members error.
+	if p.match(lexer.Extends_) {
+		angle, paren, bracket := 0, 0, 0
+		for p.peek().Kind != lexer.EOF {
+			k := p.peek().Kind
+			if k == lexer.LBRACE && angle == 0 && paren == 0 && bracket == 0 {
+				break
+			}
+			switch k {
+			case lexer.LT:
+				angle++
+			case lexer.GT:
+				if angle > 0 {
+					angle--
+				}
+			case lexer.LPAREN:
+				paren++
+			case lexer.RPAREN:
+				if paren > 0 {
+					paren--
+				}
+			case lexer.LBRACKET:
+				bracket++
+			case lexer.RBRACKET:
+				if bracket > 0 {
+					bracket--
+				}
+			}
+			p.next()
+		}
 	}
 	if p.peek().Kind == lexer.LBRACE {
 		p.next()
@@ -369,6 +518,7 @@ func (p *Parser) parseInterfaceDecl() ast.Stmt {
 }
 
 func (p *Parser) parseTypeAliasDecl() ast.Stmt {
+	p.droppedTypes++
 	p.next()
 	if isIdentifierToken(p.peek().Kind) {
 		p.next()
@@ -381,6 +531,7 @@ func (p *Parser) parseTypeAliasDecl() ast.Stmt {
 }
 
 func (p *Parser) parseEnumDecl() ast.Stmt {
+	p.droppedTypes++
 	p.next()
 	if isIdentifierToken(p.peek().Kind) {
 		p.next()
@@ -414,7 +565,7 @@ func (p *Parser) parseImport() ast.Stmt {
 	pos := tokPos(p.next())
 	stmt := &ast.ImportStmt{Position: pos}
 
-	// Skip `type` in `import type {...}` — type-only imports carry no runtime
+	// Skip `type` in `import type {...}` - type-only imports carry no runtime
 	// binding, so they can be ignored by the hydration pipeline.
 	if isIdentifierToken(p.peek().Kind) && p.peek().Value == "type" {
 		p.next()
@@ -456,6 +607,19 @@ func (p *Parser) parseNamedImports(named *[]ast.NamedImport) {
 		if p.peek().Kind == lexer.RBRACE || p.peek().Kind == lexer.EOF {
 			break
 		}
+		// Skip an inline `type` modifier (`import { type Foo }`). Type-only
+		// specifiers carry no runtime binding, so the whole entry is dropped.
+		if isIdentifierToken(p.peek().Kind) && p.peek().Value == "type" && isIdentifierToken(p.peekN(1)) {
+			p.next() // consume `type`
+			p.next() // consume the type name
+			if p.match(lexer.As) && isIdentifierToken(p.peek().Kind) {
+				p.next()
+			}
+			if !p.match(lexer.COMMA) {
+				break
+			}
+			continue
+		}
 		if isIdentifierToken(p.peek().Kind) {
 			remote := p.next().Value
 			local := remote
@@ -473,6 +637,17 @@ func (p *Parser) parseNamedImports(named *[]ast.NamedImport) {
 	p.expect(lexer.RBRACE)
 }
 
+// decodeStringToken turns a lexer String token (raw source text including the
+// delimiter quotes) into its runtime value: the delimiters are stripped and
+// escape sequences are decoded. JSX attribute strings intentionally do NOT use
+// this - JSX does not process backslash escapes.
+func decodeStringToken(raw string) string {
+	if len(raw) >= 2 {
+		raw = raw[1 : len(raw)-1]
+	}
+	return escape.UnescapeJSString(raw)
+}
+
 func (p *Parser) parseForStmt() ast.Stmt {
 	pos := tokPos(p.next())
 	p.expect(lexer.LPAREN)
@@ -482,7 +657,12 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		if p.peek().Kind == lexer.Let_ || p.peek().Kind == lexer.Var_ || p.peek().Kind == lexer.Const_ {
 			init = p.parseVarStmt()
 		} else {
+			// Bare init expression: block `in` so `for (x in obj)` leaves the
+			// `in` for the for-in branch below instead of parsing `x in obj`.
+			prevNoIn := p.noIn
+			p.noIn = true
 			expr := p.parseExpr(precLowest)
+			p.noIn = prevNoIn
 			if expr != nil {
 				init = &ast.ExprStmt{Position: expr.Pos(), Expression: expr}
 			}
@@ -491,11 +671,22 @@ func (p *Parser) parseForStmt() ast.Stmt {
 
 	if p.peek().Kind == lexer.In_ || p.peek().Kind == lexer.Of {
 		isForOf := p.peek().Kind == lexer.Of
+		keyword := ""
+		if vs, ok := init.(*ast.VarStmt); ok {
+			switch vs.Kind {
+			case ast.VarConst:
+				keyword = "const"
+			case ast.VarLet:
+				keyword = "let"
+			default:
+				keyword = "var"
+			}
+		}
 		p.next()
 		right := p.parseExpr(precLowest)
 		p.expect(lexer.RPAREN)
-		body := p.parseBlock()
-		return &ast.ForInStmt{Position: pos, Left: forInitToExpr(init), Right: right, Body: body, IsForOf: isForOf}
+		body := p.parseBlockOrStmt()
+		return &ast.ForInStmt{Position: pos, Left: forInitToExpr(init), Right: right, Body: body, IsForOf: isForOf, Keyword: keyword}
 	}
 
 	p.match(lexer.SEMI)
@@ -512,7 +703,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	}
 	p.expect(lexer.RPAREN)
 
-	body := p.parseBlock()
+	body := p.parseBlockOrStmt()
 	return &ast.ForStmt{Position: pos, Init: init, Test: test, Update: update, Body: body}
 }
 
@@ -536,13 +727,13 @@ func (p *Parser) parseWhileStmt() ast.Stmt {
 	p.expect(lexer.LPAREN)
 	test := p.parseExpr(precLowest)
 	p.expect(lexer.RPAREN)
-	body := p.parseBlock()
+	body := p.parseBlockOrStmt()
 	return &ast.WhileStmt{Position: pos, Test: test, Body: body}
 }
 
 func (p *Parser) parseDoWhileStmt() ast.Stmt {
 	pos := tokPos(p.next())
-	body := p.parseBlock()
+	body := p.parseBlockOrStmt()
 	p.expect(lexer.While_)
 	p.expect(lexer.LPAREN)
 	test := p.parseExpr(precLowest)
@@ -619,16 +810,24 @@ func (p *Parser) parseTryStmt() ast.Stmt {
 }
 
 func (p *Parser) parseThrowStmt() ast.Stmt {
-	pos := tokPos(p.next())
+	kw := p.next()
+	pos := tokPos(kw)
+	// A line break after `throw` is a syntax error in JS; emitting a
+	// diagnostic is clearer than silently parsing across the newline.
+	if p.newlineBefore(kw) {
+		p.errWithMsg("illegal newline after `throw`", "`throw` and its expression must be on the same line")
+	}
 	value := p.parseExpr(precLowest)
 	p.match(lexer.SEMI)
 	return &ast.ThrowStmt{Position: pos, Value: value}
 }
 
 func (p *Parser) parseBreakStmt() ast.Stmt {
-	pos := tokPos(p.next())
+	kw := p.next()
+	pos := tokPos(kw)
 	var label string
-	if isIdentifierToken(p.peek().Kind) {
+	// ASI: a label must be on the same line as `break`.
+	if !p.newlineBefore(kw) && isIdentifierToken(p.peek().Kind) {
 		label = p.next().Value
 	}
 	p.match(lexer.SEMI)
@@ -636,9 +835,10 @@ func (p *Parser) parseBreakStmt() ast.Stmt {
 }
 
 func (p *Parser) parseContinueStmt() ast.Stmt {
-	pos := tokPos(p.next())
+	kw := p.next()
+	pos := tokPos(kw)
 	var label string
-	if isIdentifierToken(p.peek().Kind) {
+	if !p.newlineBefore(kw) && isIdentifierToken(p.peek().Kind) {
 		label = p.next().Value
 	}
 	p.match(lexer.SEMI)
@@ -676,9 +876,15 @@ func (p *Parser) parseExport() ast.Stmt {
 	case lexer.Type_:
 		exp.Declaration = p.parseTypeAliasDecl()
 	case lexer.STAR:
-		// export * from 'source'
+		// export * from 'source'   or   export * as Name from 'source'
 		p.next()
 		exp.StarReexport = true
+		if p.match(lexer.As) && isIdentifierToken(p.peek().Kind) {
+			// `export * as Name from 'x'` - a namespace re-export. Record the
+			// namespace binding so downstream alias resolution can address
+			// `Name.<Export>` (mirrors `import * as Name`).
+			exp.Namespace = p.next().Value
+		}
 		if p.match(lexer.From) {
 			if p.peek().Kind == lexer.String {
 				exp.ReexportSource = p.next().Value
@@ -688,7 +894,17 @@ func (p *Parser) parseExport() ast.Stmt {
 		}
 		p.match(lexer.SEMI)
 	case lexer.LBRACE:
-		// export { name } from 'source' — named re-export
+		if exp.Default {
+			// `export default { ... }` is an object-literal expression, not a
+			// named re-export. Fall through to expression parsing below.
+			expr := p.parseExpr(precLowest)
+			if expr != nil {
+				exp.Declaration = &ast.ExprStmt{Expression: expr}
+			}
+			p.match(lexer.SEMI)
+			break
+		}
+		// export { name } from 'source' - named re-export
 		names := p.parseExportNames()
 		if p.match(lexer.From) && p.peek().Kind == lexer.String {
 			exp.ReexportSource = p.next().Value
@@ -696,7 +912,24 @@ func (p *Parser) parseExport() ast.Stmt {
 		}
 		p.match(lexer.SEMI)
 	default:
-		if isIdentifierToken(p.peek().Kind) {
+		if exp.Default {
+			// `export default <expression>` - object/call/literal/JSX/identifier.
+			// Previously non-identifier expression defaults were dropped
+			// silently; represent them as an ExprStmt so config descriptors
+			// (e.g. `export default defineContent({...})`) survive parsing.
+			// A bare identifier is recorded as Local so the annotator can
+			// resolve the default component name.
+			if p.peek().Kind == lexer.EOF {
+				break
+			}
+			expr := p.parseExpr(precLowest)
+			if id, ok := expr.(*ast.Identifier); ok {
+				exp.Local = id.Name
+			} else if expr != nil {
+				exp.Declaration = &ast.ExprStmt{Expression: expr}
+			}
+			p.match(lexer.SEMI)
+		} else if isIdentifierToken(p.peek().Kind) {
 			exp.Local = p.next().Value
 			p.match(lexer.SEMI)
 		} else {
@@ -800,10 +1033,14 @@ func (p *Parser) parseFnDecl() ast.Stmt {
 }
 
 func (p *Parser) parseReturn() ast.Stmt {
-	pos := tokPos(p.next())
+	kw := p.next()
+	pos := tokPos(kw)
 	stmt := &ast.ReturnStmt{Position: pos}
 
-	if p.peek().Kind != lexer.SEMI && p.peek().Kind != lexer.RBRACE && p.peek().Kind != lexer.EOF {
+	// ASI: a line break after `return` ends the statement, so the following
+	// token starts a new statement (JS restricted production).
+	if !p.newlineBefore(kw) &&
+		p.peek().Kind != lexer.SEMI && p.peek().Kind != lexer.RBRACE && p.peek().Kind != lexer.EOF {
 		stmt.Value = p.parseExpr(precLowest)
 	}
 
@@ -848,6 +1085,21 @@ func (p *Parser) parseBlock() []ast.Stmt {
 	body := p.parseStmtList(lexer.RBRACE)
 	p.expect(lexer.RBRACE)
 	return body
+}
+
+// parseBlockOrStmt parses a control-flow body that may be either a
+// brace-delimited block or a single unbraced statement (`for (...) x++;`,
+// `while (...) if (y) z();`). The single statement is wrapped in a one-element
+// list so callers keep the []Stmt shape.
+func (p *Parser) parseBlockOrStmt() []ast.Stmt {
+	if p.peek().Kind == lexer.LBRACE {
+		return p.parseBlock()
+	}
+	stmt := p.parseStmt()
+	if stmt == nil {
+		return nil
+	}
+	return []ast.Stmt{stmt}
 }
 
 func (p *Parser) parseStmtList(end lexer.Kind) []ast.Stmt {
@@ -900,6 +1152,11 @@ func (p *Parser) parseArrayPatternInto(sb *strings.Builder, names *[]string, res
 		if p.peek().Kind == lexer.SPREAD {
 			p.next()
 			sb.WriteString("...")
+			// A trailing `...rest` records its binding in rest so consumers
+			// (sigutil) can distinguish the rest element from normal names.
+			if isIdentifierToken(p.peek().Kind) && rest != nil {
+				*rest = p.peek().Value
+			}
 			if !p.parsePatternElement(sb, names, rest) {
 				p.next()
 			}
@@ -929,19 +1186,27 @@ func (p *Parser) parseObjectPatternInto(sb *strings.Builder, names *[]string, re
 		if p.peek().Kind == lexer.SPREAD {
 			p.next()
 			sb.WriteString("...")
+			// Record the trailing object rest binding name.
+			if isIdentifierToken(p.peek().Kind) && rest != nil {
+				*rest = p.peek().Value
+			}
 			if !p.parsePatternElement(sb, names, rest) {
 				p.next()
 			}
 		} else if isIdentifierToken(p.peek().Kind) || p.peek().Kind == lexer.String || p.peek().Kind == lexer.Number {
 			key := p.next()
-			sb.WriteString(key.Value)
+			kv := key.Value
+			if key.Kind == lexer.String {
+				kv = decodeStringToken(kv)
+			}
+			sb.WriteString(kv)
 			if p.match(lexer.COLON) {
 				sb.WriteString(":")
 				if !p.parsePatternElement(sb, names, rest) {
 					p.next()
 				}
 			} else {
-				*names = append(*names, key.Value)
+				*names = append(*names, kv)
 			}
 		} else {
 			p.next()
@@ -982,7 +1247,7 @@ func (p *Parser) parseParamList() []*ast.Param {
 	for p.peek().Kind != lexer.RPAREN && p.peek().Kind != lexer.EOF {
 		param := &ast.Param{}
 
-		// A `this` parameter (`method(this: Counter)`) is compile-time only —
+		// A `this` parameter (`method(this: Counter)`) is compile-time only -
 		// skip it and its annotation entirely.
 		if isIdentifierToken(p.peek().Kind) && p.peek().Value == "this" {
 			p.next()
@@ -995,12 +1260,18 @@ func (p *Parser) parseParamList() []*ast.Param {
 			continue
 		}
 
-		if p.match(lexer.LBRACE) {
+		if p.peek().Kind == lexer.LBRACE {
+			var sb strings.Builder
+			var names []string
+			p.parseObjectPatternInto(&sb, &names, nil)
 			param.Name = "{...}"
-			for p.peek().Kind != lexer.RBRACE && p.peek().Kind != lexer.EOF {
-				p.next()
-			}
-			p.expect(lexer.RBRACE)
+			param.Pattern = sb.String()
+		} else if p.peek().Kind == lexer.LBRACKET {
+			var sb strings.Builder
+			var names []string
+			p.parseArrayPatternInto(&sb, &names, nil)
+			param.Name = "[...]"
+			param.Pattern = sb.String()
 		} else if isIdentifierToken(p.peek().Kind) {
 			param.Name = p.next().Value
 		} else if p.match(lexer.SPREAD) {
@@ -1012,7 +1283,7 @@ func (p *Parser) parseParamList() []*ast.Param {
 			break
 		}
 
-		// Optional parameter marker (`name?: Type`) — skip the `?`.
+		// Optional parameter marker (`name?: Type`) - skip the `?`.
 		p.match(lexer.QUEST)
 
 		if p.peek().Kind == lexer.COLON {
@@ -1040,6 +1311,25 @@ func (p *Parser) parseExpr(prec int) ast.Expr {
 
 	for {
 		tok := p.peek()
+		// `satisfies T` is a TS type assertion with the precedence of `as`. It
+		// lexes as an identifier (not a keyword), so handle it here. The type is
+		// compile-time only and dropped, keeping the runtime expression.
+		if tok.Kind == lexer.Identifier && tok.Value == "satisfies" && prec < precAs {
+			p.droppedTypes++
+			p.next()
+			p.parseExpr(precAs)
+			// Consume a union/intersection type and generic type arguments so
+			// they don't leak into the runtime expression (mirrors `as`).
+			for p.peek().Kind == lexer.BIT_OR || p.peek().Kind == lexer.BIT_AND {
+				p.next()
+				p.parseExpr(precAs)
+			}
+			if p.peek().Kind == lexer.LT {
+				p.next()
+				p.skipTypeArgs()
+			}
+			continue
+		}
 		nextPrec, ok := precMap[tok.Kind]
 		if !ok || prec >= nextPrec {
 			break
@@ -1056,6 +1346,18 @@ func (p *Parser) parseExpr(prec int) ast.Expr {
 }
 
 func (p *Parser) parsePrefix() ast.Expr {
+	// Guarded at the recursion chokepoint (parens/arrays/objects recurse back
+	// into parseExpr) rather than in parseExpr itself, so the depth counter is
+	// only touched per leaf rather than per precedence level. Manual (not defer)
+	// decrement keeps the hot path cheap; a deeper overflow panics and unwinds
+	// past this frame to ParseProgram anyway.
+	p.enter()
+	e := p.parsePrefixInner()
+	p.leave()
+	return e
+}
+
+func (p *Parser) parsePrefixInner() ast.Expr {
 	tok := p.peek()
 
 	// `async` is a contextual keyword but isIdentifierToken() treats it as a
@@ -1120,15 +1422,7 @@ func (p *Parser) parsePrefix() ast.Expr {
 
 	case lexer.String:
 		p.next()
-		// Strip exactly the opening and closing delimiter quotes (which always
-		// match — either `"` or `'`). A naive strings.Trim of quote chars would
-		// also strip escaped closing quotes inside the value, e.g.
-		// `"double \"quote\""` → `double \"quote\` (dangling backslash).
-		val := tok.Value
-		if len(val) >= 2 {
-			val = val[1 : len(val)-1]
-		}
-		return &ast.Literal{Position: tokPos(tok), Kind: ast.StringLit, Value: val}
+		return &ast.Literal{Position: tokPos(tok), Kind: ast.StringLit, Value: decodeStringToken(tok.Value)}
 
 	case lexer.True:
 		p.next()
@@ -1151,7 +1445,7 @@ func (p *Parser) parsePrefix() ast.Expr {
 		return &ast.Literal{Position: tokPos(tok), Kind: ast.RegexpLit, Value: tok.Value}
 
 	case lexer.LT:
-		// `<T>expr` angle-bracket type assertion (e.g. `<string>foo`) — only
+		// `<T>expr` angle-bracket type assertion (e.g. `<string>foo`) - only
 		// distinguished from JSX when the bracketed name is a primitive type
 		// keyword, which never names a JSX element.
 		if p.pos+1 < len(p.tokens) && isPrimitiveTypeKeyword(p.tokens[p.pos+1].Kind) {
@@ -1259,10 +1553,10 @@ func (p *Parser) parsePrefix() ast.Expr {
 					props = append(props, &ast.ObjectProp{Key: name, Value: &ast.Identifier{Name: name}, Shorthand: true})
 				}
 			} else if p.peek().Kind == lexer.String {
-				name := p.next().Value
+				key := decodeStringToken(p.next().Value)
 				if p.peek().Kind == lexer.COLON {
 					p.next()
-					props = append(props, &ast.ObjectProp{Key: name, Value: p.parseExpr(precLowest)})
+					props = append(props, &ast.ObjectProp{Key: key, Value: p.parseExpr(precLowest)})
 				}
 			} else if p.peek().Kind == lexer.Number {
 				name := p.next().Value
@@ -1367,38 +1661,23 @@ func (p *Parser) parsePrefix() ast.Expr {
 	}
 }
 
-func (p *Parser) parseArrowFn(params []*ast.Param) *ast.ArrowFn {
-	p.expect(lexer.RPAREN)
-	p.expect(lexer.ARROW)
-
-	var body []ast.Stmt
-	isExpr := false
-
-	if p.peek().Kind == lexer.LBRACE {
-		body = p.parseBlock()
-	} else {
-		expr := p.parseExpr(precLowest)
-		body = []ast.Stmt{&ast.ExprStmt{Expression: expr}}
-		isExpr = true
-	}
-
-	return &ast.ArrowFn{
-		Params:     params,
-		Body:       body,
-		Expression: isExpr,
-	}
-}
-
 func (p *Parser) isArrowFunction() bool {
 	// Quick check: if no ARROW token exists ahead, this is not an arrow function.
-	hasArrow := false
-	for i := p.pos; i < len(p.tokens); i++ {
-		if p.tokens[i].Kind == lexer.ARROW {
-			hasArrow = true
-			break
+	// arrowFrom[i] is the index of the first ARROW token at or after i (-1 when
+	// none), precomputed in one pass so this check is O(1) rather than O(n) per
+	// parenthesized expression - otherwise a paren-heavy file is O(n).
+	if p.arrowFrom == nil {
+		p.arrowFrom = make([]int, len(p.tokens)+1)
+		next := -1
+		for i := len(p.tokens) - 1; i >= 0; i-- {
+			if p.tokens[i].Kind == lexer.ARROW {
+				next = i
+			}
+			p.arrowFrom[i] = next
 		}
+		p.arrowFrom[len(p.tokens)] = -1
 	}
-	if !hasArrow {
+	if p.pos >= len(p.tokens) || p.arrowFrom[p.pos] < 0 {
 		return false
 	}
 
@@ -1459,6 +1738,21 @@ func (p *Parser) isArrowFunction() bool {
 		}
 	}
 	return false
+}
+
+// parseCallArgs parses a call's argument list starting at the current `(`,
+// producing a CallExpr over callee. optional marks an optional call (`fn?.(...)`).
+func (p *Parser) parseCallArgs(callee ast.Expr, optional bool) ast.Expr {
+	p.expect(lexer.LPAREN)
+	var args []ast.Expr
+	for p.peek().Kind != lexer.RPAREN && p.peek().Kind != lexer.EOF {
+		args = append(args, p.parseExpr(precLowest))
+		if !p.match(lexer.COMMA) {
+			break
+		}
+	}
+	p.expect(lexer.RPAREN)
+	return &ast.CallExpr{Callee: callee, Args: args, Optional: optional}
 }
 
 func (p *Parser) parseInfix(left ast.Expr) ast.Expr {
@@ -1527,6 +1821,11 @@ func (p *Parser) parseInfix(left ast.Expr) ast.Expr {
 		p.next()
 		return &ast.BinaryExpr{Left: left, Op: ">=", Right: p.parseExpr(precCompare)}
 	case lexer.In_:
+		if p.noIn {
+			// Inside a `for` initializer, `in` is not a binary operator - it
+			// begins the for-in clause. Stop so the caller can handle it.
+			return nil
+		}
 		p.next()
 		return &ast.BinaryExpr{Left: left, Op: "in", Right: p.parseExpr(precCompare)}
 	case lexer.Instanceof_:
@@ -1585,7 +1884,11 @@ func (p *Parser) parseInfix(left ast.Expr) ast.Expr {
 	case lexer.ASSIGN, lexer.ADD_ASSIGN, lexer.SUB_ASSIGN, lexer.MUL_ASSIGN, lexer.DIV_ASSIGN, lexer.MOD_ASSIGN:
 		op := tok.Value
 		p.next()
-		return &ast.BinaryExpr{Left: left, Op: op, Right: p.parseExpr(precAssign)}
+		// Assignment is right-associative: parse the RHS one level below
+		// assignment so `a = b = c` nests as `a = (b = c)`, not `(a = b) = c`.
+		// The precedence-climbing loop breaks on `prec >= nextPrec`, so a lower
+		// bound lets a same-precedence `=` bind inside the RHS.
+		return &ast.BinaryExpr{Left: left, Op: op, Right: p.parseExpr(precAssign - 1)}
 	case lexer.QUEST:
 		p.next()
 		con := p.parseExpr(precAssign)
@@ -1601,37 +1904,51 @@ func (p *Parser) parseInfix(left ast.Expr) ast.Expr {
 		return nil
 	case lexer.QUESTION_DOT:
 		p.next()
+		// Optional call `fn?.(args)`.
+		if p.peek().Kind == lexer.LPAREN {
+			return p.parseCallArgs(left, true)
+		}
+		// Optional computed member `obj?.[expr]`.
+		if p.peek().Kind == lexer.LBRACKET {
+			p.next()
+			prop := p.parseExpr(precLowest)
+			p.expect(lexer.RBRACKET)
+			return &ast.MemberExpr{Object: left, Property: prop, Computed: true, Optional: true}
+		}
 		if isIdentifierToken(p.peek().Kind) {
 			name := p.next().Value
 			return &ast.MemberExpr{Object: left, Property: &ast.Identifier{Name: name}, Computed: false, Optional: true}
 		}
-		return nil
+		// `?.` followed by anything else is not a valid chain. The token is
+		// already consumed, so return the receiver rather than nil (which would
+		// drop the whole expression) and surface a diagnostic.
+		p.errWithMsg("unexpected token after `?.`", "optional chaining expects a property, `[...]`, or `(...)`")
+		return left
 	case lexer.INC:
+		// ASI: `a\n++b` must not postfix-bind across the newline.
+		if p.newlineAfterPrev(p.pos) {
+			return nil
+		}
 		p.next()
 		return &ast.UnaryExpr{Op: "++", Arg: left, Postfix: true}
 	case lexer.DEC:
+		if p.newlineAfterPrev(p.pos) {
+			return nil
+		}
 		p.next()
 		return &ast.UnaryExpr{Op: "--", Arg: left, Postfix: true}
 	case lexer.NOT:
 		p.next()
 		return &ast.TypeAssertion{Expr: left}
 	case lexer.LPAREN:
-		p.next()
-		var args []ast.Expr
-		for p.peek().Kind != lexer.RPAREN && p.peek().Kind != lexer.EOF {
-			args = append(args, p.parseExpr(precLowest))
-			if !p.match(lexer.COMMA) {
-				break
-			}
-		}
-		p.expect(lexer.RPAREN)
-		return &ast.CallExpr{Callee: left, Args: args}
+		return p.parseCallArgs(left, false)
 	case lexer.LBRACKET:
 		p.next()
 		prop := p.parseExpr(precLowest)
 		p.expect(lexer.RBRACKET)
 		return &ast.MemberExpr{Object: left, Property: prop, Computed: true}
 	case lexer.As:
+		p.droppedTypes++
 		p.next()
 		typeRef := p.parseExpr(precAs)
 		// Type unions/intersections in `as` type annotations (e.g. `as HTMLElement | null`)
@@ -1658,6 +1975,13 @@ func (p *Parser) parseInfix(left ast.Expr) ast.Expr {
 func (p *Parser) parseFnExpr() ast.Expr {
 	p.next()
 	fn := &ast.ArrowFn{Async: false}
+	// A function expression may carry a name (`function Foo() {}`). It is only
+	// visible inside the body, so it is consumed and ignored - matching how the
+	// compiler treats unnamed function expressions. Compiled library output
+	// (e.g. Radix UI's `__name(function Foo() {...}, "Foo")`) relies on this.
+	if isIdentifierToken(p.peek().Kind) {
+		p.next()
+	}
 	p.expect(lexer.LPAREN)
 	fn.Params = p.parseParamList()
 	p.expect(lexer.RPAREN)
@@ -1774,6 +2098,7 @@ func (p *Parser) looksLikeTypeArgs() bool {
 }
 
 func (p *Parser) skipTypeArgs() {
+	p.droppedTypes++
 	depth := 1
 	for depth > 0 && p.pos < len(p.tokens) {
 		tok := p.next()
@@ -1816,6 +2141,13 @@ func (p *Parser) parseTemplateExpr() ast.Expr {
 }
 
 func (p *Parser) parseJSXElement() ast.Expr {
+	p.enter()
+	e := p.parseJSXElementInner()
+	p.leave()
+	return e
+}
+
+func (p *Parser) parseJSXElementInner() ast.Expr {
 	if p.peek().Kind == lexer.LT_SLASH {
 		return nil
 	}
@@ -1851,7 +2183,8 @@ func (p *Parser) parseJSXElement() ast.Expr {
 			return &ast.JSXElement{Position: pos, Opening: opening}
 		}
 		if tok.Kind == lexer.EOF {
-			break
+			p.errWithMsg("unterminated JSX opening tag", "the tag <"+name+"> is missing its closing `>`")
+			return &ast.JSXElement{Position: pos, Opening: opening}
 		}
 		if tok.Kind == lexer.Whitespace {
 			p.next()
@@ -1869,7 +2202,7 @@ func (p *Parser) parseJSXElement() ast.Expr {
 
 	for {
 		// rawPeek so whitespace before inline text isn't consumed: the text
-		// between elements is handled by parseJSXChild → parseJSXText.
+		// between elements is handled by parseJSXChild -> parseJSXText.
 		tok := p.rawPeek()
 		if tok.Kind == lexer.LT_SLASH {
 			p.next()
@@ -1886,6 +2219,7 @@ func (p *Parser) parseJSXElement() ast.Expr {
 			break
 		}
 		if tok.Kind == lexer.EOF {
+			p.errWithMsg("unterminated JSX element", "the element <"+name+"> is missing its closing </"+name+">")
 			break
 		}
 		child := p.parseJSXChild()
@@ -1912,6 +2246,7 @@ func (p *Parser) parseJSXFragment() ast.Expr {
 			break
 		}
 		if tok.Kind == lexer.EOF {
+			p.errWithMsg("unterminated JSX fragment", "the fragment `<>` is missing its closing `</>`")
 			break
 		}
 		child := p.parseJSXChild()
@@ -1942,6 +2277,13 @@ func (p *Parser) parseJSXChild() ast.JSXChild {
 		return ec
 
 	case lexer.LT:
+		// `<` starts an element/fragment only when a tag name or `>` follows.
+		// A stray `<` (e.g. `a < b` written without `{'{'}`) is preserved as
+		// literal text rather than mis-parsed as a tag.
+		if !p.jsxTagFollows() {
+			p.next()
+			return &ast.JSXText{Value: "<"}
+		}
 		elem := p.parseJSXElement()
 		if el, ok := elem.(*ast.JSXElement); ok {
 			return &ast.JSXElementChild{Element: el}
@@ -1951,12 +2293,26 @@ func (p *Parser) parseJSXChild() ast.JSXChild {
 		}
 		return nil
 
-	case lexer.LT_SLASH, lexer.GT, lexer.EOF:
+	case lexer.LT_SLASH, lexer.EOF:
 		return nil
 
 	default:
+		// Includes GT, which is literal text inside children (D2: preserve `>`
+		// as text, not a terminator).
 		return p.parseJSXText()
 	}
+}
+
+// jsxTagFollows reports whether the `<` at the current position begins a JSX
+// element or fragment. A tag name must be adjacent to `<` (JSX allows no space
+// after it), so `< b` in prose is literal text while `<b>` is a tag.
+func (p *Parser) jsxTagFollows() bool {
+	i := p.pos + 1
+	if i >= len(p.tokens) {
+		return false
+	}
+	k := p.tokens[i].Kind
+	return k == lexer.GT || isIdentifierToken(k)
 }
 
 func (p *Parser) parseJSXText() ast.JSXChild {
@@ -1964,7 +2320,7 @@ func (p *Parser) parseJSXText() ast.JSXChild {
 	for {
 		tok := p.rawPeek()
 		switch tok.Kind {
-		case lexer.LBRACE, lexer.LT, lexer.LT_SLASH, lexer.GT, lexer.EOF:
+		case lexer.LBRACE, lexer.LT, lexer.LT_SLASH, lexer.EOF:
 			if b.Len() > 0 {
 				return &ast.JSXText{Value: normalizeJSXText(b.String())}
 			}
@@ -2007,7 +2363,9 @@ func normalizeJSXText(text string) string {
 			b.WriteString(trimmed)
 		}
 	}
-	return b.String()
+	// Decode HTML character references in JSX text (React/Babel do this), so
+	// `&rsaquo;` renders as `` in both SSR and the client `h()` path.
+	return html.UnescapeString(b.String())
 }
 
 // splitJSXLines splits a string on \n and \r (handling \r\n) into its lines.
@@ -2066,9 +2424,8 @@ func (p *Parser) parseJSXAttr() *ast.JSXAttr {
 		if p.match(lexer.ASSIGN) {
 			if p.peek().Kind == lexer.String {
 				val := p.next()
-				// Strip exactly the delimiter quotes (matching the same logic
-				// as parsePrefix's String case) so escaped quotes in the value
-				// are preserved and no dangling backslash is left behind.
+				// JSX attribute strings do not process backslash escapes (unlike
+				// JS string literals), so only the delimiter quotes are stripped.
 				unquoted := val.Value
 				if len(unquoted) >= 2 {
 					unquoted = unquoted[1 : len(unquoted)-1]
@@ -2095,6 +2452,7 @@ func (p *Parser) skipTypeParams() {
 	if p.peek().Kind != lexer.LT {
 		return
 	}
+	p.droppedTypes++
 	depth := 0
 	for {
 		tok := p.peek()
@@ -2124,6 +2482,7 @@ func (p *Parser) skipTypeAnnotation(beforeBrace bool, stopAtArrow ...bool) {
 	if p.peek().Kind != lexer.COLON {
 		return
 	}
+	p.droppedTypes++
 	p.next()
 	stopArrow := len(stopAtArrow) > 0 && stopAtArrow[0]
 	depth := 0
@@ -2155,13 +2514,6 @@ func (p *Parser) skipTypeAnnotation(beforeBrace bool, stopAtArrow ...bool) {
 	}
 }
 
-func isUpper(s string) bool {
-	if len(s) == 0 {
-		return false
-	}
-	return unicode.IsUpper(rune(s[0]))
-}
-
 // isPrimitiveTypeKeyword reports whether a token names a primitive type that
 // can open an angle-bracket type assertion (`<T>`). These never name JSX
 // elements, so a leading `<` of this form is unambiguous.
@@ -2177,6 +2529,7 @@ func isPrimitiveTypeKeyword(k lexer.Kind) bool {
 // the leading `<` is already consumed. The cast itself is compile-time only;
 // the embedded runtime expression is preserved.
 func (p *Parser) parseTypeAssertion() ast.Expr {
+	p.droppedTypes++
 	pos := tokPos(p.peek())
 	p.next() // consume `<`
 	// Consume the type reference up to the closing `>`.

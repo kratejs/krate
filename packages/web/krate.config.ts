@@ -1,4 +1,5 @@
-import { defineConfig, docs, sitemap } from '@krate/core';
+import { defineConfig, defineContent, docs, sitemap } from '@krate/core';
+import { baseDocsTheme } from '@krate/base-docs-theme';
 
 export default defineConfig({
   entry: "src/pages/index.tsx",
@@ -6,6 +7,8 @@ export default defineConfig({
   pagesDir: "src/pages",
   publicDir: "public",
   minify: true,
+
+  viewTransitions: "auto",
 
   devServer: {
     port: 3000,
@@ -17,27 +20,61 @@ export default defineConfig({
     headingAnchors: true,
     admonitions: true,
     codeHighlight: true,
+    mermaid: true,
   },
 
   seo: {
     baseUrl: "https://krate.js.org",
     siteName: "Krate",
     description: "A Go-native static site generator with signal-based reactivity.",
+    image: "https://krate.js.org/og.png",
   },
+
+  redirects: [
+    { source: "/docs/guides/contributing/", destination: "/docs/contributing/", permanent: true },
+    { source: "/docs/guides/diagrams/", destination: "/docs/core-concepts/markdown/", permanent: true },
+  ],
+
+  content: defineContent({
+    blog: {
+      dir: "src/content/blog",
+      schema: {
+        title: { type: "string", required: true },
+        description: { type: "string", required: true },
+        date: { type: "date", required: true },
+        author: "string",
+        tags: "string[]",
+        draft: "boolean",
+        order: { type: "number", required: true },
+      },
+    },
+  }),
 
   plugins: [
     sitemap({ baseUrl: "https://krate.js.org", changeFreq: "daily", priority: "0.8" }),
+    { name: "robots", options: { allow: "/" } },
+    {
+      name: "feed",
+      options: {
+        baseUrl: "https://krate.js.org",
+        title: "Krate Docs",
+        description: "Guides and reference for the Krate Go-native web framework.",
+      },
+    },
     docs({
-      contentDir: "content/docs",
+      contentDir: "src/content/docs",
       title: "Krate Docs",
-      layout: "src/components/docs-layout.tsx",
+      theme: baseDocsTheme({
+        feedback: { repo: "kratejs/krate", label: "Was this page helpful?" },
+      }),
+      editLinkBase: "https://github.com/kratejs/krate/blob/main/packages/web",
       search: {
         enabled: true,
-        engine: "docfind",
+        engine: "pagefind",
         maxResults: 8,
       },
       links: [
-        { icon: "lucide:github", url: "https://github.com/kratejs/krate" },
+        { icon: "lucide:github", url: "https://github.com/kratejs/krate", name: "GitHub" },
       ],
     }),
   ],

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/gitinfo"
 )
 
 // SitemapPluginOptions holds typed configuration for the sitemap plugin.
@@ -19,7 +20,7 @@ type SitemapPluginOptions struct {
 }
 
 func init() {
-	Register(&HookFunc{name: "sitemap", order: 100, hooks: PluginHooks{
+	_ = Register(&HookFunc{name: "sitemap", order: 100, hooks: PluginHooks{
 		AfterBuild: generateSitemap,
 	}})
 }
@@ -34,7 +35,7 @@ func generateSitemap(ctx *BuildResultHookCtx) error {
 				configured = true
 				if pc.Options != nil {
 					data, _ := json.Marshal(pc.Options)
-					json.Unmarshal(data, opts)
+					_ = json.Unmarshal(data, opts)
 				}
 				break
 			}
@@ -49,7 +50,7 @@ func generateSitemap(ctx *BuildResultHookCtx) error {
 		}
 	}
 	if baseURL == "" {
-		// Not configured — skip silently. Only error when the user explicitly
+		// Not configured - skip silently. Only error when the user explicitly
 		// opted into the sitemap plugin but forgot a base URL.
 		if !configured {
 			return nil
@@ -77,9 +78,19 @@ func generateSitemap(ctx *BuildResultHookCtx) error {
 		if p.OutName != "." {
 			loc = baseURL + "/" + path.Clean(p.OutName)
 		}
+		// Prefer the source file's last git commit date, falling back to the
+		// build date when git metadata is unavailable.
+		lastmod := now
+		if p.Page != "" {
+			if lc := gitinfo.LastCommit(ctx.Root, p.Page); lc != "" {
+				if t, err := time.Parse(time.RFC3339, lc); err == nil {
+					lastmod = t.UTC().Format("2006-01-02")
+				}
+			}
+		}
 		b.WriteString("  <url>\n")
 		b.WriteString(fmt.Sprintf("    <loc>%s</loc>\n", loc))
-		b.WriteString(fmt.Sprintf("    <lastmod>%s</lastmod>\n", now))
+		b.WriteString(fmt.Sprintf("    <lastmod>%s</lastmod>\n", lastmod))
 		b.WriteString(fmt.Sprintf("    <changefreq>%s</changefreq>\n", changeFreq))
 		b.WriteString(fmt.Sprintf("    <priority>%s</priority>\n", priority))
 		b.WriteString("  </url>\n")

@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 )
@@ -56,12 +58,28 @@ func (p *configParser) parseRoot(cfg *Config) error {
 	if err != nil {
 		return err
 	}
+	recordUnknownKeys(obj)
 	for _, prop := range obj {
 		if err := applyConfigProp(cfg, prop.key, prop.val); err != nil {
 			return fmt.Errorf("property %q: %w", prop.key, err)
 		}
 	}
 	return nil
+}
+
+// recordUnknownKeys appends a warning for each unrecognized top-level or nested
+// key. Called after a successful static parse so typos surface, mirroring the
+// JS-executed path (UnknownKeyWarnings).
+func recordUnknownKeys(obj []configProp) {
+	m := make(map[string]interface{}, len(obj))
+	for _, prop := range obj {
+		m[prop.key] = prop.val
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return
+	}
+	Warnings = append(Warnings, UnknownKeyWarnings(data)...)
 }
 
 type configProp struct {
@@ -105,10 +123,31 @@ func (p *configParser) parseKey() (string, error) {
 	if t.Kind == lexer.String {
 		return t.Value, nil
 	}
-	if t.Kind == lexer.Identifier {
+	// Accept identifiers AND reserved words used as property names (e.g.
+	// `type`, `default`, `class`). Any token whose value is a valid identifier
+	// is a valid unquoted object key in JS/TS.
+	if isIdentifierName(t.Value) {
 		return t.Value, nil
 	}
 	return "", fmt.Errorf("expected property key (identifier or string), got %q at line %d", t.Value, t.Line)
+}
+
+// isIdentifierName reports whether s is a valid JS identifier (ASCII subset),
+// used to accept reserved words as object keys.
+func isIdentifierName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_' || r == '$':
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (p *configParser) parseValue() (interface{}, error) {
@@ -190,6 +229,102 @@ func parseNumber(s string) (interface{}, error) {
 	return nil, fmt.Errorf("invalid number %q", s)
 }
 
+// configInt coerces a parsed numeric config value to int.
+func configInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	}
+	return 0, false
+}
+
+// configInt64 coerces a parsed numeric config value to int64.
+func configInt64(v interface{}) (int64, bool) {
+	switch n := v.(type) {
+	case int64:
+		return n, true
+	case float64:
+		return int64(n), true
+	case int:
+		return int64(n), true
+	}
+	return 0, false
+}
+
+// configStrings appends the string items of a parsed array to dst.
+func configStrings(dst []string, v interface{}) []string {
+	arr, ok := v.([]interface{})
+	if !ok {
+		return dst
+	}
+	for _, item := range arr {
+		if s, ok := item.(string); ok {
+			dst = append(dst, s)
+		}
+	}
+	return dst
+}
+
+// parseSidecar builds a SidecarConfig from a statically parsed object.
+func parseSidecar(v interface{}) (*SidecarConfig, error) {
+	m, ok := v.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("expected object, got %T", v)
+	}
+	sc := &SidecarConfig{}
+	for k, raw := range m {
+		switch k {
+		case "command":
+			if s, ok := raw.(string); ok {
+				sc.Command = s
+			}
+		case "args":
+			sc.Args = configStrings(sc.Args, raw)
+		case "cwd":
+			if s, ok := raw.(string); ok {
+				sc.Cwd = s
+			}
+		case "env":
+			if em, ok := raw.(map[string]interface{}); ok {
+				sc.Env = make(map[string]string, len(em))
+				for ek, ev := range em {
+					if es, ok := ev.(string); ok {
+						sc.Env[ek] = es
+					}
+				}
+			}
+		case "port":
+			if n, ok := configInt(raw); ok {
+				sc.Port = n
+			}
+		case "target":
+			if s, ok := raw.(string); ok {
+				sc.Target = s
+			}
+		case "prefix":
+			if s, ok := raw.(string); ok {
+				sc.Prefix = s
+			}
+		}
+	}
+	return sc, nil
+}
+
+// interfaceStrings converts a parsed JSON array of values to []string.
+func interfaceStrings(arr []interface{}) []string {
+	out := make([]string, 0, len(arr))
+	for _, v := range arr {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func applyConfigProp(cfg *Config, key string, val interface{}) error {
 	switch key {
 	case "entry":
@@ -246,6 +381,182 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return fmt.Errorf("expected boolean, got %T", val)
 		}
 		cfg.Sourcemap = b
+	case "basePath":
+		s, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("expected string, got %T", val)
+		}
+		cfg.BasePath = s
+	case "compat":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "mode":
+				if s, ok := v.(string); ok {
+					cfg.Compat.Mode = s
+				}
+			case "userAgent":
+				if b, ok := v.(bool); ok {
+					cfg.Compat.UserAgent = b
+				}
+			}
+		}
+	case "viewTransitions":
+		switch v := val.(type) {
+		case bool:
+			if v {
+				cfg.ViewTransitions = "auto"
+			} else {
+				cfg.ViewTransitions = "off"
+			}
+		case string:
+			switch strings.ToLower(strings.TrimSpace(v)) {
+			case "", "auto", "on", "true":
+				cfg.ViewTransitions = "auto"
+			case "off", "false", "none":
+				cfg.ViewTransitions = "off"
+			default:
+				return fmt.Errorf("viewTransitions: expected \"auto\" or \"off\", got %q", v)
+			}
+		default:
+			return fmt.Errorf("viewTransitions: expected boolean or string, got %T", val)
+		}
+	case "ppr":
+		switch v := val.(type) {
+		case bool:
+			cfg.PPR = v
+		case map[string]interface{}:
+			cfg.PPR = true
+			if n, ok := v["revalidate"]; ok {
+				switch rv := n.(type) {
+				case int64:
+					cfg.PPRRevalidate = int(rv)
+				case float64:
+					cfg.PPRRevalidate = int(rv)
+				default:
+					return fmt.Errorf("ppr.revalidate: expected number, got %T", n)
+				}
+			}
+		default:
+			return fmt.Errorf("ppr: expected boolean or object, got %T", val)
+		}
+	case "server":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "host":
+				if s, ok := v.(string); ok {
+					cfg.Server.Host = s
+				}
+			case "port":
+				if n, ok := configInt(v); ok {
+					cfg.Server.Port = n
+				}
+			case "maxBodySize":
+				if n, ok := configInt64(v); ok {
+					cfg.Server.MaxBodySize = n
+				}
+			}
+		}
+	case "cors":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "enabled":
+				if b, ok := v.(bool); ok {
+					cfg.CORS.Enabled = b
+				}
+			case "origins":
+				cfg.CORS.Origins = configStrings(cfg.CORS.Origins, v)
+			case "methods":
+				cfg.CORS.Methods = configStrings(cfg.CORS.Methods, v)
+			case "headers":
+				cfg.CORS.Headers = configStrings(cfg.CORS.Headers, v)
+			case "credentials":
+				if b, ok := v.(bool); ok {
+					cfg.CORS.Credentials = b
+				}
+			case "maxAge":
+				if n, ok := configInt(v); ok {
+					cfg.CORS.MaxAge = n
+				}
+			}
+		}
+	case "api":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		if sc, ok := m["sidecar"]; ok && sc != nil {
+			parsed, err := parseSidecar(sc)
+			if err != nil {
+				return fmt.Errorf("api.sidecar: %w", err)
+			}
+			cfg.API.Sidecar = parsed
+		}
+	case "seo":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			s, _ := v.(string)
+			switch k {
+			case "baseUrl":
+				cfg.SEO.BaseURL = s
+			case "siteName":
+				cfg.SEO.SiteName = s
+			case "description":
+				cfg.SEO.Description = s
+			case "image":
+				cfg.SEO.Image = s
+			}
+		}
+	case "robots":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			s, _ := v.(string)
+			switch k {
+			case "allow":
+				cfg.Robots.Allow = s
+			case "disallow":
+				cfg.Robots.Disallow = s
+			case "sitemap":
+				cfg.Robots.Sitemap = s
+			}
+		}
+	case "runtime":
+		if s, ok := val.(string); ok {
+			cfg.Runtime = s
+		}
+	case "tsBaseDir":
+		if s, ok := val.(string); ok {
+			cfg.TSBaseDir = s
+		}
+	case "pathAliases":
+		if data, err := json.Marshal(val); err == nil {
+			_ = cfg.PathAliases.UnmarshalJSON(data)
+		}
+	case "serverComponents":
+		cfg.ServerComponents = configStrings(cfg.ServerComponents, val)
+	case "runtimeComponents":
+		cfg.RuntimeComponents = configStrings(cfg.RuntimeComponents, val)
+	case "serverDirs":
+		cfg.ServerDirs = configStrings(cfg.ServerDirs, val)
+	case "runtimeDirs":
+		cfg.RuntimeDirs = configStrings(cfg.RuntimeDirs, val)
 	case "devServer":
 		m, ok := val.(map[string]interface{})
 		if !ok {
@@ -268,14 +579,29 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 					return fmt.Errorf("devServer.open: expected boolean, got %T", v)
 				}
 				cfg.DevServer.Open = b
+			case "overlay":
+				b, ok := v.(bool)
+				if !ok {
+					return fmt.Errorf("devServer.overlay: expected boolean, got %T", v)
+				}
+				cfg.DevServer.Overlay = &b
+			case "toolbar":
+				b, ok := v.(bool)
+				if !ok {
+					return fmt.Errorf("devServer.toolbar: expected boolean, got %T", v)
+				}
+				cfg.DevServer.Toolbar = &b
+			case "editor":
+				s, ok := v.(string)
+				if !ok {
+					return fmt.Errorf("devServer.editor: expected string, got %T", v)
+				}
+				cfg.DevServer.Editor = s
 			}
 		}
 	case "emitReact":
-		b, ok := val.(bool)
-		if !ok {
-			return fmt.Errorf("expected boolean, got %T", val)
-		}
-		cfg.EmitReact = b
+		// Deprecated no-op: React-to-krate transpilation is always enabled.
+		// Accepted silently so existing configs keep loading without warnings.
 	case "markdown":
 		m, ok := val.(map[string]interface{})
 		if !ok {
@@ -307,6 +633,205 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				if b, ok := v.(bool); ok {
 					cfg.Markdown.Math = b
 				}
+			case "mermaid":
+				if b, ok := v.(bool); ok {
+					cfg.Markdown.Mermaid = b
+				}
+			}
+		}
+	case "goApi":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "enabled":
+				if b, ok := v.(bool); ok {
+					cfg.GoAPI.Enabled = &b
+				}
+			case "module":
+				if s, ok := v.(string); ok {
+					cfg.GoAPI.Module = s
+				}
+			case "tidy":
+				if b, ok := v.(bool); ok {
+					cfg.GoAPI.Tidy = &b
+				}
+			case "deps":
+				arr, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("goApi.deps: expected array, got %T", v)
+				}
+				for _, item := range arr {
+					om, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					var dep GoAPIDep
+					if s, ok := om["path"].(string); ok {
+						dep.Path = s
+					}
+					if s, ok := om["version"].(string); ok {
+						dep.Version = s
+					}
+					cfg.GoAPI.Deps = append(cfg.GoAPI.Deps, dep)
+				}
+			case "replaces":
+				arr, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("goApi.replaces: expected array, got %T", v)
+				}
+				for _, item := range arr {
+					om, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					var rp GoAPIReplace
+					if s, ok := om["from"].(string); ok {
+						rp.From = s
+					}
+					if s, ok := om["to"].(string); ok {
+						rp.To = s
+					}
+					cfg.GoAPI.Replaces = append(cfg.GoAPI.Replaces, rp)
+				}
+			}
+		}
+	case "go":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "enabled":
+				if b, ok := v.(bool); ok {
+					cfg.Go.Enabled = &b
+				}
+			case "module":
+				if s, ok := v.(string); ok {
+					cfg.Go.Module = s
+				}
+			case "tidy":
+				if b, ok := v.(bool); ok {
+					cfg.Go.Tidy = &b
+				}
+			case "apiEnabled":
+				if b, ok := v.(bool); ok {
+					cfg.Go.APIEnabled = &b
+				}
+			case "componentDirs", "apiDirs":
+				arr, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("go.%s: expected array, got %T", k, v)
+				}
+				var dirs []string
+				for _, item := range arr {
+					if s, ok := item.(string); ok {
+						dirs = append(dirs, s)
+					}
+				}
+				if k == "componentDirs" {
+					cfg.Go.ComponentDirs = dirs
+				} else {
+					cfg.Go.APIDirs = dirs
+				}
+			case "deps":
+				arr, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("go.deps: expected array, got %T", v)
+				}
+				for _, item := range arr {
+					om, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					var dep GoDep
+					if s, ok := om["path"].(string); ok {
+						dep.Path = s
+					}
+					if s, ok := om["version"].(string); ok {
+						dep.Version = s
+					}
+					cfg.Go.Deps = append(cfg.Go.Deps, dep)
+				}
+			case "replaces":
+				arr, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("go.replaces: expected array, got %T", v)
+				}
+				for _, item := range arr {
+					om, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					var rp GoReplace
+					if s, ok := om["from"].(string); ok {
+						rp.From = s
+					}
+					if s, ok := om["to"].(string); ok {
+						rp.To = s
+					}
+					cfg.Go.Replaces = append(cfg.Go.Replaces, rp)
+				}
+			case "exclude":
+				arr, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("go.exclude: expected array, got %T", v)
+				}
+				for _, item := range arr {
+					om, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					var ex GoExclude
+					if s, ok := om["path"].(string); ok {
+						ex.Path = s
+					}
+					if s, ok := om["version"].(string); ok {
+						ex.Version = s
+					}
+					cfg.Go.Exclude = append(cfg.Go.Exclude, ex)
+				}
+			}
+		}
+	case "dce":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "css":
+				if b, ok := v.(bool); ok {
+					cfg.Dce.CSS = &b
+				}
+			case "js":
+				if b, ok := v.(bool); ok {
+					cfg.Dce.JS = &b
+				}
+			case "aggressive":
+				if b, ok := v.(bool); ok {
+					cfg.Dce.Aggressive = &b
+				}
+			}
+		}
+	case "fonts":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "preload":
+				if b, ok := v.(bool); ok {
+					cfg.Fonts.Preload = &b
+				}
+			case "display":
+				if s, ok := v.(string); ok {
+					cfg.Fonts.Display = s
+				}
 			}
 		}
 	case "tailwind":
@@ -329,6 +854,39 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 					if s, ok := item.(string); ok {
 						cfg.Tailwind.ScanDirs = append(cfg.Tailwind.ScanDirs, s)
 					}
+				}
+			case "content":
+				switch cv := v.(type) {
+				case []interface{}:
+					for _, item := range cv {
+						if s, ok := item.(string); ok {
+							cfg.Tailwind.Content = append(cfg.Tailwind.Content, s)
+						}
+					}
+				case map[string]interface{}:
+					if files, ok := cv["files"].([]interface{}); ok {
+						for _, item := range files {
+							if s, ok := item.(string); ok {
+								cfg.Tailwind.Content = append(cfg.Tailwind.Content, s)
+							}
+						}
+					}
+				}
+			case "preflight":
+				if b, ok := v.(bool); ok {
+					cfg.Tailwind.Preflight = b
+				}
+			case "strict":
+				if b, ok := v.(bool); ok {
+					cfg.Tailwind.Strict = b
+				}
+			case "darkMode":
+				if s, ok := v.(string); ok {
+					cfg.Tailwind.DarkMode = s
+				}
+			case "executeConfig":
+				if b, ok := v.(bool); ok {
+					cfg.Tailwind.ExecuteConfig = b
 				}
 			}
 		}
@@ -385,9 +943,34 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				if s, ok := v.(string); ok {
 					cfg.SSR.APIRuntime = s
 				}
+			case "apiWorkers":
+				switch n := v.(type) {
+				case int64:
+					cfg.SSR.APIWorkers = int(n)
+				case float64:
+					cfg.SSR.APIWorkers = int(n)
+				}
+			case "apiIsolation":
+				if b, ok := v.(bool); ok {
+					cfg.SSR.APIIsolation = b
+				}
+			case "nodeWorkers":
+				switch n := v.(type) {
+				case int64:
+					cfg.SSR.NodeWorkers = int(n)
+				case float64:
+					cfg.SSR.NodeWorkers = int(n)
+				}
 			case "ssrRuntime":
 				if s, ok := v.(string); ok {
 					cfg.SSR.SSRRuntime = s
+				}
+			case "rendererWorkers":
+				switch n := v.(type) {
+				case int64:
+					cfg.SSR.RendererWorkers = int(n)
+				case float64:
+					cfg.SSR.RendererWorkers = int(n)
 				}
 			case "streaming":
 				if b, ok := v.(bool); ok {
@@ -477,6 +1060,52 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			}
 			cfg.Rewrites = append(cfg.Rewrites, rw)
 		}
+	case "content":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		cfg.Content = m
+	case "checks":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		cfg.Checks = m
+	case "i18n":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		if s, ok := m["defaultLocale"].(string); ok {
+			cfg.I18n.DefaultLocale = s
+		}
+		if arr, ok := m["locales"].([]interface{}); ok {
+			cfg.I18n.Locales = interfaceStrings(arr)
+		}
+		if s, ok := m["routing"].(string); ok {
+			cfg.I18n.Routing = s
+		}
+	case "versions":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		if s, ok := m["current"].(string); ok {
+			cfg.Versions.Current = s
+		}
+		if arr, ok := m["versions"].([]interface{}); ok {
+			cfg.Versions.Versions = interfaceStrings(arr)
+		}
+		if b, ok := m["banner"].(bool); ok {
+			cfg.Versions.Banner = &b
+		}
+	case "output":
+		s, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("expected string, got %T", val)
+		}
+		cfg.Output = s
 	default:
 		// Unknown config keys are silently ignored for forward compatibility
 	}

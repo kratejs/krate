@@ -34,7 +34,7 @@ func wirePluginServeHandlers(root string, cfg *config.Config, next http.Handler)
 				}
 				w.WriteHeader(reqRes.Status)
 				if reqRes.Body != "" {
-					w.Write([]byte(reqRes.Body))
+					_, _ = w.Write([]byte(reqRes.Body))
 				}
 				return
 			}
@@ -57,7 +57,7 @@ func wirePluginServeHandlers(root string, cfg *config.Config, next http.Handler)
 				copyHeaders(w.Header(), cap.header)
 				w.WriteHeader(cap.status)
 			}
-			w.Write(cap.body.Bytes())
+			_, _ = w.Write(cap.body.Bytes())
 			return
 		}
 
@@ -86,12 +86,12 @@ func wirePluginServeHandlers(root string, cfg *config.Config, next http.Handler)
 			}
 			w.WriteHeader(resp.Status)
 			if resp.Body != "" {
-				w.Write([]byte(resp.Body))
+				_, _ = w.Write([]byte(resp.Body))
 			}
 		} else {
 			copyHeaders(w.Header(), cap.header)
 			w.WriteHeader(status)
-			w.Write(cap.body.Bytes())
+			_, _ = w.Write(cap.body.Bytes())
 		}
 	})
 }

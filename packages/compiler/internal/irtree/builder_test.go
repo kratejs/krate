@@ -14,6 +14,12 @@ func annotateWith(prog *ast.Program, cfg *config.Config, path, raw string) *irtr
 	return annotator.Annotate(prog, cfg, path, raw)
 }
 
+// normalizeJS strips all whitespace so tests compare generated JS by tokens
+// rather than by the exact (readable) formatting the printer emits.
+func normalizeJS(s string) string {
+	return strings.Join(strings.Fields(s), "")
+}
+
 func configWithRuntime(names ...string) *config.Config {
 	return &config.Config{RuntimeComponents: names}
 }
@@ -22,7 +28,7 @@ func configWithServer(names ...string) *config.Config {
 	return &config.Config{ServerComponents: names}
 }
 
-// ─── Fragment children ───────────────────────────────────────────────────────
+// Fragment children
 
 func TestBuildFragmentFlattensMixedChildren(t *testing.T) {
 	tree := annotateAndBuild(t, `export default function App() {
@@ -64,7 +70,7 @@ func TestBuildFragmentEscapesTextExpression(t *testing.T) {
 	}
 }
 
-// ─── Keyed list slots ────────────────────────────────────────────────────────
+// Keyed list slots
 
 func TestBuildKeyedListWithLiteralArray(t *testing.T) {
 	tree := annotateAndBuild(t, `export default function App() {
@@ -119,7 +125,34 @@ func TestBuildListWithoutKeyFallsBackToIndex(t *testing.T) {
 	}
 }
 
-// ─── Nested components ───────────────────────────────────────────────────────
+func TestBuildListSlotSubstitutesIndexParam(t *testing.T) {
+	tree := annotateAndBuild(t, `export default function App() {
+	return <ul>{["apple","banana"].map((item, i) => <li>{item} ({i})</li>)}</ul>;
+}`)
+	var list *irtree.ListSlot
+	for _, child := range tree.Root.Children {
+		if ls, ok := child.(*irtree.ListSlot); ok {
+			list = ls
+			break
+		}
+	}
+	if list == nil {
+		t.Fatal("expected ListSlot for .map() call")
+	}
+	if len(list.Items) != 2 {
+		t.Fatalf("expected 2 resolved items, got %d", len(list.Items))
+	}
+	got0 := renderSlotHTML(list.Items[0])
+	if got0 != "<li>apple (0)</li>" {
+		t.Errorf("item 0: expected '<li>apple (0)</li>', got %q", got0)
+	}
+	got1 := renderSlotHTML(list.Items[1])
+	if got1 != "<li>banana (1)</li>" {
+		t.Errorf("item 1: expected '<li>banana (1)</li>', got %q", got1)
+	}
+}
+
+// Nested components
 
 func TestBuildNestedComponentSlot(t *testing.T) {
 	src := `function Header() { return <h1>hi</h1>; }
@@ -171,7 +204,7 @@ export default function App() { return <div><Counter /></div>; }`
 	}
 }
 
-// ─── Runtime / server tier components ────────────────────────────────────────
+// Runtime / server tier components
 
 func TestBuildRuntimeComponentSlotIsPlaceholder(t *testing.T) {
 	src := `function RuntimeWidget(props) { return <div>{props.label}</div>; }
@@ -229,7 +262,7 @@ export default function App() { return <div><ServerWidget title="t" /></div>; }`
 	}
 }
 
-// ─── Text escaping in static value slots ────────────────────────────────────
+// Text escaping in static value slots
 
 func TestBuildEscapesTemplateLiteralInTextPosition(t *testing.T) {
 	// Mirrors the <Code>{`function App() { return <h1>Hello</h1>; }`}</Code> case:
@@ -335,8 +368,9 @@ export default function App() { return <div><Counter/></div>; }`,
 			}
 			if tt.wantVar != "" {
 				found := false
+				want := normalizeJS(tt.wantVar)
 				for _, ev := range comp.Component.ExtraVars {
-					if ev == tt.wantVar {
+					if normalizeJS(ev) == want {
 						found = true
 					}
 				}
@@ -366,7 +400,7 @@ func TestBuildMetaSlotKeepsScriptRaw(t *testing.T) {
 	}
 }
 
-// ─── <SyntaxHighlight> compile-time chroma through {children} ────────────────
+// <SyntaxHighlight> compile-time chroma through {children}
 
 func findStaticHTML(children []irtree.SlotNode, pred func(string) bool) bool {
 	for _, child := range children {
@@ -385,6 +419,12 @@ func findStaticHTML(children []irtree.SlotNode, pred func(string) bool) bool {
 		case *irtree.ConditionalSlot:
 			if findStaticHTML(n.Consequent, pred) || findStaticHTML(n.Alternate, pred) {
 				return true
+			}
+		case *irtree.ListSlot:
+			for _, item := range n.Items {
+				if findStaticHTML(item.Contents, pred) {
+					return true
+				}
 			}
 		}
 	}
@@ -416,7 +456,7 @@ export default function Page() {
 	}
 }
 
-// ─── useRef object refs ──────────────────────────────────────────────────────
+// useRef object refs
 
 func TestRefBindingUseRefObjectAssignsCurrent(t *testing.T) {
 	src := `export default function App() {
@@ -428,8 +468,8 @@ func TestRefBindingUseRefObjectAssignsCurrent(t *testing.T) {
 	if len(refs) != 1 {
 		t.Fatalf("expected 1 ref binding, got %d: %+v", len(refs), refs)
 	}
-	if refs[0].Target != "inputRef.current" {
-		t.Errorf("expected target inputRef.current for ref={inputRef}, got %q", refs[0].Target)
+	if refs[0].Target != "inputRef" || !refs[0].Adaptive {
+		t.Errorf("expected adaptive target inputRef for ref={inputRef}, got %q adaptive=%v", refs[0].Target, refs[0].Adaptive)
 	}
 }
 
@@ -458,8 +498,8 @@ func TestRefBindingUseRefCallAssignsCurrent(t *testing.T) {
 	if len(refs) != 1 {
 		t.Fatalf("expected 1 ref binding, got %d: %+v", len(refs), refs)
 	}
-	if refs[0].Target != "inputRef.current" {
-		t.Errorf("expected target inputRef.current for ref={inputRef} from useRef(null), got %q", refs[0].Target)
+	if refs[0].Target != "inputRef" || !refs[0].Adaptive {
+		t.Errorf("expected adaptive target inputRef for ref={inputRef} from useRef(null), got %q adaptive=%v", refs[0].Target, refs[0].Adaptive)
 	}
 }
 
@@ -538,7 +578,7 @@ func TestBuildSuspenseBoundaryStaticFallback(t *testing.T) {
 }
 
 func TestBuildSuspenseBoundaryRuntimePrimary(t *testing.T) {
-	// Primary is a runtime-tier component (via config) → ModeRegion + Primary.
+	// Primary is a runtime-tier component (via config) -> ModeRegion + Primary.
 	src := `function Live() { return <p>live</p>; }
 export default function App() {
 	return <Suspense fallback={<span>loading</span>}><Live /></Suspense>;
@@ -571,7 +611,7 @@ export default function App() {
 }
 
 func TestBuildSuspenseBoundaryDefaultNoFallback(t *testing.T) {
-	// No fallback, empty boundary → ModeDefault, empty fallback.
+	// No fallback, empty boundary -> ModeDefault, empty fallback.
 	tree := annotateAndBuild(t, `export default function App() {
 	return <Suspense></Suspense>;
 }`)
@@ -595,7 +635,7 @@ func TestBuildSuspenseBoundaryDefaultNoFallback(t *testing.T) {
 func TestBuildSuspenseBoundaryNestedRuntimeRegion(t *testing.T) {
 	// A runtime component nested inside a non-runtime wrapper element: the
 	// static wrappers are baked as the boundary's resolved content and the
-	// nested runtime component becomes its own standalone region — a boundary
+	// nested runtime component becomes its own standalone region - a boundary
 	// alone has no component/bundle identity the sidecar could render, so it
 	// must not be deferred as an anonymous whole.
 	src := `function Live() { return <p>live</p>; }
@@ -632,4 +672,328 @@ export default function App() {
 	if !foundRuntime {
 		t.Errorf("expected a nested runtime ComponentSlot in the resolved content, got %#v", susp.Resolved)
 	}
+}
+
+// findConditional reports whether any node in the slot tree is a
+// ConditionalSlot (i.e. a guard that could not be folded at build time).
+func findConditional(children []irtree.SlotNode) bool {
+	for _, child := range children {
+		switch n := child.(type) {
+		case *irtree.ConditionalSlot:
+			return true
+		case *irtree.ComponentSlot:
+			if n.Component != nil && (findConditional(n.Component.Children) || findConditional(n.Component.ReturnSlots)) {
+				return true
+			}
+		case *irtree.SuspenseSlot:
+			if findConditional(n.Resolved) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestBuildPropsGuardLengthFolds verifies that guards reading a prop array's
+// `.length` (e.g. `{props.actions && props.actions.length > 0 && <div>...</div>}`)
+// fold at build time so SSR renders the real markup instead of an empty
+// hydration-only ConditionalSlot wrapper. Regression: resolveMemberChainValue
+// could not hop `.length` over a resolved array literal, so the guard leaked
+// and the list content was dropped from SSR.
+func TestBuildPropsGuardLengthFolds(t *testing.T) {
+	tree := annotateAndBuild(t, `function Card(props) {
+	const [n, setN] = createSignal(0);
+	return <section>
+		{props.actions && props.actions.length > 0 && <div class="actions">{props.actions.map((a) => <a class="act" href={a.link}>{a.text}</a>)}</div>}
+		{props.tags && props.tags.length > 0 && <div class="tags">{props.tags.map((tag) => <span class="tag">{tag}</span>)}</div>}
+	</section>;
+}
+export default function App() {
+	return <Card actions={[{text: "Go", link: "/go"}]} tags={["a", "b"]} />;
+}`)
+
+	if !findStaticHTML(tree.Root.Children, func(html string) bool {
+		return strings.Contains(html, `class="act"`) && strings.Contains(html, ">Go</a>")
+	}) {
+		t.Error("expected hero-action-style link from prop array to render in SSR")
+	}
+	if !findStaticHTML(tree.Root.Children, func(html string) bool {
+		return strings.Contains(html, `class="tag"`) && strings.Contains(html, ">a</span>")
+	}) {
+		t.Error("expected tag span from prop array to render in SSR")
+	}
+	if findConditional(tree.Root.Children) {
+		t.Error("expected props `.length` guards to fold statically, got a ConditionalSlot")
+	}
+}
+
+// TestBuildPropsGuardAbsentFolds verifies that a guard on an absent prop
+// (`{props.editUrl && <a/>}`) folds to nothing rather than a ConditionalSlot.
+func TestBuildPropsGuardAbsentFolds(t *testing.T) {
+	tree := annotateAndBuild(t, `function Card(props) {
+	return <section>{props.editUrl && <a class="edit" href={props.editUrl}>Edit</a>}</section>;
+}
+export default function App() {
+	return <Card />;
+}`)
+
+	if findStaticHTML(tree.Root.Children, func(html string) bool {
+		return strings.Contains(html, `class="edit"`)
+	}) {
+		t.Error("expected absent-prop guard to render nothing")
+	}
+	if findConditional(tree.Root.Children) {
+		t.Error("expected absent-prop guard to fold, got a ConditionalSlot")
+	}
+}
+
+// TestBuildNegatedPropGuardFolds verifies that a negated prop guard
+// (`{!props.tocHidden && <aside/>}`) folds to a real boolean. Regression:
+// evalConstWithSignals stringified `!` to "!true", which isTruthyValue treated
+// as truthy, so a hidden TOC still rendered at SSR.
+func TestBuildNegatedPropGuardFolds(t *testing.T) {
+	build := func(t *testing.T, props string) *irtree.ComponentTree {
+		t.Helper()
+		return annotateAndBuild(t, `function Card(props) {
+	const [n, setN] = createSignal(0);
+	return <section>{!props.tocHidden && <aside class="toc">TOC</aside>}</section>;
+}
+export default function App() {
+	return <Card `+props+` />;
+}`)
+	}
+
+	// tocHidden: true -> negation false -> nothing renders.
+	hidden := build(t, `tocHidden={true}`)
+	if findStaticHTML(hidden.Root.Children, func(html string) bool {
+		return strings.Contains(html, `class="toc"`)
+	}) {
+		t.Error("expected toc to be hidden when tocHidden is true")
+	}
+	if findConditional(hidden.Root.Children) {
+		t.Error("expected negated guard to fold, got a ConditionalSlot")
+	}
+
+	// no tocHidden -> undefined is falsy -> !undefined is true -> TOC renders.
+	visible := build(t, ``)
+	if !findStaticHTML(visible.Root.Children, func(html string) bool {
+		return strings.Contains(html, `class="toc"`)
+	}) {
+		t.Error("expected toc to render when tocHidden is absent")
+	}
+	if findConditional(visible.Root.Children) {
+		t.Error("expected negated guard to fold, got a ConditionalSlot")
+	}
+}
+
+// showIf / visibleIf sugar
+
+// TestShowIfStaticTruthyFolds verifies that a `showIf` whose test is statically
+// true renders the element (with the attribute stripped) and does not produce a
+// ConditionalSlot.
+func TestShowIfStaticTruthyFolds(t *testing.T) {
+	tree := annotateAndBuild(t, `export default function App() {
+	return <div><span class="x" showIf={1 > 0}>yes</span></div>;
+}`)
+	if !findStaticHTML(tree.Root.Children, func(html string) bool {
+		return strings.Contains(html, `class="x"`) && strings.Contains(html, ">yes</span>")
+	}) {
+		t.Error("expected showIf truthy element to render")
+	}
+	if findConditional(tree.Root.Children) {
+		t.Error("expected static-truthy showIf to fold, got a ConditionalSlot")
+	}
+	if strings.Contains(renderStaticHTML(tree.Root.Children), "showIf") {
+		t.Error("showIf must not leak into emitted HTML")
+	}
+}
+
+// TestShowIfStaticFalsyRendersNothing verifies that a statically-false showIf
+// elides the element entirely.
+func TestShowIfStaticFalsyRendersNothing(t *testing.T) {
+	tree := annotateAndBuild(t, `export default function App() {
+	return <div><span class="x" showIf={1 > 2}>no</span></div>;
+}`)
+	if findStaticHTML(tree.Root.Children, func(html string) bool {
+		return strings.Contains(html, `class="x"`) || strings.Contains(html, ">no</span>")
+	}) {
+		t.Error("expected showIf falsy element to render nothing")
+	}
+	if findConditional(tree.Root.Children) {
+		t.Error("expected static-falsy showIf to fold, got a ConditionalSlot")
+	}
+}
+
+// TestVisibleIfAliasIsShowIf verifies `visibleIf` behaves exactly like `showIf`.
+func TestVisibleIfAliasIsShowIf(t *testing.T) {
+	tree := annotateAndBuild(t, `export default function App() {
+	return <div><span class="y" visibleIf={1 > 0}>alias</span></div>;
+}`)
+	if !findStaticHTML(tree.Root.Children, func(html string) bool {
+		return strings.Contains(html, `class="y"`) && strings.Contains(html, ">alias</span>")
+	}) {
+		t.Error("expected visibleIf truthy element to render")
+	}
+	if strings.Contains(renderStaticHTML(tree.Root.Children), "visibleIf") {
+		t.Error("visibleIf must not leak into emitted HTML")
+	}
+}
+
+// TestShowIfBareAlwaysRenders verifies `<X showIf />` (no value) is truthy.
+func TestShowIfBareAlwaysRenders(t *testing.T) {
+	tree := annotateAndBuild(t, `export default function App() {
+	return <div><span class="bare" showIf>bare</span></div>;
+}`)
+	if !findStaticHTML(tree.Root.Children, func(html string) bool {
+		return strings.Contains(html, `class="bare"`) && strings.Contains(html, ">bare</span>")
+	}) {
+		t.Error("expected bare showIf to render the element")
+	}
+}
+
+// TestShowIfReactiveBecomesConditionalSlot verifies that a signal-driven showIf
+// produces a ConditionalSlot (hydration toggles visibility) rather than folding.
+func TestShowIfReactiveBecomesConditionalSlot(t *testing.T) {
+	tree := annotateAndBuild(t, `function Toggle() {
+	const [on] = createSignal(true);
+	return <div><span class="maybe" showIf={on()}>hi</span></div>;
+}
+export default function App() { return <Toggle />; }`)
+	if !findConditional(tree.Root.Children) {
+		t.Error("expected reactive showIf to produce a ConditionalSlot")
+	}
+}
+
+// TestShowIfOnComponentElement verifies the sugar works on component elements,
+// not just intrinsic ones.
+func TestShowIfOnComponentElement(t *testing.T) {
+	tree := annotateAndBuild(t, `function Widget() { return <b class="w">w</b>; }
+function Card() {
+	const [n] = createSignal(0);
+	return <div><Widget showIf={n() > 0} /></div>;
+}
+export default function App() { return <Card />; }`)
+	if !findConditional(tree.Root.Children) {
+		t.Error("expected component showIf to produce a ConditionalSlot")
+	}
+}
+
+// TestShowIfEquivalentToExplicitGuard verifies the sugar lowers to the same slot
+// shape as the explicit `{test && <el/>}` form.
+func TestShowIfEquivalentToExplicitGuard(t *testing.T) {
+	sugar := annotateAndBuild(t, `export default function App() {
+	return <div><span class="s" showIf={1 < 2}>x</span></div>;
+}`)
+	explicit := annotateAndBuild(t, `export default function App() {
+	return <div>{1 < 2 && <span class="s">x</span>}</div>;
+}`)
+	if got, want := renderStaticHTML(sugar.Root.Children), renderStaticHTML(explicit.Root.Children); got != want {
+		t.Errorf("showIf sugar output differs from explicit guard:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// TestShowIfStripsFromComponentProps verifies the attribute never reaches a
+// child component's props map (the builder strips it before extracting props).
+func TestShowIfStripsFromComponentProps(t *testing.T) {
+	tree := annotateAndBuild(t, `function Inner(props) {
+	return <span>{Object.keys(props).length}</span>;
+}
+export default function App() {
+	const [n] = createSignal(0);
+	return <Inner showIf={n() > 0} other="x" />;
+}`)
+	if strings.Contains(renderStaticHTML(tree.Root.Children), "showIf") {
+		t.Error("showIf must not be passed to a component's props")
+	}
+}
+
+// TestShowIfExprGuardsAndStrips exercises the exported helper directly: it must
+// report the test, remove showIf/visibleIf, and never mutate the input element.
+func TestShowIfExprGuardsAndStrips(t *testing.T) {
+	prog := parseProg(t, `export default function App() { return <div showIf={a} visibleIf={b} class="k">x</div>; }`)
+	exp := prog.Body[len(prog.Body)-1].(*ast.ExportStmt)
+	appFn := exp.Declaration.(*ast.FnDecl)
+	el := appFn.Body[0].(*ast.ReturnStmt).Value.(*ast.JSXElement)
+	origLen := len(el.Opening.Attributes)
+
+	test, stripped, ok := irtree.ShowIfExpr(el)
+	if !ok {
+		t.Fatal("expected ShowIfExpr to detect showIf")
+	}
+	if _, ok := test.(*ast.Identifier); !ok {
+		t.Errorf("expected identifier test, got %T", test)
+	}
+	if len(el.Opening.Attributes) != origLen {
+		t.Error("ShowIfExpr must not mutate the original element")
+	}
+	if len(stripped.Opening.Attributes) != origLen-2 {
+		t.Fatalf("expected both showIf and visibleIf stripped, got %d attrs", len(stripped.Opening.Attributes))
+	}
+	for _, attr := range stripped.Opening.Attributes {
+		if attr.Name == "showIf" || attr.Name == "visibleIf" {
+			t.Errorf("attribute %q leaked through stripping", attr.Name)
+		}
+	}
+}
+
+// renderStaticHTML walks slot nodes collecting StaticHTML/initial text.
+func renderStaticHTML(children []irtree.SlotNode) string {
+	var b strings.Builder
+	var walk func(nodes []irtree.SlotNode)
+	walk = func(nodes []irtree.SlotNode) {
+		for _, n := range nodes {
+			switch c := n.(type) {
+			case *irtree.StaticHTML:
+				b.WriteString(c.HTML)
+			case *irtree.TextSlot:
+				b.WriteString(c.Initial)
+			case *irtree.ExprSlot:
+				b.WriteString(c.Initial)
+			case *irtree.ComponentSlot:
+				if c.Component != nil {
+					walk(c.Component.Children)
+					walk(c.Component.ReturnSlots)
+				}
+			case *irtree.ConditionalSlot:
+				walk(c.Consequent)
+				walk(c.Alternate)
+			case *irtree.ListSlot:
+				for _, li := range c.Items {
+					walk(li.Contents)
+				}
+			}
+		}
+	}
+	walk(children)
+	return b.String()
+}
+
+// renderSlotHTML flattens slot nodes into their static HTML for assertions.
+func renderSlotHTML(item *irtree.ListItem) string {
+	var b strings.Builder
+	var walk func(nodes []irtree.SlotNode)
+	walk = func(nodes []irtree.SlotNode) {
+		for _, n := range nodes {
+			switch c := n.(type) {
+			case *irtree.StaticHTML:
+				b.WriteString(c.HTML)
+			case *irtree.TextSlot:
+				b.WriteString(c.Initial)
+			case *irtree.ExprSlot:
+				b.WriteString(c.Initial)
+			case *irtree.ComponentSlot:
+				if c.Component != nil {
+					walk(c.Component.ReturnSlots)
+				}
+			case *irtree.ListSlot:
+				for _, li := range c.Items {
+					walk(li.Contents)
+				}
+			case *irtree.ConditionalSlot:
+				walk(c.Consequent)
+			}
+		}
+	}
+	walk(item.Contents)
+	return b.String()
 }

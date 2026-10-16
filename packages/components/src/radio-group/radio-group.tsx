@@ -1,111 +1,46 @@
 import './radio-group.css';
-import { createSignal, createEffect } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSChoice, type CSSScope } from '@krate/runtime';
+
+const RadioGroupCtx = createScope<string>();
 
 export interface RadioGroupProps {
-  children?: any;
-  value?: string;
+  /** Literal initial selected value. */
   defaultValue?: string;
-  onValueChange?: (value: string) => void;
-  name?: string;
-  orientation?: 'horizontal' | 'vertical';
+  label?: string;
+  children?: any;
 }
 
+/**
+ * Radio group. Zero JS via a context-provided CSS scope; items compile to hidden
+ * radios plus `:has()` CSS.
+ */
 export function RadioGroup(props: RadioGroupProps) {
-  var [selected, setSelected] = createSignal(props.defaultValue || "");
-  var rootRef: HTMLElement | null = null;
-
-  createEffect(function () {
-    if (props.value !== undefined) {
-      setSelected(props.value);
-    }
-  });
-
-  function handleChange(val: string) {
-    setSelected(val);
-    if (props.onValueChange) {
-      props.onValueChange(val);
-    }
-  }
-
-  function syncItems(root: HTMLElement, selectedValue: string) {
-    var items = root.querySelectorAll("[data-krate-radio-group-item]");
-    for (var i = 0; i < items.length; i++) {
-      var el = items[i] as HTMLElement;
-      var val = el.getAttribute("data-value");
-      el.setAttribute("data-state", val === selectedValue ? "checked" : "unchecked");
-    }
-  }
-
-  function handleClick(e: MouseEvent) {
-    var target = e.target as HTMLElement;
-    var root = target.closest("[data-krate-radio-group]") as HTMLElement;
-    if (root) rootRef = root;
-
-    var item = target.closest("[data-krate-radio-group-item]");
-    if (item) {
-      var value = item.getAttribute("data-value");
-      if (value) {
-        handleChange(value);
-        if (root) {
-          syncItems(root, value);
-        }
-      }
-    }
-  }
-
-  createEffect(function () {
-    var selectedValue = selected();
-    var root = rootRef;
-    if (root) {
-      syncItems(root, selectedValue);
-    }
-  });
-
+  const value = createCSSChoice<string>('', { as: 'radiogroup', label: props.label });
   return (
-    <div
-      ref={(el) => { rootRef = el as HTMLElement; }}
-      class="krate-radio-group"
-      data-krate-radio-group="true"
-      role="radiogroup"
-      data-orientation={props.orientation || "vertical"}
-      onClick={handleClick}
-    >
-      {props.children}
-    </div>
+    <RadioGroupCtx.Provider value={value}>
+      <div class="krate-radio-group">{props.children}</div>
+    </RadioGroupCtx.Provider>
   );
 }
 
 export interface RadioGroupItemProps {
   value?: string;
-  disabled?: boolean;
   children?: any;
 }
 
+/** @deprecated Use `RadioGroup.Item` instead. */
 export function RadioGroupItem(props: RadioGroupItemProps) {
-  var value = props.value || "";
-
+  const scope = RadioGroupCtx.use();
   return (
-    <button
-      class={"krate-radio-group-item" + (props.disabled ? " krate-radio-group-item-disabled" : "")}
-      role="radio"
-      type="button"
-      data-value={value}
-      data-krate-radio-group-item="true"
-      disabled={props.disabled}
-    >
-      <span class="krate-radio-group-item-indicator">
-        <span class="krate-radio-group-item-indicator-dot" />
-      </span>
-    </button>
+    <label class="krate-radio-item" {...scope.trigger(props.value)}>
+      <span class="krate-radio-indicator" aria-hidden="true" />
+      <span class="krate-radio-label">{props.children}</span>
+    </label>
   );
 }
 
-export interface RadioGroupLabelProps {
-  children?: any;
+export interface RadioGroup {
+  Item: typeof RadioGroupItem;
 }
 
-export function RadioGroupLabel(props: RadioGroupLabelProps) {
-  return (
-    <span class="krate-radio-group-label">{props.children}</span>
-  );
-}
+RadioGroup.Item = RadioGroupItem;

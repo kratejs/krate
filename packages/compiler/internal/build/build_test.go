@@ -13,13 +13,18 @@ import (
 
 func TestSubstituteImportMetaURL(t *testing.T) {
 	js := "const base = new URL('../models/', import.meta.url);"
-	got := substituteImportMetaURL(js, "demo", "index.ab12cd.js")
+	got := substituteImportMetaURL(js, "demo", "index.ab12cd.js", "")
 	want := "const base = new URL('../models/', \"/demo/index.ab12cd.js\");"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
-	if !strings.Contains(substituteImportMetaURL("no import.meta here", "x", "y.js"), "import.meta") {
+	if !strings.Contains(substituteImportMetaURL("no import.meta here", "x", "y.js", ""), "import.meta") {
 		t.Fatal("must be a no-op when import.meta.url is absent")
+	}
+	// basePath is applied so relative imports resolve under the sub-path.
+	withBase := substituteImportMetaURL(js, "demo", "index.ab12cd.js", "/docs")
+	if !strings.Contains(withBase, `"/docs/demo/index.ab12cd.js"`) {
+		t.Fatalf("basePath not applied: %q", withBase)
 	}
 }
 
@@ -58,7 +63,7 @@ func TestBuildTestProject(t *testing.T) {
 	// from packages/compiler/internal/build/ -> packages/compiler/ -> examples
 	projectRoot := filepath.Clean(filepath.Join(pkgDir, "..", "..", "..", "..", "examples"))
 	if _, err := os.Stat(projectRoot); os.IsNotExist(err) {
-		t.Skipf("examples not found at %s", projectRoot)
+		requireE2E(t, "examples not found at %s", projectRoot)
 	}
 
 	cfg, err := config.Load(projectRoot)
@@ -88,7 +93,9 @@ func TestBuildTestProject(t *testing.T) {
 		{path: filepath.Join(outDir, "test", "index.html")},
 		{path: filepath.Join(outDir, "video", "[id]", "index.html"), contains: []string{"<!DOCTYPE html>", "video"}},
 		{path: filepath.Join(outDir, "syntax-robustness", "index.html"), contains: []string{"<!DOCTYPE html>", "Syntax Robustness"}},
-		{path: filepath.Join(outDir, "manifest.json"), contains: []string{"\"pages\""}},
+		{path: filepath.Join(outDir, "go-component", "index.html"), contains: []string{"<!DOCTYPE html>", "krate-go-badge", "go-native"}},
+		{path: filepath.Join(outDir, "server-runtime-demo", "index.html"), contains: []string{"go-server-time", "Go build time"}},
+		{path: filepath.Join(outDir, "manifest.json"), contains: []string{"\"pages\"", "\"runtime\": \"go\"", "\"component\": \"GoRuntimeTime\""}},
 	}
 
 	for _, c := range checks {
@@ -140,6 +147,44 @@ func TestBuildTestProject(t *testing.T) {
 		}
 	}
 
+	// Dynamic-route regression: the reusable [id] template must be built with a
+	// replaceable sentinel (not a leaked variable name or a folded literal), so
+	// the server can substitute the matched URL segment anywhere the param is
+	// read - body text, <title>, and meta attributes.
+	templatePath := filepath.Join(outDir, "video", "[id]", "index.html")
+	if data, err := os.ReadFile(templatePath); err == nil {
+		content := string(data)
+		if !strings.Contains(content, "__KRATE_PARAM_id__") {
+			t.Errorf("dynamic route template missing param sentinel (dynamic params not bound in props fold)")
+		}
+		if strings.Contains(content, ">videoId<") || strings.Contains(content, "Video ID: <strong>videoId") {
+			t.Errorf("dynamic route template leaked the local variable name instead of a sentinel")
+		}
+	} else {
+		t.Errorf("reading dynamic route template: %v", err)
+	}
+
+	// generateStaticParams pages are built separately with concrete values and
+	// must not contain a sentinel.
+	for _, id := range []string{"abc123", "demo-42"} {
+		p := filepath.Join(outDir, "video", id, "index.html")
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Errorf("reading static param page %s: %v", id, err)
+			continue
+		}
+		content := string(data)
+		if !strings.Contains(content, id) {
+			t.Errorf("static param page %s missing its concrete id value", id)
+		}
+		if strings.Contains(content, "__KRATE_PARAM_") {
+			t.Errorf("static param page %s unexpectedly contains a dynamic sentinel", id)
+		}
+		if strings.Contains(content, ">unknown<") || strings.Contains(content, "videoId") {
+			t.Errorf("static param page %s rendered a placeholder instead of its param", id)
+		}
+	}
+
 	// Verify JS hydration files exist (hashed names)
 	entries, err := os.ReadDir(outDir)
 	if err != nil {
@@ -156,7 +201,10 @@ func TestBuildTestProject(t *testing.T) {
 		t.Error("no hashed JS hydration file found in output directory")
 	}
 
-	// Verify Tailwind CSS generation: stylesheet should contain utility rules
+	// Verify Tailwind CSS generation: the site-global stylesheet (linked on
+	// every page) should contain utility rules. Per-page stylesheets are
+	// separate now, so scan the root styles.*.css files for one that carries
+	// the generated utilities.
 	twChecks := []struct {
 		desc string
 		seek string
@@ -174,25 +222,30 @@ func TestBuildTestProject(t *testing.T) {
 		{"bg color utility", ".bg-blue-50"},
 		{"text size utility", ".text-2xl"},
 	}
-	cssFound := false
+	cssFiles := []string{}
 	for _, c := range entries {
 		if strings.HasPrefix(c.Name(), "styles.") && strings.HasSuffix(c.Name(), ".css") && !c.IsDir() {
 			data, err := os.ReadFile(filepath.Join(outDir, c.Name()))
 			if err != nil {
 				t.Fatalf("reading CSS file %s: %v", c.Name(), err)
 			}
-			css := string(data)
-			for _, tw := range twChecks {
-				if !strings.Contains(css, tw.seek) {
-					t.Errorf("Tailwind CSS missing %s: %q not in stylesheet", tw.desc, tw.seek)
-				}
-			}
-			cssFound = true
-			break
+			cssFiles = append(cssFiles, string(data))
 		}
 	}
-	if !cssFound {
-		t.Error("no styles.css file found")
+	if len(cssFiles) == 0 {
+		t.Error("no styles.*.css file found")
+	}
+	for _, tw := range twChecks {
+		found := false
+		for _, css := range cssFiles {
+			if strings.Contains(css, tw.seek) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Tailwind CSS missing %s: %q not in any stylesheet", tw.desc, tw.seek)
+		}
 	}
 
 	// Verify docs plugin generated pages
@@ -249,7 +302,7 @@ func TestBuildRejectsUnsupportedRenderSyntax(t *testing.T) {
 	}
 	projectRoot := filepath.Clean(filepath.Join(pkgDir, "..", "..", "..", "..", "examples"))
 	if _, err := os.Stat(projectRoot); os.IsNotExist(err) {
-		t.Skipf("examples not found at %s", projectRoot)
+		requireE2E(t, "examples not found at %s", projectRoot)
 	}
 
 	cfg, err := config.Load(projectRoot)
@@ -319,7 +372,7 @@ func TestStageServerRenderer(t *testing.T) {
 	}
 	src := findServerRendererSource(repoRoot)
 	if src == "" {
-		t.Skipf("server-renderer source not found under %s", repoRoot)
+		requireE2E(t, "server-renderer source not found under %s", repoRoot)
 	}
 
 	// Fake project root so findRendererScript locates dist/.krate/ exactly as
@@ -348,7 +401,7 @@ func TestStageServerRenderer(t *testing.T) {
 	// Node must be able to parse the driver without tsx.
 	node, err := exec.LookPath("node")
 	if err != nil {
-		t.Skipf("node not available: %v", err)
+		requireE2E(t, "node not available: %v", err)
 	}
 	if out, err := exec.Command(node, "--check", staged).CombinedOutput(); err != nil {
 		t.Fatalf("node --check failed: %v\n%s", err, out)

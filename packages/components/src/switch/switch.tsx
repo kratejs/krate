@@ -1,53 +1,23 @@
 import './switch.css';
-import { createSignal, createEffect } from '@krate/runtime';
+import { createCSSToggle } from '@krate/runtime';
 
 export interface SwitchProps {
-  checked?: boolean;
-  defaultChecked?: boolean;
-  onCheckedChange?: (checked: boolean) => void;
-  disabled?: boolean;
-  name?: string;
-  value?: string;
-  id?: string;
+  /** Accessible label for the switch. */
+  label?: string;
+  children?: any;
 }
 
+/**
+ * Switch. Zero JS: compiles to a hidden checkbox plus `:has()` CSS. The initial
+ * state is fixed at build time (uncontrolled); use the CSS-signal `part` API if
+ * you need a per-instance initial value.
+ */
 export function Switch(props: SwitchProps) {
-  var [checked, setChecked] = createSignal(props.defaultChecked || false);
-
-  createEffect(function () {
-    if (props.checked !== undefined) {
-      setChecked(props.checked);
-    }
-  });
-
-  function toggle() {
-    if (props.disabled) return;
-    var next = !checked();
-    setChecked(next);
-    if (props.onCheckedChange) {
-      props.onCheckedChange(next);
-    }
-  }
-
-  function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === " " || e.key === "Enter") {
-      e.preventDefault();
-      toggle();
-    }
-  }
-
+  const [on, setOn] = createCSSToggle(false, { as: 'switch' });
   return (
-    <button
-      class={"krate-switch" + (checked() ? " krate-switch-checked" : "")}
-      role="switch"
-      type="button"
-      aria-checked={checked() ? "true" : "false"}
-      data-state={checked() ? "checked" : "unchecked"}
-      disabled={props.disabled}
-      onClick={toggle}
-      onKeyDown={handleKeyDown}
-    >
+    <button class="krate-switch" type="button" aria-label={props.label} onClick={() => setOn(!on())}>
       <span class="krate-switch-thumb" />
+      {props.children}
     </button>
   );
 }

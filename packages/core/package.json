@@ -38,7 +38,11 @@
   ],
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "postinstall": "node ./install.js"
+  },
+  "dependencies": {
+    "@krate/plugin": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

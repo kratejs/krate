@@ -1,0 +1,4 @@
+# Static-host redirects (Netlify / Cloudflare Pages format).
+# `krate serve` applies these from krate.config.ts; this file covers static hosts.
+/docs/guides/contributing/  /docs/contributing/            301
+/docs/guides/diagrams/      /docs/core-concepts/markdown/  301

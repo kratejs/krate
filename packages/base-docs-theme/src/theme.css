@@ -1,0 +1,1777 @@
+:root,
+:root[data-theme="light"] {
+    color-scheme: light;
+    --sidebar-width: 280px;
+    --toc-width: 240px;
+    --header-height: 56px;
+    --toc-bar-height: 0px;
+    --chrome-height: var(--header-height);
+    --gap: 2rem;
+    --radius: 8px;
+    
+    /* Typography */
+    --font-sans: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono Variable', "JetBrains Mono", "Fira Code", monospace;
+    
+    /* Core Monochrome Palette */
+    --color-bg: #ffffff;
+    --color-fg: #09090b;
+    --color-muted: #71717a;
+    --color-muted-bg: #f4f4f5;
+    --color-border: #e4e4e7;
+    --color-card-bg: rgba(255, 255, 255, 0.7);
+    --color-sidebar-bg: rgba(250, 250, 250, 0.75);
+    --color-sidebar-border: #e4e4e7;
+    
+    /* Content Colors */
+    --color-text-main: #27272a;
+    --color-text-link: #52525b;
+    --color-pre-bg: #18181b;
+    --color-pre-fg: #fafafa;
+    
+    /* Modern Glassmorphism & Accent Overlays */
+    --blur-intensity: 12px;
+    --navbar-bg: rgba(255, 255, 255, 0.75);
+    --overlay-bg: rgba(9, 9, 11, 0.4);
+    --docs-accent-bg: rgba(249, 115, 22, 0.08);
+    --docs-accent-border: rgba(249, 115, 22, 0.2);
+    --docs-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.04), 0 4px 12px -5px rgba(0, 0, 0, 0.03);
+    
+    /* Brand Accent Colors (Requested) */
+    --color-primary: #f97316;
+    --color-primary-hover: #ea580c;
+
+    /* Bridge for @krate/components (Aside/admonitions, Card, Steps, Tabs, Code,
+       Avatar). Those components consume `--krate-*` tokens with dark defaults;
+       mapping them here makes every library component follow the docs palette in
+       both light and dark mode. Values reference `--color-*`, so they resolve
+       correctly under the dark / prefers-color-scheme overrides below. */
+    --krate-primary: var(--color-primary);
+    --krate-primary-hover: var(--color-primary-hover);
+    --krate-text: var(--color-fg);
+    --krate-text-muted: var(--color-text-main);
+    --krate-border: var(--color-border);
+    --krate-card-bg: color-mix(in srgb, var(--color-bg) 96%, var(--color-fg));
+    --krate-tabs-bg: var(--color-muted-bg);
+    --krate-danger: #ef4444;
+    --krate-code-bg: var(--color-pre-bg);
+    --krate-code-text: var(--color-pre-fg);
+    --krate-code-title-bg: color-mix(in srgb, var(--color-pre-bg) 82%, #ffffff 6%);
+    --krate-code-title-text: #9ca3af;
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --color-bg: #09090b;
+    --color-fg: #fafafa;
+    --color-muted: #a1a1aa;
+    --color-muted-bg: #18181b;
+    --color-border: #27272a;
+    --color-card-bg: rgba(17, 17, 19, 0.7);
+    --color-sidebar-bg: rgba(9, 9, 11, 0.65);
+    --color-sidebar-border: #27272a;
+    
+    --color-text-main: #e4e4e7;
+    --color-text-link: #a1a1aa;
+    --color-pre-bg: #030303;
+    --color-pre-fg: #f4f4f5;
+    
+    /* Dark Glassmorphism */
+    --navbar-bg: rgba(9, 9, 11, 0.8);
+    --overlay-bg: rgba(0, 0, 0, 0.6);
+    --docs-accent-bg: rgba(249, 115, 22, 0.12);
+    --docs-accent-border: rgba(249, 115, 22, 0.3);
+    --docs-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+    
+    --color-primary: #f97316;
+    --color-primary-hover: #f97316;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --color-bg: #09090b;
+        --color-fg: #fafafa;
+        --color-muted: #a1a1aa;
+        --color-muted-bg: #18181b;
+        --color-border: #27272a;
+        --color-card-bg: rgba(17, 17, 19, 0.7);
+        --color-sidebar-bg: rgba(9, 9, 11, 0.65);
+        --color-sidebar-border: #27272a;
+        --color-text-main: #e4e4e7;
+        --color-text-link: #a1a1aa;
+        --color-pre-bg: #030303;
+        --color-pre-fg: #f4f4f5;
+        --navbar-bg: rgba(9, 9, 11, 0.8);
+        --overlay-bg: rgba(0, 0, 0, 0.6);
+        --docs-accent-bg: rgba(249, 115, 22, 0.12);
+        --docs-accent-border: rgba(249, 115, 22, 0.3);
+        --docs-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+        --color-primary: #f97316;
+        --color-primary-hover: #f97316;
+    }
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html {
+    /* Anchored headings should not hide beneath the sticky header / mobile TOC
+       bar. --chrome-height tracks the full sticky chrome and is expanded by the
+       mobile media query when the TOC bar is present. */
+    scroll-padding-top: var(--chrome-height);
+}
+
+body {
+    margin: 0;
+    font-family: var(--font-sans);
+    color: var(--color-fg);
+    background: var(--color-bg);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    caret-color: var(--color-primary);
+    transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Browser surfaces carry the design too: scrollbars, selection, tabular data. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+}
+
+*::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+    background-color: var(--color-border);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-muted);
+}
+
+/* Lock background scrolling while the mobile drawer or TOC sheet is open. */
+body.krc-nav-open {
+    overflow: hidden;
+    overscroll-behavior: contain;
+}
+
+a {
+    color: var(--color-primary);
+    text-decoration: none;
+    transition: color 0.15s ease;
+}
+
+a:hover {
+    color: var(--color-primary-hover);
+}
+
+/* --- Layout Shell & Glassmorphic Headers --- */
+.docs-navbar {
+    display: flex;
+    align-items: center;
+    height: var(--header-height);
+    padding: 0 1.5rem;
+    padding-left: max(1.5rem, env(safe-area-inset-left));
+    padding-right: max(1.5rem, env(safe-area-inset-right));
+    background: var(--navbar-bg);
+    backdrop-filter: blur(var(--blur-intensity));
+    -webkit-backdrop-filter: blur(var(--blur-intensity));
+    border-bottom: 1px solid var(--color-border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    gap: 1rem;
+}
+
+.navbar-left,
+.navbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+.navbar-left {
+    flex: 1;
+}
+
+.navbar-actions {
+    margin-left: auto;
+}
+
+.navbar-switchers {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.navbar-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.navbar-title:hover,
+.sidebar-header h2 a:hover {
+    color: var(--color-primary);
+}
+
+.navbar-social-links {
+    display: none;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.social-link,
+.sidebar-close,
+.sidebar-toggle,
+.mobile-toc-toggle,
+.theme-toggle,
+.toc-mobile-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    color: var(--color-fg);
+    background: transparent;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.social-link svg {
+    width: 16px;
+    height: 16px;
+}
+
+.sidebar-overlay,
+.toc-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--overlay-bg);
+    z-index: 90;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    animation: fadeIn 0.2s ease forwards;
+}
+
+.sidebar-overlay.open,
+.toc-overlay.open {
+    display: block;
+}
+
+/* --- Navigation Sidebars --- */
+.sidebar {
+    position: fixed;
+    top: var(--header-height);
+    left: 0;
+    bottom: 0;
+    width: var(--sidebar-width);
+    background: var(--color-sidebar-bg);
+    backdrop-filter: blur(var(--blur-intensity));
+    -webkit-backdrop-filter: blur(var(--blur-intensity));
+    border-right: 1px solid var(--color-sidebar-border);
+    overflow-y: auto;
+    z-index: 95;
+    display: flex;
+    flex-direction: column;
+    padding-left: env(safe-area-inset-left);
+    padding-bottom: env(safe-area-inset-bottom);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+}
+
+.sidebar-header {
+    padding: 1.25rem 1.25rem 0.75rem;
+    border-bottom: 1px solid var(--color-sidebar-border);
+}
+
+.sidebar-header h2 {
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--color-fg);
+    letter-spacing: -0.01em;
+}
+
+.sidebar-header h2 a {
+    color: inherit;
+}
+
+.sidebar-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.9rem;
+}
+
+.sidebar-social-links {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+/* i18n/version switchers live in the drawer on mobile (see .navbar-switchers).
+   The whole sidebar header is hidden on desktop, so these follow it. */
+.sidebar-switchers {
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.9rem;
+}
+
+/* Overlay (don't push sibling items down) but stay inside the drawer. */
+.sidebar-switchers .krate-switcher-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: auto;
+    min-width: 150px;
+    width: max-content;
+    max-width: 70vw;
+}
+
+.sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 999px;
+}
+
+.sidebar-nav {
+    padding: 0.75rem 0.75rem 1.5rem;
+    flex: 1;
+}
+
+.sidebar-section {
+    margin: 0.25rem 0;
+}
+
+.sidebar-section-title {
+    padding: 0.75rem 0.5rem 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-muted);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.sidebar-section-row {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 2.25rem;
+    border-radius: var(--radius);
+}
+
+.sidebar-section-link,
+.sidebar-section-toggle,
+.sidebar-link {
+    border-radius: var(--radius);
+}
+
+.sidebar-section-link {
+    position: relative;
+    min-width: 0;
+    flex: 1;
+    display: block;
+    padding: 0.375rem 0.5rem;
+    color: var(--color-text-link);
+    font-size: 0.875rem;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.15s ease;
+}
+
+.sidebar-section-toggle {
+    width: 1.75rem;
+    height: 1.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    color: var(--color-muted);
+    background: transparent;
+    cursor: pointer;
+    flex: 0 0 auto;
+    transition: color 0.15s ease;
+}
+
+.sidebar-chevron {
+    display: inline-block;
+    transform: rotate(0deg);
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 1rem;
+}
+
+.sidebar-collapsible.open > .sidebar-section-row .sidebar-chevron {
+    transform: rotate(90deg);
+}
+
+.sidebar-section-children {
+    margin-left: 0.65rem;
+    padding-left: 0.5rem;
+    border-left: 1px solid var(--color-border);
+}
+
+.sidebar-collapsible.collapsed > .sidebar-section-children {
+    display: none;
+}
+
+.sidebar-section-static > .sidebar-section-children {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+}
+
+.sidebar-link {
+    position: relative;
+    display: block;
+    margin: 0.12rem 0;
+    padding: 0.375rem 0.5rem;
+    color: var(--color-text-link);
+    font-size: 0.875rem;
+    transition: all 0.15s ease;
+}
+
+/* Unified Active Sidebar States using brand orange */
+.sidebar-link.active,
+.sidebar-section-link.active {
+    color: var(--color-primary);
+    background: var(--docs-accent-bg);
+    box-shadow: inset 0 0 0 1px var(--docs-accent-border);
+    padding-left: 0.85rem;
+    font-weight: 600;
+}
+
+.sidebar-link.active::before,
+.sidebar-section-link.active::before {
+    content: "";
+    position: absolute;
+    left: 0.35rem;
+    top: 50%;
+    width: 3px;
+    height: 14px;
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: var(--color-primary);
+}
+
+/* --- Core Semantic Content Typography --- */
+/* Conditional wrappers (the `data-krate-cond-w` divs emitted around
+   {cond && …}) are layout-transparent, so a `position: sticky` child — e.g. the
+   mobile TOC bar — sticks to the viewport instead of being clipped to the
+   wrapper's own (short) box. Hidden branches still use inline display:none. */
+.docs-page > [data-krate-cond-w] {
+    display: contents;
+}
+
+.docs-body {
+    display: flex;
+    margin-top: 0;
+    min-height: calc(100vh - var(--header-height));
+    min-height: calc(100dvh - var(--header-height));
+}
+
+.docs-main {
+    flex: 1;
+    min-width: 0;
+    /* Explicit width so auto margins can't size this flex item to max-content
+       (which happens in the mobile column layout below and blows the page out
+       to the widest code line). */
+    width: 100%;
+    padding: 2.5rem 2rem 4rem;
+    padding-bottom: max(4rem, env(safe-area-inset-bottom));
+    max-width: 840px;
+    margin: 0 auto;
+    /* Long unbreakable tokens (URLs, hashes) wrap instead of overflowing. */
+    overflow-wrap: break-word;
+}
+
+.breadcrumbs {
+    font-size: 0.8rem;
+    color: var(--color-muted);
+    margin-bottom: 1.75rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.breadcrumbs a {
+    color: var(--color-muted);
+}
+
+.breadcrumbs a:hover {
+    color: var(--color-primary);
+}
+
+.breadcrumbs .sep {
+    color: var(--color-border);
+    margin: 0 0.25rem;
+}
+
+.breadcrumbs .current {
+    color: var(--color-fg);
+    font-weight: 500;
+}
+
+.docs-content h1 {
+    margin: 0 0 0.75rem;
+    font-size: 2.25rem;
+    font-weight: 800;
+    color: var(--color-fg);
+    letter-spacing: -0.035em;
+    line-height: 1.15;
+}
+
+.docs-content h2 {
+    margin: 3rem 0 1rem;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-fg);
+    letter-spacing: -0.02em;
+    line-height: 1.3;
+}
+
+.docs-content h3 {
+    margin: 2rem 0 0.75rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--color-fg);
+    letter-spacing: -0.01em;
+}
+
+.docs-content p {
+    margin: 1rem 0;
+    line-height: 1.8;
+    color: var(--color-text-main);
+}
+
+.docs-content p,
+.docs-content li,
+.docs-content a {
+    overflow-wrap: break-word;
+}
+
+/* Inline code chips only - never code inside a fenced block, so the Code
+   component and syntax-highlighted blocks keep their own styling. */
+.docs-content :not(pre) > code {
+    background: var(--color-muted-bg);
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.85em;
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    border: 1px solid var(--color-border);
+}
+
+/* Plain markdown code blocks (no syntax highlighting). The Code component wraps
+   its chrome in `.krate-code-block` and highlighted blocks carry `.chroma`, so
+   both are excluded here. */
+.docs-content :not(.krate-code-block) > pre:not(.chroma) {
+    max-width: 100%;
+    overflow-x: auto;
+    margin: 1.5rem 0;
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius);
+    background: var(--color-pre-bg);
+    color: var(--color-pre-fg);
+    border: 1px solid var(--color-border);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Syntax-highlighted blocks keep chroma's own background/token colors, but
+   adopt the same compact scale and box as the plain blocks. */
+.docs-content :not(.krate-code-block) > pre.chroma {
+    max-width: 100%;
+    overflow-x: auto;
+    margin: 1.5rem 0;
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--color-border);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* The Code component sets its code at 0.875rem; trim it a touch and re-assert
+   its chrome so bundle order can't reintroduce the old inflated size. */
+.docs-content .krate-code-block pre {
+    margin: 0;
+    padding: 16px;
+    border: 0;
+    border-radius: 0 0 8px 8px;
+    background: transparent;
+}
+
+.docs-content .krate-code-block code {
+    font-size: 0.8125rem;
+}
+
+/* Wide GFM tables scroll horizontally instead of overflowing the layout. */
+.table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.docs-content a {
+    font-weight: 500;
+    text-underline-offset: 4px;
+    text-decoration: underline currentColor transparent;
+    transition: text-decoration-color 0.15s ease, color 0.15s ease;
+}
+
+.docs-content a:hover {
+    text-decoration-color: var(--color-primary);
+}
+
+.docs-content img,
+.docs-content video {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius);
+    margin: 1.5rem 0;
+    border: 1px solid var(--color-border);
+    box-shadow: var(--docs-shadow);
+}
+
+/* Long unbreakable tokens (URLs, hashes, inline code, headings) must wrap
+   rather than force the page wider than the viewport. `anywhere` also shrinks
+   min-content size, which keeps flex/grid children from blowing out. */
+.docs-content {
+    overflow-wrap: anywhere;
+    min-width: 0;
+}
+
+.docs-content :is(h1, h2, h3, h4, h5, h6) {
+    overflow-wrap: anywhere;
+}
+
+.docs-content :not(pre) > code {
+    overflow-wrap: anywhere;
+}
+
+.docs-content :is(pre, .krate-code-block, .table-wrap, table, img, video) {
+    max-width: 100%;
+}
+
+.docs-content table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1.5rem 0;
+    font-size: 0.875rem;
+}
+
+.docs-content th,
+.docs-content td {
+    border: 1px solid var(--color-border);
+    padding: 0.625rem 1rem;
+    text-align: left;
+}
+
+.docs-content th {
+    background: var(--color-muted-bg);
+    font-weight: 600;
+    color: var(--color-fg);
+}
+
+.docs-content ul,
+.docs-content ol {
+    padding-left: 1.5rem;
+    line-height: 1.8;
+    margin: 1rem 0;
+    color: var(--color-text-main);
+}
+
+.docs-content li {
+    margin: 0.375rem 0;
+}
+
+.docs-content hr {
+    border: none;
+    border-top: 1px solid var(--color-border);
+    margin: 2.5rem 0;
+}
+
+.docs-content blockquote {
+    margin: 1.5rem 0;
+    padding: 0.9rem 1.15rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-muted-bg);
+    color: var(--color-text-main);
+}
+
+.docs-content blockquote > :first-child { margin-top: 0; }
+.docs-content blockquote > :last-child { margin-bottom: 0; }
+
+/* Modern Minimalist Anchors */
+.docs-content .heading-anchor {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.2em;
+    height: 1.2em;
+    margin-left: -1.2em;
+    padding-right: 0.25em;
+    color: var(--color-primary);
+    opacity: 0;
+    transition: opacity 0.15s;
+    text-decoration: none !important;
+    font-size: 0.85em;
+    font-weight: 400;
+    vertical-align: middle;
+}
+
+.docs-content h2:hover .heading-anchor,
+.docs-content h3:hover .heading-anchor {
+    opacity: 1;
+}
+
+/* Bottom Pagination Cards */
+.docs-nav {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--color-border);
+    gap: 1rem;
+}
+
+.docs-nav a {
+    flex: 1;
+    max-width: 48%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-card-bg);
+    box-shadow: var(--docs-shadow);
+    transition: all 0.2s ease;
+}
+
+.docs-nav a:hover {
+    border-color: var(--color-primary);
+    background: var(--docs-accent-bg);
+    text-decoration: none;
+}
+
+.docs-nav .nav-label {
+    font-size: 0.75rem;
+    color: var(--color-muted);
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.docs-nav .nav-title {
+    font-weight: 600;
+    color: var(--color-fg);
+    font-size: 0.95rem;
+}
+
+.docs-nav a:hover .nav-title {
+    color: var(--color-primary);
+}
+
+.docs-nav .nav-next {
+    align-items: flex-end;
+    text-align: right;
+}
+
+/* --- Table of Contents (TOC Framework) --- */
+.toc {
+    display: none;
+    width: var(--toc-width);
+    flex-shrink: 0;
+    padding: 2.5rem 1.5rem 2rem 0.5rem;
+}
+
+.toc-panel {
+    position: sticky;
+    top: calc(var(--header-height) + 2.5rem);
+    max-height: calc(100vh - var(--header-height) - 5rem);
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+
+.toc-panel::-webkit-scrollbar,
+.toc-nav::-webkit-scrollbar {
+    display: none;
+}
+
+.toc-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-fg);
+    margin-bottom: 0.75rem;
+}
+
+.toc-nav {
+    --toc-rail-width: 1rem;
+    --toc-depth-step: 0.75rem;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.toc-link {
+    --toc-indent: 0rem;
+    position: relative;
+    z-index: 1;
+    display: block;
+    font-size: 0.825rem;
+    color: var(--color-muted);
+    line-height: 1.4;
+    padding: 0.35rem 0.5rem 0.35rem calc(var(--toc-rail-width) + var(--toc-indent));
+    border-radius: 4px;
+    transition: color 0.15s, background-color 0.15s;
+}
+
+.toc-h3 {
+    --toc-indent: var(--toc-depth-step);
+}
+
+.toc-link:hover {
+    color: var(--color-fg);
+    font-weight: 600;
+}
+
+.toc-link.in-view {
+    color: var(--color-fg);
+}
+
+.toc-link.active {
+    color: var(--color-primary);
+    font-weight: 600;
+}
+
+/* Advanced SVG Rail Indicators */
+.toc-indicator-svg {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: calc(var(--toc-rail-width) + var(--toc-depth-step) + 0.25rem);
+    min-height: 1px;
+    overflow: visible;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.toc-indicator-rail,
+.toc-indicator-line {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.toc-indicator-rail {
+    stroke: var(--color-border);
+    stroke-width: 1.5;
+}
+
+.toc-indicator-line {
+    stroke: var(--color-primary);
+    stroke-width: 2.5;
+    transition: opacity 0.2s ease;
+}
+
+.toc-indicator-circle {
+    fill: var(--color-bg);
+    stroke: var(--color-primary);
+    stroke-width: 2;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.toc-indicator-circle.visible {
+    opacity: 1;
+}
+
+.toc-mobile-shell {
+    display: none;
+}
+
+/* --- Theme Toggle Micro-Animations --- */
+.theme-toggle {
+    position: relative;
+}
+
+.theme-toggle svg {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.theme-toggle svg:first-child {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+}
+
+.theme-toggle svg:last-child {
+    opacity: 0;
+    transform: rotate(-30deg) scale(0.8);
+}
+
+:root[data-theme="dark"] .theme-toggle svg:first-child {
+    opacity: 0;
+    transform: rotate(30deg) scale(0.8);
+}
+
+:root[data-theme="dark"] .theme-toggle svg:last-child {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+}
+
+/* Interactive Element Global Hovers */
+.social-link:hover,
+.sidebar-close:hover,
+.sidebar-toggle:hover,
+.mobile-toc-toggle:hover,
+.theme-toggle:hover,
+.sidebar-section-row:hover:not(:has(.active)),
+.toc-mobile-toggle:hover {
+    background: var(--color-muted-bg);
+    border-color: color-mix(in srgb, var(--color-border) 70%, var(--color-fg));
+    color: var(--color-fg);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* --- Media Queries (Clean, Fluid Responsive Layouts) --- */
+
+/* Tablet / mobile: drawer sidebar, inline TOC sheet. */
+@media (max-width: 1023px) {
+    /* One custom property drives every sticky offset + scroll-padding below. */
+    :root {
+        --toc-bar-height: 48px;
+        --chrome-height: calc(var(--header-height) + var(--toc-bar-height));
+    }
+
+    /* No TOC for this page: don't reserve space for the (absent) bar. */
+    html:not(:has(.toc-mobile-toggle)) {
+        --toc-bar-height: 0px;
+    }
+
+    .sidebar {
+        transform: translateX(-100%);
+        top: 0;
+        z-index: 101;
+        width: min(85vw, 300px);
+        background: var(--color-bg);
+        box-shadow: 20px 0 40px rgba(0, 0, 0, 0.15);
+        padding-top: env(safe-area-inset-top);
+        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        will-change: transform;
+    }
+
+    .sidebar.open {
+        transform: translateX(0);
+    }
+
+    .docs-body {
+        flex-direction: column;
+    }
+
+    /* Mobile TOC Glassmorphism Layer */
+    .toc-mobile-shell {
+        display: block;
+        position: sticky;
+        top: var(--header-height);
+        z-index: 97;
+        background: var(--navbar-bg);
+        backdrop-filter: blur(var(--blur-intensity));
+        -webkit-backdrop-filter: blur(var(--blur-intensity));
+        border-bottom: 1px solid var(--color-border);
+    }
+
+    .toc-mobile-toggle {
+        width: 100%;
+        height: var(--toc-bar-height);
+        padding: 0 1.5rem;
+        padding-left: max(1.5rem, env(safe-area-inset-left));
+        padding-right: max(1.5rem, env(safe-area-inset-right));
+        border: none;
+        border-radius: 0;
+        justify-content: space-between;
+    }
+
+    .toc-mobile-copy {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        min-width: 0;
+        text-align: left;
+    }
+
+    .toc-mobile-label {
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-muted);
+        font-weight: 700;
+    }
+
+    .toc-current {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--color-fg);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 70vw;
+    }
+
+    /* TOC becomes a top sheet anchored just below the sticky chrome. */
+    .toc {
+        display: block;
+        position: fixed;
+        top: var(--chrome-height);
+        left: 0;
+        right: 0;
+        width: auto;
+        padding: 0;
+        z-index: 96;
+        background: var(--navbar-bg);
+        backdrop-filter: blur(var(--blur-intensity));
+        -webkit-backdrop-filter: blur(var(--blur-intensity));
+        border-bottom: 1px solid var(--color-border);
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.05);
+        overflow: hidden;
+        opacity: 0;
+        max-height: 0;
+        visibility: hidden;
+        transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease, visibility 0.25s;
+    }
+
+    .toc.open {
+        opacity: 1;
+        visibility: visible;
+        max-height: min(70vh, 30rem);
+        max-height: min(70dvh, 30rem);
+    }
+
+    .toc-panel {
+        position: static;
+        height: auto;
+        max-height: inherit;
+        overflow-y: auto;
+        padding: 1rem 1.5rem;
+        padding-left: max(1.5rem, env(safe-area-inset-left));
+        padding-right: max(1.5rem, env(safe-area-inset-right));
+    }
+
+    .toc-header {
+        display: none;
+    }
+
+    .toc-nav {
+        max-height: none;
+        overflow: visible;
+    }
+
+    .docs-main {
+        /* Full width: auto margins must not size this column-flex item to
+           max-content (that would blow the page out to the widest code line). */
+        width: 100%;
+        padding: 1.5rem 1.5rem 3rem;
+        padding-bottom: max(3rem, env(safe-area-inset-bottom));
+    }
+
+    .navbar-actions {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    /* Version/language switchers and the theme toggle move into the drawer on
+       small screens; the navbar keeps only the search + menu controls. */
+    .navbar-switchers,
+    .docs-navbar .theme-toggle {
+        display: none;
+    }
+
+    .docs-content h1 { font-size: 1.85rem; }
+    .docs-content h2 { font-size: 1.35rem; }
+
+    /* Touch: every interactive control gets at least a 44px hit target. */
+    .theme-toggle,
+    .sidebar-toggle,
+    .sidebar-close,
+    .social-link,
+    .sidebar-section-toggle,
+    .toc-link {
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    .sidebar-link,
+    .sidebar-section-link {
+        min-height: 44px;
+    }
+
+    .sidebar-section-toggle {
+        width: 44px;
+        height: 44px;
+    }
+
+    .krate-search-trigger {
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    /* Keep the code header compact: the copy button sits in a 36px bar, so a
+       44px target would inflate it. 32px is still comfortable to tap. */
+    .krate-code-copy {
+        min-width: 32px;
+        min-height: 32px;
+        padding: 6px 10px;
+    }
+}
+
+@media (max-width: 767px) {
+    .docs-navbar {
+        gap: 0.5rem;
+        padding: 0 1rem;
+        padding-left: max(1rem, env(safe-area-inset-left));
+        padding-right: max(1rem, env(safe-area-inset-right));
+    }
+    .toc-mobile-toggle {
+        padding: 0 1rem;
+    }
+    .docs-main {
+        padding: 1.5rem 1rem 3rem;
+        padding-bottom: max(3rem, env(safe-area-inset-bottom));
+    }
+
+    /* Let the actions row shrink instead of pushing the menu button offscreen. */
+    .navbar-title {
+        font-size: 0.8rem;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .navbar-actions {
+        flex: 1 1 auto;
+        min-width: 0;
+        gap: 0.4rem;
+    }
+    .navbar-switchers .krate-switcher {
+        flex-shrink: 0;
+    }
+    .krate-docs-search {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+    .krate-docs-search-input {
+        width: 100%;
+    }
+    .docs-hero-title {
+        font-size: 1.9rem;
+    }
+    .docs-hero {
+        padding: 1.25rem 0 1rem;
+    }
+
+    /* Stack prev/next full-width so long titles aren't cramped side-by-side. */
+    .docs-nav {
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    .docs-nav a {
+        max-width: 100%;
+    }
+    .docs-nav .nav-next {
+        align-items: flex-start;
+        text-align: left;
+    }
+
+    /* Keep the trailing breadcrumb from overflowing. */
+    .breadcrumbs .current {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 65vw;
+    }
+}
+
+@media (min-width: 1024px) {
+    .sidebar-toggle,
+    .toc-mobile-shell,
+    .sidebar-close,
+    .sidebar-header {
+        display: none;
+    }
+
+    /* Drawers/overlays are mobile-only; never show them on desktop. */
+    .sidebar-overlay,
+    .toc-overlay,
+    .sidebar-overlay.open,
+    .toc-overlay.open {
+        display: none;
+    }
+
+    .navbar-social-links {
+        display: flex;
+    }
+
+    .docs-body {
+        padding-left: var(--sidebar-width);
+        padding-right: var(--toc-width);
+    }
+
+    /* No table of contents: reclaim the right column. */
+    .docs-page-no-toc .docs-body {
+        padding-right: 0;
+    }
+
+    .sidebar {
+        transform: translateX(0);
+    }
+
+    .toc {
+        display: block;
+        position: fixed;
+        top: var(--header-height);
+        right: 0;
+        bottom: 0;
+        width: var(--toc-width);
+        background: transparent;
+        order: 0;
+    }
+}
+
+/* Respect users who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* --- Phase 1/2/3/4 additions: description, hero, tags, edit link, sidebar chrome --- */
+
+.sidebar-link,
+.sidebar-section-link {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.sidebar-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sidebar-icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    color: var(--color-muted);
+}
+
+.sidebar-icon svg {
+    display: block;
+}
+
+.sidebar-badge {
+    flex: 0 0 auto;
+    padding: 0.05rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1.4;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--color-primary);
+    background: var(--docs-accent-bg);
+    border: 1px solid var(--docs-accent-border);
+    white-space: nowrap;
+}
+
+.sidebar-badge-new { color: #ffffff; background: var(--color-primary); border-color: var(--color-primary); }
+.sidebar-badge-beta { color: #7c3aed; background: rgba(124, 58, 237, 0.12); border-color: rgba(124, 58, 237, 0.3); }
+.sidebar-badge-default { color: var(--color-muted); background: transparent; border-color: var(--color-border); }
+
+.docs-description {
+    margin: 0 0 1.25rem;
+    max-width: 720px;
+    color: var(--color-muted);
+    font-size: 1.05rem;
+    line-height: 1.6;
+}
+
+.docs-hero {
+    margin: 0 0 2rem;
+    padding: 2rem 0 1.5rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.docs-hero-title {
+    margin: 0;
+    font-size: 2.4rem;
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+}
+
+.docs-hero-tagline {
+    margin: 0.75rem 0 0;
+    max-width: 680px;
+    color: var(--color-muted);
+    font-size: 1.125rem;
+    line-height: 1.6;
+}
+
+.docs-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+.docs-hero-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.6rem 1.25rem;
+    border-radius: var(--radius);
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: none;
+    color: #ffffff;
+    background: var(--color-primary);
+    border: 1px solid transparent;
+    transition: background 0.15s ease;
+}
+
+.docs-hero-action:hover {
+    background: var(--color-primary-hover);
+}
+
+.docs-hero-action-secondary {
+    color: var(--color-text-link);
+    background: transparent;
+    border-color: var(--color-border);
+}
+
+.docs-hero-action-secondary:hover {
+    background: var(--color-muted-bg);
+}
+
+.docs-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 1.5rem 0 0;
+}
+
+.docs-tag {
+    padding: 0.2rem 0.7rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-text-link);
+    background: var(--color-muted-bg);
+    border: 1px solid var(--color-border);
+}
+
+.docs-edit-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 1.75rem;
+    padding: 0.4rem 0.75rem;
+    border-radius: var(--radius);
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--color-muted);
+    text-decoration: none;
+    border: 1px solid var(--color-border);
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.docs-edit-link:hover {
+    color: var(--color-text-link);
+    border-color: var(--color-primary);
+}
+/* -- Taxonomy, footnotes, definition lists, math ------------------------- */
+.docs-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px; border-radius: 999px;
+  background: var(--color-muted-bg); color: var(--color-muted);
+  border: 1px solid var(--color-border); font-size: 12px; text-decoration: none;
+}
+a.docs-tag:hover { color: var(--color-text-main); border-color: var(--color-muted); }
+.docs-tag.docs-category { background: var(--docs-accent-bg); color: var(--color-primary); }
+.docs-last-updated { margin: 16px 0 0; color: var(--color-muted); font-size: 12px; }
+
+.taxonomy-list { list-style: none; padding: 0; margin: 16px 0; display: grid; gap: 8px; }
+.taxonomy-list a { color: var(--color-link); text-decoration: none; }
+.taxonomy-list a:hover { text-decoration: underline; }
+
+.krate-footnotes { margin-top: 32px; font-size: 14px; color: var(--color-muted); }
+.krate-footnote-ref a { text-decoration: none; padding: 0 1px; }
+.krate-footnote-back { text-decoration: none; margin-left: 4px; opacity: 0.6; }
+.krate-footnote-back:hover { opacity: 1; }
+
+.md-content dl { margin: 16px 0; }
+.md-content dt { font-weight: 600; color: var(--color-text-main); }
+.md-content dd { margin: 2px 0 10px 20px; color: var(--color-muted); }
+
+.krate-math-block { display: block; overflow-x: auto; margin: 16px 0; text-align: center; }
+
+.krate-directive-body > :first-child { margin-top: 0; }
+.krate-directive-body > :last-child { margin-bottom: 0; }
+
+/* --- Admonitions (:::note/tip/warning/danger/caution -> <Aside>) ----------
+   The component ships dark defaults; tint each variant from the docs palette
+   so it reads correctly in light mode too. */
+.docs-content .krate-aside {
+    margin: 1.5rem 0;
+    padding: 0.9rem 1.1rem;
+    border: 1px solid color-mix(in srgb, var(--aside-accent, var(--color-primary)) 34%, var(--color-border));
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--aside-accent, var(--color-primary)) 9%, var(--color-bg));
+}
+
+/* `note` is neutral: an off-brand blue is the only cold colour on an otherwise
+   monochrome + orange page, so it reads as "broken". Neutral keeps the
+   informational tone without fighting the palette. */
+.docs-content .krate-aside-note { --aside-accent: var(--color-muted); }
+.docs-content .krate-aside-tip { --aside-accent: #10b981; }
+.docs-content .krate-aside-warning { --aside-accent: #f59e0b; }
+.docs-content .krate-aside-danger { --aside-accent: #ef4444; }
+.docs-content .krate-aside-caution { --aside-accent: #f97316; }
+
+.docs-content .krate-aside-title {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0 0 0.4rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-fg);
+}
+
+.docs-content .krate-aside-title svg { color: var(--aside-accent, var(--color-primary)); flex: 0 0 auto; }
+.docs-content .krate-aside-content { color: var(--color-text-main); line-height: 1.7; }
+.docs-content .krate-aside-content > :first-child { margin-top: 0; }
+.docs-content .krate-aside-content > :last-child { margin-bottom: 0; }
+
+/* --- Container directives (:::card / :::steps / :::tabs / :::code-group) --- */
+.docs-content .krate-card,
+.docs-content .krate-tabs {
+    background: var(--krate-card-bg);
+    border-color: var(--color-border);
+}
+
+.docs-content .krate-card-title {
+    border-bottom-color: var(--color-border);
+    color: var(--color-fg);
+}
+
+.docs-content .krate-card-body { color: var(--color-text-main); }
+
+.docs-content .krate-steps { border-left-color: var(--color-border); }
+
+.docs-content .krate-step-number {
+    background: var(--docs-accent-bg);
+    color: var(--color-primary);
+    border-color: var(--docs-accent-border);
+}
+
+.docs-content .krate-step-title { color: var(--color-fg); }
+.docs-content .krate-step-content { color: var(--color-text-main); }
+
+.docs-content .krate-tabs-list {
+    background: var(--color-muted-bg);
+    border-bottom-color: var(--color-border);
+}
+
+.docs-content .krate-tabs-content { color: var(--color-text-main); }
+/* --- Polish: contrast, focus, typography, motion ----------------------- */
+:root, :root[data-theme="light"] { --color-link: #c2410c; }
+:root[data-theme="dark"] { --color-link: #fb923c; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --color-link: #fb923c; }
+}
+
+/* Accessible links: use the AA contrast token for body links. */
+.docs-content a:not(.heading-anchor):not(.docs-tag),
+.breadcrumbs a,
+.taxonomy-list a { color: var(--color-link); }
+.docs-content a:not(.heading-anchor):not(.docs-tag):hover,
+.breadcrumbs a:hover { color: var(--color-primary-hover); }
+
+/* Visible keyboard focus everywhere. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Skip to content. */
+.skip-link {
+  position: absolute; left: 0.75rem; top: -3rem;
+  z-index: 300; padding: 0.5rem 0.9rem;
+  background: var(--color-primary); color: #fff;
+  border-radius: 0 0 var(--radius) var(--radius);
+  font-weight: 600; text-decoration: none;
+  transition: top 0.15s ease;
+}
+.skip-link:focus { top: 0; color: #fff; }
+
+/* Content typography gaps. */
+.docs-content h4, .docs-content h5, .docs-content h6 {
+  margin: 1.6em 0 0.5em; line-height: 1.3; scroll-margin-top: var(--chrome-height);
+}
+.docs-content h4 { font-size: 1.05rem; }
+.docs-content h5 { font-size: 0.95rem; }
+.docs-content h6 { font-size: 0.9rem; color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.docs-content :is(h1, h2, h3) { scroll-margin-top: calc(var(--chrome-height) + 12px); }
+.docs-content :not(pre) > pre {
+  background: var(--color-pre-bg); color: var(--color-pre-fg);
+  padding: 1rem 1.15rem; border-radius: var(--radius); overflow-x: auto;
+}
+.docs-content kbd {
+  font-family: var(--font-mono); font-size: 0.8em;
+  padding: 0.15em 0.45em; border: 1px solid var(--color-border);
+  border-bottom-width: 2px; border-radius: 5px; background: var(--color-muted-bg);
+}
+.docs-content mark { background: var(--docs-accent-bg); color: inherit; padding: 0 0.15em; border-radius: 3px; }
+.docs-content details {
+  margin: 1rem 0; padding: 0.75rem 1rem; border: 1px solid var(--color-border);
+  border-radius: var(--radius); background: var(--color-card-bg);
+}
+.docs-content summary { cursor: pointer; font-weight: 600; }
+.docs-content figure { margin: 1.5rem 0; }
+.docs-content figcaption { margin-top: 0.5rem; font-size: 0.85rem; color: var(--color-muted); text-align: center; }
+.docs-content li > input[type="checkbox"] { margin-right: 0.4rem; accent-color: var(--color-primary); }
+.docs-content ul.contains-task-list, .docs-content li.task-list-item { list-style: none; }
+::selection { background: var(--docs-accent-bg); }
+
+/* Respect reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}
+/* --- Self-hosted fonts (drop-in) ---------------------------------------
+   Place the subset woff2 files in the site's public/fonts/ directory. The
+   local() sources let installed desktop fonts win; the stack has system
+   fallbacks, so a missing file degrades gracefully. */
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: local('Inter'), local('Inter Variable'), url('/fonts/inter.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: local('JetBrains Mono'), local('JetBrainsMono'), url('/fonts/jetbrains-mono.woff2') format('woff2');
+}
+/* --- Headless search (theme-styled) -----------------------------------
+   The DocsSearch component ships no styles; the theme styles these classes. */
+.krate-docs-search { position: relative; display: flex; align-items: center; }
+.krate-docs-search-icon { position: absolute; left: 0.6rem; display: inline-flex; color: var(--color-muted); pointer-events: none; }
+.krate-docs-search-input { width: 210px; height: 32px; padding: 0 0.6rem 0 1.95rem; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-card-bg); color: var(--color-text-main); font: inherit; font-size: 0.85rem; }
+.krate-docs-search-input:focus { outline: none; border-color: var(--color-primary); }
+.krate-docs-search-results { position: absolute; top: calc(100% + 6px); right: 0; width: min(440px, 92vw); max-height: 62vh; overflow: auto; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: var(--docs-shadow); padding: 0.35rem; z-index: 200; }
+.krate-docs-search-item { display: block; padding: 0.5rem 0.6rem; border-radius: 6px; text-decoration: none; color: var(--color-text-main); }
+.krate-docs-search-item:hover, .krate-docs-search-item.active { background: var(--color-muted-bg); color: var(--color-text-main); }
+.krate-docs-search-title { display: block; font-weight: 600; font-size: 0.9rem; }
+.krate-docs-search-snippet { display: block; font-size: 0.78rem; color: var(--color-muted); margin-top: 0.15rem; }
+.krate-docs-search-empty { padding: 0.75rem; color: var(--color-muted); font-size: 0.85rem; }
+@media (max-width: 1023px) {
+    /* Keep the search input flexible so it shares leftover navbar space. */
+    .krate-docs-search { flex: 1 1 auto; min-width: 0; }
+    .krate-docs-search-input { width: 100%; min-width: 0; }
+    .krate-switcher > summary { min-width: 44px; min-height: 44px; }
+
+    /* Results drop from the navbar as a full-width sheet instead of a narrow
+       popover anchored to the (mid-navbar) input, which ran off-screen. */
+    .krate-docs-search-results {
+        position: fixed;
+        top: var(--header-height);
+        left: 0;
+        right: 0;
+        width: auto;
+        max-height: 60vh;
+        border-radius: 0 0 var(--radius) var(--radius);
+        border-left: 0;
+        border-right: 0;
+    }
+}
+/* --- i18n / versioning chrome ----------------------------------------- */
+.docs-version-banner {
+  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  padding: 0.45rem 1rem; background: var(--docs-accent-bg);
+  border-bottom: 1px solid var(--docs-accent-border);
+  color: var(--color-text-main); font-size: 0.85rem;
+}
+.docs-version-banner-link { color: var(--color-link); font-weight: 600; }
+.krate-switcher { position: relative; }
+.krate-switcher > summary {
+  list-style: none; cursor: pointer; display: inline-flex; align-items: center;
+  justify-content: center;
+  gap: 0.3rem; height: 32px; padding: 0 0.5rem;
+  border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-muted);
+}
+.krate-switcher > summary::-webkit-details-marker { display: none; }
+.krate-switcher[open] > summary { color: var(--color-text-main); border-color: var(--color-primary); }
+.krate-switcher-current { font-size: 0.8rem; font-weight: 600; }
+.krate-switcher:not([open]) > .krate-switcher-menu { display: none; }
+.krate-switcher-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; min-width: 160px;
+  background: var(--color-bg); border: 1px solid var(--color-border);
+  border-radius: var(--radius); box-shadow: var(--docs-shadow); padding: 0.3rem;
+  z-index: 200; display: flex; flex-direction: column;
+}
+.krate-switcher-menu a { padding: 0.4rem 0.6rem; border-radius: 6px; color: var(--color-text-main); text-decoration: none; font-size: 0.85rem; }
+.krate-switcher-menu a:hover { background: var(--color-muted-bg); }
+.krate-switcher-menu a.active { color: var(--color-primary); font-weight: 600; }
+/* --- Mermaid diagrams ------------------------------------------------- */
+/* Mermaid stamps an inline `max-width: <natural>px` on the SVG; override it so
+   diagrams use the content width instead of rendering tiny and "zoomed out". */
+.mermaid { margin: 1.5rem 0; text-align: center; overflow-x: auto; }
+.mermaid svg { max-width: 100% !important; height: auto; }
+
+/* The fenced block is `<pre class="mermaid">`. The generic plain-code rule
+   (`.docs-content :not(.krate-code-block) > pre`) is more specific than
+   `pre.mermaid`, so it would keep the code box (border/padding/background/
+   white-space). Force the diagram box to be a plain, centred block. */
+pre.mermaid,
+.docs-content pre.mermaid {
+    background: transparent !important;
+    border: 0 !important;
+    padding: 0 !important;
+    margin: 1.5rem 0 !important;
+    font-size: inherit !important;
+    line-height: normal !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    color: inherit !important;
+    text-align: center;
+}
+
+/* Mermaid measures and renders its labels itself. The prose rules above
+   (`overflow-wrap: anywhere`, `text-wrap: pretty`, heading/paragraph margins)
+   leak into the diagram and change label metrics — making Mermaid lay out
+   enormous nodes (a 4-node graph became ~3257x4193 in Firefox) and detach
+   edges. Neutralise the inherited text-flow for *everything* inside a diagram,
+   including SVG <text>/<tspan> (which the earlier reset missed). */
+.mermaid,
+.mermaid * {
+    overflow-wrap: normal !important;
+    word-break: normal !important;
+    text-wrap: auto !important;
+    letter-spacing: normal !important;
+    word-spacing: normal !important;
+}
+
+.mermaid :is(p, span, div, foreignObject, ul, ol, li, .nodeLabel, .edgeLabel, .label) {
+    margin: 0;
+    padding: 0;
+    line-height: 1.2 !important;
+    color: inherit;
+    font-size: inherit;
+}
+/* --- Page footer (edit link + feedback) ------------------------------- */
+.docs-page-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap; margin-top: 1.75rem;
+}
+.docs-feedback { display: inline-flex; align-items: center; gap: 0.5rem; color: var(--color-muted); font-size: 0.85rem; }
+.docs-feedback-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border: 1px solid var(--color-border);
+  border-radius: var(--radius); text-decoration: none; font-size: 0.95rem;
+}
+.docs-feedback-btn:hover { border-color: var(--color-primary); background: var(--color-muted-bg); }.docs-contributors { margin-top: 0.5rem; color: var(--color-muted); font-size: 0.85rem; }
+.docs-contributors span { font-weight: 600; color: var(--color-fg); }
+
+/* --- Reading polish ---------------------------------------------------- */
+
+/* Balance headings and avoid orphaned words in prose. */
+.docs-content :is(h1, h2, h3) { text-wrap: balance; }
+.docs-content :is(p, li) { text-wrap: pretty; }
+
+/* Heading anchors are hover-only by default, which hides them on touch. */
+@media (hover: none) {
+    .docs-content .heading-anchor { opacity: 0.45; }
+}
+.docs-content .heading-anchor:focus-visible { opacity: 1; }
+
+/* Make permalink targets obvious. */
+.docs-content :is(h2, h3, h4):target { color: var(--color-primary); }
+
+/* Zebra rows + sticky header for long tables (scroll inside .table-wrap). */
+.docs-content tbody tr:nth-child(even) { background: var(--color-muted-bg); }
+.table-wrap { max-height: 70vh; }
+.table-wrap thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--color-muted-bg);
+}
+
+/* Subtle indicator on off-site links. */
+.docs-content a[href^="http"]:not(.heading-anchor):not(.docs-tag)::after {
+    content: "\2197";
+    margin-left: 0.15em;
+    font-size: 0.75em;
+    color: var(--color-muted);
+}

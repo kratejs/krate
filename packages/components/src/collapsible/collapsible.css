@@ -2,18 +2,18 @@
   width: 100%;
 }
 .krate-collapsible-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
+  color: var(--krate-text, #09090b);
+}
+.krate-collapsible-trigger:focus-visible {
+  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline-offset: 2px;
 }
 .krate-collapsible-content {
-  overflow: hidden;
-  transition: max-height 0.2s ease;
-}
-.krate-collapsible-content[data-state="closed"],
-.krate-collapsible[data-state="closed"] > .krate-collapsible-content {
-  max-height: 0;
-}
-.krate-collapsible-content-inner {
   padding-top: 8px;
-  color: var(--krate-text-muted, #a1a1aa);
+  color: var(--krate-text-muted, #71717a);
   line-height: 1.6;
 }

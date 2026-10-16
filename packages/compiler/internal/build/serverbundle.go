@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
+	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
 
 // CompileServerBundles compiles SSR/ISR/streaming pages into self-contained ESM bundles
@@ -15,11 +16,14 @@ import (
 //   - JSX automatic transform using @krate/runtime/jsx-runtime
 //   - Head, Suspense, Script, Style imported from @krate/runtime/server
 //   - All dependencies bundled (except node_modules externals)
-func CompileServerBundles(results []*PageResult, root, outDir string) map[string]string {
-	// Collect non-SSG pages
+func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap bool) map[string]string {
+	// Collect non-SSG pages that actually need the Node renderer. A streaming
+	// page whose regions are all Go (or that has no dynamic regions at all) is
+	// rendered by the Go server + Go host alone, so its page bundle is never
+	// loaded - skip compiling it.
 	var ssrPages []*PageResult
 	for _, r := range results {
-		if r.Mode != RenderSSG && r.SourcePath != "" {
+		if r.Mode != RenderSSG && r.SourcePath != "" && pageNeedsNodeServerBundle(r) {
 			ssrPages = append(ssrPages, r)
 		}
 	}
@@ -42,6 +46,11 @@ func CompileServerBundles(results []*PageResult, root, outDir string) map[string
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
+			defer func() {
+				if r := recover(); r != nil {
+					_ = safe.Recover(r) // prints the stack; this page is skipped
+				}
+			}()
 
 			absSource := filepath.Join(root, page.SourcePath)
 			sourceData, err := os.ReadFile(absSource)
@@ -52,9 +61,15 @@ func CompileServerBundles(results []*PageResult, root, outDir string) map[string
 
 			// Inject Head/Suspense/Script/Style imports at the top of the file
 			// so pages can use them as globals (matching krate compiler behavior)
-			injectedSource := injectServerGlobals(string(sourceData))
+			pageSrc := string(sourceData)
+			// Annotate Go-component call sites with __krateGoId so the shim can
+			// inline a server-tier component's build-time HTML (page.GoBaked).
+			if locals := goComponentLocals(absSource, pageSrc, root); len(locals) > 0 {
+				pageSrc = annotateGoCalls(pageSrc, absSource, locals)
+			}
+			injectedSource := injectServerGlobals(pageSrc)
 
-			// Compile with esbuild — use stdin so esbuild resolves relative imports
+			// Compile with esbuild - use stdin so esbuild resolves relative imports
 			// from the project root (AbsWorkingDir) rather than a temp file location
 			route := page.OutName
 			if route == "." || route == "" {
@@ -70,6 +85,7 @@ func CompileServerBundles(results []*PageResult, root, outDir string) map[string
 				Platform:        api.PlatformNode,
 				Outfile:         outPath,
 				Write:           true,
+				Sourcemap:       sourceMapMode(sourcemap),
 				JSX:             api.JSXAutomatic,
 				JSXSideEffects:  false,
 				JSXImportSource: "@krate/runtime/server",
@@ -79,6 +95,7 @@ func CompileServerBundles(results []*PageResult, root, outDir string) map[string
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
+				Plugins: []api.Plugin{goServerBundlePlugin(page.GoBaked, root)},
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   injectedSource,
@@ -104,6 +121,22 @@ func CompileServerBundles(results []*PageResult, root, outDir string) map[string
 	wg.Wait()
 
 	return bundles
+}
+
+// pageNeedsNodeServerBundle reports whether a non-SSG page requires a compiled
+// Node server bundle: SSR/ISR pages (coarse page region) or any page with a
+// non-Go dynamic region. Streaming pages whose regions are all Go (or that have
+// no dynamic regions) are served without the Node renderer.
+func pageNeedsNodeServerBundle(r *PageResult) bool {
+	if r.Mode == RenderSSR || r.Mode == RenderISR {
+		return true
+	}
+	for _, reg := range r.Regions {
+		if reg.Runtime != "go" {
+			return true
+		}
+	}
+	return false
 }
 
 // injectServerGlobals prepends imports for Head, Suspense, Script, Style, Link, Image, Icon

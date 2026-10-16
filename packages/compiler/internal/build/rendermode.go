@@ -10,13 +10,13 @@ import (
 type RenderMode int
 
 const (
-	// RenderSSG — pre-rendered at build time (default, current behavior).
+	// RenderSSG - pre-rendered at build time (default, current behavior).
 	RenderSSG RenderMode = iota
-	// RenderSSR — rendered on every request via Node.js runtime.
+	// RenderSSR - rendered on every request via Node.js runtime.
 	RenderSSR
-	// RenderISR — pre-rendered at build, revalidated in background after `revalidate` seconds.
+	// RenderISR - pre-rendered at build, revalidated in background after `revalidate` seconds.
 	RenderISR
-	// RenderStreaming — SSR with Suspense-based streaming via HTTP chunked encoding.
+	// RenderStreaming - SSR with Suspense-based streaming via HTTP chunked encoding.
 	RenderStreaming
 )
 
@@ -43,23 +43,32 @@ type PageMeta struct {
 	Source     string     `json:"source"`               // source file relative to project root
 	Mode       RenderMode `json:"mode"`                 // ssg, ssr, isr, streaming
 	Revalidate int        `json:"revalidate,omitempty"` // ISR revalidation interval in seconds
+	// DynamicParams is false when a dynamic route must NOT render params other
+	// than those returned by generateStaticParams (unknown params 404). True by
+	// default; set via `export const dynamicParams = false` or static output mode.
+	DynamicParams bool `json:"dynamicParams"`
+	// StaticOnly marks a dynamic route whose set of valid params is closed, so
+	// the build should not emit a `[param]` fallback template.
+	StaticOnly bool `json:"staticOnly,omitempty"`
 }
 
 // pageConfig holds the merged page-level render config extracted from
-// `export const config = { ... }`.
+// `export const config = { ... }` plus sibling const exports.
 type pageConfig struct {
 	streaming  bool
 	ssr        bool
 	isr        bool
 	revalidate int
+	// dynamicParams is tri-state: nil = unset (inherit global), otherwise the
+	// page-level override.
+	dynamicParams *bool
 }
 
 // detectRenderMode inspects a page's AST to determine its rendering mode.
 // Returns the mode and revalidation interval.
-//
 // Precedence: explicit `isr` > `ssr` > `streaming` (config or <Suspense>).
-// ISR/SSR were previously unreachable — nothing in the build ever produced
-// them — so wiring the config keys here is what makes them real.
+// ISR/SSR were previously unreachable - nothing in the build ever produced
+// them - so wiring the config keys here is what makes them real.
 func detectRenderMode(prog *ast.Program) (RenderMode, int) {
 	cfg := parsePageConfig(prog)
 
@@ -75,7 +84,7 @@ func detectRenderMode(prog *ast.Program) (RenderMode, int) {
 		return RenderStreaming, 0
 	}
 
-	// Using <Suspense> implies a streaming boundary — resolved fallbacks are
+	// Using <Suspense> implies a streaming boundary - resolved fallbacks are
 	// swapped in at request time, so such pages cannot be statically baked.
 	if usesSuspense(prog) {
 		return RenderStreaming, 0
@@ -85,13 +94,39 @@ func detectRenderMode(prog *ast.Program) (RenderMode, int) {
 }
 
 // parsePageConfig reads the page-level render config from
-// `export const config = { ... }`.
+// `export const config = { ... }` plus sibling `export const dynamicParams`.
 func parsePageConfig(prog *ast.Program) pageConfig {
 	var cfg pageConfig
 	for _, stmt := range prog.Body {
+		// Assignment form: `generateStaticParams.dynamicParams = false`.
+		if es, ok := stmt.(*ast.ExprStmt); ok {
+			if bin, ok := es.Expression.(*ast.BinaryExpr); ok && bin.Op == "=" {
+				if mem, ok := bin.Left.(*ast.MemberExpr); ok {
+					if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "dynamicParams" {
+						if id, ok := mem.Object.(*ast.Identifier); ok && id.Name == "generateStaticParams" {
+							if b, ok := boolLiteral(bin.Right); ok {
+								v := b
+								cfg.dynamicParams = &v
+							}
+						}
+					}
+				}
+			}
+		}
 		exp, ok := stmt.(*ast.ExportStmt)
 		if !ok {
 			continue
+		}
+		// Sibling exports: `export const dynamicParams = false`.
+		if vs, ok := exp.Declaration.(*ast.VarStmt); ok {
+			for _, d := range vs.Decls {
+				if d.Name == "dynamicParams" && d.Init != nil {
+					if b, ok := boolLiteral(d.Init); ok {
+						v := b
+						cfg.dynamicParams = &v
+					}
+				}
+			}
 		}
 		vs, ok := exp.Declaration.(*ast.VarStmt)
 		if !ok {
@@ -119,6 +154,11 @@ func parsePageConfig(prog *ast.Program) pageConfig {
 							cfg.revalidate = n
 						}
 					}
+				case "dynamicParams":
+					if b, ok := boolLiteral(prop.Value); ok {
+						v := b
+						cfg.dynamicParams = &v
+					}
 				}
 			}
 		}
@@ -126,14 +166,37 @@ func parsePageConfig(prog *ast.Program) pageConfig {
 	return cfg
 }
 
+// boolLiteral returns the boolean value of a bool literal expression.
+func boolLiteral(v ast.Expr) (bool, bool) {
+	lit, ok := v.(*ast.Literal)
+	if !ok || lit.Kind != ast.BoolLit {
+		return false, false
+	}
+	return lit.Value == "true", true
+}
+
 func boolPropTrue(v ast.Expr) bool {
 	lit, ok := v.(*ast.Literal)
 	return ok && lit.Kind == ast.BoolLit && lit.Value == "true"
 }
 
+// dynamicParamsAllowed reports whether a page (typically a dynamic route) may
+// render params outside those returned by generateStaticParams.
+// Resolution: a page-level `export const dynamicParams` always wins; otherwise
+// the global static output mode (`output: "static"`) closes the set, and SSG
+// is the default (dynamic fallback allowed). Request-time modes (ssr/isr/
+// streaming) are inherently dynamic and default to allowing params.
+func dynamicParamsAllowed(prog *ast.Program, staticMode bool) bool {
+	cfg := parsePageConfig(prog)
+	if cfg.dynamicParams != nil {
+		return *cfg.dynamicParams
+	}
+	return !staticMode
+}
+
 // usesSuspense reports whether the page AST contains a <Suspense> JSX element
 // anywhere (nested inside functions, conditionals, arrays, etc.). This is an
-// AST-based check — a prior string scan (`strings.Contains(source, "<Suspense")`)
+// AST-based check - a prior string scan (`strings.Contains(source, "<Suspense")`)
 // could misfire on comments and string literals.
 func usesSuspense(prog *ast.Program) bool {
 	found := false

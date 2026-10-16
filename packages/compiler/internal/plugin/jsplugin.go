@@ -11,6 +11,7 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/astjson"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 )
 
@@ -25,12 +26,12 @@ var jsPluginBundleCache sync.Map // absPath -> bundle string or error
 const pluginGlobal = "__kratePlugin"
 
 // runJSPluginHook executes a JS community plugin hook inside an embedded
-// QuickJS VM — no subprocess, no stdin/stdout. The plugin module is bundled
+// QuickJS VM - no subprocess, no stdin/stdout. The plugin module is bundled
 // with esbuild into a self-contained IIFE and evaluated in a fresh VM. Hooks
 // are invoked as fn(ctx, options, krate) where ctx is the JSON-serialized hook
 // context and the return value is a { files, routes, generatedPages, html,
 // headHTML, rawCSS } result object (optionally a Promise).
-func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir string, hookCtx interface{}) error {
+func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir string, env CommunityEnv, hookCtx interface{}) error {
 	bundleCode, err := bundleJSPlugin(pc.Module, root)
 	if err != nil {
 		return err
@@ -41,6 +42,18 @@ func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir strin
 		return fmt.Errorf("creating JS runtime: %w", err)
 	}
 	defer rt.Close()
+
+	_ = rt.SetEnv(environ.Current)
+
+	// Attribute all console/log output to this plugin.
+	rt.SetLogPrefix("[plugin:" + pc.Name + "]")
+
+	// Assemble the richer `krate` object's capabilities (resolve/read/emit/
+	// write/inject) and register their Go-backed host functions.
+	cap := newKrateCapabilities(root, outDir, env, hookName, hookCtx)
+	if err := registerKrateHostFuncs(rt, cap); err != nil {
+		return fmt.Errorf("registering krate capabilities: %w", err)
+	}
 
 	if _, err := rt.Execute(bundleCode); err != nil {
 		return fmt.Errorf("loading plugin bundle: %w", err)
@@ -54,11 +67,7 @@ func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir strin
 	if err != nil {
 		return fmt.Errorf("serializing plugin options: %w", err)
 	}
-	krateJSON, err := json.Marshal(map[string]string{
-		"root":    root,
-		"outDir":  outDir,
-		"version": "1.0.0",
-	})
+	krateJSON, err := json.Marshal(cap.metadata())
 	if err != nil {
 		return fmt.Errorf("serializing krate metadata: %w", err)
 	}
@@ -74,7 +83,16 @@ func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir strin
     var hooks = (plugin && plugin.hooks) || mod.hooks || plugin || {};
     var fn = hooks[%[4]s];
     if (typeof fn !== 'function') return JSON.stringify({ skip: true });
-    var out = fn(%[3]s, %[2]s, %[5]s);
+    var krate = %[5]s;
+    krate.resolveFile = function(spec) { return _krate_resolveFile(String(spec)); };
+    krate.readFile = function(spec) { return _krate_readFile(String(spec)); };
+    krate.emitFile = function(path, content) { _krate_emitFile(String(path), String(content)); };
+    krate.writeFileToRoot = function(rel, content) { _krate_writeFileToRoot(String(rel), String(content)); };
+    krate.injectHead = function(html) { return _krate_injectHead(String(html)); };
+    krate.injectCSS = function(css) { return _krate_injectCSS(String(css)); };
+    krate.log = function() { _krate_log(JSON.stringify(Array.prototype.slice.call(arguments))); };
+    krate.warn = function() { _krate_warn(JSON.stringify(Array.prototype.slice.call(arguments))); };
+    var out = fn(%[3]s, %[2]s, krate);
     if (out && typeof out.then === 'function') {
       __krateResult = undefined;
       __krateError = '';
@@ -100,14 +118,14 @@ func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir strin
 
 	if msg.Pending {
 		rt.DrainJobs()
-		readScript := fmt.Sprintf(`
+		readScript := `
 (function() {
   if (typeof __krateError === 'string' && __krateError) {
     return JSON.stringify({ error: __krateError });
   }
   return JSON.stringify({ result: __krateResult });
 })()
-`)
+`
 		res2, err := rt.Execute(readScript)
 		if err != nil {
 			return fmt.Errorf("resolving async %s hook: %w", hookName, err)
@@ -125,11 +143,15 @@ func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir strin
 	}
 
 	var output communityOutput
-	if msg.Result != nil && len(msg.Result) > 0 {
+	if len(msg.Result) > 0 {
 		if err := json.Unmarshal(msg.Result, &output); err != nil {
 			return fmt.Errorf("invalid plugin result JSON: %w", err)
 		}
 	}
+
+	// Fold in side-effects produced through the krate capability methods
+	// (emitFile / injectHead / injectCSS) before applying the output.
+	cap.applyTo(&output)
 
 	return applyPluginOutput(hookName, &output, outDir, hookCtx)
 }

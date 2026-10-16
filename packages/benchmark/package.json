@@ -17,6 +17,7 @@
     "bench": "node src/run.mjs",
     "bench:build": "node src/run.mjs build",
     "bench:api": "node src/run.mjs api",
+    "bench:ssr": "node src/run.mjs ssr",
     "report": "node src/run.mjs report"
   },
   "devDependencies": {

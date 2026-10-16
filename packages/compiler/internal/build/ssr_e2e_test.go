@@ -19,12 +19,12 @@ import (
 
 // TestSSRDynamicRouteParamsE2E boots the staged SSR renderer driver against a
 // dynamic route ([id]) manifest and verifies that params extracted by the Go
-// server are injected into the page component's props at render time — not
+// server are injected into the page component's props at render time - not
 // dropped as the placeholder/officially-empty props.
 func TestSSRDynamicRouteParamsE2E(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
-		t.Skipf("node not available: %v", err)
+		requireE2E(t, "node not available: %v", err)
 	}
 
 	repoRoot, err := repoRootPath()
@@ -34,7 +34,7 @@ func TestSSRDynamicRouteParamsE2E(t *testing.T) {
 	runtimeSrc := filepath.Join(repoRoot, "packages", "runtime", "src")
 	serverTS := filepath.Join(runtimeSrc, "server.ts")
 	if _, err := os.Stat(serverTS); err != nil {
-		t.Skipf("@krate/runtime server source not found: %v", err)
+		requireE2E(t, "@krate/runtime server source not found: %v", err)
 	}
 
 	fakeRoot := t.TempDir()
@@ -53,14 +53,14 @@ export default function VideoPage(props) {
 	bundlePath := filepath.Join(bundleDir, "video.test.server.mjs")
 
 	res := api.Build(api.BuildOptions{
-		AbsWorkingDir: repoRoot,
-		Bundle:        true,
-		Format:        api.FormatESModule,
-		Platform:      api.PlatformNode,
-		Outfile:       bundlePath,
-		Write:         true,
-		JSX:           api.JSXAutomatic,
-		JSXSideEffects: false,
+		AbsWorkingDir:   repoRoot,
+		Bundle:          true,
+		Format:          api.FormatESModule,
+		Platform:        api.PlatformNode,
+		Outfile:         bundlePath,
+		Write:           true,
+		JSX:             api.JSXAutomatic,
+		JSXSideEffects:  false,
 		JSXImportSource: "@krate/runtime/server",
 		Plugins: []api.Plugin{{
 			Name: "krate-ssr-e2e-alias",
@@ -72,7 +72,7 @@ export default function VideoPage(props) {
 							// bare `@krate/runtime/server`
 							return api.OnResolveResult{Path: serverTS}, nil
 						}
-						// subpath like "jsx-runtime" → try server-<name>.ts then <name>.ts
+						// subpath like "jsx-runtime" -> try server-<name>.ts then <name>.ts
 						candidates := []string{
 							filepath.Join(runtimeSrc, "server-"+spec+".ts"),
 							filepath.Join(runtimeSrc, spec+".ts"),
@@ -128,8 +128,8 @@ export default function VideoPage(props) {
 		t.Fatalf("starting renderer: %v", err)
 	}
 	defer func() {
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 	}()
 
 	base := fmt.Sprintf("http://localhost:%d", port)
@@ -165,11 +165,11 @@ export default function VideoPage(props) {
 func renderForParams(t *testing.T, base, route, url string, params, query map[string]string) string {
 	t.Helper()
 	body := map[string]interface{}{
-		"route":  route,
-		"url":    url,
-		"method": "GET",
-		"params": params,
-		"query":  query,
+		"route":   route,
+		"url":     url,
+		"method":  "GET",
+		"params":  params,
+		"query":   query,
 		"regions": []map[string]string{{"id": "page", "kind": "page"}},
 	}
 	data, _ := json.Marshal(body)

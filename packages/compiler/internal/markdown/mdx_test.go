@@ -135,8 +135,8 @@ Some text here.
 	cfg := DefaultConfig()
 	fm, segments := ParseMDXSegments(src, cfg)
 
-	if fm["title"] != "Demo" {
-		t.Errorf("frontmatter title = %q, want %q", fm["title"], "Demo")
+	if s, _ := fm["title"].(string); s != "Demo" {
+		t.Errorf("frontmatter title = %#v, want %q", fm["title"], "Demo")
 	}
 
 	// First segment should be markdown HTML (not containing import line)

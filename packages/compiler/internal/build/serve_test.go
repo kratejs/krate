@@ -3,6 +3,7 @@ package build
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -50,7 +51,7 @@ func TestRewriteDestination(t *testing.T) {
 		destination string
 		want        string
 	}{
-		// Non-wildcard — simple passthrough
+		// Non-wildcard - simple passthrough
 		{"/old", "/old", "/new", "/new"},
 		{"/old/page", "/old", "/new", "/new"},
 
@@ -162,18 +163,18 @@ func TestMatchDynamicRoute(t *testing.T) {
 func TestFindDynamicRoutes(t *testing.T) {
 	dir := t.TempDir()
 	// Create static page directory
-	os.MkdirAll(filepath.Join(dir, "about"), 0755)
-	os.WriteFile(filepath.Join(dir, "about", "index.html"), []byte("<html>about</html>"), 0644)
+	_ = os.MkdirAll(filepath.Join(dir, "about"), 0755)
+	_ = os.WriteFile(filepath.Join(dir, "about", "index.html"), []byte("<html>about</html>"), 0644)
 
 	// Create dynamic route directory
 	dynDir := filepath.Join(dir, "video", "[id]")
-	os.MkdirAll(dynDir, 0755)
-	os.WriteFile(filepath.Join(dynDir, "index.html"), []byte("<html>video</html>"), 0644)
+	_ = os.MkdirAll(dynDir, 0755)
+	_ = os.WriteFile(filepath.Join(dynDir, "index.html"), []byte("<html>video</html>"), 0644)
 
 	// Create another dynamic route
 	dynDir2 := filepath.Join(dir, "user", "[username]", "posts", "[postId]")
-	os.MkdirAll(dynDir2, 0755)
-	os.WriteFile(filepath.Join(dynDir2, "index.html"), []byte("<html>post</html>"), 0644)
+	_ = os.MkdirAll(dynDir2, 0755)
+	_ = os.WriteFile(filepath.Join(dynDir2, "index.html"), []byte("<html>post</html>"), 0644)
 
 	routes := findDynamicRoutes(dir)
 	// Only dirs with index.html: video/[id] and user/[username]/posts/[postId]
@@ -197,10 +198,10 @@ func TestFindDynamicRoutes(t *testing.T) {
 
 func TestStaticRouteExists(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "items", "alpha"), 0755)
-	os.WriteFile(filepath.Join(dir, "items", "alpha", "index.html"), []byte("<html>static alpha</html>"), 0644)
-	os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>home</html>"), 0644)
-	os.WriteFile(filepath.Join(dir, "favicon.ico"), []byte("x"), 0644)
+	_ = os.MkdirAll(filepath.Join(dir, "items", "alpha"), 0755)
+	_ = os.WriteFile(filepath.Join(dir, "items", "alpha", "index.html"), []byte("<html>static alpha</html>"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>home</html>"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "favicon.ico"), []byte("x"), 0644)
 
 	cases := []struct {
 		path string
@@ -223,14 +224,14 @@ func TestStaticRouteExists(t *testing.T) {
 // TestShouldServeStatic verifies the ssrPageHandler routing decision: a static
 // file wins only for SSG pages / unmatched routes. A manifest-registered
 // ssr/isr/streaming page must ALWAYS go through the sidecar even when a
-// pre-generated (baked) file exists — regression for pre-generated ISR variants
+// pre-generated (baked) file exists - regression for pre-generated ISR variants
 // and runtime-component regions being frozen at their build timestamp.
 func TestShouldServeStatic(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "cached", "known"), 0755)
-	os.WriteFile(filepath.Join(dir, "cached", "known", "index.html"), []byte("<html>baked</html>"), 0644)
-	os.MkdirAll(filepath.Join(dir, "items", "alpha"), 0755)
-	os.WriteFile(filepath.Join(dir, "items", "alpha", "index.html"), []byte("<html>alpha</html>"), 0644)
+	_ = os.MkdirAll(filepath.Join(dir, "cached", "known"), 0755)
+	_ = os.WriteFile(filepath.Join(dir, "cached", "known", "index.html"), []byte("<html>baked</html>"), 0644)
+	_ = os.MkdirAll(filepath.Join(dir, "items", "alpha"), 0755)
+	_ = os.WriteFile(filepath.Join(dir, "items", "alpha", "index.html"), []byte("<html>alpha</html>"), 0644)
 
 	mkPage := func(mode string) *ManifestPage {
 		return &ManifestPage{Mode: mode, Route: "/cached/[id]"}
@@ -242,17 +243,17 @@ func TestShouldServeStatic(t *testing.T) {
 		page *ManifestPage
 		want bool
 	}{
-		// SSG page with a concrete static file → static wins (beats sibling
+		// SSG page with a concrete static file -> static wins (beats sibling
 		// dynamic [param] template).
 		{"ssg static file present", "/items/alpha", &ManifestPage{Mode: "ssg"}, true},
-		// SSG page with NO static file → not static (falls to dynamic template).
+		// SSG page with NO static file -> not static (falls to dynamic template).
 		{"ssg no static file", "/items/beta", &ManifestPage{Mode: "ssg"}, false},
-		// Pre-generated ISR variant: static file EXISTS but page is ISR → must
+		// Pre-generated ISR variant: static file EXISTS but page is ISR -> must
 		// NOT be served statically (goes to the sidecar for revalidation).
 		{"isr pre-generated variant", "/cached/known", mkPage("isr"), false},
 		{"ssr page with baked shell", "/cached/known", mkPage("ssr"), false},
 		{"streaming page with baked shell", "/cached/known", mkPage("streaming"), false},
-		// Unmatched route with a static file → static.
+		// Unmatched route with a static file -> static.
 		{"unknown route static", "/cached/known", nil, true},
 	}
 	for _, tc := range cases {
@@ -265,11 +266,11 @@ func TestShouldServeStatic(t *testing.T) {
 func TestStaticBeatsDynamicRoute(t *testing.T) {
 	dir := t.TempDir()
 	static := filepath.Join(dir, "items", "alpha")
-	os.MkdirAll(static, 0755)
-	os.WriteFile(filepath.Join(static, "index.html"), []byte("<html>STATIC ALPHA</html>"), 0644)
+	_ = os.MkdirAll(static, 0755)
+	_ = os.WriteFile(filepath.Join(static, "index.html"), []byte("<html>STATIC ALPHA</html>"), 0644)
 	dyn := filepath.Join(dir, "items", "[id]")
-	os.MkdirAll(dyn, 0755)
-	os.WriteFile(filepath.Join(dyn, "index.html"), []byte("<html>DYNAMIC TEMPLATE</html>"), 0644)
+	_ = os.MkdirAll(dyn, 0755)
+	_ = os.WriteFile(filepath.Join(dyn, "index.html"), []byte("<html>DYNAMIC TEMPLATE</html>"), 0644)
 
 	routes := findDynamicRoutes(dir)
 	var pattern string
@@ -288,7 +289,7 @@ func TestStaticBeatsDynamicRoute(t *testing.T) {
 	if staticRouteExists(dir, "/items/alpha") != true {
 		t.Error("static /items/alpha must exist so the handler skips the dynamic template")
 	}
-	// The pattern still matches the URL — precedence comes from the gate above.
+	// The pattern still matches the URL - precedence comes from the gate above.
 	if _, ok := matchDynamicRoute("/items/alpha", pattern); !ok {
 		t.Error("items/[id] pattern should still match /items/alpha; the static gate is the precedence mechanism")
 	}
@@ -296,11 +297,48 @@ func TestStaticBeatsDynamicRoute(t *testing.T) {
 
 func TestFindDynamicRoutesEmpty(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "about"), 0755)
-	os.WriteFile(filepath.Join(dir, "about", "index.html"), []byte("<html>about</html>"), 0644)
+	_ = os.MkdirAll(filepath.Join(dir, "about"), 0755)
+	_ = os.WriteFile(filepath.Join(dir, "about", "index.html"), []byte("<html>about</html>"), 0644)
 
 	routes := findDynamicRoutes(dir)
 	if len(routes) != 0 {
 		t.Errorf("expected 0 dynamic routes, got %d", len(routes))
+	}
+}
+
+func TestApplyDynamicRouteParams(t *testing.T) {
+	tmpl := "<html><head><title>Video: " + dynamicParamSentinel("id") + "</title>" +
+		"<meta name=description content=\"Watch " + dynamicParamSentinel("id") + "\"></head>" +
+		"<body><p>Video ID: <strong>" + dynamicParamSentinel("id") + "</strong></p></body></html>"
+
+	got := applyDynamicRouteParams(tmpl, map[string]string{"id": "abc123"})
+
+	if strings.Contains(got, dynamicParamSentinel("id")) {
+		t.Errorf("sentinel not substituted: %s", got)
+	}
+	// Substituted in text, title, and attribute positions.
+	if !strings.Contains(got, "<title>Video: abc123</title>") {
+		t.Errorf("title not substituted: %s", got)
+	}
+	if !strings.Contains(got, "content=\"Watch abc123\"") {
+		t.Errorf("attribute not substituted: %s", got)
+	}
+	if !strings.Contains(got, "<strong>abc123</strong>") {
+		t.Errorf("body text not substituted: %s", got)
+	}
+	// Params script injected before </head>.
+	if !strings.Contains(got, `__KRATE_PARAMS__={"id":"abc123"}</script></head>`) {
+		t.Errorf("params script not injected: %s", got)
+	}
+}
+
+func TestApplyDynamicRouteParamsEscapes(t *testing.T) {
+	tmpl := "<p>" + dynamicParamSentinel("id") + "</p>"
+	got := applyDynamicRouteParams(tmpl, map[string]string{"id": `<script>&"`})
+	if strings.Contains(got, "<script>&\"") {
+		t.Errorf("param value not HTML-escaped: %s", got)
+	}
+	if !strings.Contains(got, "&lt;script&gt;&amp;") {
+		t.Errorf("expected escaped param value in output: %s", got)
 	}
 }

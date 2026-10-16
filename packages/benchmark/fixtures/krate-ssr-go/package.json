@@ -1,0 +1,6 @@
+{
+  "name": "bench-krate-ssr-go",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module"
+}

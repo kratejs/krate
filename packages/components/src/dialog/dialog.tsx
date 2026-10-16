@@ -1,122 +1,49 @@
 import './dialog.css';
-import { createSignal, createEffect, onCleanup } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+
+const DialogCtx = createScope<string | null>();
 
 export interface DialogProps {
+  label?: string;
   children?: any;
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
 }
 
+/** Modal dialog. Zero JS via a context-provided CSS scope (`as: 'dialog'`). */
 export function Dialog(props: DialogProps) {
-  var [open, setOpen] = createSignal(props.open || false);
-  var rootRef: HTMLElement | null = null;
-
-  createEffect(function () {
-    if (props.open !== undefined) {
-      setOpen(props.open);
-    }
-  });
-
-  function close() {
-    setOpen(false);
-    if (props.onOpenChange) {
-      props.onOpenChange(false);
-    }
-  }
-
-  function handleClick(e: MouseEvent) {
-    var target = e.target as HTMLElement;
-    var root = target.closest("[data-krate-dialog]") as HTMLElement;
-    if (root) rootRef = root;
-
-    var trigger = target.closest("[data-krate-dialog-trigger]");
-    if (trigger) {
-      setOpen(true);
-      if (props.onOpenChange) {
-        props.onOpenChange(true);
-      }
-      return;
-    }
-    var closeBtn = target.closest("[data-krate-dialog-close]");
-    if (closeBtn) {
-      close();
-      return;
-    }
-    if (target.classList.contains("krate-dialog-overlay")) {
-      close();
-      return;
-    }
-  }
-
-  function handleClickOutside(e: MouseEvent) {
-    var r = rootRef;
-    if (r && !r.contains(e.target as Node)) {
-      close();
-    }
-  }
-
-  createEffect(function () {
-    document.addEventListener("click", handleClick);
-    var outsideTimer: any = null;
-    if (open()) {
-      outsideTimer = setTimeout(function () {
-        document.addEventListener("click", handleClickOutside);
-      }, 0);
-    }
-    return function () {
-      document.removeEventListener("click", handleClick);
-      if (outsideTimer) clearTimeout(outsideTimer);
-      document.removeEventListener("click", handleClickOutside);
-    };
-  });
-
+  const open = createCSSGroup<string>(null, { as: 'dialog', label: props.label });
   return (
-    <div class="krate-dialog" data-state={open() ? "open" : "closed"} data-krate-dialog="true">
-      {props.children}
-    </div>
+    <DialogCtx.Provider value={open}>
+      <div class="krate-dialog">{props.children}</div>
+    </DialogCtx.Provider>
   );
 }
 
 export interface DialogTriggerProps {
+  value?: string;
   children?: any;
 }
 
+/** @deprecated Use `Dialog.Trigger` instead. */
 export function DialogTrigger(props: DialogTriggerProps) {
+  const open = DialogCtx.use();
   return (
-    <button class="krate-dialog-trigger" type="button" data-krate-dialog-trigger="true">
+    <button class="krate-dialog-trigger" type="button" {...open.trigger(props.value)}>
       {props.children}
     </button>
   );
 }
 
-export interface DialogPortalProps {
-  children?: any;
-}
-
-export function DialogPortal(props: DialogPortalProps) {
-  return <span class="krate-dialog-portal">{props.children}</span>;
-}
-
-export interface DialogOverlayProps {
-}
-
-export function DialogOverlay(props: DialogOverlayProps) {
-  return (
-    <div class="krate-dialog-overlay"></div>
-  );
-}
-
 export interface DialogContentProps {
+  value?: string;
   children?: any;
 }
 
+/** @deprecated Use `Dialog.Content` instead. */
 export function DialogContent(props: DialogContentProps) {
+  const open = DialogCtx.use();
   return (
-    <div class="krate-dialog-content-wrapper" data-krate-dialog-content-wrapper="true">
-      <div class="krate-dialog-overlay"></div>
-      <div class="krate-dialog-content" role="dialog" aria-modal="true">
-        {props.children}
-      </div>
+    <div class="krate-dialog-content" role="dialog" {...open.panel(props.value)}>
+      {props.children}
     </div>
   );
 }
@@ -125,30 +52,44 @@ export interface DialogTitleProps {
   children?: any;
 }
 
+/** @deprecated Use `Dialog.Title` instead. */
 export function DialogTitle(props: DialogTitleProps) {
-  return <div class="krate-dialog-title">{props.children}</div>;
+  return <h2 class="krate-dialog-title">{props.children}</h2>;
 }
 
 export interface DialogDescriptionProps {
   children?: any;
 }
 
+/** @deprecated Use `Dialog.Description` instead. */
 export function DialogDescription(props: DialogDescriptionProps) {
-  return <div class="krate-dialog-description">{props.children}</div>;
+  return <p class="krate-dialog-description">{props.children}</p>;
 }
 
 export interface DialogCloseProps {
   children?: any;
 }
 
+/** @deprecated Use `Dialog.Close` instead. */
 export function DialogClose(props: DialogCloseProps) {
+  const open = DialogCtx.use();
   return (
-    <button class="krate-dialog-close" type="button" data-krate-dialog-close="true">
-      {props.children ? props.children : (
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
-        </svg>
-      )}
+    <button class="krate-dialog-close" type="button" aria-label="Close" {...open.close()}>
+      {props.children}
     </button>
   );
 }
+
+export interface Dialog {
+  Trigger: typeof DialogTrigger;
+  Content: typeof DialogContent;
+  Title: typeof DialogTitle;
+  Description: typeof DialogDescription;
+  Close: typeof DialogClose;
+}
+
+Dialog.Trigger = DialogTrigger;
+Dialog.Content = DialogContent;
+Dialog.Title = DialogTitle;
+Dialog.Description = DialogDescription;
+Dialog.Close = DialogClose;

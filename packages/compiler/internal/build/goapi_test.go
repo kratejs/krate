@@ -31,7 +31,7 @@ const helloGoRoute = `package api
 import (
 	"net/http"
 
-	"krate-goapi/runtime"
+	"github.com/kratejs/krate/packages/compiler/goext/runtime"
 )
 
 func GET(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +44,7 @@ const userGoRoute = `package api
 import (
 	"net/http"
 
-	"krate-goapi/runtime"
+	"github.com/kratejs/krate/packages/compiler/goext/runtime"
 )
 
 func Handler(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +151,7 @@ func TestGoAPISidecarServesRequests(t *testing.T) {
 		t.Errorf("GET /api/users/abc123 = %d %s", status, body)
 	}
 
-	// Route not registered on the Go sidecar → 404 from its mux
+	// Route not registered on the Go sidecar -> 404 from its mux
 	status, _ = get("/api/nonexistent")
 	if status != 404 {
 		t.Errorf("GET /api/nonexistent = %d, want 404", status)

@@ -8,14 +8,14 @@ import (
 )
 
 // TestAliasImportResolution verifies that the `@/*` TypeScript path alias
-// resolves through the full Bundle() pipeline — the same path a real page
-// build takes — so users can import from the project source root (e.g.
+// resolves through the full Bundle() pipeline - the same path a real page
+// build takes - so users can import from the project source root (e.g.
 // `@/lib/helpers`, `@/components/badge`) without the compiler failing to find
 // the module. Components live under `@/components/*`
 func TestAliasImportResolution(t *testing.T) {
 	root := t.TempDir()
 
-	// tsconfig paths: `@/*` → `./*` with baseUrl `./src`.
+	// tsconfig paths: `@/*` -> `./*` with baseUrl `./src`.
 	tsconfig := `{
 		"compilerOptions": {
 			"baseUrl": "./src",
@@ -24,29 +24,29 @@ func TestAliasImportResolution(t *testing.T) {
 			}
 		}
 	}`
-	os.MkdirAll(filepath.Join(root, "src"), 0755)
-	os.WriteFile(filepath.Join(root, "tsconfig.json"), []byte(tsconfig), 0644)
+	_ = os.MkdirAll(filepath.Join(root, "src"), 0755)
+	_ = os.WriteFile(filepath.Join(root, "tsconfig.json"), []byte(tsconfig), 0644)
 
 	// helpers module target
-	os.MkdirAll(filepath.Join(root, "src", "lib"), 0755)
-	os.WriteFile(filepath.Join(root, "src", "lib", "helpers.ts"),
+	_ = os.MkdirAll(filepath.Join(root, "src", "lib"), 0755)
+	_ = os.WriteFile(filepath.Join(root, "src", "lib", "helpers.ts"),
 		[]byte(`export function greet(name: string): string { return "hi " + name; }`), 0644)
 
 	// badge component target (via @/components alias)
-	os.MkdirAll(filepath.Join(root, "src", "components"), 0755)
-	os.WriteFile(filepath.Join(root, "src", "components", "badge.tsx"),
+	_ = os.MkdirAll(filepath.Join(root, "src", "components"), 0755)
+	_ = os.WriteFile(filepath.Join(root, "src", "components", "badge.tsx"),
 		[]byte(`export default function Badge() { return <span>badge</span>; }`), 0644)
 
 	// page that imports via the @/ alias
 	pageDir := filepath.Join(root, "src", "pages")
-	os.MkdirAll(pageDir, 0755)
+	_ = os.MkdirAll(pageDir, 0755)
 	page := filepath.Join(pageDir, "index.tsx")
 	pageSrc := `import { greet } from '@/lib/helpers';
 import Badge from '@/components/badge';
 export default function Page() {
   return <div>{greet("world")}<Badge /></div>;
 }`
-	os.WriteFile(page, []byte(pageSrc), 0644)
+	_ = os.WriteFile(page, []byte(pageSrc), 0644)
 
 	b := New(root)
 	b.SetPathAliases(
@@ -97,11 +97,11 @@ export default function Page() {
 func TestAliasImportResolutionConfig(t *testing.T) {
 	root := t.TempDir()
 
-	os.MkdirAll(filepath.Join(root, "src", "utils"), 0755)
-	os.WriteFile(filepath.Join(root, "src", "utils", "helper.ts"), []byte(`export const x = 1;`), 0644)
-	os.MkdirAll(filepath.Join(root, "src", "pages"), 0755)
+	_ = os.MkdirAll(filepath.Join(root, "src", "utils"), 0755)
+	_ = os.WriteFile(filepath.Join(root, "src", "utils", "helper.ts"), []byte(`export const x = 1;`), 0644)
+	_ = os.MkdirAll(filepath.Join(root, "src", "pages"), 0755)
 	page := filepath.Join(root, "src", "pages", "index.tsx")
-	os.WriteFile(page, []byte(`import { x } from '@/utils/helper'; export default function P() { return <div>{x}</div>; }`), 0644)
+	_ = os.WriteFile(page, []byte(`import { x } from '@/utils/helper'; export default function P() { return <div>{x}</div>; }`), 0644)
 
 	b := New(root)
 	b.SetPathAliases(
@@ -121,12 +121,12 @@ func TestAliasImportResolutionConfig(t *testing.T) {
 func TestNonAliasScopeDoesNotResolve(t *testing.T) {
 	root := t.TempDir()
 
-	os.MkdirAll(filepath.Join(root, "src", "components"), 0755)
-	os.WriteFile(filepath.Join(root, "src", "components", "badge.tsx"),
+	_ = os.MkdirAll(filepath.Join(root, "src", "components"), 0755)
+	_ = os.WriteFile(filepath.Join(root, "src", "components", "badge.tsx"),
 		[]byte(`export default function Badge() { return <span>badge</span>; }`), 0644)
-	os.MkdirAll(filepath.Join(root, "src", "pages"), 0755)
+	_ = os.MkdirAll(filepath.Join(root, "src", "pages"), 0755)
 	page := filepath.Join(root, "src", "pages", "index.tsx")
-	os.WriteFile(page, []byte(`import Badge from '@components/badge'; export default function P() { return <Badge />; }`), 0644)
+	_ = os.WriteFile(page, []byte(`import Badge from '@components/badge'; export default function P() { return <Badge />; }`), 0644)
 
 	b := New(root)
 	b.SetPathAliases(
@@ -135,7 +135,7 @@ func TestNonAliasScopeDoesNotResolve(t *testing.T) {
 		filepath.Join(root, "src"),
 	)
 
-	// `@components/badge` is not an alias and is not a resolvable module — the
+	// `@components/badge` is not an alias and is not a resolvable module - the
 	// bundled modules must NOT include the badge component under that name.
 	bundle, err := b.Bundle(page)
 	if err != nil {

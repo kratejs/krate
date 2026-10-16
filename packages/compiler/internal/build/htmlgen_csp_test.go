@@ -43,6 +43,22 @@ func TestGenerateCSPMeta_HydrationJSHash(t *testing.T) {
 	}
 }
 
+func TestGenerateCSPMeta_HashesRuntimeConfigAndVT(t *testing.T) {
+	// Simulates the assembled document: the injected runtime config script and
+	// the View Transitions style must be allow-listed by hash.
+	script := `window.__KRATE_CFG__={"basePath":"/docs"};`
+	html := `<html><head><script>` + script + `</script>` +
+		`<style>@view-transition{navigation:auto}</style></head><body></body></html>`
+	meta := generateCSPMeta(html, html, "", "")
+
+	if !strings.Contains(meta, sha256Base64(strings.TrimSpace(script))) {
+		t.Errorf("runtime config script hash missing from CSP: %s", meta)
+	}
+	if !strings.Contains(meta, "style-src 'self' 'sha256-") {
+		t.Errorf("View Transitions style hash missing from CSP: %s", meta)
+	}
+}
+
 func TestGenerateCSPMeta_CustomDirective(t *testing.T) {
 	meta := generateCSPMeta("", "", "", "default-src 'none'; frame-ancestors 'none'")
 	if !strings.Contains(meta, "frame-ancestors 'none'") {

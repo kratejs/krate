@@ -14,7 +14,7 @@ func annotateWithRuntime(prog *ast.Program, raw string) *irtree.Annotations {
 	return annotator.Annotate(prog, &config.Config{RuntimeComponents: []string{"RuntimeWidget"}}, "page.tsx", raw)
 }
 
-// ─── emitSSREvaluated ───────────────────────────────────────────────────────
+// emitSSREvaluated
 
 func TestEmitSSREvaluatedWithPropBindings(t *testing.T) {
 	src := `function Card(props) {
@@ -64,8 +64,8 @@ func TestEmitSSREvaluatedDateNow(t *testing.T) {
 export default function Page() {
   return <ServerTime />;
 }`
-	// ServerTime is signal-less → SSR-evaluated. Without the QuickJS hook,
-	// Date.now() is an unsupported built-in → "".
+	// ServerTime is signal-less -> SSR-evaluated. Without the QuickJS hook,
+	// Date.now() is an unsupported built-in -> "".
 	result, _ := fullPipeline(t, src)
 	if strings.Contains(result.HTML, "built 1") && !strings.Contains(result.HTML, "Date.now") {
 		t.Log("Date.now evaluated")
@@ -120,7 +120,7 @@ export default function Page() {
 	}
 }
 
-// ─── Meta slots ─────────────────────────────────────────────────────────────
+// Meta slots
 
 func TestEmitMultipleMetaSlots(t *testing.T) {
 	src := `export default function Page() {
@@ -163,7 +163,56 @@ export default function Page() {
 	}
 }
 
-// ─── emitClient edge cases ──────────────────────────────────────────────────
+// TestEmitMetaCallSiteHeadInWrapper guards the call-site <Head> case: a <Head>
+// passed as a CHILD into a signal-less wrapper is not part of the wrapper's own
+// return JSX, so SSREval does not capture it - EmitMeta must still walk the
+// wrapper's call-site children to hoist it. Regression guard for the meta-dedup
+// fix, which only skips the eval'd own-return tree.
+func TestEmitMetaCallSiteHeadInWrapper(t *testing.T) {
+	src := `function Shell(props) {
+  return <html><body>{props.children}</body></html>;
+}
+export default function Page() {
+  return <Shell><Head><title>Call Site Title</title></Head><div>body</div></Shell>;
+}`
+	result, _ := fullPipeline(t, src)
+	if !strings.Contains(result.HeadHTML, "Call Site Title") {
+		t.Errorf("call-site <Head> passed into a wrapper was not hoisted, got HeadHTML=%q", result.HeadHTML)
+	}
+}
+
+// TestEmitMetaHeadNotDuplicated guards the opposite direction: the root's OWN
+// <Head> is captured once by SSREval and must not be appended a second time by
+// EmitMeta (which previously doubled <title> with stale pre-binding values).
+func TestEmitMetaHeadNotDuplicated(t *testing.T) {
+	src := `export default function Page() {
+  return <div><Head><title>Only Once</title></Head><p>body</p></div>;
+}`
+	result, _ := fullPipeline(t, src)
+	if got := strings.Count(result.HeadHTML, "<title>Only Once</title>"); got != 1 {
+		t.Errorf("expected the root <title> exactly once in HeadHTML, got %d:\n%s", got, result.HeadHTML)
+	}
+}
+
+// TestEmitRootLocalFoldsInHead locks the root-local fold: a plain const at the
+// page root must resolve to its value in both head and body, never leak the
+// identifier name. Regression guard (blog.tsx renders
+// <Head><title>{title} - Krate Blog</title></Head>).
+func TestEmitRootLocalFoldsInHead(t *testing.T) {
+	src := `export default function Page() {
+  const title = "Root Local Title";
+  return <div><Head><title>{title} - Site</title></Head><p>{title}</p></div>;
+}`
+	result, _ := fullPipeline(t, src)
+	if !strings.Contains(result.HeadHTML, "<title>Root Local Title - Site</title>") {
+		t.Errorf("root local in <title> was not folded, got HeadHTML=%q", result.HeadHTML)
+	}
+	if !strings.Contains(result.HTML, "<p>Root Local Title</p>") {
+		t.Errorf("root local in body was not folded, got HTML=%q", result.HTML)
+	}
+}
+
+// emitClient edge cases
 
 func TestEmitClientCollectsChildComponentSignatures(t *testing.T) {
 	src := `function Counter() {
@@ -216,7 +265,7 @@ func TestEmitExprSlotEscapesInitial(t *testing.T) {
 	}
 }
 
-// ─── Runtime component emission ─────────────────────────────────────────────
+// Runtime component emission
 
 func TestEmitRuntimeRegionMarkers(t *testing.T) {
 	src := `function RuntimeWidget(props) { return <div>{props.label}</div>; }
@@ -323,7 +372,7 @@ func slotBindingEqual(a, b irtree.SlotBinding) bool {
 	return true
 }
 
-// ─── Suspense slot emission ─────────────────────────────────────────────────
+// Suspense slot emission
 
 func TestEmitSuspenseSlot(t *testing.T) {
 	fb := []irtree.SlotNode{&irtree.StaticHTML{HTML: `<div class="loading">Loading...</div>`}}

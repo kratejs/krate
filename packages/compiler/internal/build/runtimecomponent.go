@@ -128,7 +128,7 @@ func findRuntimeComponentFiles(root string, serverComponents, runtimeComponents 
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() {
 				return nil
 			}

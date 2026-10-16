@@ -266,3 +266,208 @@ footer {
   padding: 2rem;
   color: var(--text-muted);
 }
+
+/* CSS Signals demo page */
+.sig-page h1 {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+.sig-note {
+  color: var(--text-muted);
+  margin-bottom: 2rem;
+}
+.sig-section {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.sig-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--primary);
+  margin-bottom: 0.25rem;
+}
+.sig-note code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0 0.3rem;
+  border-radius: 4px;
+}
+.sig-body {
+  margin-top: 1rem;
+}
+.sig-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+.sig-btn {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.sig-btn:hover {
+  background: rgba(99, 102, 241, 0.3);
+  border-color: var(--primary);
+}
+.sig-btn.ghost {
+  background: transparent;
+}
+.sig-seg {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.sig-seg-btn,
+.sig-chip {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  cursor: pointer;
+}
+.sig-seg-btn:hover,
+.sig-chip:hover {
+  color: var(--text);
+}
+.sig-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sig-chip {
+  border-color: var(--border);
+}
+.sig-panel {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.sig-panel.muted {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+}
+.sig-acc {
+  width: 100%;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.sig-acc:hover {
+  border-color: var(--primary);
+}
+.sig-menu-item {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.sig-menu-item:hover {
+  background: rgba(99, 102, 241, 0.2);
+}
+.sig-stepper {
+  display: inline-flex;
+  gap: 8px;
+}
+.sig-progress {
+  width: 260px;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.sig-progress .krc-fill {
+  height: 100%;
+  width: 0;
+  background: var(--primary);
+  transition: width 0.2s;
+}
+.sig-stack-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 0.5rem;
+}
+
+.sig-readout {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.sig-readout .krc-live::after {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* @krate/components ships the base-docs-theme as its default theme; the examples
+   page is dark, so just request the dark scheme and let the library defaults
+   apply unchanged. */
+html:root {
+  color-scheme: dark;
+}
+
+/* Modern demo page spacing */
+.zerojs-demo,
+.interactive-demo,
+.tabs-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.zerojs-demo h1,
+.interactive-demo h1,
+.tabs-demo h1 {
+  margin-bottom: 0.25rem;
+}
+.zerojs-demo section,
+.interactive-demo section,
+.tabs-demo section {
+  padding: 1.25rem 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.zerojs-demo h2,
+.interactive-demo h2,
+.tabs-demo h2 {
+  font-size: 1.05rem;
+  margin-bottom: 0;
+  color: var(--primary);
+}
+.demo-section-content {
+  gap: 16px;
+}
+
+/* Space out clustered controls (buttons, toggles, inputs) on the demo pages. */
+.ui-demo section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ui-demo .hero-actions,
+.ui-demo div[style*='display: flex'] {
+  row-gap: 10px;
+  column-gap: 10px;
+  flex-wrap: wrap;
+}
+

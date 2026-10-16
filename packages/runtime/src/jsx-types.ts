@@ -1,7 +1,44 @@
 declare global {
+  /**
+   * Extension point for Krate-generated types. `krate build` writes
+   * `krate-env.d.ts`, which augments these interfaces with the project's
+   * routes and content collections (see `.krate/types/`).
+   *
+   * `TypedRoutes` is intentionally empty by default so the runtime type-checks
+   * with no generated files present.
+   */
+  namespace Krate {
+    interface TypedRoutes {}
+  }
+
+  /**
+   * A navigation target. When the project has generated route types,
+   * `Krate.TypedRoutes.href` is a union of its routes, which gives `<Link href>`
+   * and `<a href>` autocomplete. `string` is always accepted so arbitrary URLs
+   * (external, query strings, hashes) keep working.
+   */
+  type KrateHref = Krate.TypedRoutes extends { href: infer H }
+    ? H extends string
+      ? H | (string & {})
+      : string
+    : string;
+
   namespace JSX {
     interface Element extends Node {}
     interface ElementChildrenAttribute { children: {} }
+
+    /**
+     * Attributes accepted by every JSX element (intrinsic and component).
+     * `showIf` (and its alias `visibleIf`) conditionally render the element:
+     * `<X showIf={expr}>` is sugar for `{expr && <X>}`, compiled at build time.
+     * Both are compiler-erased and never reach emitted HTML or component props.
+     */
+    interface IntrinsicAttributes {
+      /** Conditionally render this element (sugar for `{expr && <el/>}`). */
+      showIf?: unknown;
+      /** Alias of `showIf`. */
+      visibleIf?: unknown;
+    }
 
     type Booleanish = boolean | 'true' | 'false';
     type CSSProperties = Record<string, string | number>;
@@ -173,7 +210,7 @@ declare global {
       onWaiting?: EventHandler<Event>;
     }
 
-    interface DOMAttributes {
+    interface DOMAttributes extends IntrinsicAttributes {
       children?: unknown[] | unknown;
       key?: string | number;
       /** Assigns the mounted DOM element. Pass a mutable holder (`ref={myRef}`), a callback (`ref={el => ...}`), or an element. */
@@ -186,10 +223,13 @@ declare global {
 
     interface HTMLAttributes extends AriaAttributes, ClipboardEventHandler, CompositionEventHandler, FocusEventHandler, FormEventHandler, KeyboardEventHandler, MouseEventHandler, PointerEventHandler, TouchEventHandler, WheelEventHandler, AnimationEventHandler, TransitionEventHandler, UIEventHandler, MediaEventHandler, DOMAttributes {
       accessKey?: string;
+      accesskey?: string;
       class?: string;
       className?: string;
       contentEditable?: Booleanish | 'inherit' | 'false' | 'true';
+      contenteditable?: Booleanish | 'inherit' | 'false' | 'true';
       contextMenu?: string;
+      contextmenu?: string;
       dir?: string;
       draggable?: Booleanish;
       hidden?: boolean | string;
@@ -200,6 +240,7 @@ declare global {
       role?: string;
       spellcheck?: Booleanish;
       tabIndex?: number;
+      tabindex?: number;
       title?: string;
       translate?: 'yes' | 'no';
       about?: string;
@@ -229,11 +270,14 @@ declare global {
       writingSuggestions?: 'mark' | 'suggestion';
       inputMode?: 'none' | 'text' | 'tel' | 'url' | 'email' | 'numeric' | 'decimal' | 'search';
       placeholder?: string;
+      // Raw HTML injected verbatim (trusted). Used by Markdown/MDX rendering and
+      // content-collection bodies: `dangerouslySetInnerHTML={{ __html: html }}`.
+      dangerouslySetInnerHTML?: { __html: string };
     }
 
     interface AnchorHTMLAttributes extends HTMLAttributes {
       download?: string;
-      href?: string;
+      href?: KrateHref;
       hrefLang?: string;
       media?: string;
       ping?: string;
@@ -349,13 +393,16 @@ declare global {
       accept?: string;
       alt?: string;
       autoComplete?: string;
+      autocomplete?: string;
       autoFocus?: boolean;
+      autofocus?: boolean;
       capture?: boolean | string;
       checked?: boolean | string;
       crossOrigin?: string;
       disabled?: boolean | string;
       form?: string;
       formAction?: string;
+      formaction?: string;
       formEncType?: string;
       formMethod?: string;
       formNoValidate?: boolean;
@@ -364,13 +411,16 @@ declare global {
       list?: string;
       max?: number | string;
       maxLength?: number;
+      maxlength?: number;
       min?: number | string;
       minLength?: number;
+      minlength?: number;
       multiple?: boolean;
       name?: string;
       pattern?: string;
       placeholder?: string;
       readOnly?: boolean;
+      readonly?: boolean;
       required?: boolean | string;
       size?: number;
       src?: string;
@@ -384,7 +434,9 @@ declare global {
 
     interface SelectHTMLAttributes extends Omit<HTMLAttributes, 'onChange'> {
       autoComplete?: string;
+      autocomplete?: string;
       autoFocus?: boolean;
+      autofocus?: boolean;
       disabled?: boolean | string;
       form?: string;
       multiple?: boolean;
@@ -397,16 +449,21 @@ declare global {
 
     interface TextareaHTMLAttributes extends Omit<HTMLAttributes, 'onChange' | 'onInput'> {
       autoComplete?: string;
+      autocomplete?: string;
       autoFocus?: boolean;
+      autofocus?: boolean;
       cols?: number;
       dirName?: string;
       disabled?: boolean | string;
       form?: string;
       maxLength?: number;
+      maxlength?: number;
       minLength?: number;
+      minlength?: number;
       name?: string;
       placeholder?: string;
       readOnly?: boolean;
+      readonly?: boolean;
       required?: boolean | string;
       rows?: number;
       value?: string | number;
@@ -592,8 +649,10 @@ declare global {
 
     interface TdHTMLAttributes extends HTMLAttributes {
       colSpan?: number;
+      colspan?: number;
       headers?: string;
       rowSpan?: number;
+      rowspan?: number;
       scope?: string;
       abbr?: string;
       width?: number | string;
@@ -602,8 +661,10 @@ declare global {
     interface ThHTMLAttributes extends HTMLAttributes {
       abbr?: string;
       colSpan?: number;
+      colspan?: number;
       headers?: string;
       rowSpan?: number;
+      rowspan?: number;
       scope?: 'col' | 'colgroup' | 'row' | 'rowgroup';
       width?: number | string;
     }
@@ -626,7 +687,7 @@ declare global {
       disablePictureInPicture?: boolean;
     }
 
-    interface SVGAttributes extends AriaAttributes {
+    interface SVGAttributes extends AriaAttributes, IntrinsicAttributes {
       children?: unknown[] | unknown;
       key?: string | number;
       ref?: ((el: globalThis.Element) => void) | { current: globalThis.Element | null } | globalThis.Element | null;
@@ -1012,7 +1073,7 @@ declare global {
     }
 
     interface LinkProps extends AnchorHTMLAttributes {
-      href: string;
+      href: KrateHref;
       className?: string;
       external?: boolean;
       children?: any;

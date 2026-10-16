@@ -1,6 +1,8 @@
 package annotator
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -27,7 +29,7 @@ func entryTier(t *testing.T, ann *irtree.Annotations) irtree.ComponentTier {
 	return ann.ComponentTiers[ann.EntryPoint]
 }
 
-// ─── Tier classification priority ───────────────────────────────────────────
+// Tier classification priority
 
 func TestClassifyDirectivePriority(t *testing.T) {
 	src := `// @server
@@ -81,11 +83,11 @@ export default function App() { return <Button label="x" />; }`
 	}
 }
 
-// ─── Per-module source classification ───────────────────────────────────────
+// Per-module source classification
 
 func TestClassifyExportedConstArrow(t *testing.T) {
 	// `export const Live = () => ...` lands in ExportStmt.Declaration as a
-	// VarStmt — it must be collected just like `const Live = () => ...`.
+	// VarStmt - it must be collected just like `const Live = () => ...`.
 	src := `export const Live = ({ name }: any) => <p>live {name}</p>;
 export default function App() { return <Live name="world" />; }`
 	ann := Annotate(parseProg(t, src), &config.Config{}, "src/Live.tsx", src)
@@ -200,7 +202,7 @@ func TestMergeModuleFunctionsCollectsSignals(t *testing.T) {
 	}
 }
 
-// ─── Streaming / Suspense detection ─────────────────────────────────────────
+// Streaming / Suspense detection
 
 func TestDetectSuspenseUsage(t *testing.T) {
 	src := `import { Suspense } from '@krate/runtime/server';
@@ -256,5 +258,59 @@ function Other() { return <div/>; }`
 	}
 	if ann.UsedComponents["Other"] {
 		t.Error("unused component should not be marked used")
+	}
+}
+
+// Import-binding aliases
+
+func TestMergeImportAliasesMapsLocalBindingToDeclaredDefault(t *testing.T) {
+	dir := t.TempDir()
+	entryFile := filepath.Join(dir, "entry.tsx")
+	themeFile := filepath.Join(dir, "theme", "layout.tsx")
+	_ = os.MkdirAll(filepath.Dir(themeFile), 0755)
+
+	// The theme's component is named NightLayout, but the page imports it as
+	// DocsLayout. Without aliasing, the resolver (which keys merged module
+	// functions by declared name) would never match <DocsLayout>.
+	pageSrc := `import DocsLayout from "./theme/layout";
+export default function Page() {
+  return <DocsLayout pageTitle="Hi" />;
+}`
+	themeSrc := `export default function NightLayout(props: any) {
+  return <div class="docs-page">{props.pageTitle}</div>;
+}`
+	_ = os.WriteFile(entryFile, []byte(pageSrc), 0644)
+	_ = os.WriteFile(themeFile, []byte(themeSrc), 0644)
+
+	entryMod := ModuleSource{Program: parseProg(t, pageSrc), Path: entryFile, RawSource: pageSrc}
+	themeMod := ModuleSource{Program: parseProg(t, themeSrc), Path: themeFile, RawSource: themeSrc}
+
+	ann := Annotate(entryMod.Program, &config.Config{}, entryFile, pageSrc)
+	MergeModuleFunctions(ann, []ModuleSource{themeMod})
+	if _, ok := ann.Functions["DocsLayout"]; ok {
+		t.Fatal("DocsLayout should not resolve before aliasing (declared name is NightLayout)")
+	}
+	if _, ok := ann.Functions["NightLayout"]; !ok {
+		t.Fatal("NightLayout should be merged from the theme module")
+	}
+
+	MergeImportAliases(ann, []ModuleSource{themeMod}, entryMod)
+
+	if _, ok := ann.Functions["DocsLayout"]; !ok {
+		t.Fatalf("expected alias DocsLayout → NightLayout to be resolvable after MergeImportAliases")
+	}
+	if !ann.UsedComponents["DocsLayout"] {
+		t.Error("expected the aliased component to be walked as used from the entry")
+	}
+}
+
+func TestBuildImportAliasesIgnoresUnresolvableBindings(t *testing.T) {
+	dir := t.TempDir()
+	aFile := filepath.Join(dir, "a.tsx")
+	_ = os.WriteFile(aFile, []byte(`import Sidebar from "./missing/layout";`), 0644)
+	mod := ModuleSource{Program: parseProg(t, `import Sidebar from "./missing/layout";`), Path: aFile, RawSource: ""}
+	aliases := BuildImportAliases([]ModuleSource{mod, mod})
+	if len(aliases) != 0 {
+		t.Errorf("expected no aliases for an unresolvable import, got %v", aliases)
 	}
 }

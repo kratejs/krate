@@ -14,7 +14,7 @@ export default function Home() {
         <h1 class="hero-title">__PROJECT_DISPLAY_NAME__</h1>
         <p class="hero-subtitle">
           This is your documentation home. Content lives in{" "}
-          <code>content/docs/</code> as Markdown — add files there and they
+          <code>src/content/docs/</code> as Markdown — add files there and they
           appear in the sidebar automatically, with search, a table of contents,
           and prev/next navigation.
         </p>
@@ -30,7 +30,7 @@ export default function Home() {
         <a class="feature-card" href="/docs/">
           <h3>Markdown-first</h3>
           <p>
-            Write pages in Markdown or MDX under <code>content/docs/</code>.
+            Write pages in Markdown or MDX under <code>src/content/docs/</code>.
             Frontmatter controls titles and sidebar ordering.
           </p>
         </a>
@@ -52,7 +52,7 @@ export default function Home() {
 
       <section class="cta-band">
         <h2>Start writing.</h2>
-        <p>Add your first page under <code>content/docs/</code>.</p>
+        <p>Add your first page under <code>src/content/docs/</code>.</p>
         <a class="btn btn-primary" href="/docs/getting-started/">Get started</a>
       </section>
     </>

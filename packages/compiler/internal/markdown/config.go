@@ -8,6 +8,7 @@ type Config struct {
 	CodeHighlight  bool   `json:"codeHighlight"`  // syntax highlighting for code blocks
 	CodeTheme      string `json:"codeTheme"`      // chroma theme name for syntax highlighting (default: github-dark)
 	Math           bool   `json:"math"`           // $...$ and $$...$$ math support
+	Mermaid        bool   `json:"mermaid"`        // render ```mermaid blocks as Mermaid diagrams
 }
 
 func DefaultConfig() Config {

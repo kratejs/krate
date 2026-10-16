@@ -53,6 +53,8 @@ type CallExpr struct {
 	Position Pos
 	Callee   Expr
 	Args     []Expr
+	// Optional marks an optional call `fn?.()`, emitted as `callee?.(...)`.
+	Optional bool
 }
 
 func (c *CallExpr) node()    {}
@@ -229,14 +231,94 @@ type JSXAttr struct {
 
 func (j *JSXAttr) Pos() Pos { return j.Position }
 
+// htmlAttrAliases maps React/JSX camelCase attribute names to their HTML
+// equivalents. Includes the React DOM property renames plus SVG presentation
+// attributes, so transpiled React source (and shadcn/radix components) emit
+// valid HTML/SVG attributes.
+var htmlAttrAliases = map[string]string{
+	// React DOM property aliases.
+	"className":       "class",
+	"htmlFor":         "for",
+	"tabIndex":        "tabindex",
+	"readOnly":        "readonly",
+	"autoComplete":    "autocomplete",
+	"autoFocus":       "autofocus",
+	"autoPlay":        "autoplay",
+	"colSpan":         "colspan",
+	"rowSpan":         "rowspan",
+	"srcSet":          "srcset",
+	"maxLength":       "maxlength",
+	"minLength":       "minlength",
+	"contentEditable": "contenteditable",
+	"spellCheck":      "spellcheck",
+	"formAction":      "formaction",
+	"formEncType":     "formenctype",
+	"formMethod":      "formmethod",
+	"formNoValidate":  "formnovalidate",
+	"formTarget":      "formtarget",
+	"acceptCharset":   "accept-charset",
+	"noValidate":      "novalidate",
+	"crossOrigin":     "crossorigin",
+	"defaultValue":    "value",
+	"defaultChecked":  "checked",
+	"dateTime":        "datetime",
+	"accessKey":       "accesskey",
+	"inputMode":       "inputmode",
+	"enterKeyHint":    "enterkeyhint",
+	"autoCapitalize":  "autocapitalize",
+	"autoCorrect":     "autocorrect",
+	"referrerPolicy":  "referrerpolicy",
+	"srcLang":         "srclang",
+	"itemScope":       "itemscope",
+	"itemType":        "itemtype",
+	"itemID":          "itemid",
+	"allowFullScreen": "allowfullscreen",
+	"playsInline":     "playsinline",
+	"frameBorder":     "frameborder",
+	"marginWidth":     "marginwidth",
+	"marginHeight":    "marginheight",
+	"charSet":         "charset",
+	"httpEquiv":       "http-equiv",
+	"cellPadding":     "cellpadding",
+	"cellSpacing":     "cellspacing",
+	"useMap":          "usemap",
+	"captureAudio":    "capture",
+	// SVG presentation attributes (camelCase in React, kebab/verbatim in SVG).
+	"strokeWidth":         "stroke-width",
+	"strokeLinecap":       "stroke-linecap",
+	"strokeLinejoin":      "stroke-linejoin",
+	"strokeDasharray":     "stroke-dasharray",
+	"strokeDashoffset":    "stroke-dashoffset",
+	"strokeMiterlimit":    "stroke-miterlimit",
+	"strokeOpacity":       "stroke-opacity",
+	"fillRule":            "fill-rule",
+	"fillOpacity":         "fill-opacity",
+	"clipRule":            "clip-rule",
+	"clipPath":            "clip-path",
+	"stopColor":           "stop-color",
+	"stopOpacity":         "stop-opacity",
+	"gradientUnits":       "gradientUnits",
+	"patternUnits":        "patternUnits",
+	"textAnchor":          "text-anchor",
+	"dominantBaseline":    "dominant-baseline",
+	"vectorEffect":        "vector-effect",
+	"shapeRendering":      "shape-rendering",
+	"floodColor":          "flood-color",
+	"floodOpacity":        "flood-opacity",
+	"markerEnd":           "marker-end",
+	"markerMid":           "marker-mid",
+	"markerStart":         "marker-start",
+	"stdDeviation":        "stdDeviation",
+	"viewBox":             "viewBox",
+	"preserveAspectRatio": "preserveAspectRatio",
+}
+
 // HTMLAttrName maps a JSX attribute name to its HTML attribute name, translating
-// React-style aliases (className, htmlFor) to their DOM equivalents (class, for).
+// React-style camelCase aliases (className, htmlFor, tabIndex, SVG props, ...) to
+// their DOM equivalents. Unknown names pass through unchanged.
 func HTMLAttrName(name string) string {
-	switch name {
-	case "className":
-		return "class"
-	case "htmlFor":
-		return "for"
+	if mapped, ok := htmlAttrAliases[name]; ok {
+		return mapped
 	}
 	return name
 }
@@ -246,6 +328,10 @@ type Param struct {
 	Name     string
 	Default  Expr // Store the expression here
 	IsRest   bool // Added this
+	// Pattern holds the source text of a destructuring parameter pattern
+	// (e.g. `{items, label}` or `[a, b]`). When set, Name is the "{...}" sentinel
+	// and codegen emits this pattern so the destructured locals are bound.
+	Pattern string
 }
 
 func (p *Param) node()    {}
@@ -290,6 +376,7 @@ type ExportStmt struct {
 	Default        bool
 	Local          string
 	StarReexport   bool   // export * from 'source'
+	Namespace      string // export * as Namespace from 'source'
 	ReexportSource string // source path for re-exports (export * from '...' or export { X } from '...')
 }
 
@@ -386,6 +473,10 @@ type ForInStmt struct {
 	Right    Expr
 	Body     []Stmt
 	IsForOf  bool
+	// Keyword is the declaration keyword of the loop binding ("const", "let",
+	// "var"), or "" for a bare assignment target such as `for (x in obj)`. The
+	// parser records it so codegen can reproduce the original binding form.
+	Keyword string
 }
 
 func (f *ForInStmt) node()    {}

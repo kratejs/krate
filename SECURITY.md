@@ -32,6 +32,25 @@ The following are in scope:
 - Handler/script string injection (escaping of inline JS)
 - The embedded QuickJS plugin/API runtime sandbox
 - The Go API sidecar and middleware execution
+- Request handling in `krate serve` (headers, body limits, timeouts, panic
+  isolation)
+
+## Server hardening defaults
+
+`krate serve` and `krate dev` apply these by default:
+
+- Read-header/read/write/idle timeouts on the HTTP server; SSE and streaming
+  responses extend their own write deadline.
+- Panic recovery per request: a panic returns `500` and is logged, it does not
+  take the process down.
+- Request bodies for API routes/middleware are capped (`maxRequestBodyBytes`).
+- Security headers: `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`, `Permissions-Policy`, and HSTS when `seo.baseUrl` is https.
+- `Content-Security-Policy` as an HTTP header when `csp.enabled` is set
+  (hashes are generated for inline scripts/styles; the header adds
+  `frame-ancestors`, which a `<meta>` CSP cannot express).
+- Request IDs (`X-Request-Id`) for correlation, with structured `log/slog`
+  request logs.
 
 ## Safe Harbor
 
@@ -46,5 +65,7 @@ will not face legal action from us.
 - Never interpolate user content into HTML or JS without escaping.
 - The `$esc()` sanitizer and `escapeHTML()` are security boundaries. Do not
   weaken them.
-- JS plugins run in QuickJS with a `30s` timeout and filesystem write checks —
-  preserve these guarantees.
+- JS plugins run in QuickJS with a 32 MB memory limit, a 256 KB stack, and a
+  `30s` eval timeout (`internal/jsruntime/jsruntime.go`). Plugin file writes go
+  through `pluginapi.WriteFileToRoot`, which rejects paths that escape the
+  project root (`WithinRoot`). Preserve these guarantees.

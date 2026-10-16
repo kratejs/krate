@@ -1,0 +1,17 @@
+# golangci-lint configuration for the Krate compiler (packages/compiler).
+#
+# CI builds the linter with the project's Go toolchain (see .github/workflows/ci.yml)
+# so its analysis Go version matches go.mod.
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused

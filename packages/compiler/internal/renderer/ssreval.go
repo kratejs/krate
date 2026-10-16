@@ -2,6 +2,8 @@ package renderer
 
 import (
 	"fmt"
+	"math"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -68,6 +70,108 @@ type SSREval struct {
 	// emitting empty/wrong output, the emitter surfaces these so the build
 	// fails with a clear message.
 	errs []error
+
+	// cvaFactories maps module-level `const X = cva(...)` bindings to their
+	// resolved specs so `X({ variant })` calls in a prop-driven component fold
+	// to a static class string during SSR.
+	cvaFactories map[string]*irtree.CVASpec
+
+	// restProps maps a rest-parameter name (e.g. `props` in `{ a, ...props }`)
+	// to the call-site attrs it collects, so `{...props}` spreads on intrinsic
+	// elements expand during SSREval.
+	restProps map[string]map[string]ast.Expr
+
+	// tagAliases maps a local `const X = <tag expr>` binding to its tag
+	// expression, so `<X/>` resolves to the concrete tag when it folds.
+	tagAliases map[string]ast.Expr
+
+	// jsxBindings marks local names bound to a JSX value (`const chip = <span/>`)
+	// so `{chip}` is injected as markup instead of being HTML-escaped.
+	jsxBindings map[string]bool
+
+	// contextDefaults maps a module-level `const X = createContext(v)` binding to
+	// its literal default v, so `X.useContext()` folds at build time.
+	contextDefaults map[string]string
+
+	// codeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
+	// during SSREval, so inline highlighted blocks match the generated
+	// stylesheet. Empty selects the default theme.
+	codeTheme string
+
+	// goComponents maps imported Go component names to their refs, and goEnqueue
+	// records a build-time render request, returning a splice marker. Set by the
+	// emitter; the build renders all requests in one Go host call.
+	goComponents map[string]irtree.GoComponentRef
+	goEnqueue    func(callID, name, propsJSON string) string
+}
+
+// SetGoComponents installs the Go-component table + enqueue hook.
+func (e *SSREval) SetGoComponents(comps map[string]irtree.GoComponentRef, enqueue func(callID, name, propsJSON string) string) {
+	e.goComponents = comps
+	e.goEnqueue = enqueue
+}
+
+// SetCodeTheme installs the chroma theme for compile-time code highlighting.
+func (e *SSREval) SetCodeTheme(theme string) {
+	e.codeTheme = theme
+}
+
+// SetCVAFactories installs the module-wide cva factory table.
+func (e *SSREval) SetCVAFactories(factories map[string]*irtree.CVASpec) {
+	e.cvaFactories = factories
+}
+
+// SetContextDefaults installs the module-wide context-default table.
+func (e *SSREval) SetContextDefaults(defaults map[string]string) {
+	e.contextDefaults = defaults
+}
+
+// SetRestProps installs the rest-parameter attribute map for spread expansion.
+func (e *SSREval) SetRestProps(rest map[string]map[string]ast.Expr) {
+	e.restProps = rest
+}
+
+// expandSSRSpreadAttrs expands `{...name}` spreads resolving to a known rest
+// parameter; explicit attributes win over spread-provided ones.
+func (e *SSREval) expandSSRSpreadAttrs(attrs []*ast.JSXAttr) (out []*ast.JSXAttr, expanded bool) {
+	if e.restProps == nil {
+		return attrs, false
+	}
+	explicit := make(map[string]bool)
+	for _, attr := range attrs {
+		if !attr.Spread {
+			explicit[attr.Name] = true
+		}
+	}
+	for _, attr := range attrs {
+		if !attr.Spread || attr.Value == nil {
+			out = append(out, attr)
+			continue
+		}
+		id, ok := attr.Value.(*ast.Identifier)
+		if !ok {
+			out = append(out, attr)
+			continue
+		}
+		rest, ok := e.restProps[id.Name]
+		if !ok {
+			out = append(out, attr)
+			continue
+		}
+		expanded = true
+		names := make([]string, 0, len(rest))
+		for name := range rest {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if explicit[name] {
+				continue
+			}
+			out = append(out, &ast.JSXAttr{Position: attr.Position, Name: name, Value: rest[name]})
+		}
+	}
+	return out, expanded
 }
 
 // addErr records an unsupported-construct diagnostic during evaluation.
@@ -91,9 +195,10 @@ const maxEvalDepth = 10
 // NewSSREval creates a new SSR evaluator.
 func NewSSREval(functions map[string]*ast.FnDecl) *SSREval {
 	return &SSREval{
-		bindings:  make(map[string]string),
-		arrays:    make(map[string][]string),
-		functions: functions,
+		bindings:    make(map[string]string),
+		arrays:      make(map[string][]string),
+		jsxBindings: make(map[string]bool),
+		functions:   functions,
 	}
 }
 
@@ -108,18 +213,35 @@ func (e *SSREval) SetBindings(bindings map[string]string) {
 // Also evaluates for-loops that build arrays via `.push(<JSX/>)` so
 // components like OTPField render their statically-built element lists.
 func (e *SSREval) BindLocalVars(body []ast.Stmt) {
+	if e.tagAliases == nil {
+		e.tagAliases = make(map[string]ast.Expr)
+	}
 	for _, stmt := range body {
 		switch s := stmt.(type) {
 		case *ast.VarStmt:
 			for _, decl := range s.Decls {
 				if decl.Name != "" && decl.Init != nil {
-					if arr, ok := decl.Init.(*ast.ArrayExpr); ok && hasJSX(arr) {
+					// Array literals are registered as arrays (not scalar
+					// bindings). An EMPTY array is registered too so a following
+					// `for (...) { name.push(<JSX/>) }` can append to it - the
+					// common `var items = []; for (...) items.push(<X/>)` pattern.
+					if arr, ok := decl.Init.(*ast.ArrayExpr); ok && (hasJSX(arr) || len(arr.Elements) == 0) {
 						var elems []string
 						for _, el := range arr.Elements {
 							elems = append(elems, e.eval(el))
 						}
 						e.arrays[decl.Name] = elems
 						continue
+					}
+					// Record tag aliases (`const Comp = cond ? Slot : "button"`)
+					// so `<Comp/>` can resolve to the concrete tag.
+					if isTagExpr(decl.Init) {
+						e.tagAliases[decl.Name] = decl.Init
+					}
+					// A local bound to JSX (`const chip = <span/>`) must render as
+					// markup when read, not as escaped text.
+					if e.isHTMLProducing(decl.Init) {
+						e.jsxBindings[decl.Name] = true
 					}
 					e.bindings[decl.Name] = e.eval(decl.Init)
 				}
@@ -130,7 +252,7 @@ func (e *SSREval) BindLocalVars(body []ast.Stmt) {
 			if vs, ok := s.Declaration.(*ast.VarStmt); ok {
 				for _, decl := range vs.Decls {
 					if decl.Name != "" && decl.Init != nil {
-						if arr, ok := decl.Init.(*ast.ArrayExpr); ok && hasJSX(arr) {
+						if arr, ok := decl.Init.(*ast.ArrayExpr); ok && (hasJSX(arr) || len(arr.Elements) == 0) {
 							var elems []string
 							for _, el := range arr.Elements {
 								elems = append(elems, e.eval(el))
@@ -144,6 +266,231 @@ func (e *SSREval) BindLocalVars(body []ast.Stmt) {
 			}
 		}
 	}
+}
+
+// evalSlot renders `<Slot attrs>{child}</Slot>` by merging the Slot's
+// attributes onto the single child element (the shadcn/radix `asChild`
+// contract). Returns ok=false when there is not exactly one element child.
+func (e *SSREval) evalSlot(el *ast.JSXElement) (string, bool) {
+	var child *ast.JSXElement
+	for _, c := range el.Children {
+		switch ch := c.(type) {
+		case *ast.JSXElementChild:
+			if child != nil {
+				return "", false
+			}
+			child = ch.Element
+		case *ast.JSXText:
+			if strings.TrimSpace(ch.Value) != "" {
+				return "", false
+			}
+		case *ast.JSXExprContainer:
+			// `{children}` / `{props.children}` forwards the call-site child,
+			// which arrives via the frame's `children` binding.
+			if !isChildrenRef(ch.Expression) {
+				return "", false
+			}
+		}
+	}
+	if child == nil {
+		// The child may have arrived via the frame's `children` binding (e.g.
+		// a forwarded rest spread or `{children}`). Merge the Slot's attributes
+		// into the rendered child HTML.
+		if raw, ok := e.bindings["children"]; ok && raw != "" {
+			if merged, ok := e.mergeSlotChildrenHTML(el, raw); ok {
+				return merged, true
+			}
+		}
+		return "", false
+	}
+	// Merge the Slot's explicit attributes under the child's own (child wins
+	// for duplicates, matching cloneElement where later props override).
+	merged := make([]*ast.JSXAttr, 0, len(el.Opening.Attributes)+len(child.Opening.Attributes))
+	childAttrs := make(map[string]bool, len(child.Opening.Attributes))
+	for _, a := range child.Opening.Attributes {
+		if !a.Spread {
+			childAttrs[a.Name] = true
+		}
+	}
+	for _, a := range el.Opening.Attributes {
+		if a.Spread {
+			continue
+		}
+		if a.Name == "key" || a.Name == "ref" || isSlotOnlyAttr(a.Name) {
+			continue
+		}
+		if childAttrs[a.Name] {
+			continue
+		}
+		if a.Name == "class" || a.Name == "className" {
+			merged = append(merged, mergeClassAttr(child, a))
+			continue
+		}
+		merged = append(merged, a)
+	}
+	merged = append(merged, child.Opening.Attributes...)
+
+	cloned := *child
+	opening := *child.Opening
+	opening.Attributes = e.expandSlotSpread(merged)
+	cloned.Opening = &opening
+	return e.evalJSX(&cloned), true
+}
+
+// mergeSlotChildrenHTML merges the Slot's attributes into the opening tag of
+// already-rendered children HTML (the forwarded `children` binding case). It
+// injects the class and any other simple attributes into the first element.
+func (e *SSREval) mergeSlotChildrenHTML(slot *ast.JSXElement, html string) (string, bool) {
+	start := strings.IndexByte(html, '<')
+	if start < 0 {
+		return "", false
+	}
+	// Skip closing tags / comments / doctype.
+	if start+1 >= len(html) {
+		return "", false
+	}
+	switch html[start+1] {
+	case '/', '!':
+		return "", false
+	}
+	end := strings.IndexByte(html[start:], '>')
+	if end < 0 {
+		return "", false
+	}
+	end += start
+
+	cls := ""
+	for _, a := range slot.Opening.Attributes {
+		if a.Spread || isSlotOnlyAttr(a.Name) {
+			continue
+		}
+		if a.Name == "class" || a.Name == "className" {
+			cls = e.eval(a.Value)
+		}
+	}
+	if cls == "" {
+		return html, true
+	}
+	// Merge into an existing class attribute if present, else add one.
+	openTag := html[start : end+1]
+	if idx := indexClassAttr(openTag); idx >= 0 {
+		// Insert the Slot's classes after `class="`.
+		insertAt := start + idx
+		return html[:insertAt] + cls + " " + html[insertAt:], true
+	}
+	return html[:end] + ` class="` + escape.HTML(cls) + `"` + html[end:], true
+}
+
+// indexClassAttr returns the offset just after the opening quote of a
+// class="..." attribute in an opening tag, or -1.
+func indexClassAttr(tag string) int {
+	for _, key := range []string{` class="`, ` class='`} {
+		if i := strings.Index(tag, key); i >= 0 {
+			return i + len(key)
+		}
+	}
+	return -1
+}
+
+// isSlotOnlyAttr reports attributes consumed by Slot itself, not forwarded.
+func isSlotOnlyAttr(name string) bool {
+	switch name {
+	case "asChild", "children", "suppressHydrationWarning":
+		return true
+	}
+	return false
+}
+
+// mergeClassAttr combines a Slot-provided class with the child's existing class
+// attribute value (Slot class first, then child class), as a `a + " " + b`
+// binary expression that the evaluator folds.
+func mergeClassAttr(child *ast.JSXElement, slotAttr *ast.JSXAttr) *ast.JSXAttr {
+	for _, ca := range child.Opening.Attributes {
+		if ca.Name != "class" && ca.Name != "className" {
+			continue
+		}
+		combined := &ast.BinaryExpr{
+			Op: "+",
+			Left: &ast.BinaryExpr{
+				Op:    "+",
+				Left:  slotAttr.Value,
+				Right: &ast.Literal{Kind: ast.StringLit, Value: " "},
+			},
+			Right: ca.Value,
+		}
+		return &ast.JSXAttr{Position: slotAttr.Position, Name: "class", Value: combined}
+	}
+	return slotAttr
+}
+
+// expandSlotSpread drops unresolved spreads (Slot spread handling is limited to
+// explicit attributes in this lowering).
+func (e *SSREval) expandSlotSpread(attrs []*ast.JSXAttr) []*ast.JSXAttr {
+	out := make([]*ast.JSXAttr, 0, len(attrs))
+	for _, a := range attrs {
+		if a.Spread {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// isTagExpr reports whether an initializer could be a JSX tag alias: a string
+// literal, a component identifier, or a conditional/type-assertion of those.
+func isTagExpr(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.Literal:
+		return e.Kind == ast.StringLit
+	case *ast.Identifier:
+		return len(e.Name) > 0
+	case *ast.ConditionalExpr:
+		return isTagExpr(e.Consequent) || isTagExpr(e.Alternate)
+	case *ast.TypeAssertion:
+		return isTagExpr(e.Expr)
+	}
+	return false
+}
+
+// resolveTagAlias resolves a JSX tag bound to a local `const X = ...` to its
+// concrete tag name when the binding folds against the current bindings.
+func (e *SSREval) resolveTagAlias(name string) string {
+	// Only uppercase tags are component references; lowercase tags are always
+	// intrinsic and must never alias a same-named local.
+	if len(name) == 0 || name[0] < 'A' || name[0] > 'Z' {
+		return ""
+	}
+	if e.tagAliases == nil {
+		return ""
+	}
+	expr, ok := e.tagAliases[name]
+	if !ok {
+		return ""
+	}
+	return e.foldTagExpr(expr)
+}
+
+func (e *SSREval) foldTagExpr(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.Literal:
+		if t.Kind == ast.StringLit {
+			return t.Value
+		}
+		return ""
+	case *ast.Identifier:
+		return t.Name
+	case *ast.ConditionalExpr:
+		if !e.isStaticExpr(t.Test) {
+			return ""
+		}
+		if isSSRTruthy(e.eval(t.Test)) {
+			return e.foldTagExpr(t.Consequent)
+		}
+		return e.foldTagExpr(t.Alternate)
+	case *ast.TypeAssertion:
+		return e.foldTagExpr(t.Expr)
+	}
+	return ""
 }
 
 // evalForLoop statically evaluates a `for` loop whose body pushes JSX onto an
@@ -253,7 +600,7 @@ func (e *SSREval) Eval(expr ast.Expr) string {
 	case *ast.ObjectExpr:
 		return e.evalObjectExpr(ex)
 	case *ast.NewExpr:
-		// `new Date(...)` etc. — delegated to QuickJS so real constructors run.
+		// `new Date(...)` etc. - delegated to QuickJS so real constructors run.
 		if root := globalRoot(ex.Callee); globalBuiltins[root] {
 			return e.delegateJS(ex)
 		}
@@ -270,7 +617,7 @@ func (e *SSREval) eval(expr ast.Expr) string {
 	return e.Eval(expr)
 }
 
-// ─── Binary ────────────────────────────────────────────────────────────────
+// Binary
 
 func (e *SSREval) evalBinaryExpr(expr *ast.BinaryExpr) string {
 	left := e.eval(expr.Left)
@@ -294,12 +641,27 @@ func (e *SSREval) evalBinaryExpr(expr *ast.BinaryExpr) string {
 		return left + right
 	case "/":
 		if isNumericStr(left) && isNumericStr(right) {
-			return trimFloatStr(toFloat(left) / toFloat(right))
+			r := toFloat(right)
+			if r == 0 {
+				// Match JS: x/0 is +/-Infinity (x=0 gives NaN).
+				if toFloat(left) == 0 {
+					return "NaN"
+				}
+				if left != "" && left[0] == '-' {
+					return "-Infinity"
+				}
+				return "Infinity"
+			}
+			return trimFloatStr(toFloat(left) / r)
 		}
 		return left + right
 	case "%":
 		if isNumericStr(left) && isNumericStr(right) {
-			return trimFloatStr(float64(int(toFloat(left)) % int(toFloat(right))))
+			r := toFloat(right)
+			if r == 0 {
+				return "NaN" // JS x % 0 is NaN; never divide by zero in Go.
+			}
+			return trimFloatStr(math.Mod(toFloat(left), r))
 		}
 		return left + right
 	case "<", ">", "<=", ">=":
@@ -371,7 +733,7 @@ func boolStr(b bool) string {
 	return "false"
 }
 
-// ─── Unary ─────────────────────────────────────────────────────────────────
+// Unary
 
 func (e *SSREval) evalUnaryExpr(expr *ast.UnaryExpr) string {
 	if expr.Op == "!" {
@@ -387,7 +749,7 @@ func (e *SSREval) evalUnaryExpr(expr *ast.UnaryExpr) string {
 	return e.eval(expr.Arg)
 }
 
-// ─── Conditional ───────────────────────────────────────────────────────────
+// Conditional
 
 func (e *SSREval) evalConditional(expr *ast.ConditionalExpr) string {
 	test := e.eval(expr.Test)
@@ -397,7 +759,7 @@ func (e *SSREval) evalConditional(expr *ast.ConditionalExpr) string {
 	return e.eval(expr.Alternate)
 }
 
-// ─── Member ────────────────────────────────────────────────────────────────
+// Member
 
 func (e *SSREval) evalMemberExpr(expr *ast.MemberExpr) string {
 	prop := ""
@@ -405,8 +767,8 @@ func (e *SSREval) evalMemberExpr(expr *ast.MemberExpr) string {
 		prop = id.Name
 	}
 
-	// Direct binding lookup: props.breadcrumbs → bindings["breadcrumbs"]
-	// Only applies when the object is `props` — a bare `item.url` must NOT
+	// Direct binding lookup: props.breadcrumbs -> bindings["breadcrumbs"]
+	// Only applies when the object is `props` - a bare `item.url` must NOT
 	// resolve from a top-level "url" binding (which could be a leftover prop
 	// from another component) but from the `item` object binding instead.
 	if prop != "" {
@@ -426,22 +788,17 @@ func (e *SSREval) evalMemberExpr(expr *ast.MemberExpr) string {
 		// Try to extract property from binding value
 		if v, found := e.bindings[id.Name]; found {
 			if prop == "length" && v != "" {
-				// Array length: count \x1f-separated items
-				parts := strings.Split(v, "\x1f")
-				return itoa(len(parts))
+				return itoa(len(arrayItems(v)))
 			}
 			if prop != "" {
 				if val := extractJSONProp(v, prop); val != "" {
 					return val
 				}
-				// Property is missing from the object — return "" so ternary
-				// tests like `item.indexURL ? ... : ...` correctly pick the
-				// alternate branch instead of treating the whole object as the
-				// property value.
-				if strings.HasPrefix(v, "{") {
-					return ""
-				}
-				return v
+				// Property is missing (or the binding is not an object): return
+				// "" so `item.name` on a plain string (and `item.x ? ... : ...`)
+				// resolves to undefined/empty instead of rendering the whole
+				// binding value.
+				return ""
 			}
 			return v
 		}
@@ -453,8 +810,7 @@ func (e *SSREval) evalMemberExpr(expr *ast.MemberExpr) string {
 	}
 	// .length on evaluated value
 	if prop == "length" && obj != "" {
-		parts := strings.Split(obj, "\x1f")
-		return itoa(len(parts))
+		return itoa(len(arrayItems(obj)))
 	}
 	// Try to extract property from evaluated object string
 	if prop != "" {
@@ -467,7 +823,7 @@ func (e *SSREval) evalMemberExpr(expr *ast.MemberExpr) string {
 
 // extractJSONProp is defined in eval.go and shared across the package.
 
-// ─── Call ──────────────────────────────────────────────────────────────────
+// Call
 
 func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 	// JSON.stringify
@@ -483,12 +839,11 @@ func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 		}
 		// .join()
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "join" {
-			arr := e.eval(mem.Object)
 			sep := ", "
 			if len(expr.Args) == 1 {
 				sep = e.eval(expr.Args[0])
 			}
-			return strings.ReplaceAll(arr, "\x1f", sep)
+			return strings.Join(arrayItems(e.eval(mem.Object)), sep)
 		}
 		// .filter()
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "filter" && len(expr.Args) == 1 {
@@ -496,12 +851,19 @@ func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 		}
 		// .length
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "length" {
-			arr := e.eval(mem.Object)
-			return itoa(len(strings.Split(arr, "\x1f")))
+			return itoa(len(arrayItems(e.eval(mem.Object))))
 		}
 		// .toString()
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "toString" {
 			return e.eval(mem.Object)
+		}
+		// `X.useContext()` -> the context default (no Provider at build time).
+		if prop, ok := mem.Property.(*ast.Identifier); ok && (prop.Name == "useContext" || prop.Name == "use") {
+			if id, ok := mem.Object.(*ast.Identifier); ok && e.contextDefaults != nil {
+				if def, found := e.contextDefaults[id.Name]; found {
+					return def
+				}
+			}
 		}
 		// .toUpperCase()
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "toUpperCase" {
@@ -510,6 +872,46 @@ func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 		// .toLowerCase()
 		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "toLowerCase" {
 			return strings.ToLower(e.eval(mem.Object))
+		}
+		// .slice(start, end?) - strings (runes) and arrays (either \x1f-joined
+		// or a JS array literal from a serialized binding).
+		if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "slice" {
+			obj := e.eval(mem.Object)
+			start, end, hasEnd := 0, 0, false
+			if len(expr.Args) >= 1 {
+				if n, err := strconv.Atoi(strings.TrimSpace(e.eval(expr.Args[0]))); err == nil {
+					start = n
+				}
+			}
+			if len(expr.Args) >= 2 {
+				if n, err := strconv.Atoi(strings.TrimSpace(e.eval(expr.Args[1]))); err == nil {
+					end = n
+					hasEnd = true
+				}
+			}
+			if strings.Contains(obj, "\x1f") || strings.HasPrefix(strings.TrimSpace(obj), "[") {
+				items := arrayItems(obj)
+				s, en := sliceBounds(start, end, hasEnd, len(items))
+				return strings.Join(items[s:en], "\x1f")
+			}
+			runes := []rune(obj)
+			s, en := sliceBounds(start, end, hasEnd, len(runes))
+			return string(runes[s:en])
+		}
+	}
+	// Class helpers (cn/clsx) fold to a literal class string when every
+	// argument is statically known, so a prop-driven component's
+	// `className={cn("base", className)}` renders real classes at build time.
+	if id, ok := expr.Callee.(*ast.Identifier); ok && (id.Name == "cn" || id.Name == "clsx") {
+		if v, ok := e.evalClassCall(expr.Args); ok {
+			return v
+		}
+	}
+	// A known cva factory call (`buttonVariants({ variant, size })`) folds to
+	// its class string when the selection is statically known.
+	if id, ok := expr.Callee.(*ast.Identifier); ok && e.cvaFactories != nil {
+		if spec, ok := e.cvaFactories[id.Name]; ok {
+			return e.evalCVACall(spec, expr.Args)
 		}
 	}
 	// IIFE
@@ -527,12 +929,196 @@ func (e *SSREval) evalCallExpr(expr *ast.CallExpr) string {
 	return ""
 }
 
-// ─── Template ──────────────────────────────────────────────────────────────
+// sliceBounds resolves JS Array/String.prototype.slice arguments (negative
+// offsets and an omitted end are supported) to a clamped [start, end) range.
+func sliceBounds(start, end int, hasEnd bool, n int) (int, int) {
+	if start < 0 {
+		start += n
+		if start < 0 {
+			start = 0
+		}
+	}
+	if start > n {
+		start = n
+	}
+	if !hasEnd {
+		end = n
+	}
+	if end < 0 {
+		end += n
+		if end < 0 {
+			end = 0
+		}
+	}
+	if end > n {
+		end = n
+	}
+	if end < start {
+		end = start
+	}
+	return start, end
+}
+
+// evalCVACall resolves a cva factory call to its class string using the current
+// bindings for the variant selection.
+func (e *SSREval) evalCVACall(spec *irtree.CVASpec, args []ast.Expr) string {
+	selection := map[string]string{}
+	extra := ""
+	if len(args) >= 1 {
+		if obj, ok := args[0].(*ast.ObjectExpr); ok {
+			for _, prop := range obj.Properties {
+				if prop == nil || prop.Spread || prop.Key == "" || !e.isStaticExpr(prop.Value) {
+					continue
+				}
+				v := e.eval(prop.Value)
+				if v == "" || v == "undefined" || v == "null" {
+					continue
+				}
+				if prop.Key == "class" || prop.Key == "className" {
+					extra = v
+					continue
+				}
+				selection[prop.Key] = v
+			}
+		}
+	}
+	return spec.Fold(selection, extra)
+}
+
+// evalClassCall folds cn/clsx arguments against the current SSREval bindings.
+// It returns ok=false when any argument cannot be statically resolved.
+func (e *SSREval) evalClassCall(args []ast.Expr) (string, bool) {
+	var tokens []string
+	for _, arg := range args {
+		toks, ok := e.evalClassValue(arg)
+		if !ok {
+			return "", false
+		}
+		tokens = append(tokens, toks...)
+	}
+	return strings.Join(tokens, " "), true
+}
+
+func (e *SSREval) evalClassValue(expr ast.Expr) ([]string, bool) {
+	switch ex := expr.(type) {
+	case *ast.Literal:
+		switch ex.Kind {
+		case ast.StringLit:
+			if ex.Value == "" {
+				return nil, true
+			}
+			return []string{ex.Value}, true
+		case ast.NumberLit:
+			return []string{ex.Value}, true
+		default:
+			return nil, true
+		}
+	case *ast.Identifier:
+		if isChildrenRef(expr) {
+			return nil, false
+		}
+		if v, ok := e.bindings[ex.Name]; ok {
+			if v == "" || v == "undefined" || v == "null" || v == "false" {
+				return nil, true
+			}
+			return []string{v}, true
+		}
+		if _, ok := e.arrays[ex.Name]; ok {
+			return nil, false
+		}
+		// An unbound identifier is not statically known.
+		return nil, false
+	case *ast.CallExpr:
+		// Nested class helpers behave like their result string.
+		if id, ok := ex.Callee.(*ast.Identifier); ok && (id.Name == "cn" || id.Name == "clsx") {
+			v, ok := e.evalClassCall(ex.Args)
+			if !ok {
+				return nil, false
+			}
+			if v == "" {
+				return nil, true
+			}
+			return []string{v}, true
+		}
+		if id, ok := ex.Callee.(*ast.Identifier); ok && e.cvaFactories != nil {
+			if spec, ok := e.cvaFactories[id.Name]; ok {
+				v := e.evalCVACall(spec, ex.Args)
+				if v == "" {
+					return nil, true
+				}
+				return []string{v}, true
+			}
+		}
+		return nil, false
+	case *ast.TemplateExpr:
+		for _, part := range ex.Parts {
+			if !e.isStaticExpr(part) {
+				return nil, false
+			}
+		}
+		v := e.eval(expr)
+		if v == "" {
+			return nil, true
+		}
+		return []string{v}, true
+	case *ast.ArrayExpr:
+		var out []string
+		for _, el := range ex.Elements {
+			if el == nil {
+				continue
+			}
+			toks, ok := e.evalClassValue(el)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, toks...)
+		}
+		return out, true
+	case *ast.ObjectExpr:
+		var out []string
+		for _, prop := range ex.Properties {
+			if prop == nil || prop.Spread || prop.Key == "" {
+				return nil, false
+			}
+			if !e.isStaticExpr(prop.Value) {
+				return nil, false
+			}
+			v := e.eval(prop.Value)
+			if isSSRTruthy(v) {
+				out = append(out, prop.Key)
+			}
+		}
+		return out, true
+	case *ast.BinaryExpr:
+		if ex.Op == "&&" {
+			if !e.isStaticExpr(ex.Left) {
+				return nil, false
+			}
+			if !isSSRTruthy(e.eval(ex.Left)) {
+				return nil, true
+			}
+			return e.evalClassValue(ex.Right)
+		}
+		return nil, false
+	case *ast.ConditionalExpr:
+		if !e.isStaticExpr(ex.Test) {
+			return nil, false
+		}
+		if isSSRTruthy(e.eval(ex.Test)) {
+			return e.evalClassValue(ex.Consequent)
+		}
+		return e.evalClassValue(ex.Alternate)
+	default:
+		return nil, false
+	}
+}
+
+// Template
 
 func (e *SSREval) evalTemplateExpr(expr *ast.TemplateExpr) string {
 	var b strings.Builder
 	for i, raw := range expr.Raw {
-		b.WriteString(raw)
+		b.WriteString(escape.TemplateRaw(raw))
 		if i < len(expr.Parts) {
 			b.WriteString(e.eval(expr.Parts[i]))
 		}
@@ -540,7 +1126,7 @@ func (e *SSREval) evalTemplateExpr(expr *ast.TemplateExpr) string {
 	return b.String()
 }
 
-// ─── JSX ───────────────────────────────────────────────────────────────────
+// JSX
 
 // resolveIconName evaluates the `name` attribute of an <Icon> element through
 // the eval bindings (props + local vars). Returns "" when the name is a
@@ -604,7 +1190,7 @@ func (e *SSREval) isStaticExpr(expr ast.Expr) bool {
 // tryEvalSyntaxHighlight renders <SyntaxHighlight> as compile-time chroma
 // HTML. A {children} passthrough resolves from the current frame's raw
 // call-site text so chroma sees the original code. ok=false when any part of
-// the content isn't statically known — the caller then renders a plain code
+// the content isn't statically known - the caller then renders a plain code
 // block through the standard children rules instead of highlighting
 // placeholder values.
 func (e *SSREval) tryEvalSyntaxHighlight(el *ast.JSXElement) (string, bool) {
@@ -640,7 +1226,7 @@ func (e *SSREval) tryEvalSyntaxHighlight(el *ast.JSXElement) (string, bool) {
 	if normalizedLang == "" {
 		return "<pre><code>" + escape.HTML(codeStr) + "</code></pre>", true
 	}
-	highlighted := syntaxhighlight.Highlight(codeStr, normalizedLang)
+	highlighted := syntaxhighlight.HighlightTheme(codeStr, normalizedLang, e.codeTheme)
 	return "<pre class=\"chroma\"><code class=\"language-" + escape.HTML(lang) + "\">" + highlighted + "</code></pre>", true
 }
 
@@ -671,8 +1257,89 @@ func (e *SSREval) evalPlainCodeBlock(el *ast.JSXElement) string {
 	return b.String()
 }
 
+// evalLink renders the built-in <Link> as an <a> with the SPA/prefetch data
+// attributes the client router consumes. The generic element path then renders
+// it (attributes evaluated against the current bindings).
+func (e *SSREval) evalLink(el *ast.JSXElement) string {
+	prefetch := "true"
+	replace := ""
+	external := false
+	scrollFalse := false
+	var out []*ast.JSXAttr
+	for _, a := range el.Opening.Attributes {
+		if a.Spread {
+			out = append(out, a)
+			continue
+		}
+		switch a.Name {
+		case "prefetch":
+			if a.Value != nil {
+				prefetch = e.eval(a.Value)
+			}
+		case "replace":
+			if a.Value == nil {
+				replace = "true"
+			} else {
+				replace = e.eval(a.Value)
+			}
+		case "external":
+			external = true
+		case "scroll":
+			if lit, ok := a.Value.(*ast.Literal); ok && lit.Value == "false" {
+				scrollFalse = true
+			}
+		case "className":
+			out = append(out, &ast.JSXAttr{Name: "class", Value: a.Value})
+		default:
+			out = append(out, a)
+		}
+	}
+	if external {
+		out = append(out, &ast.JSXAttr{Name: "data-krate-external", Value: nil})
+	} else {
+		out = append(out, &ast.JSXAttr{Name: "data-krate-link", Value: nil})
+		if prefetch != "false" {
+			out = append(out, &ast.JSXAttr{Name: "data-prefetch", Value: nil})
+		}
+		if replace == "true" {
+			out = append(out, &ast.JSXAttr{Name: "data-krate-replace", Value: nil})
+		}
+		if scrollFalse {
+			out = append(out, &ast.JSXAttr{Name: "data-krate-scroll", Value: &ast.Literal{Kind: ast.StringLit, Value: "false"}})
+		}
+	}
+	clone := &ast.JSXElement{
+		Opening:  &ast.JSXOpening{Name: "a", Attributes: out, SelfClosing: el.Opening.SelfClosing},
+		Children: el.Children,
+		Closing:  &ast.JSXClosing{Name: "a"},
+	}
+	return e.evalJSX(clone)
+}
+
 func (e *SSREval) evalJSX(el *ast.JSXElement) string {
+	// `showIf`/`visibleIf` sugar: {test && <el/>}. Signal-less components reach
+	// this path, so the test must be evaluated statically against the bindings
+	// (props/locals); a truthy test renders the stripped element, a falsy test
+	// renders nothing. A signal-referencing test would have promoted the
+	// component to the client tier and never arrive here.
+	if test, stripped, ok := irtree.ShowIfExpr(el); ok {
+		if isSSRTruthy(e.eval(test)) {
+			return e.evalJSX(stripped)
+		}
+		return ""
+	}
+
 	name := el.Opening.Name
+
+	// A tag bound to a local `const X = cond ? Tag : "tag"` resolves through the
+	// eval bindings when the condition folds (the shadcn `asChild` pattern).
+	if alias := e.resolveTagAlias(name); alias != "" && alias != name {
+		cloned := *el
+		opening := *el.Opening
+		opening.Name = alias
+		cloned.Opening = &opening
+		return e.evalJSX(&cloned)
+	}
 
 	// Special components: capture their content into meta fields so signal-less
 	// wrappers (layouts, doc shells) still inject <Head>/<Script>/<Style>.
@@ -700,7 +1367,7 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		}
 	}
 
-	// <SyntaxHighlight lang="...">code</SyntaxHighlight> — compile-time chroma
+	// <SyntaxHighlight lang="...">code</SyntaxHighlight> - compile-time chroma
 	// highlighting when the content is statically known; a plain code block
 	// through the standard children rules otherwise.
 	if name == "SyntaxHighlight" {
@@ -710,19 +1377,39 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		return e.evalPlainCodeBlock(el)
 	}
 
-	// Uppercase = component — resolve and evaluate recursively
+	// Built-in <Link>: lower to an <a> carrying the SPA/prefetch data
+	// attributes so signal-less components (theme chrome, breadcrumbs, prev/
+	// next) render real anchors instead of an unknown component.
+	if name == "Link" {
+		return e.evalLink(el)
+	}
+
+	// <Slot> (the `asChild` primitive): render its single child element with
+	// the Slot's own attributes merged onto it, instead of wrapping.
+	if name == "Slot" {
+		if html, ok := e.evalSlot(el); ok {
+			return html
+		}
+		// No single element child - render children alone.
+		return e.evalChildren(el.Children)
+	}
+
+	// Uppercase = component - resolve and evaluate recursively
 	if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
 		if e.interactiveEmit != nil {
 			if html, handled := e.interactiveEmit(el); handled {
 				return html
 			}
 		}
+		if ref, ok := e.goComponents[name]; ok && e.goEnqueue != nil {
+			return e.evalGoComponent(el, ref)
+		}
 		if e.functions != nil {
 			if fn := e.functions[name]; fn != nil {
 				return e.evalComponentFn(fn, el)
 			}
 		}
-		// Unknown component — skip
+		// Unknown component - skip
 		return ""
 	}
 
@@ -732,9 +1419,10 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 
 	// dangerouslySetInnerHTML={{__html: "..."}} injects raw, pre-rendered HTML
 	// (e.g. build-time markdown). It is never emitted as an attribute.
+	attrs, expanded := e.expandSSRSpreadAttrs(el.Opening.Attributes)
 	var rawInnerHTML string
 	hasRawInnerHTML := false
-	for _, attr := range el.Opening.Attributes {
+	for _, attr := range attrs {
 		if attr.Spread || attr.Name != "dangerouslySetInnerHTML" || attr.Value == nil {
 			continue
 		}
@@ -744,7 +1432,7 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		}
 	}
 
-	for _, attr := range el.Opening.Attributes {
+	for _, attr := range attrs {
 		if attr.Spread || attr.Name == "dangerouslySetInnerHTML" {
 			continue
 		}
@@ -752,8 +1440,13 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		if attr.Value != nil {
 			val = e.eval(attr.Value)
 		} else {
-			// Bare attribute like <input disabled /> — boolean true
+			// Bare attribute like <input disabled /> - boolean true
 			val = "true"
+		}
+		// A prop that resolved to undefined/null is omitted entirely (React
+		// drops undefined attributes).
+		if val == "undefined" || val == "null" {
+			continue
 		}
 		// Boolean attributes must not be emitted with empty/"false" values:
 		// their mere presence (even ="") makes them truthy in HTML.
@@ -780,6 +1473,20 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 	}
 
 	if el.Opening.SelfClosing && !hasRawInnerHTML {
+		// A self-closing element may still receive children through a forwarded
+		// rest spread (`<Comp {...props}/>`), since React's props object carries
+		// `children`. Inject the frame's children when a spread was expanded and
+		// they are present.
+		if expanded {
+			if ch, ok := e.bindings["children"]; ok && ch != "" {
+				b.WriteByte('>')
+				b.WriteString(ch)
+				b.WriteString("</")
+				b.WriteString(name)
+				b.WriteByte('>')
+				return b.String()
+			}
+		}
 		if isVoidElement(el.Opening.Name) {
 			b.WriteString(" />")
 		} else {
@@ -792,11 +1499,25 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 
 	b.WriteByte('>')
 	if hasRawInnerHTML {
-		// The dangerouslySetInnerHTML value is pre-rendered markup — inject
+		// The dangerouslySetInnerHTML value is pre-rendered markup - inject
 		// it verbatim, ignoring children.
 		b.WriteString(rawInnerHTML)
 	} else {
-		for _, child := range el.Children {
+		children := el.Children
+		// React's props object carries `children`, so `<Comp {...props}/>`
+		// forwards the call-site children. When this element has no explicit
+		// children but a rest spread was expanded, inject the component
+		// frame's children binding.
+		if len(children) == 0 && expanded {
+			if ch, ok := e.bindings["children"]; ok && ch != "" {
+				b.WriteString(ch)
+				b.WriteString("</")
+				b.WriteString(name)
+				b.WriteByte('>')
+				return b.String()
+			}
+		}
+		for _, child := range children {
 			switch c := child.(type) {
 			case *ast.JSXText:
 				b.WriteString(c.Value)
@@ -891,6 +1612,28 @@ func (e *SSREval) evalChildren(children []ast.JSXChild) string {
 	return b.String()
 }
 
+// evalGoComponent enqueues a build-time render for an imported Go component: it
+// serializes props to JSON, renders children to HTML, and returns a splice
+// marker the build replaces with the host's output.
+func (e *SSREval) evalGoComponent(el *ast.JSXElement, ref irtree.GoComponentRef) string {
+	props := map[string]string{}
+	for _, attr := range el.Opening.Attributes {
+		if attr == nil || attr.Spread || attr.Name == "" {
+			continue
+		}
+		if attr.Value == nil {
+			props[attr.Name] = "true"
+			continue
+		}
+		props[attr.Name] = irtree.SerializeJSON(attr.Value, func(x ast.Expr) (string, bool) {
+			return e.eval(x), true
+		})
+	}
+	childHTML := e.evalChildren(el.Children)
+	callID := irtree.GoCallID(el.Position.Line, el.Position.Col, ref.Func)
+	return e.goEnqueue(callID, ref.Func, goPropsJSON(props, childHTML))
+}
+
 // evalComponentFn evaluates a component function with props extracted from JSX attributes.
 func (e *SSREval) evalComponentFn(fn *ast.FnDecl, el *ast.JSXElement) string {
 	e.depth++
@@ -922,7 +1665,7 @@ func (e *SSREval) evalComponentFn(fn *ast.FnDecl, el *ast.JSXElement) string {
 			}
 			for _, param := range fn.Params {
 				if param.Name == "{...}" {
-					// Destructured param — map attr name directly
+					// Destructured param - map attr name directly
 					val := e.eval(attr.Value)
 					e.bindings[attr.Name] = val
 				} else if param.Name == attr.Name {
@@ -1015,34 +1758,50 @@ func (e *SSREval) evalComponentFn(fn *ast.FnDecl, el *ast.JSXElement) string {
 // back to the else branch. This supports signal-less components whose function
 // body has no top-level return statement (e.g. an SVG helper that returns from
 // each if/else branch). Returns ok=false when no branch resolves to a return.
+// Block-bodied ifs (if (c) { return <x/>; }) are unwrapped so the return inside
+// the braces is found.
 func (e *SSREval) evalBranchReturns(stmts []ast.Stmt) (string, bool) {
 	for _, stmt := range stmts {
-		if ifStmt, ok := stmt.(*ast.IfStmt); ok {
-			condVal := e.eval(ifStmt.Test)
-			truthy := condVal != "" && condVal != "false" && condVal != "null" && condVal != "undefined" && condVal != "0"
-			if truthy {
-				if v, ok := e.returnFromConsequent(ifStmt.Consequent); ok {
-					return v, true
-				}
-				if v, ok := e.evalBranchReturns(ifStmt.Consequent); ok {
-					return v, true
-				}
-			} else if v, ok := e.evalBranchReturns(ifStmt.Alternate); ok {
+		switch s := stmt.(type) {
+		case *ast.BlockStmt:
+			if v, ok := e.evalBranchReturns(s.Body); ok {
 				return v, true
 			}
-		} else if retStmt, ok := stmt.(*ast.ReturnStmt); ok && retStmt.Value != nil {
-			return e.eval(retStmt.Value), true
+		case *ast.IfStmt:
+			condVal := e.eval(s.Test)
+			truthy := condVal != "" && condVal != "false" && condVal != "null" && condVal != "undefined" && condVal != "0"
+			if truthy {
+				if v, ok := e.returnFromConsequent(s.Consequent); ok {
+					return v, true
+				}
+				if v, ok := e.evalBranchReturns(s.Consequent); ok {
+					return v, true
+				}
+			} else if v, ok := e.evalBranchReturns(s.Alternate); ok {
+				return v, true
+			}
+		case *ast.ReturnStmt:
+			if s.Value != nil {
+				return e.eval(s.Value), true
+			}
 		}
 	}
 	return "", false
 }
 
 // returnFromConsequent extracts the direct return value from an if-consequent
-// statement list, if it ends in a return.
+// statement list (unwrapping a wrapping block), if it ends in a return.
 func (e *SSREval) returnFromConsequent(consequent []ast.Stmt) (string, bool) {
 	for _, stmt := range consequent {
-		if retStmt, ok := stmt.(*ast.ReturnStmt); ok && retStmt.Value != nil {
-			return e.eval(retStmt.Value), true
+		switch s := stmt.(type) {
+		case *ast.BlockStmt:
+			if v, ok := e.returnFromConsequent(s.Body); ok {
+				return v, true
+			}
+		case *ast.ReturnStmt:
+			if s.Value != nil {
+				return e.eval(s.Value), true
+			}
 		}
 	}
 	return "", false
@@ -1065,7 +1824,7 @@ func (e *SSREval) evalFragment(frag *ast.JSXFragment) string {
 	return b.String()
 }
 
-// ─── JSX text escaping ──────────────────────────────────────────────────────
+// JSX text escaping
 
 // escapeContainerValue returns the evaluated value of a JSXExprContainer in a
 // text position. Element-producing expressions (JSX, .map() of JSX, ternaries
@@ -1081,7 +1840,7 @@ func (e *SSREval) escapeContainerValue(expr ast.Expr) string {
 func (e *SSREval) escapeContainerValueEvaluated(expr ast.Expr, v string) string {
 	if e.childrenIsHTML && isChildrenRef(expr) {
 		// The children binding was already rendered (and escaped) by the
-		// emitter's slot pipeline — injecting it raw is correct.
+		// emitter's slot pipeline - injecting it raw is correct.
 		return stripArraySep(v)
 	}
 	if e.isHTMLProducing(expr) {
@@ -1116,6 +1875,18 @@ func (e *SSREval) isHTMLProducing(expr ast.Expr) bool {
 	switch t := expr.(type) {
 	case *ast.JSXElement, *ast.JSXFragment:
 		return true
+	case *ast.Identifier:
+		// An identifier bound to a JSX-built array (e.g. `var items = [];
+		// for (...) items.push(<li/>)`) or to a JSX value (`const chip = <b/>`)
+		// evaluates to HTML markup.
+		if _, isArr := e.arrays[t.Name]; isArr {
+			return true
+		}
+		return e.jsxBindings[t.Name]
+	case *ast.MemberExpr:
+		// A prop/local member whose resolved value is markup (e.g.
+		// `{props.body}` where body={<b/>}) is HTML, not text.
+		return strings.HasPrefix(strings.TrimSpace(e.eval(t)), "<")
 	case *ast.ArrayExpr:
 		for _, el := range t.Elements {
 			if e.isHTMLProducing(el) {
@@ -1126,7 +1897,7 @@ func (e *SSREval) isHTMLProducing(expr ast.Expr) bool {
 	case *ast.ConditionalExpr:
 		return e.isHTMLProducing(t.Consequent) || e.isHTMLProducing(t.Alternate)
 	case *ast.BinaryExpr:
-		// `left && <el/>`, `left || <el/>` — the right operand can be markup.
+		// `left && <el/>`, `left || <el/>` - the right operand can be markup.
 		return e.isHTMLProducing(t.Right)
 	case *ast.CallExpr:
 		// `.map()` produces markup only when the callback body produces markup
@@ -1154,7 +1925,7 @@ func (e *SSREval) isHTMLProducing(expr ast.Expr) bool {
 	return false
 }
 
-// ─── Built-in delegation to QuickJS ─────────────────────────────────────────
+// Built-in delegation to QuickJS
 
 // globalBuiltins are ECMAScript globals that the Go SSR evaluator does not
 // implement. Calls/constructors rooted at these names are delegated to the
@@ -1200,7 +1971,7 @@ func (e *SSREval) delegateJS(expr ast.Expr) string {
 	return v
 }
 
-// ─── Array ─────────────────────────────────────────────────────────────────
+// Array
 
 func (e *SSREval) evalArrayExpr(expr *ast.ArrayExpr) string {
 	var parts []string
@@ -1219,15 +1990,10 @@ func (e *SSREval) evalArrayMap(arrExpr ast.Expr, callback ast.Expr) string {
 	if arrVal == "" {
 		return ""
 	}
-	// Split by separator (used by array rendering). Prop bindings arrive as
-	// JS-array-literal strings (e.g. `[{title:'Welcome',url:'/docs/'}]`) from
-	// buildPropBindings/evalConst, while code-built arrays use \x1f. Handle both.
-	var items []string
-	if strings.HasPrefix(arrVal, "[") {
-		items = splitJSArrayLiteral(arrVal)
-	} else {
-		items = strings.Split(arrVal, "\x1f")
-	}
+	// Prop bindings arrive as JS-array-literal strings
+	// (e.g. `[{title:'Welcome',url:'/docs/'}]`) from buildPropBindings/evalConst,
+	// while code-built arrays use \x1f. arrayItems handles both.
+	items := arrayItems(arrVal)
 	bodyExpr := arrowBodyExpr(arrow)
 	if bodyExpr == nil {
 		return ""
@@ -1252,6 +2018,45 @@ func (e *SSREval) evalArrayMap(arrExpr ast.Expr, callback ast.Expr) string {
 	return strings.Join(results, "\x1f")
 }
 
+// arrayItems splits an array binding value into its elements regardless of how
+// it was produced. Arrays built in evaluated code are stored as \x1f-joined
+// strings; arrays arriving from props/consts are serialized as JS array
+// literals (e.g. `['a','b']` or `[{title:'x'}]`). Both forms are handled here so
+// `.join`, `.length`, and `.map` agree on what an array is. String elements of a
+// literal form are unquoted so `items.map((s) => <li>{s}</li>)` renders `a`, not
+// `'a'`.
+func arrayItems(v string) []string {
+	if v == "" {
+		return nil
+	}
+	if strings.HasPrefix(strings.TrimSpace(v), "[") {
+		raw := splitJSArrayLiteral(v)
+		items := make([]string, 0, len(raw))
+		for _, el := range raw {
+			items = append(items, unquoteJSString(el))
+		}
+		return items
+	}
+	return strings.Split(v, "\x1f")
+}
+
+// unquoteJSString removes a matching pair of single/double/backtick quotes and
+// the common escapes, so serialized string elements render as their text value.
+func unquoteJSString(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return s
+	}
+	q := s[0]
+	if (q != '\'' && q != '"' && q != '`') || s[len(s)-1] != q {
+		return s
+	}
+	body := s[1 : len(s)-1]
+	body = strings.ReplaceAll(body, `\\`, `\`)
+	body = strings.ReplaceAll(body, `\`+string(q), string(q))
+	return body
+}
+
 // splitJSArrayLiteral splits a JS array-literal string into its top-level
 // elements, respecting nested braces/brackets and quoted strings. Used when a
 // .map() source comes from a prop binding that was serialized by evalConst
@@ -1259,7 +2064,7 @@ func (e *SSREval) evalArrayMap(arrExpr ast.Expr, callback ast.Expr) string {
 func splitJSArrayLiteral(s string) []string {
 	s = strings.TrimSpace(s)
 	if len(s) < 2 || s[0] != '[' || s[len(s)-1] != ']' {
-		// Not a well-formed array literal — fall back to whole string.
+		// Not a well-formed array literal - fall back to whole string.
 		if s == "" {
 			return nil
 		}
@@ -1303,7 +2108,7 @@ func splitJSArrayLiteral(s string) []string {
 	return items
 }
 
-// ─── Object ────────────────────────────────────────────────────────────────
+// Object
 
 func (e *SSREval) evalObjectExpr(expr *ast.ObjectExpr) string {
 	var parts []string
@@ -1311,12 +2116,35 @@ func (e *SSREval) evalObjectExpr(expr *ast.ObjectExpr) string {
 		if prop.Spread {
 			continue
 		}
+		key := prop.Key
+		// Quote keys that are not valid identifiers (e.g. "a-b").
+		if !isIdentString(key) {
+			key = strconv.Quote(key)
+		}
 		val := e.eval(prop.Value)
-		parts = append(parts, prop.Key+`:`+val)
+		parts = append(parts, key+`:`+val)
 	}
 	return "{" + strings.Join(parts, ",") + "}"
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+// isIdentString reports whether s is a valid JS identifier.
+func isIdentString(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if i == 0 {
+			if !(ch == '_' || ch == '$' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+				return false
+			}
+		} else if !(ch == '_' || ch == '$' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+// Helpers
 
 // stringLiteralValue is already defined in eval.go.

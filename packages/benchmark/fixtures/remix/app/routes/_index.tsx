@@ -1,10 +1,14 @@
+import { useState } from "react";
+
 export default function Index() {
+  const [count, setCount] = useState(0);
   const items = Array.from({ length: 100 }, (_, i) => i);
 
   return (
     <main>
       <h1>Benchmark</h1>
-      <p>Remix page</p>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount((c) => c + 1)}>+</button>
       <ul>
         {items.map((i) => (
           <li key={i}>Item {i}</li>

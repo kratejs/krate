@@ -40,13 +40,21 @@ async function main() {
     console.log('  build     Build project for production');
     console.log('  dev       Start development server');
     console.log('  serve     Build and serve for preview');
+    console.log('  types     Generate route/content TypeScript declarations');
+    console.log('  check     Run compiler-enforced quality gates (a11y/SEO/perf)');
+    console.log('  plugin    Manage plugins (e.g. `krate plugin add <pkg>`)');
     console.log('  init      Scaffold a new project (alias: create)');
     console.log('  version   Show version');
+    console.log('  mcp       Run the MCP (Model Context Protocol) for model interactions');
     process.exit(0);
   }
 
   const cmd = args[0];
 
+  // Commands handled by the JS wrapper itself (cross-platform scaffolding) or
+  // that need no Go binary. Everything else is forwarded to the native binary so
+  // the two command lists cannot drift - a missing entry here was previously
+  // swallowing `krate types` and `krate check`.
   switch (cmd) {
     case 'init':
     case 'create':
@@ -57,22 +65,23 @@ async function main() {
         process.exit(1);
       }
       break;
-    case 'build':
-    case 'dev':
-    case 'serve':
+    case 'version':
+      console.log(`krate v${version}`);
+      break;
+    case '--help':
+    case '-h':
+    case 'help':
+      console.log('Usage: krate <command> [options]');
+      console.log('');
+      console.log('Commands: build, dev, serve, types, check, plugin, init, mcp, version');
+      break;
+    default:
       try {
         await execBinary(args);
       } catch (err: any) {
         console.error(err.message);
         process.exit(1);
       }
-      break;
-    case 'version':
-      console.log(`krate v${version}`);
-      break;
-    default:
-      console.error(`Unknown command: ${cmd}`);
-      process.exit(1);
   }
 }
 

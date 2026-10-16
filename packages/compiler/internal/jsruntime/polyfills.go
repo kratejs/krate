@@ -2,9 +2,11 @@ package jsruntime
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
@@ -133,21 +135,21 @@ func (r *Runtime) injectConsole() error {
 
 	// Register Go implementations
 	if err := r.RegisterFunc("console_log", func(args []any) (any, error) {
-		fmt.Println(args...)
+		r.Log(args)
 		return nil, nil
 	}); err != nil {
 		return err
 	}
 
 	if err := r.RegisterFunc("console_error", func(args []any) (any, error) {
-		fmt.Println("ERROR:", args)
+		r.Error(args)
 		return nil, nil
 	}); err != nil {
 		return err
 	}
 
 	if err := r.RegisterFunc("console_warn", func(args []any) (any, error) {
-		fmt.Println("WARN:", args)
+		r.Warn(args)
 		return nil, nil
 	}); err != nil {
 		return err
@@ -258,13 +260,6 @@ func (r *Runtime) injectTextEncoding() error {
 	return err
 }
 
-// fetchResponse holds the result of a fetch call
-type fetchResponse struct {
-	StatusCode int
-	Headers    map[string]string
-	Body       string
-}
-
 // injectFetch adds the fetch API
 func (r *Runtime) injectFetch() error {
 	// Register Go fetch implementation
@@ -366,26 +361,49 @@ func (r *Runtime) injectProcessEnv() error {
 	return err
 }
 
-// SetEnv sets environment variables for the runtime
+// SetEnv sets environment variables for the runtime. Values are JSON-encoded
+// so keys/values containing quotes or backslashes are safe.
 func (r *Runtime) SetEnv(env map[string]string) error {
-	// Convert to JSON and inject
-	jsonEnv := "{"
-	first := true
-	for k, v := range env {
-		if !first {
-			jsonEnv += ","
-		}
-		jsonEnv += fmt.Sprintf(`"%s":"%s"`, k, v)
-		first = false
+	if env == nil {
+		env = map[string]string{}
 	}
-	jsonEnv += "}"
-
-	_, err := r.Execute(fmt.Sprintf("process.env = %s;", jsonEnv))
+	b, err := json.Marshal(env)
+	if err != nil {
+		return fmt.Errorf("marshaling env: %w", err)
+	}
+	_, err = r.Execute(fmt.Sprintf("process.env = %s;", string(b)))
 	return err
 }
 
 // injectWebAPIs adds URL, Headers, and Response web standard APIs
 func (r *Runtime) injectWebAPIs() error {
+	// URL resolution is delegated to Go (net/url) so the JS shim can implement
+	// `new URL(relative, base)` without recursing into its own constructor.
+	if err := r.RegisterFunc("_go_resolveURL", func(args []any) (any, error) {
+		if len(args) < 1 {
+			return "", nil
+		}
+		ref, _ := args[0].(string)
+		base := ""
+		if len(args) > 1 {
+			base, _ = args[1].(string)
+		}
+		if base == "" {
+			return ref, nil
+		}
+		bu, err := url.Parse(base)
+		if err != nil {
+			return ref, nil
+		}
+		ru, err := url.Parse(ref)
+		if err != nil {
+			return ref, nil
+		}
+		return bu.ResolveReference(ru).String(), nil
+	}); err != nil {
+		return err
+	}
+
 	_, err := r.Execute(`
 		class URLSearchParams {
 			constructor(init) {
@@ -441,12 +459,13 @@ func (r *Runtime) injectWebAPIs() error {
 
 		class URL {
 			constructor(url, base) {
-				if (base) {
-					this._href = new URL(url, base).href;
+				if (base !== undefined && base !== null && base !== '') {
+					var baseHref = (base && typeof base === 'object' && base.href) ? base.href : String(base);
+					this._href = String(_go_resolveURL(String(url), baseHref));
 				} else {
-					this._href = url;
+					this._href = String(url);
 				}
-				var match = this._href.match(/^(https?:)\/\/([^\/:]+)(:\d+)?(\/[^\?]*)?(\?.*)?(#.*)?$/);
+				var match = this._href.match(/^(https?:)\/\/([^\/:]+)(:\d+)?(\/[^?#]*)?(\?[^#]*)?(#.*)?$/);
 				if (match) {
 					this.protocol = match[1];
 					this.hostname = match[2];

@@ -1,5 +1,14 @@
 import { createEffect } from './signal.js';
 
+// React-style event names whose DOM event differs from lowercasing. onFocus/
+// onBlur use the bubbling focusin/focusout; onChange uses input (per-keystroke).
+const EVENT_ALIASES: Record<string, string> = {
+  doubleclick: 'dblclick',
+  focus: 'focusin',
+  blur: 'focusout',
+  change: 'input',
+};
+
 export type Component<P = {}> = (props: P) => Node | null | undefined;
 
 export type PropsWithChildren<P = {}> = P & { children?: unknown[] };
@@ -8,7 +17,7 @@ export type RefCallback = (el: Element) => void;
 /** Extracts the Props type from a Component. */
 export type ComponentProps<C> = C extends Component<infer P> ? P : never;
 
-// ─── per-node effect tracking ────────────────────────────────────────────────
+// per-node effect tracking
 // Reactive props/children create effects that must be disposed when the node is
 // removed from the DOM (list items, conditional branches, SPA reconciliation).
 // Without this, effects and their closures accumulate for the page's lifetime.
@@ -36,7 +45,7 @@ export function disposeNode(node: Node): void {
   }
 }
 
-// ─── comment-marker DOM traversal ───────────────────────────────────────────
+// comment-marker DOM traversal
 
 /**
  * Find the matching end comment marker for a start marker.
@@ -86,7 +95,7 @@ export function insert(parent: Node, value: unknown, startMarker: Node): void {
     clearNodes(startMarker, endMarker);
     insertBefore(parent, value, endMarker);
   } else {
-    // No end marker found — append at end
+    // No end marker found - append at end
     insertBefore(parent, value, null);
   }
 }
@@ -118,8 +127,11 @@ function setAttr(el: Element, key: string, value: unknown): void {
       Object.assign((el as HTMLElement).style, value);
     }
   } else if (key.startsWith('on') && typeof value === 'function') {
-    // Store handler reference on element for cleanup on re-render
-    const eventKey = key.slice(2).toLowerCase();
+    // Store handler reference on element for cleanup on re-render.
+    // Normalise React-style event names to their DOM equivalents (matching the
+    // compiler's static path).
+    const raw = key.slice(2).toLowerCase();
+    const eventKey = EVENT_ALIASES[raw] || raw;
     const handlerKey = `__krate_${eventKey}`;
     const prevHandler = (el as any)[handlerKey];
     if (prevHandler) {
@@ -127,6 +139,14 @@ function setAttr(el: Element, key: string, value: unknown): void {
     }
     el.addEventListener(eventKey, value as EventListener);
     (el as any)[handlerKey] = value;
+  } else if (key === 'value' || key === 'checked' || key === 'selected') {
+    // Form-control state is a DOM property, not an attribute: setting the
+    // attribute after user interaction has no effect.
+    if (key === 'value') {
+      (el as any).value = value == null || value === false ? '' : value;
+    } else {
+      (el as any)[key] = !!value;
+    }
   } else if (key === 'ref') {
     if (typeof value === 'function') value(el);
     else if (value && typeof value === 'object' && 'current' in value) (value.current as unknown) = el;
@@ -206,11 +226,11 @@ export function mount(fn: () => Node, container: string | HTMLElement): void {
 export function hydrate(fn: () => Node, container: string | HTMLElement): void {
   const el = getContainer(container);
   if (el.childNodes.length === 0) {
-    // Empty container — fall back to mount behavior
+    // Empty container - fall back to mount behavior
     el.appendChild(fn());
     return;
   }
-  // SSR content exists — run the component to set up effects/signals.
+  // SSR content exists - run the component to set up effects/signals.
   // The freshly-built tree is only used to establish reactive subscriptions;
   // it is not attached to the DOM, so dispose its effects to avoid leaks.
   const tree = fn();

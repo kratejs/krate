@@ -10,19 +10,38 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
 
-// Watch watches root for filesystem changes using native OS events (inotify,
-// FSEvents, kqueue, ReadDirectoryChangesW via fsnotify).
+// Watch watches the builder's project root for filesystem changes using native
+// OS events (inotify, FSEvents, kqueue, ReadDirectoryChangesW via fsnotify).
+// It takes the Builder that ran the initial build rather than constructing a
+// fresh one: page builds populate the dependency graph on the builder (see
+// recordDeps), and a brand-new Builder would start with an empty graph, so
+// every save would miss partial tracking and fall through to a full rebuild.
 // Each debounced batch of changes is fed through the dependency graph to
 // rebuild only the affected pages/APIs, and the rebuilt routes are sent on
 // reload. debounceDelay is the coalescing window: a single save (or an
 // atomic-rename editor) can emit many events in a burst, so only one rebuild
 // runs per burst. It returns an error only if the watcher fails to start.
-func Watch(root string, cfg *config.Config, debounceDelay time.Duration, reload chan<- []string) error {
-	b := New(root, cfg)
-	b.DevMode = reload != nil
+func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
+	// DevMode is owned by the caller (`krate dev` sets it so output stays
+	// readable); `krate build --watch` leaves it off and keeps minifying.
+	root := b.Root
+	cfg := b.Cfg
+
+	// Safety net: if the builder has no dependency graph yet (no initial
+	// BuildAll ran), do one now so partial rebuilds work instead of every
+	// change taking the full-rebuild fallback in processChanges.
+	b.depMu.Lock()
+	needsInitialBuild := len(b.depGraph) == 0
+	b.depMu.Unlock()
+	if needsInitialBuild {
+		if err := b.BuildAll(); err != nil {
+			return fmt.Errorf("initial build: %w", err)
+		}
+	}
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -74,7 +93,7 @@ func Watch(root string, cfg *config.Config, debounceDelay time.Duration, reload 
 		}
 		changed := uniqueStrings(pending)
 		pending = nil
-		b.processChanges(changed, cfg, reload)
+		b.processChanges(changed, hub)
 		fmt.Printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
 	}
 
@@ -94,7 +113,7 @@ func Watch(root string, cfg *config.Config, debounceDelay time.Duration, reload 
 			// next to their originals so relative imports resolve; ignoring
 			// them here prevents those rewrites from re-triggering the watcher
 			// in an infinite loop.
-			if internalName(ev.Name) {
+			if (internalName(ev.Name) && !layoutOrLoadingFile(ev.Name)) || generatedDeclaration(ev.Name) {
 				continue
 			}
 			// Keep the recursive watch in sync as directories are created,
@@ -136,15 +155,42 @@ func Watch(root string, cfg *config.Config, debounceDelay time.Duration, reload 
 	}
 }
 
+// isManagedGoFile reports whether a Go file is one krate compiles (an API route
+// under src/api or a Go component under a configured component dir).
+func (b *Builder) isManagedGoFile(p string) bool {
+	slash := filepath.ToSlash(p)
+	if strings.Contains(slash, "src/api/") {
+		return true
+	}
+	for _, d := range b.Cfg.Go.ComponentDirList() {
+		dd := strings.Trim(filepath.ToSlash(d), "/")
+		if dd == "" {
+			continue
+		}
+		if strings.Contains(slash, "/"+dd+"/") || strings.HasSuffix(slash, "/"+dd) {
+			return true
+		}
+	}
+	return false
+}
+
 // processChanges routes a batch of changed files through the dependency graph
 // and rebuilds exactly what depends on them, falling back to a full rebuild when
 // nothing matches dependency tracking. Rebuilt routes are sent to reload.
-func (b *Builder) processChanges(changed []string, cfg *config.Config, reload chan<- []string) {
-	// Go files outside src/api/ are not krate-managed; ignore them so they
-	// don't trigger a full rebuild.
+func (b *Builder) processChanges(changed []string, hub *DevHub) {
+	// A panic during an incremental rebuild must not kill the dev server; report
+	// it and keep watching.
+	defer func() {
+		if rec := recover(); rec != nil {
+			fmt.Fprintf(os.Stderr, "  %sDev rebuild error:%s %v\n", cRed, cReset, safe.Recover(rec))
+		}
+	}()
+
+	// Only krate-managed Go files (API routes + Go components) trigger
+	// rebuilds; other .go files in the project are ignored.
 	var filtered []string
 	for _, p := range changed {
-		if strings.HasSuffix(p, ".go") && !strings.Contains(filepath.ToSlash(p), "src/api/") {
+		if strings.HasSuffix(p, ".go") && !b.isManagedGoFile(p) {
 			continue
 		}
 		filtered = append(filtered, p)
@@ -160,11 +206,11 @@ func (b *Builder) processChanges(changed []string, cfg *config.Config, reload ch
 	var goAPIChanged bool
 
 	for _, p := range changed {
+		if strings.HasSuffix(p, ".go") {
+			goAPIChanged = true
+			continue
+		}
 		if strings.Contains(filepath.ToSlash(p), "src/api/") {
-			if strings.HasSuffix(p, ".go") {
-				goAPIChanged = true
-				continue
-			}
 			// Only compile files that are direct endpoints (ignore private
 			// files starting with '_').
 			if !strings.HasPrefix(filepath.Base(p), "_") && (strings.HasSuffix(p, ".ts") || strings.HasSuffix(p, ".js")) {
@@ -186,10 +232,19 @@ func (b *Builder) processChanges(changed []string, cfg *config.Config, reload ch
 	pagesToBuild = uniqueStrings(pagesToBuild)
 
 	var routes []string
+	var diags []diag.Diagnostic
+	addDiags := func(prefix string, err error) {
+		for _, d := range DiagnosticsFromError(err) {
+			if prefix != "" && d.Message != "" {
+				d.Message = prefix + d.Message
+			}
+			diags = append(diags, d)
+		}
+	}
 
 	if len(pagesToBuild) > 0 {
 		for _, p := range pagesToBuild {
-			route := pageToOutput(p, cfg.PagesDir)
+			route := pageToOutput(p, b.Cfg.PagesDir)
 			if route == "." {
 				route = "/"
 			} else {
@@ -198,8 +253,9 @@ func (b *Builder) processChanges(changed []string, cfg *config.Config, reload ch
 			routes = append(routes, route)
 		}
 		fmt.Printf("  %sAffected pages:%s %v\n", cBlue, cReset, routes)
-		if err := b.BuildPages(pagesToBuild); err != nil {
+		if _, err := b.BuildPages(pagesToBuild); err != nil {
 			fmt.Fprintf(os.Stderr, "  %sUI Compilation Error: %v%s\n", cRed, err, cReset)
+			addDiags("UI: ", err)
 		}
 	}
 
@@ -207,6 +263,7 @@ func (b *Builder) processChanges(changed []string, cfg *config.Config, reload ch
 		fmt.Printf("  %sCompiling changed API endpoints...%s\n", cCyan, cReset)
 		if err := b.CompileAPIRoutes(apiToBuild); err != nil {
 			fmt.Fprintf(os.Stderr, "  %sAPI Compilation Error: %v%s\n", cRed, err, cReset)
+			addDiags("API: ", err)
 		}
 	}
 
@@ -214,6 +271,7 @@ func (b *Builder) processChanges(changed []string, cfg *config.Config, reload ch
 		fmt.Printf("  %sCompiling changed Go API routes...%s\n", cCyan, cReset)
 		if err := b.BuildAllGoAPI(); err != nil {
 			fmt.Fprintf(os.Stderr, "  %sGo API Compilation Error: %v%s\n", cRed, err, cReset)
+			addDiags("Go API: ", err)
 		}
 	}
 
@@ -221,17 +279,16 @@ func (b *Builder) processChanges(changed []string, cfg *config.Config, reload ch
 		fmt.Printf("  %sNo dependency tracking matches; rebuilding all...%s\n", cYellow, cReset)
 		if err := b.BuildAll(); err != nil {
 			fmt.Fprintf(os.Stderr, "  %sError: %v%s\n", cRed, err, cReset)
+			addDiags("", err)
 		}
 		if err := b.BuildAllAPI(); err != nil {
 			fmt.Fprintf(os.Stderr, "  %sError: %v%s\n", cRed, err, cReset)
+			addDiags("", err)
 		}
 	}
 
-	if reload != nil {
-		select {
-		case reload <- routes:
-		default:
-		}
+	if hub != nil {
+		hub.Publish(DevEvent{Type: "reload", Routes: routes, Diagnostics: diags})
 	}
 }
 
@@ -281,12 +338,42 @@ func managedPath(path string, outDir string) bool {
 
 // internalName reports whether base is a krate-private or dotfile name. The
 // compiler treats leading '_' (private pages/APIs/runtime components) and '.'
-// (dotfiles) as internal everywhere, so the watcher must not rebuild on them —
+// (dotfiles) as internal everywhere, so the watcher must not rebuild on them -
 // the SSR bundler, for one, writes transient _tmp_*.tsx sources into the
 // source tree during each rebuild.
 func internalName(path string) bool {
 	base := filepath.Base(path)
 	return strings.HasPrefix(base, "_") || strings.HasPrefix(base, ".")
+}
+
+// layoutOrLoadingFile reports whether path is a `_layout.*` or `loading.*`
+// file. These are the only leading-underscore source files a user edits that
+// affect a built page; every other `_`-prefixed name is a private/internal
+// artifact the watcher must ignore (notably the SSR bundler's transient
+// `_tmp_*` sources). Without this exemption, editing _layout.tsx would never
+// rebuild the pages it wraps.
+func layoutOrLoadingFile(path string) bool {
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, "loading.") {
+		return trackedFile(path)
+	}
+	for _, name := range layoutNames {
+		if base == name {
+			return true
+		}
+	}
+	return false
+}
+
+// generatedDeclaration reports whether path is a declaration file krate writes
+// into the source tree during a full build (`krate-env.d.ts`,
+// `krate-content.d.ts`, and any other *.d.ts it emits). A full build rewrites
+// these beside user source, so unless they are ignored the watcher sees its own
+// output and rebuilds forever. User-authored .d.ts files never need a rebuild
+// on their own either: they are consumed through the imports of tracked source,
+// which will trigger a rebuild when they change.
+func generatedDeclaration(path string) bool {
+	return strings.HasSuffix(strings.ToLower(filepath.Base(path)), ".d.ts")
 }
 
 // skippedDir reports whether path lies within an ignored directory

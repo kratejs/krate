@@ -4,20 +4,35 @@ package css
 type TailwindTheme struct {
 	Spacing     map[string]string            `json:"spacing"`
 	Sizing      map[string]string            `json:"sizing"`
+	MaxWidth    map[string]string            `json:"maxWidth"`
+	MinWidth    map[string]string            `json:"minWidth"`
+	LineHeight  map[string]string            `json:"lineHeight"`
+	Opacity     map[string]string            `json:"opacity"`
+	Screens     map[string]string            `json:"screens"`
 	Colors      map[string]map[string]string `json:"colors"`
 	TextSizes   map[string]string            `json:"textSizes"`
 	FontWeights map[string]string            `json:"fontWeights"`
+	FontFamily  map[string]string            `json:"fontFamily"`
 	Radii       map[string]string            `json:"radii"`
 	Shadows     map[string]string            `json:"shadows"`
 	BgColors    map[string]string            `json:"bgColors"`
+	// DarkMode is "media" (default), "class", or "selector".
+	DarkMode string `json:"darkMode"`
 }
 
 // DefaultTailwindTheme returns the default Tailwind theme configuration.
 func DefaultTailwindTheme() TailwindTheme {
 	return TailwindTheme{
-		Spacing: defaultSpacing(),
-		Sizing:  defaultSizing(),
-		Colors:  defaultColors(),
+		Spacing:    defaultSpacing(),
+		Sizing:     defaultSizing(),
+		MaxWidth:   defaultMaxWidth(),
+		MinWidth:   defaultMinWidth(),
+		LineHeight: defaultLineHeight(),
+		Opacity:    defaultOpacity(),
+		Screens:    defaultScreens(),
+		FontFamily: defaultFontFamily(),
+		Colors:     defaultColors(),
+		DarkMode:   "media",
 		TextSizes: map[string]string{
 			"xs":   "font-size: 0.75rem; line-height: 1rem;",
 			"sm":   "font-size: 0.875rem; line-height: 1.25rem;",
@@ -45,27 +60,88 @@ func DefaultTailwindTheme() TailwindTheme {
 			"black":      "900",
 		},
 		Radii: map[string]string{
-			"sm":  "0.125rem",
-			"md":  "0.375rem",
-			"lg":  "0.5rem",
-			"xl":  "0.75rem",
-			"2xl": "1rem",
-			"3xl": "1.5rem",
+			"none": "0",
+			"sm":   "0.125rem",
+			"":     "0.25rem",
+			"md":   "0.375rem",
+			"lg":   "0.5rem",
+			"xl":   "0.75rem",
+			"2xl":  "1rem",
+			"3xl":  "1.5rem",
+			"full": "9999px",
 		},
 		Shadows: map[string]string{
-			"sm":    "0 1px 2px 0 rgba(0, 0, 0, 0.05)",
-			"md":    "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)",
-			"lg":    "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)",
-			"xl":    "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
-			"2xl":   "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-			"inner": "inset 0 2px 4px 0 rgba(0, 0, 0, 0.05)",
+			"sm":    "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+			"":      "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
+			"md":    "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
+			"lg":    "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
+			"xl":    "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
+			"2xl":   "0 25px 50px -12px rgb(0 0 0 / 0.25)",
+			"inner": "inset 0 2px 4px 0 rgb(0 0 0 / 0.05)",
+			"none":  "none",
 		},
 		BgColors: map[string]string{
 			"transparent": "transparent",
 			"current":     "currentColor",
 			"white":       "#ffffff",
 			"black":       "#000000",
+			"inherit":     "inherit",
 		},
+	}
+}
+
+// defaultScreens returns the standard responsive breakpoints (min-width).
+func defaultScreens() map[string]string {
+	return map[string]string{
+		"sm": "640px", "md": "768px", "lg": "1024px", "xl": "1280px", "2xl": "1536px",
+	}
+}
+
+// defaultMaxWidth mirrors Tailwind's max-width scale.
+func defaultMaxWidth() map[string]string {
+	return map[string]string{
+		"none": "none", "0": "0rem", "xs": "20rem", "sm": "24rem", "md": "28rem",
+		"lg": "32rem", "xl": "36rem", "2xl": "42rem", "3xl": "48rem", "4xl": "56rem",
+		"5xl": "64rem", "6xl": "72rem", "7xl": "80rem", "full": "100%",
+		"min": "min-content", "max": "max-content", "fit": "fit-content",
+		"prose": "65ch", "screen-sm": "640px", "screen-md": "768px",
+		"screen-lg": "1024px", "screen-xl": "1280px", "screen-2xl": "1536px",
+	}
+}
+
+// defaultMinWidth mirrors Tailwind's min-width scale.
+func defaultMinWidth() map[string]string {
+	return map[string]string{
+		"0": "0px", "full": "100%", "min": "min-content", "max": "max-content",
+		"fit": "fit-content",
+	}
+}
+
+// defaultLineHeight mirrors Tailwind's named leading scale.
+func defaultLineHeight() map[string]string {
+	return map[string]string{
+		"none": "1", "tight": "1.25", "snug": "1.375", "normal": "1.5",
+		"relaxed": "1.625", "loose": "2",
+	}
+}
+
+// defaultOpacity mirrors Tailwind's opacity scale.
+func defaultOpacity() map[string]string {
+	return map[string]string{
+		"0": "0", "5": "0.05", "10": "0.1", "15": "0.15", "20": "0.2",
+		"25": "0.25", "30": "0.3", "35": "0.35", "40": "0.4", "45": "0.45",
+		"50": "0.5", "55": "0.55", "60": "0.6", "65": "0.65", "70": "0.7",
+		"75": "0.75", "80": "0.8", "85": "0.85", "90": "0.9", "95": "0.95",
+		"100": "1",
+	}
+}
+
+// defaultFontFamily mirrors Tailwind's font stacks.
+func defaultFontFamily() map[string]string {
+	return map[string]string{
+		"sans":  "ui-sans-serif, system-ui, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", \"Noto Color Emoji\"",
+		"serif": "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif",
+		"mono":  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
 	}
 }
 

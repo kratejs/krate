@@ -121,6 +121,12 @@ function buildLocalDevBinary() {
 }
 
 console.log(`Generating @krate/core platform packages (version ${version})...`);
+if (!process.env.SKIP_GO) {
+  const sync = spawnSync('node', [join(root, 'scripts', 'sync-krate-docs.mjs')], {
+    stdio: 'inherit',
+  });
+  if (sync.status !== 0) process.exit(sync.status ?? 1);
+}
 for (const target of platforms) {
   const dir = join(outBase, target.pkg);
   rmSync(dir, { recursive: true, force: true });

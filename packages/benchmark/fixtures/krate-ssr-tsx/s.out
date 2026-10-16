@@ -1,0 +1,25 @@
+[1m[36m  Building for preview...[0m
+  [36m▶[0m C:\Users\jamie\Documents\krate\packages\benchmark\fixtures\krate-ssr-tsx\src\pages\index.tsx
+    [32m✓[0m ./index.html [90m(root)[0m
+  [36m⚡[0m Compiled 1 server bundles
+  [36m⚡[0m Staged SSR renderer driver
+  [36m▸ Runtime[0m Widget.runtime.tsx
+  [36m⚡[0m Compiled 1 runtime components
+  [36m⚡[0m SSR: 0, ISR: 0, Streaming: 1 pages
+[1m[32m  Build complete. Starting server...[0m
+[krate-ssr] primary supervising 4 workers
+[krate-ssr] Loaded manifest: 1 SSR/ISR/streaming pages
+[krate-ssr] Loaded manifest: 1 SSR/ISR/streaming pages
+[krate-ssr] Renderer server listening on port 4811
+[krate-ssr] Loaded manifest: 1 SSR/ISR/streaming pages
+[krate-ssr] Renderer server listening on port 4811
+[krate-ssr] Loaded manifest: 1 SSR/ISR/streaming pages
+[krate-ssr] Renderer server listening on port 4811
+[krate-ssr] Loaded manifest: 1 SSR/ISR/streaming pages
+[krate-ssr] Renderer server listening on port 4811
+  [36m⚡[0m SSR renderer → [36mhttp://localhost:4811[0m
+[32m  serve server → [36mhttp://localhost:4801[0m [90m(started in 396ms)[0m
+19:43:43 GET / 200 8ms
+[krate-ssr] worker 28032 exited; restarting
+[krate-ssr] worker 28016 exited; restarting
+[krate-ssr] worker 28000 exited; restarting

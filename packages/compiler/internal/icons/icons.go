@@ -53,9 +53,8 @@ func validIconName(s string) bool {
 }
 
 // ResolveIcon resolves an <Icon name="..."> to sanitized SVG content.
-//
 // A name without a ":" is a project-local icon resolved from
-// <root>/icons/<name>.svg — the filename registers the icon name. A name with
+// <root>/icons/<name>.svg - the filename registers the icon name. A name with
 // a ":" is a `set:name` pair fetched from the Iconify API and cached under
 // <root>/.krate/cache/icons/.
 func ResolveIcon(root string, fullName string) (Icon, error) {
@@ -74,7 +73,7 @@ func readCachedIcon(cachePath string) (Icon, bool) {
 	}
 	ic, perr := parseSVG(string(data))
 	if perr != nil {
-		// Stale/corrupt cache — drop it and re-fetch on the slow path.
+		// Stale/corrupt cache - drop it and re-fetch on the slow path.
 		_ = os.Remove(cachePath)
 		return Icon{}, false
 	}
@@ -166,10 +165,9 @@ func resolveRemoteIcon(root string, fullName string) (Icon, error) {
 
 // parseSVG extracts the inner markup and viewBox from a full SVG document and
 // sanitizes the inner markup for safe insertion into page HTML.
-//
 // The disk cache may contain either a full `<svg>...</svg>` document (the raw
 // Iconify API response) or bare inner markup (written by older cache writers).
-// Bare inner markup — content with no <svg> root — is treated as already-inner
+// Bare inner markup - content with no <svg> root - is treated as already-inner
 // so stale caches keep working.
 func parseSVG(data string) (Icon, error) {
 	matches := svgInnerRegex.FindStringSubmatch(data)
@@ -214,11 +212,11 @@ func sanitizeSVG(s string) string {
 			i++
 			continue
 		}
-		// XML/HTML comment — drop it (and anything up to its terminator).
+		// XML/HTML comment - drop it (and anything up to its terminator).
 		if i+4 <= len(s) && strings.HasPrefix(s[i:], "<!--") {
 			end := strings.Index(s[i+4:], "-->")
 			if end < 0 {
-				return b.String() // unterminated comment — drop the tail
+				return b.String() // unterminated comment - drop the tail
 			}
 			i += 4 + end + 3
 			continue
@@ -240,7 +238,7 @@ func sanitizeSVG(s string) string {
 			j++
 		}
 		if j >= len(s) {
-			return b.String() // unterminated tag — drop the tail
+			return b.String() // unterminated tag - drop the tail
 		}
 		tag := s[i : j+1]
 		name := svgTagName(tag)
@@ -253,7 +251,7 @@ func sanitizeSVG(s string) string {
 				rest := strings.ToLower(s[j+1:])
 				ci := strings.Index(rest, close)
 				if ci < 0 {
-					return b.String() // unterminated block — drop the tail
+					return b.String() // unterminated block - drop the tail
 				}
 				i = j + 1 + ci + len(close)
 				continue

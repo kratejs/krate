@@ -1,0 +1,108 @@
+.krate-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: var(--krate-radius-sm, 6px);
+  font-weight: 600;
+  font-size: 0.9rem;
+  font-family: inherit;
+  line-height: 1;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  background: transparent;
+  color: var(--krate-text, #09090b);
+  transition: background-color 0.16s var(--krate-ease-in-out, ease),
+    border-color 0.16s var(--krate-ease-in-out, ease),
+    color 0.16s var(--krate-ease-in-out, ease),
+    box-shadow 0.16s var(--krate-ease-in-out, ease),
+    transform 0.16s var(--krate-ease-out, ease);
+}
+.krate-button:active {
+  transform: translateY(1px) scale(0.99);
+}
+.krate-button:focus-visible {
+  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline-offset: 2px;
+}
+.krate-button:disabled,
+.krate-button[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+.krate-button-sm {
+  padding: 4px 12px;
+  font-size: 0.8rem;
+}
+.krate-button-md {
+  padding: 8px 16px;
+  font-size: 0.9rem;
+}
+.krate-button-lg {
+  padding: 12px 24px;
+  font-size: 1rem;
+}
+.krate-button-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+.krate-button-primary {
+  background: var(--krate-primary, #3b82f6);
+  color: var(--krate-primary-fg, #fff);
+  box-shadow: var(--krate-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.06));
+}
+.krate-button-primary:hover {
+  background: var(--krate-primary-hover, #2563eb);
+  color: var(--krate-primary-fg, #fff);
+  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--krate-primary, #3b82f6) 65%, transparent);
+}
+.krate-button-secondary {
+  background: var(--krate-surface, #f4f4f5);
+  color: var(--krate-text, #09090b);
+  border-color: var(--krate-border, #e4e4e7);
+}
+.krate-button-secondary:hover {
+  background: var(--krate-surface-hover, #e4e4e7);
+  border-color: var(--krate-border-strong, #d4d4d8);
+}
+.krate-button-outline {
+  background: transparent;
+  color: var(--krate-text, #09090b);
+  border-color: var(--krate-border, #e4e4e7);
+}
+.krate-button-outline:hover {
+  background: var(--krate-surface-hover, #e4e4e7);
+  border-color: var(--krate-border-strong, #d4d4d8);
+}
+.krate-button-ghost {
+  background: transparent;
+  color: var(--krate-text, #09090b);
+}
+.krate-button-ghost:hover {
+  background: var(--krate-surface-hover, #e4e4e7);
+}
+.krate-button-destructive {
+  background: var(--krate-danger, #ef4444);
+  color: #fff;
+  box-shadow: var(--krate-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.06));
+}
+.krate-button-destructive:hover {
+  background: var(--krate-danger-hover, #dc2626);
+  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--krate-danger, #ef4444) 60%, transparent);
+}
+.krate-button-link {
+  background: transparent;
+  color: var(--krate-primary, #3b82f6);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  padding: 0;
+}
+.krate-button-link:hover {
+  color: var(--krate-primary-hover, #2563eb);
+}

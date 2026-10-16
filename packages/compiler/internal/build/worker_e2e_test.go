@@ -11,7 +11,7 @@ import (
 
 // TestBuildPageWorker verifies `new Worker('./worker.ts')` in a page: the
 // worker target is resolved, the page's hydration JS references the hashed
-// /workers/… URL, and a real esbuild-bundled worker file is emitted.
+// /workers/... URL, and a real esbuild-bundled worker file is emitted.
 func TestBuildPageWorker(t *testing.T) {
 	root := t.TempDir()
 	pagesDir := filepath.Join(root, "src", "pages")
@@ -81,7 +81,7 @@ func TestBuildPageWorker(t *testing.T) {
 		t.Fatalf("hydration JS still references worker source:\n%.1200s", js)
 	}
 
-	// workers.json index should list the source → URL mapping.
+	// workers.json index should list the source -> URL mapping.
 	if idx, err := os.ReadFile(filepath.Join(cfg.OutDir, "workers.json")); err == nil {
 		if !strings.Contains(string(idx), url) {
 			t.Fatalf("workers.json missing worker URL:\n%.800s", idx)

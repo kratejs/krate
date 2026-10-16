@@ -113,10 +113,10 @@ func IsStaticComponentFile(path string) bool {
 // ComponentClass classifies a source file for server component handling.
 // The 4-tier system:
 //
-//	ComponentClassStatic  — compile-time only, no client JS, no hydration
-//	ComponentClassClient  — default: SSR/SSG + client hydration
-//	ComponentClassServer  — build-time server evaluation, HTML output only
-//	ComponentClassRuntime — serve-time evaluation via QuickJS, streamed to client
+//	ComponentClassStatic - compile-time only, no client JS, no hydration
+//	ComponentClassClient - default: SSR/SSG + client hydration
+//	ComponentClassServer - build-time server evaluation, HTML output only
+//	ComponentClassRuntime - serve-time evaluation via QuickJS, streamed to client
 type ComponentClass int
 
 const (
@@ -155,13 +155,13 @@ func (cc ComponentClass) String() string {
 // ClassifyComponent determines if a file is a server/runtime/static component.
 // Checks directive in source code first, then file convention, then config lists,
 // then directory membership. Last fallback is ComponentClassClient.
-//
 // Priority order:
 //  1. Directive in source code (@server, @runtime, @static)
 //  2. File convention (*.server.tsx, *.runtime.tsx, *.static.tsx)
 //  3. Config name/path list match (serverComponents, runtimeComponents)
 //  4. Directory membership (serverDirs, runtimeDirs)
-//  5. Default → ComponentClassClient
+//
+// 5. Default -> ComponentClassClient
 func ClassifyComponent(source string, filePath string, serverComponents []string, runtimeComponents []string, serverDirs []string, runtimeDirs []string) ComponentClass {
 	// 1. Directive check (highest priority)
 	if HasServerDirective(source) {
@@ -198,7 +198,7 @@ func ClassifyComponent(source string, filePath string, serverComponents []string
 		}
 	}
 
-	// 4. Directory membership — check if the file lives under any configured
+	// 4. Directory membership - check if the file lives under any configured
 	//    server or runtime directory. Paths are matched by prefix.
 	if isPathInDirs(filePath, serverDirs) {
 		return ComponentClassServer
@@ -245,8 +245,8 @@ func toForwardSlash(s string) string {
 }
 
 // extractComponentName extracts the component name from a file path.
-// e.g., "/src/components/DataTable.server.tsx" → "DataTable"
-// e.g., "/src/components/DataTable.tsx" → "DataTable"
+// e.g., "/src/components/DataTable.server.tsx" -> "DataTable"
+// e.g., "/src/components/DataTable.tsx" -> "DataTable"
 func extractComponentName(filePath string) string {
 	base := filePath
 	// Get the filename without extension
@@ -272,7 +272,7 @@ func extractComponentName(filePath string) string {
 
 // HasStaticReactivity checks if source code contains reactive primitives
 // (createSignal, createEffect, createMemo, createResource, onMount, event handlers).
-// Used for automatic static tier detection — components without these are candidates
+// Used for automatic static tier detection - components without these are candidates
 // for static rendering (no client hydration needed).
 func HasStaticReactivity(source string) bool {
 	indicators := []string{

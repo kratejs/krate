@@ -30,14 +30,14 @@ func stripArraySep(s string) string {
 	return strings.ReplaceAll(s, "\x1f", "")
 }
 
-// ─── JS string escaping ──────────────────────────────────────────────────────
+// JS string escaping
 
 // escapeJSString escapes a string for safe embedding in a JS single-quoted string literal.
 func escapeJSString(s string) string {
 	return escape.JSString(s)
 }
 
-// ─── AST helpers ─────────────────────────────────────────────────────────────
+// AST helpers
 
 // stringLiteralValue returns the raw value string from a Literal AST node.
 func stringLiteralValue(e *ast.Literal) string {
@@ -65,10 +65,13 @@ func arrowBodyExpr(arrow *ast.ArrowFn) ast.Expr {
 	return nil
 }
 
-// ─── JSON helpers ────────────────────────────────────────────────────────────
+// JSON helpers
 
 // extractJSONProp extracts a property value from a JSON-like object string.
-// e.g., extractJSONProp(`{"count":42,"items":[1,2,3]}`, "count") → "42"
+// e.g., extractJSONProp(`{"count":42,"items":[1,2,3]}`, "count") -> "42"
+// Single-quoted values (produced by the const serializer that re-quotes JS
+// source as '...' for embedding in generated code) are handled too, so prop
+// objects serialized either way resolve their members during SSR.
 func extractJSONProp(objStr, prop string) string {
 	if objStr == "" || objStr[0] != '{' {
 		return ""
@@ -98,21 +101,21 @@ func extractJSONProp(objStr, prop string) string {
 	}
 	// Find end of value
 	depth := 0
-	inStr := false
+	quote := byte(0)
 	for j := i; j < len(objStr); j++ {
 		ch := objStr[j]
-		if inStr {
+		if quote != 0 {
 			if ch == '\\' {
 				j++
 				continue
 			}
-			if ch == '"' {
-				inStr = false
+			if ch == quote {
+				quote = 0
 			}
 			continue
 		}
-		if ch == '"' {
-			inStr = true
+		if ch == '"' || ch == '\'' {
+			quote = ch
 			continue
 		}
 		if ch == '{' || ch == '[' {
@@ -132,44 +135,53 @@ func extractJSONProp(objStr, prop string) string {
 // unquoteJSONPropValue normalizes an extracted JSON property value. Numeric,
 // boolean, and null values pass through as-is; JSON string values have their
 // surrounding quotes removed (and escapes resolved) so they render as plain
-// text in SSR output (e.g. params.id → abc-123 rather than "abc-123").
+// text in SSR output (e.g. params.id -> abc-123 rather than "abc-123").
 func unquoteJSONPropValue(v string) string {
-	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
-		var sb strings.Builder
-		for i := 1; i < len(v)-1; i++ {
-			c := v[i]
-			if c == '\\' && i+1 < len(v)-1 {
-				i++
-				next := v[i]
-				switch next {
-				case 'n':
-					sb.WriteByte('\n')
-				case 't':
-					sb.WriteByte('\t')
-				case 'r':
-					sb.WriteByte('\r')
-				case '\\', '"', '/':
-					sb.WriteByte(next)
-				case 'u':
-					// Skip \uXXXX sequences (rare in params); leave as-is marker.
-					sb.WriteString("\\u")
-					if i+4 < len(v) {
-						sb.WriteString(v[i+1 : i+5])
-						i += 4
-					}
-				default:
-					sb.WriteByte(next)
-				}
-				continue
-			}
-			sb.WriteByte(c)
+	if len(v) >= 2 {
+		var q byte
+		switch v[0] {
+		case '"':
+			q = '"'
+		case '\'':
+			q = '\''
 		}
-		return sb.String()
+		if q != 0 && v[len(v)-1] == q {
+			var sb strings.Builder
+			for i := 1; i < len(v)-1; i++ {
+				c := v[i]
+				if c == '\\' && i+1 < len(v)-1 {
+					i++
+					next := v[i]
+					switch next {
+					case 'n':
+						sb.WriteByte('\n')
+					case 't':
+						sb.WriteByte('\t')
+					case 'r':
+						sb.WriteByte('\r')
+					case '\\', '"', '\'', '/':
+						sb.WriteByte(next)
+					case 'u':
+						// Skip \uXXXX sequences (rare in params); leave as-is marker.
+						sb.WriteString("\\u")
+						if i+4 < len(v) {
+							sb.WriteString(v[i+1 : i+5])
+							i += 4
+						}
+					default:
+						sb.WriteByte(next)
+					}
+					continue
+				}
+				sb.WriteByte(c)
+			}
+			return sb.String()
+		}
 	}
 	return v
 }
 
-// ─── Number helpers ──────────────────────────────────────────────────────────
+// Number helpers
 
 // toFloat attempts to parse a string as a float64.
 func toFloat(s string) float64 {
@@ -180,7 +192,7 @@ func toFloat(s string) float64 {
 	return f
 }
 
-// ─── AST analysis helpers (used by tests and IR tree) ────────────────────────
+// AST analysis helpers (used by tests and IR tree)
 
 // hasJSX returns true if the expression tree contains a JSX element.
 func hasJSX(expr ast.Expr) bool {
@@ -218,7 +230,7 @@ func isVoidElement(tag string) bool {
 }
 
 // isBooleanAttr reports whether an HTML attribute is a boolean attribute whose
-// mere presence is meaningful — an empty or "false" string value is still truthy.
+// mere presence is meaningful - an empty or "false" string value is still truthy.
 func isBooleanAttr(name string) bool {
 	switch name {
 	case "disabled", "required", "readonly", "checked", "selected", "multiple", "autofocus", "hidden", "inert", "novalidate", "open", "async", "defer", "autoplay", "controls", "loop", "muted", "playsinline", "allowfullscreen", "default", "ismap", "itemscope", "nohref", "noresize", "noshade", "nowrap", "reversed", "scoped", "seamless", "sortable", "translate":

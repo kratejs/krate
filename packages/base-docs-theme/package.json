@@ -1,0 +1,34 @@
+{
+  "name": "@krate/base-docs-theme",
+  "version": "0.1.0",
+  "description": "The default Krate docs theme: navbar, sidebar, table of contents, breadcrumbs, prev/next, and light/dark mode.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://krate.js.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kratejs/krate.git"
+  },
+  "keywords": [
+    "krate",
+    "docs",
+    "theme",
+    "ssg"
+  ],
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./layout": "./src/layout.tsx",
+    "./chrome": "./src/chrome.tsx",
+    "./shell": "./src/shell.tsx",
+    "./theme.css": "./src/theme.css"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@krate/plugin": "workspace:*",
+    "@krate/runtime": "workspace:*"
+  }
+}

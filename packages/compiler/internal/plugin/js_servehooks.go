@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 )
 
@@ -60,6 +61,7 @@ func runJSServeHook(module, hookName, root string, payload map[string]interface{
 		return nil, fmt.Errorf("creating JS runtime: %w", err)
 	}
 	defer rt.Close()
+	_ = rt.SetEnv(environ.Current)
 	if _, err := rt.Execute(bundleCode); err != nil {
 		return nil, fmt.Errorf("loading plugin bundle: %w", err)
 	}

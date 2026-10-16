@@ -74,7 +74,7 @@ func TestSelfReferentialEffectIsCircular(t *testing.T) {
 
 func TestWriteOnlyEffectWithoutRead(t *testing.T) {
 	// A setInterval callback that writes a signal is a legitimate one-shot
-	// imperative effect — the write is deferred, so it must NOT warn.
+	// imperative effect - the write is deferred, so it must NOT warn.
 	g := Build([]irtree.ComponentSignature{sig(
 		[]irtree.SignalDecl{{Name: "tick", SetterName: "setTick"}},
 		[]string{"createEffect(() => { const id = setInterval(() => setTick(Date.now()), 1000); onCleanup(() => clearInterval(id)); })"},

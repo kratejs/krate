@@ -1,6 +1,7 @@
 package lexer
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -211,6 +212,117 @@ func TestRegexLiteral(t *testing.T) {
 	kind(t, toks[1], ASSIGN)
 	kind(t, toks[2], Regexp)
 	value(t, toks[2], "/test/i")
+}
+
+func TestJSXTextLeadingSlashIsNotRegex(t *testing.T) {
+	// Regression: a `/` after a tag's `>` used to be lexed as a regex literal,
+	// swallowing the rest of the line (`<code>/about</code>` -> regex
+	// "/about</") and erasing the closing tags.
+	toks := tokens("<code>/about</code>")
+	want := []struct {
+		kind Kind
+		val  string
+	}{
+		{LT, "<"}, {Identifier, "code"}, {GT, ">"},
+		{DIV, "/"}, {Identifier, "about"},
+		{LT_SLASH, "</"}, {Identifier, "code"}, {GT, ">"}, {EOF, ""},
+	}
+	for i, w := range want {
+		kind(t, toks[i], w.kind)
+		if w.val != "" {
+			value(t, toks[i], w.val)
+		}
+	}
+}
+
+func TestJSXTextBlockCommentLikeIsText(t *testing.T) {
+	// `/api/*` in JSX text must not open a block comment nor a regex.
+	toks := tokens("<code>/api/*</code>")
+	want := []struct {
+		kind Kind
+		val  string
+	}{
+		{LT, "<"}, {Identifier, "code"}, {GT, ">"},
+		{DIV, "/"}, {Identifier, "api"}, {DIV, "/"}, {STAR, "*"},
+		{LT_SLASH, "</"}, {Identifier, "code"}, {GT, ">"}, {EOF, ""},
+	}
+	for i, w := range want {
+		kind(t, toks[i], w.kind)
+		value(t, toks[i], w.val)
+	}
+}
+
+func TestJSXTextLineCommentLikeIsText(t *testing.T) {
+	// `//` in JSX text must not start a line comment.
+	toks := tokens("<p>https://example.com/a</p>")
+	var joined string
+	for _, tok := range toks {
+		joined += tok.Value
+	}
+	if !strings.Contains(joined, "https://example.com/a") {
+		t.Errorf("JSX text lost its URL: %q", joined)
+	}
+	// The closing tag must still be present.
+	kind(t, toks[len(toks)-2], GT)
+}
+
+func TestJSXTextSlashIsNotDivisionInExpr(t *testing.T) {
+	// JSX text between elements: `<span class="sep"> / </span>`.
+	toks := tokens(`<span class="sep"> / </span>`)
+	// Should end with a clean closing tag, not a swallowed regex/comment.
+	last := toks[len(toks)-2]
+	kind(t, last, GT)
+}
+
+func TestSlashAfterGTInArithmetic(t *testing.T) {
+	// `a > b / c` must lex the `/` as division, not the start of a regex.
+	toks := tokens("a>b/c")
+	kind(t, toks[0], Identifier)
+	kind(t, toks[1], GT)
+	kind(t, toks[2], Identifier)
+	kind(t, toks[3], DIV)
+	value(t, toks[3], "/")
+	kind(t, toks[4], Identifier)
+	value(t, toks[4], "c")
+}
+
+func TestAngleBracketCastDoesNotLeakJSXState(t *testing.T) {
+	// `<string>x` is a type assertion, not JSX; the lexer must not enter
+	// JSX-text mode, or a later regex literal would be mangled.
+	toks := tokens("const cast = <string>x;\nconst re = /foo/g;")
+	var sawRegexp bool
+	for _, tok := range toks {
+		if tok.Kind == Regexp {
+			sawRegexp = true
+			value(t, tok, "/foo/g")
+		}
+	}
+	if !sawRegexp {
+		t.Error("regex literal after angle-bracket cast was not lexed as Regexp")
+	}
+}
+
+func TestLeadingDotNumber(t *testing.T) {
+	toks := tokens(".5 + 1")
+	kind(t, toks[0], Number)
+	value(t, toks[0], ".5")
+	kind(t, toks[1], PLUS)
+	kind(t, toks[2], Number)
+}
+
+func TestGenericArrowNotJSXTag(t *testing.T) {
+	// `<T,>(x) => x` is a generic arrow, not a JSX element; treating `<T,>` as
+	// a tag would desync the JSX stack and mangle a following regex.
+	toks := tokens("const f = <T,>(x) => x;\nconst re = /foo/g;")
+	var sawRegexp bool
+	for _, tok := range toks {
+		if tok.Kind == Regexp {
+			sawRegexp = true
+		}
+	}
+	if !sawRegexp {
+		t.Error("regex after generic arrow was not lexed as Regexp (JSX desync)")
+	}
 }
 
 func TestLineComment(t *testing.T) {

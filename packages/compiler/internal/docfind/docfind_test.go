@@ -56,6 +56,34 @@ func TestBuildProducesSearchableWASM(t *testing.T) {
 	}
 }
 
+func TestSearchInProcess(t *testing.T) {
+	docs := []Document{
+		{Title: "Getting Started", Category: "docs", Href: "/docs/getting-started", Body: "This guide will help you get started with krate."},
+		{Title: "Configuration", Category: "docs", Href: "/docs/configuration", Body: "Configure krate with krate.config.ts."},
+	}
+	got, err := Search(context.Background(), docs, "config", 8)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	found := false
+	for _, r := range got {
+		if r.Href == "/docs/configuration" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("'config' did not match /docs/configuration: %+v", got)
+	}
+
+	none, err := Search(context.Background(), docs, "zzz-not-in-index", 8)
+	if err != nil {
+		t.Fatalf("Search(gibberish): %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("expected no results for gibberish, got %+v", none)
+	}
+}
+
 func TestBuildEmptyDocuments(t *testing.T) {
 	_, err := Build(context.Background(), nil)
 	if err == nil {

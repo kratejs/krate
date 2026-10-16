@@ -19,7 +19,7 @@ function resolveBinary() {
     const binary = join(pkgPath, 'bin', binaryName);
     if (existsSync(binary)) return binary;
   } catch {
-    // Platform package not installed — fall through to local binary.
+    // Platform package not installed - fall through to local binary.
   }
   const local = join(binDir, binaryName);
   if (existsSync(local)) return local;

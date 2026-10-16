@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	irtree "github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
@@ -25,9 +26,10 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 
 	// 1. Collect all function declarations
 	collectFunctionsWithSource(prog.Body, ann.Functions, ann.ComponentSources, ann.ComponentRaw, sourceFile, rawSource)
+	collectMemberComponents(prog.Body, ann.Functions)
 
-	// 2. Find default export → entry point
-	ann.EntryPoint = findDefaultExport(prog.Body)
+	// 2. Find default export -> entry point
+	ann.EntryPoint = FindDefaultExport(prog.Body)
 
 	// 3. Walk used-component graph
 	if ann.EntryPoint != "" {
@@ -64,7 +66,6 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 // 3. Config name lists (serverComponents, runtimeComponents)
 // 4. Config directory lists (serverDirs, runtimeDirs)
 // 5. Default: TierClient
-//
 // Each function is classified using its OWN module's source file and raw text
 // (recorded by collectFunctionsWithSource), so a page-level `// @server`
 // directive doesn't leak onto imported *.runtime.tsx components.
@@ -306,12 +307,7 @@ func hasSuspenseInExpr(expr ast.Expr) bool {
 	return false
 }
 
-// ─── AST walking helpers (ported from renderer) ────────────────────────────
-
-// collectFunctions walks function bodies recording declarations.
-func collectFunctions(body []ast.Stmt, dest map[string]*ast.FnDecl) {
-	collectFunctionsWithSource(body, dest, nil, nil, "", "")
-}
+// AST walking helpers (ported from renderer)
 
 // collectFunctionsWithSource walks function bodies recording declarations and,
 // when sourcePath/rawSource are non-empty, records the module source each
@@ -334,7 +330,7 @@ func collectFunctionsWithSource(body []ast.Stmt, dest map[string]*ast.FnDecl, so
 				case *ast.FnDecl:
 					record(decl)
 				case *ast.VarStmt:
-					// `export const Live = () => <p/>` — the parser stores the
+					// `export const Live = () => <p/>` - the parser stores the
 					// variable statement in ExportStmt.Declaration, so named
 					// arrow/function-expression components exported like this
 					// get the same treatment as plain FnDecl components.
@@ -365,6 +361,62 @@ func collectFunctionsWithSource(body []ast.Stmt, dest map[string]*ast.FnDecl, so
 	}
 }
 
+// collectMemberComponents registers plain member assignments (`Root.Part =
+// PartFn`) so dotted JSX tags like `<Root.Part>` resolve to the assigned
+// component — the general mechanism behind namespaced compound APIs.
+func collectMemberComponents(body []ast.Stmt, functions map[string]*ast.FnDecl) {
+	for _, stmt := range body {
+		switch s := stmt.(type) {
+		case *ast.ExprStmt:
+			assign, ok := s.Expression.(*ast.BinaryExpr)
+			if !ok || assign.Op != "=" {
+				continue
+			}
+			member, ok := assign.Left.(*ast.MemberExpr)
+			if !ok || member.Computed {
+				continue
+			}
+			obj, ok := member.Object.(*ast.Identifier)
+			if !ok {
+				continue
+			}
+			prop, ok := member.Property.(*ast.Identifier)
+			if !ok {
+				continue
+			}
+			tag := obj.Name + "." + prop.Name
+			if rhs, ok := assign.Right.(*ast.Identifier); ok {
+				if fn := functions[rhs.Name]; fn != nil {
+					if _, exists := functions[tag]; !exists {
+						functions[tag] = fn
+					}
+				}
+			}
+		case *ast.BlockStmt:
+			collectMemberComponents(s.Body, functions)
+		case *ast.ForStmt:
+			collectMemberComponents(s.Body, functions)
+		case *ast.WhileStmt:
+			collectMemberComponents(s.Body, functions)
+		case *ast.DoWhileStmt:
+			collectMemberComponents(s.Body, functions)
+		case *ast.IfStmt:
+			collectMemberComponents(s.Consequent, functions)
+			collectMemberComponents(s.Alternate, functions)
+		case *ast.SwitchStmt:
+			for _, c := range s.Cases {
+				collectMemberComponents(c.Body, functions)
+			}
+		case *ast.TryStmt:
+			collectMemberComponents(s.Body, functions)
+			if s.Catch != nil {
+				collectMemberComponents(s.Catch.Body, functions)
+			}
+			collectMemberComponents(s.Finally, functions)
+		}
+	}
+}
+
 // recordComponentVarDecls registers named function-expression/arrow components
 // from a variable statement (e.g. `const Live = () => <p/>`). Component names
 // start with an uppercase letter, mirroring how JSX resolves identifiers.
@@ -378,7 +430,11 @@ func recordComponentVarDecls(stmt *ast.VarStmt, record func(*ast.FnDecl)) {
 	}
 }
 
-func findDefaultExport(body []ast.Stmt) string {
+// FindDefaultExport returns the identifier a program's default export resolves
+// to: the declared name for `export default function Foo()`, or the local name
+// for `export default Foo`. It returns "" when the default export is anonymous
+// or unbound.
+func FindDefaultExport(body []ast.Stmt) string {
 	for _, stmt := range body {
 		if exp, ok := stmt.(*ast.ExportStmt); ok && exp.Default {
 			if fn, ok := exp.Declaration.(*ast.FnDecl); ok {
@@ -484,9 +540,14 @@ func collectFragmentRefs(frag *ast.JSXFragment, functions map[string]*ast.FnDecl
 	}
 }
 
-// collectSignalDecls walks function bodies to find createSignal / createResource calls.
+// collectSignalDecls walks function bodies to find createSignal /
+// createResource calls. Zero-JS CSS primitives (createCSSChoice etc.) are
+// compiler-erased, so they are never registered as signals.
 func collectSignalDecls(body []ast.Stmt, signals map[string]ast.Expr) {
 	for _, d := range sigutil.Find(body, true) {
+		if d.CSSKind != sigutil.CSSKindNone {
+			continue
+		}
 		if d.Initial != nil {
 			signals[d.Name] = d.Initial
 		}
@@ -549,6 +610,27 @@ func MergeModuleFunctions(ann *irtree.Annotations, modules []ModuleSource) {
 	for _, mod := range modules {
 		if mod.Program != nil {
 			collectFunctionsWithSource(mod.Program.Body, ann.Functions, ann.ComponentSources, ann.ComponentRaw, mod.Path, mod.RawSource)
+			collectMemberComponents(mod.Program.Body, ann.Functions)
+			// Merge module-level cva factories so variant calls in the entry
+			// module can fold against factories defined in imported modules.
+			if ann.CVAFactories == nil {
+				ann.CVAFactories = make(map[string]*irtree.CVASpec)
+			}
+			for name, spec := range irtree.CollectCVAFactories(mod.Program) {
+				if _, exists := ann.CVAFactories[name]; !exists {
+					ann.CVAFactories[name] = spec
+				}
+			}
+			// Merge context defaults so `X.useContext()` in the entry module can
+			// fold against `createContext` bindings from imported modules.
+			if ann.ContextDefaults == nil {
+				ann.ContextDefaults = make(map[string]string)
+			}
+			for name, def := range irtree.CollectContextDefaults(mod.Program) {
+				if _, exists := ann.ContextDefaults[name]; !exists {
+					ann.ContextDefaults[name] = def
+				}
+			}
 		}
 	}
 	// Re-walk used components to pick up newly discovered functions. The used
@@ -565,6 +647,139 @@ func MergeModuleFunctions(ann *irtree.Annotations, modules []ModuleSource) {
 	for name := range ann.UsedComponents {
 		if fn, ok := ann.Functions[name]; ok {
 			collectSignalDecls(fn.Body, ann.Signals)
+		}
+	}
+}
+
+// MergeImportAliases makes imported components resolvable under their local
+// binding names. Bundled modules' function declarations are merged into one map
+// keyed by declared name, so without aliasing a renamed import - e.g.
+// `import FooLayout from "./theme/layout"` where the theme declares
+// `export default function NightLayout` - renders nothing: `<FooLayout>` has no
+// matching entry. Aliasing each import local to the function it actually
+// resolves to fixes that, so page/theme authors can name exports freely.
+// entry is the page's own module (its imports are the ones that matter most).
+func MergeImportAliases(ann *irtree.Annotations, modules []ModuleSource, entry ModuleSource) {
+	if entry.Program != nil {
+		modules = append(modules, entry)
+	}
+	aliases := BuildImportAliases(modules)
+	for local, declared := range aliases {
+		if fn := ann.Functions[declared]; fn != nil {
+			if _, exists := ann.Functions[local]; !exists {
+				ann.Functions[local] = fn
+			}
+		}
+	}
+	// Re-walk used components so aliased references from the entry are
+	// classified and their signals collected, then reclassify tiers for them.
+	if ann.EntryPoint != "" {
+		ann.UsedComponents = map[string]bool{}
+		collectUsedFuncs(ann.Functions, ann.EntryPoint, ann.UsedComponents)
+	}
+	for name := range ann.UsedComponents {
+		if fn, ok := ann.Functions[name]; ok {
+			collectSignalDecls(fn.Body, ann.Signals)
+		}
+	}
+}
+
+// BuildImportAliases returns a map from import local binding to the declared
+// function name it resolves to across the given modules. Default imports map to
+// their module's default export; named imports map to the exported name (which
+// equals the declared name for function declarations). Unresolvable bindings
+// (namespace imports, re-exports, non-function exports) are skipped.
+func BuildImportAliases(modules []ModuleSource) map[string]string {
+	byPath := make(map[string]*ast.Program)
+	for _, m := range modules {
+		if m.Program != nil && m.Path != "" {
+			byPath[m.Path] = m.Program
+		}
+	}
+	aliases := make(map[string]string)
+	for _, m := range modules {
+		if m.Program == nil || m.Path == "" {
+			continue
+		}
+		for _, stmt := range m.Program.Body {
+			// Namespace re-export (`export * as Card from './card'`): address
+			// every function of the target module as `Card.<Name>`.
+			if exp, ok := stmt.(*ast.ExportStmt); ok && exp.Namespace != "" && exp.ReexportSource != "" {
+				target := bundler.ResolveImport(m.Path, strings.Trim(exp.ReexportSource, "\"'"))
+				if tprog := byPath[target]; tprog != nil {
+					addNamespaceAliases(aliases, exp.Namespace, tprog.Body)
+				}
+				continue
+			}
+			imp, ok := stmt.(*ast.ImportStmt)
+			if !ok || imp.Source == "" {
+				continue
+			}
+			target := bundler.ResolveImport(m.Path, strings.Trim(imp.Source, "\"'"))
+			tprog := byPath[target]
+			if tprog == nil {
+				continue
+			}
+			if imp.Default != "" {
+				if name := FindDefaultExport(tprog.Body); name != "" {
+					aliases[imp.Default] = name
+				}
+			}
+			for _, n := range imp.Named {
+				if n.Local != "" && n.Remote != "" && n.Local != n.Remote {
+					aliases[n.Local] = n.Remote
+				}
+				// The target module may re-export a namespace under this name
+				// (`export * as Card from './card'`), so `import { Card }` then
+				// `<Card.Root>` resolves to the deeper module's `Root`. Expand
+				// the named import into namespace aliases keyed by the LOCAL
+				// binding so the import site's dotted tag resolves.
+				if nsBody, ok := namespaceReexportBody(tprog.Body, n.Remote, m.Path, byPath); ok {
+					addNamespaceAliases(aliases, n.Local, nsBody)
+				}
+			}
+			// Namespace import (`import * as Card from './card'`): every
+			// function exported by the target module becomes addressable as
+			// `Card.<Name>`, so dotted JSX tags like `<Card.Root>` resolve to
+			// the declared `Root` function.
+			if imp.Namespace != "" {
+				addNamespaceAliases(aliases, imp.Namespace, tprog.Body)
+			}
+		}
+	}
+	return aliases
+}
+
+// namespaceReexportBody returns the target module's body when `exportName` in
+// the given module is a namespace re-export (`export * as exportName from '...'`).
+// This lets a named import of that binding expand into dotted aliases.
+func namespaceReexportBody(body []ast.Stmt, exportName, modulePath string, byPath map[string]*ast.Program) ([]ast.Stmt, bool) {
+	for _, stmt := range body {
+		exp, ok := stmt.(*ast.ExportStmt)
+		if !ok || exp.Namespace != exportName || exp.ReexportSource == "" {
+			continue
+		}
+		target := bundler.ResolveImport(modulePath, strings.Trim(exp.ReexportSource, "\"'"))
+		if tprog := byPath[target]; tprog != nil {
+			return tprog.Body, true
+		}
+	}
+	return nil, false
+}
+
+// addNamespaceAliases maps `ns.<Fn>` to the declared function name for every
+// function declaration in a module body, so dotted JSX tags resolve.
+func addNamespaceAliases(aliases map[string]string, ns string, body []ast.Stmt) {
+	for _, stmt := range body {
+		switch d := stmt.(type) {
+		case *ast.FnDecl:
+			if d.Name != "" {
+				aliases[ns+"."+d.Name] = d.Name
+			}
+		case *ast.ExportStmt:
+			if d2, ok := d.Declaration.(*ast.FnDecl); ok && d2.Name != "" {
+				aliases[ns+"."+d2.Name] = d2.Name
+			}
 		}
 	}
 }

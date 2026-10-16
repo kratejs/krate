@@ -1,76 +1,34 @@
 import './toast.css';
-import { createSignal, onCleanup } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSToggle, type CSSScope } from '@krate/runtime';
+
+const ToastCtx = createScope<boolean>();
 
 export interface ToastProps {
-  children?: any;
   variant?: 'default' | 'success' | 'destructive';
-  duration?: number;
-  key?: any;
-  onClose?: () => void;
+  children?: any;
 }
 
+/** Toast. Zero JS: a hidden checkbox shows it; the close button unchecks it. */
 export function Toast(props: ToastProps) {
-  var [visible, setVisible] = createSignal(true);
-
-  function handleClose() {
-    setVisible(false);
-    if (props.onClose) {
-      props.onClose();
-    }
-  }
-
+  const open = createCSSToggle(true);
   return (
-    <div
-      class={"krate-toast krate-toast-" + (props.variant || "default")}
-      data-state={visible() ? "open" : "closed"}
-      role="status"
-    >
-      <div class="krate-toast-content">
-        {props.children}
+    <ToastCtx.Provider value={open}>
+      <div class="krate-toast" data-variant={props.variant || 'default'} role="status" {...open.panel(true)}>
+        <div class="krate-toast-body">{props.children}</div>
+        <ToastClose />
       </div>
-      <button class="krate-toast-close" type="button" aria-label="Close" onClick={handleClose}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
-        </svg>
-      </button>
-    </div>
+    </ToastCtx.Provider>
   );
 }
 
-export interface ToastProviderProps {
-  children?: any;
-  swipeDirection?: 'left' | 'right' | 'up' | 'down';
-}
-
-export function ToastProvider(props: ToastProviderProps) {
+/** @deprecated Use `Toast.Close` instead. */
+export function ToastClose() {
+  const open = ToastCtx.use();
   return (
-    <div class="krate-toast-provider">
-      {props.children}
-    </div>
-  );
-}
-
-export interface ToastViewportProps {
-  children?: any;
-}
-
-export function ToastViewport(props: ToastViewportProps) {
-  return (
-    <div class="krate-toast-viewport">
-      {props.children}
-    </div>
-  );
-}
-
-export interface ToastActionProps {
-  children?: any;
-  altText?: string;
-}
-
-export function ToastAction(props: ToastActionProps) {
-  return (
-    <button class="krate-toast-action" type="button">
-      {props.children}
+    <button class="krate-toast-close" type="button" aria-label="Close" {...open.close()}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M18 6 6 18M6 6l12 12" />
+      </svg>
     </button>
   );
 }
@@ -79,6 +37,7 @@ export interface ToastTitleProps {
   children?: any;
 }
 
+/** @deprecated Use `Toast.Title` instead. */
 export function ToastTitle(props: ToastTitleProps) {
   return <div class="krate-toast-title">{props.children}</div>;
 }
@@ -87,6 +46,17 @@ export interface ToastDescriptionProps {
   children?: any;
 }
 
+/** @deprecated Use `Toast.Description` instead. */
 export function ToastDescription(props: ToastDescriptionProps) {
   return <div class="krate-toast-description">{props.children}</div>;
 }
+
+export interface Toast {
+  Title: typeof ToastTitle;
+  Description: typeof ToastDescription;
+  Close: typeof ToastClose;
+}
+
+Toast.Title = ToastTitle;
+Toast.Description = ToastDescription;
+Toast.Close = ToastClose;

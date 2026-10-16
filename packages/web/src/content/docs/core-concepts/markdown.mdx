@@ -1,0 +1,163 @@
+---
+title: Markdown & MDX
+order: 7
+description: Author content in Markdown or MDX — GFM, admonitions, math, diagrams, and components.
+---
+
+# Markdown & MDX
+
+Content pages can be authored in Markdown (`.md`) or MDX (`.mdx`) — Markdown
+with embedded JSX components. Both compile to static HTML at build time.
+
+## Frontmatter
+
+Each content page starts with YAML frontmatter:
+
+```md
+---
+title: My Page
+order: 2
+sidebar: guides
+keywords: [setup, install]
+---
+
+# Content starts here
+```
+
+| Key | Purpose |
+|-----|---------|
+| `title` | Page title (used in the sidebar and `<title>`) |
+| `order` | Sort order within a directory (default `999`) |
+| `sidebar` | Sidebar section override, or `[...]` JSON for a fully custom sidebar |
+| `keywords` | Explicit search keywords for the search index |
+
+## Markdown features
+
+The markdown renderer supports:
+
+- **GFM** — tables, task lists, autolinks, strikethrough
+- **Heading anchors** — every heading gets an `id` for deep-linking and TOC
+- **Definition lists** — a term line followed by `: definition` lines
+- **Footnotes** — `[^1]` references with `[^1]: text` definitions
+- **Emoji shortcodes** — `:rocket:` → 🚀 (outside code spans)
+- **Admonitions**
+
+:::note
+This is a note. Admonitions are enabled with `admonitions: true` in the
+markdown config.
+:::
+
+:::warning
+This is a warning callout.
+:::
+
+:::tip
+Admonition types include `note`, `tip`, `warning`, and `danger`.
+:::
+
+- **Syntax highlighting** — fenced code blocks are highlighted at build time:
+
+```tsx
+export default function Hello() {
+  return <h1>Hello, MDX!</h1>;
+}
+```
+
+- **Math** — with `math: true`, `$inline$` and `$$display$$` spans are wrapped
+  in `.krate-math` elements. In the docs plugin, KaTeX is loaded from a CDN and
+  auto-renders them; elsewhere the spans are left for your own renderer/CSS.
+  Code spans/blocks are never touched:
+
+  ```text
+  The identity $e^{i\pi} + 1 = 0$ is famous.
+
+  $$\int_0^1 x\,dx = \tfrac{1}{2}$$
+  ```
+
+## Diagrams
+
+With `mermaid: true`, fenced `mermaid` blocks render as diagrams:
+
+```mermaid
+graph TD
+  A[Source TSX] --> B[Go compiler]
+  B --> C[Static HTML]
+  B --> D[Hydration JS]
+```
+
+## Component directives
+
+Import a component, then wrap content in it with a `:::component` directive —
+the body is rendered as Markdown and passed to the component as HTML:
+
+```mdx
+import { Card, Steps } from '@krate/components';
+
+:::component Card title="Getting started"
+Krate **compiles** Markdown into your components, with full Markdown inside.
+:::
+```
+
+Directives are expanded to real component JSX at build time, so they appear in
+the output as static HTML with no client runtime. This works for any imported
+component (`:::component Steps`, `:::component Aside type="tip"`, …).
+
+### Built-in directives
+
+Four container directives lower to `@krate/components` without any import (the
+docs plugin auto-imports them):
+
+- `:::card Title` … `:::` — wraps the body in a `Card`.
+- `:::steps` with nested `::step Title` items — a `Steps` list.
+- `:::tabs` with nested `::tab Label` items — a `Tabs` panel.
+- `:::code-group` with fenced code blocks — one tab per language.
+
+```mdx
+:::steps
+::step Install
+Run `npm install`.
+::step Build
+Run `krate build`.
+:::
+```
+
+The `Tabs` (`Tabs.List`/`Tabs.Trigger`/`Tabs.Content`), `Steps` (`Steps.Step`), `Card`,
+and `Code` components are imported automatically when their directive is used.
+
+## MDX
+
+MDX lets you embed JSX directly in your content. The docs plugin re-inserts
+JSX blocks back into the rendered HTML, so components can be used inline:
+
+```mdx
+# A page with a component
+
+Here is a callout rendered from JSX:
+
+<div class="callout">
+  <strong>Heads up!</strong> You can mix Markdown and JSX in one file.
+</div>
+```
+
+MDX files can also **import components**:
+
+```mdx
+import { Callout } from '../../components/callout';
+
+<Callout type="tip">Imports work too.</Callout>
+```
+
+## Configuration
+
+```typescript
+markdown: {
+  gfm: true,
+  headingAnchors: true,
+  admonitions: true,
+  codeHighlight: true,
+  math: false,
+}
+```
+
+For how Markdown and MDX are parsed and compiled, see
+[Contributing → Architecture](/docs/contributing/architecture/).

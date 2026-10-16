@@ -6,7 +6,9 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/astjson"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/compiler/internal/version"
 	pluginsdk "github.com/kratejs/krate/packages/compiler/pluginsdk"
 )
 
@@ -14,13 +16,13 @@ import (
 // subprocess. The referenced Go hook contexts are built for the wire from the
 // in-process typed context and their returned output is applied via the shared
 // applyPluginOutput path.
-func runGoPluginHook(hookName string, pc config.PluginConfig, root, outDir string, hookCtx interface{}) error {
+func runGoPluginHook(hookName string, pc config.PluginConfig, root, outDir string, env CommunityEnv, hookCtx interface{}) error {
 	host, err := goPluginFor(pc)
 	if err != nil {
 		return err
 	}
 
-	args, err := buildGoHookArgs(hookName, root, outDir, hookCtx)
+	args, err := buildGoHookArgs(hookName, root, outDir, env, hookCtx)
 	if err != nil {
 		return err
 	}
@@ -68,11 +70,29 @@ func translateRoutes(in []pluginsdk.Route) []Route {
 
 // buildGoHookArgs constructs the wire arguments for a hook. The AfterParse
 // context carries the program as an astjson document, mirroring the JS path.
-func buildGoHookArgs(hookName string, root, outDir string, hookCtx interface{}) (interface{}, error) {
-	switch hookName {
-	case "BeforeBuild", "GenerateRoutes", "AfterBuild":
-		return hookCtx, nil
-	case "AfterParse":
+// Every hook gets the shared Krate metadata (projectRoot, outDir, pagesDir,
+// version, devMode, pages, config) so Go plugins see the same context as the
+// JS `krate` object.
+func buildGoHookArgs(hookName, root, outDir string, env CommunityEnv, hookCtx interface{}) (interface{}, error) {
+	base := map[string]interface{}{
+		"projectRoot": root,
+		"outDir":      outDir,
+		"version":     version.Value,
+	}
+	if env.PagesDir != "" {
+		base["pagesDir"] = env.PagesDir
+	}
+	if env.DevMode {
+		base["devMode"] = true
+	}
+	if env.Config != nil {
+		base["config"] = env.Config
+	}
+	if pages := pagesFromCtx(hookCtx); len(pages) > 0 {
+		base["pages"] = pages
+	}
+
+	if hookName == "AfterParse" {
 		pctx, ok := hookCtx.(*ParseHookCtx)
 		if !ok || pctx == nil {
 			return hookCtx, nil
@@ -85,10 +105,28 @@ func buildGoHookArgs(hookName string, root, outDir string, hookCtx interface{}) 
 			}
 			doc["program"] = json.RawMessage(enc)
 		}
+		for k, v := range base {
+			doc[k] = v
+		}
 		return doc, nil
-	default:
-		return hookCtx, nil
 	}
+
+	// Marshal the typed hook context, then merge the shared metadata without
+	// clobbering fields the context already declares (e.g. BuildArgs.outDir).
+	data, err := json.Marshal(hookCtx)
+	if err != nil {
+		return nil, err
+	}
+	var merged map[string]interface{}
+	if err := json.Unmarshal(data, &merged); err != nil {
+		return nil, err
+	}
+	for k, v := range base {
+		if _, exists := merged[k]; !exists {
+			merged[k] = v
+		}
+	}
+	return merged, nil
 }
 
 // runJSManifest bundles a plugin module (unless it is directly a Go binary)
@@ -110,9 +148,10 @@ func runJSManifest(module string) (goPluginDescriptor, error) {
 		return goPluginDescriptor{}, fmt.Errorf("creating JS runtime for manifest: %w", err)
 	}
 	defer rt.Close()
+	_ = rt.SetEnv(environ.Current)
 	// Prelude a CommonJS shim so descriptor files written as
 	// `module.exports = ...` (the documented Go-plugin shape) load even when
-	// esbuild leaves the `module.exports` assignment unwrapped — which happens
+	// esbuild leaves the `module.exports` assignment unwrapped - which happens
 	// when the file also references `import.meta` (esbuild then treats it as
 	// ESM and does NOT convert the CJS export to the __kratePlugin global).
 	// Pure ESM bundles ignore the shim and still set __kratePlugin; pure CJS

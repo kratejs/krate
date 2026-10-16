@@ -1,76 +1,71 @@
-.krate-dialog-content-wrapper {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.krate-dialog {
+  display: inline-block;
 }
-.krate-dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  animation: krate-dialog-fade-in 0.15s ease;
+.krate-dialog-trigger {
+  cursor: pointer;
 }
 .krate-dialog-content {
-  position: relative;
+  position: fixed;
+  inset: 0;
+  margin: auto;
   z-index: 1001;
   width: 90vw;
   max-width: 520px;
+  height: fit-content;
   max-height: 85vh;
   padding: 24px;
   border-radius: 12px;
-  background: var(--krate-card-bg, #111113);
-  border: 1px solid var(--krate-border, #27272a);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  background: var(--krate-card-bg, #ffffff);
+  border: 1px solid var(--krate-border, #e4e4e7);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
   overflow-y: auto;
   animation: krate-dialog-scale-in 0.15s ease;
 }
 .krate-dialog-title {
   font-size: 1.15rem;
   font-weight: 600;
-  color: var(--krate-text, #fafafa);
-  margin-bottom: 4px;
+  color: var(--krate-text, #09090b);
+  margin: 0 0 4px;
 }
 .krate-dialog-description {
   font-size: 0.9rem;
-  color: var(--krate-text-muted, #a1a1aa);
+  color: var(--krate-text-muted, #71717a);
   line-height: 1.5;
-  margin-bottom: 20px;
-}
-.krate-dialog-trigger {
-  all: unset;
-  cursor: pointer;
+  margin: 0 0 20px;
 }
 .krate-dialog-close {
-  all: unset;
   position: absolute;
   top: 16px;
-  right: 16px;
+  inset-inline-end: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
+  border: 0;
   border-radius: 4px;
+  background: transparent;
   color: var(--krate-text-muted, #71717a);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
 }
 .krate-dialog-close:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--krate-text, #fafafa);
+  background: var(--krate-surface, #f4f4f5);
+  color: var(--krate-text, #09090b);
 }
 .krate-dialog-close:focus-visible {
-  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #3b82f6);
   outline-offset: 2px;
-}
-@keyframes krate-dialog-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
 }
 @keyframes krate-dialog-scale-in {
   from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: scale(1); }
 }
+
+.krate-dialog-close {
+  width: auto;
+  min-width: 28px;
+  height: auto;
+  padding: 6px 10px;
+}
+
+.krate-dialog-content { display: flex; flex-direction: column; gap: 8px; }

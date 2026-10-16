@@ -12,6 +12,7 @@ package plug
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/rpc"
 	"os"
 
@@ -20,6 +21,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/astjson"
+	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
 )
 
 // Handshake constants shared by the plugin binary and the Krate host.
@@ -100,6 +102,103 @@ type Result struct {
 	Ast json.RawMessage `json:"ast,omitempty"`
 }
 
+// EmitFile appends a file to the hook's output. The host writes `files` into the
+// output directory (outDir-relative paths, traversal-guarded). It is the Go
+// counterpart of the JS `krate.emitFile`.
+func (r *Result) EmitFile(path, content string) {
+	r.Files = append(r.Files, File{Path: path, Content: content})
+}
+
+// InjectHead appends markup to the page <head>. It takes effect for the
+// AfterRender and AfterPage hooks; the host folds it into the context's own
+// HeadHTML before applying. It is the Go counterpart of `krate.injectHead`.
+func (r *Result) InjectHead(html string) {
+	if r.HeadHTML == nil {
+		s := ""
+		r.HeadHTML = &s
+	}
+	*r.HeadHTML += html
+}
+
+// InjectCSS appends raw CSS. It takes effect for the AfterRender hook. It is the
+// Go counterpart of `krate.injectCSS`.
+func (r *Result) InjectCSS(css string) {
+	if r.RawCSS == nil {
+		s := ""
+		r.RawCSS = &s
+	}
+	if *r.RawCSS != "" {
+		*r.RawCSS += "\n"
+	}
+	*r.RawCSS += css
+}
+
+// ResolveFile resolves a plugin file specifier to an absolute path without
+// hand-rolling a node_modules walk. Absolute/relative paths are anchored to
+// projectRoot and must stay inside it; bare specifiers resolve through
+// node_modules first. Traversal outside projectRoot is rejected.
+func ResolveFile(projectRoot, spec string) (string, error) {
+	return pluginapi.Resolve(projectRoot, spec)
+}
+
+// ReadFile resolves spec (see ResolveFile) and returns its contents as a string.
+func ReadFile(projectRoot, spec string) (string, error) {
+	return pluginapi.ReadFile(projectRoot, spec)
+}
+
+// WriteFileToRoot writes content to rel, interpreted relative to projectRoot
+// (e.g. "public/logo.svg"), creating parent directories as needed. A path that
+// escapes projectRoot is rejected. It is the Go counterpart of the JS
+// `krate.writeFileToRoot`.
+func WriteFileToRoot(projectRoot, rel string, content []byte) error {
+	return pluginapi.WriteFileToRoot(projectRoot, rel, content)
+}
+
+// pluginLogName is set by Serve so Log/Warn can attribute output.
+var pluginLogName string
+
+// Log writes a diagnostic line to stderr, prefixed with the plugin name. It is
+// the Go counterpart of the JS `krate.log`.
+func Log(args ...interface{}) {
+	writePluginLog("", args...)
+}
+
+// Warn writes a warning line to stderr, prefixed with the plugin name. It is
+// the Go counterpart of the JS `krate.warn`.
+func Warn(args ...interface{}) {
+	writePluginLog("WARN: ", args...)
+}
+
+// writePluginLog formats "[plugin:<name>] <tag><args>" to stderr. Plugin
+// subprocess stderr is inherited by the Krate host, so it reaches the user.
+func writePluginLog(tag string, args ...interface{}) {
+	label := pluginLogName
+	if label == "" {
+		label = "unnamed"
+	}
+	fmt.Fprintf(os.Stderr, "[plugin:%s] %s%s\n", label, tag, fmt.Sprint(args...))
+}
+
+// KrateInfo carries build-wide metadata on hook contexts that do not already
+// declare their own root/outDir fields. It mirrors the fields of the JS `krate`
+// object so plugins get the same context in both runtimes.
+type KrateInfo struct {
+	// ProjectRoot is the absolute path to the project root.
+	ProjectRoot string `json:"projectRoot,omitempty"`
+	// OutDir is the absolute path to the output directory.
+	OutDir string `json:"outDir,omitempty"`
+	// PagesDir is the absolute path to the configured pages directory.
+	PagesDir string `json:"pagesDir,omitempty"`
+	// Version is the running Krate compiler version.
+	Version string `json:"version,omitempty"`
+	// DevMode is true during `krate dev`.
+	DevMode bool `json:"devMode,omitempty"`
+	// Pages is the current page list (paths).
+	Pages []string `json:"pages,omitempty"`
+	// Config is the resolved krate config object.
+	Config interface{} `json:"config,omitempty"`
+}
+
 // File is a single file written to the output directory.
 type File struct {
 	Path    string `json:"path"`
@@ -135,7 +234,10 @@ type PageResult struct {
 type BuildArgs struct {
 	Result
 	Root           string           `json:"root"`
+	ProjectRoot    string           `json:"projectRoot,omitempty"`
 	OutDir         string           `json:"outDir"`
+	PagesDir       string           `json:"pagesDir,omitempty"`
+	Version        string           `json:"version,omitempty"`
 	Config         interface{}      `json:"config,omitempty"`
 	Pages          []string         `json:"pages"`
 	GeneratedPages *[]GeneratedPage `json:"generatedPages,omitempty"`
@@ -147,6 +249,7 @@ type BuildArgs struct {
 // build.
 type ParseArgs struct {
 	Result
+	KrateInfo
 	Page    string       `json:"page"`
 	Program *ast.Program `json:"-"`
 }
@@ -177,6 +280,7 @@ func (p *ParseArgs) UnmarshalJSON(data []byte) error {
 // MarkdownArgs is passed to AfterMarkdownParse.
 type MarkdownArgs struct {
 	Result
+	KrateInfo
 	Page  string `json:"page"`
 	HTML  string `json:"html"`
 	Title string `json:"title"`
@@ -187,6 +291,7 @@ type MarkdownArgs struct {
 // from the host and are mutable; their final values are applied by the host.
 type RenderArgs struct {
 	Result
+	KrateInfo
 	Page     string `json:"page"`
 	HTML     string `json:"html"`
 	HeadHTML string `json:"headHTML"`
@@ -197,6 +302,7 @@ type RenderArgs struct {
 // PageArgs is passed to AfterPage with the final page output.
 type PageArgs struct {
 	Result
+	KrateInfo
 	Page     string `json:"page"`
 	OutName  string `json:"outName"`
 	HTML     string `json:"html"`
@@ -207,11 +313,14 @@ type PageArgs struct {
 // BuildResultArgs is passed to AfterBuild with every page's results.
 type BuildResultArgs struct {
 	Result
-	Root   string       `json:"root"`
-	OutDir string       `json:"outDir"`
-	Config interface{}  `json:"config,omitempty"`
-	Pages  []PageResult `json:"pages"`
-	CSS    string       `json:"css"`
+	Root        string       `json:"root"`
+	ProjectRoot string       `json:"projectRoot,omitempty"`
+	OutDir      string       `json:"outDir"`
+	PagesDir    string       `json:"pagesDir,omitempty"`
+	Version     string       `json:"version,omitempty"`
+	Config      interface{}  `json:"config,omitempty"`
+	Pages       []PageResult `json:"pages"`
+	CSS         string       `json:"css"`
 }
 
 // ServeRequestArgs is the request-time context for the ServeRequest hook.
@@ -355,6 +464,14 @@ func (s *pluginServer) Dispatch(req DispatchRequest, out *json.RawMessage) error
 		if s.hooks.AfterRender != nil {
 			err = s.hooks.AfterRender(&ctx)
 		}
+		// Fold capability-helper emissions (Result.InjectHead/InjectCSS) into the
+		// concrete context fields the host applies.
+		if ctx.Result.HeadHTML != nil {
+			ctx.HeadHTML += *ctx.Result.HeadHTML
+		}
+		if ctx.Result.RawCSS != nil {
+			ctx.RawCSS = joinCSS(ctx.RawCSS, *ctx.Result.RawCSS)
+		}
 		env = ctx.Result
 		env.HTML = &ctx.HTML
 		env.HeadHTML = &ctx.HeadHTML
@@ -366,6 +483,9 @@ func (s *pluginServer) Dispatch(req DispatchRequest, out *json.RawMessage) error
 		}
 		if s.hooks.AfterPage != nil {
 			err = s.hooks.AfterPage(&ctx)
+		}
+		if ctx.Result.HeadHTML != nil {
+			ctx.HeadHTML += *ctx.Result.HeadHTML
 		}
 		env = ctx.Result
 		env.HTML = &ctx.HTML
@@ -398,6 +518,17 @@ type unknownHookError struct{ hook string }
 
 func (e *unknownHookError) Error() string {
 	return "plugin: unknown hook " + e.hook
+}
+
+// joinCSS concatenates two CSS fragments with a single newline separator.
+func joinCSS(base, add string) string {
+	if base == "" {
+		return add
+	}
+	if add == "" {
+		return base
+	}
+	return base + "\n" + add
 }
 
 // dispatchServe handles the request-time ServeRequest and ServeResponse hooks.
@@ -444,6 +575,7 @@ func (s *pluginServer) dispatchServe(req DispatchRequest, out *json.RawMessage) 
 // Serve launches the plugin subprocess protocol. Call it from main and do not
 // return after invoking it; the plugin exits when the host shuts it down.
 func Serve(name string, hooks Hooks) {
+	pluginLogName = name
 	logger := hclog.New(&hclog.LoggerOptions{
 		Name:   name,
 		Level:  hclog.Warn,

@@ -1,0 +1,115 @@
+/* Design tokens for @krate/components.
+ *
+ * Defaults mirror @krate/base-docs-theme (the docs site). Every declaration is
+ * wrapped in `:where(...)` (zero specificity) so ANY rule of yours — a plain
+ * `:root { --krate-primary: … }` — overrides the defaults regardless of load
+ * order. Only set `--krate-primary` to retheme: hover, focus ring, active
+ * states, and the CSS-signal `--krate-active*` colours are derived from it. */
+:where(:root) {
+  color-scheme: light dark;
+
+  --krate-font: 'Inter', system-ui, -apple-system, blinkmacsystemfont, 'Segoe UI', roboto, sans-serif;
+  --krate-radius-sm: 6px;
+  --krate-radius: 8px;
+  --krate-radius-lg: 12px;
+  --krate-gap: 8px;
+
+  --krate-primary: #f97316;
+  --krate-primary-hover: color-mix(in srgb, var(--krate-primary) 85%, black);
+  --krate-primary-fg: #ffffff;
+  --krate-focus-ring: var(--krate-primary);
+  --krate-danger: #ef4444;
+  --krate-danger-hover: color-mix(in srgb, var(--krate-danger) 85%, black);
+  --krate-success: #22c55e;
+  --krate-warning: #f59e0b;
+
+  --krate-fg: #09090b;
+  --krate-muted: #71717a;
+  --krate-bg: #ffffff;
+  --krate-bg-subtle: #fafafa;
+  --krate-surface: #f4f4f5;
+  --krate-surface-hover: #e4e4e7;
+  --krate-border: #e4e4e7;
+  --krate-border-strong: #d4d4d8;
+  --krate-overlay: rgba(9, 9, 11, 0.4);
+
+  --krate-text: var(--krate-fg);
+  --krate-text-muted: var(--krate-muted);
+  --krate-card-bg: var(--krate-bg);
+
+  --krate-code-bg: #18181b;
+  --krate-code-text: #fafafa;
+
+  /* Elevation - offset + soft blur, low alpha. `--krate-hairline` is a top
+     inner highlight the dark ramp turns on to separate surfaces without depth. */
+  --krate-shadow-xs: 0 1px 2px rgba(24, 24, 27, 0.06);
+  --krate-shadow-sm: 0 1px 2px rgba(24, 24, 27, 0.06), 0 2px 6px -2px rgba(24, 24, 27, 0.08);
+  --krate-shadow-md: 0 2px 4px rgba(24, 24, 27, 0.05), 0 10px 24px -8px rgba(24, 24, 27, 0.12);
+  --krate-shadow-lg: 0 4px 10px rgba(24, 24, 27, 0.06), 0 24px 48px -16px rgba(24, 24, 27, 0.16);
+  --krate-hairline: none;
+
+  --krate-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --krate-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :where(:root) {
+    --krate-fg: #fafafa;
+    --krate-muted: #a1a1aa;
+    --krate-bg: #09090b;
+    --krate-bg-subtle: #0f0f11;
+    --krate-surface: #18181b;
+    --krate-surface-hover: #27272a;
+    --krate-border: #27272a;
+    --krate-border-strong: #3f3f46;
+    --krate-card-bg: #18181b;
+    --krate-overlay: rgba(0, 0, 0, 0.6);
+    --krate-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --krate-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px -2px rgba(0, 0, 0, 0.5);
+    --krate-shadow-md: 0 2px 6px rgba(0, 0, 0, 0.4), 0 14px 32px -10px rgba(0, 0, 0, 0.55);
+    --krate-shadow-lg: 0 6px 14px rgba(0, 0, 0, 0.45), 0 30px 60px -20px rgba(0, 0, 0, 0.65);
+    --krate-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  }
+}
+
+:where(:root[data-theme='dark']) {
+  --krate-fg: #fafafa;
+  --krate-muted: #a1a1aa;
+  --krate-bg: #09090b;
+  --krate-bg-subtle: #0f0f11;
+  --krate-surface: #18181b;
+  --krate-surface-hover: #27272a;
+  --krate-border: #27272a;
+  --krate-border-strong: #3f3f46;
+  --krate-card-bg: #18181b;
+  --krate-overlay: rgba(0, 0, 0, 0.6);
+  --krate-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --krate-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px -2px rgba(0, 0, 0, 0.5);
+  --krate-shadow-md: 0 2px 6px rgba(0, 0, 0, 0.4), 0 14px 32px -10px rgba(0, 0, 0, 0.55);
+  --krate-shadow-lg: 0 6px 14px rgba(0, 0, 0, 0.45), 0 30px 60px -20px rgba(0, 0, 0, 0.65);
+  --krate-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+
+:where(:root[data-theme='light']) {
+  --krate-fg: #09090b;
+  --krate-muted: #71717a;
+  --krate-bg: #ffffff;
+  --krate-bg-subtle: #fafafa;
+  --krate-surface: #f4f4f5;
+  --krate-surface-hover: #e4e4e7;
+  --krate-border: #e4e4e7;
+  --krate-border-strong: #d4d4d8;
+  --krate-card-bg: #ffffff;
+  --krate-overlay: rgba(9, 9, 11, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .krate-button,
+  .krate-tabs-trigger,
+  .krate-switch,
+  .krate-switch-thumb,
+  .krate-accordion-trigger-icon,
+  .krate-collapsible-trigger-icon {
+    transition: none !important;
+  }
+}

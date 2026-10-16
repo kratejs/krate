@@ -468,7 +468,7 @@ func (g *Graph) Validate() []Diagnostic {
 }
 
 // findCycles reports circular dependencies in the bipartite
-// effect → (sync reads) signal → (sync writes) effect graph. Only synchronous
+// effect -> (sync reads) signal -> (sync writes) effect graph. Only synchronous
 // edges are used: a write inside a deferred callback (event handler, timer,
 // promise chain) cannot create a synchronous feedback loop.
 func (g *Graph) findCycles() []Diagnostic {

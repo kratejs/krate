@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 
 	"github.com/hashicorp/go-hclog"
@@ -264,15 +263,4 @@ func isGoPlugin(pc config.PluginConfig) bool {
 		return false
 	}
 	return desc.Runtime == "go"
-}
-
-// isHookEqual normalizes a hook name list against a requested hook to check
-// membership without case sensitivity.
-func hookListed(hooks []string, want string) bool {
-	for _, h := range hooks {
-		if strings.EqualFold(h, want) {
-			return true
-		}
-	}
-	return false
 }

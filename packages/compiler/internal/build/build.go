@@ -1,12 +1,15 @@
 package build
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,9 +20,12 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/annotator"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/content"
 	"github.com/kratejs/krate/packages/compiler/internal/css"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
+	"github.com/kratejs/krate/packages/compiler/internal/gohost"
+	"github.com/kratejs/krate/packages/compiler/internal/gotsgen"
 	"github.com/kratejs/krate/packages/compiler/internal/icons"
 	"github.com/kratejs/krate/packages/compiler/internal/imageproc"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
@@ -27,13 +33,10 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
+	"github.com/kratejs/krate/packages/compiler/internal/safe"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
+	"github.com/kratejs/krate/packages/compiler/internal/tsexec"
 )
-
-type cssModuleBinding struct {
-	LocalVar string
-	Mappings map[string]string
-}
 
 type PageResult struct {
 	Page          string
@@ -45,13 +48,22 @@ type PageResult struct {
 	HydrationJS   string
 	JSFile        string
 	CSSFile       string
+	CSSModernFile string // modern-only stylesheet for the UA sibling (hybrid+userAgent)
+	CSSLegacyFile string // legacy-only stylesheet for the UA sibling (hybrid+userAgent)
+	CSS           string // this page's own imported CSS (before minification/hashing)
 	RuntimeJSFile string // shared runtime chunk path (relative to outDir), e.g. "chunks/runtime.abc.js"
 	HasJS         bool
 	HasCSS        bool
+	HasCSSSignals bool // page emitted CSS-signal rules (drives the legacy sibling)
 	IsErrorPage   bool
 	UsedCSS       map[string]bool
 	UsedFuncs     map[string]bool
 	LoadingHTML   string // rendered loading.tsx fallback for SPA transitions
+
+	// FinalHTML is the fully assembled document written to disk (head + body,
+	// SEO injection, minification). Populated by writeHTMLPages; consumed by
+	// compiler-enforced quality checks.
+	FinalHTML string
 
 	// SSR/ISR/Streaming metadata
 	Mode             RenderMode
@@ -59,9 +71,28 @@ type PageResult struct {
 	SourcePath       string // relative path to source file
 	ServerBundlePath string // path to server bundle (for SSR/ISR pages)
 
+	// DynamicParams is false when a dynamic route must 404 for params other
+	// than those returned by generateStaticParams.
+	DynamicParams bool // StaticOnly marks a dynamic route template (e.g. blog/[slug].tsx) whose
+	// valid params are closed: the build must not emit its `[param]` fallback
+	// HTML. The concrete generateStaticParams pages are emitted normally.
+	StaticOnly bool
+	// IsDynamicTemplate is true for the canonical `[...]` template page result
+	// (as opposed to the concrete pages expanded from generateStaticParams).
+	IsDynamicTemplate bool
+
 	// Regions lists this page's dynamic regions (Suspense primaries + runtime
 	// components) discovered from the IR tree. Populated for non-SSG pages.
 	Regions []Region
+
+	// Program is the page's parsed (and plugin-transformed) AST. Consumed by
+	// compiler-enforced quality checks; nil for plugin-generated routes.
+	Program *ast.Program
+
+	// GoBaked maps a Go-component call-site id (irtree.GoCallID) to its
+	// build-time rendered HTML. Consumed by CompileServerBundles so an SSR page
+	// bundle can inline server-tier Go components instead of calling the host.
+	GoBaked map[string]string
 }
 
 type Builder struct {
@@ -69,34 +100,229 @@ type Builder struct {
 	Cfg      *config.Config
 	DevMode  bool
 	Verbose  bool
-	depGraph map[string][]string // file path → page source paths that depend on it
-	pageDeps map[string][]string // page source path → files it depends on
+	Env      map[string]string   // resolved .env values (build/serve-time only, never client-facing)
+	depGraph map[string][]string // file path -> page source paths that depend on it
+	pageDeps map[string][]string // page source path -> files it depends on
 	depMu    sync.Mutex          // protects depGraph/pageDeps
 
+	// goHostMu serialises Go host scaffolding/compilation so concurrent page
+	// builds that lazily need the host (e.g. incremental dev rebuilds) don't
+	// race on the generated module dir.
+	goHostMu sync.Mutex
+	// goParseMu guards goParseCache: parsed `.go` component files, cached per
+	// build so each is parsed once instead of once per page/layout.
+	goParseMu    sync.Mutex
+	goParseCache map[string][]gotsgen.Component
+
+	// SkipQualityChecks suppresses the in-build quality gates so callers that
+	// run their own check pass (e.g. `krate check`, which re-reads dist/) don't
+	// evaluate and report the same findings twice.
+	SkipQualityChecks bool
+
+	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
+	// in the global stylesheet; injected into every page head.
+	fontPreloadHTML string
+
 	workerMu  sync.Mutex
-	workers   map[string]string // worker source path → hashed site URL (/workers/…)
-	workerEsm map[string]bool   // worker source path → built as ES module
+	workers   map[string]string // worker source path -> hashed site URL (/workers/...)
+	workerEsm map[string]bool   // worker source path -> built as ES module
 
 	chunkMu sync.Mutex
-	chunks  map[string]string // dynamic-import source path → hashed site URL (/chunks/…)
+	chunks  map[string]string // dynamic-import source path -> hashed site URL (/chunks/...)
 
 	// Plugin hook errors are collected here (page builds run in parallel
-	// goroutines) so a failing plugin — e.g. a Go plugin whose binary is
-	// missing — fails `krate build` with a non-zero exit instead of silently
+	// goroutines) so a failing plugin - e.g. a Go plugin whose binary is
+	// missing - fails `krate build` with a non-zero exit instead of silently
 	// dropping the plugin's contribution and exiting 0.
 	pluginErrs []string
 	pluginMu   sync.Mutex
+
+	// contentMods maps virtual import specifiers (e.g. "krate/content") to the
+	// codegen'd module on disk. Populated by prepareContent before page builds
+	// and installed on every bundler instance.
+	contentMods map[string]string
+
+	// contentCollections maps a collection name to its entries, used to inline
+	// `getCollection("...")` into literal arrays for build-time folding.
+	contentCollections map[string][]content.Entry
+
+	// contentModuleDTS holds ambient `krate/content` declarations, appended to
+	// the generated krate-env.d.ts bridge.
+	contentModuleDTS string
+
+	// stateOnce/stateScript cache the durable SSR state payload injected into
+	// every page as `window.__KRATE_STATE__` (from krate.state.json). Signals
+	// created with `{ persist }` prefer this server-chosen value on hydration.
+	stateOnce   sync.Once
+	stateScript string
+
+	// tsxTsconfig is the absolute path to the generated `.krate/tsconfig.json`
+	// used by `npx tsx` bootstraps so user source resolves Krate aliases
+	// (krate/content) and the project's own path aliases.
+	tsxTsconfig string
+
+	// staticOnlyRoutes collects dynamic route patterns (e.g. "/blog/[slug]")
+	// whose params are closed, so the manifest and server can 404 unknown params.
+	staticOnlyRoutes []string
+	staticOnlyMu     sync.Mutex
+
+	// Prof accumulates per-phase wall-clock timings when --profile is set.
+	// Safe for concurrent use from parallel page goroutines.
+	Prof *Profiler
+
+	// moduleCache shares parsed modules across every Bundler in the build so
+	// shared theme/component/runtime modules are parsed once, not once per page.
+	moduleCache *bundler.ModuleCache
+	// cacheContentHash keys the module cache's validity: when content
+	// collections change, cached ASTs (whose getCollection calls were inlined)
+	// must be re-parsed, so the cache is reset.
+	cacheContentHash string
+	// transformOnce guards the in-place universal transforms so a shared
+	// (cached) AST is transformed exactly once per build, never concurrently.
+	transformOnce sync.Map
+
+	// diskCache persists per-page outputs across runs (see diskcache.go).
+	diskCache *buildDiskCache
+}
+
+// shouldMinifyJS reports whether generated JavaScript should be minified.
+// Development builds emit readable JS (newlines, indentation, component
+// comments) so devtools and view-source are usable; production still minifies.
+func (b *Builder) shouldMinifyJS() bool {
+	return b.Cfg.ShouldMinifyJS() && !b.DevMode
+}
+
+// runtimeCommonHead returns the per-page <head> extras: the site runtime config
+// (window.__KRATE_CFG__) for the SPA router, and the View Transitions CSS when
+// enabled. Emitted on every page (production and dev).
+func (b *Builder) runtimeCommonHead() string {
+	var sb strings.Builder
+	cfg := map[string]interface{}{"basePath": b.Cfg.BaseURLPath()}
+	if b.Cfg.ViewTransitions == "off" {
+		cfg["viewTransitions"] = false
+	} else {
+		cfg["viewTransitions"] = "auto"
+	}
+	if data, err := json.Marshal(cfg); err == nil {
+		sb.WriteString("<script>window.__KRATE_CFG__=")
+		sb.Write(data)
+		sb.WriteString(";</script>\n")
+	}
+	if b.Cfg.ViewTransitions != "off" {
+		sb.WriteString("<style>@view-transition{navigation:auto}")
+		sb.WriteString("@media (prefers-reduced-motion: reduce){")
+		sb.WriteString("::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}")
+		sb.WriteString("</style>\n")
+	}
+	if b.fontPreloadHTML != "" {
+		sb.WriteString(b.fontPreloadHTML)
+	}
+	return sb.String()
+}
+
+// devBootstrapJSON is the config the dev overlay bundle reads from
+// window.__KRATE_DEV__ (endpoints + feature toggles).
+func (b *Builder) devBootstrapJSON() string {
+	cfg := map[string]interface{}{
+		"sse":     "/__krate/hotreload",
+		"errors":  "/__krate/client-error",
+		"open":    "/__krate/open",
+		"overlay": b.Cfg.DevServer.OverlayEnabled(),
+		"toolbar": b.Cfg.DevServer.ToolbarEnabled(),
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func New(root string, cfg *config.Config) *Builder {
 	// Set KrateRoot so the bundler can resolve krate/* virtual packages
 	bundler.KrateRoot = findKrateRoot(root)
-	return &Builder{
-		Root:     root,
-		Cfg:      cfg,
-		depGraph: make(map[string][]string),
-		pageDeps: make(map[string][]string),
+	// Normalise the project root into the config once, at construction. Builds
+	// derive this lazily; doing it here keeps the config stable across builds so
+	// the disk-cache config hash (and any other consumer) doesn't churn.
+	cfg.Markdown.Root = root
+	cfgHash := ""
+	if data, err := json.Marshal(cfg); err == nil {
+		sum := sha256.Sum256(data)
+		cfgHash = hex.EncodeToString(sum[:])
 	}
+	// The disk cache is only safe for pure builds: per-page plugin hooks can
+	// inject output the cache cannot replay, and sourcemap sidecars aren't
+	// captured.
+	enabled := diskCacheEnabled(cfg.Sourcemap, plugin.HasPerPageHooks(), hasCommunityPlugins(cfg))
+	return &Builder{
+		Root:        root,
+		Cfg:         cfg,
+		depGraph:    make(map[string][]string),
+		pageDeps:    make(map[string][]string),
+		Prof:        NewProfiler(false),
+		moduleCache: bundler.NewModuleCache(),
+		diskCache:   newBuildDiskCache(root, cfgHash, enabled),
+	}
+}
+
+// hasCommunityPlugins reports whether any configured plugin is a community
+// (JS/TS module) plugin, whose hooks the disk cache can't statically reason
+// about.
+func hasCommunityPlugins(cfg *config.Config) bool {
+	for _, p := range cfg.Plugins {
+		if p.Module != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureTransformed applies the universal AST transforms (icons, images, spread
+// flattening, content inlining) to prog exactly once per build. Cached module
+// ASTs are shared across concurrent page builds, so these in-place mutations
+// must be serialized per program.
+func (b *Builder) ensureTransformed(prog *ast.Program) {
+	if prog == nil {
+		return
+	}
+	v, _ := b.transformOnce.LoadOrStore(prog, &sync.Once{})
+	v.(*sync.Once).Do(func() {
+		b.TransformUniversalIcons(prog)
+		b.TransformUniversalImages(prog)
+		b.FlattenComponentSpreadAttrs(prog)
+		b.InlineContent(prog)
+	})
+}
+
+// contentHashOf returns a stable hash of the build's content collections. It is
+// used to invalidate the module cache when content changes (cached ASTs have
+// their getCollection calls inlined).
+func (b *Builder) contentHashOf() string {
+	if len(b.contentCollections) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(b.contentCollections))
+	for name := range b.contentCollections {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	h := fnv.New64a()
+	for _, name := range names {
+		h.Write([]byte(name))
+		h.Write([]byte{0})
+		for _, e := range b.contentCollections[name] {
+			// json.Marshal sorts map keys, so the hash is deterministic.
+			data, _ := json.Marshal(e)
+			h.Write(data)
+			h.Write([]byte{'\n'})
+		}
+	}
+	return strconv.FormatUint(h.Sum64(), 16)
+}
+
+// phase records a build phase when profiling is enabled; the returned function
+// ends the phase. Callers use `defer b.phase("name")()`.
+func (b *Builder) phase(name string) func() {
+	return b.Prof.Phase(name)
 }
 
 // pluginFailed records a plugin hook error so the overall build fails with a
@@ -119,6 +345,47 @@ func (b *Builder) drainPluginErrs() []string {
 	errs := b.pluginErrs
 	b.pluginErrs = nil
 	return errs
+}
+
+// recoverPage runs a page/route build, converting a panic into an error so a
+// single bad page cannot crash the whole build.
+func recoverPage(fn func() (*PageResult, string, error)) (result *PageResult, rawCSS string, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = safe.Recover(rec)
+		}
+	}()
+	return fn()
+}
+
+// runPageHook runs a page-level hook: the native hook (when native is non-nil)
+// followed by the same-named community plugin hook. Both are best-effort - a
+// failure is logged and recorded so the build exits non-zero, but rendering
+// continues so every page's problem is reported in one pass. This centralizes
+// the identical AfterParse / AfterRender / AfterMarkdownParse dispatch.
+func (b *Builder) runPageHook(name, page string, ctx any, native func() error) {
+	if native != nil {
+		if err := safe.Run(native); err != nil {
+			fmt.Fprintf(os.Stderr, "  %s%s plugin error (%s):%s %v\n", cYellow, name, page, cReset, err)
+			b.pluginFailed(fmt.Errorf("%s (%s): %v", name, page, err))
+		}
+	}
+	if err := safe.Run(func() error {
+		return plugin.RunCommunityPlugins(name, b.Cfg.Plugins, b.Root, b.Cfg.OutDir, ctx, b.communityEnv())
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error %s (%s):%s %v\n", cYellow, name, page, cReset, err)
+		b.pluginFailed(fmt.Errorf("%s (%s): %v", name, page, err))
+	}
+}
+
+// communityEnv is the build-wide context handed to community plugin hooks so
+// the richer `krate` object reflects the project layout and config.
+func (b *Builder) communityEnv() plugin.CommunityEnv {
+	return plugin.CommunityEnv{
+		PagesDir: b.Cfg.PagesDir,
+		DevMode:  b.DevMode,
+		Config:   b.Cfg,
+	}
 }
 
 // findKrateRoot walks up from the project root to find the krate compiler's root directory.
@@ -153,14 +420,24 @@ func (b *Builder) printReactiveDiags(diags []reactive.Diagnostic) {
 
 // BuildPages rebuilds only the specified pages (by source path).
 // Unlike BuildAll, it does NOT clean the output directory.
-func (b *Builder) BuildPages(pages []string) error {
+func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	if len(pages) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	errorCount := 0
+	var pageErrs []error
 
-	b.Cfg.Markdown.Root = b.Root
+	b.resetBuildCaches()
+
+	// A dynamic-route template (e.g. video/[id].tsx) is not the page that gets
+	// served: its concrete URLs are the generateStaticParams expansions. Rebuild
+	// those too, or a partial rebuild would leave every /video/abc123 variant
+	// pointing at stale HTML while the [id] template itself is refreshed.
+	concrete, gspErr := b.resolveStaticParamsPages(pages)
+	if gspErr != nil {
+		fmt.Fprintf(os.Stderr, "  %s✗ Error:%s %v\n", cRed, cReset, gspErr)
+		pageErrs = append(pageErrs, gspErr)
+	}
 
 	type pageBuildResult struct {
 		result *PageResult
@@ -169,7 +446,7 @@ func (b *Builder) BuildPages(pages []string) error {
 		page   string
 	}
 
-	resultsCh := make(chan pageBuildResult, len(pages))
+	resultsCh := make(chan pageBuildResult, len(pages)+len(concrete))
 	var wg sync.WaitGroup
 	pool := newWorkerPool(buildWorkerLimit())
 
@@ -180,9 +457,21 @@ func (b *Builder) BuildPages(pages []string) error {
 			pool.acquire()
 			defer pool.release()
 			fmt.Printf("  %s▶%s %s\n", cCyan, cReset, p)
-			result, rawCSS, err := b.buildPage(p)
+			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildPage(p) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
 		}(page)
+	}
+
+	for _, spp := range concrete {
+		wg.Add(1)
+		go func(s staticParamsPage) {
+			defer wg.Done()
+			pool.acquire()
+			defer pool.release()
+			fmt.Printf("  %s▶%s %s\n", cCyan, cReset, s.OutPath)
+			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildStaticParamsPage(s) })
+			resultsCh <- pageBuildResult{result, rawCSS, err, s.OutPath}
+		}(spp)
 	}
 
 	go func() {
@@ -191,30 +480,17 @@ func (b *Builder) BuildPages(pages []string) error {
 	}()
 
 	var results []*PageResult
-	mergedCSS := ""
-	docsCSS := ""
-	cssRuleSeen := make(map[string]bool)
-	docsCSSRuleSeen := make(map[string]bool)
 
 	for res := range resultsCh {
 		if res.err != nil {
 			fmt.Fprintf(os.Stderr, "\n  %s✗ Error:%s %v\n", cRed, cReset, res.err)
-			errorCount++
+			pageErrs = append(pageErrs, res.err)
 			continue
 		}
 		result := res.result
 		results = append(results, result)
 
-		isDocsPage := strings.HasPrefix(result.OutName, "docs/") || result.OutName == "docs"
-		if res.rawCSS != "" {
-			if isDocsPage {
-				docsCSS = mergeCSS(docsCSS, res.rawCSS, docsCSSRuleSeen)
-			} else {
-				mergedCSS = mergeCSS(mergedCSS, res.rawCSS, cssRuleSeen)
-			}
-		}
-
-		// Run page-level plugins (AfterPage — post-layout)
+		// Run page-level plugins (AfterPage - post-layout)
 		pageHTML := result.HTML
 		pageHeadHTML := result.HeadHTML
 		afterPageCtx := &plugin.PageHookCtx{
@@ -228,7 +504,7 @@ func (b *Builder) BuildPages(pages []string) error {
 			fmt.Fprintf(os.Stderr, "  %sPlugin error (AfterPage: %s):%s %v\n", cYellow, res.page, cReset, err)
 			b.pluginFailed(err)
 		}
-		if err := plugin.RunCommunityPlugins("AfterPage", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterPageCtx); err != nil {
+		if err := plugin.RunCommunityPlugins("AfterPage", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterPageCtx, b.communityEnv()); err != nil {
 			fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (AfterPage: %s):%s %v\n", cYellow, res.page, cReset, err)
 			b.pluginFailed(err)
 		}
@@ -238,44 +514,84 @@ func (b *Builder) BuildPages(pages []string) error {
 	}
 
 	if len(results) == 0 {
-		return fmt.Errorf("no pages built successfully")
-	}
-
-	if b.Cfg.Tailwind.Enabled {
-		twCfg := css.LoadTailwindConfig(b.Root)
-		twCSS, err := css.GenerateTailwind(b.Root, twCfg)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %sTailwind error:%s %v\n", cYellow, cReset, err)
-		} else if twCSS != "" {
-			mergedCSS = mergeCSS(mergedCSS, twCSS, cssRuleSeen)
+		if len(pageErrs) > 0 {
+			return nil, &multiError{summary: fmt.Sprintf("build failed: no pages built successfully (%d error(s)); check that pagesDir (%s) contains at least one page", len(pageErrs), b.Cfg.PagesDir), errs: pageErrs}
 		}
+		return nil, fmt.Errorf("no pages built successfully; check that pagesDir (%s) contains at least one page", b.Cfg.PagesDir)
 	}
-
-	// Inject chroma syntax highlighting CSS if code highlighting is enabled
-	if b.Cfg.Markdown.CodeHighlight {
-		chromaCSS := syntaxhighlight.CSSForTheme(b.Cfg.Markdown.CodeTheme)
-		if chromaCSS != "" {
-			mergedCSS = chromaCSS + "\n" + mergedCSS
-		}
-	}
-
-	// Regenerate global CSS (if multiple pages, need new CSS hash)
-	cssFile := b.writeGlobalCSS(mergedCSS)
 
 	// Write shared runtime chunk (extracted from per-page bundles)
-	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.Cfg.ShouldMinifyJS(), b.Root)
-
-	// In-memory HTML generation + string swap + single disk write per page
-	b.writeHTMLPages(results, cssFile, runtimeJS)
-
-	if perrs := b.drainPluginErrs(); len(perrs) > 0 {
-		return fmt.Errorf("build failed: %d plugin error(s):\n  %s", len(perrs), strings.Join(perrs, "\n  "))
+	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root)
+	if b.DevMode {
+		writeDevChunk(b.Cfg.OutDir, b.Root)
 	}
 
+	// Per-page stylesheets: each page links only the CSS its own module graph
+	// imported (deduplicated across pages sharing identical CSS).
+	b.writePageCSS(results)
+
+	// Optional site-global stylesheet (Tailwind) linked on every page.
+	var globalCSS []string
+	if twCSS := b.tailwindCSS(); twCSS != "" {
+		if f := b.writeGlobalCSS(twCSS); f != "" {
+			globalCSS = append(globalCSS, f)
+		}
+	}
+
+	// In-memory HTML generation + string swap + single disk write per page
+	b.writeHTMLPages(results, globalCSS, runtimeJS)
+
+	// Refresh the sidecar artifacts this subset of pages owns: an SSR/streaming
+	// page's server bundle, and any runtime components it references. Done here
+	// (rather than by rebuilding the whole site) so a dev-mode edit stays a
+	// single-page rebuild even on a server-rendered site.
+	b.refreshPageServerArtifacts(results, runtimeJS, globalCSS)
+
+	if perrs := b.drainPluginErrs(); len(perrs) > 0 {
+		return results, fmt.Errorf("build failed: %d plugin error(s):\n  %s", len(perrs), strings.Join(perrs, "\n  "))
+	}
+
+	// Surface page failures even when some pages succeeded, so a dev rebuild
+	// with a mix of good and bad pages still reports the errors (and the
+	// browser overlay shows them) instead of silently succeeding.
+	if len(pageErrs) > 0 {
+		return results, &multiError{summary: fmt.Sprintf("build failed: %d page error(s)", len(pageErrs)), errs: pageErrs}
+	}
+
+	return results, nil
+}
+
+// guardOutDir refuses truly destructive output directories so the build's output
+// wipe can never delete the user's sources: a filesystem root or an outDir equal
+// to the project root are hard errors. An outDir that merely *contains* the
+// project root (e.g. a monorepo parent) is allowed but warned about. Set
+// KRATE_ALLOW_UNSAFE_OUTDIR=1 to bypass the check entirely.
+func (b *Builder) guardOutDir() error {
+	if os.Getenv("KRATE_ALLOW_UNSAFE_OUTDIR") != "" {
+		return nil
+	}
+	outAbs, err1 := filepath.Abs(b.Cfg.OutDir)
+	rootAbs, err2 := filepath.Abs(b.Root)
+	if err1 != nil || err2 != nil {
+		return nil
+	}
+	if filepath.Dir(outAbs) == outAbs {
+		return fmt.Errorf("refusing to build: outDir %s is a filesystem root (set KRATE_ALLOW_UNSAFE_OUTDIR=1 to override)", outAbs)
+	}
+	if outAbs == rootAbs {
+		return fmt.Errorf("refusing to build: outDir equals the project root (%s)", outAbs)
+	}
+	if fsutil.WithinDir(outAbs, rootAbs) {
+		fmt.Fprintf(os.Stderr, "  %s⚠ outDir %s contains the project root; the build will wipe it%s\n", cYellow, outAbs, cReset)
+	}
 	return nil
 }
 
 func (b *Builder) BuildAll() error {
+	defer b.phase("build:total")()
+	if err := b.guardOutDir(); err != nil {
+		return err
+	}
 	if err := os.RemoveAll(b.Cfg.OutDir); err != nil {
 		return fmt.Errorf("cleaning output dir: %w", err)
 	}
@@ -284,7 +600,16 @@ func (b *Builder) BuildAll() error {
 	}
 	defer b.ClosePlugins()
 
-	b.Cfg.Markdown.Root = b.Root
+	b.resetBuildCaches()
+
+	// Generate `.krate/tsconfig.json` so `npx tsx` bootstraps (config load,
+	// generateStaticParams) resolve `krate/content` and the project's path
+	// aliases. Non-fatal on failure.
+	if tsPath, err := b.writeTsxTsconfig(); err != nil {
+		fmt.Fprintf(os.Stderr, "  %sWarning: failed to write .krate/tsconfig.json:%s %v\n", cYellow, cReset, err)
+	} else {
+		b.tsxTsconfig = tsPath
+	}
 
 	pages, err := findPages(b.Cfg.PagesDir)
 	if err != nil {
@@ -295,6 +620,7 @@ func (b *Builder) BuildAll() error {
 	}
 
 	// Run BeforeBuild hooks (docs plugin generates .krategen/ pages here)
+	stopPlugins := b.phase("build:plugins-before")
 	genPages := make([]plugin.GeneratedPage, 0)
 	beforeBuildCtx := &plugin.BuildHookCtx{
 		Root:           b.Root,
@@ -308,7 +634,7 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sPlugin error (BeforeBuild):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
-	if err := plugin.RunCommunityPlugins("BeforeBuild", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, beforeBuildCtx); err != nil {
+	if err := plugin.RunCommunityPlugins("BeforeBuild", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, beforeBuildCtx, b.communityEnv()); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (BeforeBuild):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
@@ -332,10 +658,11 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sPlugin error (GenerateRoutes):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
-	if err := plugin.RunCommunityPlugins("GenerateRoutes", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, routeCtx); err != nil {
+	if err := plugin.RunCommunityPlugins("GenerateRoutes", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, routeCtx, b.communityEnv()); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (GenerateRoutes):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
+	stopPlugins()
 
 	type pageBuildResult struct {
 		result *PageResult
@@ -344,7 +671,38 @@ func (b *Builder) BuildAll() error {
 		page   string
 	}
 
+	// Prepare content collections before building pages: this validates
+	// frontmatter, emits `.krate/types/content.d.ts`, and codegens the
+	// `krate/content` module pages can import. Schema violations are build
+	// errors (a content bug); IO problems are warnings.
+	stopContent := b.phase("build:content")
+	cres := b.prepareContent()
+	stopContent()
+	// Cached module ASTs have their getCollection calls inlined, so a content
+	// change must invalidate the parse cache; source-only changes keep it.
+	ch := b.contentHashOf()
+	if ch != b.cacheContentHash {
+		b.moduleCache = bundler.NewModuleCache()
+		b.cacheContentHash = ch
+	}
+	if b.diskCache != nil {
+		b.diskCache.setContentHash(ch)
+	}
+	for _, w := range cres.Warnings {
+		fmt.Fprintf(os.Stderr, "  %sWarning: content:%s %v\n", cYellow, cReset, w)
+	}
+	for _, ve := range cres.Validation {
+		fmt.Fprintf(os.Stderr, "  %sContent error:%s %v\n", cRed, cReset, ve)
+	}
+
+	// Build the Go host (API routes + components) before pages, so pages that
+	// import Go components can render them through the host at build time.
+	if err := b.BuildAllGoAPI(); err != nil {
+		return err
+	}
+
 	totalPages := len(pages) + len(routes)
+	stopPages := b.phase("build:pages")
 	resultsCh := make(chan pageBuildResult, totalPages)
 	var wg sync.WaitGroup
 	pool := newWorkerPool(buildWorkerLimit())
@@ -356,7 +714,7 @@ func (b *Builder) BuildAll() error {
 			pool.acquire()
 			defer pool.release()
 			fmt.Printf("  %s▶%s %s\n", cCyan, cReset, p)
-			result, rawCSS, err := b.buildPage(p)
+			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildPage(p) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
 		}(page)
 	}
@@ -368,7 +726,7 @@ func (b *Builder) BuildAll() error {
 			pool.acquire()
 			defer pool.release()
 			fmt.Printf("  %s▶%s %s (route)%s\n", cGreen, cReset, r.Path, cReset)
-			result, rawCSS, err := b.buildRoute(r)
+			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildRoute(r) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, "(route) " + r.Path}
 		}(route)
 	}
@@ -379,17 +737,15 @@ func (b *Builder) BuildAll() error {
 	}()
 
 	var results []*PageResult
-	mergedCSS := ""
-	docsCSS := ""
-	cssRuleSeen := make(map[string]bool)
-	docsCSSRuleSeen := make(map[string]bool)
 	errorCount := 0
 	var failureMessages []string
+	var failureErrs []error
 
 	for res := range resultsCh {
 		if res.err != nil {
 			fmt.Fprintf(os.Stderr, "\n  %s✗ Error (%s):%s %v\n", cRed, res.page, cReset, res.err)
 			failureMessages = append(failureMessages, fmt.Sprintf("  %s: %v", res.page, res.err))
+			failureErrs = append(failureErrs, res.err)
 			errorCount++
 			continue
 		}
@@ -397,16 +753,7 @@ func (b *Builder) BuildAll() error {
 		result := res.result
 		results = append(results, result)
 
-		isDocsPage := strings.HasPrefix(result.OutName, "docs/") || result.OutName == "docs"
-		if res.rawCSS != "" {
-			if isDocsPage {
-				docsCSS = mergeCSS(docsCSS, res.rawCSS, docsCSSRuleSeen)
-			} else {
-				mergedCSS = mergeCSS(mergedCSS, res.rawCSS, cssRuleSeen)
-			}
-		}
-
-		// Run page-level plugins (AfterPage — post-layout)
+		// Run page-level plugins (AfterPage - post-layout)
 		pageHTML := result.HTML
 		pageHeadHTML := result.HeadHTML
 		afterPageCtx := &plugin.PageHookCtx{
@@ -420,7 +767,7 @@ func (b *Builder) BuildAll() error {
 			fmt.Fprintf(os.Stderr, "  %sPlugin error (AfterPage: %s):%s %v\n", cYellow, res.page, cReset, err)
 			b.pluginFailed(err)
 		}
-		if err := plugin.RunCommunityPlugins("AfterPage", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterPageCtx); err != nil {
+		if err := plugin.RunCommunityPlugins("AfterPage", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterPageCtx, b.communityEnv()); err != nil {
 			fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (AfterPage: %s):%s %v\n", cYellow, res.page, cReset, err)
 			b.pluginFailed(err)
 		}
@@ -428,36 +775,28 @@ func (b *Builder) BuildAll() error {
 		result.HTML = afterPageCtx.HTML
 		result.HeadHTML = afterPageCtx.HeadHTML
 	}
-
-	if b.Cfg.Tailwind.Enabled {
-		twCfg := css.LoadTailwindConfig(b.Root)
-		twCSS, err := css.GenerateTailwind(b.Root, twCfg)
-		if err == nil && twCSS != "" {
-			mergedCSS = mergeCSS(mergedCSS, twCSS, cssRuleSeen)
-		}
-	}
+	stopPages()
 
 	staticParamPages, gspErr := b.resolveStaticParamsPages(pages)
 	if gspErr != nil {
 		fmt.Fprintf(os.Stderr, "  %s✗ Error:%s %v\n", cRed, cReset, gspErr)
 		failureMessages = append(failureMessages, "  "+gspErr.Error())
+		failureErrs = append(failureErrs, gspErr)
 		errorCount++
 	}
 	if len(staticParamPages) > 0 {
 		fmt.Printf("  %s⚡%s Building %d statically generated pages from generateStaticParams\n", cCyan, cReset, len(staticParamPages))
 		for _, spp := range staticParamPages {
-			result, rawCSS, err := b.buildStaticParamsPage(spp)
+			result, _, err := b.buildStaticParamsPage(spp)
 			if err != nil {
 				msg := fmt.Sprintf("generateStaticParams page %s: %v", spp.OutPath, err)
 				fmt.Fprintf(os.Stderr, "  %s✗ Error:%s %v\n", cRed, cReset, msg)
 				failureMessages = append(failureMessages, "  "+msg)
+				failureErrs = append(failureErrs, fmt.Errorf("generateStaticParams page %s: %w", spp.OutPath, err))
 				errorCount++
 				continue
 			}
 			results = append(results, result)
-			if rawCSS != "" {
-				mergedCSS = mergeCSS(mergedCSS, rawCSS, cssRuleSeen)
-			}
 			// Run AfterPage plugins for the generated page
 			afterPageCtx := &plugin.PageHookCtx{
 				Page:     result.Page,
@@ -466,24 +805,44 @@ func (b *Builder) BuildAll() error {
 				HeadHTML: result.HeadHTML,
 				HasJS:    result.HasJS,
 			}
-			plugin.RunAfterPage(afterPageCtx)
-			plugin.RunCommunityPlugins("AfterPage", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterPageCtx)
+			if err := plugin.RunAfterPage(afterPageCtx); err != nil {
+				fmt.Fprintf(os.Stderr, "  %sPlugin error (AfterPage: %s):%s %v\n", cYellow, result.Page, cReset, err)
+				b.pluginFailed(err)
+			}
+			if err := plugin.RunCommunityPlugins("AfterPage", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterPageCtx, b.communityEnv()); err != nil {
+				fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (AfterPage: %s):%s %v\n", cYellow, result.Page, cReset, err)
+				b.pluginFailed(err)
+			}
 			result.HTML = afterPageCtx.HTML
 			result.HeadHTML = afterPageCtx.HeadHTML
 		}
 	}
 
-	// Inject chroma syntax highlighting CSS if code highlighting is enabled
-	if b.Cfg.Markdown.CodeHighlight {
-		chromaCSS := syntaxhighlight.CSSForTheme(b.Cfg.Markdown.CodeTheme)
-		if chromaCSS != "" {
-			mergedCSS = chromaCSS + "\n" + mergedCSS
+	// Static-only dynamic routes: drop their canonical `[param]` fallback
+	// template so the output contains only the concrete pages baked from
+	// generateStaticParams. On a plain static host, any other param therefore
+	// 404s with no server involvement.
+	{
+		filtered := results[:0]
+		var dropped []string
+		for _, r := range results {
+			if r != nil && r.StaticOnly && r.IsDynamicTemplate {
+				pat := routeFromOutName(r.OutName)
+				dropped = append(dropped, pat)
+				b.staticOnlyMu.Lock()
+				b.staticOnlyRoutes = append(b.staticOnlyRoutes, pat)
+				b.staticOnlyMu.Unlock()
+				continue
+			}
+			filtered = append(filtered, r)
+		}
+		results = filtered
+		if len(dropped) > 0 {
+			fmt.Printf("  %s⚡%s Static-only dynamic routes (no fallback template): %s\n", cCyan, cReset, strings.Join(dropped, ", "))
 		}
 	}
 
-	// Write global CSS with hash-based naming
-	cssFile := b.writeGlobalCSS(mergedCSS)
-
+	stopWrite := b.phase("build:write")
 	// Write shared runtime chunk only if at least one page needs client JS.
 	// Fully static sites (no signals/handlers anywhere) ship zero JavaScript.
 	anyPageHasJS := false
@@ -495,16 +854,44 @@ func (b *Builder) BuildAll() error {
 	}
 	runtimeJS := ""
 	if anyPageHasJS {
-		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.Cfg.ShouldMinifyJS(), b.Root)
+		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root)
+	}
+	if b.DevMode {
+		writeDevChunk(b.Cfg.OutDir, b.Root)
+	}
+
+	// Per-page stylesheets: each page links only the CSS its own module graph
+	// imported (deduplicated across pages sharing identical CSS).
+	b.writePageCSS(results)
+
+	// Optional site-global stylesheet (Tailwind) linked on every page.
+	var globalCSS []string
+	if twCSS := b.tailwindCSS(); twCSS != "" {
+		if f := b.writeGlobalCSS(twCSS); f != "" {
+			globalCSS = append(globalCSS, f)
+		}
 	}
 
 	// In-memory HTML generation + string swap + single disk write per page
-	b.writeHTMLPages(results, cssFile, runtimeJS)
+	b.writeHTMLPages(results, globalCSS, runtimeJS)
+	stopWrite()
+
+	// Compiler-enforced quality gates (opt-in via `checks` in krate.config.ts).
+	// Runs against the final HTML so rules see exactly what ships.
+	if !b.SkipQualityChecks {
+		if err := b.runQualityChecks(results, runtimeJS); err != nil {
+			fmt.Fprintf(os.Stderr, "  %s✗ Checks:%s %v\n", cRed, cReset, err)
+			failureMessages = append(failureMessages, "  checks: "+err.Error())
+			failureErrs = append(failureErrs, err)
+			errorCount++
+		}
+	}
 
 	// Compile and emit any registered web workers to /workers/.
 	if err := b.writeWorkerBundles(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sWorker bundle error:%s %v\n", cYellow, cReset, err)
 		failureMessages = append(failureMessages, "  workers: "+err.Error())
+		failureErrs = append(failureErrs, err)
 		errorCount++
 	}
 
@@ -512,12 +899,13 @@ func (b *Builder) BuildAll() error {
 	if err := b.writeDynamicChunkBundles(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sDynamic import chunk error:%s %v\n", cYellow, cReset, err)
 		failureMessages = append(failureMessages, "  chunks: "+err.Error())
+		failureErrs = append(failureErrs, err)
 		errorCount++
 	}
 
 	if b.Cfg.PublicDir != "" {
 		if info, err := os.Stat(b.Cfg.PublicDir); err == nil && info.IsDir() {
-			copyDirToOut(b.Cfg.PublicDir, b.Cfg.OutDir)
+			_ = copyDirToOut(b.Cfg.PublicDir, b.Cfg.OutDir)
 		}
 	}
 
@@ -526,35 +914,26 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sImage copy error:%s %v\n", cYellow, cReset, err)
 	}
 
-	// Append docs-specific component CSS + chroma CSS to docs-styles.css
-	if docsCSS != "" || b.Cfg.Markdown.CodeHighlight {
-		extra := docsCSS
-		if b.Cfg.Markdown.CodeHighlight {
-			chromaCSS := syntaxhighlight.CSSForTheme(b.Cfg.Markdown.CodeTheme)
-			if chromaCSS != "" {
-				if extra != "" {
-					extra = chromaCSS + "\n" + extra
-				} else {
-					extra = chromaCSS
-				}
-			}
-		}
-		b.writeDocsCSS(extra)
-	}
-
+	stopTools := b.phase("build:tools")
 	if err := b.BuildAllAPI(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sAPI Build error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  API: "+err.Error())
+		failureErrs = append(failureErrs, err)
 		errorCount++
 	}
 
 	b.BuildMiddleware()
 
 	// Write page manifest with SSR/ISR metadata
-	manifest := BuildManifest(results, cssFile, runtimeJS)
+	manifestCSS := ""
+	if len(globalCSS) > 0 {
+		manifestCSS = globalCSS[0]
+	}
+	manifest := BuildManifest(results, manifestCSS, runtimeJS)
+	manifest.StaticOnlyRoutes = append([]string(nil), b.staticOnlyRoutes...)
 
 	// Compile server bundles for SSR/ISR/streaming pages
-	serverBundles := CompileServerBundles(results, b.Root, b.Cfg.OutDir)
+	serverBundles := CompileServerBundles(results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap)
 	if len(serverBundles) > 0 {
 		fmt.Printf("  %s⚡%s Compiled %d server bundles\n", cCyan, cReset, len(serverBundles))
 		// Stage the bundled SSR renderer driver so `krate serve` runs it with
@@ -572,9 +951,16 @@ func (b *Builder) BuildAll() error {
 		fmt.Printf("  %s⚡%s Compiled %d runtime components\n", cCyan, cReset, len(runtimeCompBundles))
 	}
 	manifest.SetRuntimeComponents(runtimeCompBundles)
+	stopTools()
 
 	if err := WriteManifest(manifest, b.Cfg.OutDir, serverBundles); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sWarning: failed to write manifest:%s %v\n", cYellow, cReset, err)
+	}
+
+	// Generate typed route declarations (.krate/types/routes.d.ts + bridge).
+	// Warnings only - type generation must never fail a build.
+	if err := b.writeRouteTypes(results); err != nil {
+		fmt.Fprintf(os.Stderr, "  %sWarning: failed to generate route types:%s %v\n", cYellow, cReset, err)
 	}
 
 	// Report SSR/ISR page count
@@ -595,6 +981,8 @@ func (b *Builder) BuildAll() error {
 
 	// Run build-level plugins (after all pages are done and aggregate work is complete)
 	pageResults := make([]plugin.PageResult, len(results))
+	seenCSS := make(map[string]bool)
+	var mergedPageCSS strings.Builder
 	for i, r := range results {
 		pageResults[i] = plugin.PageResult{
 			Page:     r.Page,
@@ -603,34 +991,55 @@ func (b *Builder) BuildAll() error {
 			HeadHTML: r.HeadHTML,
 			HasJS:    r.HasJS,
 		}
+		if r.CSSFile != "" && !seenCSS[r.CSSFile] {
+			seenCSS[r.CSSFile] = true
+			if data, err := os.ReadFile(filepath.Join(b.Cfg.OutDir, r.CSSFile)); err == nil {
+				mergedPageCSS.Write(data)
+				mergedPageCSS.WriteString("\n")
+			}
+		}
 	}
 	afterBuildCtx := &plugin.BuildResultHookCtx{
-		Root:   b.Root,
-		OutDir: b.Cfg.OutDir,
-		Config: b.Cfg,
-		Pages:  pageResults,
-		CSS:    mergedCSS,
+		Root:    b.Root,
+		OutDir:  b.Cfg.OutDir,
+		Config:  b.Cfg,
+		Pages:   pageResults,
+		CSS:     mergedPageCSS.String(),
+		DevMode: b.DevMode,
 	}
 	if err := plugin.RunAfterBuild(afterBuildCtx); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sPlugin error (AfterBuild):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
-	if err := plugin.RunCommunityPlugins("AfterBuild", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterBuildCtx); err != nil {
+	if err := plugin.RunCommunityPlugins("AfterBuild", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, afterBuildCtx, b.communityEnv()); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error (AfterBuild):%s %v\n", cYellow, cReset, err)
 		b.pluginFailed(err)
 	}
 
 	// Plugin hook errors recorded in parallel page goroutines (AfterParse,
-	// AfterRender, AfterMarkdownParse, AfterPage) must fail the build too —
+	// AfterRender, AfterMarkdownParse, AfterPage) must fail the build too -
 	// otherwise `krate build` exits 0 while silently dropping plugin output.
 	perrs := b.drainPluginErrs()
 	if len(perrs) > 0 {
 		failureMessages = append(failureMessages, perrs...)
+		for _, pe := range perrs {
+			failureErrs = append(failureErrs, fmt.Errorf("%s", pe))
+		}
 		errorCount += len(perrs)
 	}
 
+	if b.diskCache != nil && b.diskCache.enabled && (b.Prof.Enabled() || b.Verbose) {
+		fmt.Fprintf(os.Stderr, "  build cache: %s\n", b.diskCache.string())
+	}
+	if b.Prof.Enabled() {
+		b.Prof.Report(os.Stderr)
+	}
+
 	if errorCount > 0 {
-		return fmt.Errorf("build failed: %d error(s):\n%s", errorCount, strings.Join(failureMessages, "\n"))
+		return &multiError{
+			summary: fmt.Sprintf("build failed: %d error(s):\n%s", errorCount, strings.Join(failureMessages, "\n")),
+			errs:    failureErrs,
+		}
 	}
 
 	return nil
@@ -668,37 +1077,224 @@ func (b *Builder) affectedPages(changedFiles []string) []string {
 	return pages
 }
 
+// tailwindOptions builds the Tailwind options from config.
+func (b *Builder) tailwindOptions() css.TailwindOptions {
+	return css.TailwindOptions{
+		ScanDirs:         b.Cfg.Tailwind.ScanDirs,
+		ContentOverrides: b.Cfg.Tailwind.Content,
+		Preflight:        b.Cfg.Tailwind.Preflight,
+		Strict:           b.Cfg.Tailwind.Strict,
+		DarkMode:         b.Cfg.Tailwind.DarkMode,
+		ExecuteConfig:    b.Cfg.Tailwind.ExecuteConfig,
+	}
+}
+
+// processCSSDirectives handles Tailwind build-time directives in authored CSS:
+// `@tailwind` is stripped (Krate generates utilities itself) and `@layer` is
+// unwrapped to its inner rules. When Tailwind is enabled, plain `@apply`
+// utilities are expanded; unsupported ones are reported with a warning.
+func (b *Builder) processCSSDirectives(cssText string) string {
+	// `@layer` is left intact: it is valid CSS and unwrapping it would change
+	// the authored cascade.
+	cssText = css.StripAtTailwind(cssText)
+	if !b.Cfg.Tailwind.Enabled || !strings.Contains(cssText, "@apply") {
+		return cssText
+	}
+	opts := b.tailwindOptions()
+	gen := css.NewTailwindGenerator()
+	gen.MergeConfig(css.LoadTailwindConfigWithOptions(b.Root, opts))
+	out, unresolved := css.ExpandApply(cssText, gen.Theme)
+	if len(unresolved) > 0 {
+		fmt.Fprintf(os.Stderr, "  %sTailwind @apply: could not expand %s%s\n", cYellow, strings.Join(unresolved, ", "), cReset)
+	}
+	return out
+}
+
+// tailwindCSS generates the site-global Tailwind stylesheet honoring the
+// tailwind config (scanDirs/content, darkMode, preflight, strict). Returns ""
+// when Tailwind is disabled or no classes were found.
+func (b *Builder) tailwindCSS() string {
+	if !b.Cfg.Tailwind.Enabled {
+		return ""
+	}
+	opts := b.tailwindOptions()
+	twCfg := css.LoadTailwindConfigWithOptions(b.Root, opts)
+	// v4 CSS-first config: merge `@theme { --... }` variables found in project CSS.
+	atTheme := css.ScanAtTheme(b.Root, opts)
+	twCSS, err := css.GenerateTailwindWithTheme(b.Root, twCfg, opts, atTheme)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  %sTailwind error:%s %v\n", cYellow, cReset, err)
+		return ""
+	}
+	return twCSS
+}
+
 func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 	cssFile := ""
 	if mergedCSS != "" {
 		processedCSS := mergedCSS
 		// Inline @import directives before minification
 		processedCSS = css.InlineImports(processedCSS, b.Root)
+		processedCSS = b.processCSSDirectives(processedCSS)
+		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
+		if b.Cfg.Fonts.PreloadEnabled() {
+			b.fontPreloadHTML = fontPreloadHTML(collectFontURLs(processedCSS), b.Cfg.BaseURLPath())
+		}
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
+		} else {
+			processedCSS = css.RemoveDuplicateDeclarations(processedCSS)
 		}
 		if strings.TrimSpace(processedCSS) != "" {
 			processedBytes := []byte(processedCSS)
 			cssHash := hashContent(processedBytes)
 			cssFile = "styles." + cssHash + ".css"
 			cssPath := filepath.Join(b.Cfg.OutDir, cssFile)
-			os.WriteFile(cssPath, processedBytes, 0644)
+			_ = fsutil.WriteFileIfChanged(cssPath, processedBytes, 0644)
 		}
 	}
 	return cssFile
 }
 
-// writeDocsCSS appends component CSS to the docs-styles.css file in the output directory.
-func (b *Builder) writeDocsCSS(docsCSS string) {
-	docsCSSPath := filepath.Join(b.Cfg.OutDir, "docs-styles.css")
-	existing, _ := os.ReadFile(docsCSSPath)
-	combined := string(existing) + "\n" + docsCSS
-	os.WriteFile(docsCSSPath, []byte(combined), 0644)
+// writePageCSS writes one hashed stylesheet per page from the page's own CSS.
+// Pages sharing identical CSS (e.g. every docs page under the same theme, or
+// every page wrapped by the same layout) collapse onto one shared file, so each
+// page only downloads the CSS its own module graph imported. Syntax-highlight
+// (chroma) CSS is prepended only when the page actually renders highlighted
+// code. Returns the set of stylesheet filenames written.
+func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
+	written := make(map[string]bool)
+	// Memoize the expensive inline+directive+minify pipeline: many pages share
+	// byte-identical CSS (the docs theme is linked on every page), so process
+	// each distinct input once.
+	type processed struct {
+		file       string
+		data       []byte
+		modernFile string
+		modernData []byte
+		legacyFile string
+		legacyData []byte
+	}
+	memo := make(map[string]processed)
+	var chromaCSS string
+	chromaLoaded := false
+
+	// Per-variant stylesheets: in hybrid+userAgent mode the UA sibling should
+	// download only the legacy signal rules (and the default document only the
+	// modern rules), so split the hybrid stylesheet per variant.
+	variants := b.legacyDocEnabled()
+
+	write := func(file string, data []byte) {
+		if file == "" || written[file] {
+			return
+		}
+		_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, file), data, 0644)
+		written[file] = true
+	}
+	process := func(pageCss string) (string, []byte) {
+		processedCSS := css.InlineImports(pageCss, b.Root)
+		processedCSS = b.processCSSDirectives(processedCSS)
+		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
+		if b.Cfg.ShouldMinifyCSS() {
+			processedCSS = css.Minify(processedCSS)
+		} else {
+			processedCSS = css.RemoveDuplicateDeclarations(processedCSS)
+		}
+		bs := []byte(processedCSS)
+		if strings.TrimSpace(processedCSS) == "" {
+			return "", nil
+		}
+		return "styles." + hashContent(bs) + ".css", bs
+	}
+
+	for _, r := range results {
+		if r.CSS == "" && !pageRendersCode(r.HTML) {
+			continue
+		}
+		pageCss := r.CSS
+		if b.Cfg.Markdown.CodeHighlight && pageRendersCode(r.HTML) {
+			if !chromaLoaded {
+				chromaCSS = syntaxhighlight.CSSForTheme(b.Cfg.Markdown.CodeTheme)
+				chromaLoaded = true
+			}
+			if chromaCSS != "" {
+				pageCss = chromaCSS + "\n" + pageCss
+			}
+		}
+
+		key := hashContent([]byte(pageCss))
+		p, ok := memo[key]
+		if !ok {
+			p.file, p.data = process(pageCss)
+			if variants && r.HasCSSSignals {
+				modernRaw, legacyRaw := splitVariantCSS(pageCss)
+				p.modernFile, p.modernData = process(modernRaw)
+				if p.modernFile != "" {
+					p.modernFile = strings.TrimSuffix(p.modernFile, ".css") + ".modern.css"
+				}
+				p.legacyFile, p.legacyData = process(legacyRaw)
+				if p.legacyFile != "" {
+					p.legacyFile = strings.TrimSuffix(p.legacyFile, ".css") + ".legacy.css"
+				}
+			}
+			memo[key] = p
+		}
+		r.CSSFile = p.file
+		write(p.file, p.data)
+		if p.modernFile != "" {
+			r.CSSModernFile = p.modernFile
+			write(p.modernFile, p.modernData)
+		}
+		if p.legacyFile != "" {
+			r.CSSLegacyFile = p.legacyFile
+			write(p.legacyFile, p.legacyData)
+		}
+	}
+	return written
+}
+
+// pageRendersCode reports whether a page's markup contains syntax-highlighted
+// code, in which case the chroma stylesheet is needed on that page.
+func pageRendersCode(html string) bool {
+	return strings.Contains(html, "chroma")
 }
 
 // writeHTMLPages builds the layout wrapper, applies placeholders, minifies,
 // and saves to disk in a single parallel step (Zero Disk-I/O Amplification Fix)
-func (b *Builder) writeHTMLPages(results []*PageResult, cssFile string, runtimeJSFile string) {
+// cssFiles are extra global stylesheets (e.g. Tailwind) linked on every page in
+// addition to each page's own stylesheet (r.CSSFile).
+// durableStateScript returns the `<script>window.__KRATE_STATE__=...</script>`
+// tag for the project's durable state, read once from `krate.state.json` (or
+// `.krate/state.json`). Returns "" when neither exists or the JSON is invalid.
+// Signals created with `{ persist }` prefer this server-chosen value over
+// browser storage on hydration, so SSR and client agree.
+func (b *Builder) durableStateScript() string {
+	b.stateOnce.Do(func() {
+		for _, name := range []string{"krate.state.json", filepath.Join(".krate", "state.json")} {
+			data, err := os.ReadFile(filepath.Join(b.Root, name))
+			if err != nil || len(data) == 0 {
+				continue
+			}
+			if !json.Valid(data) {
+				continue
+			}
+			// Escape characters that could terminate the inline <script> or
+			// break the JS (json.Valid does not escape them). `\u003c` etc. are
+			// valid inside JSON strings and JS source alike.
+			state := string(data)
+			state = strings.ReplaceAll(state, "<", "\\u003c")
+			state = strings.ReplaceAll(state, ">", "\\u003e")
+			state = strings.ReplaceAll(state, "&", "\\u0026")
+			state = strings.ReplaceAll(state, "\u2028", "\\u2028")
+			state = strings.ReplaceAll(state, "\u2029", "\\u2029")
+			b.stateScript = "<script>window.__KRATE_STATE__=" + state + "</script>"
+			return
+		}
+	})
+	return b.stateScript
+}
+
+func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runtimeJSFile string) {
 	var wg sync.WaitGroup
 	pool := newWorkerPool(buildWorkerLimit())
 	for _, r := range results {
@@ -707,50 +1303,103 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFile string, runtimeJ
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
+			defer func() {
+				if rec := recover(); rec != nil {
+					b.pluginFailed(safe.Recover(rec))
+				}
+			}()
 
 			pageDir := b.Cfg.OutDir
 			if r.OutName != "." {
 				pageDir = filepath.Join(b.Cfg.OutDir, r.OutName)
 			}
 
-			os.MkdirAll(pageDir, 0755)
+			_ = os.MkdirAll(pageDir, 0755)
 
 			// 1. Construct structural HTML wrapper in memory.
-			// A page links the global stylesheet when it has its own imported CSS
-			// OR when a merged stylesheet (e.g. Tailwind-generated) was written.
-			hasCSS := r.HasCSS || cssFile != ""
+			// A page links its own stylesheet (r.CSSFile) first, then any
+			// site-global stylesheets (e.g. Tailwind) so utility classes can
+			// override page/component styles.
+			pageCSS := []string{}
+			if r.CSSFile != "" {
+				pageCSS = append(pageCSS, r.CSSFile)
+			}
+			pageCSS = append(pageCSS, cssFiles...)
+			// UA siblings link a variant-only stylesheet when the build emitted
+			// one (hybrid+userAgent); otherwise they share the page sheet.
+			legacyPageCSS := pageCSS
+			if r.CSSLegacyFile != "" {
+				legacyPageCSS = append([]string{r.CSSLegacyFile}, cssFiles...)
+			}
+			modernPageCSS := pageCSS
+			if r.CSSModernFile != "" {
+				modernPageCSS = append([]string{r.CSSModernFile}, cssFiles...)
+			}
+			devBootstrap := ""
+			if b.DevMode {
+				devBootstrap = b.devBootstrapJSON()
+			}
+			runtimeHead := b.runtimeCommonHead()
 			var html string
 			if r.LoadingHTML != "" {
-				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, hasCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode)
+				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
 			} else {
-				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, hasCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode)
+				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
 			}
 
-			// 2. CSP meta tag injection
-			if b.Cfg.CSP.Enabled {
-				cspMeta := generateCSPMeta(r.ScriptHTML, r.StyleHTML, r.HydrationJS, b.Cfg.CSP.Directive)
-				if cspMeta != "" {
-					html = strings.Replace(html, "</head>", cspMeta+"</head>", 1)
+			// Opt-in UA variants: sibling documents so `krate serve` can send a
+			// smaller, variant-only document to User-Agent-classified visitors.
+			// The default document stays the full hybrid (works on any host).
+			legacyHTML := ""
+			modernHTML := ""
+			if b.legacyDocEnabled() && r.HasCSSSignals && !r.IsErrorPage {
+				// Swap the gated shim for the unconditional one (legacy) or drop
+				// it entirely (modern) so each sibling ships only what it needs.
+				baseScript := strings.ReplaceAll(r.ScriptHTML, hybridShimScriptTag(), "")
+				legacyScriptHTML := baseScript + legacyShimScriptTag()
+				if r.LoadingHTML != "" {
+					legacyHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, r.LoadingHTML, legacyPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
+					modernHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, r.LoadingHTML, modernPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
+				} else {
+					legacyHTML = generateHTML(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, legacyPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
+					modernHTML = generateHTML(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, modernPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
 				}
 			}
 
-			// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
-			if b.Cfg.SEO.BaseURL != "" {
-				seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO.BaseURL, b.Cfg.SEO.SiteName, b.Cfg.SEO.Description, b.Cfg.SEO.Image)
-				if seoTags != "" {
-					html = strings.Replace(html, "</head>", seoTags+"</head>", 1)
+			// finish applies the head injections + minify shared by the default
+			// and legacy documents. CSP hashes the fully assembled document, so
+			// each variant's inline scripts are allow-listed individually.
+			finish := func(h string) string {
+				// 2. Durable SSR state (window.__KRATE_STATE__): a page-level
+				// payload that persisted signals prefer on hydration, so the
+				// hydrated value matches what the server rendered.
+				if state := b.durableStateScript(); state != "" {
+					h = strings.Replace(h, "</head>", state+"</head>", 1)
 				}
+				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
+				if b.Cfg.SEO.BaseURL != "" {
+					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO.BaseURL, b.Cfg.SEO.SiteName, b.Cfg.SEO.Description, b.Cfg.SEO.Image)
+					if seoTags != "" {
+						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
+					}
+				}
+				// 2c. CSP meta tag injection. Hash against the FULLY ASSEMBLED
+				// document so every inline script/style is allow-listed.
+				if b.Cfg.CSP.Enabled {
+					cspMeta := generateCSPMeta(h, h, r.HydrationJS, b.Cfg.CSP.Directive)
+					if cspMeta != "" {
+						h = strings.Replace(h, "</head>", cspMeta+"</head>", 1)
+					}
+				}
+				// 3. Minify code in memory
+				if b.Cfg.ShouldMinifyHTML() {
+					h = minifyHTML(h)
+				}
+				return h
 			}
 
-			// 3. Perform placeholder swap in memory
-			if cssFile != "" {
-				html = strings.ReplaceAll(html, cssPlaceholder, cssFile)
-			}
-
-			// 3. Minify code in memory
-			if b.Cfg.ShouldMinifyHTML() {
-				html = minifyHTML(html)
-			}
+			html = finish(html)
+			r.FinalHTML = html
 
 			// 4. Single Write to physical media
 			// Error pages (404/500) are written directly at the output root as .html
@@ -761,7 +1410,13 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFile string, runtimeJ
 			} else {
 				htmlPath = filepath.Join(pageDir, "index.html")
 			}
-			os.WriteFile(htmlPath, []byte(html), 0644)
+			_ = fsutil.WriteFileIfChanged(htmlPath, []byte(html), 0644)
+			if legacyHTML != "" {
+				_ = fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.legacy.html"), []byte(finish(legacyHTML)), 0644)
+			}
+			if modernHTML != "" {
+				_ = fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.modern.html"), []byte(finish(modernHTML)), 0644)
+			}
 		}(r)
 	}
 	wg.Wait()
@@ -785,12 +1440,28 @@ func (b *Builder) cfgPathAliasTargets() [][]string {
 	return targets
 }
 
-func (b *Builder) buildPage(page string) (*PageResult, string, error) {
+// newBundler creates a bundler configured with this build's path aliases,
+// component tiers, and virtual modules (codegen'd `krate/content`).
+func (b *Builder) newBundler() *bundler.Bundler {
 	bnd := bundler.New(b.Root)
-	bnd.SetEmitReact(b.Cfg.EmitReact)
 	bnd.SetPathAliases(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
 	bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)
+	if b.contentMods != nil {
+		bnd.SetVirtualModules(b.contentMods)
+	}
+	bnd.SetModuleCache(b.moduleCache)
+	return bnd
+}
+
+func (b *Builder) buildPage(page string) (*PageResult, string, error) {
+	defer b.phase("page:total")()
+	if pr, css, ok := b.tryDiskReplay(page); ok {
+		return pr, css, nil
+	}
+	stopBundle := b.phase("page:bundle")
+	bnd := b.newBundler()
 	bundle, err := bnd.Bundle(page)
+	stopBundle()
 	if err != nil {
 		return nil, "", fmt.Errorf("bundling page %s: %w", page, err)
 	}
@@ -813,14 +1484,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		Page:    page,
 		Program: entryModule.Program,
 	}
-	if err := plugin.RunAfterParse(parseCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sAfterParse plugin error (%s):%s %v\n", cYellow, page, cReset, err)
-		b.pluginFailed(fmt.Errorf("AfterParse (%s): %v", page, err))
-	}
-	if err := plugin.RunCommunityPlugins("AfterParse", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, parseCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error AfterParse (%s):%s %v\n", cYellow, page, cReset, err)
-		b.pluginFailed(fmt.Errorf("AfterParse (%s): %v", page, err))
-	}
+	b.runPageHook("AfterParse", page, parseCtx, func() error { return plugin.RunAfterParse(parseCtx) })
 	// Plugins may hand back a replacement AST (JS plugins decode the astjson doc
 	// they return; Go-style plugins swap ctx.Program directly). Point the entry
 	// module at the final program so all downstream stages render the edited tree.
@@ -842,39 +1506,103 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		}
 	}
 
+	// A page that imports a runtime-tier Go component must stream: its region is
+	// rendered per request by the Go host (via /__krate/gorender).
+	pageGoComponents := b.collectGoComponents(bundle, b.Root)
+	for _, ref := range pageGoComponents {
+		if ref.Tier == irtree.TierRuntime && renderMode == RenderSSG {
+			renderMode = RenderStreaming
+			break
+		}
+	}
+
 	// Global streaming override: if configured, all *static* pages stream.
-	// Explicit ssr/isr opts win — forcing them to streaming would silently
+	// Explicit ssr/isr opts win - forcing them to streaming would silently
 	// defeat a page author's per-page config.
 	if b.Cfg.SSR.Streaming && renderMode == RenderSSG {
 		renderMode = RenderStreaming
 		fmt.Fprintf(os.Stderr, "  %s⚡%s %s → streaming (global override)\n", cCyan, cReset, filepath.Base(page))
 	}
 
-	b.TransformUniversalIcons(entryModule.Program)
-	b.TransformUniversalImages(entryModule.Program)
+	// Static output mode disables request-time rendering entirely: a page that
+	// would have been SSR/ISR/streaming is downgraded to SSG. Dynamic routes
+	// are additionally closed to the params generateStaticParams returns (see
+	// dynamicParams below).
+	staticMode := strings.EqualFold(b.Cfg.Output, "static")
+	if staticMode && renderMode != RenderSSG {
+		fmt.Fprintf(os.Stderr, "  %s⚡%s %s → ssg (static output mode)\n", cCyan, cReset, filepath.Base(page))
+		renderMode = RenderSSG
+	}
 
-	// ─── New pipeline: Annotate → Build IR → Emit ──────────────────────────
+	isDynRoute := isDynamicRoute(page, b.Cfg.PagesDir)
+	allowDynamic := dynamicParamsAllowed(entryModule.Program, staticMode)
+	// A dynamic route is "static only" when it must not be served for
+	// arbitrary params. Only meaningful for dynamic routes.
+	staticOnly := isDynRoute && !allowDynamic
+
+	stopCompile := b.phase("page:compile")
+	b.ensureTransformed(entryModule.Program)
+
+	// New pipeline: Annotate -> Build IR -> Emit
 	// Transform <Icon>/<Image> in imported component modules too. These are
 	// universal built-in components, so their JSX must be compiled to concrete
-	// SVG/picture markup wherever they appear — including inside library
+	// SVG/picture markup wherever they appear - including inside library
 	// components like LinkCard that the page imports. Skipping imported modules
 	// leaves <Icon> as an unresolved component slot that renders nothing.
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, page, entryModule.SourceCode)
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	for _, mp := range extraPrograms {
-		b.TransformUniversalIcons(mp.Program)
-		b.TransformUniversalImages(mp.Program)
+		b.ensureTransformed(mp.Program)
 	}
 	annotator.MergeModuleFunctions(ann, extraPrograms)
+	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	tree := irtree.Build(entryModule.Program, ann)
-	regions := enumerateRegions(tree)
+	pageOpts := b.irBuildOptions()
+	pageOpts.GoComponents = pageGoComponents
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, pageOpts)
+	// CSS primitive declarations that cannot be compiled to CSS are hard errors
+	// (there is no fallback to client signals).
+	if len(tree.Errors) > 0 {
+		return nil, "", renderErrors(page, tree.Errors)
+	}
+	// CSS stylesheets are generated during IR construction (one shared,
+	// instance-agnostic stylesheet per scope). Append them to the page's own CSS
+	// so they land in the hashed external stylesheet.
+	choiceCSS := tree.CSSSignalsCSS
+	// Dynamic-route templates are built once and served for every matching URL,
+	// so bind each [param] to a replaceable sentinel the server substitutes per
+	// request (see serve.go applyDynamicRouteParams). Mirrors injectStaticParams
+	// and only affects static/server roots; generateStaticParams pages are built
+	// separately with concrete values.
+	if isDynamicRoute(page, b.Cfg.PagesDir) {
+		injectDynamicRoutePlaceholders(tree, extractParamNames(page, b.Cfg.PagesDir))
+	}
 	emitter := renderer.NewEmitter()
+	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.IconResolver = b.iconResolver
 	emitter.EvalJS = b.jsExprEvaluator()
+	emitter.GoComponents = pageOpts.GoComponents
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
+	// Render imported Go components (server tier, slot path + SSREval'd) via the
+	// Go host in one batch, then inline their HTML at the emitted markers.
+	var goBaked map[string]string
+	if len(emitResult.GoRenders) > 0 {
+		rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
+		if gerr != nil {
+			return nil, "", gerr
+		}
+		emitResult.HTML = substituteGoRenders(emitResult.HTML, rendered)
+		goBaked = goBakedMap(emitResult.GoRenders, rendered)
+	}
+	// Regions are enumerated after emit so runtime Go components can carry their
+	// build-rendered children (set during emitRuntime) in RegionMeta.Props.
+	regions := enumerateRegions(tree)
+	for i := range regions {
+		regions[i].Revalidate = regionRevalidate(b.Root, regions[i].SourcePath)
+	}
+	stopCompile()
 
 	if len(emitResult.Errors) > 0 {
 		return nil, "", renderErrors(page, emitResult.Errors)
@@ -892,14 +1620,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		HasJS:    len(emitResult.Signatures) > 0,
 		RawCSS:   bundle.CSS,
 	}
-	if err := plugin.RunAfterRender(renderCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sAfterRender plugin error (%s):%s %v\n", cYellow, page, cReset, err)
-		b.pluginFailed(fmt.Errorf("AfterRender (%s): %v", page, err))
-	}
-	if err := plugin.RunCommunityPlugins("AfterRender", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, renderCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sCommunity plugin error AfterRender (%s):%s %v\n", cYellow, page, cReset, err)
-		b.pluginFailed(fmt.Errorf("AfterRender (%s): %v", page, err))
-	}
+	b.runPageHook("AfterRender", page, renderCtx, func() error { return plugin.RunAfterRender(renderCtx) })
 	// Apply plugin modifications back
 	emitResult.HTML = renderCtx.HTML
 	emitResult.HeadHTML = renderCtx.HeadHTML
@@ -907,8 +1628,8 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	// Run AfterMarkdownParse hooks for markdown pages (plugins can modify the
 	// rendered HTML). Markdown pages flow through the normal bundler/emitter
-	// pipeline — the bundler synthesizes an MDX-style TSX bundle (bundler.go
-	// .md/.mdx branch) — so the hook runs against the fully emitted markup.
+	// pipeline - the bundler synthesizes an MDX-style TSX bundle (bundler.go
+	// .md/.mdx branch) - so the hook runs against the fully emitted markup.
 	if strings.HasSuffix(page, ".md") || strings.HasSuffix(page, ".mdx") {
 		outName := pageToOutput(page, b.Cfg.PagesDir)
 		mdCtx := &plugin.MarkdownHookCtx{
@@ -916,14 +1637,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			HTML:  emitResult.HTML,
 			Route: outName,
 		}
-		if err := plugin.RunAfterMarkdownParse(mdCtx); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sAfterMarkdownParse plugin error (%s):%s %v\n", cYellow, page, cReset, err)
-			b.pluginFailed(fmt.Errorf("AfterMarkdownParse (%s): %v", page, err))
-		}
-		if err := plugin.RunCommunityPlugins("AfterMarkdownParse", b.Cfg.Plugins, b.Root, b.Cfg.OutDir, mdCtx); err != nil {
-			fmt.Fprintf(os.Stderr, "  %sCommunity plugin error AfterMarkdownParse (%s):%s %v\n", cYellow, page, cReset, err)
-			b.pluginFailed(fmt.Errorf("AfterMarkdownParse (%s): %v", page, err))
-		}
+		b.runPageHook("AfterMarkdownParse", page, mdCtx, func() error { return plugin.RunAfterMarkdownParse(mdCtx) })
 		emitResult.HTML = mdCtx.HTML
 	}
 
@@ -939,12 +1653,72 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		emitResult.HTML = "<!--suspense:page-->" + emitResult.HTML + "<!--/suspense:page-->"
 	}
 
-	bundle.CSS += b.applyLayoutStack(page, emitResult)
+	layoutCSS, layoutFiles, layoutHasSignals := b.applyLayoutStack(page, emitResult)
+	bundle.CSS += layoutCSS
+	// Generated CSS signal rules land in the page's own hashed stylesheet, after
+	// layout CSS so author styles can override the defaults.
+	if choiceCSS != "" {
+		bundle.CSS += choiceCSS
+		// Legacy/hybrid modes drive the class-based stylesheet with a scoped
+		// shim; modern mode stays zero-JS.
+		emitResult.ScriptHTML += b.compatShimHTML()
+		// No-JS legacy engines (no :has(), scripting off) need the reveal-all
+		// fallback, since the shim cannot run.
+		if b.needsNoJSFallback() {
+			emitResult.StyleHTML += noJSFallbackHTML(tree.NoJSFallbackCSS)
+		}
+	}
+	// ARIA roles that need synthesized state (tabs/listbox/disclosure) inject a
+	// tiny inline synchroniser. Every other CSS-signal page stays zero-JS.
+	if tree.NeedsCSSARIA {
+		emitResult.ScriptHTML += "<script>" + renderer.CSSARIAJS + "</script>"
+	}
+
+	// Layouts wrap the page and are not part of its module graph, so record
+	// them explicitly: editing _layout.tsx must rebuild every page it wraps.
+	deps = append(deps, layoutFiles...)
+	// The loading.tsx fallback is also a file the user edits directly.
+	if lp := findLoading(page, b.Cfg.PagesDir); lp != "" {
+		deps = append(deps, lp)
+	}
 
 	b.recordDeps(page, deps)
 
 	outName := pageToOutput(page, b.Cfg.PagesDir)
 	pageDir := filepath.Join(b.Cfg.OutDir, outName)
+	pageBase := strings.TrimSuffix(filepath.Base(page), filepath.Ext(page))
+	relSrc, _ := filepath.Rel(b.Root, page)
+
+	// A static-only dynamic route has no fallback template: skip all page-dir
+	// output for the canonical `[param]` result. Concrete pages expanded from
+	// generateStaticParams are built separately and write normally.
+	if staticOnly {
+		b.recordDeps(page, deps)
+		pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
+		return &PageResult{
+			Page:              page,
+			OutName:           outName,
+			HTML:              emitResult.HTML,
+			HeadHTML:          emitResult.HeadHTML,
+			ScriptHTML:        emitResult.ScriptHTML,
+			StyleHTML:         emitResult.StyleHTML,
+			HasCSS:            pageCSS != "",
+			HasCSSSignals:     tree.HasCSSSignals || layoutHasSignals,
+			IsErrorPage:       pageBase == "404" || pageBase == "500",
+			CSS:               pageCSS,
+			UsedCSS:           emitResult.UsedCSS,
+			UsedFuncs:         emitResult.UsedFuncs,
+			Mode:              renderMode,
+			Revalidate:        revalidate,
+			SourcePath:        relSrc,
+			Regions:           regions,
+			DynamicParams:     allowDynamic,
+			StaticOnly:        true,
+			IsDynamicTemplate: true,
+			Program:           entryModule.Program,
+			GoBaked:           goBaked,
+		}, bundle.CSS, nil
+	}
 
 	if err := os.MkdirAll(pageDir, 0755); err != nil {
 		return nil, "", fmt.Errorf("creating page dir: %w", err)
@@ -952,34 +1726,52 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	jsFile := ""
 	hydrationJS := ""
+	var jsBytes []byte
 	hasJS := false
 	needsHydrate := len(emitResult.Signatures) > 0
 	if needsHydrate {
-		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
-		if strings.TrimSpace(hydrationJS) != "" {
+		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		if rawJS != "" {
 			hasJS = true
-			if b.Cfg.ShouldMinifyJS() {
-				hydrationJS = minifyJS(hydrationJS)
+			finalJS := rawJS
+			mapJSON := ""
+			if b.shouldMinifyJS() {
+				if b.Cfg.Sourcemap {
+					// Minify with esbuild's own map so the minified output can be
+					// decoded back to the generated code. The hydration bundle is
+					// compiler-generated (no literal user TSX), so `sources` labels
+					// it as such rather than pretending to be the page source.
+					finalJS, mapJSON = minifyJSWithMap(rawJS, "krate-hydration.js")
+				} else {
+					finalJS = minifyJS(rawJS)
+				}
 			}
 
 			// Write page-specific hydration code only (runtime is in a shared chunk)
-			finalJS := strings.TrimSpace(hydrationJS)
+			finalJS = strings.TrimSpace(finalJS)
 			jsHash := hashContent([]byte(finalJS))
 			jsFile = "index." + jsHash + ".js"
-			finalJS = substituteImportMetaURL(finalJS, outName, jsFile)
+			finalJS = substituteImportMetaURL(finalJS, outName, jsFile, b.Cfg.BaseURLPath())
 			jsPath := filepath.Join(pageDir, jsFile)
-			os.WriteFile(jsPath, []byte(finalJS), 0644)
+			_ = fsutil.WriteFileIfChanged(jsPath, []byte(finalJS), 0644)
+
+			if b.Cfg.Sourcemap {
+				sm := mapJSON
+				if sm == "" {
+					// Unminified output: emit a valid line-level map with the
+					// generated code embedded so devtools shows a coherent file.
+					sm = generateSourcemap(finalJS, "krate-hydration.js", finalJS)
+				}
+				_ = fsutil.WriteFileAtomic(jsPath+".map", []byte(sm), 0644)
+				finalJS = appendSourceMappingURL(finalJS, jsFile+".map")
+				_ = fsutil.WriteFileIfChanged(jsPath, []byte(finalJS), 0644)
+			}
 
 			// Keep the CSP hash and any other ingest in sync with the bytes
 			// actually written (which may differ from hydrationJS if
-			// import.meta.url was substituted).
+			// import.meta.url was substituted or a sourcemap comment appended).
 			hydrationJS = finalJS
-
-			if b.Cfg.Sourcemap {
-				sm := generateSourcemap(finalJS, hydrationJS, page)
-				smPath := jsPath + ".map"
-				os.WriteFile(smPath, []byte(sm), 0644)
-			}
+			jsBytes = []byte(finalJS)
 		} else {
 			hydrationJS = ""
 		}
@@ -995,31 +1787,191 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	loadingHTML := b.renderLoadingComponent(page)
 
+	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
+
 	// Return data structures without triggering an intermediate disk write
-	pageBase := strings.TrimSuffix(filepath.Base(page), filepath.Ext(page))
-	relSrc, _ := filepath.Rel(b.Root, page)
-	return &PageResult{
-		Page:        page,
-		OutName:     outName,
-		HTML:        emitResult.HTML,
-		HeadHTML:    emitResult.HeadHTML,
-		ScriptHTML:  emitResult.ScriptHTML,
-		StyleHTML:   emitResult.StyleHTML,
-		HydrationJS: hydrationJS,
-		HasJS:       hasJS,
-		JSFile:      jsFile,
-		HasCSS:      bundle.CSS != "",
-		IsErrorPage: pageBase == "404" || pageBase == "500",
-		UsedCSS:     emitResult.UsedCSS,
-		UsedFuncs:   emitResult.UsedFuncs,
-		LoadingHTML: loadingHTML,
+	result := &PageResult{
+		Page:          page,
+		OutName:       outName,
+		HTML:          emitResult.HTML,
+		HeadHTML:      emitResult.HeadHTML,
+		ScriptHTML:    emitResult.ScriptHTML,
+		StyleHTML:     emitResult.StyleHTML,
+		HydrationJS:   hydrationJS,
+		HasJS:         hasJS,
+		JSFile:        jsFile,
+		HasCSS:        pageCSS != "",
+		HasCSSSignals: tree.HasCSSSignals || layoutHasSignals,
+		IsErrorPage:   pageBase == "404" || pageBase == "500",
+		CSS:           pageCSS,
+		UsedCSS:       emitResult.UsedCSS,
+		UsedFuncs:     emitResult.UsedFuncs,
+		LoadingHTML:   loadingHTML,
 
 		Mode:       renderMode,
 		Revalidate: revalidate,
 		SourcePath: relSrc,
 		Regions:    regions,
-	}, bundle.CSS, nil
+
+		DynamicParams:     allowDynamic,
+		StaticOnly:        staticOnly,
+		IsDynamicTemplate: isDynRoute,
+		Program:           entryModule.Program,
+		GoBaked:           goBaked,
+	}
+	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes)
+	return result, bundle.CSS, nil
 }
+
+// tryDiskReplay returns a cached PageResult for page when every input file is
+// unchanged since it was written, replaying the page's disk side effects
+// (hydration JS, asset copies, worker/chunk registration, dep graph).
+func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
+	c := b.diskCache
+	if c == nil || !c.enabled {
+		return nil, "", false
+	}
+	// Dynamic-route templates bake param placeholders and are cheap; keep them
+	// off the cache to avoid replaying placeholder injection.
+	if isDynamicRoute(page, b.Cfg.PagesDir) {
+		return nil, "", false
+	}
+	e, ok := c.load(page)
+	if !ok || e.Key == "" {
+		c.markMiss()
+		return nil, "", false
+	}
+	key, _, _, ok := c.computeKey(e.Deps)
+	if !ok || key != e.Key {
+		c.markMiss()
+		return nil, "", false
+	}
+
+	pageDir := filepath.Join(b.Cfg.OutDir, e.OutName)
+	_ = os.MkdirAll(pageDir, 0755)
+	if len(e.JSBytes) > 0 && e.JSFile != "" {
+		_ = fsutil.WriteFileIfChanged(filepath.Join(pageDir, e.JSFile), e.JSBytes, 0644)
+	}
+	if len(e.AssetFiles) > 0 {
+		_ = b.writeAssetFiles(e.AssetFiles)
+	}
+	b.registerWorkers(e.WorkerFiles, trueSet(e.WorkerEsm))
+	b.registerDynamicChunks(e.DynImports)
+	b.recordDeps(page, e.Deps)
+	c.markHit()
+
+	return &PageResult{
+		Page:          page,
+		OutName:       e.OutName,
+		HTML:          e.HTML,
+		HeadHTML:      e.HeadHTML,
+		ScriptHTML:    e.ScriptHTML,
+		StyleHTML:     e.StyleHTML,
+		HydrationJS:   e.HydrationJS,
+		HasJS:         e.HasJS,
+		JSFile:        e.JSFile,
+		HasCSS:        e.HasCSS,
+		HasCSSSignals: e.HasCSSSignals,
+		IsErrorPage:   e.IsErrorPage,
+		CSS:           e.CSS,
+		UsedCSS:       setFromSlice(e.UsedCSS),
+		UsedFuncs:     setFromSlice(e.UsedFuncs),
+		LoadingHTML:   e.LoadingHTML,
+		Mode:          RenderMode(e.Mode),
+		Revalidate:    e.Revalidate,
+		SourcePath:    e.SourcePath,
+
+		DynamicParams:     e.DynamicParams,
+		StaticOnly:        e.StaticOnly,
+		IsDynamicTemplate: e.IsDynamicTemplate,
+		// Program is intentionally nil: AST-based checks are skipped for cached
+		// pages (their inputs - and therefore findings - are unchanged).
+	}, e.CSS, true
+}
+
+// maybeStoreDiskPage persists a freshly built page result when caching is
+// enabled and the page is a plain SSG page.
+func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, bundle *bundler.Bundle, jsBytes []byte) {
+	c := b.diskCache
+	if c == nil || !c.enabled || bundle == nil {
+		return
+	}
+	if r.Mode != RenderSSG || len(r.Regions) > 0 || r.Program == nil {
+		return
+	}
+	if isDynamicRoute(page, b.Cfg.PagesDir) {
+		return
+	}
+	absDeps := make([]string, 0, len(deps)+1)
+	for _, d := range deps {
+		if !filepath.IsAbs(d) {
+			d = filepath.Join(b.Root, d)
+		}
+		absDeps = append(absDeps, filepath.Clean(d))
+	}
+	key, sorted, hashes, ok := c.computeKey(absDeps)
+	if !ok {
+		return
+	}
+	c.save(page, &diskPageEntry{
+		Key:           key,
+		OutName:       r.OutName,
+		HTML:          r.HTML,
+		HeadHTML:      r.HeadHTML,
+		ScriptHTML:    r.ScriptHTML,
+		StyleHTML:     r.StyleHTML,
+		HydrationJS:   r.HydrationJS,
+		JSFile:        r.JSFile,
+		JSBytes:       jsBytes,
+		CSS:           r.CSS,
+		HasJS:         r.HasJS,
+		HasCSS:        r.HasCSS,
+		HasCSSSignals: r.HasCSSSignals,
+		IsErrorPage:   r.IsErrorPage,
+		UsedCSS:       sliceFromSet(r.UsedCSS),
+		UsedFuncs:     sliceFromSet(r.UsedFuncs),
+		LoadingHTML:   r.LoadingHTML,
+		Mode:          int(r.Mode),
+		Revalidate:    r.Revalidate,
+		SourcePath:    r.SourcePath,
+
+		DynamicParams:     r.DynamicParams,
+		StaticOnly:        r.StaticOnly,
+		IsDynamicTemplate: r.IsDynamicTemplate,
+
+		Deps:        sorted,
+		DepHashes:   hashes,
+		AssetFiles:  bundle.AssetFiles,
+		WorkerFiles: bundle.WorkerFiles,
+		WorkerEsm:   sliceFromSet(bundle.WorkerEsm),
+		DynImports:  bundle.DynImportFiles,
+	})
+}
+
+func sliceFromSet(m map[string]bool) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func setFromSlice(s []string) map[string]bool {
+	if len(s) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(s))
+	for _, k := range s {
+		out[k] = true
+	}
+	return out
+}
+
+func trueSet(s []string) map[string]bool { return setFromSlice(s) }
 
 // buildRoute generates a full HTML page from a plugin-generated virtual route.
 func (b *Builder) buildRoute(route plugin.Route) (result *PageResult, rawCSS string, err error) {
@@ -1030,7 +1982,7 @@ func (b *Builder) buildRoute(route plugin.Route) (result *PageResult, rawCSS str
 
 	// Use our new shared pipeline
 	// This works for plugins because we pass route.Data (the props) directly
-	layoutRes, rawCSS, err := b.executeLayoutPipeline(route.Layout, route.Content, route.Data)
+	layoutRes, rawCSS, _, _, err := b.executeLayoutPipeline(route.Layout, route.Content, route.Data)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1047,25 +1999,86 @@ func (b *Builder) buildRoute(route plugin.Route) (result *PageResult, rawCSS str
 		HasJS:       false,
 		JSFile:      "",
 		HasCSS:      rawCSS != "",
+		CSS:         rawCSS,
 		UsedCSS:     layoutRes.UsedCSS,
 		UsedFuncs:   make(map[string]bool),
 	}, rawCSS, nil
 }
 
 // layoutEmitCacheEntry is the layout skeleton (pre-children-injection) keyed by
-// layout path + modtime. The layout is content-independent of its pages, so the
-// expensive bundle/annotate/emit pipeline runs once per layout version instead
-// of once per page.
+// layout path + the modtimes of every file in the layout's module graph. The
+// layout is content-independent of its pages, so the expensive
+// bundle/annotate/emit pipeline runs once per layout version instead of once per
+// page. deps records the layout's full module graph so that editing a component
+// the layout imports (which leaves the layout file itself untouched) is detected
+// and forces a rebuild instead of reusing a stale skeleton.
 type layoutEmitCacheEntry struct {
-	modTime                                    time.Time
 	html, headHTML, scriptHTML, styleHTML, css string
+	// hasSignals records whether the layout (and its components) compiled any
+	// CSS signal rules, so wrapped pages know to emit UA siblings/fallbacks.
+	hasSignals bool
+	// Client hydration metadata, merged into each wrapped page so the layout's
+	// interactive components hydrate (their JS is generated alongside the page's).
+	signatures     []irtree.ComponentSignature
+	listComponents []*ast.FnDecl
+	hasLinks       bool
+	deps           []string
+	depTimes       map[string]time.Time
+}
+
+// layoutIDPrefix returns a stable, collision-free namespace for a layout's
+// compact slot IDs. It starts with "_" (outside the base62 alphabet the page
+// builder uses) so a merged layout + page can never share a data-k ID.
+func layoutIDPrefix(layoutPath string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(filepath.ToSlash(layoutPath)))
+	return "_l" + strconv.FormatUint(uint64(h.Sum32()), 36) + "_"
+}
+
+// layoutCacheFresh reports whether every file the layout was built from is
+// still unchanged. A missing file, or any modtime change, invalidates the entry.
+func layoutCacheFresh(e *layoutEmitCacheEntry) bool {
+	if e == nil {
+		return false
+	}
+	for _, dep := range e.deps {
+		info, err := os.Stat(dep)
+		if err != nil {
+			return false
+		}
+		if !info.ModTime().Equal(e.depTimes[dep]) {
+			return false
+		}
+	}
+	return true
+}
+
+// resetBuildCaches clears the in-process layout/loading emit caches. They are
+// only valid within a single build pass: a long-lived `krate dev` process would
+// otherwise keep serving a layout rendered before a component it imports was
+// edited, and would keep negative-caching a `_layout.tsx`/`loading.tsx` that was
+// created after the first build. Cleared in place (sync.Map.Clear) so it is safe
+// even if a build goroutine from a previous pass is still winding down.
+func (b *Builder) resetBuildCaches() {
+	layoutEmitCache.Clear()
+	loadingEmitCache.Clear()
+	layoutCache.Clear()
+	// Re-arm the per-program transform guard for this build. The parsed module
+	// cache persists across builds; re-running the (idempotent) transforms on
+	// already-transformed ASTs is a no-op, and the guard keeps it race-free.
+	b.transformOnce = sync.Map{}
+	// tsx bootstrap results may depend on user source that changed since the
+	// last build, so drop any memoized outputs.
+	tsexec.Invalidate()
+	// Go component parses are per-build.
+	b.goParseCache = nil
 }
 
 var layoutEmitCache sync.Map
 var loadingEmitCache sync.Map
 
 // emitCacheLocks maps a layout/loading path to the mutex serializing its
-// bundle→emit pipeline. Concurrent buildPage goroutines sharing the same layout
+// bundle->emit pipeline. Concurrent buildPage goroutines sharing the same layout
 // all miss the cache at once; the mutex makes the first goroutine do the work
 // while the rest wait and then read the filled cache (singleflight without a
 // new dependency).
@@ -1076,28 +2089,34 @@ func emitCacheLock(path string) *sync.Mutex {
 	return mu.(*sync.Mutex)
 }
 
-func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props map[string]string) (*renderer.EmitResult, string, error) {
+// executeLayoutPipeline renders (or reuses) a layout and injects page content.
+// It returns the emitted result, the layout's CSS, and the full set of files the
+// layout was built from (its module graph), so callers can record them as page
+// dependencies - editing a component a layout imports must rebuild the pages the
+// layout wraps, even though the layout file itself is unchanged.
+func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props map[string]string) (*renderer.EmitResult, string, []string, bool, error) {
 	var css string
 
 	if layoutPath == "" {
-		return &renderer.EmitResult{HTML: content}, "", nil
+		return &renderer.EmitResult{HTML: content}, "", nil, false, nil
 	}
 
-	var modTime time.Time
-	if info, err := os.Stat(layoutPath); err == nil {
-		modTime = info.ModTime()
-	}
-
-	// Cache hit: reuse the layout skeleton and inject the page content.
+	// Cache hit: reuse the layout skeleton and inject the page content. The
+	// cache is only valid while every file in the layout's module graph is
+	// unchanged; a stale entry (e.g. an imported component edited during a
+	// long-lived `krate dev` process) is ignored and re-rendered.
 	if cached, ok := layoutEmitCache.Load(layoutPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
-		if entry.modTime.Equal(modTime) {
+		if layoutCacheFresh(entry) {
 			return &renderer.EmitResult{
-				HTML:       strings.Replace(entry.html, "<!--__children__-->", content, -1),
-				HeadHTML:   entry.headHTML,
-				ScriptHTML: entry.scriptHTML,
-				StyleHTML:  entry.styleHTML,
-			}, entry.css, nil
+				HTML:           strings.Replace(entry.html, "<!--__children__-->", content, -1),
+				HeadHTML:       entry.headHTML,
+				ScriptHTML:     entry.scriptHTML,
+				StyleHTML:      entry.styleHTML,
+				Signatures:     entry.signatures,
+				ListComponents: entry.listComponents,
+				HasLinks:       entry.hasLinks,
+			}, entry.css, entry.deps, entry.hasSignals, nil
 		}
 	}
 
@@ -1111,46 +2130,68 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	// filled it while we waited.
 	if cached, ok := layoutEmitCache.Load(layoutPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
-		if entry.modTime.Equal(modTime) {
+		if layoutCacheFresh(entry) {
 			return &renderer.EmitResult{
-				HTML:       strings.Replace(entry.html, "<!--__children__-->", content, -1),
-				HeadHTML:   entry.headHTML,
-				ScriptHTML: entry.scriptHTML,
-				StyleHTML:  entry.styleHTML,
-			}, entry.css, nil
+				HTML:           strings.Replace(entry.html, "<!--__children__-->", content, -1),
+				HeadHTML:       entry.headHTML,
+				ScriptHTML:     entry.scriptHTML,
+				StyleHTML:      entry.styleHTML,
+				Signatures:     entry.signatures,
+				ListComponents: entry.listComponents,
+				HasLinks:       entry.hasLinks,
+			}, entry.css, entry.deps, entry.hasSignals, nil
 		}
 	}
 
-	bnd := bundler.New(b.Root)
-	bnd.SetEmitReact(b.Cfg.EmitReact)
-	bnd.SetPathAliases(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
-	bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)
+	bnd := b.newBundler()
 	layoutBundle, err := bnd.Bundle(layoutPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("bundling layout %s: %w", layoutPath, err)
+		return nil, "", nil, false, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
 	}
 
 	layoutModule := findEntryModule(layoutBundle.Modules)
 	if layoutModule == nil || layoutModule.Program == nil {
-		return nil, "", fmt.Errorf("layout module invalid or empty: %s", layoutPath)
+		return nil, "", nil, false, fmt.Errorf("layout module invalid or empty: %s (ensure the layout has a default export)", layoutPath)
 	}
 
-	b.TransformUniversalIcons(layoutModule.Program)
-	b.TransformUniversalImages(layoutModule.Program)
+	// The layout's full module graph is both its cache-invalidation key and a
+	// dependency of every page it wraps.
+	layoutDeps := layoutDepPaths(layoutPath, layoutBundle)
+
+	b.ensureTransformed(layoutModule.Program)
 
 	ann := annotator.Annotate(layoutModule.Program, b.Cfg, layoutPath, layoutModule.SourceCode)
 	extraLayoutPrograms := moduleSources(layoutBundle.Modules, layoutModule)
+	for _, mp := range extraLayoutPrograms {
+		b.ensureTransformed(mp.Program)
+	}
 	annotator.MergeModuleFunctions(ann, extraLayoutPrograms)
+	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	tree := irtree.Build(layoutModule.Program, ann)
+	opts := b.irBuildOptions()
+	opts.IDPrefix = layoutIDPrefix(layoutPath)
+	opts.GoComponents = b.collectGoComponents(layoutBundle, b.Root)
+	tree := irtree.BuildWithOptions(layoutModule.Program, ann, opts)
+	if len(tree.Errors) > 0 {
+		return nil, "", nil, false, renderErrors(layoutPath, tree.Errors)
+	}
 	emitter := renderer.NewEmitter()
+	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.IconResolver = b.iconResolver
 	emitter.EvalJS = b.jsExprEvaluator()
+	emitter.GoComponents = opts.GoComponents
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
+	if len(emitResult.GoRenders) > 0 {
+		rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
+		if gerr != nil {
+			return nil, "", nil, false, gerr
+		}
+		emitResult.HTML = substituteGoRenders(emitResult.HTML, rendered)
+	}
 
 	if len(emitResult.Errors) > 0 {
-		return nil, "", renderErrors(layoutPath, emitResult.Errors)
+		return nil, "", nil, false, renderErrors(layoutPath, emitResult.Errors)
 	}
 
 	// Compile-time reactive dependency validation. Surfaced as warnings so
@@ -1158,26 +2199,80 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	b.printReactiveDiags(reactive.Build(emitResult.Signatures).Validate())
 
 	css = layoutBundle.CSS
+	// CSS signal rules for the layout and its components are generated during IR
+	// construction and appended to the layout's own module CSS.
+	if tree.CSSSignalsCSS != "" {
+		css += tree.CSSSignalsCSS
+		emitResult.ScriptHTML += b.compatShimHTML()
+		if b.needsNoJSFallback() {
+			emitResult.StyleHTML += noJSFallbackHTML(tree.NoJSFallbackCSS)
+		}
+	}
+	if tree.NeedsCSSARIA {
+		emitResult.ScriptHTML += "<script>" + renderer.CSSARIAJS + "</script>"
+	}
 
 	layoutEmitCache.Store(layoutPath, &layoutEmitCacheEntry{
-		modTime:    modTime,
-		html:       emitResult.HTML,
-		headHTML:   emitResult.HeadHTML,
-		scriptHTML: emitResult.ScriptHTML,
-		styleHTML:  emitResult.StyleHTML,
-		css:        css,
+		html:           emitResult.HTML,
+		headHTML:       emitResult.HeadHTML,
+		scriptHTML:     emitResult.ScriptHTML,
+		styleHTML:      emitResult.StyleHTML,
+		signatures:     emitResult.Signatures,
+		listComponents: emitResult.ListComponents,
+		hasLinks:       emitResult.HasLinks,
+		css:            css,
+		hasSignals:     tree.HasCSSSignals,
+		deps:           layoutDeps,
+		depTimes:       modTimesOf(layoutDeps),
 	})
 
 	// Inject page content at {children} slot
 	return &renderer.EmitResult{
-		HTML:       strings.Replace(emitResult.HTML, "<!--__children__-->", content, -1),
-		HeadHTML:   emitResult.HeadHTML,
-		ScriptHTML: emitResult.ScriptHTML,
-		StyleHTML:  emitResult.StyleHTML,
-	}, css, nil
+		HTML:           strings.Replace(emitResult.HTML, "<!--__children__-->", content, -1),
+		HeadHTML:       emitResult.HeadHTML,
+		ScriptHTML:     emitResult.ScriptHTML,
+		StyleHTML:      emitResult.StyleHTML,
+		Signatures:     emitResult.Signatures,
+		ListComponents: emitResult.ListComponents,
+		HasLinks:       emitResult.HasLinks,
+	}, css, layoutDeps, tree.HasCSSSignals, nil
 }
 
-// ─── New IR Tree Pipeline ──────────────────────────────────────────────────
+// layoutDepPaths returns the absolute paths of every real file in a layout's
+// module graph, including the layout entry itself. External/bare module
+// specifiers (node builtins, `react`, virtual modules) are skipped: they have no
+// filesystem modtime and would otherwise keep the layout cache permanently
+// stale.
+func layoutDepPaths(layoutPath string, bundle *bundler.Bundle) []string {
+	deps := []string{layoutPath}
+	seen := map[string]bool{layoutPath: true}
+	for _, mod := range bundle.Modules {
+		if mod == nil || mod.IsExternal || mod.Path == "" || seen[mod.Path] {
+			continue
+		}
+		if !filepath.IsAbs(mod.Path) {
+			continue
+		}
+		seen[mod.Path] = true
+		deps = append(deps, mod.Path)
+	}
+	return deps
+}
+
+// modTimesOf stats each path, returning a path->modtime map used to detect
+// changes to a cached layout's dependencies. Paths that cannot be statted are
+// omitted so layoutCacheFresh treats them as changed.
+func modTimesOf(paths []string) map[string]time.Time {
+	out := make(map[string]time.Time, len(paths))
+	for _, p := range paths {
+		if info, err := os.Stat(p); err == nil {
+			out[p] = info.ModTime()
+		}
+	}
+	return out
+}
+
+// New IR Tree Pipeline
 
 // NewRenderPipeline runs the new annotator + irtree + emitter pipeline.
 // It returns an EmitResult containing HTML + hydration metadata.
@@ -1185,13 +2280,17 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 // tested side-by-side before full migration.
 func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*renderer.EmitResult, error) {
 	if entryModule == nil || entryModule.Program == nil {
-		return nil, fmt.Errorf("entry module invalid or empty")
+		return nil, fmt.Errorf("entry module invalid or empty (ensure the page has a default export)")
 	}
 
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, page, entryModule.SourceCode)
 
-	tree := irtree.Build(entryModule.Program, ann)
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, b.irBuildOptions())
+	if len(tree.Errors) > 0 {
+		return nil, renderErrors(page, tree.Errors)
+	}
 	emitter := renderer.NewEmitter()
+	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	result := emitter.Emit(tree)
 
 	if len(result.Errors) > 0 {
@@ -1201,88 +2300,18 @@ func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*
 	return result, nil
 }
 
-// renderErrors folds renderer diagnostics into a single clear build error.
+// renderErrors folds renderer diagnostics into a single clear build error while
+// preserving the individual diagnostics for structured display.
 func renderErrors(page string, errs []error) error {
 	msgs := make([]string, 0, len(errs))
 	for _, e := range errs {
 		msgs = append(msgs, e.Error())
 	}
-	return fmt.Errorf("render failed (%s): %s", page, strings.Join(msgs, "; "))
-}
-
-// mergeCSS merges new CSS into the accumulated CSS, deduplicating by individual rule.
-// Rules are split respecting brace depth so @keyframes/@media rules with nested
-// braces are treated as a single unit.
-func mergeCSS(merged, newCSS string, seen map[string]bool) string {
-	if newCSS == "" {
-		return merged
+	return &renderError{
+		page:    page,
+		summary: fmt.Sprintf("render failed (%s): %s", page, strings.Join(msgs, "; ")),
+		errs:    errs,
 	}
-	var b strings.Builder
-	b.Grow(len(merged) + len(newCSS))
-	b.WriteString(merged)
-	if merged != "" && !strings.HasSuffix(merged, "\n") {
-		b.WriteByte('\n')
-	}
-	// Split newCSS into rules respecting brace depth
-	i := 0
-	for i < len(newCSS) {
-		openIdx := strings.IndexByte(newCSS[i:], '{')
-		if openIdx < 0 {
-			// No more rules — append any trailing text
-			rest := newCSS[i:]
-			if strings.TrimSpace(rest) != "" {
-				b.WriteString(rest)
-				b.WriteByte('\n')
-			}
-			break
-		}
-		openIdx += i
-		// Find matching close brace (respecting nested braces and strings)
-		depth := 1
-		j := openIdx + 1
-		inStr := byte(0)
-		for j < len(newCSS) && depth > 0 {
-			ch := newCSS[j]
-			if inStr != 0 {
-				if ch == '\\' && j+1 < len(newCSS) {
-					j += 2
-					continue
-				}
-				if ch == inStr {
-					inStr = 0
-				}
-			} else {
-				switch ch {
-				case '"', '\'':
-					inStr = ch
-				case '{':
-					depth++
-				case '}':
-					depth--
-				}
-			}
-			j++
-		}
-		if depth > 0 {
-			// Unmatched brace — append the rest and stop
-			rest := newCSS[i:]
-			if strings.TrimSpace(rest) != "" {
-				b.WriteString(rest)
-				b.WriteByte('\n')
-			}
-			break
-		}
-		// j points just past the closing '}'; rule is [i, j)
-		rule := newCSS[i:j]
-		key := strings.TrimSpace(rule)
-		if key != "" && !seen[key] {
-			seen[key] = true
-			b.WriteString(rule)
-			b.WriteByte('\n')
-		}
-		i = j
-	}
-	return b.String()
 }
 
 func findPages(dir string) ([]string, error) {
@@ -1299,7 +2328,7 @@ func findPages(dir string) ([]string, error) {
 
 	var pages []string
 	exts := map[string]bool{".tsx": true, ".ts": true, ".jsx": true, ".js": true, ".md": true, ".mdx": true}
-	fsutil.WalkExt(dir, exts, nil, func(path string, _ os.FileInfo) error {
+	_ = fsutil.WalkExt(dir, exts, nil, func(path string, _ os.FileInfo) error {
 		base := filepath.Base(path)
 		if !strings.HasPrefix(base, "_") {
 			pages = append(pages, path)
@@ -1318,13 +2347,11 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 		return ""
 	}
 
-	var modTime time.Time
-	if info, err := os.Stat(loadingPath); err == nil {
-		modTime = info.ModTime()
-	}
+	// Cache hit: reuse the rendered loading fallback only while every file in
+	// its module graph is unchanged.
 	if cached, ok := loadingEmitCache.Load(loadingPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
-		if entry.modTime.Equal(modTime) {
+		if layoutCacheFresh(entry) {
 			return entry.html
 		}
 	}
@@ -1336,15 +2363,12 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	defer lock.Unlock()
 	if cached, ok := loadingEmitCache.Load(loadingPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
-		if entry.modTime.Equal(modTime) {
+		if layoutCacheFresh(entry) {
 			return entry.html
 		}
 	}
 
-	bnd := bundler.New(b.Root)
-	bnd.SetEmitReact(b.Cfg.EmitReact)
-	bnd.SetPathAliases(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
-	bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)
+	bnd := b.newBundler()
 	bundle, err := bnd.Bundle(loadingPath)
 	if err != nil {
 		return ""
@@ -1353,17 +2377,27 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	if entryModule == nil || entryModule.Program == nil {
 		return ""
 	}
+	deps := layoutDepPaths(loadingPath, bundle)
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, loadingPath, entryModule.SourceCode)
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
-	tree := irtree.Build(entryModule.Program, ann)
+	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, b.irBuildOptions())
+	if len(tree.Errors) > 0 {
+		for _, e := range tree.Errors {
+			fmt.Fprintf(os.Stderr, "  %s✗ Error (loading %s):%s %v\n", cRed, loadingPath, cReset, e)
+		}
+		return ""
+	}
 	emitter := renderer.NewEmitter()
+	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitter.EvalJS = b.jsExprEvaluator()
 	emitResult := emitter.Emit(tree)
 
 	loadingEmitCache.Store(loadingPath, &layoutEmitCacheEntry{
-		modTime: modTime,
-		html:    emitResult.HTML,
+		html:     emitResult.HTML,
+		deps:     deps,
+		depTimes: modTimesOf(deps),
 	})
 	return emitResult.HTML
 }
@@ -1422,21 +2456,36 @@ func findLayoutStack(pagePath, pagesDir string) []string {
 // is merged after the inner content so an outer layout's own head/style lands
 // after (and thus after the nested section's). A layout that fails to build is
 // skipped so the page still emits unwrapped. Returns the CSS contributed by the
-// applied layouts.
-func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult) string {
+// applied layouts and the layout paths used, so the caller can record them as
+// page dependencies (a layout edit must rebuild every page it wraps).
+func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult) (string, []string, bool) {
 	var css string
+	var used []string
+	hasSignals := false
 	for _, layoutPath := range findLayoutStack(page, b.Cfg.PagesDir) {
-		layoutRes, layoutCSS, err := b.executeLayoutPipeline(layoutPath, emitResult.HTML, nil)
+		layoutRes, layoutCSS, layoutDeps, layoutHasSignals, err := b.executeLayoutPipeline(layoutPath, emitResult.HTML, nil)
 		if err != nil {
 			continue
 		}
+		hasSignals = hasSignals || layoutHasSignals
 		emitResult.HTML = layoutRes.HTML
 		emitResult.HeadHTML = emitResult.HeadHTML + layoutRes.HeadHTML
 		emitResult.ScriptHTML = emitResult.ScriptHTML + layoutRes.ScriptHTML
 		emitResult.StyleHTML = emitResult.StyleHTML + layoutRes.StyleHTML
+		// Carry the layout's client components into the page so its interactivity
+		// hydrates. Their compact slot IDs are namespaced (IDPrefix) so they can't
+		// collide with the page's.
+		emitResult.Signatures = append(emitResult.Signatures, layoutRes.Signatures...)
+		emitResult.ListComponents = append(emitResult.ListComponents, layoutRes.ListComponents...)
+		if layoutRes.HasLinks {
+			emitResult.HasLinks = true
+		}
 		css += layoutCSS
+		// Record the layout's full module graph (not just the layout file) so
+		// editing a component the layout imports rebuilds every wrapped page.
+		used = append(used, layoutDeps...)
 	}
-	return css
+	return css, used, hasSignals
 }
 
 var (
@@ -1479,29 +2528,6 @@ func findLayoutFile(pagePath, pagesDir string, names []string) string {
 // layoutCache caches findLayout results to avoid repeated os.Stat calls.
 var layoutCache sync.Map
 
-func extractCSSModuleBindings(prog *ast.Program, entryPath string, cssModules map[string]*bundler.CSSModuleInfo) []cssModuleBinding {
-	var bindings []cssModuleBinding
-	entryDir := filepath.Dir(entryPath)
-	for _, stmt := range prog.Body {
-		imp, ok := stmt.(*ast.ImportStmt)
-		if !ok || imp.Default == "" {
-			continue
-		}
-		src := strings.Trim(imp.Source, "\"'")
-		if !strings.Contains(src, ".module.css") {
-			continue
-		}
-		resolved := filepath.Clean(filepath.Join(entryDir, src))
-		if info, ok := cssModules[resolved]; ok {
-			bindings = append(bindings, cssModuleBinding{
-				LocalVar: imp.Default,
-				Mappings: info.Mappings,
-			})
-		}
-	}
-	return bindings
-}
-
 // BuildMiddleware compiles middleware.ts (if present) to .krate/middleware.js.
 func (b *Builder) BuildMiddleware() {
 	middlewarePaths := []string{
@@ -1525,7 +2551,7 @@ func (b *Builder) BuildMiddleware() {
 	fmt.Printf("  %s▶ Middleware%s %s\n", cGreen, cReset, filepath.Base(middlewarePath))
 
 	outDir := filepath.Join(b.Root, ".krate")
-	os.MkdirAll(outDir, 0755)
+	_ = os.MkdirAll(outDir, 0755)
 	outPath := filepath.Join(outDir, "middleware.js")
 
 	result := api.Build(api.BuildOptions{
@@ -1546,17 +2572,8 @@ func (b *Builder) BuildMiddleware() {
 	}
 
 	if len(result.OutputFiles) > 0 {
-		os.WriteFile(outPath, result.OutputFiles[0].Contents, 0644)
+		_ = fsutil.WriteFileAtomic(outPath, result.OutputFiles[0].Contents, 0644)
 	}
-}
-func extractLiteralValue(expr ast.Expr) string {
-	switch e := expr.(type) {
-	case *ast.Literal:
-		return e.Value
-	case *ast.Identifier:
-		return e.Name
-	}
-	return ""
 }
 
 // extractBuildComponentName extracts the component name from a file path for server component marking.
@@ -1619,7 +2636,7 @@ func (b *Builder) jsExprEvaluator() func(code string) (string, error) {
 
 func pageToOutput(page, pagesDir string) string {
 	// Generated pages in .krategen/ use route derived from file path relative to .krategen/
-	// Trailing "/index" is stripped so "docs/index" → output at docs/index.html (route /docs/)
+	// Trailing "/index" is stripped so "docs/index" -> output at docs/index.html (route /docs/)
 	if strings.Contains(page, ".krate/gen") || strings.Contains(page, ".krate\\gen") {
 		idx := strings.Index(page, ".krate/gen")
 		if idx == -1 {
@@ -1644,12 +2661,12 @@ func pageToOutput(page, pagesDir string) string {
 		return ""
 	}
 	// Normalize to forward slashes so the returned OutName is a portable URL
-	// path ("video/[id]" on every OS) — it feeds manifest routes, shell reads,
+	// path ("video/[id]" on every OS) - it feeds manifest routes, shell reads,
 	// and region requests. Callers that touch the filesystem join it with
 	// filepath.Join, which re-applies the OS separator.
 	name := filepath.ToSlash(strings.TrimSuffix(rel, filepath.Ext(rel)))
 	// A nested index page (blog/index.tsx) is the directory's default page: it
-	// maps to the parent route (blog) so /blog/ serves it — not the odd
+	// maps to the parent route (blog) so /blog/ serves it - not the odd
 	// /blog/index URL (which would 404 into a directory listing at /blog/).
 	// Matches the .krate/gen behavior just above.
 	name = strings.TrimSuffix(name, "/index")
@@ -1701,7 +2718,7 @@ func (b *Builder) registerWorkers(files map[string]string, esm map[string]bool) 
 }
 
 // writeWorkerBundles compiles every registered worker source into the output
-// directory at its hashed /workers/… URL. Workers are produced with esbuild so
+// directory at its hashed /workers/... URL. Workers are produced with esbuild so
 // their own relative imports are bundled into a single browser-safe file.
 func (b *Builder) writeWorkerBundles() error {
 	b.workerMu.Lock()
@@ -1764,6 +2781,7 @@ func (b *Builder) writeWorkerBundles() error {
 			Write:            true,
 			Loader:           map[string]api.Loader{ext: loader},
 			MinifyWhitespace: b.Cfg.ShouldMinifyJS(),
+			Sourcemap:        sourceMapMode(b.Cfg.Sourcemap),
 			LogLevel:         api.LogLevelSilent,
 		})
 		if len(result.Errors) > 0 {
@@ -1779,9 +2797,19 @@ func (b *Builder) writeWorkerBundles() error {
 	// Emit a tiny index of emitted workers for tooling/debugging.
 	if len(built) > 0 {
 		idx, _ := json.MarshalIndent(built, "", "  ")
-		os.WriteFile(filepath.Join(b.Cfg.OutDir, "workers.json"), idx, 0644)
+		_ = fsutil.WriteFileAtomic(filepath.Join(b.Cfg.OutDir, "workers.json"), idx, 0644)
 	}
 	return nil
+}
+
+// sourceMapMode maps Krate's sourcemap config to esbuild's mode. Linked maps
+// are written next to the output and referenced by a comment; when disabled,
+// none are produced.
+func sourceMapMode(enabled bool) api.SourceMap {
+	if enabled {
+		return api.SourceMapLinked
+	}
+	return api.SourceMapNone
 }
 
 // registerDynamicChunks collects dynamic-import chunk registrations from a page
@@ -1802,7 +2830,7 @@ func (b *Builder) registerDynamicChunks(files map[string]string) {
 }
 
 // writeDynamicChunkBundles compiles every registered dynamic-import chunk into
-// the output directory at its hashed /chunks/… URL. Chunks are produced with
+// the output directory at its hashed /chunks/... URL. Chunks are produced with
 // esbuild as ES modules (the browser's `import()` returns their namespace), with
 // their own relative imports bundled into a single browser-safe file.
 func (b *Builder) writeDynamicChunkBundles() error {
@@ -1853,6 +2881,7 @@ func (b *Builder) writeDynamicChunkBundles() error {
 			Write:            true,
 			Loader:           map[string]api.Loader{ext: loader},
 			MinifyWhitespace: b.Cfg.ShouldMinifyJS(),
+			Sourcemap:        sourceMapMode(b.Cfg.Sourcemap),
 			LogLevel:         api.LogLevelSilent,
 		})
 		if len(result.Errors) > 0 {
@@ -1870,17 +2899,17 @@ func (b *Builder) writeDynamicChunkBundles() error {
 // with the URL of the page's own hydration script. Hydration scripts are plain
 // classic <script> files where `import.meta` would be a SyntaxError, but
 // `new URL('../x', import.meta.url)` is a common way to reference assets
-// relative to the current module — substituting the script's real served URL
+// relative to the current module - substituting the script's real served URL
 // keeps those resolutions working. jsFile is the hashed script filename.
-func substituteImportMetaURL(hydrationJS, outName, jsFile string) string {
+func substituteImportMetaURL(hydrationJS, outName, jsFile, basePath string) string {
 	if !strings.Contains(hydrationJS, "import.meta.url") {
 		return hydrationJS
 	}
-	return strings.ReplaceAll(hydrationJS, "import.meta.url", strconv.Quote(pageScriptSrc(outName, jsFile)))
+	return strings.ReplaceAll(hydrationJS, "import.meta.url", strconv.Quote(pageScriptSrc(outName, jsFile, basePath)))
 }
 
 // writeAssetFiles copies every registered asset into the output directory at
-// its hashed /assets/… URL path. Safe to call once per page build: the copy is
+// its hashed /assets/... URL path. Safe to call once per page build: the copy is
 // content-addressed so repeated writes are idempotent.
 func (b *Builder) writeAssetFiles(assets map[string]string) error {
 	for src, url := range assets {
@@ -1900,7 +2929,7 @@ func (b *Builder) writeAssetFiles(assets map[string]string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(dst, data, 0644); err != nil {
+		if err := fsutil.WriteFileAtomic(dst, data, 0644); err != nil {
 			return err
 		}
 	}
@@ -1943,6 +2972,28 @@ func (b *Builder) walkAndTransformIcons(node ast.Node) {
 		n.Value = b.transformIconExpr(n.Value)
 	case *ast.ExprStmt:
 		n.Expression = b.transformIconExpr(n.Expression)
+	case *ast.ArrowFn:
+		for _, stmt := range n.Body {
+			b.walkAndTransformIcons(stmt)
+		}
+	case *ast.IfStmt:
+		b.walkAndTransformIcons(n.Test)
+		for _, s := range n.Consequent {
+			b.walkAndTransformIcons(s)
+		}
+		for _, s := range n.Alternate {
+			b.walkAndTransformIcons(s)
+		}
+	case *ast.BlockStmt:
+		for _, s := range n.Body {
+			b.walkAndTransformIcons(s)
+		}
+	case *ast.VarStmt:
+		for _, d := range n.Decls {
+			if d.Init != nil {
+				d.Init = b.transformIconExpr(d.Init)
+			}
+		}
 	}
 }
 
@@ -1969,6 +3020,7 @@ func (b *Builder) transformIconExpr(expr ast.Expr) ast.Expr {
 			}
 		}
 	case *ast.ConditionalExpr:
+		e.Test = b.transformIconExpr(e.Test)
 		e.Consequent = b.transformIconExpr(e.Consequent)
 		e.Alternate = b.transformIconExpr(e.Alternate)
 	case *ast.JSXFragment:
@@ -1983,12 +3035,27 @@ func (b *Builder) transformIconExpr(expr ast.Expr) ast.Expr {
 				}
 			}
 		}
+	case *ast.BinaryExpr:
+		// `{cond && <Icon .../>}` (and other operators) - recurse both sides so
+		// icons inside short-circuit guards still compile to SVG.
+		e.Left = b.transformIconExpr(e.Left)
+		e.Right = b.transformIconExpr(e.Right)
+	case *ast.CallExpr:
+		// `{items.map((x) => <Icon .../>)}` and similar call-argument JSX.
+		e.Callee = b.transformIconExpr(e.Callee)
+		for i := range e.Args {
+			e.Args[i] = b.transformIconExpr(e.Args[i])
+		}
+	case *ast.ArrowFn:
+		for _, stmt := range e.Body {
+			b.walkAndTransformIcons(stmt)
+		}
 	}
 	return expr
 }
 
 // iconNameIsLiteral reports whether an <Icon> element's `name` attribute is a
-// static string literal — the only form transformIconExpr can resolve to an
+// static string literal - the only form transformIconExpr can resolve to an
 // SVG at build time. Icons with a dynamic name (e.g. name={icon} or a ternary)
 // are deliberately left untouched so the SSREval/runtime path can resolve them
 // against the real prop values instead of falling back to an empty name error.
@@ -2277,9 +3344,21 @@ func (b *Builder) compileImageToPicture(orig *ast.JSXElement) *ast.JSXElement {
 		return imageErrorSpan("[Image: missing src]")
 	}
 
+	publicDir := b.Cfg.PublicDir
+	if publicDir == "" {
+		publicDir = filepath.Join(b.Root, "public")
+	}
+
+	// `src` is a URL, not a filesystem path. A leading "/" is the site root on
+	// every platform - do NOT let filepath.IsAbs treat it as an OS-absolute
+	// path (it does on Linux, which made `/hero.png` resolve to the drive root).
+	// Only a genuinely absolute filesystem path (e.g. `C:\assets\hero.png`) is
+	// used verbatim.
 	resolvedSrc := src
-	if !filepath.IsAbs(src) {
-		resolvedSrc = filepath.Join(b.Root, "public", src)
+	if strings.HasPrefix(src, "/") {
+		resolvedSrc = filepath.Join(publicDir, strings.TrimPrefix(src, "/"))
+	} else if !filepath.IsAbs(src) {
+		resolvedSrc = filepath.Join(publicDir, src)
 	}
 
 	result, err := imageproc.ProcessImage(b.Root, resolvedSrc, reqW, reqH, quality, placeholder != "empty")
@@ -2333,7 +3412,7 @@ func (b *Builder) compileImageToPicture(orig *ast.JSXElement) *ast.JSXElement {
 	// CLS mitigation: reserve the intrinsic aspect ratio so the browser can
 	// size the image before it loads, plus a blurred LQIP background. Vectors
 	// (e.g. SVG) are passed through without decoding, so they may not know
-	// their intrinsic dimensions — don't force an aspect-ratio in that case.
+	// their intrinsic dimensions - don't force an aspect-ratio in that case.
 	style := ""
 	if result.Width > 0 && result.Height > 0 {
 		style = fmt.Sprintf("width:100%%;height:auto;aspect-ratio:%d/%d", result.Width, result.Height)
@@ -2485,7 +3564,7 @@ func evalAttrString(expr ast.Expr) (string, bool) {
 }
 
 func (b *Builder) BuildAllAPI() error {
-	apiSrcDir := filepath.Join(b.Root, "src", "api")
+	apiSrcDir := filepath.Join(b.Root, filepath.FromSlash(gohost.DefaultAPIDir))
 	if _, err := os.Stat(apiSrcDir); os.IsNotExist(err) {
 		return nil // No API directory present, skip silently
 	}
@@ -2531,8 +3610,11 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(routes))
-	apiSrcDir := filepath.Join(b.Root, "src", "api")
+	apiSrcDir := filepath.Join(b.Root, filepath.FromSlash(gohost.DefaultAPIDir))
 	pool := newWorkerPool(buildWorkerLimit())
+
+	var metaMu sync.Mutex
+	metas := make(map[string]apiRouteMeta, len(routes))
 
 	for _, route := range routes {
 		wg.Add(1)
@@ -2541,10 +3623,22 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 			pool.acquire()
 			defer pool.release()
 			fmt.Printf("  %s▶ API%s %s\n", cGreen, cReset, filepath.Base(r))
-			if err := b.compileSingleRoute(r, apiSrcDir); err != nil {
+			meta, err := func() (m apiRouteMeta, err error) {
+				err = safe.Run(func() error {
+					var e error
+					m, e = b.compileSingleRoute(r, apiSrcDir)
+					return e
+				})
+				return
+			}()
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "  %s✗ API Error:%s %s: %v\n", cRed, cReset, r, err)
 				errCh <- err
+				return
 			}
+			metaMu.Lock()
+			metas[meta.File] = meta
+			metaMu.Unlock()
 		}(route)
 	}
 
@@ -2553,68 +3647,166 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 	if len(errCh) > 0 {
 		return <-errCh
 	}
+	b.mergeAPIRouteMeta(metas)
 	return nil
 }
 
-func (b *Builder) compileSingleRoute(file string, apiSrcDir string) error {
+// apiRouteMeta records one compiled JS API route so the dev/prod server can
+// route Node-only routes (those importing external modules / node builtins that
+// the embedded QuickJS runtime cannot run) to the Node sidecar.
+type apiRouteMeta struct {
+	// File is the out-dir relative output, e.g. "users/[id].js".
+	File string `json:"file"`
+	// NodeOnly is true when the bundle still has external imports.
+	NodeOnly bool `json:"nodeOnly"`
+}
+
+func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMeta, error) {
 	relPath, err := filepath.Rel(apiSrcDir, file)
 	if err != nil {
-		return err
+		return apiRouteMeta{}, err
 	}
 	outName := strings.TrimSuffix(relPath, filepath.Ext(relPath)) + ".js"
-	outPath := filepath.Join(b.Cfg.OutDir, "api", outName)
 
-	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
-		return err
+	// Two artifacts so each runtime gets the shape it wants:
+	//   dist/api/<name>.js       IIFE + bundled  -> embedded QuickJS
+	//   dist/api-node/<name>.js  ESM  + externals -> Node sidecar
+	quickjsPath := filepath.Join(b.Cfg.OutDir, "api", outName)
+	nodePath := filepath.Join(b.Cfg.OutDir, "api-node", outName)
+	for _, p := range []string{quickjsPath, nodePath} {
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			return apiRouteMeta{}, err
+		}
 	}
 
-	opts := api.BuildOptions{
+	// QuickJS artifact: IIFE with a global name so the runtime loads it with a
+	// plain eval and reads exports off `__krate_route` (no runtime regex
+	// export-stripping); deps are bundled so the route is self-contained.
+	quickjsOpts := api.BuildOptions{
 		EntryPoints: []string{file},
 		Bundle:      true,
 		Platform:    api.PlatformNode,
-		Format:      api.FormatESModule,   // Compiles cleanly to ES modules matching your runner
-		Packages:    api.PackagesExternal, // Keeps third-party node_modules completely external
-		Outfile:     outPath,
+		Format:      api.FormatIIFE,
+		GlobalName:  "__krate_route",
+		Outfile:     quickjsPath,
 		Write:       true,
-		Metafile:    true, // Generates the dep-graph string in-memory
+		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),
+		Metafile:    true,
+	}
+	// Node artifact: ESM with third-party packages external (Node resolves them
+	// from node_modules at runtime, including native addons).
+	nodeOpts := api.BuildOptions{
+		EntryPoints: []string{file},
+		Bundle:      true,
+		Platform:    api.PlatformNode,
+		Format:      api.FormatESModule,
+		Packages:    api.PackagesExternal,
+		Outfile:     nodePath,
+		Write:       true,
+		Sourcemap:   sourceMapMode(b.Cfg.Sourcemap),
+		Metafile:    true,
 	}
 
 	if b.Cfg.ShouldMinifyJS() {
-		opts.MinifyWhitespace = true
-		opts.MinifyIdentifiers = true
-		opts.MinifySyntax = true
+		quickjsOpts.MinifyWhitespace = true
+		quickjsOpts.MinifyIdentifiers = true
+		quickjsOpts.MinifySyntax = true
+		nodeOpts.MinifyWhitespace = true
+		nodeOpts.MinifyIdentifiers = true
+		nodeOpts.MinifySyntax = true
 	}
 
-	result := api.Build(opts)
-
-	if len(result.Errors) > 0 {
-		formatted := api.FormatMessages(result.Errors, api.FormatMessagesOptions{
-			Kind:  api.ErrorMessage,
-			Color: true, // Retains your pretty terminal compiler colors
-		})
-		var sb strings.Builder
-		for _, msg := range formatted {
-			sb.WriteString(msg)
-		}
-		return fmt.Errorf("esbuild compilation failed:\n%s", sb.String())
+	quickjsResult := api.Build(quickjsOpts)
+	if len(quickjsResult.Errors) > 0 {
+		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(quickjsResult.Errors))
+	}
+	nodeResult := api.Build(nodeOpts)
+	if len(nodeResult.Errors) > 0 {
+		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(nodeResult.Errors))
 	}
 
-	// Extract dependency tracking from the in-memory metafile string
-	if result.Metafile != "" {
+	meta := apiRouteMeta{File: filepath.ToSlash(outName)}
+
+	// Node-only = imports still external after bundling (node builtins / native
+	// deps the embedded runtime cannot provide). Package deps that bundle cleanly
+	// stay embedded, so dep-using routes still run in QuickJS.
+	if quickjsResult.Metafile != "" {
 		type esbuildMeta struct {
-			Inputs map[string]interface{} `json:"inputs"`
+			Inputs  map[string]interface{} `json:"inputs"`
+			Outputs map[string]struct {
+				Imports []struct {
+					External bool `json:"external"`
+				} `json:"imports"`
+			} `json:"outputs"`
 		}
-		var meta esbuildMeta
-		if err := json.Unmarshal([]byte(result.Metafile), &meta); err == nil {
+		var m esbuildMeta
+		if err := json.Unmarshal([]byte(quickjsResult.Metafile), &m); err == nil {
 			var deps []string
-			for inputPath := range meta.Inputs {
+			for inputPath := range m.Inputs {
 				// Convert to pristine workspace absolute paths for the file watcher
 				deps = append(deps, filepath.Clean(filepath.Join(b.Root, inputPath)))
 			}
 			// Re-inject back into your framework's reactive watch graph
 			b.recordDeps(file, deps)
+
+			for _, out := range m.Outputs {
+				for _, imp := range out.Imports {
+					if imp.External {
+						meta.NodeOnly = true
+					}
+				}
+			}
 		}
 	}
 
-	return nil
+	return meta, nil
+}
+
+// formatEsbuildErrors renders esbuild messages into a single styled string.
+func formatEsbuildErrors(errs []api.Message) string {
+	formatted := api.FormatMessages(errs, api.FormatMessagesOptions{
+		Kind:  api.ErrorMessage,
+		Color: true, // Retains your pretty terminal compiler colors
+	})
+	var sb strings.Builder
+	for _, msg := range formatted {
+		sb.WriteString(msg)
+	}
+	return sb.String()
+}
+
+// mergeAPIRouteMeta writes/updates `.krate/api-routes.json`, preserving entries
+// for routes not touched by this (possibly incremental) build.
+func (b *Builder) mergeAPIRouteMeta(updates map[string]apiRouteMeta) {
+	if len(updates) == 0 {
+		return
+	}
+	manifestPath := filepath.Join(b.Root, ".krate", "api-routes.json")
+	merged := map[string]apiRouteMeta{}
+	if data, err := os.ReadFile(manifestPath); err == nil {
+		var existing []apiRouteMeta
+		if json.Unmarshal(data, &existing) == nil {
+			for _, m := range existing {
+				merged[m.File] = m
+			}
+		}
+	}
+	for k, v := range updates {
+		merged[k] = v
+	}
+	files := make([]string, 0, len(merged))
+	for f := range merged {
+		files = append(files, f)
+	}
+	sort.Strings(files)
+	list := make([]apiRouteMeta, 0, len(files))
+	for _, f := range files {
+		list = append(list, merged[f])
+	}
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0755); err != nil {
+		return
+	}
+	if data, err := json.MarshalIndent(list, "", "  "); err == nil {
+		_ = fsutil.WriteFileAtomic(manifestPath, data, 0644)
+	}
 }

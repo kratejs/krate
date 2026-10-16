@@ -1,4 +1,4 @@
-export { defineConfig, docs, sitemap } from "./config.js";
+export { defineConfig, docs, sitemap, feed, defineContent } from "./config.js";
 export type {
   KrateConfig,
   PluginConfig,
@@ -13,6 +13,19 @@ export type {
   RobotsConfig,
   DocsPluginOptions,
   DocsSidebarItem,
+  DocsSearchOptions,
+  DocsThemeDescriptor,
+  DocsThemeOptions,
   SitemapPluginOptions,
+  FeedPluginOptions,
   RuntimeName,
+  ContentConfig,
+  ContentCollection,
+  ContentField,
+  ContentFieldSpec,
+  ContentFieldType,
+  ChecksConfig,
+  CheckSeverity,
+  CheckRuleId,
 } from "./config.js";
+export type { DocsLayoutProps } from "./config.js";

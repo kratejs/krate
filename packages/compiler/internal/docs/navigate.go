@@ -12,23 +12,32 @@ type Breadcrumb struct {
 	IsLast bool   `json:"isLast"` // true if this is the current page
 }
 
-// SortPages sorts pages by directory, then order, then title.
+// SortPages sorts pages by directory, then order, then title. A per-item
+// `sidebar: {order}` override wins over the top-level `order:` frontmatter.
 func SortPages(pages []Page) {
 	sort.Slice(pages, func(i, j int) bool {
 		if pages[i].Dir != pages[j].Dir {
 			return pages[i].Dir < pages[j].Dir
 		}
-		if pages[i].Order != pages[j].Order {
-			return pages[i].Order < pages[j].Order
+		oi, oj := effectiveOrder(pages[i]), effectiveOrder(pages[j])
+		if oi != oj {
+			return oi < oj
 		}
 		return pages[i].Title < pages[j].Title
 	})
 }
 
+func effectiveOrder(p Page) int {
+	if p.SidebarCfg != nil && p.SidebarCfg.Order > 0 {
+		return p.SidebarCfg.Order
+	}
+	return p.Order
+}
+
 // NormalizePagePath strips trailing "/index" from a page path for URL generation.
-// "index" → ""
-// "guides/index" → "guides"
-// "guides/advanced" → "guides/advanced"
+// "index" -> ""
+// "guides/index" -> "guides"
+// "guides/advanced" -> "guides/advanced"
 func NormalizePagePath(path string) string {
 	if path == "index" || path == "" {
 		return ""
@@ -36,24 +45,84 @@ func NormalizePagePath(path string) string {
 	return strings.TrimSuffix(path, "/index")
 }
 
+// DocsBasePath is the URL prefix the docs plugin mounts pages under. It is the
+// single source of truth for absolute docs URLs (sidebar, prev/next links, and
+// breadcrumbs) so they agree.
+const DocsBasePath = "/docs"
+
 // PageURL returns the full URL for a docs page path.
 func PageURL(path string) string {
 	normalized := NormalizePagePath(path)
 	if normalized == "" {
-		return "/docs/"
+		return DocsBasePath + "/"
 	}
-	return "/docs/" + normalized + "/"
+	return DocsBasePath + "/" + normalized + "/"
+}
+
+// pagePathURL returns a page's URL, preferring the plugin-computed (locale- and
+// version-aware) URL when present.
+func pagePathURL(p Page) string {
+	if p.URL != "" {
+		return p.URL
+	}
+	return PageURL(p.Path)
+}
+
+// LocaleURL returns the absolute URL for a docs page in a locale. The default
+// locale is unprefixed (/docs/...); other locales are path-prefixed
+// (/fr/docs/...).
+func LocaleURL(locale, defaultLocale, path string) string {
+	base := PageURL(path)
+	if locale == "" || locale == defaultLocale {
+		return base
+	}
+	return "/" + locale + base
+}
+
+// BuildBreadcrumbsURL is BuildBreadcrumbs with a locale prefix applied to every
+// non-default locale's crumb URLs.
+func BuildBreadcrumbsURL(locale, defaultLocale, path string) []Breadcrumb {
+	crumbs := BuildBreadcrumbs(path)
+	if locale == "" || locale == defaultLocale {
+		return crumbs
+	}
+	for i := range crumbs {
+		if crumbs[i].URL != "" {
+			crumbs[i].URL = "/" + locale + crumbs[i].URL
+		}
+	}
+	return crumbs
 }
 
 // BuildSidebarTree builds a recursive sidebar tree from pages.
-// Pages are grouped by their directory structure — each subdirectory
+// Pages are grouped by their directory structure - each subdirectory
 // becomes a nested SidebarItem with Children, supporting infinite nesting.
+// Frontmatter navigation metadata (`sidebar: {...}` and top-level `badge`) is
+// applied here: `hidden` pages are dropped from the nav (still renderable and
+// searchable), `label` overrides the displayed title, `order` overrides the
+// sort position, and `badge` / `icon` decorate the entry. Directory sections
+// inherit `collapsible` / `defaultOpen` / `badge` / `icon` from their index
+// page.
 func BuildSidebarTree(pages []Page) []SidebarItem {
 	if len(pages) == 0 {
 		return nil
 	}
 
 	SortPages(pages)
+
+	// Per-page nav metadata keyed by URL so directory sections can inherit it
+	// from their index page (matching sidebarIndexURLNav's resolution).
+	navByURL := make(map[string]*SidebarNavConfig)
+	badgeByURL := make(map[string]*Badge)
+	for _, p := range pages {
+		url := pagePathURL(p)
+		if p.SidebarCfg != nil {
+			navByURL[url] = p.SidebarCfg
+		}
+		if p.Badge != nil {
+			badgeByURL[url] = p.Badge
+		}
+	}
 
 	type dirNode struct {
 		item    SidebarItem
@@ -67,10 +136,31 @@ func BuildSidebarTree(pages []Page) []SidebarItem {
 
 	// Build the tree from the sorted pages list
 	for _, p := range pages {
+		cfg := p.SidebarCfg
+		if cfg != nil && cfg.Hidden {
+			continue
+		}
 		dir := p.Dir
+		title := p.Title
+		var icon string
+		var badge *Badge
+		if cfg != nil {
+			if cfg.Label != "" {
+				title = cfg.Label
+			}
+			icon = cfg.Icon
+			if cfg.Badge != nil {
+				badge = cfg.Badge
+			}
+		}
+		if badge == nil {
+			badge = p.Badge
+		}
 		linkItem := SidebarItem{
-			Title: p.Title,
-			URL:   PageURL(p.Path),
+			Title: title,
+			URL:   pagePathURL(p),
+			Icon:  icon,
+			Badge: badge,
 		}
 		if dir == "" {
 			root.item.Children = append(root.item.Children, linkItem)
@@ -103,8 +193,22 @@ func BuildSidebarTree(pages []Page) []SidebarItem {
 		for _, subdir := range n.subdirs {
 			n.item.Children = append(n.item.Children, flatten(subdir))
 		}
+		if n.item.Title != "__root__" {
+			if idxURL := sidebarIndexURLNav(n.item); idxURL != "" {
+				if cfg, ok := navByURL[idxURL]; ok {
+					n.item.Icon = firstNonEmpty(cfg.Icon, n.item.Icon)
+					n.item.Collapsible = n.item.Collapsible || cfg.Collapsible
+					n.item.Expanded = n.item.Expanded || cfg.DefaultOpen
+					if cfg.Badge != nil {
+						n.item.Badge = cfg.Badge
+					} else if b, ok2 := badgeByURL[idxURL]; ok2 {
+						n.item.Badge = b
+					}
+				}
+			}
+		}
 		// Stable sort: sections after links, sections alphabetically,
-		// links preserve insertion order (from SortPages: Dir→Order→Title)
+		// links preserve insertion order (from SortPages: Dir->Order->Title)
 		sort.SliceStable(n.item.Children, func(i, j int) bool {
 			hasChildrenI := len(n.item.Children[i].Children) > 0
 			hasChildrenJ := len(n.item.Children[j].Children) > 0
@@ -132,8 +236,15 @@ func BuildSidebarTree(pages []Page) []SidebarItem {
 	return append(root.item.Children, dirSections...)
 }
 
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 // BuildBreadcrumbs returns the breadcrumb trail as a slice.
-// Index pages (e.g. "guides/index") produce breadcrumbs ending at the directory name ("Guides") — no "Index" crumb.
+// Index pages (e.g. "guides/index") produce breadcrumbs ending at the directory name ("Guides") - no "Index" crumb.
 func BuildBreadcrumbs(path string) []Breadcrumb {
 	path = NormalizePagePath(path)
 	if path == "" {
@@ -151,7 +262,7 @@ func BuildBreadcrumbs(path string) []Breadcrumb {
 		isLast := (i == len(parts)-1)
 		result = append(result, Breadcrumb{
 			Label:  label,
-			URL:    accum,
+			URL:    DocsBasePath + accum + "/",
 			IsLast: isLast,
 		})
 	}
@@ -175,7 +286,16 @@ func PathToTitle(path string) string {
 // EnrichSidebarItems pre-computes IndexURL, Collapsible, and Expanded fields
 // for each sidebar item relative to the given currentPath.
 // This allows the TSX renderer to use these values directly without function calls.
+// Values already set by frontmatter (sidebar: {collapsible, defaultOpen}) are
+// preserved and OR'd with the auto-derived values.
 func EnrichSidebarItems(items []SidebarItem, currentPath string) []SidebarItem {
+	return EnrichSidebarItemsURL(items, PageURL(currentPath))
+}
+
+// EnrichSidebarItemsURL is EnrichSidebarItems keyed by the current page's full
+// (locale/version-aware) URL, so active/expanded state is correct under i18n
+// and versioning.
+func EnrichSidebarItemsURL(items []SidebarItem, activeURL string) []SidebarItem {
 	if len(items) == 0 {
 		return items
 	}
@@ -183,11 +303,11 @@ func EnrichSidebarItems(items []SidebarItem, currentPath string) []SidebarItem {
 	for i, item := range items {
 		out[i] = item
 		out[i].IndexURL = sidebarIndexURLNav(item)
-		out[i].Collapsible = len(item.Children) > 0 && out[i].IndexURL != ""
-		out[i].Expanded = sidebarItemActiveNav(item, currentPath)
+		out[i].Collapsible = item.Collapsible || (len(item.Children) > 0 && out[i].IndexURL != "")
+		out[i].Expanded = item.Expanded || sidebarItemActiveNav(item, activeURL)
 		if len(item.Children) > 0 {
 			filtered := filterSidebarIndexChildNav(item.Children, out[i].IndexURL)
-			out[i].Children = EnrichSidebarItems(filtered, currentPath)
+			out[i].Children = EnrichSidebarItemsURL(filtered, activeURL)
 		}
 	}
 	return out
@@ -228,12 +348,12 @@ func sidebarIndexURLNav(item SidebarItem) string {
 	return ""
 }
 
-func sidebarItemActiveNav(item SidebarItem, currentPath string) bool {
-	if item.Active || (item.URL != "" && item.URL == PageURL(currentPath)) {
+func sidebarItemActiveNav(item SidebarItem, activeURL string) bool {
+	if item.Active || (item.URL != "" && item.URL == activeURL) {
 		return true
 	}
 	for _, child := range item.Children {
-		if sidebarItemActiveNav(child, currentPath) {
+		if sidebarItemActiveNav(child, activeURL) {
 			return true
 		}
 	}

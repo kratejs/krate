@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"fmt"
+	"html"
 	"regexp"
 	"strings"
 
@@ -11,13 +12,182 @@ import (
 
 // RenderToHTML converts Markdown source to HTML using the given config.
 func RenderToHTML(src string, cfg Config) string {
-	lines := strings.Split(src, "\n")
+	body, footnotes := extractFootnotes(src)
+	lines := strings.Split(body, "\n")
 	blocks := parseBlocks(lines, cfg)
 	var out strings.Builder
 	for _, b := range blocks {
 		out.WriteString(renderBlock(b, cfg))
 	}
+	html := out.String()
+	if len(footnotes) > 0 {
+		html = renderFootnotes(html, footnotes, cfg)
+	}
+	if cfg.Math {
+		html = wrapMath(html)
+	}
+	return html
+}
+
+// Footnotes
+
+type footnoteDef struct {
+	id   string
+	text string
+}
+
+var footnoteDefRe = regexp.MustCompile(`^\[\^([^\]]+)\]:\s*(.*)$`)
+var footnoteRefRe = regexp.MustCompile(`\[\^([^\]]+)\]`)
+
+// extractFootnotes pulls `[^id]: text` definitions out of the source, returning
+// the remaining body and the definitions in document order.
+func extractFootnotes(src string) (string, []footnoteDef) {
+	lines := strings.Split(src, "\n")
+	var out []string
+	var defs []footnoteDef
+	inFence := false
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		// Footnote definitions inside fenced code blocks are code, not defs.
+		if fenceRe.MatchString(trimmed) {
+			inFence = !inFence
+			out = append(out, lines[i])
+			continue
+		}
+		if inFence {
+			out = append(out, lines[i])
+			continue
+		}
+		m := footnoteDefRe.FindStringSubmatch(lines[i])
+		if m == nil {
+			out = append(out, lines[i])
+			continue
+		}
+		text := m[2]
+		// Continuation lines are indented.
+		for i+1 < len(lines) && (strings.HasPrefix(lines[i+1], "    ") || strings.HasPrefix(lines[i+1], "\t")) {
+			text += " " + strings.TrimSpace(lines[i+1])
+			i++
+		}
+		defs = append(defs, footnoteDef{id: m[1], text: strings.TrimSpace(text)})
+	}
+	return strings.Join(out, "\n"), defs
+}
+
+// renderFootnotes replaces `[^id]` references with numbered links and appends a
+// footnotes section. Unreferenced definitions are omitted.
+func renderFootnotes(html string, defs []footnoteDef, cfg Config) string {
+	byID := map[string]footnoteDef{}
+	for _, d := range defs {
+		byID[d.id] = d
+	}
+	numbers := map[string]int{}
+	order := []string{}
+	html = footnoteRefRe.ReplaceAllStringFunc(html, func(match string) string {
+		id := footnoteRefRe.FindStringSubmatch(match)[1]
+		if _, ok := byID[id]; !ok {
+			return match
+		}
+		n, ok := numbers[id]
+		if !ok {
+			n = len(order) + 1
+			numbers[id] = n
+			order = append(order, id)
+		}
+		return fmt.Sprintf(`<sup class="krate-footnote-ref" id="fnref-%s"><a href="#fn-%s">%d</a></sup>`, id, id, n)
+	})
+	if len(order) == 0 {
+		return html
+	}
+	var b strings.Builder
+	b.WriteString(html)
+	b.WriteString("<section class=\"krate-footnotes\">\n<ol>\n")
+	for _, id := range order {
+		d := byID[id]
+		b.WriteString(fmt.Sprintf("<li id=\"fn-%s\">%s <a class=\"krate-footnote-back\" href=\"#fnref-%s\" aria-label=\"Back to reference\">\u21a9</a></li>\n",
+			id, renderInline(d.text, cfg), id))
+	}
+	b.WriteString("</ol>\n</section>\n")
+	return b.String()
+}
+
+func renderDefinitionList(b block, cfg Config) string {
+	var out strings.Builder
+	out.WriteString("<dl>\n<dt>")
+	out.WriteString(renderInline(b.info, cfg))
+	out.WriteString("</dt>\n")
+	for _, def := range b.items {
+		out.WriteString("<dd>")
+		out.WriteString(renderInline(strings.Join(def.lines, " "), cfg))
+		out.WriteString("</dd>\n")
+	}
+	out.WriteString("</dl>\n")
 	return out.String()
+}
+
+// mathBlockRe matches a display-math span `$$...$$`; mathInlineRe matches an
+// inline `$...$` that is not just whitespace and does not span lines.
+var (
+	mathBlockRe  = regexp.MustCompile(`\$\$([^$]+?)\$\$`)
+	mathInlineRe = regexp.MustCompile(`\$([^\s$][^$\n]*?[^\s$]|[^\s$])\$`)
+	// orderedListRe matches an ordered-list marker at the start of a line.
+	orderedListRe = regexp.MustCompile(`^\d+\.\s+`)
+)
+
+// wrapMath wraps TeX delimiters in `.krate-math` spans so a math renderer
+// (KaTeX/MathJax auto-render) or the theme's CSS can pick them up. Code blocks
+// and inline code are skipped so `$` in code samples is left untouched.
+func wrapMath(html string) string {
+	var out strings.Builder
+	i := 0
+	for i < len(html) {
+		next := strings.IndexByte(html[i:], '<')
+		if next < 0 {
+			out.WriteString(wrapMathInText(html[i:]))
+			break
+		}
+		if next > 0 {
+			out.WriteString(wrapMathInText(html[i : i+next]))
+		}
+		tagStart := i + next
+		// Copy <pre> ... </pre> and <code> ... </code> regions verbatim so math
+		// delimiters inside code are never wrapped. The open tag is detected
+		// here (not only at the loop top) because preceding text was just
+		// copied, which would otherwise consume the tag generically.
+		if tag := mathSkipTag(html, tagStart); tag != "" {
+			closeTag := "</" + tag + ">"
+			if end := strings.Index(html[tagStart:], closeTag); end >= 0 {
+				out.WriteString(html[tagStart : tagStart+end+len(closeTag)])
+				i = tagStart + end + len(closeTag)
+				continue
+			}
+		}
+		end := strings.IndexByte(html[tagStart:], '>')
+		if end < 0 {
+			out.WriteString(html[tagStart:])
+			break
+		}
+		out.WriteString(html[tagStart : tagStart+end+1])
+		i = tagStart + end + 1
+	}
+	return out.String()
+}
+
+// mathSkipTag returns the tag name when html[i:] begins a <pre>/<code> open tag.
+func mathSkipTag(html string, i int) string {
+	for _, tag := range []string{"pre", "code"} {
+		if strings.HasPrefix(html[i:], "<"+tag) {
+			return tag
+		}
+	}
+	return ""
+}
+
+// wrapMathInText wraps math delimiters in a run of text (no tags).
+func wrapMathInText(text string) string {
+	text = mathBlockRe.ReplaceAllString(text, `<span class="krate-math krate-math-block">$$$1$$</span>`)
+	text = mathInlineRe.ReplaceAllString(text, `<span class="krate-math krate-math-inline">$$$1$$</span>`)
+	return text
 }
 
 type blockType int
@@ -34,6 +204,7 @@ const (
 	bThematicBreak
 	bHTML
 	bBlank
+	bDefinitionList
 )
 
 type block struct {
@@ -164,12 +335,12 @@ func parseBlocks(lines []string, cfg Config) []block {
 		}
 
 		// Ordered list
-		if matched, _ := regexp.MatchString(`^\d+\.\s+`, line); matched {
+		if orderedListRe.MatchString(line) {
 			var items []block
 			var itemLines []string
 			for i < len(lines) {
 				l := lines[i]
-				if matched2, _ := regexp.MatchString(`^\d+\.\s+`, l); matched2 {
+				if orderedListRe.MatchString(l) {
 					if len(itemLines) > 0 {
 						items = append(items, block{typ: bParagraph, lines: itemLines})
 					}
@@ -205,6 +376,24 @@ func parseBlocks(lines []string, cfg Config) []block {
 				i++
 			}
 			blocks = append(blocks, block{typ: bTable, cells: rows})
+			continue
+		}
+
+		// Definition list: a term line followed by one or more `: definition`.
+		if i+1 < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[i+1]), ": ") {
+			term := strings.TrimSpace(line)
+			var defs []block
+			j := i + 1
+			for j < len(lines) {
+				d := strings.TrimSpace(lines[j])
+				if !strings.HasPrefix(d, ": ") {
+					break
+				}
+				defs = append(defs, block{typ: bParagraph, lines: []string{strings.TrimSpace(strings.TrimPrefix(d, ":"))}})
+				j++
+			}
+			blocks = append(blocks, block{typ: bDefinitionList, info: term, items: defs})
+			i = j
 			continue
 		}
 
@@ -291,6 +480,8 @@ func renderBlock(b block, cfg Config) string {
 		return "<hr>\n"
 	case bHTML:
 		return strings.Join(b.lines, "\n") + "\n"
+	case bDefinitionList:
+		return renderDefinitionList(b, cfg)
 	default:
 		return ""
 	}
@@ -316,9 +507,14 @@ func renderParagraph(b block, cfg Config) string {
 func renderCodeBlock(b block, cfg Config) string {
 	code := strings.Join(b.lines, "\n")
 
+	// Mermaid diagrams render client-side from the raw source text.
+	if cfg.Mermaid && strings.EqualFold(strings.TrimSpace(b.info), "mermaid") {
+		return "<pre class=\"mermaid\">" + escape.HTML(code) + "</pre>\n"
+	}
+
 	if cfg.CodeHighlight && b.info != "" {
 		lang := syntaxhighlight.NormalizeLanguage(b.info)
-		highlighted := syntaxhighlight.Highlight(code, lang)
+		highlighted := syntaxhighlight.HighlightTheme(code, lang, cfg.CodeTheme)
 		return fmt.Sprintf("<pre class=\"chroma\"><code class=\"language-%s\">%s</code></pre>\n", b.info, highlighted)
 	}
 
@@ -363,7 +559,7 @@ func renderTable(b block, cfg Config) string {
 		return ""
 	}
 	var out strings.Builder
-	out.WriteString("<table>\n")
+	out.WriteString("<div class=\"table-wrap\">\n<table>\n")
 	for i, row := range b.cells {
 		tag := "td"
 		if i == 0 {
@@ -379,11 +575,16 @@ func renderTable(b block, cfg Config) string {
 			out.WriteString("</thead>\n<tbody>\n")
 		}
 	}
-	out.WriteString("</tbody>\n</table>\n")
+	out.WriteString("</tbody>\n</table>\n</div>\n")
 	return out.String()
 }
 
 func slugify(text string) string {
+	// Headings are slugged from their rendered inline HTML, which escapes
+	// entities (e.g. `&` -> `&amp;`). Decode first so the slug reflects the
+	// visible text ("static output & dynamic params" -> static-output-dynamic-params)
+	// rather than an `amp`-laden remnant.
+	text = html.UnescapeString(text)
 	lower := strings.ToLower(text)
 	re := regexp.MustCompile(`[^a-z0-9\s-]`)
 	clean := re.ReplaceAllString(lower, "")

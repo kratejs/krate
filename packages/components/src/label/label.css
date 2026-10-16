@@ -2,7 +2,7 @@
   display: inline-block;
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--krate-text, #fafafa);
+  color: var(--krate-text, #09090b);
   cursor: default;
   user-select: none;
   line-height: 1.4;

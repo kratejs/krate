@@ -1,123 +1,185 @@
 package css
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
-	"time"
+
+	"github.com/kratejs/krate/packages/compiler/internal/jseval"
 )
 
 // TailwindConfig represents the tailwind.config.ts/js parsed values.
 type TailwindConfig struct {
-	Theme TailwindTheme `json:"theme"`
+	Theme    TailwindTheme `json:"theme"`
+	DarkMode string        `json:"darkMode"`
 }
 
-// LoadTailwindConfig attempts to load a tailwind.config file by executing it via npx tsx.
-// Falls back to defaults if not found or execution fails.
-func LoadTailwindConfig(root string) *TailwindConfig {
-	cfg := &TailwindConfig{
-		Theme: DefaultTailwindTheme(),
-	}
+// TailwindOptions carries site config that influences generation (scan roots,
+// preflight, strict diagnostics).
+type TailwindOptions struct {
+	// ScanDirs are directories (relative to root) to scan for classes.
+	ScanDirs []string
+	// ContentOverrides, when non-empty, replaces ScanDirs (Tailwind `content`).
+	ContentOverrides []string
+	// Preflight enables the base reset.
+	Preflight bool
+	// Strict collects unrecognized classes.
+	Strict bool
+	// DarkMode overrides the config's dark-mode strategy.
+	DarkMode string
+	// ExecuteConfig forces in-process config evaluation (esbuild + QuickJS)
+	// instead of the static parser.
+	ExecuteConfig bool
+}
 
-	// Look for tailwind.config files in order of preference
-	candidates := []string{
-		"tailwind.config.ts",
-		"tailwind.config.js",
-		"tailwind.config.mjs",
-	}
+// configFileNames are the supported tailwind config filenames.
+var configFileNames = []string{
+	"tailwind.config.ts", "tailwind.config.js", "tailwind.config.mjs",
+}
 
-	var configPath string
-	for _, c := range candidates {
+// findTailwindConfig returns the first existing config path under root.
+func findTailwindConfig(root string) string {
+	for _, c := range configFileNames {
 		p := filepath.Join(root, c)
 		if _, err := os.Stat(p); err == nil {
-			configPath = p
-			break
+			return p
 		}
 	}
+	return ""
+}
+
+// LoadTailwindConfig loads a tailwind.config file. It prefers a static parse
+// (no JS runtime required); when `execute` is true or the static parse yields no
+// theme, it evaluates the config in-process (esbuild + QuickJS). On any failure
+// it returns defaults (a diagnostic is surfaced by the caller).
+func LoadTailwindConfig(root string) *TailwindConfig {
+	return LoadTailwindConfigWithOptions(root, TailwindOptions{})
+}
+
+// LoadTailwindConfigWithOptions is LoadTailwindConfig with explicit options.
+func LoadTailwindConfigWithOptions(root string, opts TailwindOptions) *TailwindConfig {
+	cfg := &TailwindConfig{Theme: DefaultTailwindTheme()}
+
+	configPath := findTailwindConfig(root)
 	if configPath == "" {
+		if opts.DarkMode != "" {
+			cfg.Theme.DarkMode = opts.DarkMode
+		}
 		return cfg
 	}
 
-	// Try to execute via npx tsx
-	bootstrap := fmt.Sprintf(`import cfg from "%s"; console.log(JSON.stringify({theme:cfg.theme||{}}));`, configPath)
-	tmpDir, err := os.MkdirTemp("", "krate-tailwind-*")
+	// Prefer the static parse so builds need no Node.
+	if !opts.ExecuteConfig {
+		if parsed, ok := ParseTailwindConfigStatic(configPath); ok {
+			mergeTailwindConfig(cfg, parsed)
+			if opts.DarkMode != "" {
+				cfg.Theme.DarkMode = opts.DarkMode
+			}
+			return cfg
+		}
+	}
+
+	if parsed, ok := executeTailwindConfig(root, configPath); ok {
+		mergeTailwindConfig(cfg, parsed)
+	} else if parsed, ok := ParseTailwindConfigStatic(configPath); ok {
+		mergeTailwindConfig(cfg, parsed)
+	}
+	if opts.DarkMode != "" {
+		cfg.Theme.DarkMode = opts.DarkMode
+	}
+	return cfg
+}
+
+// executeTailwindConfig evaluates the config in-process via jseval (esbuild
+// bundle + embedded QuickJS) - no Node/`npx tsx`. It returns ok=false when the
+// config can't be bundled or executed, so the caller falls back to the static
+// parser.
+func executeTailwindConfig(root, configPath string) (*TailwindConfig, bool) {
+	rel, err := filepath.Rel(root, configPath)
 	if err != nil {
-		return cfg
+		return nil, false
 	}
-	defer os.RemoveAll(tmpDir)
+	spec := "./" + filepath.ToSlash(rel)
+	bootstrap := fmt.Sprintf(`import cfg from %q;
+var c = (cfg && cfg.default) ? cfg.default : cfg;
+globalThis.%s = { theme: (c && c.theme) || {}, darkMode: (c && c.darkMode) || "" };`, spec, jseval.ResultGlobal)
 
-	tmpFile := filepath.Join(tmpDir, "bootstrap.mjs")
-	if err := os.WriteFile(tmpFile, []byte(bootstrap), 0644); err != nil {
-		return cfg
-	}
-
-	// Bound the npx tsx execution so a hung tailwind.config (blocking import,
-	// infinite loop) falls back to defaults instead of blocking the build.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "npx", "tsx", tmpFile)
-	cmd.Dir = root
-	output, err := cmd.Output()
+	data, err := jseval.Eval(jseval.Options{
+		Source:     bootstrap,
+		ResolveDir: root,
+		Sourcefile: "krate-tailwind-bootstrap.ts",
+	})
 	if err != nil {
-		return cfg
+		return nil, false
 	}
 
 	var parsed TailwindConfig
-	if err := json.Unmarshal(output, &parsed); err != nil {
-		return cfg
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return nil, false
 	}
+	return &parsed, true
+}
 
-	// Merge with defaults
-	if parsed.Theme.Spacing != nil {
-		for k, v := range cfg.Theme.Spacing {
-			if _, ok := parsed.Theme.Spacing[k]; !ok {
-				parsed.Theme.Spacing[k] = v
-			}
-		}
-		cfg.Theme.Spacing = parsed.Theme.Spacing
+// mergeTailwindConfig folds a parsed config into cfg, applying `extend`
+// semantics: top-level theme keys replace defaults, `extend` keys merge in.
+// (The static parser already resolves extend/override into concrete maps, so
+// here we only copy non-empty maps and the dark-mode strategy.)
+func mergeTailwindConfig(cfg *TailwindConfig, parsed *TailwindConfig) {
+	if parsed == nil {
+		return
 	}
-	if parsed.Theme.Colors != nil {
-		for k, v := range cfg.Theme.Colors {
-			if _, ok := parsed.Theme.Colors[k]; !ok {
-				parsed.Theme.Colors[k] = v
-			}
-		}
-		for k, v := range parsed.Theme.Colors {
-			cfg.Theme.Colors[k] = v
-		}
+	t := parsed.Theme
+	if len(t.Spacing) > 0 {
+		cfg.Theme.Spacing = t.Spacing
 	}
-	if parsed.Theme.TextSizes != nil {
-		for k, v := range parsed.Theme.TextSizes {
-			cfg.Theme.TextSizes[k] = v
-		}
+	if len(t.Sizing) > 0 {
+		cfg.Theme.Sizing = t.Sizing
 	}
-	if parsed.Theme.FontWeights != nil {
-		for k, v := range parsed.Theme.FontWeights {
-			cfg.Theme.FontWeights[k] = v
-		}
+	if len(t.MaxWidth) > 0 {
+		cfg.Theme.MaxWidth = t.MaxWidth
 	}
-	if parsed.Theme.Radii != nil {
-		for k, v := range parsed.Theme.Radii {
-			cfg.Theme.Radii[k] = v
-		}
+	if len(t.MinWidth) > 0 {
+		cfg.Theme.MinWidth = t.MinWidth
 	}
-	if parsed.Theme.Shadows != nil {
-		for k, v := range parsed.Theme.Shadows {
-			cfg.Theme.Shadows[k] = v
-		}
+	if len(t.LineHeight) > 0 {
+		cfg.Theme.LineHeight = t.LineHeight
 	}
-	if parsed.Theme.Sizing != nil {
-		for k, v := range parsed.Theme.Sizing {
-			cfg.Theme.Sizing[k] = v
-		}
+	if len(t.Opacity) > 0 {
+		cfg.Theme.Opacity = t.Opacity
 	}
-
-	return cfg
+	if len(t.Screens) > 0 {
+		cfg.Theme.Screens = t.Screens
+	}
+	if len(t.Colors) > 0 {
+		cfg.Theme.Colors = t.Colors
+	}
+	if len(t.TextSizes) > 0 {
+		cfg.Theme.TextSizes = t.TextSizes
+	}
+	if len(t.FontWeights) > 0 {
+		cfg.Theme.FontWeights = t.FontWeights
+	}
+	if len(t.FontFamily) > 0 {
+		cfg.Theme.FontFamily = t.FontFamily
+	}
+	if len(t.Radii) > 0 {
+		cfg.Theme.Radii = t.Radii
+	}
+	if len(t.Shadows) > 0 {
+		cfg.Theme.Shadows = t.Shadows
+	}
+	if len(t.BgColors) > 0 {
+		cfg.Theme.BgColors = t.BgColors
+	}
+	if t.DarkMode != "" {
+		cfg.Theme.DarkMode = t.DarkMode
+	}
+	if parsed.DarkMode != "" {
+		cfg.Theme.DarkMode = parsed.DarkMode
+	}
 }
 
 // MergeConfig merges a TailwindConfig into the generator's theme.
@@ -125,61 +187,80 @@ func (g *TailwindGenerator) MergeConfig(cfg *TailwindConfig) {
 	if cfg == nil {
 		return
 	}
-	t := cfg.Theme
-	if len(t.Spacing) > 0 {
-		g.Theme.Spacing = t.Spacing
-	}
-	if len(t.Colors) > 0 {
-		g.Theme.Colors = t.Colors
-	}
-	if len(t.TextSizes) > 0 {
-		g.Theme.TextSizes = t.TextSizes
-	}
-	if len(t.FontWeights) > 0 {
-		g.Theme.FontWeights = t.FontWeights
-	}
-	if len(t.Radii) > 0 {
-		g.Theme.Radii = t.Radii
-	}
-	if len(t.Shadows) > 0 {
-		g.Theme.Shadows = t.Shadows
-	}
-	if len(t.Sizing) > 0 {
-		g.Theme.Sizing = t.Sizing
-	}
-	if len(t.BgColors) > 0 {
-		g.Theme.BgColors = t.BgColors
-	}
+	merged := &TailwindConfig{Theme: g.Theme}
+	mergeTailwindConfig(merged, cfg)
+	g.Theme = merged.Theme
 }
 
-// GenerateTailwind runs the full Tailwind pipeline: scan classes → generate CSS → return.
+// GenerateTailwind runs the full Tailwind pipeline: scan classes -> generate CSS.
 func GenerateTailwind(root string, cfg *TailwindConfig) (string, error) {
+	return GenerateTailwindWithOptions(root, cfg, TailwindOptions{})
+}
+
+// GenerateTailwindWithOptions is GenerateTailwind with explicit options.
+func GenerateTailwindWithOptions(root string, cfg *TailwindConfig, opts TailwindOptions) (string, error) {
+	dirs := resolveScanDirs(root, opts)
+
 	scanner := NewTailwindScanner(root)
-
-	// Scan source directories for class names
-	dirs := []string{filepath.Join(root, "src")}
 	classes := scanner.ScanClasses(dirs)
-
 	if len(classes) == 0 {
 		return "", nil
 	}
 
 	generator := NewTailwindGenerator()
 	generator.MergeConfig(cfg)
+	generator.Strict = opts.Strict
 
-	return generator.Generate(classes), nil
+	css := generator.Generate(classes)
+	if opts.Preflight {
+		css = TailwindPreflight(generator.Theme) + css
+	}
+	return css, nil
 }
 
-// StripTailwindDirectives removes @tailwind and @apply directives from CSS.
-func StripTailwindDirectives(css string) string {
-	var result strings.Builder
-	for _, line := range strings.Split(css, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "@tailwind") || strings.HasPrefix(trimmed, "@apply") {
-			continue
-		}
-		result.WriteString(line)
-		result.WriteByte('\n')
+// resolveScanDirs returns absolute scan roots: `content` wins over `scanDirs`,
+// both default to `<root>/src`. Globs are reduced to their base directory.
+func resolveScanDirs(root string, opts TailwindOptions) []string {
+	patterns := opts.ContentOverrides
+	if len(patterns) == 0 {
+		patterns = opts.ScanDirs
 	}
-	return strings.TrimSpace(result.String())
+	if len(patterns) == 0 {
+		patterns = []string{"src"}
+	}
+	var dirs []string
+	seen := map[string]bool{}
+	for _, p := range patterns {
+		// Reduce a glob (`./src/**/*.tsx`) to its static base directory.
+		base := p
+		if i := strings.IndexAny(base, "*?{"); i >= 0 {
+			base = base[:i]
+			if i := strings.LastIndexByte(base, '/'); i >= 0 {
+				base = base[:i]
+			}
+		}
+		base = strings.TrimPrefix(base, "./")
+		if base == "" {
+			base = "."
+		}
+		abs := base
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(root, base)
+		}
+		if !seen[abs] {
+			seen[abs] = true
+			dirs = append(dirs, abs)
+		}
+	}
+	return dirs
+}
+
+// atTailwindRe matches a `@tailwind base|components|utilities;` directive.
+var atTailwindRe = regexp.MustCompile(`(?m)^[ \t]*@tailwind[^;{}]*;[ \t]*\r?\n?`)
+
+// StripAtTailwind removes `@tailwind base|components|utilities;` directives.
+// Krate generates Tailwind output itself, so a leftover directive would ship as
+// an invalid at-rule.
+func StripAtTailwind(css string) string {
+	return atTailwindRe.ReplaceAllString(css, "")
 }

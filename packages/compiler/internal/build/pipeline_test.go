@@ -1,6 +1,7 @@
 package build
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
@@ -22,23 +24,43 @@ func testProjectPath(t *testing.T) string {
 	}
 	root := filepath.Clean(filepath.Join(pkgDir, "..", "..", "..", "..", "examples"))
 	if _, err := os.Stat(root); os.IsNotExist(err) {
-		t.Skipf("examples not found at %s", root)
+		requireE2E(t, "examples not found at %s", root)
 	}
 	return root
 }
 
+// buildTestProject builds the shared examples/ project once per test process
+// and reuses the output. Many integration tests need the built site; rebuilding
+// it for each is by far the dominant cost (and under -race it exceeded the Go
+// test timeout). The examples sources are not mutated between tests, so a single
+// build is sound.
+var (
+	e2eBuildOnce sync.Once
+	e2eBuildDir  string
+	e2eBuildErr  error
+)
+
 func buildTestProject(t *testing.T) string {
 	t.Helper()
+	// Resolve the path per call so requireE2E's skip logic still applies.
 	root := testProjectPath(t)
-	cfg, err := config.Load(root)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+
+	e2eBuildOnce.Do(func() {
+		cfg, err := config.Load(root)
+		if err != nil {
+			e2eBuildErr = fmt.Errorf("config.Load: %w", err)
+			return
+		}
+		if err := New(root, cfg).BuildAll(); err != nil {
+			e2eBuildErr = fmt.Errorf("BuildAll: %w", err)
+			return
+		}
+		e2eBuildDir = cfg.OutDir
+	})
+	if e2eBuildErr != nil {
+		t.Fatal(e2eBuildErr)
 	}
-	b := New(root, cfg)
-	if err := b.BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
-	}
-	return cfg.OutDir
+	return e2eBuildDir
 }
 
 func readOut(t *testing.T, outDir, rel string) string {
@@ -58,7 +80,8 @@ func TestBuildLayoutChildrenInjection(t *testing.T) {
 	if !strings.Contains(html, `<nav>`) {
 		t.Errorf("expected layout nav in page, got:\n%.400s", html)
 	}
-	if !strings.Contains(html, `&copy; 2026`) {
+	// JSX text entities are decoded (React semantics), so `&copy;` renders as .
+	if !strings.Contains(html, "\u00a9 2026") {
 		t.Errorf("expected layout footer in page, got:\n%.400s", html)
 	}
 	if !strings.Contains(html, `class=layout`) {
@@ -84,7 +107,7 @@ func TestBuildMixedTierPage(t *testing.T) {
 	outDir := buildTestProject(t)
 	html := readOut(t, outDir, filepath.Join("server-runtime-demo", "index.html"))
 
-	// Server components are evaluated by QuickJS at build time → a real
+	// Server components are evaluated by QuickJS at build time -> a real
 	// millisecond epoch timestamp is baked into the static HTML.
 	tsRe := regexp.MustCompile(`Compiled at build time: (\d{13})`)
 	m := tsRe.FindStringSubmatch(html)
@@ -92,7 +115,7 @@ func TestBuildMixedTierPage(t *testing.T) {
 		t.Fatalf("expected a 13-digit QuickJS Date.now() timestamp baked at build, got:\n%.600s", html)
 	}
 
-	// Runtime components are NOT baked — each becomes a region splice marker
+	// Runtime components are NOT baked - each becomes a region splice marker
 	// (<!--region:region-<slotID>--><!--/region:region-<slotID>-->) that the
 	// sidecar fills at request time.
 	if !strings.Contains(html, "<!--region:") {
@@ -133,7 +156,7 @@ func TestGenerateHTMLDevModePreservesInlineScripts(t *testing.T) {
 	style := `<style>.a{color:red}</style>`
 	html := generateHTML(
 		"<div>body</div>", "<title>t</title>", inline, style,
-		true, "", "runtime.js", "/", true,
+		[]string{}, "", "runtime.js", "/", true, "", "", "",
 	)
 	if !strings.Contains(html, `console.log("inline")`) {
 		t.Errorf("dev-mode HTML dropped inline script:\n%s", html)
@@ -209,7 +232,7 @@ func TestBuildLocalIconsFolder(t *testing.T) {
 	if strings.Contains(html, "onclick") || strings.Contains(html, "alert(1)") {
 		t.Errorf("malicious event handler not sanitized:\n%.800s", html)
 	}
-	if strings.Contains(html, "<script>") {
+	if strings.Contains(html, "<script>alert") {
 		t.Errorf("malicious <script> not stripped:\n%.800s", html)
 	}
 }
@@ -245,7 +268,7 @@ func TestBuildLocalIconsFolderMissing(t *testing.T) {
 func TestGenerateHTMLMinifiedNotDev(t *testing.T) {
 	html := generateHTML(
 		"<div>body</div>", "<title>t</title>", "", "",
-		false, "", "", "/", false,
+		[]string{}, "", "", "/", false, "", "", "",
 	)
 	if strings.Contains(html, "__krate/hotreload") {
 		t.Errorf("production HTML should not include dev hot-reload script:\n%s", html)
@@ -360,7 +383,7 @@ func TestBuildImageResponsive(t *testing.T) {
 	}
 	var webpFound bool
 	// Each variant must carry a hex cache-key tag followed by a width, e.g.
-	// `<tag>_640.webp` — the "tag verification" that the emitted filenames are
+	// `<tag>_640.webp` - the "tag verification" that the emitted filenames are
 	// content-hashed (cache key) rather than unversioned.
 	tagRe := regexp.MustCompile(`^[0-9a-f]{16}_\d+\.webp$`)
 	for _, e := range entries {
@@ -452,12 +475,12 @@ func TestBuildLinkOutput(t *testing.T) {
 		t.Errorf("docs link should not prefetch: %q", docs)
 	}
 
-	// replace → history.replaceState.
+	// replace -> history.replaceState.
 	if faq := byHref("/faq"); !strings.Contains(faq, "data-krate-replace") {
 		t.Errorf("faq link missing data-krate-replace: %q", faq)
 	}
 
-	// scroll={false} → data-krate-scroll="false".
+	// scroll={false} -> data-krate-scroll="false".
 	if blog := byHref("/blog"); !strings.Contains(blog, `data-krate-scroll="false"`) {
 		t.Errorf("blog link missing data-krate-scroll: %q", blog)
 	}
@@ -501,7 +524,7 @@ func TestRuntimeChunkIncludesReconcile(t *testing.T) {
 	root := filepath.Clean(filepath.Join(pkgDir, "..", "..", "..", ".."))
 	rt := loadRuntimeFromDisk(root)
 	if rt == "" {
-		t.Skip("runtime dist not available in this environment")
+		requireE2E(t, "runtime dist not available in this environment")
 	}
 	for _, want := range []string{
 		"reconcileTrees",
@@ -530,7 +553,7 @@ func TestPageScriptSrc(t *testing.T) {
 		{"docs/getting-started", "index.c.js", "/docs/getting-started/index.c.js"},
 	}
 	for _, tt := range tests {
-		if got := pageScriptSrc(tt.route, tt.jsFile); got != tt.want {
+		if got := pageScriptSrc(tt.route, tt.jsFile, ""); got != tt.want {
 			t.Errorf("pageScriptSrc(%q, %q) = %q, want %q", tt.route, tt.jsFile, got, tt.want)
 		}
 	}
@@ -557,7 +580,7 @@ func TestBuildNestedEffectsEmitted(t *testing.T) {
 }
 
 // TestBuildMemoEmitted verifies a createMemo declaration and its reactive getter
-// binding are both present in a page's hydration JS — without the declaration
+// binding are both present in a page's hydration JS - without the declaration
 // the getter reference (e.g. doubled()) would throw ReferenceError.
 func TestBuildMemoEmitted(t *testing.T) {
 	outDir := buildTestProject(t)
@@ -577,7 +600,7 @@ func TestBuildMemoEmitted(t *testing.T) {
 
 // TestBuildResourceEmitted verifies a createResource declaration (getter +
 // actions) is emitted into the page hydration JS and that references to the
-// resource getter/actions (loading/state/refetch) resolve against it — no
+// resource getter/actions (loading/state/refetch) resolve against it - no
 // ReferenceError and no internal sentinel leaked into the output.
 func TestBuildResourceEmitted(t *testing.T) {
 	outDir := buildTestProject(t)

@@ -41,6 +41,7 @@ export default function App(props: Props) {
   while (count() < 10) { setCount(count() + 1); }
   const worker = new Worker(new URL('./w.ts', import.meta.url), { type: 'module' });
   const data = import('./data.json');
+  const maybe = obj?.fn?.() ?? items?.[0] ?? fallback;
 
   return (
     <div class={count() > 5 ? 'big' : 'small'} data-n={count()} {...props}>

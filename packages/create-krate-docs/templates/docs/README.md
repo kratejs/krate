@@ -21,7 +21,7 @@ Open [http://localhost:3000](http://localhost:3000) to see your docs.
 
 ## Writing docs
 
-Add Markdown or MDX files under `content/docs/` — each file becomes a page
+Add Markdown or MDX files under `src/content/docs/` — each file becomes a page
 automatically. Directories become sections in the sidebar.
 
 Use frontmatter to control the title and ordering:
@@ -50,11 +50,11 @@ order: 1
 ├── krate.config.ts        # Krate config (docs plugin, search, SEO)
 ├── tsconfig.json          # TypeScript configuration
 ├── public/                # Styles, search script, favicon
-├── content/
-│   └── docs/              # Markdown/MDX documentation pages
 └── src/
+    ├── content/
+    │   └── docs/          # Markdown/MDX documentation pages
     ├── pages/             # Home, layout, and 404 pages
-    └── components/        # docs-layout and docs UI components
+    └── components/        # project components (docs shell comes from @krate/base-docs-theme)
 ```
 
 ## Configuration

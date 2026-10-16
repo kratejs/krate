@@ -1,10 +1,15 @@
+/* Admonition. The variant colour is carried by a full hairline border and a
+ * faint tint rather than a thick side-tab, which reads as a generic accent and
+ * fights the surrounding layout. `--krate-aside-accent` is the per-variant
+ * knob; the title icon inherits it. */
 .krate-aside {
+    --krate-aside-accent: var(--krate-primary, #f97316);
     margin: 24px 0;
-    padding: 12px 20px;
-    border-radius: 8px;
-    border: 1px solid var(--krate-border, #27272a);
-    border-left-width: 4px;
-    background: var(--krate-aside-bg, #111113);
+    padding: 12px 18px;
+    border-radius: var(--krate-radius, 8px);
+    border: 1px solid color-mix(in srgb, var(--krate-aside-accent) 32%, var(--krate-border, #e4e4e7));
+    background: color-mix(in srgb, var(--krate-aside-accent) 8%, var(--krate-bg, #ffffff));
+    color: var(--krate-text, #09090b);
 }
 .krate-aside-title {
     display: flex;
@@ -12,35 +17,24 @@
     gap: 8px;
     font-weight: 600;
     font-size: 0.9rem;
-    margin-top: 4px;
     margin-bottom: 8px;
-    color: var(--krate-text, #fafafa);
+    color: var(--krate-text, #09090b);
+}
+.krate-aside-title svg {
+    flex: 0 0 auto;
+    color: var(--krate-aside-accent);
 }
 .krate-aside-content {
-    color: var(--krate-text-muted, #b9b9b9);
+    color: var(--krate-text-muted, #71717a);
     line-height: 1.6;
 }
-.krate-aside-content p {
-    margin: 0;
-    margin-bottom: 4px;
+.krate-aside-content p,
+div.krate-aside .krate-aside-content p {
+  margin: 0;
+  margin-bottom: 4px;
 }
-.krate-aside-note {
-    border-left-color: #3b82f6;
-    background: var(--krate-aside-note-bg, #111113);
-}
-.krate-aside-tip {
-    border-left-color: #10b981;
-    background: var(--krate-aside-tip-bg, #111113);
-}
-.krate-aside-warning {
-    border-left-color: #f59e0b;
-    background: var(--krate-aside-warning-bg, #111113);
-}
-.krate-aside-danger {
-    border-left-color: #ef4444;
-    background: var(--krate-aside-danger-bg, #111113);
-}
-.krate-aside-caution {
-    border-left-color: #f97316;
-    background: var(--krate-aside-caution-bg, #111113);
-}
+.krate-aside-note { --krate-aside-accent: var(--krate-muted, #71717a); }
+.krate-aside-tip { --krate-aside-accent: #10b981; }
+.krate-aside-warning { --krate-aside-accent: #f59e0b; }
+.krate-aside-danger { --krate-aside-accent: #ef4444; }
+.krate-aside-caution { --krate-aside-accent: #f97316; }

@@ -216,7 +216,7 @@ func TestGoPluginDiscoveryAndRouting(t *testing.T) {
 	// Build an npm-style package with a JS descriptor and a bin/ directory.
 	pkgDir := t.TempDir()
 	binDir := filepath.Join(pkgDir, "bin")
-	os.MkdirAll(binDir, 0755)
+	_ = os.MkdirAll(binDir, 0755)
 	binName := "fixtureplugin"
 	if runtime.GOOS == "windows" {
 		binName += ".exe"
@@ -249,7 +249,7 @@ func TestGoPluginDiscoveryAndRouting(t *testing.T) {
 	// BeforeBuild: the Go plugin writes fixture.txt.
 	ctx := &BuildHookCtx{Root: root, OutDir: out, Pages: []string{"index.tsx"}}
 	defer GoClosePlugins()
-	if err := runCommunityHook("BeforeBuild", cfg, root, out, ctx); err != nil {
+	if err := runCommunityHook("BeforeBuild", cfg, root, out, CommunityEnv{}, ctx); err != nil {
 		t.Fatalf("runCommunityHook BeforeBuild: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(out, "fixture.txt"))
@@ -267,7 +267,7 @@ func TestGoPluginDiscoveryAndRouting(t *testing.T) {
 		t.Fatal(err)
 	}
 	parseCtx := &ParseHookCtx{Page: "index.tsx", Program: decodeProg(t, progDoc)}
-	if err := runCommunityHook("AfterParse", cfg, root, out, parseCtx); err != nil {
+	if err := runCommunityHook("AfterParse", cfg, root, out, CommunityEnv{}, parseCtx); err != nil {
 		t.Fatalf("runCommunityHook AfterParse: %v", err)
 	}
 	if parseCtx.Program == nil {
@@ -279,7 +279,7 @@ func TestGoPluginDiscoveryAndRouting(t *testing.T) {
 
 	// AfterRender: injects head content + meta tag.
 	renderCtx := &RenderHookCtx{Page: "index.tsx", HTML: "<p>body</p>", HeadHTML: "<title>t</title>", RawCSS: ""}
-	if err := runCommunityHook("AfterRender", cfg, root, out, renderCtx); err != nil {
+	if err := runCommunityHook("AfterRender", cfg, root, out, CommunityEnv{}, renderCtx); err != nil {
 		t.Fatalf("runCommunityHook AfterRender: %v", err)
 	}
 	if !strings.Contains(renderCtx.HeadHTML, `content="gofix"`) {

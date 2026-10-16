@@ -1,0 +1,13 @@
+# Krate browser support policy.
+#
+# Krate targets evergreen engines that implement ES2020. The compiler emits
+# ES2020 for hydration chunks and workers; the client runtime bundle uses the
+# same baseline. There is no ES5/legacy downleveling or differential serving.
+#
+# Baseline (ES2020): Chrome 87+, Edge 88+, Firefox 78+, Safari 14+.
+# Update this file and docs/core-concepts/browser-support.md together when the
+# baseline changes.
+last 2 chrome versions
+last 2 edge versions
+last 2 firefox versions
+last 2 safari versions

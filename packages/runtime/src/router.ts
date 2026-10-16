@@ -1,8 +1,9 @@
-import { reconcileTrees } from './reconcile.js';
-
 let initialized = false;
 let pendingAbort: AbortController | undefined;
 let routerCleanup: (() => void) | null = null;
+// Monotonic navigation sequence: a slower, superseded fetch must never apply
+// its HTML over a newer navigation.
+let navSeq = 0;
 
 /** Cache for prefetched page HTML keyed by URL (bounded LRU). */
 const prefetchCache = new Map<string, string>();
@@ -20,6 +21,57 @@ const SCROLL_HISTORY_MAX = 50;
  */
 const RUNTIME_CHUNK_RE = /\/chunks\/runtime\.[^/]+\.js$/;
 
+/** Site config injected by the compiler (`window.__KRATE_CFG__`). */
+interface KrateRuntimeConfig {
+  basePath?: string;
+  viewTransitions?: boolean | 'auto';
+}
+
+function runtimeConfig(): KrateRuntimeConfig {
+  return ((globalThis as any).__KRATE_CFG__ as KrateRuntimeConfig) || {};
+}
+
+/** Normalizes the configured base path to "" or "/prefix" (no trailing slash). */
+function basePath(): string {
+  const bp = runtimeConfig().basePath || '';
+  if (!bp || bp === '/') return '';
+  return '/' + bp.replace(/^\/+|\/+$/g, '');
+}
+
+/** Strips the base path from a pathname so route comparisons are consistent. */
+function stripBase(pathname: string): string {
+  const bp = basePath();
+  if (bp && (pathname === bp || pathname.startsWith(bp + '/'))) {
+    const rest = pathname.slice(bp.length);
+    return rest === '' ? '/' : rest;
+  }
+  return pathname;
+}
+
+// Set during initRouter so the exported `navigate()` can drive the SPA router.
+let navigateImpl: ((url: string, opts?: NavigateOptions) => void) | null = null;
+
+export interface NavigateOptions {
+  replace?: boolean;
+  scroll?: boolean;
+  /** State stored on the new history entry. */
+  state?: unknown;
+}
+
+/**
+ * Programmatic SPA navigation. Falls back to a full page load when the router
+ * has not initialized (e.g. before hydration). Returns false when handled
+ * client-side, true when a full navigation was triggered.
+ */
+export function navigate(url: string, opts: NavigateOptions = {}): boolean {
+  if (navigateImpl) {
+    navigateImpl(url, opts);
+    return false;
+  }
+  if (typeof location !== 'undefined') location.href = url;
+  return true;
+}
+
 export function initRouter(): void {
   if (typeof document === 'undefined') return;
 
@@ -27,7 +79,13 @@ export function initRouter(): void {
   if (initialized) return;
   initialized = true;
 
-  const CONTENT_SEL = '.docs-content, main, #root';
+  // Reconcile from the app root so navigation between DIFFERENT shells (the
+  // marketing layout's <main> and the docs layout's `.docs-page`) swaps the
+  // whole shell instead of reconciling mismatched tree shapes (which dropped
+  // the docs navbar/sidebar while still loading its CSS). Within one shell the
+  // diff preserves unchanged nodes (sidebar/TOC) by key, so docs<->docs stays
+  // cheap.
+  const CONTENT_SEL = '#root, main, .docs-content';
   const TRANSITION_MS = 150;
   const PREFETCH_DELAY = 200;
   let notFoundHTML: string | null = null;
@@ -140,24 +198,11 @@ export function initRouter(): void {
     prefetchTimers.set(a, timer);
   }
 
-  function stripHandlerProps(root: Element): void {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-    let node = walker.nextNode();
-    while (node) {
-      const el = node as Element;
-      for (const key of Object.keys(el)) {
-        if (key.indexOf('__krate_') === 0) {
-          delete (el as any)[key];
-        }
-      }
-      node = walker.nextNode();
-    }
-  }
-
   // Begin the visual transition (fade out + optional loading overlay) while a
   // page fetch is in flight, so navigation doesn't feel artificially delayed.
   let loadingOverlay: Node | null = null;
   function beginTransition(): void {
+    if (supportsViewTransitions()) return; // native View Transition handles it
     const oldContent = findContentRoot(document);
     const loadingTemplate = document.querySelector('template[data-krate-loading]') as HTMLTemplateElement | null;
     if (loadingTemplate && loadingTemplate.content && oldContent) {
@@ -173,6 +218,7 @@ export function initRouter(): void {
   }
 
   function endTransition(): void {
+    if (supportsViewTransitions()) return; // opacity was never touched
     if (loadingOverlay && loadingOverlay.parentNode) {
       loadingOverlay.parentNode.removeChild(loadingOverlay);
     }
@@ -181,6 +227,143 @@ export function initRouter(): void {
     if (oldContent) {
       (oldContent as HTMLElement).style.opacity = '1';
     }
+  }
+
+  // Analytics hook: fires once after every successful SPA navigation
+  // (click, prefetch-cache, back/forward, and error-page replacements all flow
+  // through swapContent/replacePage). A throw inside the hook is ignored.
+  function notifyNavigation(url: string): void {
+    try {
+      const hook = (globalThis as any).__krate_onNavigation;
+      if (typeof hook === 'function') hook(url);
+    } catch {
+      /* ignore hook failures */
+    }
+  }
+
+  function dispatchNavEvent(name: string, url: string): void {
+    try {
+      window.dispatchEvent(new CustomEvent(name, { detail: { url } }));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Whether native View Transitions should wrap the SPA mutation. */
+  function supportsViewTransitions(): boolean {
+    if (runtimeConfig().viewTransitions === false) return false;
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      try {
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+      } catch {
+        /* ignore */
+      }
+    }
+    return typeof (document as any).startViewTransition === 'function';
+  }
+
+  /** Diff stylesheet <link>s by absolute URL (base-path and format safe). */
+  function reconcileStylesheets(doc: Document): void {
+    const newStyles = doc.querySelectorAll('link[rel="stylesheet"]');
+    const newHrefs = new Set<string>();
+    newStyles.forEach((s) => {
+      const href = s.getAttribute('href');
+      if (href) newHrefs.add(new URL(href, location.origin).href);
+    });
+    document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => {
+      const abs = (l as HTMLLinkElement).href;
+      if (abs && !newHrefs.has(abs)) l.remove();
+    });
+    const existing = new Set<string>();
+    document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => existing.add((l as HTMLLinkElement).href));
+    newStyles.forEach((s) => {
+      const href = s.getAttribute('href');
+      if (!href) return;
+      const abs = new URL(href, location.origin).href;
+      if (!existing.has(abs)) {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = abs;
+        document.head.appendChild(link);
+      }
+    });
+  }
+
+  /**
+   * Apply `data-view-transition="name"` to `view-transition-name`. Persistent
+   * chrome (navbar/sidebar) keeps its name across mutations so it morphs
+   * instead of cross-fading. Runs at init and after every swap.
+   */
+  function applyViewTransitionNames(root: ParentNode): void {
+    root.querySelectorAll('[data-view-transition]').forEach((el) => {
+      const name = (el as HTMLElement).getAttribute('data-view-transition');
+      if (name) (el as HTMLElement).style.viewTransitionName = name;
+    });
+  }
+
+  /** Move focus to the content root after navigation (a11y). */
+  function focusContent(): void {
+    const root = findContentRoot(document) as HTMLElement | null;
+    if (!root) return;
+    if (!root.hasAttribute('tabindex')) root.setAttribute('tabindex', '-1');
+    try {
+      root.focus({ preventScroll: true });
+    } catch {
+      try {
+        root.focus();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /**
+   * Inject Speculation Rules so the browser prefetches same-origin links ahead
+   * of hover, where supported. Falls back to the JS prefetch path elsewhere.
+   */
+  function setupSpeculationRules(): void {
+    const supports = (HTMLScriptElement as any).supports;
+    if (typeof supports !== 'function' || !supports('speculationrules')) return;
+    try {
+      const script = document.createElement('script');
+      script.type = 'speculationrules';
+      script.textContent = JSON.stringify({
+        prefetch: [
+          {
+            where: {
+              and: [
+                { href_matches: '/*' },
+                { not: { href_matches: '/__krate/*' } },
+                { not: { href_matches: '/api/*' } },
+              ],
+            },
+            eagerness: 'moderate',
+          },
+        ],
+      });
+      document.head.appendChild(script);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // The app shell lives in `#root` on every page (see generateHTML), so it is
+  // the one stable swap target. Heuristic per-page content roots made different
+  // shells/page shapes reconcile incorrectly (dropping the navbar); swapping
+  // the whole shell is always correct and the new page's own scripts hydrate it.
+  function appRoot(doc: Document): HTMLElement {
+    return (doc.getElementById('root') || doc.body) as HTMLElement;
+  }
+
+  // Document-level <head> tags that change per page and must follow a swap.
+  const HEAD_SYNC_SEL =
+    'meta[name="description"], meta[property^="og:"], meta[name^="twitter:"], link[rel="canonical"], script[type="application/ld+json"]';
+
+  function reconcileHeadMeta(doc: Document): void {
+    document.head.querySelectorAll(HEAD_SYNC_SEL).forEach((el) => el.remove());
+    doc.head.querySelectorAll(HEAD_SYNC_SEL).forEach((el) => {
+      document.head.appendChild(document.importNode(el, true));
+    });
   }
 
   function swapContent(
@@ -193,58 +376,50 @@ export function initRouter(): void {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
 
-    const newContent = findContentRoot(doc);
-    const oldContent = findContentRoot(document);
+    const newContent = appRoot(doc);
+    const oldContent = appRoot(document);
     if (!newContent || !oldContent) {
       location.href = url;
       return;
     }
 
-    const newTitle = doc.querySelector('title');
-    if (newTitle) document.title = newTitle.textContent || '';
+    dispatchNavEvent('krate:navigate-start', url);
 
-    // Dispose all active effects before replacing DOM
-    if (typeof (globalThis as any).disposeAll === 'function') {
-      (globalThis as any).disposeAll();
+    // The single synchronous DOM mutation point. Wrapped in a View Transition
+    // when the browser supports it, so the SPA morph is animated natively.
+    const runMutation = () => {
+      const newTitle = doc.querySelector('title');
+      if (newTitle) document.title = newTitle.textContent || '';
+
+      // Dispose all active effects before replacing DOM
+      if (typeof (globalThis as any).disposeAll === 'function') {
+        (globalThis as any).disposeAll();
+      }
+
+      // Replace the entire app shell. This is deterministic for ANY page pair
+      // (docs<->docs, marketing<->docs, different layouts): no structural mismatch
+      // can drop chrome. The new page's scripts re-hydrate below, and View
+      // Transitions keep the visual transition smooth.
+      const nodes = Array.from(newContent.childNodes).map((n) => document.importNode(n, true));
+      oldContent.replaceChildren(...nodes);
+
+      reconcileStylesheets(doc);
+      reconcileHeadMeta(doc);
+      applyViewTransitionNames(document);
+    };
+
+    if (supportsViewTransitions()) {
+      try {
+        const vt = (document as any).startViewTransition(runMutation);
+        if (vt && vt.finished && typeof vt.finished.catch === 'function') {
+          vt.finished.catch(() => {});
+        }
+      } catch {
+        runMutation();
+      }
+    } else {
+      runMutation();
     }
-
-    // Strip stale hydration handler props so kept nodes don't retain
-    // closures bound to disposed signals; hydration re-sets them below.
-    stripHandlerProps(oldContent);
-
-    // Diff the live content against the parsed new page instead of wiping
-    // it via innerHTML, so unchanged nodes keep their state (focus, scroll,
-    // media playback, CSS animations) across navigation.
-    reconcileTrees(oldContent, newContent);
-
-    // Diff and remove old stylesheets not present in new page
-    const newStyles = doc.querySelectorAll('link[rel="stylesheet"]');
-    const newHrefs = new Set<string>();
-    newStyles.forEach((s) => {
-      const href = s.getAttribute('href');
-      if (href) newHrefs.add(href);
-    });
-
-    document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => {
-      const href = (l as HTMLLinkElement).getAttribute('href');
-      if (href && !newHrefs.has(href)) {
-        l.remove();
-      }
-    });
-
-    const existingHrefs = new Set<string>();
-    document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => {
-      existingHrefs.add((l as HTMLLinkElement).href);
-    });
-    newStyles.forEach((s) => {
-      const href = s.getAttribute('href');
-      if (href && !existingHrefs.has(href)) {
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = href;
-        document.head.appendChild(link);
-      }
-    });
 
     // Load new scripts, then rehydrate
     loadScripts(scripts, url).then(() => {
@@ -285,9 +460,12 @@ export function initRouter(): void {
     }
 
     applyScroll(url, { restoreScroll, scroll });
+    if (!restoreScroll) focusContent();
     updateActiveLinks();
 
     window.dispatchEvent(new CustomEvent('krate:navigate', { detail: { url } }));
+    dispatchNavEvent('krate:navigate-end', url);
+    notifyNavigation(url);
   }
 
   function handleHashScroll(url: string): boolean {
@@ -320,7 +498,7 @@ export function initRouter(): void {
 
   // Mark the link matching the current route with aria-current="page".
   function updateActiveLinks(): void {
-    const path = location.pathname;
+    const path = stripBase(location.pathname);
     document.querySelectorAll('a[data-krate-link]').forEach((a) => {
       const href = a.getAttribute('href');
       if (!href) {
@@ -329,7 +507,7 @@ export function initRouter(): void {
       }
       let target = href;
       try {
-        target = new URL(href, location.origin).pathname;
+        target = stripBase(new URL(href, location.origin).pathname);
       } catch {
         return;
       }
@@ -359,7 +537,7 @@ export function initRouter(): void {
       const s = document.createElement('script');
       const resolved = resolveSrc(src, baseUrl);
       s.src = resolved;
-      // Only page scripts are disposable across navigations — the shared
+      // Only page scripts are disposable across navigations - the shared
       // runtime chunk stays in place.
       if (!RUNTIME_CHUNK_RE.test(resolved)) s.setAttribute('data-krate-spa', '');
       s.onload = () => resolve();
@@ -396,6 +574,7 @@ export function initRouter(): void {
       (globalThis as any).disposeAll();
     }
     history.pushState({}, '', url);
+    notifyNavigation(url);
     document.open();
     document.write(html);
     document.close();
@@ -452,7 +631,9 @@ export function initRouter(): void {
     url: string,
     opts: { replace?: boolean; scroll?: boolean; restoreScroll?: boolean } = {}
   ): void {
-    // Check prefetch cache first — already-loaded content swaps instantly.
+    const seq = ++navSeq;
+
+    // Check prefetch cache first - already-loaded content swaps instantly.
     const cached = prefetchCache.get(url);
     if (cached) {
       const parser = new DOMParser();
@@ -476,11 +657,13 @@ export function initRouter(): void {
       signal,
     })
       .then((res) => {
+        if (seq !== navSeq) return; // superseded by a newer navigation
         if (!res.ok) {
           const page = res.status >= 500 ? fetchErrorPage() : fetchNotFoundPage();
           return page.then((html) => {
+            if (seq !== navSeq) return;
             if (html) {
-              // Error pages contain full layout — full page replacement
+              // Error pages contain full layout - full page replacement
               replacePage(html, url);
             } else {
               location.href = url;
@@ -488,6 +671,7 @@ export function initRouter(): void {
           });
         }
         return res.text().then((html) => {
+          if (seq !== navSeq) return; // superseded while reading the body
           const parser = new DOMParser();
           const doc = parser.parseFromString(html, 'text/html');
           swapContent(html, url, extractScripts(doc, url), opts);
@@ -509,7 +693,7 @@ export function initRouter(): void {
   }
 
   const clickHandler = (e: MouseEvent) => {
-    // Never intercept modified clicks (cmd/ctrl/shift/alt or middle button) —
+    // Never intercept modified clicks (cmd/ctrl/shift/alt or middle button) -
     // they should open in a new tab or trigger browser behavior.
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const a = (e.target as HTMLElement).closest('a[data-krate-link]') as HTMLAnchorElement | null;
@@ -539,7 +723,24 @@ export function initRouter(): void {
   window.addEventListener('popstate', popstateHandler);
 
   setupPrefetch();
+  setupSpeculationRules();
   updateActiveLinks();
+  applyViewTransitionNames(document);
+
+  // Expose the SPA navigation to `navigate()` (and any embedded UI).
+  navigateImpl = (url: string, opts: NavigateOptions = {}) => {
+    let sameOrigin = true;
+    try {
+      sameOrigin = new URL(url, location.href).origin === location.origin;
+    } catch {
+      sameOrigin = false;
+    }
+    if (!sameOrigin) {
+      location.href = url;
+      return;
+    }
+    fetchAndSwap(new URL(url, location.href).href, opts);
+  };
 
   // Mark the initially-loaded page scripts as disposable so they're removed and
   // re-executed against the fresh DOM when the user navigates back to this
@@ -554,6 +755,7 @@ export function initRouter(): void {
     document.removeEventListener('click', clickHandler);
     window.removeEventListener('popstate', popstateHandler);
     cleanupPrefetch();
+    navigateImpl = null;
   };
 }
 

@@ -190,7 +190,7 @@ export default defineConfig({
   redirects: [{ source: "/old", destination: "/new", permanent: true }],
   plugins: [
     sitemap({ baseUrl: "https://example.com" }),
-    docs({ contentDir: "content/docs", title: "Docs", search: { engine: "docfind" } }),
+    docs({ contentDir: "src/content/docs", title: "Docs", search: { engine: "docfind" } }),
   ],
 });
 ```
@@ -207,6 +207,9 @@ same factory pattern: `import demoPlugin from './plugins/my-plugin'` then
 | `krate build [dir]` | Production build (`--watch`, `--out-dir`, `--config`) |
 | `krate dev [dir]` | Build + dev server (port 3000) + hot reload |
 | `krate serve [dir]` | Build + static HTTP server |
+| `krate check [dir]` | Build and run quality gates (a11y/SEO/perf) |
+| `krate types [dir]` | Generate route/content TypeScript declarations |
+| `krate mcp [dir]` | Start the agent-native MCP server over stdio |
 | `krate init [dir]` | Scaffold a new project (alias: `create`) |
 | `krate version` | Print version |
 

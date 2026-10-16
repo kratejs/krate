@@ -1,5 +1,5 @@
 /**
- * Dev Error Overlay — shows a styled error overlay in development mode.
+ * Dev Error Overlay - shows a styled error overlay in development mode.
  * Catches unhandled errors and unhandled promise rejections,
  * displays them in a dismissable overlay with file/line info.
  */

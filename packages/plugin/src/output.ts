@@ -10,6 +10,7 @@
  */
 
 import type { GeneratedPage, PluginFile, PluginRoute } from "./context.js";
+import type { AstNode } from "./ast.js";
 import type { Krate } from "./krate.js";
 
 /** Optional shape a build hook may return to affect the build. */
@@ -20,6 +21,11 @@ export interface PluginOutput {
   routes?: PluginRoute[];
   /** Page files that should enter the normal page pipeline. */
   generatedPages?: GeneratedPage[];
+  /**
+   * Replacement AST for the page (AfterParse only). Return the edited
+   * `ctx.program` document to rewrite the tree before rendering.
+   */
+  ast?: AstNode;
   /** Replace the page HTML (AfterMarkdownParse/AfterRender/AfterPage). */
   html?: string;
   /** Additional head HTML (appended). */
@@ -33,8 +39,8 @@ export interface PluginOutput {
 }
 
 /** A build hook implementation; may return a Promise. */
-export type PluginHookFn<Ctx, Out = PluginOutput> = (
+export type PluginHookFn<Ctx, Out = PluginOutput, Options = unknown> = (
   ctx: Ctx,
-  options: unknown,
+  options: Options,
   krate: Krate,
 ) => Out | void | Promise<Out | void>;

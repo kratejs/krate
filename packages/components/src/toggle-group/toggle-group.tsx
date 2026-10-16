@@ -1,133 +1,68 @@
 import './toggle-group.css';
-import { createSignal, createEffect } from '@krate/runtime';
+import { createScope, createScopeFlags, createCSSChoice, createCSSFlags, type CSSScope, type CSSFlagsScope } from '@krate/runtime';
 
-interface ToggleGroupBaseProps {
-  children?: any;
-  type?: 'single' | 'multiple';
-  orientation?: 'horizontal' | 'vertical';
-  size?: 'sm' | 'md' | 'lg';
-}
+const ToggleGroupCtx = createScope<string>();
+const ToggleGroupMultiCtx = createScopeFlags<string>();
 
-export interface ToggleGroupSingleProps extends ToggleGroupBaseProps {
-  type?: 'single';
-  value?: string;
+export interface ToggleGroupProps {
   defaultValue?: string;
-  onValueChange?: (value: string) => void;
+  label?: string;
+  children?: any;
 }
 
-export interface ToggleGroupMultipleProps extends ToggleGroupBaseProps {
-  type?: 'multiple';
-  value?: string[];
-  defaultValue?: string[];
-  onValueChange?: (value: string[]) => void;
-}
-
-export type ToggleGroupProps = ToggleGroupSingleProps | ToggleGroupMultipleProps;
-
+/** Single-select toggle group (radio semantics), zero JS. */
 export function ToggleGroup(props: ToggleGroupProps) {
-  var type = props.type || "single";
-  var [selected, setSelected] = createSignal<string | string[]>(
-    type === "single"
-      ? ((props.defaultValue as string) || "")
-      : ((props.defaultValue as string[]) || [])
-  );
-  var rootRef: HTMLElement | null = null;
-
-  createEffect(function () {
-    if (props.value !== undefined) {
-      setSelected(props.value);
-    }
-  });
-
-  function syncItems(root: HTMLElement, selectedValue: string | string[]) {
-    var groupType = root.getAttribute("data-type");
-    var items = root.querySelectorAll("[data-krate-toggle-group-item]");
-    for (var i = 0; i < items.length; i++) {
-      var el = items[i] as HTMLElement;
-      var val = el.getAttribute("data-value");
-      var isActive = false;
-      if (groupType === "single") {
-        isActive = selectedValue === val;
-      } else if (Array.isArray(selectedValue)) {
-        isActive = selectedValue.indexOf(val!) >= 0;
-      }
-      el.setAttribute("data-state", isActive ? "on" : "off");
-    }
-  }
-
-  function handleClick(e: MouseEvent) {
-    var target = e.target as HTMLElement;
-    var root = target.closest("[data-krate-toggle-group]") as HTMLElement;
-    if (root) rootRef = root;
-
-    var item = target.closest("[data-krate-toggle-group-item]");
-    if (item) {
-      var value = item.getAttribute("data-value");
-      if (value) {
-        var groupType = root ? root.getAttribute("data-type") : "single";
-        if (groupType === "single") {
-          var current = selected() as string;
-          var next = current === value ? "" : value;
-          setSelected(next);
-          if (props.onValueChange) (props.onValueChange as (value: string) => void)(next);
-          if (root) syncItems(root, next);
-        } else {
-          var currentArr = selected() as string[];
-          var idx = currentArr.indexOf(value);
-          var nextArr: string[];
-          if (idx >= 0) {
-            nextArr = currentArr.filter(function (v) { return v !== value; });
-          } else {
-            nextArr = currentArr.concat([value]);
-          }
-          setSelected(nextArr);
-          if (props.onValueChange) (props.onValueChange as (value: string[]) => void)(nextArr);
-          if (root) syncItems(root, nextArr);
-        }
-      }
-    }
-  }
-
-  createEffect(function () {
-    var selectedValue = selected();
-    var root = rootRef;
-    if (root) {
-      syncItems(root, selectedValue);
-    }
-  });
-
+  const value = createCSSChoice<string>('', { as: 'radiogroup', label: props.label });
   return (
-    <div
-      ref={(el) => { rootRef = el as HTMLElement; }}
-      class={"krate-toggle-group" + (props.size ? " krate-toggle-group-" + props.size : "")}
-      data-krate-toggle-group="true"
-      role="group"
-      data-orientation={props.orientation || "horizontal"}
-      data-type={type}
-      onClick={handleClick}
-    >
-      {props.children}
-    </div>
+    <ToggleGroupCtx.Provider value={value}>
+      <div class="krate-toggle-group">{props.children}</div>
+    </ToggleGroupCtx.Provider>
   );
 }
 
 export interface ToggleGroupItemProps {
   value?: string;
-  disabled?: boolean;
   children?: any;
 }
 
+/** @deprecated Use `ToggleGroup.Item` instead. */
 export function ToggleGroupItem(props: ToggleGroupItemProps) {
+  const value = ToggleGroupCtx.use();
   return (
-    <button
-      class="krate-toggle-group-item"
-      type="button"
-      role="checkbox"
-      data-value={props.value || ""}
-      data-krate-toggle-group-item="true"
-      disabled={props.disabled}
-    >
+    <button class="krate-toggle-group-item" type="button" {...value.trigger(props.value)}>
       {props.children}
     </button>
   );
 }
+
+/** Multi-select toggle group (checkbox semantics), zero JS. */
+export function ToggleGroupMultiple(props: ToggleGroupProps) {
+  const flags = createCSSFlags<string>([], { label: props.label });
+  return (
+    <ToggleGroupMultiCtx.Provider value={flags}>
+      <div class="krate-toggle-group">{props.children}</div>
+    </ToggleGroupMultiCtx.Provider>
+  );
+}
+
+/** @deprecated Use `ToggleGroupMultiple.Item` instead. */
+export function ToggleGroupMultipleItem(props: ToggleGroupItemProps) {
+  const flags = ToggleGroupMultiCtx.use();
+  return (
+    <button class="krate-toggle-group-item" type="button" {...flags.trigger(props.value as string)}>
+      {props.children}
+    </button>
+  );
+}
+
+export interface ToggleGroup {
+  Item: typeof ToggleGroupItem;
+}
+
+ToggleGroup.Item = ToggleGroupItem;
+
+export interface ToggleGroupMultiple {
+  Item: typeof ToggleGroupMultipleItem;
+}
+
+ToggleGroupMultiple.Item = ToggleGroupMultipleItem;

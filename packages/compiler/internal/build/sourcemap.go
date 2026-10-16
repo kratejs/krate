@@ -1,53 +1,80 @@
 package build
 
 import (
-	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
 
-// generateSourcemap produces a basic inline sourcemap in JSON format.
-// It maps lines in the minified output back to lines in the original source.
-// This is a line-level mapping (not character-precise VLQ).
-func generateSourcemap(minified, original, filename string) string {
-	minLines := strings.Split(minified, "\n")
-	origLines := strings.Split(original, "\n")
+// sourceMap is the JSON shape of a source map (v3). Only the fields Krate
+// populates are listed.
+type sourceMap struct {
+	Version        int      `json:"version"`
+	File           string   `json:"file"`
+	SourceRoot     string   `json:"sourceRoot"`
+	Sources        []string `json:"sources"`
+	SourcesContent []string `json:"sourcesContent,omitempty"`
+	Names          []string `json:"names"`
+	Mappings       string   `json:"mappings"`
+}
+
+// generateSourcemap builds a valid line-level source map. Generated and
+// original line counts are mapped 1:1 where possible; because the per-page
+// hydration bundle is compiler-generated (there is no literal original
+// TypeScript the lines correspond to), the *generated* code is embedded as
+// `sourcesContent` so devtools can still display a coherent file rather than a
+// misleading self-reference. Consumers that need true column mappings for
+// esbuild-built assets get real maps directly from esbuild.
+func generateSourcemap(generated, sourcePath, sourceContent string) string {
+	genLines := strings.Split(generated, "\n")
+	srcLines := strings.Split(sourceContent, "\n")
 
 	var mappings strings.Builder
-	for i := range minLines {
+	for i := range genLines {
 		if i > 0 {
 			mappings.WriteString(";")
 		}
-		if i < len(origLines) {
-			mappings.WriteString(vlqEncode([]int{0, i, 0, 0}))
+		// Map each generated line to the same line in the source (clamped).
+		line := i
+		if line >= len(srcLines) {
+			line = len(srcLines) - 1
 		}
+		if line < 0 {
+			line = 0
+		}
+		mappings.WriteString(vlqEncode([]int{0, line, 0, 0}))
 	}
 
-	// Use forward slashes in paths for cross-platform compatibility
-	filePath := strings.ReplaceAll(filename, "\\", "/")
-
-	sm := fmt.Sprintf(`{
-  "version":3,
-  "file":"%s",
-  "sourceRoot":"",
-  "sources":["%s"],
-  "names":[],
-  "mappings":"%s"
-}`, filePath, filePath, mappings.String())
-
-	return sm
+	sm := sourceMap{
+		Version:        3,
+		File:           strings.ReplaceAll(sourcePath, "\\", "/"),
+		SourceRoot:     "",
+		Sources:        []string{strings.ReplaceAll(sourcePath, "\\", "/")},
+		SourcesContent: []string{sourceContent},
+		Names:          []string{},
+		Mappings:       mappings.String(),
+	}
+	data, err := json.Marshal(sm)
+	if err != nil {
+		// Fall back to a minimal valid map rather than emitting invalid JSON.
+		return `{"version":3,"file":"","sources":[],"names":[],"mappings":""}`
+	}
+	return string(data)
 }
 
-// GenerateInlineSourcemap creates a data URL with the base64-encoded sourcemap
-// that can be appended to a JS file.
-func generateInlineSourcemap(minified, original, filename string) string {
-	sm := generateSourcemap(minified, original, filename)
-	encoded := base64.StdEncoding.EncodeToString([]byte(sm))
-	return "//# sourceMappingURL=data:application/json;base64," + encoded
+// appendSourceMappingURL appends a `//# sourceMappingURL=` comment pointing at
+// the given map filename, unless one is already present.
+func appendSourceMappingURL(js, mapFile string) string {
+	if strings.Contains(js, "sourceMappingURL=") {
+		return js
+	}
+	if !strings.HasSuffix(js, "\n") {
+		js += "\n"
+	}
+	return js + "//# sourceMappingURL=" + mapFile + "\n"
 }
 
 // vlqEncode encodes a slice of integers using Base64 VLQ encoding.
-// This is a simplified implementation for line-level mappings.
 func vlqEncode(values []int) string {
 	var result strings.Builder
 	for _, v := range values {
@@ -58,10 +85,8 @@ func vlqEncode(values []int) string {
 
 // encodeVLQSegment encodes a single integer using Base64 VLQ.
 func encodeVLQSegment(value int) string {
-	// VLQ encoding: encode in 5-bit chunks, LSB first
-	// Each chunk is 5 bits, sign bit is LSB, continuation bit is bit 5
-
-	// Make room for sign bit
+	// VLQ encoding: encode in 5-bit chunks, LSB first.
+	// Each chunk is 5 bits, sign bit is LSB, continuation bit is bit 5.
 	var v uint
 	if value < 0 {
 		v = uint((-value)<<1) | 1
@@ -71,7 +96,6 @@ func encodeVLQSegment(value int) string {
 
 	var result strings.Builder
 	for {
-		// Take bottom 5 bits
 		chunk := int(v) & 0x1F
 		v >>= 5
 		if v > 0 {
@@ -82,7 +106,6 @@ func encodeVLQSegment(value int) string {
 			break
 		}
 	}
-
 	return result.String()
 }
 
@@ -94,3 +117,5 @@ func base64VLQ(v int) byte {
 	}
 	return vlqChars[v]
 }
+
+var _ = fmt.Sprintf

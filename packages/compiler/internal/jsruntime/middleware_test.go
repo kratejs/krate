@@ -32,7 +32,7 @@ var middleware = function(request) {
 		t.Fatalf("Execute middleware code failed: %v", err)
 	}
 
-	// Test: unauthenticated admin request → redirect
+	// Test: unauthenticated admin request -> redirect
 	result, err := rt.Execute(`
 		(function() {
 			var request = {
@@ -298,7 +298,7 @@ export {
 	}
 	defer mrt.Close()
 
-	// Test /old-blog → 301 redirect
+	// Test /old-blog -> 301 redirect
 	result := mrt.Execute(MiddlewareRequest{
 		URL:     "http://localhost:3000/old-blog",
 		Path:    "/old-blog",
@@ -314,7 +314,7 @@ export {
 		t.Errorf("Expected X-Frame-Options: DENY, got %s", result.Headers["x-frame-options"])
 	}
 
-	// Test /admin → 403
+	// Test /admin -> 403
 	result = mrt.Execute(MiddlewareRequest{
 		URL:     "http://localhost:3000/admin/settings",
 		Path:    "/admin/settings",
@@ -327,7 +327,7 @@ export {
 		t.Errorf("Expected 'Forbidden', got %s", result.Body)
 	}
 
-	// Test normal page → 200
+	// Test normal page -> 200
 	result = mrt.Execute(MiddlewareRequest{
 		URL:     "http://localhost:3000/about",
 		Path:    "/about",

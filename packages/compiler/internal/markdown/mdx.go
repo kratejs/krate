@@ -1,15 +1,20 @@
 package markdown
 
 import (
+	"fmt"
 	"html"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/frontmatter"
 )
 
 // MDXResult holds the parsed result of an MDX file.
 type MDXResult struct {
-	Frontmatter map[string]string
+	Frontmatter map[string]any
 	HTML        string
 	JSXBlocks   []JSXBlock
 }
@@ -134,61 +139,11 @@ func ParseMDX(src string, cfg Config) *MDXResult {
 	}
 }
 
-// ReinsertJSXBlocks replaces placeholders in HTML with the actual JSX block content.
-func (r *MDXResult) ReinsertJSXBlocks() string {
-	result := r.HTML
-	for _, jsx := range r.JSXBlocks {
-		placeholder := "__KRATE_MDX_" + runeToStr(jsx.Index) + "__"
-		// Build JSX string
-		var jsxStr strings.Builder
-		jsxStr.WriteString("<")
-		jsxStr.WriteString(jsx.Tag)
-		if jsx.Attrs != "" {
-			jsxStr.WriteString(" ")
-			jsxStr.WriteString(jsx.Attrs)
-		}
-		jsxStr.WriteString(">")
-		if jsx.Children != "" {
-			// Render children as Markdown too (recursive)
-			childHTML := RenderToHTML(jsx.Children, DefaultConfig())
-			jsxStr.WriteString(childHTML)
-		}
-		jsxStr.WriteString("</")
-		jsxStr.WriteString(jsx.Tag)
-		jsxStr.WriteString(">")
-		result = strings.ReplaceAll(result, placeholder, jsxStr.String())
-	}
-	return result
-}
-
-func extractFrontmatter(src string) (map[string]string, string) {
-	// Strip a leading UTF-8 BOM so files saved with one still parse their
-	// frontmatter and body correctly.
-	src = strings.TrimPrefix(src, "\ufeff")
-	lines := strings.Split(src, "\n")
-	if len(lines) < 2 || strings.TrimSpace(lines[0]) != "---" {
-		return nil, src
-	}
-
-	fm := make(map[string]string)
-	i := 1
-	for i < len(lines) {
-		if strings.TrimSpace(lines[i]) == "---" {
-			i++
-			break
-		}
-		line := lines[i]
-		if idx := strings.IndexByte(line, ':'); idx >= 0 {
-			key := strings.TrimSpace(line[:idx])
-			val := strings.TrimSpace(line[idx+1:])
-			val = strings.Trim(val, "\"'")
-			fm[key] = val
-		}
-		i++
-	}
-
-	body := strings.Join(lines[i:], "\n")
-	return fm, body
+// extractFrontmatter delegates to the shared mini-YAML parser
+// (internal/frontmatter) so the docs plugin and the markdown renderer always
+// parse frontmatter identically.
+func extractFrontmatter(src string) (map[string]any, string) {
+	return frontmatter.Parse(src)
 }
 
 func isJSXStart(s string) bool {
@@ -198,17 +153,17 @@ func isJSXStart(s string) bool {
 	if strings.HasPrefix(s, "</") || strings.HasPrefix(s, "<!") || strings.HasPrefix(s, "<?") {
 		return false
 	}
-	// Only uppercase component names are JSX blocks
-	for _, r := range s[1:] {
-		if r == ' ' || r == '>' || r == '/' {
-			return false
-		}
-		if unicode.IsUpper(r) || r == '_' {
-			return true
-		}
+	// Only uppercase component names are JSX blocks: the first character after
+	// "<" decides.
+	rs := []rune(s[1:])
+	if len(rs) == 0 {
 		return false
 	}
-	return false
+	r := rs[0]
+	if r == ' ' || r == '>' || r == '/' {
+		return false
+	}
+	return unicode.IsUpper(r) || r == '_'
 }
 
 func extractJSXTag(lines []string, start int) (tag, attrs, rest string, endLine int) {
@@ -336,7 +291,21 @@ type seqMarker struct {
 	jsx         *jsxBlockT   // set for JSX blocks
 	code        *codeBlockT  // set for code blocks
 	aside       *asideBlockT // set for admonitions
+	rawJSX      string       // set for `:::component Name` directives
 }
+
+// directiveRe matches a `:::component Name attrs...` block opener. The body is
+// markdown-rendered and passed to the component as raw HTML; the component is
+// expected to be imported in the MDX frontmatter/imports.
+var directiveRe = regexp.MustCompile(`^:::\s*component\s+([A-Za-z_][A-Za-z0-9_.]*)\s*(.*)$`)
+
+// containerDirectiveRe matches the built-in container directives that lower to
+// @krate/components primitives: card, steps (+ nested ::step), tabs (+ ::tab),
+// and code-group (fenced code blocks become tabs).
+var containerDirectiveRe = regexp.MustCompile(`^:::\s*(card|steps|tabs|code-group)\b\s*(.*)$`)
+
+// itemDirectiveRe matches a nested item marker inside :::steps / :::tabs.
+var itemDirectiveRe = regexp.MustCompile(`^::\s*(step|tab)\b\s*(.*)$`)
 
 type jsxBlockT struct {
 	Tag       string
@@ -364,13 +333,13 @@ func makePlaceholder(prefix string, idx int) string {
 // ParseMDXSegments parses MDX (or plain Markdown) and returns ordered segments
 // (HTML + JSX blocks + code blocks) suitable for generating TSX source code.
 // JSX blocks are returned as raw JSX strings, and fenced code blocks are
-// returned as Code segments that render the <Code> component — both are
+// returned as Code segments that render the <Code> component - both are
 // embedded directly in TSX output.
-func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]string, segments []MDXSegment) {
+func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]any, segments []MDXSegment) {
 	frontmatter, body := extractFrontmatter(src)
 
 	// Strip import lines from the body so they don't render as markdown text.
-	// Lines inside fenced code blocks are preserved — an "import ..." line used
+	// Lines inside fenced code blocks are preserved - an "import ..." line used
 	// as a code sample must not be hoisted or removed from its block.
 	bodyLines := strings.Split(body, "\n")
 	var bodyWithoutImports []string
@@ -405,12 +374,74 @@ func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]string, se
 	jsxIdx := 0
 	codeIdx := 0
 	asideIdx := 0
+	directiveIdx := 0
 	for i < len(lines) {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 
-		// Admonition (:::type ... / :::::: ) → <Aside> segment.
-		if m := admonRe.FindStringSubmatch(trimmed); m != nil && strings.HasPrefix(trimmed, ":") {
+		// Built-in container directives (:::card / :::steps / :::tabs /
+		// :::code-group) lower to @krate/components primitives.
+		if m := containerDirectiveRe.FindStringSubmatch(trimmed); m != nil {
+			kind := m[1]
+			arg := strings.TrimSpace(m[2])
+			var outer []string
+			j := i + 1
+			for ; j < len(lines); j++ {
+				if strings.TrimSpace(lines[j]) == ":::" {
+					break
+				}
+				outer = append(outer, lines[j])
+			}
+			jsx := renderContainerDirective(kind, arg, outer, cfg)
+			placeholder := makePlaceholder("DIRECTIVE", directiveIdx)
+			processed.WriteString(placeholder)
+			processed.WriteByte('\n')
+			markers = append(markers, seqMarker{placeholder: placeholder, rawJSX: jsx})
+			directiveIdx++
+			i = j + 1
+			continue
+		}
+
+		// Component directive (:::component Name attr="x" ... :::) -> the named
+		// component wrapping markdown-rendered body content. Checked before
+		// admonitions so `:::component` isn't read as an admonition type.
+		if m := directiveRe.FindStringSubmatch(trimmed); m != nil {
+			name := m[1]
+			attrs := strings.TrimSpace(m[2])
+			var inner []string
+			j := i + 1
+			for ; j < len(lines); j++ {
+				if strings.TrimSpace(lines[j]) == ":::" {
+					break
+				}
+				inner = append(inner, lines[j])
+			}
+			innerHTML := RenderToHTML(strings.Join(inner, "\n"), cfg)
+			var jsx strings.Builder
+			jsx.WriteString("<")
+			jsx.WriteString(name)
+			if attrs != "" {
+				jsx.WriteString(" ")
+				jsx.WriteString(attrs)
+			}
+			jsx.WriteString("><div class=\"krate-directive-body\" dangerouslySetInnerHTML={{__html: `")
+			jsx.WriteString(escapeTemplateLiteral(innerHTML))
+			jsx.WriteString("`}} /></")
+			jsx.WriteString(name)
+			jsx.WriteString(">")
+			placeholder := makePlaceholder("DIRECTIVE", directiveIdx)
+			processed.WriteString(placeholder)
+			processed.WriteByte('\n')
+			markers = append(markers, seqMarker{placeholder: placeholder, rawJSX: jsx.String()})
+			directiveIdx++
+			i = j + 1
+			continue
+		}
+
+		// Admonition (:::type ... / :::::: ) -> <Aside> segment. Disabled when
+		// the markdown config turns admonitions off, in which case the block is
+		// rendered as ordinary markdown.
+		if m := admonRe.FindStringSubmatch(trimmed); m != nil && strings.HasPrefix(trimmed, ":") && cfg.Admonitions {
 			adType := strings.ToLower(strings.TrimSpace(m[1]))
 			adTitleLine := strings.TrimSpace(m[2])
 			var inner []string
@@ -440,15 +471,26 @@ func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]string, se
 			continue
 		}
 
-		// Fenced code block → <Code> segment.
+		// Fenced code block -> <Code> segment (or a Mermaid diagram).
 		if fenceRe.MatchString(trimmed) {
 			lang, codeLines, next := collectFencedCode(lines, i)
+			code := strings.Join(codeLines, "\n")
+			if cfg.Mermaid && strings.EqualFold(strings.TrimSpace(lang), "mermaid") {
+				jsx := "<pre class=\"mermaid\">{`" + escapeTemplateLiteral(code) + "`}</pre>"
+				placeholder := makePlaceholder("DIRECTIVE", directiveIdx)
+				processed.WriteString(placeholder)
+				processed.WriteByte('\n')
+				markers = append(markers, seqMarker{placeholder: placeholder, rawJSX: jsx})
+				directiveIdx++
+				i = next
+				continue
+			}
 			placeholder := makePlaceholder("CODE", codeIdx)
 			processed.WriteString(placeholder)
 			processed.WriteByte('\n')
 			markers = append(markers, seqMarker{
 				placeholder: placeholder,
-				code:        &codeBlockT{Lang: lang, Code: strings.Join(codeLines, "\n")},
+				code:        &codeBlockT{Lang: lang, Code: code},
 			})
 			codeIdx++
 			i = next
@@ -545,7 +587,7 @@ func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]string, se
 
 	// Clean up <p> wrappers around placeholders. The markdown renderer wraps
 	// inline content in <p> tags, but block placeholders should be block-level.
-	// e.g., <p>__KRATE_..._0__</p> → __KRATE_..._0__
+	// e.g., <p>__KRATE_..._0__</p> -> __KRATE_..._0__
 	for _, m := range markers {
 		html = strings.ReplaceAll(html, "<p>"+m.placeholder+"</p>", m.placeholder)
 	}
@@ -563,6 +605,8 @@ func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]string, se
 		}
 		if m.jsx != nil {
 			segs = append(segs, MDXSegment{JSX: buildJSXString(m.jsx)})
+		} else if m.rawJSX != "" {
+			segs = append(segs, MDXSegment{JSX: m.rawJSX})
 		} else if m.code != nil {
 			segs = append(segs, MDXSegment{Code: &CodeSegment{Lang: m.code.Lang, Code: m.code.Code}})
 		} else if m.aside != nil {
@@ -660,11 +704,13 @@ func asideTitle(adType, titleLine string) string {
 // emitted as raw HTML (unescaped) inside the Aside.
 func BuildAsideJSX(ad *AsideSegment) string {
 	var sb strings.Builder
-	sb.WriteString("<Aside type=\"")
-	sb.WriteString(escapeJSXString(ad.Type))
-	sb.WriteString("\" title=\"")
-	sb.WriteString(escapeJSXString(ad.Title))
-	sb.WriteString("\"><div dangerouslySetInnerHTML={{__html:`")
+	// Attribute values are emitted as JS string EXPRESSIONS (`{ "..." }`) so
+	// quotes/ampersands survive the lexer/parser round-trip verbatim.
+	sb.WriteString("<Aside type={")
+	sb.WriteString(escape.JSStringDQ(ad.Type))
+	sb.WriteString("} title={")
+	sb.WriteString(escape.JSStringDQ(ad.Title))
+	sb.WriteString("}><div dangerouslySetInnerHTML={{__html:`")
 	sb.WriteString(escapeTemplateLiteral(ad.InnerHTML))
 	sb.WriteString("`}} /></Aside>")
 	return sb.String()
@@ -683,7 +729,7 @@ func buildJSXString(jsx *jsxBlockT) string {
 	} else {
 		jsxStr.WriteString(">")
 		if jsx.Children != "" {
-			// JSX children are kept as raw text — not processed as markdown.
+			// JSX children are kept as raw text - not processed as markdown.
 			// MDX treats content inside JSX components as JSX, not markdown.
 			jsxStr.WriteString(jsx.Children)
 		}
@@ -701,23 +747,14 @@ func BuildCodeJSX(lang, code string) string {
 	var sb strings.Builder
 	sb.WriteString("<Code")
 	if lang != "" {
-		sb.WriteString(" lang=\"")
-		sb.WriteString(escapeJSXString(lang))
-		sb.WriteString("\"")
+		sb.WriteString(" lang={")
+		sb.WriteString(escape.JSStringDQ(lang))
+		sb.WriteString("}")
 	}
 	sb.WriteString(">{`")
 	sb.WriteString(escapeTemplateLiteral(code))
 	sb.WriteString("`}</Code>")
 	return sb.String()
-}
-
-func escapeJSXString(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "\"", "&quot;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	s = strings.ReplaceAll(s, "'", "&#39;")
-	return s
 }
 
 // escapeTemplateLiteral escapes backticks and ${ so raw code can be embedded
@@ -754,4 +791,220 @@ func collectFencedCode(lines []string, i int) (lang string, code []string, next 
 		i++
 	}
 	return lang, code, i
+}
+
+// --- Built-in container directives ------------------------------------------
+
+type directiveItem struct {
+	title    string
+	bodyHTML string
+}
+
+// renderContainerDirective lowers :::card / :::steps / :::tabs / :::code-group
+// to @krate/components JSX. Nested items use ::step / ::tab markers; code-group
+// items are fenced code blocks.
+func renderContainerDirective(kind, arg string, lines []string, cfg Config) string {
+	switch kind {
+	case "card":
+		inner := RenderToHTML(strings.Join(lines, "\n"), cfg)
+		return wrapDirectiveComponent("Card", arg, inner)
+	case "steps":
+		items := splitDirectiveItems(lines, "step", cfg)
+		var b strings.Builder
+		b.WriteString("<Steps>")
+		for _, it := range items {
+			b.WriteString("<Step")
+			if it.title != "" {
+				b.WriteString(" title=" + jsxQuote(it.title))
+			}
+			b.WriteString(">")
+			b.WriteString(directiveInner(it.bodyHTML))
+			b.WriteString("</Step>")
+		}
+		b.WriteString("</Steps>")
+		return b.String()
+	case "tabs":
+		return renderTabsJSX(splitDirectiveItems(lines, "tab", cfg))
+	case "code-group":
+		return renderCodeGroupJSX(parseCodeGroup(lines))
+	}
+	return ""
+}
+
+func splitDirectiveItems(lines []string, marker string, cfg Config) []directiveItem {
+	var items []directiveItem
+	var body []string
+	var cur *directiveItem
+	flush := func() {
+		if cur != nil {
+			cur.bodyHTML = RenderToHTML(strings.Join(body, "\n"), cfg)
+			items = append(items, *cur)
+			body = nil
+		}
+	}
+	for _, ln := range lines {
+		if m := itemDirectiveRe.FindStringSubmatch(strings.TrimSpace(ln)); m != nil && m[1] == marker {
+			flush()
+			cur = &directiveItem{title: strings.TrimSpace(m[2])}
+			continue
+		}
+		if cur != nil {
+			body = append(body, ln)
+		}
+	}
+	flush()
+	if len(items) == 0 {
+		items = append(items, directiveItem{bodyHTML: RenderToHTML(strings.Join(lines, "\n"), cfg)})
+	}
+	return items
+}
+
+func renderTabsJSX(items []directiveItem) string {
+	type norm struct{ label, value, html string }
+	var list []norm
+	used := map[string]bool{}
+	for i, it := range items {
+		label := it.title
+		if label == "" {
+			label = fmt.Sprintf("Tab %d", i+1)
+		}
+		val := budgetSlug(label, i)
+		for used[val] {
+			val += "-" + runeToStr(i)
+		}
+		used[val] = true
+		list = append(list, norm{label, val, it.bodyHTML})
+	}
+	var b strings.Builder
+	b.WriteString("<Tabs defaultValue=" + jsxQuote(list[0].value) + ">")
+	b.WriteString("<TabsList>")
+	for _, n := range list {
+		b.WriteString("<TabsTrigger value=" + jsxQuote(n.value) + ">" + escape.HTML(n.label) + "</TabsTrigger>")
+	}
+	b.WriteString("</TabsList>")
+	for _, n := range list {
+		b.WriteString("<TabsContent value=" + jsxQuote(n.value) + ">" + directiveInner(n.html) + "</TabsContent>")
+	}
+	b.WriteString("</Tabs>")
+	return b.String()
+}
+
+type codeGroupItem struct {
+	lang string
+	code string
+}
+
+func parseCodeGroup(lines []string) []codeGroupItem {
+	var items []codeGroupItem
+	for i := 0; i < len(lines); {
+		if fenceRe.MatchString(strings.TrimSpace(lines[i])) {
+			lang, codeLines, next := collectFencedCode(lines, i)
+			items = append(items, codeGroupItem{lang: lang, code: strings.Join(codeLines, "\n")})
+			i = next
+			continue
+		}
+		i++
+	}
+	return items
+}
+
+func renderCodeGroupJSX(items []codeGroupItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	val := func(i int) string {
+		if items[i].lang == "" {
+			return "code-" + runeToStr(i)
+		}
+		return items[i].lang + "-" + runeToStr(i)
+	}
+	var b strings.Builder
+	b.WriteString("<Tabs defaultValue=" + jsxQuote(val(0)) + ">")
+	b.WriteString("<TabsList>")
+	for i, it := range items {
+		label := it.lang
+		if label == "" {
+			label = fmt.Sprintf("Code %d", i+1)
+		}
+		b.WriteString("<TabsTrigger value=" + jsxQuote(val(i)) + ">" + escape.HTML(label) + "</TabsTrigger>")
+	}
+	b.WriteString("</TabsList>")
+	for i, it := range items {
+		b.WriteString("<TabsContent value=" + jsxQuote(val(i)) + ">" + BuildCodeJSX(it.lang, it.code) + "</TabsContent>")
+	}
+	b.WriteString("</Tabs>")
+	return b.String()
+}
+
+func wrapDirectiveComponent(name, title, innerHTML string) string {
+	var b strings.Builder
+	b.WriteString("<" + name)
+	if title != "" {
+		b.WriteString(" title=" + jsxQuote(title))
+	}
+	b.WriteString(">")
+	b.WriteString(directiveInner(innerHTML))
+	b.WriteString("</" + name + ">")
+	return b.String()
+}
+
+// directiveInner wraps rendered markdown as dangerouslySetInnerHTML.
+func directiveInner(html string) string {
+	return "<div class=\"krate-directive-body\" dangerouslySetInnerHTML={{__html: `" +
+		escapeTemplateLiteral(html) + "`}} />"
+}
+
+func jsxQuote(s string) string { return "\"" + escape.HTMLAttr(s) + "\"" }
+
+// budgetSlug slugifies a label for use as a tab value (deterministic).
+func budgetSlug(label string, idx int) string {
+	var b strings.Builder
+	prev := false
+	for _, r := range strings.ToLower(label) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prev = false
+		} else if !prev && b.Len() > 0 {
+			b.WriteByte('-')
+			prev = true
+		}
+	}
+	s := strings.Trim(b.String(), "-")
+	if s == "" {
+		return "tab-" + runeToStr(idx)
+	}
+	return s
+}
+
+// DirectiveComponents returns the @krate/components names used by built-in
+// container directives in src, so the docs plugin can auto-import them.
+func DirectiveComponents(src string) []string {
+	used := map[string]bool{}
+	add := func(names ...string) {
+		for _, n := range names {
+			used[n] = true
+		}
+	}
+	for _, ln := range strings.Split(src, "\n") {
+		m := containerDirectiveRe.FindStringSubmatch(strings.TrimSpace(ln))
+		if m == nil {
+			continue
+		}
+		switch m[1] {
+		case "card":
+			add("Card")
+		case "steps":
+			add("Steps", "Step")
+		case "tabs":
+			add("Tabs", "TabsList", "TabsTrigger", "TabsContent")
+		case "code-group":
+			add("Tabs", "TabsList", "TabsTrigger", "TabsContent", "Code")
+		}
+	}
+	out := make([]string, 0, len(used))
+	for n := range used {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
 }

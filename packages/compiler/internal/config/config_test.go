@@ -295,6 +295,34 @@ func TestParseTSConfigRewrites(t *testing.T) {
 	}
 }
 
+func TestParseTSConfigContent(t *testing.T) {
+	src := `export default {
+		content: {
+			blog: {
+				dir: "src/content/blog",
+				schema: { title: "string", order: { type: "number", required: true } },
+			},
+		},
+	}`
+	cfg := &Config{}
+	if err := parseTSConfig(src, cfg); err != nil {
+		t.Fatalf("parseTSConfig: %v", err)
+	}
+	if cfg.Content == nil {
+		t.Fatal("expected content config")
+	}
+	blog, ok := cfg.Content["blog"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected blog collection, got %T", cfg.Content["blog"])
+	}
+	if blog["dir"] != "src/content/blog" {
+		t.Errorf("dir = %v", blog["dir"])
+	}
+	if _, ok := blog["schema"].(map[string]interface{}); !ok {
+		t.Errorf("schema should be an object, got %T", blog["schema"])
+	}
+}
+
 func TestParseTSConfigSSR(t *testing.T) {
 	src := `export default {
 		ssr: {
@@ -344,6 +372,123 @@ func TestParseTSConfigSSRStreamingFalse(t *testing.T) {
 	}
 	if cfg.SSR.Streaming {
 		t.Error("Streaming = true, want false (default)")
+	}
+}
+
+func TestParseTSConfigCompat(t *testing.T) {
+	src := `export default {
+		compat: { mode: "hybrid", userAgent: true },
+	}`
+	cfg := &Config{}
+	if err := parseTSConfig(src, cfg); err != nil {
+		t.Fatalf("parseTSConfig: %v", err)
+	}
+	if cfg.Compat.Mode != "hybrid" {
+		t.Errorf("Compat.Mode = %q, want hybrid", cfg.Compat.Mode)
+	}
+	if !cfg.Compat.UserAgent {
+		t.Error("Compat.UserAgent = false, want true")
+	}
+	if got := cfg.Compat.ModeOrDefault(); got != "hybrid" {
+		t.Errorf("ModeOrDefault = %q, want hybrid", got)
+	}
+}
+
+func TestCompatValidate(t *testing.T) {
+	if _, err := (&Config{Compat: CompatConfig{Mode: "nope"}}).Validate(); err == nil {
+		t.Error("expected error for invalid compat.mode")
+	}
+	warnings, err := (&Config{Compat: CompatConfig{Mode: "modern", UserAgent: true}}).Validate()
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "compat.userAgent") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a compat.userAgent warning, got %v", warnings)
+	}
+	if got := (CompatConfig{}).ModeOrDefault(); got != "modern" {
+		t.Errorf("empty ModeOrDefault = %q, want modern", got)
+	}
+}
+
+func TestParseTSConfigGo(t *testing.T) {
+	src := `export default {
+		go: {
+			module: "myapp",
+			tidy: true,
+			componentDirs: ["src/components", "src/lib"],
+			apiEnabled: false,
+			deps: [{ path: "github.com/x/y", version: "v1.2.3" }],
+			replaces: [{ from: "github.com/x/y", to: "../y" }],
+			exclude: [{ path: "github.com/a/b", version: "v9.9.9" }],
+		},
+	}`
+	cfg := &Config{}
+	if err := parseTSConfig(src, cfg); err != nil {
+		t.Fatalf("parseTSConfig: %v", err)
+	}
+	if cfg.Go.Module != "myapp" {
+		t.Errorf("Go.Module = %q", cfg.Go.Module)
+	}
+	if !cfg.Go.TidyOrDefault() {
+		t.Error("Go.Tidy should be true")
+	}
+	if got := cfg.Go.ComponentDirList(); len(got) != 2 || got[0] != "src/components" {
+		t.Errorf("ComponentDirList = %v", got)
+	}
+	if cfg.Go.APIEnabledOrDefault() {
+		t.Error("apiEnabled false should disable API")
+	}
+	if len(cfg.Go.Deps) != 1 || cfg.Go.Deps[0].Path != "github.com/x/y" {
+		t.Errorf("Deps = %v", cfg.Go.Deps)
+	}
+	if len(cfg.Go.Replaces) != 1 || cfg.Go.Replaces[0].To != "../y" {
+		t.Errorf("Replaces = %v", cfg.Go.Replaces)
+	}
+	if len(cfg.Go.Exclude) != 1 || cfg.Go.Exclude[0].Path != "github.com/a/b" {
+		t.Errorf("Exclude = %v", cfg.Go.Exclude)
+	}
+}
+
+func TestEffectiveGoFoldsLegacyGoAPI(t *testing.T) {
+	enabled := true
+	cfg := &Config{GoAPI: GoAPICfg{
+		Enabled:  &enabled,
+		Module:   "legacy",
+		Deps:     []GoAPIDep{{Path: "github.com/x/y", Version: "v1.0.0"}},
+		Replaces: []GoAPIReplace{{From: "github.com/x/y", To: "../y"}},
+	}}
+	g := cfg.EffectiveGo()
+	if g.Module != "legacy" {
+		t.Errorf("EffectiveGo.Module = %q, want legacy", g.Module)
+	}
+	if len(g.Deps) != 1 || g.Deps[0].Path != "github.com/x/y" {
+		t.Errorf("EffectiveGo.Deps = %v", g.Deps)
+	}
+	if len(g.Replaces) != 1 || g.Replaces[0].From != "github.com/x/y" {
+		t.Errorf("EffectiveGo.Replaces = %v", g.Replaces)
+	}
+	// A `go` block overrides the legacy values for the fields it sets.
+	cfg.Go.Module = "unified"
+	if got := cfg.EffectiveGo().Module; got != "unified" {
+		t.Errorf("go.module should win, got %q", got)
+	}
+}
+
+func TestUnknownKeyWarningsGoItems(t *testing.T) {
+	raw := []byte(`{"go":{"deps":[{"path":"x","versoin":"v1"}],"replaces":[{"from":"a","too":"b"}]}}`)
+	warnings := UnknownKeyWarnings(raw)
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "go.deps.versoin") {
+		t.Errorf("expected a go.deps item-key warning, got: %v", warnings)
+	}
+	if !strings.Contains(joined, "go.replaces.too") {
+		t.Errorf("expected a go.replaces item-key warning, got: %v", warnings)
 	}
 }
 
@@ -547,28 +692,19 @@ func TestEndOfLine(t *testing.T) {
 	}
 }
 
-// TestWriteBootstrapResolvesPluginModules verifies the generated config
+// TestConfigEvalBootstrapResolvesPluginModules verifies the embedded config
 // bootstrap converts file:// plugin module URLs (as returned by plugin
-// factories via import.meta.url) into filesystem paths before serialization.
-func TestWriteBootstrapResolvesPluginModules(t *testing.T) {
-	bootstrapPath := filepath.Join(t.TempDir(), "bootstrap.mjs")
-	content := configBootstrapContent(filepath.Join("C:", "proj", "krate.config.ts"))
-	if err := os.WriteFile(bootstrapPath, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(bootstrapPath)
-
-	data, err := os.ReadFile(bootstrapPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	content = string(data)
-
+// factories via import.meta.url) into filesystem paths, surfaces validate()
+// errors, and re-exports the config object.
+func TestConfigEvalBootstrapResolvesPluginModules(t *testing.T) {
+	content := configEvalBootstrap("./krate.config.ts")
 	for _, want := range []string{
-		`fileURLToPath`,
-		`p.module.startsWith('file://')`,
-		`p.module = fileURLToPath(p.module);`,
-		`JSON.stringify(config)`,
+		`__krateFileURLToPath`,
+		`p.module.indexOf('file://') === 0`,
+		`p.module = __krateFileURLToPath(p.module);`,
+		`theme.module = __krateFileURLToPath(theme.module);`,
+		`globalThis.__krateEvalResult = config;`,
+		validatePrefix,
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("bootstrap missing %q:\n%s", want, content)

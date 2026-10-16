@@ -55,6 +55,7 @@ export interface ContextMenuTriggerProps {
   children?: any;
 }
 
+/** @deprecated Use `ContextMenu.Trigger` instead. */
 export function ContextMenuTrigger(props: ContextMenuTriggerProps) {
   return (
     <div class="krate-context-menu-trigger" data-krate-context-menu-trigger="true">
@@ -67,6 +68,7 @@ export interface ContextMenuContentProps {
   children?: any;
 }
 
+/** @deprecated Use `ContextMenu.Content` instead. */
 export function ContextMenuContent(props: ContextMenuContentProps) {
   return (
     <div class="krate-context-menu-content" data-krate-context-menu-content="true">
@@ -81,6 +83,7 @@ export interface ContextMenuItemProps {
   onSelect?: () => void;
 }
 
+/** @deprecated Use `ContextMenu.Item` instead. */
 export function ContextMenuItem(props: ContextMenuItemProps) {
   return (
     <div class={"krate-context-menu-item" + (props.disabled ? " krate-context-menu-item-disabled" : "")} data-krate-context-menu-item="true" onClick={props.onSelect}>
@@ -92,6 +95,7 @@ export function ContextMenuItem(props: ContextMenuItemProps) {
 export interface ContextMenuSeparatorProps {
 }
 
+/** @deprecated Use `ContextMenu.Separator` instead. */
 export function ContextMenuSeparator(props: ContextMenuSeparatorProps) {
   return <div class="krate-context-menu-separator" />;
 }
@@ -100,6 +104,21 @@ export interface ContextMenuLabelProps {
   children?: any;
 }
 
+/** @deprecated Use `ContextMenu.Label` instead. */
 export function ContextMenuLabel(props: ContextMenuLabelProps) {
   return <div class="krate-context-menu-label">{props.children}</div>;
 }
+
+export interface ContextMenu {
+  Trigger: typeof ContextMenuTrigger;
+  Content: typeof ContextMenuContent;
+  Item: typeof ContextMenuItem;
+  Separator: typeof ContextMenuSeparator;
+  Label: typeof ContextMenuLabel;
+}
+
+ContextMenu.Trigger = ContextMenuTrigger;
+ContextMenu.Content = ContextMenuContent;
+ContextMenu.Item = ContextMenuItem;
+ContextMenu.Separator = ContextMenuSeparator;
+ContextMenu.Label = ContextMenuLabel;

@@ -109,7 +109,7 @@ func TestMinifiedRuntimeIsValidJS(t *testing.T) {
 	root := filepath.Clean(filepath.Join(pkgDir, "..", "..", "..", ".."))
 	rt := loadRuntimeFromDisk(root)
 	if rt == "" {
-		t.Skip("runtime dist not available in this environment")
+		requireE2E(t, "runtime dist not available in this environment")
 	}
 	min := minifyJSBase(rt)
 	// The runtime exposes its API on window; the window.* property names must

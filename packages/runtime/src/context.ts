@@ -1,10 +1,14 @@
+import type { CSSScope, CSSFlagsScope } from './signal.js';
+
 let contextId = 0;
 
 export interface Context<T> {
   id: number;
   defaultValue: T;
-  Provider: (props: { value: T; children?: unknown[] }) => Node;
+  Provider: (props: { value: T; children?: any }) => Node;
   useContext: () => T;
+  /** Alias for {@link Context.useContext}. */
+  use: () => T;
 }
 
 const contextStack: Map<number, unknown[]> = new Map();
@@ -20,14 +24,42 @@ export function resetContexts(): void {
   }
 }
 
+/**
+ * Create a context that carries a CSS scope handle (see {@link CSSScope}). The
+ * default is a harmless placeholder — a `<Provider>` value always wins — so no
+ * cast is needed:
+ *
+ * ```ts
+ * const TabsCtx = createScope<string>();
+ * // provide:  <TabsCtx.Provider value={createCSSChoice('a')}>…</Provider>
+ * // consume:  const tab = TabsCtx.use();
+ * ```
+ */
+export function createScope<T>(): Context<CSSScope<T>> {
+  return createContext<CSSScope<T>>({} as CSSScope<T>);
+}
+
+/** Like {@link createScope} but for a `createCSSFlags` handle. */
+export function createScopeFlags<K extends string>(): Context<CSSFlagsScope<K>> {
+  return createContext<CSSFlagsScope<K>>({} as CSSFlagsScope<K>);
+}
+
 export function createContext<T>(defaultValue: T): Context<T> {
   const id = contextId++;
   contextStack.set(id, [defaultValue]);
 
+  const useContext = (): T => {
+    const stack = contextStack.get(id);
+    if (stack && stack.length > 0) {
+      return stack[stack.length - 1] as T;
+    }
+    return defaultValue;
+  };
+
   return {
     id,
     defaultValue,
-    Provider: (props: { value: T; children?: unknown[] }): Node => {
+    Provider: (props: { value: T; children?: any }): Node => {
       const stack = contextStack.get(id) || [defaultValue];
       stack.push(props.value);
       contextStack.set(id, stack);
@@ -58,12 +90,7 @@ export function createContext<T>(defaultValue: T): Context<T> {
 
       return container;
     },
-    useContext: (): T => {
-      const stack = contextStack.get(id);
-      if (stack && stack.length > 0) {
-        return stack[stack.length - 1] as T;
-      }
-      return defaultValue;
-    },
+    useContext,
+    use: useContext,
   };
 }

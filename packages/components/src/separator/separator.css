@@ -1,6 +1,6 @@
 .krate-separator {
   flex-shrink: 0;
-  background: var(--krate-border, #27272a);
+  background: var(--krate-border, #e4e4e7);
 }
 .krate-separator-horizontal {
   height: 1px;

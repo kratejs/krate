@@ -2,7 +2,7 @@
   margin: 24px 0;
   padding-left: 0;
   counter-reset: krate-step;
-  border-left: 2px solid var(--krate-border, #27272a);
+  border-left: 2px solid var(--krate-border, #e4e4e7);
 }
 .krate-step {
   position: relative;
@@ -25,9 +25,9 @@
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  background: var(--krate-card-bg, #111113);
-  color: var(--krate-text, #fafafa);
-  border: 1px solid var(--krate-border, #27272a);
+  background: var(--krate-card-bg, #ffffff);
+  color: var(--krate-text, #09090b);
+  border: 1px solid var(--krate-border, #e4e4e7);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -40,9 +40,9 @@
 .krate-step-title {
   font-weight: 600;
   font-size: 1.05rem;
-  color: var(--krate-text, #fafafa);
+  color: var(--krate-text, #09090b);
 }
 .krate-step-content {
-  color: var(--krate-text-muted, #b9b9b9);
+  color: var(--krate-text-muted, #71717a);
   line-height: 1.6;
 }

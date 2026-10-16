@@ -102,6 +102,55 @@ func TestExportFunction(t *testing.T) {
 	}
 }
 
+// TestExportDefaultExpression verifies `export default <expression>` (object,
+// call, literal) is parsed rather than silently dropped. Regression: the
+// parser only handled identifiers/functions, so `export default defineContent({...})`
+// vanished and config descriptors were lost.
+func TestExportDefaultExpression(t *testing.T) {
+	cases := []string{
+		`export default { a: 1, b: { c: "x" } };`,
+		`export default defineContent({ blog: { dir: "content/blog" } });`,
+		`export default 42;`,
+	}
+	for _, src := range cases {
+		prog, errs := parse(t, src)
+		if len(errs) > 0 {
+			t.Fatalf("parse %q: unexpected errors: %v", src, errs)
+		}
+		exp, ok := prog.Body[0].(*ast.ExportStmt)
+		if !ok {
+			t.Fatalf("parse %q: expected ExportStmt, got %T", src, prog.Body[0])
+		}
+		if !exp.Default {
+			t.Errorf("parse %q: expected default export", src)
+		}
+		if exp.Declaration == nil {
+			t.Errorf("parse %q: expected declaration, got nil", src)
+		}
+	}
+}
+
+// TestExportDefaultIdentifier verifies a bare identifier default is recorded as
+// Local (not a declaration), preserving component resolution.
+func TestExportDefaultIdentifier(t *testing.T) {
+	prog, errs := parse(t, `function App() {} export default App;`)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	var exp *ast.ExportStmt
+	for _, s := range prog.Body {
+		if e, ok := s.(*ast.ExportStmt); ok {
+			exp = e
+		}
+	}
+	if exp == nil {
+		t.Fatal("expected ExportStmt")
+	}
+	if exp.Local != "App" {
+		t.Errorf("expected Local=App, got %q", exp.Local)
+	}
+}
+
 func TestImport(t *testing.T) {
 	prog, errs := parse(t, `import { foo as bar } from "./utils";`)
 	if len(errs) > 0 {
@@ -353,6 +402,28 @@ func TestJSXTextQuotesAfterValues(t *testing.T) {
 	}
 }
 
+func TestJSXTextLeadingSlash(t *testing.T) {
+	// Regression: a JSX text child that begins with `/` (e.g. `<code>/about</code>`)
+	// must not be lexed as a regex literal, which swallowed the closing tags and
+	// produced "expected ), got EOF".
+	src := `const el = <p><code>/about</code> and <code>x/y</code></p>;`
+	prog, errs := parse(t, src)
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	decl := firstVarDecl(t, prog)
+	jsx, ok := decl.Init.(*ast.JSXElement)
+	if !ok {
+		t.Fatalf("expected JSXElement, got %T", decl.Init)
+	}
+	if jsx.Opening.Name != "p" {
+		t.Errorf("expected element name 'p', got %q", jsx.Opening.Name)
+	}
+	if len(jsx.Children) == 0 {
+		t.Fatal("expected children on <p>")
+	}
+}
+
 func TestArrowFunction(t *testing.T) {
 	prog, errs := parse(t, "const fn = () => 42;")
 	if len(errs) > 0 {
@@ -454,6 +525,28 @@ func TestStatementLevelObjectDestructuring(t *testing.T) {
 	}
 	if decl.Pattern != "{refetch,data}" {
 		t.Errorf("expected pattern {refetch,data}, got %q", decl.Pattern)
+	}
+}
+
+// TestMalformedInputDiagnostics locks in that malformed input surfaces a
+// diagnostic rather than being silently accepted or dropped.
+func TestMalformedInputDiagnostics(t *testing.T) {
+	cases := []struct{ name, src string }{
+		{"unterminated-jsx", "const el = <div>hello"},
+		{"unterminated-jsx-fragment", "const el = <>hello"},
+		{"unterminated-jsx-tag", "const el = <div class=\"x\" "},
+		{"missing-rparen", "const x = (1 + 2;"},
+		{"missing-rbrace", "function f() { return 1;"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			p := New(lexer.New(tt.src).Tokenize())
+			p.Filename = "test.tsx"
+			p.ParseProgram()
+			if len(p.Errors()) == 0 {
+				t.Errorf("expected a diagnostic for %q", tt.src)
+			}
+		})
 	}
 }
 

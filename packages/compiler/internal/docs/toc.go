@@ -1,8 +1,9 @@
 package docs
 
 import (
+	"fmt"
+	"html"
 	"strings"
-	"unicode"
 
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 )
@@ -14,21 +15,40 @@ type TOCItem struct {
 	Depth int    `json:"depth"` // 2 for h2, 3 for h3
 }
 
-// ExtractTOC parses rendered HTML and extracts heading structure for the TOC sidebar.
+// ExtractTOC parses rendered HTML and extracts the default heading range
+// (h2-h3) for the TOC sidebar.
 func ExtractTOC(html string) []TOCItem {
+	return ExtractTOCLevels(html, 2, 3)
+}
+
+// ExtractTOCLevels parses rendered HTML and extracts headings with levels in
+// the inclusive [minLevel, maxLevel] range (2-6). Levels outside 1-6 and an
+// empty range are clamped to the defaults (2-3).
+func ExtractTOCLevels(html string, minLevel, maxLevel int) []TOCItem {
+	if minLevel < 2 {
+		minLevel = 2
+	}
+	if minLevel > 6 {
+		minLevel = 6
+	}
+	if maxLevel < minLevel {
+		maxLevel = minLevel
+	}
+	if maxLevel > 6 {
+		maxLevel = 6
+	}
+
 	var items []TOCItem
 	pos := 0
 	for pos < len(html) {
-		h2Idx := strings.Index(html[pos:], "<h2")
-		h3Idx := strings.Index(html[pos:], "<h3")
 		nextIdx := -1
 		depth := 0
-		if h2Idx >= 0 && (h3Idx < 0 || h2Idx < h3Idx) {
-			nextIdx = pos + h2Idx
-			depth = 2
-		} else if h3Idx >= 0 {
-			nextIdx = pos + h3Idx
-			depth = 3
+		for d := minLevel; d <= maxLevel; d++ {
+			needle := fmt.Sprintf("<h%d", d)
+			if idx := strings.Index(html[pos:], needle); idx >= 0 && (nextIdx < 0 || idx < nextIdx) {
+				nextIdx = pos + idx
+				depth = d
+			}
 		}
 		if nextIdx < 0 || nextIdx >= len(html) {
 			break
@@ -145,15 +165,7 @@ func stripInlineHTML(s string) string {
 			out.WriteRune(r)
 		}
 	}
-	return strings.TrimSpace(out.String())
-}
-
-// HasLetters checks if a string contains any letter characters.
-func HasLetters(s string) bool {
-	for _, r := range s {
-		if unicode.IsLetter(r) {
-			return true
-		}
-	}
-	return false
+	// Decode entities so a heading `Components &amp; helpers` yields the plain
+	// text `Components & helpers` in the TOC/search index (not `&amp;`).
+	return strings.TrimSpace(html.UnescapeString(out.String()))
 }

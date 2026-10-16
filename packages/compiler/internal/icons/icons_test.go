@@ -17,7 +17,7 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// ─── Local icons/ folder resolution ─────────────────────────────────────────
+// Local icons/ folder resolution
 
 func TestResolveLocalIcon(t *testing.T) {
 	root := t.TempDir()
@@ -53,7 +53,7 @@ func TestResolveLocalIconRejectsTraversal(t *testing.T) {
 	}
 }
 
-// ─── Remote cache read path ─────────────────────────────────────────────────
+// Remote cache read path
 
 func TestResolveRemoteIconFromCache(t *testing.T) {
 	root := t.TempDir()
@@ -78,7 +78,7 @@ func TestResolveRemoteIconRejectsBadNames(t *testing.T) {
 	}
 }
 
-// ─── SVG sanitization ───────────────────────────────────────────────────────
+// SVG sanitization
 
 func TestSanitizeSVG(t *testing.T) {
 	in := `<path d="M0 0h24v24H0z" onclick="alert(1)" onmouseover='steal()'/>
@@ -118,7 +118,7 @@ func TestDangerousURLValue(t *testing.T) {
 	}
 }
 
-// ─── Legacy wrapper ─────────────────────────────────────────────────────────
+// Legacy wrapper
 
 func TestGetIconContentWrapper(t *testing.T) {
 	root := t.TempDir()

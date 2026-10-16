@@ -1,8 +1,46 @@
 package build
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 )
+
+// revalidateRe matches a runtime component's `export const revalidate = N`
+// cache directive (PPR per-region cache window).
+var revalidateRe = regexp.MustCompile(`(?m)^\s*export\s+const\s+revalidate\s*(?::\s*number\s*)?=\s*(\d+)`)
+
+// revalidateCommentRe matches a Go component's `// krate:revalidate N` cache
+// directive (the Go equivalent of the TS `export const revalidate`).
+var revalidateCommentRe = regexp.MustCompile(`(?m)^\s*//\s*krate:revalidate\s+(\d+)`)
+
+// regionRevalidate reads a region's per-region revalidate directive from its
+// source file, defaulting to 0 (no region-specific window).
+func regionRevalidate(root, sourcePath string) int {
+	if sourcePath == "" {
+		return 0
+	}
+	p := sourcePath
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(root, sourcePath)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return 0
+	}
+	m := revalidateRe.FindSubmatch(data)
+	if m == nil {
+		m = revalidateCommentRe.FindSubmatch(data)
+	}
+	if m == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(string(m[1]))
+	return n
+}
 
 // Region describes a single dynamic region within a server-rendered page. Each
 // region is rendered at request time by the SSR sidecar and spliced into the
@@ -21,6 +59,12 @@ type Region struct {
 	Props map[string]any `json:"props,omitempty"`
 	// Suspense indicates the region is a Suspense primary/boundary (streamed).
 	Suspense bool `json:"suspense,omitempty"`
+	// Runtime is the render engine: "" (Node SSR sidecar) or "go" (Go host).
+	Runtime string `json:"runtime,omitempty"`
+	// Revalidate is the region's own cache window in seconds (from
+	// `export const revalidate = N` in the runtime component). 0 falls back to
+	// the page's ISR cadence (PPR directives).
+	Revalidate int `json:"revalidate,omitempty"`
 }
 
 // RegionMeta is the serializable subset of Region written to the manifests.
@@ -31,15 +75,16 @@ type RegionMeta struct {
 	BundlePath string         `json:"bundlePath,omitempty"`
 	Props      map[string]any `json:"props,omitempty"`
 	Suspense   bool           `json:"suspense,omitempty"`
+	Runtime    string         `json:"runtime,omitempty"`
+	Revalidate int            `json:"revalidate,omitempty"`
 }
 
 // enumerateRegions walks a page's IR tree and collects every dynamic region in
 // deterministic (tree) order:
-//
-//   - A ModeRegion SuspenseSlot → one region for the boundary. If it has a
+//   - A ModeRegion SuspenseSlot -> one region for the boundary. If it has a
 //     top-level runtime primary, the primary identity is captured; otherwise the
 //     whole boundary is re-rendered (ComponentName empty, keyed by StreamID).
-//   - Standalone TierRuntime ComponentNode → one region per instance.
+//   - Standalone TierRuntime ComponentNode -> one region per instance.
 func enumerateRegions(tree *irtree.ComponentTree) []Region {
 	if tree == nil || tree.Root == nil {
 		return nil
@@ -66,12 +111,13 @@ func walkSlotRegions(slot irtree.SlotNode, emit func(Region)) {
 	switch s := slot.(type) {
 	case *irtree.ComponentSlot:
 		if s.Component != nil && s.Component.Tier == irtree.TierRuntime {
-			// Standalone runtime component — one region per instance.
+			// Standalone runtime component - one region per instance.
 			emit(Region{
 				ID:            "region-" + string(s.ID),
 				ComponentName: s.Component.Name,
 				SourcePath:    s.Component.SourceFile,
 				Props:         s.Component.RuntimeProps,
+				Runtime:       s.Component.Runtime,
 			})
 			return
 		}
@@ -96,7 +142,7 @@ func walkSlotRegions(slot irtree.SlotNode, emit func(Region)) {
 					Suspense: true,
 				})
 			}
-			// The boundary renders as one unit — do not descend into its
+			// The boundary renders as one unit - do not descend into its
 			// baked content (standalone nested regions surface separately when
 			// the boundary itself is re-rendered).
 			return

@@ -1,65 +1,46 @@
 .krate-toolbar {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 6px;
+  padding: 4px;
+  border: 1px solid var(--krate-border, #e4e4e7);
   border-radius: 8px;
-  background: var(--krate-card-bg, #111113);
-  border: 1px solid var(--krate-border, #27272a);
-}
-.krate-toolbar[data-orientation="vertical"] {
-  flex-direction: column;
+  background: var(--krate-card-bg, #ffffff);
 }
 .krate-toolbar-group {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+}
+.krate-toolbar-button,
+.krate-toolbar-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--krate-text, #09090b);
+  font-size: 0.875rem;
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.krate-toolbar-button:hover,
+.krate-toolbar-link:hover {
+  background: var(--krate-surface-hover, #e4e4e7);
+}
+.krate-toolbar-button:focus-visible,
+.krate-toolbar-link:focus-visible {
+  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline-offset: -2px;
 }
 .krate-toolbar-separator {
   width: 1px;
   height: 20px;
   margin: 0 4px;
-  background: var(--krate-border, #27272a);
-}
-.krate-toolbar-button {
-  all: unset;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 10px;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--krate-text, #fafafa);
-  cursor: pointer;
-  transition: background 0.15s;
-  min-height: 32px;
-}
-.krate-toolbar-button:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-.krate-toolbar-button:focus-visible {
-  outline: 2px solid var(--krate-primary, #3b82f6);
-  outline-offset: -2px;
-}
-.krate-toolbar-button-outline {
-  border: 1px solid var(--krate-border, #3f3f46);
-}
-.krate-toolbar-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.krate-toolbar-link {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 10px;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--krate-text, #fafafa);
-  text-decoration: none;
-  transition: background 0.15s;
-}
-.krate-toolbar-link:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--krate-border, #e4e4e7);
 }

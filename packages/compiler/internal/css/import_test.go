@@ -3,6 +3,7 @@ package css
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -13,12 +14,12 @@ func TestInlineImports(t *testing.T) {
 	// Write main.css with an @import
 	mainCSS := `@import "base.css";
 .container { color: red; }`
-	os.WriteFile(filepath.Join(dir, "main.css"), []byte(mainCSS), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "main.css"), []byte(mainCSS), 0644)
 
 	// Write base.css
 	baseCSS := `body { margin: 0; }
 p { line-height: 1.5; }`
-	os.WriteFile(filepath.Join(dir, "base.css"), []byte(baseCSS), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "base.css"), []byte(baseCSS), 0644)
 
 	// Test inlining
 	result := InlineImports(mainCSS, dir)
@@ -39,14 +40,14 @@ func TestInlineImportsCircular(t *testing.T) {
 	// Create circular imports: a.css imports b.css, b.css imports a.css
 	aCSS := `@import "b.css";
 .a { color: red; }`
-	os.WriteFile(filepath.Join(dir, "a.css"), []byte(aCSS), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "a.css"), []byte(aCSS), 0644)
 
 	bCSS := `@import "a.css";
 .b { color: blue; }`
-	os.WriteFile(filepath.Join(dir, "b.css"), []byte(bCSS), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "b.css"), []byte(bCSS), 0644)
 
 	result := InlineImports(aCSS, dir)
-	// Should not infinite loop — circular import is skipped
+	// Should not infinite loop - circular import is skipped
 	if !contains(result, ".a { color: red; }") {
 		t.Errorf("expected .a content, got: %s", result)
 	}
@@ -60,10 +61,10 @@ func TestInlineImportsUrlSyntax(t *testing.T) {
 
 	mainCSS := `@import url("base.css");
 .container { color: red; }`
-	os.WriteFile(filepath.Join(dir, "main.css"), []byte(mainCSS), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "main.css"), []byte(mainCSS), 0644)
 
 	baseCSS := `body { margin: 0; }`
-	os.WriteFile(filepath.Join(dir, "base.css"), []byte(baseCSS), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "base.css"), []byte(baseCSS), 0644)
 
 	result := InlineImports(mainCSS, dir)
 	if !contains(result, "body { margin: 0; }") {
@@ -90,14 +91,14 @@ func TestInlineImportsNested(t *testing.T) {
 	// main imports level1, level1 imports level2
 	mainCSS := `@import "level1.css";
 .main { color: red; }`
-	os.WriteFile(filepath.Join(dir, "main.css"), []byte(mainCSS), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "main.css"), []byte(mainCSS), 0644)
 
 	level1CSS := `@import "level2.css";
 .level1 { color: green; }`
-	os.WriteFile(filepath.Join(dir, "level1.css"), []byte(level1CSS), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "level1.css"), []byte(level1CSS), 0644)
 
 	level2CSS := `.level2 { color: blue; }`
-	os.WriteFile(filepath.Join(dir, "level2.css"), []byte(level2CSS), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "level2.css"), []byte(level2CSS), 0644)
 
 	result := InlineImports(mainCSS, dir)
 	if !contains(result, ".level2 { color: blue; }") {
@@ -116,17 +117,17 @@ func TestInlineImportsMaxDepth(t *testing.T) {
 
 	// Create a chain of imports deeper than 10
 	css := `.deep { color: red; }`
-	os.WriteFile(filepath.Join(dir, "level10.css"), []byte(css), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "level10.css"), []byte(css), 0644)
 
 	for i := 9; i >= 1; i-- {
 		css = `@import "level` + itoa(i+1) + `.css";`
-		os.WriteFile(filepath.Join(dir, "level"+itoa(i)+".css"), []byte(css), 0644)
+		_ = os.WriteFile(filepath.Join(dir, "level"+itoa(i)+".css"), []byte(css), 0644)
 	}
 
 	mainCSS := `@import "level1.css";
 .main {}`
 	result := InlineImports(mainCSS, dir)
-	// Should stop at depth 10 — the deep import should still be inlined
+	// Should stop at depth 10 - the deep import should still be inlined
 	if !contains(result, ".deep { color: red; }") {
 		t.Errorf("expected deep content inlined, got: %s", result)
 	}
@@ -138,7 +139,7 @@ func TestInlineImportsTraversalRejected(t *testing.T) {
 
 	// Place a decoy outside the project root.
 	decoy := filepath.Join(root, "secret.css")
-	os.WriteFile(decoy, []byte(".secret { display: none; }"), 0644)
+	_ = os.WriteFile(decoy, []byte(".secret { display: none; }"), 0644)
 
 	mainCSS := `@import "../../../` + filepath.Base(dir) + `/../secret.css";
 .ok { color: red; }`
@@ -157,7 +158,7 @@ func TestInlineImportsTraversalFile(t *testing.T) {
 
 	// Create a file outside the base dir.
 	outside := filepath.Join(filepath.Dir(dir), "outside.css")
-	os.WriteFile(outside, []byte(".outside { color: blue; }"), 0644)
+	_ = os.WriteFile(outside, []byte(".outside { color: blue; }"), 0644)
 
 	mainCSS := `@import "../outside.css";
 .ok {}`
@@ -170,11 +171,11 @@ func TestInlineImportsTraversalFile(t *testing.T) {
 func TestInlineImportsAbsoluteAndURLRejected(t *testing.T) {
 	dir := t.TempDir()
 	decoy := filepath.Join(dir, "abs.css")
-	os.WriteFile(decoy, []byte(".abs { color: red; }"), 0644)
+	_ = os.WriteFile(decoy, []byte(".abs { color: red; }"), 0644)
 
 	// A file outside the root, referenced by absolute path.
 	outside := filepath.Join(filepath.Dir(dir), "outside.css")
-	os.WriteFile(outside, []byte(".outside { color: blue; }"), 0644)
+	_ = os.WriteFile(outside, []byte(".outside { color: blue; }"), 0644)
 
 	mainCSS := `@import "https://evil.example/x.css";
 @import "file:///etc/passwd";
@@ -199,12 +200,12 @@ func TestInlineImportsAbsoluteAndURLRejected(t *testing.T) {
 func TestInlineImportsNestedRelativeWithinRoot(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "a", "b")
-	os.MkdirAll(sub, 0755)
+	_ = os.MkdirAll(sub, 0755)
 
 	// main at root imports a nested file, which climbs back up two levels to a
-	// shared file — still inside the project root.
-	os.WriteFile(filepath.Join(dir, "shared.css"), []byte(".shared { color: green; }"), 0644)
-	os.WriteFile(filepath.Join(sub, "nested.css"), []byte(`@import "../../shared.css";
+	// shared file - still inside the project root.
+	_ = os.WriteFile(filepath.Join(dir, "shared.css"), []byte(".shared { color: green; }"), 0644)
+	_ = os.WriteFile(filepath.Join(sub, "nested.css"), []byte(`@import "../../shared.css";
 .nested {}`), 0644)
 
 	mainCSS := `@import "a/b/nested.css";
@@ -243,4 +244,28 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+func TestInlineImportsMediaPrelude(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "base.css"), []byte("body{margin:0}"), 0644)
+	out := InlineImports("@import \"base.css\" screen and (min-width: 600px);", dir)
+	if !strings.Contains(out, "@media screen and (min-width: 600px)") {
+		t.Fatalf("media prelude not applied: %s", out)
+	}
+	if !strings.Contains(out, "body{margin:0}") {
+		t.Fatalf("import not inlined: %s", out)
+	}
+}
+
+func TestInlineImportsLayerPrelude(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "base.css"), []byte(".x{color:red}"), 0644)
+	out := InlineImports("@import \"base.css\" layer(base);", dir)
+	if strings.Contains(out, "layer(base)") {
+		t.Fatalf("layer prelude leaked: %s", out)
+	}
+	if !strings.Contains(out, ".x{color:red}") {
+		t.Fatalf("import not inlined: %s", out)
+	}
 }

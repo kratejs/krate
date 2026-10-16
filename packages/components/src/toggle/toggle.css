@@ -1,50 +1,34 @@
 .krate-toggle {
-  all: unset;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
+  padding: 8px 14px;
   border-radius: 6px;
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--krate-text-muted, #a1a1aa);
-  background: transparent;
+  font-family: inherit;
+  color: var(--krate-text, #09090b);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  min-width: 36px;
-  height: 36px;
+  border: 1px solid transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.krate-toggle:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--krate-text, #fafafa);
+/* The scope sets --krate-active* on the trigger label when checked. Declare the
+   variant backgrounds after the hover rule (and lower the hover specificity with
+   :where) so a checked toggle keeps its active colour on hover. */
+.krate-toggle:where(:hover) {
+  background: var(--krate-surface-hover, #e4e4e7);
+}
+.krate-toggle[data-variant='default'] {
+  background: var(--krate-active-bg, var(--krate-surface, #f4f4f5));
+  border-color: var(--krate-active-color, transparent);
+}
+.krate-toggle[data-variant='outline'] {
+  border-color: var(--krate-active-color, var(--krate-border, #e4e4e7));
+  background: var(--krate-active-bg, transparent);
 }
 .krate-toggle:focus-visible {
-  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #f97316);
   outline-offset: 2px;
 }
-.krate-toggle[data-state="on"] {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--krate-text, #fafafa);
-}
-.krate-toggle-outline {
-  border: 1px solid var(--krate-border, #3f3f46);
-}
-.krate-toggle-outline[data-state="on"] {
-  border-color: var(--krate-primary, #3b82f6);
-  background: rgba(59, 130, 246, 0.08);
-  color: var(--krate-primary, #3b82f6);
-}
-.krate-toggle-sm {
-  min-width: 32px;
-  height: 32px;
-  padding: 6px;
-}
-.krate-toggle-lg {
-  min-width: 42px;
-  height: 42px;
-  padding: 10px;
-}
-.krate-toggle:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.krate-toggle[data-size='sm'] { padding: 4px 10px; font-size: 0.8rem; }
+.krate-toggle[data-size='lg'] { padding: 12px 18px; font-size: 1rem; }

@@ -11,7 +11,7 @@ import (
 
 // TestAssetImportRewrite verifies that importing a non-code file registers it
 // in AssetFiles and rewrites bare references to the imported binding into the
-// hashed /assets/… URL literal inside the AST.
+// hashed /assets/... URL literal inside the AST.
 func TestAssetImportRewrite(t *testing.T) {
 	tmp := t.TempDir()
 	pagesDir := filepath.Join(tmp, "pages")

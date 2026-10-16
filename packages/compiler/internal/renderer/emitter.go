@@ -2,6 +2,8 @@ package renderer
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -28,6 +30,9 @@ type EmitResult struct {
 	// render. A non-empty set means the build must fail rather than ship
 	// silently empty/wrong output.
 	Errors []error
+	// GoRenders are build-time Go-component render requests; the build renders
+	// them via the Go host and substitutes HTML at the markers.
+	GoRenders []irtree.GoRenderRequest
 }
 
 // SlotOutput is the result of emitting a single slot node. Beyond HTML and
@@ -40,6 +45,7 @@ type SlotOutput struct {
 	ScriptHTML string
 	StyleHTML  string
 	Orphans    []orphanBinding
+	GoRenders  []irtree.GoRenderRequest
 }
 
 // parallelMinChildren is the smallest sibling list worth spawning goroutines
@@ -87,11 +93,56 @@ type Emitter struct {
 	// with real JS semantics instead of Go approximations.
 	EvalJS func(code string) (string, error)
 
+	// GoComponents maps imported Go component names to their refs. Wired by the
+	// build pipeline; SSREval renders them via the shared goCollector.
+	GoComponents map[string]irtree.GoComponentRef
+
+	// cvaFactories holds module-wide `const X = cva(...)` specs so variant calls
+	// in prop-driven components fold to static class strings during SSREval.
+	cvaFactories map[string]*irtree.CVASpec
+
+	// contextDefaults holds module-wide `const X = createContext(v)` defaults so
+	// `X.useContext()` folds during SSREval (no Provider exists at build time).
+	contextDefaults map[string]string
+
+	// CodeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
+	// during SSREval. It must match the stylesheet generated for the same theme
+	// (syntaxhighlight.CSSForTheme). Wire it from the build; empty selects the
+	// default theme.
+	CodeTheme string
+
 	// errs collects diagnostics for unsupported constructs encountered during
 	// emit (unknown IR slots, or SSR-evaluated expressions the evaluator could
 	// not handle). They surface on EmitResult.Errors so the build fails instead
 	// of silently emitting empty/wrong output.
 	errs []error
+
+	// goCollector accumulates build-time Go-component render requests from both
+	// the slot path and SSREval, so the whole page is rendered in one host call.
+	goCollector *goRenderCollector
+}
+
+// goRenderCollector accumulates Go-component render requests and hands out
+// unique marker ids. Shared across the parallel sub-emitters of one page.
+type goRenderCollector struct {
+	mu   sync.Mutex
+	n    int
+	reqs []irtree.GoRenderRequest
+}
+
+func (c *goRenderCollector) enqueue(callID, name, props string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n++
+	id := "g" + strconv.Itoa(c.n)
+	c.reqs = append(c.reqs, irtree.GoRenderRequest{ID: id, Name: name, Props: props, CallID: callID})
+	return irtree.GoRenderMarker(id)
+}
+
+func (c *goRenderCollector) snapshot() []irtree.GoRenderRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]irtree.GoRenderRequest(nil), c.reqs...)
 }
 
 // addErr records an unsupported-construct diagnostic during emit.
@@ -106,12 +157,14 @@ func (e *Emitter) Errors() []error {
 
 // NewEmitter creates a new emitter.
 func NewEmitter() *Emitter {
-	return &Emitter{}
+	return &Emitter{goCollector: &goRenderCollector{}}
 }
 
 // Emit walks the ComponentTree and produces an EmitResult.
 func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	e.functions = tree.Functions
+	e.cvaFactories = tree.CVAFactories
+	e.contextDefaults = tree.ContextDefaults
 	output := e.emitNode(tree.Root)
 
 	// Merge subtree-local metadata and orphans collected during emit.
@@ -148,12 +201,13 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 		UsedCSS:        make(map[string]bool),
 		ListComponents: listComponents,
 		Errors:         e.errs,
+		GoRenders:      append(output.GoRenders, e.goCollector.snapshot()...),
 	}
 }
 
 // collectListComponentFuncs walks the component tree for ListSlots and returns
 // the client component FnDecls their map bodies reference (deduplicated, in a
-// stable order). Only client-tier components are included — static/server
+// stable order). Only client-tier components are included - static/server
 // components are SSR-evaluated and don't exist as runtime functions.
 func collectListComponentFuncs(root *irtree.ComponentNode, functions map[string]*ast.FnDecl) []*ast.FnDecl {
 	seen := make(map[string]bool)
@@ -273,29 +327,53 @@ func (e *Emitter) emitNode(node *irtree.ComponentNode) SlotOutput {
 	}
 }
 
-// ─── emitStatic — static component SSR ─────────────────────────────────────
+// emitStatic - static component SSR
 
 func (e *Emitter) emitStatic(node *irtree.ComponentNode) SlotOutput {
 	var out SlotOutput
 	for _, child := range node.Children {
 		mergeSlotOutput(&out, e.emitSlotNode(child))
 	}
+	// A static component built through the tree path may render {props.children}
+	// (e.g. a context-providing root or a scope-part component); fill the
+	// placeholder with its call-site slots, like emitClient.
+	if strings.Contains(out.HTML, "<!--__children__-->") && len(node.CallSiteSlots) > 0 {
+		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
+		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", callSiteOut.HTML)
+		out.Signatures = append(out.Signatures, callSiteOut.Signatures...)
+		out.Orphans = append(out.Orphans, callSiteOut.Orphans...)
+		out.HeadHTML += callSiteOut.HeadHTML
+		out.ScriptHTML += callSiteOut.ScriptHTML
+		out.StyleHTML += callSiteOut.StyleHTML
+	}
 	return out
 }
 
-// ─── emitSSREvaluated — prop-driven components evaluated at build time ────
+// emitSSREvaluated - prop-driven components evaluated at build time
 
 func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	if node.Fn == nil {
 		return SlotOutput{}
 	}
-	ret := findReturnStmtIn(node.Fn.Body)
-	if ret == nil || ret.Value == nil {
-		return SlotOutput{}
-	}
 	eval := NewSSREval(e.functions)
 	if e.EvalJS != nil {
 		eval.SetEvalJS(e.EvalJS)
+	}
+	if len(e.GoComponents) > 0 {
+		collector := e.goCollector
+		eval.SetGoComponents(e.GoComponents, func(callID, name, propsJSON string) string {
+			return collector.enqueue(callID, name, propsJSON)
+		})
+	}
+	if e.cvaFactories != nil {
+		eval.SetCVAFactories(e.cvaFactories)
+	}
+	if e.contextDefaults != nil {
+		eval.SetContextDefaults(e.contextDefaults)
+	}
+	eval.SetCodeTheme(e.CodeTheme)
+	if node.RestProps != nil && node.RestPropsName != "" {
+		eval.SetRestProps(map[string]map[string]ast.Expr{node.RestPropsName: node.RestProps})
 	}
 	if node.SSREvalBindings != nil {
 		eval.SetBindings(node.SSREvalBindings)
@@ -329,7 +407,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		out.StyleHTML += childrenOut.StyleHTML
 		// Conditional/list slots in call-site children (e.g. {items().map(...)}
 		// inside a signal-less wrapper like ToastViewport) reference the
-		// CALLER's signals — register an orphan binding so the re-render effect
+		// CALLER's signals - register an orphan binding so the re-render effect
 		// is attached to the signature that owns those signals.
 		owner := irtree.SlotID("")
 		if len(e.clientStack) > 0 {
@@ -344,7 +422,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 			bindings["children"] = childrenHTML.String()
 			eval.SetBindings(bindings)
 			// Children were rendered through the slot pipeline (text escaped,
-			// elements hydrated) — a `{children}` container must inject them raw.
+			// elements hydrated) - a `{children}` container must inject them raw.
 			eval.childrenIsHTML = true
 			// When the call-site children were fully static text, SSREval also
 			// gets the raw text so <SyntaxHighlight> chroma-highlights the
@@ -360,34 +438,58 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	// also be emitted through the tree path so they keep their hydration
 	// markers. The hook consumes ReturnSlots in document order as SSREval
 	// encounters them. Only CLIENT-tier components are routed through the tree
-	// path — signal-less (SSREval'd) children must stay in the parent's eval
+	// path - signal-less (SSREval'd) children must stay in the parent's eval
 	// flow so they inherit the parent's prop bindings (e.g. <SidebarNav
 	// items={props.sidebarItems}/> needs `sidebarItems` bound in the parent's
 	// SSREval context). Routing them through a fresh emitSSREvaluated loses
 	// those bindings and they render empty.
-	var returnSlots []*irtree.ComponentSlot
+	// Index the component's own return slots by component NAME so the hook can
+	// match the element SSREval is currently evaluating. Matching by call order
+	// alone is wrong: SSREval visits every uppercase child (including
+	// signal-less ones that it must evaluate itself), so a preceding signal-less
+	// child would otherwise consume a client child's slot and render the wrong
+	// component (or drop its hydration).
+	returnSlots := map[string][]*irtree.ComponentSlot{}
 	for _, child := range node.ReturnSlots {
-		if slot, ok := child.(*irtree.ComponentSlot); ok {
-			if slot.Component != nil && slot.Component.Tier == irtree.TierClient {
-				returnSlots = append(returnSlots, slot)
-			}
+		if slot, ok := child.(*irtree.ComponentSlot); ok && slot.Component != nil {
+			returnSlots[slot.Component.Name] = append(returnSlots[slot.Component.Name], slot)
 		}
 	}
 	if len(returnSlots) > 0 {
-		idx := 0
+		used := map[string]int{}
 		eval.interactiveEmit = func(el *ast.JSXElement) (string, bool) {
-			if idx >= len(returnSlots) {
+			name := el.Opening.Name
+			queue := returnSlots[name]
+			i := used[name]
+			if i >= len(queue) {
 				return "", false
 			}
-			out := e.emitComponentSlot(returnSlots[idx])
-			idx++
+			used[name] = i + 1
+			slot := queue[i]
+			// Signal-less children stay in the parent's SSREval flow so they
+			// inherit the parent's prop bindings.
+			if slot.Component.Tier != irtree.TierClient {
+				return "", false
+			}
+			out := e.emitComponentSlot(slot)
 			sigs = append(sigs, out.Signatures...)
 			return out.HTML, true
 		}
 		defer func() { eval.interactiveEmit = nil }()
 	}
 
-	html := eval.Eval(ret.Value)
+	// Resolve the component's return value. Early if/else-if returns (each
+	// branch ending in `return <jsx/>`, with or without a wrapping block) are
+	// resolved first so prop-driven components whose return depends on a
+	// member value (e.g. <a> vs <div>) render the right branch. Otherwise the
+	// trailing top-level return is evaluated.
+	var retHTML string
+	if v, ok := eval.evalBranchReturns(node.Fn.Body); ok {
+		retHTML = v
+	} else if ret := findReturnStmtIn(node.Fn.Body); ret != nil && ret.Value != nil {
+		retHTML = eval.Eval(ret.Value)
+	}
+	html := retHTML
 	e.errs = append(e.errs, eval.Errors()...)
 	out.HeadHTML += eval.HeadHTML
 	out.ScriptHTML += eval.ScriptHTML
@@ -408,7 +510,7 @@ func findReturnStmtIn(body []ast.Stmt) *ast.ReturnStmt {
 	return nil
 }
 
-// ─── emitServer — server component SSR ─────────────────────────────────────
+// emitServer - server component SSR
 
 func (e *Emitter) emitServer(node *irtree.ComponentNode) SlotOutput {
 	var out SlotOutput
@@ -420,7 +522,7 @@ func (e *Emitter) emitServer(node *irtree.ComponentNode) SlotOutput {
 	return out
 }
 
-// ─── emitClient — client component SSR + scoped hydration metadata ─────────
+// emitClient - client component SSR + scoped hydration metadata
 
 func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 	var out SlotOutput
@@ -441,7 +543,7 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 	// retain their data-k/data-kh hydration markers.
 	if strings.Contains(out.HTML, "<!--__children__-->") && len(node.CallSiteSlots) > 0 {
 		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
-		out.HTML = strings.Replace(out.HTML, "<!--__children__-->", callSiteOut.HTML, 1)
+		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", callSiteOut.HTML)
 		out.Signatures = append(out.Signatures, callSiteOut.Signatures...)
 		out.Orphans = append(out.Orphans, callSiteOut.Orphans...)
 		out.HeadHTML += callSiteOut.HeadHTML
@@ -465,51 +567,102 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		}
 	}
 	sig := irtree.ComponentSignature{
-		ComponentID:   node.ID,
-		Tier:          node.Tier,
-		Signals:       node.Signals,
-		Handlers:      node.Handlers,
-		RefBindings:   node.RefBindings,
-		Effects:       node.Effects,
-		Memos:         node.Memos,
-		ExtraVars:     node.ExtraVars,
-		PreSignalVars: node.PreSignalVars,
-		BodyUses:      node.BodyUses,
-		Children:      childIDs,
-		SlotBindings:  slotBindings,
-		AttrBindings:  node.AttrBindings,
+		ComponentID:     node.ID,
+		Tier:            node.Tier,
+		Signals:         node.Signals,
+		Handlers:        node.Handlers,
+		RefBindings:     node.RefBindings,
+		Effects:         node.Effects,
+		Memos:           node.Memos,
+		ExtraVars:       node.ExtraVars,
+		PreSignalVars:   node.PreSignalVars,
+		FuncPropAliases: node.FuncPropAliases,
+		BodyUses:        node.BodyUses,
+		Children:        childIDs,
+		SlotBindings:    slotBindings,
+		AttrBindings:    node.AttrBindings,
 	}
 	out.Signatures = append([]irtree.ComponentSignature{sig}, out.Signatures...)
 
 	return out
 }
 
-// ─── emitRuntime — runtime component splice marker ────────────────────────
+// emitRuntime - runtime component splice marker
 
 func (e *Emitter) emitRuntime(node *irtree.ComponentNode) SlotOutput {
-	// Standalone runtime components (not inside a <Suspense> boundary) become
-	// their own dynamic region. The shell carries an empty splice slot keyed by
-	// the region ID (region-<slotID>, matching the build's region registry); the
-	// Go server asks the SSR sidecar to render the component and splices the
-	// HTML in at request time. The component's build-time resolved props live in
-	// the region registry (RegionMeta.Props), so nothing is serialized inline.
+	// Runtime Go components are baked as a region; their (static) children are
+	// rendered now and passed to the host as the `children` prop per request.
+	if node.Runtime == "go" && len(node.Children) > 0 {
+		childOut := e.emitSlotsParallel(node.Children)
+		if childOut.HTML != "" {
+			if node.RuntimeProps == nil {
+				node.RuntimeProps = map[string]any{}
+			}
+			node.RuntimeProps["children"] = childOut.HTML
+		}
+	}
 	id := "region-" + string(node.ID)
 	return SlotOutput{
 		HTML: fmt.Sprintf(`<!--region:%s--><!--/region:%s-->`, id, id),
 	}
 }
 
-// ─── emitMetaSlot — Head/Script/Style content routing ──────────────────────
+// emitGoComponentSlot renders an imported Go component's children, records a
+// build-time render request, and emits a marker the build replaces with the
+// host's HTML.
+func (e *Emitter) emitGoComponentSlot(s *irtree.GoComponentSlot) SlotOutput {
+	childOut := e.emitSlotsParallel(s.Children)
+	id := string(s.ID)
+	props := goPropsJSON(s.Props, childOut.HTML)
+	return SlotOutput{
+		HTML:       fmt.Sprintf("<!--krate-gocomp:%s-->", id),
+		Signatures: childOut.Signatures,
+		HeadHTML:   childOut.HeadHTML,
+		ScriptHTML: childOut.ScriptHTML,
+		StyleHTML:  childOut.StyleHTML,
+		GoRenders: append(childOut.GoRenders, irtree.GoRenderRequest{
+			ID:     id,
+			Name:   s.Ref.Func,
+			Props:  props,
+			CallID: irtree.GoCallID(s.Pos.Line, s.Pos.Col, s.Ref.Func),
+		}),
+	}
+}
 
+// goPropsJSON merges the JSON-encoded attr props with the rendered children
+// under the `children` key.
+func goPropsJSON(props map[string]string, childrenHTML string) string {
+	keys := make([]string, 0, len(props))
+	for k := range props {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys)+1)
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%q", k)+":"+props[k])
+	}
+	if childrenHTML != "" {
+		parts = append(parts, fmt.Sprintf("%q", "children")+":"+fmt.Sprintf("%q", childrenHTML))
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
+// emitMetaSlot - Head/Script/Style content routing
 func (e *Emitter) emitMetaSlot(s *irtree.MetaSlot) SlotOutput {
 	var out SlotOutput
 	for _, child := range s.Children {
 		mergeSlotOutput(&out, e.emitSlotNode(child))
 	}
+	// <Head> children are routed into the document <head> by walkMetaSlots; they
+	// must not also render into the body. <Script>/<Style> keep their body HTML
+	// (valid there, and captured separately into Script/Style fields).
+	if strings.EqualFold(s.ComponentName, "Head") {
+		out.HTML = ""
+	}
 	return out
 }
 
-// ─── emitSlotNode — type-switch dispatch for SlotNode ──────────────────────
+// emitSlotNode - type-switch dispatch for SlotNode
 
 func (e *Emitter) emitSlotNode(slot irtree.SlotNode) SlotOutput {
 	if slot == nil {
@@ -528,6 +681,8 @@ func (e *Emitter) emitSlotNode(slot irtree.SlotNode) SlotOutput {
 		return e.emitListSlot(s)
 	case *irtree.ComponentSlot:
 		return e.emitComponentSlot(s)
+	case *irtree.GoComponentSlot:
+		return e.emitGoComponentSlot(s)
 	case *irtree.SuspenseSlot:
 		return e.emitSuspenseSlot(s)
 	case *irtree.MetaSlot:
@@ -535,20 +690,20 @@ func (e *Emitter) emitSlotNode(slot irtree.SlotNode) SlotOutput {
 	case *irtree.ChildrenSlot:
 		return SlotOutput{HTML: "<!--__children__-->"}
 	default:
-		// Unknown IR slot node kind — error instead of silently dropping output.
+		// Unknown IR slot node kind - error instead of silently dropping output.
 		e.addErr("slot node type %T is not supported", slot)
 		return SlotOutput{}
 	}
 }
 
-// ─── Slot emitters ─────────────────────────────────────────────────────────
+// Slot emitters
 
 func (e *Emitter) emitStaticHTML(s *irtree.StaticHTML) SlotOutput {
 	return SlotOutput{HTML: s.HTML}
 }
 
 // mergeSlotOutput concatenates a child output into an accumulator in document
-// order. Runtime props are NOT merged here — only parallel emit re-keys them.
+// order. Runtime props are NOT merged here - only parallel emit re-keys them.
 func mergeSlotOutput(acc *SlotOutput, out SlotOutput) {
 	acc.HTML += out.HTML
 	acc.Signatures = append(acc.Signatures, out.Signatures...)
@@ -556,6 +711,7 @@ func mergeSlotOutput(acc *SlotOutput, out SlotOutput) {
 	acc.ScriptHTML += out.ScriptHTML
 	acc.StyleHTML += out.StyleHTML
 	acc.Orphans = append(acc.Orphans, out.Orphans...)
+	acc.GoRenders = append(acc.GoRenders, out.GoRenders...)
 }
 
 // emitSlotsParallel emits sibling slots concurrently using fresh sub-emitters.
@@ -577,6 +733,7 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 	}
 
 	outputs := make([]SlotOutput, len(slots))
+	subErrs := make([][]error, len(slots))
 	base := append([]irtree.SlotID{}, e.clientStack...)
 	var wg sync.WaitGroup
 	for i := range slots {
@@ -587,19 +744,30 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 			sub.functions = e.functions
 			sub.IconResolver = e.IconResolver
 			sub.EvalJS = e.EvalJS
+			sub.GoComponents = e.GoComponents
+			sub.goCollector = e.goCollector
+			// Propagate build-wide tables so SSREval in this branch folds cva
+			// variants and context defaults exactly like the sequential path.
+			sub.cvaFactories = e.cvaFactories
+			sub.contextDefaults = e.contextDefaults
+			sub.CodeTheme = e.CodeTheme
 			sub.clientStack = append([]irtree.SlotID{}, base...)
 			outputs[idx] = sub.emitSlotNode(slots[idx])
+			subErrs[idx] = sub.errs
 		}(i)
 	}
 	wg.Wait()
 
-	for _, out := range outputs {
+	for i, out := range outputs {
 		merged.HTML += out.HTML
 		merged.Signatures = append(merged.Signatures, out.Signatures...)
 		merged.HeadHTML += out.HeadHTML
 		merged.ScriptHTML += out.ScriptHTML
 		merged.StyleHTML += out.StyleHTML
 		merged.Orphans = append(merged.Orphans, out.Orphans...)
+		merged.GoRenders = append(merged.GoRenders, out.GoRenders...)
+		// Diagnostics raised in a parallel branch must still fail the build.
+		e.errs = append(e.errs, subErrs[i]...)
 	}
 	return merged
 }
@@ -744,7 +912,7 @@ func (e *Emitter) emitSuspenseSlot(s *irtree.SuspenseSlot) SlotOutput {
 		mergeSlotOutput(&out, e.emitSlotNode(child))
 	}
 
-	// ModeStatic: the primary was resolved at build time — bake it inside the
+	// ModeStatic: the primary was resolved at build time - bake it inside the
 	// markers so the shell contains the real resolved content (no streaming
 	// round-trip needed). ModeRegion/Default keep the fallback baked in.
 	inner := out.HTML
@@ -764,7 +932,7 @@ func (e *Emitter) emitSuspenseSlot(s *irtree.SuspenseSlot) SlotOutput {
 	return out
 }
 
-// ─── EmitMeta — extract Head/Script/Style content from tree ────────────────
+// EmitMeta - extract Head/Script/Style content from tree
 
 // EmitMeta walks the tree and extracts Head/Script/Style content,
 // routing MetaSlot children to the appropriate EmitResult fields.
@@ -776,34 +944,53 @@ func EmitMeta(tree *irtree.ComponentTree, result *EmitResult) {
 }
 
 // walkMetaSlots recursively walks ComponentNode children looking for MetaSlots.
+// A component's own-return <Head>/<Script>/<Style> is captured by SSREval while
+// the component's return JSX is evaluated (into EmitResult via the emitter's
+// headHTML/scriptHTML/styleHTML accumulators). For the page ROOT, node.Children
+// ARE that own-return tree, so walking them here would append the same content a
+// second time - and, when the root was SSREval'd with injected prop bindings
+// (generateStaticParams params, dynamic-route sentinels), with stale
+// pre-binding values. Child SSREval nodes keep their own-return tree in
+// ReturnSlots, so their Children are CALL-SITE slots, which SSREval does not
+// capture - a call-site <Head> passed into a signal-less wrapper must still be
+// walked. Non-evaluated nodes are never captured by SSREval, so their own-return
+// Children are walked as before.
 func walkMetaSlots(node *irtree.ComponentNode, result *EmitResult) {
 	if node == nil {
 		return
 	}
-	for _, child := range node.Children {
-		if meta, ok := child.(*irtree.MetaSlot); ok {
-			var childHTML strings.Builder
-			tmp := NewEmitter()
-			for _, c := range meta.Children {
-				out := tmp.emitSlotNode(c)
-				childHTML.WriteString(out.HTML)
-			}
-			switch strings.ToLower(meta.ComponentName) {
-			case "head":
-				result.HeadHTML += childHTML.String()
-			case "script":
-				result.ScriptHTML += childHTML.String()
-			case "style":
-				result.StyleHTML += childHTML.String()
+	// Root-like SSREval node: Children are the component's own return, already
+	// captured during SSREval. Any SSREval node with a call site has
+	// CallSiteChildren set, so this identifies the entry/root node.
+	skipOwnReturn := node.IsSSREval && node.CallSiteChildren == nil
+	if !skipOwnReturn {
+		for _, child := range node.Children {
+			if meta, ok := child.(*irtree.MetaSlot); ok {
+				var childHTML strings.Builder
+				tmp := NewEmitter()
+				for _, c := range meta.Children {
+					out := tmp.emitSlotNode(c)
+					childHTML.WriteString(out.HTML)
+				}
+				switch strings.ToLower(meta.ComponentName) {
+				case "head":
+					result.HeadHTML += childHTML.String()
+				case "script":
+					result.ScriptHTML += childHTML.String()
+				case "style":
+					result.StyleHTML += childHTML.String()
+				}
 			}
 		}
-		if comp, ok := child.(*irtree.ComponentSlot); ok {
+	}
+	for _, child := range node.Children {
+		if comp, ok := child.(*irtree.ComponentSlot); ok && comp.Component != nil {
 			walkMetaSlots(comp.Component, result)
 		}
 	}
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+// Helpers
 
 func collectChildIDs(children []irtree.SlotNode) []irtree.SlotID {
 	var ids []irtree.SlotID

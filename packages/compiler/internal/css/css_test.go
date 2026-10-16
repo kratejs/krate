@@ -49,6 +49,11 @@ func TestRemoveZeroUnits(t *testing.T) {
 		{"width: 0em;", "width: 0;"},
 		{"gap: 0rem;", "gap: 0;"},
 		{"width: 10px;", "width: 10px;"}, // non-zero unchanged
+		// Custom property values must keep their units: they are substituted
+		// verbatim into var()/calc() later, and calc(1rem + var(--x)) is invalid
+		// when --x is the bare number 0.
+		{"--toc-indent: 0rem;", "--toc-indent: 0rem;"},
+		{".a{--x: 0px;--y: 0.5rem;padding: 0px}", ".a{--x: 0px;--y: 0.5rem;padding: 0}"},
 	}
 	for _, tt := range tests {
 		got := removeZeroUnits(tt.input)
@@ -125,11 +130,75 @@ func TestRemoveDuplicateDeclarations(t *testing.T) {
 			"a { COLOR: red; color: blue; }", // case-insensitive
 			"a {color:blue}",
 		},
+		{
+			// Media-query rules must never bleed declarations across sibling rules.
+			"@media (max-width: 1279px) { .sidebar { transform: translateX(-100%); top: 0; } .sidebar.open { transform: translateX(0); } .toc { display: block; top: 48px; } }",
+			"@media (max-width: 1279px) { .sidebar {transform:translateX(-100%);top:0} .sidebar.open {transform:translateX(0)} .toc {display:block;top:48px} }",
+		},
+		{
+			// Strings containing semicolons (data URIs, content) must not break
+			// the declaration splitter.
+			`.x { content: ";"; background: url("data:image/svg+xml;utf8,<svg></svg>"); color: red; color: blue; }`,
+			`.x {content:";";background:url("data:image/svg+xml;utf8,<svg></svg>");color:blue}`,
+		},
 	}
 	for _, tt := range tests {
 		got := removeDuplicateDeclarations(tt.input)
 		if got != tt.expected {
 			t.Errorf("removeDuplicateDeclarations(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestRemoveDuplicateDeclarationsPreservesFormatting(t *testing.T) {
+	tests := []struct {
+		name, input, expected string
+	}{
+		{
+			name:     "folds duplicate, keeps newlines",
+			input:    "a {\n  color: red;\n  color: blue;\n}\n",
+			expected: "a {\n  color: blue;\n}\n",
+		},
+		{
+			name:     "folds duplicate custom property",
+			input:    "a {\n  --x: 1rem;\n  --x: 2rem;\n}\n",
+			expected: "a {\n  --x: 2rem;\n}\n",
+		},
+		{
+			name:     "case-distinct custom properties are preserved",
+			input:    "a {\n  --Foo: 1;\n  --foo: 2;\n}\n",
+			expected: "a {\n  --Foo: 1;\n  --foo: 2;\n}\n",
+		},
+		{
+			name:     "vendor-prefixed fallback preserved",
+			input:    "a {\n  display: -webkit-box;\n  display: flex;\n}\n",
+			expected: "a {\n  display: -webkit-box;\n  display: flex;\n}\n",
+		},
+		{
+			name:     "earlier important wins",
+			input:    "a {\n  color: red !important;\n  color: blue;\n}\n",
+			expected: "a {\n  color: red !important;\n}\n",
+		},
+		{
+			name:     "comment survives a folded declaration",
+			input:    "a {\n  /* keep */\n  color: red;\n  color: blue;\n}\n",
+			expected: "a {\n  /* keep */\n  color: blue;\n}\n",
+		},
+		{
+			name:     "no duplicates is a no-op",
+			input:    "a {\n  color: red;\n  margin: 0;\n}\n",
+			expected: "a {\n  color: red;\n  margin: 0;\n}\n",
+		},
+		{
+			name:     "recurses into at-rules",
+			input:    "@media (x) {\n  a {\n    color: red;\n    color: blue;\n  }\n}\n",
+			expected: "@media (x) {\n  a {\n    color: blue;\n  }\n}\n",
+		},
+	}
+	for _, tt := range tests {
+		got := RemoveDuplicateDeclarations(tt.input)
+		if got != tt.expected {
+			t.Errorf("%s: RemoveDuplicateDeclarations(%q) = %q, want %q", tt.name, tt.input, got, tt.expected)
 		}
 	}
 }

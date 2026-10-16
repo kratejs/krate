@@ -10,8 +10,9 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/annotator"
-	"github.com/kratejs/krate/packages/compiler/internal/bundler"
+	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 	"github.com/kratejs/krate/packages/compiler/internal/tsexec"
@@ -20,9 +21,8 @@ import (
 // injectStaticParams seeds the root page component with concrete dynamic-route
 // params so a statically generated page ([id].tsx via generateStaticParams)
 // can render them. Params are exposed to the component's SSR evaluation via:
-//   - `params` — a JSON object (e.g. { params } destructuring → params.id)
-//   - each param key — a direct binding (e.g. { id } destructuring → id)
-//
+// - `params` - a JSON object (e.g. { params } destructuring -> params.id)
+// - each param key - a direct binding (e.g. { id } destructuring -> id)
 // Only pure, signal-less root components are SSREval'd this way; interactive
 // (client) roots keep their normal hydration-driven emission.
 func injectStaticParams(tree *irtree.ComponentTree, params map[string]string) {
@@ -56,8 +56,53 @@ func injectStaticParams(tree *irtree.ComponentTree, params map[string]string) {
 	}
 }
 
+// dynamicParamSentinelPrefix marks the build-time placeholder emitted for a
+// dynamic-route parameter in a statically built template. The dev/preview
+// server replaces each sentinel with the matched URL segment at request time
+// (see serve.go handleDynamicRoute), so text, <title>, and attribute positions
+// all carry a real value - not just signal-bound text nodes.
+const dynamicParamSentinelPrefix = "__KRATE_PARAM_"
+
+// dynamicParamSentinel returns the unique token emitted for the named route
+// parameter. The trailing "__" keeps names unambiguous (id vs idx).
+func dynamicParamSentinel(name string) string {
+	return dynamicParamSentinelPrefix + name + "__"
+}
+
+// injectDynamicRoutePlaceholders binds each dynamic-route [param] to a unique
+// sentinel so a statically built template's evaluated output (body text, title,
+// meta attributes) contains a marker the server substitutes per request.
+// Mirrors injectStaticParams: it SSREval's the root with the sentinel bindings,
+// and only for pure static/server roots. Interactive client roots render params
+// reactively after hydration and must not be frozen to a sentinel.
+func injectDynamicRoutePlaceholders(tree *irtree.ComponentTree, paramNames []string) {
+	root := tree.Root
+	if root == nil || len(paramNames) == 0 {
+		return
+	}
+	if root.Tier != irtree.TierStatic && root.Tier != irtree.TierServer {
+		return
+	}
+	bindings := make(map[string]string, len(paramNames)+1)
+	objStr := make([]string, 0, len(paramNames))
+	for _, name := range paramNames {
+		sentinel := dynamicParamSentinel(name)
+		bindings[name] = sentinel
+		bv, _ := json.Marshal(sentinel)
+		objStr = append(objStr, fmt.Sprintf("%q:%s", name, bv))
+	}
+	bindings["params"] = "{" + strings.Join(objStr, ",") + "}"
+	for k, v := range root.SSREvalBindings {
+		if _, ok := bindings[k]; !ok {
+			bindings[k] = v
+		}
+	}
+	root.SSREvalBindings = bindings
+	root.IsSSREval = true
+}
+
 // extractParamNames extracts parameter names from a dynamic route filename.
-// e.g. "video/[id].tsx" → ["id"], "user/[username]/posts/[postId].tsx" → ["username", "postId"]
+// e.g. "video/[id].tsx" -> ["id"], "user/[username]/posts/[postId].tsx" -> ["username", "postId"]
 func extractParamNames(pagePath, pagesDir string) []string {
 	rel, err := filepath.Rel(pagesDir, pagePath)
 	if err != nil {
@@ -92,8 +137,10 @@ func hasGenerateStaticParams(prog *ast.Program) bool {
 }
 
 // executeGenerateStaticParams runs the page's generateStaticParams via npx tsx
-// and returns the parsed param combinations.
-func executeGenerateStaticParams(pagePath string) ([]map[string]string, error) {
+// and returns the parsed param combinations. tsconfig, when non-empty, is the
+// generated `.krate/tsconfig.json` passed to tsx so `krate/content` and the
+// project's path aliases resolve inside the user's module.
+func executeGenerateStaticParams(pagePath string, env []string, tsconfig string) ([]map[string]string, error) {
 	abs, err := filepath.Abs(pagePath)
 	if err != nil {
 		return nil, err
@@ -112,7 +159,7 @@ console.log(JSON.stringify(result));
 		tsexec.ImportPath(abs),
 	)
 
-	output, _, err := tsexec.RunBootstrap("krate-gsp-bootstrap", content, filepath.Dir(abs), 30*time.Second)
+	output, _, err := tsexec.RunBootstrapOpts("krate-gsp-bootstrap", content, filepath.Dir(abs), 30*time.Second, env, tsconfig)
 	if err != nil {
 		return nil, fmt.Errorf("generateStaticParams execution: %w", err)
 	}
@@ -174,10 +221,7 @@ func (b *Builder) resolveStaticParamsPages(pages []string) ([]staticParamsPage, 
 		}
 
 		// Bundle the page to check for generateStaticParams
-		bnd := bundler.New(b.Root)
-		bnd.SetEmitReact(b.Cfg.EmitReact)
-		bnd.SetPathAliases(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
-		bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)
+		bnd := b.newBundler()
 
 		bundle, err := bnd.Bundle(page)
 		if err != nil {
@@ -196,7 +240,7 @@ func (b *Builder) resolveStaticParamsPages(pages []string) ([]staticParamsPage, 
 
 		fmt.Printf("  %s⚡%s generateStaticParams: %s\n", cCyan, cReset, filepath.Base(page))
 
-		paramSets, err := executeGenerateStaticParams(page)
+		paramSets, err := executeGenerateStaticParams(page, environ.KVList(b.Env), b.tsxTsconfig)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("generateStaticParams (%s): %v", filepath.Base(page), err))
 			continue
@@ -236,10 +280,7 @@ func (b *Builder) resolveStaticParamsPages(pages []string) ([]staticParamsPage, 
 // buildStaticParamsPage builds a single page with its params injected into the
 // page component's props (via injectStaticParams).
 func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, string, error) {
-	bnd := bundler.New(b.Root)
-	bnd.SetEmitReact(b.Cfg.EmitReact)
-	bnd.SetPathAliases(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
-	bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)
+	bnd := b.newBundler()
 
 	bundle, err := bnd.Bundle(spp.PagePath)
 	if err != nil {
@@ -251,10 +292,19 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		return nil, "", fmt.Errorf("no entry module found")
 	}
 
+	// Run AfterParse hooks so statically generated dynamic-param pages get the
+	// same AST-inspection/edit opportunity as regular pages.
+	parseCtx := &plugin.ParseHookCtx{
+		Page:    spp.PagePath,
+		Program: entryModule.Program,
+	}
+	b.runPageHook("AfterParse", spp.PagePath, parseCtx, func() error { return plugin.RunAfterParse(parseCtx) })
+	entryModule.Program = parseCtx.Program
+
 	renderMode, revalidate := detectRenderMode(entryModule.Program)
 
 	// Global streaming override: if configured, all *static* pages stream.
-	// Explicit ssr/isr opts win — forcing them to streaming would silently
+	// Explicit ssr/isr opts win - forcing them to streaming would silently
 	// defeat a page author's per-page config.
 	if b.Cfg.SSR.Streaming && renderMode == RenderSSG {
 		renderMode = RenderStreaming
@@ -263,16 +313,27 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 
 	b.TransformUniversalIcons(entryModule.Program)
 	b.TransformUniversalImages(entryModule.Program)
+	b.FlattenComponentSpreadAttrs(entryModule.Program)
+	// Bind route params (e.g. slug) to their concrete values, then inline
+	// getCollection so `[slug].tsx` pages can look up the matching entry at
+	// build time.
+	substituteParamBindings(entryModule.Program, spp.Params)
+	b.InlineContent(entryModule.Program)
 
-	// ─── New pipeline: Annotate → Build IR → Emit ──────────────────────────
+	// New pipeline: Annotate -> Build IR -> Emit
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, spp.PagePath, entryModule.SourceCode)
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
-	tree := irtree.Build(entryModule.Program, ann)
+	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, b.irBuildOptions())
+	if len(tree.Errors) > 0 {
+		return nil, "", renderErrors(spp.PagePath, tree.Errors)
+	}
 	injectStaticParams(tree, spp.Params)
 	emitter := renderer.NewEmitter()
 	emitter.IconResolver = b.iconResolver
 	emitter.EvalJS = b.jsExprEvaluator()
+	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
 	emitResult := emitter.Emit(tree)
 	renderer.EmitMeta(tree, emitResult)
 
@@ -280,14 +341,75 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		return nil, "", renderErrors(spp.PagePath, emitResult.Errors)
 	}
 
+	// Render imported server-tier Go components via the Go host and inline their
+	// HTML (mirrors buildPage); keep the call-site->HTML map for SSR baking.
+	var goBaked map[string]string
+	if len(emitResult.GoRenders) > 0 {
+		rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
+		if gerr != nil {
+			return nil, "", gerr
+		}
+		emitResult.HTML = substituteGoRenders(emitResult.HTML, rendered)
+		goBaked = goBakedMap(emitResult.GoRenders, rendered)
+	}
+
 	// Compile-time reactive dependency validation. Surfaced as warnings so
 	// dead signals / circular effects are caught before hydration ships.
 	b.printReactiveDiags(reactive.Build(emitResult.Signatures).Validate())
 
-	layoutPath := findLayout(spp.PagePath, b.Cfg.PagesDir)
-	if layoutPath != "" {
-		bundle.CSS += b.applyLayoutStack(spp.PagePath, emitResult)
+	// Run AfterRender hooks (pre-layout) so plugins can modify HTML/head/CSS for
+	// statically generated dynamic-param pages, matching buildPage.
+	renderCtx := &plugin.RenderHookCtx{
+		Page:     spp.PagePath,
+		HTML:     emitResult.HTML,
+		HeadHTML: emitResult.HeadHTML,
+		HasJS:    len(emitResult.Signatures) > 0,
+		RawCSS:   bundle.CSS,
 	}
+	b.runPageHook("AfterRender", spp.PagePath, renderCtx, func() error { return plugin.RunAfterRender(renderCtx) })
+	emitResult.HTML = renderCtx.HTML
+	emitResult.HeadHTML = renderCtx.HeadHTML
+	bundle.CSS = renderCtx.RawCSS
+
+	// Run AfterMarkdownParse hooks for markdown/MDX dynamic-param pages.
+	if strings.HasSuffix(spp.PagePath, ".md") || strings.HasSuffix(spp.PagePath, ".mdx") {
+		mdCtx := &plugin.MarkdownHookCtx{
+			Page:  spp.PagePath,
+			HTML:  emitResult.HTML,
+			Route: spp.OutPath,
+		}
+		b.runPageHook("AfterMarkdownParse", spp.PagePath, mdCtx, func() error { return plugin.RunAfterMarkdownParse(mdCtx) })
+		emitResult.HTML = mdCtx.HTML
+	}
+
+	// Dynamic regions + the coarse page-region wrap, mirroring buildPage so
+	// generateStaticParams pages PPR-stream consistently with their template.
+	regions := enumerateRegions(tree)
+	for i := range regions {
+		regions[i].Revalidate = regionRevalidate(b.Root, regions[i].SourcePath)
+	}
+	if renderMode == RenderSSR || renderMode == RenderISR {
+		emitResult.HTML = "<!--suspense:page-->" + emitResult.HTML + "<!--/suspense:page-->"
+	}
+
+	layoutPath := findLayout(spp.PagePath, b.Cfg.PagesDir)
+	var deps []string
+	if layoutPath != "" {
+		layoutCSS, layoutFiles, _ := b.applyLayoutStack(spp.PagePath, emitResult)
+		bundle.CSS += layoutCSS
+		deps = append(deps, layoutFiles...)
+	}
+
+	// Record the dynamic-route template's module graph (plus any wrapping
+	// layouts) so editing blog/[slug].tsx or a layout rebuilds its expanded
+	// pages instead of falling through to a full rebuild.
+	deps = append(deps, spp.PagePath)
+	for _, mod := range bundle.Modules {
+		if mod.Path != spp.PagePath {
+			deps = append(deps, mod.Path)
+		}
+	}
+	b.recordDeps(spp.PagePath, deps)
 
 	pageDir := filepath.Join(b.Cfg.OutDir, spp.OutPath)
 	if err := os.MkdirAll(pageDir, 0755); err != nil {
@@ -302,15 +424,15 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
 		if strings.TrimSpace(hydrationJS) != "" {
 			hasJS = true
-			if b.Cfg.ShouldMinifyJS() {
+			if b.shouldMinifyJS() {
 				hydrationJS = minifyJS(hydrationJS)
 			}
 			finalJS := strings.TrimSpace(hydrationJS)
 			jsHash := hashContent([]byte(finalJS))
 			jsFile = "index." + jsHash + ".js"
-			finalJS = substituteImportMetaURL(finalJS, spp.OutPath, jsFile)
+			finalJS = substituteImportMetaURL(finalJS, spp.OutPath, jsFile, b.Cfg.BaseURLPath())
 			jsPath := filepath.Join(pageDir, jsFile)
-			os.WriteFile(jsPath, []byte(finalJS), 0644)
+			_ = os.WriteFile(jsPath, []byte(finalJS), 0644)
 			hydrationJS = finalJS
 		} else {
 			hydrationJS = ""
@@ -323,6 +445,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 	b.registerWorkers(bundle.WorkerFiles, bundle.WorkerEsm)
 	b.registerDynamicChunks(bundle.DynImportFiles)
+	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
 	return &PageResult{
 		Page:        spp.PagePath,
 		OutName:     spp.OutPath,
@@ -333,11 +456,15 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		HydrationJS: hydrationJS,
 		HasJS:       hasJS,
 		JSFile:      jsFile,
-		HasCSS:      bundle.CSS != "",
+		HasCSS:      pageCSS != "",
+		CSS:         pageCSS,
 		UsedCSS:     emitResult.UsedCSS,
 		UsedFuncs:   emitResult.UsedFuncs,
 		Mode:        renderMode,
 		Revalidate:  revalidate,
 		SourcePath:  relSrc,
+		Program:     entryModule.Program,
+		Regions:     regions,
+		GoBaked:     goBaked,
 	}, bundle.CSS, nil
 }

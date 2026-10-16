@@ -15,7 +15,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 )
 
-// ─── Test helpers ────────────────────────────────────────────────────────────
+// Test helpers
 
 func parseProg(t *testing.T, src string) *ast.Program {
 	t.Helper()
@@ -56,7 +56,7 @@ func fullPipelineWithReact(t *testing.T, src string) (*EmitResult, string) {
 	return result, hydrationJS
 }
 
-// ─── Shared utility tests ────────────────────────────────────────────────────
+// Shared utility tests
 
 func TestEscapeHTML(t *testing.T) {
 	tests := []struct {
@@ -175,7 +175,7 @@ func TestToFloat(t *testing.T) {
 	}
 }
 
-// ─── New pipeline: HTML output tests ─────────────────────────────────────────
+// New pipeline: HTML output tests
 
 func TestRenderSimpleHTML(t *testing.T) {
 	result, _ := fullPipeline(t, `export default function Page() { return <div>hello</div>; }`)
@@ -240,7 +240,7 @@ func TestRenderNestedElements(t *testing.T) {
 	}
 }
 
-// ─── New pipeline: Signal detection ──────────────────────────────────────────
+// New pipeline: Signal detection
 
 func TestSignalDetection(t *testing.T) {
 	result, _ := fullPipeline(t, `export default function Page() { const [count, setCount] = createSignal(0); return <div>{count()}</div>; }`)
@@ -374,7 +374,7 @@ export default function Page() {
 
 func TestHydrationJSCallbackRef(t *testing.T) {
 	// Callback refs (ref={(el) => { rootRef = el; }}) must be emitted as the
-	// callback itself — kbindRef(id, (el)=>{...}) — NOT wrapped as an assignment
+	// callback itself - kbindRef(id, (el)=>{...}) - NOT wrapped as an assignment
 	// target (kbindRef(id, el=>{(el)=>{...}=el;})) which is a syntax error.
 	src := `function Widget() {
   var [count, setCount] = createSignal(0);
@@ -391,7 +391,8 @@ export default function Page() {
 	if strings.Contains(js, "=el;}))") || strings.Contains(js, "}=el;") {
 		t.Errorf("callback ref must not be wrapped as an assignment target:\n%s", js)
 	}
-	if !strings.Contains(js, "(el)=>{rootRef = el;}") && !strings.Contains(js, "(el)=>{(rootRef = el);}") {
+	flat := strings.Join(strings.Fields(js), "")
+	if !strings.Contains(flat, "(el)=>{rootRef=el;}") && !strings.Contains(flat, "(el)=>{(rootRef=el);}") {
 		t.Errorf("expected the arrow callback passed to kbindRef, got:\n%s", js)
 	}
 }
@@ -526,7 +527,7 @@ export default function Page() {
 	}
 }
 
-// ─── New pipeline: Component tiers ───────────────────────────────────────────
+// New pipeline: Component tiers
 
 func TestServerComponentRendering(t *testing.T) {
 	src := `// @server
@@ -586,9 +587,9 @@ export default Page;`
 	}
 }
 
-// ─── New pipeline: React compat mode (with bundler.RewriteReact) ─────────────
+// New pipeline: React interop (always on, via bundler.RewriteReact)
 
-func TestEmitReactSignalDetection(t *testing.T) {
+func TestReactInteropSignalDetection(t *testing.T) {
 	src := `import { useState } from 'react';
 export default function Page() { const [count, setCount] = useState(0); return <div>{count()}</div>; }`
 	result, _ := fullPipelineWithReact(t, src)
@@ -608,7 +609,7 @@ export default function Page() { const [count, setCount] = useState(0); return <
 	}
 }
 
-func TestEmitReactHydrationJSWithEffects(t *testing.T) {
+func TestReactInteropHydrationJSWithEffects(t *testing.T) {
 	src := `import { useState, useEffect } from 'react';
 export default function Page() {
 	const [count, setCount] = useState(0);
@@ -624,7 +625,7 @@ export default function Page() {
 	}
 }
 
-func TestEmitReactCollectsEffects(t *testing.T) {
+func TestReactInteropCollectsEffects(t *testing.T) {
 	src := `import { useEffect } from 'react';
 export default function Page() {
 	useEffect(() => { document.title = "hello"; });
@@ -645,7 +646,7 @@ export default function Page() {
 	}
 }
 
-func TestEmitReactCollectsMemos(t *testing.T) {
+func TestReactInteropCollectsMemos(t *testing.T) {
 	src := `import { createMemo } from 'react';
 export default function Page() {
 	createMemo(() => { return 42; });
@@ -660,7 +661,7 @@ export default function Page() {
 	t.Logf("Signatures: %d, first memos: %v", len(result.Signatures), result.Signatures[0].Memos)
 }
 
-func TestEmitReactHandlerAddsParens(t *testing.T) {
+func TestReactInteropHandlerAddsParens(t *testing.T) {
 	src := `import { useState } from 'react';
 export default function Page() { const [count, setCount] = useState(0); return <button onClick={() => setCount(count + 1)}>click</button>; }`
 	result, js := fullPipelineWithReact(t, src)
@@ -684,7 +685,7 @@ export default function Page() { const [count, setCount] = useState(0); return <
 	}
 }
 
-func TestEmitReactHandlerWithoutEmitReact(t *testing.T) {
+func TestReactInteropHandlerWithCreateSignal(t *testing.T) {
 	src := `export default function Page() { const [count, setCount] = createSignal(0); return <button onClick={() => setCount(count + 1)}>click</button>; }`
 	_, js := fullPipeline(t, src)
 	if js == "" {
@@ -695,7 +696,7 @@ func TestEmitReactHandlerWithoutEmitReact(t *testing.T) {
 	}
 }
 
-// ─── New pipeline: Hydration correctness ─────────────────────────────────────
+// New pipeline: Hydration correctness
 
 func TestHandlerIndicesUnique(t *testing.T) {
 	src := `
@@ -800,7 +801,7 @@ func TestStringSignalInitialValue(t *testing.T) {
 	}
 }
 
-// ─── New pipeline: Complex scenarios ─────────────────────────────────────────
+// New pipeline: Complex scenarios
 
 func TestMultiComponentHandlerMangling(t *testing.T) {
 	src := `function CompA(props) {
@@ -882,7 +883,7 @@ export default function Page() {
 	}
 }
 
-func TestEmitReactCollectsRealisticPage(t *testing.T) {
+func TestReactInteropCollectsRealisticPage(t *testing.T) {
 	src := `import { useState, useEffect, useRef, useCallback } from 'react';
 function TimerDisplay(props) {
   const [seconds, setSeconds] = useState(0);
@@ -1026,7 +1027,7 @@ export default function Page() {
 	}
 }
 
-// ─── <SyntaxHighlight> compile-time chroma ───────────────────────────────────
+// <SyntaxHighlight> compile-time chroma
 
 func TestSSREvalSyntaxHighlightHighlightsStaticCallSiteChildren(t *testing.T) {
 	// A signal-less (SSR-evaluated) wrapper passing {children} through to

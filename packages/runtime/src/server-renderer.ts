@@ -1,12 +1,28 @@
-// @krate/runtime/server-renderer — Node.js HTTP server for SSR/ISR/Streaming
+// @krate/runtime/server-renderer - Node.js HTTP server for SSR/ISR/Streaming
 // Receives render requests from the Go server and returns HTML.
 
 import http from "node:http";
+import cluster from "node:cluster";
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { pathToFileURL } from "node:url";
 import { renderToString } from "./server.js";
+
+// Cluster across cores: page/region rendering is independent per request, so N
+// workers scale it past a single core. Krate sets KRATE_SSR_WORKERS from
+// ssr.rendererWorkers. Region/ISR caches are per-worker and ISR disk persistence
+// is disabled when clustered (the primary never serves).
+const SSR_WORKERS = Math.max(1, parseInt(process.env.KRATE_SSR_WORKERS || "1", 10) || 1);
+const isClusterPrimary = SSR_WORKERS > 1 && cluster.isPrimary;
+if (isClusterPrimary) {
+  for (let i = 0; i < SSR_WORKERS; i++) cluster.fork();
+  cluster.on("exit", (worker) => {
+    console.log(`[krate-ssr] worker ${worker.process.pid} exited; restarting`);
+    cluster.fork();
+  });
+  console.log(`[krate-ssr] primary supervising ${SSR_WORKERS} workers`);
+}
 
 // Force TCP_NODELAY on socket to prevent Nagle buffering chunks together.
 // Must be called BEFORE the first write for it to take effect.
@@ -17,7 +33,7 @@ function setupStream(res: http.ServerResponse) {
   }
 }
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// Types
 
 interface ManifestPage {
   route: string;
@@ -34,6 +50,9 @@ interface RegionMeta {
   bundlePath?: string;
   suspense?: boolean;
   props?: Record<string, any>;
+  /** Per-region revalidate seconds (PPR cache directive). 0/undefined falls
+   *  back to the page's ISR cadence, or no caching for non-ISR pages. */
+  revalidate?: number;
 }
 
 interface ServerManifest {
@@ -46,6 +65,10 @@ interface ServerManifest {
 interface CacheEntry {
   html: string;
   timestamp: number;
+  // params/query record the variant this entry was generated for so a
+  // time-based background refresh can regenerate it without evicting it.
+  params?: Record<string, string>;
+  query?: Record<string, string>;
 }
 
 interface RenderRequest {
@@ -72,7 +95,7 @@ interface RenderResponse {
   cacheStatus?: CacheStatus;
 }
 
-// ── ISR Cache (variant-aware, SWR, persisted) ────────────────────────────────
+// ISR Cache (variant-aware, SWR, persisted)
 
 // A page's cache key is the route plus its per-request variant (params +
 // query). Two dynamic-route requests (e.g. /video/a and /video/b) render
@@ -130,6 +153,18 @@ class ISRCache {
     }
   }
 
+  // entriesForRoute returns a snapshot of the cached variants for a route so a
+  // background refresh can iterate them without mutating during iteration.
+  entriesForRoute(route: string): Array<[string, CacheEntry]> {
+    const out: Array<[string, CacheEntry]> = [];
+    for (const [key, entry] of this.cache) {
+      if (key === route || key.startsWith(route + "?") || key.startsWith(route + "#")) {
+        out.push([key, entry]);
+      }
+    }
+    return out;
+  }
+
   serialize(): Record<string, unknown> {
     return {
       entries: [...this.cache.entries()].map(([key, entry]) => ({ key, ...entry })),
@@ -143,15 +178,42 @@ class ISRCache {
         this.cache.set(e.key, {
           html: e.html,
           timestamp: typeof e.timestamp === "number" ? e.timestamp : Date.now(),
+          params: e.params && typeof e.params === "object" ? e.params : undefined,
+          query: e.query && typeof e.query === "object" ? e.query : undefined,
         });
       }
     }
   }
 }
 
-const isrCache = new ISRCache();
+// ISR cache size and the render timeout are configurable via the compiler
+// (ssr.maxCacheSize / ssr.timeout), which exports them to the sidecar env.
+const isrCache = new ISRCache(parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512);
 
-// ISR cache persistence — survives renderer restarts so a bounce doesn't
+// renderTimeoutMs bounds a single renderToString call so one pathological page
+// cannot pin the sidecar. 0 disables the bound.
+const renderTimeoutMs = parseInt(process.env.KRATE_SSR_TIMEOUT || "", 10) || 5000;
+
+// Partial Prerendering: cache dynamic regions on non-ISR pages with this
+// window (overridable per region via `export const revalidate`).
+const pprEnabled = process.env.KRATE_PPR === "1";
+const pprRevalidate = parseInt(process.env.KRATE_PPR_REVALIDATE || "", 10) || 60;
+
+// withRenderTimeout rejects if p does not settle within renderTimeoutMs. The
+// underlying render keeps running (JS cannot cancel it), but the request fails
+// fast rather than hanging.
+function withRenderTimeout<T>(p: Promise<T>): Promise<T> {
+  if (renderTimeoutMs <= 0) return p;
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`render timed out after ${renderTimeoutMs}ms`)), renderTimeoutMs);
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
+// ISR cache persistence - survives renderer restarts so a bounce doesn't
 // cold-render every ISR variant. Written debounced (coalesced) to the build
 // output dir (.krate/isr-cache.json), overridable via KRATE_ISR_CACHE.
 let isrCacheFile = process.env.KRATE_ISR_CACHE || "";
@@ -162,6 +224,9 @@ function isrCachePath(): string {
 }
 
 function scheduleIsrPersist() {
+  // Clustered: multiple workers would race on the same cache file; keep the ISR
+  // cache in memory only.
+  if (SSR_WORKERS > 1) return;
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
     persistTimer = null;
@@ -190,7 +255,7 @@ function loadIsrCache() {
   }
 }
 
-// ── Page Module Loader ───────────────────────────────────────────────────────
+// Page Module Loader
 
 const moduleCache = new Map<string, any>();
 
@@ -222,7 +287,7 @@ async function loadPageModule(page: ManifestPage): Promise<any> {
   }
 }
 
-// ── Renderer ─────────────────────────────────────────────────────────────────
+// Renderer
 
 let manifest: ServerManifest | null = null;
 let projectRoot = "";
@@ -252,7 +317,7 @@ function buildProps(req: RenderRequest): Record<string, any> {
   return props;
 }
 
-// renderFresh renders a page component and — for ISR pages — stores the result.
+// renderFresh renders a page component and - for ISR pages - stores the result.
 // Extracted so background revalidation shares exactly the same render path.
 async function renderFresh(page: ManifestPage, req: RenderRequest): Promise<RenderResponse> {
   try {
@@ -263,7 +328,10 @@ async function renderFresh(page: ManifestPage, req: RenderRequest): Promise<Rend
     }
 
     const jsxNode = Component(buildProps(req));
-    const html = renderToString(jsxNode);
+    // Bound the render. renderToString is synchronous, so a page that blocks
+    // would block the sidecar's event loop regardless; the timeout still
+    // protects the request path when rendering is async (suspense/resource).
+    const html = await withRenderTimeout(Promise.resolve(renderToString(jsxNode)));
 
     const response: RenderResponse = {
       html,
@@ -274,6 +342,8 @@ async function renderFresh(page: ManifestPage, req: RenderRequest): Promise<Rend
       isrCache.set(variantKey(req), {
         html,
         timestamp: Date.now(),
+        params: req.params,
+        query: req.query,
       });
       scheduleIsrPersist();
     }
@@ -308,6 +378,43 @@ function revalidateInBackground(page: ManifestPage, req: RenderRequest) {
   })();
 
   inFlightRevalidations.set(key, p);
+}
+
+// Time-based ISR regeneration: re-render every cached variant of a route while
+// keeping the entries in place. This is the non-destructive counterpart of
+// /__krate/ssr/revalidate (which clears a route). The Go server's periodic ISR
+// timer calls this so cached pages stay fresh without evicting dynamic
+// variants - eviction would turn a request that should be a HIT into a MISS.
+const inFlightRouteRefreshes = new Map<string, Promise<number>>();
+
+function refreshRouteVariants(page: ManifestPage): Promise<number> {
+  const running = inFlightRouteRefreshes.get(page.route);
+  if (running) return running;
+
+  const p = (async () => {
+    try {
+      const variants = isrCache.entriesForRoute(page.route);
+      let refreshed = 0;
+      for (const [, entry] of variants) {
+        const req: RenderRequest = {
+          route: page.route,
+          url: page.route,
+          method: "GET",
+          headers: {},
+          params: entry.params,
+          query: entry.query,
+        };
+        const rendered = await renderFresh(page, req);
+        if (rendered.status === 200) refreshed++;
+      }
+      return refreshed;
+    } finally {
+      inFlightRouteRefreshes.delete(page.route);
+    }
+  })();
+
+  inFlightRouteRefreshes.set(page.route, p);
+  return p;
 }
 
 async function renderPage(req: RenderRequest): Promise<RenderResponse> {
@@ -351,12 +458,11 @@ async function renderPage(req: RenderRequest): Promise<RenderResponse> {
   return response;
 }
 
-// ── Region rendering (static-first) ──────────────────────────────────────────
-//
+// Region rendering (static-first)
 // The Go server owns the page: it serves the build-time static shell with the
-// <!—suspense:ID—> markers and baked fallbacks, then asks the sidecar to render
+// <!-suspense:ID-> markers and baked fallbacks, then asks the sidecar to render
 // ONLY the page's dynamic regions. Each region is rendered by its compiled
-// runtime component bundle (server-components/<Name>.runtime.js — an IIFE that
+// runtime component bundle (server-components/<Name>.runtime.js - an IIFE that
 // defines globalThis.__krate_render(propsJSON)) with the build-time baked props,
 // so nothing is re-derived at request time.
 
@@ -397,21 +503,54 @@ const regionCache = new Map<string, { html: string; timestamp: number }>();
 const regionRevalidation = new Map<string, number>();
 const inFlightRegionRevalidations = new Map<string, Promise<void>>();
 
+// Region cache is bounded (FIFO eviction) so a long-lived sidecar cannot grow
+// without limit across many dynamic region variants.
+const REGION_CACHE_MAX = parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512;
+
+function regionCacheSet(key: string, html: string): void {
+  if (regionCache.size >= REGION_CACHE_MAX && !regionCache.has(key)) {
+    const oldest = regionCache.keys().next().value;
+    if (oldest !== undefined) regionCache.delete(oldest);
+  }
+  regionCache.set(key, { html, timestamp: Date.now() });
+}
+
+function clearRegionCache(): void {
+  regionCache.clear();
+  regionRevalidation.clear();
+}
+
+function clearRegionCacheForRoute(route: string): void {
+  const prefix = route + "::";
+  for (const key of Array.from(regionCache.keys())) {
+    if (key.startsWith(prefix)) regionCache.delete(key);
+  }
+}
+
 function regionCacheKey(page: ManifestPage, regionId: string, req: RenderRequest): string {
   return variantKey({ route: page.route + "::" + regionId, params: req.params, query: req.query });
 }
 
-function renderRegionFresh(region: RegionMeta, req: RenderRequest): string {
+// regionInterval resolves a region's cache window: its own revalidate directive
+// wins, else the page's ISR cadence; non-ISR pages with no directive are 0.
+function regionInterval(page: ManifestPage, region: RegionMeta): number {
+  if (region.revalidate && region.revalidate > 0) return region.revalidate;
+  if (page.mode === "isr") return page.revalidate || 60;
+  if (pprEnabled) return pprRevalidate;
+  return 0;
+}
+
+function renderRegionFresh(region: RegionMeta, req: RenderRequest): Promise<string> {
   const render = loadRuntimeRenderer(region.bundlePath!);
-  return render(JSON.stringify(regionProps(region, req)));
+  return withRenderTimeout(Promise.resolve().then(() => render(JSON.stringify(regionProps(region, req)))));
 }
 
 function revalidateRegionInBackground(page: ManifestPage, region: RegionMeta, req: RenderRequest, key: string) {
   if (inFlightRegionRevalidations.has(key)) return;
   const p = (async () => {
     try {
-      const html = renderRegionFresh(region, req);
-      regionCache.set(key, { html, timestamp: Date.now() });
+      const html = await renderRegionFresh(region, req);
+      regionCacheSet(key, html);
       console.log(`[krate-ssr] Revalidated region ${key} (SWR)`);
     } catch (err: any) {
       console.error(`[krate-ssr] Region SWR revalidation failed ${key}:`, err.message);
@@ -430,13 +569,15 @@ async function renderRegion(page: ManifestPage, region: RegionMeta, req: RenderR
   }
 
   const key = regionCacheKey(page, region.id, req);
-  if (page.mode === "isr") {
-    const interval = page.revalidate || 60;
+  const interval = regionInterval(page, region);
+  const cacheable = interval > 0;
+
+  if (cacheable) {
     regionRevalidation.set(key, interval);
     const cached = regionCache.get(key);
     const stale = cached && (Date.now() - cached.timestamp) / 1000 > interval;
     if (cached && !stale) {
-      return { type: "region", id: region.id, status: 200, html: cached.html, cached: true };
+      return { type: "region", id: region.id, status: 200, html: cached.html, cached: true, cacheStatus: "hit" };
     }
     if (cached) {
       revalidateRegionInBackground(page, region, req, key);
@@ -445,12 +586,12 @@ async function renderRegion(page: ManifestPage, region: RegionMeta, req: RenderR
   }
 
   try {
-    const html = renderRegionFresh(region, req);
-    if (page.mode === "isr") {
-      regionCache.set(key, { html, timestamp: Date.now() });
+    const html = await renderRegionFresh(region, req);
+    if (cacheable) {
+      regionCacheSet(key, html);
     }
     const frame: Record<string, any> = { type: "region", id: region.id, status: 200, html };
-    if (page.mode === "isr") frame.cacheStatus = "miss";
+    if (cacheable) frame.cacheStatus = "miss";
     return frame;
   } catch (err: any) {
     console.error(`[krate-ssr] Region render failed ${page.route}::${region.id}:`, err.message);
@@ -491,7 +632,7 @@ function extractTitle(html: string): string {
   return match ? match[1].trim() : "";
 }
 
-// ── HTTP Server ──────────────────────────────────────────────────────────────
+// HTTP Server
 
 const PORT = parseInt(process.env.KRATE_SSR_PORT || "3100", 10);
 const manifestPath = process.env.KRATE_MANIFEST || "";
@@ -542,6 +683,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const { route: targetRoute } = JSON.parse(body);
       isrCache.deleteRoute(targetRoute);
+      clearRegionCacheForRoute(targetRoute);
       // Trigger re-render of the base variant.
       const page = findPage(targetRoute);
       if (page) {
@@ -549,6 +691,27 @@ const server = http.createServer(async (req, res) => {
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
+    } catch (err: any) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // ISR background refresh endpoint (called by the Go server on each route's
+  // revalidation cadence). Unlike /__krate/ssr/revalidate this is
+  // non-destructive: it re-renders every cached variant in place, so cached
+  // dynamic variants stay fresh instead of being evicted (which would make the
+  // next request a MISS rather than a HIT).
+  if (route === "/__krate/ssr/refresh" && req.method === "POST") {
+    const body = await parseBody(req);
+    try {
+      const { route: targetRoute } = JSON.parse(body);
+      const page = findPage(targetRoute);
+      const refreshed = page && page.mode === "isr" ? await refreshRouteVariants(page) : 0;
+      clearRegionCacheForRoute(targetRoute);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, refreshed }));
     } catch (err: any) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: err.message }));
@@ -569,6 +732,13 @@ const server = http.createServer(async (req, res) => {
         moduleCache.delete(key);
         console.log(`[krate-ssr] Invalidated cache for ${targetRoute} (${key})`);
       }
+      // Runtime component bundles are recompiled in place on a dev rebuild, but
+      // their render functions are cached for the process lifetime. Clear them
+      // so the next region render picks up the new code. Bundles are tiny and
+      // re-read on demand, so clearing all of them is cheap and avoids tracking
+      // which component maps to which route here.
+      runtimeBundleCache.clear();
+      clearRegionCache();
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
     } catch (err: any) {
@@ -578,7 +748,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ── /__krate/regions — render ONLY a page's dynamic regions ───────────────
+  // /__krate/regions - render ONLY a page's dynamic regions
   // One NDJSON frame per region, written as its own chunk so the Go server
   // forwards each region progressively and splices it into the static shell.
   // The Go server sends the splice markers it parsed from the shell; the
@@ -628,7 +798,7 @@ const server = http.createServer(async (req, res) => {
           if (region) {
             writeJsonLine(res, await renderRegion(page, region, renderReq));
           } else {
-            // Unknown region id — keep the baked content by sending no frame.
+            // Unknown region id - keep the baked content by sending no frame.
             writeJsonLine(res, { type: "skip", id: r.id });
           }
         }
@@ -642,7 +812,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ── Direct page requests (non-proxied) ──────────────────────────────────
+  // Direct page requests (non-proxied)
   // Collect request headers
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(req.headers)) {
@@ -703,6 +873,10 @@ const server = http.createServer(async (req, res) => {
   res.end(result.html);
 });
 
-server.listen(PORT, () => {
-  console.log(`[krate-ssr] Renderer server listening on port ${PORT}`);
-});
+if (isClusterPrimary) {
+  // The primary only supervises; workers own the listening socket.
+} else {
+  server.listen(PORT, () => {
+    console.log(`[krate-ssr] Renderer server listening on port ${PORT}`);
+  });
+}

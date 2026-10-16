@@ -3,6 +3,7 @@ package jsruntime
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -67,7 +68,7 @@ func TestStripExports(t *testing.T) {
 func TestAPIRouteExecute(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	// Create a simple API route
 	routeCode := `
@@ -79,7 +80,7 @@ function GET(request) {
 	};
 }
 `
-	os.WriteFile(filepath.Join(apiDir, "test.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "test.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{
@@ -97,10 +98,36 @@ function GET(request) {
 	}
 }
 
+// TestAPIRouteProcessEnv verifies environment variables configured on the
+// runtime are visible inside an API route via process.env.
+func TestAPIRouteProcessEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	apiDir := filepath.Join(tmpDir, "api")
+	_ = os.MkdirAll(apiDir, 0755)
+
+	routeCode := `
+function GET(request) {
+	return { status: 200, text: function() { return process.env.KRATE_TEST_ENV || 'missing'; } };
+}
+`
+	_ = os.WriteFile(filepath.Join(apiDir, "env.js"), []byte(routeCode), 0644)
+
+	rt := NewAPIRouteRuntime(apiDir)
+	rt.SetEnv(map[string]string{"KRATE_TEST_ENV": "api-env"})
+	result := rt.Execute(APIRequest{Method: "GET", Path: "/api/env"})
+
+	if result.Status != 200 {
+		t.Fatalf("Expected 200, got %d (%s)", result.Status, result.Error)
+	}
+	if result.Body != "api-env" {
+		t.Errorf("Body = %q, want %q (process.env not visible in route)", result.Body, "api-env")
+	}
+}
+
 func TestAPIRouteNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{
@@ -120,7 +147,7 @@ func TestAPIRouteNotFound(t *testing.T) {
 func TestAPIRouteHeadersInstanceNotLeaked(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	routeCode := `
 function GET(request) {
@@ -159,12 +186,12 @@ function GET(request) {
 func TestAPIRoutePathTraversalRejected(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	// A legit route inside the API dir.
-	os.WriteFile(filepath.Join(apiDir, "secret.js"), []byte("function GET() { return 'secret'; }"), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "secret.js"), []byte("function GET() { return 'secret'; }"), 0644)
 	// A decoy outside the API dir that must never be reached.
-	os.WriteFile(filepath.Join(tmpDir, "outside.js"), []byte("function GET() { return 'outside'; }"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "outside.js"), []byte("function GET() { return 'outside'; }"), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 
@@ -196,7 +223,7 @@ func TestAPIRoutePathTraversalRejected(t *testing.T) {
 func TestAPIRouteMethodDispatch(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	routeCode := `
 function GET(request) {
@@ -206,7 +233,7 @@ function POST(request) {
 	return { status: 201, text: function() { return 'POST'; } };
 }
 `
-	os.WriteFile(filepath.Join(apiDir, "methods.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "methods.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 
@@ -232,7 +259,7 @@ function POST(request) {
 func TestAPIRouteDefaultExport(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	// Simulate esbuild ESM output: export { handler as default }
 	routeCode := `
@@ -241,7 +268,7 @@ function handler(request) {
 }
 export { handler as default };
 `
-	os.WriteFile(filepath.Join(apiDir, "default.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "default.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{
@@ -257,14 +284,14 @@ export { handler as default };
 func TestAPIRouteJSONReturn(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	routeCode := `
 function GET(request) {
 	return { name: "test", value: 42 };
 }
 `
-	os.WriteFile(filepath.Join(apiDir, "json.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "json.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{
@@ -284,14 +311,14 @@ function GET(request) {
 func TestAPIRouteError(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	routeCode := `
 function GET(request) {
 	throw new Error('handler crashed');
 }
 `
-	os.WriteFile(filepath.Join(apiDir, "error.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "error.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{
@@ -310,7 +337,7 @@ function GET(request) {
 func TestAPIRouteLegacyHandler(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	routeCode := `
 function handler(req, res) {
@@ -320,7 +347,7 @@ function handler(req, res) {
 }
 export { handler as default };
 `
-	os.WriteFile(filepath.Join(apiDir, "legacy.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "legacy.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{
@@ -342,11 +369,11 @@ export { handler as default };
 func TestAPIRouteEsbuildMinified(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")
-	os.MkdirAll(apiDir, 0755)
+	_ = os.MkdirAll(apiDir, 0755)
 
 	// This is exactly what esbuild produces for videos.ts with minification
 	routeCode := `var n=[{id:"abc123",title:"Intro to Krate",duration:300},{id:"demo-42",title:"Advanced Patterns",duration:600}];function s(o){let e=new URL(o.url).searchParams.get("id");if(e){let i=n.find(r=>r.id===e);return i?Response.json(i):Response.json({error:"Video not found"},{status:404})}return Response.json({videos:n,count:n.length})}async function d(o){let t=await o.json();if(!t.title||!t.duration)return Response.json({error:"title and duration are required"},{status:400});let e={id:"vid-"+Date.now(),title:t.title,duration:t.duration};return n.push(e),Response.json(e,{status:201})}export{s as GET,d as POST};`
-	os.WriteFile(filepath.Join(apiDir, "videos.js"), []byte(routeCode), 0644)
+	_ = os.WriteFile(filepath.Join(apiDir, "videos.js"), []byte(routeCode), 0644)
 
 	rt := NewAPIRouteRuntime(apiDir)
 
@@ -397,7 +424,7 @@ func TestAPIRouteEsbuildMinified(t *testing.T) {
 		t.Errorf("Expected 201, got %d", result.Status)
 	}
 
-	// Test POST with missing fields → 400
+	// Test POST with missing fields -> 400
 	result = rt.Execute(APIRequest{
 		Method:  "POST",
 		Path:    "/api/videos",
@@ -407,5 +434,91 @@ func TestAPIRouteEsbuildMinified(t *testing.T) {
 	t.Logf("POST /api/videos (bad): status=%d body=%s", result.Status, result.Body)
 	if result.Status != 400 {
 		t.Errorf("Expected 400, got %d", result.Status)
+	}
+}
+
+// TestAPIRouteIIFEOutput verifies the runtime loads the build's IIFE output
+// (`var __krate_route = (() => { ... return { GET } })();`) with no regex
+// export-stripping.
+func TestAPIRouteIIFEOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	apiDir := filepath.Join(tmpDir, "api")
+	_ = os.MkdirAll(apiDir, 0755)
+
+	code := `var __krate_route = (() => {
+  function GET(request) { return Response.json({ ok: true, id: 7 }); }
+  function POST(request) { return Response.json({ created: true }, { status: 201 }); }
+  return { GET, POST };
+})();`
+	_ = os.WriteFile(filepath.Join(apiDir, "iife.js"), []byte(code), 0644)
+
+	rt := NewAPIRouteRuntime(apiDir)
+
+	get := rt.Execute(APIRequest{Method: "GET", Path: "/api/iife"})
+	if get.Status != 200 || get.Body != `{"ok":true,"id":7}` {
+		t.Fatalf("GET: status=%d body=%s error=%s", get.Status, get.Body, get.Error)
+	}
+	if get.Headers["content-type"] != "application/json" {
+		t.Errorf("GET: content-type = %q", get.Headers["content-type"])
+	}
+
+	post := rt.Execute(APIRequest{Method: "POST", Path: "/api/iife"})
+	if post.Status != 201 || post.Body != `{"created":true}` {
+		t.Fatalf("POST: status=%d body=%s error=%s", post.Status, post.Body, post.Error)
+	}
+}
+
+// TestAPIRoutePoolConcurrent exercises the shared pool under load: many
+// concurrent requests must all succeed with bounded workers.
+func TestAPIRoutePoolConcurrent(t *testing.T) {
+	tmpDir := t.TempDir()
+	apiDir := filepath.Join(tmpDir, "api")
+	_ = os.MkdirAll(apiDir, 0755)
+
+	code := `var n = 0;
+function GET(request) { n++; return Response.json({ n: n }); }`
+	_ = os.WriteFile(filepath.Join(apiDir, "count.js"), []byte(code), 0644)
+
+	rt := NewAPIRouteRuntime(apiDir)
+	rt.SetPool(4, false)
+
+	var wg sync.WaitGroup
+	errCh := make(chan string, 64)
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := rt.Execute(APIRequest{Method: "GET", Path: "/api/count"})
+			if r.Status != 200 {
+				errCh <- r.Body
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for msg := range errCh {
+		t.Errorf("concurrent request failed: %s", msg)
+	}
+}
+
+// TestAPIRouteIsolationFreshState verifies isolation mode runs each request in a
+// fresh VM, so module state does not leak between requests.
+func TestAPIRouteIsolationFreshState(t *testing.T) {
+	tmpDir := t.TempDir()
+	apiDir := filepath.Join(tmpDir, "api")
+	_ = os.MkdirAll(apiDir, 0755)
+
+	code := `var n = 0;
+function GET(request) { n++; return Response.json({ n: n }); }`
+	_ = os.WriteFile(filepath.Join(apiDir, "iso.js"), []byte(code), 0644)
+
+	rt := NewAPIRouteRuntime(apiDir)
+	rt.SetPool(4, true)
+
+	for i := 0; i < 3; i++ {
+		r := rt.Execute(APIRequest{Method: "GET", Path: "/api/iso"})
+		if r.Status != 200 || r.Body != `{"n":1}` {
+			t.Fatalf("request %d: status=%d body=%s (expected fresh state)", i, r.Status, r.Body)
+		}
 	}
 }

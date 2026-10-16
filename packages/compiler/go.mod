@@ -8,9 +8,11 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/hashicorp/go-hclog v0.14.1
 	github.com/hashicorp/go-plugin v1.6.3
+	github.com/mattn/go-isatty v0.0.20
 	github.com/skrashevich/go-webp v0.1.0
 	github.com/tetratelabs/wazero v1.12.0
 	golang.org/x/image v0.44.0
+	golang.org/x/net v0.34.0
 	modernc.org/quickjs v0.21.1
 )
 
@@ -22,11 +24,9 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/yamux v0.1.1 // indirect
 	github.com/mattn/go-colorable v0.1.4 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/oklog/run v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	golang.org/x/net v0.34.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230711160842-782d3b101e98 // indirect
