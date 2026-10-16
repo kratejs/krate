@@ -120,7 +120,7 @@ func InjectHeadingAnchors(html string) string {
 					out.WriteString(html[start : tagEnd+1])
 					out.WriteString("<a href=\"#")
 					out.WriteString(escapedID)
-					out.WriteString("\" class=\"heading-anchor\" aria-label=\"Link to this section\">#</a>")
+					out.WriteString("\" class=\"heading-anchor\" data-pagefind-ignore aria-label=\"Link to this section\">#</a>")
 					out.WriteString(content)
 					out.WriteString(html[closeIdx : closeIdx+5])
 					pos = closeIdx + 5

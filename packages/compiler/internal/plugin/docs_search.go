@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/docfind"
 	"github.com/kratejs/krate/packages/compiler/internal/docs"
@@ -75,6 +76,11 @@ func searchConfig(opts *DocsPluginOptions) (enabled bool, engine string, maxResu
 	return
 }
 
+// headingAnchorExcludeSelector is the class krate injects on the per-heading
+// "#" link (see docs.InjectHeadingAnchors). The link sits inside the heading, so
+// Pagefind would otherwise index the "#" as part of the title.
+const headingAnchorExcludeSelector = ".heading-anchor"
+
 // pagefindOptions returns the effective Pagefind options with defaults applied.
 func pagefindOptions(opts *DocsPluginOptions) PagefindOptions {
 	po := PagefindOptions{OutputSubdir: "pagefind"}
@@ -84,7 +90,19 @@ func pagefindOptions(opts *DocsPluginOptions) PagefindOptions {
 			po.OutputSubdir = "pagefind"
 		}
 	}
+	po.ExcludeSelectors = withHeadingAnchorExclude(po.ExcludeSelectors)
 	return po
+}
+
+// withHeadingAnchorExclude ensures the heading-anchor selector is excluded while
+// preserving any user-supplied selectors.
+func withHeadingAnchorExclude(selectors []string) []string {
+	for _, s := range selectors {
+		if strings.TrimSpace(s) == headingAnchorExcludeSelector {
+			return selectors
+		}
+	}
+	return append(selectors, headingAnchorExcludeSelector)
 }
 
 // engineForBuild returns the effective engine for a build, taking dev mode into

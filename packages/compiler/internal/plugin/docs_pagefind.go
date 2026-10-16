@@ -39,6 +39,14 @@ func (p *DocsPlugin) afterBuild(ctx *BuildResultHookCtx) error {
 		return nil
 	}
 
+	// Pagefind is a native binary distributed via npm and is invoked with npx,
+	// so it needs Node at build time. Warn early with an actionable message
+	// rather than letting the subprocess fail with a less specific error.
+	if _, err := exec.LookPath("npx"); err != nil {
+		fmt.Fprintln(os.Stderr, "  Docs search warning: pagefind requires Node.js (npx not found on PATH); install Node or set search.engine to \"docfind\" (falling back to JSON search)")
+		return nil
+	}
+
 	// Skip the (slow, subprocess-spawning) indexer when the indexable content
 	// is unchanged since the last successful run. Pagefind indexes the rendered
 	// docs content, so a content-input hash is a sound staleness signal.

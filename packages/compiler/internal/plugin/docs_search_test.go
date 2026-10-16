@@ -144,14 +144,48 @@ func TestPagefindOptionsDefaults(t *testing.T) {
 	if po.OutputSubdir != "pagefind" {
 		t.Errorf("OutputSubdir = %q, want pagefind", po.OutputSubdir)
 	}
+	if !containsString(po.ExcludeSelectors, headingAnchorExcludeSelector) {
+		t.Errorf("default exclude selectors %v missing %q", po.ExcludeSelectors, headingAnchorExcludeSelector)
+	}
 
 	po = pagefindOptions(&DocsPluginOptions{Search: &DocsSearchOptions{
 		Engine:   "pagefind",
 		Pagefind: &PagefindOptions{ExcludeSelectors: []string{".toc", ".nav"}},
 	}})
-	if po.OutputSubdir != "pagefind" || len(po.ExcludeSelectors) != 2 {
+	if po.OutputSubdir != "pagefind" || len(po.ExcludeSelectors) != 3 {
 		t.Errorf("unexpected pagefind options: %+v", po)
 	}
+	if !containsString(po.ExcludeSelectors, ".toc") || !containsString(po.ExcludeSelectors, headingAnchorExcludeSelector) {
+		t.Errorf("user selectors not preserved: %v", po.ExcludeSelectors)
+	}
+
+	// A user-supplied heading-anchor selector must not be duplicated.
+	po = pagefindOptions(&DocsPluginOptions{Search: &DocsSearchOptions{
+		Engine:   "pagefind",
+		Pagefind: &PagefindOptions{ExcludeSelectors: []string{headingAnchorExcludeSelector}},
+	}})
+	if countString(po.ExcludeSelectors, headingAnchorExcludeSelector) != 1 {
+		t.Errorf("heading-anchor selector duplicated: %v", po.ExcludeSelectors)
+	}
+}
+
+func containsString(s []string, want string) bool {
+	for _, v := range s {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+func countString(s []string, want string) int {
+	n := 0
+	for _, v := range s {
+		if v == want {
+			n++
+		}
+	}
+	return n
 }
 
 func TestPagefindArgs(t *testing.T) {
@@ -214,6 +248,20 @@ func TestAfterBuildSkipsInDev(t *testing.T) {
 	ctx := &BuildResultHookCtx{Root: t.TempDir(), OutDir: t.TempDir(), Config: cfg, DevMode: true}
 	if err := (&DocsPlugin{}).afterBuild(ctx); err != nil {
 		t.Fatalf("afterBuild should be a no-op in dev: %v", err)
+	}
+}
+
+// With pagefind selected but Node absent, afterBuild must warn and skip rather
+// than invoking the indexer.
+func TestAfterBuildSkipsWhenNpxMissing(t *testing.T) {
+	t.Setenv("PATH", "")
+	cfg := &config.Config{Plugins: []config.PluginConfig{{
+		Name:    "docs",
+		Options: map[string]interface{}{"search": map[string]interface{}{"engine": "pagefind"}},
+	}}}
+	ctx := &BuildResultHookCtx{Root: t.TempDir(), OutDir: t.TempDir(), Config: cfg}
+	if err := (&DocsPlugin{}).afterBuild(ctx); err != nil {
+		t.Fatalf("afterBuild should be a no-op without npx: %v", err)
 	}
 }
 
