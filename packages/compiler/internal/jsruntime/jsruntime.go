@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -218,23 +219,65 @@ func ToNative(v any) any {
 	}
 }
 
-// EvaluateExpr evaluates a self-contained JS expression in a fresh QuickJS VM
-// and returns its String() representation. Because QuickJS is a full ECMAScript
-// engine, every built-in (Date, Math, String, Number, Array, Object, ...) is
-// available - so SSR evaluation of globals like Date.now() produces a genuine
-// JS-engine value rather than a Go approximation. Returns an error when the
-// expression throws (e.g. it references an identifier that isn't defined).
+// exprVMPool holds idle expression-eval VMs. Creating a QuickJS VM and injecting
+// the polyfill bundle is the dominant cost of EvaluateExpr, so VMs are pooled and
+// reused across calls. A VM is handed to one goroutine at a time (QuickJS VMs are
+// not concurrency-safe) and the pool is bounded to GOMAXPROCS idle VMs; under
+// bursty concurrency extra calls simply create a fresh VM as before.
+var exprVMPool = make(chan *Runtime, max(1, runtime.GOMAXPROCS(0)))
+
+// exprVMPoolEnabled can be disabled with KRATE_NO_EXPR_VM_POOL (used for
+// before/after measurement, and as an escape hatch).
+func exprVMPoolEnabled() bool { return os.Getenv("KRATE_NO_EXPR_VM_POOL") == "" }
+
+func acquireExprVM() (*Runtime, error) {
+	if !exprVMPoolEnabled() {
+		return New()
+	}
+	select {
+	case rt := <-exprVMPool:
+		return rt, nil
+	default:
+		return New()
+	}
+}
+
+func releaseExprVM(rt *Runtime) {
+	if !exprVMPoolEnabled() {
+		_ = rt.Close()
+		return
+	}
+	select {
+	case exprVMPool <- rt:
+	default:
+		_ = rt.Close()
+	}
+}
+
+// EvaluateExpr evaluates a self-contained JS expression and returns its String()
+// representation. Because QuickJS is a full ECMAScript engine, every built-in
+// (Date, Math, String, Number, Array, Object, ...) is available - so SSR
+// evaluation of globals like Date.now() produces a genuine JS-engine value
+// rather than a Go approximation. Returns an error when the expression throws
+// (e.g. it references an identifier that isn't defined).
+//
+// The expression is evaluated inside a strict IIFE so it cannot leak implicit
+// globals into the pooled VM (a fresh VM previously discarded any such state).
+// The eval-timeout deadline is re-armed on every Execute by the bindings, so a
+// VM is safe to reuse even after a thrown expression or a timeout.
 func EvaluateExpr(code string) (string, error) {
-	rt, err := New()
+	rt, err := acquireExprVM()
 	if err != nil {
 		return "", fmt.Errorf("creating JS runtime: %w", err)
 	}
-	defer rt.Close()
 
-	result, err := rt.Execute("String(" + code + ")")
+	result, err := rt.Execute("String((function(){\"use strict\";return (\n" + code + "\n);})())")
 	if err != nil {
+		releaseExprVM(rt)
 		return "", fmt.Errorf("evaluating expression: %w", err)
 	}
+	releaseExprVM(rt)
+
 	switch v := result.(type) {
 	case string:
 		return v, nil

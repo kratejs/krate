@@ -139,7 +139,7 @@ func runJSManifest(module string) (goPluginDescriptor, error) {
 		return goPluginDescriptor{Runtime: "go", Binaries: map[string]string{platformKey(): bin}}, nil
 	}
 
-	bundleCode, err := bundleJSPlugin(module, ".")
+	bundleCode, globalName, err := bundleJSPlugin(module, ".")
 	if err != nil {
 		return goPluginDescriptor{}, err
 	}
@@ -153,24 +153,24 @@ func runJSManifest(module string) (goPluginDescriptor, error) {
 	// `module.exports = ...` (the documented Go-plugin shape) load even when
 	// esbuild leaves the `module.exports` assignment unwrapped - which happens
 	// when the file also references `import.meta` (esbuild then treats it as
-	// ESM and does NOT convert the CJS export to the __kratePlugin global).
-	// Pure ESM bundles ignore the shim and still set __kratePlugin; pure CJS
-	// bundles are fully wrapped by esbuild and set __kratePlugin directly.
+	// ESM and does NOT convert the CJS export to the module global).
+	// Pure ESM bundles ignore the shim and still set the module global; pure CJS
+	// bundles are fully wrapped by esbuild and set it directly.
 	if _, err := rt.Execute("var __krateModuleShimExports={}; var module={exports:__krateModuleShimExports};"); err != nil {
 		return goPluginDescriptor{}, fmt.Errorf("initializing plugin module scope: %w", err)
 	}
 	if _, err := rt.Execute(bundleCode); err != nil {
 		return goPluginDescriptor{}, fmt.Errorf("loading plugin module for manifest: %w", err)
 	}
-	call := `(function(){
+	call := fmt.Sprintf(`(function(){
       try {
-        var mod = (module && module.exports !== __krateModuleShimExports) ? module.exports : (__kratePlugin || {});
+        var mod = (module && module.exports !== __krateModuleShimExports) ? module.exports : (%s || {});
         var plugin = mod.default || mod;
         if (typeof plugin === 'function') plugin = plugin({});
         var desc = plugin || {};
         return JSON.stringify({ runtime: String(desc.runtime || ''), binaries: desc.binaries || {} });
       } catch (e) { return JSON.stringify({ error: (e && e.message) || String(e) }); }
-    })()`
+    })()`, globalName)
 	res, err := rt.Execute(call)
 	if err != nil {
 		return goPluginDescriptor{}, fmt.Errorf("reading plugin manifest: %w", err)

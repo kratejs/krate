@@ -86,6 +86,41 @@ func TestFoldCollectionChainNotRooted(t *testing.T) {
 	}
 }
 
+// BenchmarkFoldCollectionChain measures a repeated chain fold (as it appears on
+// many generated routes of a shared template): cached (one QuickJS eval + map
+// lookups) vs uncached (a QuickJS eval per call).
+func BenchmarkFoldCollectionChain(b *testing.B) {
+	data := make([]content.Entry, 0, 40)
+	for i := 0; i < 40; i++ {
+		data = append(data, content.Entry{
+			Slug: "post-" + string(rune('a'+i%26)),
+			HTML: "<p>body</p>",
+			Data: map[string]any{"title": "Post", "draft": i%3 == 0, "order": int64(i)},
+		})
+	}
+	entries := map[string][]content.Entry{"blog": data}
+	expr := firstExpr(parseInlineSource(`getCollection('blog').filter((p) => !p.data.draft).sort((a, b) => a.data.order - b.data.order)`))
+
+	b.Run("uncached", func(b *testing.B) {
+		b.Setenv("KRATE_NO_CONTENT_FOLD_CACHE", "1")
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if foldCollectionChain(expr, entries, nil) == nil {
+				b.Fatal("fold failed")
+			}
+		}
+	})
+	b.Run("cached", func(b *testing.B) {
+		resetContentFoldCache()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if foldCollectionChain(expr, entries, nil) == nil {
+				b.Fatal("fold failed")
+			}
+		}
+	})
+}
+
 func TestInlineContentReplacesGetCollection(t *testing.T) {
 	entries := map[string][]content.Entry{
 		"blog": {{Slug: "a", HTML: "<p>A</p>", Data: map[string]any{"title": "A"}}},

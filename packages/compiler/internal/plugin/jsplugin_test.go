@@ -20,7 +20,7 @@ import (
 
 // writeTestPlugin writes a JS plugin module into a temp project and returns
 // the project root, output dir, and a config pointing at it.
-func writeTestPlugin(t *testing.T, code string) (root, outDir string, cfg config.PluginConfig) {
+func writeTestPlugin(t testing.TB, code string) (root, outDir string, cfg config.PluginConfig) {
 	t.Helper()
 	root = t.TempDir()
 	outDir = filepath.Join(root, "dist")

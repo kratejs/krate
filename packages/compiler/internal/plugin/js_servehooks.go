@@ -6,7 +6,6 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
-	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 )
 
 // runJSServeRequest invokes a plugin's ServeRequest hook inside a fresh
@@ -50,17 +49,21 @@ func runJSServeResponse(pc config.PluginConfig, root string, args ServeResponseA
 }
 
 // runJSServeHook loads a plugin module and invokes the given serve hook with the
-// supplied context payload, returning the raw result JSON.
+// supplied context payload, returning the raw result JSON. It runs on a pooled
+// VM (same lifecycle as runJSPluginHook).
 func runJSServeHook(module, hookName, root string, payload map[string]interface{}) ([]byte, error) {
-	bundleCode, err := bundleJSPlugin(module, root)
+	bundleCode, globalName, err := bundleJSPlugin(module, root)
 	if err != nil {
 		return nil, err
 	}
-	rt, err := jsruntime.New()
+	vm, err := acquirePluginVM()
 	if err != nil {
 		return nil, fmt.Errorf("creating JS runtime: %w", err)
 	}
-	defer rt.Close()
+	healthy := false
+	defer func() { releasePluginVM(vm, healthy) }()
+	rt := vm.rt
+
 	_ = rt.SetEnv(environ.Current)
 	if _, err := rt.Execute(bundleCode); err != nil {
 		return nil, fmt.Errorf("loading plugin bundle: %w", err)
@@ -72,7 +75,7 @@ func runJSServeHook(module, hookName, root string, payload map[string]interface{
 	call := fmt.Sprintf(`
 (function() {
   try {
-    var mod = __kratePlugin || {};
+    var mod = %s || {};
     var plugin = mod.default || mod;
     if (typeof plugin === 'function') plugin = plugin({});
     var hooks = (plugin && plugin.hooks) || mod.hooks || plugin || {};
@@ -87,7 +90,7 @@ func runJSServeHook(module, hookName, root string, payload map[string]interface{
     return JSON.stringify({ action: 'continue', error: (e && e.message) || String(e) });
   }
 })()
-`, jsString(hookName), string(payloadJSON))
+`, globalName, jsString(hookName), string(payloadJSON))
 	res, err := rt.Execute(call)
 	if err != nil {
 		return nil, fmt.Errorf("invoking %s hook: %w", hookName, err)
@@ -96,5 +99,6 @@ func runJSServeHook(module, hookName, root string, payload map[string]interface{
 	if !ok {
 		return nil, fmt.Errorf("unexpected serve hook result type %T", res)
 	}
+	healthy = true
 	return []byte(s), nil
 }

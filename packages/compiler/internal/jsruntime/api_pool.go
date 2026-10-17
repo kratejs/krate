@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 // krateAsyncPending is the sentinel an invoke wrapper returns when the handler
@@ -18,15 +19,50 @@ type preparedRoute struct {
 	version int64
 }
 
+// apiInvokeBytecode is a process-wide cache of compiled invoke-wrapper bytecode,
+// keyed by route id + method. Each worker previously compiled its own copy on the
+// first request for a route; the wrapper depends only on (route id, method) and
+// QuickJS serialized bytecode is portable across VMs of the same library version,
+// so one compile is shared by every worker.
+var apiInvokeBytecode sync.Map
+
+// sharedInvokeBytecode returns cached bytecode for key, compiling it once via
+// compile on a miss.
+func sharedInvokeBytecode(key string, compile func() ([]byte, error)) ([]byte, error) {
+	if v, ok := apiInvokeBytecode.Load(key); ok {
+		return v.([]byte), nil
+	}
+	bc, err := compile()
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := apiInvokeBytecode.LoadOrStore(key, bc)
+	return actual.([]byte), nil
+}
+
+// apiPendingBytecode is compiled once and shared by all workers (it depends only
+// on the static apiFormatPendingJS source).
+var (
+	apiPendingMu  sync.Mutex
+	apiPendingBC  []byte
+	apiPendingErr error
+)
+
+func apiPendingBytecode(rt *Runtime) ([]byte, error) {
+	apiPendingMu.Lock()
+	defer apiPendingMu.Unlock()
+	if apiPendingBC == nil && apiPendingErr == nil {
+		apiPendingBC, apiPendingErr = rt.Compile(apiFormatPendingJS, EvalGlobal)
+	}
+	return apiPendingBC, apiPendingErr
+}
+
 // apiWorker is one long-lived VM in the pool. It caches which routes it has
-// already loaded (keyed by route id -> version) so it evaluates each route once,
-// and caches the compiled invoke/pending scripts so a request is a single
-// bytecode eval with no parsing.
+// already loaded (keyed by route id -> version) so it evaluates each route once.
 type apiWorker struct {
-	rt       *Runtime
-	loaded   map[string]int64
-	compiled map[string][]byte
-	pending  []byte
+	rt      *Runtime
+	loaded  map[string]int64
+	pending []byte
 }
 
 // DefaultAPIWorkers returns the default embedded API worker-pool size.
@@ -56,31 +92,26 @@ func newAPIWorker(env map[string]string) (*apiWorker, error) {
 		_ = rt.Close()
 		return nil, err
 	}
-	pending, err := rt.Compile(apiFormatPendingJS, EvalGlobal)
+	pending, err := apiPendingBytecode(rt)
 	if err != nil {
 		_ = rt.Close()
 		return nil, err
 	}
 	return &apiWorker{
-		rt:       rt,
-		loaded:   make(map[string]int64),
-		compiled: make(map[string][]byte),
-		pending:  pending,
+		rt:      rt,
+		loaded:  make(map[string]int64),
+		pending: pending,
 	}, nil
 }
 
-// invoke runs the handler for a route + method, using cached bytecode for the
-// wrapper so repeated requests avoid re-parsing.
+// invoke runs the handler for a route + method, using process-shared bytecode for
+// the wrapper so repeated requests (and other workers) avoid re-parsing.
 func (w *apiWorker) invoke(routeID, method string) (string, error) {
-	key := routeID + "\x00" + method
-	bc, ok := w.compiled[key]
-	if !ok {
-		var err error
-		bc, err = w.rt.Compile(apiInvokeJS(routeID, method), EvalGlobal)
-		if err != nil {
-			return "", err
-		}
-		w.compiled[key] = bc
+	bc, err := sharedInvokeBytecode(routeID+"\x00"+method, func() ([]byte, error) {
+		return w.rt.Compile(apiInvokeJS(routeID, method), EvalGlobal)
+	})
+	if err != nil {
+		return "", err
 	}
 	v, err := w.rt.EvalBytecode(bc)
 	if err != nil {

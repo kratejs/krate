@@ -3,7 +3,9 @@ package build
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/content"
@@ -12,6 +14,34 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 )
+
+// contentFoldCache memoizes baked collection-chain evaluation across pages within
+// a build. The key is the rendered chain source, which embeds the collection
+// entries and any literal bindings, so identical templates on many generated
+// routes (e.g. a `[slug]` page calling getCollection("blog").map(...)) share one
+// QuickJS evaluation. The decoded value is read-only, so arrayASTFromJSON can
+// still build a fresh AST per call site. Cleared per build.
+var contentFoldCache = struct {
+	mu sync.Mutex
+	m  map[string]contentFoldEntry
+}{m: make(map[string]contentFoldEntry)}
+
+type contentFoldEntry struct {
+	val any
+	ok  bool
+}
+
+func resetContentFoldCache() {
+	contentFoldCache.mu.Lock()
+	contentFoldCache.m = make(map[string]contentFoldEntry)
+	contentFoldCache.mu.Unlock()
+}
+
+// contentFoldCacheEnabled can be disabled with KRATE_NO_CONTENT_FOLD_CACHE (used
+// for before/after measurement).
+func contentFoldCacheEnabled() bool {
+	return os.Getenv("KRATE_NO_CONTENT_FOLD_CACHE") == ""
+}
 
 // InlineContent rewrites `getCollection("name")` calls (and the `getCollection`
 // import) into a literal array expression parsed from the collection's baked
@@ -295,15 +325,49 @@ func foldCollectionChain(expr ast.Expr, collections map[string][]content.Entry, 
 	if !ok {
 		return nil
 	}
-	out, err := jsruntime.EvaluateExpr("JSON.stringify(" + chainJS + ")")
-	if err != nil || out == "" || out == "undefined" {
-		return nil
-	}
-	var decoded any
-	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+	decoded, ok := foldChainJSON(chainJS)
+	if !ok {
 		return nil
 	}
 	return arrayASTFromJSON(decoded)
+}
+
+// foldChainJSON evaluates a baked collection chain and returns its decoded JSON
+// value, memoized by the chain source. The QuickJS evaluation is the expensive
+// step (and repeats for every generated route that shares a template); the
+// decoded value is immutable, so callers build fresh AST nodes from it.
+func foldChainJSON(chainJS string) (any, bool) {
+	if !contentFoldCacheEnabled() {
+		return evaluateChainJSON(chainJS)
+	}
+
+	contentFoldCache.mu.Lock()
+	if e, ok := contentFoldCache.m[chainJS]; ok {
+		contentFoldCache.mu.Unlock()
+		return e.val, e.ok
+	}
+	contentFoldCache.mu.Unlock()
+
+	entry := contentFoldEntry{}
+	entry.val, entry.ok = evaluateChainJSON(chainJS)
+
+	contentFoldCache.mu.Lock()
+	contentFoldCache.m[chainJS] = entry
+	contentFoldCache.mu.Unlock()
+	return entry.val, entry.ok
+}
+
+// evaluateChainJSON runs the (uncached) QuickJS evaluation of a baked chain.
+func evaluateChainJSON(chainJS string) (any, bool) {
+	out, err := jsruntime.EvaluateExpr("JSON.stringify(" + chainJS + ")")
+	if err != nil || out == "" || out == "undefined" {
+		return nil, false
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		return nil, false
+	}
+	return decoded, true
 }
 
 // rootCollectionName returns the collection name if expr is (or is chained off)

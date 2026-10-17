@@ -2079,6 +2079,8 @@ func (b *Builder) resetBuildCaches() {
 	bundler.ResetResolveCache()
 	// Runtime/dev bundle disk lookups are memoized per build.
 	resetRuntimeBundleMemo()
+	// Baked collection-chain folds are per-build (a content edit changes the key).
+	resetContentFoldCache()
 }
 
 var layoutEmitCache sync.Map
