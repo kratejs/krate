@@ -275,6 +275,43 @@ func TestGenerateHTMLMinifiedNotDev(t *testing.T) {
 	}
 }
 
+// TestGenerateHTMLPreloadsHydrationScripts verifies production HTML preloads the
+// shared runtime chunk and the page hydration script in <head> so their fetches
+// start during HTML parse. Dev mode does not (its overlay has its own path).
+func TestGenerateHTMLPreloadsHydrationScripts(t *testing.T) {
+	html := generateHTML(
+		"<div></div>", "<title>t</title>", "", "",
+		nil, "index.abc123.js", "chunks/runtime.def456.js", "about", false, "", "", "",
+		"/chunks/Search-aaa111.js",
+	)
+	if !strings.Contains(html, `<link rel="preload" as="script" href="/chunks/runtime.def456.js">`) {
+		t.Errorf("missing runtime preload:\n%s", html)
+	}
+	if !strings.Contains(html, `<link rel="preload" as="script" href="/about/index.abc123.js">`) {
+		t.Errorf("missing page-script preload:\n%s", html)
+	}
+	if !strings.Contains(html, `<link rel="modulepreload" href="/chunks/Search-aaa111.js">`) {
+		t.Errorf("missing dynamic-chunk modulepreload:\n%s", html)
+	}
+
+	dev := generateHTML("<div></div>", "", "", "", nil, "index.abc123.js", "chunks/runtime.def456.js", "about", true, "", "", "")
+	if strings.Contains(dev, `rel="preload" as="script"`) {
+		t.Errorf("dev HTML should not preload hydration scripts:\n%s", dev)
+	}
+}
+
+func TestDynamicChunkURLs(t *testing.T) {
+	js := `var a=import("/chunks/Search-abc123.js");var b=import('/chunks/Chart-def456.js');var c=import("/chunks/Search-abc123.js");`
+	got := dynamicChunkURLs(js)
+	want := []string{"/chunks/Search-abc123.js", "/chunks/Chart-def456.js"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("dynamicChunkURLs = %v, want %v", got, want)
+	}
+	if dynamicChunkURLs("var x = 1;") != nil {
+		t.Fatal("expected nil for JS without chunks")
+	}
+}
+
 // TestBuildImageResponsive verifies <Image> compiles to a WebP-first <picture>
 // with responsive srcsets, sizes, blur placeholder, and CLS-mitigating
 // aspect-ratio, and that the processed variants are copied into the output.

@@ -1354,11 +1354,12 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				devBootstrap = b.devBootstrapJSON()
 			}
 			runtimeHead := b.runtimeCommonHead()
+			chunkPreloads := dynamicChunkURLs(r.HydrationJS)
 			var html string
 			if r.LoadingHTML != "" {
-				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
+				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
 			} else {
-				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
+				html = generateHTML(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
 			}
 
 			// Opt-in UA variants: sibling documents so `krate serve` can send a
@@ -1372,11 +1373,11 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				baseScript := strings.ReplaceAll(r.ScriptHTML, hybridShimScriptTag(), "")
 				legacyScriptHTML := baseScript + legacyShimScriptTag()
 				if r.LoadingHTML != "" {
-					legacyHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, r.LoadingHTML, legacyPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
-					modernHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, r.LoadingHTML, modernPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
+					legacyHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, r.LoadingHTML, legacyPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+					modernHTML = generateHTMLWithLoading(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, r.LoadingHTML, modernPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
 				} else {
-					legacyHTML = generateHTML(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, legacyPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
-					modernHTML = generateHTML(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, modernPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath())
+					legacyHTML = generateHTML(r.HTML, r.HeadHTML, legacyScriptHTML, r.StyleHTML, legacyPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
+					modernHTML = generateHTML(r.HTML, r.HeadHTML, baseScript, r.StyleHTML, modernPageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
 				}
 			}
 

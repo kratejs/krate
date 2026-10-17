@@ -61,37 +61,56 @@ export function reconcile<T>(
       }
     }
 
-    // Reorder: insert nodes in the correct order before endMarker.
-    for (let i = 0; i < newNodes.length; i++) {
+    // Place nodes in order. Newly created nodes (not yet attached) are gathered
+    // into consecutive runs and inserted as a single DocumentFragment, so a
+    // block of new items costs one DOM mutation instead of one per node. Reused
+    // nodes are moved individually only when they are out of position.
+    let i = 0;
+    while (i < newNodes.length) {
       const prevNode = i === 0 ? startMarker : newNodes[i - 1];
-      if (newNodes[i] !== prevNode.nextSibling) {
-        parent.insertBefore(newNodes[i], prevNode.nextSibling);
+      if (newNodes[i].parentNode !== parent) {
+        const frag = document.createDocumentFragment();
+        const ref = prevNode.nextSibling;
+        do {
+          frag.appendChild(newNodes[i]);
+          i++;
+        } while (i < newNodes.length && newNodes[i].parentNode !== parent);
+        parent.insertBefore(frag, ref);
+      } else {
+        if (newNodes[i] !== prevNode.nextSibling) {
+          parent.insertBefore(newNodes[i], prevNode.nextSibling);
+        }
+        i++;
       }
     }
   } else {
-    // Unkeyed: simple index-based reconciliation
-    const maxLen = Math.max(existing.length, items.length);
+    // Unkeyed: index-based reconciliation. Existing nodes are replaced in
+    // place, excess nodes are dropped, and the new tail is appended as a single
+    // DocumentFragment insert.
+    const existingLen = existing.length;
+    const replacementLen = Math.min(existingLen, items.length);
 
-    for (let i = 0; i < maxLen; i++) {
-      if (i < items.length) {
-        const newNode = mapFn(items[i], i);
-        if (i < existing.length) {
-          // Replace existing node
-          if (existing[i] !== newNode) {
-            disposeNode(existing[i]);
-            parent.replaceChild(newNode, existing[i]);
-          }
-        } else {
-          // Append new node before endMarker
-          parent.insertBefore(newNode, endMarker);
-        }
-      } else if (i < existing.length) {
-        // Remove excess existing nodes
-        if (existing[i].parentNode === parent) {
-          disposeNode(existing[i]);
-          parent.removeChild(existing[i]);
-        }
+    for (let i = 0; i < replacementLen; i++) {
+      const newNode = mapFn(items[i], i);
+      if (existing[i] !== newNode) {
+        disposeNode(existing[i]);
+        parent.replaceChild(newNode, existing[i]);
       }
+    }
+
+    for (let i = items.length; i < existingLen; i++) {
+      if (existing[i].parentNode === parent) {
+        disposeNode(existing[i]);
+        parent.removeChild(existing[i]);
+      }
+    }
+
+    if (items.length > existingLen) {
+      const frag = document.createDocumentFragment();
+      for (let i = existingLen; i < items.length; i++) {
+        frag.appendChild(mapFn(items[i], i));
+      }
+      parent.insertBefore(frag, endMarker);
     }
   }
 }

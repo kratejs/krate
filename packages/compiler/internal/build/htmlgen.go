@@ -4,12 +4,40 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 )
 
-func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string) string {
+// dynChunkURLRe matches the chunk URLs a page's hydration JS dynamically imports
+// (the bundler rewrites `import("./X.tsx")` to `import("/chunks/X-<hash>.js")`).
+var dynChunkURLRe = regexp.MustCompile(`["'](/chunks/[^"']+\.js)["']`)
+
+// dynamicChunkURLs returns the unique dynamic-import chunk URLs referenced by a
+// page's hydration JS, so their module fetches can start during HTML parse.
+func dynamicChunkURLs(hydrationJS string) []string {
+	if !strings.Contains(hydrationJS, "/chunks/") {
+		return nil
+	}
+	matches := dynChunkURLRe.FindAllStringSubmatch(hydrationJS, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(matches))
+	var out []string
+	for _, m := range matches {
+		url := m[1]
+		if seen[url] {
+			continue
+		}
+		seen[url] = true
+		out = append(out, url)
+	}
+	return out
+}
+
+func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
 	var b strings.Builder
 
 	b.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
@@ -30,6 +58,25 @@ func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []s
 
 	for _, cssFile := range cssFiles {
 		b.WriteString(fmt.Sprintf("<link rel=\"stylesheet\" href=\"%s\">\n", assetHref(basePath, cssFile)))
+	}
+
+	// Start hydration fetches during HTML parse instead of after the body
+	// scripts are reached. The shared runtime chunk and the page hydration
+	// script are classic scripts (emitted without type="module"), so
+	// `rel="preload" as="script"` is the correct hint for them. Skipped in dev,
+	// where the overlay/toolbar has its own loading path.
+	if !devMode {
+		if runtimeJSFile != "" {
+			b.WriteString(fmt.Sprintf("<link rel=\"preload\" as=\"script\" href=\"%s\">\n", assetHref(basePath, runtimeJSFile)))
+		}
+		if jsFile != "" {
+			b.WriteString(fmt.Sprintf("<link rel=\"preload\" as=\"script\" href=\"%s\">\n", pageScriptSrc(route, jsFile, basePath)))
+		}
+		// Dynamic-import chunks are ES modules, so modulepreload is the correct
+		// hint (and the router's route prefetch picks them up too).
+		for _, chunk := range modulePreloads {
+			b.WriteString(fmt.Sprintf("<link rel=\"modulepreload\" href=\"%s\">\n", assetHref(basePath, chunk)))
+		}
 	}
 
 	// Site runtime config + View Transitions CSS (base path, SPA behavior).
@@ -89,8 +136,8 @@ func assetHref(basePath, asset string) string {
 }
 
 // generateHTMLWithLoading is like generateHTML but includes a loading template for SPA transitions.
-func generateHTMLWithLoading(bodyHTML, headHTML, scriptHTML, styleHTML, loadingHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string) string {
-	html := generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML, cssFiles, jsFile, runtimeJSFile, route, devMode, devBootstrap, runtimeHead, basePath)
+func generateHTMLWithLoading(bodyHTML, headHTML, scriptHTML, styleHTML, loadingHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
+	html := generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML, cssFiles, jsFile, runtimeJSFile, route, devMode, devBootstrap, runtimeHead, basePath, modulePreloads...)
 	if loadingHTML != "" {
 		loadingTemplate := "<template data-krate-loading>" + loadingHTML + "</template>"
 		html = strings.Replace(html, "</div>\n</body>", loadingTemplate+"</div>\n</body>", 1)

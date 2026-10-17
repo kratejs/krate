@@ -51,6 +51,55 @@ function stripBase(pathname: string): string {
 // Set during initRouter so the exported `navigate()` can drive the SPA router.
 let navigateImpl: ((url: string, opts?: NavigateOptions) => void) | null = null;
 
+// Resolve an asset URL against the navigated-to page (not the current one), so
+// relative srcs like "index.a1b2c3.js" load from the new page's directory.
+function resolveSrc(src: string, baseUrl: string): string {
+  if (/^(https?:)?\/\//.test(src) || src.startsWith('/')) {
+    return new URL(src, baseUrl).href;
+  }
+  // Relative path: resolve against the base page's directory, accounting for
+  // both "/about" and "/about/" style targets.
+  let base = baseUrl;
+  if (!base.endsWith('/')) {
+    const idx = base.lastIndexOf('/');
+    base = idx > 0 ? base.slice(0, idx + 1) : '/';
+  }
+  return new URL(src, base).href;
+}
+
+/** Bounded set of asset URLs already emitted as `<link rel="prefetch">`. */
+const prefetchedAssets = new Set<string>();
+const PREFETCHED_ASSETS_MAX = 128;
+
+/**
+ * The per-page hydration chunk(s) a prefetched document will need, as absolute
+ * URLs, excluding the shared runtime chunk and anything already loaded. Prefetching
+ * these warms the route's JS in addition to its HTML, so an SPA navigation does
+ * not stall waiting on the chunk after the HTML swap.
+ */
+export function pageAssetURLs(html: string, baseUrl: string, loaded: Set<string>): string[] {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const consider = (src: string | null) => {
+    if (!src) return;
+    let abs: string;
+    try {
+      abs = resolveSrc(src, baseUrl);
+    } catch {
+      return;
+    }
+    if (seen.has(abs) || loaded.has(abs) || RUNTIME_CHUNK_RE.test(abs)) return;
+    seen.add(abs);
+    out.push(abs);
+  };
+  doc.querySelectorAll('script[src]').forEach((s) => consider(s.getAttribute('src')));
+  doc
+    .querySelectorAll('link[rel="modulepreload"][href], link[rel="preload"][as="script"][href]')
+    .forEach((l) => consider(l.getAttribute('href')));
+  return out;
+}
+
 export interface NavigateOptions {
   replace?: boolean;
   scroll?: boolean;
@@ -111,22 +160,46 @@ export function initRouter(): void {
     return true;
   }
 
+  // Above-the-fold/viewport prefetch is deferred to idle time so it never
+  // competes with first paint; hover/focus keeps the 200ms intent debounce.
+  function idle(fn: () => void): void {
+    const ric = (window as any).requestIdleCallback;
+    if (typeof ric === 'function') ric(fn, { timeout: 1000 });
+    else setTimeout(fn, 50);
+  }
+
+  // Prefetch only links that opted in and did not opt out (prefetch={false}).
+  function shouldPrefetch(a: HTMLAnchorElement): boolean {
+    const v = a.getAttribute('data-prefetch');
+    return a.hasAttribute('data-prefetch') && v !== 'false' && v !== '0';
+  }
+
+  function prefetchAsset(url: string): void {
+    if (prefetchedAssets.has(url) || prefetchedAssets.size >= PREFETCHED_ASSETS_MAX) return;
+    prefetchedAssets.add(url);
+    const link = document.createElement('link');
+    link.rel = 'prefetch';
+    link.as = 'script';
+    link.href = url;
+    document.head.appendChild(link);
+  }
+
   function prefetchPage(url: string): void {
     if (prefetchCache.has(url)) return;
     fetch(url, { headers: { Accept: 'text/html' } })
-      .then((res) => {
-        if (res.ok) return res.text();
-        return null;
-      })
+      .then((res) => (res.ok ? res.text() : null))
       .then((html) => {
-        if (html) {
-          // Bounded LRU: evict the oldest entry when the cache is full.
-          if (prefetchCache.size >= PREFETCH_CACHE_MAX) {
-            const oldest = prefetchCache.keys().next().value;
-            if (oldest !== undefined) prefetchCache.delete(oldest);
-          }
-          prefetchCache.set(url, html);
+        if (!html) return;
+        // Bounded LRU: evict the oldest entry when the cache is full.
+        if (prefetchCache.size >= PREFETCH_CACHE_MAX) {
+          const oldest = prefetchCache.keys().next().value;
+          if (oldest !== undefined) prefetchCache.delete(oldest);
         }
+        prefetchCache.set(url, html);
+        // Warm the route's hydration chunk(s) too, not just its HTML.
+        const loaded = new Set<string>();
+        document.querySelectorAll('script[src]').forEach((s) => loaded.add((s as HTMLScriptElement).src));
+        for (const asset of pageAssetURLs(html, url, loaded)) prefetchAsset(asset);
       })
       .catch(() => {});
   }
@@ -144,9 +217,9 @@ export function initRouter(): void {
             if (entry.isIntersecting) {
               const a = entry.target as HTMLAnchorElement;
               const href = a.getAttribute('href');
-              if (href && isLocalLink(a)) {
+              if (href && isLocalLink(a) && shouldPrefetch(a)) {
                 const url = new URL(href, location.origin).href;
-                prefetchPage(url);
+                idle(() => prefetchPage(url));
               }
               prefetchObserver!.unobserve(entry.target);
             }
@@ -161,7 +234,7 @@ export function initRouter(): void {
   function observePrefetchLinks(): void {
     if (!prefetchObserver) return;
     document.querySelectorAll('a[data-prefetch]').forEach((a) => {
-      prefetchObserver!.observe(a);
+      if (shouldPrefetch(a as HTMLAnchorElement)) prefetchObserver!.observe(a);
     });
   }
 
@@ -180,7 +253,7 @@ export function initRouter(): void {
 
   function prefetchHoverHandler(e: Event): void {
     const a = (e.target as HTMLElement).closest('a[data-prefetch]') as HTMLAnchorElement | null;
-    if (!a || !isLocalLink(a)) return;
+    if (!a || !shouldPrefetch(a) || !isLocalLink(a)) return;
     const href = a.getAttribute('href');
     if (!href) return;
 
@@ -546,21 +619,8 @@ export function initRouter(): void {
     });
   }
 
-  // Resolve a script URL against the navigated-to page (not the current one),
-  // so relative srcs like "index.a1b2c3.js" load from the new page's directory.
-  function resolveSrc(src: string, baseUrl: string): string {
-    if (/^(https?:)?\/\//.test(src) || src.startsWith('/')) {
-      return new URL(src, baseUrl).href;
-    }
-    // Relative path: resolve against the base page's directory, accounting for
-    // both "/about" and "/about/" style targets.
-    let base = baseUrl;
-    if (!base.endsWith('/')) {
-      const idx = base.lastIndexOf('/');
-      base = idx > 0 ? base.slice(0, idx + 1) : '/';
-    }
-    return new URL(src, base).href;
-  }
+  // Resolve a script URL against the navigated-to page (see module-level
+  // resolveSrc), kept as a local alias for readability at call sites.
 
   function rehydrate(): void {
     if (typeof (globalThis as any).__krate_hydrate === 'function') {
