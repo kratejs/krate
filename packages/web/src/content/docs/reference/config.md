@@ -47,6 +47,23 @@ sourcemap: false,             // Write per-page sourcemaps (index.<hash>.js.map)
 React syntax is always transpiled to Krate signals and effects; no config is
 required.
 
+## Precompression
+
+```typescript
+compress: {                   // opt-in; also enabled by `krate build --precompress`
+  brotli: true,               // write .br siblings
+  gzip: true,                 // write .gz siblings
+}
+```
+
+Build-time precompression writes `.br`/`.gz` siblings beside compressible assets
+(HTML, CSS, JS, JSON, SVG, XML, ...). `krate serve` negotiates them per request
+by `Accept-Encoding` (brotli > gzip > raw) and always sends
+`Vary: Accept-Encoding`, falling back to on-the-fly gzip for dynamic responses.
+Static hosts such as Cloudflare Pages and Netlify serve the siblings
+automatically. Assets under 1 KB, already-compressed formats (images, fonts,
+wasm), and internal `.krate/` build artifacts are skipped.
+
 ## Dev server
 
 ```typescript

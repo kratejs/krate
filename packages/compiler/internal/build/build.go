@@ -1042,6 +1042,20 @@ func (b *Builder) BuildAll() error {
 		}
 	}
 
+	// Build-time precompression: emit .br/.gz siblings for compressible assets.
+	// Skipped in dev (rebuilds must stay fast); the client/static host only uses
+	// them for production delivery.
+	if !b.DevMode && b.Cfg.ShouldPrecompress() {
+		stopPC := b.phase("build:precompress")
+		n, err := PrecompressOutput(b.Cfg.OutDir, b.Cfg.Compress.Brotli, b.Cfg.Compress.Gzip)
+		stopPC()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  %sWarning: precompression failed:%s %v\n", cYellow, cReset, err)
+		} else if n > 0 {
+			fmt.Printf("  %s⚡%s Precompressed %d assets\n", cCyan, cReset, n)
+		}
+	}
+
 	return nil
 }
 

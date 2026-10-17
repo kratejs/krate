@@ -37,17 +37,18 @@ const (
 var version = "dev"
 
 type cliFlags struct {
-	ConfigPath string
-	OutDir     string
-	Watch      bool
-	Verbose    bool
-	Profile    bool
-	Sourcemap  bool
-	NoDCE      bool
-	Target     string
-	JSON       bool
-	CPUProfile string
-	MemProfile string
+	ConfigPath  string
+	OutDir      string
+	Watch       bool
+	Verbose     bool
+	Profile     bool
+	Sourcemap   bool
+	NoDCE       bool
+	Precompress bool
+	Target      string
+	JSON        bool
+	CPUProfile  string
+	MemProfile  string
 }
 
 func main() {
@@ -109,7 +110,7 @@ func main() {
 func printCommandUsage(w io.Writer, cmd string) {
 	switch cmd {
 	case "build":
-		fmt.Fprintf(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--watch] [--profile] [--cpuprofile <path>] [--memprofile <path>]\n\n")
+		fmt.Fprintf(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--watch] [--profile] [--cpuprofile <path>] [--memprofile <path>] [--precompress]\n\n")
 		fmt.Fprintf(w, "Compile the project to static output (and SSR/server bundles when needed).\n")
 	case "dev":
 		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--verbose]\n\n")
@@ -211,6 +212,8 @@ func parseFlags(args []string) (cliFlags, []string) {
 			flags.Sourcemap = true
 		case args[i] == "--no-dce":
 			flags.NoDCE = true
+		case args[i] == "--precompress":
+			flags.Precompress = true
 		case args[i] == "--json":
 			flags.JSON = true
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
@@ -262,6 +265,10 @@ func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 		off := false
 		cfg.Dce.CSS = &off
 		cfg.Dce.JS = &off
+	}
+	if flags.Precompress {
+		cfg.Compress.Brotli = true
+		cfg.Compress.Gzip = true
 	}
 
 	return root, cfg

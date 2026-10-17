@@ -61,6 +61,23 @@ func TestShouldMinify(t *testing.T) {
 	}
 }
 
+func TestShouldPrecompress(t *testing.T) {
+	cases := []struct {
+		brotli, gzip, want bool
+	}{
+		{false, false, false},
+		{true, false, true},
+		{false, true, true},
+		{true, true, true},
+	}
+	for _, c := range cases {
+		cfg := &Config{Compress: CompressConfig{Brotli: c.brotli, Gzip: c.gzip}}
+		if got := cfg.ShouldPrecompress(); got != c.want {
+			t.Errorf("ShouldPrecompress(brotli=%v,gzip=%v) = %v, want %v", c.brotli, c.gzip, got, c.want)
+		}
+	}
+}
+
 func TestResolve(t *testing.T) {
 	root := "/project"
 	cfg := &Config{
@@ -489,6 +506,25 @@ func TestUnknownKeyWarningsGoItems(t *testing.T) {
 	}
 	if !strings.Contains(joined, "go.replaces.too") {
 		t.Errorf("expected a go.replaces item-key warning, got: %v", warnings)
+	}
+}
+
+func TestUnknownKeyWarningsCompress(t *testing.T) {
+	if w := UnknownKeyWarnings([]byte(`{"compress":{"brotli":true,"gzip":true}}`)); len(w) != 0 {
+		t.Errorf("compress keys should be known, got warnings: %v", w)
+	}
+	if w := UnknownKeyWarnings([]byte(`{"compress":{"brotil":true}}`)); len(w) == 0 {
+		t.Error("expected a warning for the misspelled compress.brotil")
+	}
+}
+
+func TestParseTSConfigCompress(t *testing.T) {
+	cfg := Default()
+	if err := parseTSConfig(`export default { compress: { brotli: true, gzip: false } }`, cfg); err != nil {
+		t.Fatalf("parseTSConfig: %v", err)
+	}
+	if !cfg.Compress.Brotli || cfg.Compress.Gzip || !cfg.ShouldPrecompress() {
+		t.Fatalf("compress not parsed: %+v", cfg.Compress)
 	}
 }
 

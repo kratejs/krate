@@ -8,6 +8,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path"
+	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"strconv"
@@ -316,16 +319,44 @@ func compressibleType(ct string) bool {
 	}
 }
 
+// acceptsEncoding reports whether an Accept-Encoding header value allows the
+// given content-coding (honoring q=0 to exclude it, and "*" as a wildcard).
+func acceptsEncoding(header, coding string) bool {
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		token, q := part, 1.0
+		if i := strings.IndexByte(part, ';'); i >= 0 {
+			token = strings.TrimSpace(part[:i])
+			for _, param := range strings.Split(part[i+1:], ";") {
+				param = strings.TrimSpace(param)
+				if rest, ok := strings.CutPrefix(param, "q="); ok {
+					if v, err := strconv.ParseFloat(strings.TrimSpace(rest), 64); err == nil {
+						q = v
+					}
+				}
+			}
+		}
+		if strings.EqualFold(token, coding) || token == "*" {
+			return q > 0
+		}
+	}
+	return false
+}
+
 // gzipMiddleware gzips compressible responses when the client advertises gzip
-// support. Because the Content-Type is set by the downstream handler immediately
-// before WriteHeader, the decision is made on the first WriteHeader/Write.
+// support, and marks every compressible response `Vary: Accept-Encoding` so a
+// cache never serves an uncompressed body to a client that accepts gzip.
+// Because the Content-Type is set by the downstream handler immediately before
+// WriteHeader, the decision is made on the first WriteHeader/Write.
 func gzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			next.ServeHTTP(w, r)
-			return
+		gw := &gzipResponseWriter{
+			ResponseWriter: w,
+			wantsGzip:      acceptsEncoding(r.Header.Get("Accept-Encoding"), "gzip"),
 		}
-		gw := &gzipResponseWriter{ResponseWriter: w}
 		defer gw.close()
 		next.ServeHTTP(gw, r)
 	})
@@ -335,6 +366,7 @@ type gzipResponseWriter struct {
 	http.ResponseWriter
 	zw          *gzip.Writer
 	decided     bool
+	wantsGzip   bool
 	useGzip     bool
 	wroteHeader bool
 }
@@ -344,13 +376,17 @@ func (g *gzipResponseWriter) decide() {
 		return
 	}
 	g.decided = true
-	g.useGzip = compressibleType(g.Header().Get("Content-Type"))
-	if g.useGzip {
-		g.Header().Del("Content-Length")
-		g.Header().Set("Content-Encoding", "gzip")
-		g.Header().Add("Vary", "Accept-Encoding")
-		g.zw = gzip.NewWriter(g.ResponseWriter)
+	if !compressibleType(g.Header().Get("Content-Type")) {
+		return
 	}
+	g.Header().Add("Vary", "Accept-Encoding")
+	if !g.wantsGzip {
+		return
+	}
+	g.useGzip = true
+	g.Header().Del("Content-Length")
+	g.Header().Set("Content-Encoding", "gzip")
+	g.zw = gzip.NewWriter(g.ResponseWriter)
 }
 
 func (g *gzipResponseWriter) WriteHeader(code int) {
@@ -386,6 +422,121 @@ func (g *gzipResponseWriter) Unwrap() http.ResponseWriter { return g.ResponseWri
 func (g *gzipResponseWriter) close() {
 	if g.useGzip && g.zw != nil {
 		g.zw.Close()
+	}
+}
+
+// precompressedMiddleware serves a build-time precompressed sibling (`.br` or
+// `.gz`, from `krate build --precompress`) for a static asset when the client
+// accepts that coding, preferring brotli. Requests with no sibling fall through
+// to the next handler, so dynamic responses still get on-the-fly gzip. The
+// remote content-coding is fixed before ServeContent so Range/HEAD work on the
+// compressed bytes.
+func precompressedMiddleware(root string, next http.Handler) http.Handler {
+	root = filepath.Clean(root)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			next.ServeHTTP(w, r)
+			return
+		}
+		full, ok := precompressedBase(root, r.URL.Path)
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ae := r.Header.Get("Accept-Encoding")
+		enc, base, ok := pickPrecompressed(full, acceptsEncoding(ae, "br"), acceptsEncoding(ae, "gzip"))
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		f, err := os.Open(base + precompressedSuffix(enc))
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		defer f.Close()
+		fi, err := f.Stat()
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		h := w.Header()
+		h.Set("Content-Encoding", enc)
+		if ct := precompressedContentType(base); ct != "" {
+			h.Set("Content-Type", ct)
+		}
+		h.Add("Vary", "Accept-Encoding")
+		// The name drives ServeContent's Content-Type sniffing when unset, so
+		// pass the original asset name (not the `.br`/`.gz` sibling).
+		http.ServeContent(w, r, filepath.Base(base), fi.ModTime(), f)
+	})
+}
+
+// precompressedBase maps a URL path to a file under root, rejecting traversal.
+// The root and any directory path target their index.html.
+func precompressedBase(root, urlPath string) (string, bool) {
+	clean := path.Clean("/" + urlPath)
+	if clean == "/" {
+		return filepath.Join(root, "index.html"), true
+	}
+	full := filepath.Join(root, filepath.FromSlash(clean))
+	rel, err := filepath.Rel(root, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	if fi, err := os.Stat(full); err == nil && fi.IsDir() {
+		return filepath.Join(full, "index.html"), true
+	}
+	return full, true
+}
+
+// pickPrecompressed returns the preferred precompressed sibling of base that the
+// client accepts (brotli before gzip).
+func pickPrecompressed(base string, wantBr, wantGz bool) (enc, file string, ok bool) {
+	if wantBr && isRegularFile(base+".br") {
+		return "br", base, true
+	}
+	if wantGz && isRegularFile(base+".gz") {
+		return "gzip", base, true
+	}
+	return "", "", false
+}
+
+func precompressedSuffix(enc string) string {
+	if enc == "br" {
+		return ".br"
+	}
+	return ".gz"
+}
+
+func isRegularFile(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
+}
+
+// precompressedContentType returns a charset-qualified Content-Type for the
+// asset kinds precompression produces, so the type is correct even where the
+// platform mime table lacks an entry. Empty means "let ServeContent sniff".
+func precompressedContentType(p string) string {
+	switch strings.ToLower(filepathExt(p)) {
+	case ".html", ".htm":
+		return "text/html; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".js", ".mjs", ".cjs":
+		return "text/javascript; charset=utf-8"
+	case ".json", ".map", ".webmanifest":
+		return "application/json; charset=utf-8"
+	case ".svg":
+		return "image/svg+xml"
+	case ".xml", ".rss", ".atom":
+		return "application/xml; charset=utf-8"
+	case ".txt":
+		return "text/plain; charset=utf-8"
+	default:
+		return ""
 	}
 }
 

@@ -29,6 +29,7 @@ var knownNestedKeys = map[string]map[string]bool{
 	"goApi":     {"enabled": true, "module": true, "deps": true, "replaces": true, "tidy": true},
 	"go":        {"enabled": true, "module": true, "deps": true, "replaces": true, "exclude": true, "tidy": true, "componentDirs": true, "apiDirs": true, "apiEnabled": true},
 	"compat":    {"mode": true, "userAgent": true},
+	"compress":  {"brotli": true, "gzip": true},
 }
 
 // knownSidecarKeys is the recognized nested key set for api.sidecar.
@@ -56,6 +57,7 @@ var knownTopLevelKeys = map[string]bool{
 	"content": true, "checks": true,
 	"server": true, "cors": true, "api": true, "basePath": true,
 	"compat": true, "go": true,
+	"compress": true,
 }
 
 // Validate performs semantic/bounds checks that JSON typing alone can't. It

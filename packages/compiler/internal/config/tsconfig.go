@@ -404,6 +404,23 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				}
 			}
 		}
+	case "compress":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "brotli":
+				if b, ok := v.(bool); ok {
+					cfg.Compress.Brotli = b
+				}
+			case "gzip":
+				if b, ok := v.(bool); ok {
+					cfg.Compress.Gzip = b
+				}
+			}
+		}
 	case "viewTransitions":
 		switch v := val.(type) {
 		case bool:

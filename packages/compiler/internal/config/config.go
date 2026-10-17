@@ -452,6 +452,15 @@ func (c CompatConfig) ModeOrDefault() string {
 	return m
 }
 
+// CompressConfig controls build-time precompression: `krate build` writes `.br`
+// and/or `.gz` siblings beside compressible assets, which `krate serve` (and
+// static hosts like Cloudflare Pages/Netlify) can send when the client supports
+// them. Opt-in; also enabled by `krate build --precompress`.
+type CompressConfig struct {
+	Brotli bool `json:"brotli,omitempty"`
+	Gzip   bool `json:"gzip,omitempty"`
+}
+
 type Config struct {
 	Entry       string          `json:"entry"`
 	OutDir      string          `json:"outDir"`
@@ -485,6 +494,7 @@ type Config struct {
 	GoAPI       GoAPICfg        `json:"goApi,omitempty"`       // Go API sidecar module/deps (legacy; see Go)
 	Go          GoCfg           `json:"go,omitempty"`          // unified Go module: API routes + components
 	Compat      CompatConfig    `json:"compat,omitempty"`      // browser compatibility output mode
+	Compress    CompressConfig  `json:"compress,omitempty"`    // build-time precompression (.br/.gz)
 
 	// BasePath is the URL path prefix the whole site is served under (e.g.
 	// "/docs"). Empty means root. Used for emitted asset URLs and the SPA
@@ -542,6 +552,9 @@ type Config struct {
 func (c *Config) ShouldMinifyHTML() bool { return c.MinifyHTML || c.Minify }
 func (c *Config) ShouldMinifyCSS() bool  { return c.MinifyCSS || c.Minify }
 func (c *Config) ShouldMinifyJS() bool   { return c.MinifyJS || c.Minify }
+
+// ShouldPrecompress reports whether build-time precompression is enabled.
+func (c *Config) ShouldPrecompress() bool { return c.Compress.Brotli || c.Compress.Gzip }
 
 // ServerPort returns the listen port for `krate serve`: server.port, else
 // devServer.port, else 3000.

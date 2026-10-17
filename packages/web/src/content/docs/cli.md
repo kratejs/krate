@@ -40,6 +40,7 @@ krate build ./my-site
 | `--profile` | Print per-phase build timings and disk-cache hits/misses |
 | `--sourcemap` | Emit source maps for generated JS (also disables the build cache) |
 | `--no-dce` | Disable CSS/JS dead-code elimination |
+| `--precompress` | Write `.br` + `.gz` siblings for compressible assets (same as `compress: { brotli: true, gzip: true }`) |
 
 During the build the compiler:
 

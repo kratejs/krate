@@ -1631,8 +1631,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		top = wirePluginServeHandlers(root, cfg, top)
 	}
 	if hub == nil {
-		// Preview/static serving: gzip compressible assets.
+		// Preview/static serving: gzip compressible assets, and serve
+		// build-time precompressed (.br/.gz) siblings when present.
 		top = gzipMiddleware(top)
+		top = precompressedMiddleware(absOut, top)
 	}
 	mux.Handle("/", bodyLimitMiddleware(cfg.MaxBodyBytes(), loggingMiddleware(top)))
 
