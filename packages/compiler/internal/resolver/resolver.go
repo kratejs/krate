@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
 
 // PkgJSON is the subset of package.json the resolver reads to find a package
@@ -24,10 +26,63 @@ type PkgJSON struct {
 	Exports json.RawMessage `json:"exports"`
 }
 
+// Stat is a cached filesystem probe. Within a build a path's existence, kind,
+// size, and mtime do not change, so probes are memoized (ResetCaches clears
+// them at the start of a build so dev edits are seen).
+type Stat struct {
+	Exists bool
+	IsDir  bool
+	Mtime  time.Time
+	Size   int64
+}
+
+var (
+	cacheMu      sync.Mutex
+	statMemo     = map[string]Stat{}
+	pkgMemo      = map[string]PkgJSON{}
+	cacheEnabled = os.Getenv("KRATE_NO_RESOLVER_CACHE") == ""
+)
+
+// StatPath returns the cached stat for path (a negative result is cached too).
+// Set KRATE_NO_RESOLVER_CACHE to bypass the memo (used to A/B resolver caching).
+func StatPath(path string) Stat {
+	if !cacheEnabled {
+		return statNow(path)
+	}
+	cacheMu.Lock()
+	if s, ok := statMemo[path]; ok {
+		cacheMu.Unlock()
+		return s
+	}
+	cacheMu.Unlock()
+
+	s := statNow(path)
+
+	cacheMu.Lock()
+	statMemo[path] = s
+	cacheMu.Unlock()
+	return s
+}
+
+func statNow(path string) Stat {
+	s := Stat{}
+	if fi, err := os.Stat(path); err == nil {
+		s = Stat{Exists: true, IsDir: fi.IsDir(), Mtime: fi.ModTime(), Size: fi.Size()}
+	}
+	return s
+}
+
+// ResetCaches clears the stat and package.json memos. Call once per build.
+func ResetCaches() {
+	cacheMu.Lock()
+	statMemo = map[string]Stat{}
+	pkgMemo = map[string]PkgJSON{}
+	cacheMu.Unlock()
+}
+
 // Exists reports whether a file or directory exists at path.
 func Exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+	return StatPath(path).Exists
 }
 
 // sourceExtensions are code extensions tried in order when a candidate lacks
@@ -51,7 +106,7 @@ func NodeModule(startDir, spec string) string {
 	dir := startDir
 	for {
 		base := filepath.Join(dir, "node_modules", pkg)
-		if info, err := os.Stat(base); err == nil && info.IsDir() {
+		if s := StatPath(base); s.Exists && s.IsDir {
 			return resolvePackage(base, sub)
 		}
 		parent := filepath.Dir(dir)
@@ -218,8 +273,8 @@ func pickExportTargetString(pkgDir string, raw json.RawMessage) string {
 // given, then with source extensions, then as a directory index.
 func resolveFile(candidate string) string {
 	candidate = filepath.Clean(candidate)
-	if Exists(candidate) {
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+	if s := StatPath(candidate); s.Exists {
+		if s.IsDir {
 			for _, idx := range indexFiles {
 				p := filepath.Join(candidate, idx)
 				if Exists(p) {
@@ -240,14 +295,28 @@ func resolveFile(candidate string) string {
 }
 
 // readPkgJSON reads a package's package.json, returning an empty struct when it
-// is missing or unparseable.
+// is missing or unparseable. Results are memoized per build.
 func readPkgJSON(pkgDir string) PkgJSON {
-	data, err := os.ReadFile(filepath.Join(pkgDir, "package.json"))
-	if err != nil {
-		return PkgJSON{}
+	p := filepath.Join(pkgDir, "package.json")
+	if cacheEnabled {
+		cacheMu.Lock()
+		if cached, ok := pkgMemo[p]; ok {
+			cacheMu.Unlock()
+			return cached
+		}
+		cacheMu.Unlock()
 	}
+
 	var pkg PkgJSON
-	_ = json.Unmarshal(data, &pkg)
+	if data, err := os.ReadFile(p); err == nil {
+		_ = json.Unmarshal(data, &pkg)
+	}
+
+	if cacheEnabled {
+		cacheMu.Lock()
+		pkgMemo[p] = pkg
+		cacheMu.Unlock()
+	}
 	return pkg
 }
 

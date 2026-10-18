@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -254,68 +255,53 @@ func isDynamicRoute(pagePath, pagesDir string) bool {
 	return strings.Contains(rel, "[") && strings.Contains(rel, "]")
 }
 
+// staticParamsResolution is the per-dynamic-route outcome of expanding a route
+// with generateStaticParams.
+type staticParamsResolution struct {
+	expanded []staticParamsPage
+	note     bool
+	errs     []string
+}
+
 // resolveStaticParamsPages expands dynamic routes using generateStaticParams.
 // It returns additional pages to build, each with concrete param values, plus
 // any errors encountered while resolving dynamic routes (bundling or executing
 // generateStaticParams). A dynamic route that lacks generateStaticParams is
-// left to runtime resolution and is not an error.
+// left to runtime resolution and is not an error. Dynamic routes are independent,
+// so they are bundled and evaluated in parallel.
 func (b *Builder) resolveStaticParamsPages(pages []string) ([]staticParamsPage, error) {
+	var dynamic []string
+	for _, page := range pages {
+		if isDynamicRoute(page, b.Cfg.PagesDir) {
+			dynamic = append(dynamic, page)
+		}
+	}
+	if len(dynamic) == 0 {
+		return nil, nil
+	}
+
+	results := make([]staticParamsResolution, len(dynamic))
+	pool := newWorkerPool(buildWorkerLimit())
+	var wg sync.WaitGroup
+	for i := range dynamic {
+		wg.Add(1)
+		pool.acquire()
+		go func(i int) {
+			defer wg.Done()
+			defer pool.release()
+			results[i] = b.resolveStaticParamsPage(dynamic[i])
+		}(i)
+	}
+	wg.Wait()
+
 	var expanded []staticParamsPage
 	var errs []string
-
-	for _, page := range pages {
-		if !isDynamicRoute(page, b.Cfg.PagesDir) {
-			continue
+	for i := range results {
+		if results[i].note {
+			fmt.Printf("  %s⚡%s generateStaticParams: %s\n", cCyan, cReset, filepath.Base(dynamic[i]))
 		}
-
-		// Bundle the page to check for generateStaticParams
-		bnd := b.newBundler()
-
-		bundle, err := bnd.Bundle(page)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("failed to bundle %s for generateStaticParams: %v", page, err))
-			continue
-		}
-
-		entryModule := findEntryModule(bundle.Modules)
-		if entryModule == nil || entryModule.Program == nil {
-			continue
-		}
-
-		if !hasGenerateStaticParams(entryModule.Program) {
-			continue
-		}
-
-		fmt.Printf("  %s⚡%s generateStaticParams: %s\n", cCyan, cReset, filepath.Base(page))
-
-		paramSets, err := b.executeGenerateStaticParams(page, bnd, b.tsxTsconfig)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("generateStaticParams (%s): %v", filepath.Base(page), err))
-			continue
-		}
-
-		for _, params := range paramSets {
-			rel, _ := filepath.Rel(b.Cfg.PagesDir, page)
-			rel = filepath.ToSlash(rel)
-			rel = strings.TrimSuffix(rel, filepath.Ext(rel))
-
-			parts := strings.Split(rel, "/")
-			for i, part := range parts {
-				if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
-					paramName := part[1 : len(part)-1]
-					if val, ok := params[paramName]; ok {
-						parts[i] = val
-					}
-				}
-			}
-			outPath := strings.Join(parts, "/")
-
-			expanded = append(expanded, staticParamsPage{
-				PagePath: page,
-				Params:   params,
-				OutPath:  outPath,
-			})
-		}
+		expanded = append(expanded, results[i].expanded...)
+		errs = append(errs, results[i].errs...)
 	}
 
 	if len(errs) > 0 {
@@ -323,6 +309,57 @@ func (b *Builder) resolveStaticParamsPages(pages []string) ([]staticParamsPage, 
 	}
 
 	return expanded, nil
+}
+
+// resolveStaticParamsPage bundles one dynamic route and expands its concrete
+// param combinations.
+func (b *Builder) resolveStaticParamsPage(page string) staticParamsResolution {
+	var res staticParamsResolution
+
+	bnd := b.newBundler()
+	bundle, err := bnd.Bundle(page)
+	if err != nil {
+		res.errs = append(res.errs, fmt.Sprintf("failed to bundle %s for generateStaticParams: %v", page, err))
+		return res
+	}
+
+	entryModule := findEntryModule(bundle.Modules)
+	if entryModule == nil || entryModule.Program == nil {
+		return res
+	}
+	if !hasGenerateStaticParams(entryModule.Program) {
+		return res
+	}
+	res.note = true
+
+	paramSets, err := b.executeGenerateStaticParams(page, bnd, b.tsxTsconfig)
+	if err != nil {
+		res.errs = append(res.errs, fmt.Sprintf("generateStaticParams (%s): %v", filepath.Base(page), err))
+		return res
+	}
+
+	for _, params := range paramSets {
+		rel, _ := filepath.Rel(b.Cfg.PagesDir, page)
+		rel = filepath.ToSlash(rel)
+		rel = strings.TrimSuffix(rel, filepath.Ext(rel))
+
+		parts := strings.Split(rel, "/")
+		for i, part := range parts {
+			if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
+				paramName := part[1 : len(part)-1]
+				if val, ok := params[paramName]; ok {
+					parts[i] = val
+				}
+			}
+		}
+
+		res.expanded = append(res.expanded, staticParamsPage{
+			PagePath: page,
+			Params:   params,
+			OutPath:  strings.Join(parts, "/"),
+		})
+	}
+	return res
 }
 
 // buildStaticParamsPage builds a single page with its params injected into the

@@ -61,6 +61,9 @@ type Index struct {
 	gr      string
 	last    map[string]string   // repo-relative slash path -> committer date
 	authors map[string][]string // repo-relative slash path -> authors (recent first)
+
+	canon sync.Map // absolute path -> canonical path
+	rel   sync.Map // input path -> repo-relative slash path ("" cached too)
 }
 
 // indexCache holds one Index per project root for the process lifetime.
@@ -107,8 +110,17 @@ func buildIndex(root string) *Index {
 
 	// Cap history so enormous repos stay bounded; files untouched in the last
 	// 10000 commits simply report no git metadata (as an untracked file would).
-	out, err := execx.Output(context.Background(), execx.Timeout("KRATE_GIT_TIMEOUT", 60*time.Second), "", nil, "git", "-C", gr, "log", "--no-merges", "-n", "10000",
-		"--name-only", "--format=%x1e%cI%x1f%an")
+	args := []string{"-C", gr, "log", "--no-merges", "-n", "10000",
+		"--name-only", "--format=%x1e%cI%x1f%an"}
+	// Scope to the project's subdirectory when the repo is a monorepo: git then
+	// emits (and the process captures) only commits touching this project.
+	if rel, err := filepath.Rel(ix.gr, ix.root); err == nil {
+		rel = filepath.ToSlash(rel)
+		if rel != "" && rel != "." && !strings.HasPrefix(rel, "..") {
+			args = append(args, "--", rel)
+		}
+	}
+	out, err := execx.Output(context.Background(), execx.Timeout("KRATE_GIT_TIMEOUT", 60*time.Second), "", nil, "git", args...)
 	if err != nil {
 		return ix
 	}
@@ -152,17 +164,28 @@ func buildIndex(root string) *Index {
 
 // relSlash resolves path (absolute, or relative to the project root) to a
 // repo-relative slash path for index lookups. Returns "" when unresolvable.
+// Results (including misses) and the symlink canonicalization are cached, since
+// LastCommit and Authors resolve the same path per page.
 func (ix *Index) relSlash(path string) string {
 	if ix.gr == "" {
 		return ""
 	}
+	if v, ok := ix.rel.Load(path); ok {
+		return v.(string)
+	}
+	result := ix.computeRelSlash(path)
+	ix.rel.Store(path, result)
+	return result
+}
+
+func (ix *Index) computeRelSlash(path string) string {
 	abs := path
 	if !filepath.IsAbs(abs) {
 		abs = filepath.Join(ix.root, path)
 	}
 	// Canonicalize so the path matches the (already canonical) git top-level
 	// even when callers pass a symlinked or short/case-variant root.
-	abs = canonicalPath(abs)
+	abs = ix.canonical(abs)
 	rel, err := filepath.Rel(ix.gr, abs)
 	if err != nil {
 		return ""
@@ -172,6 +195,17 @@ func (ix *Index) relSlash(path string) string {
 		return ""
 	}
 	return rel
+}
+
+// canonical caches canonicalPath per absolute path (EvalSymlinks is a syscall-
+// heavy realpath walk).
+func (ix *Index) canonical(p string) string {
+	if v, ok := ix.canon.Load(p); ok {
+		return v.(string)
+	}
+	c := canonicalPath(p)
+	ix.canon.Store(p, c)
+	return c
 }
 
 // LastCommit returns the committer date (RFC3339) of the last commit touching

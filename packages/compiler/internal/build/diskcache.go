@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	krateversion "github.com/kratejs/krate/packages/compiler/internal/version"
 )
 
@@ -24,14 +25,16 @@ import (
 // page pipeline is skipped.
 type buildDiskCache struct {
 	dir         string
+	pagesDir    string
 	cfgHash     string
 	fingerprint string
 	enabled     bool
 
-	mu     sync.Mutex
-	memo   map[string]cachedFileHash
-	hits   int64
-	misses int64
+	dirOnce sync.Once
+	mu      sync.Mutex
+	memo    map[string]cachedFileHash
+	hits    int64
+	misses  int64
 }
 
 type cachedFileHash struct {
@@ -102,6 +105,7 @@ func newBuildDiskCache(root, cfgHash string, enabled bool) *buildDiskCache {
 		enabled: enabled,
 		memo:    map[string]cachedFileHash{},
 	}
+	c.pagesDir = filepath.Join(c.dir, "pages")
 	c.fingerprint = c.fingerprintFor("")
 	return c
 }
@@ -154,11 +158,11 @@ func (c *buildDiskCache) fingerprintFor(contentHash string) string {
 }
 
 func (c *buildDiskCache) hashFile(path string) (string, bool) {
-	fi, err := os.Stat(path)
-	if err != nil || fi.IsDir() {
+	s := resolver.StatPath(path)
+	if !s.Exists || s.IsDir {
 		return "", false
 	}
-	mtime, size := fi.ModTime().UnixNano(), fi.Size()
+	mtime, size := s.Mtime.UnixNano(), s.Size
 	c.mu.Lock()
 	if h, ok := c.memo[path]; ok && h.mtime == mtime && h.size == size {
 		c.mu.Unlock()
@@ -205,7 +209,7 @@ func (c *buildDiskCache) computeKey(deps []string) (key string, sorted, hashes [
 
 func (c *buildDiskCache) entryPath(page string) string {
 	sum := sha256.Sum256([]byte(filepath.ToSlash(page)))
-	return filepath.Join(c.dir, "pages", hex.EncodeToString(sum[:])+".json")
+	return filepath.Join(c.pagesDir, hex.EncodeToString(sum[:])+".json")
 }
 
 func (c *buildDiskCache) load(page string) (*diskPageEntry, bool) {
@@ -228,9 +232,7 @@ func (c *buildDiskCache) save(page string, e *diskPageEntry) {
 		return
 	}
 	p := c.entryPath(page)
-	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
-		return
-	}
+	c.dirOnce.Do(func() { _ = os.MkdirAll(c.pagesDir, 0755) })
 	data, err := json.Marshal(e)
 	if err != nil {
 		return

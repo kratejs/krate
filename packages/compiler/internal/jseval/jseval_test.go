@@ -60,6 +60,51 @@ globalThis.__krateEvalResult = { url };`, nil)
 	}
 }
 
+func TestRewriteImportMetaURLLeavesStringsAndComments(t *testing.T) {
+	src := "const a = import.meta.url;\n" +
+		"const s = \"import.meta.url\";\n" +
+		"const t = 'import.meta.url';\n" +
+		"const c = `x import.meta.url ${import.meta.url} y`;\n" +
+		"// import.meta.url\n" +
+		"/* import.meta.url */\n" +
+		"const w = `${ { k: import.meta.url } }`;\n" +
+		"const n = notimport.meta.urlX;\n"
+	want := "const a = \"file:///p/x.ts\";\n" +
+		"const s = \"import.meta.url\";\n" +
+		"const t = 'import.meta.url';\n" +
+		"const c = `x import.meta.url ${\"file:///p/x.ts\"} y`;\n" +
+		"// import.meta.url\n" +
+		"/* import.meta.url */\n" +
+		"const w = `${ { k: \"file:///p/x.ts\" } }`;\n" +
+		"const n = notimport.meta.urlX;\n"
+	if got := rewriteImportMetaURL(src, `"file:///p/x.ts"`); got != want {
+		t.Fatalf("rewrite mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestEvalStringContainingImportMetaURL guards against the naive text rewrite
+// that corrupted a double-quoted string holding the literal text (as in the
+// generated docs content module).
+func TestEvalStringContainingImportMetaURL(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "content.ts", "export const sample = \"code: import.meta.url\";\nexport const url = import.meta.url;\n")
+	out, err := eval(t, dir, `import { sample, url } from './content';
+globalThis.__krateEvalResult = { sample, url };`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]string
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["sample"] != "code: import.meta.url" {
+		t.Fatalf("string literal rewritten: %q", m["sample"])
+	}
+	if !strings.HasPrefix(m["url"], "file://") || !strings.Contains(m["url"], "content.ts") {
+		t.Fatalf("import.meta.url not preserved: %q", m["url"])
+	}
+}
+
 func TestEvalExposesEnv(t *testing.T) {
 	out, err := eval(t, t.TempDir(), `globalThis.__krateEvalResult = process.env.KRATE_TEST;`, map[string]string{"KRATE_TEST": "hello"})
 	if err != nil {

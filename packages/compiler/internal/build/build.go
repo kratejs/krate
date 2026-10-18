@@ -34,6 +34,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 	"github.com/kratejs/krate/packages/compiler/internal/tsexec"
@@ -668,6 +669,11 @@ func (b *Builder) BuildAll() error {
 		b.pluginFailed(err)
 	}
 	stopPlugins()
+
+	// Plugins generated files during BeforeBuild/GenerateRoutes; drop resolver
+	// stat/package.json memos so negative probes made before those files existed
+	// don't hide them from page bundling.
+	resolver.ResetCaches()
 
 	type pageBuildResult struct {
 		result *PageResult
@@ -2116,6 +2122,9 @@ func (b *Builder) resetBuildCaches() {
 	// The parse cache is keyed by mtime+size, so it stays valid and is kept.
 	b.moduleCache.ResetResolver()
 	bundler.ResetResolveCache()
+	// The resolver's stat/package.json memos are per-build too (shared by the
+	// bundler and docs plugin).
+	resolver.ResetCaches()
 	// Runtime/dev bundle disk lookups are memoized per build.
 	resetRuntimeBundleMemo()
 	// Baked collection-chain folds are per-build (a content edit changes the key).

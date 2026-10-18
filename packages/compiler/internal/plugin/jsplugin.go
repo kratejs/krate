@@ -22,6 +22,33 @@ import (
 // path. Bundling happens once per file; hook invocations run on a pooled VM.
 var jsPluginBundleCache sync.Map // absPath -> bundle string or error
 
+// jsPluginBytecodeCache memoizes the compiled bytecode of a plugin bundle so a
+// repeated hook invocation (every docs page, every markdown plugin run) reuses
+// the parse instead of re-parsing the bundle inside the pooled VM. QuickJS
+// serialized bytecode is portable across VMs of the same library version, so one
+// compile is shared by every VM. Keyed by the plugin's esbuild global name
+// (unique per module path); the stored bundle is checked so a refreshed bundle
+// recompiles.
+type pluginBytecodeEntry struct {
+	bundle string
+	bc     []byte
+	err    error
+}
+
+var jsPluginBytecodeCache sync.Map // globalName -> pluginBytecodeEntry
+
+// pluginBytecode compiles a plugin bundle once and returns the shared bytecode.
+func pluginBytecode(rt *jsruntime.Runtime, globalName, bundleCode string) ([]byte, error) {
+	if v, ok := jsPluginBytecodeCache.Load(globalName); ok {
+		if e, isEntry := v.(pluginBytecodeEntry); isEntry && e.bundle == bundleCode {
+			return e.bc, e.err
+		}
+	}
+	bc, err := rt.Compile(bundleCode, jsruntime.EvalGlobal)
+	jsPluginBytecodeCache.Store(globalName, pluginBytecodeEntry{bundle: bundleCode, bc: bc, err: err})
+	return bc, err
+}
+
 // pluginGlobalPrefix prefixes the per-module esbuild IIFE global. Each plugin
 // module is assigned its own global (keyed by its absolute path) so several
 // plugins can be loaded on one pooled VM without clobbering each other.
@@ -119,7 +146,11 @@ func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir strin
 	cap := newKrateCapabilities(root, outDir, env, hookName, hookCtx)
 	vm.cap = cap
 
-	if _, err := rt.Execute(bundleCode); err != nil {
+	bc, err := pluginBytecode(rt, globalName, bundleCode)
+	if err != nil {
+		return fmt.Errorf("compiling plugin bundle: %w", err)
+	}
+	if _, err := rt.EvalBytecode(bc); err != nil {
 		return fmt.Errorf("loading plugin bundle: %w", err)
 	}
 

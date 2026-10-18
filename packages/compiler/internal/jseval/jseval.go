@@ -147,14 +147,162 @@ func importMetaPreserver() api.Plugin {
 					return api.OnLoadResult{}, nil
 				}
 				src := string(data)
-				if strings.Contains(src, "import.meta.url") {
-					src = strings.ReplaceAll(src, "import.meta.url", fmt.Sprintf("%q", fileURL(args.Path)))
+				if strings.Contains(src, importMetaURL) {
+					src = rewriteImportMetaURL(src, fmt.Sprintf("%q", fileURL(args.Path)))
 				}
 				contents := src
 				return api.OnLoadResult{Contents: &contents, Loader: loaderForPath(args.Path)}, nil
 			})
 		},
 	}
+}
+
+// importMetaURL is the meta-property importMetaPreserver rewrites.
+const importMetaURL = "import.meta.url"
+
+// rewriteImportMetaURL returns src with every code-context occurrence of
+// import.meta.url replaced by lit (a quoted file:// URL). Occurrences inside
+// string literals, template-literal text, and comments are left untouched, so
+// source that merely mentions the text (for example a docs code sample held in
+// a string) is not corrupted.
+func rewriteImportMetaURL(src, lit string) string {
+	var b strings.Builder
+	b.Grow(len(src))
+	writeCode(&b, src, 0, len(src), lit, false)
+	return b.String()
+}
+
+// writeCode copies src[begin:end] in code context, replacing import.meta.url
+// with lit. When stopAtBrace is set it returns just past the '}' that closes the
+// enclosing template expression; otherwise it consumes the whole range.
+func writeCode(b *strings.Builder, src string, begin, end int, lit string, stopAtBrace bool) int {
+	depth := 0
+	i := begin
+	for i < end {
+		c := src[i]
+		switch {
+		case c == '{':
+			depth++
+			b.WriteByte(c)
+			i++
+		case c == '}' && stopAtBrace && depth == 0:
+			b.WriteByte(c)
+			return i + 1
+		case c == '}':
+			if depth > 0 {
+				depth--
+			}
+			b.WriteByte(c)
+			i++
+		case c == '/' && i+1 < end && src[i+1] == '/':
+			i = writeLineComment(b, src, i, end)
+		case c == '/' && i+1 < end && src[i+1] == '*':
+			i = writeBlockComment(b, src, i, end)
+		case c == '\'' || c == '"':
+			i = writeQuoted(b, src, i, end)
+		case c == '`':
+			i = writeTemplate(b, src, i, end, lit)
+		case c == 'i' && end-i >= len(importMetaURL) && src[i:i+len(importMetaURL)] == importMetaURL && identifierBoundary(src, i, i+len(importMetaURL)):
+			b.WriteString(lit)
+			i += len(importMetaURL)
+		default:
+			b.WriteByte(c)
+			i++
+		}
+	}
+	return i
+}
+
+func writeLineComment(b *strings.Builder, src string, i, end int) int {
+	j := i + 2
+	for j < end && src[j] != '\n' {
+		j++
+	}
+	b.WriteString(src[i:j])
+	return j
+}
+
+func writeBlockComment(b *strings.Builder, src string, i, end int) int {
+	stop := end
+	if j := strings.Index(src[i+2:end], "*/"); j >= 0 {
+		stop = i + 2 + j + 2
+	}
+	b.WriteString(src[i:stop])
+	return stop
+}
+
+func writeQuoted(b *strings.Builder, src string, i, end int) int {
+	q := src[i]
+	j := i + 1
+	for j < end {
+		switch src[j] {
+		case '\\':
+			j += 2
+			continue
+		case q:
+			j++
+			b.WriteString(src[i:j])
+			return j
+		case '\n':
+			b.WriteString(src[i:j])
+			return j
+		}
+		j++
+	}
+	b.WriteString(src[i:end])
+	return end
+}
+
+// writeTemplate copies a template literal starting at the backtick src[i],
+// rewriting import.meta.url inside each ${...} substitution and leaving the
+// literal text untouched.
+func writeTemplate(b *strings.Builder, src string, i, end int, lit string) int {
+	j := i + 1
+	for j < end {
+		switch src[j] {
+		case '\\':
+			j += 2
+			continue
+		case '`':
+			j++
+			b.WriteString(src[i:j])
+			return j
+		case '$':
+			if j+1 < end && src[j+1] == '{' {
+				b.WriteString(src[i : j+2])
+				i = writeCode(b, src, j+2, end, lit, true)
+				j = i
+				continue
+			}
+			j++
+		default:
+			j++
+		}
+	}
+	b.WriteString(src[i:end])
+	return end
+}
+
+// identifierBoundary reports whether src[start:end] is a standalone token (not
+// adjacent to an identifier character or a property access dot).
+func identifierBoundary(src string, start, end int) bool {
+	if start > 0 {
+		if p := src[start-1]; isIdentByte(p) || p == '.' {
+			return false
+		}
+	}
+	if end < len(src) {
+		if n := src[end]; isIdentByte(n) || n == '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || c == '$' ||
+		(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9')
 }
 
 // fileURL converts an absolute filesystem path to a file:// URL (with a leading

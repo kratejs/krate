@@ -320,8 +320,8 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 	var size int64
 	statOK := false
 	if !isExternalPkg {
-		if fi, err := os.Stat(abs); err == nil && !fi.IsDir() {
-			mtime, size, statOK = fi.ModTime(), fi.Size(), true
+		if s := resolver.StatPath(abs); s.Exists && !s.IsDir {
+			mtime, size, statOK = s.Mtime, s.Size, true
 		}
 	}
 
@@ -725,8 +725,7 @@ func resolveImport(importer, imp string, exists func(string) bool) string {
 		resolved := filepath.Clean(filepath.Join(dir, imp))
 
 		if exists(resolved) {
-			info, err := os.Stat(resolved)
-			if err == nil && info.IsDir() {
+			if resolver.StatPath(resolved).IsDir {
 				for _, index := range []string{"index.tsx", "index.ts", "index.mts", "index.jsx", "index.js", "index.mjs", "index.cjs", "index.md", "index.mdx"} {
 					candidate := filepath.Join(resolved, index)
 					if exists(candidate) {
@@ -777,8 +776,7 @@ func resolvePathAlias(imp string, aliases []pathAlias, tsBaseDir string, exists 
 					targetPath = filepath.Clean(targetPath)
 
 					if exists(targetPath) {
-						info, err := os.Stat(targetPath)
-						if err == nil && info.IsDir() {
+						if resolver.StatPath(targetPath).IsDir {
 							for _, index := range []string{"index.tsx", "index.ts", "index.jsx", "index.js"} {
 								candidate := filepath.Join(targetPath, index)
 								if exists(candidate) {
@@ -835,7 +833,7 @@ func resolveKratePackage(importerDir, imp string, exists func(string) bool) stri
 	for {
 		// Try scoped package: node_modules/@krate/{name}/
 		pkgDir := filepath.Join(dir, "node_modules", "@krate", name)
-		if _, err := os.Stat(pkgDir); err == nil {
+		if resolver.StatPath(pkgDir).Exists {
 			candidates := []string{
 				filepath.Join(pkgDir, "index.tsx"),
 				filepath.Join(pkgDir, "index.ts"),
