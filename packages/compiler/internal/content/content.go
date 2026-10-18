@@ -30,6 +30,10 @@ const (
 type Field struct {
 	Type     FieldType
 	Required bool
+	// Enum restricts a string field to the listed values.
+	Enum []string
+	// Default fills the field when frontmatter omits it.
+	Default any
 }
 
 // Collection describes one content collection.
@@ -147,9 +151,33 @@ func Validate(schema map[string]Field, data map[string]any) []error {
 		}
 		if !valueMatches(field.Type, raw) {
 			errs = append(errs, fmt.Errorf("field %q must be %s (got %s)", name, field.Type, jsTypeName(raw)))
+			continue
+		}
+		if len(field.Enum) > 0 {
+			if s, ok := raw.(string); ok && !stringInList(field.Enum, s) {
+				errs = append(errs, fmt.Errorf("field %q must be one of %s (got %q)", name, strings.Join(field.Enum, ", "), s))
+			}
 		}
 	}
 	return errs
+}
+
+// ApplyDefaults fills in schema defaults for fields omitted from frontmatter.
+func ApplyDefaults(schema map[string]Field, data map[string]any) {
+	for name, field := range schema {
+		if _, present := data[name]; !present && field.Default != nil {
+			data[name] = field.Default
+		}
+	}
+}
+
+func stringInList(list []string, v string) bool {
+	for _, s := range list {
+		if s == v {
+			return true
+		}
+	}
+	return false
 }
 
 // valueMatches reports whether a frontmatter value satisfies a field type.
@@ -598,6 +626,16 @@ func ParseSchema(raw any) map[string]Field {
 			}
 			if opt, ok := t["optional"].(bool); ok && !opt {
 				f.Required = true
+			}
+			if en, ok := t["enum"].([]any); ok {
+				for _, item := range en {
+					if s, ok := item.(string); ok {
+						f.Enum = append(f.Enum, s)
+					}
+				}
+			}
+			if def, ok := t["default"]; ok {
+				f.Default = def
 			}
 			out[name] = f
 		default:

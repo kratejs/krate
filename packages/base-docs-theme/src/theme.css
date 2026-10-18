@@ -1629,6 +1629,8 @@ a.docs-tag:hover { color: var(--color-text-main); border-color: var(--color-mute
 .krate-docs-search-icon { position: absolute; left: 0.6rem; display: inline-flex; color: var(--color-muted); pointer-events: none; }
 .krate-docs-search-input { width: 210px; height: 32px; padding: 0 0.6rem 0 1.95rem; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-card-bg); color: var(--color-text-main); font: inherit; font-size: 0.85rem; }
 .krate-docs-search-input:focus { outline: none; border-color: var(--color-primary); }
+.krate-docs-search-kbd { position: absolute; right: 0.45rem; padding: 0.05rem 0.3rem; border: 1px solid var(--color-border); border-radius: 4px; color: var(--color-muted); font-size: 0.7rem; line-height: 1.2; pointer-events: none; }
+.krate-docs-search:has(.krate-docs-search-kbd) .krate-docs-search-input { padding-right: 2.2rem; }
 .krate-docs-search-results { position: absolute; top: calc(100% + 6px); right: 0; width: min(440px, 92vw); max-height: 62vh; overflow: auto; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: var(--docs-shadow); padding: 0.35rem; z-index: 200; }
 .krate-docs-search-item { display: block; padding: 0.5rem 0.6rem; border-radius: 6px; text-decoration: none; color: var(--color-text-main); }
 .krate-docs-search-item:hover, .krate-docs-search-item.active { background: var(--color-muted-bg); color: var(--color-text-main); }

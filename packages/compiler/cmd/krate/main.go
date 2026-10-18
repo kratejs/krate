@@ -45,6 +45,8 @@ type cliFlags struct {
 	Sourcemap   bool
 	NoDCE       bool
 	Precompress bool
+	Mode        string
+	Schema      bool
 	Target      string
 	JSON        bool
 	CPUProfile  string
@@ -91,6 +93,8 @@ func main() {
 		runClean(flags, args)
 	case "doctor":
 		runDoctor(flags, args)
+	case "config":
+		runConfig(flags, args)
 	case "plugin":
 		runPlugin(flags, args)
 	case "mcp":
@@ -140,6 +144,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "doctor":
 		fmt.Fprintf(w, "Usage: krate doctor [dir]\n\n")
 		fmt.Fprintf(w, "Print a diagnostic summary of the project and toolchain.\n")
+	case "config":
+		fmt.Fprintf(w, "Usage: krate config [dir] [--mode <mode>] [--config <path>] [--schema]\n\n")
+		fmt.Fprintf(w, "Print the fully resolved configuration as JSON (--schema prints a JSON Schema).\n")
 	case "plugin":
 		fmt.Fprintf(w, "Usage: krate plugin add <package> [dir]\n\n")
 		fmt.Fprintf(w, "Manage Krate plugins.\n")
@@ -214,6 +221,11 @@ func parseFlags(args []string) (cliFlags, []string) {
 			flags.NoDCE = true
 		case args[i] == "--precompress":
 			flags.Precompress = true
+		case args[i] == "--mode" && i+1 < len(args):
+			flags.Mode = args[i+1]
+			i++
+		case args[i] == "--schema":
+			flags.Schema = true
 		case args[i] == "--json":
 			flags.JSON = true
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
@@ -241,12 +253,36 @@ func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 		os.Exit(1)
 	}
 
-	cfg, err := config.Load(root, flags.ConfigPath)
+	command := ""
+	if len(args) > 0 {
+		command = args[0]
+	}
+	defaultMode := "production"
+	if command == "dev" {
+		defaultMode = "development"
+	}
+	// `--mode` selects the environment mode (equivalent to KRATE_ENV) and the
+	// `.env.<mode>` files. Loaded before the config so a function-form
+	// defineConfig sees the resolved mode + environment variables.
+	if flags.Mode != "" {
+		_ = os.Setenv("KRATE_ENV", flags.Mode)
+	}
+	loadProjectEnv(root, defaultMode, flags.Verbose)
+	mode := environ.Mode(defaultMode)
+
+	cfg, err := config.LoadWith(root, config.LoadOptions{
+		ConfigPath: flags.ConfigPath,
+		Command:    command,
+		Mode:       mode,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sConfig error:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
 	}
 	for _, w := range config.Warnings {
+		fmt.Fprintf(os.Stderr, "  %s⚠ config:%s %s\n", cYellow, cReset, w)
+	}
+	for _, w := range plugin.ConfigWarnings(cfg) {
 		fmt.Fprintf(os.Stderr, "  %s⚠ config:%s %s\n", cYellow, cReset, w)
 	}
 	cfg.Resolve(root)
@@ -455,6 +491,9 @@ func runDeploy(flags cliFlags, args []string) {
 	env := loadProjectEnv(root, "production", flags.Verbose)
 
 	target := flags.Target
+	if target == "" {
+		target = cfg.Deploy.Target
+	}
 	if target == "" {
 		target = "netlify"
 	}

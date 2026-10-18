@@ -50,6 +50,12 @@ export type {
   PagefindOptions,
 } from "./docs.js";
 export { defineDocsTheme } from "./docs.js";
+export type {
+  MarkdownPluginContext,
+  MarkdownPluginDescriptor,
+  MarkdownTransform,
+} from "./markdown.js";
+export { defineMarkdownPlugin } from "./markdown.js";
 export type { PluginHookFn, PluginOutput } from "./output.js";
 export type { Krate } from "./krate.js";
 export {

@@ -80,6 +80,10 @@ export interface DocsSearchOptions {
   engine?: "pagefind" | "docfind" | "json";
   /** Max number of results shown (default: 8). */
   maxResults?: number;
+  /** Search input placeholder (theme-rendered). */
+  placeholder?: string;
+  /** Keyboard shortcut hint shown by the theme (e.g. "/" or "mod+k"). */
+  hotkey?: string;
   /** Pagefind options (only used when `engine` is `"pagefind"`). */
   pagefind?: PagefindOptions;
 }
@@ -104,6 +108,8 @@ export interface DocsLayoutProps<Options = DocsThemeOptions> {
   nextLink?: string;
   /** `docs({ links })` social links. */
   socialLinks: { icon?: string; url?: string }[];
+  /** Search UI hints from `docs({ search })`. */
+  search?: { placeholder?: string; hotkey?: string };
   /** Current page path (e.g. "getting-started"). */
   currentPath: string;
   /** Page description (from frontmatter) for subtitle/meta rendering. */
@@ -166,6 +172,21 @@ export interface DocsOptions {
    * `editUrl` key overrides it per page.
    */
   editLinkBase?: string;
+  /**
+   * "Edit this page" link config. `pattern` supports `:path` (the page's source
+   * path relative to the project root).
+   */
+  editLink?: { base?: string; pattern?: string };
+  /** Custom sidebar override ("auto", "none", an explicit tree, or a JSON file). */
+  sidebar?: DocsSidebarItem[] | "auto" | "none" | { from: "file"; file?: string };
+  /** Show the table of contents (default true). */
+  toc?: boolean;
+  /** Show breadcrumbs (default true). */
+  breadcrumbs?: boolean;
+  /** Show prev/next links (default true). */
+  pagination?: boolean;
+  /** Fill "last updated" from git history (default true). */
+  lastUpdated?: boolean;
 }
 
 /**

@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -23,13 +24,134 @@ type DocsPluginOptions struct {
 	Title        string             `json:"title"`
 	Layout       string             `json:"layout"`
 	Theme        json.RawMessage    `json:"theme"` // string (path or npm specifier) or DocsThemeDescriptor
-	Sidebar      []docs.SidebarItem `json:"sidebar"`
+	Sidebar      SidebarConfig      `json:"sidebar"`
 	Links        []SocialLink       `json:"links"`
 	Search       *DocsSearchOptions `json:"search"`
-	EditLinkBase string             `json:"editLinkBase"`
+	EditLinkBase string             `json:"editLinkBase"` // legacy
+	EditLink     EditLinkConfig     `json:"editLink"`
 	// LastUpdated fills each page's "last updated" date from git history when
 	// frontmatter omits it (default: true). Set false to skip git lookups.
 	LastUpdated *bool `json:"lastUpdated,omitempty"`
+	// TOC toggles the table of contents (default true).
+	TOC *bool `json:"toc,omitempty"`
+	// Breadcrumbs toggles breadcrumbs (default true).
+	Breadcrumbs *bool `json:"breadcrumbs,omitempty"`
+	// Pagination toggles prev/next links (default true).
+	Pagination *bool `json:"pagination,omitempty"`
+}
+
+func (o *DocsPluginOptions) TOCEnabled() bool         { return o.TOC == nil || *o.TOC }
+func (o *DocsPluginOptions) BreadcrumbsEnabled() bool { return o.Breadcrumbs == nil || *o.Breadcrumbs }
+func (o *DocsPluginOptions) PaginationEnabled() bool  { return o.Pagination == nil || *o.Pagination }
+
+// SidebarConfig configures the docs sidebar. It accepts:
+//   - "auto" (default): build from the filesystem/frontmatter
+//   - "none": no sidebar
+//   - an array of DocsSidebarItem: an explicit override
+//   - { from: "file", file: "sidebar.json" }: load a JSON sidebar file
+type SidebarConfig struct {
+	Mode  string
+	Items []docs.SidebarItem
+	File  string
+}
+
+func (s *SidebarConfig) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil
+	}
+	switch trimmed[0] {
+	case '"':
+		var mode string
+		if err := json.Unmarshal(data, &mode); err != nil {
+			return err
+		}
+		s.Mode = mode
+	case '[':
+		if err := json.Unmarshal(data, &s.Items); err != nil {
+			return err
+		}
+	case '{':
+		var obj struct {
+			From string `json:"from"`
+			File string `json:"file"`
+		}
+		if err := json.Unmarshal(data, &obj); err != nil {
+			return err
+		}
+		if obj.From == "file" || obj.File != "" {
+			s.Mode = "file"
+			s.File = obj.File
+		} else {
+			s.Mode = "auto"
+		}
+	default:
+		return fmt.Errorf("sidebar must be a string, an array, or an object")
+	}
+	return nil
+}
+
+// Resolve returns the sidebar to render, given the auto-built tree.
+func (s SidebarConfig) Resolve(generated []docs.SidebarItem, contentDir string) []docs.SidebarItem {
+	switch strings.ToLower(strings.TrimSpace(s.Mode)) {
+	case "none", "off", "false":
+		return nil
+	case "file":
+		file := s.File
+		if file == "" {
+			file = "sidebar.json"
+		}
+		p := file
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(contentDir, p)
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return generated
+		}
+		var items []docs.SidebarItem
+		if json.Unmarshal(data, &items) != nil {
+			return generated
+		}
+		return items
+	}
+	if len(s.Items) > 0 {
+		return s.Items
+	}
+	return generated
+}
+
+// EditLinkConfig configures "Edit this page" links. Pattern is a URL template
+// with `:path` replaced by the page's source path relative to the project root
+// (e.g. "https://github.com/org/repo/edit/main/:path").
+type EditLinkConfig struct {
+	Base    string `json:"base,omitempty"`
+	Pattern string `json:"pattern,omitempty"`
+}
+
+// editURL resolves a page's "Edit this page" URL: frontmatter `editUrl` wins,
+// then `editLink.pattern` (`:path` template), then `editLink.base` /
+// legacy `editLinkBase` + the source path.
+func (o *DocsPluginOptions) editURL(root string, page docs.Page) string {
+	if page.EditURL != "" {
+		return page.EditURL
+	}
+	base := o.EditLink.Base
+	if base == "" {
+		base = o.EditLinkBase
+	}
+	if base == "" && o.EditLink.Pattern == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(root, page.SourcePath)
+	if err != nil {
+		return ""
+	}
+	relSlash := filepath.ToSlash(rel)
+	if o.EditLink.Pattern != "" {
+		return strings.ReplaceAll(o.EditLink.Pattern, ":path", relSlash)
+	}
+	return strings.TrimSuffix(base, "/") + "/" + relSlash
 }
 
 // DocsThemeDescriptor mirrors the shape a docs theme factory returns
@@ -211,9 +333,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 				versionAlts[vk][ver] = ps[i].URL
 			}
 			sec := docs.BuildSidebarTree(ps)
-			if len(opts.Sidebar) > 0 {
-				sec = opts.Sidebar
-			}
+			sec = opts.Sidebar.Resolve(sec, filepath.Join(ctx.Root, opts.ContentDir))
 			// The version's landing URL (its index, else its first page) backs
 			// the version switcher when a page has no equivalent in that version.
 			versionRoot[loc+"\x00"+ver] = firstSidebarURL(sec)
@@ -285,8 +405,8 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 				DefaultLocale:  defaultLocale,
 				Version:        page.Version,
 				CurrentVersion: currentVersion,
-				Locales:        localeSwitchLinks(locales, defaultLocale, localeAlts[page.Version+"\x00"+page.Path]),
-				Versions:       versionSwitchLinks(versions, currentVersion, page.Locale, defaultLocale, versionAlts[page.Locale+"\x00"+page.Path], versionRoot),
+				Locales:        localeSwitchLinksWithLabels(locales, defaultLocale, localeAlts[page.Version+"\x00"+page.Path], cfg.I18n.LocaleLabels),
+				Versions:       versionSwitchLinksWithLabels(versions, currentVersion, page.Locale, defaultLocale, versionAlts[page.Locale+"\x00"+page.Path], versionRoot, cfg.Versions.Labels),
 				VersionBanner:  cfg.Versions.Enabled() && cfg.Versions.BannerEnabled() && page.Version != currentVersion,
 			}
 
@@ -576,6 +696,16 @@ func applyNavOverride(override *docs.NavOverride, autoTitle, autoLink string) (t
 func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page docs.Page, layoutRel string, searchEnabled bool, sections []docs.SidebarItem, tocItems []docs.TOCItem, breadcrumbs []docs.Breadcrumb, prevTitle, prevLink, nextTitle, nextLink string, li docsLocaleInfo, opts *DocsPluginOptions, themeOptions json.RawMessage, mdConfig markdown.Config) string {
 	prevTitle, prevLink, prevOk := applyNavOverride(page.Prev, prevTitle, prevLink)
 	nextTitle, nextLink, nextOk := applyNavOverride(page.Next, nextTitle, nextLink)
+	if !opts.PaginationEnabled() {
+		prevTitle, prevLink, nextTitle, nextLink = "", "", "", ""
+		prevOk, nextOk = false, false
+	}
+	if !opts.TOCEnabled() {
+		tocItems = nil
+	}
+	if !opts.BreadcrumbsEnabled() {
+		breadcrumbs = nil
+	}
 	siteTitle := opts.Title
 	socialLinks := socialLinksWithNames(opts.Links)
 
@@ -638,6 +768,15 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	currentPathJSON, _ := json.Marshal(page.Path)
 	templateJSON, _ := json.Marshal(page.Template)
 
+	// Per-page document language (the shell ships lang="en"; the build applies
+	// this override server-side so crawlers/no-JS see the right language).
+	if li.Locale != "" {
+		langJSON, _ := json.Marshal(li.Locale)
+		sb.WriteString("export const lang = ")
+		sb.WriteString(string(langJSON))
+		sb.WriteString(";\n\n")
+	}
+
 	sb.WriteString("export default function DocPage() {\n")
 	sb.WriteString("  const docsProps = {\n")
 	sb.WriteString("    pageTitle: ")
@@ -646,6 +785,12 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	sb.WriteString("    siteTitle: ")
 	sb.WriteString(string(siteTitleJSON))
 	sb.WriteString(",\n")
+	if opts.Search != nil && (opts.Search.Placeholder != "" || opts.Search.Hotkey != "") {
+		searchJSON, _ := json.Marshal(map[string]string{"placeholder": opts.Search.Placeholder, "hotkey": opts.Search.Hotkey})
+		sb.WriteString("    search: ")
+		sb.WriteString(string(searchJSON))
+		sb.WriteString(",\n")
+	}
 	sb.WriteString("    sidebarItems: ")
 	sb.WriteString(string(sidebarJSON))
 	sb.WriteString(",\n")
@@ -700,12 +845,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		sb.WriteString(",\n")
 	}
 
-	editUrl := page.EditURL
-	if editUrl == "" && opts.EditLinkBase != "" {
-		if rel, err := filepath.Rel(ctx.Root, page.SourcePath); err == nil {
-			editUrl = strings.TrimSuffix(opts.EditLinkBase, "/") + "/" + filepath.ToSlash(rel)
-		}
-	}
+	editUrl := opts.editURL(ctx.Root, page)
 	if editUrl != "" {
 		editUrlJSON, _ := json.Marshal(editUrl)
 		sb.WriteString("    editUrl: ")
@@ -807,13 +947,6 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 			sb.WriteString(" />\n")
 		}
 	}
-	// Set the document language for non-default locales (the shell ships
-	// lang="en"; this corrects it before content paints).
-	if li.Locale != "" && li.Locale != li.DefaultLocale {
-		sb.WriteString("        <script>{`document.documentElement.lang=")
-		sb.WriteString(escapeTemplateLit("'" + li.Locale + "'"))
-		sb.WriteString(";`}</script>\n")
-	}
 	if page.Description != "" {
 		sb.WriteString("        <meta name=\"description\" content=")
 		sb.WriteString(jsxAttrExpr(page.Description))
@@ -854,7 +987,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		sb.WriteString("\n      <div class=\"md-content\" data-pagefind-body>\n")
 		for _, seg := range segments {
 			if seg.HTML != "" {
-				html := seg.HTML
+				html := applyMarkdownTransformPlugins(cfg, ctx, page, seg.HTML)
 				if mdConfig.HeadingAnchors {
 					html = docs.InjectHeadingAnchors(html)
 				}
@@ -880,7 +1013,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		}
 		sb.WriteString("      </div>\n")
 	} else {
-		content := page.Content
+		content := applyMarkdownTransformPlugins(cfg, ctx, page, page.Content)
 		if mdConfig.HeadingAnchors {
 			content = docs.InjectHeadingAnchors(content)
 		}
@@ -895,6 +1028,32 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	sb.WriteString("}\n")
 
 	return sb.String()
+}
+
+// applyMarkdownTransformPlugins runs the configured `markdown.plugins` modules
+// over a docs page's rendered HTML. The same modules run for .md/.mdx page files
+// via the normal AfterMarkdownParse dispatch; docs pages are generated TSX, so
+// they are applied here instead.
+func applyMarkdownTransformPlugins(cfg *config.Config, ctx *BuildHookCtx, page docs.Page, html string) string {
+	if html == "" || len(cfg.Markdown.Plugins) == 0 {
+		return html
+	}
+	var plugins []config.PluginConfig
+	for _, p := range cfg.Plugins {
+		if strings.HasPrefix(p.Name, "markdown-transform-") {
+			plugins = append(plugins, p)
+		}
+	}
+	if len(plugins) == 0 {
+		return html
+	}
+	mdCtx := &MarkdownHookCtx{Page: page.SourcePath, HTML: html, Title: page.Title, Route: page.URL}
+	env := CommunityEnv{PagesDir: cfg.PagesDir, Config: cfg}
+	if err := RunCommunityPlugins("AfterMarkdownParse", plugins, ctx.Root, ctx.OutDir, mdCtx, env); err != nil {
+		fmt.Fprintf(os.Stderr, "  Warning: markdown plugin (docs/%s): %v\n", page.Path, err)
+		return html
+	}
+	return mdCtx.HTML
 }
 
 func escapeTemplateLit(s string) string {

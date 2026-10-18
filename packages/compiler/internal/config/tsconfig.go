@@ -325,6 +325,16 @@ func interfaceStrings(arr []interface{}) []string {
 	return out
 }
 
+func interfaceStringMap(m map[string]interface{}) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
+}
+
 func applyConfigProp(cfg *Config, key string, val interface{}) error {
 	switch key {
 	case "entry":
@@ -421,6 +431,56 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				}
 			}
 		}
+	case "head":
+		data, err := json.Marshal(val)
+		if err != nil {
+			return err
+		}
+		var hc HeadConfig
+		if err := json.Unmarshal(data, &hc); err != nil {
+			return err
+		}
+		cfg.Head = hc
+	case "security":
+		data, err := json.Marshal(val)
+		if err != nil {
+			return err
+		}
+		var sc SecurityConfig
+		if err := json.Unmarshal(data, &sc); err != nil {
+			return err
+		}
+		cfg.Security = sc
+	case "headers":
+		data, err := json.Marshal(val)
+		if err != nil {
+			return err
+		}
+		var hr []HeaderRule
+		if err := json.Unmarshal(data, &hr); err != nil {
+			return err
+		}
+		cfg.Headers = hr
+	case "images":
+		data, err := json.Marshal(val)
+		if err != nil {
+			return err
+		}
+		var ic ImagesConfig
+		if err := json.Unmarshal(data, &ic); err != nil {
+			return err
+		}
+		cfg.Images = ic
+	case "deploy":
+		data, err := json.Marshal(val)
+		if err != nil {
+			return err
+		}
+		var dc DeployConfig
+		if err := json.Unmarshal(data, &dc); err != nil {
+			return err
+		}
+		cfg.Deploy = dc
 	case "viewTransitions":
 		switch v := val.(type) {
 		case bool:
@@ -536,6 +596,40 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				cfg.SEO.Description = s
 			case "image":
 				cfg.SEO.Image = s
+			case "titleTemplate":
+				cfg.SEO.TitleTemplate = s
+			case "twitter":
+				cfg.SEO.Twitter = s
+			case "themeColor":
+				cfg.SEO.ThemeColor = s
+			case "locale":
+				cfg.SEO.Locale = s
+			}
+		}
+	case "site":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			s, _ := v.(string)
+			switch k {
+			case "url":
+				cfg.Site.URL = s
+			case "name":
+				cfg.Site.Name = s
+			case "description":
+				cfg.Site.Description = s
+			case "image":
+				cfg.Site.Image = s
+			case "titleTemplate":
+				cfg.Site.TitleTemplate = s
+			case "twitter":
+				cfg.Site.Twitter = s
+			case "themeColor":
+				cfg.Site.ThemeColor = s
+			case "locale":
+				cfg.Site.Locale = s
 			}
 		}
 	case "robots":
@@ -614,6 +708,22 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 					return fmt.Errorf("devServer.editor: expected string, got %T", v)
 				}
 				cfg.DevServer.Editor = s
+			case "proxy":
+				m2, ok := v.(map[string]interface{})
+				if !ok {
+					return fmt.Errorf("devServer.proxy: expected object, got %T", v)
+				}
+				cfg.DevServer.Proxy = nil
+				for pfx, tv := range m2 {
+					s, ok := tv.(string)
+					if !ok {
+						return fmt.Errorf("devServer.proxy[%q]: expected string, got %T", pfx, tv)
+					}
+					if cfg.DevServer.Proxy == nil {
+						cfg.DevServer.Proxy = map[string]string{}
+					}
+					cfg.DevServer.Proxy[pfx] = s
+				}
 			}
 		}
 	case "emitReact":
@@ -653,6 +763,10 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			case "mermaid":
 				if b, ok := v.(bool); ok {
 					cfg.Markdown.Mermaid = b
+				}
+			case "plugins":
+				if arr, ok := v.([]interface{}); ok {
+					cfg.Markdown.Plugins = interfaceStrings(arr)
 				}
 			}
 		}
@@ -1100,6 +1214,9 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 		if arr, ok := m["locales"].([]interface{}); ok {
 			cfg.I18n.Locales = interfaceStrings(arr)
 		}
+		if mm, ok := m["localeLabels"].(map[string]interface{}); ok {
+			cfg.I18n.LocaleLabels = interfaceStringMap(mm)
+		}
 		if s, ok := m["routing"].(string); ok {
 			cfg.I18n.Routing = s
 		}
@@ -1114,6 +1231,9 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 		if arr, ok := m["versions"].([]interface{}); ok {
 			cfg.Versions.Versions = interfaceStrings(arr)
 		}
+		if mm, ok := m["labels"].(map[string]interface{}); ok {
+			cfg.Versions.Labels = interfaceStringMap(mm)
+		}
 		if b, ok := m["banner"].(bool); ok {
 			cfg.Versions.Banner = &b
 		}
@@ -1124,7 +1244,16 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 		}
 		cfg.Output = s
 	default:
-		// Unknown config keys are silently ignored for forward compatibility
+		// Keys without a dedicated case are applied by JSON round-trip, so a new
+		// Config field needs no per-key switch entry here. Unknown keys are
+		// ignored (and reported by UnknownKeyWarnings) for forward compatibility.
+		data, err := json.Marshal(map[string]interface{}{key: val})
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(data, cfg); err != nil {
+			return fmt.Errorf("%s: %w", key, err)
+		}
 	}
 	return nil
 }

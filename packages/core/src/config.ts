@@ -36,6 +36,8 @@ export interface DevServerConfig {
   toolbar?: boolean;
   /** Editor command for the overlay's "open in editor" action (default: "code"). */
   editor?: string;
+  /** Proxy matching path prefixes to a backend during dev, e.g. `{ "/api": "http://localhost:8080" }`. */
+  proxy?: Record<string, string>;
 }
 
 export interface ServerConfig {
@@ -124,6 +126,11 @@ export interface MarkdownConfig {
   math?: boolean;
   /** Render ```` ```mermaid ```` code blocks as diagrams (loads Mermaid from a CDN). */
   mermaid?: boolean;
+  /**
+   * JS modules that transform rendered markdown HTML (see `defineMarkdownPlugin`
+   * in `@krate/plugin`). Each runs on the AfterMarkdownParse hook.
+   */
+  plugins?: string[];
 }
 
 export type RuntimeName = "quickjs" | "node" | "bun" | "deno";
@@ -156,12 +163,169 @@ export interface SEOConfig {
   siteName?: string;
   description?: string;
   image?: string;
+  /** Title template applied to page titles, e.g. `"%s | Krate"`. */
+  titleTemplate?: string;
+  /** Default `twitter:site` handle (leading @ optional). */
+  twitter?: string;
+  /** `<meta name="theme-color">` value. */
+  themeColor?: string;
+  /** Default `<html lang>` / og:locale, e.g. "en" or "en-US". */
+  locale?: string;
+}
+
+/**
+ * Canonical site metadata. Supersedes `seo` (kept as an alias); values here win
+ * per field. The sitemap/feed/llms/robots plugins inherit all of it.
+ */
+export interface SiteConfig {
+  url?: string;
+  name?: string;
+  description?: string;
+  image?: string;
+  titleTemplate?: string;
+  twitter?: string;
+  themeColor?: string;
+  locale?: string;
 }
 
 export interface RobotsConfig {
   allow?: string;
   disallow?: string;
   sitemap?: string;
+}
+
+export interface HeadScript {
+  /** External script URL. */
+  src?: string;
+  /** Inline script body (mutually exclusive with src). */
+  content?: string;
+  type?: string;
+  async?: boolean;
+  defer?: boolean;
+  /** Emit `type="module"`. */
+  module?: boolean;
+  /** Extra attributes (e.g. `data-domain`). */
+  attrs?: Record<string, string>;
+}
+
+export interface HeadMeta {
+  name?: string;
+  property?: string;
+  httpEquiv?: string;
+  charset?: string;
+  content?: string;
+}
+
+export interface HeadLink {
+  rel: string;
+  href: string;
+  as?: string;
+  type?: string;
+  crossOrigin?: string;
+  media?: string;
+  sizes?: string;
+}
+
+/** Site-wide <head> injection. Also accepts the array form `string[]`. */
+export interface HeadConfig {
+  meta?: HeadMeta[];
+  links?: HeadLink[];
+  scripts?: HeadScript[];
+  /** Raw HTML injected verbatim (trusted config only). */
+  raw?: string[];
+}
+
+/**
+ * Security response-header overrides for `krate serve`. Empty keeps the default;
+ * `"off"` (or "none"/"false") disables the header.
+ */
+export interface SecurityConfig {
+  /** Toggle `X-Content-Type-Options: nosniff` (default on). */
+  contentTypeOptions?: boolean;
+  /** `X-Frame-Options` (default "DENY"). */
+  frameOptions?: string;
+  /** `Referrer-Policy` (default "strict-origin-when-cross-origin"). */
+  referrerPolicy?: string;
+  /** `Permissions-Policy`. */
+  permissionsPolicy?: string;
+  /** `Strict-Transport-Security` (default sent for https base URLs). */
+  hsts?: string;
+}
+
+/** Custom response headers for paths matching `source` (`krate serve` only). */
+export interface HeaderRule {
+  /** Exact path, prefix wildcard ("/assets/*"), or path glob. */
+  source: string;
+  headers: Record<string, string>;
+}
+
+/** Allowlist entry for remote <Image> sources. */
+export interface ImageRemotePattern {
+  hostname: string;
+  pathname?: string;
+}
+
+/** Responsive-image pipeline config used by <Image>. */
+export interface ImagesConfig {
+  /** Generated responsive widths (ascending). */
+  breakpoints?: number[];
+  /** Base encode quality (1-100, default 82). */
+  quality?: number;
+  /** Default `sizes` attribute. */
+  sizes?: string;
+  /** Blur-up placeholder (default true). */
+  placeholder?: boolean;
+  /** Output formats: "webp" and/or "original" (default both). */
+  formats?: ("webp" | "original")[];
+  /** Emit the original image with no processing. */
+  unoptimized?: boolean;
+  /** Remote hosts allowed for <Image src>. */
+  remotePatterns?: ImageRemotePattern[];
+}
+
+/** Deploy adapter selection + options for `krate deploy`. */
+export interface DeployConfig {
+  target?: "netlify" | "vercel" | "cloudflare" | "gh-pages";
+  /** Adapter-specific options (e.g. vercel: cleanUrls, trailingSlash). */
+  options?: Record<string, string>;
+}
+
+/** One user-agent group in a robots.txt (`robots({ rules: [...] })`). */
+export interface RobotsRule {
+  /** User-agent token (default "*"). */
+  userAgent?: string;
+  /** Paths to allow. */
+  allow?: string[];
+  /** Paths to disallow. */
+  disallow?: string[];
+}
+
+/** Options for the built-in robots plugin. */
+export interface RobotsPluginOptions {
+  /** Allow a single path (default "/"). */
+  allow?: string;
+  /** Disallow a single path. */
+  disallow?: string;
+  /** Sitemap URL (defaults to `<site.url>/sitemap.xml`). */
+  sitemap?: string;
+  /** Multi user-agent groups (advanced). Overrides allow/disallow. */
+  rules?: RobotsRule[];
+}
+
+/** Options for the built-in llms plugin (`llms.txt` / `llms-full.txt`). */
+export interface LLMsPluginOptions {
+  /** Falls back to `site.url` / `seo.baseUrl`. */
+  baseUrl?: string;
+  /** Docs content directory (defaults to the docs plugin's `contentDir`). */
+  contentDir?: string;
+  /** Title (falls back to the docs title or `site.name`). */
+  title?: string;
+  /** Description (falls back to `site.description`). */
+  description?: string;
+  /** URL prefix docs are mounted under (default "/docs"). */
+  pathPrefix?: string;
+  /** Emit `llms-full.txt` (concatenated page text). Default: true. */
+  full?: boolean;
 }
 
 export interface DocsPluginOptions {
@@ -184,8 +348,8 @@ export interface DocsPluginOptions {
    * component.
    */
   theme?: DocsThemeDescriptor<DocsThemeOptions> | string;
-  /** Custom sidebar override. */
-  sidebar?: DocsSidebarItem[];
+  /** Custom sidebar override ("auto", "none", an explicit tree, or a JSON file). */
+  sidebar?: DocsSidebarItem[] | "auto" | "none" | { from: "file"; file?: string };
   /** Social links rendered in the docs layout. */
   links?: { icon?: string; url?: string }[];
   /** Search bar configuration (docfind WASM search). */
@@ -195,6 +359,20 @@ export interface DocsPluginOptions {
    * frontmatter `editUrl` key overrides it.
    */
   editLinkBase?: string;
+  /**
+   * "Edit this page" link config. `pattern` supports `:path` (source path
+   * relative to the project root), e.g.
+   * `"https://github.com/org/repo/edit/main/:path"`.
+   */
+  editLink?: { base?: string; pattern?: string };
+  /** Show the table of contents (default true). */
+  toc?: boolean;
+  /** Show breadcrumbs (default true). */
+  breadcrumbs?: boolean;
+  /** Show prev/next links (default true). */
+  pagination?: boolean;
+  /** Fill "last updated" from git history (default true). */
+  lastUpdated?: boolean;
 }
 
 export type {
@@ -216,10 +394,73 @@ export interface SitemapPluginOptions {
   priority?: string;
 }
 
+/** Build-time precompression (`.br`/`.gz` siblings). */
+export interface CompressConfig {
+  brotli?: boolean;
+  gzip?: boolean;
+}
+
+/** Browser compatibility output mode. */
+export interface CompatConfig {
+  mode?: "modern" | "legacy" | "hybrid";
+  /** Hybrid only: emit a legacy document chosen by User-Agent. */
+  userAgent?: boolean;
+}
+
+/** CSS/JS dead-code elimination. */
+export interface DceConfig {
+  css?: boolean;
+  js?: boolean;
+  aggressive?: boolean;
+}
+
+/** Web-font preload + font-display. */
+export interface FontsConfig {
+  preload?: boolean;
+  display?: string;
+}
+
+export interface GoDep {
+  path: string;
+  version: string;
+}
+export interface GoReplace {
+  from: string;
+  to: string;
+}
+export interface GoExclude {
+  path: string;
+  version: string;
+}
+
+/** Unified Go module hosting API routes + Go components. */
+export interface GoConfig {
+  enabled?: boolean;
+  module?: string;
+  deps?: GoDep[];
+  replaces?: GoReplace[];
+  exclude?: GoExclude[];
+  tidy?: boolean;
+  componentDirs?: string[];
+  apiDirs?: string[];
+  apiEnabled?: boolean;
+}
+
+/** Legacy Go API sidecar config (superseded by `go`). */
+export interface GoAPIConfig {
+  enabled?: boolean;
+  module?: string;
+  deps?: GoDep[];
+  replaces?: GoReplace[];
+  tidy?: boolean;
+}
+
 /** The full, type-checked Krate configuration surface. */
 export interface KrateConfig {
   entry?: string;
   outDir?: string;
+  /** Merge one or more base configs (paths or packages) underneath this one. */
+  extends?: string | string[];
   pagesDir?: string;
   publicDir?: string;
   minify?: boolean;
@@ -278,7 +519,31 @@ export interface KrateConfig {
   redirects?: RedirectConfig[];
   rewrites?: RewriteConfig[];
   seo?: SEOConfig;
+  /** Canonical site metadata (supersedes `seo`). */
+  site?: SiteConfig;
   robots?: RobotsConfig;
+  /** Site-wide <head> injection (meta/links/scripts/raw). */
+  head?: HeadConfig | string[];
+  /** Security response-header overrides (`krate serve`). */
+  security?: SecurityConfig;
+  /** Custom response headers by path (`krate serve`). */
+  headers?: HeaderRule[];
+  /** Responsive-image pipeline (<Image>). */
+  images?: ImagesConfig;
+  /** Deploy adapter + options (`krate deploy`). */
+  deploy?: DeployConfig;
+  /** Build-time precompression. */
+  compress?: CompressConfig;
+  /** Browser compatibility output mode. */
+  compat?: CompatConfig;
+  /** CSS/JS dead-code elimination. */
+  dce?: DceConfig;
+  /** Web-font handling. */
+  fonts?: FontsConfig;
+  /** Unified Go module (API routes + components). */
+  go?: GoConfig;
+  /** Legacy Go API config (superseded by `go`). */
+  goApi?: GoAPIConfig;
   serverComponents?: string[];
   runtimeComponents?: string[];
   serverDirs?: string[];
@@ -320,11 +585,31 @@ export interface KrateConfig {
   validate?: (config: KrateConfig) => void | Promise<void>;
 }
 
+/** Context passed to a function-form `defineConfig`. */
+export interface ConfigContext {
+  /** Current command: "build" | "dev" | "serve" | ... */
+  command: string;
+  /** Resolved mode (production/development/custom). */
+  mode: string;
+  /** True when mode is development or the command is dev. */
+  isDev: boolean;
+}
+
 /**
  * Identity helper that gives `krate.config.ts` full type-checking. Unknown
- * config keys become compile errors.
+ * config keys become compile errors. Accepts either the config object or a
+ * function invoked with the build {@link ConfigContext} (e.g. to vary settings
+ * per mode).
+ *
+ * ```ts
+ * export default defineConfig(({ isDev }) => ({
+ *   seo: { baseUrl: isDev ? "http://localhost:3000" : "https://example.com" },
+ * }));
+ * ```
  */
-export function defineConfig(config: KrateConfig): KrateConfig {
+export function defineConfig(config: KrateConfig): KrateConfig;
+export function defineConfig(config: (env: ConfigContext) => KrateConfig): (env: ConfigContext) => KrateConfig;
+export function defineConfig(config: KrateConfig | ((env: ConfigContext) => KrateConfig)) {
   return config;
 }
 
@@ -371,6 +656,23 @@ export function docs(options: DocsPluginOptions = {}): PluginConfig {
   return { name: "docs", order: 10, options };
 }
 
+/**
+ * Built-in robots plugin. Generates `robots.txt` after the build. Options
+ * override the top-level `robots` config block; both fall back to `site.url`
+ * for the sitemap line.
+ */
+export function robots(options: RobotsPluginOptions = {}): PluginConfig {
+  return { name: "robots", options };
+}
+
+/**
+ * Built-in llms plugin. Generates `llms.txt` + `llms-full.txt` for LLM
+ * consumption from the docs content.
+ */
+export function llms(options: LLMsPluginOptions = {}): PluginConfig {
+  return { name: "llms", options };
+}
+
 // Content collections
 
 /** Shorthand field types accepted in a collection schema. */
@@ -387,6 +689,10 @@ export interface ContentField {
   type: ContentFieldType;
   /** Require the field to be present in frontmatter (default: false). */
   required?: boolean;
+  /** Restrict a string field to these values. */
+  enum?: string[];
+  /** Value used when frontmatter omits the field. */
+  default?: unknown;
 }
 
 /** One field: a shorthand type string or a {@link ContentField} object. */

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -243,11 +245,67 @@ func GeneratePlaceholder(img image.Image) string {
 	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
+// DefaultBreakpoints are the responsive widths used when none are configured.
+var DefaultBreakpoints = []int{640, 768, 1024, 1280, 1536}
+
+// Options controls responsive image generation.
+type Options struct {
+	// Quality is the base encode quality (default 82).
+	Quality int
+	// Breakpoints are the target widths (ascending). Default: DefaultBreakpoints.
+	Breakpoints []int
+	// Placeholder emits a blur-up data-URI placeholder.
+	Placeholder bool
+	// Formats selects output formats: any of "webp", "original". Nil = both.
+	Formats []string
+}
+
+// BreakpointList returns the configured breakpoints or the defaults.
+func (o Options) BreakpointList() []int {
+	if len(o.Breakpoints) > 0 {
+		return o.Breakpoints
+	}
+	return DefaultBreakpoints
+}
+
+func (o Options) formatEnabled(name string) bool {
+	if len(o.Formats) == 0 {
+		return true
+	}
+	for _, f := range o.Formats {
+		if strings.EqualFold(strings.TrimSpace(f), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// optionsKey is a stable hash of the options that affect the generated variant
+// set. It is folded into the meta-cache filename so a breakpoint/format change
+// is never served from a stale meta.
+func (o Options) optionsKey() string {
+	h := fnv.New32a()
+	for _, bp := range o.BreakpointList() {
+		fmt.Fprintf(h, "%d,", bp)
+	}
+	if o.formatEnabled("webp") {
+		h.Write([]byte("w"))
+	}
+	if o.formatEnabled("original") {
+		h.Write([]byte("o"))
+	}
+	return strconv.FormatUint(uint64(h.Sum32()), 16)
+}
+
+// ComputeSrcsetWidths returns widths for the default breakpoints.
 func ComputeSrcsetWidths(origWidth int) []int {
-	breakpoints := []int{640, 768, 1024, 1280, 1536}
+	return computeSrcsetWidths(DefaultBreakpoints, origWidth)
+}
+
+func computeSrcsetWidths(breakpoints []int, origWidth int) []int {
 	var widths []int
 	for _, bp := range breakpoints {
-		if bp < origWidth {
+		if bp > 0 && bp < origWidth {
 			widths = append(widths, bp)
 		}
 	}
@@ -331,15 +389,15 @@ type imageMeta struct {
 	Fallback       []SrcsetEntry `json:"fallback"`
 }
 
-func imageMetaPath(outDir, cacheKey string, quality int) string {
-	return filepath.Join(outDir, fmt.Sprintf("%s_q%d.meta.json", cacheKey, quality))
+func imageMetaPath(outDir, cacheKey string, quality int, optsKey string) string {
+	return filepath.Join(outDir, fmt.Sprintf("%s_q%d_%s.meta.json", cacheKey, quality, optsKey))
 }
 
 // loadImageMeta returns a cached result for the source when the meta exists, the
 // requested placeholder is present, and every referenced variant file still
 // exists on disk.
-func loadImageMeta(outDir, cacheKey string, quality int, wantPlaceholder bool) (*ImageResult, bool) {
-	data, err := os.ReadFile(imageMetaPath(outDir, cacheKey, quality))
+func loadImageMeta(outDir, cacheKey string, quality int, optsKey string, wantPlaceholder bool) (*ImageResult, bool) {
+	data, err := os.ReadFile(imageMetaPath(outDir, cacheKey, quality, optsKey))
 	if err != nil {
 		return nil, false
 	}
@@ -377,10 +435,23 @@ func displayDims(origW, origH, reqW, reqH int) (int, int) {
 	}
 }
 
+// ProcessImage processes a raster source with default options.
 func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder bool) (*ImageResult, error) {
+	return ProcessImageWith(root, srcPath, reqW, reqH, Options{Quality: quality, Placeholder: wantPlaceholder})
+}
+
+// ProcessImageWith decodes the source image and generates WebP + original-format
+// responsive variants plus an optional blur placeholder, honoring the given
+// Options (breakpoints, formats, quality).
+func ProcessImageWith(root, srcPath string, reqW, reqH int, opts Options) (*ImageResult, error) {
+	quality := opts.Quality
 	if quality <= 0 {
 		quality = 82
 	}
+	wantPlaceholder := opts.Placeholder
+	optsKey := opts.optionsKey()
+	wantWebP := opts.formatEnabled("webp")
+	wantOriginal := opts.formatEnabled("original")
 
 	if vector, mime := isPassthroughSrc(srcPath); vector {
 		return &ImageResult{
@@ -400,7 +471,7 @@ func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder
 	cacheKey := ComputeCacheKey(data)
 
 	// Cache hit: reuse the previous result without decoding/resizing/encoding.
-	if res, ok := loadImageMeta(outDir, cacheKey, quality, wantPlaceholder); ok {
+	if res, ok := loadImageMeta(outDir, cacheKey, quality, optsKey, wantPlaceholder); ok {
 		outW, outH := displayDims(res.Width, res.Height, reqW, reqH)
 		res.Width, res.Height = outW, outH
 		res.AspectRatio = aspectRatio(outW, outH)
@@ -435,14 +506,16 @@ func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder
 		fallbackExt = ".png"
 	}
 
-	srcsetWidths := ComputeSrcsetWidths(origW)
+	srcsetWidths := computeSrcsetWidths(opts.BreakpointList(), origW)
 
 	// Generate variants in parallel (bounded): decode once, then resize + encode
 	// each width concurrently. img is only read, so concurrent Scale is safe.
 	type variantResult struct {
-		webp SrcsetEntry
-		fb   SrcsetEntry
-		err  error
+		webp    SrcsetEntry
+		fb      SrcsetEntry
+		hasWebP bool
+		hasFB   bool
+		err     error
 	}
 	results := make([]variantResult, len(srcsetWidths))
 	var wg sync.WaitGroup
@@ -459,35 +532,41 @@ func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder
 			resized := resize(img, sw, sh)
 			q := widthQuality(quality, sw)
 
-			webpBytes, werr := EncodeWebP(resized, q)
-			if werr != nil {
-				results[i].err = fmt.Errorf("encoding %dw webp: %w", sw, werr)
-				return
+			if wantWebP {
+				webpBytes, werr := EncodeWebP(resized, q)
+				if werr != nil {
+					results[i].err = fmt.Errorf("encoding %dw webp: %w", sw, werr)
+					return
+				}
+				webpName := fmt.Sprintf("%s_q%d_%d.webp", cacheKey, quality, sw)
+				if werr := writeFileAtomic(filepath.Join(outDir, webpName), webpBytes); werr != nil {
+					results[i].err = fmt.Errorf("writing %s: %w", webpName, werr)
+					return
+				}
+				results[i].webp = SrcsetEntry{Width: sw, FilePath: outputPrefix + "/" + webpName}
+				results[i].hasWebP = true
 			}
-			webpName := fmt.Sprintf("%s_q%d_%d.webp", cacheKey, quality, sw)
-			if werr := writeFileAtomic(filepath.Join(outDir, webpName), webpBytes); werr != nil {
-				results[i].err = fmt.Errorf("writing %s: %w", webpName, werr)
-				return
-			}
-			results[i].webp = SrcsetEntry{Width: sw, FilePath: outputPrefix + "/" + webpName}
 
-			var fbBytes []byte
-			var ferr error
-			if fallbackExt == ".png" {
-				fbBytes, ferr = EncodePNG(resized)
-			} else {
-				fbBytes, ferr = EncodeJPEG(resized, q)
+			if wantOriginal {
+				var fbBytes []byte
+				var ferr error
+				if fallbackExt == ".png" {
+					fbBytes, ferr = EncodePNG(resized)
+				} else {
+					fbBytes, ferr = EncodeJPEG(resized, q)
+				}
+				if ferr != nil {
+					results[i].err = fmt.Errorf("encoding %dw fallback: %w", sw, ferr)
+					return
+				}
+				fbName := fmt.Sprintf("%s_q%d_%d%s", cacheKey, quality, sw, fallbackExt)
+				if ferr := writeFileAtomic(filepath.Join(outDir, fbName), fbBytes); ferr != nil {
+					results[i].err = fmt.Errorf("writing %s: %w", fbName, ferr)
+					return
+				}
+				results[i].fb = SrcsetEntry{Width: sw, FilePath: outputPrefix + "/" + fbName}
+				results[i].hasFB = true
 			}
-			if ferr != nil {
-				results[i].err = fmt.Errorf("encoding %dw fallback: %w", sw, ferr)
-				return
-			}
-			fbName := fmt.Sprintf("%s_q%d_%d%s", cacheKey, quality, sw, fallbackExt)
-			if ferr := writeFileAtomic(filepath.Join(outDir, fbName), fbBytes); ferr != nil {
-				results[i].err = fmt.Errorf("writing %s: %w", fbName, ferr)
-				return
-			}
-			results[i].fb = SrcsetEntry{Width: sw, FilePath: outputPrefix + "/" + fbName}
 		}()
 	}
 	wg.Wait()
@@ -497,8 +576,12 @@ func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder
 		if results[i].err != nil {
 			return nil, results[i].err
 		}
-		webpSet = append(webpSet, results[i].webp)
-		fallbackSet = append(fallbackSet, results[i].fb)
+		if results[i].hasWebP {
+			webpSet = append(webpSet, results[i].webp)
+		}
+		if results[i].hasFB {
+			fallbackSet = append(fallbackSet, results[i].fb)
+		}
 	}
 
 	placeholder := ""
@@ -517,7 +600,7 @@ func ProcessImage(root, srcPath string, reqW, reqH, quality int, wantPlaceholder
 		Fallback:       fallbackSet,
 	}
 	if metaBytes, merr := json.Marshal(meta); merr == nil {
-		_ = writeFileAtomic(imageMetaPath(outDir, cacheKey, quality), metaBytes)
+		_ = writeFileAtomic(imageMetaPath(outDir, cacheKey, quality, optsKey), metaBytes)
 	}
 
 	outW, outH := displayDims(origW, origH, reqW, reqH)

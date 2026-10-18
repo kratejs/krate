@@ -59,6 +59,8 @@ type pageConfig struct {
 	ssr        bool
 	isr        bool
 	revalidate int
+	// lang overrides the document <html lang> for this page (e.g. docs locales).
+	lang string
 	// dynamicParams is tri-state: nil = unset (inherit global), otherwise the
 	// page-level override.
 	dynamicParams *bool
@@ -93,6 +95,12 @@ func detectRenderMode(prog *ast.Program) (RenderMode, int) {
 	return RenderSSG, 0
 }
 
+// detectPageLang returns a page-level `export const lang` (or `config.lang`)
+// override for the document <html lang>, or "" when unset.
+func detectPageLang(prog *ast.Program) string {
+	return parsePageConfig(prog).lang
+}
+
 // parsePageConfig reads the page-level render config from
 // `export const config = { ... }` plus sibling `export const dynamicParams`.
 func parsePageConfig(prog *ast.Program) pageConfig {
@@ -120,10 +128,18 @@ func parsePageConfig(prog *ast.Program) pageConfig {
 		// Sibling exports: `export const dynamicParams = false`.
 		if vs, ok := exp.Declaration.(*ast.VarStmt); ok {
 			for _, d := range vs.Decls {
-				if d.Name == "dynamicParams" && d.Init != nil {
+				if d.Init == nil {
+					continue
+				}
+				switch d.Name {
+				case "dynamicParams":
 					if b, ok := boolLiteral(d.Init); ok {
 						v := b
 						cfg.dynamicParams = &v
+					}
+				case "lang":
+					if lit, ok := d.Init.(*ast.Literal); ok && lit.Kind == ast.StringLit {
+						cfg.lang = lit.Value
 					}
 				}
 			}
@@ -158,6 +174,10 @@ func parsePageConfig(prog *ast.Program) pageConfig {
 					if b, ok := boolLiteral(prop.Value); ok {
 						v := b
 						cfg.dynamicParams = &v
+					}
+				case "lang":
+					if lit, ok := prop.Value.(*ast.Literal); ok && lit.Kind == ast.StringLit {
+						cfg.lang = lit.Value
 					}
 				}
 			}

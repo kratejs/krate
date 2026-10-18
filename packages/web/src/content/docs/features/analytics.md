@@ -34,6 +34,16 @@ inline form — children are written raw and never escaped:
 <Script>{`gtag('config', 'G-XXXXXXXXXX');`}</Script>
 ```
 
+To add it site-wide from config (no layout), use `head.scripts`:
+
+```typescript
+head: {
+  scripts: [
+    { src: "https://plausible.io/js/script.js", defer: true, attrs: { "data-domain": "mysite.com" } },
+  ],
+},
+```
+
 ## Tracking SPA navigations
 
 Krate's client router swaps content in place, so an ordinary tag-based

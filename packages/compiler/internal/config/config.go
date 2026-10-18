@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,6 +30,9 @@ type DevServer struct {
 	// Editor is the command used by the overlay's "open in editor" action
 	// (default "code", i.e. VS Code). May include flags, e.g. "code -g".
 	Editor string `json:"editor,omitempty"`
+	// Proxy forwards matching path prefixes to a backend during dev, e.g.
+	// { "/api": "http://localhost:8080" }.
+	Proxy map[string]string `json:"proxy,omitempty"`
 }
 
 // OverlayEnabled reports whether the dev error overlay is enabled (default on).
@@ -239,10 +243,59 @@ type Rewrite struct {
 }
 
 type SEOConfig struct {
-	BaseURL     string `json:"baseUrl,omitempty"`     // e.g. "https://example.com"
-	SiteName    string `json:"siteName,omitempty"`    // e.g. "My Site"
-	Description string `json:"description,omitempty"` // default meta description
-	Image       string `json:"image,omitempty"`       // default OG image URL
+	BaseURL       string `json:"baseUrl,omitempty"`     // e.g. "https://example.com"
+	SiteName      string `json:"siteName,omitempty"`    // e.g. "My Site"
+	Description   string `json:"description,omitempty"` // default meta description
+	Image         string `json:"image,omitempty"`       // default OG image URL
+	TitleTemplate string `json:"titleTemplate,omitempty"`
+	Twitter       string `json:"twitter,omitempty"`    // default twitter:site handle
+	ThemeColor    string `json:"themeColor,omitempty"` // browser theme-color
+	Locale        string `json:"locale,omitempty"`     // default <html lang> / og:locale
+}
+
+// SiteConfig is the canonical site metadata block. It overlaps `seo` (which is
+// retained as an alias) and adds title template, twitter handle, theme color,
+// and locale. Values here win over the equivalent `seo` fields.
+type SiteConfig struct {
+	URL           string `json:"url,omitempty"`
+	Name          string `json:"name,omitempty"`
+	Description   string `json:"description,omitempty"`
+	Image         string `json:"image,omitempty"`
+	TitleTemplate string `json:"titleTemplate,omitempty"`
+	Twitter       string `json:"twitter,omitempty"`
+	ThemeColor    string `json:"themeColor,omitempty"`
+	Locale        string `json:"locale,omitempty"`
+}
+
+// EffectiveSEO folds the `site` block over `seo` (site wins per field).
+func (c *Config) EffectiveSEO() SEOConfig {
+	s := c.SEO
+	site := c.Site
+	if site.URL != "" {
+		s.BaseURL = site.URL
+	}
+	if site.Name != "" {
+		s.SiteName = site.Name
+	}
+	if site.Description != "" {
+		s.Description = site.Description
+	}
+	if site.Image != "" {
+		s.Image = site.Image
+	}
+	if site.TitleTemplate != "" {
+		s.TitleTemplate = site.TitleTemplate
+	}
+	if site.Twitter != "" {
+		s.Twitter = site.Twitter
+	}
+	if site.ThemeColor != "" {
+		s.ThemeColor = site.ThemeColor
+	}
+	if site.Locale != "" {
+		s.Locale = site.Locale
+	}
+	return s
 }
 
 type RobotsConfig struct {
@@ -259,6 +312,8 @@ type I18nConfig struct {
 	DefaultLocale string `json:"defaultLocale,omitempty"`
 	// Locales lists every locale, including the default (e.g. ["en","fr","ja"]).
 	Locales []string `json:"locales,omitempty"`
+	// LocaleLabels maps a locale code to a display label (e.g. {"fr":"Français"}).
+	LocaleLabels map[string]string `json:"localeLabels,omitempty"`
 	// Routing is the URL strategy; only "prefix" is supported.
 	Routing string `json:"routing,omitempty"`
 }
@@ -274,6 +329,8 @@ type VersionsConfig struct {
 	Current string `json:"current,omitempty"`
 	// Versions lists every version, newest first (e.g. ["v2","v1"]).
 	Versions []string `json:"versions,omitempty"`
+	// Labels maps a version to a display label (e.g. {"v2":"Latest"}).
+	Labels map[string]string `json:"labels,omitempty"`
 	// Banner shows an "old version" banner when viewing a non-current version.
 	// A nil pointer defaults to true.
 	Banner *bool `json:"banner,omitempty"`
@@ -462,10 +519,14 @@ type CompressConfig struct {
 }
 
 type Config struct {
-	Entry       string          `json:"entry"`
-	OutDir      string          `json:"outDir"`
-	PagesDir    string          `json:"pagesDir"`
-	PublicDir   string          `json:"publicDir"`
+	Entry     string `json:"entry"`
+	OutDir    string `json:"outDir"`
+	PagesDir  string `json:"pagesDir"`
+	PublicDir string `json:"publicDir"`
+	// Extends merges one or more base configs (relative paths or packages)
+	// underneath this one. Additive array keys (plugins, redirects, ...) are
+	// concatenated; objects are deep-merged with this config winning.
+	Extends     StringList      `json:"extends,omitempty"`
 	Minify      bool            `json:"minify"`
 	MinifyHTML  bool            `json:"minifyHTML,omitempty"`
 	MinifyCSS   bool            `json:"minifyCSS,omitempty"`
@@ -486,6 +547,7 @@ type Config struct {
 	Redirects   []Redirect      `json:"redirects,omitempty"`   // config-based redirects
 	Rewrites    []Rewrite       `json:"rewrites,omitempty"`    // config-based rewrites
 	SEO         SEOConfig       `json:"seo,omitempty"`         // SEO metadata (baseUrl, siteName, description)
+	Site        SiteConfig      `json:"site,omitempty"`        // canonical site metadata (supersedes seo)
 	Robots      RobotsConfig    `json:"robots,omitempty"`      // robots.txt config
 	I18n        I18nConfig      `json:"i18n,omitempty"`        // multi-language docs
 	Versions    VersionsConfig  `json:"versions,omitempty"`    // versioned docs
@@ -495,6 +557,11 @@ type Config struct {
 	Go          GoCfg           `json:"go,omitempty"`          // unified Go module: API routes + components
 	Compat      CompatConfig    `json:"compat,omitempty"`      // browser compatibility output mode
 	Compress    CompressConfig  `json:"compress,omitempty"`    // build-time precompression (.br/.gz)
+	Head        HeadConfig      `json:"head,omitempty"`        // site-wide <head> injection
+	Security    SecurityConfig  `json:"security,omitempty"`    // security header overrides
+	Headers     []HeaderRule    `json:"headers,omitempty"`     // custom response headers
+	Images      ImagesConfig    `json:"images,omitempty"`      // responsive-image pipeline
+	Deploy      DeployConfig    `json:"deploy,omitempty"`      // deploy adapter + options
 
 	// BasePath is the URL path prefix the whole site is served under (e.g.
 	// "/docs"). Empty means root. Used for emitted asset URLs and the SPA
@@ -625,37 +692,75 @@ func (c *Config) ValidateConfig() error {
 	return nil
 }
 
+// LoadOptions carries the build context: the config path plus the command and
+// resolved mode, which are passed to a function-form `defineConfig` and used to
+// pick environment files.
+type LoadOptions struct {
+	ConfigPath string
+	Command    string // "build" | "dev" | "serve" | ...
+	Mode       string // resolved environment mode (production/development/custom)
+}
+
 // Load reads the krate config. If configPath is provided and non-empty, it uses
 // that file directly. Otherwise it looks for krate.config.ts in root.
 func Load(root string, configPath ...string) (*Config, error) {
+	opts := LoadOptions{}
+	if len(configPath) > 0 {
+		opts.ConfigPath = configPath[0]
+	}
+	return LoadWith(root, opts)
+}
+
+// LoadWith loads the config with an explicit command/mode context.
+func LoadWith(root string, opts LoadOptions) (*Config, error) {
 	Warnings = nil
 	cfg := Default()
 
 	tsPath := ""
-	if len(configPath) > 0 && configPath[0] != "" {
-		tsPath = configPath[0]
+	if opts.ConfigPath != "" {
+		tsPath = opts.ConfigPath
 		if !filepath.IsAbs(tsPath) {
 			tsPath = filepath.Join(root, tsPath)
 		}
 	} else {
-		tsPath = filepath.Join(root, "krate.config.ts")
+		for _, name := range []string{"krate.config.ts", "krate.config.js", "krate.config.mjs", "krate.config.json"} {
+			p := filepath.Join(root, name)
+			if _, err := os.Stat(p); err == nil {
+				tsPath = p
+				break
+			}
+		}
+		if tsPath == "" {
+			tsPath = filepath.Join(root, "krate.config.ts")
+		}
 	}
 
 	if _, err := os.Stat(tsPath); err == nil {
-		data, readErr := os.ReadFile(tsPath)
-		if readErr != nil {
-			return nil, fmt.Errorf("reading config %s: %w", tsPath, readErr)
-		}
-		// Evaluate the config in the embedded runtime (esbuild + QuickJS): it
-		// resolves imports and runs plugin factories without a Node/tsx
-		// subprocess. Simple literal configs the embedded path cannot run fall
-		// back to the static parser.
-		if err := executeEmbeddedTSConfig(tsPath, cfg); err != nil {
-			if configUsesModules(string(data)) {
-				return nil, configNotExecutableError(tsPath, err)
+		merged, loadErr := loadConfigMerged(tsPath, opts, map[string]bool{})
+		switch {
+		case loadErr == nil:
+			if uerr := json.Unmarshal(merged, cfg); uerr != nil {
+				return nil, fmt.Errorf("parsing config %s: %w", tsPath, uerr)
 			}
-			if parseErr := parseTSConfig(string(data), cfg); parseErr != nil {
+			Warnings = append(Warnings, UnknownKeyWarnings(merged)...)
+		case errors.Is(loadErr, errStaticFallback):
+			// Simple literal configs the embedded runtime cannot run are parsed
+			// statically (extends is not supported on this path).
+			src, _ := os.ReadFile(tsPath)
+			if parseErr := parseTSConfig(string(src), cfg); parseErr != nil {
 				return nil, fmt.Errorf("parsing config %s: %w", tsPath, parseErr)
+			}
+			if bytes.Contains(src, []byte("extends")) {
+				Warnings = append(Warnings, "extends is ignored when the config is parsed statically")
+			}
+		default:
+			return nil, loadErr
+		}
+		// Resolve plugin module paths relative to the config directory.
+		dir := filepath.Dir(tsPath)
+		for i, p := range cfg.Plugins {
+			if p.Module != "" && !filepath.IsAbs(p.Module) {
+				cfg.Plugins[i].Module = filepath.Join(dir, p.Module)
 			}
 		}
 	}
@@ -699,6 +804,36 @@ func (c *Config) Resolve(root string) {
 	// Fold the legacy goApi block into the unified go config once, so the rest
 	// of the codebase reads a single normalized field (c.Go).
 	c.Go = c.EffectiveGo()
+	// Fold the `site` block over `seo` so downstream code reads c.SEO.
+	c.SEO = c.EffectiveSEO()
+	// Config-level markdown transforms become community plugins that run on
+	// AfterMarkdownParse (see defineMarkdownPlugin).
+	if len(c.Markdown.Plugins) > 0 {
+		existing := make(map[string]bool, len(c.Plugins))
+		for _, p := range c.Plugins {
+			if p.Module != "" {
+				existing[p.Module] = true
+			}
+		}
+		for i, mod := range c.Markdown.Plugins {
+			if mod == "" {
+				continue
+			}
+			abs := mod
+			if !filepath.IsAbs(abs) {
+				abs = filepath.Join(root, abs)
+			}
+			if existing[abs] {
+				continue
+			}
+			c.Plugins = append(c.Plugins, PluginConfig{
+				Name:   fmt.Sprintf("markdown-transform-%d", i+1),
+				Module: abs,
+				Order:  60,
+			})
+			existing[abs] = true
+		}
+	}
 }
 
 // LoadTSConfigPaths reads tsconfig.json and extracts compilerOptions.paths

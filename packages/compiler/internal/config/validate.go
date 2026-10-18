@@ -4,32 +4,59 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"reflect"
 	"sort"
 	"strings"
 )
 
 // knownNestedKeys maps a known top-level object key to the nested keys we
-// recognize, so typos inside nested config objects surface too (JSON unmarshal
-// otherwise drops them silently).
-var knownNestedKeys = map[string]map[string]bool{
-	"devServer": {"port": true, "open": true, "overlay": true, "toolbar": true, "editor": true},
-	"server":    {"host": true, "port": true, "maxBodySize": true},
-	"cors":      {"enabled": true, "origins": true, "methods": true, "headers": true, "credentials": true, "maxAge": true},
-	"api":       {"sidecar": true},
-	"ssr":       {"rendererPort": true, "timeout": true, "maxCacheSize": true, "middlewareRuntime": true, "apiRuntime": true, "apiWorkers": true, "apiIsolation": true, "nodeWorkers": true, "ssrRuntime": true, "rendererWorkers": true, "streaming": true},
-	"markdown":  {"root": true, "gfm": true, "headingAnchors": true, "admonitions": true, "codeHighlight": true, "codeTheme": true, "math": true, "mermaid": true},
-	"tailwind":  {"enabled": true, "scanDirs": true, "content": true, "preflight": true, "strict": true, "darkMode": true, "executeConfig": true},
-	"csp":       {"enabled": true, "directive": true},
-	"seo":       {"baseUrl": true, "siteName": true, "description": true, "image": true},
-	"i18n":      {"defaultLocale": true, "locales": true, "routing": true},
-	"versions":  {"current": true, "versions": true, "banner": true},
-	"robots":    {"allow": true, "disallow": true, "sitemap": true},
-	"dce":       {"css": true, "js": true, "aggressive": true},
-	"fonts":     {"preload": true, "display": true},
-	"goApi":     {"enabled": true, "module": true, "deps": true, "replaces": true, "tidy": true},
-	"go":        {"enabled": true, "module": true, "deps": true, "replaces": true, "exclude": true, "tidy": true, "componentDirs": true, "apiDirs": true, "apiEnabled": true},
-	"compat":    {"mode": true, "userAgent": true},
-	"compress":  {"brotli": true, "gzip": true},
+// recognize. It is derived from the Config struct's field types so adding a
+// struct field registers its nested keys automatically.
+var knownNestedKeys = buildKnownNestedKeys()
+
+func buildKnownNestedKeys() map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	t := reflect.TypeOf(Config{})
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		name, ok := schemaFieldName(f)
+		if !ok {
+			continue
+		}
+		if keys := structJSONKeys(f.Type); len(keys) > 0 {
+			out[name] = keys
+		}
+	}
+	return out
+}
+
+// structJSONKeys returns the JSON field names of a struct type (dereferencing
+// pointers), or nil for non-structs (maps/slices/interfaces accept arbitrary
+// keys).
+func structJSONKeys(t reflect.Type) map[string]bool {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	keys := map[string]bool{}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		if name, ok := schemaFieldName(f); ok {
+			keys[name] = true
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return keys
 }
 
 // knownSidecarKeys is the recognized nested key set for api.sidecar.
@@ -44,20 +71,28 @@ var knownSidecarKeys = map[string]bool{
 // knownTopLevelKeys is the set of recognized top-level config keys, derived from
 // the Config struct's JSON tags. Used to warn on typos/unknown keys that JSON
 // unmarshalling would otherwise drop silently.
-var knownTopLevelKeys = map[string]bool{
-	"entry": true, "outDir": true, "pagesDir": true, "publicDir": true,
-	"minify": true, "minifyHTML": true, "minifyCSS": true, "minifyJS": true,
-	"sourcemap": true, "devServer": true, "plugins": true, "emitReact": true,
-	"viewTransitions": true, "ppr": true,
-	"markdown": true, "tailwind": true, "csp": true, "runtime": true, "ssr": true,
-	"pathAliases": true, "tsBaseDir": true, "redirects": true, "rewrites": true,
-	"seo": true, "robots": true, "output": true, "serverComponents": true,
-	"i18n": true, "versions": true, "dce": true, "fonts": true, "goApi": true,
-	"runtimeComponents": true, "serverDirs": true, "runtimeDirs": true,
-	"content": true, "checks": true,
-	"server": true, "cors": true, "api": true, "basePath": true,
-	"compat": true, "go": true,
-	"compress": true,
+var knownTopLevelKeys = buildKnownTopLevelKeys()
+
+// buildKnownTopLevelKeys derives the recognized top-level keys from Config's
+// JSON tags (plus keys parsed specially with no JSON field), so adding a struct
+// field registers it in one place.
+func buildKnownTopLevelKeys() map[string]bool {
+	m := map[string]bool{
+		"viewTransitions": true,
+		"ppr":             true,
+		"emitReact":       true,
+	}
+	t := reflect.TypeOf(Config{})
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		if name, ok := schemaFieldName(f); ok {
+			m[name] = true
+		}
+	}
+	return m
 }
 
 // Validate performs semantic/bounds checks that JSON typing alone can't. It
@@ -75,6 +110,12 @@ func (c *Config) Validate() (warnings []string, err error) {
 	}
 	if c.Server.MaxBodySize < 0 {
 		return nil, fmt.Errorf("server.maxBodySize must be >= 0, got %d", c.Server.MaxBodySize)
+	}
+	if c.Site != (SiteConfig{}) && c.SEO != (SEOConfig{}) {
+		warnings = append(warnings, "both `site` and `seo` are set; `site` wins - migrate to `site` and remove `seo`")
+	}
+	if c.GoAPI.Enabled != nil || c.GoAPI.Module != "" || len(c.GoAPI.Deps) > 0 || len(c.GoAPI.Replaces) > 0 || c.GoAPI.Tidy != nil {
+		warnings = append(warnings, "`goApi` is deprecated; use the unified `go` block")
 	}
 	if bp := c.BasePath; bp != "" {
 		if strings.Contains(bp, "://") || !strings.HasPrefix(bp, "/") {
@@ -175,7 +216,10 @@ func UnknownKeyWarnings(raw []byte) []string {
 	}
 	var unknown []string
 	for k, v := range m {
-		if k == "validate" { // user-supplied hook, intentionally not in Config
+		if k == "validate" || k == "$schema" {
+			// `validate` is a user-supplied hook (intentionally not in Config);
+			// `$schema` is a JSON-Schema editor hint (e.g. pointing at
+			// .krate/config.schema.json).
 			continue
 		}
 		if !knownTopLevelKeys[k] {

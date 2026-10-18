@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/deploy"
 )
 
 func TestSubstituteImportMetaURL(t *testing.T) {
@@ -121,6 +122,88 @@ func TestBuildTestProject(t *testing.T) {
 				}
 			}
 		}
+	}
+
+	// Config-surface features exercised by examples/krate.config.ts.
+	if cfg.Site.URL != "https://example.com" || cfg.SEO.BaseURL != cfg.Site.URL {
+		t.Errorf("site block not folded into SEO: site=%q seo=%q", cfg.Site.URL, cfg.SEO.BaseURL)
+	}
+	if cfg.Deploy.Target != "netlify" {
+		t.Errorf("deploy.target = %q, want netlify", cfg.Deploy.Target)
+	}
+	if !cfg.Compress.Gzip {
+		t.Error("compress.gzip not parsed")
+	}
+	if cfg.Images.Quality != 80 {
+		t.Errorf("images.quality = %d, want 80", cfg.Images.Quality)
+	}
+	if len(cfg.Markdown.Plugins) == 0 {
+		t.Error("markdown.plugins not parsed")
+	}
+	// `extends` is consumed during load; the proof it merged is that the base's
+	// `tailwind.enabled` is present although the main config only sets
+	// `markdown.plugins`.
+	if !cfg.Tailwind.Enabled {
+		t.Error("extends merge not applied (tailwind.enabled from shared.config.ts missing)")
+	}
+	if cfg.Security.FrameOptions != "SAMEORIGIN" || len(cfg.Headers) == 0 {
+		t.Errorf("security/headers not parsed: %+v / %d", cfg.Security, len(cfg.Headers))
+	}
+	if len(cfg.Head.Scripts) == 0 || len(cfg.Head.Meta) == 0 {
+		t.Errorf("head not parsed: %+v", cfg.Head)
+	}
+
+	// Output checks for those features.
+	if data, err := os.ReadFile(filepath.Join(outDir, "markdown-demo", "index.html")); err != nil {
+		t.Errorf("reading markdown page: %v", err)
+	} else if !strings.Contains(string(data), "data-markdown-plugin") {
+		t.Error("markdown.plugins transform did not run")
+	}
+	if data, err := os.ReadFile(filepath.Join(outDir, "index.html")); err == nil {
+		h := string(data)
+		for _, want := range []string{"example-head", "/analytics.js"} {
+			if !strings.Contains(h, want) {
+				t.Errorf("index.html missing %q (head/analytics injection)", want)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "index.html.gz")); err != nil {
+		t.Errorf("precompressed sibling missing (compress.gzip): %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(outDir, "robots.txt")); err != nil {
+		t.Errorf("robots.txt missing: %v", err)
+	} else if !strings.Contains(string(data), "Allow: /") {
+		t.Errorf("robots plugin options not applied:\n%s", data)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "llms.txt")); err != nil {
+		t.Errorf("llms.txt missing: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(outDir, "docs", "getting-started", "index.html")); err == nil {
+		h := string(data)
+		if !strings.Contains(h, "edit/main/examples/src/content") {
+			t.Error("docs editLink.pattern not applied")
+		}
+		if !strings.Contains(h, "Search the docs") || !strings.Contains(h, "krate-docs-search-kbd") {
+			t.Error("docs search placeholder/hotkey not applied")
+		}
+		if !strings.Contains(h, "data-markdown-plugin") {
+			t.Error("markdown.plugins did not run on docs pages")
+		}
+	}
+
+	if data, err := os.ReadFile(filepath.Join(outDir, "lang-demo", "index.html")); err != nil {
+		t.Errorf("reading lang-demo page: %v", err)
+	} else if !strings.Contains(string(data), "lang=fr") && !strings.Contains(string(data), `lang="fr"`) {
+		t.Error("per-page `export const lang` not applied to <html lang>")
+	}
+
+	// Deploy adapters emit explicit header rules for static hosts.
+	if _, err := deploy.Emit("netlify", cfg, outDir); err != nil {
+		t.Errorf("deploy.Emit: %v", err)
+	} else if headers, err := os.ReadFile(filepath.Join(outDir, "_headers")); err != nil {
+		t.Error("deploy did not write _headers")
+	} else if !strings.Contains(string(headers), "/_krate/images/*") {
+		t.Errorf("_headers missing images rule:\n%s", headers)
 	}
 
 	// Verify syntax-robustness page renders alias-imported components. The

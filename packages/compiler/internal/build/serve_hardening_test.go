@@ -299,3 +299,75 @@ func TestNewHTTPServerHasTimeouts(t *testing.T) {
 		t.Errorf("server missing timeouts: %+v", s)
 	}
 }
+
+func TestSecurityHeadersOverrides(t *testing.T) {
+	off := false
+	cfg := config.Default()
+	cfg.Security = config.SecurityConfig{FrameOptions: "SAMEORIGIN", ContentTypeOptions: &off, ReferrerPolicy: "off"}
+	h := securityHeadersMiddleware(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if got := rec.Header().Get("X-Frame-Options"); got != "SAMEORIGIN" {
+		t.Errorf("X-Frame-Options = %q, want SAMEORIGIN", got)
+	}
+	if rec.Header().Get("X-Content-Type-Options") != "" {
+		t.Error("nosniff should be disabled by security.contentTypeOptions=false")
+	}
+	if rec.Header().Get("Referrer-Policy") != "" {
+		t.Error("referrer policy should be disabled by \"off\"")
+	}
+	if rec.Header().Get("Permissions-Policy") == "" {
+		t.Error("permissions-policy default should still be sent")
+	}
+}
+
+func TestCustomHeadersMiddleware(t *testing.T) {
+	h := customHeadersMiddleware([]config.HeaderRule{
+		{Source: "/assets/*", Headers: map[string]string{"Cache-Control": "public, max-age=31536000, immutable"}},
+		{Source: "/health", Headers: map[string]string{"X-Health": "1"}},
+	}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
+	if rec.Header().Get("Cache-Control") == "" {
+		t.Error("assets prefix rule not applied")
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/other", nil))
+	if rec.Header().Get("Cache-Control") != "" {
+		t.Error("assets rule leaked to /other")
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if rec.Header().Get("X-Health") != "1" {
+		t.Error("exact rule not applied")
+	}
+}
+
+func TestDevProxyMiddleware(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("backend:" + r.URL.Path))
+	}))
+	defer backend.Close()
+
+	next := false
+	h := devProxyMiddleware(map[string]string{"/api": backend.URL}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/users", nil))
+	if next {
+		t.Fatal("expected /api to be proxied")
+	}
+	if got := rec.Body.String(); got != "backend:/api/users" {
+		t.Fatalf("proxied body = %q", got)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/other", nil))
+	if !next {
+		t.Fatal("expected /other to fall through")
+	}
+}

@@ -1635,6 +1635,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// build-time precompressed (.br/.gz) siblings when present.
 		top = gzipMiddleware(top)
 		top = precompressedMiddleware(absOut, top)
+	} else {
+		// Dev: proxy configured prefixes (e.g. /api) to a backend.
+		top = devProxyMiddleware(cfg.DevServer.Proxy, top)
 	}
 	mux.Handle("/", bodyLimitMiddleware(cfg.MaxBodyBytes(), loggingMiddleware(top)))
 
@@ -1659,7 +1662,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	// Wrap the mux so every route (including /api/, /__krate/, health) gets
 	// request IDs, security headers, and panic recovery.
-	var rootHandler http.Handler = requestIDMiddleware(basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, mux)))))
+	var rootHandler http.Handler = requestIDMiddleware(basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, mux))))))
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {

@@ -87,6 +87,7 @@ interface BaseDocsLayoutProps {
   lastUpdated?: string;
   authors?: string[];
   i18n?: I18nProps;
+  search?: { placeholder?: string; hotkey?: string };
   options?: {
     themeStorageKey?: string;
     feedback?: { repo: string; discussions?: boolean; label?: string };
@@ -306,7 +307,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
               </details>
             )}
           </div>
-          <DocsSearch />
+          <DocsSearch placeholder={props.search?.placeholder} hotkey={props.search?.hotkey} />
           <div class="navbar-social-links">
             <SocialLinks links={props.socialLinks} />
           </div>

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
@@ -23,7 +24,15 @@ func Emit(target string, cfg *config.Config, outDir string) ([]string, error) {
 	}
 	switch target {
 	case "netlify", "cloudflare":
-		return emitRedirects(cfg, outDir)
+		files, err := emitRedirects(cfg, outDir)
+		if err != nil {
+			return nil, err
+		}
+		hfiles, err := emitHeaders(cfg, outDir)
+		if err != nil {
+			return nil, err
+		}
+		return append(files, hfiles...), nil
 	case "vercel":
 		return emitVercel(cfg, outDir)
 	case "gh-pages":
@@ -56,7 +65,46 @@ func emitRedirects(cfg *config.Config, outDir string) ([]string, error) {
 	return []string{p}, nil
 }
 
-// emitVercel writes a `vercel.json` with redirects and rewrites.
+// emitHeaders writes a `_headers` file (Netlify + Cloudflare Pages format) from
+// the config's `headers` rules. Only explicit rules are emitted; `security`
+// defaults are left to `krate serve` so static-host behavior is not changed
+// implicitly.
+func emitHeaders(cfg *config.Config, outDir string) ([]string, error) {
+	if len(cfg.Headers) == 0 {
+		return nil, nil
+	}
+	var b strings.Builder
+	for _, rule := range cfg.Headers {
+		if rule.Source == "" || len(rule.Headers) == 0 {
+			continue
+		}
+		b.WriteString(rule.Source)
+		b.WriteByte('\n')
+		keys := make([]string, 0, len(rule.Headers))
+		for k := range rule.Headers {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			b.WriteString("  ")
+			b.WriteString(k)
+			b.WriteString(": ")
+			b.WriteString(rule.Headers[k])
+			b.WriteByte('\n')
+		}
+		b.WriteByte('\n')
+	}
+	if b.Len() == 0 {
+		return nil, nil
+	}
+	p := filepath.Join(outDir, "_headers")
+	if err := fsutil.WriteFileAtomic(p, []byte(b.String()), 0644); err != nil {
+		return nil, fmt.Errorf("writing _headers: %w", err)
+	}
+	return []string{p}, nil
+}
+
+// emitVercel writes a `vercel.json` with redirects, rewrites, and headers.
 func emitVercel(cfg *config.Config, outDir string) ([]string, error) {
 	type vRedirect struct {
 		Source      string `json:"source"`
@@ -84,6 +132,43 @@ func emitVercel(cfg *config.Config, outDir string) ([]string, error) {
 	}
 	if len(doc) == 0 {
 		doc["cleanUrls"] = true
+	}
+	// Adapter options (config `deploy.options`).
+	if v, ok := cfg.Deploy.Options["cleanUrls"]; ok {
+		doc["cleanUrls"] = strings.EqualFold(v, "true")
+	}
+	if v, ok := cfg.Deploy.Options["trailingSlash"]; ok {
+		doc["trailingSlash"] = strings.EqualFold(v, "true")
+	}
+	// Custom headers (config `headers`).
+	if len(cfg.Headers) > 0 {
+		type vHeader struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		type vHeaderRule struct {
+			Source  string    `json:"source"`
+			Headers []vHeader `json:"headers"`
+		}
+		rules := make([]vHeaderRule, 0, len(cfg.Headers))
+		for _, r := range cfg.Headers {
+			if r.Source == "" || len(r.Headers) == 0 {
+				continue
+			}
+			keys := make([]string, 0, len(r.Headers))
+			for k := range r.Headers {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			hh := make([]vHeader, 0, len(keys))
+			for _, k := range keys {
+				hh = append(hh, vHeader{Key: k, Value: r.Headers[k]})
+			}
+			rules = append(rules, vHeaderRule{Source: r.Source, Headers: hh})
+		}
+		if len(rules) > 0 {
+			doc["headers"] = rules
+		}
 	}
 
 	data, err := json.MarshalIndent(doc, "", "  ")

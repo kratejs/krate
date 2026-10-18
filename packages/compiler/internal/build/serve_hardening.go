@@ -8,11 +8,14 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -262,26 +265,82 @@ func panicRecoveryMiddleware(logger *slog.Logger, next http.Handler) http.Handle
 // securityHeadersMiddleware applies safe defaults. Nothing here breaks static
 // sites; HSTS is only emitted for https base URLs.
 func securityHeadersMiddleware(cfg *config.Config, next http.Handler) http.Handler {
-	hsts := ""
-	if strings.HasPrefix(strings.ToLower(cfg.SEO.BaseURL), "https://") {
+	sec := cfg.Security
+	nosniff := sec.ContentTypeOptions == nil || *sec.ContentTypeOptions
+	frame := headerOrDefault(sec.FrameOptions, "DENY")
+	referrer := headerOrDefault(sec.ReferrerPolicy, "strict-origin-when-cross-origin")
+	permissions := headerOrDefault(sec.PermissionsPolicy, "camera=(), microphone=(), geolocation=()")
+	hsts := sec.HSTS
+	if hsts == "" && strings.HasPrefix(strings.ToLower(cfg.SEO.BaseURL), "https://") {
 		hsts = "max-age=31536000; includeSubDomains"
 	}
 	csp := buildCSPHeader(cfg)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		if hsts != "" {
-			h.Set("Strict-Transport-Security", hsts)
+		if nosniff {
+			h.Set("X-Content-Type-Options", "nosniff")
 		}
+		setHeaderUnlessDisabled(h, "X-Frame-Options", frame)
+		setHeaderUnlessDisabled(h, "Referrer-Policy", referrer)
+		setHeaderUnlessDisabled(h, "Permissions-Policy", permissions)
+		setHeaderUnlessDisabled(h, "Strict-Transport-Security", hsts)
 		if csp != "" {
 			h.Set("Content-Security-Policy", csp)
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func headerOrDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+func setHeaderUnlessDisabled(h http.Header, name, value string) {
+	if value == "" || config.HeaderDisabled(value) {
+		return
+	}
+	h.Set(name, value)
+}
+
+// customHeadersMiddleware applies user-configured response headers (config
+// `headers: [{ source, headers }]`) for requests whose path matches. Runs just
+// inside the security headers so a rule can override a default.
+func customHeadersMiddleware(rules []config.HeaderRule, next http.Handler) http.Handler {
+	if len(rules) == 0 {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		for _, rule := range rules {
+			if headerSourceMatches(rule.Source, r.URL.Path) {
+				for k, v := range rule.Headers {
+					h.Set(k, v)
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// headerSourceMatches reports whether a path matches a header rule's source: an
+// exact path, a trailing `*` prefix ("/assets/*"), or a path.Match glob.
+func headerSourceMatches(pattern, p string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return false
+	}
+	if !strings.Contains(pattern, "*") {
+		return p == pattern
+	}
+	if strings.HasSuffix(pattern, "*") {
+		return strings.HasPrefix(p, strings.TrimSuffix(pattern, "*"))
+	}
+	ok, _ := path.Match(pattern, p)
+	return ok
 }
 
 // buildCSPHeader returns the CSP directive for the HTTP header. A user-supplied
@@ -538,6 +597,41 @@ func precompressedContentType(p string) string {
 	default:
 		return ""
 	}
+}
+
+// devProxyMiddleware forwards configured path prefixes to a backend during dev
+// (config `devServer.proxy`). Longest prefix wins; unmatched requests fall
+// through to the normal dev handler.
+func devProxyMiddleware(proxy map[string]string, next http.Handler) http.Handler {
+	if len(proxy) == 0 {
+		return next
+	}
+	type rule struct {
+		prefix  string
+		handler http.Handler
+	}
+	var rules []rule
+	for prefix, target := range proxy {
+		u, err := url.Parse(target)
+		if err != nil || u.Host == "" {
+			continue
+		}
+		p := "/" + strings.Trim(prefix, "/")
+		if p == "/" {
+			p = ""
+		}
+		rules = append(rules, rule{p, httputil.NewSingleHostReverseProxy(u)})
+	}
+	sort.Slice(rules, func(i, j int) bool { return len(rules[i].prefix) > len(rules[j].prefix) })
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, rt := range rules {
+			if rt.prefix == "" || r.URL.Path == rt.prefix || strings.HasPrefix(r.URL.Path, rt.prefix+"/") {
+				rt.handler.ServeHTTP(w, r)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // streaming helpers

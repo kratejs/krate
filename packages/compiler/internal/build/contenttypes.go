@@ -68,6 +68,7 @@ func (b *Builder) prepareContent() contentTypeResult {
 		found, walkErrs := discoverContentEntries(b.Root, dir, b.Cfg.Markdown)
 		res.Warnings = append(res.Warnings, walkErrs...)
 		for _, e := range found {
+			content.ApplyDefaults(col.Schema, e.Data)
 			if schemaErrs := content.Validate(col.Schema, e.Data); len(schemaErrs) > 0 {
 				for _, se := range schemaErrs {
 					res.Validation = append(res.Validation, fmt.Errorf("%s: %s: %w", name, filepath.ToSlash(e.Path), se))

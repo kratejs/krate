@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -68,6 +69,7 @@ type PageResult struct {
 	// SSR/ISR/Streaming metadata
 	Mode             RenderMode
 	Revalidate       int
+	Lang             string // per-page <html lang> override (e.g. docs locales)
 	SourcePath       string // relative path to source file
 	ServerBundlePath string // path to server bundle (for SSR/ISR pages)
 
@@ -609,6 +611,9 @@ func (b *Builder) BuildAll() error {
 		fmt.Fprintf(os.Stderr, "  %sWarning: failed to write .krate/tsconfig.json:%s %v\n", cYellow, cReset, err)
 	} else {
 		b.tsxTsconfig = tsPath
+	}
+	if err := writeConfigSchema(b.Root); err != nil {
+		fmt.Fprintf(os.Stderr, "  %sWarning: failed to write .krate/config.schema.json:%s %v\n", cYellow, cReset, err)
 	}
 
 	pages, err := findPages(b.Cfg.PagesDir)
@@ -1385,6 +1390,20 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			// and legacy documents. CSP hashes the fully assembled document, so
 			// each variant's inline scripts are allow-listed individually.
 			finish := func(h string) string {
+				// 1. Document language: per-page lang wins (e.g. docs locales),
+				// then site.locale; otherwise the default "en" stands.
+				lang := r.Lang
+				if lang == "" {
+					lang = b.Cfg.SEO.Locale
+				}
+				if lang != "" {
+					h = strings.Replace(h, "<html lang=\"en\">", "<html lang=\""+escape.HTMLAttr(lang)+"\">", 1)
+				}
+				// 1b. Site-wide <head> injection (head + analytics), added before
+				// CSP so inline analytics scripts get hash-allow-listed.
+				if tags := b.globalHeadHTML(h); tags != "" {
+					h = strings.Replace(h, "</head>", tags+"</head>", 1)
+				}
 				// 2. Durable SSR state (window.__KRATE_STATE__): a page-level
 				// payload that persisted signals prefer on hydration, so the
 				// hydrated value matches what the server rendered.
@@ -1393,7 +1412,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				}
 				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
 				if b.Cfg.SEO.BaseURL != "" {
-					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO.BaseURL, b.Cfg.SEO.SiteName, b.Cfg.SEO.Description, b.Cfg.SEO.Image)
+					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO)
 					if seoTags != "" {
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
 					}
@@ -1507,6 +1526,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	// Detect rendering mode (SSR/ISR/Streaming) from AST exports + <Suspense> usage
 	renderMode, revalidate := detectRenderMode(entryModule.Program)
+	pageLang := detectPageLang(entryModule.Program)
 
 	// If the page imports any runtime components, force streaming mode.
 	// Runtime components (*.runtime.tsx) must be rendered at request time,
@@ -1725,6 +1745,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			UsedFuncs:         emitResult.UsedFuncs,
 			Mode:              renderMode,
 			Revalidate:        revalidate,
+			Lang:              pageLang,
 			SourcePath:        relSrc,
 			Regions:           regions,
 			DynamicParams:     allowDynamic,
@@ -1825,6 +1846,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 		Mode:       renderMode,
 		Revalidate: revalidate,
+		Lang:       pageLang,
 		SourcePath: relSrc,
 		Regions:    regions,
 
@@ -1894,6 +1916,7 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		LoadingHTML:   e.LoadingHTML,
 		Mode:          RenderMode(e.Mode),
 		Revalidate:    e.Revalidate,
+		Lang:          e.Lang,
 		SourcePath:    e.SourcePath,
 
 		DynamicParams:     e.DynamicParams,
@@ -1948,6 +1971,7 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		LoadingHTML:   r.LoadingHTML,
 		Mode:          int(r.Mode),
 		Revalidate:    r.Revalidate,
+		Lang:          r.Lang,
 		SourcePath:    r.SourcePath,
 
 		DynamicParams:     r.DynamicParams,
@@ -3368,6 +3392,19 @@ func (b *Builder) compileImageToPicture(orig *ast.JSXElement) *ast.JSXElement {
 		return imageErrorSpan("[Image: missing src]")
 	}
 
+	// Resolve image options from config, overridden by per-<Image> attributes.
+	imgCfg := b.Cfg.Images
+	if quality <= 0 {
+		quality = imgCfg.Quality
+	}
+	if sizes == "" {
+		sizes = imgCfg.Sizes
+	}
+	wantPlaceholder := imgCfg.PlaceholderEnabled()
+	if placeholder != "" {
+		wantPlaceholder = placeholder != "empty"
+	}
+
 	publicDir := b.Cfg.PublicDir
 	if publicDir == "" {
 		publicDir = filepath.Join(b.Root, "public")
@@ -3385,11 +3422,33 @@ func (b *Builder) compileImageToPicture(orig *ast.JSXElement) *ast.JSXElement {
 		resolvedSrc = filepath.Join(publicDir, src)
 	}
 
-	result, err := imageproc.ProcessImage(b.Root, resolvedSrc, reqW, reqH, quality, placeholder != "empty")
-	if err != nil {
-		return imageErrorSpan(fmt.Sprintf("[Image: %v]", err))
+	var result *imageproc.ImageResult
+	switch {
+	case strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://"):
+		// Remote images are passed through unoptimized, but only when allowlisted.
+		u, perr := url.Parse(src)
+		if perr != nil || u.Hostname() == "" || !imgCfg.RemoteAllowed(u.Hostname(), u.Path) {
+			return imageErrorSpan("[Image: remote src not allowed - add its host to images.remotePatterns]")
+		}
+		result = &imageproc.ImageResult{Width: reqW, Height: reqH}
+	case imgCfg.Unoptimized:
+		result = &imageproc.ImageResult{Width: reqW, Height: reqH}
+	default:
+		var perr error
+		result, perr = imageproc.ProcessImageWith(b.Root, resolvedSrc, reqW, reqH, imageproc.Options{
+			Quality:     quality,
+			Breakpoints: imgCfg.Breakpoints,
+			Placeholder: wantPlaceholder,
+			Formats:     imgCfg.Formats,
+		})
+		if perr != nil {
+			return imageErrorSpan(fmt.Sprintf("[Image: %v]", perr))
+		}
 	}
 	result.Src = "/" + strings.TrimPrefix(src, "/")
+	if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
+		result.Src = src
+	}
 
 	if loading == "" {
 		loading = "lazy"

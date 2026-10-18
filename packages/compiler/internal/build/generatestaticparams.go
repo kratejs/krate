@@ -367,6 +367,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	// build time.
 	substituteParamBindings(entryModule.Program, spp.Params)
 	b.InlineContent(entryModule.Program)
+	pageLang := detectPageLang(entryModule.Program)
 
 	// New pipeline: Annotate -> Build IR -> Emit
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, spp.PagePath, entryModule.SourceCode)
@@ -510,6 +511,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		UsedFuncs:   emitResult.UsedFuncs,
 		Mode:        renderMode,
 		Revalidate:  revalidate,
+		Lang:        pageLang,
 		SourcePath:  relSrc,
 		Program:     entryModule.Program,
 		Regions:     regions,

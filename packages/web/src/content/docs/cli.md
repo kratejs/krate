@@ -41,6 +41,7 @@ krate build ./my-site
 | `--sourcemap` | Emit source maps for generated JS (also disables the build cache) |
 | `--no-dce` | Disable CSS/JS dead-code elimination |
 | `--precompress` | Write `.br` + `.gz` siblings for compressible assets (same as `compress: { brotli: true, gzip: true }`) |
+| `--mode <name>` | Set the environment mode (like `KRATE_ENV`); loads `.env.<name>` and is passed to a function-form `defineConfig` |
 
 During the build the compiler:
 
@@ -139,6 +140,18 @@ The `--json` form emits a single JSON document on stdout:
 `files` maps each depended-on source file to the routes that reference it (what
 links here). The same model backs the MCP `explain` tool and the
 `krate://graph` resource — see [MCP Server](/docs/features/mcp/).
+
+## `krate config`
+
+```sh
+krate config [dir] [--mode <mode>] [--config <path>] [--schema]
+```
+
+Prints the fully resolved configuration (defaults applied, `site` folded into
+`seo`, plugin options, absolute paths) as JSON. `--schema` prints a JSON Schema
+for `krate.config.*` instead; builds also write `.krate/config.schema.json` so
+editors can use it via `$schema`. Config files may be `krate.config.ts`, `.js`,
+`.mjs`, or `.json`.
 
 ## `krate deploy`
 

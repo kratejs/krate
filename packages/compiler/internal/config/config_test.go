@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -75,6 +76,369 @@ func TestShouldPrecompress(t *testing.T) {
 		if got := cfg.ShouldPrecompress(); got != c.want {
 			t.Errorf("ShouldPrecompress(brotli=%v,gzip=%v) = %v, want %v", c.brotli, c.gzip, got, c.want)
 		}
+	}
+}
+
+// TestLoadFunctionFormConfig verifies defineConfig's function form is invoked
+// with the build context (command/mode/isDev).
+func TestLoadFunctionFormConfig(t *testing.T) {
+	root := t.TempDir()
+	src := `export default ({ command, mode, isDev }) => ({
+  outDir: isDev ? "dist-dev" : "dist-prod",
+  plugins: [{ name: "docs", options: { title: command + ":" + mode } }],
+});`
+	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadWith(root, LoadOptions{Command: "build", Mode: "production"})
+	if err != nil {
+		t.Fatalf("LoadWith(production): %v", err)
+	}
+	if filepath.Base(cfg.OutDir) != "dist-prod" {
+		t.Errorf("OutDir = %q, want dist-prod", cfg.OutDir)
+	}
+	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Options["title"] != "build:production" {
+		t.Errorf("function context not passed: %+v", cfg.Plugins)
+	}
+
+	cfg, err = LoadWith(root, LoadOptions{Command: "build", Mode: "development"})
+	if err != nil {
+		t.Fatalf("LoadWith(development): %v", err)
+	}
+	if filepath.Base(cfg.OutDir) != "dist-dev" {
+		t.Errorf("OutDir = %q, want dist-dev for development mode", cfg.OutDir)
+	}
+}
+
+func TestImagesConfig(t *testing.T) {
+	cfg := Default()
+	if err := json.Unmarshal([]byte(`{"images":{"quality":70,"breakpoints":[300,600],"formats":["webp"],"remotePatterns":[{"hostname":"images.example.com"}]}}`), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Images.Quality != 70 || len(cfg.Images.Breakpoints) != 2 || len(cfg.Images.Formats) != 1 {
+		t.Fatalf("images not parsed: %+v", cfg.Images)
+	}
+	if !cfg.Images.RemoteAllowed("images.example.com", "/x.png") {
+		t.Error("allowlisted remote host should be allowed")
+	}
+	if cfg.Images.RemoteAllowed("evil.com", "/x.png") {
+		t.Error("unlisted remote host should be rejected")
+	}
+	if !cfg.Images.PlaceholderEnabled() {
+		t.Error("placeholder should default to on")
+	}
+}
+
+func TestImageRemotePatterns(t *testing.T) {
+	c := ImagesConfig{RemotePatterns: []ImageRemotePattern{
+		{Hostname: "*.example.com"},
+		{Hostname: "cdn.example.org", Pathname: "/images/**"},
+		{Hostname: "**.nested.example"},
+	}}
+	cases := []struct {
+		host, path string
+		want       bool
+	}{
+		{"images.example.com", "/x.png", true},
+		{"a.b.example.com", "/x.png", false}, // "*.example.com" is one label
+		{"cdn.example.org", "/images/a/b.png", true},
+		{"cdn.example.org", "/other.png", false},
+		{"a.b.nested.example", "/x.png", true}, // "**.nested.example" any depth
+	}
+	for _, tc := range cases {
+		if got := c.RemoteAllowed(tc.host, tc.path); got != tc.want {
+			t.Errorf("RemoteAllowed(%q, %q) = %v, want %v", tc.host, tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestHeadConfigForms(t *testing.T) {
+	cfg := Default()
+	if err := json.Unmarshal([]byte(`{"head":["<script>a</script>","<!-- b -->"]}`), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Head.Raw) != 2 {
+		t.Errorf("head array form -> Raw = %v", cfg.Head.Raw)
+	}
+
+	cfg2 := Default()
+	if err := json.Unmarshal([]byte(`{"head":{"scripts":[{"src":"a.js","defer":true}],"meta":[{"name":"x","content":"y"}]}}`), cfg2); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg2.Head.Scripts) != 1 || cfg2.Head.Scripts[0].Src != "a.js" || !cfg2.Head.Scripts[0].Defer {
+		t.Errorf("head object form not parsed: %+v", cfg2.Head)
+	}
+	if len(cfg2.Head.Meta) != 1 || cfg2.Head.Meta[0].Name != "x" {
+		t.Errorf("head meta not parsed: %+v", cfg2.Head.Meta)
+	}
+}
+
+func TestDeprecationWarnings(t *testing.T) {
+	w, err := (&Config{
+		Site: SiteConfig{URL: "https://new.example"},
+		SEO:  SEOConfig{BaseURL: "https://old.example"},
+	}).Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(w, "\n"), "both `site` and `seo`") {
+		t.Errorf("missing site/seo deprecation warning: %v", w)
+	}
+
+	w, err = (&Config{GoAPI: GoAPICfg{Module: "example.com/api"}}).Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(w, "\n"), "goApi` is deprecated") {
+		t.Errorf("missing goApi deprecation warning: %v", w)
+	}
+}
+
+// knownTopLevelKeys/knownNestedKeys are derived from Config so a new field is
+// registered automatically. This guards against drift.
+func TestKnownKeysDerivedFromConfig(t *testing.T) {
+	typ := reflect.TypeOf(Config{})
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		name, ok := schemaFieldName(f)
+		if !ok {
+			continue
+		}
+		if !knownTopLevelKeys[name] {
+			t.Errorf("Config field %q is not in knownTopLevelKeys", name)
+		}
+	}
+	for parent, child := range map[string]string{
+		"images": "quality",
+		"head":   "scripts",
+		"deploy": "target",
+		"go":     "componentDirs",
+		"compat": "mode",
+	} {
+		if !knownNestedKeys[parent][child] {
+			t.Errorf("knownNestedKeys[%q] missing %q", parent, child)
+		}
+	}
+	if _, ok := knownNestedKeys["content"]; ok {
+		t.Error("content should accept arbitrary keys (map type)")
+	}
+}
+
+// A key without a dedicated switch case is applied by the JSON round-trip.
+func TestApplyConfigPropDefaultJSON(t *testing.T) {
+	cfg := Default()
+	if err := applyConfigProp(cfg, "extends", "./base.config.ts"); err != nil {
+		t.Fatalf("applyConfigProp: %v", err)
+	}
+	if len(cfg.Extends) != 1 || cfg.Extends[0] != "./base.config.ts" {
+		t.Fatalf("default JSON path did not apply extends: %v", cfg.Extends)
+	}
+}
+
+func TestSchemaJSONCoversKeys(t *testing.T) {
+	data, err := SchemaJSON()
+	if err != nil {
+		t.Fatalf("SchemaJSON: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("schema is not JSON: %v", err)
+	}
+	if m["$schema"] == nil {
+		t.Error("missing $schema")
+	}
+	props, _ := m["properties"].(map[string]any)
+	for _, key := range []string{"site", "seo", "head", "security", "headers", "images", "extends", "compress", "devServer", "plugins", "content"} {
+		if props[key] == nil {
+			t.Errorf("schema missing top-level key %q", key)
+		}
+	}
+}
+
+func TestExtendsPackagePreset(t *testing.T) {
+	root := t.TempDir()
+	pkgDir := filepath.Join(root, "node_modules", "@acme", "preset")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "package.json"), []byte(`{"krate":"./krate.config.json"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "krate.config.json"), []byte(`{"outDir":"preset-dist"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "krate.config.json"), []byte(`{"extends":"@acme/preset"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadWith(root, LoadOptions{})
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if filepath.Base(cfg.OutDir) != "preset-dist" {
+		t.Errorf("OutDir = %q, want preset-dist", cfg.OutDir)
+	}
+}
+
+func TestExtendsDedupesPlugins(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "base.json"), []byte(`{"plugins":[{"name":"docs","options":{"title":"Base"}}]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	child := `{"extends":"./base.json","plugins":[{"name":"docs","options":{"title":"Child"}},{"name":"robots"}]}`
+	if err := os.WriteFile(filepath.Join(root, "krate.config.json"), []byte(child), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadWith(root, LoadOptions{})
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if len(cfg.Plugins) != 2 {
+		t.Fatalf("plugins = %d, want 2 (deduped docs + robots)", len(cfg.Plugins))
+	}
+	for _, p := range cfg.Plugins {
+		if p.Name == "docs" {
+			if title, _ := p.Options["title"].(string); title != "Child" {
+				t.Errorf("docs title = %q, want Child (extending config wins)", title)
+			}
+		}
+	}
+}
+
+func TestExtendsResolvesModulesRelativeToBase(t *testing.T) {
+	root := t.TempDir()
+	presets := filepath.Join(root, "presets")
+	if err := os.MkdirAll(presets, 0755); err != nil {
+		t.Fatal(err)
+	}
+	base := `{"plugins":[{"name":"demo","module":"./plugin.ts"}],"markdown":{"plugins":["./md.ts"]}}`
+	if err := os.WriteFile(filepath.Join(presets, "base.config.json"), []byte(base), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "krate.config.json"), []byte(`{"extends":"./presets/base.config.json"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadWith(root, LoadOptions{})
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	wantPlugin := filepath.Join(presets, "plugin.ts")
+	found := false
+	for _, p := range cfg.Plugins {
+		if p.Name == "demo" {
+			found = true
+			if p.Module != wantPlugin {
+				t.Errorf("base plugin module = %q, want %q", p.Module, wantPlugin)
+			}
+		}
+	}
+	if !found {
+		t.Error("base plugin missing after merge")
+	}
+	if len(cfg.Markdown.Plugins) != 1 || cfg.Markdown.Plugins[0] != filepath.Join(presets, "md.ts") {
+		t.Errorf("base markdown plugins = %v, want resolved against base dir", cfg.Markdown.Plugins)
+	}
+}
+
+func TestExtendsMergesBaseConfig(t *testing.T) {
+	root := t.TempDir()
+	base := `{"outDir":"base-dist","seo":{"baseUrl":"https://base.example","siteName":"Base"},"plugins":[{"name":"sitemap"}],"redirects":[{"source":"/a","destination":"/b"}]}`
+	if err := os.WriteFile(filepath.Join(root, "base.json"), []byte(base), 0644); err != nil {
+		t.Fatal(err)
+	}
+	child := `{"extends":"./base.json","outDir":"child-dist","seo":{"siteName":"Child"},"plugins":[{"name":"robots"}],"redirects":[{"source":"/c","destination":"/d"}]}`
+	if err := os.WriteFile(filepath.Join(root, "krate.config.json"), []byte(child), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadWith(root, LoadOptions{})
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if filepath.Base(cfg.OutDir) != "child-dist" {
+		t.Errorf("OutDir = %q, want child-dist (child wins)", cfg.OutDir)
+	}
+	if cfg.SEO.BaseURL != "https://base.example" {
+		t.Errorf("site.url = %q, want inherited base URL", cfg.SEO.BaseURL)
+	}
+	if cfg.SEO.SiteName != "Child" {
+		t.Errorf("siteName = %q, want Child", cfg.SEO.SiteName)
+	}
+	if len(cfg.Plugins) != 2 {
+		t.Errorf("plugins = %d, want 2 (concatenated)", len(cfg.Plugins))
+	}
+	if len(cfg.Redirects) != 2 {
+		t.Errorf("redirects = %d, want 2 (concatenated)", len(cfg.Redirects))
+	}
+}
+
+func TestExtendsCycleDetected(t *testing.T) {
+	root := t.TempDir()
+	_ = os.WriteFile(filepath.Join(root, "a.json"), []byte(`{"extends":"./b.json"}`), 0644)
+	_ = os.WriteFile(filepath.Join(root, "b.json"), []byte(`{"extends":"./a.json"}`), 0644)
+	_ = os.WriteFile(filepath.Join(root, "krate.config.json"), []byte(`{"extends":"./a.json"}`), 0644)
+	if _, err := LoadWith(root, LoadOptions{}); err == nil || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("expected a cycle error, got %v", err)
+	}
+}
+
+func TestMarkdownPluginsBecomeCommunityPlugins(t *testing.T) {
+	root := t.TempDir()
+	cfg := Default()
+	cfg.Markdown.Plugins = []string{"./md/transform.ts"}
+	cfg.Resolve(root)
+	cfg.Resolve(root) // idempotent across repeated Resolve calls
+
+	count := 0
+	for _, p := range cfg.Plugins {
+		if p.Name == "markdown-transform-1" {
+			count++
+			if want := filepath.Join(root, "md", "transform.ts"); p.Module != want {
+				t.Errorf("module = %q, want %q", p.Module, want)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("markdown plugin registered %d times, want 1", count)
+	}
+}
+
+func TestLoadJSONConfig(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "krate.config.json"), []byte(`{"outDir":"build","site":{"url":"https://x.example"}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadWith(root, LoadOptions{Command: "build", Mode: "production"})
+	if err != nil {
+		t.Fatalf("LoadWith json: %v", err)
+	}
+	if filepath.Base(cfg.OutDir) != "build" {
+		t.Errorf("OutDir = %q, want build", cfg.OutDir)
+	}
+	if cfg.SEO.BaseURL != "https://x.example" {
+		t.Errorf("site.url not folded: %q", cfg.SEO.BaseURL)
+	}
+}
+
+func TestSiteFoldsIntoSEO(t *testing.T) {
+	c := &Config{
+		SEO:  SEOConfig{BaseURL: "https://old.example", Description: "old"},
+		Site: SiteConfig{URL: "https://new.example", Name: "New", TitleTemplate: "%s | New", Twitter: "krate", ThemeColor: "#fff", Locale: "en-US"},
+	}
+	got := c.EffectiveSEO()
+	if got.BaseURL != "https://new.example" || got.SiteName != "New" ||
+		got.TitleTemplate != "%s | New" || got.Twitter != "krate" ||
+		got.ThemeColor != "#fff" || got.Locale != "en-US" {
+		t.Fatalf("site not folded over seo: %+v", got)
+	}
+	if got.Description != "old" {
+		t.Fatalf("Description = %q, want %q (site omitted it)", got.Description, "old")
 	}
 }
 
@@ -509,6 +873,13 @@ func TestUnknownKeyWarningsGoItems(t *testing.T) {
 	}
 }
 
+func TestUnknownKeyWarningsAllowsSchema(t *testing.T) {
+	raw := []byte(`{"$schema":"./.krate/config.schema.json","outDir":"dist"}`)
+	if w := UnknownKeyWarnings(raw); len(w) != 0 {
+		t.Errorf("$schema should not warn, got %v", w)
+	}
+}
+
 func TestUnknownKeyWarningsCompress(t *testing.T) {
 	if w := UnknownKeyWarnings([]byte(`{"compress":{"brotli":true,"gzip":true}}`)); len(w) != 0 {
 		t.Errorf("compress keys should be known, got warnings: %v", w)
@@ -733,7 +1104,7 @@ func TestEndOfLine(t *testing.T) {
 // factories via import.meta.url) into filesystem paths, surfaces validate()
 // errors, and re-exports the config object.
 func TestConfigEvalBootstrapResolvesPluginModules(t *testing.T) {
-	content := configEvalBootstrap("./krate.config.ts")
+	content := configEvalBootstrap("./krate.config.ts", LoadOptions{Command: "build", Mode: "production"})
 	for _, want := range []string{
 		`__krateFileURLToPath`,
 		`p.module.indexOf('file://') === 0`,

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 )
 
@@ -264,11 +265,14 @@ func sha256Base64(content string) string {
 
 // generateSEOTags produces canonical, OpenGraph, and Twitter Card meta tags.
 // It skips tags that are already present in headHTML to avoid duplication.
-func generateSEOTags(headHTML, route, baseURL, siteName, defaultDescription, defaultImage string) string {
+func generateSEOTags(headHTML, route string, seo config.SEOConfig) string {
+	baseURL := strings.TrimRight(seo.BaseURL, "/")
 	if baseURL == "" {
 		return ""
 	}
-	baseURL = strings.TrimRight(baseURL, "/")
+	siteName := seo.SiteName
+	defaultDescription := seo.Description
+	defaultImage := seo.Image
 
 	canonical := baseURL + "/"
 	if route != "" && route != "." {
@@ -285,6 +289,12 @@ func generateSEOTags(headHTML, route, baseURL, siteName, defaultDescription, def
 	title := extractMetaContent(headHTML, "title")
 	if title == "" {
 		title = siteName
+	}
+	// Apply the title template only to a bare page title. Titles that already
+	// carry a site/section suffix (e.g. docs pages: "Guide - Site Docs") are left
+	// alone so the suffix is not duplicated.
+	if seo.TitleTemplate != "" && isBareTitle(title, siteName) {
+		title = strings.ReplaceAll(seo.TitleTemplate, "%s", title)
 	}
 
 	// Extract description from headHTML <meta name="description"> if present
@@ -309,6 +319,9 @@ func generateSEOTags(headHTML, route, baseURL, siteName, defaultDescription, def
 	if !strings.Contains(headHTML, "og:description") && desc != "" {
 		tags = append(tags, fmt.Sprintf("<meta property=\"og:description\" content=\"%s\">", escape.HTMLAttr(desc)))
 	}
+	if !strings.Contains(headHTML, "og:locale") && seo.Locale != "" {
+		tags = append(tags, fmt.Sprintf("<meta property=\"og:locale\" content=\"%s\">", escape.HTMLAttr(ogLocale(seo.Locale))))
+	}
 	// Resolve the default OG image once (absolute URL when a base is set).
 	ogImage := defaultImage
 	if ogImage != "" && !strings.HasPrefix(ogImage, "http") {
@@ -326,6 +339,9 @@ func generateSEOTags(headHTML, route, baseURL, siteName, defaultDescription, def
 		}
 		tags = append(tags, fmt.Sprintf("<meta name=\"twitter:card\" content=\"%s\">", card))
 	}
+	if seo.Twitter != "" && !strings.Contains(headHTML, "twitter:site") {
+		tags = append(tags, fmt.Sprintf("<meta name=\"twitter:site\" content=\"%s\">", escape.HTMLAttr(twitterHandle(seo.Twitter))))
+	}
 	if !strings.Contains(headHTML, "twitter:title") && title != "" {
 		tags = append(tags, fmt.Sprintf("<meta name=\"twitter:title\" content=\"%s\">", escape.HTMLAttr(title)))
 	}
@@ -336,10 +352,42 @@ func generateSEOTags(headHTML, route, baseURL, siteName, defaultDescription, def
 		tags = append(tags, fmt.Sprintf("<meta name=\"twitter:image\" content=\"%s\">", ogImage))
 	}
 
+	if !strings.Contains(headHTML, "theme-color") && seo.ThemeColor != "" {
+		tags = append(tags, fmt.Sprintf("<meta name=\"theme-color\" content=\"%s\">", escape.HTMLAttr(seo.ThemeColor)))
+	}
+
 	if len(tags) == 0 {
 		return ""
 	}
 	return strings.Join(tags, "\n") + "\n"
+}
+
+// isBareTitle reports whether a document title is a plain page title with no
+// existing site/section suffix (in which case a title template should apply).
+func isBareTitle(title, siteName string) bool {
+	if title == "" || title == siteName {
+		return false
+	}
+	for _, sep := range []string{" | ", " - ", " :: ", " \u2014 ", " \u2013 ", " \u00b7 "} {
+		if strings.Contains(title, sep) {
+			return false
+		}
+	}
+	return true
+}
+
+// ogLocale converts an HTML lang tag ("en-US") to an og:locale value ("en_US").
+func ogLocale(locale string) string {
+	return strings.ReplaceAll(strings.TrimSpace(locale), "-", "_")
+}
+
+// twitterHandle normalizes a Twitter/X handle to its "@name" form.
+func twitterHandle(handle string) string {
+	handle = strings.TrimSpace(handle)
+	if handle == "" || strings.HasPrefix(handle, "@") {
+		return handle
+	}
+	return "@" + handle
 }
 
 // extractMetaContent extracts text content from <title>...</title> in headHTML.

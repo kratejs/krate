@@ -9,6 +9,10 @@ type Config struct {
 	CodeTheme      string `json:"codeTheme"`      // chroma theme name for syntax highlighting (default: github-dark)
 	Math           bool   `json:"math"`           // $...$ and $$...$$ math support
 	Mermaid        bool   `json:"mermaid"`        // render ```mermaid blocks as Mermaid diagrams
+	// Plugins lists JS module paths whose default export is a markdown transform
+	// (see defineMarkdownPlugin). Each is registered as a community plugin that
+	// runs on AfterMarkdownParse, so it can rewrite rendered HTML.
+	Plugins []string `json:"plugins,omitempty"`
 }
 
 func DefaultConfig() Config {

@@ -65,6 +65,7 @@ type diskPageEntry struct {
 	LoadingHTML   string
 	Mode          int
 	Revalidate    int
+	Lang          string
 	SourcePath    string
 
 	DynamicParams     bool

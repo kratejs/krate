@@ -17,6 +17,46 @@ pagesDir: "src/pages",        // Pages directory (default: src/pages)
 publicDir: "public",          // Static assets directory (default: public)
 ```
 
+## Site metadata
+
+`site` is the canonical site metadata; `seo` is a deprecated alias (a config
+using both gets a warning and `site` wins per field). The sitemap/feed/llms/robots
+plugins inherit these values.
+
+```typescript
+site: {
+  url: "https://example.com",   // canonical origin (sitemap, canonical, OG)
+  name: "My Site",
+  description: "Default meta description",
+  image: "https://example.com/og.png",
+  titleTemplate: "%s | My Site",
+  twitter: "mysite",            // twitter:site handle (@ optional)
+  themeColor: "#0b1020",
+  locale: "en",                 // <html lang> + og:locale
+},
+```
+
+`defineConfig` also accepts a function invoked with the build context, and
+`--mode <name>` selects the mode (and `.env.<mode>` files):
+
+```typescript
+export default defineConfig(({ command, mode, isDev }) => ({
+  site: { url: isDev ? "http://localhost:3000" : "https://example.com" },
+}));
+```
+
+Config files may be `krate.config.ts`, `.js`, `.mjs`, or `.json`. A `.json`
+config cannot call the factory helpers (`docs()`, `defineContent`); write the
+equivalent plain objects, or use a `.ts`/`.js` file.
+
+`titleTemplate` applies only to bare page titles; a title that already carries a
+site/section suffix (e.g. docs pages: `Guide - Site Docs`) is left unchanged so
+the suffix is not duplicated.
+
+Builds write a JSON Schema to `.krate/config.schema.json` for editor/tooling
+completion (it is a local build artifact, not served with the site). A `.json`
+config can reference it with `"$schema": "./.krate/config.schema.json"`.
+
 ## Minification
 
 ```typescript
@@ -64,6 +104,75 @@ Static hosts such as Cloudflare Pages and Netlify serve the siblings
 automatically. Assets under 1 KB, already-compressed formats (images, fonts,
 wasm), and internal `.krate/` build artifacts are skipped.
 
+## Head & scripts
+
+```typescript
+head: {
+  meta: [{ name: "theme-color", content: "#0b1020" }],
+  links: [{ rel: "preconnect", href: "https://cdn.example" }],
+  scripts: [
+    { src: "/analytics.js", defer: true },
+    // { content: "/* inline */", module: true },
+  ],
+  // raw: ['<meta ...>'],
+},
+// concise raw form:
+// head: ['<link rel="preconnect" href="https://cdn.example">'],
+```
+
+`head` injects into every page's `<head>` before CSP hashing. `scripts` supports
+`src`/`content`, `async`/`defer`, `type`/`module`, and `attrs`. Use it for
+analytics, fonts, and other site-wide tags.
+
+## Response headers & security
+
+> These apply to **`krate serve`** only. Static hosts (Netlify, Cloudflare,
+> Vercel) ignore them; configure headers there instead.
+
+`headers` applies custom response headers; `security` overrides the defaults
+(`"off"` disables a header).
+
+```typescript
+headers: [
+  { source: "/assets/*", headers: { "Cache-Control": "public, max-age=31536000, immutable" } },
+],
+security: {
+  frameOptions: "SAMEORIGIN",
+  referrerPolicy: "strict-origin-when-cross-origin",
+  permissionsPolicy: "camera=(), microphone=()",
+  hsts: "max-age=31536000; includeSubDomains",
+},
+```
+
+`krate deploy` writes explicit `headers` rules to `_headers` (Netlify /
+Cloudflare Pages) and to `vercel.json` (Vercel). Only explicit rules are emitted;
+`security` defaults stay serve-only so static-host behavior is not changed
+implicitly.
+
+## Images
+
+```typescript
+images: {
+  breakpoints: [640, 1080, 1920],
+  quality: 80,
+  sizes: "(max-width: 768px) 100vw, 50vw",
+  placeholder: true,
+  formats: ["webp", "original"],
+  remotePatterns: [{ hostname: "images.example.com" }],
+  // unoptimized: true,
+},
+```
+
+Controls the `<Image>` pipeline: generated widths, encode quality, default
+`sizes`, blur placeholder, output formats, and allowed remote hosts. A remote
+`src` not listed in `remotePatterns` is a build error; `unoptimized` passes the
+original image through.
+
+`remotePatterns` hostnames support `*.example.com` (one label) and
+`**.example.com` (any depth); `pathname` supports `*` (one segment) and `**`
+(any depth), e.g. `"/images/**"`. Output formats are WebP and the original
+format; **AVIF is not supported** (it needs a separate encoder).
+
 ## Dev server
 
 ```typescript
@@ -73,13 +182,16 @@ devServer: {
   overlay: true,   // show the dev error overlay (default true)
   toolbar: true,   // show the dev toolbar (default true)
   editor: "code",  // editor command for "open in editor" (default "code" = VS Code)
+  proxy: { "/api": "http://localhost:8080" }, // forward matching paths during dev
 }
 ```
 
 `editor` may include flags (for example `"code -g"`). It is used by the
-overlay's location links and by `GET /__krate/open`. In development, generated
-JavaScript is served unminified (with component comments) so devtools are
-readable; production output stays minified.
+overlay's location links and by `GET /__krate/open`. `proxy` forwards matching
+path prefixes to a backend only in dev (longest prefix wins), so you can run a
+separate backend without CORS. In development, generated JavaScript is served
+unminified (with component comments) so devtools are readable; production output
+stays minified.
 
 ## Tailwind CSS
 
@@ -112,7 +224,8 @@ markdown: {
   headingAnchors: true,
   admonitions: true,
   codeHighlight: true,
-  math: false,          // load KaTeX (CDN) and render $…$ / $$…$$
+  math: false,          // load KaTeX (CDN) and render $...$ / $$...$$
+  plugins: ["./md/transform.ts"], // AfterMarkdownParse HTML transforms
 }
 ```
 
@@ -121,6 +234,19 @@ definition lists, footnotes (`[^1]`), emoji shortcodes (`:rocket:`), and
 component directives — `:::card`, `:::steps` (`::step`), `:::tabs` (`::tab`),
 and `:::code-group`. The `Tabs`/`Steps`/`Card`/`Code` components are auto-imported
 for the docs plugin; elsewhere `:::component Name` wraps arbitrary components.
+
+`markdown.plugins` lists JS/TS modules (relative to the project root) whose
+default export transforms rendered HTML. Author them with `defineMarkdownPlugin`:
+
+```ts
+// md/transform.ts
+import { defineMarkdownPlugin } from "@krate/plugin";
+export default defineMarkdownPlugin((html) => html.replaceAll("TODO", "DONE"));
+```
+
+Each runs on the `AfterMarkdownParse` hook (async transforms are awaited) and
+applies to rendered Markdown for both `.md`/`.mdx` page files and docs-plugin
+pages.
 
 ## Runtime
 
@@ -214,20 +340,88 @@ instead of cross-fading. Reduced-motion preferences are respected.
 ## Plugins
 
 ```typescript
-import { sitemap, feed, docs } from "@krate/core";
+import { sitemap, feed, docs, robots, llms } from "@krate/core";
 
 plugins: [
   sitemap({ baseUrl: "https://example.com" }),
   feed({ baseUrl: "https://example.com", type: "all", count: 20 }),
+  robots({ disallow: "/admin" }),
+  llms({ title: "Krate Docs" }),
   docs({ contentDir: "src/content/docs", title: "Docs" }),
 ]
 ```
 
 The `feed` plugin emits `feed.xml` (RSS), `atom.xml`, and `feed.json` from the
 docs content and adds `<link rel="alternate">` discovery plus JSON-LD
-structured data to docs pages. The docs plugin also renders tag/category index
-pages (`/docs/tags/<slug>/`, `/docs/categories/<slug>/`) and fills each page's
+structured data to docs pages. `robots` and `llms` are typed factories like the
+others; their options override the top-level `robots`/site metadata. The docs
+plugin also renders tag/category index pages
+(`/docs/tags/<slug>/`, `/docs/categories/<slug>/`) and fills each page's
 "last updated" date from git history (disable with `docs({ lastUpdated: false })`).
+
+Docs layout options:
+
+```typescript
+docs({
+  // Sidebar: "auto" (default), "none", an explicit tree, or a JSON file.
+  sidebar: "auto",
+  // sidebar: [{ title: "Guides", children: [{ title: "Intro", url: "/docs/guides" }] }],
+  // sidebar: { from: "file", file: "sidebar.json" },
+
+  toc: true,          // table of contents (default true)
+  breadcrumbs: true,  // breadcrumbs (default true)
+  pagination: true,   // prev/next links (default true)
+  editLink: { pattern: "https://github.com/org/repo/edit/main/:path" },
+  search: { placeholder: "Search the docs", hotkey: "/" },
+})
+```
+
+`editLinkBase` is deprecated; use `editLink.base` (base URL + source path) or
+`editLink.pattern` (a URL template with `:path`). `search.hotkey` (e.g. `/` or
+`mod+k`) focuses the search input, and `search.placeholder` sets its placeholder.
+
+## Extends & presets
+
+```typescript
+extends: "./base.config.ts",
+// extends: ["@acme/krate-preset", "./local.config.ts"],
+```
+
+Bases are merged underneath this config: objects deep-merge (this config wins),
+and additive arrays (`plugins`, `redirects`, `rewrites`, `serverComponents`,
+`runtimeComponents`, `serverDirs`, `runtimeDirs`) concatenate. Duplicate
+`plugins` are de-duped by name, with the extending config winning. Paths resolve
+relative to the extending config, then to `node_modules` (package presets —
+resolved via `package.json` `krate`, `exports`, `module`, or `main`). Cycles are
+rejected.
+
+## Deploy
+
+```typescript
+deploy: {
+  target: "vercel",                  // netlify | vercel | cloudflare | gh-pages
+  options: { cleanUrls: "true", trailingSlash: "false" },
+},
+```
+
+`krate deploy` uses this target unless `--target` is passed; the adapter options
+customize the generated host files.
+
+## i18n & versions
+
+```typescript
+i18n: { defaultLocale: "en", locales: ["en", "fr"], localeLabels: { fr: "Français" } },
+versions: { current: "v2", versions: ["v2", "v1"], labels: { v1: "1.x (legacy)" } },
+```
+
+`localeLabels` / `labels` override the built-in display names in the locale and
+version switchers (docs plugin).
+
+`i18n` and `versions` are **docs-scoped**. For app pages, use `[locale]` dynamic
+routes + content collections (Krate does not auto-prefix arbitrary page routes).
+
+Docs pages emit `<html lang>` for their locale server-side. Any page can override
+it with `export const lang = "fr"` (or `export const config = { lang: "fr" }`).
 
 ## Redirects & rewrites
 
@@ -241,6 +435,9 @@ rewrites: [
 ```
 
 ## SEO & robots
+
+`seo` is retained for compatibility; prefer `site` (see [Site metadata](#site-metadata)),
+which also supports `titleTemplate`, `twitter`, `themeColor`, and `locale`.
 
 ```typescript
 seo: {
@@ -288,6 +485,7 @@ content: {
       title: "string",
       order: { type: "number", required: true },
       tags: "string[]",
+      status: { type: "string", enum: ["draft", "published"], default: "draft" },
     },
   },
 },
@@ -413,7 +611,8 @@ go: {
 `go` configures the unified Go host that compiles **Go API routes**
 (`src/api/**/*.go`) and **Go components** (`componentDirs/**/*.go`, see
 [Go Components](/docs/features/go-components/)) into one binary. It supersedes
-the older `goApi` block (still accepted; its values are folded into `go`).
+the older `goApi` block (deprecated; its values are folded into `go`, and a
+config that sets it gets a warning).
 
 Go is **enabled by default** with `componentDirs: ["src/components"]` and
 `apiDirs: ["src/api"]`, so no config is needed for the default layout. Run

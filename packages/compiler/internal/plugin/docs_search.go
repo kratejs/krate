@@ -26,6 +26,10 @@ type DocsSearchOptions struct {
 	Engine string `json:"engine"`
 	// MaxResults caps the number of results shown. Default: 8.
 	MaxResults int `json:"maxResults"`
+	// Placeholder is the search input placeholder (theme-rendered).
+	Placeholder string `json:"placeholder,omitempty"`
+	// Hotkey is the keyboard shortcut hint shown by the theme (e.g. "/" or "mod+k").
+	Hotkey string `json:"hotkey,omitempty"`
 	// Pagefind configures the "pagefind" engine. Ignored for other engines.
 	Pagefind *PagefindOptions `json:"pagefind"`
 }

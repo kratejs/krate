@@ -144,16 +144,21 @@ func docsRoute(locale, defaultLocale, version, currentVersion, path string) stri
 	return route
 }
 
-// localeSwitchLinks builds the LocaleSwitcher entries for a page from a
-// translation map (locale -> URL), falling back to each locale's docs root.
-func localeSwitchLinks(locales []string, defaultLocale string, byLocale map[string]string) []altLink {
+// localeSwitchLinksWithLabels builds the LocaleSwitcher entries for a page from
+// a translation map (locale -> URL), falling back to each locale's docs root.
+// Per-locale labels (i18n.localeLabels) override the built-in endonyms.
+func localeSwitchLinksWithLabels(locales []string, defaultLocale string, byLocale, labels map[string]string) []altLink {
 	out := make([]altLink, 0, len(locales))
 	for _, loc := range locales {
 		url := byLocale[loc]
 		if url == "" {
 			url = docs.LocaleURL(loc, defaultLocale, "index")
 		}
-		out = append(out, altLink{Code: loc, Label: localeLabel(loc), URL: url})
+		label := localeLabel(loc)
+		if l := labels[loc]; l != "" {
+			label = l
+		}
+		out = append(out, altLink{Code: loc, Label: label, URL: url})
 	}
 	return out
 }
@@ -163,6 +168,12 @@ func localeSwitchLinks(locales []string, defaultLocale string, byLocale map[stri
 // falls back to that version's root (its first page), so switching never lands
 // on the current version's page (the previous hardcoded "/docs/" fallback).
 func versionSwitchLinks(versions []string, currentVersion, locale, defaultLocale string, byVersion, rootByVersion map[string]string) []altLink {
+	return versionSwitchLinksWithLabels(versions, currentVersion, locale, defaultLocale, byVersion, rootByVersion, nil)
+}
+
+// versionSwitchLinksWithLabels is versionSwitchLinks with per-version display
+// labels (versions.labels) overriding the raw version code.
+func versionSwitchLinksWithLabels(versions []string, currentVersion, locale, defaultLocale string, byVersion, rootByVersion, labels map[string]string) []altLink {
 	out := make([]altLink, 0, len(versions))
 	for _, ver := range versions {
 		url := byVersion[ver]
@@ -177,7 +188,11 @@ func versionSwitchLinks(versions []string, currentVersion, locale, defaultLocale
 		if url == "" {
 			url = docsURL(locale, defaultLocale, ver, currentVersion, "index")
 		}
-		out = append(out, altLink{Code: ver, Label: ver, URL: url})
+		label := ver
+		if l := labels[ver]; l != "" {
+			label = l
+		}
+		out = append(out, altLink{Code: ver, Label: label, URL: url})
 	}
 	return out
 }

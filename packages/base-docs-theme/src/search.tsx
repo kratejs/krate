@@ -1,4 +1,4 @@
-import { createSignal, onMount, onCleanup } from "@krate/runtime";
+import { createSignal, onMount, onCleanup, useRef } from "@krate/runtime";
 
 /**
  * Headless docs search - the theme places this wherever it wants and styles it
@@ -12,6 +12,8 @@ export interface DocsSearchProps {
   placeholder?: string;
   maxResults?: number;
   label?: string;
+  /** Keyboard shortcut hint rendered next to the input (e.g. "mod+k"). */
+  hotkey?: string;
 }
 
 interface Hit {
@@ -37,6 +39,53 @@ function searchAPI(): Promise<any> {
   });
 }
 
+interface HotkeyCombo {
+  key: string;
+  meta: boolean;
+  ctrl: boolean;
+  alt: boolean;
+}
+
+/** Parse "mod+k", "ctrl+/", "alt+p", etc. "mod" is Cmd on macOS, Ctrl elsewhere. */
+function parseHotkey(hotkey: string | undefined): HotkeyCombo | null {
+  if (!hotkey) return null;
+  const parts = hotkey.toLowerCase().split("+").map((p) => p.trim());
+  let key = "";
+  let meta = false;
+  let ctrl = false;
+  let alt = false;
+  for (const part of parts) {
+    switch (part) {
+      case "mod": {
+        const isMac =
+          typeof navigator !== "undefined" &&
+          /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || "");
+        if (isMac) meta = true;
+        else ctrl = true;
+        break;
+      }
+      case "cmd":
+      case "meta":
+        meta = true;
+        break;
+      case "ctrl":
+      case "control":
+        ctrl = true;
+        break;
+      case "alt":
+      case "option":
+        alt = true;
+        break;
+      case "shift":
+        // Shift is not required (layout-friendly); allow it either way.
+        break;
+      default:
+        if (part) key = part;
+    }
+  }
+  return key ? { key, meta, ctrl, alt } : null;
+}
+
 export function DocsSearch(props: DocsSearchProps) {
   const placeholder = props.placeholder || "Search";
   const limit = props.maxResults || 8;
@@ -49,6 +98,7 @@ export function DocsSearch(props: DocsSearchProps) {
 
   let rootRef: HTMLElement | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   function run(q: string) {
     if (!q.trim()) {
@@ -108,8 +158,37 @@ export function DocsSearch(props: DocsSearchProps) {
       if (rootRef && !rootRef.contains(e.target as Node)) setOpen(false);
     }
     document.addEventListener("click", onDocClick);
+
+    const combo = parseHotkey(props.hotkey);
+    function onHotkey(e: KeyboardEvent) {
+      if (!combo) return;
+      if (e.key.toLowerCase() !== combo.key) return;
+      if (combo.meta && !e.metaKey) return;
+      if (combo.ctrl && !e.ctrlKey) return;
+      if (combo.alt && !e.altKey) return;
+      // Don't steal the key while typing in another field.
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      const input = inputRef.current;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }
+    if (combo) document.addEventListener("keydown", onHotkey);
+
     onCleanup(function () {
       document.removeEventListener("click", onDocClick);
+      if (combo) document.removeEventListener("keydown", onHotkey);
     });
   });
 
@@ -121,6 +200,7 @@ export function DocsSearch(props: DocsSearchProps) {
       <input
         class="krate-docs-search-input"
         type="search"
+        ref={inputRef}
         placeholder={placeholder}
         aria-label={label}
         autocomplete="off"
@@ -131,6 +211,7 @@ export function DocsSearch(props: DocsSearchProps) {
           if (results().length > 0) setOpen(true);
         }}
       />
+      {props.hotkey && <kbd class="krate-docs-search-kbd">{props.hotkey}</kbd>}
       {open() && (
         <div class="krate-docs-search-results" role="listbox">
           {loading() && results().length === 0 && (
