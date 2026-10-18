@@ -1,6 +1,9 @@
 package tsexec
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -36,5 +39,46 @@ func TestRunBootstrapEnvPassthrough(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(out)); got != "from-bootstrap" {
 		t.Errorf("process.env.KRATE_TEST_ENV = %q, want %q", got, "from-bootstrap")
+	}
+}
+
+// TestResolveTSXRunnerHonorsEnv verifies KRATE_TSX wins over discovery on every
+// platform, and that the "off" sentinel forces the npx path.
+func TestResolveTSXRunnerHonorsEnv(t *testing.T) {
+	want := filepath.Join(t.TempDir(), "custom-tsx")
+	t.Setenv("KRATE_TSX", want)
+	if got := resolveTSXRunner(t.TempDir()); got != want {
+		t.Fatalf("resolveTSXRunner = %q, want %q", got, want)
+	}
+	for _, off := range []string{"off", "0", "none", "OFF"} {
+		t.Setenv("KRATE_TSX", off)
+		if got := resolveTSXRunner(t.TempDir()); got != "" {
+			t.Fatalf("KRATE_TSX=%q: resolveTSXRunner = %q, want \"\" (force npx)", off, got)
+		}
+	}
+}
+
+// TestResolveTSXRunnerFindsLocalBin verifies a locally installed tsx is found by
+// walking up from cwd, so npx (and its shared, racy install cache) is skipped.
+func TestResolveTSXRunnerFindsLocalBin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows uses npx; .bin shims are not directly executable")
+	}
+	t.Setenv("KRATE_TSX", "")
+	root := t.TempDir()
+	binDir := filepath.Join(root, "node_modules", ".bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(binDir, "tsx")
+	if err := os.WriteFile(want, []byte("#!/usr/bin/env node\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "packages", "app")
+	if err := os.MkdirAll(nested, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveTSXRunner(nested); got != want {
+		t.Fatalf("resolveTSXRunner = %q, want %q", got, want)
 	}
 }
