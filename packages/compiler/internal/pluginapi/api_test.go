@@ -16,6 +16,9 @@ import (
 func setupProject(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
 	write := func(rel, content string) {
 		p := filepath.Join(root, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {

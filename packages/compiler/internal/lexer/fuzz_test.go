@@ -12,7 +12,9 @@ func FuzzLexer(f *testing.F) {
 	f.Add([]byte("function f(x: number): string { return x.toString(); }"))
 	f.Add([]byte("const s = \"unterminated"))
 	f.Add([]byte("const r = /unterminated"))
+	f.Add([]byte("#"))
 	f.Add([]byte(""))
+
 	f.Add([]byte{0xff, 0xfe, 0x00, 0x41})
 
 	f.Fuzz(func(t *testing.T, data []byte) {

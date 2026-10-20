@@ -6,6 +6,15 @@ import (
 	"testing"
 )
 
+func tempRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		return resolved
+	}
+	return root
+}
+
 func writePkg(t *testing.T, pkgDir string, files map[string]string) {
 	t.Helper()
 	if err := os.MkdirAll(pkgDir, 0755); err != nil {
@@ -24,7 +33,7 @@ func writePkg(t *testing.T, pkgDir string, files map[string]string) {
 }
 
 func TestNodeModuleUnscoped(t *testing.T) {
-	root := t.TempDir()
+	root := tempRoot(t)
 	writePkg(t, filepath.Join(root, "node_modules", "formslib"), map[string]string{
 		"package.json": `{"main": "dist/main.js"}`,
 		"dist/main.js": "export const x = 1;",
@@ -37,7 +46,7 @@ func TestNodeModuleUnscoped(t *testing.T) {
 }
 
 func TestNodeModuleScopedAtProjectRoot(t *testing.T) {
-	root := t.TempDir()
+	root := tempRoot(t)
 	writePkg(t, filepath.Join(root, "node_modules", "@scope", "theme"), map[string]string{
 		"package.json":  `{"module": "src/layout.js", "main": "legacy.js"}`,
 		"src/layout.js": "export default () => null;",
@@ -53,7 +62,7 @@ func TestNodeModuleScopedAtProjectRoot(t *testing.T) {
 func TestNodeModuleHoisted(t *testing.T) {
 	// A package nested under the project still finds a theme hoisted to the
 	// workspaces root's node_modules (walk-up resolution).
-	root := t.TempDir()
+	root := tempRoot(t)
 	inner := filepath.Join(root, "apps", "docs")
 	if err := os.MkdirAll(inner, 0755); err != nil {
 		t.Fatal(err)
@@ -70,7 +79,7 @@ func TestNodeModuleHoisted(t *testing.T) {
 }
 
 func TestNodeModuleMissing(t *testing.T) {
-	root := t.TempDir()
+	root := tempRoot(t)
 	if got := NodeModule(root, "nope"); got != "" {
 		t.Errorf("expected empty for missing package, got %q", got)
 	}
@@ -80,7 +89,7 @@ func TestNodeModuleMissing(t *testing.T) {
 }
 
 func TestNodeModuleIndexFallback(t *testing.T) {
-	root := t.TempDir()
+	root := tempRoot(t)
 	// No package.json; index.tsx fallback.
 	writePkg(t, filepath.Join(root, "node_modules", "baretheme"), map[string]string{
 		"index.tsx": "export default () => null;",

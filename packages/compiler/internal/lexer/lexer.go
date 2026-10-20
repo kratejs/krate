@@ -561,6 +561,9 @@ func (l *Lexer) Tokenize() []Token {
 }
 
 func (l *Lexer) next() rune {
+	if l.pos >= len(l.src) {
+		return 0
+	}
 	ch := l.src[l.pos]
 	l.pos++
 	l.col++

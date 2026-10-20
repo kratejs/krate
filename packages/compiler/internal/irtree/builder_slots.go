@@ -4670,24 +4670,6 @@ func renderFnAsHandler(fn *ast.FnDecl, signals map[string]ast.Expr) string {
 	return b.String()
 }
 
-// extractProps from JSX element
-
-func extractProps(el *ast.JSXElement) map[string]ast.Expr {
-	props := make(map[string]ast.Expr)
-	for _, attr := range el.Opening.Attributes {
-		if attr.Spread || isShowIfAttr(attr.Name) || isReactDirectiveAttr(attr.Name) {
-			continue
-		}
-		// A bare attribute (`<Child disabled />`) means boolean true.
-		if attr.Value == nil {
-			props[attr.Name] = &ast.Literal{Kind: ast.BoolLit, Value: "true"}
-			continue
-		}
-		props[attr.Name] = attr.Value
-	}
-	return props
-}
-
 // cloneStringMap copies a string map so a provider can override context
 // markers for its subtree without leaking them to siblings.
 func cloneStringMap(m map[string]string) map[string]string {
