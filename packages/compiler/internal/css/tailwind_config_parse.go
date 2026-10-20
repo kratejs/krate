@@ -10,7 +10,7 @@ import (
 // executing it, extracting the common `theme` / `extend` / `darkMode` shapes.
 // It deliberately handles a useful subset (object/array/string literals) so the
 // Go-native build needs no Node; anything it cannot parse returns ok=false and
-// the caller may fall back to `npx tsx`.
+// the caller may fall back to in-process evaluation.
 func ParseTailwindConfigStatic(path string) (*TailwindConfig, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -1,24 +1,29 @@
 package build
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/annotator"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
+	"github.com/kratejs/krate/packages/compiler/internal/execx"
+	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jseval"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
-	"github.com/kratejs/krate/packages/compiler/internal/tsexec"
 )
 
 // injectStaticParams seeds the root page component with concrete dynamic-route
@@ -141,13 +146,12 @@ func hasGenerateStaticParams(prog *ast.Program) bool {
 
 // executeGenerateStaticParams runs the page's generateStaticParams and returns
 // the parsed param combinations. It evaluates the function on the embedded
-// esbuild+QuickJS runtime first (no Node, no `npx tsx`, no npx install lock),
-// and falls back to `npx tsx` when the module can't be bundled or executed that
-// way - e.g. it imports a Node built-in, which esbuild leaves external and
-// QuickJS cannot resolve. bnd supplies the bundler's resolution rules (virtual
-// modules such as `krate/content`, tsconfig path aliases, krate/* packages);
-// tsconfig is passed to the tsx fallback so those resolve there too.
-func (b *Builder) executeGenerateStaticParams(pagePath string, bnd *bundler.Bundler, tsconfig string) ([]map[string]string, error) {
+// esbuild+QuickJS runtime first. If the module needs Node built-ins or other
+// runtime APIs QuickJS cannot provide, it bundles the bootstrap to ESM and runs
+// it with the configured runtime. bnd supplies the bundler's resolution rules
+// (virtual modules such as `krate/content`, tsconfig path aliases, krate/*
+// packages).
+func (b *Builder) executeGenerateStaticParams(pagePath string, bnd *bundler.Bundler) ([]map[string]string, error) {
 	abs, err := filepath.Abs(pagePath)
 	if err != nil {
 		return nil, err
@@ -159,11 +163,80 @@ func (b *Builder) executeGenerateStaticParams(pagePath string, bnd *bundler.Bund
 		}
 	}
 
-	output, _, err := tsexec.RunBootstrapOpts("krate-gsp-bootstrap", gspBootstrapTSX(tsexec.ImportPath(abs)), filepath.Dir(abs), 30*time.Second, environ.KVList(b.Env), tsconfig)
+	output, err := b.runGSPBundle(abs, bnd)
 	if err != nil {
 		return nil, fmt.Errorf("generateStaticParams execution: %w", err)
 	}
 	return parseParamSets(output)
+}
+
+// runGSPBundle bundles the generateStaticParams bootstrap to ESM JavaScript and
+// runs it with the configured runtime. Bundling with esbuild preserves TSX,
+// path aliases, and krate/* resolution while avoiding tsx entirely.
+func (b *Builder) runGSPBundle(abs string, bnd *bundler.Bundler) ([]byte, error) {
+	bootstrap := gspBootstrapJS(filepath.ToSlash(abs))
+	resolve := func(importer, spec string) (string, bool) {
+		if bnd != nil {
+			if p := bnd.Resolve(importer, spec); p != "" {
+				return p, true
+			}
+		}
+		return "", false
+	}
+	js, err := jseval.Bundle(jseval.Options{
+		Source:        bootstrap,
+		ResolveDir:    filepath.Dir(abs),
+		Sourcefile:    "krate-gsp-bootstrap.ts",
+		Loader:        api.LoaderTS,
+		ResolveImport: resolve,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("bundling bootstrap: %w", err)
+	}
+	genDir := filepath.Join(b.Root, ".krate", "gen")
+	if err := os.MkdirAll(genDir, 0755); err != nil {
+		return nil, fmt.Errorf("creating bootstrap directory: %w", err)
+	}
+	name := "gsp-" + hashContent([]byte(js)) + ".mjs"
+	path := filepath.Join(genDir, name)
+	if err := fsutil.WriteFileIfChanged(path, []byte(js), 0644); err != nil {
+		return nil, fmt.Errorf("writing bootstrap: %w", err)
+	}
+
+	runtime := b.gspRuntime()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var args []string
+	cmdName := "node"
+	switch runtime {
+	case "", "node":
+		args = []string{path}
+	case "bun":
+		cmdName = "bun"
+		args = []string{"run", path}
+	case "deno":
+		cmdName = "deno"
+		args = []string{"run", "--allow-net", "--allow-read", "--allow-env", "--allow-sys", path}
+	default:
+		return nil, fmt.Errorf("unsupported runtime %q for generateStaticParams (want node, bun, or deno)", runtime)
+	}
+	cmd := execx.Command(ctx, cmdName, args...)
+	cmd.Dir = filepath.Dir(abs)
+	if len(b.Env) > 0 {
+		cmd.Env = append(os.Environ(), environ.KVList(b.Env)...)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, errors.New("execution timed out after 30s")
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, fmt.Errorf("execution failed:\n%s", strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return nil, err
+	}
+	return out, nil
 }
 
 // gspEmbedded evaluates the page's generateStaticParams on the embedded
@@ -194,11 +267,27 @@ Promise.resolve(fn()).then(function (r) { globalThis.%s = r; }, function () {});
 	})
 }
 
-// gspBootstrapTSX is the `npx tsx` fallback bootstrap: it imports the page and
-// prints the JSON result of generateStaticParams.
-func gspBootstrapTSX(importPath string) string {
+// gspRuntime picks the build-time runtime for bundled generateStaticParams.
+// The SSR runtime is the explicit runtime setting; the global runtime is used
+// only when it names a supported sidecar (quickjs cannot run this bundle).
+func (b *Builder) gspRuntime() string {
+	if b.Cfg == nil {
+		return "node"
+	}
+	for _, rt := range []string{b.Cfg.SSR.SSRRuntime, b.Cfg.Runtime} {
+		switch strings.ToLower(strings.TrimSpace(rt)) {
+		case "node", "bun", "deno":
+			return strings.ToLower(strings.TrimSpace(rt))
+		}
+	}
+	return "node"
+}
+
+// gspBootstrapJS imports the page and prints the JSON result of
+// generateStaticParams. It is bundled to ESM before execution.
+func gspBootstrapJS(importPath string) string {
 	return fmt.Sprintf(
-		`import * as mod from '%s';
+		`import * as mod from %q;
 const fn = mod.generateStaticParams || (mod.default && mod.default.generateStaticParams);
 if (typeof fn !== 'function') {
   process.stderr.write('generateStaticParams is not a function\n');
@@ -332,7 +421,7 @@ func (b *Builder) resolveStaticParamsPage(page string) staticParamsResolution {
 	}
 	res.note = true
 
-	paramSets, err := b.executeGenerateStaticParams(page, bnd, b.tsxTsconfig)
+	paramSets, err := b.executeGenerateStaticParams(page, bnd)
 	if err != nil {
 		res.errs = append(res.errs, fmt.Sprintf("generateStaticParams (%s): %v", filepath.Base(page), err))
 		return res

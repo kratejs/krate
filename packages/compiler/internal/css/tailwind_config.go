@@ -94,7 +94,7 @@ func LoadTailwindConfigWithOptions(root string, opts TailwindOptions) *TailwindC
 }
 
 // executeTailwindConfig evaluates the config in-process via jseval (esbuild
-// bundle + embedded QuickJS) - no Node/`npx tsx`. It returns ok=false when the
+// bundle + embedded QuickJS) - no Node subprocess. It returns ok=false when the
 // config can't be bundled or executed, so the caller falls back to the static
 // parser.
 func executeTailwindConfig(root, configPath string) (*TailwindConfig, bool) {

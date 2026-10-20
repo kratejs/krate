@@ -19,8 +19,9 @@ before it.
 
 ## `config uses imports/requires but could not be executed`
 
-The compiler could not run `krate.config.ts` (it needs `npx tsx` and your
-installed dependencies). Run `npm install` in the project root, then retry.
+The compiler could not evaluate `krate.config.ts` in-process (esbuild plus the
+embedded JS runtime). This usually means a dependency is missing. Run
+`npm install` in the project root, then retry.
 
 ## `@krate/runtime` / `@krate/components` not found
 

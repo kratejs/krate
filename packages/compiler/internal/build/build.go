@@ -37,7 +37,6 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
-	"github.com/kratejs/krate/packages/compiler/internal/tsexec"
 )
 
 type PageResult struct {
@@ -158,11 +157,6 @@ type Builder struct {
 	// created with `{ persist }` prefer this server-chosen value on hydration.
 	stateOnce   sync.Once
 	stateScript string
-
-	// tsxTsconfig is the absolute path to the generated `.krate/tsconfig.json`
-	// used by `npx tsx` bootstraps so user source resolves Krate aliases
-	// (krate/content) and the project's own path aliases.
-	tsxTsconfig string
 
 	// staticOnlyRoutes collects dynamic route patterns (e.g. "/blog/[slug]")
 	// whose params are closed, so the manifest and server can 404 unknown params.
@@ -610,14 +604,6 @@ func (b *Builder) BuildAll() error {
 
 	b.resetBuildCaches()
 
-	// Generate `.krate/tsconfig.json` so `npx tsx` bootstraps (config load,
-	// generateStaticParams) resolve `krate/content` and the project's path
-	// aliases. Non-fatal on failure.
-	if tsPath, err := b.writeTsxTsconfig(); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sWarning: failed to write .krate/tsconfig.json:%s %v\n", cYellow, cReset, err)
-	} else {
-		b.tsxTsconfig = tsPath
-	}
 	if err := writeConfigSchema(b.Root); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sWarning: failed to write .krate/config.schema.json:%s %v\n", cYellow, cReset, err)
 	}
@@ -953,7 +939,7 @@ func (b *Builder) BuildAll() error {
 	if len(serverBundles) > 0 {
 		printf("  %s⚡%s Compiled %d server bundles\n", cCyan, cReset, len(serverBundles))
 		// Stage the bundled SSR renderer driver so `krate serve` runs it with
-		// plain node instead of npx tsx on the TS source.
+		// plain node instead of requiring a TypeScript runtime.
 		if staged := stageServerRenderer(b.Root, b.Cfg.OutDir); staged != "" {
 			printf("  %s⚡%s Staged SSR renderer driver\n", cCyan, cReset)
 		} else {
@@ -2135,9 +2121,6 @@ func (b *Builder) resetBuildCaches() {
 	// cache persists across builds; re-running the (idempotent) transforms on
 	// already-transformed ASTs is a no-op, and the guard keeps it race-free.
 	b.transformOnce = sync.Map{}
-	// tsx bootstrap results may depend on user source that changed since the
-	// last build, so drop any memoized outputs.
-	tsexec.Invalidate()
 	// Go component parses are per-build.
 	b.goParseCache = nil
 	// Filesystem-existence and import-resolution memos are per-build: a file

@@ -330,7 +330,7 @@ func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 // loadProjectEnv resolves the project environment mode (KRATE_ENV/NODE_ENV)
 // and loads the merged .env values. The result becomes the process-wide
 // environ.Current (read by serve-time JS VMs and sidecars) and the Builder's
-// Env (merged into build-time npx tsx subprocesses). Loaded before any
+// Env (merged into build-time subprocesses). Loaded before any
 // `<ServerComponent>` executes so setup code sees process.env.
 func loadProjectEnv(root, defaultMode string, verbose bool) map[string]string {
 	environ.Verbose = verbose

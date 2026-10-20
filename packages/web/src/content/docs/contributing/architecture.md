@@ -86,7 +86,7 @@ PostCSS, no Node at build time).
 - The CSS generator maps classes to rules from a built-in rule set. Output is
   **deterministic** — identical inputs always produce the same stylesheet.
 - Theme configuration lives in `tailwind.config.ts`, **statically parsed** by
-  default; set `tailwind.executeConfig: true` to execute it via `npx tsx`.
+  default; set `tailwind.executeConfig: true` to evaluate it in-process.
   `theme.extend` merges onto the defaults; top-level `theme` keys replace them.
 
 ## Docs search

@@ -10,8 +10,7 @@ This guide walks you through setting up and building your first Krate project.
 ## Prerequisites
 
 - **Go 1.21+** — for building the compiler
-- **Node.js 18+** — for running the runtime bundler
-- **npx** — for executing config files and plugins
+- **Node.js 20+, Bun, or Deno** — for API/SSR sidecars and bundled build scripts
 
 ## Installation
 

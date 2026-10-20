@@ -128,9 +128,9 @@ export default function demoPlugin(options: DemoPluginOptions = {}) {
   return definePlugin({
     name: "demo",
     order: 10,
-    // Point back at this file so the compiler can bundle it. In the Node/tsx
-    // config bootstrap this is the real file:// URL; inside the esbuild IIFE
-    // (QuickJS) it's empty, which is fine - the compiler already resolved it.
+    // Point back at this file so the compiler can bundle it. In the config
+    // bootstrap this is the real file:// URL; inside the esbuild IIFE (QuickJS)
+    // it's empty, which is fine - the compiler already resolved it.
     module: typeof import.meta !== "undefined" && import.meta.url ? import.meta.url : "",
     options,
   });

@@ -85,6 +85,13 @@ func Eval(opts Options) (out json.RawMessage, err error) {
 	return json.RawMessage(s), nil
 }
 
+// Bundle compiles the entry module and returns plain ESM JavaScript without
+// executing it. Node built-ins remain external so the selected runtime can
+// resolve them.
+func Bundle(opts Options) (string, error) {
+	return bundle(opts)
+}
+
 func bundle(opts Options) (string, error) {
 	sourcefile := opts.Sourcefile
 	if sourcefile == "" {

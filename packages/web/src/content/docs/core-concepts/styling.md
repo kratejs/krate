@@ -87,7 +87,7 @@ stripped and `@layer { … }` blocks are unwrapped (Krate owns the layer order).
   **deterministic** — identical inputs always produce the same stylesheet.
 - Theme configuration lives in `tailwind.config.ts`. It is **statically
   parsed** by default (no Node required); set `tailwind.executeConfig: true` to
-  execute it via `npx tsx` instead. `theme.extend` merges onto the defaults;
+  evaluate it in-process instead. `theme.extend` merges onto the defaults;
   top-level `theme` keys replace them.
 
 ```tsx

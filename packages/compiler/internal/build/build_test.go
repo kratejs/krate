@@ -481,7 +481,7 @@ func TestStageServerRenderer(t *testing.T) {
 		t.Errorf("staged driver missing bundled SSR runtime (renderToString)")
 	}
 
-	// Node must be able to parse the driver without tsx.
+	// Node must be able to parse the bundled driver.
 	node, err := exec.LookPath("node")
 	if err != nil {
 		requireE2E(t, "node not available: %v", err)

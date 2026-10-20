@@ -206,9 +206,9 @@ data access.
 
 :::note
 Both places that run user TypeScript at build time resolve `krate/content`: the
-Go bundler for page/component code, and `npx tsx` for `generateStaticParams`
-(via the generated `.krate/tsconfig.json`, which also carries your project's own
-path aliases).
+Go bundler for page/component code, and the esbuild bootstrap for
+`generateStaticParams` (which also carries your project's own path aliases).
+The bootstrap is emitted as ESM and run on the configured runtime.
 :::
 
 ## Static output & dynamic params

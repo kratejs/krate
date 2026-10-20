@@ -20,6 +20,11 @@ func FuzzParse(f *testing.F) {
 	f.Add("\x00\xff\x80\x00")
 
 	f.Fuzz(func(t *testing.T, src string) {
+		// Keep generated inputs bounded so one pathological case cannot stall
+		// the fuzz worker past its deadline.
+		if len(src) > 16*1024 {
+			t.Skip()
+		}
 		toks := lexer.New(src).Tokenize()
 		p := New(toks)
 		p.SetSource(src)

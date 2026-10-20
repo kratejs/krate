@@ -16,7 +16,6 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/execx"
-	"github.com/kratejs/krate/packages/compiler/internal/tsexec"
 )
 
 // errSSRNotRunning is the shared sentinel returned by SSR operations that need a
@@ -142,7 +141,7 @@ func (s *SSRServer) NeedsNodeRenderer() bool {
 
 // Start launches the SSR renderer server process under the configured runtime
 // (node | bun | deno). Prefers the staged driver (.krate/server-renderer.mjs)
-// bundled at build time so plain runtimes work without tsx.
+// bundled at build time so plain runtimes can execute it directly.
 func (s *SSRServer) Start() error {
 	s.mu.Lock()
 
@@ -167,15 +166,6 @@ func (s *SSRServer) Start() error {
 	if err != nil {
 		s.mu.Unlock()
 		return err
-	}
-
-	// The legacy unstaged path launches the renderer via `npx tsx`, which shares
-	// tsx's npx install dir with every other npx caller. Hold the machine-wide
-	// npx lock across the install + startup so concurrent renderers/builds don't
-	// race on the same install (ENOTEMPTY). Released when Start returns.
-	if runtimeCmd == "npx" {
-		release := tsexec.AcquireExecLock(4 * time.Minute)
-		defer release()
 	}
 
 	env := os.Environ()
@@ -427,28 +417,29 @@ func (s *SSRServer) FindPageForRoute(urlPath string) (*ManifestPage, map[string]
 }
 
 func (s *SSRServer) findRendererScript() string {
-	// Prefer the bundled driver staged into dist by the build (runs with plain
-	// node, no npx/tsx dependency at serve time).
+	// Prefer the bundled driver staged into dist by the build. If it is missing
+	// (for example an older dist), bundle the renderer now so serve never needs
+	// a TypeScript runtime.
 	staged := filepath.Join(s.root, "dist", ".krate", "server-renderer.mjs")
-	if _, err := os.Stat(staged); err == nil {
-		abs, _ := filepath.Abs(staged)
-		return abs
+	if _, err := os.Stat(staged); err != nil {
+		staged = stageServerRenderer(s.root, filepath.Join(s.root, "dist"))
+		if staged == "" {
+			return ""
+		}
 	}
-	return findServerRendererSource(s.root)
+	abs, _ := filepath.Abs(staged)
+	return abs
 }
 
-// ssrRuntimeCommand returns the exec command + args that launch the SSR
+// ssrRuntimeCommand returns the exec command + args that launch the bundled SSR
 // renderer script under the configured runtime. bun and deno get the flags the
 // renderer needs (network to listen, filesystem to read dist + the ISR cache).
-// When the script is raw TypeScript source (no staged driver), node runs it via
-// tsx (legacy dev path).
 func ssrRuntimeCommand(runtime, rendererPath string) (string, []string, error) {
-	isTS := strings.HasSuffix(strings.ToLower(rendererPath), ".ts")
+	if strings.EqualFold(filepath.Ext(rendererPath), ".ts") {
+		return "", nil, fmt.Errorf("SSR renderer must be bundled JavaScript, got %s", rendererPath)
+	}
 	switch runtime {
 	case "", "node":
-		if isTS {
-			return "npx", []string{"--yes", "tsx", rendererPath}, nil
-		}
 		return "node", []string{rendererPath}, nil
 	case "bun":
 		return "bun", append([]string{"run"}, rendererPath), nil
@@ -509,8 +500,8 @@ func findServerRendererSource(root string) string {
 // stageServerRenderer bundles the @krate/runtime server-renderer entrypoint into
 // a standalone node-runnable ESM driver at <outDir>/.krate/server-renderer.mjs.
 // The driver bundles the SSR runtime (server.ts) so `krate serve` only needs a
-// plain `node <driver>` process instead of `npx tsx <source>.ts`. Returns the
-// absolute staged path, or "" if the source couldn't be located or bundled.
+// plain runtime process. Returns the absolute staged path, or "" if the source
+// couldn't be located or bundled.
 func stageServerRenderer(root, outDir string) string {
 	source := findServerRendererSource(root)
 	if source == "" {

@@ -71,8 +71,8 @@ See the `krate-examples` project for a working setup: `examples/.env` and
 - **Plugins** — Go plugin hooks and JS/TS community plugins running in
   QuickJS.
 - **SSR / ISR / streaming pages** — the renderer sidecar subprocess.
-- **`generateStaticParams`** — the `npx tsx` subprocess that computes
-  statically generated params.
+- **`generateStaticParams`** — the embedded or bundled-runtime evaluation that
+  computes statically generated params.
 
 In every case the embedded/child process sees the merged map: shell env
 overridden only where files define a variable the shell does not.

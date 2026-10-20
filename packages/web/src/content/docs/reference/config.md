@@ -203,7 +203,7 @@ tailwind: {
   preflight: true,         // emit the Tailwind base reset (default; false to opt out)
   strict: false,           // warn about classes that produce no rule
   darkMode: "media",       // "media" | "class" | "selector"
-  executeConfig: false,    // execute tailwind.config via npx tsx (else static parse)
+  executeConfig: false,    // evaluate tailwind.config in-process (else static parse)
 }
 ```
 

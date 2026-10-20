@@ -50,8 +50,7 @@ func runDoctor(flags cliFlags, args []string) {
 	}
 
 	// Runtimes.
-	checkTool("node", "API/SSR sidecar + tsx config execution")
-	checkTool("npx", "tsx config bootstrap")
+	checkTool("node", "API/SSR sidecar + generateStaticParams")
 	if _, err := exec.LookPath("go"); err == nil {
 		fmt.Printf("  %s✓ go%s         available (Go API routes + components)\n", cGreen, cReset)
 		if out, err := execx.Output(context.Background(), 5*time.Second, "", nil, "go", "version"); err == nil {

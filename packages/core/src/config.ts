@@ -104,7 +104,7 @@ export interface TailwindConfig {
   strict?: boolean;
   /** "media" (default) | "class" | "selector". */
   darkMode?: string;
-  /** Run tailwind.config via `npx tsx` instead of static parse. */
+  /** Evaluate tailwind.config in-process instead of static parse. */
   executeConfig?: boolean;
 }
 

@@ -24,8 +24,8 @@ Notable internal subsystems (`packages/compiler/internal/`):
 ## Prerequisites
 
 - **Go** - the version in `packages/compiler/go.mod`.
-- **Node.js 20+** and **pnpm** - for the JS packages, the compiler's edge-case
-  sidecars (`generateStaticParams` still shells out to `npx tsx`), and the
+- **Node.js 20+** and **pnpm** - for the JS packages, the compiler's sidecars
+  (`generateStaticParams` runs bundled ESM on the configured runtime), and the
   benchmark harness.
 
 ## Repository layout

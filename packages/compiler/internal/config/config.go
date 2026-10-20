@@ -122,7 +122,7 @@ type TailwindCfg struct {
 	Strict bool `json:"strict,omitempty"`
 	// DarkMode is "media" (default), "class", or "selector".
 	DarkMode string `json:"darkMode,omitempty"`
-	// ExecuteConfig runs tailwind.config via `npx tsx` instead of static parse.
+	// ExecuteConfig evaluates tailwind.config in-process instead of static parse.
 	ExecuteConfig bool `json:"executeConfig,omitempty"`
 }
 

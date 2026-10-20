@@ -8,7 +8,6 @@ import (
 
 func TestSSRRuntimeCommand(t *testing.T) {
 	staged := filepath.Join("dist", ".krate", "server-renderer.mjs")
-	rawTS := filepath.Join("src", "server-renderer.ts")
 
 	tests := []struct {
 		name        string
@@ -30,13 +29,6 @@ func TestSSRRuntimeCommand(t *testing.T) {
 			renderer:    staged,
 			wantCmd:     "node",
 			wantArgsSub: []string{staged},
-		},
-		{
-			name:        "node legacy ts source uses tsx",
-			runtime:     "node",
-			renderer:    rawTS,
-			wantCmd:     "npx",
-			wantArgsSub: []string{"tsx", rawTS},
 		},
 		{
 			name:        "bun",
@@ -74,6 +66,9 @@ func TestSSRRuntimeCommand(t *testing.T) {
 
 	if _, _, err := ssrRuntimeCommand("python", staged); err == nil {
 		t.Error("expected error for unsupported runtime")
+	}
+	if _, _, err := ssrRuntimeCommand("node", filepath.Join("src", "server-renderer.ts")); err == nil {
+		t.Error("expected error for an unbundled TypeScript renderer")
 	}
 }
 

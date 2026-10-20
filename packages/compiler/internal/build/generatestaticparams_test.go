@@ -114,7 +114,7 @@ export function generateStaticParams() {
 	cfg.OutDir = filepath.Join(tmpDir, "dist")
 	b := New(tmpDir, cfg)
 
-	paramSets, err := b.executeGenerateStaticParams(pagePath, b.newBundler(), "")
+	paramSets, err := b.executeGenerateStaticParams(pagePath, b.newBundler())
 	if err != nil {
 		t.Fatalf("executeGenerateStaticParams: %v", err)
 	}
@@ -131,15 +131,13 @@ export function generateStaticParams() {
 	}
 }
 
-// TestExecuteGenerateStaticParamsNodeFallback covers the hybrid: a
+// TestExecuteGenerateStaticParamsNodeFallback covers the runtime fallback: a
 // generateStaticParams that imports a Node built-in can't run on the embedded
-// QuickJS runtime (esbuild leaves the built-in external), so it must fall back
-// to `npx tsx` and still resolve.
+// QuickJS runtime (esbuild leaves the built-in external), so it must bundle to
+// ESM and run under the configured runtime.
 func TestExecuteGenerateStaticParamsNodeFallback(t *testing.T) {
-	for _, tool := range []string{"node", "npx"} {
-		if _, err := exec.LookPath(tool); err != nil {
-			t.Skipf("%s not available", tool)
-		}
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
 	}
 	tmpDir := t.TempDir()
 	pagesDir := filepath.Join(tmpDir, "src", "pages")
@@ -165,7 +163,7 @@ export function generateStaticParams() {
 	cfg.OutDir = filepath.Join(tmpDir, "dist")
 	b := New(tmpDir, cfg)
 
-	paramSets, err := b.executeGenerateStaticParams(pagePath, b.newBundler(), "")
+	paramSets, err := b.executeGenerateStaticParams(pagePath, b.newBundler())
 	if err != nil {
 		t.Fatalf("executeGenerateStaticParams (node fallback): %v", err)
 	}
@@ -174,6 +172,53 @@ export function generateStaticParams() {
 	}
 }
 
+func TestExecuteGenerateStaticParamsBundleResolvesAlias(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+	tmpDir := t.TempDir()
+	pagesDir := filepath.Join(tmpDir, "src", "pages")
+	libDir := filepath.Join(tmpDir, "src", "lib")
+	if err := os.MkdirAll(filepath.Join(pagesDir, "video"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(libDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	helper := `import { homedir } from "node:os";
+export function params() {
+  return [{ id: homedir() ? "alias-ok" : "no" }];
+}
+`
+	if err := os.WriteFile(filepath.Join(libDir, "params.ts"), []byte(helper), 0644); err != nil {
+		t.Fatal(err)
+	}
+	page := `import { params } from "@lib/params";
+export function generateStaticParams() {
+  return params();
+}
+`
+	pagePath := filepath.Join(pagesDir, "video", "[id].tsx")
+	if err := os.WriteFile(pagePath, []byte(page), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	cfg.PagesDir = pagesDir
+	cfg.OutDir = filepath.Join(tmpDir, "dist")
+	cfg.TSBaseDir = tmpDir
+	cfg.PathAliases = config.PathAliases{{Prefix: "@lib/*", Targets: []string{"./src/lib/*"}}}
+	b := New(tmpDir, cfg)
+
+	paramSets, err := b.executeGenerateStaticParams(pagePath, b.newBundler())
+	if err != nil {
+		t.Fatalf("executeGenerateStaticParams: %v", err)
+	}
+	if len(paramSets) != 1 || paramSets[0]["id"] != "alias-ok" {
+		t.Fatalf("unexpected param sets: %+v", paramSets)
+	}
+}
 func TestResolveStaticParamsPages(t *testing.T) {
 	tmpDir := t.TempDir()
 	pagesDir := filepath.Join(tmpDir, "src", "pages")

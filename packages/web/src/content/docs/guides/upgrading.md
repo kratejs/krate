@@ -54,7 +54,8 @@ When upgrading across a minor:
 
 | Package | Requirement |
 |---------|-------------|
-| Node (for `npx tsx` config + sidecars) | 20+ |
+| Node (sidecars and bundled build scripts) | 20+ |
+| Bun or Deno (optional sidecar runtimes) | current |
 | Go (to build the compiler from source) | see `packages/compiler/go.mod` |
 | Browsers | see [Browser Support](/docs/core-concepts/browser-support/) |
 
