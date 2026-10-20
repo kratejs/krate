@@ -375,9 +375,16 @@ type ExportStmt struct {
 	Declaration    Stmt
 	Default        bool
 	Local          string
-	StarReexport   bool   // export * from 'source'
-	Namespace      string // export * as Namespace from 'source'
-	ReexportSource string // source path for re-exports (export * from '...' or export { X } from '...')
+	Named          []NamedExport // `export { A, B as C }` pairs (local -> exported)
+	StarReexport   bool          // export * from 'source'
+	Namespace      string        // export * as Namespace from 'source'
+	ReexportSource string        // source path for re-exports (export * from '...' or export { X } from '...')
+}
+
+// NamedExport is one specifier in `export { Local, Local as Remote }`.
+type NamedExport struct {
+	Local  string
+	Remote string
 }
 
 func (e *ExportStmt) node()    {}
@@ -416,6 +423,41 @@ type FnDecl struct {
 func (f *FnDecl) node()    {}
 func (f *FnDecl) stmt()    {}
 func (f *FnDecl) Pos() Pos { return f.Position }
+
+// ClassMemberKind distinguishes methods, fields, and constructors.
+type ClassMemberKind int
+
+const (
+	ClassMethod ClassMemberKind = iota
+	ClassField
+	ClassConstructor
+)
+
+// ClassMember is one member of a class body.
+type ClassMember struct {
+	Position Pos
+	Kind     ClassMemberKind
+	Name     string
+	Private  bool
+	Static   bool
+	Async    bool
+	Params   []*Param
+	Body     []Stmt
+	Init     Expr
+}
+
+// ClassDecl is a class declaration. Krate lowers React class components from
+// it; other classes are retained so compiled code is not silently dropped.
+type ClassDecl struct {
+	Position   Pos
+	Name       string
+	SuperClass Expr
+	Members    []*ClassMember
+}
+
+func (c *ClassDecl) node()    {}
+func (c *ClassDecl) stmt()    {}
+func (c *ClassDecl) Pos() Pos { return c.Position }
 
 type ReturnStmt struct {
 	Position Pos

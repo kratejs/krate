@@ -55,6 +55,13 @@ func TestPrintJSXAndExpr(t *testing.T) {
 	}
 }
 
+func TestPrintZeroParamArrow(t *testing.T) {
+	out := roundTrip(t, "const f = () => 1;\n")
+	if !strings.Contains(out, "() => 1") {
+		t.Errorf("zero-parameter arrow lost its parameter list: %q", out)
+	}
+}
+
 func TestPrintArrowAndObject(t *testing.T) {
 	src := `const f = (x) => x * 2;
 const o = { a: 1, b: 'two', c };

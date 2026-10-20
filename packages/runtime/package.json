@@ -49,6 +49,18 @@
     "./jsx-types": {
       "types": "./dist/jsx-types.d.ts",
       "default": "./dist/jsx-types.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "default": "./dist/react.js"
+    },
+    "./react/jsx-runtime": {
+      "types": "./dist/react-jsx-runtime.d.ts",
+      "default": "./dist/react-jsx-runtime.js"
+    },
+    "./slot": {
+      "types": "./dist/slot.d.ts",
+      "default": "./dist/slot.js"
     }
   },
   "files": [

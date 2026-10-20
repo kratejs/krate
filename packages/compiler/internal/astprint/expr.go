@@ -1,6 +1,7 @@
 package astprint
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -152,15 +153,18 @@ func (p *printer) exprPrec(e ast.Expr, parentPrec int, right bool) string {
 
 func (p *printer) arrow(a *ast.ArrowFn) string {
 	params := printParams(a.Params)
+	if params == "" {
+		params = "()"
+	}
 	if a.Async {
 		params = "async (" + params + ")"
 	}
 	if a.Expression && len(a.Body) == 1 {
 		if es, ok := a.Body[0].(*ast.ExprStmt); ok {
-			return params + " => " + p.expr(es.Expression)
+			return params + " => " + arrowBodyExpr(p, es.Expression)
 		}
 		if rs, ok := a.Body[0].(*ast.ReturnStmt); ok {
-			return params + " => " + p.expr(rs.Value)
+			return params + " => " + arrowBodyExpr(p, rs.Value)
 		}
 	}
 	body := &printer{}
@@ -180,14 +184,14 @@ func (p *printer) object(o *ast.ObjectExpr) string {
 		}
 		key := prop.Key
 		if prop.Method {
-			parts = append(parts, key+"("+p.arrowParams(prop.Value)+") "+p.arrowBlock(prop.Value))
+			parts = append(parts, printObjectKey(key)+"("+p.arrowParams(prop.Value)+") "+p.arrowBlock(prop.Value))
 			continue
 		}
 		if prop.Shorthand {
 			parts = append(parts, key)
 			continue
 		}
-		parts = append(parts, key+": "+p.expr(prop.Value))
+		parts = append(parts, printObjectKey(key)+": "+p.expr(prop.Value))
 	}
 	return "{ " + strings.Join(parts, ", ") + " }"
 }
@@ -401,4 +405,35 @@ func quoteString(s string) string {
 	}
 	b.WriteByte('"')
 	return b.String()
+}
+
+func arrowBodyExpr(p *printer, e ast.Expr) string {
+	s := p.expr(e)
+	if _, ok := e.(*ast.ObjectExpr); ok {
+		return "(" + s + ")"
+	}
+	return s
+}
+
+func printObjectKey(key string) string {
+	if isJSIdent(key) {
+		return key
+	}
+	return strconv.Quote(key)
+}
+
+func isJSIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		if i == 0 {
+			if !(r == '_' || r == '$' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+				return false
+			}
+		} else if !(r == '_' || r == '$' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
 }

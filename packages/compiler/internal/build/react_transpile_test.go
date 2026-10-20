@@ -395,6 +395,226 @@ func TestUseContextTranspile(t *testing.T) {
 	assertRuntimeBundleHasContext(t)
 }
 
+// TestUseContextProviderValueTranspile verifies a literal Provider value wins
+// over the context default for reads inside its subtree during static render.
+func TestUseContextProviderValueTranspile(t *testing.T) {
+	root := t.TempDir()
+	pages := filepath.Join(root, "src", "pages")
+	if err := os.MkdirAll(pages, 0755); err != nil {
+		t.Fatal(err)
+	}
+	page := `
+		import { createContext } from 'react';
+		const ThemeCtx = createContext('light');
+		export default function Page() {
+			return (
+				<ThemeCtx.Provider value="dark">
+					<span>{ThemeCtx.useContext()}</span>
+				</ThemeCtx.Provider>
+			);
+		}
+	`
+	if err := os.WriteFile(filepath.Join(pages, "index.tsx"), []byte(page), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = pages
+	cfg.OutDir = filepath.Join(root, "dist")
+	b := New(root, cfg)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	html, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), "dark") {
+		t.Errorf("provider value should render instead of the default:\n%s", html)
+	}
+}
+
+// TestDynamicContextProviderTranspile verifies a signal-backed Provider value
+// substitutes for context reads inside its subtree during static render and
+// hydration codegen.
+func TestDynamicContextProviderTranspile(t *testing.T) {
+	root := t.TempDir()
+	pages := filepath.Join(root, "src", "pages")
+	if err := os.MkdirAll(pages, 0755); err != nil {
+		t.Fatal(err)
+	}
+	page := `
+		import { createContext, useState } from 'react';
+		const ThemeCtx = createContext('light');
+		export default function Page() {
+			const [theme, setTheme] = useState('dark');
+			return (
+				<ThemeCtx.Provider value={theme}>
+					<span>{ThemeCtx.useContext()}</span>
+				</ThemeCtx.Provider>
+			);
+		}
+	`
+	if err := os.WriteFile(filepath.Join(pages, "index.tsx"), []byte(page), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = pages
+	cfg.OutDir = filepath.Join(root, "dist")
+	b := New(root, cfg)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	html, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), "dark") {
+		t.Errorf("dynamic provider value should render instead of the default:\n%s", html)
+	}
+}
+
+// TestCrossComponentDynamicContextTranspile verifies a dynamic provider value
+// reaches a child component (through the synthetic context prop), not just
+// reads in the same component.
+func TestCrossComponentDynamicContextTranspile(t *testing.T) {
+	root := t.TempDir()
+	pages := filepath.Join(root, "src", "pages")
+	if err := os.MkdirAll(pages, 0755); err != nil {
+		t.Fatal(err)
+	}
+	page := `
+		import { createContext, useState } from 'react';
+		const ThemeCtx = createContext('light');
+		function Child() {
+			return <span>{ThemeCtx.useContext()}</span>;
+		}
+		export default function Page() {
+			const [theme, setTheme] = useState('dark');
+			return (
+				<ThemeCtx.Provider value={theme}>
+					<Child />
+				</ThemeCtx.Provider>
+			);
+		}
+	`
+	if err := os.WriteFile(filepath.Join(pages, "index.tsx"), []byte(page), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = pages
+	cfg.OutDir = filepath.Join(root, "dist")
+	b := New(root, cfg)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	html, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), "dark") {
+		t.Errorf("dynamic provider value should reach the child:\n%s", html)
+	}
+}
+
+// TestPortalRendersAndMounts verifies a built-in <Portal> emits its content and
+// a mount call (the client moves it to document.body).
+func TestPortalRendersAndMounts(t *testing.T) {
+	root := t.TempDir()
+	pages := filepath.Join(root, "src", "pages")
+	if err := os.MkdirAll(pages, 0755); err != nil {
+		t.Fatal(err)
+	}
+	page := `
+		export default function Page() {
+			return (
+				<div>
+					<Portal><div class="overlay">Overlay</div></Portal>
+				</div>
+			);
+		}
+	`
+	if err := os.WriteFile(filepath.Join(pages, "index.tsx"), []byte(page), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = pages
+	cfg.OutDir = filepath.Join(root, "dist")
+	b := New(root, cfg)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	html, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), "data-krate-portal") || !strings.Contains(string(html), "Overlay") {
+		t.Errorf("portal content should render:\n%s", html)
+	}
+	jsFiles, _ := filepath.Glob(filepath.Join(cfg.OutDir, "index.*.js"))
+	if len(jsFiles) == 0 {
+		t.Fatal("expected a page hydration script for the portal")
+	}
+	js, err := os.ReadFile(jsFiles[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), "krateMountPortals") {
+		t.Errorf("page JS should mount portals:\n%s", js)
+	}
+}
+
+// TestClassComponentLowering verifies a class component is lowered to a Krate
+// function component (state signal, render, setState).
+func TestClassComponentLowering(t *testing.T) {
+	root := t.TempDir()
+	pages := filepath.Join(root, "src", "pages")
+	if err := os.MkdirAll(pages, 0755); err != nil {
+		t.Fatal(err)
+	}
+	page := `
+		import React from 'react';
+		class Counter extends React.Component {
+			state = { count: 7 };
+			render() {
+				return (
+					<button onClick={() => this.setState({ count: 8 })}>
+						{this.state.count}
+					</button>
+				);
+			}
+		}
+		export default Counter;
+	`
+	if err := os.WriteFile(filepath.Join(pages, "index.tsx"), []byte(page), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = pages
+	cfg.OutDir = filepath.Join(root, "dist")
+	b := New(root, cfg)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	html, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), "7") {
+		t.Errorf("class state should render:\n%s", html)
+	}
+	jsFiles, _ := filepath.Glob(filepath.Join(cfg.OutDir, "index.*.js"))
+	if len(jsFiles) == 0 {
+		t.Fatal("expected hydration JS for the class component")
+	}
+	js, err := os.ReadFile(jsFiles[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), "count:7") || !strings.Contains(string(js), "count:8") {
+		t.Errorf("class component should lower state + setState:\n%s", js)
+	}
+}
+
 // assertRuntimeBundleHasContext loads the built runtime chunk and checks the
 // context API is present. Skips when the runtime dist hasn't been bundled.
 func assertRuntimeBundleHasContext(t *testing.T) {

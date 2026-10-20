@@ -78,6 +78,10 @@ type Annotations struct {
 	// ContextDefaults maps a module-level `const X = createContext(v)` binding to
 	// the literal default v, so `X.useContext()` folds during SSR.
 	ContextDefaults map[string]string
+	// ClassComponents records class declarations that extend Component/
+	// PureComponent, so the builder can emit a specific diagnostic (class
+	// component lowering is not implemented yet).
+	ClassComponents map[string]bool
 }
 
 // (Annotations continues below.)
@@ -342,7 +346,11 @@ type ComponentNode struct {
 	// child must read them from the __krate_props registry at runtime, and any
 	// `var X = props.<funcProp>` local must be emitted as a live read of
 	// props.<funcProp> instead of being const-folded to the function's name.
-	FuncProps map[string]bool
+	// IslandBoot holds page-scope registration statements for external islands
+	// whose props come from this component's signals. They run inside the
+	// component IIFE so signal getters and setters are in scope.
+	IslandBoot []string
+	FuncProps  map[string]bool
 	// FuncPropAliases holds `var <local>=props.<funcProp>` declarations for
 	// locals that alias a function prop. They must be emitted after the
 	// `var props=__krate_props[...]` binding but before any effects/handlers
@@ -369,6 +377,10 @@ type ComponentNode struct {
 	// The emitter uses SSREval to render these at build time.
 	IsSSREval       bool
 	SSREvalBindings map[string]string
+	// LocalVars holds build-time folded local constants (including cva/cn class
+	// strings); they are merged into SSREvalBindings so SSR-evaluated components
+	// resolve local variables such as `const classes = cn(cva(...))`.
+	LocalVars map[string]string
 	// RestProps holds the call-site attributes collected by the component's
 	// rest parameter (e.g. `{ className, ...props }`), so SSREval can expand a
 	// `{...props}` spread on an intrinsic element. RestPropsName is that
@@ -414,6 +426,16 @@ type ComponentTree struct {
 	// ContextDefaults holds module-wide `const X = createContext(v)` defaults so
 	// the emitter can fold `X.useContext()` during SSREval.
 	ContextDefaults map[string]string
+
+	// ExternalComponents are unresolved JSX components imported from bare npm
+	// packages. Krate cannot statically evaluate arbitrary React libraries, so
+	// the build emits a placeholder and a runtime bundle that mounts them.
+	ExternalComponents []ExternalComponent
+
+	// Warnings holds non-fatal problems collected while building the tree (for
+	// example, an unresolved component that will not render). The build prints
+	// them to stderr.
+	Warnings []string
 
 	// CSSSignalsCSS is the generated stylesheet for every CSS signal scope
 	// compiled into this tree (empty when none). The build appends it to the
@@ -462,6 +484,7 @@ type ComponentSignature struct {
 	ExtraVars       []string
 	PreSignalVars   []string
 	FuncPropAliases []string
+	IslandBoot      []string
 	BodyUses        []string
 	Children        []SlotID
 	SlotBindings    []SlotBinding
@@ -491,4 +514,35 @@ func sanitizeTagName(name string) string {
 	name = strings.ReplaceAll(name, "/", "-")
 	name = strings.ReplaceAll(name, ":", "-")
 	return name
+}
+
+// ExternalImport records a binding imported from a bare npm package.
+type ExternalImport struct {
+	Source    string
+	Local     string
+	Remote    string
+	Default   bool
+	Namespace bool
+}
+
+// ExternalComponent is an unresolved package component that is mounted at
+// runtime instead of being statically rendered.
+type ExternalComponent struct {
+	ID      string
+	Source  string
+	Local   string
+	Members []string
+	// Namespace is set when Local is a namespace import.
+	Namespace bool
+	Props     map[string]any
+	// Subtree is the serialized JSX for the whole external subtree (captured at
+	// the topmost external component), rendered by the runtime island.
+	Subtree string
+	// PropsJS is a JS object literal of page-scope signal values the subtree
+	// reads (key -> value expression), evaluated in the page's hydration scope.
+	PropsJS string
+	// File/Line/Col locate the usage for diagnostics.
+	File string
+	Line int
+	Col  int
 }

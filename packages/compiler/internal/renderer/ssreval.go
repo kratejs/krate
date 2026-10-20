@@ -1433,7 +1433,7 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 	}
 
 	for _, attr := range attrs {
-		if attr.Spread || attr.Name == "dangerouslySetInnerHTML" {
+		if attr.Spread || attr.Name == "dangerouslySetInnerHTML" || attr.Name == "ref" || attr.Name == "key" {
 			continue
 		}
 		val := ""

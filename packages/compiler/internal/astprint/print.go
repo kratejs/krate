@@ -26,6 +26,14 @@ func Print(p *ast.Program) string {
 	return pr.b.String()
 }
 
+// PrintExpr renders a single expression as source (for example, re-emitting a
+// JSX subtree as the body of an external React island). Unsupported nodes
+// render as an empty string rather than panicking.
+func PrintExpr(expr ast.Expr) string {
+	pr := &printer{}
+	return pr.expr(expr)
+}
+
 type printer struct {
 	b strings.Builder
 }

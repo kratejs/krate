@@ -33,6 +33,10 @@ type EmitResult struct {
 	// GoRenders are build-time Go-component render requests; the build renders
 	// them via the Go host and substitutes HTML at the markers.
 	GoRenders []irtree.GoRenderRequest
+	// IslandBootJS publishes page-scope signal values for external React
+	// islands. It is emitted inside the page hydration IIFE (where those signals
+	// are in scope) before the islands mount.
+	IslandBootJS string
 }
 
 // SlotOutput is the result of emitting a single slot node. Beyond HTML and
@@ -577,6 +581,7 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		ExtraVars:       node.ExtraVars,
 		PreSignalVars:   node.PreSignalVars,
 		FuncPropAliases: node.FuncPropAliases,
+		IslandBoot:      node.IslandBoot,
 		BodyUses:        node.BodyUses,
 		Children:        childIDs,
 		SlotBindings:    slotBindings,

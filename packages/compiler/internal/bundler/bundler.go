@@ -220,6 +220,14 @@ func (b *Bundler) resolveImportForModuleUncached(importer, imp string) string {
 			return path
 		}
 	}
+	// React ecosystem imports resolve to Krate's compatibility runtime. React
+	// source hooks/JSX are lowered by RewriteReact; this catches imports that
+	// survive that pass (react-dom, react/jsx-runtime in compiled packages).
+	if compat := reactCompatSpecifier(imp); compat != "" {
+		if p := resolver.NodeModule(filepath.Dir(importer), compat); p != "" {
+			return p
+		}
+	}
 	resolved := resolveImport(importer, imp, b.fileExists)
 	if resolved != "" {
 		return resolved
@@ -351,7 +359,18 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 		return nil
 	}
 
-	return b.resolveTSXModule(path, abs, mtime, size, statOK, isEntry)
+	if err := b.resolveTSXModule(path, abs, mtime, size, statOK, isEntry); err != nil {
+		// A compiled dependency that Krate's TSX parser cannot read is kept as an
+		// opaque external module. Its components are mounted at runtime (see the
+		// build's external-component bundling), so a parser gap in a third-party
+		// package must not fail the whole page.
+		if !isEntry && strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
+			b.order = append(b.order, &Module{Path: path, IsExternal: true})
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // isSourceExt reports whether a path is a JS/TS source file the bundler parses.
@@ -611,6 +630,23 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 func isKrateRuntime(abs string) bool {
 	norm := filepath.ToSlash(abs)
 	return strings.Contains(norm, "/node_modules/@krate/runtime/")
+}
+
+// reactCompatSpecifier maps a React ecosystem module specifier to Krate's React
+// compatibility runtime (a subpath of @krate/runtime). Empty when unrelated.
+// React source imports are removed by RewriteReact; this covers imports that
+// survive it, notably compiled packages importing react-dom / jsx-runtime.
+func reactCompatSpecifier(imp string) string {
+	switch imp {
+	case "react", "react-dom", "react-dom/client":
+		return "@krate/runtime/react"
+	case "react/jsx-runtime", "react/jsx-dev-runtime":
+		return "@krate/runtime/react/jsx-runtime"
+	case "@radix-ui/react-slot":
+		// shadcn's `asChild` primitive: compile against Krate's native Slot.
+		return "@krate/runtime/slot"
+	}
+	return ""
 }
 
 func (b *Bundler) collectImports(prog *ast.Program, mod *Module) {

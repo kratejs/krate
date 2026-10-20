@@ -186,6 +186,11 @@ type Builder struct {
 
 	// diskCache persists per-page outputs across runs (see diskcache.go).
 	diskCache *buildDiskCache
+	// External React islands share one Preact build across every page. The
+	// import map points the bare preact* specifiers at those shared chunks.
+	islandMu        sync.Mutex
+	islandImportMap string
+	preactChunks    map[string]string
 }
 
 // shouldMinifyJS reports whether generated JavaScript should be minified.
@@ -1365,6 +1370,9 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				devBootstrap = b.devBootstrapJSON()
 			}
 			runtimeHead := b.runtimeCommonHead()
+			if im := b.islandImportMapHTML(); im != "" {
+				runtimeHead = im + runtimeHead
+			}
 			chunkPreloads := dynamicChunkURLs(r.HydrationJS)
 			var html string
 			if r.LoadingHTML != "" {
@@ -1600,12 +1608,19 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
 	pageOpts := b.irBuildOptions()
+	pageOpts.ModuleConsts, pageOpts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
+	externalByLocal, externalImports, localImports := entryExternalImports(entryModule.Program)
+	pageOpts.ExternalImports = externalByLocal
+	pageOpts.LocalComponentImports = localImports
 	pageOpts.GoComponents = pageGoComponents
 	tree := irtree.BuildWithOptions(entryModule.Program, ann, pageOpts)
 	// CSS primitive declarations that cannot be compiled to CSS are hard errors
 	// (there is no fallback to client signals).
 	if len(tree.Errors) > 0 {
 		return nil, "", renderErrors(page, tree.Errors)
+	}
+	for _, w := range tree.Warnings {
+		fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n", cYellow, cReset, w)
 	}
 	// CSS stylesheets are generated during IR construction (one shared,
 	// instance-agnostic stylesheet per scope). Append them to the page's own CSS
@@ -1770,9 +1785,17 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	hydrationJS := ""
 	var jsBytes []byte
 	hasJS := false
-	needsHydrate := len(emitResult.Signatures) > 0
+	islandBoot, islandJS, islandErr := b.buildIslands(tree.ExternalComponents, externalImports)
+	if islandErr != nil {
+		return nil, "", islandErr
+	}
+	emitResult.IslandBootJS = islandBoot
+	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
 	if needsHydrate {
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		if islandJS != "" {
+			rawJS = strings.TrimSpace(rawJS + "\n" + islandJS)
+		}
 		if rawJS != "" {
 			hasJS = true
 			finalJS := rawJS
@@ -2227,6 +2250,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	annotator.ReclassifyTiers(ann, b.Cfg)
 	opts := b.irBuildOptions()
 	opts.IDPrefix = layoutIDPrefix(layoutPath)
+	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(layoutModule.Program, extraLayoutPrograms)
 	opts.GoComponents = b.collectGoComponents(layoutBundle, b.Root)
 	tree := irtree.BuildWithOptions(layoutModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
@@ -2342,7 +2366,9 @@ func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*
 
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, page, entryModule.SourceCode)
 
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, b.irBuildOptions())
+	opts := b.irBuildOptions()
+	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, nil)
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		return nil, renderErrors(page, tree.Errors)
 	}
@@ -2439,7 +2465,9 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, b.irBuildOptions())
+	opts := b.irBuildOptions()
+	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
+	tree := irtree.BuildWithOptions(entryModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		for _, e := range tree.Errors {
 			fmt.Fprintf(os.Stderr, "  %s✗ Error (loading %s):%s %v\n", cRed, loadingPath, cReset, e)

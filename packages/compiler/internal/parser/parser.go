@@ -237,54 +237,60 @@ const (
 	precAs
 	precTerm
 	precFactor
+	precPow
 	precUnary
 	precCall
 	precMember
 )
 
 var precMap = map[lexer.Kind]int{
-	lexer.ARROW:        precAssign,
-	lexer.ASSIGN:       precAssign,
-	lexer.ADD_ASSIGN:   precAssign,
-	lexer.SUB_ASSIGN:   precAssign,
-	lexer.MUL_ASSIGN:   precAssign,
-	lexer.DIV_ASSIGN:   precAssign,
-	lexer.MOD_ASSIGN:   precAssign,
-	lexer.SHL_ASSIGN:   precAssign,
-	lexer.SHR_ASSIGN:   precAssign,
-	lexer.QUEST:        precCond,
-	lexer.NULLISH:      precOr,
-	lexer.OR:           precOr,
-	lexer.AND:          precAnd,
-	lexer.BIT_OR:       precBitwiseOr,
-	lexer.BIT_XOR:      precBitwiseXor,
-	lexer.BIT_AND:      precBitwiseAnd,
-	lexer.EQ:           precEq,
-	lexer.NEQ:          precEq,
-	lexer.STRICT_EQ:    precEq,
-	lexer.STRICT_NEQ:   precEq,
-	lexer.LT:           precCompare,
-	lexer.GT:           precCompare,
-	lexer.LTE:          precCompare,
-	lexer.GTE:          precCompare,
-	lexer.In_:          precCompare,
-	lexer.Instanceof_:  precCompare,
-	lexer.SHL:          precShift,
-	lexer.SHR:          precShift,
-	lexer.USHIFT_RIGHT: precShift,
-	lexer.PLUS:         precTerm,
-	lexer.MINUS:        precTerm,
-	lexer.STAR:         precFactor,
-	lexer.DIV:          precFactor,
-	lexer.MOD:          precFactor,
-	lexer.LPAREN:       precCall,
-	lexer.LBRACKET:     precCall,
-	lexer.DOT:          precMember,
-	lexer.QUESTION_DOT: precMember,
-	lexer.INC:          precUnary,
-	lexer.DEC:          precUnary,
-	lexer.NOT:          precAs,
-	lexer.As:           precAs,
+	lexer.ARROW:          precAssign,
+	lexer.ASSIGN:         precAssign,
+	lexer.ADD_ASSIGN:     precAssign,
+	lexer.SUB_ASSIGN:     precAssign,
+	lexer.MUL_ASSIGN:     precAssign,
+	lexer.DIV_ASSIGN:     precAssign,
+	lexer.MOD_ASSIGN:     precAssign,
+	lexer.SHL_ASSIGN:     precAssign,
+	lexer.SHR_ASSIGN:     precAssign,
+	lexer.POW_ASSIGN:     precAssign,
+	lexer.AND_ASSIGN:     precAssign,
+	lexer.OR_ASSIGN:      precAssign,
+	lexer.NULLISH_ASSIGN: precAssign,
+	lexer.QUEST:          precCond,
+	lexer.NULLISH:        precOr,
+	lexer.OR:             precOr,
+	lexer.AND:            precAnd,
+	lexer.BIT_OR:         precBitwiseOr,
+	lexer.BIT_XOR:        precBitwiseXor,
+	lexer.BIT_AND:        precBitwiseAnd,
+	lexer.EQ:             precEq,
+	lexer.NEQ:            precEq,
+	lexer.STRICT_EQ:      precEq,
+	lexer.STRICT_NEQ:     precEq,
+	lexer.LT:             precCompare,
+	lexer.GT:             precCompare,
+	lexer.LTE:            precCompare,
+	lexer.GTE:            precCompare,
+	lexer.In_:            precCompare,
+	lexer.Instanceof_:    precCompare,
+	lexer.SHL:            precShift,
+	lexer.SHR:            precShift,
+	lexer.USHIFT_RIGHT:   precShift,
+	lexer.PLUS:           precTerm,
+	lexer.MINUS:          precTerm,
+	lexer.STAR:           precFactor,
+	lexer.POW:            precPow,
+	lexer.DIV:            precFactor,
+	lexer.MOD:            precFactor,
+	lexer.LPAREN:         precCall,
+	lexer.LBRACKET:       precCall,
+	lexer.DOT:            precMember,
+	lexer.QUESTION_DOT:   precMember,
+	lexer.INC:            precUnary,
+	lexer.DEC:            precUnary,
+	lexer.NOT:            precAs,
+	lexer.As:             precAs,
 }
 
 func (p *Parser) ParseProgram() (prog *ast.Program) {
@@ -414,27 +420,81 @@ func (p *Parser) parseStmtInner() ast.Stmt {
 }
 
 func (p *Parser) parseClassDecl() ast.Stmt {
-	p.droppedTypes++
-	p.next()
+	start := p.next() // `class`
+	decl := &ast.ClassDecl{Position: tokPos(start)}
 	if isIdentifierToken(p.peek().Kind) {
-		p.next()
+		decl.Name = p.next().Value
 	}
+	p.skipTypeParams()
 	if p.match(lexer.Extends_) {
-		_ = p.parseExpr(precLowest)
+		decl.SuperClass = p.parseExpr(precLowest)
 	}
-	if p.peek().Kind == lexer.LBRACE {
-		p.next()
-		depth := 1
-		for depth > 0 && p.peek().Kind != lexer.EOF {
-			tok := p.next()
-			if tok.Kind == lexer.LBRACE {
-				depth++
-			} else if tok.Kind == lexer.RBRACE {
-				depth--
+	if !p.match(lexer.LBRACE) {
+		return decl
+	}
+	for p.peek().Kind != lexer.RBRACE && p.peek().Kind != lexer.EOF {
+		before := p.pos
+		if p.match(lexer.SEMI) {
+			continue
+		}
+		member := &ast.ClassMember{Position: tokPos(p.peek())}
+		for {
+			if p.peek().Kind == lexer.Identifier && p.peek().Value == "static" {
+				p.next()
+				member.Static = true
+				continue
 			}
+			switch p.peek().Kind {
+			case lexer.Async:
+				p.next()
+				member.Async = true
+				continue
+			case lexer.Public_, lexer.Private_, lexer.Protected_, lexer.Readonly_:
+				p.next()
+				continue
+			}
+			break
+		}
+		// `static { ... }` initializer block: consume it.
+		if member.Static && p.peek().Kind == lexer.LBRACE {
+			_ = p.parseBlock()
+		} else {
+			if p.match(lexer.LBRACKET) {
+				// Computed member name; the expression is not needed for lowering.
+				_ = p.parseExpr(precLowest)
+				p.expect(lexer.RBRACKET)
+			} else if isIdentifierToken(p.peek().Kind) {
+				member.Name = p.next().Value
+				member.Private = strings.HasPrefix(member.Name, "#")
+			}
+			if p.peek().Kind == lexer.LPAREN {
+				p.next()
+				member.Params = p.parseParamList()
+				p.expect(lexer.RPAREN)
+				p.skipTypeAnnotation(true)
+				if member.Name == "constructor" {
+					member.Kind = ast.ClassConstructor
+				}
+				if p.peek().Kind == lexer.LBRACE {
+					member.Body = p.parseBlock()
+				}
+			} else {
+				member.Kind = ast.ClassField
+				if p.match(lexer.ASSIGN) {
+					member.Init = p.parseExpr(precLowest)
+				}
+				p.match(lexer.SEMI)
+			}
+			decl.Members = append(decl.Members, member)
+		}
+		// Guarantee progress even on malformed input (otherwise a member that
+		// consumed nothing would loop forever).
+		if p.pos == before {
+			p.next()
 		}
 	}
-	return nil
+	p.expect(lexer.RBRACE)
+	return decl
 }
 
 func (p *Parser) parseInterfaceDecl() ast.Stmt {
@@ -904,11 +964,17 @@ func (p *Parser) parseExport() ast.Stmt {
 			p.match(lexer.SEMI)
 			break
 		}
-		// export { name } from 'source' - named re-export
-		names := p.parseExportNames()
+		// export { name } / export { local as exported } / ... from 'source'
+		specs := p.parseExportSpecifiers()
 		if p.match(lexer.From) && p.peek().Kind == lexer.String {
 			exp.ReexportSource = p.next().Value
+			names := make([]string, 0, len(specs))
+			for _, s := range specs {
+				names = append(names, s.Remote)
+			}
 			exp.Local = strings.Join(names, ",")
+		} else {
+			exp.Named = specs
 		}
 		p.match(lexer.SEMI)
 	default:
@@ -940,23 +1006,29 @@ func (p *Parser) parseExport() ast.Stmt {
 	return exp
 }
 
-// parseExportNames parses "{ name1, name2 }" inside an export statement.
-func (p *Parser) parseExportNames() []string {
+// parseExportSpecifiers parses "{ name1, name2 as alias }" inside an export
+// statement, keeping the local -> exported pairing so re-export aliases can be
+// resolved downstream (compiled libraries commonly rename: `export { Root2 as Root }`).
+func (p *Parser) parseExportSpecifiers() []ast.NamedExport {
 	p.next() // consume '{'
-	var names []string
+	var specs []ast.NamedExport
 	for {
 		if p.peek().Kind == lexer.RBRACE || p.peek().Kind == lexer.EOF {
 			break
 		}
-		if isIdentifierToken(p.peek().Kind) {
-			names = append(names, p.next().Value)
-		} else {
+		if !isIdentifierToken(p.peek().Kind) {
 			break
 		}
+		local := p.next().Value
+		remote := local
+		if p.match(lexer.As) && isIdentifierToken(p.peek().Kind) {
+			remote = p.next().Value
+		}
+		specs = append(specs, ast.NamedExport{Local: local, Remote: remote})
 		p.match(lexer.COMMA)
 	}
 	p.match(lexer.RBRACE)
-	return names
+	return specs
 }
 
 func (p *Parser) parseVarStmt() ast.Stmt {
@@ -1249,7 +1321,7 @@ func (p *Parser) parseParamList() []*ast.Param {
 
 		// A `this` parameter (`method(this: Counter)`) is compile-time only -
 		// skip it and its annotation entirely.
-		if isIdentifierToken(p.peek().Kind) && p.peek().Value == "this" {
+		if p.peek().Kind == lexer.This_ || (isIdentifierToken(p.peek().Kind) && p.peek().Value == "this") {
 			p.next()
 			if p.peek().Kind == lexer.COLON {
 				p.skipTypeAnnotation(false)
@@ -1746,7 +1818,12 @@ func (p *Parser) parseCallArgs(callee ast.Expr, optional bool) ast.Expr {
 	p.expect(lexer.LPAREN)
 	var args []ast.Expr
 	for p.peek().Kind != lexer.RPAREN && p.peek().Kind != lexer.EOF {
-		args = append(args, p.parseExpr(precLowest))
+		if p.peek().Kind == lexer.SPREAD {
+			pos := tokPos(p.next())
+			args = append(args, &ast.UnaryExpr{Position: pos, Op: "...", Arg: p.parseExpr(precAssign)})
+		} else {
+			args = append(args, p.parseExpr(precLowest))
+		}
 		if !p.match(lexer.COMMA) {
 			break
 		}
@@ -1767,15 +1844,11 @@ func (p *Parser) parseInfix(left ast.Expr) ast.Expr {
 		return &ast.BinaryExpr{Left: left, Op: "-", Right: p.parseExpr(precTerm)}
 	case lexer.STAR:
 		p.next()
-		if p.peek().Kind == lexer.STAR {
-			// `2 ** 10` lexes as two STAR tokens; without this guard it would be
-			// mangled into `(2 * nil) * 10` and emitted as incorrect code.
-			p.errWithMsg("exponentiation operator ** is not supported", "use Math.pow(a, b) or a * a instead")
-			p.next()
-			_ = p.parseExpr(precFactor)
-			return left
-		}
 		return &ast.BinaryExpr{Left: left, Op: "*", Right: p.parseExpr(precFactor)}
+	case lexer.POW:
+		p.next()
+		// Right-associative: `a ** b ** c` is `a ** (b ** c)`.
+		return &ast.BinaryExpr{Left: left, Op: "**", Right: p.parseExpr(precPow - 1)}
 	case lexer.DIV:
 		p.next()
 		return &ast.BinaryExpr{Left: left, Op: "/", Right: p.parseExpr(precFactor)}
@@ -1837,11 +1910,6 @@ func (p *Parser) parseInfix(left ast.Expr) ast.Expr {
 	case lexer.SHR:
 		p.next()
 		return &ast.BinaryExpr{Left: left, Op: ">>", Right: p.parseExpr(precShift)}
-	case lexer.SHL_ASSIGN, lexer.SHR_ASSIGN:
-		p.errWithMsg(fmt.Sprintf("compound assignment %s is not supported", kindLabel(tok.Kind)), "")
-		p.next()
-		_ = p.parseExpr(precAssign)
-		return left
 	case lexer.USHIFT_RIGHT:
 		p.next()
 		return &ast.BinaryExpr{Left: left, Op: ">>>", Right: p.parseExpr(precShift)}
@@ -1881,7 +1949,8 @@ func (p *Parser) parseInfix(left ast.Expr) ast.Expr {
 			params = append(params, &ast.Param{Name: id.Name})
 		}
 		return p.parseArrowBody(params)
-	case lexer.ASSIGN, lexer.ADD_ASSIGN, lexer.SUB_ASSIGN, lexer.MUL_ASSIGN, lexer.DIV_ASSIGN, lexer.MOD_ASSIGN:
+	case lexer.ASSIGN, lexer.ADD_ASSIGN, lexer.SUB_ASSIGN, lexer.MUL_ASSIGN, lexer.DIV_ASSIGN, lexer.MOD_ASSIGN,
+		lexer.SHL_ASSIGN, lexer.SHR_ASSIGN, lexer.POW_ASSIGN, lexer.AND_ASSIGN, lexer.OR_ASSIGN, lexer.NULLISH_ASSIGN:
 		op := tok.Value
 		p.next()
 		// Assignment is right-associative: parse the RHS one level below
@@ -2667,6 +2736,16 @@ func kindLabel(k lexer.Kind) string {
 		return "/="
 	case lexer.MOD_ASSIGN:
 		return "%="
+	case lexer.POW:
+		return "**"
+	case lexer.POW_ASSIGN:
+		return "**="
+	case lexer.AND_ASSIGN:
+		return "&&="
+	case lexer.OR_ASSIGN:
+		return "||="
+	case lexer.NULLISH_ASSIGN:
+		return "??="
 	case lexer.SLASH_GT:
 		return "/>"
 	case lexer.LT_SLASH:

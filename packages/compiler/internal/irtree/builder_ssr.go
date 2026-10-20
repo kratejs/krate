@@ -92,8 +92,48 @@ func (b *builder) evalAttrValue(expr ast.Expr) string {
 		if v, ok := b.foldCVACall(call); ok {
 			return v
 		}
+		// Class helpers wrapping a cva call (`cn(buttonVariants({...}), x)`)
+		// need the factory table, which evalConstWithSignals does not have.
+		if id, ok := call.Callee.(*ast.Identifier); ok {
+			switch id.Name {
+			case "cn", "clsx", "twMerge":
+				return b.foldClassArgs(call.Args)
+			}
+		}
 	}
 	return evalConstWithSignals(expr, b.sigMap(), b.localProps)
+}
+
+// foldClassArgs evaluates cn/clsx/twMerge arguments, folding cva factory calls
+// inside them and skipping false/undefined entries.
+func (b *builder) foldClassArgs(args []ast.Expr) string {
+	var parts []string
+	for _, arg := range args {
+		if call, ok := arg.(*ast.CallExpr); ok {
+			if v, ok := b.foldCVACall(call); ok {
+				if v != "" {
+					parts = append(parts, v)
+				}
+				continue
+			}
+			if id, ok := call.Callee.(*ast.Identifier); ok {
+				switch id.Name {
+				case "cn", "clsx", "twMerge":
+					if v := b.foldClassArgs(call.Args); v != "" {
+						parts = append(parts, v)
+					}
+					continue
+				}
+			}
+		}
+		v := b.evalAttrValue(arg)
+		switch v {
+		case "", "undefined", "null", "false":
+			continue
+		}
+		parts = append(parts, v)
+	}
+	return strings.Join(parts, " ")
 }
 
 // foldCVACall folds a `X({ variant: ... })` call where X is a known cva factory
@@ -533,6 +573,23 @@ func evalConstWithSignals(expr ast.Expr, signals map[string]ast.Expr, props map[
 		// content-collection entry: post.data.title) fold through the literal.
 		if v, ok := resolveMemberOnLiteral(e, signals, props); ok {
 			return v
+		}
+		// Signal object member: `state().field` folds through the signal's
+		// object-literal initial (used by lowered class components).
+		if call, ok := e.Object.(*ast.CallExpr); ok && !e.Computed && len(call.Args) == 0 {
+			if id, ok := call.Callee.(*ast.Identifier); ok {
+				if init, found := signals[id.Name]; found {
+					if obj, ok := init.(*ast.ObjectExpr); ok {
+						if prop, ok := e.Property.(*ast.Identifier); ok {
+							for _, p := range obj.Properties {
+								if p != nil && !p.Spread && p.Key == prop.Name && p.Value != nil {
+									return evalConstWithSignals(p.Value, signals, props)
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 		if id, ok := e.Object.(*ast.Identifier); ok && id.Name == "props" {
 			if prop, ok := e.Property.(*ast.Identifier); ok {

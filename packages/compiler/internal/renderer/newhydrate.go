@@ -26,12 +26,13 @@ function scan(){__cache.clear();var w=document.createTreeWalker(__root,NodeFilte
 scan();
 window.findSlot=function(id){var el=__root.querySelector('[data-k="k:'+id+'"]');if(el)return el;return __cache.get(id)||null;};
 window.refreshSlots=scan;
+window.krateMountPortals=function(){var list=document.querySelectorAll('[data-krate-portal]');for(var i=0;i<list.length;i++){(function(node){if(node.getAttribute('data-krate-portal-mounted'))return;node.setAttribute('data-krate-portal-mounted','1');if(node.parentNode!==document.body)document.body.appendChild(node);if(typeof window.onCleanup==='function')window.onCleanup(function(){if(node.parentNode)node.parentNode.removeChild(node);});})(list[i]);}};
 window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}});});};
 window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);});});};
 window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var a=n.nextSibling,b=a?a.nextSibling:null;if(!a||!b)return;var v=(get());if(v){a.style.display='';b.style.display='none';}else{a.style.display='none';b.style.display='';}});});};
 window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)n.removeAttribute(attr);else if(v===true)n.setAttribute(attr,'');else n.setAttribute(attr,String(v));});});};
-window.kbindProp=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(attr==='value'){n.value=v==null||v===false?'':String(v);}else{n[attr]=!!v;}});});};
-window.kbindHandler=function(id,prop,fn){var n=findSlot(id);if(n)__safe(function(){n[prop]=fn;});};
+window.kbindProp=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(attr==='value'){var s=v==null||v===false?'':String(v);if(n.value===s)return;n.value=s;}else{var b=!!v;if(n[attr]===b)return;n[attr]=b;}});});};
+window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){n[prop]=fn;});};
 window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);});};
 window.kbindRef=function(id,set){var n=findSlot(id);if(n)__safe(function(){set(n);});};
 })();
@@ -50,12 +51,13 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		}
 		if len(sig.Signals) > 0 || len(sig.Handlers) > 0 || len(sig.Effects) > 0 ||
 			len(sig.Memos) > 0 || len(sig.ExtraVars) > 0 || len(sig.PreSignalVars) > 0 ||
-			len(sig.SlotBindings) > 0 || len(sig.AttrBindings) > 0 {
+			len(sig.SlotBindings) > 0 || len(sig.AttrBindings) > 0 || len(sig.RefBindings) > 0 ||
+			len(sig.IslandBoot) > 0 {
 			hasWork = true
 			break
 		}
 	}
-	if !hasWork && !result.HasLinks {
+	if !hasWork && !result.HasLinks && result.IslandBootJS == "" && !strings.Contains(result.HTML, "data-krate-portal") {
 		return ""
 	}
 
@@ -64,6 +66,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	// Rebuild the comment-marker cache against the current DOM (fresh page
 	// load or SPA navigation).
 	b.WriteString("refreshSlots();\n")
+	b.WriteString("if(window.krateMountPortals)window.krateMountPortals();\n")
 
 	// Component functions needed by dynamic list slots. Without these the
 	// runtime `h(Component, props)` call in a list binding would throw
@@ -160,6 +163,13 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			b.WriteString("var ")
 			b.WriteString(alias)
 			b.WriteString(";\n")
+		}
+
+		// External island prop providers. These must run inside this component's
+		// IIFE: the props read its signal getters/setters directly.
+		for _, js := range sig.IslandBoot {
+			b.WriteString(js)
+			b.WriteByte('\n')
 		}
 
 		// Refs: assign the live DOM node to the referenced variable, or invoke a
@@ -285,6 +295,15 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		b.WriteString("})();\n")
 	}
 
+	// Publish page-scope signal values for external React islands. This runs
+	// inside the page IIFE so the signal getters are in scope.
+	if result.IslandBootJS != "" {
+		b.WriteString(result.IslandBootJS)
+		if !strings.HasSuffix(result.IslandBootJS, "\n") {
+			b.WriteByte('\n')
+		}
+	}
+
 	// Event delegation
 	seenEvents := map[string]bool{}
 	var handlerEvents []string
@@ -316,7 +335,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			b.WriteString(ev)
 			b.WriteString("',e=>{var _n=e.target;while(_n&&_n!==document){for(var _k in _n){if(_k.indexOf('__krate_")
 			b.WriteString(ev)
-			b.WriteString("_')===0){_n[_k](e);break;}}if(e.cancelBubble)return;_n=_n.parentNode;}});\n")
+			b.WriteString("_')===0&&typeof _n[_k]==='function'){_n[_k](e);break;}}if(e.cancelBubble)return;_n=_n.parentNode;}});\n")
 		}
 		b.WriteString("__krate_del_cleanup=function(){for(var i=0;i<__krate_del_fns.length;i++){__krate_del_root.removeEventListener(__krate_del_fns[i].ev,__krate_del_fns[i].fn);}__krate_del_fns=[];};\n")
 	}
@@ -396,3 +415,21 @@ func isBareStringToken(v string) bool {
 	}
 	return true
 }
+
+// CompatBootstrapJS exposes the small set of React compatibility APIs that
+// transpiled source components can reference directly in their hydration
+// IIFEs (there is no module import inside the emitted IIFE). Compiled packages
+// use the Preact compat chunks instead.
+const CompatBootstrapJS = `
+window.useImperativeHandle=function(ref,create){if(!ref)return;var v=create();if(typeof ref==='function')ref(v);else if(ref&&typeof ref==='object')ref.current=v;};
+window.useSyncExternalStore=function(subscribe,getSnapshot){var s=createSignal(getSnapshot());createEffect(function(){var unsub=subscribe(function(){s[1](getSnapshot());});return function(){if(typeof unsub==='function')unsub();};});return s[0];};
+window.useTransition=function(){var s=createSignal(false);function start(fn){s[1](true);try{fn();}finally{s[1](false);}}return [s[0],start];};
+window.startTransition=function(fn){fn();};
+window.createEffectDeps=function(fn,deps){var prev=null,has=false,cleanup=null;function same(a,b){if(!a||!b||a.length!==b.length)return false;for(var i=0;i<a.length;i++){if(a[i]!==b[i])return false;}return true;}createEffect(function(){var next=deps?deps():[];if(has&&deps&&same(prev,next))return;prev=next;has=true;if(typeof cleanup==="function"){cleanup();cleanup=null;}cleanup=fn();});onCleanup(function(){if(typeof cleanup==="function")cleanup();});};
+window.createMemoDeps=function(fn,deps){var s=createSignal(fn()),prev=deps?deps():[];function same(a,b){if(a.length!==b.length)return false;for(var i=0;i<a.length;i++){if(a[i]!==b[i])return false;}return true;}createEffect(function(){var next=deps?deps():[];if(same(prev,next))return;prev=next;s[1](fn());});return s[0];};
+window.useDeferredValue=function(v){return v;};
+window.useDebugValue=function(){};
+window.isValidElement=function(v){return (typeof Node!=='undefined'&&v instanceof Node)||(v&&typeof v==='object');};
+window.Children={toArray:function(c){if(c==null||c===false||c===true)return [];if(Array.isArray(c)){var o=[];for(var i=0;i<c.length;i++){var a=window.Children.toArray(c[i]);for(var j=0;j<a.length;j++)o.push(a[j]);}return o;}return [c];},count:function(c){return window.Children.toArray(c).length;},only:function(c){return window.Children.toArray(c)[0];},map:function(c,fn){return window.Children.toArray(c).map(fn);},forEach:function(c,fn){var a=window.Children.toArray(c);for(var i=0;i<a.length;i++)fn(a[i],i);}};
+window.cloneElement=function(el,props){if(el==null||el===false||el===true)return el;var n=(typeof Node!=='undefined'&&el instanceof Node)?el.cloneNode(true):el;if(props&&n&&n.nodeType===1){for(var k in props){if(k==='children')continue;var v=props[k];if(v==null||v===false)continue;if(k==='className'||k==='class'){n.setAttribute('class',String(v));}else if(k==='style'&&typeof v==='object'){for(var s in v)n.style[s]=v[s];}else if(k.indexOf('on')===0&&typeof v==='function'){n[k.toLowerCase()]=v;}else{n.setAttribute(k,String(v));}}}if(arguments.length>2){while(n.firstChild)n.removeChild(n.firstChild);for(var i=2;i<arguments.length;i++){var c=arguments[i];if(c==null||c===false||c===true)continue;n.appendChild(typeof Node!=='undefined'&&c instanceof Node?c:document.createTextNode(String(c)));}}return n;};
+`

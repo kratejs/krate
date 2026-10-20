@@ -26,6 +26,10 @@ func isResourceSentinel(expr ast.Expr) bool {
 // localProps table so `Ctx.useContext()` folds to its default during SSG.
 const contextMarkerPrefix = "__krate_context__"
 
+// contextPropPrefix marks the synthetic prop that carries a dynamic context
+// value across a component boundary.
+const contextPropPrefix = "__krate_ctx_"
+
 // BuildOptions configures IR construction.
 type BuildOptions struct {
 	// CodeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
@@ -50,6 +54,19 @@ type BuildOptions struct {
 	// GoComponents maps imported local names to Go components (from `.go`
 	// imports), so the builder lowers <Card/> into a GoComponentSlot.
 	GoComponents map[string]GoComponentRef
+	// ExternalImports maps a bare-package import binding to its module, so an
+	// unresolved JSX component from a package is mounted at runtime.
+	ExternalImports map[string]ExternalImport
+	// LocalComponentImports lists relative-path import bindings. An external
+	// island cannot render them, so the builder warns when its subtree
+	// references one.
+	LocalComponentImports map[string]bool
+	// ModuleConsts and ModuleConstInits extend the entry module's module-level
+	// constants with values collected from imported modules (including
+	// `export { a as b }` aliases), so imported literals fold in page and
+	// component expressions. Entry-module values take precedence on collision.
+	ModuleConsts     map[string]string
+	ModuleConstInits map[string]ast.Expr
 }
 
 // Build constructs a ComponentTree from a parsed program and its annotations
@@ -73,6 +90,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 	if codeTheme == "" {
 		codeTheme = syntaxhighlight.DefaultTheme
 	}
+	moduleConsts, moduleConstInits := mergedModuleConstants(prog, opts)
 	builder := &builder{
 		functions:        ann.Functions,
 		ann:              ann,
@@ -81,8 +99,8 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		elementCounts:    make(map[string]int),
 		slotIDMap:        make(map[string]SlotID),
 		slotCounts:       make(map[string]int),
-		moduleConsts:     collectModuleConsts(prog),
-		moduleConstInits: collectModuleConstInits(prog),
+		moduleConsts:     moduleConsts,
+		moduleConstInits: moduleConstInits,
 		cvaFactories:     mergeCVAFactories(ann.CVAFactories, prog),
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
 		codeTheme:        codeTheme,
@@ -90,6 +108,8 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		aggressiveDCE:    opts.AggressiveDCE,
 		compat:           opts.Compat,
 		goComponents:     opts.GoComponents,
+		externalImports:  opts.ExternalImports,
+		localImports:     opts.LocalComponentImports,
 	}
 
 	root := builder.buildComponentNode(entryFn, "")
@@ -119,6 +139,9 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		NoJSFallbackCSS: noJSFallback,
 		NeedsCSSARIA:    builder.cssNeedsARIA,
 		Errors:          errs,
+
+		ExternalComponents: builder.externals,
+		Warnings:           builder.warnings,
 	}
 }
 
@@ -167,8 +190,10 @@ type builder struct {
 	pendingRefs      []RefBinding        // accumulated during buildSlotNodes
 	pendingPropsRegs []string            // __krate_props["id"]={...} registrations for child components
 	slotCounts       map[string]int      // per-parent dynamic-slot counters for sibling disambiguation
+	currentNode      *ComponentNode      // component whose slots are being built
 	localFnBody      []ast.Stmt          // body of current component function for handler resolution
 	localSignals     map[string]ast.Expr // component-local signal context (name -> initial expr)
+	signalSetters    map[string]bool     // component-local signal setter names
 	localProps       map[string]string   // component-local resolved props (name -> value)
 	localParamNames  map[string]bool     // component parameter names (destructured or not) for undefined folding
 	// restProps maps a rest parameter name (e.g. `props` in `{a, ...props}`) to
@@ -186,9 +211,18 @@ type builder struct {
 	codeTheme        string                    // chroma theme for compile-time <Code> highlighting
 	idPrefix         string                    // namespace for compact slot IDs (merged builds)
 	aggressiveDCE    bool                      // drop unreferenced local functions (opt-in)
+	forceClient      bool                      // keep a wrapper client so call-site child slots hydrate
 	suspenseCount    int                       // monotonic counter for stable StreamID generation
 	compat           csssignals.StyleMode      // CSS-signal stylesheet mode (modern/legacy/hybrid)
 	goComponents     map[string]GoComponentRef // imported Go components (local name -> ref)
+	externalImports  map[string]ExternalImport // bare-package import bindings (local -> module)
+	localImports     map[string]bool           // relative-path import bindings
+	externals        []ExternalComponent       // unresolved package components mounted at runtime
+	warnings         []string                  // non-fatal build warnings
+	// contextValues holds the active provider value expression per context,
+	// pushed while building a `<Ctx.Provider value={expr}>` subtree so a
+	// dynamic value substitutes for `Ctx.useContext()` reads.
+	contextValues map[string]ast.Expr
 
 	// cssIndex assigns stable, page-unique indices to (component, var) scope
 	// pairs so classes/CSS are deterministic across builds.
@@ -368,4 +402,29 @@ func (b *builder) nextDynamicSlot(parentID, kind string) SlotID {
 		return SlotID(base)
 	}
 	return joinSlotID(parentID, kind+"."+itoa(n))
+}
+
+// CollectModuleConstants returns a module's top-level literal values and
+// initializers. The build pipeline uses it to merge constants from imported
+// modules so imported literals (and `export { a as b }` aliases) fold.
+func CollectModuleConstants(prog *ast.Program) (map[string]string, map[string]ast.Expr) {
+	return collectModuleConsts(prog), collectModuleConstInits(prog)
+}
+
+// mergedModuleConstants combines the entry module's constants with those
+// supplied through BuildOptions. Entry-module values win on collision.
+func mergedModuleConstants(prog *ast.Program, opts BuildOptions) (map[string]string, map[string]ast.Expr) {
+	consts := collectModuleConsts(prog)
+	inits := collectModuleConstInits(prog)
+	for k, v := range opts.ModuleConsts {
+		if _, ok := consts[k]; !ok {
+			consts[k] = v
+		}
+	}
+	for k, v := range opts.ModuleConstInits {
+		if _, ok := inits[k]; !ok {
+			inits[k] = v
+		}
+	}
+	return consts, inits
 }

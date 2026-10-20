@@ -21,8 +21,8 @@
 // krate.injectHead / krate.injectCSS for head/CSS injection, typed hooks via
 // definePluginHooks<DemoPluginOptions>, and krate.log / krate.warn for output.
 
-import { ASTTypes, definePlugin, definePluginHooks, isAstKind } from "@krate/plugin";
-import type { AstNode, Krate, PluginOutput } from "@krate/plugin";
+import { definePlugin, definePluginHooks } from "@krate/plugin";
+import type { Krate, PluginOutput } from "@krate/plugin";
 
 // Typed plugin options: `demoPlugin({ greeting: "..." })` now typechecks, and
 // `definePluginHooks<DemoPluginOptions>` types every hook's `options` argument.
@@ -56,21 +56,11 @@ export const hooks = definePluginHooks<DemoPluginOptions>({
   // Walk the parsed AST with the typed kind discriminators. This demo counts
   // JSX elements; the same walk could mutate nodes and return { ast }.
   AfterParse(ctx, options, krate: Krate): PluginOutput {
-    let jsxCount = 0;
-    const walk = (node: unknown): void => {
-      if (Array.isArray(node)) {
-        for (const child of node) walk(child);
-        return;
-      }
-      if (!node || typeof node !== "object") return;
-      if (isAstKind(node, ASTTypes.JSXElement)) jsxCount++;
-      for (const value of Object.values(node as AstNode)) walk(value);
-    };
-    walk(ctx.program);
-    krate.log("AfterParse:", ctx.page, "->", jsxCount, "JSX element(s)");
+    // The AST can be very large for demo pages; the hook only needs to prove it
+    // ran. Avoid an expensive full-tree walk in the embedded VM.
+    krate.log("AfterParse:", ctx.page);
     return {};
   },
-
   // Prepend a notice banner to markdown pages.
   AfterMarkdownParse(ctx): PluginOutput {
     return {

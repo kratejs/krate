@@ -68,8 +68,14 @@ nav .logo {
 
 main {
   flex: 1;
-  max-width: 720px;
   width: 100%;
+}
+main:has(.react-demo-page) {
+  max-width: none;
+  padding: 0;
+}
+main:not(:has(.react-demo-page)) {
+  max-width: 720px;
   margin: 0 auto;
   padding: 3rem 2rem;
 }
@@ -83,7 +89,7 @@ main {
   box-shadow: var(--shadow);
 }
 
-h1 {
+main:not(:has(.react-demo-page)) h1 {
   font-size: 2rem;
   font-weight: 700;
   margin-bottom: 1.5rem;
@@ -93,14 +99,14 @@ h1 {
   background-clip: text;
 }
 
-h2 {
+main:not(:has(.react-demo-page)) h2 {
   font-size: 1.25rem;
   font-weight: 600;
   margin-bottom: 1rem;
   color: var(--text);
 }
 
-p {
+main:not(:has(.react-demo-page)) p {
   color: var(--text-muted);
   margin-bottom: 1rem;
 }
@@ -121,7 +127,7 @@ p {
   font-variant-numeric: tabular-nums;
 }
 
-button {
+main:not(:has(.react-demo-page)) button {
   font-size: 1.1rem;
   padding: 0.6rem 1.2rem;
   cursor: pointer;
@@ -133,16 +139,16 @@ button {
   transition: all 0.2s;
 }
 
-button:hover {
+main:not(:has(.react-demo-page)) button:hover {
   background: var(--primary-hover);
   transform: translateY(-1px);
 }
 
-button:active {
+main:not(:has(.react-demo-page)) button:active {
   transform: translateY(0);
 }
 
-input {
+main:not(:has(.react-demo-page)) input {
   font-size: 1rem;
   padding: 0.75rem 1rem;
   width: 100%;
@@ -154,18 +160,18 @@ input {
   margin-top: 1rem;
 }
 
-input:focus {
+main:not(:has(.react-demo-page)) input:focus {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
 }
 
-ul {
+main:not(:has(.react-demo-page)) ul {
   list-style: none;
   margin-top: 1rem;
 }
 
-li {
+main:not(:has(.react-demo-page)) li {
   padding: 0.75rem 1rem;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -223,13 +229,13 @@ footer {
 }
 
 @media (max-width: 640px) {
-  main { padding: 2rem 1rem; }
+  main:not(:has(.react-demo-page)) { padding: 2rem 1rem; }
   .features { grid-template-columns: 1fr; }
   nav { padding: 1rem; }
 }
 
 /* Components Demo Page */
-.components-demo h1 {
+.components-demo main:not(:has(.react-demo-page)) h1 {
   font-size: 2.5rem;
   margin-bottom: 0.5rem;
 }
@@ -258,7 +264,7 @@ footer {
   flex-direction: column;
   gap: 12px;
 }
-.demo-section-content p {
+.demo-section-content main:not(:has(.react-demo-page)) p {
   margin: 0;
 }
 .demo-footer {
@@ -268,7 +274,7 @@ footer {
 }
 
 /* CSS Signals demo page */
-.sig-page h1 {
+.sig-page main:not(:has(.react-demo-page)) h1 {
   font-size: 2.5rem;
   margin-bottom: 0.5rem;
 }
@@ -329,7 +335,7 @@ footer {
   border-radius: 10px;
 }
 .sig-seg-btn,
-.sig-chip {
+.sig-chimain:not(:has(.react-demo-page)) p {
   background: transparent;
   color: var(--text-muted);
   border: 1px solid transparent;
@@ -347,7 +353,7 @@ footer {
   flex-wrap: wrap;
   gap: 8px;
 }
-.sig-chip {
+.sig-chimain:not(:has(.react-demo-page)) p {
   border-color: var(--border);
 }
 .sig-panel {
@@ -433,7 +439,7 @@ html:root {
 }
 .zerojs-demo h1,
 .interactive-demo h1,
-.tabs-demo h1 {
+.tabs-demo main:not(:has(.react-demo-page)) h1 {
   margin-bottom: 0.25rem;
 }
 .zerojs-demo section,
@@ -449,7 +455,7 @@ html:root {
 }
 .zerojs-demo h2,
 .interactive-demo h2,
-.tabs-demo h2 {
+.tabs-demo main:not(:has(.react-demo-page)) h2 {
   font-size: 1.05rem;
   margin-bottom: 0;
   color: var(--primary);

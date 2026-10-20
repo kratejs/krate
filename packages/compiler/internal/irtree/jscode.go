@@ -50,6 +50,10 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 		return e.Name
 	case *ast.CallExpr:
 		calleeJS := generateExprJS(e.Callee, signals)
+		switch e.Callee.(type) {
+		case *ast.ArrowFn, *ast.BinaryExpr, *ast.ConditionalExpr:
+			calleeJS = "(" + calleeJS + ")"
+		}
 		opt := ""
 		if e.Optional {
 			opt = "?."
@@ -189,10 +193,18 @@ func renderArrowFn(fn *ast.ArrowFn, signals map[string]ast.Expr) string {
 	b.WriteString(renderParams(fn.Params))
 	b.WriteString(")=>")
 	if fn.Expression {
-		// Expression body: return the expression
+		// Expression body: return the expression. An object literal must be
+		// parenthesized, otherwise `() => ({...})` becomes a block body.
 		bodyExpr := arrowBodyExpr(fn)
 		if bodyExpr != nil {
-			b.WriteString(generateExprJS(bodyExpr, signals))
+			js := generateExprJS(bodyExpr, signals)
+			if _, isObject := bodyExpr.(*ast.ObjectExpr); isObject {
+				b.WriteByte('(')
+				b.WriteString(js)
+				b.WriteByte(')')
+			} else {
+				b.WriteString(js)
+			}
 		} else {
 			b.WriteString("{}")
 		}

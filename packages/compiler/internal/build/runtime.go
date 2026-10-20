@@ -125,6 +125,7 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string) str
 	// kbind* helpers) so per-page hydration scripts only contain their own
 	// signals and binding calls instead of duplicating this boilerplate.
 	runtime += renderer.HydrationBootstrapJS
+	runtime += renderer.CompatBootstrapJS
 
 	runtimeToWrite := runtime
 	if shouldMinify {

@@ -466,7 +466,23 @@ func reactEventName(attrName string) (event string, capture, direct bool) {
 // reactive), or its return JSX contains event handlers (e.g. a reusable
 // <Button onClick={props.onClick}> wrapper).
 func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr) bool {
+	// A ref passed to a component must be bound at hydration time, so the
+	// component cannot be flattened by the SSR evaluator.
+	if _, ok := attrs["ref"]; ok {
+		return true
+	}
 	if hasLifecycleCall(fn.Body) {
+		return true
+	}
+	// A component rendering an external (bare-package) component must take the
+	// IR path so the island placeholder is emitted; the SSREval shortcut would
+	// re-render the source and drop it.
+	if b.componentHasExternalComponent(fn) {
+		return true
+	}
+	// A component reading a dynamic context must stay reactive (IR path) so the
+	// provider value can be bound through its synthetic prop.
+	if b.readsActiveContext(fn.Body) {
 		return true
 	}
 	for _, expr := range attrs {
@@ -487,6 +503,9 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 		}
 	}
 	if ret := findReturnStmt(fn.Body); ret != nil {
+		if hasRefAttrExpr(ret.Value) {
+			return true
+		}
 		return hasEventHandlerExpr(ret.Value)
 	}
 	return false
@@ -1013,6 +1032,253 @@ func bodyReferencesProps(body []ast.Stmt) bool {
 	for _, stmt := range body {
 		if stmtReferencesProps(stmt) {
 			return true
+		}
+	}
+	return false
+}
+
+// componentHasExternalComponent reports whether a component's returned JSX
+// references a bare-package (external) component.
+func (b *builder) componentHasExternalComponent(fn *ast.FnDecl) bool {
+	if fn == nil || len(b.externalImports) == 0 {
+		return false
+	}
+	ret := findReturnStmt(fn.Body)
+	if ret == nil || ret.Value == nil {
+		return false
+	}
+	return b.exprHasExternalComponent(ret.Value)
+}
+
+func (b *builder) exprHasExternalComponent(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.JSXElement:
+		root := e.Opening.Name
+		if i := strings.IndexByte(root, '.'); i >= 0 {
+			root = root[:i]
+		}
+		if imp, ok := b.externalImports[root]; ok && isExternalPackageSpecifier(imp.Source) {
+			if fn, known := b.functions[e.Opening.Name]; known && fn != nil {
+				src := strings.ReplaceAll(b.ann.ComponentSources[fn.Name], "\\", "/")
+				if !strings.Contains(src, "/node_modules/") {
+					// Resolved to local Krate source (e.g. a path alias).
+					root = ""
+				}
+			}
+			if root != "" {
+				return true
+			}
+		}
+		for _, ch := range e.Children {
+			switch c := ch.(type) {
+			case *ast.JSXElementChild:
+				if b.exprHasExternalComponent(c.Element) {
+					return true
+				}
+			case *ast.JSXFragmentChild:
+				if b.exprHasExternalComponent(c.Fragment) {
+					return true
+				}
+			}
+		}
+	case *ast.JSXFragment:
+		for _, ch := range e.Children {
+			switch c := ch.(type) {
+			case *ast.JSXElementChild:
+				if b.exprHasExternalComponent(c.Element) {
+					return true
+				}
+			case *ast.JSXFragmentChild:
+				if b.exprHasExternalComponent(c.Fragment) {
+					return true
+				}
+			}
+		}
+	case *ast.ConditionalExpr:
+		return b.exprHasExternalComponent(e.Test) || b.exprHasExternalComponent(e.Consequent) || b.exprHasExternalComponent(e.Alternate)
+	case *ast.BinaryExpr:
+		return b.exprHasExternalComponent(e.Left) || b.exprHasExternalComponent(e.Right)
+	case *ast.ArrayExpr:
+		for _, el := range e.Elements {
+			if b.exprHasExternalComponent(el) {
+				return true
+			}
+		}
+	case *ast.CallExpr:
+		for _, arg := range e.Args {
+			if b.exprHasExternalComponent(arg) {
+				return true
+			}
+		}
+	case *ast.ObjectExpr:
+		for _, prop := range e.Properties {
+			if prop != nil && b.exprHasExternalComponent(prop.Value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// readsActiveContext reports whether a component's returned JSX reads a context
+// that currently has a dynamic provider value in scope.
+func (b *builder) readsActiveContext(body []ast.Stmt) bool {
+	if len(b.contextValues) == 0 {
+		return false
+	}
+	ret := findReturnStmt(body)
+	if ret == nil || ret.Value == nil {
+		return false
+	}
+	return b.exprReadsActiveContext(ret.Value)
+}
+
+func (b *builder) exprReadsActiveContext(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	if isContextRead(expr) {
+		if ctx, ok := contextReadTarget(expr); ok {
+			if _, found := b.contextValues[ctx]; found {
+				return true
+			}
+		}
+	}
+	switch e := expr.(type) {
+	case *ast.JSXElement:
+		for _, ch := range e.Children {
+			switch c := ch.(type) {
+			case *ast.JSXExprContainer:
+				if b.exprReadsActiveContext(c.Expression) {
+					return true
+				}
+			case *ast.JSXElementChild:
+				if b.exprReadsActiveContext(c.Element) {
+					return true
+				}
+			case *ast.JSXFragmentChild:
+				if b.exprReadsActiveContext(c.Fragment) {
+					return true
+				}
+			}
+		}
+	case *ast.JSXFragment:
+		for _, ch := range e.Children {
+			switch c := ch.(type) {
+			case *ast.JSXExprContainer:
+				if b.exprReadsActiveContext(c.Expression) {
+					return true
+				}
+			case *ast.JSXElementChild:
+				if b.exprReadsActiveContext(c.Element) {
+					return true
+				}
+			case *ast.JSXFragmentChild:
+				if b.exprReadsActiveContext(c.Fragment) {
+					return true
+				}
+			}
+		}
+	case *ast.ConditionalExpr:
+		return b.exprReadsActiveContext(e.Test) || b.exprReadsActiveContext(e.Consequent) || b.exprReadsActiveContext(e.Alternate)
+	case *ast.BinaryExpr:
+		return b.exprReadsActiveContext(e.Left) || b.exprReadsActiveContext(e.Right)
+	case *ast.ArrayExpr:
+		for _, el := range e.Elements {
+			if b.exprReadsActiveContext(el) {
+				return true
+			}
+		}
+	case *ast.CallExpr:
+		if b.exprReadsActiveContext(e.Callee) {
+			return true
+		}
+		for _, a := range e.Args {
+			if b.exprReadsActiveContext(a) {
+				return true
+			}
+		}
+	case *ast.ObjectExpr:
+		for _, prop := range e.Properties {
+			if prop != nil && b.exprReadsActiveContext(prop.Value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// containsIdentifier reports whether s contains name as a standalone JS
+// identifier (not part of a longer name).
+func containsIdentifier(s, name string) bool {
+	if name == "" {
+		return false
+	}
+	for offset := 0; offset < len(s); {
+		i := strings.Index(s[offset:], name)
+		if i < 0 {
+			return false
+		}
+		start := offset + i
+		end := start + len(name)
+		leftOK := start == 0 || !isJSIdentByte(s[start-1])
+		rightOK := end == len(s) || !isJSIdentByte(s[end])
+		if leftOK && rightOK {
+			return true
+		}
+		offset = start + 1
+	}
+	return false
+}
+
+func isJSIdentByte(c byte) bool {
+	return c == '_' || c == '$' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+// hasRefAttrExpr reports whether expr's JSX tree contains an explicit `ref`
+// attribute. A component that passes or renders a ref must stay client-rendered
+// so the ref object can be created and bound at hydration time.
+func hasRefAttrExpr(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	switch e := expr.(type) {
+	case *ast.JSXElement:
+		if e.Opening != nil {
+			for _, attr := range e.Opening.Attributes {
+				if attr != nil && !attr.Spread && attr.Name == "ref" {
+					return true
+				}
+			}
+		}
+		return hasRefAttrChildren(e.Children)
+	case *ast.JSXFragment:
+		return hasRefAttrChildren(e.Children)
+	case *ast.ConditionalExpr:
+		return hasRefAttrExpr(e.Consequent) || hasRefAttrExpr(e.Alternate)
+	case *ast.BinaryExpr:
+		return hasRefAttrExpr(e.Left) || hasRefAttrExpr(e.Right)
+	case *ast.TypeAssertion:
+		return hasRefAttrExpr(e.Expr)
+	}
+	return false
+}
+
+func hasRefAttrChildren(children []ast.JSXChild) bool {
+	for _, child := range children {
+		switch c := child.(type) {
+		case *ast.JSXExprContainer:
+			if hasRefAttrExpr(c.Expression) {
+				return true
+			}
+		case *ast.JSXElementChild:
+			if hasRefAttrExpr(c.Element) {
+				return true
+			}
+		case *ast.JSXFragmentChild:
+			if hasRefAttrExpr(c.Fragment) {
+				return true
+			}
 		}
 	}
 	return false

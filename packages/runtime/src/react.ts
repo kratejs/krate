@@ -1,0 +1,331 @@
+/**
+ * React compatibility runtime.
+ *
+ * Compiled React libraries (for example `@radix-ui/react-*`) and React source
+ * that the compiler could not lower statically resolve to this module. It
+ * implements the React API surface on top of Krate's DOM factory, signals, and
+ * context so that code can execute without shipping React.
+ *
+ * Krate components run once and update through signals, so hooks here are
+ * signal-backed rather than re-render based. Pure APIs (`createElement`,
+ * `Children`, `cloneElement`, `isValidElement`, `createRef`, `createContext`)
+ * behave as expected; scheduling APIs (`useTransition`, `startTransition`,
+ * `useDeferredValue`) are best-effort. Class components are intentionally
+ * minimal.
+ */
+import { h, type Component } from './dom.js';
+import { createSignal, createEffect } from './signal.js';
+import { createContext as krateCreateContext } from './context.js';
+import { cloneElement as krateCloneElement } from './class-helpers.js';
+import { jsx as krateJsx } from './jsx-runtime.js';
+
+/** React's `Fragment` marker; `createElement(Fragment, ...)` yields a fragment. */
+export const Fragment: unique symbol = Symbol.for('krate.react.fragment');
+
+function fragmentChildren(children: unknown[]): DocumentFragment {
+  const frag = document.createDocumentFragment();
+  for (const child of children) {
+    if (child == null || child === false || child === true) continue;
+    if (child instanceof Node) frag.appendChild(child);
+    else if (Array.isArray(child)) frag.appendChild(fragmentChildren(child));
+    else frag.appendChild(document.createTextNode(String(child)));
+  }
+  return frag;
+}
+
+export type ReactChild = unknown;
+
+/**
+ * `React.createElement(type, config, ...children)`. Returns a Krate DOM node
+ * (elements) or the result of the component function, matching `h`.
+ */
+export function createElement(
+  type: unknown,
+  config?: Record<string, unknown> | null,
+  ...children: unknown[]
+): Node {
+  if (type === Fragment) return fragmentChildren(children);
+  const props: Record<string, unknown> = config ? { ...config } : {};
+  if (children.length === 1) props.children = children[0];
+  else if (children.length > 1) props.children = children;
+  return krateJsx(type as string | Component<Record<string, unknown>>, props);
+}
+
+export const jsx = krateJsx;
+export const jsxs = krateJsx;
+
+export function jsxDEV(
+  type: unknown,
+  props: Record<string, unknown> | null,
+  _key?: unknown,
+  _isStatic?: boolean,
+  _source?: unknown,
+  _self?: unknown
+): Node {
+  return krateJsx(type as string | Component<Record<string, unknown>>, props);
+}
+
+/** `React.Children` helpers over arrays and single values. */
+export const Children = {
+  map(children: unknown, fn: (child: unknown, index: number) => unknown): unknown[] {
+    return toArray(children).map((child, i) => fn(child, i));
+  },
+  forEach(children: unknown, fn: (child: unknown, index: number) => void): void {
+    toArray(children).forEach((child, i) => fn(child, i));
+  },
+  count(children: unknown): number {
+    return toArray(children).length;
+  },
+  toArray(children: unknown): unknown[] {
+    return toArray(children);
+  },
+  only(children: unknown): unknown {
+    const list = toArray(children);
+    if (list.length !== 1) {
+      throw new Error(`React.Children.only expected a single child, got ${list.length}`);
+    }
+    return list[0];
+  },
+};
+
+function toArray(children: unknown): unknown[] {
+  if (children == null || children === false || children === true) return [];
+  if (Array.isArray(children)) {
+    const out: unknown[] = [];
+    for (const child of children) out.push(...toArray(child));
+    return out;
+  }
+  return [children];
+}
+
+export function cloneElement(
+  element: Node,
+  props?: Record<string, unknown> | null,
+  ...children: unknown[]
+): Node {
+  return krateCloneElement(element, props, ...children);
+}
+
+export function isValidElement(value: unknown): boolean {
+  return value instanceof Node || (typeof value === 'object' && value !== null);
+}
+
+export interface RefObject<T> {
+  current: T | null;
+}
+
+export function createRef<T = unknown>(): RefObject<T> {
+  return { current: null };
+}
+
+export function forwardRef(render: unknown): unknown {
+  // Krate binds refs at compile time; render is returned unchanged.
+  return render;
+}
+
+export function memo<P>(component: Component<P>, _compare?: unknown): Component<P> {
+  return component;
+}
+
+export function lazy(loader: unknown): unknown {
+  // A synchronous passthrough: Krate cannot await a dynamic import at render
+  // time. Dynamic/lazy components require the SSR/islands path.
+  return loader;
+}
+
+export const StrictMode = Fragment;
+export const Profiler = Fragment;
+export const Suspense = Fragment;
+
+// --- context ---
+
+export interface ReactContext<T> {
+  readonly _id: number;
+  readonly defaultValue: T;
+  readonly Provider: (props: { value: T; children?: unknown }) => Node;
+  readonly Consumer: (props: { children: (value: T) => unknown }) => unknown;
+  useContext(): T;
+  use(): T;
+}
+
+export function createContext<T>(defaultValue: T): ReactContext<T> {
+  const ctx = krateCreateContext<T>(defaultValue);
+  return {
+    _id: ctx.id,
+    defaultValue,
+    Provider: (props) => ctx.Provider(props),
+    Consumer: (props) => props.children(ctx.useContext()),
+    useContext: ctx.useContext,
+    use: ctx.useContext,
+  };
+}
+
+export function useContext<T>(ctx: ReactContext<T>): T {
+  return ctx.useContext();
+}
+
+// --- hooks ---
+
+export function useState<T>(
+  initial: T | (() => T)
+): [() => T, (value: T | ((prev: T) => T)) => void] {
+  const value = typeof initial === 'function' ? (initial as () => T)() : initial;
+  return createSignal(value);
+}
+
+export function useReducer<S, A>(
+  reducer: (state: S, action: A) => S,
+  initial: S
+): [() => S, (action: A) => void] {
+  const [get, set] = createSignal(initial);
+  const dispatch = (action: A): void => set((prev) => reducer(prev as S, action));
+  return [get, dispatch];
+}
+
+export function useMemo<T>(factory: () => T, _deps?: unknown[]): T {
+  return factory();
+}
+
+export function useCallback<T extends (...args: never[]) => unknown>(fn: T, _deps?: unknown[]): T {
+  return fn;
+}
+
+export function useRef<T = unknown>(initial?: T): RefObject<T> {
+  return { current: initial ?? null };
+}
+
+export function useEffect(effect: () => void | (() => void), _deps?: unknown[]): void {
+  createEffect(effect);
+}
+
+export const useLayoutEffect = useEffect;
+export const useInsertionEffect = useEffect;
+
+export function useImperativeHandle<T>(ref: RefObject<T> | ((v: T) => void) | null, create: () => T): void {
+  if (!ref) return;
+  const value = create();
+  if (typeof ref === 'function') ref(value);
+  else ref.current = value;
+}
+
+export function useDebugValue(_value?: unknown): void {
+  // no-op
+}
+
+export function useSyncExternalStore<T>(
+  subscribe: (onChange: () => void) => () => void,
+  getSnapshot: () => T
+): () => T {
+  const [get, set] = createSignal(getSnapshot());
+  createEffect(() => {
+    const unsubscribe = subscribe(() => set(getSnapshot()));
+    return () => unsubscribe();
+  });
+  return get;
+}
+
+export function useTransition(): [() => boolean, (fn: () => void) => void] {
+  const [pending, setPending] = createSignal(false);
+  const start = (fn: () => void): void => {
+    setPending(true);
+    try {
+      fn();
+    } finally {
+      setPending(false);
+    }
+  };
+  return [pending, start];
+}
+
+export function useOptimistic<T>(
+  initial: T,
+  update?: (state: T, action: T) => T,
+): [() => T, (action: T) => void] {
+  const [state, setState] = createSignal(initial);
+  const add = (action: T): void => {
+    setState((prev) => (update ? update(prev, action) : action));
+  };
+  return [state, add];
+}
+
+export function useActionState<State, Payload>(
+  action: (prev: State, payload: Payload) => State | Promise<State>,
+  initial: State,
+): [() => State, (payload: Payload) => Promise<void>, () => boolean] {
+  const [state, setState] = createSignal(initial);
+  const [pending, setPending] = createSignal(false);
+  const dispatch = async (payload: Payload): Promise<void> => {
+    setPending(true);
+    try {
+      setState(await action(state(), payload));
+    } finally {
+      setPending(false);
+    }
+  };
+  return [state, dispatch, pending];
+}
+
+export function useFormStatus(): {
+  pending: boolean;
+  data: FormData | null;
+  method: string | null;
+  action: string | null;
+} {
+  return { pending: false, data: null, method: null, action: null };
+}
+
+export function useDeferredValue<T>(value: T): T {
+  return value;
+}
+
+export function startTransition(fn: () => void): void {
+  fn();
+}
+
+export function use<T>(value: T | ReactContext<T>): T {
+  const ctx = value as ReactContext<T>;
+  if (ctx && typeof ctx.useContext === 'function') return ctx.useContext();
+  return value as T;
+}
+
+export function flushSync<T>(fn: () => T): T {
+  return fn();
+}
+
+export function createPortal(children: unknown, container: Element | DocumentFragment): Element | DocumentFragment {
+  if (children instanceof Node) container.appendChild(children);
+  else if (Array.isArray(children)) {
+    for (const child of children) {
+      if (child instanceof Node) container.appendChild(child);
+      else if (child != null) container.appendChild(document.createTextNode(String(child)));
+    }
+  } else if (children != null) {
+    container.appendChild(document.createTextNode(String(children)));
+  }
+  return container;
+}
+
+/** Minimal class base so compiled code that `extends React.Component` resolves. */
+export class ComponentBase {
+  props: Record<string, unknown>;
+  state: Record<string, unknown>;
+  constructor(props?: Record<string, unknown>) {
+    this.props = props ?? {};
+    this.state = {};
+  }
+  setState(update: unknown): void {
+    const next =
+      typeof update === 'function'
+        ? (update as (s: Record<string, unknown>, p: Record<string, unknown>) => Record<string, unknown>)(
+            this.state,
+            this.props
+          )
+        : (update as Record<string, unknown>);
+    this.state = { ...this.state, ...next };
+  }
+  render(): Node | null {
+    return null;
+  }
+}
+
+export const reactCompat = { h, Fragment };

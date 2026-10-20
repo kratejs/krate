@@ -22,11 +22,13 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 		Functions:        make(map[string]*ast.FnDecl),
 		ComponentSources: make(map[string]string),
 		ComponentRaw:     make(map[string]string),
+		ClassComponents:  make(map[string]bool),
 	}
 
 	// 1. Collect all function declarations
 	collectFunctionsWithSource(prog.Body, ann.Functions, ann.ComponentSources, ann.ComponentRaw, sourceFile, rawSource)
 	collectMemberComponents(prog.Body, ann.Functions)
+	collectClassComponents(prog.Body, ann.ClassComponents)
 
 	// 2. Find default export -> entry point
 	ann.EntryPoint = FindDefaultExport(prog.Body)
@@ -335,10 +337,18 @@ func collectFunctionsWithSource(body []ast.Stmt, dest map[string]*ast.FnDecl, so
 					// arrow/function-expression components exported like this
 					// get the same treatment as plain FnDecl components.
 					recordComponentVarDecls(decl, record)
+				case *ast.ClassDecl:
+					if fn, ok := synthesizeClassComponent(decl); ok {
+						record(fn)
+					}
 				}
 			}
 		case *ast.VarStmt:
 			recordComponentVarDecls(s, record)
+		case *ast.ClassDecl:
+			if fn, ok := synthesizeClassComponent(s); ok {
+				record(fn)
+			}
 		case *ast.ForStmt:
 			collectFunctionsWithSource(s.Body, dest, sources, raws, sourcePath, rawSource)
 		case *ast.WhileStmt:
@@ -580,6 +590,12 @@ func unwrapComponentInit(expr ast.Expr) *ast.ArrowFn {
 			if len(e.Args) >= 1 {
 				return unwrapComponentInit(e.Args[0])
 			}
+			return nil
+		}
+		// esbuild's `__name(fn, "Name")` wrapper (emitted by compiled libraries
+		// such as Radix) is an identity; unwrap it so the component registers.
+		if id, ok := e.Callee.(*ast.Identifier); ok && id.Name == "__name" && len(e.Args) >= 1 {
+			return unwrapComponentInit(e.Args[0])
 		}
 	}
 	return nil
@@ -611,6 +627,10 @@ func MergeModuleFunctions(ann *irtree.Annotations, modules []ModuleSource) {
 		if mod.Program != nil {
 			collectFunctionsWithSource(mod.Program.Body, ann.Functions, ann.ComponentSources, ann.ComponentRaw, mod.Path, mod.RawSource)
 			collectMemberComponents(mod.Program.Body, ann.Functions)
+			if ann.ClassComponents == nil {
+				ann.ClassComponents = make(map[string]bool)
+			}
+			collectClassComponents(mod.Program.Body, ann.ClassComponents)
 			// Merge module-level cva factories so variant calls in the entry
 			// module can fold against factories defined in imported modules.
 			if ann.CVAFactories == nil {
@@ -768,20 +788,87 @@ func namespaceReexportBody(body []ast.Stmt, exportName, modulePath string, byPat
 }
 
 // addNamespaceAliases maps `ns.<Fn>` to the declared function name for every
-// function declaration in a module body, so dotted JSX tags resolve.
+// function declaration in a module body, so dotted JSX tags resolve. It also
+// follows simple aliases (`var Root2 = Popover`) and named export renames
+// (`export { Root2 as Root }`), which is how compiled libraries expose their
+// public compound components.
 func addNamespaceAliases(aliases map[string]string, ns string, body []ast.Stmt) {
+	varAlias := map[string]string{}
+	declareVar := func(v *ast.VarStmt) {
+		for _, decl := range v.Decls {
+			if decl.Name == "" {
+				continue
+			}
+			if id, ok := decl.Init.(*ast.Identifier); ok {
+				varAlias[decl.Name] = id.Name
+				continue
+			}
+			aliases[ns+"."+decl.Name] = decl.Name
+		}
+	}
 	for _, stmt := range body {
 		switch d := stmt.(type) {
 		case *ast.FnDecl:
 			if d.Name != "" {
 				aliases[ns+"."+d.Name] = d.Name
 			}
+		case *ast.VarStmt:
+			declareVar(d)
 		case *ast.ExportStmt:
 			if d2, ok := d.Declaration.(*ast.FnDecl); ok && d2.Name != "" {
 				aliases[ns+"."+d2.Name] = d2.Name
 			}
+			if v, ok := d.Declaration.(*ast.VarStmt); ok {
+				declareVar(v)
+			}
 		}
 	}
+	for _, stmt := range body {
+		d, ok := stmt.(*ast.ExportStmt)
+		if !ok {
+			continue
+		}
+		for _, n := range d.Named {
+			target := n.Local
+			if t, ok := varAlias[target]; ok {
+				target = t
+			}
+			aliases[ns+"."+n.Remote] = target
+		}
+	}
+}
+
+// collectClassComponents records class declarations that extend Component or
+// PureComponent, so the builder can emit a specific class-component diagnostic
+// instead of a generic "unresolved component".
+func collectClassComponents(body []ast.Stmt, dest map[string]bool) {
+	for _, stmt := range body {
+		var class *ast.ClassDecl
+		switch s := stmt.(type) {
+		case *ast.ClassDecl:
+			class = s
+		case *ast.ExportStmt:
+			if c, ok := s.Declaration.(*ast.ClassDecl); ok {
+				class = c
+			}
+		}
+		if class == nil || class.Name == "" || !isReactClassBase(class.SuperClass) {
+			continue
+		}
+		dest[class.Name] = true
+	}
+}
+
+func isReactClassBase(super ast.Expr) bool {
+	switch s := super.(type) {
+	case *ast.Identifier:
+		return s.Name == "Component" || s.Name == "PureComponent"
+	case *ast.MemberExpr:
+		if prop, ok := s.Property.(*ast.Identifier); ok {
+			return prop.Name == "Component" || prop.Name == "PureComponent"
+		}
+	}
+	return false
 }
 
 // ReclassifyTiers re-runs tier classification for all used components.

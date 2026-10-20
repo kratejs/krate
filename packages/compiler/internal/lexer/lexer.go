@@ -83,6 +83,11 @@ const (
 	SHL_ASSIGN
 	SHR_ASSIGN
 	USHIFT_RIGHT
+	POW
+	POW_ASSIGN
+	AND_ASSIGN
+	OR_ASSIGN
+	NULLISH_ASSIGN
 
 	Regexp
 
@@ -322,7 +327,12 @@ func (l *Lexer) Tokenize() []Token {
 				l.emit(QUESTION_DOT)
 			} else if l.peek() == '?' {
 				l.next()
-				l.emit(NULLISH)
+				if l.peek() == '=' {
+					l.next()
+					l.emit(NULLISH_ASSIGN)
+				} else {
+					l.emit(NULLISH)
+				}
 			} else {
 				l.emit(QUEST)
 			}
@@ -480,7 +490,15 @@ func (l *Lexer) Tokenize() []Token {
 				l.emit(MINUS)
 			}
 		case '*':
-			if l.peek() == '=' {
+			if l.peek() == '*' {
+				l.next()
+				if l.peek() == '=' {
+					l.next()
+					l.emit(POW_ASSIGN)
+				} else {
+					l.emit(POW)
+				}
+			} else if l.peek() == '=' {
 				l.next()
 				l.emit(MUL_ASSIGN)
 			} else {
@@ -496,14 +514,24 @@ func (l *Lexer) Tokenize() []Token {
 		case '&':
 			if l.peek() == '&' {
 				l.next()
-				l.emit(AND)
+				if l.peek() == '=' {
+					l.next()
+					l.emit(AND_ASSIGN)
+				} else {
+					l.emit(AND)
+				}
 			} else {
 				l.emit(BIT_AND)
 			}
 		case '|':
 			if l.peek() == '|' {
 				l.next()
-				l.emit(OR)
+				if l.peek() == '=' {
+					l.next()
+					l.emit(OR_ASSIGN)
+				} else {
+					l.emit(OR)
+				}
 			} else {
 				l.emit(BIT_OR)
 			}
@@ -512,7 +540,13 @@ func (l *Lexer) Tokenize() []Token {
 		case '~':
 			l.emit(BIT_NOT)
 		default:
-			if unicode.IsLetter(ch) || ch == '_' || ch == '$' {
+			if ch == '#' {
+				// Private class field / member (`#name`). Lexed as a single
+				// identifier so `this.#x` and class bodies parse; class bodies are
+				// discarded by the parser but must not abort the file.
+				l.next()
+				l.readIdentifier()
+			} else if unicode.IsLetter(ch) || ch == '_' || ch == '$' {
 				l.readIdentifier()
 			} else if unicode.IsDigit(ch) {
 				l.readNumber()

@@ -81,6 +81,19 @@ export function disposeAll(): void {
     }
   }
   rootCleanups.length = 0;
+  // Unmount external Preact islands mounted by the page before the DOM swap.
+  const g = globalThis as { __krate_island_cleanups?: Array<() => void> };
+  const islands = g.__krate_island_cleanups;
+  if (Array.isArray(islands)) {
+    g.__krate_island_cleanups = [];
+    for (const cleanup of islands) {
+      try {
+        cleanup();
+      } catch {
+        // Island unmount errors must not prevent the SPA swap.
+      }
+    }
+  }
   pending.length = 0;
   flushScheduled = false;
   // Reset every context stack to its default so provider values from the page

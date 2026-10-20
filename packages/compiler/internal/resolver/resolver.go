@@ -103,7 +103,14 @@ func NodeModule(startDir, spec string) string {
 	if pkg == "" {
 		return ""
 	}
+	// Follow symlinks to the real package directory before walking up. pnpm
+	// links workspace/node_modules entries to a virtual store; a package's own
+	// dependencies (e.g. `@radix-ui/react-popover` from `radix-ui`) only exist
+	// next to the real directory, so walking the symlink path would miss them.
 	dir := startDir
+	if resolved, err := filepath.EvalSymlinks(startDir); err == nil {
+		dir = resolved
+	}
 	for {
 		base := filepath.Join(dir, "node_modules", pkg)
 		if s := StatPath(base); s.Exists && s.IsDir {
