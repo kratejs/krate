@@ -200,7 +200,7 @@ tailwind: {
   enabled: false,
   scanDirs: ["src"],       // directories to scan (or use `content` globs)
   content: [],             // Tailwind-style content globs; wins over scanDirs
-  preflight: false,        // emit the Tailwind base reset (changes styling)
+  preflight: true,         // emit the Tailwind base reset (default; false to opt out)
   strict: false,           // warn about classes that produce no rule
   darkMode: "media",       // "media" | "class" | "selector"
   executeConfig: false,    // execute tailwind.config via npx tsx (else static parse)

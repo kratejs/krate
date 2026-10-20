@@ -115,7 +115,8 @@ type TailwindCfg struct {
 	// Content is the Tailwind-style content glob list; when set it takes
 	// precedence over ScanDirs.
 	Content []string `json:"content,omitempty"`
-	// Preflight enables the Tailwind base reset (opt-in; changes page styling).
+	// Preflight enables the Tailwind base reset. It defaults to true to match
+	// Tailwind; set it to false to opt out.
 	Preflight bool `json:"preflight,omitempty"`
 	// Strict reports classes that produced no rule as build warnings.
 	Strict bool `json:"strict,omitempty"`
@@ -674,6 +675,7 @@ func Default() *Config {
 		Minify:    true,
 		Sourcemap: false,
 		Markdown:  markdown.DefaultConfig(),
+		Tailwind:  TailwindCfg{Preflight: true},
 	}
 }
 

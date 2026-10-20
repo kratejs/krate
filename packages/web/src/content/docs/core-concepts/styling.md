@@ -46,7 +46,7 @@ follows the **Tailwind v4 CSS-first** model.
 tailwind: {
   enabled: true,
   scanDirs: ["src"],          // or: content: ["./src/**/*.{tsx,mdx}"]
-  preflight: false,           // opt-in base reset
+  preflight: true,            // base reset (default; false to opt out)
   strict: false,              // warn on classes that produce no rule
   darkMode: "media",          // "media" | "class" | "selector"
 }
@@ -115,7 +115,7 @@ Supported features:
   `saturate-*`, `sepia`, `drop-shadow-*`, and `backdrop-*`), **animation**
   (`animate-*`), **blend modes**, plus layout, typography, interactivity,
   3D-transform, border, and background families.
-- Preflight: opt in with `tailwind.preflight: true`.
+- Preflight is emitted by default to match Tailwind. Set `tailwind.preflight: false` to opt out.
 
 ### Differences from Tailwind
 
