@@ -273,6 +273,26 @@ func TestGzipMiddlewareSkipsBinary(t *testing.T) {
 	}
 }
 
+func TestStaticCacheControl(t *testing.T) {
+	cases := []struct {
+		path string
+		dev  bool
+		want string
+	}{
+		{"/site.css", true, "no-store"},
+		{"/site.css", false, "no-cache"},
+		{"/react-demo/", true, "no-store"},
+		{"/react-demo/", false, "no-cache"},
+		{"/styles.abc123.css", true, "public, max-age=31536000, immutable"},
+		{"/styles.abc123.css", false, "public, max-age=31536000, immutable"},
+	}
+	for _, c := range cases {
+		if got := staticCacheControl(c.path, c.dev); got != c.want {
+			t.Errorf("staticCacheControl(%q, %v) = %q, want %q", c.path, c.dev, got, c.want)
+		}
+	}
+}
+
 func TestHashedAssetDetection(t *testing.T) {
 	cases := map[string]bool{
 		"/styles.abc123.css":        true,

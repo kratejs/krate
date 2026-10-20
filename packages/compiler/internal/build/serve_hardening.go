@@ -642,6 +642,20 @@ func devProxyMiddleware(proxy map[string]string, next http.Handler) http.Handler
 // so a one-year immutable cache is safe.
 var hashedAssetRe = regexp.MustCompile(`\.[0-9a-z]{6,}\.[a-z0-9]+$|-[0-9a-z]{6,}\.[a-z0-9]+$`)
 
+// staticCacheControl returns the cache policy for a static file. Hashed assets
+// are immutable. In dev, HTML and unhashed files must not be stored at all:
+// a same-second rebuild can otherwise revalidate to the old document (and its
+// old stylesheet hash) because Last-Modified has one-second precision.
+func staticCacheControl(urlPath string, dev bool) string {
+	if isHashedAsset(urlPath) {
+		return "public, max-age=31536000, immutable"
+	}
+	if dev {
+		return "no-store"
+	}
+	return "no-cache"
+}
+
 func isHashedAsset(urlPath string) bool {
 	p := urlPath
 	if i := strings.IndexByte(p, '?'); i >= 0 {
