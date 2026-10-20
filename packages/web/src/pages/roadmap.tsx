@@ -79,11 +79,11 @@ const REACT_PHASES = [
 const MCP_PHASES = [
   {
     id: "M1",
-    tone: "now",
-    status: "In progress",
+    tone: "gate",
+    status: "Complete",
     title: "Protocol and transport",
     body: "stdio and Streamable HTTP with persistent sessions, bearer auth, structured results, pagination, progress, structured logging, resource subscriptions, cancellation, and SSE reconnect replay.",
-    exit: "The in-repo protocol and HTTP conformance suite passes. Remaining: remote hardening, rate limits, and broader client testing.",
+    exit: "The in-repo protocol and HTTP conformance suite passes, including sessions, progress, subscriptions, cancellation, and reconnect.",
   },
   {
     id: "M2",
