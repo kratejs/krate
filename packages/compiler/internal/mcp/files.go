@@ -16,7 +16,7 @@ import (
 // walking huge dependency trees).
 var listIgnoreDirs = map[string]bool{
 	".git": true, "node_modules": true, "dist": true, "build": true,
-	"out": true, ".next": true, ".cache": true, "coverage": true,
+	"out": true, ".next": true, ".cache": true, "coverage": true, ".krate": true,
 }
 
 // maxListFiles caps list_files output so a huge tree cannot flood context.
@@ -29,6 +29,17 @@ func (s *Service) toolListFiles(ctx context.Context, args map[string]any) (ToolR
 	glob := argString(args, "glob")
 	recursive := argBool(args, "recursive", true)
 	includeDenied := argBool(args, "includeDenied", false)
+	offset, err := decodeCursor(argString(args, "cursor"))
+	if err != nil {
+		return ErrorResult(err.Error()), nil
+	}
+	limit := argInt(args, "limit", 500)
+	if limit <= 0 {
+		limit = 500
+	}
+	if limit > maxListFiles {
+		limit = maxListFiles
+	}
 
 	base := s.root
 	if dir != "" {
@@ -76,10 +87,25 @@ func (s *Service) toolListFiles(ctx context.Context, args map[string]any) (ToolR
 		return ErrorResult("listing files: " + walkErr.Error()), nil
 	}
 	sort.Strings(files)
+	total := len(files)
+	next := ""
+	if offset > total {
+		offset = total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	page := files[offset:end]
+	if end < total {
+		next = encodeCursor(end)
+	}
 	return JSONResult(map[string]any{
-		"files":     files,
-		"count":     len(files),
-		"truncated": truncated,
+		"files":      page,
+		"count":      len(page),
+		"total":      total,
+		"truncated":  truncated || end < total,
+		"nextCursor": next,
 	})
 }
 
@@ -127,7 +153,7 @@ func (s *Service) toolReadFile(ctx context.Context, args map[string]any) (ToolRe
 }
 
 // toolCreateFile creates a new file. It refuses to overwrite an existing file
-// (use edit_page for edits), validates the write policy, and parse-gates
+// (use edit_file for edits), validates the write policy, and parse-gates
 // editable source.
 func (s *Service) toolCreateFile(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
 	target := argString(args, "path")
@@ -141,7 +167,7 @@ func (s *Service) toolCreateFile(ctx context.Context, args map[string]any) (Tool
 		return ErrorResult(err.Error()), nil
 	}
 	if _, statErr := os.Stat(abs); statErr == nil {
-		return ErrorResult("file already exists: " + rel + " (use edit_page to modify it)"), nil
+		return ErrorResult("file already exists: " + rel + " (use edit_file to modify it)"), nil
 	}
 	if gate := parseGate(rel, content); gate != "" {
 		return ErrorResult(gate), nil
@@ -150,11 +176,12 @@ func (s *Service) toolCreateFile(ctx context.Context, args map[string]any) (Tool
 	if !apply {
 		return TextResult("Dry run (would create " + rel + "; apply: true to write).\n\n" + diff), nil
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
-		return ErrorResult("creating the directory for " + rel + ": " + err.Error()), nil
+	tx := newFileTransaction(s)
+	if err := tx.stageWrite(abs, rel, content, ""); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
-	if err := os.WriteFile(abs, []byte(content), 0644); err != nil {
-		return ErrorResult("writing " + rel + ": " + err.Error()), nil
+	if err := tx.commit(); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
 	return TextResult("Created " + rel + "\n\n" + diff), nil
 }
@@ -180,8 +207,12 @@ func (s *Service) toolDeleteFile(ctx context.Context, args map[string]any) (Tool
 	if !apply {
 		return TextResult("Dry run (would delete " + rel + "; apply: true to delete)."), nil
 	}
-	if err := os.Remove(abs); err != nil {
-		return ErrorResult("deleting " + rel + ": " + err.Error()), nil
+	tx := newFileTransaction(s)
+	if err := tx.stageDelete(abs, rel, ""); err != nil {
+		return ErrorResult(err.Error()), nil
+	}
+	if err := tx.commit(); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
 	return TextResult("Deleted " + rel), nil
 }
@@ -211,11 +242,19 @@ func (s *Service) toolMoveFile(ctx context.Context, args map[string]any) (ToolRe
 	if !apply {
 		return TextResult("Dry run (would move " + fromRel + " -> " + toRel + "; apply: true to move)."), nil
 	}
-	if err := os.MkdirAll(filepath.Dir(toAbs), 0755); err != nil {
-		return ErrorResult("creating the destination directory: " + err.Error()), nil
+	data, readErr := os.ReadFile(fromAbs)
+	if readErr != nil {
+		return ErrorResult("reading " + fromRel + ": " + readErr.Error()), nil
 	}
-	if err := os.Rename(fromAbs, toAbs); err != nil {
-		return ErrorResult("moving " + fromRel + " -> " + toRel + ": " + err.Error()), nil
+	tx := newFileTransaction(s)
+	if err := tx.stageWrite(toAbs, toRel, string(data), ""); err != nil {
+		return ErrorResult(err.Error()), nil
+	}
+	if err := tx.stageDelete(fromAbs, fromRel, hashString(string(data))); err != nil {
+		return ErrorResult(err.Error()), nil
+	}
+	if err := tx.commit(); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
 	return TextResult("Moved " + fromRel + " -> " + toRel), nil
 }
@@ -266,20 +305,24 @@ func (s *Service) toolCreateComponent(ctx context.Context, args map[string]any) 
 	if !apply {
 		return TextResult("Dry run (would create " + tsxRelNorm + "; apply: true to write).\n\n" + diff), nil
 	}
-	if err := os.MkdirAll(filepath.Dir(tsxAbs), 0755); err != nil {
-		return ErrorResult("creating the directory: " + err.Error()), nil
-	}
-	if err := os.WriteFile(tsxAbs, []byte(tsxSrc), 0644); err != nil {
-		return ErrorResult("writing " + tsxRelNorm + ": " + err.Error()), nil
+	tx := newFileTransaction(s)
+	if err := tx.stageWrite(tsxAbs, tsxRelNorm, tsxSrc, ""); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
 	created := []string{tsxRelNorm}
 	if withCss {
 		cssAbs, cssRelNorm, err := s.resolveEditTarget(cssRel)
-		if err == nil {
-			if err := os.WriteFile(cssAbs, []byte(componentCSS(name)), 0644); err == nil {
-				created = append(created, cssRelNorm)
-			}
+		if err != nil {
+			return ErrorResult(err.Error()), nil
 		}
+		cssSrc := componentCSS(name)
+		if err := tx.stageWrite(cssAbs, cssRelNorm, cssSrc, ""); err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		created = append(created, cssRelNorm)
+	}
+	if err := tx.commit(); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
 	return TextResult("Created " + strings.Join(created, ", ") + "\n\n" + diff), nil
 }
@@ -287,7 +330,7 @@ func (s *Service) toolCreateComponent(ctx context.Context, args map[string]any) 
 // parseGate returns a non-empty message when an editable source file would fail
 // to parse after the change.
 func parseGate(rel, content string) string {
-	if !isEditablePageExt(rel) {
+	if !isEditableSourceExt(rel) {
 		return ""
 	}
 	if _, perrs, _ := astprint.Parse(content); len(perrs) > 0 {

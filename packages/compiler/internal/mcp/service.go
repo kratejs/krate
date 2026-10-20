@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kratejs/krate/packages/compiler/internal/astjson"
 	"github.com/kratejs/krate/packages/compiler/internal/astprint"
 	"github.com/kratejs/krate/packages/compiler/internal/build"
 	"github.com/kratejs/krate/packages/compiler/internal/check"
@@ -38,12 +37,15 @@ type Options struct {
 
 // Service implements the MCP tools and resources over one in-process Builder.
 type Service struct {
-	root    string
-	cfg     *config.Config
-	env     map[string]string
-	verbose bool
-	builder *build.Builder
-	policy  *Policy
+	root           string
+	cfg            *config.Config
+	env            map[string]string
+	verbose        bool
+	builder        *build.Builder
+	policy         *Policy
+	notifyMu       sync.Mutex
+	notifyResource []func(string)
+	notifyLog      []func(level, message string)
 
 	// runMu serializes write operations and build/check (which swap os.Stdout
 	// during stdout capture) so concurrent requests never race.
@@ -75,6 +77,10 @@ func newBuilder(opts Options) *build.Builder {
 // Register installs every tool, resource, template, prompt, and completion on
 // the MCP server.
 func (s *Service) Register(srv *Server) {
+	s.notifyMu.Lock()
+	s.notifyResource = append(s.notifyResource, srv.NotifyResourceUpdated)
+	s.notifyLog = append(s.notifyLog, srv.NotifyLog)
+	s.notifyMu.Unlock()
 	// read tools
 	srv.RegisterTool(Tool{
 		Name:        "list_routes",
@@ -121,6 +127,15 @@ func (s *Service) Register(srv *Server) {
 		Handler:     s.toolCheck,
 	})
 	srv.RegisterTool(Tool{
+		Name:        "run_task",
+		Description: "Run an allowlisted project task: build, check, test, or typecheck. build/check run in-process; test/typecheck run the project's npm script without a shell.",
+		InputSchema: objSchema(map[string]any{
+			"task": enumSchema("Task to run", "build", "check", "test", "typecheck"),
+		}, "task"),
+		Annotations: rebuildToolAnnotations("Run Task"),
+		Handler:     s.toolRunTask,
+	})
+	srv.RegisterTool(Tool{
 		Name:        "explain",
 		Description: "Explain a route from the compiled site graph: render mode, source, dependencies, dependents, and emitted output files. Builds the site to populate the graph.",
 		InputSchema: objSchema(map[string]any{
@@ -128,6 +143,84 @@ func (s *Service) Register(srv *Server) {
 		}, "route"),
 		Annotations: readOnlyAnnotations("Explain Route"),
 		Handler:     s.toolExplain,
+	})
+
+	srv.RegisterTool(Tool{
+		Name:        "search_project",
+		Description: "Search project source and content files (literal or regex) with optional glob, context lines, and pagination.",
+		InputSchema: objSchema(map[string]any{
+			"query":         strSchema("Text or regular expression to find"),
+			"regex":         boolSchema("Treat query as a regular expression (default false)"),
+			"caseSensitive": boolSchema("Case-sensitive search (default false)"),
+			"glob":          strSchema("Optional path glob, e.g. src/**/*.tsx"),
+			"context":       numSchema("Context lines before and after each match (default 2, max 10)"),
+			"limit":         numSchema("Maximum matches (default 100, max 500)"),
+			"cursor":        strSchema("Opaque cursor from a previous search_project result"),
+		}, "query"),
+		Annotations: readOnlyAnnotations("Search Project"),
+		Handler:     s.toolSearchProject,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "read_files",
+		Description: "Read several project files in one call, with per-file byte caps and policy checks.",
+		InputSchema: objSchema(map[string]any{
+			"path":  strSchema("Single project-relative path"),
+			"paths": map[string]any{"type": "array", "items": strSchema("Project-relative path")},
+		}),
+		Annotations: readOnlyAnnotations("Read Files"),
+		Handler:     s.toolReadFiles,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "get_diagnostics",
+		Description: "Run a build and quality checks, returning structured diagnostics with file, line/column, code, severity, and hint.",
+		InputSchema: objSchema(map[string]any{
+			"check": boolSchema("Also run quality checks (default true)"),
+			"route": strSchema("Optional route filter for check findings"),
+		}),
+		Annotations: rebuildToolAnnotations("Get Diagnostics"),
+		Handler:     s.toolGetDiagnostics,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "find_references",
+		Description: "Find source references to a symbol across project files. Returns file, line, column, and surrounding context.",
+		InputSchema: objSchema(map[string]any{
+			"symbol":  strSchema("Symbol or identifier to find"),
+			"glob":    strSchema("Optional path glob"),
+			"context": numSchema("Context lines (default 1)"),
+			"limit":   numSchema("Maximum references (default 100)"),
+		}, "symbol"),
+		Annotations: readOnlyAnnotations("Find References"),
+		Handler:     s.toolFindReferences,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "impact",
+		Description: "Show routes affected by a source file, or the dependencies and dependents of a route, using the compiled site graph.",
+		InputSchema: objSchema(map[string]any{
+			"path":  strSchema("Project-relative source path"),
+			"route": strSchema("Route path"),
+		}),
+		Annotations: readOnlyAnnotations("Impact Analysis"),
+		Handler:     s.toolImpact,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "list_changes",
+		Description: "List recent MCP transactions, including their IDs, files, timestamps, and undone state.",
+		InputSchema: objSchema(map[string]any{
+			"limit":  numSchema("Maximum transactions (default 10)"),
+			"cursor": strSchema("Opaque cursor from a previous list_changes result"),
+		}),
+		Annotations: readOnlyAnnotations("List Changes"),
+		Handler:     s.toolListChanges,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "get_history",
+		Description: "Alias for list_changes: recent transaction history for undo and audit.",
+		InputSchema: objSchema(map[string]any{
+			"limit":  numSchema("Maximum transactions (default 10)"),
+			"cursor": strSchema("Opaque cursor from a previous get_history result"),
+		}),
+		Annotations: readOnlyAnnotations("Get History"),
+		Handler:     s.toolListChanges,
 	})
 
 	// write tools (dry-run by default)
@@ -148,30 +241,80 @@ func (s *Service) Register(srv *Server) {
 		Handler:     s.toolCreatePage,
 	})
 	srv.RegisterTool(Tool{
-		Name:        "edit_ast",
-		Description: "Replace a page's AST with an edited kind-tagged document (from read_page). Returns a unified diff unless apply=true. Refuses files containing TypeScript constructs the parser drops.",
+		Name:        "edit_file",
+		Description: "Edit any project file directly (pages, components, CSS, API routes, content, docs): provide content for a full-file replace, or find+replace for a targeted edit. Returns a unified diff unless apply=true. Editable JS/TS source is re-parsed and the edit is refused if it would not parse.",
 		InputSchema: objSchema(map[string]any{
-			"route":  strSchema("Route path or source path"),
-			"source": strSchema("Page source path (alternative to route)"),
-			"ast":    strSchema("Kind-tagged AST document (JSON)"),
-			"apply":  boolSchema("Write the file (default false: dry-run)"),
-		}, "ast"),
-		Annotations: destructiveToolAnnotations("Edit Page AST"),
-		Handler:     s.toolEditAST,
-	})
-	srv.RegisterTool(Tool{
-		Name:        "edit_page",
-		Description: "Edit a page or any project file's source directly (no AST required): provide content for a full-file replace, or find+replace for a targeted in-place edit. Returns a unified diff unless apply=true. Editable source (.ts/.tsx/.js/.jsx) is re-parsed and the edit is refused if it would not parse.",
-		InputSchema: objSchema(map[string]any{
-			"route":      strSchema("Route path (e.g. /about) or a project-relative path (e.g. src/pages/about.tsx, src/styles/main.css, src/content/blog/hello.md)"),
-			"content":    strSchema("Full new file content (full replace; creates the file when it does not exist)"),
-			"find":       strSchema("Exact text to replace; must match once unless replaceAll is true"),
-			"replace":    strSchema("Replacement text for find"),
-			"replaceAll": boolSchema("Allow replacing all occurrences of find (default false)"),
-			"apply":      boolSchema("Write the file (default false: dry-run)"),
+			"route":          strSchema("Route path (e.g. /about) or a project-relative path (e.g. src/pages/about.tsx, src/styles/main.css, src/content/blog/hello.md)"),
+			"content":        strSchema("Full new file content (full replace; creates the file when it does not exist)"),
+			"find":           strSchema("Exact text to replace; must match once unless replaceAll is true"),
+			"replace":        strSchema("Replacement text for find"),
+			"replaceAll":     boolSchema("Allow replacing all occurrences of find (default false)"),
+			"expectedSha256": strSchema("Optional SHA-256 of the content the caller read; refuses stale edits"),
+			"expectedMtime":  numSchema("Optional file mtime (Unix seconds); refuses stale edits"),
+			"apply":          boolSchema("Write the file (default false: dry-run)"),
 		}, "route"),
 		Annotations: destructiveToolAnnotations("Edit Page Source"),
-		Handler:     s.toolEditPage,
+		Handler:     s.toolEditFile,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "apply_patch",
+		Description: "Apply a unified diff to one or many files as one atomic transaction. Context must match exactly. Supports create, modify, delete, and rename. Returns a dry-run diff unless apply=true.",
+		InputSchema: objSchema(map[string]any{
+			"patch":    strSchema("Unified diff text (git-style ---/+++/@@ format)"),
+			"expected": objOnlySchema("Optional map of project-relative path to expected SHA-256"),
+			"apply":    boolSchema("Apply the patch (default false: dry-run)"),
+		}, "patch"),
+		Annotations: destructiveToolAnnotations("Apply Patch"),
+		Handler:     s.toolApplyPatch,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "batch_edit",
+		Description: "Apply a list of source operations (create/replace/delete/move) as one atomic transaction. Each operation may include expectedSha256. Returns a combined diff unless apply=true.",
+		InputSchema: objSchema(map[string]any{
+			"edits": map[string]any{
+				"type":        "array",
+				"description": "Operations: {path, content|find+replace|delete|to, expectedSha256?, replaceAll?}",
+				"items":       objOnlySchema("One file operation"),
+			},
+			"apply": boolSchema("Apply the operations (default false: dry-run)"),
+		}, "edits"),
+		Annotations: destructiveToolAnnotations("Batch Edit"),
+		Handler:     s.toolBatchEdit,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "undo",
+		Description: "Undo the most recent applied MCP transaction. Refuses if the affected files changed afterward unless force=true.",
+		InputSchema: objSchema(map[string]any{
+			"id":    strSchema("Transaction ID (omit for the most recent)"),
+			"force": boolSchema("Undo even when files changed after the transaction (default false)"),
+		}),
+		Annotations: destructiveToolAnnotations("Undo Last Edit"),
+		Handler:     s.toolUndo,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "apply_fix",
+		Description: "Apply an explicit repair to a source file (find/replace) with expected-hash protection. Use the diagnostic data from get_diagnostics to choose the edit.",
+		InputSchema: objSchema(map[string]any{
+			"path":           strSchema("Project-relative path"),
+			"route":          strSchema("Route path (alternative to path)"),
+			"find":           strSchema("Exact text to replace"),
+			"replace":        strSchema("Replacement text"),
+			"expectedSha256": strSchema("Optional expected source hash"),
+			"apply":          boolSchema("Apply the fix (default false: dry-run)"),
+		}, "find"),
+		Annotations: destructiveToolAnnotations("Apply Fix"),
+		Handler:     s.toolApplyFix,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "format_file",
+		Description: "Format a TypeScript/JavaScript source file with the compiler's printer. Returns a diff unless apply=true.",
+		InputSchema: objSchema(map[string]any{
+			"path":  strSchema("Project-relative path"),
+			"route": strSchema("Route path (alternative to path)"),
+			"apply": boolSchema("Write the formatted file (default false: dry-run)"),
+		}),
+		Annotations: destructiveToolAnnotations("Format File"),
+		Handler:     s.toolFormatFile,
 	})
 	srv.RegisterTool(Tool{
 		Name:        "list_files",
@@ -181,6 +324,8 @@ func (s *Service) Register(srv *Server) {
 			"glob":          strSchema("Optional path glob filter, e.g. src/components/**/*.tsx"),
 			"recursive":     boolSchema("Recurse into subdirectories (default true)"),
 			"includeDenied": boolSchema("Include paths the policy denies (default false)"),
+			"limit":         numSchema("Maximum files per page (default 500)"),
+			"cursor":        strSchema("Opaque cursor from a previous list_files result"),
 		}),
 		Annotations: readOnlyAnnotations("List Files"),
 		Handler:     s.toolListFiles,
@@ -196,7 +341,7 @@ func (s *Service) Register(srv *Server) {
 	})
 	srv.RegisterTool(Tool{
 		Name:        "create_file",
-		Description: "Create a new project file. Refuses to overwrite an existing file (use edit_page to modify), respects the write policy, and parse-gates editable source. Returns a unified diff unless apply=true.",
+		Description: "Create a new project file. Refuses to overwrite an existing file (use edit_file to modify), respects the write policy, and parse-gates editable source. Returns a unified diff unless apply=true.",
 		InputSchema: objSchema(map[string]any{
 			"path":    strSchema("Project-relative path to create"),
 			"content": strSchema("Full file content"),
@@ -228,7 +373,7 @@ func (s *Service) Register(srv *Server) {
 	})
 	srv.RegisterTool(Tool{
 		Name:        "create_component",
-		Description: "Scaffold a Krate component (client, static, or server) under src/components/<kebab-name>/, optionally with a companion .css file. Returns a unified diff unless apply=true. Use read_file/edit_page for further changes.",
+		Description: "Scaffold a Krate component (client, static, or server) under src/components/<kebab-name>/, optionally with a companion .css file. Returns a unified diff unless apply=true. Use read_file/edit_file for further changes.",
 		InputSchema: objSchema(map[string]any{
 			"name":    strSchema("PascalCase component name, e.g. StatusBadge"),
 			"kind":    enumSchema("Component tier (default client)", "client", "static", "server"),
@@ -343,6 +488,10 @@ func (s *Service) Register(srv *Server) {
 	srv.RegisterPrompt(s.promptAddPage())
 	srv.RegisterPrompt(s.promptPublishContent())
 	srv.RegisterPrompt(s.promptFixChecks())
+	srv.RegisterPrompt(s.promptRepairDiagnostics())
+	srv.RegisterPrompt(s.promptRefactor())
+	srv.RegisterPrompt(s.promptAuditDependencies())
+	srv.RegisterPrompt(s.promptScaffoldComponent())
 	srv.RegisterPrompt(s.promptExplore())
 
 	// completions
@@ -352,7 +501,7 @@ func (s *Service) Register(srv *Server) {
 	srv.RegisterCompletion("ref/prompt", "add-page", "collection", s.completeCollections)
 	srv.RegisterCompletion("ref/prompt", "add-page", "route", s.completeRoutes)
 	srv.RegisterCompletion("ref/prompt", "publish-content", "collection", s.completeCollections)
-	srv.RegisterCompletion("ref/tool", "edit_page", "route", s.completeRoutes)
+	srv.RegisterCompletion("ref/tool", "edit_file", "route", s.completeRoutes)
 	srv.RegisterCompletion("ref/tool", "read_page", "route", s.completeRoutes)
 	srv.RegisterCompletion("ref/tool", "explain", "route", s.completeRoutes)
 	srv.RegisterCompletion("ref/tool", "read_content", "collection", s.completeCollections)
@@ -364,6 +513,26 @@ func (s *Service) Register(srv *Server) {
 }
 
 // read tools
+
+func (s *Service) notifyChangedResources() {
+	s.notifyMu.Lock()
+	fns := append([]func(string){}, s.notifyResource...)
+	s.notifyMu.Unlock()
+	for _, uri := range []string{"krate://manifest", "krate://routes", "krate://graph", "krate://content"} {
+		for _, fn := range fns {
+			fn(uri)
+		}
+	}
+}
+
+func (s *Service) logMessage(level, message string) {
+	s.notifyMu.Lock()
+	fns := append([]func(string, string){}, s.notifyLog...)
+	s.notifyMu.Unlock()
+	for _, fn := range fns {
+		fn(level, message)
+	}
+}
 
 func (s *Service) toolListRoutes(ctx context.Context, _ map[string]any) (ToolResult, *rpcError) {
 	routes, err := s.builder.RouteList()
@@ -472,11 +641,15 @@ func (s *Service) toolSearchDocs(ctx context.Context, args map[string]any) (Tool
 }
 
 func (s *Service) toolBuild(ctx context.Context, _ map[string]any) (ToolResult, *rpcError) {
+	reportProgress(ctx, 0, 1, "building")
+	s.logMessage("info", "building site")
 	out, err := s.runBuild(ctx)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("build failed: %v\n\n%s", err, out)), nil
 	}
 	routes, _ := s.builder.RouteList()
+	reportProgress(ctx, 1, 1, "build complete")
+	s.logMessage("info", "build complete")
 	return JSONResult(map[string]any{
 		"ok":     true,
 		"routes": len(routes),
@@ -485,6 +658,8 @@ func (s *Service) toolBuild(ctx context.Context, _ map[string]any) (ToolResult, 
 }
 
 func (s *Service) toolCheck(ctx context.Context, _ map[string]any) (ToolResult, *rpcError) {
+	reportProgress(ctx, 0, 1, "running checks")
+	s.logMessage("info", "running quality checks")
 	// Build if the output directory is not present, then evaluate gates.
 	if _, err := os.Stat(filepath.Join(s.cfg.OutDir, "manifest.json")); err != nil {
 		if out, buildErr := s.runBuild(ctx); buildErr != nil {
@@ -505,6 +680,7 @@ func (s *Service) toolCheck(ctx context.Context, _ map[string]any) (ToolResult, 
 	if err != nil {
 		return ErrorResult("running checks: " + err.Error()), nil
 	}
+	reportProgress(ctx, 1, 1, "checks complete")
 	errs, warns := check.Counts(findings)
 	if findings == nil {
 		findings = []check.Finding{}
@@ -686,35 +862,59 @@ func (s *Service) toolCreatePage(ctx context.Context, args map[string]any) (Tool
 		return TextResult("Dry run (apply: true to write). Would create:\n\n" + body), nil
 	}
 
+	pageRel, relErr := filepath.Rel(s.root, abs)
+	if relErr != nil {
+		return ErrorResult("invalid page path: " + relErr.Error()), nil
+	}
+	pageRel = filepath.ToSlash(pageRel)
+	abs, pageRel, err = s.resolveEditTarget(pageRel)
+	if err != nil {
+		return ErrorResult(err.Error()), nil
+	}
 	if _, err := os.Stat(abs); err == nil {
 		return ErrorResult("page already exists: " + rel), nil
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
-		return ErrorResult("creating directory: " + err.Error()), nil
+	tx := newFileTransaction(s)
+	if err := validateGoSource(pageRel, content); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
-	if err := os.WriteFile(abs, []byte(content), 0644); err != nil {
-		return ErrorResult("writing page: " + err.Error()), nil
+	if err := tx.stageWrite(abs, pageRel, content, ""); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
 	created := []string{rel}
 	if entryRel != "" {
-		eabs := filepath.Join(s.root, filepath.FromSlash(entryRel))
+		eabs, eRel, err := s.resolveEditTarget(entryRel)
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
 		if _, err := os.Stat(eabs); err == nil {
 			return ErrorResult("content entry already exists: " + entryRel), nil
 		}
-		if err := os.MkdirAll(filepath.Dir(eabs), 0755); err != nil {
-			return ErrorResult("creating entry dir: " + err.Error()), nil
-		}
-		if err := os.WriteFile(eabs, []byte(entryContent), 0644); err != nil {
-			return ErrorResult("writing content entry: " + err.Error()), nil
+		if err := tx.stageWrite(eabs, eRel, entryContent, ""); err != nil {
+			return ErrorResult(err.Error()), nil
 		}
 		created = append(created, entryRel)
 	}
 	if layoutRel != "" {
 		labs := filepath.Join(s.cfg.PagesDir, "_layout.tsx")
-		if err := os.WriteFile(labs, []byte(layoutContent), 0644); err != nil {
-			return ErrorResult("writing layout: " + err.Error()), nil
+		lProj, lErr := filepath.Rel(s.root, labs)
+		if lErr != nil {
+			return ErrorResult("invalid layout path: " + lErr.Error()), nil
+		}
+		labs, lRel, err := s.resolveEditTarget(filepath.ToSlash(lProj))
+		if err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		if err := validateGoSource(lRel, layoutContent); err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		if err := tx.stageWrite(labs, lRel, layoutContent, ""); err != nil {
+			return ErrorResult(err.Error()), nil
 		}
 		created = append(created, layoutRel)
+	}
+	if err := tx.commit(); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
 
 	// Regenerate route/content types so the new page is typed immediately.
@@ -814,71 +1014,10 @@ func (s *Service) renderContentEntry(col string, m map[string]any) (rel, content
 	return rel, renderMarkdownEntry(m, "Content for **"+slug+"**."), nil
 }
 
-func (s *Service) toolEditAST(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
-	rawAST, rerr := requireString(args, "ast")
-	if rerr != nil {
-		return ToolResult{}, rerr
-	}
-	apply := argBool(args, "apply", false)
-
-	target := argString(args, "route")
-	if target == "" {
-		target = argString(args, "source")
-	}
-	if target == "" {
-		return ErrorResult("provide route or source"), nil
-	}
-
-	src, rel, err := s.resolveSource(target)
-	if err != nil {
-		return ErrorResult(err.Error()), nil
-	}
-
-	original, err := os.ReadFile(src)
-	if err != nil {
-		return ErrorResult("reading page: " + err.Error()), nil
-	}
-
-	// The AST printer cannot reproduce TypeScript constructs the parser drops
-	// (interfaces, type aliases, annotations). Refuse rather than silently
-	// stripping them.
-	if _, _, dropped := astprint.Parse(string(original)); dropped > 0 {
-		return ErrorResult("refusing to edit: " + rel + " contains TypeScript type syntax (interfaces, aliases, or annotations) that the AST cannot round-trip. Use edit_page to edit the source directly."), nil
-	}
-
-	prog, err := astjson.DecodeProgram([]byte(rawAST))
-	if err != nil {
-		return ErrorResult("invalid AST document: " + err.Error()), nil
-	}
-	out := astprint.Print(prog)
-
-	// Validate that the printed source reparses cleanly before touching disk.
-	if _, perrs, _ := astprint.Parse(out); len(perrs) > 0 {
-		msgs := make([]string, 0, len(perrs))
-		for _, e := range perrs {
-			msgs = append(msgs, e.Error())
-		}
-		return ErrorResult("edited AST does not produce valid source:\n" + strings.Join(msgs, "\n")), nil
-	}
-	// Preserve the file's original line ending.
-	if strings.Contains(string(original), "\r\n") {
-		out = strings.ReplaceAll(out, "\n", "\r\n")
-	}
-
-	diff := unifiedDiff(rel, string(original), out)
-	if !apply {
-		return TextResult(diff), nil
-	}
-	if err := os.WriteFile(src, []byte(out), 0644); err != nil {
-		return ErrorResult("writing page: " + err.Error()), nil
-	}
-	return TextResult("Updated " + rel + "\n\n" + diff), nil
-}
-
-// toolEditPage edits a page or any project file directly (no AST required).
+// toolEditFile edits a page or any project file directly (no AST required).
 // Two modes: a full-file replace via content, or a targeted find+replace. The
 // edited source is re-parsed before writing so broken files are never written.
-func (s *Service) toolEditPage(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
+func (s *Service) toolEditFile(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
 	target := argString(args, "route")
 	if target == "" {
 		return ErrorResult("provide route (a page route like /about or a project-relative path like src/pages/about.tsx)"), nil
@@ -887,6 +1026,11 @@ func (s *Service) toolEditPage(ctx context.Context, args map[string]any) (ToolRe
 	find := argString(args, "find")
 	replace := argString(args, "replace")
 	replaceAll := argBool(args, "replaceAll", false)
+	expectedSHA := argString(args, "expectedSha256")
+	var expectedMtime int64
+	if v, ok := args["expectedMtime"].(float64); ok {
+		expectedMtime = int64(v)
+	}
 	apply := argBool(args, "apply", false)
 
 	if content == "" && find == "" {
@@ -904,9 +1048,20 @@ func (s *Service) toolEditPage(ctx context.Context, args map[string]any) (ToolRe
 	original, exists := "", true
 	if data, readErr := os.ReadFile(abs); readErr == nil {
 		original = string(data)
+		if expectedSHA != "" && hashString(original) != expectedSHA {
+			return ErrorResult(rel + " changed since it was read; refresh and retry"), nil
+		}
+		if expectedMtime != 0 {
+			if info, statErr := os.Stat(abs); statErr != nil || info.ModTime().Unix() != expectedMtime {
+				return ErrorResult(rel + " changed since it was read; refresh and retry"), nil
+			}
+		}
 	} else if os.IsNotExist(readErr) {
 		if find != "" {
 			return ErrorResult("cannot find+replace on a file that does not exist: " + rel), nil
+		}
+		if expectedSHA != "" || expectedMtime != 0 {
+			return ErrorResult(rel + " does not exist but an expected version was supplied"), nil
 		}
 		exists = false
 	} else {
@@ -933,7 +1088,7 @@ func (s *Service) toolEditPage(ctx context.Context, args map[string]any) (ToolRe
 	}
 
 	// Parse gate: editable source must still parse after the edit.
-	if isEditablePageExt(rel) {
+	if isEditableSourceExt(rel) {
 		if _, perrs, _ := astprint.Parse(out); len(perrs) > 0 {
 			msgs := make([]string, 0, len(perrs))
 			for _, e := range perrs {
@@ -943,18 +1098,19 @@ func (s *Service) toolEditPage(ctx context.Context, args map[string]any) (ToolRe
 		}
 	}
 
-	diff := unifiedDiff(rel, original, out)
+	tx := newFileTransaction(s)
+	if err := tx.stageWrite(abs, rel, out, expectedSHA); err != nil {
+		return ErrorResult(err.Error()), nil
+	}
+	diff := tx.diff()
 	if !apply {
 		if !exists {
 			return TextResult("Dry run (would create " + rel + "; apply: true to write).\n\n" + diff), nil
 		}
 		return TextResult("Dry run (apply: true to write).\n\n" + diff), nil
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
-		return ErrorResult("creating the directory for " + rel + ": " + err.Error()), nil
-	}
-	if err := os.WriteFile(abs, []byte(out), 0644); err != nil {
-		return ErrorResult("writing " + rel + ": " + err.Error()), nil
+	if err := tx.commit(); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
 	verb := "Updated"
 	if !exists {
@@ -1133,11 +1289,12 @@ func (s *Service) toolCreateContent(ctx context.Context, args map[string]any) (T
 	if !apply {
 		return TextResult("Dry run (apply: true to write). Would create:\n\n" + diff), nil
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
-		return ErrorResult("creating the directory for " + rel + ": " + err.Error()), nil
+	tx := newFileTransaction(s)
+	if err := tx.stageWrite(abs, rel, out, ""); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
-	if err := os.WriteFile(abs, []byte(out), 0644); err != nil {
-		return ErrorResult("writing " + rel + ": " + err.Error()), nil
+	if err := tx.commit(); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
 	return TextResult("Created " + rel + "\n\n" + diff), nil
 }
@@ -1256,8 +1413,13 @@ func (s *Service) toolEditContent(ctx context.Context, args map[string]any) (Too
 	if !apply {
 		return TextResult("Dry run (apply: true to write).\n\n" + diff), nil
 	}
-	if err := os.WriteFile(filepath.Join(absDir, filepath.FromSlash(relFile)), []byte(out), 0644); err != nil {
-		return ErrorResult("writing " + projPath + ": " + err.Error()), nil
+	abs := filepath.Join(absDir, filepath.FromSlash(relFile))
+	tx := newFileTransaction(s)
+	if err := tx.stageWrite(abs, projPath, out, ""); err != nil {
+		return ErrorResult(err.Error()), nil
+	}
+	if err := tx.commit(); err != nil {
+		return ErrorResult(err.Error()), nil
 	}
 	return TextResult("Updated " + projPath + "\n\n" + diff), nil
 }
@@ -1554,13 +1716,69 @@ func (s *Service) promptPublishContent() *Prompt {
 func (s *Service) promptFixChecks() *Prompt {
 	return &Prompt{
 		Name:        "fix-checks",
-		Description: "Run the quality gates, then fix the worst a11y/SEO/perf findings via edit_page.",
+		Description: "Run the quality gates, then fix the worst a11y/SEO/perf findings via apply_fix or apply_patch.",
 		Arguments: []PromptArgument{
 			{Name: "route", Description: "Scope attention to a single route"},
 		},
 		Messages: []PromptMessage{{
 			Role:    "user",
-			Content: TextContent("Run the quality gates with the check tool. For each finding (see the findings array), read_page the source of the offending route, then fix it with edit_page, keeping the diff minimal and in the project's style. Re-run check after applying to confirm the fix."),
+			Content: TextContent("Run get_diagnostics with check enabled. For each finding, read the source file, then apply the smallest safe repair with apply_fix (find/replace) or apply_patch. Keep the diff minimal and match the project style. Re-run get_diagnostics or run_task { task: \"check\" } afterward to confirm the fix."),
+		}},
+	}
+}
+
+func (s *Service) promptRepairDiagnostics() *Prompt {
+	return &Prompt{
+		Name:        "repair-diagnostics",
+		Description: "Diagnose build and check failures, then apply minimal repairs and verify.",
+		Arguments: []PromptArgument{
+			{Name: "route", Description: "Optional route to focus on"},
+		},
+		Messages: []PromptMessage{{
+			Role:    "user",
+			Content: TextContent("Run get_diagnostics with check enabled. Read the files involved, then repair the smallest set of issues with apply_fix or apply_patch in dry-run mode first. Apply only after reviewing the diff, then run get_diagnostics and run_task { task: \"build\" } or check again. Report anything that remains unfixable."),
+		}},
+	}
+}
+
+func (s *Service) promptRefactor() *Prompt {
+	return &Prompt{
+		Name:        "refactor",
+		Description: "Plan and apply a safe multi-file refactor using references and impact analysis.",
+		Arguments: []PromptArgument{
+			{Name: "target", Description: "Symbol, component, or file to refactor", Required: true},
+			{Name: "goal", Description: "What should change"},
+		},
+		Messages: []PromptMessage{{
+			Role:    "user",
+			Content: TextContent("Refactor {{target}} so that {{goal}}. Start with search_project, find_references, and impact to map every affected file. Read the relevant files, then propose an apply_patch or batch_edit diff and show it before applying. After applying, run build and check and report the affected routes."),
+		}},
+	}
+}
+
+func (s *Service) promptAuditDependencies() *Prompt {
+	return &Prompt{
+		Name:        "audit-dependencies",
+		Description: "Audit project dependencies and import usage without mutating files.",
+		Arguments:   []PromptArgument{{Name: "scope", Description: "Optional directory or package scope"}},
+		Messages: []PromptMessage{{
+			Role:    "user",
+			Content: TextContent("Audit dependencies{{scope}}. Read package.json and the lockfile, use search_project to map imports to packages, and report unused packages, missing declarations, duplicate versions, and risky or outdated dependencies. Do not modify files; return a prioritized report with exact package names and evidence."),
+		}},
+	}
+}
+
+func (s *Service) promptScaffoldComponent() *Prompt {
+	return &Prompt{
+		Name:        "scaffold-component",
+		Description: "Scaffold a component that matches the project's existing conventions.",
+		Arguments: []PromptArgument{
+			{Name: "name", Description: "Component name", Required: true},
+			{Name: "kind", Description: "client, static, or server"},
+		},
+		Messages: []PromptMessage{{
+			Role:    "user",
+			Content: TextContent("Create the {{name}} component with kind {{kind}}. First read a nearby component and its CSS to learn the house style. Use create_component (dry-run first), then edit_file/apply_patch for any required props or styling. Run build and check afterward."),
 		}},
 	}
 }
@@ -1790,9 +2008,9 @@ func (s *Service) collectionCanonical(name string) string {
 	return ""
 }
 
-// isEditablePageExt reports whether an edit_page target should be re-parsed
+// isEditableSourceExt reports whether an edit_file target should be re-parsed
 // for validation before writing.
-func isEditablePageExt(rel string) bool {
+func isEditableSourceExt(rel string) bool {
 	l := strings.ToLower(rel)
 	return strings.HasSuffix(l, ".ts") || strings.HasSuffix(l, ".tsx") ||
 		strings.HasSuffix(l, ".js") || strings.HasSuffix(l, ".jsx")

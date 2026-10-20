@@ -464,7 +464,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
-			fmt.Printf("  %s▶%s %s\n", cCyan, cReset, p)
+			printf("  %s▶%s %s\n", cCyan, cReset, p)
 			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildPage(p) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
 		}(page)
@@ -476,7 +476,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
-			fmt.Printf("  %s▶%s %s\n", cCyan, cReset, s.OutPath)
+			printf("  %s▶%s %s\n", cCyan, cReset, s.OutPath)
 			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildStaticParamsPage(s) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, s.OutPath}
 		}(spp)
@@ -729,7 +729,7 @@ func (b *Builder) BuildAll() error {
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
-			fmt.Printf("  %s▶%s %s\n", cCyan, cReset, p)
+			printf("  %s▶%s %s\n", cCyan, cReset, p)
 			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildPage(p) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
 		}(page)
@@ -741,7 +741,7 @@ func (b *Builder) BuildAll() error {
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
-			fmt.Printf("  %s▶%s %s (route)%s\n", cGreen, cReset, r.Path, cReset)
+			printf("  %s▶%s %s (route)%s\n", cGreen, cReset, r.Path, cReset)
 			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildRoute(r) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, "(route) " + r.Path}
 		}(route)
@@ -801,7 +801,7 @@ func (b *Builder) BuildAll() error {
 		errorCount++
 	}
 	if len(staticParamPages) > 0 {
-		fmt.Printf("  %s⚡%s Building %d statically generated pages from generateStaticParams\n", cCyan, cReset, len(staticParamPages))
+		printf("  %s⚡%s Building %d statically generated pages from generateStaticParams\n", cCyan, cReset, len(staticParamPages))
 		for _, spp := range staticParamPages {
 			result, _, err := b.buildStaticParamsPage(spp)
 			if err != nil {
@@ -854,7 +854,7 @@ func (b *Builder) BuildAll() error {
 		}
 		results = filtered
 		if len(dropped) > 0 {
-			fmt.Printf("  %s⚡%s Static-only dynamic routes (no fallback template): %s\n", cCyan, cReset, strings.Join(dropped, ", "))
+			printf("  %s⚡%s Static-only dynamic routes (no fallback template): %s\n", cCyan, cReset, strings.Join(dropped, ", "))
 		}
 	}
 
@@ -951,11 +951,11 @@ func (b *Builder) BuildAll() error {
 	// Compile server bundles for SSR/ISR/streaming pages
 	serverBundles := CompileServerBundles(results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap)
 	if len(serverBundles) > 0 {
-		fmt.Printf("  %s⚡%s Compiled %d server bundles\n", cCyan, cReset, len(serverBundles))
+		printf("  %s⚡%s Compiled %d server bundles\n", cCyan, cReset, len(serverBundles))
 		// Stage the bundled SSR renderer driver so `krate serve` runs it with
 		// plain node instead of npx tsx on the TS source.
 		if staged := stageServerRenderer(b.Root, b.Cfg.OutDir); staged != "" {
-			fmt.Printf("  %s⚡%s Staged SSR renderer driver\n", cCyan, cReset)
+			printf("  %s⚡%s Staged SSR renderer driver\n", cCyan, cReset)
 		} else {
 			fmt.Fprintf(os.Stderr, "  %sWarning: SSR renderer driver not staged — server-renderer source not found under %s (ensure @krate/runtime is installed)%s\n", cYellow, b.Root, cReset)
 		}
@@ -964,7 +964,7 @@ func (b *Builder) BuildAll() error {
 	// Compile runtime server components (*.runtime.tsx, // @runtime, runtimeDirs)
 	runtimeCompBundles := CompileRuntimeComponents(b.Root, b.Cfg.OutDir, b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.RuntimeDirs)
 	if len(runtimeCompBundles) > 0 {
-		fmt.Printf("  %s⚡%s Compiled %d runtime components\n", cCyan, cReset, len(runtimeCompBundles))
+		printf("  %s⚡%s Compiled %d runtime components\n", cCyan, cReset, len(runtimeCompBundles))
 	}
 	manifest.SetRuntimeComponents(runtimeCompBundles)
 	stopTools()
@@ -992,7 +992,7 @@ func (b *Builder) BuildAll() error {
 		}
 	}
 	if ssrCount+isrCount+streamingCount > 0 {
-		fmt.Printf("  %s⚡%s SSR: %d, ISR: %d, Streaming: %d pages\n", cCyan, cReset, ssrCount, isrCount, streamingCount)
+		printf("  %s⚡%s SSR: %d, ISR: %d, Streaming: %d pages\n", cCyan, cReset, ssrCount, isrCount, streamingCount)
 	}
 
 	// Run build-level plugins (after all pages are done and aggregate work is complete)
@@ -1068,7 +1068,7 @@ func (b *Builder) BuildAll() error {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %sWarning: precompression failed:%s %v\n", cYellow, cReset, err)
 		} else if n > 0 {
-			fmt.Printf("  %s⚡%s Precompressed %d assets\n", cCyan, cReset, n)
+			printf("  %s⚡%s Precompressed %d assets\n", cCyan, cReset, n)
 		}
 	}
 
@@ -2633,7 +2633,7 @@ func (b *Builder) BuildMiddleware() {
 		return
 	}
 
-	fmt.Printf("  %s▶ Middleware%s %s\n", cGreen, cReset, filepath.Base(middlewarePath))
+	printf("  %s▶ Middleware%s %s\n", cGreen, cReset, filepath.Base(middlewarePath))
 
 	outDir := filepath.Join(b.Root, ".krate")
 	_ = os.MkdirAll(outDir, 0755)
@@ -3023,12 +3023,12 @@ func (b *Builder) writeAssetFiles(assets map[string]string) error {
 
 func printResult(outName, jsFile string) {
 	if outName == "." {
-		fmt.Printf("    %s✓%s %s/index.html %s(root)%s\n", cGreen, cReset, outName, cGray, cReset)
+		printf("    %s✓%s %s/index.html %s(root)%s\n", cGreen, cReset, outName, cGray, cReset)
 	} else {
-		fmt.Printf("    %s✓%s %s/index.html\n", cGreen, cReset, outName)
+		printf("    %s✓%s %s/index.html\n", cGreen, cReset, outName)
 	}
 	if jsFile != "" {
-		fmt.Printf("    %s%s (hydration)%s\n", cGray, jsFile, cReset)
+		printf("    %s%s (hydration)%s\n", cGray, jsFile, cReset)
 	}
 }
 
@@ -3742,7 +3742,7 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
-			fmt.Printf("  %s▶ API%s %s\n", cGreen, cReset, filepath.Base(r))
+			printf("  %s▶ API%s %s\n", cGreen, cReset, filepath.Base(r))
 			meta, err := func() (m apiRouteMeta, err error) {
 				err = safe.Run(func() error {
 					var e error

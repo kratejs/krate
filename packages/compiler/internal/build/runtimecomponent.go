@@ -103,7 +103,7 @@ func CompileRuntimeComponents(root, outDir string, serverComponents, runtimeComp
 	var bundles []RuntimeComponentBundle
 	for _, file := range files {
 		name := extractBuildComponentName(file)
-		fmt.Printf("  %s▸ Runtime%s %s\n", cCyan, cReset, filepath.Base(file))
+		printf("  %s▸ Runtime%s %s\n", cCyan, cReset, filepath.Base(file))
 		bundle, err := compileSingleRuntimeComponent(root, outDir, file)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s✗ Runtime component error (%s):%s %v\n", cRed, name, cReset, err)

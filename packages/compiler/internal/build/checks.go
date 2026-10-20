@@ -48,7 +48,7 @@ func (b *Builder) runQualityChecks(results []*PageResult, runtimeJSFile string) 
 	}
 	if len(findings) == 0 {
 		if b.Verbose {
-			fmt.Printf("  %s✓%s Quality checks passed (%d pages)\n", cGreen, cReset, len(pages))
+			printf("  %s✓%s Quality checks passed (%d pages)\n", cGreen, cReset, len(pages))
 		}
 		return nil
 	}
@@ -70,7 +70,7 @@ func (b *Builder) runQualityChecks(results []*PageResult, runtimeJSFile string) 
 	if len(shown) > 0 {
 		fmt.Print(check.FormatWith(shown, fopts))
 	}
-	fmt.Printf("  %s⚡%s Checks: %s\n", cCyan, cReset, check.Summary(errs, warns, fopts))
+	printf("  %s⚡%s Checks: %s\n", cCyan, cReset, check.Summary(errs, warns, fopts))
 
 	if check.Failing(findings, cfg.FailOn) {
 		return fmt.Errorf("quality checks failed (%d error(s))", errs)

@@ -298,7 +298,7 @@ func (b *Builder) resolveStaticParamsPages(pages []string) ([]staticParamsPage, 
 	var errs []string
 	for i := range results {
 		if results[i].note {
-			fmt.Printf("  %s⚡%s generateStaticParams: %s\n", cCyan, cReset, filepath.Base(dynamic[i]))
+			printf("  %s⚡%s generateStaticParams: %s\n", cCyan, cReset, filepath.Base(dynamic[i]))
 		}
 		expanded = append(expanded, results[i].expanded...)
 		errs = append(errs, results[i].errs...)

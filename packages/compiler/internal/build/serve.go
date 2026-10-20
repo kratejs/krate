@@ -825,7 +825,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		if isNodeFamilyRuntime(apiRTOption) {
 			sidecarRuntime = apiRTOption
 		}
-		fmt.Printf("  %s⚡%s API sidecar (%s) → %shttp://localhost:%d%s\n", cCyan, cReset, sidecarRuntime, cCyan, apiPort, cReset)
+		printf("  %s⚡%s API sidecar (%s) → %shttp://localhost:%d%s\n", cCyan, cReset, sidecarRuntime, cCyan, apiPort, cReset)
 
 		go func() {
 			defer func() {
@@ -891,9 +891,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		if err := goAPI.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "  %s⚠ Go API sidecar not started:%s %v\n", cYellow, cReset, err)
 		} else if goAPI.socket != "" {
-			fmt.Printf("  %s⚡%s Go API → %s%s%s\n", cCyan, cReset, cCyan, goAPI.socket, cReset)
+			printf("  %s⚡%s Go API → %s%s%s\n", cCyan, cReset, cCyan, goAPI.socket, cReset)
 		} else {
-			fmt.Printf("  %s⚡%s Go API → %shttp://localhost:%d%s\n", cCyan, cReset, cCyan, goAPIPort, cReset)
+			printf("  %s⚡%s Go API → %shttp://localhost:%d%s\n", cCyan, cReset, cCyan, goAPIPort, cReset)
 		}
 	}
 
@@ -948,7 +948,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			if cfg.API.Sidecar.Command != "" {
 				mode = "supervised"
 			}
-			fmt.Printf("  %s⚡%s API sidecar (%s) %s → %s%s%s\n", cCyan, cReset, mode, customSidecar.Prefix(), cCyan, target, cReset)
+			printf("  %s⚡%s API sidecar (%s) %s → %s%s%s\n", cCyan, cReset, mode, customSidecar.Prefix(), cCyan, target, cReset)
 		}
 	}
 
@@ -1051,12 +1051,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if err := ssr.LoadManifest(); err != nil {
 		// No request-time pages: nothing routes through the renderer.
 	} else if !ssr.NeedsNodeRenderer() {
-		fmt.Printf("  %s⚡%s SSR renderer skipped (all request-time regions render on the Go host)\n", cCyan, cReset)
+		printf("  %s⚡%s SSR renderer skipped (all request-time regions render on the Go host)\n", cCyan, cReset)
 	} else if err := ssr.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %s⚠ SSR renderer not started:%s %v\n", cYellow, cReset, err)
 	} else {
 		ssrStarted = true
-		fmt.Printf("  %s⚡%s SSR renderer → %shttp://localhost:%d%s\n", cCyan, cReset, cCyan, ssrPort, cReset)
+		printf("  %s⚡%s SSR renderer → %shttp://localhost:%d%s\n", cCyan, cReset, cCyan, ssrPort, cReset)
 	}
 
 	// SSR/ISR/Streaming route handler - intercepts before static file server
@@ -1086,7 +1086,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Scan for dynamic routes ([param] directories) in the output
 	dynRoutes := findDynamicRoutes(absOut)
 	if len(dynRoutes) > 0 {
-		fmt.Printf("  %s⚡%s Dynamic routes: %d patterns\n", cCyan, cReset, len(dynRoutes))
+		printf("  %s⚡%s Dynamic routes: %d patterns\n", cCyan, cReset, len(dynRoutes))
 	}
 
 	// Opt-in User-Agent document selection (compat.mode hybrid + userAgent).
@@ -1670,7 +1670,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if hub == nil {
 		label = "serve"
 	}
-	fmt.Printf("%s  %s server → %shttp://localhost:%d%s %s(started in %s)%s\n", cGreen, label, cCyan, addr.Port, cReset, cGray, time.Since(startTime).Round(time.Millisecond), cReset)
+	printf("%s  %s server → %shttp://localhost:%d%s %s(started in %s)%s\n", cGreen, label, cCyan, addr.Port, cReset, cGray, time.Since(startTime).Round(time.Millisecond), cReset)
 
 	// Start ISR background revalidation - one timer per page, each route
 	// revalidating on its own cadence (previously every ISR page was revalidated
@@ -1684,7 +1684,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if ssrStarted {
 		isrPages := ssr.GetISRPages()
 		if len(isrPages) > 0 {
-			fmt.Printf("  %s⚡%s ISR revalidation: %d pages\n", cCyan, cReset, len(isrPages))
+			printf("  %s⚡%s ISR revalidation: %d pages\n", cCyan, cReset, len(isrPages))
 			for _, p := range isrPages {
 				page := p
 				isrWg.Add(1)
@@ -1730,7 +1730,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	go func() {
 		<-sigCh
-		fmt.Printf("\n%sShutting down...%s\n", cGray, cReset)
+		printf("\n%sShutting down...%s\n", cGray, cReset)
 		defer func() {
 			if r := recover(); r != nil {
 				_ = safe.Recover(r)
@@ -1740,22 +1740,22 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		isrCloseOnce.Do(func() { close(isrDone) })
 		if ssrStarted {
 			ssr.Stop()
-			fmt.Printf("  %s✓%s SSR renderer stopped\n", cGreen, cReset)
+			printf("  %s✓%s SSR renderer stopped\n", cGreen, cReset)
 		}
 		if goAPI != nil {
 			goAPI.Close()
-			fmt.Printf("  %s✓%s Go API sidecar stopped\n", cGreen, cReset)
+			printf("  %s✓%s Go API sidecar stopped\n", cGreen, cReset)
 		}
 		if customSidecar != nil {
 			customSidecar.Stop()
-			fmt.Printf("  %s✓%s API sidecar stopped\n", cGreen, cReset)
+			printf("  %s✓%s API sidecar stopped\n", cGreen, cReset)
 		}
 		nodeAPICmdMu.Lock()
 		nc := nodeAPICmd
 		nodeAPICmdMu.Unlock()
 		if nc != nil && nc.Process != nil {
 			execx.KillTree(nc)
-			fmt.Printf("  %s✓%s Node API sidecar stopped\n", cGreen, cReset)
+			printf("  %s✓%s Node API sidecar stopped\n", cGreen, cReset)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()

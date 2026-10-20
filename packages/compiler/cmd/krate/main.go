@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +50,9 @@ type cliFlags struct {
 	Schema      bool
 	Target      string
 	JSON        bool
+	HTTP        bool
+	Port        int
+	Token       string
 	CPUProfile  string
 	MemProfile  string
 }
@@ -151,8 +155,11 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "Usage: krate plugin add <package> [dir]\n\n")
 		fmt.Fprintf(w, "Manage Krate plugins.\n")
 	case "mcp":
-		fmt.Fprintf(w, "Usage: krate mcp [dir]\n\n")
-		fmt.Fprintf(w, "Run the MCP server (Model Context Protocol) over stdio.\n")
+		fmt.Fprintf(w, "Usage: krate mcp [dir] [--http] [--port 7331] [--token TOKEN]\n\n")
+		fmt.Fprintf(w, "Run the MCP server (Model Context Protocol) over stdio by default.\n")
+		fmt.Fprintf(w, "  --http        Serve Streamable HTTP at /mcp instead\n")
+		fmt.Fprintf(w, "  --port N      HTTP port (default 7331, localhost only)\n")
+		fmt.Fprintf(w, "  --token T     Bearer token (or KRATE_MCP_TOKEN)\n")
 	default:
 		printUsage(w)
 	}
@@ -172,7 +179,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  clean     Remove build output (dist) and the compiler cache (.krate/cache)\n")
 	fmt.Fprintf(w, "  doctor    Print a diagnostic summary of the project and toolchain\n")
 	fmt.Fprintf(w, "  plugin    Manage plugins (add <pkg>)\n")
-	fmt.Fprintf(w, "  mcp       Run the MCP server (Model Context Protocol)\n")
+	fmt.Fprintf(w, "  mcp       Run the MCP server (Model Context Protocol; --http for HTTP)\n")
 	fmt.Fprintf(w, "  version   Print the version\n")
 	fmt.Fprintf(w, "  help      Print this help, or `krate help <command>`\n\n")
 	fmt.Fprintf(w, "Flags:\n")
@@ -228,6 +235,16 @@ func parseFlags(args []string) (cliFlags, []string) {
 			flags.Schema = true
 		case args[i] == "--json":
 			flags.JSON = true
+		case args[i] == "--http":
+			flags.HTTP = true
+		case args[i] == "--port" && i+1 < len(args):
+			if n, err := strconv.Atoi(args[i+1]); err == nil {
+				flags.Port = n
+			}
+			i++
+		case args[i] == "--token" && i+1 < len(args):
+			flags.Token = args[i+1]
+			i++
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
 			// than rejecting them as unknown flags.
@@ -713,6 +730,24 @@ func runMCP(flags cliFlags, args []string) {
 		Env:     env,
 		Verbose: flags.Verbose,
 	})
+	if flags.HTTP {
+		port := flags.Port
+		if port == 0 {
+			port = 7331
+		}
+		token := flags.Token
+		if token == "" {
+			token = os.Getenv("KRATE_MCP_TOKEN")
+		}
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		fmt.Fprintf(os.Stderr, "  MCP HTTP server -> http://%s/mcp (POST; GET for SSE)\n", addr)
+		if err := mcp.ServeHTTP(svc, addr, token); err != nil {
+			fmt.Fprintf(os.Stderr, "%sMCP HTTP error:%s %v\n", cRed, cReset, err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	srv := mcp.NewServer(protocolOut, "krate", version)
 	svc.Register(srv)
 

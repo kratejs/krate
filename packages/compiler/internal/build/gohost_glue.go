@@ -49,7 +49,7 @@ func (b *Builder) BuildAllGoAPI() error {
 		_ = os.Remove(gohost.RoutesManifestPath(b.Root))
 		return nil
 	}
-	fmt.Printf("  %s▶%s Go host %d route(s), %d component(s) → %s\n", cGreen, cReset, len(info.Routes), info.Components, info.BinPath)
+	printf("  %s▶%s Go host %d route(s), %d component(s) → %s\n", cGreen, cReset, len(info.Routes), info.Components, info.BinPath)
 	if !goInitHinted && gohost.SetupMissing(b.Root) {
 		goInitHinted = true
 		fmt.Fprintf(os.Stderr, "  %s·%s Go editor intellisense isn't set up yet - run %skrate go:init%s\n", cYellow, cReset, cCyan, cReset)

@@ -52,10 +52,10 @@ func (b *Builder) refreshPageServerArtifacts(results []*PageResult, runtimeJS st
 	}
 
 	if len(serverBundles) > 0 {
-		fmt.Printf("  %s⚡%s Refreshed %d server bundle(s)\n", cCyan, cReset, len(serverBundles))
+		printf("  %s⚡%s Refreshed %d server bundle(s)\n", cCyan, cReset, len(serverBundles))
 	}
 	if len(runtimeBundles) > 0 {
-		fmt.Printf("  %s⚡%s Refreshed %d runtime component(s)\n", cCyan, cReset, len(runtimeBundles))
+		printf("  %s⚡%s Refreshed %d runtime component(s)\n", cCyan, cReset, len(runtimeBundles))
 	}
 
 	manifestCSS := ""

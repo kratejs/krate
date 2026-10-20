@@ -64,7 +64,7 @@ func TestPolicyDeniesEnvByDefault(t *testing.T) {
 	if !strings.Contains(text, "refusing") {
 		t.Fatalf("expected .env read refusal, got %s", text)
 	}
-	text = toolText(t, serve(t, svc, call("edit_page", map[string]any{
+	text = toolText(t, serve(t, svc, call("edit_file", map[string]any{
 		"route": ".env", "content": "SECRET=2\n", "apply": true,
 	}))[0])
 	if !strings.Contains(text, "refusing") {
@@ -84,7 +84,7 @@ func TestPolicyAllowOverridesDefaultDeny(t *testing.T) {
 	svc.policy = loadPolicy(svc.root)
 	writeFile(t, svc.root, "config/public.env", "PUBLIC=1\n")
 
-	text := toolText(t, serve(t, svc, call("edit_page", map[string]any{
+	text := toolText(t, serve(t, svc, call("edit_file", map[string]any{
 		"route": "config/public.env", "content": "PUBLIC=2\n", "apply": true,
 	}))[0])
 	if strings.Contains(text, "refusing") {
@@ -104,7 +104,7 @@ func TestPolicyDenyWins(t *testing.T) {
 	svc.policy = loadPolicy(svc.root)
 	writeFile(t, svc.root, "src/generated/gen.ts", "export const x = 1;\n")
 
-	text := toolText(t, serve(t, svc, call("edit_page", map[string]any{
+	text := toolText(t, serve(t, svc, call("edit_file", map[string]any{
 		"route": "src/generated/gen.ts", "content": "export const x = 2;\n", "apply": true,
 	}))[0])
 	if !strings.Contains(text, "refusing") {

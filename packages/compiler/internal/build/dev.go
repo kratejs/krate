@@ -71,7 +71,7 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 		}
 	}
 
-	fmt.Printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
+	printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
 
 	debounce := debounceDelay
 	if debounce <= 0 {
@@ -94,7 +94,7 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 		changed := uniqueStrings(pending)
 		pending = nil
 		b.processChanges(changed, hub)
-		fmt.Printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
+		printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
 	}
 
 	for {
@@ -252,7 +252,7 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 			}
 			routes = append(routes, route)
 		}
-		fmt.Printf("  %sAffected pages:%s %v\n", cBlue, cReset, routes)
+		printf("  %sAffected pages:%s %v\n", cBlue, cReset, routes)
 		if _, err := b.BuildPages(pagesToBuild); err != nil {
 			fmt.Fprintf(os.Stderr, "  %sUI Compilation Error: %v%s\n", cRed, err, cReset)
 			addDiags("UI: ", err)
@@ -260,7 +260,7 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 	}
 
 	if len(apiToBuild) > 0 {
-		fmt.Printf("  %sCompiling changed API endpoints...%s\n", cCyan, cReset)
+		printf("  %sCompiling changed API endpoints...%s\n", cCyan, cReset)
 		if err := b.CompileAPIRoutes(apiToBuild); err != nil {
 			fmt.Fprintf(os.Stderr, "  %sAPI Compilation Error: %v%s\n", cRed, err, cReset)
 			addDiags("API: ", err)
@@ -268,7 +268,7 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 	}
 
 	if goAPIChanged {
-		fmt.Printf("  %sCompiling changed Go API routes...%s\n", cCyan, cReset)
+		printf("  %sCompiling changed Go API routes...%s\n", cCyan, cReset)
 		if err := b.BuildAllGoAPI(); err != nil {
 			fmt.Fprintf(os.Stderr, "  %sGo API Compilation Error: %v%s\n", cRed, err, cReset)
 			addDiags("Go API: ", err)
@@ -276,7 +276,7 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 	}
 
 	if len(pagesToBuild) == 0 && len(apiToBuild) == 0 && !goAPIChanged {
-		fmt.Printf("  %sNo dependency tracking matches; rebuilding all...%s\n", cYellow, cReset)
+		printf("  %sNo dependency tracking matches; rebuilding all...%s\n", cYellow, cReset)
 		if err := b.BuildAll(); err != nil {
 			fmt.Fprintf(os.Stderr, "  %sError: %v%s\n", cRed, err, cReset)
 			addDiags("", err)

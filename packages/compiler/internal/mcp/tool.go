@@ -15,6 +15,8 @@ type Tool struct {
 	Title       string
 	Description string
 	InputSchema map[string]any
+	// OutputSchema describes structuredContent when a tool returns one.
+	OutputSchema map[string]any
 	// Annotations describe tool behavior so clients can auto-approve safe
 	// calls and warn on destructive ones (readOnlyHint/destructiveHint/
 	// idempotentHint/openWorldHint, protocol 2025-03-26+).
@@ -26,8 +28,9 @@ type Tool struct {
 // IsError marks an application-level failure (the tool ran but the operation
 // failed), distinct from a protocol error.
 type ToolResult struct {
-	Content []Content
-	IsError bool
+	Content    []Content
+	Structured any
+	IsError    bool
 }
 
 // Content is a single MCP content block. Only text and resource are needed.
@@ -58,7 +61,7 @@ func JSONResult(v any) (ToolResult, *rpcError) {
 	if err != nil {
 		return ToolResult{}, Errorf("encoding result: %v", err)
 	}
-	return TextResult(string(data)), nil
+	return ToolResult{Content: []Content{TextContent(string(data))}, Structured: v}, nil
 }
 
 // marshalJSON encodes indented JSON with HTML escaping disabled so page source,
@@ -198,6 +201,9 @@ func (s *Server) callTool(raw json.RawMessage, op *pendingOp) (any, *rpcError) {
 	var params struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
+		Meta      struct {
+			ProgressToken any `json:"progressToken"`
+		} `json:"_meta"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &params); err != nil {
@@ -213,6 +219,13 @@ func (s *Server) callTool(raw json.RawMessage, op *pendingOp) (any, *rpcError) {
 	}
 	if params.Arguments == nil {
 		params.Arguments = map[string]any{}
+	}
+	if params.Meta.ProgressToken != nil {
+		token := params.Meta.ProgressToken
+		op.progressToken = token
+		op.ctx = context.WithValue(op.ctx, progressKey{}, progressFn(func(progress, total float64, message string) {
+			s.writeProgress(token, progress, total, message)
+		}))
 	}
 	var result ToolResult
 	var rerr *rpcError
@@ -231,10 +244,14 @@ func (s *Server) callTool(raw json.RawMessage, op *pendingOp) (any, *rpcError) {
 	if content == nil {
 		content = []Content{}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"content": content,
 		"isError": result.IsError,
-	}, nil
+	}
+	if result.Structured != nil {
+		out["structuredContent"] = result.Structured
+	}
+	return out, nil
 }
 
 func (s *Server) readResource(raw json.RawMessage) (any, *rpcError) {
@@ -430,6 +447,16 @@ func argString(args map[string]any, key string) string {
 // argBool extracts a boolean argument with a default.
 func argBool(args map[string]any, key string, def bool) bool {
 	if v, ok := args[key].(bool); ok {
+		return v
+	}
+	return def
+}
+
+func argInt(args map[string]any, key string, def int) int {
+	if v, ok := args[key].(float64); ok {
+		return int(v)
+	}
+	if v, ok := args[key].(int); ok {
 		return v
 	}
 	return def

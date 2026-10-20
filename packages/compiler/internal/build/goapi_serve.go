@@ -383,7 +383,7 @@ func (g *goAPISupervisor) watch() {
 						fmt.Fprintf(os.Stderr, "  %s⚠ Go API sidecar restart failed:%s %v\n", cYellow, cReset, err)
 						return
 					}
-					fmt.Printf("  %s⚡%s Go API sidecar restarted (%d routes)\n", cCyan, cReset, len(routes))
+					printf("  %s⚡%s Go API sidecar restarted (%d routes)\n", cCyan, cReset, len(routes))
 				}
 			}()
 		}

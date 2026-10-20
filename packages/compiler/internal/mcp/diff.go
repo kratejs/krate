@@ -1,9 +1,12 @@
 package mcp
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/kratejs/krate/packages/compiler/internal/build"
 )
 
 // unifiedDiff renders a minimal unified-style diff between old and new text.
@@ -57,38 +60,13 @@ func splitLines(s string) []string {
 	return strings.Split(s, "\n")
 }
 
-// captureStdout runs fn with os.Stdout redirected to a pipe and returns the
-// captured text. It is used around build/check calls because the compiler
-// prints progress to stdout, which would otherwise corrupt the JSON-RPC stream.
+// captureStdout runs fn with build progress redirected to a buffer. The
+// compiler prints progress through build.SetOutput instead of os.Stdout, so
+// this is safe for concurrent tool calls and never corrupts JSON-RPC output.
 func captureStdout(fn func() error) (string, error) {
-	orig := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		// Cannot redirect; run directly rather than failing the operation.
-		return "", fn()
-	}
-	os.Stdout = w
-
-	done := make(chan string, 1)
-	go func() {
-		var b strings.Builder
-		buf := make([]byte, 32*1024)
-		for {
-			n, rerr := r.Read(buf)
-			if n > 0 {
-				b.Write(buf[:n])
-			}
-			if rerr != nil {
-				break
-			}
-		}
-		done <- b.String()
-	}()
-
-	runErr := fn()
-	_ = w.Close()
-	os.Stdout = orig
-	out := <-done
-	_ = r.Close()
-	return out, runErr
+	var buf bytes.Buffer
+	build.SetOutput(&buf)
+	defer build.SetOutput(os.Stdout)
+	err := fn()
+	return buf.String(), err
 }

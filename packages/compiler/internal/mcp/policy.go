@@ -24,9 +24,30 @@ type Policy struct {
 	Allow    []string `json:"allow"`
 	Deny     []string `json:"deny"`
 	ReadOnly []string `json:"readOnly"`
+	// WriteRoots limits writes to these project-relative paths. Empty keeps
+	// the legacy project-wide behavior (minus denied paths).
+	WriteRoots []string `json:"writeRoots,omitempty"`
+	// MaxFileBytes caps a single read/write. Zero uses the default.
+	MaxFileBytes int64 `json:"maxFileBytes,omitempty"`
+	// MaxBatchFiles caps a transaction. Zero uses the default.
+	MaxBatchFiles int `json:"maxBatchFiles,omitempty"`
+	// AllowBinary permits writing binary files. Read tools already return a
+	// binary marker instead of content.
+	AllowBinary bool `json:"allowBinary,omitempty"`
+	// AllowTasks gates run_task.
+	AllowTasks []string `json:"allowTasks,omitempty"`
 
 	// loaded is true when a config file was found (informational).
 	loaded bool
+}
+
+// defaultWriteDeniedPatterns are generated/output trees that must never be
+// edited by an agent.
+var defaultWriteDeniedPatterns = []string{
+	"node_modules", "node_modules/**",
+	"dist", "dist/**",
+	"build", "build/**",
+	".krate", ".krate/**",
 }
 
 // defaultDeniedPatterns are always denied unless an `allow` entry matches.
@@ -36,6 +57,7 @@ var defaultDeniedPatterns = []string{
 	"*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore",
 	"id_rsa", "id_ed25519", "id_ecdsa", "id_dsa",
 	".git", ".git/**",
+	".krate", ".krate/**",
 	".krate/mcp.json",
 	"*.npmrc", "*.pypirc", "*.netrc",
 }
@@ -82,8 +104,8 @@ func (p *Policy) denied(rel string) bool {
 	return false
 }
 
-// writable reports whether rel may be written: not denied, and not marked
-// read-only.
+// writable reports whether rel may be written: not denied, not read-only,
+// inside writeRoots when configured, and not in a generated output tree.
 func (p *Policy) writable(rel string) bool {
 	if p.denied(rel) {
 		return false
@@ -94,7 +116,35 @@ func (p *Policy) writable(rel string) bool {
 			return false
 		}
 	}
+	for _, pat := range defaultWriteDeniedPatterns {
+		if globMatch(pat, rel) {
+			return false
+		}
+	}
+	if len(p.WriteRoots) > 0 && !p.withinWriteRoots(rel) {
+		return false
+	}
 	return true
+}
+
+func (p *Policy) withinWriteRoots(rel string) bool {
+	rel = normalizeRel(rel)
+	for _, root := range p.WriteRoots {
+		root = strings.Trim(normalizeRel(root), "/")
+		if root == "" || root == "." {
+			return true
+		}
+		if strings.ContainsAny(root, "*?[") {
+			if globMatch(root, rel) {
+				return true
+			}
+			continue
+		}
+		if rel == root || strings.HasPrefix(rel, root+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // describe returns a short human-readable summary of why a path is denied.
@@ -114,6 +164,14 @@ func (p *Policy) deniedReason(rel string) string {
 		if globMatch(pat, rel) {
 			return "is marked read-only in .krate/mcp.json"
 		}
+	}
+	for _, pat := range defaultWriteDeniedPatterns {
+		if globMatch(pat, rel) {
+			return "is a generated or output path (" + strconvQuote(pat) + ") and cannot be edited"
+		}
+	}
+	if len(p.WriteRoots) > 0 && !p.withinWriteRoots(rel) {
+		return "is outside writeRoots in .krate/mcp.json"
 	}
 	return "is not permitted"
 }

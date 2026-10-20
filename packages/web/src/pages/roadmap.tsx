@@ -82,39 +82,39 @@ const MCP_PHASES = [
     tone: "now",
     status: "In progress",
     title: "Protocol and transport",
-    body: "Stay current with the MCP specification, add streamable HTTP alongside stdio, remote authentication, structured results, pagination, progress, logging, and resource subscriptions.",
-    exit: "MCP Inspector and four clients pass the protocol conformance suite, including cancellation and reconnect.",
+    body: "stdio and Streamable HTTP with persistent sessions, bearer auth, structured results, pagination, progress, structured logging, resource subscriptions, cancellation, and SSE reconnect replay.",
+    exit: "The in-repo protocol and HTTP conformance suite passes. Remaining: remote hardening, rate limits, and broader client testing.",
   },
   {
     id: "M2",
     tone: "next",
-    status: "Next",
+    status: "In progress",
     title: "Workspace graph",
-    body: "Expose symbols, references, dependency impact, incremental indexes, diagnostics, and previews for multi-root workspaces.",
+    body: "search_project, read_files, structured diagnostics, lexical references, and site-graph impact are implemented. Semantic symbol indexes, incremental indexing, and multi-root workspaces remain.",
     exit: "An agent can answer what breaks before editing without reading every file.",
   },
   {
     id: "M3",
-    tone: "next",
-    status: "Next",
+    tone: "now",
+    status: "In progress",
     title: "Safe editing",
-    body: "Batch transactions, conflict detection, shared undo, apply-fix and codemod tools, and preview-before-write across many files.",
+    body: "Source editing, atomic multi-file patches, batch operations, undo, expected-hash conflicts, dry-run previews, and writeRoots are implemented. Automatic diagnostic fixes and codemods remain.",
     exit: "Every write is atomic or rolled back; concurrent edits are detected and explained.",
   },
   {
     id: "M4",
-    tone: "later",
-    status: "Later",
+    tone: "next",
+    status: "In progress",
     title: "Agent workflows",
-    body: "Curated migrations, React compatibility fixes, check-to-fix loops, test execution, and an evaluation suite for agent prompts.",
-    exit: "A full page migration or framework upgrade can be driven end to end with reviewable operations.",
+    body: "Diagnostic repair, refactor, dependency audit, and component scaffold prompts; run_task for build/check/test/typecheck. Migration is deferred. Prompt evaluation remains.",
+    exit: "A complete fix, refactor, and check workflow is reviewable and repeatable.",
   },
   {
     id: "M5",
     tone: "later",
     status: "Later",
     title: "Security and operations",
-    body: "Audit logs, secret redaction, rate limits, remote multi-tenant isolation, and observability for hosted MCP.",
+    body: "writeRoots, project policy, localhost binding, and bearer auth are implemented. Audit logs, secret redaction, rate limits, remote isolation, and hosted observability remain.",
     exit: "Remote MCP can be offered without exposing project secrets or cross-tenant state.",
   },
 ];
@@ -323,24 +323,25 @@ export default function Roadmap() {
               graph.
             </p>
           </div>
-          <span class="roadmap-status roadmap-status-next">Next</span>
+          <span class="roadmap-status roadmap-status-now">In progress</span>
         </div>
 
         <div class="roadmap-split">
           <div class="roadmap-panel">
             <h3>Today</h3>
             <p>
-              <code>krate mcp</code> provides read/write tools, resources, prompts,
-              completions, cancellation, and a project policy over stdio. The
-              protocol surface is custom and transport-agnostic.
+              <code>krate mcp</code> provides stdio and Streamable HTTP,
+              structured results, transactions and undo, diagnostics, project
+              search, pagination, progress, resource subscriptions, prompts,
+              cancellation, and a project policy.
             </p>
           </div>
           <div class="roadmap-panel">
             <h3>Target</h3>
             <p>
-              A current-spec MCP server with remote transport, graph-aware
-              operations, safe multi-file transactions, and workflows for
-              migration and compatibility fixes.
+              A hardened MCP workspace with semantic graph operations, automatic
+              diagnostic fixes and codemods, stronger remote operations, and
+              reviewable agent workflows.
             </p>
           </div>
         </div>
@@ -350,20 +351,19 @@ export default function Roadmap() {
             <h3>New tools</h3>
             <ul class="roadmap-list">
               <li><code>get_diagnostics</code> with stable codes and fixes</li>
-              <li><code>apply_fix</code> and <code>batch_edit</code> with rollback</li>
-              <li><code>find_references</code> and <code>impact</code></li>
-              <li><code>run_task</code>, <code>preview</code>, and <code>test</code></li>
-              <li><code>migrate_next</code> driven by the same reports as the CLI</li>
+              <li><code>apply_patch</code>, <code>batch_edit</code>, and <code>undo</code></li>
+              <li><code>search_project</code>, <code>read_files</code>, and <code>impact</code></li>
+              <li><code>run_task</code> for build, check, test, and typecheck</li>
             </ul>
           </div>
           <div class="roadmap-panel">
             <h3>Acceptance</h3>
             <ul class="roadmap-list">
-              <li>MCP Inspector plus Claude, Cursor, VS Code, and opencode</li>
-              <li>Protocol conformance and cancellation tests</li>
+              <li>In-repo protocol and HTTP conformance suite</li>
+              <li>Cancellation, reconnect, and SSE replay tests</li>
               <li>No stdout contamination in stdio mode</li>
-              <li>Authenticated remote transport</li>
-              <li>Structured results and versioned tool schemas</li>
+              <li>Authenticated HTTP transport</li>
+              <li>Structured results and pagination</li>
             </ul>
           </div>
         </div>
