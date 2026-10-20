@@ -476,6 +476,12 @@ export interface KrateConfig {
    */
   basePath?: string;
   /**
+   * Client-side SPA router (link interception, prefetch, history navigation).
+   * Default true. Set false to keep full-page navigation and omit the router
+   * from the shared runtime.
+   */
+  spa?: boolean;
+  /**
    * View Transitions API integration. `true`/`"auto"` (default) enables
    * same-document SPA morphs and the cross-document `@view-transition` rule;
    * `false`/`"off"` disables it.

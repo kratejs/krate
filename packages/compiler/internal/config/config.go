@@ -569,6 +569,11 @@ type Config struct {
 	// router so the site works when hosted under a sub-path.
 	BasePath string `json:"basePath,omitempty"`
 
+	// SPA enables the client-side router (link interception, prefetch, and
+	// history navigation). Nil means enabled; false keeps normal full-page
+	// navigation and omits the router from the shared runtime.
+	SPA *bool `json:"spa,omitempty"`
+
 	// ViewTransitions controls the View Transitions API integration. "" or
 	// "auto" (default) enables it (same-document SPA morphs + a cross-document
 	// @view-transition rule); "off" disables it.
@@ -651,6 +656,11 @@ func (c *Config) MaxAPIBodyBytes() int64 {
 		return c.Server.MaxBodySize
 	}
 	return defaultMaxAPIBodyBytes
+}
+
+// SPAEnabled reports whether the client-side router is enabled (default true).
+func (c *Config) SPAEnabled() bool {
+	return c.SPA == nil || *c.SPA
 }
 
 // BaseURLPath returns BasePath normalized to either "" or "/prefix" (no trailing

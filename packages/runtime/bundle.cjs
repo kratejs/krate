@@ -8,6 +8,7 @@
  *
  * - krate-runtime.js - signals + DOM + JSX runtime + SPA router
  * - krate-hydrate.js - same minus the JSX runtime (used for SSG hydration)
+ * - krate-hydrate-lite.js - hydration without the SPA router (`spa: false`)
  *
  * esbuild minification here is complemented by the compiler, which re-minifies
  * the shared chunk with its embedded esbuild when writing dist/chunks/.
@@ -19,7 +20,6 @@ export * from './src/signal';
 export * from './src/dom';
 export * from './src/resource';
 export * from './src/jsx-runtime';
-export * from './src/reconcile';
 export * from './src/router';
 export * from './src/class-helpers';
 export * from './src/context';
@@ -30,8 +30,19 @@ const HYDRATE_ENTRY = `
 export * from './src/signal';
 export * from './src/dom';
 export * from './src/resource';
-export * from './src/reconcile';
 export * from './src/router';
+export * from './src/class-helpers';
+export * from './src/context';
+export * from './src/storage';
+`;
+
+// Lite hydration bundle for sites with the SPA router disabled. It keeps the
+// public navigation API as full-page navigation stubs.
+const LITE_ENTRY = `
+export * from './src/signal';
+export * from './src/dom';
+export * from './src/resource';
+export * from './src/router-lite';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/storage';
@@ -69,8 +80,9 @@ async function main() {
   fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
   await buildBundle('krate-runtime.js', RUNTIME_ENTRY);
   await buildBundle('krate-hydrate.js', HYDRATE_ENTRY);
+  await buildBundle('krate-hydrate-lite.js', LITE_ENTRY);
   await buildBundle('krate-dev.js', DEV_ENTRY, false);
-  console.log('Runtime bundled! (krate-runtime.js + krate-hydrate.js + krate-dev.js)');
+  console.log('Runtime bundled! (krate-runtime.js + krate-hydrate.js + krate-hydrate-lite.js + krate-dev.js)');
 }
 
 main().catch((err) => {

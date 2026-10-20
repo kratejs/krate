@@ -255,18 +255,15 @@ initRouter()
 ```
 
 Call once to enable client-side navigation via `data-krate-link` anchors and
-`<Link>`. Handles `pushState`, `popstate`, stylesheet diffing, and tree
-reconciliation. On navigation the router diffs the live content root against
-the parsed new page via `reconcileTrees` — unchanged nodes (keyed by
-`<!--k:-->` comment markers, `data-k` attributes, and `id` anchors) are kept in
-place so their state (focus, scroll, media, CSS animations) survives. Effects
-are disposed before the diff and stale `__krate_*` handler props are stripped;
-the new page's hydration JS then rebinds the kept nodes. Emits a
-`krate:navigate` CustomEvent after each navigation.
+`<Link>`. Handles `pushState`, `popstate`, stylesheet/head diffing, scroll
+restoration, and view transitions. On navigation the router replaces the app
+shell (`#root`) with the parsed new page and then re-runs that page's hydration
+script, so event handlers and dynamic bindings are reattached cleanly. Effects
+are disposed before the swap. Emits a `krate:navigate` CustomEvent after each
+navigation.
 
-`reinitRouter()` tears down and re-registers the router listeners — useful
+`reinitRouter()` tears down and re-registers the router listeners - useful
 after a full page replacement or for HMR in dev.
-
 Programmatic navigation:
 
 ```typescript

@@ -114,7 +114,7 @@ func TestMinifiedRuntimeIsValidJS(t *testing.T) {
 	min := minifyJSBase(rt)
 	// The runtime exposes its API on window; the window.* property names must
 	// survive identifier mangling (properties are not renamed).
-	for _, name := range []string{"reconcileTrees", "initRouter", "createSignal", "createEffect"} {
+	for _, name := range []string{"initRouter", "createSignal", "createEffect"} {
 		if !strings.Contains(min, "window."+name) && !strings.Contains(min, name) {
 			t.Fatalf("minified runtime lost core export %q (%d bytes)", name, len(min))
 		}

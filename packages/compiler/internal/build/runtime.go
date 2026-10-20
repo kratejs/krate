@@ -30,6 +30,44 @@ func loadRuntimeFromDisk(projectRoot string) string {
 	return loadNamedBundleFromDisk(projectRoot, "krate-hydrate.js", "krate-runtime.js")
 }
 
+// loadRuntimeFromDiskFor selects the full hydration runtime or the lite build
+// without the SPA router. Older runtime packages may not ship the lite bundle,
+// so fall back to the full one rather than failing the build.
+func loadRuntimeFromDiskFor(projectRoot string, spa bool) string {
+	if spa {
+		return loadRuntimeFromDisk(projectRoot)
+	}
+	return loadNamedBundleFromDisk(projectRoot, "krate-hydrate-lite.js", "krate-hydrate.js", "krate-runtime.js")
+}
+
+// runtimeChunkOptions selects which optional pieces are appended to the shared
+// runtime chunk.
+type runtimeChunkOptions struct {
+	SPA    bool
+	Compat bool
+}
+
+// runtimeNeedsCompat reports whether any page's hydration script references a
+// React compatibility API that lives in CompatBootstrapJS.
+func runtimeNeedsCompat(results []*PageResult) bool {
+	markers := []string{
+		"useImperativeHandle", "useSyncExternalStore", "useTransition",
+		"startTransition", "useDeferredValue", "useDebugValue",
+		"isValidElement", "Children", "cloneElement",
+	}
+	for _, r := range results {
+		if r == nil || r.HydrationJS == "" {
+			continue
+		}
+		for _, marker := range markers {
+			if strings.Contains(r.HydrationJS, marker) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // loadDevBundleFromDisk loads the dev-only overlay/toolbar bundle
 // (krate-dev.js) from the @krate/runtime dist directory, if present.
 func loadDevBundleFromDisk(projectRoot string) string {
@@ -115,8 +153,8 @@ func probeNamedBundleFromDisk(projectRoot string, names []string) string {
 // writeRuntimeChunk writes the krate runtime to a shared chunk file in dist/chunks/.
 // Returns the relative path (e.g. "chunks/runtime.abc123.js") for use in <script> tags.
 // Returns empty string if runtime is unavailable.
-func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string) string {
-	runtime := loadRuntimeFromDisk(projectRoot)
+func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opts runtimeChunkOptions) string {
+	runtime := loadRuntimeFromDiskFor(projectRoot, opts.SPA)
 	if runtime == "" {
 		return ""
 	}
@@ -125,7 +163,9 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string) str
 	// kbind* helpers) so per-page hydration scripts only contain their own
 	// signals and binding calls instead of duplicating this boilerplate.
 	runtime += renderer.HydrationBootstrapJS
-	runtime += renderer.CompatBootstrapJS
+	if opts.Compat {
+		runtime += renderer.CompatBootstrapJS
+	}
 
 	runtimeToWrite := runtime
 	if shouldMinify {

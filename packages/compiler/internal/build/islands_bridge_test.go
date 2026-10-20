@@ -166,3 +166,35 @@ func copyTree(t *testing.T, src, dst string) error {
 		return os.WriteFile(target, data, 0644)
 	})
 }
+func TestIslandChunksMinified(t *testing.T) {
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	cfg.Minify = true
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+
+	islands, err := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "island.*.js"))
+	if err != nil || len(islands) == 0 {
+		t.Fatalf("expected an island chunk: %v", err)
+	}
+	island, err := os.ReadFile(islands[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(island), "// ../../node_modules") {
+		t.Errorf("production island chunk is not minified")
+	}
+
+	preactChunks, err := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "preact-preact.*.js"))
+	if err != nil || len(preactChunks) == 0 {
+		t.Fatalf("expected Preact chunks: %v", err)
+	}
+	preact, err := os.ReadFile(preactChunks[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(preact), "// ../../node_modules") {
+		t.Errorf("production Preact chunk is not minified")
+	}
+}

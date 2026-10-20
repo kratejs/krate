@@ -550,10 +550,10 @@ func TestBuildLinkOutput(t *testing.T) {
 	}
 }
 
-// TestRuntimeChunkIncludesReconcile guards against the SPA router losing its
-// dependency: reconcileTrees lives in reconcile.ts, which the runtime bundle
-// (packages/runtime/bundle.cjs) must include for navigation to work.
-func TestRuntimeChunkIncludesReconcile(t *testing.T) {
+// TestRuntimeChunkIncludesRouter guards the eager runtime bundle against losing
+// the SPA router. The router swaps the app shell directly; reconcileTrees is a
+// separate module and must not be pulled into every hydrated page.
+func TestRuntimeChunkIncludesRouter(t *testing.T) {
 	pkgDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -563,14 +563,13 @@ func TestRuntimeChunkIncludesReconcile(t *testing.T) {
 	if rt == "" {
 		requireE2E(t, "runtime dist not available in this environment")
 	}
-	for _, want := range []string{
-		"reconcileTrees",
-		"reconcile",
-		"conditional",
-	} {
+	for _, want := range []string{"initRouter", "replaceChildren", "popstate"} {
 		if !strings.Contains(rt, want) {
-			t.Errorf("runtime bundle missing %q — add reconcile.js to bundle.cjs", want)
+			t.Errorf("runtime bundle missing %q", want)
 		}
+	}
+	if strings.Contains(rt, "reconcileTrees") {
+		t.Error("reconcileTrees must not be bundled into the eager runtime")
 	}
 }
 

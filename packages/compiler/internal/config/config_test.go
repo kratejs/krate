@@ -743,6 +743,19 @@ func TestParseTSConfigSSR(t *testing.T) {
 	}
 }
 
+func TestParseTSConfigSPA(t *testing.T) {
+	cfg := Default()
+	if !cfg.SPAEnabled() {
+		t.Fatal("SPA should be enabled by default")
+	}
+	if err := parseTSConfig(`export default { spa: false }`, cfg); err != nil {
+		t.Fatalf("parseTSConfig: %v", err)
+	}
+	if cfg.SPAEnabled() {
+		t.Fatal("spa: false should disable the router")
+	}
+}
+
 func TestParseTSConfigSSRStreamingFalse(t *testing.T) {
 	src := `export default {
 		ssr: { streaming: false },

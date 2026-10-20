@@ -15,7 +15,12 @@ entry: "src/index.tsx",       // Entry point (default: src/index.tsx)
 outDir: "dist",               // Output directory (default: dist)
 pagesDir: "src/pages",        // Pages directory (default: src/pages)
 publicDir: "public",          // Static assets directory (default: public)
+spa: true,                    // Client-side router (default: true; false omits it)
 ```
+
+Set `spa: false` to use normal full-page navigation and omit the SPA router,
+prefetch, and history code from the shared runtime. `navigate()` still works and
+performs a full navigation.
 
 ## Site metadata
 

@@ -481,6 +481,12 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			return err
 		}
 		cfg.Deploy = dc
+	case "spa":
+		if b, ok := val.(bool); ok {
+			cfg.SPA = &b
+		} else {
+			return fmt.Errorf("spa: expected boolean, got %T", val)
+		}
 	case "viewTransitions":
 		switch v := val.(type) {
 		case bool:

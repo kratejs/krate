@@ -78,6 +78,10 @@ import { Link } from '@krate/runtime';
 <Link href="/about">About</Link>
 ```
 
+SPA navigation is enabled by default. Set `spa: false` in the config to omit
+the router from the shared runtime and use normal full-page navigation; links
+and `navigate()` keep working.
+
 `initRouter()` powers:
 
 - **Prefetching** — `data-prefetch` on hover/focus and viewport entry.
