@@ -573,6 +573,25 @@ func TestRuntimeChunkIncludesRouter(t *testing.T) {
 	}
 }
 
+// TestImportMapBeforeModulePreload guards Firefox: an import map must be
+// parsed before modulepreload starts resolving bare specifiers.
+func TestImportMapBeforeModulePreload(t *testing.T) {
+	html := generateHTML(
+		"<div></div>", "<title>t</title>", "", "",
+		nil, "index.abc123.js", "chunks/runtime.def456.js", "about", false, "",
+		`<script type="importmap">{"imports":{"preact":"/preact.js"}}</script>`,
+		"", "/chunks/island.abc.js",
+	)
+	importAt := strings.Index(html, `type="importmap"`)
+	preloadAt := strings.Index(html, `rel="modulepreload"`)
+	if importAt < 0 || preloadAt < 0 {
+		t.Fatalf("missing import map or modulepreload:\n%s", html)
+	}
+	if importAt > preloadAt {
+		t.Errorf("import map must precede modulepreload:\n%s", html)
+	}
+}
+
 // TestPageScriptSrc verifies page hydration scripts are emitted with absolute
 // site paths so they resolve correctly on first load AND when the SPA router
 // injects them during client-side navigation from another route.

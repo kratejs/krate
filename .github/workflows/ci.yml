@@ -68,6 +68,9 @@ jobs:
       - name: Check embedded docs are in sync
         run: node scripts/sync-krate-docs.mjs --check
 
+      - name: Check compatibility matrix
+        run: pnpm run check:matrix
+
       - name: gofmt
         run: |
           unformatted=$(gofmt -l .)
@@ -184,3 +187,106 @@ jobs:
       - name: Fuzz parser
         run: go test -fuzz=FuzzParse -fuzztime=30s -run=^$ ./internal/parser
         working-directory: packages/compiler
+
+  browser-conformance:
+    name: Browser conformance (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/compiler/go.mod
+          cache: true
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build JS packages
+        run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ matrix.browser }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install ${{ matrix.browser }}
+        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Browser conformance
+        run: go test -run TestBrowserConformance -count=1 -v ./internal/build
+        working-directory: packages/compiler
+        env:
+          KRATE_BROWSER: ${{ matrix.browser }}
+          KRATE_REQUIRE_E2E: "1"
+
+  preact-conformance:
+    name: Preact ${{ matrix.preact }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        preact: ["10.20.0", "10.24.0", "10.29.8"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/compiler/go.mod
+          cache: true
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build JS packages
+        run: pnpm -r --filter '!@krate/web' --filter '!@krate/benchmark' build
+
+      - name: Pin Preact
+        run: pnpm --filter krate-examples add -D preact@${{ matrix.preact }}
+
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Browser conformance
+        run: go test -run TestBrowserConformance -count=1 -v ./internal/build
+        working-directory: packages/compiler
+        env:
+          KRATE_BROWSER: chromium
+          KRATE_REQUIRE_E2E: "1"

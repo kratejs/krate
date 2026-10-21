@@ -45,6 +45,13 @@ func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []s
 	b.WriteString("<meta charset=\"UTF-8\">\n")
 	b.WriteString("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, viewport-fit=cover\">\n")
 
+	// Site runtime config + View Transitions CSS (base path, SPA behavior).
+	if runtimeHead != "" {
+		b.WriteString(runtimeHead)
+		if !strings.HasSuffix(runtimeHead, "\n") {
+			b.WriteByte('\n')
+		}
+	}
 	if headHTML != "" {
 		b.WriteString(headHTML)
 		b.WriteByte('\n')
@@ -77,14 +84,6 @@ func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []s
 		// hint (and the router's route prefetch picks them up too).
 		for _, chunk := range modulePreloads {
 			b.WriteString(fmt.Sprintf("<link rel=\"modulepreload\" href=\"%s\">\n", assetHref(basePath, chunk)))
-		}
-	}
-
-	// Site runtime config + View Transitions CSS (base path, SPA behavior).
-	if runtimeHead != "" {
-		b.WriteString(runtimeHead)
-		if !strings.HasSuffix(runtimeHead, "\n") {
-			b.WriteByte('\n')
 		}
 	}
 

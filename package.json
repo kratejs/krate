@@ -29,17 +29,19 @@
   "scripts": {
     "build": "pnpm sync:docs && pnpm -r build",
     "build:platforms": "node scripts/build-platform-packages.mjs",
-    "sync:docs": "node scripts/sync-krate-docs.mjs",
+    "sync:docs": "node scripts/sync-compat-matrix.mjs && node scripts/sync-krate-docs.mjs",
     "check:docs": "node scripts/sync-krate-docs.mjs --check",
+    "check:matrix": "node scripts/check-compat-matrix.mjs && node scripts/sync-compat-matrix.mjs --check",
     "dev": "cd packages/compiler && go run ./cmd/krate dev ../../examples",
     "test": "pnpm sync:docs && pnpm test:js && cd packages/compiler && go test ./...",
     "test:compiler": "pnpm sync:docs && cd packages/compiler && go test ./... -v",
     "test:js": "pnpm -r run test",
-    "typecheck":  "pnpm --filter @krate/runtime --filter @krate/components --filter @krate/core --filter @krate/plugin --filter @krate/web run typecheck",
+    "typecheck": "pnpm --filter @krate/runtime --filter @krate/components --filter @krate/core --filter @krate/plugin --filter @krate/web run typecheck",
     "vet": "pnpm sync:docs && cd packages/compiler && go vet ./..."
   },
   "devDependencies": {
     "happy-dom": "^20.14.5",
+    "playwright": "^1.64.1",
     "vitest": "^5.0.3"
   }
 }

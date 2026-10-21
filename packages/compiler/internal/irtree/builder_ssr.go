@@ -1602,7 +1602,7 @@ func (b *builder) buildChildPropsRegDecl(id string, props map[string]ast.Expr) s
 			sb.WriteByte(',')
 		}
 		first = false
-		sb.WriteString(name)
+		sb.WriteString(jsObjectKey(name))
 		sb.WriteByte(':')
 		val := b.renderChildPropValue(expr)
 		if val == "" {

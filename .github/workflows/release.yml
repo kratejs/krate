@@ -75,6 +75,9 @@ jobs:
       - name: Check embedded docs are in sync
         run: node scripts/sync-krate-docs.mjs --check
 
+      - name: Check compatibility matrix
+        run: pnpm run check:matrix
+
       - name: Generate platform packages
         run: node scripts/build-platform-packages.mjs
 

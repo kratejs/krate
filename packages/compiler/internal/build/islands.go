@@ -166,8 +166,8 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports []irtree
 	if _, err := b.ensurePreactShared(); err != nil {
 		return "", "", err
 	}
-	if v := installedPreactVersion(b.Root); v != "" && versionLess(v, "10.19.0") {
-		fmt.Fprintf(os.Stderr, "  %sWarning:%s preact %s is older than 10.19.0; islands use hooks and compat APIs that older releases can break\n", cYellow, cReset, v)
+	if v := installedPreactVersion(b.Root); v != "" && versionLess(v, "10.20.0") {
+		fmt.Fprintf(os.Stderr, "  %sWarning:%s preact %s is older than 10.20.0; islands use hooks and compat APIs that older releases can break\n", cYellow, cReset, v)
 	}
 	alias := map[string]string{
 		"react":                 "preact/compat",
@@ -305,7 +305,11 @@ export { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, use
 			LogLevel:          api.LogLevelSilent,
 		})
 		if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
-			return nil, fmt.Errorf("external React components require Preact, which is not installed in this project\n  hint: install it with `pnpm add preact` (or `npm install preact`)")
+			var detail []string
+			for _, e := range result.Errors {
+				detail = append(detail, e.Text)
+			}
+			return nil, fmt.Errorf("external React components require Preact, which is not installed in this project\n  hint: install it with `pnpm add preact` (or `npm install preact`)\n  detail: %s", strings.Join(detail, "; "))
 		}
 		out := result.OutputFiles[0].Contents
 		name := "chunks/preact-" + strings.ReplaceAll(s.name, "/", "-") + "." + hashContent(out) + ".js"

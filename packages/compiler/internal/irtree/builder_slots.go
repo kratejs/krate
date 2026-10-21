@@ -4231,7 +4231,7 @@ func (b *builder) collectNamedMemos(body []ast.Stmt) map[string]*ast.ArrowFn {
 				continue
 			}
 			id, ok := call.Callee.(*ast.Identifier)
-			if !ok || id.Name != "createMemo" {
+			if !ok || (id.Name != "createMemo" && id.Name != "createMemoDeps") {
 				continue
 			}
 			if len(call.Args) < 1 {

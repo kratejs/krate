@@ -37,6 +37,7 @@ const site = {
       links: [
         { label: "Blog", href: "/blog/" },
         { label: "Showcase", href: "/showcase/" },
+        { label: "Compatibility", href: "/docs/guides/compatibility/" },
         { label: "Roadmap", href: "/roadmap/" },
         { label: "Changelog", href: "/changelog/" },
         { label: "GitHub", href: "https://github.com/kratejs/krate", external: true },

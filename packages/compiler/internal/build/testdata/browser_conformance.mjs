@@ -1,16 +1,21 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { chromium, firefox, webkit } from "playwright";
 
 const root = process.argv[2];
-const chromePath = process.argv[3];
+const browserName = process.argv[3] || "chromium";
 const port = 4189;
-const debugPort = 9349;
-const pageUrl = `http://127.0.0.1:${port}/react-demo/`;
 
-if (!root || !chromePath) {
-  console.error("usage: browser_conformance.mjs <dist-root> <chrome>");
+if (!root) {
+  console.error("usage: browser_conformance.mjs <dist-root> [chromium|firefox|webkit]");
+  process.exit(2);
+}
+
+const browsers = { chromium, firefox, webkit };
+const browserType = browsers[browserName];
+if (!browserType) {
+  console.error(`unsupported browser ${browserName}`);
   process.exit(2);
 }
 
@@ -22,9 +27,11 @@ const mime = {
   ".svg": "image/svg+xml",
   ".woff2": "font/woff2",
 };
+
 const server = http.createServer((req, res) => {
   let p = decodeURIComponent(req.url.split("?")[0]);
   if (p.endsWith("/")) p += "index.html";
+  else if (!path.extname(p)) p += "/index.html";
   fs.readFile(path.join(root, p), (err, body) => {
     if (err) {
       res.statusCode = 404;
@@ -35,121 +42,117 @@ const server = http.createServer((req, res) => {
     res.end(body);
   });
 });
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const chrome = spawn(
-  chromePath,
-  [
-    "--headless=new",
-    "--disable-gpu",
-    "--no-sandbox",
-    "--disable-dev-shm-usage",
-    "--no-first-run",
-    "--no-default-browser-check",
-    `--remote-debugging-port=${debugPort}`,
-    `--user-data-dir=${path.join(process.env.TEMP || "/tmp", "krate-browser-" + Date.now())}`,
-    "about:blank",
-  ],
-  { stdio: "ignore" },
-);
+const baseURL = `http://127.0.0.1:${port}`;
+const failures = [];
+let browser;
 
-let socket;
+function fail(message) {
+  failures.push(message);
+}
+
 try {
   await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
-  let targets;
-  for (let i = 0; i < 50; i++) {
-    try {
-      targets = await (await fetch(`http://127.0.0.1:${debugPort}/json`)).json();
-      if (targets.some((t) => t.type === "page")) break;
-    } catch {}
-    await sleep(200);
-  }
-  const page = targets && targets.find((t) => t.type === "page");
-  if (!page) throw new Error("Chrome did not expose a page target");
-
-  socket = new WebSocket(page.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.onopen = resolve;
-    socket.onerror = reject;
-  });
-  let id = 0;
-  const pending = new Map();
+  browser = await browserType.launch({ headless: true });
+  const context = await browser.newContext();
+  const page = await context.newPage();
   const errors = [];
-  socket.onmessage = (msg) => {
-    const data = JSON.parse(msg.data);
-    if (data.id && pending.has(data.id)) {
-      pending.get(data.id)(data);
-      pending.delete(data.id);
-      return;
-    }
-    if (data.method === "Runtime.exceptionThrown") {
-      errors.push(data.params.exceptionDetails.exception?.description || data.params.exceptionDetails.text);
-    }
-    if (data.method === "Runtime.consoleAPICalled" && data.params.type === "error") {
-      errors.push(data.params.args.map((a) => a.value || a.description).join(" "));
-    }
-  };
-  const send = (method, params = {}) =>
-    new Promise((resolve) => {
-      const callID = ++id;
-      pending.set(callID, resolve);
-      socket.send(JSON.stringify({ id: callID, method, params }));
-    });
-  const evaluate = async (expression) => {
-    const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
-    return result.result?.result?.value;
+  page.on("console", (msg) => {
+    if (msg.type() !== "error") return;
+    // Resource 404s are reported with their URL by the response listener below.
+    if (msg.text().startsWith("Failed to load resource")) return;
+    errors.push(msg.text());
+  });
+  page.on("pageerror", (err) => errors.push(err.message));
+  page.on("response", (response) => {
+    if (response.status() < 400) return;
+    const url = response.url();
+    if (url.endsWith("/analytics.js") || url.endsWith("/favicon.ico")) return;
+    errors.push(`${response.status()} ${url}`);
+  });
+
+  const go = async (route, waitFor) => {
+    await page.goto(baseURL + route, { waitUntil: "networkidle" });
+    if (waitFor) await page.waitForSelector(waitFor, { timeout: 8000 });
   };
 
-  await send("Page.enable");
-  await send("Runtime.enable");
-  await send("Page.navigate", { url: pageUrl });
-  await sleep(2300);
+  // React source + compiled Radix islands.
+  await go("/react-demo/", "[role=switch]");
+  await page.waitForTimeout(1500);
+  const before = await page.evaluate(() => ({
+    state: document.querySelector("[role=switch]")?.getAttribute("data-state"),
+    label: (document.body.innerText.match(/Live switch \w+/) || [])[0],
+    timer: (document.body.innerText.match(/timer: \d+s/) || [])[0],
+    classTick: Number((document.body.innerText.match(/Class component ticked (\d+) times/) || [])[1]),
+  }));
+  await page.locator("[role=switch]").click();
+  await page.getByRole("button", { name: "tick", exact: true }).click();
+  const after = await page.evaluate(() => ({
+    state: document.querySelector("[role=switch]")?.getAttribute("data-state"),
+    label: (document.body.innerText.match(/Live switch \w+/) || [])[0],
+    classTick: Number((document.body.innerText.match(/Class component ticked (\d+) times/) || [])[1]),
+  }));
+  const tooltipTrigger = page.getByRole("button", { name: "Hover me" });
+  await tooltipTrigger.scrollIntoViewIfNeeded();
+  await tooltipTrigger.focus();
+  let tooltip = null;
+  for (let attempt = 0; attempt < 3 && !tooltip; attempt++) {
+    await tooltipTrigger.dispatchEvent("pointerenter");
+    await page.waitForTimeout(500);
+    tooltip = await page.locator("[role=tooltip]").textContent().catch(() => null);
+  }
+  const tooltipDebug = {
+    count: await tooltipTrigger.count(),
+    state: await tooltipTrigger.getAttribute("data-state").catch(() => null),
+    tooltips: await page.locator("[role=tooltip]").count(),
+  };
 
-  const before = await evaluate(`({
-    state: document.querySelector('[role=switch]')?.getAttribute('data-state'),
-    label: (document.body.innerText.match(/Live switch \\w+/) || [])[0],
-    timer: (document.body.innerText.match(/timer: \\d+s/) || [])[0],
-    classTick: Number((document.body.innerText.match(/Class component ticked (\\d+) times/) || [])[1])
-  })`);
-  await evaluate(`document.querySelector('[role=switch]').click()`);
-  await sleep(400);
-  await evaluate(`(() => { const b = Array.from(document.querySelectorAll('button')).find((x) => x.textContent.trim() === 'tick'); if (b) b.click(); })()`);
-  await sleep(150);
-  const after = await evaluate(`({
-    state: document.querySelector('[role=switch]')?.getAttribute('data-state'),
-    label: (document.body.innerText.match(/Live switch \\w+/) || [])[0],
-    classTick: Number((document.body.innerText.match(/Class component ticked (\\d+) times/) || [])[1])
-  })`);
+  if (before.state !== "checked") fail(`switch initial state: ${before.state}`);
+  if (before.label !== "Live switch on") fail(`switch initial label: ${before.label}`);
+  if (!before.timer) fail("timer did not start");
+  if (after.state !== "unchecked") fail(`switch state after click: ${after.state}`);
+  if (after.label !== "Live switch off") fail(`switch label after click: ${after.label}`);
+  if (!(after.classTick > before.classTick)) fail(`class component tick: ${before.classTick} -> ${after.classTick}`);
+  if (tooltip !== "Tooltip content") fail(`tooltip content: ${tooltip}`);
 
-  const box = await evaluate(`(() => {
-    const b = Array.from(document.querySelectorAll('button')).find((x) => x.textContent === 'Hover me');
-    if (!b) return null;
-    b.scrollIntoView({ block: 'center' });
-    const r = b.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  })()`);
-  if (!box) throw new Error("tooltip trigger not found");
-  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.x, y: box.y });
-  await sleep(450);
-  const tooltip = await evaluate(`(() => {
-    const t = document.querySelector('[role=tooltip]');
-    return t ? t.textContent : null;
-  })()`);
+  // React source dashboard: controlled input, derived list, dynamic insertion.
+  await go("/react-dashboard/", 'input[placeholder="Filter reports..."]');
+  const dashboardRows = () => page.locator("[data-testid=dashboard-row]").count();
+  if ((await dashboardRows()) !== 3) fail(`dashboard initial rows: ${await dashboardRows()}`);
+  await page.locator('input[placeholder="Filter reports..."]').fill("beta");
+  await page.waitForTimeout(50);
+  if ((await dashboardRows()) !== 1) fail(`dashboard filtered rows: ${await dashboardRows()}`);
+  if (!(await page.locator("[data-testid=dashboard-row]").textContent())?.includes("Beta migration")) {
+    fail("dashboard filter did not select Beta migration");
+  }
+  await page.locator('input[placeholder="Filter reports..."]').fill("");
+  await page.getByRole("button", { name: "Add report" }).click();
+  if ((await dashboardRows()) !== 4) fail(`dashboard rows after add: ${await dashboardRows()}`);
+  if ((await page.locator("[data-testid=dashboard-total]").textContent()) !== "4") {
+    fail(`dashboard total after add: ${await page.locator("[data-testid=dashboard-total]").textContent()}`);
+  }
 
-  const failures = [];
-  if (before?.state !== "checked") failures.push(`switch initial state: ${before?.state}`);
-  if (before?.label !== "Live switch on") failures.push(`switch initial label: ${before?.label}`);
-  if (!before?.timer) failures.push("timer did not start");
-  if (after?.state !== "unchecked") failures.push(`switch state after click: ${after?.state}`);
-  if (after?.label !== "Live switch off") failures.push(`switch label after click: ${after?.label}`);
-  if (!(after?.classTick > before?.classTick)) failures.push(`class component tick: ${before?.classTick} -> ${after?.classTick}`);
-  if (tooltip !== "Tooltip content") failures.push(`tooltip content: ${tooltip}`);
-  if (errors.length) failures.push("console errors: " + errors.join(" | "));
+  // React source forms: text/select/checkbox/radio/textarea/submit.
+  await go("/react-forms/", 'input[placeholder="Ada Lovelace"]');
+  await page.locator('input[placeholder="Ada Lovelace"]').fill("Ada");
+  await page.locator("[data-testid=form-role]").selectOption("designer");
+  await page.locator("[data-testid=form-subscribe]").check();
+  await page.locator("[data-testid=form-plan-enterprise]").check();
+  await page.locator("[data-testid=form-notes]").fill("ship it");
+  await page.getByRole("button", { name: "Submit" }).click();
+  const formResult = await page.locator("[data-testid=form-result]").textContent();
+  if (formResult !== "Ada|designer|subscribed|enterprise|ship it") {
+    fail(`form result: ${formResult}`);
+  }
 
-  console.log(JSON.stringify({ before, after, tooltip, errors, failures }, null, 2));
+  if (errors.length) fail("console errors: " + errors.join(" | "));
+
+  console.log(JSON.stringify({ browser: browserName, before, after, tooltip, tooltipDebug, formResult, errors, failures }, null, 2));
   if (failures.length) process.exitCode = 1;
+} catch (err) {
+  console.error(err?.stack || String(err));
+  process.exitCode = 1;
 } finally {
-  if (socket) socket.close();
-  chrome.kill();
+  if (browser) await browser.close();
   server.close();
 }

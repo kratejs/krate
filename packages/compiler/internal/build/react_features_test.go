@@ -210,3 +210,28 @@ func TestLocalCvaClassFolds(t *testing.T) {
 		t.Fatalf("class variable leaked into output:\n%s\n%s", html, js)
 	}
 }
+func TestReactUseMemoDepsBinding(t *testing.T) {
+	page := `
+		import { useMemo, useState } from 'react';
+		export default function Page() {
+			const [q, setQ] = useState('');
+			const visible = useMemo(() => ['alpha', 'beta'].filter((item) => item.includes(q())), [q]);
+			return (
+				<div>
+					<input value={q} onChange={(event: any) => setQ(event.target.value)} />
+					<ul>{visible().map((item) => <li>{item}</li>)}</ul>
+				</div>
+			);
+		}
+	`
+	_, js, err := buildKrateProject(t, map[string]string{"src/pages/index.tsx": page})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(js, "createMemoDeps") {
+		t.Fatalf("useMemo deps should lower to createMemoDeps:\n%s", js)
+	}
+	if !strings.Contains(js, "kbindContent") {
+		t.Fatalf("a derived memo list must emit a reactive binding:\n%s", js)
+	}
+}

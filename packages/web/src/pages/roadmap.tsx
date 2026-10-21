@@ -19,28 +19,14 @@ const V1_BAR = [
   },
 ];
 
-const COMPAT_MATRIX = [
-  { area: "Hooks and effects", source: "Beta", islands: "Beta", target: "React 18 parity" },
-  { area: "Context and refs", source: "Beta", islands: "Beta", target: "Stable" },
-  { area: "Class components", source: "Partial", islands: "n/a", target: "Full common subset" },
-  { area: "Events and forms", source: "Partial", islands: "Partial", target: "React 18 parity" },
-  { area: "Children, keys, and refs", source: "Partial", islands: "Partial", target: "Documented semantics" },
-  { area: "Portals and Suspense", source: "Beta", islands: "Beta", target: "SSR-safe" },
-  { area: "Error boundaries", source: "Planned", islands: "Planned", target: "Source and island" },
-  { area: "SSR island hydration", source: "Planned", islands: "Planned", target: "Streaming-safe" },
-  { area: "Local components in islands", source: "Planned", islands: "Planned", target: "Supported" },
-  { area: "React 19 actions and forms", source: "Planned", islands: "Planned", target: "Source semantics" },
-  { area: "Compiled React packages", source: "n/a", islands: "Beta (Preact)", target: "Documented compat" },
-];
-
 const REACT_PHASES = [
   {
     id: "R1",
-    tone: "now",
-    status: "In progress",
+    tone: "gate",
+    status: "Complete",
     title: "Conformance foundation",
     body: "Build the corpus and the public matrix that gate every release.",
-    exit: "Corpus includes a shadcn dashboard, the Radix suite, a Next.js app, class components, and forms; CI runs Chrome, Firefox, and WebKit plus the supported Preact versions.",
+    exit: "Corpus includes a shadcn dashboard, the Radix suite, a Next.js app, class components, and forms; CI runs Chromium, Firefox, and WebKit plus the supported Preact versions.",
   },
   {
     id: "R2",
@@ -219,6 +205,7 @@ export default function Roadmap() {
       </div>
       <div class="hero-actions">
         <a class="btn btn-primary" href="https://github.com/kratejs/krate/milestones">Milestones</a>
+        <a class="btn btn-secondary" href="/docs/guides/compatibility/">Compatibility matrix</a>
         <a class="btn btn-secondary" href="/docs/guides/react-compatibility/">React compatibility</a>
         <a class="btn btn-secondary" href="/docs/features/mcp/">MCP</a>
         <a class="btn btn-secondary" href="/docs/guides/migrating-from-nextjs/">Next.js migration</a>
@@ -258,7 +245,7 @@ export default function Roadmap() {
               Source components compile to signals with hooks, context, refs, common
               class components, and live island props/callbacks. Radix primitives
               run as Preact islands, and controlled primitives are covered by a real
-              Chrome conformance harness.
+              Chromium, Firefox, and WebKit conformance harness.
             </p>
           </div>
           <div class="roadmap-panel">
@@ -278,24 +265,11 @@ export default function Roadmap() {
           Preact compat surface, with documented divergences for compiled packages.
         </div>
 
-        <div class="table-wrap roadmap-table">
-          <table class="compare">
-            <thead>
-              <tr><th>Surface</th><th>Source</th><th>Islands</th><th>v1 target</th></tr>
-            </thead>
-            <tbody>
-              {COMPAT_MATRIX.map((row) => (
-                <tr>
-                  <td>{row.area}</td>
-                  <td>{row.source}</td>
-                  <td>{row.islands}</td>
-                  <td>{row.target}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div class="roadmap-callout">
+          <strong>Live matrix.</strong> The source, island, and SSR status for
+          every surface is published in the <a href="/docs/guides/compatibility/">compatibility matrix</a>,
+          with its test references and known divergences.
         </div>
-
         <h3 class="roadmap-subtitle">Phases</h3>
         <ol class="roadmap-phases">
           {REACT_PHASES.map((phase) => (

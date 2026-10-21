@@ -17,7 +17,8 @@ Krate supports React in two ways:
    are bundled into a small, isolated Preact island and hydrate on the client.
    See [Compiled React packages](#compiled-react-packages-islands).
 
-This page covers both paths.
+This page covers both paths. For the current status of every surface and the
+tests backing it, see the [compatibility matrix](/docs/guides/compatibility/).
 
 ## Source transpilation
 
@@ -208,7 +209,7 @@ How it works:
   pnpm add preact
   ```
 
-  If Preact is missing, the build fails with an actionable error rather than
+  Preact 10.20 or newer is required. If Preact is missing, the build fails with an actionable error rather than
   shipping a broken island.
 - The islands for a page share one chunk (`chunks/island.<hash>.js`). Shared
   Preact modules are emitted once and wired through an import map.
@@ -219,7 +220,7 @@ How it works:
 - Island output is **client-only** in v1: the placeholder is server-rendered and
   the island renders after its chunk loads. If rendering throws, the placeholder
   is marked `data-krate-island-error` and shows a fallback message.
-- Krate warns when the installed Preact is older than 10.19, which is the
+- Krate warns when the installed Preact is older than 10.20, which is the
   minimum version the island hooks and compat behavior are tested against.
 
 Two runtimes are involved at an island boundary: the page (Krate signals) and

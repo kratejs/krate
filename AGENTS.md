@@ -70,10 +70,21 @@ go test ./...                      # full suite (includes examples/ integration)
 go test -race ./internal/build ./internal/bundler   # concurrency-sensitive
 go vet ./...
 gofmt -l .                         # must be empty
+
+# Browser conformance (install once with `pnpm exec playwright install chromium firefox webkit`)
+KRATE_BROWSER=chromium go test ./internal/build -run TestBrowserConformance -v
 ```
 
 `KRATE_REQUIRE_E2E=1` turns environment-missing test skips (Node, built runtime,
-docs) into hard failures. CI sets it on all OSes.
+docs) into hard failures. CI sets it on all OSes. Browser conformance runs only
+when `KRATE_BROWSER` is set; CI covers Chromium, Firefox, WebKit, and the
+supported Preact versions.
+
+The public compatibility matrix lives in
+`packages/web/src/data/compat-matrix.json`; `pnpm sync:docs` regenerates
+`packages/web/src/content/docs/guides/compatibility.md`. Run
+`pnpm check:matrix` after changing it; supported rows must reference a Go test,
+fixture, browser route, or CI job.
 
 ## CI
 
@@ -83,8 +94,10 @@ docs) into hard failures. CI sets it on all OSes.
 - `go test -race` with coverage on ubuntu, plus a plain `go test ./...` matrix on
   macOS and Windows (both with `KRATE_REQUIRE_E2E=1`).
 - `pnpm run typecheck`, `pnpm run test:js`, `node scripts/sync-krate-docs.mjs
-  --check`, a 30s `gofmt`/docs gate, informational benchmarks, and 30s fuzzers
-  (`FuzzLexer`, `FuzzParse`).
+  --check`, `pnpm run check:matrix`, a 30s `gofmt`/docs gate, informational
+  benchmarks, and 30s fuzzers (`FuzzLexer`, `FuzzParse`).
+- Browser conformance in Chromium, Firefox, and WebKit, plus the minimum,
+  intermediate, and workspace Preact versions.
 
 `.github/workflows/release.yml` gates publishing on `go build/vet/test` and
 `check:docs`, and syncs embedded docs before packaging binaries.

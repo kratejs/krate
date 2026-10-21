@@ -1,0 +1,203 @@
+{
+  "updated": "2026-10-21",
+  "rows": [
+    {
+      "id": "hooks-state",
+      "area": "Hooks: state and reducers",
+      "source": "beta",
+      "islands": "beta",
+      "ssr": "n/a",
+      "target": "React 18 parity",
+      "summary": "useState and useReducer lower to signals. Reducer dispatch uses the same getter contract as a signal.",
+      "tests": ["TestReactUseReducerBuild", "TestRewriteReactUseReducer", "TestRewriteReactNamespaceUseReducer"],
+      "roadmap": true
+    },
+    {
+      "id": "hooks-effects",
+      "area": "Hooks: effects and memo",
+      "source": "beta",
+      "islands": "beta",
+      "ssr": "n/a",
+      "target": "React 18 parity",
+      "summary": "Effects with empty deps use mount timing; dependency arrays use createEffectDeps/createMemoDeps. Passive-effect timing and cleanup ordering still differ from React.",
+      "tests": ["TestRewriteReactEffectDepsAndMemo", "TestRewriteReactEffectEmptyDepsMountOnce"],
+      "roadmap": true
+    },
+    {
+      "id": "context-refs",
+      "area": "Context and refs",
+      "source": "beta",
+      "islands": "beta",
+      "ssr": "n/a",
+      "target": "Stable",
+      "summary": "Context values stay reactive across components. forwardRef, callback refs, createRef, and useRef are covered.",
+      "tests": ["TestUseContextTranspile", "TestCrossComponentDynamicContextTranspile", "TestReactForwardRefCallback", "TestReactCreateRefBinds"],
+      "roadmap": true
+    },
+    {
+      "id": "transitions",
+      "area": "Transitions and deferred values",
+      "source": "beta",
+      "islands": "beta",
+      "ssr": "n/a",
+      "target": "Documented semantics",
+      "summary": "useTransition lowers to a pending signal. useDeferredValue, startTransition, and React 19 async transitions are best-effort rather than React scheduling.",
+      "tests": ["TestRewriteReactUseTransitionLowered"],
+      "roadmap": true
+    },
+    {
+      "id": "class-components",
+      "area": "Class components",
+      "source": "partial",
+      "islands": "n/a",
+      "ssr": "n/a",
+      "target": "Full common subset",
+      "summary": "State, setState, mount/update/unmount, forceUpdate, helpers, and instance fields are lowered. shouldComponentUpdate, snapshots, derived state, and error lifecycle methods are rejected with diagnostics.",
+      "tests": ["TestClassComponentLowering", "TestSynthesizeClassComponentRejectsUnsupported"],
+      "roadmap": true
+    },
+    {
+      "id": "error-boundaries",
+      "area": "Error boundaries",
+      "source": "planned",
+      "islands": "planned",
+      "ssr": "planned",
+      "target": "Source and island",
+      "summary": "No React-compatible error boundary lifecycle yet. Build failures and island load errors use Krate fallbacks.",
+      "tests": [],
+      "roadmap": true
+    },
+    {
+      "id": "children-keys-refs",
+      "area": "Children, keys, and refs",
+      "source": "partial",
+      "islands": "partial",
+      "ssr": "n/a",
+      "target": "Documented semantics",
+      "summary": "Static Children helpers and cloneElement fold at build time. Keyed updates intentionally do not run a React reconciler.",
+      "tests": ["TestReactChildrenMapSSR", "TestReactCloneElementFold", "TestReactKeyNotEmitted"],
+      "roadmap": true
+    },
+    {
+      "id": "events",
+      "area": "Events",
+      "source": "partial",
+      "islands": "partial",
+      "ssr": "n/a",
+      "target": "React 18 parity",
+      "summary": "Delegated bubbling, capture, non-bubbling, focus, and controlled value/checked paths are covered. Composition and full synthetic-event surface remain gaps.",
+      "tests": ["TestEventDelegationBubbles", "TestNonBubblingEventUsesDirectListener", "TestCaptureEventUsesCaptureListener"],
+      "roadmap": true
+    },
+    {
+      "id": "forms",
+      "area": "Forms and inputs",
+      "source": "partial",
+      "islands": "partial",
+      "ssr": "n/a",
+      "target": "React 18 parity",
+      "summary": "Controlled text, select, checkbox, radio, textarea, and submit handling run in the browser corpus. defaultValue/uncontrolled parity and React 19 form actions remain.",
+      "tests": ["TestFormValueUsesPropertyBinding", "browser:/react-forms/"],
+      "roadmap": true
+    },
+    {
+      "id": "portals",
+      "area": "Portals",
+      "source": "beta",
+      "islands": "beta",
+      "ssr": "n/a",
+      "target": "SSR-safe",
+      "summary": "createPortal and Portal mount into document.body with cleanup. SSR output remains a placeholder until hydration.",
+      "tests": ["TestPortalRendersAndMounts"],
+      "roadmap": true
+    },
+    {
+      "id": "suspense",
+      "area": "Suspense",
+      "source": "beta",
+      "islands": "beta",
+      "ssr": "n/a",
+      "target": "SSR-safe",
+      "summary": "Fallback shells and runtime regions are covered. React lazy/loadable semantics and nested island Suspense boundaries remain incomplete.",
+      "tests": ["TestBuildSuspenseBoundaryStaticFallback", "TestBuildSuspenseBoundaryRuntimePrimary"],
+      "roadmap": true
+    },
+    {
+      "id": "react-19",
+      "area": "React 19 actions and forms",
+      "source": "planned",
+      "islands": "planned",
+      "ssr": "n/a",
+      "target": "Source semantics",
+      "summary": "Compat shims exist for useActionState, useOptimistic, useFormStatus, use, and async transitions, but form actions and pending semantics are not in the browser gate yet.",
+      "tests": [],
+      "roadmap": true
+    },
+    {
+      "id": "compiled-packages",
+      "area": "Compiled React packages",
+      "source": "n/a",
+      "islands": "beta",
+      "ssr": "n/a",
+      "target": "Documented compat",
+      "summary": "Radix and other compiled packages run as Preact islands with live props, callbacks, portals, and controlled primitives.",
+      "tests": ["TestIslandSignalPropBridge", "TestIslandChunksMinified", "browser:/react-demo/"],
+      "roadmap": true
+    },
+    {
+      "id": "shadcn-dashboard",
+      "area": "shadcn-style dashboard",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "n/a",
+      "target": "Stable",
+      "summary": "Copied shadcn source components, cva/cn folding, cards, controlled filters, and derived lists run in the browser corpus.",
+      "tests": ["TestShadcnButtonFoldsVariantsAndSpread", "browser:/react-dashboard/"],
+      "roadmap": false
+    },
+    {
+      "id": "next-app-corpus",
+      "area": "Next.js app corpus",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "n/a",
+      "target": "Migration-ready",
+      "summary": "The benchmark Next App Router fixture is the migration-shaped corpus. It is source-corpus coverage today, not a browser-run Krate app.",
+      "tests": ["fixture:packages/benchmark/fixtures/next"],
+      "roadmap": false
+    },
+    {
+      "id": "local-island-components",
+      "area": "Local components in islands",
+      "source": "n/a",
+      "islands": "planned",
+      "ssr": "n/a",
+      "target": "Supported",
+      "summary": "A local Krate component cannot currently render inside a compiled island subtree; the build reports it instead of dropping it.",
+      "tests": [],
+      "roadmap": false
+    },
+    {
+      "id": "ssr-islands",
+      "area": "SSR island hydration",
+      "source": "n/a",
+      "islands": "planned",
+      "ssr": "planned",
+      "target": "Streaming-safe",
+      "summary": "Islands are client-only in v1. The placeholder renders on the server and the island mounts after its chunk loads.",
+      "tests": [],
+      "roadmap": false
+    },
+    {
+      "id": "preact-versions",
+      "area": "Supported Preact versions",
+      "source": "n/a",
+      "islands": "beta",
+      "ssr": "n/a",
+      "target": "10.20 through current",
+      "summary": "The island build warns below 10.20. The conformance jobs exercise the minimum, an intermediate version, and the workspace version.",
+      "tests": ["ci:preact-conformance"],
+      "roadmap": false
+    }
+  ]
+}
