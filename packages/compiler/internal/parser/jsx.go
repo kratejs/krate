@@ -176,10 +176,13 @@ func (p *Parser) parseJSXChildren(parent string) []ast.JSXChild {
 			return children
 		case lexer.JSXText:
 			p.next()
-			// A literal `>` in JSX text is kept as text (a deliberate leniency
-			// for prose); a stray `}` is always a mistake.
+			// A literal `>` inside prose (`a > b`) is kept as text, a deliberate
+			// leniency; `>` right after a tag (`<div>>`) and a stray `}` are
+			// always mistakes.
 			if strings.Contains(t.Value, "}") {
 				p.errorAt(t, "unexpected `}` in JSX text", "write it as {'}'} or &rbrace;")
+			} else if strings.HasPrefix(t.Value, ">") {
+				p.errorAt(t, "unexpected `>` in JSX text", "write it as {'>'} or &gt;")
 			}
 			if text := normalizeJSXText(decodeJSXEntities(t.Value)); text != "" {
 				children = append(children, &ast.JSXText{Value: text})

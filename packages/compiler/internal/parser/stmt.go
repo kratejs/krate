@@ -1119,7 +1119,6 @@ func (p *Parser) parseImport() ast.Stmt {
 		}
 		stmt.Default = name.Value
 		p.checkBindingName(name)
-		p.declare(name, name.Value, declLexical)
 		if !p.match(lexer.COMMA) {
 			goto from
 		}
@@ -1141,7 +1140,6 @@ func (p *Parser) parseImport() ast.Stmt {
 		}
 		nt := p.next()
 		p.checkBindingName(nt)
-		p.declare(nt, nt.Value, declLexical)
 		stmt.Namespace = nt.Value
 	default:
 		p.errWithMsg("unexpected "+describe(p.tok())+" in import declaration", "write `import name from '...'`, `import { a } from '...'` or `import * as ns from '...'`")
@@ -1207,14 +1205,12 @@ func (p *Parser) parseNamedImports(named *[]ast.NamedImport) {
 			} else {
 				lt := p.next()
 				p.checkBindingName(lt)
-				p.declare(lt, lt.Value, declLexical)
 				local = lt.Value
 			}
 		} else if isString || !isIdentifierToken(t.Kind) {
 			p.errorAt(t, "`"+remote+"` cannot be imported without a local name", "write `"+t.Value+" as localName`")
 		} else {
 			p.checkBindingName(t)
-			p.declare(t, remote, declLexical)
 		}
 		*named = append(*named, ast.NamedImport{Local: local, Remote: remote})
 		if !p.match(lexer.COMMA) {
