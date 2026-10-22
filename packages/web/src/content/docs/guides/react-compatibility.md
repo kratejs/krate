@@ -137,6 +137,73 @@ The rewrite is scope-aware: it never touches shadowed locals, function
 parameters, setters, or values that are already called. Krate-native
 `createSignal` code (which already writes `count()`) is left untouched.
 
+### Values computed during render
+
+React recomputes everything in a component body on each render. Krate runs the
+body once, so a body value that depends on state, props or context is compiled
+to a lazily recomputed **derived value**, and its reads are auto-called like
+state reads:
+
+```tsx
+const [todos, setTodos] = useState(initial);
+const [filter, setFilter] = useState("all");
+const visible = todos.filter((t) => filter === "all" || t.done === (filter === "done"));
+const left = todos.filter((t) => !t.done).length;   // always current
+const label = left === 1 ? "item" : "items";
+```
+
+This covers plain `const`/`let` bindings, destructuring (`const { a, b } =
+obj`), values derived from other derived values, `props.x` reads in components
+that take a `props` parameter, and a `let` built up by later body statements
+(`let cls = "a"; if (on) cls += " b";`). Values that read nothing reactive stay
+plain constants. A binding that cannot be recomputed safely (reassigned inside a
+handler, or built by statements that also write other variables) keeps its
+first value and is reported as `KR8301`. See
+[Reactivity](/docs/core-concepts/reactivity/#render-values-in-react-source-components).
+
+### Custom hooks
+
+A custom hook is an ordinary function that runs once per component instance,
+so its own state and effects belong to that instance. When it returns a value
+that depends on its state (`return [on, toggle]`, `return { value, setValue }`),
+the result is a derived getter, and the call site reads it like any other
+derived value:
+
+```tsx
+function useToggle(initial: boolean) {
+  const [on, setOn] = useState(initial);
+  const toggle = useCallback(() => setOn((v) => !v), []);
+  return [on, toggle] as const;
+}
+
+const [open, toggleOpen] = useToggle(false); // open is current, toggleOpen works
+```
+
+Hook arguments are read when the hook is called; a hook that must react to a
+changing argument should receive it through state it owns or a getter.
+
+### Context values
+
+`useContext(Ctx)` returns the provided value itself (an object, a number),
+never the getter that carries it from the provider: `const { color } =
+useContext(Theme)`, `log(theme)` and `[theme]` dependency arrays behave as in
+React, and consumers update when the provider's value changes, including
+through intermediate components.
+
+### Module-level state
+
+A module evaluates once. A module-level constant created by code (`const store
+= createStore(0)`) is created once per page and shared by every component that
+uses it, top-level statements that use it (`window.__store = store`) run once,
+and helpers its initializer calls are bundled into the page script, including
+helpers imported from other local modules. An imported binding that hydration
+code needs but the compiler cannot copy (for example one bound by a
+destructuring export) is reported as `KR8302`.
+
+User bindings named like runtime helpers (`h`, `findSlot`, `kbind*`,
+`krate*`) are renamed in the compiled output, so `hits.map((h) => <li>{h}</li>)`
+works.
+
 ### `useId`
 
 `useId()` resolves to a **stable, per-instance build-time literal** rather than

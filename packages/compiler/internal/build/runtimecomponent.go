@@ -58,6 +58,8 @@ var Fragment={__fragment:true};
 function createSignal(initial){var v=initial;return[function(){return v;},function(n){v=n;}];}
 function createEffect(){}
 function createMemo(fn){return fn;}
+function krateDerived(fn){fn.__krateDerived=true;return fn;}
+function krateHook(v){return typeof v==='function'&&v.__krateDerived?v:function(){return v;};}
 function onMount(){}
 function onCleanup(){}
 function createContext(def){return{Provider:function(p){return p.children;},useContext:function(){return def;},defaultValue:def};}
@@ -78,10 +80,10 @@ function forwardRef(fn){return fn;}
 function createElement(tag,props){var ch=[];for(var i=2;i<arguments.length;i++)ch.push(arguments[i]);props=props||{};props.children=ch.length<=1?ch[0]:ch;return jsx(tag,props);}
 if(typeof globalThis!=='undefined'){
 globalThis.__krate_jsx={jsx:jsx,jsxs:jsxs,Fragment:Fragment};
-globalThis.__krate_runtime={createSignal:createSignal,createEffect:createEffect,createMemo:createMemo,onMount:onMount,onCleanup:onCleanup,createContext:createContext,createResource:createResource,h:h,mount:mount,hydrate:hydrate,useRef:useRef,useCallback:useCallback,forwardRef:forwardRef,createElement:createElement};
+globalThis.__krate_runtime={createSignal:createSignal,createEffect:createEffect,createMemo:createMemo,krateDerived:krateDerived,krateHook:krateHook,onMount:onMount,onCleanup:onCleanup,createContext:createContext,createResource:createResource,h:h,mount:mount,hydrate:hydrate,useRef:useRef,useCallback:useCallback,forwardRef:forwardRef,createElement:createElement};
 globalThis.__krate_server={Head:Head,Suspense:Suspense,Script:Script,Style:Style,Link:Link,Image:Image,Icon:Icon};
 }
-export {jsx,jsxs,Fragment,createSignal,createEffect,createMemo,onMount,onCleanup,createContext,createResource,h,mount,hydrate,Head,Suspense,Script,Style,Link,Image,Icon,useRef,useCallback,forwardRef,createElement};
+export {jsx,jsxs,Fragment,createSignal,createEffect,createMemo,krateDerived,krateHook,onMount,onCleanup,createContext,createResource,h,mount,hydrate,Head,Suspense,Script,Style,Link,Image,Icon,useRef,useCallback,forwardRef,createElement};
 export default jsx;
 `
 

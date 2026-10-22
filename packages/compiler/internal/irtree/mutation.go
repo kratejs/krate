@@ -65,6 +65,7 @@ var pureMethods = map[string]bool{
 var deferredCallees = map[string]bool{
 	"createEffect": true, "createEffectDeps": true, "onMount": true,
 	"onCleanup": true, "createMemo": true, "createMemoDeps": true,
+	"krateDerived": true,
 }
 
 // mutationWalker collects a mutationSet for render-phase code.

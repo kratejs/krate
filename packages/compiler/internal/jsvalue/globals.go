@@ -85,6 +85,28 @@ func globalObject(name string) (Value, bool) {
 			}
 			return Bool(math.IsNaN(arg(args, 0).ToNumber()))
 		}), true
+	case "krateDerived":
+		// The compiled form of a React render value: at build time its getter
+		// simply computes the value.
+		return Func("krateDerived", func(args []Value) Value {
+			fn := arg(args, 0)
+			if fn.kind != KindFunction {
+				return fn
+			}
+			return Func(derivedGetterName, func([]Value) Value { return fn.Call() })
+		}), true
+	case "krateHook":
+		// A custom hook result normalized to a getter (see krateDerived).
+		return Func("krateHook", func(args []Value) Value {
+			v := arg(args, 0)
+			if v.kind == KindUnknown {
+				return v
+			}
+			if v.kind == KindFunction && v.fn != nil && v.fn.Name == derivedGetterName {
+				return v
+			}
+			return Func(derivedGetterName, func([]Value) Value { return v })
+		}), true
 	case "isFinite":
 		return Func("isFinite", func(args []Value) Value {
 			if a := arg(args, 0); a.IsUnknown() {
@@ -96,6 +118,10 @@ func globalObject(name string) (Value, bool) {
 	}
 	return Value{}, false
 }
+
+// derivedGetterName names the getter functions krateDerived and krateHook
+// return, so krateHook passes a derived getter through unchanged.
+const derivedGetterName = "__krate_derived"
 
 func numericFn(name string, f func(xs []float64) float64) Value {
 	return Func(name, func(args []Value) Value {

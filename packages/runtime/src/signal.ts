@@ -66,6 +66,11 @@ interface EffectState {
   /** Component owner current when the effect was created (see krateOwnerScope). */
   owner: unknown;
   /**
+   * Set on the observer of a derived value (krateDerived): a write to one of
+   * its sources calls mark synchronously instead of queueing a re-run.
+   */
+  mark?: (reactWrite: boolean) => void;
+  /**
    * Marks an ownership root (see createRoot). A root is pushed on the context
    * stack with `disposed` set so signal reads stay untracked, while effects,
    * memos and cleanups registered under it are collected into `cleanups`.
@@ -596,28 +601,7 @@ export function createSignal<T>(
     return value;
   };
 
-  const notify = (reactWrite = false): void => {
-    const list = Array.from(subs);
-    for (const effect of list) {
-      if (effect.disposed) {
-        // Lazy cleanup for effects that were disposed without unsubscribing.
-        subs.delete(effect);
-        continue;
-      }
-      if (effect.running) {
-        // A feedback loop that writes its own dependencies gets one
-        // re-run after the current run; further iterations are dropped to
-        // guarantee termination.
-        effect.rerun = true;
-        continue;
-      }
-      if (!effect.queued) {
-        effect.queued = true;
-        pending.push(effect);
-      }
-    }
-    scheduleFlush(reactWrite);
-  };
+  const notify = (reactWrite = false): void => notifySubs(subs, reactWrite);
 
   const write = (next: T | ((prev: T) => T)): void => {
     const resolved = typeof next === 'function' ? (next as (prev: T) => T)(value) : next;
@@ -654,6 +638,131 @@ export function createSignal<T>(
 
   signalGetters.add(read);
   return [read, write];
+}
+
+// notifySubs schedules every subscriber of a changed source. Derived-value
+// observers are marked stale synchronously (and forward the notification to
+// their own subscribers), so anything that re-runs in the flush reads a
+// recomputed value.
+function notifySubs(subs: Set<EffectState>, reactWrite = false): void {
+  const list = Array.from(subs);
+  for (const effect of list) {
+    if (effect.disposed) {
+      // Lazy cleanup for effects that were disposed without unsubscribing.
+      subs.delete(effect);
+      continue;
+    }
+    if (effect.mark) {
+      effect.mark(reactWrite);
+      continue;
+    }
+    if (effect.running) {
+      // A feedback loop that writes its own dependencies gets one
+      // re-run after the current run; further iterations are dropped to
+      // guarantee termination.
+      effect.rerun = true;
+      continue;
+    }
+    if (!effect.queued) {
+      effect.queued = true;
+      pending.push(effect);
+    }
+  }
+  scheduleFlush(reactWrite);
+}
+
+const derivedGetters = new WeakSet<object>();
+
+/**
+ * A lazily evaluated derived value: the compile target of a React render-body
+ * value (`const total = rows.reduce(...)`). The getter recomputes on read when
+ * a signal (or another derived value) it read last time has changed since, so
+ * every reader in a flush sees the same current value. Nothing is computed
+ * until the first read, and a write only marks it stale. triggers, when
+ * given, is read for its subscriptions only: an object or array literal built
+ * in render gets a new identity whenever the component would re-render.
+ */
+export function krateDerived<T>(fn: () => T, triggers?: () => unknown): () => T {
+  let value: T;
+  let stale = true;
+  const subs = new Set<EffectState>();
+  const node = newEffectState(() => {});
+  node.mark = (reactWrite: boolean) => {
+    if (!stale) {
+      stale = true;
+      notifySubs(subs, reactWrite);
+    }
+  };
+  allEffects.add(node);
+
+  const read = (): T => {
+    const current = context[context.length - 1];
+    if (current && !current.disposed) {
+      subs.add(current);
+      current.sources.add(subs);
+    }
+    // Outside render (an event handler, an effect setup) React state reads
+    // see a committed snapshot. When that snapshot can differ from the latest
+    // values, compute from it without touching the cache, which always holds
+    // the latest render value.
+    if (
+      (renderDepth === 0 || snapshotEpoch !== null) &&
+      (changedCells.size > 0 || (snapshotEpoch !== null && historyCells.size > 0))
+    ) {
+      return untrack(fn);
+    }
+    if (stale && !node.disposed) {
+      for (const set of node.sources) {
+        set.delete(node);
+      }
+      node.sources.clear();
+      // Cleared before computing so a source written during the computation
+      // marks it stale again instead of being lost.
+      stale = false;
+      context.push(node);
+      try {
+        // Extra sources (a render literal's state and props) only subscribe.
+        if (triggers) triggers();
+        value = fn();
+      } catch (err) {
+        stale = true;
+        throw err;
+      } finally {
+        context.pop();
+      }
+    } else if (node.disposed) {
+      return untrack(fn);
+    }
+    return value;
+  };
+
+  // Disposed with the binding (or component) that created it.
+  const parent = context[context.length - 1];
+  if (parent) {
+    parent.cleanups.push(() => {
+      disposeEffect(node);
+      allEffects.delete(node);
+    });
+  }
+  derivedGetters.add(read);
+  signalGetters.add(read);
+  return read;
+}
+
+/** Reports whether fn is a getter returned by krateDerived. */
+export function isDerivedGetter(fn: unknown): boolean {
+  return typeof fn === 'function' && derivedGetters.has(fn);
+}
+
+/**
+ * Normalizes a custom hook's return value to a getter. A hook compiled from
+ * React source returns a derived getter for a render-dependent result; any
+ * other value (a hook from a plain module, a constant) is wrapped so the call
+ * site can read every hook result the same way.
+ */
+export function krateHook<T>(value: T | (() => T)): () => T {
+  if (isDerivedGetter(value)) return value as () => T;
+  return () => value as T;
 }
 
 // Getters returned by createSignal, so the React compatibility hooks can read

@@ -1,15 +1,11 @@
 {
   "r18/app_data_table": {
     "severity": "P0",
-    "reason": "[derived-render-values] a useMemo result used by other render-local values is called as a getter: uncaught 'visible is not a function', tbody renders no rows, select-all starts checked"
+    "reason": "[ref-callback-rerun] the inline callback ref that sets el.indeterminate = some runs once; React re-runs it on every render, so the select-all box never becomes indeterminate"
   },
   "r18/app_tabs_accordion": {
     "severity": "P0",
-    "reason": "[derived-render-values] tab panel text derived from tabs[index] never updates after selecting a tab; aria-selected={false} is omitted instead of rendering \"false\"; clicked tab loses focus"
-  },
-  "r18/app_todo": {
-    "severity": "P0",
-    "reason": "[derived-render-values] 'N left' (todos.filter(...).length computed in render) is stale after adding a todo; later edit/filter steps diverge"
+    "reason": "[list-row-conditional] accordion rows inside the conditionally mounted FAQ panel keep {isOpen && <p/>} from mount: the previous answer stays open after toggling another row"
   },
   "r18/boundary_did_catch_info": {
     "severity": "P0",
@@ -89,15 +85,11 @@
   },
   "r18/context_memo_child": {
     "severity": "P1",
-    "reason": "[signal-getter-leak] useContext value read in a memo child's render logs as a function (signal getter), not the number; render count also differs (P2 part)"
+    "reason": "[render-count] the context value is now plain and the text updates, but the memo child's body (its render log) does not re-run on context changes"
   },
   "r18/context_nested_providers": {
     "severity": "P0",
     "reason": "[context-build-eval] build fails: a component that nests itself under a Provider (<Level><Level>) is rejected as 'recursive component cannot be expanded'"
-  },
-  "r18/context_provider_change": {
-    "severity": "P0",
-    "reason": "[signal-getter-leak] object context value read via useContext gives undefined fields in effects and data-color={theme.color} is dropped; only the style binding works"
   },
   "r18/diag_find_dom_node": {
     "severity": "P1",
@@ -111,14 +103,6 @@
     "severity": "P1",
     "reason": "[missing-diagnostic] string ref (ref=\"name\", this.refs): build succeeds with no KR5xxx diagnostic"
   },
-  "r18/effect_deps_nan": {
-    "severity": "P0",
-    "reason": "[derived-render-values] const value = Number(raw) is evaluated once at hydration: text and effect deps never update after raw changes"
-  },
-  "r18/effect_deps_object_identity": {
-    "severity": "P1",
-    "reason": "[signal-getter-leak] object literal {page} built in render stores the signal getter, so the effects log 'fn' instead of the page number; the effects re-run when React's do"
-  },
   "r18/effect_reads_ref": {
     "severity": "P0",
     "reason": "[autofocus] input focused from an effect gets its controlled/default value written after focus, so the caret is at the start and typing prepends (!draft)"
@@ -129,23 +113,11 @@
   },
   "r18/form_controlled_checkbox": {
     "severity": "P0",
-    "reason": "[derived-render-values] 'select all' checked={a && b && c} is not recomputed; clicked checkboxes lose focus (node replaced)"
-  },
-  "r18/form_controlled_input": {
-    "severity": "P0",
-    "reason": "[derived-render-values] derived 'valid' never updates; aria-invalid={bool} renders aria-invalid=\"\" instead of \"true\"/\"false\""
+    "reason": "[controlled-revert] a checkbox with checked={true} and an onChange that does not set state unchecks on click; React reverts it to checked"
   },
   "r18/form_controlled_reject": {
     "severity": "P0",
     "reason": "[controlled-input] rejected edits are now restored, except an input with a constant value and a no-op onChange: typing still changes the DOM value (xread only by state)"
-  },
-  "r18/form_radio_group": {
-    "severity": "P0",
-    "reason": "[derived-render-values] price derived with plans.find(...) never updates; radio loses focus after change"
-  },
-  "r18/hook_custom_hook": {
-    "severity": "P0",
-    "reason": "[custom-hooks] custom hooks returning a tuple/object render garbage ('open=function open()...', '[object HTMLButtonElement]') and their counters stay empty"
   },
   "r18/hook_usecallback_identity": {
     "severity": "P2",
@@ -162,14 +134,6 @@
   "r18/hook_usestate_lazy_init": {
     "severity": "P1",
     "reason": "[caret] the lazy initializer runs once and the value matches, but the controlled textarea value is written after hydration, so the caret starts at the end and typing appends (React: caret at the start)"
-  },
-  "r18/hook_usesyncexternalstore": {
-    "severity": "P0",
-    "reason": "[module-scope] module-level const cartStore = createStore(0) using an imported helper is not bundled: 'createStore is not defined', store-driven text empty"
-  },
-  "r18/list_filter_map": {
-    "severity": "P0",
-    "reason": "[derived-render-values] list filtered by two states in a render-local const: updates on the text filter but not on the select; empty state never shows"
   },
   "r18/portal_basic": {
     "severity": "P0",

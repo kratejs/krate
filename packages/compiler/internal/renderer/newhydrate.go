@@ -17,6 +17,7 @@ import (
 // refreshSlots() to rebuild the comment-marker cache against the new DOM.
 const HydrationBootstrapJS = `
 window.__krateErrs=[];
+window.__krateModule=function(k,f){var m=window.__krate_mod||(window.__krate_mod={});if(!Object.prototype.hasOwnProperty.call(m,k))m[k]=f();return m[k];};
 window.__krate_props={};
 window.$esc=function(v){var d=document.createElement('div');d.textContent=v;return d.innerHTML};
 window.__safe=function(fn){try{return fn();}catch(e){try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}return null;}};
@@ -35,7 +36,7 @@ window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(functio
 window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;var __first=true;__safe(function(){createEffect(function(){var v=get();if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);});});};
 window.kbindList=function(id,src,key,render,mode){var n=findSlot(id);if(!n||n.nodeType!==8||typeof krateBindList!=='function')return;__safe(function(){krateBindList(n,src,key,render,mode);});};
 window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(function(){var s=!!get();var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');});});};
-window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)n.removeAttribute(attr);else if(v===true)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){n.removeAttribute('style');Object.assign(n.style,v);}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));});});};
+window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;var ad=/^(aria|data)-/.test(attr);__safe(function(){createEffect(function(){var v=get();if(v==null||(v===false&&!ad))n.removeAttribute(attr);else if(v===true&&!ad)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){if(typeof krateApplyStyle==='function')krateApplyStyle(n,v);else Object.assign(n.style,v);}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));});});};
 window.kbindProp=function(id,attr,get){var n=findSlot(id);if(n)__safe(function(){krateControl(n,attr,get);});};
 window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){krateOn(n,prop,fn);});};
 window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);});};
@@ -316,6 +317,10 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			}
 			if exprJS == "" {
 				continue
+			}
+			if strings.HasPrefix(exprJS, "{") {
+				// An object literal (a style object) is an expression body.
+				exprJS = "(" + exprJS + ")"
 			}
 			// value/checked/selected are DOM properties, not attributes: setting
 			// the attribute after interaction has no effect.
