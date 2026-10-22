@@ -151,25 +151,6 @@ func (b *builder) evalAttrValue(expr ast.Expr) string {
 	return legacyConstString(expr, b.evalAttrConst(expr))
 }
 
-// foldCVACall folds a `X({ variant: ... })` call where X is a known cva factory
-// declared in this program or an imported module. Returns ok=false when X is
-// not a cva factory or the selection is not statically known.
-func (b *builder) foldCVACall(call *ast.CallExpr) (string, bool) {
-	id, ok := call.Callee.(*ast.Identifier)
-	if !ok || b.cvaFactories == nil {
-		return "", false
-	}
-	spec, ok := b.cvaFactories[id.Name]
-	if !ok {
-		return "", false
-	}
-	v := foldCVAValue(b.constInterp(b.localProps), spec, call.Args)
-	if v.IsUnknown() {
-		return "", false
-	}
-	return v.StringValue(), true
-}
-
 func evalConst(expr ast.Expr) string {
 	if expr == nil {
 		return ""
@@ -344,30 +325,6 @@ func evalConstWithSignals(expr ast.Expr, signals map[string]ast.Expr, props valu
 		return ""
 	}
 	return legacyConstString(expr, evalConstValue(expr, signals, props))
-}
-
-// resolveMemberChainValue resolves a member-access chain rooted at `props`
-// (e.g. props.options.accent, props.tags.length) against the props map.
-// ok=false when the chain is not rooted at props or does not fully fold.
-func resolveMemberChainValue(expr ast.Expr, props valueMap) (string, bool) {
-	cur := expr
-	depth := 0
-	for {
-		mem, ok := cur.(*ast.MemberExpr)
-		if !ok {
-			break
-		}
-		depth++
-		cur = mem.Object
-	}
-	if id, ok := cur.(*ast.Identifier); !ok || id.Name != "props" || depth == 0 {
-		return "", false
-	}
-	v := evalConstValue(expr, nil, props)
-	if v.ContainsUnknown() {
-		return "", false
-	}
-	return legacyConstString(expr, v), true
 }
 
 // operandLeaks reports whether expr depends on a value that is not known at

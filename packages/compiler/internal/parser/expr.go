@@ -93,10 +93,6 @@ func isAssignOp(k lexer.Kind) bool {
 	return false
 }
 
-// parseExpr is the historical entry point; the precedence argument is
-// ignored (it always parses a full comma expression).
-func (p *Parser) parseExpr(int) ast.Expr { return p.parseExpression() }
-
 // parseExpression parses a comma-separated expression sequence.
 func (p *Parser) parseExpression() ast.Expr {
 	left := p.parseAssign()
@@ -180,10 +176,7 @@ func canStartExpression(t lexer.Token) bool {
 		lexer.SHL, lexer.SHR, lexer.USHIFT_RIGHT, lexer.SLASH_GT, lexer.LT_SLASH, lexer.As:
 		return false
 	}
-	if isAssignOp(t.Kind) {
-		return false
-	}
-	return true
+	return !isAssignOp(t.Kind)
 }
 
 func (p *Parser) parseConditional() ast.Expr {

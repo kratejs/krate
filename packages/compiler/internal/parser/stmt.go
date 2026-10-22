@@ -254,9 +254,6 @@ func (p *Parser) parseBody() []ast.Stmt {
 	return []ast.Stmt{stmt}
 }
 
-// parseBlockOrStmt is kept for callers that parse an unbraced or braced body.
-func (p *Parser) parseBlockOrStmt() []ast.Stmt { return p.parseBody() }
-
 func (p *Parser) parseBlock() []ast.Stmt {
 	p.expect(lexer.LBRACE)
 	p.pushScope(false)
@@ -695,26 +692,6 @@ func (p *Parser) letStartsForDeclaration() bool {
 		return n.Kind == lexer.Of && false
 	}
 	return p.letStartsDeclaration()
-}
-
-// forInitToExpr converts a for-in/of initializer statement into the loop's
-// left-hand expression (kept for callers that build ForInStmt by hand).
-func forInitToExpr(init ast.Stmt) ast.Expr {
-	if init == nil {
-		return nil
-	}
-	if es, ok := init.(*ast.ExprStmt); ok {
-		return es.Expression
-	}
-	if vs, ok := init.(*ast.VarStmt); ok && len(vs.Decls) > 0 {
-		if vs.Decls[0].Target != nil {
-			return vs.Decls[0].Target
-		}
-		if vs.Decls[0].Name != "" {
-			return &ast.Identifier{Name: vs.Decls[0].Name}
-		}
-	}
-	return nil
 }
 
 // Variable declarations
@@ -1243,7 +1220,6 @@ func (p *Parser) parseImportAttributes(out *[]ast.ImportAttribute) {
 		default:
 			p.errWithMsg("expected an import attribute name", "")
 			p.skipTo(lexer.RBRACE)
-			break
 		}
 		if key == "" && kt.Kind != lexer.String {
 			break

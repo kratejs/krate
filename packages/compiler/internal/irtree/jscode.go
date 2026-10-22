@@ -940,8 +940,7 @@ func codegenIssues(fn *ast.FnDecl, mk func(pos ast.Pos, msg, hint string) error)
 	var walkExpr func(ast.Expr)
 	var walkStmt func(ast.Stmt)
 	var walkJSXChild func(ast.JSXChild)
-	var walkClass func(*ast.ClassDecl)
-	walkClass = func(c *ast.ClassDecl) {
+	walkClass := func(c *ast.ClassDecl) {
 		if c == nil {
 			return
 		}

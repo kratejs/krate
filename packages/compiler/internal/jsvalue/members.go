@@ -695,7 +695,6 @@ func stringMethod(s, name string, args []Value) Value {
 					adv += size
 				} else {
 					rest = ""
-					pos = len(s) + 1
 					break
 				}
 			}

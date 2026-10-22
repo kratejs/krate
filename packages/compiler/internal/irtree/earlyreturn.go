@@ -123,7 +123,7 @@ func (l *returnLowerer) seq(stmts []ast.Stmt, top bool) (ast.Expr, bool) {
 			continue
 		}
 		var expr ast.Expr
-		falls := true
+		var falls bool
 		switch s := stmt.(type) {
 		case *ast.ReturnStmt:
 			expr, falls = s.Value, false

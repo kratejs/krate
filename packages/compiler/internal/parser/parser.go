@@ -252,9 +252,6 @@ func (p *Parser) tok() lexer.Token { return p.tokens[p.pos] }
 
 func (p *Parser) kind() lexer.Kind { return p.tokens[p.pos].Kind }
 
-// peek returns the current token.
-func (p *Parser) peek() lexer.Token { return p.tokens[p.pos] }
-
 // at returns the token n positions ahead (clamped to EOF).
 func (p *Parser) at(n int) lexer.Token {
 	i := p.pos + n
@@ -356,8 +353,6 @@ func (p *Parser) errorAt(tok lexer.Token, msg, hint string) {
 	p.errs = append(p.errs, d)
 }
 
-func (p *Parser) err(msg string) { p.errorAt(p.tok(), msg, "") }
-
 func (p *Parser) errWithMsg(msg, hint string) { p.errorAt(p.tok(), msg, hint) }
 
 func (p *Parser) errAtPos(pos ast.Pos, msg, hint string) {
@@ -394,13 +389,6 @@ func describe(t lexer.Token) string {
 
 func tokPos(tok lexer.Token) ast.Pos {
 	return ast.Pos{Line: tok.Line, Col: tok.Col, Offset: tok.Offset}
-}
-
-func posFromStmts(stmts []ast.Stmt) ast.Pos {
-	if len(stmts) > 0 && stmts[0] != nil {
-		return stmts[0].Pos()
-	}
-	return ast.Pos{}
 }
 
 func kindLabel(k lexer.Kind) string {

@@ -279,17 +279,6 @@ func loaderForExt(path string) api.Loader {
 	}
 }
 
-// lineStartOffsets returns the byte offset of the start of each 1-based line.
-func lineStartOffsets(src string) []int {
-	starts := []int{0}
-	for i := 0; i < len(src); i++ {
-		if src[i] == '\n' {
-			starts = append(starts, i+1)
-		}
-	}
-	return starts
-}
-
 // tagNameEnd returns the byte offset immediately after the tag name of the
 // JSX element starting at p (p.Offset is the byte offset of its `<`).
 func tagNameEnd(src string, p ast.Pos, name string) (int, bool) {

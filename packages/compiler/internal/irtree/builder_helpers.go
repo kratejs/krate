@@ -151,15 +151,6 @@ func isReferenceInit(expr ast.Expr) bool {
 	return false
 }
 
-// isStringLiteral reports whether expr is a string literal. A folded string
-// value cannot be told apart from the null/undefined keyword (both resolve to
-// the same text), so callers deciding whether to omit a nullish value consult
-// the AST kind: `{"null"}` is real text, `{null}` is not.
-func isStringLiteral(expr ast.Expr) bool {
-	lit, ok := expr.(*ast.Literal)
-	return ok && lit.Kind == ast.StringLit
-}
-
 func isNumericLiteral(s string) bool {
 	if s == "" {
 		return false

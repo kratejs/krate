@@ -548,6 +548,3 @@ func (p *printer) param(prm *ast.Param) string {
 	}
 	return name
 }
-
-// printParams renders a parameter list (kept for callers in this package).
-func printParams(params []*ast.Param) string { return (&printer{}).params(params) }
