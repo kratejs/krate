@@ -71,6 +71,9 @@ interface Update {
 
 let seq = 0;
 
+// Where the parent's original prop getters are kept on a gated props object.
+const RAW_GETTERS = Symbol.for('krate.class.rawProps');
+
 class Controller {
   readonly inst: ClassInstance;
   readonly owner: Owner | null;
@@ -98,14 +101,27 @@ class Controller {
     this.raw = raw && typeof raw === 'object' ? raw : {};
     this.getState = getState;
     this.setStateSignal = setState;
-    for (const key of Object.keys(this.raw)) {
-      const desc = Object.getOwnPropertyDescriptor(this.raw, key);
-      if (desc && desc.get) {
-        const get = desc.get;
-        const obj = this.raw;
-        this.rawGetters.push([key, () => get.call(obj)]);
+    // A remounted instance reuses the registry object an earlier instance
+    // gated; read the parent's original getters from where it saved them.
+    const holder = this.raw as { [RAW_GETTERS]?: Array<[string, () => unknown]> };
+    let saved = holder[RAW_GETTERS];
+    if (!saved) {
+      saved = [];
+      for (const key of Object.keys(this.raw)) {
+        const desc = Object.getOwnPropertyDescriptor(this.raw, key);
+        if (desc && desc.get) {
+          const get = desc.get;
+          const obj = this.raw;
+          saved.push([key, () => get.call(obj)]);
+        }
+      }
+      try {
+        Object.defineProperty(this.raw, RAW_GETTERS, { value: saved, enumerable: false, configurable: true });
+      } catch {
+        // A frozen registry cannot be gated either.
       }
     }
+    this.rawGetters.push(...saved);
     this.props = this.readProps();
     this.state = untrack(getState) || {};
     this.context = this.readContext();
@@ -367,6 +383,16 @@ class Controller {
     if (this.catching) return true;
     this.catching = true;
     try {
+      // React logs every error a boundary catches.
+      if (typeof console !== 'undefined') {
+        console.error(err);
+        console.error(
+          'The above error occurred in the <' + (info.componentStack.match(/at (\S+)/)?.[1] || 'Unknown') +
+            '> component:' + info.componentStack +
+            '\n\nReact will try to recreate this component tree from scratch using the error boundary you provided, ' +
+            (spec.name || 'Component') + '.',
+        );
+      }
       owner.inError = true;
       // The children that were rendered when the error happened stay down
       // until the boundary renders again; dormant ones (a hidden fallback

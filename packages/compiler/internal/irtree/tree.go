@@ -89,6 +89,23 @@ type Annotations struct {
 	// static or private member, an unknown this.x read, ...). The builder
 	// reports it when the component is used.
 	ClassRejections map[string]diag.Diagnostic
+	// ClassBoundaries names the lowered class components that are error
+	// boundaries (static getDerivedStateFromError and/or componentDidCatch).
+	ClassBoundaries map[string]bool
+	// ClassNotes holds non-blocking warnings for lowered class components
+	// (for example a boundary without getDerivedStateFromError), reported once
+	// when the component is rendered.
+	ClassNotes map[string][]diag.Diagnostic
+}
+
+// IsLoweredClass reports whether name is a React class component that was
+// lowered to a function component.
+func (a *Annotations) IsLoweredClass(name string) bool {
+	if a == nil || !a.ClassComponents[name] {
+		return false
+	}
+	_, rejected := a.ClassRejections[name]
+	return !rejected
 }
 
 // (Annotations continues below.)
@@ -379,6 +396,8 @@ type ComponentNode struct {
 	InstanceID string
 	SourceFile string
 	Line       int
+	// Class marks a lowered React class component (see Annotations.IsLoweredClass).
+	Class bool
 
 	// SSR-evaluated components: prop-driven with no signals.
 	// The emitter uses SSREval to render these at build time.
@@ -504,6 +523,20 @@ type ComponentSignature struct {
 	Children        []SlotID
 	SlotBindings    []SlotBinding
 	AttrBindings    []AttrBinding
+
+	// Owner-tree links (see renderer/owner_emit.go). Name is the component
+	// name; ParentID the nearest enclosing hydrated component (React's parent
+	// fiber); CreatorID the component whose render created this element (it
+	// differs from ParentID for props.children); CondID/CondBranch the
+	// conditional slot and branch ("c" or "a") the component renders in.
+	Name       string
+	ParentID   SlotID
+	CreatorID  SlotID
+	CondID     SlotID
+	CondBranch string
+	// Class marks a lowered React class component; pages that render one use
+	// the owner tree.
+	Class bool
 }
 
 // SlotBinding - describes a content binding for hydration

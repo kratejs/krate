@@ -545,6 +545,7 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 	defer func() { e.clientStack = e.clientStack[:len(e.clientStack)-1] }()
 
 	mergeSlotOutput(&out, e.emitSlotsParallel(node.Children))
+	ownCount := len(out.Signatures)
 
 	// Replace {props.children} placeholder with rendered call site children.
 	// This ensures interactive sub-components nested inside signal components
@@ -554,8 +555,12 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		html := callSiteOut.HTML
 		callSiteOut.HTML = ""
 		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", html)
+		if cond, branch, ok := childrenPlaceholderCond(node.Children); ok {
+			claimCond(callSiteOut.Signatures, cond, branch)
+		}
 		mergeSlotOutput(&out, callSiteOut)
 	}
+	claimOwnerLinks(out.Signatures, node, ownCount)
 
 	childIDs := collectChildIDs(node.Children)
 	slotBindings := collectSlotBindings(node.Children)
@@ -588,6 +593,8 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		Children:        childIDs,
 		SlotBindings:    slotBindings,
 		AttrBindings:    node.AttrBindings,
+		Name:            node.Name,
+		Class:           node.Class,
 	}
 	out.Signatures = append([]irtree.ComponentSignature{sig}, out.Signatures...)
 
@@ -917,6 +924,9 @@ func (e *Emitter) emitConditionalSlot(s *irtree.ConditionalSlot) SlotOutput {
 		activeHTML, inactiveHTML, held = alt.HTML, cons.HTML, "c"
 	}
 	cons.HTML, alt.HTML = "", ""
+
+	claimCond(cons.Signatures, s.ID, "c")
+	claimCond(alt.Signatures, s.ID, "a")
 
 	var out SlotOutput
 	mergeSlotOutput(&out, cons)

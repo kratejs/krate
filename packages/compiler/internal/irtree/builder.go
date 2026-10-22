@@ -166,6 +166,8 @@ func (b *builder) finishTree(root *ComponentNode) *ComponentTree {
 	errs = append(errs, b.codegenErrs...)
 	errs = append(errs, b.markupErrs...)
 
+	b.reportClassNotes()
+
 	cssSignals, noJSFallback := b.cssStylesheets()
 	return &ComponentTree{
 		Root:             root,

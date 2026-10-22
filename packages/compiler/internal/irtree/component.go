@@ -63,6 +63,7 @@ func (b *builder) newComponentNode(fn *ast.FnDecl, parentID string) *ComponentNo
 		Fn:         fn,
 		SourceFile: b.ann.SourceFile,
 		Line:       fn.Position.Line,
+		Class:      b.ann.IsLoweredClass(fn.Name),
 	}
 }
 

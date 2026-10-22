@@ -145,7 +145,13 @@ func (b *builder) collectExtraVarJS(body []ast.Stmt, order *bodyOrder, params ma
 			if ifEndsInReturn(s) {
 				continue
 			}
-			add(s, renderStmtJS(s, b.sigMap()), stmtsReferenceSignal(s.Consequent, b) || stmtsReferenceSignal(s.Alternate, b))
+			reactive := b.referencesSignal(s.Test) || stmtsReferenceSignal(s.Consequent, b) || stmtsReferenceSignal(s.Alternate, b)
+			js := renderStmtJS(s, b.sigMap())
+			if reactive && isThrowGuard(s) {
+				// Re-check the guard when its signals change (throwguard.go).
+				js = throwGuardJS(js)
+			}
+			add(s, js, reactive)
 		case *ast.ExprStmt:
 			if !isReplayedBodyExpr(s.Expression) || params[assignedIdent(s.Expression)] {
 				continue

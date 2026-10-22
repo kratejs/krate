@@ -19,7 +19,8 @@ const HydrationBootstrapJS = `
 window.__krateErrs=[];
 window.__krate_props={};
 window.$esc=function(v){var d=document.createElement('div');d.textContent=v;return d.innerHTML};
-window.__safe=function(fn){try{return fn();}catch(e){try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}return null;}};
+window.__safe=function(fn,n){try{return fn();}catch(e){if(window.__krateOnError&&window.__krateOnError(e,n))return null;try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}return null;}};
+window.__kfx=function(n,f){return function(){try{return f();}catch(e){if(n&&n.isConnected===false){try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}return;}throw e;}};};
 (function(){
 var __root=document.getElementById('root')||document.body;
 var __cache=new Map();
@@ -31,14 +32,14 @@ scan();
 window.findSlot=function(id){var q='[data-k="k:'+id+'"]';var el=__root.querySelector(q);if(el)return el;var c=__cache.get(id);if(c)return c;var found=null;__tpls.forEach(function(t){if(!found)found=t.content.querySelector(q);});if(!found&&typeof krateCondDetached==='function'){var ds=krateCondDetached();for(var i=0;i<ds.length&&!found;i++)found=ds[i].querySelector(q);}return found;};
 window.refreshSlots=scan;
 window.krateMountPortals=function(){var list=document.querySelectorAll('[data-krate-portal]');for(var i=0;i<list.length;i++){(function(node){if(node.getAttribute('data-krate-portal-mounted'))return;node.setAttribute('data-krate-portal-mounted','1');if(node.parentNode!==document.body)document.body.appendChild(node);if(typeof window.onCleanup==='function')window.onCleanup(function(){if(node.parentNode)node.parentNode.removeChild(node);});})(list[i]);}};
-window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}});});};
-window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);});});};
-window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(function(){krateCondSwap(n,!!get(),t);});});};
-window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)n.removeAttribute(attr);else if(v===true)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){n.removeAttribute('style');Object.assign(n.style,v);}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));});});};
-window.kbindProp=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(attr==='value'){var s=v==null||v===false?'':String(v);if(n.value===s)return;n.value=s;}else{var b=!!v;if(n[attr]===b)return;n[attr]=b;}});});};
-window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){n[prop]=fn;});};
-window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);});};
-window.kbindRef=function(id,set){var n=findSlot(id);if(n)__safe(function(){set(n);});};
+window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__kfx(n,function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}}));},n);};
+window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__kfx(n,function(){var v=get();while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);}));},n);};
+window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(__kfx(n,function(){var s=!!get();if(window.__krateCondPre)window.__krateCondPre(id,s);krateCondSwap(n,s,t);if(window.__krateCondPost)window.__krateCondPost(id,s);}));},n);};
+window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__kfx(n,function(){var v=get();if(v==null||v===false)n.removeAttribute(attr);else if(v===true)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){n.removeAttribute('style');Object.assign(n.style,v);}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));}));},n);};
+window.kbindProp=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__kfx(n,function(){var v=get();if(attr==='value'){var s=v==null||v===false?'':String(v);if(n.value===s)return;n.value=s;}else{var b=!!v;if(n[attr]===b)return;n[attr]=b;}}));},n);};
+window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){n[prop]=fn;},n);};
+window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);if(typeof window.onCleanup==='function')window.onCleanup(function(){n.removeEventListener(ev,fn,!!capture);});},n);};
+window.kbindRef=function(id,set){var n=findSlot(id);if(n)__safe(function(){set(n);},n);};
 window.createEffectDeps=function(fn,deps){var prev=null,has=false,cleanup=null;function same(a,b){if(!a||!b||a.length!==b.length)return false;for(var i=0;i<a.length;i++){if(a[i]!==b[i])return false;}return true;}createEffect(function(){var next=deps?deps():[];if(has&&deps&&same(prev,next))return;prev=next;has=true;if(typeof cleanup==="function"){cleanup();cleanup=null;}cleanup=fn();});onCleanup(function(){if(typeof cleanup==="function")cleanup();});};
 window.createMemoDeps=function(fn,deps){var s=createSignal(fn()),prev=deps?deps():[];function same(a,b){if(a.length!==b.length)return false;for(var i=0;i<a.length;i++){if(a[i]!==b[i])return false;}return true;}createEffect(function(){var next=deps?deps():[];if(same(prev,next))return;prev=next;s[1](fn());});return s[0];};
 function __krateActionBase(){var c=window.__KRATE_CFG__;return c&&c.basePath?c.basePath:'';}
@@ -88,7 +89,13 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		}
 	}
 
-	// Per-component scoped IIFEs
+	// Per-component scoped IIFEs. Pages with class components register each
+	// scope with the owner tree instead (see owner_emit.go).
+	owned := needsOwnerTree(result.Signatures)
+	present := map[irtree.SlotID]bool{}
+	if owned {
+		b.WriteString(ownerPrelude)
+	}
 	for _, sig := range result.Signatures {
 		if sig.Tier != irtree.TierClient {
 			continue
@@ -97,7 +104,13 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		// traced back to a source component. Stripped by minification in prod.
 		b.WriteString("// component ")
 		b.WriteString(string(sig.ComponentID))
-		b.WriteString("\n(function(){\n")
+		if owned {
+			b.WriteString("\n")
+			b.WriteString(ownerOpen(sig, present))
+			present[sig.ComponentID] = true
+		} else {
+			b.WriteString("\n(function(){\n")
+		}
 
 		// The component's own props object declaration must precede signal
 		// initializers: signal RawInits like `createSignal(props.x || "")`
@@ -301,7 +314,11 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			b.WriteString(");\n")
 		}
 
-		b.WriteString("})();\n")
+		if owned {
+			b.WriteString("});\n")
+		} else {
+			b.WriteString("})();\n")
+		}
 	}
 
 	// Publish page-scope signal values for external React islands. This runs
