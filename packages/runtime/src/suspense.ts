@@ -664,6 +664,7 @@ function boundaryDOM(start: Comment, tpl: HTMLTemplateElement | null, initialCon
       if (content.length === 0) {
         content = fromTemplate();
         insert(content);
+        refsEnter();
         return;
       }
       for (const n of content) {
@@ -689,7 +690,16 @@ function boundaryDOM(start: Comment, tpl: HTMLTemplateElement | null, initialCon
     }
     if (fallback.length === 0) fallback = fromTemplate();
     insert(fallback);
+    refsEnter();
   };
+}
+
+// refsEnter attaches the refs of elements that just entered the document
+// (refs.ts holds refs of detached nodes until then), so a form action or ref
+// in content revealed from its template is bound.
+function refsEnter(): void {
+  const enter = (globalThis as { krateRefsEnter?: () => void }).krateRefsEnter;
+  if (typeof enter === 'function') enter();
 }
 
 /** Registers a boundary under its id so compiled runs can find it. */

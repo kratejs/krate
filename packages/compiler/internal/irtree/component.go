@@ -178,8 +178,10 @@ func (b *builder) collectHydrationBody(fn *ast.FnDecl, node *ComponentNode) hydr
 	node.Memos = b.collectMemoJS(fn.Body)
 	body.pre, body.post = b.collectExtraVarJS(fn.Body, body.order, paramBindingSet(fn))
 	body.post = append(body.post, b.collectResourceJS(fn.Body, body.order)...)
-	body.post = append(body.post, b.collectReactiveFactoryJS(fn.Body, body.order)...)
-	node.PreSignalVars = bodyJSStrings(body.pre)
+	factoryPre, factoryPost := b.collectReactiveFactoryJS(fn.Body, body.order)
+	body.pre = append(body.pre, factoryPre...)
+	body.post = append(body.post, factoryPost...)
+	node.PreSignalVars = mergeBodyJS(body.pre)
 	node.ExtraVars = mergeBodyJS(body.post)
 	return body
 }

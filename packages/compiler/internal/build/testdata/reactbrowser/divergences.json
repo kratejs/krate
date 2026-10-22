@@ -18,9 +18,5 @@
   "r19/action_form_auto_reset": {
     "severity": "P2",
     "reason": "[form-actions] the action, message and auto-reset match; with the fixture's 80ms delay Krate commits the result one frame after React, so the snapshot right after the click can still show the old field value"
-  },
-  "r19/app_reference": {
-    "severity": "P0",
-    "reason": "[use-promise] the reference app builds and its actions, useFormStatus and useOptimistic run; use(promise) under Suspense shows the list immediately instead of the 'loading todos' fallback, which shifts the later steps"
   }
 }

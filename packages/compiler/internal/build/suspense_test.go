@@ -171,6 +171,9 @@ func TestLazyComponentGetsHydrationChunk(t *testing.T) {
 	if !strings.HasPrefix(chunk, "__krateLazyRun(function(){") || !strings.Contains(chunk, "kbindHandler(") {
 		t.Fatalf("unexpected lazy chunk:\n%s", chunk)
 	}
+	if !regexp.MustCompile(`<link rel="?modulepreload"? href="?/lazy-Heavy\.[a-z0-9]+\.js`).MatchString(html) {
+		t.Fatalf("the lazy chunk should be preloaded:\n%s", html)
+	}
 	if strings.Contains(pageJS, "__KRATE_LAZY_CHUNK_") {
 		t.Fatalf("chunk placeholder left in the page script:\n%s", pageJS)
 	}

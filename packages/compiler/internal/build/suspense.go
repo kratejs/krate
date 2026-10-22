@@ -2,6 +2,7 @@ package build
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
@@ -48,4 +49,24 @@ func runtimeNeedsSuspense(results []*PageResult) bool {
 		}
 	}
 	return false
+}
+
+var lazyChunkURLRe = regexp.MustCompile(`__krateLazy\("([^"]+\.js)"`)
+
+// lazyChunkPreloads returns the lazy chunk URLs a page script loads, relative
+// to the base path, for <link rel="modulepreload">. The fetch then overlaps
+// the page load instead of starting at hydration (the module still only runs
+// when the component first renders), so a lazy boundary reveals on the same
+// schedule as React, whose lazy code is usually already loaded.
+func lazyChunkPreloads(pageJS, basePath string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range lazyChunkURLRe.FindAllStringSubmatch(pageJS, -1) {
+		url := strings.TrimPrefix(m[1], basePath)
+		if !seen[url] {
+			seen[url] = true
+			out = append(out, url)
+		}
+	}
+	return out
 }

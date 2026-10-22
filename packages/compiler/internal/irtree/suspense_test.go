@@ -78,12 +78,49 @@ export default function App() {
 		t.Fatalf("User must hydrate (client, not SSREval), got tier %v ssreval %v", found.Tier, found.IsSSREval)
 	}
 	declared := false
-	for _, ev := range found.ExtraVars {
+	for _, ev := range append(found.PreSignalVars, found.ExtraVars...) {
 		if ev == "var user=__krateUse(()=>__krateRead(p))" {
 			declared = true
 		}
 	}
 	if !declared {
-		t.Fatalf("expected the use() value declared once in the hydration scope, got %q", found.ExtraVars)
+		t.Fatalf("expected the use() value declared once in the hydration scope, got %q", append(found.PreSignalVars, found.ExtraVars...))
+	}
+}
+
+// A signal initialized from a use() value (useState(use(p))) is declared
+// after that value: the use() declaration reads no signal, so it is emitted
+// with the pre-signal fragments.
+func TestUseValueDeclaredBeforeSignalsInitializedFromIt(t *testing.T) {
+	tree := annotateAndBuild(t, `const p = Promise.resolve([1]);
+function List() {
+	const loaded = __krateUse(() => __krateRead(p));
+	const [items, setItems] = createSignal(loaded());
+	return <ul onClick={() => setItems([])}>{items().length}</ul>;
+}
+export default function App() {
+	return <Suspense fallback={<i>wait</i>}><List /></Suspense>;
+}`)
+	var found *irtree.ComponentNode
+	for _, n := range tree.Root.Children {
+		if s, ok := n.(*irtree.SuspenseSlot); ok {
+			for _, r := range s.Resolved {
+				if cs, ok := r.(*irtree.ComponentSlot); ok {
+					found = cs.Component
+				}
+			}
+		}
+	}
+	if found == nil {
+		t.Fatal("List was not built")
+	}
+	pre := false
+	for _, v := range found.PreSignalVars {
+		if v == "var loaded=__krateUse(()=>__krateRead(p))" {
+			pre = true
+		}
+	}
+	if !pre {
+		t.Fatalf("the use() value must precede the signal declarations, pre=%q extra=%q", found.PreSignalVars, found.ExtraVars)
 	}
 }

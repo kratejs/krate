@@ -442,7 +442,9 @@ script. As in React, the enclosing `<Suspense>` shows its fallback until the
 component is ready: the build ships the fallback with the lazy content (already
 rendered) in a template, and the chunk is loaded with a dynamic import when the
 component first renders on the client, that is when the page hydrates, or when
-a hidden branch holding it is first shown. The boundary reveals the content
+a hidden branch holding it is first shown. The page links the chunk with
+`<link rel="modulepreload">`, so its download overlaps the page load; it
+still only runs when the component renders. The boundary reveals the content
 once the chunk has run, so it is interactive from the first frame it is
 visible.
 
