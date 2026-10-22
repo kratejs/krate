@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -208,12 +209,50 @@ func renderForParams(t *testing.T, base, route, url string, params, query map[st
 	return ""
 }
 
+// freePort returns a server port P for which P+1 (API/action sidecar) and
+// P+10 (SSR renderer) are free too, and reserves the block for the rest of
+// the test binary so servers started in parallel never get overlapping ports.
 func freePort(t *testing.T) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	reservedPortsMu.Lock()
+	defer reservedPortsMu.Unlock()
+	for attempt := 0; attempt < 100; attempt++ {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := l.Addr().(*net.TCPAddr).Port
+		l.Close()
+		block := []int{port, port + 1, port + 10}
+		ok := true
+		for _, p := range block {
+			if reservedPorts[p] || !portBindable(p) {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		for p := port; p <= port+10; p++ {
+			reservedPorts[p] = true
+		}
+		return port
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	t.Fatal("freePort: no free port block found")
+	return 0
+}
+
+var (
+	reservedPortsMu sync.Mutex
+	reservedPorts   = map[int]bool{}
+)
+
+func portBindable(port int) bool {
+	l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return false
+	}
+	l.Close()
+	return true
 }

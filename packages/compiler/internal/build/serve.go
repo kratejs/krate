@@ -819,7 +819,7 @@ func Serve(root string, cfg *config.Config, startTime time.Time) error {
 
 func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
 	port := cfg.ServerPort()
-	apiPort := port + 1
+	apiPort := internalPort(port + 1)
 
 	// Load embedded middleware runtime if configured (default: quickjs)
 	var middlewareRT *jsruntime.MiddlewareRuntime
@@ -1073,7 +1073,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// alone (no node/bun process).
 	ssrPort := cfg.SSR.RendererPort
 	if ssrPort == 0 {
-		ssrPort = port + 10
+		ssrPort = internalPort(port + 10)
 	}
 	ssr := NewSSRServer(root, ssrPort, cfg.SSR.SSRRuntime)
 	ssr.SetEnv(environ.Current)
@@ -2220,4 +2220,20 @@ func sanitizeActionReturn(value string, r *http.Request) string {
 		return ""
 	}
 	return u.RequestURI()
+}
+
+// internalPort returns preferred when it can be bound on localhost and
+// otherwise a free port chosen by the OS. Sidecars default to fixed offsets
+// from the server port, which collide when several servers run at once.
+func internalPort(preferred int) int {
+	if ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", preferred)); err == nil {
+		_ = ln.Close()
+		return preferred
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return preferred
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
 }
