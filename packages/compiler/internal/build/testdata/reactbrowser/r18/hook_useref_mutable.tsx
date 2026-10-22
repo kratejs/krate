@@ -1,15 +1,15 @@
 import { useRef, useState } from "react";
 import { log } from "../lib/log";
 
-// Mutating ref.current does not re-render; the value shows up on the next
-// render caused by state.
+// Mutating ref.current does not re-render; the value shows up once it is
+// copied into state. Reading ref.current during render is covered by
+// diag_ref_read_in_render (React discourages it; Krate reports KR5008).
 export default function HookUseRefMutable() {
   const clicks = useRef(0);
   const [shown, setShown] = useState(0);
   return (
     <div>
       <p id="shown">shown {shown}</p>
-      <p id="live">ref at render {clicks.current}</p>
       <button
         id="silent"
         onClick={() => {

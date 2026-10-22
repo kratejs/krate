@@ -32,6 +32,33 @@ function TodoRow(props: { todo: Todo, index: number, onRemove: (id: number) => v
   );
 }
 
+function Detail(props: { id: string, onLog: (line: string) => void }) {
+  useEffect(() => {
+    props.onLog('detail open ' + props.id);
+    return () => props.onLog('detail close ' + props.id);
+  }, []);
+  return <p data-testid="detail">details for {props.id}</p>;
+}
+
+function Section(props: { id: string, open: boolean, onToggle: (id: string) => void, onLog: (line: string) => void }) {
+  const [hits, setHits] = useState(0);
+  const label = props.id.toUpperCase() + ' x' + hits;
+  return (
+    <div data-section={props.id}>
+      <button
+        class="toggle"
+        onClick={() => {
+          setHits(hits + 1);
+          props.onToggle(props.id);
+        }}
+      >
+        {label}
+      </button>
+      {props.open && <Detail id={props.id} onLog={props.onLog} />}
+    </div>
+  );
+}
+
 function Profile(props: { user: string }) {
   const [note, setNote] = useState('');
   return (
@@ -62,6 +89,8 @@ export default function Page() {
   ]);
 
   const addLog = (line: string) => setLog((prev) => [...prev, line]);
+  const [openSection, setOpenSection] = useState('');
+  const sections = ['alpha', 'beta'];
   const remove = (id: number) => setTodos(todos.filter((t) => t.id !== id));
   const insertMiddle = () => {
     const middle = Math.floor(todos.length / 2);
@@ -153,6 +182,18 @@ export default function Page() {
         <button data-testid="user-grace" onClick={() => setUser('grace')}>grace</button>
       </div>
       <Profile key={user} user={user} />
+
+      <div data-testid="sections">
+        {sections.map((id) => (
+          <Section
+            key={id}
+            id={id}
+            open={openSection === id}
+            onToggle={(next) => setOpenSection(openSection === next ? '' : next)}
+            onLog={addLog}
+          />
+        ))}
+      </div>
 
       <ol data-testid="log" class="text-xs text-slate-500">
         {log.map((line, i) => (

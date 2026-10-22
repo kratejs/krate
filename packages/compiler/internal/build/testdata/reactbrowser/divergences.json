@@ -1,8 +1,4 @@
 {
-  "r18/app_tabs_accordion": {
-    "severity": "P0",
-    "reason": "[list-row-conditional] accordion rows inside the conditionally mounted FAQ panel keep {isOpen && <p/>} from mount: the previous answer stays open after toggling another row"
-  },
   "r18/class_pure_component": {
     "severity": "P2",
     "reason": "[render-count] PureComponent render is logged once less: Krate updates the text binding without re-running render(); DOM and state match"
@@ -18,10 +14,6 @@
   "r18/hook_useid": {
     "severity": "P2",
     "reason": "[id-format] useId strings differ (krate-1-Field-Field_c0 vs _r_0_); ids are unique and label/aria links work on both sides"
-  },
-  "r18/hook_useref_mutable": {
-    "severity": "P1",
-    "reason": "[ref-in-render] ref.current read during render is shown once and never refreshed on later renders; reported as KR5008 (keep displayed values in state)"
   },
   "r19/action_form_auto_reset": {
     "severity": "P2",

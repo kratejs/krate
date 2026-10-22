@@ -296,12 +296,15 @@ func (s *ChildrenSlot) GetID() SlotID { return "" }
 // AttrBinding - dynamic attribute: <div class={expr()}>
 type AttrBinding struct {
 	ElementSlotID SlotID
-	AttrName      string
-	SignalName    string
-	ExprSource    string
-	Initial       string
-	InitialExpr   ast.Expr
-	IsString      bool
+	// InLists names the list slots whose rows contain the element (see
+	// ComponentSignature.InLists).
+	InLists     []SlotID
+	AttrName    string
+	SignalName  string
+	ExprSource  string
+	Initial     string
+	InitialExpr ast.Expr
+	IsString    bool
 	// Prop is the JSX prop name (defaultValue, defaultChecked, ...) when it
 	// differs from AttrName, so form-control defaults bind the right property.
 	Prop string
@@ -314,6 +317,9 @@ type AttrBinding struct {
 // HandlerDecl - event handler: onClick={() => fn()}
 type HandlerDecl struct {
 	ElementSlotID SlotID
+	// InLists names the list slots whose rows contain the element (see
+	// ComponentSignature.InLists).
+	InLists []SlotID
 	// Prop is the React prop name (onClick, onChangeCapture); the runtime maps
 	// it to native events, phases and delegation.
 	Prop    string
@@ -333,6 +339,9 @@ type HandlerDecl struct {
 // Target is the JS variable expression to assign (e.g. "wrapRef").
 type RefBinding struct {
 	ElementSlotID SlotID
+	// InLists names the list slots whose rows contain the element (see
+	// ComponentSignature.InLists).
+	InLists []SlotID
 	// Target is the assignment target for object refs (`ref={myRef}` ->
 	// `myRef.current = el` or `myRef = el`). Mutually exclusive with Callback.
 	Target string

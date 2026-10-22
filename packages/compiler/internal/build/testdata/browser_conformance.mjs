@@ -300,6 +300,22 @@ try {
   }));
   if (noteSame !== "hello") fail(`keyed remount with the same key reset state: ${noteSame}`);
   if (profile.user !== "grace" || profile.note !== "") fail(`keyed remount: ${JSON.stringify(profile)}`);
+  // Conditionals inside rows mount and unmount their components (effects run
+  // per open/close) and render-derived values in rows stay live.
+  const sectionState = () =>
+    page.evaluate(() => ({
+      labels: Array.from(document.querySelectorAll("[data-section] .toggle")).map((b) => b.textContent),
+      details: Array.from(document.querySelectorAll("[data-testid=detail]")).map((d) => d.textContent),
+      log: Array.from(document.querySelectorAll("[data-testid=log] li")).map((li) => li.textContent).filter((l) => l.startsWith("detail")),
+    }));
+  await page.locator("[data-section=alpha] .toggle").click();
+  await page.waitForTimeout(50);
+  await page.locator("[data-section=beta] .toggle").click();
+  await page.waitForTimeout(50);
+  const sections = await sectionState();
+  if (sections.labels.join() !== "ALPHA x1,BETA x1") fail(`row derived labels: ${sections.labels}`);
+  if (sections.details.join() !== "details for beta") fail(`row conditional: ${sections.details}`);
+  if (sections.log.join() !== "detail open alpha,detail close alpha,detail open beta") fail(`row conditional effects: ${sections.log}`);
 
 
   // React effects: phase order, children before parents, Object.is deps,

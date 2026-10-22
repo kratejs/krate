@@ -664,6 +664,9 @@ semantics:
   (`items.map(renderRow)`) or a destructured callback parameter
   (`items.map(({ id, name }) => ...)`) receives plain values, so a row whose
   item changed is re-rendered (its state resets); prefer `item => ...`.
+- **Conditionals inside rows** (`{open === item.id && <Panel />}`) mount and
+  unmount their components (effects and cleanups run on each toggle), and
+  values a row derives from state or props stay live.
 - **Duplicate keys** log React's "Encountered two children with the same key"
   error. The first occurrence keeps its row; each duplicate gets its own row.
 - **Nested lists, text rows** (`items.map(t => t.label)`), keyed fragments, and

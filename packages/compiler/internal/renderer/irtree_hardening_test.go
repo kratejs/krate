@@ -290,8 +290,11 @@ export default function App() {
   </div>;
 }`
 	_, _, js := buildTreeReact(t, src)
-	mustContain(t, "js", js, `,()=>rm(1));`, `,()=>rm(2));`, `,()=>[9].forEach((i)=>rm(i)));`)
-	mustNotContain(t, "js", js, `,()=>rm(i.id));`)
+	// Rows are bound by the keyed list runtime: the row render reads the item
+	// through its accessor, and a nested function that rebinds the name keeps
+	// its own parameter. Rows do not also get per-item handler bindings.
+	mustContain(t, "js", js, `onClick:()=>rm(i().id)`, `onClick:()=>[9].forEach((i)=>rm(i))`)
+	mustNotContain(t, "js", js, `,()=>rm(i.id));`, `,()=>rm(1));`)
 }
 
 func TestRecursiveComponents(t *testing.T) {
