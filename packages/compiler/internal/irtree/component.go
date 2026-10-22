@@ -515,6 +515,14 @@ func (b *builder) buildComponentReturn(fn *ast.FnDecl, node *ComponentNode) {
 	}
 	for name := range b.localFuncProps {
 		forward(name)
+		// Build-time reads of the forwarded getter (`props.__krate_ctx_X()`
+		// in this component's own JSX) evaluate to the provider's initial.
+		ctx := strings.TrimPrefix(name, contextPropPrefix)
+		if initial, ok := b.contextInitials[ctx]; ok && strings.HasPrefix(name, contextPropPrefix) {
+			if _, exists := b.localProps[name]; !exists {
+				b.localProps[name] = jsvalue.Func(name, func([]jsvalue.Value) jsvalue.Value { return initial })
+			}
+		}
 	}
 	b.contextValues = childContext
 	node.Children = b.buildSlotNodes(retExpr, string(node.ID))
