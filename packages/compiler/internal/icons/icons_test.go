@@ -28,7 +28,7 @@ func TestResolveLocalIcon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveIcon: %v", err)
 	}
-	if !strings.Contains(ic.Inner, `<path d="M0 0h32v32H0z"/>`) {
+	if !strings.Contains(ic.Inner, `<path d="M0 0h32v32H0z" />`) {
 		t.Errorf("expected inner path, got %q", ic.Inner)
 	}
 	if ic.ViewBox != "0 0 32 32" {
@@ -64,7 +64,7 @@ func TestResolveRemoteIconFromCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveIcon: %v", err)
 	}
-	if !strings.Contains(ic.Inner, `<path d="M0 0h24v24H0z"/>`) {
+	if !strings.Contains(ic.Inner, `<path d="M0 0h24v24H0z" />`) {
 		t.Errorf("expected cached inner content, got %q", ic.Inner)
 	}
 }

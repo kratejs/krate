@@ -184,3 +184,7 @@ jobs:
       - name: Fuzz parser
         run: go test -fuzz=FuzzParse -fuzztime=30s -run=^$ ./internal/parser
         working-directory: packages/compiler
+
+      - name: Fuzz HTML minifier
+        run: go test -fuzz=FuzzMinifyHTML -fuzztime=30s -run=^$ ./internal/build
+        working-directory: packages/compiler
