@@ -64,6 +64,48 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	defer func() { b.currentNode = savedNode }()
 
 	node.Signals = b.collectSignalDecls(fn)
+
+	// Set the component-local signal context before collecting body uses,
+	// effects, memos and extra vars. The table holds exactly this component's
+	// own signals: a parent's (or another component's) signal of the same
+	// name is not in scope inside this component's hydration IIFE, so it must
+	// never classify this component's identifiers as reactive. The walk starts
+	// at the component top level, where no nested binding shadows anything.
+	savedLocalSignals := b.localSignals
+	savedShadow := b.shadow
+	b.shadow = nil
+	own := make(map[string]ast.Expr, len(node.Signals))
+	for _, sig := range node.Signals {
+		if sig.InitialExpr != nil {
+			own[sig.Name] = sig.InitialExpr
+		} else {
+			own[sig.Name] = &ast.Literal{Kind: ast.NullLit, Value: "undefined"}
+		}
+	}
+	// A dynamic `<Ctx.Provider value={expr}>` value is substituted for
+	// `Ctx.useContext()` reads in descendants while they are built, so the
+	// enclosing component's signals that expr reads stay resolvable (for the
+	// SSR initial value) unless this component declares its own binding of the
+	// same name. Hydration reads the value through the props registry.
+	if len(b.contextValues) > 0 && savedLocalSignals != nil {
+		ctxNames := make([]string, 0, len(b.contextValues))
+		for ctx := range b.contextValues {
+			ctxNames = append(ctxNames, ctx)
+		}
+		sort.Strings(ctxNames)
+		for _, ctx := range ctxNames {
+			scanJSIdents(generateExprJS(b.contextValues[ctx], nil), func(name string) {
+				if _, mine := own[name]; mine {
+					return
+				}
+				if init, ok := savedLocalSignals[name]; ok {
+					own[name] = init
+				}
+			})
+		}
+	}
+	b.localSignals = own
+
 	node.BodyUses = b.collectBodySignalUses(fn.Body, node.Signals)
 	savedSetters := b.signalSetters
 	b.signalSetters = make(map[string]bool, len(node.Signals))
@@ -71,25 +113,6 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 		if sig.SetterName != "" {
 			b.signalSetters[sig.SetterName] = true
 		}
-	}
-
-	// Set component-local signal context before collecting effects/memos/extra
-	// vars: component's own signals take precedence over the global annotation
-	// map so signal reads resolve to the correct initial value even with name
-	// collisions across components - and signal-referencing classifications for
-	// extra vars see the current component's signals, not just the parent's.
-	savedLocalSignals := b.localSignals
-	if len(node.Signals) > 0 {
-		merged := make(map[string]ast.Expr, len(b.ann.Signals)+len(node.Signals))
-		for k, v := range b.ann.Signals {
-			merged[k] = v
-		}
-		for _, sig := range node.Signals {
-			if sig.InitialExpr != nil {
-				merged[sig.Name] = sig.InitialExpr
-			}
-		}
-		b.localSignals = merged
 	}
 
 	// Client-only: effects, memos, extra vars
@@ -409,9 +432,17 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 		node.FuncPropAliases = append(node.FuncPropAliases, funcPropAliases...)
 	}
 
-	// Find return statement and build children
-	// Handlers are accumulated in b.pendingHandlers during this walk.
-	returnStmt := findReturnStmt(fn.Body)
+	// Find the render return (early-return guards are lowered into a
+	// conditional chain) and build children. Handlers are accumulated in
+	// b.pendingHandlers during this walk.
+	returnStmt, retIssue := lowerRenderReturn(fn.Body)
+	if retIssue != nil && !b.returnIssueReported[fn] {
+		if b.returnIssueReported == nil {
+			b.returnIssueReported = make(map[*ast.FnDecl]bool)
+		}
+		b.returnIssueReported[fn] = true
+		b.errorAt(retIssue.pos, "component <"+fn.Name+">: "+retIssue.msg, retIssue.hint)
+	}
 	if returnStmt != nil && returnStmt.Value != nil {
 		// CSS components render through the normal slot pipeline: the analyzer
 		// drives trigger/panel rewrites and the controller inputs are injected
@@ -479,6 +510,7 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	// Restore context
 	b.localFnBody = savedLocalFnBody
 	b.localSignals = savedLocalSignals
+	b.shadow = savedShadow
 	b.signalSetters = savedSetters
 	b.localProps = savedLocalProps
 	b.contextValues = savedContextValues
@@ -588,13 +620,18 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 
 	referenced := make(map[string]bool)
 	var queue []string
+	// Tokenize each code fragment once; string literals, comments and
+	// property names (`obj.helper`) never count as references.
 	scan := func(code string) {
-		for name := range candidates {
-			if !referenced[name] && codeContainsIdent(code, name) {
+		if code == "" {
+			return
+		}
+		scanJSIdents(code, func(name string) {
+			if _, ok := candidates[name]; ok && !referenced[name] {
 				referenced[name] = true
 				queue = append(queue, name)
 			}
-		}
+		})
 	}
 
 	// Always emit the component's own local function declarations. Parts of the
@@ -689,27 +726,22 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	return result
 }
 
-// codeContainsIdent reports whether code contains name as a standalone
-// identifier (not a substring of a longer identifier). Used to detect local
-// function references in generated JS like `var handler=handleClickOutside`.
+// codeContainsIdent reports whether JS code references name as an identifier.
+// Used to detect local function references in generated JS like
+// `var handler=handleClickOutside`. The scan is token-based: occurrences
+// inside string literals, template text, comments and property names
+// (`x.name`) are not references.
 func codeContainsIdent(code, name string) bool {
-	if name == "" || code == "" {
+	if name == "" || code == "" || !strings.Contains(code, name) {
 		return false
 	}
-	start := 0
-	for {
-		idx := strings.Index(code[start:], name)
-		if idx < 0 {
-			return false
+	found := false
+	scanJSIdents(code, func(word string) {
+		if word == name {
+			found = true
 		}
-		i := start + idx
-		beforeOK := i == 0 || !isIdentChar(code[i-1])
-		afterOK := i+len(name) >= len(code) || !isIdentChar(code[i+len(name)])
-		if beforeOK && afterOK {
-			return true
-		}
-		start = i + len(name)
-	}
+	})
+	return found
 }
 
 // collectHandlerLocalFunctions scans handler bodies for local function references
@@ -788,7 +820,17 @@ func (b *builder) buildSlotNodes(expr ast.Expr, parentID string) []SlotNode {
 		return nil
 	case *ast.TypeAssertion:
 		return b.buildSlotNodes(e.Expr, parentID)
+	case *ast.NewExpr, *ast.AwaitExpr, *ast.ThisExpr, *ast.DynamicImport, *ast.ImportMetaExpr:
+		// Render like the same expression in a JSX child position: folded
+		// statically when possible, otherwise a runtime expression slot.
+		return b.buildExprContainerChildrenMode(&ast.JSXExprContainer{Expression: e}, parentID, true)
+	case *ast.ObjectExpr:
+		b.errorAt(e.Position, "an object literal is rendered as JSX content, which is not valid (React rejects objects as children)",
+			"render one of its properties (e.g. {obj.label}), JSON.stringify(obj), or map it to elements")
+		return nil
 	default:
+		b.errorAt(expr.Pos(), fmt.Sprintf("this expression (%T) cannot be rendered as JSX content", expr),
+			"wrap it in a JSX expression the compiler supports, such as a string, number, element, conditional or .map() call")
 		return nil
 	}
 }
@@ -810,6 +852,9 @@ func (b *builder) buildCallExprSlots(call *ast.CallExpr, parentID string) []Slot
 // buildJSXSlot - lowercase HTML or uppercase component
 
 func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
+	if el == nil || el.Opening == nil {
+		return nil
+	}
 	// Built-in <Portal>: render children inline with a marker, then move the
 	// node to document.body on the client (see HydrationBootstrapJS).
 	if el.Opening != nil && el.Opening.Name == "Portal" {
@@ -955,12 +1000,9 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 			return slots
 		}
 		// Unknown component - render as empty span, but warn instead of failing
-		// silently. Class components get a specific, actionable message.
-		if b.ann != nil && b.ann.ClassComponents[name] {
-			b.warnings = append(b.warnings, "class component <"+name+"> is not lowered: supported state/this.props/this.setState, componentDidMount/componentWillUnmount, helper methods, arrow handlers, and instance fields; move other lifecycle, derived-state, or error-boundary logic into a function component")
-		} else {
-			b.warnings = append(b.warnings, "component <"+name+"> could not be resolved and will not render")
-		}
+		// silently. Class components get a specific, actionable message naming
+		// the unsupported member.
+		b.warnUnrenderedComponent(name, el)
 		return []SlotNode{&StaticHTML{HTML: "<span></span>"}}
 	}
 
@@ -1040,7 +1082,7 @@ func (b *builder) resolveSuspensePrimary(children []ast.JSXChild, parentID strin
 
 	for _, c := range children {
 		elc, ok := c.(*ast.JSXElementChild)
-		if !ok {
+		if !ok || elc.Element == nil || elc.Element.Opening == nil {
 			directStatic = append(directStatic, c)
 			continue
 		}
@@ -1673,6 +1715,9 @@ func (b *builder) constJSON(expr ast.Expr) string {
 // buildComponentSlot - recursive component build
 
 func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []SlotNode {
+	if el == nil || el.Opening == nil {
+		return nil
+	}
 	childName := el.Opening.Name
 	childFn := b.functions[childName]
 	if childFn == nil {
@@ -1733,6 +1778,14 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 
 	childSignals := b.collectSignalDecls(childFn)
 	attrs := extractPropsAST(el)
+
+	// Recursion guard: expanding a component that is already being expanded
+	// with the same props can never terminate (see enterExpansion).
+	leave, ok := b.enterExpansion(childFn.Name, el, attrs)
+	if !ok {
+		return []SlotNode{&StaticHTML{HTML: ""}}
+	}
+	defer leave()
 
 	// Pass active dynamic context values into the child as synthetic props so
 	// its hydration code reads them from the props registry (the parent's
@@ -2062,6 +2115,9 @@ func substitutePropExprList(list []ast.Expr, props map[string]ast.Expr) []ast.Ex
 }
 
 func substitutePropExprsJSXElement(el *ast.JSXElement, props map[string]ast.Expr) *ast.JSXElement {
+	if el == nil || el.Opening == nil {
+		return el
+	}
 	opening := &ast.JSXOpening{Name: el.Opening.Name, SelfClosing: el.Opening.SelfClosing}
 	for _, attr := range el.Opening.Attributes {
 		if attr.Spread || attr.Value == nil {
@@ -2305,7 +2361,8 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 			if _, ok := b.actionAttrURL(attr.Value); ok {
 				actionAttrs[attr] = true
 			} else if _, ok := attr.Value.(*ast.ArrowFn); ok {
-				b.warnings = append(b.warnings, "inline function passed to "+attr.Name+" was not extracted as a server action; move it to a \"use server\" module and import it")
+				b.warnAt(attr.Position, "inline function passed to "+attr.Name+" was not extracted as a server action",
+					"move it to a \"use server\" module and import it")
 			}
 		}
 	}
@@ -2943,7 +3000,7 @@ func (b *builder) propsReadsClosed(e ast.Expr) bool {
 	case *ast.Literal:
 		return true
 	case *ast.Identifier:
-		if _, ok := b.sigMap()[x.Name]; ok {
+		if ok := b.isSignalName(x.Name); ok {
 			return true
 		}
 		if _, ok := b.localProps[x.Name]; ok {
@@ -2997,7 +3054,7 @@ func (b *builder) testFullyKnown(e ast.Expr) bool {
 	case *ast.Literal:
 		return true
 	case *ast.Identifier:
-		if _, ok := b.sigMap()[x.Name]; ok {
+		if ok := b.isSignalName(x.Name); ok {
 			return true
 		}
 		if _, ok := b.localProps[x.Name]; ok {
@@ -3009,7 +3066,7 @@ func (b *builder) testFullyKnown(e ast.Expr) bool {
 		return false
 	case *ast.CallExpr:
 		if id, ok := x.Callee.(*ast.Identifier); ok {
-			if _, ok := b.sigMap()[id.Name]; ok {
+			if ok := b.isSignalName(id.Name); ok {
 				return true
 			}
 			// Pure built-in constructors: String(), Number(), Boolean()
@@ -3231,12 +3288,26 @@ func (b *builder) tryResolveArrayItems(arr *ast.ArrayExpr, mapExpr ast.Expr, lis
 	var items []*ListItem
 	for i, elem := range arr.Elements {
 		key := itoa(i)
-		concrete := substituteListParam(bodyExpr, paramName, elem)
-		if indexName != "" {
-			concrete = substituteListParam(concrete, indexName, &ast.Literal{Position: elem.Pos(), Kind: ast.NumberLit, Value: itoa(i)})
+		if elem == nil {
+			// An array hole (`[a, , b]`) maps like undefined.
+			elem = &ast.Literal{Position: arr.Position, Kind: ast.NullLit, Value: "undefined"}
 		}
+		concrete := substituteListParam(bodyExpr, paramName, elem)
+		var index ast.Expr
+		if indexName != "" {
+			index = &ast.Literal{Position: elem.Pos(), Kind: ast.NumberLit, Value: itoa(i)}
+			concrete = substituteListParam(concrete, indexName, index)
+		}
+		// A block-bodied callback (`x => { const label = x.name; return
+		// <li>{label}</li>; }`) declares locals the rendered body reads:
+		// simple const locals are substituted (innermost last, so a later
+		// local may read an earlier one); any other local shadows component
+		// bindings of the same name while the item is built.
+		concrete = substituteCallbackLocals(arrow, concrete, paramName, elem, indexName, index)
 		itemID := joinSlotIDKey(SlotID(listID), key)
+		restore := b.pushShadow(blockBindingNames(arrow.Body))
 		contents := b.buildSlotNodes(concrete, string(itemID))
+		restore()
 		if len(contents) == 0 {
 			contents = []SlotNode{&StaticHTML{HTML: ""}}
 		}
@@ -3246,6 +3317,46 @@ func (b *builder) tryResolveArrayItems(arr *ast.ArrayExpr, mapExpr ast.Expr, lis
 		})
 	}
 	return items
+}
+
+// substituteCallbackLocals substitutes the simple `const name = init` locals a
+// block-bodied map callback declares before its return into the rendered
+// body. Each init has the loop parameter (and index) substituted first.
+func substituteCallbackLocals(arrow *ast.ArrowFn, body ast.Expr, param string, elem ast.Expr, indexName string, index ast.Expr) ast.Expr {
+	if arrow == nil || arrow.Expression {
+		return body
+	}
+	type local struct {
+		name string
+		init ast.Expr
+	}
+	var locals []local
+	for _, stmt := range arrow.Body {
+		if _, ok := stmt.(*ast.ReturnStmt); ok {
+			break
+		}
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok || vs.Kind != ast.VarConst {
+			continue
+		}
+		for _, d := range vs.Decls {
+			if d == nil || d.IsDestructuring || d.Name == "" || d.Init == nil {
+				continue
+			}
+			init := substituteListParam(d.Init, param, elem)
+			if index != nil {
+				init = substituteListParam(init, indexName, index)
+			}
+			for _, prev := range locals {
+				init = substituteListParam(init, prev.name, prev.init)
+			}
+			locals = append(locals, local{name: d.Name, init: init})
+		}
+	}
+	for i := len(locals) - 1; i >= 0; i-- {
+		body = substituteListParam(body, locals[i].name, locals[i].init)
+	}
+	return body
 }
 
 // substituteListParam returns a deep clone of body with every reference to the
@@ -3285,7 +3396,13 @@ func (s *listParamSubstituter) sub(expr ast.Expr) ast.Expr {
 		}
 		return &ast.MemberExpr{Position: e.Position, Object: obj, Property: e.Property, Computed: e.Computed, Optional: e.Optional}
 	case *ast.CallExpr:
-		return &ast.CallExpr{Position: e.Position, Callee: s.sub(e.Callee), Args: subExprList(s, e.Args)}
+		return &ast.CallExpr{Position: e.Position, Callee: s.sub(e.Callee), Args: subExprList(s, e.Args), Optional: e.Optional}
+	case *ast.NewExpr:
+		return &ast.NewExpr{Position: e.Position, Callee: s.sub(e.Callee), Args: subExprList(s, e.Args)}
+	case *ast.AwaitExpr:
+		return &ast.AwaitExpr{Position: e.Position, Arg: s.sub(e.Arg)}
+	case *ast.DynamicImport:
+		return &ast.DynamicImport{Position: e.Position, Arg: s.sub(e.Arg)}
 	case *ast.BinaryExpr:
 		return &ast.BinaryExpr{Position: e.Position, Left: s.sub(e.Left), Op: e.Op, Right: s.sub(e.Right)}
 	case *ast.UnaryExpr:
@@ -3307,12 +3424,131 @@ func (s *listParamSubstituter) sub(expr ast.Expr) ast.Expr {
 	case *ast.JSXFragment:
 		return &ast.JSXFragment{Position: e.Position, Children: subJSXChildrenList(s, e.Children)}
 	case *ast.ArrowFn:
-		return e // map bodies are expressions; nested arrows capture their own scope
+		// A nested function (e.g. `onClick={() => rm(item.id)}`) closes over
+		// the loop parameter, which no longer exists once the item is
+		// rendered on its own, so it is substituted too - unless the function
+		// rebinds the name (a parameter or local of the same name).
+		if bindingScopeDeclares(functionScopeNames(e.Params, e.Body), s.param) {
+			return e
+		}
+		return &ast.ArrowFn{Position: e.Position, Params: e.Params, Body: s.subStmts(e.Body), Expression: e.Expression, Async: e.Async}
 	case *ast.TypeAssertion:
 		return &ast.TypeAssertion{Position: e.Position, Expr: s.sub(e.Expr), TypeRef: e.TypeRef}
 	default:
 		return expr
 	}
+}
+
+// subStmts substitutes the loop parameter in a nested function body,
+// stopping at nested scopes that rebind it.
+func (s *listParamSubstituter) subStmts(stmts []ast.Stmt) []ast.Stmt {
+	if len(stmts) == 0 {
+		return stmts
+	}
+	out := make([]ast.Stmt, len(stmts))
+	for i, stmt := range stmts {
+		out[i] = s.subStmt(stmt)
+	}
+	return out
+}
+
+func (s *listParamSubstituter) subStmt(stmt ast.Stmt) ast.Stmt {
+	switch st := stmt.(type) {
+	case *ast.ExprStmt:
+		return &ast.ExprStmt{Position: st.Position, Expression: s.sub(st.Expression)}
+	case *ast.ReturnStmt:
+		return &ast.ReturnStmt{Position: st.Position, Value: s.sub(st.Value)}
+	case *ast.ThrowStmt:
+		return &ast.ThrowStmt{Position: st.Position, Value: s.sub(st.Value)}
+	case *ast.VarStmt:
+		decls := make([]*ast.VarDecl, len(st.Decls))
+		for i, d := range st.Decls {
+			if d == nil {
+				continue
+			}
+			cp := *d
+			cp.Init = s.sub(d.Init)
+			decls[i] = &cp
+		}
+		return &ast.VarStmt{Position: st.Position, Kind: st.Kind, Decls: decls}
+	case *ast.IfStmt:
+		return &ast.IfStmt{Position: st.Position, Test: s.sub(st.Test), Consequent: s.subBlock(st.Consequent), Alternate: s.subBlock(st.Alternate)}
+	case *ast.BlockStmt:
+		return &ast.BlockStmt{Position: st.Position, Body: s.subBlock(st.Body)}
+	case *ast.WhileStmt:
+		return &ast.WhileStmt{Position: st.Position, Test: s.sub(st.Test), Body: s.subBlock(st.Body)}
+	case *ast.DoWhileStmt:
+		return &ast.DoWhileStmt{Position: st.Position, Body: s.subBlock(st.Body), Test: s.sub(st.Test)}
+	case *ast.ForInStmt:
+		cp := *st
+		cp.Right = s.sub(st.Right)
+		if !bindingScopeDeclares(forInBindingNames(st), s.param) {
+			cp.Body = s.subBlock(st.Body)
+		}
+		return &cp
+	case *ast.ForStmt:
+		if vs, ok := st.Init.(*ast.VarStmt); ok && vs.Kind != ast.VarVar {
+			for _, d := range vs.Decls {
+				if bindingScopeDeclares(varDeclBindingNames(d), s.param) {
+					return st
+				}
+			}
+		}
+		cp := *st
+		if st.Init != nil {
+			cp.Init = s.subStmt(st.Init)
+		}
+		cp.Test = s.sub(st.Test)
+		cp.Update = s.sub(st.Update)
+		cp.Body = s.subBlock(st.Body)
+		return &cp
+	case *ast.SwitchStmt:
+		cases := make([]*ast.CaseClause, len(st.Cases))
+		for i, c := range st.Cases {
+			if c == nil {
+				continue
+			}
+			cases[i] = &ast.CaseClause{Position: c.Position, Test: s.sub(c.Test), Body: s.subBlock(c.Body)}
+		}
+		return &ast.SwitchStmt{Position: st.Position, Discriminant: s.sub(st.Discriminant), Cases: cases}
+	case *ast.TryStmt:
+		cp := *st
+		cp.Body = s.subBlock(st.Body)
+		cp.Finally = s.subBlock(st.Finally)
+		if st.Catch != nil && !bindingScopeDeclares(catchBindingNames(st.Catch), s.param) {
+			c := *st.Catch
+			c.Body = s.subBlock(st.Catch.Body)
+			cp.Catch = &c
+		}
+		return &cp
+	case *ast.FnDecl:
+		if bindingScopeDeclares(functionScopeNames(st.Params, st.Body), s.param) {
+			return st
+		}
+		cp := *st
+		cp.Body = s.subStmts(st.Body)
+		return &cp
+	}
+	// Statements the substituter does not model (for loops with their own
+	// bindings, labels, ...) are kept as-is.
+	return stmt
+}
+
+// subBlock substitutes a nested block unless it declares the parameter name.
+func (s *listParamSubstituter) subBlock(stmts []ast.Stmt) []ast.Stmt {
+	if bindingScopeDeclares(blockBindingNames(stmts), s.param) {
+		return stmts
+	}
+	return s.subStmts(stmts)
+}
+
+func bindingScopeDeclares(names []string, name string) bool {
+	for _, n := range names {
+		if n == name {
+			return true
+		}
+	}
+	return false
 }
 
 func subExprList(s *listParamSubstituter, list []ast.Expr) []ast.Expr {
@@ -3341,6 +3577,9 @@ func subJSXChildrenList(s *listParamSubstituter, children []ast.JSXChild) []ast.
 }
 
 func substituteListParamJSX(el *ast.JSXElement, s *listParamSubstituter) *ast.JSXElement {
+	if el == nil || el.Opening == nil {
+		return el
+	}
 	opening := &ast.JSXOpening{Name: el.Opening.Name, SelfClosing: el.Opening.SelfClosing}
 	for _, attr := range el.Opening.Attributes {
 		if attr.Spread || attr.Value == nil {
@@ -3452,7 +3691,7 @@ func collectListComponents(expr ast.Expr) []string {
 				}
 			}
 		case *ast.JSXElement:
-			if len(v.Opening.Name) > 0 && v.Opening.Name[0] >= 'A' && v.Opening.Name[0] <= 'Z' {
+			if v.Opening != nil && len(v.Opening.Name) > 0 && v.Opening.Name[0] >= 'A' && v.Opening.Name[0] <= 'Z' {
 				if !seen[v.Opening.Name] {
 					seen[v.Opening.Name] = true
 					names = append(names, v.Opening.Name)
@@ -3604,11 +3843,20 @@ func (b *builder) buildStaticTextSlot(expr ast.Expr, parentID string) *StaticHTM
 
 // Signal resolution helpers
 
+// setterNameFor derives the conventional setter name (`count` gives
+// `setCount`); an empty name has no setter.
+func setterNameFor(name string) string {
+	if name == "" {
+		return ""
+	}
+	return "set" + strings.ToUpper(name[:1]) + name[1:]
+}
+
 func (b *builder) resolveSignal(name string) SignalDecl {
 	if initial, ok := b.sigMap()[name]; ok {
 		return SignalDecl{
 			Name:        name,
-			SetterName:  "set" + strings.ToUpper(name[:1]) + name[1:],
+			SetterName:  setterNameFor(name),
 			Initial:     evalConst(initial),
 			IsString:    isStringType(initial, b.sigMap()),
 			InitialExpr: initial,
@@ -3623,11 +3871,10 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 	}
 	switch e := expr.(type) {
 	case *ast.Identifier:
-		_, ok := b.sigMap()[e.Name]
-		return ok
+		return b.isSignalName(e.Name)
 	case *ast.CallExpr:
 		if id, ok := e.Callee.(*ast.Identifier); ok {
-			if _, ok := b.sigMap()[id.Name]; ok {
+			if ok := b.isSignalName(id.Name); ok {
 				return true
 			}
 		}
@@ -3663,7 +3910,10 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 	case *ast.ArrowFn:
 		// Arrow bodies execute immediately in some positions (e.g. inside
 		// createMemo(() => count() * 2) or createEffect), so a signal read
-		// inside the thunk matters for dependency ordering.
+		// inside the thunk matters for dependency ordering. Parameters and
+		// body-level declarations shadow component signals of the same name
+		// (`items.map(count => count)` does not read a `count` signal).
+		defer b.pushShadow(functionScopeNames(e.Params, e.Body))()
 		for _, s := range e.Body {
 			if stmtReferenceSignal(s, b) {
 				return true
@@ -4024,7 +4274,7 @@ func (b *builder) collectBodySignalUses(body []ast.Stmt, decls []SignalDecl) []s
 		switch v := e.(type) {
 		case *ast.CallExpr:
 			if id, ok := v.Callee.(*ast.Identifier); ok {
-				if _, isSig := b.sigMap()[id.Name]; isSig {
+				if isSig := b.isSignalName(id.Name); isSig {
 					mark(id.Name) // signalName() read
 				} else if sigName := setterToSignal[id.Name]; sigName != "" {
 					mark(sigName) // setSignalName() write
@@ -4051,7 +4301,9 @@ func (b *builder) collectBodySignalUses(body []ast.Stmt, decls []SignalDecl) []s
 				walkExpr(p)
 			}
 		case *ast.ArrowFn:
+			restore := b.pushShadow(functionScopeNames(v.Params, v.Body))
 			walkStmt(v.Body)
+			restore()
 		case *ast.AwaitExpr:
 			walkExpr(v.Arg)
 		case *ast.DynamicImport:
@@ -4141,7 +4393,9 @@ func (b *builder) collectBodySignalUses(body []ast.Stmt, decls []SignalDecl) []s
 			case *ast.ThrowStmt:
 				walkExpr(s.Value)
 			case *ast.FnDecl:
+				restore := b.pushShadow(functionScopeNames(s.Params, s.Body))
 				walkStmt(s.Body)
+				restore()
 			}
 		}
 	}
@@ -4352,6 +4606,13 @@ func (b *builder) collectExtraVarJS(body []ast.Stmt) (pre, post []string) {
 		switch s := stmt.(type) {
 		case *ast.VarStmt:
 			for _, decl := range s.Decls {
+				if decl.Init == nil && !decl.IsDestructuring && decl.Name != "" && decl.Name != "children" {
+					// `let timer;` has no value to fold, but handlers and
+					// effects may assign it, so it must still be declared in
+					// the hydration scope.
+					pre = append(pre, "var "+decl.Name)
+					continue
+				}
 				if decl.Init != nil {
 					// useId() is resolved to a per-instance literal by the
 					// caller (collectLocalVars) and emitted from there, so it is
@@ -4481,6 +4742,7 @@ func stmtReferenceSignal(stmt ast.Stmt, b *builder) bool {
 			}
 		}
 	case *ast.BlockStmt:
+		defer b.pushShadow(blockBindingNames(s.Body))()
 		if stmtsReferenceSignal(s.Body, b) {
 			return true
 		}
@@ -4492,11 +4754,22 @@ func stmtReferenceSignal(stmt ast.Stmt, b *builder) bool {
 		if s.Init != nil && stmtReferenceSignal(s.Init, b) {
 			return true
 		}
+		if vs, ok := s.Init.(*ast.VarStmt); ok && vs.Kind != ast.VarVar {
+			var names []string
+			for _, d := range vs.Decls {
+				names = append(names, varDeclBindingNames(d)...)
+			}
+			defer b.pushShadow(names)()
+		}
 		if b.referencesSignal(s.Test) || b.referencesSignal(s.Update) || stmtsReferenceSignal(s.Body, b) {
 			return true
 		}
 	case *ast.ForInStmt:
-		if b.referencesSignal(s.Right) || stmtsReferenceSignal(s.Body, b) {
+		if b.referencesSignal(s.Right) {
+			return true
+		}
+		defer b.pushShadow(forInBindingNames(s))()
+		if stmtsReferenceSignal(s.Body, b) {
 			return true
 		}
 	case *ast.WhileStmt:
@@ -4520,8 +4793,13 @@ func stmtReferenceSignal(stmt ast.Stmt, b *builder) bool {
 		if stmtsReferenceSignal(s.Body, b) || stmtsReferenceSignal(s.Finally, b) {
 			return true
 		}
-		if s.Catch != nil && stmtsReferenceSignal(s.Catch.Body, b) {
-			return true
+		if s.Catch != nil {
+			restore := b.pushShadow(catchBindingNames(s.Catch))
+			hit := stmtsReferenceSignal(s.Catch.Body, b)
+			restore()
+			if hit {
+				return true
+			}
 		}
 	case *ast.ExprStmt:
 		if b.referencesSignal(s.Expression) {
@@ -4553,7 +4831,7 @@ func (b *builder) collectSignalReads(expr ast.Expr) []string {
 		}
 		switch v := e.(type) {
 		case *ast.Identifier:
-			if _, ok := b.sigMap()[v.Name]; ok && !seen[v.Name] {
+			if ok := b.isSignalName(v.Name); ok && !seen[v.Name] {
 				seen[v.Name] = true
 				reads = append(reads, v.Name)
 			}
@@ -4591,11 +4869,13 @@ func (b *builder) collectSignalReads(expr ast.Expr) []string {
 				walkJSXChild(child)
 			}
 		case *ast.ArrowFn:
+			restore := b.pushShadow(functionScopeNames(v.Params, v.Body))
 			for _, stmt := range v.Body {
 				if ret, ok := stmt.(*ast.ReturnStmt); ok {
 					walk(ret.Value)
 				}
 			}
+			restore()
 		}
 	}
 	walkJSXChild = func(child ast.JSXChild) {
@@ -4636,15 +4916,41 @@ func (b *builder) extractHandlerBody(expr ast.Expr) string {
 		if _, ok := b.functions[e.Name]; ok && !b.ann.UsedComponents[e.Name] {
 			return e.Name
 		}
-		return ""
+		// Any other binding (an imported function, a module const, a
+		// destructured prop): resolve it when the event fires. `typeof` keeps
+		// an unbound name from throwing, and a non-function value is ignored
+		// the way React ignores it.
+		return "function(e){if(typeof " + e.Name + "===\"function\")return " + e.Name + ".call(this,e);}"
 	case *ast.MemberExpr:
 		// A function prop forwarded directly, e.g. onClick={props.onClick}.
 		// Render it as a live reference resolved through the child's props
 		// object (var props = __krate_props[...]) at hydration time.
 		return generateExprJS(e, b.sigMap())
+	case *ast.TypeAssertion:
+		return b.extractHandlerBody(e.Expr)
+	case nil:
+		return ""
 	default:
+		return b.guardedHandlerJS(expr)
+	}
+}
+
+// guardedHandlerJS emits a handler for an arbitrary function-valued
+// expression (`flag ? a : b`, `makeHandler(id)`, `handlers[kind]`). An
+// expression that reads signals is evaluated on every event so it sees the
+// current state; any other expression is evaluated once when the handler is
+// bound (so `debounce(fn)` keeps one debounced instance, as in React). The
+// result is invoked only when it is a function.
+func (b *builder) guardedHandlerJS(expr ast.Expr) string {
+	js := generateExprJS(expr, b.sigMap())
+	if js == "" {
 		return ""
 	}
+	const call = "if(typeof __h===\"function\")return __h.call(this,e);"
+	if b.referencesSignal(expr) {
+		return "function(e){var __h=(" + js + ");" + call + "}"
+	}
+	return "(function(){var __h=(" + js + ");return function(e){" + call + "};})()"
 }
 
 // findLocalFunction finds a function declaration by name in the given body.
@@ -4803,12 +5109,22 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		)
 	}
 	if len(b.localImports) > 0 {
+		locals := make([]string, 0, len(b.localImports))
 		for local := range b.localImports {
+			locals = append(locals, local)
+		}
+		sort.Strings(locals)
+		for _, local := range locals {
 			// Only a local component used as a tag is a problem. A member such
 			// as `DropdownMenu.Label` also contains the identifier text "Label",
 			// so require a tag position (`<Label`).
 			if strings.Contains(subtree, "<"+local) && containsIdentifier(subtree, local) {
-				b.warnings = append(b.warnings, "external island for <"+root+"> references local component <"+local+">, which is not bundled into the island (use a plain element or an external package)")
+				pos := el.Position
+				if inner := findJSXElementNamed(el, local); inner != nil {
+					pos = inner.Position
+				}
+				b.warnAt(pos, "external island for <"+root+"> references local component <"+local+">, which is not bundled into the island",
+					"use a plain element or a component from an external package inside <"+root+">, or move <"+local+"> outside the island")
 			}
 		}
 	}
@@ -4960,7 +5276,7 @@ func (b *builder) bridgeIslandFragment(frag *ast.JSXFragment, used map[string]bo
 func (b *builder) bridgeScopeExpr(expr ast.Expr, used map[string]bool) ast.Expr {
 	switch e := expr.(type) {
 	case *ast.Identifier:
-		if _, ok := b.sigMap()[e.Name]; ok {
+		if ok := b.isSignalName(e.Name); ok {
 			used[e.Name] = true
 			return &ast.MemberExpr{Object: &ast.Identifier{Name: "props"}, Property: &ast.Identifier{Name: e.Name}}
 		}
@@ -4973,7 +5289,7 @@ func (b *builder) bridgeScopeExpr(expr ast.Expr, used map[string]bool) ast.Expr 
 		}
 	case *ast.CallExpr:
 		if id, ok := e.Callee.(*ast.Identifier); ok && len(e.Args) == 0 {
-			if _, sig := b.sigMap()[id.Name]; sig {
+			if sig := b.isSignalName(id.Name); sig {
 				used[id.Name] = true
 				return &ast.MemberExpr{Object: &ast.Identifier{Name: "props"}, Property: &ast.Identifier{Name: id.Name}}
 			}
@@ -5092,6 +5408,9 @@ func hasComponentChildren(children []ast.JSXChild) bool {
 	for _, child := range children {
 		switch c := child.(type) {
 		case *ast.JSXElementChild:
+			if c.Element == nil || c.Element.Opening == nil {
+				continue
+			}
 			name := c.Element.Opening.Name
 			if name != "" && name[0] >= 'A' && name[0] <= 'Z' && !isNonClientBuiltinTag(name) {
 				return true

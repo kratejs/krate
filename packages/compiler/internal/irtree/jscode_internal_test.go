@@ -83,7 +83,7 @@ func TestCodegenIssuesCleanForSupportedConstructs(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected FnDecl, got %T", prog.Body[0])
 	}
-	if issues := codegenIssues(fn); len(issues) > 0 {
+	if issues := codegenIssues(fn, nil); len(issues) > 0 {
 		t.Errorf("unexpected codegen issues for supported constructs: %v", issues)
 	}
 }
