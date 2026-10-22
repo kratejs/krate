@@ -313,8 +313,8 @@ type builder struct {
 	slotIDMap      map[string]SlotID // logical ID -> compact ID
 	slotCounts     map[string]int    // per-parent dynamic-slot counters for sibling disambiguation
 	// elementCounts is the per-parent tag counter for sibling disambiguation.
-	// buildComponentNode gives each child a fresh map and restores the
-	// caller's afterwards, so siblings after a child keep counting.
+	// A component's walk clears it on entry and restores the caller's counts
+	// on exit, so siblings after a child component keep unique IDs.
 	elementCounts    map[string]int
 	moduleConsts     valueMap                  // module-level const values (name -> folded value)
 	moduleConstInits map[string]ast.Expr       // module-level const initializers (name -> expr)
@@ -334,8 +334,10 @@ type builder struct {
 	warnings         []diag.Diagnostic         // non-fatal, positioned build warnings
 	// snapshotPropWarned dedupes snapshot-prop warnings per component and props.
 	snapshotPropWarned map[string]bool
-	markupErrs         []error    // invalid tag/attribute names, children on void elements
-	selectStack        [][]string // selected option values of enclosing <select> elements
+	// eventDiagSeen dedupes event/form/ref warnings per source position.
+	eventDiagSeen map[string]bool
+	markupErrs    []error    // invalid tag/attribute names, children on void elements
+	selectStack   [][]string // selected option values of enclosing <select> elements
 
 	// cssIndex assigns stable, page-unique indices to (component, var) scope
 	// pairs so classes/CSS are deterministic across builds.

@@ -205,6 +205,71 @@ try {
   await page.locator("[data-testid=store-bump]").click();
   await page.locator("[data-testid=store-bump]").click();
   await waitText("store-value", "2");
+  // React events, forms and refs: delegation order, native interleaving,
+  // controlled restore, enter/leave, focus bubbling, refs and handles.
+  await go("/react-events/", "[data-testid=order-button]");
+  await page.waitForTimeout(100);
+  const eventLog = () => page.locator("[data-testid=event-log]").textContent();
+  await page.locator("[data-testid=clear-log]").click();
+  await page.locator("[data-testid=order-button]").click();
+  const order = await eventLog();
+  const wantOrder =
+    "outer-capture;middle-capture;native-inner;button:click:self;middle-bubble;outer-bubble;native-document;";
+  if (order !== wantOrder) fail(`event order: ${order}`);
+  await page.locator("[data-testid=stop-toggle]").check();
+  await page.locator("[data-testid=clear-log]").click();
+  await page.locator("[data-testid=order-button]").click();
+  const stopped = await eventLog();
+  if (stopped !== "outer-capture;middle-capture;native-inner;button:click:self;") fail(`stopPropagation order: ${stopped}`);
+
+  await page.locator("[data-testid=upper]").fill("ab");
+  const upper = await page.locator("[data-testid=upper]").inputValue();
+  if (upper !== "AB") fail(`controlled transform: ${upper}`);
+  await page.locator("[data-testid=locked]").pressSequentially("xyz");
+  const locked = await page.locator("[data-testid=locked]").inputValue();
+  if (locked !== "locked") fail(`controlled restore: ${locked}`);
+  await page.locator("[data-testid=agree]").click();
+  if (await page.locator("[data-testid=agree]").isChecked()) fail("controlled checkbox was not restored");
+
+  const hoverCount = async () => Number(await page.locator("[data-testid=hover-count]").textContent());
+  await page.locator("[data-testid=hover-box]").scrollIntoViewIfNeeded();
+  await page.mouse.move(0, 0);
+  const hover0 = await hoverCount();
+  const box = await page.locator("[data-testid=hover-box]").boundingBox();
+  await page.mouse.move(box.x + 5, box.y + box.height / 2);
+  const hover1 = await hoverCount();
+  await page.mouse.move(0, 0);
+  const hover2 = await hoverCount();
+  if (hover1 !== hover0 + 1 || hover2 !== hover1 + 10) fail(`mouseenter/mouseleave: ${hover0} -> ${hover1} -> ${hover2}`);
+
+  await page.locator("[data-testid=ref-input]").click();
+  await page.locator("[data-testid=other-input]").click();
+  const focusLog = await page.locator("[data-testid=focus-log]").textContent();
+  if (focusLog !== "focus:ref-input;blur:ref-input;focus:other-input;") fail(`focus bubbling: ${focusLog}`);
+  await page.locator("[data-testid=focus-ref]").click();
+  const focused = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
+  if (focused !== "ref-input") fail(`ref as prop focus: ${focused}`);
+  const layoutSaw = await page.locator("[data-testid=layout-saw]").textContent();
+  if (layoutSaw !== "INPUT") fail(`layout effect saw ref: ${layoutSaw}`);
+
+  await page.locator("[data-testid=bump]").click();
+  const handleCount = await page.locator("[data-testid=handle-count]").textContent();
+  if (handleCount !== "1") fail(`useImperativeHandle: ${handleCount}`);
+
+  const refLog = () => page.locator("[data-testid=ref-log]").textContent();
+  const refInitial = await refLog();
+  await page.locator("[data-testid=toggle-ref]").click();
+  const refHidden = await refLog();
+  await page.locator("[data-testid=toggle-ref]").click();
+  const refShown = await refLog();
+  if (refInitial !== "attach:EM;" || refHidden !== "attach:EM;cleanup;" || refShown !== "attach:EM;cleanup;attach:EM;") {
+    fail(`callback ref cleanup: ${refInitial} / ${refHidden} / ${refShown}`);
+  }
+
+  await page.locator("[data-testid=uncontrolled]").fill("changed");
+  await page.locator("[data-testid=reset]").click();
+  const resetValue = await page.locator("[data-testid=uncontrolled]").inputValue();
+  if (resetValue !== "start") fail(`form reset: ${resetValue}`);
 
   if (errors.length) fail("console errors: " + errors.join(" | "));
 

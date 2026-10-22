@@ -18,7 +18,9 @@
  * minimal.
  */
 import { h, type Component } from './dom.js';
-import { createSignal, createEffect } from './signal.js';
+import { createSignal, createEffect, onCleanup } from './signal.js';
+import { krateSetRef, type KrateRef } from './refs.js';
+import { krateEventRoot } from './events.js';
 import { createContext as krateCreateContext } from './context.js';
 import { cloneElement as krateCloneElement } from './class-helpers.js';
 import { jsx as krateJsx } from './jsx-runtime.js';
@@ -366,11 +368,33 @@ export function useEffect(effect: () => void | (() => void), _deps?: unknown[]):
 export const useLayoutEffect = useEffect;
 export const useInsertionEffect = useEffect;
 
-export function useImperativeHandle<T>(ref: RefObject<T> | ((v: T) => void) | null, create: () => T): void {
-  if (!ref) return;
-  const value = create();
-  if (typeof ref === 'function') ref(value);
-  else ref.current = value;
+/**
+ * Attaches the handle returned by `create` to `ref` (object or callback ref,
+ * with React 19 callback cleanup) and detaches it on unmount. With a deps
+ * array (or deps thunk) the handle is re-created only when a dependency changes.
+ */
+export function useImperativeHandle<T>(
+  ref: RefObject<T> | ((v: T | null) => unknown) | null | undefined,
+  create: () => T,
+  deps?: unknown[] | (() => unknown[])
+): void {
+  const readDeps = typeof deps === 'function' ? deps : deps ? () => deps : null;
+  let prev: unknown[] | null = null;
+  let undo: (() => void) | null = null;
+  const run = (): void => {
+    if (undo) undo();
+    undo = ref ? krateSetRef(ref as KrateRef, create()) : null;
+  };
+  createEffect(() => {
+    const next = readDeps ? readDeps() : null;
+    if (prev && next && next.length === prev.length && next.every((v, i) => Object.is(v, prev![i]))) return;
+    prev = next;
+    run();
+  });
+  onCleanup(() => {
+    if (undo) undo();
+    undo = null;
+  });
 }
 
 export function useDebugValue(_value?: unknown): void {
@@ -471,6 +495,9 @@ export function flushSync<T>(fn: () => T): T {
 }
 
 export function createPortal(children: unknown, container: Element | DocumentFragment): Element | DocumentFragment {
+  // Handlers inside a portal outside the app root still need delegation.
+  const root = typeof document !== 'undefined' ? document.getElementById('root') : null;
+  if (container.nodeType === 1 && !(root && root.contains(container))) krateEventRoot(container);
   if (children instanceof Node) container.appendChild(children);
   else if (Array.isArray(children)) {
     for (const child of children) {
