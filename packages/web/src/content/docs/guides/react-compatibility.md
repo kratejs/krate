@@ -100,13 +100,105 @@ export default function Counter() {
 | `useOptimistic` / `useActionState` / `useFormStatus` | React 19 compat shims |
 | `StrictMode` / `Profiler` | pass-through |
 
-Class components that follow the common subset are lowered to functions:
-`state` (field or constructor), `render`, `this.state.x`, `this.props.x`,
-`this.setState` (object or updater), `componentDidMount`,
-`componentDidUpdate` (state diff), `componentWillUnmount`, `forceUpdate`,
-helper methods, arrow-function handlers, and instance fields. Unsupported
-lifecycle hooks (`shouldComponentUpdate`, `getSnapshotBeforeUpdate`, derived
-state, and error boundaries) produce a specific build diagnostic.
+### Class components
+
+Classes extending `Component` or `PureComponent` are lowered at build time:
+`render()` becomes the component body (so the page is rendered to HTML at
+build time), and a small runtime instance provides `this`. The semantics
+follow React 18:
+
+- **Updates are batched.** `this.setState(partial | updater, callback)` and
+  `this.forceUpdate(callback)` queue an update; `this.state` changes when it
+  commits. Updaters run in order with `(state, props)`.
+- **Render and commit phases.** An update recomputes props and state,
+  applies `static getDerivedStateFromProps(props, state)` (also before the
+  first render), asks `shouldComponentUpdate(nextProps, nextState)` (or
+  compares shallowly for `PureComponent`), calls
+  `getSnapshotBeforeUpdate(prevProps, prevState)` before the DOM changes,
+  then writes the DOM. `componentDidUpdate(prevProps, prevState, snapshot)`
+  and setState callbacks run after the DOM is updated, children before
+  parents. A skipped update still updates `this.props`/`this.state` and runs
+  the callbacks, as in React.
+- **Props are live.** A parent's state change reaches `this.props` and
+  triggers `componentDidUpdate`. A class re-renders when the component that
+  created it re-renders (unless it bails out), but not when it was passed in
+  as `props.children`.
+- **Mounting follows conditionals.** A class inside `{show ? <Child/> : null}`
+  mounts when the branch is shown and unmounts (`componentWillUnmount`,
+  parent first) when it is hidden; showing it again creates a fresh instance
+  with fresh state. Components in an initially hidden branch do not mount
+  until it is shown.
+- **Also supported:** `static defaultProps`, `static contextType` with
+  `this.context`, getters and setters, private `#members`, class fields and
+  arrow handlers, instance fields assigned in any method (`this.timer = ...`),
+  `componentWillReceiveProps` / `componentWillUpdate` and their `UNSAFE_`
+  forms (skipped when `getDerivedStateFromProps` or `getSnapshotBeforeUpdate`
+  is defined, as in React), and refs: `<MyClass ref={r}/>` sets `r.current` to
+  the instance (with its public methods) after `componentDidMount` and to
+  `null` before `componentWillUnmount`.
+- **Render locals stay reactive.** `const { count } = this.state` and other
+  render locals derived from state or props are recomputed by every binding.
+
+Rejected with a coded warning (the component renders nothing):
+`UNSAFE_componentWillMount` (KR3005), legacy `contextTypes` (KR3006), other
+static members and static blocks (KR3003), computed member names (KR3004),
+`this` inside a static lifecycle (KR3007), and `this.<name>` reads of
+properties nothing defines, such as string refs (KR3002).
+
+Pages that render a class component hydrate through an owner tree (one owner
+per component instance). The same pages get React's mount/unmount behavior
+for function components in conditional branches.
+
+React's `Component`/`PureComponent` from `@krate/runtime/react`, rendered with
+`createElement` at runtime, use the same instance controller. Compiled npm
+packages run on Preact inside islands and keep Preact's class semantics.
+
+### Error boundaries
+
+A class with `static getDerivedStateFromError(error)` and/or
+`componentDidCatch(error, info)` is an error boundary:
+
+```tsx
+class ErrorBoundary extends Component {
+  state = { error: null };
+  static getDerivedStateFromError(error) { return { error: error.message }; }
+  componentDidCatch(error, info) { report(error, info.componentStack); }
+  render() {
+    if (this.state.error) {
+      return <button onClick={() => this.setState({ error: null })}>Try again</button>;
+    }
+    return this.props.children;
+  }
+}
+```
+
+- **What is caught** mirrors React: errors thrown by descendants while they
+  hydrate, while a binding re-renders, in a render-time guard
+  (`if (this.state.n === 5) throw ...` re-checks on every update), in
+  lifecycles and in effects. Errors in event handlers, timers and promises
+  are not caught.
+- **On an error** the boundary unmounts its whole subtree (cleanups and
+  `componentWillUnmount` run for components that had mounted), renders the
+  state from `getDerivedStateFromError`, then calls
+  `componentDidCatch(error, { componentStack })` after the fallback is in the
+  DOM. Caught errors are logged with `console.error`, like React.
+- **Recovery.** When the boundary renders its children again (for example
+  after `setState({ error: null })`), the children mount fresh.
+- **Nesting.** The innermost boundary catches. An error thrown by a
+  boundary's own render or fallback goes to the boundary above it.
+- **At build time** a `throw` while the page is rendered inside a boundary
+  renders the boundary's fallback instead of failing the build (warning
+  KR3009), and `componentDidCatch` is called when the page hydrates. Retrying
+  after a build-time error renders an empty children region, because the
+  subtree could not be built; rebuild once the data is fixed. A build-time
+  throw with no boundary fails the build (KR3010).
+- **Without `getDerivedStateFromError`** the subtree is unmounted but its
+  last DOM stays until `componentDidCatch` calls `setState` (warning KR3008).
+- **Uncaught errors.** React 18 unmounts the whole root. Krate keeps the
+  server-rendered page, logs the error with its component stack, and unmounts
+  only the component that threw (and its descendants).
+- Errors in a hidden conditional branch's bindings (which React would never
+  have rendered) are ignored. Error boundaries around islands are planned.
 
 ### Bare reads are auto-called
 
@@ -350,7 +442,8 @@ observed in a browser. The browser conformance suite (`/react-events/` in
   they read.
 - **`ref` as a prop**, `forwardRef`, and `useImperativeHandle(ref, create,
   deps)` are supported. Refs in lists keep the right element per item.
-- Refs to class component instances are not supported yet.
+- Refs to class component instances receive the instance (see Class
+  components).
 
 ### Build diagnostics
 
