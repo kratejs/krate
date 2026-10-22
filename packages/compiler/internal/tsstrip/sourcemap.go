@@ -150,19 +150,18 @@ func (sm *sourceMap) next(ln, k int) (segment, int, bool) {
 	return segment{}, 0, false
 }
 
-// textIndex converts between byte offsets and the two line/column systems in
-// play: Krate's lexer (lines split on '\n' only, columns counted in runes) and
-// source maps / esbuild (lines split on \n, \r, \r\n, U+2028, U+2029; columns
-// in UTF-16 code units).
+// textIndex converts between byte offsets and line/column positions. Krate's
+// lexer and source maps agree on line terminators (\n, \r, \r\n, U+2028,
+// U+2029) and both count columns in UTF-16 code units; Krate positions are
+// 1-based, source-map positions 0-based.
 type textIndex struct {
 	s       string
-	nl      []int // byte offset of each '\n'-delimited line start
-	es      []int // byte offset of each source-map line start
+	es      []int // byte offset of each line start
 	esASCII []bool
 }
 
 func newTextIndex(s string) *textIndex {
-	t := &textIndex{s: s, nl: []int{0}, es: []int{0}}
+	t := &textIndex{s: s, es: []int{0}}
 	ascii := true
 	for i := 0; i < len(s); {
 		c := s[i]
@@ -170,7 +169,6 @@ func newTextIndex(s string) *textIndex {
 			i++
 			switch c {
 			case '\n':
-				t.nl = append(t.nl, i)
 				t.esASCII = append(t.esASCII, ascii)
 				t.es = append(t.es, i)
 				ascii = true
@@ -187,7 +185,7 @@ func newTextIndex(s string) *textIndex {
 		r, n := utf8.DecodeRuneInString(s[i:])
 		i += n
 		ascii = false
-		if r == ' ' || r == ' ' {
+		if r == 0x2028 || r == 0x2029 {
 			t.esASCII = append(t.esASCII, false)
 			t.es = append(t.es, i)
 			ascii = true
@@ -197,34 +195,26 @@ func newTextIndex(s string) *textIndex {
 	return t
 }
 
-// krateOffset converts a Krate (1-based line, rune column) position to a byte
-// offset, clamped to the line.
+// krateOffset converts a Krate (1-based line, 1-based UTF-16 column)
+// position to a byte offset, clamped to the line.
 func (t *textIndex) krateOffset(line, col int) int {
 	if line < 1 {
 		return 0
 	}
-	if line > len(t.nl) {
-		return len(t.s)
+	if col < 1 {
+		col = 1
 	}
-	off := t.nl[line-1]
-	end := len(t.s)
-	if line < len(t.nl) {
-		end = t.nl[line]
-	}
-	for k := 0; k < col && off < end; k++ {
-		_, n := utf8.DecodeRuneInString(t.s[off:])
-		off += n
-	}
-	return off
+	return t.esOffset(line-1, col-1)
 }
 
-// kratePos converts a byte offset to a Krate (1-based line, rune column).
+// kratePos converts a byte offset to a Krate (1-based line, 1-based UTF-16
+// column) position.
 func (t *textIndex) kratePos(off int) (int, int) {
 	if off > len(t.s) {
 		off = len(t.s)
 	}
-	ln := sort.Search(len(t.nl), func(j int) bool { return t.nl[j] > off }) - 1
-	return ln + 1, utf8.RuneCountInString(t.s[t.nl[ln]:off])
+	ln, col := t.esPos(off)
+	return ln + 1, col + 1
 }
 
 // esPos converts a byte offset to a 0-based source-map (line, UTF-16 column).

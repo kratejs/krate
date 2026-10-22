@@ -74,6 +74,17 @@ export const ASTTypes = Object.freeze({
   AwaitExpr: "AwaitExpr",
   DynamicImport: "DynamicImport",
   ImportMetaExpr: "ImportMetaExpr",
+  // Classes, tagged templates and less common statements
+  ClassDecl: "ClassDecl",
+  ClassMember: "ClassMember",
+  ClassExpr: "ClassExpr",
+  TaggedTemplateExpr: "TaggedTemplateExpr",
+  MetaProperty: "MetaProperty",
+  ParenExpr: "ParenExpr",
+  LabeledStmt: "LabeledStmt",
+  EmptyStmt: "EmptyStmt",
+  WithStmt: "WithStmt",
+  DebuggerStmt: "DebuggerStmt",
 } as const);
 
 /** Union of every AST node `kind` discriminator. */

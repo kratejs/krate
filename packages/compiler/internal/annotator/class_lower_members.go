@@ -55,6 +55,10 @@ func collectClassMembers(class *ast.ClassDecl) (map[string]bool, bool) {
 			if m.Name != "state" && m.Name != "" {
 				members[m.Name] = true
 			}
+		case ast.ClassConstructor:
+		default:
+			// Getters, setters, accessors and static blocks are not lowered.
+			return nil, false
 		}
 	}
 	// Constructor assignments create instance fields even when they have no

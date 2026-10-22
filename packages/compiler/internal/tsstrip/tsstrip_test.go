@@ -274,7 +274,9 @@ func jsxPositions(prog *ast.Program) []ast.Pos {
 	walk = func(n any) {
 		switch v := n.(type) {
 		case *ast.JSXElement:
-			out = append(out, v.Position)
+			// Line and column are compared; byte offsets differ between the
+			// typed and plain sources.
+			out = append(out, ast.Pos{Line: v.Position.Line, Col: v.Position.Col})
 			for _, c := range v.Children {
 				if ec, ok := c.(*ast.JSXElementChild); ok {
 					walk(ec.Element)

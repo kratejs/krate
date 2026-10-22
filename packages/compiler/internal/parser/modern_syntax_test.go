@@ -22,7 +22,7 @@ func TestModernSyntaxParses(t *testing.T) {
 		{"shl", "const x = a << b;"},
 		{"shr", "const x = a >> b;"},
 		{"ushr", "const x = a >>> b;"},
-		{"private-member", "const z = obj.#value;"},
+		{"private-member", "class C { #value = 1; m(obj) { return obj.#value; } }"},
 		{"private-field", "class C { #x = 1; }"},
 		{"spread-call", "run(...args);"},
 		{"export-alias", "const a = 1; export { a as b };"},
