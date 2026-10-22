@@ -33,15 +33,13 @@ window.refreshSlots=scan;
 window.krateMountPortals=function(){var list=document.querySelectorAll('[data-krate-portal]');for(var i=0;i<list.length;i++){(function(node){if(node.getAttribute('data-krate-portal-mounted'))return;node.setAttribute('data-krate-portal-mounted','1');if(node.parentNode!==document.body)document.body.appendChild(node);if(typeof krateEventRoot==='function')krateEventRoot(node);if(typeof window.onCleanup==='function')window.onCleanup(function(){if(node.parentNode)node.parentNode.removeChild(node);});})(list[i]);}};
 window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}});});};
 window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;var __first=true;__safe(function(){createEffect(function(){var v=get();if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}var _fa=document.activeElement,_fid=_fa&&_fa!==document.body&&_fa.id&&n.parentNode&&n.parentNode.contains(_fa)?_fa.id:null;while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);if(_fid&&!_fa.isConnected){var _fn=document.getElementById(_fid);if(_fn&&_fn.focus)_fn.focus();}});});};
+window.kbindList=function(id,src,key,render,mode){var n=findSlot(id);if(!n||n.nodeType!==8||typeof krateBindList!=='function')return;__safe(function(){krateBindList(n,src,key,render,mode);});};
 window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(function(){var s=!!get();var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');});});};
-window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)n.removeAttribute(attr);else if(v===true)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){n.removeAttribute('style');Object.assign(n.style,v);}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));});});};
+window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(typeof v==='boolean'&&(attr.indexOf('aria-')===0||attr.indexOf('data-')===0))n.setAttribute(attr,String(v));else if(v==null||v===false)n.removeAttribute(attr);else if(v===true)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){n.removeAttribute('style');Object.assign(n.style,v);}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));});});};
 window.kbindProp=function(id,attr,get){var n=findSlot(id);if(n)__safe(function(){krateControl(n,attr,get);});};
 window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){krateOn(n,prop,fn);});};
 window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);});};
 window.kbindRef=function(id,get,set){var n=findSlot(id);if(n)__safe(function(){krateBindRef(n,get,set);});};
-function __krateActionBase(){var c=window.__KRATE_CFG__;return c&&c.basePath?c.basePath:'';}
-window.__krateAction=function(id){return function(){var args=Array.prototype.slice.call(arguments);return fetch(__krateActionBase()+'/__krate/action/'+id,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json','accept':'application/json','x-krate-action':'fetch','x-krate-return':location.pathname+location.search},body:JSON.stringify({args:args})}).then(function(r){return r.json().then(function(p){if(!r.ok)throw new Error(p&&p.details?p.details:p&&p.error?p.error:r.statusText);return p.result;});});};};
-if(!window.__krateActionBound){window.__krateActionBound=true;document.addEventListener('submit',function(e){var form=e.target;if(!form||form.tagName!=='FORM'||e.defaultPrevented)return;var submitter=e.submitter;var actionEl=null;if(submitter&&submitter.hasAttribute&&submitter.hasAttribute('data-krate-action'))actionEl=submitter;else if(form.hasAttribute('data-krate-action'))actionEl=form;if(!actionEl)return;if(submitter&&submitter.hasAttribute('formaction')&&!submitter.hasAttribute('data-krate-action'))return;e.preventDefault();if(form.getAttribute('data-krate-action-pending'))return;form.setAttribute('data-krate-action-pending','1');form.setAttribute('aria-busy','true');var url=actionEl===form?form.action:(submitter.formAction||form.action);var fd=new FormData(form);if(submitter&&submitter.name){fd.append(submitter.name,submitter.value);}fetch(url,{method:'POST',credentials:'same-origin',headers:{'accept':'application/json','x-krate-action':'fetch','x-krate-return':location.pathname+location.search},body:fd}).then(function(r){return r.json().then(function(p){if(!r.ok)throw new Error(p&&p.details?p.details:p&&p.error?p.error:r.statusText);return p;});}).then(function(p){if(p&&typeof p.redirect==='string'&&p.redirect){location.assign(p.redirect);return;}location.reload();}).catch(function(err){form.removeAttribute('data-krate-action-pending');form.removeAttribute('aria-busy');console.error('krate server action:',err);});},false);}
 })();
 `
 
@@ -73,6 +71,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	// Rebuild the comment-marker cache against the current DOM (fresh page
 	// load or SPA navigation).
 	b.WriteString("refreshSlots();\n")
+	b.WriteString("if(typeof krateRefsHold==='function')krateRefsHold();\n")
 	b.WriteString("if(window.krateMountPortals)window.krateMountPortals();\n")
 
 	// Component functions needed by dynamic list slots. Without these the
@@ -91,6 +90,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	owners := pageNeedsOwners(result)
 	if owners {
 		b.WriteString("var __ko=typeof krateOwner==='function'?krateOwner:function(){};\n")
+		b.WriteString("var __km=typeof krateMount==='function'?krateMount:function(i,p,c,s,f){f();};\n")
 	}
 
 	// Per-component scoped IIFEs
@@ -102,9 +102,20 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		// traced back to a source component. Stripped by minification in prod.
 		b.WriteString("// component ")
 		b.WriteString(string(sig.ComponentID))
-		b.WriteString("\n(function(){\n")
-		if owners {
-			writeOwnerDecl(&b, sig)
+		// A component inside a conditional branch is remountable: its scope is
+		// a function the runtime runs on every mount (fresh state, bindings
+		// and effects) and skips while the branch is hidden.
+		remountable := owners && len(sig.Conds) > 0
+		if remountable {
+			b.WriteString("\n")
+			writeOwnerDecl(&b, sig, "__km")
+			b.WriteString(",function(){\n")
+		} else {
+			b.WriteString("\n(function(){\n")
+			if owners {
+				writeOwnerDecl(&b, sig, "__ko")
+				b.WriteString(");\n")
+			}
 		}
 
 		// The component's own props object declaration must precede signal
@@ -236,7 +247,35 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 				b.WriteString(",()=>")
 				b.WriteString(sb.ExprJS)
 				b.WriteString(");\n")
-			case "expr", "list":
+			case "list":
+				if sb.List != nil {
+					// Keyed list runtime: rows adopt the server-rendered DOM by
+					// key and are reconciled by key on every change.
+					b.WriteString("kbindList(")
+					b.WriteString(strconv.Quote(string(sb.SlotID)))
+					b.WriteString(",()=>(")
+					b.WriteString(sb.List.Source)
+					b.WriteString("),")
+					if sb.List.Key != "" {
+						b.WriteString(sb.List.Key)
+					} else {
+						b.WriteString("null")
+					}
+					b.WriteString(",")
+					b.WriteString(sb.List.Render)
+					if sb.List.Accessor {
+						b.WriteString(",1);\n")
+					} else {
+						b.WriteString(",0);\n")
+					}
+					continue
+				}
+				b.WriteString("kbindContent(")
+				b.WriteString(strconv.Quote(string(sb.SlotID)))
+				b.WriteString(",()=>")
+				b.WriteString(sb.ExprJS)
+				b.WriteString(");\n")
+			case "expr":
 				b.WriteString("kbindContent(")
 				b.WriteString(strconv.Quote(string(sb.SlotID)))
 				b.WriteString(",()=>")
@@ -298,7 +337,11 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			b.WriteString(");\n")
 		}
 
-		b.WriteString("})();\n")
+		if remountable {
+			b.WriteString("});\n")
+		} else {
+			b.WriteString("})();\n")
+		}
 	}
 	if owners {
 		b.WriteString("__ko(null);\n")
@@ -329,7 +372,9 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 // in which case every component scope declares its owner.
 func pageNeedsOwners(result *EmitResult) bool {
 	for _, sig := range result.Signatures {
-		if sig.Tier == irtree.TierClient && len(sig.Effects) > 0 {
+		// Components in conditional branches need owners to unmount and
+		// remount with fresh state when the branch toggles.
+		if sig.Tier == irtree.TierClient && (len(sig.Effects) > 0 || len(sig.Conds) > 0) {
 			return true
 		}
 	}
@@ -338,8 +383,11 @@ func pageNeedsOwners(result *EmitResult) bool {
 
 // writeOwnerDecl emits the krateOwner call that opens a component scope:
 // its id, enclosing component, conditional branches and list slot.
-func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
-	b.WriteString("__ko(")
+// fn is __ko (krateOwner) or __km (krateMount, which always takes the conds
+// and slot arguments). The call is left open for the caller to close.
+func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature, fn string) {
+	b.WriteString(fn)
+	b.WriteString("(")
 	b.WriteString(strconv.Quote(string(sig.ComponentID)))
 	b.WriteString(",")
 	if sig.ParentID != "" {
@@ -347,7 +395,7 @@ func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
 	} else {
 		b.WriteString("null")
 	}
-	if len(sig.Conds) > 0 || sig.ListSlot != "" {
+	if fn == "__km" || len(sig.Conds) > 0 || sig.ListSlot != "" {
 		b.WriteString(",[")
 		for i, c := range sig.Conds {
 			if i > 0 {
@@ -367,9 +415,10 @@ func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
 		if sig.ListSlot != "" {
 			b.WriteString(",")
 			b.WriteString(strconv.Quote(string(sig.ListSlot)))
+		} else if fn == "__km" {
+			b.WriteString(",null")
 		}
 	}
-	b.WriteString(");\n")
 }
 
 // writeRefBinding emits kbindRef(id, get, assign). get returns the ref value

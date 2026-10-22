@@ -22,7 +22,7 @@
  * restored to their state value, so a handler that does not update state keeps
  * the field unchanged, as in React.
  */
-import { createEffect } from './signal.js';
+import { createEffect, krateFlushSync } from './signal.js';
 
 /** A React-compatible synthetic event. */
 export interface KrateSyntheticEvent<E extends Event = Event> {
@@ -476,6 +476,9 @@ export function krateSetControl(el: Element, prop: string, v: unknown): void {
 function restore(el: FormEl): void {
   const c = el.__kc;
   if (!c) return;
+  // React flushes the event's synchronous updates before restoring, so the
+  // control is compared with the newly committed state.
+  krateFlushSync();
   if (c.value) krateSetControl(el, 'value', c.value());
   if (c.checked) krateSetControl(el, 'checked', c.checked());
 }
@@ -497,6 +500,7 @@ export function krateControl(el: Element, prop: string, get: () => unknown): () 
     track(f);
   }
   let was: boolean | undefined;
+  let mounted = false;
   return createEffect(() => {
     const v = get();
     if (controlProp) {
@@ -514,5 +518,10 @@ export function krateControl(el: Element, prop: string, get: () => unknown): () 
       was = now;
     }
     krateSetControl(f, prop, v);
+    // React mounts a textarea with its caret at the start.
+    if (!mounted && prop === 'value' && f.tagName === 'TEXTAREA' && f.ownerDocument.activeElement !== f) {
+      f.setSelectionRange(0, 0);
+    }
+    mounted = true;
   });
 }

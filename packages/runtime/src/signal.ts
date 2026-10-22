@@ -16,12 +16,27 @@ export interface SignalOptions<T> {
    * the key, store (local/session/memory), serialization, and cross-tab sync.
    */
   persist?: PersistSpec<T>;
+  /**
+   * React state semantics (set by the compiler for useState/useReducer).
+   * Outside Krate's render phase (event handlers, effect bodies, cleanups)
+   * the getter returns the value of the last commit, so a handler sees its
+   * render's snapshot and a cleanup sees the render its effect ran for.
+   * Writes still apply immediately to functional updaters, and an update made
+   * outside a discrete event commits in a later task, as React schedules it.
+   */
+  react?: boolean;
 }
+
+/** Signal options that give a signal React state semantics. */
+export const krateHookState: { readonly react: true } = { react: true };
 
 // A null entry is an untracked scope (see untrack): reads inside it subscribe
 // nothing.
 const context: Array<EffectState | null> = [];
-const mountQueue: Array<() => void> = [];
+// Each queued mount callback remembers the owner (effect or root) that was
+// current when it was registered, so an onCleanup inside the callback belongs
+// to that owner instead of the page root.
+const mountQueue: Array<{ fn: () => void; owner: EffectState | null | undefined }> = [];
 let mountScheduled = false;
 const allEffects = new Set<EffectState>();
 // Top-level onCleanup registrations (called outside an effect body) are scoped
@@ -50,10 +65,135 @@ interface EffectState {
   queued: boolean;
   /** Component owner current when the effect was created (see krateOwnerScope). */
   owner: unknown;
+  /**
+   * Marks an ownership root (see createRoot). A root is pushed on the context
+   * stack with `disposed` set so signal reads stay untracked, while effects,
+   * memos and cleanups registered under it are collected into `cleanups`.
+   */
+  root?: boolean;
+  /** Set once a root has been disposed. */
+  dead?: boolean;
 }
 
 function newEffectState(fn: () => void): EffectState {
-  return { fn, cleanups: [], disposed: false, sources: new Set(), running: false, rerun: false, queued: false, owner: currentOwner };
+  const effect: EffectState = { fn, cleanups: [], disposed: false, sources: new Set(), running: false, rerun: false, queued: false, owner: currentOwner };
+  if (currentOwner !== null) {
+    let set = ownerEffects.get(currentOwner);
+    if (!set) ownerEffects.set(currentOwner, (set = new Set()));
+    set.add(effect);
+  }
+  return effect;
+}
+
+// Effects and top-level cleanups created while an owner was current, so the
+// owner can be unmounted on its own (a component removed by a conditional).
+const ownerEffects = new Map<unknown, Set<EffectState>>();
+const ownerCleanups = new Map<unknown, Array<() => void>>();
+
+/**
+ * Disposes every effect created under `owner` and runs its top-level
+ * onCleanup callbacks (internal, used when a component unmounts).
+ */
+export function krateDisposeOwner(owner: unknown): void {
+  const effects = ownerEffects.get(owner);
+  ownerEffects.delete(owner);
+  if (effects) {
+    for (const effect of effects) {
+      disposeEffect(effect);
+      allEffects.delete(effect);
+    }
+  }
+  const cleanups = ownerCleanups.get(owner);
+  ownerCleanups.delete(owner);
+  if (cleanups) {
+    for (const c of cleanups) {
+      try {
+        c();
+      } catch {
+        // One failing cleanup must not keep the rest from running.
+      }
+    }
+  }
+}
+
+// Render snapshots for React state (see SignalOptions.react).
+//
+// Krate's render phase is any tracked effect run (DOM bindings, dependency
+// trackers, memo computations read by them): reads there see the latest
+// value. Everywhere else a React state read returns the value as of the last
+// commit, or as of `snapshotEpoch` while an effect setup/cleanup runs for the
+// commit it belongs to.
+let renderDepth = 0;
+let snapshotEpoch: number | null = null;
+let epoch = 0;
+
+interface ReactCell {
+  commit(e: number): void;
+  prune(min: number): boolean;
+}
+const changedCells = new Set<ReactCell>();
+const historyCells = new Set<ReactCell>();
+
+/** Records the current React state values as commit `epoch` (internal). */
+export function krateCommitSnapshot(): number {
+  epoch++;
+  for (const cell of changedCells) cell.commit(epoch);
+  changedCells.clear();
+  return epoch;
+}
+
+/** The epoch of the last commit snapshot (internal). */
+export function krateEpoch(): number {
+  return epoch;
+}
+
+/** Runs fn reading React state as of commit `at` (internal). */
+export function krateReadAt<T>(at: number | null, fn: () => T): T {
+  const prev = snapshotEpoch;
+  snapshotEpoch = at;
+  try {
+    return fn();
+  } finally {
+    snapshotEpoch = prev;
+  }
+}
+
+/** Drops snapshot history older than commit `min` (internal). */
+export function kratePruneSnapshots(min: number): void {
+  for (const cell of historyCells) {
+    if (!cell.prune(min)) historyCells.delete(cell);
+  }
+}
+
+// Update lanes. A write during a discrete event (click, key, input...) or a
+// commit flushes in a microtask, and a discrete update also runs its passive
+// effects at the end of its commit, like React's SyncLane. A React state
+// write anywhere else (timeouts, promises) flushes in a later task, after
+// the microtasks that code queued, like React's DefaultLane.
+const DISCRETE = new Set(
+  ('auxclick beforeinput blur cancel change click close compositionend compositionstart compositionupdate ' +
+    'contextmenu copy cut dblclick dragend dragstart drop focusin focusout input invalid keydown keypress keyup ' +
+    'mousedown mouseup paste pause play pointercancel pointerdown pointerup ratechange reset resize seeked ' +
+    'select submit touchcancel touchend touchstart volumechange focus').split(' '),
+);
+let committing = 0;
+let syncLane = false;
+
+function inDiscreteEvent(): boolean {
+  const ev = typeof window !== 'undefined' ? (window as unknown as { event?: Event }).event : undefined;
+  return !!ev && DISCRETE.has(ev.type);
+}
+
+/** Marks a commit in progress (internal): writes there flush in a microtask. */
+export function krateCommitting(on: boolean): void {
+  committing += on ? 1 : -1;
+}
+
+/** Reports and clears whether the pending commit came from a discrete event. */
+export function krateTakeSyncLane(): boolean {
+  const v = syncLane;
+  syncLane = false;
+  return v;
 }
 
 // The component owner whose body (or binding effect) is currently running.
@@ -125,6 +265,7 @@ export function sameValue(a: unknown, b: unknown): boolean {
 function disposeEffect(effect: EffectState): void {
   if (!effect.disposed) {
     effect.disposed = true;
+    if (effect.owner !== null) ownerEffects.get(effect.owner)?.delete(effect);
     // Detach from every signal subscriber Set so a long-lived signal never
     // retains a disposed effect (and its closure graph).
     for (const set of effect.sources) {
@@ -158,6 +299,13 @@ export function disposeAll(): void {
     }
   }
   rootCleanups.length = 0;
+  for (const owner of Array.from(ownerCleanups.keys())) {
+    krateDisposeOwner(owner);
+  }
+  ownerEffects.clear();
+  changedCells.clear();
+  historyCells.clear();
+  snapshotEpoch = null;
   // Unmount external Preact islands mounted by the page before the DOM swap.
   const g = globalThis as { __krate_island_cleanups?: Array<() => void> };
   const islands = g.__krate_island_cleanups;
@@ -173,6 +321,9 @@ export function disposeAll(): void {
   }
   pending.length = 0;
   flushScheduled = false;
+  flushMode = 0;
+  flushToken++;
+  syncLane = false;
   // Reset every context stack to its default so provider values from the page
   // being torn down cannot leak into the next SPA navigation.
   resetContexts();
@@ -400,16 +551,52 @@ export function createSignal<T>(
 
   const subs = new Set<EffectState>();
 
+  // React state: the committed value and its per-commit history.
+  const react = !!options?.react;
+  let committed = value;
+  let history: Array<[number, T]> | null = null;
+  const cell: ReactCell | null = react
+    ? {
+        commit(e: number): void {
+          if (Object.is(committed, value)) return;
+          if (!history) history = [[0, committed]];
+          history.push([e, value]);
+          committed = value;
+          historyCells.add(cell as ReactCell);
+        },
+        prune(min: number): boolean {
+          if (!history) return false;
+          while (history.length > 1 && history[1][0] <= min) history.shift();
+          if (history.length === 1) {
+            history = null;
+            return false;
+          }
+          return true;
+        },
+      }
+    : null;
+  const valueAt = (at: number): T => {
+    if (!history) return committed;
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i][0] <= at) return history[i][1];
+    }
+    return history[0][1];
+  };
+
   const read = (): T => {
     const current = context[context.length - 1];
     if (current && !current.disposed) {
       subs.add(current);
       current.sources.add(subs);
     }
+    if (react) {
+      if (snapshotEpoch !== null) return valueAt(snapshotEpoch);
+      if (renderDepth === 0) return committed;
+    }
     return value;
   };
 
-  const notify = (): void => {
+  const notify = (reactWrite = false): void => {
     const list = Array.from(subs);
     for (const effect of list) {
       if (effect.disposed) {
@@ -429,7 +616,7 @@ export function createSignal<T>(
         pending.push(effect);
       }
     }
-    scheduleFlush();
+    scheduleFlush(reactWrite);
   };
 
   const write = (next: T | ((prev: T) => T)): void => {
@@ -441,7 +628,8 @@ export function createSignal<T>(
       if (persist) {
         writePersisted(persist, value);
       }
-      notify();
+      if (cell) changedCells.add(cell);
+      notify(react);
     }
   };
 
@@ -477,15 +665,33 @@ export function isSignalGetter(fn: unknown): boolean {
   return typeof fn === 'function' && signalGetters.has(fn);
 }
 
-function scheduleFlush(): void {
-  if (!flushScheduled) {
-    flushScheduled = true;
-    queueMicrotask(flushEffects);
+// 0: none, 1: microtask, 2: later task.
+let flushMode = 0;
+let flushToken = 0;
+
+function scheduleFlush(reactWrite = false): void {
+  const discrete = inDiscreteEvent();
+  if (discrete) syncLane = true;
+  const micro = !reactWrite || discrete || committing > 0 || renderDepth > 0 || typeof setTimeout !== 'function';
+  if (flushMode === 1 || (!micro && flushMode === 2)) return;
+  flushScheduled = true;
+  const token = ++flushToken;
+  const run = (): void => {
+    if (token === flushToken) flushEffects();
+  };
+  if (micro) {
+    flushMode = 1;
+    queueMicrotask(run);
+  } else {
+    flushMode = 2;
+    setTimeout(run, 0);
   }
 }
 
 function flushEffects(): void {
   flushScheduled = false;
+  flushMode = 0;
+  flushToken++;
   for (const hook of beforeFlushHooks) {
     hook();
   }
@@ -546,6 +752,11 @@ function runEffect(effect: EffectState): void {
   context.push(effect);
   const prevOwner = currentOwner;
   currentOwner = effect.owner;
+  renderDepth++;
+  // A tracked run is render work: it sees the latest values even when it is
+  // started from inside an effect setup or cleanup.
+  const prevEpoch = snapshotEpoch;
+  snapshotEpoch = null;
   try {
     // Support Solid-style `return () => {...}` cleanup functions. Many
     // components (Slider, Dropdown, Dialog, Tooltip) register their document
@@ -557,6 +768,8 @@ function runEffect(effect: EffectState): void {
       effect.cleanups.push(ret as () => void);
     }
   } finally {
+    snapshotEpoch = prevEpoch;
+    renderDepth--;
     currentOwner = prevOwner;
     context.pop();
     effect.running = false;
@@ -566,27 +779,80 @@ function runEffect(effect: EffectState): void {
 export function createEffect(fn: () => void): () => void {
   const effect = newEffectState(fn);
   allEffects.add(effect);
+  // An effect created while an ownership root is current is disposed with it.
+  const owner = context[context.length - 1];
   runEffect(effect);
 
-  return () => {
+  const dispose = (): void => {
     disposeEffect(effect);
     allEffects.delete(effect);
   };
+  if (owner && owner.root) addOwnerCleanup(owner, dispose);
+  return dispose;
 }
 
 export function onCleanup(fn: () => void): void {
   const current = context[context.length - 1];
   if (current) {
-    current.cleanups.push(fn);
+    addOwnerCleanup(current, fn);
   } else {
-    // No active effect: treat as a root/component-level cleanup, run on
-    // disposeAll() (route change / page teardown).
-    rootCleanups.push(fn);
+    // No active effect: a component-level cleanup. It runs when its owner
+    // unmounts, or on disposeAll() (route change / page teardown).
+    if (currentOwner !== null) {
+      let list = ownerCleanups.get(currentOwner);
+      if (!list) ownerCleanups.set(currentOwner, (list = []));
+      list.push(fn);
+    } else {
+      rootCleanups.push(fn);
+    }
+  }
+}
+
+function addOwnerCleanup(owner: EffectState, fn: () => void): void {
+  if (owner.dead) {
+    // The root is already gone (a late mount callback): clean up at once.
+    fn();
+    return;
+  }
+  owner.cleanups.push(fn);
+}
+
+/**
+ * Run `fn` in a new ownership root. Effects, memos, onCleanup callbacks and
+ * onMount callbacks registered while it runs (and the cleanups those mount
+ * callbacks register) belong to the root and are torn down, in registration
+ * order, when the returned `dispose` is called. Signal reads inside `fn` are
+ * not tracked by any enclosing effect. Keyed list rows and keyed remounts use
+ * one root per row so a removed row runs its cleanups without touching its
+ * siblings.
+ */
+export function createRoot<T>(fn: (dispose: () => void) => T): T {
+  const root = newEffectState(() => {});
+  // `disposed` keeps signal reads inside the root untracked.
+  root.disposed = true;
+  root.root = true;
+  const dispose = (): void => {
+    if (root.dead) return;
+    root.dead = true;
+    const cleanups = root.cleanups.splice(0);
+    for (const cleanup of cleanups) {
+      try {
+        cleanup();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+  context.push(root);
+  try {
+    return fn(dispose);
+  } finally {
+    context.pop();
   }
 }
 
 export function onMount(fn: () => void): void {
-  mountQueue.push(fn);
+  mountQueue.push({ fn, owner: context[context.length - 1] });
   if (!mountScheduled) {
     mountScheduled = true;
     queueMicrotask(flushMounts);
@@ -596,8 +862,24 @@ export function onMount(fn: () => void): void {
 function flushMounts(): void {
   mountScheduled = false;
   const queue = mountQueue.splice(0);
-  for (const fn of queue) {
-    fn();
+  for (const { fn, owner } of queue) {
+    if (!owner) {
+      fn();
+      continue;
+    }
+    // The owner unmounted before its mount effects ran: skip them, as React
+    // does for a component that never committed.
+    if (owner.dead || (!owner.root && owner.disposed)) continue;
+    // Collect cleanups registered by the callback without tracking its reads.
+    const collector = newEffectState(() => {});
+    collector.disposed = true;
+    context.push(collector);
+    try {
+      fn();
+    } finally {
+      context.pop();
+    }
+    for (const cleanup of collector.cleanups) addOwnerCleanup(owner, cleanup);
   }
 }
 
@@ -643,11 +925,17 @@ export function createMemo<T>(fn: () => T): () => T {
 export function createReducer<S, A, I = S>(
   reducer: (state: S, action: A) => S,
   initial: I,
-  init?: (arg: I) => S,
+  init?: ((arg: I) => S) | SignalOptions<S> | null,
+  options?: SignalOptions<S>,
 ): [() => S, (action: A) => void] {
   // React's lazy initializer: useReducer(reducer, arg, init) starts at init(arg).
+  // An options object may take init's place (createReducer(r, s, opts)).
+  if (init && typeof init === 'object') {
+    options = init;
+    init = undefined;
+  }
   const start = (typeof init === 'function' ? init(initial) : initial) as S;
-  const [get, set] = createSignal<S>(start);
+  const [get, set] = createSignal<S>(start, options);
   // dispatch is created once, so its identity is stable for the component's
   // lifetime. The signal's Object.is bail-out skips updates when the reducer
   // returns the current state.

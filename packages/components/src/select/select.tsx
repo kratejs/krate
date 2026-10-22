@@ -131,6 +131,7 @@ export function Select(props: SelectProps) {
             {filtered().map(function (o) {
               return (
                 <div
+                  key={o.value}
                   class={'krate-select-item' + (o.value === value() ? ' krate-select-item-selected' : '') + (o.disabled ? ' krate-select-item-disabled' : '')}
                   role="option"
                   aria-selected={o.value === value() ? 'true' : 'false'}

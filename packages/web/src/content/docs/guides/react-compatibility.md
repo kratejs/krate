@@ -49,11 +49,11 @@ export default function Timer() {
 
 | React | Rewritten to |
 |-------|--------------|
-| `useState` | `createSignal` (a lazy initializer `useState(() => x)` is called once) |
+| `useState` | `createSignal(init, krateHookState)` (React state snapshots; a lazy initializer `useState(() => x)` or `useState(loadFn)` is called once) |
 | `useEffect` | `createEffectDeps(fn, () => deps)` (passive phase, see [Effects](#effects)) |
 | `useLayoutEffect` / `useInsertionEffect` | `createEffectDeps(fn, () => deps, 'layout' / 'insertion')` |
 | `useMemo` | `createMemoDeps(fn, () => deps)`; without deps, `createMemo` |
-| `useReducer` | `createReducer` (stable `dispatch`, lazy `init`, Object.is bail-out) |
+| `useReducer` | `createReducer(reducer, init(arg), krateHookState)` (stable `dispatch`, Object.is bail-out) |
 | `useRef` | `{ current: initial }` |
 | `useCallback` | `createCallbackDeps(fn, () => deps)`; without deps, the wrapped function |
 | `useContext` | `Context.useContext()` |
@@ -90,14 +90,17 @@ export default function Counter() {
 | `lazy` | identity passthrough |
 | `<Fragment>` / `<React.Fragment>` | a JSX fragment |
 | `react/jsx-runtime`, `jsx`, `jsxs`, `jsxDEV` | lowered to Krate JSX |
-| `react-dom` / `react-dom/client` | `createPortal` and `flushSync` map to the compat runtime (other entry points are not supported) |
+| `react-dom` / `react-dom/client` | `createPortal` and `flushSync` map to the compat runtime; `useFormStatus` and `requestFormReset` are supported (other entry points are not supported) |
 | `Children.only` / `toArray` / `count` | folded at build time on literal input, otherwise compat shim |
 | `Children.map` | folded at build time for a literal list and inline arrow, otherwise compat shim |
 | `cloneElement` | folded at build time on a literal element and props, otherwise compat shim |
 | `isValidElement` | folded at build time on literal input, otherwise compat shim |
 | `createPortal` / `<Portal>` | rendered into `document.body` and cleaned up on dispose |
 | `Component` / `PureComponent` | lowerable class components (see below) |
-| `useOptimistic` / `useActionState` / `useFormStatus` | React 19 compat shims |
+| `useActionState` | lowered to signals: `[state, formAction, isPending]`, sequential queue, previous state sent to server actions, no-JS fallback with permalink |
+| `useOptimistic` | lowered to signals: updates apply while an action is pending and revert when it settles |
+| `useFormStatus` | form-scoped status (`pending`, `data`, `method`, `action`) of the form containing the component |
+| `<form action={fn}>` / `formAction={fn}` | server actions and client functions, run in an async transition without a page reload, form reset on success |
 | `StrictMode` / `Profiler` | pass-through |
 
 Class components that follow the common subset are lowered to functions:
@@ -155,9 +158,23 @@ by `Object.is` (so `NaN` equals `NaN` and `+0` differs from `-0`). Setting
 state to the value it already has (by `Object.is`) is a no-op: no binding or
 effect re-runs.
 
+**State snapshots.** `useState` and `useReducer` state follows React's
+render snapshots. Outside rendering (event handlers, effect bodies,
+cleanups) a state read returns the value of the last commit, so
+`setCount(count + 1)` called three times in one handler adds one, while
+functional updates (`setCount((c) => c + 1)`) always see the latest pending
+value. Effect setups and cleanups read the state and props of the commit
+they belong to: a cleanup sees the values of the render its effect ran for,
+as a React closure would. Krate-native `createSignal` signals keep reading
+their latest value.
+
 **Commit order.** Signal writes are batched: every update made in the same
-task (an event handler, a timeout, a promise callback) produces one commit.
-A commit runs after the DOM bindings have been updated, in React's order:
+task produces one commit. An update made in a discrete event (click, key,
+input, submit, focus, ...) commits in a microtask after the handler and runs
+its passive effects at the end of that commit, before microtasks the handler
+queued (React's synchronous lane). An update made elsewhere (a timeout, a
+promise callback) commits in a later task, after the microtasks queued with
+it. A commit runs after the DOM bindings have been updated, in React's order:
 
 1. Mutation phase, per component: insertion-effect cleanup and setup, then
    layout-effect cleanup.
@@ -180,6 +197,7 @@ A layout effect that sets state therefore re-commits before paint.
 | `const deps = [a, b]` in the same component | inlined, same as `[a, b]` |
 | an expression (`props.deps`, `cond ? [a] : [b]`, `[...items, a]`) | evaluated live and compared at run time |
 | a parameter or imported array | compared at run time, but the captured array never changes ([KR2001](#effect-diagnostics)) |
+| an inline function, object or array, or a local bound to one (`[handler]`, `[{ page }]`) | re-runs after every commit that changes the component's state or props, since React sees a new identity on every render |
 | omitted (or `null` / `undefined`) | re-runs after every commit that changes the component's own state or props ([KR2002](#effect-diagnostics)) |
 
 React re-runs a dependency-less effect after every render. Krate has no
@@ -198,16 +216,17 @@ and resets the ref to `null` on unmount.
 **Unmounting.** When a list re-render removes a component, its cleanups run
 parent before child (React's deletion order): insertion and layout cleanups
 immediately, passive cleanups in the passive phase. A component inside a
-conditional branch that becomes hidden has all of its effect cleanups run,
-and when the branch is shown again every effect setup runs again, like React's
-`<Activity mode="hidden">`. Unlike React's `{cond && <Child />}`, the
-component's state is kept while it is hidden.
+conditional branch (`{show && <Counter />}`, `cond ? <A /> : <B />`) is
+unmounted when the branch hides: its cleanups run, its refs and bindings are
+released and its state is discarded. Showing the branch again mounts a fresh
+instance, so state starts from its initial value and every effect runs
+again, as in React. The branch's DOM nodes are reused and re-bound, so
+uncontrolled DOM state inside them (typed text in an uncontrolled input,
+scroll position) survives the toggle, which React would reset.
 
-**Closures.** Krate state reads are live getters, so code inside an effect
-always sees the current value. In a cleanup this differs from React, where a
-cleanup sees the values of the render its effect ran for ([KR2007](#effect-diagnostics)):
-copy the value into a local in the effect body (`const id = roomId; return ()
-=> leave(id);`).
+**Closures.** Krate reads state through live getters, so a timer or promise
+callback created inside an effect reads the latest committed value when it
+runs, where React's closure would keep the value of its render.
 
 Compiled packages and code the compiler could not lower use the same runtime
 through `@krate/runtime/react`: `useEffect`, `useLayoutEffect` and
@@ -225,7 +244,7 @@ component, which is what React does when the deps never change.
 | KR2004 | `useCallback` has no dependency array (one identity for the component's lifetime) | pass the dependencies |
 | KR2005 | `useMemo` has no dependency array (recomputes when a signal it reads changes) | pass the dependencies |
 | KR2006 | the dependency argument is not an array | pass `[a, b]` or omit it |
-| KR2007 | an effect cleanup reads state | copy the value in the effect body |
+| KR2008 | a hook is called inside a condition or loop (Rules of Hooks) | call it unconditionally at the top level, or move the part into a child component |
 
 These are warnings; diagnostics for files under `node_modules` are not
 printed.
@@ -280,9 +299,58 @@ Lowercase `<script>` and `<style>` elements render where they are written
 (for example a `<style>` inside an `<svg>`). Use `<Head>`, `<Script>` and
 `<Style>` to place content in the document head or body end.
 
-`key` and `suppressHydrationWarning` are compiler-only and never appear in the
-output. Event handler props are covered in
+`key` and `suppressHydrationWarning` never appear in the output. `key` drives
+list reconciliation and remounting, see [Keys and lists](#keys-and-lists).
+Event handler props are covered in
 [Events, forms and refs](#events-forms-and-refs).
+
+## Keys and lists
+
+A `.map()` whose array can change at runtime is reconciled by key, with React's
+semantics:
+
+- **Rows are matched by `key`**, the key of the element, component or
+  `<Fragment key>` the callback returns. Keys may be strings or numbers and
+  compare as strings (`1` and `'1'` are the same key). A row whose key is still
+  present keeps its DOM nodes, input values, focus and selection, component
+  state, effects and refs, and is moved into the new order with the fewest DOM
+  moves. Rows whose key disappeared unmount (effect cleanups run, refs detach)
+  before new rows mount; new rows run their effects after they are inserted.
+- **Without a key** rows are matched by index, as in React: reordering the
+  array moves the data, while state (an input value, a component's `useState`)
+  stays with the position.
+- **Rows update in place.** When the item for an existing key is a new object,
+  or its index changes, only the parts of the row that read it update; the row
+  is not remounted. Components rendered in a row receive live props, including
+  simple destructured props (`function Row({ item })`). A non-arrow callback
+  (`items.map(renderRow)`) or a destructured callback parameter
+  (`items.map(({ id, name }) => ...)`) receives plain values, so a row whose
+  item changed is re-rendered (its state resets); prefer `item => ...`.
+- **Duplicate keys** log React's "Encountered two children with the same key"
+  error. The first occurrence keeps its row; each duplicate gets its own row.
+- **Nested lists, text rows** (`items.map(t => t.label)`), keyed fragments, and
+  lists inside `<table>`/`<tbody>`, `<select>` and `<ul>` all work: rows are
+  delimited by comment markers, which are valid in every content model.
+- **Hydration adopts server-rendered rows by key.** The build renders each row
+  between `<!--k:ID:$key-->` markers; on load the list binds the existing nodes
+  (handlers, live attributes, component state) instead of re-rendering them,
+  so refs attach once and nothing flickers. A row whose key could not be
+  computed at build time is adopted by position.
+
+Changing the `key` of a single element remounts it, React's "reset state with
+a key" pattern:
+
+```tsx
+<Profile key={userId} userId={userId} />
+// a new userId unmounts the old Profile (cleanups run) and mounts a fresh one
+```
+
+This applies to any element whose key reads state or props, including inside
+conditionals and list rows.
+
+Lists over build-time constants (a literal array, or a prop known at build
+time) cannot reorder, so they render statically and are never warned about.
+
 
 ## shadcn/ui
 
@@ -421,7 +489,8 @@ observed in a browser. The browser conformance suite (`/react-events/` in
 - **Constant values.** `value="fixed"` with an `onChange` is controlled too:
   typing snaps back to the constant, as in React.
 - **Mount behavior.** Text inputs get React's mount-time caret (at the end of
-  the value), so typing after `focus()` appends. An `autoFocus` element is
+  the value), so typing after `focus()` appends; a controlled textarea starts
+  with the caret at the beginning, as in React. An `autoFocus` element is
   focused when its conditional branch mounts, and focus stays on a list item
   (matched by `id`) when the list re-renders.
 - **`value={undefined}`** (or `null`) leaves the field uncontrolled. Switching a
@@ -442,8 +511,8 @@ observed in a browser. The browser conformance suite (`/react-events/` in
   changes, and each call sees the state of its own render, matching React's
   new-callback-per-render behavior. Callback refs never subscribe the
   surrounding binding to signals they read.
-- Hydration refs attach after every component has bound its DOM and before
-  layout effects, so a ref on server-rendered list content that is re-rendered
+- Hydration refs attach after every component on the page has bound its DOM
+  and before layout effects (components mounted later attach at once), so a ref on server-rendered list content that is re-rendered
   on hydration is never called with the stale node.
 - **`ref.current` read during render** is shown once and not refreshed on
   later renders (Krate does not re-render); it is reported as `KR5008`. Keep
@@ -464,6 +533,9 @@ observed in a browser. The browser conformance suite (`/react-events/` in
 | `KR5006` | `value={cond ? x : undefined}`: a field that switches between controlled and uncontrolled |
 | `KR5007` | `onChange` on a `contentEditable` element (use `onInput`) |
 | `KR5008` | `ref.current` read in rendered JSX (shown once, never refreshed) |
+| `KR6001` | a list that can change at runtime renders elements without a `key` |
+| `KR6002` | two items of a list resolve to the same key at build time |
+| `KR6003` | a map callback keys some returned elements but not others |
 
 ## What is not supported
 
@@ -496,9 +568,31 @@ import { saveFeedback } from "../actions/feedback";
 </form>
 ```
 
-Forms work without JavaScript and are enhanced by the shared runtime. See
-[Server Actions](/docs/guides/server-actions/) for the module format, direct
-calls, runtime requirements, and security model.
+Forms work without JavaScript and are enhanced by the shared runtime.
+
+### React 19 actions
+
+`<form action={fn}>` and `<button formAction={fn}>` accept a server action or a
+client function. On submit the function receives the `FormData` inside an async
+transition; the page does not reload and uncontrolled fields reset after
+success. The React 19 hooks follow React's semantics:
+
+- `useActionState(action, initial, permalink?)` returns
+  `[state, formAction, isPending]`. Calls are queued in order and receive the
+  previous state; with a server action the previous state travels to the
+  server and the returned state back. Without JavaScript the form posts to the
+  action with the initial state and redirects to `permalink`.
+- `useFormStatus()` reads the pending status, data, method and action of the
+  form that contains the component.
+- `useOptimistic(state, update?)` applies updates while an action is pending and
+  reverts to the latest state when it settles.
+- `requestFormReset(form)` resets a form after its pending action.
+
+Inline `"use server"` functions inside components are not supported
+(`KR7001`); move them into a `"use server"` module. See
+[Server Actions](/docs/guides/server-actions/) for the module format, wire
+format, request context (`headers()`, `cookies()`, `redirect()`), runtime
+requirements, and security model.
 
 ## Diagnostics and conformance
 

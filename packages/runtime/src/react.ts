@@ -21,6 +21,12 @@ import { krateEventRoot } from './events.js';
 import { createContext as krateCreateContext } from './context.js';
 import { cloneElement as krateCloneElement } from './class-helpers.js';
 import { jsx as krateJsx } from './jsx-runtime.js';
+import {
+  __krateActionState,
+  __krateOptimistic,
+  requestFormReset as krateRequestFormReset,
+  type FormStatus,
+} from './actions.js';
 
 /** React's `Fragment` marker; `createElement(Fragment, ...)` yields a fragment. */
 export const Fragment: unique symbol = Symbol.for('krate.react.fragment');
@@ -268,42 +274,53 @@ export function useTransition(): [() => boolean, (fn: () => void) => void] {
   return [pending, start];
 }
 
-export function useOptimistic<T>(
-  initial: T,
-  update?: (state: T, action: T) => T,
-): [() => T, (action: T) => void] {
-  const [state, setState] = createSignal(initial);
-  const add = (action: T): void => {
-    setState((prev) => (update ? update(prev, action) : action));
-  };
-  return [state, add];
+/**
+ * React 19 `useOptimistic`. `state` may be a value or a getter; optimistic
+ * updates apply on top of it while an action is pending and are dropped when
+ * the action settles.
+ */
+export function useOptimistic<T, A = T>(
+  state: T | (() => T),
+  update?: (state: T, action: A) => T,
+): [() => T, (action: A) => void] {
+  const base = typeof state === 'function' ? (state as () => T) : () => state as T;
+  const [value, setValue] = createSignal(base());
+  return [value, __krateOptimistic<T, A>(base, (v) => setValue(() => v), update)];
 }
 
+/**
+ * React 19 `useActionState`: returns `[state, dispatch, isPending]` getters and
+ * a dispatch usable as a form action. Calls are queued in order and each
+ * receives the previous state; server actions receive it as their first
+ * argument over the action transport.
+ */
 export function useActionState<State, Payload>(
   action: (prev: State, payload: Payload) => State | Promise<State>,
   initial: State,
-): [() => State, (payload: Payload) => Promise<void>, () => boolean] {
+  _permalink?: string,
+): [() => State, (payload: Payload) => void, () => boolean] {
   const [state, setState] = createSignal(initial);
   const [pending, setPending] = createSignal(false);
-  const dispatch = async (payload: Payload): Promise<void> => {
-    setPending(true);
-    try {
-      setState(await action(state(), payload));
-    } finally {
-      setPending(false);
-    }
-  };
-  return [state, dispatch, pending];
+  const dispatch = __krateActionState<State>(
+    action as (prev: State, payload: unknown) => State | Promise<State>,
+    state,
+    (v) => setState(() => v),
+    setPending,
+  );
+  return [state, dispatch as (payload: Payload) => void, pending];
 }
 
-export function useFormStatus(): {
-  pending: boolean;
-  data: FormData | null;
-  method: string | null;
-  action: string | null;
-} {
+/**
+ * React DOM `useFormStatus`. Source components are lowered by the compiler to
+ * a form-scoped status bound to the component's element; called from compiled
+ * code without an element, it reports an idle status.
+ */
+export function useFormStatus(): FormStatus {
   return { pending: false, data: null, method: null, action: null };
 }
+
+/** React DOM `requestFormReset(form)`. */
+export const requestFormReset = krateRequestFormReset;
 
 export function useDeferredValue<T>(value: T): T {
   return value;

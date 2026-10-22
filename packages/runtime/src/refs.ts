@@ -82,8 +82,20 @@ export function krateSetRef(ref: KrateRef, value: unknown): () => void {
   return () => detach(e);
 }
 
-// Hydration refs waiting for krateRefsFlush (null when none are queued).
+// Hydration refs waiting for krateRefsFlush; null when no hydration script is
+// holding them.
 let deferred: RefEntry[] | null = null;
+
+/**
+ * Starts holding hydration refs (called at the start of a page's hydration
+ * script) until krateRefsFlush. Components mounted later attach at once.
+ */
+export function krateRefsHold(): void {
+  if (deferred) return;
+  deferred = [];
+  // Safety net if the script stops before its flush.
+  queueMicrotask(krateRefsFlush);
+}
 
 /**
  * Attaches the hydration refs queued so far whose element is in the
@@ -103,7 +115,7 @@ export function krateRefsFlush(): void {
 /**
  * Registers an element ref. mode 'now' attaches immediately (a node built by
  * h() that is about to be inserted); 'defer' queues it for krateRefsFlush
- * (hydration); otherwise it attaches when the element is in the document. A
+ * while a hydration script holds refs (krateRefsHold); otherwise it attaches when the element is in the document. A
  * ref on a detached node waits until a conditional branch holding it is
  * shown. Returns the release function (detach plus unregister), safe to call
  * more than once.
@@ -111,12 +123,7 @@ export function krateRefsFlush(): void {
 export function krateAttachRef(el: Element, ref: KrateRef, assign?: (v: unknown) => void, mode?: 'now' | 'defer'): () => void {
   const e: RefEntry = { el, ref, assign, on: false, undo: null };
   live.add(e);
-  if (mode === 'defer') {
-    if (!deferred) {
-      deferred = [];
-      // Safety net when no hydration script flushes explicitly.
-      queueMicrotask(krateRefsFlush);
-    }
+  if (mode === 'defer' && deferred) {
     deferred.push(e);
   } else if (mode === 'now' || el.isConnected) {
     attach(e);

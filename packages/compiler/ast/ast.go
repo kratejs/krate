@@ -203,6 +203,9 @@ func (j *JSXElement) Pos() Pos { return j.Position }
 type JSXFragment struct {
 	Position Pos
 	Children []JSXChild
+	// Key is the React key of a lowered `<Fragment key={...}>`; nil for the
+	// `<>...</>` shorthand, which cannot carry a key.
+	Key Expr
 }
 
 func (j *JSXFragment) node()    {}

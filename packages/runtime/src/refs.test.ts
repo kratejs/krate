@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { krateAttachRef, krateSetRef, krateRefsFlush } from './refs';
+import { krateAttachRef, krateSetRef, krateRefsFlush, krateRefsHold } from './refs';
 import { krateBindRef, h, disposeNode, krateOn, krateControl } from './dom';
 import { createSignal, createEffect, onCleanup, disposeAll } from './signal';
 import { krateCondSwap, krateCondDetached, krateCondReset, krateSanitizeAttr } from './slots';
@@ -84,6 +84,7 @@ describe('element refs', () => {
   it('assigns plain variable targets through the setter', () => {
     const el = document.getElementById('i')!;
     let target: unknown = undefined;
+    krateRefsHold();
     const dispose = krateBindRef(el, () => undefined, (v) => {
       target = v;
     });
@@ -222,6 +223,19 @@ describe('hydration bootstrap refs and events', () => {
     disposeAll();
   });
 
+  it('stringifies boolean aria-* and data-* attribute bindings', async () => {
+    document.body.innerHTML = '<div id="root"><input data-k="k:i"></div>';
+    bootstrap();
+    const [bad, setBad] = createSignal(false);
+    (window as any).kbindAttr('i', 'aria-invalid', () => bad());
+    const input = document.querySelector('input')!;
+    expect(input.getAttribute('aria-invalid')).toBe('false');
+    setBad(true);
+    await tick();
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    disposeAll();
+  });
+
   it('binds handlers and controlled values', () => {
     document.body.innerHTML = '<div id="root"><input data-k="k:i" value="a"></div>';
     bootstrap();
@@ -243,6 +257,7 @@ describe('hydration ref queue', () => {
     document.body.innerHTML = '<div id="root"><ul><li id="ssr">a</li></ul></div>';
     const log: string[] = [];
     const ssr = document.getElementById('ssr')!;
+    krateRefsHold();
     krateBindRef(ssr, () => (n: unknown) => {
       log.push('ssr ' + (n ? 'node' : 'null'));
     });
@@ -253,5 +268,14 @@ describe('hydration ref queue', () => {
     document.querySelector('ul')!.appendChild(fresh);
     krateRefsFlush();
     expect(log).toEqual(['fresh node']);
+  });
+});
+
+describe('refs outside hydration', () => {
+  it('attach at once for a component mounted after hydration', () => {
+    document.body.innerHTML = '<div id="root"><input id="late"></div>';
+    const ref = { current: null as unknown };
+    krateBindRef(document.getElementById('late')!, () => ref);
+    expect(ref.current).toBe(document.getElementById('late'));
   });
 });
