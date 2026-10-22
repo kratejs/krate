@@ -3,10 +3,6 @@
     "severity": "P0",
     "reason": "[derived-render-values] a useMemo result used by other render-local values is called as a getter: uncaught 'visible is not a function', tbody renders no rows, select-all starts checked"
   },
-  "r18/app_modal_focus": {
-    "severity": "P1",
-    "reason": "[conditional-child-effects] the unmounted Dialog's effect runs at page load; when opened, focus() in its effect runs before the input exists so focus stays on the trigger"
-  },
   "r18/app_tabs_accordion": {
     "severity": "P0",
     "reason": "[derived-render-values] tab panel text derived from tabs[index] never updates after selecting a tab; aria-selected={false} is omitted instead of rendering \"false\"; clicked tab loses focus"
@@ -103,10 +99,6 @@
     "severity": "P0",
     "reason": "[signal-getter-leak] object context value read via useContext gives undefined fields in effects and data-color={theme.color} is dropped; only the style binding works"
   },
-  "r18/diag_conditional_hook": {
-    "severity": "P1",
-    "reason": "[missing-diagnostic] hook called inside if(): build succeeds with no KR2xxx diagnostic"
-  },
   "r18/diag_find_dom_node": {
     "severity": "P1",
     "reason": "[missing-diagnostic] findDOMNode (removed in React 19): build succeeds with no KR8001 diagnostic"
@@ -125,15 +117,15 @@
   },
   "r18/effect_cleanup_order_rerun": {
     "severity": "P1",
-    "reason": "[effect-cleanup] on re-run Krate interleaves cleanup+effect per effect instead of running all cleanups first, and cleanups see the new state (disconnect random instead of general)"
+    "reason": "[effect-cleanup] cleanups now run before re-runs in React order, but each cleanup reads the new state (disconnect random instead of general)"
   },
   "r18/effect_deps_empty": {
     "severity": "P1",
-    "reason": "[conditional-child-effects] child with [] effect: cleanup does not run when the child is removed by a condition, and the effect does not run again on remount"
+    "reason": "[effect-cleanup] [] effect cleanup on unmount reads the latest props (unmount two instead of one)"
   },
   "r18/effect_deps_function": {
     "severity": "P1",
-    "reason": "[effect-deps] functions in deps never compare as changed: neither the inline function nor the useCallback recreated on userId change re-runs its effect"
+    "reason": "[effect-deps] an inline function in deps never re-runs its effect (identity treated as stable); the useCallback effect re-runs but before the inline one"
   },
   "r18/effect_deps_literal": {
     "severity": "P1",
@@ -151,29 +143,21 @@
     "severity": "P1",
     "reason": "[signal-getter-leak] object literal {page} built in render stores the signal getter (effects log 'fn'); inline object deps do not re-run every render"
   },
-  "r18/effect_deps_signed_zero": {
-    "severity": "P0",
-    "reason": "[setstate-equality] state setter compares with === so setOffset(-0) after 0 is dropped (React uses Object.is); DOM and effect stay on +0"
-  },
   "r18/effect_deps_variable": {
     "severity": "P1",
     "reason": "[effect-cleanup] deps array held in a variable works, but the cleanup closure sees the new query (cancel ab instead of cancel a)"
   },
   "r18/effect_layout_vs_passive": {
     "severity": "P1",
-    "reason": "[effect-phases] insertion, layout and passive effects run in declaration order in one phase; React runs insertion < layout < passive, cleanups likewise"
+    "reason": "[effect-cleanup] insertion/layout/passive phases now match, but every cleanup reads the new state (cleanup 1 instead of 0)"
   },
   "r18/effect_order_parent_child": {
     "severity": "P1",
-    "reason": "[effect-order] effects run parent-first (root, branch, leaves); React runs children first; unmount cleanup order also differs"
-  },
-  "r18/effect_reads_dom": {
-    "severity": "P1",
-    "reason": "[effect-timing] layout and passive effects run before the DOM reflects the update (see 1 row after adding the 2nd)"
+    "reason": "[effect-order] mount order matches; on update cleanups and re-runs go per component (branch, root) instead of all child cleanups first, and cleanups read new props"
   },
   "r18/effect_reads_ref": {
-    "severity": "P1",
-    "reason": "[effect-timing] ref to a conditionally rendered input is non-null before mount, and focus() in the effect runs before the input is inserted, so focus stays on the button"
+    "severity": "P0",
+    "reason": "[autofocus] input focused from an effect gets its controlled/default value written after focus, so the caret is at the start and typing prepends (!draft)"
   },
   "r18/effect_setstate_in_effect": {
     "severity": "P1",
@@ -181,7 +165,7 @@
   },
   "r18/effect_unmount_cleanup": {
     "severity": "P1",
-    "reason": "[list-remount] removing a keyed row never runs its layout/passive cleanup, while the remaining rows re-run their mount effects; initial mount order also differs"
+    "reason": "[list-remount] removing one keyed row unmounts every row and remounts the survivors (extra cleanups and mount effects)"
   },
   "r18/event_checkbox_radio_onchange": {
     "severity": "P1",
@@ -190,26 +174,6 @@
   "r18/event_double_click": {
     "severity": "P0",
     "reason": "[autofocus] autoFocus is emitted as an attribute and the controlled value is set after focus, so typing lands at the start (' docUntitled')"
-  },
-  "r18/event_input_onchange": {
-    "severity": "P1",
-    "reason": "[synthetic-event] onChange on text inputs reports e.type 'input'; React reports 'change'"
-  },
-  "r18/event_stop_propagation": {
-    "severity": "P0",
-    "reason": "[synthetic-event] e.isPropagationStopped() is missing: handler throws, state update lost"
-  },
-  "r18/event_submit_prevent": {
-    "severity": "P0",
-    "reason": "[event-current-target] delegated onSubmit gets currentTarget = #root, so new FormData(e.currentTarget) throws and the submit result is lost"
-  },
-  "r18/event_synthetic_fields": {
-    "severity": "P1",
-    "reason": "[synthetic-event] e.nativeEvent is missing (instanceof MouseEvent false)"
-  },
-  "r18/event_target_current_target": {
-    "severity": "P1",
-    "reason": "[event-current-target] e.currentTarget is the delegation root (div#root) instead of the element whose handler runs"
   },
   "r18/form_controlled_checkbox": {
     "severity": "P0",
@@ -221,23 +185,11 @@
   },
   "r18/form_controlled_reject": {
     "severity": "P0",
-    "reason": "[controlled-input] when onChange rejects an edit the DOM value is not restored to state (pin keeps '12a3', frozen input accepts typing)"
-  },
-  "r18/form_controlled_textarea": {
-    "severity": "P0",
-    "reason": "[controlled-input] textarea value truncated in onChange is not written back to the DOM; user sees text beyond the limit"
-  },
-  "r18/form_multi_select": {
-    "severity": "P0",
-    "reason": "[controlled-input] <select multiple value={array}> is not controlled: selection is cleared on change and not applied from state"
+    "reason": "[controlled-input] rejected edits are now restored, except an input with a constant value and a no-op onChange: typing still changes the DOM value (xread only by state)"
   },
   "r18/form_radio_group": {
     "severity": "P0",
     "reason": "[derived-render-values] price derived with plans.find(...) never updates; radio loses focus after change"
-  },
-  "r18/form_uncontrolled_default": {
-    "severity": "P0",
-    "reason": "[uncontrolled-default] defaultValue that depends on state is re-applied on update, overwriting what the user typed (ada becomes 'guest 1')"
   },
   "r18/hook_custom_hook": {
     "severity": "P0",
@@ -258,10 +210,6 @@
   "r18/hook_useref_mutable": {
     "severity": "P1",
     "reason": "[ref-in-render] ref.current read during render is shown once and never refreshed on later renders; no diagnostic for the unsupported pattern"
-  },
-  "r18/hook_usestate_bailout": {
-    "severity": "P1",
-    "reason": "[setstate-equality] setState with a new but equal-content object does not re-render, so the deps-less effect does not run"
   },
   "r18/hook_usestate_functional_batch": {
     "severity": "P0",
@@ -293,7 +241,7 @@
   },
   "r18/key_insert_remove": {
     "severity": "P1",
-    "reason": "[list-remount] keyed row effects run twice at load, and every list change re-runs mount effects of unchanged rows without their cleanups; removed rows never run cleanup"
+    "reason": "[list-remount] every list change unmounts all rows and remounts them (cleanups and mount effects for unchanged keys)"
   },
   "r18/key_reorder_stateful": {
     "severity": "P0",
@@ -317,19 +265,11 @@
   },
   "r18/ref_callback_mount_unmount": {
     "severity": "P1",
-    "reason": "[callback-ref] callback ref is not called with null on unmount nor with the node on remount of a conditional element"
+    "reason": "[callback-ref] a useCallback ref on a conditional element is never called (not with the node on mount or remount, not with null on unmount)"
   },
   "r18/ref_create_ref_class": {
     "severity": "P0",
     "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
-  },
-  "r18/ref_imperative_handle": {
-    "severity": "P0",
-    "reason": "[imperative-handle] useImperativeHandle on a forwardRef child never assigns ref.current: calling the handle throws"
-  },
-  "r18/ref_in_layout_effect": {
-    "severity": "P0",
-    "reason": "[effect-timing] layout effect measures before the DOM update, so the rendered height is one step behind (0px, 20px vs 20px, 40px)"
   },
   "r18/ref_list_refs": {
     "severity": "P1",
@@ -401,7 +341,7 @@
   },
   "r19/ref_callback_cleanup": {
     "severity": "P1",
-    "reason": "[callback-ref] ref callback cleanup is not called on detach and the callback is not called again on re-attach"
+    "reason": "[callback-ref] a ref callback that returns a cleanup is never called: no attach on mount, no cleanup on detach"
   },
   "r19/transition_async": {
     "severity": "P1",
@@ -410,5 +350,13 @@
   "r19/use_promise_suspense": {
     "severity": "P0",
     "reason": "[use-promise] use(promise) under Suspense: no fallback, the list renders empty and never fills, switching posts does not suspend"
+  },
+  "r18/effect_passive_flush_discrete": {
+    "severity": "P1",
+    "reason": "[effect-timing] passive effects after a discrete click run in a later task (handler microtask logs before passive 1; React flushes them first), and updates from a timeout commit synchronously (layout before the queued microtask)"
+  },
+  "r18/effect_toggle_stateful_child": {
+    "severity": "P0",
+    "reason": "[conditional-state] {show && <Counter/>} keeps the child state when hidden and shown again (count 2 instead of a fresh 0); React remounts it"
   }
 }
