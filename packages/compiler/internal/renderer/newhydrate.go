@@ -34,7 +34,7 @@ window.findSlot=function(id){var q='[data-k="k:'+id+'"]';var el=__root.querySele
 window.refreshSlots=scan;
 window.krateMountPortals=function(){var list=document.querySelectorAll('[data-krate-portal]');for(var i=0;i<list.length;i++){(function(node){if(node.getAttribute('data-krate-portal-mounted'))return;node.setAttribute('data-krate-portal-mounted','1');if(node.parentNode!==document.body)document.body.appendChild(node);if(typeof krateEventRoot==='function')krateEventRoot(node);if(typeof window.onCleanup==='function')window.onCleanup(function(){if(node.parentNode)node.parentNode.removeChild(node);});})(list[i]);}};
 window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}}));},n);};
-window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;var __first=true;__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);}));},n);};
+window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;var __first=true;__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}var _fa=document.activeElement,_fid=_fa&&_fa!==document.body&&_fa.id&&n.parentNode&&n.parentNode.contains(_fa)?_fa.id:null;while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);if(_fid&&!_fa.isConnected){var _fn=document.getElementById(_fid);if(_fn&&_fn.focus)_fn.focus();}}));},n);};
 window.kbindList=function(id,src,key,render,mode){var n=findSlot(id);if(!n||n.nodeType!==8||typeof krateBindList!=='function')return;__safe(function(){krateBindList(n,src,key,render,mode);});};
 window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(__krateFx(n,function(){var s=!!get();var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(window.__krateCondPre)window.__krateCondPre(id,s);if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');if(window.__krateCondPost)window.__krateCondPost(id,s);}));},n);};
 window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;var ad=/^(aria|data)-/.test(attr);__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(v==null||(v===false&&!ad))n.removeAttribute(attr);else if(v===true&&!ad)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){if(typeof krateApplyStyle==='function')krateApplyStyle(n,v);else{n.removeAttribute('style');Object.assign(n.style,v);}}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));}));},n);};
@@ -73,6 +73,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	// Rebuild the comment-marker cache against the current DOM (fresh page
 	// load or SPA navigation).
 	b.WriteString("refreshSlots();\n")
+	b.WriteString("if(typeof krateRefsHold==='function')krateRefsHold();\n")
 	b.WriteString("if(window.krateMountPortals)window.krateMountPortals();\n")
 
 	// Component functions needed by dynamic list slots. Without these the
@@ -379,6 +380,10 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	}
 
 	// Router
+	// Hydration refs attach once every component has bound its DOM.
+	b.WriteString("if(typeof krateRefsFlush==='function')krateRefsFlush();\n")
+	// Text inputs get React's mount-time caret (at the end of the value).
+	b.WriteString("if(typeof krateMountFields==='function')krateMountFields(document.getElementById('root')||document.body);\n")
 	b.WriteString("if(typeof reinitRouter==='function'){reinitRouter();}else if(typeof initRouter==='function'){initRouter();}\n")
 
 	b.WriteString("})();\n")

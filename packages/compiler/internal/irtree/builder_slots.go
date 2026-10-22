@@ -97,6 +97,7 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	// call local or imported helpers.
 	for _, r := range node.RefBindings {
 		scan(r.Callback)
+		scan(r.Target)
 	}
 	for _, eff := range node.Effects {
 		scan(eff)
@@ -1438,6 +1439,9 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 
 	// Dynamic attributes: emit the SSR initial value plus the hydration marker.
 	for _, a := range attrs {
+		if a.HydrateOnly {
+			continue
+		}
 		// The SSR initial value goes through the same table as static
 		// attributes; an empty non-boolean initial is omitted.
 		switch {
