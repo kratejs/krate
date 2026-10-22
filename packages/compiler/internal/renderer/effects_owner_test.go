@@ -68,7 +68,8 @@ export default function Index() {
 
 func TestBootstrapReportsBranchAndSlotChanges(t *testing.T) {
 	for _, frag := range []string{
-		"var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');",
+		// The owner-tree hooks (boundary.ts) bracket the effects.ts activity calls.
+		"var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(window.__krateCondPre)window.__krateCondPre(id,s);if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');if(window.__krateCondPost)window.__krateCondPost(id,s);",
 		"if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}",
 	} {
 		if !strings.Contains(HydrationBootstrapJS, frag) {

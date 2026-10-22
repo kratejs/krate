@@ -1,83 +1,11 @@
 {
-  "r18/app_data_table": {
-    "severity": "P0",
-    "reason": "[derived-render-values] a useMemo result used by other render-local values is called as a getter: uncaught 'visible is not a function', tbody renders no rows, select-all starts checked"
-  },
   "r18/app_tabs_accordion": {
     "severity": "P0",
-    "reason": "[derived-render-values] tab panel text derived from tabs[index] never updates after selecting a tab; aria-selected={false} is omitted instead of rendering \"false\"; clicked tab loses focus"
-  },
-  "r18/app_todo": {
-    "severity": "P0",
-    "reason": "[derived-render-values] 'N left' (todos.filter(...).length computed in render) is stale after adding a todo; later edit/filter steps diverge"
-  },
-  "r18/boundary_did_catch_info": {
-    "severity": "P0",
-    "reason": "[class-unlowered] error boundaries (getDerivedStateFromError) are not lowered: the boundary and its children render as an empty <span>; warned without a diagnostic code"
-  },
-  "r18/boundary_effect_error": {
-    "severity": "P0",
-    "reason": "[class-unlowered] error boundary not lowered (empty <span>, subtree never renders); errors thrown in effects are not routed to a boundary; warned without a code"
-  },
-  "r18/boundary_event_handler_error": {
-    "severity": "P0",
-    "reason": "[class-unlowered] error boundary wrapping the whole page is not lowered, so the page renders only an empty <span>; warned without a code"
-  },
-  "r18/boundary_nested": {
-    "severity": "P0",
-    "reason": "[class-unlowered] nested error boundaries not lowered: children render as an empty <span>; warned without a code"
-  },
-  "r18/boundary_render_error": {
-    "severity": "P0",
-    "reason": "[class-unlowered] error boundary not lowered: protected child renders as an empty <span> and no fallback appears on render error; warned without a code"
-  },
-  "r18/boundary_reset_key": {
-    "severity": "P0",
-    "reason": "[class-unlowered] error boundary not lowered (empty <span>); key-based reset cannot work; warned without a code"
-  },
-  "r18/class_context_type": {
-    "severity": "P0",
-    "reason": "[class-unlowered] class with static contextType is not lowered and renders an empty <span>; warned without a code"
-  },
-  "r18/class_default_props": {
-    "severity": "P0",
-    "reason": "[class-default-props] static defaultProps are ignored: missing props render as undefined (class=\"pill undefined\", empty label)"
-  },
-  "r18/class_derived_state": {
-    "severity": "P0",
-    "reason": "[class-unlowered] class with static getDerivedStateFromProps is not lowered and renders an empty <span>; warned without a code"
-  },
-  "r18/class_get_snapshot": {
-    "severity": "P0",
-    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
-  },
-  "r18/class_lifecycle_mount_update_unmount": {
-    "severity": "P1",
-    "reason": "[class-lifecycle] componentDidUpdate is not called for prop changes (only own setState) and componentWillUnmount never runs when the parent removes the class"
-  },
-  "r18/class_lifecycle_order_nested": {
-    "severity": "P1",
-    "reason": "[effect-order] componentDidMount/DidUpdate run parent-first and interleave with child hook effects; React runs children first, then parents"
+    "reason": "[list-row-conditional] accordion rows inside the conditionally mounted FAQ panel keep {isOpen && <p/>} from mount: the previous answer stays open after toggling another row"
   },
   "r18/class_pure_component": {
     "severity": "P2",
     "reason": "[render-count] PureComponent render is logged once less: Krate updates the text binding without re-running render(); DOM and state match"
-  },
-  "r18/class_setstate_callback": {
-    "severity": "P0",
-    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
-  },
-  "r18/class_setstate_functional": {
-    "severity": "P0",
-    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
-  },
-  "r18/class_should_component_update": {
-    "severity": "P0",
-    "reason": "[class-unlowered] class with shouldComponentUpdate is not lowered and renders an empty <span> (hint says remove it); warned without a code"
-  },
-  "r18/class_state_setstate": {
-    "severity": "P0",
-    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
   },
   "r18/context_consumer_render_prop": {
     "severity": "P0",
@@ -89,15 +17,11 @@
   },
   "r18/context_memo_child": {
     "severity": "P1",
-    "reason": "[signal-getter-leak] useContext value read in a memo child's render logs as a function (signal getter), not the number; render count also differs (P2 part)"
+    "reason": "[render-count] the context value is now plain and the text updates, but the memo child's body (its render log) does not re-run on context changes"
   },
   "r18/context_nested_providers": {
     "severity": "P0",
     "reason": "[context-build-eval] build fails: a component that nests itself under a Provider (<Level><Level>) is rejected as 'recursive component cannot be expanded'"
-  },
-  "r18/context_provider_change": {
-    "severity": "P0",
-    "reason": "[signal-getter-leak] object context value read via useContext gives undefined fields in effects and data-color={theme.color} is dropped; only the style binding works"
   },
   "r18/diag_find_dom_node": {
     "severity": "P1",
@@ -106,30 +30,6 @@
   "r18/diag_legacy_context": {
     "severity": "P1",
     "reason": "[missing-diagnostic] legacy context (childContextTypes/getChildContext/contextTypes): build succeeds with no KR3xxx diagnostic"
-  },
-  "r18/effect_deps_nan": {
-    "severity": "P0",
-    "reason": "[derived-render-values] const value = Number(raw) is evaluated once at hydration: text and effect deps never update after raw changes"
-  },
-  "r18/effect_deps_object_identity": {
-    "severity": "P1",
-    "reason": "[signal-getter-leak] object literal {page} built in render stores the signal getter, so the effects log 'fn' instead of the page number; the effects re-run when React's do"
-  },
-  "r18/form_controlled_checkbox": {
-    "severity": "P0",
-    "reason": "[derived-render-values] 'select all' checked={a && b && c} is not recomputed"
-  },
-  "r18/form_controlled_input": {
-    "severity": "P0",
-    "reason": "[derived-render-values] derived 'valid' never updates, so aria-invalid={!valid} and the status text stay at their build-time value"
-  },
-  "r18/form_radio_group": {
-    "severity": "P0",
-    "reason": "[derived-render-values] price derived with plans.find(...) never updates"
-  },
-  "r18/hook_custom_hook": {
-    "severity": "P0",
-    "reason": "[custom-hooks] custom hooks returning a tuple/object render garbage ('open=function open()...', '[object HTMLButtonElement]') and their counters stay empty"
   },
   "r18/hook_usecallback_identity": {
     "severity": "P2",
@@ -143,14 +43,6 @@
     "severity": "P1",
     "reason": "[ref-in-render] ref.current read during render is shown once and never refreshed on later renders; reported as KR5008 (keep displayed values in state)"
   },
-  "r18/hook_usesyncexternalstore": {
-    "severity": "P0",
-    "reason": "[module-scope] module-level const cartStore = createStore(0) using an imported helper is not bundled: 'createStore is not defined', store-driven text empty"
-  },
-  "r18/list_filter_map": {
-    "severity": "P0",
-    "reason": "[derived-render-values] list filtered by two states in a render-local const: updates on the text filter but not on the select; empty state never shows"
-  },
   "r18/portal_basic": {
     "severity": "P0",
     "reason": "[portal] createPortal(..., document.body) content never appears in body; clicks cannot reach it"
@@ -158,10 +50,6 @@
   "r18/portal_modal_toggle": {
     "severity": "P0",
     "reason": "[portal] conditional portal never mounts into body; its effect runs at page load while closed"
-  },
-  "r18/ref_create_ref_class": {
-    "severity": "P0",
-    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
   },
   "r18/suspense_fallback_then_content": {
     "severity": "P0",

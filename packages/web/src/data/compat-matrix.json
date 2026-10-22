@@ -48,23 +48,23 @@
     {
       "id": "class-components",
       "area": "Class components",
-      "source": "partial",
+      "source": "beta",
       "islands": "n/a",
       "ssr": "n/a",
       "target": "Full common subset",
-      "summary": "State, setState, mount/update/unmount, forceUpdate, helpers, and instance fields are lowered. shouldComponentUpdate, snapshots, derived state, and error lifecycle methods are rejected with diagnostics.",
-      "tests": ["TestClassComponentLowering", "TestSynthesizeClassComponentRejectsUnsupported"],
+      "summary": "Lowered onto a runtime instance with React 18 ordering: batched setState with callbacks, forceUpdate, componentDidMount/DidUpdate (props and state, children first)/WillUnmount on branch removal, shouldComponentUpdate, PureComponent, getDerivedStateFromProps, getSnapshotBeforeUpdate, defaultProps, contextType, accessors, private members, and instance refs. UNSAFE_componentWillMount, legacy context and other statics are rejected with KR3xxx diagnostics.",
+      "tests": ["TestClassComponentLowering", "TestClassComponentLoweringEmit", "TestClassLoweringIssueNamesMember", "browser:/react-class/", "fixture:examples/src/pages/react-class.tsx"],
       "roadmap": true
     },
     {
       "id": "error-boundaries",
       "area": "Error boundaries",
-      "source": "planned",
+      "source": "beta",
       "islands": "planned",
-      "ssr": "planned",
+      "ssr": "partial",
       "target": "Source and island",
-      "summary": "No React-compatible error boundary lifecycle yet. Build failures and island load errors use Krate fallbacks.",
-      "tests": [],
+      "summary": "Classes with getDerivedStateFromError/componentDidCatch catch errors from descendants' render, bindings, lifecycles and effects (not event handlers or async code), unmount the failed subtree, and recover on reset. A throw while the page is built renders the boundary fallback (KR3009). Uncaught errors unmount only the failing component. Island boundaries are planned.",
+      "tests": ["TestBoundaryBuildTimeFallback", "TestBuildTimeThrowWithoutBoundaryFails", "TestClassBoundaryChildrenBranch", "browser:/react-class/"],
       "roadmap": true
     },
     {

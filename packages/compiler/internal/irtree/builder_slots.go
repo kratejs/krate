@@ -338,7 +338,9 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		return nil
 	}
 	// A key that reads reactive state remounts the element when it changes.
-	if key := jsxKeyAttr(el); key != nil && b.referencesSignal(key) {
+	// A lowered class remounts itself (its runtime instance reads the key),
+	// which keeps it and its children in the error-boundary owner tree.
+	if key := jsxKeyAttr(el); key != nil && b.referencesSignal(key) && !b.ann.IsLoweredClass(el.Opening.Name) {
 		return b.buildKeyedSlot(el, key, parentID)
 	}
 	// Built-in <Portal>: render children inline with a marker, then move the
@@ -445,6 +447,7 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		savedScope := b.contextScopes
 		savedProps := b.localProps
 		savedValues := b.contextValues
+		savedInitials := b.contextInitials
 		isScope := false
 		if ref, ok := b.resolveScopeExpr(valueExpr); ok {
 			isScope = true
@@ -461,7 +464,13 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 			b.contextValues[ctx] = valueExpr
 			// Static rendering (SSREval) still folds reads from this marker, so
 			// seed it with the value's build-time initial as a fallback.
-			if initial := evalConstValue(valueExpr, b.sigMap(), savedProps); !initial.ContainsUnknown() {
+			initial := evalConstValue(valueExpr, b.sigMap(), savedProps)
+			b.contextInitials = make(map[string]jsvalue.Value, len(savedInitials)+1)
+			for k, v := range savedInitials {
+				b.contextInitials[k] = v
+			}
+			b.contextInitials[ctx] = initial
+			if !initial.ContainsUnknown() {
 				b.localProps = cloneStringMap(savedProps)
 				b.localProps[contextMarkerPrefix+ctx] = initial
 			}
@@ -470,6 +479,7 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		b.contextScopes = savedScope
 		b.localProps = savedProps
 		b.contextValues = savedValues
+		b.contextInitials = savedInitials
 		return slots
 	}
 
@@ -2698,6 +2708,10 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 		if b.isLivePropRead(e) {
 			return true
 		}
+		// `tabs[index()]` reads a signal in its computed key.
+		if e.Computed && b.referencesSignal(e.Property) {
+			return true
+		}
 		return b.referencesSignal(e.Object)
 	case *ast.BinaryExpr:
 		return b.referencesSignal(e.Left) || b.referencesSignal(e.Right)
@@ -2903,6 +2917,12 @@ func (b *builder) collectSignalDecls(fn *ast.FnDecl) []SignalDecl {
 					if _, isSig := b.sigMap()[id.Name]; isSig {
 						rawInit = generateExprJS(d.Initial, b.sigMap())
 					}
+				}
+				// A call that folded to an object or array (Object.assign,
+				// a class's getDerivedStateFromProps) runs on the client too:
+				// the folded source would otherwise be emitted as a string.
+				if rawInit == "" && (strings.HasPrefix(initial, "{") || strings.HasPrefix(initial, "[")) {
+					rawInit = generateExprJS(d.Initial, b.sigMap())
 				}
 			}
 		}

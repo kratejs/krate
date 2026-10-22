@@ -39,6 +39,11 @@ type hookFrame struct {
 	sc     *scope
 	params []*ast.Param
 	body   []ast.Stmt
+	// kind and propsName are set for component and custom hook bodies in
+	// React modules (react_derived.go); propsName is a component's
+	// whole-props parameter.
+	kind      frameKind
+	propsName string
 	// noDeps are synthesized dependency arrays of effects without a
 	// dependency array, filled once the whole body has been rewritten.
 	noDeps []*ast.ArrayExpr
@@ -402,6 +407,10 @@ func (c *reactCtx) callableGetterCall(sc *scope, name string, call *ast.CallExpr
 				return true
 			case "useMemo":
 				return len(call.Args) > 0
+			case "derived":
+				// A derived render value or hook result: React source calling
+				// it invokes the value.
+				return true
 			}
 			return false
 		}

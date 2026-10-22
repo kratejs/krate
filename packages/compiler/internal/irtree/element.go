@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -99,6 +100,23 @@ func (b *builder) elementBindings(el *ast.JSXElement, id SlotID) (handlers []Han
 	return handlers, attrs, refs
 }
 
+// refCallbackReads lists the reactive values (state and derived render
+// values) an inline callback ref reads anywhere in its body, sorted.
+func (b *builder) refCallbackReads(fn *ast.ArrowFn, js string) []string {
+	own := map[string]bool{}
+	for _, n := range functionScopeNames(fn.Params, fn.Body) {
+		own[n] = true
+	}
+	var reads []string
+	for name := range b.sigMap() {
+		if !own[name] && b.isSignalName(name) && codeContainsIdent(js, name) {
+			reads = append(reads, name)
+		}
+	}
+	sort.Strings(reads)
+	return reads
+}
+
 // constantControlBindings returns hydration-only bindings for statically
 // known value/checked props on form controls.
 func (b *builder) constantControlBindings(tag string, attributes []*ast.JSXAttr, id SlotID, have []AttrBinding) []AttrBinding {
@@ -166,7 +184,7 @@ func (b *builder) refBinding(attr *ast.JSXAttr, id SlotID) (RefBinding, bool) {
 		// state of its own render. Re-bind when a signal the callback reads
 		// changes, and give each callback a snapshot of those signals by
 		// shadowing their getters.
-		if reads := b.collectSignalReads(fn); len(reads) > 0 {
+		if reads := b.refCallbackReads(fn, cb); len(reads) > 0 {
 			args := make([]string, len(reads))
 			for i, r := range reads {
 				args[i] = "(v=>()=>v)(" + r + "())"
