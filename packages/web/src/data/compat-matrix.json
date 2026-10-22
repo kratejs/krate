@@ -130,7 +130,7 @@
       "ssr": "n/a",
       "target": "Source semantics",
       "summary": "Source useActionState (queued, previous state over the action transport, permalink no-JS fallback), useFormStatus (form-scoped), useOptimistic (revert on settle), requestFormReset, and function form actions are lowered and run in the browser gate. Compiled packages get the same useActionState/useOptimistic runtime; their useFormStatus is idle. use() and async startTransition are tracked under Suspense and transitions.",
-      "tests": ["TestLowerUseActionState", "TestLowerUseFormStatusDestructured", "TestLowerUseOptimistic", "TestReactActionFormsCompile", "browser:/react-actions/"],
+      "tests": ["TestLowerUseActionState", "TestReactBrowserDifferential", "TestLowerUseFormStatusDestructured", "TestLowerUseOptimistic", "TestReactActionFormsCompile", "browser:/react-actions/"],
       "roadmap": true
     },
     {
@@ -209,6 +209,28 @@
       "summary": "The island build warns below 10.20. The conformance jobs exercise the minimum, an intermediate version, and the workspace version.",
       "tests": ["ci:preact-conformance"],
       "roadmap": false
+    },
+    {
+      "id": "browser-differential",
+      "area": "Browser differential corpus",
+      "source": "partial",
+      "islands": "n/a",
+      "ssr": "n/a",
+      "target": "No P0/P1 divergence",
+      "summary": "124 source-component fixtures (React 18 corpus plus the React 19 reference app) run in real React 19 and in Krate in Chromium, Firefox, and WebKit; DOM, form state, focus, and effect/lifecycle/ref ordering are compared after every step. Known divergences are tracked with a severity, and KRATE_REACT_EXIT=1 fails while P0/P1 entries remain.",
+      "tests": ["TestReactBrowserDifferential", "TestReactBrowserCorpus", "ci:browser-conformance"],
+      "roadmap": true
+    },
+    {
+      "id": "react-19-reference",
+      "area": "React 19 reference app",
+      "source": "planned",
+      "islands": "n/a",
+      "ssr": "n/a",
+      "target": "Same browser suite as React 18",
+      "summary": "Fixtures for useActionState, useOptimistic, useFormStatus, form and button actions with auto-reset, use(promise) and use(context), ref as a prop, ref cleanup callbacks, async transitions, useDeferredValue initial values, document metadata, and server actions under the real server.",
+      "tests": ["TestReactBrowserDifferential", "fixture:packages/compiler/internal/build/testdata/reactbrowser/r19/app_reference.tsx"],
+      "roadmap": true
     }
   ]
 }

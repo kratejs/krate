@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "dispatch", "sel": "#ime", "event": "compositionstart", "ctor": "CompositionEvent", "init": { "data": "" } },
+    { "op": "dispatch", "sel": "#ime", "event": "compositionupdate", "ctor": "CompositionEvent", "init": { "data": "ni" } },
+    { "op": "dispatch", "sel": "#ime", "event": "compositionend", "ctor": "CompositionEvent", "init": { "data": "你" } }
+  ]
+}

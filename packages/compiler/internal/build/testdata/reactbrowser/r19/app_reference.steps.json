@@ -1,0 +1,13 @@
+{
+  "settleMs": 0,
+  "steps": [
+    { "op": "waitFor", "sel": "#todos" },
+    { "op": "click", "sel": "#add" },
+    { "op": "waitFor", "sel": "#error" },
+    { "op": "fill", "sel": "#title", "text": "ship Krate" },
+    { "op": "click", "sel": "#add" },
+    { "op": "wait", "ms": 60 },
+    { "op": "waitFor", "text": "ready" },
+    { "op": "wait", "ms": 30 }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#next" },
+    { "op": "type", "sel": "#name", "text": "Ada" },
+    { "op": "type", "sel": "#email", "text": "ada@calc.org" },
+    { "op": "click", "sel": "#next" },
+    { "op": "click", "sel": "#next" },
+    { "op": "select", "sel": "#plan", "value": "pro" },
+    { "op": "click", "sel": "#back" },
+    { "op": "click", "sel": "#next" },
+    { "op": "click", "sel": "#next" },
+    { "op": "click", "sel": "#next" },
+    { "op": "click", "sel": "#terms" },
+    { "op": "click", "sel": "#next" }
+  ]
+}

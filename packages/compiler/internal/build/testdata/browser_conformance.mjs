@@ -5,9 +5,9 @@ import { chromium, firefox, webkit } from "playwright";
 
 const root = process.argv[2];
 const browserName = process.argv[3] || "chromium";
-// Optional origin of the server-action endpoint (Go action handler in front of
-// the Node sidecar). /__krate/action/* requests are proxied to it.
-const actionOrigin = process.argv[4] || "";
+// Base URL of a running `krate serve` for routes that need the server
+// (server actions). Empty skips those routes.
+const actionsBase = process.argv[4] || "";
 const port = 4189;
 
 if (!root) {
@@ -32,19 +32,6 @@ const mime = {
 };
 
 const server = http.createServer((req, res) => {
-  if (actionOrigin && req.url.startsWith("/__krate/action/")) {
-    const target = new URL(req.url, actionOrigin);
-    const upstream = http.request(target, { method: req.method, headers: req.headers }, (ures) => {
-      res.writeHead(ures.statusCode || 502, ures.headers);
-      ures.pipe(res);
-    });
-    upstream.on("error", (err) => {
-      res.statusCode = 502;
-      res.end(String(err));
-    });
-    req.pipe(upstream);
-    return;
-  }
   let p = decodeURIComponent(req.url.split("?")[0]);
   if (p.endsWith("/")) p += "index.html";
   else if (!path.extname(p)) p += "/index.html";
@@ -263,8 +250,8 @@ try {
 
   // React 19 actions: useActionState + useFormStatus + useOptimistic on the
   // server-action transport, without page reloads.
-  let actions = { skipped: !actionOrigin };
-  if (actionOrigin) {
+  let actions = { skipped: !actionsBase };
+  if (actionsBase) {
     const text = (id) => page.locator(`[data-testid=${id}]`).textContent();
     const waitText = async (id, value) => {
       try {
@@ -277,7 +264,8 @@ try {
         throw new Error(`[data-testid=${id}] is ${JSON.stringify(await text(id))}, want ${JSON.stringify(value)}; errors: ${errors.join(" | ")}`);
       }
     };
-    await go("/react-actions/", "[data-testid=todo-form]");
+    await page.goto(actionsBase + "/react-actions/", { waitUntil: "networkidle" });
+    await page.waitForSelector("[data-testid=todo-form]", { timeout: 8000 });
     await page.evaluate(() => {
       window.__krateNoReload = true;
     });
@@ -316,6 +304,14 @@ try {
     await page.waitForFunction(() => !document.querySelector("[data-testid=feedback-form]")?.hasAttribute("data-krate-action-pending"));
     const feedbackInput = await page.locator("[data-testid=feedback-text]").inputValue();
 
+    const faResponse = page.waitForResponse((r) => r.url().includes("/__krate/action/") && r.request().method() === "POST");
+    await page.locator("[data-testid=formaction-form] button[type=submit]").click();
+    const faRes = await faResponse;
+    const formActionResult = { status: faRes.status(), body: await faRes.json().catch(() => null) };
+    if (formActionResult.status !== 200 || formActionResult.body?.result?.text !== "submitted by formAction") {
+      fail(`server action formAction: ${JSON.stringify(formActionResult)}`);
+    }
+
     await page.getByRole("button", { name: "Run action directly" }).click();
     await waitText("direct-result", "direct call:11:fetch");
     const noReload = await page.evaluate(() => window.__krateNoReload === true);
@@ -323,7 +319,7 @@ try {
     // Progressive enhancement: the same forms post natively without JS.
     const noJS = await browser.newContext({ javaScriptEnabled: false });
     const plain = await noJS.newPage();
-    await plain.goto(baseURL + "/react-actions/");
+    await plain.goto(actionsBase + "/react-actions/");
     await plain.locator("[data-testid=todo-title]").fill("no js");
     const [nojsTodo] = await Promise.all([
       plain.waitForResponse((r) => r.url().includes("/__krate/action/")),
@@ -331,7 +327,7 @@ try {
     ]);
     await plain.waitForLoadState("load");
     const nojsTodoURL = plain.url();
-    await plain.goto(baseURL + "/react-actions/");
+    await plain.goto(actionsBase + "/react-actions/");
     const [nojsFeedback] = await Promise.all([
       plain.waitForResponse((r) => r.url().includes("/__krate/action/")),
       plain.locator("[data-testid=feedback-form] button").click(),
@@ -349,6 +345,7 @@ try {
       feedbackStatus,
       feedbackInput,
       noReload,
+      formAction: formActionResult,
       nojs: { todo: nojsTodo.status(), todoURL: nojsTodoURL, feedback: nojsFeedback.status(), feedbackURL: nojsFeedbackURL },
     };
     if (todoPending.label !== "Working..." || !todoPending.disabled) fail(`useFormStatus pending: ${JSON.stringify(todoPending)}`);

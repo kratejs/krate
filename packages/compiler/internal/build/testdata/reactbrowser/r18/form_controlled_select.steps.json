@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "select", "sel": "#country", "value": "jp" },
+    { "op": "select", "sel": "#city", "value": "Kyoto" },
+    { "op": "select", "sel": "#country", "value": "fr" }
+  ]
+}

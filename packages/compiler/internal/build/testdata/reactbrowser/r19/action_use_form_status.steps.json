@@ -1,0 +1,9 @@
+{
+  "settleMs": 0,
+  "steps": [
+    { "op": "click", "sel": "#submit" },
+    { "op": "wait", "ms": 60 },
+    { "op": "waitFor", "text": "subscribed ada" },
+    { "op": "wait", "ms": 30 }
+  ]
+}

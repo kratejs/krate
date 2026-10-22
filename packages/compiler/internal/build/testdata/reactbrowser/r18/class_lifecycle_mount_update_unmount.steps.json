@@ -1,0 +1,8 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#tick" },
+    { "op": "click", "sel": "#relabel" },
+    { "op": "click", "sel": "#toggle" },
+    { "op": "click", "sel": "#toggle" }
+  ]
+}

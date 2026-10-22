@@ -1,0 +1,6 @@
+{
+  "steps": [
+    { "op": "type", "sel": "#text", "text": " big" },
+    { "op": "fill", "sel": "#text", "text": "" }
+  ]
+}

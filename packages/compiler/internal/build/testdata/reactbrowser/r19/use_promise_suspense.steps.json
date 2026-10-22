@@ -1,0 +1,8 @@
+{
+  "settleMs": 0,
+  "steps": [
+    { "op": "waitFor", "sel": "#comments" },
+    { "op": "click", "sel": "#next" },
+    { "op": "waitFor", "text": "part2: first!" }
+  ]
+}

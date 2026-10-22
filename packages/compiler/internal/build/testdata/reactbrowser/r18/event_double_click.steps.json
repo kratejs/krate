@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "dblclick", "sel": "#title" },
+    { "op": "type", "sel": "#title-input", "text": " doc" },
+    { "op": "click", "sel": "#done" }
+  ]
+}

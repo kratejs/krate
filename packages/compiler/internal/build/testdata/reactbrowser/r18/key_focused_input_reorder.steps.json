@@ -1,0 +1,8 @@
+{
+  "notes": "The rotate button prevents mousedown so focus stays in the input.",
+  "steps": [
+    { "op": "type", "sel": "#in-y", "text": "typed" },
+    { "op": "click", "sel": "#rotate" },
+    { "op": "click", "sel": "#rotate" }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#add" },
+    { "op": "eval", "js": "window.__store.set(10)" },
+    { "op": "eval", "js": "window.__store.set(10)" }
+  ]
+}

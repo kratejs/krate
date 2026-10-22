@@ -47,17 +47,25 @@ func TestBrowserConformance(t *testing.T) {
 		t.Fatalf("BuildAll: %v", err)
 	}
 
+	// Server actions need the real server (POST /__krate/action/<id> through
+	// the Node sidecar), so /react-actions/ is visited on an in-process
+	// Serve; the rest of the corpus is served statically.
+	actionsBase := ""
+	if canStopInProcessServer {
+		base, err := startKrateServer(t, projectRoot, cfg)
+		if err != nil {
+			t.Fatalf("serve examples: %v", err)
+		}
+		actionsBase = base
+	} else {
+		t.Log("skipping /react-actions/: in-process server needs a unix host")
+	}
+
 	script, err := filepath.Abs(filepath.Join("testdata", "browser_conformance.mjs"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Server actions: the static server proxies /__krate/action/ to the Go
-	// action handler in front of the real Node sidecar.
-	actionOrigin := ""
-	if hasActionManifest(projectRoot) {
-		actionOrigin = serveActionSidecar(t, "node", filepath.Join(projectRoot, ".krate", "actions"), false).URL
-	}
-	cmd := exec.Command("node", script, cfg.OutDir, browser, actionOrigin)
+	cmd := exec.Command("node", script, cfg.OutDir, browser, actionsBase)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "Executable doesn't exist") ||

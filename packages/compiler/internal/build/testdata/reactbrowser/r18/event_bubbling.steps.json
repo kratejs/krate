@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#btn" },
+    { "op": "click", "sel": "#text" },
+    { "op": "click", "sel": "#outer" }
+  ]
+}
