@@ -50,13 +50,13 @@ func TestMinifyHTMLPreservesRegionMarkers(t *testing.T) {
 	}
 }
 
-// TestRemoveOptionalQuotesPreservesCSP guards the quote stripper against
+// TestMinifyHTMLQuotesPreservesCSP guards the quote stripper against
 // corrupting quoted attribute values that contain quotes and spaces, such as a
 // Content-Security-Policy: the inner 'self' quotes must survive unminified and
 // the attribute's own opening/closing quotes must stay.
-func TestRemoveOptionalQuotesPreservesCSP(t *testing.T) {
+func TestMinifyHTMLQuotesPreservesCSP(t *testing.T) {
 	in := `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-abc';">`
-	out := removeOptionalQuotes(in)
+	out := minifyHTML(in)
 	want := `content="default-src 'self'; script-src 'self' 'sha256-abc';"`
 	if !strings.Contains(out, want) {
 		t.Errorf("CSP content value corrupted:\n  in : %s\n  out: %s", in, out)
@@ -66,11 +66,11 @@ func TestRemoveOptionalQuotesPreservesCSP(t *testing.T) {
 	}
 }
 
-// TestRemoveOptionalQuotesKeepsQuotedSpaces ensures a quoted value containing
+// TestMinifyHTMLQuotesKeepsQuotedSpaces ensures a quoted value containing
 // spaces keeps both its quotes and doesn't confuse the tag scanner.
-func TestRemoveOptionalQuotesKeepsQuotedSpaces(t *testing.T) {
+func TestMinifyHTMLQuotesKeepsQuotedSpaces(t *testing.T) {
 	in := `<div class="foo bar" title="a b" hidden></div>`
-	out := removeOptionalQuotes(in)
+	out := minifyHTML(in)
 	if !strings.Contains(out, `class="foo bar"`) || !strings.Contains(out, `title="a b"`) {
 		t.Errorf("quoted space values corrupted:\n  in : %s\n  out: %s", in, out)
 	}
@@ -79,21 +79,21 @@ func TestRemoveOptionalQuotesKeepsQuotedSpaces(t *testing.T) {
 	}
 }
 
-// TestRemoveOptionalQuotesStillDropsSimple ensures simple values are still
+// TestMinifyHTMLQuotesStillDropsSimple ensures simple values are still
 // safely unquoted.
-func TestRemoveOptionalQuotesStillDropsSimple(t *testing.T) {
+func TestMinifyHTMLQuotesStillDropsSimple(t *testing.T) {
 	in := `<img src="x.png" alt="hi" width="200">`
-	out := removeOptionalQuotes(in)
+	out := minifyHTML(in)
 	if !strings.Contains(out, `src=x.png alt=hi width=200>`) {
 		t.Errorf("expected simple attribute quotes dropped:\n  out: %s", out)
 	}
 }
 
-// TestRemoveOptionalQuotesKeepsEmpty preserves empty values (dropping them
+// TestMinifyHTMLQuotesKeepsEmpty preserves empty values (dropping them
 // would merge adjacent attributes).
-func TestRemoveOptionalQuotesKeepsEmpty(t *testing.T) {
+func TestMinifyHTMLQuotesKeepsEmpty(t *testing.T) {
 	in := `<img onerror="" onload="">`
-	out := removeOptionalQuotes(in)
+	out := minifyHTML(in)
 	if !strings.Contains(out, `onerror="" onload=""`) {
 		t.Errorf("empty attribute values must keep quotes:\n  out: %s", out)
 	}
