@@ -20,8 +20,8 @@
     "reason": "[context-build-eval] build fails: useContext() default value used without a Provider cannot be evaluated at build time (unresolved identifier createContext)"
   },
   "r18/context_memo_child": {
-    "severity": "P1",
-    "reason": "[render-count] the context value is now plain and the text updates, but the memo child's body (its render log) does not re-run on context changes"
+    "severity": "P2",
+    "reason": "[render-count] the context value is plain and the text updates like React; only the memo child's render log differs, because Krate does not re-run component bodies (same as class_pure_component and hook_usecallback_identity)"
   },
   "r18/context_nested_providers": {
     "severity": "P0",
