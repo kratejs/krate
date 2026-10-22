@@ -1,6 +1,9 @@
 // @krate/runtime/server - Server-side rendering runtime
 // Provides the same API as the client runtime but renders to HTML strings.
 
+export { getActionContext, headers, cookies, redirect } from './action-context.js';
+export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
+
 // Signal (server: returns initial value, no reactivity)
 
 export function createSignal<T>(initial: T): [() => T, (v: T | ((prev: T) => T)) => void] {
@@ -159,6 +162,8 @@ function setAttr(key: string, val: any): string {
   if ((key === "formAction" || key === "formaction") && isServerAction(val)) {
     return ` formaction="${escapeHTML(val.actionUrl)}" formmethod="post" data-krate-action`;
   }
+  // Client function actions run only after hydration; they have no HTML form.
+  if (typeof val === "function") return "";
   if (key === "class") return ` class="${escapeHTML(String(val))}"`;
   if (key === "style" && typeof val === "object") {
     const css = Object.entries(val)

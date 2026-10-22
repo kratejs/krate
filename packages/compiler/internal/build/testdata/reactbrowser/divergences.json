@@ -95,10 +95,6 @@
     "severity": "P1",
     "reason": "[missing-diagnostic] findDOMNode (removed in React 19): build succeeds with no KR8001 diagnostic"
   },
-  "r18/diag_hook_in_loop": {
-    "severity": "P1",
-    "reason": "[missing-diagnostic] useState inside a for loop: build succeeds with no KR2xxx diagnostic"
-  },
   "r18/diag_legacy_context": {
     "severity": "P1",
     "reason": "[missing-diagnostic] legacy context (childContextTypes/getChildContext/contextTypes): build succeeds with no KR3xxx diagnostic"
@@ -107,45 +103,9 @@
     "severity": "P1",
     "reason": "[missing-diagnostic] string ref (ref=\"name\", this.refs): build succeeds with no KR5xxx diagnostic"
   },
-  "r18/effect_cleanup_order_rerun": {
-    "severity": "P1",
-    "reason": "[effect-cleanup] cleanups now run before re-runs in React order, but each cleanup reads the new state (disconnect random instead of general)"
-  },
-  "r18/effect_deps_empty": {
-    "severity": "P1",
-    "reason": "[effect-cleanup] [] effect cleanup on unmount reads the latest props (unmount two instead of one)"
-  },
-  "r18/effect_deps_function": {
-    "severity": "P1",
-    "reason": "[effect-deps] an inline function in deps never re-runs its effect (identity treated as stable); the useCallback effect re-runs but before the inline one"
-  },
-  "r18/effect_deps_literal": {
-    "severity": "P1",
-    "reason": "[effect-cleanup] cleanup reads the current state value instead of the value from the render it belongs to (cleanup count 1 instead of 0)"
-  },
-  "r18/effect_deps_missing": {
-    "severity": "P1",
-    "reason": "[effect-cleanup] effect without deps: cleanup closure sees the new values instead of the previous render's"
-  },
-  "r18/effect_deps_variable": {
-    "severity": "P1",
-    "reason": "[effect-cleanup] deps array held in a variable works, but the cleanup closure sees the new query (cancel ab instead of cancel a)"
-  },
-  "r18/effect_layout_vs_passive": {
-    "severity": "P1",
-    "reason": "[effect-cleanup] insertion/layout/passive phases now match, but every cleanup reads the new state (cleanup 1 instead of 0)"
-  },
-  "r18/effect_order_parent_child": {
-    "severity": "P1",
-    "reason": "[effect-order] mount order matches; on update cleanups and re-runs go per component (branch, root) instead of all child cleanups first, and cleanups read new props"
-  },
   "r18/effect_reads_ref": {
     "severity": "P0",
     "reason": "[autofocus] input focused from an effect gets its controlled/default value written after focus, so the caret is at the start and typing prepends (!draft)"
-  },
-  "r18/effect_setstate_in_effect": {
-    "severity": "P1",
-    "reason": "[effect-timing] derived state set in an effect: the initial 'words now 0' effect run is missing (state already 1 on first effect)"
   },
   "r18/event_double_click": {
     "severity": "P0",
@@ -167,25 +127,13 @@
     "severity": "P2",
     "reason": "[id-format] useId strings differ (krate-1-Field-Field_c0 vs _r_0_); ids are unique and label/aria links work on both sides"
   },
-  "r18/hook_usereducer_init": {
-    "severity": "P0",
-    "reason": "[hooks-reducer-init] useReducer(reducer, arg, init) ignores init: state is the raw arg, count renders empty and dispatch throws 'state.history is not iterable'"
-  },
   "r18/hook_useref_mutable": {
     "severity": "P1",
     "reason": "[ref-in-render] ref.current read during render is shown once and never refreshed on later renders; no diagnostic for the unsupported pattern"
   },
-  "r18/hook_usestate_functional_batch": {
-    "severity": "P0",
-    "reason": "[state-snapshot] state reads in a handler see updates immediately (no render snapshot): setCount(count + 1) three times adds 3 instead of 1"
-  },
   "r18/hook_usestate_lazy_init": {
-    "severity": "P0",
-    "reason": "[hooks-lazy-init] useState(loadDraft) stores the identifier text 'loadDraft' instead of calling the initializer"
-  },
-  "r18/key_change_remounts": {
     "severity": "P1",
-    "reason": "[effect-props-snapshot] a key change remounts with fresh state and effects, but the old instance's effect cleanup reads the new props (props are live getters, not a per-render snapshot)"
+    "reason": "[caret] the lazy initializer runs once and the value matches, but the controlled textarea value is written after hydration, so the caret starts at the end and typing appends (React: caret at the start)"
   },
   "r18/portal_basic": {
     "severity": "P0",
@@ -223,37 +171,17 @@
     "severity": "P0",
     "reason": "[suspense-lazy] build fails: nested Suspense with lazy(() => promise) evaluated at build time"
   },
-  "r19/action_button_form_action": {
-    "severity": "P0",
-    "reason": "[form-actions] client function actions are stringified into action/formaction attributes (function source leaks into the DOM) and the form submits natively, navigating away"
-  },
   "r19/action_form_auto_reset": {
-    "severity": "P0",
-    "reason": "[form-actions] <form action={asyncFn}> stringifies the function into the action attribute; submit is not intercepted, no message is added, no auto-reset"
-  },
-  "r19/action_optimistic": {
-    "severity": "P0",
-    "reason": "[form-actions] useOptimistic list not rendered on load and the client action form submits natively (page navigates away)"
-  },
-  "r19/action_server_form": {
-    "severity": "P0",
-    "reason": "[form-actions] useActionState with a 'use server' action renders action=\"formAction\" literally; submit navigates natively instead of calling POST /__krate/action"
+    "severity": "P2",
+    "reason": "[form-actions] the action, message and auto-reset match; with the fixture's 80ms delay Krate commits the result one frame after React, so the snapshot right after the click can still show the old field value"
   },
   "r19/action_server_direct": {
     "severity": "P1",
     "reason": "[async-transition] direct server action call works end to end, but useTransition isPending stays false during the async transition ('loading' never shows)"
   },
-  "r19/action_use_action_state": {
-    "severity": "P0",
-    "reason": "[form-actions] useActionState: action=\"formAction\" literal, button rendered disabled, state count empty; the action never runs"
-  },
-  "r19/action_use_form_status": {
-    "severity": "P0",
-    "reason": "[form-status] build fails: useFormStatus() from react-dom is evaluated at build time ('unresolved identifier useFormStatus')"
-  },
   "r19/app_reference": {
     "severity": "P0",
-    "reason": "[form-status] React 19 reference app does not build: useFormStatus evaluated at build time (also exercises use(promise), useActionState, useOptimistic)"
+    "reason": "[use-promise] the reference app builds and its actions, useFormStatus and useOptimistic run; use(promise) under Suspense shows the list immediately instead of the 'loading todos' fallback, which shifts the later steps"
   },
   "r19/context_as_provider": {
     "severity": "P0",
@@ -282,13 +210,5 @@
   "r19/use_promise_suspense": {
     "severity": "P0",
     "reason": "[use-promise] use(promise) under Suspense: no fallback, the list renders empty and never fills, switching posts does not suspend"
-  },
-  "r18/effect_passive_flush_discrete": {
-    "severity": "P1",
-    "reason": "[effect-timing] passive effects after a discrete click run in a later task (handler microtask logs before passive 1; React flushes them first), and updates from a timeout commit synchronously (layout before the queued microtask)"
-  },
-  "r18/effect_toggle_stateful_child": {
-    "severity": "P0",
-    "reason": "[conditional-state] {show && <Counter/>} keeps the child state when hidden and shown again (count 2 instead of a fresh 0); React remounts it"
   }
 }

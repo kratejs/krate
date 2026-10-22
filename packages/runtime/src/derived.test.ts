@@ -122,6 +122,25 @@ describe('krateDerived render identity', () => {
   });
 });
 
+describe('krateDerived with React state snapshots', () => {
+  beforeEach(() => disposeAll());
+
+  it('reads the committed value in a handler and the latest value in render', async () => {
+    const [raw, setRaw] = createSignal('12', { react: true });
+    const value = krateDerived(() => Number(raw()));
+    const seen: number[] = [];
+    createEffect(() => {
+      seen.push(value());
+    });
+    setRaw('7');
+    // Like a React event handler: state set in this handler is not visible yet.
+    expect(value()).toBe(12);
+    await flush();
+    expect(seen).toEqual([12, 7]);
+    expect(value()).toBe(7);
+  });
+});
+
 describe('krateHook', () => {
   beforeEach(() => disposeAll());
 

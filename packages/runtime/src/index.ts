@@ -15,6 +15,8 @@ export { clsx, cn, cva, twMerge, Slot, cloneElement } from './class-helpers.js';
 export type { ClassValue, CVAConfig } from './class-helpers.js';
 export { createContext, createScope, createScopeFlags, resetContexts } from './context.js';
 export { createResource } from './resource.js';
+export { requestFormReset, getFormStatus, isServerAction, ServerActionError } from './actions.js';
+export type { FormStatus, ServerActionProxy } from './actions.js';
 export type { Context } from './context.js';
 export type { ResourceReturn, ResourceActions } from './resource.js';
 export type { Component, PropsWithChildren, ComponentProps, RefCallback } from './dom.js';

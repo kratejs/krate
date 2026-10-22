@@ -29,6 +29,8 @@ var reactNames = map[string]string{
 	// useId is lowered by the IR builder to a per-instance build-time literal;
 	// the marker identifier is resolved there (it has the instance context).
 	"useId": "__krate_useId",
+	// React DOM's requestFormReset is a runtime global (runtime/src/actions.ts).
+	"requestFormReset": "requestFormReset",
 }
 
 // structuralReactAPIs are React APIs lowered structurally (identity/passthrough
@@ -160,15 +162,23 @@ type reactCtx struct {
 	frames      []*hookFrame
 	arrayConsts map[*scope]map[string]*ast.ArrayExpr
 	callables   map[*scope]map[string]string
+	// fnNames are bindings known to hold functions (function declarations
+	// and const arrow/function expressions), used for lazy initializers.
+	fnNames     map[string]bool
+	freshLocals map[*scope]map[string]bool
+	// formStatusSeq numbers lowered useFormStatus() mount refs per module and
+	// formStatusPos records their positions for diagnostics.
+	formStatusSeq int
+	formStatusPos []ast.Pos
 
 	// Render-scope lowering state (react_derived.go). react is set for a
 	// module that imports React; reads counts reactive reads seen while
 	// rewriting, so a caller can tell whether an expression is render-dependent.
-	react   bool
-	reads   int
-	tmp     int
-	fnNames map[*ast.ArrowFn]string
-	setters map[string]bool
+	react      bool
+	reads      int
+	tmp        int
+	arrowNames map[*ast.ArrowFn]string
+	setters    map[string]bool
 }
 
 // localAPI resolves an identifier bound by a React named import to its React
@@ -194,7 +204,7 @@ func (c *reactCtx) compatMember(mem *ast.MemberExpr) (ast.Expr, bool) {
 		return nil, false
 	}
 	isReactMember := c.alias != "" && objID.Name == c.alias && compatReactNames[propID.Name]
-	isDOMMember := c.domAlias != "" && objID.Name == c.domAlias && (propID.Name == "createPortal" || propID.Name == "flushSync")
+	isDOMMember := c.domAlias != "" && objID.Name == c.domAlias && reactDOMAPI(propID.Name)
 	if !isReactMember && !isDOMMember {
 		return nil, false
 	}
@@ -218,7 +228,7 @@ func (c *reactCtx) memberAPI(mem *ast.MemberExpr) (string, bool) {
 	if c.alias != "" && objID.Name == c.alias && reactAPI(propID.Name) {
 		return propID.Name, true
 	}
-	if c.domAlias != "" && objID.Name == c.domAlias && (propID.Name == "createPortal" || propID.Name == "flushSync") {
+	if c.domAlias != "" && objID.Name == c.domAlias && reactDOMAPI(propID.Name) {
 		return propID.Name, true
 	}
 	return "", false
@@ -251,6 +261,7 @@ func RewriteReact(prog *ast.Program) {
 func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	renameReservedBindings(prog)
 	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src}
+	ctx.fnNames = functionNames(prog.Body)
 	var toRemove []int
 
 	for i, stmt := range prog.Body {
@@ -303,8 +314,7 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 					ctx.domAlias = local
 					continue
 				}
-				switch named.Remote {
-				case "createPortal", "flushSync":
+				if reactDOMAPI(named.Remote) {
 					ctx.imports[local] = named.Remote
 				}
 			}
@@ -365,6 +375,15 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	return ctx.diags
 }
 
+// reactDOMAPI reports the react-dom exports Krate lowers or provides.
+func reactDOMAPI(name string) bool {
+	switch name {
+	case "createPortal", "flushSync", "useFormStatus", "requestFormReset":
+		return true
+	}
+	return false
+}
+
 func (c *reactCtx) rewriteStmts(stmts []ast.Stmt, sc *scope) {
 	for _, stmt := range stmts {
 		c.rewriteStmt(stmt, sc)
@@ -384,6 +403,10 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 	case *ast.ExprStmt:
 		s.Expression = c.rewriteExpr(s.Expression, sc)
 	case *ast.FnDecl:
+		if c.frame() != nil && s.Name != "" {
+			// A function declared in a component is a new function each render.
+			c.recordFresh(sc, s.Name)
+		}
 		child := c.fnScope(s.Params, sc)
 		done := c.enterFn(child, s.Params, s.Body)
 		kind := frameKindOf(s.Name)
@@ -391,6 +414,7 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 			kind = frameComponent
 		}
 		c.rewriteFnBody(&s.Body, child, kind, s.Params)
+		c.injectFormStatusRefs(s.Body)
 		done()
 	case *ast.ExportStmt:
 		if s.Declaration != nil {
@@ -398,8 +422,10 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 		}
 	case *ast.IfStmt:
 		s.Test = c.rewriteExpr(s.Test, sc)
-		c.rewriteStmts(s.Consequent, sc)
-		c.rewriteStmts(s.Alternate, sc)
+		c.guarded("condition", func() {
+			c.rewriteStmts(s.Consequent, sc)
+			c.rewriteStmts(s.Alternate, sc)
+		})
 	case *ast.BlockStmt:
 		c.rewriteStmts(s.Body, newScope(sc))
 	case *ast.ForStmt:
@@ -412,7 +438,7 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 		if s.Update != nil {
 			s.Update = c.rewriteExpr(s.Update, sc)
 		}
-		c.rewriteStmts(s.Body, newScope(sc))
+		c.guarded("loop", func() { c.rewriteStmts(s.Body, newScope(sc)) })
 	case *ast.ForInStmt:
 		if s.Left != nil {
 			s.Left = c.rewriteExpr(s.Left, sc)
@@ -420,14 +446,14 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 		if s.Right != nil {
 			s.Right = c.rewriteExpr(s.Right, sc)
 		}
-		c.rewriteStmts(s.Body, newScope(sc))
+		c.guarded("loop", func() { c.rewriteStmts(s.Body, newScope(sc)) })
 	case *ast.WhileStmt:
 		if s.Test != nil {
 			s.Test = c.rewriteExpr(s.Test, sc)
 		}
-		c.rewriteStmts(s.Body, newScope(sc))
+		c.guarded("loop", func() { c.rewriteStmts(s.Body, newScope(sc)) })
 	case *ast.DoWhileStmt:
-		c.rewriteStmts(s.Body, newScope(sc))
+		c.guarded("loop", func() { c.rewriteStmts(s.Body, newScope(sc)) })
 		if s.Test != nil {
 			s.Test = c.rewriteExpr(s.Test, sc)
 		}
@@ -439,7 +465,7 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 			if cs.Test != nil {
 				cs.Test = c.rewriteExpr(cs.Test, sc)
 			}
-			c.rewriteStmts(cs.Body, sc)
+			c.guarded("condition", func() { c.rewriteStmts(cs.Body, sc) })
 		}
 	case *ast.TryStmt:
 		c.rewriteStmts(s.Body, sc)
@@ -473,6 +499,9 @@ func (c *reactCtx) fnScope(params []*ast.Param, parent *scope) *scope {
 // factories) in the scope, then rewrites the initializers so React-style reads
 // inside them become calls.
 func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
+	if c.lowerActionHook(v, sc) {
+		return
+	}
 	// Lower `const [pending, start] = useTransition()` to a Krate signal plus a
 	// starter function. The compat call would otherwise leave both bindings
 	// undefined in the hydration scope.
@@ -551,6 +580,9 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 		decl.Init = c.rewriteExpr(decl.Init, sc)
 		if arr, ok := decl.Init.(*ast.ArrayExpr); ok && v.Kind == ast.VarConst && !decl.IsDestructuring && decl.Name != "" {
 			c.recordArrayConst(sc, decl.Name, arr)
+		}
+		if !decl.IsDestructuring && decl.Name != "" && isFreshValue(decl.Init) && c.frame() != nil {
+			c.recordFresh(sc, decl.Name)
 		}
 	}
 }
@@ -650,6 +682,7 @@ func (c *reactCtx) rewriteExprCtx(expr ast.Expr, sc *scope, valuePos bool) ast.E
 		} else {
 			c.rewriteFnBody(&e.Body, child, frameKindOf(c.fnName(e)), e.Params)
 		}
+		c.injectFormStatusRefs(e.Body)
 		done()
 	case *ast.TemplateExpr:
 		for i, part := range e.Parts {
@@ -718,6 +751,7 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 
 	// Effects, memos and callbacks with dependency arrays (react_effects.go).
 	if isReactAPI {
+		c.checkHookPlacement(e, api)
 		if _, ok := effectPhases[api]; ok {
 			return c.lowerEffectHook(e, api, sc)
 		}
@@ -729,13 +763,9 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 		case "useCallback":
 			return c.lowerCallbackHook(e, sc)
 		case "useState":
-			// Lazy initializer: React calls useState(() => init) once and
-			// stores its result; createSignal would store the function.
-			if len(e.Args) >= 1 {
-				if arrow, ok := e.Args[0].(*ast.ArrowFn); ok && len(arrow.Params) == 0 && !arrow.Async && !arrow.Generator {
-					e.Args[0] = &ast.CallExpr{Position: arrow.Position, Callee: arrow}
-				}
-			}
+			c.lowerStateHook(e)
+		case "useReducer":
+			c.lowerReducerHook(e)
 		case "useImperativeHandle":
 			// Honour the dependency array: the compat helper re-creates the
 			// handle when the thunk's result changes.

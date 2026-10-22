@@ -96,12 +96,12 @@ func (c *reactCtx) noteFnName(name string, init ast.Expr) {
 	if name == "" || init == nil {
 		return
 	}
-	if c.fnNames == nil {
-		c.fnNames = map[*ast.ArrowFn]string{}
+	if c.arrowNames == nil {
+		c.arrowNames = map[*ast.ArrowFn]string{}
 	}
 	switch e := init.(type) {
 	case *ast.ArrowFn:
-		c.fnNames[e] = name
+		c.arrowNames[e] = name
 	case *ast.CallExpr:
 		api, ok := c.callAPI(e.Callee)
 		if !ok {
@@ -117,7 +117,7 @@ func (c *reactCtx) noteFnName(name string, init ast.Expr) {
 
 // fnName returns the name a function expression is known by.
 func (c *reactCtx) fnName(e *ast.ArrowFn) string {
-	if n, ok := c.fnNames[e]; ok {
+	if n, ok := c.arrowNames[e]; ok {
 		return n
 	}
 	return e.Name
