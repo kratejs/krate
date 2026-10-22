@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#open" },
+    { "op": "waitFor", "sel": ".lazy-toggle" },
+    { "op": "click", "sel": ".lazy-toggle" }
+  ]
+}

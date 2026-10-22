@@ -1,0 +1,8 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#plus3" },
+    { "op": "click", "sel": "#stale" },
+    { "op": "click", "sel": "#timeout" },
+    { "op": "wait", "ms": 50 }
+  ]
+}

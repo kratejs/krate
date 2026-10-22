@@ -1,0 +1,8 @@
+{
+  "server": true,
+  "steps": [
+    { "op": "click", "sel": "#load" },
+    { "op": "waitFor", "text": "grace" },
+    { "op": "wait", "ms": 50 }
+  ]
+}

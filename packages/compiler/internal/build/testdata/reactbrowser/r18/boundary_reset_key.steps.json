@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#fail" },
+    { "op": "click", "sel": "#retry" },
+    { "op": "click", "sel": "#fail" }
+  ]
+}

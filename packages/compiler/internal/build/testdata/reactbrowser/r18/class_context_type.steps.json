@@ -1,0 +1,6 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#fr" },
+    { "op": "click", "sel": "#de" }
+  ]
+}

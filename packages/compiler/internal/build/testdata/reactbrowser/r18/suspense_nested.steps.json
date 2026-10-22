@@ -1,0 +1,7 @@
+{
+  "settleMs": 0,
+  "steps": [
+    { "op": "waitFor", "sel": "#sidebar" },
+    { "op": "waitFor", "sel": "#comments" }
+  ]
+}

@@ -7,6 +7,9 @@ const root = process.argv[2];
 const browserName = process.argv[3] || "chromium";
 // An ephemeral port by default so parallel runs do not collide.
 const port = Number(process.env.KRATE_BROWSER_PORT || 0);
+// Base URL of a running `krate serve` for routes that need the server
+// (server actions). Empty skips those routes.
+const actionsBase = process.argv[4] || "";
 
 if (!root) {
   console.error("usage: browser_conformance.mjs <dist-root> [chromium|firefox|webkit]");
@@ -237,6 +240,49 @@ try {
   if (noteSame !== "hello") fail(`keyed remount with the same key reset state: ${noteSame}`);
   if (profile.user !== "grace" || profile.note !== "") fail(`keyed remount: ${JSON.stringify(profile)}`);
 
+  // Server actions: direct call through the client proxy, a form action and a
+  // button formAction, all through POST /__krate/action/<id>.
+  let actions = null;
+  if (actionsBase) {
+    await page.goto(actionsBase + "/react-actions/", { waitUntil: "networkidle" });
+    await page.waitForSelector("[data-testid=feedback-form]", { timeout: 8000 });
+    await page.getByRole("button", { name: "Run action directly" }).click();
+    await page
+      .waitForFunction(() => document.querySelector("[data-testid=direct-result]")?.textContent?.includes(":"), null, { timeout: 8000 })
+      .catch(() => {});
+    const direct = await page.locator("[data-testid=direct-result]").textContent();
+    if (direct !== "direct call:11") fail(`server action direct result: ${direct}`);
+
+    // A successful form action reloads the page, which discards the response
+    // body, so capture it while proxying the request.
+    const submitAction = async (formTestId) => {
+      let captured = null;
+      await page.route("**/__krate/action/**", async (route) => {
+        const response = await route.fetch();
+        captured = { status: response.status(), body: await response.text() };
+        await route.fulfill({ response });
+      });
+      await page.locator(`[data-testid=${formTestId}] button[type=submit]`).click();
+      for (let i = 0; i < 80 && !captured; i++) await page.waitForTimeout(100);
+      await page.unroute("**/__krate/action/**");
+      await page.waitForLoadState("networkidle");
+      let body = null;
+      try {
+        body = JSON.parse(captured?.body || "");
+      } catch {}
+      return { status: captured?.status, ok: body?.ok === true, text: body?.result?.text };
+    };
+    const form = await submitAction("feedback-form");
+    if (form.status !== 200 || !form.ok || form.text !== "hello from a form") {
+      fail(`server action form: ${JSON.stringify(form)}`);
+    }
+    const formAction = await submitAction("formaction-form");
+    if (formAction.status !== 200 || !formAction.ok || formAction.text !== "submitted by formAction") {
+      fail(`server action formAction: ${JSON.stringify(formAction)}`);
+    }
+    actions = { direct, form, formAction };
+  }
+
   // React effects: phase order, children before parents, Object.is deps,
   // batching, and cleanups when a conditional branch hides.
   await go("/react-effects/", "[data-testid=effects-inc]");
@@ -339,7 +385,7 @@ try {
 
   if (errors.length) fail("console errors: " + errors.join(" | "));
 
-  console.log(JSON.stringify({ browser: browserName, before, after, tooltip, tooltipDebug, formResult, errors, failures }, null, 2));
+  console.log(JSON.stringify({ browser: browserName, before, after, tooltip, tooltipDebug, formResult, actions, errors, failures }, null, 2));
   if (failures.length) process.exitCode = 1;
 } catch (err) {
   console.error(err?.stack || String(err));

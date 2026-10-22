@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "hover", "sel": "#a" },
+    { "op": "hover", "sel": "#b" },
+    { "op": "hover", "sel": "#far" }
+  ]
+}

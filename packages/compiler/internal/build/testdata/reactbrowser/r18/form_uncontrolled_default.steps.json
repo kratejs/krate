@@ -1,0 +1,9 @@
+{
+  "steps": [
+    { "op": "fill", "sel": "#name", "text": "ada" },
+    { "op": "click", "sel": "#news" },
+    { "op": "click", "sel": "#rerender" },
+    { "op": "select", "sel": "#plan", "value": "free" },
+    { "op": "click", "sel": "#read" }
+  ]
+}

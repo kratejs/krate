@@ -1,0 +1,9 @@
+{
+  "steps": [
+    { "op": "type", "sel": "#tag", "text": "go" },
+    { "op": "press", "sel": "#tag", "key": "Enter" },
+    { "op": "type", "sel": "#tag", "text": "tmp" },
+    { "op": "press", "sel": "#tag", "key": "Escape" },
+    { "op": "press", "sel": "#tag", "key": "Shift+A" }
+  ]
+}
