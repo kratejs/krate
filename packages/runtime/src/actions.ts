@@ -360,6 +360,16 @@ interface ActionTarget {
 /** Binds a function action to a form or submit button (`action={fn}` / `formAction={fn}`). */
 export function __krateBindFormAction(el: Element, get: Getter): void {
   (el as Element & ActionTarget).__krateFormAction = get;
+  // The native POST target only serves the no-JS fallback; once the function
+  // is bound the element matches React's client DOM (no action attribute).
+  if (el.tagName === 'FORM') {
+    el.removeAttribute('action');
+    el.removeAttribute('method');
+  } else {
+    el.removeAttribute('formaction');
+    el.removeAttribute('formmethod');
+  }
+  el.removeAttribute('data-krate-action');
 }
 
 interface RunnableAction {
@@ -433,7 +443,6 @@ export async function submitFormAction(
   st.running++;
   publish(st, { pending: true, data, method, action: action || url || null });
   form.setAttribute('data-krate-action-pending', '1');
-  form.setAttribute('aria-busy', 'true');
   let ok = false;
   try {
     await runActionTransition(async () => {
@@ -453,7 +462,6 @@ export async function submitFormAction(
     st.running--;
     if (st.running === 0) {
       form.removeAttribute('data-krate-action-pending');
-      form.removeAttribute('aria-busy');
       publish(st, IDLE);
       if (ok || st.resetRequested) {
         st.resetRequested = false;

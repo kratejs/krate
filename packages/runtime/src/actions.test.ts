@@ -71,7 +71,6 @@ describe('form actions', () => {
     submit(form);
     expect(seen).toEqual(['typed']);
     expect(form.getAttribute('data-krate-action-pending')).toBe('1');
-    expect(form.getAttribute('aria-busy')).toBe('true');
     expect(getFormStatus(form).pending).toBe(true);
     expect(input.value).toBe('typed');
     gate.resolve();
@@ -98,6 +97,15 @@ describe('form actions', () => {
     expect((errors[0] as Error).message).toBe('boom');
     expect(input.value).toBe('kept');
     expect(getFormStatus(form).pending).toBe(false);
+  });
+
+  it('drops the no-JS POST target once a function is bound', () => {
+    const form = makeForm('<form action="/__krate/action/a1?__krate_args=%5B0%5D" method="post" data-krate-action><button formaction="/x" formmethod="post">b</button></form>');
+    const button = form.querySelector('button') as HTMLButtonElement;
+    __krateBindFormAction(form, () => () => {});
+    __krateBindFormAction(button, () => () => {});
+    expect(form.hasAttribute('action') || form.hasAttribute('method') || form.hasAttribute('data-krate-action')).toBe(false);
+    expect(button.hasAttribute('formaction') || button.hasAttribute('formmethod')).toBe(false);
   });
 
   it('prefers a submit button formAction over the form action', async () => {

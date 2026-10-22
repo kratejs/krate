@@ -93,6 +93,11 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	for _, h := range node.Handlers {
 		scan(h.Body)
 	}
+	// Callback refs (including bound form actions) run at hydration and can
+	// call local or imported helpers.
+	for _, r := range node.RefBindings {
+		scan(r.Callback)
+	}
 	for _, eff := range node.Effects {
 		scan(eff)
 	}
