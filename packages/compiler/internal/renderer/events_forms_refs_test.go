@@ -138,20 +138,16 @@ export default function App() {
 	mustContain(t, "js", js,
 		`kbindRef("`, `()=>ref,v=>{ref=v;}`, `()=>inner,v=>{inner=v;}`,
 		`useImperativeHandle(props.ref,`, "()=>{\n  return [n()];\n}",
-		"__kfx.push(function(){",
-		"for(var __kfi=0;__kfi<__kfx.length;__kfi++)__kfx[__kfi]();",
+		"}, 'layout');",
 	)
-	// The parent's layout effect is queued, the children's refs and handle
-	// are bound in their own scopes, and the queue runs after every scope.
-	queued := strings.Index(js, "__kfx.push(function(){")
+	// Effects register in their own scopes and run in the runtime commit
+	// after hydration (children's refs and handles are bound by then); the
+	// parent's layout effect is registered before the children's scopes.
+	parentEffect := strings.Index(js, "createEffectDeps(")
 	childRef := strings.Index(js, `()=>ref,v=>{ref=v;}`)
 	handle := strings.Index(js, "useImperativeHandle(")
-	flush := strings.Index(js, "for(var __kfi=0")
-	if !(queued < childRef && childRef < flush && handle < flush) {
-		t.Errorf("effects must run after every ref and handle is bound:\n%s", js)
-	}
-	if strings.Contains(js[handle-30:handle], "__kfx.push") {
-		t.Errorf("useImperativeHandle must not be queued with effects:\n%s", js)
+	if parentEffect < 0 || childRef < 0 || handle < 0 || strings.Contains(js, "__kfx") {
+		t.Errorf("unexpected effect/ref emission:\n%s", js)
 	}
 }
 

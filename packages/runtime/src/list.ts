@@ -22,7 +22,8 @@
  * are adopted by key: the callback runs in virtual-node mode and its output is
  * bound to the existing DOM instead of replacing it.
  */
-import { createEffect, createRoot, createSignal, untrack } from './signal.js';
+import { createEffect, createRoot, createSignal, onCleanup, untrack } from './signal.js';
+import { krateUnmount, krateWithOwner } from './effects.js';
 import {
   adoptValue,
   appendChild,
@@ -95,17 +96,18 @@ function newRowMarkers(): [Comment, Comment] {
 function renderInRoot(state: ListState, row: Row, item: unknown, i: number, body: (v: unknown) => void): void {
   createRoot((dispose) => {
     trackEffect(row.start, dispose);
-    let v: unknown;
-    if (state.accessor) {
+    // The row is an effect owner: components it renders are its children, so
+    // removing the row unmounts them (React effect cleanups) in one call.
+    const { value, owner } = krateWithOwner(() => {
+      if (!state.accessor) return state.render(item, i);
       const [getItem, setItem] = createSignal<unknown>(item);
       const [getIndex, setIndex] = createSignal<number>(i);
       row.setItem = setItem as (v: () => unknown) => void;
       row.setIndex = setIndex;
-      v = state.render(getItem, getIndex);
-    } else {
-      v = state.render(item, i);
-    }
-    body(v);
+      return state.render(getItem, getIndex);
+    });
+    onCleanup(() => krateUnmount(owner));
+    body(value);
   });
 }
 

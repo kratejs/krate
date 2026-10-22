@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createSignal, onMount, onCleanup } from './signal';
 import { h } from './dom';
 import { krateList, krateBindList, longestIncreasingSubsequence } from './list';
+import { createEffectDeps } from './effects';
 
 type Item = { id: number; label: string };
 
@@ -291,6 +292,34 @@ describe('keyed lists', () => {
     await tick();
     expect(refs).toHaveLength(2);
     expect(refs[1]).toBeNull();
+  });
+});
+
+describe('React effects in rows', () => {
+  it('runs passive effects per key: none on reorder, cleanup on removal, setup for new keys', async () => {
+    const log: string[] = [];
+    const settle = async () => {
+      for (let i = 0; i < 3; i++) await tick();
+    };
+    const [items, setItems] = createSignal<number[]>([1, 2]);
+    function Row(props: any) {
+      const id = props.id;
+      createEffectDeps(() => {
+        log.push('effect ' + id);
+        return () => log.push('cleanup ' + id);
+      }, () => []);
+      return h('li', null, String(id));
+    }
+    mountList(krateList(() => items(), (n: any) => n, (n: any) => h(Row, { get id() { return n(); } }), 1).mount());
+    await settle();
+    expect(log).toEqual(['effect 1', 'effect 2']);
+    log.length = 0;
+    setItems([2, 1]);
+    await settle();
+    expect(log).toEqual([]);
+    setItems([2, 3]);
+    await settle();
+    expect(log).toEqual(['cleanup 1', 'effect 3']);
   });
 });
 
