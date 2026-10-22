@@ -68,8 +68,14 @@ import (
 //	                                       severity and "TODO: classify")
 //	KRATE_REACTBROWSER_RUN=<regexp>        only fixtures whose name matches
 //	KRATE_REACTBROWSER_REPORT=<file>       write every divergence diff to file
-//	KRATE_REACTBROWSER_JOBS=<n>            parallel fixtures (default 6)
+//	KRATE_REACTBROWSER_JOBS=<n>            parallel fixtures (default 6 on
+//	                                       Chromium, 3 on Firefox/WebKit)
 //	KRATE_REACTBROWSER_KEEP=<dir>          build into dir and keep it
+//	KRATE_REACTBROWSER_DRIVER=<command>    run run.mjs with this command
+//	                                       instead of node, e.g. a docker run
+//	                                       of the Playwright image (mount the
+//	                                       repo and the temp dir at the same
+//	                                       paths, use --network host)
 //	KRATE_REACT_EXIT=1                     fail while any P0/P1 entry remains
 //	                                       (the R2/R3 exit criterion)
 
@@ -750,6 +756,9 @@ func TestReactBrowserDifferential(t *testing.T) {
 	}
 
 	jobs := 6
+	if browser != "chromium" {
+		jobs = 3
+	}
 	if v, err := strconv.Atoi(os.Getenv("KRATE_REACTBROWSER_JOBS")); err == nil && v > 0 {
 		jobs = v
 	}
@@ -764,7 +773,11 @@ func TestReactBrowserDifferential(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	cmd := exec.Command("node", script, planPath, outPath)
+	driver := []string{"node"}
+	if d := strings.Fields(os.Getenv("KRATE_REACTBROWSER_DRIVER")); len(d) > 0 {
+		driver = d
+	}
+	cmd := exec.Command(driver[0], append(driver[1:], script, planPath, outPath)...)
 	runOut, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(runOut), "Executable doesn't exist") || strings.Contains(string(runOut), "browserType.launch") {

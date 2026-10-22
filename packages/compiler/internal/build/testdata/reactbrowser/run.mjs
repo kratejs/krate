@@ -57,7 +57,9 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const actionTimeout = 2500;
+// Generous so loaded CI runners (or Firefox/WebKit in containers) do not
+// time out on actionable elements; a missing element still fails the step.
+const actionTimeout = plan.actionTimeout || 10000;
 
 async function settle(page, ms) {
   await page.evaluate(
@@ -80,6 +82,15 @@ function describeStep(step) {
 async function runStep(page, step) {
   const loc = step.sel ? page.locator(step.sel).first() : null;
   const opts = { timeout: step.timeout || actionTimeout };
+  // Fail fast when nothing matches (a common Krate-side divergence) instead
+  // of waiting for the full actionability timeout.
+  if (loc && step.op !== "waitFor") {
+    try {
+      await loc.waitFor({ state: "attached", timeout: 2500 });
+    } catch {
+      throw new Error(`no element matches ${step.sel}`);
+    }
+  }
   switch (step.op) {
     case "click":
       return loc.click(step.modifiers ? { ...opts, modifiers: step.modifiers } : opts);
