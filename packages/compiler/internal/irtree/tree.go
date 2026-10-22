@@ -510,6 +510,24 @@ type ComponentSignature struct {
 	Children        []SlotID
 	SlotBindings    []SlotBinding
 	AttrBindings    []AttrBinding
+	// ParentID is the enclosing client component, empty at the top level.
+	// Hydration declares it so React effects run children before parents.
+	ParentID SlotID
+	// Conds lists the conditional branches the component renders inside,
+	// outermost first. Effects of a component in a hidden branch are cleaned
+	// up and re-run when the branch is shown again.
+	Conds []CondBranch
+	// ListSlot is the innermost list slot whose items contain the component;
+	// replacing that list's content on the client unmounts the component.
+	ListSlot SlotID
+}
+
+// CondBranch names one branch ("c" consequent, "a" alternate) of a
+// conditional slot and whether it is the branch rendered on the server.
+type CondBranch struct {
+	SlotID         SlotID
+	Branch         string
+	InitiallyShown bool
 }
 
 // SlotBinding - describes a content binding for hydration

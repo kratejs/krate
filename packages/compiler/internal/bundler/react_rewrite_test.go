@@ -95,11 +95,13 @@ func TestRewriteReactEffectEmptyDepsMountOnce(t *testing.T) {
 			return <div>x</div>;
 		}
 	`)
-	if !strings.Contains(out, "onMount") || !strings.Contains(out, "onCleanup") {
-		t.Fatalf("empty-deps effect should lower to onMount + onCleanup:\n%s", out)
+	// An empty deps thunk never changes, so the effect runs once after mount
+	// and its cleanup runs on unmount.
+	if !strings.Contains(out, "createEffectDeps(") || !strings.Contains(out, "return [];") {
+		t.Fatalf("empty-deps effect should lower to createEffectDeps with an empty deps thunk:\n%s", out)
 	}
-	if strings.Contains(out, "createEffect") {
-		t.Fatalf("empty-deps effect must not lower to a reactive createEffect:\n%s", out)
+	if strings.Contains(out, "createEffect(") {
+		t.Fatalf("empty-deps effect must not lower to an auto-tracked createEffect:\n%s", out)
 	}
 }
 
