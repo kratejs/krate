@@ -404,6 +404,7 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		savedScope := b.contextScopes
 		savedProps := b.localProps
 		savedValues := b.contextValues
+		savedInitials := b.contextInitials
 		isScope := false
 		if ref, ok := b.resolveScopeExpr(valueExpr); ok {
 			isScope = true
@@ -420,7 +421,13 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 			b.contextValues[ctx] = valueExpr
 			// Static rendering (SSREval) still folds reads from this marker, so
 			// seed it with the value's build-time initial as a fallback.
-			if initial := evalConstValue(valueExpr, b.sigMap(), savedProps); !initial.ContainsUnknown() {
+			initial := evalConstValue(valueExpr, b.sigMap(), savedProps)
+			b.contextInitials = make(map[string]jsvalue.Value, len(savedInitials)+1)
+			for k, v := range savedInitials {
+				b.contextInitials[k] = v
+			}
+			b.contextInitials[ctx] = initial
+			if !initial.ContainsUnknown() {
 				b.localProps = cloneStringMap(savedProps)
 				b.localProps[contextMarkerPrefix+ctx] = initial
 			}
@@ -429,6 +436,7 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		b.contextScopes = savedScope
 		b.localProps = savedProps
 		b.contextValues = savedValues
+		b.contextInitials = savedInitials
 		return slots
 	}
 
@@ -2590,6 +2598,10 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 		return false
 	case *ast.MemberExpr:
 		if b.isLivePropRead(e) {
+			return true
+		}
+		// `tabs[index()]` reads a signal in its computed key.
+		if e.Computed && b.referencesSignal(e.Property) {
 			return true
 		}
 		return b.referencesSignal(e.Object)

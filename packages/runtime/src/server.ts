@@ -29,6 +29,21 @@ export function createMemo<T>(fn: () => T): () => T {
   };
 }
 
+// Derived render values (krateDerived) and custom hook results (krateHook)
+// have no dependencies to track on the server: each read recomputes.
+const derivedGetters = new WeakSet<object>();
+
+export function krateDerived<T>(fn: () => T): () => T {
+  const read = () => fn();
+  derivedGetters.add(read);
+  return read;
+}
+
+export function krateHook<T>(value: T | (() => T)): () => T {
+  if (typeof value === "function" && derivedGetters.has(value)) return value as () => T;
+  return () => value as T;
+}
+
 export function onCleanup(_fn: () => void): void {
   // No-op on server
 }

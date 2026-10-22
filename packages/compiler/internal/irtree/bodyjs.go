@@ -209,6 +209,9 @@ func (b *builder) extraVarDeclJS(decl *ast.VarDecl) (string, bool) {
 	if decl.IsDestructuring || referencesProps(decl.Init) {
 		return "", false
 	}
+	if derivedCallee(decl.Init) != "" {
+		return "var " + decl.Name + "=" + generateExprJS(b.derivedDeclInit(decl.Init), b.sigMap()), true
+	}
 	return "var " + decl.Name + "=" + generateExprJS(decl.Init, b.sigMap()), true
 }
 

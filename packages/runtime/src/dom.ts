@@ -179,7 +179,9 @@ function setAttr(el: Element, key: string, value: unknown): void {
     onCleanup(release);
   } else if (key === 'key') {
     // key is metadata only, not set as attribute
-  } else if (value !== null && value !== undefined && value !== false) {
+  } else if (value !== null && value !== undefined && (value !== false || /^(aria|data)-/.test(key))) {
+    // aria-* and data-* stringify booleans (aria-selected={false} renders
+    // "false"), as in React.
     el.setAttribute(key, krateSanitizeAttr(key, String(value)));
   }
 }

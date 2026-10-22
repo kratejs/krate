@@ -2,7 +2,7 @@ export { createSignal, createReducer, createCSSChoice, createCSSToggle, createCS
 export type { CSSARIAOptions, CSSVars, CSSPrimitiveOptions, CSSStackActions, CSSScope, CSSFlagsScope, SignalOptions } from './signal.js';
 export { createEffectDeps, createMemoDeps, createCallbackDeps, flushPassive } from './effects.js';
 export type { EffectPhase } from './effects.js';
-export { untrack, sameValue, krateFlushSync } from './signal.js';
+export { untrack, sameValue, krateFlushSync, krateDerived, krateHook, isDerivedGetter } from './signal.js';
 export { clearPersisted, readPersisted, writePersisted } from './storage.js';
 export type { PersistOptions, PersistSpec, PersistStore, StorageLike } from './storage.js';
 export { h, mount, hydrate, insert, clearNodes, disposeNode } from './dom.js';

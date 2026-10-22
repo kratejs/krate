@@ -218,6 +218,10 @@ func (b *builder) registerReactiveLocals(fn *ast.FnDecl) {
 	for _, name := range b.collectResourceNames(fn.Body) {
 		b.localSignals[name] = resourceSentinel
 	}
+	// Derived render values and custom hook results (derived.go).
+	for name, initial := range b.collectDerivedLocals(fn.Body) {
+		b.localSignals[name] = initial
+	}
 }
 
 // installComponentProps completes the local-prop scope the call site set up
@@ -456,6 +460,10 @@ func (b *builder) localDecls(fn *ast.FnDecl, node *ComponentNode, fold *localFol
 func (b *builder) localDeclJS(name string, init ast.Expr, fold *localFold) string {
 	locals := fold.locals
 	changed := fold.changed[name]
+	if derivedCallee(init) != "" {
+		// A derived getter is always re-created at hydration.
+		return "var " + name + "=" + generateExprJS(b.derivedDeclInit(init), b.sigMap())
+	}
 	foldable := init != nil && !changed && !locals[name].IsUnknown() && !b.referencesSignal(init) && !isReferenceInit(init)
 	if foldable {
 		switch init.(type) {
@@ -488,15 +496,25 @@ func (b *builder) buildComponentReturn(fn *ast.FnDecl, node *ComponentNode) {
 	}
 	retExpr := b.enterCSSScope(fn, node, returnStmt)
 
+	// A context value this component received through its synthetic getter
+	// prop is forwarded to its own children as a call of that getter (the
+	// provider's names are not in scope in this component's hydration IIFE).
+	// Function-valued props live in localFuncProps rather than localProps.
 	childContext := cloneExprMap(b.contextValues)
-	for name := range b.localProps {
+	forward := func(name string) {
 		if strings.HasPrefix(name, contextPropPrefix) {
 			ctx := strings.TrimPrefix(name, contextPropPrefix)
-			childContext[ctx] = &ast.MemberExpr{
+			childContext[ctx] = &ast.CallExpr{Callee: &ast.MemberExpr{
 				Object:   &ast.Identifier{Name: "props"},
 				Property: &ast.Identifier{Name: name},
-			}
+			}}
 		}
+	}
+	for name := range b.localProps {
+		forward(name)
+	}
+	for name := range b.localFuncProps {
+		forward(name)
 	}
 	b.contextValues = childContext
 	node.Children = b.buildSlotNodes(retExpr, string(node.ID))

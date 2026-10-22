@@ -77,6 +77,8 @@ var reactiveFactories = map[string]bool{
 	"useReducer":     true,
 	"useActionState": true,
 	"useOptimistic":  true,
+	// The compat useSyncExternalStore returns a getter of the snapshot.
+	"useSyncExternalStore": true,
 }
 
 // reactAPI reports whether name is a known React API (rename, structural, or
@@ -158,6 +160,15 @@ type reactCtx struct {
 	frames      []*hookFrame
 	arrayConsts map[*scope]map[string]*ast.ArrayExpr
 	callables   map[*scope]map[string]string
+
+	// Render-scope lowering state (react_derived.go). react is set for a
+	// module that imports React; reads counts reactive reads seen while
+	// rewriting, so a caller can tell whether an expression is render-dependent.
+	react   bool
+	reads   int
+	tmp     int
+	fnNames map[*ast.ArrowFn]string
+	setters map[string]bool
 }
 
 // localAPI resolves an identifier bound by a React named import to its React
@@ -326,6 +337,7 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	if ctx.alias != "" {
 		ctx.fragmentNames[ctx.alias] = true
 	}
+	ctx.react = len(ctx.imports) > 0 || ctx.alias != "" || ctx.domAlias != ""
 
 	for i := len(toRemove) - 1; i >= 0; i-- {
 		idx := toRemove[i]
@@ -373,7 +385,11 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 	case *ast.FnDecl:
 		child := c.fnScope(s.Params, sc)
 		done := c.enterFn(child, s.Params, s.Body)
-		c.rewriteStmts(s.Body, child)
+		kind := frameKindOf(s.Name)
+		if s.Name == "" && s.Default {
+			kind = frameComponent
+		}
+		c.rewriteFnBody(&s.Body, child, kind, s.Params)
 		done()
 	case *ast.ExportStmt:
 		if s.Declaration != nil {
@@ -497,11 +513,16 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 			continue
 		}
 		if decl.Init != nil {
+			c.noteFnName(decl.Name, decl.Init)
 			if c.isReactiveFactory(decl.Init) {
 				if decl.IsDestructuring && len(decl.Names) >= 1 {
 					sc.declareGetter(decl.Names[0])
 					for _, n := range decl.Names[1:] {
 						sc.declareLocal(n)
+						if c.setters == nil {
+							c.setters = map[string]bool{}
+						}
+						c.setters[n] = true
 					}
 				} else if decl.Name != "" {
 					sc.declareGetter(decl.Name)
@@ -582,6 +603,12 @@ func (c *reactCtx) rewriteExprCtx(expr ast.Expr, sc *scope, valuePos bool) ast.E
 				continue
 			}
 			prop.Value = c.rewriteExpr(prop.Value, sc)
+			// `{ count }` reading a getter is `{ count: count() }`.
+			if prop.Shorthand {
+				if id, ok := prop.Value.(*ast.Identifier); !ok || id.Name != prop.Key {
+					prop.Shorthand = false
+				}
+			}
 		}
 	case *ast.ArrayExpr:
 		for i, elem := range e.Elements {
@@ -590,6 +617,9 @@ func (c *reactCtx) rewriteExprCtx(expr ast.Expr, sc *scope, valuePos bool) ast.E
 	case *ast.MemberExpr:
 		if id, ok := c.compatMember(e); ok {
 			return id
+		}
+		if id, ok := e.Object.(*ast.Identifier); ok && c.isPropsRead(sc, id.Name) {
+			c.reads++
 		}
 		e.Object = c.rewriteExpr(e.Object, sc)
 		if e.Computed {
@@ -614,7 +644,11 @@ func (c *reactCtx) rewriteExprCtx(expr ast.Expr, sc *scope, valuePos bool) ast.E
 			}
 		}
 		done := c.enterFn(child, e.Params, e.Body)
-		c.rewriteStmts(e.Body, child)
+		if e.Expression {
+			c.rewriteStmts(e.Body, child)
+		} else {
+			c.rewriteFnBody(&e.Body, child, frameKindOf(c.fnName(e)), e.Params)
+		}
 		done()
 	case *ast.TemplateExpr:
 		for i, part := range e.Parts {
@@ -660,8 +694,11 @@ func (c *reactCtx) rewriteIdentifier(e *ast.Identifier, sc *scope, valuePos bool
 		// call sites are handled by rewriteCall.
 		return e
 	}
-	if valuePos && sc.isGetter(e.Name) {
-		return &ast.CallExpr{Position: e.Position, Callee: e}
+	if sc.isGetter(e.Name) {
+		c.reads++
+		if valuePos {
+			return &ast.CallExpr{Position: e.Position, Callee: e}
+		}
 	}
 	return e
 }
@@ -773,6 +810,7 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 		}
 	} else if id, ok := e.Callee.(*ast.Identifier); ok && c.callableGetterCall(sc, id.Name, e) {
 		// A useMemo/useCallback getter holds a function: call its value.
+		c.reads++
 		e.Callee = &ast.CallExpr{Position: id.Position, Callee: id}
 	} else {
 		e.Callee = c.rewriteExprCtx(e.Callee, sc, false)

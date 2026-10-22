@@ -7,6 +7,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
 
@@ -258,6 +259,10 @@ type componentCtx struct {
 	// pushed while building a `<Ctx.Provider value={expr}>` subtree so a
 	// dynamic value substitutes for `Ctx.useContext()` reads.
 	contextValues map[string]ast.Expr
+	// contextInitials holds the build-time value of each active dynamic
+	// provider value, so a consumer deeper in the tree (where the value is
+	// read through a forwarded getter prop) still gets its SSR initial.
+	contextInitials map[string]jsvalue.Value
 	// scopeHandles maps a local identifier (or `props.<name>`) to the CSS scope
 	// it holds, so `x.trigger(v)` / `x.panel(v)` / `x.close()` spreads resolve
 	// anywhere in any component (a handle can be passed to children as a prop).

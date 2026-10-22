@@ -312,7 +312,7 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	}
 	// A component reading a dynamic context must stay reactive (IR path) so the
 	// provider value can be bound through its synthetic prop.
-	if b.readsActiveContext(fn.Body) {
+	if b.readsActiveContext(fn.Body) || b.readsActiveDerivedContext(fn.Body) {
 		return true
 	}
 	for _, expr := range attrs {
