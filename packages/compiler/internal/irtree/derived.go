@@ -78,6 +78,13 @@ func (b *builder) collectDerivedLocals(body []ast.Stmt) map[string]ast.Expr {
 					out[d.Name] = exprFromValue(initial)
 					continue
 				}
+				// A constant provider or default, taken where the component
+				// reads it (not where the local is used, which may be inside
+				// the component's own provider of the same context).
+				if v, found := b.localProps[contextMarkerPrefix+ctx]; found && !v.ContainsUnknown() {
+					out[d.Name] = exprFromValue(v)
+					continue
+				}
 			}
 			out[d.Name] = &ast.CallExpr{Callee: d.Init}
 		}

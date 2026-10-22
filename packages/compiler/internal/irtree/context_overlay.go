@@ -102,9 +102,13 @@ func (b *builder) applyChildrenContext(ov *contextOverlay) func() {
 	if ov == nil || (len(ov.static) == 0 && len(ov.dynamic) == 0) {
 		return func() {}
 	}
-	savedValues, savedProps := b.contextValues, b.localProps
+	savedValues, savedProps, savedInitials := b.contextValues, b.localProps, b.contextInitials
 	values := cloneExprMap(savedValues)
 	props := cloneStringMap(savedProps)
+	initials := make(map[string]jsvalue.Value, len(savedInitials)+len(ov.initials))
+	for k, v := range savedInitials {
+		initials[k] = v
+	}
 	for ctx, v := range ov.static {
 		delete(values, ctx)
 		props[contextMarkerPrefix+ctx] = v
@@ -113,10 +117,13 @@ func (b *builder) applyChildrenContext(ov *contextOverlay) func() {
 		values[ctx] = expr
 		if v, ok := ov.initials[ctx]; ok {
 			props[contextMarkerPrefix+ctx] = v
+			initials[ctx] = v
+		} else {
+			delete(initials, ctx)
 		}
 	}
-	b.contextValues, b.localProps = values, props
-	return func() { b.contextValues, b.localProps = savedValues, savedProps }
+	b.contextValues, b.localProps, b.contextInitials = values, props, initials
+	return func() { b.contextValues, b.localProps, b.contextInitials = savedValues, savedProps, savedInitials }
 }
 
 // callerExpansion drops the innermost expansion frame while a component's

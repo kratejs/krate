@@ -407,14 +407,6 @@ func (b *builder) liveContextLocals(fold *localFold) {
 		}
 		fold.locals[name] = jsvalue.Dynamic("context " + ctx)
 		fold.leaked[name] = true
-		// The local holds the provider's getter: reads bind reactively, and
-		// its SSR initial is the context read itself (the nearest folded
-		// provider value).
-		if b.localSignals != nil {
-			if _, own := b.localSignals[name]; !own {
-				b.localSignals[name] = init
-			}
-		}
 	}
 }
 

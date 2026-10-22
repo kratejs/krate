@@ -23,7 +23,7 @@ func pageJS(t *testing.T, outDir string) string {
 	return sb.String()
 }
 
-var tagRe = regexp.MustCompile(`<!--/?k:[^>]*-->| data-k(attr-[a-z]+)?=[^ >]+`)
+var tagRe = regexp.MustCompile(`<!--/?k:[^>]*-->| data-k(attr-[a-z-]+)?=[^ >]+`)
 
 // visibleHTML drops hydration markers so assertions read like the DOM.
 func visibleHTML(html string) string { return tagRe.ReplaceAllString(html, "") }
