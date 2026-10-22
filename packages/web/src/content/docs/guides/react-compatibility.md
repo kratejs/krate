@@ -90,14 +90,17 @@ export default function Counter() {
 | `lazy` | identity passthrough |
 | `<Fragment>` / `<React.Fragment>` | a JSX fragment |
 | `react/jsx-runtime`, `jsx`, `jsxs`, `jsxDEV` | lowered to Krate JSX |
-| `react-dom` / `react-dom/client` | `createPortal` and `flushSync` map to the compat runtime (other entry points are not supported) |
+| `react-dom` / `react-dom/client` | `createPortal` and `flushSync` map to the compat runtime; `useFormStatus` and `requestFormReset` are supported (other entry points are not supported) |
 | `Children.only` / `toArray` / `count` | folded at build time on literal input, otherwise compat shim |
 | `Children.map` | folded at build time for a literal list and inline arrow, otherwise compat shim |
 | `cloneElement` | folded at build time on a literal element and props, otherwise compat shim |
 | `isValidElement` | folded at build time on literal input, otherwise compat shim |
 | `createPortal` / `<Portal>` | rendered into `document.body` and cleaned up on dispose |
 | `Component` / `PureComponent` | lowerable class components (see below) |
-| `useOptimistic` / `useActionState` / `useFormStatus` | React 19 compat shims |
+| `useActionState` | lowered to signals: `[state, formAction, isPending]`, sequential queue, previous state sent to server actions, no-JS fallback with permalink |
+| `useOptimistic` | lowered to signals: updates apply while an action is pending and revert when it settles |
+| `useFormStatus` | form-scoped status (`pending`, `data`, `method`, `action`) of the form containing the component |
+| `<form action={fn}>` / `formAction={fn}` | server actions and client functions, run in an async transition without a page reload, form reset on success |
 | `StrictMode` / `Profiler` | pass-through |
 
 Class components that follow the common subset are lowered to functions:
@@ -548,9 +551,31 @@ import { saveFeedback } from "../actions/feedback";
 </form>
 ```
 
-Forms work without JavaScript and are enhanced by the shared runtime. See
-[Server Actions](/docs/guides/server-actions/) for the module format, direct
-calls, runtime requirements, and security model.
+Forms work without JavaScript and are enhanced by the shared runtime.
+
+### React 19 actions
+
+`<form action={fn}>` and `<button formAction={fn}>` accept a server action or a
+client function. On submit the function receives the `FormData` inside an async
+transition; the page does not reload and uncontrolled fields reset after
+success. The React 19 hooks follow React's semantics:
+
+- `useActionState(action, initial, permalink?)` returns
+  `[state, formAction, isPending]`. Calls are queued in order and receive the
+  previous state; with a server action the previous state travels to the
+  server and the returned state back. Without JavaScript the form posts to the
+  action with the initial state and redirects to `permalink`.
+- `useFormStatus()` reads the pending status, data, method and action of the
+  form that contains the component.
+- `useOptimistic(state, update?)` applies updates while an action is pending and
+  reverts to the latest state when it settles.
+- `requestFormReset(form)` resets a form after its pending action.
+
+Inline `"use server"` functions inside components are not supported
+(`KR7001`); move them into a `"use server"` module. See
+[Server Actions](/docs/guides/server-actions/) for the module format, wire
+format, request context (`headers()`, `cookies()`, `redirect()`), runtime
+requirements, and security model.
 
 ## Diagnostics and conformance
 

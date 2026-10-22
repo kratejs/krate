@@ -207,37 +207,17 @@
     "severity": "P0",
     "reason": "[suspense-lazy] build fails: nested Suspense with lazy(() => promise) evaluated at build time"
   },
-  "r19/action_button_form_action": {
-    "severity": "P0",
-    "reason": "[form-actions] client function actions are stringified into action/formaction attributes (function source leaks into the DOM) and the form submits natively, navigating away"
-  },
   "r19/action_form_auto_reset": {
-    "severity": "P0",
-    "reason": "[form-actions] <form action={asyncFn}> stringifies the function into the action attribute; submit is not intercepted, no message is added, no auto-reset"
-  },
-  "r19/action_optimistic": {
-    "severity": "P0",
-    "reason": "[form-actions] useOptimistic list not rendered on load and the client action form submits natively (page navigates away)"
-  },
-  "r19/action_server_form": {
-    "severity": "P0",
-    "reason": "[form-actions] useActionState with a 'use server' action renders action=\"formAction\" literally; submit navigates natively instead of calling POST /__krate/action"
+    "severity": "P2",
+    "reason": "[form-actions] the action, message and auto-reset match; with the fixture's 80ms delay Krate commits the result one frame after React, so the snapshot right after the click can still show the old field value"
   },
   "r19/action_server_direct": {
     "severity": "P1",
     "reason": "[async-transition] direct server action call works end to end, but useTransition isPending stays false during the async transition ('loading' never shows)"
   },
-  "r19/action_use_action_state": {
-    "severity": "P0",
-    "reason": "[form-actions] useActionState: action=\"formAction\" literal, button rendered disabled, state count empty; the action never runs"
-  },
-  "r19/action_use_form_status": {
-    "severity": "P0",
-    "reason": "[form-status] build fails: useFormStatus() from react-dom is evaluated at build time ('unresolved identifier useFormStatus')"
-  },
   "r19/app_reference": {
     "severity": "P0",
-    "reason": "[form-status] React 19 reference app does not build: useFormStatus evaluated at build time (also exercises use(promise), useActionState, useOptimistic)"
+    "reason": "[use-promise] the reference app builds and its actions, useFormStatus and useOptimistic run; use(promise) under Suspense shows the list immediately instead of the 'loading todos' fallback, which shifts the later steps"
   },
   "r19/context_as_provider": {
     "severity": "P0",
