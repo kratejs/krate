@@ -1,0 +1,396 @@
+=== call-method-delete
+cache.delete(k);
+=== call-method-keywords
+a.delete(k); a.new(k); a.typeof(k); a.void(k); a.in(k); a.class.if.else(k);
+=== unary-plus
++a;
+=== unary-plus-expr
+x = +a + +b;
+=== unary-minus
+x = -a - -b;
+=== unary-not-bitnot
+x = !a; y = ~b; z = !!c;
+=== unary-typeof-void
+x = typeof a; y = void 0; z = typeof typeof a;
+=== unary-delete
+delete a.b; delete a[b]; delete a;
+=== new-member
+new a.b.C();
+=== new-member-noargs
+new a.b.C;
+=== new-call-result
+new (a())();
+=== new-then-member
+new a.b().c;
+=== new-new
+new new a()();
+=== new-computed
+new a[b]();
+=== new-paren-member
+new (a.b)();
+=== new-tag
+new tag`x`;
+=== new-target
+function f() { return new.target; }
+=== postfix-prefix
+a++; b--; ++c; --d; x = a++ + ++b;
+=== exponent
+x = a ** b ** c;
+=== exponent-neg
+x = (-2) ** 2; y = 2 ** -1;
+=== exponent-assign
+a **= 2;
+=== logical-assign
+a ||= b; c &&= d; e ??= f;
+=== nullish
+x = a ?? b; y = (a || b) ?? c; z = a ?? (b && c);
+=== optional-member
+a?.b;
+=== optional-index
+a?.[0];
+=== optional-call
+a?.();
+=== optional-chain-long
+a?.b.c(d)?.e[f];
+=== optional-paren
+(a?.b).c;
+=== optional-delete
+delete a?.b;
+=== optional-method-call
+a.b?.(c);
+=== optional-ternary
+x = a?.5:1;
+=== tagged-template
+tag`a${b}c`;
+=== tagged-member
+a.b`x`;
+=== tagged-call
+f(1)`x`;
+=== tagged-nested
+tag`a${tag2`b`}c`;
+=== tagged-statements
+var x = 1;
+tag`hello`;
+y();
+=== template-literal
+x = `a${b}c${d}e`;
+=== template-nested
+x = `a${`b${c}`}d`;
+=== template-escapes
+x = `line1\nline2\u{41}\x41`;
+=== template-multiline
+x = `a
+b`;
+=== regex-simple
+x = /ab+c/gi;
+=== regex-class-slash
+x = /[/]/;
+=== regex-flags
+x = /a/dgimsuy;
+=== regex-v-flag
+x = /[\p{L}--[a-z]]/v;
+=== regex-division
+x = a / b / c;
+=== regex-after-paren
+if (a) /x/.test(b);
+=== regex-in-call
+f(/a\/b/);
+=== regex-after-postfix
+x = a++ / 2;
+=== numeric-separator
+x = 1_000_000 + 0b1_0 + 0o7_7 + 0xFF_FF + 1_0.0_1e1_0;
+=== bigint
+x = 10n + 0x1Fn + 0b11n + 0o7n;
+=== number-forms
+x = .5 + 5. + 0.5e-3 + 0X1f + 0B1 + 0O7;
+=== import-meta
+x = import.meta.url;
+=== dynamic-import
+x = import("a");
+=== dynamic-import-await
+async function f() { return await import("a"); }
+=== dynamic-import-then
+import("a").then(m => m.default);
+=== label
+a: for (;;) { break a; }
+=== label-continue
+outer: for (var i = 0; i < 1; i++) { for (;;) { continue outer; } }
+=== label-block
+a: { break a; }
+=== keyword-props
+x = { if: 1, class: 2, get: 3, set: 4, static: 5, async: 6, await: 7, of: 8, new: 9 };
+=== keyword-member
+a.class; a.if; a.function; a.default;
+=== keyword-methods
+x = { get() {}, set() {}, async() {}, static() {} };
+=== class-keyword-methods
+class A { static static() {} get get() {} set set(v) {} async async() {} static async *gen() {} }
+=== class-fields
+class A { a = 1; b; static c = 2; 'd' = 3; [e] = 4; 5 = 6; }
+=== class-private
+class A { #a = 1; #m() { return this.#a; } static #s = 2; get #g() { return 1; } set #g(v) {} }
+=== class-private-in
+class A { #a; static has(o) { return #a in o; } }
+=== class-static-block
+class A { static { init(); } }
+=== class-extends
+class A extends B { constructor() { super(); super.x(); } }
+=== class-extends-call
+class A extends mix(B, C) {}
+=== class-accessors
+class A { get a() { return 1; } set a(v) {} static get b() { return 2; } }
+=== class-computed
+class A { [a]() {} static [b]() {} get [c]() {} *[d]() {} async *[e]() {} }
+=== class-expr
+x = class Named extends Base {};
+=== generator-fn
+function* g() { yield 1; yield* h(); const x = yield; }
+=== generator-method
+x = { *g() { yield 1; } };
+=== async-generator
+async function* ag() { yield 1; await x; yield* y; }
+=== for-await
+async function f() { for await (const x of y) { z(x); } }
+=== for-of
+for (const [a, b] of c) {}
+=== for-in
+for (var k in o) {}
+=== for-classic
+for (let i = 0, j = 1; i < j; i++, j--) {}
+=== for-empty
+for (;;) { break; }
+=== destructure-obj
+const { a, b: c, d = 1, ...rest } = o;
+=== destructure-arr
+const [a, , b = 2, ...rest] = arr;
+=== destructure-nested
+const { a: { b: [c, d] } } = o;
+=== destructure-params
+function f({ a, b = 1 }, [c, d], ...rest) {}
+=== destructure-assign
+[a, b] = [b, a];
+=== destructure-assign-obj
+({ a, b } = o);
+=== destructure-computed
+const { [k]: v } = o;
+=== default-params
+function f(a = 1, b = a + 1) {}
+=== rest-params
+function f(...args) {}
+=== spread-call
+f(...a, b, ...c);
+=== spread-array
+x = [...a, b, ...c];
+=== spread-object
+x = { ...a, b, ...c };
+=== arrow-forms
+f = a => a; g = (a, b) => a + b; h = () => ({}); i = async a => a; j = async (a) => { await a; };
+=== arrow-destructure
+f = ({ a }, [b]) => a + b;
+=== arrow-nested
+f = a => b => c => a + b + c;
+=== arrow-in-ternary
+x = a ? b => 1 : c => 2;
+=== getter-setter-obj
+x = { get a() { return 1; }, set a(v) {} };
+=== computed-keys
+x = { [a]: 1, [b + c]() {}, get [d]() { return 1; } };
+=== shorthand-methods
+x = { a() {}, async b() {}, *c() {}, async *d() {} };
+=== object-numeric-keys
+x = { 1: a, 0x10: b, "s": c, 1n: d };
+=== sequence
+x = (a, b, c);
+=== comma-stmt
+a, b, c;
+=== conditional-chain
+x = a ? b : c ? d : e;
+=== if-else
+if (a) b; else if (c) d; else e;
+=== if-else-block
+if (a) { b } else { c }
+=== switch
+switch (a) { case 1: b(); break; case 2: default: c(); }
+=== try-catch
+try { a(); } catch (e) { b(); } finally { c(); }
+=== try-optional-catch
+try { a(); } catch { b(); }
+=== try-destructure-catch
+try { a(); } catch ({ message }) { b(message); }
+=== do-while
+do a(); while (b);
+=== while
+while (a) { b(); }
+=== throw
+function f() { throw new Error("x"); }
+=== instanceof-in
+x = a instanceof B; y = "k" in o;
+=== bitwise
+x = a & b | c ^ d << e >> f >>> g;
+=== precedence
+x = a + b * c - d / e % f;
+=== precedence-paren
+x = (a + b) * c;
+=== assign-chain
+a = b = c = 1;
+=== compound-assign
+a += 1; b -= 1; c *= 2; d /= 2; e %= 2; f <<= 1; g >>= 1; h >>>= 1; i &= 1; j |= 1; k ^= 1;
+=== member-chain
+a.b.c.d(e).f[g].h();
+=== call-chain
+f(a)(b)(c);
+=== iife
+(function () { a(); })();
+=== iife-arrow
+(() => { a(); })();
+=== iife-bang
+!function () { a(); }();
+=== fn-expr-named
+x = function f() {};
+=== async-fn
+async function f() { await a; }
+=== async-arrow-await
+x = async () => await y;
+=== await-expr
+async function f() { x = await a + await b; }
+=== yield-precedence
+function* g() { x = yield a ? b : c; }
+=== asi-return
+function f() { return
+1 }
+=== asi-postfix
+a
+++b
+=== asi-call-paren
+a = b
+;(c)
+=== asi-no-semi
+var a = 1
+var b = 2
+a++
+b--
+=== let-identifier
+var let_ = 1; let
+x = 1;
+=== async-identifier
+var async = 1; async = 2;
+=== of-identifier
+var of = 1; for (of of of) {}
+=== get-set-identifier
+var get = 1, set = 2, static_ = 3; get = set;
+=== string-escapes
+x = "\u{1F600}\x41\n\t\\\"" + '\'';
+=== string-line-continuation
+x = "a\
+b";
+=== string-quotes
+x = 'it\'s' + "say \"hi\"";
+=== unicode-ident
+var ab = 1; var é = 2;
+=== octal-escape
+x = "\101";
+=== directive
+"use strict"; x = 1;
+=== directive-fn
+function f() { "use strict"; return 1; }
+=== empty-statements
+;;; a();;;
+=== block-scope
+{ let a = 1; { const b = 2; } }
+=== var-multiple
+var a = 1, b, c = 3;
+=== function-hoist
+f(); function f() {}
+=== getter-on-class-static-name
+class A { static name = 1; static prototype2 = 2; }
+=== super-call
+class A extends B { m() { return super.m(); } }
+=== super-computed
+class A extends B { m() { return super[x](); } }
+=== with-stmt
+with (a) { b; }
+=== debugger
+debugger;
+=== in-operator-for-init
+for (var i = (1 in o); i < 1; i++) {}
+=== using-decl
+{ using x = f(); }
+=== await-using-decl
+async function f() { await using x = g(); }
+=== export-default-only-script-neg !
+export default 1 +;
+=== neg-unclosed-brace !
+function f() {
+=== neg-unclosed-paren !
+f(1, 2;
+=== neg-double-operator !
+x = 1 + * 2;
+=== neg-bad-assign-target !
+1 = 2;
+=== neg-const-no-init !
+const a;
+=== neg-let-let !
+let let = 1;
+=== neg-break-outside !
+break;
+=== neg-continue-outside !
+continue;
+=== neg-undefined-label !
+break foo;
+=== neg-dup-label !
+a: a: ;
+=== neg-new-target-outside !
+new.target;
+=== neg-regex-unterminated !
+x = /abc;
+=== neg-string-unterminated !
+x = "abc
+=== neg-template-unterminated !
+x = `abc
+=== neg-optional-template !
+a?.b`x`;
+=== neg-optional-assign !
+a?.b = 1;
+=== neg-nullish-mix !
+a ?? b || c;
+=== neg-exponent-unary !
+-2 ** 2;
+=== neg-rest-not-last !
+function f(...a, b) {}
+=== neg-dup-proto !
+x = { __proto__: 1, __proto__: 2 };
+=== neg-class-dup-ctor !
+class A { constructor() {} constructor() {} }
+=== neg-getter-params !
+x = { get a(b) {} };
+=== neg-setter-noparams !
+x = { set a() {} };
+=== neg-await-bigint-bad !
+x = 1.5n;
+=== neg-numeric-sep-trailing !
+x = 1_;
+=== neg-numeric-sep-double !
+x = 1__0;
+=== neg-regex-bad-flag !
+x = /a/gg;
+=== neg-private-undeclared !
+class A { m() { return this.#x; } }
+=== neg-delete-private !
+class A { #x; m() { delete this.#x; } }
+=== neg-yield-in-arrow-params !
+function* g() { (a = yield) => 1; }
+=== neg-arrow-newline !
+f = (a)
+=> a;
+=== neg-super-outside !
+function f() { super.x; }
+=== neg-for-of-let-async !
+for (async of []) ;
+=== neg-label-fn-strict !
+"use strict"; a: function f() {}
+=== neg-octal-strict !
+"use strict"; x = 010;
+=== neg-with-strict !
+"use strict"; with (a) {}
+=== neg-eval-assign-strict !
+"use strict"; eval = 1;
