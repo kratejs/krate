@@ -127,6 +127,12 @@ value={cond ? x : undefined} makes the field uncontrolled while the expression i
 
 React's onChange only fires for input, textarea and select. A contentEditable element never receives it; listen with onInput instead.
 
+### KR5008
+
+**ref.current read during render**
+
+React shows the ref's value as of the latest render, so a later state update reveals a mutated ref.current. Krate components render once and bind only state, so a ref read in JSX is shown once and never refreshed. Keep values the UI shows in state, or read the ref in an effect or event handler.
+
 ## KR6xxx: lists and keys
 
 No codes are registered in this range yet.

@@ -270,6 +270,10 @@ type AttrBinding struct {
 	// Prop is the JSX prop name (defaultValue, defaultChecked, ...) when it
 	// differs from AttrName, so form-control defaults bind the right property.
 	Prop string
+	// HydrateOnly marks a binding whose attribute is already rendered
+	// statically (a constant controlled value); only the hydration call is
+	// emitted.
+	HydrateOnly bool
 }
 
 // HandlerDecl - event handler: onClick={() => fn()}

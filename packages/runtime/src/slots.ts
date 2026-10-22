@@ -11,6 +11,7 @@
 // branches keep working across toggles.
 
 import { krateRefsEnter, krateRefsLeave } from './refs.js';
+import { krateMountFields } from './events.js';
 
 interface CondState {
   /** Branch currently between the markers: 'c' or 'a'. */
@@ -84,11 +85,19 @@ export function krateCondSwap(start: Comment, show: boolean, tpl: HTMLTemplateEl
     if (st.tpl) incoming.appendChild(st.tpl.content);
   }
   detached.delete(incoming);
+  // React focuses an autoFocus element when it mounts (and renders no
+  // autofocus attribute on the client).
+  const auto = incoming.querySelector('[autofocus]') as HTMLElement | null;
+  krateMountFields(incoming);
   parent.insertBefore(incoming, end);
   st.other = out;
   detached.add(out);
   st.shown = want;
   krateRefsEnter();
+  if (auto) {
+    auto.removeAttribute('autofocus');
+    auto.focus();
+  }
 }
 
 const URL_ATTRS: Record<string, true> = { href: true, src: true, action: true, formaction: true, 'xlink:href': true };

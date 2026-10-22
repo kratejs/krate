@@ -239,6 +239,7 @@ func RewriteReact(prog *ast.Program) {
 // codes_effects.go). file and src position the diagnostics.
 func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src}
+	ctx.refDiagnostics(prog)
 	var toRemove []int
 
 	for i, stmt := range prog.Body {

@@ -82,16 +82,45 @@ export function krateSetRef(ref: KrateRef, value: unknown): () => void {
   return () => detach(e);
 }
 
+// Hydration refs waiting for krateRefsFlush (null when none are queued).
+let deferred: RefEntry[] | null = null;
+
 /**
- * Registers an element ref. The ref is attached now when `now` is true or the
- * element is in the document; otherwise it waits until a conditional branch
- * holding the element is shown. Returns the release function (detach plus
- * unregister), safe to call more than once.
+ * Attaches the hydration refs queued so far whose element is in the
+ * document. The hydration script calls it after every component has bound its
+ * DOM (and before the effect commit), so a ref on server-rendered content that
+ * a binding replaced (a re-rendered list) is never attached, as in React.
  */
-export function krateAttachRef(el: Element, ref: KrateRef, assign?: (v: unknown) => void, now?: boolean): () => void {
+export function krateRefsFlush(): void {
+  const list = deferred;
+  deferred = null;
+  if (!list) return;
+  for (const e of list) {
+    if (live.has(e) && (e.el as Node).isConnected) attach(e);
+  }
+}
+
+/**
+ * Registers an element ref. mode 'now' attaches immediately (a node built by
+ * h() that is about to be inserted); 'defer' queues it for krateRefsFlush
+ * (hydration); otherwise it attaches when the element is in the document. A
+ * ref on a detached node waits until a conditional branch holding it is
+ * shown. Returns the release function (detach plus unregister), safe to call
+ * more than once.
+ */
+export function krateAttachRef(el: Element, ref: KrateRef, assign?: (v: unknown) => void, mode?: 'now' | 'defer'): () => void {
   const e: RefEntry = { el, ref, assign, on: false, undo: null };
   live.add(e);
-  if (now || el.isConnected) attach(e);
+  if (mode === 'defer') {
+    if (!deferred) {
+      deferred = [];
+      // Safety net when no hydration script flushes explicitly.
+      queueMicrotask(krateRefsFlush);
+    }
+    deferred.push(e);
+  } else if (mode === 'now' || el.isConnected) {
+    attach(e);
+  }
   return () => {
     live.delete(e);
     detach(e);

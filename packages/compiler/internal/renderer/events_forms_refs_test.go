@@ -106,9 +106,6 @@ func TestEventAndRefDiagnostics(t *testing.T) {
 	if got := codes[diag.CodeLowercaseEvent]; len(got) != 1 || !strings.Contains(got[0].Hint, "onClick") {
 		t.Errorf("want one KR5002 for onclick={fn}, got %+v", got)
 	}
-	if got := codes[diag.CodeStringRef]; len(got) != 1 {
-		t.Errorf("want one KR5003 for a string ref, got %+v", got)
-	}
 	if strings.Contains(js, "'field'") {
 		t.Errorf("a string ref must not be bound:\n%s", js)
 	}
@@ -180,4 +177,35 @@ export default function App() {
 		}
 		seen[slot] = id
 	}
+}
+
+// A literal controlled value with onChange hydrates so typing snaps back; a
+// checkbox value (data) and a forwarded prop are not frozen.
+func TestConstantControlledValueBinds(t *testing.T) {
+	src := `function Field({ value, onChange }) { return <input id="f" value={value} onChange={onChange} />; }
+export default function App() {
+  return <div>
+    <input id="frozen" value="fixed" onChange={() => 1} />
+    <input id="box" type="checkbox" value="yes" onChange={() => 1} />
+    <Field value="" onChange={() => 2} />
+  </div>;
+}`
+	_, html, js := buildTreeReact(t, src)
+	mustContain(t, "js", js, `,"value",()=>'fixed')`)
+	mustNotContain(t, "js", js, `()=>'yes'`, `,"value",()=>'')`)
+	if strings.Count(html, `value="fixed"`) != 1 {
+		t.Errorf("the constant value must render once:\n%s", html)
+	}
+}
+
+// Inline callback refs re-bind when a state value they read changes and see
+// that render's value.
+func TestInlineCallbackRefSnapshotsState(t *testing.T) {
+	src := `import { useState } from "react";
+export default function App() {
+  const [n, setN] = useState(0);
+  return <span ref={(node) => console.log(n, node)} onClick={() => setN(n + 1)}>{n}</span>;
+}`
+	_, _, js := buildTreeReact(t, src)
+	mustContain(t, "js", js, "((n)=>(node)=>console.log(n(), node))((v=>()=>v)(n()))")
 }

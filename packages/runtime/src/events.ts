@@ -306,6 +306,25 @@ export function krateOn(el: Element, prop: string, fn: ((e: KrateSyntheticEvent<
   }
 }
 
+/**
+ * Mounts the text inputs under `root` the way React does: React sets an
+ * input's value through the DOM property, which leaves the caret at the end,
+ * while an input parsed from HTML keeps it at the start (so typing after
+ * focus() or autoFocus would land before the text). Re-assigning the value
+ * moves the caret; the user's value is kept. Textareas are left alone (React
+ * leaves their caret at the start too).
+ */
+export function krateMountFields(root: ParentNode): void {
+  const list = root.querySelectorAll('input[value]');
+  for (let i = 0; i < list.length; i++) {
+    const f = list[i] as FormEl;
+    if (!TEXT_TYPES.has(f.type || 'text') || !f.value || f.ownerDocument.activeElement === f) continue;
+    const v = f.value;
+    f.value = '';
+    f.value = v;
+  }
+}
+
 // value tracking and onChange
 
 const TEXT_TYPES = new Set(

@@ -15,6 +15,9 @@ func (b *builder) referencedModuleConstVars(node *ComponentNode) []string {
 	for _, h := range node.Handlers {
 		sources = append(sources, h.Body)
 	}
+	for _, r := range node.RefBindings {
+		sources = append(sources, r.Callback, r.Target)
+	}
 	sources = append(sources, node.Effects...)
 	sources = append(sources, node.Memos...)
 	for _, attr := range node.AttrBindings {

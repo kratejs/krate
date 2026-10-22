@@ -11,9 +11,10 @@ export {
   krateSynthetic,
   krateEventRoot,
   krateEventName,
+  krateMountFields,
 } from './events.js';
 export type { KrateSyntheticEvent } from './events.js';
-export { krateAttachRef, krateSetRef, krateRefsEnter, krateRefsLeave } from './refs.js';
+export { krateAttachRef, krateSetRef, krateRefsEnter, krateRefsLeave, krateRefsFlush } from './refs.js';
 export type { KrateRef } from './refs.js';
 
 export type Component<P = {}> = (props: P) => Node | null | undefined;
@@ -64,8 +65,12 @@ function trackOwner(value: unknown, owner: unknown): void {
  * `assign` handles plain-variable targets.
  */
 export function krateBindRef(el: Element, get: (() => KrateRef) | null, assign?: (v: unknown) => void): () => void {
+  let first = true;
   const dispose = createEffect(() => {
-    const release = krateAttachRef(el, get ? get() : undefined, assign);
+    // The first binding happens during hydration and is queued until every
+    // component has bound its DOM; a later re-bind attaches at once.
+    const release = krateAttachRef(el, get ? get() : undefined, assign, first ? 'defer' : undefined);
+    first = false;
     onCleanup(release);
   });
   trackEffect(el, dispose);
@@ -174,7 +179,7 @@ function setAttr(el: Element, key: string, value: unknown): void {
   } else if (key === 'ref') {
     // Attached now (the node is about to be inserted), detached when the node
     // is disposed or the rendering effect re-runs.
-    const release = krateAttachRef(el, value as KrateRef, undefined, true);
+    const release = krateAttachRef(el, value as KrateRef, undefined, 'now');
     trackEffect(el, release);
     onCleanup(release);
   } else if (key === 'key') {

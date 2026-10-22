@@ -111,10 +111,6 @@
     "severity": "P1",
     "reason": "[missing-diagnostic] legacy context (childContextTypes/getChildContext/contextTypes): build succeeds with no KR3xxx diagnostic"
   },
-  "r18/diag_string_ref": {
-    "severity": "P1",
-    "reason": "[missing-diagnostic] string ref (ref=\"name\", this.refs): build succeeds with no KR5xxx diagnostic"
-  },
   "r18/effect_cleanup_order_rerun": {
     "severity": "P1",
     "reason": "[effect-cleanup] cleanups now run before re-runs in React order, but each cleanup reads the new state (disconnect random instead of general)"
@@ -155,10 +151,6 @@
     "severity": "P1",
     "reason": "[effect-order] mount order matches; on update cleanups and re-runs go per component (branch, root) instead of all child cleanups first, and cleanups read new props"
   },
-  "r18/effect_reads_ref": {
-    "severity": "P0",
-    "reason": "[autofocus] input focused from an effect gets its controlled/default value written after focus, so the caret is at the start and typing prepends (!draft)"
-  },
   "r18/effect_setstate_in_effect": {
     "severity": "P1",
     "reason": "[effect-timing] derived state set in an effect: the initial 'words now 0' effect run is missing (state already 1 on first effect)"
@@ -167,14 +159,6 @@
     "severity": "P1",
     "reason": "[list-remount] removing one keyed row unmounts every row and remounts the survivors (extra cleanups and mount effects)"
   },
-  "r18/event_checkbox_radio_onchange": {
-    "severity": "P1",
-    "reason": "[focus-loss] clicking an already-checked radio re-renders the group and replaces the node, losing focus"
-  },
-  "r18/event_double_click": {
-    "severity": "P0",
-    "reason": "[autofocus] autoFocus is emitted as an attribute and the controlled value is set after focus, so typing lands at the start (' docUntitled')"
-  },
   "r18/form_controlled_checkbox": {
     "severity": "P0",
     "reason": "[derived-render-values] 'select all' checked={a && b && c} is not recomputed; clicked checkboxes lose focus (node replaced)"
@@ -182,10 +166,6 @@
   "r18/form_controlled_input": {
     "severity": "P0",
     "reason": "[derived-render-values] derived 'valid' never updates; aria-invalid={bool} renders aria-invalid=\"\" instead of \"true\"/\"false\""
-  },
-  "r18/form_controlled_reject": {
-    "severity": "P0",
-    "reason": "[controlled-input] rejected edits are now restored, except an input with a constant value and a no-op onChange: typing still changes the DOM value (xread only by state)"
   },
   "r18/form_radio_group": {
     "severity": "P0",
@@ -209,7 +189,7 @@
   },
   "r18/hook_useref_mutable": {
     "severity": "P1",
-    "reason": "[ref-in-render] ref.current read during render is shown once and never refreshed on later renders; no diagnostic for the unsupported pattern"
+    "reason": "[ref-in-render] ref.current read during render is shown once and never refreshed on later renders; reported as KR5008 (keep displayed values in state)"
   },
   "r18/hook_usestate_functional_batch": {
     "severity": "P0",
@@ -259,21 +239,9 @@
     "severity": "P0",
     "reason": "[portal] conditional portal never mounts into body; its effect runs at page load while closed"
   },
-  "r18/ref_callback_inline_rerender": {
-    "severity": "P1",
-    "reason": "[callback-ref] inline callback refs are never called (no node on mount, no null/node pair on re-render)"
-  },
-  "r18/ref_callback_mount_unmount": {
-    "severity": "P1",
-    "reason": "[callback-ref] a useCallback ref on a conditional element is never called (not with the node on mount or remount, not with null on unmount)"
-  },
   "r18/ref_create_ref_class": {
     "severity": "P0",
     "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
-  },
-  "r18/ref_list_refs": {
-    "severity": "P1",
-    "reason": "[callback-ref] callback refs inside .map are never called: the Map stays empty and focusing an item by id fails"
   },
   "r18/suspense_fallback_then_content": {
     "severity": "P0",
@@ -338,10 +306,6 @@
   "r19/meta_title_hoist": {
     "severity": "P1",
     "reason": "[document-metadata] <title> in a component is not hoisted to <head>: it stays in the body with Krate slot markers as literal text and document.title never updates (use <Head>)"
-  },
-  "r19/ref_callback_cleanup": {
-    "severity": "P1",
-    "reason": "[callback-ref] a ref callback that returns a cleanup is never called: no attach on mount, no cleanup on detach"
   },
   "r19/transition_async": {
     "severity": "P1",
