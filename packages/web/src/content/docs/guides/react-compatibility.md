@@ -91,14 +91,17 @@ export default function Counter() {
 | `Suspense` | a real boundary: fallback while anything inside is pending |
 | `<Fragment>` / `<React.Fragment>` | a JSX fragment |
 | `react/jsx-runtime`, `jsx`, `jsxs`, `jsxDEV` | lowered to Krate JSX |
-| `react-dom` / `react-dom/client` | `createPortal` and `flushSync` map to the compat runtime (other entry points are not supported) |
+| `react-dom` / `react-dom/client` | `createPortal` and `flushSync` map to the compat runtime; `useFormStatus` and `requestFormReset` are supported (other entry points are not supported) |
 | `Children.only` / `toArray` / `count` | folded at build time on literal input, otherwise compat shim |
 | `Children.map` | folded at build time for a literal list and inline arrow, otherwise compat shim |
 | `cloneElement` | folded at build time on a literal element and props, otherwise compat shim |
 | `isValidElement` | folded at build time on literal input, otherwise compat shim |
 | `createPortal` / `<Portal>` | rendered into `document.body` and cleaned up on dispose |
 | `Component` / `PureComponent` | lowerable class components (see below) |
-| `useOptimistic` / `useActionState` / `useFormStatus` | React 19 compat shims |
+| `useActionState` | lowered to signals: `[state, formAction, isPending]`, sequential queue, previous state sent to server actions, no-JS fallback with permalink |
+| `useOptimistic` | lowered to signals: updates apply while an action is pending and revert when it settles |
+| `useFormStatus` | form-scoped status (`pending`, `data`, `method`, `action`) of the form containing the component |
+| `<form action={fn}>` / `formAction={fn}` | server actions and client functions, run in an async transition without a page reload, form reset on success |
 | `StrictMode` / `Profiler` | render their children; `Profiler`'s `onRender` is never called (warning KR4005) |
 
 Class components that follow the common subset are lowered to functions:
@@ -386,9 +389,58 @@ Lowercase `<script>` and `<style>` elements render where they are written
 (for example a `<style>` inside an `<svg>`). Use `<Head>`, `<Script>` and
 `<Style>` to place content in the document head or body end.
 
-`key` and `suppressHydrationWarning` are compiler-only and never appear in the
-output. Event handler props are covered in
+`key` and `suppressHydrationWarning` never appear in the output. `key` drives
+list reconciliation and remounting, see [Keys and lists](#keys-and-lists).
+Event handler props are covered in
 [Events, forms and refs](#events-forms-and-refs).
+
+## Keys and lists
+
+A `.map()` whose array can change at runtime is reconciled by key, with React's
+semantics:
+
+- **Rows are matched by `key`**, the key of the element, component or
+  `<Fragment key>` the callback returns. Keys may be strings or numbers and
+  compare as strings (`1` and `'1'` are the same key). A row whose key is still
+  present keeps its DOM nodes, input values, focus and selection, component
+  state, effects and refs, and is moved into the new order with the fewest DOM
+  moves. Rows whose key disappeared unmount (effect cleanups run, refs detach)
+  before new rows mount; new rows run their effects after they are inserted.
+- **Without a key** rows are matched by index, as in React: reordering the
+  array moves the data, while state (an input value, a component's `useState`)
+  stays with the position.
+- **Rows update in place.** When the item for an existing key is a new object,
+  or its index changes, only the parts of the row that read it update; the row
+  is not remounted. Components rendered in a row receive live props, including
+  simple destructured props (`function Row({ item })`). A non-arrow callback
+  (`items.map(renderRow)`) or a destructured callback parameter
+  (`items.map(({ id, name }) => ...)`) receives plain values, so a row whose
+  item changed is re-rendered (its state resets); prefer `item => ...`.
+- **Duplicate keys** log React's "Encountered two children with the same key"
+  error. The first occurrence keeps its row; each duplicate gets its own row.
+- **Nested lists, text rows** (`items.map(t => t.label)`), keyed fragments, and
+  lists inside `<table>`/`<tbody>`, `<select>` and `<ul>` all work: rows are
+  delimited by comment markers, which are valid in every content model.
+- **Hydration adopts server-rendered rows by key.** The build renders each row
+  between `<!--k:ID:$key-->` markers; on load the list binds the existing nodes
+  (handlers, live attributes, component state) instead of re-rendering them,
+  so refs attach once and nothing flickers. A row whose key could not be
+  computed at build time is adopted by position.
+
+Changing the `key` of a single element remounts it, React's "reset state with
+a key" pattern:
+
+```tsx
+<Profile key={userId} userId={userId} />
+// a new userId unmounts the old Profile (cleanups run) and mounts a fresh one
+```
+
+This applies to any element whose key reads state or props, including inside
+conditionals and list rows.
+
+Lists over build-time constants (a literal array, or a prop known at build
+time) cannot reorder, so they render statically and are never warned about.
+
 
 ## shadcn/ui
 
@@ -554,6 +606,9 @@ observed in a browser. The browser conformance suite (`/react-events/` in
 | `KR5005` | `value` with `defaultValue`, or `checked` with `defaultChecked` (the default is ignored) |
 | `KR5006` | `value={cond ? x : undefined}`: a field that switches between controlled and uncontrolled |
 | `KR5007` | `onChange` on a `contentEditable` element (use `onInput`) |
+| `KR6001` | a list that can change at runtime renders elements without a `key` |
+| `KR6002` | two items of a list resolve to the same key at build time |
+| `KR6003` | a map callback keys some returned elements but not others |
 
 ## What is not supported
 
@@ -586,9 +641,31 @@ import { saveFeedback } from "../actions/feedback";
 </form>
 ```
 
-Forms work without JavaScript and are enhanced by the shared runtime. See
-[Server Actions](/docs/guides/server-actions/) for the module format, direct
-calls, runtime requirements, and security model.
+Forms work without JavaScript and are enhanced by the shared runtime.
+
+### React 19 actions
+
+`<form action={fn}>` and `<button formAction={fn}>` accept a server action or a
+client function. On submit the function receives the `FormData` inside an async
+transition; the page does not reload and uncontrolled fields reset after
+success. The React 19 hooks follow React's semantics:
+
+- `useActionState(action, initial, permalink?)` returns
+  `[state, formAction, isPending]`. Calls are queued in order and receive the
+  previous state; with a server action the previous state travels to the
+  server and the returned state back. Without JavaScript the form posts to the
+  action with the initial state and redirects to `permalink`.
+- `useFormStatus()` reads the pending status, data, method and action of the
+  form that contains the component.
+- `useOptimistic(state, update?)` applies updates while an action is pending and
+  reverts to the latest state when it settles.
+- `requestFormReset(form)` resets a form after its pending action.
+
+Inline `"use server"` functions inside components are not supported
+(`KR7001`); move them into a `"use server"` module. See
+[Server Actions](/docs/guides/server-actions/) for the module format, wire
+format, request context (`headers()`, `cookies()`, `redirect()`), runtime
+requirements, and security model.
 
 ## Diagnostics and conformance
 

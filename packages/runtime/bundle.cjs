@@ -23,6 +23,7 @@ const RUNTIME_ENTRY = `
 export * from './src/signal';
 export * from './src/effects';
 export * from './src/dom';
+export * from './src/list';
 export * from './src/slots';
 export * from './src/resource';
 export * from './src/jsx-runtime';
@@ -30,18 +31,21 @@ export * from './src/router';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/storage';
+export * from './src/actions';
 `;
 
 const HYDRATE_ENTRY = `
 export * from './src/signal';
 export * from './src/effects';
 export * from './src/dom';
+export * from './src/list';
 export * from './src/slots';
 export * from './src/resource';
 export * from './src/router';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/storage';
+export * from './src/actions';
 `;
 
 // Lite hydration bundle for sites with the SPA router disabled. It keeps the
@@ -50,12 +54,14 @@ const LITE_ENTRY = `
 export * from './src/signal';
 export * from './src/effects';
 export * from './src/dom';
+export * from './src/list';
 export * from './src/slots';
 export * from './src/resource';
 export * from './src/router-lite';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/storage';
+export * from './src/actions';
 `;
 
 const SUSPENSE_ENTRY = `export * from './src/suspense';`;

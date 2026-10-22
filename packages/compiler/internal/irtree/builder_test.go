@@ -89,12 +89,14 @@ func TestBuildKeyedListWithLiteralArray(t *testing.T) {
 	if len(list.Items) != 3 {
 		t.Fatalf("expected 3 resolved items, got %d", len(list.Items))
 	}
-	// Current implementation resolves literal-array items synchronously and
-	// falls back to index-based keys (data-derived key reconciliation is not
-	// yet implemented).
-	if list.Items[0].Key != "0" || list.Items[1].Key != "1" || list.Items[2].Key != "2" {
-		t.Errorf("expected index keys, got %q,%q,%q",
+	// Literal-array items are resolved synchronously and marked with their
+	// folded key, so hydration adopts each row by key.
+	if list.Items[0].Key != "$1" || list.Items[1].Key != "$2" || list.Items[2].Key != "$3" {
+		t.Errorf("expected folded keys, got %q,%q,%q",
 			list.Items[0].Key, list.Items[1].Key, list.Items[2].Key)
+	}
+	if !list.Keyed || list.Bind == nil || list.Bind.Key == "" {
+		t.Errorf("expected a keyed runtime binding, got keyed=%v bind=%+v", list.Keyed, list.Bind)
 	}
 	for i, item := range list.Items {
 		if len(item.Contents) != 1 {

@@ -638,6 +638,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 		// Third-party packages cannot act on these hints; keep builds quiet.
 		reactDiags = nil
 	}
+	b.checkInlineUseServer(prog, path, src)
 	_, actionChanged := b.rewriteActionImports(prog, abs)
 
 	mod := &Module{Path: path, Program: prog, IsEntry: isEntry, SourceCode: src, Diagnostics: reactDiags}

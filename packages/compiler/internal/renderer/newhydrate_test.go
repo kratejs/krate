@@ -63,8 +63,8 @@ func TestHydrationListSlotBinding(t *testing.T) {
   return <ul>{items().map(i => <li>{i}</li>)}</ul>;
 }`
 	_, js := fullPipeline(t, src)
-	if !strings.Contains(js, "kbindContent(") {
-		t.Errorf("expected kbindContent binding for list slot, got:\n%s", js)
+	if !strings.Contains(js, "kbindList(") {
+		t.Errorf("expected kbindList binding for list slot, got:\n%s", js)
 	}
 }
 
@@ -230,10 +230,13 @@ func TestIsBareStringToken(t *testing.T) {
 	}
 }
 
-func TestHydrationBootstrapIncludesServerActions(t *testing.T) {
-	for _, marker := range []string{"__krateAction", "data-krate-action", "/__krate/action/"} {
-		if !strings.Contains(HydrationBootstrapJS, marker) {
-			t.Errorf("HydrationBootstrapJS missing %q", marker)
+// The server-action client (proxies, form submission, action hooks) lives in
+// the TypeScript runtime (packages/runtime/src/actions.ts), so the bootstrap
+// must not define a second, competing submit listener.
+func TestHydrationBootstrapLeavesServerActionsToRuntime(t *testing.T) {
+	for _, marker := range []string{"__krateActionBound", "window.__krateAction="} {
+		if strings.Contains(HydrationBootstrapJS, marker) {
+			t.Errorf("HydrationBootstrapJS still defines %q", marker)
 		}
 	}
 }

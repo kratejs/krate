@@ -398,10 +398,6 @@ func callNamed(name string, args ...ast.Expr) *ast.CallExpr {
 	return &ast.CallExpr{Callee: &ast.Identifier{Name: name}, Args: args}
 }
 
-func thunk(expr ast.Expr) *ast.ArrowFn {
-	return &ast.ArrowFn{Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: expr}}}
-}
-
 // lowerSuspenseDecl lowers one declaration initialized by use(),
 // useDeferredValue or useSyncExternalStore. It reports whether it handled the
 // declaration (including its scope bookkeeping).

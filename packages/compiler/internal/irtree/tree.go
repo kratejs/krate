@@ -177,8 +177,13 @@ type ListSlot struct {
 	ID         SlotID
 	ExprSource string
 	Items      []*ListItem
-	Keyed      bool
-	Signals    []string
+	// Keyed reports that the map callback returns keyed JSX: rows are matched
+	// by key on update instead of by index.
+	Keyed   bool
+	Signals []string
+	// Bind is the runtime list binding (see keyed.go); nil keeps the
+	// whole-region re-render of ExprSource.
+	Bind *ListBinding
 	// Components lists the client component names referenced by the list's
 	// map body JSX (e.g. <Toast> in toasts().map(t => <Toast/>)). These must
 	// be emitted into the hydration scope so the runtime `h()` call can invoke
@@ -189,7 +194,17 @@ type ListSlot struct {
 func (s *ListSlot) slotNode()     {}
 func (s *ListSlot) GetID() SlotID { return s.ID }
 
-// ListItem represents a single item in a ListSlot.
+// ListBinding is the hydration form of a list slot: krateBindList(slot,
+// () => Source, Key, Render, accessor ? 1 : 0).
+type ListBinding struct {
+	Source   string
+	Key      string
+	Render   string
+	Accessor bool
+}
+
+// ListItem represents a single item in a ListSlot. Key is the item's marker
+// key: "$" plus the folded key prop for keyed rows, or the index.
 type ListItem struct {
 	Key      string
 	Contents []SlotNode
@@ -524,6 +539,10 @@ type ComponentSignature struct {
 	// Its hydration code (and its descendants') is loaded as a separate chunk.
 	Lazy     bool
 	LazyName string
+	// InLists names the list slots whose rows contain this component. When
+	// such a list is bound at runtime the rows (and this component) are
+	// rendered and adopted by the list, so the signature is not hydrated.
+	InLists []SlotID
 	// ParentID is the enclosing client component, empty at the top level.
 	// Hydration declares it so React effects run children before parents.
 	ParentID SlotID
@@ -552,6 +571,8 @@ type SlotBinding struct {
 	Type    string   // "text", "expr", "conditional", "list"
 	ExprJS  string   // JS expression to evaluate (e.g. "count()" or "(x() > 0 ? ... : ...)")
 	Signals []string // signal names this binding depends on
+	// List is set for list slots bound through the keyed list runtime.
+	List *ListBinding
 }
 
 // Helpers
