@@ -84,18 +84,19 @@ export default function Counter() {
 | `ref` as a prop (React 19) | supported: `function Input({ ref, ...p }) { return <input ref={ref} {...p} /> }` needs no `forwardRef` |
 | `createRef` | lowered to `{ current: null }` |
 | `useImperativeHandle` | attaches the handle before effects run; re-created when a dependency changes, detached on unmount |
-| `createContext` | supported, including provider values that change at runtime |
+| `createContext` | supported: `<Ctx.Provider value>`, React 19 `<Ctx value>`, `<Ctx.Consumer>{(v) => ...}</Ctx.Consumer>`, any constant default (objects included), provider values that change at runtime, and nested or self-nesting providers (see [Context](#context)) |
 | `createElement` | lowered to `h` |
 | `memo` | identity (components already run once) |
 | `lazy` | identity passthrough |
 | `<Fragment>` / `<React.Fragment>` | a JSX fragment |
 | `react/jsx-runtime`, `jsx`, `jsxs`, `jsxDEV` | lowered to Krate JSX |
-| `react-dom` / `react-dom/client` | `createPortal` and `flushSync` map to the compat runtime (other entry points are not supported) |
+| `react-dom` / `react-dom/client` | `createPortal` and `flushSync` map to the compat runtime; `findDOMNode`, `render`, `hydrate` and `unmountComponentAtNode` (removed in React 19) report KR8001 |
 | `Children.only` / `toArray` / `count` | folded at build time on literal input, otherwise compat shim |
 | `Children.map` | folded at build time for a literal list and inline arrow, otherwise compat shim |
 | `cloneElement` | folded at build time on a literal element and props, otherwise compat shim |
 | `isValidElement` | folded at build time on literal input, otherwise compat shim |
-| `createPortal` / `<Portal>` | rendered into `document.body` and cleaned up on dispose |
+| `createPortal` / `<Portal>` | mounted into its container after hydration (see [Portals](#portals)) |
+| `<title>` / `<meta>` / `<link>` (React 19) | hoisted into `<head>` (see [Document metadata](#document-metadata)) |
 | `Component` / `PureComponent` | lowerable class components (see below) |
 | `useOptimistic` / `useActionState` / `useFormStatus` | React 19 compat shims |
 | `StrictMode` / `Profiler` | pass-through |
@@ -107,6 +108,62 @@ Class components that follow the common subset are lowered to functions:
 helper methods, arrow-function handlers, and instance fields. Unsupported
 lifecycle hooks (`shouldComponentUpdate`, `getSnapshotBeforeUpdate`, derived
 state, and error boundaries) produce a specific build diagnostic.
+
+### Context
+
+Context is resolved where a component is rendered, as in React: a read sees the
+nearest provider above it, including providers that a parent component wraps
+around `{props.children}` (`<Level><Level /></Level>` nests). A provider whose
+value is a build-time constant is folded into the static HTML; a value that
+reads state is passed to the readers as a getter, so every consumer updates
+when it changes. Without a provider, readers get the `createContext` default.
+
+```tsx
+const Theme = createContext("light");
+
+function ThemeBox(props) {
+  const [dark, setDark] = useState(false);
+  return (
+    <Theme value={dark ? "dark" : "light"}>
+      <button onClick={() => setDark(!dark)}>flip</button>
+      {props.children}
+    </Theme>
+  );
+}
+
+<ThemeBox>
+  <Theme.Consumer>{(theme) => <p>{theme}</p>}</Theme.Consumer>
+</ThemeBox>
+```
+
+A `Consumer` child must be a single render function with a plain parameter
+(or a `{ a, b }` pattern), otherwise the build reports KR8004. Legacy context
+(`contextTypes`, `childContextTypes`, `getChildContext`) was removed in
+React 19 and reports KR8005.
+
+### Portals
+
+`createPortal(children, container)` (and the built-in `<Portal container>`)
+renders its children in the component's place in the tree and moves them into
+the container once the page hydrates; like React, the portal content is not
+part of the server-rendered HTML. The container can be `document.body`,
+`document.getElementById("id")`, `document.querySelector("selector")` or any
+expression the component can evaluate in the browser (a container that cannot
+be resolved reports KR8006 and falls back to `document.body`). React events
+bubble from portal content to the component's ancestors, a portal inside a
+conditional branch mounts and unmounts with the branch, and its content is
+removed when the component goes away.
+
+### Document metadata
+
+As in React 19, a `<title>`, `<meta>` or `<link>` rendered anywhere in a
+component is placed in the document `<head>`. A `<title>` that reads state
+keeps `document.title` up to date; reactive `<meta content>` and `<link href>`
+update in place. Identical elements (the same stylesheet rendered twice) are
+emitted once, and `<link rel="stylesheet">` is hoisted only with a
+`precedence`, as in React. Elements inside `<svg>`, with an `itemProp`, or
+inside a conditional branch or list item stay where they are rendered.
+`<Head>` keeps working and is the way to set head content from layouts.
 
 ### Bare reads are auto-called
 
@@ -401,7 +458,9 @@ observed in a browser. The browser conformance suite (`/react-events/` in
 - **Errors** thrown by a handler do not stop the other handlers; the first error
   is rethrown after the dispatch.
 - Handlers on `window`/`document` registered in `useEffect` stay native
-  listeners. Handlers inside a portal moved outside the root keep working.
+  listeners. Handlers inside a portal keep working, and events from portal
+  content bubble to the React ancestors of the portal, not the DOM ancestors
+  of its container.
 
 ### Forms
 

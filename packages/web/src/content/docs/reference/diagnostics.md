@@ -171,7 +171,7 @@ A class component uses legacy context (`contextTypes`, `childContextTypes` or `g
 
 **Portal container cannot be resolved**
 
-`createPortal(children, container)` moves its children into a DOM node after hydration. Krate resolves `document.body`, `document.getElementById("id")` and `document.querySelector("selector")` with literal arguments, and any other expression in the component's hydration scope; a container that is not an element when the page hydrates leaves the content in place. Make sure the container exists in the page before the component hydrates (for example a `<div id="modal-root">` in the layout).
+`createPortal(children, container)` moves its children into a DOM node after hydration. Krate resolves `document.body`, `document.getElementById("id")` and `document.querySelector("selector")` with literal arguments, and any other expression in the hydration scope of a client component; elsewhere the content mounts into `document.body`, and a container that is not an element when the page hydrates keeps the content unmounted. Make sure the container exists before the component hydrates (for example a `<div id="modal-root">` in the layout).
 
 ## See also
 
