@@ -233,6 +233,11 @@ type componentCtx struct {
 	restProps         map[string]map[string]ast.Expr
 	pendingScopeProps map[string]scopeRef // the parent's scope-valued props for the child build
 	forceClient       bool                // keep a wrapper client so call-site child slots hydrate
+	// liveProps names the props whose call-site value reads a caller signal;
+	// they are registered as getters, so `<livePropsParam>.<name>` reads are
+	// reactive in the child's hydration code.
+	liveProps      map[string]bool
+	livePropsParam string
 	// contextScopes maps an active context name (as provided by a
 	// `<Ctx.Provider value={scope}>` subtree) to the scope handle it carries, so
 	// `const s = Ctx.useContext()` inside a descendant resolves `s.trigger(...)`.
@@ -324,8 +329,10 @@ type builder struct {
 	actionURLs       map[string]string         // server-action binding -> POST URL
 	externals        []ExternalComponent       // unresolved package components mounted at runtime
 	warnings         []diag.Diagnostic         // non-fatal, positioned build warnings
-	markupErrs       []error                   // invalid tag/attribute names, children on void elements
-	selectStack      [][]string                // selected option values of enclosing <select> elements
+	// snapshotPropWarned dedupes snapshot-prop warnings per component and props.
+	snapshotPropWarned map[string]bool
+	markupErrs         []error    // invalid tag/attribute names, children on void elements
+	selectStack        [][]string // selected option values of enclosing <select> elements
 
 	// cssIndex assigns stable, page-unique indices to (component, var) scope
 	// pairs so classes/CSS are deterministic across builds.

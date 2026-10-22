@@ -43,7 +43,7 @@ func TestRecursiveComponentPropsDoNotLeakBetweenInstances(t *testing.T) {
 `
 	cases := []struct {
 		name, items, want string
-		absent             []string
+		absent            []string
 	}{
 		{
 			name:  "child badge only",

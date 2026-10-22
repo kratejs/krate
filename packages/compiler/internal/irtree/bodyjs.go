@@ -150,7 +150,9 @@ func (b *builder) collectExtraVarJS(body []ast.Stmt, order *bodyOrder, params ma
 			if !isReplayedBodyExpr(s.Expression) || params[assignedIdent(s.Expression)] {
 				continue
 			}
-			add(s, renderStmtJS(s, b.sigMap()), stmtReferenceSignal(s, b))
+			// A custom hook may read the component's signals through
+			// closures, so it runs after the signal declarations.
+			add(s, renderStmtJS(s, b.sigMap()), isCustomHookCall(s.Expression) || stmtReferenceSignal(s, b))
 		case *ast.ForStmt, *ast.ForInStmt, *ast.WhileStmt, *ast.DoWhileStmt:
 			add(s, renderStmtJS(s, b.sigMap()), stmtReferenceSignal(s, b))
 		case *ast.SwitchStmt, *ast.TryStmt, *ast.LabeledStmt:
@@ -223,7 +225,9 @@ func isReplayedBodyExpr(expr ast.Expr) bool {
 			return false
 		}
 		if id, ok := e.Callee.(*ast.Identifier); ok {
-			return !isHookCallee(id.Name)
+			// A custom hook (`useTitle("x")`) is ordinary code that runs once
+			// per instance; only the runtime's own hooks have dedicated passes.
+			return !isHookCallee(id.Name) || isCustomHookCallee(id.Name)
 		}
 	}
 	return true
@@ -272,6 +276,37 @@ func isHookCallee(name string) bool {
 		return unicode.IsUpper(rune(rest[0]))
 	}
 	return false
+}
+
+// runtimeHooks are the `use*` hooks the runtime (and the React compatibility
+// layer) provides; their body-level calls are collected or dropped by
+// dedicated passes.
+var runtimeHooks = map[string]bool{
+	"useState": true, "useEffect": true, "useLayoutEffect": true,
+	"useInsertionEffect": true, "useMemo": true, "useReducer": true,
+	"useRef": true, "useCallback": true, "useId": true, "useContext": true,
+	"useSyncExternalStore": true, "useTransition": true, "useDeferredValue": true,
+	"useOptimistic": true, "useActionState": true, "useFormStatus": true,
+	"useImperativeHandle": true, "useDebugValue": true,
+}
+
+// isCustomHookCallee reports whether name is a `use*` hook defined by the
+// application rather than the runtime.
+func isCustomHookCallee(name string) bool {
+	if runtimeHooks[name] || strings.HasPrefix(name, "use__krate") {
+		return false
+	}
+	rest, ok := strings.CutPrefix(name, "use")
+	return ok && rest != "" && unicode.IsUpper(rune(rest[0]))
+}
+
+func isCustomHookCall(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	id, ok := call.Callee.(*ast.Identifier)
+	return ok && isCustomHookCallee(id.Name)
 }
 
 // stmtHasReturn reports whether stmt contains a `return` that would exit the

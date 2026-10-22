@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -217,6 +218,7 @@ func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs
 	b.pendingHandlers, b.pendingAttrs, b.pendingRefs = nil, nil, nil
 	b.localProps = b.propBindingsToLocalProps(childFn, attrs, b.localProps)
 	b.restProps = b.restPropsFor(fnRestParamName(childFn), childFn, attrs)
+	b.liveProps, b.livePropsParam = nil, ""
 	b.localFnBody = childFn.Body
 	b.locateOnly++
 	slots := b.buildSlotNodes(ret, string(childID))
@@ -233,8 +235,10 @@ func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs
 func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDecl, childID SlotID, attrs map[string]ast.Expr, provider scopeProvider) []SlotNode {
 	b.pushComponentCtx()
 	b.installCallSiteInputs(el, childFn, attrs)
+	live := b.liveProps
 	childNode := b.buildComponentNode(childFn, string(childID))
 	b.popComponentCtx()
+	b.warnSnapshotProps(el, childFn, childNode, live)
 
 	childNode.Props = attrs
 	childNode.CallSiteChildren = el.Children
@@ -257,6 +261,20 @@ func (b *builder) installCallSiteInputs(el *ast.JSXElement, childFn *ast.FnDecl,
 	parentProps := b.localProps
 	b.localProps = make(valueMap, len(attrs))
 	var funcProps map[string]bool
+	// Evaluated in the caller's scope, before the child's signals replace it.
+	var live map[string]bool
+	for name, expr := range attrs {
+		if !strings.HasPrefix(name, contextPropPrefix) && b.isSignalDerivedProp(expr) {
+			if live == nil {
+				live = make(map[string]bool)
+			}
+			live[name] = true
+		}
+	}
+	b.liveProps, b.livePropsParam = live, ""
+	if live != nil {
+		b.livePropsParam = plainPropsParamName(childFn)
+	}
 	for name, expr := range attrs {
 		if b.isFuncReference(expr) {
 			if funcProps == nil {
@@ -269,6 +287,17 @@ func (b *builder) installCallSiteInputs(el *ast.JSXElement, childFn *ast.FnDecl,
 			continue
 		}
 		b.localProps[name] = b.resolveBindingValue(expr, parentProps)
+	}
+	// An omitted destructured prop takes its pattern default (`{ step = 2 }`)
+	// or undefined, rather than leaving the bare name unresolved.
+	if len(childFn.Params) > 0 && childFn.Params[0] != nil && childFn.Params[0].Pattern != "" {
+		rest := fnRestParamName(childFn)
+		for _, name := range destructuredParamNames(childFn.Params[0].Pattern) {
+			if _, given := attrs[name]; given || name == rest {
+				continue
+			}
+			b.localProps[name] = b.paramDefaultValue(childFn, name)
+		}
 	}
 	b.localFuncProps = funcProps
 
@@ -359,7 +388,9 @@ func (b *builder) registerChildProps(childNode *ComponentNode, childFn *ast.FnDe
 	}
 	hasHydration := len(childNode.Handlers) > 0 || len(childNode.Effects) > 0 || len(childNode.Memos) > 0 ||
 		len(childNode.Signals) > 0 || len(childNode.RefBindings) > 0 || len(childNode.AttrBindings) > 0 ||
-		len(b.contextValues) > 0
+		len(b.contextValues) > 0 ||
+		// Bindings of getter-registered props (`{props.title}`).
+		(childFn != nil && plainPropsParamName(childFn) != "" && slotsReadProps(childNode.Children, plainPropsParamName(childFn)))
 	if !hasHydration {
 		return
 	}
@@ -373,9 +404,175 @@ func (b *builder) registerChildProps(childNode *ComponentNode, childFn *ast.FnDe
 		// A child that reads props only inside rendered JSX (e.g. a list
 		// binding `props.items.map(...)`) still needs the registry.
 		bodyReferencesProps(childFn.Body)
-	if !readsProps {
+	// A destructured or differently named props parameter
+	// (`function Child({ label })`) is not a hydration-scope binding on its
+	// own: when the emitted hydration code reads one of its names, bind it
+	// from the registry object.
+	paramJS, paramNames := propsParamBindingJS(childFn)
+	readsParam := paramJS != "" && hydrationReadsAny(childNode, paramNames)
+	if !readsProps && !readsParam {
 		return
 	}
 	b.pendingPropsRegs = append(b.pendingPropsRegs, b.buildChildPropsRegDecl(string(childNode.ID), childNode.Props))
-	childNode.ExtraVars = append([]string{"var props=__krate_props[" + strconv.Quote(string(childNode.ID)) + "]"}, childNode.ExtraVars...)
+	decl := "var props=__krate_props[" + strconv.Quote(string(childNode.ID)) + "]"
+	if readsParam {
+		// Kept in the same fragment so the params are bound before signal
+		// initializers that may read them.
+		decl += ";" + paramJS
+	}
+	childNode.ExtraVars = append([]string{decl}, childNode.ExtraVars...)
+}
+
+// propsParamBindingJS returns the declaration that binds a component's first
+// parameter from the hydration `props` object, with the names it binds. It
+// is "" for a plain `props` parameter (already the registry binding), a rest
+// parameter, or no parameter.
+func propsParamBindingJS(fn *ast.FnDecl) (string, []string) {
+	if fn == nil || len(fn.Params) == 0 || fn.Params[0] == nil {
+		return "", nil
+	}
+	p := fn.Params[0]
+	if p.IsRest {
+		return "", nil
+	}
+	if p.Pattern != "" {
+		names := destructuredParamNames(p.Pattern)
+		if len(names) == 0 {
+			return "", nil
+		}
+		return "var " + p.Pattern + "=props", names
+	}
+	if p.Name == "" || p.Name == "props" || p.Name == "{...}" || p.Name == "[...]" {
+		return "", nil
+	}
+	return "var " + p.Name + "=props", []string{p.Name}
+}
+
+// warnSnapshotProps warns when a signal-derived prop reaches a hydrating
+// child through a destructured parameter: the destructured local is read
+// once, so the child never sees later values. Only `props.<name>` reads of a
+// plain props parameter go through the live getter.
+func (b *builder) warnSnapshotProps(el *ast.JSXElement, childFn *ast.FnDecl, childNode *ComponentNode, live map[string]bool) {
+	if len(live) == 0 || b.locateOnly > 0 || childNode == nil || childNode.Tier != TierClient {
+		return
+	}
+	if len(childFn.Params) == 0 || childFn.Params[0] == nil || childFn.Params[0].Pattern == "" {
+		return
+	}
+	var stale []string
+	for _, name := range destructuredParamNames(childFn.Params[0].Pattern) {
+		if live[name] {
+			stale = append(stale, name)
+		}
+	}
+	if len(stale) == 0 {
+		return
+	}
+	sort.Strings(stale)
+	key := childFn.Name + ":" + strings.Join(stale, ",")
+	if b.snapshotPropWarned[key] {
+		return
+	}
+	if b.snapshotPropWarned == nil {
+		b.snapshotPropWarned = make(map[string]bool)
+	}
+	b.snapshotPropWarned[key] = true
+	b.warnAt(el.Position,
+		"<"+el.Opening.Name+"> receives signal-derived prop(s) "+strings.Join(stale, ", ")+
+			" through a destructured parameter; the child only sees the initial value",
+		"declare the parameter as `props` and read `props."+stale[0]+"` to keep it reactive, or pass an accessor ("+
+			stale[0]+"={() => ...}) and call it in the child")
+}
+
+// rendersLiveProps reports whether the component being built binds a
+// getter-registered prop in its rendered output (`{props.title}` where the
+// caller passed a signal-derived value), so it must hydrate.
+func (b *builder) rendersLiveProps(node *ComponentNode) bool {
+	if len(b.liveProps) == 0 || b.livePropsParam == "" {
+		return false
+	}
+	return slotsReadProps(node.Children, b.livePropsParam)
+}
+
+// slotsReadProps reports whether a component's own slots read the named
+// props parameter.
+func slotsReadProps(slots []SlotNode, param string) bool {
+	return slotsReadAny(slots, func(code string) bool { return codeContainsIdent(code, param) })
+}
+
+// hydrationReadsAny reports whether the JS a component emits into its own
+// hydration scope references any of names. Nested component instances have
+// their own scopes and are not inspected.
+func hydrationReadsAny(node *ComponentNode, names []string) bool {
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[n] = true
+	}
+	reads := func(code string) bool {
+		if code == "" {
+			return false
+		}
+		found := false
+		scanJSIdents(code, func(name string) {
+			if want[name] {
+				found = true
+			}
+		})
+		return found
+	}
+	var codes []string
+	for _, h := range node.Handlers {
+		codes = append(codes, h.Body)
+	}
+	for _, s := range node.Signals {
+		codes = append(codes, s.RawInit, s.FactoryJS, s.OptionsJS)
+	}
+	for _, a := range node.AttrBindings {
+		codes = append(codes, a.ExprSource)
+	}
+	for _, r := range node.RefBindings {
+		codes = append(codes, r.Target, r.Callback)
+	}
+	codes = append(codes, node.Effects...)
+	codes = append(codes, node.Memos...)
+	codes = append(codes, node.ExtraVars...)
+	codes = append(codes, node.PreSignalVars...)
+	codes = append(codes, node.FuncPropAliases...)
+	codes = append(codes, node.BodyUses...)
+	codes = append(codes, node.IslandBoot...)
+	for _, c := range codes {
+		if reads(c) {
+			return true
+		}
+	}
+	return slotsReadAny(node.Children, reads)
+}
+
+func slotsReadAny(slots []SlotNode, reads func(string) bool) bool {
+	for _, s := range slots {
+		switch v := s.(type) {
+		case *ExprSlot:
+			if reads(v.ExprSource) {
+				return true
+			}
+		case *ConditionalSlot:
+			if reads(v.TestJS) || reads(v.ExprSource) || slotsReadAny(v.Consequent, reads) || slotsReadAny(v.Alternate, reads) {
+				return true
+			}
+		case *ListSlot:
+			if reads(v.ExprSource) {
+				return true
+			}
+			for _, it := range v.Items {
+				if it != nil && slotsReadAny(it.Contents, reads) {
+					return true
+				}
+			}
+		case *SuspenseSlot:
+			if slotsReadAny(v.Fallback, reads) || slotsReadAny(v.Resolved, reads) {
+				return true
+			}
+		}
+	}
+	return false
 }
