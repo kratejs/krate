@@ -10,7 +10,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
-func mustContain(t *testing.T, out string, wants ...string) {
+func actionsContain(t *testing.T, out string, wants ...string) {
 	t.Helper()
 	for _, w := range wants {
 		if !strings.Contains(out, w) {
@@ -25,7 +25,7 @@ export default function Page() {
   const [count, formAction, isPending] = useActionState(increment, 0, "/count");
   return <form action={formAction}><p>{count} {isPending ? "..." : ""}</p></form>;
 }`)
-	mustContain(t, out,
+	actionsContain(t, out,
 		`[count, __krate_as_set_count] = createSignal(0)`,
 		`[isPending, __krate_as_setp_count] = createSignal(false)`,
 		`formAction = __krateActionState(increment, () => count(), __krate_as_set_count, __krate_as_setp_count, 0, "/count")`,
@@ -43,7 +43,7 @@ function F() {
   const [msg, act] = useActionState(async (prev, fd) => prev + "!", "hi");
   return <form action={act}>{msg}</form>;
 }`)
-	mustContain(t, out, `[__krate_as_pending_msg, __krate_as_setp_msg] = createSignal(false)`, `act = __krateActionState(`)
+	actionsContain(t, out, `[__krate_as_pending_msg, __krate_as_setp_msg] = createSignal(false)`, `act = __krateActionState(`)
 }
 
 func TestLowerUseOptimistic(t *testing.T) {
@@ -53,7 +53,7 @@ function List() {
   const [shown, addShown] = useOptimistic(items, (s, n) => [...s, n]);
   return <ul>{shown.length}</ul>;
 }`)
-	mustContain(t, out,
+	actionsContain(t, out,
 		`[shown, __krate_opt_set_shown] = createSignal(items())`,
 		`addShown = __krateOptimistic(() => items(), __krate_opt_set_shown, (s, n) =>`,
 		`shown().length`,
@@ -66,7 +66,7 @@ function Submit() {
   const { pending, data: formData } = useFormStatus();
   return <button disabled={pending}>{formData ? "x" : "y"}</button>;
 }`)
-	mustContain(t, out,
+	actionsContain(t, out,
 		`[pending, __krate_fs_pending_pending] = createSignal(false)`,
 		`[formData, __krate_fs_data_formData] = createSignal(null)`,
 		`__krate_fs_ref_1 = (el) => __krateFormStatusMount(el, { pending: __krate_fs_pending_pending, data: __krate_fs_data_formData })`,
@@ -81,7 +81,7 @@ function Status(props) {
   const status = ReactDOM.useFormStatus();
   return <span ref={props.r}>{status.pending ? "busy" : "idle"}</span>;
 }`)
-	mustContain(t, out,
+	actionsContain(t, out,
 		`[status, __krate_fs_set_status] = createSignal({ pending: false, data: null, method: null, action: null })`,
 		`status().pending`,
 		`__krateAssignRef(props.r, el)`,
@@ -94,7 +94,7 @@ function Submit() {
   const { pending } = useFormStatus();
   return <Button disabled={pending} />;
 }`)
-	diags := RewriteReact(prog)
+	diags := RewriteReactDiag(prog, "page.tsx", "")
 	if len(diags) != 1 || diags[0].Code != diag.CodeFormStatusNoElement || !diags[0].IsWarning() {
 		t.Fatalf("expected one KR7002 warning, got %+v", diags)
 	}
@@ -106,7 +106,7 @@ function Submit() {
 func TestRequestFormResetFromReactDOM(t *testing.T) {
 	out := rewriteSrc(t, `import { requestFormReset } from "react-dom";
 function F() { return <button onClick={(e) => requestFormReset(e.target.form)}>r</button>; }`)
-	mustContain(t, out, `requestFormReset(e.target.form)`)
+	actionsContain(t, out, `requestFormReset(e.target.form)`)
 	if strings.Contains(out, "react-dom") {
 		t.Fatalf("react-dom import should be removed:\n%s", out)
 	}

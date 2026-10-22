@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSignal } from './signal.js';
+import { krateOn } from './events.js';
 import {
   ACTION_ARGS_FIELD,
   ServerActionError,
@@ -125,6 +126,24 @@ describe('form actions', () => {
     submit(form);
     await tick();
     expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('runs onSubmit through the React event system first; preventDefault cancels the action', async () => {
+    const form = makeForm('<form><button>Go</button></form>');
+    const order: string[] = [];
+    let cancel = true;
+    krateOn(form, 'onSubmit', (e) => {
+      order.push('onSubmit');
+      if (cancel) e.preventDefault();
+    });
+    __krateBindFormAction(form, () => () => order.push('action'));
+    submit(form);
+    await tick();
+    expect(order).toEqual(['onSubmit']);
+    cancel = false;
+    submit(form);
+    await tick();
+    expect(order).toEqual(['onSubmit', 'onSubmit', 'action']);
   });
 
   it('restores controlled fields after the reset', async () => {

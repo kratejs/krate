@@ -292,14 +292,9 @@ func (c *reactCtx) injectFormStatusRefs(body []ast.Stmt) {
 		if n := len(c.formStatusPos); n > 0 {
 			pos = c.formStatusPos[n-1]
 		}
-		c.diags = append(c.diags, diag.Diagnostic{
-			Line:     pos.Line,
-			Col:      pos.Col,
-			Severity: diag.SeverityWarning,
-			Code:     diag.CodeFormStatusNoElement,
-			Message:  "useFormStatus() needs the component to return a DOM element; its status stays idle",
-			Hint:     "return an element such as <button> or <span> (not a component or a value) from the component that calls useFormStatus()",
-		})
+		c.warn(pos, diag.CodeFormStatusNoElement,
+			"useFormStatus() needs the component to return a DOM element; its status stays idle",
+			"return an element such as <button> or <span> (not a component or a value) from the component that calls useFormStatus()")
 	}
 }
 

@@ -7,29 +7,6 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
-// addSourceDiagnostics records non-fatal rewrite diagnostics for a module,
-// filling in the file and the offending source line.
-func (b *Bundler) addSourceDiagnostics(path, src string, diags []diag.Diagnostic) {
-	for _, d := range diags {
-		d.File = path
-		if d.Source == "" {
-			d.Source = sourceLine(src, d.Line)
-		}
-		b.warnings = append(b.warnings, d)
-	}
-}
-
-func sourceLine(src string, line int) string {
-	if line <= 0 {
-		return ""
-	}
-	lines := strings.Split(src, "\n")
-	if line > len(lines) {
-		return ""
-	}
-	return strings.TrimRight(lines[line-1], "\r")
-}
-
 // checkInlineUseServer rejects a `"use server"` directive at the top of a
 // function body. React allows inline server functions that close over
 // component scope; Krate supports file-level action modules only.
@@ -44,7 +21,7 @@ func (b *Bundler) checkInlineUseServer(prog *ast.Program, path, src string) {
 	d := diag.New(path, pos.Line, pos.Col,
 		`inline "use server" functions are not supported`,
 		`move the function into a module whose first statement is "use server", export it, and import it here`,
-		sourceLine(src, pos.Line)).WithCode(diag.CodeInlineUseServer)
+		sourceLineOf(src, pos.Line)).WithCode(diag.CodeInlineUseServer)
 	_ = b.setActionError(d)
 }
 

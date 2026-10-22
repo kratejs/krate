@@ -152,13 +152,18 @@ type reactCtx struct {
 	// because they resolve to the compatibility runtime rather than a krate
 	// primitive.
 	compat map[string]bool
+
+	// Effect/memo lowering state (react_effects.go).
+	file        string
+	src         string
+	diags       []diag.Diagnostic
+	frames      []*hookFrame
+	arrayConsts map[*scope]map[string]*ast.ArrayExpr
+	callables   map[*scope]map[string]string
 	// formStatusSeq numbers lowered useFormStatus() mount refs per module and
 	// formStatusPos records their positions for diagnostics.
 	formStatusSeq int
 	formStatusPos []ast.Pos
-	// diags collects non-fatal diagnostics (positions only; the bundler adds
-	// the file).
-	diags []diag.Diagnostic
 }
 
 // localAPI resolves an identifier bound by a React named import to its React
@@ -231,10 +236,15 @@ func (c *reactCtx) callAPI(callee ast.Expr) (string, bool) {
 // module (no opt-in): React imports and `React.*` member calls are mapped to
 // existing krate runtime primitives, and bare reads of hook values are
 // auto-called so unmodified React (`{count}`, `count + 1`) behaves correctly.
-//
-// It returns non-fatal diagnostics carrying positions but no file name.
-func RewriteReact(prog *ast.Program) []diag.Diagnostic {
-	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}}
+func RewriteReact(prog *ast.Program) {
+	RewriteReactDiag(prog, "", "")
+}
+
+// RewriteReactDiag is RewriteReact that also returns the coded warnings for
+// React patterns whose Krate semantics differ (see internal/diag
+// codes_effects.go). file and src position the diagnostics.
+func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
+	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src}
 	var toRemove []int
 
 	for i, stmt := range prog.Body {
@@ -376,8 +386,10 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 		s.Expression = c.rewriteExpr(s.Expression, sc)
 	case *ast.FnDecl:
 		child := c.fnScope(s.Params, sc)
+		done := c.enterFn(child, s.Params, s.Body)
 		c.rewriteStmts(s.Body, child)
 		c.injectFormStatusRefs(s.Body)
+		done()
 	case *ast.ExportStmt:
 		if s.Declaration != nil {
 			c.rewriteStmt(s.Declaration, sc)
@@ -511,6 +523,11 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 					}
 				} else if decl.Name != "" {
 					sc.declareGetter(decl.Name)
+					if call, ok := decl.Init.(*ast.CallExpr); ok {
+						if api, ok := c.isDepsGetterHook(call); ok {
+							c.markCallable(sc, decl.Name, api)
+						}
+					}
 				}
 			} else if !decl.IsDestructuring {
 				sc.declareLocal(decl.Name)
@@ -528,6 +545,9 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 			}
 		}
 		decl.Init = c.rewriteExpr(decl.Init, sc)
+		if arr, ok := decl.Init.(*ast.ArrayExpr); ok && v.Kind == ast.VarConst && !decl.IsDestructuring && decl.Name != "" {
+			c.recordArrayConst(sc, decl.Name, arr)
+		}
 	}
 }
 
@@ -540,6 +560,9 @@ func (c *reactCtx) isReactiveFactory(init ast.Expr) bool {
 		return false
 	}
 	if api, ok := c.callAPI(call.Callee); ok {
+		if api == "useCallback" {
+			return hasDepsArg(call)
+		}
 		return reactiveFactories[api]
 	}
 	if id, ok := call.Callee.(*ast.Identifier); ok {
@@ -608,8 +631,10 @@ func (c *reactCtx) rewriteExprCtx(expr ast.Expr, sc *scope, valuePos bool) ast.E
 				p.Default = c.rewriteExpr(p.Default, sc)
 			}
 		}
+		done := c.enterFn(child, e.Params, e.Body)
 		c.rewriteStmts(e.Body, child)
 		c.injectFormStatusRefs(e.Body)
+		done()
 	case *ast.TemplateExpr:
 		for i, part := range e.Parts {
 			e.Parts[i] = c.rewriteExpr(part, sc)
@@ -672,56 +697,40 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 
 	api, isReactAPI := c.callAPI(e.Callee)
 
-	// React runs an effect with an empty dependency array exactly once. Lower
-	// that case to onMount (with cleanup registration) instead of createEffect,
-	// which would re-run it whenever any signal it reads changes.
-	if isReactAPI && (api == "useEffect" || api == "useLayoutEffect" || api == "useInsertionEffect") && len(e.Args) >= 2 {
-		if deps, ok := e.Args[1].(*ast.ArrayExpr); ok && len(deps.Elements) == 0 {
-			fn := c.rewriteExpr(e.Args[0], sc)
-			cleanup := &ast.VarStmt{Decls: []*ast.VarDecl{{Name: "__krate_effect_cleanup", Init: &ast.CallExpr{Callee: fn}}}}
-			guard := &ast.IfStmt{
-				Test: &ast.BinaryExpr{
-					Left:  &ast.UnaryExpr{Op: "typeof", Arg: &ast.Identifier{Name: "__krate_effect_cleanup"}},
-					Op:    "===",
-					Right: &ast.Literal{Kind: ast.StringLit, Value: "function"},
-				},
-				Consequent: []ast.Stmt{&ast.ExprStmt{Expression: &ast.CallExpr{
-					Callee: &ast.Identifier{Name: "onCleanup"},
-					Args:   []ast.Expr{&ast.Identifier{Name: "__krate_effect_cleanup"}},
-				}}},
-			}
-			return &ast.CallExpr{
-				Position: e.Position,
-				Callee:   &ast.Identifier{Name: "onMount"},
-				Args: []ast.Expr{&ast.ArrowFn{
-					Position: e.Position,
-					Body:     []ast.Stmt{cleanup, guard},
-				}},
-			}
+	// Effects, memos and callbacks with dependency arrays (react_effects.go).
+	if isReactAPI {
+		if _, ok := effectPhases[api]; ok {
+			return c.lowerEffectHook(e, api, sc)
 		}
-		// Non-empty dependency arrays: createEffectDeps compares the deps and
-		// only runs the callback when one changed. The deps thunk re-reads the
-		// signal getters so the effect subscribes to them.
-		if _, ok := e.Args[1].(*ast.ArrayExpr); ok {
-			fn := c.rewriteExpr(e.Args[0], sc)
-			deps := c.rewriteExpr(e.Args[1], sc)
-			thunk := &ast.ArrowFn{Position: e.Position, Body: []ast.Stmt{&ast.ReturnStmt{Value: deps}}}
-			return &ast.CallExpr{Position: e.Position, Callee: &ast.Identifier{Name: "createEffectDeps"}, Args: []ast.Expr{fn, thunk}}
+		switch api {
+		case "useMemo":
+			if lowered, ok := c.lowerMemoHook(e, sc); ok {
+				return lowered
+			}
+		case "useCallback":
+			return c.lowerCallbackHook(e, sc)
+		case "useState":
+			// Lazy initializer: React calls useState(() => init) once and
+			// stores its result; createSignal would store the function.
+			if len(e.Args) >= 1 {
+				if arrow, ok := e.Args[0].(*ast.ArrowFn); ok && len(arrow.Params) == 0 && !arrow.Async && !arrow.Generator {
+					e.Args[0] = &ast.CallExpr{Position: arrow.Position, Callee: arrow}
+				}
+			}
+		case "useImperativeHandle":
+			// Honour the dependency array: the compat helper re-creates the
+			// handle when the thunk's result changes.
+			if len(e.Args) >= 3 {
+				if thunk, ok := c.depsThunk(&ast.CallExpr{Position: e.Position, Args: e.Args[1:]}, api, sc); ok {
+					e.Args[2] = thunk
+				}
+			}
 		}
 	}
 
-	if isReactAPI && api == "useMemo" && len(e.Args) >= 2 {
-		if _, ok := e.Args[1].(*ast.ArrayExpr); ok {
-			fn := c.rewriteExpr(e.Args[0], sc)
-			deps := c.rewriteExpr(e.Args[1], sc)
-			thunk := &ast.ArrowFn{Position: e.Position, Body: []ast.Stmt{&ast.ReturnStmt{Value: deps}}}
-			return &ast.CallExpr{Position: e.Position, Callee: &ast.Identifier{Name: "createMemoDeps"}, Args: []ast.Expr{fn, thunk}}
-		}
-	}
-
-	// `memo`/`lazy` are identity wrappers; `useCallback` yields its function.
+	// `memo`/`lazy` are identity wrappers.
 	switch api {
-	case "memo", "lazy", "useCallback":
+	case "memo", "lazy":
 		if isReactAPI && len(e.Args) >= 1 {
 			return c.rewriteExpr(e.Args[0], sc)
 		}
@@ -781,6 +790,9 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 			c.compat[api] = true
 			e.Callee = &ast.Identifier{Name: api}
 		}
+	} else if id, ok := e.Callee.(*ast.Identifier); ok && c.callableGetterCall(sc, id.Name, e) {
+		// A useMemo/useCallback getter holds a function: call its value.
+		e.Callee = &ast.CallExpr{Position: id.Position, Callee: id}
 	} else {
 		e.Callee = c.rewriteExprCtx(e.Callee, sc, false)
 	}

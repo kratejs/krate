@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
 // ModuleCache memoizes per-file parse results across every Bundler in a build.
@@ -102,6 +103,7 @@ type programEntry struct {
 	imports     []string
 	compClass   ComponentClass
 	frontmatter map[string]any
+	diags       []diag.Diagnostic
 }
 
 type cssEntry struct {

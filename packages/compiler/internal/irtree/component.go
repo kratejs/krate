@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"maps"
 	"sort"
 	"strings"
 
@@ -73,12 +74,10 @@ func (b *builder) newComponentNode(fn *ast.FnDecl, parentID string) *ComponentNo
 func (b *builder) buildComponentScoped(fn *ast.FnDecl, node *ComponentNode, isPageRoot bool) componentResult {
 	b.pushComponentCtx()
 	defer b.popComponentCtx()
-	// The child restarts the per-parent tag counters; the caller's counts are
-	// restored afterwards so an element following a component child does not
-	// reuse a sibling's slot id.
-	callerCounts := b.elementCounts
-	b.elementCounts = make(map[string]int)
-	defer func() { b.elementCounts = callerCounts }()
+	// The caller's sibling counters survive the child's walk; otherwise an
+	// element after a child component reuses an earlier sibling's slot ID.
+	savedCounts := maps.Clone(b.elementCounts)
+	defer func() { b.elementCounts = savedCounts }()
 
 	// Scope handles are component-scoped: only this component's own
 	// declarations and its scope-valued props are visible while building it.

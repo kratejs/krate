@@ -32,8 +32,8 @@ for usage.
 | Class components | Partial | n/a | n/a | Full common subset |
 | Error boundaries | Planned | Planned | Planned | Source and island |
 | Children, keys, and refs | Partial | Partial | n/a | Documented semantics |
-| Events | Partial | Partial | n/a | React 18 parity |
-| Forms and inputs | Partial | Partial | n/a | React 18 parity |
+| Events | Beta | Partial | n/a | React 18 parity |
+| Forms and inputs | Beta | Partial | n/a | React 18 parity |
 | Portals | Beta | Beta | n/a | SSR-safe |
 | Suspense | Beta | Beta | n/a | SSR-safe |
 | React 19 actions and forms | Beta | Partial | n/a | Source semantics |
@@ -51,25 +51,25 @@ for usage.
 
 **Source:** Beta · **Islands:** Beta · **SSR:** n/a
 
-useState and useReducer lower to signals. Reducer dispatch uses the same getter contract as a signal.
+useState and useReducer lower to signals with React's Object.is bail-out, functional updates, lazy initializers, a stable dispatch, and automatic batching (one commit per task).
 
-Evidence: `TestReactUseReducerBuild`, `TestRewriteReactUseReducer`, `TestRewriteReactNamespaceUseReducer`
+Evidence: `TestReactUseReducerBuild`, `TestRewriteReactUseReducer`, `TestRewriteReactNamespaceUseReducer`, `TestUseReducerLazyInitIsPreserved`, `TestLazyUseStateInitializerRunsOnce`, `browser:/react-effects/`
 
 ### Hooks: effects and memo
 
 **Source:** Beta · **Islands:** Beta · **SSR:** n/a
 
-Effects with empty deps use mount timing; dependency arrays use createEffectDeps/createMemoDeps. Passive-effect timing and cleanup ordering still differ from React.
+Effects run in React's commit order (insertion, layout before paint, passive after paint; children before parents; cleanups before re-runs; parent-first unmount) with Object.is dependency comparison. useMemo/useCallback honour deps synchronously. Effects without deps re-run on the component's own state/props changes only, hidden conditional branches behave like Activity (state kept), and cleanups read live state; each divergence has a KR2xxx diagnostic.
 
-Evidence: `TestRewriteReactEffectDepsAndMemo`, `TestRewriteReactEffectEmptyDepsMountOnce`
+Evidence: `TestRewriteReactEffectDepsAndMemo`, `TestRewriteReactEffectEmptyDepsMountOnce`, `TestEffectPhasesLowerToCreateEffectDeps`, `TestEffectWithoutDepsSynthesizesStateAndProps`, `TestHydrationDeclaresEffectOwners`, `browser:/react-effects/`
 
 ### Context and refs
 
 **Source:** Beta · **Islands:** Beta · **SSR:** n/a
 
-Context values stay reactive across components. forwardRef, callback refs, createRef, and useRef are covered.
+Context values stay reactive across components. Object and callback refs (with React 19 cleanup functions), ref as a prop, forwardRef, createRef, useRef, and useImperativeHandle with deps attach before layout effects and detach on unmount.
 
-Evidence: `TestUseContextTranspile`, `TestCrossComponentDynamicContextTranspile`, `TestReactForwardRefCallback`, `TestReactCreateRefBinds`
+Evidence: `TestUseContextTranspile`, `TestCrossComponentDynamicContextTranspile`, `TestReactForwardRefCallback`, `TestReactCreateRefBinds`, `TestRefBindingsAndEffectOrder`, `browser:/react-events/`
 
 ### Transitions and deferred values
 
@@ -99,25 +99,25 @@ Evidence: Planned; no stable test reference yet.
 
 **Source:** Partial · **Islands:** Partial · **SSR:** n/a
 
-Static Children helpers and cloneElement fold at build time. Keyed updates intentionally do not run a React reconciler.
+Static Children helpers and cloneElement fold at build time. Keyed updates intentionally do not run a React reconciler. Refs in lists attach per item and detach when an item is removed.
 
-Evidence: `TestReactChildrenMapSSR`, `TestReactCloneElementFold`, `TestReactKeyNotEmitted`
+Evidence: `TestReactChildrenMapSSR`, `TestReactCloneElementFold`, `TestReactKeyNotEmitted`, `TestEventHandlersUseReactPropNames`
 
 ### Events
 
-**Source:** Partial · **Islands:** Partial · **SSR:** n/a
+**Source:** Beta · **Islands:** Partial · **SSR:** n/a
 
-Delegated bubbling, capture, non-bubbling, focus, and controlled value/checked paths are covered. Composition and full synthetic-event surface remain gaps.
+React 17+ root delegation with capture then bubble order, native listener interleaving, stopPropagation, the synthetic event surface, React onChange semantics, focus/blur bubbling, per-element enter/leave, media and composition events. Unknown or lowercase event props are diagnosed (KR5001, KR5002).
 
-Evidence: `TestEventDelegationBubbles`, `TestNonBubblingEventUsesDirectListener`, `TestCaptureEventUsesCaptureListener`
+Evidence: `TestEventDelegationBubbles`, `TestNonBubblingEventUsesDirectListener`, `TestCaptureEventUsesCaptureListener`, `TestEventHandlersUseReactPropNames`, `TestEventAndRefDiagnostics`, `browser:/react-events/`
 
 ### Forms and inputs
 
-**Source:** Partial · **Islands:** Partial · **SSR:** n/a
+**Source:** Beta · **Islands:** Partial · **SSR:** n/a
 
-Controlled text, select, checkbox, radio, textarea, and submit handling run in the browser corpus. React 19 form actions (action/formAction functions, reset after success, no-JS server action posts) run in the browser gate. defaultValue/uncontrolled parity remains.
+Controlled text, select (single and multiple), checkbox, radio group, textarea, number and range inputs restore to state after onChange; uncontrolled defaultValue/defaultChecked only set defaults; form reset and value={undefined} follow React. Form diagnostics: KR5004 to KR5007. React 19 form actions (action/formAction functions, reset after success, no-JS server action posts) run in the browser gate.
 
-Evidence: `TestFormValueUsesPropertyBinding`, `browser:/react-forms/`, `TestReactActionFormsCompile`, `browser:/react-actions/`
+Evidence: `TestFormValueUsesPropertyBinding`, `TestFormControlBindings`, `TestFormDiagnostics`, `browser:/react-forms/`, `browser:/react-events/`, `TestReactActionFormsCompile`, `browser:/react-actions/`
 
 ### Portals
 

@@ -109,14 +109,15 @@ func TestHydrationHandlerPropNaming(t *testing.T) {
   return <button id="inc" onClick={() => setN(n + 1)}>+</button>;
 }`
 	_, js := fullPipeline(t, src)
-	if !strings.Contains(js, "__krate_click_") {
-		t.Errorf("expected __krate_click_ handler property, got:\n%s", js)
+	if !strings.Contains(js, `kbindHandler("`) || !strings.Contains(js, `"onClick",`) {
+		t.Errorf("expected kbindHandler(id, \"onClick\", fn), got:\n%s", js)
 	}
 }
 
 func TestHydrationEventDelegationDistinctness(t *testing.T) {
-	// Two elements, both onClick, plus one onInput: one delegated listener per
-	// distinct event type, and a handler property for each element.
+	// Two elements, both onClick, plus one onInput: one handler registration
+	// per element. The runtime installs one root listener per native type, so
+	// pages carry no delegation code.
 	src := `export default function Page() {
   const [a, setA] = createSignal(0);
   const [b, setB] = createSignal(0);
@@ -127,18 +128,14 @@ func TestHydrationEventDelegationDistinctness(t *testing.T) {
   </div>;
 }`
 	_, js := fullPipeline(t, src)
-	if strings.Count(js, "__krate_del_add('click'") != 1 {
-		t.Errorf("expected exactly ONE delegated click listener, got %d:\n%s",
-			strings.Count(js, "__krate_del_add('click'"), js)
+	if strings.Contains(js, "__krate_del_add") || strings.Contains(js, "addEventListener") {
+		t.Errorf("expected no per-page delegation code:\n%s", js)
 	}
-	if strings.Count(js, "__krate_del_add('input'") != 1 {
-		t.Errorf("expected exactly ONE delegated input listener, got %d:\n%s",
-			strings.Count(js, "__krate_del_add('input'"), js)
+	if got := strings.Count(js, `"onClick",`); got != 2 {
+		t.Errorf("expected 2 onClick registrations, got %d:\n%s", got, js)
 	}
-	// Two click handler properties (one per button), passed to kbindHandler
-	// as quoted prop names.
-	if got := strings.Count(js, `"__krate_click_`); got != 2 {
-		t.Errorf("expected 2 click handler properties, got %d:\n%s", got, js)
+	if got := strings.Count(js, `"onInput",`); got != 1 {
+		t.Errorf("expected 1 onInput registration, got %d:\n%s", got, js)
 	}
 }
 

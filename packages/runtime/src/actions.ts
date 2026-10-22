@@ -276,8 +276,8 @@ export interface FormStatusSetters {
 /**
  * Subscribes a component's `useFormStatus()` to the nearest form that contains
  * its root element `el` (not `el` itself, matching React: a component reads the
- * status of a parent form). Returns the unsubscribe function, which also runs
- * on page teardown.
+ * status of a parent form). Returns the unsubscribe function, used as the
+ * callback-ref cleanup when the element detaches.
  */
 export function __krateFormStatusMount(el: Element | null, setters: FormStatusSetters): () => void {
   let form: HTMLFormElement | null = null;
@@ -298,11 +298,12 @@ export function __krateFormStatusMount(el: Element | null, setters: FormStatusSe
   };
   st.subs.add(sub);
   sub(st.status);
-  const off = (): void => {
+  // The returned function is the callback-ref cleanup: the ref system calls
+  // it when the element detaches. Registering it with onCleanup instead would
+  // tie it to the ref binding's effect, which may re-run.
+  return (): void => {
     st.subs.delete(sub);
   };
-  onCleanup(off);
-  return off;
 }
 
 /**
