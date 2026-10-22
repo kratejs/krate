@@ -63,6 +63,10 @@ function TodoList(props: { initial: Promise<Todo[]> }) {
 // React 19 reference app: use(promise) under Suspense for the initial data,
 // useActionState for validation and pending state, useOptimistic for the
 // pending row, useFormStatus in the submit button, form auto-reset.
+// The steps submit with Enter in the title field rather than clicking #add:
+// in Firefox, whether a clicked button that is disabled during the commit
+// keeps focus is racy in React itself, so a click made the focus snapshot
+// nondeterministic on both sides.
 export default function AppReference() {
   return (
     <main>
