@@ -104,7 +104,7 @@ func TestDerivedGroupWritingTwoValuesWarns(t *testing.T) {
 			return <p>{a}{b}</p>;
 		}
 	`)
-	findDiag(t, diags, diag.CodeStaleRenderValue)
+	_ = findDiag(t, diags, diag.CodeStaleRenderValue)
 	if strings.Contains(out, "let a = krateDerived") {
 		t.Errorf("a group that also writes b must not be derived:\n%s", out)
 	}

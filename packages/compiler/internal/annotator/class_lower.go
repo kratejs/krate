@@ -353,8 +353,7 @@ func (l *classLowerer) staticFn(mem *ast.ClassMember, propsParam bool) *ast.Arro
 // renameIdent renames free uses of from to to (arrow parameters that shadow
 // from stop the rename).
 func renameIdent(from, to string) exprFn {
-	var f exprFn
-	f = func(e ast.Expr, recurse func(ast.Expr) ast.Expr) ast.Expr {
+	f := func(e ast.Expr, recurse func(ast.Expr) ast.Expr) ast.Expr {
 		switch x := e.(type) {
 		case *ast.Identifier:
 			if x.Name == from {

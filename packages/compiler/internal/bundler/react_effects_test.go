@@ -104,7 +104,7 @@ export default function Page(props) {
   const run = (deps) => useEffect(() => {}, deps);
   return <p>x</p>;
 }`)
-	findDiag(t, diags, diag.CodeDepsUnresolved)
+	_ = findDiag(t, diags, diag.CodeDepsUnresolved)
 }
 
 func TestEffectDepsExpressionComparedAtRunTime(t *testing.T) {
