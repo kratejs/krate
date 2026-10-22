@@ -14,9 +14,5 @@
   "r18/hook_useid": {
     "severity": "P2",
     "reason": "[id-format] useId strings differ (krate-1-Field-Field_c0 vs _r_0_); ids are unique and label/aria links work on both sides"
-  },
-  "r19/action_form_auto_reset": {
-    "severity": "P2",
-    "reason": "[form-actions] the action, message and auto-reset match; with the fixture's 80ms delay Krate commits the result one frame after React, so the snapshot right after the click can still show the old field value"
   }
 }

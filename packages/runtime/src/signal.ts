@@ -240,6 +240,24 @@ function inDiscreteEvent(): boolean {
   return !!ev && DISCRETE.has(ev.type);
 }
 
+let transitionWrites = 0;
+
+/**
+ * Runs fn with its signal writes in the transition lane: they commit in a
+ * later task, like React's transition and default updates, even for plain
+ * signals. Used for the updates an async action makes when it settles
+ * (pending flags, results), so the pending render stays on screen for at
+ * least one task, as it does in React.
+ */
+export function krateTransitionWrites<T>(fn: () => T): T {
+  transitionWrites++;
+  try {
+    return fn();
+  } finally {
+    transitionWrites--;
+  }
+}
+
 /** Reports whether a native event type is discrete (React's SyncLane). */
 export function krateIsDiscrete(type: string): boolean {
   return DISCRETE.has(type);
@@ -886,9 +904,12 @@ let flushMode = 0;
 let flushToken = 0;
 
 function scheduleFlush(reactWrite = false): void {
-  const discrete = inDiscreteEvent();
+  // Transition writes never take the sync lane, even when the microtask that
+  // makes them still sees the discrete event that started the action.
+  const discrete = transitionWrites === 0 && inDiscreteEvent();
   if (discrete) syncLane = true;
-  const micro = !reactWrite || discrete || committing > 0 || renderDepth > 0 || typeof setTimeout !== 'function';
+  const later = reactWrite || transitionWrites > 0;
+  const micro = !later || discrete || committing > 0 || renderDepth > 0 || typeof setTimeout !== 'function';
   if (flushMode === 1 || (!micro && flushMode === 2)) return;
   flushScheduled = true;
   const token = ++flushToken;
@@ -922,21 +943,34 @@ function flushEffectsInner(): void {
   for (const hook of beforeFlushHooks) {
     hook();
   }
-  const effects = pending.splice(0);
-  for (const effect of effects) {
-    if (effect.disposed) {
-      continue;
-    }
-    effect.queued = false;
-    effect.rerun = false;
-    runEffect(effect);
-    if (effect.rerun && !effect.disposed) {
+  // Effects re-queued by writes during a pass run in further passes of this
+  // same flush, so the cascade settles and commits before any other task or
+  // microtask can run. Otherwise code running between passes (an action's
+  // settle callback) would read React state that is written but not yet
+  // committed.
+  for (let pass = 0; pending.length > 0 && pass < 100; pass++) {
+    const effects = pending.splice(0);
+    for (const effect of effects) {
+      if (effect.disposed) {
+        continue;
+      }
+      effect.queued = false;
       effect.rerun = false;
       runEffect(effect);
+      if (effect.rerun && !effect.disposed) {
+        effect.rerun = false;
+        runEffect(effect);
+      }
     }
   }
-  // Writes made by these effects scheduled another flush; the commit runs
-  // once that cascade settles, so it sees the final DOM.
+  if (pending.length === 0) {
+    // The cascade is done: a flush the passes scheduled has nothing to do.
+    flushMode = 0;
+    flushScheduled = false;
+    flushToken++;
+  }
+  // A cascade longer than the pass cap continues in the scheduled flush; the
+  // commit runs once it settles, so it sees the final DOM.
   if (pending.length === 0) {
     // Settle hooks (the class component render phase) may write signals;
     // flush those in this same pass so the commit sees every DOM write.
@@ -980,6 +1014,11 @@ export function runAfterFlush(): void {
   // Every settled flush is a commit: record React state here, so committed
   // values advance even when no effect scheduler is loaded.
   if (changedCells.size > 0) krateCommitSnapshot();
+  // React's commit reads document.activeElement (to restore focus and
+  // selection). In Firefox that read applies the focus fixup rule, so a
+  // focused button the commit disabled loses focus; reading it here gives
+  // each browser the same focus outcome as under React.
+  if (typeof document !== 'undefined') void document.activeElement;
   for (const hook of afterFlushHooks) {
     hook();
   }

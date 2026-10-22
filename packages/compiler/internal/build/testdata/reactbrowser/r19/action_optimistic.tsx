@@ -3,6 +3,11 @@ import { delay, log } from "../lib/log";
 
 type Msg = { text: string; sending?: boolean };
 
+// The action delay is far longer than the harness's step latency on purpose:
+// a snapshot is taken right after the submit, and with a ~300ms delay a
+// loaded runner (Firefox in a container, six fixtures at once) sometimes let
+// the action finish before that snapshot and sometimes not, on either side,
+// so the expected DOM depended on timing. Later steps wait for the result.
 // useOptimistic shows a pending item immediately; it is replaced by the
 // confirmed state when the action finishes.
 export default function ActionOptimistic() {
@@ -15,7 +20,7 @@ export default function ActionOptimistic() {
   async function send(formData: FormData) {
     const text = String(formData.get("text"));
     addOptimistic(text);
-    await delay(300, null);
+    await delay(1500, null);
     log("confirmed", text);
     startTransition(() => setMessages((m) => [...m, { text }]));
   }

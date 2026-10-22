@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { krateOn } from './events';
-import { createSignal, createEffect, disposeAll, krateHookState, krateFlushSync } from './signal';
+import { createSignal, createEffect, disposeAll, krateHookState, krateFlushSync, krateRunEvent, krateTransitionWrites } from './signal';
 import { createEffectDeps } from './effects';
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -82,5 +82,26 @@ describe('discrete events flush synchronously', () => {
     await tick();
     await tick();
     expect(seen).toEqual([0, 5]);
+  });
+});
+
+describe('transition writes', () => {
+  beforeEach(() => disposeAll());
+
+  it('keeps a pending render committed by a submit until a later task', async () => {
+    const [pending, setPending] = createSignal(false);
+    const seen: string[] = [];
+    createEffect(() => void seen.push('pending=' + pending()));
+    krateRunEvent('submit', true, () => {
+      setPending(true);
+      // The action settles a microtask later; its updates are transitions.
+      void Promise.resolve().then(() => krateTransitionWrites(() => setPending(false)));
+    });
+    seen.push('event returned');
+    for (let i = 0; i < 3; i++) await Promise.resolve();
+    seen.push('microtasks done');
+    await tick();
+    await tick();
+    expect(seen).toEqual(['pending=false', 'pending=true', 'event returned', 'microtasks done', 'pending=false']);
   });
 });

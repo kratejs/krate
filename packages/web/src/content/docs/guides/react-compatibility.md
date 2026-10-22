@@ -514,7 +514,13 @@ input, change, submit, focus, ...) is dispatched are flushed synchronously
 once all of that event's handlers ran: render, commit, layout and passive
 effects complete before the browser event returns (React's synchronous
 lane). Continuous events (mouse and pointer moves, scroll, wheel) keep the
-normal batching. An update made elsewhere (a timeout, a
+normal batching. The updates an async action makes when it settles (its
+result, the pending flags of `useActionState` and `useFormStatus`,
+optimistic reverts) commit in a later task, like React's transitions, so
+the pending render is on screen for at least one task. Like React's commit,
+each commit reads `document.activeElement`, so a focused element the commit
+disabled (a submit button with `disabled={pending}`) keeps or loses focus as
+it does under React in each browser. An update made elsewhere (a timeout, a
 promise callback) commits in a later task, after the microtasks queued with
 it. A commit runs after the DOM bindings have been updated, in React's order:
 
