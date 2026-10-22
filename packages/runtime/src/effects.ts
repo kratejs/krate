@@ -233,7 +233,12 @@ function disposeTree(owner: Owner, active: boolean, passive: Array<() => void>):
     hook.stop();
     dirty.delete(hook);
     if (!active) {
-      takeCleanup(hook);
+      // Hidden, so its cleanup already ran (or never will): just release it.
+      if (hook.mounted) {
+        hook.mounted = false;
+        hook.cleanup = null;
+        releaseEpoch(hook.epoch);
+      }
       continue;
     }
     if (hook.phase === 'passive') {
@@ -475,12 +480,26 @@ function takeCleanup(hook: HookEffect): Cleanup {
   if (!hook.mounted) return null;
   hook.mounted = false;
   const at = hook.epoch;
+  const c = hook.cleanup;
+  hook.cleanup = null;
+  if (!c) {
+    releaseEpoch(at);
+    return null;
+  }
+  // The snapshot stays live until the (possibly deferred) cleanup ran.
+  return () => {
+    try {
+      krateReadAt(at, () => untrack(c));
+    } finally {
+      releaseEpoch(at);
+    }
+  };
+}
+
+function releaseEpoch(at: number): void {
   const n = (liveEpochs.get(at) || 1) - 1;
   if (n > 0) liveEpochs.set(at, n);
   else liveEpochs.delete(at);
-  const c = hook.cleanup;
-  hook.cleanup = null;
-  return c ? () => krateReadAt(at, () => untrack(c)) : null;
 }
 
 function runCleanup(hook: HookEffect): void {

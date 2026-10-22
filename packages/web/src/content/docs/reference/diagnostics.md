@@ -69,11 +69,11 @@ React recomputes such a memo on every render. Krate recomputes it when a signal 
 
 The second argument of useEffect/useLayoutEffect/useInsertionEffect/useMemo/useCallback must be an array (React warns otherwise). The value is ignored and the hook is treated as having no dependency array. Pass [a, b] or omit the argument.
 
-### KR2007
+### KR2008
 
-**Effect cleanup reads state**
+**Hook called inside a condition or loop**
 
-In React a cleanup closes over the values of the render its effect ran for, so it sees the previous state. Krate state reads are live getters, so a cleanup sees the current (new) value. Copy the value into a local in the effect body and read that in the cleanup: const id = roomId; return () => leave(id).
+React requires hooks to be called in the same order on every render (the Rules of Hooks), so a hook inside an if, switch or loop is undefined behaviour in React (it throws when the hook count changes). Krate runs the component once and would bind whatever the first run created. Call the hook unconditionally at the top level and branch on its result, or move the repeated or conditional part into a child component that calls the hook.
 
 ## KR3xxx: class components and error boundaries
 

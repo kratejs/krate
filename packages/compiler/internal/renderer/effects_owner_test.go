@@ -94,3 +94,42 @@ export default function Index() {
 		t.Fatalf("lazy initializer should be called, not stored:\n%s\n%s", res.HTML, js)
 	}
 }
+
+func TestStateInitializerFromModuleBindings(t *testing.T) {
+	_, js := fullPipelineWithReact(t, `import { useState } from 'react';
+const START = 4;
+function loadDraft() { return "saved"; }
+export default function Index() {
+  const [draft, setDraft] = useState(loadDraft);
+  const [n, setN] = useState(START);
+  return <button onClick={() => setN(n + 1)}>{draft} {n}</button>;
+}`)
+	for _, frag := range []string{
+		"createSignal(loadDraft(),krateHookState)",
+		"createSignal(START,krateHookState)",
+		"var START=4;",
+		"function loadDraft()",
+	} {
+		if !strings.Contains(js, frag) {
+			t.Fatalf("missing %q in:\n%s", frag, js)
+		}
+	}
+}
+
+func TestForwardedLivePropStaysLive(t *testing.T) {
+	_, js := fullPipelineWithReact(t, `import { useState, useEffect } from 'react';
+function Leaf(props) {
+  useEffect(() => {}, [props.n]);
+  return <li>{props.n}</li>;
+}
+function Branch(props) {
+  return <ul><Leaf n={props.n} /></ul>;
+}
+export default function Index() {
+  const [n, setN] = useState(0);
+  return <div><Branch n={n} /><button onClick={() => setN(n + 1)}>+</button></div>;
+}`)
+	if !strings.Contains(js, "{get n(){return props.n}}") {
+		t.Fatalf("a forwarded live prop must read the parent's props getter:\n%s", js)
+	}
+}

@@ -28,7 +28,7 @@ export interface SignalOptions<T> {
 }
 
 /** Signal options that give a signal React state semantics. */
-export const krateHookState: SignalOptions<unknown> = { react: true };
+export const krateHookState: { readonly react: true } = { react: true };
 
 // A null entry is an untracked scope (see untrack): reads inside it subscribe
 // nothing.
