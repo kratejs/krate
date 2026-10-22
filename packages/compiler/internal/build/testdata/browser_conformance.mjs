@@ -211,6 +211,62 @@ try {
   const resetValue = await page.locator("[data-testid=uncontrolled]").inputValue();
   if (resetValue !== "start") fail(`form reset: ${resetValue}`);
 
+  // React class components: lifecycle order, shouldComponentUpdate, unmount and
+  // remount, instance refs, and error boundaries (runtime, nested, build time).
+  const errorsBeforeClass = errors.length;
+  await go("/react-class/", "[data-testid=inc]");
+  await page.waitForTimeout(100);
+  const classLog = () => page.locator("[data-testid=class-log]").textContent();
+  const mountLog = "child mount 1;parent mount ref=instance;caught build: no data at build time at ErrorBoundary (build);";
+  if ((await classLog()) !== mountLog) fail(`class mount log: ${await classLog()}`);
+  await page.locator("[data-testid=inc]").click();
+  await page.waitForTimeout(50);
+  await page.locator("[data-testid=inc]").click();
+  await page.waitForTimeout(50);
+  if ((await page.locator("[data-testid=gate]").textContent()) !== "even 2") {
+    fail(`shouldComponentUpdate gate: ${await page.locator("[data-testid=gate]").textContent()}`);
+  }
+  await page.locator("[data-testid=toggle]").click();
+  await page.waitForTimeout(50);
+  await page.locator("[data-testid=toggle]").click();
+  await page.waitForTimeout(50);
+  const wantUpdates =
+    mountLog +
+    "child update 1>2;parent update 1>2 was=n=1 doubled=2;callback 2;" +
+    "child update 2>3;parent update 2>3 was=n=2 doubled=4;callback 3;" +
+    "child unmount;parent update 3>3 was=n=3 doubled=6;child mount 3;parent update 3>3 was=n=3 doubled=6;";
+  if ((await classLog()) !== wantUpdates) fail(`class update log: ${await classLog()}`);
+  for (let i = 0; i < 2; i++) {
+    await page.locator("[data-testid=buggy-a]").click();
+    await page.waitForTimeout(50);
+  }
+  if (!(await page.locator("[data-testid=fallback-inner]").isVisible())) fail("inner boundary did not render its fallback");
+  if (!(await page.locator("[data-testid=buggy-b]").isVisible())) fail("sibling outside the inner boundary was unmounted");
+  await page.locator("[data-testid=retry-inner]").click();
+  await page.waitForTimeout(50);
+  if ((await page.locator("[data-testid=buggy-a]").textContent()) !== "0") fail("boundary retry did not remount with fresh state");
+  for (let i = 0; i < 2; i++) {
+    await page.locator("[data-testid=buggy-b]").click();
+    await page.waitForTimeout(50);
+  }
+  if (!(await page.locator("[data-testid=fallback-outer]").isVisible())) fail("outer boundary did not catch");
+  if (!(await page.locator("[data-testid=fallback-build]").isVisible())) fail("build-time fallback not shown after hydration");
+  const handlerErrors = [];
+  const onHandlerError = (err) => handlerErrors.push(err.message);
+  page.on("pageerror", onHandlerError);
+  await page.locator("[data-testid=handler-throws]").click();
+  await page.waitForTimeout(50);
+  page.off("pageerror", onHandlerError);
+  if (!(await page.locator("[data-testid=handler-throws]").isVisible())) fail("an event handler error was caught by a boundary");
+  if (!handlerErrors.includes("handler error")) fail(`handler error not uncaught: ${handlerErrors}`);
+  const wantCaught = wantUpdates + "caught inner: crashed a at BuggyCounter;caught outer: crashed b at BuggyCounter;";
+  if ((await classLog()) !== wantCaught) fail(`boundary log: ${await classLog()}`);
+  // Caught errors are logged like React does; the handler error is expected.
+  const expected = /crashed [ab]|The above error occurred|handler error/;
+  for (let i = errors.length - 1; i >= errorsBeforeClass; i--) {
+    if (expected.test(errors[i])) errors.splice(i, 1);
+  }
+
   if (errors.length) fail("console errors: " + errors.join(" | "));
 
   console.log(JSON.stringify({ browser: browserName, before, after, tooltip, tooltipDebug, formResult, errors, failures }, null, 2));

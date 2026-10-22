@@ -16,6 +16,7 @@ import "github.com/kratejs/krate/packages/compiler/ast"
 const (
 	loweredClassState   = "__krate_class_state"
 	loweredClassRuntime = "__krateClass"
+	loweredBuildError   = "__krate_class_build_error"
 )
 
 // boundaryFallback returns the fallback build of fn for instance id, or ok=false.
@@ -53,11 +54,16 @@ func (b *builder) boundaryFallback(fn *ast.FnDecl, id SlotID) (*ast.FnDecl, bool
 			if !ok {
 				continue
 			}
+			// The error is a local so the initializer is emitted as an
+			// expression the client evaluates (like getDerivedStateFromProps).
 			next := &ast.CallExpr{
 				Callee: &ast.MemberExpr{Object: &ast.Identifier{Name: "Object"}, Property: &ast.Identifier{Name: "assign"}},
-				Args:   []ast.Expr{&ast.ObjectExpr{}, init, &ast.CallExpr{Callee: derive, Args: []ast.Expr{errObj}}},
+				Args:   []ast.Expr{&ast.ObjectExpr{}, init, &ast.CallExpr{Callee: derive, Args: []ast.Expr{&ast.Identifier{Name: loweredBuildError}}}},
 			}
+			decl := &ast.VarStmt{Kind: ast.VarConst, Decls: []*ast.VarDecl{{Name: loweredBuildError, Init: errObj}}}
 			body[i] = replaceVarInit(stmt, &ast.CallExpr{Callee: &ast.Identifier{Name: "createSignal"}, Args: []ast.Expr{next}})
+			body = append(body[:i], append([]ast.Stmt{decl}, body[i:]...)...)
+			break
 		}
 	}
 	out := *fn
