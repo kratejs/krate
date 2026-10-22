@@ -220,6 +220,26 @@ clearNodes(start, end)               // clear nodes between two markers
 Low-level helpers used by the compiled hydration code to manage dynamic
 regions delimited by `<!--k-->` comment markers.
 
+### Conditional markup and `krateCondSwap`
+
+A reactive conditional (`{open() ? <A/> : <B/>}`, `{open() && <A/>}`) renders
+no wrapper element. The active branch sits between comment markers and the
+inactive branch is carried in a `<template>` placed after the page content:
+
+```html
+<ul><li>a</li><!--k:c1--><li>shown</li><!--/k:c1--></ul>
+...
+<template data-kc="c1" data-kb="a"><li>hidden</li></template>
+```
+
+Conditionals are therefore valid inside `<table>`, `<tbody>`, `<tr>`, `<ul>`,
+`<ol>`, `<select>` and `<p>`, and CSS child selectors (`li:last-child`,
+`tr + tr`) see only the real children. Hydration binds handlers and nested
+slots in both branches; `krateCondSwap(startMarker, show, template)` moves the
+bound nodes between the markers and a detached fragment when the condition
+changes, so state in either branch survives toggling. Marker ids and list keys
+are percent-encoded (`%`, `<`, `>`) so user data cannot close a comment.
+
 ## JSX runtime
 
 ```typescript

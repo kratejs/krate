@@ -20,6 +20,39 @@ func HTML(s string) string {
 	return htmlReplacer.Replace(s)
 }
 
+var textReplacer = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+)
+
+// Text escapes a decoded string for an HTML text position (element content
+// outside raw-text elements). Only & < > need escaping there; quotes are left
+// alone so ordinary prose stays readable.
+func Text(s string) string {
+	return textReplacer.Replace(s)
+}
+
+var commentReplacer = strings.NewReplacer(
+	"%", "%25",
+	">", "%3E",
+	"<", "%3C",
+	"\x00", "%00",
+	"\x1f", "",
+)
+
+// Comment encodes a value (slot id, list key, stream id) for use inside an
+// HTML comment marker such as <!--k:ID-->. A comment can only be closed by a
+// sequence containing '>', so percent-encoding '>' (and '<' and '%', which
+// keeps the encoding reversible with decodeURIComponent) means user data can
+// never terminate the marker. Ordinary ids and keys are left unchanged.
+func Comment(s string) string {
+	if !strings.ContainsAny(s, "%<>\x00\x1f") {
+		return s
+	}
+	return commentReplacer.Replace(s)
+}
+
 // HTMLAttr is an alias for HTML: both escape the full set, so the result is
 // safe in double-quoted attributes, single-quoted attributes, and text nodes.
 func HTMLAttr(s string) string {

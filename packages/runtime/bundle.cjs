@@ -18,6 +18,7 @@ const esbuild = require('esbuild');
 const RUNTIME_ENTRY = `
 export * from './src/signal';
 export * from './src/dom';
+export * from './src/slots';
 export * from './src/resource';
 export * from './src/jsx-runtime';
 export * from './src/router';
@@ -29,6 +30,7 @@ export * from './src/storage';
 const HYDRATE_ENTRY = `
 export * from './src/signal';
 export * from './src/dom';
+export * from './src/slots';
 export * from './src/resource';
 export * from './src/router';
 export * from './src/class-helpers';
@@ -41,6 +43,7 @@ export * from './src/storage';
 const LITE_ENTRY = `
 export * from './src/signal';
 export * from './src/dom';
+export * from './src/slots';
 export * from './src/resource';
 export * from './src/router-lite';
 export * from './src/class-helpers';

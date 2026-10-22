@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
@@ -99,25 +100,35 @@ func TestTypedModuleConsts(t *testing.T) {
 	}
 }
 
-func TestOmitAttrValue(t *testing.T) {
+// TestJSAttrValueThroughHTMLSpec verifies typed values reach the htmlspec
+// attribute table with their JS type intact.
+func TestJSAttrValueThroughHTMLSpec(t *testing.T) {
 	cases := []struct {
 		name string
 		v    jsvalue.Value
-		omit bool
+		want string
 	}{
-		{"title", jsvalue.Null(), true},
-		{"id", jsvalue.Undefined(), true},
-		{"lang", jsvalue.Bool(false), true},
-		{"data-x", jsvalue.Bool(false), false},
-		{"aria-hidden", jsvalue.Bool(false), false},
-		{"draggable", jsvalue.Bool(false), false},
-		{"src", jsvalue.String(""), true},
-		{"alt", jsvalue.String(""), false},
-		{"title", jsvalue.String("null"), false},
+		{"title", jsvalue.Null(), ``},
+		{"id", jsvalue.Undefined(), ``},
+		{"lang", jsvalue.Bool(false), ``},
+		{"data-x", jsvalue.Bool(false), ` data-x="false"`},
+		{"aria-hidden", jsvalue.Bool(false), ` aria-hidden="false"`},
+		{"draggable", jsvalue.Bool(false), ` draggable="false"`},
+		{"disabled", jsvalue.String("0"), ` disabled`},
+		{"disabled", jsvalue.Number(0), ``},
+		{"src", jsvalue.String(""), ``},
+		{"alt", jsvalue.String(""), ` alt=""`},
+		{"title", jsvalue.String("null"), ` title="null"`},
+		{"tabIndex", jsvalue.Number(-1), ` tabindex="-1"`},
+		{"className", jsvalue.NewArray(jsvalue.String("a"), jsvalue.String("b")), ` class="a,b"`},
 	}
 	for _, c := range cases {
-		if got := OmitAttrValue(c.name, c.v); got != c.omit {
-			t.Errorf("OmitAttrValue(%s, %#v) = %v, want %v", c.name, c.v, got, c.omit)
+		if got := htmlspec.Attr("img", c.name, JSAttrValue(c.v, "")); got != c.want {
+			t.Errorf("Attr(%s, %#v) = %q, want %q", c.name, c.v, got, c.want)
 		}
+	}
+	sel := htmlspec.SelectValues(JSAttrValue(jsvalue.NewArray(jsvalue.String("a"), jsvalue.Number(2)), ""))
+	if len(sel) != 2 || sel[0] != "a" || sel[1] != "2" {
+		t.Errorf("SelectValues(array) = %q", sel)
 	}
 }

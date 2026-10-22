@@ -1,8 +1,6 @@
 package irtree
 
 import (
-	"strings"
-
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
@@ -295,42 +293,12 @@ func typedModuleConsts(inits map[string]ast.Expr, legacy map[string]string) valu
 	return out
 }
 
-// OmitAttrValue reports whether React omits an attribute with this value:
-// null, undefined and functions are never serialized, `false` is dropped on
-// attributes that are neither boolean nor data-/aria- (those keep "false"),
-// and an empty src is dropped (it would re-request the page).
-func OmitAttrValue(name string, v jsvalue.Value) bool {
-	switch v.Kind() {
-	case jsvalue.KindUndefined, jsvalue.KindNull, jsvalue.KindFunction:
-		return true
-	case jsvalue.KindBool:
-		if !v.BoolValue() && !isBooleanAttr(name) && !strings.HasPrefix(name, "data-") && !strings.HasPrefix(name, "aria-") && !isEnumeratedBoolAttr(name) {
-			return true
-		}
-	case jsvalue.KindString:
-		if name == "src" && v.StringValue() == "" {
-			return true
-		}
-	}
-	return false
-}
-
 // arrayHasJSX reports whether an array literal contains a JSX element.
 func arrayHasJSX(arr *ast.ArrayExpr) bool {
 	for _, el := range arr.Elements {
 		if hasJSXInExpr(el) {
 			return true
 		}
-	}
-	return false
-}
-
-// isEnumeratedBoolAttr reports "true"/"false" enumerated attributes, which
-// React serializes for both values.
-func isEnumeratedBoolAttr(name string) bool {
-	switch strings.ToLower(ast.HTMLAttrName(name)) {
-	case "draggable", "spellcheck", "contenteditable", "autoreverse", "externalresourcesrequired", "focusable", "preservealpha":
-		return true
 	}
 	return false
 }

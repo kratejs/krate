@@ -102,6 +102,10 @@ type SSREval struct {
 	// nativeGuard prevents re-entering the built-in delegation hook while a
 	// call is evaluated natively first.
 	nativeGuard map[ast.Expr]bool
+
+	// selectStack holds the selected option values of enclosing <select>
+	// elements (nil when the select has no value/defaultValue).
+	selectStack [][]string
 }
 
 // maxEvalDepth bounds nested component evaluation (a recursion guard, not a
@@ -1098,29 +1102,16 @@ func (e *SSREval) evalLink(el *ast.JSXElement) string {
 	return e.evalJSX(clone)
 }
 
-// attrString converts an attribute value to the string the attribute
-// serialization expects. ok=false when the attribute must be omitted (null,
-// undefined, functions) or is not known (reported as a diagnostic).
-func (e *SSREval) attrString(attr *ast.JSXAttr) (string, bool) {
-	if attr.Value == nil {
-		// Bare attribute like <input disabled /> - boolean true.
-		return "true", true
-	}
-	v := e.value(attr.Value)
+// attrValue evaluates an attribute expression for the htmlspec serializer.
+// A value not known at build time is reported and treated as absent: a
+// build-time rendered component has no runtime to fill it in later.
+func (e *SSREval) attrValue(expr ast.Expr) jsvalue.Value {
+	v := e.value(expr)
 	if v.ContainsUnknown() {
-		e.reportUnknown(attr.Value, firstUnknownOf(v), "attribute "+attr.Name)
-		return "", false
+		e.reportUnknown(expr, firstUnknownOf(v), "attribute")
+		return jsvalue.Undefined()
 	}
-	if irtree.OmitAttrValue(attr.Name, v) {
-		// React drops null/undefined (and non-boolean false) attributes and
-		// never serializes handlers.
-		return "", false
-	}
-	switch v.Kind() {
-	case jsvalue.KindArray, jsvalue.KindObject:
-		return jsvalue.LegacyString(v), true
-	}
-	return v.ToString(), true
+	return v
 }
 
 // firstUnknownOf returns the first Unknown inside v (v itself if Unknown).
@@ -1176,10 +1167,10 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 	case "Head", "head":
 		e.HeadHTML += e.evalChildren(el.Children)
 		return ""
-	case "Script", "script":
+	case "Script":
 		e.ScriptHTML += e.renderMetaElement(el, "script")
 		return ""
-	case "Style", "style":
+	case "Style":
 		e.StyleHTML += e.renderMetaElement(el, "style")
 		return ""
 	}
@@ -1237,104 +1228,7 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		return ""
 	}
 
-	var b strings.Builder
-	b.WriteByte('<')
-	b.WriteString(name)
-
-	// dangerouslySetInnerHTML={{__html: "..."}} injects raw, pre-rendered HTML
-	// (e.g. build-time markdown). It is never emitted as an attribute.
-	attrs, expanded := e.expandSSRSpreadAttrs(el.Opening.Attributes)
-	var rawInnerHTML string
-	hasRawInnerHTML := false
-	for _, attr := range attrs {
-		if attr.Spread || attr.Name != "dangerouslySetInnerHTML" || attr.Value == nil {
-			continue
-		}
-		if raw, ok := e.evalInnerHTMLValue(attr.Value); ok {
-			rawInnerHTML = raw
-			hasRawInnerHTML = true
-		}
-	}
-
-	for _, attr := range attrs {
-		if attr.Spread || attr.Name == "dangerouslySetInnerHTML" || attr.Name == "ref" || attr.Name == "key" {
-			continue
-		}
-		val, ok := e.attrString(attr)
-		if !ok {
-			continue
-		}
-		// Boolean attributes must not be emitted with empty/"false" values:
-		// their mere presence (even ="") makes them truthy in HTML.
-		if isBooleanAttr(attr.Name) {
-			if val == "" || val == "false" || val == "null" || val == "undefined" || val == "0" {
-				continue
-			}
-			b.WriteByte(' ')
-			b.WriteString(ast.HTMLAttrName(attr.Name))
-			if val != "true" {
-				b.WriteString(`="`)
-				b.WriteString(escape.HTML(val))
-				b.WriteByte('"')
-			}
-			continue
-		}
-		b.WriteByte(' ')
-		b.WriteString(ast.HTMLAttrName(attr.Name))
-		if attr.Value != nil {
-			b.WriteString(`="`)
-			b.WriteString(escape.HTML(val))
-			b.WriteByte('"')
-		}
-	}
-
-	if el.Opening.SelfClosing && !hasRawInnerHTML {
-		// A self-closing element may still receive children through a forwarded
-		// rest spread (`<Comp {...props}/>`), since React's props object carries
-		// `children`.
-		if expanded {
-			if ch := e.childrenHTML(); ch != "" {
-				b.WriteByte('>')
-				b.WriteString(ch)
-				b.WriteString("</")
-				b.WriteString(name)
-				b.WriteByte('>')
-				return b.String()
-			}
-		}
-		if isVoidElement(el.Opening.Name) {
-			b.WriteString(" />")
-		} else {
-			b.WriteString("></")
-			b.WriteString(el.Opening.Name)
-			b.WriteByte('>')
-		}
-		return b.String()
-	}
-
-	b.WriteByte('>')
-	if hasRawInnerHTML {
-		// The dangerouslySetInnerHTML value is pre-rendered markup - inject
-		// it verbatim, ignoring children.
-		b.WriteString(rawInnerHTML)
-	} else {
-		children := el.Children
-		// `<Comp {...props}/>` forwards the call-site children.
-		if len(children) == 0 && expanded {
-			if ch := e.childrenHTML(); ch != "" {
-				b.WriteString(ch)
-				b.WriteString("</")
-				b.WriteString(name)
-				b.WriteByte('>')
-				return b.String()
-			}
-		}
-		b.WriteString(e.renderChildren(children))
-	}
-	b.WriteString("</")
-	b.WriteString(name)
-	b.WriteByte('>')
-	return b.String()
+	return e.renderElement(el, name)
 }
 
 // renderChildren renders JSX children in child position.
@@ -1343,7 +1237,7 @@ func (e *SSREval) renderChildren(children []ast.JSXChild) string {
 	for _, child := range children {
 		switch c := child.(type) {
 		case *ast.JSXText:
-			b.WriteString(c.Value)
+			b.WriteString(escape.Text(c.Value))
 		case *ast.JSXExprContainer:
 			b.WriteString(e.renderChildExpr(c.Expression))
 		case *ast.JSXElementChild:
@@ -1363,34 +1257,13 @@ func (e *SSREval) renderMetaElement(el *ast.JSXElement, tag string) string {
 	b.WriteByte('<')
 	b.WriteString(tag)
 	for _, attr := range el.Opening.Attributes {
-		if attr.Spread || attr.Value == nil || attr.Name == "dangerouslySetInnerHTML" {
+		if attr.Spread || attr.Name == "dangerouslySetInnerHTML" {
 			continue
 		}
-		val, ok := e.attrString(attr)
-		if !ok {
-			continue
-		}
-		if isBooleanAttr(attr.Name) {
-			if val == "" || val == "false" || val == "null" || val == "undefined" || val == "0" {
-				continue
-			}
-			b.WriteByte(' ')
-			b.WriteString(ast.HTMLAttrName(attr.Name))
-			if val != "true" {
-				b.WriteString(`="`)
-				b.WriteString(escape.HTML(val))
-				b.WriteByte('"')
-			}
-			continue
-		}
-		b.WriteByte(' ')
-		b.WriteString(ast.HTMLAttrName(attr.Name))
-		b.WriteString(`="`)
-		b.WriteString(escape.HTML(val))
-		b.WriteByte('"')
+		b.WriteString(irtree.RenderAttr(tag, attr, e.attrValue, nil))
 	}
 	b.WriteByte('>')
-	b.WriteString(e.evalChildren(el.Children))
+	b.WriteString(e.renderElementChildren(tag, el.Children))
 	b.WriteString("</")
 	b.WriteString(tag)
 	b.WriteByte('>')
@@ -1428,7 +1301,7 @@ func (e *SSREval) evalChildren(children []ast.JSXChild) string {
 	for _, child := range children {
 		switch c := child.(type) {
 		case *ast.JSXText:
-			b.WriteString(c.Value)
+			b.WriteString(escape.Text(c.Value))
 		case *ast.JSXExprContainer:
 			if c.Expression == nil {
 				continue
@@ -1516,7 +1389,7 @@ func (e *SSREval) callSiteProps(el *ast.JSXElement) (props jsvalue.Value, childr
 			if c.Value == "" {
 				continue
 			}
-			html.WriteString(c.Value)
+			html.WriteString(escape.Text(c.Value))
 			raw.WriteString(c.Value)
 			hasChildren = true
 		case *ast.JSXExprContainer:
