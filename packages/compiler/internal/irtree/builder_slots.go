@@ -1915,7 +1915,9 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 				b.localProps = b.propBindingsToLocalProps(childFn, attrs, savedProps)
 				b.restProps = b.restPropsFor(fnRestParamName(childFn), childFn, attrs)
 				b.localFnBody = childFn.Body
+				b.locateOnly++
 				childNode.ReturnSlots = b.buildSlotNodes(ret.Value, string(childID))
+				b.locateOnly--
 				b.localProps = savedProps
 				b.restProps = savedRest
 				b.localFnBody = savedFnBody
@@ -1964,6 +1966,10 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 			}
 		}
 		b.restProps = map[string]map[string]ast.Expr{restName: rest}
+	} else if propsName := plainPropsParamName(childFn); propsName != "" {
+		// A whole-props parameter (`function Btn(props)`) collects every
+		// call-site attribute, so `<button {...props}>` forwards them all.
+		b.restProps = map[string]map[string]ast.Expr{propsName: callSiteAttrs(attrs)}
 	} else {
 		b.restProps = nil
 	}
@@ -2028,8 +2034,10 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	// (which would reference out-of-scope identifiers). Even with no call-site
 	// props the child handlers may read props.X (e.g. props.onOpenChange), so
 	// an empty {} registration is emitted to keep `props` defined.
-	if childNode.Tier == TierClient && (len(childNode.Handlers) > 0 || len(childNode.Effects) > 0 || len(childNode.Memos) > 0 || len(childNode.Signals) > 0 || len(childNode.RefBindings) > 0 || len(b.contextValues) > 0) {
+	if childNode.Tier == TierClient && (len(childNode.Handlers) > 0 || len(childNode.Effects) > 0 || len(childNode.Memos) > 0 || len(childNode.Signals) > 0 || len(childNode.RefBindings) > 0 || len(childNode.AttrBindings) > 0 || len(b.contextValues) > 0) {
 		if handlersOrLocalsReferenceProps(childNode.Handlers, childFn.Body) ||
+			// Forwarded spread props are bound as `props.<name>` reads.
+			attrBindingsReferenceProps(childNode.AttrBindings) ||
 			compiledRefsProps(childNode.Effects) || compiledRefsProps(childNode.Memos) ||
 			signalsReferenceProps(childNode.Signals) || len(childNode.FuncPropAliases) > 0 ||
 			// Dynamic context is read through synthetic props (`props.__krate_ctx_*`).
@@ -2212,9 +2220,13 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 	// value is a known rest parameter (`{...props}`) is expanded to the
 	// collected call-site attributes so forwarded props reach the element.
 	var refs []RefBinding
-	attributes, _ := b.expandSpreadAttrs(el.Opening.Attributes)
+	attributes, _ := b.expandForwardedSpreadAttrs(el.Opening.Attributes)
 	for _, attr := range attributes {
 		if attr.Spread {
+			if attr.Value != nil && !isScopeHelperExpr(attr.Value) && b.locateOnly == 0 {
+				b.warnAt(attr.Position, "spread attribute {..."+generateExprJS(attr.Value, nil)+"} on <"+tag+"> has no build-time value; its attributes are not rendered",
+					"spread a rest/props parameter or an object whose value is known at build time, or pass the attributes explicitly")
+			}
 			continue
 		}
 		// React-only directives (key, suppressHydrationWarning) carry no DOM
@@ -2423,7 +2435,7 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 	}
 
 	// Static attributes (spread rest params expanded to concrete attributes).
-	attrsForOpening, _ := b.expandSpreadAttrs(el.Opening.Attributes)
+	attrsForOpening, _ := b.expandForwardedSpreadAttrs(el.Opening.Attributes)
 	actionAttrs := make(map[*ast.JSXAttr]bool)
 	hasMethod := false
 	hasFormMethod := false

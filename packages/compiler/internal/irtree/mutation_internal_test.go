@@ -26,9 +26,17 @@ func TestCollectLocalVarsTracksMutations(t *testing.T) {
 		// build-time value).
 		want map[string]string
 	}{
-		{"push", `const a = [1]; a.push(2);`, map[string]string{"a": "?"}},
+		{"push folds", `const a = [1]; a.push(2, 3);`, map[string]string{"a": "[1,2,3]"}},
+		{"push unknown", `const a = [1]; a.push(Math.random());`, map[string]string{"a": "?"}},
+		{"other mutator", `const a = [2, 1]; a.sort();`, map[string]string{"a": "?"}},
 		{"pure method keeps value", `const a = [1]; a.map(x => x);`, map[string]string{"a": "[1]"}},
-		{"member write", `const o = {n: 1}; o.n = 2;`, map[string]string{"o": "?"}},
+		{"member write folds", `const o = {n: 1}; o.n = 2; o["m"] = "x";`, map[string]string{"o": "{n:2,m:'x'}"}},
+		{"nested member write", `const o = {i: {n: 1}}; o.i.n = 2;`, map[string]string{"o": "?"}},
+		{"alias", `const p = {n: 1}; const q = p; q.n = 2;`, map[string]string{"p": "?", "q": "?"}},
+		{"contained alias", `const p = [1]; const box = [p]; box[0].push(2);`, map[string]string{"p": "?", "box": "?"}},
+		{"rebinding alias keeps original", `const p = {n: 1}; let q = p; q = {n: 2};`, map[string]string{"p": "{n:1}"}},
+		{"alias by reassignment", `const p = {n: 1}; let q = {}; q = p; q.n = 2;`, map[string]string{"p": "?"}},
+		{"map mutation", `const m = new Map(); m.set("k", 1);`, map[string]string{"m": "?"}},
 		{"delete", `const o = {n: 1}; delete o.n;`, map[string]string{"o": "?"}},
 		{"update", `let n = 1; n++; n--; n++;`, map[string]string{"n": "2"}},
 		{"compound", `let s = "a"; s += "b";`, map[string]string{"s": "ab"}},

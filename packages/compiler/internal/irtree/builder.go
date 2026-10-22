@@ -204,6 +204,10 @@ func (b *builder) cssStylesheets() (stylesheet, noJSFallback string) {
 
 // builder holds state during IR construction.
 type builder struct {
+	// locateOnly is non-zero while building slots that only locate nested
+	// client components and are never emitted (a build-time evaluated
+	// component's own return JSX); warnings about rendered output are skipped.
+	locateOnly       int
 	functions        map[string]*ast.FnDecl
 	ann              *Annotations
 	idCounter        map[string]int

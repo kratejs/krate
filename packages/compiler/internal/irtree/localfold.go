@@ -64,6 +64,10 @@ type localFolder struct {
 	sigMap    map[string]ast.Expr
 	nextUseId func() string
 	muts      *mutationWalker
+	// aliases links locals that may share an object (`const q = p`,
+	// `const list = [p]`): a change through one may be visible through the
+	// other, so they lose their build-time value together.
+	aliases map[string]map[string]bool
 }
 
 func (f *localFolder) record(name string) {
@@ -86,12 +90,69 @@ func (f *localFolder) taint(ms mutationSet) {
 			if v, ok := f.working[name]; ok && isPrimitiveValue(v) {
 				continue
 			}
+			// The shared object changed: every alias sees it.
+			for _, alias := range f.aliasGroup(name) {
+				f.drop(alias)
+			}
+			continue
 		}
-		f.res.locals[name] = jsvalue.Dynamic("local " + name + " changes during render")
-		delete(f.working, name)
-		f.res.leaked[name] = true
-		f.res.changed[name] = true
+		f.drop(name)
 	}
+}
+
+func (f *localFolder) drop(name string) {
+	if _, isLocal := f.res.locals[name]; !isLocal {
+		return
+	}
+	f.res.locals[name] = jsvalue.Dynamic("local " + name + " changes during render")
+	delete(f.working, name)
+	f.res.leaked[name] = true
+	f.res.changed[name] = true
+}
+
+// link records that a and b may share an object.
+func (f *localFolder) link(a, b string) {
+	if a == b {
+		return
+	}
+	if f.aliases == nil {
+		f.aliases = make(map[string]map[string]bool)
+	}
+	for _, p := range [][2]string{{a, b}, {b, a}} {
+		if f.aliases[p[0]] == nil {
+			f.aliases[p[0]] = make(map[string]bool)
+		}
+		f.aliases[p[0]][p[1]] = true
+	}
+}
+
+// aliasGroup returns name and every local transitively linked to it.
+func (f *localFolder) aliasGroup(name string) []string {
+	seen := map[string]bool{name: true}
+	queue := []string{name}
+	for i := 0; i < len(queue); i++ {
+		for other := range f.aliases[queue[i]] {
+			if !seen[other] {
+				seen[other] = true
+				queue = append(queue, other)
+			}
+		}
+	}
+	return queue
+}
+
+// linkReferences links name to every object-valued local its initializer or
+// assigned value references.
+func (f *localFolder) linkReferences(name string, expr ast.Expr) {
+	scanJSIdents(generateExprJS(expr, nil), func(ref string) {
+		if _, isLocal := f.res.locals[ref]; !isLocal || ref == name {
+			return
+		}
+		if v, ok := f.working[ref]; ok && isPrimitiveValue(v) {
+			return
+		}
+		f.link(name, ref)
+	})
 }
 
 func (f *localFolder) stmts(stmts []ast.Stmt) {
@@ -170,6 +231,9 @@ func (f *localFolder) decl(decl *ast.VarDecl) {
 	// `working` so dependents also emit as runtime reads. Functions and JSX
 	// have no literal form and stay runtime too.
 	v := evalConstValue(decl.Init, f.sigMap, f.working)
+	if !isPrimitiveValue(v) {
+		f.linkReferences(name, decl.Init)
+	}
 	if v.ContainsUnknown() || v.IsFunction() || v.IsJSX() {
 		if _, exists := f.res.locals[name]; !exists {
 			f.res.locals[name] = jsvalue.Dynamic("local " + name)
@@ -189,6 +253,9 @@ func (f *localFolder) decl(decl *ast.VarDecl) {
 // `x++`) and reports whether it did. Anything else is left to the caller,
 // which drops the build-time value of whatever the expression may change.
 func (f *localFolder) assign(expr ast.Expr) bool {
+	if f.assignMember(expr) || f.push(expr) {
+		return true
+	}
 	if u, ok := expr.(*ast.UnaryExpr); ok && (u.Op == "++" || u.Op == "--") {
 		id, ok := u.Arg.(*ast.Identifier)
 		if !ok || !isKnownLocal(id.Name, f.res.locals) {
@@ -241,7 +308,108 @@ func (f *localFolder) assign(expr ast.Expr) bool {
 	default:
 		return false
 	}
+	if !isPrimitiveValue(next) {
+		f.linkReferences(id.Name, bin.Right)
+	}
 	f.set(id.Name, next)
+	return true
+}
+
+// ownedLocal returns the folded value of a local that no other local may
+// share, or false.
+func (f *localFolder) ownedLocal(e ast.Expr) (string, jsvalue.Value, bool) {
+	id, ok := e.(*ast.Identifier)
+	if !ok || !isKnownLocal(id.Name, f.res.locals) || len(f.aliases[id.Name]) > 0 {
+		return "", jsvalue.Value{}, false
+	}
+	v, ok := f.working[id.Name]
+	if !ok || v.ContainsUnknown() {
+		return "", jsvalue.Value{}, false
+	}
+	return id.Name, v, true
+}
+
+// knownArg evaluates a value stored into a local object: it must be known
+// and its evaluation must not change anything.
+func (f *localFolder) knownArg(e ast.Expr) (jsvalue.Value, bool) {
+	if len(f.muts.exprMutations(e)) > 0 {
+		return jsvalue.Value{}, false
+	}
+	v := evalConstValue(e, f.sigMap, f.working)
+	if v.ContainsUnknown() || !isPrimitiveValue(v) {
+		// Storing an object would alias it; keep to primitives.
+		return jsvalue.Value{}, false
+	}
+	return v, true
+}
+
+// assignMember folds `o.key = v` / `o["key"] = v` on an unshared local
+// object by replacing it with an updated copy.
+func (f *localFolder) assignMember(expr ast.Expr) bool {
+	bin, ok := expr.(*ast.BinaryExpr)
+	if !ok || bin.Op != "=" {
+		return false
+	}
+	m, ok := bin.Left.(*ast.MemberExpr)
+	if !ok {
+		return false
+	}
+	key := ""
+	switch p := m.Property.(type) {
+	case *ast.Identifier:
+		if !m.Computed {
+			key = p.Name
+		}
+	case *ast.Literal:
+		if m.Computed && p.Kind == ast.StringLit {
+			key = p.Value
+		}
+	}
+	name, obj, ok := f.ownedLocal(m.Object)
+	if key == "" || !ok || !obj.IsObject() {
+		return false
+	}
+	v, ok := f.knownArg(bin.Right)
+	if !ok {
+		return false
+	}
+	next := jsvalue.NewObject()
+	for _, k := range obj.Keys() {
+		kv, _ := obj.Get(k)
+		next.Set(k, kv)
+	}
+	next.Set(key, v)
+	f.set(name, next)
+	return true
+}
+
+// push folds `arr.push(a, ...)` on an unshared local array by replacing it
+// with an extended copy.
+func (f *localFolder) push(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	m, ok := call.Callee.(*ast.MemberExpr)
+	if !ok || m.Computed {
+		return false
+	}
+	if p, ok := m.Property.(*ast.Identifier); !ok || p.Name != "push" {
+		return false
+	}
+	name, arr, ok := f.ownedLocal(m.Object)
+	if !ok || !arr.IsArray() {
+		return false
+	}
+	elems := append([]jsvalue.Value(nil), arr.Elems()...)
+	for _, a := range call.Args {
+		v, ok := f.knownArg(a)
+		if !ok {
+			return false
+		}
+		elems = append(elems, v)
+	}
+	f.set(name, jsvalue.NewArray(elems...))
 	return true
 }
 

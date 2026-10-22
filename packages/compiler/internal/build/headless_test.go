@@ -151,6 +151,32 @@ if (countText !== "2") fail("counter not updated: " + countText);
 `)
 }
 
+// TestHydrationSpreadForwardsHandler checks that a handler forwarded through
+// `{...props}` on a client component's root element is bound from the props
+// registry and runs.
+func TestHydrationSpreadForwardsHandler(t *testing.T) {
+	page := `
+		import { useState } from 'react';
+		function Btn(props: any) {
+			const [n, setN] = useState(0);
+			return <button {...props}>{n}</button>;
+		}
+		export default function Index() {
+			const [c, setC] = useState(0);
+			function inc() { setC(c + 1); }
+			return <main><Btn id="b" title="t" onClick={inc} /><i id="c">{c}</i></main>;
+		}
+	`
+	runHeadless(t, page, `
+const b = win.document.getElementById("b");
+if (!b || b.getAttribute("title") !== "t") fail("spread attributes missing: " + win.document.body.innerHTML);
+b.click();
+await new Promise((resolve) => setTimeout(resolve, 50));
+const c = win.document.getElementById("c").textContent.trim();
+if (c !== "1") fail("forwarded handler did not run: " + c);
+`)
+}
+
 // TestHydrationReplaysBodyStatements checks that component-body statements
 // which are not declarations (mutations, updates, dependency effects) run in
 // the hydration scope in source order, so the browser shows what React shows.

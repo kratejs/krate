@@ -431,42 +431,87 @@ func extractPropsAST(el *ast.JSXElement) map[string]ast.Expr {
 }
 
 // expandSpreadAttrs replaces `{...name}` spreads that resolve to a known rest
-// parameter with the call-site attributes it collected. Explicitly-written
-// attributes win over spread-provided ones, matching JSX semantics. Spreads
-// that cannot be resolved are left untouched (and later skipped).
-// The second return value reports whether a rest spread was expanded, so the
-// caller can flow call-site children through it (React includes `children` in
-// the props object, so `<Comp {...props}/>` forwards them).
+// or props parameter with the call-site attributes it collected, in React's
+// order (a later attribute or spread overrides an earlier one). Spreads that
+// cannot be resolved are left untouched (and later skipped). The second
+// return value reports whether such a spread was expanded, so the caller can
+// flow call-site children through it (React includes `children` in the props
+// object, so `<Comp {...props}/>` forwards them).
 func (b *builder) expandSpreadAttrs(attrs []*ast.JSXAttr) ([]*ast.JSXAttr, bool) {
-	var out []*ast.JSXAttr
-	expanded := false
-	// Track which attribute names were written explicitly so spreads don't
-	// override them.
-	explicit := make(map[string]bool)
-	for _, attr := range attrs {
-		if !attr.Spread {
-			explicit[attr.Name] = true
-		}
-	}
-	for _, attr := range attrs {
-		if !attr.Spread || attr.Value == nil {
-			out = append(out, attr)
-			continue
-		}
+	return b.mergeRestSpreads(attrs, false)
+}
+
+// expandForwardedSpreadAttrs is expandSpreadAttrs for an element built in the
+// component that owns the rest parameter. The call-site expressions belong to
+// the parent's scope, so a forwarded value that is not a literal is read
+// through the component's own props object (`props.title`): SSR resolves it
+// from the call-site values and hydration reads the props registry, instead of
+// referencing parent bindings that are not in this component's scope.
+func (b *builder) expandForwardedSpreadAttrs(attrs []*ast.JSXAttr) ([]*ast.JSXAttr, bool) {
+	return b.mergeRestSpreads(attrs, true)
+}
+
+func (b *builder) mergeRestSpreads(attrs []*ast.JSXAttr, viaProps bool) ([]*ast.JSXAttr, bool) {
+	return MergeSpreadAttrs(attrs, func(attr *ast.JSXAttr) SpreadExpansion {
 		rest := b.restAttrs(attr.Value)
 		if rest == nil {
-			out = append(out, attr)
+			return b.constObjectSpread(attr)
+		}
+		exp := SpreadExpansion{Resolved: true, ForwardsChildren: true}
+		for _, name := range sortedKeysExpr(rest) {
+			value := rest[name]
+			if viaProps {
+				value = forwardedPropExpr(name, value)
+			}
+			exp.Attrs = append(exp.Attrs, &ast.JSXAttr{Position: attr.Position, Name: name, Value: value})
+		}
+		return exp
+	})
+}
+
+// constObjectSpread expands a spread whose value folds to a known object at
+// build time into one attribute per own key, each reading `expr[key]`. A
+// nullish value contributes nothing; a key whose value is not known at build
+// time becomes a hydration binding. Scope-helper spreads and values with no
+// build-time value stay unresolved.
+func (b *builder) constObjectSpread(attr *ast.JSXAttr) SpreadExpansion {
+	if isScopeHelperExpr(attr.Value) {
+		return SpreadExpansion{}
+	}
+	v := b.evalAttrConst(attr.Value)
+	if v.IsNullish() {
+		return SpreadExpansion{Resolved: true}
+	}
+	if !v.IsObject() {
+		return SpreadExpansion{}
+	}
+	exp := SpreadExpansion{Resolved: true}
+	for _, k := range v.Keys() {
+		if k == "children" {
+			exp.ForwardsChildren = true
 			continue
 		}
-		expanded = true
-		for _, name := range sortedKeysExpr(rest) {
-			if explicit[name] {
-				continue
-			}
-			out = append(out, &ast.JSXAttr{Position: attr.Position, Name: name, Value: rest[name]})
-		}
+		exp.Attrs = append(exp.Attrs, &ast.JSXAttr{Position: attr.Position, Name: k, Value: &ast.MemberExpr{
+			Position: attr.Position,
+			Object:   attr.Value,
+			Property: &ast.Literal{Position: attr.Position, Kind: ast.StringLit, Value: k},
+			Computed: true,
+		}})
 	}
-	return out, expanded
+	return exp
+}
+
+// forwardedPropExpr returns the expression a component uses to read a
+// call-site prop it forwards: the literal itself, or `props.<name>`.
+func forwardedPropExpr(name string, callSite ast.Expr) ast.Expr {
+	if _, isLit := callSite.(*ast.Literal); isLit {
+		return callSite
+	}
+	pos := callSite.Pos()
+	if isJSIdentifier(name) {
+		return &ast.MemberExpr{Position: pos, Object: &ast.Identifier{Position: pos, Name: "props"}, Property: &ast.Identifier{Position: pos, Name: name}}
+	}
+	return &ast.MemberExpr{Position: pos, Object: &ast.Identifier{Position: pos, Name: "props"}, Property: &ast.Literal{Position: pos, Kind: ast.StringLit, Value: name}, Computed: true}
 }
 
 // restAttrs resolves a spread value expression to the attribute map of a known
@@ -733,6 +778,33 @@ func fnRestParamName(fn *ast.FnDecl) string {
 	return ""
 }
 
+// plainPropsParamName returns the name of a component's whole-props
+// parameter (`props` in `function Btn(props)`), or "" when the first
+// parameter is destructured or absent.
+func plainPropsParamName(fn *ast.FnDecl) string {
+	if fn == nil || len(fn.Params) == 0 {
+		return ""
+	}
+	p := fn.Params[0]
+	if p.IsRest || p.Pattern != "" || p.Name == "" || p.Name == "{...}" || p.Name == "[...]" {
+		return ""
+	}
+	return p.Name
+}
+
+// callSiteAttrs returns the call-site attributes a props object carries,
+// without the compiler's synthetic context props.
+func callSiteAttrs(attrs map[string]ast.Expr) map[string]ast.Expr {
+	out := make(map[string]ast.Expr, len(attrs))
+	for name, expr := range attrs {
+		if strings.HasPrefix(name, contextPropPrefix) {
+			continue
+		}
+		out[name] = expr
+	}
+	return out
+}
+
 // destructuredParamNames extracts the binding identifiers from a destructuring
 // pattern source string (e.g. "{ className, size, ...rest }" -> [className,
 // size, rest]). Keys with a rename (`{ a: b }`) bind `b`. It is a lightweight
@@ -929,6 +1001,17 @@ func handlersOrLocalsReferenceProps(handlers []HandlerDecl, body []ast.Stmt) boo
 func compiledRefsProps(js []string) bool {
 	for _, s := range js {
 		if codeContainsIdent(s, "props") {
+			return true
+		}
+	}
+	return false
+}
+
+// attrBindingsReferenceProps reports whether any attribute binding reads
+// `props` at hydration time.
+func attrBindingsReferenceProps(bindings []AttrBinding) bool {
+	for _, a := range bindings {
+		if codeContainsIdent(a.ExprSource, "props") {
 			return true
 		}
 	}

@@ -38,30 +38,57 @@ func TestBodyStmtMapMutationReplayed(t *testing.T) {
 		`kbindContent("3",()=>(cache.has('k')?'yes':'no'));`)
 }
 
-func TestBodyStmtArrayMutationDefersFold(t *testing.T) {
+func TestBodyStmtArrayPushFolds(t *testing.T) {
 	src := `export default function Index() {
   const arr = [1, 2, 3];
   arr.push(4);
   return <main><p>{arr.length}</p></main>;
 }`
 	res, js := fullPipeline(t, src)
-	if strings.Contains(res.HTML, "<p>3</p>") {
-		t.Fatalf("arr.length folded to the pre-push value:\n%s", res.HTML)
+	if !strings.Contains(res.HTML, "<p>4</p>") {
+		t.Fatalf("arr.length must fold to the post-push value:\n%s", res.HTML)
 	}
-	assertInOrder(t, js, "var arr=[1,2,3];\n", "arr.push(4);\n", `kbindContent("3",()=>arr.length);`)
+	assertInOrder(t, js, "var arr=[1,2,3];\n", "arr.push(4);\n")
 }
 
-func TestBodyStmtMemberWriteDefersFold(t *testing.T) {
+func TestBodyStmtArrayMutationDefersFold(t *testing.T) {
+	src := `export default function Index() {
+  const arr = [3, 1, 2];
+  arr.sort();
+  return <main><p>{arr[0]}</p></main>;
+}`
+	res, js := fullPipeline(t, src)
+	if strings.Contains(res.HTML, "<p>3</p>") {
+		t.Fatalf("arr[0] folded to the pre-sort value:\n%s", res.HTML)
+	}
+	assertInOrder(t, js, "var arr=[3,1,2];\n", "arr.sort();\n", `()=>arr[0]`)
+}
+
+func TestBodyStmtMemberWriteFolds(t *testing.T) {
 	src := `export default function Index() {
   const o = { n: 1 };
   o.n = 2;
   return <main><p>{o.n}</p></main>;
 }`
 	res, js := fullPipeline(t, src)
-	if strings.Contains(res.HTML, "<p>1</p>") {
-		t.Fatalf("o.n folded to the pre-write value:\n%s", res.HTML)
+	if !strings.Contains(res.HTML, "<p>2</p>") {
+		t.Fatalf("o.n must fold to the written value:\n%s", res.HTML)
 	}
-	assertInOrder(t, js, "var o={n:1};\n", "(o.n = 2);\n", `()=>o.n`)
+	assertInOrder(t, js, "var o={n:1};\n", "(o.n = 2);\n")
+}
+
+func TestBodyStmtAliasedWriteDefersFold(t *testing.T) {
+	src := `export default function Index() {
+  const o = { n: 1 };
+  const q = o;
+  q.n = 2;
+  return <main><p>{o.n}</p></main>;
+}`
+	res, js := fullPipeline(t, src)
+	if strings.Contains(res.HTML, "<p>1</p>") {
+		t.Fatalf("o.n folded although an alias changed it:\n%s", res.HTML)
+	}
+	assertInOrder(t, js, "var o={n:1};\n", "var q=o;\n", "(q.n = 2);\n", `()=>o.n`)
 }
 
 func TestBodyStmtUpdateFoldsAndReplays(t *testing.T) {

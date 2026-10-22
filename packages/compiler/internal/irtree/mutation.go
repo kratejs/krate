@@ -384,6 +384,20 @@ func (w *mutationWalker) target(e ast.Expr, kind mutationKind) {
 	}
 }
 
+// RenderMutatedNames returns the names a function body may change while it
+// runs (reassignments and content mutations, see mutationWalker). Callers
+// folding a body-level binding at build time must not fold these.
+func RenderMutatedNames(body []ast.Stmt) map[string]bool {
+	w := newMutationWalker(body)
+	out := make(map[string]bool)
+	for _, s := range body {
+		for name := range w.stmtMutations(s) {
+			out[name] = true
+		}
+	}
+	return out
+}
+
 // rootIdentName returns the identifier at the base of a member chain
 // (`a` for `a.b[c].d`), or "" when the base is not a plain identifier.
 func rootIdentName(e ast.Expr) string {

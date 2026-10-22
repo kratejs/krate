@@ -566,6 +566,15 @@ func (b *builder) isStaticResolvable(expr ast.Expr) bool {
 				return true
 			}
 		}
+		// `obj["key"]` on a folded local object (an expanded object spread)
+		// resolves when the member value is known.
+		if id, ok := e.Object.(*ast.Identifier); ok && e.Computed && !b.isSignalName(id.Name) {
+			if lit, ok := e.Property.(*ast.Literal); ok && lit.Kind == ast.StringLit {
+				if _, inProps := b.localProps[id.Name]; inProps {
+					return !b.evalAttrConst(e).ContainsUnknown()
+				}
+			}
+		}
 		return false
 	case *ast.BinaryExpr:
 		return b.isStaticResolvable(e.Left) && b.isStaticResolvable(e.Right)
