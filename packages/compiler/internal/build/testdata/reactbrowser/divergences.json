@@ -19,10 +19,6 @@
     "severity": "P2",
     "reason": "[id-format] useId strings differ (krate-1-Field-Field_c0 vs _r_0_); ids are unique and label/aria links work on both sides"
   },
-  "r18/hook_useref_mutable": {
-    "severity": "P1",
-    "reason": "[ref-in-render] ref.current read during render is shown once and never refreshed on later renders; reported as KR5008 (keep displayed values in state)"
-  },
   "r18/suspense_fallback_then_content": {
     "severity": "P0",
     "reason": "[suspense-lazy] build fails: lazy(() => promise) is evaluated at build time ('cannot evaluate delay(...)')"
