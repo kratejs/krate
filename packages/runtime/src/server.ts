@@ -33,7 +33,7 @@ export function createMemo<T>(fn: () => T): () => T {
 // have no dependencies to track on the server: each read recomputes.
 const derivedGetters = new WeakSet<object>();
 
-export function krateDerived<T>(fn: () => T): () => T {
+export function krateDerived<T>(fn: () => T, _triggers?: () => unknown): () => T {
   const read = () => fn();
   derivedGetters.add(read);
   return read;

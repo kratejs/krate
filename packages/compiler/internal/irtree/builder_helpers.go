@@ -461,8 +461,12 @@ func isAttrBinding(attr *ast.JSXAttr) bool {
 		return false
 	}
 	switch attr.Value.(type) {
-	case *ast.Identifier, *ast.CallExpr, *ast.MemberExpr, *ast.ConditionalExpr, *ast.BinaryExpr, *ast.ArrowFn:
+	case *ast.Identifier, *ast.CallExpr, *ast.MemberExpr, *ast.ConditionalExpr, *ast.BinaryExpr, *ast.ArrowFn, *ast.UnaryExpr, *ast.TemplateExpr:
 		return true
+	case *ast.ObjectExpr:
+		// A style object that reads a reactive value (`style={{ fontSize:
+		// theme().size }}`); a fully static one is folded by buildAttrBinding.
+		return attr.Name == "style"
 	}
 	return false
 }

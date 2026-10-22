@@ -103,6 +103,25 @@ describe('krateDerived', () => {
   });
 });
 
+describe('krateDerived render identity', () => {
+  beforeEach(() => disposeAll());
+
+  it('recomputes a render literal when any trigger changes', () => {
+    const [page] = createSignal(1);
+    const [theme, setTheme] = createSignal('light');
+    const inline = krateDerived(
+      () => ({ page: page() }),
+      () => [page(), theme()],
+    );
+    const first = inline();
+    expect(inline()).toBe(first);
+    setTheme('dark');
+    const second = inline();
+    expect(second).not.toBe(first);
+    expect(second).toEqual({ page: 1 });
+  });
+});
+
 describe('krateHook', () => {
   beforeEach(() => disposeAll());
 

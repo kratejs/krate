@@ -583,17 +583,36 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 		node.ExtraVars = append(node.ExtraVars, res.propsRegs...)
 	}
 	// Local and module-level functions referenced by handlers, effects, memos
-	// and dynamic list slot expressions must be in hydration scope.
-	for _, fnDecl := range b.collectReferencedFunctions(node, fn.Body) {
-		if fnJS := renderFnDeclJS(fnDecl, b.sigMap()); fnJS != "" {
-			node.ExtraVars = append(node.ExtraVars, fnJS)
+	// and dynamic list slot expressions must be in hydration scope, and so
+	// must the module-level constants they (and the hydration code) read,
+	// which are declared before the signals and pre-signal vars. A constant's
+	// initializer can call an imported helper (`const store =
+	// createStore(0)`), so both are resolved until nothing new is found.
+	emittedFns := map[string]bool{}
+	addFunctions := func() {
+		for _, fnDecl := range b.collectReferencedFunctions(node, fn.Body) {
+			if emittedFns[fnDecl.Name] {
+				continue
+			}
+			emittedFns[fnDecl.Name] = true
+			if fnJS := renderFnDeclJS(fnDecl, b.sigMap()); fnJS != "" {
+				node.ExtraVars = append(node.ExtraVars, fnJS)
+			}
 		}
 	}
-	// Module-level constants referenced from hydration code are declared
-	// before the signals and pre-signal vars.
-	if decls := b.referencedModuleConstVars(node); len(decls) > 0 {
-		node.PreSignalVars = append(decls, node.PreSignalVars...)
+	addFunctions()
+	var constDecls []string
+	for round := 0; round < 4; round++ {
+		decls := b.referencedModuleConstVars(node)
+		if len(decls) == len(constDecls) {
+			break
+		}
+		base := node.PreSignalVars[len(constDecls):]
+		node.PreSignalVars = append(append([]string(nil), decls...), base...)
+		constDecls = decls
+		addFunctions()
 	}
+	b.checkUnbundledImports(node)
 	if needsNoClientJS(node, fn) && !res.forceClient && !b.rendersLiveProps(node) {
 		node.Tier = TierStatic
 	}

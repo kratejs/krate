@@ -115,6 +115,8 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		slotCounts:       make(map[string]int),
 		moduleConsts:     typedModuleConsts(moduleConstInits, moduleConsts),
 		moduleConstInits: moduleConstInits,
+		moduleStmts:      collectModuleStmts(prog),
+		entryProg:        prog,
 		cvaFactories:     mergeCVAFactories(ann.CVAFactories, prog),
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
 		codeTheme:        codeTheme,
@@ -321,6 +323,8 @@ type builder struct {
 	elementCounts    map[string]int
 	moduleConsts     valueMap                  // module-level const values (name -> folded value)
 	moduleConstInits map[string]ast.Expr       // module-level const initializers (name -> expr)
+	moduleStmts      []ast.Stmt                // entry module top-level statements that run code
+	entryProg        *ast.Program              // the entry module (imports for KR8302)
 	cvaFactories     map[string]*CVASpec       // module-level `const X = cva(...)` factories
 	contextDefaults  map[string]string         // module-level `const X = createContext(v)` defaults
 	codeTheme        string                    // chroma theme for compile-time <Code> highlighting

@@ -21,7 +21,7 @@ import (
 // one of them, or "".
 func derivedCallee(expr ast.Expr) string {
 	call, ok := expr.(*ast.CallExpr)
-	if !ok || len(call.Args) != 1 {
+	if !ok || len(call.Args) < 1 || len(call.Args) > 2 {
 		return ""
 	}
 	id, ok := call.Callee.(*ast.Identifier)

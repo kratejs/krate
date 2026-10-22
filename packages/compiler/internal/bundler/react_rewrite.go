@@ -249,6 +249,7 @@ func RewriteReact(prog *ast.Program) {
 // React patterns whose Krate semantics differ (see internal/diag
 // codes_effects.go). file and src position the diagnostics.
 func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
+	renameReservedBindings(prog)
 	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src}
 	var toRemove []int
 

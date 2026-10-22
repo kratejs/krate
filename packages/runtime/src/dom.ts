@@ -155,19 +155,71 @@ function insertBefore(parent: Node, value: unknown, before: Node | null): void {
 // Prop names whose DOM attribute differs from the JSX spelling.
 const ATTR_ALIASES: Record<string, string> = { htmlFor: 'for' };
 
+// CSS properties (hyphenated, vendor prefix removed) whose numeric values
+// take no px unit; mirrors the compiler's htmlspec table (React's
+// isUnitlessNumber).
+const UNITLESS = new Set([
+  'animation-iteration-count', 'aspect-ratio', 'border-image-outset', 'border-image-slice',
+  'border-image-width', 'box-flex', 'box-flex-group', 'box-ordinal-group', 'column-count',
+  'columns', 'flex', 'flex-grow', 'flex-positive', 'flex-shrink', 'flex-negative', 'flex-order',
+  'grid-area', 'grid-row', 'grid-row-end', 'grid-row-span', 'grid-row-start', 'grid-column',
+  'grid-column-end', 'grid-column-span', 'grid-column-start', 'font-weight', 'line-clamp',
+  'line-height', 'opacity', 'order', 'orphans', 'scale', 'tab-size', 'widows', 'z-index', 'zoom',
+  'fill-opacity', 'flood-opacity', 'stop-opacity', 'stroke-dasharray', 'stroke-dashoffset',
+  'stroke-miterlimit', 'stroke-opacity', 'stroke-width',
+]);
+
+function cssName(key: string): string {
+  if (key.startsWith('--')) return key;
+  const name = key.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+  return name.startsWith('ms-') ? '-' + name : name;
+}
+
+const appliedStyles = new WeakMap<Element, Set<string>>();
+
+/**
+ * Applies a React style object to el: camelCase keys are hyphenated, numbers
+ * get px unless the property is unitless, null/boolean/empty values are
+ * skipped, and properties set by the previous object but absent now are
+ * removed. Other inline styles are left alone.
+ */
+export function krateApplyStyle(el: Element, style: Record<string, unknown>): void {
+  const decl = (el as HTMLElement).style;
+  if (!decl) return;
+  const next = new Set<string>();
+  for (const key of Object.keys(style)) {
+    const v = style[key];
+    if (v == null || typeof v === 'boolean' || v === '') continue;
+    const name = cssName(key);
+    const bare = name.replace(/^-(webkit|moz|ms|o)-/, '');
+    const text = typeof v === 'number' && v !== 0 && !name.startsWith('--') && !UNITLESS.has(bare) ? v + 'px' : String(v);
+    decl.setProperty(name, text);
+    next.add(name);
+  }
+  const prev = appliedStyles.get(el);
+  if (prev) {
+    for (const name of prev) {
+      if (!next.has(name)) decl.removeProperty(name);
+    }
+  }
+  appliedStyles.set(el, next);
+}
+
 function setAttr(el: Element, key: string, value: unknown): void {
   if (key === 'class' || key === 'className') {
     // Guard against false/null/undefined before String() conversion.
     const next = value === false || value === null || value === undefined ? '' : String(value);
     if (el.getAttribute('class') !== next) {
-      if (next === '' && !el.hasAttribute('class')) return;
+      // className="" renders class="" (as in React); a missing class stays
+      // missing.
+      if (next === '' && !el.hasAttribute('class') && typeof value !== 'string') return;
       el.setAttribute('class', next);
     }
   } else if (key === 'style') {
     if (typeof value === 'string') {
       if (el.getAttribute('style') !== value) el.setAttribute('style', value);
     } else if (value && typeof value === 'object') {
-      Object.assign((el as HTMLElement).style, value);
+      krateApplyStyle(el, value as Record<string, unknown>);
     } else if (value == null || value === false) {
       el.removeAttribute('style');
     }

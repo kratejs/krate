@@ -5,7 +5,7 @@ export type { EffectPhase } from './effects.js';
 export { untrack, sameValue, krateFlushSync, krateDerived, krateHook, isDerivedGetter } from './signal.js';
 export { clearPersisted, readPersisted, writePersisted } from './storage.js';
 export type { PersistOptions, PersistSpec, PersistStore, StorageLike } from './storage.js';
-export { h, mount, hydrate, insert, clearNodes, disposeNode } from './dom.js';
+export { h, mount, hydrate, insert, clearNodes, disposeNode, krateApplyStyle } from './dom.js';
 export { krateList, krateBindList } from './list.js';
 export { krateCondSwap, krateCondDetached, krateCondReset, krateSanitizeAttr, BLOCKED_URL } from './slots.js';
 export { Fragment, jsx, jsxs } from './jsx-runtime.js';

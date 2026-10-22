@@ -501,9 +501,11 @@ const derivedGetters = new WeakSet<object>();
  * value (`const total = rows.reduce(...)`). The getter recomputes on read when
  * a signal (or another derived value) it read last time has changed since, so
  * every reader in a flush sees the same current value. Nothing is computed
- * until the first read, and a write only marks it stale.
+ * until the first read, and a write only marks it stale. triggers, when
+ * given, is read for its subscriptions only: an object or array literal built
+ * in render gets a new identity whenever the component would re-render.
  */
-export function krateDerived<T>(fn: () => T): () => T {
+export function krateDerived<T>(fn: () => T, triggers?: () => unknown): () => T {
   let value: T;
   let stale = true;
   const subs = new Set<EffectState>();
@@ -532,6 +534,8 @@ export function krateDerived<T>(fn: () => T): () => T {
       stale = false;
       context.push(node);
       try {
+        // Extra sources (a render literal's state and props) only subscribe.
+        if (triggers) triggers();
         value = fn();
       } catch (err) {
         stale = true;

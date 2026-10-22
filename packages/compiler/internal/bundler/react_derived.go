@@ -661,7 +661,28 @@ func (c *reactCtx) rewriteRenderDecl(v *ast.VarStmt, d *ast.VarDecl, sc *scope, 
 			return one.Decls
 		}
 	}
-	return c.bindDerived(v, d, derivedCall(d.Init), sc)
+	call := derivedCall(d.Init)
+	c.addRenderIdentity(call, d.Init)
+	return c.bindDerived(v, d, call, sc)
+}
+
+// addRenderIdentity gives a derived object or array literal (`const options =
+// { page }`) a fresh identity on every render, as in React: besides its own
+// inputs it is recomputed whenever the component's state or props change
+// (the frame's render triggers, filled in when the body is done).
+func (c *reactCtx) addRenderIdentity(call *ast.CallExpr, init ast.Expr) {
+	switch unparen(init).(type) {
+	case *ast.ObjectExpr, *ast.ArrayExpr:
+	default:
+		return
+	}
+	f := c.frame()
+	if f == nil || f.kind != frameComponent {
+		return
+	}
+	arr := &ast.ArrayExpr{Position: call.Position}
+	f.noDeps = append(f.noDeps, arr)
+	call.Args = append(call.Args, &ast.ArrowFn{Position: call.Position, Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: arr}}})
 }
 
 // isHookInit reports a React hook call that owns its binding (useRef,
