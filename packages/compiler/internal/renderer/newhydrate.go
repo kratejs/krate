@@ -17,9 +17,11 @@ import (
 // refreshSlots() to rebuild the comment-marker cache against the new DOM.
 const HydrationBootstrapJS = `
 window.__krateErrs=[];
+window.__krateModule=function(k,f){var m=window.__krate_mod||(window.__krate_mod={});if(!Object.prototype.hasOwnProperty.call(m,k))m[k]=f();return m[k];};
 window.__krate_props={};
 window.$esc=function(v){var d=document.createElement('div');d.textContent=v;return d.innerHTML};
-window.__safe=function(fn){try{return fn();}catch(e){try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}return null;}};
+window.__safe=function(fn,n){try{return fn();}catch(e){if(window.__krateOnError&&window.__krateOnError(e,n))return null;try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}return null;}};
+window.__krateFx=function(n,f){return function(){try{return f();}catch(e){if(n&&n.isConnected===false){try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}return;}throw e;}};};
 (function(){
 var __root=document.getElementById('root')||document.body;
 var __cache=new Map();
@@ -31,16 +33,16 @@ function scan(){__cache.clear();__tpls.clear();if(typeof krateCondReset==='funct
 scan();
 window.findSlot=function(id){var q='[data-k="k:'+id+'"]';var el=__root.querySelector(q);if(el)return el;var c=__cache.get(id);if(c)return c;var found=null;__tpls.forEach(function(t){if(!found)found=t.content.querySelector(q);});if(!found&&typeof krateCondDetached==='function'){var ds=krateCondDetached();for(var i=0;i<ds.length&&!found;i++)found=ds[i].querySelector(q);}if(!found&&typeof kratePortalFind==='function'){var pr=__portalRoots();if(typeof krateCondDetached==='function')pr=pr.concat(krateCondDetached());found=kratePortalFind(q,pr);}if(!found&&document.head)found=document.head.querySelector(q);return found;};
 window.refreshSlots=scan;
-window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}});});};
-window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;var __first=true;__safe(function(){createEffect(function(){var v=get();if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);});});};
+window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}}));},n);};
+window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;var __first=true;__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);}));},n);};
 window.kbindList=function(id,src,key,render,mode){var n=findSlot(id);if(!n||n.nodeType!==8||typeof krateBindList!=='function')return;__safe(function(){krateBindList(n,src,key,render,mode);});};
-window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(function(){var s=!!get();var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');});});};
-window.kbindTextContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();n.textContent=v==null||typeof v==='boolean'?'':String(v);});});};
-window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)n.removeAttribute(attr);else if(v===true)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){n.removeAttribute('style');Object.assign(n.style,v);}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));});});};
-window.kbindProp=function(id,attr,get){var n=findSlot(id);if(n)__safe(function(){krateControl(n,attr,get);});};
-window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){krateOn(n,prop,fn);});};
-window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);});};
-window.kbindRef=function(id,get,set){var n=findSlot(id);if(n)__safe(function(){krateBindRef(n,get,set);});};
+window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(__krateFx(n,function(){var s=!!get();var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(window.__krateCondPre)window.__krateCondPre(id,s);if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');if(window.__krateCondPost)window.__krateCondPost(id,s);}));},n);};
+window.kbindTextContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__krateFx(n,function(){var v=get();n.textContent=v==null||typeof v==='boolean'?'':String(v);}));},n);};
+window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;var ad=/^(aria|data)-/.test(attr);__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(v==null||(v===false&&!ad))n.removeAttribute(attr);else if(v===true&&!ad)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){if(typeof krateApplyStyle==='function')krateApplyStyle(n,v);else{n.removeAttribute('style');Object.assign(n.style,v);}}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));}));},n);};
+window.kbindProp=function(id,attr,get){var n=findSlot(id);if(n)__safe(function(){krateControl(n,attr,get);},n);};
+window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){krateOn(n,prop,fn);},n);};
+window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);if(typeof window.onCleanup==='function')window.onCleanup(function(){n.removeEventListener(ev,fn,!!capture);});},n);};
+window.kbindRef=function(id,get,set){var n=findSlot(id);if(n)__safe(function(){krateBindRef(n,get,set);},n);};
 })();
 `
 
@@ -84,14 +86,20 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		}
 	}
 
+	// Per-component scoped IIFEs. Pages with class components register each
+	// scope with the owner tree instead (see owner_emit.go).
+	owned := needsOwnerTree(result.Signatures)
+	present := map[irtree.SlotID]bool{}
+	if owned {
+		b.WriteString(ownerPrelude)
+	}
 	// React effects need component boundaries (ordering, unmount, hidden
 	// branches); declare an owner per component when any component has them.
 	owners := pageNeedsOwners(result)
 	if owners {
 		b.WriteString("var __ko=typeof krateOwner==='function'?krateOwner:function(){};\n")
+		b.WriteString("var __km=typeof krateMount==='function'?krateMount:function(i,p,c,s,f){f();};\n")
 	}
-
-	// Per-component scoped IIFEs
 	for _, sig := range result.Signatures {
 		if sig.Tier != irtree.TierClient {
 			continue
@@ -100,9 +108,32 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		// traced back to a source component. Stripped by minification in prod.
 		b.WriteString("// component ")
 		b.WriteString(string(sig.ComponentID))
-		b.WriteString("\n(function(){\n")
-		if owners {
-			writeOwnerDecl(&b, sig)
+		// A component inside a conditional branch is remountable: its scope is
+		// a function the runtime runs on every mount (fresh state, bindings
+		// and effects) and skips while the branch is hidden. On pages using the
+		// class/boundary owner tree, that tree mounts and unmounts the scope
+		// (with the same fresh-state semantics) and the effects owner is
+		// declared inside it.
+		remountable := owners && len(sig.Conds) > 0 && !owned
+		switch {
+		case owned:
+			b.WriteString("\n")
+			b.WriteString(ownerOpen(sig, present))
+			present[sig.ComponentID] = true
+			if owners {
+				writeOwnerDecl(&b, sig, "__ko")
+				b.WriteString(");\n")
+			}
+		case remountable:
+			b.WriteString("\n")
+			writeOwnerDecl(&b, sig, "__km")
+			b.WriteString(",function(){\n")
+		default:
+			b.WriteString("\n(function(){\n")
+			if owners {
+				writeOwnerDecl(&b, sig, "__ko")
+				b.WriteString(");\n")
+			}
 		}
 
 		// The component's own props object declaration must precede signal
@@ -305,6 +336,10 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			if exprJS == "" {
 				continue
 			}
+			if strings.HasPrefix(exprJS, "{") {
+				// An object literal (a style object) is an expression body.
+				exprJS = "(" + exprJS + ")"
+			}
 			// value/checked/selected are DOM properties, not attributes: setting
 			// the attribute after interaction has no effect.
 			name := a.AttrName
@@ -332,7 +367,11 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			b.WriteString(");\n")
 		}
 
-		b.WriteString("})();\n")
+		if owned || remountable {
+			b.WriteString("});\n")
+		} else {
+			b.WriteString("})();\n")
+		}
 	}
 	if owners {
 		b.WriteString("__ko(null);\n")
@@ -363,7 +402,9 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 // in which case every component scope declares its owner.
 func pageNeedsOwners(result *EmitResult) bool {
 	for _, sig := range result.Signatures {
-		if sig.Tier == irtree.TierClient && len(sig.Effects) > 0 {
+		// Components in conditional branches need owners to unmount and
+		// remount with fresh state when the branch toggles.
+		if sig.Tier == irtree.TierClient && (len(sig.Effects) > 0 || len(sig.Conds) > 0) {
 			return true
 		}
 	}
@@ -372,8 +413,11 @@ func pageNeedsOwners(result *EmitResult) bool {
 
 // writeOwnerDecl emits the krateOwner call that opens a component scope:
 // its id, enclosing component, conditional branches and list slot.
-func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
-	b.WriteString("__ko(")
+// fn is __ko (krateOwner) or __km (krateMount, which always takes the conds
+// and slot arguments). The call is left open for the caller to close.
+func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature, fn string) {
+	b.WriteString(fn)
+	b.WriteString("(")
 	b.WriteString(strconv.Quote(string(sig.ComponentID)))
 	b.WriteString(",")
 	if sig.ParentID != "" {
@@ -381,7 +425,7 @@ func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
 	} else {
 		b.WriteString("null")
 	}
-	if len(sig.Conds) > 0 || sig.ListSlot != "" {
+	if fn == "__km" || len(sig.Conds) > 0 || sig.ListSlot != "" {
 		b.WriteString(",[")
 		for i, c := range sig.Conds {
 			if i > 0 {
@@ -401,9 +445,10 @@ func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
 		if sig.ListSlot != "" {
 			b.WriteString(",")
 			b.WriteString(strconv.Quote(string(sig.ListSlot)))
+		} else if fn == "__km" {
+			b.WriteString(",null")
 		}
 	}
-	b.WriteString(");\n")
 }
 
 // writeRefBinding emits kbindRef(id, get, assign). get returns the ref value
@@ -513,6 +558,7 @@ window.useTransition=function(){var s=createSignal(false);function start(fn){s[1
 window.startTransition=function(fn){fn();};
 window.useDeferredValue=function(v){return v;};
 window.useDebugValue=function(){};
+window.createRef=function(){return {current:null};};
 window.isValidElement=function(v){return (typeof Node!=='undefined'&&v instanceof Node)||(v&&typeof v==='object');};
 window.Children={toArray:function(c){if(c==null||c===false||c===true)return [];if(Array.isArray(c)){var o=[];for(var i=0;i<c.length;i++){var a=window.Children.toArray(c[i]);for(var j=0;j<a.length;j++)o.push(a[j]);}return o;}return [c];},count:function(c){return window.Children.toArray(c).length;},only:function(c){return window.Children.toArray(c)[0];},map:function(c,fn){return window.Children.toArray(c).map(fn);},forEach:function(c,fn){var a=window.Children.toArray(c);for(var i=0;i<a.length;i++)fn(a[i],i);}};
 window.cloneElement=function(el,props){if(el==null||el===false||el===true)return el;var n=(typeof Node!=='undefined'&&el instanceof Node)?el.cloneNode(true):el;if(props&&n&&n.nodeType===1){for(var k in props){if(k==='children')continue;var v=props[k];if(v==null||v===false)continue;if(k==='className'||k==='class'){n.setAttribute('class',String(v));}else if(k==='style'&&typeof v==='object'){for(var s in v)n.style[s]=v[s];}else if(k.indexOf('on')===0&&typeof v==='function'){krateOn(n,k,v);}else{n.setAttribute(k,String(v));}}}if(arguments.length>2){while(n.firstChild)n.removeChild(n.firstChild);for(var i=2;i<arguments.length;i++){var c=arguments[i];if(c==null||c===false||c===true)continue;n.appendChild(typeof Node!=='undefined'&&c instanceof Node?c:document.createTextNode(String(c)));}}return n;};

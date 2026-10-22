@@ -73,6 +73,9 @@ type BuildOptions struct {
 	// The binding is a client proxy at runtime, but SSR renders the URL so
 	// forms work without JavaScript.
 	ActionURLs map[string]string
+	// BoundaryThrows renders the listed error boundary instances in their
+	// fallback state (see boundary_build.go).
+	BoundaryThrows map[SlotID]BoundaryThrow
 }
 
 // Build constructs a ComponentTree from a parsed program and its annotations
@@ -115,6 +118,8 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		slotCounts:       make(map[string]int),
 		moduleConsts:     typedModuleConsts(moduleConstInits, moduleConsts),
 		moduleConstInits: moduleConstInits,
+		moduleStmts:      collectModuleStmts(prog),
+		entryProg:        prog,
 		cvaFactories:     mergeCVAFactories(ann.CVAFactories, prog),
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
 		codeTheme:        codeTheme,
@@ -125,6 +130,7 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		externalImports:  opts.ExternalImports,
 		localImports:     opts.LocalComponentImports,
 		actionURLs:       opts.ActionURLs,
+		boundaryThrows:   opts.BoundaryThrows,
 	}
 	if entryFn := ann.Functions[ann.EntryPoint]; entryFn != nil {
 		b.expansion = []expansionFrame{{name: entryFn.Name}}
@@ -166,6 +172,8 @@ func (b *builder) finishTree(root *ComponentNode) *ComponentTree {
 	errs = append(errs, b.buildErrs...)
 	errs = append(errs, b.codegenErrs...)
 	errs = append(errs, b.markupErrs...)
+
+	b.reportClassNotes()
 
 	cssSignals, noJSFallback := b.cssStylesheets()
 	return &ComponentTree{
@@ -263,6 +271,10 @@ type componentCtx struct {
 	// component's return starts with (see recordChildrenContext).
 	entryContextValues  map[string]ast.Expr
 	entryContextMarkers map[string]jsvalue.Value
+	// contextInitials holds the build-time value of each active dynamic
+	// provider value, so a consumer deeper in the tree (where the value is
+	// read through a forwarded getter prop) still gets its SSR initial.
+	contextInitials map[string]jsvalue.Value
 	// scopeHandles maps a local identifier (or `props.<name>`) to the CSS scope
 	// it holds, so `x.trigger(v)` / `x.panel(v)` / `x.close()` spreads resolve
 	// anywhere in any component (a handle can be passed to children as a prop).
@@ -311,7 +323,8 @@ type builder struct {
 	idCounter      map[string]int
 	hasLinks       bool
 	runtimeProps   *RuntimePropStore
-	instanceCounts map[string]int    // per-component-name instance counter
+	instanceCounts map[string]int // per-component-name instance counter
+	boundaryThrows map[SlotID]BoundaryThrow
 	slotCounter    int               // monotonic counter for compact slot IDs
 	slotIDMap      map[string]SlotID // logical ID -> compact ID
 	slotCounts     map[string]int    // per-parent dynamic-slot counters for sibling disambiguation
@@ -321,6 +334,8 @@ type builder struct {
 	elementCounts    map[string]int
 	moduleConsts     valueMap                  // module-level const values (name -> folded value)
 	moduleConstInits map[string]ast.Expr       // module-level const initializers (name -> expr)
+	moduleStmts      []ast.Stmt                // entry module top-level statements that run code
+	entryProg        *ast.Program              // the entry module (imports for KR8302)
 	cvaFactories     map[string]*CVASpec       // module-level `const X = cva(...)` factories
 	contextDefaults  map[string]jsvalue.Value  // module-level `const X = createContext(v)` defaults
 	codeTheme        string                    // chroma theme for compile-time <Code> highlighting

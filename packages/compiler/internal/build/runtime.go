@@ -53,7 +53,7 @@ func runtimeNeedsCompat(results []*PageResult) bool {
 	markers := []string{
 		"useImperativeHandle", "useSyncExternalStore", "useTransition",
 		"startTransition", "useDeferredValue", "useDebugValue",
-		"isValidElement", "Children", "cloneElement",
+		"isValidElement", "Children", "cloneElement", "createRef",
 	}
 	for _, r := range results {
 		if r == nil || r.HydrationJS == "" {

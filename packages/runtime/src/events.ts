@@ -22,7 +22,7 @@
  * restored to their state value, so a handler that does not update state keeps
  * the field unchanged, as in React.
  */
-import { createEffect } from './signal.js';
+import { createEffect, krateFlushSync } from './signal.js';
 
 /** A React-compatible synthetic event. */
 export interface KrateSyntheticEvent<E extends Event = Event> {
@@ -459,6 +459,9 @@ export function krateSetControl(el: Element, prop: string, v: unknown): void {
 function restore(el: FormEl): void {
   const c = el.__kc;
   if (!c) return;
+  // React flushes the event's synchronous updates before restoring, so the
+  // control is compared with the newly committed state.
+  krateFlushSync();
   if (c.value) krateSetControl(el, 'value', c.value());
   if (c.checked) krateSetControl(el, 'checked', c.checked());
 }

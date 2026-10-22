@@ -25,8 +25,9 @@ func TestHydrationDeclaresEffectOwners(t *testing.T) {
 		"(function(){\n__ko(\"Index_c0\",null);\n",
 		// No-deps effect: deps are the component's state.
 		"return [c(),show()];",
-		// The child in the conditional's consequent, shown on the server.
-		"(function(){\n__ko(\"4.c.Child.Child_c0\",\"Index_c0\",[[\"4\",\"c\",1]]);\n",
+		// The child in the conditional's consequent, shown on the server, is
+		// a remountable scope.
+		"__km(\"4.c.Child.Child_c0\",\"Index_c0\",[[\"4\",\"c\",1]],null,function(){\n",
 		"__ko(null);\n")
 	// List rows are rendered and adopted by the keyed list runtime, which
 	// gives each row its own effect owner.
@@ -60,14 +61,15 @@ export default function Index() {
   const [open, setOpen] = useState(false);
   return <main><button onClick={() => setOpen(!open)}>t</button>{open ? <Panel /> : <span>closed</span>}</main>;
 }`)
-	if !strings.Contains(js, `[["3","c",0]]`) {
+	if !strings.Contains(js, `__km("3.c.Panel.Panel_c0","Index_c0",[["3","c",0]],null,function(){`) {
 		t.Fatalf("a component in the initially hidden branch must be declared hidden:\n%s", js)
 	}
 }
 
 func TestBootstrapReportsBranchAndSlotChanges(t *testing.T) {
 	for _, frag := range []string{
-		"var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');",
+		// The owner-tree hooks (boundary.ts) bracket the effects.ts activity calls.
+		"var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(window.__krateCondPre)window.__krateCondPre(id,s);if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');if(window.__krateCondPost)window.__krateCondPost(id,s);",
 		"if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}",
 	} {
 		if !strings.Contains(HydrationBootstrapJS, frag) {
@@ -89,7 +91,46 @@ export default function Index() {
   const [c, setC] = useState(() => 2 + 3);
   return <button onClick={() => setC((x) => x + 1)}>{c}</button>;
 }`)
-	if !strings.Contains(res.HTML, ">5<") || !strings.Contains(js, "createSignal(5)") {
+	if !strings.Contains(res.HTML, ">5<") || !strings.Contains(js, "createSignal(5,krateHookState)") {
 		t.Fatalf("lazy initializer should be called, not stored:\n%s\n%s", res.HTML, js)
+	}
+}
+
+func TestStateInitializerFromModuleBindings(t *testing.T) {
+	_, js := fullPipelineWithReact(t, `import { useState } from 'react';
+const START = 4;
+function loadDraft() { return "saved"; }
+export default function Index() {
+  const [draft, setDraft] = useState(loadDraft);
+  const [n, setN] = useState(START);
+  return <button onClick={() => setN(n + 1)}>{draft} {n}</button>;
+}`)
+	for _, frag := range []string{
+		"createSignal(loadDraft(),krateHookState)",
+		"createSignal(START,krateHookState)",
+		"var START=4;",
+		"function loadDraft()",
+	} {
+		if !strings.Contains(js, frag) {
+			t.Fatalf("missing %q in:\n%s", frag, js)
+		}
+	}
+}
+
+func TestForwardedLivePropStaysLive(t *testing.T) {
+	_, js := fullPipelineWithReact(t, `import { useState, useEffect } from 'react';
+function Leaf(props) {
+  useEffect(() => {}, [props.n]);
+  return <li>{props.n}</li>;
+}
+function Branch(props) {
+  return <ul><Leaf n={props.n} /></ul>;
+}
+export default function Index() {
+  const [n, setN] = useState(0);
+  return <div><Branch n={n} /><button onClick={() => setN(n + 1)}>+</button></div>;
+}`)
+	if !strings.Contains(js, "{get n(){return props.n}}") {
+		t.Fatalf("a forwarded live prop must read the parent's props getter:\n%s", js)
 	}
 }

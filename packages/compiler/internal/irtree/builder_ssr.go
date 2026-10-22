@@ -1014,6 +1014,12 @@ func (b *builder) buildChildPropsRegDecl(id string, props map[string]ast.Expr) s
 			sb.WriteByte(',')
 		}
 		val := b.renderChildPropValue(expr)
+		if b.livePropsParam == "props" && b.readsLiveProp(expr) {
+			// Forwarding a live prop (`n={props.n}`) must stay a read of the
+			// parent's own props getter, not its build-time value, so the
+			// grandchild sees updates.
+			val = generateExprJS(expr, b.sigMap())
+		}
 		if val == "" {
 			val = "undefined"
 		}
@@ -1147,4 +1153,48 @@ func subExprListGeneric(s *propsMemberSubstituter, list []ast.Expr) []ast.Expr {
 		out[i] = s.sub(e)
 	}
 	return out
+}
+
+// readsLiveProp reports whether expr reads a live prop of the component being
+// built (see isLivePropRead).
+func (b *builder) readsLiveProp(expr ast.Expr) bool {
+	found := false
+	var walk func(ast.Expr)
+	walk = func(e ast.Expr) {
+		if e == nil || found {
+			return
+		}
+		switch x := e.(type) {
+		case *ast.MemberExpr:
+			if b.isLivePropRead(x) {
+				found = true
+				return
+			}
+			walk(x.Object)
+		case *ast.CallExpr:
+			walk(x.Callee)
+			for _, a := range x.Args {
+				walk(a)
+			}
+		case *ast.BinaryExpr:
+			walk(x.Left)
+			walk(x.Right)
+		case *ast.UnaryExpr:
+			walk(x.Arg)
+		case *ast.ConditionalExpr:
+			walk(x.Test)
+			walk(x.Consequent)
+			walk(x.Alternate)
+		case *ast.TemplateExpr:
+			for _, p := range x.Parts {
+				walk(p)
+			}
+		case *ast.ArrayExpr:
+			for _, el := range x.Elements {
+				walk(el)
+			}
+		}
+	}
+	walk(expr)
+	return found
 }

@@ -13,7 +13,7 @@
  * `useDeferredValue`) are best-effort. Class components are intentionally
  * minimal.
  */
-import { h, krateTrackNode, type Component } from './dom.js';
+import { h, krateTrackNode, type Component as FnComponent } from './dom.js';
 import type { KratePortalNode } from './portal.js';
 import { createSignal, createEffect, createReducer, isSignalGetter } from './signal.js';
 import { createEffectDeps, type EffectPhase } from './effects.js';
@@ -22,6 +22,7 @@ import { krateEventRoot } from './events.js';
 import { createContext as krateCreateContext } from './context.js';
 import { cloneElement as krateCloneElement } from './class-helpers.js';
 import { jsx as krateJsx } from './jsx-runtime.js';
+import { mountClassElement } from './class-component.js';
 import {
   __krateActionState,
   __krateOptimistic,
@@ -58,11 +59,13 @@ export function createElement(
   const props: Record<string, unknown> = config ? { ...config } : {};
   if (children.length === 1) props.children = children[0];
   else if (children.length > 1) props.children = children;
-  return krateJsx(type as string | Component<Record<string, unknown>>, props);
+  return renderType(type, props);
 }
 
-export const jsx = krateJsx;
-export const jsxs = krateJsx;
+export function jsx(type: unknown, props: Record<string, unknown> | null): Node {
+  return renderType(type, props || {});
+}
+export const jsxs = jsx;
 
 export function jsxDEV(
   type: unknown,
@@ -72,7 +75,7 @@ export function jsxDEV(
   _source?: unknown,
   _self?: unknown
 ): Node {
-  return krateJsx(type as string | Component<Record<string, unknown>>, props);
+  return renderType(type, props || {});
 }
 
 /** `React.Children` helpers over arrays and single values. */
@@ -133,7 +136,7 @@ export function forwardRef(render: unknown): unknown {
   return render;
 }
 
-export function memo<P>(component: Component<P>, _compare?: unknown): Component<P> {
+export function memo<P>(component: FnComponent<P>, _compare?: unknown): FnComponent<P> {
   return component;
 }
 
@@ -376,15 +379,25 @@ export function createPortal(children: unknown, container: Element | DocumentFra
   return anchor;
 }
 
-/** Minimal class base so compiled code that `extends React.Component` resolves. */
+/**
+ * Class component base for React source the compiler did not lower (for
+ * example classes created at runtime). Rendering it with createElement/jsx
+ * mounts it through the same instance controller as lowered classes
+ * (class-component.ts): setState is batched, lifecycles run in React order,
+ * and each committed update re-runs render(). Compiled npm packages do not
+ * use this: they run on Preact in islands.
+ */
 export class ComponentBase {
   props: Record<string, unknown>;
   state: Record<string, unknown>;
+  context: unknown;
   constructor(props?: Record<string, unknown>) {
     this.props = props ?? {};
     this.state = {};
+    this.context = undefined;
   }
-  setState(update: unknown): void {
+  /** Replaced by the controller on mount; before that it merges synchronously. */
+  setState(update: unknown, _callback?: () => void): void {
     const next =
       typeof update === 'function'
         ? (update as (s: Record<string, unknown>, p: Record<string, unknown>) => Record<string, unknown>)(
@@ -394,9 +407,34 @@ export class ComponentBase {
         : (update as Record<string, unknown>);
     this.state = { ...this.state, ...next };
   }
-  render(): Node | null {
+  forceUpdate(_callback?: () => void): void {}
+  render(): unknown {
     return null;
   }
+}
+(ComponentBase.prototype as unknown as { isReactComponent: object }).isReactComponent = {};
+
+export class Component extends ComponentBase {}
+
+export class PureComponent extends ComponentBase {}
+(PureComponent.prototype as unknown as { isPureReactComponent: boolean }).isPureReactComponent = true;
+
+function isClassComponent(type: unknown): boolean {
+  return typeof type === 'function' && !!(type as { prototype?: { isReactComponent?: unknown } }).prototype?.isReactComponent;
+}
+
+function toNode(value: unknown): Node {
+  if (value instanceof Node) return value;
+  if (value == null || value === false || value === true) return document.createTextNode('');
+  if (Array.isArray(value)) return fragmentChildren(value);
+  return document.createTextNode(String(value));
+}
+
+function renderType(type: unknown, props: Record<string, unknown>): Node {
+  if (isClassComponent(type)) {
+    return mountClassElement(type as Parameters<typeof mountClassElement>[0], props, toNode);
+  }
+  return krateJsx(type as string | FnComponent<Record<string, unknown>>, props);
 }
 
 export const reactCompat = { h, Fragment };

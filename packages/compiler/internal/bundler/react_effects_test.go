@@ -246,38 +246,79 @@ export default function Page() {
   const [s, dispatch] = useReducer((x, a) => x + a, 2, (n) => n * 3);
   return <button onClick={() => dispatch(1)}>{s}</button>;
 }`)
-	mustContain(t, out, "createReducer((x, a) => x + a, 2, (n) => n * 3)")
+	mustContain(t, out, "createReducer((x, a) => x + a, ((n) => n * 3)(2), krateHookState)")
 }
 
-func TestEffectCleanupReadingStateWarns(t *testing.T) {
-	_, diags := rewriteDiag(t, `import { useEffect, useState } from 'react';
-export default function Page() {
-  const [room, setRoom] = useState('a');
-  useEffect(() => {
-    const id = room;
-    join(id);
-    return () => { leave(room); };
-  }, [room]);
-  useEffect(() => {
-    const id = room;
-    return () => leave(id);
-  }, [room]);
-  return <p>{room}</p>;
+func TestHookInLoopOrConditionWarns(t *testing.T) {
+	_, diags := rewriteDiag(t, `import { useState, useEffect, use } from 'react';
+export default function Page(props) {
+  const values = [];
+  for (const f of props.fields) {
+    const [v] = useState(f);
+    values.push(v);
+  }
+  if (props.tracking) {
+    useEffect(() => {}, []);
+  }
+  if (props.ctx) {
+    use(props.ctx);
+  }
+  const ok = () => { if (props.x) { return 1; } };
+  return <p>{values.join(" ")}</p>;
 }`)
 	var hits []diag.Diagnostic
 	for _, d := range diags {
-		if d.Code == diag.CodeCleanupReadsState {
+		if d.Code == diag.CodeHookPlacement {
 			hits = append(hits, d)
 		}
 	}
-	if len(hits) != 1 || hits[0].Line != 7 || hits[0].Col != 26 {
-		t.Fatalf("want one KR2007 at 7:26, got %v", hits)
+	if len(hits) != 2 || hits[0].Line != 5 || hits[0].Col != 17 || !strings.Contains(hits[0].Message, "inside a loop") ||
+		hits[1].Line != 9 || !strings.Contains(hits[1].Message, "inside a condition") {
+		t.Fatalf("want KR2008 at 5:17 (loop) and line 9 (condition), got %v", hits)
 	}
+}
+
+func TestStateLoweringUsesReactSemantics(t *testing.T) {
+	out, _ := rewriteDiag(t, `import { useState, useReducer } from 'react';
+function loadDraft() { return 'saved'; }
+const makeInit = (n) => ({ count: n, history: [] });
+export default function Page() {
+  const [draft, setDraft] = useState(loadDraft);
+  const [n, setN] = useState(() => 1 + 1);
+  const [plain, setPlain] = useState(0);
+  const [s, dispatch] = useReducer((st, a) => st, 5, makeInit);
+  const [r, send] = useReducer((st, a) => st, 0);
+  return <p>{draft}{n}{plain}{s.count}{r}</p>;
+}`)
+	mustContain(t, out,
+		"createSignal(loadDraft(), krateHookState)",
+		"createSignal((() => 1 + 1)(), krateHookState)",
+		"createSignal(0, krateHookState)",
+		"createReducer((st, a) => st, makeInit(5), krateHookState)",
+		"createReducer((st, a) => st, 0, krateHookState)")
+}
+
+func TestFreshDepsReRunEveryRender(t *testing.T) {
+	out, _ := rewriteDiag(t, `import { useEffect, useState, useCallback } from 'react';
+export default function Page(props) {
+  const [a, setA] = useState(0);
+  const handler = () => a;
+  const stable = useCallback(() => a, [a]);
+  function named() { return a; }
+  useEffect(() => {}, [handler]);
+  useEffect(() => {}, [() => a, stable]);
+  useEffect(() => {}, [named, props.x]);
+  return <p>{a}</p>;
+}`)
+	mustContain(t, out,
+		"return [...[a(), ...krateDepsOf(props)]];",
+		"return [...[a(), ...krateDepsOf(props)], stable()];",
+		"return [...[a(), ...krateDepsOf(props)], props.x];")
 }
 
 func TestEffectCodesAreRegistered(t *testing.T) {
 	for _, code := range []diag.Code{diag.CodeDepsUnresolved, diag.CodeEffectNoDeps, diag.CodeAsyncEffect,
-		diag.CodeCallbackNoDeps, diag.CodeMemoNoDeps, diag.CodeDepsNotArray, diag.CodeCleanupReadsState} {
+		diag.CodeCallbackNoDeps, diag.CodeMemoNoDeps, diag.CodeDepsNotArray, diag.CodeHookPlacement} {
 		info, ok := diag.Lookup(code)
 		if !ok || info.Title == "" || !strings.HasPrefix(string(code), "KR2") {
 			t.Fatalf("code %s not registered in the KR2xxx range", code)

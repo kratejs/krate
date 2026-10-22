@@ -29,8 +29,8 @@ for usage.
 | Hooks: effects and memo | Beta | Beta | n/a | React 18 parity |
 | Context and refs | Beta | Beta | n/a | Stable |
 | Transitions and deferred values | Beta | Beta | n/a | Documented semantics |
-| Class components | Partial | n/a | n/a | Full common subset |
-| Error boundaries | Planned | Planned | Planned | Source and island |
+| Class components | Beta | n/a | n/a | Full common subset |
+| Error boundaries | Beta | Planned | Partial | Source and island |
 | Children, keys, and refs | Partial | Partial | n/a | Documented semantics |
 | Events | Beta | Partial | n/a | React 18 parity |
 | Forms and inputs | Beta | Partial | n/a | React 18 parity |
@@ -53,17 +53,17 @@ for usage.
 
 **Source:** Beta · **Islands:** Beta · **SSR:** n/a
 
-useState and useReducer lower to signals with React's Object.is bail-out, functional updates, lazy initializers, a stable dispatch, and automatic batching (one commit per task).
+useState and useReducer lower to signals with React render snapshots (handlers and effects read the committed state, functional updaters the latest), Object.is bail-out, lazy initializers (inline or named), useReducer init, a stable dispatch, and React's update lanes (discrete events commit in a microtask, other updates in a later task).
 
-Evidence: `TestReactUseReducerBuild`, `TestRewriteReactUseReducer`, `TestRewriteReactNamespaceUseReducer`, `TestUseReducerLazyInitIsPreserved`, `TestLazyUseStateInitializerRunsOnce`, `browser:/react-effects/`
+Evidence: `TestReactUseReducerBuild`, `TestRewriteReactUseReducer`, `TestRewriteReactNamespaceUseReducer`, `TestUseReducerLazyInitIsPreserved`, `TestLazyUseStateInitializerRunsOnce`, `TestStateLoweringUsesReactSemantics`, `browser:/react-effects/`
 
 ### Hooks: effects and memo
 
 **Source:** Beta · **Islands:** Beta · **SSR:** n/a
 
-Effects run in React's commit order (insertion, layout before paint, passive after paint; children before parents; cleanups before re-runs; parent-first unmount) with Object.is dependency comparison. useMemo/useCallback honour deps synchronously. Effects without deps re-run on the component's own state/props changes only, hidden conditional branches behave like Activity (state kept), and cleanups read live state; each divergence has a KR2xxx diagnostic.
+Effects run in React's commit order (insertion, layout before paint, passive after paint or synchronously after discrete events; children before parents; cleanups before re-runs; parent-first unmount) with Object.is deps, and setups/cleanups read the state and props of their own commit. useMemo/useCallback honour deps synchronously. Conditional branches unmount and remount components with fresh state. Effects without deps re-run on the component's own state/props changes only; each divergence has a KR2xxx diagnostic.
 
-Evidence: `TestRewriteReactEffectDepsAndMemo`, `TestRewriteReactEffectEmptyDepsMountOnce`, `TestEffectPhasesLowerToCreateEffectDeps`, `TestEffectWithoutDepsSynthesizesStateAndProps`, `TestHydrationDeclaresEffectOwners`, `browser:/react-effects/`
+Evidence: `TestRewriteReactEffectDepsAndMemo`, `TestRewriteReactEffectEmptyDepsMountOnce`, `TestEffectPhasesLowerToCreateEffectDeps`, `TestEffectWithoutDepsSynthesizesStateAndProps`, `TestHydrationDeclaresEffectOwners`, `TestFreshDepsReRunEveryRender`, `TestHookInLoopOrConditionWarns`, `browser:/react-effects/`
 
 ### Context and refs
 
@@ -83,19 +83,19 @@ Evidence: `TestRewriteReactUseTransitionLowered`
 
 ### Class components
 
-**Source:** Partial · **Islands:** n/a · **SSR:** n/a
+**Source:** Beta · **Islands:** n/a · **SSR:** n/a
 
-State, setState, mount/update/unmount, forceUpdate, helpers, and instance fields are lowered. shouldComponentUpdate, snapshots, derived state, and error lifecycle methods are rejected with diagnostics.
+Lowered onto a runtime instance with React 18 ordering: batched setState with callbacks, forceUpdate, componentDidMount/DidUpdate (props and state, children first)/WillUnmount on branch removal, shouldComponentUpdate, PureComponent, getDerivedStateFromProps, getSnapshotBeforeUpdate, defaultProps, contextType, accessors, private members, and instance refs. UNSAFE_componentWillMount, legacy context and other statics are rejected with KR3xxx diagnostics.
 
-Evidence: `TestClassComponentLowering`, `TestSynthesizeClassComponentRejectsUnsupported`
+Evidence: `TestClassComponentLowering`, `TestClassComponentLoweringEmit`, `TestClassLoweringIssueNamesMember`, `browser:/react-class/`, `fixture:examples/src/pages/react-class.tsx`
 
 ### Error boundaries
 
-**Source:** Planned · **Islands:** Planned · **SSR:** Planned
+**Source:** Beta · **Islands:** Planned · **SSR:** Partial
 
-No React-compatible error boundary lifecycle yet. Build failures and island load errors use Krate fallbacks.
+Classes with getDerivedStateFromError/componentDidCatch catch errors from descendants' render, bindings, lifecycles and effects (not event handlers or async code), unmount the failed subtree, and recover on reset. A throw while the page is built renders the boundary fallback (KR3009). Uncaught errors unmount only the failing component. Island boundaries are planned.
 
-Evidence: Planned; no stable test reference yet.
+Evidence: `TestBoundaryBuildTimeFallback`, `TestBuildTimeThrowWithoutBoundaryFails`, `TestClassBoundaryChildrenBranch`, `browser:/react-class/`
 
 ### Children, keys, and refs
 
