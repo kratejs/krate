@@ -44,6 +44,9 @@ type EmitResult struct {
 	// of its build-rendered static children. Emit never mutates the shared IR,
 	// so the build attaches these to the region props itself.
 	RuntimeChildren map[string]string
+	// BoundaryThrows lists error boundaries whose subtree threw while the page
+	// was built; the build re-renders them in their fallback state.
+	BoundaryThrows []irtree.BoundaryThrow
 }
 
 // SlotOutput is the result of emitting a single slot node. Beyond HTML and
@@ -64,6 +67,8 @@ type SlotOutput struct {
 	Templates string
 	// RuntimeChildren: see EmitResult.RuntimeChildren.
 	RuntimeChildren map[string]string
+	// BoundaryThrows: see EmitResult.BoundaryThrows.
+	BoundaryThrows []irtree.BoundaryThrow
 }
 
 // inlineHTML returns the output's HTML with its hoisted templates appended,
@@ -233,6 +238,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 		Errors:          e.errs,
 		GoRenders:       append(output.GoRenders, e.goCollector.snapshot()...),
 		RuntimeChildren: output.RuntimeChildren,
+		BoundaryThrows:  output.BoundaryThrows,
 	}
 }
 
@@ -543,6 +549,7 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 
 	e.clientStack = append(e.clientStack, node.ID)
 	defer func() { e.clientStack = e.clientStack[:len(e.clientStack)-1] }()
+	errStart := len(e.errs)
 
 	mergeSlotOutput(&out, e.emitSlotsParallel(node.Children))
 	ownCount := len(out.Signatures)
@@ -561,6 +568,14 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		mergeSlotOutput(&out, callSiteOut)
 	}
 	claimOwnerLinks(out.Signatures, node, ownCount)
+	if node.Boundary {
+		e.claimBoundaryThrows(node, errStart, &out)
+		if len(node.CallSiteSlots) == 0 {
+			// A boundary built in its fallback state has no children to splice.
+			out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", "")
+			out.Templates = strings.ReplaceAll(out.Templates, "<!--__children__-->", "")
+		}
+	}
 
 	childIDs := collectChildIDs(node.Children)
 	slotBindings := collectSlotBindings(node.Children)
@@ -767,6 +782,7 @@ func mergeSlotOutput(acc *SlotOutput, out SlotOutput) {
 	acc.GoRenders = append(acc.GoRenders, out.GoRenders...)
 	acc.Templates += out.Templates
 	acc.RuntimeChildren = mergeRuntimeChildren(acc.RuntimeChildren, out.RuntimeChildren)
+	acc.BoundaryThrows = append(acc.BoundaryThrows, out.BoundaryThrows...)
 }
 
 // emitWorkers bounds the number of emit goroutines running at once across the

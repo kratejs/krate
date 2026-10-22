@@ -2,6 +2,19 @@ package irtree
 
 import "sort"
 
+// BoundaryThrow records that a component inside the error boundary
+// BoundaryID threw while the page was built. A rebuild with it in
+// BuildOptions.BoundaryThrows renders that boundary in its fallback state.
+type BoundaryThrow struct {
+	BoundaryID SlotID
+	// Boundary is the boundary component's name.
+	Boundary string
+	// Name and Message describe the thrown error; Line/Col locate the throw.
+	Name      string
+	Message   string
+	Line, Col int
+}
+
 // reportClassNotes adds the non-blocking warnings of every lowered class
 // component the page rendered (Annotations.ClassNotes), once per class.
 func (b *builder) reportClassNotes() {

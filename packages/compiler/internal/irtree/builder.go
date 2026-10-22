@@ -72,6 +72,9 @@ type BuildOptions struct {
 	// The binding is a client proxy at runtime, but SSR renders the URL so
 	// forms work without JavaScript.
 	ActionURLs map[string]string
+	// BoundaryThrows renders the listed error boundary instances in their
+	// fallback state (see boundary_build.go).
+	BoundaryThrows map[SlotID]BoundaryThrow
 }
 
 // Build constructs a ComponentTree from a parsed program and its annotations
@@ -124,6 +127,7 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		externalImports:  opts.ExternalImports,
 		localImports:     opts.LocalComponentImports,
 		actionURLs:       opts.ActionURLs,
+		boundaryThrows:   opts.BoundaryThrows,
 	}
 	if entryFn := ann.Functions[ann.EntryPoint]; entryFn != nil {
 		b.expansion = []expansionFrame{{name: entryFn.Name}}
@@ -308,7 +312,8 @@ type builder struct {
 	idCounter      map[string]int
 	hasLinks       bool
 	runtimeProps   *RuntimePropStore
-	instanceCounts map[string]int    // per-component-name instance counter
+	instanceCounts map[string]int // per-component-name instance counter
+	boundaryThrows map[SlotID]BoundaryThrow
 	slotCounter    int               // monotonic counter for compact slot IDs
 	slotIDMap      map[string]SlotID // logical ID -> compact ID
 	slotCounts     map[string]int    // per-parent dynamic-slot counters for sibling disambiguation

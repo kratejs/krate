@@ -404,6 +404,8 @@ type ComponentNode struct {
 	Line       int
 	// Class marks a lowered React class component (see Annotations.IsLoweredClass).
 	Class bool
+	// Boundary marks a lowered class that is an error boundary.
+	Boundary bool
 
 	// SSR-evaluated components: prop-driven with no signals.
 	// The emitter uses SSREval to render these at build time.

@@ -233,6 +233,15 @@ func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs
 // the call-site inputs installed, then its call-site children in the caller's
 // scope, and registers its props for hydration.
 func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDecl, childID SlotID, attrs map[string]ast.Expr, provider scopeProvider) []SlotNode {
+	// An error boundary whose subtree threw at build time renders its fallback
+	// (boundary_build.go); the instance id is the one newComponentNode assigns.
+	instance := SlotID(string(joinSlotID(string(childID), childFn.Name)) + "_c" + itoa(b.instanceCounts[childFn.Name]))
+	if fallback, ok := b.boundaryFallback(childFn, instance); ok {
+		childFn = fallback
+		bare := *el
+		bare.Children = nil
+		el = &bare
+	}
 	b.pushComponentCtx()
 	b.installCallSiteInputs(el, childFn, attrs)
 	live := b.liveProps

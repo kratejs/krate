@@ -1,6 +1,8 @@
 package annotator
 
 import (
+	"strings"
+
 	"github.com/kratejs/krate/packages/compiler/ast"
 )
 
@@ -227,6 +229,9 @@ func (l *classLowerer) spec() ast.Expr {
 	if m.gdsfe != nil {
 		add("getDerivedStateFromError", l.staticFn(m.gdsfe, false))
 	}
+	if exposed := l.exposed(); len(exposed.Properties) > 0 {
+		add("expose", &ast.ArrowFn{Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: exposed}}})
+	}
 	for _, src := range lifecycleOrder {
 		mem := m.lifecycles[src]
 		if mem == nil {
@@ -244,6 +249,27 @@ func (l *classLowerer) spec() ast.Expr {
 		}
 		add(lc.key, &ast.ArrowFn{Params: params, Expression: true,
 			Body: []ast.Stmt{&ast.ReturnStmt{Value: call(ident(classMemberLocal(src)), args...)}}})
+	}
+	return obj
+}
+
+// exposed lists the public methods and function-valued fields, which React
+// code reaches through an instance ref (`this.child.current.focus()`).
+func (l *classLowerer) exposed() *ast.ObjectExpr {
+	obj := &ast.ObjectExpr{}
+	add := func(name string) {
+		if strings.HasPrefix(name, "#") {
+			return
+		}
+		obj.Properties = append(obj.Properties, &ast.ObjectProp{Key: name, Value: ident(classMemberLocal(name))})
+	}
+	for _, mem := range l.m.methods {
+		add(mem.Name)
+	}
+	for _, mem := range l.m.fields {
+		if _, ok := mem.Init.(*ast.ArrowFn); ok {
+			add(mem.Name)
+		}
 	}
 	return obj
 }

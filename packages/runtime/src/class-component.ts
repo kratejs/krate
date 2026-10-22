@@ -18,6 +18,7 @@
 //           children before parents.
 
 import { afterFlush, createEffect, createSignal, untrack } from './signal.js';
+import { krateSetRef, type KrateRef } from './refs.js';
 import {
   getOwner,
   handleError,
@@ -50,6 +51,8 @@ export interface ClassSpec {
   componentDidCatch?: (error: unknown, info: ErrorInfo) => void;
   componentWillReceiveProps?: (nextProps: Obj, nextContext: unknown) => void;
   componentWillUpdate?: (nextProps: Obj, nextState: Obj, nextContext: unknown) => void;
+  /** Public methods to put on the instance (read once, at mount). */
+  expose?: () => Obj;
   /** An error a descendant threw while the page was built (see build-time boundaries). */
   buildError?: { name?: string; message?: string } | null;
 }
@@ -90,6 +93,7 @@ class Controller {
   mounted = false;
   disposed = false;
   private catching = false;
+  private detachRef: (() => void) | null = null;
   private errorCommitPending = false;
   private props: Obj;
   private state: Obj;
@@ -180,8 +184,20 @@ class Controller {
     }
 
     commit(this, () => {
+      // Public methods live as locals in the lowered scope; put them on the
+      // instance so refs (`ref.current.focus()`) can call them.
+      const exposed = this.spec.expose ? untrack(this.spec.expose) : null;
+      if (exposed) {
+        for (const key of Object.keys(exposed)) {
+          if (!(key in this.inst)) (this.inst as Obj)[key] = exposed[key];
+        }
+      }
       this.mounted = true;
       if (this.spec.componentDidMount) this.spec.componentDidMount.call(this.inst);
+      // `<MyClass ref={r}/>` receives the instance after componentDidMount,
+      // before the parent's componentDidMount (children commit first).
+      const ref = untrack(() => this.raw.ref) as KrateRef;
+      if (ref) this.detachRef = krateSetRef(ref, this.inst);
     });
     const buildError = this.spec.buildError;
     if (buildError && this.spec.componentDidCatch) {
@@ -200,7 +216,8 @@ class Controller {
     const out: Obj = {};
     untrack(() => {
       for (const key of Object.keys(this.raw)) {
-        if (key.startsWith('__krate')) continue;
+        // React keeps `ref` (and `key`) out of a class's props.
+        if (key.startsWith('__krate') || key === 'ref' || key === 'key') continue;
         const getter = this.rawGetters.find((g) => g[0] === key);
         out[key] = getter ? getter[1]() : this.raw[key];
       }
@@ -233,7 +250,7 @@ class Controller {
       }
     }
     for (const key of keys) {
-      if (key.startsWith('__krate')) continue;
+      if (key.startsWith('__krate') || key === 'ref' || key === 'key') continue;
       try {
         Object.defineProperty(this.raw, key, {
           get: () => rendered()[key],
@@ -434,6 +451,10 @@ class Controller {
     if (this.disposed) return;
     this.disposed = true;
     renderQueue.delete(this);
+    // React detaches the ref before componentWillUnmount.
+    const detach = this.detachRef;
+    this.detachRef = null;
+    if (detach) detach();
     if (this.mounted && this.spec.componentWillUnmount) {
       this.spec.componentWillUnmount.call(this.inst);
     }

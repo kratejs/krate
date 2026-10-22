@@ -230,6 +230,29 @@ describe('class lifecycles', () => {
     expect(log.slice(4)).toEqual(['C mount', 'P mount']);
   });
 
+  it('attaches the instance to a ref after mount and detaches it before unmount', async () => {
+    const log: string[] = [];
+    const ref: { current: unknown } = { current: null };
+    __krateOwn('Page', { n: 'Page' }, () => {
+      __krateCondPost('9', true);
+    });
+    __krateOwn('Fancy', { p: 'Page', n: 'Fancy', c: '9', b: 'c' }, () => {
+      const focus = () => log.push('focus');
+      classScope({ ref, label: 'x' }, {}, {
+        expose: () => ({ focus }),
+        componentDidMount: () => log.push('mount ref=' + (ref.current === null ? 'null' : 'set')),
+        componentWillUnmount: () => log.push('unmount ref=' + (ref.current === null ? 'null' : 'set')),
+      });
+    });
+    await settle();
+    (ref.current as { focus: () => void }).focus();
+    expect((ref.current as ClassInstance).props).toEqual({ label: 'x' });
+    __krateCondPre('9', false);
+    __krateCondPost('9', false);
+    expect(ref.current).toBeNull();
+    expect(log).toEqual(['mount ref=null', 'focus', 'unmount ref=null']);
+  });
+
   it('keeps components in an initially hidden branch dormant', async () => {
     let setups = 0;
     __krateOwn('Page', { n: 'Page' }, () => {
