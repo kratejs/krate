@@ -73,6 +73,12 @@ func (b *builder) newComponentNode(fn *ast.FnDecl, parentID string) *ComponentNo
 func (b *builder) buildComponentScoped(fn *ast.FnDecl, node *ComponentNode, isPageRoot bool) componentResult {
 	b.pushComponentCtx()
 	defer b.popComponentCtx()
+	// The child restarts the per-parent tag counters; the caller's counts are
+	// restored afterwards so an element following a component child does not
+	// reuse a sibling's slot id.
+	callerCounts := b.elementCounts
+	b.elementCounts = make(map[string]int)
+	defer func() { b.elementCounts = callerCounts }()
 
 	// Scope handles are component-scoped: only this component's own
 	// declarations and its scope-valued props are visible while building it.

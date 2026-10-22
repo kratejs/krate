@@ -13,6 +13,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/css"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
@@ -71,6 +72,9 @@ type Bundle struct {
 	DynImportFiles map[string]string // dynamic-import source path -> hashed site URL (/chunks/...)
 	Frontmatter    map[string]any    // .mdx frontmatter, if any
 	ActionImports  map[string]string // local binding -> server-action URL
+	// Warnings holds non-fatal diagnostics from source rewrites (React hook
+	// lowering) for the modules parsed in this bundle.
+	Warnings []diag.Diagnostic
 }
 
 type Bundler struct {
@@ -88,6 +92,7 @@ type Bundler struct {
 	actionBasePath    string
 	actionImports     map[string]string
 	actionErr         error
+	warnings          []diag.Diagnostic
 	pathAliases       []pathAlias
 	tsBaseDir         string
 	serverComponents  []string
@@ -281,6 +286,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	b.frontmatter = nil
 	b.actionImports = make(map[string]string)
 	b.actionErr = nil
+	b.warnings = nil
 
 	err := b.resolveModule(entry, true)
 	if err != nil {
@@ -325,6 +331,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		DynImportFiles: b.dynImports,
 		Frontmatter:    b.frontmatter,
 		ActionImports:  b.actionImports,
+		Warnings:       b.warnings,
 	}, nil
 }
 
@@ -626,7 +633,8 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	if len(errs) > 0 {
 		return &parseError{summary: parser.FormatDiagnostics(errs), errs: errs}
 	}
-	RewriteReact(prog)
+	b.addSourceDiagnostics(path, src, RewriteReact(prog))
+	b.checkInlineUseServer(prog, path, src)
 	_, actionChanged := b.rewriteActionImports(prog, abs)
 
 	mod := &Module{Path: path, Program: prog, IsEntry: isEntry, SourceCode: src}

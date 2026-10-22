@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
 )
 
@@ -28,6 +29,8 @@ var reactNames = map[string]string{
 	// useId is lowered by the IR builder to a per-instance build-time literal;
 	// the marker identifier is resolved there (it has the instance context).
 	"useId": "__krate_useId",
+	// React DOM's requestFormReset is a runtime global (runtime/src/actions.ts).
+	"requestFormReset": "requestFormReset",
 }
 
 // structuralReactAPIs are React APIs lowered structurally (identity/passthrough
@@ -149,6 +152,13 @@ type reactCtx struct {
 	// because they resolve to the compatibility runtime rather than a krate
 	// primitive.
 	compat map[string]bool
+	// formStatusSeq numbers lowered useFormStatus() mount refs per module and
+	// formStatusPos records their positions for diagnostics.
+	formStatusSeq int
+	formStatusPos []ast.Pos
+	// diags collects non-fatal diagnostics (positions only; the bundler adds
+	// the file).
+	diags []diag.Diagnostic
 }
 
 // localAPI resolves an identifier bound by a React named import to its React
@@ -174,7 +184,7 @@ func (c *reactCtx) compatMember(mem *ast.MemberExpr) (ast.Expr, bool) {
 		return nil, false
 	}
 	isReactMember := c.alias != "" && objID.Name == c.alias && compatReactNames[propID.Name]
-	isDOMMember := c.domAlias != "" && objID.Name == c.domAlias && (propID.Name == "createPortal" || propID.Name == "flushSync")
+	isDOMMember := c.domAlias != "" && objID.Name == c.domAlias && reactDOMAPI(propID.Name)
 	if !isReactMember && !isDOMMember {
 		return nil, false
 	}
@@ -198,7 +208,7 @@ func (c *reactCtx) memberAPI(mem *ast.MemberExpr) (string, bool) {
 	if c.alias != "" && objID.Name == c.alias && reactAPI(propID.Name) {
 		return propID.Name, true
 	}
-	if c.domAlias != "" && objID.Name == c.domAlias && (propID.Name == "createPortal" || propID.Name == "flushSync") {
+	if c.domAlias != "" && objID.Name == c.domAlias && reactDOMAPI(propID.Name) {
 		return propID.Name, true
 	}
 	return "", false
@@ -221,7 +231,9 @@ func (c *reactCtx) callAPI(callee ast.Expr) (string, bool) {
 // module (no opt-in): React imports and `React.*` member calls are mapped to
 // existing krate runtime primitives, and bare reads of hook values are
 // auto-called so unmodified React (`{count}`, `count + 1`) behaves correctly.
-func RewriteReact(prog *ast.Program) {
+//
+// It returns non-fatal diagnostics carrying positions but no file name.
+func RewriteReact(prog *ast.Program) []diag.Diagnostic {
 	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}}
 	var toRemove []int
 
@@ -275,8 +287,7 @@ func RewriteReact(prog *ast.Program) {
 					ctx.domAlias = local
 					continue
 				}
-				switch named.Remote {
-				case "createPortal", "flushSync":
+				if reactDOMAPI(named.Remote) {
 					ctx.imports[local] = named.Remote
 				}
 			}
@@ -333,6 +344,16 @@ func RewriteReact(prog *ast.Program) {
 		imp := &ast.ImportStmt{Source: `"@krate/runtime/react"`, Named: named}
 		prog.Body = append([]ast.Stmt{imp}, prog.Body...)
 	}
+	return ctx.diags
+}
+
+// reactDOMAPI reports the react-dom exports Krate lowers or provides.
+func reactDOMAPI(name string) bool {
+	switch name {
+	case "createPortal", "flushSync", "useFormStatus", "requestFormReset":
+		return true
+	}
+	return false
 }
 
 func (c *reactCtx) rewriteStmts(stmts []ast.Stmt, sc *scope) {
@@ -356,6 +377,7 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 	case *ast.FnDecl:
 		child := c.fnScope(s.Params, sc)
 		c.rewriteStmts(s.Body, child)
+		c.injectFormStatusRefs(s.Body)
 	case *ast.ExportStmt:
 		if s.Declaration != nil {
 			c.rewriteStmt(s.Declaration, sc)
@@ -437,6 +459,9 @@ func (c *reactCtx) fnScope(params []*ast.Param, parent *scope) *scope {
 // factories) in the scope, then rewrites the initializers so React-style reads
 // inside them become calls.
 func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
+	if c.lowerActionHook(v, sc) {
+		return
+	}
 	// Lower `const [pending, start] = useTransition()` to a Krate signal plus a
 	// starter function. The compat call would otherwise leave both bindings
 	// undefined in the hydration scope.
@@ -584,6 +609,7 @@ func (c *reactCtx) rewriteExprCtx(expr ast.Expr, sc *scope, valuePos bool) ast.E
 			}
 		}
 		c.rewriteStmts(e.Body, child)
+		c.injectFormStatusRefs(e.Body)
 	case *ast.TemplateExpr:
 		for i, part := range e.Parts {
 			e.Parts[i] = c.rewriteExpr(part, sc)

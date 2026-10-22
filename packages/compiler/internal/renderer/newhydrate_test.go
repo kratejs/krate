@@ -233,10 +233,13 @@ func TestIsBareStringToken(t *testing.T) {
 	}
 }
 
-func TestHydrationBootstrapIncludesServerActions(t *testing.T) {
-	for _, marker := range []string{"__krateAction", "data-krate-action", "/__krate/action/"} {
-		if !strings.Contains(HydrationBootstrapJS, marker) {
-			t.Errorf("HydrationBootstrapJS missing %q", marker)
+// The server-action client (proxies, form submission, action hooks) lives in
+// the TypeScript runtime (packages/runtime/src/actions.ts), so the bootstrap
+// must not define a second, competing submit listener.
+func TestHydrationBootstrapLeavesServerActionsToRuntime(t *testing.T) {
+	for _, marker := range []string{"__krateActionBound", "window.__krateAction="} {
+		if strings.Contains(HydrationBootstrapJS, marker) {
+			t.Errorf("HydrationBootstrapJS still defines %q", marker)
 		}
 	}
 }

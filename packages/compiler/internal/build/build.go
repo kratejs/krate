@@ -1626,6 +1626,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		return nil, "", renderErrors(page, tree.Errors)
 	}
 	printTreeWarnings(os.Stderr, tree.Warnings)
+	printTreeWarnings(os.Stderr, bundle.Warnings)
 	// CSS stylesheets are generated during IR construction (one shared,
 	// instance-agnostic stylesheet per scope). Append them to the page's own CSS
 	// so they land in the hashed external stylesheet.
