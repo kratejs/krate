@@ -129,7 +129,23 @@ React's onChange only fires for input, textarea and select. A contentEditable el
 
 ## KR6xxx: lists and keys
 
-No codes are registered in this range yet.
+### KR6001
+
+**Each child in a list should have a unique key prop**
+
+A list whose items can change at runtime (its array reads a signal, state or a runtime value) returns elements without a key, so rows are matched by index. When items are reordered, inserted or removed, row state (input values, focus, component state, effects) stays with the position instead of following the item, exactly as in React. Add a stable, unique key from the item, for example <li key={item.id}>. Lists over build-time constants are not reported.
+
+### KR6002
+
+**Encountered two children with the same key**
+
+Two items of a list resolve to the same key at build time. Keys must be unique among siblings so each row keeps its identity. The runtime also logs a console error when it sees duplicates; it keeps the first occurrence on its existing row and renders each duplicate as a separate row. Use an id that is unique per item.
+
+### KR6003
+
+**List callback keys only some of its elements**
+
+A map callback returns a keyed element on some paths and an unkeyed one on others (for example a ternary with a key on one branch). Unkeyed rows fall back to their index, which mixes identities. Put the same key on every returned element.
 
 ## KR7xxx: React 19 actions and server actions
 

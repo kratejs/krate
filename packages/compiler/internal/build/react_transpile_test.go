@@ -756,7 +756,7 @@ func TestModuleConstPropToClientComponent(t *testing.T) {
 	if !strings.Contains(src, "items:[{label:'Home'},{label:'About'}]") {
 		t.Errorf("module const value not inlined into the props registry:\n%s", src)
 	}
-	if !strings.Contains(src, `var props=__krate_props[`) || !strings.Contains(src, "props.items.map") {
+	if !strings.Contains(src, `var props=__krate_props[`) || !strings.Contains(src, "()=>(props.items)") {
 		t.Errorf("component should read the prop from the registry at runtime, got:\n%s", src)
 	}
 }
@@ -838,7 +838,7 @@ func TestClientComponentReadsLocationSearch(t *testing.T) {
 	if !strings.Contains(js, "krate:navigate") {
 		t.Errorf("SPA navigation listener not emitted:\n%s", js)
 	}
-	if !strings.Contains(js, "kbindContent") {
+	if !strings.Contains(js, "kbindList") {
 		t.Errorf("reactive list binding not emitted:\n%s", js)
 	}
 }

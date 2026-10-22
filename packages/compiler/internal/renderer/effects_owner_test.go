@@ -28,9 +28,12 @@ func TestHydrationDeclaresEffectOwners(t *testing.T) {
 		// The child in the conditional's consequent, shown on the server, is
 		// a remountable scope.
 		"__km(\"4.c.Child.Child_c0\",\"Index_c0\",[[\"4\",\"c\",1]],null,function(){\n",
-		// List items carry their list slot.
-		"__ko(\"8.Child.Child_c1\",\"Index_c0\",[],\"7\");\n",
 		"__ko(null);\n")
+	// List rows are rendered and adopted by the keyed list runtime, which
+	// gives each row its own effect owner.
+	if !strings.Contains(js, `kbindList("7"`) || strings.Contains(js, `__ko("8.Child.Child_c1"`) {
+		t.Fatalf("list rows must not also hydrate as separate owners:\n%s", js)
+	}
 	if strings.Contains(js, "onMount(") {
 		t.Fatalf("React effects must not lower to onMount:\n%s", js)
 	}

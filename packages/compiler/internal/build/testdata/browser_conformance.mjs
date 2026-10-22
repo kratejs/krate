@@ -5,10 +5,11 @@ import { chromium, firefox, webkit } from "playwright";
 
 const root = process.argv[2];
 const browserName = process.argv[3] || "chromium";
+// An ephemeral port by default so parallel runs do not collide.
+const port = Number(process.env.KRATE_BROWSER_PORT || 0);
 // Base URL of a running `krate serve` for routes that need the server
 // (server actions). Empty skips those routes.
 const actionsBase = process.argv[4] || "";
-const port = 4189;
 
 if (!root) {
   console.error("usage: browser_conformance.mjs <dist-root> [chromium|firefox|webkit]");
@@ -46,7 +47,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const baseURL = `http://127.0.0.1:${port}`;
+let baseURL = "";
 const failures = [];
 let browser;
 
@@ -56,6 +57,7 @@ function fail(message) {
 
 try {
   await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+  baseURL = `http://127.0.0.1:${server.address().port}`;
   browser = await browserType.launch({ headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -147,6 +149,96 @@ try {
   if (formResult !== "Ada|designer|subscribed|enterprise|ship it") {
     fail(`form result: ${formResult}`);
   }
+
+  // Keys and list reconciliation: state follows keys across reorder, insert,
+  // update and removal; effects mount/unmount per key; keyed remount resets.
+  await go("/react-keys/", "[data-testid=todo-row]");
+  await page.waitForTimeout(100);
+  const keysSnap = () =>
+    page.evaluate(() => {
+      const q = (sel) => Array.from(document.querySelectorAll(sel));
+      return {
+        rows: q("[data-testid=todo-row]").map((li) => ({
+          id: li.getAttribute("data-id"),
+          pos: li.querySelector(".pos")?.textContent,
+          draft: li.querySelector(".draft")?.value,
+          clicks: li.querySelector(".clicks")?.textContent,
+          title: li.querySelector(".title")?.textContent,
+        })),
+        plain: q("[data-testid=plain] li").map((li) => li.textContent + "=" + li.querySelector("input").value),
+        pairs: q("[data-testid=pairs] dt").map((dt) => dt.textContent + ":" + dt.nextElementSibling?.textContent),
+        table: q("[data-testid=table] tr").map((tr) => tr.textContent),
+        options: q("[data-testid=picker] option").map((o) => o.textContent),
+        tags: document.querySelector("[data-testid=tags]")?.textContent,
+        log: q("[data-testid=log] li").map((li) => li.textContent),
+        empty: !!document.querySelector("[data-testid=empty]"),
+        focusedRow: document.activeElement?.closest?.("[data-testid=todo-row]")?.getAttribute("data-id") || null,
+      };
+    });
+  const clickKeep = (testid) =>
+    page.evaluate((id) => document.querySelector(`[data-testid=${id}]`).click(), testid);
+  const keys0 = await keysSnap();
+  if (keys0.rows.map((r) => r.id).join() !== "1,2,3") fail(`keys initial rows: ${JSON.stringify(keys0.rows)}`);
+  if (keys0.log.join() !== "mount 1,mount 2,mount 3") fail(`keys mount log: ${keys0.log}`);
+  await page.locator('[data-testid=todo-row][data-id="1"] .draft').fill("edited one");
+  await page.locator('[data-testid=todo-row][data-id="2"] .clicks').click();
+  await page.locator('[data-testid=todo-row][data-id="2"] .clicks').click();
+  await page.locator("[data-testid=plain] li >> nth=0").locator("input").fill("p1");
+  await page.locator('[data-testid=todo-row][data-id="1"] .draft').focus();
+  await clickKeep("reverse");
+  await page.waitForTimeout(50);
+  const keys1 = await keysSnap();
+  const rowsText = (snap) => snap.rows.map((r) => `${r.id}/${r.pos}/${r.draft}/${r.clicks}/${r.title}`).join(" ");
+  if (rowsText(keys1) !== "3/0/three/0/three 2/1/two/2/two 1/2/edited one/0/one") fail(`keys after reverse: ${rowsText(keys1)}`);
+  if (keys1.focusedRow !== "1") fail(`keys focus after reverse: ${keys1.focusedRow}`);
+  if (keys1.plain.join() !== "three=,two=,one=p1") fail(`keys plain inputs: ${keys1.plain}`);
+  if (keys1.pairs.join() !== "3:three,2:two,1:one") fail(`keys fragments: ${keys1.pairs}`);
+  if (keys1.table.join() !== "0three,1two,2one") fail(`keys table rows: ${keys1.table}`);
+  if (keys1.options.join() !== "three,two,one") fail(`keys select options: ${keys1.options}`);
+  if (keys1.tags !== "three;two;one;") fail(`keys text list: ${keys1.tags}`);
+  if (keys1.log.length !== 3) fail(`keys reorder must not remount: ${keys1.log}`);
+  await clickKeep("insert");
+  await clickKeep("rename");
+  await page.waitForTimeout(50);
+  const keys2 = await keysSnap();
+  if (rowsText(keys2) !== "3/0/three/0/three 4/1/new 4/0/new 4 2/2/two/2/two! 1/3/edited one/0/one") fail(`keys after insert+rename: ${rowsText(keys2)}`);
+  if (keys2.log.join() !== "mount 1,mount 2,mount 3,mount 4") fail(`keys insert log: ${keys2.log}`);
+  await page.locator('[data-testid=todo-row][data-id="2"] .remove').click();
+  await page.waitForTimeout(50);
+  const keys3 = await keysSnap();
+  if (keys3.rows.map((r) => r.id).join() !== "3,4,1") fail(`keys after remove: ${keys3.rows.map((r) => r.id)}`);
+  if (keys3.log[keys3.log.length - 1] !== "unmount 2") fail(`keys remove log: ${keys3.log}`);
+  await clickKeep("clear");
+  await page.waitForTimeout(50);
+  const keys4 = await keysSnap();
+  if (keys4.rows.length !== 0 || !keys4.empty) fail(`keys clear: ${keys4.rows.length} empty=${keys4.empty}`);
+  await clickKeep("restore");
+  await page.waitForTimeout(50);
+  const keys5 = await keysSnap();
+  if (rowsText(keys5) !== "1/0/one/0/one 2/1/two/0/two 3/2/three/0/three") fail(`keys restore: ${rowsText(keys5)}`);
+  if (keys5.empty) fail("keys empty state still shown after restore");
+  await page.evaluate(() => {
+    document.querySelector("[data-group=fruit]").__mark = 1;
+  });
+  await clickKeep("groups-swap");
+  await page.waitForTimeout(50);
+  const groups = await page.evaluate(() => ({
+    order: Array.from(document.querySelectorAll("[data-group]")).map((s) => s.getAttribute("data-group") + ":" + Array.from(s.querySelectorAll("li")).map((li) => li.textContent).join("+")),
+    kept: document.querySelector("[data-group=fruit]").__mark === 1,
+  }));
+  if (groups.order.join() !== "veg:leek+kale,fruit:apple+pear" || !groups.kept) fail(`keys nested lists: ${JSON.stringify(groups)}`);
+  await page.locator("[data-testid=profile-note]").fill("hello");
+  await clickKeep("user-ada");
+  await page.waitForTimeout(50);
+  const noteSame = await page.locator("[data-testid=profile-note]").inputValue();
+  await clickKeep("user-grace");
+  await page.waitForTimeout(50);
+  const profile = await page.evaluate(() => ({
+    user: document.querySelector("[data-testid=profile]")?.getAttribute("data-user"),
+    note: document.querySelector("[data-testid=profile-note]")?.value,
+  }));
+  if (noteSame !== "hello") fail(`keyed remount with the same key reset state: ${noteSame}`);
+  if (profile.user !== "grace" || profile.note !== "") fail(`keyed remount: ${JSON.stringify(profile)}`);
 
   // Server actions: direct call through the client proxy, a form action and a
   // button formAction, all through POST /__krate/action/<id>.

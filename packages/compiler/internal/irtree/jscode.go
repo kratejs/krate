@@ -264,7 +264,9 @@ func RenderComponentFnJS(fn *ast.FnDecl) string {
 	if fn == nil {
 		return ""
 	}
-	return renderStmtJS(fn, nil)
+	// List rows render components through the runtime h(); the reactive form
+	// keeps their markup in sync with the props getters rows pass.
+	return renderFnDeclJS(fn, nil)
 }
 
 // renderStmtJS renders a top-level statement to JS source.

@@ -332,7 +332,7 @@ function SearchDemo() {
       </p>
       <ul className="grid grid-cols-2 gap-1 text-sm text-slate-300">
         {filtered().map((fruit) => (
-          <li className="rounded bg-slate-950/60 px-2 py-1">{fruit}</li>
+          <li key={fruit} className="rounded bg-slate-950/60 px-2 py-1">{fruit}</li>
         ))}
       </ul>
     </div>
