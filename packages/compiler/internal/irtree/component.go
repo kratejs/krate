@@ -585,7 +585,7 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 	// Local and module-level functions referenced by handlers, effects, memos
 	// and dynamic list slot expressions must be in hydration scope.
 	for _, fnDecl := range b.collectReferencedFunctions(node, fn.Body) {
-		if fnJS := renderStmtJS(fnDecl, b.sigMap()); fnJS != "" {
+		if fnJS := renderFnDeclJS(fnDecl, b.sigMap()); fnJS != "" {
 			node.ExtraVars = append(node.ExtraVars, fnJS)
 		}
 	}

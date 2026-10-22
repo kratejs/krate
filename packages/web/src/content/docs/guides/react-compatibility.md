@@ -280,9 +280,58 @@ Lowercase `<script>` and `<style>` elements render where they are written
 (for example a `<style>` inside an `<svg>`). Use `<Head>`, `<Script>` and
 `<Style>` to place content in the document head or body end.
 
-`key` and `suppressHydrationWarning` are compiler-only and never appear in the
-output. Event handler props are covered in
+`key` and `suppressHydrationWarning` never appear in the output. `key` drives
+list reconciliation and remounting, see [Keys and lists](#keys-and-lists).
+Event handler props are covered in
 [Events, forms and refs](#events-forms-and-refs).
+
+## Keys and lists
+
+A `.map()` whose array can change at runtime is reconciled by key, with React's
+semantics:
+
+- **Rows are matched by `key`**, the key of the element, component or
+  `<Fragment key>` the callback returns. Keys may be strings or numbers and
+  compare as strings (`1` and `'1'` are the same key). A row whose key is still
+  present keeps its DOM nodes, input values, focus and selection, component
+  state, effects and refs, and is moved into the new order with the fewest DOM
+  moves. Rows whose key disappeared unmount (effect cleanups run, refs detach)
+  before new rows mount; new rows run their effects after they are inserted.
+- **Without a key** rows are matched by index, as in React: reordering the
+  array moves the data, while state (an input value, a component's `useState`)
+  stays with the position.
+- **Rows update in place.** When the item for an existing key is a new object,
+  or its index changes, only the parts of the row that read it update; the row
+  is not remounted. Components rendered in a row receive live props, including
+  simple destructured props (`function Row({ item })`). A non-arrow callback
+  (`items.map(renderRow)`) or a destructured callback parameter
+  (`items.map(({ id, name }) => ...)`) receives plain values, so a row whose
+  item changed is re-rendered (its state resets); prefer `item => ...`.
+- **Duplicate keys** log React's "Encountered two children with the same key"
+  error. The first occurrence keeps its row; each duplicate gets its own row.
+- **Nested lists, text rows** (`items.map(t => t.label)`), keyed fragments, and
+  lists inside `<table>`/`<tbody>`, `<select>` and `<ul>` all work: rows are
+  delimited by comment markers, which are valid in every content model.
+- **Hydration adopts server-rendered rows by key.** The build renders each row
+  between `<!--k:ID:$key-->` markers; on load the list binds the existing nodes
+  (handlers, live attributes, component state) instead of re-rendering them,
+  so refs attach once and nothing flickers. A row whose key could not be
+  computed at build time is adopted by position.
+
+Changing the `key` of a single element remounts it, React's "reset state with
+a key" pattern:
+
+```tsx
+<Profile key={userId} userId={userId} />
+// a new userId unmounts the old Profile (cleanups run) and mounts a fresh one
+```
+
+This applies to any element whose key reads state or props, including inside
+conditionals and list rows.
+
+Lists over build-time constants (a literal array, or a prop known at build
+time) cannot reorder, so they render statically and are never warned about.
+
 
 ## shadcn/ui
 
@@ -448,6 +497,9 @@ observed in a browser. The browser conformance suite (`/react-events/` in
 | `KR5005` | `value` with `defaultValue`, or `checked` with `defaultChecked` (the default is ignored) |
 | `KR5006` | `value={cond ? x : undefined}`: a field that switches between controlled and uncontrolled |
 | `KR5007` | `onChange` on a `contentEditable` element (use `onInput`) |
+| `KR6001` | a list that can change at runtime renders elements without a `key` |
+| `KR6002` | two items of a list resolve to the same key at build time |
+| `KR6003` | a map callback keys some returned elements but not others |
 
 ## What is not supported
 

@@ -63,8 +63,8 @@ func TestHydrationListSlotBinding(t *testing.T) {
   return <ul>{items().map(i => <li>{i}</li>)}</ul>;
 }`
 	_, js := fullPipeline(t, src)
-	if !strings.Contains(js, "kbindContent(") {
-		t.Errorf("expected kbindContent binding for list slot, got:\n%s", js)
+	if !strings.Contains(js, "kbindList(") {
+		t.Errorf("expected kbindList binding for list slot, got:\n%s", js)
 	}
 }
 
