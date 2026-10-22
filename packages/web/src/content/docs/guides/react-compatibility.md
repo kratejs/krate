@@ -509,10 +509,12 @@ as a React closure would. Krate-native `createSignal` signals keep reading
 their latest value.
 
 **Commit order.** Signal writes are batched: every update made in the same
-task produces one commit. An update made in a discrete event (click, key,
-input, submit, focus, ...) commits in a microtask after the handler and runs
-its passive effects at the end of that commit, before microtasks the handler
-queued (React's synchronous lane). An update made elsewhere (a timeout, a
+task produces one commit. Updates made while a discrete event (click, key,
+input, change, submit, focus, ...) is dispatched are flushed synchronously
+once all of that event's handlers ran: render, commit, layout and passive
+effects complete before the browser event returns (React's synchronous
+lane). Continuous events (mouse and pointer moves, scroll, wheel) keep the
+normal batching. An update made elsewhere (a timeout, a
 promise callback) commits in a later task, after the microtasks queued with
 it. A commit runs after the DOM bindings have been updated, in React's order:
 

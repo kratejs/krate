@@ -22,7 +22,7 @@
  * restored to their state value, so a handler that does not update state keeps
  * the field unchanged, as in React.
  */
-import { createEffect, krateFlushSync } from './signal.js';
+import { createEffect, krateFlushSync, krateRunEvent } from './signal.js';
 
 /** A React-compatible synthetic event. */
 export interface KrateSyntheticEvent<E extends Event = Event> {
@@ -237,13 +237,17 @@ function dispatchRoot(native: Event, capture: boolean): void {
   n[flag] = 1;
   const t = native.type;
   const target = native.target as Node | null;
-  if (t !== 'change' && t !== 'beforeinput') {
-    emit(native, TO_REACT[t] || t, target, capture ? 1 : 2);
-  }
-  if (!capture) {
-    if (t === 'change' || t === 'input' || t === 'click') changePlugin(native);
-    else if (t === 'beforeinput' || t === 'compositionend') beforeInputPlugin(native);
-  }
+  // The bubble listener is the end of the delegated dispatch: a discrete
+  // event's updates are flushed synchronously there, once per native event.
+  krateRunEvent(t, !capture, () => {
+    if (t !== 'change' && t !== 'beforeinput') {
+      emit(native, TO_REACT[t] || t, target, capture ? 1 : 2);
+    }
+    if (!capture) {
+      if (t === 'change' || t === 'input' || t === 'click') changePlugin(native);
+      else if (t === 'beforeinput' || t === 'compositionend') beforeInputPlugin(native);
+    }
+  });
   rethrow();
 }
 
@@ -261,7 +265,7 @@ function directDispatch(el: Node, native: Event, capture: boolean): void {
   if (!h) return;
   const e = krateSynthetic(native);
   e.currentTarget = el;
-  call(h, e);
+  krateRunEvent(native.type, true, () => call(h, e));
   e.currentTarget = null;
   rethrow();
 }
