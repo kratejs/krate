@@ -127,12 +127,39 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	// of the list would throw ReferenceError. The ListSlot may be nested inside
 	// a signal-less child wrapper's call-site slots (e.g. <ToastViewport>{list}</ToastViewport>),
 	// so walk the built slot tree transitively.
+	scannedComponents := map[string]bool{}
+	var scanComponentBody func(name string)
+	scanComponentBody = func(name string) {
+		fn := b.functions[name]
+		if fn == nil || scannedComponents[name] {
+			return
+		}
+		scannedComponents[name] = true
+		// Declare the component in this scope (its body then resolves this
+		// scope's helpers); the queue below scans its body transitively.
+		candidates[name] = fn
+		if !referenced[name] {
+			referenced[name] = true
+			queue = append(queue, name)
+		}
+		code := renderStmtJS(fn, nil)
+		scanJSIdents(code, func(id string) {
+			if id != name && isComponentName(id) && b.functions[id] != nil {
+				scanComponentBody(id)
+			}
+		})
+	}
 	var scanSlots func(slots []SlotNode)
 	scanSlots = func(slots []SlotNode) {
 		for _, child := range slots {
 			switch s := child.(type) {
 			case *ListSlot:
 				scan(s.ExprSource)
+				// Components a list row renders run in this scope at runtime,
+				// so the helpers their bodies call must be declared here too.
+				for _, name := range s.Components {
+					scanComponentBody(name)
+				}
 			case *ComponentSlot:
 				if s.Component != nil {
 					scanSlots(s.Component.Children)
