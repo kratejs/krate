@@ -75,9 +75,9 @@ Evidence: `TestUseContextTranspile`, `TestCrossComponentDynamicContextTranspile`
 
 **Source:** Beta · **Islands:** Beta · **SSR:** n/a
 
-useTransition lowers to a pending signal. useDeferredValue, startTransition, and React 19 async transitions are best-effort rather than React scheduling.
+useTransition and startTransition support async actions: isPending stays true until the action, its awaited work and overlapping transitions settle, and a transition keeps revealed Suspense content. useDeferredValue (with React 19 initialValue) catches up in a later task; useSyncExternalStore follows the store by Object.is and unsubscribes on teardown. Updates after an await are ordinary updates, as in React 19.
 
-Evidence: `TestRewriteReactUseTransitionLowered`
+Evidence: `TestRewriteReactUseTransitionLowered`, `TestTransitionStarterLowering`, `TestDeferredValueAndExternalStoreLowering`, `TestRuntimeNeedsSuspense`, `browser:/react-suspense/`, `fixture:examples/src/pages/react-suspense.tsx`
 
 ### Class components
 
@@ -131,9 +131,9 @@ Evidence: `TestPortalRendersAndMounts`
 
 **Source:** Beta · **Islands:** Beta · **SSR:** n/a
 
-Fallback shells and runtime regions are covered. React lazy/loadable semantics and nested island Suspense boundaries remain incomplete.
+Boundaries show their fallback while use(promise), a resource or a lazy chunk inside is pending, reveal siblings together, and nest independently (innermost wins). Content that cannot resolve at build time ships the fallback and hydrates into the content. A non-transition update that suspends shows the fallback again; a transition keeps the revealed content. lazy() renders at build time and loads its hydration code as a separate chunk. Fallbacks of request-time regions stay as before.
 
-Evidence: `TestBuildSuspenseBoundaryStaticFallback`, `TestBuildSuspenseBoundaryRuntimePrimary`
+Evidence: `TestBuildSuspenseBoundaryStaticFallback`, `TestBuildSuspenseBoundaryRuntimePrimary`, `TestSuspenseUseRendersFallbackAndTemplatesContent`, `TestNestedSuspenseInnermostWins`, `TestLazyComponentGetsHydrationChunk`, `TestLazyLowersToImportAndMarker`, `TestUsePromiseLowersToGetter`, `browser:/react-suspense/`, `fixture:examples/src/pages/react-suspense.tsx`
 
 ### React 19 actions and forms
 

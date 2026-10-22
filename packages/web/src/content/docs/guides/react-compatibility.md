@@ -58,11 +58,11 @@ export default function Timer() {
 | `useCallback` | the wrapped function |
 | `useContext` | `Context.useContext()` |
 | `useId` | a build-time literal (see below) |
-| `useTransition` | lowered to a pending signal plus a starter function |
-| `useDeferredValue` | compat shim (`@krate/runtime/react`) |
-| `useSyncExternalStore` | compat shim |
+| `useTransition` | a pending signal plus an async-aware `startTransition` (see [Suspense](#suspense-lazy-use-and-transitions)) |
+| `useDeferredValue` | a deferred getter (`createDeferredValue`) |
+| `useSyncExternalStore` | a store getter (`createExternalStore`) |
 | `useImperativeHandle` / `useDebugValue` | compat shim |
-| `use` | compat shim |
+| `use` | `use(promise)` suspends the nearest `<Suspense>`; `use(Context)` is a context read |
 
 Named imports, aliased imports (`import { useState as state }`), and the
 `React.*` namespace all work:
@@ -85,7 +85,8 @@ export default function Counter() {
 | `createContext` | supported, including provider values that change at runtime |
 | `createElement` | lowered to `h` |
 | `memo` | identity (components already run once) |
-| `lazy` | identity passthrough |
+| `lazy` | rendered at build time; its hydration code is a separate chunk (see [Suspense](#suspense-lazy-use-and-transitions)) |
+| `Suspense` | a real boundary: fallback while anything inside is pending |
 | `<Fragment>` / `<React.Fragment>` | a JSX fragment |
 | `react/jsx-runtime`, `jsx`, `jsxs`, `jsxDEV` | lowered to Krate JSX |
 | `react-dom` / `react-dom/client` | `createPortal` and `flushSync` map to the compat runtime (other entry points are not supported) |
@@ -96,7 +97,7 @@ export default function Counter() {
 | `createPortal` / `<Portal>` | rendered into `document.body` and cleaned up on dispose |
 | `Component` / `PureComponent` | lowerable class components (see below) |
 | `useOptimistic` / `useActionState` / `useFormStatus` | React 19 compat shims |
-| `StrictMode` / `Profiler` | pass-through |
+| `StrictMode` / `Profiler` | render their children; `Profiler`'s `onRender` is never called (warning KR4005) |
 
 Class components that follow the common subset are lowered to functions:
 `state` (field or constructor), `render`, `this.state.x`, `this.props.x`,
@@ -142,6 +143,97 @@ a runtime counter. The server-rendered id and the hydrated id always agree.
 `useReducer` maps to `createReducer`, which returns `[getter, dispatch]` -- the
 same getter contract as `createSignal`, so it reacts and hydrates like any other
 signal.
+
+### Suspense, lazy, use() and transitions
+
+**Boundaries.** `<Suspense fallback={...}>` (also `React.Suspense` or an
+aliased import) shows its fallback while any component inside it is suspended
+and reveals the content once everything inside has settled. Siblings under one
+boundary reveal together, and a suspension counts only for the innermost
+boundary around it, so an outer boundary keeps showing its content (with the
+inner fallback). The fallback is rendered as normal Krate output and can be
+interactive.
+
+At build time a boundary renders its content when the content does not depend
+on pending work. When a component inside it reads `use(promise)` or a
+`createResource`, the promise cannot be resolved at build time: the page ships
+the fallback, and the content waits (already rendered, with its value slots
+empty) in a hoisted `<template>`. Hydration binds the content there and swaps
+it in when the boundary has nothing pending. Request-time (runtime and server)
+components inside a boundary keep using streaming regions.
+
+**`use(promise)`.** Write it as the initializer of a declaration in the
+component body:
+
+```tsx
+function User({ userPromise }) {
+  const user = use(userPromise);          // may be conditional: cond ? use(p) : null
+  return <p>{user.name}</p>;
+}
+```
+
+The value is reactive. While the promise is pending the component's hydration
+is suspended (its boundary shows the fallback); when it resolves the component
+runs again with the value. As in React, the same promise object never suspends
+again once it resolved, a rejected promise is reported to the nearest error
+boundary, and promises must be cached: a promise created during rendering is
+reused by position when the component runs again, like React's replay. If the
+promise changes later (for example a new promise in state), the boundary shows
+its fallback again, except inside a transition, where the revealed content
+stays and the transition stays pending until the new promise resolves.
+`use(Context)` is a plain context read and works anywhere. `use(promise)` used
+outside a declaration (KR4003) or destructured (KR4004) is a build error, and a
+component calling it outside any `<Suspense>` gets warning KR4008.
+
+**`lazy()`.** Declare lazy components at module level with a static import:
+
+```tsx
+const Chart = lazy(() => import('./Chart'));
+const Panel = lazy(() => import('./panels').then((m) => ({ default: m.Panel })));
+```
+
+Krate renders the static HTML of everything at build time, so splitting the
+render code of a lazy component would save nothing: its HTML is in the page
+from the first byte. What is split is its **hydration code**. The component's
+event handlers and bindings (and those of its children) are written to
+`lazy-<Name>.<hash>.js` next to the page script and loaded with a dynamic
+import when the page hydrates, which is the first time the component renders
+on the client (React's lazy also starts loading on first render). Until the
+chunk has run, the content is visible but not interactive, as with React
+hydrating server-rendered lazy content; a boundary still showing its fallback
+waits for the chunk before revealing. The default export must be a component
+(KR4007); a failed chunk load is reported to the nearest error boundary. The
+loader must be a static `import()` (KR4001), `lazy()` must not be called inside
+a component (KR4002), and a lazy package import (`import('some-package')`) is
+compiled like a static import (warning KR4006).
+
+**Transitions.** `useTransition()` returns `[isPending, startTransition]`.
+`isPending` becomes true when a transition starts and stays true until the
+action settles, including async actions and the work they await, and until
+every overlapping transition started through the same hook settled. The
+top-level `startTransition` accepts async functions too. Updates made after an
+`await` inside an action are ordinary updates, as in React 19; wrap them in
+another `startTransition` to mark them.
+
+**`useDeferredValue(value, initialValue?)`** returns a getter that keeps the
+previous value during an urgent update and catches up in a later task (a
+`setTimeout(0)` after the update). With `initialValue` (React 19) the first
+value is `initialValue` and the real value follows the same way. Updates made
+inside a transition are not deferred again.
+
+**`useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot?)`** returns
+a getter. It subscribes once, re-reads the snapshot on every store
+notification and once right after subscribing (so a change between the first
+read and the subscription is not missed), stores a new snapshot only when it
+differs by `Object.is`, and unsubscribes when the page is torn down. The build
+renders `getServerSnapshot` (when it is an inline function) and the client
+hydrates from `getSnapshot`. A `getSnapshot` that returns a new object on
+every call logs a warning, as React does.
+
+The compat runtime (`@krate/runtime/react`, used by code that is not lowered
+at build time) implements the same semantics with render-time placeholders:
+a component that suspends renders a placeholder that the nearest `<Suspense>`
+claims, and the placeholder re-renders the component when its promise settles.
 
 ### Attributes and `style`
 
