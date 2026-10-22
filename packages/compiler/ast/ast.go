@@ -1,5 +1,7 @@
 package ast
 
+import "github.com/kratejs/krate/packages/compiler/internal/htmlspec"
+
 // Pos is the start of a node: a 1-based Line, a 1-based Col counted in UTF-16
 // code units (the unit LSP clients and editors use), and the byte Offset into
 // the source.
@@ -254,96 +256,12 @@ type JSXAttr struct {
 
 func (j *JSXAttr) Pos() Pos { return j.Position }
 
-// htmlAttrAliases maps React/JSX camelCase attribute names to their HTML
-// equivalents. Includes the React DOM property renames plus SVG presentation
-// attributes, so transpiled React source (and shadcn/radix components) emit
-// valid HTML/SVG attributes.
-var htmlAttrAliases = map[string]string{
-	// React DOM property aliases.
-	"className":       "class",
-	"htmlFor":         "for",
-	"tabIndex":        "tabindex",
-	"readOnly":        "readonly",
-	"autoComplete":    "autocomplete",
-	"autoFocus":       "autofocus",
-	"autoPlay":        "autoplay",
-	"colSpan":         "colspan",
-	"rowSpan":         "rowspan",
-	"srcSet":          "srcset",
-	"maxLength":       "maxlength",
-	"minLength":       "minlength",
-	"contentEditable": "contenteditable",
-	"spellCheck":      "spellcheck",
-	"formAction":      "formaction",
-	"formEncType":     "formenctype",
-	"formMethod":      "formmethod",
-	"formNoValidate":  "formnovalidate",
-	"formTarget":      "formtarget",
-	"acceptCharset":   "accept-charset",
-	"noValidate":      "novalidate",
-	"crossOrigin":     "crossorigin",
-	"defaultValue":    "value",
-	"defaultChecked":  "checked",
-	"dateTime":        "datetime",
-	"accessKey":       "accesskey",
-	"inputMode":       "inputmode",
-	"enterKeyHint":    "enterkeyhint",
-	"autoCapitalize":  "autocapitalize",
-	"autoCorrect":     "autocorrect",
-	"referrerPolicy":  "referrerpolicy",
-	"srcLang":         "srclang",
-	"itemScope":       "itemscope",
-	"itemType":        "itemtype",
-	"itemID":          "itemid",
-	"allowFullScreen": "allowfullscreen",
-	"playsInline":     "playsinline",
-	"frameBorder":     "frameborder",
-	"marginWidth":     "marginwidth",
-	"marginHeight":    "marginheight",
-	"charSet":         "charset",
-	"httpEquiv":       "http-equiv",
-	"cellPadding":     "cellpadding",
-	"cellSpacing":     "cellspacing",
-	"useMap":          "usemap",
-	"captureAudio":    "capture",
-	// SVG presentation attributes (camelCase in React, kebab/verbatim in SVG).
-	"strokeWidth":         "stroke-width",
-	"strokeLinecap":       "stroke-linecap",
-	"strokeLinejoin":      "stroke-linejoin",
-	"strokeDasharray":     "stroke-dasharray",
-	"strokeDashoffset":    "stroke-dashoffset",
-	"strokeMiterlimit":    "stroke-miterlimit",
-	"strokeOpacity":       "stroke-opacity",
-	"fillRule":            "fill-rule",
-	"fillOpacity":         "fill-opacity",
-	"clipRule":            "clip-rule",
-	"clipPath":            "clip-path",
-	"stopColor":           "stop-color",
-	"stopOpacity":         "stop-opacity",
-	"gradientUnits":       "gradientUnits",
-	"patternUnits":        "patternUnits",
-	"textAnchor":          "text-anchor",
-	"dominantBaseline":    "dominant-baseline",
-	"vectorEffect":        "vector-effect",
-	"shapeRendering":      "shape-rendering",
-	"floodColor":          "flood-color",
-	"floodOpacity":        "flood-opacity",
-	"markerEnd":           "marker-end",
-	"markerMid":           "marker-mid",
-	"markerStart":         "marker-start",
-	"stdDeviation":        "stdDeviation",
-	"viewBox":             "viewBox",
-	"preserveAspectRatio": "preserveAspectRatio",
-}
-
 // HTMLAttrName maps a JSX attribute name to its HTML attribute name, translating
-// React-style camelCase aliases (className, htmlFor, tabIndex, SVG props, ...) to
-// their DOM equivalents. Unknown names pass through unchanged.
+// React-style aliases (className, htmlFor, tabIndex, SVG and xlink props, ...)
+// to their DOM equivalents. The table lives in internal/htmlspec so every
+// emitter shares it. Unknown names pass through unchanged.
 func HTMLAttrName(name string) string {
-	if mapped, ok := htmlAttrAliases[name]; ok {
-		return mapped
-	}
-	return name
+	return htmlspec.AttrName(name)
 }
 
 type Param struct {

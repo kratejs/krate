@@ -18,7 +18,23 @@ type Diagnostic struct {
 	Message string `json:"message"`
 	Hint    string `json:"hint,omitempty"`
 	Source  string `json:"source,omitempty"` // the offending source line, for caret rendering
+	// Severity classifies the diagnostic. The zero value means an error, so
+	// existing producers keep their meaning.
+	Severity Severity `json:"severity,omitempty"`
 }
+
+// Severity is the seriousness of a Diagnostic.
+type Severity string
+
+const (
+	// SeverityError fails the build. It is also the zero value.
+	SeverityError Severity = ""
+	// SeverityWarning is reported but does not fail the build.
+	SeverityWarning Severity = "warning"
+)
+
+// IsWarning reports whether the diagnostic is a non-fatal warning.
+func (d Diagnostic) IsWarning() bool { return d.Severity == SeverityWarning }
 
 // FromError extracts a Diagnostic from an error, unwrapping as needed. Non-
 // Diagnostic errors are converted to a Diagnostic carrying only the message, so

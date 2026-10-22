@@ -3,6 +3,7 @@ export type { CSSARIAOptions, CSSVars, CSSPrimitiveOptions, CSSStackActions, CSS
 export { clearPersisted, readPersisted, writePersisted } from './storage.js';
 export type { PersistOptions, PersistSpec, PersistStore, StorageLike } from './storage.js';
 export { h, mount, hydrate, insert, clearNodes, disposeNode } from './dom.js';
+export { krateCondSwap, krateCondDetached, krateCondReset, krateSanitizeAttr, BLOCKED_URL } from './slots.js';
 export { Fragment, jsx, jsxs } from './jsx-runtime.js';
 export { initRouter, reinitRouter, navigate } from './router.js';
 export type { NavigateOptions } from './router.js';

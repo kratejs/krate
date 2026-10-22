@@ -64,13 +64,17 @@ func TestBuildShowIfStaticAndReactive(t *testing.T) {
 	if !strings.Contains(html, "class=alias") && !strings.Contains(html, `class="alias"`) {
 		t.Errorf("expected visibleIf alias element to render:\n%.600s", html)
 	}
-	// The reactive element must be present (render-both ConditionalSlot) and
-	// toggled by hydration rather than resolved at build time.
+	// The reactive element must be present (active branch between comment
+	// markers, or held in the hoisted template) and toggled by hydration
+	// rather than resolved at build time.
 	if !strings.Contains(html, "toggle") {
 		t.Errorf("expected reactive showIf element to render for hydration:\n%.600s", html)
 	}
-	if !strings.Contains(html, "data-krate-cond-w") {
-		t.Errorf("expected reactive showIf to emit a conditional wrapper:\n%.600s", html)
+	if !strings.Contains(html, "<template data-kc=") {
+		t.Errorf("expected reactive showIf to emit a conditional branch template:\n%.600s", html)
+	}
+	if strings.Contains(html, "data-krate-cond-w") {
+		t.Errorf("conditional wrapper divs must no longer be emitted:\n%.600s", html)
 	}
 
 	// Hydration code must reference the reactive conditional.

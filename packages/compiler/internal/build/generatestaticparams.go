@@ -563,6 +563,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	// Dynamic regions + the coarse page-region wrap, mirroring buildPage so
 	// generateStaticParams pages PPR-stream consistently with their template.
 	regions := enumerateRegions(tree)
+	attachRuntimeChildren(regions, emitResult.RuntimeChildren)
 	for i := range regions {
 		regions[i].Revalidate = regionRevalidate(b.Root, regions[i].SourcePath)
 	}

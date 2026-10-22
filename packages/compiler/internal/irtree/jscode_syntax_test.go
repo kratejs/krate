@@ -16,8 +16,8 @@ func TestCodegenModernSyntax(t *testing.T) {
 		{"const { a, b = 1, ...r } = o;", "const {a,b=1,...r}=o;"},
 		{"const [x, , y = 2] = arr;", "const [x,,y=2]=arr;"},
 		{"x = [, a, ,];", "[,a,,]"},
-		{"x = void 0;", "(void 0)"},
-		{"x = - -y;", "-(-y)"},
+		{"x = void 0;", "void 0"},
+		{"x = - -y;", "- -y"},
 		{"x = { get v() { return 1; }, [k]: 2, *g() {} };", "get v() {"},
 		{"x = { get v() { return 1; }, [k]: 2, *g() {} };", "[k]:2"},
 		{"x = { get v() { return 1; }, [k]: 2, *g() {} };", "*g() {}"},
@@ -47,13 +47,13 @@ func TestCodegenModernSyntax(t *testing.T) {
 }
 
 func TestCodegenIssuesAcceptsNewNodes(t *testing.T) {
-	src := "function C() { class K { m() {} } label: for (;;) { break label; } const t = tag`x`; return new.target; }"
+	src := "function C() { const K = class { m() {} }; label: for (;;) { break label; } const t = tag`x`; return new.target; }"
 	p := parser.New(lexer.New(src).Tokenize())
 	prog := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
 		t.Fatal(errs)
 	}
-	if issues := codegenIssues(prog.Body[0].(*ast.FnDecl)); len(issues) > 0 {
+	if issues := codegenIssues(prog.Body[0].(*ast.FnDecl), nil); len(issues) > 0 {
 		t.Fatalf("unexpected codegen issues: %v", issues)
 	}
 }

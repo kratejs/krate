@@ -6,6 +6,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
 
@@ -117,19 +118,40 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		actionURLs:       opts.ActionURLs,
 	}
 
+	builder.expansion = []expansionFrame{{name: entryFn.Name}}
 	root := builder.buildComponentNode(entryFn, "")
 	root.SourceFile = ann.SourceFile
 
 	// Validate that every construct in the module's functions is supported by
 	// the JS code generator. Unsupported nodes become hard build errors rather
 	// than being silently dropped from the emitted hydration/SSR code.
-	for _, fn := range ann.Functions {
-		builder.codegenErrs = append(builder.codegenErrs, codegenIssues(fn)...)
+	// Functions are visited in name order so the error list is deterministic;
+	// an aliased function (an import alias maps to the same declaration) is
+	// validated once.
+	fnNames := make([]string, 0, len(ann.Functions))
+	for name := range ann.Functions {
+		fnNames = append(fnNames, name)
+	}
+	sort.Strings(fnNames)
+	checked := make(map[*ast.FnDecl]bool, len(fnNames))
+	for _, name := range fnNames {
+		fn := ann.Functions[name]
+		if fn == nil || checked[fn] {
+			continue
+		}
+		checked[fn] = true
+		builder.srcFn = name
+		builder.codegenErrs = append(builder.codegenErrs, codegenIssues(fn, func(pos ast.Pos, msg, hint string) error {
+			return builder.diagAt(pos, diag.SeverityError, msg, hint)
+		})...)
+		builder.srcFn = ""
 	}
 
-	errs := make([]error, 0, len(builder.cssErrs)+len(builder.codegenErrs))
+	errs := make([]error, 0, len(builder.cssErrs)+len(builder.buildErrs)+len(builder.codegenErrs))
 	errs = append(errs, builder.cssErrs...)
+	errs = append(errs, builder.buildErrs...)
 	errs = append(errs, builder.codegenErrs...)
+	errs = append(errs, builder.markupErrs...)
 
 	cssSignals, noJSFallback := builder.cssStylesheets()
 	return &ComponentTree{
@@ -224,7 +246,9 @@ type builder struct {
 	localImports     map[string]bool           // relative-path import bindings
 	actionURLs       map[string]string         // server-action binding -> POST URL
 	externals        []ExternalComponent       // unresolved package components mounted at runtime
-	warnings         []string                  // non-fatal build warnings
+	warnings         []diag.Diagnostic         // non-fatal, positioned build warnings
+	markupErrs       []error                   // invalid tag/attribute names, children on void elements
+	selectStack      [][]string                // selected option values of enclosing <select> elements
 	// contextValues holds the active provider value expression per context,
 	// pushed while building a `<Ctx.Provider value={expr}>` subtree so a
 	// dynamic value substitutes for `Ctx.useContext()` reads.
@@ -276,6 +300,26 @@ type builder struct {
 	// does not support. They fail the build so no construct is silently dropped
 	// from emitted hydration/SSR code.
 	codegenErrs []error
+	// buildErrs collects positioned hard errors raised while building slots
+	// (unlowerable early returns, recursive component expansion, ...).
+	buildErrs []error
+
+	// shadow is the chain of nested lexical scopes active during an expression
+	// walk. Names it declares shadow component-level signals and locals.
+	shadow *bindingScope
+	// expansion is the stack of component functions currently being expanded,
+	// used to detect recursive components; recursiveExpansions counts every
+	// re-entry so a diverging recursion is cut off with a diagnostic.
+	expansion           []expansionFrame
+	recursiveExpansions int
+	recursionReported   map[string]bool
+	// returnIssueReported dedupes unlowerable early-return diagnostics per
+	// component function (a component may be instantiated many times).
+	returnIssueReported map[*ast.FnDecl]bool
+	// srcFn names the function whose AST is being walked when it differs from
+	// the component node being built (a child's return walked for discovery),
+	// so diagnostics resolve the right source file.
+	srcFn string
 }
 
 func (b *builder) collectCSSScope(s *csssignals.Scope) {

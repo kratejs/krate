@@ -187,29 +187,20 @@ func renderClassJS(c *ast.ClassDecl, signals map[string]ast.Expr, level int) str
 	return b.String()
 }
 
-// renderUnaryJS renders a prefix/postfix/keyword unary operator.
+// renderUnaryJS renders a prefix/postfix/keyword unary operator, a spread,
+// or an argument-less `yield`.
 func renderUnaryJS(e *ast.UnaryExpr, signals map[string]ast.Expr) string {
 	if e.Arg == nil {
 		return e.Op
 	}
 	arg := generateExprJS(e.Arg, signals)
-	if e.Postfix {
+	switch {
+	case e.Postfix:
 		return arg + e.Op
-	}
-	switch e.Op {
-	case "typeof":
-		return "typeof " + arg
-	case "void", "delete", "yield", "yield*":
-		// Keyword operators need a space: `typeofx` would be an identifier.
-		return "(" + e.Op + " " + arg + ")"
-	case "...":
+	case e.Op == "...":
 		return "..." + arg
 	}
-	// Keep `- -x` / `+ +x` from fusing into `--x` / `++x`.
-	if strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "+") {
-		return e.Op + "(" + arg + ")"
-	}
-	return e.Op + arg
+	return unaryPrefixJS(e.Op, arg)
 }
 
 func isGeneratorFn(e ast.Expr) bool {
