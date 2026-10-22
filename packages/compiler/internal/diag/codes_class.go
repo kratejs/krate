@@ -12,6 +12,7 @@ const (
 	CodeBoundaryNoDerivedState Code = "KR3008"
 	CodeBoundaryBuildFallback  Code = "KR3009"
 	CodeBuildTimeThrow         Code = "KR3010"
+	CodeClassNotLowered        Code = "KR3011"
 )
 
 func init() {
@@ -36,5 +37,7 @@ func init() {
 			"A component inside an error boundary threw while the page was built. Krate rendered the boundary's fallback (the state returned by getDerivedStateFromError) instead of failing the build, and calls componentDidCatch when the page hydrates. Fix the error, or keep the fallback if it is expected."},
 		CodeInfo{CodeBuildTimeThrow, "Component threw while the page was built",
 			"A component threw (a throw statement ran) while Krate rendered the page at build time, and no error boundary encloses it, so the build fails. Fix the error, guard it with a condition, or wrap the component in an error boundary to render a fallback instead."},
+		CodeInfo{CodeClassNotLowered, "Class component is not lowered",
+			"Krate lowers class components declared at module top level (`class X extends Component`, exported or not). A class expression or a class declared inside a function is not lowered and renders nothing. Move the declaration to module scope or convert it to a function component."},
 	)
 }

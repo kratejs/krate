@@ -183,7 +183,13 @@ class ErrorBoundary extends Component {
   `componentDidCatch(error, { componentStack })` after the fallback is in the
   DOM. Caught errors are logged with `console.error`, like React.
 - **Recovery.** When the boundary renders its children again (for example
-  after `setState({ error: null })`), the children mount fresh.
+  after `setState({ error: null })`), the children mount fresh. Changing a
+  class element's `key` (`<ErrorBoundary key={attempt}>`) unmounts it and
+  mounts a new instance with fresh state.
+- **Render retry.** As in React 18, an error thrown while rendering during an
+  update is retried once before the fallback commits, so
+  `getDerivedStateFromError` runs twice for it (once for errors in effects and
+  lifecycles).
 - **Nesting.** The innermost boundary catches. An error thrown by a
   boundary's own render or fallback goes to the boundary above it.
 - **At build time** a `throw` while the page is rendered inside a boundary
