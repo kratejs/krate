@@ -212,7 +212,7 @@ func runeToStr(i int) string {
 }
 
 // ExtractImports pulls import statements from MDX/TSX source lines.
-// Returns only lines that start with "import " (after trimming whitespace).
+// Returns only lines that are ESM import statements (see isImportLine).
 func ExtractImports(src string) []string {
 	lines := strings.Split(src, "\n")
 	var imports []string
@@ -234,11 +234,21 @@ func ExtractImports(src string) []string {
 		if inFrontmatter {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "import ") {
+		if isImportLine(trimmed) {
 			imports = append(imports, trimmed)
 		}
 	}
 	return imports
+}
+
+// importLineRe matches a single-line ESM import statement: a bare
+// `import "mod"` or `import <clause> from "mod"`, optionally `import type`.
+var importLineRe = regexp.MustCompile(`^import\s+(?:type\s+)?(?:["'][^"']+["']|[\w$*{][^"']*?\s*from\s*["'][^"']+["'])\s*;?$`)
+
+// isImportLine reports whether a trimmed markdown line is an ESM import
+// rather than prose that happens to start with the word "import".
+func isImportLine(trimmed string) bool {
+	return importLineRe.MatchString(trimmed)
 }
 
 // HTMLToJSX converts rendered HTML to JSX-compatible syntax.
@@ -360,7 +370,7 @@ func ParseMDXSegments(src string, cfg Config) (frontmatter map[string]any, segme
 		if inFrontmatter {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "import ") {
+		if isImportLine(trimmed) {
 			continue
 		}
 		bodyWithoutImports = append(bodyWithoutImports, line)

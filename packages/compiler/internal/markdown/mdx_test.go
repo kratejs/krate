@@ -47,6 +47,22 @@ title: Plain
 			expected: nil,
 		},
 		{
+			name: "prose starting with import is not an import",
+			input: `# Themes
+
+import it and pass every docs data field in as props.
+import "./side-effect.css"
+import type { Props } from "./types"
+import * as Lib from "lib";
+import Default, { named } from "./mod"`,
+			expected: []string{
+				`import "./side-effect.css"`,
+				`import type { Props } from "./types"`,
+				`import * as Lib from "lib";`,
+				`import Default, { named } from "./mod"`,
+			},
+		},
+		{
 			name: "imports in frontmatter ignored",
 			input: `---
 import: something
@@ -173,5 +189,14 @@ Just text.
 		if strings.Contains(seg.HTML, "import") {
 			t.Errorf("segment[%d] HTML contains import: %q", i, seg.HTML)
 		}
+	}
+}
+
+func TestParseMDXSegmentsKeepsImportProse(t *testing.T) {
+	src := "# Themes\n\nPages\nimport it and pass every field in as props.\n"
+	_, segs := ParseMDXSegments(src, Config{})
+	html := RenderSegmentsToHTML(segs)
+	if !strings.Contains(html, "import it and pass every field") {
+		t.Fatalf("prose line starting with import was dropped: %s", html)
 	}
 }
