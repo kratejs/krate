@@ -330,6 +330,11 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 				if findLocalFunction(e.Name, b.localFnBody) != nil {
 					return true
 				}
+				// Arrow-function locals and useActionState dispatches (e.g. a
+				// form action forwarded to a child) are live values too.
+				if findLocalConstFn(e.Name, b.localFnBody) != nil || b.actionStateCall(e.Name) != nil {
+					return true
+				}
 			}
 		}
 		// Signal-valued props: <Child value={count()} /> means the child

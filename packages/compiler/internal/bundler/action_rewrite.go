@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
 // SetActionModules configures the server-action modules discovered by the
@@ -73,7 +74,9 @@ func (b *Bundler) rewriteActionImports(prog *ast.Program, abs string) (map[strin
 		if imp.Default != "" {
 			id, ok := exports["default"]
 			if !ok {
-				_ = b.setActionError(fmt.Errorf("%s imports the default export from the server action module %s, but it has none\n  hint: export a default async function or import a named action", abs, src))
+				_ = b.setActionError(diag.New(abs, imp.Position.Line, imp.Position.Col,
+					fmt.Sprintf("imports the default export from the server action module %s, but it has none", src),
+					"export a default async function or import a named action", "").WithCode(diag.CodeActionImportMissing))
 				return handled, changed
 			}
 			if err := b.noteActionImport(imp.Default, actionURL(b.actionBasePath, id)); err != nil {
@@ -92,7 +95,9 @@ func (b *Bundler) rewriteActionImports(prog *ast.Program, abs string) (map[strin
 			}
 			id, ok := exports[remote]
 			if !ok {
-				_ = b.setActionError(fmt.Errorf("%s imports %q from the server action module %s, but it is not exported\n  hint: export an async function named %q from that file", abs, remote, src, remote))
+				_ = b.setActionError(diag.New(abs, imp.Position.Line, imp.Position.Col,
+					fmt.Sprintf("imports %q from the server action module %s, but it is not exported", remote, src),
+					fmt.Sprintf("export an async function named %q from that file", remote), "").WithCode(diag.CodeActionImportMissing))
 				return handled, changed
 			}
 			if err := b.noteActionImport(local, actionURL(b.actionBasePath, id)); err != nil {

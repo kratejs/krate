@@ -38,6 +38,8 @@ import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 import cluster from 'node:cluster';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomBytes } from 'node:crypto';
 
 const API_DIR = path.resolve(process.argv[2] || './src/api');
 const PORT = parseInt(process.argv[3] || '3001', 10);
@@ -55,83 +57,7 @@ const WORKERS = Math.max(1, parseInt(process.env.KRATE_API_WORKERS || '1', 10) |
 // The module cache is bypassed in dev (HOT) so edits are picked up.
 const fileCache = new Map();
 const moduleCache = new Map();
-const actionModuleCache = new Map();
-let actionManifest = null;
-let actionManifestTime = 0;
-
-function loadActionManifest() {
-  const manifestPath = path.join(ACTION_DIR, 'manifest.json');
-  try {
-    const st = fs.statSync(manifestPath);
-    if (!actionManifest || st.mtimeMs !== actionManifestTime) {
-      actionManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-      actionManifestTime = st.mtimeMs;
-    }
-  } catch {
-    actionManifest = { actions: [] };
-  }
-  return actionManifest;
-}
-
-function sendJSON(res, status, body) {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Cache-Control', 'no-store');
-  res.end(JSON.stringify(body));
-}
-
-function actionFileURL(file) {
-  const url = pathToFileURL(file).href;
-  return HOT ? url + '?t=' + Date.now() : url;
-}
-
-async function runAction(req, res, urlPath) {
-  let id = '';
-  try { id = decodeURIComponent(urlPath.slice('/__krate/action/'.length)); } catch {}
-  const entry = (loadActionManifest().actions || []).find((a) => a.id === id);
-  if (!entry) return sendJSON(res, 404, { error: 'Server action not found' });
-  const file = path.join(ACTION_DIR, entry.file || '');
-  if (!file.startsWith(ACTION_DIR + path.sep)) return sendJSON(res, 404, { error: 'Server action not found' });
-
-  let mod = actionModuleCache.get(file);
-  if (!mod || HOT) {
-    mod = await import(actionFileURL(file));
-    if (!HOT) actionModuleCache.set(file, mod);
-  }
-  const fn = entry.export === 'default' ? (mod.default || mod[entry.export]) : mod[entry.export];
-  if (typeof fn !== 'function') return sendJSON(res, 500, { error: 'Server action export is not a function' });
-
-  const fetchMode = String(req.headers['x-krate-action'] || '') === 'fetch';
-  const jsonBody = String(req.headers['content-type'] || '').includes('application/json');
-  let result;
-  if (fetchMode && jsonBody) {
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
-    let payload = {};
-    try { payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch {}
-    const args = Array.isArray(payload.args) ? payload.args : [];
-    result = await fn(...args);
-  } else {
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
-    const body = Buffer.concat(chunks);
-    const headers = new Headers();
-    for (const [k, v] of Object.entries(req.headers)) {
-      if (v !== undefined) headers.set(k, Array.isArray(v) ? v.join(', ') : v);
-    }
-    const request = new Request('http://localhost' + urlPath, { method: 'POST', headers, body });
-    result = await fn(await request.formData());
-  }
-
-  const redirect = result && typeof result === 'object' && typeof result.redirect === 'string' ? result.redirect : '';
-  if (fetchMode) return sendJSON(res, 200, { ok: true, result, redirect });
-  const location = redirect || req.headers['x-krate-return'] || req.headers.referer || '/';
-  res.statusCode = 303;
-  res.setHeader('Location', String(location));
-  res.setHeader('Cache-Control', 'no-store');
-  res.end();
-}
-
+` + actionSidecarJS + actionSidecarNodeAdapter + `
 let middlewareModule = null;
 if (MIDDLEWARE_PATH && fs.existsSync(MIDDLEWARE_PATH)) {
   try {
@@ -146,8 +72,13 @@ const server = http.createServer(async (req, res) => {
     const urlPath = urlObj.pathname;
 
     if (urlPath.startsWith('/__krate/action/')) {
-      if (req.method !== 'POST') return sendJSON(res, 405, { error: 'Method Not Allowed' });
-      return await runAction(req, res, urlPath);
+      if (req.method !== 'POST') return sendActionResponse(res, actionFail(405, 'Method Not Allowed'));
+      try {
+        return await runAction(req, res, urlObj);
+      } catch (e) {
+        console.error('[krate] server action error:', e);
+        return sendActionResponse(res, actionFail(500, 'Server action failed'));
+      }
     }
 
     // Middleware endpoint: execute middleware and return result
@@ -330,6 +261,8 @@ const apiServerBunScriptContent = `import path from 'node:path';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomBytes } from 'node:crypto';
 
 const API_DIR = path.resolve(process.argv[2] || './src/api');
 const PORT = parseInt(process.argv[3] || '3001', 10);
@@ -339,9 +272,6 @@ const HOT = process.env.KRATE_API_HOT === '1';
 
 const fileCache = new Map();
 const moduleCache = new Map();
-const actionModuleCache = new Map();
-let actionManifest = null;
-let actionManifestTime = 0;
 
 let middlewareModule = null;
 if (MIDDLEWARE_PATH) {
@@ -350,52 +280,8 @@ if (MIDDLEWARE_PATH) {
 
 function json(body, status) { return Response.json(body, { status: status || 200 }); }
 
-function loadActionManifest() {
-  const manifestPath = path.join(ACTION_DIR, 'manifest.json');
-  try {
-    const st = fs.statSync(manifestPath);
-    if (!actionManifest || st.mtimeMs !== actionManifestTime) {
-      actionManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-      actionManifestTime = st.mtimeMs;
-    }
-  } catch {
-    actionManifest = { actions: [] };
-  }
-  return actionManifest;
-}
 
-async function runAction(req, urlPath) {
-  let id = '';
-  try { id = decodeURIComponent(urlPath.slice('/__krate/action/'.length)); } catch {}
-  const entry = (loadActionManifest().actions || []).find((a) => a.id === id);
-  if (!entry) return json({ error: 'Server action not found' }, 404);
-  const file = path.join(ACTION_DIR, entry.file || '');
-  if (!file.startsWith(ACTION_DIR + path.sep)) return json({ error: 'Server action not found' }, 404);
-  let mod = actionModuleCache.get(file);
-  if (!mod || HOT) {
-    mod = await import(pathToFileURL(file).href + (HOT ? '?t=' + Date.now() : ''));
-    if (!HOT) actionModuleCache.set(file, mod);
-  }
-  const fn = entry.export === 'default' ? (mod.default || mod[entry.export]) : mod[entry.export];
-  if (typeof fn !== 'function') return json({ error: 'Server action export is not a function' }, 500);
-
-  const fetchMode = String(req.headers.get('x-krate-action') || '') === 'fetch';
-  const jsonBody = String(req.headers.get('content-type') || '').includes('application/json');
-  let result;
-  if (fetchMode && jsonBody) {
-    let payload = {};
-    try { payload = await req.json(); } catch {}
-    const args = Array.isArray(payload.args) ? payload.args : [];
-    result = await fn(...args);
-  } else {
-    result = await fn(await req.formData());
-  }
-  const redirect = result && typeof result === 'object' && typeof result.redirect === 'string' ? result.redirect : '';
-  if (fetchMode) return json({ ok: true, result, redirect });
-  const location = redirect || req.headers.get('x-krate-return') || req.headers.get('referer') || '/';
-  return new Response(null, { status: 303, headers: { Location: location } });
-}
-
+` + actionSidecarJS + `
 function sanitize(p) {
   let rel = p || '/';
   try { rel = decodeURIComponent(rel); } catch { return null; }
@@ -498,8 +384,13 @@ Bun.serve({
     const url = new URL(req.url);
     const urlPath = url.pathname;
     if (urlPath.startsWith('/__krate/action/')) {
-      if (req.method !== 'POST') return json({ error: 'Method Not Allowed' }, 405);
-      try { return await runAction(req, urlPath); } catch (e) { return json({ error: 'Server action failed', details: e.message }, 500); }
+      if (req.method !== 'POST') return actionFail(405, 'Method Not Allowed');
+      try {
+        return await krateRunAction(req, urlPath, url.search);
+      } catch (e) {
+        console.error('[krate] server action error:', e);
+        return actionFail(500, 'Server action failed');
+      }
     }
     if (urlPath === '/__krate/middleware') return handleMiddleware(req);
     const clean = sanitize(urlPath.replace(/^\/api/, ''));
@@ -1106,26 +997,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	apiBodyLimit := cfg.MaxAPIBodyBytes()
 	if hasActions {
-		mux.HandleFunc("/__krate/action/", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPost {
-				w.Header().Set("Allow", http.MethodPost)
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			if !sameOriginActionRequest(r) {
-				http.Error(w, "cross-site server action rejected", http.StatusForbidden)
-				return
-			}
-			if r.Body != nil {
-				r.Body = http.MaxBytesReader(w, r.Body, apiBodyLimit)
-			}
-			if ret := sanitizeActionReturn(r.Header.Get("X-Krate-Return"), r); ret != "" {
-				r.Header.Set("X-Krate-Return", ret)
-			} else {
-				r.Header.Del("X-Krate-Return")
-			}
-			apiProxy.ServeHTTP(w, r)
-		})
+		mux.HandleFunc("/__krate/action/", actionHandler(apiProxy, apiBodyLimit))
 	}
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {

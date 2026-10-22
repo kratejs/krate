@@ -83,6 +83,12 @@ func (b *builder) elementBindings(el *ast.JSXElement, id SlotID) (handlers []Han
 			if h := b.buildHandlerDecl(attr, string(id)); h != nil {
 				handlers = append(handlers, *h)
 			}
+		case isFormActionAttr(attr.Name) && attr.Value != nil && b.isFunctionAction(attr.Value):
+			// React 19 function actions run through the runtime submit
+			// listener; the value is bound to the element, not rendered.
+			if rb, ok := b.formActionBinding(attr, id); ok {
+				refs = append(refs, rb)
+			}
 		case isAttrBinding(attr):
 			if a := b.buildAttrBinding(attr, string(id)); a != nil {
 				attrs = append(attrs, *a)

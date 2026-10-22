@@ -93,7 +93,7 @@ export function Pagination(props: PaginationProps) {
       </a>
       <ul class="krate-pagination-list">
         {pages().map((p) => (
-          <li>
+          <li key={p}>
             <a
               class={"krate-pagination-page" + (p === current() ? " krate-pagination-active" : "")}
               href={prefix + p}

@@ -143,14 +143,6 @@
     "severity": "P1",
     "reason": "[effect-timing] derived state set in an effect: the initial 'words now 0' effect run is missing (state already 1 on first effect)"
   },
-  "r18/effect_unmount_cleanup": {
-    "severity": "P1",
-    "reason": "[list-remount] removing one keyed row unmounts every row and remounts the survivors (extra cleanups and mount effects)"
-  },
-  "r18/event_checkbox_radio_onchange": {
-    "severity": "P1",
-    "reason": "[focus-loss] clicking an already-checked radio re-renders the group and replaces the node, losing focus"
-  },
   "r18/event_double_click": {
     "severity": "P0",
     "reason": "[autofocus] autoFocus is emitted as an attribute and the controlled value is set after focus, so typing lands at the start (' docUntitled')"
@@ -204,28 +196,8 @@
     "reason": "[module-scope] module-level const cartStore = createStore(0) using an imported helper is not bundled: 'createStore is not defined', store-driven text empty"
   },
   "r18/key_change_remounts": {
-    "severity": "P0",
-    "reason": "[key-remount] changing a component's key does not remount it: draft state survives, mount/unmount effects do not run"
-  },
-  "r18/key_focused_input_reorder": {
-    "severity": "P0",
-    "reason": "[list-remount] reordering keyed rows recreates their DOM: typed text in uncontrolled inputs is lost and focus drops to body"
-  },
-  "r18/key_fragment": {
-    "severity": "P0",
-    "reason": "[keyed-fragment] <Fragment key> inside .map renders nothing and adding an item throws (insertBefore parameter 1 is not of type Node)"
-  },
-  "r18/key_index_vs_id": {
-    "severity": "P0",
-    "reason": "[list-item-state] useState inside components rendered by .map does not update the DOM (checkbox click has no effect)"
-  },
-  "r18/key_insert_remove": {
     "severity": "P1",
-    "reason": "[list-remount] every list change unmounts all rows and remounts them (cleanups and mount effects for unchanged keys)"
-  },
-  "r18/key_reorder_stateful": {
-    "severity": "P0",
-    "reason": "[list-item-state] row component state (votes) inside .map does not update; focus lost on click"
+    "reason": "[effect-props-snapshot] a key change remounts with fresh state and effects, but the old instance's effect cleanup reads the new props (props are live getters, not a per-render snapshot)"
   },
   "r18/list_filter_map": {
     "severity": "P0",
@@ -243,10 +215,6 @@
     "severity": "P0",
     "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
   },
-  "r18/ref_list_refs": {
-    "severity": "P1",
-    "reason": "[callback-ref] callback refs inside .map are never called: the Map stays empty and focusing an item by id fails"
-  },
   "r18/suspense_fallback_then_content": {
     "severity": "P0",
     "reason": "[suspense-lazy] build fails: lazy(() => promise) is evaluated at build time ('cannot evaluate delay(...)')"
@@ -263,37 +231,17 @@
     "severity": "P0",
     "reason": "[suspense-lazy] build fails: nested Suspense with lazy(() => promise) evaluated at build time"
   },
-  "r19/action_button_form_action": {
-    "severity": "P0",
-    "reason": "[form-actions] client function actions are stringified into action/formaction attributes (function source leaks into the DOM) and the form submits natively, navigating away"
-  },
   "r19/action_form_auto_reset": {
-    "severity": "P0",
-    "reason": "[form-actions] <form action={asyncFn}> stringifies the function into the action attribute; submit is not intercepted, no message is added, no auto-reset"
-  },
-  "r19/action_optimistic": {
-    "severity": "P0",
-    "reason": "[form-actions] useOptimistic list not rendered on load and the client action form submits natively (page navigates away)"
-  },
-  "r19/action_server_form": {
-    "severity": "P0",
-    "reason": "[form-actions] useActionState with a 'use server' action renders action=\"formAction\" literally; submit navigates natively instead of calling POST /__krate/action"
+    "severity": "P2",
+    "reason": "[form-actions] the action, message and auto-reset match; with the fixture's 80ms delay Krate commits the result one frame after React, so the snapshot right after the click can still show the old field value"
   },
   "r19/action_server_direct": {
     "severity": "P1",
     "reason": "[async-transition] direct server action call works end to end, but useTransition isPending stays false during the async transition ('loading' never shows)"
   },
-  "r19/action_use_action_state": {
-    "severity": "P0",
-    "reason": "[form-actions] useActionState: action=\"formAction\" literal, button rendered disabled, state count empty; the action never runs"
-  },
-  "r19/action_use_form_status": {
-    "severity": "P0",
-    "reason": "[form-status] build fails: useFormStatus() from react-dom is evaluated at build time ('unresolved identifier useFormStatus')"
-  },
   "r19/app_reference": {
     "severity": "P0",
-    "reason": "[form-status] React 19 reference app does not build: useFormStatus evaluated at build time (also exercises use(promise), useActionState, useOptimistic)"
+    "reason": "[use-promise] the reference app builds and its actions, useFormStatus and useOptimistic run; use(promise) under Suspense shows the list immediately instead of the 'loading todos' fallback, which shifts the later steps"
   },
   "r19/deferred_initial_value": {
     "severity": "P0",
