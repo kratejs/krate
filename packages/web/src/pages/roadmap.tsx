@@ -30,16 +30,16 @@ const REACT_PHASES = [
   },
   {
     id: "R2",
-    tone: "next",
-    status: "Next",
+    tone: "gate",
+    status: "Complete",
     title: "React 18 source parity",
     body: "Close the remaining semantic gaps for source components: dependency arrays, effect ordering, class lifecycle, error boundaries, events, forms, keys, refs, and Suspense.",
     exit: "No P0 or P1 divergence in the source-component corpus; failures have actionable diagnostics.",
   },
   {
     id: "R3",
-    tone: "next",
-    status: "Next",
+    tone: "gate",
+    status: "Complete",
     title: "React 19 source semantics",
     body: "Build the React 19 action hooks (useActionState, useOptimistic, useFormStatus) on top of the server-action transport, plus use, ref-as-prop, and async transitions.",
     exit: "The React 19 reference app passes the same browser conformance suite as React 18.",
@@ -242,10 +242,12 @@ export default function Roadmap() {
           <div class="roadmap-panel">
             <h3>Today</h3>
             <p>
-              Source components compile to signals with hooks, context, refs, common
-              class components, and live island props/callbacks. Radix primitives
-              run as Preact islands, and controlled primitives are covered by a real
-              Chromium, Firefox, and WebKit conformance harness.
+              Source components match React 18 and React 19 in a browser
+              differential against React itself: effects, class lifecycles, error
+              boundaries, events, forms, keys, refs, Suspense, use, and the action
+              hooks. Radix primitives run as Preact islands, and controlled
+              primitives are covered by a real Chromium, Firefox, and WebKit
+              conformance harness.
             </p>
           </div>
           <div class="roadmap-panel">
