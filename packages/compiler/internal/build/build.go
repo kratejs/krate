@@ -1654,8 +1654,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		goBaked = goBakedMap(emitResult.GoRenders, rendered)
 	}
 	// Regions are enumerated after emit so runtime Go components can carry their
-	// build-rendered children (set during emitRuntime) in RegionMeta.Props.
+	// build-rendered children (EmitResult.RuntimeChildren) in RegionMeta.Props.
 	regions := enumerateRegions(tree)
+	attachRuntimeChildren(regions, emitResult.RuntimeChildren)
 	for i := range regions {
 		regions[i].Revalidate = regionRevalidate(b.Root, regions[i].SourcePath)
 	}

@@ -1,7 +1,10 @@
 package renderer
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +40,10 @@ type EmitResult struct {
 	// islands. It is emitted inside the page hydration IIFE (where those signals
 	// are in scope) before the islands mount.
 	IslandBootJS string
+	// RuntimeChildren maps a runtime Go region id ("region-<id>") to the HTML
+	// of its build-rendered static children. Emit never mutates the shared IR,
+	// so the build attaches these to the region props itself.
+	RuntimeChildren map[string]string
 }
 
 // SlotOutput is the result of emitting a single slot node. Beyond HTML and
@@ -50,6 +57,20 @@ type SlotOutput struct {
 	StyleHTML  string
 	Orphans    []orphanBinding
 	GoRenders  []irtree.GoRenderRequest
+	// Templates holds the <template data-kc> elements carrying the inactive
+	// branch of each conditional in this subtree. They are hoisted to the end
+	// of the page HTML so conditionals stay valid inside <table>, <ul>,
+	// <select> or <p>; see emitConditionalSlot.
+	Templates string
+	// RuntimeChildren: see EmitResult.RuntimeChildren.
+	RuntimeChildren map[string]string
+}
+
+// inlineHTML returns the output's HTML with its hoisted templates appended,
+// for consumers that keep only the HTML (props passed to a Go host, baked
+// suspense content, meta capture).
+func (o SlotOutput) inlineHTML() string {
+	return o.HTML + o.Templates
 }
 
 // parallelMinChildren is the smallest sibling list worth spawning goroutines
@@ -195,17 +216,18 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	listComponents := collectListComponentFuncs(tree.Root, tree.Functions)
 
 	return &EmitResult{
-		HTML:           output.HTML,
-		HeadHTML:       e.headHTML,
-		ScriptHTML:     e.scriptHTML,
-		StyleHTML:      e.styleHTML,
-		Signatures:     output.Signatures,
-		HasLinks:       tree.HasLinks,
-		UsedFuncs:      make(map[string]bool),
-		UsedCSS:        make(map[string]bool),
-		ListComponents: listComponents,
-		Errors:         e.errs,
-		GoRenders:      append(output.GoRenders, e.goCollector.snapshot()...),
+		HTML:            output.HTML + output.Templates,
+		HeadHTML:        e.headHTML,
+		ScriptHTML:      e.scriptHTML,
+		StyleHTML:       e.styleHTML,
+		Signatures:      output.Signatures,
+		HasLinks:        tree.HasLinks,
+		UsedFuncs:       make(map[string]bool),
+		UsedCSS:         make(map[string]bool),
+		ListComponents:  listComponents,
+		Errors:          e.errs,
+		GoRenders:       append(output.GoRenders, e.goCollector.snapshot()...),
+		RuntimeChildren: output.RuntimeChildren,
 	}
 }
 
@@ -343,12 +365,10 @@ func (e *Emitter) emitStatic(node *irtree.ComponentNode) SlotOutput {
 	// placeholder with its call-site slots, like emitClient.
 	if strings.Contains(out.HTML, "<!--__children__-->") && len(node.CallSiteSlots) > 0 {
 		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
-		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", callSiteOut.HTML)
-		out.Signatures = append(out.Signatures, callSiteOut.Signatures...)
-		out.Orphans = append(out.Orphans, callSiteOut.Orphans...)
-		out.HeadHTML += callSiteOut.HeadHTML
-		out.ScriptHTML += callSiteOut.ScriptHTML
-		out.StyleHTML += callSiteOut.StyleHTML
+		html := callSiteOut.HTML
+		callSiteOut.HTML = ""
+		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", html)
+		mergeSlotOutput(&out, callSiteOut)
 	}
 	return out
 }
@@ -409,6 +429,9 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		out.HeadHTML += childrenOut.HeadHTML
 		out.ScriptHTML += childrenOut.ScriptHTML
 		out.StyleHTML += childrenOut.StyleHTML
+		out.Templates += childrenOut.Templates
+		out.GoRenders = append(out.GoRenders, childrenOut.GoRenders...)
+		out.RuntimeChildren = mergeRuntimeChildren(out.RuntimeChildren, childrenOut.RuntimeChildren)
 		// Conditional/list slots in call-site children (e.g. {items().map(...)}
 		// inside a signal-less wrapper like ToastViewport) reference the
 		// CALLER's signals - register an orphan binding so the re-render effect
@@ -475,9 +498,12 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 			if slot.Component.Tier != irtree.TierClient {
 				return "", false
 			}
-			out := e.emitComponentSlot(slot)
-			sigs = append(sigs, out.Signatures...)
-			return out.HTML, true
+			slotOut := e.emitComponentSlot(slot)
+			sigs = append(sigs, slotOut.Signatures...)
+			out.Templates += slotOut.Templates
+			out.GoRenders = append(out.GoRenders, slotOut.GoRenders...)
+			out.RuntimeChildren = mergeRuntimeChildren(out.RuntimeChildren, slotOut.RuntimeChildren)
+			return slotOut.HTML, true
 		}
 		defer func() { eval.interactiveEmit = nil }()
 	}
@@ -521,7 +547,7 @@ func (e *Emitter) emitServer(node *irtree.ComponentNode) SlotOutput {
 	for _, child := range node.Children {
 		mergeSlotOutput(&out, e.emitSlotNode(child))
 	}
-	wrapped := `<div data-krate-server="` + node.Name + `">` + out.HTML + `</div>`
+	wrapped := `<div data-krate-server="` + escape.HTMLAttr(node.Name) + `">` + out.HTML + `</div>`
 	out.HTML = wrapped
 	return out
 }
@@ -534,25 +560,17 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 	e.clientStack = append(e.clientStack, node.ID)
 	defer func() { e.clientStack = e.clientStack[:len(e.clientStack)-1] }()
 
-	childrenOut := e.emitSlotsParallel(node.Children)
-	out.HTML = childrenOut.HTML
-	out.Signatures = append(out.Signatures, childrenOut.Signatures...)
-	out.Orphans = append(out.Orphans, childrenOut.Orphans...)
-	out.HeadHTML += childrenOut.HeadHTML
-	out.ScriptHTML += childrenOut.ScriptHTML
-	out.StyleHTML += childrenOut.StyleHTML
+	mergeSlotOutput(&out, e.emitSlotsParallel(node.Children))
 
 	// Replace {props.children} placeholder with rendered call site children.
 	// This ensures interactive sub-components nested inside signal components
 	// retain their data-k/data-kh hydration markers.
 	if strings.Contains(out.HTML, "<!--__children__-->") && len(node.CallSiteSlots) > 0 {
 		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
-		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", callSiteOut.HTML)
-		out.Signatures = append(out.Signatures, callSiteOut.Signatures...)
-		out.Orphans = append(out.Orphans, callSiteOut.Orphans...)
-		out.HeadHTML += callSiteOut.HeadHTML
-		out.ScriptHTML += callSiteOut.ScriptHTML
-		out.StyleHTML += callSiteOut.StyleHTML
+		html := callSiteOut.HTML
+		callSiteOut.HTML = ""
+		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", html)
+		mergeSlotOutput(&out, callSiteOut)
 	}
 
 	childIDs := collectChildIDs(node.Children)
@@ -595,21 +613,35 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 // emitRuntime - runtime component splice marker
 
 func (e *Emitter) emitRuntime(node *irtree.ComponentNode) SlotOutput {
+	id := "region-" + escape.Comment(string(node.ID))
+	out := SlotOutput{
+		HTML: `<!--region:` + id + `--><!--/region:` + id + `-->`,
+	}
 	// Runtime Go components are baked as a region; their (static) children are
 	// rendered now and passed to the host as the `children` prop per request.
+	// The HTML is returned in RuntimeChildren instead of being written into the
+	// shared IR, so emit stays pure and safe to run concurrently or twice.
 	if node.Runtime == "go" && len(node.Children) > 0 {
 		childOut := e.emitSlotsParallel(node.Children)
-		if childOut.HTML != "" {
-			if node.RuntimeProps == nil {
-				node.RuntimeProps = map[string]any{}
-			}
-			node.RuntimeProps["children"] = childOut.HTML
+		if html := childOut.inlineHTML(); html != "" {
+			out.RuntimeChildren = map[string]string{"region-" + string(node.ID): html}
 		}
 	}
-	id := "region-" + string(node.ID)
-	return SlotOutput{
-		HTML: fmt.Sprintf(`<!--region:%s--><!--/region:%s-->`, id, id),
+	return out
+}
+
+// mergeRuntimeChildren merges src into dst, allocating dst when needed.
+func mergeRuntimeChildren(dst, src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return dst
 	}
+	if dst == nil {
+		dst = make(map[string]string, len(src))
+	}
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }
 
 // emitGoComponentSlot renders an imported Go component's children, records a
@@ -618,9 +650,9 @@ func (e *Emitter) emitRuntime(node *irtree.ComponentNode) SlotOutput {
 func (e *Emitter) emitGoComponentSlot(s *irtree.GoComponentSlot) SlotOutput {
 	childOut := e.emitSlotsParallel(s.Children)
 	id := string(s.ID)
-	props := goPropsJSON(s.Props, childOut.HTML)
+	props := goPropsJSON(s.Props, childOut.inlineHTML())
 	return SlotOutput{
-		HTML:       fmt.Sprintf("<!--krate-gocomp:%s-->", id),
+		HTML:       "<!--krate-gocomp:" + escape.Comment(id) + "-->",
 		Signatures: childOut.Signatures,
 		HeadHTML:   childOut.HeadHTML,
 		ScriptHTML: childOut.ScriptHTML,
@@ -635,21 +667,46 @@ func (e *Emitter) emitGoComponentSlot(s *irtree.GoComponentSlot) SlotOutput {
 }
 
 // goPropsJSON merges the JSON-encoded attr props with the rendered children
-// under the `children` key.
+// under the `children` key and returns a JSON object (keys sorted for
+// determinism). Prop values are expected to be JSON already; a value that is
+// not valid JSON is encoded as a JSON string, so the result is always valid.
 func goPropsJSON(props map[string]string, childrenHTML string) string {
 	keys := make([]string, 0, len(props))
 	for k := range props {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	parts := make([]string, 0, len(keys)+1)
+	var b strings.Builder
+	b.WriteByte('{')
+	first := true
+	write := func(k string, v []byte) {
+		if !first {
+			b.WriteByte(',')
+		}
+		first = false
+		kj, _ := json.Marshal(k)
+		b.Write(kj)
+		b.WriteByte(':')
+		b.Write(v)
+	}
 	for _, k := range keys {
-		parts = append(parts, fmt.Sprintf("%q", k)+":"+props[k])
+		if k == "children" && childrenHTML != "" {
+			continue
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, []byte(props[k])); err == nil && compact.Len() > 0 {
+			write(k, compact.Bytes())
+			continue
+		}
+		enc, _ := json.Marshal(props[k])
+		write(k, enc)
 	}
 	if childrenHTML != "" {
-		parts = append(parts, fmt.Sprintf("%q", "children")+":"+fmt.Sprintf("%q", childrenHTML))
+		enc, _ := json.Marshal(childrenHTML)
+		write("children", enc)
 	}
-	return "{" + strings.Join(parts, ",") + "}"
+	b.WriteByte('}')
+	return b.String()
 }
 
 // emitMetaSlot - Head/Script/Style content routing
@@ -708,7 +765,7 @@ func (e *Emitter) emitStaticHTML(s *irtree.StaticHTML) SlotOutput {
 }
 
 // mergeSlotOutput concatenates a child output into an accumulator in document
-// order. Runtime props are NOT merged here - only parallel emit re-keys them.
+// order, including hoisted conditional templates and runtime-region children.
 func mergeSlotOutput(acc *SlotOutput, out SlotOutput) {
 	acc.HTML += out.HTML
 	acc.Signatures = append(acc.Signatures, out.Signatures...)
@@ -717,14 +774,22 @@ func mergeSlotOutput(acc *SlotOutput, out SlotOutput) {
 	acc.StyleHTML += out.StyleHTML
 	acc.Orphans = append(acc.Orphans, out.Orphans...)
 	acc.GoRenders = append(acc.GoRenders, out.GoRenders...)
+	acc.Templates += out.Templates
+	acc.RuntimeChildren = mergeRuntimeChildren(acc.RuntimeChildren, out.RuntimeChildren)
 }
+
+// emitWorkers bounds the number of emit goroutines running at once across the
+// whole process (nested parallel emits included). A slot that cannot get a
+// worker slot is emitted inline by the calling goroutine, so nesting can never
+// deadlock waiting for a worker.
+var emitWorkers = make(chan struct{}, runtime.GOMAXPROCS(0))
 
 // emitSlotsParallel emits sibling slots concurrently using fresh sub-emitters.
 // Each sub-emitter carries its own client-stack, orphan list, and meta
-// accumulators, so no shared state is ever mutated concurrently. After the
-// goroutines finish the results are merged back in document order, keeping
-// output byte-for-byte deterministic. Lists below parallelMinChildren are
-// emitted sequentially to avoid goroutine overhead.
+// accumulators, so no shared state is ever mutated concurrently (emit never
+// writes to the IR). After the goroutines finish the results are merged back
+// in document order, keeping output byte-for-byte deterministic. Lists below
+// parallelMinChildren are emitted sequentially to avoid goroutine overhead.
 func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 	var merged SlotOutput
 	if len(slots) == 0 {
@@ -740,37 +805,42 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 	outputs := make([]SlotOutput, len(slots))
 	subErrs := make([][]error, len(slots))
 	base := append([]irtree.SlotID{}, e.clientStack...)
+	emitOne := func(idx int) {
+		sub := NewEmitter()
+		sub.functions = e.functions
+		sub.IconResolver = e.IconResolver
+		sub.EvalJS = e.EvalJS
+		sub.GoComponents = e.GoComponents
+		sub.goCollector = e.goCollector
+		// Propagate build-wide tables so SSREval in this branch folds cva
+		// variants and context defaults exactly like the sequential path.
+		sub.cvaFactories = e.cvaFactories
+		sub.contextDefaults = e.contextDefaults
+		sub.CodeTheme = e.CodeTheme
+		sub.clientStack = append([]irtree.SlotID{}, base...)
+		outputs[idx] = sub.emitSlotNode(slots[idx])
+		subErrs[idx] = sub.errs
+	}
 	var wg sync.WaitGroup
 	for i := range slots {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			sub := NewEmitter()
-			sub.functions = e.functions
-			sub.IconResolver = e.IconResolver
-			sub.EvalJS = e.EvalJS
-			sub.GoComponents = e.GoComponents
-			sub.goCollector = e.goCollector
-			// Propagate build-wide tables so SSREval in this branch folds cva
-			// variants and context defaults exactly like the sequential path.
-			sub.cvaFactories = e.cvaFactories
-			sub.contextDefaults = e.contextDefaults
-			sub.CodeTheme = e.CodeTheme
-			sub.clientStack = append([]irtree.SlotID{}, base...)
-			outputs[idx] = sub.emitSlotNode(slots[idx])
-			subErrs[idx] = sub.errs
-		}(i)
+		select {
+		case emitWorkers <- struct{}{}:
+			wg.Add(1)
+			go func(idx int) {
+				defer func() {
+					<-emitWorkers
+					wg.Done()
+				}()
+				emitOne(idx)
+			}(i)
+		default:
+			emitOne(i)
+		}
 	}
 	wg.Wait()
 
 	for i, out := range outputs {
-		merged.HTML += out.HTML
-		merged.Signatures = append(merged.Signatures, out.Signatures...)
-		merged.HeadHTML += out.HeadHTML
-		merged.ScriptHTML += out.ScriptHTML
-		merged.StyleHTML += out.StyleHTML
-		merged.Orphans = append(merged.Orphans, out.Orphans...)
-		merged.GoRenders = append(merged.GoRenders, out.GoRenders...)
+		mergeSlotOutput(&merged, out)
 		// Diagnostics raised in a parallel branch must still fail the build.
 		e.errs = append(e.errs, subErrs[i]...)
 	}
@@ -813,7 +883,7 @@ func collectChildrenOrphans(children []irtree.SlotNode, owner irtree.SlotID) []o
 func (e *Emitter) emitTextSlot(s *irtree.TextSlot) SlotOutput {
 	id := string(s.ID)
 	initial := s.Initial
-	html := fmt.Sprintf("<!--k:%s-->%s<!--/k:%s-->", id, escape.HTML(initial), id)
+	html := slotMarker(id) + escape.Text(initial) + slotEndMarker(id)
 	return SlotOutput{HTML: html}
 }
 
@@ -823,64 +893,52 @@ func (e *Emitter) emitExprSlot(s *irtree.ExprSlot) SlotOutput {
 	// expressions (JSX-producing expressions route to ListSlot/ConditionalSlot),
 	// so they are always text and must be HTML-escaped to prevent template
 	// literals like `return <h1>x</h1>` from leaking real markup into the page.
-	html := fmt.Sprintf("<!--k:%s-->%s<!--/k:%s-->", id, escape.HTML(s.Initial), id)
+	html := slotMarker(id) + escape.Text(s.Initial) + slotEndMarker(id)
 	return SlotOutput{HTML: html}
 }
 
+// slotMarker and slotEndMarker render the comment markers that delimit a
+// dynamic slot. The id is comment-encoded so it can never close the comment.
+func slotMarker(id string) string    { return "<!--k:" + escape.Comment(id) + "-->" }
+func slotEndMarker(id string) string { return "<!--/k:" + escape.Comment(id) + "-->" }
+
+// emitConditionalSlot renders a reactive conditional as comment markers around
+// the ACTIVE branch only:
+//
+//	<!--k:ID-->active branch<!--/k:ID-->
+//
+// No wrapper element is emitted, so a conditional is valid anywhere (inside
+// <table>, <tbody>, <tr>, <ul>, <ol>, <select>, <p>) and CSS child selectors
+// see the real children. The inactive branch is rendered into a
+//
+//	<template data-kc="ID" data-kb="c|a">inactive branch</template>
+//
+// that is hoisted to the end of the page (SlotOutput.Templates), where
+// data-kb names the branch it holds (c = consequent, a = alternate). The
+// hydration bootstrap binds slots inside template content too, and kbindCond
+// swaps the branch nodes between the markers and a detached fragment, so
+// handlers and nested bindings of both branches survive toggling.
 func (e *Emitter) emitConditionalSlot(s *irtree.ConditionalSlot) SlotOutput {
 	id := string(s.ID)
-	var b strings.Builder
-	b.WriteString("<!--k:")
-	b.WriteString(id)
-	b.WriteString("-->")
-	// Render both branches, wrapped in togglable wrappers. The hydration
-	// effect toggles their display based on the test, so the SSR shows the
-	// initially-active branch and interactivity switches between them.
-	consequentHTML, alternateHTML := "", ""
-	var allSignatures []irtree.ComponentSignature
-	var allOrphans []orphanBinding
-	var childMeta, childScript, childStyle string
+	var cons, alt SlotOutput
 	for _, child := range s.Consequent {
-		out := e.emitSlotNode(child)
-		consequentHTML += out.HTML
-		allSignatures = append(allSignatures, out.Signatures...)
-		allOrphans = append(allOrphans, out.Orphans...)
-		childMeta += out.HeadHTML
-		childScript += out.ScriptHTML
-		childStyle += out.StyleHTML
+		mergeSlotOutput(&cons, e.emitSlotNode(child))
 	}
 	for _, child := range s.Alternate {
-		out := e.emitSlotNode(child)
-		alternateHTML += out.HTML
-		allSignatures = append(allSignatures, out.Signatures...)
-		allOrphans = append(allOrphans, out.Orphans...)
-		childMeta += out.HeadHTML
-		childScript += out.ScriptHTML
-		childStyle += out.StyleHTML
+		mergeSlotOutput(&alt, e.emitSlotNode(child))
 	}
-	consequentStyle, alternateStyle := "", ` style="display:none"`
+	activeHTML, inactiveHTML, held := cons.HTML, alt.HTML, "a"
 	if !s.InitialActive {
-		consequentStyle, alternateStyle = ` style="display:none"`, ""
+		activeHTML, inactiveHTML, held = alt.HTML, cons.HTML, "c"
 	}
-	b.WriteString("<div data-krate-cond-w")
-	b.WriteString(consequentStyle)
-	b.WriteString(">")
-	b.WriteString(consequentHTML)
-	b.WriteString("</div><div data-krate-cond-w")
-	b.WriteString(alternateStyle)
-	b.WriteString(">")
-	b.WriteString(alternateHTML)
-	b.WriteString("</div><!--/k:")
-	b.WriteString(id)
-	b.WriteString("-->")
-	return SlotOutput{
-		HTML:       b.String(),
-		Signatures: allSignatures,
-		HeadHTML:   childMeta,
-		ScriptHTML: childScript,
-		StyleHTML:  childStyle,
-		Orphans:    allOrphans,
-	}
+	cons.HTML, alt.HTML = "", ""
+
+	var out SlotOutput
+	mergeSlotOutput(&out, cons)
+	mergeSlotOutput(&out, alt)
+	out.HTML = slotMarker(id) + activeHTML + slotEndMarker(id)
+	out.Templates = `<template data-kc="` + escape.HTMLAttr(id) + `" data-kb="` + held + `">` + inactiveHTML + `</template>` + out.Templates
+	return out
 }
 
 func (e *Emitter) emitListSlot(s *irtree.ListSlot) SlotOutput {
@@ -889,21 +947,18 @@ func (e *Emitter) emitListSlot(s *irtree.ListSlot) SlotOutput {
 	var out SlotOutput
 
 	for _, item := range s.Items {
-		itemsHTML.WriteString(fmt.Sprintf("<!--k:%s:%s-->", id, item.Key))
+		itemID := id + ":" + item.Key
+		itemsHTML.WriteString(slotMarker(itemID))
 		for _, child := range item.Contents {
 			childOut := e.emitSlotNode(child)
 			itemsHTML.WriteString(childOut.HTML)
-			out.Signatures = append(out.Signatures, childOut.Signatures...)
-			out.Orphans = append(out.Orphans, childOut.Orphans...)
-			out.HeadHTML += childOut.HeadHTML
-			out.ScriptHTML += childOut.ScriptHTML
-			out.StyleHTML += childOut.StyleHTML
+			childOut.HTML = ""
+			mergeSlotOutput(&out, childOut)
 		}
-		itemsHTML.WriteString(fmt.Sprintf("<!--/k:%s:%s-->", id, item.Key))
+		itemsHTML.WriteString(slotEndMarker(itemID))
 	}
 
-	html := fmt.Sprintf("<!--k:%s-->%s<!--/k:%s-->", id, itemsHTML.String(), id)
-	out.HTML = html
+	out.HTML = slotMarker(id) + itemsHTML.String() + slotEndMarker(id)
 	return out
 }
 
@@ -924,15 +979,12 @@ func (e *Emitter) emitSuspenseSlot(s *irtree.SuspenseSlot) SlotOutput {
 	if s.Mode == irtree.SuspenseModeStatic {
 		inner = ""
 		for _, child := range s.Resolved {
-			inner += e.emitSlotNode(child).HTML
+			inner += e.emitSlotNode(child).inlineHTML()
 		}
 	}
 
-	id := s.StreamID
-	html := fmt.Sprintf(
-		`<!--suspense:%s-->%s<!--/suspense:%s-->`,
-		id, inner, id,
-	)
+	id := escape.Comment(s.StreamID)
+	html := `<!--suspense:` + id + `-->` + inner + `<!--/suspense:` + id + `-->`
 	out.HTML = html
 	return out
 }
@@ -975,7 +1027,7 @@ func walkMetaSlots(node *irtree.ComponentNode, result *EmitResult) {
 				tmp := NewEmitter()
 				for _, c := range meta.Children {
 					out := tmp.emitSlotNode(c)
-					childHTML.WriteString(out.HTML)
+					childHTML.WriteString(out.inlineHTML())
 				}
 				switch strings.ToLower(meta.ComponentName) {
 				case "head":
@@ -1037,8 +1089,9 @@ func collectSlotBindings(children []irtree.SlotNode) []irtree.SlotBinding {
 			})
 			// Recurse into both branches so nested slots (text slots, nested
 			// conditionals, lists) stay reactive after the conditional toggles.
-			// The emitter renders both branches (render-both + visibility
-			// toggle), so their nodes exist in the DOM to bind against.
+			// The inactive branch lives in a <template data-kc> whose content
+			// the bootstrap also binds, so both branches' nodes exist to bind
+			// against.
 			bindings = append(bindings, collectSlotBindings(s.Consequent)...)
 			bindings = append(bindings, collectSlotBindings(s.Alternate)...)
 		case *irtree.ListSlot:
