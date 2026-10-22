@@ -3,6 +3,7 @@ package parser
 import (
 	"testing"
 
+	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 )
 
@@ -123,12 +124,12 @@ func TestEdgeCases(t *testing.T) {
 		{"nullish-chain", "const x = a ?? b ?? c ?? d;"},
 		{"and-chain", "const x = a && b && c;"},
 		{"or-chain", "const x = a || b || c;"},
-		{"mixed-logical", "const x = a || b && c ?? d;"},
+		{"mixed-logical", "const x = (a || b && c) ?? d;"},
 		{"increment-decrement", "i++; i--; ++i; --i;"},
 		{"unary-plus-minus", "const x = +a; const y = -b;"},
 		{"not-chain", "const x = !!a;"},
 		{"typed-array-init", "const results: number[] = [];"},
-		{"typed-array-no-init", "const results: number[];"},
+		{"typed-array-no-init", "let results: number[];"},
 		{"typed-object-init", "const data: { items: number[] } = { items: [] };"},
 		{"typed-union", "const x: string | number = 'hello';"},
 		{"typed-generic", "const x: Array<string> = [];"},
@@ -149,5 +150,35 @@ func TestEdgeCases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			testParse(t, tt.name, tt.src)
 		})
+	}
+}
+
+// TestEdgeCaseShapes upgrades edge cases whose "parses without errors" check
+// masked dropped code: unary plus, tagged templates and labels must survive
+// in the AST.
+func TestEdgeCaseShapes(t *testing.T) {
+	parse := func(src string) *ast.Program {
+		t.Helper()
+		p := New(lexer.New(src).Tokenize())
+		prog := p.ParseProgram()
+		if len(p.Errors()) > 0 {
+			t.Fatalf("%q: %v", src, p.Errors())
+		}
+		return prog
+	}
+	prog := parse("const x = +a; const y = -b;")
+	if u, ok := prog.Body[0].(*ast.VarStmt).Decls[0].Init.(*ast.UnaryExpr); !ok || u.Op != "+" {
+		t.Errorf("unary plus dropped: %#v", prog.Body[0].(*ast.VarStmt).Decls[0].Init)
+	}
+	prog = parse("const x = html`<div>${value}</div>`;")
+	if len(prog.Body) != 1 {
+		t.Fatalf("tagged template split into %d statements", len(prog.Body))
+	}
+	if _, ok := prog.Body[0].(*ast.VarStmt).Decls[0].Init.(*ast.TaggedTemplateExpr); !ok {
+		t.Errorf("tagged template = %T", prog.Body[0].(*ast.VarStmt).Decls[0].Init)
+	}
+	prog = parse("outer: for (let i = 0; i < 10; i++) { }")
+	if _, ok := prog.Body[0].(*ast.LabeledStmt); !ok {
+		t.Errorf("label dropped: %T", prog.Body[0])
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 type Module struct {
@@ -103,7 +104,23 @@ type Bundler struct {
 	// cache memoizes per-file parse results. Shared across bundles in a build
 	// so shared modules are parsed once instead of once per page. May be nil.
 	cache *ModuleCache
+
+	// tsOpts are the tsconfig options used when stripping TypeScript.
+	tsOpts tsstrip.Options
 }
+
+// SetTSOptions configures how TypeScript sources are lowered (decorators,
+// class-field semantics) before parsing.
+func (b *Bundler) SetTSOptions(opts tsstrip.Options) { b.tsOpts = opts }
+
+// parseError keeps each diagnostic addressable while printing them together.
+type parseError struct {
+	summary string
+	errs    []error
+}
+
+func (e *parseError) Error() string   { return e.summary }
+func (e *parseError) Unwrap() []error { return e.errs }
 
 // SetModuleCache attaches a shared parse cache. A nil cache disables caching.
 func (b *Bundler) SetModuleCache(c *ModuleCache) {
@@ -602,13 +619,12 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 		return fmt.Errorf("reading %s: %w", path, err)
 	}
 	src := string(data)
-	tokens := lexer.New(src).Tokenize()
-	p := parser.New(tokens)
-	p.Filename = path
-	p.SetSource(src)
-	prog := p.ParseProgram()
-	if len(p.Errors()) > 0 {
-		return fmt.Errorf("%s", parser.FormatDiagnostics(p.Errors()))
+	// TypeScript is stripped by esbuild first; positions in the AST and in
+	// diagnostics refer to the original src. SourceCode stays the original so
+	// comment directives (`// @server`) are still seen.
+	prog, errs := tsstrip.Parse(path, src, b.tsOpts)
+	if len(errs) > 0 {
+		return &parseError{summary: parser.FormatDiagnostics(errs), errs: errs}
 	}
 	RewriteReact(prog)
 	_, actionChanged := b.rewriteActionImports(prog, abs)

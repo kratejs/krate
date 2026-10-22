@@ -122,6 +122,32 @@ const [count] = createSignal(0);
   emitted); a reactive test becomes part of the hydration bundle and toggles the
   element's visibility as the signal changes.
 
+## Passing signals as props
+
+A prop whose value reads a signal stays live in the child. The compiler passes
+it as a getter, so every `props.<name>` read (in rendered JSX, effects, memos
+and handlers) sees the current value:
+
+```tsx
+function Badge(props: { label: string }) {
+  return <span>{props.label}</span>; // updates when count changes
+}
+
+export default function Page() {
+  const [count, setCount] = createSignal(0);
+  return <Badge label={`clicked ${count()} times`} />;
+}
+```
+
+Destructuring reads the value once: `function Badge({ label })` sees only the
+initial value of a signal-derived prop, and the build warns about it. Keep the
+`props` parameter (and read `props.label`), or pass an accessor
+(`label={() => ...}`) and call it in the child.
+
+Custom hooks are plain functions: a call such as `useTitle("Home")` runs once
+per component instance during hydration, in source order with the rest of the
+component body.
+
 ## CSS Signals
 
 Interactive state can be expressed with **zero client JavaScript** using CSS

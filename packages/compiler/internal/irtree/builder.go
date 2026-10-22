@@ -6,6 +6,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
 
@@ -90,12 +91,20 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		}
 	}
 
+	builder := newBuilder(prog, ann, opts)
+	root := builder.buildComponentNode(entryFn, "")
+	root.SourceFile = ann.SourceFile
+	return builder.finishTree(root)
+}
+
+// newBuilder prepares the build-global state for one IR construction.
+func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder {
 	codeTheme := opts.CodeTheme
 	if codeTheme == "" {
 		codeTheme = syntaxhighlight.DefaultTheme
 	}
 	moduleConsts, moduleConstInits := mergedModuleConstants(prog, opts)
-	builder := &builder{
+	b := &builder{
 		functions:        ann.Functions,
 		ann:              ann,
 		idCounter:        make(map[string]int),
@@ -103,7 +112,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		elementCounts:    make(map[string]int),
 		slotIDMap:        make(map[string]SlotID),
 		slotCounts:       make(map[string]int),
-		moduleConsts:     moduleConsts,
+		moduleConsts:     typedModuleConsts(moduleConstInits, moduleConsts),
 		moduleConstInits: moduleConstInits,
 		cvaFactories:     mergeCVAFactories(ann.CVAFactories, prog),
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
@@ -116,37 +125,64 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		localImports:     opts.LocalComponentImports,
 		actionURLs:       opts.ActionURLs,
 	}
+	if entryFn := ann.Functions[ann.EntryPoint]; entryFn != nil {
+		b.expansion = []expansionFrame{{name: entryFn.Name}}
+	}
+	return b
+}
 
-	root := builder.buildComponentNode(entryFn, "")
-	root.SourceFile = ann.SourceFile
-
+// finishTree validates the module's functions and assembles the tree around
+// the built root.
+func (b *builder) finishTree(root *ComponentNode) *ComponentTree {
+	ann := b.ann
 	// Validate that every construct in the module's functions is supported by
 	// the JS code generator. Unsupported nodes become hard build errors rather
 	// than being silently dropped from the emitted hydration/SSR code.
-	for _, fn := range ann.Functions {
-		builder.codegenErrs = append(builder.codegenErrs, codegenIssues(fn)...)
+	// Functions are visited in name order so the error list is deterministic;
+	// an aliased function (an import alias maps to the same declaration) is
+	// validated once.
+	fnNames := make([]string, 0, len(ann.Functions))
+	for name := range ann.Functions {
+		fnNames = append(fnNames, name)
+	}
+	sort.Strings(fnNames)
+	checked := make(map[*ast.FnDecl]bool, len(fnNames))
+	for _, name := range fnNames {
+		fn := ann.Functions[name]
+		if fn == nil || checked[fn] {
+			continue
+		}
+		checked[fn] = true
+		b.srcFn = name
+		b.codegenErrs = append(b.codegenErrs, codegenIssues(fn, func(pos ast.Pos, msg, hint string) error {
+			return b.diagAt(pos, diag.SeverityError, msg, hint)
+		})...)
+		b.srcFn = ""
 	}
 
-	errs := make([]error, 0, len(builder.cssErrs)+len(builder.codegenErrs))
-	errs = append(errs, builder.cssErrs...)
-	errs = append(errs, builder.codegenErrs...)
+	errs := make([]error, 0, len(b.cssErrs)+len(b.buildErrs)+len(b.codegenErrs))
+	errs = append(errs, b.cssErrs...)
+	errs = append(errs, b.buildErrs...)
+	errs = append(errs, b.codegenErrs...)
+	errs = append(errs, b.markupErrs...)
 
-	cssSignals, noJSFallback := builder.cssStylesheets()
+	cssSignals, noJSFallback := b.cssStylesheets()
 	return &ComponentTree{
-		Root:            root,
-		HasLinks:        builder.hasLinks,
-		RuntimeStore:    builder.runtimeProps,
-		Functions:       ann.Functions,
-		CVAFactories:    builder.cvaFactories,
-		ContextDefaults: builder.contextDefaults,
-		CSSSignalsCSS:   cssSignals,
-		HasCSSSignals:   len(builder.cssCollected) > 0 || len(builder.cssConditions) > 0,
-		NoJSFallbackCSS: noJSFallback,
-		NeedsCSSARIA:    builder.cssNeedsARIA,
-		Errors:          errs,
+		Root:             root,
+		HasLinks:         b.hasLinks,
+		RuntimeStore:     b.runtimeProps,
+		Functions:        ann.Functions,
+		CVAFactories:     b.cvaFactories,
+		ContextDefaults:  b.contextDefaults,
+		ModuleConstInits: b.moduleConstInits,
+		CSSSignalsCSS:    cssSignals,
+		HasCSSSignals:    len(b.cssCollected) > 0 || len(b.cssConditions) > 0,
+		NoJSFallbackCSS:  noJSFallback,
+		NeedsCSSARIA:     b.cssNeedsARIA,
+		Errors:           errs,
 
-		ExternalComponents: builder.externals,
-		Warnings:           builder.warnings,
+		ExternalComponents: b.externals,
+		Warnings:           b.warnings,
 	}
 }
 
@@ -179,44 +215,112 @@ func (b *builder) cssStylesheets() (stylesheet, noJSFallback string) {
 	return stylesheet, noJSFallback
 }
 
-// builder holds state during IR construction.
+// componentCtx is the build state scoped to the component instance being
+// built. The builder embeds the active context; buildComponentNode pushes the
+// caller's context on entry and pops it on exit, so nothing a component build
+// changes here can leak into its parent or siblings. A child starts from a
+// copy of its caller's context: the call-site inputs are set by
+// buildComponentSlot before the push, and the render scope is replaced as the
+// child's body is processed.
+type componentCtx struct {
+	// Call-site inputs.
+	localProps       valueMap        // resolved props, params, locals and module consts (name -> value)
+	localFuncProps   map[string]bool // prop names whose values are function references
+	callSiteChildren []ast.JSXChild  // call-site children of the current component
+	// restProps maps a rest (or whole-props) parameter name to the call-site
+	// attributes it collects (attr name -> expression). Used to expand
+	// `{...props}` spreads on intrinsic elements.
+	restProps         map[string]map[string]ast.Expr
+	pendingScopeProps map[string]scopeRef // the parent's scope-valued props for the child build
+	forceClient       bool                // keep a wrapper client so call-site child slots hydrate
+	// liveProps names the props whose call-site value reads a caller signal;
+	// they are registered as getters, so `<livePropsParam>.<name>` reads are
+	// reactive in the child's hydration code.
+	liveProps      map[string]bool
+	livePropsParam string
+	// contextScopes maps an active context name (as provided by a
+	// `<Ctx.Provider value={scope}>` subtree) to the scope handle it carries, so
+	// `const s = Ctx.useContext()` inside a descendant resolves `s.trigger(...)`.
+	contextScopes map[string]scopeRef
+
+	// Render scope of the component body.
+	currentNode     *ComponentNode      // component whose slots are being built
+	localFnBody     []ast.Stmt          // body of current component function for handler resolution
+	localSignals    map[string]ast.Expr // component-local signal context (name -> initial expr)
+	signalSetters   map[string]bool     // component-local signal setter names
+	localParamNames map[string]bool     // component parameter names (destructured or not) for undefined folding
+	refObjectVars   map[string]bool     // component-local names bound to a useRef {current:...} object
+	refCallbackVars map[string]bool     // component-local names bound to a function (callback-ref targets)
+	// shadow is the chain of nested lexical scopes active during an expression
+	// walk. Names it declares shadow component-level signals and locals.
+	shadow *bindingScope
+	// contextValues holds the active provider value expression per context,
+	// pushed while building a `<Ctx.Provider value={expr}>` subtree so a
+	// dynamic value substitutes for `Ctx.useContext()` reads.
+	contextValues map[string]ast.Expr
+	// scopeHandles maps a local identifier (or `props.<name>`) to the CSS scope
+	// it holds, so `x.trigger(v)` / `x.panel(v)` / `x.close()` spreads resolve
+	// anywhere in any component (a handle can be passed to children as a prop).
+	scopeHandles map[string]scopeRef
+	// cssSignals is the analyzer for the component currently being walked, and
+	// cssToken its per-instance token. Both are nil/"" outside a CSS signal
+	// component. They drive trigger/panel interception in buildJSXSlot and the
+	// controller/diagnostics collection.
+	cssSignals *csssignals.Analyzer
+	cssToken   string
+
+	// Hydration bindings accumulated while building the component's slots.
+	pendingHandlers  []HandlerDecl
+	pendingAttrs     []AttrBinding
+	pendingRefs      []RefBinding
+	pendingPropsRegs []string // __krate_props["id"]={...} registrations for child components
+}
+
+// pushComponentCtx saves the active component context.
+func (b *builder) pushComponentCtx() {
+	b.ctxStack = append(b.ctxStack, b.componentCtx)
+}
+
+// popComponentCtx restores the context saved by the matching push.
+func (b *builder) popComponentCtx() {
+	n := len(b.ctxStack) - 1
+	b.componentCtx = b.ctxStack[n]
+	b.ctxStack[n] = componentCtx{}
+	b.ctxStack = b.ctxStack[:n]
+}
+
+// builder holds state during IR construction. Per-component state lives in
+// the embedded componentCtx; the fields below are build-global: inputs shared
+// by every component, counters that keep IDs unique across the page, and the
+// collected output (CSS, externals, diagnostics).
 type builder struct {
-	functions        map[string]*ast.FnDecl
-	ann              *Annotations
-	idCounter        map[string]int
-	hasLinks         bool
-	runtimeProps     *RuntimePropStore
-	instanceCounts   map[string]int      // per-component-name instance counter
-	elementCounts    map[string]int      // per-parent tag name counter for sibling disambiguation
-	slotCounter      int                 // monotonic counter for compact slot IDs
-	slotIDMap        map[string]SlotID   // logical ID -> compact ID
-	pendingHandlers  []HandlerDecl       // accumulated during buildSlotNodes
-	pendingAttrs     []AttrBinding       // accumulated during buildSlotNodes
-	pendingRefs      []RefBinding        // accumulated during buildSlotNodes
-	pendingPropsRegs []string            // __krate_props["id"]={...} registrations for child components
-	slotCounts       map[string]int      // per-parent dynamic-slot counters for sibling disambiguation
-	currentNode      *ComponentNode      // component whose slots are being built
-	localFnBody      []ast.Stmt          // body of current component function for handler resolution
-	localSignals     map[string]ast.Expr // component-local signal context (name -> initial expr)
-	signalSetters    map[string]bool     // component-local signal setter names
-	localProps       map[string]string   // component-local resolved props (name -> value)
-	localParamNames  map[string]bool     // component parameter names (destructured or not) for undefined folding
-	// restProps maps a rest parameter name (e.g. `props` in `{a, ...props}`) to
-	// the call-site attributes it collects (attr name -> expression). Used to
-	// expand `{...props}` spreads on intrinsic elements.
-	restProps        map[string]map[string]ast.Expr
-	localFuncProps   map[string]bool           // component-local prop names whose values are function references
-	refObjectVars    map[string]bool           // component-local names bound to a useRef {current:...} object
-	refCallbackVars  map[string]bool           // component-local names bound to a function (callback-ref targets)
-	callSiteChildren []ast.JSXChild            // call-site children of the current component
-	moduleConsts     map[string]string         // module-level const values (name -> resolved literal)
+	componentCtx
+	ctxStack []componentCtx
+
+	// locateOnly is non-zero while building slots that only locate nested
+	// client components and are never emitted (a build-time evaluated
+	// component's own return JSX); warnings about rendered output are skipped.
+	locateOnly     int
+	functions      map[string]*ast.FnDecl
+	ann            *Annotations
+	idCounter      map[string]int
+	hasLinks       bool
+	runtimeProps   *RuntimePropStore
+	instanceCounts map[string]int    // per-component-name instance counter
+	slotCounter    int               // monotonic counter for compact slot IDs
+	slotIDMap      map[string]SlotID // logical ID -> compact ID
+	slotCounts     map[string]int    // per-parent dynamic-slot counters for sibling disambiguation
+	// elementCounts is the per-parent tag counter for sibling disambiguation.
+	// buildComponentNode clears it on entry and does not restore it; element
+	// IDs stay unique because they are joined with the parent's slot ID.
+	elementCounts    map[string]int
+	moduleConsts     valueMap                  // module-level const values (name -> folded value)
 	moduleConstInits map[string]ast.Expr       // module-level const initializers (name -> expr)
 	cvaFactories     map[string]*CVASpec       // module-level `const X = cva(...)` factories
 	contextDefaults  map[string]string         // module-level `const X = createContext(v)` defaults
 	codeTheme        string                    // chroma theme for compile-time <Code> highlighting
 	idPrefix         string                    // namespace for compact slot IDs (merged builds)
 	aggressiveDCE    bool                      // drop unreferenced local functions (opt-in)
-	forceClient      bool                      // keep a wrapper client so call-site child slots hydrate
 	suspenseCount    int                       // monotonic counter for stable StreamID generation
 	compat           csssignals.StyleMode      // CSS-signal stylesheet mode (modern/legacy/hybrid)
 	goComponents     map[string]GoComponentRef // imported Go components (local name -> ref)
@@ -224,11 +328,11 @@ type builder struct {
 	localImports     map[string]bool           // relative-path import bindings
 	actionURLs       map[string]string         // server-action binding -> POST URL
 	externals        []ExternalComponent       // unresolved package components mounted at runtime
-	warnings         []string                  // non-fatal build warnings
-	// contextValues holds the active provider value expression per context,
-	// pushed while building a `<Ctx.Provider value={expr}>` subtree so a
-	// dynamic value substitutes for `Ctx.useContext()` reads.
-	contextValues map[string]ast.Expr
+	warnings         []diag.Diagnostic         // non-fatal, positioned build warnings
+	// snapshotPropWarned dedupes snapshot-prop warnings per component and props.
+	snapshotPropWarned map[string]bool
+	markupErrs         []error    // invalid tag/attribute names, children on void elements
+	selectStack        [][]string // selected option values of enclosing <select> elements
 
 	// cssIndex assigns stable, page-unique indices to (component, var) scope
 	// pairs so classes/CSS are deterministic across builds.
@@ -240,23 +344,6 @@ type builder struct {
 	// components (their namespaced parts): fn -> options/initial. Consulted by
 	// cssAnalyzer so controllers/classes match the exact set of call-site parts.
 	scopeOverrides map[*ast.FnDecl]scopeSpec
-	// scopeHandles maps a local identifier (or `props.<name>`) to the CSS scope
-	// it holds, so `x.trigger(v)` / `x.panel(v)` / `x.close()` spreads resolve
-	// anywhere in any component (a handle can be passed to children as a prop).
-	scopeHandles map[string]scopeRef
-	// pendingScopeProps carries the parent's scope-valued props into the child
-	// component build so `props.<name>` resolves to the same handle.
-	pendingScopeProps map[string]scopeRef
-	// contextScopes maps an active context name (as provided by a
-	// `<Ctx.Provider value={scope}>` subtree) to the scope handle it carries, so
-	// `const s = Ctx.useContext()` inside a descendant resolves `s.trigger(...)`.
-	contextScopes map[string]scopeRef
-	// cssSignals is the analyzer for the component currently being walked, and
-	// cssToken its per-instance token. Both are nil/"" outside a CSS signal
-	// component. They drive trigger/panel interception in buildJSXSlot and the
-	// controller/diagnostics collection.
-	cssSignals *csssignals.Analyzer
-	cssToken   string
 	// cssCollected holds every scope whose controller inputs were emitted, so
 	// the tree can expose the exact set of stylesheets the page needs.
 	cssCollected map[int]*csssignals.Scope
@@ -276,6 +363,23 @@ type builder struct {
 	// does not support. They fail the build so no construct is silently dropped
 	// from emitted hydration/SSR code.
 	codegenErrs []error
+	// buildErrs collects positioned hard errors raised while building slots
+	// (unlowerable early returns, recursive component expansion, ...).
+	buildErrs []error
+
+	// expansion is the stack of component functions currently being expanded,
+	// used to detect recursive components; recursiveExpansions counts every
+	// re-entry so a diverging recursion is cut off with a diagnostic.
+	expansion           []expansionFrame
+	recursiveExpansions int
+	recursionReported   map[string]bool
+	// returnIssueReported dedupes unlowerable early-return diagnostics per
+	// component function (a component may be instantiated many times).
+	returnIssueReported map[*ast.FnDecl]bool
+	// srcFn names the function whose AST is being walked when it differs from
+	// the component node being built (a child's return walked for discovery),
+	// so diagnostics resolve the right source file.
+	srcFn string
 }
 
 func (b *builder) collectCSSScope(s *csssignals.Scope) {

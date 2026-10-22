@@ -12,16 +12,45 @@ var htmlReplacer = strings.NewReplacer(
 	">", "&gt;",
 	"\"", "&quot;",
 	"'", "&#39;",
-	// The \x1f unit separator is the internal array-item delimiter used by
-	// SSREval's array evaluation. It is not content and must never reach HTML.
-	"\x1f", "",
 )
 
 // HTML escapes a string for safe inclusion in HTML text content or attribute
-// values. The full set (& < > " ') is escaped and the internal \x1f array
-// separator is stripped.
+// values. The full set (& < > " ') is escaped.
 func HTML(s string) string {
 	return htmlReplacer.Replace(s)
+}
+
+var textReplacer = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+)
+
+// Text escapes a decoded string for an HTML text position (element content
+// outside raw-text elements). Only & < > need escaping there; quotes are left
+// alone so ordinary prose stays readable.
+func Text(s string) string {
+	return textReplacer.Replace(s)
+}
+
+var commentReplacer = strings.NewReplacer(
+	"%", "%25",
+	">", "%3E",
+	"<", "%3C",
+	"\x00", "%00",
+	"\x1f", "",
+)
+
+// Comment encodes a value (slot id, list key, stream id) for use inside an
+// HTML comment marker such as <!--k:ID-->. A comment can only be closed by a
+// sequence containing '>', so percent-encoding '>' (and '<' and '%', which
+// keeps the encoding reversible with decodeURIComponent) means user data can
+// never terminate the marker. Ordinary ids and keys are left unchanged.
+func Comment(s string) string {
+	if !strings.ContainsAny(s, "%<>\x00\x1f") {
+		return s
+	}
+	return commentReplacer.Replace(s)
 }
 
 // HTMLAttr is an alias for HTML: both escape the full set, so the result is

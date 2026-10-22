@@ -10,541 +10,14 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/astprint"
-	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
-
-// buildComponentNode
-
-func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *ComponentNode {
-	if fn == nil {
-		return &ComponentNode{Name: "_nil", Tier: TierStatic}
-	}
-
-	// Scope handles are component-scoped: only this component's own declarations
-	// and its scope-valued props are visible while building it.
-	savedHandles := b.scopeHandles
-	savedPendingScope := b.pendingScopeProps
-	b.scopeHandles = make(map[string]scopeRef)
-	// A component that provides a CSS scope via context must render its
-	// call-site children through the slot tree (not SSR-eval), so it stays off
-	// the static tier like part roots.
-	_, _, providesScope := providedScopeContext(fn)
-	defer func() {
-		b.scopeHandles = savedHandles
-		b.pendingScopeProps = savedPendingScope
-	}()
-
-	id := joinSlotID(parentID, fn.Name)
-	tier := b.ann.ComponentTiers[fn.Name]
-	if tier == TierUnknown {
-		tier = TierClient
-	}
-
-	// Instance disambiguation: append _cN to prevent slot ID collisions
-	// when the same component appears multiple times.
-	instanceIdx := b.instanceCounts[fn.Name]
-	b.instanceCounts[fn.Name]++
-	id = SlotID(string(id) + "_c" + itoa(instanceIdx))
-
-	node := &ComponentNode{
-		ID:         id,
-		Name:       fn.Name,
-		Tier:       tier,
-		Fn:         fn,
-		SourceFile: b.ann.SourceFile,
-		Line:       fn.Position.Line,
-	}
-	savedNode := b.currentNode
-	b.currentNode = node
-	defer func() { b.currentNode = savedNode }()
-
-	node.Signals = b.collectSignalDecls(fn)
-	node.BodyUses = b.collectBodySignalUses(fn.Body, node.Signals)
-	savedSetters := b.signalSetters
-	b.signalSetters = make(map[string]bool, len(node.Signals))
-	for _, sig := range node.Signals {
-		if sig.SetterName != "" {
-			b.signalSetters[sig.SetterName] = true
-		}
-	}
-
-	// Set component-local signal context before collecting effects/memos/extra
-	// vars: component's own signals take precedence over the global annotation
-	// map so signal reads resolve to the correct initial value even with name
-	// collisions across components - and signal-referencing classifications for
-	// extra vars see the current component's signals, not just the parent's.
-	savedLocalSignals := b.localSignals
-	if len(node.Signals) > 0 {
-		merged := make(map[string]ast.Expr, len(b.ann.Signals)+len(node.Signals))
-		for k, v := range b.ann.Signals {
-			merged[k] = v
-		}
-		for _, sig := range node.Signals {
-			if sig.InitialExpr != nil {
-				merged[sig.Name] = sig.InitialExpr
-			}
-		}
-		b.localSignals = merged
-	}
-
-	// Client-only: effects, memos, extra vars
-	if tier == TierClient {
-		node.InstanceID = deriveInstanceID(string(id))
-		node.Effects = b.collectEffectJS(fn.Body)
-		node.Memos = b.collectMemoJS(fn.Body)
-		node.PreSignalVars, node.ExtraVars = b.collectExtraVarJS(fn.Body)
-		node.ExtraVars = append(node.ExtraVars, b.collectResourceJS(fn.Body)...)
-	}
-
-	// Reset element tag counters for fresh walk
-	for k := range b.elementCounts {
-		delete(b.elementCounts, k)
-	}
-
-	// Save parent's pending handlers so child component processing doesn't overwrite them
-	savedHandlers := b.pendingHandlers
-	b.pendingHandlers = nil
-
-	// Save parent's pending attr bindings for the same reason
-	savedAttrs := b.pendingAttrs
-	b.pendingAttrs = nil
-
-	// Save parent's pending ref bindings for the same reason
-	savedRefs := b.pendingRefs
-	b.pendingRefs = nil
-
-	// Save parent's pending props registrations for the same reason
-	savedPropsRegs := b.pendingPropsRegs
-	b.pendingPropsRegs = nil
-
-	// Set local function body context for handler resolution
-	savedLocalFnBody := b.localFnBody
-	b.localFnBody = fn.Body
-
-	// Track which local variables are useRef {current:...} objects so a
-	// `ref={myRef}` binding assigns `.current` instead of clobbering the object.
-	savedRefObjectVars := b.refObjectVars
-	b.refObjectVars = collectRefObjectVars(fn.Body)
-
-	// Track which local names hold functions (named function declarations or
-	// variables initialized to an arrow/function). `ref={setRef}` where setRef
-	// is such a function is a callback ref - kbindRef(id, setRef) invokes it
-	// with the node - NOT an assignment target (which would overwrite the
-	// function variable with the element, breaking onMount readers).
-	savedRefCallbackVars := b.refCallbackVars
-	b.refCallbackVars = collectFunctionRefVars(fn.Body)
-
-	// Named memos (const doubled = createMemo(() => ...)) are treated as local
-	// reactive getters: mapping the getter to its arrow body expression lets
-	// JSX text reads like {doubled()} resolve to a reactive text binding with a
-	// computed SSR initial value (b.sigMap() is consulted for both reactivity
-	// detection and initial evaluation).
-	if tier == TierClient && b.localSignals != nil {
-		for name, arrow := range b.collectNamedMemos(fn.Body) {
-			if bodyExpr := arrowBodyExpr(arrow); bodyExpr != nil {
-				b.localSignals[name] = bodyExpr
-			}
-		}
-		// Resource getters (const [user, actions] = createResource(...)) are
-		// registered as reactive getters with a sentinel initial expression so
-		// reads like {user.loading} / {user.state} resolve their correct initial
-		// value during SSR while still emitting live bindings at hydration.
-		for _, name := range b.collectResourceNames(fn.Body) {
-			b.localSignals[name] = resourceSentinel
-		}
-	}
-
-	// Set component-local props: resolved call-site attribute values so that
-	// prop reads (props.X and bare param identifiers) resolve during the walk.
-	// buildComponentSlot populates b.localProps before invoking this method.
-	savedLocalProps := b.localProps
-	savedContextValues := b.contextValues
-	savedParamNames := b.localParamNames
-	// Record the component's parameter names (including destructured members)
-	// and fold any absent one to "undefined" (or its default), so an omitted
-	// prop like `className` in `cn("base", className)` resolves as a known
-	// undefined rather than leaking the identifier.
-	b.localParamNames = make(map[string]bool)
-	for _, name := range extractParamNames(fn) {
-		b.localParamNames[name] = true
-		if b.localProps == nil {
-			b.localProps = make(map[string]string)
-		}
-		if _, exists := b.localProps[name]; !exists {
-			b.localProps[name] = b.paramDefaultValue(fn, name)
-		}
-	}
-	// The entry component is built with an empty parent ID and has no call
-	// site; any non-empty parent ID means we are a child with call-site props.
-	// The distinction matters below: root locals are folded for build-time
-	// evaluation but must NOT force the root out of its static tier.
-	isPageRoot := parentID == ""
-	savedLocalFuncProps := b.localFuncProps
-	if b.localFuncProps != nil {
-		node.FuncProps = b.localFuncProps
-	}
-
-	// Fold module-level constants (const X = <literal>) into the component's
-	// local-prop scope so JSX text referencing them (e.g. {hexNum}) resolves to
-	// their value at build time instead of leaking the identifier name. Local
-	// props/vars take precedence, so module consts are only added as defaults.
-	if len(b.moduleConsts) > 0 {
-		if b.localProps == nil {
-			b.localProps = make(map[string]string)
-		}
-		for k, v := range b.moduleConsts {
-			if _, exists := b.localProps[k]; !exists {
-				b.localProps[k] = v
-			}
-		}
-	}
-
-	// Seed `createContext(default)` bindings under a reserved key so
-	// `Ctx.useContext()` folds to the default at build time (no Provider exists
-	// during SSG). Without this the local `const v = Ctx.useContext()` cannot be
-	// folded and hydration would reference an undefined context object.
-	if len(b.contextDefaults) > 0 {
-		if b.localProps == nil {
-			b.localProps = make(map[string]string)
-		}
-		for k, v := range b.contextDefaults {
-			key := contextMarkerPrefix + k
-			if _, exists := b.localProps[key]; !exists {
-				b.localProps[key] = v
-			}
-		}
-	}
-
-	// Resolve component local variables (var lang = props.lang || "", etc.) to
-	// build-time constants. Folded into localProps for SSR initial evaluation
-	// and emitted as var declarations in the hydration bundle so bindings that
-	// reference them don't throw ReferenceError. Locals that alias a function
-	// prop (`var onNavigate = props.onNavigate`) cannot be const-folded (the
-	// value is a live function reference, not a literal): they're emitted as a
-	// runtime read of the __krate_props registry instead.
-	var funcPropAliases []string
-	// A page root starts with a nil localProps map, but its local variables
-	// still need folding so slot initials resolve to their values rather than
-	// leaking the identifier name into output (e.g. a root `const title = "..."`
-	// rendered inside <Head><title>{title}</title></Head>).
-	if b.localProps == nil {
-		b.localProps = make(map[string]string)
-	}
-	// useId() resolves to a per-component-instance build-time literal. The
-	// instance ID is stable across SSR and hydration, so `<Label htmlFor={id}>`
-	// / `<Input id={id}>` agree without any runtime state (and without the
-	// SSR/hydration divergence React's runtime counter risks). Multiple calls
-	// within one instance get distinct suffixes.
-	useIdBase := "krate-" + strings.ReplaceAll(string(id), ".", "-")
-	useIdN := 0
-	nextUseId := func() string {
-		n := useIdN
-		useIdN++
-		if n == 0 {
-			return useIdBase
-		}
-		return useIdBase + "-" + itoa(n)
-	}
-	locals, useIdLocals, localInits, localOrder, localLeaked := collectLocalVars(fn.Body, b.sigMap(), b.localProps, nextUseId)
-	// Re-fold locals whose initializer needs the cva/cn table (e.g. shadcn's
-	// `const classes = cn(buttonVariants({ variant }), className)`), so JSX
-	// attributes reference the class value instead of the variable name.
-	for name, init := range localInits {
-		if init == nil {
-			continue
-		}
-		// Array/object/JSX locals may be mutated by loops or emitted as runtime
-		// structures; folding them would skip those statements.
-		switch init.(type) {
-		case *ast.ArrayExpr, *ast.ObjectExpr, *ast.JSXElement, *ast.JSXFragment, *ast.ArrowFn:
-			continue
-		}
-		if v := b.evalAttrValue(init); v != "" {
-			locals[name] = v
-			if b.localProps == nil {
-				b.localProps = make(map[string]string)
-			}
-			b.localProps[name] = v
-		}
-	}
-	if len(locals) > 0 {
-		node.LocalVars = make(map[string]string, len(locals))
-		for name, val := range locals {
-			if val != "" {
-				node.LocalVars[name] = val
-			}
-		}
-	}
-	if b.localFuncProps != nil && tier == TierClient {
-		// Remove function-prop aliases from the fold set so they aren't
-		// serialized as the function's name string, and re-declare them as
-		// live reads below.
-		for name := range locals {
-			if prop := funcPropAliasOf(fn.Body, name, b.localFuncProps); prop != "" {
-				funcPropAliases = append(funcPropAliases, name+"=props."+prop)
-				delete(locals, name)
-			}
-		}
-	}
-	// useId locals are referenced by SSR-resolved attributes and any client
-	// bindings, so emit them as extra vars for every client component -
-	// including the page root (whose ordinary locals are intentionally left
-	// unemitted to allow static promotion).
-	if tier == TierClient {
-		declared := declaredLocalNames(node, fn)
-		for _, name := range sortedKeys(useIdLocals) {
-			if declared[name] {
-				continue
-			}
-			node.ExtraVars = append(node.ExtraVars, "var "+name+"="+jsLiteralFor(useIdLocals[name]))
-		}
-	}
-	// Dynamic context locals (`const v = Ctx.useContext()`) must read the live
-	// getter prop rather than the context default folded at build time.
-	for name, init := range localInits {
-		if init == nil {
-			continue
-		}
-		ctx, ok := contextReadTarget(init)
-		if !ok {
-			continue
-		}
-		if _, active := b.contextValues[ctx]; !active {
-			continue
-		}
-		localInits[name] = &ast.MemberExpr{
-			Object:   &ast.Identifier{Name: "props"},
-			Property: &ast.Identifier{Name: contextPropPrefix + ctx},
-		}
-		locals[name] = ""
-		localLeaked[name] = true
-	}
-	if len(locals) > 0 {
-		for k, v := range locals {
-			// Leaked locals have no known value; leaving them OUT of localProps
-			// makes guards/tests referencing them fold as unknown (so a
-			// ConditionalSlot is emitted) instead of treating "" as a
-			// definitive falsy value and dropping the branch.
-			if localLeaked[k] {
-				continue
-			}
-			if _, exists := b.localProps[k]; !exists {
-				b.localProps[k] = v
-			}
-		}
-		// Emit ExtraVars for children only. collectExtraVarJS already excludes
-		// props-derived locals for every component specifically so a purely
-		// presentational root can auto-promote to TierStatic; re-adding them
-		// here for the root would block that promotion and flip the page to
-		// client (losing build-time evaluability).
-		if tier == TierClient && !isPageRoot {
-			declared := declaredLocalNames(node, fn)
-			// Emit locals in SOURCE (declaration) order, not alphabetical order:
-			// a local may reference an earlier local (e.g. `basePath` derives
-			// from `themeOptions`), and alphabetical emission would assign the
-			// dependent before its dependency, yielding `undefined`.
-			var preLocals []string
-			for _, name := range localOrder {
-				if _, ok := locals[name]; !ok {
-					continue
-				}
-				if declared[name] {
-					continue
-				}
-				// A local whose initializer reads props OR another local must be
-				// re-evaluated at runtime (`var items=props.items||[]`) so its
-				// dependencies have already been assigned. Folding is only safe
-				// for build-time constants; emitting a folded array/object
-				// literal there previously quoted the JS source into a string.
-				init := localInits[name]
-				decl := ""
-				// Emit as a runtime expression when the value depends on props,
-				// on another local, is a reference to a function/object binding,
-				// or could not be folded at all (`locals[name] == ""` marks a
-				// leaked/unresolvable value). Reference initializers must be
-				// rendered from the AST (as `SomeIdent`) rather than the folded
-				// string, which cannot be told apart from a string constant.
-				// A folded, non-reactive scalar (e.g. `const classes = cn(cva(...))`)
-				// can be emitted as its value. Only props-derived arrays/objects/
-				// functions (and signal-reactive locals) need the runtime expression.
-				foldable := init != nil && locals[name] != "" && !b.referencesSignal(init) && !isReferenceInit(init)
-				if foldable {
-					switch init.(type) {
-					case *ast.ArrayExpr, *ast.ObjectExpr, *ast.JSXElement, *ast.JSXFragment, *ast.ArrowFn:
-						foldable = false
-					}
-				}
-				if init != nil && !foldable && (referencesProps(init) || referencesAnyLocal(init, b.sigMap(), locals) || isReferenceInit(init) || locals[name] == "") {
-					if js := generateExprJS(init, b.sigMap()); js != "" {
-						decl = "var " + name + "=" + js
-					}
-				}
-				if decl == "" {
-					decl = "var " + name + "=" + jsLiteralFor(locals[name])
-				}
-				// Signal-referencing locals must be declared after the signal
-				// declarations; everything else goes BEFORE collectExtraVarJS's
-				// pre-vars so a local that depends on a props-derived local
-				// (emitted here) is ordered correctly.
-				if init != nil && b.referencesSignal(init) {
-					node.ExtraVars = append(node.ExtraVars, decl)
-				} else {
-					preLocals = append(preLocals, decl)
-				}
-			}
-			if len(preLocals) > 0 {
-				node.PreSignalVars = append(preLocals, node.PreSignalVars...)
-			}
-		}
-	}
-	if len(funcPropAliases) > 0 && tier == TierClient {
-		// The alias reads props.<funcProp>, so the component must bind props to
-		// the registry entry registered by its parent (emitted ahead of these in
-		// newhydrate). Declared AFTER the registry read to preserve correctness.
-		node.FuncPropAliases = append(node.FuncPropAliases, funcPropAliases...)
-	}
-
-	// Find return statement and build children
-	// Handlers are accumulated in b.pendingHandlers during this walk.
-	returnStmt := findReturnStmt(fn.Body)
-	if returnStmt != nil && returnStmt.Value != nil {
-		// CSS components render through the normal slot pipeline: the analyzer
-		// drives trigger/panel rewrites and the controller inputs are injected
-		// into the component's scope anchor. Set the component-local analyzer +
-		// per-instance token for the duration of the walk.
-		analyzer := b.cssAnalyzer(fn)
-		if analyzer != nil && analyzer.HaveAny() && !analyzer.OK() {
-			// Hard error: no fallback. The declaration is not compiled to
-			// signals either, so a broken component must fail the build.
-			for _, reason := range analyzer.Errors() {
-				b.collectCSSErr(fn.Name, returnStmt.Position.Line, reason)
-			}
-		}
-
-		// Scope-valued props from the parent are visible to this component
-		// whether or not it declares its own scope.
-		for k, ref := range b.pendingScopeProps {
-			b.scopeHandles[k] = ref
-		}
-		b.pendingScopeProps = nil
-		// Context-provided scope handles (`const s = Ctx.useContext()`).
-		b.registerContextReads(fn)
-		// Scope handles are compile-time state: never emit them as runtime vars.
-		node.PreSignalVars = dropVarDecls(node.PreSignalVars, b.scopeHandles)
-		node.ExtraVars = dropVarDecls(node.ExtraVars, b.scopeHandles)
-
-		savedChoice, savedToken := b.cssSignals, b.cssToken
-		retExpr := returnStmt.Value
-		if analyzer != nil && analyzer.OK() {
-			b.cssSignals = analyzer
-			b.cssToken = csssignals.SanitizeToken(string(id))
-			for _, s := range analyzer.Scopes() {
-				b.collectCSSScope(s)
-			}
-			b.registerScopeLocals(fn, analyzer, b.cssToken)
-			for _, c := range analyzer.Conditions() {
-				b.collectCSSCondition(c)
-			}
-			if analyzer.NeedsARIA() {
-				b.cssNeedsARIA = true
-			}
-			// Inject the scope class + controller inputs into the component's
-			// root (or a display:contents wrapper when there is no single
-			// intrinsic root). Done on a copy so multiple instances don't
-			// accumulate classes/inputs in the shared AST.
-			retExpr = b.prepareCSSRoot(retExpr, analyzer.Scopes(), b.cssToken)
-		}
-
-		childContext := cloneExprMap(savedContextValues)
-		for name := range b.localProps {
-			if strings.HasPrefix(name, contextPropPrefix) {
-				ctx := strings.TrimPrefix(name, contextPropPrefix)
-				childContext[ctx] = &ast.MemberExpr{
-					Object:   &ast.Identifier{Name: "props"},
-					Property: &ast.Identifier{Name: name},
-				}
-			}
-		}
-		b.contextValues = childContext
-		node.Children = b.buildSlotNodes(retExpr, string(id))
-
-		b.cssSignals, b.cssToken = savedChoice, savedToken
-	}
-
-	// Restore context
-	b.localFnBody = savedLocalFnBody
-	b.localSignals = savedLocalSignals
-	b.signalSetters = savedSetters
-	b.localProps = savedLocalProps
-	b.contextValues = savedContextValues
-	b.localParamNames = savedParamNames
-	b.localFuncProps = savedLocalFuncProps
-	b.refObjectVars = savedRefObjectVars
-	b.refCallbackVars = savedRefCallbackVars
-
-	// Read accumulated handlers from slot building walk
-	if tier == TierClient {
-		node.Handlers = b.pendingHandlers
-		node.AttrBindings = b.pendingAttrs
-		node.RefBindings = b.pendingRefs
-		// Props registrations for child components must run in this
-		// component's scope (their values reference this component's
-		// signals), and before child component IIFEs read the registry.
-		if len(b.pendingPropsRegs) > 0 {
-			node.ExtraVars = append(node.ExtraVars, b.pendingPropsRegs...)
-		}
-		// Scan handlers/effects/memos (and dynamic list slot expressions, which
-		// may be nested in call-site children of signal-less wrappers) for local
-		// and module-level function references, and include those function
-		// declarations in extra vars so the hydration code has access to them.
-		localFnDecls := b.collectReferencedFunctions(node, fn.Body)
-		for _, fnDecl := range localFnDecls {
-			fnJS := renderStmtJS(fnDecl, b.sigMap())
-			if fnJS != "" {
-				node.ExtraVars = append(node.ExtraVars, fnJS)
-			}
-		}
-		// Module-level constants (arrays, objects, literals) referenced from
-		// handlers/effects/memos/vars are declared before signals and pre-signal
-		// vars so hydration code does not throw ReferenceError for a module
-		// binding that is out of scope inside the component IIFE.
-		if decls := b.referencedModuleConstVars(node); len(decls) > 0 {
-			node.PreSignalVars = append(decls, node.PreSignalVars...)
-		}
-
-		// Auto-promote to TierStatic: if the component has no signals,
-		// effects, memos, handlers, attr bindings, or extra vars, it is
-		// purely static (props-in, JSX-out) and can be SSR-evaluated at
-		// build time with zero client JS. This covers layout components
-		// ({children} passthrough), presentational components, and any
-		// function that only composes JSX from its props.
-		// A ref passed to a child component (e.g. `<Input ref={inputRef}>`)
-		// needs this component's hydration scope to create/bind the ref object,
-		// even though no intrinsic element in this component owns a ref.
-		hasComponentRef := false
-		if ret := findReturnStmt(fn.Body); ret != nil {
-			hasComponentRef = hasRefAttrExpr(ret.Value)
-		}
-		if len(node.Signals) == 0 && len(node.Effects) == 0 &&
-			len(node.Memos) == 0 && len(node.ExtraVars) == 0 &&
-			len(node.PreSignalVars) == 0 &&
-			len(node.Handlers) == 0 && len(node.AttrBindings) == 0 &&
-			len(node.RefBindings) == 0 && !hasComponentRef && !providesScope && !b.forceClient {
-			node.Tier = TierStatic
-		}
-	}
-	b.pendingHandlers = savedHandlers
-	b.pendingAttrs = savedAttrs
-	b.pendingRefs = savedRefs
-	b.pendingPropsRegs = savedPropsRegs
-
-	return node
-}
 
 // collectReferencedFunctions returns the function declarations a client
 // component must have in scope at hydration time: local helper functions plus
@@ -588,13 +61,18 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 
 	referenced := make(map[string]bool)
 	var queue []string
+	// Tokenize each code fragment once; string literals, comments and
+	// property names (`obj.helper`) never count as references.
 	scan := func(code string) {
-		for name := range candidates {
-			if !referenced[name] && codeContainsIdent(code, name) {
+		if code == "" {
+			return
+		}
+		scanJSIdents(code, func(name string) {
+			if _, ok := candidates[name]; ok && !referenced[name] {
 				referenced[name] = true
 				queue = append(queue, name)
 			}
-		}
+		})
 	}
 
 	// Always emit the component's own local function declarations. Parts of the
@@ -638,6 +116,10 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	// local functions from the parent scope; hoist them so the child's forwarded
 	// handlers resolve at runtime.
 	for _, ev := range node.ExtraVars {
+		scan(ev)
+	}
+	// Replayed body statements (e.g. a custom hook call `useTitle("x")`).
+	for _, ev := range node.PreSignalVars {
 		scan(ev)
 	}
 	// Dynamic list slot expressions (e.g. {items().map(x => <Item onSelect={fn}/>)})
@@ -689,27 +171,22 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	return result
 }
 
-// codeContainsIdent reports whether code contains name as a standalone
-// identifier (not a substring of a longer identifier). Used to detect local
-// function references in generated JS like `var handler=handleClickOutside`.
+// codeContainsIdent reports whether JS code references name as an identifier.
+// Used to detect local function references in generated JS like
+// `var handler=handleClickOutside`. The scan is token-based: occurrences
+// inside string literals, template text, comments and property names
+// (`x.name`) are not references.
 func codeContainsIdent(code, name string) bool {
-	if name == "" || code == "" {
+	if name == "" || code == "" || !strings.Contains(code, name) {
 		return false
 	}
-	start := 0
-	for {
-		idx := strings.Index(code[start:], name)
-		if idx < 0 {
-			return false
+	found := false
+	scanJSIdents(code, func(word string) {
+		if word == name {
+			found = true
 		}
-		i := start + idx
-		beforeOK := i == 0 || !isIdentChar(code[i-1])
-		afterOK := i+len(name) >= len(code) || !isIdentChar(code[i+len(name)])
-		if beforeOK && afterOK {
-			return true
-		}
-		start = i + len(name)
-	}
+	})
+	return found
 }
 
 // collectHandlerLocalFunctions scans handler bodies for local function references
@@ -788,7 +265,17 @@ func (b *builder) buildSlotNodes(expr ast.Expr, parentID string) []SlotNode {
 		return nil
 	case *ast.TypeAssertion:
 		return b.buildSlotNodes(e.Expr, parentID)
+	case *ast.NewExpr, *ast.AwaitExpr, *ast.ThisExpr, *ast.DynamicImport, *ast.ImportMetaExpr:
+		// Render like the same expression in a JSX child position: folded
+		// statically when possible, otherwise a runtime expression slot.
+		return b.buildExprContainerChildrenMode(&ast.JSXExprContainer{Expression: e}, parentID, true)
+	case *ast.ObjectExpr:
+		b.errorAt(e.Position, "an object literal is rendered as JSX content, which is not valid (React rejects objects as children)",
+			"render one of its properties (e.g. {obj.label}), JSON.stringify(obj), or map it to elements")
+		return nil
 	default:
+		b.errorAt(expr.Pos(), fmt.Sprintf("this expression (%T) cannot be rendered as JSX content", expr),
+			"wrap it in a JSX expression the compiler supports, such as a string, number, element, conditional or .map() call")
 		return nil
 	}
 }
@@ -810,6 +297,9 @@ func (b *builder) buildCallExprSlots(call *ast.CallExpr, parentID string) []Slot
 // buildJSXSlot - lowercase HTML or uppercase component
 
 func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
+	if el == nil || el.Opening == nil {
+		return nil
+	}
 	// Built-in <Portal>: render children inline with a marker, then move the
 	// node to document.body on the client (see HydrationBootstrapJS).
 	if el.Opening != nil && el.Opening.Name == "Portal" {
@@ -856,9 +346,11 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 
 	name := el.Opening.Name
 
-	// Special components - route to metadata output
+	// Special components - route to metadata output. Lowercase <script> and
+	// <style> are ordinary elements rendered in place (e.g. a <style> inside
+	// an <svg>); only the documented <Head>/<Script>/<Style> are hoisted.
 	switch name {
-	case "Head", "head", "Script", "script", "Style", "style":
+	case "Head", "head", "Script", "Style":
 		return []SlotNode{b.buildMetaSlot(el, parentID)}
 	case "Link":
 		b.hasLinks = true
@@ -920,7 +412,7 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		}
 		if s, ok := literalString(valueExpr); ok {
 			b.localProps = cloneStringMap(savedProps)
-			b.localProps[contextMarkerPrefix+ctx] = s
+			b.localProps[contextMarkerPrefix+ctx] = jsvalue.String(s)
 		} else if valueExpr != nil && !isScope {
 			// A dynamic value (signal/prop expression): substitute it for
 			// `Ctx.useContext()` reads while building the subtree.
@@ -928,7 +420,7 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 			b.contextValues[ctx] = valueExpr
 			// Static rendering (SSREval) still folds reads from this marker, so
 			// seed it with the value's build-time initial as a fallback.
-			if initial := evalConstWithSignals(valueExpr, b.sigMap(), savedProps); initial != "" {
+			if initial := evalConstValue(valueExpr, b.sigMap(), savedProps); !initial.ContainsUnknown() {
 				b.localProps = cloneStringMap(savedProps)
 				b.localProps[contextMarkerPrefix+ctx] = initial
 			}
@@ -955,12 +447,9 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 			return slots
 		}
 		// Unknown component - render as empty span, but warn instead of failing
-		// silently. Class components get a specific, actionable message.
-		if b.ann != nil && b.ann.ClassComponents[name] {
-			b.warnings = append(b.warnings, "class component <"+name+"> is not lowered: supported state/this.props/this.setState, componentDidMount/componentWillUnmount, helper methods, arrow handlers, and instance fields; move other lifecycle, derived-state, or error-boundary logic into a function component")
-		} else {
-			b.warnings = append(b.warnings, "component <"+name+"> could not be resolved and will not render")
-		}
+		// silently. Class components get a specific, actionable message naming
+		// the unsupported member.
+		b.warnUnrenderedComponent(name, el)
 		return []SlotNode{&StaticHTML{HTML: "<span></span>"}}
 	}
 
@@ -1040,7 +529,7 @@ func (b *builder) resolveSuspensePrimary(children []ast.JSXChild, parentID strin
 
 	for _, c := range children {
 		elc, ok := c.(*ast.JSXElementChild)
-		if !ok {
+		if !ok || elc.Element == nil || elc.Element.Opening == nil {
 			directStatic = append(directStatic, c)
 			continue
 		}
@@ -1105,7 +594,7 @@ func (b *builder) buildSuspenseResolved(children []ast.JSXChild, parentID string
 			out = append(out, b.buildExprContainerChildren(ch, parentID)...)
 		case *ast.JSXText:
 			if ch.Value != "" {
-				out = append(out, &StaticHTML{HTML: ch.Value})
+				out = append(out, &StaticHTML{HTML: escape.Text(ch.Value)})
 			}
 		}
 	}
@@ -1394,10 +883,14 @@ func (b *builder) resolveCallSiteChildrenText() (string, bool) {
 		case *ast.JSXText:
 			sb.WriteString(c.Value)
 		case *ast.JSXExprContainer:
-			if c.Expression == nil || b.referencesSignal(c.Expression) || !b.testFullyKnown(c.Expression) {
+			if c.Expression == nil || b.referencesSignal(c.Expression) {
 				return "", false
 			}
-			sb.WriteString(evalConstWithSignals(c.Expression, b.sigMap(), b.localProps))
+			text, ok := childText(b.evalValue(c.Expression))
+			if !ok {
+				return "", false
+			}
+			sb.WriteString(text)
 		default:
 			// JSX elements / fragments at the call site can't become plain text.
 			return "", false
@@ -1437,15 +930,13 @@ func (b *builder) buildSyntaxHighlightSlots(el *ast.JSXElement, parentID string)
 					continue
 				}
 			}
-			val := evalConstWithSignals(c.Expression, b.sigMap(), b.localProps)
-			if id, ok := c.Expression.(*ast.Identifier); ok && val == id.Name {
-				// Unresolvable identifier - can't highlight at compile time.
+			val, ok := childText(b.evalValue(c.Expression))
+			if !ok {
+				// Not known at build time - can't highlight at compile time.
 				canHighlight = false
 				break
 			}
-			if val != "" {
-				code.WriteString(val)
-			}
+			code.WriteString(val)
 		}
 	}
 
@@ -1509,13 +1000,25 @@ func (b *builder) buildMetaSlot(el *ast.JSXElement, parentID string) *MetaSlot {
 		switch c := child.(type) {
 		case *ast.JSXText:
 			if c.Value != "" {
-				children = append(children, &StaticHTML{HTML: c.Value})
+				if name == "script" || name == "style" {
+					children = append(children, &StaticHTML{HTML: htmlspec.RawText(name, c.Value)})
+				} else {
+					children = append(children, &StaticHTML{HTML: escape.Text(c.Value)})
+				}
 			}
 		case *ast.JSXExprContainer:
 			// Meta content (Head/Script/Style) is intentionally raw HTML - a
 			// template literal inside <Script>{...}</Script> must NOT be
-			// HTML-escaped or the inline script would be corrupted.
+			// HTML-escaped or the inline script would be corrupted. Only the
+			// closing-tag sequence is neutralized inside script/style.
 			childNodes := b.buildMetaExprContainerChildren(c, parentID)
+			if name == "script" || name == "style" {
+				for i, n := range childNodes {
+					if st, ok := n.(*StaticHTML); ok {
+						childNodes[i] = &StaticHTML{HTML: htmlspec.RawText(name, st.HTML)}
+					}
+				}
+			}
 			children = append(children, childNodes...)
 		case *ast.JSXElementChild:
 			childNodes := b.buildSlotNodes(c.Element, parentID)
@@ -1543,22 +1046,10 @@ func (b *builder) buildMetaOpeningTag(el *ast.JSXElement, tag string) string {
 	buf.WriteByte('<')
 	buf.WriteString(tag)
 	for _, attr := range el.Opening.Attributes {
-		if attr.Spread || attr.Value == nil || attr.Name == "dangerouslySetInnerHTML" {
+		if attr.Spread || attr.Name == "dangerouslySetInnerHTML" {
 			continue
 		}
-		val := b.evalAttrValue(attr.Value)
-		if isBooleanAttr(attr.Name) {
-			if val == "true" {
-				buf.WriteByte(' ')
-				buf.WriteString(ast.HTMLAttrName(attr.Name))
-			}
-			continue
-		}
-		buf.WriteByte(' ')
-		buf.WriteString(ast.HTMLAttrName(attr.Name))
-		buf.WriteString(`="`)
-		buf.WriteString(escape.HTML(val))
-		buf.WriteByte('"')
+		buf.WriteString(RenderAttr(tag, attr, b.evalAttrConst, b.evalAttrValue))
 	}
 	buf.WriteByte('>')
 	return buf.String()
@@ -1665,307 +1156,12 @@ func (b *builder) buildGoComponentSlot(el *ast.JSXElement, ref GoComponentRef, p
 // constJSON serializes a call-site prop expression to JSON, resolving
 // signal/prop reads to their build-time values.
 func (b *builder) constJSON(expr ast.Expr) string {
+	if js, ok := jsvalue.JSONStringify(b.evalValue(expr)); ok {
+		return js
+	}
 	return SerializeJSON(expr, func(e ast.Expr) (string, bool) {
 		return evalConstWithSignals(e, b.sigMap(), b.localProps), true
 	})
-}
-
-// buildComponentSlot - recursive component build
-
-func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []SlotNode {
-	childName := el.Opening.Name
-	childFn := b.functions[childName]
-	if childFn == nil {
-		return nil
-	}
-
-	childID := joinSlotID(parentID, childName)
-
-	// Scope root: resolve its option universe from the call site (an explicit
-	// literal `options` array, or the descendant `value` literals) before it is
-	// built, so its controller inputs match the parts.
-	if b.declaresCSSTScope(childFn) {
-		if spec := b.collectScopeSpec(el); len(spec.options) > 0 {
-			b.setScopeOverride(childFn, spec)
-		}
-	}
-	// Context-providing component: if its return wraps a scope handle in
-	// `<Ctx.Provider value={handle}>`, make that scope active while building the
-	// call-site children, so descendant `Ctx.useContext()` reads resolve.
-	provCtx := ""
-	var provRef scopeRef
-	provOK := false
-	if ctxName, localVar, ok := providedScopeContext(childFn); ok {
-		if a := b.cssAnalyzer(childFn); a != nil && a.OK() {
-			if sc := a.ScopeByVar(localVar); sc != nil {
-				provCtx = ctxName
-				provRef = scopeRef{analyzer: a, scope: sc, token: b.cssTokenFor(childID, childName)}
-				provOK = true
-			}
-		}
-	}
-
-	// Runtime-tier components are NOT rendered at build time. The emitter
-	// produces a krate-id placeholder + props entry so the serve-time renderer
-	// evaluates them (via QuickJS/streaming) at request time with fresh values.
-	if childTier := b.ann.ComponentTiers[childName]; childTier == TierRuntime {
-		instanceIdx := b.instanceCounts[childName]
-		b.instanceCounts[childName]++
-		id := SlotID(string(childID) + "_c" + itoa(instanceIdx))
-		attrs := extractPropsAST(el)
-		props := make(map[string]any, len(attrs))
-		for name, expr := range attrs {
-			props[name] = evalConstWithSignals(expr, b.sigMap(), b.localProps)
-		}
-		return []SlotNode{&ComponentSlot{
-			ID: id,
-			Component: &ComponentNode{
-				ID:           id,
-				Name:         childName,
-				Tier:         TierRuntime,
-				Props:        attrs,
-				RuntimeProps: props,
-				SourceFile:   b.ann.ComponentSources[childName],
-				Line:         childFn.Position.Line,
-			},
-		}}
-	}
-
-	childSignals := b.collectSignalDecls(childFn)
-	attrs := extractPropsAST(el)
-
-	// Pass active dynamic context values into the child as synthetic props so
-	// its hydration code reads them from the props registry (the parent's
-	// signal names are not in scope in the child's IIFE).
-	if len(b.contextValues) > 0 {
-		for ctx, val := range b.contextValues {
-			// Pass a getter so a child component reads the live value through
-			// the props registry instead of a mount-time snapshot.
-			attrs["__krate_ctx_"+ctx] = &ast.ArrowFn{
-				Expression: true,
-				Body:       []ast.Stmt{&ast.ReturnStmt{Value: val}},
-			}
-		}
-	}
-	// CSS signal components must go through buildComponentNode so their
-	// analyzer is installed and triggers/panels are rewritten. A panels-only
-	// component has no signals/handlers and would otherwise take the SSREval
-	// shortcut, which bypasses the interception and breaks the panels. The same
-	// applies to components using first-class scope-handle spreads.
-	if len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !hasComponentChildren(el.Children) {
-		if !b.componentNeedsClient(childFn, attrs) {
-			// Inline signal-derived props: a signal-less component that renders
-			// a parent's signal value (e.g. <Display value={display()}/>) must
-			// stay reactive, so its return JSX is inlined with the props
-			// substituted by their call-site expressions.
-			if b.componentHasSignalProps(attrs) {
-				return b.inlineSignalPropsComponent(el, childFn, childID, attrs)
-			}
-			// Pure prop-driven component - mark for SSR evaluation at emit time.
-			// Extract prop bindings from the JSX call site so the emitter can
-			// evaluate the component's return statement with those bindings.
-			// Disambiguate multiple instances (_cN) so CSS-choice radio names are
-			// unique across repeated use of the same component.
-			instanceIdx := b.instanceCounts[childName]
-			b.instanceCounts[childName]++
-			childID = SlotID(string(childID) + "_c" + itoa(instanceIdx))
-
-			paramNames := extractParamNames(childFn)
-			bindings := b.buildPropBindings(paramNames, attrs, childFn)
-			useIdBase := "krate-" + strings.ReplaceAll(string(childID), ".", "-")
-			useIdN := 0
-			nextUseId := func() string {
-				n := useIdN
-				useIdN++
-				if n == 0 {
-					return useIdBase
-				}
-				return useIdBase + "-" + itoa(n)
-			}
-			locals := b.foldLocalConsts(childFn, bindings, nextUseId)
-
-			childNode := &ComponentNode{
-				ID:               childID,
-				Name:             childName,
-				Tier:             TierStatic,
-				Fn:               childFn,
-				SSREvalBindings:  bindings,
-				LocalVars:        locals,
-				IsSSREval:        true,
-				CallSiteChildren: el.Children,
-				RestProps:        restProps(childFn, attrs),
-				RestPropsName:    fnRestParamName(childFn),
-			}
-
-			// Recursively discover sub-components within call-site children.
-			// Even though this component has no signals itself, its children
-			// may contain interactive components that need their own hydration.
-			savedCS := b.callSiteChildren
-			b.callSiteChildren = el.Children
-			// When the call-site children are fully static text, keep the raw
-			// text so SSREval can chroma-highlight <SyntaxHighlight> content.
-			if text, ok := b.resolveCallSiteChildrenText(); ok {
-				childNode.CallSiteChildrenText = text
-			}
-			childNode.Children = b.buildCallSiteChildSlots(el.Children, string(childID))
-			b.callSiteChildren = savedCS
-
-			// Also discover sub-components inside the component's OWN return JSX.
-			// A signal-less wrapper function (e.g. a demo wrapper) may return JSX
-			// containing interactive client components; those must be emitted
-			// through the tree path too or they'd be SSR'd as flat static HTML
-			// with no hydration.
-			// The child's own params are installed as local props and the
-			// pending handler/attr/ref accumulators are saved and restored so
-			// the child's internal bindings never leak into the parent's
-			// signature (the slots here are only used to locate nested client
-			// components, never emitted directly).
-			if ret := findReturnStmt(childFn.Body); ret != nil && ret.Value != nil {
-				savedHandlers, savedAttrs, savedRefs := b.pendingHandlers, b.pendingAttrs, b.pendingRefs
-				b.pendingHandlers, b.pendingAttrs, b.pendingRefs = nil, nil, nil
-				savedProps := b.localProps
-				savedRest := b.restProps
-				savedFnBody := b.localFnBody
-				b.localProps = b.propBindingsToLocalProps(childFn, attrs, savedProps)
-				b.restProps = b.restPropsFor(fnRestParamName(childFn), childFn, attrs)
-				b.localFnBody = childFn.Body
-				childNode.ReturnSlots = b.buildSlotNodes(ret.Value, string(childID))
-				b.localProps = savedProps
-				b.restProps = savedRest
-				b.localFnBody = savedFnBody
-				b.pendingHandlers, b.pendingAttrs, b.pendingRefs = savedHandlers, savedAttrs, savedRefs
-			}
-
-			return []SlotNode{&ComponentSlot{
-				ID:        childID,
-				Component: childNode,
-			}}
-		}
-	}
-
-	// Provide resolved call-site prop values to the child component walk so
-	// props.X reads and bare param identifiers evaluate to their SSR initial.
-	savedProps := b.localProps
-	savedFuncProps := b.localFuncProps
-	savedRestProps := b.restProps
-	b.localProps = make(map[string]string, len(attrs))
-	var funcProps map[string]bool
-	for name, expr := range attrs {
-		if b.isFuncReference(expr) {
-			if funcProps == nil {
-				funcProps = make(map[string]bool)
-			}
-			funcProps[name] = true
-			// Function props have no const value; keep them absent from the
-			// child's localProps so a `var X = props.<fn>` alias isn't folded to
-			// a function-name string.
-			continue
-		}
-		b.localProps[name] = b.resolveBindingValue(expr, savedProps)
-	}
-	b.localFuncProps = funcProps
-	// Record what a rest parameter collects: every call-site attr not bound by
-	// a named/destructured parameter.
-	if restName := fnRestParamName(childFn); restName != "" {
-		bound := make(map[string]bool)
-		for _, n := range extractParamNames(childFn) {
-			bound[n] = true
-		}
-		rest := make(map[string]ast.Expr)
-		for name, expr := range attrs {
-			if !bound[name] {
-				rest[name] = expr
-			}
-		}
-		b.restProps = map[string]map[string]ast.Expr{restName: rest}
-	} else {
-		b.restProps = nil
-	}
-	savedCallSite := b.callSiteChildren
-	b.callSiteChildren = el.Children
-
-	// Flow any scope-valued props (e.g. scope={tab}) into the child build so its
-	// `props.scope.trigger(...)` spreads resolve to the parent's handle.
-	scopeProps := make(map[string]scopeRef)
-	for name, expr := range attrs {
-		if ref, ok := b.resolveScopeExpr(expr); ok {
-			scopeProps["props."+name] = ref
-			scopeProps[name] = ref
-		}
-	}
-	b.pendingScopeProps = scopeProps
-
-	forceClient := hasComponentChildren(el.Children)
-	savedForceClient := b.forceClient
-	b.forceClient = forceClient
-	childNode := b.buildComponentNode(childFn, string(childID))
-	b.forceClient = savedForceClient
-	b.localProps = savedProps
-	b.localFuncProps = savedFuncProps
-	b.restProps = savedRestProps
-	childNode.Props = attrs
-	childNode.CallSiteChildren = el.Children
-	if provOK {
-		saved := b.contextScopes
-		b.contextScopes = cloneScopeMap(saved)
-		b.contextScopes[provCtx] = provRef
-		childNode.CallSiteSlots = b.buildCallSiteChildSlots(el.Children, string(childID))
-		b.contextScopes = saved
-	} else {
-		childNode.CallSiteSlots = b.buildCallSiteChildSlots(el.Children, string(childID))
-	}
-	b.callSiteChildren = savedCallSite
-
-	// Auto-promoted SSR-evaluated components need prop bindings so that
-	// {props.X} resolves at build time during SSREval. The bindings are
-	// built from call-site attrs (not node.Props which is the raw AST)
-	// and the component's parameter names.
-	if childNode.IsSSREval && childNode.SSREvalBindings == nil {
-		paramNames := extractParamNames(childFn)
-		childNode.SSREvalBindings = b.buildPropBindings(paramNames, attrs, childFn)
-	}
-	if childNode.IsSSREval && len(childNode.LocalVars) > 0 {
-		if childNode.SSREvalBindings == nil {
-			childNode.SSREvalBindings = make(map[string]string, len(childNode.LocalVars))
-		}
-		for name, val := range childNode.LocalVars {
-			if _, exists := childNode.SSREvalBindings[name]; !exists {
-				childNode.SSREvalBindings[name] = val
-			}
-		}
-	}
-
-	// Hoist props for handlers that reference props.X. The props object
-	// values may reference THIS component's signals (e.g. checked={checked1()}),
-	// so it must be built in the parent's scope and shared with the child via
-	// the __krate_props registry instead of inlining it into the child IIFE
-	// (which would reference out-of-scope identifiers). Even with no call-site
-	// props the child handlers may read props.X (e.g. props.onOpenChange), so
-	// an empty {} registration is emitted to keep `props` defined.
-	if childNode.Tier == TierClient && (len(childNode.Handlers) > 0 || len(childNode.Effects) > 0 || len(childNode.Memos) > 0 || len(childNode.Signals) > 0 || len(childNode.RefBindings) > 0 || len(b.contextValues) > 0) {
-		if handlersOrLocalsReferenceProps(childNode.Handlers, childFn.Body) ||
-			compiledRefsProps(childNode.Effects) || compiledRefsProps(childNode.Memos) ||
-			signalsReferenceProps(childNode.Signals) || len(childNode.FuncPropAliases) > 0 ||
-			// Dynamic context is read through synthetic props (`props.__krate_ctx_*`).
-			len(b.contextValues) > 0 ||
-			// A child that reads props only inside rendered JSX (e.g. a list
-			// binding `props.items.map(...)`) still needs the registry so
-			// `props` resolves at hydration.
-			bodyReferencesProps(childFn.Body) {
-			reg := b.buildChildPropsRegDecl(string(childNode.ID), childNode.Props)
-			b.pendingPropsRegs = append(b.pendingPropsRegs, reg)
-			childNode.ExtraVars = append([]string{"var props=__krate_props[" + strconv.Quote(string(childNode.ID)) + "]"}, childNode.ExtraVars...)
-		}
-	}
-
-	// Walk children and update TextSlot initials with resolved values
-	// (buildTextSlot uses resolveSignal which can't resolve props.X at build time)
-	updateTextSlotInitials(childNode.Children, childNode.Signals)
-
-	return []SlotNode{&ComponentSlot{
-		ID:        childID,
-		Component: childNode,
-	}}
 }
 
 // inlineSignalPropsComponent inlines a signal-less component whose props read
@@ -2062,6 +1258,9 @@ func substitutePropExprList(list []ast.Expr, props map[string]ast.Expr) []ast.Ex
 }
 
 func substitutePropExprsJSXElement(el *ast.JSXElement, props map[string]ast.Expr) *ast.JSXElement {
+	if el == nil || el.Opening == nil {
+		return el
+	}
 	opening := &ast.JSXOpening{Name: el.Opening.Name, SelfClosing: el.Opening.SelfClosing}
 	for _, attr := range el.Opening.Attributes {
 		if attr.Spread || attr.Value == nil {
@@ -2095,184 +1294,6 @@ func substitutePropExprsJSXChildren(children []ast.JSXChild, props map[string]as
 	return out
 }
 
-// buildStaticElementSlots - HTML element, returns []SlotNode
-// When the element has component or dynamic children, the result is split:
-//   [StaticHTML(opening+pre), ComponentSlot, StaticHTML(post+closing)]
-// When all children are static, returns a single StaticHTML.
-
-func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) []SlotNode {
-	logicalID := joinSlotID(parentID, b.nextElementTag(el.Opening.Name, parentID))
-	id := b.assignSlotID(logicalID)
-	var children []SlotNode
-	var handlers []HandlerDecl
-	var attrs []AttrBinding
-
-	// dangerouslySetInnerHTML={{__html: "..."}} injects raw, pre-rendered HTML
-	// (e.g. build-time markdown). When statically resolvable, the whole element
-	// becomes a single StaticHTML slot so the value is never HTML-escaped.
-	if rawHTML, ok := b.evalInnerHTMLAttr(el); ok {
-		openingTag := b.buildElementOpening(el, nil, nil, nil, string(id))
-		return []SlotNode{&StaticHTML{HTML: openingTag + ">" + rawHTML + "</" + el.Opening.Name + ">"}}
-	}
-
-	// Process attributes: handlers, bindings, static attrs. A spread whose
-	// value is a known rest parameter (`{...props}`) is expanded to the
-	// collected call-site attributes so forwarded props reach the element.
-	var refs []RefBinding
-	attributes, _ := b.expandSpreadAttrs(el.Opening.Attributes)
-	for _, attr := range attributes {
-		if attr.Spread {
-			continue
-		}
-		// React-only directives (key, suppressHydrationWarning) carry no DOM
-		// meaning and must not become attributes or hydration bindings.
-		if isReactDirectiveAttr(attr.Name) {
-			continue
-		}
-		if attr.Name == "ref" {
-			if attr.Value != nil {
-				// Callback ref: ref={(el) => {...}}. The arrow function is the
-				// callback itself - it receives the mounted element directly
-				// (React-style). Render it as-is instead of treating it as an
-				// assignment target.
-				if fn, ok := attr.Value.(*ast.ArrowFn); ok {
-					if cb := renderArrowFn(fn, b.sigMap()); cb != "" {
-						refs = append(refs, RefBinding{ElementSlotID: id, Callback: cb})
-					}
-					continue
-				}
-				target := generateExprJS(attr.Value, b.sigMap())
-				if target != "" {
-					// ref={fnName} where fnName is a function declared in this
-					// component is a callback ref: pass the function to kbindRef so
-					// it is INVOKED with the mounted element. Falling through to the
-					// assignment target would emit el=>{fnName=el;} - overwriting
-					// the function variable and breaking later calls/reads.
-					if refID, ok := attr.Value.(*ast.Identifier); ok && b.refCallbackVars != nil && b.refCallbackVars[refID.Name] {
-						refs = append(refs, RefBinding{ElementSlotID: id, Callback: refID.Name})
-						continue
-					}
-					// An identifier or member ref (e.g. `ref={inputRef}` or a
-					// forwarded `ref={props.ref}`) may be a `{current}` object, a
-					// callback, or a plain variable. Emit an adaptive setter that
-					// handles all three.
-					switch attr.Value.(type) {
-					case *ast.Identifier, *ast.MemberExpr:
-						refs = append(refs, RefBinding{ElementSlotID: id, Target: target, Adaptive: true})
-						continue
-					}
-					refs = append(refs, RefBinding{ElementSlotID: id, Target: target})
-				}
-			}
-			continue
-		}
-		if isOnEvent(attr.Name) {
-			h := b.buildHandlerDecl(attr, string(id))
-			if h != nil {
-				handlers = append(handlers, *h)
-			}
-		} else if isAttrBinding(attr) {
-			a := b.buildAttrBinding(attr, string(id))
-			if a != nil {
-				attrs = append(attrs, *a)
-			}
-		}
-	}
-
-	// Accumulate handlers for the component node
-	b.pendingHandlers = append(b.pendingHandlers, handlers...)
-	b.pendingAttrs = append(b.pendingAttrs, attrs...)
-	b.pendingRefs = append(b.pendingRefs, refs...)
-
-	// Process children
-	for _, child := range el.Children {
-		switch c := child.(type) {
-		case *ast.JSXText:
-			if c.Value != "" {
-				children = append(children, &StaticHTML{HTML: c.Value})
-			}
-		case *ast.JSXExprContainer:
-			childNodes := b.buildExprContainerChildren(c, string(id))
-			children = append(children, childNodes...)
-		case *ast.JSXElementChild:
-			childNodes := b.buildSlotNodes(c.Element, string(id))
-			children = append(children, childNodes...)
-		case *ast.JSXFragmentChild:
-			childNodes := b.buildFragmentSlots(c.Fragment, string(id))
-			children = append(children, childNodes...)
-		}
-	}
-
-	// Check if any children are ComponentSlots or other dynamic non-StaticHTML slots
-	hasDynamicChildren := false
-	for _, child := range children {
-		if child == nil {
-			continue
-		}
-		switch child.(type) {
-		case *StaticHTML, *ChildrenSlot:
-			// These are OK to inline
-		default:
-			hasDynamicChildren = true
-		}
-	}
-
-	openingTag := b.buildElementOpening(el, handlers, attrs, refs, string(id))
-	closingTag := "</" + el.Opening.Name + ">"
-
-	// Self-closing: void HTML elements can use />, others need full </tagName>
-	if el.Opening.SelfClosing {
-		if isVoidElement(el.Opening.Name) {
-			return []SlotNode{&StaticHTML{HTML: openingTag + " />"}}
-		}
-		return []SlotNode{&StaticHTML{HTML: openingTag + "></" + el.Opening.Name + ">"}}
-	}
-
-	// No dynamic children - everything fits in one StaticHTML
-	if !hasDynamicChildren {
-		var buf strings.Builder
-		buf.WriteString(openingTag)
-		buf.WriteByte('>')
-		for _, child := range children {
-			if s, ok := child.(*StaticHTML); ok {
-				buf.WriteString(s.HTML)
-			} else if _, ok := child.(*ChildrenSlot); ok {
-				buf.WriteString("<!--__children__-->")
-			}
-		}
-		buf.WriteString(closingTag)
-		return []SlotNode{&StaticHTML{HTML: buf.String()}}
-	}
-
-	// Has dynamic children - split into StaticHTML segments around them
-	var result []SlotNode
-	var preBuf strings.Builder
-	preBuf.WriteString(openingTag)
-	preBuf.WriteByte('>')
-
-	for _, child := range children {
-		if child == nil {
-			continue
-		}
-		switch c := child.(type) {
-		case *StaticHTML:
-			preBuf.WriteString(c.HTML)
-		case *ChildrenSlot:
-			preBuf.WriteString("<!--__children__-->")
-		default:
-			// Flush pre-buffer as StaticHTML, then add the dynamic child
-			result = append(result, &StaticHTML{HTML: preBuf.String()})
-			preBuf.Reset()
-			result = append(result, child)
-		}
-	}
-	// Flush remaining pre-buffer + closing tag
-	preBuf.WriteString(closingTag)
-	result = append(result, &StaticHTML{HTML: preBuf.String()})
-
-	return result
-}
-
 // buildElementOpening builds the opening tag string with attributes.
 func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl, attrs []AttrBinding, refs []RefBinding, elementSlotID string) string {
 	var buf strings.Builder
@@ -2290,7 +1311,7 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 	}
 
 	// Static attributes (spread rest params expanded to concrete attributes).
-	attrsForOpening, _ := b.expandSpreadAttrs(el.Opening.Attributes)
+	attrsForOpening, _ := b.expandForwardedSpreadAttrs(el.Opening.Attributes)
 	actionAttrs := make(map[*ast.JSXAttr]bool)
 	hasMethod := false
 	hasFormMethod := false
@@ -2305,9 +1326,17 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 			if _, ok := b.actionAttrURL(attr.Value); ok {
 				actionAttrs[attr] = true
 			} else if _, ok := attr.Value.(*ast.ArrowFn); ok {
-				b.warnings = append(b.warnings, "inline function passed to "+attr.Name+" was not extracted as a server action; move it to a \"use server\" module and import it")
+				b.warnAt(attr.Position, "inline function passed to "+attr.Name+" was not extracted as a server action",
+					"move it to a \"use server\" module and import it")
 			}
 		}
+	}
+	// Inside <select value>, an option's selection comes from the select.
+	inSelect := false
+	optionSelected := false
+	if name == "option" && len(b.selectStack) > 0 && b.selectStack[len(b.selectStack)-1] != nil {
+		inSelect = true
+		optionSelected = OptionSelected(b.selectStack[len(b.selectStack)-1], OptionValue(el, b.evalAttrConst))
 	}
 	for _, attr := range attrsForOpening {
 		if attr.Spread || attr.Name == "ref" || attr.Name == "dangerouslySetInnerHTML" {
@@ -2325,35 +1354,17 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 		if isAttrBinding(attr) && !b.isStaticResolvable(attr.Value) {
 			continue
 		}
-		if attr.Value != nil {
-			val := b.evalAttrValue(attr.Value)
-			// Boolean attributes: omit when falsy, emit bare name when true.
-			if isBooleanAttr(attr.Name) {
-				if val == "true" {
-					buf.WriteByte(' ')
-					buf.WriteString(ast.HTMLAttrName(attr.Name))
-					buf.WriteString(`="true"`)
-				}
-				continue
-			}
-			// undefined/null attributes are omitted entirely (React semantics)
-			// instead of rendering `value="undefined"`. A string literal
-			// "null"/"undefined" is real text and is kept.
-			if !isStringLiteral(attr.Value) && (val == "undefined" || val == "null") {
-				continue
-			}
-			buf.WriteByte(' ')
-			buf.WriteString(ast.HTMLAttrName(attr.Name))
-			buf.WriteString(`="`)
-			buf.WriteString(escape.HTML(val))
-			buf.WriteByte('"')
-			if actionAttrs[attr] {
-				buf.WriteString(` data-krate-action`)
-			}
-		} else {
-			buf.WriteByte(' ')
-			buf.WriteString(ast.HTMLAttrName(attr.Name))
+		if skipFormValueAttr(name, attr.Name, inSelect) {
+			continue
 		}
+		rendered := RenderAttr(name, attr, b.evalAttrConst, b.evalAttrValue)
+		buf.WriteString(rendered)
+		if rendered != "" && actionAttrs[attr] {
+			buf.WriteString(` data-krate-action`)
+		}
+	}
+	if optionSelected {
+		buf.WriteString(" selected")
 	}
 	if len(actionAttrs) > 0 {
 		if name == "form" && !hasMethod {
@@ -2371,22 +1382,21 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 
 	// Dynamic attributes: emit the SSR initial value plus the hydration marker.
 	for _, a := range attrs {
-		// Boolean attributes: omit when false/unset, emit bare name when true.
-		// All other attributes: emit when the initial value is non-empty.
-		if isBooleanAttr(a.AttrName) {
-			if a.Initial == "true" {
-				buf.WriteByte(' ')
-				buf.WriteString(ast.HTMLAttrName(a.AttrName))
-				buf.WriteString(`="true"`)
+		// The SSR initial value goes through the same table as static
+		// attributes; an empty non-boolean initial is omitted.
+		switch {
+		case skipFormValueAttr(name, a.AttrName, inSelect):
+		case a.AttrName == "style":
+			if css, ok := StyleCSS(a.InitialExpr, b.evalAttrConst); ok {
+				buf.WriteString(` style="` + escape.HTMLAttr(css) + `"`)
 			}
-		} else if a.Initial != "" && (a.Initial != "undefined" && a.Initial != "null" || isStringLiteral(a.InitialExpr)) {
-			buf.WriteByte(' ')
-			buf.WriteString(ast.HTMLAttrName(a.AttrName))
-			buf.WriteString(`="`)
-			buf.WriteString(escape.HTML(a.Initial))
-			buf.WriteByte('"')
+		case htmlspec.IsBoolean(a.AttrName) || a.Initial != "":
+			buf.WriteString(htmlspec.Attr(name, a.AttrName, JSAttrValue(b.evalAttrConst(a.InitialExpr), a.Initial)))
 		}
-		buf.WriteString(fmt.Sprintf(` data-kattr-%s="k:%s"`, a.AttrName, a.ElementSlotID))
+		if !htmlspec.ValidAttrName(a.AttrName) {
+			continue
+		}
+		buf.WriteString(` data-kattr-` + a.AttrName + `="k:` + escape.HTMLAttr(string(a.ElementSlotID)) + `"`)
 	}
 
 	return buf.String()
@@ -2403,8 +1413,8 @@ func (b *builder) actionAttrURL(expr ast.Expr) (string, bool) {
 	case *ast.MemberExpr:
 		if id, ok := e.Object.(*ast.Identifier); ok && id.Name == "props" && !e.Computed {
 			if prop, ok := e.Property.(*ast.Identifier); ok {
-				if raw, ok := b.localProps[prop.Name]; ok {
-					val := strings.Trim(raw, `"'`)
+				if raw, ok := b.localProps[prop.Name]; ok && raw.Kind() == jsvalue.KindString {
+					val := strings.Trim(raw.StringValue(), `"'`)
 					if strings.Contains(val, "/__krate/action/") {
 						return val, true
 					}
@@ -2419,14 +1429,31 @@ func (b *builder) actionAttrURL(expr ast.Expr) (string, bool) {
 	return "", false
 }
 
-// isBooleanAttr reports whether an HTML attribute is a boolean attribute whose
-// presence alone is meaningful (an empty/false value would still be truthy).
-func isBooleanAttr(name string) bool {
-	switch name {
-	case "disabled", "required", "readonly", "checked", "selected", "multiple", "autofocus", "hidden", "inert", "novalidate", "open", "async", "defer", "autoplay", "controls", "loop", "muted", "playsinline", "truespeed", "allowfullscreen", "default", "ismap", "itemscope", "nohref", "noresize", "noshade", "nowrap", "reversed", "scoped", "seamless", "sortable", "translate":
+// skipFormValueAttr reports attributes rendered as content or selection
+// instead of an attribute: value/defaultValue on <textarea> and <select>, and
+// an option's own selected flag inside a <select value>.
+func skipFormValueAttr(tag, name string, inSelect bool) bool {
+	if htmlspec.ContentValue(tag, name) || htmlspec.SelectValueProp(tag, name) {
 		return true
 	}
-	return false
+	return inSelect && name == "selected"
+}
+
+// addMarkupErrs records markup diagnostics once (an element can be built more
+// than once, e.g. for each instance of a component).
+func (b *builder) addMarkupErrs(errs []error) {
+	for _, err := range errs {
+		dup := false
+		for _, have := range b.markupErrs {
+			if have.Error() == err.Error() {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			b.markupErrs = append(b.markupErrs, err)
+		}
+	}
 }
 
 // buildExprContainerChildren - build slots from {expr} in JSX
@@ -2441,185 +1468,6 @@ func (b *builder) buildMetaExprContainerChildren(ec *ast.JSXExprContainer, paren
 	return b.buildExprContainerChildrenMode(ec, parentID, false)
 }
 
-// buildExprContainerChildrenMode routes a {expr} JSX container child to the
-// correct slot type. When `doEscape` is true the statically-evaluated result is
-// HTML-escaped because it sits in a JSX text position (a template literal like
-// <Code>{`function App() { return <h1>...</h1>; }`}</Code> must not leak real
-// markup). Meta content passes doEscape=false so inline scripts stay raw.
-func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, parentID string, doEscape bool) []SlotNode {
-	if ec.Expression == nil {
-		return nil
-	}
-
-	// A JSX element produced by a build-time substitution (e.g. the child
-	// injected by Children.map) renders as a normal slot, not as a text value.
-	switch e := ec.Expression.(type) {
-	case *ast.JSXElement:
-		return b.buildSlotNodes(e, parentID)
-	case *ast.JSXFragment:
-		return b.buildFragmentSlots(e, parentID)
-	}
-
-	if v, ok := b.activeContextValue(ec.Expression); ok {
-		if slot := b.buildTextSlot(v, parentID); slot != nil {
-			return []SlotNode{slot}
-		}
-		return b.buildExprContainerChildrenMode(&ast.JSXExprContainer{Expression: v}, parentID, doEscape)
-	}
-
-	// Fold React's structural helpers when their inputs are statically known.
-	if folded, ok := foldStructuralReact(ec.Expression); ok {
-		switch f := folded.(type) {
-		case *ast.JSXElement:
-			return b.buildSlotNodes(f, parentID)
-		case *ast.JSXFragment:
-			return b.buildFragmentSlots(f, parentID)
-		case *ast.ArrayExpr:
-			frag := &ast.JSXFragment{}
-			for _, el := range f.Elements {
-				switch e := el.(type) {
-				case *ast.JSXElement:
-					frag.Children = append(frag.Children, &ast.JSXElementChild{Element: e})
-				case *ast.JSXFragment:
-					frag.Children = append(frag.Children, &ast.JSXFragmentChild{Fragment: e})
-				default:
-					frag.Children = append(frag.Children, &ast.JSXExprContainer{Expression: e})
-				}
-			}
-			return b.buildFragmentSlots(frag, parentID)
-		default:
-			return b.buildExprContainerChildrenMode(&ast.JSXExprContainer{Expression: folded}, parentID, doEscape)
-		}
-	}
-
-	// Special: {children} placeholder for layouts
-	if id, ok := ec.Expression.(*ast.Identifier); ok && id.Name == "children" {
-		return []SlotNode{&ChildrenSlot{}}
-	}
-
-	// Special: {props.children} - same children placeholder
-	if mem, ok := ec.Expression.(*ast.MemberExpr); ok {
-		if id, ok := mem.Object.(*ast.Identifier); ok && id.Name == "props" {
-			if pid, ok := mem.Property.(*ast.Identifier); ok && pid.Name == "children" {
-				return []SlotNode{&ChildrenSlot{}}
-			}
-		}
-	}
-
-	// CSS signal live text: a bare `{getter()}` read of a compiled scope renders
-	// the inherited `--krate-current` custom property via `.krc-live::after`,
-	// with zero JS (the value updates through the `:has()` variable rules).
-	if b.cssSignals != nil && b.cssSignals.OK() {
-		if _, ok := b.cssSignals.MatchText(ec.Expression); ok {
-			return []SlotNode{&StaticHTML{HTML: `<span class="krc-live"></span>`}}
-		}
-	}
-	// Live text via a scope handle: `{scope.current()}` renders the selected
-	// value through the inherited `--krate-current` custom property.
-	if name, ref, _, ok := b.helperCall(ec.Expression); ok && name == "current" {
-		ref.scope.LiveText = true
-		return []SlotNode{&StaticHTML{HTML: `<span class="krc-live"></span>`}}
-	}
-
-	// .map() call - always try to resolve at build time (even without signals)
-	if isMapCall(ec.Expression) {
-		return []SlotNode{b.buildListSlot(ec.Expression, parentID)}
-	}
-
-	// Ternary with JSX in branches: {cond() ? <A/> : <B/>}
-	// This must be checked BEFORE the static value path, otherwise
-	// unresolved variables (e.g. title, showCopy from props) cause
-	// evalConst to fall through to a null alternate and emit "null".
-	if cond, ok := ec.Expression.(*ast.ConditionalExpr); ok {
-		// Statically-known test -> build the winning branch directly so SSR
-		// renders real content (e.g. a checkmark SVG or children label).
-		if nodes := b.tryResolveConditional(cond, parentID); len(nodes) > 0 {
-			return nodes
-		}
-		if isTernaryWithJSX(ec.Expression) {
-			return []SlotNode{b.buildConditionalSlot(ec.Expression, parentID)}
-		}
-	}
-
-	// Boolean short-circuit with JSX on the right: {left && <A/>} and
-	// {left || <A/>}.  The static-value path const-evaluates the right
-	// operand via evalConst, which cannot serialize JSX to HTML (returns "")
-	// so client-tier layouts (e.g. the docs theme shell) that gate sections
-	// on props would silently lose that markup.  Route guards through the
-	// conditional-slot machinery instead: statically-known tests fold to
-	// the winning branch so SSR renders real content; reactive guards
-	// become hidable ConditionalSlots.
-	if bin, ok := ec.Expression.(*ast.BinaryExpr); ok && (bin.Op == "&&" || bin.Op == "||") {
-		if hasJSXInExpr(bin.Right) {
-			if nodes, resolved := b.tryResolveGuard(bin, parentID); resolved {
-				return nodes
-			}
-			return []SlotNode{b.buildGuardSlot(bin, parentID)}
-		}
-	}
-
-	// Check if expression references any signal
-	if !b.referencesSignal(ec.Expression) {
-		// Simple identifiers that reference local variables (not signals,
-		// not children) must go through the dynamic expr slot so they
-		// are evaluated at hydration time. Otherwise evalConst would
-		// return the variable name as literal text ("inputElements").
-		// First check for a for-loop-built JSX array so components like
-		// OTPField can render their imperatively-pushed element lists.
-		if id, ok := ec.Expression.(*ast.Identifier); ok {
-			if nodes := b.tryResolveForLoopArray(ec.Expression, parentID); len(nodes) > 0 {
-				return nodes
-			}
-			// Module-level constants (const X = <literal>) resolve to their
-			// value at build time; render them statically instead of deferring
-			// to a hydration binding that would reference an out-of-scope
-			// identifier (which would render the raw name as text).
-			if id.Name != "children" {
-				if v, isConst := b.moduleConsts[id.Name]; isConst {
-					if doEscape {
-						return []SlotNode{&StaticHTML{HTML: escape.HTML(v)}}
-					}
-					return []SlotNode{&StaticHTML{HTML: v}}
-				}
-				// Local variables resolved via collectLocalVars (var X = expr)
-				// have known values at build time; render statically.
-				if v, ok := b.localProps[id.Name]; ok {
-					if doEscape {
-						return []SlotNode{&StaticHTML{HTML: escape.HTML(v)}}
-					}
-					return []SlotNode{&StaticHTML{HTML: v}}
-				}
-			}
-			return []SlotNode{b.buildExprSlot(ec.Expression, parentID)}
-		}
-		slot := b.buildStaticValueSlot(ec.Expression, parentID)
-		if slot != nil {
-			if doEscape {
-				return []SlotNode{&StaticHTML{HTML: escape.HTML(slot.HTML)}}
-			}
-			return []SlotNode{slot}
-		}
-		return nil
-	}
-
-	// Simple signal read: {count()}
-	if isSimpleSignalRead(ec.Expression) {
-		slot := b.buildTextSlot(ec.Expression, parentID)
-		if slot != nil {
-			return []SlotNode{slot}
-		}
-		return nil
-	}
-
-	// .map() call
-	if isMapCall(ec.Expression) {
-		return []SlotNode{b.buildListSlot(ec.Expression, parentID)}
-	}
-
-	// Fallback: complex expression (binary, member chain, template, etc.)
-	return []SlotNode{b.buildExprSlot(ec.Expression, parentID)}
-}
-
 // buildTextSlot - simple signal read
 
 func (b *builder) buildTextSlot(expr ast.Expr, parentID string) *TextSlot {
@@ -2630,7 +1478,7 @@ func (b *builder) buildTextSlot(expr ast.Expr, parentID string) *TextSlot {
 
 	id := b.assignSlotID(b.nextDynamicSlot(parentID, "text"))
 	decl := b.resolveSignal(signalName)
-	initial := evalConstWithSignals(decl.InitialExpr, b.sigMap(), b.localProps)
+	initial, _ := childText(b.evalValue(decl.InitialExpr))
 
 	return &TextSlot{
 		ID:      id,
@@ -2645,7 +1493,9 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 	id := b.assignSlotID(b.nextDynamicSlot(parentID, "expr"))
 	signals := b.collectSignalReads(expr)
 	exprSource := generateExprJS(expr, b.sigMap())
-	initial := evalConstWithSignals(expr, b.sigMap(), b.localProps)
+	// The SSR initial is the value rendered as child text (React semantics:
+	// false/null/undefined render nothing); the emitter escapes it.
+	initial, _ := childText(b.evalValue(expr))
 
 	return &ExprSlot{
 		ID:         id,
@@ -2724,9 +1574,9 @@ func (b *builder) tryResolveForLoopArray(expr ast.Expr, parentID string) []SlotN
 // evalForLoopArray statically iterates a for-loop, binding the loop variable
 // into the props context, and builds each pushed JSX element as a slot node.
 func (b *builder) evalForLoopArray(fs *ast.ForStmt, pushArgs []ast.Expr, parentID string) []SlotNode {
-	loopVars := make(map[string]string)
-	evalProps := func() map[string]string {
-		m := make(map[string]string, len(b.localProps)+len(loopVars))
+	loopVars := make(valueMap)
+	evalProps := func() valueMap {
+		m := make(valueMap, len(b.localProps)+len(loopVars))
 		for k, v := range b.localProps {
 			m[k] = v
 		}
@@ -2740,9 +1590,9 @@ func (b *builder) evalForLoopArray(fs *ast.ForStmt, pushArgs []ast.Expr, parentI
 		for _, decl := range vs.Decls {
 			if decl.Name != "" {
 				if decl.Init != nil {
-					loopVars[decl.Name] = evalConstWithSignals(decl.Init, b.sigMap(), evalProps())
+					loopVars[decl.Name] = evalConstValue(decl.Init, b.sigMap(), evalProps())
 				} else {
-					loopVars[decl.Name] = ""
+					loopVars[decl.Name] = jsvalue.Undefined()
 				}
 			}
 		}
@@ -2753,7 +1603,7 @@ func (b *builder) evalForLoopArray(fs *ast.ForStmt, pushArgs []ast.Expr, parentI
 
 	var nodes []SlotNode
 	for iter := 0; iter < 1000; iter++ {
-		if isFalsyValue(evalConstWithSignals(fs.Test, b.sigMap(), evalProps())) {
+		if truthy, known := evalConstValue(fs.Test, b.sigMap(), evalProps()).Truthy(); !known || !truthy {
 			break
 		}
 		b.localProps = evalProps()
@@ -2762,11 +1612,11 @@ func (b *builder) evalForLoopArray(fs *ast.ForStmt, pushArgs []ast.Expr, parentI
 		}
 		if upd, ok := fs.Update.(*ast.UnaryExpr); ok && (upd.Op == "++" || upd.Op == "--") {
 			if id, ok := upd.Arg.(*ast.Identifier); ok {
-				if n, ok := parseNumeric(loopVars[id.Name]); ok {
+				if cur := loopVars[id.Name]; cur.Kind() == jsvalue.KindNumber {
 					if upd.Op == "++" {
-						loopVars[id.Name] = trimFloat(n + 1)
+						loopVars[id.Name] = jsvalue.Number(cur.NumberValue() + 1)
 					} else {
-						loopVars[id.Name] = trimFloat(n - 1)
+						loopVars[id.Name] = jsvalue.Number(cur.NumberValue() - 1)
 					}
 				}
 			}
@@ -2792,7 +1642,7 @@ func (b *builder) tryResolveConditional(cond *ast.ConditionalExpr, parentID stri
 		return nil
 	}
 	var branch ast.Expr
-	if isTruthyValue(val) {
+	if val.ToBoolean() {
 		branch = cond.Consequent
 	} else {
 		branch = cond.Alternate
@@ -2803,8 +1653,23 @@ func (b *builder) tryResolveConditional(cond *ast.ConditionalExpr, parentID stri
 	case *ast.JSXFragment:
 		return b.buildSlotNodes(br, parentID)
 	default:
-		v := evalConstWithSignals(branch, b.sigMap(), b.localProps)
-		return []SlotNode{&StaticHTML{HTML: v}}
+		// A non-JSX branch renders as a child value (strings escaped,
+		// null/false empty); a branch holding JSX goes through the slot
+		// pipeline.
+		if !hasJSXInExpr(branch) {
+			if nodes, ok := staticChildNodes(b.evalValue(branch), true); ok {
+				if nodes[0].(*StaticHTML).HTML == "" {
+					// Keep a node so the resolved (empty) branch is not
+					// mistaken for an unresolved test.
+					return []SlotNode{&StaticHTML{HTML: ""}}
+				}
+				return nodes
+			}
+		}
+		if nodes := b.buildSlotNodes(branch, parentID); len(nodes) > 0 {
+			return nodes
+		}
+		return []SlotNode{&StaticHTML{HTML: ""}}
 	}
 }
 
@@ -2884,12 +1749,16 @@ func (b *builder) tryResolveGuard(bin *ast.BinaryExpr, parentID string) ([]SlotN
 	if !known {
 		return nil, false
 	}
-	truthy := isTruthyValue(val)
+	truthy := val.ToBoolean()
 	// && renders the right operand when the left is truthy;
 	// || renders the right operand when the left is falsy.
 	renderJSX := (bin.Op == "&&") == truthy
 	if !renderJSX {
-		// Guard renders nothing emit nothing (nil slice).
+		// The guard evaluates to its left operand, which renders as a child:
+		// `{0 && <A/>}` shows 0 (React semantics), false/null/"" show nothing.
+		if nodes, ok := staticChildNodes(val, true); ok && nodes[0].(*StaticHTML).HTML != "" {
+			return nodes, true
+		}
 		return nil, true
 	}
 	return b.buildSlotNodes(bin.Right, parentID), true
@@ -2912,159 +1781,41 @@ func (b *builder) buildGuardSlot(bin *ast.BinaryExpr, parentID string) *Conditio
 
 // knownTestValue resolves a ternary test to a value and reports whether the
 // resolution is authoritative (no unresolvable identifiers leaked).
-func (b *builder) knownTestValue(test ast.Expr) (string, bool) {
+func (b *builder) knownTestValue(test ast.Expr) (jsvalue.Value, bool) {
 	// {props.children ? <A/> : <B/>} - truthiness comes from call-site children.
 	if mem, ok := test.(*ast.MemberExpr); ok {
 		if id, ok := mem.Object.(*ast.Identifier); ok && id.Name == "props" {
 			if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "children" {
-				if b.hasCallSiteChildren() {
-					return "true", true
-				}
-				return "", true
+				return jsvalue.Bool(b.hasCallSiteChildren()), true
 			}
 		}
 	}
-	v := evalConstWithSignals(test, b.sigMap(), b.localProps)
-	if b.testFullyKnown(test) || b.propsReadsClosed(test) {
-		return v, true
+	// A typed value that folded completely is authoritative: Unknown
+	// propagates through every operator, so only fully-resolved leaves (or a
+	// short-circuit that never reads the unknown side) produce a known value.
+	v := b.evalValue(test)
+	if _, known := v.Truthy(); !known {
+		return v, false
 	}
-	return v, false
+	if isPropsMemberOfFuncProp(test, b.localFuncProps) {
+		return v, false
+	}
+	return v, true
 }
 
-// propsReadsClosed reports whether every leaf of a guard/ternary test is
-// either resolvable at build time or a direct `props.<name>` member read.
-// A component's props are closed at the call site: any name not present in
-// localProps is a definitive undefined, so `{props.optional && <X/>}` folds to
-// nothing instead of degrading to a hydration-only ConditionalSlot.
-func (b *builder) propsReadsClosed(e ast.Expr) bool {
-	switch x := e.(type) {
-	case nil:
-		return true
-	case *ast.Literal:
-		return true
-	case *ast.Identifier:
-		if _, ok := b.sigMap()[x.Name]; ok {
-			return true
-		}
-		if _, ok := b.localProps[x.Name]; ok {
-			return true
-		}
-		if _, ok := b.moduleConsts[x.Name]; ok {
-			return true
-		}
-		return false
-	case *ast.MemberExpr:
-		// A direct props.<name> read is always closed: present in localProps or
-		// a definitive undefined. Function props have no build-time value.
-		if id, ok := x.Object.(*ast.Identifier); ok && id.Name == "props" {
-			if prop, ok := x.Property.(*ast.Identifier); ok {
-				if b.localFuncProps != nil && b.localFuncProps[prop.Name] {
-					return false
-				}
-				return true
-			}
-		}
-		// Deeper chains (props.a.b, props.a.length) are closed only when they
-		// fully const-fold against the call-site props.
-		if _, ok := resolveMemberChainValue(x, b.localProps); ok {
-			return true
-		}
-		return false
-	case *ast.BinaryExpr:
-		return b.propsReadsClosed(x.Left) && b.propsReadsClosed(x.Right)
-	case *ast.UnaryExpr:
-		return b.propsReadsClosed(x.Arg)
-	case *ast.ConditionalExpr:
-		return b.propsReadsClosed(x.Test) && b.propsReadsClosed(x.Consequent) && b.propsReadsClosed(x.Alternate)
-	case *ast.TemplateExpr:
-		for _, p := range x.Parts {
-			if !b.propsReadsClosed(p) {
-				return false
-			}
-		}
-		return true
-	case *ast.TypeAssertion:
-		return b.propsReadsClosed(x.Expr)
-	}
-	return false
-}
-
-func (b *builder) testFullyKnown(e ast.Expr) bool {
-	if e == nil {
+// isPropsMemberOfFuncProp reports a direct `props.<fn>` read of a function
+// prop, which has no build-time value.
+func isPropsMemberOfFuncProp(e ast.Expr, funcProps map[string]bool) bool {
+	mem, ok := e.(*ast.MemberExpr)
+	if !ok || funcProps == nil {
 		return false
 	}
-	switch x := e.(type) {
-	case *ast.Literal:
-		return true
-	case *ast.Identifier:
-		if _, ok := b.sigMap()[x.Name]; ok {
-			return true
-		}
-		if _, ok := b.localProps[x.Name]; ok {
-			return true
-		}
-		if _, ok := b.moduleConsts[x.Name]; ok {
-			return true
-		}
+	id, ok := mem.Object.(*ast.Identifier)
+	if !ok || id.Name != "props" {
 		return false
-	case *ast.CallExpr:
-		if id, ok := x.Callee.(*ast.Identifier); ok {
-			if _, ok := b.sigMap()[id.Name]; ok {
-				return true
-			}
-			// Pure built-in constructors: String(), Number(), Boolean()
-			if (id.Name == "String" || id.Name == "Number" || id.Name == "Boolean") && len(x.Args) == 1 {
-				return b.testFullyKnown(x.Args[0])
-			}
-		}
-		return false
-	case *ast.MemberExpr:
-		if id, ok := x.Object.(*ast.Identifier); ok && id.Name == "props" {
-			if prop, ok := x.Property.(*ast.Identifier); ok {
-				if prop.Name == "children" {
-					return true
-				}
-				_, ok := b.localProps[prop.Name]
-				return ok
-			}
-		}
-		// Nested chains rooted at props (props.a.b, props.a.length) are known
-		// whenever the whole chain const-folds against the call-site props.
-		if _, ok := resolveMemberChainValue(x, b.localProps); ok {
-			return true
-		}
-		return false
-	case *ast.BinaryExpr:
-		return b.testFullyKnown(x.Left) && b.testFullyKnown(x.Right)
-	case *ast.UnaryExpr:
-		return b.testFullyKnown(x.Arg)
-	case *ast.ConditionalExpr:
-		return b.testFullyKnown(x.Test) && b.testFullyKnown(x.Consequent) && b.testFullyKnown(x.Alternate)
-	case *ast.TemplateExpr:
-		for _, p := range x.Parts {
-			if !b.testFullyKnown(p) {
-				return false
-			}
-		}
-		return true
-	case *ast.ArrayExpr:
-		for _, el := range x.Elements {
-			if el != nil && !b.testFullyKnown(el) {
-				return false
-			}
-		}
-		return true
-	case *ast.ObjectExpr:
-		for _, prop := range x.Properties {
-			if !prop.Spread && prop.Value != nil && !b.testFullyKnown(prop.Value) {
-				return false
-			}
-		}
-		return true
-	case *ast.TypeAssertion:
-		return b.testFullyKnown(x.Expr)
 	}
-	return false
+	prop, ok := mem.Property.(*ast.Identifier)
+	return ok && funcProps[prop.Name]
 }
 
 func (b *builder) hasCallSiteChildren() bool {
@@ -3102,7 +1853,7 @@ func (b *builder) buildConditionalSlot(expr ast.Expr, parentID string) *Conditio
 	active := false
 	if cond != nil {
 		testJS = generateExprJS(cond.Test, b.sigMap())
-		active = isTruthyValue(evalConstWithSignals(cond.Test, b.sigMap(), b.localProps))
+		active = b.evalValue(cond.Test).ToBoolean()
 	}
 
 	slot := &ConditionalSlot{
@@ -3166,35 +1917,18 @@ func (b *builder) resolveArrayLiteralExpr(expr ast.Expr) *ast.ArrayExpr {
 	if prop, ok := mem.Property.(*ast.Identifier); !ok || prop.Name != "map" {
 		return nil
 	}
-	// Resolve the array object expression to a JS source literal.
-	var source string
-	switch obj := mem.Object.(type) {
-	case *ast.ArrayExpr:
+	if obj, ok := mem.Object.(*ast.ArrayExpr); ok {
 		return obj
-	case *ast.Identifier:
-		if v, isConst := b.moduleConsts[obj.Name]; isConst {
-			source = v
-		} else if v, ok := b.localProps[obj.Name]; ok {
-			source = v
-		}
-	case *ast.MemberExpr:
-		source = evalConstWithSignals(obj, b.sigMap(), b.localProps)
 	}
-	if source == "" {
+	// Fold the receiver (a prop, local, module const, signal initial, or a
+	// chain such as items.filter(...).slice(0, 3)) to a typed array value and
+	// turn its elements back into literals for item substitution.
+	v := b.evalValue(mem.Object)
+	if !v.IsArray() || v.ContainsUnknown() {
 		return nil
 	}
-	prog := parseExprAsProgram(source)
-	if prog == nil {
-		return nil
-	}
-	for _, stmt := range prog.Body {
-		if es, ok := stmt.(*ast.ExprStmt); ok {
-			if arr, ok := es.Expression.(*ast.ArrayExpr); ok {
-				return arr
-			}
-		}
-	}
-	return nil
+	arr, _ := jsvalue.ToAST(v).(*ast.ArrayExpr)
+	return arr
 }
 
 // tryResolveArrayItems renders a list slot's SSR items from an already-resolved
@@ -3231,12 +1965,26 @@ func (b *builder) tryResolveArrayItems(arr *ast.ArrayExpr, mapExpr ast.Expr, lis
 	var items []*ListItem
 	for i, elem := range arr.Elements {
 		key := itoa(i)
-		concrete := substituteListParam(bodyExpr, paramName, elem)
-		if indexName != "" {
-			concrete = substituteListParam(concrete, indexName, &ast.Literal{Position: elem.Pos(), Kind: ast.NumberLit, Value: itoa(i)})
+		if elem == nil {
+			// An array hole (`[a, , b]`) maps like undefined.
+			elem = &ast.Literal{Position: arr.Position, Kind: ast.NullLit, Value: "undefined"}
 		}
+		concrete := substituteListParam(bodyExpr, paramName, elem)
+		var index ast.Expr
+		if indexName != "" {
+			index = &ast.Literal{Position: elem.Pos(), Kind: ast.NumberLit, Value: itoa(i)}
+			concrete = substituteListParam(concrete, indexName, index)
+		}
+		// A block-bodied callback (`x => { const label = x.name; return
+		// <li>{label}</li>; }`) declares locals the rendered body reads:
+		// simple const locals are substituted (innermost last, so a later
+		// local may read an earlier one); any other local shadows component
+		// bindings of the same name while the item is built.
+		concrete = substituteCallbackLocals(arrow, concrete, paramName, elem, indexName, index)
 		itemID := joinSlotIDKey(SlotID(listID), key)
+		restore := b.pushShadow(blockBindingNames(arrow.Body))
 		contents := b.buildSlotNodes(concrete, string(itemID))
+		restore()
 		if len(contents) == 0 {
 			contents = []SlotNode{&StaticHTML{HTML: ""}}
 		}
@@ -3246,6 +1994,46 @@ func (b *builder) tryResolveArrayItems(arr *ast.ArrayExpr, mapExpr ast.Expr, lis
 		})
 	}
 	return items
+}
+
+// substituteCallbackLocals substitutes the simple `const name = init` locals a
+// block-bodied map callback declares before its return into the rendered
+// body. Each init has the loop parameter (and index) substituted first.
+func substituteCallbackLocals(arrow *ast.ArrowFn, body ast.Expr, param string, elem ast.Expr, indexName string, index ast.Expr) ast.Expr {
+	if arrow == nil || arrow.Expression {
+		return body
+	}
+	type local struct {
+		name string
+		init ast.Expr
+	}
+	var locals []local
+	for _, stmt := range arrow.Body {
+		if _, ok := stmt.(*ast.ReturnStmt); ok {
+			break
+		}
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok || vs.Kind != ast.VarConst {
+			continue
+		}
+		for _, d := range vs.Decls {
+			if d == nil || d.IsDestructuring || d.Name == "" || d.Init == nil {
+				continue
+			}
+			init := substituteListParam(d.Init, param, elem)
+			if index != nil {
+				init = substituteListParam(init, indexName, index)
+			}
+			for _, prev := range locals {
+				init = substituteListParam(init, prev.name, prev.init)
+			}
+			locals = append(locals, local{name: d.Name, init: init})
+		}
+	}
+	for i := len(locals) - 1; i >= 0; i-- {
+		body = substituteListParam(body, locals[i].name, locals[i].init)
+	}
+	return body
 }
 
 // substituteListParam returns a deep clone of body with every reference to the
@@ -3285,7 +2073,13 @@ func (s *listParamSubstituter) sub(expr ast.Expr) ast.Expr {
 		}
 		return &ast.MemberExpr{Position: e.Position, Object: obj, Property: e.Property, Computed: e.Computed, Optional: e.Optional}
 	case *ast.CallExpr:
-		return &ast.CallExpr{Position: e.Position, Callee: s.sub(e.Callee), Args: subExprList(s, e.Args)}
+		return &ast.CallExpr{Position: e.Position, Callee: s.sub(e.Callee), Args: subExprList(s, e.Args), Optional: e.Optional}
+	case *ast.NewExpr:
+		return &ast.NewExpr{Position: e.Position, Callee: s.sub(e.Callee), Args: subExprList(s, e.Args)}
+	case *ast.AwaitExpr:
+		return &ast.AwaitExpr{Position: e.Position, Arg: s.sub(e.Arg)}
+	case *ast.DynamicImport:
+		return &ast.DynamicImport{Position: e.Position, Arg: s.sub(e.Arg)}
 	case *ast.BinaryExpr:
 		return &ast.BinaryExpr{Position: e.Position, Left: s.sub(e.Left), Op: e.Op, Right: s.sub(e.Right)}
 	case *ast.UnaryExpr:
@@ -3307,12 +2101,131 @@ func (s *listParamSubstituter) sub(expr ast.Expr) ast.Expr {
 	case *ast.JSXFragment:
 		return &ast.JSXFragment{Position: e.Position, Children: subJSXChildrenList(s, e.Children)}
 	case *ast.ArrowFn:
-		return e // map bodies are expressions; nested arrows capture their own scope
+		// A nested function (e.g. `onClick={() => rm(item.id)}`) closes over
+		// the loop parameter, which no longer exists once the item is
+		// rendered on its own, so it is substituted too - unless the function
+		// rebinds the name (a parameter or local of the same name).
+		if bindingScopeDeclares(functionScopeNames(e.Params, e.Body), s.param) {
+			return e
+		}
+		return &ast.ArrowFn{Position: e.Position, Params: e.Params, Body: s.subStmts(e.Body), Expression: e.Expression, Async: e.Async}
 	case *ast.TypeAssertion:
 		return &ast.TypeAssertion{Position: e.Position, Expr: s.sub(e.Expr), TypeRef: e.TypeRef}
 	default:
 		return expr
 	}
+}
+
+// subStmts substitutes the loop parameter in a nested function body,
+// stopping at nested scopes that rebind it.
+func (s *listParamSubstituter) subStmts(stmts []ast.Stmt) []ast.Stmt {
+	if len(stmts) == 0 {
+		return stmts
+	}
+	out := make([]ast.Stmt, len(stmts))
+	for i, stmt := range stmts {
+		out[i] = s.subStmt(stmt)
+	}
+	return out
+}
+
+func (s *listParamSubstituter) subStmt(stmt ast.Stmt) ast.Stmt {
+	switch st := stmt.(type) {
+	case *ast.ExprStmt:
+		return &ast.ExprStmt{Position: st.Position, Expression: s.sub(st.Expression)}
+	case *ast.ReturnStmt:
+		return &ast.ReturnStmt{Position: st.Position, Value: s.sub(st.Value)}
+	case *ast.ThrowStmt:
+		return &ast.ThrowStmt{Position: st.Position, Value: s.sub(st.Value)}
+	case *ast.VarStmt:
+		decls := make([]*ast.VarDecl, len(st.Decls))
+		for i, d := range st.Decls {
+			if d == nil {
+				continue
+			}
+			cp := *d
+			cp.Init = s.sub(d.Init)
+			decls[i] = &cp
+		}
+		return &ast.VarStmt{Position: st.Position, Kind: st.Kind, Decls: decls}
+	case *ast.IfStmt:
+		return &ast.IfStmt{Position: st.Position, Test: s.sub(st.Test), Consequent: s.subBlock(st.Consequent), Alternate: s.subBlock(st.Alternate)}
+	case *ast.BlockStmt:
+		return &ast.BlockStmt{Position: st.Position, Body: s.subBlock(st.Body)}
+	case *ast.WhileStmt:
+		return &ast.WhileStmt{Position: st.Position, Test: s.sub(st.Test), Body: s.subBlock(st.Body)}
+	case *ast.DoWhileStmt:
+		return &ast.DoWhileStmt{Position: st.Position, Body: s.subBlock(st.Body), Test: s.sub(st.Test)}
+	case *ast.ForInStmt:
+		cp := *st
+		cp.Right = s.sub(st.Right)
+		if !bindingScopeDeclares(forInBindingNames(st), s.param) {
+			cp.Body = s.subBlock(st.Body)
+		}
+		return &cp
+	case *ast.ForStmt:
+		if vs, ok := st.Init.(*ast.VarStmt); ok && vs.Kind != ast.VarVar {
+			for _, d := range vs.Decls {
+				if bindingScopeDeclares(varDeclBindingNames(d), s.param) {
+					return st
+				}
+			}
+		}
+		cp := *st
+		if st.Init != nil {
+			cp.Init = s.subStmt(st.Init)
+		}
+		cp.Test = s.sub(st.Test)
+		cp.Update = s.sub(st.Update)
+		cp.Body = s.subBlock(st.Body)
+		return &cp
+	case *ast.SwitchStmt:
+		cases := make([]*ast.CaseClause, len(st.Cases))
+		for i, c := range st.Cases {
+			if c == nil {
+				continue
+			}
+			cases[i] = &ast.CaseClause{Position: c.Position, Test: s.sub(c.Test), Body: s.subBlock(c.Body)}
+		}
+		return &ast.SwitchStmt{Position: st.Position, Discriminant: s.sub(st.Discriminant), Cases: cases}
+	case *ast.TryStmt:
+		cp := *st
+		cp.Body = s.subBlock(st.Body)
+		cp.Finally = s.subBlock(st.Finally)
+		if st.Catch != nil && !bindingScopeDeclares(catchBindingNames(st.Catch), s.param) {
+			c := *st.Catch
+			c.Body = s.subBlock(st.Catch.Body)
+			cp.Catch = &c
+		}
+		return &cp
+	case *ast.FnDecl:
+		if bindingScopeDeclares(functionScopeNames(st.Params, st.Body), s.param) {
+			return st
+		}
+		cp := *st
+		cp.Body = s.subStmts(st.Body)
+		return &cp
+	}
+	// Statements the substituter does not model (for loops with their own
+	// bindings, labels, ...) are kept as-is.
+	return stmt
+}
+
+// subBlock substitutes a nested block unless it declares the parameter name.
+func (s *listParamSubstituter) subBlock(stmts []ast.Stmt) []ast.Stmt {
+	if bindingScopeDeclares(blockBindingNames(stmts), s.param) {
+		return stmts
+	}
+	return s.subStmts(stmts)
+}
+
+func bindingScopeDeclares(names []string, name string) bool {
+	for _, n := range names {
+		if n == name {
+			return true
+		}
+	}
+	return false
 }
 
 func subExprList(s *listParamSubstituter, list []ast.Expr) []ast.Expr {
@@ -3341,6 +2254,9 @@ func subJSXChildrenList(s *listParamSubstituter, children []ast.JSXChild) []ast.
 }
 
 func substituteListParamJSX(el *ast.JSXElement, s *listParamSubstituter) *ast.JSXElement {
+	if el == nil || el.Opening == nil {
+		return el
+	}
 	opening := &ast.JSXOpening{Name: el.Opening.Name, SelfClosing: el.Opening.SelfClosing}
 	for _, attr := range el.Opening.Attributes {
 		if attr.Spread || attr.Value == nil {
@@ -3452,7 +2368,7 @@ func collectListComponents(expr ast.Expr) []string {
 				}
 			}
 		case *ast.JSXElement:
-			if len(v.Opening.Name) > 0 && v.Opening.Name[0] >= 'A' && v.Opening.Name[0] <= 'Z' {
+			if v.Opening != nil && len(v.Opening.Name) > 0 && v.Opening.Name[0] >= 'A' && v.Opening.Name[0] <= 'Z' {
 				if !seen[v.Opening.Name] {
 					seen[v.Opening.Name] = true
 					names = append(names, v.Opening.Name)
@@ -3510,7 +2426,7 @@ func (b *builder) buildFragmentSlots(frag *ast.JSXFragment, parentID string) []S
 			result = append(result, b.buildExprContainerChildren(c, parentID)...)
 		case *ast.JSXText:
 			if c.Value != "" {
-				result = append(result, &StaticHTML{HTML: c.Value})
+				result = append(result, &StaticHTML{HTML: escape.Text(c.Value)})
 			}
 		}
 	}
@@ -3580,35 +2496,56 @@ func (b *builder) buildAttrBinding(attr *ast.JSXAttr, elementID string) *AttrBin
 
 // buildStaticValueSlot - expression with no signals
 
-func (b *builder) buildStaticValueSlot(expr ast.Expr, parentID string) *StaticHTML {
-	val := evalConstWithSignals(expr, b.sigMap(), b.localProps)
-	// An expression that resolves to undefined/null renders nothing (React
-	// semantics) rather than the literal text "undefined". A string literal
-	// "null"/"undefined" is real text and is kept.
-	if !isStringLiteral(expr) && (val == "undefined" || val == "null") {
-		return &StaticHTML{HTML: ""}
-	}
-	return &StaticHTML{HTML: val}
-}
-
 // buildStaticTextSlot is buildStaticValueSlot for JSX text positions: the
 // statically-evaluated result is HTML-escaped so a template literal or string
 // expression cannot inject real markup (e.g. <Code>{`return <h1>x</h1>`}</Code>).
 func (b *builder) buildStaticTextSlot(expr ast.Expr, parentID string) *StaticHTML {
-	val := evalConstWithSignals(expr, b.sigMap(), b.localProps)
-	if !isStringLiteral(expr) && (val == "undefined" || val == "null") {
-		return &StaticHTML{HTML: ""}
+	v := b.evalValue(expr)
+	if nodes, ok := staticChildNodes(v, true); ok {
+		return nodes[0].(*StaticHTML)
 	}
-	return &StaticHTML{HTML: escape.HTML(val)}
+	return &StaticHTML{HTML: escape.HTML(legacyConstString(expr, v))}
+}
+
+// staticChildNodes renders a build-time value in JSX child position with React
+// semantics (null/undefined/booleans render nothing, numbers and strings are
+// text, arrays concatenate). escapeText=false keeps text raw for meta content
+// (inline <script>/<style>). ok=false when the value is not statically known
+// or not renderable as static text.
+func staticChildNodes(v jsvalue.Value, escapeText bool) ([]SlotNode, bool) {
+	if v.ContainsUnknown() {
+		return nil, false
+	}
+	if escapeText {
+		html, ok := renderChildValue(v)
+		if !ok {
+			return nil, false
+		}
+		return []SlotNode{&StaticHTML{HTML: html}}, true
+	}
+	text, ok := childText(v)
+	if !ok {
+		return nil, false
+	}
+	return []SlotNode{&StaticHTML{HTML: text}}, true
 }
 
 // Signal resolution helpers
+
+// setterNameFor derives the conventional setter name (`count` gives
+// `setCount`); an empty name has no setter.
+func setterNameFor(name string) string {
+	if name == "" {
+		return ""
+	}
+	return "set" + strings.ToUpper(name[:1]) + name[1:]
+}
 
 func (b *builder) resolveSignal(name string) SignalDecl {
 	if initial, ok := b.sigMap()[name]; ok {
 		return SignalDecl{
 			Name:        name,
-			SetterName:  "set" + strings.ToUpper(name[:1]) + name[1:],
+			SetterName:  setterNameFor(name),
 			Initial:     evalConst(initial),
 			IsString:    isStringType(initial, b.sigMap()),
 			InitialExpr: initial,
@@ -3623,11 +2560,10 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 	}
 	switch e := expr.(type) {
 	case *ast.Identifier:
-		_, ok := b.sigMap()[e.Name]
-		return ok
+		return b.isSignalName(e.Name)
 	case *ast.CallExpr:
 		if id, ok := e.Callee.(*ast.Identifier); ok {
-			if _, ok := b.sigMap()[id.Name]; ok {
+			if ok := b.isSignalName(id.Name); ok {
 				return true
 			}
 		}
@@ -3641,6 +2577,9 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 		}
 		return false
 	case *ast.MemberExpr:
+		if b.isLivePropRead(e) {
+			return true
+		}
 		return b.referencesSignal(e.Object)
 	case *ast.BinaryExpr:
 		return b.referencesSignal(e.Left) || b.referencesSignal(e.Right)
@@ -3663,7 +2602,10 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 	case *ast.ArrowFn:
 		// Arrow bodies execute immediately in some positions (e.g. inside
 		// createMemo(() => count() * 2) or createEffect), so a signal read
-		// inside the thunk matters for dependency ordering.
+		// inside the thunk matters for dependency ordering. Parameters and
+		// body-level declarations shadow component signals of the same name
+		// (`items.map(count => count)` does not read a `count` signal).
+		defer b.pushShadow(functionScopeNames(e.Params, e.Body))()
 		for _, s := range e.Body {
 			if stmtReferenceSignal(s, b) {
 				return true
@@ -3703,6 +2645,20 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 		return b.referencesSignal(e.Expr)
 	}
 	return false
+}
+
+// isLivePropRead reports whether e reads a getter-registered prop
+// (`props.title` where the caller passed a signal-derived value).
+func (b *builder) isLivePropRead(e *ast.MemberExpr) bool {
+	if len(b.liveProps) == 0 || b.livePropsParam == "" || e.Computed {
+		return false
+	}
+	obj, ok := e.Object.(*ast.Identifier)
+	if !ok || obj.Name != b.livePropsParam || b.isShadowed(obj.Name) {
+		return false
+	}
+	prop, ok := e.Property.(*ast.Identifier)
+	return ok && b.liveProps[prop.Name]
 }
 
 func isSimpleSignalRead(expr ast.Expr) bool {
@@ -3866,7 +2822,7 @@ func signalOptionsJS(d sigutil.Decl, signals map[string]ast.Expr) string {
 // should evaluate the real expression. This returns the JS source of the
 // initializer when it's a genuine runtime expression we can't fold, and ""
 // otherwise (so newhydrate emits the folded literal).
-func signalRawInit(expr ast.Expr, folded string, signals map[string]ast.Expr, props map[string]string) string {
+func signalRawInit(expr ast.Expr, folded string, signals map[string]ast.Expr, props valueMap) string {
 	if expr == nil {
 		return ""
 	}
@@ -4024,7 +2980,7 @@ func (b *builder) collectBodySignalUses(body []ast.Stmt, decls []SignalDecl) []s
 		switch v := e.(type) {
 		case *ast.CallExpr:
 			if id, ok := v.Callee.(*ast.Identifier); ok {
-				if _, isSig := b.sigMap()[id.Name]; isSig {
+				if isSig := b.isSignalName(id.Name); isSig {
 					mark(id.Name) // signalName() read
 				} else if sigName := setterToSignal[id.Name]; sigName != "" {
 					mark(sigName) // setSignalName() write
@@ -4051,7 +3007,9 @@ func (b *builder) collectBodySignalUses(body []ast.Stmt, decls []SignalDecl) []s
 				walkExpr(p)
 			}
 		case *ast.ArrowFn:
+			restore := b.pushShadow(functionScopeNames(v.Params, v.Body))
 			walkStmt(v.Body)
+			restore()
 		case *ast.AwaitExpr:
 			walkExpr(v.Arg)
 		case *ast.DynamicImport:
@@ -4141,7 +3099,9 @@ func (b *builder) collectBodySignalUses(body []ast.Stmt, decls []SignalDecl) []s
 			case *ast.ThrowStmt:
 				walkExpr(s.Value)
 			case *ast.FnDecl:
+				restore := b.pushShadow(functionScopeNames(s.Params, s.Body))
 				walkStmt(s.Body)
+				restore()
 			}
 		}
 	}
@@ -4183,6 +3143,12 @@ func (b *builder) collectEffectJS(body []ast.Stmt) []string {
 								js := generateExprJS(call.Args[0], b.sigMap())
 								effects = append(effects, "onCleanup("+js+")")
 							}
+						case "createEffectDeps":
+							// React useEffect/useLayoutEffect with a non-empty
+							// dependency list: the deps thunk is the second arg.
+							if len(call.Args) >= 1 {
+								effects = append(effects, generateExprJS(call, b.sigMap()))
+							}
 						}
 					}
 				}
@@ -4222,8 +3188,8 @@ func (b *builder) collectEffectJS(body []ast.Stmt) []string {
 // getter and actions object are in scope at hydration time - slot bindings and
 // handlers reference user()/user.loading/actions.refetch() and would otherwise
 // throw ReferenceError because createResource was previously dropped entirely.
-func (b *builder) collectResourceJS(body []ast.Stmt) []string {
-	var out []string
+func (b *builder) collectResourceJS(body []ast.Stmt, order *bodyOrder) []bodyJS {
+	var out []bodyJS
 	for _, stmt := range body {
 		vs, ok := stmt.(*ast.VarStmt)
 		if !ok {
@@ -4241,7 +3207,10 @@ func (b *builder) collectResourceJS(body []ast.Stmt) []string {
 			if !ok || id.Name != "createResource" {
 				continue
 			}
-			out = append(out, renderStmtJS(&ast.VarStmt{Kind: vs.Kind, Decls: []*ast.VarDecl{decl}}, b.sigMap()))
+			out = append(out, bodyJS{
+				ord: order.of(decl),
+				js:  renderStmtJS(&ast.VarStmt{Kind: vs.Kind, Decls: []*ast.VarDecl{decl}}, b.sigMap()),
+			})
 		}
 	}
 	return out
@@ -4338,95 +3307,6 @@ func (b *builder) collectMemoJS(body []ast.Stmt) []string {
 	return memos
 }
 
-// collectExtraVarJS from function body
-
-// collectExtraVarJS walks top-level value declarations and returns them split
-// into two groups: pre (declarations that reference NO signal getters, safe to
-// emit before signal declarations) and post (declarations that read signals,
-// which must come after the signal decls they depend on). Signal initializers
-// like createSignal(initial.value) evaluate local values at hydration time, so
-// a plain local object placed in `pre` is declared first - matching source
-// order.
-func (b *builder) collectExtraVarJS(body []ast.Stmt) (pre, post []string) {
-	for _, stmt := range body {
-		switch s := stmt.(type) {
-		case *ast.VarStmt:
-			for _, decl := range s.Decls {
-				if decl.Init != nil {
-					// useId() is resolved to a per-instance literal by the
-					// caller (collectLocalVars) and emitted from there, so it is
-					// skipped here to avoid emitting the raw marker.
-					if isUseIdCall(decl.Init) {
-						continue
-					}
-					// A context read folds to its default value (SSR) and is
-					// emitted as a folded local, so skip the raw call here -
-					// emitting `var x=Ctx.useContext()` would reference an
-					// undefined context object at hydration time.
-					if isContextRead(decl.Init) {
-						continue
-					}
-					// A first-class scope handle is compile-time state, never a
-					// runtime local.
-					if isCSSFactoryCall(decl.Init) {
-						continue
-					}
-					if call, ok := decl.Init.(*ast.CallExpr); ok {
-						if id, ok := call.Callee.(*ast.Identifier); ok {
-							// createMemo stays an extra var so the named getter
-							// (const doubled = createMemo(...)) is declared with
-							// its real name, letting slot bindings reference it
-							// as () => doubled(). Signals/resources/effects are
-							// handled by their own collection passes.
-							switch id.Name {
-							case "createSignal", "createResource", "createEffect":
-								continue
-							}
-						}
-					}
-					if !decl.IsDestructuring && !referencesProps(decl.Init) {
-						js := generateExprJS(decl.Init, b.sigMap())
-						if b.referencesSignal(decl.Init) {
-							post = append(post, "var "+decl.Name+"="+js)
-						} else {
-							pre = append(pre, "var "+decl.Name+"="+js)
-						}
-					}
-				}
-			}
-		case *ast.BlockStmt:
-			p, po := b.collectExtraVarJS(s.Body)
-			pre = append(pre, p...)
-			post = append(post, po...)
-		case *ast.IfStmt:
-			// Render early-return guards (`if (!items || items.length === 0)
-			// return <span/>`) are a render-time decision already captured by the
-			// SSR slot output. Re-emitting them at hydration as a top-level
-			// statement that can `return` would abort the component IIFE BEFORE
-			// its refs/effects register (the guard also runs before any local
-			// `var items = props.items` declaration it reads, because those
-			// locals are appended to ExtraVars afterwards). Skip them here.
-			if ifEndsInReturn(s) {
-				continue
-			}
-			if stmtsReferenceSignal(s.Consequent, b) || stmtsReferenceSignal(s.Alternate, b) {
-				post = append(post, renderStmtJS(s, b.sigMap()))
-			} else {
-				pre = append(pre, renderStmtJS(s, b.sigMap()))
-			}
-		case *ast.ForStmt:
-			renderLoopStmt(&pre, &post, s, b)
-		case *ast.ForInStmt:
-			renderLoopStmt(&pre, &post, s, b)
-		case *ast.WhileStmt:
-			renderLoopStmt(&pre, &post, s, b)
-		case *ast.DoWhileStmt:
-			renderLoopStmt(&pre, &post, s, b)
-		}
-	}
-	return pre, post
-}
-
 // ifEndsInReturn reports whether the if statement is a render early-return
 // guard: any of its branches (directly or inside a wrapping block) contains a
 // `return` statement.
@@ -4452,15 +3332,6 @@ func stmtsContainReturn(stmts []ast.Stmt) bool {
 	return false
 }
 
-func renderLoopStmt(pre, post *[]string, s ast.Stmt, b *builder) {
-	js := renderStmtJS(s, b.sigMap())
-	if stmtsReferenceSignal([]ast.Stmt{s}, b) {
-		*post = append(*post, js)
-	} else {
-		*pre = append(*pre, js)
-	}
-}
-
 // stmtsReferenceSignal reports whether any statement in the list reads a
 // signal getter, either directly or nested in blocks/control flow.
 func stmtsReferenceSignal(stmts []ast.Stmt, b *builder) bool {
@@ -4481,6 +3352,7 @@ func stmtReferenceSignal(stmt ast.Stmt, b *builder) bool {
 			}
 		}
 	case *ast.BlockStmt:
+		defer b.pushShadow(blockBindingNames(s.Body))()
 		if stmtsReferenceSignal(s.Body, b) {
 			return true
 		}
@@ -4492,11 +3364,22 @@ func stmtReferenceSignal(stmt ast.Stmt, b *builder) bool {
 		if s.Init != nil && stmtReferenceSignal(s.Init, b) {
 			return true
 		}
+		if vs, ok := s.Init.(*ast.VarStmt); ok && vs.Kind != ast.VarVar {
+			var names []string
+			for _, d := range vs.Decls {
+				names = append(names, varDeclBindingNames(d)...)
+			}
+			defer b.pushShadow(names)()
+		}
 		if b.referencesSignal(s.Test) || b.referencesSignal(s.Update) || stmtsReferenceSignal(s.Body, b) {
 			return true
 		}
 	case *ast.ForInStmt:
-		if b.referencesSignal(s.Right) || stmtsReferenceSignal(s.Body, b) {
+		if b.referencesSignal(s.Right) {
+			return true
+		}
+		defer b.pushShadow(forInBindingNames(s))()
+		if stmtsReferenceSignal(s.Body, b) {
 			return true
 		}
 	case *ast.WhileStmt:
@@ -4520,8 +3403,13 @@ func stmtReferenceSignal(stmt ast.Stmt, b *builder) bool {
 		if stmtsReferenceSignal(s.Body, b) || stmtsReferenceSignal(s.Finally, b) {
 			return true
 		}
-		if s.Catch != nil && stmtsReferenceSignal(s.Catch.Body, b) {
-			return true
+		if s.Catch != nil {
+			restore := b.pushShadow(catchBindingNames(s.Catch))
+			hit := stmtsReferenceSignal(s.Catch.Body, b)
+			restore()
+			if hit {
+				return true
+			}
 		}
 	case *ast.ExprStmt:
 		if b.referencesSignal(s.Expression) {
@@ -4553,7 +3441,7 @@ func (b *builder) collectSignalReads(expr ast.Expr) []string {
 		}
 		switch v := e.(type) {
 		case *ast.Identifier:
-			if _, ok := b.sigMap()[v.Name]; ok && !seen[v.Name] {
+			if ok := b.isSignalName(v.Name); ok && !seen[v.Name] {
 				seen[v.Name] = true
 				reads = append(reads, v.Name)
 			}
@@ -4591,11 +3479,13 @@ func (b *builder) collectSignalReads(expr ast.Expr) []string {
 				walkJSXChild(child)
 			}
 		case *ast.ArrowFn:
+			restore := b.pushShadow(functionScopeNames(v.Params, v.Body))
 			for _, stmt := range v.Body {
 				if ret, ok := stmt.(*ast.ReturnStmt); ok {
 					walk(ret.Value)
 				}
 			}
+			restore()
 		}
 	}
 	walkJSXChild = func(child ast.JSXChild) {
@@ -4636,15 +3526,41 @@ func (b *builder) extractHandlerBody(expr ast.Expr) string {
 		if _, ok := b.functions[e.Name]; ok && !b.ann.UsedComponents[e.Name] {
 			return e.Name
 		}
-		return ""
+		// Any other binding (an imported function, a module const, a
+		// destructured prop): resolve it when the event fires. `typeof` keeps
+		// an unbound name from throwing, and a non-function value is ignored
+		// the way React ignores it.
+		return "function(e){if(typeof " + e.Name + "===\"function\")return " + e.Name + ".call(this,e);}"
 	case *ast.MemberExpr:
 		// A function prop forwarded directly, e.g. onClick={props.onClick}.
 		// Render it as a live reference resolved through the child's props
 		// object (var props = __krate_props[...]) at hydration time.
 		return generateExprJS(e, b.sigMap())
+	case *ast.TypeAssertion:
+		return b.extractHandlerBody(e.Expr)
+	case nil:
+		return ""
 	default:
+		return b.guardedHandlerJS(expr)
+	}
+}
+
+// guardedHandlerJS emits a handler for an arbitrary function-valued
+// expression (`flag ? a : b`, `makeHandler(id)`, `handlers[kind]`). An
+// expression that reads signals is evaluated on every event so it sees the
+// current state; any other expression is evaluated once when the handler is
+// bound (so `debounce(fn)` keeps one debounced instance, as in React). The
+// result is invoked only when it is a function.
+func (b *builder) guardedHandlerJS(expr ast.Expr) string {
+	js := generateExprJS(expr, b.sigMap())
+	if js == "" {
 		return ""
 	}
+	const call = "if(typeof __h===\"function\")return __h.call(this,e);"
+	if b.referencesSignal(expr) {
+		return "function(e){var __h=(" + js + ");" + call + "}"
+	}
+	return "(function(){var __h=(" + js + ");return function(e){" + call + "};})()"
 }
 
 // findLocalFunction finds a function declaration by name in the given body.
@@ -4734,8 +3650,8 @@ func renderFnAsHandler(fn *ast.FnDecl, signals map[string]ast.Expr) string {
 
 // cloneStringMap copies a string map so a provider can override context
 // markers for its subtree without leaking them to siblings.
-func cloneStringMap(m map[string]string) map[string]string {
-	out := make(map[string]string, len(m)+1)
+func cloneStringMap(m valueMap) valueMap {
+	out := make(valueMap, len(m)+1)
 	for k, v := range m {
 		out[k] = v
 	}
@@ -4803,12 +3719,22 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		)
 	}
 	if len(b.localImports) > 0 {
+		locals := make([]string, 0, len(b.localImports))
 		for local := range b.localImports {
+			locals = append(locals, local)
+		}
+		sort.Strings(locals)
+		for _, local := range locals {
 			// Only a local component used as a tag is a problem. A member such
 			// as `DropdownMenu.Label` also contains the identifier text "Label",
 			// so require a tag position (`<Label`).
 			if strings.Contains(subtree, "<"+local) && containsIdentifier(subtree, local) {
-				b.warnings = append(b.warnings, "external island for <"+root+"> references local component <"+local+">, which is not bundled into the island (use a plain element or an external package)")
+				pos := el.Position
+				if inner := findJSXElementNamed(el, local); inner != nil {
+					pos = inner.Position
+				}
+				b.warnAt(pos, "external island for <"+root+"> references local component <"+local+">, which is not bundled into the island",
+					"use a plain element or a component from an external package inside <"+root+">, or move <"+local+"> outside the island")
 			}
 		}
 	}
@@ -4960,7 +3886,7 @@ func (b *builder) bridgeIslandFragment(frag *ast.JSXFragment, used map[string]bo
 func (b *builder) bridgeScopeExpr(expr ast.Expr, used map[string]bool) ast.Expr {
 	switch e := expr.(type) {
 	case *ast.Identifier:
-		if _, ok := b.sigMap()[e.Name]; ok {
+		if ok := b.isSignalName(e.Name); ok {
 			used[e.Name] = true
 			return &ast.MemberExpr{Object: &ast.Identifier{Name: "props"}, Property: &ast.Identifier{Name: e.Name}}
 		}
@@ -4969,11 +3895,13 @@ func (b *builder) bridgeScopeExpr(expr ast.Expr, used map[string]bool) ast.Expr 
 			return &ast.MemberExpr{Object: &ast.Identifier{Name: "props"}, Property: &ast.Identifier{Name: e.Name}}
 		}
 		if v, ok := b.localProps[e.Name]; ok && e.Name != "props" && e.Name != "children" && !strings.HasPrefix(e.Name, "__krate_") {
-			return &ast.Literal{Kind: ast.StringLit, Value: v}
+			if lit := jsvalue.ToAST(v); lit != nil {
+				return lit
+			}
 		}
 	case *ast.CallExpr:
 		if id, ok := e.Callee.(*ast.Identifier); ok && len(e.Args) == 0 {
-			if _, sig := b.sigMap()[id.Name]; sig {
+			if sig := b.isSignalName(id.Name); sig {
 				used[id.Name] = true
 				return &ast.MemberExpr{Object: &ast.Identifier{Name: "props"}, Property: &ast.Identifier{Name: id.Name}}
 			}
@@ -5064,19 +3992,20 @@ func (b *builder) bridgeScopeStmts(stmts []ast.Stmt, used map[string]bool) {
 
 // foldLocalConsts folds a component's local constants using the cva/cn-aware
 // attribute evaluator, returning name -> value and extending props with them.
-func (b *builder) foldLocalConsts(fn *ast.FnDecl, props map[string]string, nextUseId func() string) map[string]string {
+func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func() string) valueMap {
 	saved := b.localProps
 	b.localProps = props
-	locals, _, inits, _, _ := collectLocalVars(fn.Body, b.sigMap(), props, nextUseId)
+	fold := collectLocalVars(fn.Body, b.sigMap(), props, nextUseId)
+	locals, inits := fold.locals, fold.inits
 	for name, init := range inits {
-		if init == nil {
+		if init == nil || fold.changed[name] {
 			continue
 		}
 		switch init.(type) {
 		case *ast.ArrayExpr, *ast.ObjectExpr, *ast.JSXElement, *ast.JSXFragment, *ast.ArrowFn:
 			continue
 		}
-		if v := b.evalAttrValue(init); v != "" {
+		if v := b.evalAttrConst(init); !v.ContainsUnknown() && !v.IsFunction() && !v.IsJSX() {
 			locals[name] = v
 			props[name] = v
 		}
@@ -5092,6 +4021,9 @@ func hasComponentChildren(children []ast.JSXChild) bool {
 	for _, child := range children {
 		switch c := child.(type) {
 		case *ast.JSXElementChild:
+			if c.Element == nil || c.Element.Opening == nil {
+				continue
+			}
 			name := c.Element.Opening.Name
 			if name != "" && name[0] >= 'A' && name[0] <= 'Z' && !isNonClientBuiltinTag(name) {
 				return true

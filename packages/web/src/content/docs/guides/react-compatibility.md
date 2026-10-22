@@ -145,19 +145,53 @@ signal.
 
 ### Attributes and `style`
 
-React-style attribute aliases are translated to their HTML/SVG equivalents,
-including `className` -> `class`, `htmlFor` -> `for`, `tabIndex` -> `tabindex`,
-`readOnly`, `autoComplete`, `colSpan`, `srcSet`, `contentEditable`, and SVG
-presentation attributes such as `strokeWidth`, `fillRule`, `clipPath`, and
-`strokeDasharray`.
+Elements and attributes are serialized with the same rules as
+`react-dom/server` (React 19), from one table shared by every render path:
 
-A **literal** `style={{ ... }}` object is folded to a CSS string, converting
-camelCase keys to kebab-case and adding `px` to dimension values:
+- **Names.** React prop names map to their HTML/SVG attributes: `className`
+  -> `class`, `htmlFor` -> `for`, `tabIndex` -> `tabindex`, `readOnly`,
+  `autoComplete`, `colSpan`, `srcSet`, `contentEditable`, SVG presentation
+  attributes (`strokeWidth` -> `stroke-width`, `fillRule`, `clipPath`, ...),
+  and the namespaced SVG attributes `xlinkHref` -> `xlink:href`,
+  `xmlnsXlink` -> `xmlns:xlink`, `xmlLang`, `xmlSpace`. SVG names that are
+  already camelCase in SVG (`viewBox`, `markerHeight`, `preserveAspectRatio`)
+  are kept as written.
+- **Boolean attributes** (`disabled`, `checked`, `hidden`, `readOnly`, ...)
+  render bare when truthy and are omitted when `false`, `null` or
+  `undefined`. `hidden="until-found"` is kept. `translate` is enumerated
+  (`"yes"`/`"no"`), and `draggable`, `spellCheck` and `contentEditable` render
+  `"true"`/`"false"`. `aria-*` and `data-*` stringify booleans.
+- **Form values.** `<textarea value>`/`defaultValue` render as the textarea's
+  content; `<select value>`/`defaultValue` (an array for `multiple`) mark the
+  matching `<option selected>`; `defaultValue`/`defaultChecked` on `<input>`
+  become `value`/`checked`.
+- **URLs.** A `javascript:` URL in `href`, `src`, `action`, `formAction` or
+  `xlinkHref` is replaced, as in React 19, with
+  `javascript:throw new Error('React has blocked a javascript: URL as a security precaution.')`.
+  The hydration runtime applies the same rule to reactive attribute updates.
+  An empty `src` (and an empty `href` other than on `<a>`) is omitted.
+- **Text.** JSX text is HTML-escaped, so `<p>&lt;b&gt;</p>` renders the
+  characters `<b>`, never a tag. `<script>` and `<style>` children are raw text.
+- **Validation.** Invalid element or attribute names, and children on void
+  elements (`<br>text</br>`), are build errors. Void elements never get a
+  closing tag.
+
+`style={{ ... }}` objects are serialized to a CSS string: camelCase keys become
+kebab-case, vendor prefixes keep their leading dash (`WebkitTransition` ->
+`-webkit-transition`, `msTransform` -> `-ms-transform`), numbers get `px`
+except for unitless properties (`lineHeight`, `opacity`, `zIndex`, `flex`,
+`fontWeight`, ...) and custom properties (`--gap`), and `null`, `undefined`,
+boolean and empty values are skipped. An object with no declarations omits the
+attribute.
 
 ```tsx
-<div style={{ fontSize: 14, backgroundColor: 'red' }} />
-// -> <div style="font-size:14px;background-color:red">
+<div style={{ fontSize: 14, lineHeight: 1.5, '--gap': 4, color: null }} />
+// -> <div style="font-size:14px;line-height:1.5;--gap:4">
 ```
+
+Lowercase `<script>` and `<style>` elements render where they are written
+(for example a `<style>` inside an `<svg>`). Use `<Head>`, `<Script>` and
+`<Style>` to place content in the document head or body end.
 
 `onDoubleClick` is translated to the DOM `dblclick` event. `key` and
 `suppressHydrationWarning` are compiler-only and never appear in the output.

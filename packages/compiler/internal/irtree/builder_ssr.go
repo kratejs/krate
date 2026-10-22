@@ -1,50 +1,29 @@
 package irtree
 
 import (
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // SSR expression helpers
 
 // collectModuleConsts scans the module-level (top-of-file) variable
 // declarations and constant-folds those with statically-evaluable initializers
-// into a name -> value map. This lets JSX text like {hexNum} resolve to 255 at
-// build time instead of leaking the identifier name as literal text. Later
-// declarations may reference earlier ones (e.g. const c = a + b).
+// into a name -> value map (legacy string form, for the build's cross-module
+// merge). Later declarations may reference earlier ones (const c = a + b).
 func collectModuleConsts(prog *ast.Program) map[string]string {
-	consts := make(map[string]string)
-	if prog == nil {
-		return consts
-	}
-	for _, stmt := range prog.Body {
-		var vs *ast.VarStmt
-		switch s := stmt.(type) {
-		case *ast.VarStmt:
-			vs = s
-		case *ast.ExportStmt:
-			if v, ok := s.Declaration.(*ast.VarStmt); ok {
-				vs = v
-			}
-		}
-		if vs == nil {
-			continue
-		}
-		for _, decl := range vs.Decls {
-			if decl.Name == "" || decl.Init == nil {
-				continue
-			}
-			if val := evalConstWithSignals(decl.Init, nil, consts); val != "" {
-				consts[decl.Name] = val
-			}
+	out := make(map[string]string)
+	for name, v := range typedModuleConsts(collectModuleConstInits(prog), nil) {
+		if s := legacyConstString(nil, v); s != "" {
+			out[name] = s
 		}
 	}
-	return consts
+	return out
 }
 
 // collectModuleConstInits returns the initializer expression for every
@@ -79,178 +58,108 @@ func collectModuleConstInits(prog *ast.Program) map[string]ast.Expr {
 	return out
 }
 
-// evalConst evaluates a constant expression to a string value.
-// evalAttrValue resolves a JSX attribute value at build time, folding class
-// helpers (cn/clsx) and cva variant calls in addition to ordinary constants.
-// It is the single entry point for static attribute emission and binding
-// initials so className folds consistently across render paths.
-func (b *builder) evalAttrValue(expr ast.Expr) string {
+// evalValue folds expr against the current component scope (signals, props,
+// locals, module constants) with cva factories and server-action URLs.
+func (b *builder) evalValue(expr ast.Expr) jsvalue.Value {
 	if expr == nil {
-		return ""
+		return jsvalue.Undefined()
 	}
-	if id, ok := expr.(*ast.Identifier); ok {
-		if u, ok := b.actionURLs[id.Name]; ok {
-			return u
+	return b.constInterp(b.localProps).Eval(expr)
+}
+
+// constInterp returns a const-folding interpreter over props that also knows
+// the builder's cva factories and server-action URLs.
+func (b *builder) constInterp(props valueMap) *jsvalue.Interp {
+	in := newConstInterp(b.sigMap(), props)
+	ident, call := in.Hooks.Ident, in.Hooks.Call
+	in.Hooks.Ident = func(name string) (jsvalue.Value, bool) {
+		if u, ok := b.actionURLs[name]; ok {
+			if _, shadowed := props[name]; !shadowed {
+				return jsvalue.String(u), true
+			}
 		}
+		return ident(name)
+	}
+	in.Hooks.Call = func(c *ast.CallExpr) (jsvalue.Value, bool) {
+		if id, ok := c.Callee.(*ast.Identifier); ok {
+			if spec, ok := b.cvaFactories[id.Name]; ok {
+				return foldCVAValue(in, spec, c.Args), true
+			}
+			if id.Name == "twMerge" {
+				if _, isProp := props[id.Name]; !isProp {
+					return foldClassValues(in, c.Args), true
+				}
+			}
+		}
+		return call(c)
+	}
+	return in
+}
+
+// foldCVAValue folds a cva factory call against a statically-known selection.
+func foldCVAValue(in *jsvalue.Interp, spec *CVASpec, args []ast.Expr) jsvalue.Value {
+	selection := map[string]string{}
+	extra := ""
+	if len(args) >= 1 {
+		obj := in.Eval(args[0])
+		if obj.IsUnknown() {
+			return obj
+		}
+		for _, k := range obj.Keys() {
+			v, _ := obj.Get(k)
+			if v.IsUnknown() {
+				return v
+			}
+			if v.IsNullish() || (v.Kind() == jsvalue.KindString && v.StringValue() == "") {
+				continue
+			}
+			if k == "class" || k == "className" {
+				extra = v.ToString()
+				continue
+			}
+			selection[k] = v.ToString()
+		}
+	}
+	return jsvalue.String(spec.Fold(selection, extra))
+}
+
+// evalAttrConst resolves a JSX attribute value at build time, folding class
+// helpers (cn/clsx/twMerge), cva variant calls and server-action URLs in
+// addition to ordinary constants.
+func (b *builder) evalAttrConst(expr ast.Expr) jsvalue.Value {
+	if expr == nil {
+		return jsvalue.Undefined()
 	}
 	if mem, ok := expr.(*ast.MemberExpr); ok && !mem.Computed {
 		if obj, ok := mem.Object.(*ast.Identifier); ok && obj.Name == "props" {
 			if prop, ok := mem.Property.(*ast.Identifier); ok {
-				if raw, ok := b.localProps[prop.Name]; ok {
-					if u := strings.Trim(raw, `"'`); strings.Contains(u, "/__krate/action/") {
-						return u
+				if raw, ok := b.localProps[prop.Name]; ok && raw.Kind() == jsvalue.KindString {
+					if u := strings.Trim(raw.StringValue(), `"'`); strings.Contains(u, "/__krate/action/") {
+						return jsvalue.String(u)
 					}
 				}
 			}
 		}
 	}
-	if call, ok := expr.(*ast.CallExpr); ok {
-		if v, ok := b.foldCVACall(call); ok {
-			return v
-		}
-		// Class helpers wrapping a cva call (`cn(buttonVariants({...}), x)`)
-		// need the factory table, which evalConstWithSignals does not have.
-		if id, ok := call.Callee.(*ast.Identifier); ok {
-			switch id.Name {
-			case "cn", "clsx", "twMerge":
-				return b.foldClassArgs(call.Args)
-			}
-		}
-	}
-	return evalConstWithSignals(expr, b.sigMap(), b.localProps)
+	return b.evalValue(expr)
 }
 
-// foldClassArgs evaluates cn/clsx/twMerge arguments, folding cva factory calls
-// inside them and skipping false/undefined entries.
-func (b *builder) foldClassArgs(args []ast.Expr) string {
-	var parts []string
-	for _, arg := range args {
-		if call, ok := arg.(*ast.CallExpr); ok {
-			if v, ok := b.foldCVACall(call); ok {
-				if v != "" {
-					parts = append(parts, v)
-				}
-				continue
-			}
-			if id, ok := call.Callee.(*ast.Identifier); ok {
-				switch id.Name {
-				case "cn", "clsx", "twMerge":
-					if v := b.foldClassArgs(call.Args); v != "" {
-						parts = append(parts, v)
-					}
-					continue
-				}
-			}
-		}
-		v := b.evalAttrValue(arg)
-		switch v {
-		case "", "undefined", "null", "false":
-			continue
-		}
-		parts = append(parts, v)
-	}
-	return strings.Join(parts, " ")
-}
-
-// foldCVACall folds a `X({ variant: ... })` call where X is a known cva factory
-// declared in this program or an imported module. Returns ok=false when X is
-// not a cva factory or the selection is not statically known.
-func (b *builder) foldCVACall(call *ast.CallExpr) (string, bool) {
-	id, ok := call.Callee.(*ast.Identifier)
-	if !ok || b.cvaFactories == nil {
-		return "", false
-	}
-	spec, ok := b.cvaFactories[id.Name]
-	if !ok {
-		return "", false
-	}
-	selection := map[string]string{}
-	extra := ""
-	if len(call.Args) >= 1 {
-		obj, ok := call.Args[0].(*ast.ObjectExpr)
-		if !ok {
-			return "", false
-		}
-		for _, prop := range obj.Properties {
-			if prop == nil || prop.Spread || prop.Key == "" {
-				continue
-			}
-			v := evalConstWithSignals(prop.Value, b.sigMap(), b.localProps)
-			if prop.Value != nil && operandLeaks(prop.Value, b.sigMap(), b.localProps) {
-				return "", false
-			}
-			if v == "undefined" || v == "null" || v == "" {
-				continue
-			}
-			if prop.Key == "class" || prop.Key == "className" {
-				extra = v
-				continue
-			}
-			selection[prop.Key] = v
-		}
-	}
-	return spec.Fold(selection, extra), true
-}
-
-// constArrayItems parses a const-folded array value into its element strings.
-// Values arrive either as the internal \x1f-joined form (arrays built in
-// evaluated code) or as a JS array-literal source string (arrays from props /
-// consts, e.g. `['a','b']`). String elements are unquoted so `arr.join(", ")`
-// yields the element text rather than its quoted source form.
-func constArrayItems(v string) ([]string, bool) {
-	if v == "" {
-		return nil, true
-	}
-	if strings.Contains(v, "\x1f") {
-		return strings.Split(v, "\x1f"), true
-	}
-	if !strings.HasPrefix(strings.TrimSpace(v), "[") {
-		return nil, false
-	}
-	arr, ok := constSourceToAST(v).(*ast.ArrayExpr)
-	if !ok {
-		return nil, false
-	}
-	out := make([]string, 0, len(arr.Elements))
-	for _, el := range arr.Elements {
-		out = append(out, evalConst(el))
-	}
-	return out, true
-}
-
-// sliceConstBounds resolves JS Array/String.prototype.slice arguments
-// (negative offsets and an omitted end) to a clamped [start, end) range.
-func sliceConstBounds(start, end int, hasEnd bool, n int) (int, int) {
-	if start < 0 {
-		start += n
-		if start < 0 {
-			start = 0
-		}
-	}
-	if start > n {
-		start = n
-	}
-	if !hasEnd {
-		end = n
-	}
-	if end < 0 {
-		end += n
-		if end < 0 {
-			end = 0
-		}
-	}
-	if end > n {
-		end = n
-	}
-	if end < start {
-		end = start
-	}
-	return start, end
+// evalAttrValue is evalAttrConst in the legacy string form expected by the
+// attribute serialization and binding initials, so className folds
+// consistently across render paths.
+func (b *builder) evalAttrValue(expr ast.Expr) string {
+	return legacyConstString(expr, b.evalAttrConst(expr))
 }
 
 func evalConst(expr ast.Expr) string {
 	if expr == nil {
 		return ""
+	}
+	// Context-free folding uses JS semantics when the value is fully known;
+	// otherwise the structural fallback below keeps identifier names and
+	// expression text for JS emission.
+	if v := evalConstValue(expr, nil, nil); !v.ContainsUnknown() && !v.IsFunction() {
+		return jsvalue.LegacyString(v)
 	}
 	switch e := expr.(type) {
 	case *ast.Literal:
@@ -273,7 +182,7 @@ func evalConst(expr ast.Expr) string {
 		if arg == "" {
 			return ""
 		}
-		return e.Op + arg
+		return unaryPrefixJS(e.Op, arg)
 	case *ast.BinaryExpr:
 		left := evalConst(e.Left)
 		right := evalConst(e.Right)
@@ -373,7 +282,7 @@ func constExprToJS(expr ast.Expr) string {
 		}
 		return "{" + strings.Join(parts, ",") + "}"
 	case *ast.UnaryExpr:
-		return e.Op + constExprToJS(e.Arg)
+		return unaryPrefixJS(e.Op, constExprToJS(e.Arg))
 	case *ast.TemplateExpr:
 		// Preserve the template literal as valid JS with interpolated parts.
 		var b strings.Builder
@@ -407,604 +316,24 @@ func constExprToJS(expr ast.Expr) string {
 }
 
 // evalConstWithSignals evaluates a constant expression, resolving signal reads
-// (name()) and bare signal identifiers to their initial values. Used to compute
-// the SSR initial value of dynamic attributes like data-state={open() ? "open" : "closed"}.
-// props maps component parameter names to pre-resolved call-site values so
-// props.X reads and bare param identifiers resolve.
-func evalConstWithSignals(expr ast.Expr, signals map[string]ast.Expr, props map[string]string) string {
+// (name()) and bare signal identifiers to their initial values, and returns it
+// in the legacy string form. Used to compute SSR initial values of dynamic
+// attributes like data-state={open() ? "open" : "closed"}. props maps component
+// parameter names (and folded locals) to their build-time values.
+func evalConstWithSignals(expr ast.Expr, signals map[string]ast.Expr, props valueMap) string {
 	if expr == nil {
 		return ""
 	}
-	switch e := expr.(type) {
-	case *ast.Literal:
-		if e.Kind == ast.NullLit {
-			return ""
-		}
-		if e.Kind == ast.StringLit {
-			return e.Value
-		}
-		return e.Value
-	case *ast.CallExpr:
-		// Array.prototype.join: fold `arr.join(sep)` to a string when `arr` is a
-		// statically-known array (an array literal, a prop binding such as
-		// `props.authors`, or a signal initial). Without this the join only
-		// resolves during hydration, so a client component's build-time static
-		// HTML renders "" and diverges from the hydrated output.
-		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
-			if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "join" {
-				arr := evalConstWithSignals(mem.Object, signals, props)
-				sep := ","
-				if len(e.Args) == 1 {
-					if s := evalConstWithSignals(e.Args[0], signals, props); s != "" {
-						sep = s
-					}
-				}
-				if items, ok := constArrayItems(arr); ok {
-					return strings.Join(items, sep)
-				}
-			}
-			// String/Array.prototype.slice: fold `x.slice(a, b?)` so static text
-			// such as `{lastUpdated.slice(0, 10)}` renders at build time instead
-			// of collapsing to "" (it never re-renders during hydration).
-			if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "slice" {
-				obj := evalConstWithSignals(mem.Object, signals, props)
-				start, end, hasEnd := 0, 0, false
-				if len(e.Args) >= 1 {
-					if n, err := strconv.Atoi(strings.TrimSpace(evalConstWithSignals(e.Args[0], signals, props))); err == nil {
-						start = n
-					}
-				}
-				if len(e.Args) >= 2 {
-					if n, err := strconv.Atoi(strings.TrimSpace(evalConstWithSignals(e.Args[1], signals, props))); err == nil {
-						end = n
-						hasEnd = true
-					}
-				}
-				if items, ok := constArrayItems(obj); ok {
-					s, en := sliceConstBounds(start, end, hasEnd, len(items))
-					return strings.Join(items[s:en], "\x1f")
-				}
-				runes := []rune(obj)
-				s, en := sliceConstBounds(start, end, hasEnd, len(runes))
-				return string(runes[s:en])
-			}
-		}
-		// `Ctx.useContext()` folds to the context default (no Provider exists
-		// during SSG). The default was seeded under a reserved key above.
-		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
-			if prop, ok := mem.Property.(*ast.Identifier); ok && (prop.Name == "useContext" || prop.Name == "use") {
-				if id, ok := mem.Object.(*ast.Identifier); ok {
-					if v, found := props[contextMarkerPrefix+id.Name]; found {
-						return v
-					}
-				}
-			}
-		}
-		if id, ok := e.Callee.(*ast.Identifier); ok {
-			// `useContext(Ctx)` (the @krate/runtime form) folds to the default.
-			if (id.Name == "useContext" || id.Name == "use") && len(e.Args) == 1 {
-				if arg, ok := e.Args[0].(*ast.Identifier); ok {
-					if v, found := props[contextMarkerPrefix+arg.Name]; found {
-						return v
-					}
-				}
-			}
-			if initial, ok := signals[id.Name]; ok {
-				if isResourceSentinel(initial) {
-					return "" // resource getter: no data resolved during SSR
-				}
-				return evalConstWithSignals(initial, signals, props)
-			}
-			if id.Name == "String" && len(e.Args) == 1 {
-				return evalConstWithSignals(e.Args[0], signals, props)
-			}
-			// Pure class helpers (cn/clsx) fold to a literal class string when
-			// every argument is statically known, so className becomes static
-			// HTML with no hydration binding.
-			if id.Name == "cn" || id.Name == "clsx" {
-				if v, ok := foldClassCall(e.Args, signals, props); ok {
-					return v
-				}
-			}
-		}
-		return ""
-	case *ast.Identifier:
-		if e.Name == "__krate_resource__" {
-			return "" // resource sentinel: no data resolved during SSR
-		}
-		if initial, ok := signals[e.Name]; ok {
-			return evalConstWithSignals(initial, signals, props)
-		}
-		if v, ok := props[e.Name]; ok {
-			return v
-		}
-		return e.Name
-	case *ast.ConditionalExpr:
-		test := evalConstWithSignals(e.Test, signals, props)
-		if test == "false" || test == "null" || test == "undefined" || test == "0" || test == "" {
-			return evalConstWithSignals(e.Alternate, signals, props)
-		}
-		return evalConstWithSignals(e.Consequent, signals, props)
-	case *ast.BinaryExpr:
-		switch e.Op {
-		case "||":
-			left := evalConstWithSignals(e.Left, signals, props)
-			if isTruthyValue(left) {
-				return left
-			}
-			return evalConstWithSignals(e.Right, signals, props)
-		case "&&":
-			left := evalConstWithSignals(e.Left, signals, props)
-			if !isTruthyValue(left) {
-				return left
-			}
-			return evalConstWithSignals(e.Right, signals, props)
-		case "==", "===", "!=", "!==":
-			lVal := evalConstWithSignals(e.Left, signals, props)
-			rVal := evalConstWithSignals(e.Right, signals, props)
-			// A literal operand is known even when its resolved value is "".
-			// A non-empty resolved value is also known. Only treat truly
-			// unresolvable operands (unresolved identifier, call, etc.) as unknown.
-			_, lLit := e.Left.(*ast.Literal)
-			_, rLit := e.Right.(*ast.Literal)
-			if !lLit && lVal == "" {
-				return ""
-			}
-			if !rLit && rVal == "" {
-				return ""
-			}
-			switch e.Op {
-			case "==", "===":
-				return strconv.FormatBool(lVal == rVal)
-			default:
-				return strconv.FormatBool(lVal != rVal)
-			}
-		default:
-			left := evalConstWithSignals(e.Left, signals, props)
-			right := evalConstWithSignals(e.Right, signals, props)
-			if operandLeaks(e.Left, signals, props) || operandLeaks(e.Right, signals, props) {
-				return ""
-			}
-			return evalBinaryValue(e.Op, left, right)
-		}
-	case *ast.UnaryExpr:
-		arg := evalConstWithSignals(e.Arg, signals, props)
-		if e.Op == "!" {
-			// Logical negation must fold to a real boolean; returning "!true"
-			// would stringify to a truthy value and invert the guard at SSR.
-			// Callers only trust this value when testFullyKnown is true, so an
-			// empty arg here means a resolved falsy operand (null/""), not an
-			// unresolved leak.
-			return strconv.FormatBool(!isTruthyValue(arg))
-		}
-		if arg == "" {
-			return ""
-		}
-		return e.Op + arg
-	case *ast.MemberExpr:
-		if v, ok := resolveMemberChainValue(e, props); ok {
-			return v
-		}
-		// Member reads on an object literal (e.g. a list item substituted from a
-		// content-collection entry: post.data.title) fold through the literal.
-		if v, ok := resolveMemberOnLiteral(e, signals, props); ok {
-			return v
-		}
-		// Signal object member: `state().field` folds through the signal's
-		// object-literal initial (used by lowered class components).
-		if call, ok := e.Object.(*ast.CallExpr); ok && !e.Computed && len(call.Args) == 0 {
-			if id, ok := call.Callee.(*ast.Identifier); ok {
-				if init, found := signals[id.Name]; found {
-					if obj, ok := init.(*ast.ObjectExpr); ok {
-						if prop, ok := e.Property.(*ast.Identifier); ok {
-							for _, p := range obj.Properties {
-								if p != nil && !p.Spread && p.Key == prop.Name && p.Value != nil {
-									return evalConstWithSignals(p.Value, signals, props)
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-		if id, ok := e.Object.(*ast.Identifier); ok && id.Name == "props" {
-			if prop, ok := e.Property.(*ast.Identifier); ok {
-				if v, ok := props[prop.Name]; ok {
-					return v
-				}
-				// children resolve through call-site slot machinery, never here.
-				if prop.Name == "children" {
-					return ""
-				}
-				// An absent prop is a definite undefined at runtime. Return the
-				// "undefined" token (not "") so comparisons fold correctly
-				// (undefined !== false === true) and fallbacks via || still
-				// pick the default (undefined is falsy).
-				return "undefined"
-			}
-		} else if id, ok := e.Object.(*ast.Identifier); ok {
-			if initial, ok := signals[id.Name]; ok && isResourceSentinel(initial) {
-				if prop, ok := e.Property.(*ast.Identifier); ok {
-					switch prop.Name {
-					case "loading":
-						return "true"
-					case "state":
-						return "unresolved"
-					case "error":
-						return ""
-					}
-				}
-				return ""
-			}
-		}
-		return ""
-	case *ast.TemplateExpr:
-		var buf strings.Builder
-		for i, raw := range e.Raw {
-			buf.WriteString(escape.TemplateRaw(raw))
-			if i < len(e.Parts) {
-				buf.WriteString(evalConstWithSignals(e.Parts[i], signals, props))
-			}
-		}
-		return buf.String()
-	default:
-		return evalConst(expr)
-	}
+	return legacyConstString(expr, evalConstValue(expr, signals, props))
 }
 
-// foldClassCall evaluates a `cn(...)`/`clsx(...)` call to a literal class
-// string when every argument is a statically-known class value: a string, a
-// number, a boolean/null, a template, a `&&`/ternary guard whose test folds, an
-// array of class values, or an object of `{class: bool}` toggles. Returns
-// ok=false when any argument cannot be resolved, leaving the call to runtime.
-func foldClassCall(args []ast.Expr, signals map[string]ast.Expr, props map[string]string) (string, bool) {
-	var tokens []string
-	for _, arg := range args {
-		vals, ok := foldClassValue(arg, signals, props)
-		if !ok {
-			return "", false
-		}
-		tokens = append(tokens, vals...)
-	}
-	return strings.Join(tokens, " "), true
-}
-
-// foldClassValue flattens one argument to zero or more class tokens. The
-// boolean=true return means "statically known"; an empty slice is a valid
-// known-empty result (e.g. a falsy guard).
-func foldClassValue(expr ast.Expr, signals map[string]ast.Expr, props map[string]string) ([]string, bool) {
-	switch e := expr.(type) {
-	case *ast.Literal:
-		switch e.Kind {
-		case ast.StringLit:
-			if e.Value == "" {
-				return nil, true
-			}
-			return []string{e.Value}, true
-		case ast.NumberLit:
-			return []string{e.Value}, true
-		default:
-			// booleans/null contribute nothing.
-			return nil, true
-		}
-	case *ast.TemplateExpr:
-		v := evalConstWithSignals(expr, signals, props)
-		if operandLeaks(expr, signals, props) {
-			return nil, false
-		}
-		if v == "" {
-			return nil, true
-		}
-		return []string{v}, true
-	case *ast.ArrayExpr:
-		var out []string
-		for _, el := range e.Elements {
-			if el == nil {
-				continue
-			}
-			toks, ok := foldClassValue(el, signals, props)
-			if !ok {
-				return nil, false
-			}
-			out = append(out, toks...)
-		}
-		return out, true
-	case *ast.ObjectExpr:
-		var out []string
-		for _, prop := range e.Properties {
-			if prop == nil || prop.Spread || prop.Key == "" {
-				return nil, false
-			}
-			v := evalConstWithSignals(prop.Value, signals, props)
-			if operandLeaks(prop.Value, signals, props) {
-				return nil, false
-			}
-			if isTruthyValue(v) {
-				out = append(out, prop.Key)
-			}
-		}
-		return out, true
-	case *ast.BinaryExpr:
-		if e.Op == "&&" {
-			left := evalConstWithSignals(e.Left, signals, props)
-			if operandLeaks(e.Left, signals, props) {
-				return nil, false
-			}
-			if !isTruthyValue(left) {
-				return nil, true
-			}
-			return foldClassValue(e.Right, signals, props)
-		}
-		// Other binary operators are not class values.
-		return nil, false
-	case *ast.ConditionalExpr:
-		test := evalConstWithSignals(e.Test, signals, props)
-		if operandLeaks(e.Test, signals, props) {
-			return nil, false
-		}
-		if isTruthyValue(test) {
-			return foldClassValue(e.Consequent, signals, props)
-		}
-		return foldClassValue(e.Alternate, signals, props)
-	case *ast.Identifier:
-		// A bare local/prop that resolves to a string literal.
-		if v, ok := props[e.Name]; ok {
-			if v == "" || v == "undefined" || v == "null" || v == "false" {
-				return nil, true
-			}
-			return []string{v}, true
-		}
-		return nil, false
-	default:
-		return nil, false
-	}
-}
-
-// resolveMemberChainValue resolves a member-access chain rooted at `props`
-// (e.g. props.options.accent, props.options?.dark) against the props map.
-// Each intermediate hop must resolve to a literal object whose property value
-// can be const-folded (so `props.theme.colors.primary` works when the theme
-// object is a call-site literal). Returns (value, true) when fully resolvable;
-// (value, false) when the root or any hop cannot be determined.
-func resolveMemberChainValue(expr ast.Expr, props map[string]string) (string, bool) {
-	var names []string
-	cur := expr
-	for {
-		mem, ok := cur.(*ast.MemberExpr)
-		if !ok {
-			break
-		}
-		pid, ok := mem.Property.(*ast.Identifier)
-		if !ok {
-			return "", false
-		}
-		names = append(names, pid.Name)
-		cur = mem.Object
-	}
-	if len(names) == 0 {
-		return "", false
-	}
-	id, ok := cur.(*ast.Identifier)
-	if !ok || id.Name != "props" {
-		return "", false
-	}
-	v, ok := props[names[len(names)-1]]
-	if !ok {
-		return "", false
-	}
-	// Hop through each outer member in reverse (innermost to outermost).
-	for i := len(names) - 2; i >= 0; i-- {
-		name := names[i]
-		lit := constSourceToAST(v)
-		// `.length` on a resolved array/string literal (e.g. props.tags.length,
-		// props.hero.actions.length) folds to a number so guards like
-		// `{props.x && props.x.length > 0 && ...}` resolve at build time.
-		if name == "length" {
-			if n, ok := constLength(lit); ok {
-				v = strconv.Itoa(n)
-				continue
-			}
-			return "", false
-		}
-		obj, ok := lit.(*ast.ObjectExpr)
-		if !ok {
-			return "", false
-		}
-		var found bool
-		for _, p := range obj.Properties {
-			if p.Spread || p.Key != name || p.Value == nil {
-				continue
-			}
-			v = evalConst(p.Value)
-			found = true
-			break
-		}
-		if !found {
-			return "", false
-		}
-	}
-	return v, true
-}
-
-// resolveMemberOnLiteral folds a member chain against an object/array literal
-// expression. It handles reads like `post.data.title` where `post` is an
-// object literal (e.g. a list item substituted from a content-collection
-// entry), plus `.length` on array literals. Returns (value, true) when the
-// whole chain resolves.
-func resolveMemberOnLiteral(expr *ast.MemberExpr, signals map[string]ast.Expr, props map[string]string) (string, bool) {
-	// Collect the property chain (innermost first) and the base expression.
-	var names []string
-	var cur ast.Expr = expr
-	for {
-		mem, ok := cur.(*ast.MemberExpr)
-		if !ok {
-			break
-		}
-		pid, ok := mem.Property.(*ast.Identifier)
-		if !ok {
-			return "", false
-		}
-		names = append(names, pid.Name)
-		cur = mem.Object
-	}
-	if len(names) == 0 {
-		return "", false
-	}
-
-	// Resolve the base: an object/array literal, or a signal/local binding
-	// whose value is one.
-	base := cur
-	switch b := cur.(type) {
-	case *ast.Identifier:
-		if initial, ok := signals[b.Name]; ok {
-			base = initial
-		} else if v, ok := props[b.Name]; ok {
-			if lit := constSourceToAST(v); lit != nil {
-				base = lit
-			} else {
-				return "", false
-			}
-		} else {
-			return "", false
-		}
-	case *ast.ObjectExpr, *ast.ArrayExpr:
-		// use as-is
-	default:
-		return "", false
-	}
-
-	// Walk outer?inner is not needed; names are innermost-first, so reverse to
-	// resolve outermost property first.
-	for i := len(names) - 1; i >= 0; i-- {
-		name := names[i]
-		if name == "length" {
-			if n, ok := constLength(base); ok {
-				base = &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(n)}
-				continue
-			}
-			return "", false
-		}
-		obj, ok := base.(*ast.ObjectExpr)
-		if !ok {
-			return "", false
-		}
-		var found bool
-		for _, p := range obj.Properties {
-			if p.Spread || p.Key != name || p.Value == nil {
-				continue
-			}
-			base = p.Value
-			found = true
-			break
-		}
-		if !found {
-			return "", false
-		}
-	}
-	return evalConstWithSignals(base, signals, props), true
-}
-func operandLeaks(expr ast.Expr, signals map[string]ast.Expr, props map[string]string) bool {
-	switch e := expr.(type) {
-	case *ast.Identifier:
-		if e.Name == "props" {
-			return true
-		}
-		if _, ok := signals[e.Name]; ok {
-			return false
-		}
-		_, ok := props[e.Name]
-		return !ok
-	case *ast.MemberExpr:
-		if id, ok := e.Object.(*ast.Identifier); ok && id.Name == "props" {
-			if _, ok := e.Property.(*ast.Identifier); ok {
-				return false
-			}
-		}
-		if _, ok := resolveMemberChainValue(e, props); ok {
-			return false
-		}
-		return true
-	case *ast.CallExpr:
-		// Context reads fold to their default and never leak.
-		if mem, ok := e.Callee.(*ast.MemberExpr); ok {
-			if prop, ok := mem.Property.(*ast.Identifier); ok && (prop.Name == "useContext" || prop.Name == "use") {
-				if id, ok := mem.Object.(*ast.Identifier); ok {
-					if _, found := props[contextMarkerPrefix+id.Name]; found {
-						return false
-					}
-				}
-			}
-		}
-		if id, ok := e.Callee.(*ast.Identifier); ok {
-			if (id.Name == "useContext" || id.Name == "use") && len(e.Args) == 1 {
-				if arg, ok := e.Args[0].(*ast.Identifier); ok {
-					if _, found := props[contextMarkerPrefix+arg.Name]; found {
-						return false
-					}
-				}
-			}
-			if _, ok := signals[id.Name]; ok {
-				return false
-			}
-			// Pure class helpers do not leak when every argument is itself
-			// resolvable (e.g. cn("base", className)), so class folding can
-			// proceed for prop-driven components.
-			if id.Name == "cn" || id.Name == "clsx" {
-				for _, arg := range e.Args {
-					if operandLeaks(arg, signals, props) {
-						return true
-					}
-				}
-				return false
-			}
-		}
-		return true
-	case *ast.BinaryExpr:
-		return operandLeaks(e.Left, signals, props) || operandLeaks(e.Right, signals, props)
-	case *ast.UnaryExpr:
-		return operandLeaks(e.Arg, signals, props)
-	case *ast.ConditionalExpr:
-		if operandLeaks(e.Test, signals, props) {
-			return true
-		}
-		tv := evalConstWithSignals(e.Test, signals, props)
-		if isTruthyValue(tv) {
-			return operandLeaks(e.Consequent, signals, props)
-		}
-		return operandLeaks(e.Alternate, signals, props)
-	case *ast.TemplateExpr:
-		for _, p := range e.Parts {
-			if operandLeaks(p, signals, props) {
-				return true
-			}
-		}
-		return false
-	case *ast.TypeAssertion:
-		return operandLeaks(e.Expr, signals, props)
-	default:
+// operandLeaks reports whether expr depends on a value that is not known at
+// build time (an unresolved identifier, an unsupported construct, ...).
+func operandLeaks(expr ast.Expr, signals map[string]ast.Expr, props valueMap) bool {
+	if expr == nil {
 		return false
 	}
-}
-
-// resolveSignalReadExpr resolves a signal-read expression to its initial value.
-// Handles CallExpr{name()} and Identifier{name} where name is a known signal.
-func resolveSignalReadExpr(expr ast.Expr, signals map[string]ast.Expr) string {
-	if expr == nil || signals == nil {
-		return ""
-	}
-	switch e := expr.(type) {
-	case *ast.CallExpr:
-		if id, ok := e.Callee.(*ast.Identifier); ok {
-			if initial, ok := signals[id.Name]; ok {
-				return evalConst(initial)
-			}
-		}
-	case *ast.Identifier:
-		if initial, ok := signals[e.Name]; ok {
-			return evalConst(initial)
-		}
-	}
-	return ""
+	return evalConstValue(expr, signals, props).ContainsUnknown()
 }
 
 // updateTextSlotInitials walks slot children and updates TextSlot.Initial
@@ -1013,7 +342,15 @@ func updateTextSlotInitials(children []SlotNode, signals []SignalDecl) {
 	signalMap := make(map[string]string)
 	for _, sig := range signals {
 		if sig.Initial != "" {
-			signalMap[sig.Name] = sig.Initial
+			initial := sig.Initial
+			if !sig.IsString {
+				// Non-string initials (booleans, null) render with React child
+				// semantics: `{flag()}` with flag=false shows nothing.
+				if t, ok := childText(jsvalue.FromLegacy(initial)); ok {
+					initial = t
+				}
+			}
+			signalMap[sig.Name] = initial
 		}
 	}
 	for _, child := range children {
@@ -1051,42 +388,87 @@ func extractPropsAST(el *ast.JSXElement) map[string]ast.Expr {
 }
 
 // expandSpreadAttrs replaces `{...name}` spreads that resolve to a known rest
-// parameter with the call-site attributes it collected. Explicitly-written
-// attributes win over spread-provided ones, matching JSX semantics. Spreads
-// that cannot be resolved are left untouched (and later skipped).
-// The second return value reports whether a rest spread was expanded, so the
-// caller can flow call-site children through it (React includes `children` in
-// the props object, so `<Comp {...props}/>` forwards them).
+// or props parameter with the call-site attributes it collected, in React's
+// order (a later attribute or spread overrides an earlier one). Spreads that
+// cannot be resolved are left untouched (and later skipped). The second
+// return value reports whether such a spread was expanded, so the caller can
+// flow call-site children through it (React includes `children` in the props
+// object, so `<Comp {...props}/>` forwards them).
 func (b *builder) expandSpreadAttrs(attrs []*ast.JSXAttr) ([]*ast.JSXAttr, bool) {
-	var out []*ast.JSXAttr
-	expanded := false
-	// Track which attribute names were written explicitly so spreads don't
-	// override them.
-	explicit := make(map[string]bool)
-	for _, attr := range attrs {
-		if !attr.Spread {
-			explicit[attr.Name] = true
-		}
-	}
-	for _, attr := range attrs {
-		if !attr.Spread || attr.Value == nil {
-			out = append(out, attr)
-			continue
-		}
+	return b.mergeRestSpreads(attrs, false)
+}
+
+// expandForwardedSpreadAttrs is expandSpreadAttrs for an element built in the
+// component that owns the rest parameter. The call-site expressions belong to
+// the parent's scope, so a forwarded value that is not a literal is read
+// through the component's own props object (`props.title`): SSR resolves it
+// from the call-site values and hydration reads the props registry, instead of
+// referencing parent bindings that are not in this component's scope.
+func (b *builder) expandForwardedSpreadAttrs(attrs []*ast.JSXAttr) ([]*ast.JSXAttr, bool) {
+	return b.mergeRestSpreads(attrs, true)
+}
+
+func (b *builder) mergeRestSpreads(attrs []*ast.JSXAttr, viaProps bool) ([]*ast.JSXAttr, bool) {
+	return MergeSpreadAttrs(attrs, func(attr *ast.JSXAttr) SpreadExpansion {
 		rest := b.restAttrs(attr.Value)
 		if rest == nil {
-			out = append(out, attr)
+			return b.constObjectSpread(attr)
+		}
+		exp := SpreadExpansion{Resolved: true, ForwardsChildren: true}
+		for _, name := range sortedKeysExpr(rest) {
+			value := rest[name]
+			if viaProps {
+				value = forwardedPropExpr(name, value)
+			}
+			exp.Attrs = append(exp.Attrs, &ast.JSXAttr{Position: attr.Position, Name: name, Value: value})
+		}
+		return exp
+	})
+}
+
+// constObjectSpread expands a spread whose value folds to a known object at
+// build time into one attribute per own key, each reading `expr[key]`. A
+// nullish value contributes nothing; a key whose value is not known at build
+// time becomes a hydration binding. Scope-helper spreads and values with no
+// build-time value stay unresolved.
+func (b *builder) constObjectSpread(attr *ast.JSXAttr) SpreadExpansion {
+	if isScopeHelperExpr(attr.Value) {
+		return SpreadExpansion{}
+	}
+	v := b.evalAttrConst(attr.Value)
+	if v.IsNullish() {
+		return SpreadExpansion{Resolved: true}
+	}
+	if !v.IsObject() {
+		return SpreadExpansion{}
+	}
+	exp := SpreadExpansion{Resolved: true}
+	for _, k := range v.Keys() {
+		if k == "children" {
+			exp.ForwardsChildren = true
 			continue
 		}
-		expanded = true
-		for _, name := range sortedKeysExpr(rest) {
-			if explicit[name] {
-				continue
-			}
-			out = append(out, &ast.JSXAttr{Position: attr.Position, Name: name, Value: rest[name]})
-		}
+		exp.Attrs = append(exp.Attrs, &ast.JSXAttr{Position: attr.Position, Name: k, Value: &ast.MemberExpr{
+			Position: attr.Position,
+			Object:   attr.Value,
+			Property: &ast.Literal{Position: attr.Position, Kind: ast.StringLit, Value: k},
+			Computed: true,
+		}})
 	}
-	return out, expanded
+	return exp
+}
+
+// forwardedPropExpr returns the expression a component uses to read a
+// call-site prop it forwards: the literal itself, or `props.<name>`.
+func forwardedPropExpr(name string, callSite ast.Expr) ast.Expr {
+	if _, isLit := callSite.(*ast.Literal); isLit {
+		return callSite
+	}
+	pos := callSite.Pos()
+	if isJSIdentifier(name) {
+		return &ast.MemberExpr{Position: pos, Object: &ast.Identifier{Position: pos, Name: "props"}, Property: &ast.Identifier{Position: pos, Name: name}}
+	}
+	return &ast.MemberExpr{Position: pos, Object: &ast.Identifier{Position: pos, Name: "props"}, Property: &ast.Literal{Position: pos, Kind: ast.StringLit, Value: name}, Computed: true}
 }
 
 // restAttrs resolves a spread value expression to the attribute map of a known
@@ -1160,11 +542,11 @@ func (b *builder) foldTagExpr(expr ast.Expr) string {
 		// A component reference (Slot, Button, ...) is already a valid tag.
 		return e.Name
 	case *ast.ConditionalExpr:
-		test := evalConstWithSignals(e.Test, b.sigMap(), b.localProps)
-		if operandLeaks(e.Test, b.sigMap(), b.localProps) {
+		testV := b.evalValue(e.Test)
+		if testV.IsUnknown() {
 			return ""
 		}
-		if isTruthyValue(test) {
+		if testV.ToBoolean() {
 			return b.foldTagExpr(e.Consequent)
 		}
 		return b.foldTagExpr(e.Alternate)
@@ -1177,28 +559,22 @@ func (b *builder) foldTagExpr(expr ast.Expr) string {
 // paramDefaultValue returns the build-time value for an omitted parameter: its
 // default expression when the pattern declares one (`asChild = false`), else
 // "undefined".
-func (b *builder) paramDefaultValue(fn *ast.FnDecl, name string) string {
+func (b *builder) paramDefaultValue(fn *ast.FnDecl, name string) jsvalue.Value {
 	for _, p := range fn.Params {
 		if p == nil || p.Name == "" {
 			continue
 		}
 		if p.Name == name && p.Default != nil {
-			if v := evalConstWithSignals(p.Default, b.sigMap(), b.localProps); v != "" {
-				return v
-			}
-			return "undefined"
+			return b.evalValue(p.Default)
 		}
 		// Destructured member with a default: `{ asChild = false }`.
 		if p.Name == "{...}" {
 			if def := destructuredParamDefault(p.Pattern, name); def != nil {
-				if v := evalConstWithSignals(def, b.sigMap(), b.localProps); v != "" {
-					return v
-				}
-				return "undefined"
+				return b.evalValue(def)
 			}
 		}
 	}
-	return "undefined"
+	return jsvalue.Undefined()
 }
 
 // destructuredParamDefault returns the default expression for a binding in a
@@ -1287,13 +663,13 @@ func (b *builder) restPropsFor(restName string, fn *ast.FnDecl, attrs map[string
 // its call-site attrs: each parameter name resolves to the evaluated call-site
 // value (or "undefined" when omitted). Used when walking a signal-less
 // component's own return JSX so className={cn(...)} etc. fold correctly.
-func (b *builder) propBindingsToLocalProps(fn *ast.FnDecl, attrs map[string]ast.Expr, parent map[string]string) map[string]string {
-	out := make(map[string]string)
+func (b *builder) propBindingsToLocalProps(fn *ast.FnDecl, attrs map[string]ast.Expr, parent valueMap) valueMap {
+	out := make(valueMap)
 	for _, name := range extractParamNames(fn) {
 		if expr, ok := attrs[name]; ok {
 			out[name] = b.resolveBindingValue(expr, parent)
 		} else {
-			out[name] = "undefined"
+			out[name] = jsvalue.Undefined()
 		}
 	}
 	return out
@@ -1357,6 +733,33 @@ func fnRestParamName(fn *ast.FnDecl) string {
 		}
 	}
 	return ""
+}
+
+// plainPropsParamName returns the name of a component's whole-props
+// parameter (`props` in `function Btn(props)`), or "" when the first
+// parameter is destructured or absent.
+func plainPropsParamName(fn *ast.FnDecl) string {
+	if fn == nil || len(fn.Params) == 0 {
+		return ""
+	}
+	p := fn.Params[0]
+	if p.IsRest || p.Pattern != "" || p.Name == "" || p.Name == "{...}" || p.Name == "[...]" {
+		return ""
+	}
+	return p.Name
+}
+
+// callSiteAttrs returns the call-site attributes a props object carries,
+// without the compiler's synthetic context props.
+func callSiteAttrs(attrs map[string]ast.Expr) map[string]ast.Expr {
+	out := make(map[string]ast.Expr, len(attrs))
+	for name, expr := range attrs {
+		if strings.HasPrefix(name, contextPropPrefix) {
+			continue
+		}
+		out[name] = expr
+	}
+	return out
 }
 
 // destructuredParamNames extracts the binding identifiers from a destructuring
@@ -1460,11 +863,11 @@ func indexTopLevel(s, target string) int {
 //  2. Single props object: function(props) with <Comp items={...} label={...} />
 //     In this case, we flatten the attrs into top-level bindings so the SSREval
 //     can resolve `props.breadcrumbs` by treating "breadcrumbs" as a binding.
-func (b *builder) buildPropBindings(paramNames []string, attrs map[string]ast.Expr, fn *ast.FnDecl) map[string]string {
-	bindings := make(map[string]string)
+func (b *builder) buildPropBindings(paramNames []string, attrs map[string]ast.Expr, fn *ast.FnDecl) map[string]jsvalue.Value {
+	bindings := make(map[string]jsvalue.Value)
 	props := b.localProps
 	if props == nil {
-		props = make(map[string]string)
+		props = make(valueMap)
 	}
 	if len(paramNames) == 1 && paramNames[0] == "props" {
 		// Single props object pattern evaluate each attribute value
@@ -1493,22 +896,11 @@ func (b *builder) buildPropBindings(paramNames []string, attrs map[string]ast.Ex
 // value. It resolves through the enclosing component's local props (so a
 // `props.foo` passed from a parent resolves), plus signal reads to their
 // initial values, falling back to plain const evaluation.
-func (b *builder) resolveBindingValue(expr ast.Expr, props map[string]string) string {
+func (b *builder) resolveBindingValue(expr ast.Expr, props valueMap) jsvalue.Value {
 	if expr == nil {
-		return ""
+		return jsvalue.Undefined()
 	}
-	if id, ok := expr.(*ast.Identifier); ok {
-		if u, ok := b.actionURLs[id.Name]; ok {
-			return "'" + escape.JSString(u) + "'"
-		}
-	}
-	if v := evalConstWithSignals(expr, b.sigMap(), props); v != "" {
-		return v
-	}
-	if v := evalConst(expr); v != "" {
-		return v
-	}
-	return resolveSignalReadExpr(expr, b.sigMap())
+	return b.constInterp(props).Eval(expr)
 }
 
 func (b *builder) buildCallSiteChildSlots(children []ast.JSXChild, parentID string) []SlotNode {
@@ -1523,22 +915,11 @@ func (b *builder) buildCallSiteChildSlots(children []ast.JSXChild, parentID stri
 			result = append(result, b.buildExprContainerChildren(c, parentID)...)
 		case *ast.JSXText:
 			if c.Value != "" {
-				result = append(result, &StaticHTML{HTML: c.Value})
+				result = append(result, &StaticHTML{HTML: escape.Text(c.Value)})
 			}
 		}
 	}
 	return result
-}
-
-// isVoidElement returns true for HTML void elements that can be self-closing.
-// Non-void elements like <div/> must be emitted as <div></div>.
-func isVoidElement(tag string) bool {
-	switch tag {
-	case "area", "base", "br", "col", "embed", "hr", "img", "input",
-		"link", "meta", "param", "source", "track", "wbr":
-		return true
-	}
-	return false
 }
 
 // handlerBodiesReferenceProps checks if any handler body references `props.`
@@ -1570,16 +951,24 @@ func handlersOrLocalsReferenceProps(handlers []HandlerDecl, body []ast.Stmt) boo
 	return false
 }
 
-// propsIdentRe matches a standalone `props` identifier in compiled JS.
-var propsIdentRe = regexp.MustCompile(`\bprops\b`)
-
 // compiledRefsProps reports whether any compiled JS string references `props`.
 // Effects/memos that read props.X (e.g. controlled-component sync effects like
 // `if (props.checked !== undefined) setChecked(props.checked)`) require the
 // parent-scope props registration so `props` resolves at runtime.
 func compiledRefsProps(js []string) bool {
 	for _, s := range js {
-		if propsIdentRe.MatchString(s) {
+		if codeContainsIdent(s, "props") {
+			return true
+		}
+	}
+	return false
+}
+
+// attrBindingsReferenceProps reports whether any attribute binding reads
+// `props` at hydration time.
+func attrBindingsReferenceProps(bindings []AttrBinding) bool {
+	for _, a := range bindings {
+		if codeContainsIdent(a.ExprSource, "props") {
 			return true
 		}
 	}
@@ -1593,7 +982,7 @@ func compiledRefsProps(js []string) bool {
 // touches props.
 func signalsReferenceProps(signals []SignalDecl) bool {
 	for _, s := range signals {
-		if propsIdentRe.MatchString(s.RawInit) {
+		if codeContainsIdent(s.RawInit, "props") {
 			return true
 		}
 	}
@@ -1617,22 +1006,44 @@ func (b *builder) buildChildPropsRegDecl(id string, props map[string]ast.Expr) s
 		sb.WriteByte('}')
 		return sb.String()
 	}
-	first := true
-	for name, expr := range props {
-		if !first {
+	// Keys are emitted in sorted order so the registration (and the hashed
+	// hydration bundle) is byte-identical across builds.
+	for i, name := range sortedKeysExpr(props) {
+		expr := props[name]
+		if i > 0 {
 			sb.WriteByte(',')
 		}
-		first = false
-		sb.WriteString(jsObjectKey(name))
-		sb.WriteByte(':')
 		val := b.renderChildPropValue(expr)
 		if val == "" {
 			val = "undefined"
 		}
+		if b.isSignalDerivedProp(expr) {
+			// A getter keeps the prop live: each child read re-evaluates
+			// it, so effects and bindings that read props.X track the
+			// parent's signals instead of a hydration-time snapshot.
+			sb.WriteString("get ")
+			sb.WriteString(jsObjectKey(name))
+			sb.WriteString("(){return ")
+			sb.WriteString(val)
+			sb.WriteString("}")
+			continue
+		}
+		sb.WriteString(jsObjectKey(name))
+		sb.WriteByte(':')
 		sb.WriteString(val)
 	}
 	sb.WriteByte('}')
 	return sb.String()
+}
+
+// isSignalDerivedProp reports whether a call-site prop value reads one of the
+// current component's signals (`title={String(count())}`). Functions are live
+// references already and synthetic context props are getters themselves.
+func (b *builder) isSignalDerivedProp(expr ast.Expr) bool {
+	if _, isFn := expr.(*ast.ArrowFn); isFn {
+		return false
+	}
+	return b.referencesSignal(expr)
 }
 
 // renderChildPropValue renders a call-site prop value to self-contained JS for a
@@ -1669,13 +1080,13 @@ func (b *builder) renderChildPropValue(expr ast.Expr) string {
 // resolvePropsMembers rewrites MemberExpr nodes of the form `props.X` into the
 // resolved literal AST for X when X is present in the given props map. Returns
 // nil (leaving the expression untouched) when no props.X member is resolvable.
-func resolvePropsMembers(expr ast.Expr, props map[string]string, signals map[string]ast.Expr) ast.Expr {
+func resolvePropsMembers(expr ast.Expr, props valueMap, signals map[string]ast.Expr) ast.Expr {
 	// Fast path: the whole expression is props.X.
 	if mem, ok := expr.(*ast.MemberExpr); ok {
 		if id, ok := mem.Object.(*ast.Identifier); ok && id.Name == "props" {
 			if pid, ok := mem.Property.(*ast.Identifier); ok {
 				if v, ok := props[pid.Name]; ok {
-					if lit := constSourceToAST(v); lit != nil {
+					if lit := jsvalue.ToAST(v); lit != nil {
 						return lit
 					}
 				}
@@ -1687,7 +1098,7 @@ func resolvePropsMembers(expr ast.Expr, props map[string]string, signals map[str
 }
 
 type propsMemberSubstituter struct {
-	props   map[string]string
+	props   valueMap
 	signals map[string]ast.Expr
 }
 
@@ -1700,7 +1111,7 @@ func (s *propsMemberSubstituter) sub(expr ast.Expr) ast.Expr {
 		if id, ok := e.Object.(*ast.Identifier); ok && id.Name == "props" {
 			if pid, ok := e.Property.(*ast.Identifier); ok {
 				if v, ok := s.props[pid.Name]; ok {
-					if lit := constSourceToAST(v); lit != nil {
+					if lit := jsvalue.ToAST(v); lit != nil {
 						return lit
 					}
 				}
@@ -1736,63 +1147,4 @@ func subExprListGeneric(s *propsMemberSubstituter, list []ast.Expr) []ast.Expr {
 		out[i] = s.sub(e)
 	}
 	return out
-}
-
-// constSourceToAST converts a resolved const value string back to an AST literal
-// so it can be re-emitted as self-contained JS. Array/object/numeric/boolean
-// sources (valid JS produced by evalConst) are parsed back; a bare string token
-// becomes a string literal. Returns nil when the value is empty.
-func constSourceToAST(v string) ast.Expr {
-	if v == "" {
-		return nil
-	}
-	switch v {
-	case "true", "false", "null", "undefined":
-		return &ast.Literal{Kind: ast.BoolLit, Value: v}
-	}
-	if v[0] == '[' || v[0] == '{' {
-		if expr := singleExprFromProgram(parseExprAsProgram(v)); expr != nil {
-			return expr
-		}
-		// A bare object literal parses as a block statement, not an expression.
-		// Wrap in parens so the parser returns the ObjectExpr itself.
-		if expr := singleExprFromProgram(parseExprAsProgram("(" + v + ")")); expr != nil {
-			return expr
-		}
-		return nil
-	}
-	// A bare scalar (string/number). Number-like values stay numeric tokens.
-	if isNumericLiteral(v) {
-		return &ast.Literal{Kind: ast.NumberLit, Value: v}
-	}
-	return &ast.Literal{Kind: ast.StringLit, Value: v}
-}
-
-// constLength returns the `.length` of a resolved const expression: the number
-// of elements for an array literal, or the rune count for a string literal.
-// Returns ok=false for anything else (objects, numbers, unresolved values).
-func constLength(expr ast.Expr) (int, bool) {
-	switch e := expr.(type) {
-	case *ast.ArrayExpr:
-		return len(e.Elements), true
-	case *ast.Literal:
-		if e.Kind == ast.StringLit {
-			return len([]rune(e.Value)), true
-		}
-	}
-	return 0, false
-}
-
-// singleExprFromProgram returns the single expression statement of a program,
-// or nil when the program is empty or has no leading expression statement.
-func singleExprFromProgram(prog *ast.Program) ast.Expr {
-	if prog == nil {
-		return nil
-	}
-	for _, stmt := range prog.Body {
-		if es, ok := stmt.(*ast.ExprStmt); ok {
-			return es.Expression
-		}
-	}
-	return nil
 }

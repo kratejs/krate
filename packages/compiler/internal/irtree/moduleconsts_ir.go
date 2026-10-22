@@ -28,14 +28,16 @@ func (b *builder) referencedModuleConstVars(node *ComponentNode) []string {
 
 	used := make(map[string]bool)
 	var queue []string
-	for name := range b.moduleConstInits {
-		for _, src := range sources {
-			if src != "" && codeContainsIdent(src, name) {
+	for _, src := range sources {
+		if src == "" {
+			continue
+		}
+		scanJSIdents(src, func(name string) {
+			if _, ok := b.moduleConstInits[name]; ok && !used[name] {
 				used[name] = true
 				queue = append(queue, name)
-				break
 			}
-		}
+		})
 	}
 
 	// Follow constants referenced by other constants' initializers.
@@ -50,12 +52,12 @@ func (b *builder) referencedModuleConstVars(node *ComponentNode) []string {
 		if js == "" {
 			continue
 		}
-		for other := range b.moduleConstInits {
-			if !used[other] && codeContainsIdent(js, other) {
+		scanJSIdents(js, func(other string) {
+			if _, ok := b.moduleConstInits[other]; ok && !used[other] {
 				used[other] = true
 				queue = append(queue, other)
 			}
-		}
+		})
 	}
 
 	if len(used) == 0 {

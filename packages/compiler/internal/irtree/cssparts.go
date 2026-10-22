@@ -427,8 +427,10 @@ func (b *builder) scopeOption(arg ast.Expr, fallback string) string {
 		if mem, ok := arg.(*ast.MemberExpr); ok && !mem.Computed {
 			if id, ok := mem.Object.(*ast.Identifier); ok && id.Name == "props" {
 				if prop, ok := mem.Property.(*ast.Identifier); ok {
-					if v, ok := b.localProps[prop.Name]; ok && v != "" {
-						return v
+					if v, ok := b.localProps[prop.Name]; ok {
+						if str := legacyConstString(nil, v); str != "" {
+							return str
+						}
 					}
 				}
 			}

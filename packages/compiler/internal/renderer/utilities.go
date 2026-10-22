@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -8,26 +9,10 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 )
 
-// itoa converts an int to its decimal string representation without allocating fmt.Sprintf.
+// itoa converts an int to its decimal string representation (negative values
+// included).
 func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	pos := len(buf)
-	for i > 0 {
-		pos--
-		buf[pos] = byte('0' + i%10)
-		i /= 10
-	}
-	return string(buf[pos:])
-}
-
-// stripArraySep removes the internal \x1f array-item separator. SSREval joins
-// array elements (e.g. .map() results, array literals) with \x1f; any write
-// path that bypasses escape.HTML (raw HTML-producing output) must strip it too.
-func stripArraySep(s string) string {
-	return strings.ReplaceAll(s, "\x1f", "")
+	return strconv.Itoa(i)
 }
 
 // JS string escaping
@@ -67,69 +52,124 @@ func arrowBodyExpr(arrow *ast.ArrowFn) ast.Expr {
 
 // JSON helpers
 
-// extractJSONProp extracts a property value from a JSON-like object string.
-// e.g., extractJSONProp(`{"count":42,"items":[1,2,3]}`, "count") -> "42"
-// Single-quoted values (produced by the const serializer that re-quotes JS
-// source as '...' for embedding in generated code) are handled too, so prop
-// objects serialized either way resolve their members during SSR.
+// extractJSONProp extracts a top-level property value from a JSON-like
+// object string. e.g. extractJSONProp(`{"count":42,"items":[1,2,3]}`, "count")
+// returns "42". Valid JSON is decoded with encoding/json; JS object-literal
+// source (unquoted keys, single-quoted strings, produced by the const
+// serializer) is scanned structurally, so keys are only matched at the top
+// level and never inside nested objects or string values. String values are
+// returned unquoted; other values are returned as source text.
 func extractJSONProp(objStr, prop string) string {
+	objStr = strings.TrimSpace(objStr)
 	if objStr == "" || objStr[0] != '{' {
 		return ""
 	}
-	// Try quoted key format: "prop":
-	quotedKey := `"` + prop + `":`
-	idx := strings.Index(objStr, quotedKey)
-	if idx < 0 {
-		// Try unquoted key format: prop:
-		quotedKey = prop + ":"
-		idx = strings.Index(objStr, quotedKey)
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(objStr), &obj); err == nil {
+		raw, ok := obj[prop]
+		if !ok {
+			return ""
+		}
+		var str string
+		if err := json.Unmarshal(raw, &str); err == nil {
+			return str
+		}
+		return string(raw)
 	}
-	if idx < 0 {
-		return ""
+	if v, ok := scanObjectProp(objStr, prop); ok {
+		return unquoteJSONPropValue(v)
 	}
-	valStart := idx + len(quotedKey)
-	if valStart >= len(objStr) {
-		return ""
+	return ""
+}
+
+// scanObjectProp finds the source text of a top-level property value in a JS
+// object literal, honoring nesting and string quoting.
+func scanObjectProp(src, prop string) (string, bool) {
+	n := len(src)
+	i := 1
+	skipSpace := func() {
+		for i < n && (src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r') {
+			i++
+		}
 	}
-	// Extract value: skip whitespace
-	i := valStart
-	for i < len(objStr) && objStr[i] == ' ' {
-		i++
-	}
-	if i >= len(objStr) {
-		return ""
-	}
-	// Find end of value
-	depth := 0
-	quote := byte(0)
-	for j := i; j < len(objStr); j++ {
-		ch := objStr[j]
-		if quote != 0 {
-			if ch == '\\' {
+	for i < n {
+		skipSpace()
+		if i >= n || src[i] == '}' {
+			return "", false
+		}
+		// Key: quoted string or bare identifier/number.
+		var key string
+		if src[i] == '"' || src[i] == '\'' {
+			q := src[i]
+			j := i + 1
+			for j < n && src[j] != q {
+				if src[j] == '\\' {
+					j++
+				}
 				j++
+			}
+			if j >= n {
+				return "", false
+			}
+			key = unquoteJSONPropValue(src[i : j+1])
+			i = j + 1
+		} else {
+			j := i
+			for j < n && src[j] != ':' && src[j] != ',' && src[j] != '}' && src[j] != ' ' {
+				j++
+			}
+			key = src[i:j]
+			i = j
+		}
+		skipSpace()
+		if i >= n || src[i] != ':' {
+			// Shorthand or malformed entry: skip to the next top-level comma.
+			if i < n && src[i] == ',' {
+				i++
 				continue
 			}
-			if ch == quote {
-				quote = 0
-			}
-			continue
+			return "", false
 		}
-		if ch == '"' || ch == '\'' {
-			quote = ch
-			continue
-		}
-		if ch == '{' || ch == '[' {
-			depth++
-		} else if ch == '}' || ch == ']' {
-			if depth == 0 {
-				return unquoteJSONPropValue(objStr[i:j])
+		i++
+		skipSpace()
+		start := i
+		depth := 0
+		quote := byte(0)
+		for i < n {
+			ch := src[i]
+			if quote != 0 {
+				if ch == '\\' {
+					i += 2
+					continue
+				}
+				if ch == quote {
+					quote = 0
+				}
+				i++
+				continue
 			}
-			depth--
-		} else if ch == ',' && depth == 0 {
-			return unquoteJSONPropValue(objStr[i:j])
+			if ch == '"' || ch == '\'' || ch == '`' {
+				quote = ch
+			} else if ch == '{' || ch == '[' || ch == '(' {
+				depth++
+			} else if ch == '}' || ch == ']' || ch == ')' {
+				if depth == 0 {
+					break
+				}
+				depth--
+			} else if ch == ',' && depth == 0 {
+				break
+			}
+			i++
+		}
+		if key == prop {
+			return strings.TrimSpace(src[start:min(i, n)]), true
+		}
+		if i < n && src[i] == ',' {
+			i++
 		}
 	}
-	return unquoteJSONPropValue(objStr[i:])
+	return "", false
 }
 
 // unquoteJSONPropValue normalizes an extracted JSON property value. Numeric,
@@ -183,15 +223,6 @@ func unquoteJSONPropValue(v string) string {
 
 // Number helpers
 
-// toFloat attempts to parse a string as a float64.
-func toFloat(s string) float64 {
-	if s == "" {
-		return 0
-	}
-	f, _ := strconv.ParseFloat(s, 64)
-	return f
-}
-
 // AST analysis helpers (used by tests and IR tree)
 
 // hasJSX returns true if the expression tree contains a JSX element.
@@ -218,84 +249,44 @@ func hasJSX(expr ast.Expr) bool {
 	return false
 }
 
-// isVoidElement returns true for HTML void elements that can be self-closing.
-// Non-void elements like <div/> must be emitted as <div></div>.
-func isVoidElement(tag string) bool {
-	switch tag {
-	case "area", "base", "br", "col", "embed", "hr", "img", "input",
-		"link", "meta", "param", "source", "track", "wbr":
-		return true
-	}
-	return false
-}
-
-// isBooleanAttr reports whether an HTML attribute is a boolean attribute whose
-// mere presence is meaningful - an empty or "false" string value is still truthy.
-func isBooleanAttr(name string) bool {
-	switch name {
-	case "disabled", "required", "readonly", "checked", "selected", "multiple", "autofocus", "hidden", "inert", "novalidate", "open", "async", "defer", "autoplay", "controls", "loop", "muted", "playsinline", "allowfullscreen", "default", "ismap", "itemscope", "nohref", "noresize", "noshade", "nowrap", "reversed", "scoped", "seamless", "sortable", "translate":
-		return true
-	}
-	return false
-}
-
-// mangleIdentInString replaces occurrences of `from` with `to` in `src`, skipping string literals.
+// mangleIdentInString replaces occurrences of `from` with `to` in `src`,
+// skipping single- and double-quoted string literals. Template literals are
+// not skipped (their ${} interpolations hold code). Runs in one linear pass.
 func mangleIdentInString(src, from, to string) string {
+	if from == "" {
+		return src
+	}
 	var b strings.Builder
 	b.Grow(len(src))
-	i := 0
-	for i < len(src) {
-		if isInsideString(src, i) {
-			b.WriteByte(src[i])
-			i++
-			continue
-		}
-		if i+len(from) <= len(src) && src[i:i+len(from)] == from {
-			b.WriteString(to)
-			i += len(from)
-			continue
-		}
-		b.WriteByte(src[i])
-		i++
-	}
-	return b.String()
-}
-
-// isInsideString checks if position `pos` is inside a string literal in `src`.
-func isInsideString(src string, pos int) bool {
-	if pos >= len(src) {
-		return false
-	}
-	inString := false
-	strChar := byte(0)
-	templateDepth := 0
-	for i := 0; i < pos; i++ {
+	quote := byte(0)
+	for i := 0; i < len(src); {
 		ch := src[i]
-		if inString {
-			if ch == '\\' {
+		if quote != 0 {
+			b.WriteByte(ch)
+			i++
+			if ch == '\\' && i < len(src) {
+				b.WriteByte(src[i])
 				i++
 				continue
 			}
-			if ch == '`' {
-				templateDepth--
-				if templateDepth == 0 {
-					inString = false
-				}
-				continue
-			}
-			if ch == strChar {
-				inString = false
+			if ch == quote {
+				quote = 0
 			}
 			continue
 		}
 		if ch == '"' || ch == '\'' {
-			inString = true
-			strChar = ch
-		} else if ch == '`' {
-			inString = true
-			strChar = '`'
-			templateDepth++
+			quote = ch
+			b.WriteByte(ch)
+			i++
+			continue
 		}
+		if strings.HasPrefix(src[i:], from) {
+			b.WriteString(to)
+			i += len(from)
+			continue
+		}
+		b.WriteByte(ch)
+		i++
 	}
-	return inString && templateDepth == 0
+	return b.String()
 }

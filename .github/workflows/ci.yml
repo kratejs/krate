@@ -101,6 +101,20 @@ jobs:
         run: go tool cover -func=coverage.out | tail -1
         working-directory: packages/compiler
 
+      # Already part of go test above; re-run for the pass-rate table.
+      - name: Parser conformance summary
+        run: |
+          status=0
+          go test -count=1 -run TestConformance ./internal/conformance || status=$?
+          if [ -f "$KRATE_CONFORMANCE_MARKDOWN" ]; then
+            cat "$KRATE_CONFORMANCE_MARKDOWN" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit $status
+        working-directory: packages/compiler
+        env:
+          KRATE_CONFORMANCE_MARKDOWN: ${{ runner.temp }}/conformance.md
+          KRATE_CONFORMANCE_SUMMARY: ${{ runner.temp }}/conformance.json
+
   go-matrix:
     name: Go (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -186,6 +200,10 @@ jobs:
 
       - name: Fuzz parser
         run: go test -fuzz=FuzzParse -fuzztime=30s -run=^$ ./internal/parser
+        working-directory: packages/compiler
+
+      - name: Fuzz HTML minifier
+        run: go test -fuzz=FuzzMinifyHTML -fuzztime=30s -run=^$ ./internal/build
         working-directory: packages/compiler
 
   browser-conformance:

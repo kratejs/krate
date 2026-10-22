@@ -44,6 +44,17 @@ Server components (`// @server`) are evaluated at build time and their output is
 baked into the static HTML, so build-time data needs no special page-level
 function. See [Data Fetching](/docs/features/data-fetching/).
 
+Components without client state (no signals or handlers) are also rendered
+entirely at build time. Their expressions follow JavaScript and React semantics:
+`{false}`, `{null}` and `{undefined}` render nothing, `{0 && <b/>}` renders `0`,
+strings are always escaped (only JSX is markup), and array methods such as
+`filter`, `map`, `find` and `join` run on build-time data. Every value such a
+component renders must be known at build time (a prop, a local, or a module
+constant); an expression that cannot be evaluated, or a component that cannot
+be resolved, fails the build with a diagnostic instead of rendering empty
+output. Browser globals like `window` are `undefined` there, exactly as under
+server rendering.
+
 ## ISR (Incremental Static Regeneration)
 
 Opt a page in with the `isr` flag. `revalidate` (seconds) controls how often the

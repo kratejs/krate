@@ -18,7 +18,23 @@ type Diagnostic struct {
 	Message string `json:"message"`
 	Hint    string `json:"hint,omitempty"`
 	Source  string `json:"source,omitempty"` // the offending source line, for caret rendering
+	// Severity classifies the diagnostic. The zero value means an error, so
+	// existing producers keep their meaning.
+	Severity Severity `json:"severity,omitempty"`
 }
+
+// Severity is the seriousness of a Diagnostic.
+type Severity string
+
+const (
+	// SeverityError fails the build. It is also the zero value.
+	SeverityError Severity = ""
+	// SeverityWarning is reported but does not fail the build.
+	SeverityWarning Severity = "warning"
+)
+
+// IsWarning reports whether the diagnostic is a non-fatal warning.
+func (d Diagnostic) IsWarning() bool { return d.Severity == SeverityWarning }
 
 // FromError extracts a Diagnostic from an error, unwrapping as needed. Non-
 // Diagnostic errors are converted to a Diagnostic carrying only the message, so
@@ -69,17 +85,42 @@ func FormatDiagnostics(errs []error) string {
 			b.WriteString("\n")
 			b.WriteString(d.Source)
 			b.WriteString("\n")
-			caretCol := d.Col - 1
-			if caretCol < 0 {
-				caretCol = 0
-			}
-			b.WriteString(strings.Repeat(" ", caretCol))
+			b.WriteString(caretPrefix(d.Source, d.Col))
 			b.WriteString("^")
 		}
 		if d.Hint != "" {
 			b.WriteString("\n  hint: ")
 			b.WriteString(d.Hint)
 		}
+	}
+	return b.String()
+}
+
+// caretPrefix returns the padding that places a caret under column col of
+// line. Columns are 1-based UTF-16 code units (an astral-plane character
+// counts as two); tabs in the line are copied so the caret lines up in a
+// terminal.
+func caretPrefix(line string, col int) string {
+	var b strings.Builder
+	units := 0
+	for _, r := range line {
+		if units >= col-1 {
+			break
+		}
+		if r == '\t' {
+			b.WriteByte('\t')
+		} else {
+			b.WriteByte(' ')
+		}
+		if r >= 0x10000 {
+			units += 2
+		} else {
+			units++
+		}
+	}
+	for units < col-1 {
+		b.WriteByte(' ')
+		units++
 	}
 	return b.String()
 }

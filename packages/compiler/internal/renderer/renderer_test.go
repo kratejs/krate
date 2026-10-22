@@ -139,6 +139,8 @@ func TestItoa(t *testing.T) {
 		{42, "42"},
 		{123, "123"},
 		{999, "999"},
+		{-1, "-1"},
+		{-42, "-42"},
 	}
 	for _, tt := range tests {
 		got := itoa(tt.input)
@@ -163,15 +165,6 @@ func TestEscapeJSString(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("escapeJSString(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
-	}
-}
-
-func TestToFloat(t *testing.T) {
-	if f := toFloat("3.14"); f < 3.13 || f > 3.15 {
-		t.Errorf("expected ~3.14, got %f", f)
-	}
-	if f := toFloat(""); f != 0 {
-		t.Errorf("expected 0 for empty string, got %f", f)
 	}
 }
 
@@ -405,7 +398,7 @@ func TestHydrationJSPropsDeclPrecedesSignalInits(t *testing.T) {
 	// vars, so the `var props=__krate_props[...]` decl must be hoisted above
 	// them.
 	src := `function RadioGroup(props) {
-  var [selected, setSelected] = createSignal((props.defaultValue || "").trim());
+  var [selected, setSelected] = createSignal((props.defaultValue || "").normalize());
   function handleChange(v) {
     setSelected(v);
     if (props.onValueChange) props.onValueChange(v);
@@ -421,6 +414,9 @@ export default function Page() {
 }`
 	_, js := fullPipeline(t, src)
 	propsDecl := "var props=__krate_props["
+	// String.prototype.normalize has no build-time implementation, so the
+	// initializer stays a runtime expression (a foldable one such as .trim()
+	// is folded to its value instead).
 	sigIdx := strings.Index(js, "props.defaultValue")
 	declIdx := strings.Index(js, propsDecl)
 	if sigIdx == -1 {

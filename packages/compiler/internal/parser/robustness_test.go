@@ -64,7 +64,7 @@ func TestSyntaxRobustness(t *testing.T) {
 		{"logical-and", "const x = a && b && c;"},
 		{"logical-or", "const x = a || b || c;"},
 		{"nullish-chain", "const x = a ?? b ?? c ?? 'd';"},
-		{"mixed-logical", "const x = a || b && c ?? d;"},
+		{"mixed-logical", "const x = (a || b && c) ?? d;"},
 
 		// Bitwise / shifts / unary
 		{"bitwise-not", "const x = ~a;"},

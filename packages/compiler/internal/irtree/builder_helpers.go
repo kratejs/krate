@@ -11,121 +11,6 @@ import (
 
 // Helpers
 
-func findReturnStmt(body []ast.Stmt) *ast.ReturnStmt {
-	for _, stmt := range body {
-		if ret, ok := stmt.(*ast.ReturnStmt); ok {
-			return ret
-		}
-	}
-	return nil
-}
-
-// collectLocalVars resolves top-level local variable declarations in a component
-// body to build-time constants (derived from props and other locals). Handles
-// sequential `var x = <expr>` declarations and simple reassignments/mutations
-// (`x = ...`, `x += ...`) across `var`/expression/`if` statements. The result
-// is used to resolve SSR initial values AND to emit `var x = <const>` decls into
-// the hydration bundle so bindings referencing locals don't throw ReferenceError.
-func collectLocalVars(body []ast.Stmt, sigMap map[string]ast.Expr, props map[string]string, nextUseId func() string) (locals, useIds map[string]string, inits map[string]ast.Expr, order []string, leaked map[string]bool) {
-	locals = make(map[string]string)
-	useIds = make(map[string]string)
-	inits = make(map[string]ast.Expr)
-	leaked = make(map[string]bool)
-	working := make(map[string]string, len(props))
-	for k, v := range props {
-		working[k] = v
-	}
-	applyLocalStmts(body, locals, working, sigMap, nextUseId, useIds, inits, &order, leaked)
-	return locals, useIds, inits, order, leaked
-}
-
-func applyLocalStmts(stmts []ast.Stmt, locals, working map[string]string, sigMap map[string]ast.Expr, nextUseId func() string, useIds map[string]string, inits map[string]ast.Expr, order *[]string, leaked map[string]bool) {
-	record := func(name string) {
-		if order == nil {
-			return
-		}
-		for _, n := range *order {
-			if n == name {
-				return
-			}
-		}
-		*order = append(*order, name)
-	}
-	for _, stmt := range stmts {
-		switch s := stmt.(type) {
-		case *ast.VarStmt:
-			for _, decl := range s.Decls {
-				name := decl.Name
-				if name == "" && len(decl.Names) > 0 {
-					name = decl.Names[0]
-				}
-				if name == "" || name == "children" || decl.IsDestructuring {
-					continue
-				}
-				// A first-class scope handle is compile-time state, never a
-				// runtime local. (A `Ctx.useContext()` read that is NOT a scope
-				// handle still folds to the context default here.)
-				if isCSSFactoryCall(decl.Init) {
-					continue
-				}
-				if decl.Init != nil {
-					// useId() resolves to a per-instance build-time literal so
-					// SSR and hydration agree without runtime state.
-					if isUseIdCall(decl.Init) {
-						idLit := ""
-						if nextUseId != nil {
-							idLit = nextUseId()
-						}
-						locals[name] = idLit
-						working[name] = idLit
-						if useIds != nil {
-							useIds[name] = idLit
-						}
-						record(name)
-						continue
-					}
-					// A local whose initializer can't be folded (references an
-					// unknown/unresolvable value, e.g. `tocItems.length` when
-					// tocItems is not statically known) must still be RECORDED so
-					// it is emitted as a runtime read - bindings/handlers may
-					// reference it. Dropping it entirely produced `X is not
-					// defined` at hydration. Its folded value is left unknown ("")
-					// and it is kept out of `working` so dependents also emit as
-					// runtime reads rather than folding against a wrong value.
-					if operandLeaks(decl.Init, sigMap, working) {
-						if _, exists := locals[name]; !exists {
-							locals[name] = ""
-							inits[name] = decl.Init
-							leaked[name] = true
-							record(name)
-						}
-						continue
-					}
-					v := evalConstWithSignals(decl.Init, sigMap, working)
-					locals[name] = v
-					inits[name] = decl.Init
-					working[name] = v
-					record(name)
-				}
-			}
-		case *ast.ExprStmt:
-			applyLocalAssignment(s.Expression, locals, working, sigMap)
-		case *ast.IfStmt:
-			test := evalConstWithSignals(s.Test, sigMap, working)
-			if isTruthyValue(test) {
-				applyLocalStmts(s.Consequent, locals, working, sigMap, nextUseId, useIds, inits, order, leaked)
-				continue
-			}
-			if isFalsyValue(test) {
-				applyLocalStmts(s.Alternate, locals, working, sigMap, nextUseId, useIds, inits, order, leaked)
-				continue
-			}
-		case *ast.BlockStmt:
-			applyLocalStmts(s.Body, locals, working, sigMap, nextUseId, useIds, inits, order, leaked)
-		}
-	}
-}
-
 // isContextRead reports whether expr is a context read: either the React form
 // `useContext(Ctx)` or the Krate member form `Ctx.useContext()`. Such reads fold
 // to the context default at build time and must not be emitted as runtime calls
@@ -155,51 +40,6 @@ func isUseIdCall(expr ast.Expr) bool {
 	}
 	id, ok := call.Callee.(*ast.Identifier)
 	return ok && id.Name == "__krate_useId"
-}
-
-func applyLocalAssignment(expr ast.Expr, locals, working map[string]string, sigMap map[string]ast.Expr) {
-	bin, ok := expr.(*ast.BinaryExpr)
-	if !ok {
-		return
-	}
-	id, ok := bin.Left.(*ast.Identifier)
-	if !ok {
-		return
-	}
-	name := id.Name
-	cur, exists := working[name]
-	if !exists && !isKnownLocal(name, locals) {
-		return
-	}
-	rhs := evalConstWithSignals(bin.Right, sigMap, working)
-	if rhs == "" {
-		return
-	}
-	switch bin.Op {
-	case "=":
-		locals[name] = rhs
-		working[name] = rhs
-	case "+=", "-=", "*=", "/=", "%=":
-		if cur == "" {
-			return
-		}
-		combined := cur + " " + bin.Op[:1] + " " + rhs
-		if bin.Op == "+=" {
-			combined = cur + rhs
-		}
-		locals[name] = combined
-		working[name] = combined
-	}
-}
-
-func isKnownLocal(name string, locals map[string]string) bool {
-	_, ok := locals[name]
-	return ok
-}
-
-// isTruthyValue reports whether a resolved const string is truthy in JS terms.
-func isTruthyValue(v string) bool {
-	return v != "" && v != "false" && v != "null" && v != "undefined" && v != "0"
 }
 
 // evalBinaryValue computes the value of a binary operation between two resolved
@@ -272,11 +112,6 @@ func trimFloat(f float64) string {
 	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
-// isFalsyValue reports whether a resolved const string is falsy in JS terms.
-func isFalsyValue(v string) bool {
-	return v == "" || v == "false" || v == "null" || v == "undefined" || v == "0"
-}
-
 // jsLiteralFor renders a resolved const value as a JS literal. A genuine JS
 // numeric literal or keyword is emitted bare; array/object source produced by
 // evalConst is emitted verbatim; everything else is quoted as a string so
@@ -314,15 +149,6 @@ func isReferenceInit(expr ast.Expr) bool {
 		return true
 	}
 	return false
-}
-
-// isStringLiteral reports whether expr is a string literal. A folded string
-// value cannot be told apart from the null/undefined keyword (both resolve to
-// the same text), so callers deciding whether to omit a nullish value consult
-// the AST kind: `{"null"}` is real text, `{null}` is not.
-func isStringLiteral(expr ast.Expr) bool {
-	lit, ok := expr.(*ast.Literal)
-	return ok && lit.Kind == ast.StringLit
 }
 
 func isNumericLiteral(s string) bool {
@@ -528,7 +354,7 @@ func hasLifecycleCall(body []ast.Stmt) bool {
 				if call, ok := s.Expression.(*ast.CallExpr); ok {
 					if id, ok := call.Callee.(*ast.Identifier); ok {
 						switch id.Name {
-						case "createEffect", "onMount", "onCleanup":
+						case "createEffect", "createEffectDeps", "onMount", "onCleanup":
 							return true
 						}
 					}
@@ -687,14 +513,14 @@ func (b *builder) isStaticResolvable(expr ast.Expr) bool {
 		if _, isAction := b.actionURLs[e.Name]; isAction {
 			return true
 		}
-		if _, inSig := b.sigMap()[e.Name]; inSig {
+		if inSig := b.isSignalName(e.Name); inSig {
 			return false
 		}
 		_, inProps := b.localProps[e.Name]
 		return inProps
 	case *ast.CallExpr:
 		if id, ok := e.Callee.(*ast.Identifier); ok {
-			if _, inSig := b.sigMap()[id.Name]; inSig {
+			if inSig := b.isSignalName(id.Name); inSig {
 				return false
 			}
 			if id.Name == "String" && len(e.Args) == 1 {
@@ -729,6 +555,15 @@ func (b *builder) isStaticResolvable(expr ast.Expr) bool {
 		if id, ok := e.Object.(*ast.Identifier); ok && id.Name == "props" {
 			if _, ok := e.Property.(*ast.Identifier); ok {
 				return true
+			}
+		}
+		// `obj["key"]` on a folded local object (an expanded object spread)
+		// resolves when the member value is known.
+		if id, ok := e.Object.(*ast.Identifier); ok && e.Computed && !b.isSignalName(id.Name) {
+			if lit, ok := e.Property.(*ast.Literal); ok && lit.Kind == ast.StringLit {
+				if _, inProps := b.localProps[id.Name]; inProps {
+					return !b.evalAttrConst(e).ContainsUnknown()
+				}
 			}
 		}
 		return false
@@ -919,7 +754,7 @@ func isStringType(expr ast.Expr, signals map[string]ast.Expr) bool {
 // referencesAnyLocal reports whether expr (rendered to JS) references any of
 // the given local names, so the caller can emit it as a runtime expression in
 // dependency order rather than a folded build-time literal.
-func referencesAnyLocal(expr ast.Expr, sigMap map[string]ast.Expr, locals map[string]string) bool {
+func referencesAnyLocal(expr ast.Expr, sigMap map[string]ast.Expr, locals valueMap) bool {
 	js := generateExprJS(expr, sigMap)
 	if js == "" {
 		return false

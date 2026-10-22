@@ -12,8 +12,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/gotsgen"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
-	"github.com/kratejs/krate/packages/compiler/internal/lexer"
-	"github.com/kratejs/krate/packages/compiler/internal/parser"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 // This file lets an SSR/ISR page's server bundle (compiled by esbuild from raw
@@ -30,7 +29,7 @@ import (
 // Go components (`import { X } from "./x.go"`). Returns nil when the source has
 // no `.go` imports.
 func goComponentLocals(srcPath, src, root string) map[string]bool {
-	prog := parseProgram(src)
+	prog := parseProgram(srcPath, src)
 	if prog == nil {
 		return nil
 	}
@@ -91,11 +90,10 @@ func annotateGoCalls(src, srcPath string, locals map[string]bool) string {
 	if len(locals) == 0 {
 		return src
 	}
-	prog := parseProgram(src)
+	prog := parseProgram(srcPath, src)
 	if prog == nil {
 		return src
 	}
-	starts := lineStartOffsets(src)
 
 	type insertion struct {
 		at   int
@@ -109,7 +107,7 @@ func annotateGoCalls(src, srcPath string, locals map[string]bool) string {
 
 	addJSX := func(v *ast.JSXElement) {
 		if v.Opening != nil && locals[v.Opening.Name] {
-			if at, ok := tagNameEnd(starts, v.Position); ok {
+			if at, ok := tagNameEnd(src, v.Position, v.Opening.Name); ok {
 				id := irtree.GoCallID(v.Position.Line, v.Position.Col, v.Opening.Name)
 				inserts = append(inserts, insertion{at, fmt.Sprintf(" __krateGoId=%q", id)})
 			}
@@ -259,9 +257,12 @@ func annotateGoCalls(src, srcPath string, locals map[string]bool) string {
 	return out
 }
 
-// parseProgram lexes and parses TSX source into an AST (nil on failure).
-func parseProgram(src string) *ast.Program {
-	return parser.New(lexer.New(src).Tokenize()).ParseProgram()
+// parseProgram parses page/module source into an AST (nil on a TypeScript
+// syntax error). TypeScript is stripped first and positions refer to src, so
+// JSX positions match the page AST the emitter derives Go call ids from.
+func parseProgram(path, src string) *ast.Program {
+	prog, _ := tsstrip.Parse(path, src, tsstrip.Options{})
+	return prog
 }
 
 // loaderForExt maps a JS/TS file extension to an esbuild loader.
@@ -278,26 +279,21 @@ func loaderForExt(path string) api.Loader {
 	}
 }
 
-// lineStartOffsets returns the byte offset of the start of each 1-based line.
-func lineStartOffsets(src string) []int {
-	starts := []int{0}
-	for i := 0; i < len(src); i++ {
-		if src[i] == '\n' {
-			starts = append(starts, i+1)
-		}
-	}
-	return starts
-}
-
-// tagNameEnd returns the byte offset immediately after p's token. The lexer
-// records a token's Pos column after consuming it, so Line/Col point just past
-// the JSX tag name (which is what we want to insert an attribute after).
-func tagNameEnd(lineStarts []int, p ast.Pos) (int, bool) {
-	idx := p.Line - 1
-	if idx < 0 || idx >= len(lineStarts) {
+// tagNameEnd returns the byte offset immediately after the tag name of the
+// JSX element starting at p (p.Offset is the byte offset of its `<`).
+func tagNameEnd(src string, p ast.Pos, name string) (int, bool) {
+	i := p.Offset
+	if i < 0 || i >= len(src) || src[i] != '<' {
 		return 0, false
 	}
-	return lineStarts[idx] + p.Col, true
+	i++
+	for i < len(src) && (src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r') {
+		i++
+	}
+	if !strings.HasPrefix(src[i:], name) {
+		return 0, false
+	}
+	return i + len(name), true
 }
 
 // goServerBundlePlugin resolves/loads `.go` imports and the `krate:go-baked`

@@ -27,6 +27,11 @@ func synthesizeClassComponent(class *ast.ClassDecl) (*ast.FnDecl, bool) {
 	if class == nil || class.Name == "" || !isReactClassBase(class.SuperClass) {
 		return nil, false
 	}
+	// classLoweringIssue names the exact unsupported member for the build
+	// warning; the checks below remain as a backstop.
+	if classLoweringIssue(class) != nil {
+		return nil, false
+	}
 
 	members, ok := collectClassMembers(class)
 	if !ok {
