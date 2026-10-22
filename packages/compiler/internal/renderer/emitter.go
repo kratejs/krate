@@ -13,6 +13,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // EmitResult consolidates all page output from the emitter.
@@ -44,6 +45,12 @@ type EmitResult struct {
 	// of its build-rendered static children. Emit never mutates the shared IR,
 	// so the build attaches these to the region props itself.
 	RuntimeChildren map[string]string
+	// LazyChunks holds the hydration code of lazy() components, filled by
+	// GenerateNewHydrationJS; the build writes each one to its own file.
+	LazyChunks []LazyChunk
+	// BoundaryThrows lists error boundaries whose subtree threw while the page
+	// was built; the build re-renders them in their fallback state.
+	BoundaryThrows []irtree.BoundaryThrow
 }
 
 // SlotOutput is the result of emitting a single slot node. Beyond HTML and
@@ -64,6 +71,8 @@ type SlotOutput struct {
 	Templates string
 	// RuntimeChildren: see EmitResult.RuntimeChildren.
 	RuntimeChildren map[string]string
+	// BoundaryThrows: see EmitResult.BoundaryThrows.
+	BoundaryThrows []irtree.BoundaryThrow
 }
 
 // inlineHTML returns the output's HTML with its hoisted templates appended,
@@ -84,6 +93,9 @@ var parallelMinChildren = 8
 type orphanBinding struct {
 	owner irtree.SlotID
 	bind  irtree.SlotBinding
+	// lists names the list slots whose rows contain the binding's slot (see
+	// ComponentSignature.InLists).
+	lists []irtree.SlotID
 }
 
 // Emitter walks a ComponentTree and produces HTML + hydration metadata.
@@ -128,7 +140,7 @@ type Emitter struct {
 
 	// contextDefaults holds module-wide `const X = createContext(v)` defaults so
 	// `X.useContext()` folds during SSREval (no Provider exists at build time).
-	contextDefaults map[string]string
+	contextDefaults map[string]jsvalue.Value
 
 	// moduleConsts holds module-level `const X = <expr>` initializers so
 	// SSREval resolves module constants referenced by signal-less components.
@@ -203,16 +215,34 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	e.styleHTML += output.StyleHTML
 	e.orphans = append(e.orphans, output.Orphans...)
 
+	// Rows of a list bound by the keyed list runtime are rendered and adopted
+	// by that list, so the components and bindings inside them must not also
+	// hydrate on their own.
+	managed := managedLists(output.Signatures, e.orphans)
+
 	// Attach orphan bindings (dynamic slots in call-site children that
 	// reference a caller's signals) to the signature that owns them: first try
 	// the client component that enclosed the collection site, then fall back to
 	// the first signature declaring the binding's signals.
 	if len(e.orphans) > 0 {
 		for _, o := range e.orphans {
+			if inManagedList(o.lists, managed) {
+				continue
+			}
 			if owner := findSignatureOwner(output.Signatures, o.owner, o.bind); owner >= 0 {
 				output.Signatures[owner].SlotBindings = append(output.Signatures[owner].SlotBindings, o.bind)
 			}
 		}
+	}
+	if len(managed) > 0 {
+		kept := output.Signatures[:0]
+		for _, sig := range output.Signatures {
+			if !inManagedList(sig.InLists, managed) {
+				dropManagedElementBindings(&sig, managed)
+				kept = append(kept, sig)
+			}
+		}
+		output.Signatures = kept
 	}
 
 	// Collect client component functions referenced by dynamic list slots so
@@ -233,6 +263,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 		Errors:          e.errs,
 		GoRenders:       append(output.GoRenders, e.goCollector.snapshot()...),
 		RuntimeChildren: output.RuntimeChildren,
+		BoundaryThrows:  output.BoundaryThrows,
 	}
 }
 
@@ -400,6 +431,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	if e.contextDefaults != nil {
 		eval.SetContextDefaults(e.contextDefaults)
 	}
+	eval.SetContextValues(node.ContextValues)
 	eval.SetCodeTheme(e.CodeTheme)
 	eval.SetModuleConsts(e.moduleConsts)
 	if node.RestProps != nil && node.RestPropsName != "" {
@@ -543,8 +575,10 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 
 	e.clientStack = append(e.clientStack, node.ID)
 	defer func() { e.clientStack = e.clientStack[:len(e.clientStack)-1] }()
+	errStart := len(e.errs)
 
 	mergeSlotOutput(&out, e.emitSlotsParallel(node.Children))
+	ownCount := len(out.Signatures)
 
 	// Replace {props.children} placeholder with rendered call site children.
 	// This ensures interactive sub-components nested inside signal components
@@ -554,7 +588,19 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		html := callSiteOut.HTML
 		callSiteOut.HTML = ""
 		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", html)
+		if cond, branch, ok := childrenPlaceholderCond(node.Children); ok {
+			claimCond(callSiteOut.Signatures, cond, branch)
+		}
 		mergeSlotOutput(&out, callSiteOut)
+	}
+	claimOwnerLinks(out.Signatures, node, ownCount)
+	if node.Boundary {
+		e.claimBoundaryThrows(node, errStart, &out)
+		if len(node.CallSiteSlots) == 0 {
+			// A boundary built in its fallback state has no children to splice.
+			out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", "")
+			out.Templates = strings.ReplaceAll(out.Templates, "<!--__children__-->", "")
+		}
 	}
 
 	childIDs := collectChildIDs(node.Children)
@@ -588,6 +634,15 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		Children:        childIDs,
 		SlotBindings:    slotBindings,
 		AttrBindings:    node.AttrBindings,
+		Name:            node.Name,
+		Class:           node.Class,
+		Lazy:            node.Lazy,
+	}
+	if node.Lazy && node.LazyLoader == "" {
+		sig.LazyName = node.Name
+	}
+	if len(e.clientStack) > 1 {
+		sig.ParentID = e.clientStack[len(e.clientStack)-2]
 	}
 	out.Signatures = append([]irtree.ComponentSignature{sig}, out.Signatures...)
 
@@ -702,7 +757,7 @@ func (e *Emitter) emitMetaSlot(s *irtree.MetaSlot) SlotOutput {
 	// <Head> children are routed into the document <head> by walkMetaSlots; they
 	// must not also render into the body. <Script>/<Style> keep their body HTML
 	// (valid there, and captured separately into Script/Style fields).
-	if strings.EqualFold(s.ComponentName, "Head") {
+	if strings.EqualFold(s.ComponentName, "Head") || s.ComponentName == irtree.HoistMeta {
 		out.HTML = ""
 	}
 	return out
@@ -760,6 +815,7 @@ func mergeSlotOutput(acc *SlotOutput, out SlotOutput) {
 	acc.GoRenders = append(acc.GoRenders, out.GoRenders...)
 	acc.Templates += out.Templates
 	acc.RuntimeChildren = mergeRuntimeChildren(acc.RuntimeChildren, out.RuntimeChildren)
+	acc.BoundaryThrows = append(acc.BoundaryThrows, out.BoundaryThrows...)
 }
 
 // emitWorkers bounds the number of emit goroutines running at once across the
@@ -858,6 +914,7 @@ func collectChildrenOrphans(children []irtree.SlotNode, owner irtree.SlotID) []o
 					Type:    "list",
 					ExprJS:  ls.ExprSource,
 					Signals: ls.Signals,
+					List:    ls.Bind,
 				},
 			})
 		}
@@ -917,6 +974,11 @@ func (e *Emitter) emitConditionalSlot(s *irtree.ConditionalSlot) SlotOutput {
 		activeHTML, inactiveHTML, held = alt.HTML, cons.HTML, "c"
 	}
 	cons.HTML, alt.HTML = "", ""
+	tagCondBranch(cons.Signatures, s.ID, "c", s.InitialActive)
+	tagCondBranch(alt.Signatures, s.ID, "a", !s.InitialActive)
+
+	claimCond(cons.Signatures, s.ID, "c")
+	claimCond(alt.Signatures, s.ID, "a")
 
 	var out SlotOutput
 	mergeSlotOutput(&out, cons)
@@ -926,6 +988,15 @@ func (e *Emitter) emitConditionalSlot(s *irtree.ConditionalSlot) SlotOutput {
 	return out
 }
 
+// emitListSlot renders a list as comment markers around its rows:
+//
+//	<!--k:ID--><!--k:ID:KEY-->row<!--/k:ID:KEY-->...<!--/k:ID-->
+//
+// KEY is "$" plus the row's key for keyed rows (comment-encoded) or the index,
+// so hydration adopts each server-rendered row by key. Comments are valid in
+// every content model (<tbody>, <select>, <ul>), so lists work anywhere.
+// Signatures and orphan bindings from the rows are tagged with the list ID;
+// Emit drops them when the list itself is bound by the list runtime.
 func (e *Emitter) emitListSlot(s *irtree.ListSlot) SlotOutput {
 	id := string(s.ID)
 	var itemsHTML strings.Builder
@@ -938,40 +1009,39 @@ func (e *Emitter) emitListSlot(s *irtree.ListSlot) SlotOutput {
 			childOut := e.emitSlotNode(child)
 			itemsHTML.WriteString(childOut.HTML)
 			childOut.HTML = ""
+			if s.Bind != nil {
+				for i := range childOut.Signatures {
+					childOut.Signatures[i].InLists = append(childOut.Signatures[i].InLists, s.ID)
+				}
+				for i := range childOut.Orphans {
+					childOut.Orphans[i].lists = append(childOut.Orphans[i].lists, s.ID)
+				}
+			}
 			mergeSlotOutput(&out, childOut)
 		}
 		itemsHTML.WriteString(slotEndMarker(itemID))
 	}
 
 	out.HTML = slotMarker(id) + itemsHTML.String() + slotEndMarker(id)
+	for i := range out.Signatures {
+		if out.Signatures[i].ListSlot == "" {
+			out.Signatures[i].ListSlot = s.ID
+		}
+	}
 	return out
+}
+
+// tagCondBranch records that the components in sigs render inside one branch
+// of conditional slot id (outer conditionals are prepended later, so Conds
+// ends up outermost first).
+func tagCondBranch(sigs []irtree.ComponentSignature, id irtree.SlotID, branch string, shown bool) {
+	for i := range sigs {
+		sigs[i].Conds = append([]irtree.CondBranch{{SlotID: id, Branch: branch, InitiallyShown: shown}}, sigs[i].Conds...)
+	}
 }
 
 func (e *Emitter) emitComponentSlot(s *irtree.ComponentSlot) SlotOutput {
 	return e.emitNode(s.Component)
-}
-
-func (e *Emitter) emitSuspenseSlot(s *irtree.SuspenseSlot) SlotOutput {
-	var out SlotOutput
-	for _, child := range s.Fallback {
-		mergeSlotOutput(&out, e.emitSlotNode(child))
-	}
-
-	// ModeStatic: the primary was resolved at build time - bake it inside the
-	// markers so the shell contains the real resolved content (no streaming
-	// round-trip needed). ModeRegion/Default keep the fallback baked in.
-	inner := out.HTML
-	if s.Mode == irtree.SuspenseModeStatic {
-		inner = ""
-		for _, child := range s.Resolved {
-			inner += e.emitSlotNode(child).inlineHTML()
-		}
-	}
-
-	id := escape.Comment(s.StreamID)
-	html := `<!--suspense:` + id + `-->` + inner + `<!--/suspense:` + id + `-->`
-	out.HTML = html
-	return out
 }
 
 // EmitMeta - extract Head/Script/Style content from tree
@@ -1015,6 +1085,13 @@ func walkMetaSlots(node *irtree.ComponentNode, result *EmitResult) {
 					childHTML.WriteString(out.inlineHTML())
 				}
 				switch strings.ToLower(meta.ComponentName) {
+				case irtree.HoistMeta:
+					// Hoisted React 19 metadata; identical elements (the same
+					// stylesheet or tag rendered twice) are emitted once.
+					html := childHTML.String()
+					if !strings.Contains(result.HeadHTML, html) {
+						result.HeadHTML += html
+					}
 				case "head":
 					result.HeadHTML += childHTML.String()
 				case "script":
@@ -1085,8 +1162,74 @@ func collectSlotBindings(children []irtree.SlotNode) []irtree.SlotBinding {
 				Type:    "list",
 				ExprJS:  s.ExprSource,
 				Signals: s.Signals,
+				List:    s.Bind,
 			})
 		}
 	}
 	return bindings
+}
+
+// managedLists returns the IDs of list slots that will be bound by the keyed
+// list runtime: list bindings with a runtime plan, either declared by a
+// signature or carried by an orphan binding that has an owner.
+func managedLists(sigs []irtree.ComponentSignature, orphans []orphanBinding) map[irtree.SlotID]bool {
+	managed := map[irtree.SlotID]bool{}
+	for _, sig := range sigs {
+		if sig.Tier != irtree.TierClient {
+			continue
+		}
+		for _, b := range sig.SlotBindings {
+			if b.Type == "list" && b.List != nil {
+				managed[b.SlotID] = true
+			}
+		}
+	}
+	for _, o := range orphans {
+		if o.bind.Type == "list" && o.bind.List != nil && findSignatureOwner(sigs, o.owner, o.bind) >= 0 {
+			managed[o.bind.SlotID] = true
+		}
+	}
+	return managed
+}
+
+func inManagedList(lists []irtree.SlotID, managed map[irtree.SlotID]bool) bool {
+	for _, id := range lists {
+		if managed[id] {
+			return true
+		}
+	}
+	return false
+}
+
+// dropManagedElementBindings removes handler, attribute and ref bindings of
+// elements inside rows of runtime-bound lists: the row render binds those
+// elements itself when it adopts them.
+func dropManagedElementBindings(sig *irtree.ComponentSignature, managed map[irtree.SlotID]bool) {
+	if len(sig.Handlers) > 0 {
+		kept := make([]irtree.HandlerDecl, 0, len(sig.Handlers))
+		for _, h := range sig.Handlers {
+			if !inManagedList(h.InLists, managed) {
+				kept = append(kept, h)
+			}
+		}
+		sig.Handlers = kept
+	}
+	if len(sig.AttrBindings) > 0 {
+		kept := make([]irtree.AttrBinding, 0, len(sig.AttrBindings))
+		for _, a := range sig.AttrBindings {
+			if !inManagedList(a.InLists, managed) {
+				kept = append(kept, a)
+			}
+		}
+		sig.AttrBindings = kept
+	}
+	if len(sig.RefBindings) > 0 {
+		kept := make([]irtree.RefBinding, 0, len(sig.RefBindings))
+		for _, r := range sig.RefBindings {
+			if !inManagedList(r.InLists, managed) {
+				kept = append(kept, r)
+			}
+		}
+		sig.RefBindings = kept
+	}
 }

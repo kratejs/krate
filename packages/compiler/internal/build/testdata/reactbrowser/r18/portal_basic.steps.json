@@ -1,0 +1,6 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#toast-btn" },
+    { "op": "click", "sel": "#toast-btn" }
+  ]
+}

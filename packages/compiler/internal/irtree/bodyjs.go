@@ -124,7 +124,7 @@ func (b *builder) collectExtraVarJS(body []ast.Stmt, order *bodyOrder, params ma
 			pre = append(pre, frag)
 		}
 	}
-	for _, stmt := range body {
+	for idx, stmt := range body {
 		switch s := stmt.(type) {
 		case *ast.VarStmt:
 			for _, decl := range s.Decls {
@@ -145,7 +145,18 @@ func (b *builder) collectExtraVarJS(body []ast.Stmt, order *bodyOrder, params ma
 			if ifEndsInReturn(s) {
 				continue
 			}
-			add(s, renderStmtJS(s, b.sigMap()), stmtsReferenceSignal(s.Consequent, b) || stmtsReferenceSignal(s.Alternate, b))
+			reactive := b.referencesSignal(s.Test) || stmtsReferenceSignal(s.Consequent, b) || stmtsReferenceSignal(s.Alternate, b)
+			js := renderStmtJS(s, b.sigMap())
+			if isThrowGuard(s) {
+				// Re-check the guard when its signals change, recomputing the
+				// locals it reads (throwguard.go).
+				withDeps, live := b.throwGuardWithDeps(body, idx, js)
+				if reactive || live {
+					js = throwGuardJS(withDeps)
+					reactive = true
+				}
+			}
+			add(s, js, reactive)
 		case *ast.ExprStmt:
 			if !isReplayedBodyExpr(s.Expression) || params[assignedIdent(s.Expression)] {
 				continue
@@ -201,13 +212,17 @@ func (b *builder) extraVarDeclJS(decl *ast.VarDecl) (string, bool) {
 			// bindings reference it as () => doubled(). Signals/resources/
 			// effects are handled by their own collection passes.
 			switch id.Name {
-			case "createSignal", "createResource", "createEffect":
+			case "createSignal", "createResource", "createEffect",
+				"__krateUse", "createDeferredValue", "createExternalStore":
 				return "", false
 			}
 		}
 	}
 	if decl.IsDestructuring || referencesProps(decl.Init) {
 		return "", false
+	}
+	if derivedCallee(decl.Init) != "" {
+		return "var " + decl.Name + "=" + generateExprJS(b.derivedDeclInit(decl.Init), b.sigMap()), true
 	}
 	return "var " + decl.Name + "=" + generateExprJS(decl.Init, b.sigMap()), true
 }
@@ -269,7 +284,8 @@ func isHookCallee(name string) bool {
 	switch name {
 	case "createEffect", "createEffectDeps", "onMount", "onCleanup",
 		"createMemo", "createMemoDeps", "createSignal", "createResource",
-		"createReducer", "createContext":
+		"createReducer", "createContext",
+		"__krateUse", "createDeferredValue", "createExternalStore":
 		return true
 	}
 	if rest, ok := strings.CutPrefix(name, "use"); ok && rest != "" {

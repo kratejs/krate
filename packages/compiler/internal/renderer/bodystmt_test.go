@@ -166,7 +166,8 @@ export default function Index() {
 }`
 	_, js := fullPipelineWithReact(t, src)
 	assertInOrder(t, js, "createEffectDeps(", "console.log('a', c());", "return [c()];",
-		"onMount(", "console.log('b');", "createEffect(", "console.log('c');")
+		"createEffectDeps(", "console.log('b');", "return [];",
+		"createEffectDeps(", "console.log('c');", "return [c()];")
 }
 
 func TestBodyStmtChildLocalsMergeInSourceOrder(t *testing.T) {

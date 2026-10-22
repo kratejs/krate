@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#by-index li:nth-child(1) .done" },
+    { "op": "click", "sel": "#by-id li:nth-child(1) .done" },
+    { "op": "click", "sel": "#shift" }
+  ]
+}

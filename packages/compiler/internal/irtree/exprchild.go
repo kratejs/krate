@@ -21,6 +21,7 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 		return nodes
 	}
 	if isChildrenPlaceholder(expr) {
+		b.recordChildrenContext()
 		return []SlotNode{&ChildrenSlot{}}
 	}
 	if b.isCSSLiveText(expr) {
@@ -59,11 +60,37 @@ func (b *builder) jsxValueChild(expr ast.Expr, parentID string, doEscape bool) (
 	case *ast.JSXFragment:
 		return b.buildFragmentSlots(e, parentID), true
 	}
+	if content, container, ok := portalCall(expr); ok {
+		return b.buildPortal(content, container, expr.Pos(), parentID), true
+	}
 	if v, ok := b.activeContextValue(expr); ok {
+		var slots []SlotNode
 		if slot := b.buildTextSlot(v, parentID); slot != nil {
-			return []SlotNode{slot}, true
+			slots = []SlotNode{slot}
+		} else {
+			slots = b.exprChild(v, parentID, doEscape)
 		}
-		return b.exprChild(v, parentID, doEscape), true
+		// A value forwarded through a getter prop has no signal to resolve
+		// its SSR text from; use the provider's build-time initial.
+		if ctx, found := contextReadTarget(expr); found {
+			if initial, known := b.contextInitials[ctx]; known {
+				if text, ok := childText(initial); ok {
+					for _, s := range slots {
+						switch t := s.(type) {
+						case *TextSlot:
+							if t.Initial == "" {
+								t.Initial = text
+							}
+						case *ExprSlot:
+							if t.Initial == "" {
+								t.Initial = text
+							}
+						}
+					}
+				}
+			}
+		}
+		return slots, true
 	}
 	folded, ok := foldStructuralReact(expr)
 	if !ok {

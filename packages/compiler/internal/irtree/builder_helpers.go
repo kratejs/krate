@@ -263,7 +263,10 @@ var reactEventAliases = map[string]string{
 var nonBubblingEvents = map[string]bool{
 	"mouseenter": true, "mouseleave": true,
 	"pointerenter": true, "pointerleave": true,
-	"scroll": true, "load": true, "error": true,
+	"scroll": true, "scrollend": true, "load": true, "error": true,
+	"abort": true, "cancel": true, "close": true, "invalid": true, "toggle": true,
+	"play": true, "pause": true, "ended": true, "playing": true, "timeupdate": true,
+	"volumechange": true, "loadeddata": true, "loadedmetadata": true,
 }
 
 // reactEventName resolves a JSX event prop to its DOM event name plus whether it
@@ -272,9 +275,10 @@ var nonBubblingEvents = map[string]bool{
 // attached directly; everything else is delegated.
 func reactEventName(attrName string) (event string, capture, direct bool) {
 	name := attrName
-	if strings.HasSuffix(name, "Capture") {
-		name = strings.TrimSuffix(name, "Capture")
-		capture = true
+	if len(name) > 2 {
+		var base string
+		base, capture = splitEventProp(name)
+		name = "on" + base
 	}
 	if mapped, ok := reactEventAliases[name]; ok {
 		event = mapped
@@ -300,6 +304,14 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	if hasLifecycleCall(fn.Body) {
 		return true
 	}
+	// use() values, deferred values, external stores and resources are
+	// runtime getters, so their component hydrates.
+	if bodyUsesReactiveFactory(fn.Body) {
+		return true
+	}
+	if containsPortal(fn.Body) {
+		return true
+	}
 	// A component rendering an external (bare-package) component must take the
 	// IR path so the island placeholder is emitted; the SSREval shortcut would
 	// re-render the source and drop it.
@@ -308,7 +320,7 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	}
 	// A component reading a dynamic context must stay reactive (IR path) so the
 	// provider value can be bound through its synthetic prop.
-	if b.readsActiveContext(fn.Body) {
+	if b.readsActiveContext(fn.Body) || b.readsActiveDerivedContext(fn.Body) {
 		return true
 	}
 	for _, expr := range attrs {
@@ -321,6 +333,11 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 			}
 			if b.localFnBody != nil {
 				if findLocalFunction(e.Name, b.localFnBody) != nil {
+					return true
+				}
+				// Arrow-function locals and useActionState dispatches (e.g. a
+				// form action forwarded to a child) are live values too.
+				if findLocalConstFn(e.Name, b.localFnBody) != nil || b.actionStateCall(e.Name) != nil {
 					return true
 				}
 			}
@@ -457,8 +474,12 @@ func isAttrBinding(attr *ast.JSXAttr) bool {
 		return false
 	}
 	switch attr.Value.(type) {
-	case *ast.Identifier, *ast.CallExpr, *ast.MemberExpr, *ast.ConditionalExpr, *ast.BinaryExpr, *ast.ArrowFn:
+	case *ast.Identifier, *ast.CallExpr, *ast.MemberExpr, *ast.ConditionalExpr, *ast.BinaryExpr, *ast.ArrowFn, *ast.UnaryExpr, *ast.TemplateExpr:
 		return true
+	case *ast.ObjectExpr:
+		// A style object that reads a reactive value (`style={{ fontSize:
+		// theme().size }}`); a fully static one is folded by buildAttrBinding.
+		return attr.Name == "style"
 	}
 	return false
 }
@@ -778,7 +799,8 @@ func referencesProps(expr ast.Expr) bool {
 	case *ast.Identifier:
 		return e.Name == "props"
 	case *ast.MemberExpr:
-		return referencesProps(e.Object)
+		// A computed key reads props too: `posts[props.index]`.
+		return referencesProps(e.Object) || (e.Computed && referencesProps(e.Property))
 	case *ast.CallExpr:
 		if referencesProps(e.Callee) {
 			return true

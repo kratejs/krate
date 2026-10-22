@@ -10,6 +10,12 @@
 // moves the very nodes that were bound: handlers and nested bindings of both
 // branches keep working across toggles.
 
+import { krateRefsEnter, krateRefsLeave } from './refs.js';
+import { krateMountFields } from './events.js';
+import { kratePortalsEnter, kratePortalsIn, kratePortalsLeave } from './portal.js';
+
+export * from './portal.js';
+
 interface CondState {
   /** Branch currently between the markers: 'c' or 'a'. */
   shown: 'c' | 'a';
@@ -73,16 +79,32 @@ export function krateCondSwap(start: Comment, show: boolean, tpl: HTMLTemplateEl
     out.appendChild(n);
     n = next;
   }
+  // React order: refs of the outgoing branch detach before the incoming
+  // branch's refs attach.
+  krateRefsLeave(out);
+  // A hidden branch takes its portal content with it.
+  kratePortalsLeave(out);
   let incoming = st.other;
   if (!incoming) {
     incoming = document.createDocumentFragment();
     if (st.tpl) incoming.appendChild(st.tpl.content);
   }
   detached.delete(incoming);
+  // React focuses an autoFocus element when it mounts (and renders no
+  // autofocus attribute on the client).
+  const auto = incoming.querySelector('[autofocus]') as HTMLElement | null;
+  krateMountFields(incoming);
+  const portals = kratePortalsIn(incoming);
   parent.insertBefore(incoming, end);
+  kratePortalsEnter(portals);
   st.other = out;
   detached.add(out);
   st.shown = want;
+  krateRefsEnter();
+  if (auto) {
+    auto.removeAttribute('autofocus');
+    auto.focus();
+  }
 }
 
 const URL_ATTRS: Record<string, true> = { href: true, src: true, action: true, formaction: true, 'xlink:href': true };

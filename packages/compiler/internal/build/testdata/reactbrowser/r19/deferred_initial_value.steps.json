@@ -1,0 +1,6 @@
+{
+  "steps": [
+    { "op": "type", "sel": "#q", "text": "p" },
+    { "op": "fill", "sel": "#q", "text": "b" }
+  ]
+}

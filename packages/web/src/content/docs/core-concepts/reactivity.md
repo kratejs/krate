@@ -148,6 +148,43 @@ Custom hooks are plain functions: a call such as `useTitle("Home")` runs once
 per component instance during hydration, in source order with the rest of the
 component body.
 
+## Render values in React source components
+
+Krate components run once. A component written in React style (a module that
+imports from `react`) relies on its body running on every render instead, so
+the compiler turns the body's render-dependent values into **derived values**:
+
+```tsx
+const [raw, setRaw] = useState("12");
+const value = Number(raw);                    // krateDerived(() => Number(raw()))
+const label = value > 1 ? "items" : "item";   // derived from a derived value
+let cls = "tab";
+if (active) cls += " on";                     // folded into cls's computation
+```
+
+- A top-level body binding becomes derived when its initializer reads state,
+  a memo, `props.x`, a context value, a custom hook result or another derived
+  value. Everything else (constants, closures, refs) is left as written, so it
+  costs nothing at runtime.
+- Every read of the binding (text, attributes, lists, conditions, handlers,
+  effects and dependency arrays) sees the current value. A derived value is
+  computed lazily on read and recomputed only after one of its inputs changed,
+  so every reader in an update sees the same value.
+- An object or array literal built in the body (`const options = { page }`)
+  also gets a new identity whenever the component's own state or props change,
+  as it would on a React re-render, so effects that list it as a dependency
+  re-run the same way.
+- A `let` assigned by later body statements is computed together with those
+  statements. When that is not possible (the statements also write another
+  variable, or a handler reassigns the binding) the value keeps its first
+  value and the build warns with `KR8301`.
+- Custom hooks that return render-dependent values return a derived getter;
+  `const [on, toggle] = useToggle()` and `const counter = useCounter()` read
+  the current result.
+
+Krate-native modules (no React import) keep run-once semantics: write
+`createMemo` or call the getters yourself.
+
 ## CSS Signals
 
 Interactive state can be expressed with **zero client JavaScript** using CSS

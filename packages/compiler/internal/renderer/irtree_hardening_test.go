@@ -73,7 +73,8 @@ export default function App() {
   return <div><p>{count()}</p><ul>{items.map(count => <li>{count}</li>)}</ul></div>;
 }`,
 			html: []string{"<li>1</li>", "<li>2</li>", "<li>3</li>"},
-			js:   []string{"items.map((count)=>h('li',null,count))"},
+			// The map parameter (now a row accessor) shadows the signal.
+			js: []string{"kbindList(\"5\",()=>(items),null,(count)=>h('li',null,()=>count()),1)"},
 		},
 		{
 			name: "signal of another component is not in scope",
@@ -289,8 +290,11 @@ export default function App() {
   </div>;
 }`
 	_, _, js := buildTreeReact(t, src)
-	mustContain(t, "js", js, `,()=>rm(1));`, `,()=>rm(2));`, `,()=>[9].forEach((i)=>rm(i)));`)
-	mustNotContain(t, "js", js, `,()=>rm(i.id));`)
+	// Rows are bound by the keyed list runtime: the row render reads the item
+	// through its accessor, and a nested function that rebinds the name keeps
+	// its own parameter. Rows do not also get per-item handler bindings.
+	mustContain(t, "js", js, `onClick:()=>rm(i().id)`, `onClick:()=>[9].forEach((i)=>rm(i))`)
+	mustNotContain(t, "js", js, `,()=>rm(i.id));`, `,()=>rm(1));`)
 }
 
 func TestRecursiveComponents(t *testing.T) {
@@ -431,7 +435,7 @@ func TestWarningsArePositionedDiagnostics(t *testing.T) {
 	t.Run("class component names the unsupported member", func(t *testing.T) {
 		src := `import { Component } from "react";
 class Gate extends Component {
-  shouldComponentUpdate() { return false; }
+  static helper() { return false; }
   render() { return <div>gate</div>; }
 }
 export default function App() {
@@ -442,8 +446,8 @@ export default function App() {
 			t.Fatalf("want 1 warning, got %+v", tree.Warnings)
 		}
 		w := tree.Warnings[0]
-		if !w.IsWarning() || w.Line != 3 || !strings.Contains(w.Message, "shouldComponentUpdate is not supported") ||
-			!strings.Contains(w.Message, "rendered at page.tsx:7:") || !strings.Contains(w.Source, "shouldComponentUpdate()") || w.Hint == "" {
+		if !w.IsWarning() || w.Line != 3 || !strings.Contains(w.Message, "static member helper is not supported") || w.Code != "KR3003" ||
+			!strings.Contains(w.Message, "rendered at page.tsx:7:") || !strings.Contains(w.Source, "static helper()") || w.Hint == "" {
 			t.Errorf("warning = %+v", w)
 		}
 	})

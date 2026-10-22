@@ -10,6 +10,7 @@ import {
   useContext,
   useOptimistic,
   useFormStatus,
+  useActionState,
 } from './react.js';
 
 describe('react compat runtime', () => {
@@ -62,11 +63,22 @@ describe('react compat runtime', () => {
 });
 
 describe('react 19 compat shims', () => {
-  it('useOptimistic updates its getter', () => {
+  it('useOptimistic applies an update and reverts it outside an action', async () => {
     const [state, add] = useOptimistic(1);
     expect(state()).toBe(1);
     add(2);
     expect(state()).toBe(2);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(state()).toBe(1);
+  });
+
+  it('useActionState threads the previous state', async () => {
+    const [state, dispatch, pending] = useActionState(async (prev: number, n: number) => prev + n, 1);
+    dispatch(2);
+    expect(pending()).toBe(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(state()).toBe(3);
+    expect(pending()).toBe(false);
   });
 
   it('useFormStatus exposes an idle status', () => {

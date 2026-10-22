@@ -13,6 +13,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/css"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
@@ -34,6 +35,9 @@ type Module struct {
 	// modules are never shared via the parse cache (the rewrites are not
 	// idempotent), so caching stays safe for the rewrite-free majority.
 	Rewritable bool
+	// Diagnostics are coded warnings from the React rewrite (for example a
+	// dependency array the compiler cannot resolve).
+	Diagnostics []diag.Diagnostic
 }
 
 // moduleNeedsRewrite reports whether any per-bundle rewrite pass could touch a
@@ -599,7 +603,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	cacheable := statOK && !isEntry
 	if cacheable {
 		if e, ok := b.cache.getProgram(abs, mtime, size); ok {
-			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry, SourceCode: e.source, ComponentClass: e.compClass}
+			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry, SourceCode: e.source, ComponentClass: e.compClass, Diagnostics: e.diags}
 			mod.Imports = append([]string(nil), e.imports...)
 			b.order = append(b.order, mod)
 			for _, imp := range mod.Imports {
@@ -626,10 +630,18 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	if len(errs) > 0 {
 		return &parseError{summary: parser.FormatDiagnostics(errs), errs: errs}
 	}
-	RewriteReact(prog)
+	reactDiags, err := splitReactDiags(RewriteReactDiag(prog, path, src))
+	if err != nil {
+		return err
+	}
+	if strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
+		// Third-party packages cannot act on these hints; keep builds quiet.
+		reactDiags = nil
+	}
+	b.checkInlineUseServer(prog, path, src)
 	_, actionChanged := b.rewriteActionImports(prog, abs)
 
-	mod := &Module{Path: path, Program: prog, IsEntry: isEntry, SourceCode: src}
+	mod := &Module{Path: path, Program: prog, IsEntry: isEntry, SourceCode: src, Diagnostics: reactDiags}
 	mod.ComponentClass = ClassifyComponent(src, path, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs)
 	b.collectImports(prog, mod)
 	// Modules a rewrite pass may mutate are parsed fresh per bundle (never
@@ -640,6 +652,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 		b.cache.putProgram(abs, &programEntry{
 			mtime: mtime, size: size, program: prog, source: src,
 			imports: append([]string(nil), mod.Imports...), compClass: mod.ComponentClass,
+			diags: reactDiags,
 		})
 	}
 	for _, imp := range mod.Imports {

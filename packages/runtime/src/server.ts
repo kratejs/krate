@@ -1,6 +1,9 @@
 // @krate/runtime/server - Server-side rendering runtime
 // Provides the same API as the client runtime but renders to HTML strings.
 
+export { getActionContext, headers, cookies, redirect } from './action-context.js';
+export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
+
 // Signal (server: returns initial value, no reactivity)
 
 export function createSignal<T>(initial: T): [() => T, (v: T | ((prev: T) => T)) => void] {
@@ -27,6 +30,21 @@ export function createMemo<T>(fn: () => T): () => T {
     }
     return cached;
   };
+}
+
+// Derived render values (krateDerived) and custom hook results (krateHook)
+// have no dependencies to track on the server: each read recomputes.
+const derivedGetters = new WeakSet<object>();
+
+export function krateDerived<T>(fn: () => T, _triggers?: () => unknown): () => T {
+  const read = () => fn();
+  derivedGetters.add(read);
+  return read;
+}
+
+export function krateHook<T>(value: T | (() => T)): () => T {
+  if (typeof value === "function" && derivedGetters.has(value)) return value as () => T;
+  return () => value as T;
 }
 
 export function onCleanup(_fn: () => void): void {
@@ -144,6 +162,8 @@ function setAttr(key: string, val: any): string {
   if ((key === "formAction" || key === "formaction") && isServerAction(val)) {
     return ` formaction="${escapeHTML(val.actionUrl)}" formmethod="post" data-krate-action`;
   }
+  // Client function actions run only after hydration; they have no HTML form.
+  if (typeof val === "function") return "";
   if (key === "class") return ` class="${escapeHTML(String(val))}"`;
   if (key === "style" && typeof val === "object") {
     const css = Object.entries(val)

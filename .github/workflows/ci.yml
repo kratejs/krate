@@ -256,6 +256,25 @@ jobs:
           KRATE_BROWSER: ${{ matrix.browser }}
           KRATE_REQUIRE_E2E: "1"
 
+      # React 19 vs Krate differential over the R2/R3 corpus. Fails on any
+      # divergence not listed in testdata/reactbrowser/divergences.json.
+      # Set KRATE_REACT_EXIT: "1" once the corpus has no P0/P1 entries.
+      - name: React browser differential
+        run: go test -run 'TestReactBrowser' -count=1 -v ./internal/build
+        working-directory: packages/compiler
+        env:
+          KRATE_BROWSER: ${{ matrix.browser }}
+          KRATE_REQUIRE_E2E: "1"
+          KRATE_REACTBROWSER_REPORT: ${{ runner.temp }}/react-browser-${{ matrix.browser }}.txt
+
+      - name: Upload React differential report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: react-browser-diff-${{ matrix.browser }}
+          path: ${{ runner.temp }}/react-browser-${{ matrix.browser }}.txt
+          if-no-files-found: ignore
+
   preact-conformance:
     name: Preact ${{ matrix.preact }}
     runs-on: ubuntu-latest

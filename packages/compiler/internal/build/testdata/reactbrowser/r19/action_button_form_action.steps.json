@@ -1,0 +1,9 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#publish" },
+    { "op": "wait", "ms": 50 },
+    { "op": "fill", "sel": "#title", "text": "Second" },
+    { "op": "click", "sel": "#save" },
+    { "op": "wait", "ms": 50 }
+  ]
+}

@@ -7,6 +7,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
 
@@ -72,6 +73,9 @@ type BuildOptions struct {
 	// The binding is a client proxy at runtime, but SSR renders the URL so
 	// forms work without JavaScript.
 	ActionURLs map[string]string
+	// BoundaryThrows renders the listed error boundary instances in their
+	// fallback state (see boundary_build.go).
+	BoundaryThrows map[SlotID]BoundaryThrow
 }
 
 // Build constructs a ComponentTree from a parsed program and its annotations
@@ -92,8 +96,10 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 	}
 
 	builder := newBuilder(prog, ann, opts)
+	builder.checkLazyComponents()
 	root := builder.buildComponentNode(entryFn, "")
 	root.SourceFile = ann.SourceFile
+	builder.warnSuspendOutsideBoundary(entryFn, entryFn.Position)
 	return builder.finishTree(root)
 }
 
@@ -114,6 +120,8 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		slotCounts:       make(map[string]int),
 		moduleConsts:     typedModuleConsts(moduleConstInits, moduleConsts),
 		moduleConstInits: moduleConstInits,
+		moduleStmts:      collectModuleStmts(prog),
+		entryProg:        prog,
 		cvaFactories:     mergeCVAFactories(ann.CVAFactories, prog),
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
 		codeTheme:        codeTheme,
@@ -124,6 +132,7 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		externalImports:  opts.ExternalImports,
 		localImports:     opts.LocalComponentImports,
 		actionURLs:       opts.ActionURLs,
+		boundaryThrows:   opts.BoundaryThrows,
 	}
 	if entryFn := ann.Functions[ann.EntryPoint]; entryFn != nil {
 		b.expansion = []expansionFrame{{name: entryFn.Name}}
@@ -165,6 +174,8 @@ func (b *builder) finishTree(root *ComponentNode) *ComponentTree {
 	errs = append(errs, b.buildErrs...)
 	errs = append(errs, b.codegenErrs...)
 	errs = append(errs, b.markupErrs...)
+
+	b.reportClassNotes()
 
 	cssSignals, noJSFallback := b.cssStylesheets()
 	return &ComponentTree{
@@ -258,6 +269,14 @@ type componentCtx struct {
 	// pushed while building a `<Ctx.Provider value={expr}>` subtree so a
 	// dynamic value substitutes for `Ctx.useContext()` reads.
 	contextValues map[string]ast.Expr
+	// entryContextValues and entryContextMarkers are the context state the
+	// component's return starts with (see recordChildrenContext).
+	entryContextValues  map[string]ast.Expr
+	entryContextMarkers map[string]jsvalue.Value
+	// contextInitials holds the build-time value of each active dynamic
+	// provider value, so a consumer deeper in the tree (where the value is
+	// read through a forwarded getter prop) still gets its SSR initial.
+	contextInitials map[string]jsvalue.Value
 	// scopeHandles maps a local identifier (or `props.<name>`) to the CSS scope
 	// it holds, so `x.trigger(v)` / `x.panel(v)` / `x.close()` spreads resolve
 	// anywhere in any component (a handle can be passed to children as a prop).
@@ -306,22 +325,28 @@ type builder struct {
 	idCounter      map[string]int
 	hasLinks       bool
 	runtimeProps   *RuntimePropStore
-	instanceCounts map[string]int    // per-component-name instance counter
+	instanceCounts map[string]int // per-component-name instance counter
+	boundaryThrows map[SlotID]BoundaryThrow
 	slotCounter    int               // monotonic counter for compact slot IDs
 	slotIDMap      map[string]SlotID // logical ID -> compact ID
 	slotCounts     map[string]int    // per-parent dynamic-slot counters for sibling disambiguation
 	// elementCounts is the per-parent tag counter for sibling disambiguation.
-	// buildComponentNode clears it on entry and does not restore it; element
-	// IDs stay unique because they are joined with the parent's slot ID.
+	// A component's walk clears it on entry and restores the caller's counts
+	// on exit, so siblings after a child component keep unique IDs.
 	elementCounts    map[string]int
-	moduleConsts     valueMap                  // module-level const values (name -> folded value)
-	moduleConstInits map[string]ast.Expr       // module-level const initializers (name -> expr)
-	cvaFactories     map[string]*CVASpec       // module-level `const X = cva(...)` factories
-	contextDefaults  map[string]string         // module-level `const X = createContext(v)` defaults
-	codeTheme        string                    // chroma theme for compile-time <Code> highlighting
-	idPrefix         string                    // namespace for compact slot IDs (merged builds)
-	aggressiveDCE    bool                      // drop unreferenced local functions (opt-in)
-	suspenseCount    int                       // monotonic counter for stable StreamID generation
+	moduleConsts     valueMap                 // module-level const values (name -> folded value)
+	moduleConstInits map[string]ast.Expr      // module-level const initializers (name -> expr)
+	moduleStmts      []ast.Stmt               // entry module top-level statements that run code
+	entryProg        *ast.Program             // the entry module (imports for KR8302)
+	cvaFactories     map[string]*CVASpec      // module-level `const X = cva(...)` factories
+	contextDefaults  map[string]jsvalue.Value // module-level `const X = createContext(v)` defaults
+	codeTheme        string                   // chroma theme for compile-time <Code> highlighting
+	idPrefix         string                   // namespace for compact slot IDs (merged builds)
+	aggressiveDCE    bool                     // drop unreferenced local functions (opt-in)
+	suspenseCount    int                      // monotonic counter for stable StreamID generation
+	suspenseDepth    int                      // >0 while building <Suspense> content
+	pendingLazy      *LazyComponent           // lazy() instance being built (see finishClientComponent)
+	pendingLazyFn    *ast.FnDecl
 	compat           csssignals.StyleMode      // CSS-signal stylesheet mode (modern/legacy/hybrid)
 	goComponents     map[string]GoComponentRef // imported Go components (local name -> ref)
 	externalImports  map[string]ExternalImport // bare-package import bindings (local -> module)
@@ -331,8 +356,17 @@ type builder struct {
 	warnings         []diag.Diagnostic         // non-fatal, positioned build warnings
 	// snapshotPropWarned dedupes snapshot-prop warnings per component and props.
 	snapshotPropWarned map[string]bool
-	markupErrs         []error    // invalid tag/attribute names, children on void elements
-	selectStack        [][]string // selected option values of enclosing <select> elements
+	// eventDiagSeen dedupes event/form/ref warnings per source position.
+	eventDiagSeen map[string]bool
+	markupErrs    []error    // invalid tag/attribute names, children on void elements
+	selectStack   [][]string // selected option values of enclosing <select> elements
+	// svgDepth and metaDepth count the enclosing <svg> elements and <Head>
+	// blocks: document metadata is not hoisted inside either.
+	svgDepth  int
+	metaDepth int
+	// branchDepth counts enclosing conditional branches and list items;
+	// metadata there stays in place (hoisting it needs a runtime head swap).
+	branchDepth int
 
 	// cssIndex assigns stable, page-unique indices to (component, var) scope
 	// pairs so classes/CSS are deterministic across builds.

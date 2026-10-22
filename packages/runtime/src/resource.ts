@@ -12,6 +12,18 @@ export interface ResourceActions<T> {
   refetch: () => void;
 }
 
+// Bridge to the optional Suspense module (shipped as a separate bundle). When
+// present, a resource read while loading suspends the Suspense boundary of the
+// component that created it.
+interface SuspenseHook {
+  current(): unknown;
+  suspend(boundary: unknown, promise: PromiseLike<unknown>): void;
+}
+
+function suspenseHook(): SuspenseHook | undefined {
+  return (globalThis as { __krateSuspenseHook?: SuspenseHook }).__krateSuspenseHook;
+}
+
 export function createResource<T, S = void>(
   source: (() => S) | S,
   fetcher: (source: S, opts?: { signal?: AbortSignal }) => Promise<T>
@@ -23,12 +35,24 @@ export function createResource<T, S = void>(
   const [version, setVersion] = createSignal(0);
 
   let abortController: AbortController | undefined;
+  const owner = suspenseHook()?.current() ?? null;
+  let inflight: Promise<void> | null = null;
+  let notified: Promise<void> | null = null;
 
   const getSourceValue = (): S => {
     return typeof source === 'function' ? (source as () => S)() : source;
   };
 
-  const fetch = async (): Promise<void> => {
+  const fetch = (): Promise<void> => {
+    const run = doFetch();
+    inflight = run;
+    run.then(() => {
+      if (inflight === run) inflight = null;
+    });
+    return run;
+  };
+
+  const doFetch = async (): Promise<void> => {
     if (abortController) {
       abortController.abort();
     }
@@ -83,6 +107,10 @@ export function createResource<T, S = void>(
   // as a plain data property, snapshotting state/loading/error once at creation
   // so they never track reactive updates. defineProperties installs live accessors.
   const resource = function (): T | undefined {
+    if (owner && inflight && notified !== inflight) {
+      notified = inflight;
+      suspenseHook()?.suspend(owner, inflight);
+    }
     return data();
   } as ResourceReturn<T>;
   Object.defineProperties(resource, {

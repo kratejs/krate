@@ -57,7 +57,7 @@ func TestSanitizeActionReturn(t *testing.T) {
 
 func TestActionSidecarHandlesActions(t *testing.T) {
 	for _, script := range []string{apiServerScriptContent, apiServerBunScriptContent} {
-		for _, marker := range []string{"__krate/action/", "runAction", "formData"} {
+		for _, marker := range []string{"__krate/action/", "krateRunAction", "formData", "AsyncLocalStorage"} {
 			if !strings.Contains(script, marker) {
 				t.Errorf("sidecar script missing %q", marker)
 			}

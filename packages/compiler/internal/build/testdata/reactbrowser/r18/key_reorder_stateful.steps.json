@@ -1,0 +1,10 @@
+{
+  "steps": [
+    { "op": "click", "sel": "[data-name=bob]" },
+    { "op": "click", "sel": "[data-name=cid]" },
+    { "op": "click", "sel": "[data-name=cid]" },
+    { "op": "click", "sel": "#reverse" },
+    { "op": "click", "sel": "[data-name=ann]" },
+    { "op": "click", "sel": "#sort" }
+  ]
+}

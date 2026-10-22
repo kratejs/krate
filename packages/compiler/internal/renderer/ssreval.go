@@ -42,6 +42,11 @@ type SSREval struct {
 	ScriptHTML string
 	StyleHTML  string
 
+	// svgDepth and headDepth count enclosing <svg> elements and <Head>
+	// blocks, where React 19 metadata is not hoisted.
+	svgDepth  int
+	headDepth int
+
 	// interactiveEmit is an optional hook set by the emitter. When an
 	// uppercase component JSX element is encountered during evaluation, the
 	// hook is given a chance to render it through the tree emit path (which
@@ -89,7 +94,11 @@ type SSREval struct {
 
 	// contextDefaults maps a module-level `const X = createContext(v)` binding to
 	// its literal default v, so `X.useContext()` folds at build time.
-	contextDefaults map[string]string
+	contextDefaults map[string]jsvalue.Value
+	// contextStack holds the provider values in scope per context, innermost
+	// last: the instance's build-time providers (SetContextValues) plus
+	// providers met while evaluating its JSX.
+	contextStack map[string][]jsvalue.Value
 
 	// codeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>.
 	codeTheme string
@@ -157,8 +166,86 @@ func (e *SSREval) SetCVAFactories(factories map[string]*irtree.CVASpec) {
 }
 
 // SetContextDefaults installs the module-wide context-default table.
-func (e *SSREval) SetContextDefaults(defaults map[string]string) {
+func (e *SSREval) SetContextDefaults(defaults map[string]jsvalue.Value) {
 	e.contextDefaults = defaults
+}
+
+// SetContextValues installs the provider values in scope where the evaluated
+// component instance is rendered.
+func (e *SSREval) SetContextValues(values map[string]jsvalue.Value) {
+	for ctx, v := range values {
+		e.pushContext(ctx, v)
+	}
+}
+
+func (e *SSREval) pushContext(ctx string, v jsvalue.Value) {
+	if e.contextStack == nil {
+		e.contextStack = make(map[string][]jsvalue.Value)
+	}
+	e.contextStack[ctx] = append(e.contextStack[ctx], v)
+}
+
+func (e *SSREval) popContext(ctx string) {
+	if s := e.contextStack[ctx]; len(s) > 0 {
+		e.contextStack[ctx] = s[:len(s)-1]
+	}
+}
+
+// contextValue resolves a context read: the nearest provider value, else the
+// createContext default.
+func (e *SSREval) contextValue(ctx string) (jsvalue.Value, bool) {
+	if s := e.contextStack[ctx]; len(s) > 0 {
+		return s[len(s)-1], true
+	}
+	def, ok := e.contextDefaults[ctx]
+	return def, ok
+}
+
+// isContextName reports whether name is a module-level createContext binding.
+func (e *SSREval) isContextName(name string) bool {
+	if _, ok := e.contextDefaults[name]; !ok {
+		return false
+	}
+	_, fn := e.functions[name]
+	return !fn
+}
+
+// evalContextElement renders `<Ctx.Provider value>`, React 19 `<Ctx value>`
+// and `<Ctx.Consumer>{value => ...}</Ctx.Consumer>`.
+func (e *SSREval) evalContextElement(el *ast.JSXElement, name string) (string, bool) {
+	ctx, member, _ := strings.Cut(name, ".")
+	if !e.isContextName(ctx) {
+		return "", false
+	}
+	switch member {
+	case "", "Provider":
+		value := jsvalue.Undefined()
+		for _, attr := range el.Opening.Attributes {
+			if attr != nil && !attr.Spread && attr.Name == "value" && attr.Value != nil {
+				value = e.value(attr.Value)
+			}
+		}
+		e.pushContext(ctx, value)
+		defer e.popContext(ctx)
+		return e.renderChildren(el.Children), true
+	case "Consumer":
+		cur, _ := e.contextValue(ctx)
+		var out strings.Builder
+		for _, child := range el.Children {
+			c, ok := child.(*ast.JSXExprContainer)
+			if !ok || c.Expression == nil {
+				continue
+			}
+			fn := e.value(c.Expression)
+			if !fn.IsFunction() {
+				e.reportUnknown(c.Expression, fn, "<"+name+"> child")
+				continue
+			}
+			out.WriteString(e.renderValue(c.Expression, fn.Call(cur)))
+		}
+		return out.String(), true
+	}
+	return "", false
 }
 
 // SetRestProps installs the rest-parameter attribute map for spread expansion.
@@ -257,6 +344,10 @@ func (e *SSREval) reportUnknown(expr ast.Expr, v jsvalue.Value, context string) 
 	if expr != nil {
 		pos = expr.Pos()
 		src = irtree.GenerateExprJS(expr, nil)
+	}
+	if t := v.Thrown(); t != nil {
+		e.errs = append(e.errs, newBuildThrow(t))
+		return
 	}
 	if v.IsUnsupported() {
 		e.addDiag(pos, "unsupported expression: "+v.Reason()+" (in "+context+" `"+src+"`)",
@@ -362,16 +453,16 @@ func (e *SSREval) interceptCall(call *ast.CallExpr) (jsvalue.Value, bool) {
 		}
 		if (callee.Name == "useContext" || callee.Name == "use") && len(call.Args) == 1 {
 			if arg, ok := call.Args[0].(*ast.Identifier); ok {
-				if def, found := e.contextDefaults[arg.Name]; found {
-					return jsvalue.FromLegacy(def), true
+				if def, found := e.contextValue(arg.Name); found {
+					return def, true
 				}
 			}
 		}
 	case *ast.MemberExpr:
 		if prop, ok := callee.Property.(*ast.Identifier); ok && (prop.Name == "useContext" || prop.Name == "use") {
 			if id, ok := callee.Object.(*ast.Identifier); ok {
-				if def, found := e.contextDefaults[id.Name]; found {
-					return jsvalue.FromLegacy(def), true
+				if def, found := e.contextValue(id.Name); found {
+					return def, true
 				}
 			}
 		}
@@ -1170,7 +1261,9 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 	// wrappers (layouts, doc shells) still inject <Head>/<Script>/<Style>.
 	switch name {
 	case "Head", "head":
+		e.headDepth++
 		e.HeadHTML += e.evalChildren(el.Children)
+		e.headDepth--
 		return ""
 	case "Script":
 		e.ScriptHTML += e.renderMetaElement(el, "script")
@@ -1211,6 +1304,10 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		return e.renderChildren(el.Children)
 	}
 
+	if html, ok := e.evalContextElement(el, name); ok {
+		return html
+	}
+
 	// Uppercase = component - resolve and evaluate recursively.
 	if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
 		if e.interactiveEmit != nil {
@@ -1233,6 +1330,19 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		return ""
 	}
 
+	// React 19 document metadata (<title>, <meta>, <link>) moves to <head>;
+	// identical elements are emitted once.
+	if e.svgDepth == 0 && e.headDepth == 0 && irtree.IsHoistableMetadata(el) {
+		html := e.renderElement(irtree.WithoutAttr(el, "precedence"), name)
+		if !strings.Contains(e.HeadHTML, html) {
+			e.HeadHTML += html
+		}
+		return ""
+	}
+	if name == "svg" {
+		e.svgDepth++
+		defer func() { e.svgDepth-- }()
+	}
 	return e.renderElement(el, name)
 }
 

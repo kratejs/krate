@@ -1,0 +1,8 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#idle" },
+    { "op": "click", "sel": "#same-object" },
+    { "op": "click", "sel": "#new-object" },
+    { "op": "click", "sel": "#busy" }
+  ]
+}

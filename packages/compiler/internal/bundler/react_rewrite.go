@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
 )
 
@@ -28,6 +29,8 @@ var reactNames = map[string]string{
 	// useId is lowered by the IR builder to a per-instance build-time literal;
 	// the marker identifier is resolved there (it has the instance context).
 	"useId": "__krate_useId",
+	// React DOM's requestFormReset is a runtime global (runtime/src/actions.ts).
+	"requestFormReset": "requestFormReset",
 }
 
 // structuralReactAPIs are React APIs lowered structurally (identity/passthrough
@@ -76,6 +79,8 @@ var reactiveFactories = map[string]bool{
 	"useReducer":     true,
 	"useActionState": true,
 	"useOptimistic":  true,
+	// The compat useSyncExternalStore returns a getter of the snapshot.
+	"useSyncExternalStore": true,
 }
 
 // reactAPI reports whether name is a known React API (rename, structural, or
@@ -149,6 +154,33 @@ type reactCtx struct {
 	// because they resolve to the compatibility runtime rather than a krate
 	// primitive.
 	compat map[string]bool
+	// susp holds Suspense/lazy/use() lowering state (react_suspense.go).
+	susp *suspenseState
+
+	// Effect/memo lowering state (react_effects.go).
+	file        string
+	src         string
+	diags       []diag.Diagnostic
+	frames      []*hookFrame
+	arrayConsts map[*scope]map[string]*ast.ArrayExpr
+	callables   map[*scope]map[string]string
+	// fnNames are bindings known to hold functions (function declarations
+	// and const arrow/function expressions), used for lazy initializers.
+	fnNames     map[string]bool
+	freshLocals map[*scope]map[string]bool
+	// formStatusSeq numbers lowered useFormStatus() mount refs per module and
+	// formStatusPos records their positions for diagnostics.
+	formStatusSeq int
+	formStatusPos []ast.Pos
+
+	// Render-scope lowering state (react_derived.go). react is set for a
+	// module that imports React; reads counts reactive reads seen while
+	// rewriting, so a caller can tell whether an expression is render-dependent.
+	react      bool
+	reads      int
+	tmp        int
+	arrowNames map[*ast.ArrowFn]string
+	setters    map[string]bool
 }
 
 // localAPI resolves an identifier bound by a React named import to its React
@@ -174,7 +206,7 @@ func (c *reactCtx) compatMember(mem *ast.MemberExpr) (ast.Expr, bool) {
 		return nil, false
 	}
 	isReactMember := c.alias != "" && objID.Name == c.alias && compatReactNames[propID.Name]
-	isDOMMember := c.domAlias != "" && objID.Name == c.domAlias && (propID.Name == "createPortal" || propID.Name == "flushSync")
+	isDOMMember := c.domAlias != "" && objID.Name == c.domAlias && reactDOMAPI(propID.Name)
 	if !isReactMember && !isDOMMember {
 		return nil, false
 	}
@@ -198,7 +230,7 @@ func (c *reactCtx) memberAPI(mem *ast.MemberExpr) (string, bool) {
 	if c.alias != "" && objID.Name == c.alias && reactAPI(propID.Name) {
 		return propID.Name, true
 	}
-	if c.domAlias != "" && objID.Name == c.domAlias && (propID.Name == "createPortal" || propID.Name == "flushSync") {
+	if c.domAlias != "" && objID.Name == c.domAlias && reactDOMAPI(propID.Name) {
 		return propID.Name, true
 	}
 	return "", false
@@ -222,8 +254,19 @@ func (c *reactCtx) callAPI(callee ast.Expr) (string, bool) {
 // existing krate runtime primitives, and bare reads of hook values are
 // auto-called so unmodified React (`{count}`, `count + 1`) behaves correctly.
 func RewriteReact(prog *ast.Program) {
-	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}}
+	RewriteReactDiag(prog, "", "")
+}
+
+// RewriteReactDiag is RewriteReact that also returns the coded warnings for
+// React patterns whose Krate semantics differ (see internal/diag
+// codes_effects.go). file and src position the diagnostics.
+func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
+	renameReservedBindings(prog)
+	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src, susp: newSuspenseState()}
+	ctx.fnNames = functionNames(prog.Body)
+	ctx.refDiagnostics(prog)
 	var toRemove []int
+	legacy := legacyImports(prog)
 
 	for i, stmt := range prog.Body {
 		imp, ok := stmt.(*ast.ImportStmt)
@@ -255,6 +298,9 @@ func RewriteReact(prog *ast.Program) {
 				if named.Remote == "Fragment" {
 					ctx.fragmentNames[local] = true
 				}
+				if named.Remote == "Suspense" {
+					ctx.susp.suspense[local] = true
+				}
 			}
 		case "react-dom", "react-dom/client":
 			// Krate does not ship react-dom. The DOM entry points React source uses
@@ -275,8 +321,7 @@ func RewriteReact(prog *ast.Program) {
 					ctx.domAlias = local
 					continue
 				}
-				switch named.Remote {
-				case "createPortal", "flushSync":
+				if reactDOMAPI(named.Remote) {
 					ctx.imports[local] = named.Remote
 				}
 			}
@@ -310,12 +355,16 @@ func RewriteReact(prog *ast.Program) {
 	if ctx.alias != "" {
 		ctx.fragmentNames[ctx.alias] = true
 	}
+	ctx.react = len(ctx.imports) > 0 || ctx.alias != "" || ctx.domAlias != ""
 
 	for i := len(toRemove) - 1; i >= 0; i-- {
 		idx := toRemove[i]
 		prog.Body = append(prog.Body[:idx], prog.Body[idx+1:]...)
 	}
 
+	ctx.collectModuleContexts(prog)
+	ctx.lowerLazyDecls(prog)
+	ctx.checkLegacyAPIs(prog, legacy)
 	ctx.rewriteStmts(prog.Body, newScope(nil))
 
 	// React APIs that resolve to the compatibility runtime are pulled in from
@@ -333,6 +382,16 @@ func RewriteReact(prog *ast.Program) {
 		imp := &ast.ImportStmt{Source: `"@krate/runtime/react"`, Named: named}
 		prog.Body = append([]ast.Stmt{imp}, prog.Body...)
 	}
+	return ctx.diags
+}
+
+// reactDOMAPI reports the react-dom exports Krate lowers or provides.
+func reactDOMAPI(name string) bool {
+	switch name {
+	case "createPortal", "flushSync", "useFormStatus", "requestFormReset":
+		return true
+	}
+	return false
 }
 
 func (c *reactCtx) rewriteStmts(stmts []ast.Stmt, sc *scope) {
@@ -354,16 +413,29 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 	case *ast.ExprStmt:
 		s.Expression = c.rewriteExpr(s.Expression, sc)
 	case *ast.FnDecl:
+		if c.frame() != nil && s.Name != "" {
+			// A function declared in a component is a new function each render.
+			c.recordFresh(sc, s.Name)
+		}
 		child := c.fnScope(s.Params, sc)
-		c.rewriteStmts(s.Body, child)
+		done := c.enterFn(child, s.Params, s.Body)
+		kind := frameKindOf(s.Name)
+		if s.Name == "" && s.Default {
+			kind = frameComponent
+		}
+		c.rewriteFnBody(&s.Body, child, kind, s.Params)
+		c.injectFormStatusRefs(s.Body)
+		done()
 	case *ast.ExportStmt:
 		if s.Declaration != nil {
 			c.rewriteStmt(s.Declaration, sc)
 		}
 	case *ast.IfStmt:
 		s.Test = c.rewriteExpr(s.Test, sc)
-		c.rewriteStmts(s.Consequent, sc)
-		c.rewriteStmts(s.Alternate, sc)
+		c.guarded("condition", func() {
+			c.rewriteStmts(s.Consequent, sc)
+			c.rewriteStmts(s.Alternate, sc)
+		})
 	case *ast.BlockStmt:
 		c.rewriteStmts(s.Body, newScope(sc))
 	case *ast.ForStmt:
@@ -376,7 +448,7 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 		if s.Update != nil {
 			s.Update = c.rewriteExpr(s.Update, sc)
 		}
-		c.rewriteStmts(s.Body, newScope(sc))
+		c.guarded("loop", func() { c.rewriteStmts(s.Body, newScope(sc)) })
 	case *ast.ForInStmt:
 		if s.Left != nil {
 			s.Left = c.rewriteExpr(s.Left, sc)
@@ -384,14 +456,14 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 		if s.Right != nil {
 			s.Right = c.rewriteExpr(s.Right, sc)
 		}
-		c.rewriteStmts(s.Body, newScope(sc))
+		c.guarded("loop", func() { c.rewriteStmts(s.Body, newScope(sc)) })
 	case *ast.WhileStmt:
 		if s.Test != nil {
 			s.Test = c.rewriteExpr(s.Test, sc)
 		}
-		c.rewriteStmts(s.Body, newScope(sc))
+		c.guarded("loop", func() { c.rewriteStmts(s.Body, newScope(sc)) })
 	case *ast.DoWhileStmt:
-		c.rewriteStmts(s.Body, newScope(sc))
+		c.guarded("loop", func() { c.rewriteStmts(s.Body, newScope(sc)) })
 		if s.Test != nil {
 			s.Test = c.rewriteExpr(s.Test, sc)
 		}
@@ -403,7 +475,7 @@ func (c *reactCtx) rewriteStmt(stmt ast.Stmt, sc *scope) {
 			if cs.Test != nil {
 				cs.Test = c.rewriteExpr(cs.Test, sc)
 			}
-			c.rewriteStmts(cs.Body, sc)
+			c.guarded("condition", func() { c.rewriteStmts(cs.Body, sc) })
 		}
 	case *ast.TryStmt:
 		c.rewriteStmts(s.Body, sc)
@@ -437,55 +509,40 @@ func (c *reactCtx) fnScope(params []*ast.Param, parent *scope) *scope {
 // factories) in the scope, then rewrites the initializers so React-style reads
 // inside them become calls.
 func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
+	if c.lowerActionHook(v, sc) {
+		return
+	}
 	// Lower `const [pending, start] = useTransition()` to a Krate signal plus a
-	// starter function. The compat call would otherwise leave both bindings
-	// undefined in the hydration scope.
-	if len(v.Decls) == 1 {
-		decl := v.Decls[0]
-		if decl != nil && decl.IsDestructuring && len(decl.Names) >= 2 {
-			if call, ok := decl.Init.(*ast.CallExpr); ok {
-				if api, ok := c.callAPI(call.Callee); ok && api == "useTransition" {
-					pending, start := decl.Names[0], decl.Names[1]
-					setter := "__krate_transition_" + pending
-					boolLit := func(b bool) ast.Expr {
-						val := "false"
-						if b {
-							val = "true"
-						}
-						return &ast.Literal{Kind: ast.BoolLit, Value: val}
-					}
-					makeCall := func(name string, args ...ast.Expr) *ast.CallExpr {
-						return &ast.CallExpr{Callee: &ast.Identifier{Name: name}, Args: args}
-					}
-					v.Decls = []*ast.VarDecl{
-						{IsDestructuring: true, Names: []string{pending, setter}, Init: makeCall("createSignal", boolLit(false))},
-						{Name: start, Init: &ast.ArrowFn{Params: []*ast.Param{{Name: "fn"}}, Body: []ast.Stmt{
-							&ast.ExprStmt{Expression: makeCall(setter, boolLit(true))},
-							&ast.ExprStmt{Expression: makeCall("fn")},
-							&ast.ExprStmt{Expression: makeCall(setter, boolLit(false))},
-						}}},
-					}
-					sc.declareGetter(pending)
-					sc.declareLocal(setter)
-					sc.declareLocal(start)
-					return
-				}
-			}
-		}
+	// transition starter that keeps it pending while async actions run.
+	if c.lowerTransitionVarStmt(v, sc) {
+		return
 	}
 	for _, decl := range v.Decls {
 		if decl == nil {
 			continue
 		}
+		if c.lowerSuspenseDecl(decl, sc) {
+			continue
+		}
 		if decl.Init != nil {
+			c.noteFnName(decl.Name, decl.Init)
 			if c.isReactiveFactory(decl.Init) {
 				if decl.IsDestructuring && len(decl.Names) >= 1 {
 					sc.declareGetter(decl.Names[0])
 					for _, n := range decl.Names[1:] {
 						sc.declareLocal(n)
+						if c.setters == nil {
+							c.setters = map[string]bool{}
+						}
+						c.setters[n] = true
 					}
 				} else if decl.Name != "" {
 					sc.declareGetter(decl.Name)
+					if call, ok := decl.Init.(*ast.CallExpr); ok {
+						if api, ok := c.isDepsGetterHook(call); ok {
+							c.markCallable(sc, decl.Name, api)
+						}
+					}
 				}
 			} else if !decl.IsDestructuring {
 				sc.declareLocal(decl.Name)
@@ -503,6 +560,12 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 			}
 		}
 		decl.Init = c.rewriteExpr(decl.Init, sc)
+		if arr, ok := decl.Init.(*ast.ArrayExpr); ok && v.Kind == ast.VarConst && !decl.IsDestructuring && decl.Name != "" {
+			c.recordArrayConst(sc, decl.Name, arr)
+		}
+		if !decl.IsDestructuring && decl.Name != "" && isFreshValue(decl.Init) && c.frame() != nil {
+			c.recordFresh(sc, decl.Name)
+		}
 	}
 }
 
@@ -515,6 +578,9 @@ func (c *reactCtx) isReactiveFactory(init ast.Expr) bool {
 		return false
 	}
 	if api, ok := c.callAPI(call.Callee); ok {
+		if api == "useCallback" {
+			return hasDepsArg(call)
+		}
 		return reactiveFactories[api]
 	}
 	if id, ok := call.Callee.(*ast.Identifier); ok {
@@ -552,6 +618,12 @@ func (c *reactCtx) rewriteExprCtx(expr ast.Expr, sc *scope, valuePos bool) ast.E
 				continue
 			}
 			prop.Value = c.rewriteExpr(prop.Value, sc)
+			// `{ count }` reading a getter is `{ count: count() }`.
+			if prop.Shorthand {
+				if id, ok := prop.Value.(*ast.Identifier); !ok || id.Name != prop.Key {
+					prop.Shorthand = false
+				}
+			}
 		}
 	case *ast.ArrayExpr:
 		for i, elem := range e.Elements {
@@ -560,6 +632,9 @@ func (c *reactCtx) rewriteExprCtx(expr ast.Expr, sc *scope, valuePos bool) ast.E
 	case *ast.MemberExpr:
 		if id, ok := c.compatMember(e); ok {
 			return id
+		}
+		if id, ok := e.Object.(*ast.Identifier); ok && c.isPropsRead(sc, id.Name) {
+			c.reads++
 		}
 		e.Object = c.rewriteExpr(e.Object, sc)
 		if e.Computed {
@@ -583,7 +658,14 @@ func (c *reactCtx) rewriteExprCtx(expr ast.Expr, sc *scope, valuePos bool) ast.E
 				p.Default = c.rewriteExpr(p.Default, sc)
 			}
 		}
-		c.rewriteStmts(e.Body, child)
+		done := c.enterFn(child, e.Params, e.Body)
+		if e.Expression {
+			c.rewriteStmts(e.Body, child)
+		} else {
+			c.rewriteFnBody(&e.Body, child, frameKindOf(c.fnName(e)), e.Params)
+		}
+		c.injectFormStatusRefs(e.Body)
+		done()
 	case *ast.TemplateExpr:
 		for i, part := range e.Parts {
 			e.Parts[i] = c.rewriteExpr(part, sc)
@@ -598,6 +680,9 @@ func (c *reactCtx) rewriteExprCtx(expr ast.Expr, sc *scope, valuePos bool) ast.E
 	case *ast.DynamicImport:
 		e.Arg = c.rewriteExpr(e.Arg, sc)
 	case *ast.JSXElement:
+		if lowered, ok := c.lowerSuspenseJSX(e, sc); ok {
+			return lowered
+		}
 		if c.isFragmentTag(e.Opening.Name) {
 			return c.lowerFragment(e, sc)
 		}
@@ -628,8 +713,11 @@ func (c *reactCtx) rewriteIdentifier(e *ast.Identifier, sc *scope, valuePos bool
 		// call sites are handled by rewriteCall.
 		return e
 	}
-	if valuePos && sc.isGetter(e.Name) {
-		return &ast.CallExpr{Position: e.Position, Callee: e}
+	if sc.isGetter(e.Name) {
+		c.reads++
+		if valuePos {
+			return &ast.CallExpr{Position: e.Position, Callee: e}
+		}
 	}
 	return e
 }
@@ -646,58 +734,49 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 
 	api, isReactAPI := c.callAPI(e.Callee)
 
-	// React runs an effect with an empty dependency array exactly once. Lower
-	// that case to onMount (with cleanup registration) instead of createEffect,
-	// which would re-run it whenever any signal it reads changes.
-	if isReactAPI && (api == "useEffect" || api == "useLayoutEffect" || api == "useInsertionEffect") && len(e.Args) >= 2 {
-		if deps, ok := e.Args[1].(*ast.ArrayExpr); ok && len(deps.Elements) == 0 {
-			fn := c.rewriteExpr(e.Args[0], sc)
-			cleanup := &ast.VarStmt{Decls: []*ast.VarDecl{{Name: "__krate_effect_cleanup", Init: &ast.CallExpr{Callee: fn}}}}
-			guard := &ast.IfStmt{
-				Test: &ast.BinaryExpr{
-					Left:  &ast.UnaryExpr{Op: "typeof", Arg: &ast.Identifier{Name: "__krate_effect_cleanup"}},
-					Op:    "===",
-					Right: &ast.Literal{Kind: ast.StringLit, Value: "function"},
-				},
-				Consequent: []ast.Stmt{&ast.ExprStmt{Expression: &ast.CallExpr{
-					Callee: &ast.Identifier{Name: "onCleanup"},
-					Args:   []ast.Expr{&ast.Identifier{Name: "__krate_effect_cleanup"}},
-				}}},
-			}
-			return &ast.CallExpr{
-				Position: e.Position,
-				Callee:   &ast.Identifier{Name: "onMount"},
-				Args: []ast.Expr{&ast.ArrowFn{
-					Position: e.Position,
-					Body:     []ast.Stmt{cleanup, guard},
-				}},
-			}
+	// Effects, memos and callbacks with dependency arrays (react_effects.go).
+	if isReactAPI {
+		c.checkHookPlacement(e, api)
+		if _, ok := effectPhases[api]; ok {
+			return c.lowerEffectHook(e, api, sc)
 		}
-		// Non-empty dependency arrays: createEffectDeps compares the deps and
-		// only runs the callback when one changed. The deps thunk re-reads the
-		// signal getters so the effect subscribes to them.
-		if _, ok := e.Args[1].(*ast.ArrayExpr); ok {
-			fn := c.rewriteExpr(e.Args[0], sc)
-			deps := c.rewriteExpr(e.Args[1], sc)
-			thunk := &ast.ArrowFn{Position: e.Position, Body: []ast.Stmt{&ast.ReturnStmt{Value: deps}}}
-			return &ast.CallExpr{Position: e.Position, Callee: &ast.Identifier{Name: "createEffectDeps"}, Args: []ast.Expr{fn, thunk}}
+		switch api {
+		case "useMemo":
+			if lowered, ok := c.lowerMemoHook(e, sc); ok {
+				return lowered
+			}
+		case "useCallback":
+			return c.lowerCallbackHook(e, sc)
+		case "useState":
+			c.lowerStateHook(e)
+		case "useReducer":
+			c.lowerReducerHook(e)
+		case "useImperativeHandle":
+			// Honour the dependency array: the compat helper re-creates the
+			// handle when the thunk's result changes.
+			if len(e.Args) >= 3 {
+				if thunk, ok := c.depsThunk(&ast.CallExpr{Position: e.Position, Args: e.Args[1:]}, api, sc); ok {
+					e.Args[2] = thunk
+				}
+			}
 		}
 	}
 
-	if isReactAPI && api == "useMemo" && len(e.Args) >= 2 {
-		if _, ok := e.Args[1].(*ast.ArrayExpr); ok {
-			fn := c.rewriteExpr(e.Args[0], sc)
-			deps := c.rewriteExpr(e.Args[1], sc)
-			thunk := &ast.ArrowFn{Position: e.Position, Body: []ast.Stmt{&ast.ReturnStmt{Value: deps}}}
-			return &ast.CallExpr{Position: e.Position, Callee: &ast.Identifier{Name: "createMemoDeps"}, Args: []ast.Expr{fn, thunk}}
-		}
-	}
-
-	// `memo`/`lazy` are identity wrappers; `useCallback` yields its function.
+	// `memo`/`lazy` are identity wrappers.
 	switch api {
-	case "memo", "lazy", "useCallback":
+	case "memo", "lazy":
+		if isReactAPI && api == "lazy" {
+			// Valid lazy() declarations were lowered at module level.
+			c.reportStrayLazy(e)
+		}
 		if isReactAPI && len(e.Args) >= 1 {
 			return c.rewriteExpr(e.Args[0], sc)
+		}
+	case "use":
+		if isReactAPI {
+			if lowered, ok := c.rewriteUseCall(e, sc); ok {
+				return lowered
+			}
 		}
 	case "forwardRef":
 		// forwardRef((props, ref) => ...) is lowered to (props) => ... with
@@ -755,6 +834,10 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 			c.compat[api] = true
 			e.Callee = &ast.Identifier{Name: api}
 		}
+	} else if id, ok := e.Callee.(*ast.Identifier); ok && c.callableGetterCall(sc, id.Name, e) {
+		// A useMemo/useCallback getter holds a function: call its value.
+		c.reads++
+		e.Callee = &ast.CallExpr{Position: id.Position, Callee: id}
 	} else {
 		e.Callee = c.rewriteExprCtx(e.Callee, sc, false)
 	}
@@ -802,7 +885,11 @@ func (c *reactCtx) lowerJSXCall(call *ast.CallExpr, sc *scope) (ast.Expr, bool) 
 	propsExpr := call.Args[1]
 
 	if id, ok := typeExpr.(*ast.Identifier); ok && c.fragmentNames[id.Name] {
-		return &ast.JSXFragment{Position: call.Position, Children: c.jsxChildrenFromProps(propsExpr, sc)}, true
+		frag := &ast.JSXFragment{Position: call.Position, Children: c.jsxChildrenFromProps(propsExpr, sc)}
+		if len(call.Args) > 2 && call.Args[2] != nil {
+			frag.Key = c.rewriteExpr(call.Args[2], sc)
+		}
+		return frag, true
 	}
 
 	name, ok := jsxTypeName(typeExpr)
@@ -831,10 +918,16 @@ func (c *reactCtx) lowerJSXCall(call *ast.CallExpr, sc *scope) (ast.Expr, bool) 
 			children = prop.Value
 			hasChildren = true
 		case "key":
-			// React reconciliation key; Krate drops it (position/marker identity).
+			// React reconciliation key: kept as a JSX attribute so list and
+			// keyed-remount lowering can read it; every HTML path drops it.
+			attrs = append(attrs, &ast.JSXAttr{Name: "key", Value: c.rewriteExpr(prop.Value, sc)})
 		default:
 			attrs = append(attrs, &ast.JSXAttr{Name: prop.Key, Value: c.rewriteExpr(prop.Value, sc)})
 		}
+	}
+	// jsx(type, props, key): the automatic runtime passes the key separately.
+	if len(call.Args) > 2 && call.Args[2] != nil {
+		attrs = append(attrs, &ast.JSXAttr{Name: "key", Value: c.rewriteExpr(call.Args[2], sc)})
 	}
 
 	el := &ast.JSXElement{
@@ -942,7 +1035,13 @@ func (c *reactCtx) lowerFragment(el *ast.JSXElement, sc *scope) ast.Expr {
 	for i, child := range el.Children {
 		el.Children[i] = c.rewriteJSXChild(child, sc)
 	}
-	return &ast.JSXFragment{Position: el.Position, Children: el.Children}
+	frag := &ast.JSXFragment{Position: el.Position, Children: el.Children}
+	for _, attr := range el.Opening.Attributes {
+		if attr != nil && !attr.Spread && attr.Name == "key" && attr.Value != nil {
+			frag.Key = c.rewriteExpr(attr.Value, sc)
+		}
+	}
+	return frag
 }
 
 func (c *reactCtx) rewriteJSXElement(el *ast.JSXElement, sc *scope) {
@@ -954,7 +1053,7 @@ func (c *reactCtx) rewriteJSXElement(el *ast.JSXElement, sc *scope) {
 			}
 			// React-only directives carry no DOM meaning; drop them so no
 			// render path (static SSR, IR tree, hydration) can emit them.
-			if attr.Name == "key" || attr.Name == "suppressHydrationWarning" {
+			if attr.Name == "suppressHydrationWarning" {
 				continue
 			}
 			if attr.Name == "style" {
@@ -982,8 +1081,12 @@ func (c *reactCtx) rewriteJSXChild(child ast.JSXChild, sc *scope) ast.JSXChild {
 		ch.Expression = c.rewriteExpr(ch.Expression, sc)
 		return ch
 	case *ast.JSXElementChild:
-		if el, ok := c.rewriteExpr(ch.Element, sc).(*ast.JSXElement); ok {
-			ch.Element = el
+		switch out := c.rewriteExpr(ch.Element, sc).(type) {
+		case *ast.JSXElement:
+			ch.Element = out
+		case *ast.JSXFragment:
+			// <Fragment>, <StrictMode> and <Profiler> lower to fragments.
+			return &ast.JSXFragmentChild{Fragment: out}
 		}
 		return ch
 	case *ast.JSXFragmentChild:

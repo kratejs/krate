@@ -1,0 +1,6 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#more" },
+    { "op": "click", "sel": "#more" }
+  ]
+}

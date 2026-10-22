@@ -2,13 +2,33 @@ import type { CSSScope, CSSFlagsScope } from './signal.js';
 
 let contextId = 0;
 
+/** Marks Krate context objects so `use(x)` can tell them from promises. */
+export const KRATE_CONTEXT: unique symbol = Symbol.for('krate.context');
+
 export interface Context<T> {
+  /** Context marker (see {@link KRATE_CONTEXT}). */
+  $$typeof?: typeof KRATE_CONTEXT;
+  /** React 19: the context itself renders as its provider (`<Ctx value>`). */
+  (props: { value: T; children?: any }): Node;
   id: number;
   defaultValue: T;
   Provider: (props: { value: T; children?: any }) => Node;
+  /** Renders `children(value)` with the nearest provider value. */
+  Consumer: (props: { children?: any }) => Node;
   useContext: () => T;
   /** Alias for {@link Context.useContext}. */
   use: () => T;
+}
+
+function toNode(v: unknown): Node {
+  if (v instanceof Node) return v;
+  const frag = document.createDocumentFragment();
+  if (Array.isArray(v)) {
+    for (const item of v) frag.appendChild(toNode(item));
+  } else if (v != null && v !== false && v !== true) {
+    frag.appendChild(document.createTextNode(String(v)));
+  }
+  return frag;
 }
 
 const contextStack: Map<number, unknown[]> = new Map();
@@ -56,41 +76,51 @@ export function createContext<T>(defaultValue: T): Context<T> {
     return defaultValue;
   };
 
-  return {
-    id,
-    defaultValue,
-    Provider: (props: { value: T; children?: any }): Node => {
-      const stack = contextStack.get(id) || [defaultValue];
-      stack.push(props.value);
-      contextStack.set(id, stack);
+  const Provider = (props: { value: T; children?: any }): Node => {
+    const stack = contextStack.get(id) || [defaultValue];
+    stack.push(props.value);
+    contextStack.set(id, stack);
 
-      // Create a container and render children
-      const container = document.createElement('div');
-      container.style.display = 'contents';
-      if (props.children) {
-        for (const child of props.children) {
-          if (child instanceof Node) {
-            container.appendChild(child);
-          } else if (child != null) {
-            container.appendChild(document.createTextNode(String(child)));
-          }
+    // Create a container and render children
+    const container = document.createElement('div');
+    container.style.display = 'contents';
+    // Read once: a lazy `children` getter renders under this provider.
+    const children = props.children;
+    if (children) {
+      for (const child of Array.isArray(children) ? children : [children]) {
+        if (child instanceof Node) {
+          container.appendChild(child);
+        } else if (child != null) {
+          container.appendChild(document.createTextNode(String(child)));
         }
       }
+    }
 
-      // Pop the context value synchronously after rendering children.
-      // Children are already rendered (passed as pre-built DOM nodes), so
-      // any effects that read context have already done so during their
-      // synchronous creation. Synchronous pop fixes the nested Provider race:
-      // with microtask pop, code after an inner Provider but within the outer
-      // Provider's scope would incorrectly see the inner value still on the stack.
-      stack.pop();
-      if (stack.length === 0) {
-        stack.push(defaultValue);
-      }
+    // Pop the context value synchronously after rendering children.
+    // Children are already rendered (passed as pre-built DOM nodes), so
+    // any effects that read context have already done so during their
+    // synchronous creation. Synchronous pop fixes the nested Provider race:
+    // with microtask pop, code after an inner Provider but within the outer
+    // Provider's scope would incorrectly see the inner value still on the stack.
+    stack.pop();
+    if (stack.length === 0) {
+      stack.push(defaultValue);
+    }
 
-      return container;
-    },
-    useContext,
-    use: useContext,
+    return container;
   };
+  const Consumer = (props: { children?: any }): Node => {
+    let fn = props.children;
+    if (Array.isArray(fn)) fn = fn.find((c) => typeof c === 'function');
+    return typeof fn === 'function' ? toNode(fn(useContext())) : toNode(null);
+  };
+  const ctx = ((props: { value: T; children?: any }) => Provider(props)) as Context<T>;
+  ctx.$$typeof = KRATE_CONTEXT;
+  ctx.id = id;
+  ctx.defaultValue = defaultValue;
+  ctx.Provider = Provider;
+  ctx.Consumer = Consumer;
+  ctx.useContext = useContext;
+  ctx.use = useContext;
+  return ctx;
 }

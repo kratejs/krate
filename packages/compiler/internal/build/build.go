@@ -531,7 +531,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	}
 
 	// Write shared runtime chunk (extracted from per-page bundles)
-	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results)})
+	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results), Suspense: runtimeNeedsSuspense(results)})
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)
 	}
@@ -867,7 +867,7 @@ func (b *Builder) BuildAll() error {
 	}
 	runtimeJS := ""
 	if anyPageHasJS {
-		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results)})
+		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results), Suspense: runtimeNeedsSuspense(results)})
 	}
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)
@@ -1371,6 +1371,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				runtimeHead = im + runtimeHead
 			}
 			chunkPreloads := dynamicChunkURLs(r.HydrationJS)
+			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
 			var html string
 			if r.LoadingHTML != "" {
 				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)
@@ -1518,6 +1519,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("bundling page %s: %w", page, err)
 	}
+	printModuleWarnings(os.Stderr, bundle.Modules)
 
 	entryModule := findEntryModule(bundle.Modules)
 	if entryModule == nil || entryModule.Program == nil {
@@ -1644,6 +1646,18 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	emitter.EvalJS = b.jsExprEvaluator()
 	emitter.GoComponents = pageOpts.GoComponents
 	emitResult := emitter.Emit(tree)
+	tree, emitResult = applyBoundaryFallbacks(page, tree, emitResult, pageOpts, func(opts irtree.BuildOptions) (*irtree.ComponentTree, *renderer.EmitResult) {
+		t := irtree.BuildWithOptions(entryModule.Program, ann, opts)
+		if isDynamicRoute(page, b.Cfg.PagesDir) {
+			injectDynamicRoutePlaceholders(t, extractParamNames(page, b.Cfg.PagesDir))
+		}
+		em := renderer.NewEmitter()
+		em.CodeTheme = b.Cfg.Markdown.CodeTheme
+		em.IconResolver = b.iconResolver
+		em.EvalJS = b.jsExprEvaluator()
+		em.GoComponents = opts.GoComponents
+		return t, em.Emit(t)
+	})
 	renderer.EmitMeta(tree, emitResult)
 	// Render imported Go components (server tier, slot path + SSREval'd) via the
 	// Go host in one batch, then inline their HTML at the emitted markers.
@@ -1798,6 +1812,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
 	if needsHydrate {
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)
 		if islandJS != "" {
 			rawJS = strings.TrimSpace(rawJS + "\n" + islandJS)
 		}
@@ -2152,6 +2167,8 @@ func (b *Builder) resetBuildCaches() {
 	resolver.ResetCaches()
 	// Runtime/dev bundle disk lookups are memoized per build.
 	resetRuntimeBundleMemo()
+	// Module warnings are printed once per build.
+	resetModuleWarnings()
 	// Baked collection-chain folds are per-build (a content edit changes the key).
 	resetContentFoldCache()
 }
@@ -2230,6 +2247,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if err != nil {
 		return nil, "", nil, false, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
 	}
+	printModuleWarnings(os.Stderr, layoutBundle.Modules)
 
 	layoutModule := findEntryModule(layoutBundle.Modules)
 	if layoutModule == nil || layoutModule.Program == nil {

@@ -1,0 +1,7 @@
+{
+  "settleMs": 0,
+  "steps": [
+    { "op": "waitFor", "sel": "#report" },
+    { "op": "wait", "ms": 50 }
+  ]
+}

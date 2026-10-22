@@ -8,6 +8,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	irtree "github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
 )
 
@@ -30,6 +31,7 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 	collectMemberComponents(prog.Body, ann.Functions)
 	collectClassComponents(prog.Body, ann.ClassComponents)
 	collectClassRejections(prog.Body, ann, sourceFile, rawSource)
+	collectLazyComponents(prog.Body, ann, sourceFile, rawSource)
 
 	// 2. Find default export -> entry point
 	ann.EntryPoint = FindDefaultExport(prog.Body)
@@ -451,6 +453,11 @@ func FindDefaultExport(body []ast.Stmt) string {
 			if fn, ok := exp.Declaration.(*ast.FnDecl); ok {
 				return fn.Name
 			}
+			// `export default class Page extends Component` (lowered to a
+			// function of the same name).
+			if class, ok := exp.Declaration.(*ast.ClassDecl); ok && class.Name != "" {
+				return class.Name
+			}
 			if exp.Local != "" {
 				return exp.Local
 			}
@@ -633,6 +640,7 @@ func MergeModuleFunctions(ann *irtree.Annotations, modules []ModuleSource) {
 			}
 			collectClassComponents(mod.Program.Body, ann.ClassComponents)
 			collectClassRejections(mod.Program.Body, ann, mod.Path, mod.RawSource)
+			collectLazyComponents(mod.Program.Body, ann, mod.Path, mod.RawSource)
 			// Merge module-level cva factories so variant calls in the entry
 			// module can fold against factories defined in imported modules.
 			if ann.CVAFactories == nil {
@@ -646,7 +654,7 @@ func MergeModuleFunctions(ann *irtree.Annotations, modules []ModuleSource) {
 			// Merge context defaults so `X.useContext()` in the entry module can
 			// fold against `createContext` bindings from imported modules.
 			if ann.ContextDefaults == nil {
-				ann.ContextDefaults = make(map[string]string)
+				ann.ContextDefaults = make(map[string]jsvalue.Value)
 			}
 			for name, def := range irtree.CollectContextDefaults(mod.Program) {
 				if _, exists := ann.ContextDefaults[name]; !exists {
@@ -685,6 +693,8 @@ func MergeImportAliases(ann *irtree.Annotations, modules []ModuleSource, entry M
 	if entry.Program != nil {
 		modules = append(modules, entry)
 	}
+	markLazyDefaults(ann, modules)
+	lowerContextUses(ann, modules)
 	aliases := BuildImportAliases(modules)
 	for local, declared := range aliases {
 		if fn := ann.Functions[declared]; fn != nil {

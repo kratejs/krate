@@ -1,0 +1,6 @@
+{
+  "captureHead": true,
+  "steps": [
+    { "op": "click", "sel": "#next" }
+  ]
+}

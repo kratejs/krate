@@ -79,7 +79,7 @@ type Annotations struct {
 	CVAFactories map[string]*CVASpec
 	// ContextDefaults maps a module-level `const X = createContext(v)` binding to
 	// the literal default v, so `X.useContext()` folds during SSR.
-	ContextDefaults map[string]string
+	ContextDefaults map[string]jsvalue.Value
 	// ClassComponents records class declarations that extend Component/
 	// PureComponent, so the builder can emit a specific diagnostic (class
 	// component lowering is not implemented yet).
@@ -89,6 +89,26 @@ type Annotations struct {
 	// static or private member, an unknown this.x read, ...). The builder
 	// reports it when the component is used.
 	ClassRejections map[string]diag.Diagnostic
+	// LazyComponents maps a component binding declared with React.lazy() to
+	// its declaration. Its hydration code goes into a separate chunk.
+	LazyComponents map[string]LazyComponent
+	// ClassBoundaries names the lowered class components that are error
+	// boundaries (static getDerivedStateFromError and/or componentDidCatch).
+	ClassBoundaries map[string]bool
+	// ClassNotes holds non-blocking warnings for lowered class components
+	// (for example a boundary without getDerivedStateFromError), reported once
+	// when the component is rendered.
+	ClassNotes map[string][]diag.Diagnostic
+}
+
+// IsLoweredClass reports whether name is a React class component that was
+// lowered to a function component.
+func (a *Annotations) IsLoweredClass(name string) bool {
+	if a == nil || !a.ClassComponents[name] {
+		return false
+	}
+	_, rejected := a.ClassRejections[name]
+	return !rejected
 }
 
 // (Annotations continues below.)
@@ -174,8 +194,13 @@ type ListSlot struct {
 	ID         SlotID
 	ExprSource string
 	Items      []*ListItem
-	Keyed      bool
-	Signals    []string
+	// Keyed reports that the map callback returns keyed JSX: rows are matched
+	// by key on update instead of by index.
+	Keyed   bool
+	Signals []string
+	// Bind is the runtime list binding (see keyed.go); nil keeps the
+	// whole-region re-render of ExprSource.
+	Bind *ListBinding
 	// Components lists the client component names referenced by the list's
 	// map body JSX (e.g. <Toast> in toasts().map(t => <Toast/>)). These must
 	// be emitted into the hydration scope so the runtime `h()` call can invoke
@@ -186,7 +211,17 @@ type ListSlot struct {
 func (s *ListSlot) slotNode()     {}
 func (s *ListSlot) GetID() SlotID { return s.ID }
 
-// ListItem represents a single item in a ListSlot.
+// ListBinding is the hydration form of a list slot: krateBindList(slot,
+// () => Source, Key, Render, accessor ? 1 : 0).
+type ListBinding struct {
+	Source   string
+	Key      string
+	Render   string
+	Accessor bool
+}
+
+// ListItem represents a single item in a ListSlot. Key is the item's marker
+// key: "$" plus the folded key prop for keyed rows, or the index.
 type ListItem struct {
 	Key      string
 	Contents []SlotNode
@@ -261,20 +296,36 @@ func (s *ChildrenSlot) GetID() SlotID { return "" }
 // AttrBinding - dynamic attribute: <div class={expr()}>
 type AttrBinding struct {
 	ElementSlotID SlotID
-	AttrName      string
-	SignalName    string
-	ExprSource    string
-	Initial       string
-	InitialExpr   ast.Expr
-	IsString      bool
+	// InLists names the list slots whose rows contain the element (see
+	// ComponentSignature.InLists).
+	InLists     []SlotID
+	AttrName    string
+	SignalName  string
+	ExprSource  string
+	Initial     string
+	InitialExpr ast.Expr
+	IsString    bool
+	// Prop is the JSX prop name (defaultValue, defaultChecked, ...) when it
+	// differs from AttrName, so form-control defaults bind the right property.
+	Prop string
+	// HydrateOnly marks a binding whose attribute is already rendered
+	// statically (a constant controlled value); only the hydration call is
+	// emitted.
+	HydrateOnly bool
 }
 
 // HandlerDecl - event handler: onClick={() => fn()}
 type HandlerDecl struct {
 	ElementSlotID SlotID
-	Event         string
-	Body          string
-	Signals       []string
+	// InLists names the list slots whose rows contain the element (see
+	// ComponentSignature.InLists).
+	InLists []SlotID
+	// Prop is the React prop name (onClick, onChangeCapture); the runtime maps
+	// it to native events, phases and delegation.
+	Prop    string
+	Event   string
+	Body    string
+	Signals []string
 	// Capture attaches a capture-phase listener (onClickCapture). Direct
 	// attaches a listener on the element itself (capture handlers and
 	// non-bubbling events), bypassing the delegated bubble-phase listener.
@@ -288,6 +339,9 @@ type HandlerDecl struct {
 // Target is the JS variable expression to assign (e.g. "wrapRef").
 type RefBinding struct {
 	ElementSlotID SlotID
+	// InLists names the list slots whose rows contain the element (see
+	// ComponentSignature.InLists).
+	InLists []SlotID
 	// Target is the assignment target for object refs (`ref={myRef}` ->
 	// `myRef.current = el` or `myRef = el`). Mutually exclusive with Callback.
 	Target string
@@ -327,11 +381,15 @@ type SignalDecl struct {
 
 // ComponentNode - a single component instance in the tree
 type ComponentNode struct {
-	ID    SlotID
-	Name  string
-	Tier  ComponentTier
-	Fn    *ast.FnDecl
-	Props map[string]ast.Expr
+	ID   SlotID
+	Name string
+	Tier ComponentTier
+	Fn   *ast.FnDecl
+	// Lazy marks an instance of a React.lazy() component (see LazyComponent).
+	// LazyLoader is set when its loader is not a static import.
+	Lazy       bool
+	LazyLoader string
+	Props      map[string]ast.Expr
 	// RuntimeProps holds resolved prop values for runtime-tier components
 	// (prop name -> value). These are serialized into the page's runtime props
 	// script so the serve-time renderer can pass them to the component.
@@ -379,6 +437,10 @@ type ComponentNode struct {
 	InstanceID string
 	SourceFile string
 	Line       int
+	// Class marks a lowered React class component (see Annotations.IsLoweredClass).
+	Class bool
+	// Boundary marks a lowered class that is an error boundary.
+	Boundary bool
 
 	// SSR-evaluated components: prop-driven with no signals.
 	// The emitter uses SSREval to render these at build time.
@@ -388,6 +450,13 @@ type ComponentNode struct {
 	// component, so props the IR folder cannot represent (JSX values) are
 	// evaluated by the SSR evaluator itself.
 	SSREvalAttrs map[string]ast.Expr
+	// ContextValues holds the build-time constant provider values (and
+	// folded defaults) in scope at this instance, keyed by context binding, so
+	// SSR evaluation reads the nearest provider instead of the default.
+	ContextValues map[string]jsvalue.Value
+	// childrenContext is the provider state at this instance's
+	// {props.children} placeholder, applied to its call-site children.
+	childrenContext *contextOverlay
 	// LocalVars holds build-time folded local constants (including cva/cn class
 	// strings); they are merged into SSREvalBindings so SSR-evaluated components
 	// resolve local variables such as `const classes = cn(cva(...))`.
@@ -436,7 +505,7 @@ type ComponentTree struct {
 	CVAFactories map[string]*CVASpec
 	// ContextDefaults holds module-wide `const X = createContext(v)` defaults so
 	// the emitter can fold `X.useContext()` during SSREval.
-	ContextDefaults map[string]string
+	ContextDefaults map[string]jsvalue.Value
 	// ModuleConstInits holds module-level constant initializers (entry module
 	// plus imports) so SSREval resolves module constants.
 	ModuleConstInits map[string]ast.Expr
@@ -504,6 +573,52 @@ type ComponentSignature struct {
 	Children        []SlotID
 	SlotBindings    []SlotBinding
 	AttrBindings    []AttrBinding
+	// Boundary is the stream ID of the innermost <Suspense> boundary whose
+	// content holds this instance ("" outside any boundary).
+	Boundary string
+	// Lazy marks an instance of a lazy() component; LazyName is its name.
+	// Its hydration code (and its descendants') is loaded as a separate chunk.
+	Lazy     bool
+	LazyName string
+	// InLists names the list slots whose rows contain this component. When
+	// such a list is bound at runtime the rows (and this component) are
+	// rendered and adopted by the list, so the signature is not hydrated.
+	InLists []SlotID
+
+	// ParentID is the enclosing client component, empty at the top level
+	// (React's parent fiber). Hydration declares it so React effects run
+	// children before parents and errors reach the nearest boundary.
+	ParentID SlotID
+	// Conds lists the conditional branches the component renders inside,
+	// outermost first. Effects of a component in a hidden branch are cleaned
+	// up and re-run when the branch is shown again.
+	Conds []CondBranch
+	// ListSlot is the innermost list slot whose items contain the component;
+	// replacing that list's content on the client unmounts the component.
+	ListSlot SlotID
+
+	// Owner-tree links for class pages (see renderer/owner_emit.go). Name is
+	// the component name; CreatorID the component whose render created this
+	// element (it differs from ParentID for props.children); CondID and
+	// OwnerBranch the innermost conditional slot and branch ("c" or "a").
+	Name        string
+	CreatorID   SlotID
+	CondID      SlotID
+	OwnerBranch string
+	// Class marks a lowered React class component; pages that render one use
+	// the owner tree.
+	Class bool
+}
+
+// CondBranch names one branch ("c" consequent, "a" alternate) of a
+// conditional slot and whether it is the branch rendered on the server.
+type CondBranch struct {
+	SlotID         SlotID
+	Branch         string
+	InitiallyShown bool
+	// Boundary marks a Suspense boundary's branch: the component's effects
+	// wait for the reveal, but it is not remounted.
+	Boundary bool
 }
 
 // SlotBinding - describes a content binding for hydration
@@ -514,6 +629,8 @@ type SlotBinding struct {
 	Type    string   // "text", "expr", "conditional", "list"
 	ExprJS  string   // JS expression to evaluate (e.g. "count()" or "(x() > 0 ? ... : ...)")
 	Signals []string // signal names this binding depends on
+	// List is set for list slots bound through the keyed list runtime.
+	List *ListBinding
 }
 
 // Helpers

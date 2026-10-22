@@ -27,7 +27,7 @@ func TestReactForwardRefProp(t *testing.T) {
 	if !strings.Contains(js, "__krate_props[") {
 		t.Fatalf("expected the forwarded ref to be passed through props:\n%s", js)
 	}
-	if !strings.Contains(js, "_r.current=el") {
+	if !strings.Contains(js, "()=>props.ref,v=>{props.ref=v;}") {
 		t.Fatalf("expected an adaptive ref binding:\n%s", js)
 	}
 }

@@ -80,7 +80,7 @@ func TestReactCreateRefBinds(t *testing.T) {
 	if !strings.Contains(js, "var ref={current:null}") {
 		t.Fatalf("createRef was not lowered:\n%s", js)
 	}
-	if !strings.Contains(js, "_r.current=el") {
+	if !strings.Contains(js, "()=>ref,v=>{ref=v;}") {
 		t.Fatalf("expected an adaptive ref binding:\n%s", js)
 	}
 }
@@ -103,7 +103,7 @@ func TestReactForwardRefCallback(t *testing.T) {
 	if strings.Contains(html, "<input ref") {
 		t.Fatalf("ref leaked as an HTML attribute:\n%s", html)
 	}
-	if !strings.Contains(js, "{ref:onRef}") || !strings.Contains(js, "typeof _r==='function'") {
+	if !strings.Contains(js, "{ref:onRef}") || !strings.Contains(js, "()=>props.ref,v=>{props.ref=v;}") {
 		t.Fatalf("expected a callback ref binding:\n%s", js)
 	}
 }
@@ -231,7 +231,7 @@ func TestReactUseMemoDepsBinding(t *testing.T) {
 	if !strings.Contains(js, "createMemoDeps") {
 		t.Fatalf("useMemo deps should lower to createMemoDeps:\n%s", js)
 	}
-	if !strings.Contains(js, "kbindContent") {
+	if !strings.Contains(js, "kbindList") {
 		t.Fatalf("a derived memo list must emit a reactive binding:\n%s", js)
 	}
 }

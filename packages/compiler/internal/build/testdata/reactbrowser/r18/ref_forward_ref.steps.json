@@ -1,0 +1,5 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#focus" }
+  ]
+}

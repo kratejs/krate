@@ -21,6 +21,9 @@ type Diagnostic struct {
 	// Severity classifies the diagnostic. The zero value means an error, so
 	// existing producers keep their meaning.
 	Severity Severity `json:"severity,omitempty"`
+	// Code is a stable identifier such as "KR2001" for diagnostics that have
+	// an entry in the registry (see codes.go). Empty for uncatalogued ones.
+	Code Code `json:"code,omitempty"`
 }
 
 // Severity is the seriousness of a Diagnostic.
@@ -55,7 +58,20 @@ func (d Diagnostic) Error() string {
 	if d.File != "" {
 		loc = d.File + ":"
 	}
-	return fmt.Sprintf("%s%d:%d: %s", loc, d.Line, d.Col, d.Message)
+	return fmt.Sprintf("%s%d:%d: %s%s", loc, d.Line, d.Col, d.codePrefix(), d.Message)
+}
+
+// WithCode returns a copy of d carrying code.
+func (d Diagnostic) WithCode(code Code) Diagnostic {
+	d.Code = code
+	return d
+}
+
+func (d Diagnostic) codePrefix() string {
+	if d.Code == "" {
+		return ""
+	}
+	return "[" + string(d.Code) + "] "
 }
 
 // New builds a Diagnostic from a source line for caret rendering.
@@ -80,7 +96,7 @@ func FormatDiagnostics(errs []error) string {
 		if d.File != "" {
 			loc = d.File + ":"
 		}
-		fmt.Fprintf(&b, "%s%d:%d: %s", loc, d.Line, d.Col, d.Message)
+		fmt.Fprintf(&b, "%s%d:%d: %s%s", loc, d.Line, d.Col, d.codePrefix(), d.Message)
 		if d.Source != "" {
 			b.WriteString("\n")
 			b.WriteString(d.Source)
