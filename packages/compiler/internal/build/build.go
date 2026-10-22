@@ -1620,9 +1620,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	if len(tree.Errors) > 0 {
 		return nil, "", renderErrors(page, tree.Errors)
 	}
-	for _, w := range tree.Warnings {
-		fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n", cYellow, cReset, w)
-	}
+	printTreeWarnings(os.Stderr, tree.Warnings)
 	// CSS stylesheets are generated during IR construction (one shared,
 	// instance-agnostic stylesheet per scope). Append them to the page's own CSS
 	// so they land in the hashed external stylesheet.

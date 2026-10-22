@@ -1,7 +1,6 @@
 package irtree
 
 import (
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1570,16 +1569,13 @@ func handlersOrLocalsReferenceProps(handlers []HandlerDecl, body []ast.Stmt) boo
 	return false
 }
 
-// propsIdentRe matches a standalone `props` identifier in compiled JS.
-var propsIdentRe = regexp.MustCompile(`\bprops\b`)
-
 // compiledRefsProps reports whether any compiled JS string references `props`.
 // Effects/memos that read props.X (e.g. controlled-component sync effects like
 // `if (props.checked !== undefined) setChecked(props.checked)`) require the
 // parent-scope props registration so `props` resolves at runtime.
 func compiledRefsProps(js []string) bool {
 	for _, s := range js {
-		if propsIdentRe.MatchString(s) {
+		if codeContainsIdent(s, "props") {
 			return true
 		}
 	}
@@ -1593,7 +1589,7 @@ func compiledRefsProps(js []string) bool {
 // touches props.
 func signalsReferenceProps(signals []SignalDecl) bool {
 	for _, s := range signals {
-		if propsIdentRe.MatchString(s.RawInit) {
+		if codeContainsIdent(s.RawInit, "props") {
 			return true
 		}
 	}
@@ -1617,12 +1613,13 @@ func (b *builder) buildChildPropsRegDecl(id string, props map[string]ast.Expr) s
 		sb.WriteByte('}')
 		return sb.String()
 	}
-	first := true
-	for name, expr := range props {
-		if !first {
+	// Keys are emitted in sorted order so the registration (and the hashed
+	// hydration bundle) is byte-identical across builds.
+	for i, name := range sortedKeysExpr(props) {
+		expr := props[name]
+		if i > 0 {
 			sb.WriteByte(',')
 		}
-		first = false
 		sb.WriteString(jsObjectKey(name))
 		sb.WriteByte(':')
 		val := b.renderChildPropValue(expr)
