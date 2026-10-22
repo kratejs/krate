@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "type", "sel": "#draft", "text": "hi" },
+    { "op": "click", "sel": "#next" },
+    { "op": "type", "sel": "#draft", "text": "x" }
+  ]
+}

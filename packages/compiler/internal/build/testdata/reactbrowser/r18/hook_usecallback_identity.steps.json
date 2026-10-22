@@ -1,0 +1,10 @@
+{
+  "notes": "Render counts are shown in the DOM; memo skipping is visible as an unchanged count.",
+  "steps": [
+    { "op": "click", "sel": "#tick" },
+    { "op": "click", "sel": "#save-stable" },
+    { "op": "click", "sel": "#edit" },
+    { "op": "click", "sel": "#save-stable" },
+    { "op": "click", "sel": "#save-inline" }
+  ]
+}

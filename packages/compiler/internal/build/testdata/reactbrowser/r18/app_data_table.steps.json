@@ -1,0 +1,13 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#sort-score" },
+    { "op": "click", "sel": "#sort-score" },
+    { "op": "click", "sel": ".row-check[data-id='2']" },
+    { "op": "type", "sel": "#filter", "text": "red" },
+    { "op": "click", "sel": "#all" },
+    { "op": "clear", "sel": "#filter" },
+    { "op": "click", "sel": "#all" },
+    { "op": "click", "sel": "#all" },
+    { "op": "click", "sel": "#sort-name" }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "type", "sel": "#bio", "text": " world" },
+    { "op": "type", "sel": "#bio", "text": " and more than twenty" },
+    { "op": "click", "sel": "#reset" }
+  ]
+}

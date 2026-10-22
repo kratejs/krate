@@ -1,0 +1,9 @@
+{
+  "steps": [
+    { "op": "fill", "sel": "#nick", "text": "grace" },
+    { "op": "click", "sel": "#alerts" },
+    { "op": "fill", "sel": "#about", "text": "admiral" },
+    { "op": "select", "sel": "#lang", "value": "fr" },
+    { "op": "click", "sel": "#reset" }
+  ]
+}

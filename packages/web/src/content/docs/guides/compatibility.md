@@ -44,6 +44,8 @@ for usage.
 | Local components in islands | n/a | Planned | n/a | Supported |
 | SSR island hydration | n/a | Planned | Planned | Streaming-safe |
 | Supported Preact versions | n/a | Beta | n/a | 10.20 through current |
+| Browser differential corpus | Partial | n/a | n/a | No P0/P1 divergence |
+| React 19 reference app | Planned | n/a | n/a | Same browser suite as React 18 |
 
 ## Details
 
@@ -141,7 +143,7 @@ Evidence: `TestBuildSuspenseBoundaryStaticFallback`, `TestBuildSuspenseBoundaryR
 
 Compat shims exist for useActionState, useOptimistic, useFormStatus, use, and async transitions, but form actions and pending semantics are not in the browser gate yet.
 
-Evidence: Planned; no stable test reference yet.
+Evidence: `TestReactBrowserDifferential`, `browser:/react-actions/`
 
 ### Server actions
 
@@ -198,6 +200,22 @@ Evidence: Planned; no stable test reference yet.
 The island build warns below 10.20. The conformance jobs exercise the minimum, an intermediate version, and the workspace version.
 
 Evidence: `ci:preact-conformance`
+
+### Browser differential corpus
+
+**Source:** Partial · **Islands:** n/a · **SSR:** n/a
+
+124 source-component fixtures (React 18 corpus plus the React 19 reference app) run in real React 19 and in Krate in Chromium, Firefox, and WebKit; DOM, form state, focus, and effect/lifecycle/ref ordering are compared after every step. Known divergences are tracked with a severity, and KRATE_REACT_EXIT=1 fails while P0/P1 entries remain.
+
+Evidence: `TestReactBrowserDifferential`, `TestReactBrowserCorpus`, `ci:browser-conformance`
+
+### React 19 reference app
+
+**Source:** Planned · **Islands:** n/a · **SSR:** n/a
+
+Fixtures for useActionState, useOptimistic, useFormStatus, form and button actions with auto-reset, use(promise) and use(context), ref as a prop, ref cleanup callbacks, async transitions, useDeferredValue initial values, document metadata, and server actions under the real server.
+
+Evidence: `TestReactBrowserDifferential`, `fixture:packages/compiler/internal/build/testdata/reactbrowser/r19/app_reference.tsx`
 
 ## How claims are verified
 
