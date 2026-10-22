@@ -60,26 +60,38 @@ func firstErr(errs []error) error {
 }
 
 // TestNestedParensAreLinear guards against quadratic arrow-function
-// detection: 50k nested parentheses (below the depth limit only when wrapped
-// in separate statements) must parse quickly.
+// detection and speculative type-argument rescans. It compares parse time for
+// an input and one four times larger (deeper nesting, longer chains) instead
+// of using a wall-clock limit, so it holds under -race and coverage on slow
+// runners. Linear parsing gives a ratio near 4; quadratic gives near 16.
 func TestNestedParensAreLinear(t *testing.T) {
-	var b strings.Builder
-	for i := 0; i < 50; i++ {
-		b.WriteString("x = " + strings.Repeat("(", 1000) + "1" + strings.Repeat(")", 1000) + ";\n")
+	build := func(k int) string {
+		var b strings.Builder
+		for i := 0; i < 10; i++ {
+			b.WriteString("x = " + strings.Repeat("(", 250*k) + "1" + strings.Repeat(")", 250*k) + ";\n")
+		}
+		b.WriteString("y = " + strings.Repeat("(a) + ", 5000*k) + "1;\n")
+		b.WriteString("z = a" + strings.Repeat(" < a", 300*k) + ";\n")
+		return b.String()
 	}
-	// One long flat chain of parenthesized operands as well.
-	b.WriteString("y = " + strings.Repeat("(a) + ", 50000) + "1;\n")
-	// Chained comparisons must not rescan speculative type arguments.
-	b.WriteString("z = a" + strings.Repeat(" < a", 1500) + ";\n")
-	src := b.String()
-	start := time.Now()
-	p := newParser(src)
-	p.ParseProgram()
-	if len(p.Errors()) != 0 {
-		t.Fatalf("unexpected errors: %v", p.Errors()[0])
+	parse := func(src string) time.Duration {
+		best := time.Duration(1<<63 - 1)
+		for r := 0; r < 3; r++ {
+			start := time.Now()
+			p := newParser(src)
+			p.ParseProgram()
+			if len(p.Errors()) != 0 {
+				t.Fatalf("unexpected errors: %v", p.Errors()[0])
+			}
+			if d := time.Since(start); d < best {
+				best = d
+			}
+		}
+		return best
 	}
-	if d := time.Since(start); d > time.Second {
-		t.Fatalf("parsing 50k nested/parenthesized operands took %v", d)
+	small, large := parse(build(1)), parse(build(4))
+	if ratio := float64(large) / float64(small); ratio > 10 {
+		t.Fatalf("parse time grew %.1fx for a 4x larger input (%v vs %v); expected linear scaling", ratio, small, large)
 	}
 }
 
