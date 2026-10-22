@@ -432,7 +432,7 @@ func TestWarningsArePositionedDiagnostics(t *testing.T) {
 	t.Run("class component names the unsupported member", func(t *testing.T) {
 		src := `import { Component } from "react";
 class Gate extends Component {
-  shouldComponentUpdate() { return false; }
+  static helper() { return false; }
   render() { return <div>gate</div>; }
 }
 export default function App() {
@@ -443,8 +443,8 @@ export default function App() {
 			t.Fatalf("want 1 warning, got %+v", tree.Warnings)
 		}
 		w := tree.Warnings[0]
-		if !w.IsWarning() || w.Line != 3 || !strings.Contains(w.Message, "shouldComponentUpdate is not supported") ||
-			!strings.Contains(w.Message, "rendered at page.tsx:7:") || !strings.Contains(w.Source, "shouldComponentUpdate()") || w.Hint == "" {
+		if !w.IsWarning() || w.Line != 3 || !strings.Contains(w.Message, "static member helper is not supported") || w.Code != "KR3003" ||
+			!strings.Contains(w.Message, "rendered at page.tsx:7:") || !strings.Contains(w.Source, "static helper()") || w.Hint == "" {
 			t.Errorf("warning = %+v", w)
 		}
 	})

@@ -17,7 +17,8 @@
  * `useDeferredValue` defers getter values. Class components are intentionally
  * minimal.
  */
-import { h, type Component } from './dom.js';
+import { h, type Component as FnComponent } from './dom.js';
+import { getOwner, handleError, type Owner } from './boundary.js';
 import { createSignal, createEffect, createReducer, isSignalGetter } from './signal.js';
 import { createEffectDeps, type EffectPhase } from './effects.js';
 import { krateSetRef, type KrateRef } from './refs.js';
@@ -25,6 +26,7 @@ import { krateEventRoot } from './events.js';
 import { createContext as krateCreateContext } from './context.js';
 import { cloneElement as krateCloneElement } from './class-helpers.js';
 import { jsx as krateJsx } from './jsx-runtime.js';
+import { mountClassElement } from './class-component.js';
 import {
   createBoundary,
   createDeferredValue,
@@ -37,6 +39,7 @@ import {
   useTransition as krateUseTransition,
   withReplayScope,
   connectActionTransitions,
+  connectErrorBoundaries,
   type Boundary,
   type Thenable,
 } from './suspense.js';
@@ -51,6 +54,8 @@ import {
 
 // Actions, useActionState and useTransition share one transition scope.
 connectActionTransitions({ setActionTransitionRunner, __krateBeginAction });
+// Errors from suspended work go to the nearest error boundary.
+connectErrorBoundaries({ getOwner, handleError: (e, o) => handleError(e, o as Owner) });
 
 /** React's `Fragment` marker; `createElement(Fragment, ...)` yields a fragment. */
 export const Fragment: unique symbol = Symbol.for('krate.react.fragment');
@@ -109,12 +114,11 @@ function render(type: unknown, props: Record<string, unknown> | null): Node {
     const kids = props?.children;
     return fragmentChildren(kids === undefined ? [] : Array.isArray(kids) ? kids : [kids]);
   }
-  if (typeof type !== 'function') {
-    return krateJsx(type as string | Component<Record<string, unknown>>, props);
+  if (typeof type !== 'function' || isClassComponent(type)) {
+    return renderType(type, props || {});
   }
   const replay = { list: [], i: 0 };
-  const attempt = (): Node =>
-    withReplayScope(replay, () => krateJsx(type as Component<Record<string, unknown>>, props));
+  const attempt = (): Node => withReplayScope(replay, () => renderType(type, props || {}));
   try {
     return attempt();
   } catch (error) {
@@ -237,7 +241,7 @@ export function forwardRef(render: unknown): unknown {
   return render;
 }
 
-export function memo<P>(component: Component<P>, _compare?: unknown): Component<P> {
+export function memo<P>(component: FnComponent<P>, _compare?: unknown): FnComponent<P> {
   return component;
 }
 
@@ -248,7 +252,7 @@ export function memo<P>(component: Component<P>, _compare?: unknown): Component<
  * import or a non-component default is reported to the nearest error
  * boundary.
  */
-export function lazy<P>(loader: () => PromiseLike<{ default: unknown }>): Component<P> {
+export function lazy<P>(loader: () => PromiseLike<{ default: unknown }>): FnComponent<P> {
   let payload: Thenable<{ default: unknown }> | null = null;
   const Lazy = (props: P): Node => {
     if (!payload) payload = trackThenable(loader() as Thenable<{ default: unknown }>);
@@ -262,7 +266,7 @@ export function lazy<P>(loader: () => PromiseLike<{ default: unknown }>): Compon
     }
     return render(impl, props as unknown as Record<string, unknown>);
   };
-  return Lazy as unknown as Component<P>;
+  return Lazy as unknown as FnComponent<P>;
 }
 
 /** StrictMode renders its children; Krate has no double-render checks. */
@@ -542,15 +546,25 @@ export function createPortal(children: unknown, container: Element | DocumentFra
   return container;
 }
 
-/** Minimal class base so compiled code that `extends React.Component` resolves. */
+/**
+ * Class component base for React source the compiler did not lower (for
+ * example classes created at runtime). Rendering it with createElement/jsx
+ * mounts it through the same instance controller as lowered classes
+ * (class-component.ts): setState is batched, lifecycles run in React order,
+ * and each committed update re-runs render(). Compiled npm packages do not
+ * use this: they run on Preact in islands.
+ */
 export class ComponentBase {
   props: Record<string, unknown>;
   state: Record<string, unknown>;
+  context: unknown;
   constructor(props?: Record<string, unknown>) {
     this.props = props ?? {};
     this.state = {};
+    this.context = undefined;
   }
-  setState(update: unknown): void {
+  /** Replaced by the controller on mount; before that it merges synchronously. */
+  setState(update: unknown, _callback?: () => void): void {
     const next =
       typeof update === 'function'
         ? (update as (s: Record<string, unknown>, p: Record<string, unknown>) => Record<string, unknown>)(
@@ -560,9 +574,34 @@ export class ComponentBase {
         : (update as Record<string, unknown>);
     this.state = { ...this.state, ...next };
   }
-  render(): Node | null {
+  forceUpdate(_callback?: () => void): void {}
+  render(): unknown {
     return null;
   }
+}
+(ComponentBase.prototype as unknown as { isReactComponent: object }).isReactComponent = {};
+
+export class Component extends ComponentBase {}
+
+export class PureComponent extends ComponentBase {}
+(PureComponent.prototype as unknown as { isPureReactComponent: boolean }).isPureReactComponent = true;
+
+function isClassComponent(type: unknown): boolean {
+  return typeof type === 'function' && !!(type as { prototype?: { isReactComponent?: unknown } }).prototype?.isReactComponent;
+}
+
+function toNode(value: unknown): Node {
+  if (value instanceof Node) return value;
+  if (value == null || value === false || value === true) return document.createTextNode('');
+  if (Array.isArray(value)) return fragmentChildren(value);
+  return document.createTextNode(String(value));
+}
+
+function renderType(type: unknown, props: Record<string, unknown>): Node {
+  if (isClassComponent(type)) {
+    return mountClassElement(type as Parameters<typeof mountClassElement>[0], props, toNode);
+  }
+  return krateJsx(type as string | FnComponent<Record<string, unknown>>, props);
 }
 
 export const reactCompat = { h, Fragment };

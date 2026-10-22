@@ -234,6 +234,24 @@ func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs
 // scope, and registers its props for hydration.
 func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDecl, childID SlotID, attrs map[string]ast.Expr, provider scopeProvider) []SlotNode {
 	b.warnSuspendOutsideBoundary(childFn, el.Position)
+	// An error boundary whose subtree threw at build time renders its fallback
+	// (boundary_build.go); the instance id is the one newComponentNode assigns.
+	instance := SlotID(string(joinSlotID(string(childID), childFn.Name)) + "_c" + itoa(b.instanceCounts[childFn.Name]))
+	if fallback, ok := b.boundaryFallback(childFn, instance); ok {
+		childFn = fallback
+		bare := *el
+		bare.Children = nil
+		el = &bare
+	}
+	// A lowered class remounts when its key changes; the runtime instance
+	// reads the key through a reserved prop.
+	if b.ann.IsLoweredClass(childFn.Name) {
+		for _, a := range el.Opening.Attributes {
+			if a != nil && !a.Spread && a.Name == "key" && a.Value != nil {
+				attrs["__krate_key"] = a.Value
+			}
+		}
+	}
 	b.pushComponentCtx()
 	b.installCallSiteInputs(el, childFn, attrs)
 	live := b.liveProps
@@ -403,6 +421,8 @@ func (b *builder) registerChildProps(childNode *ComponentNode, childFn *ast.FnDe
 		(childFn != nil && bodyUsesReactiveFactory(childFn.Body)) ||
 		// Replayed locals derived from live props (`var hits=...props.query`).
 		(childFn != nil && plainPropsParamName(childFn) != "" && hydrationReadsAny(childNode, []string{plainPropsParamName(childFn)})) ||
+		// Replayed body statements (a render-time throw guard) read props too.
+		len(childNode.ExtraVars) > 0 ||
 		// Bindings of getter-registered props (`{props.title}`).
 		(childFn != nil && plainPropsParamName(childFn) != "" && slotsReadProps(childNode.Children, plainPropsParamName(childFn)))
 	if !hasHydration {

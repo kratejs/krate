@@ -1645,6 +1645,18 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	emitter.EvalJS = b.jsExprEvaluator()
 	emitter.GoComponents = pageOpts.GoComponents
 	emitResult := emitter.Emit(tree)
+	tree, emitResult = applyBoundaryFallbacks(page, tree, emitResult, pageOpts, func(opts irtree.BuildOptions) (*irtree.ComponentTree, *renderer.EmitResult) {
+		t := irtree.BuildWithOptions(entryModule.Program, ann, opts)
+		if isDynamicRoute(page, b.Cfg.PagesDir) {
+			injectDynamicRoutePlaceholders(t, extractParamNames(page, b.Cfg.PagesDir))
+		}
+		em := renderer.NewEmitter()
+		em.CodeTheme = b.Cfg.Markdown.CodeTheme
+		em.IconResolver = b.iconResolver
+		em.EvalJS = b.jsExprEvaluator()
+		em.GoComponents = opts.GoComponents
+		return t, em.Emit(t)
+	})
 	renderer.EmitMeta(tree, emitResult)
 	// Render imported Go components (server tier, slot path + SSREval'd) via the
 	// Go host in one batch, then inline their HTML at the emitted markers.

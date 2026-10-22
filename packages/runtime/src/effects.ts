@@ -258,6 +258,18 @@ function disposeTree(owner: Owner, active: boolean, passive: Array<() => void>):
 }
 
 /**
+ * Unmounts the hydrated component `id` and forgets it, so running its
+ * hydration scope again (a remount by the class/boundary owner tree in
+ * boundary.ts) creates a fresh owner whose effects mount again.
+ */
+export function krateForgetOwner(id: string): void {
+  const owner = byId.get(id);
+  if (!owner) return;
+  krateUnmount(owner);
+  byId.delete(id);
+}
+
+/**
  * Declares a remountable hydrated component (emitted for components inside
  * a conditional branch). `fn` is the component's hydration scope; it runs now
  * when the branch is shown, and again, as a fresh instance, every time the
@@ -466,12 +478,41 @@ export function createEffectDeps(
 
 function runSetup(hook: HookEffect, at: number): void {
   if (hook.owner.disposed) return;
-  // The setup sees the state of the commit it belongs to.
-  const ret = krateReadAt(at, () => untrack(hook.fn));
+  let ret: unknown;
+  try {
+    // The setup sees the state of the commit it belongs to.
+    ret = krateReadAt(at, () => untrack(hook.fn));
+  } catch (err) {
+    reportHookError(err, hook.owner);
+    return;
+  }
   hook.cleanup = typeof ret === 'function' ? (ret as () => void) : null;
   hook.mounted = true;
   hook.epoch = at;
   liveEpochs.set(at, (liveEpochs.get(at) || 0) + 1);
+}
+
+// Error boundaries (boundary.ts) receive errors thrown by effect setups and
+// cleanups, as React's do. Without a handler the error is rethrown.
+let hookErrorHandler: ((err: unknown, ownerId: string | null) => boolean) | null = null;
+
+/** Installs the handler for errors thrown by hook effects (internal). */
+export function krateOnHookError(fn: ((err: unknown, ownerId: string | null) => boolean) | null): void {
+  hookErrorHandler = fn;
+}
+
+function reportHookError(err: unknown, owner: Owner): void {
+  let id: string | null = null;
+  for (let o: Owner | null = owner; o && id === null; o = o.parent) id = o.id;
+  if (!(hookErrorHandler && hookErrorHandler(err, id))) throw err;
+}
+
+function runGuarded(fn: () => void, owner: Owner): void {
+  try {
+    untrack(fn);
+  } catch (err) {
+    reportHookError(err, owner);
+  }
 }
 
 // Detaches the cleanup of the last setup, bound to that setup's snapshot so
@@ -504,7 +545,7 @@ function releaseEpoch(at: number): void {
 
 function runCleanup(hook: HookEffect): void {
   const c = takeCleanup(hook);
-  if (c) c();
+  if (c) runGuarded(c, hook.owner);
 }
 
 function pruneSnapshots(): void {
@@ -531,12 +572,26 @@ function orderHooks(hooks: Set<HookEffect>): HookEffect[] {
   });
 }
 
+// Callbacks run in every commit's layout phase, after layout effects and
+// before passive ones (class component lifecycles, see class-component.ts).
+const layoutHooks: Array<() => void> = [];
+
+/** Registers fn to run in the layout phase of every commit (internal). */
+export function krateOnLayoutCommit(fn: () => void): void {
+  layoutHooks.push(fn);
+}
+
+function runLayoutHooks(): void {
+  for (const fn of layoutHooks) fn();
+}
+
 function commit(): void {
   commitQueued = false;
   // Every settled update is a commit: snapshot the React state it rendered.
   const at = krateCommitSnapshot();
   const sync = krateTakeSyncLane();
   if (dirty.size === 0) {
+    runLayoutHooks();
     if (sync) flushPassive();
     pruneSnapshots();
     return;
@@ -568,6 +623,7 @@ function commit(): void {
     for (const h of hooks) {
       if (h.phase === 'layout') runSetup(h, at);
     }
+    runLayoutHooks();
     // Passive phase, after paint.
     let queued = false;
     for (const h of hooks) {

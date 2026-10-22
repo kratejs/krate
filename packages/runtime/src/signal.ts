@@ -35,9 +35,38 @@ export const krateHookState: { readonly react: true } = { react: true };
 const context: Array<EffectState | null> = [];
 // Each queued mount callback remembers the owner (effect or root) that was
 // current when it was registered, so an onCleanup inside the callback belongs
-// to that owner instead of the page root.
-const mountQueue: Array<{ fn: () => void; owner: EffectState | null | undefined }> = [];
+// to that owner instead of the page root, and the error-boundary owner its
+// errors are routed to.
+const mountQueue: Array<{ fn: () => void; owner: EffectState | null | undefined; boundary: unknown }> = [];
 let mountScheduled = false;
+
+/**
+ * Owner integration (installed by boundary.ts). An owner is the component
+ * instance that is current while code runs; effects, cleanups and mount
+ * callbacks created under it are tied to it, and errors they throw are routed
+ * to it (error boundaries, Suspense). With no hooks installed every code path
+ * below behaves exactly as before.
+ */
+export interface OwnerHooks {
+  /** The owner active right now, or null. */
+  current(): unknown;
+  /** Runs fn with owner current, routing anything it throws. */
+  run(owner: unknown, fn: () => void): void;
+  /** Registers fn to run when owner is unmounted. */
+  cleanup(owner: unknown, fn: () => void): void;
+  /** Routes an error thrown by owner's code; true when handled. */
+  error(owner: unknown, err: unknown): boolean;
+}
+
+let ownerHooks: OwnerHooks | null = null;
+
+/** Installs (or with null removes) the owner integration hooks. */
+export function setOwnerHooks(hooks: OwnerHooks | null): void {
+  ownerHooks = hooks;
+}
+
+// Callbacks that run once the effect queue has fully drained (see afterFlush).
+const afterQueue: Array<() => void> = [];
 const allEffects = new Set<EffectState>();
 // Top-level onCleanup registrations (called outside an effect body) are scoped
 // to the page/root and run when disposeAll() executes on route change. This
@@ -65,6 +94,13 @@ interface EffectState {
   queued: boolean;
   /** Component owner current when the effect was created (see krateOwnerScope). */
   owner: unknown;
+  /** Error-boundary owner current when the effect was created (see OwnerHooks), or null. */
+  boundaryOwner: unknown;
+  /**
+   * Set on the observer of a derived value (krateDerived): a write to one of
+   * its sources calls mark synchronously instead of queueing a re-run.
+   */
+  mark?: (reactWrite: boolean) => void;
   /**
    * Marks an ownership root (see createRoot). A root is pushed on the context
    * stack with `disposed` set so signal reads stay untracked, while effects,
@@ -76,7 +112,7 @@ interface EffectState {
 }
 
 function newEffectState(fn: () => void): EffectState {
-  const effect: EffectState = { fn, cleanups: [], disposed: false, sources: new Set(), running: false, rerun: false, queued: false, owner: currentOwner };
+  const effect: EffectState = { fn, cleanups: [], disposed: false, sources: new Set(), running: false, rerun: false, queued: false, owner: currentOwner, boundaryOwner: ownerHooks ? ownerHooks.current() : null };
   if (currentOwner !== null) {
     let set = ownerEffects.get(currentOwner);
     if (!set) ownerEffects.set(currentOwner, (set = new Set()));
@@ -133,6 +169,22 @@ interface ReactCell {
 }
 const changedCells = new Set<ReactCell>();
 const historyCells = new Set<ReactCell>();
+
+/**
+ * Runs fn as render work: React state reads see the latest values rather than
+ * the last commit's (internal; the class component render phase).
+ */
+export function krateRenderPhase<T>(fn: () => T): T {
+  renderDepth++;
+  const prevEpoch = snapshotEpoch;
+  snapshotEpoch = null;
+  try {
+    return fn();
+  } finally {
+    snapshotEpoch = prevEpoch;
+    renderDepth--;
+  }
+}
 
 /** Records the current React state values as commit `epoch` (internal). */
 export function krateCommitSnapshot(): number {
@@ -196,6 +248,11 @@ export function krateTakeSyncLane(): boolean {
   return v;
 }
 
+/** The effect currently collecting dependencies, ignoring untracked frames. */
+function currentEffect(): EffectState | null {
+  return context[context.length - 1] || null;
+}
+
 // The component owner whose body (or binding effect) is currently running.
 // Opaque here; effects.ts gives it meaning (effect ordering and unmounting).
 // Effects capture it at creation and restore it while they re-run, so
@@ -250,6 +307,25 @@ export function untrack<T>(fn: () => T): T {
     return fn();
   } finally {
     context.pop();
+  }
+}
+
+/**
+ * Runs fn once after the pending effect queue has fully drained (including
+ * effects scheduled while it drained) and the after-flush hooks ran, so the
+ * DOM reflects every write made so far. Schedules a flush when none is
+ * pending. Used by the class component commit phase.
+ */
+export function afterFlush(fn: () => void): void {
+  afterQueue.push(fn);
+  scheduleFlush();
+}
+
+function drainAfterQueue(): void {
+  if (afterQueue.length === 0) return;
+  const after = afterQueue.splice(0);
+  for (const fn of after) {
+    fn();
   }
 }
 
@@ -320,6 +396,7 @@ export function disposeAll(): void {
     }
   }
   pending.length = 0;
+  afterQueue.length = 0;
   flushScheduled = false;
   flushMode = 0;
   flushToken++;
@@ -596,28 +673,7 @@ export function createSignal<T>(
     return value;
   };
 
-  const notify = (reactWrite = false): void => {
-    const list = Array.from(subs);
-    for (const effect of list) {
-      if (effect.disposed) {
-        // Lazy cleanup for effects that were disposed without unsubscribing.
-        subs.delete(effect);
-        continue;
-      }
-      if (effect.running) {
-        // A feedback loop that writes its own dependencies gets one
-        // re-run after the current run; further iterations are dropped to
-        // guarantee termination.
-        effect.rerun = true;
-        continue;
-      }
-      if (!effect.queued) {
-        effect.queued = true;
-        pending.push(effect);
-      }
-    }
-    scheduleFlush(reactWrite);
-  };
+  const notify = (reactWrite = false): void => notifySubs(subs, reactWrite);
 
   const write = (next: T | ((prev: T) => T)): void => {
     const resolved = typeof next === 'function' ? (next as (prev: T) => T)(value) : next;
@@ -654,6 +710,131 @@ export function createSignal<T>(
 
   signalGetters.add(read);
   return [read, write];
+}
+
+// notifySubs schedules every subscriber of a changed source. Derived-value
+// observers are marked stale synchronously (and forward the notification to
+// their own subscribers), so anything that re-runs in the flush reads a
+// recomputed value.
+function notifySubs(subs: Set<EffectState>, reactWrite = false): void {
+  const list = Array.from(subs);
+  for (const effect of list) {
+    if (effect.disposed) {
+      // Lazy cleanup for effects that were disposed without unsubscribing.
+      subs.delete(effect);
+      continue;
+    }
+    if (effect.mark) {
+      effect.mark(reactWrite);
+      continue;
+    }
+    if (effect.running) {
+      // A feedback loop that writes its own dependencies gets one
+      // re-run after the current run; further iterations are dropped to
+      // guarantee termination.
+      effect.rerun = true;
+      continue;
+    }
+    if (!effect.queued) {
+      effect.queued = true;
+      pending.push(effect);
+    }
+  }
+  scheduleFlush(reactWrite);
+}
+
+const derivedGetters = new WeakSet<object>();
+
+/**
+ * A lazily evaluated derived value: the compile target of a React render-body
+ * value (`const total = rows.reduce(...)`). The getter recomputes on read when
+ * a signal (or another derived value) it read last time has changed since, so
+ * every reader in a flush sees the same current value. Nothing is computed
+ * until the first read, and a write only marks it stale. triggers, when
+ * given, is read for its subscriptions only: an object or array literal built
+ * in render gets a new identity whenever the component would re-render.
+ */
+export function krateDerived<T>(fn: () => T, triggers?: () => unknown): () => T {
+  let value: T;
+  let stale = true;
+  const subs = new Set<EffectState>();
+  const node = newEffectState(() => {});
+  node.mark = (reactWrite: boolean) => {
+    if (!stale) {
+      stale = true;
+      notifySubs(subs, reactWrite);
+    }
+  };
+  allEffects.add(node);
+
+  const read = (): T => {
+    const current = context[context.length - 1];
+    if (current && !current.disposed) {
+      subs.add(current);
+      current.sources.add(subs);
+    }
+    // Outside render (an event handler, an effect setup) React state reads
+    // see a committed snapshot. When that snapshot can differ from the latest
+    // values, compute from it without touching the cache, which always holds
+    // the latest render value.
+    if (
+      (renderDepth === 0 || snapshotEpoch !== null) &&
+      (changedCells.size > 0 || (snapshotEpoch !== null && historyCells.size > 0))
+    ) {
+      return untrack(fn);
+    }
+    if (stale && !node.disposed) {
+      for (const set of node.sources) {
+        set.delete(node);
+      }
+      node.sources.clear();
+      // Cleared before computing so a source written during the computation
+      // marks it stale again instead of being lost.
+      stale = false;
+      context.push(node);
+      try {
+        // Extra sources (a render literal's state and props) only subscribe.
+        if (triggers) triggers();
+        value = fn();
+      } catch (err) {
+        stale = true;
+        throw err;
+      } finally {
+        context.pop();
+      }
+    } else if (node.disposed) {
+      return untrack(fn);
+    }
+    return value;
+  };
+
+  // Disposed with the binding (or component) that created it.
+  const parent = context[context.length - 1];
+  if (parent) {
+    parent.cleanups.push(() => {
+      disposeEffect(node);
+      allEffects.delete(node);
+    });
+  }
+  derivedGetters.add(read);
+  signalGetters.add(read);
+  return read;
+}
+
+/** Reports whether fn is a getter returned by krateDerived. */
+export function isDerivedGetter(fn: unknown): boolean {
+  return typeof fn === 'function' && derivedGetters.has(fn);
+}
+
+/**
+ * Normalizes a custom hook's return value to a getter. A hook compiled from
+ * React source returns a derived getter for a render-dependent result; any
+ * other value (a hook from a plain module, a constant) is wrapped so the call
+ * site can read every hook result the same way.
+ */
+export function krateHook<T>(value: T | (() => T)): () => T {
+  if (isDerivedGetter(value)) return value as () => T;
+  return () => value as T;
 }
 
 // Getters returned by createSignal, so the React compatibility hooks can read
@@ -711,8 +892,38 @@ function flushEffects(): void {
   // Writes made by these effects scheduled another flush; the commit runs
   // once that cascade settles, so it sees the final DOM.
   if (pending.length === 0) {
+    // Settle hooks (the class component render phase) may write signals;
+    // flush those in this same pass so the commit sees every DOM write.
+    for (const hook of settleHooks) {
+      hook();
+    }
+    if (pending.length > 0 && settleDepth < 50) {
+      settleDepth++;
+      try {
+        flushEffects();
+      } finally {
+        settleDepth--;
+      }
+      return;
+    }
     runAfterFlush();
   }
+}
+
+const settleHooks: Array<() => void> = [];
+let settleDepth = 0;
+
+/**
+ * Registers fn to run when a flush has no pending effects, before the
+ * after-flush hooks. Signal writes it makes are flushed first (internal).
+ */
+export function krateOnSettle(fn: () => void): void {
+  settleHooks.push(fn);
+}
+
+/** Ensures a flush runs soon even when no signal was written (internal). */
+export function krateRequestFlush(): void {
+  scheduleFlush();
 }
 
 /**
@@ -723,6 +934,7 @@ export function runAfterFlush(): void {
   for (const hook of afterFlushHooks) {
     hook();
   }
+  drainAfterQueue();
 }
 
 /**
@@ -743,13 +955,7 @@ export function krateFlushSync(): void {
 
 function runEffect(effect: EffectState): void {
   effect.running = true;
-  // Run cleanups from previous execution
-  for (const cleanup of effect.cleanups) {
-    cleanup();
-  }
-  effect.cleanups.length = 0;
-
-  context.push(effect);
+  let pushed = false;
   const prevOwner = currentOwner;
   currentOwner = effect.owner;
   renderDepth++;
@@ -758,6 +964,12 @@ function runEffect(effect: EffectState): void {
   const prevEpoch = snapshotEpoch;
   snapshotEpoch = null;
   try {
+    // Run cleanups from previous execution
+    for (const cleanup of effect.cleanups.splice(0)) {
+      cleanup();
+    }
+    context.push(effect);
+    pushed = true;
     // Support Solid-style `return () => {...}` cleanup functions. Many
     // components (Slider, Dropdown, Dialog, Tooltip) register their document
     // listeners in an effect and return a cleanup that removes them; without
@@ -767,11 +979,17 @@ function runEffect(effect: EffectState): void {
     if (typeof ret === 'function') {
       effect.cleanups.push(ret as () => void);
     }
+  } catch (err) {
+    // An owned effect reports to its owner (error boundaries); unowned
+    // effects keep the previous behavior and throw.
+    if (!(effect.boundaryOwner && ownerHooks && ownerHooks.error(effect.boundaryOwner, err))) {
+      throw err;
+    }
   } finally {
     snapshotEpoch = prevEpoch;
     renderDepth--;
     currentOwner = prevOwner;
-    context.pop();
+    if (pushed) context.pop();
     effect.running = false;
   }
 }
@@ -779,22 +997,32 @@ function runEffect(effect: EffectState): void {
 export function createEffect(fn: () => void): () => void {
   const effect = newEffectState(fn);
   allEffects.add(effect);
-  // An effect created while an ownership root is current is disposed with it.
+  // An effect created while an ownership root is current is disposed with it,
+  // and an effect created under a component owner is disposed when that
+  // component unmounts.
   const owner = context[context.length - 1];
-  runEffect(effect);
-
   const dispose = (): void => {
     disposeEffect(effect);
     allEffects.delete(effect);
   };
+  if (effect.boundaryOwner && ownerHooks) {
+    ownerHooks.cleanup(effect.boundaryOwner, dispose);
+  }
+  runEffect(effect);
   if (owner && owner.root) addOwnerCleanup(owner, dispose);
   return dispose;
 }
 
 export function onCleanup(fn: () => void): void {
-  const current = context[context.length - 1];
+  const current = currentEffect();
   if (current) {
     addOwnerCleanup(current, fn);
+    return;
+  }
+  const owner = ownerHooks ? ownerHooks.current() : null;
+  if (owner && ownerHooks) {
+    // Component-level cleanup: runs when the owning component unmounts.
+    ownerHooks.cleanup(owner, fn);
   } else {
     // No active effect: a component-level cleanup. It runs when its owner
     // unmounts, or on disposeAll() (route change / page teardown).
@@ -852,7 +1080,7 @@ export function createRoot<T>(fn: (dispose: () => void) => T): T {
 }
 
 export function onMount(fn: () => void): void {
-  mountQueue.push({ fn, owner: context[context.length - 1] });
+  mountQueue.push({ fn, owner: context[context.length - 1], boundary: ownerHooks ? ownerHooks.current() : null });
   if (!mountScheduled) {
     mountScheduled = true;
     queueMicrotask(flushMounts);
@@ -862,24 +1090,28 @@ export function onMount(fn: () => void): void {
 function flushMounts(): void {
   mountScheduled = false;
   const queue = mountQueue.splice(0);
-  for (const { fn, owner } of queue) {
-    if (!owner) {
-      fn();
-      continue;
-    }
-    // The owner unmounted before its mount effects ran: skip them, as React
-    // does for a component that never committed.
-    if (owner.dead || (!owner.root && owner.disposed)) continue;
-    // Collect cleanups registered by the callback without tracking its reads.
-    const collector = newEffectState(() => {});
-    collector.disposed = true;
-    context.push(collector);
-    try {
-      fn();
-    } finally {
-      context.pop();
-    }
-    for (const cleanup of collector.cleanups) addOwnerCleanup(owner, cleanup);
+  for (const { fn, owner, boundary } of queue) {
+    const run = (): void => {
+      if (!owner) {
+        fn();
+        return;
+      }
+      // The owner unmounted before its mount effects ran: skip them, as React
+      // does for a component that never committed.
+      if (owner.dead || (!owner.root && owner.disposed)) return;
+      // Collect cleanups registered by the callback without tracking its reads.
+      const collector = newEffectState(() => {});
+      collector.disposed = true;
+      context.push(collector);
+      try {
+        fn();
+      } finally {
+        context.pop();
+      }
+      for (const cleanup of collector.cleanups) addOwnerCleanup(owner, cleanup);
+    };
+    if (boundary && ownerHooks) ownerHooks.run(boundary, run);
+    else run();
   }
 }
 
@@ -902,14 +1134,17 @@ export function createMemo<T>(fn: () => T): () => T {
 
   // Register cleanup on the parent context so this memo effect is disposed
   // when the parent re-runs or is disposed.
-  const parent = context[context.length - 1];
+  const parent = currentEffect();
+  const disposeMemo = (): void => {
+    if (!effect.disposed) {
+      disposeEffect(effect);
+      allEffects.delete(effect);
+    }
+  };
   if (parent) {
-    parent.cleanups.push(() => {
-      if (!effect.disposed) {
-        disposeEffect(effect);
-        allEffects.delete(effect);
-      }
-    });
+    parent.cleanups.push(disposeMemo);
+  } else if (effect.boundaryOwner && ownerHooks) {
+    ownerHooks.cleanup(effect.boundaryOwner, disposeMemo);
   }
 
   return get;

@@ -169,8 +169,41 @@ export function setSuspenseErrorHandler(handler: SuspenseErrorHandler | null): v
   errorHandler = handler;
 }
 
-export function reportSuspenseError(error: unknown, boundary: Boundary | null): void {
+// Error boundaries (boundary.ts): the owner of the component whose work
+// failed routes the error to its nearest boundary.
+interface OwnerApi {
+  getOwner: () => unknown;
+  handleError: (error: unknown, owner: unknown) => void;
+}
+
+let ownerApi: OwnerApi | null = null;
+
+/** Connects error boundaries explicitly (tests, the compat runtime). */
+export function connectErrorBoundaries(api: OwnerApi | null): void {
+  ownerApi = api;
+}
+
+function owners(): OwnerApi | null {
+  if (ownerApi) return ownerApi;
+  const g = globalThis as Partial<OwnerApi>;
+  return typeof g.getOwner === 'function' && typeof g.handleError === 'function'
+    ? { getOwner: g.getOwner, handleError: g.handleError }
+    : null;
+}
+
+/** The error-boundary owner of the code running now, if any. */
+function errorOwner(): unknown {
+  const api = owners();
+  return api ? api.getOwner() : null;
+}
+
+export function reportSuspenseError(error: unknown, boundary: Boundary | null, owner?: unknown): void {
   if (errorHandler && errorHandler(error, boundary) === true) return;
+  const api = owner ? owners() : null;
+  if (api) {
+    api.handleError(error, owner);
+    return;
+  }
   const g = globalThis as { __krateReportError?: (e: unknown, anchor: Node | null) => boolean | void };
   if (typeof g.__krateReportError === 'function' && g.__krateReportError(error, boundary ? boundary.anchor : null) === true) {
     return;
@@ -703,6 +736,7 @@ export function currentBoundary(): Boundary | null {
 export function __krateBoundary(id: string | null, fn: () => void): void {
   const boundary = id ? getBoundary(id) : null;
   const state: RunState = { boundary, scope: { list: [], i: 0 }, disposers: [] };
+  const errOwner = errorOwner();
   boundary?.hold();
   const attempt = (): void => {
     state.scope.i = 0;
@@ -726,7 +760,7 @@ export function __krateBoundary(id: string | null, fn: () => void): void {
         return;
       }
       boundary?.release();
-      reportSuspenseError(error, boundary);
+      reportSuspenseError(error, boundary, errOwner);
     }
   };
   attempt();
@@ -747,6 +781,7 @@ export function __krateBoundary(id: string | null, fn: () => void): void {
 export function __krateUse<T>(compute: () => T): () => T {
   const run = currentRun;
   const boundary = run ? run.boundary : null;
+  const errOwner = errorOwner();
   const scope: ReadScope = run ? run.scope : { list: [], i: 0 };
   const start = scope.i;
   const initial = withReadScope(scope, compute);
@@ -768,7 +803,7 @@ export function __krateUse<T>(compute: () => T): () => T {
         suspendOn(boundary, error.thenable);
         return;
       }
-      reportSuspenseError(error, boundary);
+      reportSuspenseError(error, boundary, errOwner);
     }
   });
   if (run) run.disposers.push(dispose);
@@ -795,6 +830,7 @@ const lazyLoads = new Map<string, Promise<unknown>>();
  */
 export function __krateLazy(url: string, boundaryId?: string | null): Promise<unknown> {
   const boundary = boundaryId ? getBoundary(boundaryId) : null;
+  const errOwner = errorOwner();
   boundary?.hold();
   let load = lazyLoads.get(url);
   if (!load) {
@@ -815,7 +851,7 @@ export function __krateLazy(url: string, boundaryId?: string | null): Promise<un
     () => boundary?.release(),
     (error: unknown) => {
       boundary?.release();
-      reportSuspenseError(error, boundary);
+      reportSuspenseError(error, boundary, errOwner);
     },
   );
   return load;

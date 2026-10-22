@@ -246,5 +246,5 @@ func wrapBoundaryRun(text, streamID string) string {
 
 // lazyChunkPrelude declares the effect-owner helpers the page script
 // declares, since the component scopes in a chunk call them.
-const lazyChunkPrelude = "var __ko=typeof krateOwner==='function'?krateOwner:function(){};\n" +
+const lazyChunkPrelude = ownerPrelude + "var __ko=typeof krateOwner==='function'?krateOwner:function(){};\n" +
 	"var __km=typeof krateMount==='function'?krateMount:function(i,p,c,s,f){f();};\n"

@@ -6,8 +6,12 @@ import {
   runActionTransition,
   setActionTransitionRunner,
 } from './actions.js';
+import { createOwner, runWithOwner, setBoundary } from './boundary.js';
 import {
+  __krateBoundary,
+  __krateRead,
   __krateTransitionStarter,
+  connectErrorBoundaries,
   connectActionTransitions,
   isInTransition,
   setSuspenseErrorHandler,
@@ -15,6 +19,7 @@ import {
 
 afterEach(() => {
   setActionTransitionRunner(null);
+  connectErrorBoundaries(null);
   setSuspenseErrorHandler(null);
   vi.useRealTimers();
 });
@@ -55,5 +60,31 @@ describe('one transition scope for transitions and actions', () => {
     // The action runtime reports action errors; the transition does not again.
     expect(reported).toHaveLength(0);
     expect(isActionPending()).toBe(false);
+  });
+});
+
+describe('error boundaries', () => {
+  it('routes a rejected use() promise to the error boundary of the component', async () => {
+    const { getOwner, handleError } = await import('./boundary.js');
+    connectErrorBoundaries({ getOwner, handleError: (e, o) => handleError(e, o as Parameters<typeof handleError>[1]) });
+    const caught: unknown[] = [];
+    const parent = createOwner('Boundary', null);
+    setBoundary(parent, (error) => {
+      caught.push(error);
+      return true;
+    });
+    const child = createOwner('Child', parent);
+    let reject!: (e: unknown) => void;
+    const p = new Promise((_, rej) => {
+      reject = rej;
+    });
+    runWithOwner(child, () => {
+      __krateBoundary(null, () => {
+        __krateRead(p);
+      });
+    });
+    reject(new Error('boom'));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(caught.map((e) => (e as Error).message)).toEqual(['boom']);
   });
 });

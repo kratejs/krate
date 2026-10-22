@@ -55,7 +55,7 @@ type runtimeChunkOptions struct {
 func runtimeNeedsCompat(results []*PageResult) bool {
 	markers := []string{
 		"useImperativeHandle", "useDebugValue",
-		"isValidElement", "Children", "cloneElement",
+		"isValidElement", "Children", "cloneElement", "createRef",
 		// Lazy chunks are separate files; their code may use compat APIs.
 		"__krateLazy(",
 	}

@@ -104,13 +104,114 @@ export default function Counter() {
 | `<form action={fn}>` / `formAction={fn}` | server actions and client functions, run in an async transition without a page reload, form reset on success |
 | `StrictMode` / `Profiler` | render their children; `Profiler`'s `onRender` is never called (warning KR4005) |
 
-Class components that follow the common subset are lowered to functions:
-`state` (field or constructor), `render`, `this.state.x`, `this.props.x`,
-`this.setState` (object or updater), `componentDidMount`,
-`componentDidUpdate` (state diff), `componentWillUnmount`, `forceUpdate`,
-helper methods, arrow-function handlers, and instance fields. Unsupported
-lifecycle hooks (`shouldComponentUpdate`, `getSnapshotBeforeUpdate`, derived
-state, and error boundaries) produce a specific build diagnostic.
+### Class components
+
+Classes extending `Component` or `PureComponent` are lowered at build time:
+`render()` becomes the component body (so the page is rendered to HTML at
+build time), and a small runtime instance provides `this`. The semantics
+follow React 18:
+
+- **Updates are batched.** `this.setState(partial | updater, callback)` and
+  `this.forceUpdate(callback)` queue an update; `this.state` changes when it
+  commits. Updaters run in order with `(state, props)`.
+- **Render and commit phases.** An update recomputes props and state,
+  applies `static getDerivedStateFromProps(props, state)` (also before the
+  first render), asks `shouldComponentUpdate(nextProps, nextState)` (or
+  compares shallowly for `PureComponent`), calls
+  `getSnapshotBeforeUpdate(prevProps, prevState)` before the DOM changes,
+  then writes the DOM. `componentDidUpdate(prevProps, prevState, snapshot)`
+  and setState callbacks run after the DOM is updated, children before
+  parents. A skipped update still updates `this.props`/`this.state` and runs
+  the callbacks, as in React.
+- **Props are live.** A parent's state change reaches `this.props` and
+  triggers `componentDidUpdate`. A class re-renders when the component that
+  created it re-renders (unless it bails out), but not when it was passed in
+  as `props.children`.
+- **Mounting follows conditionals.** A class inside `{show ? <Child/> : null}`
+  mounts when the branch is shown and unmounts (`componentWillUnmount`,
+  parent first) when it is hidden; showing it again creates a fresh instance
+  with fresh state. Components in an initially hidden branch do not mount
+  until it is shown.
+- **Also supported:** `static defaultProps`, `static contextType` with
+  `this.context`, getters and setters, private `#members`, class fields and
+  arrow handlers, instance fields assigned in any method (`this.timer = ...`),
+  `componentWillReceiveProps` / `componentWillUpdate` and their `UNSAFE_`
+  forms (skipped when `getDerivedStateFromProps` or `getSnapshotBeforeUpdate`
+  is defined, as in React), and refs: `<MyClass ref={r}/>` sets `r.current` to
+  the instance (with its public methods) after `componentDidMount` and to
+  `null` before `componentWillUnmount`.
+- **Render locals stay reactive.** `const { count } = this.state` and other
+  render locals derived from state or props are recomputed by every binding.
+
+Rejected with a coded warning (the component renders nothing):
+`UNSAFE_componentWillMount` (KR3005), legacy `contextTypes` (KR3006), other
+static members and static blocks (KR3003), computed member names (KR3004),
+`this` inside a static lifecycle (KR3007), and `this.<name>` reads of
+properties nothing defines, such as string refs (KR3002).
+
+Pages that render a class component hydrate through an owner tree (one owner
+per component instance) that routes errors to boundaries and mounts and
+unmounts components with their conditional branch, with the same fresh-state
+remount semantics as other pages. A class's `render()` body is evaluated once
+per mount (bindings update afterwards), so side effects inside `render()`, such
+as logging, run fewer times than in React.
+
+React's `Component`/`PureComponent` from `@krate/runtime/react`, rendered with
+`createElement` at runtime, use the same instance controller. Compiled npm
+packages run on Preact inside islands and keep Preact's class semantics.
+
+### Error boundaries
+
+A class with `static getDerivedStateFromError(error)` and/or
+`componentDidCatch(error, info)` is an error boundary:
+
+```tsx
+class ErrorBoundary extends Component {
+  state = { error: null };
+  static getDerivedStateFromError(error) { return { error: error.message }; }
+  componentDidCatch(error, info) { report(error, info.componentStack); }
+  render() {
+    if (this.state.error) {
+      return <button onClick={() => this.setState({ error: null })}>Try again</button>;
+    }
+    return this.props.children;
+  }
+}
+```
+
+- **What is caught** mirrors React: errors thrown by descendants while they
+  hydrate, while a binding re-renders, in a render-time guard
+  (`if (this.state.n === 5) throw ...` re-checks on every update), in
+  lifecycles and in effects. Errors in event handlers, timers and promises
+  are not caught.
+- **On an error** the boundary unmounts its whole subtree (cleanups and
+  `componentWillUnmount` run for components that had mounted), renders the
+  state from `getDerivedStateFromError`, then calls
+  `componentDidCatch(error, { componentStack })` after the fallback is in the
+  DOM. Caught errors are logged with `console.error`, like React.
+- **Recovery.** When the boundary renders its children again (for example
+  after `setState({ error: null })`), the children mount fresh. Changing a
+  class element's `key` (`<ErrorBoundary key={attempt}>`) unmounts it and
+  mounts a new instance with fresh state.
+- **Render retry.** As in React 18, an error thrown while rendering during an
+  update is retried once before the fallback commits, so
+  `getDerivedStateFromError` runs twice for it (once for errors in effects and
+  lifecycles).
+- **Nesting.** The innermost boundary catches. An error thrown by a
+  boundary's own render or fallback goes to the boundary above it.
+- **At build time** a `throw` while the page is rendered inside a boundary
+  renders the boundary's fallback instead of failing the build (warning
+  KR3009), and `componentDidCatch` is called when the page hydrates. Retrying
+  after a build-time error renders an empty children region, because the
+  subtree could not be built; rebuild once the data is fixed. A build-time
+  throw with no boundary fails the build (KR3010).
+- **Without `getDerivedStateFromError`** the subtree is unmounted but its
+  last DOM stays until `componentDidCatch` calls `setState` (warning KR3008).
+- **Uncaught errors.** React 18 unmounts the whole root. Krate keeps the
+  server-rendered page, logs the error with its component stack, and unmounts
+  only the component that threw (and its descendants).
+- Errors in a hidden conditional branch's bindings (which React would never
+  have rendered) are ignored. Error boundaries around islands are planned.
 
 ### Bare reads are auto-called
 
@@ -137,6 +238,73 @@ return (
 The rewrite is scope-aware: it never touches shadowed locals, function
 parameters, setters, or values that are already called. Krate-native
 `createSignal` code (which already writes `count()`) is left untouched.
+
+### Values computed during render
+
+React recomputes everything in a component body on each render. Krate runs the
+body once, so a body value that depends on state, props or context is compiled
+to a lazily recomputed **derived value**, and its reads are auto-called like
+state reads:
+
+```tsx
+const [todos, setTodos] = useState(initial);
+const [filter, setFilter] = useState("all");
+const visible = todos.filter((t) => filter === "all" || t.done === (filter === "done"));
+const left = todos.filter((t) => !t.done).length;   // always current
+const label = left === 1 ? "item" : "items";
+```
+
+This covers plain `const`/`let` bindings, destructuring (`const { a, b } =
+obj`), values derived from other derived values, `props.x` reads in components
+that take a `props` parameter, and a `let` built up by later body statements
+(`let cls = "a"; if (on) cls += " b";`). Values that read nothing reactive stay
+plain constants. A binding that cannot be recomputed safely (reassigned inside a
+handler, or built by statements that also write other variables) keeps its
+first value and is reported as `KR8301`. See
+[Reactivity](/docs/core-concepts/reactivity/#render-values-in-react-source-components).
+
+### Custom hooks
+
+A custom hook is an ordinary function that runs once per component instance,
+so its own state and effects belong to that instance. When it returns a value
+that depends on its state (`return [on, toggle]`, `return { value, setValue }`),
+the result is a derived getter, and the call site reads it like any other
+derived value:
+
+```tsx
+function useToggle(initial: boolean) {
+  const [on, setOn] = useState(initial);
+  const toggle = useCallback(() => setOn((v) => !v), []);
+  return [on, toggle] as const;
+}
+
+const [open, toggleOpen] = useToggle(false); // open is current, toggleOpen works
+```
+
+Hook arguments are read when the hook is called; a hook that must react to a
+changing argument should receive it through state it owns or a getter.
+
+### Context values
+
+`useContext(Ctx)` returns the provided value itself (an object, a number),
+never the getter that carries it from the provider: `const { color } =
+useContext(Theme)`, `log(theme)` and `[theme]` dependency arrays behave as in
+React, and consumers update when the provider's value changes, including
+through intermediate components.
+
+### Module-level state
+
+A module evaluates once. A module-level constant created by code (`const store
+= createStore(0)`) is created once per page and shared by every component that
+uses it, top-level statements that use it (`window.__store = store`) run once,
+and helpers its initializer calls are bundled into the page script, including
+helpers imported from other local modules. An imported binding that hydration
+code needs but the compiler cannot copy (for example one bound by a
+destructuring export) is reported as `KR8302`.
+
+User bindings named like runtime helpers (`h`, `findSlot`, `kbind*`,
+`krate*`) are renamed in the compiled output, so `hits.map((h) => <li>{h}</li>)`
+works.
 
 ### `useId`
 
@@ -616,7 +784,8 @@ observed in a browser. The browser conformance suite (`/react-events/` in
   they read.
 - **`ref` as a prop**, `forwardRef`, and `useImperativeHandle(ref, create,
   deps)` are supported. Refs in lists keep the right element per item.
-- Refs to class component instances are not supported yet.
+- Refs to class component instances receive the instance (see Class
+  components).
 
 ### Build diagnostics
 

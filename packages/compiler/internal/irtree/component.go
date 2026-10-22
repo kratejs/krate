@@ -64,6 +64,8 @@ func (b *builder) newComponentNode(fn *ast.FnDecl, parentID string) *ComponentNo
 		Fn:         fn,
 		SourceFile: b.ann.SourceFile,
 		Line:       fn.Position.Line,
+		Class:      b.ann.IsLoweredClass(fn.Name),
+		Boundary:   b.ann.IsLoweredClass(fn.Name) && b.ann.ClassBoundaries[fn.Name],
 	}
 }
 
@@ -220,6 +222,10 @@ func (b *builder) registerReactiveLocals(fn *ast.FnDecl) {
 		b.localSignals[name] = resourceSentinel
 	}
 	b.registerFactoryLocals(fn.Body)
+	// Derived render values and custom hook results (derived.go).
+	for name, initial := range b.collectDerivedLocals(fn.Body) {
+		b.localSignals[name] = initial
+	}
 }
 
 // installComponentProps completes the local-prop scope the call site set up
@@ -458,6 +464,10 @@ func (b *builder) localDecls(fn *ast.FnDecl, node *ComponentNode, fold *localFol
 func (b *builder) localDeclJS(name string, init ast.Expr, fold *localFold) string {
 	locals := fold.locals
 	changed := fold.changed[name]
+	if derivedCallee(init) != "" {
+		// A derived getter is always re-created at hydration.
+		return "var " + name + "=" + generateExprJS(b.derivedDeclInit(init), b.sigMap())
+	}
 	foldable := init != nil && !changed && !locals[name].IsUnknown() && !b.referencesSignal(init) && !isReferenceInit(init)
 	if foldable {
 		switch init.(type) {
@@ -490,13 +500,31 @@ func (b *builder) buildComponentReturn(fn *ast.FnDecl, node *ComponentNode) {
 	}
 	retExpr := b.enterCSSScope(fn, node, returnStmt)
 
+	// A context value this component received through its synthetic getter
+	// prop is forwarded to its own children as a call of that getter (the
+	// provider's names are not in scope in this component's hydration IIFE).
+	// Function-valued props live in localFuncProps rather than localProps.
 	childContext := cloneExprMap(b.contextValues)
-	for name := range b.localProps {
+	forward := func(name string) {
 		if strings.HasPrefix(name, contextPropPrefix) {
 			ctx := strings.TrimPrefix(name, contextPropPrefix)
-			childContext[ctx] = &ast.MemberExpr{
+			childContext[ctx] = &ast.CallExpr{Callee: &ast.MemberExpr{
 				Object:   &ast.Identifier{Name: "props"},
 				Property: &ast.Identifier{Name: name},
+			}}
+		}
+	}
+	for name := range b.localProps {
+		forward(name)
+	}
+	for name := range b.localFuncProps {
+		forward(name)
+		// Build-time reads of the forwarded getter (`props.__krate_ctx_X()`
+		// in this component's own JSX) evaluate to the provider's initial.
+		ctx := strings.TrimPrefix(name, contextPropPrefix)
+		if initial, ok := b.contextInitials[ctx]; ok && strings.HasPrefix(name, contextPropPrefix) {
+			if _, exists := b.localProps[name]; !exists {
+				b.localProps[name] = jsvalue.Func(name, func([]jsvalue.Value) jsvalue.Value { return initial })
 			}
 		}
 	}
@@ -576,17 +604,36 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 		node.ExtraVars = append(node.ExtraVars, res.propsRegs...)
 	}
 	// Local and module-level functions referenced by handlers, effects, memos
-	// and dynamic list slot expressions must be in hydration scope.
-	for _, fnDecl := range b.collectReferencedFunctions(node, fn.Body) {
-		if fnJS := renderFnDeclJS(fnDecl, b.sigMap()); fnJS != "" {
-			node.ExtraVars = append(node.ExtraVars, fnJS)
+	// and dynamic list slot expressions must be in hydration scope, and so
+	// must the module-level constants they (and the hydration code) read,
+	// which are declared before the signals and pre-signal vars. A constant's
+	// initializer can call an imported helper (`const store =
+	// createStore(0)`), so both are resolved until nothing new is found.
+	emittedFns := map[string]bool{}
+	addFunctions := func() {
+		for _, fnDecl := range b.collectReferencedFunctions(node, fn.Body) {
+			if emittedFns[fnDecl.Name] {
+				continue
+			}
+			emittedFns[fnDecl.Name] = true
+			if fnJS := renderFnDeclJS(fnDecl, b.sigMap()); fnJS != "" {
+				node.ExtraVars = append(node.ExtraVars, fnJS)
+			}
 		}
 	}
-	// Module-level constants referenced from hydration code are declared
-	// before the signals and pre-signal vars.
-	if decls := b.referencedModuleConstVars(node); len(decls) > 0 {
-		node.PreSignalVars = append(decls, node.PreSignalVars...)
+	addFunctions()
+	var constDecls []string
+	for round := 0; round < 4; round++ {
+		decls := b.referencedModuleConstVars(node)
+		if len(decls) == len(constDecls) {
+			break
+		}
+		base := node.PreSignalVars[len(constDecls):]
+		node.PreSignalVars = append(append([]string(nil), decls...), base...)
+		constDecls = decls
+		addFunctions()
 	}
+	b.checkUnbundledImports(node)
 	if needsNoClientJS(node, fn) && !res.forceClient && !b.rendersLiveProps(node) && !node.Lazy {
 		node.Tier = TierStatic
 	}

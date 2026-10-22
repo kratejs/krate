@@ -258,6 +258,10 @@ func (e *SSREval) reportUnknown(expr ast.Expr, v jsvalue.Value, context string) 
 		pos = expr.Pos()
 		src = irtree.GenerateExprJS(expr, nil)
 	}
+	if t := v.Thrown(); t != nil {
+		e.errs = append(e.errs, newBuildThrow(t))
+		return
+	}
 	if v.IsUnsupported() {
 		e.addDiag(pos, "unsupported expression: "+v.Reason()+" (in "+context+" `"+src+"`)",
 			"this component is rendered at build time; rewrite the expression with supported constructs or move it into a component with client state")

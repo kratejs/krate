@@ -31,6 +31,8 @@ export * from './src/router';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/storage';
+export * from './src/boundary';
+export * from './src/class-component';
 export * from './src/actions';
 `;
 
@@ -45,6 +47,8 @@ export * from './src/router';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/storage';
+export * from './src/boundary';
+export * from './src/class-component';
 export * from './src/actions';
 `;
 
@@ -61,6 +65,8 @@ export * from './src/router-lite';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/storage';
+export * from './src/boundary';
+export * from './src/class-component';
 export * from './src/actions';
 `;
 

@@ -20,9 +20,9 @@ func (b *builder) warnUnrenderedComponent(name string, el *ast.JSXElement) {
 			b.warnings = append(b.warnings, d)
 			return
 		}
-		b.warnAt(el.Position, "class component <"+name+"> is not lowered and will not render",
-			"supported: state, this.props, this.setState, componentDidMount/componentDidUpdate/componentWillUnmount, "+
-				"helper methods, arrow handlers and instance fields; move other logic into a function component")
+		d := b.diagAt(el.Position, diag.SeverityWarning, "class component <"+name+"> is not lowered and will not render",
+			"declare it as `class "+name+" extends Component { ... }` at module top level (class expressions and classes inside functions are not lowered), or convert it to a function component")
+		b.warnings = append(b.warnings, d.WithCode(diag.CodeClassNotLowered))
 		return
 	}
 	b.warnAt(el.Position, "component <"+name+"> could not be resolved and will not render",
