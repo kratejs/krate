@@ -36,15 +36,21 @@ import {
   trackThenable,
   useTransition as krateUseTransition,
   withReplayScope,
+  connectActionTransitions,
   type Boundary,
   type Thenable,
 } from './suspense.js';
 import {
   __krateActionState,
+  __krateBeginAction,
   __krateOptimistic,
   requestFormReset as krateRequestFormReset,
+  setActionTransitionRunner,
   type FormStatus,
 } from './actions.js';
+
+// Actions, useActionState and useTransition share one transition scope.
+connectActionTransitions({ setActionTransitionRunner, __krateBeginAction });
 
 /** React's `Fragment` marker; `createElement(Fragment, ...)` yields a fragment. */
 export const Fragment: unique symbol = Symbol.for('krate.react.fragment');
@@ -314,6 +320,7 @@ export function Suspense(props: { fallback?: unknown; children?: unknown }): Nod
 // --- context ---
 
 export interface ReactContext<T> {
+  readonly $$typeof?: symbol;
   readonly _id: number;
   readonly defaultValue: T;
   readonly Provider: (props: { value: T; children?: unknown }) => Node;
@@ -325,6 +332,7 @@ export interface ReactContext<T> {
 export function createContext<T>(defaultValue: T): ReactContext<T> {
   const ctx = krateCreateContext<T>(defaultValue);
   return {
+    $$typeof: Symbol.for('krate.context'),
     _id: ctx.id,
     defaultValue,
     Provider: (props) => ctx.Provider(props),

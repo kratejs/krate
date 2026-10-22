@@ -515,16 +515,14 @@ func (c *reactCtx) collectUses(expr ast.Expr) []*ast.CallExpr {
 	return out
 }
 
-// isContextLike reports whether a use() argument is a context: a module-level
-// createContext binding, or a name that reads as one (FooContext, FooCtx).
+// isContextLike reports whether a use() argument is known to be a context:
+// an identifier bound to a createContext(...) result in this module. Other
+// arguments (imported bindings included) lower to the use() getter, whose
+// runtime read checks for the context marker; the annotator turns uses of
+// contexts imported from other modules back into context reads.
 func (c *reactCtx) isContextLike(expr ast.Expr) bool {
-	switch e := expr.(type) {
-	case *ast.Identifier:
-		return c.susp.contexts[e.Name] || strings.HasSuffix(e.Name, "Context") || strings.HasSuffix(e.Name, "Ctx")
-	case *ast.MemberExpr:
-		if prop, ok := e.Property.(*ast.Identifier); ok && !e.Computed {
-			return strings.HasSuffix(prop.Name, "Context")
-		}
+	if e, ok := expr.(*ast.Identifier); ok {
+		return c.susp.contexts[e.Name]
 	}
 	return false
 }

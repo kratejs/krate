@@ -171,6 +171,23 @@ func TestUseContextStaysContextRead(t *testing.T) {
 	}
 }
 
+func TestUsePromiseNamedLikeAContext(t *testing.T) {
+	out, diags := rewriteSrcDiags(t, `
+		import { use } from 'react';
+		const userContext = fetch('/me').then((r) => r.json());
+		function C() {
+			const me = use(userContext);
+			return <p>{me.name}</p>;
+		}
+	`)
+	if len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+	if !strings.Contains(out, "__krateUse(() => __krateRead(userContext))") {
+		t.Errorf("a promise bound in this module is not a context, whatever its name:\n%s", out)
+	}
+}
+
 func TestUseDiagnostics(t *testing.T) {
 	_, diags := rewriteSrcDiags(t, `
 		import { use } from 'react';

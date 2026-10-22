@@ -86,6 +86,8 @@ export function isSuspenseSignal(value: unknown): value is SuspenseSignal {
 
 function noop(): void {}
 
+const CONTEXT_MARKER = Symbol.for('krate.context');
+
 /**
  * Replay scope: the thenables read in a previous attempt of the same
  * computation, by position. A read at position i reuses the earlier thenable
@@ -124,9 +126,11 @@ export function withReplayScope<T>(scope: ReadScope, fn: () => T): T {
  * through unchanged.
  */
 export function readValue<T>(value: unknown): T {
-  const ctx = value as { useContext?: () => T } | null;
-  if (ctx && typeof ctx === 'object' && typeof ctx.useContext === 'function' && !isThenable(value)) {
-    return ctx.useContext();
+  const ctx = value as { $$typeof?: symbol; useContext?: () => T } | null;
+  // Krate contexts carry a marker; objects with a useContext() method (other
+  // context shapes) count as contexts unless they are thenables.
+  if (ctx && typeof ctx === 'object' && typeof ctx.useContext === 'function') {
+    if (ctx.$$typeof === CONTEXT_MARKER || !isThenable(value)) return ctx.useContext();
   }
   if (!isThenable(value)) return value as T;
   let t = value as Thenable<T>;
@@ -249,8 +253,13 @@ export function isInTransition(): boolean {
  * Updates made after an `await` inside `fn` are ordinary updates, as in
  * React 19; wrap them in another `startTransition` to mark them.
  */
-export function runAsyncTransition(fn: () => unknown): Transition {
+export function runAsyncTransition(fn: () => unknown, options?: { report?: boolean }): Transition {
+  const report = options?.report !== false;
   const tr = new TransitionState();
+  // Join the action scope (actions.ts) so optimistic updates stay applied
+  // and form/action status stays pending for the whole transition.
+  const endAction = beginActionScope();
+  tr.promise.then(endAction, endAction);
   tr.add();
   const prev = activeTransition;
   activeTransition = tr;
@@ -262,7 +271,7 @@ export function runAsyncTransition(fn: () => unknown): Transition {
     tr.error = error;
     activeTransition = prev;
     tr.release();
-    reportSuspenseError(error, null);
+    if (report) reportSuspenseError(error, null);
     return tr;
   }
   activeTransition = prev;
@@ -274,7 +283,7 @@ export function runAsyncTransition(fn: () => unknown): Transition {
         tr.failed = true;
         tr.error = error;
         tr.release();
-        reportSuspenseError(error, null);
+        if (report) reportSuspenseError(error, null);
       },
     );
   }
@@ -287,6 +296,57 @@ export function runAsyncTransition(fn: () => unknown): Transition {
     tr.release();
   });
   return tr;
+}
+
+type BeginAction = () => () => void;
+
+let actionScope: BeginAction | null = null;
+
+// beginActionScope opens a scope in the action runtime (the hydration
+// bundle's __krateBeginAction global, or one connected explicitly).
+function beginActionScope(): () => void {
+  const begin = actionScope ?? (globalThis as { __krateBeginAction?: BeginAction }).__krateBeginAction;
+  return typeof begin === 'function' ? begin() : noop;
+}
+
+/**
+ * Makes this module the single transition scope for React 19 actions: form
+ * actions and useActionState dispatches run through runAsyncTransition, so
+ * they share pending state, transition lanes and Suspense behavior with
+ * useTransition. Errors are left to the action runtime, which reports them.
+ */
+export function connectActionTransitions(api?: {
+  setActionTransitionRunner?: (runner: (<T>(fn: () => T | Promise<T>) => Promise<T>) | null) => void;
+  __krateBeginAction?: BeginAction;
+}): void {
+  const target = (api ?? globalThis) as {
+    setActionTransitionRunner?: (runner: (<T>(fn: () => T | Promise<T>) => Promise<T>) | null) => void;
+    __krateBeginAction?: BeginAction;
+  };
+  if (api?.__krateBeginAction) actionScope = api.__krateBeginAction;
+  if (typeof target.setActionTransitionRunner !== 'function') return;
+  target.setActionTransitionRunner(<T,>(fn: () => T | Promise<T>): Promise<T> => {
+    let result: T | Promise<T> | undefined;
+    let threw = false;
+    let thrown: unknown;
+    const tr = runAsyncTransition(
+      () => {
+        try {
+          result = fn();
+        } catch (error) {
+          threw = true;
+          thrown = error;
+          throw error;
+        }
+        return result;
+      },
+      { report: false },
+    );
+    if (threw) return Promise.reject(thrown);
+    // Resolve with the action's value once the transition (including any
+    // suspension it caused) settled; reject with the action's error.
+    return Promise.resolve(result as T | Promise<T>).then((value) => tr.promise.then(() => value));
+  });
 }
 
 // The transition whose effect flush is still queued.
@@ -912,6 +972,8 @@ export function useSyncExternalStore<T>(
 ): () => T {
   return createExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
+
+connectActionTransitions();
 
 // Lets createResource (in the core bundle) suspend the creating component's
 // boundary without importing this module.

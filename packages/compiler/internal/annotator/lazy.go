@@ -48,6 +48,113 @@ func collectLazyComponents(body []ast.Stmt, ann *irtree.Annotations, file, raw s
 	}
 }
 
+// lowerContextUses turns `const v = __krateUse(() => __krateRead(X))` back
+// into the context read `createMemo(() => X.useContext())` when X is bound to createContext()
+// in any bundled module (the React lowering only sees its own module, so a
+// context imported from elsewhere was lowered as a possible promise).
+func lowerContextUses(ann *irtree.Annotations, modules []ModuleSource) {
+	contexts := map[string]bool{}
+	for _, m := range modules {
+		if m.Program == nil {
+			continue
+		}
+		for _, stmt := range m.Program.Body {
+			vs, ok := stmt.(*ast.VarStmt)
+			if !ok {
+				if exp, isExp := stmt.(*ast.ExportStmt); isExp {
+					vs, ok = exp.Declaration.(*ast.VarStmt)
+				}
+			}
+			if !ok || vs == nil {
+				continue
+			}
+			for _, d := range vs.Decls {
+				if call, ok := d.Init.(*ast.CallExpr); ok && d.Name != "" {
+					if id, ok := call.Callee.(*ast.Identifier); ok && (id.Name == "createContext" || id.Name == "createScope") {
+						contexts[d.Name] = true
+					}
+				}
+			}
+		}
+	}
+	if len(contexts) == 0 {
+		return
+	}
+	// Renamed imports of a context are contexts too.
+	for _, m := range modules {
+		if m.Program == nil {
+			continue
+		}
+		for _, stmt := range m.Program.Body {
+			if imp, ok := stmt.(*ast.ImportStmt); ok {
+				for _, n := range imp.Named {
+					if n.Local != "" && contexts[n.Remote] {
+						contexts[n.Local] = true
+					}
+				}
+			}
+		}
+	}
+	seen := map[*ast.FnDecl]bool{}
+	for _, fn := range ann.Functions {
+		if fn == nil || seen[fn] {
+			continue
+		}
+		seen[fn] = true
+		for _, stmt := range fn.Body {
+			vs, ok := stmt.(*ast.VarStmt)
+			if !ok {
+				continue
+			}
+			for _, d := range vs.Decls {
+				if name := usedContextArg(d.Init); name != "" && contexts[name] {
+					// Reads of the binding were already lowered to getter
+					// calls, so it stays a getter: a memo over the context read
+					// (which also folds to the context default at build time).
+					read := &ast.CallExpr{Callee: &ast.MemberExpr{
+						Object:   &ast.Identifier{Name: name},
+						Property: &ast.Identifier{Name: "useContext"},
+					}}
+					d.Init = &ast.CallExpr{
+						Callee: &ast.Identifier{Name: "createMemo"},
+						Args:   []ast.Expr{&ast.ArrowFn{Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: read}}}},
+					}
+				}
+			}
+		}
+	}
+}
+
+// usedContextArg returns X for `__krateUse(() => __krateRead(X))`.
+func usedContextArg(init ast.Expr) string {
+	call, ok := init.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return ""
+	}
+	if id, ok := call.Callee.(*ast.Identifier); !ok || id.Name != "__krateUse" {
+		return ""
+	}
+	arrow, ok := call.Args[0].(*ast.ArrowFn)
+	if !ok || len(arrow.Body) != 1 {
+		return ""
+	}
+	ret, ok := arrow.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		return ""
+	}
+	read, ok := ret.Value.(*ast.CallExpr)
+	if !ok || len(read.Args) != 1 {
+		return ""
+	}
+	if id, ok := read.Callee.(*ast.Identifier); !ok || id.Name != "__krateRead" {
+		return ""
+	}
+	if arg, ok := read.Args[0].(*ast.Identifier); ok {
+		return arg.Name
+	}
+	return ""
+}
+
 // aliasLazyImpl makes the lazy binding resolve to its local component.
 func aliasLazyImpl(ann *irtree.Annotations, name, impl string) {
 	fn := ann.Functions[impl]

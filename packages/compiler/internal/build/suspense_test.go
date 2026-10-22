@@ -296,3 +296,34 @@ func TestSlotIDsStayUniqueAfterChildComponent(t *testing.T) {
 		t.Fatalf("buttons after a child component need distinct slot IDs: %v\n%s", ids, html)
 	}
 }
+
+func TestUseOfImportedContextIsAContextRead(t *testing.T) {
+	dist, err := buildSuspenseProject(t, map[string]string{
+		"src/theme.ts": `
+			import { createContext } from 'react';
+			export const ThemeContext = createContext('light');
+		`,
+		"src/pages/index.tsx": `
+			import { use, useState } from 'react';
+			import { ThemeContext } from "../theme";
+			function Label() {
+				const theme = use(ThemeContext);
+				const [n, setN] = useState(0);
+				return <button onClick={() => setN(n + 1)}>{theme} {n}</button>;
+			}
+			export default function Page() {
+				return <main><Label /></main>;
+			}
+		`,
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	html := readDist(t, dist, "index.html")
+	if !strings.Contains(html, "light") {
+		t.Fatalf("the imported context default must render at build time:\n%s", html)
+	}
+	if js := readDist(t, dist, "index.*.js"); strings.Contains(js, "__krateUse") {
+		t.Fatalf("use(importedContext) must not become a use() promise read:\n%s", js)
+	}
+}

@@ -192,9 +192,13 @@ reused by position when the component runs again, like React's replay. If the
 promise changes later (for example a new promise in state), the boundary shows
 its fallback again, except inside a transition, where the revealed content
 stays and the transition stays pending until the new promise resolves.
-`use(Context)` is a plain context read and works anywhere; the compiler treats
-the argument as a context when it is a module-level `createContext` binding or
-its name ends in `Context` or `Ctx`. `use(promise)` used
+`use(Context)` is a plain context read and works anywhere. The compiler
+decides from bindings, not names: an argument bound to a `createContext(...)`
+result, in the same module or imported from another bundled module, is a
+context read (folded to its default at build time); anything else is treated
+as a possible promise, and the runtime checks the context marker on Krate
+context objects, so a promise named `userContext` suspends as expected.
+`use(promise)` used
 outside a declaration (KR4003) or destructured (KR4004) is a build error, and a
 component calling it outside any `<Suspense>` gets warning KR4008.
 
@@ -230,7 +234,10 @@ import (warning KR4006).
 `isPending` becomes true when a transition starts and stays true until the
 action settles, including async actions and the work they await, and until
 every overlapping transition started through the same hook settled. The
-top-level `startTransition` accepts async functions too. Updates made after an
+top-level `startTransition` accepts async functions too. Form actions,
+`useActionState` dispatches and `useOptimistic` share this one transition
+scope: optimistic values stay applied, and a Suspense boundary keeps its
+revealed content, until every transition and action has settled. Updates made after an
 `await` inside an action are ordinary updates, as in React 19; wrap them in
 another `startTransition` to mark them.
 

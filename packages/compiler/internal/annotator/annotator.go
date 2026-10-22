@@ -688,6 +688,7 @@ func MergeImportAliases(ann *irtree.Annotations, modules []ModuleSource, entry M
 		modules = append(modules, entry)
 	}
 	markLazyDefaults(ann, modules)
+	lowerContextUses(ann, modules)
 	aliases := BuildImportAliases(modules)
 	for local, declared := range aliases {
 		if fn := ann.Functions[declared]; fn != nil {

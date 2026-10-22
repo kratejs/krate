@@ -83,6 +83,9 @@ describe('thenables and use()', () => {
   it('reads contexts and passes plain values through', () => {
     const Ctx = createContext('dflt');
     expect(readValue(Ctx)).toBe('dflt');
+    // The marker wins even for a context that also looks like a thenable.
+    const odd = Object.assign(createContext('marked'), { then() {} });
+    expect(readValue(odd)).toBe('marked');
     expect(readValue(3)).toBe(3);
   });
 
