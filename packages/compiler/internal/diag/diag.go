@@ -69,17 +69,42 @@ func FormatDiagnostics(errs []error) string {
 			b.WriteString("\n")
 			b.WriteString(d.Source)
 			b.WriteString("\n")
-			caretCol := d.Col - 1
-			if caretCol < 0 {
-				caretCol = 0
-			}
-			b.WriteString(strings.Repeat(" ", caretCol))
+			b.WriteString(caretPrefix(d.Source, d.Col))
 			b.WriteString("^")
 		}
 		if d.Hint != "" {
 			b.WriteString("\n  hint: ")
 			b.WriteString(d.Hint)
 		}
+	}
+	return b.String()
+}
+
+// caretPrefix returns the padding that places a caret under column col of
+// line. Columns are 1-based UTF-16 code units (an astral-plane character
+// counts as two); tabs in the line are copied so the caret lines up in a
+// terminal.
+func caretPrefix(line string, col int) string {
+	var b strings.Builder
+	units := 0
+	for _, r := range line {
+		if units >= col-1 {
+			break
+		}
+		if r == '\t' {
+			b.WriteByte('\t')
+		} else {
+			b.WriteByte(' ')
+		}
+		if r >= 0x10000 {
+			units += 2
+		} else {
+			units++
+		}
+	}
+	for units < col-1 {
+		b.WriteByte(' ')
+		units++
 	}
 	return b.String()
 }

@@ -195,13 +195,15 @@ func TestSingleQuoteString(t *testing.T) {
 }
 
 func TestTemplateLiteral(t *testing.T) {
+	// Template chunks carry their delimiters; interpolated expressions are
+	// ordinary tokens between them.
 	toks := tokens("`hello ${name} world`")
-	// TEMPLATE_START (text before ${), then LBRACE, then Identifier "name", then RBRACE, then the closing backtick
 	kind(t, toks[0], TEMPLATE_START)
-	kind(t, toks[1], LBRACE)
-	kind(t, toks[2], Identifier)
-	value(t, toks[2], "name")
-	kind(t, toks[3], RBRACE)
+	value(t, toks[0], "`hello ${")
+	kind(t, toks[1], Identifier)
+	value(t, toks[1], "name")
+	kind(t, toks[2], TEMPLATE_END)
+	value(t, toks[2], "} world`")
 }
 
 func TestRegexLiteral(t *testing.T) {
@@ -216,22 +218,23 @@ func TestRegexLiteral(t *testing.T) {
 
 func TestJSXTextLeadingSlashIsNotRegex(t *testing.T) {
 	// Regression: a `/` after a tag's `>` used to be lexed as a regex literal,
-	// swallowing the rest of the line (`<code>/about</code>` -> regex
-	// "/about</") and erasing the closing tags.
+	// swallowing the rest of the line and erasing the closing tags. JSX text is
+	// one literal run.
 	toks := tokens("<code>/about</code>")
 	want := []struct {
 		kind Kind
 		val  string
 	}{
 		{LT, "<"}, {Identifier, "code"}, {GT, ">"},
-		{DIV, "/"}, {Identifier, "about"},
+		{JSXText, "/about"},
 		{LT_SLASH, "</"}, {Identifier, "code"}, {GT, ">"}, {EOF, ""},
+	}
+	if len(toks) != len(want) {
+		t.Fatalf("got %d tokens, want %d: %v", len(toks), len(want), toks)
 	}
 	for i, w := range want {
 		kind(t, toks[i], w.kind)
-		if w.val != "" {
-			value(t, toks[i], w.val)
-		}
+		value(t, toks[i], w.val)
 	}
 }
 
@@ -243,8 +246,11 @@ func TestJSXTextBlockCommentLikeIsText(t *testing.T) {
 		val  string
 	}{
 		{LT, "<"}, {Identifier, "code"}, {GT, ">"},
-		{DIV, "/"}, {Identifier, "api"}, {DIV, "/"}, {STAR, "*"},
+		{JSXText, "/api/*"},
 		{LT_SLASH, "</"}, {Identifier, "code"}, {GT, ">"}, {EOF, ""},
+	}
+	if len(toks) != len(want) {
+		t.Fatalf("got %d tokens, want %d: %v", len(toks), len(want), toks)
 	}
 	for i, w := range want {
 		kind(t, toks[i], w.kind)
@@ -348,10 +354,13 @@ func TestJSXSelfClosing(t *testing.T) {
 func TestJSXWithChildren(t *testing.T) {
 	toks := tokens("<div>hello</div>")
 	kind(t, toks[0], LT)
+	if !toks[0].JSX {
+		t.Error("opening `<` must be marked as JSX")
+	}
 	kind(t, toks[1], Identifier)
 	value(t, toks[1], "div")
 	kind(t, toks[2], GT)
-	kind(t, toks[3], Identifier)
+	kind(t, toks[3], JSXText)
 	value(t, toks[3], "hello")
 	kind(t, toks[4], LT_SLASH)
 	kind(t, toks[5], Identifier)

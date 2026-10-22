@@ -1,10 +1,10 @@
 // Package astprint renders an *ast.Program back to TypeScript/JSX source.
-// The Krate parser is intentionally lossy: it drops type-only constructs
-// (interfaces, type aliases, enums, classes) and all type annotations, because
-// they carry no runtime meaning for hydration. This printer therefore only
-// round-trips the runtime subset of a module. Callers that edit user source
-// (e.g. the MCP `edit_ast` tool) must first verify the source is in that subset
-// with LossyReason; otherwise printing would silently drop type information.
+// The Krate parser drops type-only constructs (interfaces, type aliases and
+// all type annotations) because they carry no runtime meaning for hydration.
+// This printer therefore only round-trips the runtime subset of a module.
+// Callers that edit user source (e.g. the MCP `edit_ast` tool) must first
+// verify the source is in that subset (see CycleLossy); otherwise printing
+// would silently drop type information.
 package astprint
 
 import (
@@ -31,11 +31,13 @@ func Print(p *ast.Program) string {
 // render as an empty string rather than panicking.
 func PrintExpr(expr ast.Expr) string {
 	pr := &printer{}
-	return pr.expr(expr)
+	return pr.expr(expr, precLowest)
 }
 
 type printer struct {
 	b strings.Builder
+	// noIn parenthesizes `in` expressions (inside a for-statement head).
+	noIn bool
 }
 
 func (p *printer) indent(n int) {
@@ -61,22 +63,19 @@ func (p *printer) stmt(s ast.Stmt, depth int) {
 	case *ast.ExportStmt:
 		p.export(v, depth)
 	case *ast.VarStmt:
-		p.line(depth, printVar(v))
+		p.line(depth, p.varDecl(v)+";")
 	case *ast.FnDecl:
-		p.fnDecl(v, depth)
+		p.fnDecl(v, depth, "")
+	case *ast.ClassDecl:
+		p.classDecl(v, depth, "")
 	case *ast.ReturnStmt:
 		if v.Value == nil {
 			p.line(depth, "return;")
 		} else {
-			p.line(depth, "return "+p.expr(v.Value)+";")
+			p.line(depth, "return "+p.expr(v.Value, precLowest)+";")
 		}
 	case *ast.ExprStmt:
-		e := p.expr(v.Expression)
-		// A leading object literal would parse as a block statement.
-		if _, ok := v.Expression.(*ast.ObjectExpr); ok {
-			e = "(" + e + ")"
-		}
-		p.line(depth, e+";")
+		p.line(depth, p.exprStmt(v.Expression)+";")
 	case *ast.IfStmt:
 		p.ifStmt(v, depth)
 	case *ast.BlockStmt:
@@ -86,19 +85,19 @@ func (p *printer) stmt(s ast.Stmt, depth int) {
 	case *ast.ForInStmt:
 		p.forInStmt(v, depth)
 	case *ast.WhileStmt:
-		p.line(depth, "while ("+p.expr(v.Test)+") {")
+		p.line(depth, "while ("+p.expr(v.Test, precLowest)+") {")
 		p.body(v.Body, depth+1)
 		p.line(depth, "}")
 	case *ast.DoWhileStmt:
 		p.line(depth, "do {")
 		p.body(v.Body, depth+1)
-		p.line(depth, "} while ("+p.expr(v.Test)+");")
+		p.line(depth, "} while ("+p.expr(v.Test, precLowest)+");")
 	case *ast.SwitchStmt:
 		p.switchStmt(v, depth)
 	case *ast.TryStmt:
 		p.tryStmt(v, depth)
 	case *ast.ThrowStmt:
-		p.line(depth, "throw "+p.expr(v.Value)+";")
+		p.line(depth, "throw "+p.expr(v.Value, precLowest)+";")
 	case *ast.BreakStmt:
 		if v.Label != "" {
 			p.line(depth, "break "+v.Label+";")
@@ -111,7 +110,35 @@ func (p *printer) stmt(s ast.Stmt, depth int) {
 		} else {
 			p.line(depth, "continue;")
 		}
+	case *ast.LabeledStmt:
+		inner := &printer{}
+		inner.stmt(v.Body, depth)
+		body := strings.TrimLeft(inner.b.String(), " ")
+		if body == "" {
+			body = ";\n"
+		}
+		p.indent(depth)
+		p.b.WriteString(v.Label + ": " + body)
+	case *ast.EmptyStmt:
+		p.line(depth, ";")
+	case *ast.WithStmt:
+		p.line(depth, "with ("+p.expr(v.Object, precLowest)+") {")
+		p.body(v.Body, depth+1)
+		p.line(depth, "}")
+	case *ast.DebuggerStmt:
+		p.line(depth, "debugger;")
 	}
+}
+
+// exprStmt renders an expression statement, parenthesizing expressions whose
+// leading token would otherwise parse as a declaration or block.
+func (p *printer) exprStmt(e ast.Expr) string {
+	s := p.expr(e, precLowest)
+	if strings.HasPrefix(s, "{") || strings.HasPrefix(s, "function") || strings.HasPrefix(s, "class") ||
+		strings.HasPrefix(s, "async function") || strings.HasPrefix(s, "let [") || strings.HasPrefix(s, "let[") {
+		return "(" + s + ")"
+	}
+	return s
 }
 
 func (p *printer) body(stmts []ast.Stmt, depth int) {
@@ -126,107 +153,216 @@ func (p *printer) block(stmts []ast.Stmt, depth int) {
 	p.line(depth, "}")
 }
 
-func (p *printer) fnDecl(f *ast.FnDecl, depth int) {
-	var b strings.Builder
-	if f.Async {
-		b.WriteString("async ")
+func fnHead(async, gen bool, name string) string {
+	s := ""
+	if async {
+		s = "async "
 	}
-	b.WriteString("function")
-	if f.Name != "" {
-		b.WriteString(" " + f.Name)
+	s += "function"
+	if gen {
+		s += "*"
 	}
-	b.WriteString("(" + printParams(f.Params) + ") {")
-	p.line(depth, b.String())
+	if name != "" {
+		s += " " + name
+	}
+	return s
+}
+
+func (p *printer) fnDecl(f *ast.FnDecl, depth int, prefix string) {
+	p.line(depth, prefix+fnHead(f.Async, f.Generator, f.Name)+"("+p.params(f.Params)+") {")
 	p.body(f.Body, depth+1)
 	p.line(depth, "}")
 }
 
-func (p *printer) export(e *ast.ExportStmt, depth int) {
+func (p *printer) classDecl(c *ast.ClassDecl, depth int, prefix string) {
+	p.indent(depth)
+	p.b.WriteString(prefix)
+	p.b.WriteString(p.classText(c, depth))
+	p.b.WriteString("\n")
+}
+
+// classText renders `class Name extends X { ... }` with members indented one
+// level below depth; the closing brace is not followed by a newline.
+func (p *printer) classText(c *ast.ClassDecl, depth int) string {
+	var b strings.Builder
+	b.WriteString("class")
+	if c.Name != "" {
+		b.WriteString(" " + c.Name)
+	}
+	if c.SuperClass != nil {
+		b.WriteString(" extends " + p.expr(c.SuperClass, precLHS))
+	}
+	if len(c.Members) == 0 {
+		b.WriteString(" {}")
+		return b.String()
+	}
+	b.WriteString(" {\n")
+	for _, m := range c.Members {
+		if m == nil {
+			continue
+		}
+		mp := &printer{}
+		mp.classMember(m, depth+1)
+		b.WriteString(mp.b.String())
+	}
+	for i := 0; i < depth; i++ {
+		b.WriteString("  ")
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+func (p *printer) memberKey(m *ast.ClassMember) string {
 	switch {
-	case e.StarReexport:
-		p.line(depth, "export * from "+e.ReexportSource+";")
-	case e.ReexportSource != "":
-		p.line(depth, "export { "+e.Local+" } from "+e.ReexportSource+";")
-	case e.Default && e.Local != "" && e.Declaration == nil:
-		p.line(depth, "export default "+e.Local+";")
-	case e.Default && e.Declaration != nil:
-		if es, ok := e.Declaration.(*ast.ExprStmt); ok {
-			p.line(depth, "export default "+p.expr(es.Expression)+";")
-			return
-		}
-		// `export default function ...` - print the declaration with a prefix.
-		p.exported(e.Declaration, depth, "export default ")
-	case e.Declaration != nil:
-		p.exported(e.Declaration, depth, "export ")
-	case e.Local != "":
-		p.line(depth, "export { "+e.Local+" };")
+	case m.Computed:
+		return "[" + p.expr(m.KeyExpr, precAssign) + "]"
+	case m.KeyQuoted:
+		return quoteString(m.Name)
 	}
+	return m.Name
 }
 
-// exported prints a declaration with an `export ` prefix. Function and variable
-// declarations are rendered inline rather than delegating to stmt, so the
-// prefix lands on the same line.
-func (p *printer) exported(s ast.Stmt, depth int, prefix string) {
-	switch v := s.(type) {
-	case *ast.FnDecl:
-		var b strings.Builder
-		b.WriteString(prefix)
-		if v.Async {
-			b.WriteString("async ")
-		}
-		b.WriteString("function")
-		if v.Name != "" {
-			b.WriteString(" " + v.Name)
-		}
-		b.WriteString("(" + printParams(v.Params) + ") {")
-		p.line(depth, b.String())
-		p.body(v.Body, depth+1)
-		p.line(depth, "}")
-	case *ast.VarStmt:
-		p.line(depth, prefix+printVar(v))
-	case *ast.ExprStmt:
-		p.line(depth, prefix+p.expr(v.Expression))
-	default:
-		p.stmt(s, depth)
+func (p *printer) classMember(m *ast.ClassMember, depth int) {
+	prefix := ""
+	if m.Static {
+		prefix = "static "
 	}
-}
-
-func (p *printer) ifStmt(f *ast.IfStmt, depth int) {
-	p.line(depth, "if ("+p.expr(f.Test)+") {")
-	p.body(f.Consequent, depth+1)
-	if len(f.Alternate) == 0 {
+	switch m.Kind {
+	case ast.ClassStaticBlock:
+		p.line(depth, "static {")
+		p.body(m.Body, depth+1)
 		p.line(depth, "}")
 		return
+	case ast.ClassField, ast.ClassAccessor:
+		if m.Kind == ast.ClassAccessor {
+			prefix += "accessor "
+		}
+		s := prefix + p.memberKey(m)
+		if m.Init != nil {
+			s += " = " + p.expr(m.Init, precAssign)
+		}
+		p.line(depth, s+";")
+		return
 	}
-	// `else if` chain reads best on one line.
-	if len(f.Alternate) == 1 {
-		if inner, ok := f.Alternate[0].(*ast.IfStmt); ok {
-			p.indent(depth)
-			p.b.WriteString("} else if (")
-			p.b.WriteString(p.expr(inner.Test))
-			p.b.WriteString(") {\n")
-			p.body(inner.Consequent, depth+1)
-			p.closeIfChain(inner, depth)
-			return
+	switch {
+	case m.Kind == ast.ClassGetter:
+		prefix += "get "
+	case m.Kind == ast.ClassSetter:
+		prefix += "set "
+	default:
+		if m.Async {
+			prefix += "async "
+		}
+		if m.Generator {
+			prefix += "*"
 		}
 	}
-	p.line(depth, "} else {")
-	p.body(f.Alternate, depth+1)
+	p.line(depth, prefix+p.memberKey(m)+"("+p.params(m.Params)+") {")
+	p.body(m.Body, depth+1)
 	p.line(depth, "}")
 }
 
-// closeIfChain renders the tail of a nested else-if chain that was opened by
-// ifStmt.
-func (p *printer) closeIfChain(f *ast.IfStmt, depth int) {
+func (p *printer) export(e *ast.ExportStmt, depth int) {
+	attrs := printAttributes(e.Attributes)
+	switch {
+	case e.StarReexport:
+		s := "export *"
+		if e.Namespace != "" {
+			s += " as " + printModuleName(e.Namespace)
+		}
+		p.line(depth, s+" from "+e.ReexportSource+attrs+";")
+	case e.ReexportSource != "":
+		if len(e.ReexportNamed) > 0 || e.Local == "" {
+			p.line(depth, "export "+printSpecifiers(e.ReexportNamed)+" from "+e.ReexportSource+attrs+";")
+		} else {
+			p.line(depth, "export { "+e.Local+" } from "+e.ReexportSource+attrs+";")
+		}
+	case e.Default && e.Declaration == nil && e.Local != "":
+		p.line(depth, "export default "+e.Local+";")
+	case e.Default && e.Declaration != nil:
+		switch d := e.Declaration.(type) {
+		case *ast.ExprStmt:
+			s := p.expr(d.Expression, precAssign)
+			if strings.HasPrefix(s, "function") || strings.HasPrefix(s, "class") || strings.HasPrefix(s, "async function") {
+				s = "(" + s + ")"
+			}
+			p.line(depth, "export default "+s+";")
+		case *ast.FnDecl:
+			p.fnDecl(d, depth, "export default ")
+		case *ast.ClassDecl:
+			p.classDecl(d, depth, "export default ")
+		default:
+			p.stmt(d, depth)
+		}
+	case e.Declaration != nil:
+		switch d := e.Declaration.(type) {
+		case *ast.FnDecl:
+			p.fnDecl(d, depth, "export ")
+		case *ast.ClassDecl:
+			p.classDecl(d, depth, "export ")
+		case *ast.VarStmt:
+			p.line(depth, "export "+p.varDecl(d)+";")
+		case *ast.ExprStmt:
+			p.line(depth, "export "+p.expr(d.Expression, precLowest)+";")
+		default:
+			p.stmt(d, depth)
+		}
+	case len(e.Named) > 0:
+		p.line(depth, "export "+printSpecifiers(e.Named)+";")
+	case e.Local != "":
+		p.line(depth, "export { "+e.Local+" };")
+	default:
+		p.line(depth, "export {};")
+	}
+}
+
+func printSpecifiers(specs []ast.NamedExport) string {
+	if len(specs) == 0 {
+		return "{}"
+	}
+	parts := make([]string, 0, len(specs))
+	for _, s := range specs {
+		if s.Remote == "" || s.Remote == s.Local {
+			parts = append(parts, printModuleName(s.Local))
+		} else {
+			parts = append(parts, printModuleName(s.Local)+" as "+printModuleName(s.Remote))
+		}
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
+}
+
+// printModuleName renders an import/export specifier name, quoting names
+// that are not identifier-like (`"a-b"`).
+func printModuleName(s string) string {
+	if isJSIdent(s) {
+		return s
+	}
+	return quoteString(s)
+}
+
+func printAttributes(attrs []ast.ImportAttribute) string {
+	if len(attrs) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(attrs))
+	for _, a := range attrs {
+		parts = append(parts, printModuleName(a.Key)+": "+quoteString(a.Value))
+	}
+	if len(parts) == 0 {
+		return " with {}"
+	}
+	return " with { " + strings.Join(parts, ", ") + " }"
+}
+
+func (p *printer) ifStmt(f *ast.IfStmt, depth int) {
+	p.line(depth, "if ("+p.expr(f.Test, precLowest)+") {")
+	p.body(f.Consequent, depth+1)
 	for len(f.Alternate) == 1 {
 		next, ok := f.Alternate[0].(*ast.IfStmt)
 		if !ok {
 			break
 		}
-		p.indent(depth)
-		p.b.WriteString("} else if (")
-		p.b.WriteString(p.expr(next.Test))
-		p.b.WriteString(") {\n")
+		p.line(depth, "} else if ("+p.expr(next.Test, precLowest)+") {")
 		p.body(next.Consequent, depth+1)
 		f = next
 	}
@@ -239,16 +375,24 @@ func (p *printer) closeIfChain(f *ast.IfStmt, depth int) {
 
 func (p *printer) forStmt(f *ast.ForStmt, depth int) {
 	init := ""
-	if f.Init != nil {
-		init = strings.TrimSuffix(printStmtInline(f.Init), ";")
+	p.noIn = true
+	switch v := f.Init.(type) {
+	case *ast.VarStmt:
+		init = p.varDecl(v)
+	case *ast.ExprStmt:
+		init = p.expr(v.Expression, precLowest)
+		if strings.HasPrefix(init, "let") {
+			init = "(" + init + ")"
+		}
 	}
+	p.noIn = false
 	test := ""
 	if f.Test != nil {
-		test = p.expr(f.Test)
+		test = p.expr(f.Test, precLowest)
 	}
 	update := ""
 	if f.Update != nil {
-		update = p.expr(f.Update)
+		update = p.expr(f.Update, precLowest)
 	}
 	p.line(depth, "for ("+init+"; "+test+"; "+update+") {")
 	p.body(f.Body, depth+1)
@@ -257,23 +401,35 @@ func (p *printer) forStmt(f *ast.ForStmt, depth int) {
 
 func (p *printer) forInStmt(f *ast.ForInStmt, depth int) {
 	op := " in "
+	right := p.expr(f.Right, precLowest)
 	if f.IsForOf {
 		op = " of "
+		right = p.expr(f.Right, precAssign)
 	}
-	p.line(depth, "for ("+p.expr(f.Left)+op+p.expr(f.Right)+") {")
+	head := "for "
+	if f.Await {
+		head = "for await "
+	}
+	left := p.expr(f.Left, precLHS)
+	if f.Keyword != "" {
+		left = f.Keyword + " " + left
+	} else if strings.HasPrefix(left, "let") || (f.IsForOf && strings.HasPrefix(left, "async")) {
+		left = "(" + left + ")"
+	}
+	p.line(depth, head+"("+left+op+right+") {")
 	p.body(f.Body, depth+1)
 	p.line(depth, "}")
 }
 
 func (p *printer) switchStmt(s *ast.SwitchStmt, depth int) {
-	p.line(depth, "switch ("+p.expr(s.Discriminant)+") {")
+	p.line(depth, "switch ("+p.expr(s.Discriminant, precLowest)+") {")
 	for _, c := range s.Cases {
 		if c.Test == nil {
-			p.line(depth, "default:")
+			p.line(depth+1, "default:")
 		} else {
-			p.line(depth, "case "+p.expr(c.Test)+":")
+			p.line(depth+1, "case "+p.expr(c.Test, precLowest)+":")
 		}
-		p.body(c.Body, depth+1)
+		p.body(c.Body, depth+2)
 	}
 	p.line(depth, "}")
 }
@@ -282,14 +438,18 @@ func (p *printer) tryStmt(t *ast.TryStmt, depth int) {
 	p.line(depth, "try {")
 	p.body(t.Body, depth+1)
 	if t.Catch != nil {
-		if t.Catch.Param != "" {
+		switch {
+		case t.Catch.ParamTarget != nil:
+			p.line(depth, "} catch ("+p.expr(t.Catch.ParamTarget, precAssign)+") {")
+		case t.Catch.Param != "":
 			p.line(depth, "} catch ("+t.Catch.Param+") {")
-		} else {
+		default:
 			p.line(depth, "} catch {")
 		}
 		p.body(t.Catch.Body, depth+1)
 	}
-	if len(t.Finally) > 0 {
+	// An empty finally is printed only when it is needed for validity.
+	if len(t.Finally) > 0 || t.Catch == nil {
 		p.line(depth, "} finally {")
 		p.body(t.Finally, depth+1)
 	}
@@ -299,6 +459,7 @@ func (p *printer) tryStmt(t *ast.TryStmt, depth int) {
 // helpers for statement text
 
 func printImport(i *ast.ImportStmt) string {
+	attrs := printAttributes(i.Attributes)
 	var parts []string
 	if i.Default != "" {
 		parts = append(parts, i.Default)
@@ -310,76 +471,78 @@ func printImport(i *ast.ImportStmt) string {
 		var names []string
 		for _, n := range i.Named {
 			if n.Remote != "" && n.Remote != n.Local {
-				names = append(names, n.Remote+" as "+n.Local)
+				names = append(names, printModuleName(n.Remote)+" as "+n.Local)
 			} else if n.Local != "" {
 				names = append(names, n.Local)
 			}
 		}
-		if len(names) > 0 {
-			parts = append(parts, "{ "+strings.Join(names, ", ")+" }")
-		}
+		parts = append(parts, "{ "+strings.Join(names, ", ")+" }")
 	}
 	if len(parts) == 0 {
-		return "import " + i.Source + ";"
+		return "import " + i.Source + attrs + ";"
 	}
-	return "import " + strings.Join(parts, ", ") + " from " + i.Source + ";"
+	return "import " + strings.Join(parts, ", ") + " from " + i.Source + attrs + ";"
 }
 
-func printVar(v *ast.VarStmt) string {
-	kind := "const"
-	switch v.Kind {
+func varKeyword(k ast.VarKind) string {
+	switch k {
 	case ast.VarLet:
-		kind = "let"
+		return "let"
 	case ast.VarVar:
-		kind = "var"
+		return "var"
+	case ast.VarUsing:
+		return "using"
+	case ast.VarAwaitUsing:
+		return "await using"
 	}
-	var decls []string
+	return "const"
+}
+
+func (p *printer) varDecl(v *ast.VarStmt) string {
+	decls := make([]string, 0, len(v.Decls))
 	for _, d := range v.Decls {
-		decls = append(decls, printVarDecl(d))
+		name := d.Name
+		switch {
+		case d.Target != nil:
+			name = p.expr(d.Target, precAssign)
+		case d.IsDestructuring && d.Pattern != "":
+			name = d.Pattern
+		}
+		if d.Init != nil {
+			name += " = " + p.expr(d.Init, precAssign)
+		}
+		decls = append(decls, name)
 	}
-	return kind + " " + strings.Join(decls, ", ") + ";"
+	return varKeyword(v.Kind) + " " + strings.Join(decls, ", ")
 }
 
-func printVarDecl(d *ast.VarDecl) string {
-	name := d.Name
-	if d.IsDestructuring && d.Pattern != "" {
-		name = d.Pattern
-	}
-	if d.Init != nil {
-		return name + " = " + (&printer{}).expr(d.Init)
-	}
-	return name
-}
-
-func printParams(params []*ast.Param) string {
-	var out []string
+func (p *printer) params(params []*ast.Param) string {
+	out := make([]string, 0, len(params))
 	for _, prm := range params {
-		out = append(out, printParam(prm))
+		out = append(out, p.param(prm))
 	}
 	return strings.Join(out, ", ")
 }
 
-func printParam(prm *ast.Param) string {
+func (p *printer) param(prm *ast.Param) string {
 	if prm == nil {
 		return ""
 	}
 	name := prm.Name
-	if name == "{...}" && prm.Pattern != "" {
+	switch {
+	case prm.Target != nil:
+		name = p.expr(prm.Target, precAssign)
+	case prm.Pattern != "":
 		name = prm.Pattern
 	}
 	if prm.IsRest {
 		name = "..." + name
 	}
 	if prm.Default != nil {
-		name += " = " + (&printer{}).expr(prm.Default)
+		name += " = " + p.expr(prm.Default, precAssign)
 	}
 	return name
 }
 
-// printStmtInline renders a statement without a trailing newline (for `for`
-// initializers).
-func printStmtInline(s ast.Stmt) string {
-	p := &printer{}
-	p.stmt(s, 0)
-	return strings.TrimRight(p.b.String(), "\n")
-}
+// printParams renders a parameter list (kept for callers in this package).
+func printParams(params []*ast.Param) string { return (&printer{}).params(params) }
