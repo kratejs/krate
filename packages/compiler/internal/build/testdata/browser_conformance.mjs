@@ -62,11 +62,24 @@ try {
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors = [];
+  // Firefox renders console.error(errorObject) as just "Error", so bare error
+  // names are resolved to "Name: message" from the argument before filtering.
+  const pendingErrors = [];
+  const settleErrors = () => Promise.all(pendingErrors.splice(0));
   page.on("console", (msg) => {
     if (msg.type() !== "error") return;
     // Resource 404s are reported with their URL by the response listener below.
     if (msg.text().startsWith("Failed to load resource")) return;
-    errors.push(msg.text());
+    const i = errors.push(msg.text()) - 1;
+    const arg = msg.args()[0];
+    if (arg && /^[A-Za-z]*Error$/.test(msg.text())) {
+      pendingErrors.push(
+        arg
+          .evaluate((v) => (v instanceof Error ? v.name + ": " + v.message : String(v)))
+          .then((text) => { errors[i] = text; })
+          .catch(() => {}),
+      );
+    }
   });
   page.on("pageerror", (err) => errors.push(err.message));
   page.on("response", (response) => {
@@ -470,6 +483,7 @@ try {
   if ((await classLog()) !== wantCaught) fail(`boundary log: ${await classLog()}`);
   // Caught errors are logged like React does; the handler error is expected.
   const expected = /crashed [ab]|The above error occurred|handler error/;
+  await settleErrors();
   for (let i = errors.length - 1; i >= errorsBeforeClass; i--) {
     if (expected.test(errors[i])) errors.splice(i, 1);
   }
@@ -589,6 +603,7 @@ try {
     if (nojsFeedback.status() !== 303 || !nojsFeedbackURL.endsWith("/react-actions/")) fail(`no-JS server action post: ${JSON.stringify(actions.nojs)}`);
   }
 
+  await settleErrors();
   if (errors.length) fail("console errors: " + errors.join(" | "));
 
   console.log(JSON.stringify({ browser: browserName, before, after, tooltip, tooltipDebug, formResult, suspense, actions, errors, failures }, null, 2));
