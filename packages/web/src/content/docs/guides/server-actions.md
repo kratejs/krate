@@ -290,6 +290,9 @@ dispatched on the form (or `document`) and the error is logged.
   closures for the server.
 - Every export in an action file must be a function. Re-exports are rejected
   with a build error.
+- A `useActionState` dispatch passed to a child component as a prop works with
+  JavaScript but renders no native fallback. Render the `<form>` in the
+  component that calls `useActionState` when it must work without JavaScript.
 - Action results update client state (signals, `useActionState`), not
   server-rendered markup: there is no RSC-style page refresh. Navigate or use a
   redirect to show re-rendered server output.
