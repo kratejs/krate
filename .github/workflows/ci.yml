@@ -202,6 +202,10 @@ jobs:
         run: go test -fuzz=FuzzParse -fuzztime=30s -run=^$ ./internal/parser
         working-directory: packages/compiler
 
+      - name: Fuzz HTML minifier
+        run: go test -fuzz=FuzzMinifyHTML -fuzztime=30s -run=^$ ./internal/build
+        working-directory: packages/compiler
+
   browser-conformance:
     name: Browser conformance (${{ matrix.browser }})
     runs-on: ubuntu-latest
