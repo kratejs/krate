@@ -135,7 +135,7 @@ type reactCtx struct {
 	// classComponents names the module's class components, whose `key` is
 	// kept as a reserved prop so a key change remounts the instance.
 	classComponents map[string]bool
-	alias   string            // namespace/default alias for `React`
+	alias           string // namespace/default alias for `React`
 	// domAlias is the namespace/default alias for `react-dom` (ReactDOM).
 	domAlias string
 	// fragmentNames holds local bindings (including the React alias) that
