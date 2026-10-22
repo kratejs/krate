@@ -89,6 +89,9 @@ var parallelMinChildren = 8
 type orphanBinding struct {
 	owner irtree.SlotID
 	bind  irtree.SlotBinding
+	// lists names the list slots whose rows contain the binding's slot (see
+	// ComponentSignature.InLists).
+	lists []irtree.SlotID
 }
 
 // Emitter walks a ComponentTree and produces HTML + hydration metadata.
@@ -208,16 +211,33 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	e.styleHTML += output.StyleHTML
 	e.orphans = append(e.orphans, output.Orphans...)
 
+	// Rows of a list bound by the keyed list runtime are rendered and adopted
+	// by that list, so the components and bindings inside them must not also
+	// hydrate on their own.
+	managed := managedLists(output.Signatures, e.orphans)
+
 	// Attach orphan bindings (dynamic slots in call-site children that
 	// reference a caller's signals) to the signature that owns them: first try
 	// the client component that enclosed the collection site, then fall back to
 	// the first signature declaring the binding's signals.
 	if len(e.orphans) > 0 {
 		for _, o := range e.orphans {
+			if inManagedList(o.lists, managed) {
+				continue
+			}
 			if owner := findSignatureOwner(output.Signatures, o.owner, o.bind); owner >= 0 {
 				output.Signatures[owner].SlotBindings = append(output.Signatures[owner].SlotBindings, o.bind)
 			}
 		}
+	}
+	if len(managed) > 0 {
+		kept := output.Signatures[:0]
+		for _, sig := range output.Signatures {
+			if !inManagedList(sig.InLists, managed) {
+				kept = append(kept, sig)
+			}
+		}
+		output.Signatures = kept
 	}
 
 	// Collect client component functions referenced by dynamic list slots so
@@ -884,6 +904,7 @@ func collectChildrenOrphans(children []irtree.SlotNode, owner irtree.SlotID) []o
 					Type:    "list",
 					ExprJS:  ls.ExprSource,
 					Signals: ls.Signals,
+					List:    ls.Bind,
 				},
 			})
 		}
@@ -957,6 +978,15 @@ func (e *Emitter) emitConditionalSlot(s *irtree.ConditionalSlot) SlotOutput {
 	return out
 }
 
+// emitListSlot renders a list as comment markers around its rows:
+//
+//	<!--k:ID--><!--k:ID:KEY-->row<!--/k:ID:KEY-->...<!--/k:ID-->
+//
+// KEY is "$" plus the row's key for keyed rows (comment-encoded) or the index,
+// so hydration adopts each server-rendered row by key. Comments are valid in
+// every content model (<tbody>, <select>, <ul>), so lists work anywhere.
+// Signatures and orphan bindings from the rows are tagged with the list ID;
+// Emit drops them when the list itself is bound by the list runtime.
 func (e *Emitter) emitListSlot(s *irtree.ListSlot) SlotOutput {
 	id := string(s.ID)
 	var itemsHTML strings.Builder
@@ -969,6 +999,14 @@ func (e *Emitter) emitListSlot(s *irtree.ListSlot) SlotOutput {
 			childOut := e.emitSlotNode(child)
 			itemsHTML.WriteString(childOut.HTML)
 			childOut.HTML = ""
+			if s.Bind != nil {
+				for i := range childOut.Signatures {
+					childOut.Signatures[i].InLists = append(childOut.Signatures[i].InLists, s.ID)
+				}
+				for i := range childOut.Orphans {
+					childOut.Orphans[i].lists = append(childOut.Orphans[i].lists, s.ID)
+				}
+			}
 			mergeSlotOutput(&out, childOut)
 		}
 		itemsHTML.WriteString(slotEndMarker(itemID))
@@ -1130,8 +1168,41 @@ func collectSlotBindings(children []irtree.SlotNode) []irtree.SlotBinding {
 				Type:    "list",
 				ExprJS:  s.ExprSource,
 				Signals: s.Signals,
+				List:    s.Bind,
 			})
 		}
 	}
 	return bindings
+}
+
+// managedLists returns the IDs of list slots that will be bound by the keyed
+// list runtime: list bindings with a runtime plan, either declared by a
+// signature or carried by an orphan binding that has an owner.
+func managedLists(sigs []irtree.ComponentSignature, orphans []orphanBinding) map[irtree.SlotID]bool {
+	managed := map[irtree.SlotID]bool{}
+	for _, sig := range sigs {
+		if sig.Tier != irtree.TierClient {
+			continue
+		}
+		for _, b := range sig.SlotBindings {
+			if b.Type == "list" && b.List != nil {
+				managed[b.SlotID] = true
+			}
+		}
+	}
+	for _, o := range orphans {
+		if o.bind.Type == "list" && o.bind.List != nil && findSignatureOwner(sigs, o.owner, o.bind) >= 0 {
+			managed[o.bind.SlotID] = true
+		}
+	}
+	return managed
+}
+
+func inManagedList(lists []irtree.SlotID, managed map[irtree.SlotID]bool) bool {
+	for _, id := range lists {
+		if managed[id] {
+			return true
+		}
+	}
+	return false
 }

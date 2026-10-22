@@ -21,7 +21,11 @@ export interface SignalOptions<T> {
 // A null entry is an untracked scope (see untrack): reads inside it subscribe
 // nothing.
 const context: Array<EffectState | null> = [];
-const mountQueue: Array<{ fn: () => void; owner: unknown }> = [];
+// Each queued mount callback remembers the owner (effect or root) that was
+// current when it was registered, so an onCleanup inside the callback belongs
+// to that owner instead of the page root, and the error-boundary owner its
+// errors are routed to.
+const mountQueue: Array<{ fn: () => void; owner: EffectState | null | undefined; boundary: unknown }> = [];
 let mountScheduled = false;
 
 /**
@@ -80,6 +84,14 @@ interface EffectState {
   owner: unknown;
   /** Error-boundary owner current when the effect was created (see OwnerHooks), or null. */
   boundaryOwner: unknown;
+  /**
+   * Marks an ownership root (see createRoot). A root is pushed on the context
+   * stack with `disposed` set so signal reads stay untracked, while effects,
+   * memos and cleanups registered under it are collected into `cleanups`.
+   */
+  root?: boolean;
+  /** Set once a root has been disposed. */
+  dead?: boolean;
 }
 
 function newEffectState(fn: () => void): EffectState {
@@ -668,22 +680,26 @@ function runEffect(effect: EffectState): void {
 export function createEffect(fn: () => void): () => void {
   const effect = newEffectState(fn);
   allEffects.add(effect);
+  // An effect created while an ownership root is current is disposed with it,
+  // and an effect created under a component owner is disposed when that
+  // component unmounts.
+  const owner = context[context.length - 1];
   const dispose = (): void => {
     disposeEffect(effect);
     allEffects.delete(effect);
   };
-  // An owned effect is disposed with its owner (unmounted subtree).
   if (effect.boundaryOwner && ownerHooks) {
     ownerHooks.cleanup(effect.boundaryOwner, dispose);
   }
   runEffect(effect);
+  if (owner && owner.root) addOwnerCleanup(owner, dispose);
   return dispose;
 }
 
 export function onCleanup(fn: () => void): void {
   const current = currentEffect();
   if (current) {
-    current.cleanups.push(fn);
+    addOwnerCleanup(current, fn);
     return;
   }
   const owner = ownerHooks ? ownerHooks.current() : null;
@@ -697,8 +713,51 @@ export function onCleanup(fn: () => void): void {
   }
 }
 
+function addOwnerCleanup(owner: EffectState, fn: () => void): void {
+  if (owner.dead) {
+    // The root is already gone (a late mount callback): clean up at once.
+    fn();
+    return;
+  }
+  owner.cleanups.push(fn);
+}
+
+/**
+ * Run `fn` in a new ownership root. Effects, memos, onCleanup callbacks and
+ * onMount callbacks registered while it runs (and the cleanups those mount
+ * callbacks register) belong to the root and are torn down, in registration
+ * order, when the returned `dispose` is called. Signal reads inside `fn` are
+ * not tracked by any enclosing effect. Keyed list rows and keyed remounts use
+ * one root per row so a removed row runs its cleanups without touching its
+ * siblings.
+ */
+export function createRoot<T>(fn: (dispose: () => void) => T): T {
+  const root = newEffectState(() => {});
+  // `disposed` keeps signal reads inside the root untracked.
+  root.disposed = true;
+  root.root = true;
+  const dispose = (): void => {
+    if (root.dead) return;
+    root.dead = true;
+    const cleanups = root.cleanups.splice(0);
+    for (const cleanup of cleanups) {
+      try {
+        cleanup();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  };
+  context.push(root);
+  try {
+    return fn(dispose);
+  } finally {
+    context.pop();
+  }
+}
+
 export function onMount(fn: () => void): void {
-  mountQueue.push({ fn, owner: ownerHooks ? ownerHooks.current() : null });
+  mountQueue.push({ fn, owner: context[context.length - 1], boundary: ownerHooks ? ownerHooks.current() : null });
   if (!mountScheduled) {
     mountScheduled = true;
     queueMicrotask(flushMounts);
@@ -708,12 +767,28 @@ export function onMount(fn: () => void): void {
 function flushMounts(): void {
   mountScheduled = false;
   const queue = mountQueue.splice(0);
-  for (const entry of queue) {
-    if (entry.owner && ownerHooks) {
-      ownerHooks.run(entry.owner, entry.fn);
-    } else {
-      entry.fn();
-    }
+  for (const { fn, owner, boundary } of queue) {
+    const run = (): void => {
+      if (!owner) {
+        fn();
+        return;
+      }
+      // The owner unmounted before its mount effects ran: skip them, as React
+      // does for a component that never committed.
+      if (owner.dead || (!owner.root && owner.disposed)) return;
+      // Collect cleanups registered by the callback without tracking its reads.
+      const collector = newEffectState(() => {});
+      collector.disposed = true;
+      context.push(collector);
+      try {
+        fn();
+      } finally {
+        context.pop();
+      }
+      for (const cleanup of collector.cleanups) addOwnerCleanup(owner, cleanup);
+    };
+    if (boundary && ownerHooks) ownerHooks.run(boundary, run);
+    else run();
   }
 }
 

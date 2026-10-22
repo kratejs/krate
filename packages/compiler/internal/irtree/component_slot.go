@@ -246,7 +246,7 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 	// reads the key through a reserved prop.
 	if b.ann.IsLoweredClass(childFn.Name) {
 		for _, a := range el.Opening.Attributes {
-			if a != nil && !a.Spread && a.Name == "__krate_key" && a.Value != nil {
+			if a != nil && !a.Spread && a.Name == "key" && a.Value != nil {
 				attrs["__krate_key"] = a.Value
 			}
 		}

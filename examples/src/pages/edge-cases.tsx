@@ -215,7 +215,7 @@ function ChildComponent(props: { title: string; items: string[]; onAction: (val:
     <div class="child">
       <h2>{props.title}</h2>
       <ul>
-        {props.items.map(item => <li>{item}</li>)}
+        {props.items.map(item => <li key={item}>{item}</li>)}
       </ul>
       <button onClick={() => props.onAction("new")}>Add</button>
     </div>
@@ -288,7 +288,7 @@ function ForLoopDemo() {
     <div>
       <h2>For Loop Results</h2>
       <ul>
-        {results.map(r => <li>{r}</li>)}
+        {results.map(r => <li key={r}>{r}</li>)}
       </ul>
     </div>
   );

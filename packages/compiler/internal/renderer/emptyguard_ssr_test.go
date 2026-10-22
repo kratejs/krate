@@ -69,7 +69,7 @@ export default function Page() {
 		strings.Contains(hjs, "return h(\"span\",null);\nvar items=") {
 		t.Errorf("hydration still emits the empty-guard return before the local declaration:\n%s", hjs)
 	}
-	if !strings.Contains(hjs, "kbindContent") {
-		t.Errorf("hydration must retain the list content binding:\n%s", hjs)
+	if !strings.Contains(hjs, "kbindList") {
+		t.Errorf("hydration must retain the list binding:\n%s", hjs)
 	}
 }

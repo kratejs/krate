@@ -132,10 +132,7 @@ func (s *scope) isGetter(name string) bool {
 
 type reactCtx struct {
 	imports map[string]string // local name -> React API name
-	// classComponents names the module's class components, whose `key` is
-	// kept as a reserved prop so a key change remounts the instance.
-	classComponents map[string]bool
-	alias           string // namespace/default alias for `React`
+	alias   string            // namespace/default alias for `React`
 	// domAlias is the namespace/default alias for `react-dom` (ReactDOM).
 	domAlias string
 	// fragmentNames holds local bindings (including the React alias) that
@@ -241,8 +238,7 @@ func RewriteReact(prog *ast.Program) {
 // React patterns whose Krate semantics differ (see internal/diag
 // codes_effects.go). file and src position the diagnostics.
 func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
-	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src,
-		classComponents: moduleClassComponents(prog)}
+	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src}
 	var toRemove []int
 
 	for i, stmt := range prog.Body {
@@ -825,7 +821,11 @@ func (c *reactCtx) lowerJSXCall(call *ast.CallExpr, sc *scope) (ast.Expr, bool) 
 	propsExpr := call.Args[1]
 
 	if id, ok := typeExpr.(*ast.Identifier); ok && c.fragmentNames[id.Name] {
-		return &ast.JSXFragment{Position: call.Position, Children: c.jsxChildrenFromProps(propsExpr, sc)}, true
+		frag := &ast.JSXFragment{Position: call.Position, Children: c.jsxChildrenFromProps(propsExpr, sc)}
+		if len(call.Args) > 2 && call.Args[2] != nil {
+			frag.Key = c.rewriteExpr(call.Args[2], sc)
+		}
+		return frag, true
 	}
 
 	name, ok := jsxTypeName(typeExpr)
@@ -854,10 +854,16 @@ func (c *reactCtx) lowerJSXCall(call *ast.CallExpr, sc *scope) (ast.Expr, bool) 
 			children = prop.Value
 			hasChildren = true
 		case "key":
-			// React reconciliation key; Krate drops it (position/marker identity).
+			// React reconciliation key: kept as a JSX attribute so list and
+			// keyed-remount lowering can read it; every HTML path drops it.
+			attrs = append(attrs, &ast.JSXAttr{Name: "key", Value: c.rewriteExpr(prop.Value, sc)})
 		default:
 			attrs = append(attrs, &ast.JSXAttr{Name: prop.Key, Value: c.rewriteExpr(prop.Value, sc)})
 		}
+	}
+	// jsx(type, props, key): the automatic runtime passes the key separately.
+	if len(call.Args) > 2 && call.Args[2] != nil {
+		attrs = append(attrs, &ast.JSXAttr{Name: "key", Value: c.rewriteExpr(call.Args[2], sc)})
 	}
 
 	el := &ast.JSXElement{
@@ -965,42 +971,13 @@ func (c *reactCtx) lowerFragment(el *ast.JSXElement, sc *scope) ast.Expr {
 	for i, child := range el.Children {
 		el.Children[i] = c.rewriteJSXChild(child, sc)
 	}
-	return &ast.JSXFragment{Position: el.Position, Children: el.Children}
-}
-
-// ClassKeyProp is the reserved prop a class component element's `key` is
-// renamed to; the lowered class remounts when it changes.
-const ClassKeyProp = "__krate_key"
-
-// moduleClassComponents lists the class declarations extending Component or
-// PureComponent in prog.
-func moduleClassComponents(prog *ast.Program) map[string]bool {
-	out := map[string]bool{}
-	for _, stmt := range prog.Body {
-		var class *ast.ClassDecl
-		switch s := stmt.(type) {
-		case *ast.ClassDecl:
-			class = s
-		case *ast.ExportStmt:
-			class, _ = s.Declaration.(*ast.ClassDecl)
-		}
-		if class == nil || class.Name == "" {
-			continue
-		}
-		var name string
-		switch sup := class.SuperClass.(type) {
-		case *ast.Identifier:
-			name = sup.Name
-		case *ast.MemberExpr:
-			if p, ok := sup.Property.(*ast.Identifier); ok {
-				name = p.Name
-			}
-		}
-		if name == "Component" || name == "PureComponent" {
-			out[class.Name] = true
+	frag := &ast.JSXFragment{Position: el.Position, Children: el.Children}
+	for _, attr := range el.Opening.Attributes {
+		if attr != nil && !attr.Spread && attr.Name == "key" && attr.Value != nil {
+			frag.Key = c.rewriteExpr(attr.Value, sc)
 		}
 	}
-	return out
+	return frag
 }
 
 func (c *reactCtx) rewriteJSXElement(el *ast.JSXElement, sc *scope) {
@@ -1012,13 +989,7 @@ func (c *reactCtx) rewriteJSXElement(el *ast.JSXElement, sc *scope) {
 			}
 			// React-only directives carry no DOM meaning; drop them so no
 			// render path (static SSR, IR tree, hydration) can emit them.
-			if attr.Name == "key" && attr.Value != nil && c.classComponents[el.Opening.Name] {
-				attr.Name = ClassKeyProp
-				attr.Value = c.rewriteExpr(attr.Value, sc)
-				kept = append(kept, attr)
-				continue
-			}
-			if attr.Name == "key" || attr.Name == "suppressHydrationWarning" {
+			if attr.Name == "suppressHydrationWarning" {
 				continue
 			}
 			if attr.Name == "style" {
