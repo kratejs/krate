@@ -29,6 +29,7 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 	collectFunctionsWithSource(prog.Body, ann.Functions, ann.ComponentSources, ann.ComponentRaw, sourceFile, rawSource)
 	collectMemberComponents(prog.Body, ann.Functions)
 	collectClassComponents(prog.Body, ann.ClassComponents)
+	collectClassRejections(prog.Body, ann, sourceFile, rawSource)
 
 	// 2. Find default export -> entry point
 	ann.EntryPoint = FindDefaultExport(prog.Body)
@@ -631,6 +632,7 @@ func MergeModuleFunctions(ann *irtree.Annotations, modules []ModuleSource) {
 				ann.ClassComponents = make(map[string]bool)
 			}
 			collectClassComponents(mod.Program.Body, ann.ClassComponents)
+			collectClassRejections(mod.Program.Body, ann, mod.Path, mod.RawSource)
 			// Merge module-level cva factories so variant calls in the entry
 			// module can fold against factories defined in imported modules.
 			if ann.CVAFactories == nil {

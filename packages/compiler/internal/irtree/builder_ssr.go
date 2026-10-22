@@ -1,7 +1,6 @@
 package irtree
 
 import (
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -202,7 +201,7 @@ func evalConst(expr ast.Expr) string {
 		if arg == "" {
 			return ""
 		}
-		return unarySource(e.Op, arg)
+		return unaryPrefixJS(e.Op, arg)
 	case *ast.BinaryExpr:
 		left := evalConst(e.Left)
 		right := evalConst(e.Right)
@@ -302,7 +301,7 @@ func constExprToJS(expr ast.Expr) string {
 		}
 		return "{" + strings.Join(parts, ",") + "}"
 	case *ast.UnaryExpr:
-		return unarySource(e.Op, constExprToJS(e.Arg))
+		return unaryPrefixJS(e.Op, constExprToJS(e.Arg))
 	case *ast.TemplateExpr:
 		// Preserve the template literal as valid JS with interpolated parts.
 		var b strings.Builder
@@ -934,16 +933,13 @@ func handlersOrLocalsReferenceProps(handlers []HandlerDecl, body []ast.Stmt) boo
 	return false
 }
 
-// propsIdentRe matches a standalone `props` identifier in compiled JS.
-var propsIdentRe = regexp.MustCompile(`\bprops\b`)
-
 // compiledRefsProps reports whether any compiled JS string references `props`.
 // Effects/memos that read props.X (e.g. controlled-component sync effects like
 // `if (props.checked !== undefined) setChecked(props.checked)`) require the
 // parent-scope props registration so `props` resolves at runtime.
 func compiledRefsProps(js []string) bool {
 	for _, s := range js {
-		if propsIdentRe.MatchString(s) {
+		if codeContainsIdent(s, "props") {
 			return true
 		}
 	}
@@ -957,7 +953,7 @@ func compiledRefsProps(js []string) bool {
 // touches props.
 func signalsReferenceProps(signals []SignalDecl) bool {
 	for _, s := range signals {
-		if propsIdentRe.MatchString(s.RawInit) {
+		if codeContainsIdent(s.RawInit, "props") {
 			return true
 		}
 	}
@@ -981,12 +977,13 @@ func (b *builder) buildChildPropsRegDecl(id string, props map[string]ast.Expr) s
 		sb.WriteByte('}')
 		return sb.String()
 	}
-	first := true
-	for name, expr := range props {
-		if !first {
+	// Keys are emitted in sorted order so the registration (and the hashed
+	// hydration bundle) is byte-identical across builds.
+	for i, name := range sortedKeysExpr(props) {
+		expr := props[name]
+		if i > 0 {
 			sb.WriteByte(',')
 		}
-		first = false
 		sb.WriteString(jsObjectKey(name))
 		sb.WriteByte(':')
 		val := b.renderChildPropValue(expr)
@@ -1100,18 +1097,4 @@ func subExprListGeneric(s *propsMemberSubstituter, list []ast.Expr) []ast.Expr {
 		out[i] = s.sub(e)
 	}
 	return out
-}
-
-// unarySource joins a prefix unary operator and its operand as JS source:
-// keyword operators keep a separating space (`void 0`, `typeof x`) and
-// repeated signs never fuse into an increment (`- -x`, not `--x`).
-func unarySource(op, arg string) string {
-	switch op {
-	case "void", "typeof", "delete", "await":
-		return op + " " + arg
-	}
-	if arg != "" && (op == "-" || op == "+") && (arg[0] == op[0]) {
-		return op + " " + arg
-	}
-	return op + arg
 }

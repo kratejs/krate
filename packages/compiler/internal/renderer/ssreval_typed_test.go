@@ -160,6 +160,9 @@ func TestPropJSXIsMarkup(t *testing.T) {
 	src := `function Card(props) { return <h1>{props.icon}{props.label}</h1>; }
 export default function Page() { return <Card icon={<i>i</i>} label="<b>" />; }`
 	result, _ := fullPipeline(t, src)
+	if len(result.Errors) > 0 {
+		t.Fatalf("unexpected errors: %v", result.Errors)
+	}
 	if !strings.Contains(result.HTML, "<h1><i>i</i>&lt;b&gt;</h1>") {
 		t.Errorf("got:\n%s", result.HTML)
 	}

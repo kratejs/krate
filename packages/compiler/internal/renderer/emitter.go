@@ -388,6 +388,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	if node.SSREvalBindings != nil {
 		eval.SetBindings(node.SSREvalBindings)
 	}
+	eval.ResolveJSXProps(node.SSREvalAttrs)
 	if e.IconResolver != nil {
 		eval.iconEmit = func(name string, attrs []*ast.JSXAttr) (string, bool) {
 			return e.IconResolver(name, attrs)
@@ -490,14 +491,11 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	return out
 }
 
-// findReturnStmtIn finds the return statement in a function body.
+// findReturnStmtIn finds the render return of a function body. Early-return
+// guards and switch statements are lowered to a conditional chain the same
+// way the IR builder lowers them for client components.
 func findReturnStmtIn(body []ast.Stmt) *ast.ReturnStmt {
-	for _, stmt := range body {
-		if ret, ok := stmt.(*ast.ReturnStmt); ok {
-			return ret
-		}
-	}
-	return nil
+	return irtree.RenderReturn(body)
 }
 
 // emitServer - server component SSR

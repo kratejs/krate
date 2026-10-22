@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
@@ -83,6 +84,11 @@ type Annotations struct {
 	// PureComponent, so the builder can emit a specific diagnostic (class
 	// component lowering is not implemented yet).
 	ClassComponents map[string]bool
+	// ClassRejections holds, per class component that could not be lowered, a
+	// warning positioned at the unsupported member (shouldComponentUpdate, a
+	// static or private member, an unknown this.x read, ...). The builder
+	// reports it when the component is used.
+	ClassRejections map[string]diag.Diagnostic
 }
 
 // (Annotations continues below.)
@@ -378,6 +384,10 @@ type ComponentNode struct {
 	// The emitter uses SSREval to render these at build time.
 	IsSSREval       bool
 	SSREvalBindings map[string]jsvalue.Value
+	// SSREvalAttrs holds the call-site attribute expressions of an SSREval
+	// component, so props the IR folder cannot represent (JSX values) are
+	// evaluated by the SSR evaluator itself.
+	SSREvalAttrs map[string]ast.Expr
 	// LocalVars holds build-time folded local constants (including cva/cn class
 	// strings); they are merged into SSREvalBindings so SSR-evaluated components
 	// resolve local variables such as `const classes = cn(cva(...))`.
@@ -437,9 +447,10 @@ type ComponentTree struct {
 	ExternalComponents []ExternalComponent
 
 	// Warnings holds non-fatal problems collected while building the tree (for
-	// example, an unresolved component that will not render). The build prints
-	// them to stderr.
-	Warnings []string
+	// example, an unresolved component that will not render). Each carries the
+	// file:line:col of the offending node, its source line and a hint, with
+	// Severity set to diag.SeverityWarning. The build prints them to stderr.
+	Warnings []diag.Diagnostic
 
 	// CSSSignalsCSS is the generated stylesheet for every CSS signal scope
 	// compiled into this tree (empty when none). The build appends it to the

@@ -95,9 +95,7 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 		if e.Postfix {
 			return arg + e.Op
 		}
-		// Keyword operators need a space (`typeof x`, `void 0`) and repeated
-		// signs must not fuse into `--x`.
-		return unarySource(e.Op, arg)
+		return unaryPrefixJS(e.Op, arg)
 	case *ast.ConditionalExpr:
 		test := generateExprJS(e.Test, signals)
 		consequent := generateExprJS(e.Consequent, signals)
@@ -142,6 +140,24 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 		// the build for unsupported nodes, so this is a defensive fallback.
 		return "/*krate:unsupported:" + fmt.Sprintf("%T", expr) + "*/undefined"
 	}
+}
+
+// unaryPrefixJS joins a prefix operator and its rendered operand. Keyword
+// operators (typeof, void, delete, await, yield, new) need a space, or
+// `void foo()` becomes the identifier `voidfoo`. Sign operators need one when
+// the operand starts with the same sign, or `-(-x)` printed as `--x` would be
+// a decrement.
+func unaryPrefixJS(op, arg string) string {
+	if op == "" {
+		return arg
+	}
+	if c := op[len(op)-1]; (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+		return op + " " + arg
+	}
+	if (op == "-" || op == "+") && arg != "" && arg[0] == op[0] {
+		return op + " " + arg
+	}
+	return op + arg
 }
 
 // GenerateExprJS renders an AST expression to JavaScript source. Exported so
@@ -839,7 +855,10 @@ func isJSIdentifier(s string) bool {
 // is supported by the JS code generator. It guarantees no node is silently
 // dropped: an unsupported statement or expression becomes a hard build error
 // instead of vanishing from the emitted hydration/SSR code.
-func codegenIssues(fn *ast.FnDecl) []error {
+//
+// mk builds the positioned error for a finding; nil falls back to a plain
+// error naming the function.
+func codegenIssues(fn *ast.FnDecl, mk func(pos ast.Pos, msg, hint string) error) []error {
 	if fn == nil {
 		return nil
 	}
@@ -848,10 +867,15 @@ func codegenIssues(fn *ast.FnDecl) []error {
 	if where == "" {
 		where = "<anonymous>"
 	}
+	if mk == nil {
+		mk = func(pos ast.Pos, msg, hint string) error {
+			return fmt.Errorf("%s:%d:%d: %s (hint: %s)", where, pos.Line, pos.Col, msg, hint)
+		}
+	}
 	report := func(pos ast.Pos, kind string, node interface{}) {
-		issues = append(issues, fmt.Errorf(
-			"%s:%d:%d: unsupported %s %T in client code (Krate bug — please report)",
-			where, pos.Line, pos.Col, kind, node))
+		issues = append(issues, mk(pos,
+			fmt.Sprintf("%s: the client code generator cannot emit this %s (%T)", where, kind, node),
+			"this is an internal compiler limitation; please report it with the snippet, and rewrite the construct with plain expressions meanwhile"))
 	}
 
 	var walkExpr func(ast.Expr)
@@ -900,8 +924,12 @@ func codegenIssues(fn *ast.FnDecl) []error {
 				walkExpr(p)
 			}
 		case *ast.JSXElement:
-			for _, a := range v.Opening.Attributes {
-				walkExpr(a.Value)
+			if v.Opening != nil {
+				for _, a := range v.Opening.Attributes {
+					if a != nil {
+						walkExpr(a.Value)
+					}
+				}
 			}
 			for _, c := range v.Children {
 				walkJSXChild(c)
@@ -938,6 +966,15 @@ func codegenIssues(fn *ast.FnDecl) []error {
 
 	walkStmt = func(s ast.Stmt) {
 		switch v := s.(type) {
+		case nil:
+		case *ast.ClassDecl:
+			name := v.Name
+			if name == "" {
+				name = "anonymous class"
+			}
+			issues = append(issues, mk(v.Position,
+				fmt.Sprintf("%s: class declaration %s inside a component or helper function is not supported in client code", where, name),
+				"move the class to module scope in a separate module and import it, or replace it with plain objects and functions"))
 		case *ast.ReturnStmt:
 			walkExpr(v.Value)
 		case *ast.ExprStmt:

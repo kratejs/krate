@@ -200,6 +200,29 @@ func (e *SSREval) SetBindings(bindings map[string]jsvalue.Value) {
 	e.frame.Define("props", props)
 }
 
+// ResolveJSXProps re-evaluates call-site props whose value is JSX (which the
+// IR const folder cannot represent) and binds the rendered markup.
+func (e *SSREval) ResolveJSXProps(attrs map[string]ast.Expr) {
+	names := make([]string, 0, len(attrs))
+	for name, expr := range attrs {
+		if expr != nil && hasJSX(expr) {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	sort.Strings(names)
+	bindings := make(map[string]jsvalue.Value, len(names))
+	for _, name := range names {
+		if cur, ok := e.frame.Lookup(name); ok && !cur.IsUnknown() {
+			continue
+		}
+		bindings[name] = e.value(attrs[name])
+	}
+	e.SetBindings(bindings)
+}
+
 // SetChildrenHTML binds the root component's call-site children, already
 // rendered to HTML by the emitter's slot pipeline.
 func (e *SSREval) SetChildrenHTML(html string) {
