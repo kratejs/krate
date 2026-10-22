@@ -1056,16 +1056,37 @@ func (b *builder) buildChildPropsRegDecl(id string, props map[string]ast.Expr) s
 		if i > 0 {
 			sb.WriteByte(',')
 		}
-		sb.WriteString(jsObjectKey(name))
-		sb.WriteByte(':')
 		val := b.renderChildPropValue(expr)
 		if val == "" {
 			val = "undefined"
 		}
+		if b.isSignalDerivedProp(expr) {
+			// A getter keeps the prop live: each child read re-evaluates
+			// it, so effects and bindings that read props.X track the
+			// parent's signals instead of a hydration-time snapshot.
+			sb.WriteString("get ")
+			sb.WriteString(jsObjectKey(name))
+			sb.WriteString("(){return ")
+			sb.WriteString(val)
+			sb.WriteString("}")
+			continue
+		}
+		sb.WriteString(jsObjectKey(name))
+		sb.WriteByte(':')
 		sb.WriteString(val)
 	}
 	sb.WriteByte('}')
 	return sb.String()
+}
+
+// isSignalDerivedProp reports whether a call-site prop value reads one of the
+// current component's signals (`title={String(count())}`). Functions are live
+// references already and synthetic context props are getters themselves.
+func (b *builder) isSignalDerivedProp(expr ast.Expr) bool {
+	if _, isFn := expr.(*ast.ArrowFn); isFn {
+		return false
+	}
+	return b.referencesSignal(expr)
 }
 
 // renderChildPropValue renders a call-site prop value to self-contained JS for a

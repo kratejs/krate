@@ -279,8 +279,12 @@ func (b *builder) foldComponentLocals(fn *ast.FnDecl, node *ComponentNode, isPag
 	var funcPropAliases []string
 	if b.localFuncProps != nil && client {
 		// Function-prop aliases leave the fold set so they aren't serialized
-		// as the function's name string.
-		for name := range fold.locals {
+		// as the function's name string. Declaration order keeps the output
+		// deterministic.
+		for _, name := range fold.order {
+			if _, ok := fold.locals[name]; !ok {
+				continue
+			}
 			if prop := funcPropAliasOf(fn.Body, name, b.localFuncProps); prop != "" {
 				funcPropAliases = append(funcPropAliases, name+"=props."+prop)
 				delete(fold.locals, name)
@@ -567,7 +571,7 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 	if decls := b.referencedModuleConstVars(node); len(decls) > 0 {
 		node.PreSignalVars = append(decls, node.PreSignalVars...)
 	}
-	if needsNoClientJS(node, fn) && !res.forceClient {
+	if needsNoClientJS(node, fn) && !res.forceClient && !b.rendersLiveProps(node) {
 		node.Tier = TierStatic
 	}
 }

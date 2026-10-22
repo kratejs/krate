@@ -118,6 +118,10 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	for _, ev := range node.ExtraVars {
 		scan(ev)
 	}
+	// Replayed body statements (e.g. a custom hook call `useTitle("x")`).
+	for _, ev := range node.PreSignalVars {
+		scan(ev)
+	}
 	// Dynamic list slot expressions (e.g. {items().map(x => <Item onSelect={fn}/>)})
 	// reference local functions too; without hoisting them the runtime re-render
 	// of the list would throw ReferenceError. The ListSlot may be nested inside
@@ -2717,6 +2721,9 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 		}
 		return false
 	case *ast.MemberExpr:
+		if b.isLivePropRead(e) {
+			return true
+		}
 		return b.referencesSignal(e.Object)
 	case *ast.BinaryExpr:
 		return b.referencesSignal(e.Left) || b.referencesSignal(e.Right)
@@ -2782,6 +2789,20 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 		return b.referencesSignal(e.Expr)
 	}
 	return false
+}
+
+// isLivePropRead reports whether e reads a getter-registered prop
+// (`props.title` where the caller passed a signal-derived value).
+func (b *builder) isLivePropRead(e *ast.MemberExpr) bool {
+	if len(b.liveProps) == 0 || b.livePropsParam == "" || e.Computed {
+		return false
+	}
+	obj, ok := e.Object.(*ast.Identifier)
+	if !ok || obj.Name != b.livePropsParam || b.isShadowed(obj.Name) {
+		return false
+	}
+	prop, ok := e.Property.(*ast.Identifier)
+	return ok && b.liveProps[prop.Name]
 }
 
 func isSimpleSignalRead(expr ast.Expr) bool {
