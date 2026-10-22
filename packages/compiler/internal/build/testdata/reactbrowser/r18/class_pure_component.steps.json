@@ -1,0 +1,8 @@
+{
+  "notes": "Logging in render is intentional here: PureComponent skipping render is the behavior under test.",
+  "steps": [
+    { "op": "click", "sel": "#tick" },
+    { "op": "click", "sel": "#rename" },
+    { "op": "click", "sel": "#rename" }
+  ]
+}

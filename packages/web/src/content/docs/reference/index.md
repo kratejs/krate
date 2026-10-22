@@ -22,3 +22,4 @@ Deep reference material for the Krate APIs.
 | [Component Library](/docs/reference/component-library/) | The `@krate/components` UI kit |
 | [Config Reference](/docs/reference/config/) | Every `krate.config.ts` key, with types and defaults |
 | [Config Reference](/docs/reference/config/) | Every `krate.config.ts` option |
+| [Diagnostic Codes](/docs/reference/diagnostics/) | Every stable `KRxxxx` compiler diagnostic |

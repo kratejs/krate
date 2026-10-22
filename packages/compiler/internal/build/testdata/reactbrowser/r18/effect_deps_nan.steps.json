@@ -1,0 +1,8 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#bad" },
+    { "op": "click", "sel": "#bad2" },
+    { "op": "click", "sel": "#rerender" },
+    { "op": "click", "sel": "#good" }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "type", "sel": "#search", "text": "abc" },
+    { "op": "press", "sel": "#search", "key": "Backspace" },
+    { "op": "click", "sel": "#other" }
+  ]
+}

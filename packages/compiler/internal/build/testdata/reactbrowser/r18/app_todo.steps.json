@@ -1,0 +1,15 @@
+{
+  "steps": [
+    { "op": "type", "sel": "#new-title", "text": "buy milk" },
+    { "op": "press", "sel": "#new-title", "key": "Enter" },
+    { "op": "click", "sel": "[data-id='1'] .toggle" },
+    { "op": "dblclick", "sel": "[data-id='2'] .title" },
+    { "op": "fill", "sel": "[data-id='2'] .edit", "text": "ship it today" },
+    { "op": "press", "sel": "[data-id='2'] .edit", "key": "Enter" },
+    { "op": "click", "sel": "#filter-active" },
+    { "op": "click", "sel": "#filter-done" },
+    { "op": "click", "sel": "#filter-all" },
+    { "op": "click", "sel": "#clear" },
+    { "op": "click", "sel": "[data-id='3'] .delete" }
+  ]
+}

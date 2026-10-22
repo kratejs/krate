@@ -579,3 +579,17 @@ import { saveFeedback } from "../actions/feedback";
 Forms work without JavaScript and are enhanced by the shared runtime. See
 [Server Actions](/docs/guides/server-actions/) for the module format, direct
 calls, runtime requirements, and security model.
+
+## Diagnostics and conformance
+
+Compatibility limits are reported with stable diagnostic codes (`KR2001`,
+`KR8001`, ...). Every code, with the reason it fires and what to do instead, is
+listed in the [diagnostic codes reference](/docs/reference/diagnostics/).
+
+Behavior is checked against React itself. A browser differential runs a corpus
+of React 18 source components and a React 19 reference app in both real
+React 19 and Krate, drives them with the same clicks and keystrokes in
+Chromium, Firefox and WebKit, and compares the DOM, form state, focus and the
+order of effects, cleanups, lifecycles and ref callbacks after every step.
+Known differences are tracked with a severity in the repository
+(`packages/compiler/internal/build/testdata/reactbrowser/divergences.json`).

@@ -1,0 +1,5 @@
+{
+  "steps": [
+    { "op": "type", "sel": "#draft", "text": " v2" }
+  ]
+}

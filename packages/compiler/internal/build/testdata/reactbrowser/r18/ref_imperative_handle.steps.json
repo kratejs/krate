@@ -1,0 +1,10 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#rerender" },
+    { "op": "click", "sel": "#describe" },
+    { "op": "click", "sel": "#play" },
+    { "op": "click", "sel": "#describe" },
+    { "op": "click", "sel": "#next" },
+    { "op": "click", "sel": "#describe" }
+  ]
+}

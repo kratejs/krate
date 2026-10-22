@@ -1,0 +1,7 @@
+{
+  "notes": "Render logging is the behavior under test (memo skipping).",
+  "steps": [
+    { "op": "click", "sel": "#inc" },
+    { "op": "click", "sel": "#inc" }
+  ]
+}

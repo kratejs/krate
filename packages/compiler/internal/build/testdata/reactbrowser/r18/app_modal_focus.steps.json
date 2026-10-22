@@ -1,0 +1,9 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#trigger" },
+    { "op": "press", "key": "Escape" },
+    { "op": "click", "sel": "#trigger" },
+    { "op": "type", "sel": "#dialog-name", "text": "report.pdf" },
+    { "op": "click", "sel": "#dialog-ok" }
+  ]
+}
