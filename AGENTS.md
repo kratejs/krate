@@ -70,6 +70,8 @@ go test ./...                      # full suite (includes examples/ integration)
 go test -race ./internal/build ./internal/bundler   # concurrency-sensitive
 go vet ./...
 gofmt -l .                         # must be empty
+go test ./internal/conformance     # parser conformance corpus (test262, Babel JSX)
+go test ./internal/conformance -update   # re-baseline after parser fixes
 ```
 
 `KRATE_REQUIRE_E2E=1` turns environment-missing test skips (Node, built runtime,
@@ -82,6 +84,9 @@ docs) into hard failures. CI sets it on all OSes.
 - `go build`, `go vet`, `gofmt -l`, `golangci-lint` (config `.golangci.yml`).
 - `go test -race` with coverage on ubuntu, plus a plain `go test ./...` matrix on
   macOS and Windows (both with `KRATE_REQUIRE_E2E=1`).
+- A parser conformance step (`internal/conformance`, see its README) that
+  appends the per-suite pass rate to the job summary; it fails if any case in
+  `testdata/baseline.json` regresses.
 - `pnpm run typecheck`, `pnpm run test:js`, `node scripts/sync-krate-docs.mjs
   --check`, a 30s `gofmt`/docs gate, informational benchmarks, and 30s fuzzers
   (`FuzzLexer`, `FuzzParse`).
