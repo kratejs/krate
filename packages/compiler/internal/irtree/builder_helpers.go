@@ -304,6 +304,9 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	if hasLifecycleCall(fn.Body) {
 		return true
 	}
+	if containsPortal(fn.Body) {
+		return true
+	}
 	// A component rendering an external (bare-package) component must take the
 	// IR path so the island placeholder is emitted; the SSREval shortcut would
 	// re-render the source and drop it.
@@ -791,7 +794,8 @@ func referencesProps(expr ast.Expr) bool {
 	case *ast.Identifier:
 		return e.Name == "props"
 	case *ast.MemberExpr:
-		return referencesProps(e.Object)
+		// A computed key reads props too: `posts[props.index]`.
+		return referencesProps(e.Object) || (e.Computed && referencesProps(e.Property))
 	case *ast.CallExpr:
 		if referencesProps(e.Callee) {
 			return true

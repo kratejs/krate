@@ -48,7 +48,7 @@ export interface KrateSyntheticEvent<E extends Event = Event> {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Handler = (e: KrateSyntheticEvent<any>) => unknown;
 type HTable = Record<string, Handler | undefined>;
-type KNode = Node & { __kh?: HTable; __kd?: Record<string, 1> };
+type KNode = Node & { __kh?: HTable; __kd?: Record<string, 1>; __kpp?: Node };
 type FormEl = HTMLInputElement & {
   __kv?: string;
   __kc?: Record<string, (() => unknown) | undefined>;
@@ -155,7 +155,9 @@ function rethrow(): void {
 function emit(native: Event, name: string, target: Node | null, phases: number, type?: string): KrateSyntheticEvent | null {
   const cap: Array<Node | Handler> = [];
   const bub: Array<Node | Handler> = [];
-  for (let n = target as KNode | null; n; n = n.parentNode as KNode | null) {
+  // Portal content continues at its anchor, so events bubble through the
+  // React tree rather than the DOM container (as in React).
+  for (let n = target as KNode | null; n; n = (n.__kpp || n.parentNode) as KNode | null) {
     const m = n.__kh;
     if (!m) continue;
     let h: Handler | undefined;

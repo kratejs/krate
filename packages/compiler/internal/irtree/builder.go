@@ -267,6 +267,10 @@ type componentCtx struct {
 	// pushed while building a `<Ctx.Provider value={expr}>` subtree so a
 	// dynamic value substitutes for `Ctx.useContext()` reads.
 	contextValues map[string]ast.Expr
+	// entryContextValues and entryContextMarkers are the context state the
+	// component's return starts with (see recordChildrenContext).
+	entryContextValues  map[string]ast.Expr
+	entryContextMarkers map[string]jsvalue.Value
 	// contextInitials holds the build-time value of each active dynamic
 	// provider value, so a consumer deeper in the tree (where the value is
 	// read through a forwarded getter prop) still gets its SSR initial.
@@ -333,7 +337,7 @@ type builder struct {
 	moduleStmts      []ast.Stmt                // entry module top-level statements that run code
 	entryProg        *ast.Program              // the entry module (imports for KR8302)
 	cvaFactories     map[string]*CVASpec       // module-level `const X = cva(...)` factories
-	contextDefaults  map[string]string         // module-level `const X = createContext(v)` defaults
+	contextDefaults  map[string]jsvalue.Value  // module-level `const X = createContext(v)` defaults
 	codeTheme        string                    // chroma theme for compile-time <Code> highlighting
 	idPrefix         string                    // namespace for compact slot IDs (merged builds)
 	aggressiveDCE    bool                      // drop unreferenced local functions (opt-in)
@@ -351,6 +355,13 @@ type builder struct {
 	eventDiagSeen map[string]bool
 	markupErrs    []error    // invalid tag/attribute names, children on void elements
 	selectStack   [][]string // selected option values of enclosing <select> elements
+	// svgDepth and metaDepth count the enclosing <svg> elements and <Head>
+	// blocks: document metadata is not hoisted inside either.
+	svgDepth  int
+	metaDepth int
+	// branchDepth counts enclosing conditional branches and list items;
+	// metadata there stays in place (hoisting it needs a runtime head swap).
+	branchDepth int
 
 	// cssIndex assigns stable, page-unique indices to (component, var) scope
 	// pairs so classes/CSS are deterministic across builds.

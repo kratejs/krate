@@ -319,6 +319,9 @@ func (b *builder) buildSlotNodes(expr ast.Expr, parentID string) []SlotNode {
 
 // buildCallExprSlots handles call expressions - detects .map() calls and falls back to ExprSlot.
 func (b *builder) buildCallExprSlots(call *ast.CallExpr, parentID string) []SlotNode {
+	if content, container, ok := portalCall(call); ok {
+		return b.buildPortal(content, container, call.Position, parentID)
+	}
 	if isMapCall(call) {
 		return []SlotNode{b.buildListSlot(call, parentID)}
 	}
@@ -391,7 +394,8 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 
 	// Special components - route to metadata output. Lowercase <script> and
 	// <style> are ordinary elements rendered in place (e.g. a <style> inside
-	// an <svg>); only the documented <Head>/<Script>/<Style> are hoisted.
+	// an <svg>); the documented <Head>/<Script>/<Style> are hoisted, and so is
+	// React 19 document metadata (<title>/<meta>/<link>, see metadata.go).
 	switch name {
 	case "Head", "head", "Script", "Style":
 		return []SlotNode{b.buildMetaSlot(el, parentID)}
@@ -436,8 +440,10 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 	// the subtree so descendant `Ctx.useContext()` reads resolve to it. A literal
 	// value is also folded into the subtree's context marker so static rendering
 	// sees the provided value instead of the context default.
-	if strings.HasSuffix(name, ".Provider") {
-		ctx := strings.TrimSuffix(name, ".Provider")
+	if ctx, ok := b.consumerContext(name); ok {
+		return b.buildContextConsumer(el, ctx, parentID)
+	}
+	if ctx, ok := b.providerContext(name); ok {
 		var valueExpr ast.Expr
 		for _, attr := range el.Opening.Attributes {
 			if attr != nil && attr.Name == "value" {
@@ -454,9 +460,15 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 			b.contextScopes = cloneScopeMap(savedScope)
 			b.contextScopes[ctx] = ref
 		}
-		if s, ok := literalString(valueExpr); ok {
+		if initial, ok := b.staticContextValue(valueExpr); ok && !isScope {
+			// A build-time constant (literal, folded local, serializable
+			// object) shadows any outer dynamic provider of the same context.
 			b.localProps = cloneStringMap(savedProps)
-			b.localProps[contextMarkerPrefix+ctx] = jsvalue.String(s)
+			b.localProps[contextMarkerPrefix+ctx] = initial
+			if _, outer := savedValues[ctx]; outer {
+				b.contextValues = cloneExprMap(savedValues)
+				delete(b.contextValues, ctx)
+			}
 		} else if valueExpr != nil && !isScope {
 			// A dynamic value (signal/prop expression): substitute it for
 			// `Ctx.useContext()` reads while building the subtree.
@@ -504,7 +516,10 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		return []SlotNode{&StaticHTML{HTML: "<span></span>"}}
 	}
 
-	// Lowercase = HTML element
+	// Lowercase = HTML element. React 19 document metadata moves to <head>.
+	if b.hoistsMetadata(el) {
+		return b.buildHoistedMetadata(el, parentID)
+	}
 	return b.buildStaticElementSlots(el, parentID)
 }
 
@@ -1035,6 +1050,8 @@ func (b *builder) buildSyntaxHighlightSlots(el *ast.JSXElement, parentID string)
 func (b *builder) buildMetaSlot(el *ast.JSXElement, parentID string) *MetaSlot {
 	name := strings.ToLower(el.Opening.Name)
 	var children []SlotNode
+	b.metaDepth++
+	defer func() { b.metaDepth-- }()
 
 	// <Script>/<style> and <Style> elements need their element tag preserved
 	// (including a src attribute) so they land in the body as valid markup;
@@ -1927,8 +1944,10 @@ func (b *builder) buildConditionalSlot(expr ast.Expr, parentID string) *Conditio
 	if cond != nil {
 		// Build branches under branch-scoped parents so nested slots in the
 		// consequent and alternate branches never share slot IDs.
+		b.branchDepth++
 		slot.Consequent = b.buildSlotNodes(cond.Consequent, string(id)+".c")
 		slot.Alternate = b.buildSlotNodes(cond.Alternate, string(id)+".a")
+		b.branchDepth--
 	}
 	return slot
 }
@@ -1936,6 +1955,8 @@ func (b *builder) buildConditionalSlot(expr ast.Expr, parentID string) *Conditio
 // buildListSlot - .map() with key detection
 
 func (b *builder) buildListSlot(expr ast.Expr, parentID string) *ListSlot {
+	b.branchDepth++
+	defer func() { b.branchDepth-- }()
 	id := b.assignSlotID(b.nextDynamicSlot(parentID, "list"))
 	exprSource := generateExprJS(expr, b.sigMap())
 
@@ -3963,6 +3984,29 @@ func (b *builder) activeContextValue(expr ast.Expr) (ast.Expr, bool) {
 	return v, true
 }
 
+// staticContextValue folds a provider value that is a build-time constant:
+// it reads no signal and evaluates to a serializable value (no functions, no
+// unknowns), so consumers can fold it like a context default.
+func (b *builder) staticContextValue(expr ast.Expr) (jsvalue.Value, bool) {
+	if expr == nil {
+		return jsvalue.Value{}, false
+	}
+	if s, ok := literalString(expr); ok {
+		return jsvalue.String(s), true
+	}
+	if b.referencesSignal(expr) {
+		return jsvalue.Value{}, false
+	}
+	v := evalConstValue(expr, b.sigMap(), b.localProps)
+	if v.ContainsUnknown() {
+		return jsvalue.Value{}, false
+	}
+	if _, ok := jsvalue.JSSource(v); !ok {
+		return jsvalue.Value{}, false
+	}
+	return v, true
+}
+
 // contextReadTarget returns the context identifier of `Ctx.useContext()` /
 // `useContext(Ctx)`.
 func contextReadTarget(expr ast.Expr) (string, bool) {
@@ -3993,16 +4037,16 @@ func cloneExprMap(m map[string]ast.Expr) map[string]ast.Expr {
 	return out
 }
 
-// buildPortalSlot renders <Portal> children inline inside a marker wrapper; the
-// client moves the wrapper to document.body and removes it on SPA disposal.
+// buildPortalSlot builds the built-in <Portal container={...}> (container
+// defaults to document.body).
 func (b *builder) buildPortalSlot(el *ast.JSXElement, parentID string) []SlotNode {
-	id := b.assignSlotID(b.nextDynamicSlot(parentID, "portal"))
-	children := b.buildFragmentSlots(&ast.JSXFragment{Children: el.Children}, string(id))
-	out := make([]SlotNode, 0, len(children)+2)
-	out = append(out, &StaticHTML{HTML: `<div data-krate-portal="` + string(id) + `" style="display:contents">`})
-	out = append(out, children...)
-	out = append(out, &StaticHTML{HTML: `</div>`})
-	return out
+	var container ast.Expr
+	for _, attr := range el.Opening.Attributes {
+		if attr != nil && !attr.Spread && attr.Name == "container" {
+			container = attr.Value
+		}
+	}
+	return b.buildPortal(&ast.JSXFragment{Children: el.Children}, container, el.Position, parentID)
 }
 
 // bridgeIslandExpr rewrites page-scope signal reads in an external island

@@ -47,6 +47,10 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 		defer func() { b.selectStack = b.selectStack[:len(b.selectStack)-1] }()
 	}
 
+	if tag == "svg" {
+		b.svgDepth++
+		defer func() { b.svgDepth-- }()
+	}
 	children := b.elementChildren(el, id)
 	openingTag := b.buildElementOpening(el, handlers, attrs, refs, string(id))
 	return assembleElement(el, openingTag, children)

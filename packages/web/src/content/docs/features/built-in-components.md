@@ -30,6 +30,12 @@ by name — they work without any import:
 Content inside `<Head>` is hoisted into the page's `<head>`. This works at any
 component depth, including inside layouts and plugin-generated pages.
 
+A `<title>`, `<meta>` or `<link>` rendered outside `<Head>` is also placed in
+the `<head>`, following React 19's document metadata rules: a reactive
+`<title>` updates `document.title`, and metadata inside `<svg>`, with an
+`itemProp`, or inside a conditional branch or list item stays in place (see
+the [React compatibility guide](/docs/guides/react-compatibility#document-metadata)).
+
 ## `<Script>`
 
 ```tsx

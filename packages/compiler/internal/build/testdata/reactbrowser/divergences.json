@@ -7,29 +7,9 @@
     "severity": "P2",
     "reason": "[render-count] PureComponent render is logged once less: Krate updates the text binding without re-running render(); DOM and state match"
   },
-  "r18/context_consumer_render_prop": {
-    "severity": "P0",
-    "reason": "[context-consumer] <Ctx.Consumer> render-prop child is unresolved ('could not be resolved and will not render'): empty <span>"
-  },
-  "r18/context_default_value": {
-    "severity": "P0",
-    "reason": "[context-build-eval] build fails: useContext() default value used without a Provider cannot be evaluated at build time (unresolved identifier createContext)"
-  },
   "r18/context_memo_child": {
     "severity": "P2",
     "reason": "[render-count] the context value is plain and the text updates like React; only the memo child's render log differs, because Krate does not re-run component bodies (same as class_pure_component and hook_usecallback_identity)"
-  },
-  "r18/context_nested_providers": {
-    "severity": "P0",
-    "reason": "[context-build-eval] build fails: a component that nests itself under a Provider (<Level><Level>) is rejected as 'recursive component cannot be expanded'"
-  },
-  "r18/diag_find_dom_node": {
-    "severity": "P1",
-    "reason": "[missing-diagnostic] findDOMNode (removed in React 19): build succeeds with no KR8001 diagnostic"
-  },
-  "r18/diag_legacy_context": {
-    "severity": "P1",
-    "reason": "[missing-diagnostic] legacy context (childContextTypes/getChildContext/contextTypes): build succeeds with no KR3xxx diagnostic"
   },
   "r18/hook_usecallback_identity": {
     "severity": "P2",
@@ -42,14 +22,6 @@
   "r18/hook_useref_mutable": {
     "severity": "P1",
     "reason": "[ref-in-render] ref.current read during render is shown once and never refreshed on later renders; reported as KR5008 (keep displayed values in state)"
-  },
-  "r18/portal_basic": {
-    "severity": "P0",
-    "reason": "[portal] createPortal(..., document.body) content never appears in body; clicks cannot reach it"
-  },
-  "r18/portal_modal_toggle": {
-    "severity": "P0",
-    "reason": "[portal] conditional portal never mounts into body; its effect runs at page load while closed"
   },
   "r18/suspense_fallback_then_content": {
     "severity": "P0",
@@ -79,21 +51,9 @@
     "severity": "P0",
     "reason": "[use-promise] the reference app builds and its actions, useFormStatus and useOptimistic run; use(promise) under Suspense shows the list immediately instead of the 'loading todos' fallback, which shifts the later steps"
   },
-  "r19/context_as_provider": {
-    "severity": "P0",
-    "reason": "[context-consumer] React 19 <Context value> as provider is unresolved ('could not be resolved and will not render'): empty <span>"
-  },
   "r19/deferred_initial_value": {
     "severity": "P0",
     "reason": "[deferred-value] build fails: useDeferredValue(value, initialValue) result passed to a memo child cannot be evaluated at build time"
-  },
-  "r19/meta_tags_hoist": {
-    "severity": "P0",
-    "reason": "[document-metadata] <title>/<meta>/<link> in a component stay in the body and are not hoisted; hydration throws 'props is not defined'"
-  },
-  "r19/meta_title_hoist": {
-    "severity": "P1",
-    "reason": "[document-metadata] <title> in a component is not hoisted to <head>: it stays in the body with Krate slot markers as literal text and document.title never updates (use <Head>)"
   },
   "r19/transition_async": {
     "severity": "P1",

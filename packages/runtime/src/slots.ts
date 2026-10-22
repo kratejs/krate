@@ -12,6 +12,9 @@
 
 import { krateRefsEnter, krateRefsLeave } from './refs.js';
 import { krateMountFields } from './events.js';
+import { kratePortalsEnter, kratePortalsIn, kratePortalsLeave } from './portal.js';
+
+export * from './portal.js';
 
 interface CondState {
   /** Branch currently between the markers: 'c' or 'a'. */
@@ -79,6 +82,8 @@ export function krateCondSwap(start: Comment, show: boolean, tpl: HTMLTemplateEl
   // React order: refs of the outgoing branch detach before the incoming
   // branch's refs attach.
   krateRefsLeave(out);
+  // A hidden branch takes its portal content with it.
+  kratePortalsLeave(out);
   let incoming = st.other;
   if (!incoming) {
     incoming = document.createDocumentFragment();
@@ -89,7 +94,9 @@ export function krateCondSwap(start: Comment, show: boolean, tpl: HTMLTemplateEl
   // autofocus attribute on the client).
   const auto = incoming.querySelector('[autofocus]') as HTMLElement | null;
   krateMountFields(incoming);
+  const portals = kratePortalsIn(incoming);
   parent.insertBefore(incoming, end);
+  kratePortalsEnter(portals);
   st.other = out;
   detached.add(out);
   st.shown = want;

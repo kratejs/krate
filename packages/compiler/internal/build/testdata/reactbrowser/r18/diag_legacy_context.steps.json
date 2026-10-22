@@ -1,4 +1,4 @@
 {
-  "expectBuildDiagnostic": "KR3xxx",
+  "expectBuildDiagnostic": "KR8005",
   "steps": []
 }
