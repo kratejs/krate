@@ -561,6 +561,9 @@ type CondBranch struct {
 	SlotID         SlotID
 	Branch         string
 	InitiallyShown bool
+	// Boundary marks a Suspense boundary's branch: the component's effects
+	// wait for the reveal, but it is not remounted.
+	Boundary bool
 }
 
 // SlotBinding - describes a content binding for hydration

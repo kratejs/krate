@@ -110,11 +110,15 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	for _, a := range node.AttrBindings {
 		scan(a.ExprSource)
 	}
-	// Signal factory calls (e.g. createReducer's reducer function) may reference
+	// Signal factory calls (e.g. createReducer's reducer function) and runtime
+	// initializers (a lazy useState(loadDraft) call) may reference
 	// local/module functions that must be hoisted into the hydration scope.
 	for _, s := range node.Signals {
 		if s.FactoryJS != "" {
 			scan(s.FactoryJS)
+		}
+		if s.RawInit != "" {
+			scan(s.RawInit)
 		}
 	}
 	// Props registrations (__krate_props["<id>"]={onClick:clear,...}) reference
@@ -2877,13 +2881,11 @@ func (b *builder) collectSignalDecls(fn *ast.FnDecl) []SignalDecl {
 		}
 		isStr := isStringType(d.Initial, b.sigMap())
 		rawInit := signalRawInit(d.Initial, initial, b.sigMap(), b.localProps)
-		// A module const that does not fold (useState(userPromise) with
-		// `const userPromise = fetch(...)`) folds to its own name; reference
-		// the binding instead of hydrating the name as a string.
-		if id, ok := d.Initial.(*ast.Identifier); ok && rawInit == "" && initial == id.Name {
-			if _, isConst := b.moduleConstInits[id.Name]; isConst {
-				rawInit = id.Name
-			}
+		// An identifier initializer the build cannot resolve (a module
+		// constant or binding only known at run time) must be evaluated on
+		// the client, not emitted as its own name.
+		if id, ok := d.Initial.(*ast.Identifier); ok && rawInit == "" && operandLeaks(d.Initial, b.sigMap(), b.localProps) {
+			rawInit = id.Name
 		}
 		// Array/object initializers must be emitted as real JS literals (their
 		// folded value is JS source, not a string), so keep the source verbatim.
@@ -2931,7 +2933,16 @@ func (b *builder) reducerFactoryJS(d sigutil.Decl) string {
 	if initial == "" {
 		initial = "undefined"
 	}
-	return "createReducer(" + reducer + "," + initial + ")"
+	// Further arguments (React's init function, signal options) pass through.
+	extra := ""
+	for _, a := range d.Args[2:] {
+		js := generateExprJS(a, b.sigMap())
+		if js == "" {
+			js = "undefined"
+		}
+		extra += "," + js
+	}
+	return "createReducer(" + reducer + "," + initial + extra + ")"
 }
 
 // signalOptionsJS renders the options argument of `createSignal(value, opts)`

@@ -192,16 +192,20 @@ class TransitionState implements Transition {
   count = 0;
   error: unknown = undefined;
   failed = false;
-  readonly pending: () => boolean;
   readonly promise: Promise<void>;
-  private setPending: (v: boolean) => void;
+  private settled = false;
+  // Created on first read: a transition nobody observes writes no signal
+  // (an extra write would only schedule another flush).
+  private signal: [() => boolean, (v: boolean) => void] | null = null;
   private resolve!: () => void;
   private reject!: (e: unknown) => void;
 
+  readonly pending = (): boolean => {
+    if (!this.signal) this.signal = createSignal(!this.settled);
+    return this.signal[0]();
+  };
+
   constructor() {
-    const [pending, setPending] = createSignal(true);
-    this.pending = pending;
-    this.setPending = setPending;
     this.promise = new Promise<void>((res, rej) => {
       this.resolve = res;
       this.reject = rej;
@@ -217,7 +221,8 @@ class TransitionState implements Transition {
 
   release(): void {
     if (--this.count > 0) return;
-    this.setPending(false);
+    this.settled = true;
+    this.signal?.[1](false);
     if (this.failed) this.reject(this.error);
     else this.resolve();
   }

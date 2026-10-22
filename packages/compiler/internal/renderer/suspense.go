@@ -60,8 +60,8 @@ func (e *Emitter) emitSuspenseSlot(s *irtree.SuspenseSlot) SlotOutput {
 	sid := boundarySlotID(s.StreamID)
 	// The effect scheduler treats the boundary as a conditional: content
 	// effects wait until it is revealed.
-	tagCondBranch(content.Signatures, irtree.SlotID(sid), "c", false)
-	tagCondBranch(fallback.Signatures, irtree.SlotID(sid), "a", true)
+	tagBoundaryBranch(content.Signatures, irtree.SlotID(sid), "c", false)
+	tagBoundaryBranch(fallback.Signatures, irtree.SlotID(sid), "a", true)
 	contentHTML, fallbackHTML := content.HTML, fallback.HTML
 	content.HTML, fallback.HTML = "", ""
 	var out SlotOutput
@@ -193,7 +193,7 @@ func finishSuspenseHydration(result *EmitResult, js string, spans []sigSpan, lis
 		result.LazyChunks = append(result.LazyChunks, LazyChunk{
 			Name:  name,
 			Token: LazyChunkToken(name),
-			JS:    "__krateLazyRun(function(){\n" + listFns + chunkBody[name].String() + "});\n",
+			JS:    "__krateLazyRun(function(){\n" + lazyChunkPrelude + listFns + chunkBody[name].String() + "__ko(null);\n});\n",
 		})
 	}
 	return out.String()
@@ -206,14 +206,45 @@ func boundaryArg(streamID string) string {
 	return strconv.Quote(streamID)
 }
 
-// wrapBoundaryRun turns `// component X\n(function(){\n...})();\n` into a
-// __krateBoundary run of the same body.
+// tagBoundaryBranch is tagCondBranch for a Suspense boundary: the effect
+// scheduler defers the content's effects until it is revealed, but the
+// component is not remounted (its hydration must run while the content is
+// hidden, to start the work the boundary waits for).
+func tagBoundaryBranch(sigs []irtree.ComponentSignature, id irtree.SlotID, branch string, shown bool) {
+	for i := range sigs {
+		sigs[i].Conds = append([]irtree.CondBranch{{SlotID: id, Branch: branch, InitiallyShown: shown, Boundary: true}}, sigs[i].Conds...)
+	}
+}
+
+// hasRemountCond reports whether a component sits in a conditional branch
+// that remounts it (any branch other than a Suspense boundary's).
+func hasRemountCond(conds []irtree.CondBranch) bool {
+	for _, c := range conds {
+		if !c.Boundary {
+			return true
+		}
+	}
+	return false
+}
+
+// wrapBoundaryRun runs a component scope's body through __krateBoundary.
+// The scope is `(function(){\n...})();\n` or a remountable
+// `__km(...,function(){\n...});\n`; the body moves into the boundary run.
 func wrapBoundaryRun(text, streamID string) string {
-	const open, close = "(function(){\n", "})();\n"
+	const open = "function(){\n"
 	i := strings.Index(text, open)
-	if i < 0 || !strings.HasSuffix(text, close) {
+	if i < 0 {
 		return text
 	}
-	body := text[i+len(open) : len(text)-len(close)]
-	return text[:i] + "__krateBoundary(" + boundaryArg(streamID) + ",function(){\n" + body + "});\n"
+	j := strings.LastIndex(text, "})")
+	if j < i {
+		return text
+	}
+	body := text[i+len(open) : j]
+	return text[:i+len(open)] + "__krateBoundary(" + boundaryArg(streamID) + ",function(){\n" + body + "});\n" + text[j:]
 }
+
+// lazyChunkPrelude declares the effect-owner helpers the page script
+// declares, since the component scopes in a chunk call them.
+const lazyChunkPrelude = "var __ko=typeof krateOwner==='function'?krateOwner:function(){};\n" +
+	"var __km=typeof krateMount==='function'?krateMount:function(i,p,c,s,f){f();};\n"
