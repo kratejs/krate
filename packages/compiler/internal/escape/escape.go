@@ -12,14 +12,10 @@ var htmlReplacer = strings.NewReplacer(
 	">", "&gt;",
 	"\"", "&quot;",
 	"'", "&#39;",
-	// The \x1f unit separator is the internal array-item delimiter used by
-	// SSREval's array evaluation. It is not content and must never reach HTML.
-	"\x1f", "",
 )
 
 // HTML escapes a string for safe inclusion in HTML text content or attribute
-// values. The full set (& < > " ') is escaped and the internal \x1f array
-// separator is stripped.
+// values. The full set (& < > " ') is escaped.
 func HTML(s string) string {
 	return htmlReplacer.Replace(s)
 }

@@ -8,26 +8,10 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 )
 
-// itoa converts an int to its decimal string representation without allocating fmt.Sprintf.
+// itoa converts an int to its decimal string representation (negative values
+// included).
 func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	pos := len(buf)
-	for i > 0 {
-		pos--
-		buf[pos] = byte('0' + i%10)
-		i /= 10
-	}
-	return string(buf[pos:])
-}
-
-// stripArraySep removes the internal \x1f array-item separator. SSREval joins
-// array elements (e.g. .map() results, array literals) with \x1f; any write
-// path that bypasses escape.HTML (raw HTML-producing output) must strip it too.
-func stripArraySep(s string) string {
-	return strings.ReplaceAll(s, "\x1f", "")
+	return strconv.Itoa(i)
 }
 
 // JS string escaping
@@ -182,15 +166,6 @@ func unquoteJSONPropValue(v string) string {
 }
 
 // Number helpers
-
-// toFloat attempts to parse a string as a float64.
-func toFloat(s string) float64 {
-	if s == "" {
-		return 0
-	}
-	f, _ := strconv.ParseFloat(s, 64)
-	return f
-}
 
 // AST analysis helpers (used by tests and IR tree)
 

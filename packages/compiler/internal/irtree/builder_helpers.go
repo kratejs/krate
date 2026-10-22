@@ -7,6 +7,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // Helpers
@@ -26,12 +27,12 @@ func findReturnStmt(body []ast.Stmt) *ast.ReturnStmt {
 // (`x = ...`, `x += ...`) across `var`/expression/`if` statements. The result
 // is used to resolve SSR initial values AND to emit `var x = <const>` decls into
 // the hydration bundle so bindings referencing locals don't throw ReferenceError.
-func collectLocalVars(body []ast.Stmt, sigMap map[string]ast.Expr, props map[string]string, nextUseId func() string) (locals, useIds map[string]string, inits map[string]ast.Expr, order []string, leaked map[string]bool) {
-	locals = make(map[string]string)
+func collectLocalVars(body []ast.Stmt, sigMap map[string]ast.Expr, props valueMap, nextUseId func() string) (locals valueMap, useIds map[string]string, inits map[string]ast.Expr, order []string, leaked map[string]bool) {
+	locals = make(valueMap)
 	useIds = make(map[string]string)
 	inits = make(map[string]ast.Expr)
 	leaked = make(map[string]bool)
-	working := make(map[string]string, len(props))
+	working := make(valueMap, len(props))
 	for k, v := range props {
 		working[k] = v
 	}
@@ -39,7 +40,7 @@ func collectLocalVars(body []ast.Stmt, sigMap map[string]ast.Expr, props map[str
 	return locals, useIds, inits, order, leaked
 }
 
-func applyLocalStmts(stmts []ast.Stmt, locals, working map[string]string, sigMap map[string]ast.Expr, nextUseId func() string, useIds map[string]string, inits map[string]ast.Expr, order *[]string, leaked map[string]bool) {
+func applyLocalStmts(stmts []ast.Stmt, locals, working valueMap, sigMap map[string]ast.Expr, nextUseId func() string, useIds map[string]string, inits map[string]ast.Expr, order *[]string, leaked map[string]bool) {
 	record := func(name string) {
 		if order == nil {
 			return
@@ -76,8 +77,8 @@ func applyLocalStmts(stmts []ast.Stmt, locals, working map[string]string, sigMap
 						if nextUseId != nil {
 							idLit = nextUseId()
 						}
-						locals[name] = idLit
-						working[name] = idLit
+						locals[name] = jsvalue.String(idLit)
+						working[name] = jsvalue.String(idLit)
 						if useIds != nil {
 							useIds[name] = idLit
 						}
@@ -89,19 +90,20 @@ func applyLocalStmts(stmts []ast.Stmt, locals, working map[string]string, sigMap
 					// tocItems is not statically known) must still be RECORDED so
 					// it is emitted as a runtime read - bindings/handlers may
 					// reference it. Dropping it entirely produced `X is not
-					// defined` at hydration. Its folded value is left unknown ("")
+					// defined` at hydration. Its folded value is left Unknown
 					// and it is kept out of `working` so dependents also emit as
 					// runtime reads rather than folding against a wrong value.
-					if operandLeaks(decl.Init, sigMap, working) {
+					// Functions and JSX have no literal form and stay runtime too.
+					v := evalConstValue(decl.Init, sigMap, working)
+					if v.ContainsUnknown() || v.IsFunction() || v.IsJSX() {
 						if _, exists := locals[name]; !exists {
-							locals[name] = ""
+							locals[name] = jsvalue.Dynamic("local " + name)
 							inits[name] = decl.Init
 							leaked[name] = true
 							record(name)
 						}
 						continue
 					}
-					v := evalConstWithSignals(decl.Init, sigMap, working)
 					locals[name] = v
 					inits[name] = decl.Init
 					working[name] = v
@@ -111,13 +113,13 @@ func applyLocalStmts(stmts []ast.Stmt, locals, working map[string]string, sigMap
 		case *ast.ExprStmt:
 			applyLocalAssignment(s.Expression, locals, working, sigMap)
 		case *ast.IfStmt:
-			test := evalConstWithSignals(s.Test, sigMap, working)
-			if isTruthyValue(test) {
-				applyLocalStmts(s.Consequent, locals, working, sigMap, nextUseId, useIds, inits, order, leaked)
-				continue
-			}
-			if isFalsyValue(test) {
-				applyLocalStmts(s.Alternate, locals, working, sigMap, nextUseId, useIds, inits, order, leaked)
+			test := evalConstValue(s.Test, sigMap, working)
+			if truthy, known := test.Truthy(); known {
+				if truthy {
+					applyLocalStmts(s.Consequent, locals, working, sigMap, nextUseId, useIds, inits, order, leaked)
+				} else {
+					applyLocalStmts(s.Alternate, locals, working, sigMap, nextUseId, useIds, inits, order, leaked)
+				}
 				continue
 			}
 		case *ast.BlockStmt:
@@ -157,7 +159,7 @@ func isUseIdCall(expr ast.Expr) bool {
 	return ok && id.Name == "__krate_useId"
 }
 
-func applyLocalAssignment(expr ast.Expr, locals, working map[string]string, sigMap map[string]ast.Expr) {
+func applyLocalAssignment(expr ast.Expr, locals, working valueMap, sigMap map[string]ast.Expr) {
 	bin, ok := expr.(*ast.BinaryExpr)
 	if !ok {
 		return
@@ -171,8 +173,8 @@ func applyLocalAssignment(expr ast.Expr, locals, working map[string]string, sigM
 	if !exists && !isKnownLocal(name, locals) {
 		return
 	}
-	rhs := evalConstWithSignals(bin.Right, sigMap, working)
-	if rhs == "" {
+	rhs := evalConstValue(bin.Right, sigMap, working)
+	if rhs.ContainsUnknown() {
 		return
 	}
 	switch bin.Op {
@@ -180,26 +182,21 @@ func applyLocalAssignment(expr ast.Expr, locals, working map[string]string, sigM
 		locals[name] = rhs
 		working[name] = rhs
 	case "+=", "-=", "*=", "/=", "%=":
-		if cur == "" {
+		if cur.IsUnknown() {
 			return
 		}
-		combined := cur + " " + bin.Op[:1] + " " + rhs
-		if bin.Op == "+=" {
-			combined = cur + rhs
+		combined := jsvalue.BinaryOp(bin.Op[:1], cur, rhs)
+		if combined.IsUnknown() {
+			return
 		}
 		locals[name] = combined
 		working[name] = combined
 	}
 }
 
-func isKnownLocal(name string, locals map[string]string) bool {
+func isKnownLocal(name string, locals valueMap) bool {
 	_, ok := locals[name]
 	return ok
-}
-
-// isTruthyValue reports whether a resolved const string is truthy in JS terms.
-func isTruthyValue(v string) bool {
-	return v != "" && v != "false" && v != "null" && v != "undefined" && v != "0"
 }
 
 // evalBinaryValue computes the value of a binary operation between two resolved
@@ -270,11 +267,6 @@ func trimFloat(f float64) string {
 		return strconv.FormatInt(int64(f), 10)
 	}
 	return strconv.FormatFloat(f, 'f', -1, 64)
-}
-
-// isFalsyValue reports whether a resolved const string is falsy in JS terms.
-func isFalsyValue(v string) bool {
-	return v == "" || v == "false" || v == "null" || v == "undefined" || v == "0"
 }
 
 // jsLiteralFor renders a resolved const value as a JS literal. A genuine JS
@@ -919,7 +911,7 @@ func isStringType(expr ast.Expr, signals map[string]ast.Expr) bool {
 // referencesAnyLocal reports whether expr (rendered to JS) references any of
 // the given local names, so the caller can emit it as a runtime expression in
 // dependency order rather than a folded build-time literal.
-func referencesAnyLocal(expr ast.Expr, sigMap map[string]ast.Expr, locals map[string]string) bool {
+func referencesAnyLocal(expr ast.Expr, sigMap map[string]ast.Expr, locals valueMap) bool {
 	js := generateExprJS(expr, sigMap)
 	if js == "" {
 		return false

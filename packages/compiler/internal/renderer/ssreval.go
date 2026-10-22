@@ -1088,10 +1088,12 @@ func (e *SSREval) attrString(attr *ast.JSXAttr) (string, bool) {
 		e.reportUnknown(attr.Value, firstUnknownOf(v), "attribute "+attr.Name)
 		return "", false
 	}
-	switch v.Kind() {
-	case jsvalue.KindUndefined, jsvalue.KindNull, jsvalue.KindFunction:
-		// React drops null/undefined attributes and never serializes handlers.
+	if irtree.OmitAttrValue(attr.Name, v) {
+		// React drops null/undefined (and non-boolean false) attributes and
+		// never serializes handlers.
 		return "", false
+	}
+	switch v.Kind() {
 	case jsvalue.KindArray, jsvalue.KindObject:
 		return jsvalue.LegacyString(v), true
 	}

@@ -77,11 +77,12 @@ export default function Page() {
 	ann := annotator.Annotate(prog, &config.Config{}, "page.tsx", src)
 	tree := irtree.Build(prog, ann)
 	emitter := NewEmitter()
+	// Delegated expressions come back as typed JSON: [typeof, value].
 	emitter.EvalJS = func(code string) (string, error) {
-		if code == "Date.now()" {
-			return "1710000000000", nil
+		if strings.Contains(code, "Date.now()") {
+			return `["number",1710000000000]`, nil
 		}
-		return "0", nil
+		return `["number",0]`, nil
 	}
 	result2 := emitter.Emit(tree)
 	if !strings.Contains(result2.HTML, "built 1710000000000") {
@@ -89,12 +90,15 @@ export default function Page() {
 	}
 }
 
+// TestEmitSSREvaluatedDelegatesBuiltin verifies built-ins the Go evaluator
+// does not implement (encodeURIComponent here) are delegated to the JS engine, while pure
+// built-ins it implements natively (Math) never reach it.
 func TestEmitSSREvaluatedDelegatesBuiltin(t *testing.T) {
 	src := `function Widget(props) {
-  return <div>round {Math.round(3.7)} max {Math.max(1, 5, 3)}</div>;
+  return <div>round {Math.round(3.7)} max {Math.max(1, 5, 3)} enc {encodeURIComponent(props.q)}</div>;
 }
 export default function Page() {
-  return <Widget />;
+  return <Widget q="a b" />;
 }`
 	prog := parseProg(t, src)
 	ann := annotator.Annotate(prog, &config.Config{}, "page.tsx", src)
@@ -103,20 +107,18 @@ export default function Page() {
 	emitter := NewEmitter()
 	emitter.EvalJS = func(code string) (string, error) {
 		seen = append(seen, code)
-		switch {
-		case strings.Contains(code, "Math.round"):
-			return "4", nil
-		case strings.Contains(code, "Math.max"):
-			return "5", nil
+		// Free variables are passed in as literal arguments.
+		if strings.Contains(code, "encodeURIComponent(props.q)") && strings.Contains(code, "{q:'a b'}") {
+			return `["string","a%20b"]`, nil
 		}
-		return "0", nil
+		return `["number",0]`, nil
 	}
 	result := emitter.Emit(tree)
-	if !strings.Contains(result.HTML, "round 4") || !strings.Contains(result.HTML, "max 5") {
-		t.Errorf("expected delegated built-in results, got:\n%s", result.HTML)
+	if !strings.Contains(result.HTML, "round 4 max 5 enc a%20b") {
+		t.Errorf("expected native Math and delegated encodeURIComponent results, got:\n%s", result.HTML)
 	}
-	if len(seen) == 0 {
-		t.Error("expected built-in expressions to be delegated to the JS evaluator")
+	if len(seen) != 1 || strings.Contains(seen[0], "Math.") {
+		t.Errorf("expected exactly the encodeURIComponent call to be delegated, got %q", seen)
 	}
 }
 

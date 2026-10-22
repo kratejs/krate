@@ -438,11 +438,11 @@ func TestInjectDynamicRoutePlaceholdersStaticRoot(t *testing.T) {
 	if !tree.Root.IsSSREval {
 		t.Fatal("static dynamic-route root should be SSREval'd with sentinels")
 	}
-	if got := tree.Root.SSREvalBindings["id"]; got != dynamicParamSentinel("id") {
-		t.Errorf("binding id = %q, want sentinel %q", got, dynamicParamSentinel("id"))
+	if got := tree.Root.SSREvalBindings["id"]; got.StringValue() != dynamicParamSentinel("id") {
+		t.Errorf("binding id = %#v, want sentinel %q", got, dynamicParamSentinel("id"))
 	}
-	if got := tree.Root.SSREvalBindings["params"]; !strings.Contains(got, dynamicParamSentinel("id")) {
-		t.Errorf("params binding = %q, want it to carry the sentinel", got)
+	if got, _ := tree.Root.SSREvalBindings["params"].Get("id"); got.StringValue() != dynamicParamSentinel("id") {
+		t.Errorf("params binding = %#v, want it to carry the sentinel", got)
 	}
 }
 
