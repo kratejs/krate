@@ -235,6 +235,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 		kept := output.Signatures[:0]
 		for _, sig := range output.Signatures {
 			if !inManagedList(sig.InLists, managed) {
+				dropManagedElementBindings(&sig, managed)
 				kept = append(kept, sig)
 			}
 		}
@@ -1214,4 +1215,37 @@ func inManagedList(lists []irtree.SlotID, managed map[irtree.SlotID]bool) bool {
 		}
 	}
 	return false
+}
+
+// dropManagedElementBindings removes handler, attribute and ref bindings of
+// elements inside rows of runtime-bound lists: the row render binds those
+// elements itself when it adopts them.
+func dropManagedElementBindings(sig *irtree.ComponentSignature, managed map[irtree.SlotID]bool) {
+	if len(sig.Handlers) > 0 {
+		kept := make([]irtree.HandlerDecl, 0, len(sig.Handlers))
+		for _, h := range sig.Handlers {
+			if !inManagedList(h.InLists, managed) {
+				kept = append(kept, h)
+			}
+		}
+		sig.Handlers = kept
+	}
+	if len(sig.AttrBindings) > 0 {
+		kept := make([]irtree.AttrBinding, 0, len(sig.AttrBindings))
+		for _, a := range sig.AttrBindings {
+			if !inManagedList(a.InLists, managed) {
+				kept = append(kept, a)
+			}
+		}
+		sig.AttrBindings = kept
+	}
+	if len(sig.RefBindings) > 0 {
+		kept := make([]irtree.RefBinding, 0, len(sig.RefBindings))
+		for _, r := range sig.RefBindings {
+			if !inManagedList(r.InLists, managed) {
+				kept = append(kept, r)
+			}
+		}
+		sig.RefBindings = kept
+	}
 }

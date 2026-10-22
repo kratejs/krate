@@ -81,7 +81,9 @@ func (b *builder) buildKeyedSlot(el *ast.JSXElement, key ast.Expr, parentID stri
 	if folded, ok := b.foldListKey(key); ok {
 		itemKey = "$" + folded
 	}
+	mark := b.markRowBindings()
 	contents := b.buildSlotNodes(stripped, string(joinSlotIDKey(id, "0")))
+	b.tagRowBindings(mark, id)
 	if len(contents) == 0 {
 		contents = []SlotNode{&StaticHTML{HTML: ""}}
 	}
@@ -111,4 +113,46 @@ func elementWithoutKey(el *ast.JSXElement) *ast.JSXElement {
 	cp := *el
 	cp.Opening = &opening
 	return &cp
+}
+
+// rowMark records how many element bindings the current component had before
+// a list row was built.
+type rowMark struct{ handlers, attrs, refs int }
+
+func (b *builder) markRowBindings() rowMark {
+	return rowMark{len(b.pendingHandlers), len(b.pendingAttrs), len(b.pendingRefs)}
+}
+
+// tagRowBindings tags the element bindings created while building a row with
+// the list slot ID. When that list is bound by the list runtime, the row
+// render binds its own elements, so the emitter drops these.
+func (b *builder) tagRowBindings(m rowMark, list SlotID) {
+	for i := m.handlers; i < len(b.pendingHandlers); i++ {
+		b.pendingHandlers[i].InLists = append(b.pendingHandlers[i].InLists, list)
+	}
+	for i := m.attrs; i < len(b.pendingAttrs); i++ {
+		b.pendingAttrs[i].InLists = append(b.pendingAttrs[i].InLists, list)
+	}
+	for i := m.refs; i < len(b.pendingRefs); i++ {
+		b.pendingRefs[i].InLists = append(b.pendingRefs[i].InLists, list)
+	}
+}
+
+// listBindingSources returns the JS of the runtime list bindings among slots
+// (including lists inside conditional branches), for scope analysis.
+func listBindingSources(slots []SlotNode) []string {
+	var out []string
+	for _, s := range slots {
+		switch v := s.(type) {
+		case *ListSlot:
+			out = append(out, v.ExprSource)
+			if v.Bind != nil {
+				out = append(out, v.Bind.Source, v.Bind.Key, v.Bind.Render)
+			}
+		case *ConditionalSlot:
+			out = append(out, listBindingSources(v.Consequent)...)
+			out = append(out, listBindingSources(v.Alternate)...)
+		}
+	}
+	return out
 }

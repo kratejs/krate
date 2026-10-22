@@ -2093,7 +2093,9 @@ func (b *builder) tryResolveArrayItems(arr *ast.ArrayExpr, mapExpr ast.Expr, lis
 		}
 		itemID := joinSlotIDKey(SlotID(listID), key)
 		restore := b.pushShadow(blockBindingNames(arrow.Body))
+		mark := b.markRowBindings()
 		contents := b.buildSlotNodes(concrete, string(itemID))
+		b.tagRowBindings(mark, SlotID(listID))
 		restore()
 		if len(contents) == 0 {
 			contents = []SlotNode{&StaticHTML{HTML: ""}}

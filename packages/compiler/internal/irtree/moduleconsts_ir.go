@@ -42,6 +42,9 @@ func (b *builder) referencedModuleConstVars(node *ComponentNode) []string {
 	}
 	sources = append(sources, node.ExtraVars...)
 	sources = append(sources, node.PreSignalVars...)
+	// Runtime list bindings evaluate their array and row render in this scope.
+	sources = append(sources, listBindingSources(node.Children)...)
+	sources = append(sources, listBindingSources(node.CallSiteSlots)...)
 
 	used := make(map[string]bool)
 	var queue []string
