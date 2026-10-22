@@ -85,6 +85,7 @@ export function Command(props: CommandProps) {
       <ul class="krate-command-list" role="listbox">
         {visible().map((item, i) => (
           <li
+            key={item.value}
             class={"krate-command-item" + (i === active() ? " krate-command-item-active" : "")}
             role="option"
             aria-selected={i === active() ? "true" : "false"}

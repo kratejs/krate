@@ -93,6 +93,7 @@ export default function Page() {
         <ul class="mt-5 divide-y divide-slate-800">
           {visible().map((report) => (
             <li
+              key={report.id}
               data-testid="dashboard-row"
               data-report={report.name}
               class="flex items-center justify-between gap-4 py-3"

@@ -432,7 +432,11 @@ func reactifyRoot(e ast.Expr) ast.Expr {
 			return thunk(reactifyExpr(e))
 		}
 	}
-	return reactifyExpr(e)
+	if isStaticJSXValue(e) {
+		return e
+	}
+	// Text rows (`items.map(t => t.label)`) and other values stay live too.
+	return thunk(reactifyExpr(e))
 }
 
 // reactifyExpr rewrites JSX nested in an expression.
