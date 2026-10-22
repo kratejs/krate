@@ -265,7 +265,6 @@ jobs:
         env:
           KRATE_BROWSER: ${{ matrix.browser }}
           KRATE_REQUIRE_E2E: "1"
-          KRATE_REACTBROWSER_JOBS: "6"
           KRATE_REACTBROWSER_REPORT: ${{ runner.temp }}/react-browser-${{ matrix.browser }}.txt
 
       - name: Upload React differential report
