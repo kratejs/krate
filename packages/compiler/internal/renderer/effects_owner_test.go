@@ -64,7 +64,7 @@ export default function Index() {
 
 func TestBootstrapReportsBranchAndSlotChanges(t *testing.T) {
 	for _, frag := range []string{
-		"krateCondSwap(n,s,t);if(typeof krateCondActivity==='function')krateCondActivity(id,s?'c':'a');",
+		"var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');",
 		"if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}",
 	} {
 		if !strings.Contains(HydrationBootstrapJS, frag) {
@@ -75,7 +75,7 @@ func TestBootstrapReportsBranchAndSlotChanges(t *testing.T) {
 	if strings.Contains(HydrationBootstrapJS, "window.createEffectDeps") || strings.Contains(HydrationBootstrapJS, "window.createMemoDeps") {
 		t.Fatal("deps helpers must not be redefined by the bootstrap")
 	}
-	if !strings.Contains(CompatBootstrapJS, "createEffectDeps(function(){set(create());return function(){set(null);};}") {
+	if !strings.Contains(CompatBootstrapJS, "createEffectDeps(function(){return ref?krateSetRef(ref,create()):void 0;}") {
 		t.Fatal("useImperativeHandle must attach in the layout phase and detach on cleanup")
 	}
 }

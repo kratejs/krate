@@ -16,6 +16,8 @@
 import { h, type Component } from './dom.js';
 import { createSignal, createEffect, createReducer, isSignalGetter } from './signal.js';
 import { createEffectDeps, type EffectPhase } from './effects.js';
+import { krateSetRef, type KrateRef } from './refs.js';
+import { krateEventRoot } from './events.js';
 import { createContext as krateCreateContext } from './context.js';
 import { cloneElement as krateCloneElement } from './class-helpers.js';
 import { jsx as krateJsx } from './jsx-runtime.js';
@@ -227,20 +229,14 @@ export const useLayoutEffect: (effect: EffectCallback, deps?: readonly unknown[]
 export const useInsertionEffect: (effect: EffectCallback, deps?: readonly unknown[] | null) => void = effectHook('insertion');
 
 export function useImperativeHandle<T>(
-  ref: RefObject<T> | ((v: T | null) => void) | null,
+  ref: RefObject<T> | ((v: T | null) => unknown) | null | undefined,
   create: () => T,
   deps?: readonly unknown[] | (() => unknown) | null
 ): void {
-  if (!ref) return;
-  const set = (v: T | null): void => {
-    if (typeof ref === 'function') ref(v);
-    else ref.current = v;
-  };
-  // Attached in the layout phase and detached on cleanup, like React.
-  createEffectDeps(() => {
-    set(create());
-    return () => set(null);
-  }, depsThunk(deps), 'layout');
+  // React implements handles as layout effects: attached (object or callback
+  // ref, with React 19 callback cleanup) in the layout phase, re-created when
+  // a dependency changes, detached on cleanup.
+  createEffectDeps(() => (ref ? krateSetRef(ref as KrateRef, create()) : undefined), depsThunk(deps), 'layout');
 }
 
 export function useDebugValue(_value?: unknown): void {
@@ -328,6 +324,9 @@ export function flushSync<T>(fn: () => T): T {
 }
 
 export function createPortal(children: unknown, container: Element | DocumentFragment): Element | DocumentFragment {
+  // Handlers inside a portal outside the app root still need delegation.
+  const root = typeof document !== 'undefined' ? document.getElementById('root') : null;
+  if (container.nodeType === 1 && !(root && root.contains(container))) krateEventRoot(container);
   if (children instanceof Node) container.appendChild(children);
   else if (Array.isArray(children)) {
     for (const child of children) {

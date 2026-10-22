@@ -360,8 +360,8 @@ export default function Page() {
 	if strings.Contains(js, "setRef=el;") || strings.Contains(js, "setRef = el;") {
 		t.Errorf("named callback ref must not compile to an assignment that overwrites the function:\n%s", js)
 	}
-	if !strings.Contains(js, "kbindRef(") || !strings.Contains(js, ",setRef)") {
-		t.Errorf("expected kbindRef(id, setRef) invoking the named function, got:\n%s", js)
+	if !strings.Contains(js, "kbindRef(") || !strings.Contains(js, ",()=>(setRef))") {
+		t.Errorf("expected kbindRef(id, ()=>(setRef)) invoking the named function, got:\n%s", js)
 	}
 }
 

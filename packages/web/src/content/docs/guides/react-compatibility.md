@@ -81,7 +81,9 @@ export default function Counter() {
 | React | Behavior |
 |-------|----------|
 | `forwardRef` | lowered: the ref parameter becomes `props.ref`, which binds at the rendered element |
+| `ref` as a prop (React 19) | supported: `function Input({ ref, ...p }) { return <input ref={ref} {...p} /> }` needs no `forwardRef` |
 | `createRef` | lowered to `{ current: null }` |
+| `useImperativeHandle` | attaches the handle before effects run; re-created when a dependency changes, detached on unmount |
 | `createContext` | supported, including provider values that change at runtime |
 | `createElement` | lowered to `h` |
 | `memo` | identity (components already run once) |
@@ -278,8 +280,9 @@ Lowercase `<script>` and `<style>` elements render where they are written
 (for example a `<style>` inside an `<svg>`). Use `<Head>`, `<Script>` and
 `<Style>` to place content in the document head or body end.
 
-`onDoubleClick` is translated to the DOM `dblclick` event. `key` and
-`suppressHydrationWarning` are compiler-only and never appear in the output.
+`key` and `suppressHydrationWarning` are compiler-only and never appear in the
+output. Event handler props are covered in
+[Events, forms and refs](#events-forms-and-refs).
 
 ## shadcn/ui
 
@@ -352,6 +355,100 @@ Primitives that keep internal pointer state (for example Radix Tooltip) work
 when controlled: bind `open` to a page signal and wire `onOpenChange` plus
 explicit pointer/focus handlers on the trigger.
 
+## Events, forms and refs
+
+Event handlers, form controls and refs follow React 18/19 semantics as
+observed in a browser. The browser conformance suite (`/react-events/` in
+`examples/`) exercises them in a real browser.
+
+### Events
+
+- **Synthetic events.** Handlers receive a React-style event: `type`, `target`,
+  `currentTarget` (the element whose handler is running), `nativeEvent`,
+  `eventPhase`, `bubbles`, `cancelable`, `defaultPrevented`, `timeStamp`,
+  `isTrusted`, `preventDefault()`, `stopPropagation()`,
+  `isDefaultPrevented()`, `isPropagationStopped()` and a no-op `persist()`.
+  Type-specific fields (`key`, `code`, `repeat`, modifier keys, `button`,
+  `clientX`/`pageX`, `relatedTarget`, `deltaY`, `touches`, `dataTransfer`,
+  `clipboardData`, `data`, `animationName`, `propertyName`, ...) and
+  `getModifierState()` come from the native event. `currentTarget` is `null`
+  after the handler returns, as in React.
+- **Root delegation.** Like React 17+, bubbling events are delegated to the app
+  root (`#root`, else `<body>`) with one capture-phase and one bubble-phase
+  listener per event type, installed the first time a handler needs it.
+  Capture handlers (`onClickCapture`) run top-down, then bubble handlers run
+  bottom-up. Native listeners interleave the same way: a listener added with
+  `addEventListener` on an element inside the root runs before React bubble
+  handlers, a listener on `document` runs after them.
+- **`stopPropagation()`** stops the remaining React handlers and native
+  propagation, so `document` listeners do not see the event. Called in a
+  capture handler it also skips every bubble handler.
+- **Event names.** `onDoubleClick` uses `dblclick`; `onFocus`/`onBlur` bubble
+  (they use `focusin`/`focusout`) and report `type` `focus`/`blur`.
+  `onMouseEnter`/`onMouseLeave`/`onPointerEnter`/`onPointerLeave`, `onScroll`,
+  `onLoad`/`onError`, `onToggle`, `onInvalid` and media events (`onPlay`,
+  `onEnded`, ...) do not bubble and are attached to the element.
+  `onSubmit`/`onReset`, composition events (`onCompositionStart`/`Update`/`End`)
+  and clipboard, drag, touch, wheel, pointer and animation/transition events are
+  delegated.
+- **`onChange`** follows React: text inputs, textareas and range/number inputs
+  fire on every `input` event; checkboxes and radios fire on `click` (only when
+  the checked state actually changed, so clicking a checked radio does nothing);
+  selects and file inputs fire on `change`. `onChange` runs after `onInput` and
+  `onClick` for the same native event.
+- **`onBeforeInput`** fires for text insertion (and at the end of an IME
+  composition) with `data`, not for deletions, matching React.
+- **Errors** thrown by a handler do not stop the other handlers; the first error
+  is rethrown after the dispatch.
+- Handlers on `window`/`document` registered in `useEffect` stay native
+  listeners. Handlers inside a portal moved outside the root keep working.
+
+### Forms
+
+- **Controlled fields.** `value` and `checked` make a field controlled: after
+  `onChange` the DOM is restored to the state value, so a handler that does not
+  update state (or a field without `onChange`) keeps its value, and a handler
+  that transforms the value (`setV(v.toUpperCase())`) shows the transformed
+  value immediately. Radio groups restore every radio in the group. `<select
+  value>` and `<select multiple value={[...]}>` are controlled the same way.
+- **Value attribute sync.** As in React, the `value` attribute of a controlled
+  input tracks the current value, so `form.reset()` restores the current
+  controlled value.
+- **Uncontrolled fields.** `defaultValue`/`defaultChecked` set the initial value
+  only. Changing them later updates the default (visible only while the user
+  has not edited the field) and never overwrites user input. `form.reset()`
+  restores the defaults.
+- **`value={undefined}`** (or `null`) leaves the field uncontrolled. Switching a
+  field between controlled and uncontrolled logs React's console warning at
+  runtime.
+
+### Refs
+
+- **Object refs** (`useRef`, `createRef`) get `current` set to the node before
+  any layout effect runs, including refs forwarded to a child component, and
+  reset to `null` on unmount (a conditional branch hiding, a list item
+  removed, or navigation).
+- **Callback refs** are called with the node on mount and with `null` on
+  unmount. A React 19 cleanup function returned by the callback is called on
+  unmount instead. When the callback's identity changes the old callback is
+  detached and the new one attached. Callback refs never subscribe to signals
+  they read.
+- **`ref` as a prop**, `forwardRef`, and `useImperativeHandle(ref, create,
+  deps)` are supported. Refs in lists keep the right element per item.
+- Refs to class component instances are not supported yet.
+
+### Build diagnostics
+
+| Code | Reported for |
+|------|--------------|
+| `KR5001` | an unknown event prop on a built-in element (`onClickcapture`, `onTap`); a "did you mean" hint names the React event |
+| `KR5002` | a lowercase event prop given a function (`onclick={fn}`) |
+| `KR5003` | a string ref (`ref="field"`), removed in React 19 and ignored |
+| `KR5004` | `value`/`checked` without `onChange`, `onInput`, `readOnly` or `disabled` (a read-only field) |
+| `KR5005` | `value` with `defaultValue`, or `checked` with `defaultChecked` (the default is ignored) |
+| `KR5006` | `value={cond ? x : undefined}`: a field that switches between controlled and uncontrolled |
+| `KR5007` | `onChange` on a `contentEditable` element (use `onInput`) |
+
 ## What is not supported
 
 - **Running React itself.** There is no React runtime; compiled packages run
@@ -364,15 +461,6 @@ explicit pointer/focus handlers on the trigger.
   known. Literal inputs fold at build time; dynamic inputs use the compat shim.
 - **`Children.forEach`** and dynamic `Children.map` callbacks run in the compat
   shim at runtime, not at build time.
-
-Event props follow React semantics: events **bubble** (a child handler does not
-stop an ancestor handler unless it calls `stopPropagation()`), `onChange` maps to
-`input`, `onFocus`/`onBlur` map to the bubbling `focusin`/`focusout`, and
-non-bubbling events (`onMouseEnter`/`onMouseLeave`, `onScroll`, ...) are attached
-directly. `onClickCapture`-style capture handlers are supported. Controlled
-`value`/`checked` bind by DOM property, so programmatic updates work after the
-user has interacted. Hydration skips writes when the DOM value already
-matches, preserving focus, caret position, and selection.
 
 If you rely on unsupported behavior, write the component in Krate's own style --
 see [Reactivity](/docs/core-concepts/reactivity/) and
