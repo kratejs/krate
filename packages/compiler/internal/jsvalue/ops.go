@@ -17,7 +17,7 @@ func StrictEquals(a, b Value) bool {
 		return a.b == b.b
 	case KindNumber:
 		return a.n == b.n // NaN != NaN, +0 == -0
-	case KindString:
+	case KindString, KindBigInt:
 		return a.s == b.s
 	case KindArray, KindObject, KindFunction:
 		return a.same(b)
@@ -132,6 +132,9 @@ func BinaryOp(op string, a, b Value) Value {
 	if b.kind == KindUnknown {
 		return b
 	}
+	if (a.kind == KindBigInt || b.kind == KindBigInt) && op != "===" && op != "!==" {
+		return Unsupported("BigInt operator " + op)
+	}
 	switch op {
 	case "+":
 		return Add(a, b)
@@ -204,6 +207,9 @@ func UnaryOp(op string, a Value) Value {
 	}
 	if a.kind == KindUnknown {
 		return a
+	}
+	if a.kind == KindBigInt && op != "!" {
+		return Unsupported("BigInt operator " + op)
 	}
 	switch op {
 	case "!":

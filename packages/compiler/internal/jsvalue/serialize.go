@@ -44,6 +44,8 @@ func renderChild(b *strings.Builder, v Value) error {
 		return nil
 	case KindNumber:
 		b.WriteString(NumberToString(v.n))
+	case KindBigInt:
+		b.WriteString(v.s)
 	case KindString:
 		b.WriteString(escape.HTML(v.s))
 	case KindJSX:
@@ -68,7 +70,7 @@ func RenderRawChild(v Value) string {
 	switch v.kind {
 	case KindNumber:
 		return NumberToString(v.n)
-	case KindString:
+	case KindString, KindBigInt:
 		return v.s
 	case KindJSX:
 		return v.s
@@ -110,6 +112,8 @@ func writeJSSource(b *strings.Builder, v Value) bool {
 		b.WriteByte('\'')
 		b.WriteString(escape.JSString(v.s))
 		b.WriteByte('\'')
+	case KindBigInt:
+		b.WriteString(v.s + "n")
 	case KindArray:
 		b.WriteByte('[')
 		for i, e := range v.Elems() {
@@ -302,6 +306,8 @@ func ToAST(v Value) ast.Expr {
 		return &ast.Literal{Kind: ast.NumberLit, Value: NumberToString(v.n)}
 	case KindString:
 		return &ast.Literal{Kind: ast.StringLit, Value: v.s}
+	case KindBigInt:
+		return &ast.Literal{Kind: ast.NumberLit, Value: v.s + "n"}
 	case KindArray:
 		elems := make([]ast.Expr, 0, len(v.Elems()))
 		for _, e := range v.Elems() {

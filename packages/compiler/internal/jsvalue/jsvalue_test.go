@@ -315,6 +315,11 @@ func TestInterpExpressions(t *testing.T) {
 		{`"0" == false`, `true`},
 		{`0x1F + 0b11 + 0o7 + 1_000`, `1041`},
 		{`1e21`, `1e+21`},
+		{`123n`, `123n`},
+		{`0xFFn`, `255n`},
+		{`typeof 1n`, `'bigint'`},
+		{"`${10n}`", `'10'`},
+		{`1n === 1n`, `true`},
 	}
 	for _, c := range cases {
 		v := evalSrc(t, c.src)

@@ -34,6 +34,9 @@ const (
 	// KindJSX is a rendered JSX element/fragment: a safe, already-escaped HTML
 	// fragment. It is the only kind ever written to HTML unescaped.
 	KindJSX
+	// KindBigInt is a BigInt literal value (decimal digits in s). Only
+	// rendering, comparison and conversion are supported; arithmetic is not.
+	KindBigInt
 )
 
 func (k Kind) String() string {
@@ -56,6 +59,8 @@ func (k Kind) String() string {
 		return "function"
 	case KindJSX:
 		return "jsx"
+	case KindBigInt:
+		return "bigint"
 	}
 	return "unknown"
 }
@@ -120,6 +125,9 @@ func Number(f float64) Value { return Value{kind: KindNumber, n: f} }
 
 // String returns a string value.
 func String(s string) Value { return Value{kind: KindString, s: s} }
+
+// BigInt returns a BigInt value from its decimal digits.
+func BigInt(decimal string) Value { return Value{kind: KindBigInt, s: decimal} }
 
 // JSX returns a rendered JSX value wrapping safe HTML.
 func JSX(html string) Value { return Value{kind: KindJSX, s: html} }

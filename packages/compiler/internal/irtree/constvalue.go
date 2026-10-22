@@ -211,7 +211,7 @@ func childText(v jsvalue.Value) (string, bool) {
 	switch v.Kind() {
 	case jsvalue.KindUndefined, jsvalue.KindNull, jsvalue.KindBool, jsvalue.KindFunction:
 		return "", true
-	case jsvalue.KindNumber, jsvalue.KindString:
+	case jsvalue.KindNumber, jsvalue.KindString, jsvalue.KindBigInt:
 		return v.ToString(), true
 	case jsvalue.KindArray:
 		out := ""

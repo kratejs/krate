@@ -173,6 +173,9 @@ func literalValue(e *ast.Literal) Value {
 	case ast.StringLit:
 		return String(e.Value)
 	case ast.NumberLit:
+		if d, ok := parseBigIntLiteral(e.Value); ok {
+			return BigInt(d)
+		}
 		f, ok := ParseNumberLiteral(e.Value)
 		if !ok {
 			return Unsupported("numeric literal " + e.Value)

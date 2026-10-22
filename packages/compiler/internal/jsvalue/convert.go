@@ -20,6 +20,8 @@ func (v Value) Truthy() (truthy, known bool) {
 		return !(v.n == 0 || math.IsNaN(v.n)), true
 	case KindString:
 		return v.s != "", true
+	case KindBigInt:
+		return v.s != "0", true
 	}
 	// Arrays, objects, functions and JSX elements are objects: always truthy.
 	return true, true
@@ -59,6 +61,8 @@ func (v Value) ToNumber() float64 {
 		return v.n
 	case KindString:
 		return StringToNumber(v.s)
+	case KindBigInt:
+		return StringToNumber(v.s)
 	}
 	return v.ToPrimitive().ToNumber()
 }
@@ -77,7 +81,7 @@ func (v Value) ToString() string {
 		return "false"
 	case KindNumber:
 		return NumberToString(v.n)
-	case KindString:
+	case KindString, KindBigInt:
 		return v.s
 	case KindArray:
 		return joinArray(v.Elems(), ",")
@@ -118,6 +122,8 @@ func (v Value) TypeOf() string {
 		return "string"
 	case KindFunction:
 		return "function"
+	case KindBigInt:
+		return "bigint"
 	}
 	return ""
 }
@@ -327,4 +333,30 @@ func ToIntegerOrInfinity(f float64) float64 {
 		return f
 	}
 	return math.Trunc(f)
+}
+
+// parseBigIntLiteral parses BigInt literal source (`123n`, `0xFFn`) to its
+// decimal digits.
+func parseBigIntLiteral(src string) (string, bool) {
+	s := strings.ReplaceAll(src, "_", "")
+	if !strings.HasSuffix(s, "n") || len(s) < 2 {
+		return "", false
+	}
+	s = s[:len(s)-1]
+	base := 10
+	if len(s) > 2 && s[0] == '0' {
+		switch s[1] {
+		case 'x', 'X':
+			base, s = 16, s[2:]
+		case 'o', 'O':
+			base, s = 8, s[2:]
+		case 'b', 'B':
+			base, s = 2, s[2:]
+		}
+	}
+	z, ok := new(big.Int).SetString(s, base)
+	if !ok || z.Sign() < 0 {
+		return "", false
+	}
+	return z.String(), true
 }
