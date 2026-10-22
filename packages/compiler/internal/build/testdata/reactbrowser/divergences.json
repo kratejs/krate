@@ -1,0 +1,414 @@
+{
+  "r18/app_data_table": {
+    "severity": "P0",
+    "reason": "[derived-render-values] a useMemo result used by other render-local values is called as a getter: uncaught 'visible is not a function', tbody renders no rows, select-all starts checked"
+  },
+  "r18/app_modal_focus": {
+    "severity": "P1",
+    "reason": "[conditional-child-effects] the unmounted Dialog's effect runs at page load; when opened, focus() in its effect runs before the input exists so focus stays on the trigger"
+  },
+  "r18/app_tabs_accordion": {
+    "severity": "P0",
+    "reason": "[derived-render-values] tab panel text derived from tabs[index] never updates after selecting a tab; aria-selected={false} is omitted instead of rendering \"false\"; clicked tab loses focus"
+  },
+  "r18/app_todo": {
+    "severity": "P0",
+    "reason": "[derived-render-values] 'N left' (todos.filter(...).length computed in render) is stale after adding a todo; later edit/filter steps diverge"
+  },
+  "r18/boundary_did_catch_info": {
+    "severity": "P0",
+    "reason": "[class-unlowered] error boundaries (getDerivedStateFromError) are not lowered: the boundary and its children render as an empty <span>; warned without a diagnostic code"
+  },
+  "r18/boundary_effect_error": {
+    "severity": "P0",
+    "reason": "[class-unlowered] error boundary not lowered (empty <span>, subtree never renders); errors thrown in effects are not routed to a boundary; warned without a code"
+  },
+  "r18/boundary_event_handler_error": {
+    "severity": "P0",
+    "reason": "[class-unlowered] error boundary wrapping the whole page is not lowered, so the page renders only an empty <span>; warned without a code"
+  },
+  "r18/boundary_nested": {
+    "severity": "P0",
+    "reason": "[class-unlowered] nested error boundaries not lowered: children render as an empty <span>; warned without a code"
+  },
+  "r18/boundary_render_error": {
+    "severity": "P0",
+    "reason": "[class-unlowered] error boundary not lowered: protected child renders as an empty <span> and no fallback appears on render error; warned without a code"
+  },
+  "r18/boundary_reset_key": {
+    "severity": "P0",
+    "reason": "[class-unlowered] error boundary not lowered (empty <span>); key-based reset cannot work; warned without a code"
+  },
+  "r18/class_context_type": {
+    "severity": "P0",
+    "reason": "[class-unlowered] class with static contextType is not lowered and renders an empty <span>; warned without a code"
+  },
+  "r18/class_default_props": {
+    "severity": "P0",
+    "reason": "[class-default-props] static defaultProps are ignored: missing props render as undefined (class=\"pill undefined\", empty label)"
+  },
+  "r18/class_derived_state": {
+    "severity": "P0",
+    "reason": "[class-unlowered] class with static getDerivedStateFromProps is not lowered and renders an empty <span>; warned without a code"
+  },
+  "r18/class_get_snapshot": {
+    "severity": "P0",
+    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
+  },
+  "r18/class_lifecycle_mount_update_unmount": {
+    "severity": "P1",
+    "reason": "[class-lifecycle] componentDidUpdate is not called for prop changes (only own setState) and componentWillUnmount never runs when the parent removes the class"
+  },
+  "r18/class_lifecycle_order_nested": {
+    "severity": "P1",
+    "reason": "[effect-order] componentDidMount/DidUpdate run parent-first and interleave with child hook effects; React runs children first, then parents"
+  },
+  "r18/class_pure_component": {
+    "severity": "P2",
+    "reason": "[render-count] PureComponent render is logged once less: Krate updates the text binding without re-running render(); DOM and state match"
+  },
+  "r18/class_setstate_callback": {
+    "severity": "P0",
+    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
+  },
+  "r18/class_setstate_functional": {
+    "severity": "P0",
+    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
+  },
+  "r18/class_should_component_update": {
+    "severity": "P0",
+    "reason": "[class-unlowered] class with shouldComponentUpdate is not lowered and renders an empty <span> (hint says remove it); warned without a code"
+  },
+  "r18/class_state_setstate": {
+    "severity": "P0",
+    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
+  },
+  "r18/context_consumer_render_prop": {
+    "severity": "P0",
+    "reason": "[context-consumer] <Ctx.Consumer> render-prop child is unresolved ('could not be resolved and will not render'): empty <span>"
+  },
+  "r18/context_default_value": {
+    "severity": "P0",
+    "reason": "[context-build-eval] build fails: useContext() default value used without a Provider cannot be evaluated at build time (unresolved identifier createContext)"
+  },
+  "r18/context_memo_child": {
+    "severity": "P1",
+    "reason": "[signal-getter-leak] useContext value read in a memo child's render logs as a function (signal getter), not the number; render count also differs (P2 part)"
+  },
+  "r18/context_nested_providers": {
+    "severity": "P0",
+    "reason": "[context-build-eval] build fails: a component that nests itself under a Provider (<Level><Level>) is rejected as 'recursive component cannot be expanded'"
+  },
+  "r18/context_provider_change": {
+    "severity": "P0",
+    "reason": "[signal-getter-leak] object context value read via useContext gives undefined fields in effects and data-color={theme.color} is dropped; only the style binding works"
+  },
+  "r18/diag_conditional_hook": {
+    "severity": "P1",
+    "reason": "[missing-diagnostic] hook called inside if(): build succeeds with no KR2xxx diagnostic"
+  },
+  "r18/diag_find_dom_node": {
+    "severity": "P1",
+    "reason": "[missing-diagnostic] findDOMNode (removed in React 19): build succeeds with no KR8001 diagnostic"
+  },
+  "r18/diag_hook_in_loop": {
+    "severity": "P1",
+    "reason": "[missing-diagnostic] useState inside a for loop: build succeeds with no KR2xxx diagnostic"
+  },
+  "r18/diag_legacy_context": {
+    "severity": "P1",
+    "reason": "[missing-diagnostic] legacy context (childContextTypes/getChildContext/contextTypes): build succeeds with no KR3xxx diagnostic"
+  },
+  "r18/diag_string_ref": {
+    "severity": "P1",
+    "reason": "[missing-diagnostic] string ref (ref=\"name\", this.refs): build succeeds with no KR5xxx diagnostic"
+  },
+  "r18/effect_cleanup_order_rerun": {
+    "severity": "P1",
+    "reason": "[effect-cleanup] on re-run Krate interleaves cleanup+effect per effect instead of running all cleanups first, and cleanups see the new state (disconnect random instead of general)"
+  },
+  "r18/effect_deps_empty": {
+    "severity": "P1",
+    "reason": "[conditional-child-effects] child with [] effect: cleanup does not run when the child is removed by a condition, and the effect does not run again on remount"
+  },
+  "r18/effect_deps_function": {
+    "severity": "P1",
+    "reason": "[effect-deps] functions in deps never compare as changed: neither the inline function nor the useCallback recreated on userId change re-runs its effect"
+  },
+  "r18/effect_deps_literal": {
+    "severity": "P1",
+    "reason": "[effect-cleanup] cleanup reads the current state value instead of the value from the render it belongs to (cleanup count 1 instead of 0)"
+  },
+  "r18/effect_deps_missing": {
+    "severity": "P1",
+    "reason": "[effect-cleanup] effect without deps: cleanup closure sees the new values instead of the previous render's"
+  },
+  "r18/effect_deps_nan": {
+    "severity": "P0",
+    "reason": "[derived-render-values] const value = Number(raw) is evaluated once at hydration: text and effect deps never update after raw changes"
+  },
+  "r18/effect_deps_object_identity": {
+    "severity": "P1",
+    "reason": "[signal-getter-leak] object literal {page} built in render stores the signal getter (effects log 'fn'); inline object deps do not re-run every render"
+  },
+  "r18/effect_deps_signed_zero": {
+    "severity": "P0",
+    "reason": "[setstate-equality] state setter compares with === so setOffset(-0) after 0 is dropped (React uses Object.is); DOM and effect stay on +0"
+  },
+  "r18/effect_deps_variable": {
+    "severity": "P1",
+    "reason": "[effect-cleanup] deps array held in a variable works, but the cleanup closure sees the new query (cancel ab instead of cancel a)"
+  },
+  "r18/effect_layout_vs_passive": {
+    "severity": "P1",
+    "reason": "[effect-phases] insertion, layout and passive effects run in declaration order in one phase; React runs insertion < layout < passive, cleanups likewise"
+  },
+  "r18/effect_order_parent_child": {
+    "severity": "P1",
+    "reason": "[effect-order] effects run parent-first (root, branch, leaves); React runs children first; unmount cleanup order also differs"
+  },
+  "r18/effect_reads_dom": {
+    "severity": "P1",
+    "reason": "[effect-timing] layout and passive effects run before the DOM reflects the update (see 1 row after adding the 2nd)"
+  },
+  "r18/effect_reads_ref": {
+    "severity": "P1",
+    "reason": "[effect-timing] ref to a conditionally rendered input is non-null before mount, and focus() in the effect runs before the input is inserted, so focus stays on the button"
+  },
+  "r18/effect_setstate_in_effect": {
+    "severity": "P1",
+    "reason": "[effect-timing] derived state set in an effect: the initial 'words now 0' effect run is missing (state already 1 on first effect)"
+  },
+  "r18/effect_unmount_cleanup": {
+    "severity": "P1",
+    "reason": "[list-remount] removing a keyed row never runs its layout/passive cleanup, while the remaining rows re-run their mount effects; initial mount order also differs"
+  },
+  "r18/event_checkbox_radio_onchange": {
+    "severity": "P1",
+    "reason": "[focus-loss] clicking an already-checked radio re-renders the group and replaces the node, losing focus"
+  },
+  "r18/event_double_click": {
+    "severity": "P0",
+    "reason": "[autofocus] autoFocus is emitted as an attribute and the controlled value is set after focus, so typing lands at the start (' docUntitled')"
+  },
+  "r18/event_input_onchange": {
+    "severity": "P1",
+    "reason": "[synthetic-event] onChange on text inputs reports e.type 'input'; React reports 'change'"
+  },
+  "r18/event_stop_propagation": {
+    "severity": "P0",
+    "reason": "[synthetic-event] e.isPropagationStopped() is missing: handler throws, state update lost"
+  },
+  "r18/event_submit_prevent": {
+    "severity": "P0",
+    "reason": "[event-current-target] delegated onSubmit gets currentTarget = #root, so new FormData(e.currentTarget) throws and the submit result is lost"
+  },
+  "r18/event_synthetic_fields": {
+    "severity": "P1",
+    "reason": "[synthetic-event] e.nativeEvent is missing (instanceof MouseEvent false)"
+  },
+  "r18/event_target_current_target": {
+    "severity": "P1",
+    "reason": "[event-current-target] e.currentTarget is the delegation root (div#root) instead of the element whose handler runs"
+  },
+  "r18/form_controlled_checkbox": {
+    "severity": "P0",
+    "reason": "[derived-render-values] 'select all' checked={a && b && c} is not recomputed; clicked checkboxes lose focus (node replaced)"
+  },
+  "r18/form_controlled_input": {
+    "severity": "P0",
+    "reason": "[derived-render-values] derived 'valid' never updates; aria-invalid={bool} renders aria-invalid=\"\" instead of \"true\"/\"false\""
+  },
+  "r18/form_controlled_reject": {
+    "severity": "P0",
+    "reason": "[controlled-input] when onChange rejects an edit the DOM value is not restored to state (pin keeps '12a3', frozen input accepts typing)"
+  },
+  "r18/form_controlled_textarea": {
+    "severity": "P0",
+    "reason": "[controlled-input] textarea value truncated in onChange is not written back to the DOM; user sees text beyond the limit"
+  },
+  "r18/form_multi_select": {
+    "severity": "P0",
+    "reason": "[controlled-input] <select multiple value={array}> is not controlled: selection is cleared on change and not applied from state"
+  },
+  "r18/form_radio_group": {
+    "severity": "P0",
+    "reason": "[derived-render-values] price derived with plans.find(...) never updates; radio loses focus after change"
+  },
+  "r18/form_uncontrolled_default": {
+    "severity": "P0",
+    "reason": "[uncontrolled-default] defaultValue that depends on state is re-applied on update, overwriting what the user typed (ada becomes 'guest 1')"
+  },
+  "r18/hook_custom_hook": {
+    "severity": "P0",
+    "reason": "[custom-hooks] custom hooks returning a tuple/object render garbage ('open=function open()...', '[object HTMLButtonElement]') and their counters stay empty"
+  },
+  "r18/hook_usecallback_identity": {
+    "severity": "P2",
+    "reason": "[render-count] render counters kept in refs differ because Krate does not re-run component bodies; handlers and logs match"
+  },
+  "r18/hook_useid": {
+    "severity": "P2",
+    "reason": "[id-format] useId strings differ (krate-1-Field-Field_c0 vs _r_0_); ids are unique and label/aria links work on both sides"
+  },
+  "r18/hook_usereducer_init": {
+    "severity": "P0",
+    "reason": "[hooks-reducer-init] useReducer(reducer, arg, init) ignores init: state is the raw arg, count renders empty and dispatch throws 'state.history is not iterable'"
+  },
+  "r18/hook_useref_mutable": {
+    "severity": "P1",
+    "reason": "[ref-in-render] ref.current read during render is shown once and never refreshed on later renders; no diagnostic for the unsupported pattern"
+  },
+  "r18/hook_usestate_bailout": {
+    "severity": "P1",
+    "reason": "[setstate-equality] setState with a new but equal-content object does not re-render, so the deps-less effect does not run"
+  },
+  "r18/hook_usestate_functional_batch": {
+    "severity": "P0",
+    "reason": "[state-snapshot] state reads in a handler see updates immediately (no render snapshot): setCount(count + 1) three times adds 3 instead of 1"
+  },
+  "r18/hook_usestate_lazy_init": {
+    "severity": "P0",
+    "reason": "[hooks-lazy-init] useState(loadDraft) stores the identifier text 'loadDraft' instead of calling the initializer"
+  },
+  "r18/hook_usesyncexternalstore": {
+    "severity": "P0",
+    "reason": "[module-scope] module-level const cartStore = createStore(0) using an imported helper is not bundled: 'createStore is not defined', store-driven text empty"
+  },
+  "r18/key_change_remounts": {
+    "severity": "P0",
+    "reason": "[key-remount] changing a component's key does not remount it: draft state survives, mount/unmount effects do not run"
+  },
+  "r18/key_focused_input_reorder": {
+    "severity": "P0",
+    "reason": "[list-remount] reordering keyed rows recreates their DOM: typed text in uncontrolled inputs is lost and focus drops to body"
+  },
+  "r18/key_fragment": {
+    "severity": "P0",
+    "reason": "[keyed-fragment] <Fragment key> inside .map renders nothing and adding an item throws (insertBefore parameter 1 is not of type Node)"
+  },
+  "r18/key_index_vs_id": {
+    "severity": "P0",
+    "reason": "[list-item-state] useState inside components rendered by .map does not update the DOM (checkbox click has no effect)"
+  },
+  "r18/key_insert_remove": {
+    "severity": "P1",
+    "reason": "[list-remount] keyed row effects run twice at load, and every list change re-runs mount effects of unchanged rows without their cleanups; removed rows never run cleanup"
+  },
+  "r18/key_reorder_stateful": {
+    "severity": "P0",
+    "reason": "[list-item-state] row component state (votes) inside .map does not update; focus lost on click"
+  },
+  "r18/list_filter_map": {
+    "severity": "P0",
+    "reason": "[derived-render-values] list filtered by two states in a render-local const: updates on the text filter but not on the select; empty state never shows"
+  },
+  "r18/portal_basic": {
+    "severity": "P0",
+    "reason": "[portal] createPortal(..., document.body) content never appears in body; clicks cannot reach it"
+  },
+  "r18/portal_modal_toggle": {
+    "severity": "P0",
+    "reason": "[portal] conditional portal never mounts into body; its effect runs at page load while closed"
+  },
+  "r18/ref_callback_inline_rerender": {
+    "severity": "P1",
+    "reason": "[callback-ref] inline callback refs are never called (no node on mount, no null/node pair on re-render)"
+  },
+  "r18/ref_callback_mount_unmount": {
+    "severity": "P1",
+    "reason": "[callback-ref] callback ref is not called with null on unmount nor with the node on remount of a conditional element"
+  },
+  "r18/ref_create_ref_class": {
+    "severity": "P0",
+    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
+  },
+  "r18/ref_imperative_handle": {
+    "severity": "P0",
+    "reason": "[imperative-handle] useImperativeHandle on a forwardRef child never assigns ref.current: calling the handle throws"
+  },
+  "r18/ref_in_layout_effect": {
+    "severity": "P0",
+    "reason": "[effect-timing] layout effect measures before the DOM update, so the rendered height is one step behind (0px, 20px vs 20px, 40px)"
+  },
+  "r18/ref_list_refs": {
+    "severity": "P1",
+    "reason": "[callback-ref] callback refs inside .map are never called: the Map stays empty and focusing an item by id fails"
+  },
+  "r18/suspense_fallback_then_content": {
+    "severity": "P0",
+    "reason": "[suspense-lazy] build fails: lazy(() => promise) is evaluated at build time ('cannot evaluate delay(...)')"
+  },
+  "r18/suspense_lazy": {
+    "severity": "P0",
+    "reason": "[suspense-lazy] build fails: lazy(() => import('...')) is rejected ('DynamicImport expressions are not supported')"
+  },
+  "r18/suspense_lazy_on_click": {
+    "severity": "P0",
+    "reason": "[suspense-lazy] build fails: lazy(() => import('...')) is rejected ('DynamicImport expressions are not supported')"
+  },
+  "r18/suspense_nested": {
+    "severity": "P0",
+    "reason": "[suspense-lazy] build fails: nested Suspense with lazy(() => promise) evaluated at build time"
+  },
+  "r19/action_button_form_action": {
+    "severity": "P0",
+    "reason": "[form-actions] client function actions are stringified into action/formaction attributes (function source leaks into the DOM) and the form submits natively, navigating away"
+  },
+  "r19/action_form_auto_reset": {
+    "severity": "P0",
+    "reason": "[form-actions] <form action={asyncFn}> stringifies the function into the action attribute; submit is not intercepted, no message is added, no auto-reset"
+  },
+  "r19/action_optimistic": {
+    "severity": "P0",
+    "reason": "[form-actions] useOptimistic list not rendered on load and the client action form submits natively (page navigates away)"
+  },
+  "r19/action_server_form": {
+    "severity": "P0",
+    "reason": "[form-actions] useActionState with a 'use server' action renders action=\"formAction\" literally; submit navigates natively instead of calling POST /__krate/action"
+  },
+  "r19/action_server_direct": {
+    "severity": "P1",
+    "reason": "[async-transition] direct server action call works end to end, but useTransition isPending stays false during the async transition ('loading' never shows)"
+  },
+  "r19/action_use_action_state": {
+    "severity": "P0",
+    "reason": "[form-actions] useActionState: action=\"formAction\" literal, button rendered disabled, state count empty; the action never runs"
+  },
+  "r19/action_use_form_status": {
+    "severity": "P0",
+    "reason": "[form-status] build fails: useFormStatus() from react-dom is evaluated at build time ('unresolved identifier useFormStatus')"
+  },
+  "r19/app_reference": {
+    "severity": "P0",
+    "reason": "[form-status] React 19 reference app does not build: useFormStatus evaluated at build time (also exercises use(promise), useActionState, useOptimistic)"
+  },
+  "r19/context_as_provider": {
+    "severity": "P0",
+    "reason": "[context-consumer] React 19 <Context value> as provider is unresolved ('could not be resolved and will not render'): empty <span>"
+  },
+  "r19/deferred_initial_value": {
+    "severity": "P0",
+    "reason": "[deferred-value] build fails: useDeferredValue(value, initialValue) result passed to a memo child cannot be evaluated at build time"
+  },
+  "r19/meta_tags_hoist": {
+    "severity": "P0",
+    "reason": "[document-metadata] <title>/<meta>/<link> in a component stay in the body and are not hoisted; hydration throws 'props is not defined'"
+  },
+  "r19/meta_title_hoist": {
+    "severity": "P1",
+    "reason": "[document-metadata] <title> in a component is not hoisted to <head>: it stays in the body with Krate slot markers as literal text and document.title never updates (use <Head>)"
+  },
+  "r19/ref_callback_cleanup": {
+    "severity": "P1",
+    "reason": "[callback-ref] ref callback cleanup is not called on detach and the callback is not called again on re-attach"
+  },
+  "r19/transition_async": {
+    "severity": "P1",
+    "reason": "[async-transition] useTransition isPending stays false during an async transition; the final tab matches"
+  },
+  "r19/use_promise_suspense": {
+    "severity": "P0",
+    "reason": "[use-promise] use(promise) under Suspense: no fallback, the list renders empty and never fills, switching posts does not suspend"
+  }
+}

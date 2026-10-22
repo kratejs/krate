@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "check", "sel": "#enterprise" },
+    { "op": "click", "sel": "#downgrade" },
+    { "op": "press", "sel": "#basic", "key": "ArrowDown" }
+  ]
+}

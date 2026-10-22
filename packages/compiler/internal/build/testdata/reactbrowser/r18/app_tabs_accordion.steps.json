@@ -1,0 +1,12 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#tab-pricing" },
+    { "op": "press", "sel": "#tab-pricing", "key": "ArrowRight" },
+    { "op": "click", "sel": "#q1" },
+    { "op": "click", "sel": "#multiple" },
+    { "op": "click", "sel": "#q2" },
+    { "op": "click", "sel": "#q1" },
+    { "op": "click", "sel": "#tab-overview" },
+    { "op": "click", "sel": "#tab-faq" }
+  ]
+}

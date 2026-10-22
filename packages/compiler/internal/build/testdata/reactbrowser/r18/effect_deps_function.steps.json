@@ -1,0 +1,6 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#unrelated" },
+    { "op": "click", "sel": "#user" }
+  ]
+}

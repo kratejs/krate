@@ -1,0 +1,8 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#silent" },
+    { "op": "click", "sel": "#silent" },
+    { "op": "click", "sel": "#show" },
+    { "op": "click", "sel": "#silent" }
+  ]
+}

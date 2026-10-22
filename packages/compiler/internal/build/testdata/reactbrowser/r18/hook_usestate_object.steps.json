@@ -1,0 +1,9 @@
+{
+  "steps": [
+    { "op": "type", "sel": "#name-input", "text": " L" },
+    { "op": "click", "sel": "#move" },
+    { "op": "click", "sel": "#tag" },
+    { "op": "click", "sel": "#tag" },
+    { "op": "click", "sel": "#untag" }
+  ]
+}

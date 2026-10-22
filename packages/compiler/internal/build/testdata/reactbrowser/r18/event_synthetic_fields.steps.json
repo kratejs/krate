@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#btn" },
+    { "op": "click", "sel": "#btn", "modifiers": ["Shift", "Alt"] },
+    { "op": "dispatch", "sel": "#btn", "event": "contextmenu", "ctor": "MouseEvent", "init": { "button": 2 } }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "select", "sel": "#toppings", "values": ["olives", "basil"] },
+    { "op": "click", "sel": "#none" },
+    { "op": "click", "sel": "#all" }
+  ]
+}
