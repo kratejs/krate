@@ -94,7 +94,6 @@ func annotateGoCalls(src, srcPath string, locals map[string]bool) string {
 	if prog == nil {
 		return src
 	}
-	starts := lineStartOffsets(src)
 
 	type insertion struct {
 		at   int
@@ -108,7 +107,7 @@ func annotateGoCalls(src, srcPath string, locals map[string]bool) string {
 
 	addJSX := func(v *ast.JSXElement) {
 		if v.Opening != nil && locals[v.Opening.Name] {
-			if at, ok := tagNameEnd(starts, v.Position); ok {
+			if at, ok := tagNameEnd(src, v.Position, v.Opening.Name); ok {
 				id := irtree.GoCallID(v.Position.Line, v.Position.Col, v.Opening.Name)
 				inserts = append(inserts, insertion{at, fmt.Sprintf(" __krateGoId=%q", id)})
 			}
@@ -291,15 +290,21 @@ func lineStartOffsets(src string) []int {
 	return starts
 }
 
-// tagNameEnd returns the byte offset immediately after p's token. The lexer
-// records a token's Pos column after consuming it, so Line/Col point just past
-// the JSX tag name (which is what we want to insert an attribute after).
-func tagNameEnd(lineStarts []int, p ast.Pos) (int, bool) {
-	idx := p.Line - 1
-	if idx < 0 || idx >= len(lineStarts) {
+// tagNameEnd returns the byte offset immediately after the tag name of the
+// JSX element starting at p (p.Offset is the byte offset of its `<`).
+func tagNameEnd(src string, p ast.Pos, name string) (int, bool) {
+	i := p.Offset
+	if i < 0 || i >= len(src) || src[i] != '<' {
 		return 0, false
 	}
-	return lineStarts[idx] + p.Col, true
+	i++
+	for i < len(src) && (src[i] == ' ' || src[i] == '\t' || src[i] == '\n' || src[i] == '\r') {
+		i++
+	}
+	if !strings.HasPrefix(src[i:], name) {
+		return 0, false
+	}
+	return i + len(name), true
 }
 
 // goServerBundlePlugin resolves/loads `.go` imports and the `krate:go-baked`

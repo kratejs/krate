@@ -1,5 +1,3 @@
 {
-  "attr_string_literal_entities": "entities in JSX string-literal attr values double-escaped (&amp;amp;)",
-  "comp_prop_string_lt": "entities in JSX string-literal prop values double-escaped (&amp;amp;)",
   "comp_spread_props": "spread props on a component's root element dropped"
 }

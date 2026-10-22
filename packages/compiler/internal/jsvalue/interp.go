@@ -128,6 +128,16 @@ func (in *Interp) eval(expr ast.Expr) (Value, bool) {
 		return in.template(e), false
 	case *ast.TypeAssertion:
 		return in.eval(e.Expr)
+	case *ast.ParenExpr:
+		// Parentheses end an optional chain: (a?.b).c reads c of undefined.
+		v, _ := in.eval(e.Expr)
+		return v, false
+	case *ast.TaggedTemplateExpr:
+		return Unsupported("tagged template literals are not supported"), false
+	case *ast.ClassExpr:
+		return Unsupported("class expressions are not supported"), false
+	case *ast.MetaProperty:
+		return Dynamic(e.Meta + "." + e.Property), false
 	case *ast.UnaryExpr:
 		return in.unary(e), false
 	case *ast.BinaryExpr:
@@ -372,6 +382,8 @@ func (in *Interp) assignTo(target ast.Expr, v Value) Value {
 		return Unsupported("assignment to property " + key)
 	case *ast.TypeAssertion:
 		return in.assignTo(t.Expr, v)
+	case *ast.ParenExpr:
+		return in.assignTo(t.Expr, v)
 	}
 	return Unsupported("assignment target")
 }
@@ -521,19 +533,19 @@ func (in *Interp) destructure(scope *Scope, pattern string, v Value) Value {
 	if pattern == "" {
 		return v
 	}
-	if pattern[0] != '{' && pattern[0] != '[' {
-		name, def, hasDef := cutTopLevel(pattern, '=')
-		name = strings.TrimSpace(name)
-		if hasDef && v.kind == KindUndefined {
+	// A top-level `= default` applies to plain names and nested patterns.
+	if target, def, hasDef := cutTopLevel(pattern, '='); hasDef {
+		if v.kind == KindUndefined {
 			expr := ParseExprSource(strings.TrimSpace(def))
 			if expr == nil {
 				return Unsupported("default value " + def)
 			}
 			v = in.Eval(expr)
 		}
-		if strings.HasPrefix(name, "{") || strings.HasPrefix(name, "[") {
-			return in.destructure(scope, name, v)
-		}
+		return in.destructure(scope, strings.TrimSpace(target), v)
+	}
+	if pattern[0] != '{' && pattern[0] != '[' {
+		name := strings.TrimSpace(pattern)
 		if !isIdent(name) {
 			return Unsupported("destructuring target " + name)
 		}
@@ -780,6 +792,14 @@ func (in *Interp) execStmt(stmt ast.Stmt) (Value, control) {
 		return Undefined(), ctlNormal
 	case *ast.ThrowStmt:
 		return Unsupported("throw statement"), ctlError
+	case *ast.EmptyStmt, *ast.DebuggerStmt:
+		return Undefined(), ctlNormal
+	case *ast.LabeledStmt:
+		v, ctl := in.execStmt(s.Body)
+		if ctl == ctlBreak {
+			return Undefined(), ctlNormal
+		}
+		return v, ctl
 	case *ast.WhileStmt:
 		return in.execWhile(s.Test, s.Body, false)
 	case *ast.DoWhileStmt:

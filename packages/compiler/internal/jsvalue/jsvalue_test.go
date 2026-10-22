@@ -320,6 +320,12 @@ func TestInterpExpressions(t *testing.T) {
 		{`typeof 1n`, `'bigint'`},
 		{"`${10n}`", `'10'`},
 		{`1n === 1n`, `true`},
+		{`(obj?.a)`, `1`},
+		{`2 ** 3 ** 2`, `512`},
+		{`(() => { let x = 2; x **= 3; return x; })()`, `8`},
+		{`(() => { let a = 0, b = null, c = 1; a ||= 5; b ??= 6; c &&= 7; return [a, b, c]; })()`, `[5,6,7]`},
+		{`(() => { const o = {}; o.k ??= "v"; return o.k; })()`, `'v'`},
+		{`(({a = 1, b: {c = 2} = {}}) => a + c)({})`, `3`},
 	}
 	for _, c := range cases {
 		v := evalSrc(t, c.src)

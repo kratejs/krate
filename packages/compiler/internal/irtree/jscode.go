@@ -83,6 +83,12 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 		}
 		return objJS + "." + propName
 	case *ast.BinaryExpr:
+		if e.Op == "=" {
+			switch e.Left.(type) {
+			case *ast.ObjectExpr, *ast.ArrayExpr:
+				return "(" + renderPattern(e.Left, signals) + " = " + generateExprJS(e.Right, signals) + ")"
+			}
+		}
 		left := generateExprJS(e.Left, signals)
 		right := generateExprJS(e.Right, signals)
 		// Preserve real JS semantics for `&&` (falsy left operand is returned
@@ -91,24 +97,35 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 		// nothing when the guard fails - matching React.
 		return "(" + left + " " + e.Op + " " + right + ")"
 	case *ast.UnaryExpr:
-		arg := generateExprJS(e.Arg, signals)
-		if e.Postfix {
-			return arg + e.Op
-		}
-		return unaryPrefixJS(e.Op, arg)
+		return renderUnaryJS(e, signals)
 	case *ast.ConditionalExpr:
 		test := generateExprJS(e.Test, signals)
 		consequent := generateExprJS(e.Consequent, signals)
 		alternate := generateExprJS(e.Alternate, signals)
 		return "(" + test + "?" + consequent + ":" + alternate + ")"
 	case *ast.ArrowFn:
+		if e.Function {
+			return renderFunctionExpr(e, signals)
+		}
 		return renderArrowFn(e, signals)
 	case *ast.ArrayExpr:
 		var elems []string
 		for _, el := range e.Elements {
 			elems = append(elems, generateExprJS(el, signals))
 		}
+		// A trailing hole needs its own comma: `[a,,]` has length 2.
+		if n := len(e.Elements); n > 0 && e.Elements[n-1] == nil {
+			elems = append(elems, "")
+		}
 		return "[" + strings.Join(elems, ",") + "]"
+	case *ast.ClassExpr:
+		return "(" + renderClassJS(e.Class, signals, 0) + ")"
+	case *ast.TaggedTemplateExpr:
+		return generateExprJS(e.Tag, signals) + generateTemplateExpr(e.Quasi, signals)
+	case *ast.MetaProperty:
+		return e.Meta + "." + e.Property
+	case *ast.ParenExpr:
+		return "(" + generateExprJS(e.Expr, signals) + ")"
 	case *ast.ObjectExpr:
 		return generateObjectExpr(e, signals)
 	case *ast.TemplateExpr:
@@ -125,6 +142,9 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 	case *ast.AwaitExpr:
 		return "await " + generateExprJS(e.Arg, signals)
 	case *ast.DynamicImport:
+		if e.Options != nil {
+			return "import(" + generateExprJS(e.Arg, signals) + ", " + generateExprJS(e.Options, signals) + ")"
+		}
 		return "import(" + generateExprJS(e.Arg, signals) + ")"
 	case *ast.ImportMetaExpr:
 		return "import.meta"
@@ -173,7 +193,9 @@ func renderParam(p *ast.Param) string {
 		return ""
 	}
 	s := p.Name
-	if p.Pattern != "" {
+	if p.Target != nil {
+		s = renderPattern(p.Target, nil)
+	} else if p.Pattern != "" {
 		s = p.Pattern
 	}
 	if p.IsRest {
@@ -282,7 +304,9 @@ func renderStmt(stmt ast.Stmt, signals map[string]ast.Expr, level int) string {
 		for _, decl := range s.Decls {
 			if decl.IsDestructuring {
 				pattern := decl.Pattern
-				if pattern == "" {
+				if decl.Target != nil {
+					pattern = renderPattern(decl.Target, signals)
+				} else if pattern == "" {
 					pattern = "[" + strings.Join(decl.Names, ",") + "]"
 				}
 				parts = append(parts, keyword+" "+pattern+"="+generateExprJS(decl.Init, signals))
@@ -341,7 +365,11 @@ func renderStmt(stmt ast.Stmt, signals map[string]ast.Expr, level int) string {
 		if s.Async {
 			b.WriteString("async ")
 		}
-		b.WriteString("function ")
+		b.WriteString("function")
+		if s.Generator {
+			b.WriteByte('*')
+		}
+		b.WriteByte(' ')
 		b.WriteString(s.Name)
 		b.WriteString("(")
 		b.WriteString(renderParams(s.Params))
@@ -389,8 +417,16 @@ func renderStmt(stmt ast.Stmt, signals map[string]ast.Expr, level int) string {
 			op = "of"
 		}
 		left := generateExprJS(s.Left, signals)
+		switch s.Left.(type) {
+		case *ast.ObjectExpr, *ast.ArrayExpr:
+			left = renderPattern(s.Left, signals)
+		}
 		var b strings.Builder
-		b.WriteString("for (")
+		b.WriteString("for ")
+		if s.Await {
+			b.WriteString("await ")
+		}
+		b.WriteString("(")
 		if s.Keyword != "" {
 			b.WriteString(s.Keyword)
 			b.WriteByte(' ')
@@ -479,9 +515,14 @@ func renderStmt(stmt ast.Stmt, signals map[string]ast.Expr, level int) string {
 		}
 		b.WriteByte('}')
 		if s.Catch != nil {
-			b.WriteString(" catch (")
-			b.WriteString(s.Catch.Param)
-			b.WriteString(") {")
+			switch {
+			case s.Catch.ParamTarget != nil:
+				b.WriteString(" catch (" + renderPattern(s.Catch.ParamTarget, signals) + ") {")
+			case s.Catch.Param != "":
+				b.WriteString(" catch (" + s.Catch.Param + ") {")
+			default:
+				b.WriteString(" catch {")
+			}
 			if len(s.Catch.Body) > 0 {
 				b.WriteByte('\n')
 				b.WriteString(renderStmtBlock(s.Catch.Body, signals, level+1))
@@ -501,6 +542,16 @@ func renderStmt(stmt ast.Stmt, signals map[string]ast.Expr, level int) string {
 		return b.String()
 	case *ast.ThrowStmt:
 		return "throw " + generateExprJS(s.Value, signals) + ";"
+	case *ast.ClassDecl:
+		return renderClassJS(s, signals, level)
+	case *ast.LabeledStmt:
+		return s.Label + ": " + renderStmt(s.Body, signals, level)
+	case *ast.EmptyStmt:
+		return ";"
+	case *ast.DebuggerStmt:
+		return "debugger;"
+	case *ast.WithStmt:
+		return "with (" + generateExprJS(s.Object, signals) + ") " + renderFnBodyJS(s.Body, signals, level)
 	default:
 		return "/*krate:unsupported:" + fmt.Sprintf("%T", stmt) + "*/;"
 	}
@@ -512,6 +563,10 @@ func varKeyword(kind ast.VarKind) string {
 		return "const"
 	case ast.VarLet:
 		return "let"
+	case ast.VarUsing:
+		return "using"
+	case ast.VarAwaitUsing:
+		return "await using"
 	default:
 		return "var"
 	}
@@ -526,14 +581,18 @@ func generateObjectExpr(obj *ast.ObjectExpr, signals map[string]ast.Expr) string
 			continue
 		}
 		if prop.Method {
-			parts = append(parts, generateMethod(prop.Key, prop.Value, signals))
+			if prop.Getter || prop.Setter || prop.Computed || prop.KeyNumeric || isGeneratorFn(prop.Value) {
+				parts = append(parts, generateAccessorMethod(prop, signals))
+			} else {
+				parts = append(parts, generateMethod(prop.Key, prop.Value, signals))
+			}
 			continue
 		}
 		valJS := generateExprJS(prop.Value, signals)
 		if prop.Shorthand {
 			parts = append(parts, prop.Key)
 		} else {
-			parts = append(parts, jsObjectKey(prop.Key)+":"+valJS)
+			parts = append(parts, renderPropKey(prop, signals)+":"+valJS)
 		}
 	}
 	return "{" + strings.Join(parts, ",") + "}"
@@ -881,6 +940,23 @@ func codegenIssues(fn *ast.FnDecl, mk func(pos ast.Pos, msg, hint string) error)
 	var walkExpr func(ast.Expr)
 	var walkStmt func(ast.Stmt)
 	var walkJSXChild func(ast.JSXChild)
+	var walkClass func(*ast.ClassDecl)
+	walkClass = func(c *ast.ClassDecl) {
+		if c == nil {
+			return
+		}
+		walkExpr(c.SuperClass)
+		for _, m := range c.Members {
+			if m == nil {
+				continue
+			}
+			walkExpr(m.KeyExpr)
+			walkExpr(m.Init)
+			for _, s := range m.Body {
+				walkStmt(s)
+			}
+		}
+	}
 
 	walkExpr = func(e ast.Expr) {
 		if e == nil {
@@ -947,6 +1023,15 @@ func codegenIssues(fn *ast.FnDecl, mk func(pos ast.Pos, msg, hint string) error)
 			walkExpr(v.Arg)
 		case *ast.DynamicImport:
 			walkExpr(v.Arg)
+			walkExpr(v.Options)
+		case *ast.ClassExpr:
+			walkClass(v.Class)
+		case *ast.TaggedTemplateExpr:
+			walkExpr(v.Tag)
+			walkExpr(v.Quasi)
+		case *ast.ParenExpr:
+			walkExpr(v.Expr)
+		case *ast.MetaProperty:
 		default:
 			report(e.Pos(), "expression", e)
 		}
@@ -967,6 +1052,7 @@ func codegenIssues(fn *ast.FnDecl, mk func(pos ast.Pos, msg, hint string) error)
 	walkStmt = func(s ast.Stmt) {
 		switch v := s.(type) {
 		case nil:
+			// Optional statements (a `for (;;)` without an init).
 		case *ast.ClassDecl:
 			name := v.Name
 			if name == "" {
@@ -1044,6 +1130,14 @@ func codegenIssues(fn *ast.FnDecl, mk func(pos ast.Pos, msg, hint string) error)
 			}
 		case *ast.ThrowStmt:
 			walkExpr(v.Value)
+		case *ast.LabeledStmt:
+			walkStmt(v.Body)
+		case *ast.WithStmt:
+			walkExpr(v.Object)
+			for _, c := range v.Body {
+				walkStmt(c)
+			}
+		case *ast.EmptyStmt, *ast.DebuggerStmt:
 		case *ast.BreakStmt, *ast.ContinueStmt:
 		default:
 			report(s.Pos(), "statement", s)

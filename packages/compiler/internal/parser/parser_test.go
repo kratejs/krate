@@ -175,7 +175,7 @@ func TestImport(t *testing.T) {
 }
 
 func TestIfStatement(t *testing.T) {
-	prog, errs := parse(t, "if (x > 0) { return 1; } else { return 2; }")
+	prog, errs := parse(t, "if (x > 0) { y = 1; } else { y = 2; }")
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}

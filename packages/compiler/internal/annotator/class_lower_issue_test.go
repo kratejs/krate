@@ -16,7 +16,7 @@ func TestClassLoweringIssueNamesMember(t *testing.T) {
 		{"error boundary", "class C extends Component {\n  componentDidCatch(e) {}\n  render() { return <div />; }\n}", "componentDidCatch", "error boundary", 2},
 		{"static member", "class C extends Component {\n  static helper() { return 1; }\n  render() { return <div />; }\n}", "helper", "static member helper", 2},
 		{"private member", "class C extends Component {\n  #secret = 1;\n  render() { return <div />; }\n}", "#secret", "private member #secret", 2},
-		{"unknown this", "class C extends Component {\n  render() {\n    return <div>{this.other}</div>;\n  }\n}", "this.other", "this.other is not a field", 2},
+		{"unknown this", "class C extends Component {\n  render() {\n    return <div>{this.other}</div>;\n  }\n}", "this.other", "this.other is not a field", 3},
 		{"no render", "class C extends Component {\n  componentDidMount() {}\n}", "", "no render()", 1},
 	}
 	for _, tc := range cases {

@@ -63,3 +63,12 @@ func TestFormatDiagnostics(t *testing.T) {
 		t.Errorf("missing bare error:\n%s", out)
 	}
 }
+
+func TestCaretUsesUTF16ColumnsAndTabs(t *testing.T) {
+	// Column 4 (1-based UTF-16) follows a tab and a two-unit emoji.
+	src := "\t" + string(rune(0x1F600)) + "x"
+	out := FormatDiagnostics([]error{New("a.tsx", 1, 4, "m", "", src)})
+	if !strings.Contains(out, "\n\t ^") {
+		t.Errorf("caret misplaced:\n%q", out)
+	}
+}

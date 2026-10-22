@@ -217,9 +217,8 @@ export default function App() {
 			t.Fatalf("want 1 diagnostic, got %v", tree.Errors)
 		}
 		d := ds[0]
-		// The parser gives the expression statement no position, so the
-		// diagnostic points at the enclosing guard.
-		if d.File != "page.tsx" || d.Line != 4 || d.Col <= 0 || d.Hint == "" || !strings.Contains(d.Source, "if (l())") {
+		// The diagnostic points at the statement that cannot be lowered.
+		if d.File != "page.tsx" || d.Line != 5 || d.Col != 5 || d.Hint == "" || !strings.Contains(d.Source, "console.log") {
 			t.Errorf("diagnostic = %+v", d)
 		}
 		if !strings.Contains(d.Message, "component <App>") {

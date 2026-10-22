@@ -245,62 +245,52 @@ func messageDiag(path string, m api.Message, orig, full *textIndex, bom bool) di
 		off += len(utf8BOM)
 	}
 	line, col := full.kratePos(off)
-	d.Line, d.Col = line, col+1
+	d.Line, d.Col = line, col
 	d.Source = full.line(line)
 	return d
 }
 
-// line returns the text of 1-based '\n' line n without its terminator.
+// line returns the text of 1-based line n without its terminator.
 func (t *textIndex) line(n int) string {
-	if n < 1 || n > len(t.nl) {
+	if n < 1 || n > len(t.es) {
 		return ""
 	}
 	end := len(t.s)
-	if n < len(t.nl) {
-		end = t.nl[n] - 1
+	if n < len(t.es) {
+		end = t.es[n]
 	}
-	return strings.TrimSuffix(t.s[t.nl[n-1]:end], "\r")
+	s := t.s[t.es[n-1]:end]
+	s = strings.TrimSuffix(s, "\n")
+	s = strings.TrimSuffix(s, "\r")
+	s = strings.TrimSuffix(s, string(rune(0x2028)))
+	return strings.TrimSuffix(s, string(rune(0x2029)))
 }
 
 // Pos maps a position in Code to the original source. line and col follow
-// Krate's lexer convention (1-based line split on '\n', column counted in
-// runes); col may be the column of any character of a token, and the result
-// is the column of the matching character in the original. A zero position is
-// returned unchanged.
+// Krate's lexer convention (1-based line, 1-based column in UTF-16 code
+// units) and name the start of a token; the result is the position of the
+// matching character in the original. A zero position is returned unchanged.
 func (r *Result) Pos(line, col int) (int, int) {
 	if line <= 0 {
 		return line, col
 	}
-	p := r.gen.krateOffset(line, col)
-	o := r.mapOffset(p)
-	if r.bom {
-		o += len(utf8BOM)
-	}
+	o := r.mapStart(r.gen.krateOffset(line, col))
 	return r.full.kratePos(o)
 }
 
-// mapOffset maps a byte offset in Code to a byte offset in the BOM-less
-// original. The character just before p identifies the token, so positions
-// recorded at either the start or the end of a token map consistently.
-func (r *Result) mapOffset(p int) int {
-	if p <= 0 {
-		return r.mapChar(0)
+// mapStart maps the byte offset of a token start in Code to a byte offset in
+// the original source (including a leading BOM).
+func (r *Result) mapStart(p int) int {
+	var o int
+	if p >= len(r.Code) {
+		o = len(r.orig.s)
+	} else {
+		o = r.mapChar(p)
 	}
-	_, n := utf8.DecodeLastRuneInString(r.Code[:p])
-	q := p - n
-	oq := r.mapChar(q)
-	if oq >= len(r.orig.s) {
-		return len(r.orig.s)
+	if r.bom {
+		o += len(utf8BOM)
 	}
-	if r.Code[q] == '\n' {
-		// A position just past a newline stays at the start of a line.
-		if i := strings.IndexByte(r.orig.s[oq:], '\n'); i >= 0 {
-			return oq + i + 1
-		}
-		return len(r.orig.s)
-	}
-	_, n = utf8.DecodeRuneInString(r.orig.s[oq:])
-	return oq + n
+	return o
 }
 
 // mapChar maps the byte offset of one character in Code to the original.
@@ -321,6 +311,14 @@ func (r *Result) mapChar(q int) int {
 	}
 	d := q - segGen
 	if d <= 0 {
+		// A mapping can be re-associated with a later token (esbuild maps an
+		// `export` keyword to its declaration): if the original text at the
+		// mapped position does not match, look for the token on that line.
+		if w := wordAt(r.Code, q); w != "" && !strings.HasPrefix(r.orig.s[min(segOrig, len(r.orig.s)):], w) {
+			if at := r.nearestOnLine(segOrig, w); at >= 0 {
+				return at
+			}
+		}
 		return segOrig
 	}
 	// Text esbuild printed verbatim (identifiers, JSX text, template chunks)
@@ -375,6 +373,44 @@ func (r *Result) mapChar(q int) int {
 
 func isSpace(c byte) bool { return c == ' ' || c == '\t' }
 
+// wordAt returns the identifier-like word starting at s[i], or "".
+func wordAt(s string, i int) string {
+	j := i
+	for j < len(s) {
+		c := s[j]
+		if c == '_' || c == '$' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' {
+			j++
+			continue
+		}
+		break
+	}
+	return s[i:j]
+}
+
+// nearestOnLine returns the offset of the occurrence of w on the original
+// line containing off that is closest to off, or -1.
+func (r *Result) nearestOnLine(off int, w string) int {
+	oln, _ := r.orig.esPos(min(off, len(r.orig.s)))
+	ls := r.orig.es[oln]
+	le := len(r.orig.s)
+	if oln+1 < len(r.orig.es) {
+		le = r.orig.es[oln+1]
+	}
+	best := -1
+	for from := ls; from < le; {
+		i := strings.Index(r.orig.s[from:le], w)
+		if i < 0 {
+			break
+		}
+		at := from + i
+		if best < 0 || abs(at-off) < abs(best-off) {
+			best = at
+		}
+		from = at + 1
+	}
+	return best
+}
+
 func abs(n int) int {
 	if n < 0 {
 		return -n
@@ -389,8 +425,14 @@ func (r *Result) RemapProgram(prog *ast.Program) {
 		return
 	}
 	remapPositions(prog, func(p ast.Pos) ast.Pos {
-		l, c := r.Pos(p.Line, p.Col)
-		return ast.Pos{Line: l, Col: c}
+		off := p.Offset
+		if off == 0 && (p.Line > 1 || p.Col > 1) {
+			// A synthesized position without an offset.
+			off = r.gen.krateOffset(p.Line, p.Col)
+		}
+		o := r.mapStart(off)
+		l, c := r.full.kratePos(o)
+		return ast.Pos{Line: l, Col: c, Offset: o}
 	})
 }
 
