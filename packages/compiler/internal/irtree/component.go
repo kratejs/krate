@@ -328,19 +328,8 @@ func (b *builder) foldComponentLocals(fn *ast.FnDecl, node *ComponentNode, isPag
 // locals whose initializer needs the cva/cn table are re-folded.
 func (b *builder) foldLocals(fn *ast.FnDecl, node *ComponentNode) *localFold {
 	// useId() resolves to a per-component-instance build-time literal, stable
-	// across SSR and hydration. Multiple calls within one instance get
-	// distinct suffixes.
-	useIdBase := "krate-" + strings.ReplaceAll(string(node.ID), ".", "-")
-	useIdN := 0
-	nextUseId := func() string {
-		n := useIdN
-		useIdN++
-		if n == 0 {
-			return useIdBase
-		}
-		return useIdBase + "-" + itoa(n)
-	}
-	fold := collectLocalVars(fn.Body, b.sigMap(), b.localProps, nextUseId)
+	// across SSR and hydration.
+	fold := collectLocalVars(fn.Body, b.sigMap(), b.localProps, useIdSequence(node.ID))
 	// A changed local replaces any same-named binding: with its final folded
 	// value, or (when it has none) by removal so reads defer to hydration.
 	for name := range fold.changed {

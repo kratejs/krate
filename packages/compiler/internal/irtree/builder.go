@@ -91,12 +91,20 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		}
 	}
 
+	builder := newBuilder(prog, ann, opts)
+	root := builder.buildComponentNode(entryFn, "")
+	root.SourceFile = ann.SourceFile
+	return builder.finishTree(root)
+}
+
+// newBuilder prepares the build-global state for one IR construction.
+func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder {
 	codeTheme := opts.CodeTheme
 	if codeTheme == "" {
 		codeTheme = syntaxhighlight.DefaultTheme
 	}
 	moduleConsts, moduleConstInits := mergedModuleConstants(prog, opts)
-	builder := &builder{
+	b := &builder{
 		functions:        ann.Functions,
 		ann:              ann,
 		idCounter:        make(map[string]int),
@@ -117,11 +125,16 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		localImports:     opts.LocalComponentImports,
 		actionURLs:       opts.ActionURLs,
 	}
+	if entryFn := ann.Functions[ann.EntryPoint]; entryFn != nil {
+		b.expansion = []expansionFrame{{name: entryFn.Name}}
+	}
+	return b
+}
 
-	builder.expansion = []expansionFrame{{name: entryFn.Name}}
-	root := builder.buildComponentNode(entryFn, "")
-	root.SourceFile = ann.SourceFile
-
+// finishTree validates the module's functions and assembles the tree around
+// the built root.
+func (b *builder) finishTree(root *ComponentNode) *ComponentTree {
+	ann := b.ann
 	// Validate that every construct in the module's functions is supported by
 	// the JS code generator. Unsupported nodes become hard build errors rather
 	// than being silently dropped from the emitted hydration/SSR code.
@@ -140,36 +153,36 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 			continue
 		}
 		checked[fn] = true
-		builder.srcFn = name
-		builder.codegenErrs = append(builder.codegenErrs, codegenIssues(fn, func(pos ast.Pos, msg, hint string) error {
-			return builder.diagAt(pos, diag.SeverityError, msg, hint)
+		b.srcFn = name
+		b.codegenErrs = append(b.codegenErrs, codegenIssues(fn, func(pos ast.Pos, msg, hint string) error {
+			return b.diagAt(pos, diag.SeverityError, msg, hint)
 		})...)
-		builder.srcFn = ""
+		b.srcFn = ""
 	}
 
-	errs := make([]error, 0, len(builder.cssErrs)+len(builder.buildErrs)+len(builder.codegenErrs))
-	errs = append(errs, builder.cssErrs...)
-	errs = append(errs, builder.buildErrs...)
-	errs = append(errs, builder.codegenErrs...)
-	errs = append(errs, builder.markupErrs...)
+	errs := make([]error, 0, len(b.cssErrs)+len(b.buildErrs)+len(b.codegenErrs))
+	errs = append(errs, b.cssErrs...)
+	errs = append(errs, b.buildErrs...)
+	errs = append(errs, b.codegenErrs...)
+	errs = append(errs, b.markupErrs...)
 
-	cssSignals, noJSFallback := builder.cssStylesheets()
+	cssSignals, noJSFallback := b.cssStylesheets()
 	return &ComponentTree{
 		Root:             root,
-		HasLinks:         builder.hasLinks,
-		RuntimeStore:     builder.runtimeProps,
+		HasLinks:         b.hasLinks,
+		RuntimeStore:     b.runtimeProps,
 		Functions:        ann.Functions,
-		CVAFactories:     builder.cvaFactories,
-		ContextDefaults:  builder.contextDefaults,
-		ModuleConstInits: builder.moduleConstInits,
+		CVAFactories:     b.cvaFactories,
+		ContextDefaults:  b.contextDefaults,
+		ModuleConstInits: b.moduleConstInits,
 		CSSSignalsCSS:    cssSignals,
-		HasCSSSignals:    len(builder.cssCollected) > 0 || len(builder.cssConditions) > 0,
+		HasCSSSignals:    len(b.cssCollected) > 0 || len(b.cssConditions) > 0,
 		NoJSFallbackCSS:  noJSFallback,
-		NeedsCSSARIA:     builder.cssNeedsARIA,
+		NeedsCSSARIA:     b.cssNeedsARIA,
 		Errors:           errs,
 
-		ExternalComponents: builder.externals,
-		Warnings:           builder.warnings,
+		ExternalComponents: b.externals,
+		Warnings:           b.warnings,
 	}
 }
 
