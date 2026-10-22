@@ -1239,9 +1239,7 @@ func (p *Parser) parseArrayPatternInto(sb *strings.Builder, names *[]string, res
 		} else if !p.parsePatternElement(sb, names, rest) {
 			p.next()
 		}
-		if p.match(lexer.ASSIGN) {
-			_ = p.parseExpr(precLowest)
-		}
+		p.patternDefault(sb)
 		if !p.match(lexer.COMMA) {
 			break
 		}
@@ -1283,9 +1281,7 @@ func (p *Parser) parseObjectPatternInto(sb *strings.Builder, names *[]string, re
 		} else {
 			p.next()
 		}
-		if p.match(lexer.ASSIGN) {
-			_ = p.parseExpr(precLowest)
-		}
+		p.patternDefault(sb)
 		if !p.match(lexer.COMMA) {
 			break
 		}
@@ -1293,6 +1289,26 @@ func (p *Parser) parseObjectPatternInto(sb *strings.Builder, names *[]string, re
 	}
 	p.expect(lexer.RBRACE)
 	sb.WriteString("}")
+}
+
+// patternDefault consumes an optional `= expr` default in a destructuring
+// pattern and records it in the pattern source, so consumers that bind the
+// pattern (codegen, build-time evaluation) still see the default value.
+func (p *Parser) patternDefault(sb *strings.Builder) {
+	if !p.match(lexer.ASSIGN) {
+		return
+	}
+	p.skipWS()
+	start := p.pos
+	_ = p.parseExpr(precLowest)
+	var src strings.Builder
+	for i := start; i < p.pos && i < len(p.tokens); i++ {
+		src.WriteString(p.tokens[i].Value)
+	}
+	if text := strings.TrimSpace(src.String()); text != "" {
+		sb.WriteString(" = ")
+		sb.WriteString(text)
+	}
 }
 
 func (p *Parser) parsePatternElement(sb *strings.Builder, names *[]string, rest *string) bool {
