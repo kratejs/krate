@@ -75,9 +75,8 @@ func planMapCall(call *ast.CallExpr) *listPlan {
 	if key := keyExprOf(ret); key != nil {
 		plan.KeyExpr = key
 		plan.KeyJS = renderKeyFn(arrow, prefix, key)
-	} else if plan.ReturnsElement && hasAnyKey(ret) {
-		plan.KeyHoles = true
 	}
+	plan.KeyHoles = hasKeyHole(ret)
 	plan.Accessor = simpleCallbackParams(arrow)
 	plan.RenderJS = renderRowFn(arrow, plan.Accessor)
 	return plan
@@ -190,6 +189,36 @@ func returnsElement(e ast.Expr) bool {
 		}
 	}
 	return false
+}
+
+// hasKeyHole reports a callback result that keys some returned elements but
+// not others (for example a ternary with a key on one branch only).
+func hasKeyHole(e ast.Expr) bool {
+	keyed, unkeyed := false, false
+	var walk func(e ast.Expr)
+	walk = func(e ast.Expr) {
+		switch v := e.(type) {
+		case *ast.ParenExpr:
+			walk(v.Expr)
+		case *ast.TypeAssertion:
+			walk(v.Expr)
+		case *ast.ConditionalExpr:
+			walk(v.Consequent)
+			walk(v.Alternate)
+		case *ast.BinaryExpr:
+			if v.Op == "&&" || v.Op == "||" || v.Op == "??" {
+				walk(v.Right)
+			}
+		case *ast.JSXElement, *ast.JSXFragment:
+			if hasAnyKey(v) {
+				keyed = true
+			} else {
+				unkeyed = true
+			}
+		}
+	}
+	walk(e)
+	return keyed && unkeyed
 }
 
 // hasAnyKey reports whether any returned JSX branch carries a key.
