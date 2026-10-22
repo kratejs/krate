@@ -42,6 +42,181 @@ type hookFrame struct {
 	// noDeps are synthesized dependency arrays of effects without a
 	// dependency array, filled once the whole body has been rewritten.
 	noDeps []*ast.ArrayExpr
+	// guards is the stack of conditions and loops enclosing the statement
+	// being rewritten, within this function.
+	guards []string
+}
+
+// guarded rewrites fn's statements as being inside a condition or loop.
+func (c *reactCtx) guarded(kind string, fn func()) {
+	f := c.frame()
+	if f == nil {
+		fn()
+		return
+	}
+	f.guards = append(f.guards, kind)
+	defer func() { f.guards = f.guards[:len(f.guards)-1] }()
+	fn()
+}
+
+// checkHookPlacement reports a React hook called inside a condition or loop
+// (the Rules of Hooks). React's own use() may be called conditionally.
+func (c *reactCtx) checkHookPlacement(e *ast.CallExpr, api string) {
+	if api == "use" || !strings.HasPrefix(api, "use") {
+		return
+	}
+	f := c.frame()
+	if f == nil || len(f.guards) == 0 {
+		return
+	}
+	where := "a condition"
+	for _, g := range f.guards {
+		if g == "loop" {
+			where = "a loop"
+		}
+	}
+	c.warn(e.Position, diag.CodeHookPlacement,
+		api+" is called inside "+where+"; React requires hooks to run in the same order on every render",
+		"call "+api+" unconditionally at the top level of the component and branch on its result, "+
+			"or move the repeated part into a child component that calls the hook")
+}
+
+// lowerStateHook prepares useState(init) for createSignal: a lazy
+// initializer (an inline function or a binding holding one) is called once,
+// and the signal gets React state semantics (krateHookState).
+func (c *reactCtx) lowerStateHook(e *ast.CallExpr) {
+	if len(e.Args) == 0 {
+		e.Args = []ast.Expr{&ast.Identifier{Name: "undefined"}}
+	}
+	e.Args[0] = c.lazyInit(e.Args[0])
+	e.Args = append(e.Args[:1], &ast.Identifier{Name: "krateHookState"})
+}
+
+// lowerReducerHook lowers useReducer(reducer, arg, init) to
+// createReducer(reducer, init(arg), krateHookState).
+func (c *reactCtx) lowerReducerHook(e *ast.CallExpr) {
+	if len(e.Args) < 2 {
+		return
+	}
+	initial := e.Args[1]
+	if len(e.Args) >= 3 && !isNoDeps(e.Args[2]) {
+		initial = &ast.CallExpr{Position: e.Args[2].Pos(), Callee: e.Args[2], Args: []ast.Expr{e.Args[1]}}
+	}
+	e.Args = []ast.Expr{e.Args[0], initial, &ast.Identifier{Name: "krateHookState"}}
+}
+
+// lazyInit calls a function-valued useState initializer.
+func (c *reactCtx) lazyInit(arg ast.Expr) ast.Expr {
+	switch x := arg.(type) {
+	case *ast.ArrowFn:
+		if len(x.Params) == 0 && !x.Async && !x.Generator {
+			return &ast.CallExpr{Position: x.Position, Callee: x}
+		}
+	case *ast.Identifier:
+		if c.fnNames[x.Name] {
+			return &ast.CallExpr{Position: x.Position, Callee: x}
+		}
+	}
+	return arg
+}
+
+// functionNames collects bindings that hold functions anywhere in body:
+// function declarations and const bindings initialized with a function.
+func functionNames(body []ast.Stmt) map[string]bool {
+	out := map[string]bool{}
+	var walk func([]ast.Stmt)
+	walk = func(stmts []ast.Stmt) {
+		for _, st := range stmts {
+			switch s := st.(type) {
+			case *ast.FnDecl:
+				if s.Name != "" {
+					out[s.Name] = true
+				}
+				walk(s.Body)
+			case *ast.ExportStmt:
+				if s.Declaration != nil {
+					walk([]ast.Stmt{s.Declaration})
+				}
+			case *ast.VarStmt:
+				if s.Kind != ast.VarConst {
+					continue
+				}
+				for _, d := range s.Decls {
+					if d == nil || d.IsDestructuring || d.Name == "" {
+						continue
+					}
+					if fn, ok := d.Init.(*ast.ArrowFn); ok {
+						out[d.Name] = true
+						walk(fn.Body)
+					}
+				}
+			case *ast.BlockStmt:
+				walk(s.Body)
+			}
+		}
+	}
+	walk(body)
+	return out
+}
+
+// recordFresh remembers a local whose value is a new object or function on
+// every React render (an inline arrow, object or array literal, or a nested
+// function declaration), so a dependency array naming it re-runs its hook
+// after every render.
+func (c *reactCtx) recordFresh(sc *scope, name string) {
+	if c.freshLocals == nil {
+		c.freshLocals = map[*scope]map[string]bool{}
+	}
+	m := c.freshLocals[sc]
+	if m == nil {
+		m = map[string]bool{}
+		c.freshLocals[sc] = m
+	}
+	m[name] = true
+}
+
+func (c *reactCtx) isFreshLocal(sc *scope, name string) bool {
+	for cur := sc; cur != nil; cur = cur.parent {
+		if c.freshLocals[cur][name] {
+			return true
+		}
+		if cur.getters[name] || cur.shadow[name] {
+			return false
+		}
+	}
+	return false
+}
+
+// isFreshValue reports expressions that create a new identity each time
+// they are evaluated.
+func isFreshValue(e ast.Expr) bool {
+	switch e.(type) {
+	case *ast.ArrowFn, *ast.ObjectExpr, *ast.ArrayExpr:
+		return true
+	}
+	return false
+}
+
+// freshDeps replaces dependency elements that change identity on every
+// React render with the component's render triggers, so the hook re-runs
+// after every render, as React's comparison would.
+func (c *reactCtx) freshDeps(arr *ast.ArrayExpr, sc *scope) {
+	f := c.frame()
+	if f == nil {
+		return
+	}
+	for i, el := range arr.Elements {
+		fresh := isFreshValue(el)
+		if id, ok := el.(*ast.Identifier); ok && c.isFreshLocal(sc, id.Name) {
+			fresh = true
+		}
+		if !fresh {
+			continue
+		}
+		triggers := &ast.ArrayExpr{Position: el.Pos()}
+		f.noDeps = append(f.noDeps, triggers)
+		arr.Elements[i] = &ast.UnaryExpr{Op: "...", Arg: triggers}
+	}
 }
 
 // enterFn pushes a function frame; the returned func pops it and fills the
@@ -289,6 +464,7 @@ func (c *reactCtx) depsThunk(e *ast.CallExpr, api string, sc *scope) (ast.Expr, 
 	var deps ast.Expr
 	switch x := arg.(type) {
 	case *ast.ArrayExpr:
+		c.freshDeps(x, sc)
 		deps = c.rewriteExpr(x, sc)
 	case *ast.Identifier:
 		if arr := c.lookupArrayConst(sc, x.Name); arr != nil {
@@ -318,12 +494,6 @@ func (c *reactCtx) lowerEffectHook(e *ast.CallExpr, api string, sc *scope) ast.E
 			"call an async function inside the effect instead: "+api+"(() => { load(); return cleanup; }, deps)")
 	}
 	fn := c.rewriteExpr(e.Args[0], sc)
-	if read := cleanupStateRead(fn, sc); read != nil {
-		name := read.Callee.(*ast.Identifier).Name
-		c.warn(read.Position, diag.CodeCleanupReadsState,
-			api+" cleanup reads `"+name+"`, which is the current value in Krate but the previous render's value in React",
-			"copy it in the effect body and use the copy: const prev = "+name+"; return () => use(prev);")
-	}
 	thunk, ok := c.depsThunk(e, api, sc)
 	if !ok {
 		arr := &ast.ArrayExpr{Position: e.Position}
@@ -387,101 +557,4 @@ func (c *reactCtx) isDepsGetterHook(call *ast.CallExpr) (string, bool) {
 		return "", false
 	}
 	return api, hasDepsArg(call)
-}
-
-// cleanupStateRead returns the first state getter read inside the cleanup
-// function an effect callback returns, or nil.
-func cleanupStateRead(fn ast.Expr, sc *scope) *ast.CallExpr {
-	arrow, ok := fn.(*ast.ArrowFn)
-	if !ok {
-		return nil
-	}
-	var found *ast.CallExpr
-	for _, stmt := range arrow.Body {
-		ret, ok := stmt.(*ast.ReturnStmt)
-		if !ok {
-			continue
-		}
-		cleanup, ok := ret.Value.(*ast.ArrowFn)
-		if !ok {
-			continue
-		}
-		var visitStmts func([]ast.Stmt)
-		var visit func(ast.Expr)
-		visit = func(e ast.Expr) {
-			if e == nil || found != nil {
-				return
-			}
-			switch x := e.(type) {
-			case *ast.CallExpr:
-				if id, ok := x.Callee.(*ast.Identifier); ok && len(x.Args) == 0 && sc.isGetter(id.Name) {
-					found = x
-					return
-				}
-				visit(x.Callee)
-				for _, a := range x.Args {
-					visit(a)
-				}
-			case *ast.MemberExpr:
-				visit(x.Object)
-				if x.Computed {
-					visit(x.Property)
-				}
-			case *ast.BinaryExpr:
-				visit(x.Left)
-				visit(x.Right)
-			case *ast.UnaryExpr:
-				visit(x.Arg)
-			case *ast.ConditionalExpr:
-				visit(x.Test)
-				visit(x.Consequent)
-				visit(x.Alternate)
-			case *ast.ArrayExpr:
-				for _, el := range x.Elements {
-					visit(el)
-				}
-			case *ast.ObjectExpr:
-				for _, p := range x.Properties {
-					if p != nil {
-						visit(p.Value)
-					}
-				}
-			case *ast.TemplateExpr:
-				for _, p := range x.Parts {
-					visit(p)
-				}
-			case *ast.AwaitExpr:
-				visit(x.Arg)
-			case *ast.ArrowFn:
-				visitStmts(x.Body)
-			}
-		}
-		visitStmts = func(stmts []ast.Stmt) {
-			for _, st := range stmts {
-				switch s := st.(type) {
-				case *ast.ExprStmt:
-					visit(s.Expression)
-				case *ast.ReturnStmt:
-					visit(s.Value)
-				case *ast.VarStmt:
-					for _, d := range s.Decls {
-						if d != nil {
-							visit(d.Init)
-						}
-					}
-				case *ast.IfStmt:
-					visit(s.Test)
-					visitStmts(s.Consequent)
-					visitStmts(s.Alternate)
-				case *ast.BlockStmt:
-					visitStmts(s.Body)
-				}
-			}
-		}
-		visitStmts(cleanup.Body)
-		if found != nil {
-			return found
-		}
-	}
-	return nil
 }

@@ -41,9 +41,6 @@ window.kbindProp=function(id,attr,get){var n=findSlot(id);if(n)__safe(function()
 window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){krateOn(n,prop,fn);},n);};
 window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);if(typeof window.onCleanup==='function')window.onCleanup(function(){n.removeEventListener(ev,fn,!!capture);});},n);};
 window.kbindRef=function(id,get,set){var n=findSlot(id);if(n)__safe(function(){krateBindRef(n,get,set);},n);};
-function __krateActionBase(){var c=window.__KRATE_CFG__;return c&&c.basePath?c.basePath:'';}
-window.__krateAction=function(id){return function(){var args=Array.prototype.slice.call(arguments);return fetch(__krateActionBase()+'/__krate/action/'+id,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json','accept':'application/json','x-krate-action':'fetch','x-krate-return':location.pathname+location.search},body:JSON.stringify({args:args})}).then(function(r){return r.json().then(function(p){if(!r.ok)throw new Error(p&&p.details?p.details:p&&p.error?p.error:r.statusText);return p.result;});});};};
-if(!window.__krateActionBound){window.__krateActionBound=true;document.addEventListener('submit',function(e){var form=e.target;if(!form||form.tagName!=='FORM'||e.defaultPrevented)return;var submitter=e.submitter;var actionEl=null;if(submitter&&submitter.hasAttribute&&submitter.hasAttribute('data-krate-action'))actionEl=submitter;else if(form.hasAttribute('data-krate-action'))actionEl=form;if(!actionEl)return;if(submitter&&submitter.hasAttribute('formaction')&&!submitter.hasAttribute('data-krate-action'))return;e.preventDefault();if(form.getAttribute('data-krate-action-pending'))return;form.setAttribute('data-krate-action-pending','1');form.setAttribute('aria-busy','true');var url=actionEl===form?form.action:(submitter.formAction||form.action);var fd=new FormData(form);if(submitter&&submitter.name){fd.append(submitter.name,submitter.value);}fetch(url,{method:'POST',credentials:'same-origin',headers:{'accept':'application/json','x-krate-action':'fetch','x-krate-return':location.pathname+location.search},body:fd}).then(function(r){return r.json().then(function(p){if(!r.ok)throw new Error(p&&p.details?p.details:p&&p.error?p.error:r.statusText);return p;});}).then(function(p){if(p&&typeof p.redirect==='string'&&p.redirect){location.assign(p.redirect);return;}location.reload();}).catch(function(err){form.removeAttribute('data-krate-action-pending');form.removeAttribute('aria-busy');console.error('krate server action:',err);});},false);}
 })();
 `
 
@@ -100,6 +97,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	owners := pageNeedsOwners(result)
 	if owners {
 		b.WriteString("var __ko=typeof krateOwner==='function'?krateOwner:function(){};\n")
+		b.WriteString("var __km=typeof krateMount==='function'?krateMount:function(i,p,c,s,f){f();};\n")
 	}
 	for _, sig := range result.Signatures {
 		if sig.Tier != irtree.TierClient {
@@ -109,15 +107,32 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		// traced back to a source component. Stripped by minification in prod.
 		b.WriteString("// component ")
 		b.WriteString(string(sig.ComponentID))
-		if owned {
+		// A component inside a conditional branch is remountable: its scope is
+		// a function the runtime runs on every mount (fresh state, bindings
+		// and effects) and skips while the branch is hidden. On pages using the
+		// class/boundary owner tree, that tree mounts and unmounts the scope
+		// (with the same fresh-state semantics) and the effects owner is
+		// declared inside it.
+		remountable := owners && len(sig.Conds) > 0 && !owned
+		switch {
+		case owned:
 			b.WriteString("\n")
 			b.WriteString(ownerOpen(sig, present))
 			present[sig.ComponentID] = true
-		} else {
+			if owners {
+				writeOwnerDecl(&b, sig, "__ko")
+				b.WriteString(");\n")
+			}
+		case remountable:
+			b.WriteString("\n")
+			writeOwnerDecl(&b, sig, "__km")
+			b.WriteString(",function(){\n")
+		default:
 			b.WriteString("\n(function(){\n")
-		}
-		if owners {
-			writeOwnerDecl(&b, sig)
+			if owners {
+				writeOwnerDecl(&b, sig, "__ko")
+				b.WriteString(");\n")
+			}
 		}
 
 		// The component's own props object declaration must precede signal
@@ -339,7 +354,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			b.WriteString(");\n")
 		}
 
-		if owned {
+		if owned || remountable {
 			b.WriteString("});\n")
 		} else {
 			b.WriteString("})();\n")
@@ -370,7 +385,9 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 // in which case every component scope declares its owner.
 func pageNeedsOwners(result *EmitResult) bool {
 	for _, sig := range result.Signatures {
-		if sig.Tier == irtree.TierClient && len(sig.Effects) > 0 {
+		// Components in conditional branches need owners to unmount and
+		// remount with fresh state when the branch toggles.
+		if sig.Tier == irtree.TierClient && (len(sig.Effects) > 0 || len(sig.Conds) > 0) {
 			return true
 		}
 	}
@@ -379,8 +396,11 @@ func pageNeedsOwners(result *EmitResult) bool {
 
 // writeOwnerDecl emits the krateOwner call that opens a component scope:
 // its id, enclosing component, conditional branches and list slot.
-func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
-	b.WriteString("__ko(")
+// fn is __ko (krateOwner) or __km (krateMount, which always takes the conds
+// and slot arguments). The call is left open for the caller to close.
+func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature, fn string) {
+	b.WriteString(fn)
+	b.WriteString("(")
 	b.WriteString(strconv.Quote(string(sig.ComponentID)))
 	b.WriteString(",")
 	if sig.ParentID != "" {
@@ -388,7 +408,7 @@ func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
 	} else {
 		b.WriteString("null")
 	}
-	if len(sig.Conds) > 0 || sig.ListSlot != "" {
+	if fn == "__km" || len(sig.Conds) > 0 || sig.ListSlot != "" {
 		b.WriteString(",[")
 		for i, c := range sig.Conds {
 			if i > 0 {
@@ -408,9 +428,10 @@ func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
 		if sig.ListSlot != "" {
 			b.WriteString(",")
 			b.WriteString(strconv.Quote(string(sig.ListSlot)))
+		} else if fn == "__km" {
+			b.WriteString(",null")
 		}
 	}
-	b.WriteString(");\n")
 }
 
 // writeRefBinding emits kbindRef(id, get, assign). get returns the ref value

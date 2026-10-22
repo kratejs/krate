@@ -17,8 +17,9 @@
 //           componentDidUpdate / componentDidCatch and setState callbacks,
 //           children before parents.
 
-import { afterFlush, createEffect, createSignal, krateOnSettle, krateRequestFlush, untrack } from './signal.js';
+import { createEffect, createSignal, krateOnSettle, krateRenderPhase, krateRequestFlush, untrack } from './signal.js';
 import { krateSetRef, type KrateRef } from './refs.js';
+import { krateOnLayoutCommit } from './effects.js';
 import {
   getOwner,
   handleError,
@@ -547,7 +548,7 @@ function commit(c: Controller, fn: () => void): void {
   commitQueue.push({ c, fn, n: commitSeq++ });
   if (!commitScheduled) {
     commitScheduled = true;
-    afterFlush(runCommit);
+    krateRequestFlush();
   }
 }
 
@@ -578,7 +579,9 @@ function runRender(): void {
   for (let guard = 0; renderQueue.size > 0 && guard < 1000; guard++) {
     const list = Array.from(renderQueue).sort(preOrder);
     renderQueue.clear();
-    for (const c of list) c.performUpdate();
+    krateRenderPhase(() => {
+      for (const c of list) c.performUpdate();
+    });
   }
 }
 
@@ -609,6 +612,10 @@ function runCommitEntries(): void {
 }
 
 krateOnSettle(runRender);
+// Lifecycles commit in the layout phase: after layout effects, before passive.
+krateOnLayoutCommit(() => {
+  if (commitScheduled || commitQueue.length > 0 || remountQueue.size > 0) runCommit();
+});
 
 /**
  * Creates the instance behind a lowered class component. `props` is the

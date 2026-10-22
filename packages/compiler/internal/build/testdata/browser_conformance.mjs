@@ -240,48 +240,6 @@ try {
   if (noteSame !== "hello") fail(`keyed remount with the same key reset state: ${noteSame}`);
   if (profile.user !== "grace" || profile.note !== "") fail(`keyed remount: ${JSON.stringify(profile)}`);
 
-  // Server actions: direct call through the client proxy, a form action and a
-  // button formAction, all through POST /__krate/action/<id>.
-  let actions = null;
-  if (actionsBase) {
-    await page.goto(actionsBase + "/react-actions/", { waitUntil: "networkidle" });
-    await page.waitForSelector("[data-testid=feedback-form]", { timeout: 8000 });
-    await page.getByRole("button", { name: "Run action directly" }).click();
-    await page
-      .waitForFunction(() => document.querySelector("[data-testid=direct-result]")?.textContent?.includes(":"), null, { timeout: 8000 })
-      .catch(() => {});
-    const direct = await page.locator("[data-testid=direct-result]").textContent();
-    if (direct !== "direct call:11") fail(`server action direct result: ${direct}`);
-
-    // A successful form action reloads the page, which discards the response
-    // body, so capture it while proxying the request.
-    const submitAction = async (formTestId) => {
-      let captured = null;
-      await page.route("**/__krate/action/**", async (route) => {
-        const response = await route.fetch();
-        captured = { status: response.status(), body: await response.text() };
-        await route.fulfill({ response });
-      });
-      await page.locator(`[data-testid=${formTestId}] button[type=submit]`).click();
-      for (let i = 0; i < 80 && !captured; i++) await page.waitForTimeout(100);
-      await page.unroute("**/__krate/action/**");
-      await page.waitForLoadState("networkidle");
-      let body = null;
-      try {
-        body = JSON.parse(captured?.body || "");
-      } catch {}
-      return { status: captured?.status, ok: body?.ok === true, text: body?.result?.text };
-    };
-    const form = await submitAction("feedback-form");
-    if (form.status !== 200 || !form.ok || form.text !== "hello from a form") {
-      fail(`server action form: ${JSON.stringify(form)}`);
-    }
-    const formAction = await submitAction("formaction-form");
-    if (formAction.status !== 200 || !formAction.ok || formAction.text !== "submitted by formAction") {
-      fail(`server action formAction: ${JSON.stringify(formAction)}`);
-    }
-    actions = { direct, form, formAction };
-  }
 
   // React effects: phase order, children before parents, Object.is deps,
   // batching, and cleanups when a conditional branch hides.
@@ -437,6 +395,121 @@ try {
   const expected = /crashed [ab]|The above error occurred|handler error/;
   for (let i = errors.length - 1; i >= errorsBeforeClass; i--) {
     if (expected.test(errors[i])) errors.splice(i, 1);
+  }
+
+  // React 19 actions: useActionState + useFormStatus + useOptimistic on the
+  // server-action transport, without page reloads.
+  let actions = { skipped: !actionsBase };
+  if (actionsBase) {
+    const text = (id) => page.locator(`[data-testid=${id}]`).textContent();
+    const waitText = async (id, value) => {
+      try {
+        await page.waitForFunction(
+          ([sel, v]) => document.querySelector(sel)?.textContent === v,
+          [`[data-testid=${id}]`, value],
+          { timeout: 8000 },
+        );
+      } catch {
+        throw new Error(`[data-testid=${id}] is ${JSON.stringify(await text(id))}, want ${JSON.stringify(value)}; errors: ${errors.join(" | ")}`);
+      }
+    };
+    await page.goto(actionsBase + "/react-actions/", { waitUntil: "networkidle" });
+    await page.waitForSelector("[data-testid=todo-form]", { timeout: 8000 });
+    await page.evaluate(() => {
+      window.__krateNoReload = true;
+    });
+
+    await page.locator("[data-testid=todo-title]").fill("write docs");
+    await page.locator("[data-testid=todo-submit]").click();
+    await waitText("todo-submit", "Working...");
+    const todoPending = {
+      label: await text("todo-submit"),
+      disabled: await page.locator("[data-testid=todo-submit]").isDisabled(),
+      otherForm: await text("message-submit"),
+      saving: await text("todo-pending"),
+    };
+    await waitText("todo-count", "1");
+    await waitText("todo-submit", "Add todo");
+    const todoAfter = {
+      last: await text("todo-last"),
+      input: await page.locator("[data-testid=todo-title]").inputValue(),
+    };
+    await page.locator("[data-testid=todo-title]").fill("ship it");
+    await page.locator("[data-testid=todo-submit]").click();
+    await waitText("todo-count", "2");
+    const todoSecond = await text("todo-last");
+
+    await page.locator("[data-testid=message-text]").fill("hi");
+    await page.locator("[data-testid=message-submit]").click();
+    await waitText("message-last", "hi (sending)");
+    const optimisticCount = await text("message-count");
+    await waitText("message-last", "hi");
+    const messageFinal = await text("message-count");
+
+    await page.locator("[data-testid=feedback-text]").fill("changed");
+    const feedbackResponse = page.waitForResponse((r) => r.url().includes("/__krate/action/") && r.request().method() === "POST");
+    await page.locator("[data-testid=feedback-form] button").click();
+    const feedbackStatus = (await feedbackResponse).status();
+    await page.waitForFunction(() => !document.querySelector("[data-testid=feedback-form]")?.hasAttribute("data-krate-action-pending"));
+    const feedbackInput = await page.locator("[data-testid=feedback-text]").inputValue();
+
+    const faResponse = page.waitForResponse((r) => r.url().includes("/__krate/action/") && r.request().method() === "POST");
+    await page.locator("[data-testid=formaction-form] button[type=submit]").click();
+    const faRes = await faResponse;
+    const formActionResult = { status: faRes.status(), body: await faRes.json().catch(() => null) };
+    if (formActionResult.status !== 200 || formActionResult.body?.result?.text !== "submitted by formAction") {
+      fail(`server action formAction: ${JSON.stringify(formActionResult)}`);
+    }
+
+    await page.getByRole("button", { name: "Run action directly" }).click();
+    await waitText("direct-result", "direct call:11:fetch");
+    const noReload = await page.evaluate(() => window.__krateNoReload === true);
+
+    // Progressive enhancement: the same forms post natively without JS.
+    const noJS = await browser.newContext({ javaScriptEnabled: false });
+    const plain = await noJS.newPage();
+    await plain.goto(actionsBase + "/react-actions/");
+    await plain.locator("[data-testid=todo-title]").fill("no js");
+    const [nojsTodo] = await Promise.all([
+      plain.waitForResponse((r) => r.url().includes("/__krate/action/")),
+      plain.locator("[data-testid=todo-submit]").click(),
+    ]);
+    await plain.waitForLoadState("load");
+    const nojsTodoURL = plain.url();
+    await plain.goto(actionsBase + "/react-actions/");
+    const [nojsFeedback] = await Promise.all([
+      plain.waitForResponse((r) => r.url().includes("/__krate/action/")),
+      plain.locator("[data-testid=feedback-form] button").click(),
+    ]);
+    await plain.waitForLoadState("load");
+    const nojsFeedbackURL = plain.url();
+    await noJS.close();
+
+    actions = {
+      todoPending,
+      todoAfter,
+      todoSecond,
+      optimisticCount,
+      messageFinal,
+      feedbackStatus,
+      feedbackInput,
+      noReload,
+      formAction: formActionResult,
+      nojs: { todo: nojsTodo.status(), todoURL: nojsTodoURL, feedback: nojsFeedback.status(), feedbackURL: nojsFeedbackURL },
+    };
+    if (todoPending.label !== "Working..." || !todoPending.disabled) fail(`useFormStatus pending: ${JSON.stringify(todoPending)}`);
+    if (todoPending.otherForm !== "Send") fail(`useFormStatus leaked to another form: ${todoPending.otherForm}`);
+    if (todoPending.saving !== " (saving)") fail(`useActionState isPending: ${todoPending.saving}`);
+    if (todoAfter.last !== "write docs") fail(`useActionState state: ${todoAfter.last}`);
+    if (todoAfter.input !== "") fail(`form not reset after success: ${todoAfter.input}`);
+    if (todoSecond !== "ship it") fail(`useActionState second call: ${todoSecond}`);
+    if (optimisticCount !== "2") fail(`optimistic count while pending: ${optimisticCount}`);
+    if (messageFinal !== "2") fail(`message count after settle: ${messageFinal}`);
+    if (feedbackStatus !== 200) fail(`enhanced server action form status: ${feedbackStatus}`);
+    if (feedbackInput !== "hello from a form") fail(`server action form not reset: ${feedbackInput}`);
+    if (!noReload) fail("a form action reloaded the page");
+    if (nojsTodo.status() !== 303 || !nojsTodoURL.endsWith("/react-actions/")) fail(`no-JS useActionState post: ${JSON.stringify(actions.nojs)}`);
+    if (nojsFeedback.status() !== 303 || !nojsFeedbackURL.endsWith("/react-actions/")) fail(`no-JS server action post: ${JSON.stringify(actions.nojs)}`);
   }
 
   if (errors.length) fail("console errors: " + errors.join(" | "));

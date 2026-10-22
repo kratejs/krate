@@ -29,6 +29,13 @@ import {
   kratePendingFlush,
   runAfterFlush,
   untrack,
+  krateCommitSnapshot,
+  krateCommitting,
+  krateDisposeOwner,
+  krateEpoch,
+  kratePruneSnapshots,
+  krateReadAt,
+  krateTakeSyncLane,
 } from './signal.js';
 
 /** Effect phase: React's useEffect, useLayoutEffect and useInsertionEffect. */
@@ -48,6 +55,21 @@ interface Owner {
   conds: Array<[string, string]>;
   /** Content slot whose replacement unmounts this hydrated component. */
   slot: string | null;
+  /** Set for components mounted through krateMount (remountable). */
+  record: MountRecord | null;
+}
+
+/**
+ * A remountable hydrated component (krateMount): its scope function runs on
+ * every mount, creating fresh state, bindings and effects.
+ */
+interface MountRecord {
+  id: string;
+  parentId: string | null;
+  conds: Array<[string, string]>;
+  slot: string | null;
+  fn: () => void;
+  owner: Owner | null;
 }
 
 interface HookEffect {
@@ -60,6 +82,8 @@ interface HookEffect {
   cleanup: Cleanup;
   /** True after setup ran and until its cleanup ran. */
   mounted: boolean;
+  /** Commit whose state snapshot the last setup (and so its cleanup) saw. */
+  epoch: number;
   dirty: boolean;
   seq: number;
   stop: () => void;
@@ -78,10 +102,28 @@ let commitQueued = false;
 let passiveTimer: ReturnType<typeof setTimeout> | null = null;
 // Passive work of the last commit, run in order by flushPassive.
 let passiveCleanups: Array<() => void> = [];
-let passiveSetups: HookEffect[] = [];
+let passiveSetups: Array<[HookEffect, number]> = [];
+const records: MountRecord[] = [];
+// Mounted hooks per snapshot epoch, so old snapshots can be pruned.
+const liveEpochs = new Map<number, number>();
+const unmountHooks: Array<(owner: unknown, id: string | null) => void> = [];
 
 function newOwner(id: string | null, parent: Owner | null): Owner {
-  return { id, parent, children: [], hooks: [], disposed: false, shown: true, conds: [], slot: null };
+  return { id, parent, children: [], hooks: [], disposed: false, shown: true, conds: [], slot: null, record: null };
+}
+
+/**
+ * Registers fn to run whenever a component owner unmounts (parent first),
+ * after its effect cleanups and before its bindings are disposed. Lets other
+ * lowerings (class component lifecycles) observe unmount and remount.
+ */
+export function krateOnUnmount(fn: (owner: unknown, id: string | null) => void): void {
+  unmountHooks.push(fn);
+}
+
+/** The id of a component owner (null for runtime-created components). */
+export function krateOwnerId(owner: unknown): string | null {
+  return ownerOf(owner).id;
 }
 
 function ownerOf(value: unknown): Owner {
@@ -190,7 +232,15 @@ function disposeTree(owner: Owner, active: boolean, passive: Array<() => void>):
   for (const hook of owner.hooks) {
     hook.stop();
     dirty.delete(hook);
-    if (!active) continue;
+    if (!active) {
+      // Hidden, so its cleanup already ran (or never will): just release it.
+      if (hook.mounted) {
+        hook.mounted = false;
+        hook.cleanup = null;
+        releaseEpoch(hook.epoch);
+      }
+      continue;
+    }
     if (hook.phase === 'passive') {
       const c = takeCleanup(hook);
       if (c) passive.push(c);
@@ -198,6 +248,10 @@ function disposeTree(owner: Owner, active: boolean, passive: Array<() => void>):
       runCleanup(hook);
     }
   }
+  for (const fn of unmountHooks) fn(owner, owner.id);
+  // Bindings, refs and top-level cleanups of the component go with it.
+  krateDisposeOwner(owner);
+  if (owner.record && owner.record.owner === owner) owner.record.owner = null;
   for (const child of owner.children.slice()) {
     disposeTree(child, active && child.shown, passive);
   }
@@ -213,6 +267,68 @@ export function krateForgetOwner(id: string): void {
   if (!owner) return;
   krateUnmount(owner);
   byId.delete(id);
+}
+
+/**
+ * Declares a remountable hydrated component (emitted for components inside
+ * a conditional branch). `fn` is the component's hydration scope; it runs now
+ * when the branch is shown, and again, as a fresh instance, every time the
+ * branch is shown after being hidden. Hiding the branch unmounts it:
+ * cleanups run, refs and bindings are released and its state is discarded.
+ */
+export function krateMount(
+  id: string,
+  parentId: string | null,
+  conds: Array<[string, string, number | boolean]> | null,
+  slot: string | null,
+  fn: () => void,
+): void {
+  const rec: MountRecord = { id, parentId, conds: [], slot: slot || null, fn, owner: null };
+  for (const [cid, branch, initially] of conds || []) {
+    rec.conds.push([cid, branch]);
+    if (!condShown.has(cid)) {
+      condShown.set(cid, initially ? branch : branch === 'c' ? 'a' : 'c');
+    }
+  }
+  records.push(rec);
+  if (recordVisible(rec)) mountRecord(rec);
+}
+
+function recordParent(rec: MountRecord): Owner | null {
+  if (rec.parentId == null) return root;
+  const p = byId.get(rec.parentId);
+  if (!p) return root;
+  for (let o: Owner | null = p; o; o = o.parent) {
+    if (o.disposed) return null;
+  }
+  return p;
+}
+
+function recordVisible(rec: MountRecord): boolean {
+  if (rec.slot && replacedSlots.has(rec.slot)) return false;
+  for (const [cid, branch] of rec.conds) {
+    const shown = condShown.get(cid);
+    if (shown !== undefined && shown !== branch) return false;
+  }
+  return recordParent(rec) !== null;
+}
+
+function mountRecord(rec: MountRecord): void {
+  const parent = recordParent(rec) || root;
+  const owner = newOwner(rec.id, parent);
+  owner.record = rec;
+  owner.slot = rec.slot;
+  parent.children.push(owner);
+  byId.set(rec.id, owner);
+  rec.owner = owner;
+  const prev = krateSetOwner(owner);
+  try {
+    // The scope may run inside a binding (a conditional swap); its reads must
+    // not subscribe that binding.
+    untrack(rec.fn);
+  } finally {
+    krateSetOwner(prev);
+  }
 }
 
 /**
@@ -236,9 +352,17 @@ export function krateSlotReplaced(id: string): void {
 export function krateCondActivity(id: string, branch: string): void {
   if (condShown.get(id) === branch) return;
   condShown.set(id, branch);
+  // Remountable components: unmount the ones that left (parents first), then
+  // mount fresh instances of the ones that entered (parents first).
+  for (const rec of records) {
+    if (rec.owner && !rec.owner.disposed && !recordVisible(rec)) krateUnmount(rec.owner);
+  }
+  for (const rec of records) {
+    if (!rec.owner && recordVisible(rec)) mountRecord(rec);
+  }
   const affected: Owner[] = [];
   for (const owner of byId.values()) {
-    if (owner.conds.some(([cid]) => cid === id)) affected.push(owner);
+    if (!owner.record && owner.conds.some(([cid]) => cid === id)) affected.push(owner);
   }
   let passive: Array<() => void> = [];
   for (const owner of affected) {
@@ -336,6 +460,7 @@ export function createEffectDeps(
     hasPrev: false,
     cleanup: null,
     mounted: false,
+    epoch: 0,
     dirty: false,
     seq: seq++,
     stop: () => {},
@@ -351,17 +476,20 @@ export function createEffectDeps(
   });
 }
 
-function runSetup(hook: HookEffect): void {
+function runSetup(hook: HookEffect, at: number): void {
   if (hook.owner.disposed) return;
   let ret: unknown;
   try {
-    ret = untrack(hook.fn);
+    // The setup sees the state of the commit it belongs to.
+    ret = krateReadAt(at, () => untrack(hook.fn));
   } catch (err) {
     reportHookError(err, hook.owner);
     return;
   }
   hook.cleanup = typeof ret === 'function' ? (ret as () => void) : null;
   hook.mounted = true;
+  hook.epoch = at;
+  liveEpochs.set(at, (liveEpochs.get(at) || 0) + 1);
 }
 
 // Error boundaries (boundary.ts) receive errors thrown by effect setups and
@@ -387,17 +515,43 @@ function runGuarded(fn: () => void, owner: Owner): void {
   }
 }
 
+// Detaches the cleanup of the last setup, bound to that setup's snapshot so
+// it reads the values of the render it belongs to (React closure semantics).
 function takeCleanup(hook: HookEffect): Cleanup {
   if (!hook.mounted) return null;
   hook.mounted = false;
+  const at = hook.epoch;
   const c = hook.cleanup;
   hook.cleanup = null;
-  return c;
+  if (!c) {
+    releaseEpoch(at);
+    return null;
+  }
+  // The snapshot stays live until the (possibly deferred) cleanup ran.
+  return () => {
+    try {
+      krateReadAt(at, () => untrack(c));
+    } finally {
+      releaseEpoch(at);
+    }
+  };
+}
+
+function releaseEpoch(at: number): void {
+  const n = (liveEpochs.get(at) || 1) - 1;
+  if (n > 0) liveEpochs.set(at, n);
+  else liveEpochs.delete(at);
 }
 
 function runCleanup(hook: HookEffect): void {
   const c = takeCleanup(hook);
   if (c) runGuarded(c, hook.owner);
+}
+
+function pruneSnapshots(): void {
+  let min = krateEpoch();
+  for (const e of liveEpochs.keys()) if (e < min) min = e;
+  kratePruneSnapshots(min);
 }
 
 // Orders hooks children-before-parents (post-order over the owner tree),
@@ -418,45 +572,75 @@ function orderHooks(hooks: Set<HookEffect>): HookEffect[] {
   });
 }
 
+// Callbacks run in every commit's layout phase, after layout effects and
+// before passive ones (class component lifecycles, see class-component.ts).
+const layoutHooks: Array<() => void> = [];
+
+/** Registers fn to run in the layout phase of every commit (internal). */
+export function krateOnLayoutCommit(fn: () => void): void {
+  layoutHooks.push(fn);
+}
+
+function runLayoutHooks(): void {
+  for (const fn of layoutHooks) fn();
+}
+
 function commit(): void {
   commitQueued = false;
-  if (dirty.size === 0) return;
+  // Every settled update is a commit: snapshot the React state it rendered.
+  const at = krateCommitSnapshot();
+  const sync = krateTakeSyncLane();
+  if (dirty.size === 0) {
+    runLayoutHooks();
+    if (sync) flushPassive();
+    pruneSnapshots();
+    return;
+  }
   const hooks = orderHooks(dirty).filter((h) => isActive(h.owner));
   dirty.clear();
   for (const h of hooks) h.dirty = false;
-
-  // Mutation phase, per component in order: insertion cleanup + setup, then
-  // layout cleanup.
-  let i = 0;
-  while (i < hooks.length) {
-    const owner = hooks[i].owner;
-    let j = i;
-    while (j < hooks.length && hooks[j].owner === owner) j++;
-    for (let k = i; k < j; k++) {
-      if (hooks[k].phase === 'insertion') {
-        runCleanup(hooks[k]);
-        runSetup(hooks[k]);
+  krateCommitting(true);
+  try {
+    // Mutation phase, per component in order: insertion cleanup + setup,
+    // then layout cleanup.
+    let i = 0;
+    while (i < hooks.length) {
+      const owner = hooks[i].owner;
+      let j = i;
+      while (j < hooks.length && hooks[j].owner === owner) j++;
+      for (let k = i; k < j; k++) {
+        if (hooks[k].phase === 'insertion') {
+          runCleanup(hooks[k]);
+          runSetup(hooks[k], at);
+        }
       }
+      for (let k = i; k < j; k++) {
+        if (hooks[k].phase === 'layout') runCleanup(hooks[k]);
+      }
+      i = j;
     }
-    for (let k = i; k < j; k++) {
-      if (hooks[k].phase === 'layout') runCleanup(hooks[k]);
+    // Layout phase.
+    for (const h of hooks) {
+      if (h.phase === 'layout') runSetup(h, at);
     }
-    i = j;
+    runLayoutHooks();
+    // Passive phase, after paint.
+    let queued = false;
+    for (const h of hooks) {
+      if (h.phase !== 'passive') continue;
+      const c = takeCleanup(h);
+      if (c) passiveCleanups.push(c);
+      passiveSetups.push([h, at]);
+      queued = true;
+    }
+    if (queued) schedulePassive();
+    // A discrete event's update runs its passive effects before the event
+    // returns (React's SyncLane), ahead of microtasks the handler queued.
+    if (sync) flushPassive();
+  } finally {
+    krateCommitting(false);
   }
-  // Layout phase.
-  for (const h of hooks) {
-    if (h.phase === 'layout') runSetup(h);
-  }
-  // Passive phase, after paint.
-  let queued = false;
-  for (const h of hooks) {
-    if (h.phase !== 'passive') continue;
-    const c = takeCleanup(h);
-    if (c) passiveCleanups.push(c);
-    passiveSetups.push(h);
-    queued = true;
-  }
-  if (queued) schedulePassive();
+  pruneSnapshots();
 }
 
 function schedulePassive(): void {
@@ -476,9 +660,14 @@ export function flushPassive(): void {
     const setups = passiveSetups;
     passiveCleanups = [];
     passiveSetups = [];
-    for (const c of cleanups) untrack(c);
-    for (const h of setups) {
-      if (isActive(h.owner)) runSetup(h);
+    krateCommitting(true);
+    try {
+      for (const c of cleanups) c();
+      for (const [h, at] of setups) {
+        if (isActive(h.owner)) runSetup(h, at);
+      }
+    } finally {
+      krateCommitting(false);
     }
   }
 }
