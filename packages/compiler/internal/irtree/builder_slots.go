@@ -300,6 +300,10 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 	if el == nil || el.Opening == nil {
 		return nil
 	}
+	// A key that reads reactive state remounts the element when it changes.
+	if key := jsxKeyAttr(el); key != nil && b.referencesSignal(key) {
+		return b.buildKeyedSlot(el, key, parentID)
+	}
 	// Built-in <Portal>: render children inline with a marker, then move the
 	// node to document.body on the client (see HydrationBootstrapJS).
 	if el.Opening != nil && el.Opening.Name == "Portal" {
@@ -1891,14 +1895,21 @@ func (b *builder) buildListSlot(expr ast.Expr, parentID string) *ListSlot {
 		}
 	}
 
-	return &ListSlot{
+	slot := &ListSlot{
 		ID:         id,
 		ExprSource: exprSource,
 		Items:      items,
-		Keyed:      false,
 		Signals:    b.collectSignalReads(expr),
 		Components: collectListComponents(expr),
 	}
+	if call, ok := expr.(*ast.CallExpr); ok {
+		if plan := planMapCall(call); plan != nil {
+			slot.Keyed = plan.KeyJS != ""
+			slot.Bind = &ListBinding{Source: plan.SourceJS, Key: plan.KeyJS, Render: plan.RenderJS, Accessor: plan.Accessor}
+			b.checkListKeys(call, plan)
+		}
+	}
+	return slot
 }
 
 // resolveArrayLiteralExpr returns the ArrayExpr a .map() call iterates over,
@@ -1961,6 +1972,8 @@ func (b *builder) tryResolveArrayItems(arr *ast.ArrayExpr, mapExpr ast.Expr, lis
 	if paramName == "" {
 		return nil
 	}
+	keyExpr := keyExprOf(bodyExpr)
+	seenKeys := map[string]int{}
 
 	var items []*ListItem
 	for i, elem := range arr.Elements {
@@ -1981,6 +1994,26 @@ func (b *builder) tryResolveArrayItems(arr *ast.ArrayExpr, mapExpr ast.Expr, lis
 		// local may read an earlier one); any other local shadows component
 		// bindings of the same name while the item is built.
 		concrete = substituteCallbackLocals(arrow, concrete, paramName, elem, indexName, index)
+		if keyExpr != nil {
+			// The server-rendered row is marked with the item's real key so
+			// hydration adopts it by key. Duplicates get the same occurrence
+			// suffix the runtime uses.
+			k := substituteListParam(keyExpr, paramName, elem)
+			if index != nil {
+				k = substituteListParam(k, indexName, index)
+			}
+			k = substituteCallbackLocals(arrow, k, paramName, elem, indexName, index)
+			if folded, ok := b.foldListKey(k); ok {
+				key = "$" + folded
+				if n, dup := seenKeys[key]; dup {
+					seenKeys[key] = n + 1
+					b.warnListDuplicateKey(keyExpr, folded)
+					key += "\x00" + itoa(n)
+				} else {
+					seenKeys[key] = 1
+				}
+			}
+		}
 		itemID := joinSlotIDKey(SlotID(listID), key)
 		restore := b.pushShadow(blockBindingNames(arrow.Body))
 		contents := b.buildSlotNodes(concrete, string(itemID))
@@ -2071,7 +2104,11 @@ func (s *listParamSubstituter) sub(expr ast.Expr) ast.Expr {
 				return cloneExpr(v)
 			}
 		}
-		return &ast.MemberExpr{Position: e.Position, Object: obj, Property: e.Property, Computed: e.Computed, Optional: e.Optional}
+		prop := e.Property
+		if e.Computed {
+			prop = s.sub(e.Property)
+		}
+		return &ast.MemberExpr{Position: e.Position, Object: obj, Property: prop, Computed: e.Computed, Optional: e.Optional}
 	case *ast.CallExpr:
 		return &ast.CallExpr{Position: e.Position, Callee: s.sub(e.Callee), Args: subExprList(s, e.Args), Optional: e.Optional}
 	case *ast.NewExpr:
@@ -2093,13 +2130,34 @@ func (s *listParamSubstituter) sub(expr ast.Expr) ast.Expr {
 	case *ast.ObjectExpr:
 		out := make([]*ast.ObjectProp, len(e.Properties))
 		for i, p := range e.Properties {
-			out[i] = &ast.ObjectProp{Key: p.Key, Value: s.sub(p.Value), Shorthand: p.Shorthand, Spread: p.Spread, Method: p.Method}
+			cp := *p
+			cp.Value = s.sub(p.Value)
+			if p.Computed && p.KeyExpr != nil {
+				cp.KeyExpr = s.sub(p.KeyExpr)
+			}
+			// `{ item }` must expand to `{ item: <replacement> }` once the
+			// value is no longer the bare identifier.
+			if p.Shorthand {
+				if id, ok := cp.Value.(*ast.Identifier); !ok || id.Name != p.Key {
+					cp.Shorthand = false
+				}
+			}
+			out[i] = &cp
 		}
 		return &ast.ObjectExpr{Position: e.Position, Properties: out}
+	case *ast.ParenExpr:
+		return &ast.ParenExpr{Position: e.Position, Expr: s.sub(e.Expr)}
+	case *ast.TaggedTemplateExpr:
+		cp := *e
+		cp.Tag = s.sub(e.Tag)
+		if q, ok := s.sub(e.Quasi).(*ast.TemplateExpr); ok {
+			cp.Quasi = q
+		}
+		return &cp
 	case *ast.JSXElement:
 		return substituteListParamJSX(e, s)
 	case *ast.JSXFragment:
-		return &ast.JSXFragment{Position: e.Position, Children: subJSXChildrenList(s, e.Children)}
+		return &ast.JSXFragment{Position: e.Position, Children: subJSXChildrenList(s, e.Children), Key: s.sub(e.Key)}
 	case *ast.ArrowFn:
 		// A nested function (e.g. `onClick={() => rm(item.id)}`) closes over
 		// the loop parameter, which no longer exists once the item is
@@ -2108,7 +2166,9 @@ func (s *listParamSubstituter) sub(expr ast.Expr) ast.Expr {
 		if bindingScopeDeclares(functionScopeNames(e.Params, e.Body), s.param) {
 			return e
 		}
-		return &ast.ArrowFn{Position: e.Position, Params: e.Params, Body: s.subStmts(e.Body), Expression: e.Expression, Async: e.Async}
+		cp := *e
+		cp.Body = s.subStmts(e.Body)
+		return &cp
 	case *ast.TypeAssertion:
 		return &ast.TypeAssertion{Position: e.Position, Expr: s.sub(e.Expr), TypeRef: e.TypeRef}
 	default:
@@ -2245,7 +2305,7 @@ func subJSXChildrenList(s *listParamSubstituter, children []ast.JSXChild) []ast.
 		case *ast.JSXElementChild:
 			out = append(out, &ast.JSXElementChild{Element: substituteListParamJSX(c.Element, s)})
 		case *ast.JSXFragmentChild:
-			out = append(out, &ast.JSXFragmentChild{Fragment: &ast.JSXFragment{Position: c.Fragment.Position, Children: subJSXChildrenList(s, c.Fragment.Children)}})
+			out = append(out, &ast.JSXFragmentChild{Fragment: &ast.JSXFragment{Position: c.Fragment.Position, Children: subJSXChildrenList(s, c.Fragment.Children), Key: s.sub(c.Fragment.Key)}})
 		default:
 			out = append(out, child)
 		}
@@ -2259,11 +2319,11 @@ func substituteListParamJSX(el *ast.JSXElement, s *listParamSubstituter) *ast.JS
 	}
 	opening := &ast.JSXOpening{Name: el.Opening.Name, SelfClosing: el.Opening.SelfClosing}
 	for _, attr := range el.Opening.Attributes {
-		if attr.Spread || attr.Value == nil {
+		if attr == nil || attr.Value == nil {
 			opening.Attributes = append(opening.Attributes, attr)
 			continue
 		}
-		opening.Attributes = append(opening.Attributes, &ast.JSXAttr{Position: attr.Position, Name: attr.Name, Value: s.sub(attr.Value)})
+		opening.Attributes = append(opening.Attributes, &ast.JSXAttr{Position: attr.Position, Name: attr.Name, Value: s.sub(attr.Value), Spread: attr.Spread})
 	}
 	return &ast.JSXElement{
 		Position: el.Position,

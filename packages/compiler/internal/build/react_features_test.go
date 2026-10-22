@@ -231,7 +231,7 @@ func TestReactUseMemoDepsBinding(t *testing.T) {
 	if !strings.Contains(js, "createMemoDeps") {
 		t.Fatalf("useMemo deps should lower to createMemoDeps:\n%s", js)
 	}
-	if !strings.Contains(js, "kbindContent") {
+	if !strings.Contains(js, "kbindList") {
 		t.Fatalf("a derived memo list must emit a reactive binding:\n%s", js)
 	}
 }

@@ -802,7 +802,11 @@ func (c *reactCtx) lowerJSXCall(call *ast.CallExpr, sc *scope) (ast.Expr, bool) 
 	propsExpr := call.Args[1]
 
 	if id, ok := typeExpr.(*ast.Identifier); ok && c.fragmentNames[id.Name] {
-		return &ast.JSXFragment{Position: call.Position, Children: c.jsxChildrenFromProps(propsExpr, sc)}, true
+		frag := &ast.JSXFragment{Position: call.Position, Children: c.jsxChildrenFromProps(propsExpr, sc)}
+		if len(call.Args) > 2 && call.Args[2] != nil {
+			frag.Key = c.rewriteExpr(call.Args[2], sc)
+		}
+		return frag, true
 	}
 
 	name, ok := jsxTypeName(typeExpr)
@@ -831,10 +835,16 @@ func (c *reactCtx) lowerJSXCall(call *ast.CallExpr, sc *scope) (ast.Expr, bool) 
 			children = prop.Value
 			hasChildren = true
 		case "key":
-			// React reconciliation key; Krate drops it (position/marker identity).
+			// React reconciliation key: kept as a JSX attribute so list and
+			// keyed-remount lowering can read it; every HTML path drops it.
+			attrs = append(attrs, &ast.JSXAttr{Name: "key", Value: c.rewriteExpr(prop.Value, sc)})
 		default:
 			attrs = append(attrs, &ast.JSXAttr{Name: prop.Key, Value: c.rewriteExpr(prop.Value, sc)})
 		}
+	}
+	// jsx(type, props, key): the automatic runtime passes the key separately.
+	if len(call.Args) > 2 && call.Args[2] != nil {
+		attrs = append(attrs, &ast.JSXAttr{Name: "key", Value: c.rewriteExpr(call.Args[2], sc)})
 	}
 
 	el := &ast.JSXElement{
@@ -942,7 +952,13 @@ func (c *reactCtx) lowerFragment(el *ast.JSXElement, sc *scope) ast.Expr {
 	for i, child := range el.Children {
 		el.Children[i] = c.rewriteJSXChild(child, sc)
 	}
-	return &ast.JSXFragment{Position: el.Position, Children: el.Children}
+	frag := &ast.JSXFragment{Position: el.Position, Children: el.Children}
+	for _, attr := range el.Opening.Attributes {
+		if attr != nil && !attr.Spread && attr.Name == "key" && attr.Value != nil {
+			frag.Key = c.rewriteExpr(attr.Value, sc)
+		}
+	}
+	return frag
 }
 
 func (c *reactCtx) rewriteJSXElement(el *ast.JSXElement, sc *scope) {
@@ -954,7 +970,7 @@ func (c *reactCtx) rewriteJSXElement(el *ast.JSXElement, sc *scope) {
 			}
 			// React-only directives carry no DOM meaning; drop them so no
 			// render path (static SSR, IR tree, hydration) can emit them.
-			if attr.Name == "key" || attr.Name == "suppressHydrationWarning" {
+			if attr.Name == "suppressHydrationWarning" {
 				continue
 			}
 			if attr.Name == "style" {

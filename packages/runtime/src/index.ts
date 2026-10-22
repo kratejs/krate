@@ -1,8 +1,9 @@
-export { createSignal, createReducer, createCSSChoice, createCSSToggle, createCSSFlags, createCSSGroup, createCSSRange, createCSSStack, createEffect, createMemo, onCleanup, onMount, forwardRef, useRef, disposeAll } from './signal.js';
+export { createSignal, createReducer, createCSSChoice, createCSSToggle, createCSSFlags, createCSSGroup, createCSSRange, createCSSStack, createEffect, createMemo, createRoot, untrack, onCleanup, onMount, forwardRef, useRef, disposeAll } from './signal.js';
 export type { CSSARIAOptions, CSSVars, CSSPrimitiveOptions, CSSStackActions, CSSScope, CSSFlagsScope, SignalOptions } from './signal.js';
 export { clearPersisted, readPersisted, writePersisted } from './storage.js';
 export type { PersistOptions, PersistSpec, PersistStore, StorageLike } from './storage.js';
 export { h, mount, hydrate, insert, clearNodes, disposeNode } from './dom.js';
+export { krateList, krateBindList } from './list.js';
 export { krateCondSwap, krateCondDetached, krateCondReset, krateSanitizeAttr, BLOCKED_URL } from './slots.js';
 export { Fragment, jsx, jsxs } from './jsx-runtime.js';
 export { initRouter, reinitRouter, navigate } from './router.js';
