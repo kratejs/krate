@@ -41,8 +41,23 @@ func AttrValue(expr ast.Expr, val string) htmlspec.Value {
 		if e.Name == "undefined" {
 			return htmlspec.Value{Kind: htmlspec.Null}
 		}
+	case *ast.UnaryExpr:
+		// `void 0` is how the TypeScript strip pass spells undefined.
+		if e.Op == "void" {
+			return htmlspec.Value{Kind: htmlspec.Null}
+		}
 	}
 	return htmlspec.LooseVal(val)
+}
+
+// RendersNothing reports child expressions that React renders as nothing:
+// boolean, null and undefined literals (including `void 0`).
+func RendersNothing(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	v := AttrValue(expr, "")
+	return v.Kind == htmlspec.Bool || v.Kind == htmlspec.Null
 }
 
 // StyleCSS serializes a style attribute value. Object literals (and values

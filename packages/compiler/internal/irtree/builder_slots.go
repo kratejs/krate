@@ -3645,6 +3645,9 @@ func (b *builder) buildAttrBinding(attr *ast.JSXAttr, elementID string) *AttrBin
 // buildStaticValueSlot - expression with no signals
 
 func (b *builder) buildStaticValueSlot(expr ast.Expr, parentID string) *StaticHTML {
+	if RendersNothing(expr) {
+		return &StaticHTML{HTML: ""}
+	}
 	val := evalConstWithSignals(expr, b.sigMap(), b.localProps)
 	// An expression that resolves to undefined/null renders nothing (React
 	// semantics) rather than the literal text "undefined". A string literal

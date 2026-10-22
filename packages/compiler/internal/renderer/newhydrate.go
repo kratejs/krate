@@ -26,9 +26,9 @@ var __cache=new Map();
 var __tpls=new Map();
 function __dec(v){try{return decodeURIComponent(v);}catch(e){return v;}}
 function scanIn(r){var w=document.createTreeWalker(r,NodeFilter.SHOW_COMMENT,null,false);while(w.nextNode()){var v=w.currentNode.nodeValue;if(v.indexOf('k:')===0)__cache.set(__dec(v.slice(2)),w.currentNode);}}
-function scan(){__cache.clear();__tpls.clear();scanIn(__root);var ts=__root.querySelectorAll('template[data-kc]');for(var i=0;i<ts.length;i++){__tpls.set(ts[i].getAttribute('data-kc'),ts[i]);scanIn(ts[i].content);}}
+function scan(){__cache.clear();__tpls.clear();if(typeof krateCondReset==='function')krateCondReset();scanIn(__root);var ts=__root.querySelectorAll('template[data-kc]');for(var i=0;i<ts.length;i++){__tpls.set(ts[i].getAttribute('data-kc'),ts[i]);scanIn(ts[i].content);}}
 scan();
-window.findSlot=function(id){var q='[data-k="k:'+id+'"]';var el=__root.querySelector(q);if(el)return el;var c=__cache.get(id);if(c)return c;var found=null;__tpls.forEach(function(t){if(!found)found=t.content.querySelector(q);});return found;};
+window.findSlot=function(id){var q='[data-k="k:'+id+'"]';var el=__root.querySelector(q);if(el)return el;var c=__cache.get(id);if(c)return c;var found=null;__tpls.forEach(function(t){if(!found)found=t.content.querySelector(q);});if(!found&&typeof krateCondDetached==='function'){var ds=krateCondDetached();for(var i=0;i<ds.length&&!found;i++)found=ds[i].querySelector(q);}return found;};
 window.refreshSlots=scan;
 window.krateMountPortals=function(){var list=document.querySelectorAll('[data-krate-portal]');for(var i=0;i<list.length;i++){(function(node){if(node.getAttribute('data-krate-portal-mounted'))return;node.setAttribute('data-krate-portal-mounted','1');if(node.parentNode!==document.body)document.body.appendChild(node);if(typeof window.onCleanup==='function')window.onCleanup(function(){if(node.parentNode)node.parentNode.removeChild(node);});})(list[i]);}};
 window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}});});};

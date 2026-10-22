@@ -9,14 +9,9 @@
   "comp_default_props": "destructured prop defaults not applied (renders undefined / drops attr)",
   "comp_prop_string_lt": "entities in JSX string-literal prop values double-escaped (&amp;amp;)",
   "comp_spread_props": "spread props on a component's root element dropped",
-  "expr_false": "{false} rendered as text \"false\"",
-  "expr_str_zero_and_element": "\"0\" && <b/> evaluated as falsy (JS truthiness of non-empty string wrong)",
-  "expr_string_concat": "\"5\"+\"3\" computed numerically (8) instead of string concat (53)",
-  "expr_true": "{true} rendered as text \"true\"",
-  "expr_zero_and_element": "0 && <b/> renders nothing; React renders \"0\"",
   "filter_then_map": ".filter().map() chain over literal array renders nothing",
-  "logical_or_and_nullish": "|| and ?? operators evaluate to empty",
   "num_large": "number formatting: 1e20 and 1e21 (React: 100000000000000000000 and 1e+21)",
   "num_negative_zero": "-0 rendered as \"-0\" (React: \"0\")",
+  "num_small_exp": "number formatting: 0.000001 rendered as 1e-6 (React: 0.000001)",
   "optional_chaining": "optional chaining on object literals evaluates to empty"
 }

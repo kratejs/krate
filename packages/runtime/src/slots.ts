@@ -13,12 +13,27 @@
 interface CondState {
   /** Branch currently between the markers: 'c' or 'a'. */
   shown: 'c' | 'a';
-  /** Detached nodes of the other branch. */
-  other: DocumentFragment;
+  /** Detached nodes of the other branch; null while still in the template. */
+  other: DocumentFragment | null;
+  tpl: HTMLTemplateElement | null;
   end: Comment | null;
 }
 
 type CondStart = Comment & { __krateCond?: CondState };
+
+// Branches swapped out of the document. Hydration lookups (findSlot) search
+// them too, so a binding registered after a swap still finds its node.
+const detached = new Set<DocumentFragment>();
+
+/** Fragments holding currently hidden conditional branches. */
+export function krateCondDetached(): DocumentFragment[] {
+  return Array.from(detached);
+}
+
+/** Forgets hidden branches of the previous page (called on slot rescans). */
+export function krateCondReset(): void {
+  detached.clear();
+}
 
 function findCondEnd(start: Comment): Comment | null {
   const want = '/' + (start.nodeValue || '');
@@ -32,7 +47,9 @@ function findCondEnd(start: Comment): Comment | null {
  * Shows the consequent (`show` true) or alternate branch of the conditional
  * whose start marker is `start`. `tpl` is the conditional's hoisted template
  * (null when it is missing, in which case the other branch is empty and the
- * markers are assumed to hold the branch matching the first call).
+ * markers are assumed to hold the branch matching the first call). Template
+ * content is only taken when first shown, so its nodes stay findable by
+ * hydration bindings registered after kbindCond.
  */
 export function krateCondSwap(start: Comment, show: boolean, tpl: HTMLTemplateElement | null): void {
   const node = start as CondStart;
@@ -41,9 +58,7 @@ export function krateCondSwap(start: Comment, show: boolean, tpl: HTMLTemplateEl
   if (!st) {
     const held = tpl ? tpl.getAttribute('data-kb') : null;
     const shown: 'c' | 'a' = held === 'c' ? 'a' : held === 'a' ? 'c' : want;
-    const other = document.createDocumentFragment();
-    if (tpl) other.appendChild(tpl.content);
-    st = { shown, other, end: findCondEnd(start) };
+    st = { shown, other: null, tpl, end: findCondEnd(start) };
     node.__krateCond = st;
   }
   if (st.shown === want) return;
@@ -58,8 +73,15 @@ export function krateCondSwap(start: Comment, show: boolean, tpl: HTMLTemplateEl
     out.appendChild(n);
     n = next;
   }
-  parent.insertBefore(st.other, end);
+  let incoming = st.other;
+  if (!incoming) {
+    incoming = document.createDocumentFragment();
+    if (st.tpl) incoming.appendChild(st.tpl.content);
+  }
+  detached.delete(incoming);
+  parent.insertBefore(incoming, end);
   st.other = out;
+  detached.add(out);
   st.shown = want;
 }
 

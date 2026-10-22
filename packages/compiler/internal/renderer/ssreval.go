@@ -1704,6 +1704,9 @@ func (e *SSREval) escapeContainerValue(expr ast.Expr) string {
 // escapeContainerValueEvaluated is escapeContainerValue with a pre-evaluated
 // value so callers that also need the raw value avoid evaluating twice.
 func (e *SSREval) escapeContainerValueEvaluated(expr ast.Expr, v string) string {
+	if irtree.RendersNothing(expr) {
+		return ""
+	}
 	if e.childrenIsHTML && isChildrenRef(expr) {
 		// The children binding was already rendered (and escaped) by the
 		// emitter's slot pipeline - injecting it raw is correct.
