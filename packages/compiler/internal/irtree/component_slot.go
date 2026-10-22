@@ -170,6 +170,7 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 		CallSiteChildren: el.Children,
 		RestProps:        restProps(childFn, attrs),
 		RestPropsName:    fnRestParamName(childFn),
+		ContextValues:    b.activeContextMarkers(),
 	}
 
 	// The call-site children may contain interactive components that need
@@ -181,7 +182,9 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 	if text, ok := b.resolveCallSiteChildrenText(); ok {
 		childNode.CallSiteChildrenText = text
 	}
+	restoreExpansion := b.callerExpansion()
 	childNode.Children = b.buildCallSiteChildSlots(el.Children, string(childID))
+	restoreExpansion()
 	b.callSiteChildren = savedCS
 
 	if ret := findReturnStmt(childFn.Body); ret != nil && ret.Value != nil {
@@ -238,11 +241,12 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 	live := b.liveProps
 	childNode := b.buildComponentNode(childFn, string(childID))
 	b.popComponentCtx()
+	childNode.ContextValues = b.activeContextMarkers()
 	b.warnSnapshotProps(el, childFn, childNode, live)
 
 	childNode.Props = attrs
 	childNode.CallSiteChildren = el.Children
-	childNode.CallSiteSlots = b.buildComponentCallSiteSlots(el, childID, provider)
+	childNode.CallSiteSlots = b.buildComponentCallSiteSlots(el, childID, provider, childNode.childrenContext)
 	b.completeSSREvalBindings(childNode, childFn, attrs)
 	b.registerChildProps(childNode, childFn)
 
@@ -260,6 +264,12 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 func (b *builder) installCallSiteInputs(el *ast.JSXElement, childFn *ast.FnDecl, attrs map[string]ast.Expr) {
 	parentProps := b.localProps
 	b.localProps = make(valueMap, len(attrs))
+	// Constant provider values above the call site stay visible to the child.
+	for k, v := range parentProps {
+		if strings.HasPrefix(k, contextMarkerPrefix) {
+			b.localProps[k] = v
+		}
+	}
 	var funcProps map[string]bool
 	// Evaluated in the caller's scope, before the child's signals replace it.
 	var live map[string]bool
@@ -341,9 +351,11 @@ func (b *builder) installCallSiteInputs(el *ast.JSXElement, childFn *ast.FnDecl,
 // buildComponentCallSiteSlots builds a client component's call-site children
 // (in the caller's scope) with the component's call-site children and any
 // scope it provides active.
-func (b *builder) buildComponentCallSiteSlots(el *ast.JSXElement, childID SlotID, provider scopeProvider) []SlotNode {
+func (b *builder) buildComponentCallSiteSlots(el *ast.JSXElement, childID SlotID, provider scopeProvider, overlay *contextOverlay) []SlotNode {
 	savedCallSite, savedScopes := b.callSiteChildren, b.contextScopes
 	defer func() { b.callSiteChildren, b.contextScopes = savedCallSite, savedScopes }()
+	defer b.callerExpansion()()
+	defer b.applyChildrenContext(overlay)()
 	b.callSiteChildren = el.Children
 	if provider.ok {
 		b.contextScopes = cloneScopeMap(savedScopes)

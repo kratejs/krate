@@ -79,21 +79,9 @@
     "severity": "P0",
     "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
   },
-  "r18/context_consumer_render_prop": {
-    "severity": "P0",
-    "reason": "[context-consumer] <Ctx.Consumer> render-prop child is unresolved ('could not be resolved and will not render'): empty <span>"
-  },
-  "r18/context_default_value": {
-    "severity": "P0",
-    "reason": "[context-build-eval] build fails: useContext() default value used without a Provider cannot be evaluated at build time (unresolved identifier createContext)"
-  },
   "r18/context_memo_child": {
     "severity": "P1",
     "reason": "[signal-getter-leak] useContext value read in a memo child's render logs as a function (signal getter), not the number; render count also differs (P2 part)"
-  },
-  "r18/context_nested_providers": {
-    "severity": "P0",
-    "reason": "[context-build-eval] build fails: a component that nests itself under a Provider (<Level><Level>) is rejected as 'recursive component cannot be expanded'"
   },
   "r18/context_provider_change": {
     "severity": "P0",
@@ -322,10 +310,6 @@
   "r19/app_reference": {
     "severity": "P0",
     "reason": "[form-status] React 19 reference app does not build: useFormStatus evaluated at build time (also exercises use(promise), useActionState, useOptimistic)"
-  },
-  "r19/context_as_provider": {
-    "severity": "P0",
-    "reason": "[context-consumer] React 19 <Context value> as provider is unresolved ('could not be resolved and will not render'): empty <span>"
   },
   "r19/deferred_initial_value": {
     "severity": "P0",

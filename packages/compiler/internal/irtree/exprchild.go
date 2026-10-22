@@ -21,6 +21,7 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 		return nodes
 	}
 	if isChildrenPlaceholder(expr) {
+		b.recordChildrenContext()
 		return []SlotNode{&ChildrenSlot{}}
 	}
 	if b.isCSSLiveText(expr) {

@@ -393,8 +393,10 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 	// the subtree so descendant `Ctx.useContext()` reads resolve to it. A literal
 	// value is also folded into the subtree's context marker so static rendering
 	// sees the provided value instead of the context default.
-	if strings.HasSuffix(name, ".Provider") {
-		ctx := strings.TrimSuffix(name, ".Provider")
+	if ctx, ok := b.consumerContext(name); ok {
+		return b.buildContextConsumer(el, ctx, parentID)
+	}
+	if ctx, ok := b.providerContext(name); ok {
 		var valueExpr ast.Expr
 		for _, attr := range el.Opening.Attributes {
 			if attr != nil && attr.Name == "value" {
@@ -410,9 +412,15 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 			b.contextScopes = cloneScopeMap(savedScope)
 			b.contextScopes[ctx] = ref
 		}
-		if s, ok := literalString(valueExpr); ok {
+		if initial, ok := b.staticContextValue(valueExpr); ok && !isScope {
+			// A build-time constant (literal, folded local, serializable
+			// object) shadows any outer dynamic provider of the same context.
 			b.localProps = cloneStringMap(savedProps)
-			b.localProps[contextMarkerPrefix+ctx] = jsvalue.String(s)
+			b.localProps[contextMarkerPrefix+ctx] = initial
+			if _, outer := savedValues[ctx]; outer {
+				b.contextValues = cloneExprMap(savedValues)
+				delete(b.contextValues, ctx)
+			}
 		} else if valueExpr != nil && !isScope {
 			// A dynamic value (signal/prop expression): substitute it for
 			// `Ctx.useContext()` reads while building the subtree.
@@ -3809,6 +3817,29 @@ func (b *builder) activeContextValue(expr ast.Expr) (ast.Expr, bool) {
 	v, found := b.contextValues[ctx]
 	if !found || v == nil {
 		return nil, false
+	}
+	return v, true
+}
+
+// staticContextValue folds a provider value that is a build-time constant:
+// it reads no signal and evaluates to a serializable value (no functions, no
+// unknowns), so consumers can fold it like a context default.
+func (b *builder) staticContextValue(expr ast.Expr) (jsvalue.Value, bool) {
+	if expr == nil {
+		return jsvalue.Value{}, false
+	}
+	if s, ok := literalString(expr); ok {
+		return jsvalue.String(s), true
+	}
+	if b.referencesSignal(expr) {
+		return jsvalue.Value{}, false
+	}
+	v := evalConstValue(expr, b.sigMap(), b.localProps)
+	if v.ContainsUnknown() {
+		return jsvalue.Value{}, false
+	}
+	if _, ok := jsvalue.JSSource(v); !ok {
+		return jsvalue.Value{}, false
 	}
 	return v, true
 }

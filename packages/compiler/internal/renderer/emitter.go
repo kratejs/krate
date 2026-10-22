@@ -13,6 +13,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // EmitResult consolidates all page output from the emitter.
@@ -128,7 +129,7 @@ type Emitter struct {
 
 	// contextDefaults holds module-wide `const X = createContext(v)` defaults so
 	// `X.useContext()` folds during SSREval (no Provider exists at build time).
-	contextDefaults map[string]string
+	contextDefaults map[string]jsvalue.Value
 
 	// moduleConsts holds module-level `const X = <expr>` initializers so
 	// SSREval resolves module constants referenced by signal-less components.
@@ -400,6 +401,7 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	if e.contextDefaults != nil {
 		eval.SetContextDefaults(e.contextDefaults)
 	}
+	eval.SetContextValues(node.ContextValues)
 	eval.SetCodeTheme(e.CodeTheme)
 	eval.SetModuleConsts(e.moduleConsts)
 	if node.RestProps != nil && node.RestPropsName != "" {

@@ -7,6 +7,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
 
@@ -258,6 +259,10 @@ type componentCtx struct {
 	// pushed while building a `<Ctx.Provider value={expr}>` subtree so a
 	// dynamic value substitutes for `Ctx.useContext()` reads.
 	contextValues map[string]ast.Expr
+	// entryContextValues and entryContextMarkers are the context state the
+	// component's return starts with (see recordChildrenContext).
+	entryContextValues  map[string]ast.Expr
+	entryContextMarkers map[string]jsvalue.Value
 	// scopeHandles maps a local identifier (or `props.<name>`) to the CSS scope
 	// it holds, so `x.trigger(v)` / `x.panel(v)` / `x.close()` spreads resolve
 	// anywhere in any component (a handle can be passed to children as a prop).
@@ -317,7 +322,7 @@ type builder struct {
 	moduleConsts     valueMap                  // module-level const values (name -> folded value)
 	moduleConstInits map[string]ast.Expr       // module-level const initializers (name -> expr)
 	cvaFactories     map[string]*CVASpec       // module-level `const X = cva(...)` factories
-	contextDefaults  map[string]string         // module-level `const X = createContext(v)` defaults
+	contextDefaults  map[string]jsvalue.Value  // module-level `const X = createContext(v)` defaults
 	codeTheme        string                    // chroma theme for compile-time <Code> highlighting
 	idPrefix         string                    // namespace for compact slot IDs (merged builds)
 	aggressiveDCE    bool                      // drop unreferenced local functions (opt-in)
