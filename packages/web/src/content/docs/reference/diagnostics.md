@@ -237,6 +237,12 @@ value={cond ? x : undefined} makes the field uncontrolled while the expression i
 
 React's onChange only fires for input, textarea and select. A contentEditable element never receives it; listen with onInput instead.
 
+### KR5008
+
+**ref.current read during render**
+
+React shows the ref's value as of the latest render, so a later state update reveals a mutated ref.current. Krate components render once and bind only state, so a ref read in JSX is shown once and never refreshed. Keep values the UI shows in state, or read the ref in an effect or event handler.
+
 ## KR6xxx: lists and keys
 
 ### KR6001
@@ -314,6 +320,24 @@ A React API used in a source component has no lowering to Krate signals, so the 
 **Component renders nothing because it could not be compiled**
 
 Krate could not compile a component (for example an unresolved component name or an unsupported class feature) and emitted an empty placeholder where React would render content. Fix the reported cause; the placeholder is never a valid substitute for the component's output.
+
+### KR8004
+
+**Context consumer child is not a single render function**
+
+`<Ctx.Consumer>` renders the result of calling its child with the nearest provider value, so its only child must be one function such as `{(value) => <span>{value}</span>}`. Krate inlines that function at build time; it also needs a plain parameter (or a `{ a, b }` pattern without renames or defaults). Read the value with `useContext(Ctx)` in a component when the render function is more involved.
+
+### KR8005
+
+**Legacy context API**
+
+A class component uses legacy context (`contextTypes`, `childContextTypes` or `getChildContext`). React 19 removed it, and Krate does not pass legacy context: `this.context` is empty. Create a context with `createContext`, provide it with `<Ctx value={...}>` and read it with `static contextType = Ctx` or `useContext(Ctx)`.
+
+### KR8006
+
+**Portal container cannot be resolved**
+
+`createPortal(children, container)` moves its children into a DOM node after hydration. Krate resolves `document.body`, `document.getElementById("id")` and `document.querySelector("selector")` with literal arguments, and any other expression in the hydration scope of a client component; elsewhere the content mounts into `document.body`, and a container that is not an element when the page hydrates keeps the content unmounted. Make sure the container exists before the component hydrates (for example a `<div id="modal-root">` in the layout).
 
 ### KR8301
 

@@ -115,12 +115,8 @@ func checkEventsAndForms(el *ast.JSXElement, report eventFormReporter) {
 		}
 	}
 
-	if r := attrs["ref"]; r != nil {
-		if lit, ok := r.Value.(*ast.Literal); ok && lit.Kind == ast.StringLit {
-			report(diag.CodeStringRef, at(r), "string ref \""+lit.Value+"\" on <"+tag+"> is not supported (removed in React 19) and is ignored",
-				"create a ref with useRef(null) and pass it as ref={myRef}, or pass a callback ref={(node) => ...}")
-		}
-	}
+	// String refs (KR5003) are reported on the source by the bundler, which
+	// also sees class components.
 
 	if attrs["onChange"] != nil && attrs["contentEditable"] != nil && tag != "input" && tag != "textarea" && tag != "select" {
 		report(diag.CodeContentEditableChange, at(attrs["onChange"]), "onChange never fires on a contentEditable <"+tag+">",

@@ -17,7 +17,8 @@
  * `useDeferredValue` defers getter values. Class components are intentionally
  * minimal.
  */
-import { h, type Component as FnComponent } from './dom.js';
+import { h, krateTrackNode, type Component as FnComponent } from './dom.js';
+import type { KratePortalNode } from './portal.js';
 import { getOwner, handleError, type Owner } from './boundary.js';
 import { createSignal, createEffect, createReducer, isSignalGetter } from './signal.js';
 import { createEffectDeps, type EffectPhase } from './effects.js';
@@ -530,20 +531,39 @@ export function flushSync<T>(fn: () => T): T {
   return fn();
 }
 
-export function createPortal(children: unknown, container: Element | DocumentFragment): Element | DocumentFragment {
+/**
+ * Runtime portal (content rendered by `h()` after hydration; compiled source
+ * components lower createPortal to an anchor instead, see portal.ts). The
+ * children are appended to `container`; the returned comment stands in the
+ * React tree: events bubble from the content through it, and disposing it
+ * removes the content.
+ */
+export function createPortal(children: unknown, container: Element | DocumentFragment): Node {
+  const anchor = document.createComment('krate-portal');
   // Handlers inside a portal outside the app root still need delegation.
   const root = typeof document !== 'undefined' ? document.getElementById('root') : null;
   if (container.nodeType === 1 && !(root && root.contains(container))) krateEventRoot(container);
-  if (children instanceof Node) container.appendChild(children);
-  else if (Array.isArray(children)) {
-    for (const child of children) {
-      if (child instanceof Node) container.appendChild(child);
-      else if (child != null) container.appendChild(document.createTextNode(String(child)));
+  const nodes: Node[] = [];
+  const add = (child: unknown): void => {
+    if (child == null || child === false || child === true) return;
+    if (Array.isArray(child)) {
+      for (const c of child) add(c);
+      return;
     }
-  } else if (children != null) {
-    container.appendChild(document.createTextNode(String(children)));
-  }
-  return container;
+    const node = child instanceof Node ? child : document.createTextNode(String(child));
+    if (node.nodeType === 11) {
+      for (const n of Array.from(node.childNodes)) add(n);
+      return;
+    }
+    (node as KratePortalNode).__kpp = anchor;
+    nodes.push(node);
+    container.appendChild(node);
+  };
+  add(children);
+  krateTrackNode(anchor, () => {
+    for (const n of nodes) if (n.parentNode) n.parentNode.removeChild(n);
+  });
+  return anchor;
 }
 
 /**

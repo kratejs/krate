@@ -21,6 +21,7 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 		return nodes
 	}
 	if isChildrenPlaceholder(expr) {
+		b.recordChildrenContext()
 		return []SlotNode{&ChildrenSlot{}}
 	}
 	if b.isCSSLiveText(expr) {
@@ -58,6 +59,9 @@ func (b *builder) jsxValueChild(expr ast.Expr, parentID string, doEscape bool) (
 		return b.buildSlotNodes(e, parentID), true
 	case *ast.JSXFragment:
 		return b.buildFragmentSlots(e, parentID), true
+	}
+	if content, container, ok := portalCall(expr); ok {
+		return b.buildPortal(content, container, expr.Pos(), parentID), true
 	}
 	if v, ok := b.activeContextValue(expr); ok {
 		var slots []SlotNode

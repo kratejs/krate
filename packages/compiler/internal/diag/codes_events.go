@@ -18,6 +18,8 @@ const (
 	CodeControlledSwitch Code = "KR5006"
 	// CodeContentEditableChange: onChange on a contentEditable element.
 	CodeContentEditableChange Code = "KR5007"
+	// CodeRefReadInRender: ref.current read in the rendered JSX.
+	CodeRefReadInRender Code = "KR5008"
 )
 
 func init() {
@@ -66,6 +68,14 @@ func init() {
 			Title: "onChange on a contentEditable element",
 			Explanation: "React's onChange only fires for input, textarea and select. A contentEditable element " +
 				"never receives it; listen with onInput instead.",
+		},
+		CodeInfo{
+			Code:  CodeRefReadInRender,
+			Title: "ref.current read during render",
+			Explanation: "React shows the ref's value as of the latest render, so a later state update reveals a " +
+				"mutated ref.current. Krate components render once and bind only state, so a ref read in JSX is " +
+				"shown once and never refreshed. Keep values the UI shows in state, or read the ref in an effect " +
+				"or event handler.",
 		},
 	)
 }

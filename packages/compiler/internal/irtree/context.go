@@ -1,15 +1,22 @@
 package irtree
 
-import "github.com/kratejs/krate/packages/compiler/ast"
+import (
+	"strings"
+
+	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+)
 
 // CollectContextDefaults scans a module's top-level declarations for
 // `const X = createContext(default)` and returns each context's default value
-// keyed by X. The SSR evaluator uses this to fold `X.useContext()` to the
-// default during static rendering (there is no Provider at build time), so a
-// page that reads a context default renders real text instead of leaking the
-// identifier.
-func CollectContextDefaults(prog *ast.Program) map[string]string {
-	out := map[string]string{}
+// keyed by X. Every createContext binding is listed, so the map doubles as the
+// set of known contexts (`<X value>` is a provider, `<X.Consumer>` a reader).
+// A default the build cannot evaluate (it calls a function, reads a runtime
+// global) is recorded as an unknown value. The builder and the SSR evaluator
+// fold `X.useContext()` to the default during static rendering when no
+// provider is above the reader.
+func CollectContextDefaults(prog *ast.Program) map[string]jsvalue.Value {
+	out := map[string]jsvalue.Value{}
 	if prog == nil {
 		return out
 	}
@@ -38,33 +45,61 @@ func CollectContextDefaults(prog *ast.Program) map[string]string {
 	return out
 }
 
-// contextDefaultValue returns the default of a `createContext(v)` call when v
-// is a string literal (or number, rendered as its text).
-func contextDefaultValue(expr ast.Expr) (string, bool) {
+// isCreateContextCall reports a `createContext(...)` call (React's
+// createContext is rewritten to the Krate one, which has the same name).
+func isCreateContextCall(expr ast.Expr) (*ast.CallExpr, bool) {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	id, ok := call.Callee.(*ast.Identifier)
-	if !ok || id.Name != "createContext" || len(call.Args) < 1 {
-		return "", false
+	if !ok || id.Name != "createContext" {
+		return nil, false
 	}
-	if s, ok := literalString(call.Args[0]); ok {
-		return s, true
+	return call, true
+}
+
+// contextDefaultValue returns the default of a `createContext(v)` call: v
+// evaluated at build time (undefined when absent, unknown when it cannot be
+// evaluated).
+func contextDefaultValue(expr ast.Expr) (jsvalue.Value, bool) {
+	call, ok := isCreateContextCall(expr)
+	if !ok {
+		return jsvalue.Value{}, false
 	}
-	return "", false
+	if len(call.Args) == 0 {
+		return jsvalue.Undefined(), true
+	}
+	return evalConstValue(call.Args[0], nil, nil), true
 }
 
 // mergeContextDefaults combines defaults discovered across imported modules
 // (from the annotator) with any declared in this program, this program's
 // declarations taking precedence.
-func mergeContextDefaults(fromAnn map[string]string, prog *ast.Program) map[string]string {
-	out := make(map[string]string)
+func mergeContextDefaults(fromAnn map[string]jsvalue.Value, prog *ast.Program) map[string]jsvalue.Value {
+	out := make(map[string]jsvalue.Value)
 	for name, val := range fromAnn {
 		out[name] = val
 	}
 	for name, val := range CollectContextDefaults(prog) {
 		out[name] = val
+	}
+	return out
+}
+
+// activeContextMarkers returns the context values folded into the current
+// local-prop scope (defaults and constant provider values), keyed by context.
+func (b *builder) activeContextMarkers() map[string]jsvalue.Value {
+	var out map[string]jsvalue.Value
+	for k, v := range b.localProps {
+		ctx, ok := strings.CutPrefix(k, contextMarkerPrefix)
+		if !ok {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]jsvalue.Value)
+		}
+		out[ctx] = v
 	}
 	return out
 }

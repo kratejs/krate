@@ -271,7 +271,7 @@ func (b *builder) installComponentProps(fn *ast.FnDecl, node *ComponentNode) {
 		for k, v := range b.contextDefaults {
 			key := contextMarkerPrefix + k
 			if _, exists := b.localProps[key]; !exists {
-				b.localProps[key] = jsvalue.FromLegacy(v)
+				b.localProps[key] = v
 			}
 		}
 	}
@@ -529,6 +529,7 @@ func (b *builder) buildComponentReturn(fn *ast.FnDecl, node *ComponentNode) {
 		}
 	}
 	b.contextValues = childContext
+	b.enterContextEntry()
 	node.Children = b.buildSlotNodes(retExpr, string(node.ID))
 }
 

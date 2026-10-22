@@ -8,6 +8,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	irtree "github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
 )
 
@@ -653,7 +654,7 @@ func MergeModuleFunctions(ann *irtree.Annotations, modules []ModuleSource) {
 			// Merge context defaults so `X.useContext()` in the entry module can
 			// fold against `createContext` bindings from imported modules.
 			if ann.ContextDefaults == nil {
-				ann.ContextDefaults = make(map[string]string)
+				ann.ContextDefaults = make(map[string]jsvalue.Value)
 			}
 			for name, def := range irtree.CollectContextDefaults(mod.Program) {
 				if _, exists := ann.ContextDefaults[name]; !exists {

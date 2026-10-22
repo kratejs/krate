@@ -264,7 +264,9 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	renameReservedBindings(prog)
 	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src, susp: newSuspenseState()}
 	ctx.fnNames = functionNames(prog.Body)
+	ctx.refDiagnostics(prog)
 	var toRemove []int
+	legacy := legacyImports(prog)
 
 	for i, stmt := range prog.Body {
 		imp, ok := stmt.(*ast.ImportStmt)
@@ -362,6 +364,7 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 
 	ctx.collectModuleContexts(prog)
 	ctx.lowerLazyDecls(prog)
+	ctx.checkLegacyAPIs(prog, legacy)
 	ctx.rewriteStmts(prog.Body, newScope(nil))
 
 	// React APIs that resolve to the compatibility runtime are pulled in from

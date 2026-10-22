@@ -79,7 +79,7 @@ type Annotations struct {
 	CVAFactories map[string]*CVASpec
 	// ContextDefaults maps a module-level `const X = createContext(v)` binding to
 	// the literal default v, so `X.useContext()` folds during SSR.
-	ContextDefaults map[string]string
+	ContextDefaults map[string]jsvalue.Value
 	// ClassComponents records class declarations that extend Component/
 	// PureComponent, so the builder can emit a specific diagnostic (class
 	// component lowering is not implemented yet).
@@ -305,6 +305,10 @@ type AttrBinding struct {
 	// Prop is the JSX prop name (defaultValue, defaultChecked, ...) when it
 	// differs from AttrName, so form-control defaults bind the right property.
 	Prop string
+	// HydrateOnly marks a binding whose attribute is already rendered
+	// statically (a constant controlled value); only the hydration call is
+	// emitted.
+	HydrateOnly bool
 }
 
 // HandlerDecl - event handler: onClick={() => fn()}
@@ -437,6 +441,13 @@ type ComponentNode struct {
 	// component, so props the IR folder cannot represent (JSX values) are
 	// evaluated by the SSR evaluator itself.
 	SSREvalAttrs map[string]ast.Expr
+	// ContextValues holds the build-time constant provider values (and
+	// folded defaults) in scope at this instance, keyed by context binding, so
+	// SSR evaluation reads the nearest provider instead of the default.
+	ContextValues map[string]jsvalue.Value
+	// childrenContext is the provider state at this instance's
+	// {props.children} placeholder, applied to its call-site children.
+	childrenContext *contextOverlay
 	// LocalVars holds build-time folded local constants (including cva/cn class
 	// strings); they are merged into SSREvalBindings so SSR-evaluated components
 	// resolve local variables such as `const classes = cn(cva(...))`.
@@ -485,7 +496,7 @@ type ComponentTree struct {
 	CVAFactories map[string]*CVASpec
 	// ContextDefaults holds module-wide `const X = createContext(v)` defaults so
 	// the emitter can fold `X.useContext()` during SSREval.
-	ContextDefaults map[string]string
+	ContextDefaults map[string]jsvalue.Value
 	// ModuleConstInits holds module-level constant initializers (entry module
 	// plus imports) so SSREval resolves module constants.
 	ModuleConstInits map[string]ast.Expr

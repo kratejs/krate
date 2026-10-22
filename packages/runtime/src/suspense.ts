@@ -129,7 +129,8 @@ export function readValue<T>(value: unknown): T {
   const ctx = value as { $$typeof?: symbol; useContext?: () => T } | null;
   // Krate contexts carry a marker; objects with a useContext() method (other
   // context shapes) count as contexts unless they are thenables.
-  if (ctx && typeof ctx === 'object' && typeof ctx.useContext === 'function') {
+  // Contexts are callable (React 19 `<Ctx value>`), so functions count too.
+  if (ctx && (typeof ctx === 'object' || typeof ctx === 'function') && typeof ctx.useContext === 'function') {
     if (ctx.$$typeof === CONTEXT_MARKER || !isThenable(value)) return ctx.useContext();
   }
   if (!isThenable(value)) return value as T;

@@ -48,7 +48,7 @@ export interface KrateSyntheticEvent<E extends Event = Event> {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Handler = (e: KrateSyntheticEvent<any>) => unknown;
 type HTable = Record<string, Handler | undefined>;
-type KNode = Node & { __kh?: HTable; __kd?: Record<string, 1> };
+type KNode = Node & { __kh?: HTable; __kd?: Record<string, 1>; __kpp?: Node };
 type FormEl = HTMLInputElement & {
   __kv?: string;
   __kc?: Record<string, (() => unknown) | undefined>;
@@ -155,7 +155,9 @@ function rethrow(): void {
 function emit(native: Event, name: string, target: Node | null, phases: number, type?: string): KrateSyntheticEvent | null {
   const cap: Array<Node | Handler> = [];
   const bub: Array<Node | Handler> = [];
-  for (let n = target as KNode | null; n; n = n.parentNode as KNode | null) {
+  // Portal content continues at its anchor, so events bubble through the
+  // React tree rather than the DOM container (as in React).
+  for (let n = target as KNode | null; n; n = (n.__kpp || n.parentNode) as KNode | null) {
     const m = n.__kh;
     if (!m) continue;
     let h: Handler | undefined;
@@ -303,6 +305,25 @@ export function krateOn(el: Element, prop: string, fn: ((e: KrateSyntheticEvent<
     if (name === 'change') track(el as FormEl);
   } else {
     ensure(TO_NATIVE[name] || name);
+  }
+}
+
+/**
+ * Mounts the text inputs under `root` the way React does: React sets an
+ * input's value through the DOM property, which leaves the caret at the end,
+ * while an input parsed from HTML keeps it at the start (so typing after
+ * focus() or autoFocus would land before the text). Re-assigning the value
+ * moves the caret; the user's value is kept. Textareas are left alone (React
+ * leaves their caret at the start too).
+ */
+export function krateMountFields(root: ParentNode): void {
+  const list = root.querySelectorAll('input[value]');
+  for (let i = 0; i < list.length; i++) {
+    const f = list[i] as FormEl;
+    if (!TEXT_TYPES.has(f.type || 'text') || !f.value || f.ownerDocument.activeElement === f) continue;
+    const v = f.value;
+    f.value = '';
+    f.value = v;
   }
 }
 
@@ -481,6 +502,7 @@ export function krateControl(el: Element, prop: string, get: () => unknown): () 
     track(f);
   }
   let was: boolean | undefined;
+  let mounted = false;
   return createEffect(() => {
     const v = get();
     if (controlProp) {
@@ -498,5 +520,10 @@ export function krateControl(el: Element, prop: string, get: () => unknown): () 
       was = now;
     }
     krateSetControl(f, prop, v);
+    // React mounts a textarea with its caret at the start.
+    if (!mounted && prop === 'value' && f.tagName === 'TEXTAREA' && f.ownerDocument.activeElement !== f) {
+      f.setSelectionRange(0, 0);
+    }
+    mounted = true;
   });
 }
