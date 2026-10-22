@@ -32,15 +32,13 @@ window.findSlot=function(id){var q='[data-k="k:'+id+'"]';var el=__root.querySele
 window.refreshSlots=scan;
 window.krateMountPortals=function(){var list=document.querySelectorAll('[data-krate-portal]');for(var i=0;i<list.length;i++){(function(node){if(node.getAttribute('data-krate-portal-mounted'))return;node.setAttribute('data-krate-portal-mounted','1');if(node.parentNode!==document.body)document.body.appendChild(node);if(typeof window.onCleanup==='function')window.onCleanup(function(){if(node.parentNode)node.parentNode.removeChild(node);});})(list[i]);}};
 window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}});});};
-window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);});});};
-window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(function(){krateCondSwap(n,!!get(),t);});});};
+window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;var __first=true;__safe(function(){createEffect(function(){var v=get();if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);});});};
+window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(function(){var s=!!get();krateCondSwap(n,s,t);if(typeof krateCondActivity==='function')krateCondActivity(id,s?'c':'a');});});};
 window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)n.removeAttribute(attr);else if(v===true)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){n.removeAttribute('style');Object.assign(n.style,v);}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));});});};
 window.kbindProp=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(attr==='value'){var s=v==null||v===false?'':String(v);if(n.value===s)return;n.value=s;}else{var b=!!v;if(n[attr]===b)return;n[attr]=b;}});});};
 window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){n[prop]=fn;});};
 window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);});};
 window.kbindRef=function(id,set){var n=findSlot(id);if(n)__safe(function(){set(n);});};
-window.createEffectDeps=function(fn,deps){var prev=null,has=false,cleanup=null;function same(a,b){if(!a||!b||a.length!==b.length)return false;for(var i=0;i<a.length;i++){if(a[i]!==b[i])return false;}return true;}createEffect(function(){var next=deps?deps():[];if(has&&deps&&same(prev,next))return;prev=next;has=true;if(typeof cleanup==="function"){cleanup();cleanup=null;}cleanup=fn();});onCleanup(function(){if(typeof cleanup==="function")cleanup();});};
-window.createMemoDeps=function(fn,deps){var s=createSignal(fn()),prev=deps?deps():[];function same(a,b){if(a.length!==b.length)return false;for(var i=0;i<a.length;i++){if(a[i]!==b[i])return false;}return true;}createEffect(function(){var next=deps?deps():[];if(same(prev,next))return;prev=next;s[1](fn());});return s[0];};
 function __krateActionBase(){var c=window.__KRATE_CFG__;return c&&c.basePath?c.basePath:'';}
 window.__krateAction=function(id){return function(){var args=Array.prototype.slice.call(arguments);return fetch(__krateActionBase()+'/__krate/action/'+id,{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json','accept':'application/json','x-krate-action':'fetch','x-krate-return':location.pathname+location.search},body:JSON.stringify({args:args})}).then(function(r){return r.json().then(function(p){if(!r.ok)throw new Error(p&&p.details?p.details:p&&p.error?p.error:r.statusText);return p.result;});});};};
 if(!window.__krateActionBound){window.__krateActionBound=true;document.addEventListener('submit',function(e){var form=e.target;if(!form||form.tagName!=='FORM'||e.defaultPrevented)return;var submitter=e.submitter;var actionEl=null;if(submitter&&submitter.hasAttribute&&submitter.hasAttribute('data-krate-action'))actionEl=submitter;else if(form.hasAttribute('data-krate-action'))actionEl=form;if(!actionEl)return;if(submitter&&submitter.hasAttribute('formaction')&&!submitter.hasAttribute('data-krate-action'))return;e.preventDefault();if(form.getAttribute('data-krate-action-pending'))return;form.setAttribute('data-krate-action-pending','1');form.setAttribute('aria-busy','true');var url=actionEl===form?form.action:(submitter.formAction||form.action);var fd=new FormData(form);if(submitter&&submitter.name){fd.append(submitter.name,submitter.value);}fetch(url,{method:'POST',credentials:'same-origin',headers:{'accept':'application/json','x-krate-action':'fetch','x-krate-return':location.pathname+location.search},body:fd}).then(function(r){return r.json().then(function(p){if(!r.ok)throw new Error(p&&p.details?p.details:p&&p.error?p.error:r.statusText);return p;});}).then(function(p){if(p&&typeof p.redirect==='string'&&p.redirect){location.assign(p.redirect);return;}location.reload();}).catch(function(err){form.removeAttribute('data-krate-action-pending');form.removeAttribute('aria-busy');console.error('krate server action:',err);});},false);}
@@ -88,6 +86,13 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		}
 	}
 
+	// React effects need component boundaries (ordering, unmount, hidden
+	// branches); declare an owner per component when any component has them.
+	owners := pageNeedsOwners(result)
+	if owners {
+		b.WriteString("var __ko=typeof krateOwner==='function'?krateOwner:function(){};\n")
+	}
+
 	// Per-component scoped IIFEs
 	for _, sig := range result.Signatures {
 		if sig.Tier != irtree.TierClient {
@@ -98,6 +103,9 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		b.WriteString("// component ")
 		b.WriteString(string(sig.ComponentID))
 		b.WriteString("\n(function(){\n")
+		if owners {
+			writeOwnerDecl(&b, sig)
+		}
 
 		// The component's own props object declaration must precede signal
 		// initializers: signal RawInits like `createSignal(props.x || "")`
@@ -303,6 +311,9 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 
 		b.WriteString("})();\n")
 	}
+	if owners {
+		b.WriteString("__ko(null);\n")
+	}
 
 	// Publish page-scope signal values for external React islands. This runs
 	// inside the page IIFE so the signal getters are in scope.
@@ -355,6 +366,53 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	b.WriteString("})();\n")
 
 	return b.String()
+}
+
+// pageNeedsOwners reports whether any client component registers effects,
+// in which case every component scope declares its owner.
+func pageNeedsOwners(result *EmitResult) bool {
+	for _, sig := range result.Signatures {
+		if sig.Tier == irtree.TierClient && len(sig.Effects) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// writeOwnerDecl emits the krateOwner call that opens a component scope:
+// its id, enclosing component, conditional branches and list slot.
+func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
+	b.WriteString("__ko(")
+	b.WriteString(strconv.Quote(string(sig.ComponentID)))
+	b.WriteString(",")
+	if sig.ParentID != "" {
+		b.WriteString(strconv.Quote(string(sig.ParentID)))
+	} else {
+		b.WriteString("null")
+	}
+	if len(sig.Conds) > 0 || sig.ListSlot != "" {
+		b.WriteString(",[")
+		for i, c := range sig.Conds {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			b.WriteString("[")
+			b.WriteString(strconv.Quote(string(c.SlotID)))
+			b.WriteString(",")
+			b.WriteString(strconv.Quote(c.Branch))
+			if c.InitiallyShown {
+				b.WriteString(",1]")
+			} else {
+				b.WriteString(",0]")
+			}
+		}
+		b.WriteString("]")
+		if sig.ListSlot != "" {
+			b.WriteString(",")
+			b.WriteString(strconv.Quote(string(sig.ListSlot)))
+		}
+	}
+	b.WriteString(");\n")
 }
 
 // sanitizeHandlerProp converts a slot ID to a safe JS property name component.
@@ -426,7 +484,7 @@ func isBareStringToken(v string) bool {
 // IIFEs (there is no module import inside the emitted IIFE). Compiled packages
 // use the Preact compat chunks instead.
 const CompatBootstrapJS = `
-window.useImperativeHandle=function(ref,create){if(!ref)return;var v=create();if(typeof ref==='function')ref(v);else if(ref&&typeof ref==='object')ref.current=v;};
+window.useImperativeHandle=function(ref,create,deps){if(!ref)return;function set(v){if(typeof ref==='function')ref(v);else if(ref&&typeof ref==='object')ref.current=v;}createEffectDeps(function(){set(create());return function(){set(null);};},typeof deps==='function'?deps:deps?function(){return deps;}:null,'layout');};
 window.useSyncExternalStore=function(subscribe,getSnapshot){var s=createSignal(getSnapshot());createEffect(function(){var unsub=subscribe(function(){s[1](getSnapshot());});return function(){if(typeof unsub==='function')unsub();};});return s[0];};
 window.useTransition=function(){var s=createSignal(false);function start(fn){s[1](true);try{fn();}finally{s[1](false);}}return [s[0],start];};
 window.startTransition=function(fn){fn();};

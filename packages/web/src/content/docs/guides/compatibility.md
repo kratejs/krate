@@ -51,17 +51,17 @@ for usage.
 
 **Source:** Beta · **Islands:** Beta · **SSR:** n/a
 
-useState and useReducer lower to signals. Reducer dispatch uses the same getter contract as a signal.
+useState and useReducer lower to signals with React's Object.is bail-out, functional updates, lazy initializers, a stable dispatch, and automatic batching (one commit per task).
 
-Evidence: `TestReactUseReducerBuild`, `TestRewriteReactUseReducer`, `TestRewriteReactNamespaceUseReducer`
+Evidence: `TestReactUseReducerBuild`, `TestRewriteReactUseReducer`, `TestRewriteReactNamespaceUseReducer`, `TestUseReducerLazyInitIsPreserved`, `TestLazyUseStateInitializerRunsOnce`, `browser:/react-effects/`
 
 ### Hooks: effects and memo
 
 **Source:** Beta · **Islands:** Beta · **SSR:** n/a
 
-Effects with empty deps use mount timing; dependency arrays use createEffectDeps/createMemoDeps. Passive-effect timing and cleanup ordering still differ from React.
+Effects run in React's commit order (insertion, layout before paint, passive after paint; children before parents; cleanups before re-runs; parent-first unmount) with Object.is dependency comparison. useMemo/useCallback honour deps synchronously. Effects without deps re-run on the component's own state/props changes only, hidden conditional branches behave like Activity (state kept), and cleanups read live state; each divergence has a KR2xxx diagnostic.
 
-Evidence: `TestRewriteReactEffectDepsAndMemo`, `TestRewriteReactEffectEmptyDepsMountOnce`
+Evidence: `TestRewriteReactEffectDepsAndMemo`, `TestRewriteReactEffectEmptyDepsMountOnce`, `TestEffectPhasesLowerToCreateEffectDeps`, `TestEffectWithoutDepsSynthesizesStateAndProps`, `TestHydrationDeclaresEffectOwners`, `browser:/react-effects/`
 
 ### Context and refs
 

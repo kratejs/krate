@@ -145,6 +145,40 @@ try {
     fail(`form result: ${formResult}`);
   }
 
+  // React effects: phase order, children before parents, Object.is deps,
+  // batching, and cleanups when a conditional branch hides.
+  await go("/react-effects/", "[data-testid=effects-inc]");
+  await page.waitForTimeout(200);
+  const effectLog = () => page.evaluate(() => (window.__effectLog || []).splice(0));
+  const expectLog = async (step, want) => {
+    const got = await effectLog();
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+      fail(`effects ${step}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+    }
+  };
+  await expectLog("mount", [
+    "child insertion",
+    "child layout",
+    "parent layout",
+    "child passive",
+    "parent passive 0",
+    "nan effect",
+  ]);
+  await page.locator("[data-testid=effects-inc]").click();
+  await page.waitForTimeout(100);
+  await expectLog("batched update", ["parent passive cleanup", "parent passive 2"]);
+  const doubled = await page.locator("[data-testid=effects-doubled]").textContent();
+  if (doubled !== "4") fail(`effects useMemo: ${doubled}`);
+  await page.locator("[data-testid=effects-nan]").click();
+  await page.waitForTimeout(100);
+  await expectLog("Object.is bail-out", []);
+  await page.locator("[data-testid=effects-toggle]").click();
+  await page.waitForTimeout(100);
+  await expectLog("hide branch", ["child layout cleanup", "child passive cleanup"]);
+  await page.locator("[data-testid=effects-toggle]").click();
+  await page.waitForTimeout(100);
+  await expectLog("show branch", ["child insertion", "child layout", "child passive"]);
+
   if (errors.length) fail("console errors: " + errors.join(" | "));
 
   console.log(JSON.stringify({ browser: browserName, before, after, tooltip, tooltipDebug, formResult, errors, failures }, null, 2));
