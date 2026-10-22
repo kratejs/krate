@@ -11,15 +11,6 @@ import (
 
 // Helpers
 
-func findReturnStmt(body []ast.Stmt) *ast.ReturnStmt {
-	for _, stmt := range body {
-		if ret, ok := stmt.(*ast.ReturnStmt); ok {
-			return ret
-		}
-	}
-	return nil
-}
-
 // collectLocalVars resolves top-level local variable declarations in a component
 // body to build-time constants (derived from props and other locals). Handles
 // sequential `var x = <expr>` declarations and simple reassignments/mutations
@@ -687,14 +678,14 @@ func (b *builder) isStaticResolvable(expr ast.Expr) bool {
 		if _, isAction := b.actionURLs[e.Name]; isAction {
 			return true
 		}
-		if _, inSig := b.sigMap()[e.Name]; inSig {
+		if inSig := b.isSignalName(e.Name); inSig {
 			return false
 		}
 		_, inProps := b.localProps[e.Name]
 		return inProps
 	case *ast.CallExpr:
 		if id, ok := e.Callee.(*ast.Identifier); ok {
-			if _, inSig := b.sigMap()[id.Name]; inSig {
+			if inSig := b.isSignalName(id.Name); inSig {
 				return false
 			}
 			if id.Name == "String" && len(e.Args) == 1 {

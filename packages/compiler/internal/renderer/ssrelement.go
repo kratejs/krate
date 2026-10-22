@@ -13,7 +13,7 @@ import (
 // Attribute, text and void-element rules come from htmlspec through the
 // shared irtree helpers, so this path matches the IR tree builder exactly.
 func (e *SSREval) renderElement(el *ast.JSXElement, name string) string {
-	e.addMarkupErrs(irtree.CheckElementMarkup("", el))
+	e.addMarkupErrs(irtree.CheckElementMarkup(el, irtree.FileMarkupReporter("")))
 
 	var b strings.Builder
 	b.WriteByte('<')

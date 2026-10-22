@@ -1,6 +1,7 @@
 package build
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -312,8 +313,14 @@ func TestReactDifferential(t *testing.T) {
 			}
 			next[name] = reason
 		}
-		b, _ := json.MarshalIndent(next, "", "  ")
-		if err := os.WriteFile(divPath, append(b, '\n'), 0o644); err != nil {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(next); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(divPath, buf.Bytes(), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		t.Logf("updated %s: %d of %d fixtures diverge", divPath, len(next), len(names))

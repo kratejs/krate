@@ -126,9 +126,21 @@ func RenderAttr(tag string, attr *ast.JSXAttr, eval func(ast.Expr) string) strin
 	return htmlspec.Attr(tag, attr.Name, AttrValue(attr.Value, eval(attr.Value)))
 }
 
+// MarkupReporter builds a diagnostic for a markup problem at pos.
+type MarkupReporter func(pos ast.Pos, msg, hint string) error
+
+// FileMarkupReporter reports markup diagnostics against file without a
+// source line (used where only a path is known).
+func FileMarkupReporter(file string) MarkupReporter {
+	return func(pos ast.Pos, msg, hint string) error {
+		return diag.New(file, pos.Line, pos.Col, msg, hint, "")
+	}
+}
+
 // CheckElementMarkup validates the tag name, the attribute names, and (for
-// void elements) the absence of children. It returns diagnostics for file.
-func CheckElementMarkup(file string, el *ast.JSXElement) []error {
+// void elements) the absence of children, reporting each problem through
+// report.
+func CheckElementMarkup(el *ast.JSXElement, report MarkupReporter) []error {
 	if el == nil || el.Opening == nil {
 		return nil
 	}
@@ -136,9 +148,9 @@ func CheckElementMarkup(file string, el *ast.JSXElement) []error {
 	pos := el.Position
 	name := el.Opening.Name
 	if !htmlspec.ValidTagName(name) {
-		errs = append(errs, diag.New(file, pos.Line, pos.Col,
+		errs = append(errs, report(pos,
 			fmt.Sprintf("invalid element name %q", name),
-			"element names must start with a letter and contain only letters, digits, '-', '_', '.' or ':'", ""))
+			"element names must start with a letter and contain only letters, digits, '-', '_', '.' or ':'"))
 	}
 	for _, attr := range el.Opening.Attributes {
 		if attr == nil || attr.Spread || isOnEvent(attr.Name) || htmlspec.IsReservedProp(attr.Name) {
@@ -149,15 +161,15 @@ func CheckElementMarkup(file string, el *ast.JSXElement) []error {
 			if p.Line == 0 {
 				p = pos
 			}
-			errs = append(errs, diag.New(file, p.Line, p.Col,
+			errs = append(errs, report(p,
 				fmt.Sprintf("invalid attribute name %q on <%s>", attr.Name, name),
-				"attribute names may contain letters, digits, '-', '_', '.' and ':' and must not start with a digit, '-' or '.'", ""))
+				"attribute names may contain letters, digits, '-', '_', '.' and ':' and must not start with a digit, '-' or '.'"))
 		}
 	}
 	if htmlspec.IsVoid(name) && HasMeaningfulChildren(el.Children) {
-		errs = append(errs, diag.New(file, pos.Line, pos.Col,
+		errs = append(errs, report(pos,
 			fmt.Sprintf("<%s> is a void element and cannot have children", name),
-			fmt.Sprintf("write it self-closing as <%s />; move the content next to it", name), ""))
+			fmt.Sprintf("write it self-closing as <%s />; move the content next to it", name)))
 	}
 	return errs
 }
