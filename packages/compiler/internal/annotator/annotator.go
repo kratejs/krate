@@ -30,6 +30,7 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 	collectMemberComponents(prog.Body, ann.Functions)
 	collectClassComponents(prog.Body, ann.ClassComponents)
 	collectClassRejections(prog.Body, ann, sourceFile, rawSource)
+	collectLazyComponents(prog.Body, ann, sourceFile, rawSource)
 
 	// 2. Find default export -> entry point
 	ann.EntryPoint = FindDefaultExport(prog.Body)
@@ -633,6 +634,7 @@ func MergeModuleFunctions(ann *irtree.Annotations, modules []ModuleSource) {
 			}
 			collectClassComponents(mod.Program.Body, ann.ClassComponents)
 			collectClassRejections(mod.Program.Body, ann, mod.Path, mod.RawSource)
+			collectLazyComponents(mod.Program.Body, ann, mod.Path, mod.RawSource)
 			// Merge module-level cva factories so variant calls in the entry
 			// module can fold against factories defined in imported modules.
 			if ann.CVAFactories == nil {
@@ -685,6 +687,7 @@ func MergeImportAliases(ann *irtree.Annotations, modules []ModuleSource, entry M
 	if entry.Program != nil {
 		modules = append(modules, entry)
 	}
+	markLazyDefaults(ann, modules)
 	aliases := BuildImportAliases(modules)
 	for local, declared := range aliases {
 		if fn := ann.Functions[declared]; fn != nil {

@@ -89,6 +89,9 @@ type Annotations struct {
 	// static or private member, an unknown this.x read, ...). The builder
 	// reports it when the component is used.
 	ClassRejections map[string]diag.Diagnostic
+	// LazyComponents maps a component binding declared with React.lazy() to
+	// its declaration. Its hydration code goes into a separate chunk.
+	LazyComponents map[string]LazyComponent
 }
 
 // (Annotations continues below.)
@@ -327,10 +330,12 @@ type SignalDecl struct {
 
 // ComponentNode - a single component instance in the tree
 type ComponentNode struct {
-	ID    SlotID
-	Name  string
-	Tier  ComponentTier
-	Fn    *ast.FnDecl
+	ID   SlotID
+	Name string
+	Tier ComponentTier
+	Fn   *ast.FnDecl
+	// Lazy marks an instance of a React.lazy() component (see LazyComponent).
+	Lazy  bool
 	Props map[string]ast.Expr
 	// RuntimeProps holds resolved prop values for runtime-tier components
 	// (prop name -> value). These are serialized into the page's runtime props
@@ -504,6 +509,13 @@ type ComponentSignature struct {
 	Children        []SlotID
 	SlotBindings    []SlotBinding
 	AttrBindings    []AttrBinding
+	// Boundary is the stream ID of the innermost <Suspense> boundary whose
+	// content holds this instance ("" outside any boundary).
+	Boundary string
+	// Lazy marks an instance of a lazy() component; LazyName is its name.
+	// Its hydration code (and its descendants') is loaded as a separate chunk.
+	Lazy     bool
+	LazyName string
 }
 
 // SlotBinding - describes a content binding for hydration

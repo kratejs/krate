@@ -80,19 +80,25 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	// Component functions needed by dynamic list slots. Without these the
 	// runtime `h(Component, props)` call in a list binding would throw
 	// ReferenceError when the list re-renders.
+	var listFns strings.Builder
 	for _, fn := range result.ListComponents {
 		js := irtree.RenderComponentFnJS(fn)
 		if js != "" {
-			b.WriteString(js)
-			b.WriteString("\n")
+			listFns.WriteString(js)
+			listFns.WriteString("\n")
 		}
 	}
+	b.WriteString(listFns.String())
 
-	// Per-component scoped IIFEs
-	for _, sig := range result.Signatures {
+	// Per-component scoped IIFEs. Each one's span is recorded so suspending
+	// and lazy components can be rewritten afterwards (see suspense.go).
+	var spans []sigSpan
+	for i := range result.Signatures {
+		sig := result.Signatures[i]
 		if sig.Tier != irtree.TierClient {
 			continue
 		}
+		spanStart := b.Len()
 		// Label each scope with its component so the readable dev output can be
 		// traced back to a source component. Stripped by minification in prod.
 		b.WriteString("// component ")
@@ -302,6 +308,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		}
 
 		b.WriteString("})();\n")
+		spans = append(spans, sigSpan{sig: &result.Signatures[i], start: spanStart, end: b.Len()})
 	}
 
 	// Publish page-scope signal values for external React islands. This runs
@@ -354,7 +361,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 
 	b.WriteString("})();\n")
 
-	return b.String()
+	return finishSuspenseHydration(result, b.String(), spans, listFns.String())
 }
 
 // sanitizeHandlerProp converts a slot ID to a safe JS property name component.
@@ -427,10 +434,6 @@ func isBareStringToken(v string) bool {
 // use the Preact compat chunks instead.
 const CompatBootstrapJS = `
 window.useImperativeHandle=function(ref,create){if(!ref)return;var v=create();if(typeof ref==='function')ref(v);else if(ref&&typeof ref==='object')ref.current=v;};
-window.useSyncExternalStore=function(subscribe,getSnapshot){var s=createSignal(getSnapshot());createEffect(function(){var unsub=subscribe(function(){s[1](getSnapshot());});return function(){if(typeof unsub==='function')unsub();};});return s[0];};
-window.useTransition=function(){var s=createSignal(false);function start(fn){s[1](true);try{fn();}finally{s[1](false);}}return [s[0],start];};
-window.startTransition=function(fn){fn();};
-window.useDeferredValue=function(v){return v;};
 window.useDebugValue=function(){};
 window.isValidElement=function(v){return (typeof Node!=='undefined'&&v instanceof Node)||(v&&typeof v==='object');};
 window.Children={toArray:function(c){if(c==null||c===false||c===true)return [];if(Array.isArray(c)){var o=[];for(var i=0;i<c.length;i++){var a=window.Children.toArray(c[i]);for(var j=0;j<a.length;j++)o.push(a[j]);}return o;}return [c];},count:function(c){return window.Children.toArray(c).length;},only:function(c){return window.Children.toArray(c)[0];},map:function(c,fn){return window.Children.toArray(c).map(fn);},forEach:function(c,fn){var a=window.Children.toArray(c);for(var i=0;i<a.length;i++)fn(a[i],i);}};

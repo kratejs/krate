@@ -201,7 +201,8 @@ func (b *builder) extraVarDeclJS(decl *ast.VarDecl) (string, bool) {
 			// bindings reference it as () => doubled(). Signals/resources/
 			// effects are handled by their own collection passes.
 			switch id.Name {
-			case "createSignal", "createResource", "createEffect":
+			case "createSignal", "createResource", "createEffect",
+				"__krateUse", "createDeferredValue", "createExternalStore":
 				return "", false
 			}
 		}
@@ -269,7 +270,8 @@ func isHookCallee(name string) bool {
 	switch name {
 	case "createEffect", "createEffectDeps", "onMount", "onCleanup",
 		"createMemo", "createMemoDeps", "createSignal", "createResource",
-		"createReducer", "createContext":
+		"createReducer", "createContext",
+		"__krateUse", "createDeferredValue", "createExternalStore":
 		return true
 	}
 	if rest, ok := strings.CutPrefix(name, "use"); ok && rest != "" {

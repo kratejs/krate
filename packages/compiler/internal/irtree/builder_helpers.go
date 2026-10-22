@@ -300,6 +300,11 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	if hasLifecycleCall(fn.Body) {
 		return true
 	}
+	// use() values, deferred values, external stores and resources are
+	// runtime getters, so their component hydrates.
+	if bodyUsesReactiveFactory(fn.Body) {
+		return true
+	}
 	// A component rendering an external (bare-package) component must take the
 	// IR path so the island placeholder is emitted; the SSREval shortcut would
 	// re-render the source and drop it.

@@ -233,6 +233,7 @@ func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs
 // the call-site inputs installed, then its call-site children in the caller's
 // scope, and registers its props for hydration.
 func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDecl, childID SlotID, attrs map[string]ast.Expr, provider scopeProvider) []SlotNode {
+	b.warnSuspendOutsideBoundary(childFn, el.Position)
 	b.pushComponentCtx()
 	b.installCallSiteInputs(el, childFn, attrs)
 	live := b.liveProps
@@ -241,6 +242,9 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 	b.warnSnapshotProps(el, childFn, childNode, live)
 
 	childNode.Props = attrs
+	if _, lazy := b.ann.LazyComponents[el.Opening.Name]; lazy {
+		childNode.Lazy = true
+	}
 	childNode.CallSiteChildren = el.Children
 	childNode.CallSiteSlots = b.buildComponentCallSiteSlots(el, childID, provider)
 	b.completeSSREvalBindings(childNode, childFn, attrs)

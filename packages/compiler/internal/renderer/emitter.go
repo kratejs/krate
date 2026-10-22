@@ -44,6 +44,9 @@ type EmitResult struct {
 	// of its build-rendered static children. Emit never mutates the shared IR,
 	// so the build attaches these to the region props itself.
 	RuntimeChildren map[string]string
+	// LazyChunks holds the hydration code of lazy() components, filled by
+	// GenerateNewHydrationJS; the build writes each one to its own file.
+	LazyChunks []LazyChunk
 }
 
 // SlotOutput is the result of emitting a single slot node. Beyond HTML and
@@ -588,6 +591,10 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		Children:        childIDs,
 		SlotBindings:    slotBindings,
 		AttrBindings:    node.AttrBindings,
+		Lazy:            node.Lazy,
+	}
+	if node.Lazy {
+		sig.LazyName = node.Name
 	}
 	out.Signatures = append([]irtree.ComponentSignature{sig}, out.Signatures...)
 
@@ -949,29 +956,6 @@ func (e *Emitter) emitListSlot(s *irtree.ListSlot) SlotOutput {
 
 func (e *Emitter) emitComponentSlot(s *irtree.ComponentSlot) SlotOutput {
 	return e.emitNode(s.Component)
-}
-
-func (e *Emitter) emitSuspenseSlot(s *irtree.SuspenseSlot) SlotOutput {
-	var out SlotOutput
-	for _, child := range s.Fallback {
-		mergeSlotOutput(&out, e.emitSlotNode(child))
-	}
-
-	// ModeStatic: the primary was resolved at build time - bake it inside the
-	// markers so the shell contains the real resolved content (no streaming
-	// round-trip needed). ModeRegion/Default keep the fallback baked in.
-	inner := out.HTML
-	if s.Mode == irtree.SuspenseModeStatic {
-		inner = ""
-		for _, child := range s.Resolved {
-			inner += e.emitSlotNode(child).inlineHTML()
-		}
-	}
-
-	id := escape.Comment(s.StreamID)
-	html := `<!--suspense:` + id + `-->` + inner + `<!--/suspense:` + id + `-->`
-	out.HTML = html
-	return out
 }
 
 // EmitMeta - extract Head/Script/Style content from tree

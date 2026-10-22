@@ -92,8 +92,10 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 	}
 
 	builder := newBuilder(prog, ann, opts)
+	builder.checkLazyComponents()
 	root := builder.buildComponentNode(entryFn, "")
 	root.SourceFile = ann.SourceFile
+	builder.warnSuspendOutsideBoundary(entryFn, entryFn.Position)
 	return builder.finishTree(root)
 }
 
@@ -322,6 +324,7 @@ type builder struct {
 	idPrefix         string                    // namespace for compact slot IDs (merged builds)
 	aggressiveDCE    bool                      // drop unreferenced local functions (opt-in)
 	suspenseCount    int                       // monotonic counter for stable StreamID generation
+	suspenseDepth    int                       // >0 while building <Suspense> content
 	compat           csssignals.StyleMode      // CSS-signal stylesheet mode (modern/legacy/hybrid)
 	goComponents     map[string]GoComponentRef // imported Go components (local name -> ref)
 	externalImports  map[string]ExternalImport // bare-package import bindings (local -> module)

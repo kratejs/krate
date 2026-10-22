@@ -490,7 +490,9 @@ func (b *builder) buildSuspenseSlot(el *ast.JSXElement, parentID string) *Suspen
 
 	// Resolve the primary region: a possible top-level runtime component plus
 	// the mode and the buildable static content to bake when static.
+	b.suspenseDepth++
 	primary, mode, resolved := b.resolveSuspensePrimary(el.Children, string(id))
+	b.suspenseDepth--
 	s.Primary = primary
 	s.Mode = mode
 	s.Resolved = resolved

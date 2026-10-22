@@ -171,6 +171,7 @@ func (b *builder) collectHydrationBody(fn *ast.FnDecl, node *ComponentNode) hydr
 	node.Memos = b.collectMemoJS(fn.Body)
 	body.pre, body.post = b.collectExtraVarJS(fn.Body, body.order, paramBindingSet(fn))
 	body.post = append(body.post, b.collectResourceJS(fn.Body, body.order)...)
+	body.post = append(body.post, b.collectReactiveFactoryJS(fn.Body, body.order)...)
 	node.PreSignalVars = bodyJSStrings(body.pre)
 	node.ExtraVars = mergeBodyJS(body.post)
 	return body
@@ -213,6 +214,7 @@ func (b *builder) registerReactiveLocals(fn *ast.FnDecl) {
 	for _, name := range b.collectResourceNames(fn.Body) {
 		b.localSignals[name] = resourceSentinel
 	}
+	b.registerFactoryLocals(fn.Body)
 }
 
 // installComponentProps completes the local-prop scope the call site set up
