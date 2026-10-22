@@ -59,7 +59,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		if len(sig.Signals) > 0 || len(sig.Handlers) > 0 || len(sig.Effects) > 0 ||
 			len(sig.Memos) > 0 || len(sig.ExtraVars) > 0 || len(sig.PreSignalVars) > 0 ||
 			len(sig.SlotBindings) > 0 || len(sig.AttrBindings) > 0 || len(sig.RefBindings) > 0 ||
-			len(sig.IslandBoot) > 0 {
+			len(sig.IslandBoot) > 0 || sig.Lazy {
 			hasWork = true
 			break
 		}

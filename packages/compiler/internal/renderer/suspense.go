@@ -92,9 +92,16 @@ func claimBoundary(sigs []irtree.ComponentSignature, streamID string) bool {
 // sigSuspends reports whether a component's hydration code reads use() values
 // or resources, so it must run inside its boundary.
 func sigSuspends(sig *irtree.ComponentSignature) bool {
+	// A lazy instance waits for its chunk or loader before it is shown.
+	return sig.Lazy || sigCodeSuspends(sig)
+}
+
+// sigCodeSuspends reports whether a component's hydration code itself can
+// suspend (use() values, resources, lazy loaders): it runs in __krateBoundary.
+func sigCodeSuspends(sig *irtree.ComponentSignature) bool {
 	for _, group := range [][]string{sig.PreSignalVars, sig.ExtraVars} {
 		for _, js := range group {
-			if strings.Contains(js, "__krateUse(") || strings.Contains(js, "createResource(") {
+			if strings.Contains(js, "__krateUse(") || strings.Contains(js, "createResource(") || strings.Contains(js, "__krateLazyPayload(") {
 				return true
 			}
 		}
@@ -149,7 +156,7 @@ func finishSuspenseHydration(result *EmitResult, js string, spans []sigSpan, lis
 		out.WriteString(js[prev:sp.start])
 		prev = sp.end
 		text := js[sp.start:sp.end]
-		if sigSuspends(sp.sig) {
+		if sigCodeSuspends(sp.sig) {
 			text = wrapBoundaryRun(text, sp.sig.Boundary)
 		}
 		id := string(sp.sig.ComponentID)

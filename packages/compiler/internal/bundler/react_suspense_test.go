@@ -84,6 +84,23 @@ func TestLazyDiagnostics(t *testing.T) {
 	}
 }
 
+func TestLazyPromiseLoaderKeepsLoader(t *testing.T) {
+	out, diags := rewriteSrcDiags(t, `
+		import { lazy } from 'react';
+		function Report() { return <p>r</p>; }
+		const Slow = lazy(() => delay(300, { default: Report }));
+	`)
+	if len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+	if !strings.Contains(out, `__krate_lazyload__Slow = () => delay(300, { default: Report })`) {
+		t.Errorf("expected the loader to be kept for the client:\n%s", out)
+	}
+	if !strings.Contains(out, `__krate_lazy__Slow = "fn:Report"`) {
+		t.Errorf("expected a local lazy marker:\n%s", out)
+	}
+}
+
 func TestLazyPackageWarns(t *testing.T) {
 	out, diags := rewriteSrcDiags(t, `
 		import { lazy } from 'react';

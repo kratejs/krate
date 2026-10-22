@@ -33,6 +33,14 @@ const lazyMarkerPrefix = "__krate_lazy__"
 // LazyMarkerPrefix is exported for the annotator, which collects the markers.
 const LazyMarkerPrefix = lazyMarkerPrefix
 
+// LazyLoaderPrefix names the module-level loader kept for a lazy() whose
+// loader is not a static import (`lazy(() => delay(ms, { default: X }))`).
+const LazyLoaderPrefix = "__krate_lazyload__"
+
+// LazyLocalSpec prefixes the marker value of such a lazy component: the rest
+// is the local component the loader resolves to.
+const LazyLocalSpec = "fn:"
+
 // suspenseState is the Suspense-related part of a reactCtx.
 type suspenseState struct {
 	suspense map[string]bool // local bindings of React.Suspense
@@ -127,6 +135,22 @@ func (c *reactCtx) lowerLazyDecls(prog *ast.Program) {
 				continue
 			}
 			spec, remote, ok := lazyImportSpec(call)
+			if !ok && !d.IsDestructuring && d.Name != "" {
+				if impl := lazyLocalImpl(call); impl != "" {
+					// The loader runs on the client when the component first
+					// renders; it must resolve to { default: impl }.
+					out = append(out,
+						&ast.VarStmt{Position: call.Position, Kind: ast.VarConst, Decls: []*ast.VarDecl{{
+							Name: LazyLoaderPrefix + d.Name,
+							Init: call.Args[0],
+						}}},
+						&ast.VarStmt{Position: call.Position, Kind: ast.VarConst, Decls: []*ast.VarDecl{{
+							Name: lazyMarkerPrefix + d.Name,
+							Init: &ast.Literal{Kind: ast.StringLit, Value: LazyLocalSpec + impl},
+						}}})
+					continue
+				}
+			}
 			if !ok || d.IsDestructuring || d.Name == "" {
 				c.susp.reported[call] = true
 				c.report(call.Position, diag.SeverityError, diag.CodeLazyLoader,
@@ -240,6 +264,58 @@ func lazyImportSpec(call *ast.CallExpr) (spec, remote string, ok bool) {
 		return "", "", false
 	}
 	return spec, name.Name, true
+}
+
+// lazyLocalImpl returns the component a non-import lazy loader resolves to:
+// the identifier in a `{ default: Component }` object returned (possibly
+// through a helper such as delay(ms, value)) by `() => ...`.
+func lazyLocalImpl(call *ast.CallExpr) string {
+	if len(call.Args) != 1 {
+		return ""
+	}
+	arrow, ok := call.Args[0].(*ast.ArrowFn)
+	if !ok || len(arrow.Params) != 0 {
+		return ""
+	}
+	body := arrowReturn(arrow)
+	if body == nil {
+		return ""
+	}
+	impl := ""
+	var walk func(e ast.Expr)
+	walk = func(e ast.Expr) {
+		switch x := e.(type) {
+		case *ast.ObjectExpr:
+			for _, p := range x.Properties {
+				if p == nil {
+					continue
+				}
+				if p.Key == "default" {
+					if id, ok := p.Value.(*ast.Identifier); ok && impl == "" {
+						impl = id.Name
+					}
+				}
+				walk(p.Value)
+			}
+		case *ast.CallExpr:
+			walk(x.Callee)
+			for _, a := range x.Args {
+				walk(a)
+			}
+		case *ast.MemberExpr:
+			walk(x.Object)
+		case *ast.NewExpr:
+			for _, a := range x.Args {
+				walk(a)
+			}
+		case *ast.ArrowFn:
+			if r := arrowReturn(x); r != nil {
+				walk(r)
+			}
+		}
+	}
+	walk(body)
+	return impl
 }
 
 func dynamicImportSpec(expr ast.Expr) (string, bool) {

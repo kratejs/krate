@@ -154,7 +154,11 @@ and reveals the content once everything inside has settled. Siblings under one
 boundary reveal together, and a suspension counts only for the innermost
 boundary around it, so an outer boundary keeps showing its content (with the
 inner fallback). The fallback is rendered as normal Krate output and can be
-interactive.
+interactive. As in React, a reveal that replaces a fallback waits until at
+least 300ms after the most recent fallback appeared, so sequential and nested
+reveals do not flash, and content that suspends again outside a transition is
+hidden in place (`display: none !important`, with the fallback after it)
+rather than removed, so its state and DOM nodes survive.
 
 At build time a boundary renders its content when the content does not depend
 on pending work. When a component inside it reads `use(promise)` or a
@@ -198,20 +202,26 @@ const Chart = lazy(() => import('./Chart'));
 const Panel = lazy(() => import('./panels').then((m) => ({ default: m.Panel })));
 ```
 
-Krate renders the static HTML of everything at build time, so splitting the
-render code of a lazy component would save nothing: its HTML is in the page
-from the first byte. What is split is its **hydration code**. The component's
-event handlers and bindings (and those of its children) are written to
-`lazy-<Name>.<hash>.js` next to the page script and loaded with a dynamic
-import when the page hydrates, which is the first time the component renders
-on the client (React's lazy also starts loading on first render). Until the
-chunk has run, the content is visible but not interactive, as with React
-hydrating server-rendered lazy content; a boundary still showing its fallback
-waits for the chunk before revealing. The default export must be a component
-(KR4007); a failed chunk load is reported to the nearest error boundary. The
-loader must be a static `import()` (KR4001), `lazy()` must not be called inside
-a component (KR4002), and a lazy package import (`import('some-package')`) is
-compiled like a static import (warning KR4006).
+Krate renders the HTML of a lazy component at build time like any other
+component, so splitting its render code would save nothing. What is split is
+its **hydration code**: the component's event handlers and bindings (and those
+of its children) are written to `lazy-<Name>.<hash>.js` next to the page
+script. As in React, the enclosing `<Suspense>` shows its fallback until the
+component is ready: the build ships the fallback with the lazy content (already
+rendered) in a template, and the chunk is loaded with a dynamic import when the
+component first renders on the client, that is when the page hydrates, or when
+a hidden branch holding it is first shown. The boundary reveals the content
+once the chunk has run, so it is interactive from the first frame it is
+visible.
+
+A loader that is not a static import works too when it resolves to a local
+component, for example `lazy(() => delay(300, { default: Report }))`: the
+loader runs when the component first hydrates and the boundary shows its
+fallback until it resolves. The default export must be a component (KR4007);
+a failed load is reported to the nearest error boundary. Other loaders are
+rejected (KR4001), `lazy()` must not be called inside a component (KR4002),
+and a lazy package import (`import('some-package')`) is compiled like a static
+import (warning KR4006).
 
 **Transitions.** `useTransition()` returns `[isPending, startTransition]`.
 `isPending` becomes true when a transition starts and stays true until the

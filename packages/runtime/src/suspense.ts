@@ -10,7 +10,7 @@
  *   innermost boundary wins (each suspension is attributed to the nearest
  *   boundary only). Compiled pages emit the boundary as a conditional slot
  *   (content and fallback, one of them in a hoisted template) and the
- *   boundary swaps them with `krateCondSwap`.
+ *   boundary shows one of them between the slot markers (see boundaryDOM).
  * - Runs. The hydration code of a component inside a boundary runs through
  *   `__krateBoundary(id, fn)`. When `use(promise)` meets a pending promise
  *   during that first run, the run throws a {@link SuspenseSignal}; the runner
@@ -24,7 +24,6 @@
  *   transition stays pending until that work and any async action settle.
  */
 import { createSignal, createEffect, onCleanup, krateGetOwner, krateSetOwner } from './signal.js';
-import { krateCondSwap } from './slots.js';
 
 // Thenables
 
@@ -345,6 +344,26 @@ export interface Boundary {
   release(): void;
 }
 
+// React throttles reveals: content replacing a fallback is committed no
+// sooner than FALLBACK_THROTTLE_MS after the most recent fallback appeared,
+// so nested and sequential reveals do not flash. Krate uses React 19's value.
+let fallbackThrottleMs = 300;
+let lastFallbackAt = -Infinity;
+
+function now(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+/** Records that a fallback became visible (starts the reveal throttle). */
+export function noteFallbackShown(): void {
+  lastFallbackAt = now();
+}
+
+/** Sets the reveal throttle (React's FALLBACK_THROTTLE_MS); 0 disables it. */
+export function setFallbackThrottle(ms: number): void {
+  fallbackThrottleMs = ms;
+}
+
 class BoundaryController implements Boundary {
   readonly id: string;
   anchor: Node | null;
@@ -408,13 +427,33 @@ class BoundaryController implements Boundary {
     });
   }
 
+  private throttle: ReturnType<typeof setTimeout> | null = null;
+
   private update(): void {
     const want = this.pending.size === 0 && this.holds === 0;
     if (want === this.content) return;
+    if (want) {
+      const wait = lastFallbackAt + fallbackThrottleMs - now();
+      if (wait > 0) {
+        if (this.throttle === null) {
+          this.throttle = setTimeout(() => {
+            this.throttle = null;
+            this.update();
+          }, wait);
+        }
+        return;
+      }
+    } else {
+      noteFallbackShown();
+    }
     this.content = want;
     this.apply(want);
+    // A reveal can expose a nested boundary that still shows its fallback.
+    if (want && onReveal) onReveal(this);
   }
 }
+
+let onReveal: ((b: Boundary) => void) | null = null;
 
 /**
  * Creates a boundary controller over an arbitrary show/hide function. Used by
@@ -459,15 +498,99 @@ export function getBoundary(id: string): Boundary {
   // scheduler (when loaded) so effects of the content run in the commit after
   // it is revealed and are cleaned up while it is hidden again.
   const activity = (globalThis as { krateCondActivity?: (id: string, branch: string) => void }).krateCondActivity;
+  const swap = start && start.nodeType === 8 ? boundaryDOM(start as Comment, tpl, initialContent) : null;
   const apply = (show: boolean): void => {
-    if (!start || start.nodeType !== 8) return;
+    if (!swap) return;
     if (activity && !show) activity(slot, 'a');
-    krateCondSwap(start as Comment, show, tpl);
+    swap(show);
     if (activity && show) activity(slot, 'c');
   };
   const b = createBoundary(id, apply, { anchor: start, initialContent });
+  if (!initialContent && start && start.isConnected) noteFallbackShown();
   boundaries.set(id, b);
   return b;
+}
+
+onReveal = (revealed) => {
+  for (const b of boundaries.values()) {
+    if (b !== revealed && !b.showingContent() && b.anchor && b.anchor.isConnected) {
+      noteFallbackShown();
+      return;
+    }
+  }
+};
+
+/**
+ * Shows the content or the fallback between a boundary's slot markers, the
+ * way React does: the first reveal takes the content out of its template;
+ * suspending revealed content again hides it in place (elements get
+ * `display: none !important`, text is emptied) and shows the fallback after
+ * it, so content state and DOM identity survive; revealing again restores it.
+ */
+function boundaryDOM(start: Comment, tpl: HTMLTemplateElement | null, initialContent: boolean): (show: boolean) => void {
+  const endValue = '/' + (start.nodeValue || '');
+  const end = (): Node | null => {
+    for (let n = start.nextSibling; n; n = n.nextSibling) {
+      if (n.nodeType === 8 && n.nodeValue === endValue) return n;
+    }
+    return null;
+  };
+  const between = (): Node[] => {
+    const out: Node[] = [];
+    const stop = end();
+    for (let n = start.nextSibling; n && n !== stop; n = n.nextSibling) out.push(n);
+    return out;
+  };
+  let content: Node[] = initialContent ? between() : [];
+  let fallback: Node[] = initialContent ? [] : between();
+  let tplTaken = false;
+  const fromTemplate = (): Node[] => {
+    if (!tpl || tplTaken) return [];
+    tplTaken = true;
+    return Array.from(tpl.content.childNodes);
+  };
+  const hidden = new Map<Node, [string, string] | string>();
+  const insert = (nodes: Node[]): void => {
+    const parent = start.parentNode;
+    if (!parent) return;
+    const before = end();
+    for (const n of nodes) parent.insertBefore(n, before);
+  };
+  const detach = (nodes: Node[]): void => {
+    for (const n of nodes) n.parentNode?.removeChild(n);
+  };
+  return (show: boolean): void => {
+    if (show) {
+      detach(fallback);
+      if (content.length === 0) {
+        content = fromTemplate();
+        insert(content);
+        return;
+      }
+      for (const n of content) {
+        const saved = hidden.get(n);
+        if (saved === undefined) continue;
+        if (typeof saved === 'string') n.nodeValue = saved;
+        else if (saved[0] === '') (n as HTMLElement).style.removeProperty('display');
+        else (n as HTMLElement).style.setProperty('display', saved[0], saved[1]);
+      }
+      hidden.clear();
+      return;
+    }
+    for (const n of content) {
+      if (hidden.has(n)) continue;
+      if (n.nodeType === 1 && (n as HTMLElement).style) {
+        const style = (n as HTMLElement).style;
+        hidden.set(n, [style.getPropertyValue('display'), style.getPropertyPriority('display')]);
+        style.setProperty('display', 'none', 'important');
+      } else if (n.nodeType === 3) {
+        hidden.set(n, n.nodeValue || '');
+        n.nodeValue = '';
+      }
+    }
+    if (fallback.length === 0) fallback = fromTemplate();
+    insert(fallback);
+  };
 }
 
 /** Registers a boundary under its id so compiled runs can find it. */
@@ -524,7 +647,8 @@ export function __krateBoundary(id: string | null, fn: () => void): void {
     // owner it declares from leaking into unrelated code.
     const owner = krateGetOwner();
     try {
-      fn();
+      // Reads made directly in the body (not through __krateUse) replay too.
+      withReadScope(state.scope, fn);
       currentRun = prev;
       krateSetOwner(owner);
       boundary?.release();
@@ -606,12 +730,22 @@ const lazyLoads = new Map<string, Promise<unknown>>();
  */
 export function __krateLazy(url: string, boundaryId?: string | null): Promise<unknown> {
   const boundary = boundaryId ? getBoundary(boundaryId) : null;
+  boundary?.hold();
   let load = lazyLoads.get(url);
   if (!load) {
-    load = importChunk(url);
+    // React starts loading a lazy component when it first renders: a boundary
+    // inside a hidden branch waits until the branch is shown.
+    const anchor = boundary ? boundary.anchor : null;
+    load =
+      anchor && !anchor.isConnected
+        ? whenConnected(anchor).then(() => {
+            // The fallback just became visible.
+            noteFallbackShown();
+            return importChunk(url);
+          })
+        : importChunk(url);
     lazyLoads.set(url, load);
   }
-  boundary?.hold();
   load.then(
     () => boundary?.release(),
     (error: unknown) => {
@@ -620,6 +754,46 @@ export function __krateLazy(url: string, boundaryId?: string | null): Promise<un
     },
   );
   return load;
+}
+
+// whenConnected resolves once node is attached to the document.
+function whenConnected(node: Node): Promise<void> {
+  if (node.isConnected || typeof MutationObserver === 'undefined') return Promise.resolve();
+  return new Promise((resolve) => {
+    const observer = new MutationObserver(() => {
+      if (!node.isConnected) return;
+      observer.disconnect();
+      resolve();
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  });
+}
+
+const lazyPayloads = new WeakMap<object, Thenable<unknown>>();
+
+/**
+ * The module promise of a lazy() whose loader is not a static import. The
+ * loader is called once, when the component first hydrates; it must resolve
+ * to a module whose default export is a component.
+ */
+export function __krateLazyPayload(loader: () => PromiseLike<unknown>): Thenable<unknown> {
+  let payload = lazyPayloads.get(loader);
+  if (!payload) {
+    payload = Promise.resolve()
+      .then(() => loader())
+      .then((mod) => {
+        const impl = mod && typeof mod === 'object' ? (mod as { default?: unknown }).default : undefined;
+        if (typeof impl !== 'function') {
+          throw new Error(
+            'lazy: the loader did not resolve to a module with a component as its default export (resolve to { default: Component })',
+          );
+        }
+        return mod;
+      }) as Thenable<unknown>;
+    trackThenable(payload);
+    lazyPayloads.set(loader, payload);
+  }
+  return payload;
 }
 
 let chunkImporter: (url: string) => Promise<unknown> = (url) => import(/* @vite-ignore */ url);

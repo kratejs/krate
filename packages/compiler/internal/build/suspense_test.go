@@ -157,8 +157,8 @@ func TestLazyComponentGetsHydrationChunk(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 	html := readDist(t, dist, "index.html")
-	if !strings.Contains(html, "heavy x") {
-		t.Fatalf("lazy content must render at build time:\n%s", html)
+	if !regexp.MustCompile(`<template data-kc="?s[^" >]+"? data-kb="?c"?><button[^>]*>heavy x`).MatchString(html) || !strings.Contains(html, "<p>loading</p>") {
+		t.Fatalf("lazy content renders at build time behind the fallback, as React shows the fallback first:\n%s", html)
 	}
 	pageJS := readDist(t, dist, "index.*.js")
 	chunk := readDist(t, dist, "lazy-Heavy.*.js")
@@ -173,6 +173,27 @@ func TestLazyComponentGetsHydrationChunk(t *testing.T) {
 	}
 	if strings.Contains(pageJS, "__KRATE_LAZY_CHUNK_") {
 		t.Fatalf("chunk placeholder left in the page script:\n%s", pageJS)
+	}
+}
+
+func TestLazyPromiseLoaderSuspendsUntilResolved(t *testing.T) {
+	html, js, err := buildKrateProject(t, map[string]string{"src/pages/index.tsx": `
+		import { lazy, Suspense } from 'react';
+		function delay(ms, value) { return new Promise((r) => setTimeout(() => r(value), ms)); }
+		function Report(props) { return <article id="report">Report {props.q}</article>; }
+		const SlowReport = lazy(() => delay(300, { default: Report }));
+		export default function Page() {
+			return <Suspense fallback={<p id="fb">wait</p>}><SlowReport q="Q3" /></Suspense>;
+		}
+	`})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(html, `<p id="fb">wait</p>`) || !strings.Contains(html, `data-kb="c"><article id="report">Report Q3</article>`) {
+		t.Fatalf("expected the fallback with the content behind it:\n%s", html)
+	}
+	if !strings.Contains(js, "__krateRead(__krateLazyPayload(__krate_lazyload__SlowReport))") || !strings.Contains(js, "__krateBoundary(") {
+		t.Fatalf("expected the instance to wait for its loader inside the boundary:\n%s", js)
 	}
 }
 

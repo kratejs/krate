@@ -32,14 +32,32 @@ func collectLazyComponents(body []ast.Stmt, ann *irtree.Annotations, file, raw s
 			if _, exists := ann.LazyComponents[name]; exists {
 				continue
 			}
-			ann.LazyComponents[name] = irtree.LazyComponent{
+			lc := irtree.LazyComponent{
 				Spec:   lit.Value,
 				File:   file,
 				Line:   vs.Position.Line,
 				Col:    vs.Position.Col,
 				Source: lineOf(raw, vs.Position.Line),
 			}
+			if impl, ok := strings.CutPrefix(lit.Value, bundler.LazyLocalSpec); ok {
+				lc.Spec, lc.Impl, lc.Loader = "", impl, bundler.LazyLoaderPrefix+name
+				aliasLazyImpl(ann, name, impl)
+			}
+			ann.LazyComponents[name] = lc
 		}
+	}
+}
+
+// aliasLazyImpl makes the lazy binding resolve to its local component.
+func aliasLazyImpl(ann *irtree.Annotations, name, impl string) {
+	fn := ann.Functions[impl]
+	if fn == nil {
+		return
+	}
+	if _, exists := ann.Functions[name]; !exists {
+		ann.Functions[name] = fn
+		ann.ComponentSources[name] = ann.ComponentSources[impl]
+		ann.ComponentRaw[name] = ann.ComponentRaw[impl]
 	}
 }
 
@@ -56,6 +74,10 @@ func markLazyDefaults(ann *irtree.Annotations, modules []ModuleSource) {
 		}
 	}
 	for name, lc := range ann.LazyComponents {
+		if lc.Impl != "" {
+			aliasLazyImpl(ann, name, lc.Impl)
+			continue
+		}
 		owner := byPath[lc.File]
 		if owner == nil || !importsDefaultAs(owner.Body, name) {
 			continue

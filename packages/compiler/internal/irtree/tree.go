@@ -341,8 +341,10 @@ type ComponentNode struct {
 	Tier ComponentTier
 	Fn   *ast.FnDecl
 	// Lazy marks an instance of a React.lazy() component (see LazyComponent).
-	Lazy  bool
-	Props map[string]ast.Expr
+	// LazyLoader is set when its loader is not a static import.
+	Lazy       bool
+	LazyLoader string
+	Props      map[string]ast.Expr
 	// RuntimeProps holds resolved prop values for runtime-tier components
 	// (prop name -> value). These are serialized into the page's runtime props
 	// script so the serve-time renderer can pass them to the component.

@@ -65,13 +65,12 @@ const SUSPENSE_ENTRY = `export * from './src/suspense';`;
 // signal graph.
 const SHARED_GLOBALS = {
   signal: ['createSignal', 'createEffect', 'onCleanup', 'krateGetOwner', 'krateSetOwner'],
-  slots: ['krateCondSwap'],
 };
 
 const sharedGlobalsPlugin = {
   name: 'krate-shared-globals',
   setup(build) {
-    build.onResolve({ filter: /^\.\/(signal|slots)(\.js)?$/ }, (args) => ({
+    build.onResolve({ filter: /^\.\/(signal)(\.js)?$/ }, (args) => ({
       path: args.path.replace(/^\.\//, '').replace(/\.js$/, ''),
       namespace: 'krate-global',
     }));

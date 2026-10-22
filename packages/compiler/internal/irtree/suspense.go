@@ -159,6 +159,36 @@ type LazyComponent struct {
 	// NoDefaultExport is set when the loader used the module's default
 	// export and the module has none.
 	NoDefaultExport bool
+	// Impl and Loader are set for a lazy() whose loader is not a static
+	// import: Impl is the local component it resolves to, Loader the
+	// module-level binding holding the loader function.
+	Impl   string
+	Loader string
+}
+
+// isLazyComponent reports whether name was declared with lazy().
+func (b *builder) isLazyComponent(name string) bool {
+	_, ok := b.ann.LazyComponents[name]
+	return ok
+}
+
+// lazyLoaderGate makes a promise-loader lazy instance suspend until its
+// loader resolved (the loader starts when the instance first hydrates).
+func (b *builder) lazyLoaderGate(node *ComponentNode, lc LazyComponent) {
+	init := b.moduleConstInits[lc.Loader]
+	if init == nil {
+		return
+	}
+	js := generateExprJS(init, nil)
+	if js == "" {
+		return
+	}
+	node.LazyLoader = lc.Loader
+	// ExtraVars, so helpers the loader calls are hoisted into the scope.
+	node.ExtraVars = append([]string{
+		"var " + lc.Loader + "=" + js,
+		"__krateRead(__krateLazyPayload(" + lc.Loader + "))",
+	}, node.ExtraVars...)
 }
 
 // checkLazyComponents reports lazy components whose module has no default
@@ -174,8 +204,12 @@ func (b *builder) checkLazyComponents() {
 		if b.ann.Functions[name] != nil && !lc.NoDefaultExport {
 			continue
 		}
+		what := "module " + lc.Spec + " has no default export that is a component"
+		if lc.Impl != "" {
+			what = "its loader resolves to " + lc.Impl + ", which is not a component"
+		}
 		d := diag.New(lc.File, lc.Line, lc.Col,
-			"lazy() component "+name+": module "+lc.Spec+" has no default export that is a component",
+			"lazy() component "+name+": "+what,
 			"export the component with `export default function "+name+"()`, or map a named export with .then((m) => ({ default: m.Name }))",
 			lc.Source).WithCode(diag.CodeLazyDefaultExport)
 		b.buildErrs = append(b.buildErrs, d)

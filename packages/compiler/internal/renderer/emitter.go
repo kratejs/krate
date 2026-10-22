@@ -593,7 +593,7 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 		AttrBindings:    node.AttrBindings,
 		Lazy:            node.Lazy,
 	}
-	if node.Lazy {
+	if node.Lazy && node.LazyLoader == "" {
 		sig.LazyName = node.Name
 	}
 	if len(e.clientStack) > 1 {

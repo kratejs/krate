@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   Profiler,
   StrictMode,
@@ -14,7 +14,7 @@ import {
   useTransition,
   createContext,
 } from './react.js';
-import { setSuspenseErrorHandler } from './suspense.js';
+import { setFallbackThrottle, setSuspenseErrorHandler } from './suspense.js';
 
 async function flush(n = 20): Promise<void> {
   for (let i = 0; i < n; i++) await Promise.resolve();
@@ -37,6 +37,8 @@ function mountInto(node: Node): HTMLElement {
   document.body.appendChild(root);
   return root;
 }
+
+beforeEach(() => setFallbackThrottle(0));
 
 afterEach(() => {
   setSuspenseErrorHandler(null);

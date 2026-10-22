@@ -185,6 +185,7 @@ try {
   if (!suspenseLoads.some((u) => /\/react-suspense\/lazy-LazyPanel\.[a-z0-9]+\.js$/.test(u))) {
     fail("suspense: lazy component chunk was not loaded");
   }
+  await waitText("lazy-panel", "Lazy panel: 0");
   await page.locator("[data-testid=lazy-panel]").click();
   await waitText("lazy-panel", "Lazy panel: 1");
   await page.locator("[data-testid=source-urgent]").click();

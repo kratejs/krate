@@ -5,6 +5,7 @@ import { createResource } from './resource.js';
 import {
   __krateBoundary,
   __krateLazy,
+  __krateLazyPayload,
   __krateRead,
   __krateTransitionStarter,
   __krateUse,
@@ -17,6 +18,7 @@ import {
   registerBoundary,
   resetBoundaries,
   runAsyncTransition,
+  setFallbackThrottle,
   setLazyChunkImporter,
   setSuspenseErrorHandler,
   startTransition,
@@ -45,6 +47,9 @@ function testBoundary(id = 'b', initialContent = true): { b: Boundary; shown: st
   const b = createBoundary(id, (content) => shown.push(content ? 'content' : 'fallback'), { initialContent });
   return { b, shown };
 }
+
+// Reveal throttling has its own test; elsewhere reveals are immediate.
+beforeEach(() => setFallbackThrottle(0));
 
 afterEach(() => {
   setSuspenseErrorHandler(null);
@@ -451,6 +456,79 @@ describe('lazy chunks', () => {
   });
 });
 
+describe('reveal throttling', () => {
+  it('keeps a fallback at least the throttle time before revealing', async () => {
+    vi.useFakeTimers();
+    setFallbackThrottle(300);
+    const { b, shown } = testBoundary('th', true);
+    const d = deferred<void>();
+    b.suspend(d.promise);
+    expect(shown).toEqual(['fallback']);
+    d.resolve();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(shown).toEqual(['fallback']);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(shown).toEqual(['fallback', 'content']);
+  });
+});
+
+describe('lazy loaders', () => {
+  it('calls a promise loader once and suspends the run until it resolves', async () => {
+    const { b, shown } = testBoundary('lp', false);
+    let calls = 0;
+    const d = deferred<{ default: () => null }>();
+    const loader = (): Promise<{ default: () => null }> => {
+      calls++;
+      return d.promise;
+    };
+    let ran = 0;
+    runIn(b, () => {
+      __krateRead(__krateLazyPayload(loader));
+      ran++;
+    });
+    await flush();
+    expect(ran).toBe(0);
+    d.resolve({ default: () => null });
+    await flush();
+    expect(ran).toBe(1);
+    expect(calls).toBe(1);
+    expect(shown).toEqual(['content']);
+  });
+
+  it('rejects a loader that does not resolve to a component', async () => {
+    const errors: unknown[] = [];
+    setSuspenseErrorHandler((e) => {
+      errors.push(e);
+      return true;
+    });
+    __krateBoundary(null, () => {
+      __krateRead(__krateLazyPayload(() => Promise.resolve({ default: 1 })));
+    });
+    await flush();
+    expect(String((errors[0] as Error).message)).toContain('default export');
+  });
+
+  it('starts loading a chunk only when its boundary is connected', async () => {
+    let imported = 0;
+    setLazyChunkImporter(() => {
+      imported++;
+      return Promise.resolve({});
+    });
+    installFindSlot('');
+    const tpl = document.createElement('template');
+    tpl.innerHTML = '<!--suspense:H--><!--k:sH--><p>wait</p><!--/k:sH--><!--/suspense:H-->';
+    const start = tpl.content.childNodes[1];
+    (globalThis as { findSlot?: (id: string) => Node | null }).findSlot = () => start;
+    __krateLazy('/hidden-chunk.js', 'H');
+    await flush();
+    expect(imported).toBe(0);
+    document.getElementById('root')!.appendChild(tpl.content);
+    await new Promise((r) => setTimeout(r, 0));
+    await flush();
+    expect(imported).toBe(1);
+  });
+});
+
 describe('compiled boundary markers', () => {
   it('swaps the fallback and content around the boundary slot', async () => {
     installFindSlot('<!--suspense:M--><!--k:sM--><p>content</p><!--/k:sM--><!--/suspense:M--><template data-kc="sM" data-kb="a"><p>wait</p></template>');
@@ -458,10 +536,17 @@ describe('compiled boundary markers', () => {
     expect(b.showingContent()).toBe(true);
     const d = deferred<void>();
     b.suspend(d.promise);
-    expect(document.querySelector('#root > p')?.textContent).toBe('wait');
+    // As in React: revealed content is hidden in place, the fallback follows.
+    const ps = Array.from(document.querySelectorAll('#root > p')) as HTMLElement[];
+    expect(ps.map((p) => p.textContent)).toEqual(['content', 'wait']);
+    expect(ps[0].style.getPropertyValue('display')).toBe('none');
+    expect(ps[0].style.getPropertyPriority('display')).toBe('important');
     d.resolve();
     await flush();
-    expect(document.querySelector('#root > p')?.textContent).toBe('content');
+    const after = Array.from(document.querySelectorAll('#root > p')) as HTMLElement[];
+    expect(after.map((p) => p.textContent)).toEqual(['content']);
+    expect(after[0]).toBe(ps[0]);
+    expect(after[0].style.getPropertyValue('display')).toBe('');
   });
 });
 

@@ -275,22 +275,6 @@
     "severity": "P1",
     "reason": "[callback-ref] callback refs inside .map are never called: the Map stays empty and focusing an item by id fails"
   },
-  "r18/suspense_fallback_then_content": {
-    "severity": "P0",
-    "reason": "[suspense-lazy] build fails: lazy(() => promise) is evaluated at build time ('cannot evaluate delay(...)')"
-  },
-  "r18/suspense_lazy": {
-    "severity": "P0",
-    "reason": "[suspense-lazy] build fails: lazy(() => import('...')) is rejected ('DynamicImport expressions are not supported')"
-  },
-  "r18/suspense_lazy_on_click": {
-    "severity": "P0",
-    "reason": "[suspense-lazy] build fails: lazy(() => import('...')) is rejected ('DynamicImport expressions are not supported')"
-  },
-  "r18/suspense_nested": {
-    "severity": "P0",
-    "reason": "[suspense-lazy] build fails: nested Suspense with lazy(() => promise) evaluated at build time"
-  },
   "r19/action_button_form_action": {
     "severity": "P0",
     "reason": "[form-actions] client function actions are stringified into action/formaction attributes (function source leaks into the DOM) and the form submits natively, navigating away"
@@ -306,10 +290,6 @@
   "r19/action_server_form": {
     "severity": "P0",
     "reason": "[form-actions] useActionState with a 'use server' action renders action=\"formAction\" literally; submit navigates natively instead of calling POST /__krate/action"
-  },
-  "r19/action_server_direct": {
-    "severity": "P1",
-    "reason": "[async-transition] direct server action call works end to end, but useTransition isPending stays false during the async transition ('loading' never shows)"
   },
   "r19/action_use_action_state": {
     "severity": "P0",
@@ -329,7 +309,7 @@
   },
   "r19/deferred_initial_value": {
     "severity": "P0",
-    "reason": "[deferred-value] build fails: useDeferredValue(value, initialValue) result passed to a memo child cannot be evaluated at build time"
+    "reason": "[derived-render-values] the deferred value now builds and catches up (stale/fresh text matches), but the memo child's `const hits = words.filter(... props.query)` is computed once at hydration, and its `.map((h) => <li>{h}</li>)` parameter `h` shadows the runtime h() factory, so the list never re-filters"
   },
   "r19/meta_tags_hoist": {
     "severity": "P0",
@@ -342,14 +322,6 @@
   "r19/ref_callback_cleanup": {
     "severity": "P1",
     "reason": "[callback-ref] a ref callback that returns a cleanup is never called: no attach on mount, no cleanup on detach"
-  },
-  "r19/transition_async": {
-    "severity": "P1",
-    "reason": "[async-transition] useTransition isPending stays false during an async transition; the final tab matches"
-  },
-  "r19/use_promise_suspense": {
-    "severity": "P0",
-    "reason": "[use-promise] use(promise) under Suspense: no fallback, the list renders empty and never fills, switching posts does not suspend"
   },
   "r18/effect_passive_flush_discrete": {
     "severity": "P1",

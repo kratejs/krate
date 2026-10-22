@@ -62,7 +62,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	// component has no signals/handlers and would otherwise take the SSREval
 	// shortcut, which bypasses the interception and breaks the panels. The same
 	// applies to components using first-class scope-handle spreads.
-	if len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !hasComponentChildren(el.Children) {
+	if len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !hasComponentChildren(el.Children) && !b.isLazyComponent(childName) {
 		if !b.componentNeedsClient(childFn, attrs) {
 			// A signal-less component that renders a parent's signal value
 			// (e.g. <Display value={display()}/>) must stay reactive, so its
@@ -237,12 +237,18 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 	b.pushComponentCtx()
 	b.installCallSiteInputs(el, childFn, attrs)
 	live := b.liveProps
+	lc, lazy := b.ann.LazyComponents[el.Opening.Name]
+	if lazy {
+		// Consumed by finishClientComponent for this node (children finish
+		// first and have other functions).
+		b.pendingLazy, b.pendingLazyFn = &lc, childFn
+	}
 	childNode := b.buildComponentNode(childFn, string(childID))
 	b.popComponentCtx()
 	b.warnSnapshotProps(el, childFn, childNode, live)
 
 	childNode.Props = attrs
-	if _, lazy := b.ann.LazyComponents[el.Opening.Name]; lazy {
+	if lazy {
 		childNode.Lazy = true
 	}
 	childNode.CallSiteChildren = el.Children
@@ -395,6 +401,8 @@ func (b *builder) registerChildProps(childNode *ComponentNode, childFn *ast.FnDe
 		len(b.contextValues) > 0 ||
 		// use()/deferred/external-store getters (`use(props.promise)`).
 		(childFn != nil && bodyUsesReactiveFactory(childFn.Body)) ||
+		// Replayed locals derived from live props (`var hits=...props.query`).
+		(childFn != nil && plainPropsParamName(childFn) != "" && hydrationReadsAny(childNode, []string{plainPropsParamName(childFn)})) ||
 		// Bindings of getter-registered props (`{props.title}`).
 		(childFn != nil && plainPropsParamName(childFn) != "" && slotsReadProps(childNode.Children, plainPropsParamName(childFn)))
 	if !hasHydration {
