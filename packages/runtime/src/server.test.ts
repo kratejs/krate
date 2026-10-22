@@ -55,3 +55,25 @@ describe('goComponent', () => {
     expect(renderToString(node)).toMatch(/^<!--krate-go:Badge:0:/);
   });
 });
+
+describe('server actions', () => {
+  it('renders an action function as a POST form endpoint', () => {
+    const action = Object.assign(() => undefined, {
+      actionUrl: '/base/__krate/action/a123',
+    });
+    const html = renderToString(jsx('form', { action, children: [] }));
+    expect(html).toContain('action="/base/__krate/action/a123"');
+    expect(html).toContain('method="post"');
+    expect(html).toContain('data-krate-action');
+  });
+
+  it('renders a formAction function as a POST submit endpoint', () => {
+    const action = Object.assign(() => undefined, {
+      actionUrl: '/__krate/action/a456',
+    });
+    const html = renderToString(jsx('button', { formAction: action, children: 'go' }));
+    expect(html).toContain('formaction="/__krate/action/a456"');
+    expect(html).toContain('formmethod="post"');
+    expect(html).toContain('data-krate-action');
+  });
+});

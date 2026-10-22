@@ -88,6 +88,22 @@ func (b *builder) evalAttrValue(expr ast.Expr) string {
 	if expr == nil {
 		return ""
 	}
+	if id, ok := expr.(*ast.Identifier); ok {
+		if u, ok := b.actionURLs[id.Name]; ok {
+			return u
+		}
+	}
+	if mem, ok := expr.(*ast.MemberExpr); ok && !mem.Computed {
+		if obj, ok := mem.Object.(*ast.Identifier); ok && obj.Name == "props" {
+			if prop, ok := mem.Property.(*ast.Identifier); ok {
+				if raw, ok := b.localProps[prop.Name]; ok {
+					if u := strings.Trim(raw, `"'`); strings.Contains(u, "/__krate/action/") {
+						return u
+					}
+				}
+			}
+		}
+	}
 	if call, ok := expr.(*ast.CallExpr); ok {
 		if v, ok := b.foldCVACall(call); ok {
 			return v
@@ -1275,7 +1291,7 @@ func (b *builder) propBindingsToLocalProps(fn *ast.FnDecl, attrs map[string]ast.
 	out := make(map[string]string)
 	for _, name := range extractParamNames(fn) {
 		if expr, ok := attrs[name]; ok {
-			out[name] = evalConstWithSignals(expr, b.sigMap(), parent)
+			out[name] = b.resolveBindingValue(expr, parent)
 		} else {
 			out[name] = "undefined"
 		}
@@ -1481,6 +1497,11 @@ func (b *builder) resolveBindingValue(expr ast.Expr, props map[string]string) st
 	if expr == nil {
 		return ""
 	}
+	if id, ok := expr.(*ast.Identifier); ok {
+		if u, ok := b.actionURLs[id.Name]; ok {
+			return "'" + escape.JSString(u) + "'"
+		}
+	}
 	if v := evalConstWithSignals(expr, b.sigMap(), props); v != "" {
 		return v
 	}
@@ -1629,6 +1650,9 @@ func (b *builder) renderChildPropValue(expr ast.Expr) string {
 	// The initializer AST is rendered (not the folded string) so strings stay
 	// quoted and arrays/objects stay real literals.
 	if id, ok := expr.(*ast.Identifier); ok {
+		if u, ok := b.actionURLs[id.Name]; ok {
+			return "'" + escape.JSString(u) + "'"
+		}
 		if init, ok := b.moduleConstInits[id.Name]; ok && init != nil {
 			if js := generateExprJS(init, b.sigMap()); js != "" {
 				return js

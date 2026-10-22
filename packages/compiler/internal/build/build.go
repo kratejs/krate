@@ -185,6 +185,10 @@ type Builder struct {
 	islandMu        sync.Mutex
 	islandImportMap string
 	preactChunks    map[string]string
+
+	// actions holds the discovered `"use server"` modules and their compiled
+	// bundles for this build. It is refreshed by prepareActions before pages.
+	actions *actionRegistry
 }
 
 // shouldMinifyJS reports whether generated JavaScript should be minified.
@@ -430,6 +434,9 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	var pageErrs []error
 
 	b.resetBuildCaches()
+	if err := b.prepareActions(); err != nil {
+		return nil, err
+	}
 
 	// A dynamic-route template (e.g. video/[id].tsx) is not the page that gets
 	// served: its concrete URLs are the generateStaticParams expansions. Rebuild
@@ -603,6 +610,9 @@ func (b *Builder) BuildAll() error {
 	defer b.ClosePlugins()
 
 	b.resetBuildCaches()
+	if err := b.prepareActions(); err != nil {
+		return err
+	}
 
 	if err := writeConfigSchema(b.Root); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sWarning: failed to write .krate/config.schema.json:%s %v\n", cYellow, cReset, err)
@@ -935,7 +945,7 @@ func (b *Builder) BuildAll() error {
 	manifest.StaticOnlyRoutes = append([]string(nil), b.staticOnlyRoutes...)
 
 	// Compile server bundles for SSR/ISR/streaming pages
-	serverBundles := CompileServerBundles(results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap)
+	serverBundles := CompileServerBundles(results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
 	if len(serverBundles) > 0 {
 		printf("  %s⚡%s Compiled %d server bundles\n", cCyan, cReset, len(serverBundles))
 		// Stage the bundled SSR renderer driver so `krate serve` runs it with
@@ -1483,6 +1493,10 @@ func (b *Builder) newBundler() *bundler.Bundler {
 	if b.contentMods != nil {
 		bnd.SetVirtualModules(b.contentMods)
 	}
+	if mods := b.actionModules(); len(mods) > 0 {
+		bnd.SetActionModules(mods)
+		bnd.SetActionBasePath(b.Cfg.BaseURLPath())
+	}
 	bnd.SetModuleCache(b.moduleCache)
 	return bnd
 }
@@ -1599,6 +1613,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	pageOpts.ExternalImports = externalByLocal
 	pageOpts.LocalComponentImports = localImports
 	pageOpts.GoComponents = pageGoComponents
+	pageOpts.ActionURLs = bundle.ActionImports
 	tree := irtree.BuildWithOptions(entryModule.Program, ann, pageOpts)
 	// CSS primitive declarations that cannot be compiled to CSS are hard errors
 	// (there is no fallback to client signals).
@@ -2235,6 +2250,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	opts.IDPrefix = layoutIDPrefix(layoutPath)
 	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(layoutModule.Program, extraLayoutPrograms)
 	opts.GoComponents = b.collectGoComponents(layoutBundle, b.Root)
+	opts.ActionURLs = layoutBundle.ActionImports
 	tree := irtree.BuildWithOptions(layoutModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		return nil, "", nil, false, renderErrors(layoutPath, tree.Errors)
@@ -2396,7 +2412,7 @@ func findPages(dir string) ([]string, error) {
 	exts := map[string]bool{".tsx": true, ".ts": true, ".jsx": true, ".js": true, ".md": true, ".mdx": true}
 	_ = fsutil.WalkExt(dir, exts, nil, func(path string, _ os.FileInfo) error {
 		base := filepath.Base(path)
-		if !strings.HasPrefix(base, "_") {
+		if !strings.HasPrefix(base, "_") && !isUseServerFile(path) {
 			pages = append(pages, path)
 		}
 		return nil

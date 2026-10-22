@@ -490,6 +490,9 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 		case *ast.ArrowFn:
 			return true
 		case *ast.Identifier:
+			if _, ok := b.actionURLs[e.Name]; ok {
+				return true
+			}
 			if b.localFnBody != nil {
 				if findLocalFunction(e.Name, b.localFnBody) != nil {
 					return true
@@ -680,6 +683,9 @@ func (b *builder) isStaticResolvable(expr ast.Expr) bool {
 	case *ast.Identifier:
 		if e.Name == "props" {
 			return false
+		}
+		if _, isAction := b.actionURLs[e.Name]; isAction {
+			return true
 		}
 		if _, inSig := b.sigMap()[e.Name]; inSig {
 			return false

@@ -1733,6 +1733,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 
 	childSignals := b.collectSignalDecls(childFn)
 	attrs := extractPropsAST(el)
+
 	// Pass active dynamic context values into the child as synthetic props so
 	// its hydration code reads them from the props registry (the parent's
 	// signal names are not in scope in the child's IIFE).
@@ -1860,7 +1861,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 			// a function-name string.
 			continue
 		}
-		b.localProps[name] = evalConstWithSignals(expr, b.sigMap(), savedProps)
+		b.localProps[name] = b.resolveBindingValue(expr, savedProps)
 	}
 	b.localFuncProps = funcProps
 	// Record what a rest parameter collects: every call-site attr not bound by
@@ -2290,6 +2291,24 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 
 	// Static attributes (spread rest params expanded to concrete attributes).
 	attrsForOpening, _ := b.expandSpreadAttrs(el.Opening.Attributes)
+	actionAttrs := make(map[*ast.JSXAttr]bool)
+	hasMethod := false
+	hasFormMethod := false
+	for _, attr := range attrsForOpening {
+		switch attr.Name {
+		case "method":
+			hasMethod = true
+		case "formmethod", "formMethod":
+			hasFormMethod = true
+		case "action", "formAction", "formaction":
+
+			if _, ok := b.actionAttrURL(attr.Value); ok {
+				actionAttrs[attr] = true
+			} else if _, ok := attr.Value.(*ast.ArrowFn); ok {
+				b.warnings = append(b.warnings, "inline function passed to "+attr.Name+" was not extracted as a server action; move it to a \"use server\" module and import it")
+			}
+		}
+	}
 	for _, attr := range attrsForOpening {
 		if attr.Spread || attr.Name == "ref" || attr.Name == "dangerouslySetInnerHTML" {
 			continue
@@ -2328,9 +2347,25 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 			buf.WriteString(`="`)
 			buf.WriteString(escape.HTML(val))
 			buf.WriteByte('"')
+			if actionAttrs[attr] {
+				buf.WriteString(` data-krate-action`)
+			}
 		} else {
 			buf.WriteByte(' ')
 			buf.WriteString(ast.HTMLAttrName(attr.Name))
+		}
+	}
+	if len(actionAttrs) > 0 {
+		if name == "form" && !hasMethod {
+			buf.WriteString(` method="post"`)
+		}
+		if !hasFormMethod {
+			for attr := range actionAttrs {
+				if attr.Name == "formAction" || attr.Name == "formaction" {
+					buf.WriteString(` formmethod="post"`)
+					break
+				}
+			}
 		}
 	}
 
@@ -2355,6 +2390,33 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 	}
 
 	return buf.String()
+}
+
+// actionAttrURL resolves a JSX value that names a server action to its POST
+// endpoint. Actions arrive as identifiers from the import rewrite, or as string
+// literals after a parent forwards an action prop.
+func (b *builder) actionAttrURL(expr ast.Expr) (string, bool) {
+	switch e := expr.(type) {
+	case *ast.Identifier:
+		u, ok := b.actionURLs[e.Name]
+		return u, ok
+	case *ast.MemberExpr:
+		if id, ok := e.Object.(*ast.Identifier); ok && id.Name == "props" && !e.Computed {
+			if prop, ok := e.Property.(*ast.Identifier); ok {
+				if raw, ok := b.localProps[prop.Name]; ok {
+					val := strings.Trim(raw, `"'`)
+					if strings.Contains(val, "/__krate/action/") {
+						return val, true
+					}
+				}
+			}
+		}
+	case *ast.Literal:
+		if e.Kind == ast.StringLit && strings.Contains(e.Value, "/__krate/action/") {
+			return e.Value, true
+		}
+	}
+	return "", false
 }
 
 // isBooleanAttr reports whether an HTML attribute is a boolean attribute whose

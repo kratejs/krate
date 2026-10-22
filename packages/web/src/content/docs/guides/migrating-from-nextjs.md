@@ -28,7 +28,7 @@ signals.
 | `next/link` | global `<Link>` (or `<a data-krate-link>`) |
 | `next/image` | global `<Image>` |
 | `next/head` | global `<Head>` |
-| API routes `app/api/x/route.ts` | `src/api/x.ts` (JS) or `src/api/x.go` (Go) |
+| API routes `app/api/x/route.ts` | `src/api/x.ts` (JS) or `src/api/x.go` (Go) |`r`n| `"use server"` actions | `"use server"` module; see [Server Actions](/docs/guides/server-actions/) |
 
 ## Steps
 
@@ -69,7 +69,7 @@ signals.
    `createResource` or build-time reads; see
    [Data Fetching](/docs/features/data-fetching/).
 
-7. **API routes.** Move `app/api/*/route.ts` handlers to `src/api/*.ts`
+7. **Server actions & API routes.** Move `"use server"` functions to action modules (see [Server Actions](/docs/guides/server-actions/)). Move `app/api/*/route.ts` handlers to `src/api/*.ts`
    exporting `GET`/`POST`/etc. Prefer **Go routes** (`src/api/*.go`) for hot
    endpoints.
 

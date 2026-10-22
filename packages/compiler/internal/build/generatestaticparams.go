@@ -502,6 +502,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
 	opts := b.irBuildOptions()
 	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
+	opts.ActionURLs = bundle.ActionImports
 	tree := irtree.BuildWithOptions(entryModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		return nil, "", renderErrors(spp.PagePath, tree.Errors)

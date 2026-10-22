@@ -258,3 +258,21 @@ matches, preserving focus, caret position, and selection.
 If you rely on unsupported behavior, write the component in Krate's own style --
 see [Reactivity](/docs/core-concepts/reactivity/) and
 [Migrating from Next.js](/docs/guides/migrating-from-nextjs/).
+
+## Server actions
+
+A file-level `"use server"` module is supported for mutations. Use an imported
+action as a form action, or call it from an event handler:
+
+```tsx
+import { saveFeedback } from "../actions/feedback";
+
+<form action={saveFeedback}>
+  <input name="text" />
+  <button type="submit">Save</button>
+</form>
+```
+
+Forms work without JavaScript and are enhanced by the shared runtime. See
+[Server Actions](/docs/guides/server-actions/) for the module format, direct
+calls, runtime requirements, and security model.

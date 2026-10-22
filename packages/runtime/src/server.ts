@@ -131,9 +131,19 @@ function renderNode(node: JSXNode): string {
   return "";
 }
 
+function isServerAction(v: any): v is { actionUrl: string } {
+  return typeof v === "function" && typeof (v as any).actionUrl === "string";
+}
+
 function setAttr(key: string, val: any): string {
   if (val == null || val === false) return "";
   if (val === true) return ` ${key}`;
+  if (key === "action" && isServerAction(val)) {
+    return ` action="${escapeHTML(val.actionUrl)}" data-krate-action`;
+  }
+  if ((key === "formAction" || key === "formaction") && isServerAction(val)) {
+    return ` formaction="${escapeHTML(val.actionUrl)}" formmethod="post" data-krate-action`;
+  }
   if (key === "class") return ` class="${escapeHTML(String(val))}"`;
   if (key === "style" && typeof val === "object") {
     const css = Object.entries(val)
@@ -160,7 +170,11 @@ function renderElement(el: JSXElement): string {
 
   // HTML element
   const tag = type;
-  const attrs = Object.entries(props)
+  const renderProps =
+    tag === "form" && isServerAction(props.action) && props.method == null
+      ? { ...props, method: "post" }
+      : props;
+  const attrs = Object.entries(renderProps)
     .map(([k, v]) => setAttr(k, v))
     .join("");
 

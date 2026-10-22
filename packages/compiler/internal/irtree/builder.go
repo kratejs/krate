@@ -67,6 +67,10 @@ type BuildOptions struct {
 	// component expressions. Entry-module values take precedence on collision.
 	ModuleConsts     map[string]string
 	ModuleConstInits map[string]ast.Expr
+	// ActionURLs maps an imported server-action binding to its POST endpoint.
+	// The binding is a client proxy at runtime, but SSR renders the URL so
+	// forms work without JavaScript.
+	ActionURLs map[string]string
 }
 
 // Build constructs a ComponentTree from a parsed program and its annotations
@@ -110,6 +114,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		goComponents:     opts.GoComponents,
 		externalImports:  opts.ExternalImports,
 		localImports:     opts.LocalComponentImports,
+		actionURLs:       opts.ActionURLs,
 	}
 
 	root := builder.buildComponentNode(entryFn, "")
@@ -217,6 +222,7 @@ type builder struct {
 	goComponents     map[string]GoComponentRef // imported Go components (local name -> ref)
 	externalImports  map[string]ExternalImport // bare-package import bindings (local -> module)
 	localImports     map[string]bool           // relative-path import bindings
+	actionURLs       map[string]string         // server-action binding -> POST URL
 	externals        []ExternalComponent       // unresolved package components mounted at runtime
 	warnings         []string                  // non-fatal build warnings
 	// contextValues holds the active provider value expression per context,

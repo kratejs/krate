@@ -15,7 +15,7 @@ Notable internal subsystems (`packages/compiler/internal/`):
 - `lexer`, `parser`, `astprint`, `astjson` - TSX/JSX front end and AST tooling.
 - `bundler`, `resolver`, `css`, `csssignals`, `irtree`, `renderer` - module
   graph, CSS pipeline, IR, and codegen.
-- `build` - the build/dev/serve orchestration (`Builder`), dev watcher, SSR and
+- `build` - the build/dev/serve orchestration (`Builder`), server actions, dev watcher, SSR and
   API sidecars, `krate inspect`/`check`, deploy adapters, `gitinfo`.
 - `jseval` - esbuild + embedded QuickJS (`modernc.org/quickjs`) evaluation, used
   to run `krate.config.ts` and `tailwind.config.*` in-process (no `tsx`).

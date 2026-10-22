@@ -69,6 +69,7 @@ type Bundle struct {
 	WorkerEsm      map[string]bool   // worker source path -> true when built with `type: 'module'`
 	DynImportFiles map[string]string // dynamic-import source path -> hashed site URL (/chunks/...)
 	Frontmatter    map[string]any    // .mdx frontmatter, if any
+	ActionImports  map[string]string // local binding -> server-action URL
 }
 
 type Bundler struct {
@@ -82,6 +83,10 @@ type Bundler struct {
 	workerEsm         map[string]bool   // worker source path -> built as ES module
 	dynImports        map[string]string // dynamic-import source path -> hashed site URL (/chunks/...)
 	frontmatter       map[string]any    // from .mdx frontmatter
+	actionModules     map[string]map[string]string
+	actionBasePath    string
+	actionImports     map[string]string
+	actionErr         error
 	pathAliases       []pathAlias
 	tsBaseDir         string
 	serverComponents  []string
@@ -257,6 +262,8 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	b.css = nil
 	b.cssModules = make(map[string]*CSSModuleInfo)
 	b.frontmatter = nil
+	b.actionImports = make(map[string]string)
+	b.actionErr = nil
 
 	err := b.resolveModule(entry, true)
 	if err != nil {
@@ -283,6 +290,9 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	// pointing at a stray source file.
 	b.rewriteDynamicImportRefs()
 
+	if b.actionErr != nil {
+		return nil, b.actionErr
+	}
 	if err := b.CheckCompositionRules(); err != nil {
 		return nil, err
 	}
@@ -297,6 +307,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		WorkerEsm:      b.workerEsm,
 		DynImportFiles: b.dynImports,
 		Frontmatter:    b.frontmatter,
+		ActionImports:  b.actionImports,
 	}, nil
 }
 
@@ -600,13 +611,14 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 		return fmt.Errorf("%s", parser.FormatDiagnostics(p.Errors()))
 	}
 	RewriteReact(prog)
+	_, actionChanged := b.rewriteActionImports(prog, abs)
 
 	mod := &Module{Path: path, Program: prog, IsEntry: isEntry, SourceCode: src}
 	mod.ComponentClass = ClassifyComponent(src, path, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs)
 	b.collectImports(prog, mod)
 	// Modules a rewrite pass may mutate are parsed fresh per bundle (never
 	// shared), since those rewrites are not idempotent.
-	mod.Rewritable = moduleNeedsRewrite(src, mod.Imports)
+	mod.Rewritable = actionChanged || moduleNeedsRewrite(src, mod.Imports)
 	b.order = append(b.order, mod)
 	if cacheable && !mod.Rewritable {
 		b.cache.putProgram(abs, &programEntry{

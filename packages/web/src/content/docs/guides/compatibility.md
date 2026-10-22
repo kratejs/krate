@@ -37,6 +37,7 @@ for usage.
 | Portals | Beta | Beta | n/a | SSR-safe |
 | Suspense | Beta | Beta | n/a | SSR-safe |
 | React 19 actions and forms | Planned | Planned | n/a | Source semantics |
+| Server actions | Beta | n/a | Beta | Progressive enhancement |
 | Compiled React packages | n/a | Beta | n/a | Documented compat |
 | shadcn-style dashboard | Beta | n/a | n/a | Stable |
 | Next.js app corpus | Beta | n/a | n/a | Migration-ready |
@@ -141,6 +142,14 @@ Evidence: `TestBuildSuspenseBoundaryStaticFallback`, `TestBuildSuspenseBoundaryR
 Compat shims exist for useActionState, useOptimistic, useFormStatus, use, and async transitions, but form actions and pending semantics are not in the browser gate yet.
 
 Evidence: Planned; no stable test reference yet.
+
+### Server actions
+
+**Source:** Beta · **Islands:** n/a · **SSR:** Beta
+
+File-level "use server" modules compile to hashed POST endpoints with client proxies, no-JS form posts, SSR forms, registry validation, origin checks, and body limits. Inline directives and a request context remain unsupported.
+
+Evidence: `TestPrepareActionsBuildsManifestAndBundle`, `TestRewriteActionImports`, `TestSameOriginActionRequest`, `fixture:examples/src/pages/react-actions.tsx`
 
 ### Compiled React packages
 

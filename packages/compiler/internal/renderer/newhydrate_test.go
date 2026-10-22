@@ -232,3 +232,11 @@ func TestIsBareStringToken(t *testing.T) {
 		t.Error("spaced string should not be a bare token")
 	}
 }
+
+func TestHydrationBootstrapIncludesServerActions(t *testing.T) {
+	for _, marker := range []string{"__krateAction", "data-krate-action", "/__krate/action/"} {
+		if !strings.Contains(HydrationBootstrapJS, marker) {
+			t.Errorf("HydrationBootstrapJS missing %q", marker)
+		}
+	}
+}

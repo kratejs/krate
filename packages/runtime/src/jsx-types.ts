@@ -23,6 +23,9 @@ declare global {
       : string
     : string;
 
+  /** A server action imported from a "use server" module, or a URL. */
+  type KrateFormAction = string | ((formData: FormData) => unknown | Promise<unknown>);
+
   namespace JSX {
     interface Element extends Node {}
     interface ElementChildrenAttribute { children: {} }

@@ -16,7 +16,7 @@ import (
 //   - JSX automatic transform using @krate/runtime/jsx-runtime
 //   - Head, Suspense, Script, Style imported from @krate/runtime/server
 //   - All dependencies bundled (except node_modules externals)
-func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap bool) map[string]string {
+func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) map[string]string {
 	// Collect non-SSG pages that actually need the Node renderer. A streaming
 	// page whose regions are all Go (or that has no dynamic regions at all) is
 	// rendered by the Go server + Go host alone, so its page bundle is never
@@ -95,7 +95,7 @@ func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: []api.Plugin{goServerBundlePlugin(page.GoBaked, root)},
+				Plugins: []api.Plugin{goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(actionModules, actionBasePath)},
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   injectedSource,

@@ -134,6 +134,17 @@
       "roadmap": true
     },
     {
+      "id": "server-actions",
+      "area": "Server actions",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "beta",
+      "target": "Progressive enhancement",
+      "summary": "File-level \"use server\" modules compile to hashed POST endpoints with client proxies, no-JS form posts, SSR forms, registry validation, origin checks, and body limits. Inline directives and a request context remain unsupported.",
+      "tests": ["TestPrepareActionsBuildsManifestAndBundle", "TestRewriteActionImports", "TestSameOriginActionRequest", "fixture:examples/src/pages/react-actions.tsx"],
+      "roadmap": true
+    },
+    {
       "id": "compiled-packages",
       "area": "Compiled React packages",
       "source": "n/a",

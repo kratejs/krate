@@ -41,7 +41,7 @@ const REACT_PHASES = [
     tone: "next",
     status: "Next",
     title: "React 19 source semantics",
-    body: "Lower React 19 APIs to Krate primitives: use, form actions, useActionState, useOptimistic, useFormStatus, ref-as-prop, and async transitions.",
+    body: "Build the React 19 action hooks (useActionState, useOptimistic, useFormStatus) on top of the server-action transport, plus use, ref-as-prop, and async transitions.",
     exit: "The React 19 reference app passes the same browser conformance suite as React 18.",
   },
   {
