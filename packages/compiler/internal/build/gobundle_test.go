@@ -24,7 +24,7 @@ func TestAnnotateGoCalls(t *testing.T) {
 		t.Fatalf("non-Go tag was annotated:\n%s", out)
 	}
 	// The annotated source must still be valid TSX.
-	if parseProgram(out) == nil {
+	if parseProgram("page.tsx", out) == nil {
 		t.Fatalf("annotated source failed to parse:\n%s", out)
 	}
 	// Re-running annotation must not double-inject (already idempotent per call

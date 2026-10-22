@@ -1,0 +1,217 @@
+=== fragment-empty
+<></>
+=== fragment-children
+<><a/><b>text</b></>
+=== fragment-nested
+<div><><span/></></div>
+=== namespace-attr
+<svg><use xlink:href="#a"/></svg>
+=== namespace-tag
+<a:b c="d"/>
+=== namespace-tag-children
+<svg:circle r="1">x</svg:circle>
+=== member-tag
+<a.b.c d={1}/>
+=== member-tag-children
+<Foo.Bar>hi</Foo.Bar>
+=== hyphen-tag
+<my-element a-b="c"/>
+=== hyphen-attr-expr
+<div data-x={y} aria-label="z"/>
+=== this-member-tag
+<this.Comp/>
+=== lowercase-component-member
+<foo.bar/>
+=== spread-attr
+<div {...props}/>
+=== spread-attr-mixed
+<div a="1" {...props} b={2}/>
+=== spread-child
+<div>{...children}</div>
+=== expr-child
+<div>{x}</div>
+=== empty-expr-child
+<div>{}</div>
+=== comment-expr-child
+<div>{/* comment */}</div>
+=== comment-in-tag
+<div /* c */ a="1" // line
+ b="2"/>
+=== entity-named
+<div>&nbsp;&amp;&lt;&gt;&quot;&copy;&eacute;</div>
+=== entity-numeric
+<div>&#65;&#x42;&#X43;</div>
+=== entity-missing-semicolon
+<div>&amp &lt &foo; &nosuch</div>
+=== entity-in-attr
+<div a="&amp;&quot;&#65;"/>
+=== entity-astral
+<div>&#x1F600;&#128512;</div>
+=== ws-trim-lines
+<div>
+  a
+  b
+</div>
+=== ws-trim-mixed
+<div>   a   b   </div>
+=== ws-only-newline
+<div>
+</div>
+=== ws-between-elems
+<div>
+  <a/>
+  <b/>
+</div>
+=== ws-same-line
+<div> <a/> <b/> </div>
+=== ws-tabs
+<div>
+	x	y
+	z
+</div>
+=== attr-string-backslash
+<a b="c\d"/>
+=== attr-string-backslash-n
+<a b="\n"/>
+=== attr-string-trailing-backslash
+<a b='\'/>
+=== attr-single-quote
+<a b='he said "hi"'/>
+=== attr-double-quote
+<a b="it's"/>
+=== attr-newline
+<a b="line1
+line2"/>
+=== attr-no-value
+<input disabled/>
+=== attr-jsx-value
+<a b=<c/>/>
+=== attr-fragment-value
+<a b=<></>/>
+=== attr-expr-string
+<a b={"x"}/>
+=== text-braces-escaped
+<div>{"{"}</div>
+=== text-with-quotes
+<div>"quoted" 'single'</div>
+=== text-backslash-u
+<div>café ☃</div>
+=== text-real-unicode
+<div>caf&#233; é ☃</div>
+=== arrow-body
+const f = () => <div/>;
+=== arrow-body-parens
+const f = () => (<div>x</div>);
+=== arrow-param-jsx
+const f = (a) => <a>{a}</a>;
+=== ternary
+const x = a ? <b/> : <c/>;
+=== ternary-null
+const x = a ? <b/> : null;
+=== logical-and
+const x = a && <b/>;
+=== logical-or
+const x = a || <b/>;
+=== map-children
+<ul>{items.map(i => <li key={i.id}>{i.name}</li>)}</ul>
+=== map-children-block
+<ul>{items.map(i => { return <li>{i}</li>; })}</ul>
+=== cond-children
+<div>{ok ? <a/> : <b/>}</div>
+=== cond-and-children
+<div>{ok && <a/>}</div>
+=== nested-deep
+<a><b><c><d>x</d></c></b></a>
+=== self-closing-space
+<a />
+=== closing-tag-space
+<a></a >
+=== attr-expr-arrow
+<button onClick={() => go(1)}>x</button>
+=== attr-expr-object
+<div style={{ color: "red", fontSize: 12 }}/>
+=== attr-expr-template
+<div className={`a ${b}`}/>
+=== text-after-expr
+<div>{a}text{b}</div>
+=== multiple-expr
+<div>{a}{b}{c}</div>
+=== return-jsx
+function f() { return <div/>; }
+=== return-jsx-paren
+function f() {
+  return (
+    <div>
+      x
+    </div>
+  );
+}
+=== jsx-in-array
+const a = [<a/>, <b/>];
+=== jsx-in-call
+render(<App/>, root);
+=== jsx-in-object
+const o = { a: <b/>, c: <d/> };
+=== jsx-in-template
+const s = `${<a/>}`;
+=== less-than-comparison
+a < b > c
+=== key-ref-attr
+<a key="k" ref={r}/>
+=== boolean-and-spread
+<a b {...c} d/>
+=== attr-keyword-name
+<label class="a" for="b"/>
+=== tag-keyword-like
+<if/>
+=== attr-dollar-underscore
+<a $b="1" _c="2"/>
+=== text-semicolon-amp
+<div>a &; b</div>
+=== text-double-amp
+<div>&&amp;</div>
+=== entity-in-attr-nbsp
+<a b="x&nbsp;y"/>
+=== string-expr-child
+<div>{'text'}</div>
+=== comments-adjacent
+<div>{/* a */}{/* b */}</div>
+=== async-arrow-jsx
+const f = async () => <a/>;
+=== class-render
+class A { render() { return <div>{this.props.x}</div>; } }
+=== iife-jsx
+(() => <a/>)();
+=== spread-child-fragment
+<>{...a}</>
+=== text-space-expr
+<div>a {b} c</div>
+=== text-newline-expr
+<div>
+  {a}
+  {b}
+</div>
+=== adjacent-elements !
+<a/><b/>
+=== mismatched-closing !
+<a></b>
+=== unclosed-element !
+<a>
+=== unclosed-fragment !
+<>
+=== mismatched-fragment !
+<></a>
+=== attr-unterminated-string !
+<a b="c/>
+=== text-closing-brace !
+<div>}</div>
+=== text-closing-angle !
+<div>></div>
+=== spread-attr-empty !
+<a {...}/>
+=== namespace-member-mix !
+<a:b.c/>
+=== attr-expr-empty !
+<a b={}/>
+=== attr-seq-expr !
+<a b={1, 2}/>

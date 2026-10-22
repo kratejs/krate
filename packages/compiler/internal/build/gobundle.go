@@ -12,8 +12,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/gotsgen"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
-	"github.com/kratejs/krate/packages/compiler/internal/lexer"
-	"github.com/kratejs/krate/packages/compiler/internal/parser"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 // This file lets an SSR/ISR page's server bundle (compiled by esbuild from raw
@@ -30,7 +29,7 @@ import (
 // Go components (`import { X } from "./x.go"`). Returns nil when the source has
 // no `.go` imports.
 func goComponentLocals(srcPath, src, root string) map[string]bool {
-	prog := parseProgram(src)
+	prog := parseProgram(srcPath, src)
 	if prog == nil {
 		return nil
 	}
@@ -91,7 +90,7 @@ func annotateGoCalls(src, srcPath string, locals map[string]bool) string {
 	if len(locals) == 0 {
 		return src
 	}
-	prog := parseProgram(src)
+	prog := parseProgram(srcPath, src)
 	if prog == nil {
 		return src
 	}
@@ -259,9 +258,12 @@ func annotateGoCalls(src, srcPath string, locals map[string]bool) string {
 	return out
 }
 
-// parseProgram lexes and parses TSX source into an AST (nil on failure).
-func parseProgram(src string) *ast.Program {
-	return parser.New(lexer.New(src).Tokenize()).ParseProgram()
+// parseProgram parses page/module source into an AST (nil on a TypeScript
+// syntax error). TypeScript is stripped first and positions refer to src, so
+// JSX positions match the page AST the emitter derives Go call ids from.
+func parseProgram(path, src string) *ast.Program {
+	prog, _ := tsstrip.Parse(path, src, tsstrip.Options{})
+	return prog
 }
 
 // loaderForExt maps a JS/TS file extension to an esbuild loader.

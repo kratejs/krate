@@ -620,6 +620,11 @@ type Config struct {
 	// or above the configured `failOn` severity. `krate check` uses the same
 	// rules. See internal/check.
 	Checks map[string]any `json:"checks,omitempty"`
+
+	// TSCompilerOptions holds the tsconfig.json compilerOptions that change
+	// how TypeScript is lowered when Krate strips types (see internal/tsstrip).
+	// Read from tsconfig.json, not krate.config, so it is not a config key.
+	TSCompilerOptions TSCompilerOptions `json:"-"`
 }
 
 func (c *Config) ShouldMinifyHTML() bool { return c.MinifyHTML || c.Minify }
@@ -848,8 +853,16 @@ func (c *Config) Resolve(root string) {
 	}
 }
 
+// TSCompilerOptions are the tsconfig.json compilerOptions Krate honours when
+// stripping TypeScript from pages and components.
+type TSCompilerOptions struct {
+	ExperimentalDecorators  bool
+	UseDefineForClassFields *bool
+}
+
 // LoadTSConfigPaths reads tsconfig.json and extracts compilerOptions.paths
-// and compilerOptions.baseUrl into the Config's PathAliases and TSBaseDir fields.
+// and compilerOptions.baseUrl into the Config's PathAliases and TSBaseDir fields,
+// plus the decorator/class-field options into TSCompilerOptions.
 func (c *Config) LoadTSConfigPaths(root string) {
 	tsconfigPath := filepath.Join(root, "tsconfig.json")
 	data, err := os.ReadFile(tsconfigPath)
@@ -865,6 +878,13 @@ func (c *Config) LoadTSConfigPaths(root string) {
 	compilerOpts, ok := raw["compilerOptions"].(map[string]interface{})
 	if !ok {
 		return
+	}
+
+	if v, ok := compilerOpts["experimentalDecorators"].(bool); ok {
+		c.TSCompilerOptions.ExperimentalDecorators = v
+	}
+	if v, ok := compilerOpts["useDefineForClassFields"].(bool); ok {
+		c.TSCompilerOptions.UseDefineForClassFields = &v
 	}
 
 	var baseDir string

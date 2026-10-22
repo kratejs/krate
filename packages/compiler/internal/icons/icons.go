@@ -221,7 +221,41 @@ func sanitizeSVG(s string) string {
 			i += 4 + end + 3
 			continue
 		}
-		// Read a single tag, honoring quoted attribute values.
+		// Start tags are tokenized like the HTML parser so the sanitizer and
+		// the browser agree on where a tag and its attributes end.
+		if i+1 < len(s) && isSVGAlpha(s[i+1]) {
+			st, ok := parseStartTag(s, i)
+			if !ok {
+				return b.String() // unterminated tag - drop the tail
+			}
+			name := strings.ToLower(st.name)
+			if name == "script" || name == "foreignobject" {
+				// Drop the whole block. Non-self-closing blocks consume through
+				// their matching close tag.
+				if !st.selfClosing {
+					closeTag := "</" + name + ">"
+					rest := strings.ToLower(s[st.end:])
+					ci := strings.Index(rest, closeTag)
+					if ci < 0 {
+						return b.String() // unterminated block - drop the tail
+					}
+					i = st.end + ci + len(closeTag)
+					continue
+				}
+				i = st.end
+				continue
+			}
+			b.WriteString(st.sanitized())
+			i = st.end
+			continue
+		}
+		if i+1 >= len(s) || !(s[i+1] == '/' || s[i+1] == '!' || s[i+1] == '?') {
+			b.WriteString("&lt;") // a lone '<' is text, never markup
+			i++
+			continue
+		}
+		// End tags, declarations and processing instructions carry no
+		// attributes; copy them through the first unquoted '>'.
 		j := i + 1
 		var quote byte
 		for j < len(s) {
@@ -240,110 +274,167 @@ func sanitizeSVG(s string) string {
 		if j >= len(s) {
 			return b.String() // unterminated tag - drop the tail
 		}
-		tag := s[i : j+1]
-		name := svgTagName(tag)
-		selfClosing := strings.HasSuffix(strings.TrimSpace(tag[:len(tag)-1]), "/")
-		if name == "script" || name == "foreignobject" {
-			// Drop the whole block. Non-self-closing blocks consume through
-			// their matching close tag.
-			if !selfClosing {
-				close := "</" + name + ">"
-				rest := strings.ToLower(s[j+1:])
-				ci := strings.Index(rest, close)
-				if ci < 0 {
-					return b.String() // unterminated block - drop the tail
-				}
-				i = j + 1 + ci + len(close)
-				continue
-			}
-			i = j + 1
-			continue
-		}
-		b.WriteString(sanitizeTag(tag))
+		b.WriteString(s[i : j+1])
 		i = j + 1
 	}
 	return b.String()
 }
 
-// svgTagName returns the lowercased element name of a single tag.
-func svgTagName(tag string) string {
-	t := strings.TrimLeft(tag[1:], "/!?")
-	end := 0
-	for end < len(t) && !isSVGSpace(t[end]) && t[end] != '>' && t[end] != '/' {
-		end++
-	}
-	return strings.ToLower(t[:end])
+func isSVGAlpha(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 // isSVGSpace reports whether b is HTML whitespace.
 func isSVGSpace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f'
 }
 
-// sanitizeTag rebuilds a single SVG start tag, dropping event handler
-// attributes (on*) and href/src/action attributes whose value resolves to an
-// executable or data: URL. The tag name and all other attributes are kept.
-func sanitizeTag(tag string) string {
-	if len(tag) < 2 || tag[0] != '<' {
-		return tag
-	}
-	// Closing/declaration tags carry no attributes to sanitize.
-	if tag[1] == '/' || tag[1] == '!' || tag[1] == '?' {
-		return tag
-	}
-	p := 1
-	for p < len(tag) && !isSVGSpace(tag[p]) && tag[p] != '>' && tag[p] != '/' {
-		p++
-	}
-	name := tag[:p]
+type svgAttr struct {
+	name   string
+	value  string
+	hasVal bool
+	quote  byte // 0 for an unquoted source value
+}
 
-	var kept []string
-	for p < len(tag)-1 {
-		for p < len(tag)-1 && isSVGSpace(tag[p]) {
-			p++
+type startTag struct {
+	name        string
+	attrs       []svgAttr
+	selfClosing bool
+	end         int // index just past the closing '>'
+}
+
+// parseStartTag tokenizes the start tag at s[i:] (s[i] == '<' followed by an
+// ASCII letter) following the HTML tokenizer rules: attribute values end at
+// the matching quote, or for unquoted values at whitespace or '>', so a
+// trailing '/' is only a self-closing marker when it is not part of a value.
+func parseStartTag(s string, i int) (startTag, bool) {
+	var st startTag
+	j := i + 1
+	for j < len(s) && !isSVGSpace(s[j]) && s[j] != '/' && s[j] != '>' {
+		j++
+	}
+	st.name = s[i+1 : j]
+	for {
+		slash := false
+		for j < len(s) && (isSVGSpace(s[j]) || s[j] == '/') {
+			slash = s[j] == '/'
+			j++
 		}
-		if p >= len(tag)-1 {
-			break
+		if j >= len(s) {
+			return st, false
 		}
-		attrStart := p
-		var quote byte
-		for p < len(tag)-1 {
-			ch := tag[p]
-			if quote != 0 {
-				if ch == quote {
-					quote = 0
-				}
-			} else if ch == '"' || ch == '\'' {
-				quote = ch
-			} else if isSVGSpace(ch) || ch == '>' {
-				break
+		if s[j] == '>' {
+			st.selfClosing = slash
+			st.end = j + 1
+			return st, true
+		}
+		ns := j
+		if s[j] == '=' {
+			j++
+		}
+		for j < len(s) && !isSVGSpace(s[j]) && s[j] != '/' && s[j] != '>' && s[j] != '=' {
+			j++
+		}
+		at := svgAttr{name: s[ns:j]}
+		k := j
+		for k < len(s) && isSVGSpace(s[k]) {
+			k++
+		}
+		if k < len(s) && s[k] == '=' {
+			k++
+			for k < len(s) && isSVGSpace(s[k]) {
+				k++
 			}
-			p++
+			if k >= len(s) {
+				return st, false
+			}
+			at.hasVal = true
+			switch q := s[k]; q {
+			case '"', '\'':
+				e := strings.IndexByte(s[k+1:], q)
+				if e < 0 {
+					return st, false
+				}
+				at.quote = q
+				at.value = s[k+1 : k+1+e]
+				j = k + 2 + e
+			case '>':
+				j = k
+			default:
+				vs := k
+				for k < len(s) && !isSVGSpace(s[k]) && s[k] != '>' {
+					k++
+				}
+				at.value = s[vs:k]
+				j = k
+			}
 		}
-		attr := tag[attrStart:p]
-		attrName := strings.ToLower(strings.TrimSpace(strings.SplitN(attr, "=", 2)[0]))
+		st.attrs = append(st.attrs, at)
+	}
+}
+
+// sanitized rebuilds the tag, dropping event handler attributes (on*) and
+// href/src/action attributes whose value resolves to an executable or data:
+// URL. Attribute values are always quoted when possible and a self-closing
+// slash is emitted as a separate " />" so it can never fuse with a value.
+func (st startTag) sanitized() string {
+	var out strings.Builder
+	out.WriteByte('<')
+	out.WriteString(st.name)
+	for _, a := range st.attrs {
+		name := strings.ToLower(a.name)
 		switch {
-		case strings.HasPrefix(attrName, "on"):
+		case strings.HasPrefix(name, "on"):
 			continue // event handler
-		case (attrName == "href" || attrName == "xlink:href" || attrName == "src" || attrName == "action") && dangerousURLValue(attr):
+		case (name == "href" || name == "xlink:href" || name == "src" || name == "action") && dangerousURL(a.value):
 			continue
 		}
-		kept = append(kept, attr)
-	}
-
-	var out strings.Builder
-	out.WriteString(name)
-	for _, a := range kept {
 		out.WriteByte(' ')
-		out.WriteString(a)
+		out.WriteString(a.name)
+		if !a.hasVal {
+			continue
+		}
+		q := a.quote
+		if q == 0 {
+			switch {
+			case !strings.Contains(a.value, `"`):
+				q = '"'
+			case !strings.Contains(a.value, "'"):
+				q = '\''
+			}
+		}
+		out.WriteByte('=')
+		if q == 0 {
+			out.WriteString(a.value)
+			continue
+		}
+		out.WriteByte(q)
+		out.WriteString(a.value)
+		out.WriteByte(q)
 	}
-	out.WriteByte('>')
+	if st.selfClosing {
+		out.WriteString(" />")
+	} else {
+		out.WriteByte('>')
+	}
 	return out.String()
 }
 
+// sanitizeTag rebuilds a single SVG tag with unsafe attributes removed.
+// Tags that are not start tags are returned unchanged.
+func sanitizeTag(tag string) string {
+	if len(tag) < 2 || tag[0] != '<' || !isSVGAlpha(tag[1]) {
+		return tag
+	}
+	st, ok := parseStartTag(tag, 0)
+	if !ok {
+		return tag
+	}
+	return st.sanitized()
+}
+
 // dangerousURLValue reports whether an `href="..."`-style attribute carries an
-// executable/data: URL. The value is HTML-unescaped (browsers decode entities
-// in attribute values before resolving the URL) and scheme-checked.
+// executable/data: URL.
 func dangerousURLValue(attr string) bool {
 	eq := strings.IndexByte(attr, '=')
 	if eq < 0 {
@@ -353,6 +444,13 @@ func dangerousURLValue(attr string) bool {
 	if len(val) >= 2 {
 		val = val[1 : len(val)-1]
 	}
+	return dangerousURL(val)
+}
+
+// dangerousURL reports whether a raw attribute value is a javascript: or data:
+// URL. The value is HTML-unescaped (browsers decode entities in attribute
+// values before resolving the URL) and scheme-checked.
+func dangerousURL(val string) bool {
 	val = html.UnescapeString(val)
 	val = strings.ToLower(strings.TrimSpace(val))
 	return strings.HasPrefix(val, "javascript:") || strings.HasPrefix(val, "data:")
