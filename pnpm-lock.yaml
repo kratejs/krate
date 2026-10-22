@@ -127,6 +127,15 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  packages/react-oracle:
+    devDependencies:
+      react:
+        specifier: ^19.0.0
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.8(react@19.2.8)
+
   packages/runtime:
     devDependencies:
       '@types/node':
