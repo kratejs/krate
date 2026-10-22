@@ -2,7 +2,12 @@ import type { CSSScope, CSSFlagsScope } from './signal.js';
 
 let contextId = 0;
 
+/** Marks Krate context objects so `use(x)` can tell them from promises. */
+export const KRATE_CONTEXT: unique symbol = Symbol.for('krate.context');
+
 export interface Context<T> {
+  /** Context marker (see {@link KRATE_CONTEXT}). */
+  $$typeof?: typeof KRATE_CONTEXT;
   /** React 19: the context itself renders as its provider (`<Ctx value>`). */
   (props: { value: T; children?: any }): Node;
   id: number;
@@ -110,6 +115,7 @@ export function createContext<T>(defaultValue: T): Context<T> {
     return typeof fn === 'function' ? toNode(fn(useContext())) : toNode(null);
   };
   const ctx = ((props: { value: T; children?: any }) => Provider(props)) as Context<T>;
+  ctx.$$typeof = KRATE_CONTEXT;
   ctx.id = id;
   ctx.defaultValue = defaultValue;
   ctx.Provider = Provider;

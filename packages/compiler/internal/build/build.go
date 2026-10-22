@@ -531,7 +531,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	}
 
 	// Write shared runtime chunk (extracted from per-page bundles)
-	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results)})
+	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results), Suspense: runtimeNeedsSuspense(results)})
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)
 	}
@@ -867,7 +867,7 @@ func (b *Builder) BuildAll() error {
 	}
 	runtimeJS := ""
 	if anyPageHasJS {
-		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results)})
+		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results), Suspense: runtimeNeedsSuspense(results)})
 	}
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)
@@ -1811,6 +1811,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
 	if needsHydrate {
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)
 		if islandJS != "" {
 			rawJS = strings.TrimSpace(rawJS + "\n" + islandJS)
 		}

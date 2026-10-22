@@ -154,6 +154,8 @@ type reactCtx struct {
 	// because they resolve to the compatibility runtime rather than a krate
 	// primitive.
 	compat map[string]bool
+	// susp holds Suspense/lazy/use() lowering state (react_suspense.go).
+	susp *suspenseState
 
 	// Effect/memo lowering state (react_effects.go).
 	file        string
@@ -260,7 +262,7 @@ func RewriteReact(prog *ast.Program) {
 // codes_effects.go). file and src position the diagnostics.
 func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	renameReservedBindings(prog)
-	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src}
+	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src, susp: newSuspenseState()}
 	ctx.fnNames = functionNames(prog.Body)
 	ctx.refDiagnostics(prog)
 	var toRemove []int
@@ -295,6 +297,9 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 				}
 				if named.Remote == "Fragment" {
 					ctx.fragmentNames[local] = true
+				}
+				if named.Remote == "Suspense" {
+					ctx.susp.suspense[local] = true
 				}
 			}
 		case "react-dom", "react-dom/client":
@@ -357,6 +362,8 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 		prog.Body = append(prog.Body[:idx], prog.Body[idx+1:]...)
 	}
 
+	ctx.collectModuleContexts(prog)
+	ctx.lowerLazyDecls(prog)
 	ctx.checkLegacyAPIs(prog, legacy)
 	ctx.rewriteStmts(prog.Body, newScope(nil))
 
@@ -506,43 +513,15 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 		return
 	}
 	// Lower `const [pending, start] = useTransition()` to a Krate signal plus a
-	// starter function. The compat call would otherwise leave both bindings
-	// undefined in the hydration scope.
-	if len(v.Decls) == 1 {
-		decl := v.Decls[0]
-		if decl != nil && decl.IsDestructuring && len(decl.Names) >= 2 {
-			if call, ok := decl.Init.(*ast.CallExpr); ok {
-				if api, ok := c.callAPI(call.Callee); ok && api == "useTransition" {
-					pending, start := decl.Names[0], decl.Names[1]
-					setter := "__krate_transition_" + pending
-					boolLit := func(b bool) ast.Expr {
-						val := "false"
-						if b {
-							val = "true"
-						}
-						return &ast.Literal{Kind: ast.BoolLit, Value: val}
-					}
-					makeCall := func(name string, args ...ast.Expr) *ast.CallExpr {
-						return &ast.CallExpr{Callee: &ast.Identifier{Name: name}, Args: args}
-					}
-					v.Decls = []*ast.VarDecl{
-						{IsDestructuring: true, Names: []string{pending, setter}, Init: makeCall("createSignal", boolLit(false))},
-						{Name: start, Init: &ast.ArrowFn{Params: []*ast.Param{{Name: "fn"}}, Body: []ast.Stmt{
-							&ast.ExprStmt{Expression: makeCall(setter, boolLit(true))},
-							&ast.ExprStmt{Expression: makeCall("fn")},
-							&ast.ExprStmt{Expression: makeCall(setter, boolLit(false))},
-						}}},
-					}
-					sc.declareGetter(pending)
-					sc.declareLocal(setter)
-					sc.declareLocal(start)
-					return
-				}
-			}
-		}
+	// transition starter that keeps it pending while async actions run.
+	if c.lowerTransitionVarStmt(v, sc) {
+		return
 	}
 	for _, decl := range v.Decls {
 		if decl == nil {
+			continue
+		}
+		if c.lowerSuspenseDecl(decl, sc) {
 			continue
 		}
 		if decl.Init != nil {
@@ -701,6 +680,9 @@ func (c *reactCtx) rewriteExprCtx(expr ast.Expr, sc *scope, valuePos bool) ast.E
 	case *ast.DynamicImport:
 		e.Arg = c.rewriteExpr(e.Arg, sc)
 	case *ast.JSXElement:
+		if lowered, ok := c.lowerSuspenseJSX(e, sc); ok {
+			return lowered
+		}
 		if c.isFragmentTag(e.Opening.Name) {
 			return c.lowerFragment(e, sc)
 		}
@@ -783,8 +765,18 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 	// `memo`/`lazy` are identity wrappers.
 	switch api {
 	case "memo", "lazy":
+		if isReactAPI && api == "lazy" {
+			// Valid lazy() declarations were lowered at module level.
+			c.reportStrayLazy(e)
+		}
 		if isReactAPI && len(e.Args) >= 1 {
 			return c.rewriteExpr(e.Args[0], sc)
+		}
+	case "use":
+		if isReactAPI {
+			if lowered, ok := c.rewriteUseCall(e, sc); ok {
+				return lowered
+			}
 		}
 	case "forwardRef":
 		// forwardRef((props, ref) => ...) is lowered to (props) => ... with
@@ -1089,8 +1081,12 @@ func (c *reactCtx) rewriteJSXChild(child ast.JSXChild, sc *scope) ast.JSXChild {
 		ch.Expression = c.rewriteExpr(ch.Expression, sc)
 		return ch
 	case *ast.JSXElementChild:
-		if el, ok := c.rewriteExpr(ch.Element, sc).(*ast.JSXElement); ok {
-			ch.Element = el
+		switch out := c.rewriteExpr(ch.Element, sc).(type) {
+		case *ast.JSXElement:
+			ch.Element = out
+		case *ast.JSXFragment:
+			// <Fragment>, <StrictMode> and <Profiler> lower to fragments.
+			return &ast.JSXFragmentChild{Fragment: out}
 		}
 		return ch
 	case *ast.JSXFragmentChild:

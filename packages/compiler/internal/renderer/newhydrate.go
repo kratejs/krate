@@ -60,7 +60,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		if len(sig.Signals) > 0 || len(sig.Handlers) > 0 || len(sig.Effects) > 0 ||
 			len(sig.Memos) > 0 || len(sig.ExtraVars) > 0 || len(sig.PreSignalVars) > 0 ||
 			len(sig.SlotBindings) > 0 || len(sig.AttrBindings) > 0 || len(sig.RefBindings) > 0 ||
-			len(sig.IslandBoot) > 0 {
+			len(sig.IslandBoot) > 0 || sig.Lazy {
 			hasWork = true
 			break
 		}
@@ -79,13 +79,15 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	// Component functions needed by dynamic list slots. Without these the
 	// runtime `h(Component, props)` call in a list binding would throw
 	// ReferenceError when the list re-renders.
+	var listFns strings.Builder
 	for _, fn := range result.ListComponents {
 		js := irtree.RenderComponentFnJS(fn)
 		if js != "" {
-			b.WriteString(js)
-			b.WriteString("\n")
+			listFns.WriteString(js)
+			listFns.WriteString("\n")
 		}
 	}
+	b.WriteString(listFns.String())
 
 	// Per-component scoped IIFEs. Pages with class components register each
 	// scope with the owner tree instead (see owner_emit.go).
@@ -101,10 +103,15 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		b.WriteString("var __ko=typeof krateOwner==='function'?krateOwner:function(){};\n")
 		b.WriteString("var __km=typeof krateMount==='function'?krateMount:function(i,p,c,s,f){f();};\n")
 	}
-	for _, sig := range result.Signatures {
+	// Each scope's span is recorded so suspending and lazy components can be
+	// rewritten afterwards (see suspense.go).
+	var spans []sigSpan
+	for i := range result.Signatures {
+		sig := result.Signatures[i]
 		if sig.Tier != irtree.TierClient {
 			continue
 		}
+		spanStart := b.Len()
 		// Label each scope with its component so the readable dev output can be
 		// traced back to a source component. Stripped by minification in prod.
 		b.WriteString("// component ")
@@ -115,7 +122,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		// class/boundary owner tree, that tree mounts and unmounts the scope
 		// (with the same fresh-state semantics) and the effects owner is
 		// declared inside it.
-		remountable := owners && len(sig.Conds) > 0 && !owned
+		remountable := owners && hasRemountCond(sig.Conds) && !owned
 		switch {
 		case owned:
 			b.WriteString("\n")
@@ -373,6 +380,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		} else {
 			b.WriteString("})();\n")
 		}
+		spans = append(spans, sigSpan{sig: &result.Signatures[i], start: spanStart, end: b.Len()})
 	}
 	if owners {
 		b.WriteString("__ko(null);\n")
@@ -400,7 +408,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 
 	b.WriteString("})();\n")
 
-	return b.String()
+	return finishSuspenseHydration(result, b.String(), spans, listFns.String())
 }
 
 // pageNeedsOwners reports whether any client component registers effects,
@@ -558,10 +566,6 @@ func isBareStringToken(v string) bool {
 // use the Preact compat chunks instead.
 const CompatBootstrapJS = `
 window.useImperativeHandle=function(ref,create,deps){createEffectDeps(function(){return ref?krateSetRef(ref,create()):void 0;},typeof deps==='function'?deps:deps?function(){return deps;}:null,'layout');};
-window.useSyncExternalStore=function(subscribe,getSnapshot){var s=createSignal(getSnapshot());createEffect(function(){var unsub=subscribe(function(){s[1](getSnapshot());});return function(){if(typeof unsub==='function')unsub();};});return s[0];};
-window.useTransition=function(){var s=createSignal(false);function start(fn){s[1](true);try{fn();}finally{s[1](false);}}return [s[0],start];};
-window.startTransition=function(fn){fn();};
-window.useDeferredValue=function(v){return v;};
 window.useDebugValue=function(){};
 window.createRef=function(){return {current:null};};
 window.isValidElement=function(v){return (typeof Node!=='undefined'&&v instanceof Node)||(v&&typeof v==='object');};

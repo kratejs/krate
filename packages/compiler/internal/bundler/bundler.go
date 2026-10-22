@@ -630,7 +630,10 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	if len(errs) > 0 {
 		return &parseError{summary: parser.FormatDiagnostics(errs), errs: errs}
 	}
-	reactDiags := RewriteReactDiag(prog, path, src)
+	reactDiags, err := splitReactDiags(RewriteReactDiag(prog, path, src))
+	if err != nil {
+		return err
+	}
 	if strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
 		// Third-party packages cannot act on these hints; keep builds quiet.
 		reactDiags = nil

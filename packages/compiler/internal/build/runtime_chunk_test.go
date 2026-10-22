@@ -17,7 +17,8 @@ func TestRuntimeNeedsCompat(t *testing.T) {
 		{"deps helper is core", `createEffectDeps(fn,deps);`, false},
 		{"children", `Children.count(items);`, true},
 		{"cloneElement", `cloneElement(node, props);`, true},
-		{"transition", `startTransition(fn);`, true},
+		{"transition is in the suspense runtime", `startTransition(fn);`, false},
+		{"lazy chunk may use compat", `__krateLazy("/x.js",null);`, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -9,6 +9,10 @@
  * - krate-runtime.js - signals + DOM + JSX runtime + SPA router
  * - krate-hydrate.js - same minus the JSX runtime (used for SSG hydration)
  * - krate-hydrate-lite.js - hydration without the SPA router (`spa: false`)
+ * - krate-suspense.js - Suspense, use(), lazy hydration chunks and async
+ *   transitions. The compiler appends it to the runtime chunk only for sites
+ *   whose hydration code uses them; it reads signals and slot helpers from the
+ *   globals of the hydration bundle instead of bundling a second copy.
  *
  * esbuild minification here is complemented by the compiler, which re-minifies
  * the shared chunk with its embedded esbuild when writing dist/chunks/.
@@ -66,11 +70,37 @@ export * from './src/class-component';
 export * from './src/actions';
 `;
 
+const SUSPENSE_ENTRY = `export * from './src/suspense';`;
+
+// Modules the suspense bundle shares with the hydration bundle. They resolve
+// to the window globals the hydration bundle installed, so there is a single
+// signal graph.
+const SHARED_GLOBALS = {
+  signal: ['createSignal', 'createEffect', 'onCleanup', 'krateGetOwner', 'krateSetOwner'],
+};
+
+const sharedGlobalsPlugin = {
+  name: 'krate-shared-globals',
+  setup(build) {
+    build.onResolve({ filter: /^\.\/(signal)(\.js)?$/ }, (args) => ({
+      path: args.path.replace(/^\.\//, '').replace(/\.js$/, ''),
+      namespace: 'krate-global',
+    }));
+    build.onLoad({ filter: /.*/, namespace: 'krate-global' }, (args) => ({
+      contents: SHARED_GLOBALS[args.path]
+        .map((name) => `export const ${name} = (...a) => window.${name}(...a);`)
+        .join('\n'),
+      loader: 'js',
+    }));
+  },
+};
+
 // Dev-only overlay + toolbar. Loaded by `krate dev` only, never in production.
 const DEV_ENTRY = `import './src/dev-overlay';`;
 
-async function buildBundle(outFile, entry, minify = true) {
+async function buildBundle(outFile, entry, minify = true, plugins = []) {
   const result = await esbuild.build({
+    plugins,
     stdin: { contents: entry, resolveDir: __dirname, sourcefile: 'krate-entry.ts' },
     bundle: true,
     write: false,
@@ -99,8 +129,9 @@ async function main() {
   await buildBundle('krate-runtime.js', RUNTIME_ENTRY);
   await buildBundle('krate-hydrate.js', HYDRATE_ENTRY);
   await buildBundle('krate-hydrate-lite.js', LITE_ENTRY);
+  await buildBundle('krate-suspense.js', SUSPENSE_ENTRY, true, [sharedGlobalsPlugin]);
   await buildBundle('krate-dev.js', DEV_ENTRY, false);
-  console.log('Runtime bundled! (krate-runtime.js + krate-hydrate.js + krate-hydrate-lite.js + krate-dev.js)');
+  console.log('Runtime bundled! (krate-runtime.js + krate-hydrate.js + krate-hydrate-lite.js + krate-suspense.js + krate-dev.js)');
 }
 
 main().catch((err) => {

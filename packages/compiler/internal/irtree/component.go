@@ -178,6 +178,7 @@ func (b *builder) collectHydrationBody(fn *ast.FnDecl, node *ComponentNode) hydr
 	node.Memos = b.collectMemoJS(fn.Body)
 	body.pre, body.post = b.collectExtraVarJS(fn.Body, body.order, paramBindingSet(fn))
 	body.post = append(body.post, b.collectResourceJS(fn.Body, body.order)...)
+	body.post = append(body.post, b.collectReactiveFactoryJS(fn.Body, body.order)...)
 	node.PreSignalVars = bodyJSStrings(body.pre)
 	node.ExtraVars = mergeBodyJS(body.post)
 	return body
@@ -220,6 +221,7 @@ func (b *builder) registerReactiveLocals(fn *ast.FnDecl) {
 	for _, name := range b.collectResourceNames(fn.Body) {
 		b.localSignals[name] = resourceSentinel
 	}
+	b.registerFactoryLocals(fn.Body)
 	// Derived render values and custom hook results (derived.go).
 	for name, initial := range b.collectDerivedLocals(fn.Body) {
 		b.localSignals[name] = initial
@@ -585,6 +587,15 @@ func (b *builder) enterCSSScope(fn *ast.FnDecl, node *ComponentNode, returnStmt 
 // It runs in the caller's context: helper declarations are rendered against
 // the caller's signal table.
 func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res componentResult) {
+	if b.pendingLazy != nil && fn == b.pendingLazyFn {
+		// A lazy() instance always hydrates: it suspends until its chunk or
+		// loader is ready.
+		node.Lazy = true
+		if b.pendingLazy.Loader != "" {
+			b.lazyLoaderGate(node, *b.pendingLazy)
+		}
+		b.pendingLazy, b.pendingLazyFn = nil, nil
+	}
 	node.Handlers = res.handlers
 	node.AttrBindings = res.attrs
 	node.RefBindings = res.refs
@@ -624,7 +635,7 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 		addFunctions()
 	}
 	b.checkUnbundledImports(node)
-	if needsNoClientJS(node, fn) && !res.forceClient && !b.rendersLiveProps(node) {
+	if needsNoClientJS(node, fn) && !res.forceClient && !b.rendersLiveProps(node) && !node.Lazy {
 		node.Tier = TierStatic
 	}
 }

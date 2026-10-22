@@ -1,6 +1,7 @@
 package build
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,15 +46,18 @@ func loadRuntimeFromDiskFor(projectRoot string, spa bool) string {
 type runtimeChunkOptions struct {
 	SPA    bool
 	Compat bool
+	// Suspense appends the Suspense/use()/lazy/transition runtime.
+	Suspense bool
 }
 
 // runtimeNeedsCompat reports whether any page's hydration script references a
 // React compatibility API that lives in CompatBootstrapJS.
 func runtimeNeedsCompat(results []*PageResult) bool {
 	markers := []string{
-		"useImperativeHandle", "useSyncExternalStore", "useTransition",
-		"startTransition", "useDeferredValue", "useDebugValue",
+		"useImperativeHandle", "useDebugValue",
 		"isValidElement", "Children", "cloneElement", "createRef",
+		// Lazy chunks are separate files; their code may use compat APIs.
+		"__krateLazy(",
 	}
 	for _, r := range results {
 		if r == nil || r.HydrationJS == "" {
@@ -165,6 +169,13 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opt
 	runtime += renderer.HydrationBootstrapJS
 	if opts.Compat {
 		runtime += renderer.CompatBootstrapJS
+	}
+	if opts.Suspense {
+		suspense := loadNamedBundleFromDisk(projectRoot, "krate-suspense.js")
+		if suspense == "" {
+			fmt.Fprintf(os.Stderr, "  %sWarning:%s the Suspense runtime (krate-suspense.js) was not found next to the hydration runtime; Suspense, use(), lazy() and transitions will not work (rebuild @krate/runtime)\n", cYellow, cReset)
+		}
+		runtime += "\n" + suspense
 	}
 
 	runtimeToWrite := runtime

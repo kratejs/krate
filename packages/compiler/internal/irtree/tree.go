@@ -89,6 +89,9 @@ type Annotations struct {
 	// static or private member, an unknown this.x read, ...). The builder
 	// reports it when the component is used.
 	ClassRejections map[string]diag.Diagnostic
+	// LazyComponents maps a component binding declared with React.lazy() to
+	// its declaration. Its hydration code goes into a separate chunk.
+	LazyComponents map[string]LazyComponent
 	// ClassBoundaries names the lowered class components that are error
 	// boundaries (static getDerivedStateFromError and/or componentDidCatch).
 	ClassBoundaries map[string]bool
@@ -378,11 +381,15 @@ type SignalDecl struct {
 
 // ComponentNode - a single component instance in the tree
 type ComponentNode struct {
-	ID    SlotID
-	Name  string
-	Tier  ComponentTier
-	Fn    *ast.FnDecl
-	Props map[string]ast.Expr
+	ID   SlotID
+	Name string
+	Tier ComponentTier
+	Fn   *ast.FnDecl
+	// Lazy marks an instance of a React.lazy() component (see LazyComponent).
+	// LazyLoader is set when its loader is not a static import.
+	Lazy       bool
+	LazyLoader string
+	Props      map[string]ast.Expr
 	// RuntimeProps holds resolved prop values for runtime-tier components
 	// (prop name -> value). These are serialized into the page's runtime props
 	// script so the serve-time renderer can pass them to the component.
@@ -566,6 +573,13 @@ type ComponentSignature struct {
 	Children        []SlotID
 	SlotBindings    []SlotBinding
 	AttrBindings    []AttrBinding
+	// Boundary is the stream ID of the innermost <Suspense> boundary whose
+	// content holds this instance ("" outside any boundary).
+	Boundary string
+	// Lazy marks an instance of a lazy() component; LazyName is its name.
+	// Its hydration code (and its descendants') is loaded as a separate chunk.
+	Lazy     bool
+	LazyName string
 	// InLists names the list slots whose rows contain this component. When
 	// such a list is bound at runtime the rows (and this component) are
 	// rendered and adopted by the list, so the signature is not hydrated.
@@ -602,6 +616,9 @@ type CondBranch struct {
 	SlotID         SlotID
 	Branch         string
 	InitiallyShown bool
+	// Boundary marks a Suspense boundary's branch: the component's effects
+	// wait for the reveal, but it is not remounted.
+	Boundary bool
 }
 
 // SlotBinding - describes a content binding for hydration

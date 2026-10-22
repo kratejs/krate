@@ -15,44 +15,12 @@
     "severity": "P2",
     "reason": "[id-format] useId strings differ (krate-1-Field-Field_c0 vs _r_0_); ids are unique and label/aria links work on both sides"
   },
-  "r18/suspense_fallback_then_content": {
-    "severity": "P0",
-    "reason": "[suspense-lazy] build fails: lazy(() => promise) is evaluated at build time ('cannot evaluate delay(...)')"
-  },
-  "r18/suspense_lazy": {
-    "severity": "P0",
-    "reason": "[suspense-lazy] build fails: lazy(() => import('...')) is rejected ('DynamicImport expressions are not supported')"
-  },
-  "r18/suspense_lazy_on_click": {
-    "severity": "P0",
-    "reason": "[suspense-lazy] build fails: lazy(() => import('...')) is rejected ('DynamicImport expressions are not supported')"
-  },
-  "r18/suspense_nested": {
-    "severity": "P0",
-    "reason": "[suspense-lazy] build fails: nested Suspense with lazy(() => promise) evaluated at build time"
-  },
   "r19/action_form_auto_reset": {
     "severity": "P2",
     "reason": "[form-actions] the action, message and auto-reset match; with the fixture's 80ms delay Krate commits the result one frame after React, so the snapshot right after the click can still show the old field value"
   },
-  "r19/action_server_direct": {
-    "severity": "P1",
-    "reason": "[async-transition] direct server action call works end to end, but useTransition isPending stays false during the async transition ('loading' never shows)"
-  },
   "r19/app_reference": {
     "severity": "P0",
     "reason": "[use-promise] the reference app builds and its actions, useFormStatus and useOptimistic run; use(promise) under Suspense shows the list immediately instead of the 'loading todos' fallback, which shifts the later steps"
-  },
-  "r19/deferred_initial_value": {
-    "severity": "P0",
-    "reason": "[deferred-value] build fails: useDeferredValue(value, initialValue) result passed to a memo child cannot be evaluated at build time"
-  },
-  "r19/transition_async": {
-    "severity": "P1",
-    "reason": "[async-transition] useTransition isPending stays false during an async transition; the final tab matches"
-  },
-  "r19/use_promise_suspense": {
-    "severity": "P0",
-    "reason": "[use-promise] use(promise) under Suspense: no fallback, the list renders empty and never fills, switching posts does not suspend"
   }
 }

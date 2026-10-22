@@ -899,7 +899,7 @@ func provideRuntime(t *testing.T, work string) {
 		t.Fatal(err)
 	}
 	src := filepath.Join(repo, "packages", "runtime", "dist")
-	names := []string{"krate-runtime.js", "krate-hydrate.js", "krate-hydrate-lite.js", "krate-dev.js"}
+	names := []string{"krate-runtime.js", "krate-hydrate.js", "krate-hydrate-lite.js", "krate-dev.js", "krate-suspense.js"}
 	dst := filepath.Join(work, "packages", "runtime", "dist")
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		t.Fatal(err)

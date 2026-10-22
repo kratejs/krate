@@ -304,6 +304,11 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	if hasLifecycleCall(fn.Body) {
 		return true
 	}
+	// use() values, deferred values, external stores and resources are
+	// runtime getters, so their component hydrates.
+	if bodyUsesReactiveFactory(fn.Body) {
+		return true
+	}
 	if containsPortal(fn.Body) {
 		return true
 	}

@@ -96,8 +96,10 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 	}
 
 	builder := newBuilder(prog, ann, opts)
+	builder.checkLazyComponents()
 	root := builder.buildComponentNode(entryFn, "")
 	root.SourceFile = ann.SourceFile
+	builder.warnSuspendOutsideBoundary(entryFn, entryFn.Position)
 	return builder.finishTree(root)
 }
 
@@ -332,16 +334,19 @@ type builder struct {
 	// A component's walk clears it on entry and restores the caller's counts
 	// on exit, so siblings after a child component keep unique IDs.
 	elementCounts    map[string]int
-	moduleConsts     valueMap                  // module-level const values (name -> folded value)
-	moduleConstInits map[string]ast.Expr       // module-level const initializers (name -> expr)
-	moduleStmts      []ast.Stmt                // entry module top-level statements that run code
-	entryProg        *ast.Program              // the entry module (imports for KR8302)
-	cvaFactories     map[string]*CVASpec       // module-level `const X = cva(...)` factories
-	contextDefaults  map[string]jsvalue.Value  // module-level `const X = createContext(v)` defaults
-	codeTheme        string                    // chroma theme for compile-time <Code> highlighting
-	idPrefix         string                    // namespace for compact slot IDs (merged builds)
-	aggressiveDCE    bool                      // drop unreferenced local functions (opt-in)
-	suspenseCount    int                       // monotonic counter for stable StreamID generation
+	moduleConsts     valueMap                 // module-level const values (name -> folded value)
+	moduleConstInits map[string]ast.Expr      // module-level const initializers (name -> expr)
+	moduleStmts      []ast.Stmt               // entry module top-level statements that run code
+	entryProg        *ast.Program             // the entry module (imports for KR8302)
+	cvaFactories     map[string]*CVASpec      // module-level `const X = cva(...)` factories
+	contextDefaults  map[string]jsvalue.Value // module-level `const X = createContext(v)` defaults
+	codeTheme        string                   // chroma theme for compile-time <Code> highlighting
+	idPrefix         string                   // namespace for compact slot IDs (merged builds)
+	aggressiveDCE    bool                     // drop unreferenced local functions (opt-in)
+	suspenseCount    int                      // monotonic counter for stable StreamID generation
+	suspenseDepth    int                      // >0 while building <Suspense> content
+	pendingLazy      *LazyComponent           // lazy() instance being built (see finishClientComponent)
+	pendingLazyFn    *ast.FnDecl
 	compat           csssignals.StyleMode      // CSS-signal stylesheet mode (modern/legacy/hybrid)
 	goComponents     map[string]GoComponentRef // imported Go components (local name -> ref)
 	externalImports  map[string]ExternalImport // bare-package import bindings (local -> module)

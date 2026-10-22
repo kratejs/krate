@@ -62,7 +62,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	// component has no signals/handlers and would otherwise take the SSREval
 	// shortcut, which bypasses the interception and breaks the panels. The same
 	// applies to components using first-class scope-handle spreads.
-	if len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !hasComponentChildren(el.Children) {
+	if len(childSignals) == 0 && !b.cssSignalsOK(childFn) && !hasScopeHelperSpread(childFn) && !hasComponentChildren(el.Children) && !b.isLazyComponent(childName) {
 		if !b.componentNeedsClient(childFn, attrs) {
 			// A signal-less component that renders a parent's signal value
 			// (e.g. <Display value={display()}/>) must stay reactive, so its
@@ -236,6 +236,7 @@ func (b *builder) discoverReturnSlots(childFn *ast.FnDecl, childID SlotID, attrs
 // the call-site inputs installed, then its call-site children in the caller's
 // scope, and registers its props for hydration.
 func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDecl, childID SlotID, attrs map[string]ast.Expr, provider scopeProvider) []SlotNode {
+	b.warnSuspendOutsideBoundary(childFn, el.Position)
 	// An error boundary whose subtree threw at build time renders its fallback
 	// (boundary_build.go); the instance id is the one newComponentNode assigns.
 	instance := SlotID(string(joinSlotID(string(childID), childFn.Name)) + "_c" + itoa(b.instanceCounts[childFn.Name]))
@@ -257,12 +258,21 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 	b.pushComponentCtx()
 	b.installCallSiteInputs(el, childFn, attrs)
 	live := b.liveProps
+	lc, lazy := b.ann.LazyComponents[el.Opening.Name]
+	if lazy {
+		// Consumed by finishClientComponent for this node (children finish
+		// first and have other functions).
+		b.pendingLazy, b.pendingLazyFn = &lc, childFn
+	}
 	childNode := b.buildComponentNode(childFn, string(childID))
 	b.popComponentCtx()
 	childNode.ContextValues = b.activeContextMarkers()
 	b.warnSnapshotProps(el, childFn, childNode, live)
 
 	childNode.Props = attrs
+	if lazy {
+		childNode.Lazy = true
+	}
 	childNode.CallSiteChildren = el.Children
 	childNode.CallSiteSlots = b.buildComponentCallSiteSlots(el, childID, provider, childNode.childrenContext)
 	b.completeSSREvalBindings(childNode, childFn, attrs)
@@ -419,6 +429,10 @@ func (b *builder) registerChildProps(childNode *ComponentNode, childFn *ast.FnDe
 	hasHydration := len(childNode.Handlers) > 0 || len(childNode.Effects) > 0 || len(childNode.Memos) > 0 ||
 		len(childNode.Signals) > 0 || len(childNode.RefBindings) > 0 || len(childNode.AttrBindings) > 0 ||
 		len(b.contextValues) > 0 ||
+		// use()/deferred/external-store getters (`use(props.promise)`).
+		(childFn != nil && bodyUsesReactiveFactory(childFn.Body)) ||
+		// Replayed locals derived from live props (`var hits=...props.query`).
+		(childFn != nil && plainPropsParamName(childFn) != "" && hydrationReadsAny(childNode, []string{plainPropsParamName(childFn)})) ||
 		// Replayed body statements (a render-time throw guard) read props too.
 		len(childNode.ExtraVars) > 0 ||
 		// Bindings of getter-registered props (`{props.title}`).

@@ -606,6 +606,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	needsHydrate := len(emitResult.Signatures) > 0
 	if needsHydrate {
 		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
+		hydrationJS = b.writeLazyChunks(hydrationJS, emitResult.LazyChunks, pageDir, spp.OutPath)
 		if strings.TrimSpace(hydrationJS) != "" {
 			hasJS = true
 			if b.shouldMinifyJS() {
