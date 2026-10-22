@@ -484,6 +484,20 @@ func TestResolveAbsolutePath(t *testing.T) {
 	}
 }
 
+func TestLoadTSConfigCompilerOptions(t *testing.T) {
+	dir := t.TempDir()
+	tsconfig := `{"compilerOptions": {"experimentalDecorators": true, "useDefineForClassFields": false}}`
+	if err := os.WriteFile(filepath.Join(dir, "tsconfig.json"), []byte(tsconfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{}
+	cfg.LoadTSConfigPaths(dir)
+	o := cfg.TSCompilerOptions
+	if !o.ExperimentalDecorators || o.UseDefineForClassFields == nil || *o.UseDefineForClassFields {
+		t.Errorf("TSCompilerOptions = %+v", o)
+	}
+}
+
 func TestLoadTSConfigPathsWithAliases(t *testing.T) {
 	dir := t.TempDir()
 	tsconfig := `{
