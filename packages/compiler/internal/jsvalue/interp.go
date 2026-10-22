@@ -777,6 +777,25 @@ func (in *Interp) execStmt(stmt ast.Stmt) (Value, control) {
 		return Undefined(), ctlNormal
 	case *ast.ThrowStmt:
 		return Unsupported("throw statement"), ctlError
+	case *ast.WhileStmt:
+		return in.execWhile(s.Test, s.Body, false)
+	case *ast.DoWhileStmt:
+		return in.execWhile(s.Test, s.Body, true)
+	case *ast.SwitchStmt:
+		return in.execSwitch(s)
+	case *ast.TryStmt:
+		// A build-time evaluation never throws a JS exception it could catch
+		// (failures are Unknown values), so the try body runs as a block.
+		v, ctl := in.execStmt(&ast.BlockStmt{Body: s.Body})
+		if ctl != ctlNormal {
+			return v, ctl
+		}
+		if len(s.Finally) > 0 {
+			return in.execStmt(&ast.BlockStmt{Body: s.Finally})
+		}
+		return Undefined(), ctlNormal
+	case *ast.ImportStmt, *ast.ClassDecl:
+		return Unsupported(strings.TrimPrefix(fmt.Sprintf("%T", stmt), "*ast.") + " inside a function body"), ctlError
 	}
 	return Unsupported(strings.TrimPrefix(fmt.Sprintf("%T", stmt), "*ast.") + " statements are not supported"), ctlError
 }
@@ -835,6 +854,80 @@ func (in *Interp) execFor(s *ast.ForStmt) (Value, control) {
 				return u, ctlError
 			}
 		}
+	}
+	return Undefined(), ctlNormal
+}
+
+func (in *Interp) execWhile(test ast.Expr, body []ast.Stmt, doFirst bool) (Value, control) {
+	saved := in.Scope
+	defer func() { in.Scope = saved }()
+	for iter := 0; ; iter++ {
+		if iter >= maxLoopIterations {
+			return Unsupported("loop iteration limit exceeded"), ctlError
+		}
+		if !doFirst || iter > 0 {
+			t := in.Eval(test)
+			truthy, known := t.Truthy()
+			if !known {
+				return unknownOr(t, "while"), ctlError
+			}
+			if !truthy {
+				return Undefined(), ctlNormal
+			}
+		}
+		in.Scope = NewScope(saved)
+		v, ctl := in.exec(body)
+		switch ctl {
+		case ctlReturn, ctlError:
+			return v, ctl
+		case ctlBreak:
+			return Undefined(), ctlNormal
+		}
+	}
+}
+
+func (in *Interp) execSwitch(s *ast.SwitchStmt) (Value, control) {
+	disc := in.Eval(s.Discriminant)
+	if disc.IsUnknown() {
+		return disc, ctlError
+	}
+	start := -1
+	for i, c := range s.Cases {
+		if c.Test == nil {
+			continue
+		}
+		t := in.Eval(c.Test)
+		if t.IsUnknown() {
+			return t, ctlError
+		}
+		if StrictEquals(disc, t) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		for i, c := range s.Cases {
+			if c.Test == nil {
+				start = i
+				break
+			}
+		}
+	}
+	if start < 0 {
+		return Undefined(), ctlNormal
+	}
+	saved := in.Scope
+	in.Scope = NewScope(saved)
+	defer func() { in.Scope = saved }()
+	for _, c := range s.Cases[start:] {
+		v, ctl := in.exec(c.Body)
+		switch ctl {
+		case ctlBreak:
+			return Undefined(), ctlNormal
+		case ctlNormal:
+			continue
+		}
+		return v, ctl
 	}
 	return Undefined(), ctlNormal
 }
