@@ -1,14 +1,3 @@
 {
-  "array_literal": "array literal in child position stringified instead of rendered",
-  "array_mixed_nullish": "array literal in child position stringified instead of rendered",
-  "array_nested": "array literal in child position stringified instead of rendered",
-  "array_of_numbers": "array literal in child position stringified instead of rendered",
-  "array_of_strings": "array literal in child position stringified instead of rendered",
-  "comp_const_data": "undefined className emitted as class=\"\" instead of omitted",
-  "comp_spread_props": "spread props on a component's root element dropped",
-  "filter_then_map": ".filter().map() chain over literal array renders nothing",
-  "num_large": "number formatting: 1e20 and 1e21 (React: 100000000000000000000 and 1e+21)",
-  "num_negative_zero": "-0 rendered as \"-0\" (React: \"0\")",
-  "num_small_exp": "esbuild type-strip reprints 0.000001 as 1e-6 and the evaluator prints the literal instead of JS Number formatting",
-  "optional_chaining": "optional chaining on object literals evaluates to empty"
+  "comp_spread_props": "spread props on a component's root element dropped"
 }

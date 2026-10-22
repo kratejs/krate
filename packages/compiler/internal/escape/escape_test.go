@@ -7,7 +7,6 @@ func TestHTML(t *testing.T) {
 		`<script>alert("x")</script>`: `&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;`,
 		`a & b`:                       `a &amp; b`,
 		`it's`:                        `it&#39;s`,
-		"unit\x1fsep":                 "unitsep", // internal array separator stripped
 		`plain text`:                  `plain text`,
 	}
 	for in, want := range cases {

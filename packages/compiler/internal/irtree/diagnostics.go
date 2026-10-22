@@ -6,6 +6,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // warnUnrenderedComponent reports a component tag that renders nothing
@@ -243,7 +244,9 @@ func (b *builder) expansionSignature(attrs map[string]ast.Expr, el *ast.JSXEleme
 		expr := attrs[k]
 		v := ""
 		if expr != nil && !b.referencesSignal(expr) {
-			v = b.resolveBindingValue(expr, b.localProps)
+			if src, ok := jsvalue.JSSource(b.resolveBindingValue(expr, b.localProps)); ok {
+				v = src
+			}
 		}
 		if v == "" {
 			v = "js:" + generateExprJS(expr, b.sigMap())

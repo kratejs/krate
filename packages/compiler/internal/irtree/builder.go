@@ -104,7 +104,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 		elementCounts:    make(map[string]int),
 		slotIDMap:        make(map[string]SlotID),
 		slotCounts:       make(map[string]int),
-		moduleConsts:     moduleConsts,
+		moduleConsts:     typedModuleConsts(moduleConstInits, moduleConsts),
 		moduleConstInits: moduleConstInits,
 		cvaFactories:     mergeCVAFactories(ann.CVAFactories, prog),
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
@@ -155,17 +155,18 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 
 	cssSignals, noJSFallback := builder.cssStylesheets()
 	return &ComponentTree{
-		Root:            root,
-		HasLinks:        builder.hasLinks,
-		RuntimeStore:    builder.runtimeProps,
-		Functions:       ann.Functions,
-		CVAFactories:    builder.cvaFactories,
-		ContextDefaults: builder.contextDefaults,
-		CSSSignalsCSS:   cssSignals,
-		HasCSSSignals:   len(builder.cssCollected) > 0 || len(builder.cssConditions) > 0,
-		NoJSFallbackCSS: noJSFallback,
-		NeedsCSSARIA:    builder.cssNeedsARIA,
-		Errors:          errs,
+		Root:             root,
+		HasLinks:         builder.hasLinks,
+		RuntimeStore:     builder.runtimeProps,
+		Functions:        ann.Functions,
+		CVAFactories:     builder.cvaFactories,
+		ContextDefaults:  builder.contextDefaults,
+		ModuleConstInits: builder.moduleConstInits,
+		CSSSignalsCSS:    cssSignals,
+		HasCSSSignals:    len(builder.cssCollected) > 0 || len(builder.cssConditions) > 0,
+		NoJSFallbackCSS:  noJSFallback,
+		NeedsCSSARIA:     builder.cssNeedsARIA,
+		Errors:           errs,
 
 		ExternalComponents: builder.externals,
 		Warnings:           builder.warnings,
@@ -221,7 +222,7 @@ type builder struct {
 	localFnBody      []ast.Stmt          // body of current component function for handler resolution
 	localSignals     map[string]ast.Expr // component-local signal context (name -> initial expr)
 	signalSetters    map[string]bool     // component-local signal setter names
-	localProps       map[string]string   // component-local resolved props (name -> value)
+	localProps       valueMap            // component-local resolved props (name -> value)
 	localParamNames  map[string]bool     // component parameter names (destructured or not) for undefined folding
 	// restProps maps a rest parameter name (e.g. `props` in `{a, ...props}`) to
 	// the call-site attributes it collects (attr name -> expression). Used to
@@ -231,7 +232,7 @@ type builder struct {
 	refObjectVars    map[string]bool           // component-local names bound to a useRef {current:...} object
 	refCallbackVars  map[string]bool           // component-local names bound to a function (callback-ref targets)
 	callSiteChildren []ast.JSXChild            // call-site children of the current component
-	moduleConsts     map[string]string         // module-level const values (name -> resolved literal)
+	moduleConsts     valueMap                  // module-level const values (name -> folded value)
 	moduleConstInits map[string]ast.Expr       // module-level const initializers (name -> expr)
 	cvaFactories     map[string]*CVASpec       // module-level `const X = cva(...)` factories
 	contextDefaults  map[string]string         // module-level `const X = createContext(v)` defaults

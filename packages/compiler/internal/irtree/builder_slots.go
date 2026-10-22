@@ -14,6 +14,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
@@ -198,7 +199,7 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	for _, name := range extractParamNames(fn) {
 		b.localParamNames[name] = true
 		if b.localProps == nil {
-			b.localProps = make(map[string]string)
+			b.localProps = make(valueMap)
 		}
 		if _, exists := b.localProps[name]; !exists {
 			b.localProps[name] = b.paramDefaultValue(fn, name)
@@ -220,7 +221,7 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	// props/vars take precedence, so module consts are only added as defaults.
 	if len(b.moduleConsts) > 0 {
 		if b.localProps == nil {
-			b.localProps = make(map[string]string)
+			b.localProps = make(valueMap)
 		}
 		for k, v := range b.moduleConsts {
 			if _, exists := b.localProps[k]; !exists {
@@ -235,12 +236,12 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	// folded and hydration would reference an undefined context object.
 	if len(b.contextDefaults) > 0 {
 		if b.localProps == nil {
-			b.localProps = make(map[string]string)
+			b.localProps = make(valueMap)
 		}
 		for k, v := range b.contextDefaults {
 			key := contextMarkerPrefix + k
 			if _, exists := b.localProps[key]; !exists {
-				b.localProps[key] = v
+				b.localProps[key] = jsvalue.FromLegacy(v)
 			}
 		}
 	}
@@ -258,7 +259,7 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	// leaking the identifier name into output (e.g. a root `const title = "..."`
 	// rendered inside <Head><title>{title}</title></Head>).
 	if b.localProps == nil {
-		b.localProps = make(map[string]string)
+		b.localProps = make(valueMap)
 	}
 	// useId() resolves to a per-component-instance build-time literal. The
 	// instance ID is stable across SSR and hydration, so `<Label htmlFor={id}>`
@@ -289,18 +290,18 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 		case *ast.ArrayExpr, *ast.ObjectExpr, *ast.JSXElement, *ast.JSXFragment, *ast.ArrowFn:
 			continue
 		}
-		if v := b.evalAttrValue(init); v != "" {
+		if v := b.evalAttrConst(init); !v.ContainsUnknown() && !v.IsFunction() && !v.IsJSX() {
 			locals[name] = v
 			if b.localProps == nil {
-				b.localProps = make(map[string]string)
+				b.localProps = make(valueMap)
 			}
 			b.localProps[name] = v
 		}
 	}
 	if len(locals) > 0 {
-		node.LocalVars = make(map[string]string, len(locals))
+		node.LocalVars = make(map[string]jsvalue.Value, len(locals))
 		for name, val := range locals {
-			if val != "" {
+			if !val.IsUnknown() {
 				node.LocalVars[name] = val
 			}
 		}
@@ -346,7 +347,7 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 			Object:   &ast.Identifier{Name: "props"},
 			Property: &ast.Identifier{Name: contextPropPrefix + ctx},
 		}
-		locals[name] = ""
+		locals[name] = jsvalue.Dynamic("context " + ctx)
 		localLeaked[name] = true
 	}
 	if len(locals) > 0 {
@@ -397,20 +398,20 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 				// A folded, non-reactive scalar (e.g. `const classes = cn(cva(...))`)
 				// can be emitted as its value. Only props-derived arrays/objects/
 				// functions (and signal-reactive locals) need the runtime expression.
-				foldable := init != nil && locals[name] != "" && !b.referencesSignal(init) && !isReferenceInit(init)
+				foldable := init != nil && !locals[name].IsUnknown() && !b.referencesSignal(init) && !isReferenceInit(init)
 				if foldable {
 					switch init.(type) {
 					case *ast.ArrayExpr, *ast.ObjectExpr, *ast.JSXElement, *ast.JSXFragment, *ast.ArrowFn:
 						foldable = false
 					}
 				}
-				if init != nil && !foldable && (referencesProps(init) || referencesAnyLocal(init, b.sigMap(), locals) || isReferenceInit(init) || locals[name] == "") {
+				if init != nil && !foldable && (referencesProps(init) || referencesAnyLocal(init, b.sigMap(), locals) || isReferenceInit(init) || locals[name].IsUnknown()) {
 					if js := generateExprJS(init, b.sigMap()); js != "" {
 						decl = "var " + name + "=" + js
 					}
 				}
 				if decl == "" {
-					decl = "var " + name + "=" + jsLiteralFor(locals[name])
+					decl = "var " + name + "=" + valueJSLiteral(locals[name])
 				}
 				// Signal-referencing locals must be declared after the signal
 				// declarations; everything else goes BEFORE collectExtraVarJS's
@@ -969,7 +970,7 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		}
 		if s, ok := literalString(valueExpr); ok {
 			b.localProps = cloneStringMap(savedProps)
-			b.localProps[contextMarkerPrefix+ctx] = s
+			b.localProps[contextMarkerPrefix+ctx] = jsvalue.String(s)
 		} else if valueExpr != nil && !isScope {
 			// A dynamic value (signal/prop expression): substitute it for
 			// `Ctx.useContext()` reads while building the subtree.
@@ -977,7 +978,7 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 			b.contextValues[ctx] = valueExpr
 			// Static rendering (SSREval) still folds reads from this marker, so
 			// seed it with the value's build-time initial as a fallback.
-			if initial := evalConstWithSignals(valueExpr, b.sigMap(), savedProps); initial != "" {
+			if initial := evalConstValue(valueExpr, b.sigMap(), savedProps); !initial.ContainsUnknown() {
 				b.localProps = cloneStringMap(savedProps)
 				b.localProps[contextMarkerPrefix+ctx] = initial
 			}
@@ -1440,10 +1441,14 @@ func (b *builder) resolveCallSiteChildrenText() (string, bool) {
 		case *ast.JSXText:
 			sb.WriteString(c.Value)
 		case *ast.JSXExprContainer:
-			if c.Expression == nil || b.referencesSignal(c.Expression) || !b.testFullyKnown(c.Expression) {
+			if c.Expression == nil || b.referencesSignal(c.Expression) {
 				return "", false
 			}
-			sb.WriteString(evalConstWithSignals(c.Expression, b.sigMap(), b.localProps))
+			text, ok := childText(b.evalValue(c.Expression))
+			if !ok {
+				return "", false
+			}
+			sb.WriteString(text)
 		default:
 			// JSX elements / fragments at the call site can't become plain text.
 			return "", false
@@ -1483,15 +1488,13 @@ func (b *builder) buildSyntaxHighlightSlots(el *ast.JSXElement, parentID string)
 					continue
 				}
 			}
-			val := evalConstWithSignals(c.Expression, b.sigMap(), b.localProps)
-			if id, ok := c.Expression.(*ast.Identifier); ok && val == id.Name {
-				// Unresolvable identifier - can't highlight at compile time.
+			val, ok := childText(b.evalValue(c.Expression))
+			if !ok {
+				// Not known at build time - can't highlight at compile time.
 				canHighlight = false
 				break
 			}
-			if val != "" {
-				code.WriteString(val)
-			}
+			code.WriteString(val)
 		}
 	}
 
@@ -1604,7 +1607,7 @@ func (b *builder) buildMetaOpeningTag(el *ast.JSXElement, tag string) string {
 		if attr.Spread || attr.Name == "dangerouslySetInnerHTML" {
 			continue
 		}
-		buf.WriteString(RenderAttr(tag, attr, b.evalAttrValue))
+		buf.WriteString(RenderAttr(tag, attr, b.evalAttrConst, b.evalAttrValue))
 	}
 	buf.WriteByte('>')
 	return buf.String()
@@ -1711,6 +1714,9 @@ func (b *builder) buildGoComponentSlot(el *ast.JSXElement, ref GoComponentRef, p
 // constJSON serializes a call-site prop expression to JSON, resolving
 // signal/prop reads to their build-time values.
 func (b *builder) constJSON(expr ast.Expr) string {
+	if js, ok := jsvalue.JSONStringify(b.evalValue(expr)); ok {
+		return js
+	}
 	return SerializeJSON(expr, func(e ast.Expr) (string, bool) {
 		return evalConstWithSignals(e, b.sigMap(), b.localProps), true
 	})
@@ -1847,6 +1853,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 				Tier:             TierStatic,
 				Fn:               childFn,
 				SSREvalBindings:  bindings,
+				SSREvalAttrs:     attrs,
 				LocalVars:        locals,
 				IsSSREval:        true,
 				CallSiteChildren: el.Children,
@@ -1905,7 +1912,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	savedProps := b.localProps
 	savedFuncProps := b.localFuncProps
 	savedRestProps := b.restProps
-	b.localProps = make(map[string]string, len(attrs))
+	b.localProps = make(valueMap, len(attrs))
 	var funcProps map[string]bool
 	for name, expr := range attrs {
 		if b.isFuncReference(expr) {
@@ -1983,7 +1990,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	}
 	if childNode.IsSSREval && len(childNode.LocalVars) > 0 {
 		if childNode.SSREvalBindings == nil {
-			childNode.SSREvalBindings = make(map[string]string, len(childNode.LocalVars))
+			childNode.SSREvalBindings = make(map[string]jsvalue.Value, len(childNode.LocalVars))
 		}
 		for name, val := range childNode.LocalVars {
 			if _, exists := childNode.SSREvalBindings[name]; !exists {
@@ -2251,7 +2258,7 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 	// A <select value>/<select defaultValue> marks its matching options
 	// selected; the selection is visible to options built below it.
 	if tag == "select" {
-		sel, _ := SelectSelection(el, b.evalAttrValue)
+		sel, _ := SelectSelection(el, b.evalAttrConst)
 		b.selectStack = append(b.selectStack, sel)
 		defer func() { b.selectStack = b.selectStack[:len(b.selectStack)-1] }()
 	}
@@ -2293,7 +2300,7 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 	}
 	// <textarea value/defaultValue> renders the value as its content.
 	if tag == "textarea" {
-		if content, ok := TextareaValue(el, b.evalAttrValue); ok {
+		if content, ok := TextareaValue(el, b.evalAttrConst); ok {
 			children = []SlotNode{&StaticHTML{HTML: content}}
 		}
 	}
@@ -2419,7 +2426,7 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 	optionSelected := false
 	if name == "option" && len(b.selectStack) > 0 && b.selectStack[len(b.selectStack)-1] != nil {
 		inSelect = true
-		optionSelected = OptionSelected(b.selectStack[len(b.selectStack)-1], OptionValue(el, b.evalAttrValue))
+		optionSelected = OptionSelected(b.selectStack[len(b.selectStack)-1], OptionValue(el, b.evalAttrConst))
 	}
 	for _, attr := range attrsForOpening {
 		if attr.Spread || attr.Name == "ref" || attr.Name == "dangerouslySetInnerHTML" {
@@ -2440,7 +2447,7 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 		if skipFormValueAttr(name, attr.Name, inSelect) {
 			continue
 		}
-		rendered := RenderAttr(name, attr, b.evalAttrValue)
+		rendered := RenderAttr(name, attr, b.evalAttrConst, b.evalAttrValue)
 		buf.WriteString(rendered)
 		if rendered != "" && actionAttrs[attr] {
 			buf.WriteString(` data-krate-action`)
@@ -2470,17 +2477,11 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 		switch {
 		case skipFormValueAttr(name, a.AttrName, inSelect):
 		case a.AttrName == "style":
-			initial := a
-			if css, ok := StyleCSS(a.InitialExpr, func(e ast.Expr) string {
-				if e == initial.InitialExpr {
-					return initial.Initial
-				}
-				return b.evalAttrValue(e)
-			}); ok {
+			if css, ok := StyleCSS(a.InitialExpr, b.evalAttrConst); ok {
 				buf.WriteString(` style="` + escape.HTMLAttr(css) + `"`)
 			}
 		case htmlspec.IsBoolean(a.AttrName) || a.Initial != "":
-			buf.WriteString(htmlspec.Attr(name, a.AttrName, AttrValue(a.InitialExpr, a.Initial)))
+			buf.WriteString(htmlspec.Attr(name, a.AttrName, JSAttrValue(b.evalAttrConst(a.InitialExpr), a.Initial)))
 		}
 		if !htmlspec.ValidAttrName(a.AttrName) {
 			continue
@@ -2502,8 +2503,8 @@ func (b *builder) actionAttrURL(expr ast.Expr) (string, bool) {
 	case *ast.MemberExpr:
 		if id, ok := e.Object.(*ast.Identifier); ok && id.Name == "props" && !e.Computed {
 			if prop, ok := e.Property.(*ast.Identifier); ok {
-				if raw, ok := b.localProps[prop.Name]; ok {
-					val := strings.Trim(raw, `"'`)
+				if raw, ok := b.localProps[prop.Name]; ok && raw.Kind() == jsvalue.KindString {
+					val := strings.Trim(raw.StringValue(), `"'`)
 					if strings.Contains(val, "/__krate/action/") {
 						return val, true
 					}
@@ -2674,6 +2675,19 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 		}
 	}
 
+	// An array literal holding JSX renders each element in order (React
+	// flattens arrays in child position).
+	if arr, ok := ec.Expression.(*ast.ArrayExpr); ok && arrayHasJSX(arr) {
+		var nodes []SlotNode
+		for _, el := range arr.Elements {
+			if el == nil {
+				continue
+			}
+			nodes = append(nodes, b.buildExprContainerChildrenMode(&ast.JSXExprContainer{Expression: el}, parentID, doEscape)...)
+		}
+		return nodes
+	}
+
 	// Check if expression references any signal
 	if !b.referencesSignal(ec.Expression) {
 		// Simple identifiers that reference local variables (not signals,
@@ -2692,30 +2706,26 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 			// identifier (which would render the raw name as text).
 			if id.Name != "children" {
 				if v, isConst := b.moduleConsts[id.Name]; isConst {
-					if doEscape {
-						return []SlotNode{&StaticHTML{HTML: escape.HTML(v)}}
+					if nodes, ok := staticChildNodes(v, doEscape); ok {
+						return nodes
 					}
-					return []SlotNode{&StaticHTML{HTML: v}}
 				}
 				// Local variables resolved via collectLocalVars (var X = expr)
 				// have known values at build time; render statically.
 				if v, ok := b.localProps[id.Name]; ok {
-					if doEscape {
-						return []SlotNode{&StaticHTML{HTML: escape.HTML(v)}}
+					if nodes, ok := staticChildNodes(v, doEscape); ok {
+						return nodes
 					}
-					return []SlotNode{&StaticHTML{HTML: v}}
 				}
 			}
 			return []SlotNode{b.buildExprSlot(ec.Expression, parentID)}
 		}
-		slot := b.buildStaticValueSlot(ec.Expression, parentID)
-		if slot != nil {
-			if doEscape {
-				return []SlotNode{&StaticHTML{HTML: escape.HTML(slot.HTML)}}
-			}
-			return []SlotNode{slot}
+		// A value known at build time renders with React child semantics;
+		// anything else is deferred to a hydration expression slot.
+		if nodes, ok := staticChildNodes(b.evalValue(ec.Expression), doEscape); ok {
+			return nodes
 		}
-		return nil
+		return []SlotNode{b.buildExprSlot(ec.Expression, parentID)}
 	}
 
 	// Simple signal read: {count()}
@@ -2746,7 +2756,7 @@ func (b *builder) buildTextSlot(expr ast.Expr, parentID string) *TextSlot {
 
 	id := b.assignSlotID(b.nextDynamicSlot(parentID, "text"))
 	decl := b.resolveSignal(signalName)
-	initial := evalConstWithSignals(decl.InitialExpr, b.sigMap(), b.localProps)
+	initial, _ := childText(b.evalValue(decl.InitialExpr))
 
 	return &TextSlot{
 		ID:      id,
@@ -2761,7 +2771,9 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 	id := b.assignSlotID(b.nextDynamicSlot(parentID, "expr"))
 	signals := b.collectSignalReads(expr)
 	exprSource := generateExprJS(expr, b.sigMap())
-	initial := evalConstWithSignals(expr, b.sigMap(), b.localProps)
+	// The SSR initial is the value rendered as child text (React semantics:
+	// false/null/undefined render nothing); the emitter escapes it.
+	initial, _ := childText(b.evalValue(expr))
 
 	return &ExprSlot{
 		ID:         id,
@@ -2840,9 +2852,9 @@ func (b *builder) tryResolveForLoopArray(expr ast.Expr, parentID string) []SlotN
 // evalForLoopArray statically iterates a for-loop, binding the loop variable
 // into the props context, and builds each pushed JSX element as a slot node.
 func (b *builder) evalForLoopArray(fs *ast.ForStmt, pushArgs []ast.Expr, parentID string) []SlotNode {
-	loopVars := make(map[string]string)
-	evalProps := func() map[string]string {
-		m := make(map[string]string, len(b.localProps)+len(loopVars))
+	loopVars := make(valueMap)
+	evalProps := func() valueMap {
+		m := make(valueMap, len(b.localProps)+len(loopVars))
 		for k, v := range b.localProps {
 			m[k] = v
 		}
@@ -2856,9 +2868,9 @@ func (b *builder) evalForLoopArray(fs *ast.ForStmt, pushArgs []ast.Expr, parentI
 		for _, decl := range vs.Decls {
 			if decl.Name != "" {
 				if decl.Init != nil {
-					loopVars[decl.Name] = evalConstWithSignals(decl.Init, b.sigMap(), evalProps())
+					loopVars[decl.Name] = evalConstValue(decl.Init, b.sigMap(), evalProps())
 				} else {
-					loopVars[decl.Name] = ""
+					loopVars[decl.Name] = jsvalue.Undefined()
 				}
 			}
 		}
@@ -2869,7 +2881,7 @@ func (b *builder) evalForLoopArray(fs *ast.ForStmt, pushArgs []ast.Expr, parentI
 
 	var nodes []SlotNode
 	for iter := 0; iter < 1000; iter++ {
-		if isFalsyValue(evalConstWithSignals(fs.Test, b.sigMap(), evalProps())) {
+		if truthy, known := evalConstValue(fs.Test, b.sigMap(), evalProps()).Truthy(); !known || !truthy {
 			break
 		}
 		b.localProps = evalProps()
@@ -2878,11 +2890,11 @@ func (b *builder) evalForLoopArray(fs *ast.ForStmt, pushArgs []ast.Expr, parentI
 		}
 		if upd, ok := fs.Update.(*ast.UnaryExpr); ok && (upd.Op == "++" || upd.Op == "--") {
 			if id, ok := upd.Arg.(*ast.Identifier); ok {
-				if n, ok := parseNumeric(loopVars[id.Name]); ok {
+				if cur := loopVars[id.Name]; cur.Kind() == jsvalue.KindNumber {
 					if upd.Op == "++" {
-						loopVars[id.Name] = trimFloat(n + 1)
+						loopVars[id.Name] = jsvalue.Number(cur.NumberValue() + 1)
 					} else {
-						loopVars[id.Name] = trimFloat(n - 1)
+						loopVars[id.Name] = jsvalue.Number(cur.NumberValue() - 1)
 					}
 				}
 			}
@@ -2908,7 +2920,7 @@ func (b *builder) tryResolveConditional(cond *ast.ConditionalExpr, parentID stri
 		return nil
 	}
 	var branch ast.Expr
-	if isTruthyValue(val) {
+	if val.ToBoolean() {
 		branch = cond.Consequent
 	} else {
 		branch = cond.Alternate
@@ -2919,8 +2931,23 @@ func (b *builder) tryResolveConditional(cond *ast.ConditionalExpr, parentID stri
 	case *ast.JSXFragment:
 		return b.buildSlotNodes(br, parentID)
 	default:
-		v := evalConstWithSignals(branch, b.sigMap(), b.localProps)
-		return []SlotNode{&StaticHTML{HTML: v}}
+		// A non-JSX branch renders as a child value (strings escaped,
+		// null/false empty); a branch holding JSX goes through the slot
+		// pipeline.
+		if !hasJSXInExpr(branch) {
+			if nodes, ok := staticChildNodes(b.evalValue(branch), true); ok {
+				if nodes[0].(*StaticHTML).HTML == "" {
+					// Keep a node so the resolved (empty) branch is not
+					// mistaken for an unresolved test.
+					return []SlotNode{&StaticHTML{HTML: ""}}
+				}
+				return nodes
+			}
+		}
+		if nodes := b.buildSlotNodes(branch, parentID); len(nodes) > 0 {
+			return nodes
+		}
+		return []SlotNode{&StaticHTML{HTML: ""}}
 	}
 }
 
@@ -3000,12 +3027,16 @@ func (b *builder) tryResolveGuard(bin *ast.BinaryExpr, parentID string) ([]SlotN
 	if !known {
 		return nil, false
 	}
-	truthy := isTruthyValue(val)
+	truthy := val.ToBoolean()
 	// && renders the right operand when the left is truthy;
 	// || renders the right operand when the left is falsy.
 	renderJSX := (bin.Op == "&&") == truthy
 	if !renderJSX {
-		// Guard renders nothing emit nothing (nil slice).
+		// The guard evaluates to its left operand, which renders as a child:
+		// `{0 && <A/>}` shows 0 (React semantics), false/null/"" show nothing.
+		if nodes, ok := staticChildNodes(val, true); ok && nodes[0].(*StaticHTML).HTML != "" {
+			return nodes, true
+		}
 		return nil, true
 	}
 	return b.buildSlotNodes(bin.Right, parentID), true
@@ -3028,23 +3059,41 @@ func (b *builder) buildGuardSlot(bin *ast.BinaryExpr, parentID string) *Conditio
 
 // knownTestValue resolves a ternary test to a value and reports whether the
 // resolution is authoritative (no unresolvable identifiers leaked).
-func (b *builder) knownTestValue(test ast.Expr) (string, bool) {
+func (b *builder) knownTestValue(test ast.Expr) (jsvalue.Value, bool) {
 	// {props.children ? <A/> : <B/>} - truthiness comes from call-site children.
 	if mem, ok := test.(*ast.MemberExpr); ok {
 		if id, ok := mem.Object.(*ast.Identifier); ok && id.Name == "props" {
 			if prop, ok := mem.Property.(*ast.Identifier); ok && prop.Name == "children" {
-				if b.hasCallSiteChildren() {
-					return "true", true
-				}
-				return "", true
+				return jsvalue.Bool(b.hasCallSiteChildren()), true
 			}
 		}
 	}
-	v := evalConstWithSignals(test, b.sigMap(), b.localProps)
-	if b.testFullyKnown(test) || b.propsReadsClosed(test) {
-		return v, true
+	// A typed value that folded completely is authoritative: Unknown
+	// propagates through every operator, so only fully-resolved leaves (or a
+	// short-circuit that never reads the unknown side) produce a known value.
+	v := b.evalValue(test)
+	if _, known := v.Truthy(); !known {
+		return v, false
 	}
-	return v, false
+	if isPropsMemberOfFuncProp(test, b.localFuncProps) {
+		return v, false
+	}
+	return v, true
+}
+
+// isPropsMemberOfFuncProp reports a direct `props.<fn>` read of a function
+// prop, which has no build-time value.
+func isPropsMemberOfFuncProp(e ast.Expr, funcProps map[string]bool) bool {
+	mem, ok := e.(*ast.MemberExpr)
+	if !ok || funcProps == nil {
+		return false
+	}
+	id, ok := mem.Object.(*ast.Identifier)
+	if !ok || id.Name != "props" {
+		return false
+	}
+	prop, ok := mem.Property.(*ast.Identifier)
+	return ok && funcProps[prop.Name]
 }
 
 // propsReadsClosed reports whether every leaf of a guard/ternary test is
@@ -3218,7 +3267,7 @@ func (b *builder) buildConditionalSlot(expr ast.Expr, parentID string) *Conditio
 	active := false
 	if cond != nil {
 		testJS = generateExprJS(cond.Test, b.sigMap())
-		active = isTruthyValue(evalConstWithSignals(cond.Test, b.sigMap(), b.localProps))
+		active = b.evalValue(cond.Test).ToBoolean()
 	}
 
 	slot := &ConditionalSlot{
@@ -3282,35 +3331,18 @@ func (b *builder) resolveArrayLiteralExpr(expr ast.Expr) *ast.ArrayExpr {
 	if prop, ok := mem.Property.(*ast.Identifier); !ok || prop.Name != "map" {
 		return nil
 	}
-	// Resolve the array object expression to a JS source literal.
-	var source string
-	switch obj := mem.Object.(type) {
-	case *ast.ArrayExpr:
+	if obj, ok := mem.Object.(*ast.ArrayExpr); ok {
 		return obj
-	case *ast.Identifier:
-		if v, isConst := b.moduleConsts[obj.Name]; isConst {
-			source = v
-		} else if v, ok := b.localProps[obj.Name]; ok {
-			source = v
-		}
-	case *ast.MemberExpr:
-		source = evalConstWithSignals(obj, b.sigMap(), b.localProps)
 	}
-	if source == "" {
+	// Fold the receiver (a prop, local, module const, signal initial, or a
+	// chain such as items.filter(...).slice(0, 3)) to a typed array value and
+	// turn its elements back into literals for item substitution.
+	v := b.evalValue(mem.Object)
+	if !v.IsArray() || v.ContainsUnknown() {
 		return nil
 	}
-	prog := parseExprAsProgram(source)
-	if prog == nil {
-		return nil
-	}
-	for _, stmt := range prog.Body {
-		if es, ok := stmt.(*ast.ExprStmt); ok {
-			if arr, ok := es.Expression.(*ast.ArrayExpr); ok {
-				return arr
-			}
-		}
-	}
-	return nil
+	arr, _ := jsvalue.ToAST(v).(*ast.ArrayExpr)
+	return arr
 }
 
 // tryResolveArrayItems renders a list slot's SSR items from an already-resolved
@@ -3879,28 +3911,45 @@ func (b *builder) buildAttrBinding(attr *ast.JSXAttr, elementID string) *AttrBin
 // buildStaticValueSlot - expression with no signals
 
 func (b *builder) buildStaticValueSlot(expr ast.Expr, parentID string) *StaticHTML {
-	if RendersNothing(expr) {
-		return &StaticHTML{HTML: ""}
+	v := b.evalValue(expr)
+	if nodes, ok := staticChildNodes(v, false); ok {
+		return nodes[0].(*StaticHTML)
 	}
-	val := evalConstWithSignals(expr, b.sigMap(), b.localProps)
-	// An expression that resolves to undefined/null renders nothing (React
-	// semantics) rather than the literal text "undefined". A string literal
-	// "null"/"undefined" is real text and is kept.
-	if !isStringLiteral(expr) && (val == "undefined" || val == "null") {
-		return &StaticHTML{HTML: ""}
-	}
-	return &StaticHTML{HTML: val}
+	return &StaticHTML{HTML: legacyConstString(expr, v)}
 }
 
 // buildStaticTextSlot is buildStaticValueSlot for JSX text positions: the
 // statically-evaluated result is HTML-escaped so a template literal or string
 // expression cannot inject real markup (e.g. <Code>{`return <h1>x</h1>`}</Code>).
 func (b *builder) buildStaticTextSlot(expr ast.Expr, parentID string) *StaticHTML {
-	val := evalConstWithSignals(expr, b.sigMap(), b.localProps)
-	if !isStringLiteral(expr) && (val == "undefined" || val == "null") {
-		return &StaticHTML{HTML: ""}
+	v := b.evalValue(expr)
+	if nodes, ok := staticChildNodes(v, true); ok {
+		return nodes[0].(*StaticHTML)
 	}
-	return &StaticHTML{HTML: escape.HTML(val)}
+	return &StaticHTML{HTML: escape.HTML(legacyConstString(expr, v))}
+}
+
+// staticChildNodes renders a build-time value in JSX child position with React
+// semantics (null/undefined/booleans render nothing, numbers and strings are
+// text, arrays concatenate). escapeText=false keeps text raw for meta content
+// (inline <script>/<style>). ok=false when the value is not statically known
+// or not renderable as static text.
+func staticChildNodes(v jsvalue.Value, escapeText bool) ([]SlotNode, bool) {
+	if v.ContainsUnknown() {
+		return nil, false
+	}
+	if escapeText {
+		html, ok := renderChildValue(v)
+		if !ok {
+			return nil, false
+		}
+		return []SlotNode{&StaticHTML{HTML: html}}, true
+	}
+	text, ok := childText(v)
+	if !ok {
+		return nil, false
+	}
+	return []SlotNode{&StaticHTML{HTML: text}}, true
 }
 
 // Signal resolution helpers
@@ -4178,7 +4227,7 @@ func signalOptionsJS(d sigutil.Decl, signals map[string]ast.Expr) string {
 // should evaluate the real expression. This returns the JS source of the
 // initializer when it's a genuine runtime expression we can't fold, and ""
 // otherwise (so newhydrate emits the folded literal).
-func signalRawInit(expr ast.Expr, folded string, signals map[string]ast.Expr, props map[string]string) string {
+func signalRawInit(expr ast.Expr, folded string, signals map[string]ast.Expr, props valueMap) string {
 	if expr == nil {
 		return ""
 	}
@@ -5102,8 +5151,8 @@ func renderFnAsHandler(fn *ast.FnDecl, signals map[string]ast.Expr) string {
 
 // cloneStringMap copies a string map so a provider can override context
 // markers for its subtree without leaking them to siblings.
-func cloneStringMap(m map[string]string) map[string]string {
-	out := make(map[string]string, len(m)+1)
+func cloneStringMap(m valueMap) valueMap {
+	out := make(valueMap, len(m)+1)
 	for k, v := range m {
 		out[k] = v
 	}
@@ -5347,7 +5396,9 @@ func (b *builder) bridgeScopeExpr(expr ast.Expr, used map[string]bool) ast.Expr 
 			return &ast.MemberExpr{Object: &ast.Identifier{Name: "props"}, Property: &ast.Identifier{Name: e.Name}}
 		}
 		if v, ok := b.localProps[e.Name]; ok && e.Name != "props" && e.Name != "children" && !strings.HasPrefix(e.Name, "__krate_") {
-			return &ast.Literal{Kind: ast.StringLit, Value: v}
+			if lit := jsvalue.ToAST(v); lit != nil {
+				return lit
+			}
 		}
 	case *ast.CallExpr:
 		if id, ok := e.Callee.(*ast.Identifier); ok && len(e.Args) == 0 {
@@ -5442,7 +5493,7 @@ func (b *builder) bridgeScopeStmts(stmts []ast.Stmt, used map[string]bool) {
 
 // foldLocalConsts folds a component's local constants using the cva/cn-aware
 // attribute evaluator, returning name -> value and extending props with them.
-func (b *builder) foldLocalConsts(fn *ast.FnDecl, props map[string]string, nextUseId func() string) map[string]string {
+func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func() string) valueMap {
 	saved := b.localProps
 	b.localProps = props
 	locals, _, inits, _, _ := collectLocalVars(fn.Body, b.sigMap(), props, nextUseId)
@@ -5454,7 +5505,7 @@ func (b *builder) foldLocalConsts(fn *ast.FnDecl, props map[string]string, nextU
 		case *ast.ArrayExpr, *ast.ObjectExpr, *ast.JSXElement, *ast.JSXFragment, *ast.ArrowFn:
 			continue
 		}
-		if v := b.evalAttrValue(init); v != "" {
+		if v := b.evalAttrConst(init); !v.ContainsUnknown() && !v.IsFunction() && !v.IsJSX() {
 			locals[name] = v
 			props[name] = v
 		}

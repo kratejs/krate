@@ -46,6 +46,9 @@ const (
 type Value struct {
 	Kind Kind
 	Str  string
+	// Items holds the element texts when the value is a JS array (used by
+	// <select multiple> selections).
+	Items []string
 }
 
 // StrVal builds a known-string Value.
@@ -382,16 +385,16 @@ func SelectValueProp(tag, jsxName string) bool {
 }
 
 // SelectValues splits an evaluated select value into the option values it
-// selects. Arrays (for <select multiple>) may arrive as a JSON/JS array
-// literal or joined with the evaluator's \x1f item separator.
+// selects. Arrays (for <select multiple>) arrive as Items, or as a JSON/JS
+// array literal from untyped callers.
 func SelectValues(v Value) []string {
 	if v.IsNullish() {
 		return nil
 	}
-	s := v.Str
-	if strings.Contains(s, "\x1f") {
-		return strings.Split(s, "\x1f")
+	if v.Items != nil {
+		return v.Items
 	}
+	s := v.Str
 	t := strings.TrimSpace(s)
 	if v.Kind != String && len(t) >= 2 && t[0] == '[' && t[len(t)-1] == ']' {
 		return splitArrayLiteral(t[1 : len(t)-1])

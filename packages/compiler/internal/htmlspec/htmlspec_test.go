@@ -172,7 +172,6 @@ func TestSelectValues(t *testing.T) {
 		{StrVal("[a]"), []string{"[a]"}},
 		{LooseVal(`["a", "c"]`), []string{"a", "c"}},
 		{LooseVal(`['a','b, c']`), []string{"a", "b, c"}},
-		{LooseVal("a\x1fb"), []string{"a", "b"}},
 		{Value{Kind: Null}, nil},
 	}
 	for _, c := range cases {

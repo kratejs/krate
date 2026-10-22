@@ -130,6 +130,10 @@ type Emitter struct {
 	// `X.useContext()` folds during SSREval (no Provider exists at build time).
 	contextDefaults map[string]string
 
+	// moduleConsts holds module-level `const X = <expr>` initializers so
+	// SSREval resolves module constants referenced by signal-less components.
+	moduleConsts map[string]ast.Expr
+
 	// CodeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
 	// during SSREval. It must match the stylesheet generated for the same theme
 	// (syntaxhighlight.CSSForTheme). Wire it from the build; empty selects the
@@ -190,6 +194,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	e.functions = tree.Functions
 	e.cvaFactories = tree.CVAFactories
 	e.contextDefaults = tree.ContextDefaults
+	e.moduleConsts = tree.ModuleConstInits
 	output := e.emitNode(tree.Root)
 
 	// Merge subtree-local metadata and orphans collected during emit.
@@ -396,21 +401,18 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		eval.SetContextDefaults(e.contextDefaults)
 	}
 	eval.SetCodeTheme(e.CodeTheme)
+	eval.SetModuleConsts(e.moduleConsts)
 	if node.RestProps != nil && node.RestPropsName != "" {
 		eval.SetRestProps(map[string]map[string]ast.Expr{node.RestPropsName: node.RestProps})
 	}
 	if node.SSREvalBindings != nil {
 		eval.SetBindings(node.SSREvalBindings)
 	}
+	eval.ResolveJSXProps(node.SSREvalAttrs)
 	if e.IconResolver != nil {
 		eval.iconEmit = func(name string, attrs []*ast.JSXAttr) (string, bool) {
 			return e.IconResolver(name, attrs)
 		}
-	}
-	// Bind local variables (var className = ..., etc.) so return-statement
-	// evaluation resolves locals derived from props.
-	if node.Fn != nil {
-		eval.BindLocalVars(node.Fn.Body)
 	}
 	var sigs []irtree.ComponentSignature
 	var out SlotOutput
@@ -442,15 +444,9 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		}
 		out.Orphans = append(out.Orphans, collectChildrenOrphans(node.Children, owner)...)
 		if childrenHTML.Len() > 0 {
-			bindings := eval.bindings
-			if bindings == nil {
-				bindings = make(map[string]string)
-			}
-			bindings["children"] = childrenHTML.String()
-			eval.SetBindings(bindings)
 			// Children were rendered through the slot pipeline (text escaped,
-			// elements hydrated) - a `{children}` container must inject them raw.
-			eval.childrenIsHTML = true
+			// elements hydrated), so they bind as a JSX value injected raw.
+			eval.SetChildrenHTML(childrenHTML.String())
 			// When the call-site children were fully static text, SSREval also
 			// gets the raw text so <SyntaxHighlight> chroma-highlights the
 			// original code instead of the rendered HTML.
@@ -508,18 +504,9 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		defer func() { eval.interactiveEmit = nil }()
 	}
 
-	// Resolve the component's return value. Early if/else-if returns (each
-	// branch ending in `return <jsx/>`, with or without a wrapping block) are
-	// resolved first so prop-driven components whose return depends on a
-	// member value (e.g. <a> vs <div>) render the right branch. Otherwise the
-	// trailing top-level return is evaluated.
-	var retHTML string
-	if v, ok := eval.evalBranchReturns(node.Fn.Body); ok {
-		retHTML = v
-	} else if ret := findReturnStmtIn(node.Fn.Body); ret != nil && ret.Value != nil {
-		retHTML = eval.Eval(ret.Value)
-	}
-	html := retHTML
+	// Run the component body (locals, if/else returns, loops) and render its
+	// return value.
+	html := eval.EvalComponentBody(node.Fn)
 	e.errs = append(e.errs, eval.Errors()...)
 	out.HeadHTML += eval.HeadHTML
 	out.ScriptHTML += eval.ScriptHTML
@@ -813,6 +800,7 @@ func (e *Emitter) emitSlotsParallel(slots []irtree.SlotNode) SlotOutput {
 		// variants and context defaults exactly like the sequential path.
 		sub.cvaFactories = e.cvaFactories
 		sub.contextDefaults = e.contextDefaults
+		sub.moduleConsts = e.moduleConsts
 		sub.CodeTheme = e.CodeTheme
 		sub.clientStack = append([]irtree.SlotID{}, base...)
 		outputs[idx] = sub.emitSlotNode(slots[idx])

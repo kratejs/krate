@@ -7,6 +7,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // renderElement serializes an intrinsic (lowercase) element during SSREval.
@@ -36,7 +37,7 @@ func (e *SSREval) renderElement(el *ast.JSXElement, name string) string {
 
 	// <select value>: options below are marked selected from the selection.
 	if name == "select" {
-		sel, _ := irtree.SelectSelection(&ast.JSXElement{Opening: &ast.JSXOpening{Attributes: attrs}}, e.eval)
+		sel, _ := irtree.SelectSelection(&ast.JSXElement{Opening: &ast.JSXOpening{Attributes: attrs}}, e.attrValue)
 		e.selectStack = append(e.selectStack, sel)
 		defer func() { e.selectStack = e.selectStack[:len(e.selectStack)-1] }()
 	}
@@ -52,9 +53,9 @@ func (e *SSREval) renderElement(el *ast.JSXElement, name string) string {
 		if inSelect && attr.Name == "selected" {
 			continue
 		}
-		b.WriteString(irtree.RenderAttr(name, attr, e.eval))
+		b.WriteString(irtree.RenderAttr(name, attr, e.attrValue, nil))
 	}
-	if inSelect && irtree.OptionSelected(e.selectStack[len(e.selectStack)-1], irtree.OptionValue(el, e.eval)) {
+	if inSelect && irtree.OptionSelected(e.selectStack[len(e.selectStack)-1], irtree.OptionValue(el, e.attrValue)) {
 		b.WriteString(" selected")
 	}
 
@@ -70,12 +71,10 @@ func (e *SSREval) renderElement(el *ast.JSXElement, name string) string {
 		// they are present.
 		content := ""
 		if expanded {
-			if ch, ok := e.bindings["children"]; ok && ch != "" {
-				content = ch
-			}
+			content = e.childrenHTML()
 		}
 		if name == "textarea" {
-			if v, ok := irtree.TextareaValue(&ast.JSXElement{Opening: &ast.JSXOpening{Attributes: attrs}}, e.eval); ok {
+			if v, ok := irtree.TextareaValue(&ast.JSXElement{Opening: &ast.JSXOpening{Attributes: attrs}}, e.attrValue); ok {
 				content = irtree.PreserveLeadingNewline(name, v)
 			}
 		}
@@ -99,7 +98,7 @@ func (e *SSREval) renderElement(el *ast.JSXElement, name string) string {
 		// children but a rest spread was expanded, inject the component
 		// frame's children binding.
 		if len(children) == 0 && expanded {
-			if ch, ok := e.bindings["children"]; ok && ch != "" {
+			if ch := e.childrenHTML(); ch != "" {
 				b.WriteString(ch)
 				b.WriteString("</")
 				b.WriteString(name)
@@ -108,7 +107,7 @@ func (e *SSREval) renderElement(el *ast.JSXElement, name string) string {
 			}
 		}
 		var content string
-		if v, ok := irtree.TextareaValue(&ast.JSXElement{Opening: &ast.JSXOpening{Attributes: attrs}}, e.eval); ok && name == "textarea" {
+		if v, ok := irtree.TextareaValue(&ast.JSXElement{Opening: &ast.JSXOpening{Attributes: attrs}}, e.attrValue); ok && name == "textarea" {
 			content = v
 		} else {
 			content = e.renderElementChildren(name, children)
@@ -137,9 +136,14 @@ func (e *SSREval) renderElementChildren(tag string, children []ast.JSXChild) str
 			}
 		case *ast.JSXExprContainer:
 			if raw {
-				b.WriteString(htmlspec.RawText(tag, stripArraySep(e.eval(c.Expression))))
+				v := e.value(c.Expression)
+				if v.ContainsUnknown() {
+					e.reportUnknown(c.Expression, firstUnknownOf(v), "<"+tag+"> content")
+					continue
+				}
+				b.WriteString(htmlspec.RawText(tag, jsvalue.RenderRawChild(v)))
 			} else {
-				b.WriteString(e.escapeContainerValue(c.Expression))
+				b.WriteString(e.renderChildExpr(c.Expression))
 			}
 		case *ast.JSXElementChild:
 			b.WriteString(e.evalJSX(c.Element))

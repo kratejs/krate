@@ -5,6 +5,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/astprint"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // TestBridgeScopeExpr verifies page-scope signal/prop reads inside an external
@@ -14,7 +15,7 @@ func TestBridgeScopeExpr(t *testing.T) {
 		localSignals: map[string]ast.Expr{
 			"open": &ast.Literal{Kind: ast.BoolLit, Value: "true"},
 		},
-		localProps: map[string]string{"title": "Hi"},
+		localProps: valueMap{"title": jsvalue.String("Hi")},
 	}
 	used := map[string]bool{}
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jseval"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
@@ -43,14 +45,18 @@ func injectStaticParams(tree *irtree.ComponentTree, params map[string]string) {
 		// script; injecting static bindings here would conflict with hydration.
 		return
 	}
-	bindings := make(map[string]string, len(params)+1)
-	objStr := make([]string, 0, len(params))
-	for k, v := range params {
-		bindings[k] = v
-		bv, _ := json.Marshal(v)
-		objStr = append(objStr, fmt.Sprintf("%q:%s", k, bv))
+	bindings := make(map[string]jsvalue.Value, len(params)+1)
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
 	}
-	bindings["params"] = "{" + strings.Join(objStr, ",") + "}"
+	sort.Strings(keys)
+	paramsObj := jsvalue.NewObject()
+	for _, k := range keys {
+		bindings[k] = jsvalue.String(params[k])
+		paramsObj.Set(k, jsvalue.String(params[k]))
+	}
+	bindings["params"] = paramsObj
 	if len(bindings) > 0 {
 		if len(root.SSREvalBindings) > 0 {
 			for k, v := range root.SSREvalBindings {
@@ -91,15 +97,14 @@ func injectDynamicRoutePlaceholders(tree *irtree.ComponentTree, paramNames []str
 	if root.Tier != irtree.TierStatic && root.Tier != irtree.TierServer {
 		return
 	}
-	bindings := make(map[string]string, len(paramNames)+1)
-	objStr := make([]string, 0, len(paramNames))
+	bindings := make(map[string]jsvalue.Value, len(paramNames)+1)
+	paramsObj := jsvalue.NewObject()
 	for _, name := range paramNames {
-		sentinel := dynamicParamSentinel(name)
+		sentinel := jsvalue.String(dynamicParamSentinel(name))
 		bindings[name] = sentinel
-		bv, _ := json.Marshal(sentinel)
-		objStr = append(objStr, fmt.Sprintf("%q:%s", name, bv))
+		paramsObj.Set(name, sentinel)
 	}
-	bindings["params"] = "{" + strings.Join(objStr, ",") + "}"
+	bindings["params"] = paramsObj
 	for k, v := range root.SSREvalBindings {
 		if _, ok := bindings[k]; !ok {
 			bindings[k] = v

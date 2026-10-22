@@ -8,6 +8,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // Shared element/attribute serialization used by both the IR tree builder and
@@ -60,59 +61,40 @@ func RendersNothing(expr ast.Expr) bool {
 	return v.Kind == htmlspec.Bool || v.Kind == htmlspec.Null
 }
 
-// StyleCSS serializes a style attribute value. Object literals (and values
-// that evaluate to object-literal source) go through htmlspec.Style; any
-// other value is used as a CSS string. ok is false when the attribute must be
-// omitted (null/undefined/empty object).
-func StyleCSS(expr ast.Expr, eval func(ast.Expr) string) (string, bool) {
+// ValueFunc evaluates an attribute expression to a typed build-time value.
+type ValueFunc func(ast.Expr) jsvalue.Value
+
+// StyleCSS serializes a style attribute value. Object values go through
+// htmlspec.Style; strings are used as CSS text. ok is false when the
+// attribute must be omitted (null/undefined/booleans/empty object, or a value
+// not known at build time).
+func StyleCSS(expr ast.Expr, eval ValueFunc) (string, bool) {
 	if expr == nil {
 		return "", false
 	}
-	if ta, isTA := expr.(*ast.TypeAssertion); isTA {
-		return StyleCSS(ta.Expr, eval)
-	}
-	if obj, isObj := expr.(*ast.ObjectExpr); isObj {
-		if css, done := styleFromObject(obj, eval); done {
-			return css, css != ""
+	v := eval(expr)
+	switch v.Kind() {
+	case jsvalue.KindObject:
+		entries := make([]htmlspec.StyleEntry, 0, len(v.Keys()))
+		for _, k := range v.Keys() {
+			p, _ := v.Get(k)
+			entries = append(entries, htmlspec.StyleEntry{Key: k, Value: JSAttrValue(p, "")})
 		}
+		css := htmlspec.Style(entries)
+		return css, css != ""
+	case jsvalue.KindString:
+		return v.StringValue(), v.StringValue() != ""
+	case jsvalue.KindNumber:
+		return v.ToString(), true
 	}
-	val := eval(expr)
-	v := AttrValue(expr, val)
-	if v.IsNullish() || v.Kind == htmlspec.Bool {
-		return "", false
-	}
-	if _, isLit := expr.(*ast.Literal); !isLit {
-		if t := strings.TrimSpace(val); strings.HasPrefix(t, "{") && strings.HasSuffix(t, "}") {
-			if obj, isObj := constSourceToAST(t).(*ast.ObjectExpr); isObj {
-				if css, done := styleFromObject(obj, eval); done {
-					return css, css != ""
-				}
-			}
-		}
-	}
-	return val, val != ""
-}
-
-// styleFromObject converts an object literal to CSS. done is false when the
-// object contains a spread, which only a full evaluation can resolve.
-func styleFromObject(obj *ast.ObjectExpr, eval func(ast.Expr) string) (string, bool) {
-	entries := make([]htmlspec.StyleEntry, 0, len(obj.Properties))
-	for _, prop := range obj.Properties {
-		if prop == nil {
-			continue
-		}
-		if prop.Spread || prop.Value == nil {
-			return "", false
-		}
-		entries = append(entries, htmlspec.StyleEntry{Key: prop.Key, Value: AttrValue(prop.Value, eval(prop.Value))})
-	}
-	return htmlspec.Style(entries), true
+	return "", false
 }
 
 // RenderAttr serializes one static attribute of element tag: ` name="value"`,
 // ` name`, or "" when React would omit it. Callers skip spreads, refs, event
-// handlers and dangerouslySetInnerHTML.
-func RenderAttr(tag string, attr *ast.JSXAttr, eval func(ast.Expr) string) string {
+// handlers and dangerouslySetInnerHTML. unknownText supplies the text used
+// when the value is not known at build time.
+func RenderAttr(tag string, attr *ast.JSXAttr, eval ValueFunc, unknownText func(ast.Expr) string) string {
 	if attr.Name == "style" {
 		css, ok := StyleCSS(attr.Value, eval)
 		if !ok {
@@ -121,9 +103,18 @@ func RenderAttr(tag string, attr *ast.JSXAttr, eval func(ast.Expr) string) strin
 		return ` style="` + escape.HTMLAttr(css) + `"`
 	}
 	if attr.Value == nil {
-		return htmlspec.Attr(tag, attr.Name, AttrValue(nil, ""))
+		return htmlspec.Attr(tag, attr.Name, htmlspec.Value{Kind: htmlspec.Bare})
 	}
-	return htmlspec.Attr(tag, attr.Name, AttrValue(attr.Value, eval(attr.Value)))
+	return htmlspec.Attr(tag, attr.Name, attrValueOf(attr.Value, eval, unknownText))
+}
+
+func attrValueOf(expr ast.Expr, eval ValueFunc, unknownText func(ast.Expr) string) htmlspec.Value {
+	v := eval(expr)
+	text := ""
+	if v.IsUnknown() && unknownText != nil {
+		text = unknownText(expr)
+	}
+	return JSAttrValue(v, text)
 }
 
 // MarkupReporter builds a diagnostic for a markup problem at pos.
@@ -190,10 +181,10 @@ func HasMeaningfulChildren(children []ast.JSXChild) bool {
 
 // OptionValue returns the value an <option> submits: its value attribute, or
 // else its static text content.
-func OptionValue(el *ast.JSXElement, eval func(ast.Expr) string) string {
+func OptionValue(el *ast.JSXElement, eval ValueFunc) string {
 	for _, attr := range el.Opening.Attributes {
 		if attr != nil && !attr.Spread && attr.Name == "value" && attr.Value != nil {
-			return eval(attr.Value)
+			return eval(attr.Value).ToString()
 		}
 	}
 	var b strings.Builder
@@ -203,7 +194,9 @@ func OptionValue(el *ast.JSXElement, eval func(ast.Expr) string) string {
 			b.WriteString(ch.Value)
 		case *ast.JSXExprContainer:
 			if ch.Expression != nil {
-				b.WriteString(eval(ch.Expression))
+				if text, ok := childText(eval(ch.Expression)); ok {
+					b.WriteString(text)
+				}
 			}
 		}
 	}
@@ -222,7 +215,7 @@ func OptionSelected(selection []string, value string) bool {
 
 // SelectSelection returns the option values selected by a <select>'s value or
 // defaultValue attribute, and whether such an attribute was present.
-func SelectSelection(el *ast.JSXElement, eval func(ast.Expr) string) ([]string, bool) {
+func SelectSelection(el *ast.JSXElement, eval ValueFunc) ([]string, bool) {
 	var found bool
 	var sel []string
 	for _, attr := range el.Opening.Attributes {
@@ -230,7 +223,7 @@ func SelectSelection(el *ast.JSXElement, eval func(ast.Expr) string) ([]string, 
 			continue
 		}
 		if attr.Name == "value" || (attr.Name == "defaultValue" && !found) {
-			sel = htmlspec.SelectValues(AttrValue(attr.Value, eval(attr.Value)))
+			sel = htmlspec.SelectValues(JSAttrValue(eval(attr.Value), ""))
 			found = true
 		}
 	}
@@ -239,7 +232,7 @@ func SelectSelection(el *ast.JSXElement, eval func(ast.Expr) string) ([]string, 
 
 // TextareaValue returns the escaped content of a <textarea> whose value comes
 // from a value/defaultValue attribute.
-func TextareaValue(el *ast.JSXElement, eval func(ast.Expr) string) (string, bool) {
+func TextareaValue(el *ast.JSXElement, eval ValueFunc) (string, bool) {
 	var found bool
 	var out string
 	for _, attr := range el.Opening.Attributes {
@@ -247,10 +240,10 @@ func TextareaValue(el *ast.JSXElement, eval func(ast.Expr) string) (string, bool
 			continue
 		}
 		if attr.Name == "value" || (attr.Name == "defaultValue" && !found) {
-			v := AttrValue(attr.Value, eval(attr.Value))
+			v := eval(attr.Value)
 			out = ""
-			if !v.IsNullish() && v.Kind != htmlspec.Bool {
-				out = v.Str
+			if !v.IsNullish() && v.Kind() != jsvalue.KindBool && !v.IsUnknown() {
+				out = v.ToString()
 			}
 			found = true
 		}

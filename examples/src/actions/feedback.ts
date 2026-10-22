@@ -1,3 +1,5 @@
+"use server";
+
 export async function saveFeedback(input: FormData | { text: string }) {
   const text =
     input instanceof FormData ? String(input.get("text") || "") : String(input.text || "");

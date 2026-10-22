@@ -6,6 +6,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // SlotID
@@ -382,11 +383,15 @@ type ComponentNode struct {
 	// SSR-evaluated components: prop-driven with no signals.
 	// The emitter uses SSREval to render these at build time.
 	IsSSREval       bool
-	SSREvalBindings map[string]string
+	SSREvalBindings map[string]jsvalue.Value
+	// SSREvalAttrs holds the call-site attribute expressions of an SSREval
+	// component, so props the IR folder cannot represent (JSX values) are
+	// evaluated by the SSR evaluator itself.
+	SSREvalAttrs map[string]ast.Expr
 	// LocalVars holds build-time folded local constants (including cva/cn class
 	// strings); they are merged into SSREvalBindings so SSR-evaluated components
 	// resolve local variables such as `const classes = cn(cva(...))`.
-	LocalVars map[string]string
+	LocalVars map[string]jsvalue.Value
 	// RestProps holds the call-site attributes collected by the component's
 	// rest parameter (e.g. `{ className, ...props }`), so SSREval can expand a
 	// `{...props}` spread on an intrinsic element. RestPropsName is that
@@ -432,6 +437,9 @@ type ComponentTree struct {
 	// ContextDefaults holds module-wide `const X = createContext(v)` defaults so
 	// the emitter can fold `X.useContext()` during SSREval.
 	ContextDefaults map[string]string
+	// ModuleConstInits holds module-level constant initializers (entry module
+	// plus imports) so SSREval resolves module constants.
+	ModuleConstInits map[string]ast.Expr
 
 	// ExternalComponents are unresolved JSX components imported from bare npm
 	// packages. Krate cannot statically evaluate arbitrary React libraries, so
