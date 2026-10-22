@@ -1,6 +1,7 @@
 package check
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -171,7 +172,7 @@ func runCustomRule(rt *jsruntime.Runtime, mod, bundle string, cfg Config, p *Pag
 		return nil, fmt.Errorf("loading rule bundle: %w", err)
 	}
 
-	pageJSON, err := marshalCheckPage(p)
+	pageJSON, astSrc, err := marshalCheckPage(p)
 	if err != nil {
 		return nil, err
 	}
@@ -189,14 +190,25 @@ func runCustomRule(rt *jsruntime.Runtime, mod, bundle string, cfg Config, p *Pag
     var mod = %[1]s || {};
     var fn = (mod.default && (typeof mod.default === 'function' ? mod.default : mod.default.check)) || mod.check;
     if (typeof fn !== 'function') return JSON.stringify({ skip: true });
-    var out = fn(%[2]s, { root: %[3]s.root });
+    var page = %[2]s;
+    var astSrc = %[4]s;
+    if (astSrc !== null) {
+      // Parsed on first access only: most rules never read the AST, and
+      // parsing it dominated rule time on large pages.
+      Object.defineProperty(page, 'ast', { configurable: true, enumerable: true, get: function() {
+        var v = JSON.parse(astSrc);
+        Object.defineProperty(page, 'ast', { value: v, configurable: true, enumerable: true, writable: true });
+        return v;
+      } });
+    }
+    var out = fn(page, { root: %[3]s.root });
     if (out && typeof out.then === 'function') return JSON.stringify({ error: 'async check rules are not supported' });
     return JSON.stringify({ findings: out || [] });
   } catch (e) {
     return JSON.stringify({ error: (e && e.message) || String(e) });
   }
 })()
-`, customRuleGlobal, string(pageJSON), string(metaJSON))
+`, customRuleGlobal, string(pageJSON), string(metaJSON), string(astSrc))
 
 	res, err := rt.Execute(call)
 	if err != nil {
@@ -261,22 +273,35 @@ func runCustomRule(rt *jsruntime.Runtime, mod, bundle string, cfg Config, p *Pag
 }
 
 // marshalCheckPage serializes the page surface a custom rule sees. The AST is
-// the kind-tagged astjson document so rule authors get a stable shape.
-func marshalCheckPage(p *Page) ([]byte, error) {
-	doc := map[string]any{
+// the kind-tagged astjson document so rule authors get a stable shape; it is
+// returned separately as a JS string literal so the VM parses it lazily.
+func marshalCheckPage(p *Page) (page, astSrc []byte, err error) {
+	page, err = json.Marshal(map[string]any{
 		"route":   p.Route,
 		"source":  p.RelSource,
 		"html":    p.HTML,
 		"jsBytes": p.JSBytes,
+	})
+	if err != nil {
+		return nil, nil, err
 	}
-	if p.Program != nil {
-		enc, err := astjson.EncodeProgram(p.Program)
-		if err != nil {
-			return nil, err
-		}
-		doc["ast"] = json.RawMessage(enc)
+	if p.Program == nil {
+		return page, []byte("null"), nil
 	}
-	return json.Marshal(doc)
+	enc, err := astjson.EncodeProgram(p.Program)
+	if err != nil {
+		return nil, nil, err
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, enc); err != nil {
+		return nil, nil, err
+	}
+	// A JSON string literal is also a valid JS string literal.
+	astSrc, err = json.Marshal(compact.String())
+	if err != nil {
+		return nil, nil, err
+	}
+	return page, astSrc, nil
 }
 
 // bundleCustomRule bundles a custom rule module into a self-contained IIFE that
