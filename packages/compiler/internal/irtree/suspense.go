@@ -47,9 +47,11 @@ func reactiveFactoryCall(init ast.Expr) (*ast.CallExpr, string) {
 }
 
 // collectReactiveFactoryJS returns the factory declarations of a component
-// body for the hydration scope, in source order.
-func (b *builder) collectReactiveFactoryJS(body []ast.Stmt, order *bodyOrder) []bodyJS {
-	var out []bodyJS
+// body for the hydration scope, in source order, split like the other body
+// fragments: those that read no signal (`use(props.promise)`) are declared
+// before the signal declarations, so a signal initialized from the value
+// (`useState(use(p))`, `useState(loaded)`) sees it; the rest follow them.
+func (b *builder) collectReactiveFactoryJS(body []ast.Stmt, order *bodyOrder) (pre, post []bodyJS) {
 	for _, stmt := range body {
 		vs, ok := stmt.(*ast.VarStmt)
 		if !ok {
@@ -64,13 +66,18 @@ func (b *builder) collectReactiveFactoryJS(body []ast.Stmt, order *bodyOrder) []
 			}
 			// A `var` declaration, so the folded-locals pass sees the name as
 			// declared and does not emit it a second time.
-			out = append(out, bodyJS{
+			frag := bodyJS{
 				ord: order.of(decl),
 				js:  "var " + decl.Name + "=" + generateExprJS(decl.Init, b.sigMap()),
-			})
+			}
+			if b.referencesSignal(decl.Init) {
+				post = append(post, frag)
+			} else {
+				pre = append(pre, frag)
+			}
 		}
 	}
-	return out
+	return pre, post
 }
 
 // registerFactoryLocals makes factory bindings reactive getters. A use()

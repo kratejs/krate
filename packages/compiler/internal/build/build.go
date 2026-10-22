@@ -1371,6 +1371,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				runtimeHead = im + runtimeHead
 			}
 			chunkPreloads := dynamicChunkURLs(r.HydrationJS)
+			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
 			var html string
 			if r.LoadingHTML != "" {
 				html = generateHTMLWithLoading(r.HTML, r.HeadHTML, r.ScriptHTML, r.StyleHTML, r.LoadingHTML, pageCSS, r.JSFile, runtimeJSFile, r.OutName, b.DevMode, devBootstrap, runtimeHead, b.Cfg.BaseURLPath(), chunkPreloads...)

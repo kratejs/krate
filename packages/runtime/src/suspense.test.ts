@@ -532,6 +532,21 @@ describe('lazy loaders', () => {
   });
 });
 
+describe('compiled boundary refs', () => {
+  it('attaches refs of content revealed from its template', async () => {
+    const enter = vi.fn();
+    (globalThis as { krateRefsEnter?: () => void }).krateRefsEnter = enter;
+    installFindSlot('<!--suspense:R--><!--k:sR--><p>wait</p><!--/k:sR--><!--/suspense:R--><template data-kc="sR" data-kb="c"><form></form></template>');
+    const b = getBoundary('R');
+    b.hold();
+    b.release();
+    await flush();
+    expect(document.querySelector('#root form')).not.toBeNull();
+    expect(enter).toHaveBeenCalled();
+    delete (globalThis as { krateRefsEnter?: () => void }).krateRefsEnter;
+  });
+});
+
 describe('compiled boundary markers', () => {
   it('swaps the fallback and content around the boundary slot', async () => {
     installFindSlot('<!--suspense:M--><!--k:sM--><p>content</p><!--/k:sM--><!--/suspense:M--><template data-kc="sM" data-kb="a"><p>wait</p></template>');
