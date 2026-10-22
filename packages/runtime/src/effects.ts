@@ -29,7 +29,6 @@ import {
   kratePendingFlush,
   runAfterFlush,
   untrack,
-  krateCommitSnapshot,
   krateCommitting,
   krateDisposeOwner,
   krateEpoch,
@@ -587,8 +586,8 @@ function runLayoutHooks(): void {
 
 function commit(): void {
   commitQueued = false;
-  // Every settled update is a commit: snapshot the React state it rendered.
-  const at = krateCommitSnapshot();
+  // runAfterFlush recorded the React state this commit rendered.
+  const at = krateEpoch();
   const sync = krateTakeSyncLane();
   if (dirty.size === 0) {
     runLayoutHooks();

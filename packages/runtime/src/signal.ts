@@ -231,9 +231,44 @@ const DISCRETE = new Set(
 let committing = 0;
 let syncLane = false;
 
+// Set while the event runtime dispatches a discrete native event.
+let discreteDispatch = 0;
+
 function inDiscreteEvent(): boolean {
+  if (discreteDispatch > 0) return true;
   const ev = typeof window !== 'undefined' ? (window as unknown as { event?: Event }).event : undefined;
   return !!ev && DISCRETE.has(ev.type);
+}
+
+/** Reports whether a native event type is discrete (React's SyncLane). */
+export function krateIsDiscrete(type: string): boolean {
+  return DISCRETE.has(type);
+}
+
+/**
+ * Runs the handlers of one native event dispatch. For a discrete event
+ * (click, input, keydown, submit, change, focus, ...) the updates they made
+ * are flushed synchronously when `flush` is set, as React does at the end of
+ * a discrete event: render, commit, layout and passive effects all run before
+ * the browser event returns. Continuous events keep the normal batching.
+ */
+export function krateRunEvent(type: string, flush: boolean, fn: () => void): void {
+  const discrete = DISCRETE.has(type);
+  if (!discrete) {
+    fn();
+    return;
+  }
+  discreteDispatch++;
+  try {
+    fn();
+  } finally {
+    discreteDispatch--;
+    // An event dispatched by the flush itself (a blur fired by removing the
+    // focused node) joins the running flush instead of committing on its own.
+    if (flush && discreteDispatch === 0 && flushDepth === 0 && committing === 0 && (pending.length > 0 || syncLane)) {
+      krateFlushSync();
+    }
+  }
 }
 
 /** Marks a commit in progress (internal): writes there flush in a microtask. */
@@ -869,7 +904,18 @@ function scheduleFlush(reactWrite = false): void {
   }
 }
 
+let flushDepth = 0;
+
 function flushEffects(): void {
+  flushDepth++;
+  try {
+    flushEffectsInner();
+  } finally {
+    flushDepth--;
+  }
+}
+
+function flushEffectsInner(): void {
   flushScheduled = false;
   flushMode = 0;
   flushToken++;
@@ -931,6 +977,9 @@ export function krateRequestFlush(): void {
  * example, right after hydration registered effects).
  */
 export function runAfterFlush(): void {
+  // Every settled flush is a commit: record React state here, so committed
+  // values advance even when no effect scheduler is loaded.
+  if (changedCells.size > 0) krateCommitSnapshot();
   for (const hook of afterFlushHooks) {
     hook();
   }
