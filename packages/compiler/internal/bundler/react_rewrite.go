@@ -262,6 +262,7 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	renameReservedBindings(prog)
 	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src}
 	ctx.fnNames = functionNames(prog.Body)
+	ctx.refDiagnostics(prog)
 	var toRemove []int
 	legacy := legacyImports(prog)
 

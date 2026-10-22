@@ -30,7 +30,7 @@ func (b *builder) referencedModuleConstVars(node *ComponentNode) []string {
 		sources = append(sources, h.Body)
 	}
 	for _, r := range node.RefBindings {
-		sources = append(sources, r.Callback)
+		sources = append(sources, r.Callback, r.Target)
 	}
 	sources = append(sources, node.Effects...)
 	sources = append(sources, node.Memos...)

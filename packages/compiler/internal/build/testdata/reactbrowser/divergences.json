@@ -1,8 +1,4 @@
 {
-  "r18/app_data_table": {
-    "severity": "P0",
-    "reason": "[ref-callback-rerun] the inline callback ref that sets el.indeterminate = some runs once; React re-runs it on every render, so the select-all box never becomes indeterminate"
-  },
   "r18/app_tabs_accordion": {
     "severity": "P0",
     "reason": "[list-row-conditional] accordion rows inside the conditionally mounted FAQ panel keep {isOpen && <p/>} from mount: the previous answer stays open after toggling another row"
@@ -12,28 +8,8 @@
     "reason": "[render-count] PureComponent render is logged once less: Krate updates the text binding without re-running render(); DOM and state match"
   },
   "r18/context_memo_child": {
-    "severity": "P1",
-    "reason": "[render-count] the context value is now plain and the text updates, but the memo child's body (its render log) does not re-run on context changes"
-  },
-  "r18/diag_string_ref": {
-    "severity": "P1",
-    "reason": "[missing-diagnostic] string ref (ref=\"name\", this.refs): build succeeds with no KR5xxx diagnostic"
-  },
-  "r18/effect_reads_ref": {
-    "severity": "P0",
-    "reason": "[autofocus] input focused from an effect gets its controlled/default value written after focus, so the caret is at the start and typing prepends (!draft)"
-  },
-  "r18/event_double_click": {
-    "severity": "P0",
-    "reason": "[autofocus] autoFocus is emitted as an attribute and the controlled value is set after focus, so typing lands at the start (' docUntitled')"
-  },
-  "r18/form_controlled_checkbox": {
-    "severity": "P0",
-    "reason": "[controlled-revert] a checkbox with checked={true} and an onChange that does not set state unchecks on click; React reverts it to checked"
-  },
-  "r18/form_controlled_reject": {
-    "severity": "P0",
-    "reason": "[controlled-input] rejected edits are now restored, except an input with a constant value and a no-op onChange: typing still changes the DOM value (xread only by state)"
+    "severity": "P2",
+    "reason": "[render-count] the context value is plain and the text updates like React; only the memo child's render log differs, because Krate does not re-run component bodies (same as class_pure_component and hook_usecallback_identity)"
   },
   "r18/hook_usecallback_identity": {
     "severity": "P2",
@@ -45,19 +21,7 @@
   },
   "r18/hook_useref_mutable": {
     "severity": "P1",
-    "reason": "[ref-in-render] ref.current read during render is shown once and never refreshed on later renders; no diagnostic for the unsupported pattern"
-  },
-  "r18/hook_usestate_lazy_init": {
-    "severity": "P1",
-    "reason": "[caret] the lazy initializer runs once and the value matches, but the controlled textarea value is written after hydration, so the caret starts at the end and typing appends (React: caret at the start)"
-  },
-  "r18/ref_callback_inline_rerender": {
-    "severity": "P1",
-    "reason": "[callback-ref] inline callback refs are never called (no node on mount, no null/node pair on re-render)"
-  },
-  "r18/ref_callback_mount_unmount": {
-    "severity": "P1",
-    "reason": "[callback-ref] a useCallback ref on a conditional element is never called (not with the node on mount or remount, not with null on unmount)"
+    "reason": "[ref-in-render] ref.current read during render is shown once and never refreshed on later renders; reported as KR5008 (keep displayed values in state)"
   },
   "r18/suspense_fallback_then_content": {
     "severity": "P0",
@@ -90,10 +54,6 @@
   "r19/deferred_initial_value": {
     "severity": "P0",
     "reason": "[deferred-value] build fails: useDeferredValue(value, initialValue) result passed to a memo child cannot be evaluated at build time"
-  },
-  "r19/ref_callback_cleanup": {
-    "severity": "P1",
-    "reason": "[callback-ref] a ref callback that returns a cleanup is never called: no attach on mount, no cleanup on detach"
   },
   "r19/transition_async": {
     "severity": "P1",
