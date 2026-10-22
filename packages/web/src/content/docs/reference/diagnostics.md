@@ -77,7 +77,71 @@ React requires hooks to be called in the same order on every render (the Rules o
 
 ## KR3xxx: class components and error boundaries
 
-No codes are registered in this range yet.
+### KR3001
+
+**Class component has no render method**
+
+A React class component must define render(). Without it Krate cannot lower the class and the component renders nothing. Add render() returning JSX, or convert the class to a function component.
+
+### KR3002
+
+**Unknown instance property on a class component**
+
+The class reads this.<name>, but <name> is not a field, method, accessor, props, state, context, setState or forceUpdate, and nothing assigns it. Lowered classes have no React base-class internals (this.refs, this.updater, this.isMounted). Declare the property as a field or method, or read it from props or state.
+
+### KR3003
+
+**Unsupported static class member**
+
+Only defaultProps, propTypes, displayName, contextType, getDerivedStateFromProps and getDerivedStateFromError are lowered. Other static fields, methods and static blocks have no instance equivalent after lowering; move them to module scope next to the component.
+
+### KR3004
+
+**Computed class member name**
+
+Class members named with a computed key ([expr]) cannot be resolved at build time. Give the member a plain name.
+
+### KR3005
+
+**componentWillMount is not supported**
+
+UNSAFE_componentWillMount (and componentWillMount) runs before the first render, which Krate performs at build time. Initialize state in the constructor or a state field, and move side effects to componentDidMount. componentWillReceiveProps and componentWillUpdate (and their UNSAFE_ forms) are supported.
+
+### KR3006
+
+**Legacy class context is not supported**
+
+static contextTypes and childContextTypes (the pre-16.3 context API) are not lowered. Use static contextType = MyContext and this.context, or a function component with useContext.
+
+### KR3007
+
+**this inside a static lifecycle**
+
+getDerivedStateFromProps and getDerivedStateFromError are static: React calls them without an instance and Krate lowers them to plain functions. Use their parameters instead of this.
+
+### KR3008
+
+**Error boundary without getDerivedStateFromError**
+
+A class with componentDidCatch but no static getDerivedStateFromError catches errors, but React has no state update to render a fallback with: the failed subtree is unmounted and its last DOM stays on the page until componentDidCatch calls setState. Add getDerivedStateFromError returning the fallback state.
+
+### KR3009
+
+**Error boundary rendered its fallback at build time**
+
+A component inside an error boundary threw while the page was built. Krate rendered the boundary's fallback (the state returned by getDerivedStateFromError) instead of failing the build, and calls componentDidCatch when the page hydrates. Fix the error, or keep the fallback if it is expected.
+
+### KR3010
+
+**Component threw while the page was built**
+
+A component threw (a throw statement ran) while Krate rendered the page at build time, and no error boundary encloses it, so the build fails. Fix the error, guard it with a condition, or wrap the component in an error boundary to render a fallback instead.
+
+### KR3011
+
+**Class component is not lowered**
+
+Krate lowers class components declared at module top level (`class X extends Component`, exported or not). A class expression or a class declared inside a function is not lowered and renders nothing. Move the declaration to module scope or convert it to a function component.
 
 ## KR4xxx: Suspense, lazy, use() and transitions
 

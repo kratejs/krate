@@ -79,6 +79,36 @@ type Value struct {
 	// unsupported marks an Unknown produced by an unsupported construct (as
 	// opposed to a value that is merely dynamic).
 	unsupported bool
+	// thrown is set on the Unknown produced by an executed throw statement.
+	thrown *ThrownError
+}
+
+// ThrownError describes a value thrown while evaluating at build time.
+type ThrownError struct {
+	// Name and Message come from an Error object (`new Error(msg)`) or a thrown
+	// string (Message only).
+	Name    string
+	Message string
+	// Line and Col locate the throw statement.
+	Line, Col int
+}
+
+// Throw returns the Unknown that carries a thrown error out of evaluation. It
+// is unsupported, so callers without error-boundary handling report it.
+func Throw(t *ThrownError) Value {
+	reason := "threw"
+	if t.Message != "" {
+		reason += " " + t.Message
+	}
+	return Value{kind: KindUnknown, s: reason, unsupported: true, thrown: t}
+}
+
+// Thrown returns the error when v is the result of a throw statement.
+func (v Value) Thrown() *ThrownError {
+	if v.kind != KindUnknown {
+		return nil
+	}
+	return v.thrown
 }
 
 // Array is a JS array.

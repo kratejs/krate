@@ -89,6 +89,23 @@ type Annotations struct {
 	// static or private member, an unknown this.x read, ...). The builder
 	// reports it when the component is used.
 	ClassRejections map[string]diag.Diagnostic
+	// ClassBoundaries names the lowered class components that are error
+	// boundaries (static getDerivedStateFromError and/or componentDidCatch).
+	ClassBoundaries map[string]bool
+	// ClassNotes holds non-blocking warnings for lowered class components
+	// (for example a boundary without getDerivedStateFromError), reported once
+	// when the component is rendered.
+	ClassNotes map[string][]diag.Diagnostic
+}
+
+// IsLoweredClass reports whether name is a React class component that was
+// lowered to a function component.
+func (a *Annotations) IsLoweredClass(name string) bool {
+	if a == nil || !a.ClassComponents[name] {
+		return false
+	}
+	_, rejected := a.ClassRejections[name]
+	return !rejected
 }
 
 // (Annotations continues below.)
@@ -400,6 +417,10 @@ type ComponentNode struct {
 	InstanceID string
 	SourceFile string
 	Line       int
+	// Class marks a lowered React class component (see Annotations.IsLoweredClass).
+	Class bool
+	// Boundary marks a lowered class that is an error boundary.
+	Boundary bool
 
 	// SSR-evaluated components: prop-driven with no signals.
 	// The emitter uses SSREval to render these at build time.
@@ -529,8 +550,10 @@ type ComponentSignature struct {
 	// such a list is bound at runtime the rows (and this component) are
 	// rendered and adopted by the list, so the signature is not hydrated.
 	InLists []SlotID
-	// ParentID is the enclosing client component, empty at the top level.
-	// Hydration declares it so React effects run children before parents.
+
+	// ParentID is the enclosing client component, empty at the top level
+	// (React's parent fiber). Hydration declares it so React effects run
+	// children before parents and errors reach the nearest boundary.
 	ParentID SlotID
 	// Conds lists the conditional branches the component renders inside,
 	// outermost first. Effects of a component in a hidden branch are cleaned
@@ -539,6 +562,18 @@ type ComponentSignature struct {
 	// ListSlot is the innermost list slot whose items contain the component;
 	// replacing that list's content on the client unmounts the component.
 	ListSlot SlotID
+
+	// Owner-tree links for class pages (see renderer/owner_emit.go). Name is
+	// the component name; CreatorID the component whose render created this
+	// element (it differs from ParentID for props.children); CondID and
+	// OwnerBranch the innermost conditional slot and branch ("c" or "a").
+	Name        string
+	CreatorID   SlotID
+	CondID      SlotID
+	OwnerBranch string
+	// Class marks a lowered React class component; pages that render one use
+	// the owner tree.
+	Class bool
 }
 
 // CondBranch names one branch ("c" consequent, "a" alternate) of a

@@ -29,8 +29,8 @@ func firstClass(t *testing.T, src string) *ast.ClassDecl {
 func TestSynthesizeClassComponentRejectsUnsupported(t *testing.T) {
 	cases := map[string]string{
 		"unknown this":  `class C extends Component { render() { return <div>{this.other}</div>; } }`,
-		"private field": `class C extends Component { #secret = 1; render() { return <div>{this.#secret}</div>; } }`,
-		"lifecycle":     `class C extends Component { shouldComponentUpdate() { return false; } render() { return <div />; } }`,
+		"static helper": `class C extends Component { static helper() { return 1; } render() { return <div />; } }`,
+		"will mount":    `class C extends Component { componentWillMount() {} render() { return <div />; } }`,
 	}
 	for name, src := range cases {
 		if _, ok := synthesizeClassComponent(firstClass(t, src)); ok {

@@ -168,6 +168,17 @@ func (in *Interp) eval(expr ast.Expr) (Value, bool) {
 				return v, false
 			}
 		}
+		if name := calleeName(e.Callee); errorConstructors[name] {
+			msg := ""
+			if len(e.Args) > 0 {
+				m := in.Eval(e.Args[0])
+				if m.IsUnknown() {
+					return m, false
+				}
+				msg = m.ToString()
+			}
+			return errorObject(name, msg), false
+		}
 		return Unsupported("new " + calleeName(e.Callee) + "(...)"), false
 	case *ast.JSXElement, *ast.JSXFragment:
 		if in.Hooks.JSX != nil {
@@ -791,7 +802,7 @@ func (in *Interp) execStmt(stmt ast.Stmt) (Value, control) {
 		in.Scope.Define(s.Name, in.Closure(s.Name, s.Params, s.Body))
 		return Undefined(), ctlNormal
 	case *ast.ThrowStmt:
-		return Unsupported("throw statement"), ctlError
+		return in.throw(s), ctlError
 	case *ast.EmptyStmt, *ast.DebuggerStmt:
 		return Undefined(), ctlNormal
 	case *ast.LabeledStmt:
@@ -807,10 +818,18 @@ func (in *Interp) execStmt(stmt ast.Stmt) (Value, control) {
 	case *ast.SwitchStmt:
 		return in.execSwitch(s)
 	case *ast.TryStmt:
-		// A build-time evaluation never throws a JS exception it could catch
-		// (failures are Unknown values), so the try body runs as a block.
+		// Only a throw statement raises a catchable error at build time; other
+		// failures are Unknown values that propagate.
 		v, ctl := in.execStmt(&ast.BlockStmt{Body: s.Body})
+		if ctl == ctlError && v.Thrown() != nil && s.Catch != nil {
+			v, ctl = in.execCatch(s.Catch, v.Thrown())
+		}
 		if ctl != ctlNormal {
+			if ctl != ctlError && len(s.Finally) > 0 {
+				if fv, fctl := in.execStmt(&ast.BlockStmt{Body: s.Finally}); fctl != ctlNormal {
+					return fv, fctl
+				}
+			}
 			return v, ctl
 		}
 		if len(s.Finally) > 0 {
@@ -821,6 +840,71 @@ func (in *Interp) execStmt(stmt ast.Stmt) (Value, control) {
 		return Unsupported(strings.TrimPrefix(fmt.Sprintf("%T", stmt), "*ast.") + " inside a function body"), ctlError
 	}
 	return Unsupported(strings.TrimPrefix(fmt.Sprintf("%T", stmt), "*ast.") + " statements are not supported"), ctlError
+}
+
+// throw evaluates a throw statement into the Unknown that carries the error.
+func (in *Interp) throw(s *ast.ThrowStmt) Value {
+	t := &ThrownError{Line: s.Position.Line, Col: s.Position.Col}
+	v := in.Eval(s.Value)
+	if prior := v.Thrown(); prior != nil {
+		return v
+	}
+	switch {
+	case v.kind == KindString:
+		t.Message = v.s
+	case v.kind == KindObject:
+		if n, ok := v.Get("name"); ok && n.kind == KindString {
+			t.Name = n.s
+		}
+		if m, ok := v.Get("message"); ok && m.kind == KindString {
+			t.Message = m.s
+		}
+	case v.IsUnknown():
+		t.Message = "(" + v.Reason() + ")"
+	default:
+		if src, ok := JSSource(v); ok {
+			t.Message = src
+		}
+	}
+	return Throw(t)
+}
+
+// execCatch runs a catch clause with its parameter bound to the error object.
+func (in *Interp) execCatch(c *ast.CatchClause, t *ThrownError) (Value, control) {
+	saved := in.Scope
+	in.Scope = NewScope(saved)
+	defer func() { in.Scope = saved }()
+	if c.Param != "" {
+		if r := in.BindPattern(in.Scope, c.Param, patternOf(c.Param), errorObject(t.Name, t.Message)); r.IsUnsupported() {
+			return r, ctlError
+		}
+	}
+	return in.exec(c.Body)
+}
+
+// patternOf returns the destructuring source of a catch parameter, or "".
+func patternOf(param string) string {
+	if strings.HasPrefix(param, "{") || strings.HasPrefix(param, "[") {
+		return param
+	}
+	return ""
+}
+
+// errorObject models an Error instance as a plain {name, message} object.
+func errorObject(name, message string) Value {
+	if name == "" {
+		name = "Error"
+	}
+	o := NewObject()
+	o.Set("name", String(name))
+	o.Set("message", String(message))
+	return o
+}
+
+// errorConstructors are the built-in Error types `new X(msg)` builds at build time.
+var errorConstructors = map[string]bool{
+	"Error": true, "TypeError": true, "RangeError": true, "SyntaxError": true,
+	"ReferenceError": true, "EvalError": true, "URIError": true,
 }
 
 // Declare evaluates a variable declaration into the current scope.

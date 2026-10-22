@@ -337,7 +337,9 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		return nil
 	}
 	// A key that reads reactive state remounts the element when it changes.
-	if key := jsxKeyAttr(el); key != nil && b.referencesSignal(key) {
+	// A lowered class remounts itself (its runtime instance reads the key),
+	// which keeps it and its children in the error-boundary owner tree.
+	if key := jsxKeyAttr(el); key != nil && b.referencesSignal(key) && !b.ann.IsLoweredClass(el.Opening.Name) {
 		return b.buildKeyedSlot(el, key, parentID)
 	}
 	// Built-in <Portal>: render children inline with a marker, then move the
@@ -2911,6 +2913,12 @@ func (b *builder) collectSignalDecls(fn *ast.FnDecl) []SignalDecl {
 					if _, isSig := b.sigMap()[id.Name]; isSig {
 						rawInit = generateExprJS(d.Initial, b.sigMap())
 					}
+				}
+				// A call that folded to an object or array (Object.assign,
+				// a class's getDerivedStateFromProps) runs on the client too:
+				// the folded source would otherwise be emitted as a string.
+				if rawInit == "" && (strings.HasPrefix(initial, "{") || strings.HasPrefix(initial, "[")) {
+					rawInit = generateExprJS(d.Initial, b.sigMap())
 				}
 			}
 		}

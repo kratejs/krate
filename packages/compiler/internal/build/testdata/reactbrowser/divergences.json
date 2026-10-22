@@ -7,73 +7,9 @@
     "severity": "P0",
     "reason": "[list-row-conditional] accordion rows inside the conditionally mounted FAQ panel keep {isOpen && <p/>} from mount: the previous answer stays open after toggling another row"
   },
-  "r18/boundary_did_catch_info": {
-    "severity": "P0",
-    "reason": "[class-unlowered] error boundaries (getDerivedStateFromError) are not lowered: the boundary and its children render as an empty <span>; warned without a diagnostic code"
-  },
-  "r18/boundary_effect_error": {
-    "severity": "P0",
-    "reason": "[class-unlowered] error boundary not lowered (empty <span>, subtree never renders); errors thrown in effects are not routed to a boundary; warned without a code"
-  },
-  "r18/boundary_event_handler_error": {
-    "severity": "P0",
-    "reason": "[class-unlowered] error boundary wrapping the whole page is not lowered, so the page renders only an empty <span>; warned without a code"
-  },
-  "r18/boundary_nested": {
-    "severity": "P0",
-    "reason": "[class-unlowered] nested error boundaries not lowered: children render as an empty <span>; warned without a code"
-  },
-  "r18/boundary_render_error": {
-    "severity": "P0",
-    "reason": "[class-unlowered] error boundary not lowered: protected child renders as an empty <span> and no fallback appears on render error; warned without a code"
-  },
-  "r18/boundary_reset_key": {
-    "severity": "P0",
-    "reason": "[class-unlowered] error boundary not lowered (empty <span>); key-based reset cannot work; warned without a code"
-  },
-  "r18/class_context_type": {
-    "severity": "P0",
-    "reason": "[class-unlowered] class with static contextType is not lowered and renders an empty <span>; warned without a code"
-  },
-  "r18/class_default_props": {
-    "severity": "P0",
-    "reason": "[class-default-props] static defaultProps are ignored: missing props render as undefined (class=\"pill undefined\", empty label)"
-  },
-  "r18/class_derived_state": {
-    "severity": "P0",
-    "reason": "[class-unlowered] class with static getDerivedStateFromProps is not lowered and renders an empty <span>; warned without a code"
-  },
-  "r18/class_get_snapshot": {
-    "severity": "P0",
-    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
-  },
-  "r18/class_lifecycle_mount_update_unmount": {
-    "severity": "P1",
-    "reason": "[class-lifecycle] componentDidUpdate is not called for prop changes (only own setState) and componentWillUnmount never runs when the parent removes the class"
-  },
-  "r18/class_lifecycle_order_nested": {
-    "severity": "P1",
-    "reason": "[effect-order] componentDidMount/DidUpdate run parent-first and interleave with child hook effects; React runs children first, then parents"
-  },
   "r18/class_pure_component": {
     "severity": "P2",
     "reason": "[render-count] PureComponent render is logged once less: Krate updates the text binding without re-running render(); DOM and state match"
-  },
-  "r18/class_setstate_callback": {
-    "severity": "P0",
-    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
-  },
-  "r18/class_setstate_functional": {
-    "severity": "P0",
-    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
-  },
-  "r18/class_should_component_update": {
-    "severity": "P0",
-    "reason": "[class-unlowered] class with shouldComponentUpdate is not lowered and renders an empty <span> (hint says remove it); warned without a code"
-  },
-  "r18/class_state_setstate": {
-    "severity": "P0",
-    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
   },
   "r18/context_consumer_render_prop": {
     "severity": "P0",
@@ -150,10 +86,6 @@
   "r18/ref_callback_mount_unmount": {
     "severity": "P1",
     "reason": "[callback-ref] a useCallback ref on a conditional element is never called (not with the node on mount or remount, not with null on unmount)"
-  },
-  "r18/ref_create_ref_class": {
-    "severity": "P0",
-    "reason": "[class-default-export] a page whose default export is a class component renders an empty #root"
   },
   "r18/suspense_fallback_then_content": {
     "severity": "P0",
