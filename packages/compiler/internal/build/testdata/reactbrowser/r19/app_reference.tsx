@@ -31,7 +31,11 @@ function TodoList(props: { initial: Promise<Todo[]> }) {
     const title = String(formData.get("title")).trim();
     if (!title) return "title is required";
     addOptimistic(title);
-    await delay(200, null);
+    // Long enough that the snapshot 60ms after the click always lands while
+    // the action is pending: with 200ms a slow step (Playwright actionability
+    // waits on a loaded machine) let React finish first, so the expected DOM
+    // depended on timing.
+    await delay(800, null);
     log("saved", title);
     setTodos((t) => [...t, { id: nextId.current++, title }]);
     return "";
