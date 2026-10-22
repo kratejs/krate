@@ -3,6 +3,8 @@ package astprint
 import (
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 )
@@ -109,6 +111,12 @@ func (p *printer) expr(e ast.Expr, minPrec int) string {
 	}
 	s := p.exprRaw(e)
 	if exprPrecOf(e) < minPrec {
+		return "(" + s + ")"
+	}
+	// A nested `a < b` is parenthesized so a later `>` cannot pair with it
+	// into TypeScript type arguments (`f(a < b, c > (d))` reads as a
+	// generic call).
+	if be, ok := e.(*ast.BinaryExpr); ok && be.Op == "<" && minPrec > precLowest {
 		return "(" + s + ")"
 	}
 	return s
@@ -397,8 +405,31 @@ func (p *printer) template(t *ast.TemplateExpr) string {
 	return b.String()
 }
 
+// callee renders the callee of a call: like lhsObject, but a number needs no
+// parentheses before `(`.
+func (p *printer) callee(e ast.Expr) string {
+	for {
+		ta, ok := e.(*ast.TypeAssertion)
+		if !ok || ta.Expr == nil {
+			break
+		}
+		e = ta.Expr
+	}
+	if lit, ok := e.(*ast.Literal); ok && lit.Kind == ast.NumberLit {
+		return lit.Value
+	}
+	return p.lhsObject(e)
+}
+
 // lhsObject renders the object of a member access or the callee of a call.
 func (p *printer) lhsObject(e ast.Expr) string {
+	for {
+		ta, ok := e.(*ast.TypeAssertion)
+		if !ok || ta.Expr == nil {
+			break
+		}
+		e = ta.Expr
+	}
 	s := p.expr(e, precLHS)
 	if lit, ok := e.(*ast.Literal); ok && lit.Kind == ast.NumberLit && isPlainInteger(lit.Value) {
 		return "(" + s + ")"
@@ -456,7 +487,7 @@ func (p *printer) args(args []ast.Expr) string {
 }
 
 func (p *printer) call(c *ast.CallExpr) string {
-	callee := p.lhsObject(c.Callee)
+	callee := p.callee(c.Callee)
 	if c.Optional {
 		return callee + "?.(" + p.args(c.Args) + ")"
 	}
@@ -487,7 +518,7 @@ func containsCall(e ast.Expr) bool {
 
 func (p *printer) newExpr(n *ast.NewExpr) string {
 	callee := p.expr(n.Callee, precLHS)
-	if containsCall(n.Callee) && !strings.HasPrefix(callee, "(") {
+	if containsCall(n.Callee) {
 		callee = "(" + callee + ")"
 	}
 	return "new " + callee + "(" + p.args(n.Args) + ")"
@@ -632,7 +663,10 @@ func isJSIdent(s string) bool {
 		return false
 	}
 	for i, r := range s {
-		if r == '_' || r == '$' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r > 0x7f {
+		if r == '_' || r == '$' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r > 0x7f && r != utf8.RuneError && (unicode.IsLetter(r) || i > 0 && unicode.In(r, unicode.Mn, unicode.Mc, unicode.Nd, unicode.Pc)) {
 			continue
 		}
 		if i > 0 && r >= '0' && r <= '9' {

@@ -296,6 +296,11 @@ type Lexer struct {
 	// if/while/for/with statement. After the matching `)` a `/` starts a regex.
 	parenStack       []bool
 	lastParenControl bool
+	// braceStack records, for each open `{`, whether it opened a block (as
+	// opposed to an object literal or JSX container). After the matching `}`
+	// of a block a `/` starts a regex (`if (x) {} /re/.test(s)`).
+	braceStack     []bool
+	lastBraceBlock bool
 
 	// Position tracker. Token offsets are visited in increasing order, so the
 	// line/column of each offset is computed incrementally.
@@ -450,9 +455,11 @@ func (l *Lexer) Tokenize() []Token {
 			l.incTemplateBrace()
 			// A `{` inside JSX opens an expression container; nested `{` inside
 			// it (an object literal) only deepens that container.
-			if l.inJSXTag() || l.inJSXBrace() {
+			jsx := l.inJSXTag()
+			if jsx || l.inJSXBrace() {
 				l.openJSXBrace()
 			}
+			l.braceStack = append(l.braceStack, !jsx && l.braceOpensBlock())
 			l.emit(LBRACE)
 		case '}':
 			// If this closes an open template interpolation (`${ ... }`),
@@ -462,6 +469,11 @@ func (l *Lexer) Tokenize() []Token {
 				l.readTemplate(true)
 			} else {
 				l.closeJSXBrace()
+				l.lastBraceBlock = false
+				if n := len(l.braceStack); n > 0 {
+					l.lastBraceBlock = l.braceStack[n-1]
+					l.braceStack = l.braceStack[:n-1]
+				}
 				l.emit(RBRACE)
 			}
 		case '(':
@@ -801,6 +813,16 @@ func (l *Lexer) emitJSXOpen() {
 	l.tokens[len(l.tokens)-1].JSX = true
 }
 
+// braceOpensBlock guesses whether a `{` at this point opens a block
+// statement or function body rather than an object literal.
+func (l *Lexer) braceOpensBlock() bool {
+	switch l.lastSignificant {
+	case 0, SEMI, LBRACE, RBRACE, RPAREN, ARROW, Else_, Do_, Try_, Finally_, Identifier:
+		return true
+	}
+	return false
+}
+
 // parenOpensControlHead reports whether a `(` at this point opens the head of
 // an if/while/for/with statement (including `for await (`).
 func (l *Lexer) parenOpensControlHead() bool {
@@ -913,6 +935,7 @@ func (l *Lexer) lexJSXChildren() {
 		l.pos++
 		l.incTemplateBrace()
 		l.openJSXBrace()
+		l.braceStack = append(l.braceStack, false)
 		l.emit(LBRACE)
 		return
 	case '<':
@@ -1460,7 +1483,8 @@ func (l *Lexer) readIdentifierRest() (string, bool) {
 		}
 		if c == '\\' {
 			r, n := decodeUnicodeEscape(l.src[l.pos:])
-			if n == 0 || !(isIDContinue(r) || r == '\u200c' || r == '\u200d') {
+			atStart := l.pos == l.start || l.pos == l.start+1 && l.src[l.start] == '#'
+			if n == 0 || atStart && !isIDStart(r) || !atStart && !isIDContinue(r) {
 				return "", false
 			}
 			if decoded == nil {
@@ -1740,6 +1764,10 @@ func (l *Lexer) regexContext() bool {
 	case RPAREN:
 		// `if (x) /re/.test(y)`: the `)` closed a control-statement head.
 		return l.lastParenControl
+	case RBRACE:
+		// `{ ... } /re/`: a `/` after a block starts a regex; after an
+		// object literal it divides.
+		return l.lastBraceBlock
 	case 0, Error, LBRACE, LPAREN, LBRACKET, COMMA, SEMI, COLON, ARROW, QUEST,
 		ASSIGN, ADD_ASSIGN, SUB_ASSIGN, MUL_ASSIGN, DIV_ASSIGN, MOD_ASSIGN,
 		SHL_ASSIGN, SHR_ASSIGN, USHR_ASSIGN, POW_ASSIGN,
