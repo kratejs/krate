@@ -91,10 +91,6 @@
     "severity": "P0",
     "reason": "[deferred-value] build fails: useDeferredValue(value, initialValue) result passed to a memo child cannot be evaluated at build time"
   },
-  "r19/meta_tags_hoist": {
-    "severity": "P0",
-    "reason": "[derived-render-values] <title>/<meta>/<link> are hoisted into <head> and match after load, but the component's local derived from a prop (const p = posts[props.index]) is evaluated once, so the head and the article do not update on 'next post'"
-  },
   "r19/ref_callback_cleanup": {
     "severity": "P1",
     "reason": "[callback-ref] a ref callback that returns a cleanup is never called: no attach on mount, no cleanup on detach"
