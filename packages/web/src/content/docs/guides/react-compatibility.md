@@ -41,7 +41,7 @@ export default function Timer() {
 
 ```tsx
 // ...and the compiler emits the equivalent Krate code.
-// useState  -> createSignal      useEffect -> createEffect
+// useState  -> createSignal      useEffect -> createEffectDeps
 // useRef    -> { current: null }  {seconds} -> seconds()
 ```
 
@@ -49,13 +49,13 @@ export default function Timer() {
 
 | React | Rewritten to |
 |-------|--------------|
-| `useState` | `createSignal` |
-| `useEffect` | `createEffect` |
-| `useLayoutEffect` / `useInsertionEffect` | `createEffect` |
-| `useMemo` | `createMemo` |
-| `useReducer` | `createReducer` |
+| `useState` | `createSignal` (a lazy initializer `useState(() => x)` is called once) |
+| `useEffect` | `createEffectDeps(fn, () => deps)` (passive phase, see [Effects](#effects)) |
+| `useLayoutEffect` / `useInsertionEffect` | `createEffectDeps(fn, () => deps, 'layout' / 'insertion')` |
+| `useMemo` | `createMemoDeps(fn, () => deps)`; without deps, `createMemo` |
+| `useReducer` | `createReducer` (stable `dispatch`, lazy `init`, Object.is bail-out) |
 | `useRef` | `{ current: initial }` |
-| `useCallback` | the wrapped function |
+| `useCallback` | `createCallbackDeps(fn, () => deps)`; without deps, the wrapped function |
 | `useContext` | `Context.useContext()` |
 | `useId` | a build-time literal (see below) |
 | `useTransition` | lowered to a pending signal plus a starter function |
@@ -81,7 +81,9 @@ export default function Counter() {
 | React | Behavior |
 |-------|----------|
 | `forwardRef` | lowered: the ref parameter becomes `props.ref`, which binds at the rendered element |
+| `ref` as a prop (React 19) | supported: `function Input({ ref, ...p }) { return <input ref={ref} {...p} /> }` needs no `forwardRef` |
 | `createRef` | lowered to `{ current: null }` |
+| `useImperativeHandle` | attaches the handle before effects run; re-created when a dependency changes, detached on unmount |
 | `createContext` | supported, including provider values that change at runtime |
 | `createElement` | lowered to `h` |
 | `memo` | identity (components already run once) |
@@ -143,6 +145,91 @@ a runtime counter. The server-rendered id and the hydrated id always agree.
 same getter contract as `createSignal`, so it reacts and hydrates like any other
 signal.
 
+### Effects
+
+Krate components run once, so there is no render for an effect to follow.
+Each effect hook instead watches its dependency array: the compiler passes a
+thunk (`() => [a, b]`) that the runtime re-reads whenever a signal it reads
+changes, and the effect re-runs in the next commit when any element differs
+by `Object.is` (so `NaN` equals `NaN` and `+0` differs from `-0`). Setting
+state to the value it already has (by `Object.is`) is a no-op: no binding or
+effect re-runs.
+
+**Commit order.** Signal writes are batched: every update made in the same
+task (an event handler, a timeout, a promise callback) produces one commit.
+A commit runs after the DOM bindings have been updated, in React's order:
+
+1. Mutation phase, per component: insertion-effect cleanup and setup, then
+   layout-effect cleanup.
+2. Layout phase: layout-effect setups. This happens in a microtask, before the
+   browser paints.
+3. Passive phase, in a later task (after paint): every passive cleanup, then
+   every passive setup.
+
+Within each phase, children run before parents and siblings in document
+order; effects of one component run in declaration order. Pending passive
+effects are always flushed before the next update is processed, as in React.
+A layout effect that sets state therefore re-commits before paint.
+
+**Dependency arrays.**
+
+| Pattern | Behavior |
+|---------|----------|
+| `[a, b]` | re-runs when `a` or `b` changes |
+| `[]` | runs once after mount; its cleanup runs on unmount |
+| `const deps = [a, b]` in the same component | inlined, same as `[a, b]` |
+| an expression (`props.deps`, `cond ? [a] : [b]`, `[...items, a]`) | evaluated live and compared at run time |
+| a parameter or imported array | compared at run time, but the captured array never changes ([KR2001](#effect-diagnostics)) |
+| omitted (or `null` / `undefined`) | re-runs after every commit that changes the component's own state or props ([KR2002](#effect-diagnostics)) |
+
+React re-runs a dependency-less effect after every render. Krate has no
+re-renders, so it uses the closest observable equivalent: the effect's
+dependencies are the component's `useState`/`useReducer` state and its props.
+Re-renders caused only by a parent or a context change are not modelled; pass
+an explicit array when that matters.
+
+`useMemo(fn, deps)` recomputes synchronously, when it is read, after its deps
+changed, so the value is current within the same update. `useCallback(fn,
+deps)` keeps one function identity until its deps change (so effects that
+list the callback re-run exactly when React's would). `useImperativeHandle`
+attaches the handle in the layout phase, re-creates it when its deps change,
+and resets the ref to `null` on unmount.
+
+**Unmounting.** When a list re-render removes a component, its cleanups run
+parent before child (React's deletion order): insertion and layout cleanups
+immediately, passive cleanups in the passive phase. A component inside a
+conditional branch that becomes hidden has all of its effect cleanups run,
+and when the branch is shown again every effect setup runs again, like React's
+`<Activity mode="hidden">`. Unlike React's `{cond && <Child />}`, the
+component's state is kept while it is hidden.
+
+**Closures.** Krate state reads are live getters, so code inside an effect
+always sees the current value. In a cleanup this differs from React, where a
+cleanup sees the values of the render its effect ran for ([KR2007](#effect-diagnostics)):
+copy the value into a local in the effect body (`const id = roomId; return ()
+=> leave(id);`).
+
+Compiled packages and code the compiler could not lower use the same runtime
+through `@krate/runtime/react`: `useEffect`, `useLayoutEffect` and
+`useInsertionEffect` get their phases, and dependency elements that are state
+getters are read live. There `useMemo` and `useCallback` compute once per
+component, which is what React does when the deps never change.
+
+#### Effect diagnostics
+
+| Code | Reported when | What to do |
+|------|---------------|------------|
+| KR2001 | a dependency array is a binding the compiler cannot resolve | write it inline or as `const deps = [...]` in the component |
+| KR2002 | an effect has no dependency array | pass the dependencies, or `[]` to run once |
+| KR2003 | an effect callback is `async` (its Promise is not a cleanup) | call an async function inside the effect |
+| KR2004 | `useCallback` has no dependency array (one identity for the component's lifetime) | pass the dependencies |
+| KR2005 | `useMemo` has no dependency array (recomputes when a signal it reads changes) | pass the dependencies |
+| KR2006 | the dependency argument is not an array | pass `[a, b]` or omit it |
+| KR2007 | an effect cleanup reads state | copy the value in the effect body |
+
+These are warnings; diagnostics for files under `node_modules` are not
+printed.
+
 ### Attributes and `style`
 
 Elements and attributes are serialized with the same rules as
@@ -193,8 +280,9 @@ Lowercase `<script>` and `<style>` elements render where they are written
 (for example a `<style>` inside an `<svg>`). Use `<Head>`, `<Script>` and
 `<Style>` to place content in the document head or body end.
 
-`onDoubleClick` is translated to the DOM `dblclick` event. `key` and
-`suppressHydrationWarning` are compiler-only and never appear in the output.
+`key` and `suppressHydrationWarning` are compiler-only and never appear in the
+output. Event handler props are covered in
+[Events, forms and refs](#events-forms-and-refs).
 
 ## shadcn/ui
 
@@ -267,6 +355,100 @@ Primitives that keep internal pointer state (for example Radix Tooltip) work
 when controlled: bind `open` to a page signal and wire `onOpenChange` plus
 explicit pointer/focus handlers on the trigger.
 
+## Events, forms and refs
+
+Event handlers, form controls and refs follow React 18/19 semantics as
+observed in a browser. The browser conformance suite (`/react-events/` in
+`examples/`) exercises them in a real browser.
+
+### Events
+
+- **Synthetic events.** Handlers receive a React-style event: `type`, `target`,
+  `currentTarget` (the element whose handler is running), `nativeEvent`,
+  `eventPhase`, `bubbles`, `cancelable`, `defaultPrevented`, `timeStamp`,
+  `isTrusted`, `preventDefault()`, `stopPropagation()`,
+  `isDefaultPrevented()`, `isPropagationStopped()` and a no-op `persist()`.
+  Type-specific fields (`key`, `code`, `repeat`, modifier keys, `button`,
+  `clientX`/`pageX`, `relatedTarget`, `deltaY`, `touches`, `dataTransfer`,
+  `clipboardData`, `data`, `animationName`, `propertyName`, ...) and
+  `getModifierState()` come from the native event. `currentTarget` is `null`
+  after the handler returns, as in React.
+- **Root delegation.** Like React 17+, bubbling events are delegated to the app
+  root (`#root`, else `<body>`) with one capture-phase and one bubble-phase
+  listener per event type, installed the first time a handler needs it.
+  Capture handlers (`onClickCapture`) run top-down, then bubble handlers run
+  bottom-up. Native listeners interleave the same way: a listener added with
+  `addEventListener` on an element inside the root runs before React bubble
+  handlers, a listener on `document` runs after them.
+- **`stopPropagation()`** stops the remaining React handlers and native
+  propagation, so `document` listeners do not see the event. Called in a
+  capture handler it also skips every bubble handler.
+- **Event names.** `onDoubleClick` uses `dblclick`; `onFocus`/`onBlur` bubble
+  (they use `focusin`/`focusout`) and report `type` `focus`/`blur`.
+  `onMouseEnter`/`onMouseLeave`/`onPointerEnter`/`onPointerLeave`, `onScroll`,
+  `onLoad`/`onError`, `onToggle`, `onInvalid` and media events (`onPlay`,
+  `onEnded`, ...) do not bubble and are attached to the element.
+  `onSubmit`/`onReset`, composition events (`onCompositionStart`/`Update`/`End`)
+  and clipboard, drag, touch, wheel, pointer and animation/transition events are
+  delegated.
+- **`onChange`** follows React: text inputs, textareas and range/number inputs
+  fire on every `input` event; checkboxes and radios fire on `click` (only when
+  the checked state actually changed, so clicking a checked radio does nothing);
+  selects and file inputs fire on `change`. `onChange` runs after `onInput` and
+  `onClick` for the same native event.
+- **`onBeforeInput`** fires for text insertion (and at the end of an IME
+  composition) with `data`, not for deletions, matching React.
+- **Errors** thrown by a handler do not stop the other handlers; the first error
+  is rethrown after the dispatch.
+- Handlers on `window`/`document` registered in `useEffect` stay native
+  listeners. Handlers inside a portal moved outside the root keep working.
+
+### Forms
+
+- **Controlled fields.** `value` and `checked` make a field controlled: after
+  `onChange` the DOM is restored to the state value, so a handler that does not
+  update state (or a field without `onChange`) keeps its value, and a handler
+  that transforms the value (`setV(v.toUpperCase())`) shows the transformed
+  value immediately. Radio groups restore every radio in the group. `<select
+  value>` and `<select multiple value={[...]}>` are controlled the same way.
+- **Value attribute sync.** As in React, the `value` attribute of a controlled
+  input tracks the current value, so `form.reset()` restores the current
+  controlled value.
+- **Uncontrolled fields.** `defaultValue`/`defaultChecked` set the initial value
+  only. Changing them later updates the default (visible only while the user
+  has not edited the field) and never overwrites user input. `form.reset()`
+  restores the defaults.
+- **`value={undefined}`** (or `null`) leaves the field uncontrolled. Switching a
+  field between controlled and uncontrolled logs React's console warning at
+  runtime.
+
+### Refs
+
+- **Object refs** (`useRef`, `createRef`) get `current` set to the node before
+  any layout effect runs, including refs forwarded to a child component, and
+  reset to `null` on unmount (a conditional branch hiding, a list item
+  removed, or navigation).
+- **Callback refs** are called with the node on mount and with `null` on
+  unmount. A React 19 cleanup function returned by the callback is called on
+  unmount instead. When the callback's identity changes the old callback is
+  detached and the new one attached. Callback refs never subscribe to signals
+  they read.
+- **`ref` as a prop**, `forwardRef`, and `useImperativeHandle(ref, create,
+  deps)` are supported. Refs in lists keep the right element per item.
+- Refs to class component instances are not supported yet.
+
+### Build diagnostics
+
+| Code | Reported for |
+|------|--------------|
+| `KR5001` | an unknown event prop on a built-in element (`onClickcapture`, `onTap`); a "did you mean" hint names the React event |
+| `KR5002` | a lowercase event prop given a function (`onclick={fn}`) |
+| `KR5003` | a string ref (`ref="field"`), removed in React 19 and ignored |
+| `KR5004` | `value`/`checked` without `onChange`, `onInput`, `readOnly` or `disabled` (a read-only field) |
+| `KR5005` | `value` with `defaultValue`, or `checked` with `defaultChecked` (the default is ignored) |
+| `KR5006` | `value={cond ? x : undefined}`: a field that switches between controlled and uncontrolled |
+| `KR5007` | `onChange` on a `contentEditable` element (use `onInput`) |
+
 ## What is not supported
 
 - **Running React itself.** There is no React runtime; compiled packages run
@@ -279,15 +461,6 @@ explicit pointer/focus handlers on the trigger.
   known. Literal inputs fold at build time; dynamic inputs use the compat shim.
 - **`Children.forEach`** and dynamic `Children.map` callbacks run in the compat
   shim at runtime, not at build time.
-
-Event props follow React semantics: events **bubble** (a child handler does not
-stop an ancestor handler unless it calls `stopPropagation()`), `onChange` maps to
-`input`, `onFocus`/`onBlur` map to the bubbling `focusin`/`focusout`, and
-non-bubbling events (`onMouseEnter`/`onMouseLeave`, `onScroll`, ...) are attached
-directly. `onClickCapture`-style capture handlers are supported. Controlled
-`value`/`checked` bind by DOM property, so programmatic updates work after the
-user has interacted. Hydration skips writes when the DOM value already
-matches, preserving focus, caret position, and selection.
 
 If you rely on unsupported behavior, write the component in Krate's own style --
 see [Reactivity](/docs/core-concepts/reactivity/) and

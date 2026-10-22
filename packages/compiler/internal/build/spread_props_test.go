@@ -107,7 +107,7 @@ func TestSpreadPropsForwardedValuesReadProps(t *testing.T) {
 	if !strings.Contains(child, `var props=__krate_props["1.Btn.Btn_c0"];`) {
 		t.Fatalf("child does not bind its props registry:\n%s", js)
 	}
-	if !strings.Contains(child, `kbindHandler("2","__krate_click_2",props.onClick);`) {
+	if !strings.Contains(child, `kbindHandler("2","onClick",props.onClick);`) {
 		t.Fatalf("forwarded handler not read from props:\n%s", js)
 	}
 	if strings.Contains(child, "inc") || strings.Contains(child, "c()") {

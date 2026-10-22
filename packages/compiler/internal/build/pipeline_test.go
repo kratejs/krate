@@ -648,7 +648,9 @@ func TestBuildMemoEmitted(t *testing.T) {
 	if !strings.Contains(js, "createMemo(") {
 		t.Errorf("expected createMemo declaration emitted, got:\n%.600s", js)
 	}
-	if !strings.Contains(js, "()=>r())") && !strings.Contains(js, "()=>i())") {
+	// The minifier picks the memo's name; the binding must read that getter.
+	memo := regexp.MustCompile(`var ([A-Za-z_$][\w$]*)=createMemo\(`).FindStringSubmatch(js)
+	if memo == nil || !strings.Contains(js, "()=>"+memo[1]+"())") {
 		t.Errorf("expected reactive memo getter binding emitted, got:\n%.600s", js)
 	}
 }
