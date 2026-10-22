@@ -20,7 +20,7 @@
  *   response {"ok":true,"result":R,"redirect":"/path"?}
  *            {"ok":false,"error":{"message":M,"digest":D}}
  */
-import { createEffect, onCleanup } from './signal.js';
+import { createEffect, onCleanup, krateRunEvent, krateTransitionWrites } from './signal.js';
 
 /** Field and query parameter carrying the JSON leading arguments of a form call. */
 export const ACTION_ARGS_FIELD = '__krate_args';
@@ -162,7 +162,11 @@ export function __krateBeginAction(): () => void {
     ended = true;
     pendingActions--;
     if (pendingActions === 0) {
-      for (const listener of Array.from(settleListeners)) listener();
+      // Optimistic reverts land with the action's other settle updates, in
+      // the transition lane.
+      krateTransitionWrites(() => {
+        for (const listener of Array.from(settleListeners)) listener();
+      });
     }
   };
 }
@@ -462,7 +466,9 @@ export async function submitFormAction(
     st.running--;
     if (st.running === 0) {
       form.removeAttribute('data-krate-action-pending');
-      publish(st, IDLE);
+      // The settled status commits in a later task (React's transition
+      // lane), so the pending render is painted, as in React.
+      krateTransitionWrites(() => publish(st, IDLE));
       if (ok || st.resetRequested) {
         st.resetRequested = false;
         if (ok && form.hasAttribute('data-krate-reload')) location.reload();
@@ -481,7 +487,13 @@ function onSubmit(e: Event): void {
   if (!target) return;
   e.preventDefault();
   const data = formDataFor(form, submitter);
-  void submitFormAction(form, target.fn, data, submitter, target.url);
+  // submit is a discrete event: the pending status (useFormStatus,
+  // useActionState) commits before the event returns, as in React, even when
+  // the action itself settles a few microtasks later. A focused submit button
+  // disabled by that pending render loses focus like React's does.
+  krateRunEvent('submit', true, () => {
+    void submitFormAction(form, target.fn, data, submitter, target.url);
+  });
 }
 
 /** Installs the document submit listener once per window. */
@@ -524,7 +536,7 @@ export function __krateActionState<S>(
       let ok = false;
       try {
         const next = await runActionTransition(() => action(getState(), item.payload));
-        setState(next as S);
+        krateTransitionWrites(() => setState(next as S));
         ok = true;
       } catch (err) {
         const cancelled = queue.splice(0);
@@ -534,12 +546,14 @@ export function __krateActionState<S>(
         }
         reportActionError(err);
       } finally {
-        item.end();
-        item.done(ok);
+        krateTransitionWrites(() => {
+          item.end();
+          item.done(ok);
+        });
       }
     }
     running = false;
-    setPending(false);
+    krateTransitionWrites(() => setPending(false));
   };
 
   const run = (payload: unknown): Promise<boolean> =>

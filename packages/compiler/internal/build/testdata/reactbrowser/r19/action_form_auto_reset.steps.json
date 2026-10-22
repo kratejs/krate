@@ -6,6 +6,7 @@
     { "op": "wait", "ms": 50 },
     { "op": "fill", "sel": "#text", "text": "again" },
     { "op": "press", "sel": "#text", "key": "Enter" },
-    { "op": "wait", "ms": 200 }
+    { "op": "waitFor", "sel": "#messages li:nth-child(2)" },
+    { "op": "wait", "ms": 50 }
   ]
 }
