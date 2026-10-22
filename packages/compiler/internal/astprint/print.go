@@ -257,7 +257,12 @@ func (p *printer) classMember(m *ast.ClassMember, depth int) {
 			prefix += "*"
 		}
 	}
-	p.line(depth, prefix+p.memberKey(m)+"("+p.params(m.Params)+") {")
+	head := prefix + p.memberKey(m) + "(" + p.params(m.Params) + ") {"
+	if len(m.Body) == 0 {
+		p.line(depth, head+"}")
+		return
+	}
+	p.line(depth, head)
 	p.body(m.Body, depth+1)
 	p.line(depth, "}")
 }

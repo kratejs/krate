@@ -251,9 +251,6 @@ type Token struct {
 	// Line and Col are the 1-based start position. Col counts UTF-16 units.
 	Line int
 	Col  int
-	// EndLine and EndCol are the 1-based position just past the lexeme.
-	EndLine int
-	EndCol  int
 	// NewlineBefore reports that a line terminator (in whitespace or inside a
 	// comment) separates this token from the previous non-whitespace token.
 	// The parser uses it for automatic semicolon insertion.
@@ -427,7 +424,7 @@ func (l *Lexer) lineCol(off int) (int, int) {
 
 func (l *Lexer) Tokenize() []Token {
 	if l.tokens == nil {
-		l.tokens = make([]Token, 0, len(l.src)/3+8)
+		l.tokens = make([]Token, 0, len(l.src)/5+8)
 	}
 	// A hashbang line (`#!/usr/bin/env node`) is only valid at offset 0.
 	if strings.HasPrefix(l.src, "#!") {
@@ -736,7 +733,7 @@ func (l *Lexer) Tokenize() []Token {
 	line, col := l.lineCol(l.pos)
 	l.tokens = append(l.tokens, Token{
 		Kind: EOF, Offset: l.pos, End: l.pos,
-		Line: line, Col: col, EndLine: line, EndCol: col,
+		Line: line, Col: col,
 		NewlineBefore: l.nlPending,
 	})
 	return l.tokens
@@ -776,21 +773,22 @@ func (l *Lexer) emit(kind Kind) {
 }
 
 func (l *Lexer) emitValue(kind Kind, val string) {
+	l.lastKind = kind
+	if kind == Whitespace {
+		// Whitespace carries no information the parser needs beyond
+		// NewlineBefore (recorded on the next token), so it is not emitted.
+		return
+	}
 	line, col := l.lineCol(l.start)
-	endLine, endCol := l.lineCol(l.pos)
-	tok := Token{
+	l.tokens = append(l.tokens, Token{
 		Kind: kind, Value: val,
 		Offset: l.start, End: l.pos,
-		Line: line, Col: col, EndLine: endLine, EndCol: endCol,
-	}
-	if kind != Whitespace {
-		tok.NewlineBefore = l.nlPending
-		l.nlPending = false
-		l.prevSignificant = l.lastSignificant
-		l.lastSignificant = kind
-	}
-	l.tokens = append(l.tokens, tok)
-	l.lastKind = kind
+		Line: line, Col: col,
+		NewlineBefore: l.nlPending,
+	})
+	l.nlPending = false
+	l.prevSignificant = l.lastSignificant
+	l.lastSignificant = kind
 }
 
 func (l *Lexer) emitError(msg string) {

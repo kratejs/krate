@@ -390,7 +390,7 @@ func (p *Parser) parseWithStmt() ast.Stmt {
 		p.errorAt(start, "`with` statements are not allowed in strict mode", "access the object's properties explicitly")
 	}
 	p.expect(lexer.LPAREN)
-	obj := p.parseExpression()
+	obj := p.mustExpression()
 	p.expect(lexer.RPAREN)
 	body := p.parseBody()
 	return &ast.WithStmt{Position: tokPos(start), Object: obj, Body: body}
@@ -518,7 +518,7 @@ func (p *Parser) parseThrowStmt() ast.Stmt {
 	if p.tok().NewlineBefore {
 		p.errWithMsg("illegal newline after `throw`", "`throw` and its expression must be on the same line")
 	}
-	value := p.parseExpression()
+	value := p.mustExpression()
 	p.consumeSemicolon()
 	return &ast.ThrowStmt{Position: tokPos(kw), Value: value}
 }
@@ -572,7 +572,7 @@ func (p *Parser) parseReturn() ast.Stmt {
 	stmt := &ast.ReturnStmt{Position: tokPos(kw)}
 	t := p.tok()
 	if !t.NewlineBefore && t.Kind != lexer.SEMI && t.Kind != lexer.RBRACE && t.Kind != lexer.EOF {
-		stmt.Value = p.parseExpression()
+		stmt.Value = p.mustExpression()
 	}
 	p.consumeSemicolon()
 	return stmt
@@ -655,9 +655,9 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		p.next()
 		var right ast.Expr
 		if isOf {
-			right = p.parseAssign()
+			right = p.mustAssign()
 		} else {
-			right = p.parseExpression()
+			right = p.mustExpression()
 		}
 		p.expect(lexer.RPAREN)
 		body := p.parseLoopBody()
@@ -676,11 +676,11 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	p.expect(lexer.SEMI)
 	var test, update ast.Expr
 	if p.kind() != lexer.SEMI {
-		test = p.parseExpression()
+		test = p.mustExpression()
 	}
 	p.expect(lexer.SEMI)
 	if p.kind() != lexer.RPAREN {
-		update = p.parseExpression()
+		update = p.mustExpression()
 	}
 	p.expect(lexer.RPAREN)
 	body := p.parseLoopBody()
@@ -764,7 +764,7 @@ func (p *Parser) parseUsingStmtNoSemi(await bool) ast.Stmt {
 		p.skipOptionalTypeAnnotation()
 		decl := &ast.VarDecl{Name: name.Value}
 		if p.match(lexer.ASSIGN) {
-			decl.Init = p.parseAssign()
+			decl.Init = p.mustAssign()
 		} else if p.kind() != lexer.Of {
 			p.errWithMsg("missing initializer in `using` declaration", "add `= value`")
 		}
@@ -818,7 +818,7 @@ func (p *Parser) parseDeclarators(stmt *ast.VarStmt, requireInit bool) {
 		}
 		p.skipOptionalTypeAnnotation()
 		if p.match(lexer.ASSIGN) {
-			decl.Init = p.parseAssign()
+			decl.Init = p.mustAssign()
 		} else if requireInit && (stmt.Kind == ast.VarConst || decl.IsDestructuring) {
 			if !p.inAmbientContext() {
 				p.errorAt(declTok, "missing initializer in "+map[bool]string{true: "destructuring", false: "const"}[decl.IsDestructuring]+" declaration", "add `= value`")
@@ -1058,7 +1058,7 @@ func (p *Parser) parseParams() []*ast.Param {
 			if param.IsRest {
 				p.errWithMsg("a rest parameter cannot have a default value", "remove the `= ...` default")
 			}
-			param.Default = p.parseAssign()
+			param.Default = p.mustAssign()
 		}
 		params = append(params, param)
 		if param.IsRest && p.kind() == lexer.COMMA {
@@ -1323,7 +1323,7 @@ func (p *Parser) parseExport() ast.Stmt {
 			p.parseDecorators()
 			exp.Declaration = p.parseClassDecl()
 		default:
-			expr := p.parseAssign()
+			expr := p.mustAssign()
 			if expr == nil {
 				p.unexpected()
 				return exp
@@ -1566,7 +1566,17 @@ func (p *Parser) parseNamespace(exported bool) ast.Stmt {
 	}
 	p.next()
 	errsBefore := len(p.errs)
-	body := p.parseStmtList(lexer.RBRACE)
+	var body []ast.Stmt
+	for p.kind() != lexer.RBRACE && p.kind() != lexer.EOF {
+		pos := p.pos
+		if st := p.parseStmt(stmtTop); st != nil {
+			body = append(body, st)
+		}
+		if p.pos == pos {
+			p.unexpected()
+			p.next()
+		}
+	}
 	p.expect(lexer.RBRACE)
 	if len(body) > 0 && len(p.errs) == errsBefore {
 		p.errorAt(start, "TypeScript namespaces with runtime members are not supported",

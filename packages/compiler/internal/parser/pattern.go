@@ -149,7 +149,7 @@ func (p *Parser) objectBindingPattern(names *[]string, rest *string) ast.Expr {
 			prop.Value = id
 			if p.kind() == lexer.ASSIGN {
 				p.next()
-				def := p.parseAssignAllowIn()
+				def := p.mustAssignAllowIn()
 				prop.Value = &ast.BinaryExpr{Position: id.Position, Left: id, Op: "=", Right: def}
 			}
 		}

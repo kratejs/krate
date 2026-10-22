@@ -1021,6 +1021,8 @@ func codegenIssues(fn *ast.FnDecl) []error {
 
 	walkStmt = func(s ast.Stmt) {
 		switch v := s.(type) {
+		case nil:
+			// Optional statements (a `for (;;)` without an init).
 		case *ast.ReturnStmt:
 			walkExpr(v.Value)
 		case *ast.ExprStmt:

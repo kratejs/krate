@@ -159,7 +159,7 @@ func (p *Parser) parseYield() ast.Expr {
 	if p.kind() == lexer.STAR && !p.tok().NewlineBefore {
 		p.next()
 		op = "yield*"
-		arg := p.parseAssign()
+		arg := p.mustAssign()
 		return &ast.UnaryExpr{Position: tokPos(yt), Op: op, Arg: arg}
 	}
 	var arg ast.Expr
@@ -213,6 +213,8 @@ func (p *Parser) parseConditional() ast.Expr {
 
 // parseBinary parses binary operators with precedence >= minPrec.
 func (p *Parser) parseBinary(minPrec int) ast.Expr {
+	p.enter()
+	defer p.leave()
 	left := p.parseUnary()
 	if left == nil {
 		return nil
@@ -498,9 +500,9 @@ func (p *Parser) parseImportExpr() ast.Expr {
 	if p.kind() == lexer.RPAREN {
 		p.errWithMsg("import() requires a module specifier", "")
 	} else {
-		di.Arg = p.parseAssignAllowIn()
+		di.Arg = p.mustAssignAllowIn()
 		if p.match(lexer.COMMA) && p.kind() != lexer.RPAREN {
-			di.Options = p.parseAssignAllowIn()
+			di.Options = p.mustAssignAllowIn()
 			p.match(lexer.COMMA)
 		}
 	}
@@ -660,7 +662,7 @@ func (p *Parser) parseCallTail(expr ast.Expr, calls bool) ast.Expr {
 				expr = &ast.CallExpr{Position: expr.Pos(), Callee: expr, Args: args, Optional: true}
 			case lexer.LBRACKET:
 				p.next()
-				prop := p.parseExpressionAllowIn()
+				prop := p.mustExpressionAllowIn()
 				p.expect(lexer.RBRACKET)
 				expr = &ast.MemberExpr{Position: expr.Pos(), Object: expr, Property: prop, Computed: true, Optional: true}
 			case lexer.TEMPLATE_START, tmplNoSub:
@@ -1095,7 +1097,7 @@ func (p *Parser) parseObjectMember(obj *ast.ObjectExpr) (*ast.ObjectProp, bool) 
 	prop.Value = id
 	if p.kind() == lexer.ASSIGN {
 		eq := p.next()
-		def := p.parseAssign()
+		def := p.mustAssign()
 		prop.Value = &ast.BinaryExpr{Position: id.Position, Left: id, Op: "=", Right: def}
 		if p.coverInit == nil {
 			p.coverInit = map[*ast.ObjectExpr]lexer.Token{}
@@ -1578,4 +1580,38 @@ func hexValue(s string) (int, bool) {
 		}
 	}
 	return v, true
+}
+
+// mustAssign parses an AssignmentExpression and reports a missing one.
+func (p *Parser) mustAssign() ast.Expr {
+	e := p.parseAssign()
+	if e == nil {
+		p.errWithMsg("expected an expression, got "+describe(p.tok()), "")
+	}
+	return e
+}
+
+func (p *Parser) mustAssignAllowIn() ast.Expr {
+	prev := p.noIn
+	p.noIn = false
+	e := p.mustAssign()
+	p.noIn = prev
+	return e
+}
+
+// mustExpression parses an Expression and reports a missing one.
+func (p *Parser) mustExpression() ast.Expr {
+	e := p.parseExpression()
+	if e == nil {
+		p.errWithMsg("expected an expression, got "+describe(p.tok()), "")
+	}
+	return e
+}
+
+func (p *Parser) mustExpressionAllowIn() ast.Expr {
+	prev := p.noIn
+	p.noIn = false
+	e := p.mustExpression()
+	p.noIn = prev
+	return e
 }

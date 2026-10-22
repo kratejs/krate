@@ -73,6 +73,8 @@ type Parser struct {
 	scope *scope
 	// classes tracks private names per enclosing class body.
 	classes []*privateScope
+	// typeArgsMemo caches speculative type-argument scans by token index.
+	typeArgsMemo map[int]scanResult
 	// paramNames holds the binding-name tokens of the last parameter list.
 	paramNames []lexer.Token
 
@@ -122,7 +124,8 @@ func (p *Parser) leave() { p.depth-- }
 // Whitespace tokens are dropped; layout information the parser needs is
 // carried by Token.NewlineBefore.
 func New(tokens []lexer.Token) *Parser {
-	sig := make([]lexer.Token, 0, len(tokens)/2+1)
+	// Filter in place: the caller hands the token slice over to the parser.
+	sig := tokens[:0]
 	for _, t := range tokens {
 		if t.Kind == lexer.Whitespace {
 			continue
@@ -137,7 +140,7 @@ func New(tokens []lexer.Token) *Parser {
 		if len(sig) > 0 {
 			last := sig[len(sig)-1]
 			eof.Offset, eof.End = last.End, last.End
-			eof.Line, eof.Col = last.EndLine, last.EndCol
+			eof.Line, eof.Col = last.Line, last.Col+lexer.UTF16Len(last.Value)
 		}
 		sig = append(sig, eof)
 	}

@@ -401,11 +401,29 @@ func (p *Parser) scanPredicate(c tcur) (tcur, bool) {
 	return c, true
 }
 
-// scanTypeArgs scans `<A, B>` starting at the `<`.
+type scanResult struct {
+	end tcur
+	ok  bool
+}
+
+// scanTypeArgs scans `<A, B>` starting at the `<`. Results are memoized per
+// start token so speculative scans (`a < b < c ...`) stay linear.
 func (p *Parser) scanTypeArgs(c tcur) (tcur, bool) {
 	if p.vkind(c) != lexer.LT || c.k != 0 {
 		return c, false
 	}
+	if r, ok := p.typeArgsMemo[c.i]; ok {
+		return r.end, r.ok
+	}
+	end, ok := p.scanTypeArgsAt(c)
+	if p.typeArgsMemo == nil {
+		p.typeArgsMemo = map[int]scanResult{}
+	}
+	p.typeArgsMemo[c.i] = scanResult{end, ok}
+	return end, ok
+}
+
+func (p *Parser) scanTypeArgsAt(c tcur) (tcur, bool) {
 	c = p.adv(c)
 	for {
 		var ok bool
