@@ -654,6 +654,13 @@ observed in a browser. The browser conformance suite (`/react-events/` in
   only. Changing them later updates the default (visible only while the user
   has not edited the field) and never overwrites user input. `form.reset()`
   restores the defaults.
+- **Constant values.** `value="fixed"` with an `onChange` is controlled too:
+  typing snaps back to the constant, as in React.
+- **Mount behavior.** Text inputs get React's mount-time caret (at the end of
+  the value), so typing after `focus()` appends; a controlled textarea starts
+  with the caret at the beginning, as in React. An `autoFocus` element is
+  focused when its conditional branch mounts, and focus stays on a list item
+  (matched by `id`) when the list re-renders.
 - **`value={undefined}`** (or `null`) leaves the field uncontrolled. Switching a
   field between controlled and uncontrolled logs React's console warning at
   runtime.
@@ -667,8 +674,17 @@ observed in a browser. The browser conformance suite (`/react-events/` in
 - **Callback refs** are called with the node on mount and with `null` on
   unmount. A React 19 cleanup function returned by the callback is called on
   unmount instead. When the callback's identity changes the old callback is
-  detached and the new one attached. Callback refs never subscribe to signals
-  they read.
+  detached and the new one attached. An inline callback ref
+  (`ref={(n) => log(n, count)}`) is re-bound whenever a state value it reads
+  changes, and each call sees the state of its own render, matching React's
+  new-callback-per-render behavior. Callback refs never subscribe the
+  surrounding binding to signals they read.
+- Hydration refs attach after every component on the page has bound its DOM
+  and before layout effects (components mounted later attach at once), so a ref on server-rendered list content that is re-rendered
+  on hydration is never called with the stale node.
+- **`ref.current` read during render** is shown once and not refreshed on
+  later renders (Krate does not re-render); it is reported as `KR5008`. Keep
+  values the UI shows in state.
 - **`ref` as a prop**, `forwardRef`, and `useImperativeHandle(ref, create,
   deps)` are supported. Refs in lists keep the right element per item.
 - Refs to class component instances receive the instance (see Class
@@ -680,11 +696,12 @@ observed in a browser. The browser conformance suite (`/react-events/` in
 |------|--------------|
 | `KR5001` | an unknown event prop on a built-in element (`onClickcapture`, `onTap`); a "did you mean" hint names the React event |
 | `KR5002` | a lowercase event prop given a function (`onclick={fn}`) |
-| `KR5003` | a string ref (`ref="field"`), removed in React 19 and ignored |
+| `KR5003` | a string ref (`ref="field"`, also in class components), removed in React 19 and ignored |
 | `KR5004` | `value`/`checked` without `onChange`, `onInput`, `readOnly` or `disabled` (a read-only field) |
 | `KR5005` | `value` with `defaultValue`, or `checked` with `defaultChecked` (the default is ignored) |
 | `KR5006` | `value={cond ? x : undefined}`: a field that switches between controlled and uncontrolled |
 | `KR5007` | `onChange` on a `contentEditable` element (use `onInput`) |
+| `KR5008` | `ref.current` read in rendered JSX (shown once, never refreshed) |
 | `KR6001` | a list that can change at runtime renders elements without a `key` |
 | `KR6002` | two items of a list resolve to the same key at build time |
 | `KR6003` | a map callback keys some returned elements but not others |

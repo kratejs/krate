@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -91,7 +92,75 @@ func (b *builder) elementBindings(el *ast.JSXElement, id SlotID) (handlers []Han
 			}
 		}
 	}
+	// A constant controlled value (value="x" with an onChange) still makes
+	// the field controlled: hydrate it so edits snap back, as in React.
+	if len(handlers) > 0 {
+		attrs = append(attrs, b.constantControlBindings(el.Opening.Name, attributes, id, attrs)...)
+	}
 	return handlers, attrs, refs
+}
+
+// refCallbackReads lists the reactive values (state and derived render
+// values) an inline callback ref reads anywhere in its body, sorted.
+func (b *builder) refCallbackReads(fn *ast.ArrowFn, js string) []string {
+	own := map[string]bool{}
+	for _, n := range functionScopeNames(fn.Params, fn.Body) {
+		own[n] = true
+	}
+	var reads []string
+	for name := range b.sigMap() {
+		if !own[name] && b.isSignalName(name) && codeContainsIdent(js, name) {
+			reads = append(reads, name)
+		}
+	}
+	sort.Strings(reads)
+	return reads
+}
+
+// constantControlBindings returns hydration-only bindings for statically
+// known value/checked props on form controls.
+func (b *builder) constantControlBindings(tag string, attributes []*ast.JSXAttr, id SlotID, have []AttrBinding) []AttrBinding {
+	if tag != "input" && tag != "textarea" && tag != "select" {
+		return nil
+	}
+	inputType := ""
+	for _, attr := range attributes {
+		if attr != nil && attr.Name == "type" {
+			if lit, ok := attr.Value.(*ast.Literal); ok && lit.Kind == ast.StringLit {
+				inputType = strings.ToLower(lit.Value)
+			}
+		}
+	}
+	var out []AttrBinding
+	for _, attr := range attributes {
+		if attr == nil || attr.Spread || attr.Value == nil || (attr.Name != "value" && attr.Name != "checked") {
+			continue
+		}
+		// A checkbox/radio/button value is data, not edited state.
+		if attr.Name == "value" && tag == "input" && formReadOnlyValueTypes[inputType] {
+			continue
+		}
+		// Only literals: an identifier or prop that folds at build time may
+		// still be live (a forwarded prop) and is bound elsewhere.
+		if _, ok := attr.Value.(*ast.Literal); !ok || isUndefinedExpr(attr.Value) {
+			continue
+		}
+		bound := false
+		for _, a := range have {
+			if a.AttrName == attr.Name && a.Prop == "" {
+				bound = true
+			}
+		}
+		if bound {
+			continue
+		}
+		js := generateExprJS(attr.Value, b.sigMap())
+		if js == "" {
+			continue
+		}
+		out = append(out, AttrBinding{ElementSlotID: id, AttrName: attr.Name, ExprSource: js, HydrateOnly: true})
+	}
+	return out
 }
 
 // refBinding lowers a `ref` attribute to its hydration binding.
@@ -107,7 +176,22 @@ func (b *builder) refBinding(attr *ast.JSXAttr, id SlotID) (RefBinding, bool) {
 	// itself - it receives the mounted element directly (React-style).
 	if fn, ok := attr.Value.(*ast.ArrowFn); ok {
 		cb := renderArrowFn(fn, b.sigMap())
-		return RefBinding{ElementSlotID: id, Callback: cb}, cb != ""
+		if cb == "" {
+			return RefBinding{}, false
+		}
+		// React creates a new inline callback every render: the old one is
+		// called with null and the new one with the node, each seeing the
+		// state of its own render. Re-bind when a signal the callback reads
+		// changes, and give each callback a snapshot of those signals by
+		// shadowing their getters.
+		if reads := b.refCallbackReads(fn, cb); len(reads) > 0 {
+			args := make([]string, len(reads))
+			for i, r := range reads {
+				args[i] = "(v=>()=>v)(" + r + "())"
+			}
+			cb = "((" + strings.Join(reads, ",") + ")=>" + cb + ")(" + strings.Join(args, ",") + ")"
+		}
+		return RefBinding{ElementSlotID: id, Callback: cb}, true
 	}
 	target := generateExprJS(attr.Value, b.sigMap())
 	if target == "" {
@@ -127,7 +211,10 @@ func (b *builder) refBinding(attr *ast.JSXAttr, id SlotID) (RefBinding, bool) {
 	case *ast.Identifier, *ast.MemberExpr:
 		return RefBinding{ElementSlotID: id, Target: target, Adaptive: true}, true
 	}
-	return RefBinding{ElementSlotID: id, Target: target}, true
+	// Any other expression (a useCallback getter read as `cb()`, a
+	// conditional) evaluates to the ref value; it is re-read reactively, so a
+	// changed callback identity detaches the old ref and attaches the new.
+	return RefBinding{ElementSlotID: id, Callback: target}, true
 }
 
 // elementChildren builds an element's children. JSX text is decoded by the
