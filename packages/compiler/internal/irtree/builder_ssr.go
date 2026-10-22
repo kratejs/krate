@@ -1522,22 +1522,11 @@ func (b *builder) buildCallSiteChildSlots(children []ast.JSXChild, parentID stri
 			result = append(result, b.buildExprContainerChildren(c, parentID)...)
 		case *ast.JSXText:
 			if c.Value != "" {
-				result = append(result, &StaticHTML{HTML: c.Value})
+				result = append(result, &StaticHTML{HTML: escape.Text(c.Value)})
 			}
 		}
 	}
 	return result
-}
-
-// isVoidElement returns true for HTML void elements that can be self-closing.
-// Non-void elements like <div/> must be emitted as <div></div>.
-func isVoidElement(tag string) bool {
-	switch tag {
-	case "area", "base", "br", "col", "embed", "hr", "img", "input",
-		"link", "meta", "param", "source", "track", "wbr":
-		return true
-	}
-	return false
 }
 
 // handlerBodiesReferenceProps checks if any handler body references `props.`

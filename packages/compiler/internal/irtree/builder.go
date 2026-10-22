@@ -151,6 +151,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 	errs = append(errs, builder.cssErrs...)
 	errs = append(errs, builder.buildErrs...)
 	errs = append(errs, builder.codegenErrs...)
+	errs = append(errs, builder.markupErrs...)
 
 	cssSignals, noJSFallback := builder.cssStylesheets()
 	return &ComponentTree{
@@ -246,6 +247,8 @@ type builder struct {
 	actionURLs       map[string]string         // server-action binding -> POST URL
 	externals        []ExternalComponent       // unresolved package components mounted at runtime
 	warnings         []diag.Diagnostic         // non-fatal, positioned build warnings
+	markupErrs       []error                   // invalid tag/attribute names, children on void elements
+	selectStack      [][]string                // selected option values of enclosing <select> elements
 	// contextValues holds the active provider value expression per context,
 	// pushed while building a `<Ctx.Provider value={expr}>` subtree so a
 	// dynamic value substitutes for `Ctx.useContext()` reads.

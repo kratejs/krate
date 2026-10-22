@@ -1,4 +1,5 @@
 import { createEffect } from './signal.js';
+import { krateSanitizeAttr } from './slots.js';
 
 // React-style event names whose DOM event differs from lowercasing. onFocus/
 // onBlur use the bubbling focusin/focusout; onChange uses input (per-keystroke).
@@ -153,7 +154,7 @@ function setAttr(el: Element, key: string, value: unknown): void {
   } else if (key === 'key') {
     // key is metadata only, not set as attribute
   } else if (value !== null && value !== undefined && value !== false) {
-    el.setAttribute(key, String(value));
+    el.setAttribute(key, krateSanitizeAttr(key, String(value)));
   }
 }
 

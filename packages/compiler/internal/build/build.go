@@ -1657,8 +1657,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		goBaked = goBakedMap(emitResult.GoRenders, rendered)
 	}
 	// Regions are enumerated after emit so runtime Go components can carry their
-	// build-rendered children (set during emitRuntime) in RegionMeta.Props.
+	// build-rendered children (EmitResult.RuntimeChildren) in RegionMeta.Props.
 	regions := enumerateRegions(tree)
+	attachRuntimeChildren(regions, emitResult.RuntimeChildren)
 	for i := range regions {
 		regions[i].Revalidate = regionRevalidate(b.Root, regions[i].SourcePath)
 	}
@@ -3176,11 +3177,11 @@ func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
 	icon, err := icons.ResolveIcon(b.Root, iconName)
 	if err != nil {
 		// Return a graceful error fallback inside the HTML rather than crashing
-		// the compiler. The name is escaped because it may be attacker-influenced
-		// and the value is written into the page as-is.
+		// the compiler. JSX text is escaped by the emitters, so the
+		// (possibly attacker-influenced) name cannot inject markup.
 		return &ast.JSXElement{
 			Opening:  &ast.JSXOpening{Name: "span", Attributes: forwardedAttrs, SelfClosing: false},
-			Children: []ast.JSXChild{&ast.JSXText{Value: escape.HTMLAttr(fmt.Sprintf("[%v]", err))}},
+			Children: []ast.JSXChild{&ast.JSXText{Value: fmt.Sprintf("[%v]", err)}},
 			Closing:  &ast.JSXClosing{Name: "span"},
 		}
 	}
@@ -3204,6 +3205,10 @@ func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
 	// Combine default engine SVG properties with user-defined attributes,
 	// letting the user override any default.
 	allAttrs := append(baseSvgAttrs, forwardedAttrs...)
+	// The icon body is trusted SVG markup from the icon set, injected raw.
+	allAttrs = append(allAttrs, &ast.JSXAttr{Name: "dangerouslySetInnerHTML", Value: &ast.ObjectExpr{
+		Properties: []*ast.ObjectProp{{Key: "__html", Value: &ast.Literal{Kind: ast.StringLit, Value: icon.Inner}}},
+	}})
 
 	return &ast.JSXElement{
 		Position: orig.Position,
@@ -3212,7 +3217,6 @@ func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
 			Attributes:  dedupeAttrs(allAttrs),
 			SelfClosing: false,
 		},
-		Children: []ast.JSXChild{&ast.JSXText{Value: icon.Inner}},
 		Closing: &ast.JSXClosing{
 			Name: "svg",
 		},
@@ -3525,9 +3529,6 @@ func (b *Builder) compileImageToPicture(orig *ast.JSXElement) *ast.JSXElement {
 		return &ast.JSXElement{
 			Position: orig.Position,
 			Opening:  &ast.JSXOpening{Name: "img", Attributes: imgAttrs, SelfClosing: true},
-			Children: []ast.JSXChild{
-				&ast.JSXText{Value: fmt.Sprintf("Your browser does not support the image element. Original: %s", src)},
-			},
 		}
 	}
 
@@ -3618,9 +3619,6 @@ func (b *Builder) compileImageToPicture(orig *ast.JSXElement) *ast.JSXElement {
 			Name:        "img",
 			Attributes:  imgAttrs,
 			SelfClosing: true,
-		},
-		Children: []ast.JSXChild{
-			&ast.JSXText{Value: fmt.Sprintf("Your browser does not support the image element. Original: %s", src)},
 		},
 	}
 

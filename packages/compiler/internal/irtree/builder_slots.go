@@ -11,7 +11,9 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/astprint"
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
@@ -901,9 +903,11 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 
 	name := el.Opening.Name
 
-	// Special components - route to metadata output
+	// Special components - route to metadata output. Lowercase <script> and
+	// <style> are ordinary elements rendered in place (e.g. a <style> inside
+	// an <svg>); only the documented <Head>/<Script>/<Style> are hoisted.
 	switch name {
-	case "Head", "head", "Script", "script", "Style", "style":
+	case "Head", "head", "Script", "Style":
 		return []SlotNode{b.buildMetaSlot(el, parentID)}
 	case "Link":
 		b.hasLinks = true
@@ -1147,7 +1151,7 @@ func (b *builder) buildSuspenseResolved(children []ast.JSXChild, parentID string
 			out = append(out, b.buildExprContainerChildren(ch, parentID)...)
 		case *ast.JSXText:
 			if ch.Value != "" {
-				out = append(out, &StaticHTML{HTML: ch.Value})
+				out = append(out, &StaticHTML{HTML: escape.Text(ch.Value)})
 			}
 		}
 	}
@@ -1551,13 +1555,25 @@ func (b *builder) buildMetaSlot(el *ast.JSXElement, parentID string) *MetaSlot {
 		switch c := child.(type) {
 		case *ast.JSXText:
 			if c.Value != "" {
-				children = append(children, &StaticHTML{HTML: c.Value})
+				if name == "script" || name == "style" {
+					children = append(children, &StaticHTML{HTML: htmlspec.RawText(name, c.Value)})
+				} else {
+					children = append(children, &StaticHTML{HTML: escape.Text(c.Value)})
+				}
 			}
 		case *ast.JSXExprContainer:
 			// Meta content (Head/Script/Style) is intentionally raw HTML - a
 			// template literal inside <Script>{...}</Script> must NOT be
-			// HTML-escaped or the inline script would be corrupted.
+			// HTML-escaped or the inline script would be corrupted. Only the
+			// closing-tag sequence is neutralized inside script/style.
 			childNodes := b.buildMetaExprContainerChildren(c, parentID)
+			if name == "script" || name == "style" {
+				for i, n := range childNodes {
+					if st, ok := n.(*StaticHTML); ok {
+						childNodes[i] = &StaticHTML{HTML: htmlspec.RawText(name, st.HTML)}
+					}
+				}
+			}
 			children = append(children, childNodes...)
 		case *ast.JSXElementChild:
 			childNodes := b.buildSlotNodes(c.Element, parentID)
@@ -1585,22 +1601,10 @@ func (b *builder) buildMetaOpeningTag(el *ast.JSXElement, tag string) string {
 	buf.WriteByte('<')
 	buf.WriteString(tag)
 	for _, attr := range el.Opening.Attributes {
-		if attr.Spread || attr.Value == nil || attr.Name == "dangerouslySetInnerHTML" {
+		if attr.Spread || attr.Name == "dangerouslySetInnerHTML" {
 			continue
 		}
-		val := b.evalAttrValue(attr.Value)
-		if isBooleanAttr(attr.Name) {
-			if val == "true" {
-				buf.WriteByte(' ')
-				buf.WriteString(ast.HTMLAttrName(attr.Name))
-			}
-			continue
-		}
-		buf.WriteByte(' ')
-		buf.WriteString(ast.HTMLAttrName(attr.Name))
-		buf.WriteString(`="`)
-		buf.WriteString(escape.HTML(val))
-		buf.WriteByte('"')
+		buf.WriteString(RenderAttr(tag, attr, b.evalAttrValue))
 	}
 	buf.WriteByte('>')
 	return buf.String()
@@ -2162,6 +2166,10 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 	var children []SlotNode
 	var handlers []HandlerDecl
 	var attrs []AttrBinding
+	b.addMarkupErrs(CheckElementMarkup(el, func(pos ast.Pos, msg, hint string) error {
+		return b.diagAt(pos, diag.SeverityError, msg, hint)
+	}))
+	tag := el.Opening.Name
 
 	// dangerouslySetInnerHTML={{__html: "..."}} injects raw, pre-rendered HTML
 	// (e.g. build-time markdown). When statically resolvable, the whole element
@@ -2240,14 +2248,39 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 	b.pendingAttrs = append(b.pendingAttrs, attrs...)
 	b.pendingRefs = append(b.pendingRefs, refs...)
 
-	// Process children
+	// A <select value>/<select defaultValue> marks its matching options
+	// selected; the selection is visible to options built below it.
+	if tag == "select" {
+		sel, _ := SelectSelection(el, b.evalAttrValue)
+		b.selectStack = append(b.selectStack, sel)
+		defer func() { b.selectStack = b.selectStack[:len(b.selectStack)-1] }()
+	}
+
+	// Process children. JSX text is decoded by the parser, so it is escaped
+	// here; raw-text elements (script/style) keep their content verbatim with
+	// only the closing-tag sequence neutralized.
+	rawText := htmlspec.IsRawText(tag)
 	for _, child := range el.Children {
 		switch c := child.(type) {
 		case *ast.JSXText:
 			if c.Value != "" {
-				children = append(children, &StaticHTML{HTML: c.Value})
+				if rawText {
+					children = append(children, &StaticHTML{HTML: htmlspec.RawText(tag, c.Value)})
+				} else {
+					children = append(children, &StaticHTML{HTML: escape.Text(c.Value)})
+				}
 			}
 		case *ast.JSXExprContainer:
+			if rawText {
+				for _, n := range b.buildMetaExprContainerChildren(c, string(id)) {
+					if st, ok := n.(*StaticHTML); ok {
+						children = append(children, &StaticHTML{HTML: htmlspec.RawText(tag, st.HTML)})
+					} else {
+						children = append(children, n)
+					}
+				}
+				continue
+			}
 			childNodes := b.buildExprContainerChildren(c, string(id))
 			children = append(children, childNodes...)
 		case *ast.JSXElementChild:
@@ -2256,6 +2289,19 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 		case *ast.JSXFragmentChild:
 			childNodes := b.buildFragmentSlots(c.Fragment, string(id))
 			children = append(children, childNodes...)
+		}
+	}
+	// <textarea value/defaultValue> renders the value as its content.
+	if tag == "textarea" {
+		if content, ok := TextareaValue(el, b.evalAttrValue); ok {
+			children = []SlotNode{&StaticHTML{HTML: content}}
+		}
+	}
+	if len(children) > 0 {
+		if st, ok := children[0].(*StaticHTML); ok {
+			if fixed := PreserveLeadingNewline(tag, st.HTML); fixed != st.HTML {
+				children[0] = &StaticHTML{HTML: fixed}
+			}
 		}
 	}
 
@@ -2276,11 +2322,13 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 	openingTag := b.buildElementOpening(el, handlers, attrs, refs, string(id))
 	closingTag := "</" + el.Opening.Name + ">"
 
-	// Self-closing: void HTML elements can use />, others need full </tagName>
-	if el.Opening.SelfClosing {
-		if isVoidElement(el.Opening.Name) {
-			return []SlotNode{&StaticHTML{HTML: openingTag + " />"}}
-		}
+	// Void elements never get children or a closing tag (children on a void
+	// element are reported by CheckElementMarkup). Other self-closing
+	// elements need an explicit closing tag.
+	if htmlspec.IsVoid(tag) {
+		return []SlotNode{&StaticHTML{HTML: openingTag + " />"}}
+	}
+	if el.Opening.SelfClosing && len(children) == 0 {
 		return []SlotNode{&StaticHTML{HTML: openingTag + "></" + el.Opening.Name + ">"}}
 	}
 
@@ -2366,6 +2414,13 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 			}
 		}
 	}
+	// Inside <select value>, an option's selection comes from the select.
+	inSelect := false
+	optionSelected := false
+	if name == "option" && len(b.selectStack) > 0 && b.selectStack[len(b.selectStack)-1] != nil {
+		inSelect = true
+		optionSelected = OptionSelected(b.selectStack[len(b.selectStack)-1], OptionValue(el, b.evalAttrValue))
+	}
 	for _, attr := range attrsForOpening {
 		if attr.Spread || attr.Name == "ref" || attr.Name == "dangerouslySetInnerHTML" {
 			continue
@@ -2382,35 +2437,17 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 		if isAttrBinding(attr) && !b.isStaticResolvable(attr.Value) {
 			continue
 		}
-		if attr.Value != nil {
-			val := b.evalAttrValue(attr.Value)
-			// Boolean attributes: omit when falsy, emit bare name when true.
-			if isBooleanAttr(attr.Name) {
-				if val == "true" {
-					buf.WriteByte(' ')
-					buf.WriteString(ast.HTMLAttrName(attr.Name))
-					buf.WriteString(`="true"`)
-				}
-				continue
-			}
-			// undefined/null attributes are omitted entirely (React semantics)
-			// instead of rendering `value="undefined"`. A string literal
-			// "null"/"undefined" is real text and is kept.
-			if !isStringLiteral(attr.Value) && (val == "undefined" || val == "null") {
-				continue
-			}
-			buf.WriteByte(' ')
-			buf.WriteString(ast.HTMLAttrName(attr.Name))
-			buf.WriteString(`="`)
-			buf.WriteString(escape.HTML(val))
-			buf.WriteByte('"')
-			if actionAttrs[attr] {
-				buf.WriteString(` data-krate-action`)
-			}
-		} else {
-			buf.WriteByte(' ')
-			buf.WriteString(ast.HTMLAttrName(attr.Name))
+		if skipFormValueAttr(name, attr.Name, inSelect) {
+			continue
 		}
+		rendered := RenderAttr(name, attr, b.evalAttrValue)
+		buf.WriteString(rendered)
+		if rendered != "" && actionAttrs[attr] {
+			buf.WriteString(` data-krate-action`)
+		}
+	}
+	if optionSelected {
+		buf.WriteString(" selected")
 	}
 	if len(actionAttrs) > 0 {
 		if name == "form" && !hasMethod {
@@ -2428,22 +2465,27 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 
 	// Dynamic attributes: emit the SSR initial value plus the hydration marker.
 	for _, a := range attrs {
-		// Boolean attributes: omit when false/unset, emit bare name when true.
-		// All other attributes: emit when the initial value is non-empty.
-		if isBooleanAttr(a.AttrName) {
-			if a.Initial == "true" {
-				buf.WriteByte(' ')
-				buf.WriteString(ast.HTMLAttrName(a.AttrName))
-				buf.WriteString(`="true"`)
+		// The SSR initial value goes through the same table as static
+		// attributes; an empty non-boolean initial is omitted.
+		switch {
+		case skipFormValueAttr(name, a.AttrName, inSelect):
+		case a.AttrName == "style":
+			initial := a
+			if css, ok := StyleCSS(a.InitialExpr, func(e ast.Expr) string {
+				if e == initial.InitialExpr {
+					return initial.Initial
+				}
+				return b.evalAttrValue(e)
+			}); ok {
+				buf.WriteString(` style="` + escape.HTMLAttr(css) + `"`)
 			}
-		} else if a.Initial != "" && (a.Initial != "undefined" && a.Initial != "null" || isStringLiteral(a.InitialExpr)) {
-			buf.WriteByte(' ')
-			buf.WriteString(ast.HTMLAttrName(a.AttrName))
-			buf.WriteString(`="`)
-			buf.WriteString(escape.HTML(a.Initial))
-			buf.WriteByte('"')
+		case htmlspec.IsBoolean(a.AttrName) || a.Initial != "":
+			buf.WriteString(htmlspec.Attr(name, a.AttrName, AttrValue(a.InitialExpr, a.Initial)))
 		}
-		buf.WriteString(fmt.Sprintf(` data-kattr-%s="k:%s"`, a.AttrName, a.ElementSlotID))
+		if !htmlspec.ValidAttrName(a.AttrName) {
+			continue
+		}
+		buf.WriteString(` data-kattr-` + a.AttrName + `="k:` + escape.HTMLAttr(string(a.ElementSlotID)) + `"`)
 	}
 
 	return buf.String()
@@ -2476,14 +2518,31 @@ func (b *builder) actionAttrURL(expr ast.Expr) (string, bool) {
 	return "", false
 }
 
-// isBooleanAttr reports whether an HTML attribute is a boolean attribute whose
-// presence alone is meaningful (an empty/false value would still be truthy).
-func isBooleanAttr(name string) bool {
-	switch name {
-	case "disabled", "required", "readonly", "checked", "selected", "multiple", "autofocus", "hidden", "inert", "novalidate", "open", "async", "defer", "autoplay", "controls", "loop", "muted", "playsinline", "truespeed", "allowfullscreen", "default", "ismap", "itemscope", "nohref", "noresize", "noshade", "nowrap", "reversed", "scoped", "seamless", "sortable", "translate":
+// skipFormValueAttr reports attributes rendered as content or selection
+// instead of an attribute: value/defaultValue on <textarea> and <select>, and
+// an option's own selected flag inside a <select value>.
+func skipFormValueAttr(tag, name string, inSelect bool) bool {
+	if htmlspec.ContentValue(tag, name) || htmlspec.SelectValueProp(tag, name) {
 		return true
 	}
-	return false
+	return inSelect && name == "selected"
+}
+
+// addMarkupErrs records markup diagnostics once (an element can be built more
+// than once, e.g. for each instance of a component).
+func (b *builder) addMarkupErrs(errs []error) {
+	for _, err := range errs {
+		dup := false
+		for _, have := range b.markupErrs {
+			if have.Error() == err.Error() {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			b.markupErrs = append(b.markupErrs, err)
+		}
+	}
 }
 
 // buildExprContainerChildren - build slots from {expr} in JSX
@@ -3749,7 +3808,7 @@ func (b *builder) buildFragmentSlots(frag *ast.JSXFragment, parentID string) []S
 			result = append(result, b.buildExprContainerChildren(c, parentID)...)
 		case *ast.JSXText:
 			if c.Value != "" {
-				result = append(result, &StaticHTML{HTML: c.Value})
+				result = append(result, &StaticHTML{HTML: escape.Text(c.Value)})
 			}
 		}
 	}
@@ -3820,6 +3879,9 @@ func (b *builder) buildAttrBinding(attr *ast.JSXAttr, elementID string) *AttrBin
 // buildStaticValueSlot - expression with no signals
 
 func (b *builder) buildStaticValueSlot(expr ast.Expr, parentID string) *StaticHTML {
+	if RendersNothing(expr) {
+		return &StaticHTML{HTML: ""}
+	}
 	val := evalConstWithSignals(expr, b.sigMap(), b.localProps)
 	// An expression that resolves to undefined/null renders nothing (React
 	// semantics) rather than the literal text "undefined". A string literal

@@ -96,6 +96,27 @@ func enumerateRegions(tree *irtree.ComponentTree) []Region {
 	return regions
 }
 
+// attachRuntimeChildren sets the `children` prop of runtime Go regions to the
+// HTML the emitter rendered for their static children (EmitResult.
+// RuntimeChildren). Props maps are copied so the shared IR is never mutated.
+func attachRuntimeChildren(regions []Region, children map[string]string) {
+	if len(children) == 0 {
+		return
+	}
+	for i := range regions {
+		html, ok := children[regions[i].ID]
+		if !ok {
+			continue
+		}
+		props := make(map[string]any, len(regions[i].Props)+1)
+		for k, v := range regions[i].Props {
+			props[k] = v
+		}
+		props["children"] = html
+		regions[i].Props = props
+	}
+}
+
 // walkRegions recursively descends a component node's slot children looking for
 // dynamic regions, invoking emit for each found region in tree order.
 func walkRegions(node *irtree.ComponentNode, emit func(Region)) {

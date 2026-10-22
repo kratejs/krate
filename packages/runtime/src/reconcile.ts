@@ -172,6 +172,8 @@ function nodeKey(n: Node): string | null {
     const el = n as Element;
     const dk = el.getAttribute('data-k');
     if (dk) return dk;
+    const kc = el.getAttribute('data-kc');
+    if (kc) return 'kc:' + kc;
     const id = el.getAttribute('id');
     if (id) return '#' + id;
   }
@@ -232,6 +234,16 @@ function reconcileNode(oldNode: Node, newNode: Node): Node {
   const oldEl = oldNode as Element;
   const newEl = newNode as Element;
   if (nodeKey(oldEl) !== nodeKey(newEl)) return replaceNode(oldEl, newEl);
+  // A <template>'s content is not in childNodes, so it cannot be diffed in
+  // place; replace it whenever its markup changed (conditional branches are
+  // carried in <template data-kc> elements).
+  if (oldEl.tagName === 'TEMPLATE') {
+    if ((oldEl as HTMLTemplateElement).innerHTML !== (newEl as HTMLTemplateElement).innerHTML) {
+      return replaceNode(oldEl, newEl);
+    }
+    syncAttributes(oldEl, newEl);
+    return oldEl;
+  }
 
   syncAttributes(oldEl, newEl);
   reconcileChildren(oldEl, newEl);
