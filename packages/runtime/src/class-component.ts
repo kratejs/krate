@@ -566,6 +566,73 @@ export function __krateClass(
   return new Controller(props, getState, setState, spec).inst;
 }
 
+/** Shape of a runtime (not compiler-lowered) class component instance. */
+interface RuntimeClassInstance {
+  props?: Obj;
+  state?: Obj | null;
+  context?: unknown;
+  render(): unknown;
+  setState?: unknown;
+  forceUpdate?: unknown;
+  [method: string]: unknown;
+}
+
+type RuntimeClass = (new (props: Obj) => RuntimeClassInstance) & Record<string, unknown>;
+
+const hooks = [
+  'shouldComponentUpdate',
+  'getSnapshotBeforeUpdate',
+  'componentDidMount',
+  'componentDidUpdate',
+  'componentWillUnmount',
+  'componentDidCatch',
+  'componentWillReceiveProps',
+  'componentWillUpdate',
+] as const;
+
+/**
+ * Mounts a class component at runtime (React.createElement(MyClass) in code
+ * the compiler did not lower). The instance's setState/forceUpdate go through
+ * the same controller as lowered classes; each committed update re-runs
+ * render() and replaces the host's content.
+ */
+export function mountClassElement(Klass: RuntimeClass, props: Obj, toNode: (v: unknown) => Node): Node {
+  const instance = new Klass(props);
+  const [state, setState] = createSignal<Obj>((instance.state as Obj) || {});
+  const spec: ClassSpec = {
+    name: (Klass.displayName as string) || Klass.name,
+    pure: !!(Klass.prototype as { isPureReactComponent?: boolean }).isPureReactComponent,
+    defaultProps: (Klass.defaultProps as Obj) || null,
+    getDerivedStateFromProps: Klass.getDerivedStateFromProps as ClassSpec['getDerivedStateFromProps'],
+    getDerivedStateFromError: Klass.getDerivedStateFromError as ClassSpec['getDerivedStateFromError'],
+  };
+  for (const name of hooks) {
+    const fn = instance[name] ?? instance['UNSAFE_' + name];
+    if (typeof fn === 'function') {
+      (spec as Record<string, unknown>)[name] = (...args: unknown[]) => (fn as (...a: unknown[]) => unknown).apply(instance, args);
+    }
+  }
+  const inst = __krateClass(props, state, setState, spec);
+  Object.defineProperty(instance, 'props', { get: () => inst.props, configurable: true });
+  Object.defineProperty(instance, 'state', {
+    get: () => inst.state,
+    set: (v: Obj) => {
+      inst.state = v;
+    },
+    configurable: true,
+  });
+  instance.setState = inst.setState;
+  instance.forceUpdate = inst.forceUpdate;
+  const host = document.createElement('div');
+  host.style.display = 'contents';
+  createEffect(() => {
+    state();
+    const node = untrack(() => toNode(instance.render()));
+    host.replaceChildren(node);
+  });
+  return host;
+}
+
 /** Reports an error from lowered class code to the nearest boundary. */
 export function __krateClassError(err: unknown): void {
   handleError(err, getOwner());

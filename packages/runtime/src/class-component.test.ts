@@ -267,6 +267,37 @@ describe('class lifecycles', () => {
   });
 });
 
+describe('runtime class components (react.ts Component)', () => {
+  it('re-renders on setState and runs lifecycles through the controller', async () => {
+    const { Component, createElement } = await import('./react.js');
+    const log: string[] = [];
+    let counter!: Counter;
+    class Counter extends Component {
+      state = { n: 0 };
+      componentDidMount() {
+        log.push('mount');
+      }
+      componentDidUpdate(_pp: Obj, ps: Obj) {
+        log.push('update ' + ps.n + '>' + this.state.n);
+      }
+      render() {
+        counter = this;
+        return createElement('b', null, 'n=' + String(this.state.n) + ' ' + String(this.props.label));
+      }
+    }
+    const host = createElement(Counter as never, { label: 'x' }) as HTMLElement;
+    expect(host.textContent).toBe('n=0 x');
+    await settle();
+    expect(log).toEqual(['mount']);
+    counter.setState({ n: 1 });
+    // Batched: the DOM changes once the update commits.
+    expect(host.textContent).toBe('n=0 x');
+    await settle();
+    expect(host.textContent).toBe('n=1 x');
+    expect(log).toEqual(['mount', 'update 0>1']);
+  });
+});
+
 describe('error boundaries', () => {
   function boundary(id: string, meta: Obj, log: string[], name = 'Boundary'): { get: () => Mounted } {
     let b!: Mounted;
