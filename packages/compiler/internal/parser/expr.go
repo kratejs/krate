@@ -1231,9 +1231,7 @@ func (p *Parser) tryArrow() ast.Expr {
 	t := p.tok()
 	switch {
 	case isIdentifierToken(t.Kind) && !strings.HasPrefix(t.Value, "#") && p.peekN(1) == lexer.ARROW:
-		if t.Kind == lexer.Async {
-			// `async => x` uses `async` as the parameter name.
-		}
+		// Also covers `async => x`, where `async` is the parameter name.
 		return p.parseArrow(false)
 	case t.Kind == lexer.Async && !p.at(1).NewlineBefore:
 		n := p.at(1)

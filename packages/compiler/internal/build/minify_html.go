@@ -19,13 +19,14 @@ func minifyHTML(src string) string {
 	m := &minifier{s: src}
 	m.run()
 	out := m.out.String()
-	out = strings.TrimLeft(out, htmlSpace)
-	// Trailing whitespace is only dropped after a complete tag; after text it
-	// can be significant (for example before an unterminated "<").
-	if t := strings.TrimRight(out, htmlSpace); !m.keepTail && m.preDepth == 0 && strings.HasSuffix(t, ">") {
+	// Trailing whitespace is only dropped when nothing but whitespace follows
+	// the last markup written. After text it can be significant: text that is
+	// foster-parented out of a table keeps it, and so does text before an
+	// unterminated "<". Text ending in ">" is not markup.
+	if t := strings.TrimRight(out, htmlSpace); !m.keepTail && m.preDepth == 0 && len(t) == m.markupEnd {
 		out = t
 	}
-	return out
+	return strings.TrimLeft(out, htmlSpace)
 }
 
 const htmlSpace = " \t\n\f\r"
@@ -44,6 +45,9 @@ type minifier struct {
 	prevSpace bool
 	preDepth  int
 	keepTail  bool
+	// markupEnd is the output length just after the last tag, kept comment,
+	// CDATA section or doctype that was written.
+	markupEnd int
 }
 
 func isHTMLSpace(c byte) bool {
@@ -95,6 +99,7 @@ func (m *minifier) run() {
 			}
 			if keepComment(s[i:end]) {
 				m.writeRaw(s[i:end])
+				m.markupEnd = m.out.Len()
 			}
 			i = end
 		case strings.HasPrefix(rest, "<![CDATA["):
@@ -105,6 +110,7 @@ func (m *minifier) run() {
 				return
 			}
 			m.writeRaw(rest[:idx+3])
+			m.markupEnd = m.out.Len()
 			i += idx + 3
 		case len(rest) > 1 && (rest[1] == '!' || rest[1] == '?' || rest[1] == '/' && (len(rest) < 3 || !isASCIIAlpha(rest[2]))):
 			// Doctype, bogus comment or processing instruction: up to '>'.
@@ -115,6 +121,7 @@ func (m *minifier) run() {
 				return
 			}
 			m.writeRaw(rest[:idx+1])
+			m.markupEnd = m.out.Len()
 			i += idx + 1
 		case len(rest) > 1 && (isASCIIAlpha(rest[1]) || rest[1] == '/'):
 			var ok bool
@@ -122,6 +129,7 @@ func (m *minifier) run() {
 			if !ok {
 				return
 			}
+			m.markupEnd = m.out.Len()
 		default:
 			m.text('<')
 			i++

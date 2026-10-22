@@ -183,6 +183,10 @@ func assertSameDOM(t testing.TB, in, out string) {
 
 func FuzzMinifyHTML(f *testing.F) {
 	seeds := []string{
+		// Text ending in ">" foster-parented out of a table keeps its trailing space.
+		"<tABle 00000000000>0> ",
+		"<table>0 ",
+		"<p>a</p> <!--x--> ",
 		`<svg><linearGradient id="g"><stop offset="0%" stop-color="#2298bd"/><stop offset="100%" stop-color="#0ed7b5"/></linearGradient></svg>`,
 		`<img src="/a.png"/>`,
 		`<a href="/">home</a>`,
