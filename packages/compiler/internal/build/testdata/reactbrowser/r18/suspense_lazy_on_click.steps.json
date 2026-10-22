@@ -1,6 +1,6 @@
 {
   "steps": [
-    { "op": "click", "sel": "#open" },
+    { "op": "click", "sel": "#open", "settleMs": 900 },
     { "op": "waitFor", "sel": ".lazy-toggle" },
     { "op": "click", "sel": ".lazy-toggle" }
   ]

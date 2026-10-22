@@ -83,12 +83,16 @@ async function runStep(page, step) {
   const loc = step.sel ? page.locator(step.sel).first() : null;
   const opts = { timeout: step.timeout || actionTimeout };
   // Fail fast when nothing matches (a common Krate-side divergence) instead
-  // of waiting for the full actionability timeout.
-  if (loc && step.op !== "waitFor") {
+  // of waiting for the full actionability timeout. The decision rests on an
+  // untimed count, not on the wait timing out: under load (Firefox/WebKit in
+  // containers, many pages at once) a single protocol round trip can exceed
+  // the short wait, which used to report a present element as missing and
+  // skip the step entirely.
+  if (loc && step.op !== "waitFor" && (await loc.count()) === 0) {
     try {
       await loc.waitFor({ state: "attached", timeout: 2500 });
     } catch {
-      throw new Error(`no element matches ${step.sel}`);
+      if ((await loc.count()) === 0) throw new Error(`no element matches ${step.sel}`);
     }
   }
   switch (step.op) {
