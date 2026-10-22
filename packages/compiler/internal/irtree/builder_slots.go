@@ -2767,6 +2767,14 @@ func (b *builder) collectSignalDecls(fn *ast.FnDecl) []SignalDecl {
 		}
 		isStr := isStringType(d.Initial, b.sigMap())
 		rawInit := signalRawInit(d.Initial, initial, b.sigMap(), b.localProps)
+		// A module const that does not fold (useState(userPromise) with
+		// `const userPromise = fetch(...)`) folds to its own name; reference
+		// the binding instead of hydrating the name as a string.
+		if id, ok := d.Initial.(*ast.Identifier); ok && rawInit == "" && initial == id.Name {
+			if _, isConst := b.moduleConstInits[id.Name]; isConst {
+				rawInit = id.Name
+			}
+		}
 		// Array/object initializers must be emitted as real JS literals (their
 		// folded value is JS source, not a string), so keep the source verbatim.
 		if rawInit == "" {

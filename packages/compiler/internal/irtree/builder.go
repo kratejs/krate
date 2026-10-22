@@ -313,8 +313,8 @@ type builder struct {
 	slotIDMap      map[string]SlotID // logical ID -> compact ID
 	slotCounts     map[string]int    // per-parent dynamic-slot counters for sibling disambiguation
 	// elementCounts is the per-parent tag counter for sibling disambiguation.
-	// buildComponentNode clears it on entry and does not restore it; element
-	// IDs stay unique because they are joined with the parent's slot ID.
+	// buildComponentNode gives each child a fresh map and restores the
+	// caller's afterwards, so siblings after a child keep counting.
 	elementCounts    map[string]int
 	moduleConsts     valueMap                  // module-level const values (name -> folded value)
 	moduleConstInits map[string]ast.Expr       // module-level const initializers (name -> expr)

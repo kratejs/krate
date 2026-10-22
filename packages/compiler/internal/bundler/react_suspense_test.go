@@ -190,6 +190,7 @@ func TestDeferredValueAndExternalStoreLowering(t *testing.T) {
 		function C() {
 			const [q] = useState('');
 			const deferred = useDeferredValue(q, 'init');
+			const plain = useDeferredValue(q);
 			const online = useSyncExternalStore(subscribe, () => navigator.onLine, () => true);
 			return <p>{deferred}{online ? 'on' : 'off'}</p>;
 		}

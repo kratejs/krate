@@ -363,8 +363,8 @@ func (c *reactCtx) lowerSuspenseDecl(decl *ast.VarDecl, sc *scope) bool {
 					return false
 				}
 				args := []ast.Expr{thunk(c.rewriteExpr(call.Args[0], sc))}
-				for _, a := range call.Args[1:2] {
-					args = append(args, c.rewriteExpr(a, sc))
+				if len(call.Args) > 1 {
+					args = append(args, c.rewriteExpr(call.Args[1], sc))
 				}
 				decl.Init = &ast.CallExpr{Position: call.Position, Callee: &ast.Identifier{Name: "createDeferredValue"}, Args: args}
 				sc.declareGetter(decl.Name)

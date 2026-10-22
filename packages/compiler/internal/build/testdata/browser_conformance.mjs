@@ -145,9 +145,70 @@ try {
     fail(`form result: ${formResult}`);
   }
 
+  // React Suspense, lazy, use() and transitions. Promises in the page resolve
+  // after 300-900ms, so the fallbacks are checked right after the DOM loads.
+  const suspenseLoads = [];
+  page.on("request", (req) => suspenseLoads.push(req.url()));
+  await page.goto(baseURL + "/react-suspense/", { waitUntil: "domcontentloaded" });
+  const text = (id) =>
+    page.evaluate((id) => document.querySelector(`#root [data-testid="${id}"]`)?.textContent ?? null, id);
+  const waitText = (id, want) =>
+    page
+      .waitForFunction(
+        ([id, want]) => document.querySelector(`#root [data-testid="${id}"]`)?.textContent === want,
+        [id, want],
+        { timeout: 8000 },
+      )
+      .catch(() => fail(`suspense: ${id} never became ${JSON.stringify(want)}`));
+  const suspense = {
+    initialFallback: await text("use-fallback"),
+    initialContent: await text("use-content"),
+    siblingsFallback: await text("siblings-fallback"),
+    outerShell: await text("outer-shell"),
+    outerFallback: await text("outer-fallback"),
+    innerFallback: await text("inner-fallback"),
+  };
+  if (suspense.initialFallback !== "Loading greeting..." || suspense.initialContent !== null) {
+    fail(`suspense: expected the fallback before use() resolves: ${JSON.stringify(suspense)}`);
+  }
+  if (suspense.outerShell !== "outer shell" || suspense.outerFallback !== null || suspense.innerFallback !== "Loading inner...") {
+    fail(`suspense: nested boundaries must suspend independently: ${JSON.stringify(suspense)}`);
+  }
+  await waitText("sibling-fast", "fast");
+  if ((await text("sibling-slow")) !== "slow") fail("suspense: siblings must reveal together");
+  await waitText("use-content", "Hello from use()");
+  await waitText("inner-content", "nested content");
+  await waitText("source-content", "first");
+  if (!suspenseLoads.some((u) => /\/react-suspense\/lazy-LazyPanel\.[a-z0-9]+\.js$/.test(u))) {
+    fail("suspense: lazy component chunk was not loaded");
+  }
+  await page.locator("[data-testid=lazy-panel]").click();
+  await waitText("lazy-panel", "Lazy panel: 1");
+  await page.locator("[data-testid=source-urgent]").click();
+  await page.waitForTimeout(30);
+  if ((await text("source-fallback")) !== "Loading source...") fail("suspense: urgent update must show the fallback again");
+  await waitText("source-content", "urgent");
+  await page.locator("[data-testid=source-transition]").click();
+  await page.waitForTimeout(30);
+  const during = { content: await text("source-content"), fallback: await text("source-fallback"), pending: await text("transition-pending") };
+  if (during.content !== "urgent" || during.fallback !== null || during.pending !== "pending") {
+    fail(`suspense: a transition must keep the revealed content: ${JSON.stringify(during)}`);
+  }
+  await waitText("source-content", "transition");
+  await waitText("transition-pending", "idle");
+  await page.locator("[data-testid=action-start]").click();
+  if ((await text("action-pending")) !== "pending") fail("suspense: async action must keep isPending true");
+  await waitText("action-result", "saved");
+  await waitText("action-pending", "idle");
+  await page.locator("[data-testid=deferred-input]").fill("abc");
+  await waitText("deferred-value", "abc");
+  await page.locator("[data-testid=store-bump]").click();
+  await page.locator("[data-testid=store-bump]").click();
+  await waitText("store-value", "2");
+
   if (errors.length) fail("console errors: " + errors.join(" | "));
 
-  console.log(JSON.stringify({ browser: browserName, before, after, tooltip, tooltipDebug, formResult, errors, failures }, null, 2));
+  console.log(JSON.stringify({ browser: browserName, before, after, tooltip, tooltipDebug, formResult, suspense, errors, failures }, null, 2));
   if (failures.length) process.exitCode = 1;
 } catch (err) {
   console.error(err?.stack || String(err));

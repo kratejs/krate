@@ -27,7 +27,12 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 		return &ComponentNode{Name: "_nil", Tier: TierStatic}
 	}
 	node := b.newComponentNode(fn, parentID)
+	// The child counts its own elements; the caller's counters must survive,
+	// or an element after the child reuses an earlier sibling's slot ID.
+	callerCounts := b.elementCounts
+	b.elementCounts = make(map[string]int)
 	res := b.buildComponentScoped(fn, node, parentID == "")
+	b.elementCounts = callerCounts
 	if node.Tier == TierClient {
 		b.finishClientComponent(node, fn, res)
 	}

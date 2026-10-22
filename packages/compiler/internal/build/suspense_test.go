@@ -243,3 +243,29 @@ func TestRuntimeChunkSuspenseConditional(t *testing.T) {
 		t.Error("suspense runtime omitted when requested")
 	}
 }
+
+func TestSlotIDsStayUniqueAfterChildComponent(t *testing.T) {
+	html, _, err := buildKrateProject(t, map[string]string{"src/pages/index.tsx": `
+		import { useState, Suspense } from 'react';
+		function Msg() {
+			const [x, setX] = useState(0);
+			return <i onClick={() => setX(x + 1)}>{x}</i>;
+		}
+		export default function Page() {
+			const [a, setA] = useState(0);
+			return (
+				<div>
+					<section><p><button onClick={() => setA(a + 1)}>one</button></p><Suspense fallback={<b>w</b>}><Msg /></Suspense></section>
+					<section><p><button onClick={() => setA(a + 3)}>two</button></p></section>
+				</div>
+			);
+		}
+	`})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	ids := regexp.MustCompile(`<button data-k="?([^" >]+)`).FindAllStringSubmatch(html, -1)
+	if len(ids) != 2 || ids[0][1] == ids[1][1] {
+		t.Fatalf("buttons after a child component need distinct slot IDs: %v\n%s", ids, html)
+	}
+}

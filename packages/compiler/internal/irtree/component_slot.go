@@ -393,6 +393,8 @@ func (b *builder) registerChildProps(childNode *ComponentNode, childFn *ast.FnDe
 	hasHydration := len(childNode.Handlers) > 0 || len(childNode.Effects) > 0 || len(childNode.Memos) > 0 ||
 		len(childNode.Signals) > 0 || len(childNode.RefBindings) > 0 || len(childNode.AttrBindings) > 0 ||
 		len(b.contextValues) > 0 ||
+		// use()/deferred/external-store getters (`use(props.promise)`).
+		(childFn != nil && bodyUsesReactiveFactory(childFn.Body)) ||
 		// Bindings of getter-registered props (`{props.title}`).
 		(childFn != nil && plainPropsParamName(childFn) != "" && slotsReadProps(childNode.Children, plainPropsParamName(childFn)))
 	if !hasHydration {
