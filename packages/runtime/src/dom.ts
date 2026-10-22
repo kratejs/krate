@@ -1,14 +1,19 @@
-import { createEffect } from './signal.js';
+import { createEffect, onCleanup } from './signal.js';
 import { krateSanitizeAttr } from './slots.js';
+import { krateOn, krateControl, krateSetControl } from './events.js';
+import { krateAttachRef, type KrateRef } from './refs.js';
 
-// React-style event names whose DOM event differs from lowercasing. onFocus/
-// onBlur use the bubbling focusin/focusout; onChange uses input (per-keystroke).
-const EVENT_ALIASES: Record<string, string> = {
-  doubleclick: 'dblclick',
-  focus: 'focusin',
-  blur: 'focusout',
-  change: 'input',
-};
+export {
+  krateOn,
+  krateControl,
+  krateSetControl,
+  krateSynthetic,
+  krateEventRoot,
+  krateEventName,
+} from './events.js';
+export type { KrateSyntheticEvent } from './events.js';
+export { krateAttachRef, krateSetRef, krateRefsEnter, krateRefsLeave } from './refs.js';
+export type { KrateRef } from './refs.js';
 
 export type Component<P = {}> = (props: P) => Node | null | undefined;
 
@@ -26,12 +31,32 @@ export type ComponentProps<C> = C extends Component<infer P> ? P : never;
 const effectsByNode = new WeakMap<Node, Array<() => void>>();
 
 function trackEffect(node: Node, dispose: () => void): void {
+  krateTrackNode(node, dispose);
+}
+
+/** Registers `dispose` to run when `node` is disposed (removed by a binding). */
+export function krateTrackNode(node: Node, dispose: () => void): void {
   let arr = effectsByNode.get(node);
   if (!arr) {
     arr = [];
     effectsByNode.set(node, arr);
   }
   arr.push(dispose);
+}
+
+/**
+ * Binds the ref returned by `get` to `el` (hydration `ref={...}`). The ref is
+ * re-bound (old detached, new attached) when the value read by `get` changes
+ * identity, and released when the owning scope or the node is disposed.
+ * `assign` handles plain-variable targets.
+ */
+export function krateBindRef(el: Element, get: (() => KrateRef) | null, assign?: (v: unknown) => void): () => void {
+  const dispose = createEffect(() => {
+    const release = krateAttachRef(el, get ? get() : undefined, assign);
+    onCleanup(release);
+  });
+  trackEffect(el, dispose);
+  return dispose;
 }
 
 /** Dispose all effects registered for a node and its subtree. */
@@ -128,29 +153,17 @@ function setAttr(el: Element, key: string, value: unknown): void {
       Object.assign((el as HTMLElement).style, value);
     }
   } else if (key.startsWith('on') && typeof value === 'function') {
-    // Store handler reference on element for cleanup on re-render.
-    // Normalise React-style event names to their DOM equivalents (matching the
-    // compiler's static path).
-    const raw = key.slice(2).toLowerCase();
-    const eventKey = EVENT_ALIASES[raw] || raw;
-    const handlerKey = `__krate_${eventKey}`;
-    const prevHandler = (el as any)[handlerKey];
-    if (prevHandler) {
-      el.removeEventListener(eventKey, prevHandler);
-    }
-    el.addEventListener(eventKey, value as EventListener);
-    (el as any)[handlerKey] = value;
-  } else if (key === 'value' || key === 'checked' || key === 'selected') {
+    krateOn(el, key, value as Parameters<typeof krateOn>[2]);
+  } else if (key === 'value' || key === 'checked' || key === 'selected' || key === 'defaultValue' || key === 'defaultChecked') {
     // Form-control state is a DOM property, not an attribute: setting the
     // attribute after user interaction has no effect.
-    if (key === 'value') {
-      (el as any).value = value == null || value === false ? '' : value;
-    } else {
-      (el as any)[key] = !!value;
-    }
+    krateSetControl(el, key, value);
   } else if (key === 'ref') {
-    if (typeof value === 'function') value(el);
-    else if (value && typeof value === 'object' && 'current' in value) (value.current as unknown) = el;
+    // Attached now (the node is about to be inserted), detached when the node
+    // is disposed or the rendering effect re-runs.
+    const release = krateAttachRef(el, value as KrateRef, undefined, true);
+    trackEffect(el, release);
+    onCleanup(release);
   } else if (key === 'key') {
     // key is metadata only, not set as attribute
   } else if (value !== null && value !== undefined && value !== false) {
@@ -189,7 +202,9 @@ export function h(
 
   if (props) {
     for (const [key, value] of Object.entries(props)) {
-      if (typeof value === 'function' && !key.startsWith('on')) {
+      if (typeof value === 'function' && (key === 'value' || key === 'checked')) {
+        trackEffect(el, krateControl(el, key, value as () => unknown));
+      } else if (typeof value === 'function' && !key.startsWith('on') && key !== 'ref') {
         trackEffect(el, createEffect(() => setAttr(el, key, value())));
       } else {
         setAttr(el, key, value);

@@ -31,6 +31,7 @@ func (b *builder) buildStaticElementSlots(el *ast.JSXElement, parentID string) [
 		return []SlotNode{&StaticHTML{HTML: openingTag + ">" + rawHTML + "</" + el.Opening.Name + ">"}}
 	}
 
+	b.warnEventsAndForms(el)
 	handlers, attrs, refs := b.elementBindings(el, id)
 	// Accumulate the bindings for the component node.
 	b.pendingHandlers = append(b.pendingHandlers, handlers...)
@@ -66,7 +67,7 @@ func (b *builder) elementBindings(el *ast.JSXElement, id SlotID) (handlers []Han
 		}
 		// React-only directives (key, suppressHydrationWarning) carry no DOM
 		// meaning and must not become attributes or hydration bindings.
-		if isReactDirectiveAttr(attr.Name) {
+		if isReactDirectiveAttr(attr.Name) || shadowedFormDefault(attributes, attr.Name) {
 			continue
 		}
 		switch {
@@ -90,6 +91,10 @@ func (b *builder) elementBindings(el *ast.JSXElement, id SlotID) (handlers []Han
 // refBinding lowers a `ref` attribute to its hydration binding.
 func (b *builder) refBinding(attr *ast.JSXAttr, id SlotID) (RefBinding, bool) {
 	if attr.Value == nil {
+		return RefBinding{}, false
+	}
+	// String refs are unsupported (KR5003) and ignored.
+	if lit, ok := attr.Value.(*ast.Literal); ok && lit.Kind == ast.StringLit {
 		return RefBinding{}, false
 	}
 	// Callback ref: ref={(el) => {...}}. The arrow function is the callback
