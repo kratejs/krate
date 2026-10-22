@@ -16,8 +16,10 @@ const (
 	classThisName     = "__krate_this"
 	classDefaultsName = "__krate_class_defaults"
 	classContextName  = "__krate_class_context"
-	classInitName     = "__krate_class_init"
-	classRuntimeFn    = "__krateClass"
+	// classContextSignal / classContextSetter hold the committed this.context.
+	classContextSignal = "__krate_class_ctx"
+	classContextSetter = "__krate_class_setCtx"
+	classRuntimeFn     = "__krateClass"
 )
 
 // synthesizeClassComponent lowers a React class component into a function
@@ -110,10 +112,26 @@ func (l *classLowerer) body() []ast.Stmt {
 	if m.contextType != nil {
 		out = append(out, varDecl(ast.VarConst, classContextName,
 			call(member(l.lowerExpr(m.contextType, ctxInit), "useContext"))))
+		// The committed context: render reads it, the runtime instance updates
+		// it when the provider value changes.
+		out = append(out, &ast.VarStmt{Kind: ast.VarConst, Decls: []*ast.VarDecl{{
+			IsDestructuring: true,
+			Names:           []string{classContextSignal, classContextSetter},
+			Init:            call(ident("createSignal"), ident(classContextName)),
+		}}})
 	}
 	out = append(out, l.stateSignal()...)
-	out = append(out, varDecl(ast.VarVar, classThisName, call(ident(classRuntimeFn),
-		ident("props"), ident(classStateName), ident(classSetterName), l.spec())))
+	// Declared, then assigned by a replayed statement: a props-reading local
+	// of the page root would be folded away, and the root has no props
+	// binding at hydration (hence the typeof guard).
+	out = append(out, &ast.VarStmt{Kind: ast.VarVar, Decls: []*ast.VarDecl{{Name: classThisName}}})
+	propsArg := &ast.ConditionalExpr{
+		Test:       &ast.BinaryExpr{Left: &ast.UnaryExpr{Op: "typeof", Arg: ident("props")}, Op: "===", Right: &ast.Literal{Kind: ast.StringLit, Value: "undefined"}},
+		Consequent: &ast.Literal{Kind: ast.NullLit, Value: "null"},
+		Alternate:  ident("props"),
+	}
+	out = append(out, &ast.ExprStmt{Expression: &ast.BinaryExpr{Left: ident(classThisName), Op: "=", Right: call(ident(classRuntimeFn),
+		propsArg, ident(classStateName), ident(classSetterName), l.spec())}})
 	out = append(out, l.memberDecls()...)
 	if m.ctor != nil {
 		out = append(out, l.constructorStmts()...)
@@ -127,31 +145,56 @@ func (l *classLowerer) body() []ast.Stmt {
 // into `return <>{...}</>`: the IR builds a fragment's children as slots, which
 // keeps the children region (and an error boundary's children branch) intact.
 func wrapRenderReturns(stmts []ast.Stmt) []ast.Stmt {
-	out := make([]ast.Stmt, len(stmts))
-	for i, s := range stmts {
+	out := make([]ast.Stmt, 0, len(stmts))
+	for _, s := range stmts {
 		switch v := s.(type) {
 		case *ast.ReturnStmt:
+			// `return c ? <A/> : this.props.children` becomes
+			// `if (c) return <A/>; return <>{children}</>;`, the early-return
+			// form the IR builds as a conditional with both branches.
+			if cond, ok := unparenExpr(v.Value).(*ast.ConditionalExpr); ok && needsFragmentWrap(cond) {
+				out = append(out, wrapRenderReturns([]ast.Stmt{
+					&ast.IfStmt{Position: v.Position, Test: cond.Test,
+						Consequent: []ast.Stmt{&ast.ReturnStmt{Position: v.Position, Value: cond.Consequent}}},
+					&ast.ReturnStmt{Position: v.Position, Value: cond.Alternate},
+				})...)
+				continue
+			}
 			if v.Value != nil && needsFragmentWrap(v.Value) {
 				c := *v
 				c.Value = &ast.JSXFragment{Position: v.Position, Children: []ast.JSXChild{&ast.JSXExprContainer{Expression: v.Value}}}
-				out[i] = &c
+				out = append(out, &c)
 				continue
 			}
 		case *ast.IfStmt:
 			c := *v
 			c.Consequent = wrapRenderReturns(v.Consequent)
 			c.Alternate = wrapRenderReturns(v.Alternate)
-			out[i] = &c
+			out = append(out, &c)
 			continue
 		case *ast.BlockStmt:
 			c := *v
 			c.Body = wrapRenderReturns(v.Body)
-			out[i] = &c
+			out = append(out, &c)
 			continue
 		}
-		out[i] = s
+		out = append(out, s)
 	}
 	return out
+}
+
+// unparenExpr strips grouping parentheses and type assertions.
+func unparenExpr(e ast.Expr) ast.Expr {
+	for {
+		switch x := e.(type) {
+		case *ast.ParenExpr:
+			e = x.Expr
+		case *ast.TypeAssertion:
+			e = x.Expr
+		default:
+			return e
+		}
+	}
 }
 
 func needsFragmentWrap(e ast.Expr) bool {
@@ -179,7 +222,8 @@ func (l *classLowerer) stateSignal() []ast.Stmt {
 	}
 	var out []ast.Stmt
 	if m.gdsfp != nil {
-		out = append(out, varDecl(ast.VarConst, classInitName, init))
+		// The initial state is repeated rather than held in a local: a local
+		// derived from props would be emitted after the signal reading it.
 		// The props parameter is dropped and its uses read the component's
 		// props directly, which the build resolves from the call site.
 		fn := l.staticFn(m.gdsfp, true)
@@ -188,11 +232,11 @@ func (l *classLowerer) stateSignal() []ast.Stmt {
 		case len(fn.Params) == 0:
 		case fn.Params[0] != nil && fn.Params[0].Name == "props" && fn.Params[0].Pattern == "":
 			fn.Params = fn.Params[1:]
-			args = append(args, ident(classInitName))
+			args = append(args, init)
 		default:
-			args = append(args, ident("props"), ident(classInitName))
+			args = append(args, ident("props"), init)
 		}
-		init = call(member(ident("Object"), "assign"), &ast.ObjectExpr{}, ident(classInitName), call(fn, args...))
+		init = call(member(ident("Object"), "assign"), &ast.ObjectExpr{}, init, call(fn, args...))
 	}
 	out = append(out, &ast.VarStmt{Kind: ast.VarConst, Decls: []*ast.VarDecl{{
 		IsDestructuring: true,
@@ -222,6 +266,7 @@ func (l *classLowerer) spec() ast.Expr {
 	}
 	if m.contextType != nil {
 		add("context", &ast.ArrowFn{Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: ident(classContextName)}}})
+		add("setContext", ident(classContextSetter))
 	}
 	if m.gdsfp != nil {
 		add("getDerivedStateFromProps", l.staticFn(m.gdsfp, false))
@@ -554,6 +599,9 @@ func (l *classLowerer) thisRef(name string, ctx thisCtx) ast.Expr {
 		}
 		return ident("props")
 	case "context":
+		if ctx == ctxRender && m.contextType != nil {
+			return call(ident(classContextSignal))
+		}
 		if ctx != ctxInstance && m.contextType != nil {
 			return ident(classContextName)
 		}

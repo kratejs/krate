@@ -242,6 +242,15 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 		bare.Children = nil
 		el = &bare
 	}
+	// A lowered class remounts when its key changes; the runtime instance
+	// reads the key through a reserved prop.
+	if b.ann.IsLoweredClass(childFn.Name) {
+		for _, a := range el.Opening.Attributes {
+			if a != nil && !a.Spread && a.Name == "__krate_key" && a.Value != nil {
+				attrs["__krate_key"] = a.Value
+			}
+		}
+	}
 	b.pushComponentCtx()
 	b.installCallSiteInputs(el, childFn, attrs)
 	live := b.liveProps
@@ -398,6 +407,8 @@ func (b *builder) registerChildProps(childNode *ComponentNode, childFn *ast.FnDe
 	hasHydration := len(childNode.Handlers) > 0 || len(childNode.Effects) > 0 || len(childNode.Memos) > 0 ||
 		len(childNode.Signals) > 0 || len(childNode.RefBindings) > 0 || len(childNode.AttrBindings) > 0 ||
 		len(b.contextValues) > 0 ||
+		// Replayed body statements (a render-time throw guard) read props too.
+		len(childNode.ExtraVars) > 0 ||
 		// Bindings of getter-registered props (`{props.title}`).
 		(childFn != nil && plainPropsParamName(childFn) != "" && slotsReadProps(childNode.Children, plainPropsParamName(childFn)))
 	if !hasHydration {

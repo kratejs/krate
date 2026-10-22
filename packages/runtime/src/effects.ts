@@ -353,9 +353,38 @@ export function createEffectDeps(
 
 function runSetup(hook: HookEffect): void {
   if (hook.owner.disposed) return;
-  const ret = untrack(hook.fn);
+  let ret: unknown;
+  try {
+    ret = untrack(hook.fn);
+  } catch (err) {
+    reportHookError(err, hook.owner);
+    return;
+  }
   hook.cleanup = typeof ret === 'function' ? (ret as () => void) : null;
   hook.mounted = true;
+}
+
+// Error boundaries (boundary.ts) receive errors thrown by effect setups and
+// cleanups, as React's do. Without a handler the error is rethrown.
+let hookErrorHandler: ((err: unknown, ownerId: string | null) => boolean) | null = null;
+
+/** Installs the handler for errors thrown by hook effects (internal). */
+export function krateOnHookError(fn: ((err: unknown, ownerId: string | null) => boolean) | null): void {
+  hookErrorHandler = fn;
+}
+
+function reportHookError(err: unknown, owner: Owner): void {
+  let id: string | null = null;
+  for (let o: Owner | null = owner; o && id === null; o = o.parent) id = o.id;
+  if (!(hookErrorHandler && hookErrorHandler(err, id))) throw err;
+}
+
+function runGuarded(fn: () => void, owner: Owner): void {
+  try {
+    untrack(fn);
+  } catch (err) {
+    reportHookError(err, owner);
+  }
 }
 
 function takeCleanup(hook: HookEffect): Cleanup {
@@ -368,7 +397,7 @@ function takeCleanup(hook: HookEffect): Cleanup {
 
 function runCleanup(hook: HookEffect): void {
   const c = takeCleanup(hook);
-  if (c) untrack(c);
+  if (c) runGuarded(c, hook.owner);
 }
 
 // Orders hooks children-before-parents (post-order over the owner tree),

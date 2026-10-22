@@ -570,9 +570,38 @@ function flushEffects(): void {
   // Writes made by these effects scheduled another flush; the commit runs
   // once that cascade settles, so it sees the final DOM.
   if (pending.length === 0) {
+    // Settle hooks (the class component render phase) may write signals;
+    // flush those in this same pass so the commit sees every DOM write.
+    for (const hook of settleHooks) {
+      hook();
+    }
+    if (pending.length > 0 && settleDepth < 50) {
+      settleDepth++;
+      try {
+        flushEffects();
+      } finally {
+        settleDepth--;
+      }
+      return;
+    }
     runAfterFlush();
-    drainAfterQueue();
   }
+}
+
+const settleHooks: Array<() => void> = [];
+let settleDepth = 0;
+
+/**
+ * Registers fn to run when a flush has no pending effects, before the
+ * after-flush hooks. Signal writes it makes are flushed first (internal).
+ */
+export function krateOnSettle(fn: () => void): void {
+  settleHooks.push(fn);
+}
+
+/** Ensures a flush runs soon even when no signal was written (internal). */
+export function krateRequestFlush(): void {
+  scheduleFlush();
 }
 
 /**
@@ -583,6 +612,7 @@ export function runAfterFlush(): void {
   for (const hook of afterFlushHooks) {
     hook();
   }
+  drainAfterQueue();
 }
 
 /**
@@ -592,7 +622,6 @@ export function runAfterFlush(): void {
 export function krateFlushSync(): void {
   if (pending.length === 0) {
     runAfterFlush();
-    drainAfterQueue();
     return;
   }
   // flushEffects runs the after-flush hooks itself once nothing is pending.

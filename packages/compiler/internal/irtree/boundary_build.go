@@ -45,7 +45,7 @@ func (b *builder) boundaryFallback(fn *ast.FnDecl, id SlotID) (*ast.FnDecl, bool
 				&ast.ObjectProp{Key: "buildError", Value: errObj})
 			callCopy := *call
 			callCopy.Args = append(append([]ast.Expr(nil), call.Args[:3]...), &specCopy)
-			body[i] = replaceVarInit(stmt, &callCopy)
+			body[i] = replaceAssignRight(stmt, &callCopy)
 		}
 	}
 	if derive != nil {
@@ -78,13 +78,17 @@ func errorName(name string) string {
 	return name
 }
 
-// classSpecOf matches `var __krate_this = __krateClass(props, s, set, {spec})`.
+// classSpecOf matches `__krate_this = __krateClass(props, s, set, {spec})`.
 func classSpecOf(stmt ast.Stmt) (*ast.ObjectExpr, *ast.CallExpr) {
-	vs, ok := stmt.(*ast.VarStmt)
-	if !ok || len(vs.Decls) != 1 || vs.Decls[0] == nil {
+	es, ok := stmt.(*ast.ExprStmt)
+	if !ok {
 		return nil, nil
 	}
-	call, ok := vs.Decls[0].Init.(*ast.CallExpr)
+	assign, ok := es.Expression.(*ast.BinaryExpr)
+	if !ok || assign.Op != "=" {
+		return nil, nil
+	}
+	call, ok := assign.Right.(*ast.CallExpr)
 	if !ok || len(call.Args) != 4 {
 		return nil, nil
 	}
@@ -113,6 +117,15 @@ func classStateInit(stmt ast.Stmt) (ast.Expr, bool) {
 		return nil, false
 	}
 	return call.Args[0], true
+}
+
+func replaceAssignRight(stmt ast.Stmt, right ast.Expr) ast.Stmt {
+	es := stmt.(*ast.ExprStmt)
+	assign := *es.Expression.(*ast.BinaryExpr)
+	assign.Right = right
+	c := *es
+	c.Expression = &assign
+	return &c
 }
 
 func replaceVarInit(stmt ast.Stmt, init ast.Expr) ast.Stmt {

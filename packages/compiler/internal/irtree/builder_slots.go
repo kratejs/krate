@@ -2783,6 +2783,13 @@ func (b *builder) collectSignalDecls(fn *ast.FnDecl) []SignalDecl {
 			switch d.Initial.(type) {
 			case *ast.ArrayExpr, *ast.ObjectExpr:
 				rawInit = generateExprJS(d.Initial, b.sigMap())
+			case *ast.CallExpr:
+				// A call that folded to an object or array (Object.assign,
+				// a class's getDerivedStateFromProps) runs on the client too:
+				// the folded source would otherwise be emitted as a string.
+				if strings.HasPrefix(initial, "{") || strings.HasPrefix(initial, "[") {
+					rawInit = generateExprJS(d.Initial, b.sigMap())
+				}
 			}
 		}
 		decls = append(decls, SignalDecl{

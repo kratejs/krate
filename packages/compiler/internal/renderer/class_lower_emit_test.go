@@ -38,7 +38,7 @@ export default function App() { return <main><Parent start="s" /></main>; }`
 		`__krateOwnF("App_c0"`,
 		`__krateOwnF("1.Parent.Parent_c0",{p:"App_c0",n:"Parent",k:"App_c0"}`,
 		`n:"Child",c:"`, `b:"c",k:"1.Parent.Parent_c0"`,
-		"__krateClass(props, __krate_class_state, __krate_class_setState, {name:'Parent',pure:true",
+		"(__krate_this = __krateClass(((typeof props === 'undefined')?null:props), __krate_class_state, __krate_class_setState, {name:'Parent',pure:true",
 		"getDerivedStateFromProps:", "shouldComponentUpdate:", "defaultProps:__krate_class_defaults",
 		"__krate_this.setState(",
 		// Destructured state is read from the signal in each binding.

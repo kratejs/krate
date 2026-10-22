@@ -124,7 +124,7 @@ func (b *builder) collectExtraVarJS(body []ast.Stmt, order *bodyOrder, params ma
 			pre = append(pre, frag)
 		}
 	}
-	for _, stmt := range body {
+	for idx, stmt := range body {
 		switch s := stmt.(type) {
 		case *ast.VarStmt:
 			for _, decl := range s.Decls {
@@ -147,9 +147,14 @@ func (b *builder) collectExtraVarJS(body []ast.Stmt, order *bodyOrder, params ma
 			}
 			reactive := b.referencesSignal(s.Test) || stmtsReferenceSignal(s.Consequent, b) || stmtsReferenceSignal(s.Alternate, b)
 			js := renderStmtJS(s, b.sigMap())
-			if reactive && isThrowGuard(s) {
-				// Re-check the guard when its signals change (throwguard.go).
-				js = throwGuardJS(js)
+			if isThrowGuard(s) {
+				// Re-check the guard when its signals change, recomputing the
+				// locals it reads (throwguard.go).
+				withDeps, live := b.throwGuardWithDeps(body, idx, js)
+				if reactive || live {
+					js = throwGuardJS(withDeps)
+					reactive = true
+				}
 			}
 			add(s, js, reactive)
 		case *ast.ExprStmt:

@@ -451,6 +451,11 @@ func FindDefaultExport(body []ast.Stmt) string {
 			if fn, ok := exp.Declaration.(*ast.FnDecl); ok {
 				return fn.Name
 			}
+			// `export default class Page extends Component` (lowered to a
+			// function of the same name).
+			if class, ok := exp.Declaration.(*ast.ClassDecl); ok && class.Name != "" {
+				return class.Name
+			}
 			if exp.Local != "" {
 				return exp.Local
 			}

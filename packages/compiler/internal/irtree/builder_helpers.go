@@ -241,7 +241,7 @@ func isOnEvent(name string) bool {
 // directive with no HTML representation.
 func isReactDirectiveAttr(name string) bool {
 	switch name {
-	case "key", "suppressHydrationWarning":
+	case "key", "suppressHydrationWarning", "__krate_key":
 		return true
 	}
 	return false

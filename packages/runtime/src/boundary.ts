@@ -16,7 +16,7 @@
 // setup function and is remounted by running it again.
 
 import { setOwnerHooks, untrack, onCleanup, krateGetOwner, krateSetOwner } from './signal.js';
-import { krateForgetOwner } from './effects.js';
+import { krateForgetOwner, krateOnHookError } from './effects.js';
 
 /** Second argument of componentDidCatch. */
 export interface ErrorInfo {
@@ -435,6 +435,32 @@ export function __krateOnError(err: unknown, node?: Node | null): boolean {
   if (node && node.isConnected === false) return false;
   handleError(err, current);
   return true;
+}
+
+// React hook effects (effects.ts) report errors to the component's owner.
+krateOnHookError((err, id) => {
+  const o = id ? byId.get(id) : undefined;
+  if (!o) return false;
+  if (o.state === 'mounted') {
+    commitPhaseDepth++;
+    try {
+      handleError(err, o);
+    } finally {
+      commitPhaseDepth--;
+    }
+  }
+  return true;
+});
+
+let commitPhaseDepth = 0;
+
+/**
+ * Reports whether the error being handled was thrown in the commit phase
+ * (effects, lifecycles). React retries a failed render once, but not a
+ * failed commit.
+ */
+export function inCommitPhaseError(): boolean {
+  return commitPhaseDepth > 0;
 }
 
 setOwnerHooks({

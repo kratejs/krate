@@ -17,11 +17,14 @@
 //           componentDidUpdate / componentDidCatch and setState callbacks,
 //           children before parents.
 
-import { afterFlush, createEffect, createSignal, untrack } from './signal.js';
+import { afterFlush, createEffect, createSignal, krateOnSettle, krateRequestFlush, untrack } from './signal.js';
 import { krateSetRef, type KrateRef } from './refs.js';
 import {
   getOwner,
   handleError,
+  inCommitPhaseError,
+  mountOwner,
+  unmountOwner,
   onOwnerCleanup,
   remountChildren,
   runWithOwner,
@@ -41,6 +44,8 @@ export interface ClassSpec {
   defaultProps?: Obj | null;
   /** Reads the value of `static contextType`. */
   context?: () => unknown;
+  /** Writes the committed context the lowered render reads. */
+  setContext?: (value: unknown) => void;
   getDerivedStateFromProps?: (props: Obj, state: Obj) => Obj | null | undefined;
   getDerivedStateFromError?: (error: unknown) => Obj | null | undefined;
   shouldComponentUpdate?: (nextProps: Obj, nextState: Obj, nextContext: unknown) => unknown;
@@ -93,6 +98,7 @@ class Controller {
   mounted = false;
   disposed = false;
   private catching = false;
+  private key: unknown;
   private detachRef: (() => void) | null = null;
   private errorCommitPending = false;
   private props: Obj;
@@ -127,6 +133,7 @@ class Controller {
     }
     this.rawGetters.push(...saved);
     this.props = this.readProps();
+    this.key = this.readKey();
     this.state = untrack(getState) || {};
     this.context = this.readContext();
     const [rendered, setRendered] = createSignal<Obj>(this.props);
@@ -168,10 +175,12 @@ class Controller {
     }
 
     // Track the parent's prop getters: a change schedules an update.
-    if (this.rawGetters.length > 0) {
+    if (this.spec.setContext) this.spec.setContext(this.context);
+    if (this.rawGetters.length > 0 || this.spec.context) {
       let first = true;
       createEffect(() => {
         for (const [, get] of this.rawGetters) get();
+        this.trackContext();
         if (first) {
           first = false;
           return;
@@ -232,8 +241,22 @@ class Controller {
   }
 
   private readContext(): unknown {
+    return untrack(() => this.trackContext());
+  }
+
+  // A dynamic provider value reaches the component as a thunk prop
+  // (`__krate_ctx_<Name>`); call it to get the value (tracked when called
+  // from the props-tracking effect).
+  private trackContext(): unknown {
     const read = this.spec.context;
-    return read ? untrack(read) : undefined;
+    if (!read) return undefined;
+    const v = read();
+    if (typeof v === 'function') {
+      for (const key of Object.keys(this.raw)) {
+        if (key.startsWith('__krate_ctx_') && this.raw[key] === v) return (v as () => unknown)();
+      }
+    }
+    return v;
   }
 
   // Render bindings read props through the registry object. Redefine its
@@ -289,9 +312,24 @@ class Controller {
     }
   }
 
+  private readKey(): unknown {
+    const getter = this.rawGetters.find((g) => g[0] === '__krate_key');
+    return untrack(() => (getter ? getter[1]() : this.raw.__krate_key));
+  }
+
   private update(): void {
     const spec = this.spec;
     const inst = this.inst;
+    // A new key is a new component: unmount this instance and mount a fresh
+    // one (the owner's setup runs again).
+    if (!Object.is(this.readKey(), this.key) && this.owner) {
+      const owner = this.owner;
+      unmountOwner(owner);
+      owner.inError = false;
+      mountOwner(owner);
+      remountChildren(owner);
+      return;
+    }
     const nextProps = this.readProps();
     const nextContext = this.readContext();
     const propsChanged = !shallowEqual(nextProps, this.props) || nextContext !== this.context;
@@ -354,6 +392,7 @@ class Controller {
       ? spec.getSnapshotBeforeUpdate.call(inst, prevProps, prevState)
       : undefined;
     this.setRendered(nextProps);
+    if (spec.setContext) spec.setContext(nextContext);
     // A forced update re-runs every binding, even when state is unchanged.
     this.setStateSignal(forced && nextState === prevState ? { ...nextState } : nextState);
     if (forced && nextState === prevState) this.state = untrack(this.getState);
@@ -419,6 +458,9 @@ class Controller {
       for (const child of failed) child.blocked = true;
       let next = this.state;
       if (spec.getDerivedStateFromError) {
+        // React 18 retries a render that threw during an update once before
+        // committing the fallback, so getDerivedStateFromError runs twice.
+        if (this.mounted && !inCommitPhase && !inCommitPhaseError()) spec.getDerivedStateFromError(err);
         const partial = spec.getDerivedStateFromError(err);
         if (partial != null) next = { ...next, ...partial };
       } else if (typeof console !== 'undefined') {
@@ -492,17 +534,21 @@ const renderQueue = new Set<Controller>();
 const remountQueue = new Set<Owner>();
 const commitQueue: Array<{ c: Controller; fn: () => void; n: number }> = [];
 let commitSeq = 0;
-let scheduled = false;
+let commitScheduled = false;
 
+// Render requests are processed when the current flush settles (krateOnSettle),
+// so class DOM writes land in the same pass as other bindings.
 function schedule(): void {
-  if (scheduled) return;
-  scheduled = true;
-  afterFlush(runScheduler);
+  krateRequestFlush();
 }
 
+// Lifecycles run after the pass's DOM writes and the effects.ts layout commit.
 function commit(c: Controller, fn: () => void): void {
   commitQueue.push({ c, fn, n: commitSeq++ });
-  schedule();
+  if (!commitScheduled) {
+    commitScheduled = true;
+    afterFlush(runCommit);
+  }
 }
 
 function preOrder(a: Controller, b: Controller): number {
@@ -528,18 +574,29 @@ function postOrder(a: { c: Controller; n: number }, b: { c: Controller; n: numbe
   return a.c.seq - b.c.seq || a.n - b.n;
 }
 
-function runScheduler(): void {
-  scheduled = false;
-  if (renderQueue.size > 0) {
-    for (let guard = 0; renderQueue.size > 0 && guard < 1000; guard++) {
-      const list = Array.from(renderQueue).sort(preOrder);
-      renderQueue.clear();
-      for (const c of list) c.performUpdate();
-    }
-    // Commit once the DOM writes made by the render phase have flushed.
-    schedule();
-    return;
+function runRender(): void {
+  for (let guard = 0; renderQueue.size > 0 && guard < 1000; guard++) {
+    const list = Array.from(renderQueue).sort(preOrder);
+    renderQueue.clear();
+    for (const c of list) c.performUpdate();
   }
+}
+
+// Set while lifecycles run: errors there are commit-phase errors, which React
+// does not retry.
+let inCommitPhase = false;
+
+function runCommit(): void {
+  commitScheduled = false;
+  inCommitPhase = true;
+  try {
+    runCommitEntries();
+  } finally {
+    inCommitPhase = false;
+  }
+}
+
+function runCommitEntries(): void {
   if (remountQueue.size > 0) {
     const owners = Array.from(remountQueue).sort((a, b) => a.order - b.order);
     remountQueue.clear();
@@ -549,8 +606,9 @@ function runScheduler(): void {
     const list = commitQueue.splice(0).sort(postOrder);
     for (const entry of list) entry.c.runLifecycle(entry.fn);
   }
-  if (renderQueue.size > 0 || commitQueue.length > 0 || remountQueue.size > 0) schedule();
 }
+
+krateOnSettle(runRender);
 
 /**
  * Creates the instance behind a lowered class component. `props` is the
