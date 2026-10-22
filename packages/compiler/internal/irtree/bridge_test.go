@@ -11,12 +11,12 @@ import (
 // TestBridgeScopeExpr verifies page-scope signal/prop reads inside an external
 // island subtree are rewritten to island props (and locals are inlined).
 func TestBridgeScopeExpr(t *testing.T) {
-	b := &builder{
+	b := &builder{componentCtx: componentCtx{
 		localSignals: map[string]ast.Expr{
 			"open": &ast.Literal{Kind: ast.BoolLit, Value: "true"},
 		},
 		localProps: valueMap{"title": jsvalue.String("Hi")},
-	}
+	}}
 	used := map[string]bool{}
 
 	got := astprint.PrintExpr(b.bridgeScopeExpr(&ast.CallExpr{Callee: &ast.Identifier{Name: "open"}}, used))

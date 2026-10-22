@@ -8,7 +8,7 @@ import (
 )
 
 func TestChildComponentHyphenatedPropKey(t *testing.T) {
-	b := &builder{localSignals: map[string]ast.Expr{}}
+	b := &builder{componentCtx: componentCtx{localSignals: map[string]ast.Expr{}}}
 	got := b.buildChildPropsRegDecl("probe", map[string]ast.Expr{
 		"data-testid": &ast.Literal{Kind: ast.StringLit, Value: "probe"},
 	})
