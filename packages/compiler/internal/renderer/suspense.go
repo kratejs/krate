@@ -58,6 +58,10 @@ func (e *Emitter) emitSuspenseSlot(s *irtree.SuspenseSlot) SlotOutput {
 		mergeSlotOutput(&fallback, e.emitSlotNode(child))
 	}
 	sid := boundarySlotID(s.StreamID)
+	// The effect scheduler treats the boundary as a conditional: content
+	// effects wait until it is revealed.
+	tagCondBranch(content.Signatures, irtree.SlotID(sid), "c", false)
+	tagCondBranch(fallback.Signatures, irtree.SlotID(sid), "a", true)
 	contentHTML, fallbackHTML := content.HTML, fallback.HTML
 	content.HTML, fallback.HTML = "", ""
 	var out SlotOutput

@@ -35,6 +35,9 @@ type Module struct {
 	// modules are never shared via the parse cache (the rewrites are not
 	// idempotent), so caching stays safe for the rewrite-free majority.
 	Rewritable bool
+	// Diagnostics are coded warnings from the React rewrite (for example a
+	// dependency array the compiler cannot resolve).
+	Diagnostics []diag.Diagnostic
 }
 
 // moduleNeedsRewrite reports whether any per-bundle rewrite pass could touch a
@@ -72,8 +75,6 @@ type Bundle struct {
 	DynImportFiles map[string]string // dynamic-import source path -> hashed site URL (/chunks/...)
 	Frontmatter    map[string]any    // .mdx frontmatter, if any
 	ActionImports  map[string]string // local binding -> server-action URL
-	// Warnings are non-fatal diagnostics from the React lowering passes.
-	Warnings []diag.Diagnostic
 }
 
 type Bundler struct {
@@ -91,7 +92,6 @@ type Bundler struct {
 	actionBasePath    string
 	actionImports     map[string]string
 	actionErr         error
-	warnings          []diag.Diagnostic
 	pathAliases       []pathAlias
 	tsBaseDir         string
 	serverComponents  []string
@@ -285,7 +285,6 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	b.frontmatter = nil
 	b.actionImports = make(map[string]string)
 	b.actionErr = nil
-	b.warnings = nil
 
 	err := b.resolveModule(entry, true)
 	if err != nil {
@@ -330,7 +329,6 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		DynImportFiles: b.dynImports,
 		Frontmatter:    b.frontmatter,
 		ActionImports:  b.actionImports,
-		Warnings:       b.warnings,
 	}, nil
 }
 
@@ -605,7 +603,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	cacheable := statOK && !isEntry
 	if cacheable {
 		if e, ok := b.cache.getProgram(abs, mtime, size); ok {
-			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry, SourceCode: e.source, ComponentClass: e.compClass}
+			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry, SourceCode: e.source, ComponentClass: e.compClass, Diagnostics: e.diags}
 			mod.Imports = append([]string(nil), e.imports...)
 			b.order = append(b.order, mod)
 			for _, imp := range mod.Imports {
@@ -632,12 +630,17 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	if len(errs) > 0 {
 		return &parseError{summary: parser.FormatDiagnostics(errs), errs: errs}
 	}
-	if err := b.rewriteReactModule(prog, path, src); err != nil {
+	reactDiags, err := splitReactDiags(RewriteReactDiag(prog, path, src))
+	if err != nil {
 		return err
+	}
+	if strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
+		// Third-party packages cannot act on these hints; keep builds quiet.
+		reactDiags = nil
 	}
 	_, actionChanged := b.rewriteActionImports(prog, abs)
 
-	mod := &Module{Path: path, Program: prog, IsEntry: isEntry, SourceCode: src}
+	mod := &Module{Path: path, Program: prog, IsEntry: isEntry, SourceCode: src, Diagnostics: reactDiags}
 	mod.ComponentClass = ClassifyComponent(src, path, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs)
 	b.collectImports(prog, mod)
 	// Modules a rewrite pass may mutate are parsed fresh per bundle (never
@@ -648,6 +651,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 		b.cache.putProgram(abs, &programEntry{
 			mtime: mtime, size: size, program: prog, source: src,
 			imports: append([]string(nil), mod.Imports...), compClass: mod.ComponentClass,
+			diags: reactDiags,
 		})
 	}
 	for _, imp := range mod.Imports {

@@ -596,6 +596,9 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 	if node.Lazy {
 		sig.LazyName = node.Name
 	}
+	if len(e.clientStack) > 1 {
+		sig.ParentID = e.clientStack[len(e.clientStack)-2]
+	}
 	out.Signatures = append([]irtree.ComponentSignature{sig}, out.Signatures...)
 
 	return out
@@ -924,6 +927,8 @@ func (e *Emitter) emitConditionalSlot(s *irtree.ConditionalSlot) SlotOutput {
 		activeHTML, inactiveHTML, held = alt.HTML, cons.HTML, "c"
 	}
 	cons.HTML, alt.HTML = "", ""
+	tagCondBranch(cons.Signatures, s.ID, "c", s.InitialActive)
+	tagCondBranch(alt.Signatures, s.ID, "a", !s.InitialActive)
 
 	var out SlotOutput
 	mergeSlotOutput(&out, cons)
@@ -951,7 +956,21 @@ func (e *Emitter) emitListSlot(s *irtree.ListSlot) SlotOutput {
 	}
 
 	out.HTML = slotMarker(id) + itemsHTML.String() + slotEndMarker(id)
+	for i := range out.Signatures {
+		if out.Signatures[i].ListSlot == "" {
+			out.Signatures[i].ListSlot = s.ID
+		}
+	}
 	return out
+}
+
+// tagCondBranch records that the components in sigs render inside one branch
+// of conditional slot id (outer conditionals are prepended later, so Conds
+// ends up outermost first).
+func tagCondBranch(sigs []irtree.ComponentSignature, id irtree.SlotID, branch string, shown bool) {
+	for i := range sigs {
+		sigs[i].Conds = append([]irtree.CondBranch{{SlotID: id, Branch: branch, InitiallyShown: shown}}, sigs[i].Conds...)
+	}
 }
 
 func (e *Emitter) emitComponentSlot(s *irtree.ComponentSlot) SlotOutput {

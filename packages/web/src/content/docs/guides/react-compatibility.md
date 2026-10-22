@@ -41,7 +41,7 @@ export default function Timer() {
 
 ```tsx
 // ...and the compiler emits the equivalent Krate code.
-// useState  -> createSignal      useEffect -> createEffect
+// useState  -> createSignal      useEffect -> createEffectDeps
 // useRef    -> { current: null }  {seconds} -> seconds()
 ```
 
@@ -49,13 +49,13 @@ export default function Timer() {
 
 | React | Rewritten to |
 |-------|--------------|
-| `useState` | `createSignal` |
-| `useEffect` | `createEffect` |
-| `useLayoutEffect` / `useInsertionEffect` | `createEffect` |
-| `useMemo` | `createMemo` |
-| `useReducer` | `createReducer` |
+| `useState` | `createSignal` (a lazy initializer `useState(() => x)` is called once) |
+| `useEffect` | `createEffectDeps(fn, () => deps)` (passive phase, see [Effects](#effects)) |
+| `useLayoutEffect` / `useInsertionEffect` | `createEffectDeps(fn, () => deps, 'layout' / 'insertion')` |
+| `useMemo` | `createMemoDeps(fn, () => deps)`; without deps, `createMemo` |
+| `useReducer` | `createReducer` (stable `dispatch`, lazy `init`, Object.is bail-out) |
 | `useRef` | `{ current: initial }` |
-| `useCallback` | the wrapped function |
+| `useCallback` | `createCallbackDeps(fn, () => deps)`; without deps, the wrapped function |
 | `useContext` | `Context.useContext()` |
 | `useId` | a build-time literal (see below) |
 | `useTransition` | a pending signal plus an async-aware `startTransition` (see [Suspense](#suspense-lazy-use-and-transitions)) |
@@ -161,7 +161,9 @@ on pending work. When a component inside it reads `use(promise)` or a
 `createResource`, the promise cannot be resolved at build time: the page ships
 the fallback, and the content waits (already rendered, with its value slots
 empty) in a hoisted `<template>`. Hydration binds the content there and swaps
-it in when the boundary has nothing pending. Request-time (runtime and server)
+it in when the boundary has nothing pending. Effects of the content run in the
+commit after it is revealed, and are cleaned up while the boundary shows its
+fallback again (like a hidden conditional branch, see [Effects](#effects)). Request-time (runtime and server)
 components inside a boundary keep using streaming regions.
 
 **`use(promise)`.** Write it as the initializer of a declaration in the
@@ -238,6 +240,91 @@ The compat runtime (`@krate/runtime/react`, used by code that is not lowered
 at build time) implements the same semantics with render-time placeholders:
 a component that suspends renders a placeholder that the nearest `<Suspense>`
 claims, and the placeholder re-renders the component when its promise settles.
+
+### Effects
+
+Krate components run once, so there is no render for an effect to follow.
+Each effect hook instead watches its dependency array: the compiler passes a
+thunk (`() => [a, b]`) that the runtime re-reads whenever a signal it reads
+changes, and the effect re-runs in the next commit when any element differs
+by `Object.is` (so `NaN` equals `NaN` and `+0` differs from `-0`). Setting
+state to the value it already has (by `Object.is`) is a no-op: no binding or
+effect re-runs.
+
+**Commit order.** Signal writes are batched: every update made in the same
+task (an event handler, a timeout, a promise callback) produces one commit.
+A commit runs after the DOM bindings have been updated, in React's order:
+
+1. Mutation phase, per component: insertion-effect cleanup and setup, then
+   layout-effect cleanup.
+2. Layout phase: layout-effect setups. This happens in a microtask, before the
+   browser paints.
+3. Passive phase, in a later task (after paint): every passive cleanup, then
+   every passive setup.
+
+Within each phase, children run before parents and siblings in document
+order; effects of one component run in declaration order. Pending passive
+effects are always flushed before the next update is processed, as in React.
+A layout effect that sets state therefore re-commits before paint.
+
+**Dependency arrays.**
+
+| Pattern | Behavior |
+|---------|----------|
+| `[a, b]` | re-runs when `a` or `b` changes |
+| `[]` | runs once after mount; its cleanup runs on unmount |
+| `const deps = [a, b]` in the same component | inlined, same as `[a, b]` |
+| an expression (`props.deps`, `cond ? [a] : [b]`, `[...items, a]`) | evaluated live and compared at run time |
+| a parameter or imported array | compared at run time, but the captured array never changes ([KR2001](#effect-diagnostics)) |
+| omitted (or `null` / `undefined`) | re-runs after every commit that changes the component's own state or props ([KR2002](#effect-diagnostics)) |
+
+React re-runs a dependency-less effect after every render. Krate has no
+re-renders, so it uses the closest observable equivalent: the effect's
+dependencies are the component's `useState`/`useReducer` state and its props.
+Re-renders caused only by a parent or a context change are not modelled; pass
+an explicit array when that matters.
+
+`useMemo(fn, deps)` recomputes synchronously, when it is read, after its deps
+changed, so the value is current within the same update. `useCallback(fn,
+deps)` keeps one function identity until its deps change (so effects that
+list the callback re-run exactly when React's would). `useImperativeHandle`
+attaches the handle in the layout phase, re-creates it when its deps change,
+and resets the ref to `null` on unmount.
+
+**Unmounting.** When a list re-render removes a component, its cleanups run
+parent before child (React's deletion order): insertion and layout cleanups
+immediately, passive cleanups in the passive phase. A component inside a
+conditional branch that becomes hidden has all of its effect cleanups run,
+and when the branch is shown again every effect setup runs again, like React's
+`<Activity mode="hidden">`. Unlike React's `{cond && <Child />}`, the
+component's state is kept while it is hidden.
+
+**Closures.** Krate state reads are live getters, so code inside an effect
+always sees the current value. In a cleanup this differs from React, where a
+cleanup sees the values of the render its effect ran for ([KR2007](#effect-diagnostics)):
+copy the value into a local in the effect body (`const id = roomId; return ()
+=> leave(id);`).
+
+Compiled packages and code the compiler could not lower use the same runtime
+through `@krate/runtime/react`: `useEffect`, `useLayoutEffect` and
+`useInsertionEffect` get their phases, and dependency elements that are state
+getters are read live. There `useMemo` and `useCallback` compute once per
+component, which is what React does when the deps never change.
+
+#### Effect diagnostics
+
+| Code | Reported when | What to do |
+|------|---------------|------------|
+| KR2001 | a dependency array is a binding the compiler cannot resolve | write it inline or as `const deps = [...]` in the component |
+| KR2002 | an effect has no dependency array | pass the dependencies, or `[]` to run once |
+| KR2003 | an effect callback is `async` (its Promise is not a cleanup) | call an async function inside the effect |
+| KR2004 | `useCallback` has no dependency array (one identity for the component's lifetime) | pass the dependencies |
+| KR2005 | `useMemo` has no dependency array (recomputes when a signal it reads changes) | pass the dependencies |
+| KR2006 | the dependency argument is not an array | pass `[a, b]` or omit it |
+| KR2007 | an effect cleanup reads state | copy the value in the effect body |
+
+These are warnings; diagnostics for files under `node_modules` are not
+printed.
 
 ### Attributes and `style`
 

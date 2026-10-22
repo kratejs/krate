@@ -1518,6 +1518,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("bundling page %s: %w", page, err)
 	}
+	printModuleWarnings(os.Stderr, bundle.Modules)
 
 	entryModule := findEntryModule(bundle.Modules)
 	if entryModule == nil || entryModule.Program == nil {
@@ -1625,7 +1626,6 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	if len(tree.Errors) > 0 {
 		return nil, "", renderErrors(page, tree.Errors)
 	}
-	printTreeWarnings(os.Stderr, bundle.Warnings)
 	printTreeWarnings(os.Stderr, tree.Warnings)
 	// CSS stylesheets are generated during IR construction (one shared,
 	// instance-agnostic stylesheet per scope). Append them to the page's own CSS
@@ -2154,6 +2154,8 @@ func (b *Builder) resetBuildCaches() {
 	resolver.ResetCaches()
 	// Runtime/dev bundle disk lookups are memoized per build.
 	resetRuntimeBundleMemo()
+	// Module warnings are printed once per build.
+	resetModuleWarnings()
 	// Baked collection-chain folds are per-build (a content edit changes the key).
 	resetContentFoldCache()
 }
@@ -2232,6 +2234,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if err != nil {
 		return nil, "", nil, false, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
 	}
+	printModuleWarnings(os.Stderr, layoutBundle.Modules)
 
 	layoutModule := findEntryModule(layoutBundle.Modules)
 	if layoutModule == nil || layoutModule.Program == nil {

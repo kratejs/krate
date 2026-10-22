@@ -18,7 +18,8 @@
  * minimal.
  */
 import { h, type Component } from './dom.js';
-import { createSignal, createEffect, onCleanup } from './signal.js';
+import { createSignal, createEffect, createReducer, isSignalGetter } from './signal.js';
+import { createEffectDeps, type EffectPhase } from './effects.js';
 import { krateSetRef, type KrateRef } from './refs.js';
 import { krateEventRoot } from './events.js';
 import { createContext as krateCreateContext } from './context.js';
@@ -340,19 +341,35 @@ export function useState<T>(
   return createSignal(value);
 }
 
-export function useReducer<S, A>(
+export function useReducer<S, A, I = S>(
   reducer: (state: S, action: A) => S,
-  initial: S
+  initial: I,
+  init?: (arg: I) => S
 ): [() => S, (action: A) => void] {
-  const [get, set] = createSignal(initial);
-  const dispatch = (action: A): void => set((prev) => reducer(prev as S, action));
-  return [get, dispatch];
+  // Stable dispatch, Object.is bail-out and the lazy initializer come from
+  // createReducer.
+  return createReducer(reducer, initial, init);
 }
 
+// Components run once, so a dependency array passed here is captured once.
+// Elements that are signal getters (state from useState above) are read on
+// every check, which keeps those dependencies live.
+function depsThunk(deps?: readonly unknown[] | (() => unknown) | null): (() => unknown) | null {
+  if (deps == null) return null;
+  if (typeof deps === 'function') return deps;
+  return () => deps.map((d) => (isSignalGetter(d) ? (d as () => unknown)() : d));
+}
+
+/**
+ * Memoized value. The component body runs once, so the factory runs once and
+ * the value is stable for the component's lifetime (React recomputes only
+ * when a dependency changes, which a single run cannot observe).
+ */
 export function useMemo<T>(factory: () => T, _deps?: unknown[]): T {
   return factory();
 }
 
+/** Memoized callback: one identity for the component's lifetime. */
 export function useCallback<T extends (...args: never[]) => unknown>(fn: T, _deps?: unknown[]): T {
   return fn;
 }
@@ -361,40 +378,30 @@ export function useRef<T = unknown>(initial?: T): RefObject<T> {
   return { current: initial ?? null };
 }
 
-export function useEffect(effect: () => void | (() => void), _deps?: unknown[]): void {
-  createEffect(effect);
+type EffectCallback = () => void | (() => void);
+
+function effectHook(phase: EffectPhase) {
+  return (effect: EffectCallback, deps?: readonly unknown[] | null): void => {
+    createEffectDeps(effect, depsThunk(deps), phase);
+  };
 }
 
-export const useLayoutEffect = useEffect;
-export const useInsertionEffect = useEffect;
+/** Passive effect: runs after paint, re-runs when a live dependency changes. */
+export const useEffect: (effect: EffectCallback, deps?: readonly unknown[] | null) => void = effectHook('passive');
+/** Layout effect: runs synchronously after the DOM is updated, before paint. */
+export const useLayoutEffect: (effect: EffectCallback, deps?: readonly unknown[] | null) => void = effectHook('layout');
+/** Insertion effect: runs before layout effects in the same commit. */
+export const useInsertionEffect: (effect: EffectCallback, deps?: readonly unknown[] | null) => void = effectHook('insertion');
 
-/**
- * Attaches the handle returned by `create` to `ref` (object or callback ref,
- * with React 19 callback cleanup) and detaches it on unmount. With a deps
- * array (or deps thunk) the handle is re-created only when a dependency changes.
- */
 export function useImperativeHandle<T>(
   ref: RefObject<T> | ((v: T | null) => unknown) | null | undefined,
   create: () => T,
-  deps?: unknown[] | (() => unknown[])
+  deps?: readonly unknown[] | (() => unknown) | null
 ): void {
-  const readDeps = typeof deps === 'function' ? deps : deps ? () => deps : null;
-  let prev: unknown[] | null = null;
-  let undo: (() => void) | null = null;
-  const run = (): void => {
-    if (undo) undo();
-    undo = ref ? krateSetRef(ref as KrateRef, create()) : null;
-  };
-  createEffect(() => {
-    const next = readDeps ? readDeps() : null;
-    if (prev && next && next.length === prev.length && next.every((v, i) => Object.is(v, prev![i]))) return;
-    prev = next;
-    run();
-  });
-  onCleanup(() => {
-    if (undo) undo();
-    undo = null;
-  });
+  // React implements handles as layout effects: attached (object or callback
+  // ref, with React 19 callback cleanup) in the layout phase, re-created when
+  // a dependency changes, detached on cleanup.
+  createEffectDeps(() => (ref ? krateSetRef(ref as KrateRef, create()) : undefined), depsThunk(deps), 'layout');
 }
 
 export function useDebugValue(_value?: unknown): void {

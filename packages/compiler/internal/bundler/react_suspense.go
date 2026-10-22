@@ -35,7 +35,6 @@ const LazyMarkerPrefix = lazyMarkerPrefix
 
 // suspenseState is the Suspense-related part of a reactCtx.
 type suspenseState struct {
-	diags    []diag.Diagnostic
 	suspense map[string]bool // local bindings of React.Suspense
 	contexts map[string]bool // module-level createContext bindings
 	reported map[*ast.CallExpr]bool
@@ -46,54 +45,33 @@ func newSuspenseState() *suspenseState {
 }
 
 func (c *reactCtx) report(pos ast.Pos, sev diag.Severity, code diag.Code, msg, hint string) {
-	d := diag.New("", pos.Line, pos.Col, msg, hint, "").WithCode(code)
+	d := diag.New(c.file, pos.Line, pos.Col, msg, hint, sourceLineOf(c.src, pos.Line)).WithCode(code)
 	d.Severity = sev
-	c.susp.diags = append(c.susp.diags, d)
+	c.diags = append(c.diags, d)
 }
 
-// RewriteReactDiagnostics runs RewriteReact and returns the diagnostics it
-// produced (positions only; the caller fills in the file and source line).
+// RewriteReactDiagnostics runs the React lowering without a file name and
+// returns its diagnostics (tests).
 func RewriteReactDiagnostics(prog *ast.Program) []diag.Diagnostic {
-	return rewriteReact(prog)
+	return RewriteReactDiag(prog, "", "")
 }
 
-// rewriteReactModule runs the React lowering on a parsed module. Warnings are
-// kept for the bundle; errors fail the module with positioned diagnostics.
-func (b *Bundler) rewriteReactModule(prog *ast.Program, path, src string) error {
+// splitReactDiags returns the warnings of the React lowering and fails with
+// its errors (Suspense/lazy/use() misuse) as positioned diagnostics.
+func splitReactDiags(diags []diag.Diagnostic) ([]diag.Diagnostic, error) {
+	var warnings []diag.Diagnostic
 	var errs []error
-	for _, d := range rewriteReact(prog) {
-		d.File = path
-		d.Source = sourceLineOf(src, d.Line)
+	for _, d := range diags {
 		if d.IsWarning() {
-			b.warnings = append(b.warnings, d)
-			continue
+			warnings = append(warnings, d)
+		} else {
+			errs = append(errs, d)
 		}
-		errs = append(errs, d)
 	}
 	if len(errs) > 0 {
-		return &parseError{summary: diag.FormatDiagnostics(errs), errs: errs}
+		return nil, &parseError{summary: diag.FormatDiagnostics(errs), errs: errs}
 	}
-	return nil
-}
-
-// sourceLineOf returns the 1-based line of src, or "".
-func sourceLineOf(src string, line int) string {
-	if line <= 0 {
-		return ""
-	}
-	for i := 1; ; i++ {
-		nl := strings.IndexByte(src, '\n')
-		if i == line {
-			if nl < 0 {
-				return strings.TrimRight(src, "\r")
-			}
-			return strings.TrimRight(src[:nl], "\r")
-		}
-		if nl < 0 {
-			return ""
-		}
-		src = src[nl+1:]
-	}
+	return warnings, nil
 }
 
 // collectModuleContexts records module-level `const X = createContext(...)`

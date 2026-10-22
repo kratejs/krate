@@ -104,11 +104,11 @@ func TestRewriteReactRenamesUseEffect(t *testing.T) {
 					if es, ok := bodyStmt.(*ast.ExprStmt); ok {
 						if call, ok := es.Expression.(*ast.CallExpr); ok {
 							if id, ok := call.Callee.(*ast.Identifier); ok {
-								if id.Name == "createEffect" {
+								if id.Name == "createEffectDeps" {
 									foundEffect = true
 								}
 								if id.Name == "useEffect" {
-									t.Error("useEffect should be renamed to createEffect")
+									t.Error("useEffect should be lowered to createEffectDeps")
 								}
 							}
 						}
@@ -118,7 +118,7 @@ func TestRewriteReactRenamesUseEffect(t *testing.T) {
 		}
 	}
 	if !foundEffect {
-		t.Error("expected createEffect after rewrite")
+		t.Error("expected createEffectDeps after rewrite")
 	}
 }
 
@@ -185,13 +185,17 @@ func TestRewriteReactTransformsUseCallback(t *testing.T) {
 				for _, bodyStmt := range fn.Body {
 					if v, ok := bodyStmt.(*ast.VarStmt); ok {
 						for _, decl := range v.Decls {
-							if _, ok := decl.Init.(*ast.ArrowFn); ok {
-								foundArrow = true
-							}
 							if call, ok := decl.Init.(*ast.CallExpr); ok {
 								if id, ok := call.Callee.(*ast.Identifier); ok {
 									if id.Name == "useCallback" {
 										t.Error("useCallback should be transformed")
+									}
+									// With deps, useCallback keeps its function in a
+									// deps-aware getter.
+									if id.Name == "createCallbackDeps" && len(call.Args) == 2 {
+										if _, ok := call.Args[0].(*ast.ArrowFn); ok {
+											foundArrow = true
+										}
 									}
 								}
 							}
@@ -228,11 +232,11 @@ func TestRewriteReactRenamesUseEffectInNestedFn(t *testing.T) {
 				if es, ok := bodyStmt.(*ast.ExprStmt); ok {
 					if call, ok := es.Expression.(*ast.CallExpr); ok {
 						if id, ok := call.Callee.(*ast.Identifier); ok {
-							if id.Name == "createEffect" {
+							if id.Name == "createEffectDeps" {
 								foundEffect = true
 							}
 							if id.Name == "useEffect" {
-								t.Error("useEffect should be renamed to createEffect inside TimerDisplay")
+								t.Error("useEffect should be lowered to createEffectDeps inside TimerDisplay")
 							}
 						}
 					}
@@ -241,7 +245,7 @@ func TestRewriteReactRenamesUseEffectInNestedFn(t *testing.T) {
 		}
 	}
 	if !foundEffect {
-		t.Error("expected createEffect inside TimerDisplay after rewrite")
+		t.Error("expected createEffectDeps inside TimerDisplay after rewrite")
 	}
 
 	// Also check that the import was removed

@@ -23,7 +23,7 @@
  *   content keeps showing it when a transition update suspends it, and the
  *   transition stays pending until that work and any async action settle.
  */
-import { createSignal, createEffect, onCleanup } from './signal.js';
+import { createSignal, createEffect, onCleanup, krateGetOwner, krateSetOwner } from './signal.js';
 import { krateCondSwap } from './slots.js';
 
 // Thenables
@@ -455,8 +455,15 @@ export function getBoundary(id: string): Boundary {
       : null;
   // A template holding the content means the build rendered the fallback.
   const initialContent = !tpl || tpl.getAttribute('data-kb') !== 'c';
+  // The boundary is a conditional slot: report its branch to the effect
+  // scheduler (when loaded) so effects of the content run in the commit after
+  // it is revealed and are cleaned up while it is hidden again.
+  const activity = (globalThis as { krateCondActivity?: (id: string, branch: string) => void }).krateCondActivity;
   const apply = (show: boolean): void => {
-    if (start && start.nodeType === 8) krateCondSwap(start as Comment, show, tpl);
+    if (!start || start.nodeType !== 8) return;
+    if (activity && !show) activity(slot, 'a');
+    krateCondSwap(start as Comment, show, tpl);
+    if (activity && show) activity(slot, 'c');
   };
   const b = createBoundary(id, apply, { anchor: start, initialContent });
   boundaries.set(id, b);
@@ -513,12 +520,17 @@ export function __krateBoundary(id: string | null, fn: () => void): void {
     state.scope.i = 0;
     const prev = currentRun;
     currentRun = state;
+    // A retry runs later, outside the hydration script: keep the effect
+    // owner it declares from leaking into unrelated code.
+    const owner = krateGetOwner();
     try {
       fn();
       currentRun = prev;
+      krateSetOwner(owner);
       boundary?.release();
     } catch (error) {
       currentRun = prev;
+      krateSetOwner(owner);
       for (const dispose of state.disposers.splice(0)) dispose();
       if (isSuspenseSignal(error)) {
         error.thenable.then(attempt, attempt);
