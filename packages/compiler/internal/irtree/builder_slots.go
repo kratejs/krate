@@ -1346,7 +1346,7 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 		if attr.Spread || attr.Name == "ref" || attr.Name == "dangerouslySetInnerHTML" {
 			continue
 		}
-		if isReactDirectiveAttr(attr.Name) {
+		if isReactDirectiveAttr(attr.Name) || shadowedFormDefault(attrsForOpening, attr.Name) {
 			continue
 		}
 		if isOnEvent(attr.Name) {
@@ -2501,12 +2501,12 @@ func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *Handler
 	// props registry (created in the parent scope), not an inlined parent-local
 	// expression (which is undefined inside the child IIFE).
 	if id, ok := attr.Value.(*ast.Identifier); ok && b.localFuncProps != nil && b.localFuncProps[id.Name] {
-		return &HandlerDecl{ElementSlotID: SlotID(elementID), Event: eventName, Body: "props." + id.Name, Capture: capture, Direct: direct}
+		return &HandlerDecl{ElementSlotID: SlotID(elementID), Prop: attr.Name, Event: eventName, Body: "props." + id.Name, Capture: capture, Direct: direct}
 	}
 	if mem, ok := attr.Value.(*ast.MemberExpr); ok && !mem.Computed {
 		if obj, ok := mem.Object.(*ast.Identifier); ok && obj.Name == "props" {
 			if prop, ok := mem.Property.(*ast.Identifier); ok && b.localFuncProps != nil && b.localFuncProps[prop.Name] {
-				return &HandlerDecl{ElementSlotID: SlotID(elementID), Event: eventName, Body: "props." + prop.Name, Capture: capture, Direct: direct}
+				return &HandlerDecl{ElementSlotID: SlotID(elementID), Prop: attr.Name, Event: eventName, Body: "props." + prop.Name, Capture: capture, Direct: direct}
 			}
 		}
 	}
@@ -2518,6 +2518,7 @@ func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *Handler
 
 	return &HandlerDecl{
 		ElementSlotID: SlotID(elementID),
+		Prop:          attr.Name,
 		Event:         eventName,
 		Body:          body,
 		Signals:       signals,
@@ -2551,7 +2552,18 @@ func (b *builder) buildAttrBinding(attr *ast.JSXAttr, elementID string) *AttrBin
 		Initial:     b.evalAttrValue(attr.Value),
 		InitialExpr: attr.Value,
 		IsString:    isStringType(attr.Value, b.sigMap()),
+		Prop:        formDefaultProp(attr.Name),
 	}
+}
+
+// formDefaultProp returns the JSX name of an uncontrolled form default
+// (defaultValue/defaultChecked). Those share their HTML attribute with
+// value/checked but must update the default, never the live value.
+func formDefaultProp(name string) string {
+	if name == "defaultValue" || name == "defaultChecked" {
+		return name
+	}
+	return ""
 }
 
 // buildStaticValueSlot - expression with no signals
@@ -3203,9 +3215,11 @@ func (b *builder) collectEffectJS(body []ast.Stmt) []string {
 								js := generateExprJS(call.Args[0], b.sigMap())
 								effects = append(effects, "onCleanup("+js+")")
 							}
-						case "createEffectDeps":
+						case "createEffectDeps", "useImperativeHandle":
 							// React useEffect/useLayoutEffect with a non-empty
 							// dependency list: the deps thunk is the second arg.
+							// useImperativeHandle attaches a ref handle (the
+							// hydration emitter runs it in the ref phase).
 							if len(call.Args) >= 1 {
 								effects = append(effects, generateExprJS(call, b.sigMap()))
 							}

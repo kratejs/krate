@@ -10,6 +10,8 @@
 // moves the very nodes that were bound: handlers and nested bindings of both
 // branches keep working across toggles.
 
+import { krateRefsEnter, krateRefsLeave } from './refs.js';
+
 interface CondState {
   /** Branch currently between the markers: 'c' or 'a'. */
   shown: 'c' | 'a';
@@ -73,6 +75,9 @@ export function krateCondSwap(start: Comment, show: boolean, tpl: HTMLTemplateEl
     out.appendChild(n);
     n = next;
   }
+  // React order: refs of the outgoing branch detach before the incoming
+  // branch's refs attach.
+  krateRefsLeave(out);
   let incoming = st.other;
   if (!incoming) {
     incoming = document.createDocumentFragment();
@@ -83,6 +88,7 @@ export function krateCondSwap(start: Comment, show: boolean, tpl: HTMLTemplateEl
   st.other = out;
   detached.add(out);
   st.shown = want;
+  krateRefsEnter();
 }
 
 const URL_ATTRS: Record<string, true> = { href: true, src: true, action: true, formaction: true, 'xlink:href': true };

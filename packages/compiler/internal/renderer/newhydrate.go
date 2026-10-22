@@ -30,16 +30,16 @@ function scan(){__cache.clear();__tpls.clear();if(typeof krateCondReset==='funct
 scan();
 window.findSlot=function(id){var q='[data-k="k:'+id+'"]';var el=__root.querySelector(q);if(el)return el;var c=__cache.get(id);if(c)return c;var found=null;__tpls.forEach(function(t){if(!found)found=t.content.querySelector(q);});if(!found&&typeof krateCondDetached==='function'){var ds=krateCondDetached();for(var i=0;i<ds.length&&!found;i++)found=ds[i].querySelector(q);}return found;};
 window.refreshSlots=scan;
-window.krateMountPortals=function(){var list=document.querySelectorAll('[data-krate-portal]');for(var i=0;i<list.length;i++){(function(node){if(node.getAttribute('data-krate-portal-mounted'))return;node.setAttribute('data-krate-portal-mounted','1');if(node.parentNode!==document.body)document.body.appendChild(node);if(typeof window.onCleanup==='function')window.onCleanup(function(){if(node.parentNode)node.parentNode.removeChild(node);});})(list[i]);}};
+window.krateMountPortals=function(){var list=document.querySelectorAll('[data-krate-portal]');for(var i=0;i<list.length;i++){(function(node){if(node.getAttribute('data-krate-portal-mounted'))return;node.setAttribute('data-krate-portal-mounted','1');if(node.parentNode!==document.body)document.body.appendChild(node);if(typeof krateEventRoot==='function')krateEventRoot(node);if(typeof window.onCleanup==='function')window.onCleanup(function(){if(node.parentNode)node.parentNode.removeChild(node);});})(list[i]);}};
 window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}});});};
 window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);});});};
 window.kbindList=function(id,src,key,render,mode){var n=findSlot(id);if(!n||n.nodeType!==8||typeof krateBindList!=='function')return;__safe(function(){krateBindList(n,src,key,render,mode);});};
 window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(function(){krateCondSwap(n,!!get(),t);});});};
 window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)n.removeAttribute(attr);else if(v===true)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){n.removeAttribute('style');Object.assign(n.style,v);}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));});});};
-window.kbindProp=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(attr==='value'){var s=v==null||v===false?'':String(v);if(n.value===s)return;n.value=s;}else{var b=!!v;if(n[attr]===b)return;n[attr]=b;}});});};
-window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){n[prop]=fn;});};
+window.kbindProp=function(id,attr,get){var n=findSlot(id);if(n)__safe(function(){krateControl(n,attr,get);});};
+window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){krateOn(n,prop,fn);});};
 window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);});};
-window.kbindRef=function(id,set){var n=findSlot(id);if(n)__safe(function(){set(n);});};
+window.kbindRef=function(id,get,set){var n=findSlot(id);if(n)__safe(function(){krateBindRef(n,get,set);});};
 window.createEffectDeps=function(fn,deps){var prev=null,has=false,cleanup=null;function same(a,b){if(!a||!b||a.length!==b.length)return false;for(var i=0;i<a.length;i++){if(a[i]!==b[i])return false;}return true;}createEffect(function(){var next=deps?deps():[];if(has&&deps&&same(prev,next))return;prev=next;has=true;if(typeof cleanup==="function"){cleanup();cleanup=null;}cleanup=fn();});onCleanup(function(){if(typeof cleanup==="function")cleanup();});};
 window.createMemoDeps=function(fn,deps){var s=createSignal(fn()),prev=deps?deps():[];function same(a,b){if(a.length!==b.length)return false;for(var i=0;i<a.length;i++){if(a[i]!==b[i])return false;}return true;}createEffect(function(){var next=deps?deps():[];if(same(prev,next))return;prev=next;s[1](fn());});return s[0];};
 function __krateActionBase(){var c=window.__KRATE_CFG__;return c&&c.basePath?c.basePath:'';}
@@ -76,6 +76,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	// Rebuild the comment-marker cache against the current DOM (fresh page
 	// load or SPA navigation).
 	b.WriteString("refreshSlots();\n")
+	b.WriteString("var __kfx=[];\n")
 	b.WriteString("if(window.krateMountPortals)window.krateMountPortals();\n")
 
 	// Component functions needed by dynamic list slots. Without these the
@@ -182,30 +183,21 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			b.WriteByte('\n')
 		}
 
-		// Refs: assign the live DOM node to the referenced variable, or invoke a
-		// callback ref with it. Runs after the extra vars are declared and before
-		// effects/memos that read them, so an onMount/handler can safely use the
-		// ref'd element.
+		// Refs: attach the live DOM node to the ref (object, callback or plain
+		// variable) with React semantics. Runs after the extra vars are
+		// declared and before any effect, so layout effects see the node.
 		for _, rb := range sig.RefBindings {
-			b.WriteString("kbindRef(")
-			b.WriteString(strconv.Quote(string(rb.ElementSlotID)))
-			if rb.Callback != "" {
-				b.WriteString(",")
-				b.WriteString(rb.Callback)
-			} else if rb.Adaptive {
-				// Handles every ref shape: a callback function, a {current} ref
-				// object, or a plain variable that should be assigned the node.
-				b.WriteString(",el=>{var _r=")
-				b.WriteString(rb.Target)
-				b.WriteString(";if(typeof _r==='function')_r(el);else if(_r&&typeof _r==='object')_r.current=el;else{")
-				b.WriteString(rb.Target)
-				b.WriteString("=el;}}")
-			} else {
-				b.WriteString(",el=>{")
-				b.WriteString(rb.Target)
-				b.WriteString("=el;}")
+			writeRefBinding(&b, rb)
+		}
+
+		// Imperative handles attach in the ref phase too, so a parent's
+		// effects see a child's handle (React attaches them before layout
+		// effects run).
+		for _, eff := range sig.Effects {
+			if isRefPhaseEffect(eff) {
+				b.WriteString(eff)
+				b.WriteString(";\n")
 			}
-			b.WriteString(")\n")
 		}
 
 		for i, memo := range sig.Memos {
@@ -216,9 +208,23 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			b.WriteString(";\n")
 		}
 
+		// Effects are queued and run once every component has bound its refs
+		// and DOM, in the same order as before, so an effect can read a ref
+		// forwarded to a child component.
+		deferred := false
 		for _, eff := range sig.Effects {
+			if isRefPhaseEffect(eff) {
+				continue
+			}
+			if !deferred {
+				b.WriteString("__kfx.push(function(){\n")
+				deferred = true
+			}
 			b.WriteString(eff)
 			b.WriteString(";\n")
+		}
+		if deferred {
+			b.WriteString("});\n")
 		}
 
 		// Slot bindings: compact calls into the shared kbind* helpers.
@@ -276,31 +282,20 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			}
 		}
 
-		// Event handlers. Delegated (bubbling) handlers set a property that the
-		// shared delegated listener invokes; capture-phase and non-bubbling
-		// events get a direct listener on the element.
+		// Event handlers: the runtime maps the React prop (onClick,
+		// onChangeCapture, ...) to its native events, phase and delegation.
 		for _, h := range sig.Handlers {
-			if h.Direct {
-				b.WriteString("kbindEvent(")
-				b.WriteString(strconv.Quote(string(h.ElementSlotID)))
-				b.WriteString(",")
-				b.WriteString(strconv.Quote(h.Event))
-				b.WriteString(",")
-				b.WriteString(h.Body)
-				b.WriteString(",")
+			prop := h.Prop
+			if prop == "" {
+				prop = "on" + h.Event
 				if h.Capture {
-					b.WriteString("true")
-				} else {
-					b.WriteString("false")
+					prop += "Capture"
 				}
-				b.WriteString(");\n")
-				continue
 			}
-			propName := "__krate_" + h.Event + "_" + sanitizeHandlerProp(string(h.ElementSlotID))
 			b.WriteString("kbindHandler(")
 			b.WriteString(strconv.Quote(string(h.ElementSlotID)))
 			b.WriteString(",")
-			b.WriteString(strconv.Quote(propName))
+			b.WriteString(strconv.Quote(prop))
 			b.WriteString(",")
 			b.WriteString(h.Body)
 			b.WriteString(");\n")
@@ -317,14 +312,18 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			}
 			// value/checked/selected are DOM properties, not attributes: setting
 			// the attribute after interaction has no effect.
+			name := a.AttrName
 			if isFormPropertyAttr(a.AttrName) {
 				b.WriteString("kbindProp(")
+				if a.Prop != "" {
+					name = a.Prop
+				}
 			} else {
 				b.WriteString("kbindAttr(")
 			}
 			b.WriteString(strconv.Quote(string(a.ElementSlotID)))
 			b.WriteString(",")
-			b.WriteString(strconv.Quote(a.AttrName))
+			b.WriteString(strconv.Quote(name))
 			b.WriteString(",()=>")
 			b.WriteString(exprJS)
 			b.WriteString(");\n")
@@ -342,41 +341,8 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		}
 	}
 
-	// Event delegation
-	seenEvents := map[string]bool{}
-	var handlerEvents []string
-	for _, sig := range result.Signatures {
-		for _, h := range sig.Handlers {
-			// Direct (capture / non-bubbling) handlers have their own listeners.
-			if h.Direct {
-				continue
-			}
-			if !seenEvents[h.Event] {
-				seenEvents[h.Event] = true
-				handlerEvents = append(handlerEvents, h.Event)
-			}
-		}
-	}
-
-	if len(handlerEvents) > 0 {
-		b.WriteString("if(typeof __krate_del_cleanup==='function')__krate_del_cleanup();\n")
-		// Same root resolution as the slot bootstrap (fall back to body), so a
-		// non-#root container still works.
-		b.WriteString("var __krate_del_root=document.getElementById('root')||document.body;\n")
-		b.WriteString("var __krate_del_fns=[];\n")
-		b.WriteString("function __krate_del_add(ev,fn){__krate_del_root.addEventListener(ev,fn);__krate_del_fns.push({ev:ev,fn:fn});}\n")
-		for _, ev := range handlerEvents {
-			// Event delegation: walk up from the target and invoke EVERY handler
-			// on the path (bubbling), stopping only if the handler called
-			// stopPropagation() (which sets e.cancelBubble).
-			b.WriteString("__krate_del_add('")
-			b.WriteString(ev)
-			b.WriteString("',e=>{var _n=e.target;while(_n&&_n!==document){for(var _k in _n){if(_k.indexOf('__krate_")
-			b.WriteString(ev)
-			b.WriteString("_')===0&&typeof _n[_k]==='function'){_n[_k](e);break;}}if(e.cancelBubble)return;_n=_n.parentNode;}});\n")
-		}
-		b.WriteString("__krate_del_cleanup=function(){for(var i=0;i<__krate_del_fns.length;i++){__krate_del_root.removeEventListener(__krate_del_fns[i].ev,__krate_del_fns[i].fn);}__krate_del_fns=[];};\n")
-	}
+	// Queued component effects run after every component has hydrated.
+	b.WriteString("for(var __kfi=0;__kfi<__kfx.length;__kfi++)__kfx[__kfi]();\n")
 
 	// Router
 	b.WriteString("if(typeof reinitRouter==='function'){reinitRouter();}else if(typeof initRouter==='function'){initRouter();}\n")
@@ -384,6 +350,38 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	b.WriteString("})();\n")
 
 	return b.String()
+}
+
+// writeRefBinding emits kbindRef(id, get, assign). get returns the ref value
+// (re-read reactively, so a changed callback identity re-binds); assign is the
+// fallback setter for a plain variable that is neither a callback nor a
+// {current} object.
+func writeRefBinding(b *strings.Builder, rb irtree.RefBinding) {
+	b.WriteString("kbindRef(")
+	b.WriteString(strconv.Quote(string(rb.ElementSlotID)))
+	switch {
+	case rb.Callback != "":
+		b.WriteString(",()=>(")
+		b.WriteString(rb.Callback)
+		b.WriteString(")")
+	case rb.Adaptive:
+		b.WriteString(",()=>")
+		b.WriteString(rb.Target)
+		b.WriteString(",v=>{")
+		b.WriteString(rb.Target)
+		b.WriteString("=v;}")
+	default:
+		b.WriteString(",null,v=>{")
+		b.WriteString(rb.Target)
+		b.WriteString("=v;}")
+	}
+	b.WriteString(");\n")
+}
+
+// isRefPhaseEffect reports effects that belong to the ref phase rather than
+// the effect queue (useImperativeHandle).
+func isRefPhaseEffect(eff string) bool {
+	return strings.HasPrefix(eff, "useImperativeHandle(")
 }
 
 // sanitizeHandlerProp converts a slot ID to a safe JS property name component.
@@ -455,7 +453,7 @@ func isBareStringToken(v string) bool {
 // IIFEs (there is no module import inside the emitted IIFE). Compiled packages
 // use the Preact compat chunks instead.
 const CompatBootstrapJS = `
-window.useImperativeHandle=function(ref,create){if(!ref)return;var v=create();if(typeof ref==='function')ref(v);else if(ref&&typeof ref==='object')ref.current=v;};
+window.useImperativeHandle=function(ref,create,deps){createEffectDeps(function(){return ref?krateSetRef(ref,create()):void 0;},typeof deps==='function'?deps:deps?function(){return deps;}:null);};
 window.useSyncExternalStore=function(subscribe,getSnapshot){var s=createSignal(getSnapshot());createEffect(function(){var unsub=subscribe(function(){s[1](getSnapshot());});return function(){if(typeof unsub==='function')unsub();};});return s[0];};
 window.useTransition=function(){var s=createSignal(false);function start(fn){s[1](true);try{fn();}finally{s[1](false);}}return [s[0],start];};
 window.startTransition=function(fn){fn();};
@@ -463,5 +461,5 @@ window.useDeferredValue=function(v){return v;};
 window.useDebugValue=function(){};
 window.isValidElement=function(v){return (typeof Node!=='undefined'&&v instanceof Node)||(v&&typeof v==='object');};
 window.Children={toArray:function(c){if(c==null||c===false||c===true)return [];if(Array.isArray(c)){var o=[];for(var i=0;i<c.length;i++){var a=window.Children.toArray(c[i]);for(var j=0;j<a.length;j++)o.push(a[j]);}return o;}return [c];},count:function(c){return window.Children.toArray(c).length;},only:function(c){return window.Children.toArray(c)[0];},map:function(c,fn){return window.Children.toArray(c).map(fn);},forEach:function(c,fn){var a=window.Children.toArray(c);for(var i=0;i<a.length;i++)fn(a[i],i);}};
-window.cloneElement=function(el,props){if(el==null||el===false||el===true)return el;var n=(typeof Node!=='undefined'&&el instanceof Node)?el.cloneNode(true):el;if(props&&n&&n.nodeType===1){for(var k in props){if(k==='children')continue;var v=props[k];if(v==null||v===false)continue;if(k==='className'||k==='class'){n.setAttribute('class',String(v));}else if(k==='style'&&typeof v==='object'){for(var s in v)n.style[s]=v[s];}else if(k.indexOf('on')===0&&typeof v==='function'){n[k.toLowerCase()]=v;}else{n.setAttribute(k,String(v));}}}if(arguments.length>2){while(n.firstChild)n.removeChild(n.firstChild);for(var i=2;i<arguments.length;i++){var c=arguments[i];if(c==null||c===false||c===true)continue;n.appendChild(typeof Node!=='undefined'&&c instanceof Node?c:document.createTextNode(String(c)));}}return n;};
+window.cloneElement=function(el,props){if(el==null||el===false||el===true)return el;var n=(typeof Node!=='undefined'&&el instanceof Node)?el.cloneNode(true):el;if(props&&n&&n.nodeType===1){for(var k in props){if(k==='children')continue;var v=props[k];if(v==null||v===false)continue;if(k==='className'||k==='class'){n.setAttribute('class',String(v));}else if(k==='style'&&typeof v==='object'){for(var s in v)n.style[s]=v[s];}else if(k.indexOf('on')===0&&typeof v==='function'){krateOn(n,k,v);}else{n.setAttribute(k,String(v));}}}if(arguments.length>2){while(n.firstChild)n.removeChild(n.firstChild);for(var i=2;i<arguments.length;i++){var c=arguments[i];if(c==null||c===false||c===true)continue;n.appendChild(typeof Node!=='undefined'&&c instanceof Node?c:document.createTextNode(String(c)));}}return n;};
 `

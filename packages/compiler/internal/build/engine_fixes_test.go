@@ -9,8 +9,9 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
-// TestEventDelegationBubbles verifies the generated delegated listener walks
-// every ancestor (bubbling) instead of stopping at the first handler.
+// TestEventDelegationBubbles verifies nested handlers are both registered with
+// the runtime's delegated event system (which bubbles through every ancestor and
+// honours stopPropagation) and no per-page delegation code is emitted.
 func TestEventDelegationBubbles(t *testing.T) {
 	page := `
 		import { createSignal } from '@krate/runtime';
@@ -20,16 +21,16 @@ func TestEventDelegationBubbles(t *testing.T) {
 		}
 	`
 	_, js := buildReactPage(t, page)
-	if strings.Contains(js, "if(_found)break") {
-		t.Errorf("delegated listener still stops at the first handler:\n%s", js)
+	if got := strings.Count(js, `"onClick",`); got != 2 {
+		t.Errorf("expected two onClick handler registrations, got %d:\n%s", got, js)
 	}
-	if !strings.Contains(js, "e.cancelBubble") {
-		t.Errorf("delegated listener should honour stopPropagation:\n%s", js)
+	if strings.Contains(js, "__krate_del_add") {
+		t.Errorf("per-page delegation code should no longer be emitted:\n%s", js)
 	}
 }
 
-// TestNonBubblingEventUsesDirectListener verifies mouseenter (non-bubbling) is
-// attached directly with kbindEvent rather than delegated.
+// TestNonBubblingEventUsesDirectListener verifies onMouseEnter is passed to the
+// runtime as the React prop, which attaches non-bubbling events directly.
 func TestNonBubblingEventUsesDirectListener(t *testing.T) {
 	page := `
 		import { createSignal } from '@krate/runtime';
@@ -39,13 +40,14 @@ func TestNonBubblingEventUsesDirectListener(t *testing.T) {
 		}
 	`
 	_, js := buildReactPage(t, page)
-	if !strings.Contains(js, `kbindEvent(`) || !strings.Contains(js, `"mouseenter"`) {
-		t.Errorf("onMouseEnter should use a direct listener:\n%s", js)
+	if !strings.Contains(js, `kbindHandler("`) || !strings.Contains(js, `"onMouseEnter"`) {
+		t.Errorf("onMouseEnter should be registered by its React prop name:\n%s", js)
 	}
 }
 
-// TestCaptureEventUsesCaptureListener verifies onClickCapture becomes a
-// capture-phase direct listener (event name without the Capture suffix).
+// TestCaptureEventUsesCaptureListener verifies onClickCapture is registered as
+// the capture variant (the runtime strips the suffix and runs it in the capture
+// phase).
 func TestCaptureEventUsesCaptureListener(t *testing.T) {
 	page := `
 		import { createSignal } from '@krate/runtime';
@@ -55,15 +57,16 @@ func TestCaptureEventUsesCaptureListener(t *testing.T) {
 		}
 	`
 	_, js := buildReactPage(t, page)
-	if !strings.Contains(js, `"click"`) || !strings.Contains(js, ",true)") {
-		t.Errorf("onClickCapture should use a capture direct listener:\n%s", js)
+	if !strings.Contains(js, `"onClickCapture"`) {
+		t.Errorf("onClickCapture should be registered as the capture variant:\n%s", js)
 	}
 	if strings.Contains(js, "clickcapture") {
 		t.Errorf("capture suffix leaked into the DOM event name:\n%s", js)
 	}
 }
 
-// TestFocusMapsToFocusin verifies onFocus uses the bubbling focusin event.
+// TestFocusMapsToFocusin verifies onFocus is registered by its React name; the
+// runtime delegates it through the bubbling focusin event.
 func TestFocusMapsToFocusin(t *testing.T) {
 	page := `
 		import { createSignal } from '@krate/runtime';
@@ -73,8 +76,8 @@ func TestFocusMapsToFocusin(t *testing.T) {
 		}
 	`
 	_, js := buildReactPage(t, page)
-	if !strings.Contains(js, "focusin") {
-		t.Errorf("onFocus should map to focusin:\n%s", js)
+	if !strings.Contains(js, `"onFocus"`) {
+		t.Errorf("onFocus should be registered by its React prop name:\n%s", js)
 	}
 }
 

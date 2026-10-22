@@ -263,7 +263,10 @@ var reactEventAliases = map[string]string{
 var nonBubblingEvents = map[string]bool{
 	"mouseenter": true, "mouseleave": true,
 	"pointerenter": true, "pointerleave": true,
-	"scroll": true, "load": true, "error": true,
+	"scroll": true, "scrollend": true, "load": true, "error": true,
+	"abort": true, "cancel": true, "close": true, "invalid": true, "toggle": true,
+	"play": true, "pause": true, "ended": true, "playing": true, "timeupdate": true,
+	"volumechange": true, "loadeddata": true, "loadedmetadata": true,
 }
 
 // reactEventName resolves a JSX event prop to its DOM event name plus whether it
@@ -272,9 +275,10 @@ var nonBubblingEvents = map[string]bool{
 // attached directly; everything else is delegated.
 func reactEventName(attrName string) (event string, capture, direct bool) {
 	name := attrName
-	if strings.HasSuffix(name, "Capture") {
-		name = strings.TrimSuffix(name, "Capture")
-		capture = true
+	if len(name) > 2 {
+		var base string
+		base, capture = splitEventProp(name)
+		name = "on" + base
 	}
 	if mapped, ok := reactEventAliases[name]; ok {
 		event = mapped

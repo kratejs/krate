@@ -684,6 +684,20 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 		}
 	}
 
+	// useImperativeHandle(ref, create, [deps]): the deps become a thunk so the
+	// handle is re-created when a signal dependency changes.
+	if isReactAPI && api == "useImperativeHandle" && len(e.Args) >= 3 {
+		if _, ok := e.Args[2].(*ast.ArrayExpr); ok {
+			c.compat[api] = true
+			deps := c.rewriteExpr(e.Args[2], sc)
+			return &ast.CallExpr{Position: e.Position, Callee: &ast.Identifier{Name: "useImperativeHandle"}, Args: []ast.Expr{
+				c.rewriteExpr(e.Args[0], sc),
+				c.rewriteExpr(e.Args[1], sc),
+				&ast.ArrowFn{Position: e.Position, Body: []ast.Stmt{&ast.ReturnStmt{Value: deps}}},
+			}}
+		}
+	}
+
 	if isReactAPI && api == "useMemo" && len(e.Args) >= 2 {
 		if _, ok := e.Args[1].(*ast.ArrayExpr); ok {
 			fn := c.rewriteExpr(e.Args[0], sc)

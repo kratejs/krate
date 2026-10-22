@@ -1,14 +1,19 @@
-import { createEffect } from './signal.js';
+import { createEffect, onCleanup } from './signal.js';
 import { krateSanitizeAttr } from './slots.js';
+import { krateOn, krateControl, krateSetControl } from './events.js';
+import { krateAttachRef, type KrateRef } from './refs.js';
 
-// React-style event names whose DOM event differs from lowercasing. onFocus/
-// onBlur use the bubbling focusin/focusout; onChange uses input (per-keystroke).
-const EVENT_ALIASES: Record<string, string> = {
-  doubleclick: 'dblclick',
-  focus: 'focusin',
-  blur: 'focusout',
-  change: 'input',
-};
+export {
+  krateOn,
+  krateControl,
+  krateSetControl,
+  krateSynthetic,
+  krateEventRoot,
+  krateEventName,
+} from './events.js';
+export type { KrateSyntheticEvent } from './events.js';
+export { krateAttachRef, krateSetRef, krateRefsEnter, krateRefsLeave } from './refs.js';
+export type { KrateRef } from './refs.js';
 
 export type Component<P = {}> = (props: P) => Node | null | undefined;
 
@@ -27,12 +32,32 @@ const effectsByNode = new WeakMap<Node, Array<() => void>>();
 
 /** Register a disposer that runs when `node` (or an ancestor) is disposed. */
 export function trackEffect(node: Node, dispose: () => void): void {
+  krateTrackNode(node, dispose);
+}
+
+/** Registers `dispose` to run when `node` is disposed (removed by a binding). */
+export function krateTrackNode(node: Node, dispose: () => void): void {
   let arr = effectsByNode.get(node);
   if (!arr) {
     arr = [];
     effectsByNode.set(node, arr);
   }
   arr.push(dispose);
+}
+
+/**
+ * Binds the ref returned by `get` to `el` (hydration `ref={...}`). The ref is
+ * re-bound (old detached, new attached) when the value read by `get` changes
+ * identity, and released when the owning scope or the node is disposed.
+ * `assign` handles plain-variable targets.
+ */
+export function krateBindRef(el: Element, get: (() => KrateRef) | null, assign?: (v: unknown) => void): () => void {
+  const dispose = createEffect(() => {
+    const release = krateAttachRef(el, get ? get() : undefined, assign);
+    onCleanup(release);
+  });
+  trackEffect(el, dispose);
+  return dispose;
 }
 
 /** Dispose all effects registered for a node and its subtree. */
@@ -134,29 +159,18 @@ function setAttr(el: Element, key: string, value: unknown): void {
       el.removeAttribute('style');
     }
   } else if (key.startsWith('on') && typeof value === 'function') {
-    // Store handler reference on element for cleanup on re-render.
-    // Normalise React-style event names to their DOM equivalents (matching the
-    // compiler's static path).
-    const raw = key.slice(2).toLowerCase();
-    const eventKey = EVENT_ALIASES[raw] || raw;
-    const handlerKey = `__krate_${eventKey}`;
-    const prevHandler = (el as any)[handlerKey];
-    if (prevHandler) {
-      el.removeEventListener(eventKey, prevHandler);
-    }
-    el.addEventListener(eventKey, value as EventListener);
-    (el as any)[handlerKey] = value;
-  } else if (key === 'value' || key === 'checked' || key === 'selected') {
+    krateOn(el, key, value as Parameters<typeof krateOn>[2]);
+  } else if (key === 'value' || key === 'checked' || key === 'selected' || key === 'defaultValue' || key === 'defaultChecked') {
     // Form-control state is a DOM property, not an attribute: setting the
     // attribute after user interaction has no effect.
-    if (key === 'value') {
-      const next = value == null || value === false ? '' : value;
-      if ((el as any).value !== String(next)) (el as any).value = next;
-    } else {
-      (el as any)[key] = !!value;
-    }
+    krateSetControl(el, key, value);
   } else if (key === 'ref') {
-    attachRef(el, value);
+    // Attached now (the node is about to be inserted), detached when the node
+    // is disposed or the rendering effect re-runs. Moving a list row does not
+    // dispose it, so its refs stay attached.
+    const release = krateAttachRef(el, value as KrateRef, undefined, true);
+    trackEffect(el, release);
+    onCleanup(release);
   } else if (key === 'key' || key === 'children' || key === 'dangerouslySetInnerHTML') {
     // key is reconciliation metadata; children are appended separately.
   } else {
@@ -170,26 +184,12 @@ function setAttr(el: Element, key: string, value: unknown): void {
   }
 }
 
-// Attach a callback or object ref to an element and detach it (callback with
-// null, object reset) when the element is disposed, so refs on removed list
-// rows never point at detached nodes. Moving a row does not dispose it.
-function attachRef(el: Element, ref: unknown): void {
-  if (typeof ref === 'function') {
-    ref(el);
-    trackEffect(el, () => (ref as (v: Element | null) => void)(null));
-  } else if (ref && typeof ref === 'object' && 'current' in ref) {
-    const obj = ref as { current: unknown };
-    obj.current = el;
-    trackEffect(el, () => {
-      if (obj.current === el) obj.current = null;
-    });
-  }
-}
-
 function applyProps(el: Element, props: Record<string, unknown>): void {
   for (const key in props) {
     const value = props[key];
-    if (typeof value === 'function' && !key.startsWith('on') && key !== 'ref') {
+    if (typeof value === 'function' && (key === 'value' || key === 'checked')) {
+      trackEffect(el, krateControl(el, key, value as () => unknown));
+    } else if (typeof value === 'function' && !key.startsWith('on') && key !== 'ref') {
       trackEffect(el, createEffect(() => setAttr(el, key, (value as () => unknown)())));
     } else {
       setAttr(el, key, value);

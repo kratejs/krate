@@ -282,14 +282,20 @@ type AttrBinding struct {
 	Initial       string
 	InitialExpr   ast.Expr
 	IsString      bool
+	// Prop is the JSX prop name (defaultValue, defaultChecked, ...) when it
+	// differs from AttrName, so form-control defaults bind the right property.
+	Prop string
 }
 
 // HandlerDecl - event handler: onClick={() => fn()}
 type HandlerDecl struct {
 	ElementSlotID SlotID
-	Event         string
-	Body          string
-	Signals       []string
+	// Prop is the React prop name (onClick, onChangeCapture); the runtime maps
+	// it to native events, phases and delegation.
+	Prop    string
+	Event   string
+	Body    string
+	Signals []string
 	// Capture attaches a capture-phase listener (onClickCapture). Direct
 	// attaches a listener on the element itself (capture handlers and
 	// non-bubbling events), bypassing the delegated bubble-phase listener.
