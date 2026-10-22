@@ -36,6 +36,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 	"github.com/kratejs/krate/packages/compiler/internal/tsexec"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 type PageResult struct {
@@ -1446,6 +1447,10 @@ func (b *Builder) newBundler() *bundler.Bundler {
 	bnd := bundler.New(b.Root)
 	bnd.SetPathAliases(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
 	bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)
+	bnd.SetTSOptions(tsstrip.Options{
+		ExperimentalDecorators:  b.Cfg.TSCompilerOptions.ExperimentalDecorators,
+		UseDefineForClassFields: b.Cfg.TSCompilerOptions.UseDefineForClassFields,
+	})
 	if b.contentMods != nil {
 		bnd.SetVirtualModules(b.contentMods)
 	}

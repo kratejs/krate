@@ -81,7 +81,27 @@ krate types && npx tsc --noEmit
 ```
 
 Add this after `krate build`. It catches type errors the compiler tolerates
-(Krate drops type annotations rather than validating them).
+(Krate strips types rather than validating them).
+
+## How Krate compiles TypeScript
+
+Before compiling a `.ts`/`.tsx` page, layout or component, Krate strips its
+types with esbuild (built into the `krate` binary). Everything TypeScript
+accepts is supported, including:
+
+- `enum`, `const enum` and `namespace` (lowered to plain objects)
+- constructor parameter properties (`constructor(private a: number)`)
+- decorators (standard, or legacy when `experimentalDecorators` is set)
+- nested and conditional generics (`Map<string, Set<string>>`), generic
+  arrows (`<T,>(x: T) => x`), `satisfies` and `as const`
+
+Imports follow `verbatimModuleSyntax`: `import type` and inline `type`
+specifiers are removed, every other import is kept. Use `import type` for
+type-only imports from modules that have no runtime export of that name.
+
+From your `tsconfig.json`, Krate honours `experimentalDecorators` and
+`useDefineForClassFields`. TypeScript syntax errors fail the build with the
+original `file:line:col`. Comment directives such as `// @server` still apply.
 
 ## Strictness
 
