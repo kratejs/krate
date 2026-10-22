@@ -222,6 +222,7 @@ export function DocsSearch(props: DocsSearchProps) {
           )}
           {results().map((hit, i) => (
             <a
+              key={hit.href || hit.path || i}
               class={`krate-docs-search-item${i === active() ? " active" : ""}`}
               href={hit.href || hit.path || "/"}
               role="option"

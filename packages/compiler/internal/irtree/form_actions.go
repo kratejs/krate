@@ -178,8 +178,3 @@ func renderActionAttr(tag, attrName, actionURL string) string {
 	}
 	return " " + name + `="` + escape.HTMLAttr(actionURL) + `" data-krate-action`
 }
-
-// warnCodeAt records a positioned warning with a stable diagnostic code.
-func (b *builder) warnCodeAt(pos ast.Pos, code diag.Code, msg, hint string) {
-	b.warnings = append(b.warnings, b.diagAt(pos, diag.SeverityWarning, msg, hint).WithCode(code))
-}

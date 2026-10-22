@@ -19,6 +19,7 @@ const RUNTIME_ENTRY = `
 export * from './src/signal';
 export * from './src/effects';
 export * from './src/dom';
+export * from './src/list';
 export * from './src/slots';
 export * from './src/resource';
 export * from './src/jsx-runtime';
@@ -33,6 +34,7 @@ const HYDRATE_ENTRY = `
 export * from './src/signal';
 export * from './src/effects';
 export * from './src/dom';
+export * from './src/list';
 export * from './src/slots';
 export * from './src/resource';
 export * from './src/router';
@@ -48,6 +50,7 @@ const LITE_ENTRY = `
 export * from './src/signal';
 export * from './src/effects';
 export * from './src/dom';
+export * from './src/list';
 export * from './src/slots';
 export * from './src/resource';
 export * from './src/router-lite';

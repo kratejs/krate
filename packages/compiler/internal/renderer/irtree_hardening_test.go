@@ -73,7 +73,8 @@ export default function App() {
   return <div><p>{count()}</p><ul>{items.map(count => <li>{count}</li>)}</ul></div>;
 }`,
 			html: []string{"<li>1</li>", "<li>2</li>", "<li>3</li>"},
-			js:   []string{"items.map((count)=>h('li',null,count))"},
+			// The map parameter (now a row accessor) shadows the signal.
+			js: []string{"kbindList(\"5\",()=>(items),null,(count)=>h('li',null,()=>count()),1)"},
 		},
 		{
 			name: "signal of another component is not in scope",
