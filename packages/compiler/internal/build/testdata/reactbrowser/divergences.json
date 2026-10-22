@@ -3,10 +3,6 @@
     "severity": "P0",
     "reason": "[ref-callback-rerun] the inline callback ref that sets el.indeterminate = some runs once; React re-runs it on every render, so the select-all box never becomes indeterminate"
   },
-  "r18/app_tabs_accordion": {
-    "severity": "P0",
-    "reason": "[list-row-conditional] accordion rows inside the conditionally mounted FAQ panel keep {isOpen && <p/>} from mount: the previous answer stays open after toggling another row"
-  },
   "r18/class_pure_component": {
     "severity": "P2",
     "reason": "[render-count] PureComponent render is logged once less: Krate updates the text binding without re-running render(); DOM and state match"
