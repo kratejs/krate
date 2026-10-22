@@ -40,7 +40,7 @@ func claimCond(sigs []irtree.ComponentSignature, cond irtree.SlotID, branch stri
 	for i := range sigs {
 		if sigs[i].CondID == "" {
 			sigs[i].CondID = cond
-			sigs[i].CondBranch = branch
+			sigs[i].OwnerBranch = branch
 		}
 	}
 }
@@ -126,7 +126,7 @@ func ownerOpen(sig irtree.ComponentSignature, present map[irtree.SlotID]bool) st
 	field("n", sig.Name)
 	if sig.CondID != "" {
 		field("c", string(sig.CondID))
-		field("b", sig.CondBranch)
+		field("b", sig.OwnerBranch)
 	}
 	if present[sig.CreatorID] {
 		field("k", string(sig.CreatorID))

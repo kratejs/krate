@@ -1,4 +1,5 @@
 import { createEffect, onCleanup } from './signal.js';
+import { krateWithOwner, krateUnmount } from './effects.js';
 import { krateSanitizeAttr } from './slots.js';
 import { krateOn, krateControl, krateSetControl } from './events.js';
 import { krateAttachRef, type KrateRef } from './refs.js';
@@ -42,6 +43,18 @@ export function krateTrackNode(node: Node, dispose: () => void): void {
     effectsByNode.set(node, arr);
   }
   arr.push(dispose);
+}
+
+function trackOwner(value: unknown, owner: unknown): void {
+  const unmount = (): void => krateUnmount(owner);
+  if (typeof DocumentFragment !== 'undefined' && value instanceof DocumentFragment) {
+    // Fragment children are moved out on insertion; track each of them.
+    for (let i = 0; i < value.childNodes.length; i++) trackEffect(value.childNodes[i], unmount);
+  } else if (typeof Node !== 'undefined' && value instanceof Node) {
+    trackEffect(value, unmount);
+  } else if (Array.isArray(value)) {
+    for (const v of value) trackOwner(v, owner);
+  }
 }
 
 /**
@@ -195,7 +208,11 @@ export function h(
   ...children: unknown[]
 ): Node {
   if (typeof tag === 'function') {
-    return tag({ ...(props || {}), children });
+    // Each component call gets an effect owner, so its React effects run
+    // children-before-parents and are cleaned up when its nodes are disposed.
+    const { value, owner } = krateWithOwner(() => tag({ ...(props || {}), children }));
+    trackOwner(value, owner);
+    return value;
   }
 
   const el = document.createElement(tag);

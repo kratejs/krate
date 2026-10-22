@@ -532,19 +532,37 @@ type ComponentSignature struct {
 	SlotBindings    []SlotBinding
 	AttrBindings    []AttrBinding
 
-	// Owner-tree links (see renderer/owner_emit.go). Name is the component
-	// name; ParentID the nearest enclosing hydrated component (React's parent
-	// fiber); CreatorID the component whose render created this element (it
-	// differs from ParentID for props.children); CondID/CondBranch the
-	// conditional slot and branch ("c" or "a") the component renders in.
-	Name       string
-	ParentID   SlotID
-	CreatorID  SlotID
-	CondID     SlotID
-	CondBranch string
+	// ParentID is the enclosing client component, empty at the top level
+	// (React's parent fiber). Hydration declares it so React effects run
+	// children before parents and errors reach the nearest boundary.
+	ParentID SlotID
+	// Conds lists the conditional branches the component renders inside,
+	// outermost first. Effects of a component in a hidden branch are cleaned
+	// up and re-run when the branch is shown again.
+	Conds []CondBranch
+	// ListSlot is the innermost list slot whose items contain the component;
+	// replacing that list's content on the client unmounts the component.
+	ListSlot SlotID
+
+	// Owner-tree links for class pages (see renderer/owner_emit.go). Name is
+	// the component name; CreatorID the component whose render created this
+	// element (it differs from ParentID for props.children); CondID and
+	// OwnerBranch the innermost conditional slot and branch ("c" or "a").
+	Name        string
+	CreatorID   SlotID
+	CondID      SlotID
+	OwnerBranch string
 	// Class marks a lowered React class component; pages that render one use
 	// the owner tree.
 	Class bool
+}
+
+// CondBranch names one branch ("c" consequent, "a" alternate) of a
+// conditional slot and whether it is the branch rendered on the server.
+type CondBranch struct {
+	SlotID         SlotID
+	Branch         string
+	InitiallyShown bool
 }
 
 // SlotBinding - describes a content binding for hydration

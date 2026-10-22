@@ -1,4 +1,4 @@
-export { createSignal, createReducer, createCSSChoice, createCSSToggle, createCSSFlags, createCSSGroup, createCSSRange, createCSSStack, createEffect, createMemo, onCleanup, onMount, forwardRef, useRef, disposeAll, untrack, afterFlush } from './signal.js';
+export { createSignal, createReducer, createCSSChoice, createCSSToggle, createCSSFlags, createCSSGroup, createCSSRange, createCSSStack, createEffect, createMemo, onCleanup, onMount, forwardRef, useRef, disposeAll, afterFlush } from './signal.js';
 export {
   getOwner,
   createOwner,
@@ -15,6 +15,9 @@ export {
 export type { Owner, OwnerState, BoundaryHandler, ErrorInfo } from './boundary.js';
 export type { ClassSpec, ClassInstance } from './class-component.js';
 export type { CSSARIAOptions, CSSVars, CSSPrimitiveOptions, CSSStackActions, CSSScope, CSSFlagsScope, SignalOptions } from './signal.js';
+export { createEffectDeps, createMemoDeps, createCallbackDeps, flushPassive } from './effects.js';
+export type { EffectPhase } from './effects.js';
+export { untrack, sameValue, krateFlushSync } from './signal.js';
 export { clearPersisted, readPersisted, writePersisted } from './storage.js';
 export type { PersistOptions, PersistSpec, PersistStore, StorageLike } from './storage.js';
 export { h, mount, hydrate, insert, clearNodes, disposeNode } from './dom.js';

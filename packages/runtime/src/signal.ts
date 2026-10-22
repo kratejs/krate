@@ -18,7 +18,9 @@ export interface SignalOptions<T> {
   persist?: PersistSpec<T>;
 }
 
-const context: Array<EffectState> = [];
+// A null entry is an untracked scope (see untrack): reads inside it subscribe
+// nothing.
+const context: Array<EffectState | null> = [];
 const mountQueue: Array<{ fn: () => void; owner: unknown }> = [];
 let mountScheduled = false;
 
@@ -74,8 +76,10 @@ interface EffectState {
   rerun: boolean;
   /** Set while the effect is in the pending flush queue. */
   queued: boolean;
-  /** Owner current when the effect was created (see OwnerHooks), or null. */
+  /** Component owner current when the effect was created (see krateOwnerScope). */
   owner: unknown;
+  /** Error-boundary owner current when the effect was created (see OwnerHooks), or null. */
+  boundaryOwner: unknown;
 }
 
 function newEffectState(fn: () => void): EffectState {
@@ -87,24 +91,66 @@ function newEffectState(fn: () => void): EffectState {
     running: false,
     rerun: false,
     queued: false,
-    owner: ownerHooks ? ownerHooks.current() : null,
+    owner: currentOwner,
+    boundaryOwner: ownerHooks ? ownerHooks.current() : null,
   };
 }
 
-// Pushed on the context stack by untrack(): reads see a disposed effect and
-// do not subscribe.
-const UNTRACKED: EffectState = newEffectState(() => {});
-UNTRACKED.disposed = true;
-
-/** The effect currently collecting dependencies, ignoring untrack() frames. */
+/** The effect currently collecting dependencies, ignoring untracked frames. */
 function currentEffect(): EffectState | null {
-  const top = context[context.length - 1];
-  return top && top !== UNTRACKED ? top : null;
+  return context[context.length - 1] || null;
 }
 
-/** Runs fn without subscribing the current effect to the signals it reads. */
+// The component owner whose body (or binding effect) is currently running.
+// Opaque here; effects.ts gives it meaning (effect ordering and unmounting).
+// Effects capture it at creation and restore it while they re-run, so
+// components created by a binding re-run are parented correctly.
+let currentOwner: unknown = null;
+
+/** Returns the current component owner (internal, used by effects.ts). */
+export function krateGetOwner(): unknown {
+  return currentOwner;
+}
+
+/** Sets the current component owner and returns the previous one (internal). */
+export function krateSetOwner(owner: unknown): unknown {
+  const prev = currentOwner;
+  currentOwner = owner;
+  return prev;
+}
+
+// Hooks run after a flush settles (no pending effects) and when the page is
+// torn down. effects.ts registers its commit and unmount here; the API is
+// additive so other schedulers can hook in too.
+const beforeFlushHooks: Array<() => void> = [];
+const afterFlushHooks: Array<() => void> = [];
+const disposeHooks: Array<() => void> = [];
+
+/** Registers fn to run before every effect flush starts (internal). */
+export function krateOnBeforeFlush(fn: () => void): void {
+  beforeFlushHooks.push(fn);
+}
+
+/** Registers fn to run after every settled effect flush (internal). */
+export function krateOnAfterFlush(fn: () => void): void {
+  afterFlushHooks.push(fn);
+}
+
+/** Registers fn to run at the start of disposeAll (internal). */
+export function krateOnDispose(fn: () => void): void {
+  disposeHooks.push(fn);
+}
+
+/** Reports whether signal writes are waiting for the next flush. */
+export function kratePendingFlush(): boolean {
+  return pending.length > 0;
+}
+
+/**
+ * Runs fn without subscribing the surrounding effect to the signals it reads.
+ */
 export function untrack<T>(fn: () => T): T {
-  context.push(UNTRACKED);
+  context.push(null);
   try {
     return fn();
   } finally {
@@ -113,13 +159,31 @@ export function untrack<T>(fn: () => T): T {
 }
 
 /**
- * Runs fn after the pending effect queue has fully drained (including effects
- * scheduled while it drained), so the DOM reflects every write made so far.
- * Schedules a flush when none is pending.
+ * Runs fn once after the pending effect queue has fully drained (including
+ * effects scheduled while it drained) and the after-flush hooks ran, so the
+ * DOM reflects every write made so far. Schedules a flush when none is
+ * pending. Used by the class component commit phase.
  */
 export function afterFlush(fn: () => void): void {
   afterQueue.push(fn);
   scheduleFlush();
+}
+
+function drainAfterQueue(): void {
+  if (afterQueue.length === 0) return;
+  const after = afterQueue.splice(0);
+  for (const fn of after) {
+    fn();
+  }
+}
+
+/**
+ * Same-value equality used for every React-facing comparison (state
+ * bail-out, dependency arrays): Object.is, so NaN equals NaN and +0 differs
+ * from -0.
+ */
+export function sameValue(a: unknown, b: unknown): boolean {
+  return Object.is(a, b);
 }
 
 function disposeEffect(effect: EffectState): void {
@@ -139,6 +203,13 @@ function disposeEffect(effect: EffectState): void {
 }
 
 export function disposeAll(): void {
+  for (const hook of disposeHooks) {
+    try {
+      hook();
+    } catch {
+      // Unmount errors must not prevent the rest of the teardown.
+    }
+  }
   for (const effect of allEffects) {
     disposeEffect(effect);
   }
@@ -428,7 +499,9 @@ export function createSignal<T>(
 
   const write = (next: T | ((prev: T) => T)): void => {
     const resolved = typeof next === 'function' ? (next as (prev: T) => T)(value) : next;
-    if (resolved !== value) {
+    // Object.is bail-out (React semantics): writing the same value notifies
+    // nothing, and NaN written over NaN is "the same value".
+    if (!Object.is(resolved, value)) {
       value = resolved;
       if (persist) {
         writePersisted(persist, value);
@@ -445,7 +518,7 @@ export function createSignal<T>(
       if (raw === null) return;
       try {
         const incoming = p.deserialize(raw);
-        if (incoming !== value) {
+        if (!Object.is(incoming, value)) {
           value = incoming;
           notify();
         }
@@ -456,7 +529,17 @@ export function createSignal<T>(
     onCleanup(unsubscribe);
   }
 
+  signalGetters.add(read);
   return [read, write];
+}
+
+// Getters returned by createSignal, so the React compatibility hooks can read
+// a dependency that is a signal getter instead of comparing the function.
+const signalGetters = new WeakSet<object>();
+
+/** Reports whether fn is a getter returned by createSignal. */
+export function isSignalGetter(fn: unknown): boolean {
+  return typeof fn === 'function' && signalGetters.has(fn);
 }
 
 function scheduleFlush(): void {
@@ -468,6 +551,9 @@ function scheduleFlush(): void {
 
 function flushEffects(): void {
   flushScheduled = false;
+  for (const hook of beforeFlushHooks) {
+    hook();
+  }
   const effects = pending.splice(0);
   for (const effect of effects) {
     if (effect.disposed) {
@@ -481,17 +567,46 @@ function flushEffects(): void {
       runEffect(effect);
     }
   }
-  if (pending.length === 0 && afterQueue.length > 0) {
-    const after = afterQueue.splice(0);
-    for (const fn of after) {
-      fn();
-    }
+  // Writes made by these effects scheduled another flush; the commit runs
+  // once that cascade settles, so it sees the final DOM.
+  if (pending.length === 0) {
+    runAfterFlush();
+    drainAfterQueue();
+  }
+}
+
+/**
+ * Runs the after-flush hooks now. Used when no signal flush is pending (for
+ * example, right after hydration registered effects).
+ */
+export function runAfterFlush(): void {
+  for (const hook of afterFlushHooks) {
+    hook();
+  }
+}
+
+/**
+ * Synchronously flushes pending signal effects and the commit that follows
+ * them (the building block for flushSync and tests).
+ */
+export function krateFlushSync(): void {
+  if (pending.length === 0) {
+    runAfterFlush();
+    drainAfterQueue();
+    return;
+  }
+  // flushEffects runs the after-flush hooks itself once nothing is pending.
+  let guard = 0;
+  while (pending.length > 0 && guard++ < 100) {
+    flushEffects();
   }
 }
 
 function runEffect(effect: EffectState): void {
   effect.running = true;
   let pushed = false;
+  const prevOwner = currentOwner;
+  currentOwner = effect.owner;
   try {
     // Run cleanups from previous execution
     for (const cleanup of effect.cleanups.splice(0)) {
@@ -511,10 +626,11 @@ function runEffect(effect: EffectState): void {
   } catch (err) {
     // An owned effect reports to its owner (error boundaries); unowned
     // effects keep the previous behavior and throw.
-    if (!(effect.owner && ownerHooks && ownerHooks.error(effect.owner, err))) {
+    if (!(effect.boundaryOwner && ownerHooks && ownerHooks.error(effect.boundaryOwner, err))) {
       throw err;
     }
   } finally {
+    currentOwner = prevOwner;
     if (pushed) context.pop();
     effect.running = false;
   }
@@ -528,8 +644,8 @@ export function createEffect(fn: () => void): () => void {
     allEffects.delete(effect);
   };
   // An owned effect is disposed with its owner (unmounted subtree).
-  if (effect.owner && ownerHooks) {
-    ownerHooks.cleanup(effect.owner, dispose);
+  if (effect.boundaryOwner && ownerHooks) {
+    ownerHooks.cleanup(effect.boundaryOwner, dispose);
   }
   runEffect(effect);
   return dispose;
@@ -600,8 +716,8 @@ export function createMemo<T>(fn: () => T): () => T {
   };
   if (parent) {
     parent.cleanups.push(disposeMemo);
-  } else if (effect.owner && ownerHooks) {
-    ownerHooks.cleanup(effect.owner, disposeMemo);
+  } else if (effect.boundaryOwner && ownerHooks) {
+    ownerHooks.cleanup(effect.boundaryOwner, disposeMemo);
   }
 
   return get;
@@ -614,11 +730,17 @@ export function createMemo<T>(fn: () => T): () => T {
  * other signal. Used both directly and as the lowering target for React's
  * `useReducer`.
  */
-export function createReducer<S, A>(
+export function createReducer<S, A, I = S>(
   reducer: (state: S, action: A) => S,
-  initial: S,
+  initial: I,
+  init?: (arg: I) => S,
 ): [() => S, (action: A) => void] {
-  const [get, set] = createSignal<S>(initial);
+  // React's lazy initializer: useReducer(reducer, arg, init) starts at init(arg).
+  const start = (typeof init === 'function' ? init(initial) : initial) as S;
+  const [get, set] = createSignal<S>(start);
+  // dispatch is created once, so its identity is stable for the component's
+  // lifetime. The signal's Object.is bail-out skips updates when the reducer
+  // returns the current state.
   const dispatch = (action: A): void => set((prev) => reducer(prev, action));
   return [get, dispatch];
 }

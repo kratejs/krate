@@ -15,7 +15,8 @@
 // componentWillUnmount and state resets match React. A dormant owner keeps its
 // setup function and is remounted by running it again.
 
-import { setOwnerHooks, untrack, onCleanup } from './signal.js';
+import { setOwnerHooks, untrack, onCleanup, krateGetOwner, krateSetOwner } from './signal.js';
+import { krateForgetOwner } from './effects.js';
 
 /** Second argument of componentDidCatch. */
 export interface ErrorInfo {
@@ -271,6 +272,15 @@ function disposeTree(o: OwnerImpl, to: 'dormant' | 'disposed'): void {
         errors.push(err);
       }
     }
+    // React hook effects (effects.ts) of this component clean up too, and a
+    // remount starts them fresh.
+    if (o.id) {
+      try {
+        krateForgetOwner(o.id);
+      } catch (err) {
+        errors.push(err);
+      }
+    }
     for (const c of o.children) disposeTree(c as OwnerImpl, to);
     // Errors thrown while unmounting go to the boundary above the owner.
     for (const err of errors) {
@@ -300,9 +310,12 @@ function mount(o: OwnerImpl): void {
   if (o.state !== 'dormant') return;
   o.state = 'mounted';
   mountDepth++;
+  // The scope declares its effects.ts owner itself; restore the caller's.
+  const prevEffectsOwner = krateGetOwner();
   try {
     if (o.setup) runWithOwner(o, o.setup);
   } finally {
+    krateSetOwner(prevEffectsOwner);
     mountDepth--;
   }
   if (o.state === 'mounted') {

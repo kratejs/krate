@@ -17,6 +17,7 @@ const esbuild = require('esbuild');
 
 const RUNTIME_ENTRY = `
 export * from './src/signal';
+export * from './src/effects';
 export * from './src/dom';
 export * from './src/slots';
 export * from './src/resource';
@@ -31,6 +32,7 @@ export * from './src/class-component';
 
 const HYDRATE_ENTRY = `
 export * from './src/signal';
+export * from './src/effects';
 export * from './src/dom';
 export * from './src/slots';
 export * from './src/resource';
@@ -46,6 +48,7 @@ export * from './src/class-component';
 // public navigation API as full-page navigation stubs.
 const LITE_ENTRY = `
 export * from './src/signal';
+export * from './src/effects';
 export * from './src/dom';
 export * from './src/slots';
 export * from './src/resource';

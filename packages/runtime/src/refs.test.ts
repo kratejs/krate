@@ -140,6 +140,9 @@ describe('imperative handles', () => {
         () => [n()]
       );
     });
+    // Handles attach in the layout phase of the commit (a microtask).
+    expect(ref.current).toBe(null);
+    await Promise.resolve();
     expect(ref.current).toEqual({ v: 1 });
     setOther(1);
     await tick();
