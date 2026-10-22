@@ -183,7 +183,9 @@ reused by position when the component runs again, like React's replay. If the
 promise changes later (for example a new promise in state), the boundary shows
 its fallback again, except inside a transition, where the revealed content
 stays and the transition stays pending until the new promise resolves.
-`use(Context)` is a plain context read and works anywhere. `use(promise)` used
+`use(Context)` is a plain context read and works anywhere; the compiler treats
+the argument as a context when it is a module-level `createContext` binding or
+its name ends in `Context` or `Ctx`. `use(promise)` used
 outside a declaration (KR4003) or destructured (KR4004) is a build error, and a
 component calling it outside any `<Suspense>` gets warning KR4008.
 
