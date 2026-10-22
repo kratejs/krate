@@ -915,47 +915,52 @@ func expandSlotSpread(attrs []*ast.JSXAttr) []*ast.JSXAttr {
 	return out
 }
 
-// expandSSRSpreadAttrs expands `{...name}` spreads resolving to a known rest
-// parameter; explicit attributes win over spread-provided ones.
-func (e *SSREval) expandSSRSpreadAttrs(attrs []*ast.JSXAttr) (out []*ast.JSXAttr, expanded bool) {
-	if e.restProps == nil {
-		return attrs, false
-	}
-	explicit := make(map[string]bool)
-	for _, attr := range attrs {
-		if !attr.Spread {
-			explicit[attr.Name] = true
+// expandSSRSpreadAttrs expands `{...expr}` spreads on an intrinsic element with
+// React's ordering (a later attribute or spread overrides an earlier one). A
+// known rest parameter expands to the call-site attrs it collects; any other
+// value that evaluates to an object (the whole `props` object, a local object)
+// expands to one attribute per own key, each reading `expr[key]` so normal
+// attribute evaluation serializes it. A nullish spread contributes nothing;
+// an unresolved one is kept and skipped by the emitter. The second result
+// reports whether a spread forwards `children`.
+func (e *SSREval) expandSSRSpreadAttrs(attrs []*ast.JSXAttr) ([]*ast.JSXAttr, bool) {
+	return irtree.MergeSpreadAttrs(attrs, func(attr *ast.JSXAttr) irtree.SpreadExpansion {
+		if id, ok := attr.Value.(*ast.Identifier); ok && e.restProps != nil {
+			if rest, ok := e.restProps[id.Name]; ok {
+				exp := irtree.SpreadExpansion{Resolved: true, ForwardsChildren: true}
+				names := make([]string, 0, len(rest))
+				for name := range rest {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+				for _, name := range names {
+					exp.Attrs = append(exp.Attrs, &ast.JSXAttr{Position: attr.Position, Name: name, Value: rest[name]})
+				}
+				return exp
+			}
 		}
-	}
-	for _, attr := range attrs {
-		if !attr.Spread || attr.Value == nil {
-			out = append(out, attr)
-			continue
+		v := e.value(attr.Value)
+		if v.IsNullish() {
+			return irtree.SpreadExpansion{Resolved: true}
 		}
-		id, ok := attr.Value.(*ast.Identifier)
-		if !ok {
-			out = append(out, attr)
-			continue
+		if !v.IsObject() {
+			return irtree.SpreadExpansion{}
 		}
-		rest, ok := e.restProps[id.Name]
-		if !ok {
-			out = append(out, attr)
-			continue
-		}
-		expanded = true
-		names := make([]string, 0, len(rest))
-		for name := range rest {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			if explicit[name] {
+		exp := irtree.SpreadExpansion{Resolved: true}
+		for _, k := range v.Keys() {
+			if k == "children" {
+				exp.ForwardsChildren = true
 				continue
 			}
-			out = append(out, &ast.JSXAttr{Position: attr.Position, Name: name, Value: rest[name]})
+			exp.Attrs = append(exp.Attrs, &ast.JSXAttr{Position: attr.Position, Name: k, Value: &ast.MemberExpr{
+				Position: attr.Position,
+				Object:   attr.Value,
+				Property: &ast.Literal{Kind: ast.StringLit, Value: k},
+				Computed: true,
+			}})
 		}
-	}
-	return out, expanded
+		return exp
+	})
 }
 
 // JSX

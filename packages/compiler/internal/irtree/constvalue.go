@@ -67,10 +67,18 @@ func newConstInterp(signals map[string]ast.Expr, props valueMap) *jsvalue.Interp
 		},
 		Member: func(m *ast.MemberExpr) (jsvalue.Value, bool) {
 			id, ok := m.Object.(*ast.Identifier)
-			if !ok || m.Computed {
+			if !ok {
 				return jsvalue.Value{}, false
 			}
 			prop, ok := m.Property.(*ast.Identifier)
+			if m.Computed {
+				// `props["data-x"]` reads a prop whose name is not an identifier.
+				lit, isLit := m.Property.(*ast.Literal)
+				if !isLit || lit.Kind != ast.StringLit || id.Name != "props" {
+					return jsvalue.Value{}, false
+				}
+				prop, ok = &ast.Identifier{Name: lit.Value}, true
+			}
 			if !ok {
 				return jsvalue.Value{}, false
 			}
