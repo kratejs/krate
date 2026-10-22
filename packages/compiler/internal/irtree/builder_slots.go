@@ -118,13 +118,19 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 		}
 	}
 
-	// Client-only: effects, memos, extra vars
+	// Client-only: effects, memos, extra vars. Body fragments keep their
+	// source position so the folded locals added below merge into the same
+	// order the component body runs in.
+	order := newBodyOrder(fn.Body)
+	var bodyPre, bodyPost []bodyJS
 	if tier == TierClient {
 		node.InstanceID = deriveInstanceID(string(id))
 		node.Effects = b.collectEffectJS(fn.Body)
 		node.Memos = b.collectMemoJS(fn.Body)
-		node.PreSignalVars, node.ExtraVars = b.collectExtraVarJS(fn.Body)
-		node.ExtraVars = append(node.ExtraVars, b.collectResourceJS(fn.Body)...)
+		bodyPre, bodyPost = b.collectExtraVarJS(fn.Body, order, paramBindingSet(fn))
+		bodyPost = append(bodyPost, b.collectResourceJS(fn.Body, order)...)
+		node.PreSignalVars = bodyJSStrings(bodyPre)
+		node.ExtraVars = mergeBodyJS(bodyPost)
 	}
 
 	// Reset element tag counters for fresh walk
@@ -276,12 +282,22 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 		}
 		return useIdBase + "-" + itoa(n)
 	}
-	locals, useIdLocals, localInits, localOrder, localLeaked := collectLocalVars(fn.Body, b.sigMap(), b.localProps, nextUseId)
+	fold := collectLocalVars(fn.Body, b.sigMap(), b.localProps, nextUseId)
+	locals, useIdLocals, localInits, localOrder, localLeaked := fold.locals, fold.useIds, fold.inits, fold.order, fold.leaked
+	// A changed local replaces any same-named binding: with its final folded
+	// value, or (when it has none) by removal so reads defer to hydration.
+	for name := range fold.changed {
+		if localLeaked[name] {
+			delete(b.localProps, name)
+		} else {
+			b.localProps[name] = locals[name]
+		}
+	}
 	// Re-fold locals whose initializer needs the cva/cn table (e.g. shadcn's
 	// `const classes = cn(buttonVariants({ variant }), className)`), so JSX
 	// attributes reference the class value instead of the variable name.
 	for name, init := range localInits {
-		if init == nil {
+		if init == nil || fold.changed[name] {
 			continue
 		}
 		// Array/object/JSX locals may be mutated by loops or emitted as runtime
@@ -321,15 +337,18 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 	// bindings, so emit them as extra vars for every client component -
 	// including the page root (whose ordinary locals are intentionally left
 	// unemitted to allow static promotion).
+	var useIdVars []string
 	if tier == TierClient {
 		declared := declaredLocalNames(node, fn)
 		for _, name := range sortedKeys(useIdLocals) {
 			if declared[name] {
 				continue
 			}
-			node.ExtraVars = append(node.ExtraVars, "var "+name+"="+jsLiteralFor(useIdLocals[name]))
+			useIdVars = append(useIdVars, "var "+name+"="+jsLiteralFor(useIdLocals[name]))
 		}
+		node.ExtraVars = append(node.ExtraVars, useIdVars...)
 	}
+	var preLocals, postLocals []bodyJS
 	// Dynamic context locals (`const v = Ctx.useContext()`) must read the live
 	// getter prop rather than the context default folded at build time.
 	for name, init := range localInits {
@@ -374,7 +393,6 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 			// a local may reference an earlier local (e.g. `basePath` derives
 			// from `themeOptions`), and alphabetical emission would assign the
 			// dependent before its dependency, yielding `undefined`.
-			var preLocals []string
 			for _, name := range localOrder {
 				if _, ok := locals[name]; !ok {
 					continue
@@ -398,14 +416,17 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 				// A folded, non-reactive scalar (e.g. `const classes = cn(cva(...))`)
 				// can be emitted as its value. Only props-derived arrays/objects/
 				// functions (and signal-reactive locals) need the runtime expression.
-				foldable := init != nil && !locals[name].IsUnknown() && !b.referencesSignal(init) && !isReferenceInit(init)
+				// A local changed later in the body is declared with its
+				// initializer: the replayed statements apply the changes.
+				changed := fold.changed[name]
+				foldable := init != nil && !changed && !locals[name].IsUnknown() && !b.referencesSignal(init) && !isReferenceInit(init)
 				if foldable {
 					switch init.(type) {
 					case *ast.ArrayExpr, *ast.ObjectExpr, *ast.JSXElement, *ast.JSXFragment, *ast.ArrowFn:
 						foldable = false
 					}
 				}
-				if init != nil && !foldable && (referencesProps(init) || referencesAnyLocal(init, b.sigMap(), locals) || isReferenceInit(init) || locals[name].IsUnknown()) {
+				if init != nil && !foldable && (changed || referencesProps(init) || referencesAnyLocal(init, b.sigMap(), locals) || isReferenceInit(init) || locals[name].IsUnknown()) {
 					if js := generateExprJS(init, b.sigMap()); js != "" {
 						decl = "var " + name + "=" + js
 					}
@@ -414,19 +435,20 @@ func (b *builder) buildComponentNode(fn *ast.FnDecl, parentID string) *Component
 					decl = "var " + name + "=" + valueJSLiteral(locals[name])
 				}
 				// Signal-referencing locals must be declared after the signal
-				// declarations; everything else goes BEFORE collectExtraVarJS's
-				// pre-vars so a local that depends on a props-derived local
-				// (emitted here) is ordered correctly.
+				// declarations; everything else is merged, in source order,
+				// with collectExtraVarJS's pre fragments.
+				frag := bodyJS{ord: order.ofName(name), js: decl}
 				if init != nil && b.referencesSignal(init) {
-					node.ExtraVars = append(node.ExtraVars, decl)
+					postLocals = append(postLocals, frag)
 				} else {
-					preLocals = append(preLocals, decl)
+					preLocals = append(preLocals, frag)
 				}
 			}
-			if len(preLocals) > 0 {
-				node.PreSignalVars = append(preLocals, node.PreSignalVars...)
-			}
 		}
+	}
+	if tier == TierClient {
+		node.PreSignalVars = mergeBodyJS(bodyPre, preLocals)
+		node.ExtraVars = append(useIdVars, mergeBodyJS(bodyPost, postLocals)...)
 	}
 	if len(funcPropAliases) > 0 && tier == TierClient {
 		// The alias reads props.<funcProp>, so the component must bind props to
@@ -4548,6 +4570,12 @@ func (b *builder) collectEffectJS(body []ast.Stmt) []string {
 								js := generateExprJS(call.Args[0], b.sigMap())
 								effects = append(effects, "onCleanup("+js+")")
 							}
+						case "createEffectDeps":
+							// React useEffect/useLayoutEffect with a non-empty
+							// dependency list: the deps thunk is the second arg.
+							if len(call.Args) >= 1 {
+								effects = append(effects, generateExprJS(call, b.sigMap()))
+							}
 						}
 					}
 				}
@@ -4587,8 +4615,8 @@ func (b *builder) collectEffectJS(body []ast.Stmt) []string {
 // getter and actions object are in scope at hydration time - slot bindings and
 // handlers reference user()/user.loading/actions.refetch() and would otherwise
 // throw ReferenceError because createResource was previously dropped entirely.
-func (b *builder) collectResourceJS(body []ast.Stmt) []string {
-	var out []string
+func (b *builder) collectResourceJS(body []ast.Stmt, order *bodyOrder) []bodyJS {
+	var out []bodyJS
 	for _, stmt := range body {
 		vs, ok := stmt.(*ast.VarStmt)
 		if !ok {
@@ -4606,7 +4634,10 @@ func (b *builder) collectResourceJS(body []ast.Stmt) []string {
 			if !ok || id.Name != "createResource" {
 				continue
 			}
-			out = append(out, renderStmtJS(&ast.VarStmt{Kind: vs.Kind, Decls: []*ast.VarDecl{decl}}, b.sigMap()))
+			out = append(out, bodyJS{
+				ord: order.of(decl),
+				js:  renderStmtJS(&ast.VarStmt{Kind: vs.Kind, Decls: []*ast.VarDecl{decl}}, b.sigMap()),
+			})
 		}
 	}
 	return out
@@ -4703,102 +4734,6 @@ func (b *builder) collectMemoJS(body []ast.Stmt) []string {
 	return memos
 }
 
-// collectExtraVarJS from function body
-
-// collectExtraVarJS walks top-level value declarations and returns them split
-// into two groups: pre (declarations that reference NO signal getters, safe to
-// emit before signal declarations) and post (declarations that read signals,
-// which must come after the signal decls they depend on). Signal initializers
-// like createSignal(initial.value) evaluate local values at hydration time, so
-// a plain local object placed in `pre` is declared first - matching source
-// order.
-func (b *builder) collectExtraVarJS(body []ast.Stmt) (pre, post []string) {
-	for _, stmt := range body {
-		switch s := stmt.(type) {
-		case *ast.VarStmt:
-			for _, decl := range s.Decls {
-				if decl.Init == nil && !decl.IsDestructuring && decl.Name != "" && decl.Name != "children" {
-					// `let timer;` has no value to fold, but handlers and
-					// effects may assign it, so it must still be declared in
-					// the hydration scope.
-					pre = append(pre, "var "+decl.Name)
-					continue
-				}
-				if decl.Init != nil {
-					// useId() is resolved to a per-instance literal by the
-					// caller (collectLocalVars) and emitted from there, so it is
-					// skipped here to avoid emitting the raw marker.
-					if isUseIdCall(decl.Init) {
-						continue
-					}
-					// A context read folds to its default value (SSR) and is
-					// emitted as a folded local, so skip the raw call here -
-					// emitting `var x=Ctx.useContext()` would reference an
-					// undefined context object at hydration time.
-					if isContextRead(decl.Init) {
-						continue
-					}
-					// A first-class scope handle is compile-time state, never a
-					// runtime local.
-					if isCSSFactoryCall(decl.Init) {
-						continue
-					}
-					if call, ok := decl.Init.(*ast.CallExpr); ok {
-						if id, ok := call.Callee.(*ast.Identifier); ok {
-							// createMemo stays an extra var so the named getter
-							// (const doubled = createMemo(...)) is declared with
-							// its real name, letting slot bindings reference it
-							// as () => doubled(). Signals/resources/effects are
-							// handled by their own collection passes.
-							switch id.Name {
-							case "createSignal", "createResource", "createEffect":
-								continue
-							}
-						}
-					}
-					if !decl.IsDestructuring && !referencesProps(decl.Init) {
-						js := generateExprJS(decl.Init, b.sigMap())
-						if b.referencesSignal(decl.Init) {
-							post = append(post, "var "+decl.Name+"="+js)
-						} else {
-							pre = append(pre, "var "+decl.Name+"="+js)
-						}
-					}
-				}
-			}
-		case *ast.BlockStmt:
-			p, po := b.collectExtraVarJS(s.Body)
-			pre = append(pre, p...)
-			post = append(post, po...)
-		case *ast.IfStmt:
-			// Render early-return guards (`if (!items || items.length === 0)
-			// return <span/>`) are a render-time decision already captured by the
-			// SSR slot output. Re-emitting them at hydration as a top-level
-			// statement that can `return` would abort the component IIFE BEFORE
-			// its refs/effects register (the guard also runs before any local
-			// `var items = props.items` declaration it reads, because those
-			// locals are appended to ExtraVars afterwards). Skip them here.
-			if ifEndsInReturn(s) {
-				continue
-			}
-			if stmtsReferenceSignal(s.Consequent, b) || stmtsReferenceSignal(s.Alternate, b) {
-				post = append(post, renderStmtJS(s, b.sigMap()))
-			} else {
-				pre = append(pre, renderStmtJS(s, b.sigMap()))
-			}
-		case *ast.ForStmt:
-			renderLoopStmt(&pre, &post, s, b)
-		case *ast.ForInStmt:
-			renderLoopStmt(&pre, &post, s, b)
-		case *ast.WhileStmt:
-			renderLoopStmt(&pre, &post, s, b)
-		case *ast.DoWhileStmt:
-			renderLoopStmt(&pre, &post, s, b)
-		}
-	}
-	return pre, post
-}
-
 // ifEndsInReturn reports whether the if statement is a render early-return
 // guard: any of its branches (directly or inside a wrapping block) contains a
 // `return` statement.
@@ -4822,15 +4757,6 @@ func stmtsContainReturn(stmts []ast.Stmt) bool {
 		}
 	}
 	return false
-}
-
-func renderLoopStmt(pre, post *[]string, s ast.Stmt, b *builder) {
-	js := renderStmtJS(s, b.sigMap())
-	if stmtsReferenceSignal([]ast.Stmt{s}, b) {
-		*post = append(*post, js)
-	} else {
-		*pre = append(*pre, js)
-	}
 }
 
 // stmtsReferenceSignal reports whether any statement in the list reads a
@@ -5496,9 +5422,10 @@ func (b *builder) bridgeScopeStmts(stmts []ast.Stmt, used map[string]bool) {
 func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func() string) valueMap {
 	saved := b.localProps
 	b.localProps = props
-	locals, _, inits, _, _ := collectLocalVars(fn.Body, b.sigMap(), props, nextUseId)
+	fold := collectLocalVars(fn.Body, b.sigMap(), props, nextUseId)
+	locals, inits := fold.locals, fold.inits
 	for name, init := range inits {
-		if init == nil {
+		if init == nil || fold.changed[name] {
 			continue
 		}
 		switch init.(type) {
