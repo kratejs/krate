@@ -36,7 +36,7 @@ for usage.
 | Forms and inputs | Partial | Partial | n/a | React 18 parity |
 | Portals | Beta | Beta | n/a | SSR-safe |
 | Suspense | Beta | Beta | n/a | SSR-safe |
-| React 19 actions and forms | Planned | Planned | n/a | Source semantics |
+| React 19 actions and forms | Beta | Partial | n/a | Source semantics |
 | Server actions | Beta | n/a | Beta | Progressive enhancement |
 | Compiled React packages | n/a | Beta | n/a | Documented compat |
 | shadcn-style dashboard | Beta | n/a | n/a | Stable |
@@ -115,9 +115,9 @@ Evidence: `TestEventDelegationBubbles`, `TestNonBubblingEventUsesDirectListener`
 
 **Source:** Partial · **Islands:** Partial · **SSR:** n/a
 
-Controlled text, select, checkbox, radio, textarea, and submit handling run in the browser corpus. defaultValue/uncontrolled parity and React 19 form actions remain.
+Controlled text, select, checkbox, radio, textarea, and submit handling run in the browser corpus. React 19 form actions (action/formAction functions, reset after success, no-JS server action posts) run in the browser gate. defaultValue/uncontrolled parity remains.
 
-Evidence: `TestFormValueUsesPropertyBinding`, `browser:/react-forms/`
+Evidence: `TestFormValueUsesPropertyBinding`, `browser:/react-forms/`, `TestReactActionFormsCompile`, `browser:/react-actions/`
 
 ### Portals
 
@@ -137,19 +137,19 @@ Evidence: `TestBuildSuspenseBoundaryStaticFallback`, `TestBuildSuspenseBoundaryR
 
 ### React 19 actions and forms
 
-**Source:** Planned · **Islands:** Planned · **SSR:** n/a
+**Source:** Beta · **Islands:** Partial · **SSR:** n/a
 
-Compat shims exist for useActionState, useOptimistic, useFormStatus, use, and async transitions, but form actions and pending semantics are not in the browser gate yet.
+Source useActionState (queued, previous state over the action transport, permalink no-JS fallback), useFormStatus (form-scoped), useOptimistic (revert on settle), requestFormReset, and function form actions are lowered and run in the browser gate. Compiled packages get the same useActionState/useOptimistic runtime; their useFormStatus is idle. use() and async startTransition are tracked under Suspense and transitions.
 
-Evidence: Planned; no stable test reference yet.
+Evidence: `TestLowerUseActionState`, `TestLowerUseFormStatusDestructured`, `TestLowerUseOptimistic`, `TestReactActionFormsCompile`, `browser:/react-actions/`
 
 ### Server actions
 
 **Source:** Beta · **Islands:** n/a · **SSR:** Beta
 
-File-level "use server" modules compile to hashed POST endpoints with client proxies, no-JS form posts, SSR forms, registry validation, origin checks, and body limits. Inline directives and a request context remain unsupported.
+File-level "use server" modules compile to hashed POST endpoints with client proxies, bound arguments, no-JS form posts, SSR forms, registry validation, origin checks, body limits, and no-store responses. Enhanced forms return results without reloading; errors use a {message, digest} envelope; actions read headers() and cookies() and can redirect(). Inline "use server" functions are a coded build error (KR7001).
 
-Evidence: `TestPrepareActionsBuildsManifestAndBundle`, `TestRewriteActionImports`, `TestSameOriginActionRequest`, `fixture:examples/src/pages/react-actions.tsx`
+Evidence: `TestPrepareActionsBuildsManifestAndBundle`, `TestRewriteActionImports`, `TestSameOriginActionRequest`, `TestActionSidecarTransport`, `TestActionHandlerSecurity`, `TestInlineUseServerIsCodedError`, `fixture:examples/src/pages/react-actions.tsx`, `browser:/react-actions/`
 
 ### Compiled React packages
 

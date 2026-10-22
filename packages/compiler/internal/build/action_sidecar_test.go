@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -59,6 +60,14 @@ func startActionSidecar(t *testing.T, runtime string, hot bool) *httptest.Server
 	if err := os.WriteFile(filepath.Join(actionDir, "manifest.json"), manifest, 0644); err != nil {
 		t.Fatal(err)
 	}
+	return serveActionSidecar(t, runtime, actionDir, hot)
+}
+
+// serveActionSidecar starts the sidecar script for actionDir on runtime and
+// returns a test server running the Go action handler in front of it.
+func serveActionSidecar(t *testing.T, runtime, actionDir string, hot bool) *httptest.Server {
+	t.Helper()
+	dir := t.TempDir()
 	script := apiServerScriptContent
 	if runtime == "bun" {
 		script = apiServerBunScriptContent
@@ -74,14 +83,18 @@ func startActionSidecar(t *testing.T, runtime string, hot bool) *httptest.Server
 	}
 	cmd := exec.Command(runtime, args...)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hot)))
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	var logs syncBuffer
+	cmd.Stdout = &logs
+	cmd.Stderr = &logs
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
+		if t.Failed() {
+			t.Logf("%s sidecar output:\n%s", runtime, logs.String())
+		}
 	})
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 	deadline := time.Now().Add(15 * time.Second)
@@ -96,9 +109,27 @@ func startActionSidecar(t *testing.T, runtime string, hot bool) *httptest.Server
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	srv := httptest.NewServer(actionHandler(httputil.NewSingleHostReverseProxy(target), 1024))
+	srv := httptest.NewServer(actionHandler(httputil.NewSingleHostReverseProxy(target), 1<<20))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// syncBuffer collects sidecar output written from the process pipes.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 type sidecarResult struct {

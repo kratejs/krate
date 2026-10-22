@@ -51,7 +51,13 @@ func TestBrowserConformance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("node", script, cfg.OutDir, browser)
+	// Server actions: the static server proxies /__krate/action/ to the Go
+	// action handler in front of the real Node sidecar.
+	actionOrigin := ""
+	if hasActionManifest(projectRoot) {
+		actionOrigin = serveActionSidecar(t, "node", filepath.Join(projectRoot, ".krate", "actions"), false).URL
+	}
+	cmd := exec.Command("node", script, cfg.OutDir, browser, actionOrigin)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "Executable doesn't exist") ||

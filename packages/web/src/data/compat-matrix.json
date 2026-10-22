@@ -96,8 +96,8 @@
       "islands": "partial",
       "ssr": "n/a",
       "target": "React 18 parity",
-      "summary": "Controlled text, select, checkbox, radio, textarea, and submit handling run in the browser corpus. defaultValue/uncontrolled parity and React 19 form actions remain.",
-      "tests": ["TestFormValueUsesPropertyBinding", "browser:/react-forms/"],
+      "summary": "Controlled text, select, checkbox, radio, textarea, and submit handling run in the browser corpus. React 19 form actions (action/formAction functions, reset after success, no-JS server action posts) run in the browser gate. defaultValue/uncontrolled parity remains.",
+      "tests": ["TestFormValueUsesPropertyBinding", "browser:/react-forms/", "TestReactActionFormsCompile", "browser:/react-actions/"],
       "roadmap": true
     },
     {
@@ -125,12 +125,12 @@
     {
       "id": "react-19",
       "area": "React 19 actions and forms",
-      "source": "planned",
-      "islands": "planned",
+      "source": "beta",
+      "islands": "partial",
       "ssr": "n/a",
       "target": "Source semantics",
-      "summary": "Compat shims exist for useActionState, useOptimistic, useFormStatus, use, and async transitions, but form actions and pending semantics are not in the browser gate yet.",
-      "tests": [],
+      "summary": "Source useActionState (queued, previous state over the action transport, permalink no-JS fallback), useFormStatus (form-scoped), useOptimistic (revert on settle), requestFormReset, and function form actions are lowered and run in the browser gate. Compiled packages get the same useActionState/useOptimistic runtime; their useFormStatus is idle. use() and async startTransition are tracked under Suspense and transitions.",
+      "tests": ["TestLowerUseActionState", "TestLowerUseFormStatusDestructured", "TestLowerUseOptimistic", "TestReactActionFormsCompile", "browser:/react-actions/"],
       "roadmap": true
     },
     {
@@ -140,8 +140,8 @@
       "islands": "n/a",
       "ssr": "beta",
       "target": "Progressive enhancement",
-      "summary": "File-level \"use server\" modules compile to hashed POST endpoints with client proxies, no-JS form posts, SSR forms, registry validation, origin checks, and body limits. Inline directives and a request context remain unsupported.",
-      "tests": ["TestPrepareActionsBuildsManifestAndBundle", "TestRewriteActionImports", "TestSameOriginActionRequest", "fixture:examples/src/pages/react-actions.tsx"],
+      "summary": "File-level \"use server\" modules compile to hashed POST endpoints with client proxies, bound arguments, no-JS form posts, SSR forms, registry validation, origin checks, body limits, and no-store responses. Enhanced forms return results without reloading; errors use a {message, digest} envelope; actions read headers() and cookies() and can redirect(). Inline \"use server\" functions are a coded build error (KR7001).",
+      "tests": ["TestPrepareActionsBuildsManifestAndBundle", "TestRewriteActionImports", "TestSameOriginActionRequest", "TestActionSidecarTransport", "TestActionHandlerSecurity", "TestInlineUseServerIsCodedError", "fixture:examples/src/pages/react-actions.tsx", "browser:/react-actions/"],
       "roadmap": true
     },
     {
