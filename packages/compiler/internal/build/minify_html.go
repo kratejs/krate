@@ -1,272 +1,385 @@
 package build
 
 import (
-	"strconv"
 	"strings"
 )
 
-func minifyHTML(html string) string {
-	// Protect <script> and <style> content from all minification passes.
-	rawBlocks := protectRawContent(html)
-	s := rawBlocks.protected
-
-	// Pass 1: strip HTML comments except hydration markers
-	s = stripHTMLComments(s)
-
-	// Pass 2: collapse whitespace between tags
-	s = collapseWhitespaceBetweenTags(s)
-
-	// Pass 3: collapse multiple spaces in text content to single space
-	s = collapseTextWhitespace(s)
-
-	// Pass 4: remove optional quotes around simple attribute values
-	s = removeOptionalQuotes(s)
-
-	s = strings.TrimSpace(s)
-
-	return restoreRawContent(s, rawBlocks)
+// minifyHTML shrinks rendered page HTML in a single tokenizing pass:
+//   - HTML comments are dropped except runtime markers (k:, suspense:, region:)
+//   - whitespace runs in text (outside <pre> and raw-text elements) collapse
+//     to one space
+//   - start/end tags are re-emitted with normalized attribute spacing, and
+//     quotes are dropped from attribute values only when the HTML spec allows
+//     an unquoted value
+//
+// Attribute values are never altered apart from quoting. The tokenizer follows
+// the HTML spec closely enough that anything it does not understand (EOF
+// inside a tag, unterminated raw text) is copied through verbatim.
+func minifyHTML(src string) string {
+	m := &minifier{s: src}
+	m.run()
+	out := m.out.String()
+	out = strings.TrimLeft(out, htmlSpace)
+	// Trailing whitespace is only dropped after a complete tag; after text it
+	// can be significant (for example before an unterminated "<").
+	if t := strings.TrimRight(out, htmlSpace); !m.keepTail && m.preDepth == 0 && strings.HasSuffix(t, ">") {
+		out = t
+	}
+	return out
 }
 
-// Raw content protection
+const htmlSpace = " \t\n\f\r"
 
-type rawBlocks struct {
-	protected string
-	blocks    []string
+// rawTextTags are elements whose content is not ordinary markup (raw text,
+// RCDATA, or whitespace-significant) and is copied verbatim.
+var rawTextTags = map[string]bool{
+	"script": true, "style": true, "textarea": true, "title": true,
+	"xmp": true, "iframe": true, "noembed": true, "noframes": true,
+	"noscript": true, "plaintext": true,
 }
 
-func protectRawContent(html string) rawBlocks {
-	var blocks []string
-	var result strings.Builder
-	lower := strings.ToLower(html)
-	i := 0
-	for i < len(html) {
-		tagStart := -1
-		tagLen := 0
-		for _, tag := range []string{"<script", "<style", "<pre"} {
-			if strings.HasPrefix(lower[i:], tag) {
-				chAfter := html[i+len(tag)]
-				if chAfter == '>' || chAfter == ' ' || chAfter == '\t' || chAfter == '\n' || chAfter == '\r' {
-					tagStart = i
-					tagLen = len(tag)
-					break
-				}
-			}
+type minifier struct {
+	s         string
+	out       strings.Builder
+	prevSpace bool
+	preDepth  int
+	keepTail  bool
+}
+
+func isHTMLSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r'
+}
+
+func isASCIIAlpha(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func (m *minifier) writeRaw(s string) {
+	m.out.WriteString(s)
+	m.prevSpace = false
+}
+
+func (m *minifier) text(c byte) {
+	if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+		if m.preDepth > 0 {
+			m.out.WriteByte(c)
+			return
 		}
-		if tagStart == -1 {
-			result.WriteByte(html[i])
+		if !m.prevSpace {
+			m.out.WriteByte(' ')
+			m.prevSpace = true
+		}
+		return
+	}
+	m.out.WriteByte(c)
+	m.prevSpace = false
+}
+
+func (m *minifier) run() {
+	s := m.s
+	i := 0
+	for i < len(s) {
+		if s[i] != '<' {
+			m.text(s[i])
 			i++
 			continue
 		}
-
-		tagName := html[tagStart : tagStart+tagLen]
-
-		// Find end of opening tag
-		openEnd := strings.Index(html[tagStart:], ">")
-		if openEnd == -1 {
-			result.WriteString(html[tagStart:])
-			break
-		}
-		openEnd += tagStart
-
-		// Find matching closing tag
-		closeTag := "</" + tagName[1:] + ">"
-		closeIdx := strings.Index(lower[openEnd+1:], closeTag)
-		if closeIdx == -1 {
-			// No closing tag - write as-is
-			result.WriteString(html[tagStart:])
-			break
-		}
-		closeIdx += openEnd + 1
-
-		fullEnd := closeIdx + len(closeTag)
-
-		// Preserve the full block with a placeholder
-		blockIdx := len(blocks)
-		blocks = append(blocks, html[tagStart:fullEnd])
-		result.WriteString("\x00BLOCK")
-		result.WriteString(strconv.Itoa(blockIdx))
-		result.WriteString("\x00")
-
-		i = fullEnd
-	}
-
-	return rawBlocks{protected: result.String(), blocks: blocks}
-}
-
-func restoreRawContent(html string, rb rawBlocks) string {
-	result := html
-	for i, block := range rb.blocks {
-		result = strings.Replace(result, "\x00BLOCK"+strconv.Itoa(i)+"\x00", block, 1)
-	}
-	return result
-}
-
-// Stripped-down helpers
-
-// stripHTMLComments removes HTML comments except hydration markers (<!--k:...-->).
-func stripHTMLComments(html string) string {
-	var b strings.Builder
-	i := 0
-	for i < len(html) {
-		if i+4 <= len(html) && html[i:i+4] == "<!--" {
-			end := strings.Index(html[i:], "-->")
-			if end == -1 {
-				b.WriteString(html[i:])
-				break
+		rest := s[i:]
+		switch {
+		case strings.HasPrefix(rest, "<!--"):
+			end := commentEnd(s, i)
+			if end < 0 {
+				m.writeRaw(rest)
+				m.keepTail = true
+				return
 			}
-			comment := html[i : i+end+3]
-			// Preserve hydration markers: <!--k:...--> and <!--/k:...-->
-			if len(comment) > 5 && comment[4] == 'k' && comment[5] == ':' {
-				b.WriteString(comment)
+			if keepComment(s[i:end]) {
+				m.writeRaw(s[i:end])
 			}
-			if len(comment) > 6 && comment[4] == '/' && comment[5] == 'k' && comment[6] == ':' {
-				b.WriteString(comment)
+			i = end
+		case strings.HasPrefix(rest, "<![CDATA["):
+			idx := strings.Index(rest, "]]>")
+			if idx < 0 {
+				m.writeRaw(rest)
+				m.keepTail = true
+				return
 			}
-			// Preserve suspense markers
-			if strings.HasPrefix(comment, "<!--suspense:") || strings.HasPrefix(comment, "<!--/suspense:") {
-				b.WriteString(comment)
+			m.writeRaw(rest[:idx+3])
+			i += idx + 3
+		case len(rest) > 1 && (rest[1] == '!' || rest[1] == '?' || rest[1] == '/' && (len(rest) < 3 || !isASCIIAlpha(rest[2]))):
+			// Doctype, bogus comment or processing instruction: up to '>'.
+			idx := strings.IndexByte(rest, '>')
+			if idx < 0 {
+				m.writeRaw(rest)
+				m.keepTail = true
+				return
 			}
-			// Preserve runtime region splice markers
-			if strings.HasPrefix(comment, "<!--region:") || strings.HasPrefix(comment, "<!--/region:") {
-				b.WriteString(comment)
+			m.writeRaw(rest[:idx+1])
+			i += idx + 1
+		case len(rest) > 1 && (isASCIIAlpha(rest[1]) || rest[1] == '/'):
+			var ok bool
+			i, ok = m.tag(i)
+			if !ok {
+				return
 			}
-			i += end + 3
-		} else {
-			b.WriteByte(html[i])
+		default:
+			m.text('<')
 			i++
 		}
 	}
-	return b.String()
 }
 
-// collapseWhitespaceBetweenTags collapses whitespace between HTML tags.
-func collapseWhitespaceBetweenTags(s string) string {
-	var b strings.Builder
-	inTag := false
-	inAttr := false
-	attrQuote := byte(0)
-	prevSpace := false
+// commentEnd returns the index just past the comment starting at i, or -1.
+func commentEnd(s string, i int) int {
+	start := i + 4
+	if strings.HasPrefix(s[start:], ">") {
+		return start + 1
+	}
+	if strings.HasPrefix(s[start:], "->") {
+		return start + 2
+	}
+	best := -1
+	if k := strings.Index(s[start:], "-->"); k >= 0 {
+		best = start + k + 3
+	}
+	if k := strings.Index(s[start:], "--!>"); k >= 0 && (best < 0 || start+k+4 < best) {
+		best = start + k + 4
+	}
+	return best
+}
 
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
+func keepComment(c string) bool {
+	for _, p := range []string{"<!--k:", "<!--/k:", "<!--suspense:", "<!--/suspense:", "<!--region:", "<!--/region:"} {
+		if strings.HasPrefix(c, p) {
+			return true
+		}
+	}
+	return false
+}
 
-		if ch == '<' && !inAttr {
-			inTag = true
-			prevSpace = false
-			b.WriteByte(ch)
+// tag re-emits the start or end tag at i and handles raw-text content that
+// follows a start tag. It returns the next index and false if the rest of the
+// input was consumed verbatim.
+func (m *minifier) tag(i int) (int, bool) {
+	s := m.s
+	j := i + 1
+	isEnd := s[j] == '/'
+	if isEnd {
+		j++
+	}
+	nameStart := j
+	for j < len(s) && !isHTMLSpace(s[j]) && s[j] != '/' && s[j] != '>' {
+		j++
+	}
+	name := s[nameStart:j]
+
+	var tb strings.Builder
+	tb.WriteString(s[i:j])
+	lastUnquoted := false
+	prevValueless := false
+	slash := false
+	for {
+		slash = false
+		for j < len(s) && (isHTMLSpace(s[j]) || s[j] == '/') {
+			slash = s[j] == '/'
+			j++
+		}
+		if j >= len(s) {
+			m.writeRaw(s[i:])
+			m.keepTail = true
+			return len(s), false
+		}
+		if s[j] == '>' {
+			j++
+			break
+		}
+		ns := j
+		if s[j] == '=' {
+			j++
+		}
+		for j < len(s) && !isHTMLSpace(s[j]) && s[j] != '/' && s[j] != '>' && s[j] != '=' {
+			j++
+		}
+		aname := s[ns:j]
+		k := j
+		for k < len(s) && isHTMLSpace(s[k]) {
+			k++
+		}
+		lastUnquoted = false
+		if aname[0] == '=' && prevValueless {
+			// A space would let the '=' bind as a value to the previous name.
+			tb.WriteByte('/')
+		} else {
+			tb.WriteByte(' ')
+		}
+		tb.WriteString(aname)
+		prevValueless = k >= len(s) || s[k] != '='
+		if prevValueless {
 			continue
 		}
-
-		if ch == '>' && inTag && !inAttr {
-			inTag = false
-			b.WriteByte(ch)
-			continue
+		k++
+		for k < len(s) && isHTMLSpace(s[k]) {
+			k++
 		}
-
-		if inTag {
-			if (ch == '"' || ch == '\'') && !inAttr {
-				inAttr = true
-				attrQuote = ch
-			} else if inAttr && ch == attrQuote {
-				inAttr = false
+		if k >= len(s) {
+			m.writeRaw(s[i:])
+			m.keepTail = true
+			return len(s), false
+		}
+		tb.WriteByte('=')
+		switch q := s[k]; q {
+		case '"', '\'':
+			end := strings.IndexByte(s[k+1:], q)
+			if end < 0 {
+				m.writeRaw(s[i:])
+				m.keepTail = true
+				return len(s), false
 			}
-			b.WriteByte(ch)
-			continue
+			val := s[k+1 : k+1+end]
+			j = k + 2 + end
+			if canUnquote(val) {
+				tb.WriteString(val)
+				lastUnquoted = true
+			} else {
+				tb.WriteByte(q)
+				tb.WriteString(val)
+				tb.WriteByte(q)
+			}
+		case '>':
+			tb.WriteString(`""`)
+			j = k
+		default:
+			vs := k
+			for k < len(s) && !isHTMLSpace(s[k]) && s[k] != '>' {
+				k++
+			}
+			tb.WriteString(s[vs:k])
+			lastUnquoted = true
+			j = k
 		}
+	}
+	if slash {
+		if lastUnquoted {
+			tb.WriteByte(' ')
+		}
+		tb.WriteByte('/')
+	}
+	tb.WriteByte('>')
+	m.writeRaw(tb.String())
 
-		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
-			if !prevSpace {
-				b.WriteByte(' ')
-				prevSpace = true
+	lname := strings.ToLower(name)
+	switch {
+	case lname == "pre":
+		if isEnd {
+			if m.preDepth > 0 {
+				m.preDepth--
 			}
 		} else {
-			b.WriteByte(ch)
-			prevSpace = false
+			m.preDepth++
 		}
+	case !isEnd && rawTextTags[lname]:
+		if lname == "plaintext" {
+			m.writeRaw(s[j:])
+			m.keepTail = true
+			return len(s), false
+		}
+		end := rawTextEnd(s, j, lname)
+		if end < 0 {
+			m.writeRaw(s[j:])
+			m.keepTail = true
+			return len(s), false
+		}
+		m.writeRaw(s[j:end])
+		j = end
 	}
-	return b.String()
+	return j, true
 }
 
-func collapseTextWhitespace(s string) string {
-	var b strings.Builder
-	prevSpace := false
-
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
-			if !prevSpace {
-				b.WriteByte(' ')
-				prevSpace = true
-			}
-		} else {
-			b.WriteByte(ch)
-			prevSpace = false
+// canUnquote reports whether v may be written as an unquoted attribute value
+// per the HTML spec. Values ending in '/' keep their quotes so a following
+// '>' can never be mistaken for part of a self-closing marker.
+func canUnquote(v string) bool {
+	if v == "" || v[len(v)-1] == '/' {
+		return false
+	}
+	for i := 0; i < len(v); i++ {
+		switch v[i] {
+		case ' ', '\t', '\n', '\f', '\r', '"', '\'', '=', '<', '>', '`':
+			return false
 		}
 	}
-
-	return b.String()
+	return true
 }
 
-func removeOptionalQuotes(s string) string {
-	var b strings.Builder
-	inTag := false
-	inAttr := false
-	attrQuote := byte(0)
-	dropQuotes := false
-
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-
-		if ch == '<' && !inAttr {
-			inTag = true
-		}
-
-		if ch == '>' && inTag && !inAttr {
-			inTag = false
-		}
-
-		if inTag {
-			if (ch == '"' || ch == '\'') && !inAttr {
-				// Look ahead: if value is only alphanumeric, dash, underscore, we can drop quotes
-				j := i + 1
-				canDrop := true
-				for j < len(s) && s[j] != ch {
-					if s[j] == ' ' || s[j] == '\t' || s[j] == '>' || s[j] == '=' {
-						canDrop = false
-						break
-					}
-					j++
-				}
-				isEmpty := j < len(s) && s[j] == ch && j == i+1
-				if canDrop && !isEmpty {
-					inAttr = true
-					attrQuote = ch
-					dropQuotes = true
-					continue // skip opening quote; closing quote will be skipped too
-				}
-				if !isEmpty {
-					// Non-empty but can't drop (contains spaces, >, or =):
-					// keep the open+close quotes. Stay in attr mode until the
-					// closing quote so inner quote chars (e.g. CSP 'self',
-					// style '...', data URI "...") and spaces are preserved.
-					inAttr = true
-					attrQuote = ch
-					dropQuotes = false
-				}
-				// Empty value (="") - never drop quotes; dropping creates a bare name=
-				// which the HTML parser may merge with the next attribute
-				// (e.g. onerror="" onload="" -> onerror=onload=)
-			} else if inAttr && ch == attrQuote {
-				inAttr = false
-				if dropQuotes {
-					continue // skip closing quote
-				}
-				// kept-quote value: fall through and write the closing quote
-			}
-		}
-
-		b.WriteByte(ch)
+// rawTextEnd returns the index of the end tag that closes a raw-text element
+// whose content starts at from, or -1 when unterminated.
+func rawTextEnd(s string, from int, name string) int {
+	if name == "script" {
+		return scriptEnd(s, from)
 	}
+	for k := from; k < len(s); {
+		idx := strings.Index(s[k:], "</")
+		if idx < 0 {
+			return -1
+		}
+		k += idx
+		if isEndTagAt(s, k, name) {
+			return k
+		}
+		k += 2
+	}
+	return -1
+}
 
-	return b.String()
+// isEndTagAt reports whether s[k:] is "</name" followed by whitespace, '/' or '>'.
+func isEndTagAt(s string, k int, name string) bool {
+	e := k + 2 + len(name)
+	if e >= len(s) || s[k] != '<' || s[k+1] != '/' || !strings.EqualFold(s[k+2:e], name) {
+		return false
+	}
+	return isHTMLSpace(s[e]) || s[e] == '/' || s[e] == '>'
+}
+
+// scriptEnd finds the closing </script> honoring the script data escaped and
+// double-escaped states ("<!--" ... "<script>" ... "-->").
+func scriptEnd(s string, from int) int {
+	escaped, double := false, false
+	for k := from; k < len(s); k++ {
+		if s[k] != '<' && s[k] != '-' {
+			continue
+		}
+		switch {
+		case s[k] == '-':
+			if escaped && strings.HasPrefix(s[k:], "-->") {
+				escaped, double = false, false
+				k += 2
+			}
+		case strings.HasPrefix(s[k:], "<!--"):
+			escaped = true
+			if strings.HasPrefix(s[k+2:], "-->") {
+				escaped, double = false, false
+				k += 4
+			} else {
+				k += 3
+			}
+		case isEndTagAt(s, k, "script"):
+			if !double {
+				return k
+			}
+			double = false
+			k += 7
+		case escaped && isStartTagAt(s, k, "script"):
+			double = true
+			k += 6
+		}
+	}
+	return -1
+}
+
+func isStartTagAt(s string, k int, name string) bool {
+	e := k + 1 + len(name)
+	if e >= len(s) || !strings.EqualFold(s[k+1:e], name) {
+		return false
+	}
+	return isHTMLSpace(s[e]) || s[e] == '/' || s[e] == '>'
 }
