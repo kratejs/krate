@@ -13,6 +13,7 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 )
@@ -269,7 +270,9 @@ func parseActionExports(source, rel string) (map[string]string, error) {
 			}
 		case *ast.ExportStmt:
 			if s.ReexportSource != "" || s.StarReexport || s.Namespace != "" {
-				return nil, fmt.Errorf("server action file %s cannot re-export from another module; import and re-declare the action instead", rel)
+				return nil, diag.New(rel, s.Position.Line, s.Position.Col,
+					"a \"use server\" module cannot re-export from another module",
+					"import the function and re-declare it as an export of this file", "").WithCode(diag.CodeActionReexport)
 			}
 			if s.Declaration != nil {
 				switch d := s.Declaration.(type) {
@@ -290,7 +293,9 @@ func parseActionExports(source, rel string) (map[string]string, error) {
 							continue
 						}
 						if !isFunctionExpr(vd.Init) {
-							return nil, fmt.Errorf("server action file %s exports non-function %q; every export must be a function", rel, vd.Name)
+							return nil, diag.New(rel, s.Position.Line, s.Position.Col,
+								fmt.Sprintf("server action module exports non-function %q; every export must be a function", vd.Name),
+								"export an async function, or move the value into a module without \"use server\"", "").WithCode(diag.CodeActionExportNotFunction)
 						}
 						localFns[vd.Name] = true
 						name := vd.Name
@@ -309,7 +314,9 @@ func parseActionExports(source, rel string) (map[string]string, error) {
 						return nil, err
 					}
 				default:
-					return nil, fmt.Errorf("server action file %s exports a non-function declaration", rel)
+					return nil, diag.New(rel, s.Position.Line, s.Position.Col,
+						"server action module exports a non-function declaration",
+						"export only async functions from a \"use server\" module", "").WithCode(diag.CodeActionExportNotFunction)
 				}
 			}
 			if len(s.Named) > 0 {
@@ -405,14 +412,21 @@ func actionProxyModule(exports map[string]string, basePath string) string {
 	b.WriteString("const __krateActionURLBase = ")
 	b.Write(baseJSON)
 	b.WriteString(";\n")
-	b.WriteString(`function __krateActionProxy(id) {
+	b.WriteString(`function __krateActionProxy(id, bound) {
+  bound = bound || [];
   function action() {
+    var args = bound.concat(Array.prototype.slice.call(arguments));
     if (typeof window !== "undefined" && typeof window.__krateAction === "function") {
-      return window.__krateAction(id).apply(null, arguments);
+      return window.__krateAction(id).apply(null, args);
     }
     return Promise.reject(new Error("Server action cannot run during SSR"));
   }
   action.actionUrl = __krateActionURLBase + "/__krate/action/" + id;
+  action.$$krateAction = id;
+  action.$$krateBound = bound;
+  action.bind = function (_this) {
+    return __krateActionProxy(id, bound.concat(Array.prototype.slice.call(arguments, 1)));
+  };
   action.toString = function () { return this.actionUrl; };
   return action;
 }

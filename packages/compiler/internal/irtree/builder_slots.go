@@ -93,6 +93,11 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	for _, h := range node.Handlers {
 		scan(h.Body)
 	}
+	// Callback refs (including bound form actions) run at hydration and can
+	// call local or imported helpers.
+	for _, r := range node.RefBindings {
+		scan(r.Callback)
+	}
 	for _, eff := range node.Effects {
 		scan(eff)
 	}
@@ -1343,7 +1348,10 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 
 	// Static attributes (spread rest params expanded to concrete attributes).
 	attrsForOpening, _ := b.expandForwardedSpreadAttrs(el.Opening.Attributes)
-	actionAttrs := make(map[*ast.JSXAttr]bool)
+	// actionAttrs maps an action prop that names a server action (directly or
+	// through a useActionState dispatch) to its native POST target, so the
+	// form still submits without JavaScript.
+	actionAttrs := make(map[*ast.JSXAttr]string)
 	hasMethod := false
 	hasFormMethod := false
 	for _, attr := range attrsForOpening {
@@ -1353,12 +1361,12 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 		case "formmethod", "formMethod":
 			hasFormMethod = true
 		case "action", "formAction", "formaction":
-
-			if _, ok := b.actionAttrURL(attr.Value); ok {
-				actionAttrs[attr] = true
-			} else if _, ok := attr.Value.(*ast.ArrowFn); ok {
-				b.warnAt(attr.Position, "inline function passed to "+attr.Name+" was not extracted as a server action",
-					"move it to a \"use server\" module and import it")
+			if u, ok := b.actionAttrURL(attr.Value); ok {
+				actionAttrs[attr] = u
+			} else if id, ok := attr.Value.(*ast.Identifier); ok {
+				if u, ok := b.actionStateURL(id.Name); ok {
+					actionAttrs[attr] = u
+				}
 			}
 		}
 	}
@@ -1379,6 +1387,13 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 		if isOnEvent(attr.Name) {
 			continue
 		}
+		if u, ok := actionAttrs[attr]; ok {
+			buf.WriteString(renderActionAttr(name, attr.Name, u))
+			continue
+		}
+		if isFormActionAttr(attr.Name) && attr.Value != nil && b.isFunctionAction(attr.Value) {
+			continue
+		}
 		// Dynamic bindings are emitted below (with SSR initial + marker).
 		// Statically-resolvable values - even those typed as bindings (e.g.
 		// {String(i)}, {length}) - are emitted directly here instead.
@@ -1388,11 +1403,7 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 		if skipFormValueAttr(name, attr.Name, inSelect) {
 			continue
 		}
-		rendered := RenderAttr(name, attr, b.evalAttrConst, b.evalAttrValue)
-		buf.WriteString(rendered)
-		if rendered != "" && actionAttrs[attr] {
-			buf.WriteString(` data-krate-action`)
-		}
+		buf.WriteString(RenderAttr(name, attr, b.evalAttrConst, b.evalAttrValue))
 	}
 	if optionSelected {
 		buf.WriteString(" selected")
@@ -2867,9 +2878,18 @@ func (b *builder) collectSignalDecls(fn *ast.FnDecl) []SignalDecl {
 		// Array/object initializers must be emitted as real JS literals (their
 		// folded value is JS source, not a string), so keep the source verbatim.
 		if rawInit == "" {
-			switch d.Initial.(type) {
+			switch init := d.Initial.(type) {
 			case *ast.ArrayExpr, *ast.ObjectExpr:
 				rawInit = generateExprJS(d.Initial, b.sigMap())
+			case *ast.CallExpr:
+				// A signal seeded from an earlier signal (`createSignal(items())`,
+				// e.g. lowered useOptimistic) reads it at hydration; its folded
+				// SSR value may be an array or object rendered as text.
+				if id, ok := init.Callee.(*ast.Identifier); ok && len(init.Args) == 0 && !isResourceSentinelExpr(init, b.sigMap()) {
+					if _, isSig := b.sigMap()[id.Name]; isSig {
+						rawInit = generateExprJS(d.Initial, b.sigMap())
+					}
+				}
 			}
 		}
 		decls = append(decls, SignalDecl{

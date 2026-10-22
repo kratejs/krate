@@ -96,8 +96,8 @@
       "islands": "partial",
       "ssr": "n/a",
       "target": "React 18 parity",
-      "summary": "Controlled text, select (single and multiple), checkbox, radio group, textarea, number and range inputs restore to state after onChange; uncontrolled defaultValue/defaultChecked only set defaults; form reset and value={undefined} follow React. Form diagnostics: KR5004 to KR5007. React 19 form actions are tracked separately.",
-      "tests": ["TestFormValueUsesPropertyBinding", "TestFormControlBindings", "TestFormDiagnostics", "browser:/react-forms/", "browser:/react-events/"],
+      "summary": "Controlled text, select (single and multiple), checkbox, radio group, textarea, number and range inputs restore to state after onChange; uncontrolled defaultValue/defaultChecked only set defaults; form reset and value={undefined} follow React. Form diagnostics: KR5004 to KR5007. React 19 form actions (action/formAction functions, reset after success, no-JS server action posts) run in the browser gate.",
+      "tests": ["TestFormValueUsesPropertyBinding", "TestFormControlBindings", "TestFormDiagnostics", "browser:/react-forms/", "browser:/react-events/", "TestReactActionFormsCompile", "browser:/react-actions/"],
       "roadmap": true
     },
     {
@@ -125,12 +125,12 @@
     {
       "id": "react-19",
       "area": "React 19 actions and forms",
-      "source": "planned",
-      "islands": "planned",
+      "source": "beta",
+      "islands": "partial",
       "ssr": "n/a",
       "target": "Source semantics",
-      "summary": "Compat shims exist for useActionState, useOptimistic, useFormStatus, use, and async transitions, but form actions and pending semantics are not in the browser gate yet.",
-      "tests": ["TestReactBrowserDifferential", "browser:/react-actions/"],
+      "summary": "Source useActionState (queued, previous state over the action transport, permalink no-JS fallback), useFormStatus (form-scoped), useOptimistic (revert on settle), requestFormReset, and function form actions are lowered and run in the browser gate. Compiled packages get the same useActionState/useOptimistic runtime; their useFormStatus is idle. use() and async startTransition are tracked under Suspense and transitions.",
+      "tests": ["TestLowerUseActionState", "TestReactBrowserDifferential", "TestLowerUseFormStatusDestructured", "TestLowerUseOptimistic", "TestReactActionFormsCompile", "browser:/react-actions/"],
       "roadmap": true
     },
     {
@@ -140,8 +140,8 @@
       "islands": "n/a",
       "ssr": "beta",
       "target": "Progressive enhancement",
-      "summary": "File-level \"use server\" modules compile to hashed POST endpoints with client proxies, no-JS form posts, SSR forms, registry validation, origin checks, and body limits. Inline directives and a request context remain unsupported.",
-      "tests": ["TestPrepareActionsBuildsManifestAndBundle", "TestRewriteActionImports", "TestSameOriginActionRequest", "fixture:examples/src/pages/react-actions.tsx"],
+      "summary": "File-level \"use server\" modules compile to hashed POST endpoints with client proxies, bound arguments, no-JS form posts, SSR forms, registry validation, origin checks, body limits, and no-store responses. Enhanced forms return results without reloading; errors use a {message, digest} envelope; actions read headers() and cookies() and can redirect(). Inline \"use server\" functions are a coded build error (KR7001).",
+      "tests": ["TestPrepareActionsBuildsManifestAndBundle", "TestRewriteActionImports", "TestSameOriginActionRequest", "TestActionSidecarTransport", "TestActionHandlerSecurity", "TestInlineUseServerIsCodedError", "fixture:examples/src/pages/react-actions.tsx", "browser:/react-actions/"],
       "roadmap": true
     },
     {
