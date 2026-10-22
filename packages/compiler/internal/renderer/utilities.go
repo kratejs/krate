@@ -218,27 +218,6 @@ func hasJSX(expr ast.Expr) bool {
 	return false
 }
 
-// isVoidElement returns true for HTML void elements that can be self-closing.
-// Non-void elements like <div/> must be emitted as <div></div>.
-func isVoidElement(tag string) bool {
-	switch tag {
-	case "area", "base", "br", "col", "embed", "hr", "img", "input",
-		"link", "meta", "param", "source", "track", "wbr":
-		return true
-	}
-	return false
-}
-
-// isBooleanAttr reports whether an HTML attribute is a boolean attribute whose
-// mere presence is meaningful - an empty or "false" string value is still truthy.
-func isBooleanAttr(name string) bool {
-	switch name {
-	case "disabled", "required", "readonly", "checked", "selected", "multiple", "autofocus", "hidden", "inert", "novalidate", "open", "async", "defer", "autoplay", "controls", "loop", "muted", "playsinline", "allowfullscreen", "default", "ismap", "itemscope", "nohref", "noresize", "noshade", "nowrap", "reversed", "scoped", "seamless", "sortable", "translate":
-		return true
-	}
-	return false
-}
-
 // mangleIdentInString replaces occurrences of `from` with `to` in `src`, skipping string literals.
 func mangleIdentInString(src, from, to string) string {
 	var b strings.Builder

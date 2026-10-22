@@ -24,6 +24,20 @@ func HTML(s string) string {
 	return htmlReplacer.Replace(s)
 }
 
+var textReplacer = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+	"\x1f", "",
+)
+
+// Text escapes a decoded string for an HTML text position (element content
+// outside raw-text elements). Only & < > need escaping there; quotes are left
+// alone so ordinary prose stays readable. The \x1f separator is stripped.
+func Text(s string) string {
+	return textReplacer.Replace(s)
+}
+
 // HTMLAttr is an alias for HTML: both escape the full set, so the result is
 // safe in double-quoted attributes, single-quoted attributes, and text nodes.
 func HTMLAttr(s string) string {

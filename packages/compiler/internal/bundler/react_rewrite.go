@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
 )
 
 // reactNames maps a React API name to the krate runtime identifier that
@@ -996,33 +997,16 @@ func (c *reactCtx) rewriteJSXChild(child ast.JSXChild, sc *scope) ast.JSXChild {
 
 // style objects
 
-// unitlessStyleProps are CSS properties whose numeric values must not get a px
-// suffix (matching React's unitless allowlist).
-var unitlessStyleProps = map[string]bool{
-	"animation-iteration-count": true, "aspect-ratio": true, "border-image-outset": true,
-	"border-image-slice": true, "border-image-width": true, "box-flex": true,
-	"box-flex-group": true, "box-ordinal-group": true, "column-count": true,
-	"columns": true, "flex": true, "flex-grow": true, "flex-positive": true,
-	"flex-shrink": true, "flex-negative": true, "flex-order": true, "grid-area": true,
-	"grid-column": true, "grid-column-end": true, "grid-column-span": true,
-	"grid-column-start": true, "grid-row": true, "grid-row-end": true,
-	"grid-row-span": true, "grid-row-start": true, "font-weight": true,
-	"line-clamp": true, "line-height": true, "opacity": true, "order": true,
-	"orphans": true, "tab-size": true, "widows": true, "z-index": true, "zoom": true,
-	"fill-opacity": true, "flood-opacity": true, "stop-opacity": true,
-	"stroke-dasharray": true, "stroke-dashoffset": true, "stroke-miterlimit": true,
-	"stroke-opacity": true, "stroke-width": true,
-}
-
-// styleObjectToCSS folds a literal `style={{ ... }}` object into a CSS string,
-// converting camelCase keys to kebab-case and adding `px` to bare numeric
-// dimension values. Returns ok=false when the object is not fully literal.
+// styleObjectToCSS folds a literal `style={{ ... }}` object into a CSS string
+// using the shared htmlspec rules (hyphenation, vendor prefixes, unitless
+// properties, custom properties, skipped null/boolean values). Returns
+// ok=false when the object is not fully literal.
 func styleObjectToCSS(value ast.Expr) (string, bool) {
 	obj, ok := value.(*ast.ObjectExpr)
 	if !ok {
 		return "", false
 	}
-	var parts []string
+	entries := make([]htmlspec.StyleEntry, 0, len(obj.Properties))
 	for _, prop := range obj.Properties {
 		if prop == nil || prop.Spread || prop.Key == "" {
 			return "", false
@@ -1031,30 +1015,20 @@ func styleObjectToCSS(value ast.Expr) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		key := camelToKebab(prop.Key)
-		val := lit.Value
-		if lit.Kind == ast.NumberLit && !unitlessStyleProps[key] {
-			val += "px"
+		v := htmlspec.StrVal(lit.Value)
+		switch lit.Kind {
+		case ast.NumberLit:
+			v = htmlspec.Value{Kind: htmlspec.Number, Str: lit.Value}
+		case ast.BoolLit:
+			v = htmlspec.BoolVal(lit.Value == "true")
+		case ast.NullLit:
+			v = htmlspec.Value{Kind: htmlspec.Null}
+		case ast.RegexpLit:
+			return "", false
 		}
-		parts = append(parts, key+":"+val)
+		entries = append(entries, htmlspec.StyleEntry{Key: prop.Key, Value: v})
 	}
-	return strings.Join(parts, ";"), true
-}
-
-// camelToKebab converts a camelCase CSS property name to its kebab-case form.
-func camelToKebab(name string) string {
-	var b strings.Builder
-	for i, r := range name {
-		if r >= 'A' && r <= 'Z' {
-			if i > 0 {
-				b.WriteByte('-')
-			}
-			b.WriteRune(r - 'A' + 'a')
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
+	return htmlspec.Style(entries), true
 }
 
 // lowerForwardRefArrow rewrites forwardRef((props, ref) => body) into
