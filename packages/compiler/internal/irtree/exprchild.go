@@ -60,6 +60,9 @@ func (b *builder) jsxValueChild(expr ast.Expr, parentID string, doEscape bool) (
 	case *ast.JSXFragment:
 		return b.buildFragmentSlots(e, parentID), true
 	}
+	if content, container, ok := portalCall(expr); ok {
+		return b.buildPortal(content, container, expr.Pos(), parentID), true
+	}
 	if v, ok := b.activeContextValue(expr); ok {
 		if slot := b.buildTextSlot(v, parentID); slot != nil {
 			return []SlotNode{slot}, true

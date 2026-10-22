@@ -11,6 +11,9 @@
 // branches keep working across toggles.
 
 import { krateRefsEnter, krateRefsLeave } from './refs.js';
+import { kratePortalsEnter, kratePortalsIn, kratePortalsLeave } from './portal.js';
+
+export * from './portal.js';
 
 interface CondState {
   /** Branch currently between the markers: 'c' or 'a'. */
@@ -78,13 +81,17 @@ export function krateCondSwap(start: Comment, show: boolean, tpl: HTMLTemplateEl
   // React order: refs of the outgoing branch detach before the incoming
   // branch's refs attach.
   krateRefsLeave(out);
+  // A hidden branch takes its portal content with it.
+  kratePortalsLeave(out);
   let incoming = st.other;
   if (!incoming) {
     incoming = document.createDocumentFragment();
     if (st.tpl) incoming.appendChild(st.tpl.content);
   }
   detached.delete(incoming);
+  const portals = kratePortalsIn(incoming);
   parent.insertBefore(incoming, end);
+  kratePortalsEnter(portals);
   st.other = out;
   detached.add(out);
   st.shown = want;

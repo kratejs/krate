@@ -282,6 +282,9 @@ func (b *builder) buildSlotNodes(expr ast.Expr, parentID string) []SlotNode {
 
 // buildCallExprSlots handles call expressions - detects .map() calls and falls back to ExprSlot.
 func (b *builder) buildCallExprSlots(call *ast.CallExpr, parentID string) []SlotNode {
+	if content, container, ok := portalCall(call); ok {
+		return b.buildPortal(content, container, call.Position, parentID)
+	}
 	if isMapCall(call) {
 		return []SlotNode{b.buildListSlot(call, parentID)}
 	}
@@ -3874,16 +3877,16 @@ func cloneExprMap(m map[string]ast.Expr) map[string]ast.Expr {
 	return out
 }
 
-// buildPortalSlot renders <Portal> children inline inside a marker wrapper; the
-// client moves the wrapper to document.body and removes it on SPA disposal.
+// buildPortalSlot builds the built-in <Portal container={...}> (container
+// defaults to document.body).
 func (b *builder) buildPortalSlot(el *ast.JSXElement, parentID string) []SlotNode {
-	id := b.assignSlotID(b.nextDynamicSlot(parentID, "portal"))
-	children := b.buildFragmentSlots(&ast.JSXFragment{Children: el.Children}, string(id))
-	out := make([]SlotNode, 0, len(children)+2)
-	out = append(out, &StaticHTML{HTML: `<div data-krate-portal="` + string(id) + `" style="display:contents">`})
-	out = append(out, children...)
-	out = append(out, &StaticHTML{HTML: `</div>`})
-	return out
+	var container ast.Expr
+	for _, attr := range el.Opening.Attributes {
+		if attr != nil && !attr.Spread && attr.Name == "container" {
+			container = attr.Value
+		}
+	}
+	return b.buildPortal(&ast.JSXFragment{Children: el.Children}, container, el.Position, parentID)
 }
 
 // bridgeIslandExpr rewrites page-scope signal reads in an external island

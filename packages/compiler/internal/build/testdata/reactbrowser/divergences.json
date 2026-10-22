@@ -239,14 +239,6 @@
     "severity": "P0",
     "reason": "[derived-render-values] list filtered by two states in a render-local const: updates on the text filter but not on the select; empty state never shows"
   },
-  "r18/portal_basic": {
-    "severity": "P0",
-    "reason": "[portal] createPortal(..., document.body) content never appears in body; clicks cannot reach it"
-  },
-  "r18/portal_modal_toggle": {
-    "severity": "P0",
-    "reason": "[portal] conditional portal never mounts into body; its effect runs at page load while closed"
-  },
   "r18/ref_callback_inline_rerender": {
     "severity": "P1",
     "reason": "[callback-ref] inline callback refs are never called (no node on mount, no null/node pair on re-render)"
