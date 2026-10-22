@@ -1,0 +1,8 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#click" },
+    { "op": "wait", "ms": 50 },
+    { "op": "click", "sel": "#later" },
+    { "op": "wait", "ms": 50 }
+  ]
+}
