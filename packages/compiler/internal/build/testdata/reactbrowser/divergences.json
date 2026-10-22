@@ -87,17 +87,9 @@
     "severity": "P0",
     "reason": "[signal-getter-leak] object context value read via useContext gives undefined fields in effects and data-color={theme.color} is dropped; only the style binding works"
   },
-  "r18/diag_find_dom_node": {
-    "severity": "P1",
-    "reason": "[missing-diagnostic] findDOMNode (removed in React 19): build succeeds with no KR8001 diagnostic"
-  },
   "r18/diag_hook_in_loop": {
     "severity": "P1",
     "reason": "[missing-diagnostic] useState inside a for loop: build succeeds with no KR2xxx diagnostic"
-  },
-  "r18/diag_legacy_context": {
-    "severity": "P1",
-    "reason": "[missing-diagnostic] legacy context (childContextTypes/getChildContext/contextTypes): build succeeds with no KR3xxx diagnostic"
   },
   "r18/diag_string_ref": {
     "severity": "P1",
