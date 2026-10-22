@@ -91,6 +91,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	owners := pageNeedsOwners(result)
 	if owners {
 		b.WriteString("var __ko=typeof krateOwner==='function'?krateOwner:function(){};\n")
+		b.WriteString("var __km=typeof krateMount==='function'?krateMount:function(i,p,c,s,f){f();};\n")
 	}
 
 	// Per-component scoped IIFEs
@@ -102,9 +103,20 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 		// traced back to a source component. Stripped by minification in prod.
 		b.WriteString("// component ")
 		b.WriteString(string(sig.ComponentID))
-		b.WriteString("\n(function(){\n")
-		if owners {
-			writeOwnerDecl(&b, sig)
+		// A component inside a conditional branch is remountable: its scope is
+		// a function the runtime runs on every mount (fresh state, bindings
+		// and effects) and skips while the branch is hidden.
+		remountable := owners && len(sig.Conds) > 0
+		if remountable {
+			b.WriteString("\n")
+			writeOwnerDecl(&b, sig, "__km")
+			b.WriteString(",function(){\n")
+		} else {
+			b.WriteString("\n(function(){\n")
+			if owners {
+				writeOwnerDecl(&b, sig, "__ko")
+				b.WriteString(");\n")
+			}
 		}
 
 		// The component's own props object declaration must precede signal
@@ -298,7 +310,11 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			b.WriteString(");\n")
 		}
 
-		b.WriteString("})();\n")
+		if remountable {
+			b.WriteString("});\n")
+		} else {
+			b.WriteString("})();\n")
+		}
 	}
 	if owners {
 		b.WriteString("__ko(null);\n")
@@ -325,7 +341,9 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 // in which case every component scope declares its owner.
 func pageNeedsOwners(result *EmitResult) bool {
 	for _, sig := range result.Signatures {
-		if sig.Tier == irtree.TierClient && len(sig.Effects) > 0 {
+		// Components in conditional branches need owners to unmount and
+		// remount with fresh state when the branch toggles.
+		if sig.Tier == irtree.TierClient && (len(sig.Effects) > 0 || len(sig.Conds) > 0) {
 			return true
 		}
 	}
@@ -334,8 +352,11 @@ func pageNeedsOwners(result *EmitResult) bool {
 
 // writeOwnerDecl emits the krateOwner call that opens a component scope:
 // its id, enclosing component, conditional branches and list slot.
-func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
-	b.WriteString("__ko(")
+// fn is __ko (krateOwner) or __km (krateMount, which always takes the conds
+// and slot arguments). The call is left open for the caller to close.
+func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature, fn string) {
+	b.WriteString(fn)
+	b.WriteString("(")
 	b.WriteString(strconv.Quote(string(sig.ComponentID)))
 	b.WriteString(",")
 	if sig.ParentID != "" {
@@ -343,7 +364,7 @@ func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
 	} else {
 		b.WriteString("null")
 	}
-	if len(sig.Conds) > 0 || sig.ListSlot != "" {
+	if fn == "__km" || len(sig.Conds) > 0 || sig.ListSlot != "" {
 		b.WriteString(",[")
 		for i, c := range sig.Conds {
 			if i > 0 {
@@ -363,9 +384,10 @@ func writeOwnerDecl(b *strings.Builder, sig irtree.ComponentSignature) {
 		if sig.ListSlot != "" {
 			b.WriteString(",")
 			b.WriteString(strconv.Quote(string(sig.ListSlot)))
+		} else if fn == "__km" {
+			b.WriteString(",null")
 		}
 	}
-	b.WriteString(");\n")
 }
 
 // writeRefBinding emits kbindRef(id, get, assign). get returns the ref value

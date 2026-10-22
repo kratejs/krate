@@ -25,8 +25,9 @@ func TestHydrationDeclaresEffectOwners(t *testing.T) {
 		"(function(){\n__ko(\"Index_c0\",null);\n",
 		// No-deps effect: deps are the component's state.
 		"return [c(),show()];",
-		// The child in the conditional's consequent, shown on the server.
-		"(function(){\n__ko(\"4.c.Child.Child_c0\",\"Index_c0\",[[\"4\",\"c\",1]]);\n",
+		// The child in the conditional's consequent, shown on the server, is
+		// a remountable scope.
+		"__km(\"4.c.Child.Child_c0\",\"Index_c0\",[[\"4\",\"c\",1]],null,function(){\n",
 		// List items carry their list slot.
 		"__ko(\"8.Child.Child_c1\",\"Index_c0\",[],\"7\");\n",
 		"__ko(null);\n")
@@ -57,7 +58,7 @@ export default function Index() {
   const [open, setOpen] = useState(false);
   return <main><button onClick={() => setOpen(!open)}>t</button>{open ? <Panel /> : <span>closed</span>}</main>;
 }`)
-	if !strings.Contains(js, `[["3","c",0]]`) {
+	if !strings.Contains(js, `__km("3.c.Panel.Panel_c0","Index_c0",[["3","c",0]],null,function(){`) {
 		t.Fatalf("a component in the initially hidden branch must be declared hidden:\n%s", js)
 	}
 }
@@ -86,7 +87,7 @@ export default function Index() {
   const [c, setC] = useState(() => 2 + 3);
   return <button onClick={() => setC((x) => x + 1)}>{c}</button>;
 }`)
-	if !strings.Contains(res.HTML, ">5<") || !strings.Contains(js, "createSignal(5)") {
+	if !strings.Contains(res.HTML, ">5<") || !strings.Contains(js, "createSignal(5,krateHookState)") {
 		t.Fatalf("lazy initializer should be called, not stored:\n%s\n%s", res.HTML, js)
 	}
 }

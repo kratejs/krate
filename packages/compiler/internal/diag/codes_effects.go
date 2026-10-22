@@ -15,8 +15,8 @@ const (
 	CodeMemoNoDeps Code = "KR2005"
 	// CodeDepsNotArray: a dependency argument that is not an array.
 	CodeDepsNotArray Code = "KR2006"
-	// CodeCleanupReadsState: an effect cleanup that reads state.
-	CodeCleanupReadsState Code = "KR2007"
+	// CodeHookPlacement: a hook called inside a condition or loop.
+	CodeHookPlacement Code = "KR2008"
 )
 
 func init() {
@@ -68,12 +68,13 @@ func init() {
 				"dependency array. Pass [a, b] or omit the argument.",
 		},
 		CodeInfo{
-			Code:  CodeCleanupReadsState,
-			Title: "Effect cleanup reads state",
-			Explanation: "In React a cleanup closes over the values of the render its effect ran for, so it sees the " +
-				"previous state. Krate state reads are live getters, so a cleanup sees the current (new) value. " +
-				"Copy the value into a local in the effect body and read that in the cleanup: " +
-				"const id = roomId; return () => leave(id).",
+			Code:  CodeHookPlacement,
+			Title: "Hook called inside a condition or loop",
+			Explanation: "React requires hooks to be called in the same order on every render (the Rules of " +
+				"Hooks), so a hook inside an if, switch or loop is undefined behaviour in React (it throws when " +
+				"the hook count changes). Krate runs the component once and would bind whatever the first run " +
+				"created. Call the hook unconditionally at the top level and branch on its result, or move the " +
+				"repeated or conditional part into a child component that calls the hook.",
 		},
 	)
 }
