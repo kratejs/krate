@@ -1,0 +1,8 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#focus" },
+    { "op": "press", "key": "End" },
+    { "op": "press", "key": "d" },
+    { "op": "click", "sel": "#measure" }
+  ]
+}

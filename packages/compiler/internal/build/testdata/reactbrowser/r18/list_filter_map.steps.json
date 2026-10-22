@@ -1,0 +1,9 @@
+{
+  "steps": [
+    { "op": "type", "sel": "#q", "text": "a" },
+    { "op": "select", "sel": "#role", "value": "math" },
+    { "op": "type", "sel": "#q", "text": "zz" },
+    { "op": "clear", "sel": "#q" },
+    { "op": "select", "sel": "#role", "value": "all" }
+  ]
+}

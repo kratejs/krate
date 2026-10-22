@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#go" },
+    { "op": "fill", "sel": "#user", "text": "grace" },
+    { "op": "press", "sel": "#user", "key": "Enter" }
+  ]
+}

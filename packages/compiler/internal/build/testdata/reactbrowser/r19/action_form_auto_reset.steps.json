@@ -1,0 +1,11 @@
+{
+  "steps": [
+    { "op": "fill", "sel": "#text", "text": "hello" },
+    { "op": "click", "sel": "#send" },
+    { "op": "waitFor", "sel": "#messages li" },
+    { "op": "wait", "ms": 50 },
+    { "op": "fill", "sel": "#text", "text": "again" },
+    { "op": "press", "sel": "#text", "key": "Enter" },
+    { "op": "wait", "ms": 200 }
+  ]
+}

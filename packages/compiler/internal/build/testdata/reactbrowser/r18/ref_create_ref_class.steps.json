@@ -1,0 +1,6 @@
+{
+  "steps": [
+    { "op": "fill", "sel": "#source", "text": "token-456" },
+    { "op": "click", "sel": "#copy" }
+  ]
+}

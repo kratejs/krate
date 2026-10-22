@@ -1,0 +1,8 @@
+{
+  "steps": [
+    { "op": "click", "sel": "#count" },
+    { "op": "click", "sel": "#focus-c" },
+    { "op": "click", "sel": "#drop-a" },
+    { "op": "click", "sel": "#count" }
+  ]
+}

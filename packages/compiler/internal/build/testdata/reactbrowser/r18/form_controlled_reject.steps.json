@@ -1,0 +1,8 @@
+{
+  "steps": [
+    { "op": "type", "sel": "#pin", "text": "12a3" },
+    { "op": "type", "sel": "#pin", "text": "45" },
+    { "op": "type", "sel": "#code", "text": "cd" },
+    { "op": "type", "sel": "#frozen", "text": "x" }
+  ]
+}

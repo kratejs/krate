@@ -1,0 +1,10 @@
+{
+  "settleMs": 0,
+  "steps": [
+    { "op": "click", "sel": "#add" },
+    { "op": "waitFor", "text": "added 2" },
+    { "op": "fill", "sel": "#qty", "text": "x" },
+    { "op": "click", "sel": "#add" },
+    { "op": "waitFor", "text": "invalid quantity" }
+  ]
+}

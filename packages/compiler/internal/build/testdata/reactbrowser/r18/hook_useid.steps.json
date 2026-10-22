@@ -1,0 +1,6 @@
+{
+  "notes": "Generated id strings differ by design (React uses :r0: style ids); that part is P2.",
+  "steps": [
+    { "op": "click", "sel": "#more" }
+  ]
+}

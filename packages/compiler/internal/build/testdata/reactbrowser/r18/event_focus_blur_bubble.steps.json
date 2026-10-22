@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "focus", "sel": "#first" },
+    { "op": "focus", "sel": "#second" },
+    { "op": "focus", "sel": "#outside" }
+  ]
+}
