@@ -707,7 +707,7 @@ func (e *Emitter) emitMetaSlot(s *irtree.MetaSlot) SlotOutput {
 	// <Head> children are routed into the document <head> by walkMetaSlots; they
 	// must not also render into the body. <Script>/<Style> keep their body HTML
 	// (valid there, and captured separately into Script/Style fields).
-	if strings.EqualFold(s.ComponentName, "Head") {
+	if strings.EqualFold(s.ComponentName, "Head") || s.ComponentName == irtree.HoistMeta {
 		out.HTML = ""
 	}
 	return out
@@ -1036,6 +1036,13 @@ func walkMetaSlots(node *irtree.ComponentNode, result *EmitResult) {
 					childHTML.WriteString(out.inlineHTML())
 				}
 				switch strings.ToLower(meta.ComponentName) {
+				case irtree.HoistMeta:
+					// Hoisted React 19 metadata; identical elements (the same
+					// stylesheet or tag rendered twice) are emitted once.
+					html := childHTML.String()
+					if !strings.Contains(result.HeadHTML, html) {
+						result.HeadHTML += html
+					}
 				case "head":
 					result.HeadHTML += childHTML.String()
 				case "script":

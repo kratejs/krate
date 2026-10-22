@@ -42,6 +42,11 @@ type SSREval struct {
 	ScriptHTML string
 	StyleHTML  string
 
+	// svgDepth and headDepth count enclosing <svg> elements and <Head>
+	// blocks, where React 19 metadata is not hoisted.
+	svgDepth  int
+	headDepth int
+
 	// interactiveEmit is an optional hook set by the emitter. When an
 	// uppercase component JSX element is encountered during evaluation, the
 	// hook is given a chance to render it through the tree emit path (which
@@ -1252,7 +1257,9 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 	// wrappers (layouts, doc shells) still inject <Head>/<Script>/<Style>.
 	switch name {
 	case "Head", "head":
+		e.headDepth++
 		e.HeadHTML += e.evalChildren(el.Children)
+		e.headDepth--
 		return ""
 	case "Script":
 		e.ScriptHTML += e.renderMetaElement(el, "script")
@@ -1319,6 +1326,19 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		return ""
 	}
 
+	// React 19 document metadata (<title>, <meta>, <link>) moves to <head>;
+	// identical elements are emitted once.
+	if e.svgDepth == 0 && e.headDepth == 0 && irtree.IsHoistableMetadata(el) {
+		html := e.renderElement(irtree.WithoutAttr(el, "precedence"), name)
+		if !strings.Contains(e.HeadHTML, html) {
+			e.HeadHTML += html
+		}
+		return ""
+	}
+	if name == "svg" {
+		e.svgDepth++
+		defer func() { e.svgDepth-- }()
+	}
 	return e.renderElement(el, name)
 }
 

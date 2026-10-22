@@ -309,11 +309,7 @@
   },
   "r19/meta_tags_hoist": {
     "severity": "P0",
-    "reason": "[document-metadata] <title>/<meta>/<link> in a component stay in the body and are not hoisted; hydration throws 'props is not defined'"
-  },
-  "r19/meta_title_hoist": {
-    "severity": "P1",
-    "reason": "[document-metadata] <title> in a component is not hoisted to <head>: it stays in the body with Krate slot markers as literal text and document.title never updates (use <Head>)"
+    "reason": "[derived-render-values] <title>/<meta>/<link> are hoisted into <head> and match after load, but the component's local derived from a prop (const p = posts[props.index]) is evaluated once, so the head and the article do not update on 'next post'"
   },
   "r19/ref_callback_cleanup": {
     "severity": "P1",

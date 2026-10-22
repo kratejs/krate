@@ -785,7 +785,8 @@ func referencesProps(expr ast.Expr) bool {
 	case *ast.Identifier:
 		return e.Name == "props"
 	case *ast.MemberExpr:
-		return referencesProps(e.Object)
+		// A computed key reads props too: `posts[props.index]`.
+		return referencesProps(e.Object) || (e.Computed && referencesProps(e.Property))
 	case *ast.CallExpr:
 		if referencesProps(e.Callee) {
 			return true

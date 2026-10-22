@@ -340,6 +340,13 @@ type builder struct {
 	eventDiagSeen map[string]bool
 	markupErrs    []error    // invalid tag/attribute names, children on void elements
 	selectStack   [][]string // selected option values of enclosing <select> elements
+	// svgDepth and metaDepth count the enclosing <svg> elements and <Head>
+	// blocks: document metadata is not hoisted inside either.
+	svgDepth  int
+	metaDepth int
+	// branchDepth counts enclosing conditional branches and list items;
+	// metadata there stays in place (hoisting it needs a runtime head swap).
+	branchDepth int
 
 	// cssIndex assigns stable, page-unique indices to (component, var) scope
 	// pairs so classes/CSS are deterministic across builds.

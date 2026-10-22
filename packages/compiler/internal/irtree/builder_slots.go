@@ -351,7 +351,8 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 
 	// Special components - route to metadata output. Lowercase <script> and
 	// <style> are ordinary elements rendered in place (e.g. a <style> inside
-	// an <svg>); only the documented <Head>/<Script>/<Style> are hoisted.
+	// an <svg>); the documented <Head>/<Script>/<Style> are hoisted, and so is
+	// React 19 document metadata (<title>/<meta>/<link>, see metadata.go).
 	switch name {
 	case "Head", "head", "Script", "Style":
 		return []SlotNode{b.buildMetaSlot(el, parentID)}
@@ -464,7 +465,10 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		return []SlotNode{&StaticHTML{HTML: "<span></span>"}}
 	}
 
-	// Lowercase = HTML element
+	// Lowercase = HTML element. React 19 document metadata moves to <head>.
+	if b.hoistsMetadata(el) {
+		return b.buildHoistedMetadata(el, parentID)
+	}
 	return b.buildStaticElementSlots(el, parentID)
 }
 
@@ -995,6 +999,8 @@ func (b *builder) buildSyntaxHighlightSlots(el *ast.JSXElement, parentID string)
 func (b *builder) buildMetaSlot(el *ast.JSXElement, parentID string) *MetaSlot {
 	name := strings.ToLower(el.Opening.Name)
 	var children []SlotNode
+	b.metaDepth++
+	defer func() { b.metaDepth-- }()
 
 	// <Script>/<style> and <Style> elements need their element tag preserved
 	// (including a src attribute) so they land in the body as valid markup;
@@ -1878,8 +1884,10 @@ func (b *builder) buildConditionalSlot(expr ast.Expr, parentID string) *Conditio
 	if cond != nil {
 		// Build branches under branch-scoped parents so nested slots in the
 		// consequent and alternate branches never share slot IDs.
+		b.branchDepth++
 		slot.Consequent = b.buildSlotNodes(cond.Consequent, string(id)+".c")
 		slot.Alternate = b.buildSlotNodes(cond.Alternate, string(id)+".a")
+		b.branchDepth--
 	}
 	return slot
 }
@@ -1887,6 +1895,8 @@ func (b *builder) buildConditionalSlot(expr ast.Expr, parentID string) *Conditio
 // buildListSlot - .map() with key detection
 
 func (b *builder) buildListSlot(expr ast.Expr, parentID string) *ListSlot {
+	b.branchDepth++
+	defer func() { b.branchDepth-- }()
 	id := b.assignSlotID(b.nextDynamicSlot(parentID, "list"))
 	exprSource := generateExprJS(expr, b.sigMap())
 

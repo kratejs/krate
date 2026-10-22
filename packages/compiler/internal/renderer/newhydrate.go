@@ -29,11 +29,12 @@ function scanIn(r){var w=document.createTreeWalker(r,NodeFilter.SHOW_COMMENT,nul
 function __portalRoots(){var r=[__root];__tpls.forEach(function(t){r.push(t.content);});return r;}
 function scan(){__cache.clear();__tpls.clear();if(typeof krateCondReset==='function')krateCondReset();if(typeof kratePortalReset==='function')kratePortalReset();scanIn(__root);var ts=__root.querySelectorAll('template[data-kc]');for(var i=0;i<ts.length;i++){__tpls.set(ts[i].getAttribute('data-kc'),ts[i]);scanIn(ts[i].content);}if(typeof kratePortalScan==='function')kratePortalScan(__portalRoots(),scanIn);}
 scan();
-window.findSlot=function(id){var q='[data-k="k:'+id+'"]';var el=__root.querySelector(q);if(el)return el;var c=__cache.get(id);if(c)return c;var found=null;__tpls.forEach(function(t){if(!found)found=t.content.querySelector(q);});if(!found&&typeof krateCondDetached==='function'){var ds=krateCondDetached();for(var i=0;i<ds.length&&!found;i++)found=ds[i].querySelector(q);}if(!found&&typeof kratePortalFind==='function'){var pr=__portalRoots();if(typeof krateCondDetached==='function')pr=pr.concat(krateCondDetached());found=kratePortalFind(q,pr);}return found;};
+window.findSlot=function(id){var q='[data-k="k:'+id+'"]';var el=__root.querySelector(q);if(el)return el;var c=__cache.get(id);if(c)return c;var found=null;__tpls.forEach(function(t){if(!found)found=t.content.querySelector(q);});if(!found&&typeof krateCondDetached==='function'){var ds=krateCondDetached();for(var i=0;i<ds.length&&!found;i++)found=ds[i].querySelector(q);}if(!found&&typeof kratePortalFind==='function'){var pr=__portalRoots();if(typeof krateCondDetached==='function')pr=pr.concat(krateCondDetached());found=kratePortalFind(q,pr);}if(!found&&document.head)found=document.head.querySelector(q);return found;};
 window.refreshSlots=scan;
 window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}});});};
 window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;var __first=true;__safe(function(){createEffect(function(){var v=get();if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);});});};
 window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(function(){var s=!!get();var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');});});};
+window.kbindTextContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();n.textContent=v==null||typeof v==='boolean'?'':String(v);});});};
 window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(function(){var v=get();if(v==null||v===false)n.removeAttribute(attr);else if(v===true)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){n.removeAttribute('style');Object.assign(n.style,v);}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));});});};
 window.kbindProp=function(id,attr,get){var n=findSlot(id);if(n)__safe(function(){krateControl(n,attr,get);});};
 window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){krateOn(n,prop,fn);});};
@@ -281,6 +282,14 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			// value/checked/selected are DOM properties, not attributes: setting
 			// the attribute after interaction has no effect.
 			name := a.AttrName
+			if a.AttrName == irtree.TextContentAttr {
+				b.WriteString("kbindTextContent(")
+				b.WriteString(strconv.Quote(string(a.ElementSlotID)))
+				b.WriteString(",()=>")
+				b.WriteString(exprJS)
+				b.WriteString(");\n")
+				continue
+			}
 			if isFormPropertyAttr(a.AttrName) {
 				b.WriteString("kbindProp(")
 				if a.Prop != "" {
