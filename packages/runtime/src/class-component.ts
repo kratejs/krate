@@ -1,0 +1,525 @@
+// Runtime for lowered React class components.
+//
+// The compiler lowers `class X extends Component` into a function component
+// whose render reads a committed-state signal and a gated props object. This
+// module supplies the instance behind `this`: batched setState with callbacks,
+// forceUpdate, getDerivedStateFromProps, shouldComponentUpdate /
+// PureComponent, getSnapshotBeforeUpdate, the mount/update/unmount
+// lifecycles, legacy UNSAFE_ hooks and error boundaries.
+//
+// Updates run in two phases, like React's render and commit:
+//
+//   render  (after the current effect flush): every dirty instance, parents
+//           first, computes its next props/state, consults
+//           shouldComponentUpdate, takes the snapshot, and writes the
+//           committed signals the DOM bindings read;
+//   commit  (after those DOM writes flush): componentDidMount /
+//           componentDidUpdate / componentDidCatch and setState callbacks,
+//           children before parents.
+
+import { afterFlush, createEffect, createSignal, untrack } from './signal.js';
+import {
+  getOwner,
+  handleError,
+  onOwnerCleanup,
+  remountChildren,
+  runWithOwner,
+  setBoundary,
+  unmountChildren,
+  type ErrorInfo,
+  type Owner,
+} from './boundary.js';
+
+type Obj = Record<string, unknown>;
+
+/** Lifecycle methods and statics of a lowered class, as closures. */
+export interface ClassSpec {
+  name?: string;
+  /** PureComponent: shallow-compare props and state. */
+  pure?: boolean;
+  defaultProps?: Obj | null;
+  /** Reads the value of `static contextType`. */
+  context?: () => unknown;
+  getDerivedStateFromProps?: (props: Obj, state: Obj) => Obj | null | undefined;
+  getDerivedStateFromError?: (error: unknown) => Obj | null | undefined;
+  shouldComponentUpdate?: (nextProps: Obj, nextState: Obj, nextContext: unknown) => unknown;
+  getSnapshotBeforeUpdate?: (prevProps: Obj, prevState: Obj) => unknown;
+  componentDidMount?: () => void;
+  componentDidUpdate?: (prevProps: Obj, prevState: Obj, snapshot: unknown) => void;
+  componentWillUnmount?: () => void;
+  componentDidCatch?: (error: unknown, info: ErrorInfo) => void;
+  componentWillReceiveProps?: (nextProps: Obj, nextContext: unknown) => void;
+  componentWillUpdate?: (nextProps: Obj, nextState: Obj, nextContext: unknown) => void;
+  /** An error a descendant threw while the page was built (see build-time boundaries). */
+  buildError?: { name?: string; message?: string } | null;
+}
+
+/** The object lowered code uses as `this`. Instance fields are added freely. */
+export interface ClassInstance {
+  readonly props: Obj;
+  state: Obj;
+  readonly context: unknown;
+  setState(update: Obj | ((state: Obj, props: Obj) => Obj | null | undefined) | null, callback?: () => void): void;
+  forceUpdate(callback?: () => void): void;
+  [field: string]: unknown;
+}
+
+interface Update {
+  partial: unknown;
+  callback?: () => void;
+}
+
+let seq = 0;
+
+class Controller {
+  readonly inst: ClassInstance;
+  readonly owner: Owner | null;
+  readonly spec: ClassSpec;
+  readonly seq = seq++;
+  private readonly getState: () => Obj;
+  private readonly setStateSignal: (v: Obj) => void;
+  private readonly raw: Obj;
+  private readonly rawGetters: Array<[string, () => unknown]> = [];
+  private readonly setRendered: (v: Obj) => void;
+  private queue: Update[] = [];
+  private forced = false;
+  private parentRender = false;
+  mounted = false;
+  disposed = false;
+  private catching = false;
+  private errorCommitPending = false;
+  private props: Obj;
+  private state: Obj;
+  private context: unknown;
+
+  constructor(raw: Obj | null | undefined, getState: () => Obj, setState: (v: Obj) => void, spec: ClassSpec) {
+    this.spec = spec || {};
+    this.owner = getOwner();
+    this.raw = raw && typeof raw === 'object' ? raw : {};
+    this.getState = getState;
+    this.setStateSignal = setState;
+    for (const key of Object.keys(this.raw)) {
+      const desc = Object.getOwnPropertyDescriptor(this.raw, key);
+      if (desc && desc.get) {
+        const get = desc.get;
+        const obj = this.raw;
+        this.rawGetters.push([key, () => get.call(obj)]);
+      }
+    }
+    this.props = this.readProps();
+    this.state = untrack(getState) || {};
+    this.context = this.readContext();
+    const [rendered, setRendered] = createSignal<Obj>(this.props);
+    this.setRendered = setRendered;
+    this.gateProps(rendered);
+
+    const self = this;
+    const inst: ClassInstance = {
+      get props() {
+        return self.props;
+      },
+      get state() {
+        return self.state;
+      },
+      set state(v: Obj) {
+        // `this.state = ...` outside the constructor replaces instance state
+        // without rendering, as in React.
+        self.state = v;
+      },
+      get context() {
+        return self.context;
+      },
+      setState(update, callback) {
+        self.enqueue({ partial: update, callback });
+      },
+      forceUpdate(callback) {
+        self.forced = true;
+        self.enqueue({ partial: null, callback });
+      },
+    };
+    this.inst = inst;
+
+    if (this.owner) {
+      this.owner.data.classController = this;
+      onOwnerCleanup(this.owner, () => this.unmount());
+      if (this.spec.getDerivedStateFromError || this.spec.componentDidCatch) {
+        setBoundary(this.owner, (err, info) => this.catchError(err, info));
+      }
+    }
+
+    // Track the parent's prop getters: a change schedules an update.
+    if (this.rawGetters.length > 0) {
+      let first = true;
+      createEffect(() => {
+        for (const [, get] of this.rawGetters) get();
+        if (first) {
+          first = false;
+          return;
+        }
+        if (!this.disposed) {
+          renderQueue.add(this);
+          schedule();
+        }
+      });
+    }
+
+    commit(this, () => {
+      this.mounted = true;
+      if (this.spec.componentDidMount) this.spec.componentDidMount.call(this.inst);
+    });
+    const buildError = this.spec.buildError;
+    if (buildError && this.spec.componentDidCatch) {
+      const err = new Error(buildError.message || 'Error');
+      if (buildError.name) err.name = buildError.name;
+      if (this.owner) this.owner.inError = true;
+      commit(this, () => {
+        this.spec.componentDidCatch!.call(this.inst, err, { componentStack: '\n    at ' + (this.spec.name || 'Component') + ' (build)' });
+      });
+    } else if (buildError && this.owner) {
+      this.owner.inError = true;
+    }
+  }
+
+  private readProps(): Obj {
+    const out: Obj = {};
+    untrack(() => {
+      for (const key of Object.keys(this.raw)) {
+        if (key.startsWith('__krate')) continue;
+        const getter = this.rawGetters.find((g) => g[0] === key);
+        out[key] = getter ? getter[1]() : this.raw[key];
+      }
+    });
+    const defaults = this.spec.defaultProps;
+    if (defaults) {
+      for (const key of Object.keys(defaults)) {
+        if (out[key] === undefined) out[key] = defaults[key];
+      }
+    }
+    return out;
+  }
+
+  private readContext(): unknown {
+    const read = this.spec.context;
+    return read ? untrack(read) : undefined;
+  }
+
+  // Render bindings read props through the registry object. Redefine its
+  // getters to read the committed props, so a skipped update
+  // (shouldComponentUpdate false) leaves the DOM unchanged and defaultProps
+  // apply at runtime.
+  private gateProps(rendered: () => Obj): void {
+    const keys = new Set<string>();
+    for (const [key] of this.rawGetters) keys.add(key);
+    const defaults = this.spec.defaultProps;
+    if (defaults) {
+      for (const key of Object.keys(defaults)) {
+        if (this.raw[key] === undefined) keys.add(key);
+      }
+    }
+    for (const key of keys) {
+      if (key.startsWith('__krate')) continue;
+      try {
+        Object.defineProperty(this.raw, key, {
+          get: () => rendered()[key],
+          enumerable: true,
+          configurable: true,
+        });
+      } catch {
+        // A frozen registry keeps live props.
+      }
+    }
+  }
+
+  enqueue(update: Update): void {
+    if (this.disposed) return;
+    this.queue.push(update);
+    renderQueue.add(this);
+    schedule();
+  }
+
+  /** Marks the instance for a re-render because its creator re-rendered. */
+  markParentRender(): void {
+    if (this.disposed || !this.mounted) return;
+    this.parentRender = true;
+    renderQueue.add(this);
+  }
+
+  performUpdate(): void {
+    if (this.disposed || (this.owner && this.owner.state !== 'mounted')) return;
+    if (this.owner) runWithOwner(this.owner, () => this.update());
+    else {
+      try {
+        this.update();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  }
+
+  private update(): void {
+    const spec = this.spec;
+    const inst = this.inst;
+    const nextProps = this.readProps();
+    const nextContext = this.readContext();
+    const propsChanged = !shallowEqual(nextProps, this.props) || nextContext !== this.context;
+    const queue = this.queue;
+    this.queue = [];
+    const forced = this.forced;
+    this.forced = false;
+    const parentRender = this.parentRender;
+    this.parentRender = false;
+    if (queue.length === 0 && !forced && !propsChanged && !parentRender) return;
+
+    const legacy = !spec.getDerivedStateFromProps && !spec.getSnapshotBeforeUpdate;
+    if (legacy && (propsChanged || parentRender) && spec.componentWillReceiveProps) {
+      spec.componentWillReceiveProps.call(inst, nextProps, nextContext);
+      // setState inside componentWillReceiveProps joins this update.
+      queue.push(...this.queue);
+      this.queue = [];
+    }
+
+    const prevProps = this.props;
+    const prevState = this.state;
+    let nextState = prevState;
+    const callbacks: Array<() => void> = [];
+    for (const u of queue) {
+      const partial =
+        typeof u.partial === 'function'
+          ? (u.partial as (s: Obj, p: Obj) => unknown).call(inst, nextState, nextProps)
+          : u.partial;
+      if (partial != null && typeof partial === 'object') nextState = { ...nextState, ...(partial as Obj) };
+      if (typeof u.callback === 'function') callbacks.push(u.callback);
+    }
+    if (spec.getDerivedStateFromProps) {
+      const derived = spec.getDerivedStateFromProps(nextProps, nextState);
+      if (derived != null) nextState = { ...nextState, ...derived };
+    }
+
+    let shouldUpdate = true;
+    if (!forced) {
+      if (spec.shouldComponentUpdate) {
+        shouldUpdate = !!spec.shouldComponentUpdate.call(inst, nextProps, nextState, nextContext);
+      } else if (spec.pure) {
+        shouldUpdate = !shallowEqual(prevProps, nextProps) || !shallowEqual(prevState, nextState);
+      }
+    }
+    if (shouldUpdate && legacy && spec.componentWillUpdate) {
+      spec.componentWillUpdate.call(inst, nextProps, nextState, nextContext);
+    }
+
+    // React updates the instance even when the render is skipped.
+    this.props = nextProps;
+    this.state = nextState;
+    this.context = nextContext;
+
+    if (!shouldUpdate) {
+      for (const cb of callbacks) commit(this, () => cb.call(inst));
+      return;
+    }
+
+    const snapshot = spec.getSnapshotBeforeUpdate
+      ? spec.getSnapshotBeforeUpdate.call(inst, prevProps, prevState)
+      : undefined;
+    this.setRendered(nextProps);
+    // A forced update re-runs every binding, even when state is unchanged.
+    this.setStateSignal(forced && nextState === prevState ? { ...nextState } : nextState);
+    if (forced && nextState === prevState) this.state = untrack(this.getState);
+
+    const recovering = this.owner && this.owner.inError && !this.errorCommitPending;
+    if (recovering && this.owner) {
+      this.owner.inError = false;
+      remountQueue.add(this.owner);
+    }
+    commit(this, () => {
+      if (spec.componentDidUpdate) spec.componentDidUpdate.call(inst, prevProps, prevState, snapshot);
+    });
+    for (const cb of callbacks) commit(this, () => cb.call(inst));
+    this.cascade();
+  }
+
+  // A re-render re-renders the class components this one's render created
+  // (directly or through function components), unless they bail out.
+  private cascade(): void {
+    const owner = this.owner;
+    if (!owner) return;
+    const reaches = (o: Owner | null): boolean => {
+      for (let c = o ? o.creator : null; c; c = c.creator) {
+        if (c === owner) return true;
+        if (c.data.classController) return false;
+      }
+      return false;
+    };
+    const walk = (o: Owner): void => {
+      for (const child of o.children) {
+        if (child.state !== 'mounted') continue;
+        const ctrl = child.data.classController as Controller | undefined;
+        if (ctrl && reaches(child)) ctrl.markParentRender();
+        walk(child);
+      }
+    };
+    walk(owner);
+  }
+
+  catchError(err: unknown, info: ErrorInfo): boolean {
+    const spec = this.spec;
+    const owner = this.owner;
+    if (this.disposed || !owner || owner.state !== 'mounted') return false;
+    if (this.catching) return true;
+    this.catching = true;
+    try {
+      owner.inError = true;
+      // The children that were rendered when the error happened stay down
+      // until the boundary renders again; dormant ones (a hidden fallback
+      // branch) may still mount.
+      const failed = owner.children.filter((c) => c.state === 'mounted');
+      unmountChildren(owner);
+      for (const child of failed) child.blocked = true;
+      let next = this.state;
+      if (spec.getDerivedStateFromError) {
+        const partial = spec.getDerivedStateFromError(err);
+        if (partial != null) next = { ...next, ...partial };
+      } else if (typeof console !== 'undefined') {
+        console.error(
+          (spec.name || 'Component') +
+            ': Error boundaries should implement getDerivedStateFromError(). ' +
+            'In that method, return a state update to display an error message or fallback UI.',
+        );
+      }
+      const prevProps = this.props;
+      const prevState = this.state;
+      const wasMounted = this.mounted;
+      this.state = next;
+      this.errorCommitPending = true;
+      this.setStateSignal(next);
+      commit(this, () => {
+        this.errorCommitPending = false;
+        if (wasMounted && next !== prevState && spec.componentDidUpdate) {
+          spec.componentDidUpdate.call(this.inst, prevProps, prevState, undefined);
+        }
+        if (spec.componentDidCatch) spec.componentDidCatch.call(this.inst, err, info);
+      });
+    } finally {
+      this.catching = false;
+    }
+    return true;
+  }
+
+  unmount(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    renderQueue.delete(this);
+    if (this.mounted && this.spec.componentWillUnmount) {
+      this.spec.componentWillUnmount.call(this.inst);
+    }
+    this.mounted = false;
+  }
+
+  runLifecycle(fn: () => void): void {
+    if (this.disposed) return;
+    if (this.owner) runWithOwner(this.owner, fn);
+    else {
+      try {
+        fn();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  }
+}
+
+function shallowEqual(a: Obj | null | undefined, b: Obj | null | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) {
+    if (!Object.prototype.hasOwnProperty.call(b, k) || !Object.is(a[k], b[k])) return false;
+  }
+  return true;
+}
+
+// Scheduler.
+
+const renderQueue = new Set<Controller>();
+const remountQueue = new Set<Owner>();
+const commitQueue: Array<{ c: Controller; fn: () => void; n: number }> = [];
+let commitSeq = 0;
+let scheduled = false;
+
+function schedule(): void {
+  if (scheduled) return;
+  scheduled = true;
+  afterFlush(runScheduler);
+}
+
+function commit(c: Controller, fn: () => void): void {
+  commitQueue.push({ c, fn, n: commitSeq++ });
+  schedule();
+}
+
+function preOrder(a: Controller, b: Controller): number {
+  if (a.owner && b.owner) return a.owner.order - b.owner.order;
+  return a.seq - b.seq;
+}
+
+function isAncestor(a: Owner, b: Owner): boolean {
+  for (let p = b.parent; p; p = p.parent) if (p === a) return true;
+  return false;
+}
+
+// Children commit before their parents; unrelated owners keep tree order.
+function postOrder(a: { c: Controller; n: number }, b: { c: Controller; n: number }): number {
+  const oa = a.c.owner;
+  const ob = b.c.owner;
+  if (oa && ob && oa !== ob) {
+    if (isAncestor(oa, ob)) return 1;
+    if (isAncestor(ob, oa)) return -1;
+    return oa.order - ob.order;
+  }
+  if (oa === ob) return a.n - b.n;
+  return a.c.seq - b.c.seq || a.n - b.n;
+}
+
+function runScheduler(): void {
+  scheduled = false;
+  if (renderQueue.size > 0) {
+    for (let guard = 0; renderQueue.size > 0 && guard < 1000; guard++) {
+      const list = Array.from(renderQueue).sort(preOrder);
+      renderQueue.clear();
+      for (const c of list) c.performUpdate();
+    }
+    // Commit once the DOM writes made by the render phase have flushed.
+    schedule();
+    return;
+  }
+  if (remountQueue.size > 0) {
+    const owners = Array.from(remountQueue).sort((a, b) => a.order - b.order);
+    remountQueue.clear();
+    for (const o of owners) remountChildren(o);
+  }
+  if (commitQueue.length > 0) {
+    const list = commitQueue.splice(0).sort(postOrder);
+    for (const entry of list) entry.c.runLifecycle(entry.fn);
+  }
+  if (renderQueue.size > 0 || commitQueue.length > 0 || remountQueue.size > 0) schedule();
+}
+
+/**
+ * Creates the instance behind a lowered class component. `props` is the
+ * component's props registry object, `getState`/`setState` the committed-state
+ * signal its render reads.
+ */
+export function __krateClass(
+  props: Obj | null | undefined,
+  getState: () => Obj,
+  setState: (v: Obj) => void,
+  spec: ClassSpec,
+): ClassInstance {
+  return new Controller(props, getState, setState, spec).inst;
+}
+
+/** Reports an error from lowered class code to the nearest boundary. */
+export function __krateClassError(err: unknown): void {
+  handleError(err, getOwner());
+}

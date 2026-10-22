@@ -19,8 +19,36 @@ export interface SignalOptions<T> {
 }
 
 const context: Array<EffectState> = [];
-const mountQueue: Array<() => void> = [];
+const mountQueue: Array<{ fn: () => void; owner: unknown }> = [];
 let mountScheduled = false;
+
+/**
+ * Owner integration (installed by boundary.ts). An owner is the component
+ * instance that is current while code runs; effects, cleanups and mount
+ * callbacks created under it are tied to it, and errors they throw are routed
+ * to it (error boundaries, Suspense). With no hooks installed every code path
+ * below behaves exactly as before.
+ */
+export interface OwnerHooks {
+  /** The owner active right now, or null. */
+  current(): unknown;
+  /** Runs fn with owner current, routing anything it throws. */
+  run(owner: unknown, fn: () => void): void;
+  /** Registers fn to run when owner is unmounted. */
+  cleanup(owner: unknown, fn: () => void): void;
+  /** Routes an error thrown by owner's code; true when handled. */
+  error(owner: unknown, err: unknown): boolean;
+}
+
+let ownerHooks: OwnerHooks | null = null;
+
+/** Installs (or with null removes) the owner integration hooks. */
+export function setOwnerHooks(hooks: OwnerHooks | null): void {
+  ownerHooks = hooks;
+}
+
+// Callbacks that run once the effect queue has fully drained (see afterFlush).
+const afterQueue: Array<() => void> = [];
 const allEffects = new Set<EffectState>();
 // Top-level onCleanup registrations (called outside an effect body) are scoped
 // to the page/root and run when disposeAll() executes on route change. This
@@ -46,10 +74,52 @@ interface EffectState {
   rerun: boolean;
   /** Set while the effect is in the pending flush queue. */
   queued: boolean;
+  /** Owner current when the effect was created (see OwnerHooks), or null. */
+  owner: unknown;
 }
 
 function newEffectState(fn: () => void): EffectState {
-  return { fn, cleanups: [], disposed: false, sources: new Set(), running: false, rerun: false, queued: false };
+  return {
+    fn,
+    cleanups: [],
+    disposed: false,
+    sources: new Set(),
+    running: false,
+    rerun: false,
+    queued: false,
+    owner: ownerHooks ? ownerHooks.current() : null,
+  };
+}
+
+// Pushed on the context stack by untrack(): reads see a disposed effect and
+// do not subscribe.
+const UNTRACKED: EffectState = newEffectState(() => {});
+UNTRACKED.disposed = true;
+
+/** The effect currently collecting dependencies, ignoring untrack() frames. */
+function currentEffect(): EffectState | null {
+  const top = context[context.length - 1];
+  return top && top !== UNTRACKED ? top : null;
+}
+
+/** Runs fn without subscribing the current effect to the signals it reads. */
+export function untrack<T>(fn: () => T): T {
+  context.push(UNTRACKED);
+  try {
+    return fn();
+  } finally {
+    context.pop();
+  }
+}
+
+/**
+ * Runs fn after the pending effect queue has fully drained (including effects
+ * scheduled while it drained), so the DOM reflects every write made so far.
+ * Schedules a flush when none is pending.
+ */
+export function afterFlush(fn: () => void): void {
+  afterQueue.push(fn);
+  scheduleFlush();
 }
 
 function disposeEffect(effect: EffectState): void {
@@ -95,6 +165,7 @@ export function disposeAll(): void {
     }
   }
   pending.length = 0;
+  afterQueue.length = 0;
   flushScheduled = false;
   // Reset every context stack to its default so provider values from the page
   // being torn down cannot leak into the next SPA navigation.
@@ -410,18 +481,24 @@ function flushEffects(): void {
       runEffect(effect);
     }
   }
+  if (pending.length === 0 && afterQueue.length > 0) {
+    const after = afterQueue.splice(0);
+    for (const fn of after) {
+      fn();
+    }
+  }
 }
 
 function runEffect(effect: EffectState): void {
   effect.running = true;
-  // Run cleanups from previous execution
-  for (const cleanup of effect.cleanups) {
-    cleanup();
-  }
-  effect.cleanups.length = 0;
-
-  context.push(effect);
+  let pushed = false;
   try {
+    // Run cleanups from previous execution
+    for (const cleanup of effect.cleanups.splice(0)) {
+      cleanup();
+    }
+    context.push(effect);
+    pushed = true;
     // Support Solid-style `return () => {...}` cleanup functions. Many
     // components (Slider, Dropdown, Dialog, Tooltip) register their document
     // listeners in an effect and return a cleanup that removes them; without
@@ -431,8 +508,14 @@ function runEffect(effect: EffectState): void {
     if (typeof ret === 'function') {
       effect.cleanups.push(ret as () => void);
     }
+  } catch (err) {
+    // An owned effect reports to its owner (error boundaries); unowned
+    // effects keep the previous behavior and throw.
+    if (!(effect.owner && ownerHooks && ownerHooks.error(effect.owner, err))) {
+      throw err;
+    }
   } finally {
-    context.pop();
+    if (pushed) context.pop();
     effect.running = false;
   }
 }
@@ -440,18 +523,28 @@ function runEffect(effect: EffectState): void {
 export function createEffect(fn: () => void): () => void {
   const effect = newEffectState(fn);
   allEffects.add(effect);
-  runEffect(effect);
-
-  return () => {
+  const dispose = (): void => {
     disposeEffect(effect);
     allEffects.delete(effect);
   };
+  // An owned effect is disposed with its owner (unmounted subtree).
+  if (effect.owner && ownerHooks) {
+    ownerHooks.cleanup(effect.owner, dispose);
+  }
+  runEffect(effect);
+  return dispose;
 }
 
 export function onCleanup(fn: () => void): void {
-  const current = context[context.length - 1];
+  const current = currentEffect();
   if (current) {
     current.cleanups.push(fn);
+    return;
+  }
+  const owner = ownerHooks ? ownerHooks.current() : null;
+  if (owner && ownerHooks) {
+    // Component-level cleanup: runs when the owning component unmounts.
+    ownerHooks.cleanup(owner, fn);
   } else {
     // No active effect: treat as a root/component-level cleanup, run on
     // disposeAll() (route change / page teardown).
@@ -460,7 +553,7 @@ export function onCleanup(fn: () => void): void {
 }
 
 export function onMount(fn: () => void): void {
-  mountQueue.push(fn);
+  mountQueue.push({ fn, owner: ownerHooks ? ownerHooks.current() : null });
   if (!mountScheduled) {
     mountScheduled = true;
     queueMicrotask(flushMounts);
@@ -470,8 +563,12 @@ export function onMount(fn: () => void): void {
 function flushMounts(): void {
   mountScheduled = false;
   const queue = mountQueue.splice(0);
-  for (const fn of queue) {
-    fn();
+  for (const entry of queue) {
+    if (entry.owner && ownerHooks) {
+      ownerHooks.run(entry.owner, entry.fn);
+    } else {
+      entry.fn();
+    }
   }
 }
 
@@ -494,14 +591,17 @@ export function createMemo<T>(fn: () => T): () => T {
 
   // Register cleanup on the parent context so this memo effect is disposed
   // when the parent re-runs or is disposed.
-  const parent = context[context.length - 1];
+  const parent = currentEffect();
+  const disposeMemo = (): void => {
+    if (!effect.disposed) {
+      disposeEffect(effect);
+      allEffects.delete(effect);
+    }
+  };
   if (parent) {
-    parent.cleanups.push(() => {
-      if (!effect.disposed) {
-        disposeEffect(effect);
-        allEffects.delete(effect);
-      }
-    });
+    parent.cleanups.push(disposeMemo);
+  } else if (effect.owner && ownerHooks) {
+    ownerHooks.cleanup(effect.owner, disposeMemo);
   }
 
   return get;

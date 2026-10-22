@@ -25,6 +25,8 @@ export * from './src/router';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/storage';
+export * from './src/boundary';
+export * from './src/class-component';
 `;
 
 const HYDRATE_ENTRY = `
@@ -36,6 +38,8 @@ export * from './src/router';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/storage';
+export * from './src/boundary';
+export * from './src/class-component';
 `;
 
 // Lite hydration bundle for sites with the SPA router disabled. It keeps the
@@ -49,6 +53,8 @@ export * from './src/router-lite';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/storage';
+export * from './src/boundary';
+export * from './src/class-component';
 `;
 
 // Dev-only overlay + toolbar. Loaded by `krate dev` only, never in production.
