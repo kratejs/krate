@@ -75,24 +75,31 @@ func TestNestedParensAreLinear(t *testing.T) {
 		return b.String()
 	}
 	parse := func(src string) time.Duration {
-		best := time.Duration(1<<63 - 1)
-		for r := 0; r < 3; r++ {
-			start := time.Now()
-			p := newParser(src)
-			p.ParseProgram()
-			if len(p.Errors()) != 0 {
-				t.Fatalf("unexpected errors: %v", p.Errors()[0])
-			}
-			if d := time.Since(start); d < best {
-				best = d
-			}
+		start := time.Now()
+		p := newParser(src)
+		p.ParseProgram()
+		if len(p.Errors()) != 0 {
+			t.Fatalf("unexpected errors: %v", p.Errors()[0])
 		}
-		return best
+		return time.Since(start)
 	}
-	small, large := parse(build(1)), parse(build(4))
-	if ratio := float64(large) / float64(small); ratio > 10 {
-		t.Fatalf("parse time grew %.1fx for a 4x larger input (%v vs %v); expected linear scaling", ratio, small, large)
+	small, large := build(1), build(4)
+	// Background load (parallel packages under -race) skews single samples,
+	// so interleave the two sizes, keep the fastest of each, and allow a few
+	// attempts. A quadratic regression gives about 16x on every attempt.
+	var ratio float64
+	var bestSmall, bestLarge time.Duration
+	for attempt := 0; attempt < 4; attempt++ {
+		bestSmall, bestLarge = time.Duration(1<<63-1), time.Duration(1<<63-1)
+		for r := 0; r < 3; r++ {
+			bestSmall = min(bestSmall, parse(small))
+			bestLarge = min(bestLarge, parse(large))
+		}
+		if ratio = float64(bestLarge) / float64(bestSmall); ratio <= 10 {
+			return
+		}
 	}
+	t.Fatalf("parse time grew %.1fx for a 4x larger input (%v vs %v); expected linear scaling", ratio, bestSmall, bestLarge)
 }
 
 func BenchmarkNestedParens(b *testing.B) {
