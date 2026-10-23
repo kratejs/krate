@@ -17,8 +17,18 @@ const SSR_WORKERS = Math.max(1, parseInt(process.env.KRATE_SSR_WORKERS || "1", 1
 const isClusterPrimary = SSR_WORKERS > 1 && cluster.isPrimary;
 if (isClusterPrimary) {
   for (let i = 0; i < SSR_WORKERS; i++) cluster.fork();
+  // Restart a worker that dies, but give up when they keep dying (a port that
+  // cannot be bound, a broken bundle) instead of forking forever.
+  const exits: number[] = [];
   cluster.on("exit", (worker) => {
     console.log(`[krate-ssr] worker ${worker.process.pid} exited; restarting`);
+    const now = Date.now();
+    exits.push(now);
+    while (exits.length && now - exits[0] > 60000) exits.shift();
+    if (exits.length > SSR_WORKERS * 3) {
+      console.error("[krate-ssr] workers keep exiting; giving up");
+      process.exit(1);
+    }
     cluster.fork();
   });
   console.log(`[krate-ssr] primary supervising ${SSR_WORKERS} workers`);
@@ -876,6 +886,25 @@ const server = http.createServer(async (req, res) => {
 if (isClusterPrimary) {
   // The primary only supervises; workers own the listening socket.
 } else {
+  // The port was free when Go chose it, but a bind can still fail with
+  // EADDRINUSE: any socket holding that local port blocks the wildcard bind,
+  // including a short-lived outgoing connection. Retry for a few seconds
+  // before giving up.
+  let bindRetries = 100;
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE" && bindRetries-- > 0) {
+      setTimeout(() => {
+        try {
+          server.close();
+        } catch {
+          // not listening yet
+        }
+        server.listen(PORT);
+      }, 100);
+      return;
+    }
+    throw err;
+  });
   server.listen(PORT, () => {
     console.log(`[krate-ssr] Renderer server listening on port ${PORT}`);
   });

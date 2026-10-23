@@ -246,8 +246,35 @@ const server = http.createServer(async (req, res) => {
 
 if (WORKERS > 1 && cluster.isPrimary) {
   for (let i = 0; i < WORKERS; i++) cluster.fork();
-  cluster.on('exit', () => { cluster.fork(); });
+  // Restart a worker that dies, but give up when they keep dying (a bad
+  // route module, a port that cannot be bound) instead of forking forever.
+  const exits = [];
+  cluster.on('exit', () => {
+    const now = Date.now();
+    exits.push(now);
+    while (exits.length && now - exits[0] > 60000) exits.shift();
+    if (exits.length > WORKERS * 3) {
+      console.error('[krate-api] workers keep exiting; giving up');
+      process.exit(1);
+    }
+    cluster.fork();
+  });
 } else {
+  // The port was free when Go chose it, but a bind can still fail with
+  // EADDRINUSE: any socket holding that local port blocks the wildcard bind,
+  // including a short-lived outgoing connection. Retry for a few seconds
+  // before giving up.
+  let bindRetries = 100;
+  server.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE' && bindRetries-- > 0) {
+      setTimeout(() => {
+        try { server.close(); } catch {}
+        server.listen(PORT);
+      }, 100);
+      return;
+    }
+    throw err;
+  });
   server.listen(PORT, () => {
   });
 }`
@@ -2222,18 +2249,60 @@ func sanitizeActionReturn(value string, r *http.Request) string {
 	return u.RequestURI()
 }
 
-// internalPort returns preferred when it can be bound on localhost and
-// otherwise a free port chosen by the OS. Sidecars default to fixed offsets
-// from the server port, which collide when several servers run at once.
-func internalPort(preferred int) int {
-	if ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", preferred)); err == nil {
-		_ = ln.Close()
-		return preferred
+// handedOutPorts remembers the sidecar ports internalPort returned in this
+// process, so servers starting at the same time never share one. Entries
+// expire, so a server that restarts keeps getting its preferred port.
+var (
+	handedOutPortsMu sync.Mutex
+	handedOutPorts   = map[int]time.Time{}
+)
+
+const handedOutPortTTL = time.Minute
+
+// portHandedOut reports whether port was returned by internalPort recently.
+// handedOutPortsMu must be held.
+func portHandedOut(port int) bool {
+	at, ok := handedOutPorts[port]
+	if ok && time.Since(at) > handedOutPortTTL {
+		delete(handedOutPorts, port)
+		return false
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	return ok
+}
+
+// portFree reports whether port can be bound the way the Node sidecars bind
+// it (the wildcard address), which also catches listeners on loopback only.
+func portFree(port int) bool {
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
+}
+
+// internalPort returns preferred when it can be bound and has not been handed
+// out already, and otherwise a free port chosen by the OS. Sidecars default to
+// fixed offsets from the server port, which collide when several servers run
+// at once.
+func internalPort(preferred int) int {
+	handedOutPortsMu.Lock()
+	defer handedOutPortsMu.Unlock()
+	if !portHandedOut(preferred) && portFree(preferred) {
+		handedOutPorts[preferred] = time.Now()
 		return preferred
 	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port
+	for attempt := 0; attempt < 20; attempt++ {
+		ln, err := net.Listen("tcp", ":0")
+		if err != nil {
+			break
+		}
+		port := ln.Addr().(*net.TCPAddr).Port
+		_ = ln.Close()
+		if !portHandedOut(port) {
+			handedOutPorts[port] = time.Now()
+			return port
+		}
+	}
+	return preferred
 }
