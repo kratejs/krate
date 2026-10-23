@@ -2,7 +2,9 @@
   "settleMs": 0,
   "steps": [
     { "op": "click", "sel": "#posts" },
-    { "op": "wait", "ms": 60 },
+    { "op": "waitFor", "text": "pending" },
+    { "op": "wait", "ms": 30 },
+    { "op": "eval", "js": "window.__releaseTransition()" },
     { "op": "waitFor", "text": "idle" },
     { "op": "wait", "ms": 30 }
   ]
