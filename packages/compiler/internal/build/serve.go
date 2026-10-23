@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -2270,14 +2271,18 @@ func portHandedOut(port int) bool {
 	return ok
 }
 
-// portFree reports whether port can be bound the way the Node sidecars bind
-// it (the wildcard address), which also catches listeners on loopback only.
+// portFree reports whether port can be bound on both the loopback address and
+// the wildcard address. The Node sidecars bind the wildcard address, but on
+// macOS and Windows that bind succeeds next to a loopback-only listener, so
+// checking the wildcard alone would hand out a port another server holds.
 func portFree(port int) bool {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		return false
+	for _, addr := range []string{"127.0.0.1", ""} {
+		ln, err := net.Listen("tcp", net.JoinHostPort(addr, strconv.Itoa(port)))
+		if err != nil {
+			return false
+		}
+		_ = ln.Close()
 	}
-	_ = ln.Close()
 	return true
 }
 
