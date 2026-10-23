@@ -97,7 +97,9 @@ func (m *minifier) run() {
 				m.keepTail = true
 				return
 			}
-			if keepComment(s[i:end]) {
+			// Dropping a comment must not glue a literal "<" to the text after
+			// it, which would turn that text into a tag.
+			if keepComment(s[i:end]) || strings.HasSuffix(m.out.String(), "<") {
 				m.writeRaw(s[i:end])
 				m.markupEnd = m.out.Len()
 			}
