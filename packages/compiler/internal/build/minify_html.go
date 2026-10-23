@@ -18,14 +18,11 @@ import (
 func minifyHTML(src string) string {
 	m := &minifier{s: src}
 	m.run()
+	// Leading whitespace is ignored by the parser. Trailing whitespace is
+	// kept (collapsed to one space): whether it joins the preceding text
+	// depends on the parser's insertion point, which stray end tags, dropped
+	// comments and foster parenting all change, and dropping it saves a byte.
 	out := m.out.String()
-	// Trailing whitespace is only dropped when nothing but whitespace follows
-	// the last markup written. After text it can be significant: text that is
-	// foster-parented out of a table keeps it, and so does text before an
-	// unterminated "<". Text ending in ">" is not markup.
-	if t := strings.TrimRight(out, htmlSpace); !m.keepTail && m.preDepth == 0 && len(t) == m.markupEnd {
-		out = t
-	}
 	return strings.TrimLeft(out, htmlSpace)
 }
 
@@ -44,10 +41,6 @@ type minifier struct {
 	out       strings.Builder
 	prevSpace bool
 	preDepth  int
-	keepTail  bool
-	// markupEnd is the output length just after the last tag, kept comment,
-	// CDATA section or doctype that was written.
-	markupEnd int
 }
 
 func isHTMLSpace(c byte) bool {
@@ -94,36 +87,29 @@ func (m *minifier) run() {
 			end := commentEnd(s, i)
 			if end < 0 {
 				m.writeRaw(rest)
-				m.keepTail = true
 				return
 			}
 			// Dropping a comment must not glue a literal "<" to the text after
 			// it, which would turn that text into a tag.
 			if keepComment(s[i:end]) || strings.HasSuffix(m.out.String(), "<") {
 				m.writeRaw(s[i:end])
-				m.markupEnd = m.out.Len()
 			}
 			i = end
 		case strings.HasPrefix(rest, "<![CDATA["):
 			idx := strings.Index(rest, "]]>")
 			if idx < 0 {
 				m.writeRaw(rest)
-				m.keepTail = true
 				return
 			}
 			m.writeRaw(rest[:idx+3])
-			m.markupEnd = m.out.Len()
 			i += idx + 3
 		case len(rest) > 1 && (rest[1] == '!' || rest[1] == '?' || rest[1] == '/' && (len(rest) < 3 || !isASCIIAlpha(rest[2]))):
 			// Doctype, bogus comment or processing instruction: up to '>'.
 			idx := strings.IndexByte(rest, '>')
 			if idx < 0 {
 				m.writeRaw(rest)
-				m.keepTail = true
 				return
 			}
-			// markupEnd is not advanced: a space after a bogus comment can
-			// join foster-parented table text, so it must be kept.
 			m.writeRaw(rest[:idx+1])
 			i += idx + 1
 		case len(rest) > 1 && (isASCIIAlpha(rest[1]) || rest[1] == '/'):
@@ -132,7 +118,6 @@ func (m *minifier) run() {
 			if !ok {
 				return
 			}
-			m.markupEnd = m.out.Len()
 		default:
 			m.text('<')
 			i++
@@ -197,7 +182,6 @@ func (m *minifier) tag(i int) (int, bool) {
 		}
 		if j >= len(s) {
 			m.writeRaw(s[i:])
-			m.keepTail = true
 			return len(s), false
 		}
 		if s[j] == '>' {
@@ -234,7 +218,6 @@ func (m *minifier) tag(i int) (int, bool) {
 		}
 		if k >= len(s) {
 			m.writeRaw(s[i:])
-			m.keepTail = true
 			return len(s), false
 		}
 		tb.WriteByte('=')
@@ -243,7 +226,6 @@ func (m *minifier) tag(i int) (int, bool) {
 			end := strings.IndexByte(s[k+1:], q)
 			if end < 0 {
 				m.writeRaw(s[i:])
-				m.keepTail = true
 				return len(s), false
 			}
 			val := s[k+1 : k+1+end]
@@ -291,13 +273,11 @@ func (m *minifier) tag(i int) (int, bool) {
 	case !isEnd && rawTextTags[lname]:
 		if lname == "plaintext" {
 			m.writeRaw(s[j:])
-			m.keepTail = true
 			return len(s), false
 		}
 		end := rawTextEnd(s, j, lname)
 		if end < 0 {
 			m.writeRaw(s[j:])
-			m.keepTail = true
 			return len(s), false
 		}
 		m.writeRaw(s[j:end])
