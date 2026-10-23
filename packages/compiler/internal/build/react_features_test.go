@@ -235,3 +235,37 @@ func TestReactUseMemoDepsBinding(t *testing.T) {
 		t.Fatalf("a derived memo list must emit a reactive binding:\n%s", js)
 	}
 }
+
+func TestCompileTimeFoldingQuickJSFallback(t *testing.T) {
+	page := `export default function Page() {
+		const filled = new Array(3).fill(7);
+		return <p>{filled.join("-")}:{String(Number.isInteger(4))}:{Math.max(2, 7)}</p>;
+	}`
+	html, js, err := buildKrateProject(t, map[string]string{"src/pages/index.tsx": page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(html, "7-7-7:true:7") {
+		t.Fatalf("QuickJS folding missing from HTML:\n%s", html)
+	}
+	if strings.Contains(js, "kbind") {
+		t.Fatalf("fully static page should not emit hydration bindings, got:\n%s", js)
+	}
+}
+
+func TestStaticMapEmitsNoListRuntime(t *testing.T) {
+	page := `export default function Page() {
+		const items = [{ id: 1, name: "A" }, { id: 2, name: "B" }];
+		return <ul>{items.map(({ id, name }) => <li key={id}>{name}</li>)}</ul>;
+	}`
+	html, js, err := buildKrateProject(t, map[string]string{"src/pages/index.tsx": page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(html, "<li>A</li><li>B</li>") {
+		t.Fatalf("static map missing from HTML:\n%s", html)
+	}
+	if strings.Contains(js, "kbindList") || strings.Contains(js, "krateList") {
+		t.Fatalf("static map emitted list runtime:\n%s", js)
+	}
+}

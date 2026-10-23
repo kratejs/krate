@@ -63,6 +63,14 @@ import Default, { named } from "./mod"`,
 			},
 		},
 		{
+			name: "wrapped prose mentioning a warning is not an import",
+			input: `# Lazy
+
+a lazy package import is compiled like a static
+import (warning KR4006).`,
+			expected: nil,
+		},
+		{
 			name: "imports in frontmatter ignored",
 			input: `---
 import: something

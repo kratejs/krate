@@ -23,6 +23,7 @@ Practical, end-to-end walkthroughs.
 | [Migrating from Next.js](/docs/guides/migrating-from-nextjs/) | Move an existing site to Krate |
 | [React Compatibility](/docs/guides/react-compatibility/) | Transpile React hooks and JSX to Krate |
 | [Server Actions](/docs/guides/server-actions/) | Run server code from forms and handlers |
+| [Compile-Time Evaluation](/docs/guides/compile-time-evaluation/) | Fold known values and static lists during the build |
 | [Testing](/docs/guides/testing/) | Test logic, components, and pages |
 | [TypeScript Setup](/docs/guides/typescript-setup/) | Configure tsconfig and typed routes |
 | [Upgrading](/docs/guides/upgrading/) | Keep packages in sync and upgrade safely |

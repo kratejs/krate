@@ -76,32 +76,12 @@ func TestBuildKeyedListWithLiteralArray(t *testing.T) {
 	tree := annotateAndBuild(t, `export default function App() {
 	return <ul>{[1,2,3].map(i => <li key={i}>{i}</li>)}</ul>;
 }`)
-	var list *irtree.ListSlot
-	for _, child := range tree.Root.Children {
-		if ls, ok := child.(*irtree.ListSlot); ok {
-			list = ls
-			break
-		}
+	if containsListSlot(tree.Root.Children) {
+		t.Fatal("a fully static .map() must not emit a ListSlot")
 	}
-	if list == nil {
-		t.Fatal("expected ListSlot for .map() call")
-	}
-	if len(list.Items) != 3 {
-		t.Fatalf("expected 3 resolved items, got %d", len(list.Items))
-	}
-	// Literal-array items are resolved synchronously and marked with their
-	// folded key, so hydration adopts each row by key.
-	if list.Items[0].Key != "$1" || list.Items[1].Key != "$2" || list.Items[2].Key != "$3" {
-		t.Errorf("expected folded keys, got %q,%q,%q",
-			list.Items[0].Key, list.Items[1].Key, list.Items[2].Key)
-	}
-	if !list.Keyed || list.Bind == nil || list.Bind.Key == "" {
-		t.Errorf("expected a keyed runtime binding, got keyed=%v bind=%+v", list.Keyed, list.Bind)
-	}
-	for i, item := range list.Items {
-		if len(item.Contents) != 1 {
-			t.Errorf("item %d: expected 1 content slot, got %d", i, len(item.Contents))
-		}
+	html := renderStaticHTML(tree.Root.Children)
+	if html != "<ul><li>1</li><li>2</li><li>3</li></ul>" {
+		t.Fatalf("static map HTML = %q", html)
 	}
 }
 
@@ -109,21 +89,12 @@ func TestBuildListWithoutKeyFallsBackToIndex(t *testing.T) {
 	tree := annotateAndBuild(t, `export default function App() {
 	return <ul>{["a","b"].map(x => <li>{x}</li>)}</ul>;
 }`)
-	var list *irtree.ListSlot
-	for _, child := range tree.Root.Children {
-		if ls, ok := child.(*irtree.ListSlot); ok {
-			list = ls
-			break
-		}
+	if containsListSlot(tree.Root.Children) {
+		t.Fatal("a fully static .map() must not emit a ListSlot")
 	}
-	if list == nil {
-		t.Fatal("expected ListSlot")
-	}
-	if len(list.Items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(list.Items))
-	}
-	if list.Items[0].Key != "0" || list.Items[1].Key != "1" {
-		t.Errorf("expected index fallback keys, got %q,%q", list.Items[0].Key, list.Items[1].Key)
+	html := renderStaticHTML(tree.Root.Children)
+	if html != "<ul><li>a</li><li>b</li></ul>" {
+		t.Fatalf("static map HTML = %q", html)
 	}
 }
 
@@ -131,26 +102,12 @@ func TestBuildListSlotSubstitutesIndexParam(t *testing.T) {
 	tree := annotateAndBuild(t, `export default function App() {
 	return <ul>{["apple","banana"].map((item, i) => <li>{item} ({i})</li>)}</ul>;
 }`)
-	var list *irtree.ListSlot
-	for _, child := range tree.Root.Children {
-		if ls, ok := child.(*irtree.ListSlot); ok {
-			list = ls
-			break
-		}
+	if containsListSlot(tree.Root.Children) {
+		t.Fatal("a fully static .map() must not emit a ListSlot")
 	}
-	if list == nil {
-		t.Fatal("expected ListSlot for .map() call")
-	}
-	if len(list.Items) != 2 {
-		t.Fatalf("expected 2 resolved items, got %d", len(list.Items))
-	}
-	got0 := renderSlotHTML(list.Items[0])
-	if got0 != "<li>apple (0)</li>" {
-		t.Errorf("item 0: expected '<li>apple (0)</li>', got %q", got0)
-	}
-	got1 := renderSlotHTML(list.Items[1])
-	if got1 != "<li>banana (1)</li>" {
-		t.Errorf("item 1: expected '<li>banana (1)</li>', got %q", got1)
+	html := renderStaticHTML(tree.Root.Children)
+	if html != "<ul><li>apple (0)</li><li>banana (1)</li></ul>" {
+		t.Fatalf("static map HTML = %q", html)
 	}
 }
 
@@ -971,31 +928,3 @@ func renderStaticHTML(children []irtree.SlotNode) string {
 }
 
 // renderSlotHTML flattens slot nodes into their static HTML for assertions.
-func renderSlotHTML(item *irtree.ListItem) string {
-	var b strings.Builder
-	var walk func(nodes []irtree.SlotNode)
-	walk = func(nodes []irtree.SlotNode) {
-		for _, n := range nodes {
-			switch c := n.(type) {
-			case *irtree.StaticHTML:
-				b.WriteString(c.HTML)
-			case *irtree.TextSlot:
-				b.WriteString(c.Initial)
-			case *irtree.ExprSlot:
-				b.WriteString(c.Initial)
-			case *irtree.ComponentSlot:
-				if c.Component != nil {
-					walk(c.Component.ReturnSlots)
-				}
-			case *irtree.ListSlot:
-				for _, li := range c.Items {
-					walk(li.Contents)
-				}
-			case *irtree.ConditionalSlot:
-				walk(c.Consequent)
-			}
-		}
-	}
-	walk(item.Contents)
-	return b.String()
-}

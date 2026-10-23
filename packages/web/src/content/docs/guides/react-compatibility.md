@@ -454,8 +454,8 @@ loader runs when the component first hydrates and the boundary shows its
 fallback until it resolves. The default export must be a component (KR4007);
 a failed load is reported to the nearest error boundary. Other loaders are
 rejected (KR4001), `lazy()` must not be called inside a component (KR4002),
-and a lazy package import (`import('some-package')`) is compiled like a static
-import (warning KR4006).
+and a lazy package import (`import('some-package')`) is compiled like a static import
+(warning KR4006).
 
 **Transitions.** `useTransition()` returns `[isPending, startTransition]`.
 `isPending` becomes true when a transition starts and stays true until the
@@ -961,3 +961,7 @@ Chromium, Firefox and WebKit, and compares the DOM, form state, focus and the
 order of effects, cleanups, lifecycles and ref callbacks after every step.
 Known differences are tracked with a severity in the repository
 (`packages/compiler/internal/build/testdata/reactbrowser/divergences.json`).
+
+See [Compile-Time Evaluation](/docs/guides/compile-time-evaluation/) for how
+known React expressions, `.map()` callbacks, and local helpers are folded before
+shipping.

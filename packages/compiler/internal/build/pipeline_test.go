@@ -237,6 +237,45 @@ func TestBuildLocalIconsFolder(t *testing.T) {
 	}
 }
 
+// TestBuildStaticMapIconsAndImages ensures values that only become literal
+// after static map substitution are still lowered by the late asset transforms.
+func TestBuildStaticMapIconsAndImages(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(p), err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	write("src/pages/index.tsx", `const media = [{ icon: "menu", src: "/hero.svg" }];
+export default function Page() {
+  return <div>{media.map((m) => (
+    <a><Icon name={m.icon} /><Image src={m.src} alt="Hero" /></a>
+  ))}</div>;
+}`)
+	write("icons/menu.svg", `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>`)
+	write("public/hero.svg", `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>`)
+
+	cfg := config.Default()
+	cfg.Images.Unoptimized = true
+	cfg.Resolve(root)
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	html := readOut(t, cfg.OutDir, "index.html")
+	if !strings.Contains(html, "M4 6h16") {
+		t.Errorf("static map icon was not transformed:\n%.1000s", html)
+	}
+	if !strings.Contains(html, "src=/hero.svg") && !strings.Contains(html, `src="/hero.svg"`) {
+		t.Errorf("static map image was not transformed:\n%.1000s", html)
+	}
+}
+
 // TestBuildLocalIconsFolderMissing verifies a missing local icon produces an
 // escaped error span instead of raw file content and does not break the build.
 func TestBuildLocalIconsFolderMissing(t *testing.T) {

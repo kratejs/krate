@@ -156,8 +156,13 @@ func (b *builder) isCSSLiveText(expr ast.Expr) bool {
 // lists (always resolved at build time when possible), ternaries and boolean
 // guards with JSX branches, and array literals holding JSX.
 func (b *builder) controlFlowChild(expr ast.Expr, parentID string, doEscape bool) ([]SlotNode, bool) {
+	if isFlatMapCall(expr) {
+		if nodes, ok := b.buildStaticFlatMapSlots(expr, parentID); ok {
+			return nodes, true
+		}
+	}
 	if isMapCall(expr) {
-		return []SlotNode{b.buildListSlot(expr, parentID)}, true
+		return b.buildMapSlots(expr, parentID), true
 	}
 	// Ternaries are checked BEFORE the static value path, otherwise
 	// unresolved variables (e.g. title, showCopy from props) make evalConst

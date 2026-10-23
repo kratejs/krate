@@ -14,8 +14,9 @@ function Child({ n }) {
 export default function Index() {
   const [c, setC] = useState(0);
   const [show, setShow] = useState(true);
+  const [items, setItems] = useState([1, 2]);
   useEffect(() => { console.log("parent", c); });
-  return <main><button onClick={() => setShow(!show)}>{c}</button>{show && <Child n={c} />}<ul>{[1, 2].map(i => <li key={i}><Child n={i} /></li>)}</ul></main>;
+  return <main><button onClick={() => setShow(!show)}>{c}</button>{show && <Child n={c} />}<ul>{items().map(i => <li key={i}><Child n={i} /></li>)}</ul></main>;
 }`
 
 func TestHydrationDeclaresEffectOwners(t *testing.T) {
@@ -24,7 +25,7 @@ func TestHydrationDeclaresEffectOwners(t *testing.T) {
 		"var __ko=typeof krateOwner==='function'?krateOwner:function(){};\n",
 		"(function(){\n__ko(\"Index_c0\",null);\n",
 		// No-deps effect: deps are the component's state.
-		"return [c(),show()];",
+		"return [c(),show(),items()];",
 		// The child in the conditional's consequent, shown on the server, is
 		// a remountable scope.
 		"__km(\"4.c.Child.Child_c0\",\"Index_c0\",[[\"4\",\"c\",1]],null,function(){\n",

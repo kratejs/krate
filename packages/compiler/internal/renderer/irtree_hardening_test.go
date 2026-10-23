@@ -73,8 +73,9 @@ export default function App() {
   return <div><p>{count()}</p><ul>{items.map(count => <li>{count}</li>)}</ul></div>;
 }`,
 			html: []string{"<li>1</li>", "<li>2</li>", "<li>3</li>"},
-			// The map parameter (now a row accessor) shadows the signal.
-			js: []string{"kbindList(\"5\",()=>(items),null,(count)=>h('li',null,()=>count()),1)"},
+			// A known list is static: the map parameter shadows the signal
+			// without requiring a list runtime.
+			jsAbsent: []string{"kbindList("},
 		},
 		{
 			name: "signal of another component is not in scope",
@@ -283,10 +284,12 @@ func TestListItemHandlersSubstituteParam(t *testing.T) {
 	src := `import { createSignal } from "@krate/runtime";
 export default function App() {
   const [n, setN] = createSignal(0);
+  const [items, setItems] = createSignal([{ id: 1 }, { id: 2 }]);
+  const [one, setOne] = createSignal([{ id: 7 }]);
   function rm(id) { setN(id); }
   return <div>
-    {[{ id: 1 }, { id: 2 }].map(i => <b onClick={() => rm(i.id)}>x{n()}</b>)}
-    {[{ id: 7 }].map(i => <s onClick={() => [9].forEach(i => rm(i))}>y</s>)}
+    {items().map(i => <b onClick={() => rm(i.id)}>x{n()}</b>)}
+    {one().map(i => <s onClick={() => [9].forEach(i => rm(i))}>y</s>)}
   </div>;
 }`
 	_, _, js := buildTreeReact(t, src)

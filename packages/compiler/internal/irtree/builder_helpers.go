@@ -514,114 +514,26 @@ func funcPropAliasOf(body []ast.Stmt, name string, funcProps map[string]bool) st
 	return ""
 }
 
-// isStaticResolvable reports whether an expression can be fully resolved at
-// build time from literals, props, and local bindings - i.e. it contains no
-// signal reads and every identifier is a known prop/local. Statically
-// resolvable attribute values are emitted directly into the SSR HTML with no
-// hydration binding, avoiding runtime evaluation of build-time-only locals
-// like for-loop counters.
+// isStaticResolvable reports whether an expression is fully known and can be
+// emitted into static HTML without a hydration binding. It is the single gate
+// for static attributes and static child values: the typed const interpreter
+// decides everything, instead of a second hand-maintained expression whitelist.
+//
+// Signal reads are deliberately excluded even though the interpreter can read
+// their initial value: the initial is useful for SSR, but the value can change
+// at runtime and the binding must remain.
 func (b *builder) isStaticResolvable(expr ast.Expr) bool {
 	if expr == nil {
 		return true
 	}
-	switch e := expr.(type) {
-	case *ast.Literal:
-		return true
-	case *ast.Identifier:
-		if e.Name == "props" {
-			return false
-		}
-		if _, isAction := b.actionURLs[e.Name]; isAction {
-			return true
-		}
-		if inSig := b.isSignalName(e.Name); inSig {
-			return false
-		}
-		_, inProps := b.localProps[e.Name]
-		return inProps
-	case *ast.CallExpr:
-		if id, ok := e.Callee.(*ast.Identifier); ok {
-			if inSig := b.isSignalName(id.Name); inSig {
-				return false
-			}
-			if id.Name == "String" && len(e.Args) == 1 {
-				return b.isStaticResolvable(e.Args[0])
-			}
-			// cn/clsx fold to a static class string when every argument is
-			// resolvable, so no hydration binding is needed.
-			if id.Name == "cn" || id.Name == "clsx" {
-				for _, arg := range e.Args {
-					if !b.isStaticResolvable(arg) {
-						return false
-					}
-				}
-				return true
-			}
-			// A known cva factory call folds when its selection is static.
-			if b.cvaFactories != nil {
-				if _, ok := b.cvaFactories[id.Name]; ok {
-					if len(e.Args) == 0 {
-						return true
-					}
-					if obj, ok := e.Args[0].(*ast.ObjectExpr); ok {
-						return b.isStaticResolvable(obj)
-					}
-				}
-			}
-		}
+	if b.referencesSignal(expr) {
 		return false
-	case *ast.MemberExpr:
-		// A class helper's member read (e.g. cn(...) as part of an expression)
-		// is not static; only props.X resolves.
-		if id, ok := e.Object.(*ast.Identifier); ok && id.Name == "props" {
-			if _, ok := e.Property.(*ast.Identifier); ok {
-				return true
-			}
-		}
-		// `obj["key"]` on a folded local object (an expanded object spread)
-		// resolves when the member value is known.
-		if id, ok := e.Object.(*ast.Identifier); ok && e.Computed && !b.isSignalName(id.Name) {
-			if lit, ok := e.Property.(*ast.Literal); ok && lit.Kind == ast.StringLit {
-				if _, inProps := b.localProps[id.Name]; inProps {
-					return !b.evalAttrConst(e).ContainsUnknown()
-				}
-			}
-		}
-		return false
-	case *ast.BinaryExpr:
-		return b.isStaticResolvable(e.Left) && b.isStaticResolvable(e.Right)
-	case *ast.UnaryExpr:
-		return b.isStaticResolvable(e.Arg)
-	case *ast.ConditionalExpr:
-		return b.isStaticResolvable(e.Test) && b.isStaticResolvable(e.Consequent) && b.isStaticResolvable(e.Alternate)
-	case *ast.TemplateExpr:
-		for _, p := range e.Parts {
-			if !b.isStaticResolvable(p) {
-				return false
-			}
-		}
-		return true
-	case *ast.ObjectExpr:
-		for _, prop := range e.Properties {
-			if prop == nil || prop.Spread || prop.Value == nil {
-				return false
-			}
-			if !b.isStaticResolvable(prop.Value) {
-				return false
-			}
-		}
-		return true
-	case *ast.ArrayExpr:
-		for _, el := range e.Elements {
-			if el != nil && !b.isStaticResolvable(el) {
-				return false
-			}
-		}
-		return true
-	case *ast.TypeAssertion:
-		return b.isStaticResolvable(e.Expr)
 	}
-	return false
+	if id, ok := expr.(*ast.Identifier); ok && id.Name == "props" {
+		return false
+	}
+	v := b.evalAttrConst(expr)
+	return !v.ContainsUnknown() && !v.IsFunction() && !v.IsJSX()
 }
 
 func stmtReferencesProps(stmt ast.Stmt) bool {

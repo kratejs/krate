@@ -43,7 +43,6 @@ export default function App() { return <main><Parent start="s" /></main>; }`
 		"__krate_this.setState(",
 		// Destructured state is read from the signal in each binding.
 		"__krate_class_state().n",
-		"(props.color === undefined)?__krate_class_defaults.color:props.color",
 	)
 	mustNotContain(t, "js", js, "(function(){\nvar props")
 }

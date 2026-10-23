@@ -64,7 +64,14 @@ func (b *builder) evalValue(expr ast.Expr) jsvalue.Value {
 	if expr == nil {
 		return jsvalue.Undefined()
 	}
-	return b.constInterp(b.localProps).Eval(expr)
+	v := b.constInterp(b.localProps).Eval(expr)
+	if !v.ContainsUnknown() {
+		return v
+	}
+	if fallback, ok := b.evalPureWithJS(expr); ok {
+		return fallback
+	}
+	return v
 }
 
 // constInterp returns a const-folding interpreter over props that also knows

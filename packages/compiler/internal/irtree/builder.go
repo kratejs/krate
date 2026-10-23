@@ -76,6 +76,16 @@ type BuildOptions struct {
 	// BoundaryThrows renders the listed error boundary instances in their
 	// fallback state (see boundary_build.go).
 	BoundaryThrows map[SlotID]BoundaryThrow
+	// EvalJS evaluates a self-contained pure JS expression with the host JS
+	// engine. It is used only as a fallback for known, side-effect-free
+	// expressions that the Go const interpreter cannot model.
+	EvalJS func(code string) (string, error)
+	// TransformIcon lowers an <Icon> whose name became known after static
+	// folding (for example a map parameter substituted into name={item.icon}).
+	// The build pipeline supplies the resolver; nil leaves the icon unresolved.
+	TransformIcon func(*ast.JSXElement) *ast.JSXElement
+	// TransformImage is the equivalent late lowering hook for <Image>.
+	TransformImage func(*ast.JSXElement) *ast.JSXElement
 }
 
 // Build constructs a ComponentTree from a parsed program and its annotations
@@ -133,6 +143,9 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		localImports:     opts.LocalComponentImports,
 		actionURLs:       opts.ActionURLs,
 		boundaryThrows:   opts.BoundaryThrows,
+		evalJS:           opts.EvalJS,
+		transformIcon:    opts.TransformIcon,
+		transformImage:   opts.TransformImage,
 	}
 	if entryFn := ann.Functions[ann.EntryPoint]; entryFn != nil {
 		b.expansion = []expansionFrame{{name: entryFn.Name}}
@@ -352,8 +365,14 @@ type builder struct {
 	externalImports  map[string]ExternalImport // bare-package import bindings (local -> module)
 	localImports     map[string]bool           // relative-path import bindings
 	actionURLs       map[string]string         // server-action binding -> POST URL
-	externals        []ExternalComponent       // unresolved package components mounted at runtime
-	warnings         []diag.Diagnostic         // non-fatal, positioned build warnings
+	evalJS           func(string) (string, error)
+	transformIcon    func(*ast.JSXElement) *ast.JSXElement
+	transformImage   func(*ast.JSXElement) *ast.JSXElement
+	// dynamicListRows is non-zero while building rows for a runtime-bound list.
+	// Maps nested in those rows must keep runtime list bindings.
+	dynamicListRows int
+	externals       []ExternalComponent // unresolved package components mounted at runtime
+	warnings        []diag.Diagnostic   // non-fatal, positioned build warnings
 	// snapshotPropWarned dedupes snapshot-prop warnings per component and props.
 	snapshotPropWarned map[string]bool
 	// eventDiagSeen dedupes event/form/ref warnings per source position.

@@ -3176,6 +3176,33 @@ func iconNameIsLiteral(el *ast.JSXElement) bool {
 	return false
 }
 
+// imageAttrsAreLiteral reports whether an <Image> can be lowered late. The
+// src must be a string literal, and every other supplied value must be a
+// literal too: compileImageToPicture consumes width/height/alt/etc, so a
+// dynamic value would be silently replaced with a zero value.
+func imageAttrsAreLiteral(el *ast.JSXElement) bool {
+	if el == nil || el.Opening == nil {
+		return false
+	}
+	hasSrc := false
+	for _, attr := range el.Opening.Attributes {
+		if attr.Spread || attr.Value == nil {
+			continue
+		}
+		lit, ok := attr.Value.(*ast.Literal)
+		if !ok {
+			return false
+		}
+		if attr.Name == "src" {
+			if lit.Kind != ast.StringLit {
+				return false
+			}
+			hasSrc = true
+		}
+	}
+	return hasSrc
+}
+
 func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
 	var iconName string
 	var forwardedAttrs []*ast.JSXAttr

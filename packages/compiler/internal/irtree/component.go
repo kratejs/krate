@@ -348,7 +348,7 @@ func (b *builder) foldComponentLocals(fn *ast.FnDecl, node *ComponentNode, isPag
 func (b *builder) foldLocals(fn *ast.FnDecl, node *ComponentNode) *localFold {
 	// useId() resolves to a per-component-instance build-time literal, stable
 	// across SSR and hydration.
-	fold := collectLocalVars(fn.Body, b.sigMap(), b.localProps, useIdSequence(node.ID))
+	fold := collectLocalVarsWithBuilder(fn.Body, b.sigMap(), b.localProps, useIdSequence(node.ID), b)
 	// A changed local replaces any same-named binding: with its final folded
 	// value, or (when it has none) by removal so reads defer to hydration.
 	for name := range fold.changed {
@@ -385,6 +385,14 @@ func (b *builder) foldLocals(fn *ast.FnDecl, node *ComponentNode) *localFold {
 			if !val.IsUnknown() {
 				node.LocalVars[name] = val
 			}
+		}
+	}
+	if len(fold.callables) > 0 {
+		if b.localProps == nil {
+			b.localProps = make(valueMap, len(fold.callables))
+		}
+		for name, fn := range fold.callables {
+			b.localProps[name] = fn
 		}
 	}
 	return fold

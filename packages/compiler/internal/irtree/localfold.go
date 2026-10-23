@@ -24,6 +24,10 @@ type localFold struct {
 	// so it must not be re-folded, and the folded value (or, when leaked, the
 	// absence of one) replaces any same-named prop binding.
 	changed map[string]bool
+	// callables holds local helper functions exposed to the component's const
+	// interpreter. They are emitted as runtime functions separately, not as
+	// folded values.
+	callables map[string]jsvalue.Value
 }
 
 // collectLocalVars resolves top-level local variable declarations in a
@@ -37,24 +41,81 @@ type localFold struct {
 // resolves SSR initial values and drives the `var x = ...` declarations
 // emitted into the hydration bundle.
 func collectLocalVars(body []ast.Stmt, sigMap map[string]ast.Expr, props valueMap, nextUseId func() string) *localFold {
+	return collectLocalVarsWithBuilder(body, sigMap, props, nextUseId, nil)
+}
+
+func collectLocalVarsWithBuilder(body []ast.Stmt, sigMap map[string]ast.Expr, props valueMap, nextUseId func() string, owner *builder) *localFold {
 	f := &localFolder{
 		res: &localFold{
-			locals:  make(valueMap),
-			useIds:  make(map[string]string),
-			inits:   make(map[string]ast.Expr),
-			leaked:  make(map[string]bool),
-			changed: make(map[string]bool),
+			locals:    make(valueMap),
+			useIds:    make(map[string]string),
+			inits:     make(map[string]ast.Expr),
+			leaked:    make(map[string]bool),
+			changed:   make(map[string]bool),
+			callables: make(map[string]jsvalue.Value),
 		},
 		working:   make(valueMap, len(props)),
 		sigMap:    sigMap,
 		nextUseId: nextUseId,
 		muts:      newMutationWalker(body),
+		owner:     owner,
 	}
 	for k, v := range props {
 		f.working[k] = v
 	}
+	f.in = newConstInterp(sigMap, f.working)
+	f.preloadFunctions(body)
 	f.stmts(body)
 	return f.res
+}
+
+// eval evaluates through the folder's persistent interpreter. Local helper
+// functions are bound in its scope, so calls to pure local functions fold with
+// the same rules as built-ins.
+func (f *localFolder) eval(expr ast.Expr) jsvalue.Value {
+	if f.in == nil {
+		return evalConstValue(expr, f.sigMap, f.working)
+	}
+	v := f.in.Eval(expr)
+	if !v.ContainsUnknown() || f.owner == nil || f.owner.evalJS == nil {
+		return v
+	}
+	saved := f.owner.localProps
+	f.owner.localProps = f.working
+	defer func() { f.owner.localProps = saved }()
+	if v, ok := f.owner.evalPureWithJS(expr); ok {
+		return v
+	}
+	return v
+}
+
+// preloadFunctions exposes top-level function declarations and const-arrow
+// helpers to the constant interpreter. Functions are not folded themselves;
+// calls to them only become known when their body can be evaluated.
+func (f *localFolder) preloadFunctions(body []ast.Stmt) {
+	for _, stmt := range body {
+		switch s := stmt.(type) {
+		case *ast.FnDecl:
+			if s.Name != "" {
+				fn := f.in.Closure(s.Name, s.Params, s.Body)
+				f.in.Scope.Define(s.Name, fn)
+				f.res.callables[s.Name] = fn
+				f.working[s.Name] = fn
+			}
+		case *ast.VarStmt:
+			for _, d := range s.Decls {
+				if d == nil || d.Name == "" || d.Init == nil {
+					continue
+				}
+				if arrow, ok := d.Init.(*ast.ArrowFn); ok {
+					fn := f.in.Closure(d.Name, arrow.Params, arrow.Body)
+					f.in.Scope.Define(d.Name, fn)
+					f.res.callables[d.Name] = fn
+					f.working[d.Name] = fn
+				}
+			}
+		}
+	}
 }
 
 // localFolder carries the state of one collectLocalVars walk.
@@ -64,6 +125,8 @@ type localFolder struct {
 	sigMap    map[string]ast.Expr
 	nextUseId func() string
 	muts      *mutationWalker
+	in        *jsvalue.Interp
+	owner     *builder
 	// aliases links locals that may share an object (`const q = p`,
 	// `const list = [p]`): a change through one may be visible through the
 	// other, so they lose their build-time value together.
@@ -173,7 +236,7 @@ func (f *localFolder) stmt(stmt ast.Stmt) {
 		}
 	case *ast.IfStmt:
 		f.taint(f.muts.exprMutations(s.Test))
-		test := evalConstValue(s.Test, f.sigMap, f.working)
+		test := f.eval(s.Test)
 		if truthy, known := test.Truthy(); known {
 			if truthy {
 				f.stmts(s.Consequent)
@@ -185,6 +248,14 @@ func (f *localFolder) stmt(stmt ast.Stmt) {
 		f.taint(f.muts.stmtMutations(s))
 	case *ast.BlockStmt:
 		f.stmts(s.Body)
+	case *ast.ForStmt:
+		f.foldFor(s)
+	case *ast.WhileStmt:
+		f.foldWhile(s.Test, s.Body, false)
+	case *ast.DoWhileStmt:
+		f.foldWhile(s.Test, s.Body, true)
+	case *ast.ForInStmt:
+		f.foldForIn(s)
 	case *ast.FnDecl, *ast.ReturnStmt:
 		// Function declarations run later; the render return is the read.
 	default:
@@ -198,11 +269,23 @@ func (f *localFolder) decl(decl *ast.VarDecl) {
 			f.taint(f.muts.exprMutations(decl.Init))
 		}
 	}
+	if decl.Init == nil {
+		return
+	}
+	if decl.IsDestructuring {
+		if call, ok := decl.Init.(*ast.CallExpr); ok {
+			if id, ok := call.Callee.(*ast.Identifier); ok && isHookCallee(id.Name) {
+				return
+			}
+		}
+		f.destructuredDecl(decl)
+		return
+	}
 	name := decl.Name
 	if name == "" && len(decl.Names) > 0 {
 		name = decl.Names[0]
 	}
-	if name == "" || name == "children" || decl.IsDestructuring || decl.Init == nil {
+	if name == "" || name == "children" {
 		return
 	}
 	// A first-class scope handle is compile-time state, never a runtime local.
@@ -230,7 +313,7 @@ func (f *localFolder) decl(decl *ast.VarDecl) {
 	// may reference it. Its folded value stays Unknown and it is kept out of
 	// `working` so dependents also emit as runtime reads. Functions and JSX
 	// have no literal form and stay runtime too.
-	v := evalConstValue(decl.Init, f.sigMap, f.working)
+	v := f.eval(decl.Init)
 	if !isPrimitiveValue(v) {
 		f.linkReferences(name, decl.Init)
 	}
@@ -247,6 +330,65 @@ func (f *localFolder) decl(decl *ast.VarDecl) {
 	f.res.inits[name] = decl.Init
 	f.working[name] = v
 	f.record(name)
+}
+
+// destructuredDecl folds object/array destructuring by evaluating the
+// initializer once and binding the parser's pattern through the JS interpreter.
+// This keeps `const { name } = user` and `const [first] = items` available to
+// later JSX reads.
+func (f *localFolder) destructuredDecl(decl *ast.VarDecl) {
+	v := f.eval(decl.Init)
+	names := decl.Names
+	if v.ContainsUnknown() || v.IsFunction() || v.IsJSX() {
+		for _, name := range names {
+			if name == "" || name == "children" {
+				continue
+			}
+			if _, exists := f.res.locals[name]; !exists {
+				f.res.locals[name] = jsvalue.Dynamic("local " + name)
+				f.res.inits[name] = decl.Init
+				f.res.leaked[name] = true
+				f.record(name)
+			}
+		}
+		return
+	}
+	scope := jsvalue.NewScope(nil)
+	saved := f.in.Scope
+	f.in.Scope = scope
+	result := f.in.BindPattern(scope, decl.Name, decl.Pattern, v)
+	f.in.Scope = saved
+	if result.IsUnsupported() {
+		for _, name := range names {
+			if name == "" || name == "children" {
+				continue
+			}
+			if _, exists := f.res.locals[name]; !exists {
+				f.res.locals[name] = jsvalue.Dynamic("local " + name)
+				f.res.inits[name] = decl.Init
+				f.res.leaked[name] = true
+				f.record(name)
+			}
+		}
+		return
+	}
+	for _, name := range names {
+		if name == "" || name == "children" {
+			continue
+		}
+		val, ok := scope.Lookup(name)
+		if !ok || val.ContainsUnknown() || val.IsFunction() || val.IsJSX() {
+			f.res.locals[name] = jsvalue.Dynamic("local " + name)
+			f.res.inits[name] = decl.Init
+			f.res.leaked[name] = true
+			f.record(name)
+			continue
+		}
+		f.res.locals[name] = val
+		f.res.inits[name] = decl.Init
+		f.working[name] = val
+		f.record(name)
+	}
 }
 
 // assign folds a simple reassignment of a known local (`x = 1`, `x += 2`,
@@ -289,7 +431,7 @@ func (f *localFolder) assign(expr ast.Expr) bool {
 	if len(f.muts.exprMutations(bin.Right)) > 0 {
 		return false
 	}
-	rhs := evalConstValue(bin.Right, f.sigMap, f.working)
+	rhs := f.eval(bin.Right)
 	if rhs.ContainsUnknown() {
 		return false
 	}
@@ -335,7 +477,7 @@ func (f *localFolder) knownArg(e ast.Expr) (jsvalue.Value, bool) {
 	if len(f.muts.exprMutations(e)) > 0 {
 		return jsvalue.Value{}, false
 	}
-	v := evalConstValue(e, f.sigMap, f.working)
+	v := f.eval(e)
 	if v.ContainsUnknown() || !isPrimitiveValue(v) {
 		// Storing an object would alias it; keep to primitives.
 		return jsvalue.Value{}, false
@@ -422,4 +564,283 @@ func (f *localFolder) set(name string, v jsvalue.Value) {
 func isKnownLocal(name string, locals valueMap) bool {
 	_, ok := locals[name]
 	return ok
+}
+
+// localSnapshot captures the folder state a loop may change, so a loop that
+// turns out not to be statically evaluable can fall back to conservative
+// tainting without leaving partially folded values behind.
+type localSnapshot struct {
+	working valueMap
+	locals  valueMap
+	inits   map[string]ast.Expr
+	leaked  map[string]bool
+	changed map[string]bool
+	useIds  map[string]string
+	order   []string
+}
+
+func (f *localFolder) snapshot() localSnapshot {
+	s := localSnapshot{
+		working: make(valueMap, len(f.working)),
+		locals:  make(valueMap, len(f.res.locals)),
+		inits:   make(map[string]ast.Expr, len(f.res.inits)),
+		leaked:  make(map[string]bool, len(f.res.leaked)),
+		changed: make(map[string]bool, len(f.res.changed)),
+		useIds:  make(map[string]string, len(f.res.useIds)),
+		order:   append([]string(nil), f.res.order...),
+	}
+	for k, v := range f.working {
+		s.working[k] = v
+	}
+	for k, v := range f.res.locals {
+		s.locals[k] = v
+	}
+	for k, v := range f.res.inits {
+		s.inits[k] = v
+	}
+	for k, v := range f.res.leaked {
+		s.leaked[k] = v
+	}
+	for k, v := range f.res.changed {
+		s.changed[k] = v
+	}
+	for k, v := range f.res.useIds {
+		s.useIds[k] = v
+	}
+	return s
+}
+
+func (f *localFolder) restore(s localSnapshot) {
+	for k := range f.working {
+		delete(f.working, k)
+	}
+	for k, v := range s.working {
+		f.working[k] = v
+	}
+	restoreValues := func(dst, src valueMap) {
+		for k := range dst {
+			delete(dst, k)
+		}
+		for k, v := range src {
+			dst[k] = v
+		}
+	}
+	restoreValues(f.res.locals, s.locals)
+	restoreExprs := func(dst, src map[string]ast.Expr) {
+		for k := range dst {
+			delete(dst, k)
+		}
+		for k, v := range src {
+			dst[k] = v
+		}
+	}
+	restoreExprs(f.res.inits, s.inits)
+	restoreBools := func(dst, src map[string]bool) {
+		for k := range dst {
+			delete(dst, k)
+		}
+		for k, v := range src {
+			dst[k] = v
+		}
+	}
+	restoreBools(f.res.leaked, s.leaked)
+	restoreBools(f.res.changed, s.changed)
+	restoreStrings := func(dst, src map[string]string) {
+		for k := range dst {
+			delete(dst, k)
+		}
+		for k, v := range src {
+			dst[k] = v
+		}
+	}
+	restoreStrings(f.res.useIds, s.useIds)
+	f.res.order = append(f.res.order[:0], s.order...)
+}
+
+func (f *localFolder) dropNewLocals(before map[string]bool) {
+	order := f.res.order[:0]
+	for _, name := range f.res.order {
+		if before[name] {
+			order = append(order, name)
+			continue
+		}
+		delete(f.res.locals, name)
+		delete(f.res.inits, name)
+		delete(f.res.leaked, name)
+		delete(f.res.changed, name)
+		delete(f.res.useIds, name)
+		delete(f.working, name)
+	}
+	f.res.order = order
+}
+
+func (f *localFolder) localNames() map[string]bool {
+	out := make(map[string]bool, len(f.res.locals))
+	for name := range f.res.locals {
+		out[name] = true
+	}
+	return out
+}
+
+func (f *localFolder) loopFailed(s localSnapshot, stmt ast.Stmt) bool {
+	f.restore(s)
+	f.taint(f.muts.stmtMutations(stmt))
+	return false
+}
+
+// foldFor evaluates a loop whose init/test/update and body stay within the pure
+// statement subset. It is deliberately bounded: a loop that cannot be proven
+// finite and side-effect-free is left to runtime.
+func (f *localFolder) foldFor(s *ast.ForStmt) bool {
+	snap := f.snapshot()
+	before := f.localNames()
+	if s.Init != nil {
+		switch init := s.Init.(type) {
+		case *ast.VarStmt:
+			f.stmt(init)
+		case *ast.ExprStmt:
+			if !f.assign(init.Expression) {
+				return f.loopFailed(snap, s)
+			}
+		default:
+			return f.loopFailed(snap, s)
+		}
+	}
+	for iter := 0; iter < 1000; iter++ {
+		if s.Test != nil {
+			test := f.eval(s.Test)
+			truthy, known := test.Truthy()
+			if !known {
+				return f.loopFailed(snap, s)
+			}
+			if !truthy {
+				f.dropNewLocals(before)
+				return true
+			}
+		}
+		if !f.tryStmts(s.Body) {
+			return f.loopFailed(snap, s)
+		}
+		if s.Update != nil && !f.assign(s.Update) {
+			return f.loopFailed(snap, s)
+		}
+	}
+	return f.loopFailed(snap, s)
+}
+
+// foldWhile evaluates a bounded while/do-while loop. doFirst runs the body
+// before the first test.
+func (f *localFolder) foldWhile(test ast.Expr, body []ast.Stmt, doFirst bool) bool {
+	snap := f.snapshot()
+	before := f.localNames()
+	for iter := 0; iter < 1000; iter++ {
+		if !doFirst || iter > 0 {
+			v := f.eval(test)
+			truthy, known := v.Truthy()
+			if !known {
+				return f.loopFailed(snap, &ast.WhileStmt{Test: test, Body: body})
+			}
+			if !truthy {
+				f.dropNewLocals(before)
+				return true
+			}
+		}
+		if !f.tryStmts(body) {
+			return f.loopFailed(snap, &ast.WhileStmt{Test: test, Body: body})
+		}
+	}
+	return f.loopFailed(snap, &ast.WhileStmt{Test: test, Body: body})
+}
+
+func (f *localFolder) tryStmts(stmts []ast.Stmt) bool {
+	for _, stmt := range stmts {
+		if !f.tryStmt(stmt) {
+			return false
+		}
+	}
+	return true
+}
+
+func (f *localFolder) tryStmt(stmt ast.Stmt) bool {
+	switch s := stmt.(type) {
+	case *ast.VarStmt:
+		f.stmt(s)
+		return true
+	case *ast.ExprStmt:
+		if f.assign(s.Expression) {
+			return true
+		}
+		if len(f.muts.exprMutations(s.Expression)) > 0 {
+			return false
+		}
+		return !f.eval(s.Expression).ContainsUnknown()
+	case *ast.IfStmt:
+		v := f.eval(s.Test)
+		truthy, known := v.Truthy()
+		if !known {
+			return false
+		}
+		if truthy {
+			return f.tryStmts(s.Consequent)
+		}
+		return f.tryStmts(s.Alternate)
+	case *ast.BlockStmt:
+		return f.tryStmts(s.Body)
+	case *ast.ForStmt:
+		return f.foldFor(s)
+	case *ast.WhileStmt:
+		return f.foldWhile(s.Test, s.Body, false)
+	case *ast.DoWhileStmt:
+		return f.foldWhile(s.Test, s.Body, true)
+	case *ast.ForInStmt:
+		return f.foldForIn(s)
+	case *ast.EmptyStmt:
+		return true
+	}
+	return false
+}
+
+// foldForIn folds for-of over a known array/string and for-in over a known
+// object/array. The loop binding is scoped to the body and removed afterwards.
+func (f *localFolder) foldForIn(s *ast.ForInStmt) bool {
+	snap := f.snapshot()
+	before := f.localNames()
+	right := f.eval(s.Right)
+	if right.ContainsUnknown() {
+		return f.loopFailed(snap, s)
+	}
+	var items []jsvalue.Value
+	if s.IsForOf {
+		switch right.Kind() {
+		case jsvalue.KindArray:
+			items = right.Elems()
+		case jsvalue.KindString:
+			for _, r := range right.StringValue() {
+				items = append(items, jsvalue.String(string(r)))
+			}
+		default:
+			return f.loopFailed(snap, s)
+		}
+	} else {
+		switch right.Kind() {
+		case jsvalue.KindObject, jsvalue.KindArray:
+			for _, key := range right.Keys() {
+				items = append(items, jsvalue.String(key))
+			}
+		default:
+			return f.loopFailed(snap, s)
+		}
+	}
+	for _, item := range items {
+		bindings := map[string]ast.Expr{}
+		bindPatternTarget(s.Left, jsvalue.ToAST(item), bindings)
+		for name, expr := range bindings {
+			f.working[name] = f.eval(expr)
+		}
+		if !f.tryStmts(s.Body) {
+			return f.loopFailed(snap, s)
+		}
+	}
+	f.dropNewLocals(before)
+	return true
 }

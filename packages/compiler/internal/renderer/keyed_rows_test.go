@@ -7,10 +7,10 @@ import "testing"
 // and module constants the list reads are declared in its scope.
 func TestListRowConditionalAndBindings(t *testing.T) {
 	src := `import { useState } from 'react';
-const faqs = [{ q: 'a', a: 'A' }, { q: 'b', a: 'B' }];
 export default function Page() {
   const [open, setOpen] = useState([0]);
-  return <div>{faqs.map((f, i) => {
+  const [items, setItems] = useState([{ q: 'a', a: 'A' }, { q: 'b', a: 'B' }]);
+  return <div>{items().map((f, i) => {
     const isOpen = open.includes(i);
     return (
       <div key={f.q}>
@@ -23,7 +23,6 @@ export default function Page() {
 	_, html, js := buildTreeReact(t, src)
 	mustContain(t, "html", html, "<p>A</p>")
 	mustContain(t, "js", js,
-		"var faqs=",
 		"kbindList(",
 		"'aria-expanded':()=>(open().includes(i()))",
 		"()=>((open().includes(i())) && h('p'",

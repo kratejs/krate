@@ -43,7 +43,7 @@ func TestCollectLocalVarsTracksMutations(t *testing.T) {
 		{"unknown rhs", `let s = "a"; s = Math.random();`, map[string]string{"s": "?"}},
 		{"unknown branch", `let s = "a"; if (Math.random()) { s = "b"; }`, map[string]string{"s": "?"}},
 		{"known branch", `let s = "a"; if (true) { s = "b"; }`, map[string]string{"s": "b"}},
-		{"loop", `let s = 0; for (let i = 0; i < 3; i++) { s += i; }`, map[string]string{"s": "?"}},
+		{"loop", `let s = 0; for (let i = 0; i < 3; i++) { s += i; }`, map[string]string{"s": "3"}},
 		{"callback", `const a = []; const b = [1]; b.forEach(x => a.push(x));`, map[string]string{"a": "?", "b": "[1]"}},
 		{"local helper", `const a = []; function add() { a.push(1); } add();`, map[string]string{"a": "?"}},
 		{"helper param", `const a = []; const add = (xs) => { xs.push(1); }; add(a);`, map[string]string{"a": "?"}},

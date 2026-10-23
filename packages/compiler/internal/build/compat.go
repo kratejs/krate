@@ -1,6 +1,7 @@
 package build
 
 import (
+	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/css"
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
@@ -46,6 +47,19 @@ func (b *Builder) irBuildOptions() irtree.BuildOptions {
 		CodeTheme:     b.Cfg.Markdown.CodeTheme,
 		AggressiveDCE: b.aggressiveDCE(),
 		Compat:        b.compatStyleMode(),
+		EvalJS:        b.jsExprEvaluator(),
+		TransformIcon: func(el *ast.JSXElement) *ast.JSXElement {
+			if el == nil || el.Opening == nil || !iconNameIsLiteral(el) {
+				return nil
+			}
+			return b.compileIconToSVG(el)
+		},
+		TransformImage: func(el *ast.JSXElement) *ast.JSXElement {
+			if !imageAttrsAreLiteral(el) {
+				return nil
+			}
+			return b.compileImageToPicture(el)
+		},
 	}
 }
 

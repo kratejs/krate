@@ -34,9 +34,9 @@ export default function Page() {
 	if !strings.Contains(result.HTML, ">Home</a>") || !strings.Contains(result.HTML, ">Docs</a>") {
 		t.Errorf("expected both list items SSR'd, got:\n%s", result.HTML)
 	}
-	// The list must still be bound for client re-renders.
-	if !strings.Contains(result.HTML, "<!--k:") {
-		t.Errorf("expected hydration slot markers to remain, got:\n%s", result.HTML)
+	// A known list is fully static: no slot markers or runtime list binding.
+	if strings.Contains(result.HTML, "<!--k:") {
+		t.Errorf("static list must not emit slot markers, got:\n%s", result.HTML)
 	}
 }
 

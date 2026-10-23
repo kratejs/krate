@@ -404,7 +404,19 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		return b.buildLinkSlots(el, parentID)
 	case "SyntaxHighlight":
 		return b.buildSyntaxHighlightSlots(el, parentID)
-	case "Icon", "Image":
+	case "Icon":
+		if b.transformIcon != nil {
+			if transformed := b.transformIcon(el); transformed != nil && transformed != el {
+				return b.buildSlotNodes(transformed, parentID)
+			}
+		}
+		return []SlotNode{&StaticHTML{HTML: ""}}
+	case "Image":
+		if b.transformImage != nil {
+			if transformed := b.transformImage(el); transformed != nil && transformed != el {
+				return b.buildSlotNodes(transformed, parentID)
+			}
+		}
 		return []SlotNode{&StaticHTML{HTML: ""}}
 	case "Suspense":
 		return []SlotNode{b.buildSuspenseSlot(el, parentID)}
@@ -1954,6 +1966,40 @@ func (b *builder) buildConditionalSlot(expr ast.Expr, parentID string) *Conditio
 	return slot
 }
 
+// buildMapSlots renders a .map() call. A fully known, non-reactive source is
+// flattened directly into static slots: no list markers, no list binding and
+// no hydration runtime. Reactive sources keep the ListSlot path.
+func (b *builder) buildMapSlots(expr ast.Expr, parentID string) []SlotNode {
+	if nodes, ok := b.buildStaticMapSlots(expr, parentID); ok {
+		return nodes
+	}
+	return []SlotNode{b.buildListSlot(expr, parentID)}
+}
+
+func (b *builder) buildStaticMapSlots(expr ast.Expr, parentID string) ([]SlotNode, bool) {
+	_, mem, ok := mapCallParts(expr)
+	if !ok || b.referencesSignal(mem.Object) || b.dynamicListRows > 0 {
+		return nil, false
+	}
+	arr := b.resolveArrayLiteralExpr(expr)
+	if arr == nil {
+		return nil, false
+	}
+	id := b.assignSlotID(b.nextDynamicSlot(parentID, "list"))
+	items, ok := b.tryResolveArrayItems(arr, expr, string(id), true)
+	if !ok {
+		return nil, false
+	}
+	var nodes []SlotNode
+	for _, item := range items {
+		nodes = append(nodes, item.Contents...)
+	}
+	if len(nodes) == 0 {
+		nodes = []SlotNode{&StaticHTML{HTML: ""}}
+	}
+	return nodes, true
+}
+
 // buildListSlot - .map() with key detection
 
 func (b *builder) buildListSlot(expr ast.Expr, parentID string) *ListSlot {
@@ -1967,12 +2013,14 @@ func (b *builder) buildListSlot(expr ast.Expr, parentID string) *ListSlot {
 	// is resolved by evaluating the array source expression to a literal and
 	// parsing it back, so client components still SSR their initial list
 	// content instead of rendering an empty slot until hydration.
+	b.dynamicListRows++
 	items := b.tryResolveItems(expr, string(id))
 	if len(items) == 0 {
 		if arr := b.resolveArrayLiteralExpr(expr); arr != nil {
-			items = b.tryResolveArrayItems(arr, expr, string(id))
+			items, _ = b.tryResolveArrayItems(arr, expr, string(id), false)
 		}
 	}
+	b.dynamicListRows--
 
 	slot := &ListSlot{
 		ID:         id,
@@ -2004,7 +2052,7 @@ func (b *builder) resolveArrayLiteralExpr(expr ast.Expr) *ast.ArrayExpr {
 	if !ok {
 		return nil
 	}
-	if prop, ok := mem.Property.(*ast.Identifier); !ok || prop.Name != "map" {
+	if prop, ok := mem.Property.(*ast.Identifier); !ok || (prop.Name != "map" && prop.Name != "flatMap") {
 		return nil
 	}
 	if obj, ok := mem.Object.(*ast.ArrayExpr); ok {
@@ -2027,61 +2075,43 @@ func (b *builder) resolveArrayLiteralExpr(expr ast.Expr) *ast.ArrayExpr {
 // clone of the map body, and the concrete body is built through the full slot
 // pipeline - so nested components recurse with their own hydration markers and
 // member reads (item.title) fold to the element's real literal values.
-func (b *builder) tryResolveArrayItems(arr *ast.ArrayExpr, mapExpr ast.Expr, listID string) []*ListItem {
+func (b *builder) tryResolveArrayItems(arr *ast.ArrayExpr, mapExpr ast.Expr, listID string, requireStatic bool) ([]*ListItem, bool) {
 	call, ok := mapExpr.(*ast.CallExpr)
 	if !ok || len(call.Args) != 1 {
-		return nil
+		return nil, false
 	}
-	arrow, ok := call.Args[0].(*ast.ArrowFn)
+	arrow := b.resolveMapCallback(call.Args[0])
+	if arrow == nil {
+		return nil, false
+	}
+	bodyExpr, ok := staticMapCallbackBody(arrow)
 	if !ok {
-		return nil
-	}
-	var paramName string
-	var indexName string
-	if len(arrow.Params) >= 1 {
-		paramName = arrow.Params[0].Name
-	}
-	if len(arrow.Params) >= 2 {
-		indexName = arrow.Params[1].Name
-	}
-	bodyExpr := arrowBodyExpr(arrow)
-	if bodyExpr == nil {
-		return nil
-	}
-	if paramName == "" {
-		return nil
+		return nil, false
 	}
 	keyExpr := keyExprOf(bodyExpr)
 	seenKeys := map[string]int{}
 
-	var items []*ListItem
+	items := make([]*ListItem, 0, len(arr.Elements))
 	for i, elem := range arr.Elements {
 		key := itoa(i)
 		if elem == nil {
 			// An array hole (`[a, , b]`) maps like undefined.
-			elem = &ast.Literal{Position: arr.Position, Kind: ast.NullLit, Value: "undefined"}
+			elem = undefinedExpr()
 		}
-		concrete := substituteListParam(bodyExpr, paramName, elem)
-		var index ast.Expr
-		if indexName != "" {
-			index = &ast.Literal{Position: elem.Pos(), Kind: ast.NumberLit, Value: itoa(i)}
-			concrete = substituteListParam(concrete, indexName, index)
+		bindings := mapCallbackBindings(arrow, elem, i, arr)
+		concrete, ok := b.substituteCallbackLocalsBound(arrow, bodyExpr, bindings, requireStatic)
+		if !ok {
+			return nil, false
 		}
-		// A block-bodied callback (`x => { const label = x.name; return
-		// <li>{label}</li>; }`) declares locals the rendered body reads:
-		// simple const locals are substituted (innermost last, so a later
-		// local may read an earlier one); any other local shadows component
-		// bindings of the same name while the item is built.
-		concrete = substituteCallbackLocals(arrow, concrete, paramName, elem, indexName, index)
+		keyBindings := mapCallbackBindings(arrow, elem, i, arr)
 		if keyExpr != nil {
 			// The server-rendered row is marked with the item's real key so
 			// hydration adopts it by key. Duplicates get the same occurrence
 			// suffix the runtime uses.
-			k := substituteListParam(keyExpr, paramName, elem)
-			if index != nil {
-				k = substituteListParam(k, indexName, index)
+			k, ok := b.substituteCallbackLocalsBound(arrow, keyExpr, keyBindings, requireStatic)
+			if !ok {
+				return nil, false
 			}
-			k = substituteCallbackLocals(arrow, k, paramName, elem, indexName, index)
 			if folded, ok := b.foldListKey(k); ok {
 				key = "$" + folded
 				if n, dup := seenKeys[key]; dup {
@@ -2107,7 +2137,7 @@ func (b *builder) tryResolveArrayItems(arr *ast.ArrayExpr, mapExpr ast.Expr, lis
 			Contents: contents,
 		})
 	}
-	return items
+	return items, true
 }
 
 // substituteCallbackLocals substitutes the simple `const name = init` locals a
@@ -2550,7 +2580,8 @@ func (b *builder) tryResolveItems(expr ast.Expr, listID string) []*ListItem {
 	if !ok {
 		return nil
 	}
-	return b.tryResolveArrayItems(arr, expr, listID)
+	items, _ := b.tryResolveArrayItems(arr, expr, listID, false)
+	return items
 }
 
 // buildFragmentSlots - flatten fragments
