@@ -1,7 +1,6 @@
 {
-  "settleMs": 900,
+  "ready": ".lazy-toggle",
   "steps": [
-    { "op": "waitFor", "sel": ".lazy-toggle" },
     { "op": "click", "sel": ".lazy-toggle" }
   ]
 }

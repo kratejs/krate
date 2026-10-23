@@ -71,6 +71,10 @@ async function settle(page, ms) {
   if (ms > 0) await page.waitForTimeout(ms);
 }
 
+function waitVisible(page, sel) {
+  return page.waitForSelector(sel, { state: "visible", timeout: 15000 });
+}
+
 function describeStep(step) {
   const parts = [step.op];
   for (const k of ["sel", "text", "key", "value", "values", "event", "ms", "js"]) {
@@ -292,12 +296,24 @@ async function runSide(browser, fx, url) {
     const target = /^https?:/.test(url) ? url : `http://127.0.0.1:${server.address().port}${url}`;
     const resp = await page.goto(target, { waitUntil: "load", timeout: 20000 });
     if (!resp || resp.status() >= 400) throw new Error(`GET ${target}: ${resp ? resp.status() : "no response"}`);
+    let loadError = "";
+    if (fx.ready) {
+      try {
+        await waitVisible(page, fx.ready);
+      } catch (e) {
+        loadError = "ready: " + String((e && e.message) || e).split("\n")[0];
+      }
+    }
     await settle(page, fx.settleMs ?? 30);
-    await record("load");
+    await record("load", loadError);
     for (const step of fx.steps) {
       let stepError = "";
       try {
         await runStep(page, step);
+        // "then" is a selector that must be visible before the snapshot, so a
+        // step that starts async work is compared once it has landed instead
+        // of after a fixed wait.
+        if (step.then) await waitVisible(page, step.then);
       } catch (e) {
         stepError = String((e && e.message) || e)
           .split("\n")[0]

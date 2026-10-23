@@ -1,17 +1,16 @@
 import { useActionState } from "react";
-import { delay, log } from "../lib/log";
+import { createGate, log } from "../lib/log";
 
 type State = { count: number; message: string };
 
-// The action delay is far longer than the harness's step latency on purpose:
-// a snapshot is taken right after the submit, and with a ~300ms delay a
-// loaded runner (Firefox in a container, six fixtures at once) sometimes let
-// the action finish before that snapshot and sometimes not, on either side,
-// so the expected DOM depended on timing. Later steps wait for the result.
+// The action stays pending until a step releases it (eval window.__release()),
+// so the pending UI is compared in a stable state instead of racing a timer.
 async function addToCart(prev: State, formData: FormData): Promise<State> {
   const qty = Number(formData.get("qty"));
   log("action start", prev.count, qty);
-  await delay(1500, null);
+  const gate = createGate();
+  (window as unknown as { __release?: () => void }).__release = gate.open;
+  await gate.promise;
   if (!Number.isInteger(qty) || qty <= 0) return { ...prev, message: "invalid quantity" };
   return { count: prev.count + qty, message: "added " + qty };
 }

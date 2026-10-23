@@ -1,9 +1,6 @@
 {
-  "settleMs": 0,
   "steps": [
-    { "op": "click", "sel": "#send" },
-    { "op": "wait", "ms": 40 },
-    { "op": "waitFor", "sel": "#thread li.sent:nth-child(2)" },
-    { "op": "wait", "ms": 30 }
+    { "op": "click", "sel": "#send", "then": "#thread li.sending" },
+    { "op": "eval", "js": "window.__release()", "then": "#thread li.sent:nth-child(2)" }
   ]
 }

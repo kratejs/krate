@@ -1,7 +1,6 @@
 {
-  "settleMs": 2500,
   "steps": [
-    { "op": "waitFor", "sel": "#sidebar" },
-    { "op": "waitFor", "sel": "#comments" }
+    { "op": "click", "sel": "#release-sidebar", "then": "#sidebar" },
+    { "op": "click", "sel": "#release-comments", "then": "#comments" }
   ]
 }

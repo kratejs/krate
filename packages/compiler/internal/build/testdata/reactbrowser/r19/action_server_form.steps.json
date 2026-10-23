@@ -1,11 +1,8 @@
 {
   "server": true,
   "steps": [
-    { "op": "click", "sel": "#sign" },
-    { "op": "waitFor", "sel": "#error" },
+    { "op": "click", "sel": "#sign", "then": "#error" },
     { "op": "fill", "sel": "#name", "text": "Ada" },
-    { "op": "click", "sel": "#sign" },
-    { "op": "waitFor", "sel": "#entries li" },
-    { "op": "wait", "ms": 100 }
+    { "op": "click", "sel": "#sign", "then": "#entries li" }
   ]
 }

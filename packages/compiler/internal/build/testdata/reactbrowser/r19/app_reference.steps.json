@@ -1,13 +1,10 @@
 {
-  "settleMs": 900,
+  "ready": "#todos",
   "steps": [
-    { "op": "waitFor", "sel": "#todos" },
     { "op": "press", "sel": "#title", "key": "Enter" },
     { "op": "waitFor", "sel": "#error" },
     { "op": "fill", "sel": "#title", "text": "ship Krate" },
-    { "op": "press", "sel": "#title", "key": "Enter" },
-    { "op": "wait", "ms": 60 },
-    { "op": "waitFor", "text": "ready" },
-    { "op": "wait", "ms": 30 }
+    { "op": "press", "sel": "#title", "key": "Enter", "then": "#busy:has-text('saving')" },
+    { "op": "eval", "js": "window.__save()", "then": "#busy:has-text('ready')" }
   ]
 }

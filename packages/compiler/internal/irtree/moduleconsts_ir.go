@@ -101,17 +101,18 @@ func (b *builder) referencedModuleConstVars(node *ComponentNode) []string {
 	if len(used) == 0 {
 		return nil
 	}
+	// A module-level let/var is mutable state: every component must read and
+	// write the same variable, so it (and what its initializer reads) is
+	// declared once at the top of the page script instead of per component.
+	b.hoistSharedModuleVars(used)
 	decls := make([]string, 0, len(used))
 	for _, name := range b.moduleConstOrder(used) {
-		init := b.moduleConstInits[name]
-		js := generateExprJS(init, nil)
-		if js == "" {
+		if b.moduleLets[name] {
 			continue
 		}
-		if runsCode(init) {
-			js = "__krateModule(" + strconv.Quote(name) + ",function(){return " + js + ";})"
+		if decl := b.moduleVarDecl(name); decl != "" {
+			decls = append(decls, decl)
 		}
-		decls = append(decls, "var "+name+"="+js)
 	}
 	for i, js := range stmtJS {
 		if replay[i] {
@@ -119,6 +120,86 @@ func (b *builder) referencedModuleConstVars(node *ComponentNode) []string {
 		}
 	}
 	return decls
+}
+
+// moduleVarDecl returns the `var NAME=<init>` declaration of a module binding,
+// created once per page through __krateModule when the initializer runs code.
+func (b *builder) moduleVarDecl(name string) string {
+	init := b.moduleConstInits[name]
+	js := generateExprJS(init, nil)
+	if js == "" {
+		return ""
+	}
+	if runsCode(init) {
+		js = "__krateModule(" + strconv.Quote(name) + ",function(){return " + js + ";})"
+	}
+	return "var " + name + "=" + js
+}
+
+// hoistSharedModuleVars records, in dependency order, the declarations of the
+// used module-level let/var bindings and of the constants their initializers
+// read, for emission at the top of the page script.
+func (b *builder) hoistSharedModuleVars(used map[string]bool) {
+	closure := map[string]bool{}
+	var add func(name string)
+	add = func(name string) {
+		if closure[name] || !used[name] {
+			return
+		}
+		closure[name] = true
+		for ref := range jsIdentRefs(generateExprJS(b.moduleConstInits[name], nil)) {
+			add(ref)
+		}
+	}
+	for name := range used {
+		if b.moduleLets[name] {
+			add(name)
+		}
+	}
+	if len(closure) == 0 {
+		return
+	}
+	if b.sharedSeen == nil {
+		b.sharedSeen = map[string]bool{}
+	}
+	for _, name := range b.moduleConstOrder(closure) {
+		if b.sharedSeen[name] {
+			continue
+		}
+		if decl := b.moduleVarDecl(name); decl != "" {
+			b.sharedSeen[name] = true
+			b.sharedModuleVars = append(b.sharedModuleVars, decl)
+		}
+	}
+}
+
+// collectModuleLets returns the names declared by module-level `let` and
+// `var` statements with an initializer.
+func collectModuleLets(prog *ast.Program) map[string]bool {
+	out := map[string]bool{}
+	if prog == nil {
+		return out
+	}
+	for _, stmt := range prog.Body {
+		var vs *ast.VarStmt
+		switch s := stmt.(type) {
+		case *ast.VarStmt:
+			vs = s
+		case *ast.ExportStmt:
+			if v, ok := s.Declaration.(*ast.VarStmt); ok {
+				vs = v
+			}
+		}
+		if vs == nil || (vs.Kind != ast.VarLet && vs.Kind != ast.VarVar) {
+			continue
+		}
+		for _, decl := range vs.Decls {
+			if decl.Name != "" && decl.Init != nil {
+				out[decl.Name] = true
+			}
+		}
+	}
+	return out
 }
 
 // moduleConstOrder sorts the used constants so each one follows the

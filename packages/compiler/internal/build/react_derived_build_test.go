@@ -172,3 +172,58 @@ func readHydrationJS(t *testing.T, outDir string) string {
 	}
 	return readOut(t, outDir, filepath.Base(files[0]))
 }
+
+func TestModuleLetIsDeclaredOnceForAllComponents(t *testing.T) {
+	outDir := buildWithFiles(t, map[string]string{
+		"src/pages/index.tsx": `
+			import { useState } from 'react';
+			let count = 0;
+			let release: () => void = () => {};
+			const gate = new Promise<void>((resolve) => { release = resolve; });
+			function Inc() {
+				const [n, setN] = useState(0);
+				return <button onClick={() => { count++; setN(n + 1); }}>{n}</button>;
+			}
+			function Show() {
+				const [text, setText] = useState("none");
+				return <button onClick={() => { setText("count=" + count); gate.then(() => {}); release(); }}>{text}</button>;
+			}
+			export default function Page() {
+				return <div><Inc /><Show /></div>;
+			}
+		`,
+	})
+	js := readHydrationJS(t, outDir)
+	for _, decl := range []string{"var count=0", "var release=()=>{}"} {
+		if got := strings.Count(js, decl); got != 1 {
+			t.Errorf("%q should be declared exactly once at page scope (got %d):\n%s", decl, got, js)
+		}
+	}
+	if i, j := strings.Index(js, "var count=0"), strings.Index(js, "// component "); i < 0 || j < 0 || i > j {
+		t.Errorf("shared module vars must precede the component scopes:\n%s", js)
+	}
+}
+
+func TestStateArrayPatternWithHoleOrNoSetter(t *testing.T) {
+	outDir := buildWithFiles(t, map[string]string{
+		"src/pages/index.tsx": `
+			import { useState } from 'react';
+			export default function Page() {
+				const [, setTick] = useState(0);
+				const [label] = useState("static");
+				const [n, setN] = useState(0);
+				return <button onClick={() => { setTick((t) => t + 1); setN(n + 1); }}>{label} {n}</button>;
+			}
+		`,
+	})
+	js := readHydrationJS(t, outDir)
+	for _, want := range []string{
+		"const [__krate_hole0,setTick]=createSignal(0",
+		"const [label,__krate_hole1]=createSignal(",
+		"const [n,setN]=createSignal(0",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("hydration JS should contain %q:\n%s", want, js)
+		}
+	}
+}

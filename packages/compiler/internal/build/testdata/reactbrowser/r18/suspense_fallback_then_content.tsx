@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { delay } from "../lib/log";
+import { createGate } from "../lib/log";
 
 function Report(props: { quarter: string }) {
   return (
@@ -9,19 +9,20 @@ function Report(props: { quarter: string }) {
   );
 }
 
-const SlowReport = lazy(() => delay(300, { default: Report }));
+// The lazy component resolves when the button is clicked, not after a timer,
+// so the fallback is on screen for exactly as long as the steps want it and
+// the reveal does not race React's 300ms throttle.
+const gate = createGate();
+const SlowReport = lazy(() => gate.promise.then(() => ({ default: Report })));
 
-// A lazy component that resolves after a delay: the fallback is visible
-// first and is replaced by the content.
-//
-// The load snapshot is taken after the reveal on purpose (settleMs 900 in
-// the steps file). A snapshot right after load raced the 300ms delay plus
-// React's own reveal throttle: on a loaded machine (Firefox in CI) React was
-// sometimes already showing the report while Krate still showed the
-// fallback, so the expected DOM depended on timing.
+// A lazy component that resolves later: the fallback is visible first and is
+// replaced by the content.
 export default function SuspenseFallbackThenContent() {
   return (
     <div>
+      <button id="release" onClick={() => gate.open()}>
+        release
+      </button>
       <Suspense fallback={<p id="fallback">Crunching numbers...</p>}>
         <SlowReport quarter="Q3" />
       </Suspense>

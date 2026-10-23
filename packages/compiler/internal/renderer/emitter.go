@@ -41,6 +41,9 @@ type EmitResult struct {
 	// islands. It is emitted inside the page hydration IIFE (where those signals
 	// are in scope) before the islands mount.
 	IslandBootJS string
+	// SharedModuleVars are declared once at the top of the page script, ahead
+	// of the per-component scopes, so module-level let/var state is shared.
+	SharedModuleVars []string
 	// RuntimeChildren maps a runtime Go region id ("region-<id>") to the HTML
 	// of its build-rendered static children. Emit never mutates the shared IR,
 	// so the build attaches these to the region props itself.
@@ -251,19 +254,20 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	listComponents := collectListComponentFuncs(tree.Root, tree.Functions)
 
 	return &EmitResult{
-		HTML:            output.HTML + output.Templates,
-		HeadHTML:        e.headHTML,
-		ScriptHTML:      e.scriptHTML,
-		StyleHTML:       e.styleHTML,
-		Signatures:      output.Signatures,
-		HasLinks:        tree.HasLinks,
-		UsedFuncs:       make(map[string]bool),
-		UsedCSS:         make(map[string]bool),
-		ListComponents:  listComponents,
-		Errors:          e.errs,
-		GoRenders:       append(output.GoRenders, e.goCollector.snapshot()...),
-		RuntimeChildren: output.RuntimeChildren,
-		BoundaryThrows:  output.BoundaryThrows,
+		HTML:             output.HTML + output.Templates,
+		HeadHTML:         e.headHTML,
+		ScriptHTML:       e.scriptHTML,
+		StyleHTML:        e.styleHTML,
+		Signatures:       output.Signatures,
+		HasLinks:         tree.HasLinks,
+		SharedModuleVars: tree.SharedModuleVars,
+		UsedFuncs:        make(map[string]bool),
+		UsedCSS:          make(map[string]bool),
+		ListComponents:   listComponents,
+		Errors:           e.errs,
+		GoRenders:        append(output.GoRenders, e.goCollector.snapshot()...),
+		RuntimeChildren:  output.RuntimeChildren,
+		BoundaryThrows:   output.BoundaryThrows,
 	}
 }
 

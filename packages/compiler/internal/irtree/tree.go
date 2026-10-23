@@ -509,6 +509,10 @@ type ComponentTree struct {
 	// ModuleConstInits holds module-level constant initializers (entry module
 	// plus imports) so SSREval resolves module constants.
 	ModuleConstInits map[string]ast.Expr
+	// SharedModuleVars are `var NAME=init` declarations for module-level
+	// `let`/`var` bindings used by client code. They are emitted once at the
+	// top of the page script so every component closes over the same variable.
+	SharedModuleVars []string
 
 	// ExternalComponents are unresolved JSX components imported from bare npm
 	// packages. Krate cannot statically evaluate arbitrary React libraries, so
