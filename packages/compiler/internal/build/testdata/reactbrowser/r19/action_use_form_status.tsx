@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useFormStatus } from "react-dom";
-import { delay } from "../lib/log";
+import { createGate } from "../lib/log";
 
 function SubmitButton() {
   const { pending, data } = useFormStatus();
@@ -11,11 +11,8 @@ function SubmitButton() {
   );
 }
 
-// The action delay is far longer than the harness's step latency on purpose:
-// a snapshot is taken right after the submit, and with a ~300ms delay a
-// loaded runner (Firefox in a container, six fixtures at once) sometimes let
-// the action finish before that snapshot and sometimes not, on either side,
-// so the expected DOM depended on timing. Later steps wait for the result.
+// The action stays pending until a step releases it (eval window.__release()),
+// so the pending UI is compared in a stable state instead of racing a timer.
 // useFormStatus in a child component reads the parent form's pending state
 // and submitted data.
 export default function ActionUseFormStatus() {
@@ -23,7 +20,9 @@ export default function ActionUseFormStatus() {
   return (
     <form
       action={async (fd: FormData) => {
-        await delay(1500, null);
+        const gate = createGate();
+        (window as unknown as { __release?: () => void }).__release = gate.open;
+        await gate.promise;
         setDone("subscribed " + fd.get("email"));
       }}
     >

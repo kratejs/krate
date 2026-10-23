@@ -1,9 +1,16 @@
 import { Suspense, use, useState } from "react";
-import { delay } from "../lib/log";
+import { createGate } from "../lib/log";
 
+// Each post's comments resolve when the release button is clicked, not after a
+// timer, so the fallback is stable instead of racing React's reveal throttle.
+const gates = new Map<string, ReturnType<typeof createGate>>();
 const cache = new Map<string, Promise<string[]>>();
+function gateFor(post: string) {
+  if (!gates.has(post)) gates.set(post, createGate());
+  return gates.get(post)!;
+}
 function fetchComments(post: string) {
-  if (!cache.has(post)) cache.set(post, delay(250, [post + ": first!", post + ": nice"]));
+  if (!cache.has(post)) cache.set(post, gateFor(post).promise.then(() => [post + ": first!", post + ": nice"]));
   return cache.get(post)!;
 }
 
@@ -27,6 +34,9 @@ export default function UsePromiseSuspense() {
       <Suspense fallback={<p id="loading">loading comments</p>}>
         <Comments promise={fetchComments(post)} />
       </Suspense>
+      <button id="release" onClick={() => gateFor(post).open()}>
+        load comments
+      </button>
       <button id="next" onClick={() => setPost("part2")}>
         next post
       </button>

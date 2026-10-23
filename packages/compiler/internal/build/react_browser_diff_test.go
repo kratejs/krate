@@ -54,6 +54,13 @@ import (
 //	                       server" modules go through POST /__krate/action/<id>
 //	captureHead            also compare document.title, <meta> and some <link>s
 //	settleMs               extra wait after each step (default 30)
+//	ready                  selector that must be visible before the load
+//	                       snapshot is taken (instead of a fixed wait)
+//
+// A step may carry "then": a selector that must be visible before that step's
+// snapshot is taken. Prefer ready/then, or promises gated on a button click
+// (createGate in lib/log.ts), over timers and settleMs: a timer races the
+// page load and React's own 300ms reveal throttle on a loaded machine.
 //
 // Known divergences live in testdata/reactbrowser/divergences.json as
 // fixture -> {severity, reason}. P0 is a crash, uncaught error, lost or wrong
@@ -109,6 +116,7 @@ type rbSpec struct {
 	Server                bool             `json:"server,omitempty"`
 	CaptureHead           bool             `json:"captureHead,omitempty"`
 	SettleMs              *int             `json:"settleMs,omitempty"`
+	Ready                 string           `json:"ready,omitempty"`
 	Notes                 string           `json:"notes,omitempty"`
 }
 
@@ -697,6 +705,7 @@ func TestReactBrowserDifferential(t *testing.T) {
 		Steps       []map[string]any `json:"steps"`
 		CaptureHead bool             `json:"captureHead"`
 		SettleMs    *int             `json:"settleMs,omitempty"`
+		Ready       string           `json:"ready,omitempty"`
 	}
 	plan := []planFixture{}
 	for _, fx := range fixtures {
@@ -719,6 +728,7 @@ func TestReactBrowserDifferential(t *testing.T) {
 			Steps:       fx.Spec.Steps,
 			CaptureHead: fx.Spec.CaptureHead,
 			SettleMs:    fx.Spec.SettleMs,
+			Ready:       fx.Spec.Ready,
 		}
 		if pf.Steps == nil {
 			pf.Steps = []map[string]any{}

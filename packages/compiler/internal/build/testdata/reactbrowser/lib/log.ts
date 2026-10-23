@@ -54,3 +54,14 @@ export function createStore<T>(initial: T) {
 export function delay<T>(ms: number, value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms));
 }
+
+// A promise that resolves when open() is called, so a fixture can hold
+// Suspense data or an async action pending until the harness releases it (a
+// click or an eval step) instead of racing a timer.
+export function createGate() {
+  let release: () => void = () => {};
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, open: () => release() };
+}

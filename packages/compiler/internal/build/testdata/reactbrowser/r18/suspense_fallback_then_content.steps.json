@@ -1,7 +1,5 @@
 {
-  "settleMs": 0,
   "steps": [
-    { "op": "waitFor", "sel": "#report" },
-    { "op": "wait", "ms": 50 }
+    { "op": "click", "sel": "#release", "then": "#report" }
   ]
 }

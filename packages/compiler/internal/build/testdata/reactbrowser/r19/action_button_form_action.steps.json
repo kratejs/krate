@@ -1,9 +1,7 @@
 {
   "steps": [
-    { "op": "click", "sel": "#publish" },
-    { "op": "wait", "ms": 50 },
+    { "op": "click", "sel": "#publish", "then": "#status:has-text('published')" },
     { "op": "fill", "sel": "#title", "text": "Second" },
-    { "op": "click", "sel": "#save" },
-    { "op": "wait", "ms": 50 }
+    { "op": "click", "sel": "#save", "then": "#status:has-text('saved Second')" }
   ]
 }

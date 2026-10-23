@@ -1,10 +1,10 @@
 import { Suspense, use, useActionState, useOptimistic, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { delay, log } from "../lib/log";
+import { createGate, log } from "../lib/log";
 
 type Todo = { id: number; title: string; pending?: boolean };
 
-const initialTodos = delay(150, [
+const initialTodos = Promise.resolve<Todo[]>([
   { id: 1, title: "read the React 19 notes" },
   { id: 2, title: "port the settings form" },
 ]);
@@ -31,11 +31,12 @@ function TodoList(props: { initial: Promise<Todo[]> }) {
     const title = String(formData.get("title")).trim();
     if (!title) return "title is required";
     addOptimistic(title);
-    // Long enough that the snapshot 60ms after the click always lands while
-    // the action is pending: with 200ms a slow step (Playwright actionability
-    // waits on a loaded machine) let React finish first, so the expected DOM
-    // depended on timing.
-    await delay(800, null);
+    // The save stays pending until the steps release it (eval window.__save),
+    // so the pending UI is compared in a stable state instead of racing a
+    // timer.
+    const gate = createGate();
+    (window as unknown as { __save?: () => void }).__save = gate.open;
+    await gate.promise;
     log("saved", title);
     setTodos((t) => [...t, { id: nextId.current++, title }]);
     return "";

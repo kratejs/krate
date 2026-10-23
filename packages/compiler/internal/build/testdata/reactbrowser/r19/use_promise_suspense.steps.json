@@ -1,8 +1,7 @@
 {
-  "settleMs": 0,
   "steps": [
-    { "op": "waitFor", "sel": "#comments" },
-    { "op": "click", "sel": "#next" },
-    { "op": "waitFor", "text": "part2: first!" }
+    { "op": "click", "sel": "#release", "then": "#comments" },
+    { "op": "click", "sel": "#next", "then": "#loading" },
+    { "op": "click", "sel": "#release", "then": "text=part2: first!" }
   ]
 }
