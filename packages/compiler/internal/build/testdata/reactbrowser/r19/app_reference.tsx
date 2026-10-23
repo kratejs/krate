@@ -1,3 +1,6 @@
+// The load snapshot is taken after the data and React's reveal throttle have
+// settled (settleMs 900 in the steps file); a snapshot right after load raced
+// the timer, so React and Krate could be caught in different states.
 import { Suspense, use, useActionState, useOptimistic, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { delay, log } from "../lib/log";

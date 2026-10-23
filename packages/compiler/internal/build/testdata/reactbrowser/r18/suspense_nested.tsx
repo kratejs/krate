@@ -21,6 +21,12 @@ const LazyComments = lazy(() => delay(1200, { default: Comments }));
 // fires 100ms late on a loaded machine lets the comments resolve before the
 // outer reveal commits, and React itself then shows "3 comments" without the
 // inner fallback, so the expected DOM depended on timing.
+//
+// For the same reason the load snapshot is taken after both boundaries have
+// resolved (settleMs 2500 in the steps file, past the 1200ms inner delay plus
+// the throttle). A snapshot taken right after load raced the timers: on a
+// loaded machine (Firefox in CI) React had sometimes already shown the
+// comments while Krate still showed the inner fallback.
 export default function SuspenseNested() {
   return (
     <Suspense fallback={<p id="outer-fallback">Loading page...</p>}>
