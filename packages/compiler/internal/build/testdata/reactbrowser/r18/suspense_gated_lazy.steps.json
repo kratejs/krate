@@ -1,0 +1,7 @@
+{
+  "settleMs": 30,
+  "steps": [
+    { "op": "click", "sel": "#release" },
+    { "op": "waitFor", "sel": "#panel", "state": "visible" }
+  ]
+}

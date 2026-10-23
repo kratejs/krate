@@ -131,6 +131,7 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		moduleConsts:     typedModuleConsts(moduleConstInits, moduleConsts),
 		moduleConstInits: moduleConstInits,
 		moduleStmts:      collectModuleStmts(prog),
+		moduleLets:       collectModuleLets(prog),
 		entryProg:        prog,
 		cvaFactories:     mergeCVAFactories(ann.CVAFactories, prog),
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
@@ -199,6 +200,7 @@ func (b *builder) finishTree(root *ComponentNode) *ComponentTree {
 		CVAFactories:     b.cvaFactories,
 		ContextDefaults:  b.contextDefaults,
 		ModuleConstInits: b.moduleConstInits,
+		SharedModuleVars: b.sharedModuleVars,
 		CSSSignalsCSS:    cssSignals,
 		HasCSSSignals:    len(b.cssCollected) > 0 || len(b.cssConditions) > 0,
 		NoJSFallbackCSS:  noJSFallback,
@@ -347,9 +349,12 @@ type builder struct {
 	// A component's walk clears it on entry and restores the caller's counts
 	// on exit, so siblings after a child component keep unique IDs.
 	elementCounts    map[string]int
-	moduleConsts     valueMap                 // module-level const values (name -> folded value)
-	moduleConstInits map[string]ast.Expr      // module-level const initializers (name -> expr)
-	moduleStmts      []ast.Stmt               // entry module top-level statements that run code
+	moduleConsts     valueMap            // module-level const values (name -> folded value)
+	moduleConstInits map[string]ast.Expr // module-level const initializers (name -> expr)
+	moduleStmts      []ast.Stmt          // entry module top-level statements that run code
+	moduleLets       map[string]bool     // module-level let/var bindings (mutable, so shared)
+	sharedModuleVars []string            // hoisted declarations for moduleLets and their dependencies
+	sharedSeen       map[string]bool
 	entryProg        *ast.Program             // the entry module (imports for KR8302)
 	cvaFactories     map[string]*CVASpec      // module-level `const X = cva(...)` factories
 	contextDefaults  map[string]jsvalue.Value // module-level `const X = createContext(v)` defaults

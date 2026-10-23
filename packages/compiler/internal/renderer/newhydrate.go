@@ -74,6 +74,10 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	// Rebuild the comment-marker cache against the current DOM (fresh page
 	// load or SPA navigation).
 	b.WriteString("refreshSlots();\n")
+	for _, decl := range result.SharedModuleVars {
+		b.WriteString(decl)
+		b.WriteString(";\n")
+	}
 	b.WriteString("if(typeof krateRefsHold==='function')krateRefsHold();\n")
 
 	// Component functions needed by dynamic list slots. Without these the
