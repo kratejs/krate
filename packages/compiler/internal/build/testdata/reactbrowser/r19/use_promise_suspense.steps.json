@@ -1,5 +1,5 @@
 {
-  "settleMs": 0,
+  "settleMs": 900,
   "steps": [
     { "op": "waitFor", "sel": "#comments" },
     { "op": "click", "sel": "#next" },
