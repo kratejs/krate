@@ -1280,6 +1280,9 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 			if html, handled := e.iconEmit(iconName, el.Opening.Attributes); handled {
 				return html
 			}
+			e.addDiag(el.Position, "icon "+iconName+" could not be resolved at build time",
+				"check the icon name (set:name) and network access to api.iconify.design, or pre-populate .krate/cache/icons")
+			return ""
 		}
 	}
 

@@ -128,25 +128,9 @@ func resolveRemoteIcon(root string, fullName string) (Icon, error) {
 		return ic, nil
 	}
 
-	url := fmt.Sprintf("https://api.iconify.design/%s/%s.svg", prefix, name)
-	resp, err := httpClient.Get(url)
-	if err != nil {
-		return Icon{}, fmt.Errorf("failed to reach icon API: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return Icon{}, fmt.Errorf("icon %s:%s not found in registry", prefix, name)
-	} else if resp.StatusCode != http.StatusOK {
-		return Icon{}, fmt.Errorf("api returned status %d", resp.StatusCode)
-	}
-
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	bodyBytes, err := fetchIconSVG(prefix, name)
 	if err != nil {
 		return Icon{}, err
-	}
-	if len(bodyBytes) == 1<<20 {
-		return Icon{}, fmt.Errorf("icon %s:%s response exceeds 1MB", prefix, name)
 	}
 
 	ic, err := parseSVG(string(bodyBytes))
@@ -161,6 +145,46 @@ func resolveRemoteIcon(root string, fullName string) (Icon, error) {
 	_ = os.WriteFile(cachePath, bodyBytes, 0644)
 
 	return ic, nil
+}
+
+// iconFetchAttempts bounds retries of transient API failures (network errors,
+// 429 and 5xx); builds fetch many icons in parallel and a single dropped
+// request should not fail the build.
+const iconFetchAttempts = 3
+
+// fetchIconSVG downloads one icon from the Iconify API, retrying transient
+// failures with a short backoff. A 404 is final.
+func fetchIconSVG(prefix, name string) ([]byte, error) {
+	url := fmt.Sprintf("https://api.iconify.design/%s/%s.svg", prefix, name)
+	var lastErr error
+	for attempt := 0; attempt < iconFetchAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
+		}
+		resp, err := httpClient.Get(url)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to reach icon API: %w", err)
+			continue
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		switch {
+		case resp.StatusCode == http.StatusNotFound:
+			return nil, fmt.Errorf("icon %s:%s not found in registry", prefix, name)
+		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+			lastErr = fmt.Errorf("api returned status %d", resp.StatusCode)
+			continue
+		case resp.StatusCode != http.StatusOK:
+			return nil, fmt.Errorf("api returned status %d", resp.StatusCode)
+		case err != nil:
+			lastErr = err
+			continue
+		case len(body) == 1<<20:
+			return nil, fmt.Errorf("icon %s:%s response exceeds 1MB", prefix, name)
+		}
+		return body, nil
+	}
+	return nil, lastErr
 }
 
 // parseSVG extracts the inner markup and viewBox from a full SVG document and
