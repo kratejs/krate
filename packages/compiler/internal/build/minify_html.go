@@ -120,8 +120,9 @@ func (m *minifier) run() {
 				m.keepTail = true
 				return
 			}
+			// markupEnd is not advanced: a space after a bogus comment can
+			// join foster-parented table text, so it must be kept.
 			m.writeRaw(rest[:idx+1])
-			m.markupEnd = m.out.Len()
 			i += idx + 1
 		case len(rest) > 1 && (isASCIIAlpha(rest[1]) || rest[1] == '/'):
 			var ok bool
