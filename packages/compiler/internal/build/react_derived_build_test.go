@@ -203,3 +203,27 @@ func TestModuleLetIsDeclaredOnceForAllComponents(t *testing.T) {
 		t.Errorf("shared module vars must precede the component scopes:\n%s", js)
 	}
 }
+
+func TestStateArrayPatternWithHoleOrNoSetter(t *testing.T) {
+	outDir := buildWithFiles(t, map[string]string{
+		"src/pages/index.tsx": `
+			import { useState } from 'react';
+			export default function Page() {
+				const [, setTick] = useState(0);
+				const [label] = useState("static");
+				const [n, setN] = useState(0);
+				return <button onClick={() => { setTick((t) => t + 1); setN(n + 1); }}>{label} {n}</button>;
+			}
+		`,
+	})
+	js := readHydrationJS(t, outDir)
+	for _, want := range []string{
+		"const [__krate_hole0,setTick]=createSignal(0",
+		"const [label,__krate_hole1]=createSignal(",
+		"const [n,setN]=createSignal(0",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("hydration JS should contain %q:\n%s", want, js)
+		}
+	}
+}

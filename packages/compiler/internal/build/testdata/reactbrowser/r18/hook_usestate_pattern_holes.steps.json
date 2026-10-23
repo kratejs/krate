@@ -1,0 +1,1 @@
+{ "settleMs": 30, "steps": [ { "op": "click", "sel": "#go" }, { "op": "click", "sel": "#go" } ] }

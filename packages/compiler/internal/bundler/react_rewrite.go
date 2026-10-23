@@ -2,6 +2,7 @@ package bundler
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -524,6 +525,9 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 		if c.lowerSuspenseDecl(decl, sc) {
 			continue
 		}
+		if decl.Init != nil && c.isReactiveFactory(decl.Init) {
+			nameArrayPatternHoles(decl)
+		}
 		if decl.Init != nil {
 			c.noteFnName(decl.Name, decl.Init)
 			if c.isReactiveFactory(decl.Init) {
@@ -567,6 +571,47 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 			c.recordFresh(sc, decl.Name)
 		}
 	}
+}
+
+// nameArrayPatternHoles gives every hole in an array binding pattern a
+// throwaway name (`const [, setTick] = useState(0)` becomes
+// `[__krate_hole0, setTick]`) and pads a getter-only pattern
+// (`const [a] = useState(5)`) with a throwaway setter. decl.Names lists only
+// the bound names, but the hook lowering reads it positionally (getter, then
+// setter), so a skipped element would make the setter look like the getter,
+// and a missing one would leave the getter undeclared.
+func nameArrayPatternHoles(decl *ast.VarDecl) {
+	arr, ok := decl.Target.(*ast.ArrayExpr)
+	if !ok || !decl.IsDestructuring {
+		return
+	}
+	holes := false
+	for _, el := range arr.Elements {
+		if el == nil {
+			holes = true
+			continue
+		}
+		if _, ok := el.(*ast.Identifier); !ok {
+			return
+		}
+	}
+	if !holes && len(arr.Elements) != 1 {
+		return
+	}
+	for i, el := range arr.Elements {
+		if el == nil {
+			arr.Elements[i] = &ast.Identifier{Position: arr.Position, Name: "__krate_hole" + strconv.Itoa(i)}
+		}
+	}
+	if len(arr.Elements) == 1 {
+		arr.Elements = append(arr.Elements, &ast.Identifier{Position: arr.Position, Name: "__krate_hole1"})
+	}
+	names := make([]string, 0, len(arr.Elements))
+	for _, el := range arr.Elements {
+		names = append(names, el.(*ast.Identifier).Name)
+	}
+	decl.Names = names
+	decl.Pattern = "[" + strings.Join(names, ", ") + "]"
 }
 
 // isReactiveFactory reports whether an initializer is a reactive factory whose
