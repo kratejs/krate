@@ -17,19 +17,20 @@ const SSR_WORKERS = Math.max(1, parseInt(process.env.KRATE_SSR_WORKERS || "1", 1
 const isClusterPrimary = SSR_WORKERS > 1 && cluster.isPrimary;
 if (isClusterPrimary) {
   for (let i = 0; i < SSR_WORKERS; i++) cluster.fork();
-  // Restart a worker that dies, but give up when they keep dying (a port that
-  // cannot be bound, a broken bundle) instead of forking forever.
+  // Restart a worker that dies, after a short delay, but give up when they
+  // keep dying (a port that stays unbindable, a broken bundle) instead of
+  // forking forever. The delay also gives a briefly busy port time to free up.
   const exits: number[] = [];
   cluster.on("exit", (worker) => {
     console.log(`[krate-ssr] worker ${worker.process.pid} exited; restarting`);
     const now = Date.now();
     exits.push(now);
     while (exits.length && now - exits[0] > 60000) exits.shift();
-    if (exits.length > SSR_WORKERS * 3) {
+    if (exits.length > 100) {
       console.error("[krate-ssr] workers keep exiting; giving up");
       process.exit(1);
     }
-    cluster.fork();
+    setTimeout(() => cluster.fork(), 100);
   });
   console.log(`[krate-ssr] primary supervising ${SSR_WORKERS} workers`);
 }
@@ -888,20 +889,25 @@ if (isClusterPrimary) {
 } else {
   // The port was free when Go chose it, but a bind can still fail with
   // EADDRINUSE: any socket holding that local port blocks the wildcard bind,
-  // including a short-lived outgoing connection. Retry for a few seconds
-  // before giving up.
+  // including a short-lived outgoing connection. A clustered worker exits
+  // quietly so the primary respawns it after a delay (listening again after a
+  // failed cluster listen trips a Node assertion on Windows); a standalone
+  // server retries the bind for a few seconds.
   let bindRetries = 100;
   server.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EADDRINUSE" && bindRetries-- > 0) {
-      setTimeout(() => {
-        try {
-          server.close();
-        } catch {
-          // not listening yet
-        }
-        server.listen(PORT);
-      }, 100);
-      return;
+    if (err.code === "EADDRINUSE") {
+      if (cluster.isWorker) process.exit(1);
+      if (bindRetries-- > 0) {
+        setTimeout(() => {
+          try {
+            server.close();
+          } catch {
+            // not listening yet
+          }
+          server.listen(PORT);
+        }, 100);
+        return;
+      }
     }
     throw err;
   });

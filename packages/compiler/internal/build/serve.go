@@ -247,32 +247,38 @@ const server = http.createServer(async (req, res) => {
 
 if (WORKERS > 1 && cluster.isPrimary) {
   for (let i = 0; i < WORKERS; i++) cluster.fork();
-  // Restart a worker that dies, but give up when they keep dying (a bad
-  // route module, a port that cannot be bound) instead of forking forever.
+  // Restart a worker that dies, after a short delay, but give up when they
+  // keep dying (a bad route module, a port that stays unbindable) instead of
+  // forking forever. The delay also gives a briefly busy port time to free up.
   const exits = [];
   cluster.on('exit', () => {
     const now = Date.now();
     exits.push(now);
     while (exits.length && now - exits[0] > 60000) exits.shift();
-    if (exits.length > WORKERS * 3) {
+    if (exits.length > 100) {
       console.error('[krate-api] workers keep exiting; giving up');
       process.exit(1);
     }
-    cluster.fork();
+    setTimeout(() => cluster.fork(), 100);
   });
 } else {
   // The port was free when Go chose it, but a bind can still fail with
   // EADDRINUSE: any socket holding that local port blocks the wildcard bind,
-  // including a short-lived outgoing connection. Retry for a few seconds
-  // before giving up.
+  // including a short-lived outgoing connection. A clustered worker exits
+  // quietly so the primary respawns it after a delay (listening again after a
+  // failed cluster listen trips a Node assertion on Windows); a standalone
+  // server retries the bind for a few seconds.
   let bindRetries = 100;
   server.on('error', (err) => {
-    if (err && err.code === 'EADDRINUSE' && bindRetries-- > 0) {
-      setTimeout(() => {
-        try { server.close(); } catch {}
-        server.listen(PORT);
-      }, 100);
-      return;
+    if (err && err.code === 'EADDRINUSE') {
+      if (cluster.isWorker) process.exit(1);
+      if (bindRetries-- > 0) {
+        setTimeout(() => {
+          try { server.close(); } catch {}
+          server.listen(PORT);
+        }, 100);
+        return;
+      }
     }
     throw err;
   });
