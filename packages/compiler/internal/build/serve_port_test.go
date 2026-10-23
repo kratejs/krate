@@ -53,9 +53,19 @@ func TestInternalPortDoesNotHandOutTheSamePortTwice(t *testing.T) {
 }
 
 // A bind can fail with EADDRINUSE after Go picked the port, because any
-// socket holding it blocks the wildcard bind. The clustered Node sidecar must
-// retry instead of crashing its workers in a respawn loop.
+// socket holding it blocks the wildcard bind. The Node sidecar must survive a
+// briefly busy port, both standalone (retries the bind) and clustered (the
+// worker exits quietly and the primary respawns it after a delay; relistening
+// in a cluster worker trips a Node assertion on Windows).
 func TestAPISidecarRetriesBusyPort(t *testing.T) {
+	for _, workers := range []string{"1", "2"} {
+		t.Run("workers="+workers, func(t *testing.T) {
+			testAPISidecarBusyPort(t, workers)
+		})
+	}
+}
+
+func testAPISidecarBusyPort(t *testing.T, workers string) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		requireE2E(t, "node not available: %v", err)
@@ -80,7 +90,7 @@ func TestAPISidecarRetriesBusyPort(t *testing.T) {
 	defer release.Stop()
 
 	cmd := exec.Command(node, script, apiDir, strconv.Itoa(port), filepath.Join(dir, "none.js"), filepath.Join(dir, "actions"))
-	cmd.Env = append(os.Environ(), "KRATE_API_WORKERS=2")
+	cmd.Env = append(os.Environ(), "KRATE_API_WORKERS="+workers)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Start(); err != nil {
