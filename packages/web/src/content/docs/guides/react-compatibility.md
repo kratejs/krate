@@ -14,7 +14,7 @@ Krate supports React in two ways:
    imports and calls, then compiles the component like hand-written Krate code.
 2. **Islands for compiled packages.** Packages that ship only compiled
    JavaScript and were built against React (for example `@radix-ui/react-*`)
-   are bundled into a small, isolated Preact island and hydrate on the client.
+   are bundled into a small, isolated Preact island, server-rendered where possible, and hydrated in place.
    See [Compiled React packages](#compiled-react-packages-islands).
 
 This page covers both paths. For the current status of every surface and the
@@ -741,8 +741,11 @@ import * as Popover from '@radix-ui/react-popover';
 How it works:
 
 - A component is treated as an island when its implementation lives under
-  `node_modules`. Local components (including path aliases) still compile
-  through Krate.
+  `node_modules`. Local React-compatible modules imported by the page and used
+  as tags inside that subtree are bundled into the same island, so a local
+  wrapper can contain or be contained by a compiled package component. A
+  same-file function component is reported with a diagnostic because it belongs
+  to the Krate runtime, not the island runtime.
 - The subtree is captured as-is and rendered with **Preact**. Preact is not a
   Krate dependency; install it in your app:
 
@@ -752,23 +755,26 @@ How it works:
 
   Preact 10.20 or newer is required. If Preact is missing, the build fails with an actionable error rather than
   shipping a broken island.
-- The islands for a page share one chunk (`chunks/island.<hash>.js`). Shared
-  Preact modules are emitted once and wired through an import map.
+- Each island gets its own chunk (`chunks/island.<hash>.js`). Shared Preact
+  modules are emitted once and wired through an import map.
+- Where all bridged props have build-time initial values, Krate renders the
+  island with `preact-render-to-string` and places that markup inside the
+  placeholder. The client then **hydrates** it instead of replacing it. Islands
+  with unknown runtime props, browser-only components, or portals stay
+  client-only; the build warns when an island cannot be server-rendered.
 - Signal-valued props are bridged as live getters, and the island re-renders
   when those signals change. Function props (event handlers and signal setters)
   are passed by reference, so page-to-island callbacks work. Plain object and
   string props are captured when the island mounts.
-- Island output is **client-only** in v1: the placeholder is server-rendered and
-  the island renders after its chunk loads. If rendering throws, the placeholder
-  is marked `data-krate-island-error` and shows a fallback message.
+- Each island is wrapped in a Preact error boundary. A render failure marks the
+  placeholder with `data-krate-island-error` and shows a fallback instead of
+  taking down the rest of the page.
 - Krate warns when the installed Preact is older than 10.20, which is the
   minimum version the island hooks and compat behavior are tested against.
 
 Two runtimes are involved at an island boundary: the page (Krate signals) and
 the island (Preact). Props crossing the boundary may be serializable values,
-bridged signal getters, or function references (handlers and setters). A local
-Krate component cannot be rendered inside an external subtree -- the build
-reports this instead of silently dropping it.
+bridged signal getters, or function references (handlers and setters).
 
 Primitives that keep internal pointer state (for example Radix Tooltip) work
 when controlled: bind `open` to a page signal and wire `onOpenChange` plus

@@ -10,7 +10,7 @@ This is the support contract for React compatibility. A surface is only marked
 stable when the referenced corpus and browser tests pass. Known divergences are
 listed instead of silently hidden.
 
-Last verified: **2026-10-21**. See the [roadmap](/roadmap/) for phase
+Last verified: **2026-10-26**. See the [roadmap](/roadmap/) for phase
 status and the [React compatibility guide](/docs/guides/react-compatibility/)
 for usage.
 
@@ -30,7 +30,7 @@ for usage.
 | Context and refs | Beta | Beta | n/a | Stable |
 | Transitions and deferred values | Beta | Beta | n/a | Documented semantics |
 | Class components | Beta | n/a | n/a | Full common subset |
-| Error boundaries | Beta | Planned | Partial | Source and island |
+| Error boundaries | Beta | Beta | Partial | Source and island |
 | Children, keys, and refs | Partial | Partial | n/a | Documented semantics |
 | Events | Beta | Partial | n/a | React 18 parity |
 | Forms and inputs | Beta | Partial | n/a | React 18 parity |
@@ -38,11 +38,11 @@ for usage.
 | Suspense | Beta | Beta | n/a | SSR-safe |
 | React 19 actions and forms | Beta | Partial | n/a | Source semantics |
 | Server actions | Beta | n/a | Beta | Progressive enhancement |
-| Compiled React packages | n/a | Beta | n/a | Documented compat |
+| Compiled React packages | n/a | Beta | Beta | Documented compat |
 | shadcn-style dashboard | Beta | n/a | n/a | Stable |
 | Next.js app corpus | Beta | n/a | n/a | Migration-ready |
-| Local components in islands | n/a | Planned | n/a | Supported |
-| SSR island hydration | n/a | Planned | Planned | Streaming-safe |
+| Local components in islands | n/a | Beta | n/a | Supported |
+| SSR island hydration | n/a | Beta | Beta | Hydration-safe |
 | Supported Preact versions | n/a | Beta | n/a | 10.20 through current |
 | Browser differential corpus | Partial | n/a | n/a | No P0/P1 divergence |
 | React 19 reference app | Planned | n/a | n/a | Same browser suite as React 18 |
@@ -91,9 +91,9 @@ Evidence: `TestClassComponentLowering`, `TestClassComponentLoweringEmit`, `TestC
 
 ### Error boundaries
 
-**Source:** Beta · **Islands:** Planned · **SSR:** Partial
+**Source:** Beta · **Islands:** Beta · **SSR:** Partial
 
-Classes with getDerivedStateFromError/componentDidCatch catch errors from descendants' render, bindings, lifecycles and effects (not event handlers or async code), unmount the failed subtree, and recover on reset. A throw while the page is built renders the boundary fallback (KR3009). Uncaught errors unmount only the failing component. Island boundaries are planned.
+Classes with getDerivedStateFromError/componentDidCatch catch errors from descendants' render, bindings, lifecycles and effects (not event handlers or async code), unmount the failed subtree, and recover on reset. A throw while the page is built renders the boundary fallback (KR3009). Uncaught errors unmount only the failing component. Each Preact island has its own error boundary and marks a fallback placeholder when rendering fails.
 
 Evidence: `TestBoundaryBuildTimeFallback`, `TestBuildTimeThrowWithoutBoundaryFails`, `TestClassBoundaryChildrenBranch`, `browser:/react-class/`
 
@@ -155,11 +155,11 @@ Evidence: `TestPrepareActionsBuildsManifestAndBundle`, `TestRewriteActionImports
 
 ### Compiled React packages
 
-**Source:** n/a · **Islands:** Beta · **SSR:** n/a
+**Source:** n/a · **Islands:** Beta · **SSR:** Beta
 
-Radix and other compiled packages run as Preact islands with live props, callbacks, portals, and controlled primitives.
+Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island chunks, server-rendered initial markup, hydration, and an island error boundary.
 
-Evidence: `TestIslandSignalPropBridge`, `TestIslandChunksMinified`, `browser:/react-demo/`
+Evidence: `TestIslandSignalPropBridge`, `TestIslandLocalComponent`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`
 
 ### shadcn-style dashboard
 
@@ -179,19 +179,19 @@ Evidence: `fixture:packages/benchmark/fixtures/next`
 
 ### Local components in islands
 
-**Source:** n/a · **Islands:** Planned · **SSR:** n/a
+**Source:** n/a · **Islands:** Beta · **SSR:** n/a
 
-A local Krate component cannot currently render inside a compiled island subtree; the build reports it instead of dropping it.
+Imported local React-compatible modules can be used as tags inside a compiled island and are bundled with it. Same-file Krate functions are diagnosed because they cannot cross the Krate/Preact runtime boundary.
 
-Evidence: Planned; no stable test reference yet.
+Evidence: `TestIslandLocalComponent`
 
 ### SSR island hydration
 
-**Source:** n/a · **Islands:** Planned · **SSR:** Planned
+**Source:** n/a · **Islands:** Beta · **SSR:** Beta
 
-Islands are client-only in v1. The placeholder renders on the server and the island mounts after its chunk loads.
+Islands with build-time-known props are server-rendered with Preact and hydrated in place. Each island has its own chunk; unknown props, browser-only components, and portals fall back to client-only with a warning. Request-time SSR and streaming island regions remain separate work.
 
-Evidence: Planned; no stable test reference yet.
+Evidence: `TestIslandSignalPropBridge`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`
 
 ### Supported Preact versions
 

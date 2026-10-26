@@ -1804,9 +1804,17 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	hydrationJS := ""
 	var jsBytes []byte
 	hasJS := false
-	islandBoot, islandJS, islandErr := b.buildIslands(tree.ExternalComponents, externalImports)
+	islandBoot, islandJS, islandSSR, islandErr := b.buildIslands(
+		tree.ExternalComponents,
+		externalImports,
+		entryLocalImports(entryModule.Program),
+		filepath.Dir(entryModule.Path),
+	)
 	if islandErr != nil {
 		return nil, "", islandErr
+	}
+	if len(islandSSR) > 0 {
+		emitResult.HTML = injectIslandSSR(emitResult.HTML, islandSSR)
 	}
 	emitResult.IslandBootJS = islandBoot
 	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")

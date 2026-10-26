@@ -46,8 +46,8 @@ const REACT_PHASES = [
   },
   {
     id: "R4",
-    tone: "later",
-    status: "Later",
+    tone: "gate",
+    status: "Complete",
     title: "Island and SSR parity",
     body: "Support local components inside islands, SSR island hydration, per-island chunks, island error boundaries, and a shared state bridge.",
     exit: "A page containing source components, compiled packages, and SSR renders consistently in production and development.",
@@ -158,8 +158,8 @@ const FOUNDATIONS = [
     body: "Real applications run on every release. Regressions are release blockers, not issue reports.",
   },
   {
-    title: "SSR islands and local components",
-    body: "The largest remaining product gaps. Both are required before migration can cover production apps.",
+    title: "Server-rendered islands",
+    body: "Compiled packages render their initial markup with Preact, hydrate in place, and keep local components, error boundaries, and the page signal bridge.",
   },
   {
     title: "Diagnostics and codemods",

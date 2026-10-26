@@ -983,33 +983,6 @@ func (b *builder) exprReadsActiveContext(expr ast.Expr) bool {
 	return false
 }
 
-// containsIdentifier reports whether s contains name as a standalone JS
-// identifier (not part of a longer name).
-func containsIdentifier(s, name string) bool {
-	if name == "" {
-		return false
-	}
-	for offset := 0; offset < len(s); {
-		i := strings.Index(s[offset:], name)
-		if i < 0 {
-			return false
-		}
-		start := offset + i
-		end := start + len(name)
-		leftOK := start == 0 || !isJSIdentByte(s[start-1])
-		rightOK := end == len(s) || !isJSIdentByte(s[end])
-		if leftOK && rightOK {
-			return true
-		}
-		offset = start + 1
-	}
-	return false
-}
-
-func isJSIdentByte(c byte) bool {
-	return c == '_' || c == '$' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-}
-
 // hasRefAttrExpr reports whether expr's JSX tree contains an explicit `ref`
 // attribute. A component that passes or renders a ref must stay client-rendered
 // so the ref object can be created and bound at hydration time.

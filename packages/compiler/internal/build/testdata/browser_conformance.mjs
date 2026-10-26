@@ -94,8 +94,15 @@ try {
     if (waitFor) await page.waitForSelector(waitFor, { timeout: 8000 });
   };
 
-  // React source + compiled Radix islands.
-  await go("/react-demo/", "[role=switch]");
+  // React source + compiled Radix islands. Check the island server render
+  // before the dynamic island chunk has a chance to hydrate it.
+  await page.goto(baseURL + "/react-demo/", { waitUntil: "domcontentloaded" });
+  const islandSSR = await page.evaluate(() => {
+    const island = document.querySelector("[data-krate-island][data-krate-island-ssr]");
+    return island ? (island.textContent || "").trim() : "";
+  });
+  if (!islandSSR) fail("island SSR markup missing");
+  await page.waitForSelector("[role=switch]", { timeout: 8000 });
   await page.waitForTimeout(1500);
   const before = await page.evaluate(() => ({
     state: document.querySelector("[role=switch]")?.getAttribute("data-state"),

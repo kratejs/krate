@@ -3915,6 +3915,8 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		return nil, false
 	}
 	propsJS := ""
+	ssrPropsJS := "{}"
+	ssrKnown := true
 	if len(usedSignals) > 0 {
 		names := make([]string, 0, len(usedSignals))
 		for n := range usedSignals {
@@ -3922,6 +3924,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		}
 		sort.Strings(names)
 		parts := make([]string, 0, len(names))
+		ssrParts := make([]string, 0, len(names))
 		for _, n := range names {
 			if strings.HasPrefix(n, "fn:") {
 				base := strings.TrimPrefix(n, "fn:")
@@ -3929,8 +3932,16 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 				continue
 			}
 			parts = append(parts, strconv.Quote(n)+":"+generateExprJS(&ast.CallExpr{Callee: &ast.Identifier{Name: n}}, b.sigMap()))
+			v := b.evalValue(&ast.Identifier{Name: n})
+			src, ok := jsvalue.JSSource(v)
+			if !ok || v.ContainsUnknown() || v.IsFunction() || v.IsJSX() {
+				ssrKnown = false
+				continue
+			}
+			ssrParts = append(ssrParts, strconv.Quote(n)+":"+src)
 		}
 		propsJS = "{" + strings.Join(parts, ",") + "}"
+		ssrPropsJS = "{" + strings.Join(ssrParts, ",") + "}"
 	}
 	if propsJS != "" && b.currentNode != nil {
 		b.currentNode.IslandBoot = append(b.currentNode.IslandBoot,
@@ -3938,26 +3949,32 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 			"(globalThis.__krate_island_subscribe||(globalThis.__krate_island_subscribe={}))["+strconv.Quote(id)+"]=function(cb){return createEffect(function(){ (globalThis.__krate_island_values["+strconv.Quote(id)+"])(); cb(); });};",
 		)
 	}
-	if len(b.localImports) > 0 {
-		locals := make([]string, 0, len(b.localImports))
-		for local := range b.localImports {
-			locals = append(locals, local)
+	// Same-file local functions live in the page's Krate runtime, which is a
+	// different runtime from the island's Preact tree. Imported local modules
+	// are bundled; inline functions need an explicit diagnostic, never a
+	// silently blank island.
+	for name, fn := range b.functions {
+		if fn == nil || name == root || !strings.Contains(subtree, "<"+name) {
+			continue
 		}
-		sort.Strings(locals)
-		for _, local := range locals {
-			// Only a local component used as a tag is a problem. A member such
-			// as `DropdownMenu.Label` also contains the identifier text "Label",
-			// so require a tag position (`<Label`).
-			if strings.Contains(subtree, "<"+local) && containsIdentifier(subtree, local) {
-				pos := el.Position
-				if inner := findJSXElementNamed(el, local); inner != nil {
-					pos = inner.Position
-				}
-				b.warnAt(pos, "external island for <"+root+"> references local component <"+local+">, which is not bundled into the island",
-					"use a plain element or a component from an external package inside <"+root+">, or move <"+local+"> outside the island")
-			}
+		if _, external := b.externalImports[name]; external {
+			continue
 		}
+		if b.localImports[name] {
+			continue
+		}
+		src := strings.ReplaceAll(b.ann.ComponentSources[fn.Name], "\\", "/")
+		if src != "" && strings.Contains(src, "/node_modules/") {
+			continue
+		}
+		pos := el.Position
+		if inner := findJSXElementNamed(el, name); inner != nil {
+			pos = inner.Position
+		}
+		b.warnAt(pos, "external island for <"+root+"> references same-file local component <"+name+">, which cannot cross the Krate/Preact island boundary",
+			"move <"+name+"> into its own module and import it, or render it outside the island")
 	}
+
 	props := map[string]any{}
 	if el.Opening != nil {
 		for _, attr := range el.Opening.Attributes {
@@ -3981,6 +3998,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 	b.externals = append(b.externals, ExternalComponent{
 		ID: id, Source: imp.Source, Local: root, Members: members,
 		Namespace: imp.Namespace, Props: props, Subtree: subtree, PropsJS: propsJS,
+		SSRPropsJS: ssrPropsJS, SSRPropsKnown: ssrKnown,
 		File: b.ann.SourceFile, Line: el.Position.Line, Col: el.Position.Col,
 	})
 	html := `<div data-krate-island="` + id + `" style="display:contents"></div>`

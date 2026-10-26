@@ -677,6 +677,12 @@ type ExternalComponent struct {
 	// PropsJS is a JS object literal of page-scope signal values the subtree
 	// reads (key -> value expression), evaluated in the page's hydration scope.
 	PropsJS string
+	// SSRPropsJS is the build-time initial-value object used for server
+	// rendering. SSRPropsKnown is false when a prop only exists at runtime
+	// (for example an unknown signal initial or a function-valued prop), in
+	// which case the island stays client-only.
+	SSRPropsJS    string
+	SSRPropsKnown bool
 	// File/Line/Col locate the usage for diagnostics.
 	File string
 	Line int
