@@ -123,6 +123,32 @@ func TestJSBudget(t *testing.T) {
 	}
 }
 
+func TestHydrationAndIslandBudgets(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.HydrationBudgetBytes = 100
+	cfg.IslandBudgetBytes = 100
+	cfg.RouteBudgetBytes = 100
+	page := Page{Route: "/", HTML: doc(`<h1>x</h1>`, ""), JSBytes: 200, HydrationBytes: 200, IslandBytes: 200, CSSBytes: 200}
+	fs := runOne(t, page, cfg)
+	for _, rule := range []string{"perf/hydration-budget", "perf/island-budget", "perf/route-budget"} {
+		if !hasRule(fs, rule) {
+			t.Errorf("expected %s finding, got %+v", rule, fs)
+		}
+	}
+}
+
+func TestBudgetConfig(t *testing.T) {
+	cfg, err := FromMap(map[string]any{
+		"budget": map[string]any{"js": 10, "hydration": 20, "islandJS": 30, "route": 40},
+	}, "/root", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.JSBudgetBytes != 10*1024 || cfg.HydrationBudgetBytes != 20*1024 || cfg.IslandBudgetBytes != 30*1024 || cfg.RouteBudgetBytes != 40*1024 {
+		t.Fatalf("budgets = js:%d hydration:%d island:%d route:%d", cfg.JSBudgetBytes, cfg.HydrationBudgetBytes, cfg.IslandBudgetBytes, cfg.RouteBudgetBytes)
+	}
+}
+
 func TestImageDims(t *testing.T) {
 	cfg := DefaultConfig()
 	page := Page{Route: "/", HTML: doc(`<img src="/a.png" alt="a">`, "")}

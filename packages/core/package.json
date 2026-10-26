@@ -49,12 +49,12 @@
     "typescript": "^5.5.0"
   },
   "optionalDependencies": {
-    "@krate/core-darwin-arm64": "0.0.1",
-    "@krate/core-darwin-x64": "0.0.1",
-    "@krate/core-linux-arm64": "0.0.1",
-    "@krate/core-linux-x64": "0.0.1",
-    "@krate/core-linux-x64-musl": "0.0.1",
-    "@krate/core-win32-arm64": "0.0.1",
-    "@krate/core-win32-x64": "0.0.1"
+    "@krate/core-darwin-arm64": "0.1.0",
+    "@krate/core-darwin-x64": "0.1.0",
+    "@krate/core-linux-arm64": "0.1.0",
+    "@krate/core-linux-x64": "0.1.0",
+    "@krate/core-linux-x64-musl": "0.1.0",
+    "@krate/core-win32-arm64": "0.1.0",
+    "@krate/core-win32-x64": "0.1.0"
   }
 }

@@ -20,8 +20,14 @@ type Config struct {
 	Rules map[string]Severity
 	// Ignore is the set of rule IDs to suppress.
 	Ignore map[string]bool
-	// JSBudgetBytes is the per-route client JS budget. 0 disables the rule.
+	// JSBudgetBytes is the per-route total client JS budget. 0 disables it.
 	JSBudgetBytes int
+	// HydrationBudgetBytes is the per-route hydration bundle budget.
+	HydrationBudgetBytes int
+	// IslandBudgetBytes is the per-route island chunk budget.
+	IslandBudgetBytes int
+	// RouteBudgetBytes is the per-route HTML + CSS + JS + island budget.
+	RouteBudgetBytes int
 	// FailOn is the minimum severity that makes `krate check` (and a checks-
 	// enabled build) exit non-zero.
 	FailOn Severity
@@ -100,7 +106,7 @@ func (c *Config) rulePolicy(id, category string) (active bool, override Severity
 //	  perf: true,
 //	  rules: { "a11y/img-alt": "off" },
 //	  ignore: ["seo/canonical"],
-//	  budget: { js: 100 },                  // KB per route
+//	  budget: { js: 100, hydration: 40, islandJS: 60, route: 300 }, // KB per route
 //	  failOn: "error" | "warning",
 //	}
 func FromMap(m map[string]any, root string, env map[string]string) (Config, error) {
@@ -182,12 +188,20 @@ func FromMap(m map[string]any, root string, env map[string]string) (Config, erro
 		if !ok {
 			return cfg, fmt.Errorf("checks.budget: expected object, got %T", raw)
 		}
-		if v, ok := budget["js"]; ok {
-			kb, err := numberValue(v)
-			if err != nil {
-				return cfg, fmt.Errorf("checks.budget.js: %w", err)
+		budgetKB := map[string]*int{
+			"js":        &cfg.JSBudgetBytes,
+			"hydration": &cfg.HydrationBudgetBytes,
+			"islandJS":  &cfg.IslandBudgetBytes,
+			"route":     &cfg.RouteBudgetBytes,
+		}
+		for key, dst := range budgetKB {
+			if v, ok := budget[key]; ok {
+				kb, err := numberValue(v)
+				if err != nil {
+					return cfg, fmt.Errorf("checks.budget.%s: %w", key, err)
+				}
+				*dst = int(kb * 1024)
 			}
-			cfg.JSBudgetBytes = int(kb * 1024)
 		}
 	}
 

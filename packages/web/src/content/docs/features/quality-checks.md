@@ -75,6 +75,9 @@ krate check && echo "quality gates passed"
 | `seo/broken-link` | seo | warning | internal link to an unknown route |
 | `seo/duplicate-meta` | seo | warning | title/description shared across pages |
 | `perf/js-budget` | perf | warning | route JS over `budget.js` |
+| `perf/hydration-budget` | perf | warning | route hydration bundle over `budget.hydration` |
+| `perf/island-budget` | perf | warning | island chunks over `budget.islandJS` |
+| `perf/route-budget` | perf | warning | HTML + CSS + JS + islands over `budget.route` |
 | `perf/image-dims` | perf | warning | `<img>` missing `width`/`height` (layout shift) |
 
 `alt=""` is accepted as intentional decoration; the `a11y/img-alt` rule only
@@ -104,15 +107,39 @@ still reported (and visible in the output) without failing when
 
 ### Perf budgets
 
-`budget.js` is the per-route client-JS budget in **kilobytes**, counting the
-page's hydration bundle plus the shared runtime chunk:
+Budget values are per-route **kilobytes**. Four independent budgets are
+available:
+
+| Key | Rule | Counts |
+| --- | --- | --- |
+| `js` | `perf/js-budget` | page hydration + shared runtime |
+| `hydration` | `perf/hydration-budget` | the route's own hydration bundle |
+| `islandJS` | `perf/island-budget` | asynchronous island chunks referenced by the route |
+| `route` | `perf/route-budget` | HTML + linked CSS + JS + island chunks |
 
 ```ts
 checks: {
   perf: "warning",
-  budget: { js: 100 },
+  budget: {
+    js: 100,
+    hydration: 40,
+    islandJS: 120,
+    route: 300,
+  },
 }
 ```
+
+`js` is the total client-JS budget. `hydration` isolates the route bundle, so a
+page can stay small even when a shared runtime grows. `islandJS` catches an
+expensive compiled package or several islands on one route. `route` is the
+end-to-end transfer weight, including the emitted HTML and same-origin
+stylesheets. Island chunks are counted once per route even when several islands
+share a chunk.
+
+The browser conformance gate additionally measures island hydration time from
+navigation start and compares it with `KRATE_HYDRATION_BUDGET_MS` (default
+1500ms; CI uses 2500ms). This is a test/CI threshold, not a build failure: a
+slow machine does not fail `krate build`.
 
 ## Custom rules
 

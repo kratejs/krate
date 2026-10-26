@@ -31,6 +31,30 @@ var reactEventByLower = func() map[string]string {
 	return m
 }()
 
+// LowercaseEventReplacement returns the React camelCase spelling for a
+// lowercase event prop such as onclick, onchange or onclickcapture. It returns
+// false when the prop is not a lowercase React DOM event.
+func LowercaseEventReplacement(prop string) (string, bool) {
+	if len(prop) <= 2 || !strings.HasPrefix(prop, "on") {
+		return "", false
+	}
+	name := strings.ToLower(prop[2:])
+	capture := false
+	if base, ok := strings.CutSuffix(name, "capture"); ok {
+		if _, exists := reactEventByLower[base]; exists && base != "gotpointer" && base != "lostpointer" {
+			name, capture = base, true
+		}
+	}
+	want, ok := reactEventByLower[name]
+	if !ok {
+		return "", false
+	}
+	if capture {
+		want += "Capture"
+	}
+	return "on" + want, true
+}
+
 // splitEventProp splits onClickCapture into ("Click", true). The pointer
 // capture events keep their own Capture suffix.
 func splitEventProp(prop string) (name string, capture bool) {

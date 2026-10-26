@@ -486,6 +486,77 @@ func TestIslandLocalNamedImport(t *testing.T) {
 	}
 }
 
+func TestCheckSiteIslandBudgets(t *testing.T) {
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	b := New(root, cfg)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	b.Cfg.Checks = map[string]any{"budget": map[string]any{
+		"hydration": 0.001,
+		"islandJS":  0.001,
+		"route":     0.001,
+	}}
+	findings, _, err := b.CheckSite(true)
+	if err != nil {
+		t.Fatalf("CheckSite: %v", err)
+	}
+	want := map[string]bool{
+		"perf/hydration-budget": false,
+		"perf/island-budget":    false,
+		"perf/route-budget":     false,
+	}
+	for _, f := range findings {
+		if _, ok := want[f.Rule]; ok {
+			want[f.Rule] = true
+		}
+	}
+	for rule, found := range want {
+		if !found {
+			t.Errorf("missing %s finding; got %+v", rule, findings)
+		}
+	}
+}
+
+// TestIslandSameFileLocalWarning covers KR8007: a same-file Krate component
+// cannot cross into the Preact island tree.
+func TestIslandSameFileLocalWarning(t *testing.T) {
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	page := `
+		import { Badge } from 'fake-lib';
+		function LocalLabel({ label }) { return <b>{label}</b>; }
+		export default function Page() { return <Badge label="x"><LocalLabel label="y" /></Badge>; }
+	`
+	if err := os.WriteFile(filepath.Join(root, "src", "pages", "index.tsx"), []byte(page), 0644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	if !strings.Contains(out, "[KR8007]") {
+		t.Fatalf("expected KR8007 warning, got:\n%s", out)
+	}
+}
+
+// TestIslandBundleFailureUsesKR8009 covers a malformed island package.
+func TestIslandBundleFailureUsesKR8009(t *testing.T) {
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	if err := os.WriteFile(filepath.Join(root, "node_modules", "fake-lib", "index.js"), []byte("export function Badge({"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err == nil {
+		t.Fatal("expected the island bundle to fail")
+	}
+	if !strings.Contains(err.Error(), "[KR8009]") {
+		t.Fatalf("expected KR8009, got: %v", err)
+	}
+}
+
 // TestIslandMissingPreactHint verifies the build fails with an actionable
 
 // install hint when Preact is not in the project.

@@ -17,6 +17,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/deploy"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
+	"github.com/kratejs/krate/packages/compiler/internal/fix"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 	"github.com/kratejs/krate/packages/compiler/internal/mcp"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
@@ -51,6 +52,7 @@ type cliFlags struct {
 	Target      string
 	JSON        bool
 	HTTP        bool
+	Apply       bool
 	Port        int
 	Token       string
 	CPUProfile  string
@@ -89,6 +91,8 @@ func main() {
 		runGoInit(flags, args)
 	case "check":
 		runCheck(flags, args)
+	case "fix":
+		runFix(flags, args)
 	case "inspect":
 		runInspect(flags, args)
 	case "deploy":
@@ -136,6 +140,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "check":
 		fmt.Fprintf(w, "Usage: krate check [dir]\n\n")
 		fmt.Fprintf(w, "Run compiler-enforced quality gates (a11y/SEO/perf) on the built output.\n")
+	case "fix":
+		fmt.Fprintf(w, "Usage: krate fix [dir] [--apply]\n\n")
+		fmt.Fprintf(w, "Apply conservative, parse-gated source fixes. Dry-run by default.\n")
 	case "deploy":
 		fmt.Fprintf(w, "Usage: krate deploy [dir] [--target netlify|vercel|cloudflare|gh-pages]\n\n")
 		fmt.Fprintf(w, "Build the site and write host adapter files (e.g. _redirects, vercel.json).\n")
@@ -174,6 +181,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  types     Generate route/content TypeScript declarations\n")
 	fmt.Fprintf(w, "  go:init   Set up go.mod/go.work for Go component intellisense\n")
 	fmt.Fprintf(w, "  check     Run compiler-enforced quality gates (a11y/SEO/perf)\n")
+	fmt.Fprintf(w, "  fix       Apply safe source fixes (dry-run unless --apply)\n")
 	fmt.Fprintf(w, "  inspect   Print the compiled site model (--json for machine-readable)\n")
 	fmt.Fprintf(w, "  deploy    Build and write host adapter files (netlify/vercel/...)\n")
 	fmt.Fprintf(w, "  clean     Remove build output (dist) and the compiler cache (.krate/cache)\n")
@@ -237,6 +245,8 @@ func parseFlags(args []string) (cliFlags, []string) {
 			flags.JSON = true
 		case args[i] == "--http":
 			flags.HTTP = true
+		case args[i] == "--apply":
+			flags.Apply = true
 		case args[i] == "--port" && i+1 < len(args):
 			if n, err := strconv.Atoi(args[i+1]); err == nil {
 				flags.Port = n
@@ -541,6 +551,47 @@ func runDeploy(flags cliFlags, args []string) {
 // sources, render modes, dependencies, emitted files). `--json` prints the
 // model as JSON on stdout with build chatter suppressed so the output is
 // pipeable.
+func runFix(flags cliFlags, args []string) {
+	root := "."
+	if len(args) > 1 {
+		root = args[1]
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+	res, err := fix.Run(abs, flags.Apply)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sFix error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+	if len(res.Changes) == 0 {
+		fmt.Printf("fix: no safe fixes found (%d file(s) skipped as unparseable)\n", len(res.Skipped))
+		return
+	}
+	noun := "change"
+	if len(res.Changes) != 1 {
+		noun = "changes"
+	}
+	if flags.Apply {
+		fmt.Printf("fix: applied %d %s\n", len(res.Changes), noun)
+	} else {
+		fmt.Printf("fix: %d safe %s (dry run)\n", len(res.Changes), noun)
+	}
+	for _, c := range res.Changes {
+		fmt.Printf("  %s:%d:%d  %s  %s -> %s\n", c.File, c.Line, c.Col, c.Code, c.From, c.To)
+	}
+	if !flags.Apply {
+		fmt.Println("Re-run with --apply to write these changes.")
+	}
+	if flags.Verbose {
+		for _, s := range res.Skipped {
+			fmt.Fprintf(os.Stderr, "  skipped %s: %s\n", s.File, s.Reason)
+		}
+	}
+}
+
 func runInspect(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
 	env := loadProjectEnv(root, "production", flags.Verbose)

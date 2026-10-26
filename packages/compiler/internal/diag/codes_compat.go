@@ -1,6 +1,15 @@
 package diag
 
 // KR8xxx: islands, compiled packages and general React compatibility.
+const (
+	// CodeIslandLocalComponent: same-file Krate component inside an island.
+	CodeIslandLocalComponent Code = "KR8007"
+	// CodeIslandClientOnly: an island cannot be server-rendered.
+	CodeIslandClientOnly Code = "KR8008"
+	// CodeIslandAsset: an island asset or package could not be resolved.
+	CodeIslandAsset Code = "KR8009"
+)
+
 func init() {
 	Register(
 		CodeInfo{
@@ -54,6 +63,28 @@ func init() {
 				"`document.body`, and a container that is not an element when the page hydrates keeps the " +
 				"content unmounted. Make sure the container exists before the component hydrates (for " +
 				"example a `<div id=\"modal-root\">` in the layout).",
+		},
+		CodeInfo{
+			Code:  CodeIslandLocalComponent,
+			Title: "Same-file component inside an island",
+			Explanation: "An external package island contains a component declared in the page module. " +
+				"The page component belongs to the Krate runtime and cannot run inside the island's Preact tree. " +
+				"Move the component into its own module and import it, or render it outside the island.",
+		},
+		CodeInfo{
+			Code:  CodeIslandClientOnly,
+			Title: "Island stays client-only",
+			Explanation: "The island has no build-time props, uses a browser-only API, or could not be " +
+				"rendered by Preact during the build. Its placeholder is emitted without server-rendered " +
+				"markup and the client mounts it after the island chunk loads. Pass build-time initial values " +
+				"or keep the island client-only intentionally.",
+		},
+		CodeInfo{
+			Code:  CodeIslandAsset,
+			Title: "Island asset could not be built",
+			Explanation: "Krate could not bundle the island's external package, local module, Preact " +
+				"dependency, or generated chunk. Check the reported resolver error and install the missing " +
+				"package (Preact 10.20 or newer) in the project.",
 		},
 	)
 }

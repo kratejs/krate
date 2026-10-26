@@ -71,6 +71,12 @@ jobs:
       - name: Check compatibility matrix
         run: pnpm run check:matrix
 
+      - name: Check roadmap and v1 gates
+        run: pnpm run check:roadmap
+
+      - name: Check package versions
+        run: pnpm run check:version
+
       - name: gofmt
         run: |
           unformatted=$(gofmt -l .)
@@ -165,6 +171,57 @@ jobs:
           # prerequisite here indicates a real problem, not a bare environment.
           KRATE_REQUIRE_E2E: "1"
 
+  node-versions:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/compiler/go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Runtime sidecars and generateStaticParams
+        run: go test ./internal/build -run 'TestActionSidecarTransport|TestExecuteGenerateStaticParamsRuntime' -count=1 -v
+        working-directory: packages/compiler
+
+  bun-deno:
+    name: Bun and Deno runtimes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/compiler/go.mod
+          cache: true
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
+      - name: Bun action sidecar and Deno static params
+        run: go test ./internal/build -run 'TestActionSidecarTransport/bun|TestExecuteGenerateStaticParamsRuntime' -count=1 -v
+        working-directory: packages/compiler
+
   bench:
     name: Benchmarks
     runs-on: ubuntu-latest
@@ -255,16 +312,17 @@ jobs:
         env:
           KRATE_BROWSER: ${{ matrix.browser }}
           KRATE_REQUIRE_E2E: "1"
+          KRATE_HYDRATION_BUDGET_MS: "2500"
 
       # React 19 vs Krate differential over the R2/R3 corpus. Fails on any
       # divergence not listed in testdata/reactbrowser/divergences.json.
-      # Set KRATE_REACT_EXIT: "1" once the corpus has no P0/P1 entries.
       - name: React browser differential
         run: go test -run 'TestReactBrowser' -count=1 -v ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_BROWSER: ${{ matrix.browser }}
           KRATE_REQUIRE_E2E: "1"
+          KRATE_REACT_EXIT: "1"
           KRATE_REACTBROWSER_REPORT: ${{ runner.temp }}/react-browser-${{ matrix.browser }}.txt
 
       - name: Upload React differential report
@@ -327,3 +385,4 @@ jobs:
         env:
           KRATE_BROWSER: chromium
           KRATE_REQUIRE_E2E: "1"
+          KRATE_HYDRATION_BUDGET_MS: "2500"

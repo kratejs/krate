@@ -103,6 +103,28 @@ importers:
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
+    optionalDependencies:
+      '@krate/core-darwin-arm64':
+        specifier: 0.1.0
+        version: 0.1.0
+      '@krate/core-darwin-x64':
+        specifier: 0.1.0
+        version: 0.1.0
+      '@krate/core-linux-arm64':
+        specifier: 0.1.0
+        version: 0.1.0
+      '@krate/core-linux-x64':
+        specifier: 0.1.0
+        version: 0.1.0
+      '@krate/core-linux-x64-musl':
+        specifier: 0.1.0
+        version: 0.1.0
+      '@krate/core-win32-arm64':
+        specifier: 0.1.0
+        version: 0.1.0
+      '@krate/core-win32-x64':
+        specifier: 0.1.0
+        version: 0.1.0
 
   packages/create-krate-app:
     devDependencies:
@@ -369,9 +391,21 @@ packages:
     peerDependencies:
       '@krate/runtime': ^0.5.0-alpha.2
 
+  '@krate/core-darwin-arm64@0.1.0':
+    resolution: {integrity: sha512-mhsXEXej1y7O464dB5i4D3wJK/HHO6GDi1nTgA0a9a9hJGSxeIiCvcKpzYQ+e6/0rz+D0GjM6sgAdFSCtaxp+w==}
+    cpu: [arm64]
+    os: [darwin]
+    hasBin: true
+
   '@krate/core-darwin-arm64@0.5.0-alpha.2':
     resolution: {integrity: sha512-CAEW1WABrJmpgmzso9pUEeI7KxG5K/+JMa6xZJpEGVHbiXrGNODY8p8gS6de1r78VpqmasM9CsNFyRuKCPC6xA==}
     cpu: [arm64]
+    os: [darwin]
+    hasBin: true
+
+  '@krate/core-darwin-x64@0.1.0':
+    resolution: {integrity: sha512-zhT/NUimyQ3uRP+Vzp69nJFNBNL7OQrKuCcbPztnKLwFdjyQLS3c+S3jP/9QPXL1wQk9R+ZLjdDX0IH6zhwY0Q==}
+    cpu: [x64]
     os: [darwin]
     hasBin: true
 
@@ -381,14 +415,32 @@ packages:
     os: [darwin]
     hasBin: true
 
+  '@krate/core-linux-arm64@0.1.0':
+    resolution: {integrity: sha512-nLKFsLRhA4VJsVZbMVrNiKF9TYwrKmqAnXag/wIhoYhRLGBjYX7WStnZ5n3xMpQ3y1o/N+ItO3KOTegbX4MBmg==}
+    cpu: [arm64]
+    os: [linux]
+    hasBin: true
+
   '@krate/core-linux-arm64@0.5.0-alpha.2':
     resolution: {integrity: sha512-bfPf1vx8AYz66gfQL2zyj/q1Q+Ni8nYwMz5QCB/DhUAB0UWPdDECMsl1KfsUlKzEkJwrzGFQfiK+7WLQ5QZ0fg==}
     cpu: [arm64]
     os: [linux]
     hasBin: true
 
+  '@krate/core-linux-x64-musl@0.1.0':
+    resolution: {integrity: sha512-/nb4E2N5tnMAXvyGrahUD7WgSXAbpFFZcbNUq/9rvthponOD/j9k3WUUwKdHo3hVRh0jP28rME46ZK3ikP2VzA==}
+    cpu: [x64]
+    os: [linux]
+    hasBin: true
+
   '@krate/core-linux-x64-musl@0.5.0-alpha.2':
     resolution: {integrity: sha512-5Fw3phFFGvrbgUiq2NaD5lifbGD6Tpk/DrOwA/AYskxpRAUJDp1BGmENeN84l2Eob9RGq8WXNDGwMWHcsy/ojA==}
+    cpu: [x64]
+    os: [linux]
+    hasBin: true
+
+  '@krate/core-linux-x64@0.1.0':
+    resolution: {integrity: sha512-VHjRivVNJfk7IqCC5kNUN3Udmmix2bjL1E9I81w92P4Z9zsr3rddnETv03lvQXOdxvhUySgR1TdZhKh+KpTx+A==}
     cpu: [x64]
     os: [linux]
     hasBin: true
@@ -399,9 +451,21 @@ packages:
     os: [linux]
     hasBin: true
 
+  '@krate/core-win32-arm64@0.1.0':
+    resolution: {integrity: sha512-7jCcyfvOWZNFLUwKbCdOHrOV9WdLFYWU4NC3YUkJgTmHuasA4N3SwCCUu+k7ZvLcvZ3cKyFgQlMKgybKIlhS1g==}
+    cpu: [arm64]
+    os: [win32]
+    hasBin: true
+
   '@krate/core-win32-arm64@0.5.0-alpha.2':
     resolution: {integrity: sha512-84JJHJn0ar5D6eI9glhW3vPSmDqfuYv9bruS9N8hmG90g1XXIyyB/3XlU4+iEvHwV9UoM5qeENOK9xH0zvFGxg==}
     cpu: [arm64]
+    os: [win32]
+    hasBin: true
+
+  '@krate/core-win32-x64@0.1.0':
+    resolution: {integrity: sha512-b0/QBgocnFlrftTQ6umXKNZXU8bN96aTtlVlM1n8NBWzuxi6Xxxyc1ZMZaH4H+oxhC4h16MO4CrwHzRyn4L0oQ==}
+    cpu: [x64]
     os: [win32]
     hasBin: true
 
@@ -2005,22 +2069,43 @@ snapshots:
     dependencies:
       '@krate/runtime': 0.5.0-alpha.2
 
+  '@krate/core-darwin-arm64@0.1.0':
+    optional: true
+
   '@krate/core-darwin-arm64@0.5.0-alpha.2':
+    optional: true
+
+  '@krate/core-darwin-x64@0.1.0':
     optional: true
 
   '@krate/core-darwin-x64@0.5.0-alpha.2':
     optional: true
 
+  '@krate/core-linux-arm64@0.1.0':
+    optional: true
+
   '@krate/core-linux-arm64@0.5.0-alpha.2':
+    optional: true
+
+  '@krate/core-linux-x64-musl@0.1.0':
     optional: true
 
   '@krate/core-linux-x64-musl@0.5.0-alpha.2':
     optional: true
 
+  '@krate/core-linux-x64@0.1.0':
+    optional: true
+
   '@krate/core-linux-x64@0.5.0-alpha.2':
     optional: true
 
+  '@krate/core-win32-arm64@0.1.0':
+    optional: true
+
   '@krate/core-win32-arm64@0.5.0-alpha.2':
+    optional: true
+
+  '@krate/core-win32-x64@0.1.0':
     optional: true
 
   '@krate/core-win32-x64@0.5.0-alpha.2':

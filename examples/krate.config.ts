@@ -123,7 +123,7 @@ export default defineConfig(({ isDev }) => ({
     a11y: 'warning',
     seo: 'warning',
     perf: 'warning',
-    budget: { js: 200 },
+    budget: { js: 200, hydration: 50, islandJS: 900, route: 1100 },
     custom: ['./plugins/check-no-lorem.ts'],
   },
 }));

@@ -16,6 +16,7 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate types [dir]` | Generate route/content TypeScript declarations only |
 | `krate go:init [dir]` | Set up `go.mod`/`go.work` + vendored helpers for Go intellisense |
 | `krate check [dir]` | Build and run quality gates (a11y/SEO/perf); non-zero on failure |
+| `krate fix [dir]` | Apply conservative, parse-gated source fixes (dry-run unless `--apply`) |
 | `krate inspect [dir]` | Build and print the compiled site model (`--json`) |
 | `krate deploy [dir]` | Build, then write host adapter files (`--target`) |
 | `krate clean [dir]` | Remove build output and the compiler cache |
@@ -106,6 +107,22 @@ krate check
 
 See [Quality Checks](/docs/features/quality-checks/) for configuration and the
 built-in rule list.
+
+## `krate fix`
+
+Applies safe codemods for diagnostics with an unambiguous rewrite. Dry-run by
+default; `--apply` writes atomically. Files that fail to parse are skipped and
+never partially rewritten. The first shipped fix is `KR5002` lowercase event
+names on built-in elements (`onclick` -> `onClick`).
+
+```sh
+krate fix
+krate fix --apply
+krate fix ./my-site --apply
+```
+
+See [Safe Fixes](/docs/guides/safe-fixes/) for the rewrite list and the manual
+path for every other diagnostic.
 
 ## `krate inspect`
 

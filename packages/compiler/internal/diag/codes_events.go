@@ -35,7 +35,8 @@ func init() {
 			Code:  CodeLowercaseEvent,
 			Title: "Lowercase event handler prop",
 			Explanation: "React event props are camelCase (onClick, onChange). A lowercase prop such as onclick " +
-				"is not an event handler in React and the function is never called. Use the camelCase name.",
+				"is not an event handler in React and the function is never called. Use the camelCase name. " +
+				"`krate fix` rewrites unambiguous lowercase handlers; string-valued inline handlers are left alone.",
 		},
 		CodeInfo{
 			Code:  CodeStringRef,

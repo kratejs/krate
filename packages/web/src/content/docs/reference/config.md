@@ -552,7 +552,12 @@ checks: {
   perf: "warning",
   rules: { "perf/js-budget": "error" },
   ignore: ["seo/og"],
-  budget: { js: 150 },            // per-route client-JS budget, KB
+  budget: {                       // per-route budgets, KB
+    js: 150,                      // hydration + shared runtime
+    hydration: 50,                // route hydration bundle
+    islandJS: 100,                // island chunks
+    route: 350,                   // HTML + CSS + JS + islands
+  },
   failOn: "error",
   custom: ["./checks/my-rule.ts"],
 },

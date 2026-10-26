@@ -43,6 +43,8 @@ import Button from '../components/ui/button';
 import { Badge } from '../components/ui/shadcn-badge';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { IslandLocalBadge } from '../components/island-local-badge';
+import { Exploding } from '../components/island-exploding';
 
 // ---------------------------------------------------------------------------
 // Layout helpers
@@ -425,6 +427,39 @@ function LiveSwitch() {
         <Switch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-white transition-transform demo-switch-thumb" />
       </Switch.Root>
       <span className="text-sm text-slate-300">Live switch {on() ? 'on' : 'off'}</span>
+      <IslandLocalBadge label="local island module" />
+    </div>
+  );
+}
+
+function LiveCheckbox() {
+  const [checked, setChecked] = useState(false);
+  return (
+    <div className="flex items-center gap-3">
+      <Checkbox.Root
+        checked={checked()}
+        onCheckedChange={setChecked}
+        data-testid="live-checkbox"
+        className="flex h-5 w-5 items-center justify-center rounded border border-slate-600 bg-slate-950 demo-checkbox"
+      >
+        <Checkbox.Indicator>
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M2 6l3 3 5-6" fill="none" stroke="white" strokeWidth="2" />
+          </svg>
+        </Checkbox.Indicator>
+      </Checkbox.Root>
+      <span className="text-sm text-slate-300">Live checkbox {checked() ? 'on' : 'off'}</span>
+    </div>
+  );
+}
+
+function FragileIsland() {
+  return (
+    <div data-testid="fragile-island" className="text-sm text-slate-300">
+      <Switch.Root className="relative h-6 w-11 rounded-full bg-slate-700 demo-switch">
+        <Exploding />
+      </Switch.Root>
+      <span>Fragile island fallback is checked in the browser gate.</span>
     </div>
   );
 }
@@ -616,6 +651,8 @@ function RadixShowcase() {
       <Panel title="Form controls" note="Switch, checkbox, slider, and progress.">
         <div className="space-y-4">
           <LiveSwitch />
+          <LiveCheckbox />
+          <FragileIsland />
 
           <div className="flex items-center gap-3">
             <Checkbox.Root

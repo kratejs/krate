@@ -32,6 +32,16 @@ function fail(message) {
   console.error(`compat-matrix: ${message}`);
   process.exitCode = 1;
 }
+function diagnosticCodes() {
+  const names = new Set();
+  const dir = path.join(root, "packages/compiler/internal/diag");
+  for (const file of fs.readdirSync(dir)) {
+    if (!file.endsWith(".go")) continue;
+    const source = fs.readFileSync(path.join(dir, file), "utf8");
+    for (const match of source.matchAll(/"(KR\d{4})"/g)) names.add(match[1]);
+  }
+  return names;
+}
 
 const matrix = JSON.parse(fs.readFileSync(matrixPath, "utf8"));
 if (!matrix.updated || Number.isNaN(Date.parse(matrix.updated))) {
@@ -43,6 +53,7 @@ if (!Array.isArray(matrix.rows) || matrix.rows.length === 0) {
 }
 
 const tests = goTests();
+const diagnostics = diagnosticCodes();
 const seen = new Set();
 let roadmapRows = 0;
 
@@ -57,10 +68,27 @@ for (const row of matrix.rows) {
     if (!statuses.has(row[key])) fail(`${label}: invalid ${key} status ${row[key]}`);
   }
   if (!Array.isArray(row.tests)) fail(`${label}: tests must be an array`);
+  if (row.roadmap && (row.source === "planned" || row.islands === "planned" || row.ssr === "planned")) {
+    fail(`${label}: roadmap v1 rows cannot remain planned`);
+  }
   if (row.source === "planned" || row.islands === "planned" || row.ssr === "planned") {
     // Planned surfaces may intentionally have no evidence yet.
   } else if (row.tests.length === 0) {
     fail(`${label}: supported rows need at least one test reference`);
+  }
+  if ([row.source, row.islands, row.ssr].includes("partial")) {
+    if (!Array.isArray(row.knownLimits) || row.knownLimits.length === 0) {
+      fail(`${label}: partial rows need at least one knownLimits entry`);
+    }
+  }
+  if (row.knownLimits !== undefined && !Array.isArray(row.knownLimits)) {
+    fail(`${label}: knownLimits must be an array`);
+  }
+  if (row.diagnostics !== undefined && !Array.isArray(row.diagnostics)) {
+    fail(`${label}: diagnostics must be an array`);
+  }
+  for (const code of row.diagnostics ?? []) {
+    if (!diagnostics.has(code)) fail(`${label}: missing diagnostic ${code}`);
   }
   for (const ref of row.tests) {
     if (ref.startsWith("Test")) {

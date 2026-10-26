@@ -217,6 +217,40 @@ func ruleJSBudget(p *Page, cfg *Config) []Finding {
 	}}
 }
 
+func ruleHydrationBudget(p *Page, cfg *Config) []Finding {
+	if cfg.HydrationBudgetBytes <= 0 || p.HydrationBytes <= cfg.HydrationBudgetBytes {
+		return nil
+	}
+	return []Finding{{
+		Message: fmt.Sprintf("route ships %s of hydration JS (budget %s)", humanBytes(p.HydrationBytes), humanBytes(cfg.HydrationBudgetBytes)),
+		Hint:    "Reduce the interactive surface, split work into lazy chunks, or raise checks.budget.hydration.",
+	}}
+}
+
+func ruleIslandBudget(p *Page, cfg *Config) []Finding {
+	if cfg.IslandBudgetBytes <= 0 || p.IslandBytes <= cfg.IslandBudgetBytes {
+		return nil
+	}
+	return []Finding{{
+		Message: fmt.Sprintf("route ships %s of island chunks (budget %s)", humanBytes(p.IslandBytes), humanBytes(cfg.IslandBudgetBytes)),
+		Hint:    "Move work to a server component, avoid unnecessary compiled-package islands, or raise checks.budget.islandJS.",
+	}}
+}
+
+func ruleRouteBudget(p *Page, cfg *Config) []Finding {
+	if cfg.RouteBudgetBytes <= 0 {
+		return nil
+	}
+	total := len(p.HTML) + p.CSSBytes + p.JSBytes + p.IslandBytes
+	if total <= cfg.RouteBudgetBytes {
+		return nil
+	}
+	return []Finding{{
+		Message: fmt.Sprintf("route ships %s of HTML/CSS/JS (budget %s)", humanBytes(total), humanBytes(cfg.RouteBudgetBytes)),
+		Hint:    "Remove unused content or client code, or raise checks.budget.route.",
+	}}
+}
+
 // ruleImageDims flags <img> without both width and height, which causes layout
 // shift (CLS). The compiled <Image> component always sets them.
 func ruleImageDims(p *Page, _ *Config) []Finding {

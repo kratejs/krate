@@ -212,7 +212,9 @@ class ErrorBoundary extends Component {
   server-rendered page, logs the error with its component stack, and unmounts
   only the component that threw (and its descendants).
 - Errors in a hidden conditional branch's bindings (which React would never
-  have rendered) are ignored. Error boundaries around islands are planned.
+  have rendered) are ignored. Each Preact island has its own error boundary;
+  a render failure shows a fallback in the island placeholder and sets
+  `data-krate-island-error`.
 
 ### Context
 
@@ -967,6 +969,18 @@ Chromium, Firefox and WebKit, and compares the DOM, form state, focus and the
 order of effects, cleanups, lifecycles and ref callbacks after every step.
 Known differences are tracked with a severity in the repository
 (`packages/compiler/internal/build/testdata/reactbrowser/divergences.json`).
+The four P2 differences that remain at v1 are all render-observability details,
+not DOM or interaction differences:
+
+| Fixture | Difference |
+| --- | --- |
+| `r18/class_pure_component` | A `PureComponent` render log is one update behind because Krate updates the text binding without re-running the body. |
+| `r18/context_memo_child` | A memo child's render log differs for the same reason; the rendered context value is identical. |
+| `r18/hook_usecallback_identity` | Render counters kept in refs differ because bodies are not re-run; handler behavior matches. |
+| `r18/hook_useid` | `useId` strings use Krate's `krate-<n>-...` format instead of React's `:r0:` style; ids stay unique and labels resolve. |
+
+P0 and P1 differences fail the differential (`KRATE_REACT_EXIT=1`). P2 entries
+are intentionally documented rather than hidden.
 
 See [Compile-Time Evaluation](/docs/guides/compile-time-evaluation/) for how
 known React expressions, `.map()` callbacks, and local helpers are folded before

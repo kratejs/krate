@@ -60,6 +60,16 @@ export default defineConfig({
     },
   }),
 
+  // Per-route budgets calibrated from the current docs output with headroom.
+  // Only the perf gates run here; a11y/SEO findings are tracked separately.
+  checks: {
+    a11y: false,
+    seo: false,
+    perf: "warning",
+    budget: { js: 180, hydration: 90, islandJS: 20, route: 450 },
+    failOn: "error",
+  },
+
   plugins: [
     sitemap({ baseUrl: "https://krate.js.org", changeFreq: "daily", priority: "0.8" }),
     { name: "robots", options: { allow: "/" } },

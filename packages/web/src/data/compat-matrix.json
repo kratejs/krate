@@ -9,7 +9,15 @@
       "ssr": "n/a",
       "target": "React 18 parity",
       "summary": "useState and useReducer lower to signals with React render snapshots (handlers and effects read the committed state, functional updaters the latest), Object.is bail-out, lazy initializers (inline or named), useReducer init, a stable dispatch, and React's update lanes (discrete events commit in a microtask, other updates in a later task).",
-      "tests": ["TestReactUseReducerBuild", "TestRewriteReactUseReducer", "TestRewriteReactNamespaceUseReducer", "TestUseReducerLazyInitIsPreserved", "TestLazyUseStateInitializerRunsOnce", "TestStateLoweringUsesReactSemantics", "browser:/react-effects/"],
+      "tests": [
+        "TestReactUseReducerBuild",
+        "TestRewriteReactUseReducer",
+        "TestRewriteReactNamespaceUseReducer",
+        "TestUseReducerLazyInitIsPreserved",
+        "TestLazyUseStateInitializerRunsOnce",
+        "TestStateLoweringUsesReactSemantics",
+        "browser:/react-effects/"
+      ],
       "roadmap": true
     },
     {
@@ -20,7 +28,16 @@
       "ssr": "n/a",
       "target": "React 18 parity",
       "summary": "Effects run in React's commit order (insertion, layout before paint, passive after paint or synchronously after discrete events; children before parents; cleanups before re-runs; parent-first unmount) with Object.is deps, and setups/cleanups read the state and props of their own commit. useMemo/useCallback honour deps synchronously. Conditional branches unmount and remount components with fresh state. Effects without deps re-run on the component's own state/props changes only; each divergence has a KR2xxx diagnostic.",
-      "tests": ["TestRewriteReactEffectDepsAndMemo", "TestRewriteReactEffectEmptyDepsMountOnce", "TestEffectPhasesLowerToCreateEffectDeps", "TestEffectWithoutDepsSynthesizesStateAndProps", "TestHydrationDeclaresEffectOwners", "TestFreshDepsReRunEveryRender", "TestHookInLoopOrConditionWarns", "browser:/react-effects/"],
+      "tests": [
+        "TestRewriteReactEffectDepsAndMemo",
+        "TestRewriteReactEffectEmptyDepsMountOnce",
+        "TestEffectPhasesLowerToCreateEffectDeps",
+        "TestEffectWithoutDepsSynthesizesStateAndProps",
+        "TestHydrationDeclaresEffectOwners",
+        "TestFreshDepsReRunEveryRender",
+        "TestHookInLoopOrConditionWarns",
+        "browser:/react-effects/"
+      ],
       "roadmap": true
     },
     {
@@ -31,7 +48,17 @@
       "ssr": "n/a",
       "target": "Stable",
       "summary": "Context resolves at the reader's position like React: Provider, React 19 <Ctx value>, Consumer render props, object defaults, nested and self-nesting providers, and providers around props.children; constant values fold at build time and state-driven values stay reactive. Object and callback refs (with React 19 cleanup functions), ref as a prop, forwardRef, createRef, useRef, and useImperativeHandle with deps attach before layout effects and detach on unmount.",
-      "tests": ["TestUseContextTranspile", "TestCrossComponentDynamicContextTranspile", "TestContextSelfNestingProviders", "TestContextReact19ProviderAndConsumer", "TestContextChildrenSeeComponentProvider", "TestReactForwardRefCallback", "TestReactCreateRefBinds", "TestRefBindingsAndEffectOrder", "browser:/react-events/"],
+      "tests": [
+        "TestUseContextTranspile",
+        "TestCrossComponentDynamicContextTranspile",
+        "TestContextSelfNestingProviders",
+        "TestContextReact19ProviderAndConsumer",
+        "TestContextChildrenSeeComponentProvider",
+        "TestReactForwardRefCallback",
+        "TestReactCreateRefBinds",
+        "TestRefBindingsAndEffectOrder",
+        "browser:/react-events/"
+      ],
       "roadmap": true
     },
     {
@@ -42,7 +69,14 @@
       "ssr": "n/a",
       "target": "Documented semantics",
       "summary": "useTransition and startTransition support async actions: isPending stays true until the action, its awaited work and overlapping transitions settle, and a transition keeps revealed Suspense content. useDeferredValue (with React 19 initialValue) catches up in a later task; useSyncExternalStore follows the store by Object.is and unsubscribes on teardown. Updates after an await are ordinary updates, as in React 19.",
-      "tests": ["TestRewriteReactUseTransitionLowered", "TestTransitionStarterLowering", "TestDeferredValueAndExternalStoreLowering", "TestRuntimeNeedsSuspense", "browser:/react-suspense/", "fixture:examples/src/pages/react-suspense.tsx"],
+      "tests": [
+        "TestRewriteReactUseTransitionLowered",
+        "TestTransitionStarterLowering",
+        "TestDeferredValueAndExternalStoreLowering",
+        "TestRuntimeNeedsSuspense",
+        "browser:/react-suspense/",
+        "fixture:examples/src/pages/react-suspense.tsx"
+      ],
       "roadmap": true
     },
     {
@@ -53,7 +87,13 @@
       "ssr": "n/a",
       "target": "Full common subset",
       "summary": "Lowered onto a runtime instance with React 18 ordering: batched setState with callbacks, forceUpdate, componentDidMount/DidUpdate (props and state, children first)/WillUnmount on branch removal, shouldComponentUpdate, PureComponent, getDerivedStateFromProps, getSnapshotBeforeUpdate, defaultProps, contextType, accessors, private members, and instance refs. UNSAFE_componentWillMount, legacy context and other statics are rejected with KR3xxx diagnostics.",
-      "tests": ["TestClassComponentLowering", "TestClassComponentLoweringEmit", "TestClassLoweringIssueNamesMember", "browser:/react-class/", "fixture:examples/src/pages/react-class.tsx"],
+      "tests": [
+        "TestClassComponentLowering",
+        "TestClassComponentLoweringEmit",
+        "TestClassLoweringIssueNamesMember",
+        "browser:/react-class/",
+        "fixture:examples/src/pages/react-class.tsx"
+      ],
       "roadmap": true
     },
     {
@@ -64,8 +104,22 @@
       "ssr": "partial",
       "target": "Source and island",
       "summary": "Classes with getDerivedStateFromError/componentDidCatch catch errors from descendants' render, bindings, lifecycles and effects (not event handlers or async code), unmount the failed subtree, and recover on reset. A throw while the page is built renders the boundary fallback (KR3009). Uncaught errors unmount only the failing component. Each Preact island has its own error boundary and marks a fallback placeholder when rendering fails.",
-      "tests": ["TestBoundaryBuildTimeFallback", "TestBuildTimeThrowWithoutBoundaryFails", "TestClassBoundaryChildrenBranch", "browser:/react-class/"],
-      "roadmap": true
+      "tests": [
+        "TestBoundaryBuildTimeFallback",
+        "TestBuildTimeThrowWithoutBoundaryFails",
+        "TestClassBoundaryChildrenBranch",
+        "browser:/react-class/",
+        "browser:/react-demo/"
+      ],
+      "roadmap": true,
+      "knownLimits": [
+        "Build-time boundary fallback for a browser-only island subtree is client-only; the island error boundary handles the client render failure.",
+        "Island error boundaries catch Preact render errors, not event-handler or asynchronous errors."
+      ],
+      "diagnostics": [
+        "KR3008",
+        "KR3009"
+      ]
     },
     {
       "id": "children-keys-refs",
@@ -75,30 +129,84 @@
       "ssr": "n/a",
       "target": "Documented semantics",
       "summary": "Static Children helpers and cloneElement fold at build time. Lists reconcile by key with React semantics: rows keep DOM, input and focus state, component state, effects and refs across reorder, insert and removal (minimal moves), unkeyed lists match by index, items update in place, duplicate keys warn, and a changed key on a single element remounts it. Hydration adopts server-rendered rows by key. Missing, duplicate and partial keys are diagnosed (KR6001-KR6003). Refs in lists attach per item and detach when an item is removed.",
-      "tests": ["TestReactChildrenMapSSR", "TestReactCloneElementFold", "TestReactKeyNotEmitted", "TestEventHandlersUseReactPropNames", "TestKeyedListKeyExtraction", "TestKeyedRemount", "TestListKeyDiagnostics", "TestPlanMapCall", "browser:/react-keys/"],
-      "roadmap": true
+      "tests": [
+        "TestReactChildrenMapSSR",
+        "TestReactCloneElementFold",
+        "TestReactKeyNotEmitted",
+        "TestEventHandlersUseReactPropNames",
+        "TestKeyedListKeyExtraction",
+        "TestKeyedRemount",
+        "TestListKeyDiagnostics",
+        "TestPlanMapCall",
+        "browser:/react-keys/"
+      ],
+      "roadmap": true,
+      "knownLimits": [
+        "Some dynamic Children helpers and cloneElement calls cannot be folded at build time and use the compat runtime.",
+        "List key inference is conservative for computed keys; rows without a stable key may be adopted by position."
+      ],
+      "diagnostics": [
+        "KR6001",
+        "KR6002",
+        "KR6003"
+      ]
     },
     {
       "id": "events",
       "area": "Events",
       "source": "beta",
-      "islands": "partial",
+      "islands": "beta",
       "ssr": "n/a",
       "target": "React 18 parity",
       "summary": "React 17+ root delegation with capture then bubble order, native listener interleaving, stopPropagation, the synthetic event surface, React onChange semantics, focus/blur bubbling, per-element enter/leave, media and composition events. Unknown or lowercase event props are diagnosed (KR5001, KR5002).",
-      "tests": ["TestEventDelegationBubbles", "TestNonBubblingEventUsesDirectListener", "TestCaptureEventUsesCaptureListener", "TestEventHandlersUseReactPropNames", "TestEventAndRefDiagnostics", "browser:/react-events/"],
-      "roadmap": true
+      "tests": [
+        "TestEventDelegationBubbles",
+        "TestNonBubblingEventUsesDirectListener",
+        "TestCaptureEventUsesCaptureListener",
+        "TestEventHandlersUseReactPropNames",
+        "TestEventAndRefDiagnostics",
+        "browser:/react-events/",
+        "browser:/react-demo/"
+      ],
+      "roadmap": true,
+      "knownLimits": [
+        "Island event handlers run on Preact's event system, so Krate's source-level event diagnostics do not apply inside a compiled package.",
+        "Controlled pointer/focus state in a compiled package is the package's responsibility; Krate only bridges page signals and callbacks."
+      ],
+      "diagnostics": [
+        "KR5001",
+        "KR5002"
+      ]
     },
     {
       "id": "forms",
       "area": "Forms and inputs",
       "source": "beta",
-      "islands": "partial",
+      "islands": "beta",
       "ssr": "n/a",
       "target": "React 18 parity",
       "summary": "Controlled text, select (single and multiple), checkbox, radio group, textarea, number and range inputs restore to state after onChange; uncontrolled defaultValue/defaultChecked only set defaults; form reset and value={undefined} follow React. Form diagnostics: KR5004 to KR5007. React 19 form actions (action/formAction functions, reset after success, no-JS server action posts) run in the browser gate.",
-      "tests": ["TestFormValueUsesPropertyBinding", "TestFormControlBindings", "TestFormDiagnostics", "browser:/react-forms/", "browser:/react-events/", "TestReactActionFormsCompile", "browser:/react-actions/"],
-      "roadmap": true
+      "tests": [
+        "TestFormValueUsesPropertyBinding",
+        "TestFormControlBindings",
+        "TestFormDiagnostics",
+        "browser:/react-forms/",
+        "browser:/react-events/",
+        "TestReactActionFormsCompile",
+        "browser:/react-actions/",
+        "browser:/react-demo/"
+      ],
+      "roadmap": true,
+      "knownLimits": [
+        "Controlled controls inside a compiled package use Preact's controlled-input behavior; Krate's form diagnostics apply to source components only.",
+        "Server action forms remain source-level; a compiled package receives the action runtime but not Krate's form lowering."
+      ],
+      "diagnostics": [
+        "KR5004",
+        "KR5005",
+        "KR5006",
+        "KR5007"
+      ]
     },
     {
       "id": "portals",
@@ -108,7 +216,11 @@
       "ssr": "n/a",
       "target": "SSR-safe",
       "summary": "createPortal and Portal mount into document.body or a resolved container after hydration, follow conditional branches, unmount with their component, and bubble React events to the portal's React ancestors. Like React, portal content is not part of the server-rendered HTML.",
-      "tests": ["TestPortalRendersAndMounts", "TestCreatePortalLowersToAnchor", "TestCreatePortalDynamicContainer"],
+      "tests": [
+        "TestPortalRendersAndMounts",
+        "TestCreatePortalLowersToAnchor",
+        "TestCreatePortalDynamicContainer"
+      ],
       "roadmap": true
     },
     {
@@ -119,7 +231,17 @@
       "ssr": "n/a",
       "target": "SSR-safe",
       "summary": "Boundaries show their fallback while use(promise), a resource or a lazy component inside is pending, reveal siblings together with React's 300ms reveal throttle, and nest independently (innermost wins). Content that cannot resolve at build time ships the fallback and hydrates into the content. A non-transition update that suspends hides the content in place and shows the fallback; a transition keeps the revealed content. lazy() (static import or a loader resolving to a local component) shows the fallback until its separately loaded hydration chunk or loader is ready. Matches React in the browser differential suspense fixtures.",
-      "tests": ["TestBuildSuspenseBoundaryStaticFallback", "TestBuildSuspenseBoundaryRuntimePrimary", "TestSuspenseUseRendersFallbackAndTemplatesContent", "TestNestedSuspenseInnermostWins", "TestLazyComponentGetsHydrationChunk", "TestLazyLowersToImportAndMarker", "TestUsePromiseLowersToGetter", "browser:/react-suspense/", "fixture:examples/src/pages/react-suspense.tsx"],
+      "tests": [
+        "TestBuildSuspenseBoundaryStaticFallback",
+        "TestBuildSuspenseBoundaryRuntimePrimary",
+        "TestSuspenseUseRendersFallbackAndTemplatesContent",
+        "TestNestedSuspenseInnermostWins",
+        "TestLazyComponentGetsHydrationChunk",
+        "TestLazyLowersToImportAndMarker",
+        "TestUsePromiseLowersToGetter",
+        "browser:/react-suspense/",
+        "fixture:examples/src/pages/react-suspense.tsx"
+      ],
       "roadmap": true
     },
     {
@@ -130,8 +252,23 @@
       "ssr": "n/a",
       "target": "Source semantics",
       "summary": "Source useActionState (queued, previous state over the action transport, permalink no-JS fallback), useFormStatus (form-scoped), useOptimistic (revert on settle), requestFormReset, and function form actions are lowered and run in the browser gate. Compiled packages get the same useActionState/useOptimistic runtime; their useFormStatus is idle. use() and async startTransition are tracked under Suspense and transitions.",
-      "tests": ["TestLowerUseActionState", "TestReactBrowserDifferential", "TestLowerUseFormStatusDestructured", "TestLowerUseOptimistic", "TestReactActionFormsCompile", "browser:/react-actions/"],
-      "roadmap": true
+      "tests": [
+        "TestLowerUseActionState",
+        "TestReactBrowserDifferential",
+        "TestLowerUseFormStatusDestructured",
+        "TestLowerUseOptimistic",
+        "TestReactActionFormsCompile",
+        "browser:/react-actions/"
+      ],
+      "roadmap": true,
+      "knownLimits": [
+        "Compiled packages get useActionState and useOptimistic through the compat runtime; useFormStatus is idle inside an island.",
+        "Use() and async transitions in compiled packages follow Preact compat behavior, not the source-component transition lowering.",
+        "React 19 action hooks run in source components; a compiled island gets the compat runtime subset (useFormStatus is idle)."
+      ],
+      "diagnostics": [
+        "KR7001"
+      ]
     },
     {
       "id": "server-actions",
@@ -141,7 +278,16 @@
       "ssr": "beta",
       "target": "Progressive enhancement",
       "summary": "File-level \"use server\" modules compile to hashed POST endpoints with client proxies, bound arguments, no-JS form posts, SSR forms, registry validation, origin checks, body limits, and no-store responses. Enhanced forms return results without reloading; errors use a {message, digest} envelope; actions read headers() and cookies() and can redirect(). Inline \"use server\" functions are a coded build error (KR7001).",
-      "tests": ["TestPrepareActionsBuildsManifestAndBundle", "TestRewriteActionImports", "TestSameOriginActionRequest", "TestActionSidecarTransport", "TestActionHandlerSecurity", "TestInlineUseServerIsCodedError", "fixture:examples/src/pages/react-actions.tsx", "browser:/react-actions/"],
+      "tests": [
+        "TestPrepareActionsBuildsManifestAndBundle",
+        "TestRewriteActionImports",
+        "TestSameOriginActionRequest",
+        "TestActionSidecarTransport",
+        "TestActionHandlerSecurity",
+        "TestInlineUseServerIsCodedError",
+        "fixture:examples/src/pages/react-actions.tsx",
+        "browser:/react-actions/"
+      ],
       "roadmap": true
     },
     {
@@ -152,7 +298,20 @@
       "ssr": "beta",
       "target": "Documented compat",
       "summary": "Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island chunks, server-rendered initial markup, hydration, and an island error boundary.",
-      "tests": ["TestIslandSignalPropBridge", "TestIslandLocalComponent", "TestIslandSSRWithHooks", "TestIslandSSREscapesTextProps", "TestIslandSSRUnknownPropFallsBackClientOnly", "TestIslandSSRModuleFailureFallsBackClientOnly", "TestIslandSharedSignalAcrossIslands", "TestIslandSSRArrayObjectProps", "TestIslandLocalNamedImport", "TestIslandPerIslandChunks", "TestIslandChunksMinified", "browser:/react-demo/"],
+      "tests": [
+        "TestIslandSignalPropBridge",
+        "TestIslandLocalComponent",
+        "TestIslandSSRWithHooks",
+        "TestIslandSSREscapesTextProps",
+        "TestIslandSSRUnknownPropFallsBackClientOnly",
+        "TestIslandSSRModuleFailureFallsBackClientOnly",
+        "TestIslandSharedSignalAcrossIslands",
+        "TestIslandSSRArrayObjectProps",
+        "TestIslandLocalNamedImport",
+        "TestIslandPerIslandChunks",
+        "TestIslandChunksMinified",
+        "browser:/react-demo/"
+      ],
       "roadmap": true
     },
     {
@@ -163,7 +322,10 @@
       "ssr": "n/a",
       "target": "Stable",
       "summary": "Copied shadcn source components, cva/cn folding, cards, controlled filters, and derived lists run in the browser corpus.",
-      "tests": ["TestShadcnButtonFoldsVariantsAndSpread", "browser:/react-dashboard/"],
+      "tests": [
+        "TestShadcnButtonFoldsVariantsAndSpread",
+        "browser:/react-dashboard/"
+      ],
       "roadmap": false
     },
     {
@@ -174,7 +336,9 @@
       "ssr": "n/a",
       "target": "Migration-ready",
       "summary": "The benchmark Next App Router fixture is the migration-shaped corpus. It is source-corpus coverage today, not a browser-run Krate app.",
-      "tests": ["fixture:packages/benchmark/fixtures/next"],
+      "tests": [
+        "fixture:packages/benchmark/fixtures/next"
+      ],
       "roadmap": false
     },
     {
@@ -185,8 +349,15 @@
       "ssr": "n/a",
       "target": "Supported",
       "summary": "Imported local React-compatible modules can be used as tags inside a compiled island and are bundled with it. Same-file Krate functions are diagnosed because they cannot cross the Krate/Preact runtime boundary.",
-      "tests": ["TestIslandLocalComponent"],
-      "roadmap": false
+      "tests": [
+        "TestIslandLocalComponent",
+        "browser:/react-demo/",
+        "TestIslandSameFileLocalWarning"
+      ],
+      "roadmap": false,
+      "diagnostics": [
+        "KR8007"
+      ]
     },
     {
       "id": "ssr-islands",
@@ -196,8 +367,25 @@
       "ssr": "beta",
       "target": "Hydration-safe",
       "summary": "Islands with build-time-known props are server-rendered with Preact and hydrated in place. Each island has its own chunk; unknown props, browser-only components, and portals fall back to client-only with a warning. Request-time SSR and streaming island regions remain separate work.",
-      "tests": ["TestIslandSignalPropBridge", "TestIslandSSRWithHooks", "TestIslandSSREscapesTextProps", "TestIslandSSRUnknownPropFallsBackClientOnly", "TestIslandSSRModuleFailureFallsBackClientOnly", "TestIslandSharedSignalAcrossIslands", "TestIslandSSRArrayObjectProps", "TestIslandLocalNamedImport", "TestIslandPerIslandChunks", "TestIslandChunksMinified", "browser:/react-demo/"],
-      "roadmap": false
+      "tests": [
+        "TestIslandSignalPropBridge",
+        "TestIslandSSRWithHooks",
+        "TestIslandSSREscapesTextProps",
+        "TestIslandSSRUnknownPropFallsBackClientOnly",
+        "TestIslandSSRModuleFailureFallsBackClientOnly",
+        "TestIslandSharedSignalAcrossIslands",
+        "TestIslandSSRArrayObjectProps",
+        "TestIslandLocalNamedImport",
+        "TestIslandPerIslandChunks",
+        "TestIslandChunksMinified",
+        "browser:/react-demo/",
+        "TestIslandBundleFailureUsesKR8009"
+      ],
+      "roadmap": false,
+      "diagnostics": [
+        "KR8008",
+        "KR8009"
+      ]
     },
     {
       "id": "preact-versions",
@@ -207,29 +395,41 @@
       "ssr": "n/a",
       "target": "10.20 through current",
       "summary": "The island build warns below 10.20. The conformance jobs exercise the minimum, an intermediate version, and the workspace version.",
-      "tests": ["ci:preact-conformance"],
+      "tests": [
+        "ci:preact-conformance"
+      ],
       "roadmap": false
     },
     {
       "id": "browser-differential",
       "area": "Browser differential corpus",
-      "source": "partial",
+      "source": "beta",
       "islands": "n/a",
       "ssr": "n/a",
       "target": "No P0/P1 divergence",
       "summary": "124 source-component fixtures (React 18 corpus plus the React 19 reference app) run in real React 19 and in Krate in Chromium, Firefox, and WebKit; DOM, form state, focus, and effect/lifecycle/ref ordering are compared after every step. Known divergences are tracked with a severity, and KRATE_REACT_EXIT=1 fails while P0/P1 entries remain.",
-      "tests": ["TestReactBrowserDifferential", "TestReactBrowserCorpus", "ci:browser-conformance"],
-      "roadmap": true
+      "tests": [
+        "TestReactBrowserDifferential",
+        "TestReactBrowserCorpus",
+        "ci:browser-conformance"
+      ],
+      "roadmap": true,
+      "knownLimits": [
+        "Four P2 render-count/useId formatting differences remain documented in testdata/reactbrowser/divergences.json."
+      ]
     },
     {
       "id": "react-19-reference",
       "area": "React 19 reference app",
-      "source": "planned",
+      "source": "beta",
       "islands": "n/a",
       "ssr": "n/a",
       "target": "Same browser suite as React 18",
       "summary": "Fixtures for useActionState, useOptimistic, useFormStatus, form and button actions with auto-reset, use(promise) and use(context), ref as a prop, ref cleanup callbacks, async transitions, useDeferredValue initial values, document metadata, and server actions under the real server.",
-      "tests": ["TestReactBrowserDifferential", "fixture:packages/compiler/internal/build/testdata/reactbrowser/r19/app_reference.tsx"],
+      "tests": [
+        "TestReactBrowserDifferential",
+        "fixture:packages/compiler/internal/build/testdata/reactbrowser/r19/app_reference.tsx"
+      ],
       "roadmap": true
     }
   ]

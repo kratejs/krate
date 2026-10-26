@@ -108,3 +108,12 @@ limits. All are optional.
 Set a timeout to `0` (or `off`) to disable it. Other operational variables
 include `KRATE_NO_BUILD_CACHE` (skip the disk build cache) and
 `KRATE_REQUIRE_E2E=1` (turn environment-missing test skips into failures).
+
+Browser and performance gates:
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `KRATE_BROWSER` | unset | Selects `chromium`, `firefox`, or `webkit` for browser conformance and the React differential. |
+| `KRATE_HYDRATION_BUDGET_MS` | `1500` | Maximum island hydration time from navigation start in the browser conformance gate. CI uses `2500`. |
+| `KRATE_REACT_EXIT` | unset | Fail the React differential on any P0/P1 divergence (CI sets this). |
+| `KRATE_REACTBROWSER_REPORT` | unset | Write the React differential report to this path. |

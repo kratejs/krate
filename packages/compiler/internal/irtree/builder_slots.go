@@ -10,6 +10,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/astprint"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
@@ -3971,7 +3972,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		if inner := findJSXElementNamed(el, name); inner != nil {
 			pos = inner.Position
 		}
-		b.warnAt(pos, "external island for <"+root+"> references same-file local component <"+name+">, which cannot cross the Krate/Preact island boundary",
+		b.warnCodeAt(pos, diag.CodeIslandLocalComponent, "external island for <"+root+"> references same-file local component <"+name+">, which cannot cross the Krate/Preact island boundary",
 			"move <"+name+"> into its own module and import it, or render it outside the island")
 	}
 

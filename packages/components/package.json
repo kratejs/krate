@@ -86,7 +86,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@krate/runtime": "^0.0.1"
+    "@krate/runtime": "^0.1.0"
   },
   "devDependencies": {
     "@krate/runtime": "workspace:*",

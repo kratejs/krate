@@ -69,7 +69,8 @@ func releaseCheckVM(rt *jsruntime.Runtime, healthy bool) {
 //	export default function check(page, krate) { return [ ...findings ] }
 //	export function check(page, krate) { ... }
 //
-// where page is { route, source, html, jsBytes, ast } and a finding is
+// where page is { route, source, html, jsBytes, hydrationBytes, islandBytes,
+// cssBytes, ast } and a finding is
 // { rule, message, severity?, line?, col?, hint? }. Rules run in the embedded
 // QuickJS runtime - no Node, no subprocess. Each rule bundle is compiled once
 // and the (rule, page) work is spread across a pool of VMs.
@@ -277,10 +278,13 @@ func runCustomRule(rt *jsruntime.Runtime, mod, bundle string, cfg Config, p *Pag
 // returned separately as a JS string literal so the VM parses it lazily.
 func marshalCheckPage(p *Page) (page, astSrc []byte, err error) {
 	page, err = json.Marshal(map[string]any{
-		"route":   p.Route,
-		"source":  p.RelSource,
-		"html":    p.HTML,
-		"jsBytes": p.JSBytes,
+		"route":          p.Route,
+		"source":         p.RelSource,
+		"html":           p.HTML,
+		"jsBytes":        p.JSBytes,
+		"hydrationBytes": p.HydrationBytes,
+		"islandBytes":    p.IslandBytes,
+		"cssBytes":       p.CSSBytes,
 	})
 	if err != nil {
 		return nil, nil, err

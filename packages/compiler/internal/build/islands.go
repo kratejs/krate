@@ -10,6 +10,7 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
@@ -191,7 +192,10 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 	}
 
 	if _, err := b.ensurePreactShared(); err != nil {
-		return "", "", nil, err
+		return "", "", nil, diag.Diagnostic{
+			Message: "island runtime could not be built: " + err.Error(),
+			Hint:    "install Preact 10.20 or newer with `pnpm add preact`, then rebuild",
+		}.WithCode(diag.CodeIslandAsset)
 	}
 	if v := installedPreactVersion(b.Root); v != "" && versionLess(v, "10.20.0") {
 		fmt.Fprintf(os.Stderr, "  %sWarning:%s preact %s is older than 10.20.0; islands use hooks and compat APIs that older releases can break\n", cYellow, cReset, v)
@@ -209,7 +213,13 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 		clientSrc := b.islandClientSource(e, used)
 		out, err := b.buildIslandBundle(clientSrc, resolveDir, false, nil)
 		if err != nil {
-			return "", "", nil, err
+			return "", "", nil, diag.Diagnostic{
+				File:    e.File,
+				Line:    e.Line,
+				Col:     e.Col,
+				Message: "island " + e.ID + " (<" + e.Local + ">) could not be built: " + err.Error(),
+				Hint:    "check the island package and its local imports, then rebuild",
+			}.WithCode(diag.CodeIslandAsset)
 		}
 		name := "island." + hashContent(out) + ".js"
 		chunksDir := filepath.Join(b.Cfg.OutDir, "chunks")
@@ -226,19 +236,32 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 		fmt.Fprintf(&importsJS, "import(%q).catch(function(e){ console.error(\"krate external island:\", e); });\n", url)
 
 		if !e.SSRPropsKnown {
-			fmt.Fprintf(os.Stderr, "  %sWarning:%s island %s (<%s>) stays client-only: a bridged prop has no build-time initial value\n", cYellow, cReset, e.ID, e.Local)
+			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" (<"+e.Local+">) stays client-only: a bridged prop has no build-time initial value", "pass build-time initial values, or keep the island client-only intentionally")
 			continue
 		}
 		ssrSrc := b.islandSSRSource(e, used)
 		html, err := b.buildIslandSSR(ssrSrc, resolveDir)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %sWarning:%s island %s stays client-only: server render failed: %v\n", cYellow, cReset, e.ID, err)
+			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" stays client-only: server render failed: "+err.Error(), "fix the browser-only dependency or keep the island client-only intentionally")
 			continue
 		}
 		ssrHTML[e.ID] = html
 	}
 
 	return boot.String(), importsJS.String(), ssrHTML, nil
+}
+
+// printIslandWarning emits a source-located island diagnostic. The build
+// package owns the asset failure, but the source position comes from the IR.
+func printIslandWarning(e irtree.ExternalComponent, code diag.Code, msg, hint string) {
+	d := diag.Diagnostic{
+		File: e.File, Line: e.Line, Col: e.Col,
+		Message: msg, Hint: hint, Severity: diag.SeverityWarning,
+	}.WithCode(code)
+	fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n", cYellow, cReset, d.Error())
+	if d.Hint != "" {
+		fmt.Fprintf(os.Stderr, "      hint: %s\n", d.Hint)
+	}
 }
 
 // islandImportsFor keeps only bindings referenced as JSX tags in the subtree.
@@ -310,10 +333,14 @@ func (b *Builder) islandClientSource(e irtree.ExternalComponent, imports []irtre
 	} else {
 		fmt.Fprintf(&src, "      var __vnode=(%s);\n", e.Subtree)
 	}
-	src.WriteString("      var __boundary=h(KrateIslandBoundary,{onError:function(err){console.error(\"krate external island:\",err);el.setAttribute(\"data-krate-island-error\",\"\");}},__vnode);\n")
+	src.WriteString("      var __boundary=h(KrateIslandBoundary,{onError:function(err){console.error(\"krate external island:\",String((err&&(err.name?err.name+\": \":\"\"))+(err&&err.message||err)||err));el.setAttribute(\"data-krate-island-error\",\"\");}},__vnode);\n")
+	src.WriteString("      var __start=typeof performance!==\"undefined\"?performance.now():0;\n")
 	src.WriteString("      if (el.childNodes && el.childNodes.length) hydrate(__boundary,el); else render(__boundary,el);\n")
+	src.WriteString("      var __end=typeof performance!==\"undefined\"?performance.now():0;\n")
+	fmt.Fprintf(&src, "      (globalThis.__krate_island_hydration ||= {})[%q]={start:__start,end:__end,ms:__end-__start};\n", e.ID)
+	src.WriteString("      el.setAttribute(\"data-krate-island-hydrated\",\"\");\n")
 	src.WriteString("      (globalThis.__krate_island_cleanups ||= []).push(function(){ render(null, el); });\n")
-	src.WriteString("    } catch (e) { console.error(\"krate external island:\", e); el.setAttribute(\"data-krate-island-error\", \"\"); el.textContent = \"This component could not load.\"; }\n  }\n}\n")
+	src.WriteString("    } catch (e) { console.error(\"krate external island:\", String((e&&(e.name?e.name+\": \":\"\"))+(e&&e.message||e)||e)); el.setAttribute(\"data-krate-island-error\", \"\"); el.textContent = \"This component could not load.\"; }\n  }\n}\n")
 	return src.String()
 }
 

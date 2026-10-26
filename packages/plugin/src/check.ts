@@ -49,6 +49,12 @@ export interface CheckRulePage {
   html: string;
   /** Client JS weight for this route, in bytes. */
   jsBytes: number;
+  /** Route hydration bundle weight, in bytes (excludes shared runtime/islands). */
+  hydrationBytes: number;
+  /** Asynchronous island chunk weight for this route, in bytes. */
+  islandBytes: number;
+  /** Linked same-origin CSS weight for this route, in bytes. */
+  cssBytes: number;
   /** Parsed program as an astjson document, when available. */
   ast?: CheckAstNode;
 }

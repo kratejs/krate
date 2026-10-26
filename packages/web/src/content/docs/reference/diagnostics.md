@@ -205,7 +205,7 @@ React ignores on* props on built-in elements that are not React DOM events (and 
 
 **Lowercase event handler prop**
 
-React event props are camelCase (onClick, onChange). A lowercase prop such as onclick is not an event handler in React and the function is never called. Use the camelCase name.
+React event props are camelCase (onClick, onChange). A lowercase prop such as onclick is not an event handler in React and the function is never called. Use the camelCase name. `krate fix` rewrites unambiguous lowercase handlers; string-valued inline handlers are left alone.
 
 ### KR5003
 
@@ -338,6 +338,24 @@ A class component uses legacy context (`contextTypes`, `childContextTypes` or `g
 **Portal container cannot be resolved**
 
 `createPortal(children, container)` moves its children into a DOM node after hydration. Krate resolves `document.body`, `document.getElementById("id")` and `document.querySelector("selector")` with literal arguments, and any other expression in the hydration scope of a client component; elsewhere the content mounts into `document.body`, and a container that is not an element when the page hydrates keeps the content unmounted. Make sure the container exists before the component hydrates (for example a `<div id="modal-root">` in the layout).
+
+### KR8007
+
+**Same-file component inside an island**
+
+An external package island contains a component declared in the page module. The page component belongs to the Krate runtime and cannot run inside the island's Preact tree. Move the component into its own module and import it, or render it outside the island.
+
+### KR8008
+
+**Island stays client-only**
+
+The island has no build-time props, uses a browser-only API, or could not be rendered by Preact during the build. Its placeholder is emitted without server-rendered markup and the client mounts it after the island chunk loads. Pass build-time initial values or keep the island client-only intentionally.
+
+### KR8009
+
+**Island asset could not be built**
+
+Krate could not bundle the island's external package, local module, Preact dependency, or generated chunk. Check the reported resolver error and install the missing package (Preact 10.20 or newer) in the project.
 
 ### KR8301
 

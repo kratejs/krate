@@ -63,6 +63,7 @@ pnpm typecheck         # tsc --noEmit across runtime/components/core/plugin/web
 pnpm vet               # sync docs + go vet ./...
 pnpm sync:docs         # regenerate embedded framework docs
 pnpm check:docs        # fail if embedded docs are stale
+pnpm check:version     # fail if publishable package versions drift
 
 # From packages/compiler:
 go build ./...

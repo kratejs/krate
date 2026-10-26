@@ -32,8 +32,8 @@ for usage.
 | Class components | Beta | n/a | n/a | Full common subset |
 | Error boundaries | Beta | Beta | Partial | Source and island |
 | Children, keys, and refs | Partial | Partial | n/a | Documented semantics |
-| Events | Beta | Partial | n/a | React 18 parity |
-| Forms and inputs | Beta | Partial | n/a | React 18 parity |
+| Events | Beta | Beta | n/a | React 18 parity |
+| Forms and inputs | Beta | Beta | n/a | React 18 parity |
 | Portals | Beta | Beta | n/a | SSR-safe |
 | Suspense | Beta | Beta | n/a | SSR-safe |
 | React 19 actions and forms | Beta | Partial | n/a | Source semantics |
@@ -44,8 +44,8 @@ for usage.
 | Local components in islands | n/a | Beta | n/a | Supported |
 | SSR island hydration | n/a | Beta | Beta | Hydration-safe |
 | Supported Preact versions | n/a | Beta | n/a | 10.20 through current |
-| Browser differential corpus | Partial | n/a | n/a | No P0/P1 divergence |
-| React 19 reference app | Planned | n/a | n/a | Same browser suite as React 18 |
+| Browser differential corpus | Beta | n/a | n/a | No P0/P1 divergence |
+| React 19 reference app | Beta | n/a | n/a | Same browser suite as React 18 |
 
 ## Details
 
@@ -95,7 +95,14 @@ Evidence: `TestClassComponentLowering`, `TestClassComponentLoweringEmit`, `TestC
 
 Classes with getDerivedStateFromError/componentDidCatch catch errors from descendants' render, bindings, lifecycles and effects (not event handlers or async code), unmount the failed subtree, and recover on reset. A throw while the page is built renders the boundary fallback (KR3009). Uncaught errors unmount only the failing component. Each Preact island has its own error boundary and marks a fallback placeholder when rendering fails.
 
-Evidence: `TestBoundaryBuildTimeFallback`, `TestBuildTimeThrowWithoutBoundaryFails`, `TestClassBoundaryChildrenBranch`, `browser:/react-class/`
+Known limits:
+
+- Build-time boundary fallback for a browser-only island subtree is client-only; the island error boundary handles the client render failure.
+- Island error boundaries catch Preact render errors, not event-handler or asynchronous errors.
+
+Diagnostics: `KR3008`, `KR3009`
+
+Evidence: `TestBoundaryBuildTimeFallback`, `TestBuildTimeThrowWithoutBoundaryFails`, `TestClassBoundaryChildrenBranch`, `browser:/react-class/`, `browser:/react-demo/`
 
 ### Children, keys, and refs
 
@@ -103,23 +110,44 @@ Evidence: `TestBoundaryBuildTimeFallback`, `TestBuildTimeThrowWithoutBoundaryFai
 
 Static Children helpers and cloneElement fold at build time. Lists reconcile by key with React semantics: rows keep DOM, input and focus state, component state, effects and refs across reorder, insert and removal (minimal moves), unkeyed lists match by index, items update in place, duplicate keys warn, and a changed key on a single element remounts it. Hydration adopts server-rendered rows by key. Missing, duplicate and partial keys are diagnosed (KR6001-KR6003). Refs in lists attach per item and detach when an item is removed.
 
+Known limits:
+
+- Some dynamic Children helpers and cloneElement calls cannot be folded at build time and use the compat runtime.
+- List key inference is conservative for computed keys; rows without a stable key may be adopted by position.
+
+Diagnostics: `KR6001`, `KR6002`, `KR6003`
+
 Evidence: `TestReactChildrenMapSSR`, `TestReactCloneElementFold`, `TestReactKeyNotEmitted`, `TestEventHandlersUseReactPropNames`, `TestKeyedListKeyExtraction`, `TestKeyedRemount`, `TestListKeyDiagnostics`, `TestPlanMapCall`, `browser:/react-keys/`
 
 ### Events
 
-**Source:** Beta · **Islands:** Partial · **SSR:** n/a
+**Source:** Beta · **Islands:** Beta · **SSR:** n/a
 
 React 17+ root delegation with capture then bubble order, native listener interleaving, stopPropagation, the synthetic event surface, React onChange semantics, focus/blur bubbling, per-element enter/leave, media and composition events. Unknown or lowercase event props are diagnosed (KR5001, KR5002).
 
-Evidence: `TestEventDelegationBubbles`, `TestNonBubblingEventUsesDirectListener`, `TestCaptureEventUsesCaptureListener`, `TestEventHandlersUseReactPropNames`, `TestEventAndRefDiagnostics`, `browser:/react-events/`
+Known limits:
+
+- Island event handlers run on Preact's event system, so Krate's source-level event diagnostics do not apply inside a compiled package.
+- Controlled pointer/focus state in a compiled package is the package's responsibility; Krate only bridges page signals and callbacks.
+
+Diagnostics: `KR5001`, `KR5002`
+
+Evidence: `TestEventDelegationBubbles`, `TestNonBubblingEventUsesDirectListener`, `TestCaptureEventUsesCaptureListener`, `TestEventHandlersUseReactPropNames`, `TestEventAndRefDiagnostics`, `browser:/react-events/`, `browser:/react-demo/`
 
 ### Forms and inputs
 
-**Source:** Beta · **Islands:** Partial · **SSR:** n/a
+**Source:** Beta · **Islands:** Beta · **SSR:** n/a
 
 Controlled text, select (single and multiple), checkbox, radio group, textarea, number and range inputs restore to state after onChange; uncontrolled defaultValue/defaultChecked only set defaults; form reset and value={undefined} follow React. Form diagnostics: KR5004 to KR5007. React 19 form actions (action/formAction functions, reset after success, no-JS server action posts) run in the browser gate.
 
-Evidence: `TestFormValueUsesPropertyBinding`, `TestFormControlBindings`, `TestFormDiagnostics`, `browser:/react-forms/`, `browser:/react-events/`, `TestReactActionFormsCompile`, `browser:/react-actions/`
+Known limits:
+
+- Controlled controls inside a compiled package use Preact's controlled-input behavior; Krate's form diagnostics apply to source components only.
+- Server action forms remain source-level; a compiled package receives the action runtime but not Krate's form lowering.
+
+Diagnostics: `KR5004`, `KR5005`, `KR5006`, `KR5007`
+
+Evidence: `TestFormValueUsesPropertyBinding`, `TestFormControlBindings`, `TestFormDiagnostics`, `browser:/react-forms/`, `browser:/react-events/`, `TestReactActionFormsCompile`, `browser:/react-actions/`, `browser:/react-demo/`
 
 ### Portals
 
@@ -142,6 +170,14 @@ Evidence: `TestBuildSuspenseBoundaryStaticFallback`, `TestBuildSuspenseBoundaryR
 **Source:** Beta · **Islands:** Partial · **SSR:** n/a
 
 Source useActionState (queued, previous state over the action transport, permalink no-JS fallback), useFormStatus (form-scoped), useOptimistic (revert on settle), requestFormReset, and function form actions are lowered and run in the browser gate. Compiled packages get the same useActionState/useOptimistic runtime; their useFormStatus is idle. use() and async startTransition are tracked under Suspense and transitions.
+
+Known limits:
+
+- Compiled packages get useActionState and useOptimistic through the compat runtime; useFormStatus is idle inside an island.
+- Use() and async transitions in compiled packages follow Preact compat behavior, not the source-component transition lowering.
+- React 19 action hooks run in source components; a compiled island gets the compat runtime subset (useFormStatus is idle).
+
+Diagnostics: `KR7001`
 
 Evidence: `TestLowerUseActionState`, `TestReactBrowserDifferential`, `TestLowerUseFormStatusDestructured`, `TestLowerUseOptimistic`, `TestReactActionFormsCompile`, `browser:/react-actions/`
 
@@ -183,7 +219,9 @@ Evidence: `fixture:packages/benchmark/fixtures/next`
 
 Imported local React-compatible modules can be used as tags inside a compiled island and are bundled with it. Same-file Krate functions are diagnosed because they cannot cross the Krate/Preact runtime boundary.
 
-Evidence: `TestIslandLocalComponent`
+Diagnostics: `KR8007`
+
+Evidence: `TestIslandLocalComponent`, `browser:/react-demo/`, `TestIslandSameFileLocalWarning`
 
 ### SSR island hydration
 
@@ -191,7 +229,9 @@ Evidence: `TestIslandLocalComponent`
 
 Islands with build-time-known props are server-rendered with Preact and hydrated in place. Each island has its own chunk; unknown props, browser-only components, and portals fall back to client-only with a warning. Request-time SSR and streaming island regions remain separate work.
 
-Evidence: `TestIslandSignalPropBridge`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`
+Diagnostics: `KR8008`, `KR8009`
+
+Evidence: `TestIslandSignalPropBridge`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`, `TestIslandBundleFailureUsesKR8009`
 
 ### Supported Preact versions
 
@@ -203,15 +243,19 @@ Evidence: `ci:preact-conformance`
 
 ### Browser differential corpus
 
-**Source:** Partial · **Islands:** n/a · **SSR:** n/a
+**Source:** Beta · **Islands:** n/a · **SSR:** n/a
 
 124 source-component fixtures (React 18 corpus plus the React 19 reference app) run in real React 19 and in Krate in Chromium, Firefox, and WebKit; DOM, form state, focus, and effect/lifecycle/ref ordering are compared after every step. Known divergences are tracked with a severity, and KRATE_REACT_EXIT=1 fails while P0/P1 entries remain.
+
+Known limits:
+
+- Four P2 render-count/useId formatting differences remain documented in testdata/reactbrowser/divergences.json.
 
 Evidence: `TestReactBrowserDifferential`, `TestReactBrowserCorpus`, `ci:browser-conformance`
 
 ### React 19 reference app
 
-**Source:** Planned · **Islands:** n/a · **SSR:** n/a
+**Source:** Beta · **Islands:** n/a · **SSR:** n/a
 
 Fixtures for useActionState, useOptimistic, useFormStatus, form and button actions with auto-reset, use(promise) and use(context), ref as a prop, ref cleanup callbacks, async transitions, useDeferredValue initial values, document metadata, and server actions under the real server.
 

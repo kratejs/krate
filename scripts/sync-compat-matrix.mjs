@@ -75,6 +75,14 @@ for (const row of matrix.rows) {
     "",
   );
   lines.push(row.summary, "");
+  if (Array.isArray(row.knownLimits) && row.knownLimits.length > 0) {
+    lines.push("Known limits:", "");
+    for (const limit of row.knownLimits) lines.push(`- ${limit}`);
+    lines.push("");
+  }
+  if (Array.isArray(row.diagnostics) && row.diagnostics.length > 0) {
+    lines.push(`Diagnostics: ${row.diagnostics.map((code) => `\`${code}\``).join(", ")}`, "");
+  }
   lines.push(`Evidence: ${evidence(row.tests)}`, "");
 }
 

@@ -73,6 +73,14 @@ type Page struct {
 	// JSBytes is this route's total client JS weight (page hydration + shared
 	// runtime chunk), in bytes.
 	JSBytes int
+	// HydrationBytes is the route's own hydration bundle, excluding the shared
+	// runtime chunk and asynchronous island chunks.
+	HydrationBytes int
+	// IslandBytes is the sum of the asynchronous island chunks referenced by
+	// this route. Shared Preact chunks are counted separately by the runtime.
+	IslandBytes int
+	// CSSBytes is the route's linked CSS weight.
+	CSSBytes int
 	// Program is the page's parsed program. Optional; may be nil for
 	// plugin-generated routes.
 	Program *ast.Program
@@ -149,6 +157,9 @@ var builtinRules = []builtinRule{
 
 	// perf
 	{"perf/js-budget", CategoryPerf, Warning, ruleJSBudget},
+	{"perf/hydration-budget", CategoryPerf, Warning, ruleHydrationBudget},
+	{"perf/island-budget", CategoryPerf, Warning, ruleIslandBudget},
+	{"perf/route-budget", CategoryPerf, Warning, ruleRouteBudget},
 	{"perf/image-dims", CategoryPerf, Warning, ruleImageDims},
 }
 

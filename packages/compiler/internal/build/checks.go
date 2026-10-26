@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/check"
@@ -87,13 +88,17 @@ func (b *Builder) checkPages(results []*PageResult, runtimeJSFile string) []chec
 		if r == nil || r.IsErrorPage {
 			continue
 		}
-		jsBytes := runtimeBytes + len(r.HydrationJS)
+		hydrationBytes := len(r.HydrationJS)
+		jsBytes := runtimeBytes + hydrationBytes
 		pages = append(pages, check.Page{
-			Route:     routeFromOutName(r.OutName),
-			RelSource: r.SourcePath,
-			HTML:      r.FinalHTML,
-			JSBytes:   jsBytes,
-			Program:   r.Program,
+			Route:          routeFromOutName(r.OutName),
+			RelSource:      r.SourcePath,
+			HTML:           r.FinalHTML,
+			JSBytes:        jsBytes,
+			HydrationBytes: hydrationBytes,
+			IslandBytes:    islandBytesForJSText(b.Cfg.OutDir, r.HydrationJS),
+			CSSBytes:       len(r.CSS),
+			Program:        r.Program,
 		})
 	}
 	return pages
@@ -164,12 +169,17 @@ func (b *Builder) loadBuiltPages() ([]check.Page, error) {
 		if err != nil {
 			return nil
 		}
-		jsBytes := runtimeBytes + pageJSBytes(filepath.Dir(path))
+		hydrationBytes := pageJSBytes(filepath.Dir(path))
+		jsBytes := runtimeBytes + hydrationBytes
+		html := string(data)
 		pages = append(pages, check.Page{
-			Route:     route,
-			RelSource: manifest.sourceFor(route),
-			HTML:      string(data),
-			JSBytes:   jsBytes,
+			Route:          route,
+			RelSource:      manifest.sourceFor(route),
+			HTML:           html,
+			JSBytes:        jsBytes,
+			HydrationBytes: hydrationBytes,
+			IslandBytes:    islandBytesForPage(b.Cfg.OutDir, filepath.Dir(path), html),
+			CSSBytes:       pageCSSBytes(b.Cfg.OutDir, html),
 		})
 		return nil
 	})
@@ -177,6 +187,76 @@ func (b *Builder) loadBuiltPages() ([]check.Page, error) {
 		return nil, err
 	}
 	return pages, nil
+}
+
+var islandChunkRe = regexp.MustCompile(`chunks/island\.[A-Za-z0-9]+\.js`)
+var cssLinkRe = regexp.MustCompile(`(?i)<link[^>]+href=["']([^"']+\.css)["']`)
+
+// islandBytesForJSText sums the generated island chunks referenced by a page
+// hydration script. Island URLs are already resolved to /chunks/... paths.
+func islandBytesForJSText(outDir, js string) int {
+	seen := map[string]bool{}
+	total := 0
+	for _, rel := range islandChunkRe.FindAllString(js, -1) {
+		if seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		total += fileSize(filepath.Join(outDir, filepath.FromSlash(rel)))
+	}
+	return total
+}
+
+// islandBytesForPage handles `krate check`, where the hydration script is on
+// disk rather than in memory.
+func islandBytesForPage(outDir, pageDir, html string) int {
+	seen := map[string]bool{}
+	total := 0
+	add := func(src string) {
+		for _, rel := range islandChunkRe.FindAllString(src, -1) {
+			if seen[rel] {
+				continue
+			}
+			seen[rel] = true
+			total += fileSize(filepath.Join(outDir, filepath.FromSlash(rel)))
+		}
+	}
+	add(html)
+	entries, err := os.ReadDir(pageDir)
+	if err != nil {
+		return total
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".js") || strings.HasSuffix(e.Name(), ".map") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(pageDir, e.Name()))
+		if err == nil {
+			add(string(data))
+		}
+	}
+	return total
+}
+
+// pageCSSBytes sums same-origin stylesheet links from the final document.
+func pageCSSBytes(outDir, html string) int {
+	seen := map[string]bool{}
+	total := 0
+	for _, m := range cssLinkRe.FindAllStringSubmatch(html, -1) {
+		href := m[1]
+		if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") || strings.HasPrefix(href, "//") {
+			continue
+		}
+		if strings.HasPrefix(href, "/") {
+			href = strings.TrimPrefix(href, "/")
+		}
+		if seen[href] {
+			continue
+		}
+		seen[href] = true
+		total += fileSize(filepath.Join(outDir, filepath.FromSlash(href)))
+	}
+	return total
 }
 
 // routeFromRel converts a dist-relative directory to a URL route.

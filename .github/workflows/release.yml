@@ -78,6 +78,12 @@ jobs:
       - name: Check compatibility matrix
         run: pnpm run check:matrix
 
+      - name: Check roadmap and v1 gates
+        run: pnpm run check:roadmap
+
+      - name: Check package versions
+        run: pnpm run check:version
+
       - name: Generate platform packages
         run: node scripts/build-platform-packages.mjs
 
@@ -94,7 +100,7 @@ jobs:
       - name: Publish npm packages
         run: |
           set -e
-          for dir in packages/runtime packages/components packages/core packages/plugin packages/base-docs-theme packages/create-krate-app packages/create-krate-docs; do
+          for dir in packages/runtime packages/components packages/plugin packages/base-docs-theme packages/create-krate-app packages/create-krate-docs packages/core; do
             echo "Publishing $(basename "$dir") with tag ${{ steps.tag.outputs.dist_tag }}..."
             (cd "$dir" && pnpm publish --access public --no-git-checks --tag "${{ steps.tag.outputs.dist_tag }}")
           done

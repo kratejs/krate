@@ -95,7 +95,11 @@ try {
   };
 
   // React source + compiled Radix islands. Check the island server render
-  // before the dynamic island chunk has a chance to hydrate it.
+  // before the dynamic island chunk has a chance to hydrate it. The init script
+  // arms the one intentionally-failing island used to test the error boundary.
+  await page.addInitScript(() => {
+    globalThis.__KRATE_TEST_ISLAND_ERROR = true;
+  });
   await page.goto(baseURL + "/react-demo/", { waitUntil: "domcontentloaded" });
   const islandSSR = await page.evaluate(() => {
     const island = document.querySelector("[data-krate-island][data-krate-island-ssr]");
@@ -103,6 +107,19 @@ try {
   });
   if (!islandSSR) fail("island SSR markup missing");
   await page.waitForSelector("[role=switch]", { timeout: 8000 });
+  await page.waitForFunction(
+    () => Object.keys(globalThis.__krate_island_hydration || {}).length > 0,
+    { timeout: 8000 },
+  );
+  const hydration = await page.evaluate(() => globalThis.__krate_island_hydration || {});
+  const hydrationBudget = Number(process.env.KRATE_HYDRATION_BUDGET_MS || 1500);
+  const slowIslands = Object.entries(hydration).filter(([, v]) => Number(v.end) > hydrationBudget);
+  if (!Number.isFinite(hydrationBudget) || hydrationBudget <= 0) {
+    fail(`invalid KRATE_HYDRATION_BUDGET_MS: ${process.env.KRATE_HYDRATION_BUDGET_MS}`);
+  }
+  if (slowIslands.length) {
+    fail(`island hydration over ${hydrationBudget}ms: ${slowIslands.map(([id, v]) => `${id}=${v.end.toFixed(1)}ms`).join(", ")}`);
+  }
   await page.waitForTimeout(1500);
   const before = await page.evaluate(() => ({
     state: document.querySelector("[role=switch]")?.getAttribute("data-state"),
@@ -132,6 +149,26 @@ try {
     tooltips: await page.locator("[role=tooltip]").count(),
   };
 
+  const liveCheckbox = page.locator("[data-testid=live-checkbox]");
+  const checkboxBefore = {
+    checked: await liveCheckbox.isChecked(),
+    label: (await page.locator("text=Live checkbox").first().textContent()) || "",
+  };
+  await liveCheckbox.click();
+  const checkboxAfter = {
+    checked: await liveCheckbox.isChecked(),
+    label: (await page.locator("text=Live checkbox").first().textContent()) || "",
+  };
+
+  const localModule = {
+    count: await page.locator(".island-local-badge").count(),
+    text: await page.locator(".island-local-badge").first().textContent().catch(() => null),
+  };
+
+  const fragile = page.locator("[data-testid=fragile-island] span[data-krate-island-error]");
+  const fragileText = await fragile.textContent({ timeout: 8000 }).catch(() => null);
+  await settleErrors();
+
   if (before.state !== "checked") fail(`switch initial state: ${before.state}`);
   if (before.label !== "Live switch on") fail(`switch initial label: ${before.label}`);
   if (!before.timer) fail("timer did not start");
@@ -139,6 +176,13 @@ try {
   if (after.label !== "Live switch off") fail(`switch label after click: ${after.label}`);
   if (!(after.classTick > before.classTick)) fail(`class component tick: ${before.classTick} -> ${after.classTick}`);
   if (tooltip !== "Tooltip content") fail(`tooltip content: ${tooltip}`);
+  if (checkboxBefore.checked) fail("island checkbox started checked");
+  if (!checkboxAfter.checked) fail("island checkbox did not become checked");
+  if (!checkboxAfter.label.includes("on")) fail(`island checkbox label: ${checkboxAfter.label}`);
+  if (localModule.count !== 1 || localModule.text !== "local island module") {
+    fail(`local island module: ${JSON.stringify(localModule)}`);
+  }
+  if (fragileText !== "This component could not load.") fail(`island error fallback: ${fragileText}`);
 
   // React source dashboard: controlled input, derived list, dynamic insertion.
   await go("/react-dashboard/", 'input[placeholder="Filter reports..."]');
@@ -611,9 +655,14 @@ try {
   }
 
   await settleErrors();
+  for (let i = errors.length - 1; i >= 0; i--) {
+    if (/krate external island.*island explosion|island explosion.*krate external island/.test(errors[i])) {
+      errors.splice(i, 1);
+    }
+  }
   if (errors.length) fail("console errors: " + errors.join(" | "));
 
-  console.log(JSON.stringify({ browser: browserName, before, after, tooltip, tooltipDebug, formResult, suspense, actions, errors, failures }, null, 2));
+  console.log(JSON.stringify({ browser: browserName, hydration, before, after, tooltip, tooltipDebug, checkboxBefore, checkboxAfter, localModule, fragileText, formResult, suspense, actions, errors, failures }, null, 2));
   if (failures.length) process.exitCode = 1;
 } catch (err) {
   console.error(err?.stack || String(err));

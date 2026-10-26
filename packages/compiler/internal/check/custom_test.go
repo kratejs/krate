@@ -100,7 +100,7 @@ func TestCustomRuleReadsAST(t *testing.T) {
 	}
 	for _, f := range fs {
 		if f.Rule == "custom/ast" {
-			if want := "Program 2 true ast,html,jsBytes,route,source"; f.Message != want {
+			if want := "Program 2 true ast,cssBytes,html,hydrationBytes,islandBytes,jsBytes,route,source"; f.Message != want {
 				t.Fatalf("message = %q, want %q", f.Message, want)
 			}
 			return
