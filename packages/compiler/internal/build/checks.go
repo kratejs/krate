@@ -247,9 +247,7 @@ func pageCSSBytes(outDir, html string) int {
 		if strings.HasPrefix(href, "http://") || strings.HasPrefix(href, "https://") || strings.HasPrefix(href, "//") {
 			continue
 		}
-		if strings.HasPrefix(href, "/") {
-			href = strings.TrimPrefix(href, "/")
-		}
+		href = strings.TrimPrefix(href, "/")
 		if seen[href] {
 			continue
 		}
