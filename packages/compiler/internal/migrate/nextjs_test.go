@@ -1050,3 +1050,45 @@ func hasManual(rep *Report, source, substring string) bool {
 	}
 	return false
 }
+
+func TestNextCacheImportRewrite(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `import { revalidatePath, revalidateTag, updateTag } from "next/cache";
+export default function Page() { return <p>hi</p>; }
+`)
+	writeNextFile(t, root, "app/actions.ts", `"use server";
+import { unstable_cache as cache, revalidatePath } from 'next/cache';
+export async function save() { revalidatePath("/"); }
+export const load = cache(async () => 1, ["k"], { tags: ["t"] });
+`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := findPlan(rep, "src/pages/index.tsx")
+	if page == nil {
+		t.Fatal("page missing")
+	}
+	body := string(page.Content)
+	if !strings.Contains(body, `import { revalidatePath, revalidateTag } from "@krate/runtime/server";`) {
+		t.Errorf("supported names not moved:\n%s", body)
+	}
+	if !strings.Contains(body, `import { updateTag } from "next/cache";`) {
+		t.Errorf("unsupported name must stay on next/cache:\n%s", body)
+	}
+	if !hasManual(rep, "app/page.tsx", "updateTag from next/cache") {
+		t.Errorf("missing manual item for updateTag: %+v", rep.Manual)
+	}
+	var actions *PlannedFile
+	for i := range rep.Files {
+		if strings.Contains(string(rep.Files[i].Content), "unstable_cache") {
+			actions = &rep.Files[i]
+		}
+	}
+	if actions == nil || !strings.Contains(string(actions.Content), `{ unstable_cache as cache, revalidatePath } from '@krate/runtime/server'`) {
+		t.Fatalf("aliased import not rewritten: %+v", actions)
+	}
+	if strings.Contains(string(actions.Content), "next/cache") {
+		t.Errorf("next/cache leaked:\n%s", actions.Content)
+	}
+}
