@@ -10,7 +10,14 @@ import { pathToFileURL } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { timingSafeEqual } from "node:crypto";
 import { renderToString } from "./server.js";
-import { cacheRuntime, installRenderStore, patchFetch, withCacheScope, type CacheScope } from "./cache-scope.js";
+import {
+  cacheRuntime,
+  installRenderStore,
+  patchFetch,
+  routeDataTag,
+  withCacheScope,
+  type CacheScope,
+} from "./cache-scope.js";
 
 // Render cache scopes (tags / revalidate windows read during a render) and the
 // Next-style fetch data cache. Installed once per process; page bundles share
@@ -892,7 +899,9 @@ async function applyInternalOp(op: InternalOp, payload: any): Promise<Record<str
       const targets: InvalidateTarget[] = Array.isArray(payload.targets)
         ? payload.targets.filter((t: any) => t && typeof t.route === "string")
         : [];
-      const { dataEntries } = cacheRuntime().invalidate({ tags });
+      // Path targets also drop the data their renders cached (implicit tag).
+      const dataTags = tags.concat(targets.map((t) => routeDataTag(t.route)));
+      const { dataEntries } = cacheRuntime().invalidate({ tags: dataTags });
       let isrEntries = 0;
       let regionEntries = 0;
       for (const t of targets) {

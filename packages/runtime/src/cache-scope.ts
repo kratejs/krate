@@ -202,6 +202,14 @@ export async function withCacheScope<T>(
   return { result, scope, invalidated: rt.epoch !== epoch };
 }
 
+/**
+ * Implicit tag carried by data-cache entries first stored while rendering
+ * route, so revalidatePath(route) also drops the data that render cached.
+ */
+export function routeDataTag(route: string): string {
+  return '_krate_route:' + route;
+}
+
 /** Records tags and a revalidate window on the current render scope. */
 export function recordCacheRead(tags: readonly string[] | undefined, revalidate: number | false | undefined): void {
   const scope = currentRenderScope();
@@ -241,8 +249,13 @@ export function dataCacheGetJSON(key: string): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
 
-/** Stores a JSON value unless an invalidation happened since epoch. */
+/**
+ * Stores a JSON value unless an invalidation happened since epoch. Inside a
+ * render the entry also gets the route's implicit tag (see routeDataTag).
+ */
 export function dataCacheSetJSON(key: string, json: string, ttlSeconds: number, tags: string[], epoch: number): void {
+  const scope = currentRenderScope();
+  if (scope) tags = [...tags, routeDataTag(scope.route)];
   const go = goBridge();
   if (go) {
     go._go_cache_set(key, json, ttlSeconds === Infinity ? -1 : ttlSeconds, JSON.stringify(tags));
