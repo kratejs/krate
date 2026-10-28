@@ -68,6 +68,14 @@ export default function PricesPage() {
 }
 ```
 
+The Next.js-style segment exports work too: `export const revalidate = 60`
+is ISR, `revalidate = 0` or `export const dynamic = "force-dynamic"` is SSR, and
+`dynamic = "force-static"` / `revalidate = false` keep the page static. A page
+that states no mode but reads tagged or timed data (`fetch` `next` options,
+`unstable_cache`) becomes ISR automatically. To purge ISR pages when data
+changes, call `revalidatePath` / `revalidateTag`; see
+[Caching and Revalidation](/docs/guides/caching-and-revalidation/).
+
 ISR responses are cacheable: Krate emits
 `Cache-Control: public, s-maxage=…, stale-while-revalidate=…` so CDNs hold
 fresh HTML while the sidecar revalidates stale entries in the background.

@@ -230,6 +230,9 @@ export async function signOut() {
   `undefined` outside an action. `headers()`/`cookies()` throw outside one.
 - `redirect(url)` ends the action and navigates the client (`303` for native
   posts). Returning `{ redirect: "/path" }` does the same.
+- `revalidatePath(path)` / `revalidateTag(tag)` (from `@krate/runtime/cache`)
+  purge ISR pages and cached data; they are applied before the action responds.
+  See [Caching and Revalidation](/docs/guides/caching-and-revalidation/).
 
 ## Wire format
 
@@ -241,10 +244,12 @@ The client and the sidecar exchange JSON envelopes on
 | Call, JSON args | `content-type: application/json`, `{"args":[...]}` |
 | Call with a `FormData` | multipart form fields; `__krate_args` holds a JSON array of the leading arguments |
 | Native form post | the form body; `__krate_args` and `__krate_return` ride in the action URL query |
-| Success | `200 {"ok":true,"result":R,"redirect":"/path"?}` |
+| Success | `200 {"ok":true,"result":R,"redirect":"/path"?,"revalidated":true?,"revalidation":{"paths":[...],"tags":[...]}?}` |
 | Failure | `4xx/5xx {"ok":false,"error":{"message":M,"digest":D}}` |
 
 Enhanced requests send `x-krate-action: fetch`; native posts get a `303`.
+When the action revalidated, the client dispatches a `krate:revalidate` window
+event with `detail: { paths, tags }`.
 
 ## Errors
 

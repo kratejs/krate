@@ -38,6 +38,7 @@ for usage.
 | Suspense | Beta | Beta | n/a | SSR-safe |
 | React 19 actions and forms | Beta | Partial | n/a | Source semantics |
 | Server actions | Beta | n/a | Beta | Progressive enhancement |
+| Data cache and revalidation | Beta | n/a | Beta | next/cache parity |
 | Compiled React packages | n/a | Beta | Beta | Documented compat |
 | shadcn-style dashboard | Beta | n/a | n/a | Stable |
 | Next.js app corpus | Beta | n/a | n/a | Migration-ready |
@@ -188,6 +189,22 @@ Evidence: `TestLowerUseActionState`, `TestReactBrowserDifferential`, `TestLowerU
 File-level "use server" modules compile to hashed POST endpoints with client proxies, bound arguments, no-JS form posts, SSR forms, registry validation, origin checks, body limits, and no-store responses. Enhanced forms return results without reloading; errors use a {message, digest} envelope; actions read headers() and cookies() and can redirect(). Inline "use server" functions are a coded build error (KR7001).
 
 Evidence: `TestPrepareActionsBuildsManifestAndBundle`, `TestRewriteActionImports`, `TestSameOriginActionRequest`, `TestActionSidecarTransport`, `TestActionHandlerSecurity`, `TestInlineUseServerIsCodedError`, `fixture:examples/src/pages/react-actions.tsx`, `browser:/react-actions/`
+
+### Data cache and revalidation
+
+**Source:** Beta · **Islands:** n/a · **SSR:** Beta
+
+@krate/runtime/cache provides revalidatePath, revalidateTag, unstable_cache and unstable_noStore; server fetch honors next.tags/next.revalidate/cache options; pages accept export const revalidate and export const dynamic. Revalidation is applied across the SSR renderer workers, Go region cache, QuickJS and Node API data caches before an action or API route responds; static (SSG) targets are reported as skipped (KR8603).
+
+Known limits:
+
+- Caches are in memory per server process; multiple krate serve instances do not share them.
+- Static (SSG) pages cannot be revalidated at runtime; revalidatePath reports them as skipped.
+- Tags are recorded for data read during the page render; region renders and Go components do not record tags.
+
+Diagnostics: `KR8601`, `KR8602`, `KR8603`
+
+Evidence: `TestSegmentExportsRenderMode`, `TestDataCacheUsageInference`, `TestRevalidateHostAuth`, `TestRevalidateHostResolvesPathsAndFansOut`, `TestSSRInternalProxyLockdown`, `TestRevalidateTagAndPathE2E`, `TestRevalidateFansOutToWorkersE2E`, `TestActionRevalidationReadYourWritesE2E`, `TestAPIRouteRevalidationAndDataCacheE2E`, `TestQuickJSRouteUsesHostCache`
 
 ### Compiled React packages
 

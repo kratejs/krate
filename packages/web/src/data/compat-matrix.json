@@ -291,6 +291,38 @@
       "roadmap": true
     },
     {
+      "id": "cache-revalidation",
+      "area": "Data cache and revalidation",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "beta",
+      "target": "next/cache parity",
+      "summary": "@krate/runtime/cache provides revalidatePath, revalidateTag, unstable_cache and unstable_noStore; server fetch honors next.tags/next.revalidate/cache options; pages accept export const revalidate and export const dynamic. Revalidation is applied across the SSR renderer workers, Go region cache, QuickJS and Node API data caches before an action or API route responds; static (SSG) targets are reported as skipped (KR8603).",
+      "tests": [
+        "TestSegmentExportsRenderMode",
+        "TestDataCacheUsageInference",
+        "TestRevalidateHostAuth",
+        "TestRevalidateHostResolvesPathsAndFansOut",
+        "TestSSRInternalProxyLockdown",
+        "TestRevalidateTagAndPathE2E",
+        "TestRevalidateFansOutToWorkersE2E",
+        "TestActionRevalidationReadYourWritesE2E",
+        "TestAPIRouteRevalidationAndDataCacheE2E",
+        "TestQuickJSRouteUsesHostCache"
+      ],
+      "roadmap": true,
+      "knownLimits": [
+        "Caches are in memory per server process; multiple krate serve instances do not share them.",
+        "Static (SSG) pages cannot be revalidated at runtime; revalidatePath reports them as skipped.",
+        "Tags are recorded for data read during the page render; region renders and Go components do not record tags."
+      ],
+      "diagnostics": [
+        "KR8601",
+        "KR8602",
+        "KR8603"
+      ]
+    },
+    {
       "id": "compiled-packages",
       "area": "Compiled React packages",
       "source": "n/a",

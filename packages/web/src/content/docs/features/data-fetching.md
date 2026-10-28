@@ -67,6 +67,12 @@ export default function VideoPage({ params }) {
 Both bake everything else (layout, head, static content) into a shell at build
 time; only the page body is dynamic.
 
+`export const revalidate = 60` and `export const dynamic = "force-dynamic"` are
+accepted as well. Server-side `fetch` honors `{ next: { revalidate, tags } }`
+and `cache: "no-store"`, and `unstable_cache` caches any async function; both
+are invalidated with `revalidateTag` / `revalidatePath`. See
+[Caching and Revalidation](/docs/guides/caching-and-revalidation/).
+
 ## Dynamic route params (`generateStaticParams`)
 
 For statically-built dynamic routes, `generateStaticParams` pre-generates the
