@@ -233,6 +233,14 @@ func serverExportPlugin(exports []ServerExport, pagePath string) api.Plugin {
 			pb.OnLoad(api.OnLoadOptions{Filter: `\.[cm]?[jt]sx?$`, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				list, ok := byFile[filepath.Clean(args.Path)]
 				if !ok {
+					for _, e := range exports {
+						if sameFileIdentity(args.Path, e.SourcePath) {
+							list = append(list, e)
+						}
+					}
+					ok = len(list) > 0
+				}
+				if !ok {
 					return api.OnLoadResult{}, nil
 				}
 				data, err := os.ReadFile(args.Path)

@@ -1,6 +1,9 @@
 package build
 
-import "path/filepath"
+import (
+	"os"
+	"path/filepath"
+)
 
 // canonicalPath resolves symlinks when the path exists. esbuild canonicalizes
 // module paths before handing them to plugins, while the builder keeps paths
@@ -12,9 +15,9 @@ func canonicalPath(path string) string {
 		return ""
 	}
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return filepath.Clean(resolved)
+		path = resolved
 	}
-	return filepath.Clean(path)
+	return canonicalOSPath(filepath.Clean(path))
 }
 
 // samePath reports whether two module paths name the same file, tolerating a
@@ -23,5 +26,22 @@ func samePath(a, b string) bool {
 	if filepath.Clean(a) == filepath.Clean(b) {
 		return true
 	}
-	return canonicalPath(a) == canonicalPath(b)
+	if canonicalPath(a) == canonicalPath(b) {
+		return true
+	}
+	return sameFileIdentity(a, b)
+}
+
+// sameFileIdentity falls back to the filesystem identity when the paths differ
+// in spelling (8.3 short names, case, a junction root).
+func sameFileIdentity(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ai, bi)
 }

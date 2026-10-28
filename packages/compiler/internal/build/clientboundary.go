@@ -607,6 +607,14 @@ func clientBoundaryPlugin(boundaries []ClientBoundary, impls *clientSSRImpls, ou
 			pb.OnLoad(api.OnLoadOptions{Filter: `\.[cm]?[jt]sx?$`, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				cb, ok := byPath[filepath.Clean(args.Path)]
 				if !ok {
+					for _, candidate := range boundaries {
+						if sameFileIdentity(args.Path, candidate.SourcePath) {
+							cb, ok = candidate, true
+							break
+						}
+					}
+				}
+				if !ok {
 					return api.OnLoadResult{}, nil
 				}
 				rel, err := filepath.Rel(filepath.Dir(outPath), impls.implPath(cb))
