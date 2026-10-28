@@ -369,6 +369,24 @@ React recomputes every value in a component body on each render. Krate compiles 
 
 Hydration code (an event handler, effect, derived value or a module-level initializer) uses a binding imported from another module, and the compiler could not copy that module's declaration into the page's hydration script: the import is a package, a namespace or default import, a class, or a declaration with side effects. At runtime the name would be undefined. Move the helper into a local module and import it by name, or define it in the component's module.
 
+### KR8601
+
+**Unsupported page segment export value**
+
+Krate reads the Next.js-style page exports `export const revalidate` (a constant number of seconds, 0 for per-request rendering, or false to cache indefinitely) and `export const dynamic` ("auto", "force-dynamic", "force-static" or "error") at build time. The value could not be read statically or is not one of the supported values, so it is ignored. Write a literal value.
+
+### KR8602
+
+**Static page reads revalidating data**
+
+The page reads data with cache tags, a revalidate window or `cache: "no-store"`, but it is rendered statically (it is pinned with `dynamic = "force-static"`, `revalidate = false`, or the project uses `output: "static"`). Static HTML is baked once at build time: revalidateTag, revalidatePath and revalidate windows cannot refresh it. Remove the static pin or export `revalidate = N` so the page is served with ISR.
+
+### KR8603
+
+**revalidatePath targets a static page**
+
+A revalidatePath() call names a route that is rendered statically (SSG). The page's HTML is a file baked at build time, so revalidation cannot rebuild it: at runtime the call reports the route under `skipped` and logs a warning. Make the target page ISR (`export const revalidate = N`) or SSR (`export const dynamic = "force-dynamic"`), or rebuild the site to refresh it.
+
 ## See also
 
 - [React Compatibility](/docs/guides/react-compatibility/)

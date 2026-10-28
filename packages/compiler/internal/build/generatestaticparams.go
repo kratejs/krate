@@ -480,7 +480,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	b.runPageHook("AfterParse", spp.PagePath, parseCtx, func() error { return plugin.RunAfterParse(parseCtx) })
 	entryModule.Program = parseCtx.Program
 
-	renderMode, revalidate := detectRenderMode(entryModule.Program)
+	renderMode, revalidate, _ := resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules)
 
 	// Global streaming override: if configured, all *static* pages stream.
 	// Explicit ssr/isr opts win - forcing them to streaming would silently

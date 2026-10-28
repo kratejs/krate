@@ -23,6 +23,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/content"
 	"github.com/kratejs/krate/packages/compiler/internal/css"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
@@ -1545,8 +1546,10 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	// module at the final program so all downstream stages render the edited tree.
 	entryModule.Program = parseCtx.Program
 
-	// Detect rendering mode (SSR/ISR/Streaming) from AST exports + <Suspense> usage
-	renderMode, revalidate := detectRenderMode(entryModule.Program)
+	// Detect rendering mode (SSR/ISR/Streaming) from AST exports + <Suspense>
+	// usage, falling back to the page's data-cache reads (tagged/timed fetch).
+	renderMode, revalidate, dataUsage := resolvePageRenderMode(page, entryModule, bundle.Modules)
+	explicitStatic := renderMode == RenderSSG
 	pageLang := detectPageLang(entryModule.Program)
 
 	// If the page imports any runtime components, force streaming mode.
@@ -1585,9 +1588,17 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	// are additionally closed to the params generateStaticParams returns (see
 	// dynamicParams below).
 	staticMode := strings.EqualFold(b.Cfg.Output, "static")
+	staticWhy := "the page pins itself static"
 	if staticMode && renderMode != RenderSSG {
 		fmt.Fprintf(os.Stderr, "  %s⚡%s %s → ssg (static output mode)\n", cCyan, cReset, filepath.Base(page))
 		renderMode = RenderSSG
+		staticWhy = "output: \"static\""
+		explicitStatic = true
+	}
+	if renderMode == RenderSSG && explicitStatic {
+		if d, ok := staticDataCacheWarning(page, entryModule.SourceCode, dataUsage, staticWhy); ok {
+			printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
+		}
 	}
 
 	isDynRoute := isDynamicRoute(page, b.Cfg.PagesDir)
