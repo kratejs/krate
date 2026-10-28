@@ -476,9 +476,9 @@ func TestActionRevalidationReadYourWritesE2E(t *testing.T) {
 	host.ssrBase = ssr.URL
 
 	srv, _ := startCacheAPISidecar(t, host, map[string]string{
-		"save": `export async function save(tag) { revalidateTag(tag); revalidatePath('/blog/hello'); revalidatePath('/about'); return 'saved'; }`,
+		"save":  `export async function save(tag) { revalidateTag(tag); revalidatePath('/blog/hello'); revalidatePath('/about'); return 'saved'; }`,
 		"plain": `export async function plain() { return 1; }`,
-		"fail": `export async function fail() { revalidateTag('x'); throw new Error('nope'); }`,
+		"fail":  `export async function fail() { revalidateTag('x'); throw new Error('nope'); }`,
 	}, nil, 1)
 
 	type result struct {
