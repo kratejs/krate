@@ -225,6 +225,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		}
 	}
 	linkRelativeImports(rep)
+	migrateNextFonts(rep)
 	rewriteNextModuleImports(rep, abs)
 	publicEnv := readPublicEnv(abs)
 	for k, v := range nextCfg.Env {
@@ -490,8 +491,6 @@ func applyManual(src string, kind FileKind) []string {
 		{"export function generateMetadata", "generateMetadata is not translated; render <Head> or use site config"},
 		{"getStaticProps", "getStaticProps is not supported; use build-time data or createResource"},
 		{"getServerSideProps", "getServerSideProps is not supported; use a server render mode or createResource"},
-		{"from 'next/font", "next/font is not migrated"},
-		{`from "next/font`, "next/font is not migrated"},
 		{"from 'next/server'", "next/server request/response helpers need a Request/Response migration"},
 		{`from "next/server"`, "next/server request/response helpers need a Request/Response migration"},
 		{"from 'next/legacy/image'", "next/legacy/image needs a manual Image migration"},

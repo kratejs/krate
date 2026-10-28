@@ -62,8 +62,8 @@ The first pass:
   `next/head` (Krate exposes those as globals);
 - translates static `next.config.*` redirects, rewrites, headers, `basePath`, and
   image breakpoints/formats/remote patterns into the generated config, maps
-  static root `metadata` to `site` config, and wraps static/synchronous
-  `generateMetadata` results in `<Head>`;
+  static root `metadata` to `site` config, and wraps static, synchronous, and
+  async `generateMetadata` results in `<Head>`;
 - rewrites `middleware.ts` to the standard `Request`/`Response` API, including a
   small `NextResponse` shim, static/local matcher checks, and cookie/IP/geo
   helpers; computed `config.matcher` arrays are checked at runtime;
@@ -72,6 +72,7 @@ The first pass:
 - generates `next/navigation` hook helpers, maps `next/headers` to
   `@krate/runtime/server`, rewrites common `next/server` API helpers, and maps
   simple `next/dynamic` loaders to React `lazy()`;
+- maps `next/font/google` to a generated helper and Google Fonts CSS;
 - creates `krate.config.ts` when the project has none, or merges missing
   Next-derived keys into an existing config (existing keys win);
 - merges/generates `tsconfig.json` for Krate JSX and route types;
@@ -86,10 +87,11 @@ krate migrate rollback .krate/migrate/nextjs-<timestamp>
 ```
 
 The migrator intentionally reports manual work instead of guessing:
-async `generateMetadata`, async/class default exports with metadata,
-`getStaticProps`/`getServerSideProps`, middleware response rewrites,
-`next/font`, route groups/parallel routes, `template.tsx` boundaries, unresolved relative imports,
-and function/plugin `next.config.*` files are not rewritten automatically. Resolve those before running `krate build`.
+async/class page defaults with metadata, `getStaticProps`/`getServerSideProps`,
+middleware response rewrites, local font files, `next/cache`, data-fetching
+patterns, parallel/intercepting routes, RSC boundaries, `template.tsx`,
+unresolved relative imports, and function/plugin `next.config.*` files are not
+rewritten automatically. Resolve those before running `krate build`.
 
 ## Steps
 

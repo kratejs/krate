@@ -157,8 +157,9 @@ rewritten. It strips `"use client"` and default imports for `next/link`,
 `middleware.ts` to the web `Request`/`Response` API, including static matchers
 and cookie/IP/geo shims. `next/navigation` hooks are generated into a
 compatibility helper, `next/headers` maps to `@krate/runtime/server`, and common
-`next/server` API helpers become `Request`/`Response`, and simple
-`next/dynamic` loaders become React `lazy()`. It generates
+`next/server` API helpers become `Request`/`Response`, simple `next/dynamic`
+loaders become React `lazy()`, and `next/font/google` imports use a generated
+helper/stylesheet. It generates
 `krate.config.ts` when missing, merges missing Next-derived keys into an existing
 config, merges/generates `tsconfig.json`, inlines `NEXT_PUBLIC_*` values, and
 reports everything it will not rewrite. With

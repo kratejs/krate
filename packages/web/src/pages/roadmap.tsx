@@ -127,7 +127,7 @@ const MIGRATION_PHASES = [
     tone: "now",
     status: "In progress",
     title: "Components and app semantics",
-    body: "React interop handles hooks and state. Remaining work: next/font, next/cache, data fetching, async metadata, parallel and intercepting routes, and RSC boundaries.",
+    body: "React interop handles hooks and state; migration covers next/navigation, next/headers, next/dynamic, next/font/google, async metadata, and error boundaries. Remaining: next/cache, data-fetching patterns, parallel/intercepting routes, and RSC boundaries.",
     exit: "Interactive migrated pages pass the same browser conformance suite as source pages.",
   },
   {

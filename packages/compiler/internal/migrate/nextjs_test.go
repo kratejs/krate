@@ -597,7 +597,7 @@ export default function Page() { return <h1>About</h1>; }
 	}
 }
 
-func TestDynamicGenerateMetadataStaysManual(t *testing.T) {
+func TestAsyncGenerateMetadataBecomesHead(t *testing.T) {
 	root := t.TempDir()
 	writeNextFile(t, root, "app/page.tsx", `export async function generateMetadata({ params }: any) {
   return { title: params.slug };
@@ -608,8 +608,12 @@ export default function Page() { return <h1>About</h1>; }
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasManual(rep, "app/page.tsx", "generateMetadata") {
-		t.Fatalf("dynamic generateMetadata should be manual: %+v", rep.Manual)
+	page := findPlan(rep, "src/pages/index.tsx")
+	if page == nil || !strings.Contains(string(page.Content), "<Suspense") || !strings.Contains(string(page.Content), "__krateMetadataCache") {
+		t.Fatalf("async generateMetadata not wrapped: %+v", page)
+	}
+	if hasManual(rep, "app/page.tsx", "generateMetadata") {
+		t.Fatalf("async generateMetadata should be handled: %+v", rep.Manual)
 	}
 }
 
@@ -772,6 +776,45 @@ export default function Page() {
 	helper := findPlan(rep, "src/migrated/next-navigation.ts")
 	if helper == nil || !strings.Contains(string(helper.Content), "export function usePathname") {
 		t.Fatalf("navigation helper missing: %+v", helper)
+	}
+}
+
+func TestNextFontRewrites(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `import { Inter } from "next/font/google";
+const inter = Inter({ subsets: ["latin"] });
+export default function Page() { return <p className={inter.className}>Hi</p>; }
+`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := findPlan(rep, "src/pages/index.tsx")
+	if page == nil || !strings.Contains(string(page.Content), `"../migrated/next-font"`) {
+		t.Fatalf("font import not rewritten: %+v", page)
+	}
+	helper := findPlan(rep, "src/migrated/next-font.ts")
+	if helper == nil || !strings.Contains(string(helper.Content), "export const Inter") {
+		t.Fatalf("font helper missing: %+v", helper)
+	}
+	css := findPlan(rep, "src/migrated/next-fonts.css")
+	if css == nil || !strings.Contains(string(css.Content), "fonts.googleapis.com") {
+		t.Fatalf("font css missing: %+v", css)
+	}
+}
+
+func TestLocalFontStaysManual(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `import localFont from "next/font/local";
+const font = localFont({ src: "./font.woff2" });
+export default function Page() { return <p className={font.className}>Hi</p>; }
+`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasManual(rep, "next/font/local", "local font files") {
+		t.Fatalf("local font manual item missing: %+v", rep.Manual)
 	}
 }
 

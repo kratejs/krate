@@ -192,9 +192,14 @@ func convertPageMetadata(rep *Report) {
 			head = pageMetadataHead(obj)
 		}
 		dynamicHelper := ""
+		asyncMeta := false
 		if head == "" && syncGenerateMetadata(f.Content) {
 			head = "<__KrateMetadata {...props} />"
 			dynamicHelper = generatedMetadataComponent
+		} else if head == "" && asyncGenerateMetadata(f.Content) {
+			head = "<Suspense fallback={null}><__KrateMetadata {...props} /></Suspense>"
+			dynamicHelper = generatedAsyncMetadataComponent
+			asyncMeta = true
 		}
 		if head == "" {
 			continue
@@ -216,8 +221,13 @@ func convertPageMetadata(rep *Report) {
 			continue
 		}
 		if dynamicHelper != "" {
+			if asyncMeta {
+				body = ensureReactImports(body, "Suspense", "use")
+				f.Rewrites = append(f.Rewrites, "wrapped async generateMetadata in Suspense/<Head>")
+			} else {
+				f.Rewrites = append(f.Rewrites, "wrapped dynamic generateMetadata in <Head>")
+			}
 			body += "\n" + dynamicHelper
-			f.Rewrites = append(f.Rewrites, "wrapped dynamic generateMetadata in <Head>")
 		} else {
 			f.Rewrites = append(f.Rewrites, "wrapped static page metadata in <Head>")
 		}
@@ -225,6 +235,20 @@ func convertPageMetadata(rep *Report) {
 		removeMetadataManual(rep, f.Source)
 		rep.Warnings = append(rep.Warnings, f.Source+": static metadata was moved into <Head>; the metadata export is left in place for review")
 	}
+}
+
+func ensureReactImports(src string, names ...string) string {
+	var missing []string
+	for _, name := range names {
+		re := regexp.MustCompile(`import\s*\{[^}]*\b` + regexp.QuoteMeta(name) + `\b[^}]*\}\s*from\s*["']react["']`)
+		if !re.MatchString(src) {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return src
+	}
+	return "import { " + strings.Join(missing, ", ") + " } from \"react\";\n" + src
 }
 
 func wrapPageWithHead(src, head string) (string, bool) {
@@ -347,6 +371,35 @@ func staticMetadataValue(e ast.Expr) bool {
 	return false
 }
 
+func asyncGenerateMetadata(src []byte) bool {
+	prog := parser.New(lexer.New(string(src)).Tokenize()).ParseProgram()
+	if prog == nil {
+		return false
+	}
+	for _, stmt := range prog.Body {
+		exp, ok := stmt.(*ast.ExportStmt)
+		if !ok || exp.Default {
+			continue
+		}
+		switch d := exp.Declaration.(type) {
+		case *ast.FnDecl:
+			if d.Name == "generateMetadata" && d.Async {
+				return true
+			}
+		case *ast.VarStmt:
+			for _, decl := range d.Decls {
+				if decl.Name != "generateMetadata" {
+					continue
+				}
+				if arrow, ok := decl.Init.(*ast.ArrowFn); ok && arrow.Async {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func syncGenerateMetadata(src []byte) bool {
 	prog := parser.New(lexer.New(string(src)).Tokenize()).ParseProgram()
 	if prog == nil {
@@ -378,6 +431,40 @@ func syncGenerateMetadata(src []byte) bool {
 
 const generatedMetadataComponent = `function __KrateMetadata(props: any) {
   const m = generateMetadata(props) || {};
+  const og = m.openGraph || {};
+  const tw = m.twitter || {};
+  const title = typeof m.title === "string" ? m.title : (m.title?.default || m.title?.absolute);
+  const ogImage = Array.isArray(og.images) ? (typeof og.images[0] === "string" ? og.images[0] : og.images[0]?.url) : (typeof og.images === "string" ? og.images : og.images?.url);
+  const twImage = Array.isArray(tw.images) ? (typeof tw.images[0] === "string" ? tw.images[0] : tw.images[0]?.url) : (typeof tw.images === "string" ? tw.images : tw.images?.url);
+  const canonical = m.alternates?.canonical;
+  return (
+    <Head>
+      {title ? <title>{title}</title> : null}
+      {m.description ? <meta name="description" content={m.description} /> : null}
+      {m.themeColor ? <meta name="theme-color" content={m.themeColor} /> : null}
+      {typeof m.robots === "string" ? <meta name="robots" content={m.robots} /> : null}
+      {canonical ? <link rel="canonical" href={canonical} /> : null}
+      {og.title ? <meta property="og:title" content={og.title} /> : null}
+      {og.description ? <meta property="og:description" content={og.description} /> : null}
+      {og.type ? <meta property="og:type" content={og.type} /> : null}
+      {og.url ? <meta property="og:url" content={og.url} /> : null}
+      {ogImage ? <meta property="og:image" content={ogImage} /> : null}
+      {tw.card ? <meta name="twitter:card" content={tw.card} /> : null}
+      {tw.site ? <meta name="twitter:site" content={tw.site} /> : null}
+      {tw.creator ? <meta name="twitter:creator" content={tw.creator} /> : null}
+      {tw.title ? <meta name="twitter:title" content={tw.title} /> : null}
+      {tw.description ? <meta name="twitter:description" content={tw.description} /> : null}
+      {twImage ? <meta name="twitter:image" content={twImage} /> : null}
+    </Head>
+  );
+}
+`
+
+const generatedAsyncMetadataComponent = `const __krateMetadataCache = new Map<string, any>();
+function __KrateMetadata(props: any) {
+  const key = JSON.stringify(props);
+  if (!__krateMetadataCache.has(key)) __krateMetadataCache.set(key, generateMetadata(props));
+  const m = use(__krateMetadataCache.get(key)) || {};
   const og = m.openGraph || {};
   const tw = m.twitter || {};
   const title = typeof m.title === "string" ? m.title : (m.title?.default || m.title?.absolute);
