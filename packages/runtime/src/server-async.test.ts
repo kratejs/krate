@@ -9,7 +9,7 @@ import {
   thenableRecord,
   type RequestContext,
 } from './request-context.js';
-import { Link, Suspense, jsx, renderToString, renderToStringAsync } from './server.js';
+import { Link, Suspense, clientBoundary, jsx, renderToString, renderToStringAsync } from './server.js';
 
 const REQUEST_KEY = Symbol.for('krate.request.store');
 
@@ -164,5 +164,44 @@ describe('render signals', () => {
     expect(redirectTarget(new Error('NEXT_REDIRECT:/b'))).toBe('/b');
     expect(redirectTarget(Object.assign(new Error('NEXT_REDIRECT'), { digest: 'NEXT_REDIRECT;replace;/c;307;' }))).toBe('/c');
     expect(redirectTarget(new Error('nope'))).toBe('');
+  });
+});
+
+describe('clientBoundary', () => {
+  function Counter(props: { start: number }) {
+    return props.start;
+  }
+  // A stand-in for the Preact server render of the client module.
+  const render = (_c: unknown, props: Record<string, unknown>, children: string | null) =>
+    `<button>${props.start}</button>${children ?? ''}`;
+
+  it('renders an island marker with serialized props and server-rendered children', async () => {
+    const Boundary = clientBoundary('m1', 'Counter', '/chunks/c.js', Counter, render) as any;
+    async function ServerPart() {
+      await tick();
+      return jsx('em', { children: 'from server' });
+    }
+    const html = await renderToStringAsync(jsx(Boundary, { start: 3, children: jsx(ServerPart, {}) }));
+    expect(html).toContain('<krate-island style="display:contents" data-module="m1" data-export="Counter" data-src="/chunks/c.js"');
+    expect(html).toContain('data-props="{&quot;start&quot;:3,&quot;__krateChildren&quot;:&quot;&lt;em&gt;from server&lt;/em&gt;&quot;}"');
+    expect(html).toContain('<button>3</button><em>from server</em></krate-island>');
+  });
+
+  it('passes server actions as references', async () => {
+    const action = Object.assign(async () => {}, { actionUrl: '/__krate/action/a1' });
+    const Boundary = clientBoundary('m1', 'Counter', '/c.js', Counter, render) as any;
+    const html = await renderToStringAsync(jsx(Boundary, { start: 1, onSave: action }));
+    expect(html).toContain('&quot;onSave&quot;:{&quot;__krateAction&quot;:&quot;/__krate/action/a1&quot;}');
+  });
+
+  it('rejects functions, class instances and JSX props with the prop path', async () => {
+    const Boundary = clientBoundary('m1', 'Counter', '/c.js', Counter, render) as any;
+    await expect(renderToStringAsync(jsx(Boundary, { onClick: () => {} }))).rejects.toThrow(/Prop `onClick` passed to client component <Counter> is a function/);
+    await expect(renderToStringAsync(jsx(Boundary, { opts: { when: new Date(0) } }))).rejects.toThrow(/Prop `opts.when` .* an instance of Date/);
+    await expect(renderToStringAsync(jsx(Boundary, { icon: jsx('i', {}) }))).rejects.toThrow(/only `children` can carry/);
+  });
+
+  it('returns non-function exports unchanged', () => {
+    expect(clientBoundary('m1', 'LIMIT', '/c.js', 5, render)).toBe(5);
   });
 });

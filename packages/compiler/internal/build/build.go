@@ -103,6 +103,10 @@ type PageResult struct {
 	// ServerExports lists the async server components rendered as regions of
 	// this page; the page server bundle exports each one (serverbundle.go).
 	ServerExports []ServerExport
+	// ClientBoundaries lists the "use client" modules in the module graph of a
+	// page that renders server components. The page server bundle wraps their
+	// exports in client boundaries (clientboundary.go).
+	ClientBoundaries []ClientBoundary
 }
 
 type Builder struct {
@@ -193,6 +197,11 @@ type Builder struct {
 	islandMu        sync.Mutex
 	islandImportMap string
 	preactChunks    map[string]string
+
+	// clientChunkMu guards clientChunks: "use client" module path -> URL of
+	// its hydration chunk, built once per build (clientboundary.go).
+	clientChunkMu sync.Mutex
+	clientChunks  map[string]string
 
 	// actions holds the discovered `"use server"` modules and their compiled
 	// bundles for this build. It is refreshed by prepareActions before pages.
@@ -953,7 +962,12 @@ func (b *Builder) BuildAll() error {
 	manifest.StaticOnlyRoutes = append([]string(nil), b.staticOnlyRoutes...)
 
 	// Compile server bundles for SSR/ISR/streaming pages
-	serverBundles := CompileServerBundles(results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+	serverBundles, serverBundleErrs := compileServerBundles(results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+	for _, err := range serverBundleErrs {
+		failureMessages = append(failureMessages, "  "+err.Error())
+		failureErrs = append(failureErrs, err)
+		errorCount++
+	}
 	if len(serverBundles) > 0 {
 		printf("  %s⚡%s Compiled %d server bundles\n", cCyan, cReset, len(serverBundles))
 		// Stage the bundled SSR renderer driver so `krate serve` runs it with
@@ -1628,6 +1642,10 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	if serverErr != nil {
 		return nil, "", serverErr
 	}
+	clientBoundaries, cbErr := b.prepareClientBoundaries(bundle, ann, serverPage)
+	if cbErr != nil {
+		return nil, "", cbErr
+	}
 	var (
 		tree       *irtree.ComponentTree
 		emitResult *renderer.EmitResult
@@ -1706,6 +1724,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		}
 	}
 	stopCompile()
+	if len(clientBoundaries) > 0 {
+		emitResult.ScriptHTML += clientIslandLoaderHTML
+	}
 
 	if len(emitResult.Errors) > 0 {
 		return nil, "", renderErrors(page, emitResult.Errors)
@@ -1826,6 +1847,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			GoBaked:           goBaked,
 			ServerPage:        serverPage,
 			ServerExports:     serverExportsOf(regions),
+			ClientBoundaries:  clientBoundaries,
 		}, bundle.CSS, nil
 	}
 
@@ -1947,6 +1969,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		GoBaked:           goBaked,
 		ServerPage:        serverPage,
 		ServerExports:     serverExportsOf(regions),
+		ClientBoundaries:  clientBoundaries,
 	}
 	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes)
 	return result, bundle.CSS, nil

@@ -120,30 +120,8 @@ export default function Feed() {
 	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
 		t.Fatal(err)
 	}
-	staged := stageServerRenderer(repoRoot, outDir)
-	if staged == "" {
-		t.Fatal("stageServerRenderer returned empty path")
-	}
-	port := freePort(t)
-	cmd := exec.Command(node, staged)
-	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("KRATE_SSR_PORT=%d", port),
-		fmt.Sprintf("KRATE_MANIFEST=%s", filepath.Join(outDir, "server-manifest.json")),
-		fmt.Sprintf("KRATE_ROOT=%s", root),
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting renderer: %v", err)
-	}
-	defer func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
-	base := fmt.Sprintf("http://localhost:%d", port)
-	if !waitHealth(t, base) {
-		t.Fatal("renderer did not become ready")
-	}
+	base, stop := startSidecar(t, node, repoRoot, root, outDir)
+	defer stop()
 
 	page := func(slug string) scFrame {
 		t.Helper()
@@ -204,4 +182,36 @@ export default function Feed() {
 	if strings.Contains(frames[0].HTML, "loading") {
 		t.Errorf("region must render the server component, not the fallback: %s", frames[0].HTML)
 	}
+}
+
+// startSidecar stages and boots the SSR sidecar for a built test project and
+// waits for its health endpoint.
+func startSidecar(t *testing.T, node, repoRoot, root, outDir string) (string, func()) {
+	t.Helper()
+	staged := stageServerRenderer(repoRoot, outDir)
+	if staged == "" {
+		t.Fatal("stageServerRenderer returned empty path")
+	}
+	port := freePort(t)
+	cmd := exec.Command(node, staged)
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("KRATE_SSR_PORT=%d", port),
+		fmt.Sprintf("KRATE_MANIFEST=%s", filepath.Join(outDir, "server-manifest.json")),
+		fmt.Sprintf("KRATE_ROOT=%s", root),
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting renderer: %v", err)
+	}
+	stop := func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}
+	base := fmt.Sprintf("http://localhost:%d", port)
+	if !waitHealth(t, base) {
+		stop()
+		t.Fatal("renderer did not become ready")
+	}
+	return base, stop
 }

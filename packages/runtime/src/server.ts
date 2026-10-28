@@ -319,6 +319,96 @@ export function Suspense(props: SuspenseProps): JSXNode {
 
 (Suspense as any).__krateSuspense = true;
 
+// Client boundaries ("use client" modules inside a server tree)
+
+type ClientRender = (component: unknown, props: Record<string, unknown>, childrenHTML: string | null) => string;
+
+function describeValue(v: unknown): string {
+  if (typeof v === "function") return "a function";
+  if (typeof v === "symbol") return "a symbol";
+  if (typeof v === "bigint") return "a bigint";
+  if (v && typeof v === "object") {
+    const ctor = (Object.getPrototypeOf(v) as { constructor?: { name?: string } } | null)?.constructor?.name;
+    return ctor ? `an instance of ${ctor}` : "a non-plain object";
+  }
+  return typeof v;
+}
+
+// serializeClientProp converts a prop crossing from the server to a client
+// component into JSON-safe data. Server actions become references the client
+// chunk turns back into callable proxies; anything else that JSON cannot carry
+// faithfully throws with the offending prop path.
+function serializeClientProp(v: unknown, path: string, component: string): unknown {
+  if (v === null || typeof v === "string" || typeof v === "boolean") return v;
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) throw clientPropError(path, component, `the number ${v}`);
+    return v;
+  }
+  if (v === undefined) return undefined;
+  if (isServerAction(v)) return { __krateAction: (v as any).actionUrl };
+  if (Array.isArray(v)) return v.map((x, i) => serializeClientProp(x, `${path}[${i}]`, component));
+  if (typeof v === "object") {
+    if (isElement(v) || "__raw" in (v as any)) {
+      throw clientPropError(path, component, "JSX", "only `children` can carry server-rendered JSX into a client component");
+    }
+    const proto = Object.getPrototypeOf(v);
+    if (proto !== Object.prototype && proto !== null) throw clientPropError(path, component, describeValue(v));
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      const sv = serializeClientProp(x, `${path}.${k}`, component);
+      if (sv !== undefined) out[k] = sv;
+    }
+    return out;
+  }
+  throw clientPropError(path, component, describeValue(v));
+}
+
+function clientPropError(path: string, component: string, what: string, hint?: string): Error {
+  return new Error(
+    `Prop \`${path}\` passed to client component <${component}> is ${what}, which cannot be sent from a server ` +
+      `component to the client. ` +
+      (hint || "Pass JSON-serializable data (strings, numbers, booleans, null, plain objects, arrays) or a server action; " +
+        "move event handlers and class instances into the client component."),
+  );
+}
+
+/**
+ * clientBoundary wraps an export of a `"use client"` module for the server
+ * bundle of a page that renders server components. The server renders the
+ * component's initial HTML (render) into a <krate-island> marker carrying its
+ * serialized props; the per-module client chunk at src hydrates it in the
+ * browser. Children are rendered on the server and passed as HTML.
+ */
+export function clientBoundary(
+  moduleId: string,
+  exportName: string,
+  src: string,
+  impl: unknown,
+  render: ClientRender,
+): unknown {
+  if (typeof impl !== "function") return impl;
+  const name = (impl as any).displayName || (impl as any).name || exportName;
+  const Boundary = async (props: Record<string, any>) => {
+    const { children, ...rest } = props || {};
+    const data: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(rest)) {
+      if (k === "key") continue;
+      const sv = serializeClientProp(v, k, name);
+      if (sv !== undefined) data[k] = sv;
+    }
+    const hasChildren = children != null && !(Array.isArray(children) && children.length === 0);
+    const childrenHTML = hasChildren ? await renderToStringAsync(children) : null;
+    if (childrenHTML !== null) data.__krateChildren = childrenHTML;
+    const html = render(impl, data, childrenHTML);
+    return raw(
+      `<krate-island style="display:contents" data-module="${escapeHTML(moduleId)}" data-export="${escapeHTML(exportName)}" ` +
+        `data-src="${escapeHTML(src)}" data-props="${escapeHTML(JSON.stringify(data))}">${html}</krate-island>`,
+    );
+  };
+  Object.defineProperty(Boundary, "name", { value: name });
+  return Boundary;
+}
+
 // Built-in Components (server stubs)
 
 // Head - renders children into the page head at build time.

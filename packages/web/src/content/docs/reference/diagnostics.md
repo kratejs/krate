@@ -331,6 +331,36 @@ A page that contains an async component cannot be fully baked at build time. Kra
 
 A server component used from a synchronous page renders as its own request-time region, so its props are fixed when the page shell is built: they must be literals, module constants or route params, and it cannot receive children. Make the page itself `async` (the whole page then renders per request) or pass constant props.
 
+### KR7110
+
+**Client-only API used in a server component**
+
+Components rendered by a server component (an async component) render once per request on the server and ship no JavaScript, so hooks such as useState/useEffect, Krate signals and event handlers cannot work there. Move the interactive part into a module that starts with `"use client"`; it is server-rendered and then hydrated in the browser.
+
+### KR7111
+
+**Function prop passed from a server component to a client component**
+
+Props crossing from a server component to a `"use client"` component are serialized to JSON. Functions (other than server actions), class instances and symbols cannot be sent. Define the handler inside the client component, or pass a server action. The same check runs at request time for values computed while rendering.
+
+### KR7112
+
+**Client component imports a server-only module**
+
+A module that imports `server-only` must never reach the browser, but a `"use client"` module (directly or through its imports) imports it, so it would be bundled into the client chunk. Import it from a server component instead and pass the data as props.
+
+### KR7113
+
+**Async component in a client module**
+
+Components in a `"use client"` module run in the browser and cannot be async. Move the async component to a module without the directive (it becomes a server component).
+
+### KR7114
+
+**Client module exports cannot be listed**
+
+Krate wraps each export of a `"use client"` module in a client boundary, so it must know the export names. `export * from` cannot be enumerated: list the re-exported names explicitly (`export { A, B } from "./x"`).
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

@@ -266,19 +266,21 @@ func loaderForPath(p string) api.Loader {
 // compiled page bundle failed to export (esbuild drops unresolved TypeScript
 // re-exports silently), so the gap is visible at build time and not only as a
 // 500 from the sidecar at request time.
-func reportMissingServerExports(page *PageResult, bundlePath string) {
+func reportMissingServerExports(page *PageResult, bundlePath string) error {
 	if len(page.ServerExports) == 0 {
-		return
+		return nil
 	}
 	data, err := os.ReadFile(bundlePath)
 	if err != nil {
-		return
+		return err
 	}
 	for _, e := range page.ServerExports {
 		if !strings.Contains(string(data), e.Key) {
 			fmt.Fprintf(os.Stderr, "  %sServer bundle error (%s):%s server component %s from %s could not be exported; declare it as a top-level function or const\n", cRed, page.SourcePath, cReset, e.Name, e.SourcePath)
+			return fmt.Errorf("server component %s from %s could not be exported from the page bundle", e.Name, e.SourcePath)
 		}
 	}
+	return nil
 }
 
 // topLevelAwaitError reports a module-level `await` in a page whose body is

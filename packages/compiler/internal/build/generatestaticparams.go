@@ -513,6 +513,10 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if serverErr != nil {
 		return nil, "", serverErr
 	}
+	clientBoundaries, cbErr := b.prepareClientBoundaries(bundle, ann, serverPage)
+	if cbErr != nil {
+		return nil, "", cbErr
+	}
 	var (
 		tree       *irtree.ComponentTree
 		emitResult *renderer.EmitResult
@@ -552,6 +556,10 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 			emitResult.HTML = substituteGoRenders(emitResult.HTML, rendered)
 			goBaked = goBakedMap(emitResult.GoRenders, rendered)
 		}
+	}
+
+	if len(clientBoundaries) > 0 {
+		emitResult.ScriptHTML += clientIslandLoaderHTML
 	}
 
 	// Compile-time reactive dependency validation. Surfaced as warnings so
@@ -674,7 +682,8 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		Regions:     regions,
 		GoBaked:     goBaked,
 
-		ServerPage:    serverPage,
-		ServerExports: serverExportsOf(regions),
+		ServerPage:       serverPage,
+		ServerExports:    serverExportsOf(regions),
+		ClientBoundaries: clientBoundaries,
 	}, bundle.CSS, nil
 }

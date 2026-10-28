@@ -13,6 +13,16 @@ const (
 	CodeServerComponentStreaming Code = "KR7104"
 	// CodeServerComponentProps: a server component region needs build-time props.
 	CodeServerComponentProps Code = "KR7105"
+	// CodeClientAPIInServer: hooks, signals or event handlers in a server tree.
+	CodeClientAPIInServer Code = "KR7110"
+	// CodeClientPropNotSerializable: a function prop crosses to a client component.
+	CodeClientPropNotSerializable Code = "KR7111"
+	// CodeServerOnlyInClient: a client boundary imports a server-only module.
+	CodeServerOnlyInClient Code = "KR7112"
+	// CodeAsyncClientComponent: an async component in a "use client" module.
+	CodeAsyncClientComponent Code = "KR7113"
+	// CodeClientBoundaryExports: a "use client" module's exports cannot be listed.
+	CodeClientBoundaryExports Code = "KR7114"
 )
 
 func init() {
@@ -53,6 +63,42 @@ func init() {
 				"region, so its props are fixed when the page shell is built: they must be literals, " +
 				"module constants or route params, and it cannot receive children. Make the page itself " +
 				"`async` (the whole page then renders per request) or pass constant props.",
+		},
+		CodeInfo{
+			Code:  CodeClientAPIInServer,
+			Title: "Client-only API used in a server component",
+			Explanation: "Components rendered by a server component (an async component) render once per request " +
+				"on the server and ship no JavaScript, so hooks such as useState/useEffect, Krate signals and " +
+				"event handlers cannot work there. Move the interactive part into a module that starts with " +
+				"`\"use client\"`; it is server-rendered and then hydrated in the browser.",
+		},
+		CodeInfo{
+			Code:  CodeClientPropNotSerializable,
+			Title: "Function prop passed from a server component to a client component",
+			Explanation: "Props crossing from a server component to a `\"use client\"` component are serialized " +
+				"to JSON. Functions (other than server actions), class instances and symbols cannot be sent. " +
+				"Define the handler inside the client component, or pass a server action. The same check runs " +
+				"at request time for values computed while rendering.",
+		},
+		CodeInfo{
+			Code:  CodeServerOnlyInClient,
+			Title: "Client component imports a server-only module",
+			Explanation: "A module that imports `server-only` must never reach the browser, but a " +
+				"`\"use client\"` module (directly or through its imports) imports it, so it would be bundled " +
+				"into the client chunk. Import it from a server component instead and pass the data as props.",
+		},
+		CodeInfo{
+			Code:  CodeAsyncClientComponent,
+			Title: "Async component in a client module",
+			Explanation: "Components in a `\"use client\"` module run in the browser and cannot be async. " +
+				"Move the async component to a module without the directive (it becomes a server component).",
+		},
+		CodeInfo{
+			Code:  CodeClientBoundaryExports,
+			Title: "Client module exports cannot be listed",
+			Explanation: "Krate wraps each export of a `\"use client\"` module in a client boundary, so it must " +
+				"know the export names. `export * from` cannot be enumerated: list the re-exported names " +
+				"explicitly (`export { A, B } from \"./x\"`).",
 		},
 	)
 }

@@ -151,3 +151,14 @@ func TopLevelAwait(prog *ast.Program) *ast.AwaitExpr {
 	})
 	return found
 }
+
+// WalkAST visits every node reachable from node in depth-first order; visit
+// returning false skips that node's subtree.
+func WalkAST(node any, visit func(any) bool) {
+	walkASTPruned(reflect.ValueOf(node), visit)
+}
+
+// JSXElementNames returns the tag names of every JSX element under node.
+func JSXElementNames(node any) []string {
+	return jsxElementNames(node)
+}
