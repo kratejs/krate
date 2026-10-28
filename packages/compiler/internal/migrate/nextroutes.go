@@ -98,6 +98,15 @@ func rewriteNextModuleImports(rep *Report, root string) {
 				rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: "next/dynamic import could not be rewritten automatically", Hint: "declare a lazy component with React lazy()"})
 			}
 		}
+		if strings.Contains(src, "next/cache") {
+			rewritten, rewrites, manual := rewriteNextCache(src)
+			src = rewritten
+			f.Rewrites = append(f.Rewrites, rewrites...)
+			for _, item := range manual {
+				item.Source = f.Source
+				rep.Manual = append(rep.Manual, item)
+			}
+		}
 		if strings.Contains(src, "next/headers") {
 			for _, unsupported := range []string{"draftMode"} {
 				if strings.Contains(src, unsupported) {
