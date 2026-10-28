@@ -84,7 +84,7 @@ func detectDataCacheUsage(prog *ast.Program) dataCacheUsage {
 		if !ok {
 			return true
 		}
-		name := calleeName(call.Callee)
+		name := dataCalleeName(call.Callee)
 		switch {
 		case name == "fetch":
 			if len(call.Args) >= 2 {
@@ -108,9 +108,9 @@ func detectDataCacheUsage(prog *ast.Program) dataCacheUsage {
 	return u
 }
 
-// calleeName returns "fetch" for fetch / globalThis.fetch / window.fetch and
+// dataCalleeName returns "fetch" for fetch / globalThis.fetch / window.fetch and
 // the identifier name for a plain identifier callee.
-func calleeName(e ast.Expr) string {
+func dataCalleeName(e ast.Expr) string {
 	switch v := e.(type) {
 	case *ast.Identifier:
 		return v.Name
