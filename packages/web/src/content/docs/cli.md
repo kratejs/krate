@@ -150,13 +150,18 @@ krate migrate rollback .krate/migrate/nextjs-20261027-190904
 The Next.js migrator copies App Router and Pages Router pages, layouts, loading
 and 404 files, and API route handlers into `src/pages` and `src/api`. App-local
 relative imports are copied under `src/migrated/` and their specifiers are
-rewritten. It strips `"use client"` and default imports for `next/link`,
-`next/image`, and `next/head` (Krate provides those as globals), translates static
+rewritten. It keeps `"use client"` (Krate honors it as a client boundary inside
+server component trees) and strips default imports for `next/link`,
+`next/image`, and `next/head` (Krate provides those as globals), keeps route
+groups, `@slot` directories, `default.tsx` and intercepting `(.)x` segments in
+place (the file router understands them), turns `template.tsx` into
+`_template.tsx`, maps `next/cache` to `@krate/runtime/server`, translates static
 `next.config.*` redirects/rewrites/headers/basePath/images, maps static root metadata to
 `site` config, wraps static page metadata in `<Head>`, and rewrites
 `middleware.ts` to the web `Request`/`Response` API, including static matchers
 and cookie/IP/geo shims. `next/navigation` hooks are generated into a
-compatibility helper, `next/headers` maps to `@krate/runtime/server`, and common
+compatibility helper on the Krate router (`notFound`/`redirect` get a hook-free
+server helper), `next/headers` maps to `@krate/runtime/server`, and common
 `next/server` API helpers become `Request`/`Response`, simple `next/dynamic`
 loaders become React `lazy()`, and `next/font/google` imports use a generated
 helper/stylesheet. It generates

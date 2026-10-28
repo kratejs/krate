@@ -24,7 +24,13 @@ signals.
 | `app/blog/[slug]/page.tsx` | `src/pages/blog/[slug].tsx` |
 | `layout.tsx` | `_layout.tsx` (nearest wins; stacks) |
 | `generateStaticParams` | `generateStaticParams` (same shape) |
-| `export const revalidate` | `export const revalidate` (ISR) |
+| `export const revalidate` / `dynamic` | `export const revalidate` / `dynamic` (ISR, SSR) |
+| `async` server components, `await fetch()` | `async` components render per request on the SSR sidecar; see [Server Components](/docs/features/server-components/) |
+| `fetch(url, { next: { tags, revalidate } })`, `unstable_cache` | same, cached and tagged by the runtime; see [Caching and Revalidation](/docs/guides/caching-and-revalidation/) |
+| `revalidatePath` / `revalidateTag` (`next/cache`) | same names from `@krate/runtime/server` |
+| `"use client"` | kept: a client boundary inside server component trees |
+| `template.tsx` | `_template.tsx` (remounts on every navigation) |
+| `(group)`, `@slot`, `default.tsx`, `(.)x` | same directory names under `src/pages`; see [Routing](/docs/core-concepts/routing/) |
 | `next/link` | global `<Link>` (or `<a data-krate-link>`) |
 | `next/image` | global `<Image>` |
 | `next/head` | global `<Head>` |
@@ -53,13 +59,16 @@ Next.js dependencies are left in place until the migrated app builds cleanly.
 
 The first pass:
 
-- copies `app/**/page.*`, `pages/**/*`, layouts, `loading` files,
-  root `not-found`, and API handlers into `src/pages/` and `src/api/`;
+- copies `app/**/page.*`, `pages/**/*`, layouts, templates, `loading` files,
+  root `not-found`, and API handlers into `src/pages/` and `src/api/`, keeping
+  route groups, `@slot` directories, slot `default.tsx` files and intercepting
+  `(.)x` segments in place (the Krate file router understands them);
 - copies Pages Router `_app` and wraps it as the root `_layout.tsx` shell;
 - copies app-local relative imports under `src/migrated/` and rewrites the
   migrated route imports to point at them;
-- strips `"use client"` and default imports from `next/link`, `next/image`, and
-  `next/head` (Krate exposes those as globals);
+- keeps `"use client"` (client boundary inside server component trees) and strips
+  default imports from `next/link`, `next/image`, and `next/head` (Krate exposes
+  those as globals);
 - translates static `next.config.*` redirects, rewrites, headers, `basePath`, and
   image breakpoints/formats/remote patterns into the generated config, maps
   static root `metadata` to `site` config, and wraps static, synchronous, and
@@ -69,8 +78,9 @@ The first pass:
   helpers; computed `config.matcher` arrays are checked at runtime;
 - strips root-layout `<html>`/`<body>` wrappers and generates error-boundary
   layouts for `error.tsx`;
-- generates `next/navigation` hook helpers, maps `next/headers` to
-  `@krate/runtime/server`, rewrites common `next/server` API helpers, and maps
+- generates `next/navigation` hook helpers on the Krate router (with a hook-free
+  server helper for `notFound`/`redirect`), maps `next/headers` and `next/cache`
+  to `@krate/runtime/server`, rewrites common `next/server` API helpers, and maps
   simple `next/dynamic` loaders to React `lazy()`;
 - maps `next/font/google` to a generated helper and Google Fonts CSS;
 - creates `krate.config.ts` when the project has none, or merges missing
@@ -87,11 +97,18 @@ krate migrate rollback .krate/migrate/nextjs-<timestamp>
 ```
 
 The migrator intentionally reports manual work instead of guessing:
-async/class page defaults with metadata, `getStaticProps`/`getServerSideProps`,
-middleware response rewrites, local font files, `next/cache`, data-fetching
-patterns, parallel/intercepting routes, RSC boundaries, `template.tsx`,
-unresolved relative imports, and function/plugin `next.config.*` files are not
-rewritten automatically. Resolve those before running `krate build`.
+async/class page defaults with `generateMetadata`, `getStaticProps`/
+`getServerSideProps`, middleware response rewrites, local font files, async
+layouts (move the data fetching into an async child component), `next/cache`
+exports without an equivalent (`updateTag`, `cacheLife`, `cacheTag`, `"use cache"`),
+route segment config without an equivalent (`runtime`, `preferredRegion`,
+`fetchCache`, `maxDuration`), `useParams`/`useSelectedLayoutSegment(s)`, a
+`default.tsx` outside a parallel-route slot, nested `not-found`, unresolved
+relative imports, and function/plugin `next.config.*` files are not rewritten
+automatically. Resolve those before running `krate build`.
+
+Client components rendered inside async server components hydrate with Preact:
+`--update-package` adds it, otherwise install `preact`.
 
 ## Steps
 
@@ -128,9 +145,11 @@ rewritten automatically. Resolve those before running `krate build`.
 5. **Links & images.** Replace `next/link` / `next/image` imports with the
    globals `<Link href="…">` / `<Image src width height alt>`.
 
-6. **Data fetching.** Replace `fetch` in server components with
-   `createResource` or build-time reads; see
-   [Data Fetching](/docs/features/data-fetching/).
+6. **Data fetching.** `async` server components that `await fetch()` work as
+   they do in Next.js (they render per request); tag and cache the reads with
+   `fetch(url, { next: { tags, revalidate } })` and invalidate them from server
+   actions with `revalidateTag` / `revalidatePath`. For client-side data use
+   `createResource`; see [Data Fetching](/docs/features/data-fetching/).
 
 7. **Server actions & API routes.** Move `"use server"` functions to action modules (see [Server Actions](/docs/guides/server-actions/)). Move `app/api/*/route.ts` handlers to `src/api/*.ts`
    exporting `GET`/`POST`/etc. Prefer **Go routes** (`src/api/*.go`) for hot
@@ -160,7 +179,9 @@ aid, not a full React runtime — see
 ## What is intentionally different
 
 - No `getServerSideProps` / `getStaticProps` — use render modes
-  (`export const config = { ssr: true }`) and `createResource`.
+  (`export const config = { ssr: true }`, or Next-style `export const dynamic` /
+  `revalidate`) and async server components.
+- Catch-all params (`[...slug]`) are a `/`-joined string, not `string[]`.
 - React context is supported through React interop; module-level signals and
   props are still the lowest-overhead option.
 - Streaming uses `<Suspense>` with region rendering (see
