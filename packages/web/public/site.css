@@ -244,6 +244,17 @@ video {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 1px 2px rgba(234, 88, 12, 0.35);
 }
 
+.site-logo-image {
+    display: block;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    object-fit: contain;
+}
+
 .site-nav {
     display: flex;
     align-items: center;

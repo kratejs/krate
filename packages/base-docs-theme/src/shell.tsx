@@ -25,8 +25,8 @@ export interface SiteFooterColumn {
 }
 
 export interface SiteConfig {
-  /** Brand block in the header. `logo` is a text glyph (e.g. "k"). */
-  brand?: { text: string; href?: string; logo?: string };
+  /** Brand block in the header. `logo` is a text glyph (e.g. "k"); `logoUrl` is an image. */
+  brand?: { text: string; href?: string; logo?: string; logoUrl?: string };
   /** Primary navigation links, shown in the header on every page. */
   nav?: SiteNavLink[];
   /** Social icon links (header + footer). */
@@ -46,7 +46,7 @@ export function defineSite(config: SiteConfig): SiteConfig {
   return config;
 }
 
-const DEFAULT_BRAND = { text: "krate", href: "/", logo: "k" };
+const DEFAULT_BRAND: NonNullable<SiteConfig["brand"]> = { text: "krate", href: "/", logo: "k" };
 
 export function ThemeToggle(props: { storageKey?: string }) {
   const storageKey = props.storageKey || "theme";
@@ -101,7 +101,13 @@ export function SiteHeader(props: { site: SiteConfig; currentPath?: string; chil
   return (
     <header class="site-navbar">
       <Link className="site-navbar-brand" href={brand.href || "/"}>
-        {brand.logo ? <span class="site-logo">{brand.logo}</span> : <></>}
+        {brand.logoUrl ? (
+          <img class="site-logo site-logo-image" src={brand.logoUrl} alt="" aria-hidden="true" />
+        ) : brand.logo ? (
+          <span class="site-logo">{brand.logo}</span>
+        ) : (
+          <></>
+        )}
         <span class="site-navbar-name">{brand.text}</span>
       </Link>
       <nav class="site-nav">

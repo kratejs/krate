@@ -1,7 +1,7 @@
 import { SiteHeader, SiteFooter, ThemeToggle } from "@krate/base-docs-theme/shell";
 
 const site = {
-  brand: { text: "krate", href: "/", logo: "k" },
+  brand: { text: "krate", href: "/", logoUrl: "/logo.svg" },
   nav: [
     { label: "Docs", href: "/docs/" },
     { label: "Plugins", href: "/docs/features/plugins/" },
@@ -51,6 +51,7 @@ export default function SiteLayout(props: { children: any }) {
   return (
     <div class="site-shell">
       <Head>
+        <link rel="icon" href="/logo.svg" type="image/svg+xml" />
         <link rel="manifest" href="/site.webmanifest" />
         <link rel="preload" href="/fonts/inter.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
         <link rel="preload" href="/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
