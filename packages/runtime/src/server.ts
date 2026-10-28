@@ -3,6 +3,8 @@
 
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
+export { revalidatePath, revalidateTag, unstable_cache, unstable_noStore } from './cache.js';
+export type { RevalidatePathType, UnstableCacheOptions } from './cache.js';
 
 // Signal (server: returns initial value, no reactivity)
 

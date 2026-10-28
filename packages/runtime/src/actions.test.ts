@@ -458,4 +458,30 @@ describe('server action proxies', () => {
     await __krateAction('a4')();
     expect(nav).toHaveBeenCalledWith('/next');
   });
+
+  it('dispatches krate:revalidate when the action revalidated server caches', async () => {
+    const revalidation = { paths: [{ path: '/posts', type: 'page' }], tags: ['posts'] };
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true, result: 1, revalidated: true, revalidation })));
+    const seen: unknown[] = [];
+    const onRevalidate = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener('krate:revalidate', onRevalidate);
+    try {
+      await expect(__krateAction('a5')()).resolves.toBe(1);
+      expect(seen).toEqual([revalidation]);
+    } finally {
+      window.removeEventListener('krate:revalidate', onRevalidate);
+    }
+  });
+
+  it('does not dispatch krate:revalidate for actions that revalidated nothing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true, result: null })));
+    const handler = vi.fn();
+    window.addEventListener('krate:revalidate', handler);
+    try {
+      await __krateAction('a6')();
+      expect(handler).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('krate:revalidate', handler);
+    }
+  });
 });

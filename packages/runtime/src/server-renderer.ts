@@ -7,7 +7,30 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { pathToFileURL } from "node:url";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { timingSafeEqual } from "node:crypto";
 import { renderToString } from "./server.js";
+import { cacheRuntime, installRenderStore, patchFetch, withCacheScope, type CacheScope } from "./cache-scope.js";
+
+// Render cache scopes (tags / revalidate windows read during a render) and the
+// Next-style fetch data cache. Installed once per process; page bundles share
+// the state through globalThis.
+installRenderStore(new AsyncLocalStorage<CacheScope>());
+patchFetch();
+
+// Shared secret for the mutating internal endpoints (/__krate/ssr/revalidate,
+// /refresh, /invalidate, /cache-invalidate). Krate passes it from the Go host;
+// a renderer started by hand without it keeps the endpoints open.
+const INTERNAL_SECRET = process.env.KRATE_INTERNAL_SECRET || "";
+
+function internalAuthorized(req: http.IncomingMessage): boolean {
+  if (!INTERNAL_SECRET) return true;
+  const got = req.headers["x-krate-internal"];
+  if (typeof got !== "string") return false;
+  const a = Buffer.from(got);
+  const b = Buffer.from(INTERNAL_SECRET);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 // Cluster across cores: page/region rendering is independent per request, so N
 // workers scale it past a single core. Krate sets KRATE_SSR_WORKERS from
@@ -33,6 +56,43 @@ if (isClusterPrimary) {
     setTimeout(() => cluster.fork(), 100);
   });
   console.log(`[krate-ssr] primary supervising ${SSR_WORKERS} workers`);
+
+  // Internal-op fan-out: a worker that receives a revalidation asks the
+  // primary to apply it on every live worker (each has its own caches) and
+  // answers its HTTP request only once all of them acknowledged. A worker that
+  // exits mid-broadcast counts as done: its caches died with it.
+  interface Broadcast {
+    origin: { send(msg: unknown): boolean; isConnected(): boolean };
+    remaining: Set<number>;
+    results: unknown[];
+  }
+  const broadcasts = new Map<string, Broadcast>();
+  const finish = (id: string) => {
+    const b = broadcasts.get(id);
+    if (!b || b.remaining.size > 0) return;
+    broadcasts.delete(id);
+    if (b.origin.isConnected()) b.origin.send({ type: "krate:bcast-done", id, results: b.results });
+  };
+  cluster.on("message", (worker, msg: any) => {
+    if (!msg || typeof msg !== "object") return;
+    if (msg.type === "krate:bcast") {
+      const live = Object.values(cluster.workers || {}).filter((w) => w && w.isConnected()) as any[];
+      broadcasts.set(msg.id, { origin: worker, remaining: new Set(live.map((w) => w.id)), results: [] });
+      for (const w of live) w.send({ type: "krate:apply", id: msg.id, op: msg.op, payload: msg.payload });
+      finish(msg.id);
+    } else if (msg.type === "krate:applied") {
+      const b = broadcasts.get(msg.id);
+      if (!b) return;
+      b.results.push(msg.result);
+      b.remaining.delete(worker.id);
+      finish(msg.id);
+    }
+  });
+  cluster.on("exit", (worker) => {
+    for (const [id, b] of broadcasts) {
+      if (b.remaining.delete(worker.id)) finish(id);
+    }
+  });
 }
 
 // Force TCP_NODELAY on socket to prevent Nagle buffering chunks together.
@@ -80,6 +140,12 @@ interface CacheEntry {
   // time-based background refresh can regenerate it without evicting it.
   params?: Record<string, string>;
   query?: Record<string, string>;
+  // tags the render read (fetch next.tags / unstable_cache tags), so
+  // revalidateTag can find the entry.
+  tags?: string[];
+  // revalidate is the smallest window a read declared; it shortens the
+  // page's ISR interval for this entry.
+  revalidate?: number;
 }
 
 interface RenderRequest {
@@ -124,6 +190,7 @@ function variantKey(req: { route: string; params?: Record<string, string>; query
 
 class ISRCache {
   private cache = new Map<string, CacheEntry>();
+  private byTag = new Map<string, Set<string>>();
   private maxSize: number;
   private revalidationIntervals = new Map<string, number>(); // route → seconds
 
@@ -140,28 +207,83 @@ class ISRCache {
   }
 
   set(key: string, entry: CacheEntry) {
+    if (this.cache.has(key)) this.delete(key);
     if (this.cache.size >= this.maxSize) {
       const oldest = this.cache.keys().next().value;
-      if (oldest) this.cache.delete(oldest);
+      if (oldest) this.delete(oldest);
     }
     this.cache.set(key, entry);
+    for (const t of entry.tags || []) {
+      let keys = this.byTag.get(t);
+      if (!keys) this.byTag.set(t, (keys = new Set()));
+      keys.add(key);
+    }
+  }
+
+  delete(key: string): boolean {
+    const entry = this.cache.get(key);
+    if (!entry) return false;
+    this.cache.delete(key);
+    for (const t of entry.tags || []) {
+      const keys = this.byTag.get(t);
+      if (keys) {
+        keys.delete(key);
+        if (keys.size === 0) this.byTag.delete(t);
+      }
+    }
+    return true;
+  }
+
+  get size(): number {
+    return this.cache.size;
   }
 
   isStale(key: string): boolean {
     const entry = this.cache.get(key);
     const route = key.split("?")[0].split("#")[0];
-    const interval = this.revalidationIntervals.get(route);
+    let interval = this.revalidationIntervals.get(route) || 0;
+    if (entry && entry.revalidate && entry.revalidate > 0 && (!interval || entry.revalidate < interval)) {
+      interval = entry.revalidate;
+    }
     if (!entry || !interval) return false;
     return (Date.now() - entry.timestamp) / 1000 > interval;
   }
 
   // deleteRoute removes every variant of a route (used by revalidation/invalidation).
-  deleteRoute(route: string) {
+  deleteRoute(route: string): number {
+    let n = 0;
     for (const key of [...this.cache.keys()]) {
       if (key === route || key.startsWith(route + "?") || key.startsWith(route + "#")) {
-        this.cache.delete(key);
+        if (this.delete(key)) n++;
       }
     }
+    return n;
+  }
+
+  // deleteVariant removes one params variant of a route (every query variant
+  // of it), e.g. /blog/[slug] with {slug: "a"} for revalidatePath("/blog/a").
+  deleteVariant(route: string, params: Record<string, string>): number {
+    const base = variantKey({ route, params });
+    let n = 0;
+    for (const key of [...this.cache.keys()]) {
+      if (key === base || key.startsWith(base + "#")) {
+        if (this.delete(key)) n++;
+      }
+    }
+    return n;
+  }
+
+  // deleteTags removes every entry whose render read one of tags.
+  deleteTags(tags: string[]): number {
+    let n = 0;
+    for (const t of tags) {
+      const keys = this.byTag.get(t);
+      if (!keys) continue;
+      for (const key of [...keys]) {
+        if (this.delete(key)) n++;
+      }
+    }
+    return n;
   }
 
   // entriesForRoute returns a snapshot of the cached variants for a route so a
@@ -186,11 +308,13 @@ class ISRCache {
     if (!data || !Array.isArray(data.entries)) return;
     for (const e of data.entries) {
       if (e && typeof e.key === "string" && typeof e.html === "string") {
-        this.cache.set(e.key, {
+        this.set(e.key, {
           html: e.html,
           timestamp: typeof e.timestamp === "number" ? e.timestamp : Date.now(),
           params: e.params && typeof e.params === "object" ? e.params : undefined,
           query: e.query && typeof e.query === "object" ? e.query : undefined,
+          tags: Array.isArray(e.tags) ? e.tags.filter((t: unknown) => typeof t === "string") : undefined,
+          revalidate: typeof e.revalidate === "number" ? e.revalidate : undefined,
         });
       }
     }
@@ -234,22 +358,28 @@ function isrCachePath(): string {
   return isrCacheFile || path.join(root, "dist", ".krate", "isr-cache.json");
 }
 
+function persistIsrNow() {
+  if (SSR_WORKERS > 1) return;
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  try {
+    const data = isrCache.serialize();
+    const file = isrCachePath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(data));
+  } catch (err: any) {
+    console.error("[krate-ssr] ISR cache persist failed:", err.message);
+  }
+}
+
 function scheduleIsrPersist() {
   // Clustered: multiple workers would race on the same cache file; keep the ISR
   // cache in memory only.
   if (SSR_WORKERS > 1) return;
   if (persistTimer) clearTimeout(persistTimer);
-  persistTimer = setTimeout(() => {
-    persistTimer = null;
-    try {
-      const data = isrCache.serialize();
-      const file = isrCachePath();
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, JSON.stringify(data));
-    } catch (err: any) {
-      console.error("[krate-ssr] ISR cache persist failed:", err.message);
-    }
-  }, 1000);
+  persistTimer = setTimeout(persistIsrNow, 1000);
 }
 
 function loadIsrCache() {
@@ -258,7 +388,7 @@ function loadIsrCache() {
     if (fs.existsSync(file)) {
       const data = JSON.parse(fs.readFileSync(file, "utf-8"));
       isrCache.hydrate(data);
-      const n = (isrCache as any).cache.size;
+      const n = isrCache.size;
       if (n > 0) console.log(`[krate-ssr] Loaded ${n} persisted ISR entries`);
     }
   } catch (err: any) {
@@ -338,23 +468,30 @@ async function renderFresh(page: ManifestPage, req: RenderRequest): Promise<Rend
       return { html: "", status: 500 };
     }
 
-    const jsxNode = Component(buildProps(req));
+    // The render runs in a cache scope that records the tags / revalidate
+    // windows its data reads declared (fetch next options, unstable_cache).
     // Bound the render. renderToString is synchronous, so a page that blocks
     // would block the sidecar's event loop regardless; the timeout still
     // protects the request path when rendering is async (suspense/resource).
-    const html = await withRenderTimeout(Promise.resolve(renderToString(jsxNode)));
+    const { result: html, scope, invalidated } = await withRenderTimeout(
+      withCacheScope(page.route, async () => renderToString(await Component(buildProps(req)))),
+    );
 
     const response: RenderResponse = {
       html,
       status: 200,
     };
 
-    if (page.mode === "isr") {
+    // An uncacheable read (no-store) keeps the render out of the ISR cache, and
+    // a revalidation that landed mid-render means the HTML may be stale.
+    if (page.mode === "isr" && !scope.noStore && !invalidated) {
       isrCache.set(variantKey(req), {
         html,
         timestamp: Date.now(),
         params: req.params,
         query: req.query,
+        tags: scope.tags.size ? [...scope.tags] : undefined,
+        revalidate: scope.revalidate || undefined,
       });
       scheduleIsrPersist();
     }
@@ -510,7 +647,15 @@ function regionProps(region: RegionMeta, req: RenderRequest): Record<string, any
 // Region ISR cache: region-level stale-while-revalidate, separate from the
 // page ISR cache. Region HTML only depends on the baked props, so it is fully
 // determined by (route, region id, variant) and cacheable like a page variant.
-const regionCache = new Map<string, { html: string; timestamp: number }>();
+interface RegionEntry {
+  html: string;
+  timestamp: number;
+  route: string;
+  // paramsKey identifies the params variant (encoded like variantKey).
+  paramsKey: string;
+  tags?: string[];
+}
+const regionCache = new Map<string, RegionEntry>();
 const regionRevalidation = new Map<string, number>();
 const inFlightRegionRevalidations = new Map<string, Promise<void>>();
 
@@ -518,12 +663,38 @@ const inFlightRegionRevalidations = new Map<string, Promise<void>>();
 // without limit across many dynamic region variants.
 const REGION_CACHE_MAX = parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512;
 
-function regionCacheSet(key: string, html: string): void {
+function paramsKeyOf(params?: Record<string, string>): string {
+  return variantKey({ route: "", params });
+}
+
+function regionCacheSet(key: string, html: string, page: ManifestPage, req: RenderRequest, scope?: CacheScope): void {
   if (regionCache.size >= REGION_CACHE_MAX && !regionCache.has(key)) {
     const oldest = regionCache.keys().next().value;
     if (oldest !== undefined) regionCache.delete(oldest);
   }
-  regionCache.set(key, { html, timestamp: Date.now() });
+  regionCache.set(key, {
+    html,
+    timestamp: Date.now(),
+    route: page.route,
+    paramsKey: paramsKeyOf(req.params),
+    tags: scope && scope.tags.size ? [...scope.tags] : undefined,
+  });
+}
+
+// invalidateRegions removes region entries for a route (optionally one params
+// variant) and/or entries whose render read one of tags.
+function invalidateRegions(route: string | null, params: Record<string, string> | null, tags: string[]): number {
+  const pkey = params ? paramsKeyOf(params) : null;
+  let n = 0;
+  for (const [key, e] of Array.from(regionCache.entries())) {
+    const routeHit = route !== null && e.route === route && (pkey === null || e.paramsKey === pkey);
+    const tagHit = tags.length > 0 && !!e.tags && e.tags.some((t) => tags.includes(t));
+    if (routeHit || tagHit) {
+      regionCache.delete(key);
+      n++;
+    }
+  }
+  return n;
 }
 
 function clearRegionCache(): void {
@@ -551,17 +722,28 @@ function regionInterval(page: ManifestPage, region: RegionMeta): number {
   return 0;
 }
 
-function renderRegionFresh(region: RegionMeta, req: RenderRequest): Promise<string> {
+async function renderRegionFresh(
+  page: ManifestPage,
+  region: RegionMeta,
+  req: RenderRequest,
+): Promise<{ html: string; scope: CacheScope; invalidated: boolean }> {
   const render = loadRuntimeRenderer(region.bundlePath!);
-  return withRenderTimeout(Promise.resolve().then(() => render(JSON.stringify(regionProps(region, req)))));
+  const out = await withRenderTimeout(
+    withCacheScope(page.route, () => render(JSON.stringify(regionProps(region, req)))),
+  );
+  return { html: out.result, scope: out.scope, invalidated: out.invalidated };
+}
+
+function regionCacheable(r: { scope: CacheScope; invalidated: boolean }): boolean {
+  return !r.scope.noStore && !r.invalidated;
 }
 
 function revalidateRegionInBackground(page: ManifestPage, region: RegionMeta, req: RenderRequest, key: string) {
   if (inFlightRegionRevalidations.has(key)) return;
   const p = (async () => {
     try {
-      const html = await renderRegionFresh(region, req);
-      regionCacheSet(key, html);
+      const r = await renderRegionFresh(page, region, req);
+      if (regionCacheable(r)) regionCacheSet(key, r.html, page, req, r.scope);
       console.log(`[krate-ssr] Revalidated region ${key} (SWR)`);
     } catch (err: any) {
       console.error(`[krate-ssr] Region SWR revalidation failed ${key}:`, err.message);
@@ -597,9 +779,10 @@ async function renderRegion(page: ManifestPage, region: RegionMeta, req: RenderR
   }
 
   try {
-    const html = await renderRegionFresh(region, req);
-    if (cacheable) {
-      regionCacheSet(key, html);
+    const r = await renderRegionFresh(page, region, req);
+    const html = r.html;
+    if (cacheable && regionCacheable(r)) {
+      regionCacheSet(key, html, page, req, r.scope);
     }
     const frame: Record<string, any> = { type: "region", id: region.id, status: 200, html };
     if (cacheable) frame.cacheStatus = "miss";
@@ -641,6 +824,142 @@ async function renderPageRegion(page: ManifestPage, id: string, req: RenderReque
 function extractTitle(html: string): string {
   const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   return match ? match[1].trim() : "";
+}
+
+// Internal operations (revalidation, refresh, dev invalidation)
+
+type InternalOp = "revalidate-route" | "refresh-route" | "dev-invalidate" | "cache-invalidate";
+
+const INTERNAL_OPS: Record<string, InternalOp> = {
+  "/__krate/ssr/revalidate": "revalidate-route",
+  "/__krate/ssr/refresh": "refresh-route",
+  "/__krate/ssr/invalidate": "dev-invalidate",
+  "/__krate/ssr/cache-invalidate": "cache-invalidate",
+};
+
+interface InvalidateTarget {
+  route: string;
+  params?: Record<string, string> | null;
+}
+
+function stringList(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x !== "") : [];
+}
+
+// applyInternalOp applies one internal operation to this process's caches.
+async function applyInternalOp(op: InternalOp, payload: any): Promise<Record<string, any>> {
+  switch (op) {
+    case "revalidate-route": {
+      const targetRoute = String(payload.route || "");
+      isrCache.deleteRoute(targetRoute);
+      clearRegionCacheForRoute(targetRoute);
+      cacheRuntime().invalidate({});
+      persistIsrNow();
+      const page = findPage(targetRoute);
+      if (page) {
+        await renderFresh(page, { route: targetRoute, url: targetRoute, method: "GET", headers: {} });
+      }
+      return { ok: true };
+    }
+    case "refresh-route": {
+      const targetRoute = String(payload.route || "");
+      const page = findPage(targetRoute);
+      const refreshed = page && page.mode === "isr" ? await refreshRouteVariants(page) : 0;
+      clearRegionCacheForRoute(targetRoute);
+      return { ok: true, refreshed };
+    }
+    case "dev-invalidate": {
+      const { route: targetRoute, source, bundlePath } = payload;
+      // Invalidate ISR cache for this route (all variants)
+      isrCache.deleteRoute(targetRoute);
+      // Invalidate module cache for the source file or bundle
+      const key = bundlePath || source;
+      if (key && moduleCache.has(key)) {
+        moduleCache.delete(key);
+        console.log(`[krate-ssr] Invalidated cache for ${targetRoute} (${key})`);
+      }
+      // Runtime component bundles are recompiled in place on a dev rebuild, but
+      // their render functions are cached for the process lifetime. Clear them
+      // so the next region render picks up the new code. Bundles are tiny and
+      // re-read on demand, so clearing all of them is cheap and avoids tracking
+      // which component maps to which route here.
+      runtimeBundleCache.clear();
+      clearRegionCache();
+      return { ok: true };
+    }
+    case "cache-invalidate": {
+      const tags = stringList(payload.tags);
+      const targets: InvalidateTarget[] = Array.isArray(payload.targets)
+        ? payload.targets.filter((t: any) => t && typeof t.route === "string")
+        : [];
+      const { dataEntries } = cacheRuntime().invalidate({ tags });
+      let isrEntries = 0;
+      let regionEntries = 0;
+      for (const t of targets) {
+        const params = t.params && typeof t.params === "object" ? t.params : null;
+        isrEntries += params ? isrCache.deleteVariant(t.route, params) : isrCache.deleteRoute(t.route);
+        regionEntries += invalidateRegions(t.route, params, []);
+      }
+      if (tags.length) {
+        isrEntries += isrCache.deleteTags(tags);
+        regionEntries += invalidateRegions(null, null, tags);
+      }
+      if (isrEntries > 0) persistIsrNow();
+      return { ok: true, isrEntries, regionEntries, dataEntries };
+    }
+  }
+}
+
+// Cluster fan-out (worker side). broadcastInternalOp resolves with one result
+// per live worker once every worker applied the operation.
+let broadcastSeq = 0;
+const broadcastWaiters = new Map<string, (results: Record<string, any>[]) => void>();
+
+if (cluster.isWorker) {
+  process.on("message", async (msg: any) => {
+    if (!msg || typeof msg !== "object") return;
+    if (msg.type === "krate:apply") {
+      let result: Record<string, any>;
+      try {
+        result = await applyInternalOp(msg.op, msg.payload || {});
+      } catch (err: any) {
+        result = { ok: false, error: err && err.message ? err.message : String(err) };
+      }
+      process.send!({ type: "krate:applied", id: msg.id, result });
+    } else if (msg.type === "krate:bcast-done") {
+      const done = broadcastWaiters.get(msg.id);
+      if (done) {
+        broadcastWaiters.delete(msg.id);
+        done(Array.isArray(msg.results) ? msg.results : []);
+      }
+    }
+  });
+}
+
+function broadcastInternalOp(op: InternalOp, payload: any): Promise<Record<string, any>[]> {
+  if (!cluster.isWorker || typeof process.send !== "function") {
+    return applyInternalOp(op, payload).then((r) => [r]);
+  }
+  const id = `${process.pid}-${++broadcastSeq}`;
+  return new Promise((resolve) => {
+    broadcastWaiters.set(id, resolve);
+    process.send!({ type: "krate:bcast", id, op, payload });
+  });
+}
+
+function mergeOpResults(op: InternalOp, results: Record<string, any>[]): Record<string, any> {
+  const failed = results.filter((r) => r && r.ok === false);
+  if (failed.length > 0) {
+    throw new Error(failed.map((r) => r.error).join("; "));
+  }
+  const out: Record<string, any> = { ok: true, workers: results.length };
+  if (op === "refresh-route") out.refreshed = results.reduce((n, r) => n + (r.refreshed || 0), 0);
+  if (op === "cache-invalidate") {
+    for (const k of ["isrEntries", "regionEntries", "dataEntries"]) {
+      out[k] = results.reduce((n, r) => n + (r[k] || 0), 0);
+    }
+  }
+  return out;
 }
 
 // HTTP Server
@@ -688,70 +1007,29 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ISR revalidation endpoint (called by Go server in background)
-  if (route === "/__krate/ssr/revalidate" && req.method === "POST") {
-    const body = await parseBody(req);
-    try {
-      const { route: targetRoute } = JSON.parse(body);
-      isrCache.deleteRoute(targetRoute);
-      clearRegionCacheForRoute(targetRoute);
-      // Trigger re-render of the base variant.
-      const page = findPage(targetRoute);
-      if (page) {
-        await renderFresh(page, { route: targetRoute, url: targetRoute, method: "GET", headers: {} });
-      }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    } catch (err: any) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: err.message }));
+  // Mutating internal endpoints. Each requires the host's shared secret and is
+  // applied on every clustered worker before the response is sent.
+  //   /__krate/ssr/revalidate        {route}  clear a route, re-render its base variant
+  //   /__krate/ssr/refresh           {route}  re-render cached variants in place (ISR timer)
+  //   /__krate/ssr/invalidate        {route, source, bundlePath}  dev module reload
+  //   /__krate/ssr/cache-invalidate  {targets:[{route, params?}], tags:[]}  on-demand revalidation
+  const internalOp = INTERNAL_OPS[route];
+  if (internalOp) {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" });
+      res.end(JSON.stringify({ error: "method not allowed" }));
+      return;
     }
-    return;
-  }
-
-  // ISR background refresh endpoint (called by the Go server on each route's
-  // revalidation cadence). Unlike /__krate/ssr/revalidate this is
-  // non-destructive: it re-renders every cached variant in place, so cached
-  // dynamic variants stay fresh instead of being evicted (which would make the
-  // next request a MISS rather than a HIT).
-  if (route === "/__krate/ssr/refresh" && req.method === "POST") {
-    const body = await parseBody(req);
-    try {
-      const { route: targetRoute } = JSON.parse(body);
-      const page = findPage(targetRoute);
-      const refreshed = page && page.mode === "isr" ? await refreshRouteVariants(page) : 0;
-      clearRegionCacheForRoute(targetRoute);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, refreshed }));
-    } catch (err: any) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: err.message }));
+    if (!internalAuthorized(req)) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "forbidden" }));
+      return;
     }
-    return;
-  }
-
-  // Module cache invalidation (called on file change in dev mode)
-  if (route === "/__krate/ssr/invalidate" && req.method === "POST") {
-    const body = await parseBody(req);
     try {
-      const { route: targetRoute, source, bundlePath } = JSON.parse(body);
-      // Invalidate ISR cache for this route (all variants)
-      isrCache.deleteRoute(targetRoute);
-      // Invalidate module cache for the source file or bundle
-      const key = bundlePath || source;
-      if (key && moduleCache.has(key)) {
-        moduleCache.delete(key);
-        console.log(`[krate-ssr] Invalidated cache for ${targetRoute} (${key})`);
-      }
-      // Runtime component bundles are recompiled in place on a dev rebuild, but
-      // their render functions are cached for the process lifetime. Clear them
-      // so the next region render picks up the new code. Bundles are tiny and
-      // re-read on demand, so clearing all of them is cheap and avoids tracking
-      // which component maps to which route here.
-      runtimeBundleCache.clear();
-      clearRegionCache();
+      const payload = JSON.parse((await parseBody(req)) || "{}");
+      const results = await broadcastInternalOp(internalOp, payload);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
+      res.end(JSON.stringify(mergeOpResults(internalOp, results)));
     } catch (err: any) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: err.message }));

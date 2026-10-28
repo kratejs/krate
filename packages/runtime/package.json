@@ -34,6 +34,10 @@
       "types": "./dist/server.d.ts",
       "default": "./dist/server.js"
     },
+    "./cache": {
+      "types": "./dist/cache.d.ts",
+      "default": "./dist/cache.js"
+    },
     "./server/jsx-runtime": {
       "types": "./dist/server-jsx-runtime.d.ts",
       "default": "./dist/server-jsx-runtime.js"

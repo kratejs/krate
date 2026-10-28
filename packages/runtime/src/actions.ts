@@ -17,7 +17,8 @@
  *   request  JSON       {"args":[...]}                  every argument JSON
  *            multipart  form fields + "__krate_args"     last argument a FormData;
  *                       (JSON array of leading args)
- *   response {"ok":true,"result":R,"redirect":"/path"?}
+ *   response {"ok":true,"result":R,"redirect":"/path"?,
+ *             "revalidated":true?,"revalidation":{"paths":[...],"tags":[...]}?}
  *            {"ok":false,"error":{"message":M,"digest":D}}
  */
 import { createEffect, onCleanup, krateRunEvent, krateTransitionWrites } from './signal.js';
@@ -53,6 +54,8 @@ interface Envelope {
   ok?: boolean;
   result?: unknown;
   redirect?: string;
+  revalidated?: boolean;
+  revalidation?: { paths?: Array<{ path: string; type: string }>; tags?: string[] };
   error?: { message?: string; digest?: string } | string;
   details?: string;
 }
@@ -71,6 +74,20 @@ function navigateTo(url: string): void {
   const nav = (globalThis as { navigate?: (u: string) => unknown }).navigate;
   if (typeof nav === 'function') nav(url);
   else if (typeof location !== 'undefined') location.assign(url);
+}
+
+/**
+ * Tells the page that the action revalidated server caches. The router
+ * listens for `krate:revalidate` and refreshes the current route; detail is
+ * `{ paths: [{ path, type }], tags: [...] }`.
+ */
+function dispatchRevalidate(info: Envelope['revalidation']): void {
+  if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return;
+  const detail = {
+    paths: info && Array.isArray(info.paths) ? info.paths : [],
+    tags: info && Array.isArray(info.tags) ? info.tags : [],
+  };
+  window.dispatchEvent(new CustomEvent('krate:revalidate', { detail }));
 }
 
 function errorFrom(p: Envelope | null, status: number, statusText: string): ServerActionError {
@@ -118,6 +135,7 @@ export async function callServerAction(url: string, args: unknown[]): Promise<un
   if (!res.ok || !payload || payload.ok === false) {
     throw errorFrom(payload, res.status, res.statusText);
   }
+  if (payload.revalidated) dispatchRevalidate(payload.revalidation);
   if (typeof payload.redirect === 'string' && payload.redirect) navigateTo(payload.redirect);
   return payload.result;
 }
