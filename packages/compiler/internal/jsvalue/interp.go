@@ -71,6 +71,11 @@ type Hooks struct {
 	JSX func(expr ast.Expr) Value
 }
 
+// AwaitReason is the Unsupported reason for an `await` expression: the
+// build-time evaluator cannot wait for a Promise. Callers report it with the
+// dedicated server component diagnostic.
+const AwaitReason = "`await` cannot be evaluated at build time"
+
 // maxSteps bounds total evaluation work so a runaway loop cannot hang a build.
 const maxSteps = 2_000_000
 
@@ -136,6 +141,8 @@ func (in *Interp) eval(expr ast.Expr) (Value, bool) {
 		return Unsupported("tagged template literals are not supported"), false
 	case *ast.ClassExpr:
 		return Unsupported("class expressions are not supported"), false
+	case *ast.AwaitExpr:
+		return Unsupported(AwaitReason), false
 	case *ast.MetaProperty:
 		return Dynamic(e.Meta + "." + e.Property), false
 	case *ast.UnaryExpr:

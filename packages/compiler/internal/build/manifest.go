@@ -37,6 +37,9 @@ type ManifestPage struct {
 	Mode       string `json:"mode"`
 	Revalidate int    `json:"revalidate,omitempty"`
 	BundlePath string `json:"bundlePath"` // path to server bundle (relative to outDir)
+	// ServerComponents marks a page that renders async server components: a
+	// failed render is fatal (500), never the baked placeholder body.
+	ServerComponents bool `json:"serverComponents,omitempty"`
 }
 
 // ServerManifest is the on-disk format read by the Node.js renderer server.
@@ -68,6 +71,8 @@ func BuildManifest(results []*PageResult, cssFile string, runtimeJS string) *Man
 			Revalidate:    r.Revalidate,
 			DynamicParams: r.DynamicParams,
 			StaticOnly:    r.StaticOnly,
+
+			ServerComponents: len(r.ServerExports) > 0 || r.ServerPage,
 		}
 		m.Pages = append(m.Pages, meta)
 		m.Routes[meta.Route] = meta
@@ -81,13 +86,14 @@ func BuildManifest(results []*PageResult, cssFile string, runtimeJS string) *Man
 			regs := make([]RegionMeta, 0, len(r.Regions))
 			for _, reg := range r.Regions {
 				regs = append(regs, RegionMeta{
-					ID:         reg.ID,
-					Component:  reg.ComponentName,
-					SourcePath: reg.SourcePath,
-					Props:      reg.Props,
-					Suspense:   reg.Suspense,
-					Runtime:    reg.Runtime,
-					Revalidate: reg.Revalidate,
+					ID:           reg.ID,
+					Component:    reg.ComponentName,
+					SourcePath:   reg.SourcePath,
+					Props:        reg.Props,
+					Suspense:     reg.Suspense,
+					Runtime:      reg.Runtime,
+					Revalidate:   reg.Revalidate,
+					ServerExport: reg.ServerExport,
 				})
 			}
 			m.Regions[meta.Route] = regs
@@ -168,6 +174,8 @@ func WriteManifest(m *Manifest, outDir string, serverBundles map[string]string) 
 			Mode:       p.Mode.String(),
 			Revalidate: p.Revalidate,
 			BundlePath: bundlePath,
+
+			ServerComponents: p.ServerComponents,
 		}
 		serverPages = append(serverPages, sp)
 	}

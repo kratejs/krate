@@ -67,7 +67,7 @@ func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 			if locals := goComponentLocals(absSource, pageSrc, root); len(locals) > 0 {
 				pageSrc = annotateGoCalls(pageSrc, absSource, locals)
 			}
-			injectedSource := injectServerGlobals(pageSrc)
+			injectedSource := injectServerGlobals(pageSrc) + serverExportEntrySuffix(page.ServerExports, absSource)
 
 			// Compile with esbuild - use stdin so esbuild resolves relative imports
 			// from the project root (AbsWorkingDir) rather than a temp file location
@@ -95,7 +95,7 @@ func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: []api.Plugin{goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(actionModules, actionBasePath)},
+				Plugins: []api.Plugin{serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(actionModules, actionBasePath)},
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   injectedSource,
@@ -110,6 +110,8 @@ func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 				}
 				return
 			}
+
+			reportMissingServerExports(page, outPath)
 
 			relBundle, _ := filepath.Rel(outDir, outPath)
 			mu.Lock()

@@ -66,6 +66,7 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 }
 
 // classifyTiers determines component tiers based on the priority rules:
+// 0. async function components are always TierRuntime (server components)
 // 1. Directive in source (@server, @static, @runtime)
 // 2. File convention (*.server.tsx, *.static.tsx, *.runtime.tsx)
 // 3. Config name lists (serverComponents, runtimeComponents)
@@ -84,6 +85,12 @@ func classifyTiers(ann *irtree.Annotations, cfg *config.Config) {
 
 // classifyComponent determines a single component's tier.
 func classifyComponent(name string, fn *ast.FnDecl, cfg *config.Config, sourceFile string, rawSource string) irtree.ComponentTier {
+	// 0. An async function component is a server component: it awaits data,
+	// so it can only render per request (never at build time or on the client).
+	if fn != nil && fn.Async {
+		return irtree.TierRuntime
+	}
+
 	// 1. Directive in source (leading string literal with @annotation)
 	if fn != nil {
 		if tier := detectDirectiveTier(fn); tier != irtree.TierUnknown {
@@ -586,6 +593,7 @@ func extractComponentFromVar(decl *ast.VarDecl) *ast.FnDecl {
 		Name:   decl.Name,
 		Params: innerFn.Params,
 		Body:   innerFn.Body,
+		Async:  innerFn.Async,
 	}
 }
 

@@ -301,6 +301,36 @@ Re-exports cannot be bundled as server actions. Import the function and re-decla
 
 The import names an export that the "use server" module does not declare.
 
+### KR7101
+
+**Async layouts are not supported**
+
+Layouts are baked into the static page shell at build time, so they cannot await data. Keep the layout synchronous and move the data fetching into an async child component (a server component), which renders per request.
+
+### KR7102
+
+**`await` cannot run at build time**
+
+Only async components (server components) can await: they render per request in the SSR sidecar. Code that Krate evaluates at build time, such as module-level constants a static component renders or a non-async component body, cannot await a Promise. Mark the component `async` or compute the value without awaiting.
+
+### KR7103
+
+**Server components need request-time rendering**
+
+An async component renders per request, but `output: "static"` disables the SSR sidecar, so the page cannot render it. Remove `output: "static"` or make the component synchronous.
+
+### KR7104
+
+**Page with server components is rendered per request**
+
+A page that contains an async component cannot be fully baked at build time. Krate bakes the rest of the page as a static shell and renders each server component per request (streaming mode). This is informational.
+
+### KR7105
+
+**Server component props must be known at build time in a static page**
+
+A server component used from a synchronous page renders as its own request-time region, so its props are fixed when the page shell is built: they must be literals, module constants or route params, and it cannot receive children. Make the page itself `async` (the whole page then renders per request) or pass constant props.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

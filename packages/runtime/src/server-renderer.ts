@@ -382,8 +382,10 @@ function buildProps(req: RenderRequest): Record<string, any> {
   // `({ params }) => ...` pages receive their real values at render time.
   // params and searchParams are plain objects that can also be awaited, so
   // both `params.slug` and Next.js 15's `const { slug } = await params` work.
+  // The Go server always forwards params (empty for static routes); a direct
+  // request without them keeps params undefined, as before.
   const props: Record<string, any> = {};
-  props.params = thenableRecord(req.params);
+  if (req.params) props.params = thenableRecord(req.params);
   props.searchParams = thenableRecord(req.query);
   if (req.query) props.query = req.query;
   return props;

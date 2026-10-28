@@ -505,35 +505,53 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
-	opts := b.irBuildOptions()
-	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
-	opts.ActionURLs = bundle.ActionImports
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, opts)
-	if len(tree.Errors) > 0 {
-		return nil, "", renderErrors(spp.PagePath, tree.Errors)
+	annotator.ReclassifyTiers(ann, b.Cfg)
+	serverPage, serverErr := b.applyServerComponentMode(spp.PagePath, entryModule, ann, strings.EqualFold(b.Cfg.Output, "static"), &renderMode, &revalidate)
+	if serverErr == nil && !serverPage {
+		serverErr = topLevelAwaitError(entryModule, extraPrograms)
 	}
-	injectStaticParams(tree, spp.Params)
-	emitter := renderer.NewEmitter()
-	emitter.IconResolver = b.iconResolver
-	emitter.EvalJS = b.jsExprEvaluator()
-	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
-	emitResult := emitter.Emit(tree)
-	renderer.EmitMeta(tree, emitResult)
-
-	if len(emitResult.Errors) > 0 {
-		return nil, "", renderErrors(spp.PagePath, emitResult.Errors)
+	if serverErr != nil {
+		return nil, "", serverErr
 	}
-
-	// Render imported server-tier Go components via the Go host and inline their
-	// HTML (mirrors buildPage); keep the call-site->HTML map for SSR baking.
-	var goBaked map[string]string
-	if len(emitResult.GoRenders) > 0 {
-		rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
-		if gerr != nil {
-			return nil, "", gerr
+	var (
+		tree       *irtree.ComponentTree
+		emitResult *renderer.EmitResult
+		goBaked    map[string]string
+	)
+	if serverPage {
+		// An async page renders per request; its params arrive with the request.
+		tree = &irtree.ComponentTree{}
+		emitResult = &renderer.EmitResult{}
+	} else {
+		opts := b.irBuildOptions()
+		opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
+		opts.ActionURLs = bundle.ActionImports
+		tree = irtree.BuildWithOptions(entryModule.Program, ann, opts)
+		if len(tree.Errors) > 0 {
+			return nil, "", renderErrors(spp.PagePath, tree.Errors)
 		}
-		emitResult.HTML = substituteGoRenders(emitResult.HTML, rendered)
-		goBaked = goBakedMap(emitResult.GoRenders, rendered)
+		injectStaticParams(tree, spp.Params)
+		emitter := renderer.NewEmitter()
+		emitter.IconResolver = b.iconResolver
+		emitter.EvalJS = b.jsExprEvaluator()
+		emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
+		emitResult = emitter.Emit(tree)
+		renderer.EmitMeta(tree, emitResult)
+
+		if len(emitResult.Errors) > 0 {
+			return nil, "", renderErrors(spp.PagePath, emitResult.Errors)
+		}
+
+		// Render imported server-tier Go components via the Go host and inline their
+		// HTML (mirrors buildPage); keep the call-site->HTML map for SSR baking.
+		if len(emitResult.GoRenders) > 0 {
+			rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
+			if gerr != nil {
+				return nil, "", gerr
+			}
+			emitResult.HTML = substituteGoRenders(emitResult.HTML, rendered)
+			goBaked = goBakedMap(emitResult.GoRenders, rendered)
+		}
 	}
 
 	// Compile-time reactive dependency validation. Surfaced as warnings so
@@ -579,7 +597,10 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	layoutPath := findLayout(spp.PagePath, b.Cfg.PagesDir)
 	var deps []string
 	if layoutPath != "" {
-		layoutCSS, layoutFiles, _ := b.applyLayoutStack(spp.PagePath, emitResult)
+		layoutCSS, layoutFiles, _, layoutErr := b.applyLayoutStack(spp.PagePath, emitResult)
+		if layoutErr != nil {
+			return nil, "", layoutErr
+		}
 		bundle.CSS += layoutCSS
 		deps = append(deps, layoutFiles...)
 	}
@@ -652,5 +673,8 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		Program:     entryModule.Program,
 		Regions:     regions,
 		GoBaked:     goBaked,
+
+		ServerPage:    serverPage,
+		ServerExports: serverExportsOf(regions),
 	}, bundle.CSS, nil
 }

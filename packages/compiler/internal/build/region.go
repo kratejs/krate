@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 )
@@ -65,6 +66,9 @@ type Region struct {
 	// `export const revalidate = N` in the runtime component). 0 falls back to
 	// the page's ISR cadence (PPR directives).
 	Revalidate int `json:"revalidate,omitempty"`
+	// ServerExport names the page server bundle export that renders this
+	// region (an async server component); "" for runtime component bundles.
+	ServerExport string `json:"serverExport,omitempty"`
 }
 
 // RegionMeta is the serializable subset of Region written to the manifests.
@@ -77,6 +81,8 @@ type RegionMeta struct {
 	Suspense   bool           `json:"suspense,omitempty"`
 	Runtime    string         `json:"runtime,omitempty"`
 	Revalidate int            `json:"revalidate,omitempty"`
+	// ServerExport is the page server bundle export rendering the region.
+	ServerExport string `json:"serverExport,omitempty"`
 }
 
 // enumerateRegions walks a page's IR tree and collects every dynamic region in
@@ -139,6 +145,7 @@ func walkSlotRegions(slot irtree.SlotNode, emit func(Region)) {
 				SourcePath:    s.Component.SourceFile,
 				Props:         s.Component.RuntimeProps,
 				Runtime:       s.Component.Runtime,
+				ServerExport:  serverExportFor(s.Component),
 			})
 			return
 		}
@@ -156,6 +163,7 @@ func walkSlotRegions(slot irtree.SlotNode, emit func(Region)) {
 					SourcePath:    s.Primary.SourceFile,
 					Props:         s.Primary.RuntimeProps,
 					Suspense:      true,
+					ServerExport:  serverExportFor(s.Primary),
 				})
 			} else {
 				emit(Region{
@@ -193,4 +201,50 @@ func walkSlotRegions(slot irtree.SlotNode, emit func(Region)) {
 			}
 		}
 	}
+}
+
+// ServerExport is an async server component the page server bundle must
+// export so the sidecar can render its region.
+type ServerExport struct {
+	Key        string // export name in the page bundle (__krate_sc_<Name>)
+	Name       string // component binding name in its module
+	SourcePath string // absolute path of the defining module
+}
+
+// serverExportKey is the page-bundle export name of a server component.
+// Component names are unique per page (the annotator keys functions by name),
+// so the name alone keeps keys unique.
+func serverExportKey(name string) string {
+	var b strings.Builder
+	b.WriteString("__krate_sc_")
+	for _, r := range name {
+		if r == '_' || r == '$' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
+func serverExportFor(n *irtree.ComponentNode) string {
+	if n == nil || !n.ServerComponent {
+		return ""
+	}
+	return serverExportKey(n.Name)
+}
+
+// serverExportsOf returns the distinct server components rendered by regions,
+// in region order.
+func serverExportsOf(regions []Region) []ServerExport {
+	var out []ServerExport
+	seen := map[string]bool{}
+	for _, r := range regions {
+		if r.ServerExport == "" || seen[r.ServerExport] {
+			continue
+		}
+		seen[r.ServerExport] = true
+		out = append(out, ServerExport{Key: r.ServerExport, Name: r.ComponentName, SourcePath: r.SourcePath})
+	}
+	return out
 }

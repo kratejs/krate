@@ -318,6 +318,12 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	if b.componentHasExternalComponent(fn) {
 		return true
 	}
+	// Likewise a component that (transitively) renders a runtime-tier or
+	// async server component: the build-time evaluator would run that
+	// component inline instead of emitting its request-time region.
+	if b.reachesRuntimeComponent(fn) {
+		return true
+	}
 	// A component reading a dynamic context must stay reactive (IR path) so the
 	// provider value can be bound through its synthetic prop.
 	if b.readsActiveContext(fn.Body) || b.readsActiveDerivedContext(fn.Body) {

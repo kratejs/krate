@@ -96,6 +96,13 @@ type PageResult struct {
 	// build-time rendered HTML. Consumed by CompileServerBundles so an SSR page
 	// bundle can inline server-tier Go components instead of calling the host.
 	GoBaked map[string]string
+
+	// ServerPage is true when the page component itself is async: the whole
+	// page body renders per request in the SSR sidecar (no build-time body).
+	ServerPage bool
+	// ServerExports lists the async server components rendered as regions of
+	// this page; the page server bundle exports each one (serverbundle.go).
+	ServerExports []ServerExport
 }
 
 type Builder struct {
@@ -1614,68 +1621,89 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
-	pageOpts := b.irBuildOptions()
-	pageOpts.ModuleConsts, pageOpts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
+	serverPage, serverErr := b.applyServerComponentMode(page, entryModule, ann, staticMode, &renderMode, &revalidate)
+	if serverErr == nil && !serverPage {
+		serverErr = topLevelAwaitError(entryModule, extraPrograms)
+	}
+	if serverErr != nil {
+		return nil, "", serverErr
+	}
+	var (
+		tree       *irtree.ComponentTree
+		emitResult *renderer.EmitResult
+		choiceCSS  string
+		goBaked    map[string]string
+		regions    []Region
+	)
 	externalByLocal, externalImports, localImports := entryExternalImports(entryModule.Program)
-	pageOpts.ExternalImports = externalByLocal
-	pageOpts.LocalComponentImports = localImports
-	pageOpts.GoComponents = pageGoComponents
-	pageOpts.ActionURLs = bundle.ActionImports
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, pageOpts)
-	// CSS primitive declarations that cannot be compiled to CSS are hard errors
-	// (there is no fallback to client signals).
-	if len(tree.Errors) > 0 {
-		return nil, "", renderErrors(page, tree.Errors)
-	}
-	printTreeWarnings(os.Stderr, tree.Warnings)
-	// CSS stylesheets are generated during IR construction (one shared,
-	// instance-agnostic stylesheet per scope). Append them to the page's own CSS
-	// so they land in the hashed external stylesheet.
-	choiceCSS := tree.CSSSignalsCSS
-	// Dynamic-route templates are built once and served for every matching URL,
-	// so bind each [param] to a replaceable sentinel the server substitutes per
-	// request (see serve.go applyDynamicRouteParams). Mirrors injectStaticParams
-	// and only affects static/server roots; generateStaticParams pages are built
-	// separately with concrete values.
-	if isDynamicRoute(page, b.Cfg.PagesDir) {
-		injectDynamicRoutePlaceholders(tree, extractParamNames(page, b.Cfg.PagesDir))
-	}
-	emitter := renderer.NewEmitter()
-	emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
-	emitter.IconResolver = b.iconResolver
-	emitter.EvalJS = b.jsExprEvaluator()
-	emitter.GoComponents = pageOpts.GoComponents
-	emitResult := emitter.Emit(tree)
-	tree, emitResult = applyBoundaryFallbacks(page, tree, emitResult, pageOpts, func(opts irtree.BuildOptions) (*irtree.ComponentTree, *renderer.EmitResult) {
-		t := irtree.BuildWithOptions(entryModule.Program, ann, opts)
+	if serverPage {
+		// An async page renders entirely per request in the SSR sidecar: no
+		// build-time body and no hydration code. The shell keeps only the
+		// layout around an empty coarse page region.
+		tree = &irtree.ComponentTree{}
+		emitResult = &renderer.EmitResult{}
+	} else {
+		pageOpts := b.irBuildOptions()
+		pageOpts.ModuleConsts, pageOpts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
+		pageOpts.ExternalImports = externalByLocal
+		pageOpts.LocalComponentImports = localImports
+		pageOpts.GoComponents = pageGoComponents
+		pageOpts.ActionURLs = bundle.ActionImports
+		tree = irtree.BuildWithOptions(entryModule.Program, ann, pageOpts)
+		// CSS primitive declarations that cannot be compiled to CSS are hard errors
+		// (there is no fallback to client signals).
+		if len(tree.Errors) > 0 {
+			return nil, "", renderErrors(page, tree.Errors)
+		}
+		printTreeWarnings(os.Stderr, tree.Warnings)
+		// CSS stylesheets are generated during IR construction (one shared,
+		// instance-agnostic stylesheet per scope). Append them to the page's own CSS
+		// so they land in the hashed external stylesheet.
+		choiceCSS = tree.CSSSignalsCSS
+		// Dynamic-route templates are built once and served for every matching URL,
+		// so bind each [param] to a replaceable sentinel the server substitutes per
+		// request (see serve.go applyDynamicRouteParams). Mirrors injectStaticParams
+		// and only affects static/server roots; generateStaticParams pages are built
+		// separately with concrete values.
 		if isDynamicRoute(page, b.Cfg.PagesDir) {
-			injectDynamicRoutePlaceholders(t, extractParamNames(page, b.Cfg.PagesDir))
+			injectDynamicRoutePlaceholders(tree, extractParamNames(page, b.Cfg.PagesDir))
 		}
-		em := renderer.NewEmitter()
-		em.CodeTheme = b.Cfg.Markdown.CodeTheme
-		em.IconResolver = b.iconResolver
-		em.EvalJS = b.jsExprEvaluator()
-		em.GoComponents = opts.GoComponents
-		return t, em.Emit(t)
-	})
-	renderer.EmitMeta(tree, emitResult)
-	// Render imported Go components (server tier, slot path + SSREval'd) via the
-	// Go host in one batch, then inline their HTML at the emitted markers.
-	var goBaked map[string]string
-	if len(emitResult.GoRenders) > 0 {
-		rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
-		if gerr != nil {
-			return nil, "", gerr
+		emitter := renderer.NewEmitter()
+		emitter.CodeTheme = b.Cfg.Markdown.CodeTheme
+		emitter.IconResolver = b.iconResolver
+		emitter.EvalJS = b.jsExprEvaluator()
+		emitter.GoComponents = pageOpts.GoComponents
+		emitResult = emitter.Emit(tree)
+		tree, emitResult = applyBoundaryFallbacks(page, tree, emitResult, pageOpts, func(opts irtree.BuildOptions) (*irtree.ComponentTree, *renderer.EmitResult) {
+			t := irtree.BuildWithOptions(entryModule.Program, ann, opts)
+			if isDynamicRoute(page, b.Cfg.PagesDir) {
+				injectDynamicRoutePlaceholders(t, extractParamNames(page, b.Cfg.PagesDir))
+			}
+			em := renderer.NewEmitter()
+			em.CodeTheme = b.Cfg.Markdown.CodeTheme
+			em.IconResolver = b.iconResolver
+			em.EvalJS = b.jsExprEvaluator()
+			em.GoComponents = opts.GoComponents
+			return t, em.Emit(t)
+		})
+		renderer.EmitMeta(tree, emitResult)
+		// Render imported Go components (server tier, slot path + SSREval'd) via the
+		// Go host in one batch, then inline their HTML at the emitted markers.
+		if len(emitResult.GoRenders) > 0 {
+			rendered, gerr := b.renderGoComponents(emitResult.GoRenders)
+			if gerr != nil {
+				return nil, "", gerr
+			}
+			emitResult.HTML = substituteGoRenders(emitResult.HTML, rendered)
+			goBaked = goBakedMap(emitResult.GoRenders, rendered)
 		}
-		emitResult.HTML = substituteGoRenders(emitResult.HTML, rendered)
-		goBaked = goBakedMap(emitResult.GoRenders, rendered)
-	}
-	// Regions are enumerated after emit so runtime Go components can carry their
-	// build-rendered children (EmitResult.RuntimeChildren) in RegionMeta.Props.
-	regions := enumerateRegions(tree)
-	attachRuntimeChildren(regions, emitResult.RuntimeChildren)
-	for i := range regions {
-		regions[i].Revalidate = regionRevalidate(b.Root, regions[i].SourcePath)
+		// Regions are enumerated after emit so runtime Go components can carry their
+		// build-rendered children (EmitResult.RuntimeChildren) in RegionMeta.Props.
+		regions = enumerateRegions(tree)
+		attachRuntimeChildren(regions, emitResult.RuntimeChildren)
+		for i := range regions {
+			regions[i].Revalidate = regionRevalidate(b.Root, regions[i].SourcePath)
+		}
 	}
 	stopCompile()
 
@@ -1728,7 +1756,10 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		emitResult.HTML = "<!--suspense:page-->" + emitResult.HTML + "<!--/suspense:page-->"
 	}
 
-	layoutCSS, layoutFiles, layoutHasSignals := b.applyLayoutStack(page, emitResult)
+	layoutCSS, layoutFiles, layoutHasSignals, layoutErr := b.applyLayoutStack(page, emitResult)
+	if layoutErr != nil {
+		return nil, "", layoutErr
+	}
 	bundle.CSS += layoutCSS
 	// Generated CSS signal rules land in the page's own hashed stylesheet, after
 	// layout CSS so author styles can override the defaults.
@@ -1793,6 +1824,8 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			IsDynamicTemplate: true,
 			Program:           entryModule.Program,
 			GoBaked:           goBaked,
+			ServerPage:        serverPage,
+			ServerExports:     serverExportsOf(regions),
 		}, bundle.CSS, nil
 	}
 
@@ -1912,6 +1945,8 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		IsDynamicTemplate: isDynRoute,
 		Program:           entryModule.Program,
 		GoBaked:           goBaked,
+		ServerPage:        serverPage,
+		ServerExports:     serverExportsOf(regions),
 	}
 	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes)
 	return result, bundle.CSS, nil
@@ -2276,6 +2311,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	annotator.MergeModuleFunctions(ann, extraLayoutPrograms)
 	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
 	annotator.ReclassifyTiers(ann, b.Cfg)
+	if err := asyncLayoutError(layoutPath, ann, layoutModule.SourceCode); err != nil {
+		return nil, "", nil, false, err
+	}
 	opts := b.irBuildOptions()
 	opts.IDPrefix = layoutIDPrefix(layoutPath)
 	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(layoutModule.Program, extraLayoutPrograms)
@@ -2572,14 +2610,16 @@ func findLayoutStack(pagePath, pagesDir string) []string {
 // skipped so the page still emits unwrapped. Returns the CSS contributed by the
 // applied layouts and the layout paths used, so the caller can record them as
 // page dependencies (a layout edit must rebuild every page it wraps).
-func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult) (string, []string, bool) {
+func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult) (string, []string, bool, error) {
 	var css string
 	var used []string
 	hasSignals := false
 	for _, layoutPath := range findLayoutStack(page, b.Cfg.PagesDir) {
 		layoutRes, layoutCSS, layoutDeps, layoutHasSignals, err := b.executeLayoutPipeline(layoutPath, emitResult.HTML, nil)
 		if err != nil {
-			continue
+			// A layout that cannot be built must fail the page: skipping it
+			// would silently ship the page without its layout.
+			return "", nil, false, err
 		}
 		hasSignals = hasSignals || layoutHasSignals
 		emitResult.HTML = layoutRes.HTML
@@ -2599,7 +2639,7 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 		// editing a component the layout imports rebuilds every wrapped page.
 		used = append(used, layoutDeps...)
 	}
-	return css, used, hasSignals
+	return css, used, hasSignals, nil
 }
 
 var (

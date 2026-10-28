@@ -394,6 +394,10 @@ type ComponentNode struct {
 	// (prop name -> value). These are serialized into the page's runtime props
 	// script so the serve-time renderer can pass them to the component.
 	RuntimeProps map[string]any
+	// ServerComponent marks a runtime-tier node whose component is an async
+	// function (a server component). Its region renders from the page server
+	// bundle instead of a standalone runtime component bundle.
+	ServerComponent bool
 	// Runtime selects the region render engine for a runtime-tier node: "" (Node
 	// SSR sidecar) or "go" (Go host, rendered via /__krate/gorender).
 	Runtime string
