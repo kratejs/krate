@@ -871,12 +871,28 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
   // Save the position of the entry we are leaving (pop saves in the handler).
   if (req.kind === 'push') saveScroll(currentKey);
 
+  const newChain = readRouteChain(doc);
+  const plan = planSwap(currentChain, newChain, location.href, url, doc);
+
   const mutate = () => {
     const title = doc.querySelector('title');
     if (title) document.title = title.textContent || '';
-    if (typeof (globalThis as any).disposeAll === 'function') (globalThis as any).disposeAll();
-    const nodes = Array.from(newRoot.childNodes).map((n) => document.importNode(n, true));
-    oldRoot.replaceChildren(...nodes);
+    const g = globalThis as any;
+    if (plan.keep.length > 0 && typeof g.krateDisposeExcept === 'function') g.krateDisposeExcept(plan.keep);
+    else if (typeof g.disposeAll === 'function') g.disposeAll();
+    if (plan.region) {
+      // Only the deepest boundary that differs is replaced; the kept layouts'
+      // DOM (and its state, focus and scroll containers) stays in place.
+      const { live, next } = plan.region;
+      clearBetween(live[0], live[1]);
+      const nodes = between(next[0], next[1]).map((n) => document.importNode(n, true));
+      for (const n of nodes) live[1].parentNode!.insertBefore(n, live[1]);
+      syncLoadingTemplate(oldRoot, newRoot);
+    } else {
+      const nodes = Array.from(newRoot.childNodes).map((n) => document.importNode(n, true));
+      oldRoot.replaceChildren(...nodes);
+    }
+    currentChain = newChain;
     reconcileStylesheets(doc, url);
     reconcileHeadMeta(doc);
     applyViewTransitionNames(document);
@@ -910,10 +926,13 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
   notifyNavigation(location.href);
   setStatus('idle');
 
-  // Page scripts re-run against the new DOM.
+  // Page scripts re-run against the new DOM; the hydration code of kept
+  // layouts is skipped (krateEnterScope) because their bindings are live.
   document.querySelectorAll('script[data-krate-spa]').forEach((s) => s.remove());
   const srcs = scriptsToLoad(doc, url);
+  keepScopes(plan.keep);
   const results = await Promise.all(srcs.map(loadScript));
+  keepScopes([]);
   if (seq !== navSeq) return;
   if (results.some((ok) => !ok)) {
     // A page chunk failed to load: the route would stay half-mounted, so do a
@@ -957,6 +976,126 @@ function runMutation(mutate: () => void): Promise<void> {
   }
   once();
   return Promise.resolve();
+}
+
+// Layout persistence
+
+/** One layout/template boundary of a page (emitted by the compiler as #__krate_route). */
+interface ChainEntry {
+  id: string;
+  /** "layout" or "template". */
+  k: string;
+  /** URL segments covered by the boundary's directory (-1: the rest). */
+  d: number;
+  /** Whether the layout can stay mounted across a soft navigation. */
+  p: boolean;
+  why?: string;
+  f?: string;
+}
+
+let currentChain: ChainEntry[] = [];
+
+function readRouteChain(doc: Document): ChainEntry[] {
+  const el = doc.getElementById('__krate_route');
+  if (!el) return [];
+  try {
+    const info = JSON.parse(el.textContent || '{}');
+    return Array.isArray(info.chain) ? (info.chain as ChainEntry[]) : [];
+  } catch {
+    devWarn('unreadable #__krate_route route info; layouts will be remounted');
+    return [];
+  }
+}
+
+function segmentKey(url: string, depth: number): string {
+  const segs = stripBase(new URL(url, location.href).pathname).split('/').filter(Boolean);
+  return (depth < 0 ? segs : segs.slice(0, depth)).join('/');
+}
+
+/** Finds the <!--kl:ID--> ... <!--/kl:ID--> sibling pair under root. */
+function findBoundary(root: Node, id: string): [Comment, Comment] | null {
+  const doc = root.ownerDocument || (root as Document);
+  const walker = doc.createTreeWalker(root, 128 /* NodeFilter.SHOW_COMMENT */);
+  const open = 'kl:' + id;
+  const close = '/kl:' + id;
+  while (walker.nextNode()) {
+    const c = walker.currentNode as Comment;
+    if (c.nodeValue !== open) continue;
+    for (let n = c.nextSibling; n; n = n.nextSibling) {
+      if (n.nodeType === 8 && n.nodeValue === close) return [c, n as Comment];
+    }
+    return null;
+  }
+  return null;
+}
+
+function between(start: Node, end: Node): Node[] {
+  const out: Node[] = [];
+  for (let n = start.nextSibling; n && n !== end; n = n.nextSibling) out.push(n);
+  return out;
+}
+
+function clearBetween(start: Node, end: Node): void {
+  const dispose = (globalThis as any).disposeNode;
+  for (const n of between(start, end)) {
+    n.parentNode!.removeChild(n);
+    if (typeof dispose === 'function') dispose(n);
+  }
+}
+
+function syncLoadingTemplate(liveRoot: Element, nextRoot: Element): void {
+  const sel = ':scope > template[data-krate-loading]';
+  liveRoot.querySelectorAll(sel).forEach((t) => t.remove());
+  nextRoot.querySelectorAll(sel).forEach((t) => liveRoot.appendChild(document.importNode(t, true)));
+}
+
+function keepScopes(ids: string[]): void {
+  const fn = (globalThis as any).krateKeepScopes;
+  if (typeof fn === 'function') fn(ids);
+}
+
+interface SwapPlan {
+  /** Route scopes (layout ids) that stay mounted. */
+  keep: string[];
+  /** Live and incoming marker pairs of the region to replace; null swaps #root. */
+  region: { live: [Comment, Comment]; next: [Comment, Comment] } | null;
+}
+
+/**
+ * Compares the layout chains of the current and next documents. The longest
+ * common prefix of persistable layouts (same file, same URL segments) stays
+ * mounted, and only the children region of the deepest kept layout is
+ * replaced. Templates always end the prefix, so they remount on every
+ * navigation through them. A shared layout that cannot be kept is reported
+ * in dev (never silently).
+ */
+function planSwap(oldChain: ChainEntry[], newChain: ChainEntry[], fromUrl: string, toUrl: string, doc: Document): SwapPlan {
+  const full: SwapPlan = { keep: [], region: null };
+  let k = 0;
+  while (k < oldChain.length && k < newChain.length) {
+    const a = oldChain[k];
+    const b = newChain[k];
+    if (a.id !== b.id || a.k !== 'layout' || b.k !== 'layout') break;
+    if (segmentKey(fromUrl, a.d) !== segmentKey(toUrl, b.d)) break;
+    if (!a.p || !b.p) {
+      devWarn(`layout ${b.f || b.id} is remounted on this navigation: ${b.why || a.why || 'not persistable'}`);
+      break;
+    }
+    k++;
+  }
+  if (k === 0) return full;
+  if (typeof (globalThis as any).krateDisposeExcept !== 'function') {
+    devWarn('the runtime has no krateDisposeExcept; layouts are remounted');
+    return full;
+  }
+  const id = newChain[k - 1].id;
+  const live = findBoundary(appRoot(document), id);
+  const next = findBoundary(appRoot(doc), id);
+  if (!live || !next) {
+    devWarn(`layout ${newChain[k - 1].f || id} boundary markers are missing; the whole page is swapped`);
+    return full;
+  }
+  return { keep: oldChain.slice(0, k).map((e) => e.id), region: { live, next } };
 }
 
 function sameDocument(url: string): boolean {
@@ -1195,6 +1334,7 @@ export function initRouter(): void {
   initialized = true;
 
   renderedPath = pathOf(location.href);
+  currentChain = readRouteChain(document);
   currentKey = entryKey(history.state) || newKey();
   if (entryKey(history.state) === undefined) {
     try {
@@ -1256,4 +1396,5 @@ export function destroyRouter(): void {
   listeners.clear();
   status = 'idle';
   loadingOverlay = [];
+  currentChain = [];
 }

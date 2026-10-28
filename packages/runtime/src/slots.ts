@@ -30,15 +30,36 @@ type CondStart = Comment & { __krateCond?: CondState };
 // Branches swapped out of the document. Hydration lookups (findSlot) search
 // them too, so a binding registered after a swap still finds its node.
 const detached = new Set<DocumentFragment>();
+// Start marker of the conditional each detached fragment belongs to.
+const detachedStart = new WeakMap<DocumentFragment, Comment>();
 
 /** Fragments holding currently hidden conditional branches. */
 export function krateCondDetached(): DocumentFragment[] {
   return Array.from(detached);
 }
 
-/** Forgets hidden branches of the previous page (called on slot rescans). */
+/**
+ * Forgets hidden branches of the previous page (called on slot rescans).
+ * Branches whose conditional is still in the document (a layout the SPA
+ * router kept mounted), directly or inside another kept hidden branch, stay.
+ */
 export function krateCondReset(): void {
-  detached.clear();
+  const keep = new Set<DocumentFragment>();
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const frag of detached) {
+      if (keep.has(frag)) continue;
+      const start = detachedStart.get(frag);
+      if (!start) continue;
+      const home = start.getRootNode();
+      if (start.isConnected || keep.has(home as DocumentFragment)) {
+        keep.add(frag);
+        grew = true;
+      }
+    }
+  }
+  for (const frag of Array.from(detached)) if (!keep.has(frag)) detached.delete(frag);
 }
 
 function findCondEnd(start: Comment): Comment | null {
@@ -99,6 +120,7 @@ export function krateCondSwap(start: Comment, show: boolean, tpl: HTMLTemplateEl
   kratePortalsEnter(portals);
   st.other = out;
   detached.add(out);
+  detachedStart.set(out, start);
   st.shown = want;
   krateRefsEnter();
   if (auto) {

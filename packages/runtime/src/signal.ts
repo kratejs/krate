@@ -72,7 +72,60 @@ const allEffects = new Set<EffectState>();
 // to the page/root and run when disposeAll() executes on route change. This
 // gives component-level cleanup semantics: a component's top-level onCleanup
 // registers once when its hydration IIFE runs and is invoked on unmount.
-const rootCleanups: Array<() => void> = [];
+const rootCleanups: Array<{ fn: () => void; scope: string | null }> = [];
+
+// Route scopes (SPA layout persistence). Hydration code of a layout runs
+// between krateEnterScope(id) and krateLeaveScope(), so every effect, cleanup
+// and component owner it creates is tagged with the layout's id. On a soft
+// navigation that keeps the layout mounted, the router disposes everything
+// except the kept scopes (krateDisposeExcept) and the new page's hydration
+// script skips the kept layouts' code (krateEnterScope returns false).
+let routeScope: string | null = null;
+let keptScopes = new Set<string>();
+// Scope of each owner key used by ownerEffects/ownerCleanups.
+const ownerScopes = new Map<unknown, string | null>();
+
+/**
+ * Enters the route scope `id` for the hydration code that follows. Returns
+ * false when the SPA router kept that layout mounted: its bindings and
+ * effects are still live and must not be created twice.
+ */
+export function krateEnterScope(id: string): boolean {
+  if (keptScopes.has(id)) return false;
+  routeScope = id;
+  currentOwner = null;
+  return true;
+}
+
+/** Leaves the current route scope (see krateEnterScope). */
+export function krateLeaveScope(): void {
+  routeScope = null;
+  currentOwner = null;
+}
+
+/**
+ * The route scope new effects and owners are tagged with (internal): the
+ * running effect's scope, else the scope whose hydration code is running,
+ * else the current component owner's scope (code running later, e.g. an
+ * event handler of a layout component).
+ */
+export function krateCurrentScope(): string | null {
+  const top = context[context.length - 1];
+  if (top) return top.scope;
+  if (routeScope !== null) return routeScope;
+  if (currentOwner !== null && ownerScopes.has(currentOwner)) return ownerScopes.get(currentOwner) ?? null;
+  return null;
+}
+
+/** Sets the layout scopes the router kept mounted for the next hydration (internal). */
+export function krateKeepScopes(ids: string[]): void {
+  keptScopes = new Set(ids);
+}
+
+/** Records the route scope of an owner key (internal; see effects.ts). */
+export function krateTagOwner(owner: unknown, scope: string | null): void {
+  if (owner !== null && !ownerScopes.has(owner)) ownerScopes.set(owner, scope);
+}
 
 // Pending effects scheduled to re-run in the next microtask. Writes batch
 // subscriber re-runs into a single flush so N writes in a loop (or one write
@@ -109,11 +162,15 @@ interface EffectState {
   root?: boolean;
   /** Set once a root has been disposed. */
   dead?: boolean;
+  /** Route scope (layout id) the effect belongs to; null for page code. */
+  scope: string | null;
 }
 
 function newEffectState(fn: () => void): EffectState {
-  const effect: EffectState = { fn, cleanups: [], disposed: false, sources: new Set(), running: false, rerun: false, queued: false, owner: currentOwner, boundaryOwner: ownerHooks ? ownerHooks.current() : null };
+  const scope = krateCurrentScope();
+  const effect: EffectState = { fn, cleanups: [], disposed: false, sources: new Set(), running: false, rerun: false, queued: false, owner: currentOwner, boundaryOwner: ownerHooks ? ownerHooks.current() : null, scope };
   if (currentOwner !== null) {
+    krateTagOwner(currentOwner, scope);
     let set = ownerEffects.get(currentOwner);
     if (!set) ownerEffects.set(currentOwner, (set = new Set()));
     set.add(effect);
@@ -141,6 +198,7 @@ export function krateDisposeOwner(owner: unknown): void {
   }
   const cleanups = ownerCleanups.get(owner);
   ownerCleanups.delete(owner);
+  ownerScopes.delete(owner);
   if (cleanups) {
     for (const c of cleanups) {
       try {
@@ -329,7 +387,7 @@ export function krateSetOwner(owner: unknown): unknown {
 // additive so other schedulers can hook in too.
 const beforeFlushHooks: Array<() => void> = [];
 const afterFlushHooks: Array<() => void> = [];
-const disposeHooks: Array<() => void> = [];
+const disposeHooks: Array<(keep: Set<string> | null) => void> = [];
 
 /** Registers fn to run before every effect flush starts (internal). */
 export function krateOnBeforeFlush(fn: () => void): void {
@@ -341,8 +399,12 @@ export function krateOnAfterFlush(fn: () => void): void {
   afterFlushHooks.push(fn);
 }
 
-/** Registers fn to run at the start of disposeAll (internal). */
-export function krateOnDispose(fn: () => void): void {
+/**
+ * Registers fn to run at the start of disposeAll (internal). `keep` is the
+ * set of route scopes that stay mounted for a partial teardown
+ * (krateDisposeExcept), null for a full one.
+ */
+export function krateOnDispose(fn: (keep: Set<string> | null) => void): void {
   disposeHooks.push(fn);
 }
 
@@ -408,10 +470,70 @@ function disposeEffect(effect: EffectState): void {
   }
 }
 
-export function disposeAll(): void {
+/**
+ * Partial teardown for a soft navigation that keeps some layouts mounted:
+ * disposes every effect, cleanup and component owner whose route scope is
+ * not in `keep`. With an empty `keep` this is disposeAll().
+ */
+export function krateDisposeExcept(keep: string[]): void {
+  if (keep.length === 0) {
+    disposeAll();
+    return;
+  }
+  const k = new Set(keep);
+  const gone = (scope: string | null | undefined) => !(scope != null && k.has(scope));
   for (const hook of disposeHooks) {
     try {
-      hook();
+      hook(k);
+    } catch {
+      // Unmount errors must not prevent the rest of the teardown.
+    }
+  }
+  for (const effect of Array.from(allEffects)) {
+    if (gone(effect.scope)) {
+      disposeEffect(effect);
+      allEffects.delete(effect);
+    }
+  }
+  const kept: typeof rootCleanups = [];
+  for (const cleanup of rootCleanups.splice(0)) {
+    if (!gone(cleanup.scope)) {
+      kept.push(cleanup);
+      continue;
+    }
+    try {
+      cleanup.fn();
+    } catch {
+      // Cleanup errors must not prevent remaining cleanups or DOM swap.
+    }
+  }
+  rootCleanups.push(...kept);
+  const owners = new Set<unknown>([...ownerCleanups.keys(), ...ownerEffects.keys()]);
+  for (const owner of owners) {
+    if (gone(ownerScopes.get(owner))) krateDisposeOwner(owner);
+  }
+  // Islands are only mounted by page code (layouts with islands are never kept).
+  const g = globalThis as { __krate_island_cleanups?: Array<() => void> };
+  const islands = g.__krate_island_cleanups;
+  if (Array.isArray(islands)) {
+    g.__krate_island_cleanups = [];
+    for (const cleanup of islands) {
+      try {
+        cleanup();
+      } catch {
+        // Island unmount errors must not prevent the SPA swap.
+      }
+    }
+  }
+  routeScope = null;
+  resetContexts();
+}
+
+export function disposeAll(): void {
+  routeScope = null;
+  for (const hook of disposeHooks) {
+    try {
+      hook(null);
     } catch {
       // Unmount errors must not prevent the rest of the teardown.
     }
@@ -422,7 +544,7 @@ export function disposeAll(): void {
   allEffects.clear();
   for (const cleanup of rootCleanups) {
     try {
-      cleanup();
+      cleanup.fn();
     } catch {
       // Cleanup errors must not prevent remaining cleanups or DOM swap.
     }
@@ -432,6 +554,7 @@ export function disposeAll(): void {
     krateDisposeOwner(owner);
   }
   ownerEffects.clear();
+  ownerScopes.clear();
   changedCells.clear();
   historyCells.clear();
   snapshotEpoch = null;
@@ -1115,11 +1238,12 @@ export function onCleanup(fn: () => void): void {
     // No active effect: a component-level cleanup. It runs when its owner
     // unmounts, or on disposeAll() (route change / page teardown).
     if (currentOwner !== null) {
+      krateTagOwner(currentOwner, krateCurrentScope());
       let list = ownerCleanups.get(currentOwner);
       if (!list) ownerCleanups.set(currentOwner, (list = []));
       list.push(fn);
     } else {
-      rootCleanups.push(fn);
+      rootCleanups.push({ fn, scope: krateCurrentScope() });
     }
   }
 }

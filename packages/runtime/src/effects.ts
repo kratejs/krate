@@ -35,6 +35,8 @@ import {
   kratePruneSnapshots,
   krateReadAt,
   krateTakeSyncLane,
+  krateCurrentScope,
+  krateTagOwner,
 } from './signal.js';
 
 /** Effect phase: React's useEffect, useLayoutEffect and useInsertionEffect. */
@@ -56,6 +58,8 @@ interface Owner {
   slot: string | null;
   /** Set for components mounted through krateMount (remountable). */
   record: MountRecord | null;
+  /** Route scope (layout id) the component belongs to; null for page code. */
+  scope: string | null;
 }
 
 /**
@@ -86,6 +90,8 @@ interface HookEffect {
   dirty: boolean;
   seq: number;
   stop: () => void;
+  /** Route scope of a hook registered without a component owner. */
+  scope: string | null;
 }
 
 const root: Owner = newOwner(null, null);
@@ -108,7 +114,12 @@ const liveEpochs = new Map<number, number>();
 const unmountHooks: Array<(owner: unknown, id: string | null) => void> = [];
 
 function newOwner(id: string | null, parent: Owner | null): Owner {
-  return { id, parent, children: [], hooks: [], disposed: false, shown: true, conds: [], slot: null, record: null };
+  // Components inherit the route scope of their parent component; top-level
+  // hydrated components take the scope their hydration code runs in.
+  const scope = parent && parent.parent !== null ? parent.scope : parent ? krateCurrentScope() : null;
+  const owner: Owner = { id, parent, children: [], hooks: [], disposed: false, shown: true, conds: [], slot: null, record: null, scope };
+  if (parent) krateTagOwner(owner, scope);
+  return owner;
 }
 
 /**
@@ -463,6 +474,7 @@ export function createEffectDeps(
     dirty: false,
     seq: seq++,
     stop: () => {},
+    scope: owner === root ? krateCurrentScope() : owner.scope,
   };
   owner.hooks.push(hook);
   if (owner.disposed) return;
@@ -731,7 +743,63 @@ export function krateDepsOf(value: unknown): unknown[] {
   return [value];
 }
 
-function unmountAll(): void {
+// Partial teardown (soft navigation keeping layouts mounted): unmount every
+// component outside the kept route scopes and forget their slot state.
+function unmountExcept(keep: Set<string>): void {
+  const gone = (scope: string | null) => !(scope != null && keep.has(scope));
+  const passive: Array<() => void> = [];
+  for (const child of root.children.slice()) {
+    if (!gone(child.scope)) continue;
+    disposeTree(child, child.shown, passive);
+    const i = root.children.indexOf(child);
+    if (i >= 0) root.children.splice(i, 1);
+  }
+  const keptHooks: HookEffect[] = [];
+  for (const hook of root.hooks) {
+    if (!gone(hook.scope)) {
+      keptHooks.push(hook);
+      continue;
+    }
+    hook.stop();
+    dirty.delete(hook);
+    if (hook.phase === 'passive') {
+      const c = takeCleanup(hook);
+      if (c) passive.push(c);
+    } else {
+      runCleanup(hook);
+    }
+  }
+  root.hooks = keptHooks;
+  for (const [id, owner] of Array.from(byId)) {
+    if (owner.disposed || gone(owner.scope)) byId.delete(id);
+  }
+  // Slot ids of a layout start with its scope id (the layout's ID prefix).
+  const keptId = (id: string) => {
+    for (const k of keep) if (id.startsWith(k)) return true;
+    return false;
+  };
+  for (const id of Array.from(condShown.keys())) if (!keptId(id)) condShown.delete(id);
+  for (const id of Array.from(replacedSlots)) if (!keptId(id)) replacedSlots.delete(id);
+  for (let i = records.length - 1; i >= 0; i--) {
+    if (!keptId(records[i].id)) records.splice(i, 1);
+  }
+  for (const hook of Array.from(dirty)) if (hook.owner.disposed) dirty.delete(hook);
+  passiveSetups = passiveSetups.filter(([h]) => !h.owner.disposed && !(h.owner === root && gone(h.scope)));
+  for (const c of passive) {
+    try {
+      untrack(c);
+    } catch {
+      // Keep tearing down.
+    }
+  }
+  krateSetOwner(null);
+}
+
+function unmountAll(keep: Set<string> | null): void {
+  if (keep) {
+    unmountExcept(keep);
+    return;
+  }
   // Page teardown: everything unmounts now, layout before passive.
   const passive: Array<() => void> = [];
   for (const child of root.children.slice()) {

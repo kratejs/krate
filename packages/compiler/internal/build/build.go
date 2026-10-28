@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"net/url"
@@ -23,6 +24,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/content"
 	"github.com/kratejs/krate/packages/compiler/internal/css"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
@@ -205,6 +207,10 @@ func (b *Builder) shouldMinifyJS() bool {
 func (b *Builder) runtimeCommonHead() string {
 	var sb strings.Builder
 	cfg := map[string]interface{}{"basePath": b.Cfg.BaseURLPath()}
+	if b.DevMode {
+		// Enables the SPA router's dev warnings (e.g. a layout it could not keep mounted).
+		cfg["dev"] = true
+	}
 	if b.Cfg.ViewTransitions == "off" {
 		cfg["viewTransitions"] = false
 	} else {
@@ -1728,7 +1734,10 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		emitResult.HTML = "<!--suspense:page-->" + emitResult.HTML + "<!--/suspense:page-->"
 	}
 
-	layoutCSS, layoutFiles, layoutHasSignals := b.applyLayoutStack(page, emitResult)
+	layoutCSS, layoutFiles, layoutHasSignals, routeChain, layoutErr := b.applyLayoutStack(page, emitResult)
+	if layoutErr != nil {
+		return nil, "", layoutErr
+	}
 	bundle.CSS += layoutCSS
 	// Generated CSS signal rules land in the page's own hashed stylesheet, after
 	// layout CSS so author styles can override the defaults.
@@ -1758,6 +1767,8 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	}
 
 	b.recordDeps(page, deps)
+
+	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures)
 
 	outName := pageToOutput(page, b.Cfg.PagesDir)
 	pageDir := filepath.Join(b.Cfg.OutDir, outName)
@@ -2124,10 +2135,17 @@ type layoutEmitCacheEntry struct {
 
 // layoutIDPrefix returns a stable, collision-free namespace for a layout's
 // compact slot IDs. It starts with "_" (outside the base62 alphabet the page
-// builder uses) so a merged layout + page can never share a data-k ID.
-func layoutIDPrefix(layoutPath string) string {
+// builder uses) so a merged layout + page can never share a data-k ID. The
+// hash covers the path relative to the project root so builds are identical
+// across checkouts; the same id names the layout's route boundary
+// (<!--kl:ID--> markers and the route scope of its hydration code).
+func (b *Builder) layoutIDPrefix(layoutPath string) string {
+	key := filepath.ToSlash(layoutPath)
+	if rel, err := filepath.Rel(b.Root, layoutPath); err == nil && !strings.HasPrefix(rel, "..") {
+		key = filepath.ToSlash(rel)
+	}
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(filepath.ToSlash(layoutPath)))
+	_, _ = h.Write([]byte(key))
 	return "_l" + strconv.FormatUint(uint64(h.Sum32()), 36) + "_"
 }
 
@@ -2261,6 +2279,15 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if layoutModule == nil || layoutModule.Program == nil {
 		return nil, "", nil, false, fmt.Errorf("layout module invalid or empty: %s (ensure the layout has a default export)", layoutPath)
 	}
+	if !hasDefaultExportStmt(layoutModule.Program) {
+		return nil, "", nil, false, diag.Diagnostic{
+			File:    layoutPath,
+			Line:    1,
+			Col:     1,
+			Message: "no default export: a layout or template must default-export a component",
+			Hint:    "add `export default function Layout({ children }) { return <>{children}</> }`",
+		}
+	}
 
 	// The layout's full module graph is both its cache-invalidation key and a
 	// dependency of every page it wraps.
@@ -2277,7 +2304,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
 	annotator.ReclassifyTiers(ann, b.Cfg)
 	opts := b.irBuildOptions()
-	opts.IDPrefix = layoutIDPrefix(layoutPath)
+	opts.IDPrefix = b.layoutIDPrefix(layoutPath)
 	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(layoutModule.Program, extraLayoutPrograms)
 	opts.GoComponents = b.collectGoComponents(layoutBundle, b.Root)
 	opts.ActionURLs = layoutBundle.ActionImports
@@ -2442,12 +2469,36 @@ func findPages(dir string) ([]string, error) {
 	exts := map[string]bool{".tsx": true, ".ts": true, ".jsx": true, ".js": true, ".md": true, ".mdx": true}
 	_ = fsutil.WalkExt(dir, exts, nil, func(path string, _ os.FileInfo) error {
 		base := filepath.Base(path)
-		if !strings.HasPrefix(base, "_") && !isUseServerFile(path) {
+		if !strings.HasPrefix(base, "_") && !isRouteConventionFile(base) && !isUseServerFile(path) {
 			pages = append(pages, path)
 		}
 		return nil
 	})
 	return pages, nil
+}
+
+// hasDefaultExportStmt reports whether a module has an `export default`.
+func hasDefaultExportStmt(prog *ast.Program) bool {
+	for _, stmt := range prog.Body {
+		if exp, ok := stmt.(*ast.ExportStmt); ok && exp.Default {
+			return true
+		}
+	}
+	return false
+}
+
+// isRouteConventionFile reports whether a file name is a routing convention
+// (loading UI, template) rather than a page: loading.tsx and template.tsx
+// never become /loading or /template routes.
+func isRouteConventionFile(base string) bool {
+	for _, names := range [][]string{loadingNames, templateNames} {
+		for _, n := range names {
+			if base == n {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // renderLoadingComponent finds and renders loading.tsx for a page's directory.
@@ -2527,30 +2578,43 @@ func findLayout(pagePath, pagesDir string) string {
 	return findLayoutFile(pagePath, pagesDir, layoutNames)
 }
 
+// routeBoundary is one layout or template wrapping a page.
+type routeBoundary struct {
+	Path string
+	// Kind is "layout" or "template".
+	Kind string
+}
+
 // findLayoutStack returns every layout wrapping pagePath, ordered innermost
-// first: the layout nearest to the page, then each ancestor layout up to (and
-// including) the pagesDir root. A page under blog/ with both blog/_layout and
-// _layout at pagesDir gets [blog/_layout, pagesDir/_layout] so the root shell
-// (nav/footer) can wrap a nested section layout. Pages outside pagesDir (e.g.
-// .krate/gen plugin pages) only collect layouts found in their own tree and
-// never fall back to the app root layout.
+// first (see findRouteStack, which also returns templates).
 func findLayoutStack(pagePath, pagesDir string) []string {
-	var stack []string
+	var out []string
+	for _, rb := range findRouteStack(pagePath, pagesDir) {
+		if rb.Kind == "layout" {
+			out = append(out, rb.Path)
+		}
+	}
+	return out
+}
+
+// findRouteStack returns every layout and template wrapping pagePath, ordered
+// innermost first: walking up from the page's directory, each directory
+// contributes its template (inner) and then its layout (outer), so the
+// document order is layout > template > page. A page under blog/ with
+// blog/_layout and _layout at pagesDir gets [blog/_layout, pagesDir/_layout]
+// so the root shell (nav/footer) can wrap a nested section layout. Pages
+// outside pagesDir (e.g. .krate/gen plugin pages) only collect boundaries
+// found in their own tree and never fall back to the app root layout.
+func findRouteStack(pagePath, pagesDir string) []routeBoundary {
+	var stack []routeBoundary
 	dir := filepath.Dir(pagePath)
 	for {
+		if tpl := firstExisting(dir, templateNames); tpl != "" {
+			stack = append(stack, routeBoundary{Path: tpl, Kind: "template"})
+		}
 		for _, name := range layoutNames {
-			candidate := filepath.Join(dir, name)
-			if cached, ok := layoutCache.Load(candidate); ok {
-				if cached.(string) != "" {
-					stack = append(stack, cached.(string))
-				}
-				continue
-			}
-			if _, err := os.Stat(candidate); err == nil {
-				layoutCache.Store(candidate, candidate)
-				stack = append(stack, candidate)
-			} else {
-				layoutCache.Store(candidate, "")
+			if p := firstExisting(dir, []string{name}); p != "" {
+				stack = append(stack, routeBoundary{Path: p, Kind: "layout"})
 			}
 		}
 		if dir == pagesDir {
@@ -2565,46 +2629,179 @@ func findLayoutStack(pagePath, pagesDir string) []string {
 	return stack
 }
 
-// applyLayoutStack wraps emitResult.HTML in every layout returned by
-// findLayoutStack, innermost first. Each layout's metadata (head/script/style)
-// is merged after the inner content so an outer layout's own head/style lands
-// after (and thus after the nested section's). A layout that fails to build is
-// skipped so the page still emits unwrapped. Returns the CSS contributed by the
-// applied layouts and the layout paths used, so the caller can record them as
-// page dependencies (a layout edit must rebuild every page it wraps).
-func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult) (string, []string, bool) {
+// firstExisting returns the first dir/name that exists (memoized in
+// layoutCache), or "".
+func firstExisting(dir string, names []string) string {
+	for _, name := range names {
+		candidate := filepath.Join(dir, name)
+		if cached, ok := layoutCache.Load(candidate); ok {
+			if cached.(string) != "" {
+				return cached.(string)
+			}
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			layoutCache.Store(candidate, candidate)
+			return candidate
+		}
+		layoutCache.Store(candidate, "")
+	}
+	return ""
+}
+
+// routeChainEntry describes one layout/template boundary in the per-page
+// route info the SPA router reads (see routeInfoScript).
+type routeChainEntry struct {
+	ID   string `json:"id"`
+	Kind string `json:"k"`
+	// Depth is the number of URL segments the boundary's directory covers,
+	// -1 when a catch-all segment makes it cover the rest of the path. The
+	// router keeps a layout mounted only while those segments are unchanged.
+	Depth   int    `json:"d"`
+	Persist bool   `json:"p"`
+	Why     string `json:"why,omitempty"`
+	File    string `json:"f,omitempty"`
+}
+
+// routeDepth counts the URL segments of dir relative to pagesDir. Route
+// groups "(name)" and parallel-route slots "@name" do not appear in URLs.
+func routeDepth(dir, pagesDir string) int {
+	rel, err := filepath.Rel(pagesDir, dir)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return 0
+	}
+	n := 0
+	for _, seg := range strings.Split(filepath.ToSlash(rel), "/") {
+		if isRouteGroup(seg) || strings.HasPrefix(seg, "@") {
+			continue
+		}
+		if strings.HasPrefix(seg, "[...") || strings.HasPrefix(seg, "[[...") {
+			return -1
+		}
+		n++
+	}
+	return n
+}
+
+// isRouteGroup reports whether a directory name is a route group "(name)".
+// Intercepting-route prefixes "(.)" / "(..)" / "(...)" are not groups.
+func isRouteGroup(seg string) bool {
+	return len(seg) > 2 && seg[0] == '(' && seg[len(seg)-1] == ')' && !strings.HasPrefix(seg, "(.")
+}
+
+// applyLayoutStack wraps emitResult.HTML in every layout and template
+// returned by findRouteStack, innermost first. Each boundary's children are
+// bracketed by <!--kl:ID--> markers so the SPA router can swap only the
+// deepest boundary that differs between two routes. Each boundary's metadata
+// (head/script/style) is merged after the inner content so an outer layout's
+// own head/style lands after the nested section's. A boundary that fails to
+// build fails the page with a diagnostic. Returns the CSS contributed by the
+// boundaries, the files used (page dependencies), whether any uses CSS
+// signals, and the route chain (outermost first).
+func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult) (string, []string, bool, []routeChainEntry, error) {
 	var css string
 	var used []string
 	hasSignals := false
-	for _, layoutPath := range findLayoutStack(page, b.Cfg.PagesDir) {
-		layoutRes, layoutCSS, layoutDeps, layoutHasSignals, err := b.executeLayoutPipeline(layoutPath, emitResult.HTML, nil)
+	var chain []routeChainEntry
+	for _, rb := range findRouteStack(page, b.Cfg.PagesDir) {
+		id := b.layoutIDPrefix(rb.Path)
+		open, end := "<!--kl:"+id+"-->", "<!--/kl:"+id+"-->"
+		layoutRes, layoutCSS, layoutDeps, layoutHasSignals, err := b.executeLayoutPipeline(rb.Path, open+emitResult.HTML+end, nil)
+		relPath := rb.Path
+		if rel, rerr := filepath.Rel(b.Root, rb.Path); rerr == nil {
+			relPath = filepath.ToSlash(rel)
+		}
 		if err != nil {
-			continue
+			var d diag.Diagnostic
+			var re *renderError
+			if errors.As(err, &d) || errors.As(err, &re) {
+				return "", nil, false, nil, err
+			}
+			return "", nil, false, nil, diag.Diagnostic{
+				File:    rb.Path,
+				Message: fmt.Sprintf("%s %s failed to build: %v", rb.Kind, relPath, err),
+				Hint:    "fix the " + rb.Kind + " (it must default-export a component that renders {children}); every page under its directory depends on it",
+			}
+		}
+		entry := routeChainEntry{ID: id, Kind: rb.Kind, Depth: routeDepth(filepath.Dir(rb.Path), b.Cfg.PagesDir), File: relPath}
+		switch n := strings.Count(layoutRes.HTML, open); {
+		case n == 0:
+			b.printRouteWarning(diag.Diagnostic{
+				File:     rb.Path,
+				Message:  fmt.Sprintf("%s %s does not render {children}; the page content of %s is dropped", rb.Kind, relPath, filepath.Base(page)),
+				Hint:     "render {children} (or props.children) where the page should appear",
+				Severity: diag.SeverityWarning,
+			})
+			entry.Why = "the " + rb.Kind + " does not render {children}"
+		case n > 1:
+			entry.Why = "the " + rb.Kind + " renders {children} more than once"
 		}
 		hasSignals = hasSignals || layoutHasSignals
 		emitResult.HTML = layoutRes.HTML
 		emitResult.HeadHTML = emitResult.HeadHTML + layoutRes.HeadHTML
 		emitResult.ScriptHTML = emitResult.ScriptHTML + layoutRes.ScriptHTML
 		emitResult.StyleHTML = emitResult.StyleHTML + layoutRes.StyleHTML
-		// Carry the layout's client components into the page so its interactivity
-		// hydrates. Their compact slot IDs are namespaced (IDPrefix) so they can't
-		// collide with the page's.
-		emitResult.Signatures = append(emitResult.Signatures, layoutRes.Signatures...)
+		// Carry the boundary's client components into the page so its
+		// interactivity hydrates. Their compact slot IDs are namespaced
+		// (IDPrefix) so they can't collide with the page's; RouteScope lets the
+		// router skip them while the layout stays mounted.
+		for _, sig := range layoutRes.Signatures {
+			sig.RouteScope = id
+			emitResult.Signatures = append(emitResult.Signatures, sig)
+		}
 		emitResult.ListComponents = append(emitResult.ListComponents, layoutRes.ListComponents...)
 		if layoutRes.HasLinks {
 			emitResult.HasLinks = true
 		}
 		css += layoutCSS
-		// Record the layout's full module graph (not just the layout file) so
-		// editing a component the layout imports rebuilds every wrapped page.
 		used = append(used, layoutDeps...)
+		chain = append([]routeChainEntry{entry}, chain...)
 	}
-	return css, used, hasSignals
+	return css, used, hasSignals, chain, nil
+}
+
+// printRouteWarning prints a non-fatal routing diagnostic.
+func (b *Builder) printRouteWarning(d diag.Diagnostic) {
+	fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n", cYellow, cReset, d.Error())
+	if d.Hint != "" {
+		fmt.Fprintf(os.Stderr, "      hint: %s\n", d.Hint)
+	}
+}
+
+// routeInfoScript returns the per-page route info consumed by the SPA router
+// (a JSON <script> after #root). Each boundary is persistable when it is a
+// layout whose hydration scope can be skipped (see RouteScopeBlockers).
+func routeInfoScript(chain []routeChainEntry, sigs []irtree.ComponentSignature) string {
+	if len(chain) == 0 {
+		return ""
+	}
+	blockers := renderer.RouteScopeBlockers(sigs)
+	out := make([]routeChainEntry, len(chain))
+	for i, e := range chain {
+		if e.Why == "" {
+			e.Why = blockers[e.ID]
+		}
+		e.Persist = e.Kind == "layout" && e.Why == ""
+		out[i] = e
+	}
+	data, err := json.Marshal(map[string]interface{}{"v": 1, "chain": out})
+	if err != nil {
+		return ""
+	}
+	return `<script type="application/json" id="__krate_route">` + escapeJSONForScript(string(data)) + `</script>`
+}
+
+// escapeJSONForScript keeps JSON inert inside a <script> element.
+func escapeJSONForScript(s string) string {
+	s = strings.ReplaceAll(s, "<", "\\u003c")
+	s = strings.ReplaceAll(s, ">", "\\u003e")
+	return strings.ReplaceAll(s, "&", "\\u0026")
 }
 
 var (
-	layoutNames  = []string{"_layout.tsx", "_layout.ts", "_layout.jsx", "_layout.js"}
-	loadingNames = []string{"loading.tsx", "loading.ts", "loading.jsx", "loading.js"}
+	layoutNames   = []string{"_layout.tsx", "_layout.ts", "_layout.jsx", "_layout.js"}
+	templateNames = []string{"_template.tsx", "_template.ts", "_template.jsx", "_template.js", "template.tsx", "template.ts", "template.jsx", "template.js"}
+	loadingNames  = []string{"loading.tsx", "loading.ts", "loading.jsx", "loading.js"}
 )
 
 // findLayoutFile walks up from pagePath toward pagesDir checking each directory

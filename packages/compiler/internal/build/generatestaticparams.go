@@ -576,13 +576,14 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		emitResult.HTML = "<!--suspense:page-->" + emitResult.HTML + "<!--/suspense:page-->"
 	}
 
-	layoutPath := findLayout(spp.PagePath, b.Cfg.PagesDir)
 	var deps []string
-	if layoutPath != "" {
-		layoutCSS, layoutFiles, _ := b.applyLayoutStack(spp.PagePath, emitResult)
-		bundle.CSS += layoutCSS
-		deps = append(deps, layoutFiles...)
+	layoutCSS, layoutFiles, _, routeChain, layoutErr := b.applyLayoutStack(spp.PagePath, emitResult)
+	if layoutErr != nil {
+		return nil, "", layoutErr
 	}
+	bundle.CSS += layoutCSS
+	deps = append(deps, layoutFiles...)
+	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures)
 
 	// Record the dynamic-route template's module graph (plus any wrapping
 	// layouts) so editing blog/[slug].tsx or a layout rebuilds its expanded

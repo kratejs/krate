@@ -137,12 +137,12 @@ func assetHref(basePath, asset string) string {
 
 // generateHTMLWithLoading is like generateHTML but includes a loading template for SPA transitions.
 func generateHTMLWithLoading(bodyHTML, headHTML, scriptHTML, styleHTML, loadingHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
-	html := generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML, cssFiles, jsFile, runtimeJSFile, route, devMode, devBootstrap, runtimeHead, basePath, modulePreloads...)
+	// The template is the last child of #root (the router overlays it while a
+	// navigation is in flight).
 	if loadingHTML != "" {
-		loadingTemplate := "<template data-krate-loading>" + loadingHTML + "</template>"
-		html = strings.Replace(html, "</div>\n</body>", loadingTemplate+"</div>\n</body>", 1)
+		bodyHTML += "<template data-krate-loading>" + loadingHTML + "</template>"
 	}
-	return html
+	return generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML, cssFiles, jsFile, runtimeJSFile, route, devMode, devBootstrap, runtimeHead, basePath, modulePreloads...)
 }
 
 // pageScriptSrc returns the absolute site URL for a page's hydration script.
