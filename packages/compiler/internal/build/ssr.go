@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -427,7 +428,15 @@ func (s *SSRServer) FindPageForRoute(urlPath string) (*ManifestPage, map[string]
 	if s.manifest == nil {
 		return nil, nil
 	}
-	for i := range s.manifest.Pages {
+	// Most specific pattern first: static > [param] > [...catchAll] > [[...optional]].
+	order := make([]int, len(s.manifest.Pages))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		return compareRouteSpecificity(s.manifest.Pages[order[a]].Route, s.manifest.Pages[order[b]].Route) < 0
+	})
+	for _, i := range order {
 		p := &s.manifest.Pages[i]
 		if params, ok := matchRoute(urlPath, p.Route); ok {
 			return p, params
@@ -570,24 +579,7 @@ func readFileString(path string) string {
 }
 
 func matchRoute(urlPath, pattern string) (map[string]string, bool) {
-	urlParts := strings.Split(strings.Trim(urlPath, "/"), "/")
-	patParts := strings.Split(strings.Trim(pattern, "/"), "/")
-
-	if len(urlParts) != len(patParts) {
-		return nil, false
-	}
-
-	params := make(map[string]string)
-	for i, pp := range patParts {
-		if strings.HasPrefix(pp, "[") && strings.HasSuffix(pp, "]") {
-			paramName := pp[1 : len(pp)-1]
-			params[paramName] = urlParts[i]
-		} else if pp != urlParts[i] {
-			return nil, false
-		}
-	}
-
-	return params, true
+	return matchRoutePattern(urlPath, pattern)
 }
 
 // stageCacheRuntime bundles the @krate/runtime data-cache runtime (the

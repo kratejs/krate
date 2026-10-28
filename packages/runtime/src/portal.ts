@@ -175,8 +175,16 @@ export function kratePortalFind(selector: string, roots: ParentNode[]): Element 
   return found;
 }
 
-/** Forgets the portal state of the previous page (SPA navigation). */
+/**
+ * Forgets the portal state of the previous page (SPA navigation). Portals
+ * whose anchor is still in the document (inside a layout the router kept
+ * mounted) stay mounted.
+ */
 export function kratePortalReset(): void {
-  for (const a of Array.from(mounted)) kratePortalUnmount(a, true);
-  resolvers.clear();
+  const live = new Set<string>();
+  for (const a of Array.from(mounted)) {
+    if (!a.isConnected) kratePortalUnmount(a, true);
+    else live.add(a.getAttribute('data-krate-portal') || '');
+  }
+  for (const id of Array.from(resolvers.keys())) if (!live.has(id)) resolvers.delete(id);
 }

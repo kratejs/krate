@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -2240,42 +2241,30 @@ func findDynamicRoutes(absOut string) []dynamicRoute {
 		if err != nil || !info.IsDir() {
 			return nil
 		}
-		base := info.Name()
-		if strings.Contains(base, "[") && strings.Contains(base, "]") {
+		rel, rerr := filepath.Rel(absOut, path)
+		if rerr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		// Any directory under a [param] segment is a template, including
+		// static leaves below one (blog/[slug]/comments).
+		if isDynamicPattern(rel) {
 			// Only include directories that have an index.html (actual page templates)
-			indexFile := filepath.Join(path, "index.html")
-			if _, statErr := os.Stat(indexFile); statErr == nil {
-				rel, err := filepath.Rel(absOut, path)
-				if err == nil {
-					routes = append(routes, dynamicRoute{
-						pattern: filepath.ToSlash(rel),
-						dir:     path,
-					})
-				}
+			if _, statErr := os.Stat(filepath.Join(path, "index.html")); statErr == nil {
+				routes = append(routes, dynamicRoute{pattern: rel, dir: path})
 			}
 		}
 		return nil
 	})
+	// Deterministic, most specific first (see compareRouteSpecificity).
+	sort.SliceStable(routes, func(i, j int) bool { return compareRouteSpecificity(routes[i].pattern, routes[j].pattern) < 0 })
 	return routes
 }
 
 // matchDynamicRoute checks if a URL path matches a dynamic route pattern and returns params.
 // e.g. matchDynamicRoute("/video/abc123", "video/[id]") returns {id: "abc123"}, true
 func matchDynamicRoute(urlPath, pattern string) (map[string]string, bool) {
-	urlParts := strings.Split(strings.Trim(urlPath, "/"), "/")
-	patParts := strings.Split(strings.Trim(pattern, "/"), "/")
-	if len(urlParts) != len(patParts) {
-		return nil, false
-	}
-	params := make(map[string]string)
-	for i, pp := range patParts {
-		if strings.HasPrefix(pp, "[") && strings.HasSuffix(pp, "]") {
-			params[pp[1:len(pp)-1]] = urlParts[i]
-		} else if pp != urlParts[i] {
-			return nil, false
-		}
-	}
-	return params, true
+	return matchRoutePattern(urlPath, pattern)
 }
 
 // applyDynamicRouteParams renders a built dynamic-route template for one

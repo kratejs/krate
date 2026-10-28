@@ -616,6 +616,11 @@ type ComponentSignature struct {
 	// Class marks a lowered React class component; pages that render one use
 	// the owner tree.
 	Class bool
+
+	// RouteScope is the layout/template boundary id the component belongs to
+	// ("" for page components). The SPA router skips the hydration of scopes
+	// whose layout stayed mounted across a soft navigation.
+	RouteScope string
 }
 
 // CondBranch names one branch ("c" consequent, "a" alternate) of a

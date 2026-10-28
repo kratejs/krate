@@ -24,8 +24,18 @@ export { h, mount, hydrate, insert, clearNodes, disposeNode, krateApplyStyle } f
 export { krateList, krateBindList } from './list.js';
 export { krateCondSwap, krateCondDetached, krateCondReset, krateSanitizeAttr, BLOCKED_URL } from './slots.js';
 export { Fragment, jsx, jsxs } from './jsx-runtime.js';
-export { initRouter, reinitRouter, navigate } from './router.js';
-export type { NavigateOptions } from './router.js';
+export {
+  initRouter,
+  reinitRouter,
+  destroyRouter,
+  navigate,
+  krateRouter,
+  subscribeNavigation,
+  getNavigationState,
+  getHistoryState,
+  invalidatePrefetchCache,
+} from './router.js';
+export type { NavigateOptions, NavigationState } from './router.js';
 export { clsx, cn, cva, twMerge, Slot, cloneElement } from './class-helpers.js';
 export type { ClassValue, CVAConfig } from './class-helpers.js';
 export { createContext, createScope, createScopeFlags, resetContexts } from './context.js';

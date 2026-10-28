@@ -110,10 +110,15 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 	// Each scope's span is recorded so suspending and lazy components can be
 	// rewritten afterwards (see suspense.go).
 	var spans []sigSpan
+	blockers := RouteScopeBlockers(result.Signatures)
 	for i := range result.Signatures {
 		sig := result.Signatures[i]
 		if sig.Tier != irtree.TierClient {
 			continue
+		}
+		scoped := routeScoped(sig, blockers)
+		if scoped {
+			b.WriteString(routeScopeOpen(sig.RouteScope))
 		}
 		spanStart := b.Len()
 		// Label each scope with its component so the readable dev output can be
@@ -385,6 +390,9 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			b.WriteString("})();\n")
 		}
 		spans = append(spans, sigSpan{sig: &result.Signatures[i], start: spanStart, end: b.Len()})
+		if scoped {
+			b.WriteString(routeScopeClose)
+		}
 	}
 	if owners {
 		b.WriteString("__ko(null);\n")

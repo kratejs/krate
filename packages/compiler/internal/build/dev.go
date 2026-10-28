@@ -362,6 +362,11 @@ func layoutOrLoadingFile(path string) bool {
 			return true
 		}
 	}
+	for _, name := range templateNames {
+		if base == name {
+			return true
+		}
+	}
 	return false
 }
 

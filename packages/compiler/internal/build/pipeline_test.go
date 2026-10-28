@@ -89,13 +89,17 @@ func TestBuildLayoutChildrenInjection(t *testing.T) {
 	}
 }
 
-// TestBuildLoadingPageRendered verifies src/pages/loading.tsx is emitted and
-// rendered into the loading route's HTML.
+// TestBuildLoadingPageRendered verifies src/pages/loading.tsx is the loading
+// UI of the pages beside it (a data-krate-loading template the SPA router
+// overlays during navigation), not a stray /loading route.
 func TestBuildLoadingPageRendered(t *testing.T) {
 	outDir := buildTestProject(t)
-	html := readOut(t, outDir, filepath.Join("loading", "index.html"))
-	if !strings.Contains(html, "Loading page content...") {
-		t.Errorf("expected loading page content rendered, got:\n%.400s", html)
+	if _, err := os.Stat(filepath.Join(outDir, "loading", "index.html")); err == nil {
+		t.Errorf("loading.tsx must not be emitted as a /loading page")
+	}
+	html := readOut(t, outDir, filepath.Join("about", "index.html"))
+	if !strings.Contains(html, "<template data-krate-loading>") || !strings.Contains(html, "Loading page content...") {
+		t.Errorf("expected the loading template in the page, got:\n%.400s", html)
 	}
 }
 
