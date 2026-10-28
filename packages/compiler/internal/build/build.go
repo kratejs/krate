@@ -322,6 +322,17 @@ func (b *Builder) ensureTransformed(prog *ast.Program) {
 	})
 }
 
+// ensureTransformedModules transforms every module in a page's bundle. Page
+// builds share cached ASTs, so this must finish before any AST reader runs.
+func (b *Builder) ensureTransformedModules(mods []*bundler.Module) {
+	for _, mod := range mods {
+		if mod == nil || mod.IsExternal || mod.IsCSS || mod.Program == nil {
+			continue
+		}
+		b.ensureTransformed(mod.Program)
+	}
+}
+
 // contentHashOf returns a stable hash of the build's content collections. It is
 // used to invalidate the module cache when content changes (cached ASTs have
 // their getCollection calls inlined).
@@ -1581,6 +1592,11 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	// module at the final program so all downstream stages render the edited tree.
 	entryModule.Program = parseCtx.Program
 
+	// Universal transforms mutate shared cached ASTs. Run them for the whole
+	// module graph before any pass reads those ASTs, so concurrent page builds
+	// serialize on each module's sync.Once instead of racing a reader.
+	b.ensureTransformedModules(bundle.Modules)
+
 	// Detect rendering mode (SSR/ISR/Streaming) from AST exports + <Suspense>
 	// usage, falling back to the page's data-cache reads (tagged/timed fetch).
 	renderMode, revalidate, dataUsage := resolvePageRenderMode(page, entryModule, bundle.Modules)
@@ -1643,19 +1659,10 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	staticOnly := isDynRoute && !allowDynamic
 
 	stopCompile := b.phase("page:compile")
-	b.ensureTransformed(entryModule.Program)
 
 	// New pipeline: Annotate -> Build IR -> Emit
-	// Transform <Icon>/<Image> in imported component modules too. These are
-	// universal built-in components, so their JSX must be compiled to concrete
-	// SVG/picture markup wherever they appear - including inside library
-	// components like LinkCard that the page imports. Skipping imported modules
-	// leaves <Icon> as an unresolved component slot that renders nothing.
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, page, entryModule.SourceCode)
 	extraPrograms := moduleSources(bundle.Modules, entryModule)
-	for _, mp := range extraPrograms {
-		b.ensureTransformed(mp.Program)
-	}
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
 	// Re-classify tiers for any newly discovered components

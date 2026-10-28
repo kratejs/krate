@@ -195,7 +195,7 @@ func serverExportEntrySuffix(exports []ServerExport, pagePath string) string {
 	var b strings.Builder
 	b.WriteString("\n")
 	for _, e := range exports {
-		if filepath.Clean(e.SourcePath) == filepath.Clean(pagePath) {
+		if samePath(e.SourcePath, pagePath) {
 			fmt.Fprintf(&b, "export { %s as %s };\n", e.Name, e.Key)
 			continue
 		}
@@ -215,10 +215,14 @@ func serverExportEntrySuffix(exports []ServerExport, pagePath string) string {
 func serverExportPlugin(exports []ServerExport, pagePath string) api.Plugin {
 	byFile := map[string][]ServerExport{}
 	for _, e := range exports {
-		if filepath.Clean(e.SourcePath) == filepath.Clean(pagePath) {
+		if samePath(e.SourcePath, pagePath) {
 			continue
 		}
-		byFile[filepath.Clean(e.SourcePath)] = append(byFile[filepath.Clean(e.SourcePath)], e)
+		key := filepath.Clean(e.SourcePath)
+		byFile[key] = append(byFile[key], e)
+		if resolved := canonicalPath(e.SourcePath); resolved != key {
+			byFile[resolved] = append(byFile[resolved], e)
+		}
 	}
 	return api.Plugin{
 		Name: "krate-server-exports",

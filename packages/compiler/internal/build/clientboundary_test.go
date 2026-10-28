@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
@@ -79,6 +80,39 @@ export default async function Home() {
 		if !strings.Contains(string(bundle), want) {
 			t.Errorf("page bundle missing %q:\n%s", want, bundle)
 		}
+	}
+}
+
+// A project root reached through a symlink (macOS /var -> /private/var) must
+// still match esbuild's canonical module paths when it loads client boundaries.
+func TestClientBoundaryThroughSymlinkedRoot(t *testing.T) {
+	real := t.TempDir()
+	writeFileRel(t, real, "src/components/Counter.tsx", counterClientSrc)
+	writeFileRel(t, real, "src/pages/index.tsx", `import Counter from "../components/Counter";
+export default async function Home() {
+  await Promise.resolve();
+  return <main><Counter start={1} label="n" /></main>;
+}`)
+	link := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(real, link); err != nil {
+		if out, jerr := exec.Command("cmd", "/c", "mklink", "/J", link, real).CombinedOutput(); jerr != nil {
+			t.Skipf("cannot create a symlinked project root: %v (%s)", jerr, out)
+		}
+	}
+	withPreact(t, link)
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(link, "src", "pages")
+	cfg.OutDir = filepath.Join(link, "dist")
+	b := New(link, cfg)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	bundle, err := os.ReadFile(filepath.Join(link, "dist", ".krate", "server-bundles", "index.server.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(bundle), "clientBoundary") {
+		t.Fatalf("page bundle through a symlinked root has no client boundary:\n%s", bundle)
 	}
 }
 

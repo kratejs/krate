@@ -501,6 +501,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	b.runPageHook("AfterParse", spp.PagePath, parseCtx, func() error { return plugin.RunAfterParse(parseCtx) })
 	entryModule.Program = parseCtx.Program
 
+	b.ensureTransformedModules(bundle.Modules)
 	renderMode, revalidate, _ := resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules)
 
 	// Global streaming override: if configured, all *static* pages stream.
@@ -511,9 +512,6 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		fmt.Fprintf(os.Stderr, "  %s⚡%s %s → streaming (global override)\n", cCyan, cReset, filepath.Base(spp.PagePath))
 	}
 
-	b.TransformUniversalIcons(entryModule.Program)
-	b.TransformUniversalImages(entryModule.Program)
-	b.FlattenComponentSpreadAttrs(entryModule.Program)
 	// Bind route params (e.g. slug) to their concrete values, then inline
 	// getCollection so `[slug].tsx` pages can look up the matching entry at
 	// build time.

@@ -100,6 +100,7 @@ async function __krateCallAction(url, args) {
 
 // clientModuleID is the stable boundary id of a module.
 func clientModuleID(root, path string) string {
+	root, path = canonicalPath(root), canonicalPath(path)
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		rel = path
@@ -125,6 +126,9 @@ func (b *Builder) prepareClientBoundaries(bundle *bundler.Bundle, ann *irtree.An
 		}
 		if bundler.HasUseClientDirective(mod.SourceCode) {
 			clientMods[filepath.Clean(mod.Path)] = mod
+			if resolved := canonicalPath(mod.Path); resolved != filepath.Clean(mod.Path) {
+				clientMods[resolved] = mod
+			}
 		}
 	}
 	if errs := checkServerTree(ann, roots, clientMods, bundle.ActionImports); len(errs) > 0 {
@@ -582,6 +586,9 @@ func clientBoundaryPlugin(boundaries []ClientBoundary, impls *clientSSRImpls, ou
 			return api.Plugin{}, err
 		}
 		byPath[filepath.Clean(cb.SourcePath)] = cb
+		if resolved := canonicalPath(cb.SourcePath); resolved != filepath.Clean(cb.SourcePath) {
+			byPath[resolved] = cb
+		}
 	}
 	markers := clientOnlyMarkersPlugin(false)
 	return api.Plugin{
