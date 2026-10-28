@@ -13,6 +13,10 @@ function binaryName(): string {
 }
 
 export function resolveBinary(): string {
+  // Explicit override for tests and custom deployments.
+  const override = process.env.KRATE_BINARY;
+  if (override && existsSync(override)) return override;
+
   const pkgName = `@krate/core-${process.platform}-${process.arch}`;
   try {
     const pkgPath = dirname(require.resolve(`${pkgName}/package.json`));
@@ -40,7 +44,11 @@ export function execBinary(args: string[], cwd?: string): Promise<void> {
     });
     proc.on('close', (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`krate exited with code ${code}`));
+      else {
+        const err = new Error(`krate exited with code ${code}`) as Error & { exitCode?: number };
+        err.exitCode = code ?? 1;
+        reject(err);
+      }
     });
     proc.on('error', (err) => {
       reject(new Error(`Failed to run krate binary: ${err.message}`));

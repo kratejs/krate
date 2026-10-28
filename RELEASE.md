@@ -45,16 +45,17 @@ workflow run it.
 
 ## Migration backup and rollback
 
-`krate migrate` is not part of the v1 release; the migration commands remain in
-the N1/N5 roadmap. The policy for a future migration command is:
+The Next.js migrator (`krate migrate nextjs`) is an early migration command and
+implements this policy. It remains conservative: it reports manual work rather
+than rewriting patterns it cannot prove safe. The policy is:
 
 - Take a user-visible backup (or require a clean git worktree) before writing.
 - Write changes atomically and support `--dry-run`.
 - Leave every original file recoverable until the migration completes.
 - A failed migration restores the backup; a successful migration can be undone
-  with git or the backup.
+  with `krate migrate rollback <backup-dir>` or git.
 
-For v1, rollback of a release is:
+For a release, rollback is:
 
 1. Restore the previous published dist-tag (npm `dist-tag add`) or pin the
    previous package version.

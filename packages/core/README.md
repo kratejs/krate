@@ -21,6 +21,14 @@ krate dev        # dev server with hot reload
 krate serve      # build, then serve for preview
 krate types      # generate route/content TypeScript declarations
 krate check      # run quality gates (a11y/SEO/perf)
+krate fix        # apply safe source fixes
+krate migrate    # plan or apply a framework migration
+krate inspect    # print the compiled site model
+krate deploy     # build and write host adapter files
+krate clean      # remove build output and caches
+krate doctor     # print a diagnostic summary
+krate config     # print the resolved configuration
+krate go:init    # set up Go module helpers
 krate plugin add <package>
 krate mcp        # MCP server for editors/agents
 krate version

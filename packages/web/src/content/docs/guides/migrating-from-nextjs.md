@@ -28,7 +28,65 @@ signals.
 | `next/link` | global `<Link>` (or `<a data-krate-link>`) |
 | `next/image` | global `<Image>` |
 | `next/head` | global `<Head>` |
-| API routes `app/api/x/route.ts` | `src/api/x.ts` (JS) or `src/api/x.go` (Go) |`r`n| `"use server"` actions | `"use server"` module; see [Server Actions](/docs/guides/server-actions/) |
+| API routes `app/api/x/route.ts` | `src/api/x.ts` (JS) or `src/api/x.go` (Go) |
+| `"use server"` actions | `"use server"` module; see [Server Actions](/docs/guides/server-actions/) |
+
+## Use the migration CLI
+
+Start with a dry run from the Next.js project root:
+
+```sh
+krate migrate nextjs
+```
+
+The planner detects App Router (`app/`) and Pages Router (`pages/`) files and
+prints every copy plus every item it will not rewrite. Apply it with:
+
+```sh
+krate migrate nextjs --apply
+```
+
+Add `--update-package` to also add `krate` scripts and `@krate/*` dependencies
+to `package.json`; `package.json` already exists, so pair it with `--force`.
+Next.js dependencies are left in place until the migrated app builds cleanly.
+
+The first pass:
+
+- copies `app/**/page.*`, `pages/**/*`, layouts, `loading` files,
+  root `not-found`, and API handlers into `src/pages/` and `src/api/`;
+- copies Pages Router `_app` and wraps it as the root `_layout.tsx` shell;
+- copies app-local relative imports under `src/migrated/` and rewrites the
+  migrated route imports to point at them;
+- strips `"use client"` and default imports from `next/link`, `next/image`, and
+  `next/head` (Krate exposes those as globals);
+- translates static `next.config.*` redirects, rewrites, headers, `basePath`, and
+  image breakpoints/formats/remote patterns into the generated config, maps
+  static root `metadata` to `site` config, and wraps static/synchronous
+  `generateMetadata` results in `<Head>`;
+- rewrites `middleware.ts` to the standard `Request`/`Response` API, including a
+  small `NextResponse` shim, static/local matcher checks, and cookie/IP/geo
+  helpers; computed `config.matcher` arrays are checked at runtime;
+- strips root-layout `<html>`/`<body>` wrappers and generates error-boundary
+  layouts for `error.tsx`;
+- generates `next/navigation` hook helpers, maps `next/headers` to
+  `@krate/runtime/server`, rewrites common `next/server` API helpers, and maps
+  simple `next/dynamic` loaders to React `lazy()`;
+- creates `krate.config.ts` when the project has none, or merges missing
+  Next-derived keys into an existing config (existing keys win);
+- leaves the original Next.js tree untouched.
+
+Every apply writes a rollback manifest under
+`.krate/migrate/nextjs-<timestamp>/`. Undo with:
+
+```sh
+krate migrate rollback .krate/migrate/nextjs-<timestamp>
+```
+
+The migrator intentionally reports manual work instead of guessing:
+async `generateMetadata`, async/class default exports with metadata,
+`getStaticProps`/`getServerSideProps`, middleware response rewrites,
+`next/font`, route groups/parallel routes, `template.tsx` boundaries, unresolved relative imports,
+and function/plugin `next.config.*` files are not rewritten automatically. Resolve those before running `krate build`.
 
 ## Steps
 
@@ -73,8 +131,10 @@ signals.
    exporting `GET`/`POST`/etc. Prefer **Go routes** (`src/api/*.go`) for hot
    endpoints.
 
-8. **Config.** Translate `next.config.js` to `krate.config.ts`
-   (`redirects`, `rewrites`, `headers`, `images`, `env`).
+8. **Config.** `krate migrate nextjs` translates static `redirects`,
+   `rewrites`, `headers`, `basePath`, and common `images` settings from
+   `next.config.*` into the generated `krate.config.ts`. Review custom image
+   loaders, `env`, experimental keys, and computed/plugin configs manually.
 
 9. **Build & check.**
 
@@ -96,7 +156,8 @@ aid, not a full React runtime — see
 
 - No `getServerSideProps` / `getStaticProps` — use render modes
   (`export const config = { ssr: true }`) and `createResource`.
-- No React context; share state via module-level signals or props.
+- React context is supported through React interop; module-level signals and
+  props are still the lowest-overhead option.
 - Streaming uses `<Suspense>` with region rendering (see
   [Rendering](/docs/core-concepts/rendering/)).
 

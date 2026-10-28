@@ -39,24 +39,26 @@ const (
 var version = "dev"
 
 type cliFlags struct {
-	ConfigPath  string
-	OutDir      string
-	Watch       bool
-	Verbose     bool
-	Profile     bool
-	Sourcemap   bool
-	NoDCE       bool
-	Precompress bool
-	Mode        string
-	Schema      bool
-	Target      string
-	JSON        bool
-	HTTP        bool
-	Apply       bool
-	Port        int
-	Token       string
-	CPUProfile  string
-	MemProfile  string
+	ConfigPath    string
+	OutDir        string
+	Watch         bool
+	Verbose       bool
+	Profile       bool
+	Sourcemap     bool
+	NoDCE         bool
+	Precompress   bool
+	Mode          string
+	Schema        bool
+	Target        string
+	JSON          bool
+	HTTP          bool
+	Apply         bool
+	Force         bool
+	UpdatePackage bool
+	Port          int
+	Token         string
+	CPUProfile    string
+	MemProfile    string
 }
 
 func main() {
@@ -93,6 +95,8 @@ func main() {
 		runCheck(flags, args)
 	case "fix":
 		runFix(flags, args)
+	case "migrate":
+		runMigrate(flags, args)
 	case "inspect":
 		runInspect(flags, args)
 	case "deploy":
@@ -143,6 +147,10 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "fix":
 		fmt.Fprintf(w, "Usage: krate fix [dir] [--apply]\n\n")
 		fmt.Fprintf(w, "Apply conservative, parse-gated source fixes. Dry-run by default.\n")
+	case "migrate":
+		fmt.Fprintf(w, "Usage: krate migrate nextjs [dir] [--apply] [--force] [--update-package]\n")
+		fmt.Fprintf(w, "       krate migrate rollback <backup-dir>\n\n")
+		fmt.Fprintf(w, "Plan or apply a framework migration. Dry-run by default.\n")
 	case "deploy":
 		fmt.Fprintf(w, "Usage: krate deploy [dir] [--target netlify|vercel|cloudflare|gh-pages]\n\n")
 		fmt.Fprintf(w, "Build the site and write host adapter files (e.g. _redirects, vercel.json).\n")
@@ -182,10 +190,12 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  go:init   Set up go.mod/go.work for Go component intellisense\n")
 	fmt.Fprintf(w, "  check     Run compiler-enforced quality gates (a11y/SEO/perf)\n")
 	fmt.Fprintf(w, "  fix       Apply safe source fixes (dry-run unless --apply)\n")
+	fmt.Fprintf(w, "  migrate   Plan or apply a framework migration\n")
 	fmt.Fprintf(w, "  inspect   Print the compiled site model (--json for machine-readable)\n")
 	fmt.Fprintf(w, "  deploy    Build and write host adapter files (netlify/vercel/...)\n")
 	fmt.Fprintf(w, "  clean     Remove build output (dist) and the compiler cache (.krate/cache)\n")
 	fmt.Fprintf(w, "  doctor    Print a diagnostic summary of the project and toolchain\n")
+	fmt.Fprintf(w, "  config    Print the fully resolved configuration\n")
 	fmt.Fprintf(w, "  plugin    Manage plugins (add <pkg>)\n")
 	fmt.Fprintf(w, "  mcp       Run the MCP server (Model Context Protocol; --http for HTTP)\n")
 	fmt.Fprintf(w, "  version   Print the version\n")
@@ -247,6 +257,10 @@ func parseFlags(args []string) (cliFlags, []string) {
 			flags.HTTP = true
 		case args[i] == "--apply":
 			flags.Apply = true
+		case args[i] == "--force":
+			flags.Force = true
+		case args[i] == "--update-package":
+			flags.UpdatePackage = true
 		case args[i] == "--port" && i+1 < len(args):
 			if n, err := strconv.Atoi(args[i+1]); err == nil {
 				flags.Port = n

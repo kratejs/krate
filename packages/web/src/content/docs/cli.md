@@ -17,6 +17,7 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate go:init [dir]` | Set up `go.mod`/`go.work` + vendored helpers for Go intellisense |
 | `krate check [dir]` | Build and run quality gates (a11y/SEO/perf); non-zero on failure |
 | `krate fix [dir]` | Apply conservative, parse-gated source fixes (dry-run unless `--apply`) |
+| `krate migrate nextjs [dir]` | Plan or apply a conservative Next.js migration |
 | `krate inspect [dir]` | Build and print the compiled site model (`--json`) |
 | `krate deploy [dir]` | Build, then write host adapter files (`--target`) |
 | `krate clean [dir]` | Remove build output and the compiler cache |
@@ -123,6 +124,46 @@ krate fix ./my-site --apply
 
 See [Safe Fixes](/docs/guides/safe-fixes/) for the rewrite list and the manual
 path for every other diagnostic.
+
+## `krate migrate`
+
+Plans a framework migration. Nothing is written until `--apply`; overwriting
+existing targets requires `--force`. Every apply creates a rollback manifest
+under `.krate/migrate/<framework>-<timestamp>/`.
+
+```sh
+krate migrate nextjs
+krate migrate nextjs ./my-site
+krate migrate nextjs --apply
+krate migrate nextjs --apply --force
+krate migrate rollback .krate/migrate/nextjs-20261027-190904
+```
+
+| Flag | Description |
+|------|-------------|
+| `--apply` | Write the plan atomically |
+| `--force` | Allow overwriting existing target files |
+| `--update-package` | Add Krate scripts and dependencies to `package.json` |
+| `--json` | Print the plan (or apply result) as JSON |
+
+The Next.js migrator copies App Router and Pages Router pages, layouts, loading
+and 404 files, and API route handlers into `src/pages` and `src/api`. App-local
+relative imports are copied under `src/migrated/` and their specifiers are
+rewritten. It strips `"use client"` and default imports for `next/link`,
+`next/image`, and `next/head` (Krate provides those as globals), translates static
+`next.config.*` redirects/rewrites/headers/basePath/images, maps static root metadata to
+`site` config, wraps static page metadata in `<Head>`, and rewrites
+`middleware.ts` to the web `Request`/`Response` API, including static matchers
+and cookie/IP/geo shims. `next/navigation` hooks are generated into a
+compatibility helper, `next/headers` maps to `@krate/runtime/server`, and common
+`next/server` API helpers become `Request`/`Response`, and simple
+`next/dynamic` loaders become React `lazy()`. It generates
+`krate.config.ts` when missing, merges missing Next-derived keys into an existing
+config, and reports everything it will not rewrite. With
+`--update-package` it also adds Krate scripts and dependencies while leaving the
+Next.js dependencies in place for verification. Existing targets, including
+`package.json` with `--update-package`, require `--force`. It never deletes the
+original Next.js tree. See [Migrating from Next.js](/docs/guides/migrating-from-nextjs/).
 
 ## `krate inspect`
 

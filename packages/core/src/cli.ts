@@ -15,14 +15,16 @@ const version = JSON.parse(
 function scaffold(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-    const npxArgs = ['--yes', 'create-krate-app@latest'];
-    const dir = args[1];
-    if (dir) npxArgs.push(dir);
+    const npxArgs = ['--yes', 'create-krate-app@latest', ...args.slice(1)];
 
     const proc = spawn(npxCmd, npxArgs, { stdio: 'inherit' });
     proc.on('close', (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`create-krate-app exited with code ${code}`));
+      else {
+        const err = new Error(`create-krate-app exited with code ${code}`) as Error & { exitCode?: number };
+        err.exitCode = code ?? 1;
+        reject(err);
+      }
     });
     proc.on('error', (err) => {
       reject(new Error(`Failed to run create-krate-app: ${err.message}`));
@@ -42,6 +44,14 @@ async function main() {
     console.log('  serve     Build and serve for preview');
     console.log('  types     Generate route/content TypeScript declarations');
     console.log('  check     Run compiler-enforced quality gates (a11y/SEO/perf)');
+    console.log('  fix       Apply safe source fixes');
+    console.log('  migrate   Plan or apply a framework migration');
+    console.log('  inspect   Print the compiled site model');
+    console.log('  deploy    Build and write host adapter files');
+    console.log('  clean     Remove build output and caches');
+    console.log('  doctor    Print a diagnostic summary');
+    console.log('  config    Print the resolved configuration');
+    console.log('  go:init   Set up Go module helpers');
     console.log('  plugin    Manage plugins (e.g. `krate plugin add <pkg>`)');
     console.log('  init      Scaffold a new project (alias: create)');
     console.log('  version   Show version');
@@ -62,7 +72,7 @@ async function main() {
         await scaffold(args);
       } catch (err: any) {
         console.error(err.message);
-        process.exit(1);
+        process.exit(err.exitCode || 1);
       }
       break;
     case 'version':
@@ -71,16 +81,21 @@ async function main() {
     case '--help':
     case '-h':
     case 'help':
-      console.log('Usage: krate <command> [options]');
-      console.log('');
-      console.log('Commands: build, dev, serve, types, check, plugin, init, mcp, version');
+      // Forward help so command-specific help and the canonical command list
+      // come from the native binary instead of drifting here.
+      try {
+        await execBinary(args);
+      } catch (err: any) {
+        console.error(err.message);
+        process.exit(err.exitCode || 1);
+      }
       break;
     default:
       try {
         await execBinary(args);
       } catch (err: any) {
         console.error(err.message);
-        process.exit(1);
+        process.exit(err.exitCode || 1);
       }
   }
 }
