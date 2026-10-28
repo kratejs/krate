@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) { return NextResponse.json({ ok: tru
 		"src/pages/_layout.tsx",
 		"src/pages/about.tsx",
 		"src/pages/blog/[slug].tsx",
-		"src/pages/pricing.tsx",
+		"src/pages/(marketing)/pricing.tsx",
 		"src/api/hello.ts",
 		"src/pages/loading.tsx",
 		"src/pages/404.tsx",
@@ -80,7 +80,7 @@ export async function GET(req: NextRequest) { return NextResponse.json({ ok: tru
 	}
 	for _, target := range want {
 		if findPlan(rep, target) == nil {
-			t.Errorf("missing target %s; got %+v", target, rep.Files)
+			t.Errorf("missing target %s", target)
 		}
 	}
 	if findPlan(rep, "src/pages/dashboard/error.tsx") != nil {
@@ -91,8 +91,8 @@ export async function GET(req: NextRequest) { return NextResponse.json({ ok: tru
 	if page == nil {
 		t.Fatal("index page missing")
 	}
-	if strings.Contains(string(page.Content), "use client") {
-		t.Errorf("use client not removed:\n%s", page.Content)
+	if !strings.Contains(string(page.Content), "use client") {
+		t.Errorf("use client directive must be kept:\n%s", page.Content)
 	}
 	if strings.Contains(string(page.Content), "next/link") || strings.Contains(string(page.Content), "next/image") {
 		t.Errorf("Next globals import not removed:\n%s", page.Content)
@@ -238,7 +238,7 @@ func TestScanNextPagesRouter(t *testing.T) {
 	}
 	for _, target := range []string{"src/pages/index.tsx", "src/pages/about.tsx", "src/api/hello.ts", "src/pages/404.tsx"} {
 		if findPlan(rep, target) == nil {
-			t.Errorf("missing target %s; got %+v", target, rep.Files)
+			t.Errorf("missing target %s", target)
 		}
 	}
 	if findPlan(rep, "src/migrated/pages/_app.tsx") == nil {
@@ -1090,5 +1090,117 @@ export const load = cache(async () => 1, ["k"], { tags: ["t"] });
 	}
 	if strings.Contains(string(actions.Content), "next/cache") {
 		t.Errorf("next/cache leaked:\n%s", actions.Content)
+	}
+}
+
+func TestNextParallelInterceptingTemplateAndGroups(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "package.json", `{"dependencies":{"next":"15.0.0"}}`)
+	writeNextFile(t, root, "app/layout.tsx", `export default function L({ children, modal }: any) { return <html><body>{children}{modal}</body></html>; }`)
+	writeNextFile(t, root, "app/page.tsx", `export default function P() { return <p>feed</p>; }`)
+	writeNextFile(t, root, "app/template.tsx", `export default function T({ children }: any) { return <div>{children}</div>; }`)
+	writeNextFile(t, root, "app/photo/[id]/page.tsx", `export default function Photo() { return <p>photo</p>; }`)
+	writeNextFile(t, root, "app/@modal/default.tsx", `export default function D() { return null; }`)
+	writeNextFile(t, root, "app/@modal/page.tsx", `export default function M() { return null; }`)
+	writeNextFile(t, root, "app/@modal/(.)photo/[id]/page.tsx", `export default function M() { return <dialog open>photo</dialog>; }`)
+	writeNextFile(t, root, "app/(shop)/layout.tsx", `export default function S({ children }: any) { return <section>{children}</section>; }`)
+	writeNextFile(t, root, "app/(shop)/cart/page.tsx", `export default function C() { return <p>cart</p>; }`)
+	writeNextFile(t, root, "app/blog/default.tsx", `export default function D() { return null; }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{
+		"src/pages/_layout.tsx",
+		"src/pages/index.tsx",
+		"src/pages/_template.tsx",
+		"src/pages/photo/[id].tsx",
+		"src/pages/@modal/default.tsx",
+		"src/pages/@modal/index.tsx",
+		"src/pages/@modal/(.)photo/[id].tsx",
+		"src/pages/(shop)/_layout.tsx",
+		"src/pages/(shop)/cart.tsx",
+	} {
+		if findPlan(rep, target) == nil {
+			t.Errorf("missing target %s", target)
+		}
+	}
+	if !hasManual(rep, "app/blog/default.tsx", "default.tsx outside a parallel-route slot") {
+		t.Errorf("default.tsx outside a slot must be reported: %+v", rep.Manual)
+	}
+	routes := map[string]bool{}
+	for _, r := range rep.Routes {
+		routes[r.Route] = true
+	}
+	for _, want := range []string{"/", "/photo/[id]", "/cart"} {
+		if !routes[want] {
+			t.Errorf("route %s missing from inventory: %v", want, routes)
+		}
+	}
+	for r := range routes {
+		if strings.Contains(r, "@") || strings.Contains(r, "(") {
+			t.Errorf("slot/group leaked into the route inventory: %s", r)
+		}
+	}
+}
+
+func TestNextNavigationServerHelpersAreHookFree(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/blog/[slug]/page.tsx", `import { notFound, redirect } from "next/navigation";
+import Nav from "../../nav";
+export default async function P({ params }: any) {
+  const { slug } = await params;
+  if (!slug) notFound();
+  if (slug === "old") redirect("/blog/new");
+  return <p>{slug}<Nav /></p>;
+}`)
+	writeNextFile(t, root, "app/nav.tsx", `"use client";
+import { redirect, useRouter } from "next/navigation";
+export default function Nav() { const r = useRouter(); return <button onClick={() => redirect("/x")}>{String(!!r)}</button>; }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := findPlan(rep, "src/pages/blog/[slug].tsx")
+	if page == nil || !strings.Contains(string(page.Content), `import { notFound, redirect } from "../../migrated/next-navigation-server";`) {
+		t.Fatalf("server names must use the hook-free helper: %+v", page)
+	}
+	server := findPlan(rep, "src/migrated/next-navigation-server.ts")
+	if server == nil || strings.Contains(string(server.Content), "useState") || !strings.Contains(string(server.Content), "export function notFound") {
+		t.Fatalf("server helper missing or uses hooks: %+v", server)
+	}
+	shim := findPlan(rep, "src/migrated/next-navigation.ts")
+	if shim == nil || !strings.Contains(string(shim.Content), "krateRouter") {
+		t.Fatalf("client helper must use the Krate router: %+v", shim)
+	}
+	var nav *PlannedFile
+	for i := range rep.Files {
+		if strings.Contains(string(rep.Files[i].Content), "useRouter") && rep.Files[i].Target != "src/migrated/next-navigation.ts" {
+			nav = &rep.Files[i]
+		}
+	}
+	if nav == nil || strings.Contains(string(nav.Content), "next-navigation-server") {
+		t.Fatalf("a client file keeps the client redirect: %+v", nav)
+	}
+}
+
+func TestNextAsyncLayoutAndSegmentConfigReported(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/layout.tsx", `export default async function L({ children }: any) { return <main>{children}</main>; }`)
+	writeNextFile(t, root, "app/page.tsx", `export const runtime = "edge";
+export const revalidate = 60;
+export default async function P() { return <p>x</p>; }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasManual(rep, "app/layout.tsx", "async layouts are not supported") {
+		t.Errorf("async layout must be reported: %+v", rep.Manual)
+	}
+	if !hasManual(rep, "app/page.tsx", "route segment config runtime") {
+		t.Errorf("segment config runtime must be reported: %+v", rep.Manual)
+	}
+	if hasManual(rep, "app/page.tsx", "route segment config revalidate") {
+		t.Errorf("revalidate is native and must not be reported")
 	}
 }

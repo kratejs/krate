@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -227,6 +228,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	linkRelativeImports(rep)
 	migrateNextFonts(rep)
 	rewriteNextModuleImports(rep, abs)
+	warnClientBoundaryRuntime(rep)
 	publicEnv := readPublicEnv(abs)
 	for k, v := range nextCfg.Env {
 		publicEnv[k] = v
@@ -322,7 +324,7 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 			return nil
 		}
 		dir := filepath.ToSlash(filepath.Dir(rel))
-		route, manual := appRoute(dir)
+		route, fsRoute, manual := appRoute(dir)
 		source := prefix + "/" + rel
 		for _, m := range manual {
 			rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: m, Hint: "flatten or rename the segment before migrating"})
@@ -332,10 +334,13 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 		}
 		switch base {
 		case "page":
-			target := routeFile("src/pages", route, ext)
+			target := routeFile("src/pages", fsRoute, ext)
+			if isSlotRoute(fsRoute) {
+				target = "src/pages/" + fsRoute + "/index" + ext
+			}
 			rep.Files = append(rep.Files, planned(root, source, target, KindPage, ext, rep))
 		case "layout":
-			rep.Files = append(rep.Files, planned(root, source, layoutFile("src/pages", route, ext), KindLayout, ext, rep))
+			rep.Files = append(rep.Files, planned(root, source, layoutFile("src/pages", fsRoute, ext), KindLayout, ext, rep))
 		case "route":
 			apiPath := strings.TrimPrefix(route, "api/")
 			if apiPath == route {
@@ -347,9 +352,9 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 			}
 			rep.Files = append(rep.Files, planned(root, source, routeFile("src/api", apiPath, ext), KindAPI, ext, rep))
 		case "loading":
-			rep.Files = append(rep.Files, planned(root, source, loadingFile("src/pages", route, ext), KindLoading, ext, rep))
+			rep.Files = append(rep.Files, planned(root, source, loadingFile("src/pages", fsRoute, ext), KindLoading, ext, rep))
 		case "not-found":
-			if route == "." {
+			if fsRoute == "." {
 				rep.Files = append(rep.Files, planned(root, source, "src/pages/404"+ext, KindNotFound, ext, rep))
 			} else {
 				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "nested not-found.tsx has no automatic equivalent", Hint: "handle the missing case in the page"})
@@ -357,7 +362,7 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 		case "error", "global-error":
 			assetTarget := "src/migrated/" + strings.TrimPrefix(prefix, "src/") + "/" + rel
 			rep.Files = append(rep.Files, planned(root, source, assetTarget, KindAsset, ext, rep))
-			layoutTarget := layoutFile("src/pages", route, ext)
+			layoutTarget := layoutFile("src/pages", fsRoute, ext)
 			if fileExists(filepath.Join(root, filepath.FromSlash(layoutTarget))) || hasTarget(rep, layoutTarget) {
 				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "error boundary was copied but an existing layout must be merged manually", Hint: "wrap children with the generated error boundary"})
 				return nil
@@ -380,8 +385,18 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 			rep.Files = append(rep.Files, PlannedFile{Kind: KindLayout, Target: layoutTarget, Content: []byte(body), Rewrites: []string{"generated error boundary layout"}, Dependencies: []string{assetTarget}})
 			rep.Warnings = append(rep.Warnings, source+": copied error boundary and generated "+layoutTarget)
 			return nil
-		case "template", "default":
-			rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "Next.js " + base + " boundary is not migrated", Hint: "use an error boundary or a page-level fallback"})
+		case "template":
+			target := "src/pages/_template" + ext
+			if fsRoute != "." {
+				target = "src/pages/" + fsRoute + "/_template" + ext
+			}
+			rep.Files = append(rep.Files, planned(root, source, target, KindLayout, ext, rep))
+		case "default":
+			if isSlotRoute(fsRoute) {
+				rep.Files = append(rep.Files, planned(root, source, "src/pages/"+fsRoute+"/default"+ext, KindPage, ext, rep))
+			} else {
+				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "Next.js default.tsx outside a parallel-route slot has no equivalent", Hint: "render the fallback from the layout or page"})
+			}
 		default:
 			if isNextMetadataRoute(base) {
 				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "Next.js metadata route " + base + "." + strings.TrimPrefix(ext, ".") + " is not migrated", Hint: "generate the same sitemap/robots/manifest/icon in Krate"})
@@ -501,6 +516,15 @@ func applyManual(src string, kind FileKind) []string {
 			out = append(out, c.reason)
 		}
 	}
+	if kind == KindLayout && asyncDefaultExport.MatchString(src) {
+		out = append(out, "async layouts are not supported (KR7101); move the data fetching into an async child component")
+	}
+	for _, m := range segmentConfigExport.FindAllStringSubmatch(src, -1) {
+		out = append(out, "route segment config "+m[1]+" has no Krate equivalent and was left in place")
+	}
+	if useCacheDirective.MatchString(src) {
+		out = append(out, `"use cache" is not supported; use revalidate/tags on fetch or unstable_cache`)
+	}
 	if kind == KindAPI {
 		for _, c := range []string{"NextRequest", "NextResponse"} {
 			if strings.Contains(src, c) {
@@ -511,16 +535,20 @@ func applyManual(src string, kind FileKind) []string {
 	return out
 }
 
+var (
+	asyncDefaultExport  = regexp.MustCompile(`export\s+default\s+async\b`)
+	segmentConfigExport = regexp.MustCompile(`(?m)^export\s+const\s+(fetchCache|runtime|preferredRegion|maxDuration)\b`)
+	useCacheDirective   = regexp.MustCompile(`(?m)^\s*["']use cache(?::[a-z-]+)?["']`)
+)
+
 var simpleNextImport = regexp.MustCompile(`(?m)^[ \t]*import[ \t]+[A-Za-z_$][\w$]*[ \t]+from[ \t]+["']next/(?:link|image|head)["'][ \t]*;?[ \t]*\r?\n?`)
 
-// rewriteNextSource performs only safe source changes: remove the client
-// directive and drop default imports for Next globals Krate provides itself.
+// rewriteNextSource performs only safe source changes: drop default imports
+// for Next globals Krate provides itself and unwrap the root document shell.
+// The "use client" directive is kept: Krate honors it as a client boundary
+// inside server component trees.
 func rewriteNextSource(src string, kind FileKind) (string, []string, []string) {
 	var rewrites []string
-	if body, ok := stripUseClient(src); ok {
-		src = body
-		rewrites = append(rewrites, "removed \"use client\" directive")
-	}
 	manual := []string{}
 	if kind == KindLayout {
 		if body, ok := stripDocumentShell(src); ok {
@@ -544,43 +572,55 @@ func rewriteNextSource(src string, kind FileKind) (string, []string, []string) {
 	return src, rewrites, manual
 }
 
-func stripUseClient(src string) (string, bool) {
-	lines := strings.SplitAfter(src, "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*") {
-			continue
-		}
-		if trimmed == `"use client";` || trimmed == `"use client"` || trimmed == `'use client';` || trimmed == `'use client'` {
-			lines = append(lines[:i], lines[i+1:]...)
-			return strings.Join(lines, ""), true
-		}
-		break
-	}
-	return src, false
-}
-
-func appRoute(dir string) (string, []string) {
+// appRoute maps an app-router directory to its URL route (groups, slots and
+// intercepting segments removed) and to the directory Krate uses under
+// src/pages. Krate's file router understands route groups, "@slot"
+// directories and intercepting "(.)x" segments natively, so the file path
+// keeps them.
+func appRoute(dir string) (urlRoute, fsRoute string, manual []string) {
 	if dir == "." || dir == "" {
-		return ".", nil
+		return ".", ".", nil
 	}
-	var parts []string
-	var manual []string
+	var url, fs []string
 	for _, p := range strings.Split(filepath.ToSlash(dir), "/") {
 		switch {
 		case p == "" || p == ".":
 			continue
-		case strings.HasPrefix(p, "@"):
-			manual = append(manual, "parallel route segment "+p+" is not migrated")
 		case strings.HasPrefix(p, "_"):
 			manual = append(manual, "private segment "+p+" is not a route")
+		case strings.HasPrefix(p, "@"):
+			fs = append(fs, p)
+		case isInterceptingSegment(p):
+			fs = append(fs, p)
 		case strings.HasPrefix(p, "(") && strings.HasSuffix(p, ")"):
-			// Route groups do not contribute to the URL.
+			fs = append(fs, p)
 		default:
-			parts = append(parts, p)
+			url = append(url, p)
+			fs = append(fs, p)
 		}
 	}
-	return strings.Join(parts, "/"), manual
+	urlRoute, fsRoute = strings.Join(url, "/"), strings.Join(fs, "/")
+	if fsRoute == "" {
+		fsRoute = "."
+	}
+	return urlRoute, fsRoute, manual
+}
+
+// isInterceptingSegment reports whether a directory name starts with one of
+// Next's interception markers: (.) (..) (..)(..) (...).
+func isInterceptingSegment(seg string) bool {
+	for _, marker := range []string{"(...)", "(..)(..)", "(..)", "(.)"} {
+		if strings.HasPrefix(seg, marker) && len(seg) > len(marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSlotRoute reports whether the last directory of a Krate route is a
+// parallel-route slot.
+func isSlotRoute(fsRoute string) bool {
+	return strings.HasPrefix(path.Base(fsRoute), "@")
 }
 
 func routeFile(base, route, ext string) string {
@@ -635,16 +675,32 @@ func routeInventory(rep *Report) []Route {
 func pageRoute(target string) string {
 	rel := strings.TrimPrefix(filepath.ToSlash(target), "src/pages/")
 	rel = strings.TrimSuffix(rel, filepath.Ext(rel))
-	if rel == "index" || rel == "" {
+	var parts []string
+	for _, seg := range strings.Split(rel, "/") {
+		switch {
+		case strings.HasPrefix(seg, "@"):
+			// Parallel-route slot content is rendered by a layout, not routed.
+			return ""
+		case strings.HasPrefix(seg, "(") && strings.HasSuffix(seg, ")") && !isInterceptingSegment(seg):
+			// Route groups do not contribute to the URL.
+		default:
+			parts = append(parts, seg)
+		}
+	}
+	last := ""
+	if len(parts) > 0 {
+		last = parts[len(parts)-1]
+	}
+	switch last {
+	case "_layout", "_template", "loading":
+		return ""
+	case "index":
+		parts = parts[:len(parts)-1]
+	}
+	if len(parts) == 0 {
 		return "/"
 	}
-	if strings.HasSuffix(rel, "/index") {
-		rel = strings.TrimSuffix(rel, "/index")
-	}
-	if strings.HasSuffix(rel, "/_layout") || rel == "_layout" || strings.HasSuffix(rel, "/loading") || rel == "loading" {
-		return ""
-	}
-	return "/" + rel
+	return "/" + strings.Join(parts, "/")
 }
 
 func apiRoute(target string) string {
@@ -1046,4 +1102,25 @@ func targetPath(root, rel string) (string, error) {
 		return "", fmt.Errorf("migration target escapes project root: %s", rel)
 	}
 	return target, nil
+}
+
+// warnClientBoundaryRuntime notes that client components rendered inside
+// async server components hydrate with Preact, which the project must install.
+func warnClientBoundaryRuntime(rep *Report) {
+	var client, server bool
+	for _, f := range rep.Files {
+		if f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAsset {
+			continue
+		}
+		src := string(f.Content)
+		if hasUseClientDirective(src) {
+			client = true
+		}
+		if f.Kind != KindAsset && asyncDefaultExport.MatchString(src) {
+			server = true
+		}
+	}
+	if client && server {
+		rep.Warnings = append(rep.Warnings, `"use client" components inside async server components hydrate with Preact; install preact (krate migrate nextjs --update-package adds it)`)
+	}
 }
