@@ -21,7 +21,15 @@ const browser = await browserType.launch();
 try {
   const page = await browser.newPage();
   const errors = [];
-  page.on("pageerror", (e) => errors.push(String(e)));
+  // WebKit reports a prefetch that a hard navigation cancels mid-flight as a
+  // page error ("Fetch API cannot load ... due to access control checks") even
+  // though the router handles the rejection. That is the browser cancelling the
+  // request, not a router failure.
+  const cancelledFetch = /Fetch API cannot load .* due to access control checks/;
+  page.on("pageerror", (e) => {
+    if (browserName === "webkit" && cancelledFetch.test(String(e))) return;
+    errors.push(String(e));
+  });
   const text = (sel) => page.locator(sel).first().textContent();
   const path = () => new URL(page.url()).pathname;
 

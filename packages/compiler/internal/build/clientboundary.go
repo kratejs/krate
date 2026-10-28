@@ -1,6 +1,7 @@
 package build
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,10 +39,25 @@ type ClientBoundary struct {
 	ChunkURL   string   // hydration chunk URL
 }
 
-// clientIslandLoaderHTML mounts every <krate-island> on the page from its
-// chunk. Module scripts run after the document (including spliced regions)
-// is parsed.
-const clientIslandLoaderHTML = `<script type="module">document.querySelectorAll("krate-island[data-src]").forEach(function(el){import(el.getAttribute("data-src")).then(function(m){m.mount(el)}).catch(function(e){console.error("krate client component:",e);el.setAttribute("data-krate-island-error","")})})</script>`
+// clientIslandLoaderJS mounts every <krate-island> that is not mounted yet
+// from its chunk. It is a classic script in a chunk file (not inline) so the
+// SPA router loads it when a soft navigation arrives on a page with islands,
+// and it is idempotent: it only touches islands it has not mounted.
+const clientIslandLoaderJS = `(function(){document.querySelectorAll("krate-island[data-src]:not([data-krate-island-mounted])").forEach(function(el){el.setAttribute("data-krate-island-mounted","");import(el.getAttribute("data-src")).then(function(m){m.mount(el)}).catch(function(e){console.error("krate client component:",e);el.setAttribute("data-krate-island-error","")})})})();`
+
+// islandLoaderHTML writes the island loader chunk (once per content) and
+// returns the script tag that references it. The tag is deferred so a hard
+// load runs it after the document, including spliced regions, is parsed.
+func (b *Builder) islandLoaderHTML() (string, error) {
+	name := "chunks/island-loader." + hashContent([]byte(clientIslandLoaderJS)) + ".js"
+	if err := os.MkdirAll(filepath.Join(b.Cfg.OutDir, "chunks"), 0755); err != nil {
+		return "", err
+	}
+	if err := fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, name), []byte(clientIslandLoaderJS), 0644); err != nil {
+		return "", err
+	}
+	return `<script defer src="` + assetHref(b.Cfg.BaseURLPath(), name) + `"></script>`, nil
+}
 
 // clientReviveJS turns serialized island props back into component props:
 // server-rendered children become a display:contents element holding the
@@ -399,9 +415,10 @@ export function mount(el) {
 		Target:            api.ES2020,
 		JSX:               api.JSXAutomatic,
 		JSXImportSource:   "preact",
+		TsconfigRaw:       clientTsconfigRaw(b.Root),
 		Alias:             islandAlias(b.Root, false),
 		External:          []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
-		Plugins:           []api.Plugin{clientOnlyMarkersPlugin(true)},
+		Plugins:           []api.Plugin{clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.actionModules(), b.Cfg.BaseURLPath())},
 		LogLevel:          api.LogLevelSilent,
 	})
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
@@ -477,8 +494,12 @@ func clientBuildError(path string, errs []api.Message) error {
 // once per CompileServerBundles call, under server-bundles/client/.
 type clientSSRImpls struct {
 	root, bundleDir string
-	mu              sync.Mutex
-	done            map[string]error
+	// actions are the "use server" modules; a client module that imports one
+	// gets the action proxy instead of the server source.
+	actions  map[string]map[string]string
+	basePath string
+	mu       sync.Mutex
+	done     map[string]error
 }
 
 func (c *clientSSRImpls) implPath(cb ClientBoundary) string {
@@ -516,9 +537,10 @@ export function __krate_render(C, props) {
 		Target:          api.ES2020,
 		JSX:             api.JSXAutomatic,
 		JSXImportSource: "preact",
+		TsconfigRaw:     clientTsconfigRaw(c.root),
 		Alias:           islandAlias(c.root, false),
 		External:        []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
-		Plugins:         []api.Plugin{*plugin, clientOnlyMarkersPlugin(false)},
+		Plugins:         []api.Plugin{*plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.actions, c.basePath)},
 		LogLevel:        api.LogLevelSilent,
 	})
 	var err error
@@ -593,4 +615,30 @@ func clientBoundaryPlugin(boundaries []ClientBoundary, impls *clientSSRImpls, ou
 			})
 		},
 	}, nil
+}
+
+// clientTsconfigRaw is the project's tsconfig.json with the JSX settings
+// forced to Preact's automatic runtime. A project that sets
+// jsxImportSource to @krate/runtime (every migrated app does) would otherwise
+// make esbuild compile client components against Krate's DOM runtime, which
+// cannot render on the server and is not what the islands mount with.
+func clientTsconfigRaw(root string) string {
+	opts := map[string]any{}
+	if data, err := os.ReadFile(filepath.Join(root, "tsconfig.json")); err == nil {
+		var cfg map[string]any
+		if json.Unmarshal(data, &cfg) == nil {
+			if co, ok := cfg["compilerOptions"].(map[string]any); ok {
+				opts = co
+			}
+		}
+	}
+	delete(opts, "jsxFactory")
+	delete(opts, "jsxFragmentFactory")
+	opts["jsx"] = "react-jsx"
+	opts["jsxImportSource"] = "preact"
+	out, err := json.Marshal(map[string]any{"compilerOptions": opts})
+	if err != nil {
+		return `{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "preact" } }`
+	}
+	return string(out)
 }

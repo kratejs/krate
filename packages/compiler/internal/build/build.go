@@ -1756,7 +1756,11 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	}
 	stopCompile()
 	if len(clientBoundaries) > 0 {
-		emitResult.ScriptHTML += clientIslandLoaderHTML
+		loader, lerr := b.islandLoaderHTML()
+		if lerr != nil {
+			return nil, "", lerr
+		}
+		emitResult.ScriptHTML += loader
 	}
 
 	if len(emitResult.Errors) > 0 {

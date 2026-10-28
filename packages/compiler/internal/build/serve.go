@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -2095,9 +2096,29 @@ func staticRouteExists(absOut, urlPath string) bool {
 // its build timestamp (no revalidate, no fresh region content).
 func shouldServeStatic(absOut, urlPath string, page *ManifestPage) bool {
 	if page != nil && page.Mode != RenderSSG.String() {
-		return false
+		// A baked asset (the page's hydration script, a chunk, an image) lives
+		// next to the page's index.html, so a dynamic ISR/SSR route such as
+		// posts/[slug] also matches posts/index.abc.js. Real files with an
+		// extension are never pages.
+		return isBakedAsset(absOut, urlPath)
 	}
 	return staticRouteExists(absOut, urlPath)
+}
+
+// isBakedAsset reports whether urlPath names an existing non-HTML file in the
+// build output.
+func isBakedAsset(absOut, urlPath string) bool {
+	up, err := url.PathUnescape(urlPath)
+	if err != nil {
+		up = urlPath
+	}
+	ext := strings.ToLower(path.Ext(up))
+	if ext == "" || ext == ".html" {
+		return false
+	}
+	rel := strings.TrimPrefix(path.Clean("/"+up), "/")
+	fi, err := os.Stat(filepath.Join(absOut, filepath.FromSlash(rel)))
+	return err == nil && !fi.IsDir()
 }
 
 // dynamicRoute represents a URL pattern with [param] segments found in the output directory.

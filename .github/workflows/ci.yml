@@ -325,6 +325,16 @@ jobs:
           KRATE_REACT_EXIT: "1"
           KRATE_REACTBROWSER_REPORT: ${{ runner.temp }}/react-browser-${{ matrix.browser }}.txt
 
+      # App-level browser tests: SPA router (layouts, templates, parallel and
+      # intercepting routes), client components inside server components, and a
+      # migrated Next.js app (async server components, revalidation).
+      - name: App browser tests
+        run: go test -run 'TestRouterBrowserE2E|TestUseClientIslandBrowser|TestMigratedNextAppBrowser' -count=1 -v ./internal/build
+        working-directory: packages/compiler
+        env:
+          KRATE_BROWSER: ${{ matrix.browser }}
+          KRATE_REQUIRE_E2E: "1"
+
       - name: Upload React differential report
         if: always()
         uses: actions/upload-artifact@v4

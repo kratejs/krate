@@ -43,7 +43,7 @@ func compileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 	_ = os.MkdirAll(bundleDir, 0755)
 
 	bundles := make(map[string]string, len(ssrPages))
-	impls := &clientSSRImpls{root: root, bundleDir: bundleDir}
+	impls := &clientSSRImpls{root: root, bundleDir: bundleDir, actions: actionModules, basePath: actionBasePath}
 	var fatal []error
 	var mu sync.Mutex
 	fail := func(page *PageResult, err error) {

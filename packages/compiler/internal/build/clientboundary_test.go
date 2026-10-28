@@ -59,7 +59,7 @@ export default async function Home() {
 		t.Fatalf("BuildAll: %v", err)
 	}
 	shell, _ := os.ReadFile(filepath.Join(root, "dist", "index.html"))
-	if !strings.Contains(string(shell), `krate-island[data-src]`) || !strings.Contains(string(shell), "importmap") {
+	if !strings.Contains(string(shell), `island-loader.`) || !strings.Contains(string(shell), "importmap") {
 		t.Errorf("server page shell needs the island loader and the Preact import map:\n%s", shell)
 	}
 	chunks, _ := filepath.Glob(filepath.Join(root, "dist", "chunks", "client.*.js"))

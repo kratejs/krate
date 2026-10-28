@@ -232,6 +232,7 @@ func TestShouldServeStatic(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(dir, "cached", "known", "index.html"), []byte("<html>baked</html>"), 0644)
 	_ = os.MkdirAll(filepath.Join(dir, "items", "alpha"), 0755)
 	_ = os.WriteFile(filepath.Join(dir, "items", "alpha", "index.html"), []byte("<html>alpha</html>"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "cached", "index.abc.js"), []byte("hydrate()"), 0644)
 
 	mkPage := func(mode string) *ManifestPage {
 		return &ManifestPage{Mode: mode, Route: "/cached/[id]"}
@@ -252,6 +253,10 @@ func TestShouldServeStatic(t *testing.T) {
 		// NOT be served statically (goes to the sidecar for revalidation).
 		{"isr pre-generated variant", "/cached/known", mkPage("isr"), false},
 		{"ssr page with baked shell", "/cached/known", mkPage("ssr"), false},
+		// A baked asset beside an ISR dynamic route's index.html is a file, not
+		// a page: /cached/[id] must not capture /cached/index.abc.js.
+		{"isr route does not capture a baked asset", "/cached/index.abc.js", mkPage("isr"), true},
+		{"missing asset is not static", "/cached/missing.js", mkPage("isr"), false},
 		{"streaming page with baked shell", "/cached/known", mkPage("streaming"), false},
 		// Unmatched route with a static file -> static.
 		{"unknown route static", "/cached/known", nil, true},

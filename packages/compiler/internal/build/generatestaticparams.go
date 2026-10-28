@@ -580,7 +580,11 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 
 	if len(clientBoundaries) > 0 {
-		emitResult.ScriptHTML += clientIslandLoaderHTML
+		loader, lerr := b.islandLoaderHTML()
+		if lerr != nil {
+			return nil, "", lerr
+		}
+		emitResult.ScriptHTML += loader
 	}
 
 	// Compile-time reactive dependency validation. Surfaced as warnings so
