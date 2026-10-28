@@ -629,6 +629,12 @@ func (b *Builder) BuildAll() error {
 	if err != nil {
 		return fmt.Errorf("finding pages: %w", err)
 	}
+	if err := validateRouteTree(pages, b.Cfg.PagesDir); err != nil {
+		return err
+	}
+	// Intercepting slot pages are built as fragments the SPA router swaps
+	// into their slot (see parallel.go).
+	pages = append(pages, findInterceptPages(b.Cfg.PagesDir)...)
 	if len(pages) == 0 {
 		pages = []string{b.Cfg.Entry}
 	}
@@ -1621,6 +1627,12 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
 	pageOpts := b.irBuildOptions()
+	// An intercepting slot page hydrates next to the page it overlays, so its
+	// slot ids are namespaced like a layout's.
+	intercept := cachedInterceptForPage(page, b.Cfg.PagesDir)
+	if intercept != nil {
+		pageOpts.IDPrefix = b.layoutIDPrefix(page)
+	}
 	pageOpts.ModuleConsts, pageOpts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
 	externalByLocal, externalImports, localImports := entryExternalImports(entryModule.Program)
 	pageOpts.ExternalImports = externalByLocal
@@ -1734,9 +1746,27 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		emitResult.HTML = "<!--suspense:page-->" + emitResult.HTML + "<!--/suspense:page-->"
 	}
 
-	layoutCSS, layoutFiles, layoutHasSignals, routeChain, layoutErr := b.applyLayoutStack(page, emitResult)
-	if layoutErr != nil {
-		return nil, "", layoutErr
+	var (
+		layoutCSS        string
+		layoutFiles      []string
+		layoutHasSignals bool
+		routeChain       []routeChainEntry
+		fragmentInfo     string
+	)
+	if intercept != nil {
+		// A fragment: only the slot content, bracketed like the live slot.
+		scope := b.layoutIDPrefix(page)
+		emitResult.HTML = "<!--ks:" + intercept.Slot.Key + "-->" + emitResult.HTML + "<!--/ks:" + intercept.Slot.Key + "-->"
+		for i := range emitResult.Signatures {
+			emitResult.Signatures[i].RouteScope = scope
+		}
+		fragmentInfo = fragmentInfoScript(intercept.Slot.Key, scope, intercept.Page.Target)
+	} else {
+		var layoutErr error
+		layoutCSS, layoutFiles, layoutHasSignals, routeChain, layoutErr = b.applyLayoutStack(page, emitResult)
+		if layoutErr != nil {
+			return nil, "", layoutErr
+		}
 	}
 	bundle.CSS += layoutCSS
 	// Generated CSS signal rules land in the page's own hashed stylesheet, after
@@ -1768,7 +1798,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	b.recordDeps(page, deps)
 
-	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures)
+	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + fragmentInfo
 
 	outName := pageToOutput(page, b.Cfg.PagesDir)
 	pageDir := filepath.Join(b.Cfg.OutDir, outName)
@@ -2177,6 +2207,8 @@ func (b *Builder) resetBuildCaches() {
 	layoutEmitCache.Clear()
 	loadingEmitCache.Clear()
 	layoutCache.Clear()
+	interceptCache.Clear()
+	slotCache.Clear()
 	// Re-arm the per-program transform guard for this build. The parsed module
 	// cache persists across builds; re-running the (idempotent) transforms on
 	// already-transformed ASTs is a no-op, and the guard keeps it race-free.
@@ -2294,6 +2326,19 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	layoutDeps := layoutDepPaths(layoutPath, layoutBundle)
 
 	b.ensureTransformed(layoutModule.Program)
+	if isLayoutFile(layoutPath) {
+		slots, serr := cachedSlots(filepath.Dir(layoutPath), b.Cfg.PagesDir)
+		if serr != nil {
+			return nil, "", nil, false, serr
+		}
+		if len(slots) > 0 {
+			names := map[string]bool{}
+			for _, sl := range slots {
+				names[sl.Name] = true
+			}
+			rewriteSlotProps(layoutModule.Program, names)
+		}
+	}
 
 	ann := annotator.Annotate(layoutModule.Program, b.Cfg, layoutPath, layoutModule.SourceCode)
 	extraLayoutPrograms := moduleSources(layoutBundle.Modules, layoutModule)
@@ -2469,6 +2514,11 @@ func findPages(dir string) ([]string, error) {
 	exts := map[string]bool{".tsx": true, ".ts": true, ".jsx": true, ".js": true, ".md": true, ".mdx": true}
 	_ = fsutil.WalkExt(dir, exts, nil, func(path string, _ os.FileInfo) error {
 		base := filepath.Base(path)
+		// Files under a parallel-route slot (@name) render inside their
+		// layout; intercepting slot pages are added by findInterceptPages.
+		if rel, err := filepath.Rel(dir, path); err == nil && pathHasSlot(rel) {
+			return nil
+		}
 		if !strings.HasPrefix(base, "_") && !isRouteConventionFile(base) && !isUseServerFile(path) {
 			pages = append(pages, path)
 		}
@@ -2661,6 +2711,21 @@ type routeChainEntry struct {
 	Persist bool   `json:"p"`
 	Why     string `json:"why,omitempty"`
 	File    string `json:"f,omitempty"`
+	// Slots are the parallel-route slots the layout renders.
+	Slots []routeSlotInfo `json:"s,omitempty"`
+}
+
+// routeSlotInfo describes one rendered slot in the route info.
+type routeSlotInfo struct {
+	Name string `json:"n"`
+	Key  string `json:"key"`
+	// Scope is the route scope (id prefix) of the rendered slot content.
+	Scope string `json:"scope"`
+	// Src is "page" for a matching slot page, "default" for default.tsx.
+	Src string `json:"src"`
+	// Intercepts are the URL patterns (no leading slash) the slot intercepts
+	// on soft navigation.
+	Intercepts []string `json:"i,omitempty"`
 }
 
 // routeDepth counts the URL segments of dir relative to pagesDir. Route
@@ -2681,6 +2746,24 @@ func routeDepth(dir, pagesDir string) int {
 		n++
 	}
 	return n
+}
+
+// stripRouteGroups removes route-group segments from a slash path.
+func stripRouteGroups(p string) string {
+	if !strings.Contains(p, "(") {
+		return p
+	}
+	parts := strings.Split(p, "/")
+	out := parts[:0]
+	for _, seg := range parts {
+		if !isRouteGroup(seg) {
+			out = append(out, seg)
+		}
+	}
+	if len(out) == 0 {
+		return "index"
+	}
+	return strings.Join(out, "/")
 }
 
 // isRouteGroup reports whether a directory name is a route group "(name)".
@@ -2736,6 +2819,16 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 		case n > 1:
 			entry.Why = "the " + rb.Kind + " renders {children} more than once"
 		}
+		if rb.Kind == "layout" {
+			slotRes, serr := b.renderSlots(page, rb.Path, layoutRes)
+			if serr != nil {
+				return "", nil, false, nil, serr
+			}
+			entry.Slots = slotRes.info
+			css += slotRes.css
+			used = append(used, slotRes.deps...)
+			hasSignals = hasSignals || slotRes.hasSignals
+		}
 		hasSignals = hasSignals || layoutHasSignals
 		emitResult.HTML = layoutRes.HTML
 		emitResult.HeadHTML = emitResult.HeadHTML + layoutRes.HeadHTML
@@ -2746,7 +2839,9 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 		// (IDPrefix) so they can't collide with the page's; RouteScope lets the
 		// router skip them while the layout stays mounted.
 		for _, sig := range layoutRes.Signatures {
-			sig.RouteScope = id
+			if sig.RouteScope == "" {
+				sig.RouteScope = id
+			}
 			emitResult.Signatures = append(emitResult.Signatures, sig)
 		}
 		emitResult.ListComponents = append(emitResult.ListComponents, layoutRes.ListComponents...)
@@ -2785,6 +2880,15 @@ func routeInfoScript(chain []routeChainEntry, sigs []irtree.ComponentSignature) 
 		out[i] = e
 	}
 	data, err := json.Marshal(map[string]interface{}{"v": 1, "chain": out})
+	if err != nil {
+		return ""
+	}
+	return `<script type="application/json" id="__krate_route">` + escapeJSONForScript(string(data)) + `</script>`
+}
+
+// fragmentInfoScript is the route info of an intercepting-route fragment.
+func fragmentInfoScript(key, scope, target string) string {
+	data, err := json.Marshal(map[string]interface{}{"v": 1, "frag": map[string]string{"key": key, "scope": scope, "target": target}})
 	if err != nil {
 		return ""
 	}
@@ -2971,11 +3075,17 @@ func pageToOutput(page, pagesDir string) string {
 	if err != nil {
 		return ""
 	}
+	if pathHasSlot(rel) {
+		if info := cachedInterceptForPage(page, pagesDir); info != nil {
+			return info.OutDir
+		}
+	}
 	// Normalize to forward slashes so the returned OutName is a portable URL
 	// path ("video/[id]" on every OS) - it feeds manifest routes, shell reads,
 	// and region requests. Callers that touch the filesystem join it with
-	// filepath.Join, which re-applies the OS separator.
-	name := filepath.ToSlash(strings.TrimSuffix(rel, filepath.Ext(rel)))
+	// filepath.Join, which re-applies the OS separator. Route groups
+	// "(name)" organize files without appearing in the URL.
+	name := stripRouteGroups(filepath.ToSlash(strings.TrimSuffix(rel, filepath.Ext(rel))))
 	// A nested index page (blog/index.tsx) is the directory's default page: it
 	// maps to the parent route (blog) so /blog/ serves it - not the odd
 	// /blog/index URL (which would 404 into a directory listing at /blog/).

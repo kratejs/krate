@@ -65,7 +65,7 @@ func GenerateTypes(root string, cfg *config.Config) []error {
 func (b *Builder) writeRouteTypes(results []*PageResult) error {
 	routes := make([]routetypes.Route, 0, len(results))
 	for _, r := range results {
-		if r == nil || r.IsErrorPage {
+		if r == nil || r.IsErrorPage || isFragmentOut(r.OutName) {
 			continue
 		}
 		src := r.SourcePath

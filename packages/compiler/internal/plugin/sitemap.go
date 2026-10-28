@@ -74,6 +74,10 @@ func generateSitemap(ctx *BuildResultHookCtx) error {
 	b.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
 
 	for _, p := range ctx.Pages {
+		// Intercepting-route fragments are slot content, not pages.
+		if strings.HasPrefix(p.OutName, "_krate/") {
+			continue
+		}
 		loc := baseURL + "/"
 		if p.OutName != "." {
 			loc = baseURL + "/" + path.Clean(p.OutName)

@@ -37,6 +37,7 @@ import {
   krateTakeSyncLane,
   krateCurrentScope,
   krateTagOwner,
+  krateScopeOfId,
 } from './signal.js';
 
 /** Effect phase: React's useEffect, useLayoutEffect and useInsertionEffect. */
@@ -744,9 +745,8 @@ export function krateDepsOf(value: unknown): unknown[] {
 }
 
 // Partial teardown (soft navigation keeping layouts mounted): unmount every
-// component outside the kept route scopes and forget their slot state.
-function unmountExcept(keep: Set<string>): void {
-  const gone = (scope: string | null) => !(scope != null && keep.has(scope));
+// component of a torn-down route scope and forget its slot state.
+function unmountExcept(gone: (scope: string | null) => boolean): void {
   const passive: Array<() => void> = [];
   for (const child of root.children.slice()) {
     if (!gone(child.scope)) continue;
@@ -774,10 +774,7 @@ function unmountExcept(keep: Set<string>): void {
     if (owner.disposed || gone(owner.scope)) byId.delete(id);
   }
   // Slot ids of a layout start with its scope id (the layout's ID prefix).
-  const keptId = (id: string) => {
-    for (const k of keep) if (id.startsWith(k)) return true;
-    return false;
-  };
+  const keptId = (id: string) => !gone(krateScopeOfId(id));
   for (const id of Array.from(condShown.keys())) if (!keptId(id)) condShown.delete(id);
   for (const id of Array.from(replacedSlots)) if (!keptId(id)) replacedSlots.delete(id);
   for (let i = records.length - 1; i >= 0; i--) {
@@ -795,9 +792,9 @@ function unmountExcept(keep: Set<string>): void {
   krateSetOwner(null);
 }
 
-function unmountAll(keep: Set<string> | null): void {
-  if (keep) {
-    unmountExcept(keep);
+function unmountAll(gone: ((scope: string | null) => boolean) | null): void {
+  if (gone) {
+    unmountExcept(gone);
     return;
   }
   // Page teardown: everything unmounts now, layout before passive.

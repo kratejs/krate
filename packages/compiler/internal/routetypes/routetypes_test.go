@@ -147,3 +147,15 @@ func TestBridgeNoContent(t *testing.T) {
 		t.Errorf("Bridge with no content path must omit content, got:\n%s", out)
 	}
 }
+
+func TestOptionalCatchAll(t *testing.T) {
+	if got := Params("/shop/[[...filter]]"); len(got) != 1 || got[0] != "filter" {
+		t.Errorf("Params = %v", got)
+	}
+	if got := templateLiteral("/shop/[[...filter]]"); got != "`/shop` | `/shop/${string}`" {
+		t.Errorf("templateLiteral = %s", got)
+	}
+	if got := templateLiteral("/[[...all]]"); got != "`/` | `/${string}`" {
+		t.Errorf("templateLiteral(root) = %s", got)
+	}
+}

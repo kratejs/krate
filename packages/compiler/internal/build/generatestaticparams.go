@@ -124,11 +124,13 @@ func extractParamNames(pagePath, pagesDir string) []string {
 	rel = filepath.ToSlash(rel)
 	parts := strings.Split(rel, "/")
 	var params []string
-	for _, part := range parts {
-		cleaned := strings.TrimSuffix(part, filepath.Ext(part))
-		if strings.HasPrefix(cleaned, "[") && strings.HasSuffix(cleaned, "]") {
-			paramName := cleaned[1 : len(cleaned)-1]
-			params = append(params, paramName)
+	for i, part := range parts {
+		cleaned := part
+		if i == len(parts)-1 {
+			cleaned = strings.TrimSuffix(part, filepath.Ext(part))
+		}
+		if seg := parseRouteSeg(cleaned); seg.kind != segStatic {
+			params = append(params, seg.text)
 		}
 	}
 	return params
@@ -366,6 +368,10 @@ type staticParamsResolution struct {
 func (b *Builder) resolveStaticParamsPages(pages []string) ([]staticParamsPage, error) {
 	var dynamic []string
 	for _, page := range pages {
+		// Intercepting-route fragments are served from their dynamic template.
+		if cachedInterceptForPage(page, b.Cfg.PagesDir) != nil {
+			continue
+		}
 		if isDynamicRoute(page, b.Cfg.PagesDir) {
 			dynamic = append(dynamic, page)
 		}
@@ -435,22 +441,37 @@ func (b *Builder) resolveStaticParamsPage(page string) staticParamsResolution {
 	for _, params := range paramSets {
 		rel, _ := filepath.Rel(b.Cfg.PagesDir, page)
 		rel = filepath.ToSlash(rel)
-		rel = strings.TrimSuffix(rel, filepath.Ext(rel))
+		rel = stripRouteGroups(strings.TrimSuffix(rel, filepath.Ext(rel)))
+		rel = strings.TrimSuffix(rel, "/index")
 
 		parts := strings.Split(rel, "/")
-		for i, part := range parts {
-			if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
-				paramName := part[1 : len(part)-1]
-				if val, ok := params[paramName]; ok {
-					parts[i] = val
-				}
+		out := parts[:0:0]
+		for _, part := range parts {
+			seg := parseRouteSeg(part)
+			if seg.kind == segStatic {
+				out = append(out, part)
+				continue
 			}
+			val, ok := params[seg.text]
+			if !ok {
+				out = append(out, part)
+				continue
+			}
+			// Catch-all values are "/"-joined segments; an empty optional
+			// catch-all renders at the parent path.
+			if val != "" || seg.kind != segOptionalCatchAll {
+				out = append(out, val)
+			}
+		}
+		outPath := strings.Join(out, "/")
+		if outPath == "" {
+			outPath = "."
 		}
 
 		res.expanded = append(res.expanded, staticParamsPage{
 			PagePath: page,
 			Params:   params,
-			OutPath:  strings.Join(parts, "/"),
+			OutPath:  outPath,
 		})
 	}
 	return res

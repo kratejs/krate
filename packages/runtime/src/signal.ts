@@ -387,7 +387,7 @@ export function krateSetOwner(owner: unknown): unknown {
 // additive so other schedulers can hook in too.
 const beforeFlushHooks: Array<() => void> = [];
 const afterFlushHooks: Array<() => void> = [];
-const disposeHooks: Array<(keep: Set<string> | null) => void> = [];
+const disposeHooks: Array<(gone: ((scope: string | null) => boolean) | null) => void> = [];
 
 /** Registers fn to run before every effect flush starts (internal). */
 export function krateOnBeforeFlush(fn: () => void): void {
@@ -400,11 +400,11 @@ export function krateOnAfterFlush(fn: () => void): void {
 }
 
 /**
- * Registers fn to run at the start of disposeAll (internal). `keep` is the
- * set of route scopes that stay mounted for a partial teardown
- * (krateDisposeExcept), null for a full one.
+ * Registers fn to run at the start of disposeAll (internal). For a partial
+ * teardown (krateDisposeExcept / krateDisposeScopes) `gone` reports which
+ * route scopes are torn down; it is null for a full teardown.
  */
-export function krateOnDispose(fn: (keep: Set<string> | null) => void): void {
+export function krateOnDispose(fn: (gone: ((scope: string | null) => boolean) | null) => void): void {
   disposeHooks.push(fn);
 }
 
@@ -481,10 +481,30 @@ export function krateDisposeExcept(keep: string[]): void {
     return;
   }
   const k = new Set(keep);
-  const gone = (scope: string | null | undefined) => !(scope != null && k.has(scope));
+  disposeMatching((scope) => !(scope != null && k.has(scope)), true);
+}
+
+/**
+ * Disposes only the effects, cleanups and component owners of the given
+ * route scopes (a parallel-route slot whose content is replaced).
+ */
+export function krateDisposeScopes(ids: string[]): void {
+  if (ids.length === 0) return;
+  const k = new Set(ids);
+  disposeMatching((scope) => scope != null && k.has(scope), false);
+}
+
+/** The route scope encoded in a layout/slot id ("_lHASH_x" -> "_lHASH_"), else null. */
+export function krateScopeOfId(id: string): string | null {
+  if (id.charCodeAt(0) !== 95 /* _ */) return null;
+  const end = id.indexOf('_', 1);
+  return end > 0 ? id.slice(0, end + 1) : null;
+}
+
+function disposeMatching(gone: (scope: string | null) => boolean, pageTeardown: boolean): void {
   for (const hook of disposeHooks) {
     try {
-      hook(k);
+      hook(gone);
     } catch {
       // Unmount errors must not prevent the rest of the teardown.
     }
@@ -510,8 +530,9 @@ export function krateDisposeExcept(keep: string[]): void {
   rootCleanups.push(...kept);
   const owners = new Set<unknown>([...ownerCleanups.keys(), ...ownerEffects.keys()]);
   for (const owner of owners) {
-    if (gone(ownerScopes.get(owner))) krateDisposeOwner(owner);
+    if (gone(ownerScopes.get(owner) ?? null)) krateDisposeOwner(owner);
   }
+  if (!pageTeardown) return;
   // Islands are only mounted by page code (layouts with islands are never kept).
   const g = globalThis as { __krate_island_cleanups?: Array<() => void> };
   const islands = g.__krate_island_cleanups;

@@ -26,7 +26,8 @@ type Route struct {
 
 // Param returns the parameter names embedded in a route pattern, in order.
 // e.g. "/user/[username]/posts/[postId]" -> ["username", "postId"];
-// catch-all segments "[...slug]" yield "slug".
+// catch-all segments "[...slug]" and optional catch-alls "[[...slug]]" yield
+// "slug" (its value is the matched segments joined with "/").
 func (r Route) Param() []string {
 	return Params(r.Pattern)
 }
@@ -48,6 +49,10 @@ func segmentParam(seg string) (string, bool) {
 		return "", false
 	}
 	name := seg[1 : len(seg)-1]
+	// Optional catch-all "[[...slug]]".
+	if strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]") {
+		name = name[1 : len(name)-1]
+	}
 	name = strings.TrimPrefix(name, "...")
 	if name == "" {
 		return "", false
@@ -196,6 +201,16 @@ func Bridge(routesPath, contentPath string) string {
 // catch-all also maps to `${string}` for typing purposes).
 func templateLiteral(pattern string) string {
 	segs := strings.Split(strings.Trim(pattern, "/"), "/")
+	// An optional catch-all also matches the path without it.
+	if last := segs[len(segs)-1]; strings.HasPrefix(last, "[[...") && strings.HasSuffix(last, "]]") {
+		base := "/" + strings.Join(segs[:len(segs)-1], "/")
+		without := "`" + base + "`"
+		if len(segs) > 1 {
+			without = templateLiteral(base)
+		}
+		segs[len(segs)-1] = "[...rest]"
+		return without + " | " + templateLiteral("/"+strings.Join(segs, "/"))
+	}
 	var parts []string
 	for _, seg := range segs {
 		if _, ok := segmentParam(seg); !ok {

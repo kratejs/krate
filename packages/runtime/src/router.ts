@@ -177,6 +177,8 @@ let prefetchTimers = new Map<Element, ReturnType<typeof setTimeout>>();
 let prefetchObserver: IntersectionObserver | null = null;
 let loadingOverlay: Node[] = [];
 
+/** Output prefix of intercepting-route fragments (see the compiler's parallel.go). */
+const INTERCEPT_PREFIX = '_krate/i';
 const TRANSITION_MS = 150;
 const PREFETCH_DELAY = 200;
 
@@ -887,12 +889,18 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
       clearBetween(live[0], live[1]);
       const nodes = between(next[0], next[1]).map((n) => document.importNode(n, true));
       for (const n of nodes) live[1].parentNode!.insertBefore(n, live[1]);
+      for (const sl of plan.slots) {
+        clearBetween(sl.live[0], sl.live[1]);
+        for (const n of between(sl.next[0], sl.next[1])) sl.live[1].parentNode!.insertBefore(document.importNode(n, true), sl.live[1]);
+      }
       syncLoadingTemplate(oldRoot, newRoot);
     } else {
       const nodes = Array.from(newRoot.childNodes).map((n) => document.importNode(n, true));
       oldRoot.replaceChildren(...nodes);
     }
-    currentChain = newChain;
+    currentChain = plan.chain;
+    // Detached slot content of earlier intercepts belonged to the old page.
+    interceptSnapshots.clear();
     reconcileStylesheets(doc, url);
     reconcileHeadMeta(doc);
     applyViewTransitionNames(document);
@@ -917,6 +925,8 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
     currentKey = req.restoreKey;
   }
   renderedPath = pathOf(location.href);
+  docPath = renderedPath;
+  syncParams(doc);
 
   applyScroll(url, req);
   if (req.kind !== 'pop' && req.kind !== 'refresh') focusContent();
@@ -930,7 +940,7 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
   // layouts is skipped (krateEnterScope) because their bindings are live.
   document.querySelectorAll('script[data-krate-spa]').forEach((s) => s.remove());
   const srcs = scriptsToLoad(doc, url);
-  keepScopes(plan.keep);
+  keepScopes(plan.skip);
   const results = await Promise.all(srcs.map(loadScript));
   keepScopes([]);
   if (seq !== navSeq) return;
@@ -991,6 +1001,20 @@ interface ChainEntry {
   p: boolean;
   why?: string;
   f?: string;
+  /** Parallel-route slots rendered by the layout. */
+  s?: SlotInfo[];
+}
+
+/** One parallel-route slot of a layout (see the compiler's routeSlotInfo). */
+interface SlotInfo {
+  n: string;
+  key: string;
+  /** Route scope of the content currently in the slot. */
+  scope: string;
+  /** "page" (matched slot page), "default" (default.tsx) or "intercept". */
+  src: string;
+  /** URL patterns (no leading slash) the slot intercepts on soft navigation. */
+  i?: string[];
 }
 
 let currentChain: ChainEntry[] = [];
@@ -1012,12 +1036,12 @@ function segmentKey(url: string, depth: number): string {
   return (depth < 0 ? segs : segs.slice(0, depth)).join('/');
 }
 
-/** Finds the <!--kl:ID--> ... <!--/kl:ID--> sibling pair under root. */
-function findBoundary(root: Node, id: string): [Comment, Comment] | null {
+/** Finds the <!--kl:ID--> ... <!--/kl:ID--> (or ks: slot) sibling pair under root. */
+function findBoundary(root: Node, id: string, kind = 'kl:'): [Comment, Comment] | null {
   const doc = root.ownerDocument || (root as Document);
   const walker = doc.createTreeWalker(root, 128 /* NodeFilter.SHOW_COMMENT */);
-  const open = 'kl:' + id;
-  const close = '/kl:' + id;
+  const open = kind + id;
+  const close = '/' + kind + id;
   while (walker.nextNode()) {
     const c = walker.currentNode as Comment;
     if (c.nodeValue !== open) continue;
@@ -1055,10 +1079,16 @@ function keepScopes(ids: string[]): void {
 }
 
 interface SwapPlan {
-  /** Route scopes (layout ids) that stay mounted. */
+  /** Route scopes (layouts, kept slot content) that stay mounted. */
   keep: string[];
+  /** Route scopes whose hydration code the new page script must skip. */
+  skip: string[];
   /** Live and incoming marker pairs of the region to replace; null swaps #root. */
   region: { live: [Comment, Comment]; next: [Comment, Comment] } | null;
+  /** Slots of kept layouts whose content is replaced. */
+  slots: Array<{ live: [Comment, Comment]; next: [Comment, Comment] }>;
+  /** Route chain describing the DOM after the swap. */
+  chain: ChainEntry[];
 }
 
 /**
@@ -1067,10 +1097,12 @@ interface SwapPlan {
  * mounted, and only the children region of the deepest kept layout is
  * replaced. Templates always end the prefix, so they remount on every
  * navigation through them. A shared layout that cannot be kept is reported
- * in dev (never silently).
+ * in dev (never silently). Slots of kept layouts are swapped when the new
+ * route has a matching slot page and otherwise keep their content (a soft
+ * navigation never resets a slot to its default).
  */
 function planSwap(oldChain: ChainEntry[], newChain: ChainEntry[], fromUrl: string, toUrl: string, doc: Document): SwapPlan {
-  const full: SwapPlan = { keep: [], region: null };
+  const full: SwapPlan = { keep: [], skip: [], region: null, slots: [], chain: newChain };
   let k = 0;
   while (k < oldChain.length && k < newChain.length) {
     const a = oldChain[k];
@@ -1095,7 +1127,292 @@ function planSwap(oldChain: ChainEntry[], newChain: ChainEntry[], fromUrl: strin
     devWarn(`layout ${newChain[k - 1].f || id} boundary markers are missing; the whole page is swapped`);
     return full;
   }
-  return { keep: oldChain.slice(0, k).map((e) => e.id), region: { live, next } };
+  const keep = oldChain.slice(0, k).map((e) => e.id);
+  const skip = keep.slice();
+  const slots: SwapPlan['slots'] = [];
+  const chain = newChain.slice();
+  for (let j = 0; j < k; j++) {
+    const oldSlots = oldChain[j].s || [];
+    const merged: SlotInfo[] = [];
+    for (const ns of newChain[j].s || []) {
+      const os = oldSlots.find((x) => x.key === ns.key);
+      const liveSlot = findBoundary(appRoot(document), ns.key, 'ks:');
+      const nextSlot = findBoundary(appRoot(doc), ns.key, 'ks:');
+      if (os && liveSlot && (ns.src !== 'page' || !nextSlot)) {
+        // No matching slot page for the new URL: the slot keeps its content.
+        keep.push(os.scope);
+        skip.push(os.scope, ns.scope);
+        merged.push({ ...ns, scope: os.scope, src: os.src });
+        continue;
+      }
+      if (liveSlot && nextSlot) {
+        slots.push({ live: liveSlot, next: nextSlot });
+        merged.push(ns);
+        continue;
+      }
+      devWarn(`slot @${ns.n} markers are missing; the whole page is swapped`);
+      return full;
+    }
+    chain[j] = { ...newChain[j], s: merged };
+  }
+  return { keep, skip, region: { live, next }, slots, chain };
+}
+
+// Intercepting routes
+
+interface InterceptHit {
+  entry: ChainEntry;
+  slot: SlotInfo;
+  /** URL path without base path and surrounding slashes. */
+  path: string;
+}
+
+/** Detached slot content an intercept replaced, restored on back. */
+interface SlotSnapshot {
+  key: string;
+  nodes: Node[];
+  slot: SlotInfo;
+  /** pathname+search of the page the intercept was opened from. */
+  path: string;
+}
+
+const interceptSnapshots = new Map<string, SlotSnapshot>();
+/** pathname+search of the last full document (the children route). */
+let docPath = '';
+
+type JSSeg = { kind: number; text: string };
+
+function parsePattern(pattern: string): JSSeg[] {
+  const t = pattern.replace(/^\/+|\/+$/g, '');
+  if (!t) return [];
+  return t.split('/').map((p) => {
+    if (p.startsWith('[[...') && p.endsWith(']]')) return { kind: 3, text: p.slice(5, -2) };
+    if (p.startsWith('[...') && p.endsWith(']')) return { kind: 2, text: p.slice(4, -1) };
+    if (p.startsWith('[') && p.endsWith(']')) return { kind: 1, text: p.slice(1, -1) };
+    return { kind: 0, text: p };
+  });
+}
+
+/** Mirrors the compiler's matchRoutePattern (static, [param], [...all], [[...opt]]). */
+export function matchRoutePattern(path: string, pattern: string): Record<string, string> | null {
+  const segs = parsePattern(pattern);
+  const t = path.replace(/^\/+|\/+$/g, '');
+  const parts = t ? t.split('/') : [];
+  const params: Record<string, string> = {};
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i];
+    if (s.kind >= 2) {
+      if (i !== segs.length - 1) return null;
+      const rest = parts.slice(i);
+      if (s.kind === 2 && rest.length === 0) return null;
+      if (rest.some((r) => r === '')) return null;
+      params[s.text] = rest.map(decodeSeg).join('/');
+      return params;
+    }
+    if (i >= parts.length) return null;
+    if (s.kind === 1) {
+      if (!parts[i]) return null;
+      params[s.text] = decodeSeg(parts[i]);
+    } else if (decodeSeg(parts[i]) !== s.text) {
+      return null;
+    }
+  }
+  return parts.length === segs.length ? params : null;
+}
+
+function decodeSeg(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/** Negative when pattern a is more specific than b (static > dynamic > catch-all > optional). */
+export function compareRouteSpecificity(a: string, b: string): number {
+  const sa = parsePattern(a);
+  const sb = parsePattern(b);
+  for (let i = 0; i < sa.length && i < sb.length; i++) {
+    if (sa[i].kind !== sb[i].kind) return sa[i].kind - sb[i].kind;
+    if (sa[i].kind === 0 && sa[i].text !== sb[i].text) return sa[i].text < sb[i].text ? -1 : 1;
+  }
+  if (sa.length !== sb.length) return sb.length - sa.length;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function findIntercept(url: string): InterceptHit | null {
+  const path = stripBase(new URL(url, location.href).pathname).replace(/^\/+|\/+$/g, '');
+  let best: { hit: InterceptHit; pattern: string } | null = null;
+  for (const entry of currentChain) {
+    for (const slot of entry.s || []) {
+      for (const pattern of slot.i || []) {
+        if (!matchRoutePattern(path, pattern)) continue;
+        if (!best || compareRouteSpecificity(pattern, best.pattern) < 0) {
+          best = { hit: { entry, slot, path }, pattern };
+        }
+      }
+    }
+  }
+  if (best && !findBoundary(appRoot(document), best.hit.slot.key, 'ks:')) return null;
+  return best ? best.hit : null;
+}
+
+function setSlotInfo(key: string, next: SlotInfo): void {
+  currentChain = currentChain.map((e) =>
+    e.s && e.s.some((x) => x.key === key) ? { ...e, s: e.s.map((x) => (x.key === key ? next : x)) } : e
+  );
+}
+
+function syncParams(doc: Document): void {
+  for (const script of Array.from(doc.querySelectorAll('script:not([src])'))) {
+    const m = /window\.__KRATE_PARAMS__\s*=\s*(\{[\s\S]*?\})\s*;?\s*$/.exec(script.textContent || '');
+    if (!m) continue;
+    try {
+      (globalThis as any).__KRATE_PARAMS__ = JSON.parse(m[1]);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  delete (globalThis as any).__KRATE_PARAMS__;
+}
+
+function disposeScopes(ids: string[]): void {
+  const fn = (globalThis as any).krateDisposeScopes;
+  if (typeof fn === 'function') fn(ids);
+}
+
+/**
+ * Soft navigation to a URL a mounted slot intercepts: the slot shows the
+ * intercepting fragment while the URL becomes the target and the rest of
+ * the page (including the children route) stays as it is. The slot's
+ * previous content is kept detached (alive) and restored by going back.
+ */
+async function runIntercept(req: NavRequest, hit: InterceptHit): Promise<void> {
+  const from = location.href;
+  if (req.kind !== 'pop') {
+    if (!dispatch('krate:navigate-start', { url: req.url, from, kind: req.kind, intercept: hit.slot.n }, true)) return;
+  }
+  const seq = ++navSeq;
+  if (pendingAbort) pendingAbort.abort();
+  const ctrl = new AbortController();
+  pendingAbort = ctrl;
+  setStatus('loading');
+  const fragURL = location.origin + basePath() + '/' + INTERCEPT_PREFIX + '/' + hit.slot.key + (hit.path ? '/' + hit.path : '');
+  let html = '';
+  let ok = false;
+  try {
+    const res = await fetch(fragURL, {
+      headers: { Accept: 'text/html' },
+      credentials: 'same-origin',
+      signal: ctrl.signal,
+      cache: req.bypassCache ? 'no-cache' : 'default',
+    });
+    html = await res.text();
+    ok = res.ok && (isHTMLType(res.headers.get('content-type') || '') || looksLikeHTML(html));
+    if (!ok) dispatch('krate:navigate-error', { url: req.url, status: res.status, intercept: hit.slot.n });
+  } catch (err) {
+    if ((err as any)?.name === 'AbortError' || ctrl.signal.aborted) return;
+    dispatch('krate:navigate-error', { url: req.url, status: 0, error: err, intercept: hit.slot.n });
+  } finally {
+    if (pendingAbort === ctrl) pendingAbort = undefined;
+  }
+  if (seq !== navSeq) return;
+  const doc = ok ? new DOMParser().parseFromString(html, 'text/html') : null;
+  const next = doc ? findBoundary(appRoot(doc), hit.slot.key, 'ks:') : null;
+  const live = findBoundary(appRoot(document), hit.slot.key, 'ks:');
+  let frag: { key?: string; scope?: string } | null = null;
+  try {
+    const el = doc && doc.getElementById('__krate_route');
+    frag = el ? JSON.parse(el.textContent || '{}').frag || null : null;
+  } catch {
+    frag = null;
+  }
+  if (!doc || !next || !live || !frag || frag.key !== hit.slot.key || !frag.scope) {
+    // The fragment is missing or malformed: show the real page instead,
+    // loudly (the error event above, and a console warning).
+    try {
+      console.warn(`[krate router] intercepting route for ${req.url} (slot @${hit.slot.n}) could not be loaded; navigating to the page`);
+    } catch {
+      /* ignore */
+    }
+    setStatus('idle');
+    return runNavigation({ ...req });
+  }
+  if (req.kind === 'push') saveScroll(currentKey);
+
+  // Swap the slot content.
+  if (hit.slot.src !== 'intercept') {
+    interceptSnapshots.set(currentKey, { key: hit.slot.key, nodes: between(live[0], live[1]), slot: hit.slot, path: docPath });
+    for (const n of between(live[0], live[1])) n.parentNode!.removeChild(n);
+  } else {
+    disposeScopes([hit.slot.scope]);
+    clearBetween(live[0], live[1]);
+  }
+  for (const n of between(next[0], next[1])) live[1].parentNode!.insertBefore(document.importNode(n, true), live[1]);
+  // A fragment only adds its stylesheets; the page keeps its own.
+  const existing = new Set<string>();
+  document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => existing.add((l as HTMLLinkElement).href));
+  doc.querySelectorAll('link[rel="stylesheet"][href]').forEach((l) => {
+    const abs = new URL(l.getAttribute('href')!, fragURL).href;
+    if (existing.has(abs)) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = abs;
+    document.head.appendChild(link);
+  });
+  setSlotInfo(hit.slot.key, { ...hit.slot, scope: frag.scope, src: 'intercept' });
+
+  const state = { __krate: '', state: req.state === undefined ? null : req.state, __kint: { key: hit.slot.key, base: docPath } };
+  if (req.kind === 'push') {
+    currentKey = newKey();
+    state.__krate = currentKey;
+    history.pushState(state, '', req.url);
+  } else if (req.kind === 'replace') {
+    currentKey = newKey();
+    state.__krate = currentKey;
+    history.replaceState(state, '', req.url);
+  } else if (req.kind === 'pop' && req.restoreKey) {
+    currentKey = req.restoreKey;
+  }
+  renderedPath = pathOf(location.href);
+  syncParams(doc);
+  updateActiveLinks();
+  dispatch('krate:navigate', { url: location.href, status: 200, intercept: hit.slot.n });
+  notifyNavigation(location.href);
+  setStatus('idle');
+
+  const srcs = scriptsToLoad(doc, fragURL);
+  const results = await Promise.all(srcs.map(loadScript));
+  if (seq !== navSeq) return;
+  if (results.some((r) => !r)) {
+    dispatch('krate:navigate-error', { url: location.href, status: 200, error: 'script-load', intercept: hit.slot.n });
+    hardNavigate(location.href, true);
+    return;
+  }
+  refreshPageBindings();
+  dispatch('krate:navigate-end', { url: location.href, status: 200, intercept: hit.slot.n });
+}
+
+/** Back to the page an intercept was opened from: put the slot content back. */
+function restoreSnapshot(snap: SlotSnapshot, key: string): boolean {
+  const live = findBoundary(appRoot(document), snap.key, 'ks:');
+  const current = currentChain.flatMap((e) => e.s || []).find((x) => x.key === snap.key);
+  if (!live || !current || current.src !== 'intercept') return false;
+  disposeScopes([current.scope]);
+  clearBetween(live[0], live[1]);
+  for (const n of snap.nodes) live[1].parentNode!.insertBefore(n, live[1]);
+  setSlotInfo(snap.key, snap.slot);
+  interceptSnapshots.delete(key);
+  currentKey = key;
+  renderedPath = pathOf(location.href);
+  const saved = scrollPositions.get(key);
+  if (saved !== undefined) window.scrollTo(0, saved);
+  updateActiveLinks();
+  dispatch('krate:navigate', { url: location.href, status: 200 });
+  notifyNavigation(location.href);
+  emit();
+  return true;
 }
 
 function sameDocument(url: string): boolean {
@@ -1134,6 +1451,10 @@ function start(req: NavRequest): Promise<void> {
   if ((req.kind === 'push' || req.kind === 'replace') && sameDocument(u.href) && (u.hash || u.href === location.href)) {
     hashNavigate(u.href, req);
     return Promise.resolve();
+  }
+  if (req.kind === 'push' || req.kind === 'replace') {
+    const hit = findIntercept(u.href);
+    if (hit) return runIntercept(req, hit);
   }
   return runNavigation(req);
 }
@@ -1207,6 +1528,18 @@ function popstateHandler(e: PopStateEvent): void {
     emit();
     return;
   }
+  // Back to the page an intercept was opened from.
+  const snap = key ? interceptSnapshots.get(key) : undefined;
+  if (snap && key && snap.path === pathOf(url) && snap.path === docPath && restoreSnapshot(snap, key)) return;
+  // Back/forward to an intercepted entry while its base page is still shown.
+  const kint = e.state && typeof e.state === 'object' ? (e.state as any).__kint : null;
+  if (kint && kint.base === docPath) {
+    const hit = findIntercept(url);
+    if (hit && hit.slot.key === kint.key) {
+      void runIntercept({ url, kind: 'pop', scroll: false, restoreKey: key }, hit);
+      return;
+    }
+  }
   void runNavigation({ url, kind: 'pop', scroll: true, restoreKey: key });
 }
 
@@ -1252,6 +1585,13 @@ function refresh(): Promise<void> {
   if (!initialized || typeof location === 'undefined') {
     if (typeof location !== 'undefined') location.reload();
     return Promise.resolve();
+  }
+  if (renderedPath !== docPath) {
+    // The URL shows an intercepted route: refresh the slot content.
+    const hit = findIntercept(location.href);
+    if (hit && hit.slot.src === 'intercept') {
+      return runIntercept({ url: location.href, kind: 'refresh', scroll: false, bypassCache: true }, hit);
+    }
   }
   return runNavigation({ url: location.href, kind: 'refresh', scroll: false, bypassCache: true });
 }
@@ -1335,6 +1675,7 @@ export function initRouter(): void {
 
   renderedPath = pathOf(location.href);
   currentChain = readRouteChain(document);
+  docPath = renderedPath;
   currentKey = entryKey(history.state) || newKey();
   if (entryKey(history.state) === undefined) {
     try {
@@ -1397,4 +1738,6 @@ export function destroyRouter(): void {
   status = 'idle';
   loadingOverlay = [];
   currentChain = [];
+  interceptSnapshots.clear();
+  docPath = '';
 }
