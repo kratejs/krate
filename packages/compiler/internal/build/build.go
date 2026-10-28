@@ -946,6 +946,9 @@ func (b *Builder) BuildAll() error {
 	manifest := BuildManifest(results, manifestCSS, runtimeJS)
 	manifest.StaticOnlyRoutes = append([]string(nil), b.staticOnlyRoutes...)
 
+	// revalidatePath("/x") calls whose target page is static cannot refresh it.
+	printWarningsOnce(os.Stderr, staticRevalidateTargetWarnings(filepath.Dir(b.Cfg.PagesDir), b.Root, manifest.Pages))
+
 	// Compile server bundles for SSR/ISR/streaming pages
 	serverBundles := CompileServerBundles(results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
 	if len(serverBundles) > 0 {
