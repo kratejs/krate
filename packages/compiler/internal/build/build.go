@@ -2223,6 +2223,11 @@ func (b *Builder) resetBuildCaches() {
 	b.transformOnce = sync.Map{}
 	// Go component parses are per-build.
 	b.goParseCache = nil
+	// Client boundary chunks are per-build: a dev rebuild must pick up edits
+	// to a "use client" module or its imports.
+	b.clientChunkMu.Lock()
+	b.clientChunks = nil
+	b.clientChunkMu.Unlock()
 	// Filesystem-existence and import-resolution memos are per-build: a file
 	// added/removed between dev rebuilds must not be served from a stale entry.
 	// The parse cache is keyed by mtime+size, so it stays valid and is kept.
