@@ -276,6 +276,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (WORKERS > 1 && cluster.isPrimary) {
+  // Node leaves scheduling to the OS on Windows (SCHED_NONE), where one
+  // worker tends to accept every connection. Round-robin keeps clustered
+  // caches - and therefore revalidation fan-out - reachable on every platform.
+  cluster.schedulingPolicy = cluster.SCHED_RR;
   for (let i = 0; i < WORKERS; i++) cluster.fork();
   // Restart a worker that dies, after a short delay, but give up when they
   // keep dying (a bad route module, a port that stays unbindable) instead of

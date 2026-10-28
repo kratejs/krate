@@ -53,6 +53,10 @@ function internalAuthorized(req: http.IncomingMessage): boolean {
 const SSR_WORKERS = Math.max(1, parseInt(process.env.KRATE_SSR_WORKERS || "1", 10) || 1);
 const isClusterPrimary = SSR_WORKERS > 1 && cluster.isPrimary;
 if (isClusterPrimary) {
+  // Node leaves scheduling to the OS on Windows (SCHED_NONE), where one
+  // worker tends to accept every connection. Round-robin keeps clustered
+  // caches - and therefore revalidation fan-out - reachable on every platform.
+  cluster.schedulingPolicy = cluster.SCHED_RR;
   for (let i = 0; i < SSR_WORKERS; i++) cluster.fork();
   // Restart a worker that dies, after a short delay, but give up when they
   // keep dying (a port that stays unbindable, a broken bundle) instead of

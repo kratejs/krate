@@ -53,10 +53,6 @@ func (u *dataCacheUsage) merge(o dataCacheUsage) {
 	}
 }
 
-func (u dataCacheUsage) any() bool {
-	return u.noStore || u.tagged || u.minRevalidate > 0
-}
-
 // detectDataCacheUsage scans one module for data-cache reads.
 func detectDataCacheUsage(prog *ast.Program) dataCacheUsage {
 	var u dataCacheUsage

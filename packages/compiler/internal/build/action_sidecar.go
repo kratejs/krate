@@ -303,6 +303,10 @@ async function runAction(req, res, urlObj) {
 // the request answers once all live workers acknowledged.
 const apiSidecarClusterJS = `
 if (WORKERS > 1 && cluster.isPrimary) {
+  // Node leaves scheduling to the OS on Windows (SCHED_NONE), where one
+  // worker tends to accept every connection. Round-robin keeps clustered
+  // caches - and therefore revalidation fan-out - reachable on every platform.
+  cluster.schedulingPolicy = cluster.SCHED_RR;
   const broadcasts = new Map();
   const finish = (id) => {
     const b = broadcasts.get(id);

@@ -709,9 +709,7 @@ func apiRoute(target string) string {
 	if rel == "index" || rel == "" {
 		return "/api"
 	}
-	if strings.HasSuffix(rel, "/index") {
-		rel = strings.TrimSuffix(rel, "/index")
-	}
+	rel = strings.TrimSuffix(rel, "/index")
 	return "/api/" + rel
 }
 
