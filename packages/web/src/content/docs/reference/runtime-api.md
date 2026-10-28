@@ -269,36 +269,85 @@ class; unclassifiable expressions remain a build error.
 
 ## SPA router
 
-```typescript
-import { initRouter } from '@krate/runtime'
-initRouter()
-```
-
-Call once to enable client-side navigation via `data-krate-link` anchors and
-`<Link>`. Handles `pushState`, `popstate`, stylesheet/head diffing, scroll
-restoration, and view transitions. On navigation the router replaces the app
-shell (`#root`) with the parsed new page and then re-runs that page's hydration
-script, so event handlers and dynamic bindings are reattached cleanly. Effects
-are disposed before the swap. Emits a `krate:navigate` CustomEvent after each
-navigation.
-
-`reinitRouter()` tears down and re-registers the router listeners - useful
-after a full page replacement or for HMR in dev.
-Programmatic navigation:
+The router initializes itself from every page's hydration script
+(`initRouter()` / `reinitRouter()` are idempotent). It intercepts clicks on
+`<Link>` anchors (`data-krate-link`) and same-origin `GET` form submissions,
+fetches the target document and swaps it in place. Shared layouts stay
+mounted (see [Routing & Layouts](/docs/core-concepts/routing/#layout-persistence)).
 
 ```typescript
-import { navigate } from '@krate/runtime'
-navigate('/about', { replace: false, scroll: true })
+import { krateRouter, navigate } from '@krate/runtime'
+
+await krateRouter.push('/about', { scroll: true, state: { from: 'nav' } })
+await krateRouter.replace('/search?q=krate')
+krateRouter.back()
+krateRouter.forward()
+await krateRouter.refresh()          // re-fetch the current route, keep scroll + history
+await krateRouter.prefetch('/pricing') // warm the document and its page chunk
+
+navigate('/about', { replace: false, scroll: true }) // returns false when handled client-side
 ```
 
-`navigate` returns `false` when handled client-side and `true` when it fell back
-to a full page load (router not initialized, or a cross-origin URL). The router
-also emits `krate:navigate-start` before the DOM mutation and
-`krate:navigate-end` after it — a pairing that powers View Transitions and
-progress UI — plus `krate:navigate` after history/scroll updates. Elements with
-`data-view-transition="name"` are given a matching `view-transition-name`, and
-the router wraps the mutation in `document.startViewTransition` when supported
-(honoring `prefers-reduced-motion`).
+Every navigation method resolves once the new route's DOM and URL are in place
+(page scripts may still be loading). With `spa: false` the same API performs
+full-page navigations (`refresh()` reloads, `prefetch()` resolves immediately).
+
+| API | Description |
+|-----|-------------|
+| `krateRouter.push/replace(url, opts)` | Client navigation. `opts`: `scroll` (default `true`), `state` (stored on the history entry). |
+| `krateRouter.back()/forward()` | History traversal. |
+| `krateRouter.refresh()` | Re-fetches the current route bypassing the prefetch cache; scroll position and history are kept. |
+| `krateRouter.prefetch(url)` | Fetches and caches a same-origin document. |
+| `subscribeNavigation(fn)` | Calls `fn({ url, pathname, search, hash, status })` on URL and loading-status changes; returns an unsubscribe function. `pathname` excludes the base path. |
+| `getNavigationState()` | The current value delivered to subscribers. |
+| `getHistoryState()` | The `state` passed to the navigation that created the current entry. |
+| `invalidatePrefetchCache(url?)` | Drops one prefetched document, or all of them. |
+
+**Events** (on `window`, `detail` in parentheses):
+
+- `krate:navigate-start` (`url`, `from`, `kind`): before fetching. Cancelable for
+  `push`/`replace`/`refresh` (call `preventDefault()` to veto the navigation).
+- `krate:navigate` (`url`, `status`): after the DOM swap, history and scroll update.
+- `krate:navigate-end` (`url`, `status`): after the new page scripts ran.
+- `krate:navigate-error` (`url`, `status`, `error`): a non-2xx response
+  (`status`), a network failure (`status: 0`, cancelable: `preventDefault()`
+  keeps the current page instead of the hard-reload fallback), or a page chunk
+  that failed to load (`error: "script-load"`, followed by a full load).
+- `krate:revalidate`: dispatch it (server actions that call `revalidatePath` /
+  `revalidateTag` do) to clear the prefetch cache and `refresh()` the current route.
+
+**Behavior details**
+
+- **Scroll restoration** is keyed by history entry: back/forward restores the
+  position the entry had when you left it; new navigations scroll to the top
+  or to the URL hash. `scroll: false` / `<Link scroll={false}>` keeps the position.
+- **Hash links** to the current page scroll in place without a fetch; back/forward
+  between hash entries never refetches.
+- **Redirects** are followed: the address bar shows the final URL. A response that
+  is not HTML (a download, JSON) or a redirect to another origin falls back to a
+  full navigation.
+- **Error statuses**: a server-rendered error document (`404`, `500`, ...) is shown
+  in place, keeping the SPA alive. Without an HTML body, `404`/`410` load
+  `<basePath>/404.html` and `5xx` load `<basePath>/500.html`; other statuses
+  (`401`, `403`, `429`) do a full navigation so the browser shows the real response.
+- **Prefetch cache**: documents prefetched by hover, viewport or `prefetch()` stay
+  fresh for 30 seconds (`window.__KRATE_CFG__.prefetchTTL`), are used at most once,
+  and are bounded (LRU). `refresh()` and `krate:revalidate` bypass it.
+- **Races**: a newer navigation aborts the older fetch; a superseded response never
+  replaces newer content.
+- **Accessibility**: after a navigation focus moves to `#root` (its temporary
+  `tabindex` is removed on blur) unless it is inside a kept layout, and a
+  live region (`#__krate-route-announcer`) announces the new page title.
+- **Active links**: the link to the current path gets `aria-current="page"` and
+  `data-krate-active="exact"`; links to an ancestor segment (`/docs` on
+  `/docs/intro`, never `/docs-old`) get `data-krate-active="segment"`.
+- **Forms**: same-origin `GET` forms navigate client-side with the form fields as
+  the query string. Add `data-krate-reload` to a form to opt out; forms with file
+  inputs are left to the browser.
+- **View Transitions**: elements with `data-view-transition="name"` get a matching
+  `view-transition-name`, and the swap runs inside `document.startViewTransition`
+  when supported (honoring `prefers-reduced-motion`). History, scroll and focus
+  update after the transition's update callback ran.
 
 ## Context
 
