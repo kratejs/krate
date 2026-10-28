@@ -45,6 +45,20 @@ page-level server-side data functions. A page that imports them is treated as
 **streaming**: its shell is baked (layout, server components, suspense
 fallbacks) and each runtime component resolves independently.
 
+## Async server components
+
+An `async` component fetches data per request with plain `await`, in the page
+itself or in any child, and can render `"use client"` components that hydrate
+in the browser. See [Async Server Components](/docs/features/server-components/).
+
+```tsx
+export default async function Post({ params }) {
+  const { slug } = await params;
+  const post = await fetch(`https://api.example.com/posts/${slug}`).then((r) => r.json());
+  return <h1>{post.title}</h1>;
+}
+```
+
 ## ISR / SSR page data
 
 For whole pages whose body is request-time (e.g. a dynamic route without known

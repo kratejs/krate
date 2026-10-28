@@ -18,6 +18,7 @@ A tour of the features that ship with Krate beyond the core compiler.
 | [Built-in Components](/docs/features/built-in-components/) | `<Head>`, `<Script>`, `<Style>`, `<Link>`, `<Icon>`, `<Image>` |
 | [Image Optimization](/docs/features/image-optimization/) | Compile-time WebP-first `<picture>` pipeline |
 | [Data Fetching](/docs/features/data-fetching/) | Component tiers, ISR/SSR page data, `generateStaticParams`, `createResource`, API routes |
+| [Async Server Components](/docs/features/server-components/) | `async` components that fetch per request, request APIs, `"use client"` boundaries |
 | [API Routes](/docs/features/api-routes/) | TypeScript and Go endpoints in one namespace |
 | [Go Components](/docs/features/go-components/) | Server and runtime components written in Go, importing any Go package |
 | [Plugin System](/docs/features/plugins/) | Go plugin hooks + JS/TS community plugins via QuickJS, typed with `@krate/plugin` |

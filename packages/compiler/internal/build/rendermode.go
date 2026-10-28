@@ -51,6 +51,8 @@ type PageMeta struct {
 	// StaticOnly marks a dynamic route whose set of valid params is closed, so
 	// the build should not emit a `[param]` fallback template.
 	StaticOnly bool `json:"staticOnly,omitempty"`
+	// ServerComponents marks a page that renders async server components.
+	ServerComponents bool `json:"serverComponents,omitempty"`
 }
 
 // pageConfig holds the merged page-level render config extracted from

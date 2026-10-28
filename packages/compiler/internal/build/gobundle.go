@@ -334,16 +334,22 @@ func goServerBundlePlugin(baked map[string]string, root string) api.Plugin {
 				if err != nil {
 					return api.OnLoadResult{}, err
 				}
-				src := string(data)
-				if strings.Contains(src, ".go\"") || strings.Contains(src, ".go'") {
-					if locals := goComponentLocals(args.Path, src, ""); len(locals) > 0 {
-						src = annotateGoCalls(src, args.Path, locals)
-					}
-				}
+				src := annotateGoModuleSource(args.Path, string(data))
 				return api.OnLoadResult{Contents: &src, Loader: loaderForExt(args.Path)}, nil
 			})
 		},
 	}
+}
+
+// annotateGoModuleSource annotates the Go-component call sites of a nested
+// project module so they can inline baked HTML in the server bundle.
+func annotateGoModuleSource(path, src string) string {
+	if strings.Contains(src, ".go\"") || strings.Contains(src, ".go'") {
+		if locals := goComponentLocals(path, src, ""); len(locals) > 0 {
+			src = annotateGoCalls(src, path, locals)
+		}
+	}
+	return src
 }
 
 // goShimSource builds a JS module exporting each Go component as a function that

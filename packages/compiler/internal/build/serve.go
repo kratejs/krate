@@ -510,6 +510,9 @@ type regionFrame struct {
 	NotFound    bool   `json:"notFound,omitempty"`
 	Redirect    string `json:"redirect,omitempty"`
 	Title       string `json:"title,omitempty"`
+	// Fatal marks a failed render that has no usable baked content (an async
+	// server component): the response must be an error, not the shell.
+	Fatal bool `json:"fatal,omitempty"`
 }
 
 // regionPageResult carries sidecar outcome back to the caller so it can apply
@@ -531,6 +534,9 @@ type regionPageResult struct {
 	// renderErr is non-empty when the page-region render reported a server
 	// error (status >= 500). The caller serves the baked shell / error page.
 	renderErr string
+	// fatalErr is non-empty when a server component render failed. Nothing
+	// was written; the caller answers with a 500.
+	fatalErr string
 }
 
 // regionBoundary is one splice marker and its nested markers.
@@ -717,9 +723,10 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, shells *regio
 		}
 	}
 
-	// A page-region render that 404s (unknown dynamic variant) or redirects is
-	// surfaced to the caller instead of streaming the shell.
-	if res.notFound {
+	// A page-region render that 404s (unknown dynamic variant) or redirects,
+	// or a server component render that failed, is surfaced to the caller
+	// instead of streaming the shell.
+	if res.notFound || res.redirect != "" || res.fatalErr != "" {
 		res.served = true
 		return res
 	}
@@ -826,6 +833,16 @@ func fetchNodeRegions(ssrPort int, route string, params, query, headers map[stri
 		}
 		switch frame.Type {
 		case "region":
+			// notFound()/redirect() thrown by a server component region apply
+			// to the whole response, like the page region's.
+			if frame.ID != "page" && (frame.NotFound || frame.Redirect != "") {
+				res.notFound = res.notFound || frame.NotFound
+				if res.redirect == "" {
+					res.redirect = frame.Redirect
+				}
+				framesLeft--
+				continue
+			}
 			if frame.ID == "page" {
 				res.isISR = frame.CacheStatus != ""
 				res.cacheStatus = frame.CacheStatus
@@ -839,6 +856,9 @@ func fetchNodeRegions(ssrPort int, route string, params, query, headers map[stri
 					res.renderErr = frame.Error
 					if res.renderErr == "" {
 						res.renderErr = fmt.Sprintf("page-region render failed with status %d", frame.Status)
+					}
+					if frame.Fatal {
+						res.fatalErr = res.renderErr
 					}
 					framesLeft--
 					continue
@@ -855,6 +875,16 @@ func fetchNodeRegions(ssrPort int, route string, params, query, headers map[stri
 			// Sidecar has no renderer for this marker - keep baked content.
 			framesLeft--
 		case "error":
+			msg := frame.Error
+			if msg == "" {
+				msg = fmt.Sprintf("region %s render failed with status %d", frame.ID, frame.Status)
+			}
+			if frame.Fatal && res.fatalErr == "" {
+				res.fatalErr = msg
+			}
+			if res.renderErr == "" {
+				res.renderErr = msg
+			}
 			if frame.ID != "" {
 				framesLeft--
 			} else {
@@ -1526,6 +1556,21 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			regionPort = ssrPort
 		}
 		rr := streamRegionPage(w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo)
+		if rr.served && rr.fatalErr != "" {
+			// A server component failed: there is no meaningful baked body to
+			// fall back to, so answer 500 (the custom 500 page when present).
+			fmt.Fprintf(os.Stderr, "  %sServer component error (%s):%s %s\n", cRed, route, cReset, rr.fatalErr)
+			w.Header().Set("X-Krate-Error", "render")
+			w.Header().Del("X-Krate-Cache")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusInternalServerError)
+			if data, err := os.ReadFile(filepath.Join(absOut, "500.html")); err == nil {
+				_, _ = w.Write(data)
+			} else {
+				_, _ = w.Write([]byte("<!doctype html><title>500</title><h1>Internal Server Error</h1>"))
+			}
+			return
+		}
 		if rr.served {
 			if rr.renderErr != "" {
 				// The page-region render failed; the baked body was served as a

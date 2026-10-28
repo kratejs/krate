@@ -623,18 +623,22 @@ func (b *builder) resolveSuspensePrimary(children []ast.JSXChild, parentID strin
 		if b.ann.ComponentTiers[name] == TierRuntime {
 			childID := joinSlotID(parentID, name)
 			attrs := extractPropsAST(elc.Element)
+			if fn.Async {
+				b.checkServerComponentCall(elc.Element, attrs)
+			}
 			props := make(map[string]any, len(attrs))
 			for pn, pe := range attrs {
 				props[pn] = evalConstWithSignals(pe, b.sigMap(), b.localProps)
 			}
 			node := &ComponentNode{
-				ID:           childID,
-				Name:         name,
-				Tier:         TierRuntime,
-				Props:        attrs,
-				RuntimeProps: props,
-				SourceFile:   b.ann.ComponentSources[name],
-				Line:         fn.Position.Line,
+				ID:              childID,
+				Name:            name,
+				Tier:            TierRuntime,
+				Props:           attrs,
+				RuntimeProps:    props,
+				ServerComponent: fn.Async,
+				SourceFile:      b.ann.ComponentSources[name],
+				Line:            fn.Position.Line,
 			}
 			// Build the remaining (static) children as resolved fallback-in-place
 			// content so a shell without the runtime region still shows them.

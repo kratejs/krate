@@ -301,6 +301,66 @@ Re-exports cannot be bundled as server actions. Import the function and re-decla
 
 The import names an export that the "use server" module does not declare.
 
+### KR7101
+
+**Async layouts are not supported**
+
+Layouts are baked into the static page shell at build time, so they cannot await data. Keep the layout synchronous and move the data fetching into an async child component (a server component), which renders per request.
+
+### KR7102
+
+**`await` cannot run at build time**
+
+Only async components (server components) can await: they render per request in the SSR sidecar. Code that Krate evaluates at build time, such as module-level constants a static component renders or a non-async component body, cannot await a Promise. Mark the component `async` or compute the value without awaiting.
+
+### KR7103
+
+**Server components need request-time rendering**
+
+An async component renders per request, but `output: "static"` disables the SSR sidecar, so the page cannot render it. Remove `output: "static"` or make the component synchronous.
+
+### KR7104
+
+**Page with server components is rendered per request**
+
+A page that contains an async component cannot be fully baked at build time. Krate bakes the rest of the page as a static shell and renders each server component per request (streaming mode). This is informational.
+
+### KR7105
+
+**Server component props must be known at build time in a static page**
+
+A server component used from a synchronous page renders as its own request-time region, so its props are fixed when the page shell is built: they must be literals, module constants or route params, and it cannot receive children. Make the page itself `async` (the whole page then renders per request) or pass constant props.
+
+### KR7110
+
+**Client-only API used in a server component**
+
+Components rendered by a server component (an async component) render once per request on the server and ship no JavaScript, so hooks such as useState/useEffect, Krate signals and event handlers cannot work there. Move the interactive part into a module that starts with `"use client"`; it is server-rendered and then hydrated in the browser.
+
+### KR7111
+
+**Function prop passed from a server component to a client component**
+
+Props crossing from a server component to a `"use client"` component are serialized to JSON. Functions (other than server actions), class instances and symbols cannot be sent. Define the handler inside the client component, or pass a server action. The same check runs at request time for values computed while rendering.
+
+### KR7112
+
+**Client component imports a server-only module**
+
+A module that imports `server-only` must never reach the browser, but a `"use client"` module (directly or through its imports) imports it, so it would be bundled into the client chunk. Import it from a server component instead and pass the data as props.
+
+### KR7113
+
+**Async component in a client module**
+
+Components in a `"use client"` module run in the browser and cannot be async. Move the async component to a module without the directive (it becomes a server component).
+
+### KR7114
+
+**Client module exports cannot be listed**
+
+Krate wraps each export of a `"use client"` module in a client boundary, so it must know the export names. `export * from` cannot be enumerated: list the re-exported names explicitly (`export { A, B } from "./x"`).
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

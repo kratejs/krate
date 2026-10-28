@@ -314,3 +314,26 @@ func TestBuildImportAliasesIgnoresUnresolvableBindings(t *testing.T) {
 		t.Errorf("expected no aliases for an unresolvable import, got %v", aliases)
 	}
 }
+
+// An async function component is a server component: TierRuntime regardless
+// of its declaration form, and even when no directive or convention applies.
+func TestClassifyAsyncComponentsAsRuntime(t *testing.T) {
+	src := `async function Comments() { return <ul></ul>; }
+const Likes = async () => <b>1</b>;
+function Plain() { return <i>x</i>; }
+export default async function Page() { return <div><Comments /><Likes /><Plain /></div>; }`
+	ann := Annotate(parseProg(t, src), &config.Config{}, "page.tsx", src)
+	for name, want := range map[string]irtree.ComponentTier{
+		"Page":     irtree.TierRuntime,
+		"Comments": irtree.TierRuntime,
+		"Likes":    irtree.TierRuntime,
+		"Plain":    irtree.TierClient,
+	} {
+		if got := ann.ComponentTiers[name]; got != want {
+			t.Errorf("%s: tier %v, want %v", name, got, want)
+		}
+	}
+	if !ann.Functions["Likes"].Async {
+		t.Error("async arrow components must keep the Async flag")
+	}
+}

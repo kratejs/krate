@@ -349,6 +349,13 @@ func (e *SSREval) reportUnknown(expr ast.Expr, v jsvalue.Value, context string) 
 		e.errs = append(e.errs, newBuildThrow(t))
 		return
 	}
+	if v.IsUnsupported() && v.Reason() == jsvalue.AwaitReason {
+		e.errs = append(e.errs, diag.Diagnostic{Line: pos.Line, Col: pos.Col,
+			Message: v.Reason() + " (in " + context + " `" + src + "`)",
+			Hint:    "only async components (server components) can await; mark the component `async` so it renders per request, or compute the value without awaiting",
+			Code:    diag.CodeBuildTimeAwait})
+		return
+	}
 	if v.IsUnsupported() {
 		e.addDiag(pos, "unsupported expression: "+v.Reason()+" (in "+context+" `"+src+"`)",
 			"this component is rendered at build time; rewrite the expression with supported constructs or move it into a component with client state")

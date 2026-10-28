@@ -17,6 +17,14 @@ import (
 //   - Head, Suspense, Script, Style imported from @krate/runtime/server
 //   - All dependencies bundled (except node_modules externals)
 func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) map[string]string {
+	bundles, _ := compileServerBundles(results, root, outDir, sourcemap, actionModules, actionBasePath)
+	return bundles
+}
+
+// compileServerBundles is CompileServerBundles that also returns the bundle
+// failures of pages that render server components. Those pages have no baked
+// body to fall back to, so a missing bundle must fail the build.
+func compileServerBundles(results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) (map[string]string, []error) {
 	// Collect non-SSG pages that actually need the Node renderer. A streaming
 	// page whose regions are all Go (or that has no dynamic regions at all) is
 	// rendered by the Go server + Go host alone, so its page bundle is never
@@ -28,14 +36,24 @@ func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 		}
 	}
 	if len(ssrPages) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	bundleDir := filepath.Join(outDir, ".krate", "server-bundles")
 	_ = os.MkdirAll(bundleDir, 0755)
 
 	bundles := make(map[string]string, len(ssrPages))
+	impls := &clientSSRImpls{root: root, bundleDir: bundleDir}
+	var fatal []error
 	var mu sync.Mutex
+	fail := func(page *PageResult, err error) {
+		if !page.ServerPage && len(page.ServerExports) == 0 {
+			return
+		}
+		mu.Lock()
+		fatal = append(fatal, fmt.Errorf("%s: server bundle: %w", page.SourcePath, err))
+		mu.Unlock()
+	}
 	var wg sync.WaitGroup
 	pool := newWorkerPool(buildWorkerLimit())
 
@@ -67,7 +85,7 @@ func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 			if locals := goComponentLocals(absSource, pageSrc, root); len(locals) > 0 {
 				pageSrc = annotateGoCalls(pageSrc, absSource, locals)
 			}
-			injectedSource := injectServerGlobals(pageSrc)
+			injectedSource := injectServerGlobals(pageSrc) + serverExportEntrySuffix(page.ServerExports, absSource)
 
 			// Compile with esbuild - use stdin so esbuild resolves relative imports
 			// from the project root (AbsWorkingDir) rather than a temp file location
@@ -77,6 +95,13 @@ func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 			}
 			outName := strings.TrimPrefix(route, "/") + ".server.mjs"
 			outPath := filepath.Join(bundleDir, outName)
+
+			cbPlugin, cbErr := clientBoundaryPlugin(page.ClientBoundaries, impls, outPath)
+			if cbErr != nil {
+				fmt.Fprintf(os.Stderr, "  %sServer bundle error (%s):%s %v\n", cRed, page.SourcePath, cReset, cbErr)
+				fail(page, cbErr)
+				return
+			}
 
 			result := api.Build(api.BuildOptions{
 				AbsWorkingDir:   root,
@@ -95,7 +120,7 @@ func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: []api.Plugin{goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(actionModules, actionBasePath)},
+				Plugins: []api.Plugin{cbPlugin, serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(actionModules, actionBasePath)},
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   injectedSource,
@@ -108,7 +133,12 @@ func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 				for _, e := range result.Errors {
 					fmt.Fprintf(os.Stderr, "  %sServer bundle error (%s):%s %s\n", cYellow, page.SourcePath, cReset, e.Text)
 				}
+				fail(page, fmt.Errorf("%s", result.Errors[0].Text))
 				return
+			}
+
+			if err := reportMissingServerExports(page, outPath); err != nil {
+				fail(page, err)
 			}
 
 			relBundle, _ := filepath.Rel(outDir, outPath)
@@ -120,7 +150,7 @@ func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 
 	wg.Wait()
 
-	return bundles
+	return bundles, fatal
 }
 
 // pageNeedsNodeServerBundle reports whether a non-SSG page requires a compiled

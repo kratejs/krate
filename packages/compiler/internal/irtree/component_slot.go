@@ -116,6 +116,9 @@ func (b *builder) buildRuntimeComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 	b.instanceCounts[childName]++
 	id := SlotID(string(childID) + "_c" + itoa(instanceIdx))
 	attrs := extractPropsAST(el)
+	if childFn.Async {
+		b.checkServerComponentCall(el, attrs)
+	}
 	props := make(map[string]any, len(attrs))
 	for name, expr := range attrs {
 		props[name] = evalConstWithSignals(expr, b.sigMap(), b.localProps)
@@ -123,13 +126,14 @@ func (b *builder) buildRuntimeComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 	return []SlotNode{&ComponentSlot{
 		ID: id,
 		Component: &ComponentNode{
-			ID:           id,
-			Name:         childName,
-			Tier:         TierRuntime,
-			Props:        attrs,
-			RuntimeProps: props,
-			SourceFile:   b.ann.ComponentSources[childName],
-			Line:         childFn.Position.Line,
+			ID:              id,
+			Name:            childName,
+			Tier:            TierRuntime,
+			Props:           attrs,
+			RuntimeProps:    props,
+			ServerComponent: childFn.Async,
+			SourceFile:      b.ann.ComponentSources[childName],
+			Line:            childFn.Position.Line,
 		},
 	}}
 }
