@@ -291,7 +291,7 @@ func checkServerTree(ann *irtree.Annotations, roots []string, clientMods map[str
 				if fnTag := ann.Functions[tag]; fnTag != nil {
 					children = append(children, tag)
 					if isClient(tag) {
-						checkClientCallSite(x, tag, name, actions, at)
+						checkClientCallSite(x, tag, name, at)
 					}
 					return true
 				}
@@ -323,7 +323,7 @@ func checkServerTree(ann *irtree.Annotations, roots []string, clientMods map[str
 // checkClientCallSite reports function-literal props passed from a server
 // component to a client component. Values only known at request time are
 // checked by clientBoundary when the page renders.
-func checkClientCallSite(el *ast.JSXElement, tag, owner string, actions map[string]string, at func(string, ast.Pos, diag.Code, string, string)) {
+func checkClientCallSite(el *ast.JSXElement, tag, owner string, at func(string, ast.Pos, diag.Code, string, string)) {
 	for _, a := range el.Opening.Attributes {
 		if a == nil || a.Spread || a.Value == nil {
 			continue
@@ -477,7 +477,6 @@ func clientBuildError(path string, errs []api.Message) error {
 // once per CompileServerBundles call, under server-bundles/client/.
 type clientSSRImpls struct {
 	root, bundleDir string
-	minify          bool
 	mu              sync.Mutex
 	done            map[string]error
 }
