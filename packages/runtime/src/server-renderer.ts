@@ -7,7 +7,15 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { pathToFileURL } from "node:url";
-import { renderToString } from "./server.js";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { jsx, renderToStringAsync } from "./server.js";
+import {
+  isNotFoundSignal,
+  parseCookieHeader,
+  redirectTarget,
+  thenableRecord,
+  type RequestContext,
+} from "./request-context.js";
 
 // Cluster across cores: page/region rendering is independent per request, so N
 // workers scale it past a single core. Krate sets KRATE_SSR_WORKERS from
@@ -52,6 +60,9 @@ interface ManifestPage {
   mode: string;
   revalidate?: number;
   bundlePath?: string;
+  /** The page renders async server components: a failed render is a 500,
+   *  never the baked placeholder. */
+  serverComponents?: boolean;
 }
 
 interface RegionMeta {
@@ -64,6 +75,9 @@ interface RegionMeta {
   /** Per-region revalidate seconds (PPR cache directive). 0/undefined falls
    *  back to the page's ISR cadence, or no caching for non-ISR pages. */
   revalidate?: number;
+  /** Export of the page server bundle that renders this region (an async
+   *  server component). Takes precedence over bundlePath. */
+  serverExport?: string;
 }
 
 interface ServerManifest {
@@ -104,6 +118,7 @@ interface RenderResponse {
   notFound?: boolean;
   cached?: boolean;
   cacheStatus?: CacheStatus;
+  error?: string;
 }
 
 // ISR Cache (variant-aware, SWR, persisted)
@@ -316,14 +331,60 @@ function findPage(route: string): ManifestPage | undefined {
   return page;
 }
 
+// Request scope for server components: headers()/cookies() from
+// @krate/runtime/server read it through the global store symbol, so it works
+// no matter which copy of the runtime a page bundle resolved.
+const requestStore: AsyncLocalStorage<RequestContext> = (() => {
+  const key = Symbol.for("krate.request.store");
+  const g = globalThis as Record<symbol, unknown>;
+  if (!g[key]) g[key] = new AsyncLocalStorage<RequestContext>();
+  return g[key] as AsyncLocalStorage<RequestContext>;
+})();
+
+function requestContextFor(req: RenderRequest): RequestContext {
+  const h = new Headers();
+  for (const [k, v] of Object.entries(req.headers || {})) {
+    if (typeof v === "string") {
+      try {
+        h.set(k, v);
+      } catch {
+        // skip header names the WHATWG Headers class rejects
+      }
+    }
+  }
+  return {
+    url: req.url || req.route,
+    method: req.method || "GET",
+    headers: h,
+    cookies: parseCookieHeader(h.get("cookie")),
+    params: { ...(req.params || {}) },
+    searchParams: { ...(req.query || {}) },
+  };
+}
+
+function withRequest<T>(req: RenderRequest, fn: () => Promise<T>): Promise<T> {
+  return requestStore.run(requestContextFor(req), fn);
+}
+
+// renderSignal maps notFound()/redirect() thrown during a render to a response.
+function renderSignal(err: unknown): RenderResponse | null {
+  if (isNotFoundSignal(err)) return { html: "", status: 404, notFound: true };
+  const to = redirectTarget(err);
+  if (to) return { html: "", status: 307, redirect: to };
+  return null;
+}
+
 function buildProps(req: RenderRequest): Record<string, any> {
   // Page-level data fetching (getStaticProps/getServerSideProps) has been
   // removed; per-request data is provided by server components (@server),
   // runtime components (@runtime), and middleware instead. Dynamic-route
   // params and query parameters extracted by the Go server are forwarded so
   // `({ params }) => ...` pages receive their real values at render time.
+  // params and searchParams are plain objects that can also be awaited, so
+  // both `params.slug` and Next.js 15's `const { slug } = await params` work.
   const props: Record<string, any> = {};
-  if (req.params) props.params = req.params;
+  props.params = thenableRecord(req.params);
+  props.searchParams = thenableRecord(req.query);
   if (req.query) props.query = req.query;
   return props;
 }
@@ -338,11 +399,12 @@ async function renderFresh(page: ManifestPage, req: RenderRequest): Promise<Rend
       return { html: "", status: 500 };
     }
 
-    const jsxNode = Component(buildProps(req));
-    // Bound the render. renderToString is synchronous, so a page that blocks
-    // would block the sidecar's event loop regardless; the timeout still
-    // protects the request path when rendering is async (suspense/resource).
-    const html = await withRenderTimeout(Promise.resolve(renderToString(jsxNode)));
+    // Async server components (and plain sync pages) render through
+    // renderToStringAsync inside the request scope. The timeout bounds slow
+    // awaits (fetch); a page that blocks synchronously still blocks the loop.
+    const html = await withRenderTimeout(
+      withRequest(req, () => renderToStringAsync(jsx(Component, buildProps(req)))),
+    );
 
     const response: RenderResponse = {
       html,
@@ -361,8 +423,10 @@ async function renderFresh(page: ManifestPage, req: RenderRequest): Promise<Rend
 
     return response;
   } catch (err: any) {
+    const signal = renderSignal(err);
+    if (signal) return signal;
     console.error(`[krate] Error rendering ${req.route}:`, err);
-    return { html: "", status: 500 };
+    return { html: "", status: 500, error: (err && err.message) || String(err) };
   }
 }
 
@@ -487,7 +551,15 @@ function loadRuntimeRenderer(relPath: string): (propsJSON: string) => string {
 
   const abs = path.resolve(root, "dist", relPath);
   const code = fs.readFileSync(abs, "utf-8");
-  const ctx = vm.createContext({ console });
+  // Runtime components get the host's fetch (looked up per call, so a cache
+  // layer that wraps globalThis.fetch later still applies) and the web
+  // primitives that go with it.
+  const ctx = vm.createContext({
+    console,
+    fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args),
+    Headers, Request, Response, URL, URLSearchParams, TextEncoder, TextDecoder,
+    setTimeout, clearTimeout, queueMicrotask, structuredClone, AbortController,
+  });
   vm.runInContext(code, ctx, { filename: relPath });
   const render = vm.runInContext(
     "typeof globalThis.__krate_render === 'function' ? globalThis.__krate_render : typeof __krate_render === 'function' ? __krate_render : null",
@@ -551,16 +623,32 @@ function regionInterval(page: ManifestPage, region: RegionMeta): number {
   return 0;
 }
 
-function renderRegionFresh(region: RegionMeta, req: RenderRequest): Promise<string> {
+function renderRegionFresh(region: RegionMeta, req: RenderRequest, page?: ManifestPage): Promise<string> {
+  if (region.serverExport && page) {
+    return withRenderTimeout(withRequest(req, () => renderServerExport(page, region, req)));
+  }
   const render = loadRuntimeRenderer(region.bundlePath!);
   return withRenderTimeout(Promise.resolve().then(() => render(JSON.stringify(regionProps(region, req)))));
+}
+
+// renderServerExport renders an async server component region with the page's
+// own server bundle, which exports the component under region.serverExport.
+async function renderServerExport(page: ManifestPage, region: RegionMeta, req: RenderRequest): Promise<string> {
+  const mod = await loadPageModule(page);
+  const Comp = mod[region.serverExport!];
+  if (typeof Comp !== "function") {
+    throw new Error(`server bundle for ${page.route} does not export ${region.serverExport}`);
+  }
+  const props = regionProps(region, req);
+  if (props.params && typeof props.params === "object") props.params = thenableRecord(props.params);
+  return renderToStringAsync(jsx(Comp, props));
 }
 
 function revalidateRegionInBackground(page: ManifestPage, region: RegionMeta, req: RenderRequest, key: string) {
   if (inFlightRegionRevalidations.has(key)) return;
   const p = (async () => {
     try {
-      const html = await renderRegionFresh(region, req);
+      const html = await renderRegionFresh(region, req, page);
       regionCacheSet(key, html);
       console.log(`[krate-ssr] Revalidated region ${key} (SWR)`);
     } catch (err: any) {
@@ -575,8 +663,8 @@ function revalidateRegionInBackground(page: ManifestPage, region: RegionMeta, re
 // renderRegion renders one region, applying region-level ISR caching for ISR
 // pages. Returns an NDJSON frame.
 async function renderRegion(page: ManifestPage, region: RegionMeta, req: RenderRequest): Promise<Record<string, any>> {
-  if (!region.bundlePath) {
-    return { type: "error", id: region.id, status: 400, error: "region has no runtime bundle" };
+  if (!region.bundlePath && !region.serverExport) {
+    return { type: "error", id: region.id, status: 400, error: "region has no runtime bundle", fatal: !!page.serverComponents };
   }
 
   const key = regionCacheKey(page, region.id, req);
@@ -597,7 +685,7 @@ async function renderRegion(page: ManifestPage, region: RegionMeta, req: RenderR
   }
 
   try {
-    const html = await renderRegionFresh(region, req);
+    const html = await renderRegionFresh(region, req, page);
     if (cacheable) {
       regionCacheSet(key, html);
     }
@@ -605,8 +693,17 @@ async function renderRegion(page: ManifestPage, region: RegionMeta, req: RenderR
     if (cacheable) frame.cacheStatus = "miss";
     return frame;
   } catch (err: any) {
-    console.error(`[krate-ssr] Region render failed ${page.route}::${region.id}:`, err.message);
-    return { type: "error", id: region.id, status: 500, error: err.message };
+    const signal = renderSignal(err);
+    if (signal) {
+      const frame: Record<string, any> = { type: "region", id: region.id, status: signal.status, html: "" };
+      if (signal.notFound) frame.notFound = true;
+      if (signal.redirect) frame.redirect = signal.redirect;
+      return frame;
+    }
+    console.error(`[krate-ssr] Region render failed ${page.route}::${region.id}:`, err);
+    // A server component region has no meaningful baked content, so its
+    // failure is fatal for the response (the Go server answers 500).
+    return { type: "error", id: region.id, status: 500, error: (err && err.message) || String(err), fatal: !!(region.serverExport || page.serverComponents) };
   }
 }
 
@@ -631,6 +728,8 @@ async function renderPageRegion(page: ManifestPage, id: string, req: RenderReque
   if (result.cacheStatus) frame.cacheStatus = result.cacheStatus;
   if (result.notFound) frame.notFound = true;
   if (result.redirect) frame.redirect = result.redirect;
+  if (result.error) frame.error = result.error;
+  if (page.serverComponents && frame.status >= 500) frame.fatal = true;
   // Title swap: the Go server replaces the baked <title> with the freshly
   // rendered one so params-driven pages update the browser tab.
   const title = extractTitle(result.html);
@@ -801,18 +900,17 @@ const server = http.createServer(async (req, res) => {
         regions = (manifest?.regions?.[page.route] || []).map((r) => ({ id: r.id, kind: "component" as const }));
       }
 
-      for (const r of regions) {
-        if (r.kind === "page") {
-          writeJsonLine(res, await renderPageRegion(page, r.id, renderReq));
-        } else {
-          const region = (manifest?.regions?.[page.route] || []).find((m) => m.id === r.id);
-          if (region) {
-            writeJsonLine(res, await renderRegion(page, region, renderReq));
-          } else {
-            // Unknown region id - keep the baked content by sending no frame.
-            writeJsonLine(res, { type: "skip", id: r.id });
-          }
-        }
+      // Start every region render at once (async server components await
+      // I/O, so they overlap), then write the frames in document order.
+      const pending = regions.map((r): Promise<Record<string, any>> => {
+        if (r.kind === "page") return renderPageRegion(page, r.id, renderReq);
+        const region = (manifest?.regions?.[page.route] || []).find((m) => m.id === r.id);
+        if (region) return renderRegion(page, region, renderReq);
+        // Unknown region id - keep the baked content by sending no frame.
+        return Promise.resolve({ type: "skip", id: r.id });
+      });
+      for (const p of pending) {
+        writeJsonLine(res, await p);
       }
       writeJsonLine(res, { type: "end", count: regions.length });
     } catch (err: any) {
@@ -854,7 +952,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (result.redirect) {
-    res.writeHead(302, { Location: result.redirect });
+    res.writeHead(result.status === 307 ? 307 : 302, { Location: result.redirect });
     res.end();
     return;
   }

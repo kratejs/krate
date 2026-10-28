@@ -3,6 +3,8 @@
 
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
+export { getRequestContext, notFound } from './request-context.js';
+export type { RequestContext, RequestCookies } from './request-context.js';
 
 // Signal (server: returns initial value, no reactivity)
 
@@ -138,8 +140,25 @@ function escapeHTML(str: string): string {
     .replace(/'/g, "&#39;");
 }
 
+function isThenable(v: unknown): v is PromiseLike<unknown> {
+  return v != null && (typeof v === "object" || typeof v === "function") && typeof (v as any).then === "function";
+}
+
+function componentName(fn: Function): string {
+  return (fn as any).displayName || fn.name || "anonymous";
+}
+
+function asyncInSyncRender(where: string): Error {
+  return new Error(
+    `${where} returned a Promise during a synchronous renderToString. Async server components ` +
+      `are rendered per request by the SSR sidecar through renderToStringAsync; a synchronous ` +
+      `render (for example inside goComponent children) cannot await them.`,
+  );
+}
+
 function renderNode(node: JSXNode): string {
   if (node == null || node === false) return "";
+  if (isThenable(node)) throw asyncInSyncRender("A child value");
   if (typeof node === "string") return escapeHTML(node);
   if (typeof node === "number") return String(node);
   if (typeof node === "boolean") return "";
@@ -179,12 +198,64 @@ export function renderToString(node: JSXNode): string {
   return renderNode(node);
 }
 
+/**
+ * renderToStringAsync renders a tree that may contain async (server)
+ * components. Every Promise-returning component is awaited, at any depth, and
+ * sibling subtrees resolve in parallel. Errors thrown by a component (or a
+ * rejected Promise) reject the returned Promise; nothing renders as "".
+ *
+ * <Suspense> renders its resolved children: the whole tree is awaited before
+ * any HTML is produced, so there is no fallback to show.
+ */
+export async function renderToStringAsync(node: unknown): Promise<string> {
+  const resolved = await resolveTree(node);
+  return renderNode(resolved);
+}
+
+function isElement(v: unknown): v is JSXElement {
+  return v != null && typeof v === "object" && "type" in (v as any) && "props" in (v as any) && Array.isArray((v as any).children);
+}
+
+function isJSXValue(v: unknown): boolean {
+  return isElement(v) || isThenable(v) || (Array.isArray(v) && v.some(isJSXValue));
+}
+
+// resolveTree expands function components top-down into a tree of host
+// elements, raw HTML and primitives, awaiting async components. Built-ins that
+// render their children eagerly (marked __krateEagerChildren, e.g. Link) get
+// their children and JSX-valued props resolved first, so an async component
+// passed as a child still renders.
+async function resolveTree(node: unknown): Promise<JSXNode> {
+  if (isThenable(node)) return resolveTree(await node);
+  if (node == null || typeof node !== "object") return node as JSXNode;
+  if (Array.isArray(node)) return Promise.all(node.map(resolveTree));
+  if ("__raw" in (node as any)) return node as RawHTML;
+  if (!isElement(node)) return node as JSXNode;
+  const { type, props, children } = node;
+  if (typeof type !== "function") {
+    return { type, props, children: (await Promise.all(children.map(resolveTree))) as JSXNode[] };
+  }
+  const fn = type as any;
+  if (fn.__krateSuspense) return resolveTree(children);
+  let callProps: Record<string, any> = { ...props, children };
+  if (fn.__krateEagerChildren) {
+    const entries = await Promise.all(
+      Object.entries(props).map(async ([k, v]) => [k, isJSXValue(v) ? await resolveTree(v) : v] as const),
+    );
+    callProps = { ...Object.fromEntries(entries), children: await resolveTree(children) };
+  }
+  let out: unknown = fn(callProps);
+  if (isThenable(out)) out = await out;
+  return resolveTree(out);
+}
+
 function renderElement(el: JSXElement): string {
   const { type, props, children } = el;
 
   // Component
   if (typeof type === "function") {
     const result = type({ ...props, children });
+    if (isThenable(result)) throw asyncInSyncRender(`<${componentName(type)}>`);
     return renderNode(result);
   }
 
@@ -246,6 +317,8 @@ export function Suspense(props: SuspenseProps): JSXNode {
   );
 }
 
+(Suspense as any).__krateSuspense = true;
+
 // Built-in Components (server stubs)
 
 // Head - renders children into the page head at build time.
@@ -305,6 +378,8 @@ export function Link(props: {
   const inner = children != null ? renderNode(children) : "";
   return raw(`<a ${attrs.join(" ")}>${inner}</a>`);
 }
+
+(Link as any).__krateEagerChildren = true;
 
 // Image - renders an <img> tag (server stub; Go compiler handles full responsive output at build time).
 export function Image(props: { src?: string; alt?: string; width?: number; height?: number; [key: string]: any }): JSXNode {

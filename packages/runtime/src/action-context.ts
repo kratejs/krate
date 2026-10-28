@@ -6,6 +6,8 @@
  * read that scope, so they only work while a server action is executing.
  */
 
+import { getRequestContext, requestCookies, thenable } from './request-context.js';
+
 /** Options for `cookies().set()`. HttpOnly, Path=/ and SameSite=Lax are the defaults. */
 export interface ActionCookieOptions {
   path?: string;
@@ -49,19 +51,54 @@ export function getActionContext(): ActionContext | undefined {
 function requireContext(api: string): ActionContext {
   const ctx = getActionContext();
   if (!ctx) {
-    throw new Error(`${api}() can only be called while a server action runs (inside a "use server" export)`);
+    throw new Error(
+      `${api}() can only be called while a server action runs (inside a "use server" export) ` +
+        `or while a server component (an async component) renders in the SSR sidecar`,
+    );
   }
   return ctx;
 }
 
-/** Request headers of the current server action call. */
+/**
+ * Request headers of the current server action call or server component
+ * render. The result can also be awaited (`await headers()`), as in Next.js 15.
+ */
 export function headers(): Headers {
+  const action = getActionContext();
+  if (action) return awaitableHeaders(action.headers);
+  const req = getRequestContext();
+  if (req) return awaitableHeaders(req.headers);
   return requireContext('headers').headers;
 }
 
-/** Cookies of the current server action call. */
+/**
+ * Cookies of the current server action call, or a read-only view of the
+ * request cookies while a server component renders (`get(name)` returns
+ * `{ name, value }` there, like Next.js). Can also be awaited.
+ */
 export function cookies(): ActionCookies {
+  const action = getActionContext();
+  if (action) return awaitableActionCookies(action.cookies);
+  const req = getRequestContext();
+  if (req) return requestCookies(req.cookies) as unknown as ActionCookies;
   return requireContext('cookies').cookies;
+}
+
+function awaitableActionCookies(c: ActionCookies): ActionCookies {
+  const view = (): ActionCookies => ({
+    get: (name) => c.get(name),
+    getAll: () => c.getAll(),
+    has: (name) => c.has(name),
+    set: (name, value, options) => c.set(name, value, options),
+    delete: (name, options) => c.delete(name, options),
+  });
+  return thenable(view(), view);
+}
+
+function awaitableHeaders(h: Headers): Headers {
+  const plain = new Headers(h);
+  const view = new Headers(h);
+  return thenable(view, () => plain);
 }
 
 /**

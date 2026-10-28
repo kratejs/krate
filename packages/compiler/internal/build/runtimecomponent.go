@@ -242,6 +242,7 @@ if (!__Comp) throw new Error('Runtime component must export a default function o
 globalThis.__krate_render = function(__propsJSON) {
   var __props = typeof __propsJSON === 'string' ? JSON.parse(__propsJSON) : (__propsJSON || {});
   var __result = __Comp(__props);
+  if (__result && typeof __result.then === 'function') throw new Error('Runtime component returned a Promise: async components render through the page server bundle, not the runtime component bundle');
   if (typeof __result === 'string') return __result;
   if (__result && typeof __result.__html === 'string') return __result.__html;
   return '';
