@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/kratejs/krate/packages/compiler/internal/migrate"
 )
@@ -42,6 +43,15 @@ func runMigrateNext(flags cliFlags, args []string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sMigration plan error:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
+	}
+	if flags.Report != "" {
+		if err := writeMigrationReport(flags.Report, rep); err != nil {
+			fmt.Fprintf(os.Stderr, "%sReport error:%s %v\n", cRed, cReset, err)
+			os.Exit(1)
+		}
+		if !flags.JSON {
+			fmt.Printf("migration report: %s\n", flags.Report)
+		}
 	}
 
 	if !flags.Apply {
@@ -125,6 +135,21 @@ func printMigrationManual(rep *migrate.Report) {
 			fmt.Printf("      hint: %s\n", m.Hint)
 		}
 	}
+}
+
+func writeMigrationReport(path string, rep *migrate.Report) error {
+	data, err := json.MarshalIndent(rep, "", "  ")
+	if err != nil {
+		return err
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(abs, append(data, '\n'), 0644)
 }
 
 func writeJSON(v any) {

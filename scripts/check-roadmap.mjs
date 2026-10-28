@@ -34,4 +34,16 @@ if (!matrix.rows.some((row) => row.id === "ssr-islands" && row.ssr === "beta")) 
   fail("ssr-islands must be beta for the v1 gate");
 }
 
+for (const id of ["N1", "N2"]) {
+  if (!new RegExp(`id:\\s*"${id}"[\\s\\S]*?status:\\s*"Complete"`).test(roadmap)) {
+    fail(`${id} must be marked Complete`);
+  }
+}
+if (!/id:\s*"N5"[\s\S]*?status:\s*"v1 gate"/.test(roadmap)) {
+  fail("N5 must remain the migration v1 gate");
+}
+if (!roadmap.includes("krate migrate nextjs")) {
+  fail("migration roadmap must name `krate migrate nextjs`");
+}
+
 if (!process.exitCode) console.log("roadmap: React phases and v1 gates are consistent");

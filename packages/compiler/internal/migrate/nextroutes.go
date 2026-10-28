@@ -79,6 +79,7 @@ func rewriteNextModuleImports(rep *Report, root string) {
 			rel := relativeModulePath(f.Target, nextNavigationHelper)
 			src = replaceModule(src, "next/navigation", rel)
 			f.Rewrites = append(f.Rewrites, "rewrote next/navigation imports to "+rel)
+			f.Dependencies = append(f.Dependencies, nextNavigationHelper)
 			for _, unsupported := range []string{"notFound", "useParams", "useSelectedLayoutSegment", "useSelectedLayoutSegments"} {
 				if strings.Contains(src, unsupported) {
 					rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: unsupported + " from next/navigation needs manual migration", Hint: "use route params/404 handling explicitly"})

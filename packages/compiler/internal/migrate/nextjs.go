@@ -47,12 +47,13 @@ type ManualItem struct {
 
 // PlannedFile is one file the migrator can copy or generate.
 type PlannedFile struct {
-	Kind     FileKind `json:"kind"`
-	Source   string   `json:"source,omitempty"`
-	Target   string   `json:"target"`
-	Conflict bool     `json:"conflict,omitempty"`
-	Rewrites []string `json:"rewrites,omitempty"`
-	Content  []byte   `json:"-"`
+	Kind         FileKind `json:"kind"`
+	Source       string   `json:"source,omitempty"`
+	Target       string   `json:"target"`
+	Conflict     bool     `json:"conflict,omitempty"`
+	Rewrites     []string `json:"rewrites,omitempty"`
+	Dependencies []string `json:"dependencies,omitempty"`
+	Content      []byte   `json:"-"`
 }
 
 // Report is a complete migration plan. It is safe to print as JSON.
@@ -61,8 +62,19 @@ type Report struct {
 	Framework string        `json:"framework"`
 	Detected  []string      `json:"detected,omitempty"`
 	Files     []PlannedFile `json:"files"`
+	Routes    []Route       `json:"routes,omitempty"`
 	Manual    []ManualItem  `json:"manual,omitempty"`
 	Warnings  []string      `json:"warnings,omitempty"`
+}
+
+// Route is the route inventory the migration will produce.
+type Route struct {
+	Route        string   `json:"route"`
+	Source       string   `json:"source,omitempty"`
+	Target       string   `json:"target"`
+	Kind         string   `json:"kind"`
+	Status       string   `json:"status"`
+	Dependencies []string `json:"dependencies,omitempty"`
 }
 
 // ApplyOptions controls the write step.
@@ -214,6 +226,11 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	}
 	linkRelativeImports(rep)
 	rewriteNextModuleImports(rep, abs)
+	publicEnv := readPublicEnv(abs)
+	for k, v := range nextCfg.Env {
+		publicEnv[k] = v
+	}
+	rewritePublicEnv(rep, publicEnv)
 	if site := rootMetadataSite(rep); len(site) > 0 {
 		nextCfg.Site = site
 		rep.Warnings = append(rep.Warnings, "mapped static root metadata to site config; the metadata export is left in place for review, as are icons, alternates, and per-page metadata")
@@ -259,6 +276,12 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		}
 	}
 
+	if ts, ok, note := tsconfigPlan(abs, rep); ok {
+		rep.Files = append(rep.Files, ts)
+		rep.Warnings = append(rep.Warnings, "merged/generated tsconfig.json for Krate JSX and route types")
+	} else if note != "" {
+		rep.Manual = append(rep.Manual, ManualItem{Source: "tsconfig.json", Reason: note, Hint: "set jsxImportSource to @krate/runtime and include .krate/types"})
+	}
 	dedupeTargets(rep)
 	for i := range rep.Files {
 		if fileExists(filepath.Join(abs, filepath.FromSlash(rep.Files[i].Target))) {
@@ -266,6 +289,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		}
 	}
 	sort.SliceStable(rep.Files, func(i, j int) bool { return rep.Files[i].Target < rep.Files[j].Target })
+	rep.Routes = routeInventory(rep)
 	sort.SliceStable(rep.Manual, func(i, j int) bool {
 		if rep.Manual[i].Source != rep.Manual[j].Source {
 			return rep.Manual[i].Source < rep.Manual[j].Source
@@ -352,7 +376,7 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 				"export default function Layout(props: any) {\n" +
 				"  return <__KrateErrorBoundary><div>{props.children}</div></__KrateErrorBoundary>;\n" +
 				"}\n"
-			rep.Files = append(rep.Files, PlannedFile{Kind: KindLayout, Target: layoutTarget, Content: []byte(body), Rewrites: []string{"generated error boundary layout"}})
+			rep.Files = append(rep.Files, PlannedFile{Kind: KindLayout, Target: layoutTarget, Content: []byte(body), Rewrites: []string{"generated error boundary layout"}, Dependencies: []string{assetTarget}})
 			rep.Warnings = append(rep.Warnings, source+": copied error boundary and generated "+layoutTarget)
 			return nil
 		case "template", "default":
@@ -414,7 +438,7 @@ func scanNextPages(root, pagesDir, prefix string, rep *Report) error {
 			}
 			mod := relativeModulePath(layoutTarget, assetTarget)
 			body := "import AppShell from " + strconv.Quote(mod) + ";\n\nexport default function Layout(props: any) {\n  const Component = () => props.children;\n  return <AppShell Component={Component} pageProps={{}} />;\n}\n"
-			rep.Files = append(rep.Files, PlannedFile{Kind: KindLayout, Source: source, Target: layoutTarget, Content: []byte(body), Rewrites: []string{"wrapped Pages Router _app as the root layout"}})
+			rep.Files = append(rep.Files, PlannedFile{Kind: KindLayout, Source: source, Target: layoutTarget, Content: []byte(body), Rewrites: []string{"wrapped Pages Router _app as the root layout"}, Dependencies: []string{assetTarget}})
 			rep.Warnings = append(rep.Warnings, source+": copied _app and generated src/pages/_layout; verify providers and pageProps usage")
 			return nil
 		case "_document":
@@ -579,6 +603,61 @@ func loadingFile(base, route, ext string) string {
 		return base + "/loading" + ext
 	}
 	return base + "/" + route + "/loading" + ext
+}
+
+func routeInventory(rep *Report) []Route {
+	manual := map[string]bool{}
+	for _, m := range rep.Manual {
+		manual[m.Source] = true
+	}
+	var out []Route
+	for _, f := range rep.Files {
+		route := ""
+		switch f.Kind {
+		case KindPage:
+			route = pageRoute(f.Target)
+		case KindAPI:
+			route = apiRoute(f.Target)
+		}
+		if route == "" {
+			continue
+		}
+		status := "auto"
+		if f.Conflict {
+			status = "conflict"
+		} else if manual[f.Source] {
+			status = "manual"
+		}
+		out = append(out, Route{Route: route, Source: f.Source, Target: f.Target, Kind: string(f.Kind), Status: status, Dependencies: f.Dependencies})
+	}
+	return out
+}
+
+func pageRoute(target string) string {
+	rel := strings.TrimPrefix(filepath.ToSlash(target), "src/pages/")
+	rel = strings.TrimSuffix(rel, filepath.Ext(rel))
+	if rel == "index" || rel == "" {
+		return "/"
+	}
+	if strings.HasSuffix(rel, "/index") {
+		rel = strings.TrimSuffix(rel, "/index")
+	}
+	if strings.HasSuffix(rel, "/_layout") || rel == "_layout" || strings.HasSuffix(rel, "/loading") || rel == "loading" {
+		return ""
+	}
+	return "/" + rel
+}
+
+func apiRoute(target string) string {
+	rel := strings.TrimPrefix(filepath.ToSlash(target), "src/api/")
+	rel = strings.TrimSuffix(rel, filepath.Ext(rel))
+	if rel == "index" || rel == "" {
+		return "/api"
+	}
+	if strings.HasSuffix(rel, "/index") {
+		rel = strings.TrimSuffix(rel, "/index")
+	}
+	return "/api/" + rel
 }
 
 func hasTarget(rep *Report, target string) bool {
@@ -887,18 +966,20 @@ func linkRelativeImports(rep *Report) {
 		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI) {
 			continue
 		}
-		body, rewrites, unresolved := rewriteRelativeImports(string(f.Content), f.Source, f.Target, assets)
+		body, rewrites, unresolved, deps := rewriteRelativeImports(string(f.Content), f.Source, f.Target, assets)
 		f.Content = []byte(body)
 		f.Rewrites = append(f.Rewrites, rewrites...)
+		f.Dependencies = append(f.Dependencies, deps...)
 		for _, u := range unresolved {
 			rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: "relative import " + u + " has no copied target", Hint: "copy the imported file under src/ and update the import"})
 		}
 	}
 }
 
-func rewriteRelativeImports(src, source, target string, assets map[string]string) (string, []string, []string) {
+func rewriteRelativeImports(src, source, target string, assets map[string]string) (string, []string, []string, []string) {
 	var rewrites []string
 	var unresolved []string
+	var deps []string
 	sourceDir := filepath.Dir(filepath.FromSlash(source))
 	targetDir := filepath.Dir(filepath.FromSlash(target))
 	out := relativeImport.ReplaceAllStringFunc(src, func(match string) string {
@@ -928,9 +1009,10 @@ func rewriteRelativeImports(src, source, target string, assets map[string]string
 			rel = "./" + rel
 		}
 		rewrites = append(rewrites, "import "+spec+" -> "+rel)
+		deps = append(deps, asset)
 		return prefix + quote + rel + suffix
 	})
-	return out, rewrites, unresolved
+	return out, rewrites, unresolved, uniqueStrings(deps)
 }
 
 func resolveAsset(sourceDir, spec string, assets map[string]string) (string, bool) {

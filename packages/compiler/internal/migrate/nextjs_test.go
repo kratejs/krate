@@ -154,7 +154,7 @@ func TestNextConfigComputedStaysManual(t *testing.T) {
 
 func TestNextConfigImages(t *testing.T) {
 	root := t.TempDir()
-	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>{process.env.NEXT_PUBLIC_X}</h1>; }`)
 	writeNextFile(t, root, "next.config.js", `export default {
   images: {
     deviceSizes: [640, 1080],
@@ -179,8 +179,12 @@ func TestNextConfigImages(t *testing.T) {
 			t.Errorf("config missing %q:\n%s", want, body)
 		}
 	}
-	if !hasWarning(rep, "AVIF") || !hasWarning(rep, "env is not translated") {
-		t.Errorf("image/env warnings missing: %+v", rep.Warnings)
+	if !hasWarning(rep, "AVIF") {
+		t.Errorf("image warning missing: %+v", rep.Warnings)
+	}
+	page := findPlan(rep, "src/pages/index.tsx")
+	if page == nil || !strings.Contains(string(page.Content), `"1"`) {
+		t.Fatalf("NEXT_PUBLIC value not inlined: %+v", page)
 	}
 }
 
@@ -332,6 +336,108 @@ func TestNestedLoadingMapsToPageDirectory(t *testing.T) {
 	}
 }
 
+func TestPublicEnvInlining(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, ".env", "NEXT_PUBLIC_API=https://api.example.com\nSECRET=nope\n")
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <p>{process.env.NEXT_PUBLIC_API} {process.env.NEXT_PUBLIC_MISSING}</p>; }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := findPlan(rep, "src/pages/index.tsx")
+	if page == nil {
+		t.Fatal("page missing")
+	}
+	body := string(page.Content)
+	if !strings.Contains(body, `"https://api.example.com"`) {
+		t.Fatalf("public env not inlined:\n%s", body)
+	}
+	if !strings.Contains(body, "process.env.NEXT_PUBLIC_MISSING") {
+		t.Errorf("unknown public env should stay visible:\n%s", body)
+	}
+	if !hasManual(rep, "app/page.tsx", "NEXT_PUBLIC_MISSING") {
+		t.Errorf("unknown public env should be manual: %+v", rep.Manual)
+	}
+}
+
+func TestTSConfigMerge(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "tsconfig.json", `{
+  // Next.js defaults
+  "compilerOptions": {
+    "jsx": "preserve",
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] },
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+}`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := findPlan(rep, "tsconfig.json")
+	if ts == nil {
+		t.Fatalf("tsconfig plan missing: %+v", rep.Files)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(ts.Content, &got); err != nil {
+		t.Fatal(err)
+	}
+	opts, _ := got["compilerOptions"].(map[string]any)
+	if opts["jsxImportSource"] != "@krate/runtime" {
+		t.Errorf("jsxImportSource = %v", opts["jsxImportSource"])
+	}
+	paths, _ := opts["paths"].(map[string]any)
+	if paths["@/*"] == nil {
+		t.Errorf("paths not preserved: %+v", opts)
+	}
+	includes, _ := got["include"].([]any)
+	joined := ""
+	for _, v := range includes {
+		joined += " " + v.(string)
+	}
+	if !strings.Contains(joined, ".krate/types") || strings.Contains(joined, "next-env") || strings.Contains(joined, ".next/") {
+		t.Errorf("include = %v", includes)
+	}
+}
+
+func TestTSConfigGenerated(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := findPlan(rep, "tsconfig.json")
+	if ts == nil || !strings.Contains(string(ts.Content), "@krate/runtime") {
+		t.Fatalf("generated tsconfig missing: %+v", ts)
+	}
+}
+
+func TestReportRouteInventory(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "app/blog/[slug]/page.tsx", `export default function Post() { return <h1>Post</h1>; }`)
+	writeNextFile(t, root, "app/api/hello/route.ts", `export async function GET() { return Response.json({}); }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"/": "src/pages/index.tsx", "/blog/[slug]": "src/pages/blog/[slug].tsx", "/api/hello": "src/api/hello.ts"}
+	for _, route := range rep.Routes {
+		if target, ok := want[route.Route]; ok {
+			if route.Target != target {
+				t.Errorf("route %s target = %s, want %s", route.Route, route.Target, target)
+			}
+			delete(want, route.Route)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing routes: %+v; got %+v", want, rep.Routes)
+	}
+}
+
 func TestScanNextSrcApp(t *testing.T) {
 	root := t.TempDir()
 	writeNextFile(t, root, "src/app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
@@ -378,6 +484,15 @@ export default function Page() { return <Hero />; }`)
 	}
 	if strings.Contains(string(findPlan(rep, "src/migrated/app/components/Hero.tsx").Content), `"../migrated/app/components/inner"`) {
 		t.Error("asset-to-asset import should keep its original relative path")
+	}
+	for _, route := range rep.Routes {
+		if route.Route != "/" {
+			continue
+		}
+		deps := strings.Join(route.Dependencies, ",")
+		if !strings.Contains(deps, "src/migrated/app/components/Hero.tsx") || !strings.Contains(deps, "src/migrated/app/styles.css") {
+			t.Errorf("route dependencies = %v", route.Dependencies)
+		}
 	}
 }
 

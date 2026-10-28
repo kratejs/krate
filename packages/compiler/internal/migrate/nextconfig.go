@@ -13,12 +13,13 @@ import (
 
 // nextConfigData is the subset of next.config.* that maps cleanly onto Krate.
 type nextConfigData struct {
-	BasePath  string           `json:"basePath,omitempty"`
-	Redirects []nextRedirect   `json:"redirects,omitempty"`
-	Rewrites  []nextRewrite    `json:"rewrites,omitempty"`
-	Headers   []nextHeaderRule `json:"headers,omitempty"`
-	Images    map[string]any   `json:"images,omitempty"`
-	Site      map[string]any   `json:"site,omitempty"`
+	BasePath  string            `json:"basePath,omitempty"`
+	Redirects []nextRedirect    `json:"redirects,omitempty"`
+	Rewrites  []nextRewrite     `json:"rewrites,omitempty"`
+	Headers   []nextHeaderRule  `json:"headers,omitempty"`
+	Images    map[string]any    `json:"images,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Site      map[string]any    `json:"site,omitempty"`
 }
 
 type nextRedirect struct {
@@ -141,8 +142,12 @@ func readNextConfig(path string) (nextConfigData, []string, bool) {
 		}
 		warnings = append(warnings, imageWarnings...)
 	}
-	if prop(obj, "env") != nil {
-		warnings = append(warnings, "next.config env is not translated; move values to .env")
+	if v := prop(obj, "env"); v != nil {
+		if env, ok := staticStringMap(v); ok {
+			out.Env = env
+		} else {
+			warnings = append(warnings, "next.config env is not a static string map")
+		}
 	}
 	if prop(obj, "experimental") != nil {
 		warnings = append(warnings, "next.config experimental keys are not translated")
@@ -366,4 +371,23 @@ func configJSON(entry string, next nextConfigData) []byte {
 	}
 	body, _ := json.MarshalIndent(opts, "", "  ")
 	return []byte("import { defineConfig } from '@krate/core';\n\nexport default defineConfig(" + string(body) + ");\n")
+}
+
+func staticStringMap(e ast.Expr) (map[string]string, bool) {
+	obj, ok := e.(*ast.ObjectExpr)
+	if !ok {
+		return nil, false
+	}
+	out := map[string]string{}
+	for _, p := range obj.Properties {
+		if p == nil || p.Spread || p.Computed {
+			return nil, false
+		}
+		s, ok := stringValue(p.Value)
+		if !ok {
+			return nil, false
+		}
+		out[p.Key] = s
+	}
+	return out, true
 }

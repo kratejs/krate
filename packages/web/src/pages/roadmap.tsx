@@ -108,27 +108,27 @@ const MCP_PHASES = [
 const MIGRATION_PHASES = [
   {
     id: "N1",
-    tone: "now",
-    status: "Design",
+    tone: "gate",
+    status: "Complete",
     title: "Inventory and report",
-    body: "Detect Next.js 13 through 16, App Router and Pages Router, route files, layouts, loading/error/not-found boundaries, API routes, middleware, config, env usage, fonts, and images.",
-    exit: "Dry run writes migration-report.json with routes, dependencies, unsupported constructs, and confidence levels.",
+    body: "Detect Next.js App Router and Pages Router routes, layouts, loading/error boundaries, API routes, middleware, config, public env, fonts, and images.",
+    exit: "Dry run writes migration-report.json with routes, dependencies, manual items, warnings, and per-route status.",
   },
   {
     id: "N2",
-    tone: "next",
-    status: "Next",
+    tone: "gate",
+    status: "Complete",
     title: "Routing, shell, and config",
-    body: "Move routes and layouts, rewrite links, images, head/metadata, attribute aliases, environment references, redirects, rewrites, headers, tsconfig, and package scripts.",
-    exit: "A scaffolded Next.js app builds and navigates with no manual routing edits.",
+    body: "Move routes and layouts, rewrite links, images, head/metadata, navigation, headers, dynamic imports, public env, redirects, rewrites, headers, tsconfig, aliases, and package scripts.",
+    exit: "Routing, shell, and config migration is covered by unit tests; end-to-end reference-app validation remains N5.",
   },
   {
     id: "N3",
-    tone: "next",
-    status: "Next",
+    tone: "now",
+    status: "In progress",
     title: "Components and app semantics",
-    body: "Convert hooks and state, use client/use server boundaries, next/navigation, next/headers, next/cache, data fetching, fonts, and images.",
-    exit: "Interactive pages pass the browser conformance suite after migration.",
+    body: "React interop handles hooks and state. Remaining work: next/font, next/cache, data fetching, async metadata, parallel and intercepting routes, and RSC boundaries.",
+    exit: "Interactive migrated pages pass the same browser conformance suite as source pages.",
   },
   {
     id: "N4",
@@ -366,21 +366,23 @@ export default function Roadmap() {
           <div>
             <h2 id="migration" class="roadmap-title">Migration CLI</h2>
             <p class="roadmap-lede">
-              <code>krate migrate next</code> turns a Next.js App Router project
+              <code>krate migrate nextjs</code> turns a Next.js project
               into a reviewable Krate migration, not a best-effort rewrite.
             </p>
           </div>
-          <span class="roadmap-status roadmap-status-later">Planned</span>
+          <span class="roadmap-status roadmap-status-now">Beta</span>
         </div>
 
         <div class="roadmap-panel">
           <h3>Command shape</h3>
-          <pre class="roadmap-code"><code>{`krate migrate next --dry-run --report migration.json
-krate migrate next --apply --backup
-krate migrate next --only pages --no-install`}</code></pre>
+          <pre class="roadmap-code"><code>{`krate migrate nextjs --report migration-report.json
+krate migrate nextjs --json
+krate migrate nextjs --apply --force --update-package
+krate migrate rollback .krate/migrate/nextjs-<timestamp>`}</code></pre>
           <p class="roadmap-note">
-            Dry run is the default. Deterministic codemods run first; AI
-            assistance is optional and never required for a migration to build.
+            Dry run is the default. Existing targets require --force, every
+            apply is backed up, and the report lists routes, dependencies, and
+            manual work before anything is written.
           </p>
         </div>
 
@@ -388,11 +390,11 @@ krate migrate next --only pages --no-install`}</code></pre>
           <div class="roadmap-panel">
             <h3>What moves</h3>
             <ul class="roadmap-list">
-              <li>App and Pages Router structure, layouts, and route params</li>
-              <li>Links, images, head/metadata, fonts, and attributes</li>
-              <li>Hooks, state, client/server boundaries, and data fetching</li>
-              <li>Route handlers, server actions, and forms</li>
-              <li>Config, env, redirects, rewrites, and headers</li>
+              <li>App/Pages Router routes, layouts, loading, error, API, and middleware</li>
+              <li>Links, images, head/metadata, navigation, headers, and dynamic imports</li>
+              <li>tsconfig, path aliases, public env, redirects, rewrites, headers, and images</li>
+              <li>Package scripts and Krate dependencies</li>
+              <li>App-local relative import graphs</li>
             </ul>
           </div>
           <div class="roadmap-panel">
@@ -401,7 +403,7 @@ krate migrate next --only pages --no-install`}</code></pre>
               <li>A JSON report before any file is written</li>
               <li>Every unsupported construct listed with a diagnostic</li>
               <li>Backups and rollback for applied migrations</li>
-              <li>Route inventory diff and browser conformance</li>
+              <li>Route inventory with dependencies and per-route status</li>
               <li>No silent drops and no overwrite without a flag</li>
             </ul>
           </div>

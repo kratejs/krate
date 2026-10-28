@@ -55,6 +55,7 @@ type cliFlags struct {
 	Apply         bool
 	Force         bool
 	UpdatePackage bool
+	Report        string
 	Port          int
 	Token         string
 	CPUProfile    string
@@ -148,7 +149,7 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "Usage: krate fix [dir] [--apply]\n\n")
 		fmt.Fprintf(w, "Apply conservative, parse-gated source fixes. Dry-run by default.\n")
 	case "migrate":
-		fmt.Fprintf(w, "Usage: krate migrate nextjs [dir] [--apply] [--force] [--update-package]\n")
+		fmt.Fprintf(w, "Usage: krate migrate nextjs [dir] [--apply] [--force] [--update-package] [--report <path>]\n")
 		fmt.Fprintf(w, "       krate migrate rollback <backup-dir>\n\n")
 		fmt.Fprintf(w, "Plan or apply a framework migration. Dry-run by default.\n")
 	case "deploy":
@@ -261,6 +262,9 @@ func parseFlags(args []string) (cliFlags, []string) {
 			flags.Force = true
 		case args[i] == "--update-package":
 			flags.UpdatePackage = true
+		case args[i] == "--report" && i+1 < len(args):
+			flags.Report = args[i+1]
+			i++
 		case args[i] == "--port" && i+1 < len(args):
 			if n, err := strconv.Atoi(args[i+1]); err == nil {
 				flags.Port = n

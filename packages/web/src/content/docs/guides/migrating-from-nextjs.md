@@ -44,6 +44,7 @@ prints every copy plus every item it will not rewrite. Apply it with:
 
 ```sh
 krate migrate nextjs --apply
+krate migrate nextjs --report migration-report.json
 ```
 
 Add `--update-package` to also add `krate` scripts and `@krate/*` dependencies
@@ -73,6 +74,8 @@ The first pass:
   simple `next/dynamic` loaders to React `lazy()`;
 - creates `krate.config.ts` when the project has none, or merges missing
   Next-derived keys into an existing config (existing keys win);
+- merges/generates `tsconfig.json` for Krate JSX and route types;
+- inlines `NEXT_PUBLIC_*` values from `.env*` and static `next.config.env`;
 - leaves the original Next.js tree untouched.
 
 Every apply writes a rollback manifest under

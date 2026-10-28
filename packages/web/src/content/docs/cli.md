@@ -144,6 +144,7 @@ krate migrate rollback .krate/migrate/nextjs-20261027-190904
 | `--apply` | Write the plan atomically |
 | `--force` | Allow overwriting existing target files |
 | `--update-package` | Add Krate scripts and dependencies to `package.json` |
+| `--report <path>` | Write the plan as JSON before applying |
 | `--json` | Print the plan (or apply result) as JSON |
 
 The Next.js migrator copies App Router and Pages Router pages, layouts, loading
@@ -159,7 +160,8 @@ compatibility helper, `next/headers` maps to `@krate/runtime/server`, and common
 `next/server` API helpers become `Request`/`Response`, and simple
 `next/dynamic` loaders become React `lazy()`. It generates
 `krate.config.ts` when missing, merges missing Next-derived keys into an existing
-config, and reports everything it will not rewrite. With
+config, merges/generates `tsconfig.json`, inlines `NEXT_PUBLIC_*` values, and
+reports everything it will not rewrite. With
 `--update-package` it also adds Krate scripts and dependencies while leaving the
 Next.js dependencies in place for verification. Existing targets, including
 `package.json` with `--update-package`, require `--force`. It never deletes the
