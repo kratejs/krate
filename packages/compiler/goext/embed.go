@@ -18,6 +18,11 @@ var KrateSrc []byte
 //go:embed krate/request.go
 var KrateRequestSrc []byte
 
+// KrateRevalidateSrc is the source of the goext/krate revalidation helpers.
+//
+//go:embed krate/revalidate.go
+var KrateRevalidateSrc []byte
+
 // RuntimeSrc is the source of the goext/runtime helper package.
 //
 //go:embed runtime/runtime.go

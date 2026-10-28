@@ -79,9 +79,13 @@ func DefaultAPIWorkers() int {
 
 // newAPIWorker creates a VM, injects env + the shared handler helpers, and
 // returns a ready worker.
-func newAPIWorker(env map[string]string) (*apiWorker, error) {
+func newAPIWorker(env map[string]string, hooks *CacheHooks) (*apiWorker, error) {
 	rt, err := New()
 	if err != nil {
+		return nil, err
+	}
+	if err := rt.registerCacheHooks(hooks); err != nil {
+		_ = rt.Close()
 		return nil, err
 	}
 	if err := rt.SetEnv(env); err != nil {
@@ -157,7 +161,7 @@ func (w *apiWorker) ensure(routeID, code string, version int64) error {
 // isolation mode) creates a fresh one for the single request.
 func (a *APIRouteRuntime) acquireWorker() (*apiWorker, error) {
 	if a.isolation {
-		return newAPIWorker(a.env)
+		return newAPIWorker(a.env, a.hooks)
 	}
 
 	select {
@@ -170,7 +174,7 @@ func (a *APIRouteRuntime) acquireWorker() (*apiWorker, error) {
 	if a.created < a.workers {
 		a.created++
 		a.mu.Unlock()
-		w, err := newAPIWorker(a.env)
+		w, err := newAPIWorker(a.env, a.hooks)
 		if err != nil {
 			a.mu.Lock()
 			a.created--

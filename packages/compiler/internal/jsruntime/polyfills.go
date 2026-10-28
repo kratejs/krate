@@ -277,9 +277,13 @@ func (r *Runtime) injectFetch() error {
 		method := "GET"
 		var body []byte
 		headers := make(map[string]string)
+		var fetchOpts map[string]any
 
 		if len(args) > 1 {
-			if opts, ok := args[1].(map[string]any); ok {
+			// JS objects arrive as VM objects; ToNative decodes them (before
+			// this, method/headers/body options were silently dropped).
+			if opts, ok := ToNative(args[1]).(map[string]any); ok {
+				fetchOpts = opts
 				if m, ok := opts["method"].(string); ok {
 					method = m
 				}
@@ -293,6 +297,17 @@ func (r *Runtime) injectFetch() error {
 						}
 					}
 				}
+			}
+		}
+
+		// Next-style data cache: { next: { revalidate, tags } } or
+		// cache: "force-cache" caches successful GET/HEAD responses.
+		ttl, tags := fetchCachePolicy(method, fetchOpts)
+		cacheKey := ""
+		if ttl != 0 && r.dataCache != nil {
+			cacheKey = fetchCacheKey(method, url, headers)
+			if hit, ok := r.dataCache.Get(cacheKey); ok {
+				return hit, nil
 			}
 		}
 
@@ -322,12 +337,16 @@ func (r *Runtime) injectFetch() error {
 			respHeaders[k] = resp.Header.Get(k)
 		}
 
-		return map[string]any{
-			"status":     resp.StatusCode,
-			"headers":    respHeaders,
-			"body":       string(respBody),
-			"statusText": resp.Status,
-		}, nil
+		// The result crosses into JS as JSON (the VM bridge does not convert
+		// nested Go maps).
+		data, err := json.Marshal(fetchResult{Status: resp.StatusCode, Headers: respHeaders, Body: string(respBody), StatusText: resp.Status})
+		if err != nil {
+			return nil, err
+		}
+		if cacheKey != "" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			r.dataCache.Set(cacheKey, string(data), ttl, tags)
+		}
+		return string(data), nil
 	}); err != nil {
 		return err
 	}
@@ -335,7 +354,7 @@ func (r *Runtime) injectFetch() error {
 	// Inject fetch JavaScript wrapper
 	_, err := r.Execute(`
 		async function fetch(url, options) {
-			var result = _go_fetch(url, options || {});
+			var result = JSON.parse(_go_fetch(url, options || {}));
 			return {
 				status: result.status,
 				statusText: result.statusText,

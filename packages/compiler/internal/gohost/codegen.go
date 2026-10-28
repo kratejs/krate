@@ -106,6 +106,9 @@ func WriteGoextModule(root string) error {
 	if err := os.WriteFile(filepath.Join(dir, "goext", "krate", "request.go"), goext.KrateRequestSrc, 0644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(dir, "goext", "krate", "revalidate.go"), goext.KrateRevalidateSrc, 0644); err != nil {
+		return err
+	}
 	return os.WriteFile(filepath.Join(dir, "goext", "runtime", "runtime.go"), goext.RuntimeSrc, 0644)
 }
 

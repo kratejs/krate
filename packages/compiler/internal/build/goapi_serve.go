@@ -81,13 +81,36 @@ type goRenderRegion struct {
 	Props      string `json:"props"`
 	Request    string `json:"request,omitempty"`
 	Revalidate int    `json:"revalidate,omitempty"`
+	// Route is the page route the region belongs to (cache index only).
+	Route string `json:"-"`
 }
 
 // regionCacheEntry is a cached Go-region render with its expiry (PPR/ISR
 // parity with Node regions).
 type regionCacheEntry struct {
-	html string
-	exp  time.Time
+	html  string
+	exp   time.Time
+	route string
+}
+
+// goRegionCacheMax bounds the Go region cache so a long-lived server cannot
+// grow it without limit across many dynamic variants.
+const goRegionCacheMax = 2048
+
+// regionRoute returns the page route a region render belongs to: its Route,
+// else the "url" of its request context (streamRegionPage sets it to the
+// canonical page route).
+func regionRoute(r goRenderRegion) string {
+	if r.Route != "" || r.Request == "" {
+		return r.Route
+	}
+	var ctx struct {
+		URL string `json:"url"`
+	}
+	if json.Unmarshal([]byte(r.Request), &ctx) == nil {
+		return ctx.URL
+	}
+	return ""
 }
 
 // regionKey uniquely identifies a Go region render (name + props + request
@@ -123,6 +146,8 @@ type goAPISupervisor struct {
 	lastMod time.Time
 	// regionCache memoizes Go region renders that declare a revalidate window.
 	regionCache map[string]regionCacheEntry
+	// invalidations counts InvalidateRoutes calls (render/invalidate race guard).
+	invalidations uint64
 }
 
 // newGoAPISupervisor creates a supervisor for the given sidecar binary and
@@ -173,6 +198,7 @@ func (g *goAPISupervisor) Render(regions []goRenderRegion) (map[string]string, e
 	var miss []goRenderRegion
 	now := time.Now()
 	g.mu.Lock()
+	startGen := g.invalidations
 	for _, r := range regions {
 		if r.Revalidate > 0 {
 			if e, ok := g.regionCache[regionKey(r)]; ok && now.Before(e.exp) {
@@ -215,21 +241,66 @@ func (g *goAPISupervisor) Render(regions []goRenderRegion) (map[string]string, e
 			out[frame.ID] = frame.HTML
 		}
 	}
-	// Cache renders that declare a revalidate window.
+	// Cache renders that declare a revalidate window, unless a revalidation
+	// ran while they rendered (their HTML may predate it).
 	g.mu.Lock()
-	for _, r := range miss {
-		if r.Revalidate <= 0 {
-			continue
-		}
-		if html, ok := out[r.ID]; ok {
-			g.regionCache[regionKey(r)] = regionCacheEntry{
-				html: html,
-				exp:  time.Now().Add(time.Duration(r.Revalidate) * time.Second),
+	if g.invalidations == startGen {
+		for _, r := range miss {
+			if r.Revalidate <= 0 {
+				continue
+			}
+			if html, ok := out[r.ID]; ok {
+				g.regionCacheSetLocked(regionKey(r), regionCacheEntry{
+					html:  html,
+					exp:   time.Now().Add(time.Duration(r.Revalidate) * time.Second),
+					route: regionRoute(r),
+				})
 			}
 		}
 	}
 	g.mu.Unlock()
 	return out, nil
+}
+
+// regionCacheSetLocked stores an entry, evicting expired entries and then an
+// arbitrary one when the cache is full. The caller holds g.mu.
+func (g *goAPISupervisor) regionCacheSetLocked(key string, e regionCacheEntry) {
+	if _, ok := g.regionCache[key]; !ok && len(g.regionCache) >= goRegionCacheMax {
+		now := time.Now()
+		for k, v := range g.regionCache {
+			if !now.Before(v.exp) {
+				delete(g.regionCache, k)
+			}
+		}
+		for k := range g.regionCache {
+			if len(g.regionCache) < goRegionCacheMax {
+				break
+			}
+			delete(g.regionCache, k)
+		}
+	}
+	g.regionCache[key] = e
+}
+
+// InvalidateRoutes drops cached Go region renders of the given page routes
+// and returns how many were removed. An empty list only bumps the
+// invalidation generation (in-flight renders are not cached).
+func (g *goAPISupervisor) InvalidateRoutes(routes []string) int {
+	want := make(map[string]bool, len(routes))
+	for _, r := range routes {
+		want[r] = true
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.invalidations++
+	n := 0
+	for k, e := range g.regionCache {
+		if want[e.route] {
+			delete(g.regionCache, k)
+			n++
+		}
+	}
+	return n
 }
 
 // SetEnv provides environment variables for the sidecar process.

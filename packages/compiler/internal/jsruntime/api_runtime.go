@@ -23,6 +23,7 @@ import (
 type APIRouteRuntime struct {
 	apiDir    string
 	env       map[string]string
+	hooks     *CacheHooks
 	workers   int
 	isolation bool
 
@@ -156,6 +157,13 @@ func (a *APIRouteRuntime) SetEnv(env map[string]string) {
 			return
 		}
 	}
+}
+
+// SetCacheHooks connects routes to the host's revalidation endpoint and data
+// cache (revalidatePath/revalidateTag, unstable_cache, fetch caching). Call
+// before serving.
+func (a *APIRouteRuntime) SetCacheHooks(h *CacheHooks) {
+	a.hooks = h
 }
 
 // SetPool configures the pool size and whether each request runs in a fresh VM

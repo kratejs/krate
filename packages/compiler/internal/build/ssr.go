@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -39,6 +40,52 @@ type SSRServer struct {
 	ppr             bool
 	pprRevalidate   int
 	rendererWorkers int
+	// secret authenticates the mutating internal endpoints
+	// (/__krate/ssr/revalidate, /refresh, /invalidate, /cache-invalidate).
+	secret string
+}
+
+// SetInternalSecret sets the shared secret exported to the sidecar as
+// KRATE_INTERNAL_SECRET and sent on every internal request.
+func (s *SSRServer) SetInternalSecret(secret string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.secret = secret
+}
+
+// internalPost POSTs a JSON body to an authenticated sidecar endpoint.
+func (s *SSRServer) internalPost(endpoint string, payload any) error {
+	if !s.IsRunning() {
+		return errSSRNotRunning
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://localhost:%d%s", s.port, endpoint), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	s.mu.Lock()
+	secret := s.secret
+	s.mu.Unlock()
+	if secret != "" {
+		req.Header.Set(internalSecretHeader, secret)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("%s: status %d: %s", endpoint, resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return nil
+}
+
+// InvalidateDev drops a changed page's module and caches in the renderer (dev).
+func (s *SSRServer) InvalidateDev(route, source, bundlePath string) error {
+	return s.internalPost("/__krate/ssr/invalidate", map[string]string{"route": route, "source": source, "bundlePath": bundlePath})
 }
 
 // SetTuning configures the render timeout (ms) and ISR cache size exported to
@@ -184,6 +231,9 @@ func (s *SSRServer) Start() error {
 	if s.rendererWorkers > 1 {
 		env = append(env, fmt.Sprintf("KRATE_SSR_WORKERS=%d", s.rendererWorkers))
 	}
+	if s.secret != "" {
+		env = append(env, "KRATE_INTERNAL_SECRET="+s.secret)
+	}
 	if s.ppr {
 		env = append(env, "KRATE_PPR=1")
 		if s.pprRevalidate > 0 {
@@ -281,22 +331,7 @@ func (s *SSRServer) IsRunning() bool {
 // explicit invalidation only. For time-based ISR regeneration use RefreshPage,
 // which re-renders cached variants in place without evicting them.
 func (s *SSRServer) RevalidatePage(route string) error {
-	if !s.IsRunning() {
-		return errSSRNotRunning
-	}
-
-	body, _ := json.Marshal(map[string]string{"route": route})
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(
-		fmt.Sprintf("http://localhost:%d/__krate/ssr/revalidate", s.port),
-		"application/json",
-		bytes.NewReader(body),
-	)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	return nil
+	return s.internalPost("/__krate/ssr/revalidate", map[string]string{"route": route})
 }
 
 // RefreshPage triggers a non-destructive time-based ISR refresh for a route:
@@ -305,22 +340,7 @@ func (s *SSRServer) RevalidatePage(route string) error {
 // RevalidatePage - invalidation would clear dynamic variants and turn the next
 // request into a cache miss.
 func (s *SSRServer) RefreshPage(route string) error {
-	if !s.IsRunning() {
-		return errSSRNotRunning
-	}
-
-	body, _ := json.Marshal(map[string]string{"route": route})
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post(
-		fmt.Sprintf("http://localhost:%d/__krate/ssr/refresh", s.port),
-		"application/json",
-		bytes.NewReader(body),
-	)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	return nil
+	return s.internalPost("/__krate/ssr/refresh", map[string]string{"route": route})
 }
 
 // IsSSRPage checks if a route needs server-side rendering based on the manifest.
@@ -568,4 +588,46 @@ func matchRoute(urlPath, pattern string) (map[string]string, bool) {
 	}
 
 	return params, true
+}
+
+// stageCacheRuntime bundles the @krate/runtime data-cache runtime (the
+// Next-style fetch wrapper and the shared cache state) into
+// <outDir>/.krate/cache-runtime.mjs for the Node API/action sidecar, which
+// imports it at startup (KRATE_CACHE_RUNTIME) so fetch cache options and tag
+// invalidation work in API routes and server actions. Returns "" (after
+// printing why) when the runtime source cannot be found or bundled.
+func stageCacheRuntime(root, outDir string) string {
+	source := findServerRendererSource(root)
+	if source == "" {
+		fmt.Fprintf(os.Stderr, "  %sWarning: @krate/runtime not found; fetch cache options are not applied in Node API routes and actions%s\n", cYellow, cReset)
+		return ""
+	}
+	stageDir := filepath.Join(outDir, ".krate")
+	if err := os.MkdirAll(stageDir, 0755); err != nil {
+		return ""
+	}
+	outPath := filepath.Join(stageDir, "cache-runtime.mjs")
+	result := api.Build(api.BuildOptions{
+		AbsWorkingDir: root,
+		Bundle:        true,
+		Format:        api.FormatESModule,
+		Platform:      api.PlatformNode,
+		Outfile:       outPath,
+		Write:         true,
+		LogLevel:      api.LogLevelSilent,
+		Stdin: &api.StdinOptions{
+			Loader:     api.LoaderTS,
+			Contents:   "import { patchFetch, cacheRuntime } from './cache-scope.js';\ncacheRuntime();\npatchFetch();\n",
+			ResolveDir: filepath.Dir(source),
+			Sourcefile: "krate-cache-runtime.ts",
+		},
+	})
+	if len(result.Errors) > 0 {
+		for _, e := range result.Errors {
+			fmt.Fprintf(os.Stderr, "  %sCache runtime bundle error:%s %s\n", cYellow, cReset, e.Text)
+		}
+		return ""
+	}
+	abs, _ := filepath.Abs(outPath)
+	return abs
 }

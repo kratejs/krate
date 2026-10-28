@@ -22,6 +22,9 @@ const (
 type Runtime struct {
 	vm        *quickjs.VM
 	logPrefix string // optional prefix for console output (e.g. "[plugin:demo]")
+	// dataCache, when set, caches fetch responses requested with Next-style
+	// options ({ next: { revalidate, tags } } / cache: "force-cache").
+	dataCache *DataCache
 }
 
 // SetLogPrefix sets a prefix prepended to every console line. Plugin hosts set

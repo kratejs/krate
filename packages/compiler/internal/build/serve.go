@@ -40,7 +40,7 @@ import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 import cluster from 'node:cluster';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 const API_DIR = path.resolve(process.argv[2] || './src/api');
 const PORT = parseInt(process.argv[3] || '3001', 10);
@@ -58,7 +58,7 @@ const WORKERS = Math.max(1, parseInt(process.env.KRATE_API_WORKERS || '1', 10) |
 // The module cache is bypassed in dev (HOT) so edits are picked up.
 const fileCache = new Map();
 const moduleCache = new Map();
-` + actionSidecarJS + actionSidecarNodeAdapter + `
+` + actionSidecarJS + actionSidecarNodeAdapter + apiSidecarClusterJS + `
 let middlewareModule = null;
 if (MIDDLEWARE_PATH && fs.existsSync(MIDDLEWARE_PATH)) {
   try {
@@ -71,6 +71,17 @@ const server = http.createServer(async (req, res) => {
   try {
     const urlObj = new URL(req.url, "http://" + req.headers.host);
     const urlPath = urlObj.pathname;
+
+    if (urlPath === '/__krate/internal/cache-invalidate') {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const out = req.method === 'POST'
+        ? await internalCacheInvalidate(req.headers['x-krate-internal'], Buffer.concat(chunks).toString())
+        : { status: 405, body: { error: 'method not allowed' } };
+      res.statusCode = out.status;
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify(out.body));
+    }
 
     if (urlPath.startsWith('/__krate/action/')) {
       if (req.method !== 'POST') return sendActionResponse(res, actionFail(405, 'Method Not Allowed'));
@@ -213,7 +224,10 @@ const server = http.createServer(async (req, res) => {
           body: body && body.length > 0 ? body : undefined,
         });
         
-        const response = await methodHandler(request);
+        const revalidateScope = newRevalidateScope('api');
+        const response = await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(request));
+        // revalidatePath/revalidateTag calls are applied before responding.
+        await flushRevalidate(revalidateScope);
         
         if (response instanceof Response || (response && typeof response.status === 'number' && typeof response.headers === 'object')) {
           res.statusCode = response.status;
@@ -230,8 +244,22 @@ const server = http.createServer(async (req, res) => {
           res.end();
         }
       } else {
-        // Legacy pattern: handler(req, res)
-        await methodHandler(req, res);
+        // Legacy pattern: handler(req, res). The response is held back until
+        // queued revalidations are applied.
+        const revalidateScope = newRevalidateScope('api');
+        const end = res.end.bind(res);
+        res.end = (...endArgs) => {
+          flushRevalidate(revalidateScope).then(
+            () => end(...endArgs),
+            (e) => {
+              console.error('[krate] API route revalidation failed:', e);
+              if (!res.headersSent) res.statusCode = 500;
+              end(...endArgs);
+            },
+          );
+          return res;
+        };
+        await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(req, res));
       }
     } else {
       res.statusCode = 500;
@@ -296,7 +324,7 @@ import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 const API_DIR = path.resolve(process.argv[2] || './src/api');
 const PORT = parseInt(process.argv[3] || '3001', 10);
@@ -417,6 +445,12 @@ Bun.serve({
   async fetch(req) {
     const url = new URL(req.url);
     const urlPath = url.pathname;
+    if (urlPath === '/__krate/internal/cache-invalidate') {
+      const out = req.method === 'POST'
+        ? await internalCacheInvalidate(req.headers.get('x-krate-internal'), await req.text())
+        : { status: 405, body: { error: 'method not allowed' } };
+      return json(out.body, out.status);
+    }
     if (urlPath.startsWith('/__krate/action/')) {
       if (req.method !== 'POST') return actionFail(405, 'Method Not Allowed');
       try {
@@ -436,8 +470,11 @@ Bun.serve({
     const fn = mod[req.method.toUpperCase()] || mod.default;
     if (typeof fn !== 'function') return json({ error: 'API route must export a handler function (GET, POST, etc. or default).' }, 500);
     try {
-      if (fn.length >= 2) return await legacyInvoke(fn, req, url);
-      return await toResponse(await fn(req));
+      const revalidateScope = newRevalidateScope('api');
+      const out = await REVALIDATE_STORE.run(revalidateScope, async () => (fn.length >= 2 ? legacyInvoke(fn, req, url) : toResponse(await fn(req))));
+      // revalidatePath/revalidateTag calls are applied before responding.
+      await flushRevalidate(revalidateScope);
+      return out;
     } catch (e) { return json({ error: 'Internal Server Error', details: e.message }, 500); }
   },
 });`
@@ -638,6 +675,7 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, shells *regio
 	for _, b := range all {
 		if gr, ok := goRenders[b.id]; ok {
 			gr.Request = string(reqCtx)
+			gr.Route = route
 			goReq = append(goReq, gr)
 			continue
 		}
@@ -855,6 +893,23 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	port := cfg.ServerPort()
 	apiPort := internalPort(port + 1)
 
+	// On-demand revalidation (revalidatePath/revalidateTag) reaches this
+	// process through a loopback-only internal endpoint authenticated by a
+	// per-process secret; every server-side runtime gets its URL + secret.
+	revalOut, err := filepath.Abs(cfg.OutDir)
+	if err != nil {
+		return fmt.Errorf("resolving out dir: %w", err)
+	}
+	revalHost, err := newRevalidateHost(revalOut)
+	if err != nil {
+		return err
+	}
+	if err := revalHost.Start(); err != nil {
+		return err
+	}
+	defer revalHost.Close()
+	serverEnv := withEnv(environ.Current, revalHost.Env())
+
 	// Load embedded middleware runtime if configured (default: quickjs)
 	var middlewareRT *jsruntime.MiddlewareRuntime
 	middlewareRTOption := strings.ToLower(cfg.SSR.MiddlewareRuntime)
@@ -889,6 +944,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			sidecarRuntime = apiRTOption
 		}
 		printf("  %s⚡%s API sidecar (%s) → %shttp://localhost:%d%s\n", cCyan, cReset, sidecarRuntime, cCyan, apiPort, cReset)
+		revalHost.SetNodeAPI(fmt.Sprintf("http://127.0.0.1:%d", apiPort))
 
 		go func() {
 			defer func() {
@@ -926,6 +982,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				fmt.Sprintf("KRATE_API_WORKERS=%d", nodeWorkers),
 				fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hub != nil)),
 			)
+			cmd.Env = append(cmd.Env, revalHost.EnvList()...)
+			if cacheRuntime := stageCacheRuntime(root, cfg.OutDir); cacheRuntime != "" {
+				cmd.Env = append(cmd.Env, "KRATE_CACHE_RUNTIME="+cacheRuntime)
+			}
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			nodeAPICmdMu.Lock()
@@ -950,7 +1010,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			_ = os.Remove(goAPISocket)
 			goAPI.SetSocket(goAPISocket)
 		}
-		goAPI.SetEnv(environ.KVList(environ.Current))
+		goAPI.SetEnv(environ.KVList(serverEnv))
+		revalHost.SetGoAPI(goAPI)
 		if err := goAPI.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "  %s⚠ Go API sidecar not started:%s %v\n", cYellow, cReset, err)
 		} else if goAPI.socket != "" {
@@ -960,10 +1021,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 	}
 
-	absOut, err := filepath.Abs(cfg.OutDir)
-	if err != nil {
-		return fmt.Errorf("resolving out dir: %w", err)
-	}
+	absOut := revalOut
 
 	fileServer := http.FileServer(http.Dir(absOut))
 	mux := http.NewServeMux()
@@ -981,7 +1039,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if apiRTOption == "" || apiRTOption == "quickjs" {
 		if _, err := os.Stat(apiDir); err == nil {
 			apiRT = jsruntime.NewAPIRouteRuntime(apiDir)
-			apiRT.SetEnv(environ.Current)
+			apiRT.SetEnv(serverEnv)
+			apiRT.SetCacheHooks(revalHost.CacheHooks())
 			// Dev picks up route edits by running each request in a fresh VM;
 			// production reuses stateful workers for throughput.
 			isolation := cfg.SSR.APIIsolation || hub != nil
@@ -1110,7 +1169,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		ssrPort = internalPort(port + 10)
 	}
 	ssr := NewSSRServer(root, ssrPort, cfg.SSR.SSRRuntime)
-	ssr.SetEnv(environ.Current)
+	ssr.SetEnv(serverEnv)
+	ssr.SetInternalSecret(revalHost.secret)
 	ssr.SetTuning(cfg.SSR.Timeout, cfg.SSR.MaxCacheSize)
 	ssr.SetPPR(cfg.PPR, cfg.PPRRevalidate)
 	ssr.SetRendererWorkers(cfg.SSR.RendererWorkers)
@@ -1123,27 +1183,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		fmt.Fprintf(os.Stderr, "  %s⚠ SSR renderer not started:%s %v\n", cYellow, cReset, err)
 	} else {
 		ssrStarted = true
+		revalHost.SetSSR(ssr, ssrPort)
 		printf("  %s⚡%s SSR renderer → %shttp://localhost:%d%s\n", cCyan, cReset, cCyan, ssrPort, cReset)
 	}
 
 	// SSR/ISR/Streaming route handler - intercepts before static file server
 	if ssrStarted {
-		mux.HandleFunc("/__krate/ssr/", func(w http.ResponseWriter, r *http.Request) {
-			// Forward internal SSR endpoints to the renderer
-			ssrURL := fmt.Sprintf("http://localhost:%d%s", ssrPort, r.URL.Path)
-			proxyReq, _ := http.NewRequest(r.Method, ssrURL, r.Body)
-			proxyReq.Header = r.Header
-			resp, err := sidecarClient.Do(proxyReq)
-			if err != nil {
-				w.WriteHeader(502)
-				_, _ = w.Write([]byte(`{"error":"SSR renderer unavailable"}`))
-				return
-			}
-			defer resp.Body.Close()
-			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-			w.WriteHeader(resp.StatusCode)
-			_, _ = io.Copy(w, resp.Body)
-		})
+		mux.HandleFunc("/__krate/ssr/", ssrInternalProxy(revalHost, ssrPort))
 	}
 
 	// Wrap file server to serve custom 404.html if it exists
@@ -1286,18 +1332,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 						for _, route := range routes {
 							page := ssr.findPage(route)
 							if page != nil && page.Source != "" {
-								invBody, _ := json.Marshal(map[string]string{
-									"route":      route,
-									"source":     page.Source,
-									"bundlePath": page.BundlePath,
-								})
-								resp, err := sidecarClient.Post(
-									fmt.Sprintf("http://localhost:%d/__krate/ssr/invalidate", ssrPort),
-									"application/json",
-									bytes.NewReader(invBody),
-								)
-								if err == nil {
-									resp.Body.Close()
+								if err := ssr.InvalidateDev(route, page.Source, page.BundlePath); err != nil {
+									fmt.Fprintf(os.Stderr, "  %sSSR invalidation failed (%s):%s %v\n", cYellow, route, cReset, err)
 								}
 							}
 						}
@@ -2316,4 +2352,16 @@ func internalPort(preferred int) int {
 		}
 	}
 	return preferred
+}
+
+// withEnv returns base with extra layered on top (neither is modified).
+func withEnv(base, extra map[string]string) map[string]string {
+	out := make(map[string]string, len(base)+len(extra))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
 }

@@ -14,6 +14,7 @@ func TestEmbeddedSourcesInSync(t *testing.T) {
 	}{
 		{"krate/krate.go", KrateSrc},
 		{"krate/request.go", KrateRequestSrc},
+		{"krate/revalidate.go", KrateRevalidateSrc},
 		{"runtime/runtime.go", RuntimeSrc},
 	}
 	for _, c := range cases {
