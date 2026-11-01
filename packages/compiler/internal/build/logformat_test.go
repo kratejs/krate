@@ -27,8 +27,8 @@ func TestColorStatusClasses(t *testing.T) {
 }
 
 func TestFormatDuration(t *testing.T) {
-	if got := formatDuration(250 * time.Microsecond); got != "250μs" {
-		t.Errorf("sub-ms = %q, want 250μs", got)
+	if got := formatDuration(250 * time.Microsecond); got != "250us" {
+		t.Errorf("sub-ms = %q, want 250us", got)
 	}
 	if got := formatDuration(7 * time.Millisecond); got != "7ms" {
 		t.Errorf("ms = %q, want 7ms", got)
@@ -53,7 +53,7 @@ func TestFormatRequestLineColor(t *testing.T) {
 	if !strings.Contains(line, cRed) {
 		t.Errorf("expected red status for 500: %q", line)
 	}
-	if !strings.Contains(line, "800μs") {
+	if !strings.Contains(line, "800us") {
 		t.Errorf("expected microsecond duration: %q", line)
 	}
 }

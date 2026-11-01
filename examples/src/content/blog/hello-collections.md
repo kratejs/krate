@@ -12,5 +12,5 @@ order: 1
 
 This file lives in `src/content/blog` and is validated against the `blog`
 collection schema declared in `krate.config.ts`. Because `order` is required, a
-build fails if this entry omits it — and `getCollection('blog')` reads it with
+build fails if this entry omits it - and `getCollection('blog')` reads it with
 full types during the build.

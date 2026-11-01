@@ -8,7 +8,7 @@ import (
 
 // TestCollectMemberComponents verifies plain namespaced part assignments
 // (`Root.Part = PartFn`) register dotted tags, including presentational
-// compounds (Breadcrumb.List, Table.Row, …).
+// compounds (Breadcrumb.List, Table.Row, ...).
 func TestCollectMemberComponents(t *testing.T) {
 	src := `export function Breadcrumb(props) { return <nav>{props.children}</nav>; }
 export function BreadcrumbList(props) { return <ol>{props.children}</ol>; }

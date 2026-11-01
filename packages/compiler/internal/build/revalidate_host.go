@@ -325,7 +325,7 @@ func (h *revalidateHost) warnSkipped(s skippedTarget) {
 	h.warned[s.Target] = true
 	h.warnMu.Unlock()
 	if !seen {
-		fmt.Fprintf(os.Stderr, "  %s⚠ revalidatePath(%s) skipped:%s %s\n", cYellow, s.Target, cReset, s.Reason)
+		fmt.Fprintf(os.Stderr, "  %s! revalidatePath(%s) skipped:%s %s\n", cYellow, s.Target, cReset, s.Reason)
 	}
 }
 

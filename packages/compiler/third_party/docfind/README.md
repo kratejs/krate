@@ -8,7 +8,7 @@ with WebAssembly support (FST + FSST + RAKE keyword extraction).
 
 Krate's docs plugin ships a search bar backed by a docfind index that is
 **embedded into a WASM module** at docs-build time. To keep that a pure
-in-process operation — no subprocess, no temp JSON file — krate embeds the
+in-process operation - no subprocess, no temp JSON file - krate embeds the
 docfind WASM modules into the krate binary (`internal/docfind/embedded`, via
 `go:embed`) and drives the builder module through a Go WebAssembly runtime
 (`github.com/tetratelabs/wazero`).
@@ -19,11 +19,11 @@ The upstream repo has `core/` (index building + search), `cli/` (a standalone
 build tool), and `wasm/` (wasm-bindgen bindings). Krate does **not** shell out
 to the `cli`. Instead:
 
-- `core/` — unchanged.
-- `wasm/` — rewritten to a raw C-ABI search module (no wasm-bindgen): exports
+- `core/` - unchanged.
+- `wasm/` - rewritten to a raw C-ABI search module (no wasm-bindgen): exports
   `docfind_search`, `docfind_alloc`, `docfind_free`, plus the `INDEX_BASE` /
   `INDEX_LEN` globals that get patched when an index is embedded.
-- `builder/` — new crate: a port of the upstream `cli`'s index-embedding phase
+- `builder/` - new crate: a port of the upstream `cli`'s index-embedding phase
   exposed as a C-ABI `docfind_build(docs_json, template_wasm) -> wasm` export.
 - The browser glue is `internal/docfind/embedded/docfind.js` (hand-written,
   maintained there).

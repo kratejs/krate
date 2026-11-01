@@ -38,6 +38,30 @@ func TestModuleCacheSharesParse(t *testing.T) {
 	}
 }
 
+func TestModuleCacheRejectsSameSizeEditWithPreservedMtime(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "module.tsx")
+	writeFile(t, path, "export const x = 1;\n")
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache := NewModuleCache()
+	cache.putProgram(path, &programEntry{mtime: fi.ModTime(), size: fi.Size()})
+	if _, ok := cache.getProgram(path, fi.ModTime(), fi.Size()); !ok {
+		t.Fatal("cache should hit before the edit")
+	}
+
+	writeFile(t, path, "export const x = 2;\n")
+	if err := os.Chtimes(path, fi.ModTime(), fi.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cache.getProgram(path, fi.ModTime(), fi.Size()); ok {
+		t.Fatal("same-size edit with preserved mtime must invalidate the cache")
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {

@@ -40,6 +40,8 @@
     /* Brand Accent Colors (Requested) */
     --color-primary: #f97316;
     --color-primary-hover: #ea580c;
+    --color-action: #c2410c;
+    --color-action-hover: #9a3412;
 
     /* Bridge for @krate/components (Aside/admonitions, Card, Steps, Tabs, Code,
        Avatar). Those components consume `--krate-*` tokens with dark defaults;
@@ -489,8 +491,8 @@ a:hover {
 
 /* --- Core Semantic Content Typography --- */
 /* Conditional wrappers (the `data-krate-cond-w` divs emitted around
-   {cond && …}) are layout-transparent, so a `position: sticky` child — e.g. the
-   mobile TOC bar — sticks to the viewport instead of being clipped to the
+   {cond && ...}) are layout-transparent, so a `position: sticky` child - e.g. the
+   mobile TOC bar - sticks to the viewport instead of being clipped to the
    wrapper's own (short) box. Hidden branches still use inline display:none. */
 .docs-page > [data-krate-cond-w] {
     display: contents;
@@ -1390,13 +1392,13 @@ a:hover {
     font-weight: 600;
     text-decoration: none;
     color: #ffffff;
-    background: var(--color-primary);
+    background: var(--color-action);
     border: 1px solid transparent;
     transition: background 0.15s ease;
 }
 
 .docs-hero-action:hover {
-    background: var(--color-primary-hover);
+    background: var(--color-action-hover);
 }
 
 .docs-hero-action-secondary {
@@ -1556,7 +1558,7 @@ a.docs-tag:hover { color: var(--color-text-main); border-color: var(--color-mute
 
 /* Visible keyboard focus everywhere. */
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--color-primary);
+  outline: 2px solid var(--color-action);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -1565,7 +1567,7 @@ a.docs-tag:hover { color: var(--color-text-main); border-color: var(--color-mute
 .skip-link {
   position: absolute; left: 0.75rem; top: -3rem;
   z-index: 300; padding: 0.5rem 0.9rem;
-  background: var(--color-primary); color: #fff;
+  background: var(--color-action); color: #fff;
   border-radius: 0 0 var(--radius) var(--radius);
   font-weight: 600; text-decoration: none;
   transition: top 0.15s ease;
@@ -1628,8 +1630,12 @@ a.docs-tag:hover { color: var(--color-text-main); border-color: var(--color-mute
 .krate-docs-search { position: relative; display: flex; align-items: center; }
 .krate-docs-search-icon { position: absolute; left: 0.6rem; display: inline-flex; color: var(--color-muted); pointer-events: none; }
 .krate-docs-search-input { width: 210px; height: 32px; padding: 0 0.6rem 0 1.95rem; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-card-bg); color: var(--color-text-main); font: inherit; font-size: 0.85rem; }
-.krate-docs-search-input:focus { outline: none; border-color: var(--color-primary); }
-.krate-docs-search-kbd { position: absolute; right: 0.45rem; padding: 0.05rem 0.3rem; border: 1px solid var(--color-border); border-radius: 4px; color: var(--color-muted); font-size: 0.7rem; line-height: 1.2; pointer-events: none; }
+.krate-docs-search-input:focus-visible { outline: 2px solid var(--color-action); outline-offset: 2px; border-color: var(--color-primary); }
+.krate-docs-search-status {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.krate-docs-search-kbd { position: absolute; right: 0.7rem; padding: 0; border: 0; background: transparent; color: var(--color-muted); font-size: 0.72rem; line-height: 1.2; pointer-events: none; }
 .krate-docs-search:has(.krate-docs-search-kbd) .krate-docs-search-input { padding-right: 2.2rem; }
 .krate-docs-search-results { position: absolute; top: calc(100% + 6px); right: 0; width: min(440px, 92vw); max-height: 62vh; overflow: auto; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: var(--docs-shadow); padding: 0.35rem; z-index: 200; }
 .krate-docs-search-item { display: block; padding: 0.5rem 0.6rem; border-radius: 6px; text-decoration: none; color: var(--color-text-main); }
@@ -1711,7 +1717,7 @@ pre.mermaid,
 
 /* Mermaid measures and renders its labels itself. The prose rules above
    (`overflow-wrap: anywhere`, `text-wrap: pretty`, heading/paragraph margins)
-   leak into the diagram and change label metrics — making Mermaid lay out
+   leak into the diagram and change label metrics - making Mermaid lay out
    enormous nodes (a 4-node graph became ~3257x4193 in Firefox) and detach
    edges. Neutralise the inherited text-flow for *everything* inside a diagram,
    including SVG <text>/<tspan> (which the earlier reset missed). */

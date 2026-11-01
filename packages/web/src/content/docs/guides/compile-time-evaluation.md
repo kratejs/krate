@@ -1,6 +1,6 @@
 ---
 title: Compile-Time Evaluation
-order: 8
+order: 11
 description: How Krate evaluates known values, static lists, local helpers, and pure expressions during the build.
 ---
 

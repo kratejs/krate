@@ -71,12 +71,12 @@ func (b *Builder) applyServerComponentMode(page string, entry *bundler.Module, a
 			*mode = RenderSSR
 			*revalidate = 0
 		}
-		printf("  %s⚡%s %s is an async server component -> %s\n", cCyan, cReset, filepath.Base(page), mode.String())
+		printf("  %s*%s %s is an async server component -> %s\n", cCyan, cReset, filepath.Base(page), mode.String())
 		return true, nil
 	}
 	if *mode == RenderSSG {
 		*mode = RenderStreaming
-		fmt.Fprintf(os.Stderr, "  %s⚡%s %s: [%s] renders server component %s per request -> streaming\n", cCyan, cReset, filepath.Base(page), diag.CodeServerComponentStreaming, children[0])
+		fmt.Fprintf(os.Stderr, "  %s*%s %s: [%s] renders server component %s per request -> streaming\n", cCyan, cReset, filepath.Base(page), diag.CodeServerComponentStreaming, children[0])
 	}
 	return false, nil
 }

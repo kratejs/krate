@@ -23,9 +23,9 @@ export default defineConfig({
     codeHighlight: true,
   },
 
-  seo: {
-    baseUrl,
-    siteName: "__PROJECT_DISPLAY_NAME__",
+  site: {
+    url: baseUrl,
+    name: "__PROJECT_DISPLAY_NAME__",
     description: "Documentation site built with Krate.",
   },
 

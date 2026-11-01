@@ -7,7 +7,7 @@ order: 3
 # Component Library
 
 `@krate/components` is a shadcn/ui-style set of accessible UI components built
-on the Krate runtime. To recolour them, override `--krate-primary` — see
+on the Krate runtime. To recolour them, override `--krate-primary` - see
 [Theming Components](/docs/guides/theming/).
 
 ```tsx
@@ -106,10 +106,10 @@ This applies to `Tabs`, `Accordion`/`AccordionMultiple`, `Collapsible`,
 `Switch`, `Checkbox`, `Progress`, `Select`, `Tooltip`, and `HoverCard` are
 built on native elements or pure CSS and need no signals at all.
 
-Every compound component is used **namespaced** — `Breadcrumb.List`,
+Every compound component is used **namespaced** - `Breadcrumb.List`,
 `Table.Row`, `Steps.Step`, `Form.Field`, `FileTree.Folder`, `Tabs.Trigger`,
-`Dialog.Content`, and so on. The flat exports (`BreadcrumbList`, `TableRow`, …)
+`Dialog.Content`, and so on. The flat exports (`BreadcrumbList`, `TableRow`, ...)
 still work as deprecated aliases.
 
 For data-driven option sets (options known only at runtime), use the native
-`<Select options={…}/>` component rather than a scope component.
+`<Select options={...}/>` component rather than a scope component.

@@ -1,7 +1,7 @@
 ---
 title: HTTP Headers
 description: Set response headers and understand Krate's defaults.
-order: 12
+order: 13
 ---
 
 # HTTP Headers

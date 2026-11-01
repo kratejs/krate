@@ -6,6 +6,7 @@ export {
   SiteFooter,
   HomeLayout,
   ThemeToggle,
+  ThemePrePaint,
 } from "./shell";
 export type {
   SiteConfig,

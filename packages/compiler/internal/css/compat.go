@@ -6,10 +6,10 @@ import "strings"
 // @supports blocks (see csssignals.CompatModernPrefix / CompatLegacyPrefix).
 // These helpers split it into per-variant stylesheets for UA-based serving.
 // They match the exact prefix (which includes the opening brace and a
-// `/*krate:*​/` sentinel comment), so an author's own
+// `/*krate:*/` sentinel comment), so an author's own
 // `@supports selector(:has(*))` is never touched.
 
-// RemoveAtRuleBlock removes every `prefix … }` block (prefix ends just after the
+// RemoveAtRuleBlock removes every `prefix ... }` block (prefix ends just after the
 // opening brace and sentinel) from s, brace-balanced and string/comment-aware.
 func RemoveAtRuleBlock(s, prefix string) string {
 	var b strings.Builder
@@ -26,7 +26,7 @@ func RemoveAtRuleBlock(s, prefix string) string {
 	return b.String()
 }
 
-// UnwrapAtRuleBlock replaces every `prefix … }` block with its inner content.
+// UnwrapAtRuleBlock replaces every `prefix ... }` block with its inner content.
 func UnwrapAtRuleBlock(s, prefix string) string {
 	var b strings.Builder
 	pos := 0

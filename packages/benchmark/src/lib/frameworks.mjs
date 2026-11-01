@@ -84,7 +84,7 @@ export const BUILD_FRAMEWORKS = [
 export const API_FRAMEWORKS = [
   {
     id: 'krate-go',
-    name: 'Krate — Go API route',
+    name: 'Krate - Go API route',
     fixture: 'krate-go',
     install: true,
     async prepare(ctx) {
@@ -102,7 +102,7 @@ export const API_FRAMEWORKS = [
   },
   {
     id: 'krate-ts',
-    name: 'Krate — TS API route',
+    name: 'Krate - TS API route',
     fixture: 'krate',
     install: true,
     async prepare(ctx) {
@@ -133,7 +133,7 @@ export const API_FRAMEWORKS = [
   },
   {
     id: 'krate-ts-node',
-    name: 'Krate — TS API route (node)',
+    name: 'Krate - TS API route (node)',
     fixture: 'krate',
     install: true,
     async prepare(ctx) {
@@ -165,7 +165,7 @@ export const API_FRAMEWORKS = [
   },
   {
     id: 'nextjs',
-    name: 'Next.js — route handler',
+    name: 'Next.js - route handler',
     fixture: 'next',
     install: true,
     async prepare(ctx) {
@@ -291,7 +291,7 @@ function krateSsrTarget({ id, name, fixture, impl, sidecar }) {
  * no Node renderer).
  */
 export const SSR_FRAMEWORKS = [
-  krateSsrTarget({ id: 'krate-ssr-tsx-node', name: 'Krate — runtime TSX / node', fixture: 'krate-ssr-tsx', impl: 'tsx', sidecar: 'node' }),
-  krateSsrTarget({ id: 'krate-ssr-tsx-bun', name: 'Krate — runtime TSX / bun', fixture: 'krate-ssr-tsx', impl: 'tsx', sidecar: 'bun' }),
-  krateSsrTarget({ id: 'krate-ssr-go', name: 'Krate — runtime Go (Go host)', fixture: 'krate-ssr-go', impl: 'go', sidecar: null }),
+  krateSsrTarget({ id: 'krate-ssr-tsx-node', name: 'Krate - runtime TSX / node', fixture: 'krate-ssr-tsx', impl: 'tsx', sidecar: 'node' }),
+  krateSsrTarget({ id: 'krate-ssr-tsx-bun', name: 'Krate - runtime TSX / bun', fixture: 'krate-ssr-tsx', impl: 'tsx', sidecar: 'bun' }),
+  krateSsrTarget({ id: 'krate-ssr-go', name: 'Krate - runtime Go (Go host)', fixture: 'krate-ssr-go', impl: 'go', sidecar: null }),
 ];

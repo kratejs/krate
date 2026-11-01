@@ -1,6 +1,6 @@
 ---
 title: TypeScript Setup
-order: 11
+order: 14
 description: Configure tsconfig for a Krate app and understand the generated types.
 ---
 
@@ -35,9 +35,9 @@ The scaffold ships a working config. The essentials:
 
 Notes:
 
-- **`jsx: "preserve"`** — Krate's compiler owns JSX transformation; `tsc` is
+- **`jsx: "preserve"`** - Krate's compiler owns JSX transformation; `tsc` is
   only used to typecheck (hence `noEmit`).
-- **`paths`** — `@/*` maps to `src/*`. The compiler reads the same `paths` and
+- **`paths`** - `@/*` maps to `src/*`. The compiler reads the same `paths` and
   `baseUrl` from `tsconfig.json` for bundling resolution, so they stay in sync.
 - **`include`** must cover `.krate/types` so generated route/content types are
   visible.
@@ -59,7 +59,7 @@ Regenerate after adding pages or content:
 krate types
 ```
 
-For Go components, run `krate go:init` once — it adds `.krate/types` to your
+For Go components, run `krate go:init` once - it adds `.krate/types` to your
 `tsconfig` `include` (see [Go Components](/docs/features/go-components/)).
 
 See [Typed Routes & Content](/docs/features/typed-routes/) for usage.
@@ -67,7 +67,7 @@ See [Typed Routes & Content](/docs/features/typed-routes/) for usage.
 ## Global JSX types
 
 `@krate/runtime` provides the global `JSX` namespace (intrinsics, ARIA, SVG
-attributes, `Krate.TypedRoutes`). Ensure your `tsconfig` resolves it — either
+attributes, `Krate.TypedRoutes`). Ensure your `tsconfig` resolves it - either
 via `jsxImportSource` above or a `/// <reference types="@krate/runtime" />`
 in an ambient `.d.ts`.
 

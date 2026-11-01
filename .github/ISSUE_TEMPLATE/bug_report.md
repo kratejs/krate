@@ -29,7 +29,7 @@ What you expected to happen.
 
 ## Actual behavior
 
-What actually happened. Include error output, `⚠` build warnings, or generated HTML/JS excerpts.
+What actually happened. Include error output, `!` build warnings, or generated HTML/JS excerpts.
 
 ## Environment
 

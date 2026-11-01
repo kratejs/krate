@@ -30,7 +30,7 @@ function ToggleDemo() {
         Toggle state: {on()} (live text, zero JS)
       </p>
       <div class="sig-panel" showIf={on()}>
-        Toggle is <strong>on</strong> — shown with zero JavaScript.
+        Toggle is <strong>on</strong> - shown with zero JavaScript.
       </div>
       <div class="sig-panel muted" showIf={!on()}>
         Toggle is <strong>off</strong>.
@@ -151,7 +151,7 @@ function GroupDemo() {
 
       <button class="sig-acc" onClick={() => setOpen('q2')}>Are the CSS primitives zero-JS?</button>
       <div class="sig-panel" showIf={open() === 'q2'}>
-        Yes — they compile to hidden inputs and :has() CSS. Only stateful ARIA
+        Yes - they compile to hidden inputs and :has() CSS. Only stateful ARIA
         roles inject a tiny synchroniser.
       </div>
 
@@ -189,7 +189,7 @@ function RangeDemo() {
   return (
     <div class="sig-row">
       <div class="sig-stepper">
-        <button class="sig-btn" onClick={() => setLevel(level() - 1)}>−</button>
+        <button class="sig-btn" onClick={() => setLevel(level() - 1)}>-</button>
         <button class="sig-btn" onClick={() => setLevel(level() + 1)}>+</button>
       </div>
       <div class="sig-progress">
@@ -249,7 +249,7 @@ export default function CssSignalsPage() {
         cannot be inferred natively.
       </p>
 
-      <Section title="createCSSToggle" note="Single checkbox — show/hide.">
+      <Section title="createCSSToggle" note="Single checkbox - show/hide.">
         <ToggleDemo />
       </Section>
 
@@ -257,7 +257,7 @@ export default function CssSignalsPage() {
         <SwitchDemo />
       </Section>
 
-      <Section title="createCSSChoice" note="Radio group — tabs and segmented controls.">
+      <Section title="createCSSChoice" note="Radio group - tabs and segmented controls.">
         <ChoiceDemo />
       </Section>
 
@@ -265,7 +265,7 @@ export default function CssSignalsPage() {
         <TabsAriaDemo />
       </Section>
 
-      <Section title="createCSSFlags" note="Independent checkboxes — filter chips.">
+      <Section title="createCSSFlags" note="Independent checkboxes - filter chips.">
         <FlagsDemo />
       </Section>
 
@@ -281,7 +281,7 @@ export default function CssSignalsPage() {
         <MenuDemo />
       </Section>
 
-      <Section title="createCSSRange" note="Discrete range — stepper, progress, slider.">
+      <Section title="createCSSRange" note="Discrete range - stepper, progress, slider.">
         <RangeDemo />
       </Section>
 

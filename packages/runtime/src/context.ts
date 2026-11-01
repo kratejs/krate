@@ -46,12 +46,12 @@ export function resetContexts(): void {
 
 /**
  * Create a context that carries a CSS scope handle (see {@link CSSScope}). The
- * default is a harmless placeholder — a `<Provider>` value always wins — so no
+ * default is a harmless placeholder - a `<Provider>` value always wins - so no
  * cast is needed:
  *
  * ```ts
  * const TabsCtx = createScope<string>();
- * // provide:  <TabsCtx.Provider value={createCSSChoice('a')}>…</Provider>
+ * // provide:  <TabsCtx.Provider value={createCSSChoice('a')}>...</Provider>
  * // consume:  const tab = TabsCtx.use();
  * ```
  */

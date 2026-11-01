@@ -5,12 +5,22 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kratejs/krate/packages/compiler/internal/execx"
 )
 
 func (s *Service) allowedTasks() map[string]bool {
-	allowed := map[string]bool{"build": true, "check": true, "test": true, "typecheck": true}
+	// build/check are the default safe set. Arbitrary package scripts
+	// (test/typecheck) require an explicit allowTasks entry because they run
+	// project code with the server's environment. A read-only profile runs no
+	// project tasks at all.
+	if s.policy != nil && s.policy.ReadOnlyMode {
+		return map[string]bool{}
+	}
+	allowed := map[string]bool{"build": true, "check": true}
 	if s.policy != nil && len(s.policy.AllowTasks) > 0 {
 		allowed = map[string]bool{}
 		for _, t := range s.policy.AllowTasks {
@@ -29,6 +39,9 @@ func (s *Service) toolRunTask(ctx context.Context, args map[string]any) (ToolRes
 	if task == "" {
 		return ErrorResult("provide task (build, check, test, or typecheck)"), nil
 	}
+	if s.policy != nil && s.policy.ReadOnlyMode {
+		return ErrorResult("run_task is disabled by readOnlyMode in .krate/mcp.json"), nil
+	}
 	if !s.allowedTasks()[task] {
 		return ErrorResult("task " + task + " is not in allowTasks in .krate/mcp.json"), nil
 	}
@@ -45,17 +58,22 @@ func (s *Service) toolRunTask(ctx context.Context, args map[string]any) (ToolRes
 	case "check":
 		return s.toolCheck(ctx, args)
 	case "test", "typecheck":
-		if _, err := exec.LookPath("npm"); err != nil {
-			return ErrorResult("npm is not installed; cannot run " + task), nil
+		pm := s.packageManager()
+		if _, err := exec.LookPath(pm); err != nil {
+			return ErrorResult(pm + " is not installed; cannot run " + task), nil
 		}
 		runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
-		cmd := exec.CommandContext(runCtx, "npm", "run", task)
+		args := []string{"run", task}
+		if pm == "bun" {
+			args = []string{"run", task}
+		}
+		cmd := execx.Command(runCtx, pm, args...)
 		cmd.Dir = s.root
 		cmd.Env = os.Environ()
 		out, err := cmd.CombinedOutput()
 		reportProgress(ctx, 1, 1, task+" complete")
-		text := string(out)
+		text := redactTaskOutput(string(out))
 		if len(text) > 1<<20 {
 			text = text[:1<<20] + "\n... (truncated)"
 		}
@@ -66,4 +84,38 @@ func (s *Service) toolRunTask(ctx context.Context, args map[string]any) (ToolRes
 	default:
 		return ErrorResult("unsupported task: " + task), nil
 	}
+}
+
+func (s *Service) packageManager() string {
+	switch {
+	case mcpFileExists(filepath.Join(s.root, "pnpm-lock.yaml")):
+		return "pnpm"
+	case mcpFileExists(filepath.Join(s.root, "bun.lockb")) || mcpFileExists(filepath.Join(s.root, "bun.lock")):
+		return "bun"
+	case mcpFileExists(filepath.Join(s.root, "yarn.lock")):
+		return "yarn"
+	default:
+		return "npm"
+	}
+}
+
+func mcpFileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func redactTaskOutput(text string) string {
+	for _, kv := range os.Environ() {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || len(v) < 4 {
+			continue
+		}
+		upper := strings.ToUpper(k)
+		if strings.Contains(upper, "SECRET") || strings.Contains(upper, "TOKEN") ||
+			strings.Contains(upper, "PASSWORD") || strings.Contains(upper, "API_KEY") ||
+			strings.Contains(upper, "PRIVATE_KEY") {
+			text = strings.ReplaceAll(text, v, "[redacted]")
+		}
+	}
+	return text
 }

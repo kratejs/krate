@@ -41,6 +41,7 @@ type SSRServer struct {
 	ppr             bool
 	pprRevalidate   int
 	rendererWorkers int
+	outDir          string
 	// secret authenticates the mutating internal endpoints
 	// (/__krate/ssr/revalidate, /refresh, /invalidate, /cache-invalidate).
 	secret string
@@ -52,6 +53,14 @@ func (s *SSRServer) SetInternalSecret(secret string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.secret = secret
+}
+
+// InternalSecret returns the per-process secret used for authenticated
+// sidecar requests.
+func (s *SSRServer) InternalSecret() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.secret
 }
 
 // internalPost POSTs a JSON body to an authenticated sidecar endpoint.
@@ -115,6 +124,27 @@ func (s *SSRServer) SetRendererWorkers(n int) {
 	s.rendererWorkers = n
 }
 
+// SetOutDir points the renderer at a custom build output directory.
+func (s *SSRServer) SetOutDir(dir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.outDir = dir
+}
+
+func (s *SSRServer) outputDir() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.outputDirLocked()
+}
+
+// outputDirLocked returns the build output directory. The caller must hold s.mu.
+func (s *SSRServer) outputDirLocked() string {
+	if s.outDir != "" {
+		return s.outDir
+	}
+	return filepath.Join(s.root, "dist")
+}
+
 // SetEnv provides environment variables for the sidecar process.
 func (s *SSRServer) SetEnv(env map[string]string) {
 	s.env = environ.KVList(env)
@@ -145,7 +175,7 @@ func (s *SSRServer) LoadManifest() error {
 // loadManifestLocked reads the server manifest into s.manifest. The caller must
 // hold s.mu.
 func (s *SSRServer) loadManifestLocked() error {
-	manifestPath := filepath.Join(s.root, "dist", "server-manifest.json")
+	manifestPath := filepath.Join(s.outputDirLocked(), "server-manifest.json")
 	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
 		return fmt.Errorf("server-manifest.json not found in dist/ - no SSR/ISR pages to render")
 	}
@@ -198,17 +228,17 @@ func (s *SSRServer) Start() error {
 		return nil
 	}
 
-	rendererPath := s.findRendererScript()
+	rendererPath := s.findRendererScriptLocked()
 	if rendererPath == "" {
 		s.mu.Unlock()
-		return fmt.Errorf("krate SSR renderer not found — ensure @krate/runtime is installed")
+		return fmt.Errorf("krate SSR renderer not found - ensure @krate/runtime is installed")
 	}
 
 	if err := s.loadManifestLocked(); err != nil {
 		s.mu.Unlock()
 		return err
 	}
-	manifestPath := filepath.Join(s.root, "dist", "server-manifest.json")
+	manifestPath := filepath.Join(s.outputDirLocked(), "server-manifest.json")
 
 	runtimeCmd, runtimeArgs, err := ssrRuntimeCommand(s.runtime, rendererPath)
 	if err != nil {
@@ -222,6 +252,7 @@ func (s *SSRServer) Start() error {
 		fmt.Sprintf("KRATE_SSR_PORT=%d", s.port),
 		fmt.Sprintf("KRATE_MANIFEST=%s", manifestPath),
 		fmt.Sprintf("KRATE_ROOT=%s", s.root),
+		fmt.Sprintf("KRATE_OUT_DIR=%s", s.outputDirLocked()),
 	)
 	if s.timeout > 0 {
 		env = append(env, fmt.Sprintf("KRATE_SSR_TIMEOUT=%d", s.timeout))
@@ -446,12 +477,21 @@ func (s *SSRServer) FindPageForRoute(urlPath string) (*ManifestPage, map[string]
 }
 
 func (s *SSRServer) findRendererScript() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.findRendererScriptLocked()
+}
+
+// findRendererScriptLocked resolves the renderer script. The caller must hold
+// s.mu.
+func (s *SSRServer) findRendererScriptLocked() string {
 	// Prefer the bundled driver staged into dist by the build. If it is missing
 	// (for example an older dist), bundle the renderer now so serve never needs
 	// a TypeScript runtime.
-	staged := filepath.Join(s.root, "dist", ".krate", "server-renderer.mjs")
+	outDir := s.outputDirLocked()
+	staged := filepath.Join(outDir, ".krate", "server-renderer.mjs")
 	if _, err := os.Stat(staged); err != nil {
-		staged = stageServerRenderer(s.root, filepath.Join(s.root, "dist"))
+		staged = stageServerRenderer(s.root, outDir)
 		if staged == "" {
 			return ""
 		}

@@ -153,6 +153,7 @@ func startCacheRenderer(t *testing.T, workers int) *cacheRendererFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(host.Close)
+	t.Setenv("KRATE_TEST_INTERNAL_SECRET", host.secret)
 	data := newCacheDataServer(t)
 
 	port := freePort(t)
@@ -196,7 +197,15 @@ var freshConnClient = &http.Client{Transport: &http.Transport{DisableKeepAlives:
 func isrRenderNewConn(t *testing.T, base, route string) isrResult {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"route": route, "url": route, "method": "GET", "regions": []map[string]string{{"id": "page", "kind": "page"}}})
-	resp, err := freshConnClient.Post(base+"/__krate/regions", "application/json", strings.NewReader(string(body)))
+	req, err := http.NewRequest(http.MethodPost, base+"/__krate/regions", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if secret := os.Getenv("KRATE_TEST_INTERNAL_SECRET"); secret != "" {
+		req.Header.Set("X-Krate-Internal", secret)
+	}
+	resp, err := freshConnClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

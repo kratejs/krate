@@ -13,6 +13,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/build"
 	"github.com/kratejs/krate/packages/compiler/internal/check"
+	"github.com/kratejs/krate/packages/compiler/internal/fix"
 )
 
 const (
@@ -291,9 +292,13 @@ func (s *Service) toolGetDiagnostics(ctx context.Context, args map[string]any) (
 		if rel, err := filepath.Rel(s.root, file); err == nil {
 			file = filepath.ToSlash(rel)
 		}
+		code := string(d.Code)
+		if code == "" {
+			code = "compile"
+		}
 		add(diagnosticView{
-			ID:   "compile:" + file + ":" + fmt.Sprint(d.Line) + ":" + fmt.Sprint(d.Col),
-			Code: "compile", Severity: "error", File: file, Line: d.Line, Col: d.Col, Message: d.Message, Hint: d.Hint,
+			ID:   code + ":" + file + ":" + fmt.Sprint(d.Line) + ":" + fmt.Sprint(d.Col),
+			Code: code, Severity: "error", File: file, Line: d.Line, Col: d.Col, Message: d.Message, Hint: d.Hint,
 		})
 	}
 
@@ -303,11 +308,14 @@ func (s *Service) toolGetDiagnostics(ctx context.Context, args map[string]any) (
 		var findings []check.Finding
 		var cfg check.Config
 		chk := newBuilder(Options{Root: s.root, Cfg: s.cfg, Env: s.env, Verbose: s.verbose})
+		chk.SetContext(ctx)
+		s.runMu.Lock()
 		_, err := captureStdout(func() error {
 			var e error
 			findings, cfg, e = chk.CheckSite(true)
 			return e
 		})
+		s.runMu.Unlock()
 		if err != nil {
 			add(diagnosticView{ID: "check:error", Code: "check", Severity: "error", Message: "running checks: " + err.Error()})
 		}
@@ -331,6 +339,52 @@ func (s *Service) toolGetDiagnostics(ctx context.Context, args map[string]any) (
 		"count":       len(views),
 		"output":      strings.TrimSpace(out),
 	})
+}
+
+func (s *Service) toolApplySafeFixes(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
+	files, _, skipped, err := fix.Plan(s.root)
+	if err != nil {
+		return ErrorResult("planning safe fixes: " + err.Error()), nil
+	}
+	apply := argBool(args, "apply", false)
+	tx := newFileTransaction(s)
+	rels := make([]string, 0, len(files))
+	for rel := range files {
+		rels = append(rels, rel)
+	}
+	sort.Strings(rels)
+	for _, rel := range rels {
+		if s.policy != nil && !s.policy.writable(rel) {
+			continue
+		}
+		abs, _, terr := s.resolveProjectPath(rel)
+		if terr != nil {
+			return ErrorResult(terr.Error()), nil
+		}
+		current, rerr := os.ReadFile(abs)
+		if rerr != nil {
+			return ErrorResult("reading " + rel + ": " + rerr.Error()), nil
+		}
+		if err := tx.stageWrite(abs, rel, files[rel], hashString(string(current))); err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+	}
+	if tx.count() == 0 {
+		return TextResult("No safe fixes available."), nil
+	}
+	res, rerr := s.finishTransaction(tx, apply, "safe fixes")
+	if rerr != nil {
+		return res, rerr
+	}
+	if len(skipped) > 0 {
+		var b strings.Builder
+		b.WriteString("\nSkipped files:\n")
+		for _, sk := range skipped {
+			fmt.Fprintf(&b, "  %s: %s\n", sk.File, sk.Reason)
+		}
+		res.Content = append(res.Content, TextContent(b.String()))
+	}
+	return res, nil
 }
 
 func (s *Service) toolApplyFix(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {

@@ -1,6 +1,6 @@
 ---
 title: Quality Checks
-order: 14
+order: 15
 description: Compiler-enforced accessibility, SEO, and performance gates.
 sidebar:
   label: Quality Checks
@@ -10,7 +10,7 @@ sidebar:
 # Quality Checks
 
 Krate can enforce accessibility, SEO, and performance rules as part of the
-build. Checks run against the **final rendered HTML** — exactly what ships — so
+build. Checks run against the **final rendered HTML** - exactly what ships - so
 a rule can never be fooled by a component that only looks right at author time.
 
 Checks are strictly **opt-in**: without a `checks` key in `krate.config.ts`,
@@ -45,7 +45,7 @@ krate check ./site   # explicit project directory
 
 The command builds the site and re-reads the emitted `dist/` output, so the
 report reflects the real artifact. It exits `0` when no finding meets the
-fail-on threshold, and `1` otherwise — ideal for CI.
+fail-on threshold, and `1` otherwise - ideal for CI.
 
 ```sh
 # CI
@@ -144,7 +144,7 @@ slow machine does not fail `krate build`.
 ## Custom rules
 
 Author rules in TypeScript and point `checks.custom` at the module. Custom
-rules run in the embedded QuickJS runtime (`@krate/plugin` provides the types) —
+rules run in the embedded QuickJS runtime (`@krate/plugin` provides the types) -
 no Node and no subprocess.
 
 ```ts
@@ -173,11 +173,11 @@ checks: {
 
 A custom rule receives:
 
-- `page.route` — URL route (e.g. `/blog/hello`)
-- `page.source` — source path relative to the project root
-- `page.html` — the final rendered HTML
-- `page.jsBytes` — the route's client-JS weight
-- `page.ast` — the parsed program as a kind-tagged
+- `page.route` - URL route (e.g. `/blog/hello`)
+- `page.source` - source path relative to the project root
+- `page.html` - the final rendered HTML
+- `page.jsBytes` - the route's client-JS weight
+- `page.ast` - the parsed program as a kind-tagged
   [AST document](/docs/features/typed-routes/) (when available)
 
 and returns an array of `{ rule?, message, severity?, line?, col?, hint? }`. A
@@ -191,6 +191,6 @@ build errors:
 ```
   /pricing
     x seo/title  page has no <title>
-      hint: Export a <Head><title>…</title></Head> or rely on seo.siteName.
+      hint: Export a <Head><title>...</title></Head> or rely on seo.siteName.
     ! perf/js-budget  route ships 212.4KB of JS (budget 150.0KB)
 ```

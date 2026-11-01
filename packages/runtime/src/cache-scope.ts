@@ -361,7 +361,9 @@ export function patchFetch(): void {
     if (res.ok) {
       const bytes = new Uint8Array(await res.clone().arrayBuffer());
       const headers: Array<[string, string]> = [];
-      res.headers.forEach((v, k) => headers.push([k, v]));
+      res.headers.forEach((v, k) => {
+        if (k.toLowerCase() !== 'set-cookie') headers.push([k, v]);
+      });
       const entry: CachedResponse = { status: res.status, statusText: res.statusText, headers, body: toBase64(bytes) };
       dataCacheSetJSON(key, JSON.stringify(entry), ttl, tags, epoch);
     }

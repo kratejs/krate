@@ -282,7 +282,7 @@ func (a *Analyzer) validateStmts(stmts []ast.Stmt, skip *ast.ReturnStmt, names m
 }
 
 // isScopeHelperCall reports whether expr is `X.<helper>(...)` where X is one of
-// the component's scope vars — the first-class scope-handle API (`x.current()`
+// the component's scope vars - the first-class scope-handle API (`x.current()`
 // live text; `x.trigger/panel/close` are normally spreads).
 func isScopeHelperCall(expr ast.Expr, names map[string]bool) bool {
 	call, ok := expr.(*ast.CallExpr)

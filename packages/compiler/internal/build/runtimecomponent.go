@@ -98,17 +98,17 @@ func CompileRuntimeComponents(root, outDir string, serverComponents, runtimeComp
 
 	bundleDir := filepath.Join(outDir, "server-components")
 	if err := os.MkdirAll(bundleDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "  %s✗ Runtime components: cannot create output dir:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(os.Stderr, "  %sx Runtime components: cannot create output dir:%s %v\n", cRed, cReset, err)
 		return nil
 	}
 
 	var bundles []RuntimeComponentBundle
 	for _, file := range files {
 		name := extractBuildComponentName(file)
-		printf("  %s▸ Runtime%s %s\n", cCyan, cReset, filepath.Base(file))
+		printf("  %s> Runtime%s %s\n", cCyan, cReset, filepath.Base(file))
 		bundle, err := compileSingleRuntimeComponent(root, outDir, file)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %s✗ Runtime component error (%s):%s %v\n", cRed, name, cReset, err)
+			fmt.Fprintf(os.Stderr, "  %sx Runtime component error (%s):%s %v\n", cRed, name, cReset, err)
 			continue
 		}
 		bundles = append(bundles, *bundle)

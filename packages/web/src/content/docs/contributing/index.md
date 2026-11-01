@@ -27,7 +27,7 @@ you just want to build a site, start with [Getting Started](/docs/getting-starte
 ```
 packages/
   compiler/      Go compiler (lexer, parser, bundler, renderer, build pipeline)
-  runtime/       Client runtime — signals, hydration, SPA router, resources, context
+  runtime/       Client runtime - signals, hydration, SPA router, resources, context
   components/    Built-in UI components (shadcn/ui-style)
   core/          npm CLI wrapper (@krate/core)
   web/           This documentation website
@@ -61,20 +61,20 @@ go vet ./...
 
 Test suites of note:
 
-- `internal/lexer/lexer_test.go` — lexer unit tests
-- `internal/parser/parser_test.go` — parser unit tests + edge cases
-- `internal/renderer/renderer_test.go` — renderer unit tests
-- `internal/css/*` — CSS DCE, minification, and `@import` tests
-- `internal/build/build_test.go` — full project build integration test
-- `internal/plugin/jsplugin_test.go` — JS community plugin runtime (QuickJS)
-- `internal/docfind/docfind_test.go` — in-process WASM index build + search
-- `internal/gohost/*_test.go` — Go host (API routes + components) build, scan, and render tests
+- `internal/lexer/lexer_test.go` - lexer unit tests
+- `internal/parser/parser_test.go` - parser unit tests + edge cases
+- `internal/renderer/renderer_test.go` - renderer unit tests
+- `internal/css/*` - CSS DCE, minification, and `@import` tests
+- `internal/build/build_test.go` - full project build integration test
+- `internal/plugin/jsplugin_test.go` - JS community plugin runtime (QuickJS)
+- `internal/docfind/docfind_test.go` - in-process WASM index build + search
+- `internal/gohost/*_test.go` - Go host (API routes + components) build, scan, and render tests
 
 ## CI/CD
 
-- `.github/workflows/ci.yml` — 3 platforms (Ubuntu, Windows, macOS); build,
+- `.github/workflows/ci.yml` - 3 platforms (Ubuntu, Windows, macOS); build,
   vet, test, build the examples project.
-- `.github/workflows/release.yml` — builds per-platform binary packages via
+- `.github/workflows/release.yml` - builds per-platform binary packages via
   `scripts/build-platform-packages.mjs` and publishes them to npm on a `v*`
   tag.
 

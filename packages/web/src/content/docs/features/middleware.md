@@ -1,13 +1,13 @@
 ---
 title: Middleware
 description: Intercept requests before a page renders.
-order: 9
+order: 10
 ---
 
 # Middleware
 
 Middleware runs **before page rendering** and can short-circuit requests with a
-custom `Response` — useful for auth, geolocation, A/B testing, redirects, and
+custom `Response` - useful for auth, geolocation, A/B testing, redirects, and
 bot detection.
 
 ## File convention
@@ -28,7 +28,7 @@ export function middleware(request: Request) {
 
 | Return value | Behavior |
 |--------------|----------|
-| `Response` | Short-circuits — the response is served instead of the page |
+| `Response` | Short-circuits - the response is served instead of the page |
 | `undefined` / `null` | Continues to the page handler |
 
 ## How it's wired
@@ -40,7 +40,7 @@ export function middleware(request: Request) {
 
 ## Use cases
 
-- **Auth** — redirect unauthenticated users.
-- **Bot detection** — serve a custom response to known bots.
-- **A/B testing** — rewrite requests to different variants.
-- **Header injection** — set security headers per route.
+- **Auth** - redirect unauthenticated users.
+- **Bot detection** - serve a custom response to known bots.
+- **A/B testing** - rewrite requests to different variants.
+- **Header injection** - set security headers per route.

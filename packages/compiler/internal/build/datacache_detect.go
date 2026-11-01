@@ -214,7 +214,7 @@ func resolvePageRenderMode(page string, entry *bundler.Module, mods []*bundler.M
 		return mode, reval, usage
 	}
 	if m, r, reason, ok := inferRenderModeFromData(usage); ok {
-		printf("  %s⚡%s %s → %s (%s)\n", cCyan, cReset, filepath.Base(page), m, reason)
+		printf("  %s*%s %s -> %s (%s)\n", cCyan, cReset, filepath.Base(page), m, reason)
 		return m, r, usage
 	}
 	return mode, reval, usage

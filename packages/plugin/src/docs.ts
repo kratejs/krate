@@ -112,6 +112,8 @@ export interface DocsLayoutProps<Options = DocsThemeOptions> {
   search?: { placeholder?: string; hotkey?: string };
   /** Current page path (e.g. "getting-started"). */
   currentPath: string;
+  /** URL prefix the docs are mounted under (default "/docs"). */
+  routeBase?: string;
   /** Page description (from frontmatter) for subtitle/meta rendering. */
   description?: string;
   /** Page layout template: "doc" (default) or "hero". */
@@ -128,6 +130,10 @@ export interface DocsLayoutProps<Options = DocsThemeOptions> {
   tags?: string[];
   /** Page categories (rendered as chips linking to category indexes). */
   categories?: string[];
+  /** Precomputed tag links (name + URL under `routeBase`). */
+  tagLinks?: { name: string; url: string }[];
+  /** Precomputed category links (name + URL under `routeBase`). */
+  categoryLinks?: { name: string; url: string }[];
   /** Published date (frontmatter `date`, ISO string). */
   date?: string;
   /** Last-updated date (frontmatter `lastUpdated` or git commit date). */

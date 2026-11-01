@@ -4,9 +4,10 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  copyFileSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
@@ -20,6 +21,12 @@ const pkg = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf-8'))
   name: string;
   version: string;
 };
+
+// Keep generated projects on the same release channel as this scaffolder.
+function distTag(version: string): string {
+  const match = /^[^-]+-([A-Za-z]+)/.exec(version);
+  return match ? match[1] : 'latest';
+}
 
 const c = {
   reset: '\x1b[0m',
@@ -42,7 +49,7 @@ interface Options {
 }
 
 const HELP = `
-${c.bold}create-krate-app${c.reset} — scaffold a new Krate project
+${c.bold}create-krate-app${c.reset} - scaffold a new Krate project
 
 ${c.bold}Usage${c.reset}
   ${c.cyan}create-krate-app${c.reset} [project-directory] [options]
@@ -157,9 +164,17 @@ async function promptProjectName(): Promise<string> {
   }
 }
 
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.krate']);
+const TEXT_EXT = new Set([
+  '', '.json', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.md', '.mdx',
+  '.css', '.html', '.htm', '.svg', '.txt', '.yml', '.yaml', '.toml', '.xml',
+  '.map', '.webmanifest', '.go', '.mod', '.sum',
+]);
+
 function walkDir(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && SKIP_DIRS.has(entry.name)) continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) out.push(...walkDir(full));
     else out.push(full);
@@ -181,11 +196,15 @@ function copyTemplate(
     // a dotless `gitignore` file and we restore the leading dot here.
     const destRel = basename(rel) === 'gitignore' ? join(dirname(rel), '.gitignore') : rel;
     const dest = join(destDir, destRel);
+    mkdirSync(dirname(dest), { recursive: true });
+    if (!TEXT_EXT.has(extname(src).toLowerCase())) {
+      copyFileSync(src, dest);
+      continue;
+    }
     let content = readFileSync(src, 'utf-8');
     for (const [key, value] of Object.entries(vars)) {
       content = content.split(key).join(value);
     }
-    mkdirSync(dirname(dest), { recursive: true });
     writeFileSync(dest, content);
   }
 }
@@ -248,6 +267,7 @@ async function main(): Promise<void> {
   copyTemplate(templateDir, targetDir, {
     __PROJECT_NAME__: validName,
     __PROJECT_DISPLAY_NAME__: toDisplayName(projectName),
+    __KRATE_DIST_TAG__: distTag(pkg.version),
   });
 
   const installed = !skipInstall;

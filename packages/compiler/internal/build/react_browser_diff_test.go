@@ -372,7 +372,7 @@ func buildWarnings(out string) string {
 	for _, line := range strings.Split(stripANSI(out), "\n") {
 		trimmed := strings.TrimSpace(line)
 		switch {
-		case strings.HasPrefix(trimmed, "Warning") || strings.Contains(trimmed, "⚠"):
+		case strings.Contains(strings.ToLower(trimmed), "warning") || strings.HasPrefix(trimmed, "!"):
 			inWarning = true
 			keep = append(keep, trimmed)
 		case inWarning && strings.HasPrefix(line, "    ") && trimmed != "":

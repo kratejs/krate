@@ -1,7 +1,7 @@
 ---
 title: Version Matrix
 description: Supported React, Preact, Node, Bun, Deno, Go, and browser versions.
-order: 11
+order: 15
 ---
 
 # Version Matrix

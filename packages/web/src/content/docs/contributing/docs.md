@@ -32,14 +32,14 @@ order: 2
 | Key | Purpose |
 |-----|---------|
 | `title` | Page title (sidebar and `<title>`) |
-| `description` | One-line summary for meta/OG tags — **required** on every page |
+| `description` | One-line summary for meta/OG tags - **required** on every page |
 | `order` | Sort order within a directory (default `999`; must be unique per directory) |
 | `sidebar` | Section override on an `index.md` (`label`, `order`, `collapsible`, `defaultOpen`) |
 | `next` | Override the bottom "next" link (`text`, `link`) |
 | `template` | Layout, e.g. `hero` |
 | `hero` | Hero content on `template: hero` pages (`title`, `tagline`, `actions`) |
 | `toc` | Table-of-contents options (`minLevel`, `maxLevel`, `label`) |
-| `tags` / `categories` | Taxonomy terms (generates `/docs/tags/…` and `/docs/categories/…`) |
+| `tags` / `categories` | Taxonomy terms (generates `/docs/tags/...` and `/docs/categories/...`) |
 | `badge` | Small sidebar badge next to the title |
 | `head` | Extra `<head>` markup |
 

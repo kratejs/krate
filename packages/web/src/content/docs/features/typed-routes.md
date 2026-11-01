@@ -1,14 +1,14 @@
 ---
 title: Typed Routes & Content
 description: End-to-end TypeScript safety for links, route params, and content collections.
-order: 13
+order: 14
 ---
 
 # Typed Routes & Content
 
 Krate knows every route and content entry at build time, so it generates
 TypeScript declarations for them. `<Link href>`, dynamic route params, and
-content collections become fully type-checked — with no configuration and no
+content collections become fully type-checked - with no configuration and no
 runtime cost.
 
 ## Generated files
@@ -23,7 +23,7 @@ Every `krate build` (and the standalone `krate types` command) writes:
 | `src/krate-content.d.ts` | Ambient types for the virtual `krate/content` module |
 | `.krate/gen/content.ts` | Codegen'd `krate/content` module (baked entries + `getCollection`) |
 
-All of these are generated — add them to `.gitignore` and regenerate in CI. The
+All of these are generated - add them to `.gitignore` and regenerate in CI. The
 `.krate/` directory is ignored by default; add `krate-env.d.ts` and
 `krate-content.d.ts` too.
 
@@ -84,7 +84,7 @@ export default defineConfig({
 });
 ```
 
-`defineContent` is an optional identity helper — a plain object works too:
+`defineContent` is an optional identity helper - a plain object works too:
 
 ```ts
 export default defineConfig({
@@ -99,7 +99,7 @@ Field specs are either a shorthand type string (`"string"`, `"number"`,
 an optional `required` flag. Unknown fields are ignored; omitted optional fields
 are fine.
 
-A **required** field that is missing — or a value of the wrong type — fails the
+A **required** field that is missing - or a value of the wrong type - fails the
 build (and `krate types` exits non-zero):
 
 ```text
@@ -151,7 +151,7 @@ export default function BlogIndex() {
 ```
 
 Because `getCollection` returns literal data at build time, it **folds into
-static HTML** — the example above ships zero client JavaScript for the list.
+static HTML** - the example above ships zero client JavaScript for the list.
 Supported operations include `filter`, `sort`, `find`, `slice`, and `map`
 (evaluated in the embedded engine at build time). Each entry exposes:
 
@@ -200,8 +200,8 @@ export default function BlogPost(props: { params?: { slug: string } }) {
 ```
 
 `generateStaticParams` bakes one static page per entry (`/blog/hello-collections`,
-…). The route parameter (`props.params.slug`) is substituted before rendering, so
-the `find(...)` lookup folds to the matching entry at build time — no runtime
+...). The route parameter (`props.params.slug`) is substituted before rendering, so
+the `find(...)` lookup folds to the matching entry at build time - no runtime
 data access.
 
 :::note
@@ -228,8 +228,8 @@ generateStaticParams.dynamicParams = false;   // only the baked slugs are valid
 With `dynamicParams = false`:
 
 - The build emits **only** the concrete pages from `generateStaticParams`
-  (`/blog/hello-collections`, …). The `[param]` fallback template is not written.
-- Requests for other params (`/blog/nope`) **404**, with no server required — the
+  (`/blog/hello-collections`, ...). The `[param]` fallback template is not written.
+- Requests for other params (`/blog/nope`) **404**, with no server required - the
   output is safe to host on any static CDN.
 
 The equivalent forms are `export const dynamicParams = false` or
@@ -247,10 +247,10 @@ export default defineConfig({
 
 This does two things:
 
-1. **Dynamic routes are closed by default** — every `[param]` route behaves as
+1. **Dynamic routes are closed by default** - every `[param]` route behaves as
    `dynamicParams = false` unless it opts back in with
    `export const dynamicParams = true`.
-2. **Request-time rendering is disabled** — pages that would have been SSR, ISR,
+2. **Request-time rendering is disabled** - pages that would have been SSR, ISR,
    or streaming are built as plain static pages.
 
 `output: "static"` is the way to guarantee that *only* statically renderable
@@ -258,7 +258,7 @@ routes exist in the build.
 
 ## The `krate types` command
 
-Generate declarations without running a full build — useful in CI and editors:
+Generate declarations without running a full build - useful in CI and editors:
 
 ```sh
 krate types          # writes .krate/types + src/krate-env.d.ts + src/krate-content.d.ts
@@ -279,4 +279,4 @@ a plugin (for example the [docs plugin](/docs/features/plugins/)), run
 :::
 
 For how route and collection types are generated, see
-[Contributing → Architecture](/docs/contributing/architecture/#typed-routes-content).
+[Contributing -> Architecture](/docs/contributing/architecture/#typed-routes-content).

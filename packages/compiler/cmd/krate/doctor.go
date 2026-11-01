@@ -35,12 +35,12 @@ func runDoctor(flags cliFlags, args []string) {
 	// Config.
 	cfg, err := config.Load(root, flags.ConfigPath)
 	if err != nil {
-		fmt.Printf("  %s✗ config%s     %v\n", cRed, cReset, err)
+		fmt.Printf("  %sx config%s     %v\n", cRed, cReset, err)
 	} else {
 		for _, w := range config.Warnings {
-			fmt.Printf("  %s⚠ config%s     %s\n", cYellow, cReset, w)
+			fmt.Printf("  %s! config%s     %s\n", cYellow, cReset, w)
 		}
-		fmt.Printf("  %s✓ config%s     %s\n", cGreen, cReset, configPathFor(root, flags.ConfigPath))
+		fmt.Printf("  %s+ config%s     %s\n", cGreen, cReset, configPathFor(root, flags.ConfigPath))
 		fmt.Printf("  output       %s\n", displayOutput(cfg.Output))
 		fmt.Printf("  pages        %s\n", relOrDash(root, cfg.PagesDir))
 		fmt.Printf("  outDir       %s\n", relOrDash(root, cfg.OutDir))
@@ -52,12 +52,12 @@ func runDoctor(flags cliFlags, args []string) {
 	// Runtimes.
 	checkTool("node", "API/SSR sidecar + generateStaticParams")
 	if _, err := exec.LookPath("go"); err == nil {
-		fmt.Printf("  %s✓ go%s         available (Go API routes + components)\n", cGreen, cReset)
+		fmt.Printf("  %s+ go%s         available (Go API routes + components)\n", cGreen, cReset)
 		if out, err := execx.Output(context.Background(), 5*time.Second, "", nil, "go", "version"); err == nil {
 			fmt.Printf("  %s   %s\n", "          ", strings.TrimSpace(string(out)))
 		}
 	} else {
-		fmt.Printf("  %s· go%s         not found (optional; only for src/api/*.go and Go components)\n", cGray, cReset)
+		fmt.Printf("  %s- go%s         not found (optional; only for src/api/*.go and Go components)\n", cGray, cReset)
 	}
 	if cfg != nil {
 		apiGo := countGoFiles(root, []string{gohost.DefaultAPIDir})
@@ -70,12 +70,12 @@ func runDoctor(flags cliFlags, args []string) {
 				fmt.Printf("  go.mod       go %s\n", v)
 			}
 			if gohost.GoextVendored(root) {
-				fmt.Printf("  %s✓ goext%s      vendored (.krate/goext)\n", cGreen, cReset)
+				fmt.Printf("  %s+ goext%s      vendored (.krate/goext)\n", cGreen, cReset)
 			} else {
-				fmt.Printf("  %s· goext%s      not vendored (run `krate go:init`)\n", cGray, cReset)
+				fmt.Printf("  %s- goext%s      not vendored (run `krate go:init`)\n", cGray, cReset)
 			}
 			if gohost.SetupMissing(root) {
-				fmt.Printf("  %s· go:init%s    run `krate go:init` for editor intellisense\n", cGray, cReset)
+				fmt.Printf("  %s- go:init%s    run `krate go:init` for editor intellisense\n", cGray, cReset)
 			}
 		}
 	}
@@ -85,31 +85,31 @@ func runDoctor(flags cliFlags, args []string) {
 		if out, err := execx.Output(context.Background(), 5*time.Second, "", nil, "node", "--version"); err == nil {
 			v := strings.TrimSpace(string(out))
 			if nodeVersionAtLeast(v, 20) {
-				fmt.Printf("  %s✓ node%s       %s\n", cGreen, cReset, v)
+				fmt.Printf("  %s+ node%s       %s\n", cGreen, cReset, v)
 			} else {
-				fmt.Printf("  %s⚠ node%s       %s (Krate sidecars need Node 20+)\n", cYellow, cReset, v)
+				fmt.Printf("  %s! node%s       %s (Krate sidecars need Node 20+)\n", cYellow, cReset, v)
 			}
 		}
 	}
 
 	// Dependencies: the config imports @krate/core.
 	if _, err := os.Stat(filepath.Join(root, "node_modules", "@krate", "core", "package.json")); err == nil {
-		fmt.Printf("  %s✓ deps%s       @krate/core present\n", cGreen, cReset)
+		fmt.Printf("  %s+ deps%s       @krate/core present\n", cGreen, cReset)
 	} else {
-		fmt.Printf("  %s· deps%s       @krate/core not found (run your package manager install)\n", cGray, cReset)
+		fmt.Printf("  %s- deps%s       @krate/core not found (run your package manager install)\n", cGray, cReset)
 	}
 
 	// Cache directory writability.
 	cacheDir := filepath.Join(root, ".krate", "cache")
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		fmt.Printf("  %s⚠ cache%s      cannot create %s: %v\n", cYellow, cReset, cacheDir, err)
+		fmt.Printf("  %s! cache%s      cannot create %s: %v\n", cYellow, cReset, cacheDir, err)
 	} else {
 		probe := filepath.Join(cacheDir, ".doctor-write-test")
 		if err := os.WriteFile(probe, []byte("ok"), 0o644); err == nil {
 			_ = os.Remove(probe)
-			fmt.Printf("  %s✓ cache%s      writable (%s)\n", cGreen, cReset, cacheDir)
+			fmt.Printf("  %s+ cache%s      writable (%s)\n", cGreen, cReset, cacheDir)
 		} else {
-			fmt.Printf("  %s⚠ cache%s      not writable: %v\n", cYellow, cReset, err)
+			fmt.Printf("  %s! cache%s      not writable: %v\n", cYellow, cReset, err)
 		}
 	}
 
@@ -165,10 +165,10 @@ func relOrDash(root, p string) string {
 
 func checkTool(name, purpose string) {
 	if _, err := exec.LookPath(name); err == nil {
-		fmt.Printf("  %s✓ %s%s%s available (%s)\n", cGreen, name, cReset, spaces(name), purpose)
+		fmt.Printf("  %s+ %s%s%s available (%s)\n", cGreen, name, cReset, spaces(name), purpose)
 		return
 	}
-	fmt.Printf("  %s· %s%s%s not found (%s)\n", cGray, name, cReset, spaces(name), purpose)
+	fmt.Printf("  %s- %s%s%s not found (%s)\n", cGray, name, cReset, spaces(name), purpose)
 }
 
 func spaces(name string) string {
@@ -185,9 +185,9 @@ func spaces(name string) string {
 
 func reportFile(root, name string) {
 	if _, err := os.Stat(filepath.Join(root, name)); err == nil {
-		fmt.Printf("  %s✓ %s%s\n", cGreen, name, cReset)
+		fmt.Printf("  %s+ %s%s\n", cGreen, name, cReset)
 	} else {
-		fmt.Printf("  %s· %s%s (none)\n", cGray, name, cReset)
+		fmt.Printf("  %s- %s%s (none)\n", cGray, name, cReset)
 	}
 }
 

@@ -2,7 +2,7 @@
 import { mkdirp, writeJson } from './exec.mjs';
 
 export function formatBytes(n) {
-  if (n == null) return '—';
+  if (n == null) return '-';
   const units = ['B', 'KB', 'MB', 'GB'];
   let i = 0;
   let v = n;
@@ -14,7 +14,7 @@ export function formatBytes(n) {
 }
 
 export function formatMs(n) {
-  if (n == null) return '—';
+  if (n == null) return '-';
   if (n < 1000) return `${Math.round(n)} ms`;
   return `${(n / 1000).toFixed(2)} s`;
 }
@@ -31,8 +31,8 @@ export function renderMarkdown(results) {
   lines.push('# Krate Benchmarks');
   lines.push('');
   lines.push(
-    `_Generated ${results.meta.date} · Node ${results.meta.node} · Go ${results.meta.go} · ` +
-      `${results.meta.os} ${results.meta.arch} · ${results.meta.cpus} CPU(s)_`,
+    `_Generated ${results.meta.date} - Node ${results.meta.node} - Go ${results.meta.go} - ` +
+      `${results.meta.os} ${results.meta.arch} - ${results.meta.cpus} CPU(s)_`,
   );
   lines.push('');
 
@@ -45,7 +45,7 @@ export function renderMarkdown(results) {
     lines.push('|-----------|---------|-------:|-----:|------------:|');
     for (const row of results.build) {
       lines.push(
-        `| ${row.name} | ${row.version ?? '—'} | ${formatMs(row.medianMs)} | ${formatMs(row.bestMs)} | ${formatBytes(row.outputBytes)} |`,
+        `| ${row.name} | ${row.version ?? '-'} | ${formatMs(row.medianMs)} | ${formatMs(row.bestMs)} | ${formatBytes(row.outputBytes)} |`,
       );
     }
     lines.push('');
@@ -55,8 +55,8 @@ export function renderMarkdown(results) {
     lines.push('## API throughput (higher is better)');
     lines.push('');
     lines.push(
-      '`GET /api/json` → `{"message":"hello","id":42}` · ' +
-        `${results.apiMeta?.connections ?? 32} connections · ${Math.round((results.apiMeta?.durationMs ?? 5000) / 1000)}s`,
+      '`GET /api/json` -> `{"message":"hello","id":42}` - ' +
+        `${results.apiMeta?.connections ?? 32} connections - ${Math.round((results.apiMeta?.durationMs ?? 5000) / 1000)}s`,
     );
     lines.push('');
     lines.push('| Framework | Requests/s | p50 | p99 | Errors |');
@@ -78,7 +78,7 @@ export function renderMarkdown(results) {
     lines.push('');
     lines.push(
       'A streaming page whose only dynamic content is one runtime-tier component, served by ' +
-        '`krate serve` · requests/sec · ' +
+        '`krate serve` - requests/sec - ' +
         `${Math.round((results.ssrMeta?.durationMs ?? 5000) / 1000)}s per level`,
     );
     lines.push('');
@@ -98,7 +98,7 @@ export function renderMarkdown(results) {
       const renderer = t.impl === 'go' ? 'Go host' : `${t.sidecar ?? 'node'} SSR`;
       const cells = levels.map((l) => {
         const r = t.levels.get(l);
-        return r ? r.rps.toLocaleString() : '—';
+        return r ? r.rps.toLocaleString() : '-';
       });
       lines.push(`| ${t.name} | ${renderer} | ${cells.join(' | ')} |`);
     }

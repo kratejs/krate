@@ -355,7 +355,7 @@ async function main() {
       const results = await readJson(join(RESULTS_DIR, 'latest.json'));
       process.stdout.write(renderMarkdown(results));
     } catch {
-      warn('no results yet — run `node src/run.mjs all` first');
+      warn('no results yet - run `node src/run.mjs all` first');
       process.exit(1);
     }
     return;
@@ -375,15 +375,15 @@ async function main() {
   };
 
   if (opts.command === 'build' || opts.command === 'all') {
-    log('\n— build time —');
+    log('\n- build time -');
     results.build = await runBuild(opts, krateBin);
   }
   if (opts.command === 'api' || opts.command === 'all') {
-    log('\n— api throughput —');
+    log('\n- api throughput -');
     results.api = await runApi(opts, krateBin);
   }
   if (opts.command === 'ssr' || opts.command === 'all') {
-    log('\n— ssr page throughput —');
+    log('\n- ssr page throughput -');
     results.ssr = await runSsr(opts, krateBin);
   }
 

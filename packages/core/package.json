@@ -1,7 +1,7 @@
 {
   "name": "@krate/core",
   "version": "0.1.0",
-  "description": "The Krate CLI — a Go-native static site generator with signal-based reactivity.",
+  "description": "The Krate CLI - a Go-native static site generator with signal-based reactivity.",
   "license": "Apache-2.0",
   "type": "module",
   "homepage": "https://krate.js.org",

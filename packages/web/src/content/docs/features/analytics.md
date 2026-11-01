@@ -1,7 +1,7 @@
 ---
 title: Analytics
 description: Add analytics snippets and hook into SPA route changes.
-order: 11
+order: 12
 ---
 
 # Analytics
@@ -28,7 +28,7 @@ export default function RootLayout({ children }) {
 
 `<Script>` forwards all attributes, so flags like `defer` and `data-domain`
 work as expected. If your provider needs an inline init snippet, use the
-inline form — children are written raw and never escaped:
+inline form - children are written raw and never escaped:
 
 ```tsx
 <Script>{`gtag('config', 'G-XXXXXXXXXX');`}</Script>
@@ -48,7 +48,7 @@ head: {
 
 Krate's client router swaps content in place, so an ordinary tag-based
 snippet only fires on the initial full page load. Register a navigation hook
-once — for example in a layout script or the root page — and it runs on
+once - for example in a layout script or the root page - and it runs on
 **every successful SPA navigation**:
 
 ```tsx
@@ -74,14 +74,14 @@ For Google Analytics:
 
 Hook contract:
 
-- **Signature** — `(url: string) => void`; `url` is the resolved navigation
+- **Signature** - `(url: string) => void`; `url` is the resolved navigation
   target (absolute), the same URL passed to the `krate:navigate` CustomEvent.
-- **Fires once per navigation** — click, prefetch-cache hit, back/forward,
+- **Fires once per navigation** - click, prefetch-cache hit, back/forward,
   and error-page replacements. The initial page load is a full page load and
-  is tracked by the snippet's usual beacon — do not double-count it.
-- **Fail-safe** — a throw inside the hook is caught and ignored so analytics
+  is tracked by the snippet's usual beacon - do not double-count it.
+- **Fail-safe** - a throw inside the hook is caught and ignored so analytics
   can never break routing.
-- **Set before navigating** — assign it once at app bootstrap (e.g. in a
+- **Set before navigating** - assign it once at app bootstrap (e.g. in a
   layout `<Script>`); it persists across navigations.
 
 ## Alternatives
@@ -91,6 +91,6 @@ consume directly:
 
 ```js
 window.addEventListener('krate:navigate', (e) => {
-  // e.detail.url — the navigated-to URL
+  // e.detail.url - the navigated-to URL
 });
 ```

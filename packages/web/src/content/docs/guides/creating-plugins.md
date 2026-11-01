@@ -29,7 +29,7 @@ covers authoring both.
 | `ServeResponse` | Request time, after a non-streaming response is buffered | Status, Headers, Body |
 
 Build hooks (`BeforeBuild`..`AfterBuild`) run during `krate build`. The two
-serve hooks run inside the dev server (`krate dev`) at request time — the
+serve hooks run inside the dev server (`krate dev`) at request time - the
 same interceptor pipeline as middleware.
 
 Serve hooks are **non-streaming only**: `ServeResponse` runs on buffered
@@ -39,9 +39,9 @@ unchanged.
 ## JavaScript plugins (QuickJS)
 
 A community plugin is a plain JS/TS module executed inside Krate's embedded
-QuickJS runtime — no subprocess. It lives in local project code and is wired in
+QuickJS runtime - no subprocess. It lives in local project code and is wired in
 from `krate.config.ts`. Modules may be `.js`, `.mjs`, `.cjs`, or TypeScript
-`.ts`/`.tsx` — esbuild transpiles TS before the bundle runs in QuickJS, and a
+`.ts`/`.tsx` - esbuild transpiles TS before the bundle runs in QuickJS, and a
 plugin *directory* resolves `index.ts` as its entry point just like `index.js`:
 
 ```ts
@@ -94,52 +94,52 @@ export default function demoPlugin(options: DemoOptions = {}) {
 }
 ```
 
-- **`@krate/plugin`** — import the SDK package for typed contexts, outputs, and
+- **`@krate/plugin`** - import the SDK package for typed contexts, outputs, and
   descriptors. `definePluginHooks` type-checks every hook's `ctx`; `definePlugin`
   types the factory's descriptor; `Krate` types the richer build context. The
   helpers are compile-time only and erase to nothing when the plugin is bundled
   for QuickJS, so plain `.js` plugins keep working without the package.
-- **Signature** — every hook receives `(ctx, options, krate)`: `ctx` is the
+- **Signature** - every hook receives `(ctx, options, krate)`: `ctx` is the
   JSON-serialized context (lowercase fields like `ctx.html`, `ctx.page`,
   `ctx.outName`, `ctx.headHTML`, `ctx.rawCSS`), `options` is the per-plugin
   options object, and `krate` is the build context
   `{ root, projectRoot, outDir, pagesDir, config, dev, devMode, pages, version }`
   plus the capability methods below.
-- **`krate` capabilities** — a plugin should not need raw `fs` guesswork or a
+- **`krate` capabilities** - a plugin should not need raw `fs` guesswork or a
   hand-rolled `node_modules` walk. The host exposes:
-  - `krate.resolveFile(spec)` → absolute path. Bare specifiers (`"pkg"`,
+  - `krate.resolveFile(spec)` -> absolute path. Bare specifiers (`"pkg"`,
     `"@scope/pkg/sub/file.css"`) resolve through `node_modules` walking up from
     the project root; relative paths resolve against the root.
-  - `krate.readFile(spec)` → string (resolved exactly like `resolveFile`).
-  - `krate.emitFile(path, content)` → append a file to the build output
+  - `krate.readFile(spec)` -> string (resolved exactly like `resolveFile`).
+  - `krate.emitFile(path, content)` -> append a file to the build output
     (outDir-relative; convenience over returning `{ files: [...] }`).
-  - `krate.writeFileToRoot(rel, content)` → write project-root-relative static
-    assets (for example `public/logo.svg`) — distinct from `emitFile`.
-  - `krate.injectHead(html)` / `krate.injectCSS(css)` → ergonomics over returning
+  - `krate.writeFileToRoot(rel, content)` -> write project-root-relative static
+    assets (for example `public/logo.svg`) - distinct from `emitFile`.
+  - `krate.injectHead(html)` / `krate.injectCSS(css)` -> ergonomics over returning
     `headHTML` / `rawCSS`.
   Every path is anchored to the project root and traversal outside it is
   rejected.
-- **Logging** — `krate.warn(...)` always writes a prefixed warning to stderr;
+- **Logging** - `krate.warn(...)` always writes a prefixed warning to stderr;
   `krate.log(...)` is diagnostic output shown only under `krate build --verbose`
   (which additionally prints a per-hook trace of plugin, hook, and duration).
   Plain `console.*` output is prefixed with `[plugin:<name>]`. To type the
   `options` argument, pass your options type to the generic:
   `definePluginHooks<MyOptions>({ ... })`.
-- **Return value** — hooks return `{ files, routes, generatedPages, html,
+- **Return value** - hooks return `{ files, routes, generatedPages, html,
   headHTML, rawCSS, scripts, metaTags, data }` (all optional; may be a
   Promise). `files` are written to the output dir, `routes` become static HTML
   pages, `generatedPages` enter the normal page pipeline, and `html` /
   `headHTML` / `rawCSS` / `scripts` / `metaTags` mutate the build.
-- **Coverage** — every page runs the full hook chain, including pages generated
+- **Coverage** - every page runs the full hook chain, including pages generated
   from `generateStaticParams`: `AfterParse` and `AfterRender` (and
   `AfterMarkdownParse` for `.md`/`.mdx`) run for dynamic-param pages exactly as
   they do for regular pages.
-- **Serve hooks** — `ServeRequest` returns `{ action }` where `action` is
+- **Serve hooks** - `ServeRequest` returns `{ action }` where `action` is
   `'continue'` (default), `'rewrite'` (with `newURL`), or `'respond'` (with
   `status`/`headers`/`body`). `ServeResponse` returns `{ status, headers,
   body }`; return only the fields you want to change. Async serve hooks are
-  rejected — they must be synchronous.
-- **Capabilities** — bundled plugins can use `import fs from 'fs'` and `import
+  rejected - they must be synchronous.
+- **Capabilities** - bundled plugins can use `import fs from 'fs'` and `import
   path from 'path'` (polyfilled), plus Web API polyfills (`fetch`, `URL`,
   `Headers`, `Response`, `TextEncoder`, timers, `process.env`). Non-relative
   third-party imports are left external and unavailable.
@@ -147,7 +147,7 @@ export default function demoPlugin(options: DemoOptions = {}) {
 ### AST editing in JavaScript
 
 At `AfterParse`, `ctx.program` is the **kind-tagged AST document** (the same
-`astjson` encoding the Go SDK uses) — a fully traversable JSON tree where every
+`astjson` encoding the Go SDK uses) - a fully traversable JSON tree where every
 node has a `kind` discriminator plus lowercase-cased fields (position is
 `{ line, col }`). Mutate it and return it as `ast`:
 
@@ -172,7 +172,7 @@ export const hooks = {
 };
 ```
 
-- The AST is the exact same shape Go plugins receive — **JS plugins can do
+- The AST is the exact same shape Go plugins receive - **JS plugins can do
   everything Go plugins can**, just slower (the JSON round-trip climbs per
   page; Go plugins mutate the live tree in-process).
 - Import **`ASTTypes`** (plus the `AstNode` / `AstKind` types and the
@@ -239,24 +239,24 @@ func main() {
 }
 ```
 
-- **Contexts are pointer args** — mutations propagate back to Krate. This is
+- **Contexts are pointer args** - mutations propagate back to Krate. This is
   why each hook fn takes `*plug.BuildArgs`, `*plug.ParseArgs`, etc. rather than
   returning a result object.
-- `**AfterParse**` — `ctx.Program` is a real `*ast.Program` (decoded from a
+- `**AfterParse**` - `ctx.Program` is a real `*ast.Program` (decoded from a
   kind-tagged JSON document by the host). Edit the tree directly; Krate renders
   your edits. Related types live in the public
   `github.com/kratejs/krate/packages/compiler/ast` module.
 - Every context embeds `plug.Result`, so a hook can also set `Files`, `Routes`,
   `HeadHTML`, `RawCSS`, `Scripts`, `MetaTags`, etc. on its context.
-- **Richer context & helpers** — contexts carry the same build metadata as the
+- **Richer context & helpers** - contexts carry the same build metadata as the
   JS `krate` object (`ProjectRoot`, `OutDir`, `PagesDir`, `Version`, `DevMode`,
   `Pages`, `Config`). The SDK mirrors the JS capabilities:
   `ResolveFile(root, spec)`, `ReadFile(root, spec)`, `WriteFileToRoot(root, rel,
-  content)`, and the `Result` methods `EmitFile`, `InjectHead`, `InjectCSS` —
+  content)`, and the `Result` methods `EmitFile`, `InjectHead`, `InjectCSS` -
   for example `ctx.EmitFile("note.txt", "hi")` or
   `ctx.InjectHead("<meta ...>")`. Paths are anchored to the project root and
   traversal outside it is rejected.
-- **Logging** — `plug.Log(...)` writes a prefixed diagnostic line to stderr
+- **Logging** - `plug.Log(...)` writes a prefixed diagnostic line to stderr
   (shown under `krate build --verbose`), and `plug.Warn(...)` always prints a
   prefixed warning. Like JS plugins, Go plugin hooks run for every page,
   including pages generated from `generateStaticParams`.
@@ -279,7 +279,7 @@ require (
 
 Every Krate release (`vX.Y.Z` tag pushed to the repo) automatically publishes
 the compiler module to the Go module proxy. Tagging a new version is all that's
-needed — a GitHub Release that starts with a `v` triggers the process. Because
+needed - a GitHub Release that starts with a `v` triggers the process. Because
 the module lives in a subdirectory, Go requires **prefixed version tags**
 (`packages/compiler/vX.Y.Z`); the release workflow creates that tag for you at
 the same commit as the release.
@@ -290,12 +290,12 @@ Version semantics follow Go's rules:
   version.
 - At **major version 2 or higher** the module path gains the major version
   suffix, as Go requires: `go get github.com/kratejs/krate/packages/compiler/v2@v2.0.0`.
-  The tag stays `packages/compiler/v2.0.0` — the `/vN` suffix appears only in
+  The tag stays `packages/compiler/v2.0.0` - the `/vN` suffix appears only in
   the module path, never in the tag.
 - `@latest` resolves to the highest **release** version once one exists.
 - While only **prereleases** are published (e.g. `v0.3.0-beta.1`), `@latest`
   resolves to the highest prerelease. Once any stable version is tagged,
-  `@latest` stops tracking betas — users must request a prerelease by exact
+  `@latest` stops tracking betas - users must request a prerelease by exact
   version (`@v0.3.0-beta.1`).
 - Consumers need Go at least the version in the module's `go` directive (or a
   recent toolchain with `GOTOOLCHAIN=auto`).
@@ -347,11 +347,11 @@ per-platform manifest and an `index.js` descriptor.
 
 ## Runtime notes
 
-- **Ordering** — plugins run in `order` sequence (lower first), so a plugin can
+- **Ordering** - plugins run in `order` sequence (lower first), so a plugin can
   observe the output of earlier plugins.
-- **Lifecycle** — build plugins all run inside `krate build`; Go plugin
+- **Lifecycle** - build plugins all run inside `krate build`; Go plugin
   subprocesses are launched lazily, reused across hot reloads, and closed when
   the build/serve session ends.
-- **Serve hook scope** — both serve hooks run for non-streaming responses. If a
+- **Serve hook scope** - both serve hooks run for non-streaming responses. If a
   handler streams, `ServeResponse` is skipped and the response passes through
   unchanged.

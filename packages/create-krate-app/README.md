@@ -38,12 +38,12 @@ Run without a project directory to be prompted for a name.
 
 A ready-to-run Krate project:
 
-- `krate.config.ts` — Krate configuration
-- `tsconfig.json` — TypeScript config with `@/*` path aliases
-- `package.json` — `dev`/`build`/`serve` scripts
-- `src/pages/` — file-based routes with a layout and 404 page
-- `src/components/` — a signal-powered `Counter` example (with CSS Modules)
-- `public/` — static assets and global styles
+- `krate.config.ts` - Krate configuration
+- `tsconfig.json` - TypeScript config with `@/*` path aliases
+- `package.json` - `dev`/`build`/`serve` scripts
+- `src/pages/` - file-based routes with a layout and 404 page
+- `src/components/` - a signal-powered `Counter` example (with CSS Modules)
+- `public/` - static assets and global styles
 
 ## License
 

@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -116,6 +117,7 @@ type Builder struct {
 	Cfg      *config.Config
 	DevMode  bool
 	Verbose  bool
+	ctx      context.Context     // optional cancellation for long builds
 	Env      map[string]string   // resolved .env values (build/serve-time only, never client-facing)
 	depGraph map[string][]string // file path -> page source paths that depend on it
 	pageDeps map[string][]string // page source path -> files it depends on
@@ -293,6 +295,19 @@ func New(root string, cfg *config.Config) *Builder {
 	}
 }
 
+// SetContext attaches a cancellation context to a build. It is optional; a
+// cancelled context stops between pages and before expensive phases.
+func (b *Builder) SetContext(ctx context.Context) {
+	b.ctx = ctx
+}
+
+func (b *Builder) contextErr() error {
+	if b.ctx == nil {
+		return nil
+	}
+	return b.ctx.Err()
+}
+
 // hasCommunityPlugins reports whether any configured plugin is a community
 // (JS/TS module) plugin, whose hooks the disk cache can't statically reason
 // about.
@@ -454,7 +469,7 @@ func (b *Builder) printReactiveDiags(diags []reactive.Diagnostic) {
 		return
 	}
 	for _, d := range diags {
-		fmt.Fprintf(os.Stderr, "  %s⚠ %s%s\n", cYellow, d.Message, cReset)
+		fmt.Fprintf(os.Stderr, "  %s! %s%s\n", cYellow, d.Message, cReset)
 	}
 }
 
@@ -478,7 +493,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	// pointing at stale HTML while the [id] template itself is refreshed.
 	concrete, gspErr := b.resolveStaticParamsPages(pages)
 	if gspErr != nil {
-		fmt.Fprintf(os.Stderr, "  %s✗ Error:%s %v\n", cRed, cReset, gspErr)
+		fmt.Fprintf(os.Stderr, "  %sx Error:%s %v\n", cRed, cReset, gspErr)
 		pageErrs = append(pageErrs, gspErr)
 	}
 
@@ -499,7 +514,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
-			printf("  %s▶%s %s\n", cCyan, cReset, p)
+			printf("  %s>%s %s\n", cCyan, cReset, p)
 			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildPage(p) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
 		}(page)
@@ -511,7 +526,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
-			printf("  %s▶%s %s\n", cCyan, cReset, s.OutPath)
+			printf("  %s>%s %s\n", cCyan, cReset, s.OutPath)
 			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildStaticParamsPage(s) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, s.OutPath}
 		}(spp)
@@ -526,7 +541,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 
 	for res := range resultsCh {
 		if res.err != nil {
-			fmt.Fprintf(os.Stderr, "\n  %s✗ Error:%s %v\n", cRed, cReset, res.err)
+			fmt.Fprintf(os.Stderr, "\n  %sx Error:%s %v\n", cRed, cReset, res.err)
 			pageErrs = append(pageErrs, res.err)
 			continue
 		}
@@ -625,13 +640,16 @@ func (b *Builder) guardOutDir() error {
 		return fmt.Errorf("refusing to build: outDir equals the project root (%s)", outAbs)
 	}
 	if fsutil.WithinDir(outAbs, rootAbs) {
-		fmt.Fprintf(os.Stderr, "  %s⚠ outDir %s contains the project root; the build will wipe it%s\n", cYellow, outAbs, cReset)
+		fmt.Fprintf(os.Stderr, "  %s! outDir %s contains the project root; the build will wipe it%s\n", cYellow, outAbs, cReset)
 	}
 	return nil
 }
 
 func (b *Builder) BuildAll() error {
 	defer b.phase("build:total")()
+	if err := b.contextErr(); err != nil {
+		return err
+	}
 	if err := b.guardOutDir(); err != nil {
 		return err
 	}
@@ -753,6 +771,9 @@ func (b *Builder) BuildAll() error {
 		return err
 	}
 
+	if err := b.contextErr(); err != nil {
+		return err
+	}
 	totalPages := len(pages) + len(routes)
 	stopPages := b.phase("build:pages")
 	resultsCh := make(chan pageBuildResult, totalPages)
@@ -765,7 +786,7 @@ func (b *Builder) BuildAll() error {
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
-			printf("  %s▶%s %s\n", cCyan, cReset, p)
+			printf("  %s>%s %s\n", cCyan, cReset, p)
 			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildPage(p) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, p}
 		}(page)
@@ -777,7 +798,7 @@ func (b *Builder) BuildAll() error {
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
-			printf("  %s▶%s %s (route)%s\n", cGreen, cReset, r.Path, cReset)
+			printf("  %s>%s %s (route)%s\n", cGreen, cReset, r.Path, cReset)
 			result, rawCSS, err := recoverPage(func() (*PageResult, string, error) { return b.buildRoute(r) })
 			resultsCh <- pageBuildResult{result, rawCSS, err, "(route) " + r.Path}
 		}(route)
@@ -795,7 +816,7 @@ func (b *Builder) BuildAll() error {
 
 	for res := range resultsCh {
 		if res.err != nil {
-			fmt.Fprintf(os.Stderr, "\n  %s✗ Error (%s):%s %v\n", cRed, res.page, cReset, res.err)
+			fmt.Fprintf(os.Stderr, "\n  %sx Error (%s):%s %v\n", cRed, res.page, cReset, res.err)
 			failureMessages = append(failureMessages, fmt.Sprintf("  %s: %v", res.page, res.err))
 			failureErrs = append(failureErrs, res.err)
 			errorCount++
@@ -831,18 +852,18 @@ func (b *Builder) BuildAll() error {
 
 	staticParamPages, gspErr := b.resolveStaticParamsPages(pages)
 	if gspErr != nil {
-		fmt.Fprintf(os.Stderr, "  %s✗ Error:%s %v\n", cRed, cReset, gspErr)
+		fmt.Fprintf(os.Stderr, "  %sx Error:%s %v\n", cRed, cReset, gspErr)
 		failureMessages = append(failureMessages, "  "+gspErr.Error())
 		failureErrs = append(failureErrs, gspErr)
 		errorCount++
 	}
 	if len(staticParamPages) > 0 {
-		printf("  %s⚡%s Building %d statically generated pages from generateStaticParams\n", cCyan, cReset, len(staticParamPages))
+		printf("  %s*%s Building %d statically generated pages from generateStaticParams\n", cCyan, cReset, len(staticParamPages))
 		for _, spp := range staticParamPages {
 			result, _, err := b.buildStaticParamsPage(spp)
 			if err != nil {
 				msg := fmt.Sprintf("generateStaticParams page %s: %v", spp.OutPath, err)
-				fmt.Fprintf(os.Stderr, "  %s✗ Error:%s %v\n", cRed, cReset, msg)
+				fmt.Fprintf(os.Stderr, "  %sx Error:%s %v\n", cRed, cReset, msg)
 				failureMessages = append(failureMessages, "  "+msg)
 				failureErrs = append(failureErrs, fmt.Errorf("generateStaticParams page %s: %w", spp.OutPath, err))
 				errorCount++
@@ -890,7 +911,7 @@ func (b *Builder) BuildAll() error {
 		}
 		results = filtered
 		if len(dropped) > 0 {
-			printf("  %s⚡%s Static-only dynamic routes (no fallback template): %s\n", cCyan, cReset, strings.Join(dropped, ", "))
+			printf("  %s*%s Static-only dynamic routes (no fallback template): %s\n", cCyan, cReset, strings.Join(dropped, ", "))
 		}
 	}
 
@@ -932,7 +953,7 @@ func (b *Builder) BuildAll() error {
 	// Runs against the final HTML so rules see exactly what ships.
 	if !b.SkipQualityChecks {
 		if err := b.runQualityChecks(results, runtimeJS); err != nil {
-			fmt.Fprintf(os.Stderr, "  %s✗ Checks:%s %v\n", cRed, cReset, err)
+			fmt.Fprintf(os.Stderr, "  %sx Checks:%s %v\n", cRed, cReset, err)
 			failureMessages = append(failureMessages, "  checks: "+err.Error())
 			failureErrs = append(failureErrs, err)
 			errorCount++
@@ -957,7 +978,12 @@ func (b *Builder) BuildAll() error {
 
 	if b.Cfg.PublicDir != "" {
 		if info, err := os.Stat(b.Cfg.PublicDir); err == nil && info.IsDir() {
-			_ = copyDirToOut(b.Cfg.PublicDir, b.Cfg.OutDir)
+			if err := copyDirToOut(b.Cfg.PublicDir, b.Cfg.OutDir); err != nil {
+				fmt.Fprintf(os.Stderr, "  %sPublic copy error:%s %v\n", cYellow, cReset, err)
+				failureMessages = append(failureMessages, "  public: "+err.Error())
+				failureErrs = append(failureErrs, err)
+				errorCount++
+			}
 		}
 	}
 
@@ -974,7 +1000,12 @@ func (b *Builder) BuildAll() error {
 		errorCount++
 	}
 
-	b.BuildMiddleware()
+	if err := b.BuildMiddleware(); err != nil {
+		fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %v\n", cRed, cReset, err)
+		failureMessages = append(failureMessages, "  middleware: "+err.Error())
+		failureErrs = append(failureErrs, err)
+		errorCount++
+	}
 
 	// Write page manifest with SSR/ISR metadata
 	manifestCSS := ""
@@ -995,20 +1026,20 @@ func (b *Builder) BuildAll() error {
 		errorCount++
 	}
 	if len(serverBundles) > 0 {
-		printf("  %s⚡%s Compiled %d server bundles\n", cCyan, cReset, len(serverBundles))
+		printf("  %s*%s Compiled %d server bundles\n", cCyan, cReset, len(serverBundles))
 		// Stage the bundled SSR renderer driver so `krate serve` runs it with
 		// plain node instead of requiring a TypeScript runtime.
 		if staged := stageServerRenderer(b.Root, b.Cfg.OutDir); staged != "" {
-			printf("  %s⚡%s Staged SSR renderer driver\n", cCyan, cReset)
+			printf("  %s*%s Staged SSR renderer driver\n", cCyan, cReset)
 		} else {
-			fmt.Fprintf(os.Stderr, "  %sWarning: SSR renderer driver not staged — server-renderer source not found under %s (ensure @krate/runtime is installed)%s\n", cYellow, b.Root, cReset)
+			fmt.Fprintf(os.Stderr, "  %sWarning: SSR renderer driver not staged - server-renderer source not found under %s (ensure @krate/runtime is installed)%s\n", cYellow, b.Root, cReset)
 		}
 	}
 
 	// Compile runtime server components (*.runtime.tsx, // @runtime, runtimeDirs)
 	runtimeCompBundles := CompileRuntimeComponents(b.Root, b.Cfg.OutDir, b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.RuntimeDirs)
 	if len(runtimeCompBundles) > 0 {
-		printf("  %s⚡%s Compiled %d runtime components\n", cCyan, cReset, len(runtimeCompBundles))
+		printf("  %s*%s Compiled %d runtime components\n", cCyan, cReset, len(runtimeCompBundles))
 	}
 	manifest.SetRuntimeComponents(runtimeCompBundles)
 	stopTools()
@@ -1036,7 +1067,7 @@ func (b *Builder) BuildAll() error {
 		}
 	}
 	if ssrCount+isrCount+streamingCount > 0 {
-		printf("  %s⚡%s SSR: %d, ISR: %d, Streaming: %d pages\n", cCyan, cReset, ssrCount, isrCount, streamingCount)
+		printf("  %s*%s SSR: %d, ISR: %d, Streaming: %d pages\n", cCyan, cReset, ssrCount, isrCount, streamingCount)
 	}
 
 	// Run build-level plugins (after all pages are done and aggregate work is complete)
@@ -1112,7 +1143,7 @@ func (b *Builder) BuildAll() error {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %sWarning: precompression failed:%s %v\n", cYellow, cReset, err)
 		} else if n > 0 {
-			printf("  %s⚡%s Precompressed %d assets\n", cCyan, cReset, n)
+			printf("  %s*%s Precompressed %d assets\n", cCyan, cReset, n)
 		}
 	}
 
@@ -1388,7 +1419,10 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				pageDir = filepath.Join(b.Cfg.OutDir, r.OutName)
 			}
 
-			_ = os.MkdirAll(pageDir, 0755)
+			if err := os.MkdirAll(pageDir, 0755); err != nil {
+				b.pluginFailed(fmt.Errorf("creating page dir %s: %w", pageDir, err))
+				return
+			}
 
 			// 1. Construct structural HTML wrapper in memory.
 			// A page links its own stylesheet (r.CSSFile) first, then any
@@ -1503,12 +1537,21 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			} else {
 				htmlPath = filepath.Join(pageDir, "index.html")
 			}
-			_ = fsutil.WriteFileIfChanged(htmlPath, []byte(html), 0644)
+			if err := fsutil.WriteFileIfChanged(htmlPath, []byte(html), 0644); err != nil {
+				b.pluginFailed(fmt.Errorf("writing %s: %w", htmlPath, err))
+				return
+			}
 			if legacyHTML != "" {
-				_ = fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.legacy.html"), []byte(finish(legacyHTML)), 0644)
+				if err := fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.legacy.html"), []byte(finish(legacyHTML)), 0644); err != nil {
+					b.pluginFailed(fmt.Errorf("writing legacy document for %s: %w", r.Page, err))
+					return
+				}
 			}
 			if modernHTML != "" {
-				_ = fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.modern.html"), []byte(finish(modernHTML)), 0644)
+				if err := fsutil.WriteFileIfChanged(filepath.Join(pageDir, "index.modern.html"), []byte(finish(modernHTML)), 0644); err != nil {
+					b.pluginFailed(fmt.Errorf("writing modern document for %s: %w", r.Page, err))
+					return
+				}
 			}
 		}(r)
 	}
@@ -1556,6 +1599,9 @@ func (b *Builder) newBundler() *bundler.Bundler {
 
 func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	defer b.phase("page:total")()
+	if err := b.contextErr(); err != nil {
+		return nil, "", err
+	}
 	if pr, css, ok := b.tryDiskReplay(page); ok {
 		return pr, css, nil
 	}
@@ -1565,6 +1611,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	stopBundle()
 	if err != nil {
 		return nil, "", fmt.Errorf("bundling page %s: %w", page, err)
+	}
+	if err := b.contextErr(); err != nil {
+		return nil, "", err
 	}
 	printModuleWarnings(os.Stderr, bundle.Modules)
 
@@ -1610,7 +1659,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		for _, mod := range bundle.Modules {
 			if mod.ComponentClass == bundler.ComponentClassRuntime {
 				renderMode = RenderStreaming
-				fmt.Fprintf(os.Stderr, "  %s⚡%s %s imports runtime component → streaming\n", cCyan, cReset, filepath.Base(page))
+				fmt.Fprintf(os.Stderr, "  %s*%s %s imports runtime component -> streaming\n", cCyan, cReset, filepath.Base(page))
 				break
 			}
 		}
@@ -1631,7 +1680,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	// defeat a page author's per-page config.
 	if b.Cfg.SSR.Streaming && renderMode == RenderSSG {
 		renderMode = RenderStreaming
-		fmt.Fprintf(os.Stderr, "  %s⚡%s %s → streaming (global override)\n", cCyan, cReset, filepath.Base(page))
+		fmt.Fprintf(os.Stderr, "  %s*%s %s -> streaming (global override)\n", cCyan, cReset, filepath.Base(page))
 	}
 
 	// Static output mode disables request-time rendering entirely: a page that
@@ -1641,7 +1690,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	staticMode := strings.EqualFold(b.Cfg.Output, "static")
 	staticWhy := "the page pins itself static"
 	if staticMode && renderMode != RenderSSG {
-		fmt.Fprintf(os.Stderr, "  %s⚡%s %s → ssg (static output mode)\n", cCyan, cReset, filepath.Base(page))
+		fmt.Fprintf(os.Stderr, "  %s*%s %s -> ssg (static output mode)\n", cCyan, cReset, filepath.Base(page))
 		renderMode = RenderSSG
 		staticWhy = "output: \"static\""
 		explicitStatic = true
@@ -2687,7 +2736,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	tree := irtree.BuildWithOptions(entryModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		for _, e := range tree.Errors {
-			fmt.Fprintf(os.Stderr, "  %s✗ Error (loading %s):%s %v\n", cRed, loadingPath, cReset, e)
+			fmt.Fprintf(os.Stderr, "  %sx Error (loading %s):%s %v\n", cRed, loadingPath, cReset, e)
 		}
 		return ""
 	}
@@ -3031,7 +3080,7 @@ func findLayoutFile(pagePath, pagesDir string, names []string) string {
 var layoutCache sync.Map
 
 // BuildMiddleware compiles middleware.ts (if present) to .krate/middleware.js.
-func (b *Builder) BuildMiddleware() {
+func (b *Builder) BuildMiddleware() error {
 	middlewarePaths := []string{
 		filepath.Join(b.Root, "middleware.ts"),
 		filepath.Join(b.Root, "src", "middleware.ts"),
@@ -3047,10 +3096,11 @@ func (b *Builder) BuildMiddleware() {
 		}
 	}
 	if middlewarePath == "" {
-		return
+		_ = os.Remove(filepath.Join(b.Root, ".krate", "middleware.js"))
+		return nil
 	}
 
-	printf("  %s▶ Middleware%s %s\n", cGreen, cReset, filepath.Base(middlewarePath))
+	printf("  %s> Middleware%s %s\n", cGreen, cReset, filepath.Base(middlewarePath))
 
 	outDir := filepath.Join(b.Root, ".krate")
 	_ = os.MkdirAll(outDir, 0755)
@@ -3070,12 +3120,16 @@ func (b *Builder) BuildMiddleware() {
 		for _, e := range result.Errors {
 			fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %s\n", cRed, cReset, e.Text)
 		}
-		return
+		return fmt.Errorf("middleware build failed: %s", result.Errors[0].Text)
 	}
 
-	if len(result.OutputFiles) > 0 {
-		_ = fsutil.WriteFileAtomic(outPath, result.OutputFiles[0].Contents, 0644)
+	if len(result.OutputFiles) == 0 {
+		return fmt.Errorf("middleware build produced no output")
 	}
+	if err := fsutil.WriteFileAtomic(outPath, result.OutputFiles[0].Contents, 0644); err != nil {
+		return fmt.Errorf("writing middleware: %w", err)
+	}
+	return nil
 }
 
 // extractBuildComponentName extracts the component name from a file path for server component marking.
@@ -3446,9 +3500,9 @@ func (b *Builder) writeAssetFiles(assets map[string]string) error {
 
 func printResult(outName, jsFile string) {
 	if outName == "." {
-		printf("    %s✓%s %s/index.html %s(root)%s\n", cGreen, cReset, outName, cGray, cReset)
+		printf("    %s+%s %s/index.html %s(root)%s\n", cGreen, cReset, outName, cGray, cReset)
 	} else {
-		printf("    %s✓%s %s/index.html\n", cGreen, cReset, outName)
+		printf("    %s+%s %s/index.html\n", cGreen, cReset, outName)
 	}
 	if jsFile != "" {
 		printf("    %s%s (hydration)%s\n", cGray, jsFile, cReset)
@@ -4189,7 +4243,7 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 			defer wg.Done()
 			pool.acquire()
 			defer pool.release()
-			printf("  %s▶ API%s %s\n", cGreen, cReset, filepath.Base(r))
+			printf("  %s> API%s %s\n", cGreen, cReset, filepath.Base(r))
 			meta, err := func() (m apiRouteMeta, err error) {
 				err = safe.Run(func() error {
 					var e error
@@ -4199,7 +4253,7 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 				return
 			}()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  %s✗ API Error:%s %s: %v\n", cRed, cReset, r, err)
+				fmt.Fprintf(os.Stderr, "  %sx API Error:%s %s: %v\n", cRed, cReset, r, err)
 				errCh <- err
 				return
 			}

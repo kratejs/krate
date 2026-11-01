@@ -1,6 +1,6 @@
 ---
 title: React Compatibility
-order: 5
+order: 4
 description: How Krate transpiles React source to signals, runs compiled React packages as Preact islands, and what is intentionally not supported.
 ---
 

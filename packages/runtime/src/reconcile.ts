@@ -191,8 +191,9 @@ function syncAttributes(oldEl: Element, newEl: Element): void {
       oldEl.setAttribute(name, value);
     }
   }
-  // Pass 2: remove attributes no longer present.
-  for (let i = 0; i < oldEl.attributes.length; i++) {
+  // Pass 2: remove attributes no longer present. Iterate backwards because
+  // removing an attribute shifts the live NamedNodeMap left.
+  for (let i = oldEl.attributes.length - 1; i >= 0; i--) {
     const name = oldEl.attributes[i].name;
     if (!newNames.has(name)) {
       oldEl.removeAttribute(name);
@@ -356,6 +357,7 @@ export function reconcileTrees(oldRoot: Node, newRoot: Node): void {
   if (oldEl.tagName !== newEl.tagName) {
     const imported = document.importNode(newRoot, true);
     if (oldEl.parentNode) {
+      disposeNode(oldEl);
       oldEl.parentNode.replaceChild(imported, oldEl);
     }
     return;

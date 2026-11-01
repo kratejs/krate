@@ -189,6 +189,9 @@ func (s *Service) toolBatchEdit(ctx context.Context, args map[string]any) (ToolR
 		var original string
 		data, readErr := os.ReadFile(abs)
 		if readErr == nil {
+			if op == "create" {
+				return ErrorResult("file already exists: " + rel), nil
+			}
 			original = string(data)
 		} else if !os.IsNotExist(readErr) {
 			return ErrorResult("reading " + rel + ": " + readErr.Error()), nil
@@ -259,6 +262,7 @@ func (s *Service) toolFormatFile(ctx context.Context, args map[string]any) (Tool
 		return ErrorResult("provide path"), nil
 	}
 	apply := argBool(args, "apply", false)
+	expected := argString(args, "expectedSha256")
 	abs, rel, err := s.resolveEditTarget(target)
 	if err != nil {
 		return ErrorResult(err.Error()), nil
@@ -285,7 +289,7 @@ func (s *Service) toolFormatFile(ctx context.Context, args map[string]any) (Tool
 		return TextResult(rel + " is already formatted"), nil
 	}
 	tx := newFileTransaction(s)
-	if err := tx.stageWrite(abs, rel, out, ""); err != nil {
+	if err := tx.stageWrite(abs, rel, out, expected); err != nil {
 		return ErrorResult(err.Error()), nil
 	}
 	return s.finishTransaction(tx, apply, "format")

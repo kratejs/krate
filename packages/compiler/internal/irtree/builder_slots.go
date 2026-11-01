@@ -164,6 +164,11 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 	scanSlots = func(slots []SlotNode) {
 		for _, child := range slots {
 			switch s := child.(type) {
+			case *ExprSlot:
+				// Text/expression bindings are emitted as kbindContent(...)
+				// closures in hydration JS, so helpers they call must be in
+				// scope too (e.g. <kbd>{hotkeyLabel(props.hotkey)}</kbd>).
+				scan(s.ExprSource)
 			case *ListSlot:
 				scan(s.ExprSource)
 				// Components a list row renders run in this scope at runtime,
@@ -177,6 +182,10 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 					scanSlots(s.Component.CallSiteSlots)
 				}
 			case *ConditionalSlot:
+				// ExprSource is the full ternary kept only for compatibility;
+				// hydration uses TestJS. Scanning it would pull component
+				// render helpers into this scope.
+				scan(s.TestJS)
 				scanSlots(s.Consequent)
 				scanSlots(s.Alternate)
 			}

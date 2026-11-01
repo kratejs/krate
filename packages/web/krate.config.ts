@@ -53,7 +53,6 @@ export default defineConfig({
         date: { type: "date", required: true },
         author: "string",
         tags: "string[]",
-        draft: "boolean",
         order: { type: "number", required: true },
         status: { type: "string", enum: ["draft", "published"], default: "draft" },
       },
@@ -61,10 +60,9 @@ export default defineConfig({
   }),
 
   // Per-route budgets calibrated from the current docs output with headroom.
-  // Only the perf gates run here; a11y/SEO findings are tracked separately.
   checks: {
-    a11y: false,
-    seo: false,
+    a11y: "error",
+    seo: "error",
     perf: "warning",
     budget: { js: 180, hydration: 90, islandJS: 20, route: 450 },
     failOn: "error",
@@ -96,7 +94,7 @@ export default defineConfig({
         engine: "pagefind",
         maxResults: 8,
         placeholder: "Search the docs",
-        hotkey: "/",
+        hotkey: "mod+k",
       },
       links: [
         { icon: "lucide:github", url: "https://github.com/kratejs/krate", name: "GitHub" },

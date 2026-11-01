@@ -1,6 +1,6 @@
 ---
 title: Migrating from Next.js
-order: 9
+order: 12
 description: Move a Next.js App Router or Pages Router site to Krate.
 ---
 
@@ -8,7 +8,7 @@ description: Move a Next.js App Router or Pages Router site to Krate.
 
 Krate's pages, routing, and `<Link>` semantics mirror Next.js closely, so most
 files need small edits. The biggest conceptual change: **there is no React
-runtime** — components are plain functions returning JSX, and state uses
+runtime** - components are plain functions returning JSX, and state uses
 signals.
 
 ## Concept mapping
@@ -18,7 +18,7 @@ signals.
 | `useState` | `createSignal` (`const [v, setV] = createSignal(0)`) |
 | `useEffect` | `createEffect` |
 | `useMemo` | `createMemo` |
-| `useRef` | `ref={el => …}` / `useRef` (krate runtime) |
+| `useRef` | `ref={el => ...}` / `useRef` (krate runtime) |
 | `className` | `class` |
 | `app/page.tsx` | `src/pages/index.tsx` |
 | `app/blog/[slug]/page.tsx` | `src/pages/blog/[slug].tsx` |
@@ -140,10 +140,10 @@ Client components rendered inside async server components hydrate with Preact:
    // read by calling: n()  (not n)
    ```
 
-4. **Fix attribute names.** `className` → `class`; `htmlFor` → `for`.
+4. **Fix attribute names.** `className` -> `class`; `htmlFor` -> `for`.
 
 5. **Links & images.** Replace `next/link` / `next/image` imports with the
-   globals `<Link href="…">` / `<Image src width height alt>`.
+   globals `<Link href="...">` / `<Image src width height alt>`.
 
 6. **Data fetching.** `async` server components that `await fetch()` work as
    they do in Next.js (they render per request); tag and cache the reads with
@@ -171,14 +171,14 @@ Client components rendered inside async server components hydrate with Preact:
 React interop is always on. Krate automatically rewrites React hooks
 (`useState`, `useEffect`, `useMemo`, `useReducer`, `useRef`, `useCallback`,
 `useContext`, `useId`) and `React.*` member calls to signal-based equivalents
-during compilation, and auto-calls bare reads (`{count}` → `count()`), so files
+during compilation, and auto-calls bare reads (`{count}` -> `count()`), so files
 deeply tied to React hooks compile without config changes. This is a migration
-aid, not a full React runtime — see
+aid, not a full React runtime - see
 [React Compatibility](/docs/guides/react-compatibility/).
 
 ## What is intentionally different
 
-- No `getServerSideProps` / `getStaticProps` — use render modes
+- No `getServerSideProps` / `getStaticProps` - use render modes
   (`export const config = { ssr: true }`, or Next-style `export const dynamic` /
   `revalidate`) and async server components.
 - Catch-all params (`[...slug]`) are a `/`-joined string, not `string[]`.

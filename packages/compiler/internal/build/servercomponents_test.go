@@ -239,7 +239,7 @@ func TestStreamRegionPageFatalServerComponentError(t *testing.T) {
 		`{"type":"end","count":1}`,
 	})
 	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
-	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, "/p", sidecar.port, nil, nil, nil, nil, nil)
+	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, "/p", sidecar.port, nil, nil, nil, nil, nil, false, 0, "")
 	if !rr.served || rr.fatalErr != "db down" {
 		t.Fatalf("served=%v fatalErr=%q, want served + db down", rr.served, rr.fatalErr)
 	}
@@ -265,7 +265,7 @@ func TestStreamRegionPageRegionRedirect(t *testing.T) {
 		`{"type":"end","count":1}`,
 	})
 	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
-	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, "/p", sidecar.port, nil, nil, nil, nil, nil)
+	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, "/p", sidecar.port, nil, nil, nil, nil, nil, false, 0, "")
 	if rr.redirect != "/login" {
 		t.Fatalf("redirect = %q, want /login", rr.redirect)
 	}

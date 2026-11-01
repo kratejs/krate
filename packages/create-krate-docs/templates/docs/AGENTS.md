@@ -64,23 +64,23 @@ order: 1
 
 `krate.config.ts` is where the real site setup lives:
 
-- `seo.baseUrl` / `seo.siteName` — production URL and site name.
-- `plugins` — `sitemap(...)` and `docs(...)`: `contentDir`, `theme`
+- `site.url` / `site.name` - production URL and site name.
+- `plugins` - `sitemap(...)` and `docs(...)`: `contentDir`, `theme`
   (`baseDocsTheme()` from `@krate/base-docs-theme`, or your own layout/theme),
   `search` (docfind, `maxResults`), `links`
   (social links, e.g. `lucide:github`).
-- `devServer.port` — default 3000.
+- `devServer.port` - default 3000.
 
 ## Key runtime APIs
 
 - Hit pages use the shared `SiteLayout` (`src/pages/_layout.tsx`); docs pages use
   the `@krate/base-docs-theme` layout via the docs plugin (`theme`).
 - `Head`, `Icon`, `Link` are provided globally for head/icon/link content.
-- This is NOT React — use `@krate/runtime` signals, plain `class=`, no React hooks.
+- This is NOT React - use `@krate/runtime` signals, plain `class=`, no React hooks.
 
 ## Gotchas
 
-- `dist/` is build output — never edit; the dev watcher ignores it plus `.krate`,
+- `dist/` is build output - never edit; the dev watcher ignores it plus `.krate`,
   `node_modules`, `.git`, and `_`-prefixed internal files.
 - Don't run `krate build`/`dev` from inside `dist/`.
 - If you add/rename a docs page, the sidebar and search index rebuild
@@ -88,5 +88,5 @@ order: 1
 
 ## Docs
 
-- Krate docs: https://kratejs.pages.dev/docs/
-- Customizing the docs site: https://kratejs.pages.dev/docs/guides/customizing-docs/
+- Krate docs: https://krate.js.org/docs/
+- Customizing the docs site: https://krate.js.org/docs/guides/customizing-docs/

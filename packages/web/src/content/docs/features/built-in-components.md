@@ -7,11 +7,11 @@ order: 2
 # Built-in Components
 
 Krate provides a set of built-in components that are recognized by the compiler
-by name — they work without any import:
+by name - they work without any import:
 
 | Component | Usage | Description |
 |-----------|-------|-------------|
-| `<Head>` | `<Head><title>…</title></Head>` | Injects content into `<head>` |
+| `<Head>` | `<Head><title>...</title></Head>` | Injects content into `<head>` |
 | `<Script>` | `<Script src="/app.js"/>` or `<Script>{inline}</Script>` | External or inline script in `<body>` |
 | `<Style>` | `<Style>{css}</Style>` | Inline `<style>` in `<head>` |
 | `<Link>` | `<Link href="/about">About</Link>` | SPA-enabled `<a>` |
@@ -67,21 +67,21 @@ Inline CSS is captured into `<head>`.
 <Link href="/new" target="_blank">New tab</Link>
 ```
 
-- **Prefetching** (default on) — `data-prefetch` triggers a prefetch on
+- **Prefetching** (default on) - `data-prefetch` triggers a prefetch on
   hover/focus (debounced) and on viewport entry (`IntersectionObserver`,
   `rootMargin: 200px`).
-- **`replace`** — swaps the history entry instead of pushing.
-- **`scroll`** — scrolls to top on forward navigation by default.
-- **Hash links** — `href="/about#section"` fetches the page then scrolls to
+- **`replace`** - swaps the history entry instead of pushing.
+- **`scroll`** - scrolls to top on forward navigation by default.
+- **Hash links** - `href="/about#section"` fetches the page then scrolls to
   the element.
-- **Modified clicks** — ⌘/Ctrl/Shift/Alt-click and middle-click are never
+- **Modified clicks** - Cmd/Ctrl/Shift/Alt-click and middle-click are never
   intercepted.
-- **External links** — `http(s)://`, `//`, `mailto:`, `tel:`, `#`,
+- **External links** - `http(s)://`, `//`, `mailto:`, `tel:`, `#`,
   `target="_blank"` and `download` become plain anchors the router ignores.
   `target="_blank"` auto-adds `rel="noopener noreferrer"`.
-- **Attributes** — `className` (→ `class`), `target`, `rel`, `title`, `id`,
+- **Attributes** - `className` (-> `class`), `target`, `rel`, `title`, `id`,
   `aria-label`, and other static attributes are forwarded.
-- **Active link** — after navigation, the link matching the current path gets
+- **Active link** - after navigation, the link matching the current path gets
   `aria-current="page"`.
 
 ## `<Icon>`
@@ -91,7 +91,7 @@ Inline CSS is captured into `<head>`.
 <Icon name="menu" />          // from the local icons/ registry
 ```
 
-- **Name resolution** — `icons/<name>.svg` in the project root (local, no
+- **Name resolution** - `icons/<name>.svg` in the project root (local, no
   network) or `set:name` from the Iconify API (e.g. `lucide:heart`).
 - Local SVGs keep their own `viewBox` (fallback `0 0 24 24`); user attributes
   override defaults.
@@ -118,18 +118,18 @@ Inline CSS is captured into `<head>`.
 `<Image>` compiles to a **WebP-first `<picture>`** at build time (pure-Go
 encoder, no cgo):
 
-- **WebP + fallback** — every variant is emitted twice: a
+- **WebP + fallback** - every variant is emitted twice: a
   `<source type="image/webp">` (lossy WebP via a pure-Go encoder) and a
   `<source>` in the original codec (JPEG, or PNG when the source has
   transparency). The `<img>` falls back to the original file for browsers
   without `<picture>`.
-- **Responsive** — a `srcset` at breakpoints (640/768/1024/1280/original
+- **Responsive** - a `srcset` at breakpoints (640/768/1024/1280/original
   width) for both codecs, plus `sizes`.
-- **CLS mitigation** — `width`/`height` attributes and `aspect-ratio:W/H`
+- **CLS mitigation** - `width`/`height` attributes and `aspect-ratio:W/H`
   (intrinsic ratio; width wins if props mismatch) reserve space.
-- **Blur placeholder (LQIP)** — a 16px box-blurred, base64 data-URI as the
+- **Blur placeholder (LQIP)** - a 16px box-blurred, base64 data-URI as the
   `background-image` until the real image loads.
-- **Loading** — `loading="lazy"` by default; `priority` forces `eager` +
+- **Loading** - `loading="lazy"` by default; `priority` forces `eager` +
   `fetchpriority="high"`; `decoding="async"` always set.
-- **Output** — variants written to `.krate/cache/images/` and copied to
+- **Output** - variants written to `.krate/cache/images/` and copied to
   `<outDir>/_krate/images/` (served at `/_krate/images/...`).

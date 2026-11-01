@@ -1,12 +1,39 @@
 package bundler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
+
+// Small modules are verified by content hash on every cache lookup. mtime can be
+// coarse (or deliberately preserved) on some filesystems, so a same-size edit
+// would otherwise replay a stale AST/CSS/asset URL across dev rebuilds.
+const contentVerifyLimit = 512 << 10
+
+func fileContentHash(abs string, size int64) string {
+	if size < 0 || size > contentVerifyLimit {
+		return ""
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func stampMatches(abs string, mtime time.Time, size int64, hash string) bool {
+	if size > contentVerifyLimit {
+		return true
+	}
+	return hash != "" && fileContentHash(abs, size) == hash
+}
 
 // ModuleCache memoizes per-file parse results across every Bundler in a build.
 // Bundles previously re-read, re-lexed, and re-parsed each imported module once
@@ -98,6 +125,7 @@ func (c *ModuleCache) ResetResolver() {
 type programEntry struct {
 	mtime       time.Time
 	size        int64
+	hash        string
 	program     *ast.Program
 	source      string
 	imports     []string
@@ -109,6 +137,7 @@ type programEntry struct {
 type cssEntry struct {
 	mtime    time.Time
 	size     int64
+	hash     string
 	css      string
 	mapping  map[string]string
 	isModule bool
@@ -120,6 +149,7 @@ type cssEntry struct {
 type assetEntry struct {
 	mtime time.Time
 	size  int64
+	hash  string
 	url   string
 }
 
@@ -141,7 +171,7 @@ func (c *ModuleCache) getProgram(abs string, mtime time.Time, size int64) (*prog
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.programs[abs]
-	if !ok || !e.mtime.Equal(mtime) || e.size != size {
+	if !ok || !e.mtime.Equal(mtime) || e.size != size || !stampMatches(abs, mtime, size, e.hash) {
 		return nil, false
 	}
 	return e, true
@@ -151,6 +181,7 @@ func (c *ModuleCache) putProgram(abs string, e *programEntry) {
 	if c == nil {
 		return
 	}
+	e.hash = fileContentHash(abs, e.size)
 	c.mu.Lock()
 	c.programs[abs] = e
 	c.mu.Unlock()
@@ -163,7 +194,7 @@ func (c *ModuleCache) getCSS(abs string, mtime time.Time, size int64) (*cssEntry
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.css[abs]
-	if !ok || !e.mtime.Equal(mtime) || e.size != size {
+	if !ok || !e.mtime.Equal(mtime) || e.size != size || !stampMatches(abs, mtime, size, e.hash) {
 		return nil, false
 	}
 	return e, true
@@ -173,6 +204,7 @@ func (c *ModuleCache) putCSS(abs string, e *cssEntry) {
 	if c == nil {
 		return
 	}
+	e.hash = fileContentHash(abs, e.size)
 	c.mu.Lock()
 	c.css[abs] = e
 	c.mu.Unlock()
@@ -185,7 +217,7 @@ func (c *ModuleCache) getAsset(abs string, mtime time.Time, size int64) (*assetE
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.assets[abs]
-	if !ok || !e.mtime.Equal(mtime) || e.size != size {
+	if !ok || !e.mtime.Equal(mtime) || e.size != size || !stampMatches(abs, mtime, size, e.hash) {
 		return nil, false
 	}
 	return e, true
@@ -195,6 +227,7 @@ func (c *ModuleCache) putAsset(abs string, e *assetEntry) {
 	if c == nil {
 		return
 	}
+	e.hash = fileContentHash(abs, e.size)
 	c.mu.Lock()
 	c.assets[abs] = e
 	c.mu.Unlock()

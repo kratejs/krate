@@ -38,6 +38,7 @@ const REVALIDATE_STORE = new AsyncLocalStorage();
 globalThis[Symbol.for('krate.revalidate.store')] = REVALIDATE_STORE;
 const KRATE_HOST_URL = process.env.KRATE_HOST_URL || '';
 const KRATE_INTERNAL_SECRET = process.env.KRATE_INTERNAL_SECRET || '';
+const ACTION_MAX_BODY = Math.max(1, parseInt(process.env.KRATE_ACTION_MAX_BODY || '', 10) || (1 << 20));
 
 // The data-cache runtime (Next-style fetch caching, shared cache state) staged
 // by the host. Without it fetch cache options would be silently ignored, so a
@@ -140,6 +141,14 @@ function actionFail(status, message, digest, cookies) {
   return actionJSON({ ok: false, error }, status, cookies);
 }
 
+function safeActionRedirect(value) {
+  if (typeof value !== 'string') return '';
+  const to = value.trim();
+  if (!to || to.charAt(0) !== '/' || to.charAt(1) === '/' || to.indexOf('\\') !== -1) return '';
+  if (/[\u0000-\u001f\u007f]/.test(to)) return '';
+  return to;
+}
+
 function parseActionCookies(header) {
   const jar = new Map();
   for (const part of String(header || '').split(';')) {
@@ -197,6 +206,19 @@ function leadingActionArgs(raw) {
 }
 
 async function krateRunAction(req, urlPath, search) {
+  const site = String(req.headers.get('sec-fetch-site') || '').toLowerCase();
+  if (site === 'cross-site') return actionFail(403, 'cross-site server action rejected');
+  const origin = req.headers.get('origin');
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
+  if (origin && host) {
+    try {
+      if (new URL(origin).host !== host) return actionFail(403, 'cross-origin server action rejected');
+    } catch {
+      return actionFail(403, 'invalid action origin');
+    }
+  }
+  const declared = Number(req.headers.get('content-length') || 0);
+  if (declared > ACTION_MAX_BODY) return actionFail(413, 'server action request body too large');
   let id = '';
   try { id = decodeURIComponent(urlPath.slice('/__krate/action/'.length)); } catch {}
   const entry = (loadActionManifest().actions || []).find((a) => a.id === id);
@@ -251,6 +273,7 @@ async function krateRunAction(req, urlPath, search) {
     if (!failure) failure = e;
   }
   if (!redirect && result && typeof result === 'object' && typeof result.redirect === 'string') redirect = result.redirect;
+  redirect = safeActionRedirect(redirect);
   let body = '';
   if (!failure && fetchMode) {
     const envelope = { ok: true, result: result === undefined ? null : result };
@@ -288,7 +311,14 @@ async function sendActionResponse(res, response) {
 
 async function runAction(req, res, urlObj) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > ACTION_MAX_BODY) {
+      return sendActionResponse(res, actionFail(413, 'server action request body too large'));
+    }
+    chunks.push(chunk);
+  }
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) {
     if (v !== undefined) headers.set(k, Array.isArray(v) ? v.join(k === 'cookie' ? '; ' : ', ') : v);

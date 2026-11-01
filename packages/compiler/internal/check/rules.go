@@ -122,12 +122,12 @@ func ruleTitle(p *Page, _ *Config) []Finding {
 	if title == "" {
 		return []Finding{{
 			Message: "page has no <title>",
-			Hint:    "Export a <Head><title>…</title></Head> or rely on seo.siteName.",
+			Hint:    "Export a <Head><title>...</title></Head> or rely on seo.siteName.",
 		}}
 	}
 	if len([]rune(title)) > 60 {
 		return []Finding{{
-			Message: fmt.Sprintf("<title> is %d characters (recommended ≤ 60)", len([]rune(title))),
+			Message: fmt.Sprintf("<title> is %d characters (recommended <= 60)", len([]rune(title))),
 			Hint:    "Shorten the title so it is not truncated in search results.",
 		}}
 	}
@@ -143,12 +143,12 @@ func ruleDescription(p *Page, _ *Config) []Finding {
 	if !ok || strings.TrimSpace(desc) == "" {
 		return []Finding{{
 			Message: "page has no meta description",
-			Hint:    "Set seo.description, or add <meta name=\"description\" content=\"…\">.",
+			Hint:    "Set seo.description, or add <meta name=\"description\" content=\"...\">.",
 		}}
 	}
 	if len([]rune(desc)) > 160 {
 		return []Finding{{
-			Message: fmt.Sprintf("meta description is %d characters (recommended ≤ 160)", len([]rune(desc))),
+			Message: fmt.Sprintf("meta description is %d characters (recommended <= 160)", len([]rune(desc))),
 			Hint:    "Tighten the description; search engines truncate around 160.",
 		}}
 	}

@@ -1,6 +1,6 @@
 ---
 title: Upgrading
-order: 12
+order: 17
 description: Keep Krate, @krate/runtime, and @krate/components in sync and upgrade safely.
 ---
 
@@ -8,9 +8,9 @@ description: Keep Krate, @krate/runtime, and @krate/components in sync and upgra
 
 Krate ships as several packages that must stay on the same minor:
 
-- `@krate/core` — the CLI + Go compiler
-- `@krate/runtime` — signals, DOM, router, server renderer
-- `@krate/components` — the built-in component library
+- `@krate/core` - the CLI + Go compiler
+- `@krate/runtime` - signals, DOM, router, server renderer
+- `@krate/components` - the built-in component library
 
 ## Upgrading a project
 
@@ -44,7 +44,7 @@ between builds.
 When upgrading across a minor:
 
 1. Read the release notes (GitHub Releases for the tag).
-2. Re-read [Configuration](/docs/reference/config/) for renamed/removed keys —
+2. Re-read [Configuration](/docs/reference/config/) for renamed/removed keys -
    Krate now warns on unknown config keys.
 3. Regenerate types: `krate types`.
 4. Run `krate build && krate check && npx tsc --noEmit`.
@@ -78,5 +78,5 @@ rm -rf dist .krate
 `@krate/components` uses a namespaced compound API: `Tabs.Trigger`,
 `Breadcrumb.List`, `Table.Row`, `Steps.Step`, `Form.Field`, `FileTree.Folder`,
 and so on. The older flat exports (`TabsTrigger`, `BreadcrumbList`, `TableRow`,
-`Step`, `FormField`, `FileTreeItem`, …) still work as **deprecated aliases**, but
-prefer the namespaced form — it is what the docs and examples use.
+`Step`, `FormField`, `FileTreeItem`, ...) still work as **deprecated aliases**, but
+prefer the namespaced form - it is what the docs and examples use.

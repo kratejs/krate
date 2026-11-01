@@ -73,7 +73,7 @@ minifyJS: false,              // JS minification (inherits minify)
 
 Minification only controls whitespace/size optimizations. **Duplicate
 declarations within a rule (including same-name CSS custom properties) are
-always folded to the last value**, whether or not minification is enabled —
+always folded to the last value**, whether or not minification is enabled -
 formatting is preserved when it is off.
 
 ## CSS
@@ -236,7 +236,7 @@ markdown: {
 
 Beyond GFM (tables, task lists, strikethrough, autolinks), the renderer supports
 definition lists, footnotes (`[^1]`), emoji shortcodes (`:rocket:`), and
-component directives — `:::card`, `:::steps` (`::step`), `:::tabs` (`::tab`),
+component directives - `:::card`, `:::steps` (`::step`), `:::tabs` (`::tab`),
 and `:::code-group`. The `Tabs`/`Steps`/`Card`/`Code` components are auto-imported
 for the docs plugin; elsewhere `:::component Name` wraps arbitrary components.
 
@@ -288,7 +288,7 @@ ssr: {
   `"quickjs"` (default) uses the embedded QuickJS runtime with no Node.js
   dependency; `"node"`/`"deno"` use the Node `http` sidecar; **`"bun"` uses a
   Bun-native sidecar built on `Bun.serve`** (no Node http stack, no cluster
-  shim) — the fastest JS/TS sidecar option.
+  shim) - the fastest JS/TS sidecar option.
 - **`nodeWorkers`** forks that many Node worker processes (`cluster`) for the
   API sidecar when `apiRuntime` (or `middlewareRuntime`) is
   `node`/`bun`/`deno`. (Ignored by the Bun sidecar, which is single-process.)
@@ -304,7 +304,7 @@ ssr: {
   state). Slower; dev uses it automatically so route edits are picked up.
 
 Page-level rendering is opted into per page via
-`export const config = { isr | ssr | streaming, revalidate }` — see
+`export const config = { isr | ssr | streaming, revalidate }` - see
 [Rendering](/docs/core-concepts/rendering/). SSR/ISR/streaming pages render in
 the sidecar, which resolves only the page's dynamic regions against the baked
 static shell; the embedded QuickJS runtime is used for middleware, API routes,
@@ -314,7 +314,7 @@ and community plugins.
 
 ```typescript
 ppr: true,              // cache dynamic regions on non-ISR pages
-ppr: { revalidate: 60 } // …with a custom window (seconds)
+ppr: { revalidate: 60 } // ...with a custom window (seconds)
 ```
 
 Dynamic regions (Suspense primaries + `@runtime` components) are already spliced
@@ -325,7 +325,7 @@ region a 30-second window. Region caches are bounded, persisted with the ISR
 cache, and invalidated per route.
 
 :::warning
-Region cache keys include the route, parameters, and query — **not cookies,
+Region cache keys include the route, parameters, and query - **not cookies,
 headers, or sessions**. Do not enable `ppr` for regions that render
 per-user/per-session content, or one user's output can be served to another.
 :::
@@ -396,7 +396,7 @@ Bases are merged underneath this config: objects deep-merge (this config wins),
 and additive arrays (`plugins`, `redirects`, `rewrites`, `serverComponents`,
 `runtimeComponents`, `serverDirs`, `runtimeDirs`) concatenate. Duplicate
 `plugins` are de-duped by name, with the extending config winning. Paths resolve
-relative to the extending config, then to `node_modules` (package presets —
+relative to the extending config, then to `node_modules` (package presets -
 resolved via `package.json` `krate`, `exports`, `module`, or `main`). Cycles are
 rejected.
 
@@ -461,8 +461,8 @@ robots: {
 ## Component tiers
 
 ```typescript
-serverComponents: ["DataTable"],   // names → @server
-runtimeComponents: ["AuthCheck"],  // names → @runtime
+serverComponents: ["DataTable"],   // names -> @server
+runtimeComponents: ["AuthCheck"],  // names -> @runtime
 serverDirs: ["src/components/server"],
 runtimeDirs: ["src/components/runtime"],
 ```
@@ -477,7 +477,7 @@ tsBaseDir: ".",
 ```
 
 Path aliases are also read automatically from `tsconfig.json`
-(`compilerOptions.paths` and `baseUrl`) — e.g. `@/components/Button` →
+(`compilerOptions.paths` and `baseUrl`) - e.g. `@/components/Button` ->
 `src/components/Button`.
 
 ## Content collections
@@ -526,11 +526,11 @@ compat: {
 Controls how CSS Signals are emitted for browser support (see
 [Browser Support](/docs/core-concepts/browser-support/)):
 
-- **`modern`** (default) — `:has()` selectors, zero client JS for CSS-signal
+- **`modern`** (default) - `:has()` selectors, zero client JS for CSS-signal
   pages. Requires `:has()` (Chrome/Edge 105+, Safari 15.4+, Firefox 121+).
-- **`legacy`** — emits class-based selectors plus a tiny scoped shim instead of
+- **`legacy`** - emits class-based selectors plus a tiny scoped shim instead of
   `:has()`, so interactive CSS-signal pages work on browsers without it.
-- **`hybrid`** — emits both, each wrapped in `@supports selector(:has(*))`, and
+- **`hybrid`** - emits both, each wrapped in `@supports selector(:has(*))`, and
   feature-gates the shim. Modern browsers keep the zero-JS `:has()` path; legacy
   browsers get the shim. One document, no server involvement.
 

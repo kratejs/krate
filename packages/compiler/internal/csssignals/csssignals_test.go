@@ -359,7 +359,7 @@ func TestAnalyzeStack(t *testing.T) {
 		t.Fatalf("kind=%v", s.Kind)
 	}
 	if s.Tree["settings"] != "root" {
-		t.Errorf("tree=%v (want settings→root)", s.Tree)
+		t.Errorf("tree=%v (want settings->root)", s.Tree)
 	}
 }
 

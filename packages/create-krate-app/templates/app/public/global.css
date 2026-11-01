@@ -6,6 +6,8 @@
   --text: #e6e9f0;
   --text-muted: #98a2b8;
   --accent: #00add8;
+  --accent-strong: #007a99;
+  --accent-strong-hover: #006b87;
   --accent-soft: rgba(0, 173, 216, 0.12);
   --radius: 10px;
   --max-width: 1080px;
@@ -87,7 +89,7 @@ code {
   width: 26px;
   height: 26px;
   border-radius: 7px;
-  background: var(--accent);
+  background: var(--accent-strong);
   color: #fff;
   font-weight: 800;
 }
@@ -175,12 +177,12 @@ code {
 }
 
 .btn-primary {
-  background: var(--accent);
+  background: var(--accent-strong);
   color: #fff;
 }
 
 .btn-primary:hover {
-  background: #00c0ee;
+  background: var(--accent-strong-hover);
   text-decoration: none;
 }
 

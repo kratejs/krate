@@ -86,6 +86,24 @@ func TestCORSMiddlewareAllowAllAndPreflight(t *testing.T) {
 	}
 }
 
+func TestCORSMiddlewareRejectsCredentialedWildcard(t *testing.T) {
+	cfg := config.Default()
+	cfg.CORS.Enabled = true
+	cfg.CORS.Credentials = true
+	h := corsMiddleware(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("credentialed wildcard reflected origin %q", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Errorf("credentialed wildcard emitted Allow-Credentials %q", got)
+	}
+}
+
 func TestCORSMiddlewareExplicitOrigins(t *testing.T) {
 	cfg := config.Default()
 	cfg.CORS.Enabled = true

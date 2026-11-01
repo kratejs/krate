@@ -1,8 +1,8 @@
 /* Design tokens for @krate/components.
  *
  * Defaults mirror @krate/base-docs-theme (the docs site). Every declaration is
- * wrapped in `:where(...)` (zero specificity) so ANY rule of yours — a plain
- * `:root { --krate-primary: … }` — overrides the defaults regardless of load
+ * wrapped in `:where(...)` (zero specificity) so ANY rule of yours - a plain
+ * `:root { --krate-primary: ... }` - overrides the defaults regardless of load
  * order. Only set `--krate-primary` to retheme: hover, focus ring, active
  * states, and the CSS-signal `--krate-active*` colours are derived from it. */
 :where(:root) {

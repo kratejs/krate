@@ -129,7 +129,7 @@ func TestStreamRegionPageSplicesFrames(t *testing.T) {
 	})
 
 	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
-	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil)
+	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil, false, 0, "")
 	if !rr.served {
 		t.Fatal("streamRegionPage returned served=false for a shell with suspense markers")
 	}
@@ -183,7 +183,7 @@ func TestStreamRegionPageCoarsePageRegion(t *testing.T) {
 	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
 	rec.Code = 200
 	rec.Header().Set("Content-Type", "text/html; charset=utf-8")
-	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, map[string]string{"id": "abc"}, nil, nil, nil, nil)
+	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, map[string]string{"id": "abc"}, nil, nil, nil, nil, false, 0, "")
 	if !rr.served {
 		t.Fatal("streamRegionPage returned served=false for a shell with a page marker")
 	}
@@ -237,7 +237,7 @@ func TestStreamRegionPagePageRegionErrorKeepsBakedBody(t *testing.T) {
 	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
 	rec.Code = 200
 	rec.Header().Set("Content-Type", "text/html; charset=utf-8")
-	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil)
+	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil, false, 0, "")
 	if !rr.served {
 		t.Fatal("streamRegionPage returned served=false for a shell with a page marker")
 	}
@@ -261,7 +261,7 @@ func TestStreamRegionPageNoMarkersReturnsFalse(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	rr := streamRegionPage(rec, nil, newRegionShellCache(), absOut, "/plain", 1, nil, nil, nil, nil, nil)
+	rr := streamRegionPage(rec, nil, newRegionShellCache(), absOut, "/plain", 1, nil, nil, nil, nil, nil, false, 0, "")
 	if rr.served {
 		t.Error("streamRegionPage should return served=false when the shell has no suspense markers")
 	}
@@ -288,7 +288,7 @@ func TestStreamRegionPageKeepsFallbackOnError(t *testing.T) {
 	})
 
 	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
-	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil)
+	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil, false, 0, "")
 	if !rr.served {
 		t.Fatal("streamRegionPage returned served=false")
 	}
@@ -321,7 +321,7 @@ func TestStreamRegionPageMultipleRegions(t *testing.T) {
 	})
 
 	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
-	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil)
+	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil, false, 0, "")
 	if !rr.served {
 		t.Fatal("streamRegionPage returned served=false")
 	}
@@ -360,7 +360,7 @@ func TestStreamRegionPageStandaloneRegionMarker(t *testing.T) {
 	})
 
 	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
-	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil)
+	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil, false, 0, "")
 	if !rr.served {
 		t.Fatal("streamRegionPage returned served=false for a shell with region markers")
 	}
@@ -407,7 +407,7 @@ func TestStreamRegionPageNestedRegionSkipped(t *testing.T) {
 	}
 
 	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
-	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, goRenders, renderGo)
+	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, goRenders, renderGo, false, 0, "")
 	if !rr.served {
 		t.Fatal("streamRegionPage returned served=false")
 	}
@@ -446,7 +446,7 @@ func TestStreamRegionPageNestedRegionSplicedWhenParentKept(t *testing.T) {
 	})
 
 	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
-	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil)
+	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil, false, 0, "")
 	if !rr.served {
 		t.Fatal("streamRegionPage returned served=false")
 	}
@@ -487,7 +487,7 @@ func TestStreamRegionPageGoOnlyNoSidecar(t *testing.T) {
 
 	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
 	// ssrPort 0 == no Node renderer; the call must not attempt to dial it.
-	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, 0, nil, nil, nil, goRenders, renderGo)
+	rr := streamRegionPage(rec, rec, newRegionShellCache(), absOut, route, 0, nil, nil, nil, goRenders, renderGo, false, 0, "")
 	if !rr.served {
 		t.Fatal("streamRegionPage should serve a Go-only page")
 	}

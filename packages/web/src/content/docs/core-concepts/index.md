@@ -46,11 +46,11 @@ Context provides dependency injection. Resources handle async data. See
 Every page is pre-rendered at build time into a static shell. Depending on the
 page's exports and config, the final HTML can be:
 
-- **SSG** (default) — fully static HTML, no runtime data.
-- **ISR** — static shell; the page body is cached per URL variant and
+- **SSG** (default) - fully static HTML, no runtime data.
+- **ISR** - static shell; the page body is cached per URL variant and
   revalidated in the background.
-- **SSR** — static shell; the page body is rendered fresh per request.
-- **Streaming** — static shell with dynamic regions (runtime components /
+- **SSR** - static shell; the page body is rendered fresh per request.
+- **Streaming** - static shell with dynamic regions (runtime components /
   Suspense) that the sidecar renders and splices in, streaming as they resolve.
 
 All four modes are static-first: only the page's dynamic regions (or its whole
@@ -59,8 +59,8 @@ body, for ISR/SSR) are rendered at request time. See
 
 ## Component tiers
 
-Components are classified into four tiers — static, client, server, and
-runtime — that determine how and where they render. See
+Components are classified into four tiers - static, client, server, and
+runtime - that determine how and where they render. See
 [Component Tiers](/docs/core-concepts/component-tiers/).
 
 ## Guides
@@ -72,6 +72,9 @@ runtime — that determine how and where they render. See
 | [Component Tiers](/docs/core-concepts/component-tiers/) | Static / client / server / runtime |
 | [Rendering](/docs/core-concepts/rendering/) | SSG, ISR, SSR & streaming |
 | [Styling](/docs/core-concepts/styling/) | CSS Modules, Tailwind, the CSS pipeline |
+| [CSS Signals](/docs/core-concepts/css-signals/) | Container-aware, state-driven CSS |
+| [Markdown & MDX](/docs/core-concepts/markdown/) | Markdown, MDX, directives, and diagrams |
+| [Browser Support](/docs/core-concepts/browser-support/) | Supported browsers and feature requirements |
 
-Want the internals (lexer → parser → bundler → renderer)? See
-[Contributing → Architecture](/docs/contributing/architecture/).
+Want the internals (lexer -> parser -> bundler -> renderer)? See
+[Contributing -> Architecture](/docs/contributing/architecture/).

@@ -34,11 +34,17 @@ type Policy struct {
 	// AllowBinary permits writing binary files. Read tools already return a
 	// binary marker instead of content.
 	AllowBinary bool `json:"allowBinary,omitempty"`
+	// ReadOnlyMode disables every write tool and run_task, for a shared or
+	// remote MCP profile that should only inspect the project.
+	ReadOnlyMode bool `json:"readOnlyMode,omitempty"`
 	// AllowTasks gates run_task.
 	AllowTasks []string `json:"allowTasks,omitempty"`
 
 	// loaded is true when a config file was found (informational).
 	loaded bool
+	// invalid is true when a policy file exists but could not be parsed. The
+	// policy then fails closed instead of silently granting the default access.
+	invalid bool
 }
 
 // defaultWriteDeniedPatterns are generated/output trees that must never be
@@ -53,9 +59,11 @@ var defaultWriteDeniedPatterns = []string{
 // defaultDeniedPatterns are always denied unless an `allow` entry matches.
 // These hold credentials or internal VCS state an agent must not rewrite.
 var defaultDeniedPatterns = []string{
-	".env", ".env.*", "*.env",
-	"*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore",
+	".env", ".env.*", "*.env", ".envrc", ".dev.vars",
+	"*.pem", "*.key", "*.p12", "*.pfx", "*.jks", "*.keystore", "*.p8",
 	"id_rsa", "id_ed25519", "id_ecdsa", "id_dsa",
+	"credentials.json", "service-account*.json",
+	".aws", ".aws/**", ".docker", ".docker/config.json",
 	".git", ".git/**",
 	".krate", ".krate/**",
 	".krate/mcp.json",
@@ -75,7 +83,7 @@ func loadPolicy(root string) *Policy {
 		return p
 	}
 	if err := json.Unmarshal(data, p); err != nil {
-		return &Policy{}
+		return &Policy{invalid: true}
 	}
 	p.loaded = true
 	return p
@@ -85,6 +93,9 @@ func loadPolicy(root string) *Policy {
 // explicit `allow` pattern overrides the default sensitive list but not an
 // explicit `deny` entry.
 func (p *Policy) denied(rel string) bool {
+	if p.invalid {
+		return true
+	}
 	rel = normalizeRel(rel)
 	for _, pat := range p.Deny {
 		if globMatch(pat, rel) {
@@ -107,10 +118,16 @@ func (p *Policy) denied(rel string) bool {
 // writable reports whether rel may be written: not denied, not read-only,
 // inside writeRoots when configured, and not in a generated output tree.
 func (p *Policy) writable(rel string) bool {
+	if p.ReadOnlyMode {
+		return false
+	}
 	if p.denied(rel) {
 		return false
 	}
 	rel = normalizeRel(rel)
+	if !p.AllowBinary && isBinaryPath(rel) {
+		return false
+	}
 	for _, pat := range p.ReadOnly {
 		if globMatch(pat, rel) {
 			return false
@@ -149,7 +166,16 @@ func (p *Policy) withinWriteRoots(rel string) bool {
 
 // describe returns a short human-readable summary of why a path is denied.
 func (p *Policy) deniedReason(rel string) string {
+	if p.invalid {
+		return "the project policy file is malformed; fix .krate/mcp.json"
+	}
+	if p.ReadOnlyMode {
+		return "is read-only because the project policy enables readOnlyMode"
+	}
 	rel = normalizeRel(rel)
+	if !p.AllowBinary && isBinaryPath(rel) {
+		return "is a binary file; set allowBinary in .krate/mcp.json to permit writing it"
+	}
 	for _, pat := range p.Deny {
 		if globMatch(pat, rel) {
 			return "matches the project deny rule " + strconvQuote(pat)
@@ -180,6 +206,18 @@ func normalizeRel(rel string) string {
 	rel = filepath.ToSlash(rel)
 	rel = strings.TrimPrefix(rel, "./")
 	return rel
+}
+
+var binaryExtensions = map[string]bool{
+	".avif": true, ".br": true, ".eot": true, ".gif": true, ".gz": true,
+	".ico": true, ".jpeg": true, ".jpg": true, ".mp3": true, ".mp4": true,
+	".ogg": true, ".otf": true, ".pdf": true, ".png": true, ".tar": true,
+	".ttf": true, ".wasm": true, ".wav": true, ".webm": true, ".webp": true,
+	".woff": true, ".woff2": true, ".zip": true,
+}
+
+func isBinaryPath(rel string) bool {
+	return binaryExtensions[strings.ToLower(filepath.Ext(rel))]
 }
 
 // globMatch matches a slash path against a glob supporting `**` (any number of

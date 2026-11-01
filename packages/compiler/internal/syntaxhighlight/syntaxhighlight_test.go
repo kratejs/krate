@@ -27,6 +27,6 @@ func TestIndentationPreserved(t *testing.T) {
 	tagRe := regexp.MustCompile(`<[^>]+>`)
 	plain := htmlstd.UnescapeString(tagRe.ReplaceAllString(hl, ""))
 	if want := strings.TrimSpace(code); plain != want {
-		t.Errorf("round-trip mismatch — highlighting lost content or whitespace:\n got: %q\nwant: %q", plain, want)
+		t.Errorf("round-trip mismatch - highlighting lost content or whitespace:\n got: %q\nwant: %q", plain, want)
 	}
 }

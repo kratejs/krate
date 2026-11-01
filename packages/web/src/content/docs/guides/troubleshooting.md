@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-order: 8
+order: 10
 description: Common Krate errors and how to fix them.
 ---
 
@@ -39,7 +39,7 @@ renderer).
 
 - **Tailwind:** classes are collected from the files listed in `tailwind.content`
   (defaults to `src`). A class built dynamically (e.g. `"text-" + color`) cannot
-  be detected — use a full literal class name, or add the file to `content`.
+  be detected - use a full literal class name, or add the file to `content`.
 - **CSS Modules:** import the module and reference `styles.foo`; a bare class
   name in a `.module.css` import is scoped.
 
@@ -48,7 +48,7 @@ renderer).
 - The watcher ignores `dist`, `.krate`, `node_modules`, and `_`-prefixed files.
 - If you renamed a page, wait for the rebuild banner; a compile error blocks the
   reload (the browser shows a build-error overlay).
-- Check the terminal for `Watching … for changes`.
+- Check the terminal for `Watching ... for changes`.
 
 ## `krate check` fails on an intentional pattern
 
@@ -86,7 +86,7 @@ The SSR renderer uses `devServer.port + 10` (override with `ssr.rendererPort`).
 
 ## Generated JS is larger than expected
 
-- Run `krate check` — `perf/js-budget` reports per-route JS.
+- Run `krate check` - `perf/js-budget` reports per-route JS.
 - Move logic into a **server component** (`// @server` or `*.server.tsx`) so it
   ships no client JS.
 - Confirm you are not importing a large module into a client component.
@@ -94,4 +94,4 @@ The SSR renderer uses `devServer.port + 10` (override with `ssr.rendererPort`).
 ## Type errors on generated routes/content
 
 Run `krate types` to regenerate `.krate/types/*.d.ts`, then `npx tsc --noEmit`.
-Editors cache declarations — reload the TS server if types look stale.
+Editors cache declarations - reload the TS server if types look stale.

@@ -71,9 +71,18 @@ export function isServerAction(value: unknown): value is ServerActionProxy {
 }
 
 function navigateTo(url: string): void {
+  const safe = safeRedirect(url);
+  if (!safe) return;
   const nav = (globalThis as { navigate?: (u: string) => unknown }).navigate;
-  if (typeof nav === 'function') nav(url);
-  else if (typeof location !== 'undefined') location.assign(url);
+  if (typeof nav === 'function') nav(safe);
+  else if (typeof location !== 'undefined') location.assign(safe);
+}
+
+/** Only same-origin absolute paths are followed after an action. */
+function safeRedirect(url: string): string {
+  if (!url || !url.startsWith('/') || url.startsWith('//')) return '';
+  if (url.includes('\\') || /[\u0000-\u001f\u007f]/.test(url)) return '';
+  return url;
 }
 
 /**

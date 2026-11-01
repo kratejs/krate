@@ -397,7 +397,7 @@ export default function VideoPage(props) {
 		t.Fatalf("beta render: cacheStatus=%q cached=%v, want miss", beta.cacheStatus, beta.cached)
 	}
 	if beta.html == alpha1.html {
-		t.Fatalf("beta and alpha rendered identical HTML — variant key collision?")
+		t.Fatalf("beta and alpha rendered identical HTML - variant key collision?")
 	}
 
 	// 4. Alpha unaffected by beta render -> still a hit.
@@ -499,7 +499,15 @@ func postRegionsList(t *testing.T, base, route, url string, params map[string]st
 		body["regions"] = regions
 	}
 	data, _ := json.Marshal(body)
-	resp, err := http.Post(base+"/__krate/regions", "application/json", bytes.NewReader(data))
+	req, err := http.NewRequest(http.MethodPost, base+"/__krate/regions", bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("regions request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if secret := os.Getenv("KRATE_TEST_INTERNAL_SECRET"); secret != "" {
+		req.Header.Set("X-Krate-Internal", secret)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("regions request: %v", err)
 	}
@@ -643,7 +651,7 @@ func TestRegionSidecarE2E(t *testing.T) {
 			t.Errorf("region HTML %q missing rendered component output", html)
 		}
 		if strings.Contains(html, "loading") {
-			t.Errorf("region HTML %q contains the fallback — region must render the primary", html)
+			t.Errorf("region HTML %q contains the fallback - region must render the primary", html)
 		}
 	}
 	if got == "" && len(frames.errors) > 0 {

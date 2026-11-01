@@ -2,7 +2,7 @@ export default function Changelog() {
   return (
     <article class="section">
       <Head>
-        <title>Changelog — Krate</title>
+        <title>Changelog - Krate</title>
         <meta name="description" content="Krate release notes and changelog." />
       </Head>
       <h1 class="section-title">Changelog</h1>

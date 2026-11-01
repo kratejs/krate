@@ -11,11 +11,12 @@ const version = JSON.parse(
 
 // scaffold delegates `krate init` / `krate create` to create-krate-app, the
 // official scaffold CLI. It lives in the JS wrapper (not the Go binary) so it
-// works on every platform and always pulls the latest published scaffold.
+// works on every platform and follows the core package's release channel.
 function scaffold(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-    const npxArgs = ['--yes', 'create-krate-app@latest', ...args.slice(1)];
+    const channel = /^[^-]+-([A-Za-z]+)/.exec(version);
+    const npxArgs = ['--yes', 'create-krate-app@' + (channel ? channel[1] : 'latest'), ...args.slice(1)];
 
     const proc = spawn(npxCmd, npxArgs, { stdio: 'inherit' });
     proc.on('close', (code) => {

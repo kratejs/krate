@@ -155,6 +155,7 @@ func (b *Builder) compileActionModule(dir string, mod *actionModule) error {
 func discoverActionFiles(root, outDir string) ([]string, error) {
 	outAbs, _ := filepath.Abs(outDir)
 	var files []string
+	var misplaced []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -183,12 +184,21 @@ func discoverActionFiles(root, outDir string) ([]string, error) {
 		if perrs != nil {
 			return nil
 		}
-		if hasUseServerDirective(prog) {
+		found, first := useServerDirective(prog)
+		if found && first {
 			files = append(files, path)
+		} else if found {
+			misplaced = append(misplaced, path)
 		}
 		return nil
 	})
-	return files, err
+	if err != nil {
+		return nil, err
+	}
+	if len(misplaced) > 0 {
+		return nil, fmt.Errorf("\"use server\" must be the first statement in %s", strings.Join(misplaced, ", "))
+	}
+	return files, nil
 }
 
 func isSourceFile(path string) bool {
@@ -211,19 +221,21 @@ func parseSourceFile(path string, data []byte) (*ast.Program, error) {
 	return prog, nil
 }
 
-func hasUseServerDirective(prog *ast.Program) bool {
-	if prog == nil || len(prog.Body) == 0 {
-		return false
+func useServerDirective(prog *ast.Program) (found, first bool) {
+	if prog == nil {
+		return false, false
 	}
-	stmt, ok := prog.Body[0].(*ast.ExprStmt)
-	if !ok {
-		return false
+	for i, stmt := range prog.Body {
+		expr, ok := stmt.(*ast.ExprStmt)
+		if !ok {
+			continue
+		}
+		lit, ok := expr.Expression.(*ast.Literal)
+		if ok && lit.Kind == ast.StringLit && strings.TrimSpace(lit.Value) == "use server" {
+			return true, i == 0
+		}
 	}
-	lit, ok := stmt.Expression.(*ast.Literal)
-	if !ok || lit.Kind != ast.StringLit {
-		return false
-	}
-	return strings.TrimSpace(lit.Value) == "use server"
+	return false, false
 }
 
 // parseActionExports returns every exported function in a `"use server"` file.

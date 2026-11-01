@@ -1,7 +1,7 @@
 ---
 title: CSS Signals API
 description: Reference for the zero-JS CSS-signal primitives and scope handles.
-order: 4
+order: 5
 ---
 
 # CSS Signals API
@@ -71,7 +71,7 @@ const f = createCSSFlags(['bold', 'italic']);
 
 ### `createCSSGroup(initial | null, options?)`
 
-Optional one-of-N with a `null` "closed" state — the shape behind accordions,
+Optional one-of-N with a `null` "closed" state - the shape behind accordions,
 disclosures, dialogs, popovers, menus. Returns `CSSScope<T | null>`.
 
 ```ts
@@ -93,7 +93,7 @@ const r = createCSSRange(2, { min: 0, max: 4, step: 1 });
 <div class="fill"></div>
 ```
 
-Continuous values are not expressible in pure CSS — use `createSignal`.
+Continuous values are not expressible in pure CSS - use `createSignal`.
 
 ### `createCSSStack(nodes, options?)`
 
@@ -117,7 +117,7 @@ const [stack, { push, pop, clear }] = createCSSStack(['root']);
 | `label` | `string` | accessible label for the scope container |
 | `name` | `string` | submit the selected value under this `name` |
 | `disabled` | `T[]` | options whose controller input is disabled |
-| `anchor` | side | anchor-position panels (`bottom-start`, `top`, `right`, …) |
+| `anchor` | side | anchor-position panels (`bottom-start`, `top`, `right`, ...) |
 | `transition` | `boolean` | fade/slide panels on open |
 | `aria` | `false`, or an object with `role`/`panelRole`/`container-role` | raw ARIA overrides |
 | `vars` | `{ '--prop': { option: 'value' } }` | per-option custom properties |
@@ -126,17 +126,17 @@ const [stack, { push, pop, clear }] = createCSSStack(['root']);
 
 | Preset | Container | Trigger | Panel | Runtime |
 |--------|-----------|---------|-------|---------|
-| *(none)* | — | — | — | none |
-| `switch` | — | `role=switch` | — | none |
-| `checkbox` | — | — | — | none |
-| `radiogroup` / `radio` | `radiogroup` | — | — | none |
+| *(none)* | - | - | - | none |
+| `switch` | - | `role=switch` | - | none |
+| `checkbox` | - | - | - | none |
+| `radiogroup` / `radio` | `radiogroup` | - | - | none |
 | `tabs` / `tablist` | `tablist` | `tab` | `tabpanel` | +aria-selected |
-| `listbox` | `listbox` | `option` | — | +aria-selected |
+| `listbox` | `listbox` | `option` | - | +aria-selected |
 | `menu` | `menu` | `menuitemradio` | `menu` | +aria-selected |
 | `menubar` | `menubar` | `menuitemradio` | `menu` | +aria-selected |
-| `accordion` / `disclosure` | — | `button` | `region` | +aria-expanded |
-| `dialog` / `modal` | — | `button` | `dialog` | +aria-expanded |
-| `popover` | — | `button` | `group` | +aria-expanded |
+| `accordion` / `disclosure` | - | `button` | `region` | +aria-expanded |
+| `dialog` / `modal` | - | `button` | `dialog` | +aria-expanded |
+| `popover` | - | `button` | `group` | +aria-expanded |
 
 ## Composition
 
@@ -145,9 +145,9 @@ scope handle. `Ctx.use()` (alias `useContext()`) reads it.
 
 ```ts
 const TabsCtx = createScope<string>();
-// root:    <TabsCtx.Provider value={createCSSChoice('a')}>…</TabsCtx.Provider>
+// root:    <TabsCtx.Provider value={createCSSChoice('a')}>...</TabsCtx.Provider>
 // part:    const tab = TabsCtx.use();
-// prop:    <Part scope={tab} />  →  props.scope.trigger(props.value)
+// prop:    <Part scope={tab} />  ->  props.scope.trigger(props.value)
 ```
 
 The compiler resolves `Ctx.use()` to the nearest provider and rewrites spreads,

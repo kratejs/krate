@@ -31,7 +31,7 @@ Files named `[param].tsx` map to dynamic segments. The segment value is passed
 to the component as `params`:
 
 ```tsx
-// src/pages/video/[id].tsx → /video/abc123
+// src/pages/video/[id].tsx -> /video/abc123
 export default function VideoPage({ params }) {
   return <h1>Video {params.id}</h1>;
 }
@@ -58,7 +58,7 @@ are a build error.
 A `_layout.tsx` file wraps every page in its directory and subdirectories:
 
 ```tsx
-// src/pages/_layout.tsx — wraps every page in the directory
+// src/pages/_layout.tsx - wraps every page in the directory
 export default function Layout({ children }) {
   return (
     <div>
@@ -164,7 +164,7 @@ while the next page is fetched. It is not a route of its own:
 ```tsx
 // src/pages/loading.tsx
 export default function Loading() {
-  return <div class="loading">Loading…</div>;
+  return <div class="loading">Loading...</div>;
 }
 ```
 
@@ -191,17 +191,17 @@ and `navigate()` keep working.
 
 The router handles:
 
-- **Prefetching** — `data-prefetch` on hover/focus and viewport entry, cached
+- **Prefetching** - `data-prefetch` on hover/focus and viewport entry, cached
   for 30 seconds and used once.
-- **Layout persistence** — shared layouts stay mounted (see above).
-- **Scroll restoration** — forward navigation scrolls to top; back/forward
+- **Layout persistence** - shared layouts stay mounted (see above).
+- **Scroll restoration** - forward navigation scrolls to top; back/forward
   restores the saved position of that history entry. Hash links scroll to the
   target element without a request.
-- **Modified clicks** — ⌘/Ctrl/Shift/Alt-click and middle-click are never
+- **Modified clicks** - Cmd/Ctrl/Shift/Alt-click and middle-click are never
   intercepted.
-- **External links** — `http(s)://`, `mailto:`, `tel:`, `#`, `target="_blank"`
+- **External links** - `http(s)://`, `mailto:`, `tel:`, `#`, `target="_blank"`
   and `download` anchors are left as plain links.
-- **GET forms** — submitted client-side (opt out with `data-krate-reload`).
+- **GET forms** - submitted client-side (opt out with `data-krate-reload`).
 
 `<Link>` supports `prefetch={false}`, `replace`, `scroll={false}`, and
 `target="_blank"` (which auto-adds `rel="noopener noreferrer"`). After

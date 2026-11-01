@@ -6,16 +6,16 @@ order: 1
 # Welcome
 
 This is your new documentation site, powered by Krate. Everything under
-`src/content/docs/` is rendered into the docs section automatically — Markdown and
+`src/content/docs/` is rendered into the docs section automatically - Markdown and
 MDX files become pages, and directories become sidebar sections.
 
 ## What you get
 
-- **Sidebar navigation** — generated from the content tree.
-- **Table of contents** — extracted from your headings.
+- **Sidebar navigation** - generated from the content tree.
+- **Table of contents** - extracted from your headings.
 - **Breadcrumbs** and **prev/next** navigation.
 - **Light/dark theme** toggle.
-- **Full-text search** — a WASM index embedded at build time.
+- **Full-text search** - a WASM index embedded at build time.
 - **Code highlighting** and GFM tables, task lists, and admonitions.
 
 ## A taste

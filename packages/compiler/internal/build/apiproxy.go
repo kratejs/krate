@@ -151,7 +151,7 @@ func (s *apiSidecar) supervise() {
 		default:
 		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %s⚠ API sidecar exited:%s %v (restarting in 1s)\n", cYellow, cReset, err)
+			fmt.Fprintf(os.Stderr, "  %s! API sidecar exited:%s %v (restarting in 1s)\n", cYellow, cReset, err)
 		}
 		time.Sleep(time.Second)
 	}

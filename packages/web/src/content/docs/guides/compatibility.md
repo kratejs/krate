@@ -52,7 +52,7 @@ for usage.
 
 ### Hooks: state and reducers
 
-**Source:** Beta · **Islands:** Beta · **SSR:** n/a
+**Source:** Beta - **Islands:** Beta - **SSR:** n/a
 
 useState and useReducer lower to signals with React render snapshots (handlers and effects read the committed state, functional updaters the latest), Object.is bail-out, lazy initializers (inline or named), useReducer init, a stable dispatch, and React's update lanes (discrete events commit in a microtask, other updates in a later task).
 
@@ -60,7 +60,7 @@ Evidence: `TestReactUseReducerBuild`, `TestRewriteReactUseReducer`, `TestRewrite
 
 ### Hooks: effects and memo
 
-**Source:** Beta · **Islands:** Beta · **SSR:** n/a
+**Source:** Beta - **Islands:** Beta - **SSR:** n/a
 
 Effects run in React's commit order (insertion, layout before paint, passive after paint or synchronously after discrete events; children before parents; cleanups before re-runs; parent-first unmount) with Object.is deps, and setups/cleanups read the state and props of their own commit. useMemo/useCallback honour deps synchronously. Conditional branches unmount and remount components with fresh state. Effects without deps re-run on the component's own state/props changes only; each divergence has a KR2xxx diagnostic.
 
@@ -68,7 +68,7 @@ Evidence: `TestRewriteReactEffectDepsAndMemo`, `TestRewriteReactEffectEmptyDepsM
 
 ### Context and refs
 
-**Source:** Beta · **Islands:** Beta · **SSR:** n/a
+**Source:** Beta - **Islands:** Beta - **SSR:** n/a
 
 Context resolves at the reader's position like React: Provider, React 19 <Ctx value>, Consumer render props, object defaults, nested and self-nesting providers, and providers around props.children; constant values fold at build time and state-driven values stay reactive. Object and callback refs (with React 19 cleanup functions), ref as a prop, forwardRef, createRef, useRef, and useImperativeHandle with deps attach before layout effects and detach on unmount.
 
@@ -76,7 +76,7 @@ Evidence: `TestUseContextTranspile`, `TestCrossComponentDynamicContextTranspile`
 
 ### Transitions and deferred values
 
-**Source:** Beta · **Islands:** Beta · **SSR:** n/a
+**Source:** Beta - **Islands:** Beta - **SSR:** n/a
 
 useTransition and startTransition support async actions: isPending stays true until the action, its awaited work and overlapping transitions settle, and a transition keeps revealed Suspense content. useDeferredValue (with React 19 initialValue) catches up in a later task; useSyncExternalStore follows the store by Object.is and unsubscribes on teardown. Updates after an await are ordinary updates, as in React 19.
 
@@ -84,7 +84,7 @@ Evidence: `TestRewriteReactUseTransitionLowered`, `TestTransitionStarterLowering
 
 ### Class components
 
-**Source:** Beta · **Islands:** n/a · **SSR:** n/a
+**Source:** Beta - **Islands:** n/a - **SSR:** n/a
 
 Lowered onto a runtime instance with React 18 ordering: batched setState with callbacks, forceUpdate, componentDidMount/DidUpdate (props and state, children first)/WillUnmount on branch removal, shouldComponentUpdate, PureComponent, getDerivedStateFromProps, getSnapshotBeforeUpdate, defaultProps, contextType, accessors, private members, and instance refs. UNSAFE_componentWillMount, legacy context and other statics are rejected with KR3xxx diagnostics.
 
@@ -92,7 +92,7 @@ Evidence: `TestClassComponentLowering`, `TestClassComponentLoweringEmit`, `TestC
 
 ### Error boundaries
 
-**Source:** Beta · **Islands:** Beta · **SSR:** Partial
+**Source:** Beta - **Islands:** Beta - **SSR:** Partial
 
 Classes with getDerivedStateFromError/componentDidCatch catch errors from descendants' render, bindings, lifecycles and effects (not event handlers or async code), unmount the failed subtree, and recover on reset. A throw while the page is built renders the boundary fallback (KR3009). Uncaught errors unmount only the failing component. Each Preact island has its own error boundary and marks a fallback placeholder when rendering fails.
 
@@ -107,7 +107,7 @@ Evidence: `TestBoundaryBuildTimeFallback`, `TestBuildTimeThrowWithoutBoundaryFai
 
 ### Children, keys, and refs
 
-**Source:** Partial · **Islands:** Partial · **SSR:** n/a
+**Source:** Partial - **Islands:** Partial - **SSR:** n/a
 
 Static Children helpers and cloneElement fold at build time. Lists reconcile by key with React semantics: rows keep DOM, input and focus state, component state, effects and refs across reorder, insert and removal (minimal moves), unkeyed lists match by index, items update in place, duplicate keys warn, and a changed key on a single element remounts it. Hydration adopts server-rendered rows by key. Missing, duplicate and partial keys are diagnosed (KR6001-KR6003). Refs in lists attach per item and detach when an item is removed.
 
@@ -122,7 +122,7 @@ Evidence: `TestReactChildrenMapSSR`, `TestReactCloneElementFold`, `TestReactKeyN
 
 ### Events
 
-**Source:** Beta · **Islands:** Beta · **SSR:** n/a
+**Source:** Beta - **Islands:** Beta - **SSR:** n/a
 
 React 17+ root delegation with capture then bubble order, native listener interleaving, stopPropagation, the synthetic event surface, React onChange semantics, focus/blur bubbling, per-element enter/leave, media and composition events. Unknown or lowercase event props are diagnosed (KR5001, KR5002).
 
@@ -137,7 +137,7 @@ Evidence: `TestEventDelegationBubbles`, `TestNonBubblingEventUsesDirectListener`
 
 ### Forms and inputs
 
-**Source:** Beta · **Islands:** Beta · **SSR:** n/a
+**Source:** Beta - **Islands:** Beta - **SSR:** n/a
 
 Controlled text, select (single and multiple), checkbox, radio group, textarea, number and range inputs restore to state after onChange; uncontrolled defaultValue/defaultChecked only set defaults; form reset and value={undefined} follow React. Form diagnostics: KR5004 to KR5007. React 19 form actions (action/formAction functions, reset after success, no-JS server action posts) run in the browser gate.
 
@@ -152,7 +152,7 @@ Evidence: `TestFormValueUsesPropertyBinding`, `TestFormControlBindings`, `TestFo
 
 ### Portals
 
-**Source:** Beta · **Islands:** Beta · **SSR:** n/a
+**Source:** Beta - **Islands:** Beta - **SSR:** n/a
 
 createPortal and Portal mount into document.body or a resolved container after hydration, follow conditional branches, unmount with their component, and bubble React events to the portal's React ancestors. Like React, portal content is not part of the server-rendered HTML.
 
@@ -160,7 +160,7 @@ Evidence: `TestPortalRendersAndMounts`, `TestCreatePortalLowersToAnchor`, `TestC
 
 ### Suspense
 
-**Source:** Beta · **Islands:** Beta · **SSR:** n/a
+**Source:** Beta - **Islands:** Beta - **SSR:** n/a
 
 Boundaries show their fallback while use(promise), a resource or a lazy component inside is pending, reveal siblings together with React's 300ms reveal throttle, and nest independently (innermost wins). Content that cannot resolve at build time ships the fallback and hydrates into the content. A non-transition update that suspends hides the content in place and shows the fallback; a transition keeps the revealed content. lazy() (static import or a loader resolving to a local component) shows the fallback until its separately loaded hydration chunk or loader is ready. Matches React in the browser differential suspense fixtures.
 
@@ -168,7 +168,7 @@ Evidence: `TestBuildSuspenseBoundaryStaticFallback`, `TestBuildSuspenseBoundaryR
 
 ### React 19 actions and forms
 
-**Source:** Beta · **Islands:** Partial · **SSR:** n/a
+**Source:** Beta - **Islands:** Partial - **SSR:** n/a
 
 Source useActionState (queued, previous state over the action transport, permalink no-JS fallback), useFormStatus (form-scoped), useOptimistic (revert on settle), requestFormReset, and function form actions are lowered and run in the browser gate. Compiled packages get the same useActionState/useOptimistic runtime; their useFormStatus is idle. use() and async startTransition are tracked under Suspense and transitions.
 
@@ -184,7 +184,7 @@ Evidence: `TestLowerUseActionState`, `TestReactBrowserDifferential`, `TestLowerU
 
 ### Server actions
 
-**Source:** Beta · **Islands:** n/a · **SSR:** Beta
+**Source:** Beta - **Islands:** n/a - **SSR:** Beta
 
 File-level "use server" modules compile to hashed POST endpoints with client proxies, bound arguments, no-JS form posts, SSR forms, registry validation, origin checks, body limits, and no-store responses. Enhanced forms return results without reloading; errors use a {message, digest} envelope; actions read headers() and cookies() and can redirect(). Inline "use server" functions are a coded build error (KR7001).
 
@@ -192,7 +192,7 @@ Evidence: `TestPrepareActionsBuildsManifestAndBundle`, `TestRewriteActionImports
 
 ### Data cache and revalidation
 
-**Source:** Beta · **Islands:** n/a · **SSR:** Beta
+**Source:** Beta - **Islands:** n/a - **SSR:** Beta
 
 @krate/runtime/cache provides revalidatePath, revalidateTag, unstable_cache and unstable_noStore; server fetch honors next.tags/next.revalidate/cache options; pages accept export const revalidate and export const dynamic. Revalidation is applied across the SSR renderer workers, Go region cache, QuickJS and Node API data caches before an action or API route responds; static (SSG) targets are reported as skipped (KR8603).
 
@@ -208,7 +208,7 @@ Evidence: `TestSegmentExportsRenderMode`, `TestDataCacheUsageInference`, `TestRe
 
 ### Compiled React packages
 
-**Source:** n/a · **Islands:** Beta · **SSR:** Beta
+**Source:** n/a - **Islands:** Beta - **SSR:** Beta
 
 Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island chunks, server-rendered initial markup, hydration, and an island error boundary.
 
@@ -216,7 +216,7 @@ Evidence: `TestIslandSignalPropBridge`, `TestIslandLocalComponent`, `TestIslandS
 
 ### shadcn-style dashboard
 
-**Source:** Beta · **Islands:** n/a · **SSR:** n/a
+**Source:** Beta - **Islands:** n/a - **SSR:** n/a
 
 Copied shadcn source components, cva/cn folding, cards, controlled filters, and derived lists run in the browser corpus.
 
@@ -224,7 +224,7 @@ Evidence: `TestShadcnButtonFoldsVariantsAndSpread`, `browser:/react-dashboard/`
 
 ### Next.js app corpus
 
-**Source:** Beta · **Islands:** n/a · **SSR:** n/a
+**Source:** Beta - **Islands:** n/a - **SSR:** n/a
 
 The benchmark Next App Router fixture is the migration-shaped corpus. It is source-corpus coverage today, not a browser-run Krate app.
 
@@ -232,7 +232,7 @@ Evidence: `fixture:packages/benchmark/fixtures/next`
 
 ### Local components in islands
 
-**Source:** n/a · **Islands:** Beta · **SSR:** n/a
+**Source:** n/a - **Islands:** Beta - **SSR:** n/a
 
 Imported local React-compatible modules can be used as tags inside a compiled island and are bundled with it. Same-file Krate functions are diagnosed because they cannot cross the Krate/Preact runtime boundary.
 
@@ -242,7 +242,7 @@ Evidence: `TestIslandLocalComponent`, `browser:/react-demo/`, `TestIslandSameFil
 
 ### SSR island hydration
 
-**Source:** n/a · **Islands:** Beta · **SSR:** Beta
+**Source:** n/a - **Islands:** Beta - **SSR:** Beta
 
 Islands with build-time-known props are server-rendered with Preact and hydrated in place. Each island has its own chunk; unknown props, browser-only components, and portals fall back to client-only with a warning. Request-time SSR and streaming island regions remain separate work.
 
@@ -252,7 +252,7 @@ Evidence: `TestIslandSignalPropBridge`, `TestIslandSSRWithHooks`, `TestIslandSSR
 
 ### Supported Preact versions
 
-**Source:** n/a · **Islands:** Beta · **SSR:** n/a
+**Source:** n/a - **Islands:** Beta - **SSR:** n/a
 
 The island build warns below 10.20. The conformance jobs exercise the minimum, an intermediate version, and the workspace version.
 
@@ -260,7 +260,7 @@ Evidence: `ci:preact-conformance`
 
 ### Browser differential corpus
 
-**Source:** Beta · **Islands:** n/a · **SSR:** n/a
+**Source:** Beta - **Islands:** n/a - **SSR:** n/a
 
 124 source-component fixtures (React 18 corpus plus the React 19 reference app) run in real React 19 and in Krate in Chromium, Firefox, and WebKit; DOM, form state, focus, and effect/lifecycle/ref ordering are compared after every step. Known divergences are tracked with a severity, and KRATE_REACT_EXIT=1 fails while P0/P1 entries remain.
 
@@ -272,7 +272,7 @@ Evidence: `TestReactBrowserDifferential`, `TestReactBrowserCorpus`, `ci:browser-
 
 ### React 19 reference app
 
-**Source:** Beta · **Islands:** n/a · **SSR:** n/a
+**Source:** Beta - **Islands:** n/a - **SSR:** n/a
 
 Fixtures for useActionState, useOptimistic, useFormStatus, form and button actions with auto-reset, use(promise) and use(context), ref as a prop, ref cleanup callbacks, async transitions, useDeferredValue initial values, document metadata, and server actions under the real server.
 

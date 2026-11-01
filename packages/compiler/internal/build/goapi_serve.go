@@ -32,9 +32,14 @@ var goMarkerRe = regexp.MustCompile(`<!--krate-go:([^:>]+):(\d+):([^>]*)-->`)
 // forwarded to components that take a krate.Request; each marker carries its own
 // revalidate window. Non-matching html is returned unchanged.
 func resolveGoMarkers(html, reqCtx string, renderGo func([]goRenderRegion) (map[string]string, error)) string {
+	out, _ := resolveGoMarkersE(html, reqCtx, renderGo)
+	return out
+}
+
+func resolveGoMarkersE(html, reqCtx string, renderGo func([]goRenderRegion) (map[string]string, error)) (string, error) {
 	ms := goMarkerRe.FindAllStringSubmatchIndex(html, -1)
 	if len(ms) == 0 {
-		return html
+		return html, nil
 	}
 	reqs := make([]goRenderRegion, 0, len(ms))
 	for i, m := range ms {
@@ -54,12 +59,12 @@ func resolveGoMarkers(html, reqCtx string, renderGo func([]goRenderRegion) (map[
 		})
 	}
 	if len(reqs) == 0 {
-		return html
+		return html, nil
 	}
 	rendered, err := renderGo(reqs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  %sGo component render failed:%s %v\n", cYellow, cReset, err)
-		return ""
+		return "", err
 	}
 	var b strings.Builder
 	last := 0
@@ -71,7 +76,7 @@ func resolveGoMarkers(html, reqCtx string, renderGo func([]goRenderRegion) (map[
 		last = m[1]
 	}
 	b.WriteString(html[last:])
-	return b.String()
+	return b.String(), nil
 }
 
 // goRenderRegion is one runtime Go component to render at request time.
@@ -227,6 +232,7 @@ func (g *goAPISupervisor) Render(regions []goRenderRegion) (map[string]string, e
 	}
 	defer resp.Body.Close()
 	dec := json.NewDecoder(resp.Body)
+	firstErr := ""
 	for {
 		var frame struct {
 			Type  string `json:"type"`
@@ -237,9 +243,15 @@ func (g *goAPISupervisor) Render(regions []goRenderRegion) (map[string]string, e
 		if err := dec.Decode(&frame); err != nil {
 			break
 		}
+		if frame.Error != "" && firstErr == "" {
+			firstErr = frame.Error
+		}
 		if frame.ID != "" && frame.Error == "" {
 			out[frame.ID] = frame.HTML
 		}
+	}
+	if firstErr != "" {
+		return out, fmt.Errorf("go region render failed: %s", firstErr)
 	}
 	// Cache renders that declare a revalidate window, unless a revalidation
 	// ran while they rendered (their HTML may predate it).
@@ -370,6 +382,24 @@ func (g *goAPISupervisor) spawn() error {
 	g.mu.Lock()
 	g.cmd = cmd
 	g.mu.Unlock()
+	go func(c *exec.Cmd) {
+		err := c.Wait()
+		g.mu.Lock()
+		current := g.cmd == c
+		if current {
+			g.cmd = nil
+			if err != nil {
+				// Stop routing to a dead sidecar. The built-in handlers can
+				// answer instead, and the manifest watcher restores Go routes
+				// after a rebuild.
+				g.routes = nil
+			}
+		}
+		g.mu.Unlock()
+		if current && err != nil {
+			fmt.Fprintf(os.Stderr, "  %sGo API sidecar exited unexpectedly:%s %v\n", cRed, cReset, err)
+		}
+	}(cmd)
 	// Wait for the host to accept connections so the first proxied request does
 	// not race its listen().
 	g.waitReady(10 * time.Second)
@@ -406,7 +436,6 @@ func (g *goAPISupervisor) stop() {
 	defer g.mu.Unlock()
 	if g.cmd != nil && g.cmd.Process != nil {
 		execx.KillTree(g.cmd)
-		_, _ = g.cmd.Process.Wait()
 		g.cmd = nil
 	}
 	// The killed child cannot unlink its own socket; remove it here so the next
@@ -451,10 +480,10 @@ func (g *goAPISupervisor) watch() {
 				g.mu.Unlock()
 				if changed {
 					if err := g.spawn(); err != nil {
-						fmt.Fprintf(os.Stderr, "  %s⚠ Go API sidecar restart failed:%s %v\n", cYellow, cReset, err)
+						fmt.Fprintf(os.Stderr, "  %s! Go API sidecar restart failed:%s %v\n", cYellow, cReset, err)
 						return
 					}
-					printf("  %s⚡%s Go API sidecar restarted (%d routes)\n", cCyan, cReset, len(routes))
+					printf("  %s*%s Go API sidecar restarted (%d routes)\n", cCyan, cReset, len(routes))
 				}
 			}()
 		}

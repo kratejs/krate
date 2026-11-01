@@ -33,6 +33,11 @@ interface SocialLinkItem {
   name: string;
 }
 
+interface TaxonomyLink {
+  name: string;
+  url: string;
+}
+
 interface HeroAction {
   text: string;
   link: string;
@@ -75,6 +80,8 @@ interface BaseDocsLayoutProps {
   nextLink?: string;
   socialLinks: SocialLinkItem[];
   currentPath: string;
+  /** URL prefix the docs are mounted under (default "/docs"). */
+  routeBase?: string;
   description?: string;
   template?: "doc" | "hero";
   hero?: HeroData;
@@ -83,6 +90,8 @@ interface BaseDocsLayoutProps {
   editUrl?: string;
   tags?: string[];
   categories?: string[];
+  tagLinks?: TaxonomyLink[];
+  categoryLinks?: TaxonomyLink[];
   date?: string;
   lastUpdated?: string;
   authors?: string[];
@@ -110,21 +119,12 @@ function feedbackURL(fb: { repo: string; discussions?: boolean }, title: string,
   );
 }
 
-function taxonomySlug(name: string): string {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-
-
 export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
   const pageTitle = props.pageTitle;
   const siteTitle = props.siteTitle;
   const themeOptions = props.options || {};
   const themeKey = themeOptions.themeStorageKey || "theme";
+  const routeBase = props.routeBase || "/docs";
   const tocItems = props.tocItems || [];
   const showToc = !props.tocHidden && tocItems.length > 0;
   const tocHeading = props.tocLabel || "On this page";
@@ -134,6 +134,8 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
   const hasTags = tags.length > 0;
   const categories = props.categories || [];
   const hasCategories = categories.length > 0;
+  const tagLinks = props.tagLinks || [];
+  const categoryLinks = props.categoryLinks || [];
   const lastUpdated = props.lastUpdated || "";
   const i18n = props.i18n || {};
   const localeLinks = i18n.locales || [];
@@ -274,7 +276,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
       )}
 
       <header class="docs-navbar">
-            <Link className="navbar-title" href="/docs/">{siteTitle}</Link>
+            <Link className="navbar-title" href={routeBase + "/"}>{siteTitle}</Link>
         <div class="navbar-actions">
           <div class="navbar-switchers">
             {versionLinks.length > 1 && (
@@ -413,12 +415,16 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
           <div class="docs-content">{props.children}</div>
           {(hasTags || hasCategories) && (
             <div class="docs-tags">
-              {tags.map((tag) => (
-                <Link className="docs-tag" href={"/docs/tags/" + taxonomySlug(tag) + "/"}>{tag}</Link>
-              ))}
-              {categories.map((cat) => (
-                <Link className="docs-tag docs-category" href={"/docs/categories/" + taxonomySlug(cat) + "/"}>{cat}</Link>
-              ))}
+              {tagLinks.length > 0
+                ? tagLinks.map((tag) => (
+                    <Link className="docs-tag" href={tag.url}>{tag.name}</Link>
+                  ))
+                : tags.map((tag) => <span class="docs-tag">{tag}</span>)}
+              {categoryLinks.length > 0
+                ? categoryLinks.map((cat) => (
+                    <Link className="docs-tag docs-category" href={cat.url}>{cat.name}</Link>
+                  ))
+                : categories.map((cat) => <span class="docs-tag docs-category">{cat}</span>)}
             </div>
           )}
           {lastUpdated !== "" && (
@@ -454,7 +460,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
                   rel="noopener noreferrer"
                   aria-label="Yes, this page was helpful"
                 >
-                  👍
+                  <Icon name="lucide:thumbs-up" width="16" height="16" />
                 </a>
                 <a
                   class="docs-feedback-btn"
@@ -463,7 +469,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
                   rel="noopener noreferrer"
                   aria-label="No, this page was not helpful"
                 >
-                  👎
+                  <Icon name="lucide:thumbs-down" width="16" height="16" />
                 </a>
               </div>
             )}

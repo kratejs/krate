@@ -48,6 +48,24 @@ export function defineSite(config: SiteConfig): SiteConfig {
 
 const DEFAULT_BRAND: NonNullable<SiteConfig["brand"]> = { text: "krate", href: "/", logo: "k" };
 
+/**
+ * Runs before the stylesheet paints so the persisted (or OS-preferred) color
+ * scheme is applied to <html> without a flash of the wrong theme. Every shell
+ * that renders ThemeToggle should include this.
+ */
+export function ThemePrePaint(props: { storageKey?: string }) {
+  const key = JSON.stringify(props.storageKey || "theme");
+  const script =
+    "(function(){try{var k=" + key +
+    ";var s=localStorage.getItem(k);if(s!=='dark'&&s!=='light'){s=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}" +
+    "document.documentElement.setAttribute('data-theme',s);}catch(e){}})();";
+  return (
+    <Head>
+      <script>{script}</script>
+    </Head>
+  );
+}
+
 export function ThemeToggle(props: { storageKey?: string }) {
   const storageKey = props.storageKey || "theme";
   const [theme, setTheme] = createSignal("light");
@@ -102,7 +120,7 @@ export function SiteHeader(props: { site: SiteConfig; currentPath?: string; chil
     <header class="site-navbar">
       <Link className="site-navbar-brand" href={brand.href || "/"}>
         {brand.logoUrl ? (
-          <img class="site-logo site-logo-image" src={brand.logoUrl} alt="" aria-hidden="true" />
+          <img class="site-logo site-logo-image" src={brand.logoUrl} alt="" aria-hidden="true" width="28" height="28" />
         ) : brand.logo ? (
           <span class="site-logo">{brand.logo}</span>
         ) : (
@@ -165,6 +183,7 @@ export function SiteFooter(props: { site: SiteConfig }) {
 export function HomeLayout(props: { site: SiteConfig; currentPath?: string; children: any }) {
   return (
     <div class="site-shell">
+      <ThemePrePaint storageKey={props.site.themeStorageKey} />
       <Head>
         <link rel="stylesheet" href="/site.css" />
       </Head>

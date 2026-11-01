@@ -107,7 +107,7 @@ func ruleOGImage(p *Page, _ *Config) []Finding {
 	if !strings.HasPrefix(img, "http://") && !strings.HasPrefix(img, "https://") {
 		return []Finding{{
 			Message: "og:image is not an absolute URL: " + img,
-			Hint:    "Use an absolute URL (https://…) so crawlers can fetch it.",
+			Hint:    "Use an absolute URL (https://...) so crawlers can fetch it.",
 		}}
 	}
 	return nil
@@ -180,7 +180,7 @@ func truncate(s string, n int) string {
 	if len(r) <= n {
 		return s
 	}
-	return string(r[:n]) + "…"
+	return string(r[:n]) + "..."
 }
 
 // helpers

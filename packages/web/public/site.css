@@ -19,7 +19,7 @@
 
     /* Radii */
     --radius-sm: 8px;
-    --radius: 10px;
+    --radius: 8px;
     --radius-lg: 16px;
     --radius-pill: 999px;
 
@@ -42,6 +42,8 @@
     /* AA-contrast text links: `--color-primary` fills buttons, this colours text. */
     --color-link: #c2410c;
     --color-link-hover: #9a3412;
+    --color-action: #c2410c;
+    --color-action-hover: #9a3412;
 
     --navbar-bg: rgba(255, 255, 255, 0.75);
     --overlay-bg: rgba(9, 9, 11, 0.4);
@@ -71,6 +73,8 @@
     --color-positive: #4ade80;
     --color-link: #fb923c;
     --color-link-hover: #fdba74;
+    --color-action: #c2410c;
+    --color-action-hover: #9a3412;
     --navbar-bg: rgba(9, 9, 11, 0.8);
     --overlay-bg: rgba(0, 0, 0, 0.6);
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -94,6 +98,8 @@
         --color-positive: #4ade80;
         --color-link: #fb923c;
         --color-link-hover: #fdba74;
+        --color-action: #c2410c;
+        --color-action-hover: #9a3412;
         --navbar-bg: rgba(9, 9, 11, 0.8);
         --overlay-bg: rgba(0, 0, 0, 0.6);
         --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -171,7 +177,7 @@ a:hover {
 }
 
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
-    outline: 2px solid var(--color-primary);
+    outline: 2px solid var(--color-action);
     outline-offset: 2px;
     border-radius: 4px;
 }
@@ -437,13 +443,13 @@ video {
 }
 
 .btn-primary {
-    background: var(--color-primary);
+    background: var(--color-action);
     color: var(--color-primary-fg);
     box-shadow: var(--shadow-xs);
 }
 
 .btn-primary:hover {
-    background: var(--color-primary-hover);
+    background: var(--color-action-hover);
     color: var(--color-primary-fg);
     box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--color-primary) 65%, transparent);
 }
@@ -1464,9 +1470,26 @@ video {
 
 .site-search kbd {
     font-family: var(--font-mono);
-    font-size: 0.7rem;
-    padding: 0.1rem 0.35rem;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
+    font-size: 0.72rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
     color: var(--color-muted);
+}
+
+/* Bundled variable fonts (also preloaded by the site layout). */
+@font-face {
+    font-family: 'Inter Variable';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: local('Inter'), local('Inter Variable'), url('/fonts/inter.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'JetBrains Mono Variable';
+    font-style: normal;
+    font-weight: 100 800;
+    font-display: swap;
+    src: local('JetBrains Mono'), local('JetBrains Mono Variable'), url('/fonts/jetbrains-mono.woff2') format('woff2');
 }

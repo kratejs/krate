@@ -12,9 +12,20 @@ const arch = process.arch;
 const targetKey = `${platform}-${arch}`;
 const binaryName = platform === 'win32' ? 'krate.exe' : 'krate';
 
+function isMusl() {
+  try {
+    const header = process.report && process.report.getReport().header;
+    return !!header && !header.glibcVersionRuntime;
+  } catch {
+    return false;
+  }
+}
+
 function resolveBinary() {
   try {
-    const pkgName = `@krate/core-${targetKey}`;
+    const pkgName = platform === 'linux' && arch === 'x64' && isMusl()
+      ? '@krate/core-linux-x64-musl'
+      : `@krate/core-${targetKey}`;
     const pkgPath = dirname(require.resolve(`${pkgName}/package.json`));
     const binary = join(pkgPath, 'bin', binaryName);
     if (existsSync(binary)) return binary;

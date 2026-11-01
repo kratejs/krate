@@ -1,7 +1,7 @@
 ---
 title: Architecture
 order: 2
-description: How the Krate compiler works — lexing, parsing, bundling, rendering, CSS, markdown, search, and typed routes.
+description: How the Krate compiler works - lexing, parsing, bundling, rendering, CSS, markdown, search, and typed routes.
 ---
 
 # Architecture
@@ -13,17 +13,17 @@ the [Core Concepts](/docs/core-concepts/) and [Features](/docs/features/).
 
 ```
 Source (.tsx/.ts/.md/.mdx)
-        │
-        ▼
-    Lexer (tokenize) ──► Parser (AST) ──► Bundler (imports, CSS modules, React rewrite)
-        │
-        ▼
-    Renderer (SSR: AST → HTML + signal/handler detection)
-        │
-        ▼
-    Hydration Codegen (signals → JS bundle with data-k/data-kh bindings)
-        │
-        ▼
+        |
+        v
+    Lexer (tokenize) --> Parser (AST) --> Bundler (imports, CSS modules, React rewrite)
+        |
+        v
+    Renderer (SSR: AST -> HTML + signal/handler detection)
+        |
+        v
+    Hydration Codegen (signals -> JS bundle with data-k/data-kh bindings)
+        |
+        v
     Build Output (HTML + hashed JS + hashed CSS + manifest.json)
 ```
 
@@ -60,10 +60,10 @@ hashes are stable across builds. The processing steps are:
    (circular-safe, depth limit 10); a trailing media/`supports`/`layer` prelude
    is honoured, not leaked.
 3. **Resolve `url(...)`** assets relative to the sheet, content-hash and copy
-   them to `/assets/…`, and rewrite the URL.
-4. **Handle directives** — strip `@tailwind`, unwrap `@layer`, expand `@apply`.
-5. **Minify** (string/URL/comment aware) — whitespace collapse, `rgba()`/`rgb()`
-   → hex, hex shortening, zero-unit removal, `calc()` simplification, empty-rule
+   them to `/assets/...`, and rewrite the URL.
+4. **Handle directives** - strip `@tailwind`, unwrap `@layer`, expand `@apply`.
+5. **Minify** (string/URL/comment aware) - whitespace collapse, `rgba()`/`rgb()`
+   -> hex, hex shortening, zero-unit removal, `calc()` simplification, empty-rule
    and duplicate-declaration removal. Preserves strings, `url()`, `data:` URIs,
    `/*!` license comments, vendor-prefixed fallbacks, and `!important`.
 6. **Chunk** into shared + per-page stylesheets and hash filenames.
@@ -84,7 +84,7 @@ PostCSS, no Node at build time).
   `class={cond ? "a" : "b"}`, `clsx()/cn()/cva()` arguments, and arrays are all
   found.
 - The CSS generator maps classes to rules from a built-in rule set. Output is
-  **deterministic** — identical inputs always produce the same stylesheet.
+  **deterministic** - identical inputs always produce the same stylesheet.
 - Theme configuration lives in `tailwind.config.ts`, **statically parsed** by
   default; set `tailwind.executeConfig: true` to evaluate it in-process.
   `theme.extend` merges onto the defaults; top-level `theme` keys replace them.

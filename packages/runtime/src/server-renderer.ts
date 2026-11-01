@@ -195,6 +195,7 @@ interface RenderResponse {
   cached?: boolean;
   cacheStatus?: CacheStatus;
   error?: string;
+  noStore?: boolean;
 }
 
 // ISR Cache (variant-aware, SWR, persisted)
@@ -217,7 +218,7 @@ class ISRCache {
   private cache = new Map<string, CacheEntry>();
   private byTag = new Map<string, Set<string>>();
   private maxSize: number;
-  private revalidationIntervals = new Map<string, number>(); // route → seconds
+  private revalidationIntervals = new Map<string, number>(); // route -> seconds
 
   constructor(maxSize = 512) {
     this.maxSize = maxSize;
@@ -380,7 +381,7 @@ let isrCacheFile = process.env.KRATE_ISR_CACHE || "";
 let persistTimer: NodeJS.Timeout | null = null;
 
 function isrCachePath(): string {
-  return isrCacheFile || path.join(root, "dist", ".krate", "isr-cache.json");
+  return isrCacheFile || path.join(OUT_DIR, ".krate", "isr-cache.json");
 }
 
 function persistIsrNow() {
@@ -436,7 +437,7 @@ async function loadPageModule(page: ManifestPage): Promise<any> {
 
   if (page.bundlePath) {
     // Pre-compiled bundle: bundlePath is relative to outDir (dist/)
-    const bundleAbs = path.resolve(root, "dist", page.bundlePath);
+    const bundleAbs = path.resolve(OUT_DIR, page.bundlePath);
     fileUrl = pathToFileURL(bundleAbs).href;
   } else {
     // Fallback: raw source (legacy mode)
@@ -555,6 +556,7 @@ async function renderFresh(page: ManifestPage, req: RenderRequest): Promise<Rend
     const response: RenderResponse = {
       html,
       status: 200,
+      noStore: scope.noStore || invalidated,
     };
 
     // An uncacheable read (no-store) keeps the render out of the ISR cache, and
@@ -699,7 +701,7 @@ function loadRuntimeRenderer(relPath: string): (propsJSON: string) => string {
   const cached = runtimeBundleCache.get(relPath);
   if (cached) return cached;
 
-  const abs = path.resolve(root, "dist", relPath);
+  const abs = path.resolve(OUT_DIR, relPath);
   const code = fs.readFileSync(abs, "utf-8");
   // Runtime components get the host's fetch (looked up per call, so a cache
   // layer that wraps globalThis.fetch later still applies) and the web
@@ -890,6 +892,7 @@ async function renderRegion(page: ManifestPage, region: RegionMeta, req: RenderR
     }
     const frame: Record<string, any> = { type: "region", id: region.id, status: 200, html };
     if (cacheable) frame.cacheStatus = "miss";
+    if (r.scope.noStore || r.invalidated) frame.noStore = true;
     return frame;
   } catch (err: any) {
     const signal = renderSignal(err);
@@ -928,6 +931,7 @@ async function renderPageRegion(page: ManifestPage, id: string, req: RenderReque
   if (result.notFound) frame.notFound = true;
   if (result.redirect) frame.redirect = result.redirect;
   if (result.error) frame.error = result.error;
+  if (result.noStore) frame.noStore = true;
   if (page.serverComponents && frame.status >= 500) frame.fatal = true;
   // Title swap: the Go server replaces the baked <title> with the freshly
   // rendered one so params-driven pages update the browser tab.
@@ -1084,6 +1088,7 @@ function mergeOpResults(op: InternalOp, results: Record<string, any>[]): Record<
 const PORT = parseInt(process.env.KRATE_SSR_PORT || "3100", 10);
 const manifestPath = process.env.KRATE_MANIFEST || "";
 const root = process.env.KRATE_ROOT || process.cwd();
+const OUT_DIR = process.env.KRATE_OUT_DIR || path.join(root, "dist");
 projectRoot = root;
 
 // Load manifest
@@ -1093,7 +1098,7 @@ if (manifestPath && fs.existsSync(manifestPath)) {
   console.log(`[krate-ssr] Loaded manifest: ${manifest!.pages.length} SSR/ISR/streaming pages`);
 } else {
   // Try default location
-  const defaultPath = path.join(root, "dist", "server-manifest.json");
+  const defaultPath = path.join(OUT_DIR, "server-manifest.json");
   if (fs.existsSync(defaultPath)) {
     const data = fs.readFileSync(defaultPath, "utf-8");
     manifest = JSON.parse(data);
@@ -1161,6 +1166,11 @@ const server = http.createServer(async (req, res) => {
   // sidecar renders each one (a component region from the manifest, or a
   // coarse "page" region that renders the whole page component for SSR/ISR).
   if (route === "/__krate/regions" && req.method === "POST") {
+    if (!internalAuthorized(req)) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "forbidden" }));
+      return;
+    }
     res.writeHead(200, {
       "Content-Type": "application/x-ndjson; charset=utf-8",
       "Cache-Control": "no-store",
@@ -1218,6 +1228,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Direct page requests (non-proxied)
+  if (!internalAuthorized(req)) {
+    res.writeHead(403, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "forbidden" }));
+    return;
+  }
   // Collect request headers
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(req.headers)) {
@@ -1235,7 +1250,7 @@ const server = http.createServer(async (req, res) => {
 
   if (result.notFound) {
     // Try to serve 404.html from dist
-    const notFoundPath = path.join(root, "dist", "404.html");
+    const notFoundPath = path.join(OUT_DIR, "404.html");
     if (fs.existsSync(notFoundPath)) {
       const html = fs.readFileSync(notFoundPath, "utf-8");
       res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
@@ -1255,7 +1270,7 @@ const server = http.createServer(async (req, res) => {
 
   if (result.status === 500) {
     // Try to serve 500.html from dist
-    const errorPath = path.join(root, "dist", "500.html");
+    const errorPath = path.join(OUT_DIR, "500.html");
     if (fs.existsSync(errorPath)) {
       const html = fs.readFileSync(errorPath, "utf-8");
       res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
@@ -1298,14 +1313,14 @@ if (isClusterPrimary) {
           } catch {
             // not listening yet
           }
-          server.listen(PORT);
+          server.listen(PORT, "127.0.0.1");
         }, 100);
         return;
       }
     }
     throw err;
   });
-  server.listen(PORT, () => {
+  server.listen(PORT, "127.0.0.1", () => {
     console.log(`[krate-ssr] Renderer server listening on port ${PORT}`);
   });
 }

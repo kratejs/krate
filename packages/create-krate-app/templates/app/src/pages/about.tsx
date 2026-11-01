@@ -2,7 +2,7 @@ export default function About() {
   return (
     <section class="hero">
       <Head>
-        <title>About — __PROJECT_DISPLAY_NAME__</title>
+        <title>About - __PROJECT_DISPLAY_NAME__</title>
       </Head>
       <h1 class="hero-title">About</h1>
       <p class="hero-subtitle">

@@ -263,7 +263,7 @@ func TestToolAnnotations(t *testing.T) {
 	want := map[string]bool{
 		"list_routes": false, "read_page": false, "read_content": false, "search_docs": false,
 		"list_files": false, "read_file": false,
-		"create_page": false, "edit_file": true, "apply_patch": true, "batch_edit": true, "undo": true, "format_file": true, "apply_fix": true,
+		"create_page": false, "edit_file": true, "apply_patch": true, "batch_edit": true, "undo": true, "format_file": true, "apply_fix": true, "apply_safe_fixes": true,
 		"create_file": false, "delete_file": true, "move_file": true, "create_component": false,
 		"create_content": false, "edit_content": true,
 		"build": false, "check": false, "run_task": false,
@@ -280,6 +280,33 @@ func TestToolAnnotations(t *testing.T) {
 		if destructive != want[name] {
 			t.Errorf("tool %s destructiveHint = %v, want %v", name, destructive, want[name])
 		}
+	}
+}
+
+func TestShutdownStopsServer(t *testing.T) {
+	svc := newTestService(t, map[string]string{"src/pages/index.tsx": "export default function Page() { return <h1>Hi</h1>; }"})
+	var out bytes.Buffer
+	srv := NewServer(&out, "krate", "test")
+	svc.Register(srv)
+	input := `{"jsonrpc":"2.0","id":1,"method":"shutdown"}` + "\n" +
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"
+	if err := srv.Serve(strings.NewReader(input)); err != nil {
+		t.Fatal(err)
+	}
+	var responses []map[string]any
+	dec := json.NewDecoder(&out)
+	for {
+		var m map[string]any
+		if dec.Decode(&m) != nil {
+			break
+		}
+		responses = append(responses, m)
+	}
+	if len(responses) != 1 {
+		t.Fatalf("responses after shutdown = %v, want only the shutdown result", responses)
+	}
+	if responses[0]["id"] != float64(1) {
+		t.Fatalf("shutdown response id = %v", responses[0]["id"])
 	}
 }
 
@@ -1018,7 +1045,7 @@ func TestSearchDocsSearchesFrameworkDocs(t *testing.T) {
 func TestExcerptBoundaries(t *testing.T) {
 	// Match at the very start: no leading ellipsis, first word preserved.
 	got := excerpt("Plugin System is here and more text follows", "plugin", 20)
-	if strings.HasPrefix(got, "…") {
+	if strings.HasPrefix(got, "...") {
 		t.Errorf("unexpected leading ellipsis: %q", got)
 	}
 	if !strings.HasPrefix(got, "Plugin") {
@@ -1026,12 +1053,12 @@ func TestExcerptBoundaries(t *testing.T) {
 	}
 	// Entire text fits: no ellipses at all.
 	full := excerpt("Short body", "short", 100)
-	if strings.Contains(full, "…") {
+	if strings.Contains(full, "...") {
 		t.Errorf("full-window excerpt should have no ellipsis: %q", full)
 	}
 	// Match in the middle: ellipses on both sides.
 	mid := excerpt(strings.Repeat("word ", 40)+"needle "+strings.Repeat("word ", 40), "needle", 40)
-	if !strings.HasPrefix(mid, "…") || !strings.HasSuffix(mid, "…") {
+	if !strings.HasPrefix(mid, "...") || !strings.HasSuffix(mid, "...") {
 		t.Errorf("expected both ellipses, got %q", mid)
 	}
 }
@@ -1374,6 +1401,23 @@ func TestRunTaskAllowlist(t *testing.T) {
 	text := toolText(t, serve(t, svc, call("run_task", map[string]any{"task": "test"}))[0])
 	if !strings.Contains(text, "allowTasks") {
 		t.Fatalf("expected allowlist refusal, got: %s", text)
+	}
+}
+
+func TestReadOnlyModeBlocksWritesAndTasks(t *testing.T) {
+	svc := newTestService(t, map[string]string{
+		"src/pages/index.tsx": "export default function Page() { return <h1>Hi</h1>; }\n",
+	})
+	svc.policy.ReadOnlyMode = true
+	text := toolText(t, serve(t, svc, call("edit_file", map[string]any{
+		"route": "src/pages/index.tsx", "find": "Hi", "replace": "Hello", "apply": true,
+	}))[0])
+	if !strings.Contains(text, "readOnlyMode") {
+		t.Fatalf("expected read-only write refusal, got: %s", text)
+	}
+	text = toolText(t, serve(t, svc, call("run_task", map[string]any{"task": "build"}))[0])
+	if !strings.Contains(text, "readOnlyMode") {
+		t.Fatalf("expected read-only task refusal, got: %s", text)
 	}
 }
 

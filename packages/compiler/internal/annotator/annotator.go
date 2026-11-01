@@ -383,7 +383,7 @@ func collectFunctionsWithSource(body []ast.Stmt, dest map[string]*ast.FnDecl, so
 
 // collectMemberComponents registers plain member assignments (`Root.Part =
 // PartFn`) so dotted JSX tags like `<Root.Part>` resolve to the assigned
-// component — the general mechanism behind namespaced compound APIs.
+// component - the general mechanism behind namespaced compound APIs.
 func collectMemberComponents(body []ast.Stmt, functions map[string]*ast.FnDecl) {
 	for _, stmt := range body {
 		switch s := stmt.(type) {

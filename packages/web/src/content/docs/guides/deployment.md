@@ -8,16 +8,21 @@ order: 3
 
 Because Krate is **SSG-first**, most sites are just a folder of static files.
 
-## Static hosts (Netlify, Vercel, GitHub Pages, S3, …)
+## Static hosts (Netlify, Vercel, GitHub Pages, S3, ...)
 
 1. Build locally or in CI: `krate build`
 2. Deploy the `dist/` directory.
 
 ```
-dist/          ← deploy this
+dist/          deploy this
 ```
 
-Any static host works. The output has no server runtime dependency — pages are
+Static hosts should exclude `dist/.krate/`. It contains server-only bundles,
+the SSR renderer, and the persisted ISR cache; `krate serve` needs it, but a
+static host must never publish it.
+
+
+Any static host works. The output has no server runtime dependency - pages are
 pre-rendered HTML with hashed JS/CSS assets.
 
 ### Host adapters (`krate deploy`)
@@ -103,14 +108,14 @@ steps:
 
 ## Notes
 
-- **Pagefind (default)** — the recommended `search.engine: "pagefind"` backend
+- **Pagefind (default)** - the recommended `search.engine: "pagefind"` backend
   writes a `pagefind/` bundle at build time as a set of static assets. Pagefind
   fetches its index chunks at search time, so it needs no special
   `Content-Type`, but the files must be deployed as-is.
-- **docfind WASM** — if you use `search.engine: "docfind"` (also what dev builds
+- **docfind WASM** - if you use `search.engine: "docfind"` (also what dev builds
   use), the search module (`docs/search/docfind_bg.wasm`) is a static asset; make
   sure your host serves `.wasm` with `Content-Type: application/wasm`. Most hosts
   do by default; the search UI falls back to the JSON index if not.
-- **Trailing slashes** — routes are emitted as directory index files
+- **Trailing slashes** - routes are emitted as directory index files
   (`/docs/foo/index.html`), so both `/docs/foo` and `/docs/foo/` work on hosts
   with clean-URL rewriting.

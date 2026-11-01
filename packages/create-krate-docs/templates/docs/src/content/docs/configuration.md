@@ -62,16 +62,16 @@ docs({
 });
 ```
 
-## Sitemap and SEO
+## Sitemap and site metadata
 
-The `sitemap` plugin generates `sitemap.xml`, and the top-level `seo` config
+The `sitemap` plugin generates `sitemap.xml`, and the top-level `site` config
 sets default metadata.
 
 ```ts
 export default defineConfig({
-  seo: {
-    baseUrl: "https://example.com",
-    siteName: "My Docs",
+  site: {
+    url: "https://example.com",
+    name: "My Docs",
     description: "Documentation for my project.",
   },
   plugins: [

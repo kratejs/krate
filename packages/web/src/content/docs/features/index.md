@@ -31,6 +31,7 @@ A tour of the features that ship with Krate beyond the core compiler.
 | [Typed Routes & Content](/docs/features/typed-routes/) | Generated `.d.ts` for routes, params, and content collections |
 | [Quality Checks](/docs/features/quality-checks/) | Compiler-enforced a11y, SEO, and performance gates (`krate check`) |
 | [MCP Server](/docs/features/mcp/) | Agent-native compiler surface over the Model Context Protocol (`krate mcp`) |
+| [LLMs.txt](/docs/features/llms-txt/) | Generate `llms.txt` and `llms-full.txt` for LLM crawlers |
 
 Also see the [component library](/docs/reference/component-library/), a
 shadcn/ui-style set of components built on the runtime.

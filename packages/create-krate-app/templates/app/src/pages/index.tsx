@@ -7,16 +7,16 @@ export default function Home() {
         <title>__PROJECT_DISPLAY_NAME__</title>
         <meta
           name="description"
-          content="A Krate app — signal-based reactivity, compiled to static HTML."
+          content="A Krate app - signal-based reactivity, compiled to static HTML."
         />
       </Head>
 
       <section class="hero">
-        <div class="hero-badge">Signals · SSG · Go-native</div>
+        <div class="hero-badge">Signals - SSG - Go-native</div>
         <h1 class="hero-title">You just built a Krate app.</h1>
         <p class="hero-subtitle">
           This page was server-rendered to static HTML at build time. The
-          counter below is hydrated with a tiny signal-based runtime — no React,
+          counter below is hydrated with a tiny signal-based runtime - no React,
           no bundler subprocess.
         </p>
         <div class="hero-actions">

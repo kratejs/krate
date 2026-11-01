@@ -4,7 +4,7 @@ description: How Krate binds signals to the DOM with a tiny client runtime.
 date: 2026-02-10
 author: Krate
 tags: [runtime, hydration, signals]
-draft: false
+status: published
 order: 2
 ---
 

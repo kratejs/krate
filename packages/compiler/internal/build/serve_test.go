@@ -56,20 +56,37 @@ func TestRewriteDestination(t *testing.T) {
 		{"/old/page", "/old", "/new", "/new"},
 
 		// Wildcard with :splat replacement
-		{"/legacy/docs/intro", "/legacy/*", "/docs/:splat", "/docs//docs/intro"},
-		{"/legacy/page", "/legacy/*", "/new/:splat", "/new//page"},
-		{"/legacy/", "/legacy/*", "/v2/:splat", "/v2//"},
+		{"/legacy/docs/intro", "/legacy/*", "/docs/:splat", "/docs/docs/intro"},
+		{"/legacy/page", "/legacy/*", "/new/:splat", "/new/page"},
+		{"/legacy/", "/legacy/*", "/v2/:splat", "/v2/"},
 
 		// Wildcard append (no :splat)
 		{"/old/page", "/old/*", "/new", "/new/page"},
 		{"/old/deep/path", "/old/*", "/v2", "/v2/deep/path"},
-		{"/old/", "/old/*", "/v2", "/v2/"},
+		{"/old/", "/old/*", "/v2", "/v2"},
 	}
 
 	for _, tt := range tests {
 		got := rewriteDestination(tt.path, tt.source, tt.destination)
 		if got != tt.want {
 			t.Errorf("rewriteDestination(%q, %q, %q) = %q, want %q", tt.path, tt.source, tt.destination, got, tt.want)
+		}
+	}
+}
+
+func TestIsInternalOutputPath(t *testing.T) {
+	for _, p := range []string{
+		"/.krate", "/.krate/", "/.krate/server-bundles/page.mjs",
+		"//.krate/x", "/./.krate/x", "/public/../.krate/x",
+		`\.krate\x`, "/%2ekrate/x", "/.krate%2fserver-bundles%2fpage.mjs",
+	} {
+		if !isInternalOutputPath(p) {
+			t.Errorf("isInternalOutputPath(%q) = false, want true", p)
+		}
+	}
+	for _, p := range []string{"/", "/index.html", "/.kratex", "/assets/.krate.js"} {
+		if isInternalOutputPath(p) {
+			t.Errorf("isInternalOutputPath(%q) = true, want false", p)
 		}
 	}
 }

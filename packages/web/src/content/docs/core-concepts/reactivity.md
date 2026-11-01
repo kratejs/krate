@@ -50,7 +50,7 @@ doubled(); // memoized until count changes
 ```
 
 A memo caches its computed value and only recomputes when its dependencies
-change. Only the final consumer re-renders — the memo itself is cached.
+change. Only the final consumer re-renders - the memo itself is cached.
 
 ## Cleanup & mount
 
@@ -74,9 +74,9 @@ import { createContext } from '@krate/runtime';
 
 const ThemeCtx = createContext('light');
 
-// ThemeCtx.Provider — wraps children with a value
-// ThemeCtx.useContext() — reads the nearest provider value
-// ThemeCtx.defaultValue — fallback when no provider is present
+// ThemeCtx.Provider - wraps children with a value
+// ThemeCtx.useContext() - reads the nearest provider value
+// ThemeCtx.defaultValue - fallback when no provider is present
 ```
 
 ## Resources
@@ -102,7 +102,7 @@ in-flight requests when the source changes mid-flight.
 
 ## Conditional rendering (`showIf`)
 
-For conditionally rendering an element, Krate supports a `showIf` prop — sugar
+For conditionally rendering an element, Krate supports a `showIf` prop - sugar
 for the `{expr && <el/>}` guard:
 
 ```tsx
@@ -189,23 +189,23 @@ Krate-native modules (no React import) keep run-once semantics: write
 
 Interactive state can be expressed with **zero client JavaScript** using CSS
 Signals (`createCSSChoice`, `createCSSToggle`, `createCSSFlags`,
-`createCSSGroup`, `createCSSRange`, `createCSSStack`) � compiled to hidden
+`createCSSGroup`, `createCSSRange`, `createCSSStack`) - compiled to hidden
 inputs plus `:has()` CSS. They are described in full in their own guide.
 
-- [CSS Signals guide](/docs/core-concepts/css-signals/) � concepts, both authoring
+- [CSS Signals guide](/docs/core-concepts/css-signals/) - concepts, both authoring
   styles, composition, roles, browser support, and limits.
 - [CSS Signals API reference](/docs/reference/css-signals/).
 - [Cookbook](/docs/guides/css-signals-cookbook/) and [errors](/docs/guides/css-signals-errors/).
 
 ## Compile-time validation
 
-The reactive dependency graph is validated at build time and surfaced as `⚠`
+The reactive dependency graph is validated at build time and surfaced as `!`
 warnings. The compiler detects:
 
-- **Unused signals** — declared but never read or written.
-- **Write-only effects** — effects that call setters but read no signals.
-- **No-read effects** — effects that read and write nothing (run exactly once).
-- **Circular dependencies** — including self-referential feedback loops like
+- **Unused signals** - declared but never read or written.
+- **Write-only effects** - effects that call setters but read no signals.
+- **No-read effects** - effects that read and write nothing (run exactly once).
+- **Circular dependencies** - including self-referential feedback loops like
   `setCount(count() + 1)`.
 
 These warnings help you catch bugs before they reach the browser.

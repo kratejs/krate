@@ -40,7 +40,7 @@ func TestGitRootIsCachedPerRoot(t *testing.T) {
 		t.Fatal("non-repo root reported as a git repository")
 	}
 	if !Available(repo) {
-		t.Fatal("git repo root not detected — root cache is leaking across projects")
+		t.Fatal("git repo root not detected - root cache is leaking across projects")
 	}
 	rel := filepath.Join("docs", "a.md")
 	if got := LastCommit(repo, rel); got == "" {

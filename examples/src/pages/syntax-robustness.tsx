@@ -290,7 +290,7 @@ export default function SyntaxRobustness() {
     <div class="syntax-robustness">
       <h1>Syntax Robustness</h1>
 
-      <p>The module-level declarations below exercise a broad range of TypeScript/TSX syntax — numbers, strings, templates, type annotations, operators, destructuring, loops, control flow, functions, and async — and compile without errors.</p>
+      <p>The module-level declarations below exercise a broad range of TypeScript/TSX syntax - numbers, strings, templates, type annotations, operators, destructuring, loops, control flow, functions, and async - and compile without errors.</p>
 
       <div>
         <h2>Number Formats</h2>

@@ -12,7 +12,7 @@ import (
 //
 // A backslash that is not a recognised escape is dropped (JS semantics: "\z"
 // cooks to "z"), which is why callers must not blanket-replace "\n" in emitted
-// output — a literal backslash-n in source is written "\n" (cooked to "\n") and
+// output - a literal backslash-n in source is written "\n" (cooked to "\n") and
 // a real newline escape is written "\n" (cooked to a newline).
 func TemplateRaw(s string) string {
 	if !strings.ContainsRune(s, '\\') {

@@ -69,7 +69,7 @@ const [flags, setFlag] = createCSSFlags(['bold', 'italic'])     // flags.bold()
 
 ### `createCSSGroup`
 
-An optional radio group with an explicit closed (`null`) state — accordions,
+An optional radio group with an explicit closed (`null`) state - accordions,
 disclosures, dialogs, popovers, dropdown menus.
 
 ```typescript
@@ -79,7 +79,7 @@ setOpen('faq'); setOpen(null)
 
 ### `createCSSRange`
 
-A discrete integer range — steppers, stepped sliders, progress indicators.
+A discrete integer range - steppers, stepped sliders, progress indicators.
 `set(n() +/- 1)` compiles to bounded stepper labels.
 
 ```typescript
@@ -187,7 +187,7 @@ harnesses).
 
 ## DOM helpers
 
-### `h` — hyperscript
+### `h` - hyperscript
 
 ```typescript
 const el = h('div', { class: 'foo', onClick: () => {} }, child1, child2)
@@ -246,17 +246,17 @@ are percent-encoded (`%`, `<`, `>`) so user data cannot close a comment.
 import { jsx, jsxs, Fragment } from '@krate/runtime/jsx-runtime'
 ```
 
-Automatic JSX transform — use `<div>` syntax in TSX files.
+Automatic JSX transform - use `<div>` syntax in TSX files.
 
 Every JSX element accepts a `showIf` prop (alias `visibleIf`) for conditional
-rendering — sugar for `{expr && <el/>}`, compiled away at build time:
+rendering - sugar for `{expr && <el/>}`, compiled away at build time:
 
 ```tsx
 <div showIf={count() > 0}>Shown when count is positive</div>
 ```
 
 With the zero-JS CSS primitives, `showIf` also accepts compound boolean logic
-over state — `&&`, `||`, `!`, `===` / `==`, `!==` / `!=` — across one or more
+over state - `&&`, `||`, `!`, `===` / `==`, `!==` / `!=` - across one or more
 scopes, compiled to `:has()` selector chains:
 
 ```tsx
@@ -355,9 +355,9 @@ full-page navigations (`refresh()` reloads, `prefetch()` resolves immediately).
 import { createContext } from '@krate/runtime'
 
 const ThemeCtx = createContext('light')
-// ThemeCtx.Provider — wraps children with a context value
-// ThemeCtx.useContext() — reads nearest Provider value
-// ThemeCtx.defaultValue — fallback when no Provider
+// ThemeCtx.Provider - wraps children with a context value
+// ThemeCtx.useContext() - reads nearest Provider value
+// ThemeCtx.defaultValue - fallback when no Provider
 ```
 
 ## Resources
@@ -404,13 +404,13 @@ The compiler rewrites React hooks and `React.*` calls to the primitives above at
 build time, so React source runs unchanged (no React runtime is shipped). In
 particular:
 
-- `useState` → `createSignal`, `useEffect` → `createEffect`,
-  `useMemo` → `createMemo`, `useReducer` → `createReducer`.
-- `useRef` → `{ current: initial }`, `useCallback` → the function,
-  `useContext` → `Context.useContext()`.
-- `memo`/`lazy` → identity, `createElement` → `h`,
-  `<Fragment>` → a JSX fragment.
-- `useId` → a stable per-instance build-time literal.
+- `useState` -> `createSignal`, `useEffect` -> `createEffect`,
+  `useMemo` -> `createMemo`, `useReducer` -> `createReducer`.
+- `useRef` -> `{ current: initial }`, `useCallback` -> the function,
+  `useContext` -> `Context.useContext()`.
+- `memo`/`lazy` -> identity, `createElement` -> `h`,
+  `<Fragment>` -> a JSX fragment.
+- `useId` -> a stable per-instance build-time literal.
 - Bare reads (`{count}`) are auto-called (`count()`).
 
 See the [React Compatibility guide](/docs/guides/react-compatibility/) for the

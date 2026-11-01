@@ -26,11 +26,11 @@ Files named `*.module.css` are scoped automatically:
 import styles from './Card.module.css';
 
 export default function Card() {
-  return <div class={styles.card}>…</div>;
+  return <div class={styles.card}>...</div>;
 }
 ```
 
-- Class names are hashed: `className` → `className_<fnv32a_hash>`.
+- Class names are hashed: `className` -> `className_<fnv32a_hash>`.
 - The hash is **FNV-32a of the absolute file path** (6-char base36), so it's
   deterministic per file and stable across builds.
 - Scoping is tokenizer-based: strings, comments, `url(...)`, attribute
@@ -39,7 +39,7 @@ export default function Card() {
 
 ## Tailwind CSS
 
-Krate's Tailwind is **Go-native** — no PostCSS, no Node at build time — and
+Krate's Tailwind is **Go-native** - no PostCSS, no Node at build time - and
 follows the **Tailwind v4 CSS-first** model.
 
 ```typescript
@@ -54,7 +54,7 @@ tailwind: {
 
 ### CSS-first `@theme`
 
-Define design tokens directly in CSS; Krate reads `@theme { --… }` blocks from
+Define design tokens directly in CSS; Krate reads `@theme { --... }` blocks from
 your stylesheets and generates the matching utilities (no `tailwind.config.ts`
 needed for these):
 
@@ -65,7 +65,7 @@ needed for these):
   --radius-xl: 1rem;
   --breakpoint-3xl: 120rem;
 }
-/* now: bg-brand-500, p-7, rounded-xl, 3xl:… all work */
+/* now: bg-brand-500, p-7, rounded-xl, 3xl:... all work */
 ```
 
 Supported namespaces: `--color-*` (incl. `DEFAULT` and `name-<shade>`),
@@ -77,14 +77,14 @@ Supported namespaces: `--color-*` (incl. `DEFAULT` and `name-<shade>`),
 `@apply` is supported in your CSS. Plain utilities are expanded in place;
 variant/descendant/unknown utilities cannot be represented as plain
 declarations and are reported as build warnings. `@tailwind` directives are
-stripped and `@layer { … }` blocks are unwrapped (Krate owns the layer order).
+stripped and `@layer { ... }` blocks are unwrapped (Krate owns the layer order).
 
 - A **candidate scanner** extracts Tailwind tokens from every string and
   template literal in the scanned files, so classes inside
   `class={cond ? "a" : "b"}`, `clsx()/cn()/cva()` arguments, and arrays are
   all found.
 - The CSS generator maps classes to rules from a built-in rule set. Output is
-  **deterministic** — identical inputs always produce the same stylesheet.
+  **deterministic** - identical inputs always produce the same stylesheet.
 - Theme configuration lives in `tailwind.config.ts`. It is **statically
   parsed** by default (no Node required); set `tailwind.executeConfig: true` to
   evaluate it in-process instead. `theme.extend` merges onto the defaults;
@@ -98,16 +98,16 @@ stripped and `@layer { … }` blocks are unwrapped (Krate owns the layer order).
 
 Supported features:
 
-- **Variants:** state (`hover:`, `focus:`, `active:`, `disabled:`, …),
+- **Variants:** state (`hover:`, `focus:`, `active:`, `disabled:`, ...),
   `group-*`/`peer-*` (incl. named), `data-*`/`aria-*`/`has-*`, responsive
-  breakpoints from `theme.screens` (`sm:`, `md:`, …, plus `min-*`/`max-*`),
+  breakpoints from `theme.screens` (`sm:`, `md:`, ..., plus `min-*`/`max-*`),
   `dark:`, `motion-safe:`/`motion-reduce:`, `print:`, capability queries
-  (`pointer-coarse:`, `noscript:`, `forced-colors:`, …), positional
+  (`pointer-coarse:`, `noscript:`, `forced-colors:`, ...), positional
   (`nth-*`, `first-line:`), `not-*`, child (`*:`, `**:`), container queries
   (`@sm:`, `@[400px]:`), and arbitrary variants (`[&:nth-child(3)]:`).
 - **Arbitrary values** for nearly every property, with type disambiguation
-  (`w-[100px]`, `bg-[url(/a.png)]`, `bg-[length:8px]`, `text-[14px]` →
-  font-size vs `text-[#fff]` → color, `grid-cols-[repeat(3,_1fr)]`), including
+  (`w-[100px]`, `bg-[url(/a.png)]`, `bg-[length:8px]`, `text-[14px]` ->
+  font-size vs `text-[#fff]` -> color, `grid-cols-[repeat(3,_1fr)]`), including
   typed hints (`text-[color:var(--fg)]`).
 - Negatives (`-mt-4`), color opacity modifiers (`bg-blue-500/50`,
   `from-indigo-400/50`), and arbitrary spacing multiples (`p-13`, `p-13.5`).
@@ -131,11 +131,11 @@ Plain CSS imported or referenced in pages is collected and split at the
 `styles.<hash>.css` chunk, and page-unique rules go into that page's own hashed
 chunk. A component library imported across many pages therefore ships once, not
 per page. Chunk order is deterministic, so hashes are stable across builds. See
-[Contributing → Architecture](/docs/contributing/architecture/#css-pipeline) for
+[Contributing -> Architecture](/docs/contributing/architecture/#css-pipeline) for
 the full processing steps.
 
 ## Custom properties & theming
 
-There's nothing special needed to use CSS custom properties — they pass through
+There's nothing special needed to use CSS custom properties - they pass through
 the pipeline unchanged. The docs site uses a `:root[data-theme="dark"]` scheme
 toggled at runtime for light/dark theming.

@@ -1,7 +1,7 @@
 ---
 title: Theming Components
 description: Recolour @krate/components with CSS custom properties.
-order: 13
+order: 18
 ---
 
 # Theming Components
@@ -22,9 +22,9 @@ update automatically.
 
 ## Why overrides always work
 
-The library's defaults are emitted at **zero specificity** (`:where(:root){…}`),
-so any rule of yours — a plain `:root`, `[data-theme]`, a wrapper class, whatever
-— wins no matter which stylesheet loads first. There is no ordering footgun.
+The library's defaults are emitted at **zero specificity** (`:where(:root){...}`),
+so any rule of yours - a plain `:root`, `[data-theme]`, a wrapper class, whatever
+- wins no matter which stylesheet loads first. There is no ordering footgun.
 
 :::tip
 Put your overrides in a global stylesheet (e.g. `src/styles/global.css`). They
@@ -54,7 +54,7 @@ Dark mode is handled per scheme; override it the same way if needed:
 
 | Token | Default | Derived? |
 |-------|---------|----------|
-| `--krate-primary` | `#f97316` | — (set this) |
+| `--krate-primary` | `#f97316` | - (set this) |
 | `--krate-primary-hover` | primary darkened 15% | yes |
 | `--krate-primary-fg` | `#ffffff` | no (text on primary) |
 | `--krate-focus-ring` | `var(--krate-primary)` | yes |
@@ -79,7 +79,7 @@ Dark mode is handled per scheme; override it the same way if needed:
 
 | Token | Default |
 |-------|---------|
-| `--krate-font` | `Inter, system-ui, …` |
+| `--krate-font` | `Inter, system-ui, ...` |
 | `--krate-radius` / `--krate-radius-lg` | `8px` / `12px` |
 | `--krate-code-bg` / `--krate-code-text` | `#18181b` / `#fafafa` |
 
@@ -97,7 +97,7 @@ overrides (zero-superseding) still win over both.
 
 ## Per-component tweaks
 
-Any component class can be styled directly — the theme sets the baseline:
+Any component class can be styled directly - the theme sets the baseline:
 
 ```css
 .krate-button-primary { border-radius: 9999px; }

@@ -121,7 +121,7 @@ export default function Page() {
 
 // TestBuildCSSScopeContextFlow verifies a scope provided via context
 // (`<Ctx.Provider value={scope}>`) resolves in descendant parts that read
-// `Ctx.useContext()` — the ergonomic compound-component model.
+// `Ctx.useContext()` - the ergonomic compound-component model.
 func TestBuildCSSScopeContextFlow(t *testing.T) {
 	src := `const TabsCtx = createContext(null);
 function Tabs(props) {
@@ -362,7 +362,7 @@ export default function Page() {
 	}
 }
 
-// TestBuildCSSGroupTriggerCloses verifies a group scope (accordion/popover/…)
+// TestBuildCSSGroupTriggerCloses verifies a group scope (accordion/popover/...)
 // emits a second "close" label so re-clicking the open trigger closes it, and
 // starts closed (the empty sentinel is selected).
 func TestBuildCSSGroupTriggerCloses(t *testing.T) {

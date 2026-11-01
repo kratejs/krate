@@ -157,6 +157,11 @@ func (c *buildDiskCache) fingerprintFor(contentHash string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// Small cached inputs are re-hashed on every lookup: an editor or build step can
+// preserve mtime while changing bytes, and a same-size edit would otherwise
+// replay a stale page.
+const diskCacheVerifyLimit = 512 << 10
+
 func (c *buildDiskCache) hashFile(path string) (string, bool) {
 	s := resolver.StatPath(path)
 	if !s.Exists || s.IsDir {
@@ -164,7 +169,7 @@ func (c *buildDiskCache) hashFile(path string) (string, bool) {
 	}
 	mtime, size := s.Mtime.UnixNano(), s.Size
 	c.mu.Lock()
-	if h, ok := c.memo[path]; ok && h.mtime == mtime && h.size == size {
+	if h, ok := c.memo[path]; ok && h.mtime == mtime && h.size == size && size > diskCacheVerifyLimit {
 		c.mu.Unlock()
 		return h.hash, true
 	}

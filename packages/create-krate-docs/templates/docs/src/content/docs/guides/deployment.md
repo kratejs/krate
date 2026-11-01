@@ -5,7 +5,7 @@ order: 1
 
 # Deployment
 
-The `build` script produces a fully static site in `dist/` — a folder of HTML,
+The `build` script produces a fully static site in `dist/` - a folder of HTML,
 CSS, and JavaScript you can host anywhere.
 
 ## Build for production
@@ -20,9 +20,9 @@ This emits an optimized bundle into `dist/`.
 
 Deploy the `dist/` directory to any static host:
 
-- **Vercel / Netlify / GitHub Pages** — set the build command to `npm run build`
+- **Vercel / Netlify / GitHub Pages** - set the build command to `npm run build`
   and the output directory to `dist`.
-- **Any CDN or object store** (S3, R2, Cloudflare Pages) — upload `dist/`.
+- **Any CDN or object store** (S3, R2, Cloudflare Pages) - upload `dist/`.
 
 ## Preview locally
 

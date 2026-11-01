@@ -1,4 +1,4 @@
-import { SiteHeader, SiteFooter, ThemeToggle } from "@krate/base-docs-theme/shell";
+import { SiteHeader, SiteFooter, ThemeToggle, ThemePrePaint } from "@krate/base-docs-theme/shell";
 
 const site = {
   brand: { text: "krate", href: "/", logoUrl: "/logo.svg" },
@@ -12,8 +12,8 @@ const site = {
   social: [
     { icon: "lucide:github", url: "https://github.com/kratejs/krate", name: "GitHub" },
   ],
-  footerNote: "© 2026 kratejs",
-  footerLicense: "Apache-2.0 · Built with Krate",
+  footerNote: "(c) 2026 kratejs",
+  footerLicense: "Apache-2.0 - Built with Krate",
   footerColumns: [
     {
       title: "Docs",
@@ -50,6 +50,7 @@ const site = {
 export default function SiteLayout(props: { children: any }) {
   return (
     <div class="site-shell">
+      <ThemePrePaint />
       <Head>
         <link rel="icon" href="/logo.svg" type="image/svg+xml" />
         <link rel="manifest" href="/site.webmanifest" />
@@ -61,9 +62,9 @@ export default function SiteLayout(props: { children: any }) {
         Skip to content
       </a>
       <SiteHeader site={site}>
-        <a class="site-search" href="/docs/" aria-label="Search the documentation">
+        <a class="site-search" href="/docs/" aria-label="Search the documentation" aria-keyshortcuts="Control+K Meta+K">
           <span>Search</span>
-          <kbd>Ctrl K</kbd>
+          <kbd>{"\u2318 K"}</kbd>
         </a>
         <ThemeToggle />
       </SiteHeader>

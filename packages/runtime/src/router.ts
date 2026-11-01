@@ -606,28 +606,38 @@ function reconcileHeadMeta(doc: Document): void {
   });
 }
 
-function scriptsToLoad(doc: Document, baseUrl: string): string[] {
+interface PendingScript {
+  src: string;
+  module: boolean;
+}
+
+function scriptsToLoad(doc: Document, baseUrl: string): PendingScript[] {
   const keep = new Set<string>();
   document.querySelectorAll('script[src]:not([data-krate-spa])').forEach((s) => keep.add((s as HTMLScriptElement).src));
-  const out: string[] = [];
+  const out: PendingScript[] = [];
+  const seen = new Set<string>();
   doc.querySelectorAll('script[src]').forEach((s) => {
     const src = s.getAttribute('src');
     if (!src) return;
     const t = (s.getAttribute('type') || '').toLowerCase();
     if (t && t !== 'module' && t !== 'text/javascript' && t !== 'application/javascript') return;
     const abs = resolveSrc(src, baseUrl);
-    if (!keep.has(abs) && !out.includes(abs)) out.push(abs);
+    if (!keep.has(abs) && !seen.has(abs)) {
+      seen.add(abs);
+      out.push({ src: abs, module: t === 'module' });
+    }
   });
   return out;
 }
 
-function loadScript(src: string): Promise<boolean> {
+function loadScript(script: PendingScript): Promise<boolean> {
   return new Promise((resolve) => {
     const s = document.createElement('script');
-    s.src = src;
+    s.src = script.src;
+    if (script.module) s.type = 'module';
     // Only page scripts are disposable across navigations; the shared runtime
     // chunk stays in place.
-    if (!RUNTIME_CHUNK_RE.test(src)) s.setAttribute('data-krate-spa', '');
+    if (!RUNTIME_CHUNK_RE.test(script.src)) s.setAttribute('data-krate-spa', '');
     s.onload = () => resolve(true);
     s.onerror = () => resolve(false);
     document.body.appendChild(s);

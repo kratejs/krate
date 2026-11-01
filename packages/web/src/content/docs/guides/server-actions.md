@@ -1,7 +1,7 @@
 ---
 title: Server Actions
-order: 7
-description: Call server code from forms and event handlers with a file-level "use server" directive, React 19 action hooks, progressive enhancement, and no client-side action code.
+order: 9
+description: Call server code from forms and event handlers with a file-level "use server" directive, React 19 action hooks, and progressive enhancement.
 ---
 
 # Server Actions

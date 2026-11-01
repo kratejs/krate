@@ -2,7 +2,7 @@
 
 Krate takes security seriously. This project compiles user-supplied TypeScript
 into HTML and JavaScript at build time, and runs plugin/API code in embedded
-runtimes at serve time — so we care a lot about XSS, path traversal, and code
+runtimes at serve time - so we care a lot about XSS, path traversal, and code
 injection vectors.
 
 ## Reporting a Vulnerability
@@ -54,14 +54,14 @@ The following are in scope:
 
 ## Safe Harbor
 
-We support coordinated disclosure. Researchers who act in good faith — avoiding
-privacy violations, destruction of data, and disruption of production services —
+We support coordinated disclosure. Researchers who act in good faith - avoiding
+privacy violations, destruction of data, and disruption of production services -
 will not face legal action from us.
 
 ## Security Considerations for Contributors
 
 - Never trust file paths derived from content (icons, CSS `@import`, plugins,
-  API routes) — always validate against path traversal.
+  API routes) - always validate against path traversal.
 - Never interpolate user content into HTML or JS without escaping.
 - The `$esc()` sanitizer and `escapeHTML()` are security boundaries. Do not
   weaken them.

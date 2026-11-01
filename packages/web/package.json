@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "krate dev",
-    "build": "krate build",
+    "build": "krate build && node scripts/check-output.mjs",
     "serve": "krate serve",
     "preview": "krate serve",
     "typecheck": "tsc --noEmit",

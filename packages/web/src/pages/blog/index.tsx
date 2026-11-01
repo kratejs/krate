@@ -2,7 +2,7 @@ import { getCollection } from "krate/content";
 
 export default function Blog() {
   const posts = getCollection("blog")
-    .filter((p) => !p.data.draft)
+    .filter((p) => p.data.status === "published")
     .sort((a, b) => (a.data.date < b.data.date ? 1 : -1));
 
   return (

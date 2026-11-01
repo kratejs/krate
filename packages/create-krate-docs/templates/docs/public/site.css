@@ -9,20 +9,44 @@
     --color-border: #e4e4e7;
     --color-primary: #f97316;
     --color-primary-hover: #ea580c;
+    --color-primary-strong: #c2410c;
+    --color-link: #c2410c;
+    --color-link-hover: #9a3412;
     --color-accent-bg: rgba(249, 115, 22, 0.08);
     --color-accent-border: rgba(249, 115, 22, 0.2);
-    --radius: 10px;
+    --radius: 8px;
     --max-width: 1120px;
 }
 
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --color-bg: #09090b;
+    --color-fg: #fafafa;
+    --color-muted: #a1a1aa;
+    --color-muted-bg: #18181b;
+    --color-border: #27272a;
+    --color-primary: #f97316;
+    --color-primary-hover: #ea580c;
+    --color-primary-strong: #c2410c;
+    --color-link: #fb923c;
+    --color-link-hover: #fdba74;
+    --color-accent-bg: rgba(249, 115, 22, 0.12);
+    --color-accent-border: rgba(249, 115, 22, 0.3);
+}
+
 @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
+        color-scheme: dark;
         --color-bg: #09090b;
         --color-fg: #fafafa;
         --color-muted: #a1a1aa;
         --color-muted-bg: #18181b;
         --color-border: #27272a;
         --color-primary: #f97316;
+        --color-primary-hover: #ea580c;
+        --color-primary-strong: #c2410c;
+        --color-link: #fb923c;
+        --color-link-hover: #fdba74;
         --color-accent-bg: rgba(249, 115, 22, 0.12);
         --color-accent-border: rgba(249, 115, 22, 0.3);
     }
@@ -44,12 +68,12 @@ body {
 }
 
 a {
-    color: var(--color-primary);
+    color: var(--color-link);
     text-decoration: none;
 }
 
 a:hover {
-    color: var(--color-primary-hover);
+    color: var(--color-link-hover);
 }
 
 code,
@@ -171,12 +195,12 @@ pre {
 }
 
 .btn-primary {
-    background: var(--color-primary);
+    background: var(--color-primary-strong);
     color: #fff;
 }
 
 .btn-primary:hover {
-    background: var(--color-primary-hover);
+    background: #9a3412;
     color: #fff;
 }
 
@@ -305,4 +329,97 @@ pre {
     .site-navbar-name {
         display: none;
     }
+}
+
+/* ---- Header actions + theme toggle ---- */
+.site-navbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.theme-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--color-muted);
+    cursor: pointer;
+}
+
+.theme-toggle:hover {
+    color: var(--color-fg);
+    background: var(--color-muted-bg);
+}
+
+.theme-toggle svg {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.theme-toggle svg:first-child {
+    opacity: 1;
+}
+
+.theme-toggle svg:last-child {
+    opacity: 0;
+    transform: rotate(-30deg) scale(0.8);
+}
+
+:root[data-theme="dark"] .theme-toggle svg:first-child {
+    opacity: 0;
+    transform: rotate(30deg) scale(0.8);
+}
+
+:root[data-theme="dark"] .theme-toggle svg:last-child {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+}
+
+/* ---- Accessibility ---- */
+.skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 300;
+    padding: 0.5rem 0.9rem;
+    background: var(--color-fg);
+    color: var(--color-bg);
+    border-radius: 0 0 var(--radius) var(--radius);
+    font-size: 0.875rem;
+    text-decoration: none;
+}
+
+.skip-link:focus {
+    left: 0.75rem;
+}
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-primary-strong);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* ---- Fonts ---- */
+@font-face {
+    font-family: 'Inter Variable';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: local('Inter'), local('Inter Variable'), url('/fonts/inter.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'JetBrains Mono Variable';
+    font-style: normal;
+    font-weight: 100 800;
+    font-display: swap;
+    src: local('JetBrains Mono'), local('JetBrains Mono Variable'), url('/fonts/jetbrains-mono.woff2') format('woff2');
 }

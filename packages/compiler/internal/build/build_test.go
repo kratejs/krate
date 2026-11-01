@@ -501,6 +501,31 @@ func TestStageServerRenderer(t *testing.T) {
 	}
 }
 
+func TestSSRServerUsesCustomOutDir(t *testing.T) {
+	root := t.TempDir()
+	custom := filepath.Join(root, "build")
+	if err := os.MkdirAll(custom, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(custom, "server-manifest.json"), []byte(`{"pages":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewSSRServer(root, 0, "node")
+	srv.SetOutDir(custom)
+	if err := srv.LoadManifest(); err != nil {
+		t.Fatalf("LoadManifest with custom outDir: %v", err)
+	}
+	if !srv.HasManifest() {
+		t.Fatal("manifest was not loaded from the custom outDir")
+	}
+
+	defaultSrv := NewSSRServer(root, 0, "node")
+	if err := defaultSrv.LoadManifest(); err == nil {
+		t.Fatal("default dist/ should not contain the custom manifest")
+	}
+}
+
 func repoRootPath() (string, error) {
 	pkgDir, err := os.Getwd()
 	if err != nil {

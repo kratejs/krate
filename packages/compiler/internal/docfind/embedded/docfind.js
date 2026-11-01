@@ -80,7 +80,7 @@ export default async function search(query, maxResults) {
     const payload = readString(resPtr, resLen);
     const docs = JSON.parse(payload || "[]");
     for (const d of docs) {
-      if (d.body && d.body.length > 220) d.body = d.body.slice(0, 220) + "…";
+      if (d.body && d.body.length > 220) d.body = d.body.slice(0, 220) + "...";
     }
     return docs;
   } finally {

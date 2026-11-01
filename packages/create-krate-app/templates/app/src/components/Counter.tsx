@@ -13,7 +13,7 @@ export default function Counter() {
           type="button"
           onClick={() => setCount((c) => c - 1)}
         >
-          −
+          -
         </button>
         <button
           class="btn btn-primary"

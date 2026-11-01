@@ -49,7 +49,7 @@ cd ../..
 The `CI` workflow (`.github/workflows/ci.yml`) runs on every pull request and
 push to `main`/`dev`: a frozen pnpm install, Go build/vet/test, the JS
 package build, and a 30s fuzz run of the lexer and parser. The `test` job is
-enforced by branch protection on `main` — a pull request cannot merge until it
+enforced by branch protection on `main` - a pull request cannot merge until it
 is green.
 
 ## Project Layout
@@ -57,7 +57,7 @@ is green.
 ```
 packages/
   compiler/    Go compiler (lexer, parser, bundler, renderer, build pipeline)
-  runtime/     Client-side runtime — signals, hydration, SPA router, resources
+  runtime/     Client-side runtime - signals, hydration, SPA router, resources
   components/  Built-in UI components (shadcn/ui-style)
   core/       npm CLI wrapper that downloads/executes the platform binary
   core-*/      Per-platform binaries used by @krate/core (built in CI, not committed)
@@ -85,7 +85,7 @@ examples/      Docs + feature demo site (also used for integration tests)
 
 - **Go**: Follow standard `gofmt` formatting. Prefer small, single-purpose
   functions (~10-50 lines). The renderer pipeline is intentionally split into
-  typed IR nodes — keep it that way rather than merging slot types.
+  typed IR nodes - keep it that way rather than merging slot types.
 - **TypeScript**: Prefer signals and plain functions. No classes in the runtime.
 - **No comments unless they explain *why***, not what.
 

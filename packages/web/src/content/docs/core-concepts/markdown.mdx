@@ -1,12 +1,12 @@
 ---
 title: Markdown & MDX
-order: 7
-description: Author content in Markdown or MDX — GFM, admonitions, math, diagrams, and components.
+order: 8
+description: Author content in Markdown or MDX - GFM, admonitions, math, diagrams, and components.
 ---
 
 # Markdown & MDX
 
-Content pages can be authored in Markdown (`.md`) or MDX (`.mdx`) — Markdown
+Content pages can be authored in Markdown (`.md`) or MDX (`.mdx`) - Markdown
 with embedded JSX components. Both compile to static HTML at build time.
 
 ## Frontmatter
@@ -35,11 +35,11 @@ keywords: [setup, install]
 
 The markdown renderer supports:
 
-- **GFM** — tables, task lists, autolinks, strikethrough
-- **Heading anchors** — every heading gets an `id` for deep-linking and TOC
-- **Definition lists** — a term line followed by `: definition` lines
-- **Footnotes** — `[^1]` references with `[^1]: text` definitions
-- **Emoji shortcodes** — `:rocket:` → 🚀 (outside code spans)
+- **GFM** - tables, task lists, autolinks, strikethrough
+- **Heading anchors** - every heading gets an `id` for deep-linking and TOC
+- **Definition lists** - a term line followed by `: definition` lines
+- **Footnotes** - `[^1]` references with `[^1]: text` definitions
+- **Emoji shortcodes** - `:rocket:` -> rocket emoji (outside code spans)
 - **Admonitions**
 
 :::note
@@ -55,7 +55,7 @@ This is a warning callout.
 Admonition types include `note`, `tip`, `warning`, and `danger`.
 :::
 
-- **Syntax highlighting** — fenced code blocks are highlighted at build time:
+- **Syntax highlighting** - fenced code blocks are highlighted at build time:
 
 ```tsx
 export default function Hello() {
@@ -63,7 +63,7 @@ export default function Hello() {
 }
 ```
 
-- **Math** — with `math: true`, `$inline$` and `$$display$$` spans are wrapped
+- **Math** - with `math: true`, `$inline$` and `$$display$$` spans are wrapped
   in `.krate-math` elements. In the docs plugin, KaTeX is loaded from a CDN and
   auto-renders them; elsewhere the spans are left for your own renderer/CSS.
   Code spans/blocks are never touched:
@@ -87,7 +87,7 @@ graph TD
 
 ## Component directives
 
-Import a component, then wrap content in it with a `:::component` directive —
+Import a component, then wrap content in it with a `:::component` directive -
 the body is rendered as Markdown and passed to the component as HTML:
 
 ```mdx
@@ -100,17 +100,17 @@ Krate **compiles** Markdown into your components, with full Markdown inside.
 
 Directives are expanded to real component JSX at build time, so they appear in
 the output as static HTML with no client runtime. This works for any imported
-component (`:::component Steps`, `:::component Aside type="tip"`, …).
+component (`:::component Steps`, `:::component Aside type="tip"`, ...).
 
 ### Built-in directives
 
 Four container directives lower to `@krate/components` without any import (the
 docs plugin auto-imports them):
 
-- `:::card Title` … `:::` — wraps the body in a `Card`.
-- `:::steps` with nested `::step Title` items — a `Steps` list.
-- `:::tabs` with nested `::tab Label` items — a `Tabs` panel.
-- `:::code-group` with fenced code blocks — one tab per language.
+- `:::card Title` ... `:::` - wraps the body in a `Card`.
+- `:::steps` with nested `::step Title` items - a `Steps` list.
+- `:::tabs` with nested `::tab Label` items - a `Tabs` panel.
+- `:::code-group` with fenced code blocks - one tab per language.
 
 ```mdx
 :::steps
@@ -160,4 +160,4 @@ markdown: {
 ```
 
 For how Markdown and MDX are parsed and compiled, see
-[Contributing → Architecture](/docs/contributing/architecture/).
+[Contributing -> Architecture](/docs/contributing/architecture/).

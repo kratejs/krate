@@ -44,7 +44,7 @@ transparently forwarded to the sidecar.
 - The Node sidecar runs `node:cluster` across `ssr.nodeWorkers` processes, and
   imports each route once (module cache) in production.
 - Set `ssr.apiRuntime: "bun"` to run the JS/TS routes in a **Bun sidecar** using
-  `Bun.serve` (no Node `http` stack, no cluster shim) — the fastest of the
+  `Bun.serve` (no Node `http` stack, no cluster shim) - the fastest of the
   sidecar options. `ssr.apiRuntime: "node"` (or `"deno"`) uses the Node `http`
   sidecar instead. The top-level `runtime: "bun"` selects the same Bun server
   when no explicit `apiRuntime` is set.
@@ -104,7 +104,7 @@ stack; it falls back to a loopback port only if the socket cannot be created.
 4. Run `krate dev` and hit the route.
 
 ```go
-// src/api/hello.go — GET /api/hello
+// src/api/hello.go - GET /api/hello
 package api
 
 import (
@@ -124,7 +124,7 @@ dispatch. Dynamic segments use `[param]` file names and are read with
 `r.PathValue("param")`:
 
 ```go
-// src/api/users/[id].go — all methods on /api/users/{id}
+// src/api/users/[id].go - all methods on /api/users/{id}
 func Handler(w http.ResponseWriter, r *http.Request) {
 	runtime.WriteJSON(w, 200, map[string]interface{}{"id": r.PathValue("id")})
 }
@@ -167,7 +167,7 @@ func GET(w http.ResponseWriter, r *http.Request) {
 ```
 
 Third-party modules are declared under `go` (or via a project-root `go.mod`,
-which is merged — its `require`/`replace`/`exclude` directives are copied and
+which is merged - its `require`/`replace`/`exclude` directives are copied and
 relative `replace` paths rebased):
 
 ```typescript

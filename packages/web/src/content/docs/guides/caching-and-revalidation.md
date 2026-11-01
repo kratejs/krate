@@ -1,7 +1,7 @@
 ---
 title: Caching and Revalidation
 order: 7
-description: Cache server data with tags and revalidate windows, pick a page render mode with revalidate/dynamic exports, and invalidate ISR pages on demand with revalidatePath and revalidateTag.
+description: Cache server data with tags and revalidate windows, choose a render mode, and invalidate ISR pages on demand with revalidatePath and revalidateTag.
 ---
 
 # Caching and Revalidation
@@ -50,7 +50,7 @@ it imports read data:
 - Tags alone (`{ next: { tags: [...] } }`, `unstable_cache(..., { tags })`) make
   it ISR that stays cached until a tag or path is revalidated.
 
-The build prints the inferred mode (`posts.tsx → isr (tagged data read)`). A
+The build prints the inferred mode (`posts.tsx -> isr (tagged data read)`). A
 page that is pinned static (`force-static`, `revalidate = false`,
 `output: "static"`) but reads tagged, timed or no-store data gets warning
 `KR8602`: its HTML is baked once and nothing can refresh it.

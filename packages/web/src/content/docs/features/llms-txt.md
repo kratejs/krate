@@ -36,6 +36,6 @@ export default defineConfig({
   bullet per page grouped by section (page title, URL, and description).
 - **`llms-full.txt`** - the same header followed by every page's raw content.
 
-`baseUrl`, `title`, and `description` fall back to `seo.baseUrl`,
-`seo.siteName`, and `seo.description` (and the docs plugin's options) when
-omitted. Set `full: false` to skip `llms-full.txt`. Draft pages are excluded.
+`baseUrl`, `title`, and `description` fall back to `site.url`, `site.name`, and
+`site.description` (or the deprecated `seo.*` aliases, and the docs plugin's
+options) when omitted. Set `full: false` to skip `llms-full.txt`. Draft pages are excluded.

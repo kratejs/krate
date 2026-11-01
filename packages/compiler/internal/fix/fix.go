@@ -97,6 +97,54 @@ func Run(root string, apply bool) (Result, error) {
 	return res, nil
 }
 
+// Plan returns the rewritten source for every safe fix without writing
+// anything. Callers (such as the MCP transaction layer) can then stage and
+// commit the changes under their own policy and conflict checks.
+func Plan(root string) (map[string]string, []Change, []Skipped, error) {
+	files := map[string]string{}
+	var changes []Change
+	var skipped []Skipped
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case "node_modules", "dist", ".krate", ".git":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !fixableFile(path) {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		out, fileChanges, parseErr := fixSource(string(src))
+		rel, _ := filepath.Rel(root, path)
+		rel = filepath.ToSlash(rel)
+		if parseErr != nil {
+			skipped = append(skipped, Skipped{File: rel, Reason: parseErr.Error()})
+			return nil
+		}
+		if len(fileChanges) == 0 {
+			return nil
+		}
+		for i := range fileChanges {
+			fileChanges[i].File = rel
+		}
+		changes = append(changes, fileChanges...)
+		files[rel] = out
+		return nil
+	})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return files, changes, skipped, nil
+}
+
 func fixableFile(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
 	if strings.HasSuffix(base, ".d.ts") {

@@ -110,6 +110,13 @@ func main() {
 		runConfig(flags, args)
 	case "plugin":
 		runPlugin(flags, args)
+	case "init", "create":
+		// Handled by the @krate/core npm wrapper, which delegates to
+		// create-krate-app so the scaffold follows the same release channel.
+		fmt.Fprintf(os.Stderr, "%s`krate %s` is provided by the @krate/core npm wrapper.%s\n", cYellow, args[0], cReset)
+		fmt.Fprintf(os.Stderr, "Run `npx create-krate-app@latest <dir>` or install @krate/core.\n")
+		printCommandUsage(os.Stdout, "init")
+		os.Exit(1)
 	case "mcp":
 		runMCP(flags, args)
 	case "version", "--version", "-v":
@@ -170,6 +177,10 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "plugin":
 		fmt.Fprintf(w, "Usage: krate plugin add <package> [dir]\n\n")
 		fmt.Fprintf(w, "Manage Krate plugins.\n")
+	case "init", "create":
+		fmt.Fprintf(w, "Usage: krate init [dir] [--use-npm|--use-pnpm|--use-yarn|--use-bun] [--skip-install] [--no-git]\n\n")
+		fmt.Fprintf(w, "Scaffold a new Krate project (alias: create).\n")
+		fmt.Fprintf(w, "Provided by the @krate/core npm wrapper, which delegates to create-krate-app.\n")
 	case "mcp":
 		fmt.Fprintf(w, "Usage: krate mcp [dir] [--http] [--port 7331] [--token TOKEN]\n\n")
 		fmt.Fprintf(w, "Run the MCP server (Model Context Protocol) over stdio by default.\n")
@@ -198,6 +209,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  doctor    Print a diagnostic summary of the project and toolchain\n")
 	fmt.Fprintf(w, "  config    Print the fully resolved configuration\n")
 	fmt.Fprintf(w, "  plugin    Manage plugins (add <pkg>)\n")
+	fmt.Fprintf(w, "  init      Scaffold a new project (alias: create; via the npm wrapper)\n")
 	fmt.Fprintf(w, "  mcp       Run the MCP server (Model Context Protocol; --http for HTTP)\n")
 	fmt.Fprintf(w, "  version   Print the version\n")
 	fmt.Fprintf(w, "  help      Print this help, or `krate help <command>`\n\n")
@@ -325,10 +337,10 @@ func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 		os.Exit(1)
 	}
 	for _, w := range config.Warnings {
-		fmt.Fprintf(os.Stderr, "  %s⚠ config:%s %s\n", cYellow, cReset, w)
+		fmt.Fprintf(os.Stderr, "  %s! config:%s %s\n", cYellow, cReset, w)
 	}
 	for _, w := range plugin.ConfigWarnings(cfg) {
-		fmt.Fprintf(os.Stderr, "  %s⚠ config:%s %s\n", cYellow, cReset, w)
+		fmt.Fprintf(os.Stderr, "  %s! config:%s %s\n", cYellow, cReset, w)
 	}
 	cfg.Resolve(root)
 
@@ -376,7 +388,7 @@ func runBuild(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
 	env := loadProjectEnv(root, "production", flags.Verbose)
 
-	fmt.Printf("%s%s  Building %s \u2192 %s%s\n", cBold, cCyan, root, cfg.OutDir, cReset)
+	fmt.Printf("%s%s  Building %s -> %s%s\n", cBold, cCyan, root, cfg.OutDir, cReset)
 
 	start := time.Now()
 	builder := build.New(root, cfg)
@@ -446,7 +458,7 @@ func startCPUProfile(path string) func() {
 	return func() {
 		pprof.StopCPUProfile()
 		_ = f.Close()
-		fmt.Printf("  %s·%s CPU profile written to %s\n", cGreen, cReset, path)
+		fmt.Printf("  %s-%s CPU profile written to %s\n", cGreen, cReset, path)
 	}
 }
 
@@ -463,7 +475,7 @@ func writeHeapProfile(path string) {
 		fmt.Fprintf(os.Stderr, "%sWarning: cannot write mem profile:%s %v\n", cYellow, cReset, err)
 		return
 	}
-	fmt.Printf("  %s·%s heap profile written to %s\n", cGreen, cReset, path)
+	fmt.Printf("  %s-%s heap profile written to %s\n", cGreen, cReset, path)
 }
 
 func runDev(flags cliFlags, args []string) {
@@ -543,7 +555,7 @@ func runDeploy(flags cliFlags, args []string) {
 		target = "netlify"
 	}
 
-	fmt.Printf("%s%s  Building %s \u2192 %s%s\n", cBold, cCyan, root, cfg.OutDir, cReset)
+	fmt.Printf("%s%s  Building %s -> %s%s\n", cBold, cCyan, root, cfg.OutDir, cReset)
 	builder := build.New(root, cfg)
 	builder.Verbose = flags.Verbose
 	builder.Env = env
@@ -713,7 +725,7 @@ func runCheck(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
 	env := loadProjectEnv(root, "production", flags.Verbose)
 
-	fmt.Printf("%s%s  Building for checks %s \u2192 %s%s\n", cBold, cCyan, root, cfg.OutDir, cReset)
+	fmt.Printf("%s%s  Building for checks %s -> %s%s\n", cBold, cCyan, root, cfg.OutDir, cReset)
 	start := time.Now()
 
 	builder := build.New(root, cfg)
@@ -736,7 +748,7 @@ func runCheck(flags cliFlags, args []string) {
 	fopts := check.DefaultFormatOptions()
 
 	if len(findings) == 0 {
-		fmt.Printf("%s%s  ✓ No quality issues found.%s\n", cBold, cGreen, cReset)
+		fmt.Printf("%s%s  + No quality issues found.%s\n", cBold, cGreen, cReset)
 		return
 	}
 
@@ -746,11 +758,11 @@ func runCheck(flags cliFlags, args []string) {
 	fmt.Printf("\n%s  Checks: %s in %s%s\n", cCyan, check.Summary(errs, warns, fopts), time.Since(start).Round(time.Millisecond), cReset)
 
 	if check.Failing(findings, checkCfg.FailOn) {
-		fmt.Fprintf(os.Stderr, "\n%s%s  ✗ Quality checks failed.%s\n", cBold, cRed, cReset)
+		fmt.Fprintf(os.Stderr, "\n%s%s  x Quality checks failed.%s\n", cBold, cRed, cReset)
 		os.Exit(1)
 	}
 
-	fmt.Printf("\n%s%s  ⚠ Passed with warnings (failOn=%s).%s\n", cBold, cYellow, checkCfg.FailOn, cReset)
+	fmt.Printf("\n%s%s  ! Passed with warnings (failOn=%s).%s\n", cBold, cYellow, checkCfg.FailOn, cReset)
 }
 
 // runClean removes generated output (the build output directory and the
@@ -776,7 +788,7 @@ func runClean(flags cliFlags, args []string) {
 		if relErr != nil {
 			rel = dir
 		}
-		fmt.Printf("  %s✓%s Removed %s\n", cGreen, cReset, filepath.ToSlash(rel))
+		fmt.Printf("  %s+%s Removed %s\n", cGreen, cReset, filepath.ToSlash(rel))
 	}
 }
 

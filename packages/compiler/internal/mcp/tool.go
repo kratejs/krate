@@ -137,6 +137,15 @@ type completionFn func(ctx context.Context, value string) ([]string, error)
 // render returns the prompt's messages after argument substitution and any
 // dynamic resolution.
 func (p *Prompt) render(args map[string]any) (map[string]any, *rpcError) {
+	for _, arg := range p.Arguments {
+		if !arg.Required {
+			continue
+		}
+		v, ok := args[arg.Name]
+		if !ok || strings.TrimSpace(fmt.Sprint(v)) == "" {
+			return nil, &rpcError{Code: codeInvalidParams, Message: "missing required prompt argument: " + arg.Name}
+		}
+	}
 	msgs := make([]PromptMessage, len(p.Messages))
 	copy(msgs, p.Messages)
 	for i, m := range msgs {

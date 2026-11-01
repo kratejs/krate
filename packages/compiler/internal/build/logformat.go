@@ -34,7 +34,7 @@ func colorStatus(code int) string {
 // sub-millisecond requests so fast static hits are not shown as "0ms".
 func formatDuration(d time.Duration) string {
 	if d < time.Millisecond {
-		return strconv.FormatInt(d.Microseconds(), 10) + "μs"
+		return strconv.FormatInt(d.Microseconds(), 10) + "us"
 	}
 	return strconv.FormatInt(d.Milliseconds(), 10) + "ms"
 }

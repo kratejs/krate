@@ -1,7 +1,7 @@
 ---
 title: Browser Support
 description: Supported browsers, the JavaScript baseline, and the compat modes for older engines.
-order: 8
+order: 9
 ---
 
 # Browser Support
@@ -30,7 +30,7 @@ Zero-JS CSS Signals (hidden `<input>` controllers + `:has()` stylesheets,
 see [CSS Signals](/docs/core-concepts/css-signals/)) require **`:has()`**:
 Chrome/Edge 105+, Safari 15.4+, Firefox 121+. Krate's default (`modern`) output
 also uses CSS anchor positioning for menus/popovers (Chromium 125+), which is
-progressive — browsers without it fall back to the component's own positioning.
+progressive - browsers without it fall back to the component's own positioning.
 
 By default Krate emits a `@supports not selector(:has(*))` fallback that
 **reveals all panels** (the interactive reveal degrades to "everything shown").
@@ -90,7 +90,7 @@ the `User-Agent` string for accuracy.
 |--------|--------|
 | Hydration chunks & workers | `es2020` (esbuild) |
 | Client runtime bundle (`krate-runtime.js`, `krate-hydrate.js`) | `es2020` |
-| Generated standalone pages | static HTML — no JS required to read |
+| Generated standalone pages | static HTML - no JS required to read |
 
 Hydration code uses `const`/`let`, `Map`/`Set`, `fetch`, `EventSource`,
 `history.pushState`, and `document.createTreeWalker`. All are present in the

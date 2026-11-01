@@ -2,7 +2,7 @@
 
 Scaffold a new [Krate](https://github.com/kratejs/krate) documentation site in
 seconds. Ships with the same look and feel as the official
-[krate.js.org](https://krate.js.org) docs — sidebar, table of contents,
+[krate.js.org](https://krate.js.org) docs - sidebar, table of contents,
 breadcrumbs, prev/next navigation, dark/light theme, and WASM search.
 
 ```bash
@@ -41,11 +41,11 @@ Run without a project directory to be prompted for a name.
 
 A ready-to-run Krate docs site, powered by the `docs` plugin:
 
-- `krate.config.ts` — `docs()` plugin with search, social links, and SEO
-- `tsconfig.json` — TypeScript configuration
-- `src/pages/` — home, `_layout`, and 404 pages
-- `src/content/docs/` — markdown/mdx content (add files here to create pages)
-- `public/` — site styles, favicon, robots.txt
+- `krate.config.ts` - `docs()` plugin with search, social links, and SEO
+- `tsconfig.json` - TypeScript configuration
+- `src/pages/` - home, `_layout`, and 404 pages
+- `src/content/docs/` - markdown/mdx content (add files here to create pages)
+- `public/` - site styles, favicon, robots.txt
 
 The docs shell (sidebar, table of contents, breadcrumbs, prev/next, theme
 toggle) comes from `@krate/base-docs-theme` via `theme: baseDocsTheme()`.

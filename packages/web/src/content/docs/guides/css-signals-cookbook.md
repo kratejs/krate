@@ -1,6 +1,7 @@
 ---
 title: CSS Signals Cookbook
 description: Zero-JS patterns for common widgets.
+order: 20
 ---
 
 # CSS Signals Cookbook

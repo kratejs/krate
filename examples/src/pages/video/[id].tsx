@@ -33,7 +33,7 @@ export default function VideoPage(props: VideoProps) {
         <li><Link href="/video/hello-world">Video hello-world</Link></li>
       </ul>
 
-      <Link href="/">← Back to Home</Link>
+      <Link href="/">Back to Home</Link>
     </div>
   )
 }

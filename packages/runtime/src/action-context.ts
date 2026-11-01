@@ -6,6 +6,7 @@
  * read that scope, so they only work while a server action is executing.
  */
 
+import { markNoStore } from './cache-scope.js';
 import { getRequestContext, requestCookies, thenable } from './request-context.js';
 
 /** Options for `cookies().set()`. HttpOnly, Path=/ and SameSite=Lax are the defaults. */
@@ -67,7 +68,10 @@ export function headers(): Headers {
   const action = getActionContext();
   if (action) return awaitableHeaders(action.headers);
   const req = getRequestContext();
-  if (req) return awaitableHeaders(req.headers);
+  if (req) {
+    markNoStore();
+    return awaitableHeaders(req.headers);
+  }
   return requireContext('headers').headers;
 }
 
@@ -80,7 +84,10 @@ export function cookies(): ActionCookies {
   const action = getActionContext();
   if (action) return awaitableActionCookies(action.cookies);
   const req = getRequestContext();
-  if (req) return requestCookies(req.cookies) as unknown as ActionCookies;
+  if (req) {
+    markNoStore();
+    return requestCookies(req.cookies) as unknown as ActionCookies;
+  }
   return requireContext('cookies').cookies;
 }
 

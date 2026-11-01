@@ -23,7 +23,7 @@ order: 3
 This is my first docs page.
 ```
 
-That's it — the page appears in the sidebar automatically.
+That's it - the page appears in the sidebar automatically.
 
 ## Frontmatter
 

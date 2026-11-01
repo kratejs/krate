@@ -6,7 +6,7 @@ interface PostProps {
 
 export function generateStaticParams() {
   return getCollection("blog")
-    .filter((p) => !p.data.draft)
+    .filter((p) => p.data.status === "published")
     .map((p) => ({ slug: p.slug }));
 }
 
@@ -14,7 +14,9 @@ export const dynamicParams = false;
 
 export default function BlogPost(props: PostProps) {
   const slug = props.params?.slug;
-  const post = getCollection("blog").find((p) => p.slug === slug);
+  const post = getCollection("blog").find(
+    (p) => p.slug === slug && p.data.status === "published",
+  );
 
   if (!post) {
     return (

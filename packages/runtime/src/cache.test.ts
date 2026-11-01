@@ -216,6 +216,25 @@ describe('revalidatePath / revalidateTag', () => {
 });
 
 describe('patchFetch', () => {
+  it('never replays Set-Cookie from a cached response', async () => {
+    const base = vi.fn(async () => new Response('body', {
+      status: 200,
+      headers: { 'set-cookie': 'sid=secret', 'x-test': 'yes' },
+    }));
+    vi.stubGlobal('fetch', base);
+    cacheRuntime().fetchPatched = false;
+    patchFetch();
+
+    const read = () => fetch('http://data/session', { next: { tags: ['session'], revalidate: 60 } } as RequestInit);
+    const first = await withCacheScope('/p', async () => read());
+    expect(first.result.headers.get('x-test')).toBe('yes');
+
+    const second = await withCacheScope('/p', async () => read());
+    expect(second.result.headers.get('set-cookie')).toBeNull();
+    expect(second.result.headers.get('x-test')).toBe('yes');
+    expect(base).toHaveBeenCalledTimes(1);
+  });
+
   it('caches tagged GET responses, records tags, and bypasses no-store', async () => {
     let n = 0;
     const base = vi.fn(async () => new Response(`body-${++n}`, { status: 200, headers: { 'x-n': String(n) } }));

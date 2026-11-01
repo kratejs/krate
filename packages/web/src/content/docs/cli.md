@@ -13,6 +13,7 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate build [dir]` | Production build |
 | `krate dev [dir]` | Build + dev server (port 3000) + hot reload |
 | `krate serve [dir]` | Build + static HTTP server (production preview) |
+| `krate init [dir]` | Scaffold a new project (alias: `create`; via the npm wrapper) |
 | `krate types [dir]` | Generate route/content TypeScript declarations only |
 | `krate go:init [dir]` | Set up `go.mod`/`go.work` + vendored helpers for Go intellisense |
 | `krate check [dir]` | Build and run quality gates (a11y/SEO/perf); non-zero on failure |
@@ -23,6 +24,26 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate clean [dir]` | Remove build output and the compiler cache |
 | `krate mcp [dir]` | Start the MCP (Model Context Protocol) server over stdio |
 | `krate version` | Print the version |
+
+## `krate init`
+
+Scaffolds a new project from `create-krate-app`. The command lives in the
+`@krate/core` npm wrapper (not the native binary) so it works on every platform
+and delegates to the same release channel as the running core package.
+
+```sh
+krate init my-app
+krate create my-app            # alias
+npx create-krate-app@latest my-app
+```
+
+| Flag | Description |
+|------|-------------|
+| `--use-npm` / `--use-pnpm` / `--use-yarn` / `--use-bun` | Choose the package manager |
+| `--skip-install` (`--no-install`) | Skip dependency installation |
+| `--no-git` | Do not initialize a git repository |
+
+For a documentation site, use `create-krate-docs` instead.
 
 ## `krate build`
 
@@ -57,8 +78,8 @@ During the build the compiler:
 
 `krate build` keeps a cross-run cache under `.krate/cache/build/`. On a rebuild,
 any page whose inputs (source, imports, layouts, generated content, and config)
-are byte-for-byte unchanged is replayed from the cache — bundling, compilation
-and emit are skipped — which makes repeat and CI builds dramatically faster.
+are byte-for-byte unchanged is replayed from the cache - bundling, compilation
+and emit are skipped - which makes repeat and CI builds dramatically faster.
 
 The cache is transparent and always produces identical output. It is disabled
 automatically when a page can't be faithfully replayed:
@@ -100,7 +121,7 @@ Useful for previewing `dist/` exactly as a static host would serve it.
 Builds the site and runs the compiler-enforced quality gates
 (accessibility, SEO, performance) against the emitted HTML. Exits non-zero
 when a finding meets the configured `checks.failOn` severity (default
-`error`) — ideal for CI.
+`error`) - ideal for CI.
 
 ```sh
 krate check
@@ -175,7 +196,7 @@ original Next.js tree. See [Migrating from Next.js](/docs/guides/migrating-from-
 
 ## `krate inspect`
 
-Builds the site and prints its machine-readable model — every route with its
+Builds the site and prints its machine-readable model - every route with its
 render mode, source file, dependency/dependent edges, and emitted output files:
 
 ```sh
@@ -205,7 +226,7 @@ The `--json` form emits a single JSON document on stdout:
 
 `files` maps each depended-on source file to the routes that reference it (what
 links here). The same model backs the MCP `explain` tool and the
-`krate://graph` resource — see [MCP Server](/docs/features/mcp/).
+`krate://graph` resource - see [MCP Server](/docs/features/mcp/).
 
 ## `krate config`
 

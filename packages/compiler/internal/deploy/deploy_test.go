@@ -101,3 +101,20 @@ func TestEmitUnknownTarget(t *testing.T) {
 		t.Fatal("expected error for unknown target")
 	}
 }
+
+func TestEmitRemovesServerOnlyArtifacts(t *testing.T) {
+	out := t.TempDir()
+	internal := filepath.Join(out, ".krate", "server-bundles")
+	if err := os.MkdirAll(internal, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(internal, "page.server.mjs"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Emit("netlify", config.Default(), out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(out, ".krate")); !os.IsNotExist(err) {
+		t.Fatalf(".krate still present after deploy: %v", err)
+	}
+}

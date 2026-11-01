@@ -1,6 +1,8 @@
 // @krate/runtime/server - Server-side rendering runtime
 // Provides the same API as the client runtime but renders to HTML strings.
 
+import { ATTR_ALIASES } from './htmlspec-attributes.js';
+
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
 export { revalidatePath, revalidateTag, unstable_cache, unstable_noStore } from './cache.js';
@@ -174,26 +176,64 @@ function isServerAction(v: any): v is { actionUrl: string } {
   return typeof v === "function" && typeof (v as any).actionUrl === "string";
 }
 
+const UNITLESS = new Set([
+  "animation-iteration-count", "aspect-ratio", "border-image-outset", "border-image-slice",
+  "border-image-width", "box-flex", "box-flex-group", "box-ordinal-group", "column-count",
+  "columns", "flex", "flex-grow", "flex-positive", "flex-shrink", "flex-negative", "flex-order",
+  "grid-area", "grid-row", "grid-row-end", "grid-row-span", "grid-row-start", "grid-column",
+  "grid-column-end", "grid-column-span", "grid-column-start", "font-weight", "line-clamp",
+  "line-height", "opacity", "order", "orphans", "scale", "tab-size", "widows", "z-index", "zoom",
+  "fill-opacity", "flood-opacity", "stop-opacity", "stroke-dasharray", "stroke-dashoffset",
+  "stroke-miterlimit", "stroke-opacity", "stroke-width",
+]);
+
+const URL_ATTRS = new Set(["href", "src", "action", "formaction", "xlink:href"]);
+// eslint-disable-next-line no-control-regex
+const JS_URL = /^[\u0000-\u001F ]*j[\r\n\t]*a[\r\n\t]*v[\r\n\t]*a[\r\n\t]*s[\r\n\t]*c[\r\n\t]*r[\r\n\t]*i[\r\n\t]*p[\r\n\t]*t[\r\n\t]*:/i;
+const BLOCKED_URL = "javascript:throw new Error('React has blocked a javascript: URL as a security precaution.')";
+
+function cssName(key: string): string {
+  if (key.startsWith("--")) return key;
+  const name = key.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+  return name.startsWith("ms-") ? "-" + name : name;
+}
+
+function styleString(value: Record<string, unknown>): string {
+  const out: string[] = [];
+  for (const key of Object.keys(value)) {
+    const v = value[key];
+    if (v == null || typeof v === "boolean" || v === "") continue;
+    const prop = cssName(key);
+    const bare = prop.replace(/^-(webkit|moz|ms|o)-/, "");
+    const text = typeof v === "number" && v !== 0 && !prop.startsWith("--") && !UNITLESS.has(bare)
+      ? v + "px"
+      : String(v);
+    out.push(prop + ":" + text);
+  }
+  return out.join(";");
+}
+
 function setAttr(key: string, val: any): string {
+  if (key === "children" || key === "key" || key === "ref" || key === "dangerouslySetInnerHTML") return "";
+  const name = ATTR_ALIASES[key] || key;
   if (val == null || val === false) return "";
-  if (val === true) return ` ${key}`;
-  if (key === "action" && isServerAction(val)) {
+  if (val === true) return ` ${name}`;
+  if (name === "action" && isServerAction(val)) {
     return ` action="${escapeHTML(val.actionUrl)}" data-krate-action`;
   }
-  if ((key === "formAction" || key === "formaction") && isServerAction(val)) {
+  if (name === "formaction" && isServerAction(val)) {
     return ` formaction="${escapeHTML(val.actionUrl)}" formmethod="post" data-krate-action`;
   }
   // Client function actions run only after hydration; they have no HTML form.
   if (typeof val === "function") return "";
-  if (key === "class") return ` class="${escapeHTML(String(val))}"`;
   if (key === "style" && typeof val === "object") {
-    const css = Object.entries(val)
-      .map(([k, v]) => `${k}:${v}`)
-      .join(";");
-    return ` style="${escapeHTML(css)}"`;
+    const css = styleString(val as Record<string, unknown>);
+    return css ? ` style="${escapeHTML(css)}"` : "";
   }
   if (key.startsWith("on") || key.startsWith("__")) return "";
-  return ` ${key}="${escapeHTML(String(val))}"`;
+  let text = String(val);
+  if (URL_ATTRS.has(name.toLowerCase()) && JS_URL.test(text)) text = BLOCKED_URL;
+  return ` ${name}="${escapeHTML(text)}"`;
 }
 
 export function renderToString(node: JSXNode): string {
@@ -275,7 +315,10 @@ function renderElement(el: JSXElement): string {
     return `<${tag}${attrs}>`;
   }
 
-  const inner = children.map(renderNode).join("");
+  const dangerous = props.dangerouslySetInnerHTML;
+  const inner = dangerous && typeof dangerous === "object" && typeof dangerous.__html === "string"
+    ? dangerous.__html
+    : children.map(renderNode).join("");
   return `<${tag}${attrs}>${inner}</${tag}>`;
 }
 

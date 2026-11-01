@@ -2,7 +2,7 @@ const PROJECTS = [
   {
     name: "Krate docs",
     url: "https://krate.js.org/docs/",
-    detail: "This documentation site — built with Krate itself (docs plugin, WASM search, i18n).",
+    detail: "This documentation site - built with Krate itself (docs plugin, Pagefind search, versioned pages).",
   },
   {
     name: "Krate examples",
@@ -15,7 +15,7 @@ export default function Showcase() {
   return (
     <article class="section">
       <Head>
-        <title>Showcase — Krate</title>
+        <title>Showcase - Krate</title>
         <meta name="description" content="Projects built with Krate." />
       </Head>
       <h1 class="section-title">Showcase</h1>

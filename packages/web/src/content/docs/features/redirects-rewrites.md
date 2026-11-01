@@ -1,7 +1,7 @@
 ---
 title: Redirects & Rewrites
 description: Redirect and rewrite URLs from your config.
-order: 8
+order: 9
 ---
 
 # Redirects & Rewrites
@@ -22,7 +22,7 @@ redirects: [
 |--------|-------------|
 | `source` | The path to match (supports `*` splats and `:param` segments) |
 | `destination` | Where to send the visitor |
-| `permanent` | `true` → `301`, `false` (default) → `302` |
+| `permanent` | `true` -> `301`, `false` (default) -> `302` |
 
 ## Rewrites
 
@@ -38,8 +38,8 @@ keeping clean public URLs.
 
 ## Difference
 
-- **Redirects** — the browser is sent to a new URL (`301`/`302`).
-- **Rewrites** — the request is served from a different internal path; the URL
+- **Redirects** - the browser is sent to a new URL (`301`/`302`).
+- **Rewrites** - the request is served from a different internal path; the URL
   in the address bar is unchanged.
 
 Both support pattern matching with wildcard (`*`) and parameterized

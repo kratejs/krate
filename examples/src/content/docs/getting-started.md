@@ -9,8 +9,8 @@ This guide walks you through setting up and building your first Krate project.
 
 ## Prerequisites
 
-- **Go 1.21+** — for building the compiler
-- **Node.js 20+, Bun, or Deno** — for API/SSR sidecars and bundled build scripts
+- **Go 1.21+** - for building the compiler
+- **Node.js 20+, Bun, or Deno** - for API/SSR sidecars and bundled build scripts
 
 ## Installation
 
@@ -37,9 +37,9 @@ This creates a `krate.config.ts` file with sensible defaults.
 
 Pages live in `src/pages/`. Each file becomes a route:
 
-- `src/pages/index.tsx` → `/`
-- `src/pages/about.tsx` → `/about/`
-- `src/pages/blog/post.tsx` → `/blog/post/`
+- `src/pages/index.tsx` -> `/`
+- `src/pages/about.tsx` -> `/about/`
+- `src/pages/blog/post.tsx` -> `/blog/post/`
 
 ## Building
 
@@ -67,11 +67,11 @@ Krate uses **Server-Sent Events (SSE)** to push reload signals to the browser:
 4. An SSE event is sent with the list of affected page routes
 5. The browser checks if the current page is in the list and reloads if so
 
-This means **large projects rebuild in milliseconds** — only the minimal set of pages is regenerated.
+This means **large projects rebuild in milliseconds** - only the minimal set of pages is regenerated.
 
 ### Partial Reloads
 
-Krate tracks dependencies at the file level. If you edit a shared component used by 3 pages, only those 3 pages are rebuilt. The dependency graph is built automatically during bundling — no manual configuration needed.
+Krate tracks dependencies at the file level. If you edit a shared component used by 3 pages, only those 3 pages are rebuilt. The dependency graph is built automatically during bundling - no manual configuration needed.
 
 ### Live Reload Script
 

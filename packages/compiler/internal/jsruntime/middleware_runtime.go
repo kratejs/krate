@@ -78,11 +78,45 @@ func (m *MiddlewareRuntime) Execute(req MiddlewareRequest) MiddlewareResult {
 		(function() {
 			try {
 				var req = %s;
+				var rawHeaders = req.headers || {};
+				var headerView = {
+					get: function(name) {
+						var key = String(name).toLowerCase();
+						var value = rawHeaders[key];
+						if (value === undefined) {
+							for (var k in rawHeaders) {
+								if (String(k).toLowerCase() === key) { value = rawHeaders[k]; break; }
+							}
+						}
+						return value === undefined ? null : String(value);
+					},
+					has: function(name) { return this.get(name) !== null; },
+					forEach: function(fn) {
+						for (var k in rawHeaders) fn(String(rawHeaders[k]), String(k), this);
+					},
+				};
+				var cookieJar = {};
+				var cookieHeader = headerView.get('cookie') || '';
+				if (cookieHeader) {
+					var parts = cookieHeader.split(';');
+					for (var ci = 0; ci < parts.length; ci++) {
+						var part = parts[ci];
+						var eq = part.indexOf('=');
+						if (eq <= 0) continue;
+						var cname = part.slice(0, eq).trim();
+						if (cname && cookieJar[cname] === undefined) cookieJar[cname] = part.slice(eq + 1).trim();
+					}
+				}
 				var request = {
 					url: req.url,
 					method: req.method,
 					path: req.path,
-					headers: req.headers || {},
+					headers: headerView,
+					cookies: {
+						get: function(name) { return cookieJar[String(name)]; },
+						getAll: function() { var out = []; for (var k in cookieJar) out.push({ name: k, value: cookieJar[k] }); return out; },
+						has: function(name) { return cookieJar[String(name)] !== undefined; },
+					},
 				};
 
 				var result;
@@ -95,7 +129,7 @@ func (m *MiddlewareRuntime) Execute(req MiddlewareRequest) MiddlewareResult {
 				}
 
 				if (result && typeof result.then === 'function') {
-					return JSON.stringify({ action: 'continue', error: 'Async middleware not supported in embedded runtime' });
+					return JSON.stringify({ action: 'error', error: 'Async middleware is not supported by the embedded runtime; use ssr.middlewareRuntime: "node"' });
 				}
 
 				if (result && typeof result.status === 'number') {
@@ -121,7 +155,7 @@ func (m *MiddlewareRuntime) Execute(req MiddlewareRequest) MiddlewareResult {
 
 				return JSON.stringify({ action: 'continue' });
 			} catch (e) {
-				return JSON.stringify({ action: 'continue', error: e.message });
+				return JSON.stringify({ action: 'error', error: e.message });
 			}
 		})()
 	`, string(reqJSON))
@@ -165,7 +199,7 @@ func LoadMiddlewareRuntime(root string) *MiddlewareRuntime {
 
 	rt, err := NewMiddlewareRuntime(middlewarePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  ⚠Middleware load error: %s\n", err)
+		fmt.Fprintf(os.Stderr, "  !Middleware load error: %s\n", err)
 		return nil
 	}
 

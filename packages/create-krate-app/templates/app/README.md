@@ -30,12 +30,12 @@ Open [http://localhost:3000](http://localhost:3000) to see your app.
 
 ```
 .
-├── krate.config.ts      # Krate configuration
-├── tsconfig.json        # TypeScript configuration
-├── public/              # Static assets served at /
-└── src/
-    ├── pages/           # File-based routes (pages/layouts/404)
-    └── components/      # Reusable components
++-- krate.config.ts      # Krate configuration
++-- tsconfig.json        # TypeScript configuration
++-- public/              # Static assets served at /
++-- src/
+    +-- pages/           # File-based routes (pages/layouts/404)
+    +-- components/      # Reusable components
 ```
 
 - `src/pages/index.tsx` maps to `/`

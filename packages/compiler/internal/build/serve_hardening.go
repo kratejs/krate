@@ -147,6 +147,13 @@ func corsMiddleware(cfg *config.Config, next http.Handler) http.Handler {
 		origins = []string{"*"}
 	}
 	allowAll := len(origins) == 1 && origins[0] == "*"
+	hasWildcard := false
+	for _, o := range origins {
+		if o == "*" {
+			hasWildcard = true
+			break
+		}
+	}
 	methods := strings.Join(nonEmpty(c.Methods, []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}), ", ")
 	headers := strings.Join(nonEmpty(c.Headers, []string{"Content-Type", "Authorization"}), ", ")
 
@@ -154,9 +161,12 @@ func corsMiddleware(cfg *config.Config, next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 		allowed := ""
 		switch {
-		case allowAll && !c.Credentials:
+		case allowAll && c.Credentials:
+			// A wildcard cannot be combined with credentials: reflecting any
+			// origin here would let any site make credentialed requests.
+		case allowAll:
 			allowed = "*"
-		case origin != "" && originAllowed(origin, origins):
+		case origin != "" && originAllowed(origin, origins) && !(c.Credentials && hasWildcard):
 			allowed = origin
 			w.Header().Add("Vary", "Origin")
 		}
@@ -381,6 +391,7 @@ func compressibleType(ct string) bool {
 // acceptsEncoding reports whether an Accept-Encoding header value allows the
 // given content-coding (honoring q=0 to exclude it, and "*" as a wildcard).
 func acceptsEncoding(header, coding string) bool {
+	wildcard := -1.0
 	for _, part := range strings.Split(header, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
@@ -398,11 +409,14 @@ func acceptsEncoding(header, coding string) bool {
 				}
 			}
 		}
-		if strings.EqualFold(token, coding) || token == "*" {
+		if strings.EqualFold(token, coding) {
 			return q > 0
 		}
+		if token == "*" {
+			wildcard = q
+		}
 	}
-	return false
+	return wildcard > 0
 }
 
 // gzipMiddleware gzips compressible responses when the client advertises gzip
@@ -468,6 +482,11 @@ func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 }
 
 func (g *gzipResponseWriter) Flush() {
+	if !g.wroteHeader {
+		g.WriteHeader(http.StatusOK)
+	} else {
+		g.decide()
+	}
 	if g.useGzip && g.zw != nil {
 		g.zw.Flush()
 	}

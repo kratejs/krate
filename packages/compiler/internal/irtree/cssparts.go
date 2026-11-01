@@ -9,7 +9,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
 )
 
-// dropVarDecls removes `var <name>=…` declarations whose name is a scope handle
+// dropVarDecls removes `var <name>=...` declarations whose name is a scope handle
 // (they are compile-time state, not runtime locals).
 func dropVarDecls(decls []string, names map[string]scopeRef) []string {
 	if len(decls) == 0 || len(names) == 0 {
@@ -365,7 +365,7 @@ func (b *builder) rewriteScopeSpread(el *ast.JSXElement) ast.Expr {
 		name, ref, arg, ok := b.helperCall(attr.Value)
 		if !ok {
 			// A scope helper (`.trigger/.panel/.close/.current`) whose handle is
-			// not resolvable — usually a part used outside its `<Provider>`.
+			// not resolvable - usually a part used outside its `<Provider>`.
 			b.cssErrs = append(b.cssErrs, fmt.Errorf(
 				"CSS scope helper spread at line %d is not bound to a scope handle: is there a `<Ctx.Provider value={scope}>` above it, or is the handle passed as a prop?",
 				el.Position.Line))
@@ -542,7 +542,7 @@ func collectValueLiterals(children []ast.JSXChild) []string {
 					continue
 				}
 				// Only component tags (e.g. <Tabs.Trigger value="a">) contribute
-				// options; an intrinsic <input value="…"> must not.
+				// options; an intrinsic <input value="..."> must not.
 				name := c.Element.Opening.Name
 				if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
 					if v, ok := literalAttr(c.Element, "value"); ok && !seen[v] {

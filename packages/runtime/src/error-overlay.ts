@@ -71,17 +71,17 @@ function showError(title: string, message: string, stack?: string): void {
 
   const source = stack ? parseStack(stack) : null;
   const sourceLink = source
-    ? `<div style="${getSourceLinkStyle()}" onclick="navigator.clipboard.writeText('${source.file}:${source.line}:${source.col}')">📋 ${source.file}:${source.line}:${source.col}</div>`
+    ? `<div style="${getSourceLinkStyle()}" onclick="navigator.clipboard.writeText('${source.file}:${source.line}:${source.col}')">[copy] ${source.file}:${source.line}:${source.col}</div>`
     : '';
 
   overlay.innerHTML = `
     <div style="${getCardStyle()};position:relative;">
-      <button style="${getCloseBtnStyle()}" onclick="document.getElementById('krate-error-overlay').remove();window.__krate_overlay_visible=false;">✕ Dismiss</button>
-      <div style="${getTitleStyle()}">⚡ ${title}</div>
+      <button style="${getCloseBtnStyle()}" onclick="document.getElementById('krate-error-overlay').remove();window.__krate_overlay_visible=false;">x Dismiss</button>
+      <div style="${getTitleStyle()}">* ${title}</div>
       <div style="${getMessageStyle()}">${escapeHTML(message)}</div>
       ${sourceLink}
       ${stack ? `<div style="${getStackStyle()}">${escapeHTML(stack)}</div>` : ''}
-      <div style="color:#7f8c8d;font-size:11px;margin-top:16px;">Press Esc to dismiss · Edit the file to fix, then the page will auto-reload</div>
+      <div style="color:#7f8c8d;font-size:11px;margin-top:16px;">Press Esc to dismiss - Edit the file to fix, then the page will auto-reload</div>
     </div>
   `;
 

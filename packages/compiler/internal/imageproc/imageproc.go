@@ -123,7 +123,7 @@ func hasAlpha(img image.Image) bool {
 	return false
 }
 
-// resize scales img to targetW×targetH using Catmull-Rom resampling
+// resize scales img to targetWxtargetH using Catmull-Rom resampling
 // (golang.org/x/image/draw). This replaces a hand-rolled bilinear loop with a
 // faster, higher-quality filter.
 func resize(img image.Image, targetW, targetH int) *image.RGBA {

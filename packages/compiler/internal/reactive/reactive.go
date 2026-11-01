@@ -451,7 +451,7 @@ func (g *Graph) Validate() []Diagnostic {
 		if len(e.SyncWrites) > 0 && len(e.Reads) == 0 && !e.HasNested && !e.HasOtherRefs {
 			diags = append(diags, Diagnostic{
 				Severity: "warning",
-				Message:  fmt.Sprintf("reactive: effect %q calls setters but reads no signals — probably a bug", e.Name),
+				Message:  fmt.Sprintf("reactive: effect %q calls setters but reads no signals - probably a bug", e.Name),
 			})
 		} else if len(e.Reads) == 0 && len(e.Writes) == 0 && !e.HasNested {
 			diags = append(diags, Diagnostic{
@@ -521,7 +521,7 @@ func (g *Graph) findCycles() []Diagnostic {
 					seen[key] = true
 					diags = append(diags, Diagnostic{
 						Severity: "warning",
-						Message:  fmt.Sprintf("reactive: circular dependency: %s", strings.Join(cycle, " → ")),
+						Message:  fmt.Sprintf("reactive: circular dependency: %s", strings.Join(cycle, " -> ")),
 					})
 				}
 			}

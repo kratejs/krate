@@ -12,7 +12,7 @@ per-page config or by using the components that imply them.
 
 The architecture is **static-first**: the Go compiler bakes as much as possible
 into a static shell (layout, `<head>`, server components, resolved suspense
-content). Only genuinely dynamic pieces — the "regions" of a page — are
+content). Only genuinely dynamic pieces - the "regions" of a page - are
 rendered at request time by a small sidecar and spliced into the shell. Krate
 never re-renders an entire page just to update one dynamic part, and it never
 renders a page twice.
@@ -21,7 +21,7 @@ renders a page twice.
 
 | Mode | Config | Output |
 |------|--------|--------|
-| **SSG** (default) | — | Fully static HTML, no request-time work |
+| **SSG** (default) | - | Fully static HTML, no request-time work |
 | **ISR** | `export const config = { isr: true, revalidate: 60 }` | Static shell; page body cached per URL variant and revalidated in the background |
 | **SSR** | `export const config = { ssr: true }` | Static shell; page body rendered fresh on every request |
 | **Streaming** | `export const config = { streaming: true }`, `<Suspense>`, or runtime components | Static shell; each dynamic region streamed in as it resolves |
@@ -37,7 +37,7 @@ export default function Page() {
 ```
 
 The page is rendered once at build time. The output is a static HTML file plus
-a hydration bundle. This is the fastest and most portable mode — it works on
+a hydration bundle. This is the fastest and most portable mode - it works on
 any static host.
 
 Server components (`// @server`) are evaluated at build time and their output is
@@ -77,7 +77,7 @@ changes, call `revalidatePath` / `revalidateTag`; see
 [Caching and Revalidation](/docs/guides/caching-and-revalidation/).
 
 ISR responses are cacheable: Krate emits
-`Cache-Control: public, s-maxage=…, stale-while-revalidate=…` so CDNs hold
+`Cache-Control: public, s-maxage=..., stale-while-revalidate=...` so CDNs hold
 fresh HTML while the sidecar revalidates stale entries in the background.
 `revalidate` defaults to 60 seconds when omitted.
 
@@ -100,7 +100,7 @@ request with the live URL params/query. Responses are `no-store`.
 
 Streaming pages use Suspense boundaries and runtime components. The shell is
 baked with each dynamic boundary's **fallback** in place; as each region
-resolves it is streamed to the client and spliced in — one render per region,
+resolves it is streamed to the client and spliced in - one render per region,
 no two-phase full-page render.
 
 ```tsx
@@ -120,7 +120,7 @@ treated as streaming even without the config:
 ```tsx
 export default function LivePage() {
   return (
-    <Suspense fallback={<p>Loading…</p>}>
+    <Suspense fallback={<p>Loading...</p>}>
       <LiveStatus />
     </Suspense>
   );
@@ -141,4 +141,4 @@ export default function LivePage() {
 See [Component Tiers](/docs/core-concepts/component-tiers/) for how server and
 runtime components work, and [Data Fetching](/docs/features/data-fetching/) for
 the full data model. For how the static shell and sidecar are wired, see
-[Contributing → Rendering internals](/docs/contributing/rendering/).
+[Contributing -> Rendering internals](/docs/contributing/rendering/).

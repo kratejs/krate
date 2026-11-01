@@ -1,7 +1,7 @@
 ---
 title: Testing
-order: 10
-description: Test Krate apps — build checks, types, and browserless component tests.
+order: 13
+description: Test Krate apps - build checks, types, and browserless component tests.
 ---
 
 # Testing

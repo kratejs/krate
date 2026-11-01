@@ -74,13 +74,13 @@ func FormatWith(fs []Finding, opts FormatOptions) string {
 
 		mark, markColor := "!", st.yellow
 		if f.Severity == Error {
-			mark, markColor = "✗", st.brightRed
+			mark, markColor = "x", st.brightRed
 		}
 		rule := st.dim(f.Rule + strings.Repeat(" ", ruleWidth-len([]rune(f.Rule))))
 
 		fmt.Fprintf(&b, "    %s %s  %s\n", markColor(mark), rule, f.Message)
 		if f.Hint != "" {
-			fmt.Fprintf(&b, "        %s %s\n", st.dim("↳"), st.dim("hint: "+f.Hint))
+			fmt.Fprintf(&b, "        %s %s\n", st.dim("->"), st.dim("hint: "+f.Hint))
 		}
 	}
 	return b.String()
@@ -93,7 +93,7 @@ func Summary(errors, warnings int, opts FormatOptions) string {
 		st.brightRed(fmt.Sprintf("%d error(s)", errors)),
 		st.yellow(fmt.Sprintf("%d warning(s)", warnings)),
 	}
-	return strings.Join(parts, st.dim(" · "))
+	return strings.Join(parts, st.dim(" - "))
 }
 
 // styler applies ANSI codes when enabled.

@@ -234,7 +234,7 @@
             setState("idle", "Start typing to search the documentation");
             return;
         }
-        setState("loading", "Searching…");
+        setState("loading", "Searching...");
         queryEngine(query, MAX_RESULTS).then(function (results) {
             if (input && input.value.trim() !== query) return;
             renderResults(results);

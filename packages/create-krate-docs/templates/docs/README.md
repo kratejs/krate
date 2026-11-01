@@ -5,7 +5,7 @@ A documentation site scaffolded with
 powered by the Krate [`docs` plugin](https://krate.js.org/docs/features/plugins/).
 
 It ships with a sidebar, table of contents, breadcrumbs, prev/next navigation,
-light/dark theme, and WASM-powered full-text search — the same experience as the
+light/dark theme, and WASM-powered full-text search - the same experience as the
 official [krate.js.org](https://krate.js.org) docs.
 
 ## Getting started
@@ -21,7 +21,7 @@ Open [http://localhost:3000](http://localhost:3000) to see your docs.
 
 ## Writing docs
 
-Add Markdown or MDX files under `src/content/docs/` — each file becomes a page
+Add Markdown or MDX files under `src/content/docs/` - each file becomes a page
 automatically. Directories become sections in the sidebar.
 
 Use frontmatter to control the title and ordering:
@@ -47,14 +47,14 @@ order: 1
 
 ```
 .
-├── krate.config.ts        # Krate config (docs plugin, search, SEO)
-├── tsconfig.json          # TypeScript configuration
-├── public/                # Styles, search script, favicon
-└── src/
-    ├── content/
-    │   └── docs/          # Markdown/MDX documentation pages
-    ├── pages/             # Home, layout, and 404 pages
-    └── components/        # project components (docs shell comes from @krate/base-docs-theme)
++-- krate.config.ts        # Krate config (docs plugin, search, SEO)
++-- tsconfig.json          # TypeScript configuration
++-- public/                # Styles, search script, favicon
++-- src/
+    +-- content/
+    |   +-- docs/          # Markdown/MDX documentation pages
+    +-- pages/             # Home, layout, and 404 pages
+    +-- components/        # project components (docs shell comes from @krate/base-docs-theme)
 ```
 
 ## Configuration

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,25 +29,27 @@ type sseEvent struct {
 }
 
 type mcpHTTPSession struct {
-	id      string
-	srv     *Server
-	in      *io.PipeWriter
-	mu      sync.Mutex
-	buf     []byte
-	pending map[string]chan []byte
-	subs    map[int]chan sseEvent
-	nextSub int
-	nextID  int
-	history []sseEvent
+	id       string
+	lastSeen time.Time
+	srv      *Server
+	in       *io.PipeWriter
+	mu       sync.Mutex
+	buf      []byte
+	pending  map[string]chan []byte
+	subs     map[int]chan sseEvent
+	nextSub  int
+	nextID   int
+	history  []sseEvent
 }
 
 func newMCPSession(svc *Service) *mcpHTTPSession {
 	pr, pw := io.Pipe()
 	s := &mcpHTTPSession{
-		id:      newSessionID(),
-		in:      pw,
-		pending: map[string]chan []byte{},
-		subs:    map[int]chan sseEvent{},
+		id:       newSessionID(),
+		lastSeen: time.Now(),
+		in:       pw,
+		pending:  map[string]chan []byte{},
+		subs:     map[int]chan sseEvent{},
 	}
 	s.srv = NewServer(s, "krate", "http")
 	svc.Register(s.srv)
@@ -160,6 +163,21 @@ func (s *Service) HTTPHandler(token string) http.Handler {
 	return mux
 }
 
+const (
+	maxMCPSessions = 128
+	mcpSessionTTL  = 30 * time.Minute
+)
+
+func (s *mcpHTTPSession) touch() {
+	s.mu.Lock()
+	s.lastSeen = time.Now()
+	s.mu.Unlock()
+}
+
+func (s *mcpHTTPSession) close() {
+	_ = s.in.Close()
+}
+
 func (h *mcpHTTPServer) handle(w http.ResponseWriter, r *http.Request) {
 	if !mcpAuthorized(r, h.token) {
 		w.Header().Set("WWW-Authenticate", "Bearer")
@@ -171,27 +189,45 @@ func (h *mcpHTTPServer) handle(w http.ResponseWriter, r *http.Request) {
 		h.handleSSE(w, r)
 	case http.MethodPost:
 		h.handlePost(w, r)
+	case http.MethodDelete:
+		id := strings.TrimSpace(r.Header.Get("Mcp-Session-Id"))
+		h.mu.Lock()
+		sess := h.sessions[id]
+		delete(h.sessions, id)
+		h.mu.Unlock()
+		if sess != nil {
+			sess.close()
+		}
+		w.WriteHeader(http.StatusNoContent)
 	default:
-		w.Header().Set("Allow", "GET, POST")
+		w.Header().Set("Allow", "GET, POST, DELETE")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-func (h *mcpHTTPServer) session(id string) *mcpHTTPSession {
+func (h *mcpHTTPServer) session(id string) (*mcpHTTPSession, bool) {
+	now := time.Now()
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if id != "" {
-		if s, ok := h.sessions[id]; ok {
-			return s
+	for sid, s := range h.sessions {
+		if now.Sub(s.lastSeen) > mcpSessionTTL {
+			delete(h.sessions, sid)
+			s.close()
 		}
 	}
-	s := newMCPSession(h.svc)
-	if id == "" {
-		id = s.id
+	if id != "" {
+		if s, ok := h.sessions[id]; ok {
+			s.touch()
+			return s, true
+		}
+		return nil, false
 	}
-	s.id = id
-	h.sessions[id] = s
-	return s
+	if len(h.sessions) >= maxMCPSessions {
+		return nil, false
+	}
+	s := newMCPSession(h.svc)
+	h.sessions[s.id] = s
+	return s, true
 }
 
 func (h *mcpHTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +242,11 @@ func (h *mcpHTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "empty request", http.StatusBadRequest)
 		return
 	}
-	sess := h.session(strings.TrimSpace(r.Header.Get("Mcp-Session-Id")))
+	sess, ok := h.session(strings.TrimSpace(r.Header.Get("Mcp-Session-Id")))
+	if !ok {
+		http.Error(w, "unknown or exhausted MCP session", http.StatusNotFound)
+		return
+	}
 	w.Header().Set("Mcp-Session-Id", sess.id)
 
 	var msg struct {
@@ -249,7 +289,11 @@ func (h *mcpHTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *mcpHTTPServer) handleSSE(w http.ResponseWriter, r *http.Request) {
-	sess := h.session(strings.TrimSpace(r.Header.Get("Mcp-Session-Id")))
+	sess, ok := h.session(strings.TrimSpace(r.Header.Get("Mcp-Session-Id")))
+	if !ok {
+		http.Error(w, "unknown or exhausted MCP session", http.StatusNotFound)
+		return
+	}
 	w.Header().Set("Mcp-Session-Id", sess.id)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
@@ -318,10 +362,18 @@ func newSessionID() string {
 // ServeHTTP starts a localhost MCP HTTP server. Callers that need remote access
 // should wrap this with TLS/reverse-proxy authentication.
 func ServeHTTP(s *Service, addr, token string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid MCP address %q: %w", addr, err)
+	}
+	if token == "" && host != "" && host != "127.0.0.1" && host != "::1" && host != "localhost" {
+		return fmt.Errorf("refusing to expose unauthenticated MCP on %s; set a bearer token or bind loopback", addr)
+	}
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           s.HTTPHandler(token),
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 	return srv.ListenAndServe()

@@ -4,7 +4,10 @@
 // consistent (one shared implementation, no drift).
 package escape
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 var htmlReplacer = strings.NewReplacer(
 	"&", "&amp;",
@@ -80,12 +83,35 @@ func JSString(s string) string {
 // literal and returns it wrapped in double quotes. Used when interpolating a
 // JSON payload (e.g. props) directly into generated JS.
 func JSStringDQ(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	s = strings.ReplaceAll(s, "\r", `\r`)
-	s = strings.ReplaceAll(s, "\t", `\t`)
-	return `"` + s + `"`
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '<':
+			// A payload containing "</script" must not terminate an inline
+			// script element.
+			b.WriteString(`\x3C`)
+		default:
+			if r < 0x20 || r == 0x7f || r == 0x2028 || r == 0x2029 {
+				fmt.Fprintf(&b, `\u%04x`, r)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 // UnescapeJSString decodes the escape sequences inside a JS/TS string literal's

@@ -42,7 +42,7 @@ func configUsesModules(src string) bool {
 func configNotExecutableError(tsPath string, err error) error {
 	return fmt.Errorf(
 		"parsing config %s: config uses imports/requires but could not be evaluated. "+
-			"This usually means a dependency isn't installed — run `npm install` in the project root. "+
+			"This usually means a dependency isn't installed - run `npm install` in the project root. "+
 			"Underlying error: %w",
 		tsPath, err,
 	)

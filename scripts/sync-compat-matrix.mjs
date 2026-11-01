@@ -71,7 +71,7 @@ lines.push("", "## Details", "");
 for (const row of matrix.rows) {
   lines.push(`### ${row.area}`, "");
   lines.push(
-    `**Source:** ${status(row.source)} · **Islands:** ${status(row.islands)} · **SSR:** ${status(row.ssr)}`,
+    `**Source:** ${status(row.source)} - **Islands:** ${status(row.islands)} - **SSR:** ${status(row.ssr)}`,
     "",
   );
   lines.push(row.summary, "");
@@ -112,7 +112,7 @@ const output = lines.join("\n");
 if (check) {
   const current = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "";
   if (current.replaceAll("\r\n", "\n") !== output) {
-    console.error("compat-matrix: generated docs are stale; run pnpm sync:matrix");
+    console.error("compat-matrix: generated docs are stale; run pnpm sync:docs");
     process.exit(1);
   }
   console.log("compat-matrix: docs are in sync");

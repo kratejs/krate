@@ -297,7 +297,7 @@ export default function Page() {
 	MergeImportAliases(ann, []ModuleSource{themeMod}, entryMod)
 
 	if _, ok := ann.Functions["DocsLayout"]; !ok {
-		t.Fatalf("expected alias DocsLayout → NightLayout to be resolvable after MergeImportAliases")
+		t.Fatalf("expected alias DocsLayout -> NightLayout to be resolvable after MergeImportAliases")
 	}
 	if !ann.UsedComponents["DocsLayout"] {
 		t.Error("expected the aliased component to be walked as used from the entry")

@@ -93,7 +93,10 @@ async function __krateCallAction(url, args) {
   var payload = null;
   try { payload = await res.json(); } catch (e) { payload = null; }
   if (!res.ok || !payload || payload.ok === false) throw new Error((payload && payload.error && (payload.error.message || payload.error)) || ("server action failed: " + res.status));
-  if (typeof payload.redirect === "string" && payload.redirect) location.assign(payload.redirect);
+  if (typeof payload.redirect === "string" && payload.redirect) {
+    var to = payload.redirect;
+    if (to.charAt(0) === "/" && to.charAt(1) !== "/" && to.indexOf("\\\\") === -1 && !/[\\x00-\\x1f\\x7f]/.test(to)) location.assign(to);
+  }
   return payload.result;
 }
 `

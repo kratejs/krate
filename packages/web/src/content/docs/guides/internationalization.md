@@ -1,6 +1,6 @@
 ---
 title: Internationalization
-order: 14
+order: 19
 description: Serve the docs in multiple languages with path-prefixed routing and per-page hreflang.
 ---
 

@@ -27,6 +27,7 @@ type txFile struct {
 	Existed  bool        `json:"existed"`
 	Delete   bool        `json:"delete,omitempty"`
 	Mode     os.FileMode `json:"mode,omitempty"`
+	Expected string      `json:"-"`
 }
 
 type txMeta struct {
@@ -94,7 +95,7 @@ func (t *fileTransaction) stageWrite(abs, rel, content, expected string) error {
 			mode = info.Mode().Perm()
 		}
 	}
-	t.files[rel] = &txFile{Path: rel, Original: original, New: content, Existed: existed, Mode: mode}
+	t.files[rel] = &txFile{Path: rel, Original: original, New: content, Existed: existed, Mode: mode, Expected: expected}
 	t.order = append(t.order, rel)
 	return nil
 }
@@ -115,7 +116,7 @@ func (t *fileTransaction) stageDelete(abs, rel, expected string) error {
 	if info, statErr := os.Stat(abs); statErr == nil {
 		mode = info.Mode().Perm()
 	}
-	t.files[rel] = &txFile{Path: rel, Original: string(data), Existed: true, Delete: true, Mode: mode}
+	t.files[rel] = &txFile{Path: rel, Original: string(data), Existed: true, Delete: true, Mode: mode, Expected: expected}
 	t.order = append(t.order, rel)
 	return nil
 }
@@ -146,6 +147,23 @@ func (t *fileTransaction) commit() error {
 	txDir := filepath.Join(t.svc.root, ".krate", "mcp", "transactions", t.id)
 	if err := os.MkdirAll(filepath.Join(txDir, "stage"), 0755); err != nil {
 		return fmt.Errorf("creating transaction directory: %w", err)
+	}
+
+	// Re-check every expected hash immediately before committing. A file could
+	// have changed between staging and commit (another session or an editor).
+	for _, rel := range t.order {
+		f := t.files[rel]
+		if f.Expected == "" {
+			continue
+		}
+		abs := filepath.Join(t.svc.root, filepath.FromSlash(rel))
+		current, err := os.ReadFile(abs)
+		if err != nil {
+			return fmt.Errorf("re-reading %s before commit: %w", rel, err)
+		}
+		if hashString(string(current)) != f.Expected {
+			return fmt.Errorf("%s changed since it was read; refresh and retry", rel)
+		}
 	}
 
 	absPaths := make([]string, 0, len(t.order))

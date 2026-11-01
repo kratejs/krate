@@ -233,6 +233,10 @@ loop:
 			continue
 		case "exit":
 			break loop
+		case "shutdown":
+			// Let the worker emit the shutdown result, then stop reading.
+			s.dispatch(req)
+			break loop
 		}
 		s.dispatch(req)
 	}
@@ -407,9 +411,10 @@ func (s *Server) initializeResult(raw json.RawMessage) map[string]any {
 		"protocolVersion": version,
 		"capabilities": map[string]any{
 			"tools":       map[string]any{},
-			"resources":   map[string]any{},
+			"resources":   map[string]any{"subscribe": true},
 			"prompts":     map[string]any{},
 			"completions": map[string]any{},
+			"logging":     map[string]any{},
 		},
 		"serverInfo": map[string]any{
 			"name":    s.server.Name,

@@ -12,12 +12,31 @@ function binaryName(): string {
   return process.platform === 'win32' ? 'krate.exe' : 'krate';
 }
 
+function isMusl(): boolean {
+  try {
+    const report = (process as unknown as { report?: { getReport?: () => { header?: { glibcVersionRuntime?: string } } } }).report;
+    const header = report?.getReport?.().header;
+    return !!header && !header.glibcVersionRuntime;
+  } catch {
+    return false;
+  }
+}
+
+function platformPackage(): string {
+  const platform = process.platform;
+  const arch = process.arch;
+  if (platform === 'linux' && arch === 'x64' && isMusl()) {
+    return '@krate/core-linux-x64-musl';
+  }
+  return `@krate/core-${platform}-${arch}`;
+}
+
 export function resolveBinary(): string {
   // Explicit override for tests and custom deployments.
   const override = process.env.KRATE_BINARY;
   if (override && existsSync(override)) return override;
 
-  const pkgName = `@krate/core-${process.platform}-${process.arch}`;
+  const pkgName = platformPackage();
   try {
     const pkgPath = dirname(require.resolve(`${pkgName}/package.json`));
     const binary = join(pkgPath, 'bin', binaryName());

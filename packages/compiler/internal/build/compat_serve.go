@@ -147,9 +147,11 @@ func siblingDocPath(absOut, urlPath, kind string) string {
 		return ""
 	}
 	full := filepath.Join(absOut, rel)
-	// Guard against traversal outside the output root.
+	// Guard against traversal outside the output root. A prefix check is not
+	// enough: "dist-evil" shares the "dist" prefix.
 	clean := filepath.Clean(full)
-	if !strings.HasPrefix(clean, filepath.Clean(absOut)) {
+	relCheck, err := filepath.Rel(filepath.Clean(absOut), clean)
+	if err != nil || relCheck == ".." || strings.HasPrefix(relCheck, ".."+string(filepath.Separator)) {
 		return ""
 	}
 	if fi, err := os.Stat(clean); err == nil && !fi.IsDir() {

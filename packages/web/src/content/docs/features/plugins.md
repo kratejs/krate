@@ -1,15 +1,15 @@
 ---
 title: Plugin System
 description: Extend Krate with Go hooks or JavaScript/TypeScript plugins.
-order: 6
+order: 7
 ---
 
 # Plugin System
 
 Krate's plugin system is a single, unified interface with **9 hooks** across
 two runtimes. Built-in plugins are written in Go; community plugins are either
-JavaScript modules executed inside the embedded QuickJS runtime — no subprocess,
-no stdin/stdout protocol — **or** Go plugins run as a subprocess over HashiCorp
+JavaScript modules executed inside the embedded QuickJS runtime - no subprocess,
+no stdin/stdout protocol - **or** Go plugins run as a subprocess over HashiCorp
 `go-plugin`.
 
 ## Community plugin protocol
@@ -60,7 +60,7 @@ export default function myPlugin(options: MyPluginOptions = {}) {
 }
 ```
 
-- **Hook signature** — every hook receives `(ctx, options, krate)` where `ctx`
+- **Hook signature** - every hook receives `(ctx, options, krate)` where `ctx`
   is the JSON-serialized hook context (lowercase fields like `ctx.html`,
   `ctx.page`, `ctx.outName`, `ctx.headHTML`, `ctx.rawCSS`) and `krate` is the
   richer build context: `{ root, projectRoot, outDir, pagesDir, config, dev,
@@ -68,19 +68,19 @@ export default function myPlugin(options: MyPluginOptions = {}) {
   `BuildContext`, `ParseContext`, `MarkdownContext`, `RenderContext`,
   `PageContext`, `BuildResultContext`, `ServeRequestContext`, and
   `ServeResponseContext`.
-- **`krate` capabilities** — instead of raw `fs` guesswork or a hand-rolled
+- **`krate` capabilities** - instead of raw `fs` guesswork or a hand-rolled
   `node_modules` walk, use the host-backed methods: `krate.resolveFile(spec)`
   and `krate.readFile(spec)` (root-anchored; bare specifiers resolve through
   `node_modules`), `krate.emitFile(path, content)` (write into the output
   directory), `krate.writeFileToRoot(rel, content)` (static assets under the
   project root), and `krate.injectHead(html)` / `krate.injectCSS(css)`. Every
   path is anchored to the project root and traversal outside it is rejected.
-- **Logging** — `krate.warn(...)` always writes a prefixed warning to stderr;
+- **Logging** - `krate.warn(...)` always writes a prefixed warning to stderr;
   `krate.log(...)` is diagnostic output shown only when the build runs with
   `--verbose` (which also prints a per-hook trace: plugin, hook, and duration).
   Plain `console.*` output is prefixed with `[plugin:<name>]` so it is
   attributable.
-- **Typed options** — pass your plugin's options type to
+- **Typed options** - pass your plugin's options type to
   `definePluginHooks<MyOptions>({ ... })` and every hook's `options` argument is
   typed instead of `unknown`:
 
@@ -90,7 +90,7 @@ export default function myPlugin(options: MyPluginOptions = {}) {
     BeforeBuild(ctx, options) { return { html: options.greeting ?? "" }; },
   });
   ```
-- **Return value** — hooks return `{ files, routes, generatedPages, html,
+- **Return value** - hooks return `{ files, routes, generatedPages, html,
   headHTML, rawCSS, scripts, metaTags, ast }` (all optional; may be a Promise;
   `PluginOutput` in `@krate/plugin`). `files` are written into the output
   directory (path traversal is rejected), `routes` become static HTML pages,
@@ -100,7 +100,7 @@ export default function myPlugin(options: MyPluginOptions = {}) {
   return it as `ast` to rewrite the tree (same capability as Go plugins). Use
   `ASTTypes` / `isAstKind` from `@krate/plugin` for type-safe `kind` checks
   instead of raw strings.
-- **Runtime capabilities** — bundled plugins can use `import fs from 'fs'` /
+- **Runtime capabilities** - bundled plugins can use `import fs from 'fs'` /
   `import path from 'path'` (polyfilled) plus Web API polyfills (`fetch`, `URL`,
   `Headers`, `Response`, `TextEncoder`, timers, `process.env`). Non-relative
   third-party imports are left external and unavailable.
@@ -164,8 +164,8 @@ plugins, `defineGoPlugin` for Go-plugin descriptors.
 | Plugin | Purpose |
 |--------|---------|
 | `sitemap` | Generates `sitemap.xml` |
-| `icons` | `<Icon>` → Iconify SVG with disk cache |
-| `imageprocessing` | `<Image>` → responsive `<picture>` with srcset |
+| `icons` | `<Icon>` -> Iconify SVG with disk cache |
+| `imageprocessing` | `<Image>` -> responsive `<picture>` with srcset |
 | `markdown` | Markdown/MDX compilation |
 | `csp` | Content Security Policy meta tag |
 | `docs` | Documentation site generator with WASM search |

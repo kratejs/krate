@@ -21,7 +21,7 @@ export default function SiteLayout({ children }: { children: any }) {
 
       <footer class="site-footer">
         <div class="site-footer-inner">
-          <span>© {new Date().getFullYear()} __PROJECT_DISPLAY_NAME__</span>
+          <span>(c) {new Date().getFullYear()} __PROJECT_DISPLAY_NAME__</span>
           <span>Built with Krate</span>
         </div>
       </footer>

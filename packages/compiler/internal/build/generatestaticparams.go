@@ -398,7 +398,7 @@ func (b *Builder) resolveStaticParamsPages(pages []string) ([]staticParamsPage, 
 	var errs []string
 	for i := range results {
 		if results[i].note {
-			printf("  %s⚡%s generateStaticParams: %s\n", cCyan, cReset, filepath.Base(dynamic[i]))
+			printf("  %s*%s generateStaticParams: %s\n", cCyan, cReset, filepath.Base(dynamic[i]))
 		}
 		expanded = append(expanded, results[i].expanded...)
 		errs = append(errs, results[i].errs...)
@@ -509,7 +509,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	// defeat a page author's per-page config.
 	if b.Cfg.SSR.Streaming && renderMode == RenderSSG {
 		renderMode = RenderStreaming
-		fmt.Fprintf(os.Stderr, "  %s⚡%s %s → streaming (global override)\n", cCyan, cReset, filepath.Base(spp.PagePath))
+		fmt.Fprintf(os.Stderr, "  %s*%s %s -> streaming (global override)\n", cCyan, cReset, filepath.Base(spp.PagePath))
 	}
 
 	// Bind route params (e.g. slug) to their concrete values, then inline

@@ -1,7 +1,7 @@
 {
   "name": "@krate/runtime",
   "version": "0.1.0",
-  "description": "Client-side runtime for Krate — signals, hydration, SPA router, resources, and context.",
+  "description": "Client-side runtime for Krate - signals, hydration, SPA router, resources, and context.",
   "license": "Apache-2.0",
   "type": "module",
   "homepage": "https://krate.js.org",

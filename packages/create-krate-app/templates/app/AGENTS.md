@@ -2,7 +2,7 @@
 
 Guidance for AI agents and human contributors working in this Krate app.
 
-__PROJECT_DISPLAY_NAME__ is a [Krate](https://github.com/kratejs/krate) app — a
+__PROJECT_DISPLAY_NAME__ is a [Krate](https://github.com/kratejs/krate) app - a
 Go-native static site generator with signal-based reactivity. Pages are TSX/JSX
 that compile to static HTML at build time; interactivity is hydrated by a tiny
 signal-based runtime (`@krate/runtime`), not React.
@@ -41,7 +41,7 @@ src/
 - Default-export a component from each file in `src/pages/`; the filename becomes
   the route.
 - Use the `Head` component for per-page `<head>` content (title, meta).
-- Import `createSignal` and friends from `@krate/runtime`; this is NOT React —
+- Import `createSignal` and friends from `@krate/runtime`; this is NOT React -
   no `useState`, `useEffect`, etc. `onClick={() => setCount(c => c + 1)}` works.
 - Use plain `class=` (not `className`).
 - CSS modules: import `styles from './X.module.css'` for component-scoped styles;
@@ -54,7 +54,7 @@ src/
 
 ## Gotchas
 
-- `dist/` is build output — never edit, and the dev watcher ignores it plus
+- `dist/` is build output - never edit, and the dev watcher ignores it plus
   `.krate`, `node_modules`, `.git`, and `_`-prefixed internal files.
 - Don't run `krate build`/`dev` from inside `dist/`.
 - The compiler runs as a Go binary; runtime/type errors surface as compile
@@ -63,5 +63,5 @@ src/
 
 ## Docs
 
-- Krate docs: https://kratejs.pages.dev/docs/
-- Getting started: https://kratejs.pages.dev/docs/getting-started/
+- Krate docs: https://krate.js.org/docs/
+- Getting started: https://krate.js.org/docs/getting-started/

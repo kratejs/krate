@@ -1,7 +1,7 @@
 ---
 title: CSS Signals
 description: Zero-JS interactive state compiled to hidden inputs and :has() CSS.
-order: 6
+order: 7
 ---
 
 # CSS Signals
@@ -59,7 +59,7 @@ function Tabs() {
 ```
 
 The helpers expand at build time into the exact `class`/`for`/ARIA wiring, so you
-own the markup. A handle is a plain value — pass it as a prop or through context
+own the markup. A handle is a plain value - pass it as a prop or through context
 (see [Composing across components](#composing-across-components)).
 
 ## The primitives
@@ -82,8 +82,8 @@ When omitted, they are inferred from the literals you use (setter calls,
 
 | Method | Use |
 |--------|-----|
-| `scope.trigger(value?)` | spread on the trigger element → `<label for>` |
-| `scope.panel(value?)` | spread on a panel element → `:has()`-toggled wrapper |
+| `scope.trigger(value?)` | spread on the trigger element -> `<label for>` |
+| `scope.panel(value?)` | spread on a panel element -> `:has()`-toggled wrapper |
 | `scope.close()` | spread on an element that closes a group (sentinel) |
 | `scope.current()` | renders the selected value as **live text** (zero JS) |
 | `scope.is(value)` / `on()` / `off()` | condition atoms for `showIf` |
@@ -127,8 +127,8 @@ handle directly: `<Tab scope={tab} value="overview"/>`.
 
 ## Compound conditions
 
-Panels accept arbitrary boolean logic over CSS state — `&&`, `||`, `!`,
-`===`/`!==` — across any combination of scopes:
+Panels accept arbitrary boolean logic over CSS state - `&&`, `||`, `!`,
+`===`/`!==` - across any combination of scopes:
 
 ```tsx
 const [plan, setPlan] = createCSSChoice('free', ['free', 'pro']);
@@ -140,7 +140,7 @@ const [admin, setAdmin] = createCSSToggle(false);
 
 The compiler normalizes the expression to DNF (OR of AND-terms), compiles each
 atom to a `:has()` / `:not(:has())` fragment, and deduplicates equivalent
-conditions — still zero JS.
+conditions - still zero JS.
 
 ## Live text and custom properties
 
@@ -205,7 +205,7 @@ Pass `aria: false` to opt out, or `aria: { role, panelRole }` for raw overrides.
 
 - **Anchor positioning**: an overlay scope (`as: 'popover' | 'menu' | 'menubar'`)
   anchors its panel to the trigger with `anchor()` by default; set
-  `anchor: 'bottom-start' | 'top' | 'right' | …` to choose a side. Progressive —
+  `anchor: 'bottom-start' | 'top' | 'right' | ...` to choose a side. Progressive -
   browsers without support use the component's own CSS.
 - **Transitions**: `transition: true` fades/slides a panel when it opens
   (`@starting-style`).
@@ -239,9 +239,9 @@ CSS Signals express a fixed, enumerated state with no JS. Reach for
 
 - **Data-driven options** (options known only at runtime).
 - **Reading or writing the value from JS** (imperative control, effects, logic).
-- **Controlled props** — there is no `value`/`onChange`; state is compiled.
-- **Continuous values** (a drag slider) — `createCSSRange` is discrete integers.
-- **Arbitrary push/pop history** — `createCSSStack` is a declared tree.
+- **Controlled props** - there is no `value`/`onChange`; state is compiled.
+- **Continuous values** (a drag slider) - `createCSSRange` is discrete integers.
+- **Arbitrary push/pop history** - `createCSSStack` is a declared tree.
 
 Also: a trigger must be a labelable element with a **static** class; option
 values must be **literals**; a non-compilable declaration is a **hard build

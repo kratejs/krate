@@ -1,7 +1,7 @@
 ---
 title: Safe Fixes
 description: Apply conservative codemods for Krate diagnostics without guessing.
-order: 12
+order: 16
 ---
 
 # Safe Fixes

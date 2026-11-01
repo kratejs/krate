@@ -4,7 +4,7 @@ description: Whole-program compilation, signals, and zero Node at build time.
 date: 2026-03-01
 author: Krate
 tags: [compiler, go, signals]
-draft: false
+status: published
 order: 1
 ---
 

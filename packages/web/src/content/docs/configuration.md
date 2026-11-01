@@ -7,7 +7,7 @@ description: The krate.config.ts entry point and a map of every option group.
 # Configuration
 
 Krate is configured with a `krate.config.ts` file at the project root, typed
-with `defineConfig` from `@krate/core`. Every supported key is type-checked —
+with `defineConfig` from `@krate/core`. Every supported key is type-checked -
 unknown or misspelled options become compile errors.
 
 ```typescript
@@ -28,7 +28,7 @@ export default defineConfig({
 ```
 
 React syntax (`useState`, `useEffect`, `useRef`, JSX) is transpiled to Krate
-signals and effects automatically — no config is required. See
+signals and effects automatically - no config is required. See
 [React Compatibility](/docs/guides/react-compatibility/).
 
 ## Option groups

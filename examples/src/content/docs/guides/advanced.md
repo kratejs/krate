@@ -1,7 +1,7 @@
 ---
 title: Advanced Usage
 order: 1
-sidebar: [{"title":"← Back to Getting Started","url":"/docs/getting-started/"},{"title":"Guides","children":[{"title":"Welcome to Advanced","url":"/docs/guides/"},{"title":"Advanced Usage","url":"/docs/guides/advanced/","active":true}]}]
+sidebar: [{"title":"<- Back to Getting Started","url":"/docs/getting-started/"},{"title":"Guides","children":[{"title":"Welcome to Advanced","url":"/docs/guides/"},{"title":"Advanced Usage","url":"/docs/guides/advanced/","active":true}]}]
 ---
 
 # Advanced Usage
@@ -43,11 +43,11 @@ export default {
 
 The new PluginV2 interface provides lifecycle hooks:
 
-- `BeforeBuild` — before build starts
-- `AfterParse` — after AST parsing
-- `AfterMarkdownParse` — after markdown rendering
-- `AfterRender` — after HTML rendering
-- `GenerateRoutes` — generate virtual pages
+- `BeforeBuild` - before build starts
+- `AfterParse` - after AST parsing
+- `AfterMarkdownParse` - after markdown rendering
+- `AfterRender` - after HTML rendering
+- `GenerateRoutes` - generate virtual pages
 
 ## Partial Reloads
 

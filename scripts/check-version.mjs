@@ -45,6 +45,32 @@ for (const { file, pkg } of packages) {
   }
 }
 
+// The docs site pins are updated manually and deliberately track the published
+// alpha/stable train rather than the workspace version. Still require every
+// @krate dependency to be an exact, consistent version.
+const web = JSON.parse(readFileSync(join(root, "packages/web/package.json"), "utf8"));
+const webKrate = Object.entries(web.devDependencies ?? {}).filter(([name]) => name.startsWith("@krate/") && name !== "@krate/base-docs-theme");
+if (webKrate.length !== 3) failures.push("packages/web: expected components/core/runtime pins");
+const webVersions = new Set(webKrate.map(([, range]) => range));
+if (webVersions.size > 1) failures.push("packages/web: @krate dependency versions disagree");
+for (const [name, range] of webKrate) {
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(range)) {
+    failures.push(`packages/web ${name}: must be an exact version, got ${range}`);
+  }
+}
+
+for (const file of [
+  "packages/create-krate-app/templates/app/package.json",
+  "packages/create-krate-docs/templates/docs/package.json",
+]) {
+  const template = JSON.parse(readFileSync(join(root, file), "utf8"));
+  for (const [name, range] of Object.entries(template.dependencies ?? {})) {
+    if (name.startsWith("@krate/") && range !== "__KRATE_DIST_TAG__") {
+      failures.push(`${file} ${name}: expected __KRATE_DIST_TAG__, got ${range}`);
+    }
+  }
+}
+
 if (failures.length) {
   console.error("check-version: publishable packages are out of sync");
   for (const failure of failures) console.error(`  ${failure}`);

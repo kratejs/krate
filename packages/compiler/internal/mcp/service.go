@@ -102,7 +102,7 @@ func (s *Service) Register(srv *Server) {
 	})
 	srv.RegisterTool(Tool{
 		Name:        "search_docs",
-		Description: "Search Krate's own framework documentation (embedded in the compiler) for a query, returning ranked pages with short excerpts. Searches Krate usage — not the current project's content. Read the full page with the krate://docs/{slug} resource, or pass full:true to include each hit's cleaned full text.",
+		Description: "Search Krate's own framework documentation (embedded in the compiler) for a query, returning ranked pages with short excerpts. Searches Krate usage - not the current project's content. Read the full page with the krate://docs/{slug} resource, or pass full:true to include each hit's cleaned full text.",
 		InputSchema: objSchema(map[string]any{
 			"query":    strSchema("Search query"),
 			"limit":    numSchema("Maximum results (default 8)"),
@@ -306,12 +306,22 @@ func (s *Service) Register(srv *Server) {
 		Handler:     s.toolApplyFix,
 	})
 	srv.RegisterTool(Tool{
+		Name:        "apply_safe_fixes",
+		Description: "Apply the compiler's conservative safe fixes (currently lowercase event attributes) through a policy-checked transaction. Dry-run by default.",
+		InputSchema: objSchema(map[string]any{
+			"apply": boolSchema("Write the fixes (default false: dry-run)"),
+		}),
+		Annotations: destructiveToolAnnotations("Apply Safe Fixes"),
+		Handler:     s.toolApplySafeFixes,
+	})
+	srv.RegisterTool(Tool{
 		Name:        "format_file",
 		Description: "Format a TypeScript/JavaScript source file with the compiler's printer. Returns a diff unless apply=true.",
 		InputSchema: objSchema(map[string]any{
-			"path":  strSchema("Project-relative path"),
-			"route": strSchema("Route path (alternative to path)"),
-			"apply": boolSchema("Write the formatted file (default false: dry-run)"),
+			"path":           strSchema("Project-relative path"),
+			"route":          strSchema("Route path (alternative to path)"),
+			"expectedSha256": strSchema("Optional expected source hash"),
+			"apply":          boolSchema("Write the formatted file (default false: dry-run)"),
 		}),
 		Annotations: destructiveToolAnnotations("Format File"),
 		Handler:     s.toolFormatFile,
@@ -559,11 +569,49 @@ func (s *Service) toolReadPage(ctx context.Context, args map[string]any) (ToolRe
 	if format == "" {
 		format = build.FormatSource
 	}
-	detail, err := s.builder.PageDetailFor(target, format)
+	lookup := target
+	if s.looksLikeSourcePath(target) {
+		if filepath.IsAbs(target) {
+			rel, rerr := filepath.Rel(s.root, target)
+			if rerr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return ErrorResult("refusing to read outside the project: " + target), nil
+			}
+			target = rel
+		}
+		abs, rel, rerr := s.resolveProjectPath(target)
+		if rerr != nil {
+			return ErrorResult(rerr.Error()), nil
+		}
+		if s.policy != nil && s.policy.denied(rel) {
+			return ErrorResult("refusing to read " + rel + ": it " + s.policy.deniedReason(rel)), nil
+		}
+		lookup = abs
+	}
+	detail, err := s.builder.PageDetailFor(lookup, format)
 	if err != nil {
 		return ErrorResult(err.Error()), nil
 	}
+	if detail.SourcePath != "" {
+		rel, rerr := filepath.Rel(s.root, detail.SourcePath)
+		if rerr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return ErrorResult("refusing to read outside the project: " + detail.SourcePath), nil
+		}
+		if s.policy != nil && s.policy.denied(rel) {
+			return ErrorResult("refusing to read " + rel + ": it " + s.policy.deniedReason(rel)), nil
+		}
+	}
 	return JSONResult(detail)
+}
+
+func (s *Service) looksLikeSourcePath(target string) bool {
+	if !strings.ContainsAny(target, `/\`) {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(target)) {
+	case ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".md", ".mdx":
+		return true
+	}
+	return false
 }
 
 func (s *Service) toolSearchDocs(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
@@ -672,11 +720,14 @@ func (s *Service) toolCheck(ctx context.Context, _ map[string]any) (ToolResult, 
 	var findings []check.Finding
 	var cfg check.Config
 	chk := newBuilder(Options{Root: s.root, Cfg: s.cfg, Env: s.env, Verbose: s.verbose})
+	chk.SetContext(ctx)
+	s.runMu.Lock()
 	_, err := captureStdout(func() error {
 		var e error
 		findings, cfg, e = chk.CheckSite(true)
 		return e
 	})
+	s.runMu.Unlock()
 	if err != nil {
 		return ErrorResult("running checks: " + err.Error()), nil
 	}
@@ -756,6 +807,7 @@ func (s *Service) assembleSiteGraph(ctx context.Context) (*build.SiteGraph, stri
 		return nil, "", Errorf("cancelled")
 	}
 	b := newBuilder(Options{Root: s.root, Cfg: s.cfg, Env: s.env, Verbose: s.verbose})
+	b.SetContext(ctx)
 	s.runMu.Lock()
 	out, err := captureStdout(func() error { return b.BuildAll() })
 	s.runMu.Unlock()
@@ -1008,7 +1060,7 @@ func (s *Service) renderContentEntry(col string, m map[string]any) (rel, content
 	}
 	dir := s.collectionDir(col)
 	if dir == "" {
-		return "", "", fmt.Errorf("unknown collection %q — configure it under content: in krate.config.ts or add a plugin that contributes it", col)
+		return "", "", fmt.Errorf("unknown collection %q - configure it under content: in krate.config.ts or add a plugin that contributes it", col)
 	}
 	rel = filepath.ToSlash(filepath.Join(dir, slug+".md"))
 	return rel, renderMarkdownEntry(m, "Content for **"+slug+"**."), nil
@@ -1186,10 +1238,12 @@ func (s *Service) toolReadContent(ctx context.Context, args map[string]any) (Too
 	}
 	col := s.collectionCanonical(raw)
 	if col == "" {
-		return ErrorResult("no collection named " + strconv.Quote(raw) + " — configure it under content: in krate.config.ts or add a plugin that contributes it"), nil
+		return ErrorResult("no collection named " + strconv.Quote(raw) + " - configure it under content: in krate.config.ts or add a plugin that contributes it"), nil
 	}
-	dir := s.collectionDir(col)
-	absDir := filepath.Join(s.root, filepath.FromSlash(dir))
+	absDir, dir, derr := s.contentDir(col)
+	if derr != nil {
+		return ErrorResult(derr.Error()), nil
+	}
 	slug := argString(args, "slug")
 
 	if slug == "" {
@@ -1213,15 +1267,30 @@ func (s *Service) toolReadContent(ctx context.Context, args map[string]any) (Too
 		return JSONResult(map[string]any{"collection": col, "entries": entries})
 	}
 
+	if err := validateContentSlug(slug); err != nil {
+		return ErrorResult(err.Error()), nil
+	}
 	candidate := strings.TrimSuffix(slug, filepath.Ext(slug))
 	relFile := candidate + ".md"
-	fileData, readErr := os.ReadFile(filepath.Join(absDir, filepath.FromSlash(relFile)))
+	filePath, jerr := s.contentPath(dir, relFile)
+	if jerr != nil {
+		return ErrorResult("invalid slug " + strconv.Quote(slug)), nil
+	}
+	fileData, readErr := os.ReadFile(filePath)
 	if readErr != nil {
 		relFile = candidate + ".mdx"
-		fileData, readErr = os.ReadFile(filepath.Join(absDir, filepath.FromSlash(relFile)))
+		filePath, jerr = s.contentPath(dir, relFile)
+		if jerr != nil {
+			return ErrorResult("invalid slug " + strconv.Quote(slug)), nil
+		}
+		fileData, readErr = os.ReadFile(filePath)
 	}
 	if readErr != nil {
 		return ErrorResult("no entry " + strconv.Quote(slug) + " in collection " + strconv.Quote(col)), nil
+	}
+	projFile := filepath.ToSlash(filepath.Join(dir, relFile))
+	if s.policy != nil && s.policy.denied(projFile) {
+		return ErrorResult("refusing to read " + projFile + ": it " + s.policy.deniedReason(projFile)), nil
 	}
 	text := string(fileData)
 	data, body := frontmatter.Parse(text)
@@ -1252,7 +1321,7 @@ func (s *Service) toolCreateContent(ctx context.Context, args map[string]any) (T
 	}
 	col := s.collectionCanonical(raw)
 	if col == "" {
-		return ErrorResult("no collection named " + strconv.Quote(raw) + " — configure it under content: in krate.config.ts or add a plugin that contributes it"), nil
+		return ErrorResult("no collection named " + strconv.Quote(raw) + " - configure it under content: in krate.config.ts or add a plugin that contributes it"), nil
 	}
 	slug := argString(args, "slug")
 	if slug == "" {
@@ -1263,13 +1332,19 @@ func (s *Service) toolCreateContent(ctx context.Context, args map[string]any) (T
 	}
 	apply := argBool(args, "apply", false)
 
-	dir := s.collectionDir(col)
-	if dir == "" {
-		return ErrorResult("no collection named " + strconv.Quote(col)), nil
+	_, dir, derr := s.contentDir(col)
+	if derr != nil {
+		return ErrorResult(derr.Error()), nil
 	}
 	clean := strings.TrimSuffix(slug, filepath.Ext(slug))
 	rel := filepath.ToSlash(filepath.Join(dir, clean+".md"))
-	abs := filepath.Join(s.root, filepath.FromSlash(rel))
+	abs, jerr := s.contentPath(dir, clean+".md")
+	if jerr != nil {
+		return ErrorResult("invalid slug " + strconv.Quote(slug)), nil
+	}
+	if s.policy != nil && !s.policy.writable(rel) {
+		return ErrorResult("refusing to create " + rel + ": it " + s.policy.deniedReason(rel)), nil
+	}
 	if _, err := os.Stat(abs); err == nil {
 		return ErrorResult("entry already exists: " + rel), nil
 	}
@@ -1310,7 +1385,7 @@ func (s *Service) toolEditContent(ctx context.Context, args map[string]any) (Too
 	}
 	col := s.collectionCanonical(raw)
 	if col == "" {
-		return ErrorResult("no collection named " + strconv.Quote(raw) + " — configure it under content: in krate.config.ts or add a plugin that contributes it"), nil
+		return ErrorResult("no collection named " + strconv.Quote(raw) + " - configure it under content: in krate.config.ts or add a plugin that contributes it"), nil
 	}
 	slug := argString(args, "slug")
 	if slug == "" {
@@ -1321,17 +1396,25 @@ func (s *Service) toolEditContent(ctx context.Context, args map[string]any) (Too
 	}
 	apply := argBool(args, "apply", false)
 
-	dir := s.collectionDir(col)
-	if dir == "" {
-		return ErrorResult("no collection named " + strconv.Quote(col)), nil
+	_, dir, derr := s.contentDir(col)
+	if derr != nil {
+		return ErrorResult(derr.Error()), nil
 	}
+	expected := argString(args, "expectedSha256")
 	clean := strings.TrimSuffix(slug, filepath.Ext(slug))
-	absDir := filepath.Join(s.root, filepath.FromSlash(dir))
 	relFile := clean + ".md"
-	fileData, readErr := os.ReadFile(filepath.Join(absDir, filepath.FromSlash(relFile)))
+	filePath, jerr := s.contentPath(dir, relFile)
+	if jerr != nil {
+		return ErrorResult("invalid slug " + strconv.Quote(slug)), nil
+	}
+	fileData, readErr := os.ReadFile(filePath)
 	if readErr != nil {
 		relFile = clean + ".mdx"
-		fileData, readErr = os.ReadFile(filepath.Join(absDir, filepath.FromSlash(relFile)))
+		filePath, jerr = s.contentPath(dir, relFile)
+		if jerr != nil {
+			return ErrorResult("invalid slug " + strconv.Quote(slug)), nil
+		}
+		fileData, readErr = os.ReadFile(filePath)
 	}
 	if readErr != nil {
 		return ErrorResult("no entry " + strconv.Quote(slug) + " in collection " + strconv.Quote(col)), nil
@@ -1413,9 +1496,15 @@ func (s *Service) toolEditContent(ctx context.Context, args map[string]any) (Too
 	if !apply {
 		return TextResult("Dry run (apply: true to write).\n\n" + diff), nil
 	}
-	abs := filepath.Join(absDir, filepath.FromSlash(relFile))
+	abs, jerr := s.contentPath(dir, relFile)
+	if jerr != nil {
+		return ErrorResult("invalid slug " + strconv.Quote(slug)), nil
+	}
+	if s.policy != nil && !s.policy.writable(projPath) {
+		return ErrorResult("refusing to edit " + projPath + ": it " + s.policy.deniedReason(projPath)), nil
+	}
 	tx := newFileTransaction(s)
-	if err := tx.stageWrite(abs, projPath, out, ""); err != nil {
+	if err := tx.stageWrite(abs, projPath, out, expected); err != nil {
 		return ErrorResult(err.Error()), nil
 	}
 	if err := tx.commit(); err != nil {
@@ -1814,6 +1903,7 @@ func (s *Service) runBuild(ctx context.Context) (string, error) {
 		return "", err
 	}
 	b := newBuilder(Options{Root: s.root, Cfg: s.cfg, Env: s.env, Verbose: s.verbose})
+	b.SetContext(ctx)
 	return captureStdout(func() error {
 		return b.BuildAll()
 	})
@@ -1996,6 +2086,35 @@ func (s *Service) collectionDir(name string) string {
 	return col.Dir
 }
 
+// contentDir validates that a collection directory stays inside the project
+// and returns its absolute path and slash relative path.
+// contentPath joins a collection-relative file name onto the project root. It
+// must not use SafeJoin with the collection directory as root: the directory may
+// not exist yet, and SafeJoin resolves symlinks from the deepest existing
+// ancestor of that root.
+func (s *Service) contentPath(relDir, name string) (string, error) {
+	return pluginapi.SafeJoin(s.root, filepath.ToSlash(filepath.Join(relDir, name)))
+}
+
+func (s *Service) contentDir(name string) (absDir, relDir string, err error) {
+	dir := s.collectionDir(name)
+	if dir == "" {
+		return "", "", fmt.Errorf("no collection named %q", name)
+	}
+	relDir = filepath.ToSlash(filepath.Clean(dir))
+	if filepath.IsAbs(dir) || relDir == ".." || strings.HasPrefix(relDir, "../") {
+		return "", "", fmt.Errorf("content collection %q escapes the project: %s", name, dir)
+	}
+	absDir, err = pluginapi.SafeJoin(s.root, relDir)
+	if err != nil {
+		return "", "", fmt.Errorf("content collection %q escapes the project: %s", name, dir)
+	}
+	if s.policy != nil && s.policy.denied(relDir) {
+		return "", "", fmt.Errorf("content collection %q is denied: it %s", name, s.policy.deniedReason(relDir))
+	}
+	return absDir, relDir, nil
+}
+
 // collectionCanonical returns the effective collection name for the given
 // label, or "" when no such collection exists.
 func (s *Service) collectionCanonical(name string) string {
@@ -2065,7 +2184,7 @@ func excerpt(text, query string, n int) string {
 	}
 	if idx < 0 {
 		if len(text) > n {
-			return strings.TrimSpace(text[:n]) + "…"
+			return strings.TrimSpace(text[:n]) + "..."
 		}
 		return strings.TrimSpace(text)
 	}
@@ -2083,10 +2202,10 @@ func excerpt(text, query string, n int) string {
 	end = snapEnd(text, end)
 	out := strings.TrimSpace(text[start:end])
 	if start > 0 {
-		out = "…" + out
+		out = "..." + out
 	}
 	if end < len(text) {
-		out += "…"
+		out += "..."
 	}
 	return out
 }

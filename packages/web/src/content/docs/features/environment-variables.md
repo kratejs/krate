@@ -1,7 +1,7 @@
 ---
 title: Environment Variables
 description: .env files, precedence, and process.env access.
-order: 10
+order: 11
 ---
 
 # Environment Variables
@@ -56,7 +56,7 @@ INLINE=value # trailing comment after whitespace
 - `$VAR` and `${VAR}` expand to the value of `VAR` (in-file definitions are
   chained first, then the shell environment). Missing variables expand to the
   empty string.
-- Single-quoted values are literal — no expansion — matching dotenv.
+- Single-quoted values are literal - no expansion - matching dotenv.
 
 See the `krate-examples` project for a working setup: `examples/.env` and
 `examples/.env.production`, exercised by the `src/api/env.ts` route at
@@ -66,12 +66,12 @@ See the `krate-examples` project for a working setup: `examples/.env` and
 
 `.env` values reach `process.env` in every server-side execution context:
 
-- **API routes** — `src/api/*.ts` (embedded QuickJS) and `src/api/*.go` (the
+- **API routes** - `src/api/*.ts` (embedded QuickJS) and `src/api/*.go` (the
   Go sidecar subprocess).
-- **Plugins** — Go plugin hooks and JS/TS community plugins running in
+- **Plugins** - Go plugin hooks and JS/TS community plugins running in
   QuickJS.
-- **SSR / ISR / streaming pages** — the renderer sidecar subprocess.
-- **`generateStaticParams`** — the embedded or bundled-runtime evaluation that
+- **SSR / ISR / streaming pages** - the renderer sidecar subprocess.
+- **`generateStaticParams`** - the embedded or bundled-runtime evaluation that
   computes statically generated params.
 
 In every case the embedded/child process sees the merged map: shell env
@@ -83,7 +83,7 @@ Environment values are **build/serve-time only** and are **never emitted into
 client HTML, JavaScript, or hydration payloads**. Do not put secrets in values
 you render into a page component tree; only server-only contexts (API routes,
 server components, plugins) may read them. Krate logs only that a given env
-file was found/loaded — never its values.
+file was found/loaded - never its values.
 
 ## Compiler tuning variables
 

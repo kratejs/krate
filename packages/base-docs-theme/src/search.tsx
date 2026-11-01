@@ -46,6 +46,21 @@ interface HotkeyCombo {
   alt: boolean;
 }
 
+/** Human-readable hint ("mod+k" -> the command icon plus "K"). Kept
+ * platform-neutral so the server-rendered markup matches hydration. */
+function hotkeyLabel(hotkey: string): string {
+  return hotkey
+    .split("+")
+    .map((part) => {
+      const p = part.trim().toLowerCase();
+      if (p === "mod" || p === "cmd" || p === "meta") return "\u2318";
+      if (p === "ctrl" || p === "control") return "Ctrl";
+      if (p === "alt" || p === "option") return "Alt";
+      return p.toUpperCase();
+    })
+    .join(" ");
+}
+
 /** Parse "mod+k", "ctrl+/", "alt+p", etc. "mod" is Cmd on macOS, Ctrl elsewhere. */
 function parseHotkey(hotkey: string | undefined): HotkeyCombo | null {
   if (!hotkey) return null;
@@ -96,8 +111,13 @@ export function DocsSearch(props: DocsSearchProps) {
   const [loading, setLoading] = createSignal(false);
   const [active, setActive] = createSignal(-1);
 
+  const listId = "krate-docs-search-results";
+  const statusId = "krate-docs-search-status";
+  const optionId = (index: number) => "krate-docs-search-option-" + index;
+
   let rootRef: HTMLElement | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let restoreFocus: HTMLElement | null = null;
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   function run(q: string) {
@@ -126,6 +146,15 @@ export function DocsSearch(props: DocsSearchProps) {
     timer = setTimeout(() => run(value), 120);
   }
 
+  function close(restore: boolean) {
+    setOpen(false);
+    setActive(-1);
+    if (restore && restoreFocus && inputRef.current === document.activeElement) {
+      restoreFocus.focus();
+      restoreFocus = null;
+    }
+  }
+
   function choose(index: number) {
     const hit = results()[index];
     if (!hit) return;
@@ -136,17 +165,39 @@ export function DocsSearch(props: DocsSearchProps) {
 
   function onKey(e: KeyboardEvent) {
     if (e.key === "Escape") {
-      setOpen(false);
+      e.preventDefault();
+      close(true);
       return;
     }
     const list = results();
     if (!open() || list.length === 0) return;
-    if (e.key === "ArrowDown") {
+    if (e.key === "Tab" && rootRef) {
+      // Keep keyboard focus inside the open search popover.
+      const focusables = Array.from(
+        rootRef.querySelectorAll<HTMLElement>('input, a[href]'),
+      );
+      if (focusables.length > 1) {
+        const current = focusables.indexOf(document.activeElement as HTMLElement);
+        if (e.shiftKey && current <= 0) {
+          e.preventDefault();
+          focusables[focusables.length - 1].focus();
+        } else if (!e.shiftKey && current === focusables.length - 1) {
+          e.preventDefault();
+          focusables[0].focus();
+        }
+      }
+    } else if (e.key === "ArrowDown") {
       e.preventDefault();
       setActive((active() + 1) % list.length);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActive((active() - 1 + list.length) % list.length);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActive(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActive(list.length - 1);
     } else if (e.key === "Enter") {
       e.preventDefault();
       choose(active() < 0 ? 0 : active());
@@ -155,7 +206,7 @@ export function DocsSearch(props: DocsSearchProps) {
 
   onMount(function () {
     function onDocClick(e: MouseEvent) {
-      if (rootRef && !rootRef.contains(e.target as Node)) setOpen(false);
+      if (rootRef && !rootRef.contains(e.target as Node)) close(false);
     }
     document.addEventListener("click", onDocClick);
 
@@ -180,6 +231,7 @@ export function DocsSearch(props: DocsSearchProps) {
       e.preventDefault();
       const input = inputRef.current;
       if (input) {
+        restoreFocus = document.activeElement as HTMLElement | null;
         input.focus();
         input.select();
       }
@@ -203,6 +255,13 @@ export function DocsSearch(props: DocsSearchProps) {
         ref={inputRef}
         placeholder={placeholder}
         aria-label={label}
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-autocomplete="list"
+        aria-expanded={open() ? "true" : "false"}
+        aria-controls={listId}
+        aria-describedby={statusId}
+        aria-activedescendant={open() && active() >= 0 ? optionId(active()) : undefined}
         autocomplete="off"
         spellcheck="false"
         onInput={(e: any) => onInput(e.target.value)}
@@ -210,12 +269,27 @@ export function DocsSearch(props: DocsSearchProps) {
         onFocus={() => {
           if (results().length > 0) setOpen(true);
         }}
+        onBlur={() => {
+          // Keep the list open while focus moves into a result with the mouse.
+          setTimeout(() => {
+            if (rootRef && !rootRef.contains(document.activeElement)) close(false);
+          }, 0);
+        }}
       />
-      {props.hotkey && <kbd class="krate-docs-search-kbd">{props.hotkey}</kbd>}
+      {props.hotkey && <kbd class="krate-docs-search-kbd" aria-hidden="true">{hotkeyLabel(props.hotkey)}</kbd>}
+      <div class="krate-docs-search-status" id={statusId} role="status" aria-live="polite">
+        {loading()
+          ? "Searching"
+          : open()
+            ? results().length === 0
+              ? "No results"
+              : results().length + (results().length === 1 ? " result" : " results")
+            : ""}
+      </div>
       {open() && (
-        <div class="krate-docs-search-results" role="listbox">
+        <div class="krate-docs-search-results" id={listId} role="listbox" aria-label={label}>
           {loading() && results().length === 0 && (
-            <div class="krate-docs-search-empty">Searching…</div>
+            <div class="krate-docs-search-empty">Searching...</div>
           )}
           {!loading() && results().length === 0 && (
             <div class="krate-docs-search-empty">No results</div>
@@ -223,6 +297,7 @@ export function DocsSearch(props: DocsSearchProps) {
           {results().map((hit, i) => (
             <a
               key={hit.href || hit.path || i}
+              id={optionId(i)}
               class={`krate-docs-search-item${i === active() ? " active" : ""}`}
               href={hit.href || hit.path || "/"}
               role="option"

@@ -11,7 +11,7 @@ export function CounterDemo() {
   return (
     <div class="demo">
       <button type="button" aria-label="Decrease" onClick={() => setCount((c) => c - 1)}>
-        −
+        -
       </button>
       <span class="demo-value">{count()}</span>
       <button type="button" aria-label="Increase" onClick={() => setCount((c) => c + 1)}>

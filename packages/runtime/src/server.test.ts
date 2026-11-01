@@ -29,6 +29,30 @@ describe('renderToString', () => {
   it('passes raw HTML through without escaping', () => {
     expect(renderToString({ __raw: '<b>hi</b>' } as any)).toBe('<b>hi</b>');
   });
+
+  it('maps React attribute aliases like the compiler renderer', () => {
+    const html = renderToString(jsx('label', { className: 'x', htmlFor: 'name', children: 'Name' }));
+    expect(html).toBe('<label class="x" for="name">Name</label>');
+  });
+
+  it('serializes style objects with unitless exceptions', () => {
+    const html = renderToString(jsx('div', {
+      style: { backgroundColor: 'red', marginTop: 4, opacity: 0.5, zIndex: 2, '--raw': 1 },
+    }));
+    expect(html).toBe('<div style="background-color:red;margin-top:4px;opacity:0.5;z-index:2;--raw:1"></div>');
+  });
+
+  it('renders dangerouslySetInnerHTML instead of an attribute', () => {
+    const html = renderToString(jsx('div', { dangerouslySetInnerHTML: { __html: '<b>hi</b>' } }));
+    expect(html).toBe('<div><b>hi</b></div>');
+  });
+
+  it('blocks javascript: URLs and drops reserved props', () => {
+    const html = renderToString(jsx('a', { href: 'javascript:alert(1)', ref: {}, key: 'k', children: 'x' }));
+    expect(html).toContain('href="javascript:throw new Error(');
+    expect(html).not.toContain(' ref=');
+    expect(html).not.toContain(' key=');
+  });
 });
 
 describe('goComponent', () => {

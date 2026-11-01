@@ -24,13 +24,13 @@ export default function ServerTime() {
 ```
 
 Because server components run at build time, they can `fetch` external data and
-render the result — ideal for data that doesn't change per request.
+render the result - ideal for data that doesn't change per request.
 
 ## Per-request data (runtime components)
 
 Mark a component with `// @runtime` (or a `*.runtime.tsx` file). It is rendered
 at **request time** by the SSR sidecar (Node/bun/deno) and spliced into the
-static shell as its own region — streamed to the client without a full-page
+static shell as its own region - streamed to the client without a full-page
 re-render:
 
 ```tsx
@@ -118,10 +118,10 @@ import { createResource } from '@krate/runtime';
 const [data, actions] = createResource(source, fetcher);
 ```
 
-- **Reactive** — auto-refetches when the source signal changes.
-- **Abort** — in-flight requests are aborted when the source changes.
-- **Optimistic updates** — `mutate(prev => …)`.
-- **Manual refetch** — `refetch()`.
+- **Reactive** - auto-refetches when the source signal changes.
+- **Abort** - in-flight requests are aborted when the source changes.
+- **Optimistic updates** - `mutate(prev => ...)`.
+- **Manual refetch** - `refetch()`.
 
 ```tsx
 export default function User({ id }) {
@@ -132,7 +132,7 @@ export default function User({ id }) {
 
   return (
     <div>
-      {user.loading && <p>Loading…</p>}
+      {user.loading && <p>Loading...</p>}
       {user() && <p>Hello, {user().name}</p>}
       <button onClick={refetch}>Refresh</button>
     </div>

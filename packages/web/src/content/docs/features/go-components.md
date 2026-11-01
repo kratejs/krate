@@ -93,7 +93,7 @@ func Badge(p BadgeProps) kr.Node {
   the matching Go types.
 - **Return:** `kr.Node` or `kr.HTML` (markup), `string`/number/`bool` (rendered
   as text), or `(T, error)`.
-- **Children:** the JSX children of `<Badge>…</Badge>` are rendered to HTML and
+- **Children:** the JSX children of `<Badge>...</Badge>` are rendered to HTML and
   passed under the struct field tagged `json:"children"` (typed `kr.HTML`).
 - **Escaping:** the builder escapes text and attribute values by default;
   `kr.HTML`/`kr.Raw` insert markup verbatim.
@@ -161,7 +161,7 @@ export default function Page() {
 
 The compiler resolves the `.go` import, serializes the props to JSON, and either
 inlines the HTML (server tier) or emits a request-time region (runtime tier).
-Every `.go` import is a normal ES import — the `@/` alias and relative paths both
+Every `.go` import is a normal ES import - the `@/` alias and relative paths both
 work.
 
 ## Runtime regions

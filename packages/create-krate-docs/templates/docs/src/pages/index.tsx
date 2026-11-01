@@ -2,7 +2,7 @@ export default function Home() {
   return (
     <>
       <Head>
-        <title>__PROJECT_DISPLAY_NAME__ — Documentation</title>
+        <title>__PROJECT_DISPLAY_NAME__ - Documentation</title>
         <meta
           name="description"
           content="Documentation site built with Krate."
@@ -14,7 +14,7 @@ export default function Home() {
         <h1 class="hero-title">__PROJECT_DISPLAY_NAME__</h1>
         <p class="hero-subtitle">
           This is your documentation home. Content lives in{" "}
-          <code>src/content/docs/</code> as Markdown — add files there and they
+          <code>src/content/docs/</code> as Markdown - add files there and they
           appear in the sidebar automatically, with search, a table of contents,
           and prev/next navigation.
         </p>
@@ -45,7 +45,7 @@ export default function Home() {
           <h3>WASM search</h3>
           <p>
             Full-text search powered by docfind, with the index embedded at
-            build time — zero server round-trips.
+            build time - zero server round-trips.
           </p>
         </a>
       </section>

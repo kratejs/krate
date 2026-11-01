@@ -5,7 +5,7 @@
 **A Go-native static site generator with signal-based reactivity.**
 
 Krate compiles TSX/JSX pages into static HTML at build time and generates a tiny
-hydration bundle that makes pages interactive on the client — no React, no
+hydration bundle that makes pages interactive on the client - no React, no
 bundler subprocess, no Node.js required for core compilation.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -16,22 +16,22 @@ bundler subprocess, no Node.js required for core compilation.
 
 ## Highlights
 
-- **Go-native compiler** — custom lexer, parser, bundler, and renderer. Builds run in milliseconds.
-- **Signals, not React** — fine-grained reactivity with `createSignal` / `createEffect` / `createMemo`.
-- **SSG-first** — every page is pre-rendered to static HTML. Hydration binds signals to the DOM via `data-k`/`data-kh` markers.
-- **File-based routing** — `src/pages/` maps to URLs, with nested routes, dynamic segments (`[param]`), and `_layout.tsx` layouts.
-- **Component tiers** — static, client, server (`@server`), and runtime (`@runtime`, rendered at request time by the sidecar) components in one page.
-- **Full CSS pipeline** — CSS Modules (FNV-32a scoping), Go-native Tailwind, minification, `@import` inlining.
-- **SSR, ISR & streaming** — static-first shells with revalidate-based ISR and per-region streaming SSR.
-- **No external bundler** — esbuild is only used for a few auxiliary tasks (API routes, runtime component bundles); core compilation is 100% custom Go.
-- **SPA router** — client-side navigation with DOM tree reconciliation (state, focus, and scroll survive transitions).
-- **Plugin system** — Go plugin hooks plus community plugins written in JavaScript, executed inside the embedded QuickJS runtime.
-- **WASM-powered docs search** — the docs plugin ships a search bar with a docfind index embedded into a WASM module at build time, so search runs entirely client-side.
+- **Go-native compiler** - custom lexer, parser, bundler, and renderer. Builds run in milliseconds.
+- **Signals, not React** - fine-grained reactivity with `createSignal` / `createEffect` / `createMemo`.
+- **SSG-first** - every page is pre-rendered to static HTML. Hydration binds signals to the DOM via `data-k`/`data-kh` markers.
+- **File-based routing** - `src/pages/` maps to URLs, with nested routes, dynamic segments (`[param]`), and `_layout.tsx` layouts.
+- **Component tiers** - static, client, server (`@server`), and runtime (`@runtime`, rendered at request time by the sidecar) components in one page.
+- **Full CSS pipeline** - CSS Modules (FNV-32a scoping), Go-native Tailwind, minification, `@import` inlining.
+- **SSR, ISR & streaming** - static-first shells with revalidate-based ISR and per-region streaming SSR.
+- **No external bundler** - esbuild is only used for a few auxiliary tasks (API routes, runtime component bundles); core compilation is 100% custom Go.
+- **SPA router** - client-side navigation with DOM tree reconciliation (state, focus, and scroll survive transitions).
+- **Plugin system** - Go plugin hooks plus community plugins written in JavaScript, executed inside the embedded QuickJS runtime.
+- **Pagefind-powered docs search** - production docs builds index with Pagefind (the default), with docfind/WASM as the dev-time and fallback engine, so search runs entirely client-side.
 
 ## Getting Started
 
-> The Krate docs website lives in [`packages/web`](packages/web/) — a full
-> documentation site (with WASM search) you can build and run as a reference.
+> The Krate docs website lives in [`packages/web`](packages/web/) - a full
+> documentation site (with Pagefind search) you can build and run as a reference.
 > A feature-demo example lives in [`examples/`](examples/).
 
 ### Install the CLI
@@ -63,7 +63,7 @@ Build and run:
 
 ```sh
 krate dev       # dev server with hot reload on http://localhost:3000
-krate build     # production build → dist/
+krate build     # production build -> dist/
 krate serve     # preview the production build
 ```
 
@@ -91,14 +91,14 @@ Build-time data lives in server components; per-request data in runtime
 components:
 
 ```tsx
-// @server — evaluated at build time, HTML baked in
+// @server - evaluated at build time, HTML baked in
 export default function ServerTime() {
   return <time>{new Date().toUTCString()}</time>;
 }
 ```
 
 ```tsx
-// @runtime — rendered per request by the sidecar and spliced into the shell
+// @runtime - rendered per request by the sidecar and spliced into the shell
 export default function PriceTag({ price }) {
   return <span>{price}</span>;
 }
@@ -109,7 +109,7 @@ Dynamic route pages receive their params via `generateStaticParams`.
 ### Layouts
 
 ```tsx
-// src/pages/_layout.tsx — wraps every page in the directory
+// src/pages/_layout.tsx - wraps every page in the directory
 export default function Layout({ children }) {
   return (
     <div>
@@ -123,7 +123,7 @@ export default function Layout({ children }) {
 ### Dynamic routes
 
 ```tsx
-// src/pages/video/[id].tsx → /video/abc123
+// src/pages/video/[id].tsx -> /video/abc123
 export default function VideoPage({ params }) {
   return <h1>Video {params.id}</h1>;
 }
@@ -132,7 +132,7 @@ export default function VideoPage({ params }) {
 ### Built-in components
 
 Built-in components (`Head`, `Link`, `Icon`, `Image`, `Script`, `Style`) are
-recognized by the compiler by name — no import needed:
+recognized by the compiler by name - no import needed:
 
 ```tsx
 export default function Page() {
@@ -155,9 +155,9 @@ at build time (pure-Go, no cgo) with original-format fallback, responsive
 `srcset`/`sizes`, lazy/eager loading, blur placeholders, and
 `aspect-ratio`-based CLS mitigation.
 
-`<Link>` renders an SPA-enabled `<a>` with Next.js-style behavior — prefetching
+`<Link>` renders an SPA-enabled `<a>` with Next.js-style behavior - prefetching
 on hover/focus/viewport (default on), `replace`, `scroll`, hash scrolling, and
-`aria-current` for the active route — while external links and ⌘/Ctrl/middle
+`aria-current` for the active route - while external links and Cmd/Ctrl/middle
 clicks fall through to native browser behavior.
 
 ## Component Tiers
@@ -171,8 +171,8 @@ Components are classified into four tiers that determine how they're rendered:
 | **Server** (`// @server` or `*.server.tsx`) | None | Evaluated at build time, HTML output only |
 | **Runtime** (`// @runtime` or `*.runtime.tsx`) | None | Rendered at request time by the sidecar, spliced into the static shell |
 
-Detection priority: source directive → file convention → config name list →
-directory membership → default (client).
+Detection priority: source directive -> file convention -> config name list ->
+directory membership -> default (client).
 
 ## Configuration
 
@@ -195,7 +195,7 @@ export default defineConfig({
 });
 ```
 
-`defineConfig` gives you full type-checking of every supported key — unknown or
+`defineConfig` gives you full type-checking of every supported key - unknown or
 misspelled config options become compile errors. Community plugins follow the
 same factory pattern: `import demoPlugin from './plugins/my-plugin'` then
 `demoPlugin({ ... })`.
@@ -217,17 +217,17 @@ same factory pattern: `import demoPlugin from './plugins/my-plugin'` then
 
 ```
 Source (.tsx/.ts/.md/.mdx)
-        │
-        ▼
-    Lexer (tokenize) ──► Parser (AST) ──► Bundler (imports, CSS modules, React rewrite)
-        │
-        ▼
-    Renderer (SSR: AST → HTML + signal/handler detection)
-        │
-        ▼
-    Hydration Codegen (signals → JS bundle with data-k/data-kh bindings)
-        │
-        ▼
+        |
+        v
+    Lexer (tokenize) --> Parser (AST) --> Bundler (imports, CSS modules, React rewrite)
+        |
+        v
+    Renderer (SSR: AST -> HTML + signal/handler detection)
+        |
+        v
+    Hydration Codegen (signals -> JS bundle with data-k/data-kh bindings)
+        |
+        v
     Build Output (HTML + hashed JS + hashed CSS + manifest.json)
 ```
 
@@ -236,7 +236,7 @@ Source (.tsx/.ts/.md/.mdx)
 ```
 packages/
   compiler/      Go compiler (lexer, parser, bundler, renderer, build pipeline)
-  runtime/       Client runtime — signals, hydration, SPA router, resources, context
+  runtime/       Client runtime - signals, hydration, SPA router, resources, context
   components/    Built-in UI components (shadcn/ui-style)
   core/         npm CLI wrapper (@krate/core)
   web/           The Krate documentation website (this site)
@@ -255,7 +255,7 @@ search, plus the `go:embed`-ed WASM artifacts). Regenerate them with
 
 Krate is early stage but actively developed. Core compiler, reactivity, SSR/ISR,
 streaming, plugins, and the component library are functional. See the
-[roadmap in AGENTS.md](AGENTS.md#roadmap--phase-7-nextjs-feature-parity) for
+[public roadmap](https://krate.js.org/roadmap/) for
 what's next.
 
 ## Contributing
@@ -266,4 +266,4 @@ reference on the compiler and runtime internals.
 
 ## License
 
-[Apache-2.0](LICENSE) © kratejs
+[Apache-2.0](LICENSE) (c) kratejs

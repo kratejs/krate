@@ -50,4 +50,29 @@ for (const file of manifests) {
   console.log(`${pkg.name} -> ${version}`);
 }
 
+// packages/web is intentionally not bumped here. Its @krate pins are managed
+// manually so the docs site can track a published release independently of the
+// workspace version being prepared.
+
+// Refresh the supply-chain exclusions for the current release train.
+const workspacePath = join(root, 'pnpm-workspace.yaml');
+let workspace = readFileSync(workspacePath, 'utf-8');
+const kratePackages = [
+  '@krate/components',
+  '@krate/core-darwin-arm64',
+  '@krate/core-darwin-x64',
+  '@krate/core-linux-arm64',
+  '@krate/core-linux-x64',
+  '@krate/core-linux-x64-musl',
+  '@krate/core-win32-arm64',
+  '@krate/core-win32-x64',
+  '@krate/core',
+  '@krate/plugin',
+  '@krate/runtime',
+];
+const exclusions = kratePackages.map((name) => `  - '${name}@${version}'`).join('\n');
+workspace = workspace.replace(/minimumReleaseAgeExclude:\n(?:  - .*\n?)*/, `minimumReleaseAgeExclude:\n${exclusions}\n`);
+writeFileSync(workspacePath, workspace);
+console.log(`pnpm release exclusions -> ${version}`);
+
 console.log('Done.');

@@ -1,6 +1,6 @@
 ---
 title: MCP Server (Agent-Native)
-order: 15
+order: 16
 description: Expose the Krate compiler to AI agents over the Model Context Protocol with `krate mcp`.
 sidebar:
   label: MCP Server
@@ -11,7 +11,7 @@ sidebar:
 
 `krate mcp` starts an [MCP](https://modelcontextprotocol.io) (Model Context
 Protocol) server that exposes the Krate compiler to AI agents. The agent talks
-to the real compiler — routes, AST, diagnostics, content graph — instead of
+to the real compiler - routes, AST, diagnostics, content graph - instead of
 grepping a filesystem.
 
 The server speaks **JSON-RPC 2.0 over stdio** and has **no external
@@ -50,9 +50,9 @@ Omit the path to use the current working directory: `"args": ["mcp"]`.
 
 The shape is the same, under the client's own key:
 
-- Cursor — `.cursor/mcp.json`
-- VS Code — `.vscode/mcp.json` (under `"servers"`)
-- opencode — `opencode.json`
+- Cursor - `.cursor/mcp.json`
+- VS Code - `.vscode/mcp.json` (under `"servers"`)
+- opencode - `opencode.json`
 
 ```json
 {
@@ -113,19 +113,19 @@ never write source files.
 
 `read_page` lets the agent choose what it needs with `format` (default `source`):
 
-- `source` — the raw file text, so the agent can read and edit the actual page.
-- `ast` — the **kind-tagged AST document** (the same format JS plugins
+- `source` - the raw file text, so the agent can read and edit the actual page.
+- `ast` - the **kind-tagged AST document** (the same format JS plugins
   receive), with `lossyTypes` reporting TypeScript constructs the parser drops.
-- `html` — the rendered output when the site has been built.
-- `all` — source, AST, and rendered HTML together.
+- `html` - the rendered output when the site has been built.
+- `all` - source, AST, and rendered HTML together.
 
 `read_content` lists a collection's entries (slug, project path, frontmatter)
 when `collection` alone is given, or returns a single entry's raw file, parsed
 frontmatter, and markdown body (plus rendered HTML for `.md`) when `slug` is
 added.
 
-`search_docs` searches **Krate's own framework documentation** — the content
-that powers the docs site — which is embedded into the compiler at build time,
+`search_docs` searches **Krate's own framework documentation** - the content
+that powers the docs site - which is embedded into the compiler at build time,
 so it works the same from any project and offline. It is backed by the
 [docfind](https://github.com/microsoft/docfind) WASM engine running in-process
 (the same engine Krate uses for docs search during development builds): results
@@ -167,7 +167,7 @@ The file tools let the agent discover and manage arbitrary project files
 (components, styles, assets), not just pages:
 
 - **`list_files`** lists project-relative paths (skipping `node_modules`,
-  `.git`, `dist`, …). Filter with `glob` (`src/components/**/*.tsx`), scope with
+  `.git`, `dist`, ...). Filter with `glob` (`src/components/**/*.tsx`), scope with
   `dir`, and set `includeDenied: true` to see policy-denied paths.
 - **`read_file`** returns a file's text with a language hint (or a `binary`
   marker). Sensitive paths are refused (see the policy below).
@@ -196,8 +196,8 @@ accepts structured operations; both support per-file `expectedSha256` checks.
 
 By default the agent may read and write any project file - pages, CSS,
 components, API routes, content, docs, and config - **except** a small set
-of sensitive paths — environment files (`.env*`), private keys (`*.pem`,
-`*.key`, `id_rsa`, …), `.git/`, npm/pypi/netrc credential files, and the policy
+of sensitive paths - environment files (`.env*`), private keys (`*.pem`,
+`*.key`, `id_rsa`, ...), `.git/`, npm/pypi/netrc credential files, and the policy
 file itself. Those require an explicit `allow` entry. A committed policy at
 `.krate/mcp.json` customises this:
 
@@ -210,6 +210,7 @@ file itself. Those require an explicit `allow` entry. A committed policy at
   "maxFileBytes": 2097152,
   "maxBatchFiles": 50,
   "allowBinary": false,
+  "readOnlyMode": false,
   "allowTasks": ["build", "check", "test", "typecheck"]
 }
 ```
@@ -222,13 +223,15 @@ file itself. Those require an explicit `allow` entry. A committed policy at
   project-wide behavior; `["src", "public"]` is a safer default for most sites.
 - **`maxFileBytes`** and **`maxBatchFiles`** bound memory and transaction size.
 - **`allowBinary`** permits binary writes; it is off by default.
+- **`readOnlyMode`** disables every write tool and `run_task` for a shared or
+  remote MCP profile.
 - **`allowTasks`** gates `run_task`. Generated/output trees (`node_modules`,
   `dist`, `.krate`, `build`) are never writable.
 
 Every write also rejects absolute paths and traversal outside the project root,
 resolving symlinks so a symlinked directory cannot redirect a write elsewhere.
 
-- **`create_page`** scaffolds a page from a template — `static` (default),
+- **`create_page`** scaffolds a page from a template - `static` (default),
   `content-list`, `detail`, and `blank` (raw source override). For
   content-backed templates you can pass `collection` and a `contentEntry`
   object so the matching markdown entry is authored alongside the page, and
@@ -257,9 +260,9 @@ resolving symlinks so a symlinked directory cannot redirect a write elsewhere.
 
 Prompts package recurring workflows so agents reach for the right tools:
 
-- `add-page` — create a page the Krate way: match house style first, then
+- `add-page` - create a page the Krate way: match house style first, then
   `create_page` with the chosen template, and confirm via `build`/`check`.
-- `publish-content` — author a new entry into a typed content collection via
+- `publish-content` - author a new entry into a typed content collection via
   `create_content` (schema-validated) and wire it into a page.
 - `fix-checks` - run the quality gates, then fix the worst findings with
   `apply_fix` or `apply_patch`.
@@ -270,7 +273,7 @@ Prompts package recurring workflows so agents reach for the right tools:
 - `audit-dependencies` - report unused or risky dependencies without changing
   files.
 - `scaffold-component` - create a component that matches nearby house style.
-- `explore` — summarize the project from routes, config, and outstanding checks.
+- `explore` - summarize the project from routes, config, and outstanding checks.
 
 ## Protocol
 
@@ -301,17 +304,17 @@ Prompts package recurring workflows so agents reach for the right tools:
 
 An agent asked to add a pricing page can:
 
-1. `list_routes` — see existing routes and their source files.
-2. `read_page` on a similar page (`format: "source"`) — learn component and
+1. `list_routes` - see existing routes and their source files.
+2. `read_page` on a similar page (`format: "source"`) - learn component and
    styling conventions.
-3. `create_page { route: "/pricing" }` — receive a diff.
+3. `create_page { route: "/pricing" }` - receive a diff.
 4. You approve, then the agent calls it again with `"apply": true`.
-5. `build` — surface diagnostics in the same turn.
-6. `check` — fix any accessibility or SEO findings with `edit_file`.
+5. `build` - surface diagnostics in the same turn.
+6. `check` - fix any accessibility or SEO findings with `edit_file`.
 
 Because the server holds the compiler in-process, each step is fast and the
 agent never has to invoke a shell.
 
 For how the server is implemented (no SDK dependency, stdout discipline, path
 anchoring), see
-[Contributing → Architecture](/docs/contributing/architecture/#mcp-server).
+[Contributing -> Architecture](/docs/contributing/architecture/#mcp-server).

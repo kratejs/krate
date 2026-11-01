@@ -424,7 +424,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 				breadcrumbs := docs.BuildBreadcrumbsURL(page.Locale, defaultLocale, page.Path)
 
 				fileLayoutRel := theme.importSpecifier(filepath.Dir(tsxPath))
-				tsxSource := p.generateTSX(ctx, cfg, page, fileLayoutRel, searchEnabled, b.sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, li, opts, themeOptions, cfg.Markdown)
+				tsxSource := p.generateTSX(ctx, cfg, page, fileLayoutRel, searchEnabled, b.sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, li, opts, themeOptions, cfg.Markdown, docs.DocsBasePath)
 
 				_ = os.MkdirAll(filepath.Dir(tsxPath), 0755)
 				_ = os.WriteFile(tsxPath, []byte(tsxSource), 0644)
@@ -445,7 +445,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 		}
 	}
 
-	if err := generateTaxonomyPages(ctx, genDir, theme, opts, defaultBundle.pages, defaultBundle.sections); err != nil {
+	if err := p.generateTaxonomyPages(ctx, cfg, genRoot, theme, opts, docs.DocsBasePath, searchEnabled, themeOptions, defaultBundle.pages, defaultBundle.sections); err != nil {
 		return fmt.Errorf("generating tag/category pages: %w", err)
 	}
 
@@ -693,7 +693,7 @@ func applyNavOverride(override *docs.NavOverride, autoTitle, autoLink string) (t
 	return title, link, link != ""
 }
 
-func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page docs.Page, layoutRel string, searchEnabled bool, sections []docs.SidebarItem, tocItems []docs.TOCItem, breadcrumbs []docs.Breadcrumb, prevTitle, prevLink, nextTitle, nextLink string, li docsLocaleInfo, opts *DocsPluginOptions, themeOptions json.RawMessage, mdConfig markdown.Config) string {
+func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page docs.Page, layoutRel string, searchEnabled bool, sections []docs.SidebarItem, tocItems []docs.TOCItem, breadcrumbs []docs.Breadcrumb, prevTitle, prevLink, nextTitle, nextLink string, li docsLocaleInfo, opts *DocsPluginOptions, themeOptions json.RawMessage, mdConfig markdown.Config, routeBase string) string {
 	prevTitle, prevLink, prevOk := applyNavOverride(page.Prev, prevTitle, prevLink)
 	nextTitle, nextLink, nextOk := applyNavOverride(page.Next, nextTitle, nextLink)
 	if !opts.PaginationEnabled() {
@@ -767,6 +767,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	siteTitleJSON, _ := json.Marshal(siteTitle)
 	currentPathJSON, _ := json.Marshal(page.Path)
 	templateJSON, _ := json.Marshal(page.Template)
+	routeBaseJSON, _ := json.Marshal(strings.TrimRight(routeBase, "/"))
 
 	// Per-page document language (the shell ships lang="en"; the build applies
 	// this override server-side so crawlers/no-JS see the right language).
@@ -858,11 +859,17 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		sb.WriteString("    tags: ")
 		sb.WriteString(string(tagsJSON))
 		sb.WriteString(",\n")
+		sb.WriteString("    tagLinks: ")
+		sb.WriteString(string(marshalJSONArray(taxonomyLinks(routeBase, "tags", page.Tags))))
+		sb.WriteString(",\n")
 	}
 	if len(page.Categories) > 0 {
 		catsJSON := marshalJSONArray(page.Categories)
 		sb.WriteString("    categories: ")
 		sb.WriteString(string(catsJSON))
+		sb.WriteString(",\n")
+		sb.WriteString("    categoryLinks: ")
+		sb.WriteString(string(marshalJSONArray(taxonomyLinks(routeBase, "categories", page.Categories))))
 		sb.WriteString(",\n")
 	}
 	if page.Date != "" {
@@ -911,6 +918,10 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 
 	sb.WriteString("    currentPath: ")
 	sb.WriteString(string(currentPathJSON))
+	sb.WriteString(",\n")
+
+	sb.WriteString("    routeBase: ")
+	sb.WriteString(string(routeBaseJSON))
 	sb.WriteString(",\n")
 
 	if len(strings.TrimSpace(string(themeOptions))) > 2 {
