@@ -131,12 +131,6 @@ func (s *SSRServer) SetOutDir(dir string) {
 	s.outDir = dir
 }
 
-func (s *SSRServer) outputDir() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.outputDirLocked()
-}
-
 // outputDirLocked returns the build output directory. The caller must hold s.mu.
 func (s *SSRServer) outputDirLocked() string {
 	if s.outDir != "" {
