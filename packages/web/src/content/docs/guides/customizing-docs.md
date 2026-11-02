@@ -97,6 +97,29 @@ docs({
 });
 ```
 
+### Zero-JS theme
+
+`@krate/simple-docs-theme` is a lighter shell whose chrome ships no client
+runtime. The color-theme switch and mobile drawer compile to CSS signals; the
+sidebar and mobile table of contents use native `<details>` disclosures and
+links. It has no client-side search UI, so point `searchHref` at a search page
+or leave it out:
+
+```ts
+import { simpleDocsTheme } from '@krate/simple-docs-theme';
+
+docs({
+  contentDir: "src/content/docs",
+  theme: simpleDocsTheme({ searchHref: "/search/" }),
+  search: { enabled: false },
+});
+```
+
+Setting `search.enabled: false` keeps the docs plugin from emitting its search
+script; `searchHref` then links to a search page you own. Style the theme with
+the `--simple-*` custom properties (`--simple-accent`, `--simple-bg`,
+`--simple-fg`, `--simple-border`, and so on).
+
 You can swap the whole docs shell with the `theme` option instead of `layout`.
 A theme is one of:
 
@@ -150,6 +173,8 @@ Notes:
   combobox against `window.__krateSearch`.
 - Interactive behavior (sidebar, TOC tracking, theme toggle) lives in the theme
   component itself (`@krate/base-docs-theme`), not a separate script.
+  `@krate/simple-docs-theme` takes the opposite approach: its chrome has no
+  runtime, using CSS signals and native disclosures instead.
 
 Use CSS custom properties to retheme: `--color-primary`, `--color-bg`,
 `--color-fg`, `--color-border`, `--radius`, etc.

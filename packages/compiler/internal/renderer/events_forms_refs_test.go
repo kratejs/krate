@@ -83,6 +83,21 @@ export default function App() {
 	}
 }
 
+func TestCSSSignalControllersDoNotWarn(t *testing.T) {
+	src := `import { createCSSChoice } from "@krate/runtime";
+export default function App() {
+  const theme = createCSSChoice("auto", ["auto", "light", "dark"]);
+  return <div>
+    <button {...theme.trigger("light")}>Light</button>
+    <button {...theme.trigger("dark")}>Dark</button>
+  </div>;
+}`
+	tree, _, _ := buildTreeReact(t, src)
+	if got := warningCodes(tree)[diag.CodeReadOnlyControlled]; len(got) != 0 {
+		t.Errorf("generated CSS signal controllers must not warn as controlled inputs: %+v", got)
+	}
+}
+
 func TestEventAndRefDiagnostics(t *testing.T) {
 	src := `export default function App() {
   return <div>

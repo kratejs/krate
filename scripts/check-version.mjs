@@ -14,6 +14,7 @@ const manifests = [
   "packages/components/package.json",
   "packages/plugin/package.json",
   "packages/base-docs-theme/package.json",
+  "packages/simple-docs-theme/package.json",
   "packages/create-krate-app/package.json",
   "packages/create-krate-docs/package.json",
 ];

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
@@ -99,6 +100,12 @@ func checkEventsAndForms(el *ast.JSXElement, report eventFormReporter) {
 		}
 		attrs[a.Name] = a
 	}
+	// CSS-signal controllers are generated, compiler-owned inputs. Their
+	// checked state is driven by :has() rules, so the controlled-input
+	// warnings do not apply.
+	if isCSSSignalController(attrs) {
+		return
+	}
 	at := func(a *ast.JSXAttr) ast.Pos {
 		if a.Position.Line == 0 {
 			return el.Position
@@ -180,6 +187,25 @@ func checkEventsAndForms(el *ast.JSXElement, report eventFormReporter) {
 				"add onChange to update the state, use "+pair[1]+" for an uncontrolled field, or set readOnly")
 		}
 	}
+}
+
+// isCSSSignalController reports whether the element is a generated hidden
+// controller for a CSS signal scope.
+func isCSSSignalController(attrs map[string]*ast.JSXAttr) bool {
+	class := attrs["class"]
+	if class == nil || class.Value == nil {
+		return false
+	}
+	lit, ok := class.Value.(*ast.Literal)
+	if !ok || lit.Kind != ast.StringLit {
+		return false
+	}
+	for _, name := range strings.Fields(lit.Value) {
+		if name == csssignals.HiddenClass {
+			return true
+		}
+	}
+	return false
 }
 
 // shadowedFormDefault reports a defaultValue/defaultChecked that is ignored

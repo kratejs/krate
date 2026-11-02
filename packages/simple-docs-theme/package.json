@@ -1,0 +1,44 @@
+{
+  "name": "@krate/simple-docs-theme",
+  "version": "0.1.0",
+  "description": "A zero-JS Krate docs theme built on CSS signals and native HTML disclosures.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "homepage": "https://krate.js.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kratejs/krate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kratejs/krate/issues"
+  },
+  "keywords": [
+    "krate",
+    "docs",
+    "theme",
+    "zero-js",
+    "css-signals",
+    "ssg"
+  ],
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./layout": "./src/layout.tsx",
+    "./chrome": "./src/chrome.tsx",
+    "./theme.css": "./src/theme.css"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@krate/plugin": "workspace:*",
+    "@krate/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

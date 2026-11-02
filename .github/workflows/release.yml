@@ -122,7 +122,7 @@ jobs:
       - name: Publish npm packages
         run: |
           set -e
-          for dir in packages/runtime packages/components packages/plugin packages/base-docs-theme packages/create-krate-app packages/create-krate-docs packages/core; do
+          for dir in packages/runtime packages/components packages/plugin packages/base-docs-theme packages/simple-docs-theme packages/create-krate-app packages/create-krate-docs packages/core; do
             echo "Publishing $(basename "$dir") with tag ${{ steps.tag.outputs.dist_tag }}..."
             (cd "$dir" && pnpm publish --access public --no-git-checks --tag "${{ steps.tag.outputs.dist_tag }}")
           done
@@ -183,6 +183,7 @@ jobs:
             printf -- '- `@krate/components@%s`\n' "${VERSION}"
             printf -- '- `@krate/plugin@%s`\n' "${VERSION}"
             printf -- '- `@krate/base-docs-theme@%s`\n' "${VERSION}"
+            printf -- '- `@krate/simple-docs-theme@%s`\n' "${VERSION}"
             printf -- '- `@krate/create-krate-app@%s`\n' "${VERSION}"
             printf -- '- `@krate/create-krate-docs@%s`\n' "${VERSION}"
             printf -- '- `@krate/core-win32-x64@%s`\n' "${VERSION}"
