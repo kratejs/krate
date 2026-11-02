@@ -160,6 +160,21 @@ function asyncInSyncRender(where: string): Error {
   );
 }
 
+function isClassComponent(fn: any): boolean {
+  return typeof fn === "function" && fn.prototype && typeof fn.prototype.render === "function";
+}
+
+function classFallback(type: any, instance: any, error: unknown): unknown {
+  if (typeof type.getDerivedStateFromError !== "function") throw error;
+  instance.state = { ...(instance.state || {}), ...(type.getDerivedStateFromError(error) || {}) };
+  try {
+    if (typeof instance.componentDidCatch === "function") instance.componentDidCatch(error, { componentStack: "" });
+  } catch {
+    // A throwing componentDidCatch must not hide the original render error.
+  }
+  return instance.render();
+}
+
 function renderNode(node: JSXNode): string {
   if (node == null || node === false) return "";
   if (isThenable(node)) throw asyncInSyncRender("A child value");
@@ -286,6 +301,14 @@ async function resolveTree(node: unknown): Promise<JSXNode> {
     );
     callProps = { ...Object.fromEntries(entries), children: await resolveTree(children) };
   }
+  if (isClassComponent(fn)) {
+    const instance = new fn(callProps);
+    try {
+      return await resolveTree(instance.render());
+    } catch (error) {
+      return resolveTree(classFallback(fn, instance, error));
+    }
+  }
   let out: unknown = fn(callProps);
   if (isThenable(out)) out = await out;
   return resolveTree(out);
@@ -296,6 +319,14 @@ function renderElement(el: JSXElement): string {
 
   // Component
   if (typeof type === "function") {
+    if (isClassComponent(type)) {
+      const instance = new (type as any)({ ...props, children });
+      try {
+        return renderNode(instance.render());
+      } catch (error) {
+        return renderNode(classFallback(type, instance, error) as JSXNode);
+      }
+    }
     const result = type({ ...props, children });
     if (isThenable(result)) throw asyncInSyncRender(`<${componentName(type)}>`);
     return renderNode(result);

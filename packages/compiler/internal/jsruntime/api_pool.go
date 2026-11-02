@@ -227,12 +227,13 @@ func apiInvokeJS(routeID, method string) string {
 			try {
 				var ns = globalThis.__krate_modules ? globalThis.__krate_modules[%s] : null;
 				if (!ns) return JSON.stringify({ status: 500, body: '', error: 'API route module not loaded' });
-				var fn = ns[%s] || ns['__default'] || ns['default'];
+				var named = ns[%s];
+				var fn = named || ns['__default'] || ns['default'];
 				if (typeof fn !== 'function') return JSON.stringify({ status: 500, body: '', error: 'API route must export a handler function' });
 				globalThis.__krate_err = '';
 				globalThis.__krate_result = undefined;
 				var raw = JSON.parse(__krate_req);
-				return (fn.length >= 2) ? __krate_legacy(fn, raw) : __krate_modern(fn, raw);
+				return (fn.length >= 2 && !named) ? __krate_legacy(fn, raw) : __krate_modern(fn, raw);
 			} catch (e) {
 				return JSON.stringify({ status: 500, body: '', error: e.message });
 			}
@@ -287,7 +288,7 @@ function __krate_modern(fn, raw){
 		json: function(){ try { return JSON.parse(raw.body || '{}'); } catch (e) { return {}; } },
 		text: function(){ return raw.body || ''; }
 	};
-	var result = fn(request);
+	var result = fn(request, { params: raw.params || {} });
 	if (result && typeof result.then === 'function') {
 		result.then(function(v){ globalThis.__krate_result = v; globalThis.__krate_err = ''; },
 			function(e){ globalThis.__krate_err = (e && e.message) ? e.message : 'Promise rejected'; });

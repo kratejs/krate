@@ -152,6 +152,49 @@ func TestStreamRegionPageSplicesFrames(t *testing.T) {
 	}
 }
 
+func TestStreamRegionPageOutOfOrderSiblingFrames(t *testing.T) {
+	absOut := t.TempDir()
+	route := "/stream"
+	shell := "<!DOCTYPE html><html><body><div id=root>" +
+		"<!--suspense:A--><span>loading A</span><!--/suspense:A-->" +
+		"<!--suspense:B--><span>loading B</span><!--/suspense:B-->" +
+		"</div><script src=/app.js></script></body></html>"
+	rel := filepath.Join(absOut, "stream", "index.html")
+	if err := os.MkdirAll(filepath.Dir(rel), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rel, []byte(shell), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// B resolves first even though A appears first in the document.
+	sidecar := newFakeRegionsSidecar(t, []string{
+		`{"type":"region","id":"B","status":200,"html":"<p>B ready</p>"}`,
+		`{"type":"region","id":"A","status":200,"html":"<p>A ready</p>"}`,
+		`{"type":"end","count":2}`,
+	})
+	rec := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
+	rr := streamRegionPageMode(rec, rec, newRegionShellCache(), absOut, route, sidecar.port, nil, nil, nil, nil, nil, false, 0, "", true)
+	if !rr.served {
+		t.Fatal("streamRegionPageMode returned served=false")
+	}
+	out := rec.Body.String()
+	bAt := strings.Index(out, `var id="B"`)
+	aAt := strings.Index(out, `var id="A"`)
+	if bAt < 0 || aAt < 0 {
+		t.Fatalf("missing streamed region scripts:\n%s", out)
+	}
+	if bAt > aAt {
+		t.Fatalf("frames must be emitted in completion order (B before A):\n%s", out)
+	}
+	appAt := strings.Index(out, `<script src=/app.js>`)
+	if appAt < 0 || appAt < aAt {
+		t.Fatalf("page scripts must be deferred until after region chunks:\n%s", out)
+	}
+	if !strings.Contains(out, "loading A") || !strings.Contains(out, "loading B") {
+		t.Fatalf("shell fallbacks should be streamed before replacements:\n%s", out)
+	}
+}
+
 func TestStreamRegionPageCoarsePageRegion(t *testing.T) {
 	absOut := t.TempDir()
 	// Dynamic-route ISR/SSR pages: the Go handler resolves the concrete URL

@@ -102,10 +102,11 @@ async/class page defaults with `generateMetadata`, `getStaticProps`/
 layouts (move the data fetching into an async child component), `next/cache`
 exports without an equivalent (`updateTag`, `cacheLife`, `cacheTag`, `"use cache"`),
 route segment config without an equivalent (`runtime`, `preferredRegion`,
-`fetchCache`, `maxDuration`), `useParams`/`useSelectedLayoutSegment(s)`, a
-`default.tsx` outside a parallel-route slot, nested `not-found`, unresolved
-relative imports, and function/plugin `next.config.*` files are not rewritten
-automatically. Resolve those before running `krate build`.
+`fetchCache`, `maxDuration`), a `default.tsx` outside a parallel-route slot, nested
+`not-found`, unresolved relative imports, and function/plugin
+`next.config.*` files are not rewritten automatically. Resolve those before
+running `krate build`. `useParams` and
+`useSelectedLayoutSegment(s)` are generated from the migrated navigation helper.
 
 Client components rendered inside async server components hydrate with Preact:
 `--update-package` adds it, otherwise install `preact`.

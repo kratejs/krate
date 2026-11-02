@@ -1215,9 +1215,9 @@ const server = http.createServer(async (req, res) => {
         // Unknown region id - keep the baked content by sending no frame.
         return Promise.resolve({ type: "skip", id: r.id });
       });
-      for (const p of pending) {
-        writeJsonLine(res, await p);
-      }
+      // Write each frame as soon as it resolves. Async server components finish
+      // out of document order, and the Go host inserts each chunk at its marker.
+      await Promise.all(pending.map(async (p) => writeJsonLine(res, await p)));
       writeJsonLine(res, { type: "end", count: regions.length });
     } catch (err: any) {
       console.error("[krate-ssr] Error in /__krate/regions:", err.message);

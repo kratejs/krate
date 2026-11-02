@@ -2,9 +2,31 @@ package build
 
 import (
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestAPISidecarScriptsParse(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	for name, script := range map[string]string{
+		"node": apiServerScriptContent,
+		"bun":  apiServerBunScriptContent,
+	} {
+		path := filepath.Join(t.TempDir(), name+".mjs")
+		if err := os.WriteFile(path, []byte(script), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command(node, "--check", path).CombinedOutput(); err != nil {
+			t.Errorf("%s API sidecar does not parse: %v\n%s", name, err, out)
+		}
+	}
+}
 
 func TestSameOriginActionRequest(t *testing.T) {
 	cases := []struct {

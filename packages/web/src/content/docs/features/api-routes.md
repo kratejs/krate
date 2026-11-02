@@ -67,6 +67,20 @@ export async function POST(request: Request) {
 }
 ```
 
+A route file also receives the dynamic route segments as a second argument,
+matching Next.js route handlers:
+
+```typescript
+// src/api/users/[id].ts
+export async function GET(request: Request, context: { params: { id: string } }) {
+  return Response.json({ id: context.params.id });
+}
+```
+
+`[...slug]` and optional `[[...slug]]` segments are passed as slash-joined
+strings. A default export with two parameters keeps the Node-style
+`(req, res)` signature.
+
 ### Legacy pattern: default export
 
 ```typescript

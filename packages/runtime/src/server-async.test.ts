@@ -94,6 +94,25 @@ describe('renderToStringAsync', () => {
     }
     await expect(renderToStringAsync(jsx('div', { children: jsx(Boom, {}) }))).rejects.toThrow('db down');
   });
+
+  it('renders a class error boundary around a failing async server component', async () => {
+    class Boundary {
+      props: any;
+      state = { error: null as Error | null };
+      constructor(props: any) { this.props = props; }
+      static getDerivedStateFromError(error: Error) { return { error }; }
+      render() {
+        if (this.state.error) return jsx('p', { children: 'fallback: ' + this.state.error.message });
+        return this.props.children;
+      }
+    }
+    async function Boom() {
+      await tick();
+      throw new Error('server boom');
+    }
+    const html = await renderToStringAsync(jsx(Boundary, { children: jsx(Boom, {}) }));
+    expect(html).toContain('fallback: server boom');
+  });
 });
 
 describe('renderToString with async components', () => {

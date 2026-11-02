@@ -84,6 +84,9 @@ func TestAsyncServerComponentSidecarE2E(t *testing.T) {
 
 	b, root := scProject(t, map[string]string{
 		"src/api.ts": `export const API = ` + fmt.Sprintf("%q", apiSrv.URL) + `;`,
+		"src/actions/save.ts": `"use server";
+export async function save(formData: FormData) { return { title: formData.get("title") }; }
+`,
 		"src/Comments.tsx": `import { API } from './api';
 export async function Comments({ slug }: any) {
   const list = await fetch(API + "/comments/" + slug).then((r: any) => r.json());
@@ -92,6 +95,7 @@ export async function Comments({ slug }: any) {
 		"src/pages/post/[slug].tsx": `import { cookies, notFound, redirect } from '@krate/runtime/server';
 import { API } from '../../api';
 import { Comments } from '../../Comments';
+import { save } from '../../actions/save';
 export default async function Post({ params, searchParams }: any) {
   const { slug } = await params;
   const { view } = await searchParams;
@@ -106,6 +110,7 @@ export default async function Post({ params, searchParams }: any) {
     <p class="view">{view}</p>
     <p class="sid">{jar.get("sid")?.value}</p>
     <Comments slug={slug} />
+    <form action={save}><input name="title" /><button type="submit">Save</button></form>
   </article>;
 }`,
 		"src/pages/feed.tsx": `import { Comments } from '../Comments';
@@ -148,6 +153,8 @@ export default function Feed() {
 		`<p class="view">full</p>`,
 		`<p class="sid">abc123</p>`,
 		"<li>first on hello</li><li>second</li>",
+		"/__krate/action/",
+		"data-krate-action",
 	} {
 		if !strings.Contains(ok.HTML, want) {
 			t.Errorf("async page HTML missing %q:\n%s", want, ok.HTML)

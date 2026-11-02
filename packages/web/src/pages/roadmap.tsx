@@ -132,10 +132,10 @@ const MIGRATION_PHASES = [
   },
   {
     id: "N4",
-    tone: "now",
-    status: "In progress",
+    tone: "gate",
+    status: "Complete",
     title: "Actions, RSC, and route handlers",
-    body: "Server actions and revalidation are mapped; remaining are form actions in server components, route handler edge cases, error boundaries around server components, true out-of-order streaming, and useParams/useSelectedLayoutSegment.",
+    body: "Server actions, form actions in server components, route-handler params and NextRequest/NextResponse helpers, server-component error boundaries, out-of-order sibling Suspense streaming, and useParams/useSelectedLayoutSegment(s) are implemented.",
     exit: "Forms and mutations work without a client-side React runtime; unsupported RSC features are reported.",
   },
   {

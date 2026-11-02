@@ -44,6 +44,9 @@ export default function FeedbackPage() {
   `actionUrl` and `toString()` that returns it, so SSR renders the endpoint --
   including through a component prop -- without executing the action.
   `action.bind(null, id)` returns another proxy with `id` as its first argument.
+The same form works inside an async server component: the action is rendered
+as a native POST target and the page still needs no client React runtime.
+
 - `<form action={saveFeedback}>` is rendered as:
 
   ```html

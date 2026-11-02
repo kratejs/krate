@@ -256,6 +256,27 @@ function POST(request) {
 	}
 }
 
+func TestAPIRouteReceivesNextParamsContext(t *testing.T) {
+	tmpDir := t.TempDir()
+	apiDir := filepath.Join(tmpDir, "api")
+	if err := os.MkdirAll(filepath.Join(apiDir, "items"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	routeCode := `
+async function GET(request, context) {
+	return Response.json({ id: context.params.id });
+}
+`
+	if err := os.WriteFile(filepath.Join(apiDir, "items", "[id].js"), []byte(routeCode), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rt := NewAPIRouteRuntime(apiDir)
+	result := rt.Execute(APIRequest{Method: "GET", Path: "/api/items/42"})
+	if result.Status != 200 || result.Body != `{"id":"42"}` {
+		t.Fatalf("params context: status=%d body=%s error=%s", result.Status, result.Body, result.Error)
+	}
+}
+
 func TestAPIRouteDefaultExport(t *testing.T) {
 	tmpDir := t.TempDir()
 	apiDir := filepath.Join(tmpDir, "api")

@@ -59,6 +59,31 @@ export function useSearchParams(): URLSearchParams {
   return new URLSearchParams(useNavigation().search);
 }
 
+function pathSegments(pathname: string): string[] {
+  return pathname.split("/").filter(Boolean).map((segment) => {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment;
+    }
+  });
+}
+
+export function useParams<T extends Record<string, string | string[]> = Record<string, string | string[]>>(): T {
+  useNavigation();
+  const g = globalThis as { __KRATE_PARAMS__?: T };
+  return (g.__KRATE_PARAMS__ || ({} as T));
+}
+
+export function useSelectedLayoutSegments(): string[] {
+  return pathSegments(usePathname());
+}
+
+export function useSelectedLayoutSegment(): string | null {
+  const segments = useSelectedLayoutSegments();
+  return segments.length > 0 ? segments[0] : null;
+}
+
 export function useRouter() {
   return {
     push: (url: string, options?: { scroll?: boolean }) => { void krateRouter.push(url, options); },
@@ -103,11 +128,6 @@ func rewriteNextModuleImports(rep *Report, root string) {
 				needNavigationServer = true
 				f.Rewrites = append(f.Rewrites, "rewrote next/navigation server helpers to "+relativeModulePath(f.Target, nextNavigationServerHelper))
 				f.Dependencies = append(f.Dependencies, nextNavigationServerHelper)
-			}
-			for _, unsupported := range []string{"useParams", "useSelectedLayoutSegment", "useSelectedLayoutSegments"} {
-				if strings.Contains(src, unsupported) {
-					rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: unsupported + " from next/navigation needs manual migration", Hint: "use route params/404 handling explicitly"})
-				}
 			}
 		}
 		if strings.Contains(src, "next/dynamic") {
@@ -280,10 +300,16 @@ func relativeModulePath(fromTarget, toTarget string) string {
 func rewriteAPIServerSource(src string) (string, []string, []string) {
 	var rewrites, manual []string
 	src = nextRequestType.ReplaceAllString(src, "Request")
-	src = strings.ReplaceAll(src, "NextResponse.redirect(", "Response.redirect(")
-	src = strings.ReplaceAll(src, "NextResponse.json(", "Response.json(")
 	if strings.Contains(src, "NextResponse.rewrite") {
 		manual = append(manual, "NextResponse.rewrite needs a manual API response")
+	}
+	if strings.Contains(src, "NextResponse.next") {
+		manual = append(manual, "NextResponse.next has no API-route equivalent; return a Response")
+	}
+	for _, prop := range []string{".nextUrl", ".ip", ".geo", ".cookies"} {
+		if strings.Contains(src, "request"+prop) || strings.Contains(src, "req"+prop) {
+			manual = append(manual, "NextRequest"+prop+" is not available on a standard Request")
+		}
 	}
 	importFailed := false
 	src = nextServerImport.ReplaceAllStringFunc(src, func(line string) string {
@@ -303,7 +329,7 @@ func rewriteAPIServerSource(src string) (string, []string, []string) {
 		return ""
 	})
 	if strings.Contains(src, "NextResponse") && !importFailed {
-		src = "const NextResponse = {\n  redirect: (url: string | URL, init?: ResponseInit) => Response.redirect(url, init),\n  json: (body: any, init?: ResponseInit) => Response.json(body, init),\n};\n\n" + src
+		src = "const NextResponse = {\n  redirect: (url: string | URL, init?: ResponseInit) => {\n    const headers = new Headers(init && init.headers);\n    headers.set(\"location\", String(url));\n    return new Response(null, { status: (init && init.status) || 307, headers });\n  },\n  json: (body: any, init?: ResponseInit) => Response.json(body, init),\n};\n\n" + src
 		rewrites = append(rewrites, "added NextResponse API shim")
 	}
 	return src, rewrites, manual

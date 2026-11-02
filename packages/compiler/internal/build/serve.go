@@ -71,6 +71,76 @@ if (MIDDLEWARE_PATH && fs.existsSync(MIDDLEWARE_PATH)) {
   }
 }
 
+function routeParams(file, segments) {
+  const rel = path.relative(API_DIR, file).replace(/\.[^.]+$/, '');
+  let fileSegs = rel.split(path.sep);
+  if (fileSegs[fileSegs.length - 1] === 'index') fileSegs = fileSegs.slice(0, -1);
+  const params = {};
+  for (let i = 0; i < fileSegs.length; i++) {
+    const seg = fileSegs[i];
+    if (seg.startsWith('[[...') && seg.endsWith(']]')) {
+      if (i < segments.length) params[seg.slice(5, -2)] = segments.slice(i).join('/');
+      return params;
+    }
+    if (seg.startsWith('[...') && seg.endsWith(']')) {
+      params[seg.slice(4, -1)] = segments.slice(i).join('/');
+      return params;
+    }
+    if (seg.startsWith('[') && seg.endsWith(']')) {
+      if (i < segments.length) params[seg.slice(1, -1)] = segments[i];
+    }
+  }
+  return params;
+}
+
+function isDynamicSegment(name) {
+  return name.startsWith('[') && name.endsWith(']') && !name.startsWith('[...') && !name.startsWith('[[...');
+}
+function isCatchAllSegment(name) {
+  return name.startsWith('[...') || name.startsWith('[[...');
+}
+function resolveDynamicFile(dir, segments, exts) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+  if (segments.length === 0) {
+    for (const ext of exts) {
+      const index = path.join(dir, 'index' + ext);
+      if (fs.existsSync(index)) return index;
+    }
+    return null;
+  }
+  if (segments.length > 0) {
+    const next = path.join(dir, segments[0]);
+    try {
+      if (fs.statSync(next).isDirectory()) {
+        const hit = resolveDynamicFile(next, segments.slice(1), exts);
+        if (hit) return hit;
+      }
+    } catch {}
+  }
+  for (const entry of entries) {
+    const name = entry.name;
+    const full = path.join(dir, name);
+    if (entry.isDirectory()) {
+      if (isCatchAllSegment(name) && segments.length > 0) {
+        for (const ext of exts) {
+          const index = path.join(full, 'index' + ext);
+          if (fs.existsSync(index)) return index;
+        }
+      }
+      if (isDynamicSegment(name) && segments.length > 0) {
+        const hit = resolveDynamicFile(full, segments.slice(1), exts);
+        if (hit) return hit;
+      }
+      continue;
+    }
+    const base = name.replace(/\.[^.]+$/, '');
+    if (isCatchAllSegment(base) && (segments.length > 0 || base.startsWith('[[...'))) return full;
+    if (segments.length === 1 && isDynamicSegment(base)) return full;
+  }
+  return null;
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const urlObj = new URL(req.url, "http://" + req.headers.host);
@@ -185,6 +255,7 @@ const server = http.createServer(async (req, res) => {
           break;
         }
       }
+      if (!targetFile) targetFile = resolveDynamicFile(API_DIR, cleanRel, extensions);
       fileCache.set(cleanKey, targetFile);
     }
 
@@ -202,15 +273,17 @@ const server = http.createServer(async (req, res) => {
     const method = req.method.toUpperCase();
 
     // Check for named method exports (GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD)
-    const methodHandler = routeModule[method] || routeModule.default;
+    const namedHandler = routeModule[method];
+    const methodHandler = namedHandler || routeModule.default;
+    const routeParamsValue = routeParams(targetFile, cleanRel);
 
     if (typeof methodHandler === 'function') {
       // Modern pattern: check if function expects Request (web standard API)
       const fnStr = methodHandler.toString();
       const argCount = methodHandler.length;
       
-      if (argCount <= 1) {
-        // Web standard API: handler(request) => Response
+      if (namedHandler || argCount <= 1) {
+        // Web standard API: handler(request, { params }) => Response
         const headers = {};
         for (const [key, value] of Object.entries(req.headers)) {
           headers[key] = Array.isArray(value) ? value.join(', ') : value;
@@ -232,7 +305,7 @@ const server = http.createServer(async (req, res) => {
         });
         
         const revalidateScope = newRevalidateScope('api');
-        const response = await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(request));
+        const response = await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(request, { params: routeParamsValue }));
         // revalidatePath/revalidateTag calls are applied before responding.
         await flushRevalidate(revalidateScope);
         
@@ -379,6 +452,7 @@ function resolveFile(clean) {
     const indexCheck = path.join(API_DIR, ...clean, 'index' + ext);
     if (fs.existsSync(indexCheck)) { target = indexCheck; break; }
   }
+  if (!target) target = resolveDynamicFile(API_DIR, clean, exts);
   fileCache.set(key, target);
   return target;
 }
@@ -458,6 +532,76 @@ async function legacyInvoke(fn, req, url) {
   });
 }
 
+function routeParams(file, segments) {
+  const rel = path.relative(API_DIR, file).replace(/\.[^.]+$/, '');
+  let fileSegs = rel.split(path.sep);
+  if (fileSegs[fileSegs.length - 1] === 'index') fileSegs = fileSegs.slice(0, -1);
+  const params = {};
+  for (let i = 0; i < fileSegs.length; i++) {
+    const seg = fileSegs[i];
+    if (seg.startsWith('[[...') && seg.endsWith(']]')) {
+      if (i < segments.length) params[seg.slice(5, -2)] = segments.slice(i).join('/');
+      return params;
+    }
+    if (seg.startsWith('[...') && seg.endsWith(']')) {
+      params[seg.slice(4, -1)] = segments.slice(i).join('/');
+      return params;
+    }
+    if (seg.startsWith('[') && seg.endsWith(']')) {
+      if (i < segments.length) params[seg.slice(1, -1)] = segments[i];
+    }
+  }
+  return params;
+}
+
+function isDynamicSegment(name) {
+  return name.startsWith('[') && name.endsWith(']') && !name.startsWith('[...') && !name.startsWith('[[...');
+}
+function isCatchAllSegment(name) {
+  return name.startsWith('[...') || name.startsWith('[[...');
+}
+function resolveDynamicFile(dir, segments, exts) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+  if (segments.length === 0) {
+    for (const ext of exts) {
+      const index = path.join(dir, 'index' + ext);
+      if (fs.existsSync(index)) return index;
+    }
+    return null;
+  }
+  if (segments.length > 0) {
+    const next = path.join(dir, segments[0]);
+    try {
+      if (fs.statSync(next).isDirectory()) {
+        const hit = resolveDynamicFile(next, segments.slice(1), exts);
+        if (hit) return hit;
+      }
+    } catch {}
+  }
+  for (const entry of entries) {
+    const name = entry.name;
+    const full = path.join(dir, name);
+    if (entry.isDirectory()) {
+      if (isCatchAllSegment(name) && segments.length > 0) {
+        for (const ext of exts) {
+          const index = path.join(full, 'index' + ext);
+          if (fs.existsSync(index)) return index;
+        }
+      }
+      if (isDynamicSegment(name) && segments.length > 0) {
+        const hit = resolveDynamicFile(full, segments.slice(1), exts);
+        if (hit) return hit;
+      }
+      continue;
+    }
+    const base = name.replace(/\.[^.]+$/, '');
+    if (isCatchAllSegment(base) && (segments.length > 0 || base.startsWith('[[...'))) return full;
+    if (segments.length === 1 && isDynamicSegment(base)) return full;
+  }
+  return null;
+}
+
 Bun.serve({
   port: PORT,
   hostname: '127.0.0.1',
@@ -486,11 +630,13 @@ Bun.serve({
     if (!file) return json({ error: 'API Route Not Found: ' + urlPath }, 404);
     let mod;
     try { mod = await loadModule(file); } catch (e) { return json({ error: 'Internal Server Error', details: e.message }, 500); }
-    const fn = mod[req.method.toUpperCase()] || mod.default;
+    const namedHandler = mod[req.method.toUpperCase()];
+    const fn = namedHandler || mod.default;
     if (typeof fn !== 'function') return json({ error: 'API route must export a handler function (GET, POST, etc. or default).' }, 500);
+    const routeParamsValue = routeParams(file, clean);
     try {
       const revalidateScope = newRevalidateScope('api');
-      const out = await REVALIDATE_STORE.run(revalidateScope, async () => (fn.length >= 2 ? legacyInvoke(fn, req, url) : toResponse(await fn(req))));
+      const out = await REVALIDATE_STORE.run(revalidateScope, async () => ((fn.length >= 2 && !namedHandler) ? legacyInvoke(fn, req, url) : toResponse(await fn(req, { params: routeParamsValue }))));
       // revalidatePath/revalidateTag calls are applied before responding.
       await flushRevalidate(revalidateScope);
       return out;
@@ -690,6 +836,10 @@ func parseRegionShell(shell string) *regionShell {
 // replaces the whole baked body. Returns the page-region result (served=false
 // when the shell had no region markers and the caller should use another path).
 func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string) regionPageResult {
+	return streamRegionPageMode(w, flusher, shells, absOut, route, ssrPort, params, query, headers, goRenders, renderGo, isISR, revalidate, internalSecret, false)
+}
+
+func streamRegionPageMode(w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string, outOfOrder bool) regionPageResult {
 	res := regionPageResult{}
 	relPath := strings.TrimPrefix(route, "/")
 	if relPath == "" {
@@ -732,6 +882,14 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, shells *regio
 			kind = "page"
 		}
 		regionList = append(regionList, map[string]string{"id": b.id, "kind": kind})
+	}
+
+	// Sibling Suspense regions can stream as they finish. The shell is written
+	// first and each region chunk inserts itself at its marker, so a slow region
+	// never holds up the rest of the page. Page/ISR and nested regions keep the
+	// ordered assembly path because they carry status or contain child markers.
+	if outOfOrder && !isISR && canStreamOutOfOrder(all) {
+		return streamSiblingRegions(w, flusher, shell, regionList, goReq, renderGo, string(reqCtx), ssrPort, route, params, query, headers, internalSecret)
 	}
 
 	// Only involve the Node SSR sidecar when it has something to render. A page
@@ -1632,7 +1790,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		if ssrStarted {
 			regionPort = ssrPort
 		}
-		rr := streamRegionPage(w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo, isISR, reval, ssr.InternalSecret())
+		outOfOrder := page != nil && page.Mode == RenderStreaming.String() && !page.ServerComponents
+		rr := streamRegionPageMode(w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo, isISR, reval, ssr.InternalSecret(), outOfOrder)
 		if rr.served && rr.fatalErr != "" {
 			// A server component failed: there is no meaningful baked body to
 			// fall back to, so answer 500 (the custom 500 page when present).

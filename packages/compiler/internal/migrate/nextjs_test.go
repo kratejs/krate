@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) { return NextResponse.json({ ok: tru
 
 	page := findPlan(rep, "src/pages/index.tsx")
 	if page == nil {
-		t.Fatal("index page missing")
+		t.Fatal("page missing")
 	}
 	if !strings.Contains(string(page.Content), "use client") {
 		t.Errorf("use client directive must be kept:\n%s", page.Content)
@@ -108,8 +108,8 @@ export async function GET(req: NextRequest) { return NextResponse.json({ ok: tru
 	if strings.Contains(string(layout.Content), "<html") || strings.Contains(string(layout.Content), "<body") {
 		t.Errorf("document shell not stripped:\n%s", layout.Content)
 	}
-	if !hasManual(rep, "app/api/hello/route.ts", "NextRequest") {
-		t.Errorf("NextRequest manual item missing: %+v", rep.Manual)
+	if hasManual(rep, "app/api/hello/route.ts", "NextRequest") {
+		t.Errorf("standard NextRequest should be rewritten, not manual: %+v", rep.Manual)
 	}
 	if !hasWarning(rep, "translated static next.config") {
 		t.Errorf("next.config translation warning missing: %+v", rep.Warnings)
@@ -748,21 +748,24 @@ export default function ErrorPage({ error, reset }: any) { return <button onClic
 
 func TestNextNavigationAndHeadersModuleRewrites(t *testing.T) {
 	root := t.TempDir()
-	writeNextFile(t, root, "app/page.tsx", `import { usePathname, useRouter, useSearchParams } from "next/navigation";
+	writeNextFile(t, root, "app/[slug]/page.tsx", `import { useParams, usePathname, useRouter, useSearchParams, useSelectedLayoutSegment, useSelectedLayoutSegments } from "next/navigation";
 import { cookies, headers } from "next/headers";
 export default function Page() {
   const path = usePathname();
   const router = useRouter();
   const params = useSearchParams();
+  const routeParams = useParams();
+  const segment = useSelectedLayoutSegment();
+  const segments = useSelectedLayoutSegments();
   const sid = cookies().get("sid");
   const ua = headers().get("user-agent");
-  return <h1 onClick={() => router.push("/x")}>{path}{params.get("q")}{sid}{ua}</h1>;
+  return <h1 onClick={() => router.push("/x")}>{path}{params.get("q")}{routeParams.slug}{segment}{segments.join("/")}{sid}{ua}</h1>;
 }`)
 	rep, err := ScanNext(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := findPlan(rep, "src/pages/index.tsx")
+	page := findPlan(rep, "src/pages/[slug].tsx")
 	if page == nil {
 		t.Fatal("page missing")
 	}
@@ -774,8 +777,25 @@ export default function Page() {
 		t.Errorf("next/headers not rewritten:\n%s", body)
 	}
 	helper := findPlan(rep, "src/migrated/next-navigation.ts")
-	if helper == nil || !strings.Contains(string(helper.Content), "export function usePathname") {
+	if helper == nil {
 		t.Fatalf("navigation helper missing: %+v", helper)
+	}
+	for _, want := range []string{
+		"export function usePathname",
+		"export function useParams",
+		"export function useSelectedLayoutSegment",
+		"export function useSelectedLayoutSegments",
+	} {
+		if !strings.Contains(string(helper.Content), want) {
+			t.Errorf("navigation helper missing %q", want)
+		}
+	}
+	for _, item := range rep.Manual {
+		for _, hook := range []string{"useParams", "useSelectedLayoutSegment", "useSelectedLayoutSegments"} {
+			if strings.Contains(item.Reason, hook) {
+				t.Errorf("navigation hook should be automatic: %+v", item)
+			}
+		}
 	}
 }
 
@@ -863,7 +883,7 @@ export async function GET(request: NextRequest) {
 		t.Fatal("api route missing")
 	}
 	body := string(api.Content)
-	for _, want := range []string{"request: Request", "Response.json", "request.url"} {
+	for _, want := range []string{"request: Request", "const NextResponse = {", "NextResponse.json", "request.url", "headers.set(\"location\""} {
 		if !strings.Contains(body, want) {
 			t.Errorf("api rewrite missing %q:\n%s", want, body)
 		}

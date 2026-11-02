@@ -57,6 +57,56 @@ func TestInternalPortDoesNotHandOutTheSamePortTwice(t *testing.T) {
 // briefly busy port, both standalone (retries the bind) and clustered (the
 // worker exits quietly and the primary respawns it after a delay; relistening
 // in a cluster worker trips a Node assertion on Windows).
+
+func TestAPISidecarNextRouteParams(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		requireE2E(t, "node not available: %v", err)
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "api-server.mjs")
+	if err := os.WriteFile(script, []byte(apiServerScriptContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	apiDir := filepath.Join(dir, "api", "items")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	route := `export async function GET(request, context) {
+  return Response.json({ id: context.params.id });
+}
+`
+	if err := os.WriteFile(filepath.Join(apiDir, "[id].js"), []byte(route), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	port := freePort(t)
+	cmd := exec.Command(node, script, filepath.Join(dir, "api"), strconv.Itoa(port), filepath.Join(dir, "none.js"), filepath.Join(dir, "actions"))
+	var output bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &output
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/api/items/42", port))
+		if err == nil {
+			body := make([]byte, 64)
+			n, _ := resp.Body.Read(body)
+			resp.Body.Close()
+			if got := strings.TrimSpace(string(body[:n])); got != `{"id":"42"}` {
+				t.Fatalf("dynamic API params: got %q\n%s", got, output.String())
+			}
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("API sidecar never served the dynamic route:\n%s", output.String())
+}
+
 func TestAPISidecarRetriesBusyPort(t *testing.T) {
 	for _, workers := range []string{"1", "2"} {
 		t.Run("workers="+workers, func(t *testing.T) {

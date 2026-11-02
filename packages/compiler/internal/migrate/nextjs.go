@@ -525,13 +525,6 @@ func applyManual(src string, kind FileKind) []string {
 	if useCacheDirective.MatchString(src) {
 		out = append(out, `"use cache" is not supported; use revalidate/tags on fetch or unstable_cache`)
 	}
-	if kind == KindAPI {
-		for _, c := range []string{"NextRequest", "NextResponse"} {
-			if strings.Contains(src, c) {
-				out = append(out, "Next.js "+c+" is not available; return a standard Response")
-			}
-		}
-	}
 	return out
 }
 

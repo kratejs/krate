@@ -42,6 +42,9 @@ type APIRequest struct {
 	Path    string            `json:"path"`
 	Headers map[string]string `json:"headers"`
 	Body    string            `json:"body"`
+	// Params are the dynamic route segments ([id], [...slug]), matching the
+	// second argument Next.js route handlers receive.
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // APIResult is the output of an API route handler
@@ -219,6 +222,7 @@ func (a *APIRouteRuntime) Execute(req APIRequest) APIResult {
 		return APIResult{Status: 500, Body: jsonError(err.Error())}
 	}
 
+	req.Params = apiRouteParams(a.apiDir, targetFile, req.Path)
 	reqJSON, _ := json.Marshal(req)
 	if err := worker.rt.SetGlobal("__krate_req", string(reqJSON)); err != nil {
 		return APIResult{Status: 500, Body: jsonError(err.Error())}
@@ -294,6 +298,62 @@ func (a *APIRouteRuntime) ResolveFile(reqPath string) string {
 	return filepath.ToSlash(rel)
 }
 
+// apiRouteParams extracts dynamic segments from a request path using the
+// matched route file ([id], [...slug], [[...slug]]).
+func apiRouteParams(apiDir, file, reqPath string) map[string]string {
+	rel, err := filepath.Rel(apiDir, file)
+	if err != nil || rel == "" {
+		return nil
+	}
+	rel = filepath.ToSlash(rel)
+	rel = strings.TrimSuffix(rel, filepath.Ext(rel))
+	if rel == "index" {
+		rel = ""
+	} else if strings.HasSuffix(rel, "/index") {
+		rel = strings.TrimSuffix(rel, "/index")
+	}
+	fileSegs := strings.Split(strings.Trim(rel, "/"), "/")
+	if rel == "" {
+		fileSegs = nil
+	}
+	rawPath := strings.TrimPrefix(reqPath, "/api")
+	pathSegs := strings.Split(strings.Trim(rawPath, "/"), "/")
+	if rawPath == "" || rawPath == "/" {
+		pathSegs = nil
+	}
+	params := map[string]string{}
+	for i, seg := range fileSegs {
+		switch {
+		case strings.HasPrefix(seg, "[[...") && strings.HasSuffix(seg, "]]"):
+			name := strings.TrimSuffix(strings.TrimPrefix(seg, "[[..."), "]]")
+			if i < len(pathSegs) && len(pathSegs) > i {
+				params[name] = strings.Join(pathSegs[i:], "/")
+			}
+			return params
+		case strings.HasPrefix(seg, "[...") && strings.HasSuffix(seg, "]"):
+			name := strings.TrimSuffix(strings.TrimPrefix(seg, "[..."), "]")
+			params[name] = strings.Join(pathSegs[minInt(i, len(pathSegs)):], "/")
+			return params
+		case strings.HasPrefix(seg, "[") && strings.HasSuffix(seg, "]"):
+			name := strings.TrimSuffix(strings.TrimPrefix(seg, "["), "]")
+			if i < len(pathSegs) {
+				params[name] = pathSegs[i]
+			}
+		}
+	}
+	if len(params) == 0 {
+		return nil
+	}
+	return params
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // resolveAPIFile finds the compiled JS file for a given API path. The path is
 // attacker-controlled (it derives from the request URL), so it is validated
 // before touching the filesystem: any residual percent-encoding is decoded,
@@ -333,7 +393,72 @@ func (a *APIRouteRuntime) resolveAPIFile(relPath string) string {
 		}
 	}
 
+	return a.resolveDynamicAPIFile(strings.Split(relPath, "/"), extensions)
+}
+
+// resolveDynamicAPIFile matches [id], [...slug] and [[...slug]] route files
+// when the literal path does not exist.
+func (a *APIRouteRuntime) resolveDynamicAPIFile(segs, exts []string) string {
+	return a.resolveDynamicAPIDir(a.apiDir, segs, exts)
+}
+
+func (a *APIRouteRuntime) resolveDynamicAPIDir(dir string, segs, exts []string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	if len(segs) == 0 {
+		for _, ext := range exts {
+			if fi, err := os.Stat(filepath.Join(dir, "index"+ext)); err == nil && !fi.IsDir() {
+				return filepath.Join(dir, "index"+ext)
+			}
+		}
+		return ""
+	}
+	if len(segs) > 0 {
+		next := filepath.Join(dir, segs[0])
+		if fi, err := os.Stat(next); err == nil && fi.IsDir() {
+			if p := a.resolveDynamicAPIDir(next, segs[1:], exts); p != "" {
+				return p
+			}
+		}
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		full := filepath.Join(dir, name)
+		if entry.IsDir() {
+			if isCatchAllSegment(name) && len(segs) > 0 {
+				rel, _ := filepath.Rel(a.apiDir, full)
+				for _, ext := range exts {
+					if p := a.containedPath(filepath.Join(rel, "index"), ext); p != "" {
+						return p
+					}
+				}
+			}
+			if isDynamicSegment(name) && len(segs) > 0 {
+				if p := a.resolveDynamicAPIDir(full, segs[1:], exts); p != "" {
+					return p
+				}
+			}
+			continue
+		}
+		base := strings.TrimSuffix(name, filepath.Ext(name))
+		if isCatchAllSegment(base) && (len(segs) > 0 || strings.HasPrefix(base, "[[...")) {
+			return full
+		}
+		if len(segs) == 1 && isDynamicSegment(base) {
+			return full
+		}
+	}
 	return ""
+}
+
+func isDynamicSegment(name string) bool {
+	return strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]") && !strings.HasPrefix(name, "[...") && !strings.HasPrefix(name, "[[...")
+}
+
+func isCatchAllSegment(name string) bool {
+	return strings.HasPrefix(name, "[...") || strings.HasPrefix(name, "[[...")
 }
 
 // containedPath joins apiDir with the given relative path and extension, then

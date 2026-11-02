@@ -130,6 +130,19 @@ Krate signals and event handlers are build errors (`[KR7110]`): add
 reaches a `server-only` module (directly or through its imports) fails the
 build (`[KR7112]`).
 
+## Error boundaries and streaming
+
+A class error boundary around server components catches a failed child render
+and renders its fallback on the server instead of answering 500. The boundary
+receives the error through `getDerivedStateFromError` and may call
+`componentDidCatch` for logging.
+
+Sibling `<Suspense>` regions stream as they finish. The shell and fallbacks are
+sent immediately, each region chunk inserts itself at its marker, and page
+hydration scripts run after every chunk, so a slow region never blocks the rest
+of the page. Nested boundaries and coarse SSR/ISR page regions stay on the
+ordered path because they carry status or contain child markers.
+
 ## Not supported
 
 | Pattern | Result |
@@ -139,8 +152,6 @@ build (`[KR7112]`).
 | Module-level `await` in a page rendered at build time | Build error `[KR7102]` |
 | `async` components in a `"use client"` module | Build error `[KR7113]` |
 | `export * from` in a `"use client"` module | Build error `[KR7114]` |
-| Error boundaries around server components | Not applied on the server: the request answers 500 |
-| Out-of-order streaming of `<Suspense>` fallbacks | The response is sent once every region has rendered |
 | Client-side (SPA) navigation into a page with islands | Not covered: the island loader runs on full page loads |
 
 See the [diagnostics reference](/docs/reference/diagnostics/) for every code.
