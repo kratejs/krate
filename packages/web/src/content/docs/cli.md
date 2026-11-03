@@ -157,12 +157,14 @@ krate migrate nextjs
 krate migrate nextjs ./my-site
 krate migrate nextjs --apply
 krate migrate nextjs --apply --force
+krate migrate nextjs --apply --verify
 krate migrate rollback .krate/migrate/nextjs-20261027-190904
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--apply` | Write the plan atomically |
+| `--verify` | After applying, build, run checks, and diff the route inventory |
 | `--force` | Allow overwriting existing target files |
 | `--update-package` | Add Krate scripts and dependencies to `package.json` |
 | `--report <path>` | Write the plan as JSON before applying |

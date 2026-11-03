@@ -54,6 +54,7 @@ type cliFlags struct {
 	JSON          bool
 	HTTP          bool
 	Apply         bool
+	Verify        bool
 	Force         bool
 	UpdatePackage bool
 	Report        string
@@ -159,7 +160,7 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "Usage: krate fix [dir] [--apply]\n\n")
 		fmt.Fprintf(w, "Apply conservative, parse-gated source fixes. Dry-run by default.\n")
 	case "migrate":
-		fmt.Fprintf(w, "Usage: krate migrate nextjs [dir] [--apply] [--force] [--update-package] [--report <path>]\n")
+		fmt.Fprintf(w, "Usage: krate migrate nextjs [dir] [--apply] [--verify] [--force] [--update-package] [--report <path>]\n")
 		fmt.Fprintf(w, "       krate migrate rollback <backup-dir>\n\n")
 		fmt.Fprintf(w, "Plan or apply a framework migration. Dry-run by default.\n")
 	case "deploy":
@@ -275,6 +276,8 @@ func parseFlags(args []string) (cliFlags, []string) {
 			flags.HTTP = true
 		case args[i] == "--apply":
 			flags.Apply = true
+		case args[i] == "--verify":
+			flags.Verify = true
 		case args[i] == "--force":
 			flags.Force = true
 		case args[i] == "--update-package":

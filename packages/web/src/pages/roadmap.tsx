@@ -143,7 +143,7 @@ const MIGRATION_PHASES = [
     tone: "gate",
     status: "v1 gate",
     title: "Verification and rollback",
-    body: "Run build and check, diff the route inventory, execute browser conformance, and provide backup and rollback for every applied migration.",
+    body: "Verification is implemented: krate migrate nextjs --verify builds the migrated app, runs checks, diffs the route inventory and API targets, and keeps the rollback manifest. App Router, Pages Router, and client/dynamic reference apps are covered, and the complex app runs browser conformance. The v1 gate closes at release.",
     exit: "Three reference apps migrate with build and check green, zero silent drops, and a working rollback.",
   },
 ];
@@ -379,7 +379,7 @@ export default function Roadmap() {
           <h3>Command shape</h3>
           <pre class="roadmap-code"><code>{`krate migrate nextjs --report migration-report.json
 krate migrate nextjs --json
-krate migrate nextjs --apply --force --update-package
+krate migrate nextjs --apply --verify --force --update-package
 krate migrate rollback .krate/migrate/nextjs-<timestamp>`}</code></pre>
           <p class="roadmap-note">
             Dry run is the default. Existing targets require --force, every

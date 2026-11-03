@@ -96,6 +96,19 @@ Every apply writes a rollback manifest under
 krate migrate rollback .krate/migrate/nextjs-<timestamp>
 ```
 
+Add `--verify` to build the migrated app, run `krate check`, and diff the built
+route inventory against the migration report before you accept the migration:
+
+```sh
+krate migrate nextjs --apply --verify
+```
+
+Verification fails on a build error, failing quality gate, missing route, missing
+API target, or extra generated route. It leaves the backup in place so you can
+inspect the diff and roll back. The reference-app suite runs the same check for
+App Router, Pages Router, and client-island/dynamic fixtures; the complex App
+Router fixture also runs the browser conformance suite.
+
 The migrator intentionally reports manual work instead of guessing:
 async/class page defaults with `generateMetadata`, `getStaticProps`/
 `getServerSideProps`, middleware response rewrites, local font files, async

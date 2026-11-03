@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kratejs/krate/packages/compiler/internal/build"
 	"github.com/kratejs/krate/packages/compiler/internal/migrate"
 )
 
@@ -67,23 +68,49 @@ func runMigrateNext(flags cliFlags, args []string) {
 	}
 
 	res, err := migrate.Apply(rep, migrate.ApplyOptions{Force: flags.Force})
-	if flags.JSON {
-		if err != nil {
+	if err != nil {
+		if flags.JSON {
 			fmt.Fprintf(os.Stderr, "%sMigration error:%s %v\n", cRed, cReset, err)
 			os.Exit(1)
 		}
-		writeJSON(struct {
-			Plan   *migrate.Report      `json:"plan"`
-			Result *migrate.ApplyResult `json:"result"`
-		}{Plan: rep, Result: res})
-		return
-	}
-	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sMigration error:%s %v\n", cRed, cReset, err)
 		if len(rep.Manual) > 0 {
 			printMigrationManual(rep)
 		}
 		os.Exit(1)
+	}
+
+	if flags.Verify {
+		ver, verr := build.VerifyMigration(root, rep.Routes, build.MigrationVerifyOptions{})
+		if verr != nil {
+			fmt.Fprintf(os.Stderr, "%sVerification error:%s %v\n", cRed, cReset, verr)
+			os.Exit(1)
+		}
+		if flags.JSON {
+			writeJSON(struct {
+				Plan         *migrate.Report              `json:"plan"`
+				Result       *migrate.ApplyResult         `json:"result"`
+				Verification *build.MigrationVerification `json:"verification"`
+			}{Plan: rep, Result: res, Verification: ver})
+			if !ver.OK() {
+				os.Exit(1)
+			}
+			return
+		}
+		out, ok := build.FormatMigrationVerification(ver)
+		fmt.Print(out)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "\nVerification failed. Keep the backup or roll back with:\n  krate migrate rollback %s\n", res.BackupDir)
+			os.Exit(1)
+		}
+	}
+
+	if flags.JSON {
+		writeJSON(struct {
+			Plan   *migrate.Report      `json:"plan"`
+			Result *migrate.ApplyResult `json:"result"`
+		}{Plan: rep, Result: res})
+		return
 	}
 
 	fmt.Printf("migrate: wrote %d file(s) from %s\n", len(res.Written), rep.Root)
