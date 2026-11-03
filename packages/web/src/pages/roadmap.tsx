@@ -57,7 +57,7 @@ const REACT_PHASES = [
     tone: "gate",
     status: "v1 gate",
     title: "Hardening and release",
-    body: "Version matrix, performance budgets, diagnostics, codemods, and documentation for every documented divergence.",
+    body: "The version matrix is CI-tested, performance budgets are enforced, diagnostic docs and safe codemods are gated, partial compatibility rows document their divergences, and pnpm check:release verifies the whole contract. The v1 gate closes at release.",
     exit: "The matrix is green, budgets are enforced, and migration paths have no silent failures.",
   },
 ];

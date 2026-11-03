@@ -77,6 +77,9 @@ jobs:
       - name: Check package versions
         run: pnpm run check:version
 
+      - name: Check release readiness
+        run: pnpm run check:release
+
       - name: gofmt
         run: |
           unformatted=$(gofmt -l .)

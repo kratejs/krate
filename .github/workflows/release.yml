@@ -106,6 +106,9 @@ jobs:
       - name: Check package versions
         run: pnpm run check:version
 
+      - name: Check release readiness
+        run: pnpm run check:release
+
       - name: Generate platform packages
         run: node scripts/build-platform-packages.mjs
 

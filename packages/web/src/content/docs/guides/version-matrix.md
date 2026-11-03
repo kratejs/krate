@@ -44,3 +44,14 @@ The Node and Bun/Deno jobs run the sidecar transport and
 
 Node is required for sidecars and for JavaScript package tooling. The core
 compiler itself is a single Go binary; static sites do not need Node at runtime.
+
+## Release gate
+
+`pnpm check:release` is the v1 release-readiness gate. It verifies that this
+page names every CI-tested Node, Preact, and browser version; the docs and
+examples define complete performance budgets and CI enforces the hydration
+budget; every diagnostic code has a generated reference entry; the safe codemod
+tests and guides are present; every partial compatibility row has a documented
+divergence; and the three-reference-app migration verification plus rollback
+APIs still exist. CI and the release workflow run it with the other version,
+matrix, roadmap, and docs checks.
