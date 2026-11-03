@@ -97,10 +97,10 @@ const MCP_PHASES = [
   },
   {
     id: "M5",
-    tone: "later",
-    status: "Later",
+    tone: "gate",
+    status: "Complete",
     title: "Agent workflows",
-    body: "Diagnostic repair, refactor, dependency audit, and component scaffold prompts; run_task for build/check/test/typecheck. Migration is deferred. Prompt evaluation remains.",
+    body: "Diagnostic repair, refactor, dependency audit, component scaffold, add-page, publish-content, fix-checks, and explore prompts; run_task for build/check/test/typecheck; and a prompt evaluation suite covering registration, required arguments, defaults, tool order, and safety constraints.",
     exit: "A complete fix, refactor, and check workflow is reviewable and repeatable.",
   },
 ];
@@ -299,7 +299,7 @@ export default function Roadmap() {
               graph.
             </p>
           </div>
-          <span class="roadmap-status roadmap-status-now">In progress</span>
+          <span class="roadmap-status roadmap-status-gate">Complete</span>
         </div>
 
         <div class="roadmap-split">
@@ -309,9 +309,9 @@ export default function Roadmap() {
               <code>krate mcp</code> provides stdio and Streamable HTTP,
               structured results, transactions, undo, safe codemods,
               diagnostics, semantic workspace symbols, project search,
-              pagination, progress, resource subscriptions, prompts,
-              cancellation, a project policy, redacted audit logs, rate limits,
-              and hosted health/metrics.
+              pagination, progress, resource subscriptions, evaluated agent
+              prompts, run_task, cancellation, a project policy, redacted audit
+              logs, rate limits, and hosted health/metrics.
             </p>
           </div>
           <div class="roadmap-panel">

@@ -112,6 +112,9 @@ type PromptArgument struct {
 	Name        string
 	Description string
 	Required    bool
+	// Default substitutes an omitted optional argument so rendered prompts
+	// never leak unresolved {{placeholders}}.
+	Default string
 }
 
 // Prompt is a curated, templated workflow surfaced via prompts/list and
@@ -138,20 +141,25 @@ type completionFn func(ctx context.Context, value string) ([]string, error)
 // render returns the prompt's messages after argument substitution and any
 // dynamic resolution.
 func (p *Prompt) render(args map[string]any) (map[string]any, *rpcError) {
+	values := make(map[string]any, len(args)+len(p.Arguments))
+	for key, value := range args {
+		values[key] = value
+	}
 	for _, arg := range p.Arguments {
-		if !arg.Required {
-			continue
-		}
-		v, ok := args[arg.Name]
-		if !ok || strings.TrimSpace(fmt.Sprint(v)) == "" {
+		v, ok := values[arg.Name]
+		empty := !ok || strings.TrimSpace(fmt.Sprint(v)) == ""
+		if empty && arg.Required {
 			return nil, &rpcError{Code: codeInvalidParams, Message: "missing required prompt argument: " + arg.Name}
+		}
+		if empty && arg.Default != "" {
+			values[arg.Name] = arg.Default
 		}
 	}
 	msgs := make([]PromptMessage, len(p.Messages))
 	copy(msgs, p.Messages)
 	for i, m := range msgs {
 		if m.Content.Type == "text" {
-			msgs[i].Content.Text = renderTemplateText(m.Content.Text, args)
+			msgs[i].Content.Text = renderTemplateText(m.Content.Text, values)
 		}
 	}
 	if p.Resolve != nil {

@@ -1889,15 +1889,15 @@ func (s *Service) promptAddPage() *Prompt {
 		Description: "Add a new page the Krate way: read an existing page for house style, then create_page with the chosen template and content.",
 		Arguments: []PromptArgument{
 			{Name: "route", Description: "Route to create, e.g. /pricing or /blog/[slug]", Required: true},
-			{Name: "title", Description: "Page title for the heading and <title>"},
-			{Name: "template", Description: "static, content-list, detail, or blank"},
-			{Name: "collection", Description: "Content collection backing a content-list/detail page"},
-			{Name: "withLayout", Description: "Create _layout.tsx if missing"},
-			{Name: "apply", Description: "Write the page now (default false: show a diff first)"},
+			{Name: "title", Description: "Page title for the heading and <title>", Default: "the page title"},
+			{Name: "template", Description: "static, content-list, detail, or blank", Default: "static"},
+			{Name: "collection", Description: "Content collection backing a content-list/detail page", Default: "the configured collection"},
+			{Name: "withLayout", Description: "Create _layout.tsx if missing", Default: "false"},
+			{Name: "apply", Description: "Write the page now (default false: show a diff first)", Default: "false"},
 		},
 		Messages: []PromptMessage{{
 			Role:    "user",
-			Content: TextContent("Create a new Krate page at {{route}} using the {{template}} template. First read_page an existing, similar page to match the project's conventions (components, Head/title usage, styling). Then call create_page with the prepared arguments. Unless {{apply}} is true, present the returned diff for approval before writing. After the page exists, run build and check to confirm it compiles and passes the site's quality gates."),
+			Content: TextContent("Create a new Krate page at {{route}} using the {{template}} template, titled {{title}}, with collection {{collection}} and withLayout {{withLayout}}. First read_page an existing, similar page to match the project's conventions (components, Head/title usage, styling). Then call create_page with the prepared arguments. If {{apply}} is \"true\", write after reviewing the diff; otherwise present the returned diff for approval before writing. After the page exists, run build and check to confirm it compiles and passes the site's quality gates."),
 		}},
 	}
 }
@@ -1909,13 +1909,13 @@ func (s *Service) promptPublishContent() *Prompt {
 		Arguments: []PromptArgument{
 			{Name: "collection", Description: "Collection name as configured under content: in krate.config.ts or contributed by a plugin (e.g. docs)", Required: true},
 			{Name: "slug", Description: "Entry slug, e.g. hello-world", Required: true},
-			{Name: "title", Description: "Entry title stored in frontmatter"},
-			{Name: "fields", Description: "Additional frontmatter fields as a JSON object"},
-			{Name: "apply", Description: "Write the entry now (default false: show a diff first)"},
+			{Name: "title", Description: "Entry title stored in frontmatter", Default: "the entry title"},
+			{Name: "fields", Description: "Additional frontmatter fields as a JSON object", Default: "{}"},
+			{Name: "apply", Description: "Write the entry now (default false: show a diff first)", Default: "false"},
 		},
 		Messages: []PromptMessage{{
 			Role:    "user",
-			Content: TextContent("Create a new entry in the {{collection}} content collection with slug {{slug}} and title {{title}}. Use create_content so the frontmatter is validated against the collection schema (read_content or krate://content first to see the schema and house style; add any complex fields under {{fields}}). Unless {{apply}} is true, present the diff before writing."),
+			Content: TextContent("Create a new entry in the {{collection}} content collection with slug {{slug}} and title {{title}}. Use create_content so the frontmatter is validated against the collection schema (read_content or krate://content first to see the schema and house style; add any complex fields under {{fields}}). If {{apply}} is \"true\", write after reviewing the diff; otherwise present the diff before writing."),
 		}},
 	}
 }
@@ -1925,11 +1925,11 @@ func (s *Service) promptFixChecks() *Prompt {
 		Name:        "fix-checks",
 		Description: "Run the quality gates, then fix the worst a11y/SEO/perf findings via apply_fix or apply_patch.",
 		Arguments: []PromptArgument{
-			{Name: "route", Description: "Scope attention to a single route"},
+			{Name: "route", Description: "Scope attention to a single route", Default: "the whole site"},
 		},
 		Messages: []PromptMessage{{
 			Role:    "user",
-			Content: TextContent("Run get_diagnostics with check enabled. Apply any matching codemods first with apply_safe_fixes (filter by codes and paths; review the dry-run diff). For remaining findings, read the source file, then apply the smallest safe repair with apply_fix (find/replace) or apply_patch. Keep the diff minimal and match the project style. Re-run get_diagnostics or run_task { task: \"check\" } afterward to confirm the fix."),
+			Content: TextContent("Run get_diagnostics with check enabled, scoped to {{route}}. Apply any matching codemods first with apply_safe_fixes (filter by codes and paths; review the dry-run diff). For remaining findings, read the source file, then apply the smallest safe repair with apply_fix (find/replace) or apply_patch. Keep the diff minimal and match the project style. Re-run get_diagnostics or run_task { task: \"check\" } afterward to confirm the fix."),
 		}},
 	}
 }
@@ -1939,11 +1939,11 @@ func (s *Service) promptRepairDiagnostics() *Prompt {
 		Name:        "repair-diagnostics",
 		Description: "Diagnose build and check failures, then apply minimal repairs and verify.",
 		Arguments: []PromptArgument{
-			{Name: "route", Description: "Optional route to focus on"},
+			{Name: "route", Description: "Optional route to focus on", Default: "the whole site"},
 		},
 		Messages: []PromptMessage{{
 			Role:    "user",
-			Content: TextContent("Run get_diagnostics with check enabled. Apply the safe codemods it reports first with apply_safe_fixes (dry-run, then apply after review). Read the remaining files involved, then repair the smallest set of issues with apply_fix or apply_patch in dry-run mode first. Apply only after reviewing the diff, then run get_diagnostics and run_task { task: \"build\" } or check again. Report anything that remains unfixable."),
+			Content: TextContent("Run get_diagnostics with check enabled, scoped to {{route}}. Apply the safe codemods it reports first with apply_safe_fixes (dry-run, then apply after review). Read the remaining files involved, then repair the smallest set of issues with apply_fix or apply_patch in dry-run mode first. Apply only after reviewing the diff, then run get_diagnostics and run_task { task: \"build\" } or check again. Report anything that remains unfixable."),
 		}},
 	}
 }
@@ -1954,7 +1954,7 @@ func (s *Service) promptRefactor() *Prompt {
 		Description: "Plan and apply a safe multi-file refactor using references and impact analysis.",
 		Arguments: []PromptArgument{
 			{Name: "target", Description: "Symbol, component, or file to refactor", Required: true},
-			{Name: "goal", Description: "What should change"},
+			{Name: "goal", Description: "What should change", Default: "the requested change"},
 		},
 		Messages: []PromptMessage{{
 			Role:    "user",
@@ -1967,10 +1967,10 @@ func (s *Service) promptAuditDependencies() *Prompt {
 	return &Prompt{
 		Name:        "audit-dependencies",
 		Description: "Audit project dependencies and import usage without mutating files.",
-		Arguments:   []PromptArgument{{Name: "scope", Description: "Optional directory or package scope"}},
+		Arguments:   []PromptArgument{{Name: "scope", Description: "Optional directory or package scope", Default: "the whole project"}},
 		Messages: []PromptMessage{{
 			Role:    "user",
-			Content: TextContent("Audit dependencies{{scope}}. Read package.json and the lockfile, use search_project to map imports to packages, and report unused packages, missing declarations, duplicate versions, and risky or outdated dependencies. Do not modify files; return a prioritized report with exact package names and evidence."),
+			Content: TextContent("Audit dependencies in {{scope}}. Read package.json and the lockfile, use search_project and workspace_symbols to map imports to packages, and report unused packages, missing declarations, duplicate versions, and risky or outdated dependencies. Do not modify files; return a prioritized report with exact package names and evidence."),
 		}},
 	}
 }
@@ -1981,7 +1981,7 @@ func (s *Service) promptScaffoldComponent() *Prompt {
 		Description: "Scaffold a component that matches the project's existing conventions.",
 		Arguments: []PromptArgument{
 			{Name: "name", Description: "Component name", Required: true},
-			{Name: "kind", Description: "client, static, or server"},
+			{Name: "kind", Description: "client, static, or server", Default: "client"},
 		},
 		Messages: []PromptMessage{{
 			Role:    "user",
@@ -1995,11 +1995,11 @@ func (s *Service) promptExplore() *Prompt {
 		Name:        "explore",
 		Description: "Summarize the project: routes, content collections, config, and outstanding checks.",
 		Arguments: []PromptArgument{
-			{Name: "route", Description: "Drill into one route"},
+			{Name: "route", Description: "Drill into one route", Default: "no specific route"},
 		},
 		Messages: []PromptMessage{{
 			Role:    "user",
-			Content: TextContent("Explore the Krate project: call list_routes and read the krate://routes and krate://config resources to summarize the site structure, then run check to report quality status. If a route is given, read_page it and summarize its structure and rendering mode."),
+			Content: TextContent("Explore the Krate project: call list_routes and read the krate://routes and krate://config resources to summarize the site structure, then run check to report quality status. For route context: {{route}}; if that names a real route, read_page it and summarize its structure and rendering mode."),
 		}},
 	}
 }

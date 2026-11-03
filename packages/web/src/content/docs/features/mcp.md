@@ -335,6 +335,12 @@ Prompts package recurring workflows so agents reach for the right tools:
 - `scaffold-component` - create a component that matches nearby house style.
 - `explore` - summarize the project from routes, config, and outstanding checks.
 
+Prompt quality is evaluated in `internal/mcp/prompt_eval_test.go`. The suite
+checks every registered prompt, required arguments, optional defaults, absence
+of unresolved placeholders, required tool sequence, and safety constraints such
+as dry-run-before-apply and read-only dependency audits. Add a case there
+whenever a prompt is added or its workflow changes.
+
 ## Protocol
 
 - **Structured results**: tools that return JSON also include
