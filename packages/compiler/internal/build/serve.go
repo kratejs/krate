@@ -363,17 +363,32 @@ if (WORKERS > 1 && cluster.isPrimary) {
   // keep dying (a bad route module, a port that stays unbindable) instead of
   // forking forever. The delay also gives a briefly busy port time to free up.
   const exits = [];
-  cluster.on('exit', () => {
+  let exitLogs = 0;
+  cluster.on('exit', (worker, code, signal) => {
     const now = Date.now();
     exits.push(now);
     while (exits.length && now - exits[0] > 60000) exits.shift();
-    if (exits.length > 100) {
+    if (exitLogs++ < 3) {
+      console.error('[krate-api] worker ' + (worker && worker.process ? worker.process.pid : '?') + ' exited (code=' + code + ', signal=' + signal + ')');
+    }
+    // A worker can exit while a transient local-port holder clears. Keep
+    // retrying long enough for that to happen; only a sustained failure is
+    // fatal.
+    if (exits.length > 500) {
       console.error('[krate-api] workers keep exiting; giving up');
       process.exit(1);
     }
     setTimeout(() => cluster.fork(), 100);
   });
 } else {
+  // A clustered worker that loses its primary is shutting down; do not try to
+  // send handles or log an EPIPE stack.
+  process.on('disconnect', () => process.exit(0));
+  process.on('uncaughtException', (err) => {
+    if (err && err.code === 'EPIPE') process.exit(0);
+    console.error(err);
+    process.exit(1);
+  });
   // The port was free when Go chose it, but a bind can still fail with
   // EADDRINUSE: any socket holding that local port blocks the wildcard bind,
   // including a short-lived outgoing connection. A clustered worker exits
@@ -1195,6 +1210,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	var nodeAPICmdMu sync.Mutex
 	var nodeAPICmd *exec.Cmd
+	var nodeAPIStopOnce sync.Once
+	nodeAPIStop := make(chan struct{})
 	if needNodeSidecar {
 		// An explicit node-family apiRuntime selects the sidecar command;
 		// otherwise fall back to the project's top-level runtime.
@@ -1205,6 +1222,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		printf("  %s*%s API sidecar (%s) -> %shttp://localhost:%d%s\n", cCyan, cReset, sidecarRuntime, cCyan, apiPort, cReset)
 		revalHost.SetNodeAPI(fmt.Sprintf("http://127.0.0.1:%d", apiPort))
 
+		cacheRuntime := stageCacheRuntime(root, cfg.OutDir)
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -1213,45 +1231,74 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			}()
 
 			portStr := fmt.Sprintf("%d", apiPort)
-			var cmd *exec.Cmd
+			makeCmd := func() *exec.Cmd {
+				var cmd *exec.Cmd
+				switch sidecarRuntime {
+				case "bun":
+					// Bun-native server (Bun.serve): skips the Node http stack.
+					bunPath := filepath.Join(root, ".krate", "api-server.bun.mjs")
+					_ = os.MkdirAll(filepath.Dir(bunPath), 0755)
+					_ = os.WriteFile(bunPath, []byte(apiServerBunScriptContent), 0644)
+					cmd = exec.Command("bun", "run", bunPath, nodeAPIDir, portStr, middlewarePath, actionDir)
 
-			switch sidecarRuntime {
-			case "bun":
-				// Bun-native server (Bun.serve): skips the Node http stack.
-				bunPath := filepath.Join(root, ".krate", "api-server.bun.mjs")
-				_ = os.MkdirAll(filepath.Dir(bunPath), 0755)
-				_ = os.WriteFile(bunPath, []byte(apiServerBunScriptContent), 0644)
-				cmd = exec.Command("bun", "run", bunPath, nodeAPIDir, portStr, middlewarePath, actionDir)
+				case "deno":
+					scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
+					_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
+					_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
+					cmd = exec.Command("deno", "run", "--allow-net", "--allow-read", "--allow-sys", "--allow-env", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir)
 
-			case "deno":
-				scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
-				_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
-				_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
-				cmd = exec.Command("deno", "run", "--allow-net", "--allow-read", "--allow-sys", "--allow-env", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir)
-
-			default:
-				scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
-				_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
-				_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
-				cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir)
+				default:
+					scriptPath := filepath.Join(root, ".krate", "api-server.mjs")
+					_ = os.MkdirAll(filepath.Dir(scriptPath), 0755)
+					_ = os.WriteFile(scriptPath, []byte(apiServerScriptContent), 0644)
+					cmd = exec.Command("node", scriptPath, nodeAPIDir, portStr, middlewarePath, actionDir)
+				}
+				execx.ConfigureTree(cmd)
+				cmd.Env = append(os.Environ(),
+					fmt.Sprintf("KRATE_API_WORKERS=%d", nodeWorkers),
+					fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hub != nil)),
+					fmt.Sprintf("KRATE_ACTION_MAX_BODY=%d", apiBodyLimit),
+				)
+				cmd.Env = append(cmd.Env, revalHost.EnvList()...)
+				if cacheRuntime != "" {
+					cmd.Env = append(cmd.Env, "KRATE_CACHE_RUNTIME="+cacheRuntime)
+				}
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				return cmd
 			}
 
-			execx.ConfigureTree(cmd)
-			cmd.Env = append(os.Environ(),
-				fmt.Sprintf("KRATE_API_WORKERS=%d", nodeWorkers),
-				fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hub != nil)),
-				fmt.Sprintf("KRATE_ACTION_MAX_BODY=%d", apiBodyLimit),
-			)
-			cmd.Env = append(cmd.Env, revalHost.EnvList()...)
-			if cacheRuntime := stageCacheRuntime(root, cfg.OutDir); cacheRuntime != "" {
-				cmd.Env = append(cmd.Env, "KRATE_CACHE_RUNTIME="+cacheRuntime)
+			delay := 100 * time.Millisecond
+			for {
+				select {
+				case <-nodeAPIStop:
+					return
+				default:
+				}
+				cmd := makeCmd()
+				nodeAPICmdMu.Lock()
+				nodeAPICmd = cmd
+				nodeAPICmdMu.Unlock()
+				started := time.Now()
+				err := cmd.Run()
+				select {
+				case <-nodeAPIStop:
+					return
+				default:
+				}
+				if time.Since(started) > 10*time.Second {
+					delay = 100 * time.Millisecond
+				}
+				fmt.Fprintf(os.Stderr, "  %s! Node API sidecar exited (%v); restarting in %s%s\n", cYellow, err, delay, cReset)
+				select {
+				case <-nodeAPIStop:
+					return
+				case <-time.After(delay):
+				}
+				if delay < 5*time.Second {
+					delay *= 2
+				}
 			}
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			nodeAPICmdMu.Lock()
-			nodeAPICmd = cmd
-			nodeAPICmdMu.Unlock()
-			_ = cmd.Run()
 		}()
 	}
 
@@ -2141,6 +2188,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}()
 		// Stop ISR revalidation goroutine
 		isrCloseOnce.Do(func() { close(isrDone) })
+		nodeAPIStopOnce.Do(func() { close(nodeAPIStop) })
 		if ssrStarted {
 			ssr.Stop()
 			printf("  %s+%s SSR renderer stopped\n", cGreen, cReset)

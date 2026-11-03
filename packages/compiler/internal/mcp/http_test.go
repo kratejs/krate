@@ -191,7 +191,7 @@ func TestHTTPOriginRateLimitAndObservability(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		return resp
 	}
