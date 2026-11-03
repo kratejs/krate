@@ -23,11 +23,14 @@ const (
 )
 
 type projectMatch struct {
-	Path    string   `json:"path"`
-	Line    int      `json:"line"`
-	Col     int      `json:"col"`
-	Text    string   `json:"text"`
-	Context []string `json:"context,omitempty"`
+	Path         string   `json:"path"`
+	Root         string   `json:"root,omitempty"`
+	Kind         string   `json:"kind,omitempty"`
+	ImportedFrom string   `json:"importedFrom,omitempty"`
+	Line         int      `json:"line"`
+	Col          int      `json:"col"`
+	Text         string   `json:"text"`
+	Context      []string `json:"context,omitempty"`
 }
 
 func (s *Service) toolSearchProject(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
@@ -44,6 +47,7 @@ func (s *Service) toolSearchProject(ctx context.Context, args map[string]any) (T
 		Regex:         argBool(args, "regex", false),
 		CaseSensitive: argBool(args, "caseSensitive", false),
 		Glob:          argString(args, "glob"),
+		Root:          argString(args, "root"),
 		Context:       argInt(args, "context", 2),
 		Limit:         argInt(args, "limit", defaultSearchLimit),
 		Skip:          offset,
@@ -70,28 +74,100 @@ func (s *Service) toolFindReferences(ctx context.Context, args map[string]any) (
 	if rerr != nil {
 		return ToolResult{}, rerr
 	}
-	hits, truncated, err := s.searchProject(`\b`+regexp.QuoteMeta(symbol)+`\b`, searchOptions{
-		Regex:         true,
-		CaseSensitive: true,
-		Glob:          argString(args, "glob"),
-		Context:       argInt(args, "context", 1),
-		Limit:         argInt(args, "limit", defaultSearchLimit),
-	})
-	if err != nil {
-		return ErrorResult(err.Error()), nil
+	root := argString(args, "root")
+	glob := argString(args, "glob")
+	includeDefinition := argBool(args, "includeDefinition", true)
+	limit := argInt(args, "limit", defaultSearchLimit)
+	contextLines := argInt(args, "context", 1)
+	s.refreshSymbolIndex()
+	occurrences, indexStats := s.index.snapshot()
+	var hits []projectMatch
+	truncated := false
+	for _, occ := range occurrences {
+		if occ.Name != symbol {
+			continue
+		}
+		if root != "" && occ.Root != root {
+			continue
+		}
+		if glob != "" && !globMatch(glob, occ.Path) {
+			continue
+		}
+		if !includeDefinition && occ.Kind == "definition" {
+			continue
+		}
+		if len(hits) >= limit {
+			truncated = true
+			break
+		}
+		match := s.symbolMatch(occ, contextLines)
+		hits = append(hits, match)
+	}
+	definitions := make([]projectMatch, 0)
+	for _, occ := range occurrences {
+		if occ.Kind != "definition" || occ.Name != symbol {
+			continue
+		}
+		if root != "" && occ.Root != root {
+			continue
+		}
+		if glob != "" && !globMatch(glob, occ.Path) {
+			continue
+		}
+		definitions = append(definitions, s.symbolMatch(occ, 0))
 	}
 	return JSONResult(map[string]any{
-		"symbol":     symbol,
-		"references": hits,
-		"count":      len(hits),
-		"truncated":  truncated,
+		"symbol":      symbol,
+		"references":  hits,
+		"definitions": definitions,
+		"count":       len(hits),
+		"truncated":   truncated,
+		"index":       indexStats,
 	})
+}
+
+func (s *Service) refreshSymbolIndex() symbolIndexStats {
+	return s.index.refresh(s.workspaceRoots())
+}
+
+func (s *Service) symbolMatch(occ symbolOccurrence, contextLines int) projectMatch {
+	match := projectMatch{
+		Path: indexPathLabel(occ.Root, occ.Path), Root: occ.Root, Kind: occ.Kind,
+		ImportedFrom: occ.Source, Line: occ.Line, Col: occ.Col,
+	}
+	abs := filepath.Join(s.workspacePath(occ.Root), filepath.FromSlash(occ.Path))
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return match
+	}
+	lines := splitSearchLines(string(data))
+	if occ.Line > 0 && occ.Line <= len(lines) {
+		match.Text = lines[occ.Line-1]
+		start := occ.Line - 1 - contextLines
+		if start < 0 {
+			start = 0
+		}
+		end := occ.Line + contextLines
+		if end > len(lines) {
+			end = len(lines)
+		}
+		match.Context = append([]string(nil), lines[start:end]...)
+	}
+	return match
+}
+
+func (s *Service) workspacePath(root string) string {
+	if wr, ok := s.findWorkspaceRoot(root); ok {
+		return wr.Path
+	}
+	return s.root
 }
 
 type searchOptions struct {
 	Regex         bool
 	CaseSensitive bool
 	Glob          string
+	Root          string
 	Context       int
 	Limit         int
 	Skip          int
@@ -127,60 +203,70 @@ func (s *Service) searchProject(query string, opts searchOptions) ([]projectMatc
 
 	var matches []projectMatch
 	truncated := false
-	walkErr := filepath.WalkDir(s.root, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
+	roots := s.workspaceRoots()
+	for _, root := range roots {
+		if opts.Root != "" && root.Name != opts.Root {
+			continue
 		}
-		if d.IsDir() {
-			if p != s.root && listIgnoreDirs[d.Name()] {
-				return filepath.SkipDir
+		if truncated {
+			break
+		}
+		walkErr := filepath.WalkDir(root.Path, func(p string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				if p != root.Path && listIgnoreDirs[d.Name()] {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			rel, relErr := filepath.Rel(root.Path, p)
+			if relErr != nil {
+				return nil
+			}
+			rel = filepath.ToSlash(rel)
+			if s.policy != nil && s.policy.denied(rel) {
+				return nil
+			}
+			if opts.Glob != "" && !globMatch(opts.Glob, rel) {
+				return nil
+			}
+			info, statErr := d.Info()
+			if statErr != nil || info.Size() > maxSearchFileBytes {
+				return nil
+			}
+			data, readErr := os.ReadFile(p)
+			if readErr != nil || !utf8.Valid(data) || isBinary(data) {
+				return nil
+			}
+			lines := splitSearchLines(string(data))
+			for i, line := range lines {
+				for _, loc := range re.FindAllStringIndex(line, -1) {
+					if len(matches) >= opts.Skip+opts.Limit {
+						truncated = true
+						return filepath.SkipAll
+					}
+					start := i - opts.Context
+					if start < 0 {
+						start = 0
+					}
+					end := i + opts.Context + 1
+					if end > len(lines) {
+						end = len(lines)
+					}
+					ctxLines := append([]string(nil), lines[start:end]...)
+					matches = append(matches, projectMatch{
+						Path: indexPathLabel(root.Name, rel), Root: root.Name,
+						Line: i + 1, Col: loc[0] + 1, Text: line, Context: ctxLines,
+					})
+				}
 			}
 			return nil
+		})
+		if walkErr != nil {
+			return nil, false, walkErr
 		}
-		rel, relErr := filepath.Rel(s.root, p)
-		if relErr != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-		if s.policy != nil && s.policy.denied(rel) {
-			return nil
-		}
-		if opts.Glob != "" && !globMatch(opts.Glob, rel) {
-			return nil
-		}
-		info, statErr := d.Info()
-		if statErr != nil || info.Size() > maxSearchFileBytes {
-			return nil
-		}
-		data, readErr := os.ReadFile(p)
-		if readErr != nil || !utf8.Valid(data) || isBinary(data) {
-			return nil
-		}
-		lines := splitSearchLines(string(data))
-		for i, line := range lines {
-			for _, loc := range re.FindAllStringIndex(line, -1) {
-				if len(matches) >= opts.Skip+opts.Limit {
-					truncated = true
-					return filepath.SkipAll
-				}
-				start := i - opts.Context
-				if start < 0 {
-					start = 0
-				}
-				end := i + opts.Context + 1
-				if end > len(lines) {
-					end = len(lines)
-				}
-				ctxLines := append([]string(nil), lines[start:end]...)
-				matches = append(matches, projectMatch{
-					Path: rel, Line: i + 1, Col: loc[0] + 1, Text: line, Context: ctxLines,
-				})
-			}
-		}
-		return nil
-	})
-	if walkErr != nil {
-		return nil, false, walkErr
 	}
 	if opts.Skip >= len(matches) {
 		return []projectMatch{}, truncated, nil
@@ -213,6 +299,13 @@ func (s *Service) toolReadFiles(ctx context.Context, args map[string]any) (ToolR
 	if p := argString(args, "path"); p != "" {
 		paths = append(paths, p)
 	}
+	if rootName := argString(args, "root"); rootName != "" {
+		for i, p := range paths {
+			if !strings.Contains(p, ":") {
+				paths[i] = rootName + ":" + p
+			}
+		}
+	}
 	if len(paths) == 0 {
 		return ErrorResult("provide path or paths"), nil
 	}
@@ -221,6 +314,7 @@ func (s *Service) toolReadFiles(ctx context.Context, args map[string]any) (ToolR
 	}
 	type fileView struct {
 		Path      string `json:"path"`
+		Root      string `json:"root,omitempty"`
 		Language  string `json:"language,omitempty"`
 		Bytes     int    `json:"bytes,omitempty"`
 		Truncated bool   `json:"truncated,omitempty"`
@@ -230,22 +324,23 @@ func (s *Service) toolReadFiles(ctx context.Context, args map[string]any) (ToolR
 	views := make([]fileView, 0, len(paths))
 	const perFile = 256 * 1024
 	for _, target := range paths {
-		abs, rel, err := s.resolveProjectPath(target)
+		abs, rel, rootName, err := s.resolveWorkspacePath(target)
 		if err != nil {
 			views = append(views, fileView{Path: target, Error: err.Error()})
 			continue
 		}
+		label := indexPathLabel(rootName, rel)
 		if s.policy != nil && s.policy.denied(rel) {
-			views = append(views, fileView{Path: rel, Error: "denied by policy"})
+			views = append(views, fileView{Path: label, Root: rootName, Error: "denied by policy"})
 			continue
 		}
 		data, readErr := os.ReadFile(abs)
 		if readErr != nil {
-			views = append(views, fileView{Path: rel, Error: readErr.Error()})
+			views = append(views, fileView{Path: label, Root: rootName, Error: readErr.Error()})
 			continue
 		}
 		if isBinary(data) {
-			views = append(views, fileView{Path: rel, Bytes: len(data), Error: "binary file"})
+			views = append(views, fileView{Path: label, Root: rootName, Bytes: len(data), Error: "binary file"})
 			continue
 		}
 		content := string(data)
@@ -255,7 +350,7 @@ func (s *Service) toolReadFiles(ctx context.Context, args map[string]any) (ToolR
 			truncated = true
 		}
 		views = append(views, fileView{
-			Path: rel, Language: languageForPath(rel), Bytes: len(data), Truncated: truncated, Content: content,
+			Path: label, Root: rootName, Language: languageForPath(rel), Bytes: len(data), Truncated: truncated, Content: content,
 		})
 	}
 	return JSONResult(map[string]any{"files": views, "count": len(views)})

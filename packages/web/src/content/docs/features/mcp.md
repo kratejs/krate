@@ -32,6 +32,16 @@ The HTTP endpoint is `http://127.0.0.1:<port>/mcp`. POST JSON-RPC requests to
 it; GET opens an SSE keepalive stream. It binds to localhost by default and
 requires the bearer token when one is configured. stdio remains the default.
 
+Add read/index roots for a multi-root workspace with repeatable `--root`:
+
+```sh
+krate mcp --root docs=../docs --root ui=../packages/ui
+```
+
+The primary project remains the build and write root; extra roots are available
+to `search_project`, `list_files`, `read_file`/`read_files`, `find_references`,
+and `workspace_symbols`. Their paths are returned as `root:path`.
+
 ### Claude Desktop / Claude Code
 
 `claude_desktop_config.json`:
@@ -83,7 +93,8 @@ inspection. Applied edits are transactional and reversible with `undo`.
 | `search_project` | Search project source/content with literal or regex queries, globs, context, and limits |
 | `read_files` | Read several project files in one call with byte caps |
 | `get_diagnostics` | Run build/check and return structured diagnostics with file, range, code, severity, and hint |
-| `find_references` | Find source references to a symbol, with context and limits |
+| `find_references` | Semantic references to a symbol from the incremental workspace index |
+| `workspace_symbols` | Search declarations across the primary and extra workspace roots |
 | `impact` | Show routes affected by a file, or a route's dependencies/dependents |
 | `list_changes` / `get_history` | Recent MCP transactions for audit and undo |
 | `create_page` | Create a page from a template; returns a diff (dry-run by default) |
@@ -158,9 +169,18 @@ lists conservative safe rewrites with their exact location and from/to text.
 Pass `codes` and/or `paths` to `apply_safe_fixes` to apply only that subset
 (dry-run unless `apply: true`).
 
-`find_references` searches for a symbol with word boundaries. `impact` uses the
-compiled site graph to report dependent routes for a file or dependencies and
-dependents for a route.
+`find_references` and `workspace_symbols` share an incremental semantic index.
+The index parses TS/JS/TSX/JSX declarations, imports, exports, identifiers, and
+JSX component references, so comments and string literals are not reported as
+references. Files are re-indexed only when their size or mtime changes.
+`workspace_symbols` returns declaration kind, exported state, root, path, and
+location; `find_references` returns reference/definition/import kinds plus a
+`definitions` list.
+
+`impact` uses the compiled site graph to report dependent routes for a file or
+dependencies and dependents for a route. Both index queries accept a `root`
+filter; multi-root result paths use `root:path`. The primary build/write root is
+unchanged by extra roots.
 
 `list_changes` and `get_history` expose recent MCP transactions, including file
 lists, timestamps, and undone state.
@@ -172,9 +192,11 @@ The file tools let the agent discover and manage arbitrary project files
 
 - **`list_files`** lists project-relative paths (skipping `node_modules`,
   `.git`, `dist`, ...). Filter with `glob` (`src/components/**/*.tsx`), scope with
-  `dir`, and set `includeDenied: true` to see policy-denied paths.
+  `dir`/`root`, and set `includeDenied: true` to see policy-denied paths.
+  Multi-root paths are returned as `root:path`.
 - **`read_file`** returns a file's text with a language hint (or a `binary`
-  marker). Sensitive paths are refused (see the policy below).
+  marker). Sensitive paths are refused (see the policy below). Use `root` or a
+  `root:path` target for extra workspace roots.
 - **`create_file`**, **`delete_file`**, and **`move_file`** round out the
   lifecycle. `create_file` refuses to overwrite (use `edit_file` to modify) and
   parse-gates editable source; all three default to a dry-run preview.
@@ -323,8 +345,8 @@ Prompts package recurring workflows so agents reach for the right tools:
   and `/metrics` provide liveness and Prometheus observability.
 - **Progress**: requests with `_meta.progressToken` receive
   `notifications/progress` during build, check, diagnostics, and search.
-- **Pagination**: `list_files`, `search_project`, `list_changes`, and
-  `get_history` return `nextCursor` when more results exist.
+- **Pagination**: `list_files`, `search_project`, `workspace_symbols`,
+  `list_changes`, and `get_history` return `nextCursor` when more results exist.
 - **Subscriptions**: clients can `resources/subscribe` and
   `resources/unsubscribe`; write transactions emit
   `notifications/resources/updated` for manifest, routes, graph, and content.

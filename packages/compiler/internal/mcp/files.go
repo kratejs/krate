@@ -41,50 +41,67 @@ func (s *Service) toolListFiles(ctx context.Context, args map[string]any) (ToolR
 		limit = maxListFiles
 	}
 
-	base := s.root
+	type listTarget struct {
+		root workspaceRoot
+		base string
+	}
+	var targets []listTarget
 	if dir != "" {
-		abs, _, err := s.resolveProjectPath(dir)
+		abs, _, rootName, err := s.resolveWorkspacePath(dir)
 		if err != nil {
 			return ErrorResult(err.Error()), nil
 		}
-		base = abs
+		targets = []listTarget{{root: workspaceRoot{Name: rootName, Path: s.workspacePath(rootName)}, base: abs}}
+	} else {
+		rootFilter := argString(args, "root")
+		for _, root := range s.workspaceRoots() {
+			if rootFilter != "" && root.Name != rootFilter {
+				continue
+			}
+			targets = append(targets, listTarget{root: root, base: root.Path})
+		}
 	}
 
 	var files []string
 	truncated := false
-	walkErr := filepath.WalkDir(base, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
+	for _, target := range targets {
+		if truncated {
+			break
 		}
-		if d.IsDir() {
-			if p != base && listIgnoreDirs[d.Name()] {
-				return filepath.SkipDir
+		walkErr := filepath.WalkDir(target.base, func(p string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
 			}
-			if !recursive && p != base {
-				return filepath.SkipDir
+			if d.IsDir() {
+				if p != target.base && listIgnoreDirs[d.Name()] {
+					return filepath.SkipDir
+				}
+				if !recursive && p != target.base {
+					return filepath.SkipDir
+				}
+				return nil
 			}
+			rel, relErr := filepath.Rel(target.root.Path, p)
+			if relErr != nil {
+				return nil
+			}
+			relSlash := filepath.ToSlash(rel)
+			if !includeDenied && s.policy != nil && s.policy.denied(relSlash) {
+				return nil
+			}
+			if glob != "" && !globMatch(glob, relSlash) {
+				return nil
+			}
+			if len(files) >= maxListFiles {
+				truncated = true
+				return filepath.SkipAll
+			}
+			files = append(files, indexPathLabel(target.root.Name, relSlash))
 			return nil
+		})
+		if walkErr != nil {
+			return ErrorResult("listing files: " + walkErr.Error()), nil
 		}
-		rel, relErr := filepath.Rel(s.root, p)
-		if relErr != nil {
-			return nil
-		}
-		relSlash := filepath.ToSlash(rel)
-		if !includeDenied && s.policy != nil && s.policy.denied(relSlash) {
-			return nil
-		}
-		if glob != "" && !globMatch(glob, relSlash) {
-			return nil
-		}
-		if len(files) >= maxListFiles {
-			truncated = true
-			return filepath.SkipAll
-		}
-		files = append(files, relSlash)
-		return nil
-	})
-	if walkErr != nil {
-		return ErrorResult("listing files: " + walkErr.Error()), nil
 	}
 	sort.Strings(files)
 	total := len(files)
@@ -116,23 +133,27 @@ func (s *Service) toolReadFile(ctx context.Context, args map[string]any) (ToolRe
 	if target == "" {
 		return ErrorResult("provide path (project-relative)"), nil
 	}
-	abs, rel, err := s.resolveProjectPath(target)
+	if rootName := argString(args, "root"); rootName != "" && !strings.Contains(target, ":") {
+		target = rootName + ":" + target
+	}
+	abs, rel, rootName, err := s.resolveWorkspacePath(target)
 	if err != nil {
 		return ErrorResult(err.Error()), nil
 	}
+	label := indexPathLabel(rootName, rel)
 	if s.policy != nil && s.policy.denied(rel) {
-		return ErrorResult("refusing to read " + rel + ": it " + s.policy.deniedReason(rel)), nil
+		return ErrorResult("refusing to read " + label + ": it " + s.policy.deniedReason(rel)), nil
 	}
 	data, readErr := os.ReadFile(abs)
 	if readErr != nil {
 		if os.IsNotExist(readErr) {
-			return ErrorResult("file not found: " + rel), nil
+			return ErrorResult("file not found: " + label), nil
 		}
-		return ErrorResult("reading " + rel + ": " + readErr.Error()), nil
+		return ErrorResult("reading " + label + ": " + readErr.Error()), nil
 	}
 	if isBinary(data) {
 		return JSONResult(map[string]any{
-			"path": rel, "binary": true, "bytes": len(data),
+			"path": label, "root": rootName, "binary": true, "bytes": len(data),
 			"message": "binary file; content not returned",
 		})
 	}
@@ -144,7 +165,8 @@ func (s *Service) toolReadFile(ctx context.Context, args map[string]any) (ToolRe
 		truncated = true
 	}
 	return JSONResult(map[string]any{
-		"path":      rel,
+		"path":      label,
+		"root":      rootName,
 		"language":  languageForPath(rel),
 		"bytes":     len(data),
 		"truncated": truncated,

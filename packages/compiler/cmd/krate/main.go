@@ -60,6 +60,7 @@ type cliFlags struct {
 	Port          int
 	Host          string
 	Token         string
+	Roots         []string
 	CPUProfile    string
 	MemProfile    string
 }
@@ -190,6 +191,7 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "  --host H      HTTP bind host (default 127.0.0.1; non-loopback needs --token)\n")
 		fmt.Fprintf(w, "  --port N      HTTP port (default 7331)\n")
 		fmt.Fprintf(w, "  --token T     Bearer token (or KRATE_MCP_TOKEN)\n")
+		fmt.Fprintf(w, "  --root N=P    Add a read/index workspace root (repeatable; paths use N:path)\n")
 	default:
 		printUsage(w)
 	}
@@ -290,6 +292,9 @@ func parseFlags(args []string) (cliFlags, []string) {
 			i++
 		case args[i] == "--token" && i+1 < len(args):
 			flags.Token = args[i+1]
+			i++
+		case args[i] == "--root" && i+1 < len(args):
+			flags.Roots = append(flags.Roots, args[i+1])
 			i++
 		case args[i] == "--help" || args[i] == "-h" || args[i] == "--version":
 			// Handled as commands in main(); keep them in the arg list rather
@@ -811,11 +816,21 @@ func runMCP(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
 	env := loadProjectEnv(root, "production", flags.Verbose)
 
+	var extraRoots []mcp.WorkspaceRoot
+	for _, spec := range flags.Roots {
+		name, path, ok := strings.Cut(spec, "=")
+		if !ok {
+			path = name
+			name = ""
+		}
+		extraRoots = append(extraRoots, mcp.WorkspaceRoot{Name: name, Path: path})
+	}
 	svc := mcp.NewService(mcp.Options{
-		Root:    root,
-		Cfg:     cfg,
-		Env:     env,
-		Verbose: flags.Verbose,
+		Root:       root,
+		ExtraRoots: extraRoots,
+		Cfg:        cfg,
+		Env:        env,
+		Verbose:    flags.Verbose,
 	})
 	if flags.HTTP {
 		port := flags.Port

@@ -89,10 +89,10 @@ const MCP_PHASES = [
   },
   {
     id: "M4",
-    tone: "next",
-    status: "In progress",
+    tone: "gate",
+    status: "Complete",
     title: "Workspace graph",
-    body: "search_project, read_files, structured diagnostics, lexical references, and site-graph impact are implemented. Semantic symbol indexes, incremental indexing, and multi-root workspaces remain.",
+    body: "search_project and read_files span multi-root workspaces; structured diagnostics and site-graph impact are joined by an incremental semantic symbol index with declarations, imports, exports, JSX references, and workspace_symbols.",
     exit: "An agent can answer what breaks before editing without reading every file.",
   },
   {
@@ -308,8 +308,8 @@ export default function Roadmap() {
             <p>
               <code>krate mcp</code> provides stdio and Streamable HTTP,
               structured results, transactions, undo, safe codemods,
-              diagnostics, project search, pagination, progress, resource
-              subscriptions, prompts,
+              diagnostics, semantic workspace symbols, project search,
+              pagination, progress, resource subscriptions, prompts,
               cancellation, a project policy, redacted audit logs, rate limits,
               and hosted health/metrics.
             </p>

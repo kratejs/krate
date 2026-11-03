@@ -29,10 +29,19 @@ import (
 
 // Options configures a Service.
 type Options struct {
-	Root    string
-	Cfg     *config.Config
-	Env     map[string]string
-	Verbose bool
+	Root string
+	// ExtraRoots are additional read/index workspace roots. The primary Root
+	// remains the build and write root.
+	ExtraRoots []WorkspaceRoot
+	Cfg        *config.Config
+	Env        map[string]string
+	Verbose    bool
+}
+
+// WorkspaceRoot is an additional multi-root workspace entry.
+type WorkspaceRoot struct {
+	Name string
+	Path string
 }
 
 // Service implements the MCP tools and resources over one in-process Builder.
@@ -50,6 +59,8 @@ type Service struct {
 	auditPath               string
 	secretValues            []string
 	policyLiteralRedactions []string
+	roots                   []workspaceRoot
+	index                   *workspaceIndex
 
 	// runMu serializes write operations and build/check (which swap os.Stdout
 	// during stdout capture) so concurrent requests never race.
@@ -59,6 +70,26 @@ type Service struct {
 // NewService creates a Service and its session Builder.
 func NewService(opts Options) *Service {
 	policy := loadPolicy(opts.Root)
+	roots := []workspaceRoot{{Name: "", Path: opts.Root}}
+	names := map[string]bool{}
+	for _, extra := range opts.ExtraRoots {
+		name := strings.TrimSpace(extra.Name)
+		path := strings.TrimSpace(extra.Path)
+		if path == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+		if name == "" {
+			name = filepath.Base(filepath.Clean(path))
+		}
+		if name == "" || names[name] {
+			continue
+		}
+		names[name] = true
+		roots = append(roots, workspaceRoot{Name: name, Path: path})
+	}
 	return &Service{
 		root:                    opts.Root,
 		cfg:                     opts.Cfg,
@@ -69,6 +100,8 @@ func NewService(opts Options) *Service {
 		auditPath:               policy.auditLogPath(),
 		secretValues:            secretEnvValues(opts.Env),
 		policyLiteralRedactions: append([]string(nil), policy.Redact...),
+		roots:                   roots,
+		index:                   newWorkspaceIndex(),
 	}
 }
 
@@ -80,6 +113,59 @@ func newBuilder(opts Options) *build.Builder {
 	b.Verbose = opts.Verbose
 	b.Env = opts.Env
 	return b
+}
+
+func (s *Service) workspaceRoots() []workspaceRoot {
+	return append([]workspaceRoot(nil), s.roots...)
+}
+
+func (s *Service) findWorkspaceRoot(name string) (workspaceRoot, bool) {
+	for _, root := range s.roots {
+		if root.Name == name {
+			return root, true
+		}
+	}
+	return workspaceRoot{}, false
+}
+
+// resolveWorkspacePath resolves a path in the primary root or a secondary root
+// addressed as `name:path`. Absolute paths and traversal are rejected.
+func (s *Service) resolveWorkspacePath(target string) (abs, rel, root string, err error) {
+	if i := strings.IndexByte(target, ':'); i > 0 {
+		rootName := target[:i]
+		if wr, ok := s.findWorkspaceRoot(rootName); ok && rootName != "" {
+			clean := target[i+1:]
+			if clean == "" {
+				return "", "", "", fmt.Errorf("empty path")
+			}
+			abs, rel, err = resolveWithinRoot(wr.Path, clean)
+			return abs, rel, rootName, err
+		}
+	}
+	abs, rel, err = s.resolveProjectPath(target)
+	return abs, rel, "", err
+}
+
+func resolveWithinRoot(root, target string) (abs, rel string, err error) {
+	if target == "" {
+		return "", "", fmt.Errorf("empty path")
+	}
+	if filepath.IsAbs(target) {
+		return "", "", fmt.Errorf("invalid path: %s", target)
+	}
+	clean := filepath.ToSlash(target)
+	if strings.Contains(clean, "\x00") {
+		return "", "", fmt.Errorf("invalid path: %s", target)
+	}
+	abs, err = pluginapi.SafeJoin(root, clean)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid path (outside the workspace root): %s", target)
+	}
+	pr, relErr := filepath.Rel(root, abs)
+	if relErr != nil {
+		return "", "", fmt.Errorf("invalid path (outside the workspace root): %s", target)
+	}
+	return abs, filepath.ToSlash(pr), nil
 }
 
 // Register installs every tool, resource, template, prompt, and completion on
@@ -163,6 +249,7 @@ func (s *Service) Register(srv *Server) {
 			"regex":         boolSchema("Treat query as a regular expression (default false)"),
 			"caseSensitive": boolSchema("Case-sensitive search (default false)"),
 			"glob":          strSchema("Optional path glob, e.g. src/**/*.tsx"),
+			"root":          strSchema("Optional workspace root name"),
 			"context":       numSchema("Context lines before and after each match (default 2, max 10)"),
 			"limit":         numSchema("Maximum matches (default 100, max 500)"),
 			"cursor":        strSchema("Opaque cursor from a previous search_project result"),
@@ -176,6 +263,7 @@ func (s *Service) Register(srv *Server) {
 		InputSchema: objSchema(map[string]any{
 			"path":  strSchema("Single project-relative path"),
 			"paths": map[string]any{"type": "array", "items": strSchema("Project-relative path")},
+			"root":  strSchema("Optional workspace root name applied to unprefixed paths"),
 		}),
 		Annotations: readOnlyAnnotations("Read Files"),
 		Handler:     s.toolReadFiles,
@@ -194,13 +282,29 @@ func (s *Service) Register(srv *Server) {
 		Name:        "find_references",
 		Description: "Find source references to a symbol across project files. Returns file, line, column, and surrounding context.",
 		InputSchema: objSchema(map[string]any{
-			"symbol":  strSchema("Symbol or identifier to find"),
-			"glob":    strSchema("Optional path glob"),
-			"context": numSchema("Context lines (default 1)"),
-			"limit":   numSchema("Maximum references (default 100)"),
+			"symbol":            strSchema("Symbol or identifier to find"),
+			"root":              strSchema("Optional workspace root name"),
+			"glob":              strSchema("Optional path glob"),
+			"context":           numSchema("Context lines (default 1)"),
+			"limit":             numSchema("Maximum references (default 100)"),
+			"includeDefinition": boolSchema("Include declaration sites in references (default true)"),
 		}, "symbol"),
 		Annotations: readOnlyAnnotations("Find References"),
 		Handler:     s.toolFindReferences,
+	})
+	srv.RegisterTool(Tool{
+		Name:        "workspace_symbols",
+		Description: "Search the incremental semantic symbol index across the primary root and configured multi-root workspaces. Returns declarations with kind, exported state, root, path, and location.",
+		InputSchema: objSchema(map[string]any{
+			"query":  strSchema("Case-insensitive name substring (optional)"),
+			"kind":   enumSchema("Declaration kind filter", "function", "class", "variable"),
+			"root":   strSchema("Optional workspace root name"),
+			"glob":   strSchema("Optional path glob inside the root"),
+			"limit":  numSchema("Maximum symbols (default 200, max 1000)"),
+			"cursor": strSchema("Opaque cursor from a previous workspace_symbols result"),
+		}),
+		Annotations: readOnlyAnnotations("Workspace Symbols"),
+		Handler:     s.toolWorkspaceSymbols,
 	})
 	srv.RegisterTool(Tool{
 		Name:        "impact",
@@ -343,6 +447,7 @@ func (s *Service) Register(srv *Server) {
 		Description: "List project files (project-relative paths), skipping node_modules/.git/dist by default. Filter with glob (supports * and **). Use this to discover components, styles, and assets before reading or editing.",
 		InputSchema: objSchema(map[string]any{
 			"dir":           strSchema("Directory to list, relative to the project root (default: the whole project)"),
+			"root":          strSchema("Optional workspace root name"),
 			"glob":          strSchema("Optional path glob filter, e.g. src/components/**/*.tsx"),
 			"recursive":     boolSchema("Recurse into subdirectories (default true)"),
 			"includeDenied": boolSchema("Include paths the policy denies (default false)"),
@@ -357,6 +462,7 @@ func (s *Service) Register(srv *Server) {
 		Description: "Read any project file by project-relative path. Returns text content (with a language hint) or a binary marker. Sensitive paths (environment files, keys) are refused unless allowed in .krate/mcp.json.",
 		InputSchema: objSchema(map[string]any{
 			"path": strSchema("Project-relative path, e.g. src/components/ui/button.tsx"),
+			"root": strSchema("Optional workspace root name for an unprefixed path"),
 		}, "path"),
 		Annotations: readOnlyAnnotations("Read File"),
 		Handler:     s.toolReadFile,
