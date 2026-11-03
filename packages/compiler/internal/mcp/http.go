@@ -10,9 +10,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -21,6 +23,16 @@ type mcpHTTPServer struct {
 	token    string
 	mu       sync.Mutex
 	sessions map[string]*mcpHTTPSession
+	rate     *rateLimiter
+	started  time.Time
+	metrics  mcpHTTPMetrics
+}
+
+type mcpHTTPMetrics struct {
+	requests       atomic.Int64
+	unauthorized   atomic.Int64
+	rateLimited    atomic.Int64
+	originRejected atomic.Int64
 }
 
 type sseEvent struct {
@@ -52,6 +64,7 @@ func newMCPSession(svc *Service) *mcpHTTPSession {
 		subs:     map[int]chan sseEvent{},
 	}
 	s.srv = NewServer(s, "krate", "http")
+	s.srv.SetClient(s.id, true)
 	svc.Register(s.srv)
 	go func() { _ = s.srv.Serve(pr) }()
 	return s
@@ -155,11 +168,22 @@ func (s *mcpHTTPSession) unsubscribe(id int) {
 }
 
 // HTTPHandler exposes the MCP service over Streamable HTTP with persistent
-// sessions, SSE notifications, and request-scoped responses.
+// sessions, SSE notifications, and request-scoped responses. It also exposes
+// /healthz (unauthenticated liveness) and /metrics (bearer-protected
+// Prometheus text) for hosted deployments.
 func (s *Service) HTTPHandler(token string) http.Handler {
-	h := &mcpHTTPServer{svc: s, token: token, sessions: map[string]*mcpHTTPSession{}}
+	limit, window := s.policy.rateLimit()
+	h := &mcpHTTPServer{
+		svc:      s,
+		token:    token,
+		sessions: map[string]*mcpHTTPSession{},
+		rate:     newRateLimiter(limit, window),
+		started:  time.Now(),
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp", h.handle)
+	mux.HandleFunc("/healthz", h.health)
+	mux.HandleFunc("/metrics", h.metricsHandler)
 	return mux
 }
 
@@ -179,9 +203,29 @@ func (s *mcpHTTPSession) close() {
 }
 
 func (h *mcpHTTPServer) handle(w http.ResponseWriter, r *http.Request) {
+	h.metrics.requests.Add(1)
+	if !h.svc.policy.allowsHost(r.Host) || !originAllowed(r, h.svc.policy) {
+		h.metrics.originRejected.Add(1)
+		h.svc.recordHTTPReject(r, "host_or_origin")
+		http.Error(w, "host or origin is not allowed", http.StatusForbidden)
+		return
+	}
 	if !mcpAuthorized(r, h.token) {
+		h.metrics.unauthorized.Add(1)
+		h.svc.recordHTTPReject(r, "unauthorized")
 		w.Header().Set("WWW-Authenticate", "Bearer")
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if ok, retry := h.rate.allow(rateLimitKey(r.RemoteAddr)); !ok {
+		h.metrics.rateLimited.Add(1)
+		h.svc.recordHTTPReject(r, "rate_limited")
+		seconds := int(retry.Seconds() + 0.999)
+		if seconds < 1 {
+			seconds = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
 	switch r.Method {
@@ -351,6 +395,97 @@ func mcpAuthorized(r *http.Request, token string) bool {
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
 
+// originAllowed rejects browser cross-origin requests. Non-browser clients do
+// not send Origin, so they are unaffected.
+func originAllowed(r *http.Request, policy *Policy) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if !strings.EqualFold(u.Host, r.Host) {
+		return false
+	}
+	return policy.allowsHost(u.Host)
+}
+
+func (h *mcpHTTPServer) health(w http.ResponseWriter, r *http.Request) {
+	if !h.svc.policy.allowsHost(r.Host) {
+		h.svc.recordHTTPReject(r, "host")
+		http.Error(w, "host is not allowed", http.StatusForbidden)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	h.mu.Lock()
+	active := len(h.sessions)
+	h.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":         "ok",
+		"uptimeSeconds":  int64(time.Since(h.started).Seconds()),
+		"activeSessions": active,
+	})
+}
+
+func (h *mcpHTTPServer) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	if !h.svc.policy.allowsHost(r.Host) {
+		h.svc.recordHTTPReject(r, "host")
+		http.Error(w, "host is not allowed", http.StatusForbidden)
+		return
+	}
+	if !mcpAuthorized(r, h.token) {
+		h.svc.recordHTTPReject(r, "unauthorized")
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	h.mu.Lock()
+	active := len(h.sessions)
+	h.mu.Unlock()
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	fmt.Fprintf(w, "# HELP krate_mcp_http_requests_total HTTP requests to /mcp.\n")
+	fmt.Fprintf(w, "# TYPE krate_mcp_http_requests_total counter\n")
+	fmt.Fprintf(w, "krate_mcp_http_requests_total %d\n", h.metrics.requests.Load())
+	fmt.Fprintf(w, "# HELP krate_mcp_http_unauthorized_total Requests rejected for missing or invalid credentials.\n")
+	fmt.Fprintf(w, "# TYPE krate_mcp_http_unauthorized_total counter\n")
+	fmt.Fprintf(w, "krate_mcp_http_unauthorized_total %d\n", h.metrics.unauthorized.Load())
+	fmt.Fprintf(w, "# HELP krate_mcp_http_rate_limited_total Requests rejected by the rate limiter.\n")
+	fmt.Fprintf(w, "# TYPE krate_mcp_http_rate_limited_total counter\n")
+	fmt.Fprintf(w, "krate_mcp_http_rate_limited_total %d\n", h.metrics.rateLimited.Load())
+	fmt.Fprintf(w, "# HELP krate_mcp_http_origin_rejected_total Requests rejected by host or origin checks.\n")
+	fmt.Fprintf(w, "# TYPE krate_mcp_http_origin_rejected_total counter\n")
+	fmt.Fprintf(w, "krate_mcp_http_origin_rejected_total %d\n", h.metrics.originRejected.Load())
+	fmt.Fprintf(w, "# HELP krate_mcp_sessions_active Current persistent MCP sessions.\n")
+	fmt.Fprintf(w, "# TYPE krate_mcp_sessions_active gauge\n")
+	fmt.Fprintf(w, "krate_mcp_sessions_active %d\n", active)
+}
+
+func loopbackHost(host string) bool {
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func newSessionID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -366,7 +501,7 @@ func ServeHTTP(s *Service, addr, token string) error {
 	if err != nil {
 		return fmt.Errorf("invalid MCP address %q: %w", addr, err)
 	}
-	if token == "" && host != "" && host != "127.0.0.1" && host != "::1" && host != "localhost" {
+	if token == "" && !loopbackHost(host) {
 		return fmt.Errorf("refusing to expose unauthenticated MCP on %s; set a bearer token or bind loopback", addr)
 	}
 	srv := &http.Server{

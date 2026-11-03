@@ -23,6 +23,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -78,7 +79,6 @@ type Server struct {
 	out                   *bufio.Writer
 	suppressNotifications bool
 	outMu                 sync.Mutex
-	enc                   *json.Encoder
 	pmu                   sync.Mutex // guards inflight
 	server                *serverInfo
 
@@ -104,6 +104,12 @@ type Server struct {
 	// initialized tracks the handshake so tools/list before initialize can be
 	// tolerated (some clients do this); it is informational only.
 	initialized bool
+
+	redactMu sync.RWMutex
+	redactor func(string) string
+	auditor  func(auditRecord)
+	clientID string
+	remote   bool
 }
 
 // dispatchItem is an enqueued request together with its cancellation state.
@@ -146,11 +152,8 @@ func (b *boolFlag) get() bool {
 // NewServer creates a server writing JSON-RPC responses to out.
 func NewServer(out io.Writer, name, version string) *Server {
 	bw := bufio.NewWriter(out)
-	enc := json.NewEncoder(bw)
-	enc.SetEscapeHTML(false)
 	return &Server{
 		out:           bw,
-		enc:           enc,
 		server:        &serverInfo{Name: name, Version: version},
 		tools:         make(map[string]Tool),
 		resources:     make(map[string]Resource),
@@ -159,6 +162,49 @@ func NewServer(out io.Writer, name, version string) *Server {
 		completes:     make(map[string]completionFn),
 		subscriptions: make(map[string]bool),
 		inflight:      make(map[string]*pendingOp),
+	}
+}
+
+// SetRedactor installs a text redactor applied to every outgoing JSON frame.
+func (s *Server) SetRedactor(fn func(string) string) {
+	s.redactMu.Lock()
+	s.redactor = fn
+	s.redactMu.Unlock()
+}
+
+// SetAuditHook installs a tool-call audit sink.
+func (s *Server) SetAuditHook(fn func(auditRecord)) {
+	s.redactMu.Lock()
+	s.auditor = fn
+	s.redactMu.Unlock()
+}
+
+// SetClient identifies the transport client for audit records.
+func (s *Server) SetClient(id string, remote bool) {
+	s.redactMu.Lock()
+	s.clientID = id
+	s.remote = remote
+	s.redactMu.Unlock()
+}
+
+func (s *Server) applyRedaction(text string) string {
+	s.redactMu.RLock()
+	fn := s.redactor
+	s.redactMu.RUnlock()
+	if fn != nil {
+		return fn(text)
+	}
+	return text
+}
+
+func (s *Server) audit(rec auditRecord) {
+	s.redactMu.RLock()
+	fn := s.auditor
+	rec.Client = s.clientID
+	rec.Remote = s.remote
+	s.redactMu.RUnlock()
+	if fn != nil {
+		fn(rec)
 	}
 }
 
@@ -530,16 +576,27 @@ func (s *Server) getPrompt(raw json.RawMessage) (any, *rpcError) {
 
 // writeResult sends a successful response. Callers must ensure ID is valid.
 func (s *Server) writeResult(id json.RawMessage, result any) {
-	s.outMu.Lock()
-	defer s.outMu.Unlock()
-	_ = s.enc.Encode(response{JSONRPC: "2.0", ID: id, Result: result})
-	_ = s.out.Flush()
+	s.writeJSON(response{JSONRPC: "2.0", ID: id, Result: result})
 }
 
 func (s *Server) writeError(id json.RawMessage, code int, msg string) {
+	s.writeJSON(response{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: msg}})
+}
+
+// writeJSON encodes one frame, applies redaction to the serialized text, and
+// writes it. Redacting the wire form covers tool content, resources, errors,
+// and structured payloads with one choke point.
+func (s *Server) writeJSON(value any) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(value); err != nil {
+		return
+	}
+	out := s.applyRedaction(buf.String())
 	s.outMu.Lock()
 	defer s.outMu.Unlock()
-	_ = s.enc.Encode(response{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: msg}})
+	_, _ = s.out.WriteString(out)
 	_ = s.out.Flush()
 }
 
@@ -550,10 +607,7 @@ func (s *Server) writeNotification(method string, params any) {
 	if s.suppressNotifications {
 		return
 	}
-	s.outMu.Lock()
-	defer s.outMu.Unlock()
-	_ = s.enc.Encode(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
-	_ = s.out.Flush()
+	s.writeJSON(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
 }
 
 // NotifyLog sends a structured log notification.

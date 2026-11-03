@@ -2,10 +2,12 @@ package mcp
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Policy governs which project paths the MCP write/read tools may touch. It is
@@ -39,12 +41,100 @@ type Policy struct {
 	ReadOnlyMode bool `json:"readOnlyMode,omitempty"`
 	// AllowTasks gates run_task.
 	AllowTasks []string `json:"allowTasks,omitempty"`
+	// AuditLog is the project-relative JSONL audit log path. Empty uses
+	// .krate/mcp-audit.jsonl; "off" disables audit logging.
+	AuditLog string `json:"auditLog,omitempty"`
+	// RateLimit bounds HTTP requests per client. Nil uses the default.
+	RateLimit *RateLimitPolicy `json:"rateLimit,omitempty"`
+	// AllowedHosts lets a reverse proxy expose MCP under names other than
+	// localhost. Loopback hosts are always accepted.
+	AllowedHosts []string `json:"allowedHosts,omitempty"`
+	// Redact lists literal values to mask in tool output and audit logs.
+	Redact []string `json:"redact,omitempty"`
 
 	// loaded is true when a config file was found (informational).
 	loaded bool
 	// invalid is true when a policy file exists but could not be parsed. The
 	// policy then fails closed instead of silently granting the default access.
 	invalid bool
+}
+
+// RateLimitPolicy configures the HTTP request budget per client address.
+type RateLimitPolicy struct {
+	// Disabled turns rate limiting off.
+	Disabled bool `json:"disabled,omitempty"`
+	// Requests is the number of requests allowed per window (default 120).
+	Requests int `json:"requests,omitempty"`
+	// WindowSeconds is the window length in seconds (default 60).
+	WindowSeconds int `json:"windowSeconds,omitempty"`
+}
+
+const defaultAuditLog = ".krate/mcp-audit.jsonl"
+
+// auditLogPath returns the audit log path, or "" when audit logging is off.
+func (p *Policy) auditLogPath() string {
+	if p == nil || p.invalid {
+		return defaultAuditLog
+	}
+	switch strings.ToLower(strings.TrimSpace(p.AuditLog)) {
+	case "off", "false", "none", "disabled":
+		return ""
+	case "":
+		return defaultAuditLog
+	}
+	rel := normalizeRel(p.AuditLog)
+	if filepath.IsAbs(p.AuditLog) || rel == "" || strings.HasPrefix(rel, "../") || rel == ".." {
+		return defaultAuditLog
+	}
+	return rel
+}
+
+// rateLimit returns the configured request budget. A zero limit disables
+// rate limiting.
+func (p *Policy) rateLimit() (int, time.Duration) {
+	limit, seconds := 120, 60
+	if p != nil && p.RateLimit != nil {
+		if p.RateLimit.Disabled {
+			return 0, 0
+		}
+		if p.RateLimit.Requests > 0 {
+			limit = p.RateLimit.Requests
+		}
+		if p.RateLimit.WindowSeconds > 0 {
+			seconds = p.RateLimit.WindowSeconds
+		}
+	}
+	return limit, time.Duration(seconds) * time.Second
+}
+
+// allowsHost reports whether an HTTP Host header may reach the MCP handler.
+// Loopback names are always allowed; a reverse proxy deployment can add its
+// public hostnames via allowedHosts.
+func (p *Policy) allowsHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return true
+	}
+	if strings.EqualFold(host, "localhost") || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	if p == nil {
+		return false
+	}
+	for _, allowed := range p.AllowedHosts {
+		allowed = strings.TrimSpace(allowed)
+		if allowed == "" {
+			continue
+		}
+		if strings.EqualFold(allowed, hostport) || strings.EqualFold(strings.Trim(allowed, "[]"), host) {
+			return true
+		}
+	}
+	return false
 }
 
 // defaultWriteDeniedPatterns are generated/output trees that must never be

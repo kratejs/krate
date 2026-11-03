@@ -93,6 +93,7 @@ inspection. Applied edits are transactional and reversible with `undo`.
 | `undo` | Undo the most recent transaction (or one by ID) |
 | `format_file` | Format a TypeScript/JavaScript source file; returns a diff |
 | `apply_fix` | Apply an explicit find/replace repair to a diagnostic finding |
+| `apply_safe_fixes` | Preview or apply conservative codemods, optionally filtered by codes and paths |
 | `list_files` | List project files (skips `node_modules`/`.git`/`dist`), with an optional `glob` |
 | `read_file` | Read any project file by path (text + language, or a binary marker) |
 | `create_file` | Create a new file (refuses to overwrite; parse-gated); returns a diff |
@@ -152,7 +153,10 @@ size.
 
 `get_diagnostics` runs a build (and optionally `check`) and returns structured
 entries: code, severity, file, line/column, route, message, and hint. It also
-includes the build output and whether the build succeeded.
+includes the build output and whether the build succeeded. A `codemods` array
+lists conservative safe rewrites with their exact location and from/to text.
+Pass `codes` and/or `paths` to `apply_safe_fixes` to apply only that subset
+(dry-run unless `apply: true`).
 
 `find_references` searches for a symbol with word boundaries. `impact` uses the
 compiled site graph to report dependent routes for a file or dependencies and
@@ -183,7 +187,7 @@ The file tools let the agent discover and manage arbitrary project files
 
 `create_page`, `edit_file`, `apply_patch`, `batch_edit`, `create_file`,
 `delete_file`, `move_file`, `create_component`, `create_content`,
-`edit_content`, and `apply_fix` **default to a dry-run** that returns a unified diff. Pass
+`edit_content`, `apply_fix`, and `apply_safe_fixes` **default to a dry-run** that returns a unified diff. Pass
 `"apply": true` to write. This gives the agent (and you) an approval step before
 anything changes on disk.
 
@@ -211,7 +215,11 @@ file itself. Those require an explicit `allow` entry. A committed policy at
   "maxBatchFiles": 50,
   "allowBinary": false,
   "readOnlyMode": false,
-  "allowTasks": ["build", "check", "test", "typecheck"]
+  "allowTasks": ["build", "check", "test", "typecheck"],
+  "auditLog": ".krate/mcp-audit.jsonl",
+  "rateLimit": { "requests": 120, "windowSeconds": 60 },
+  "allowedHosts": [],
+  "redact": ["my-literal-private-value"]
 }
 ```
 
@@ -227,9 +235,38 @@ file itself. Those require an explicit `allow` entry. A committed policy at
   remote MCP profile.
 - **`allowTasks`** gates `run_task`. Generated/output trees (`node_modules`,
   `dist`, `.krate`, `build`) are never writable.
+- **`auditLog`** writes redacted JSONL tool-call records. It defaults to
+  `.krate/mcp-audit.jsonl`; set it to `"off"` to disable audit logging.
+- **`rateLimit`** bounds HTTP requests per client address (default 120 per 60
+  seconds). `{ "disabled": true }` turns the limiter off.
+- **`allowedHosts`** lets a reverse proxy expose MCP under a public hostname.
+  Loopback hosts are always accepted; other `Host` headers are rejected.
+- **`redact`** lists extra literal values to mask in tool output and audit logs,
+  in addition to environment values with secret-like names.
 
 Every write also rejects absolute paths and traversal outside the project root,
 resolving symlinks so a symlinked directory cannot redirect a write elsewhere.
+
+### Remote operations
+
+For a remote deployment, bind a non-loopback interface and always set a bearer
+token:
+
+```sh
+krate mcp --http --host 0.0.0.0 --port 7331 --token "$KRATE_MCP_TOKEN"
+```
+
+`krate mcp` refuses unauthenticated binding outside loopback. The HTTP handler
+also rejects cross-origin browser requests and unexpected `Host` headers, so a
+DNS-rebinding page cannot drive a local server. Bearer tokens, secret-looking
+environment values, sensitive JSON fields, and policy `redact` literals are
+masked in tool output, errors, and audit records.
+
+Hosted health and metrics endpoints are available alongside `/mcp`:
+
+- `GET /healthz` - unauthenticated liveness with uptime and active sessions.
+- `GET /metrics` - bearer-protected Prometheus text: request, authorization,
+  rate-limit, origin-rejection, and active-session counters.
 
 - **`create_page`** scaffolds a page from a template - `static` (default),
   `content-list`, `detail`, and `blank` (raw source override). For
@@ -266,8 +303,9 @@ Prompts package recurring workflows so agents reach for the right tools:
   `create_content` (schema-validated) and wire it into a page.
 - `fix-checks` - run the quality gates, then fix the worst findings with
   `apply_fix` or `apply_patch`.
-- `repair-diagnostics` - diagnose build/check failures, apply minimal repairs,
-  and verify with `get_diagnostics` and `run_task`.
+- `repair-diagnostics` - diagnose build/check failures, apply safe codemods
+  first (`apply_safe_fixes`, filtered by the diagnostics' codes), then minimal
+  manual repairs, and verify with `get_diagnostics` and `run_task`.
 - `refactor` - map references and impact, propose a multi-file diff, then apply
   it and verify.
 - `audit-dependencies` - report unused or risky dependencies without changing
@@ -281,7 +319,8 @@ Prompts package recurring workflows so agents reach for the right tools:
   `structuredContent`, so clients can consume diagnostics and listings without
   parsing the text block.
 - **HTTP transport**: `krate mcp --http` exposes Streamable HTTP at `/mcp`
-  (POST requests, GET SSE). Authentication is bearer-token based.
+  (POST requests, GET SSE). Authentication is bearer-token based; `/healthz`
+  and `/metrics` provide liveness and Prometheus observability.
 - **Progress**: requests with `_meta.progressToken` receive
   `notifications/progress` during build, check, diagnostics, and search.
 - **Pagination**: `list_files`, `search_project`, `list_changes`, and

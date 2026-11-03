@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
 func TestFixLowercaseEvents(t *testing.T) {
@@ -46,6 +48,86 @@ func TestFixLowercaseEvents(t *testing.T) {
 	}
 	if out2 != out || len(changes2) != 0 {
 		t.Fatalf("not idempotent: %+v\n%s", changes2, out2)
+	}
+}
+
+func TestFixSafeDiagnosticCodemods(t *testing.T) {
+	src := `export default function Page() {
+  return (
+    <div>
+      <input value={v} defaultValue="x" onclick={go} />
+      <input value = {v} defaultValue = "spaced" />
+      <textarea value={v} defaultValue={fallback} />
+      <input type="checkbox" checked={c} defaultChecked />
+      <div contentEditable onChange={edit} />
+      <div contentEditable onChange={edit} onInput={input} />
+      <input value={undefined} defaultValue="keep" />
+      <Field value={v} defaultValue="keep" onChange={edit} />
+    </div>
+  );
+}
+`
+	out, changes, err := fixSource(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 6 {
+		t.Fatalf("changes = %+v\n%s", changes, out)
+	}
+	if strings.Contains(out, `value={v} defaultValue="x"`) ||
+		strings.Contains(out, `value = {v} defaultValue = "spaced"`) ||
+		strings.Contains(out, "spaced") ||
+		strings.Contains(out, `value={v} defaultValue={fallback}`) ||
+		strings.Contains(out, "checked={c} defaultChecked") {
+		t.Errorf("ignored form defaults were not removed:\n%s", out)
+	}
+	if !strings.Contains(out, "onClick={go}") {
+		t.Errorf("lowercase handler was not fixed:\n%s", out)
+	}
+	if strings.Count(out, "contentEditable onInput={edit}") != 1 {
+		t.Errorf("contentEditable handler was not repaired once:\n%s", out)
+	}
+	if !strings.Contains(out, "onChange={edit} onInput={input}") {
+		t.Errorf("conflicting contentEditable handler must be left alone:\n%s", out)
+	}
+	if !strings.Contains(out, `value={undefined} defaultValue="keep"`) {
+		t.Errorf("defaultValue must stay when value is undefined:\n%s", out)
+	}
+	if !strings.Contains(out, `<Field value={v} defaultValue="keep" onChange={edit} />`) {
+		t.Errorf("component props must not be rewritten:\n%s", out)
+	}
+	out2, changes2, err := fixSource(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out2 != out || len(changes2) != 0 {
+		t.Fatalf("not idempotent: %+v\n%s", changes2, out2)
+	}
+}
+
+func TestPlanWithCodesFiltersCodemods(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "src", "page.tsx")
+	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := `export default function Page() { return <input value={v} defaultValue="x" onclick={go} />; }`
+	if err := os.WriteFile(file, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+	files, changes, _, err := PlanWithCodes(root, []string{"KR5005"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0].Code != diag.CodeValueAndDefault {
+		t.Fatalf("changes = %+v", changes)
+	}
+	out := files["src/page.tsx"]
+	if !strings.Contains(out, "onclick={go}") {
+		t.Errorf("KR5002 was applied despite the filter:\n%s", out)
+	}
+	if strings.Contains(out, "defaultValue") {
+		t.Errorf("KR5005 was not applied:\n%s", out)
 	}
 }
 

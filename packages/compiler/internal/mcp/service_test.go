@@ -1459,6 +1459,63 @@ func TestUndoConflictAndForce(t *testing.T) {
 	}
 }
 
+func TestDiagnosticCodemodsAndFilteredFixes(t *testing.T) {
+	svc := newTestService(t, map[string]string{
+		"src/pages/index.tsx": "export default function Page() { return <button onclick={() => {}}>Hi</button>; }\n",
+	})
+	text := toolText(t, serve(t, svc, call("get_diagnostics", map[string]any{"check": false}))[0])
+	if !strings.Contains(text, `"codemods"`) || !strings.Contains(text, `"code": "KR5002"`) {
+		t.Fatalf("get_diagnostics did not advertise the safe codemod: %s", text)
+	}
+	resp := serve(t, svc, call("apply_safe_fixes", map[string]any{
+		"codes": []any{"KR5002"}, "paths": []any{"src/pages/*.tsx"}, "apply": true,
+	}))[0]
+	result := mustResp(t, resp)
+	var report strings.Builder
+	for _, block := range result["content"].([]any) {
+		report.WriteString(block.(map[string]any)["text"].(string))
+	}
+	if !strings.Contains(report.String(), "Codemods:") || !strings.Contains(report.String(), "KR5002") {
+		t.Fatalf("apply_safe_fixes did not report the codemod: %s", report.String())
+	}
+	data, err := os.ReadFile(filepath.Join(svc.root, "src", "pages", "index.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "onClick") || strings.Contains(string(data), "onclick") {
+		t.Fatalf("filtered codemod was not applied: %s", data)
+	}
+}
+
+func TestAuditLogAndSecretRedaction(t *testing.T) {
+	const secret = "super-secret-token-value"
+	svc := newTestService(t, map[string]string{
+		"src/pages/index.tsx": "export default function Page() { return <h1>" + secret + "</h1>; }\n",
+	})
+	svc.secretValues = []string{secret}
+
+	text := toolText(t, serve(t, svc, call("read_file", map[string]any{"path": "src/pages/index.tsx"}))[0])
+	if strings.Contains(text, secret) {
+		t.Fatalf("tool output leaked a secret: %s", text)
+	}
+	if !strings.Contains(text, "[REDACTED]") {
+		t.Fatalf("tool output was not redacted: %s", text)
+	}
+
+	auditPath := filepath.Join(svc.root, filepath.FromSlash(svc.auditPath))
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("reading audit log: %v", err)
+	}
+	log := string(data)
+	if !strings.Contains(log, `"event":"tool_call"`) || !strings.Contains(log, `"tool":"read_file"`) {
+		t.Fatalf("audit log missing tool call: %s", log)
+	}
+	if strings.Contains(log, secret) {
+		t.Fatalf("audit log leaked a secret: %s", log)
+	}
+}
+
 func TestTransactionLimits(t *testing.T) {
 	svc := newTestService(t, map[string]string{
 		"src/pages/index.tsx": "export default function Page() { return <h1>Hi</h1>; }\n",

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -57,6 +58,7 @@ type cliFlags struct {
 	UpdatePackage bool
 	Report        string
 	Port          int
+	Host          string
 	Token         string
 	CPUProfile    string
 	MemProfile    string
@@ -182,10 +184,11 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "Scaffold a new Krate project (alias: create).\n")
 		fmt.Fprintf(w, "Provided by the @krate/core npm wrapper, which delegates to create-krate-app.\n")
 	case "mcp":
-		fmt.Fprintf(w, "Usage: krate mcp [dir] [--http] [--port 7331] [--token TOKEN]\n\n")
+		fmt.Fprintf(w, "Usage: krate mcp [dir] [--http] [--host 127.0.0.1] [--port 7331] [--token TOKEN]\n\n")
 		fmt.Fprintf(w, "Run the MCP server (Model Context Protocol) over stdio by default.\n")
 		fmt.Fprintf(w, "  --http        Serve Streamable HTTP at /mcp instead\n")
-		fmt.Fprintf(w, "  --port N      HTTP port (default 7331, localhost only)\n")
+		fmt.Fprintf(w, "  --host H      HTTP bind host (default 127.0.0.1; non-loopback needs --token)\n")
+		fmt.Fprintf(w, "  --port N      HTTP port (default 7331)\n")
 		fmt.Fprintf(w, "  --token T     Bearer token (or KRATE_MCP_TOKEN)\n")
 	default:
 		printUsage(w)
@@ -276,6 +279,9 @@ func parseFlags(args []string) (cliFlags, []string) {
 			flags.UpdatePackage = true
 		case args[i] == "--report" && i+1 < len(args):
 			flags.Report = args[i+1]
+			i++
+		case args[i] == "--host" && i+1 < len(args):
+			flags.Host = args[i+1]
 			i++
 		case args[i] == "--port" && i+1 < len(args):
 			if n, err := strconv.Atoi(args[i+1]); err == nil {
@@ -820,7 +826,11 @@ func runMCP(flags cliFlags, args []string) {
 		if token == "" {
 			token = os.Getenv("KRATE_MCP_TOKEN")
 		}
-		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		host := flags.Host
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		addr := net.JoinHostPort(host, strconv.Itoa(port))
 		fmt.Fprintf(os.Stderr, "  MCP HTTP server -> http://%s/mcp (POST; GET for SSE)\n", addr)
 		if err := mcp.ServeHTTP(svc, addr, token); err != nil {
 			fmt.Fprintf(os.Stderr, "%sMCP HTTP error:%s %v\n", cRed, cReset, err)
@@ -830,6 +840,7 @@ func runMCP(flags cliFlags, args []string) {
 	}
 
 	srv := mcp.NewServer(protocolOut, "krate", version)
+	srv.SetClient("stdio", false)
 	svc.Register(srv)
 
 	if err := srv.Serve(os.Stdin); err != nil {

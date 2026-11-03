@@ -73,18 +73,18 @@ const MCP_PHASES = [
   },
   {
     id: "M2",
-    tone: "now",
-    status: "In progress",
+    tone: "gate",
+    status: "Complete",
     title: "Security and operations",
-    body: "writeRoots, project policy, localhost binding, and bearer auth are implemented. Audit logs, secret redaction, rate limits, remote isolation, and hosted observability remain.",
+    body: "writeRoots, project policy, localhost binding, bearer auth, redacted JSONL audit logs, secret redaction, HTTP rate limits, host/origin isolation, and /healthz plus /metrics observability are implemented.",
     exit: "Remote MCP can be offered without exposing project secrets or cross-tenant state.",
   },
   {
     id: "M3",
-    tone: "now",
-    status: "In progress",
+    tone: "gate",
+    status: "Complete",
     title: "Safe editing",
-    body: "Source editing, atomic multi-file patches, batch operations, undo, expected-hash conflicts, dry-run previews, and writeRoots are implemented. Automatic diagnostic fixes and codemods remain.",
+    body: "Source editing, atomic multi-file patches, batch operations, undo, expected-hash conflicts, dry-run previews, writeRoots, diagnostic-linked codemods, and filtered apply_safe_fixes are implemented.",
     exit: "Every write is atomic or rolled back; concurrent edits are detected and explained.",
   },
   {
@@ -307,9 +307,11 @@ export default function Roadmap() {
             <h3>Today</h3>
             <p>
               <code>krate mcp</code> provides stdio and Streamable HTTP,
-              structured results, transactions and undo, diagnostics, project
-              search, pagination, progress, resource subscriptions, prompts,
-              cancellation, and a project policy.
+              structured results, transactions, undo, safe codemods,
+              diagnostics, project search, pagination, progress, resource
+              subscriptions, prompts,
+              cancellation, a project policy, redacted audit logs, rate limits,
+              and hosted health/metrics.
             </p>
           </div>
           <div class="roadmap-panel">

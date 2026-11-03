@@ -262,15 +262,26 @@ func (s *Service) toolReadFiles(ctx context.Context, args map[string]any) (ToolR
 }
 
 type diagnosticView struct {
-	ID       string `json:"id"`
-	Code     string `json:"code"`
-	Severity string `json:"severity"`
-	File     string `json:"file,omitempty"`
-	Line     int    `json:"line,omitempty"`
-	Col      int    `json:"col,omitempty"`
-	Route    string `json:"route,omitempty"`
-	Message  string `json:"message"`
-	Hint     string `json:"hint,omitempty"`
+	ID       string       `json:"id"`
+	Code     string       `json:"code"`
+	Severity string       `json:"severity"`
+	File     string       `json:"file,omitempty"`
+	Line     int          `json:"line,omitempty"`
+	Col      int          `json:"col,omitempty"`
+	Route    string       `json:"route,omitempty"`
+	Message  string       `json:"message"`
+	Hint     string       `json:"hint,omitempty"`
+	Fix      *codemodView `json:"fix,omitempty"`
+}
+
+type codemodView struct {
+	Code string `json:"code"`
+	Tool string `json:"tool"`
+	File string `json:"file"`
+	Line int    `json:"line,omitempty"`
+	Col  int    `json:"col,omitempty"`
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
 }
 
 func (s *Service) toolGetDiagnostics(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
@@ -332,17 +343,43 @@ func (s *Service) toolGetDiagnostics(ctx context.Context, args map[string]any) (
 			})
 		}
 	}
+	codemods := []codemodView{}
+	if _, changes, _, fixErr := fix.Plan(s.root); fixErr == nil {
+		byKey := map[string]codemodView{}
+		for _, change := range changes {
+			codemod := codemodView{
+				Code: string(change.Code), Tool: "apply_safe_fixes",
+				File: change.File, Line: change.Line, Col: change.Col,
+				From: change.From, To: change.To,
+			}
+			codemods = append(codemods, codemod)
+			byKey[codemodKey(codemod.Code, codemod.File, codemod.Line, codemod.Col)] = codemod
+		}
+		for i := range views {
+			key := codemodKey(views[i].Code, views[i].File, views[i].Line, views[i].Col)
+			if codemod, ok := byKey[key]; ok {
+				views[i].Fix = &codemod
+			}
+		}
+	}
 	reportProgress(ctx, 1, 1, "diagnostics complete")
 	return JSONResult(map[string]any{
 		"ok":          buildErr == nil,
 		"diagnostics": views,
 		"count":       len(views),
+		"codemods":    codemods,
 		"output":      strings.TrimSpace(out),
 	})
 }
 
+func codemodKey(code, file string, line, col int) string {
+	return fmt.Sprintf("%s\x00%s\x00%d\x00%d", code, normalizeRel(file), line, col)
+}
+
 func (s *Service) toolApplySafeFixes(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {
-	files, _, skipped, err := fix.Plan(s.root)
+	codes := argStringList(args, "codes")
+	pathFilters := argStringList(args, "paths")
+	files, changes, skipped, err := fix.PlanWithCodes(s.root, codes)
 	if err != nil {
 		return ErrorResult("planning safe fixes: " + err.Error()), nil
 	}
@@ -350,11 +387,17 @@ func (s *Service) toolApplySafeFixes(ctx context.Context, args map[string]any) (
 	tx := newFileTransaction(s)
 	rels := make([]string, 0, len(files))
 	for rel := range files {
+		if len(pathFilters) > 0 && !matchesPathFilters(pathFilters, rel) {
+			continue
+		}
 		rels = append(rels, rel)
 	}
 	sort.Strings(rels)
+	selected := map[string]bool{}
 	for _, rel := range rels {
+		selected[rel] = true
 		if s.policy != nil && !s.policy.writable(rel) {
+			skipped = append(skipped, fix.Skipped{File: rel, Reason: s.policy.deniedReason(rel)})
 			continue
 		}
 		abs, _, terr := s.resolveProjectPath(rel)
@@ -369,22 +412,58 @@ func (s *Service) toolApplySafeFixes(ctx context.Context, args map[string]any) (
 			return ErrorResult(err.Error()), nil
 		}
 	}
+	appliedChanges := make([]fix.Change, 0, len(changes))
+	for _, change := range changes {
+		if selected[change.File] {
+			appliedChanges = append(appliedChanges, change)
+		}
+	}
 	if tx.count() == 0 {
-		return TextResult("No safe fixes available."), nil
+		if len(appliedChanges) == 0 {
+			return TextResult("No safe fixes available."), nil
+		}
+		var b strings.Builder
+		b.WriteString("No writable safe fixes available.")
+		for _, sk := range skipped {
+			fmt.Fprintf(&b, "\n  %s: %s", sk.File, sk.Reason)
+		}
+		return TextResult(b.String()), nil
 	}
 	res, rerr := s.finishTransaction(tx, apply, "safe fixes")
 	if rerr != nil {
 		return res, rerr
 	}
+	var b strings.Builder
+	if len(appliedChanges) > 0 {
+		b.WriteString("\nCodemods:\n")
+		for _, change := range appliedChanges {
+			fmt.Fprintf(&b, "  %s %s:%d:%d %q -> %q\n", change.Code, change.File, change.Line, change.Col, change.From, change.To)
+		}
+	}
 	if len(skipped) > 0 {
-		var b strings.Builder
 		b.WriteString("\nSkipped files:\n")
 		for _, sk := range skipped {
 			fmt.Fprintf(&b, "  %s: %s\n", sk.File, sk.Reason)
 		}
+	}
+	if b.Len() > 0 {
 		res.Content = append(res.Content, TextContent(b.String()))
 	}
 	return res, nil
+}
+
+func matchesPathFilters(patterns []string, rel string) bool {
+	rel = normalizeRel(rel)
+	for _, pattern := range patterns {
+		pattern = normalizeRel(pattern)
+		if pattern == "" {
+			continue
+		}
+		if globMatch(pattern, rel) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) toolApplyFix(ctx context.Context, args map[string]any) (ToolResult, *rpcError) {

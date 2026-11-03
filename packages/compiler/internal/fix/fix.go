@@ -101,6 +101,21 @@ func Run(root string, apply bool) (Result, error) {
 // anything. Callers (such as the MCP transaction layer) can then stage and
 // commit the changes under their own policy and conflict checks.
 func Plan(root string) (map[string]string, []Change, []Skipped, error) {
+	return PlanWithCodes(root, nil)
+}
+
+// PlanWithCodes is Plan restricted to the given diagnostic codes. An empty
+// list means every safe fix.
+func PlanWithCodes(root string, codes []string) (map[string]string, []Change, []Skipped, error) {
+	allow := map[string]bool{}
+	for _, code := range codes {
+		if code = strings.TrimSpace(code); code != "" {
+			allow[code] = true
+		}
+	}
+	if len(allow) == 0 {
+		allow = nil
+	}
 	files := map[string]string{}
 	var changes []Change
 	var skipped []Skipped
@@ -122,7 +137,7 @@ func Plan(root string) (map[string]string, []Change, []Skipped, error) {
 		if err != nil {
 			return nil
 		}
-		out, fileChanges, parseErr := fixSource(string(src))
+		out, fileChanges, parseErr := fixSourceFiltered(string(src), allow)
 		rel, _ := filepath.Rel(root, path)
 		rel = filepath.ToSlash(rel)
 		if parseErr != nil {
@@ -161,6 +176,10 @@ func fixableFile(path string) bool {
 // fixSource returns the rewritten source and the changes it would make. A
 // parse error is returned instead of a partial rewrite.
 func fixSource(src string) (string, []Change, error) {
+	return fixSourceFiltered(src, nil)
+}
+
+func fixSourceFiltered(src string, allow map[string]bool) (string, []Change, error) {
 	p := parser.New(lexer.New(src).Tokenize())
 	prog := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
@@ -174,26 +193,35 @@ func fixSource(src string) (string, []Change, error) {
 	if err := json.Unmarshal(doc, &root); err != nil {
 		return src, nil, err
 	}
-	var attrs []attrFix
-	collectAttrs(root, &attrs)
-	if len(attrs) == 0 {
+	var edits []sourceEdit
+	collectSafeEdits(root, src, &edits)
+	if allow != nil {
+		filtered := edits[:0]
+		for _, e := range edits {
+			if allow[string(e.code)] {
+				filtered = append(filtered, e)
+			}
+		}
+		edits = filtered
+	}
+	if len(edits) == 0 {
 		return src, nil, nil
 	}
 
-	sort.Slice(attrs, func(i, j int) bool { return attrs[i].offset > attrs[j].offset })
-	seen := map[int]bool{}
+	sort.Slice(edits, func(i, j int) bool { return edits[i].start > edits[j].start })
 	var changes []Change
 	out := src
-	for _, a := range attrs {
-		if seen[a.offset] {
+	lastStart := len(src) + 1
+	for _, e := range edits {
+		if e.start < 0 || e.end < e.start || e.end > len(out) || e.end > lastStart {
 			continue
 		}
-		seen[a.offset] = true
-		if a.offset < 0 || a.offset+len(a.from) > len(out) || out[a.offset:a.offset+len(a.from)] != a.from {
+		if out[e.start:e.end] != e.from {
 			continue
 		}
-		out = out[:a.offset] + a.to + out[a.offset+len(a.from):]
-		changes = append(changes, Change{Line: a.line, Col: a.col, Code: diag.CodeLowercaseEvent, From: a.from, To: a.to})
+		out = out[:e.start] + e.to + out[e.end:]
+		lastStart = e.start
+		changes = append(changes, Change{Line: e.line, Col: e.col, Code: e.code, From: e.from, To: e.to})
 	}
 	// Changes are reported in source order even though edits apply backwards.
 	sort.Slice(changes, func(i, j int) bool {
@@ -205,59 +233,208 @@ func fixSource(src string) (string, []Change, error) {
 	return out, changes, nil
 }
 
-type attrFix struct {
-	offset int
-	line   int
-	col    int
-	from   string
-	to     string
+type sourceEdit struct {
+	start int
+	end   int
+	line  int
+	col   int
+	from  string
+	to    string
+	code  diag.Code
 }
 
-func collectAttrs(v any, out *[]attrFix) {
+func collectSafeEdits(v any, src string, out *[]sourceEdit) {
 	switch t := v.(type) {
 	case map[string]any:
 		if t["kind"] == "JSXElement" {
-			collectElementAttrs(t, out)
+			collectElementEdits(t, src, out)
 		}
 		for _, child := range t {
-			collectAttrs(child, out)
+			collectSafeEdits(child, src, out)
 		}
 	case []any:
 		for _, child := range t {
-			collectAttrs(child, out)
+			collectSafeEdits(child, src, out)
 		}
 	}
 }
 
-// collectElementAttrs only inspects built-in elements, matching KR5002's
-// scope. Component props are free-form and may intentionally use lowercase.
-func collectElementAttrs(el map[string]any, out *[]attrFix) {
+// collectElementEdits only inspects built-in elements. Component props are
+// free-form and may intentionally use lowercase or ignore DOM semantics.
+func collectElementEdits(el map[string]any, src string, out *[]sourceEdit) {
 	opening, _ := el["opening"].(map[string]any)
 	tag, _ := opening["name"].(string)
 	if tag == "" || tag[0] < 'a' || tag[0] > 'z' || strings.ContainsAny(tag, "-.:") {
 		return
 	}
 	attrs, _ := opening["attributes"].([]any)
+	byName := map[string]map[string]any{}
 	for _, raw := range attrs {
 		attr, _ := raw.(map[string]any)
 		name, _ := attr["name"].(string)
-		to, ok := irtree.LowercaseEventReplacement(name)
-		if !ok || to == name || isStringLiteral(attr["value"]) {
-			continue
+		if name != "" {
+			byName[name] = attr
 		}
+	}
+	for _, raw := range attrs {
+		attr, _ := raw.(map[string]any)
+		name, _ := attr["name"].(string)
 		pos, _ := attr["position"].(map[string]any)
 		offset := jsonInt(pos["offset"])
 		if offset < 0 {
 			continue
 		}
-		*out = append(*out, attrFix{
-			offset: offset,
-			line:   jsonInt(pos["line"]),
-			col:    jsonInt(pos["col"]),
-			from:   name,
-			to:     to,
+		if to, ok := irtree.LowercaseEventReplacement(name); ok && to != name && !isStringLiteral(attr["value"]) {
+			*out = append(*out, sourceEdit{
+				start: offset, end: offset + len(name), line: jsonInt(pos["line"]), col: jsonInt(pos["col"]),
+				from: name, to: to, code: diag.CodeLowercaseEvent,
+			})
+		}
+	}
+	if tag != "input" && tag != "textarea" && tag != "select" {
+		if byName["contentEditable"] != nil && byName["onChange"] != nil && byName["onInput"] == nil {
+			attr := byName["onChange"]
+			pos, _ := attr["position"].(map[string]any)
+			offset := jsonInt(pos["offset"])
+			if offset >= 0 {
+				*out = append(*out, sourceEdit{
+					start: offset, end: offset + len("onChange"), line: jsonInt(pos["line"]), col: jsonInt(pos["col"]),
+					from: "onChange", to: "onInput", code: diag.CodeContentEditableChange,
+				})
+			}
+		}
+	}
+	for _, pair := range [][2]string{{"value", "defaultValue"}, {"checked", "defaultChecked"}} {
+		ctl, def := byName[pair[0]], byName[pair[1]]
+		if ctl == nil || def == nil || isUndefinedJSON(ctl["value"]) {
+			continue
+		}
+		pos, _ := def["position"].(map[string]any)
+		offset := jsonInt(pos["offset"])
+		if offset < 0 {
+			continue
+		}
+		end := attributeEnd(src, offset)
+		if end <= offset || end > len(src) {
+			continue
+		}
+		start := offset
+		for start > 0 && isJSXSpace(src[start-1]) {
+			start--
+		}
+		*out = append(*out, sourceEdit{
+			start: start, end: end, line: jsonInt(pos["line"]), col: jsonInt(pos["col"]),
+			from: src[start:end], to: "", code: diag.CodeValueAndDefault,
 		})
 	}
+}
+
+// attributeEnd returns the exclusive end offset of the JSX attribute starting
+// at start. It understands quoted values and balanced {expressions}.
+func attributeEnd(src string, start int) int {
+	i := start
+	for i < len(src) && !isJSXSpace(src[i]) && src[i] != '=' && src[i] != '>' && src[i] != '/' {
+		i++
+	}
+	if i >= len(src) {
+		return -1
+	}
+	nameEnd := i
+	for i < len(src) && isJSXSpace(src[i]) {
+		i++
+	}
+	if i >= len(src) || src[i] != '=' {
+		return nameEnd
+	}
+	i++
+	for i < len(src) && isJSXSpace(src[i]) {
+		i++
+	}
+	if i >= len(src) {
+		return -1
+	}
+	switch src[i] {
+	case '"', '\'':
+		quote := src[i]
+		i++
+		for i < len(src) {
+			if src[i] == '\\' {
+				i += 2
+				continue
+			}
+			if src[i] == quote {
+				return i + 1
+			}
+			i++
+		}
+		return -1
+	case '{':
+		return scanJSXBraces(src, i)
+	default:
+		for i < len(src) && !isJSXSpace(src[i]) && src[i] != '>' && src[i] != '/' {
+			i++
+		}
+		return i
+	}
+}
+
+func scanJSXBraces(src string, start int) int {
+	depth := 0
+	for i := start; i < len(src); i++ {
+		switch src[i] {
+		case '"', '\'':
+			quote := src[i]
+			i++
+			for i < len(src) {
+				if src[i] == '\\' {
+					i++
+				} else if src[i] == quote {
+					break
+				}
+				i++
+			}
+		case '`':
+			i++
+			for i < len(src) {
+				if src[i] == '\\' {
+					i++
+				} else if src[i] == '`' {
+					break
+				}
+				i++
+			}
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return -1
+}
+
+func isJSXSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n'
+}
+
+func isUndefinedJSON(v any) bool {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return false
+	}
+	switch m["kind"] {
+	case "Identifier":
+		name, _ := m["name"].(string)
+		return name == "undefined"
+	case "Literal":
+		return jsonInt(m["literalKind"]) == 3
+	case "UnaryExpr":
+		op, _ := m["op"].(string)
+		return op == "void"
+	}
+	return false
 }
 
 func isStringLiteral(v any) bool {

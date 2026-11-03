@@ -26,10 +26,20 @@ no-op. Writes are atomic and preserve the file mode.
 | --- | --- | --- |
 | `KR5002` | Lowercase React event name to its camelCase form | `onclick={fn}` -> `onClick={fn}` |
 | `KR5002` | Lowercase capture handler | `onclickcapture={fn}` -> `onClickCapture={fn}` |
+| `KR5005` | Remove an ignored form default when a controlled prop is present | `value={v} defaultValue="x"` -> `value={v}` |
+| `KR5005` | Remove the ignored checked default | `checked={on} defaultChecked` -> `checked={on}` |
+| `KR5007` | Rename `onChange` on `contentEditable` to `onInput` | `onChange={edit}` -> `onInput={edit}` |
 
 String-valued inline handlers such as `onclick="native()"` are HTML event
 attributes, not React handlers, and are left unchanged. Component props,
-custom-element props, and unknown event names are also left alone.
+custom-element props, and unknown event names are also left alone. A
+`defaultValue` is kept when `value` is `undefined` or `void 0`, and a
+`contentEditable` handler is kept when `onInput` already exists.
+
+Automation uses the same plan. From MCP, `get_diagnostics` returns a `codemods`
+array with each rewrite's code, path, location, and from/to text. Pass those
+codes to `apply_safe_fixes` (`{ "codes": ["KR5005"], "paths": ["src/**"] }`) to
+preview or apply only that subset.
 
 ## Manual migration
 
@@ -40,6 +50,8 @@ fix:
 | --- | --- |
 | `KR5001` | Rename the prop to a React DOM event, or attach a custom listener with `ref.current.addEventListener` in an effect. |
 | `KR5003` | Replace a string ref with `useRef`/`createRef` or a callback ref. |
+| `KR5004` | Add `onChange`, use `defaultValue`, or mark the field `readOnly`; the right choice depends on intent. |
+| `KR5006` | Use `""` (or `false` for checked) instead of `undefined` so the field stays controlled. |
 | `KR6001` | Give each dynamic list row a stable `key`. |
 | `KR6002` | Make duplicate keys unique; do not rely on index fallback. |
 | `KR7001` | Move an inline `"use server"` function to a `"use server"` module. |

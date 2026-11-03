@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Tool is a callable MCP tool. InputSchema is a hand-written JSON Schema
@@ -236,6 +237,7 @@ func (s *Server) callTool(raw json.RawMessage, op *pendingOp) (any, *rpcError) {
 			s.writeProgress(token, progress, total, message)
 		}))
 	}
+	started := time.Now()
 	var result ToolResult
 	var rerr *rpcError
 	func() {
@@ -246,6 +248,28 @@ func (s *Server) callTool(raw json.RawMessage, op *pendingOp) (any, *rpcError) {
 		}()
 		result, rerr = tool.Handler(op.ctx, params.Arguments)
 	}()
+	readOnly, _ := tool.Annotations["readOnlyHint"].(bool)
+	apply, _ := params.Arguments["apply"].(bool)
+	rec := auditRecord{
+		Event:      "tool_call",
+		Tool:       params.Name,
+		ReadOnly:   readOnly,
+		Apply:      apply,
+		Status:     "ok",
+		DurationMS: time.Since(started).Milliseconds(),
+		Args:       auditArgs(params.Arguments),
+		Paths:      auditPaths(params.Arguments),
+	}
+	if rerr != nil {
+		rec.Status = "error"
+		rec.Error = rerr.Message
+	} else if result.IsError {
+		rec.Status = "error"
+		if len(result.Content) > 0 {
+			rec.Error = result.Content[0].Text
+		}
+	}
+	s.audit(rec)
 	if rerr != nil {
 		return nil, rerr
 	}
@@ -475,6 +499,32 @@ func argInt(args map[string]any, key string, def int) int {
 func argStringMap(args map[string]any, key string) map[string]any {
 	if m, ok := args[key].(map[string]any); ok {
 		return m
+	}
+	return nil
+}
+
+// argStringList extracts a string array. A single string is accepted for
+// convenience.
+func argStringList(args map[string]any, key string) []string {
+	raw, ok := args[key]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case string:
+		if v = strings.TrimSpace(v); v != "" {
+			return []string{v}
+		}
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, strings.TrimSpace(s))
+			}
+		}
+		return out
+	case []string:
+		return v
 	}
 	return nil
 }

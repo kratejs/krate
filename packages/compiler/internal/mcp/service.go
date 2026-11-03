@@ -37,15 +37,19 @@ type Options struct {
 
 // Service implements the MCP tools and resources over one in-process Builder.
 type Service struct {
-	root           string
-	cfg            *config.Config
-	env            map[string]string
-	verbose        bool
-	builder        *build.Builder
-	policy         *Policy
-	notifyMu       sync.Mutex
-	notifyResource []func(string)
-	notifyLog      []func(level, message string)
+	root                    string
+	cfg                     *config.Config
+	env                     map[string]string
+	verbose                 bool
+	builder                 *build.Builder
+	policy                  *Policy
+	notifyMu                sync.Mutex
+	notifyResource          []func(string)
+	notifyLog               []func(level, message string)
+	auditMu                 sync.Mutex
+	auditPath               string
+	secretValues            []string
+	policyLiteralRedactions []string
 
 	// runMu serializes write operations and build/check (which swap os.Stdout
 	// during stdout capture) so concurrent requests never race.
@@ -54,13 +58,17 @@ type Service struct {
 
 // NewService creates a Service and its session Builder.
 func NewService(opts Options) *Service {
+	policy := loadPolicy(opts.Root)
 	return &Service{
-		root:    opts.Root,
-		cfg:     opts.Cfg,
-		env:     opts.Env,
-		verbose: opts.Verbose,
-		builder: newBuilder(opts),
-		policy:  loadPolicy(opts.Root),
+		root:                    opts.Root,
+		cfg:                     opts.Cfg,
+		env:                     opts.Env,
+		verbose:                 opts.Verbose,
+		builder:                 newBuilder(opts),
+		policy:                  policy,
+		auditPath:               policy.auditLogPath(),
+		secretValues:            secretEnvValues(opts.Env),
+		policyLiteralRedactions: append([]string(nil), policy.Redact...),
 	}
 }
 
@@ -81,6 +89,8 @@ func (s *Service) Register(srv *Server) {
 	s.notifyResource = append(s.notifyResource, srv.NotifyResourceUpdated)
 	s.notifyLog = append(s.notifyLog, srv.NotifyLog)
 	s.notifyMu.Unlock()
+	srv.SetRedactor(s.redact)
+	srv.SetAuditHook(s.recordAudit)
 	// read tools
 	srv.RegisterTool(Tool{
 		Name:        "list_routes",
@@ -307,8 +317,10 @@ func (s *Service) Register(srv *Server) {
 	})
 	srv.RegisterTool(Tool{
 		Name:        "apply_safe_fixes",
-		Description: "Apply the compiler's conservative safe fixes (currently lowercase event attributes) through a policy-checked transaction. Dry-run by default.",
+		Description: "Apply the compiler's conservative codemods through a policy-checked transaction: lowercase events (KR5002), ignored form defaults (KR5005), and contentEditable onChange (KR5007). Dry-run by default; filter by codes and paths.",
 		InputSchema: objSchema(map[string]any{
+			"codes": map[string]any{"type": "array", "items": strSchema("Diagnostic code, e.g. KR5002")},
+			"paths": map[string]any{"type": "array", "items": strSchema("Project-relative path or glob, e.g. src/pages/**")},
 			"apply": boolSchema("Write the fixes (default false: dry-run)"),
 		}),
 		Annotations: destructiveToolAnnotations("Apply Safe Fixes"),
@@ -1811,7 +1823,7 @@ func (s *Service) promptFixChecks() *Prompt {
 		},
 		Messages: []PromptMessage{{
 			Role:    "user",
-			Content: TextContent("Run get_diagnostics with check enabled. For each finding, read the source file, then apply the smallest safe repair with apply_fix (find/replace) or apply_patch. Keep the diff minimal and match the project style. Re-run get_diagnostics or run_task { task: \"check\" } afterward to confirm the fix."),
+			Content: TextContent("Run get_diagnostics with check enabled. Apply any matching codemods first with apply_safe_fixes (filter by codes and paths; review the dry-run diff). For remaining findings, read the source file, then apply the smallest safe repair with apply_fix (find/replace) or apply_patch. Keep the diff minimal and match the project style. Re-run get_diagnostics or run_task { task: \"check\" } afterward to confirm the fix."),
 		}},
 	}
 }
@@ -1825,7 +1837,7 @@ func (s *Service) promptRepairDiagnostics() *Prompt {
 		},
 		Messages: []PromptMessage{{
 			Role:    "user",
-			Content: TextContent("Run get_diagnostics with check enabled. Read the files involved, then repair the smallest set of issues with apply_fix or apply_patch in dry-run mode first. Apply only after reviewing the diff, then run get_diagnostics and run_task { task: \"build\" } or check again. Report anything that remains unfixable."),
+			Content: TextContent("Run get_diagnostics with check enabled. Apply the safe codemods it reports first with apply_safe_fixes (dry-run, then apply after review). Read the remaining files involved, then repair the smallest set of issues with apply_fix or apply_patch in dry-run mode first. Apply only after reviewing the diff, then run get_diagnostics and run_task { task: \"build\" } or check again. Report anything that remains unfixable."),
 		}},
 	}
 }

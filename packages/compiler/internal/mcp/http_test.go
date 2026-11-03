@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -164,5 +166,91 @@ func TestHTTPPersistentSessionProgressAndReconnect(t *testing.T) {
 	}
 	if !strings.Contains(joined, "notifications/resources/updated") {
 		t.Fatalf("reconnected SSE did not replay resource update:\n%s", joined)
+	}
+}
+
+func TestHTTPOriginRateLimitAndObservability(t *testing.T) {
+	svc := newTestService(t, map[string]string{
+		"src/pages/index.tsx": "export default function Page() { return <h1>Hi</h1>; }\n",
+	})
+	svc.policy.RateLimit = &RateLimitPolicy{Requests: 2, WindowSeconds: 60}
+	ts := httptest.NewServer(svc.HTTPHandler("secret"))
+	defer ts.Close()
+
+	post := func(host, origin string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+		req.Header.Set("Authorization", "Bearer secret")
+		if host != "" {
+			req.Host = host
+		}
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return resp
+	}
+
+	if resp := post("evil.example", ""); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("unexpected Host status = %d, want 403", resp.StatusCode)
+	}
+	if resp := post("", "https://evil.example"); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("unexpected Origin status = %d, want 403", resp.StatusCode)
+	}
+	if resp := post("", ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("first request status = %d, want 200", resp.StatusCode)
+	}
+	if resp := post("", ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("second request status = %d, want 200", resp.StatusCode)
+	}
+	if resp := post("", ""); resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("third request status = %d, want 429", resp.StatusCode)
+	} else if resp.Header.Get("Retry-After") == "" {
+		t.Fatal("rate limit response is missing Retry-After")
+	}
+
+	health, err := http.Get(ts.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthBody, _ := io.ReadAll(health.Body)
+	health.Body.Close()
+	if health.StatusCode != http.StatusOK || !strings.Contains(string(healthBody), `"status":"ok"`) {
+		t.Fatalf("health = %d %s", health.StatusCode, healthBody)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/metrics", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	metrics, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metricsBody, _ := io.ReadAll(metrics.Body)
+	metrics.Body.Close()
+	if metrics.StatusCode != http.StatusOK {
+		t.Fatalf("metrics status = %d", metrics.StatusCode)
+	}
+	if !strings.Contains(string(metricsBody), "krate_mcp_http_rate_limited_total 1") {
+		t.Fatalf("metrics missing rate-limit counter:\n%s", metricsBody)
+	}
+	if !strings.Contains(string(metricsBody), "krate_mcp_sessions_active 2") {
+		t.Fatalf("metrics missing active sessions:\n%s", metricsBody)
+	}
+
+	audit, err := os.ReadFile(filepath.Join(svc.root, filepath.FromSlash(svc.auditPath)))
+	if err != nil {
+		t.Fatalf("reading audit log: %v", err)
+	}
+	log := string(audit)
+	if !strings.Contains(log, `"event":"security_reject"`) || !strings.Contains(log, `"reason":"rate_limited"`) {
+		t.Fatalf("audit log missing security rejection:\n%s", log)
+	}
+	if strings.Contains(log, "Bearer secret") {
+		t.Fatalf("audit log leaked the bearer token:\n%s", log)
 	}
 }
