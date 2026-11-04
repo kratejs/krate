@@ -13,7 +13,7 @@ import {
 
 interface Entry {
   id: string;
-  k: 'layout' | 'template';
+  k: 'layout' | 'template' | 'error';
   d: number;
   p: boolean;
   why?: string;
@@ -118,6 +118,51 @@ describe('layout persistence', () => {
     await new Promise((r) => setTimeout(r, 0));
     // The layout effect is still live.
     expect(log).toEqual(['layout-cleanup', 'layout:1']);
+  });
+
+  it('shows a segment 404/500 page in place, keeps the layout, and hands over the server error data', async () => {
+    setup(shell('<main>Page A</main>'), [LAYOUT]);
+    const nav = document.getElementById('nav')!;
+    const errorBlock = '<script type="application/json" id="__krate_error">{"message":"Internal Server Error","digest":"abc1234567"}</script>';
+    const errDoc = doc('500', shell('<main id="err">Oops</main>'), [LAYOUT]).replace('</head>', errorBlock + '</head>');
+    (fetch as any).mockImplementation(async (input: string) => {
+      const u = new URL(input, location.href);
+      const bodies: Record<string, [number, string]> = {
+        '/boom': [500, errDoc],
+        '/missing': [404, doc('404', shell('<main id="nf">Nothing here</main>'), [LAYOUT])],
+        '/fine': [200, doc('Fine', shell('<main>Fine</main>'), [LAYOUT])],
+      };
+      const hit = bodies[u.pathname];
+      return {
+        ok: !!hit && hit[0] < 400,
+        status: hit ? hit[0] : 404,
+        url: u.href,
+        headers: new Headers({ 'content-type': 'text/html' }),
+        text: async () => (hit ? hit[1] : ''),
+      } as unknown as Response;
+    });
+
+    await krateRouter.push('/boom');
+    expect(document.getElementById('err')).not.toBeNull();
+    expect(document.getElementById('nav')).toBe(nav);
+    expect(location.pathname).toBe('/boom');
+    const block = document.getElementById('__krate_error')!;
+    expect(JSON.parse(block.textContent!).digest).toBe('abc1234567');
+    expect(document.querySelectorAll('#__krate_error')).toHaveLength(1);
+
+    // A 404 page swaps in the same way and the previous error data is dropped.
+    await krateRouter.push('/missing');
+    expect(document.getElementById('nf')).not.toBeNull();
+    expect(document.getElementById('nav')).toBe(nav);
+    expect(location.pathname).toBe('/missing');
+    expect(document.getElementById('__krate_error')).toBeNull();
+
+    // And an ordinary page after an error page leaves no stale data either.
+    await krateRouter.push('/boom');
+    expect(document.getElementById('__krate_error')).not.toBeNull();
+    await krateRouter.push('/fine');
+    expect(document.getElementById('__krate_error')).toBeNull();
+    expect(document.getElementById('nav')).toBe(nav);
   });
 
   it('remounts layouts the compiler marked as not persistable', async () => {

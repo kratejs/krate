@@ -128,3 +128,65 @@ func TestCSPSpeculationRulesInBrowser(t *testing.T) {
 	}
 	t.Logf("%s", out)
 }
+
+// TestSegmentPagesBrowser drives per-segment not-found and error pages in a
+// real browser against the real Go server (testdata/segments_app): a nested
+// 404 inside the layouts on hard load and soft navigation with layout state
+// kept, the client error boundary with reset(), nested boundaries, the
+// server-rendered error page and soft navigation away clearing an error.
+// Runs when KRATE_BROWSER is set.
+func TestSegmentPagesBrowser(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the segment pages browser test")
+	}
+	if !canStopInProcessServer {
+		t.Skip("the in-process server needs a unix host")
+	}
+	ensureRuntimeDist(t)
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	root := t.TempDir()
+	if err := copyTree(t, filepath.Join("testdata", "segments_app"), root); err != nil {
+		t.Fatal(err)
+	}
+	if err := linkRuntimePackage(t, filepath.Join(root, "node_modules", "@krate")); err != nil {
+		t.Fatal(err)
+	}
+	repoRoot, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "packages"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(repoRoot, "packages", "runtime"), filepath.Join(root, "packages", "runtime")); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "segments_e2e.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", script, base, browser).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("segment pages browser test failed: %v\n%s", err, out)
+	}
+	t.Logf("segment pages (%s):\n%s", browser, out)
+}

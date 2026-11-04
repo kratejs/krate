@@ -438,6 +438,11 @@ class Controller {
     const owner = this.owner;
     if (this.disposed || !owner || owner.state !== 'mounted') return false;
     if (this.catching) return true;
+    // The boundary already shows its fallback: an error from there is the
+    // fallback's own, which React hands to the next boundary up (a boundary
+    // never catches what its own render output throws). A reset clears inError
+    // before the children mount again, so their errors are caught as usual.
+    if (owner.inError) return false;
     this.catching = true;
     try {
       // React logs every error a boundary catches.
