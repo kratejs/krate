@@ -187,7 +187,9 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 		childNode.CallSiteChildrenText = text
 	}
 	restoreExpansion := b.callerExpansion()
+	restoreCSS := b.enterCSSChildren(childFn)
 	childNode.Children = b.buildCallSiteChildSlots(el.Children, string(childID))
+	restoreCSS()
 	restoreExpansion()
 	b.callSiteChildren = savedCS
 
@@ -278,7 +280,7 @@ func (b *builder) buildClientComponentSlot(el *ast.JSXElement, childFn *ast.FnDe
 		childNode.Lazy = true
 	}
 	childNode.CallSiteChildren = el.Children
-	childNode.CallSiteSlots = b.buildComponentCallSiteSlots(el, childID, provider, childNode.childrenContext)
+	childNode.CallSiteSlots = b.buildComponentCallSiteSlots(el, childFn, childID, provider, childNode.childrenContext)
 	b.completeSSREvalBindings(childNode, childFn, attrs)
 	b.registerChildProps(childNode, childFn)
 
@@ -383,9 +385,10 @@ func (b *builder) installCallSiteInputs(el *ast.JSXElement, childFn *ast.FnDecl,
 // buildComponentCallSiteSlots builds a client component's call-site children
 // (in the caller's scope) with the component's call-site children and any
 // scope it provides active.
-func (b *builder) buildComponentCallSiteSlots(el *ast.JSXElement, childID SlotID, provider scopeProvider, overlay *contextOverlay) []SlotNode {
+func (b *builder) buildComponentCallSiteSlots(el *ast.JSXElement, childFn *ast.FnDecl, childID SlotID, provider scopeProvider, overlay *contextOverlay) []SlotNode {
 	savedCallSite, savedScopes := b.callSiteChildren, b.contextScopes
 	defer func() { b.callSiteChildren, b.contextScopes = savedCallSite, savedScopes }()
+	defer b.enterCSSChildren(childFn)()
 	defer b.callerExpansion()()
 	defer b.applyChildrenContext(overlay)()
 	b.callSiteChildren = el.Children
@@ -625,4 +628,18 @@ func slotsReadAny(slots []SlotNode, reads func(string) bool) bool {
 		}
 	}
 	return false
+}
+
+// enterCSSChildren marks fn as an active CSS signal component while its
+// call-site children are built, so a nested instance of the same component
+// gets its own scope classes. The returned func undoes it.
+func (b *builder) enterCSSChildren(fn *ast.FnDecl) func() {
+	if a := b.cssAnalyzer(fn); a == nil || !a.OK() {
+		return func() {}
+	}
+	if b.cssActive == nil {
+		b.cssActive = make(map[*ast.FnDecl]int)
+	}
+	b.cssActive[fn]++
+	return func() { b.cssActive[fn]-- }
 }

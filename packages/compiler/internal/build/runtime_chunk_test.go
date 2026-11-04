@@ -1,6 +1,7 @@
 package build
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,15 +87,25 @@ func TestRuntimeChunkCompatConditional(t *testing.T) {
 	}
 }
 
-func TestRequireRuntimeChunk(t *testing.T) {
-	if err := requireRuntimeChunk("", []*PageResult{{HasJS: false}}); err != nil {
-		t.Fatalf("static sites need no runtime: %v", err)
+func TestWarnMissingRuntime(t *testing.T) {
+	capture := func(runtimeJS string, results []*PageResult) string {
+		old := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+		warnMissingRuntime(runtimeJS, results)
+		_ = w.Close()
+		os.Stderr = old
+		data, _ := io.ReadAll(r)
+		return string(data)
 	}
-	if err := requireRuntimeChunk("chunks/runtime.x.js", []*PageResult{{HasJS: true}}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if out := capture("", []*PageResult{{HasJS: false}}); out != "" {
+		t.Fatalf("static sites need no runtime: %q", out)
 	}
-	err := requireRuntimeChunk("", []*PageResult{{HasJS: true, SourcePath: "src/pages/index.tsx"}})
-	if err == nil || !strings.Contains(err.Error(), "krate-hydrate.js") {
-		t.Fatalf("want missing-runtime diagnostic, got %v", err)
+	if out := capture("chunks/runtime.x.js", []*PageResult{{HasJS: true}}); out != "" {
+		t.Fatalf("unexpected warning: %q", out)
+	}
+	out := capture("", []*PageResult{{HasJS: true, SourcePath: "src/pages/index.tsx"}})
+	if !strings.Contains(out, "krate-hydrate.js") || !strings.Contains(out, "hint:") {
+		t.Fatalf("want missing-runtime warning with hint, got %q", out)
 	}
 }

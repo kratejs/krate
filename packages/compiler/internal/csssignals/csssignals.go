@@ -75,6 +75,9 @@ type Scope struct {
 	// Options is the ordered option universe: choice values, ["on"] for a
 	// toggle, or flag names for flags.
 	Options []string
+	// NS namespaces the root class for scopes built by independent units
+	// (layouts); empty for the page itself.
+	NS string
 	// Index is the page-unique scope index; the root class is ClassPrefix+index.
 	Index int
 	// Class is the scope's root class, shared by every instance.
@@ -131,7 +134,7 @@ func (s *Scope) IsDisabled(option string) bool {
 }
 
 // base returns the scope's root class (e.g. "krc0").
-func (s *Scope) base() string { return ClassPrefix + encodeIndex(s.Index) }
+func (s *Scope) base() string { return ClassPrefix + s.NS + encodeIndex(s.Index) }
 
 // RadioClass returns the class marking the controller input for a choice
 // option.
@@ -301,7 +304,13 @@ type indexFor func(component, variable string) int
 // When a declaration is present but not compilable, Errors lists the reasons
 // (the build must fail; there is no fallback).
 func Analyze(component string, body []ast.Stmt, index indexFor) *Analyzer {
-	return analyzeBody(component, body, index, nil, "")
+	return analyzeBody("", component, body, index, nil, "")
+}
+
+// AnalyzeIn is Analyze with the scope classes namespaced by ns (for example a
+// layout's id prefix), so scopes built by independent units never share a class.
+func AnalyzeIn(ns, component string, body []ast.Stmt, index indexFor) *Analyzer {
+	return analyzeBody(ns, component, body, index, nil, "")
 }
 
 // AnalyzeParts is Analyze with an explicit option universe and initial value
@@ -309,10 +318,15 @@ func Analyze(component string, body []ast.Stmt, index indexFor) *Analyzer {
 // components (<Tabs><Tabs.Trigger value="a">...) whose options are literals at
 // the call site rather than in the root's own body.
 func AnalyzeParts(component string, body []ast.Stmt, index indexFor, options []string, initial string) *Analyzer {
-	return analyzeBody(component, body, index, options, initial)
+	return analyzeBody("", component, body, index, options, initial)
 }
 
-func analyzeBody(component string, body []ast.Stmt, index indexFor, partsOptions []string, partsInitial string) *Analyzer {
+// AnalyzePartsIn is AnalyzeParts with namespaced scope classes (see AnalyzeIn).
+func AnalyzePartsIn(ns, component string, body []ast.Stmt, index indexFor, options []string, initial string) *Analyzer {
+	return analyzeBody(ns, component, body, index, options, initial)
+}
+
+func analyzeBody(ns, component string, body []ast.Stmt, index indexFor, partsOptions []string, partsInitial string) *Analyzer {
 	a := &Analyzer{
 		bySetter:      make(map[string]*Scope),
 		byVar:         make(map[string]*Scope),
@@ -519,6 +533,7 @@ func analyzeBody(component string, body []ast.Stmt, index indexFor, partsOptions
 	// Assign stable indices/classes now that we know the component compiles.
 	for _, s := range a.scopes {
 		s.Index = index(component, s.Var)
+		s.NS = ns
 		s.Class = s.base()
 		// Only menus/popovers anchor their panel to the trigger; dialogs and
 		// sheets are fixed/centered (never anchored), so they are excluded.

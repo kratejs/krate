@@ -399,7 +399,11 @@ type builder struct {
 	cssIndex map[string]int
 	// cssAnalyzers memoizes per-component CSS signal analysis (nil entries for
 	// components without any CSS signal declaration).
-	cssAnalyzers map[*ast.FnDecl]*csssignals.Analyzer
+	cssAnalyzers map[cssAnalyzerKey]*csssignals.Analyzer
+	// cssActive counts the in-progress instances of each CSS signal component,
+	// so a nested instance of the same component gets its own scope classes.
+	cssActive  map[*ast.FnDecl]int
+	cssEntered []*ast.FnDecl
 	// scopeOverrides holds call-site option universes for compound scope-root
 	// components (their namespaced parts): fn -> options/initial. Consulted by
 	// cssAnalyzer so controllers/classes match the exact set of call-site parts.
@@ -489,16 +493,21 @@ func (b *builder) cssAnalyzer(fn *ast.FnDecl) *csssignals.Analyzer {
 		return nil
 	}
 	if b.cssAnalyzers == nil {
-		b.cssAnalyzers = make(map[*ast.FnDecl]*csssignals.Analyzer)
+		b.cssAnalyzers = make(map[cssAnalyzerKey]*csssignals.Analyzer)
 	}
-	if a, ok := b.cssAnalyzers[fn]; ok {
+	// An instance nested inside another instance of the same component must not
+	// share its scope classes: the outer scope's descendant selectors would
+	// otherwise react to the inner controls.
+	depth := b.cssActive[fn]
+	akey := cssAnalyzerKey{fn: fn, depth: depth}
+	if a, ok := b.cssAnalyzers[akey]; ok {
 		return a
 	}
 	if b.cssIndex == nil {
 		b.cssIndex = make(map[string]int)
 	}
 	indexFn := func(component, variable string) int {
-		key := component + "\x00" + variable
+		key := component + "\x00" + variable + "\x00" + itoa(depth)
 		if idx, ok := b.cssIndex[key]; ok {
 			return idx
 		}
@@ -508,12 +517,18 @@ func (b *builder) cssAnalyzer(fn *ast.FnDecl) *csssignals.Analyzer {
 	}
 	var a *csssignals.Analyzer
 	if spec, ok := b.scopeOverrides[fn]; ok && len(spec.options) > 0 {
-		a = csssignals.AnalyzeParts(fn.Name, fn.Body, indexFn, spec.options, spec.initial)
+		a = csssignals.AnalyzePartsIn(b.idPrefix, fn.Name, fn.Body, indexFn, spec.options, spec.initial)
 	} else {
-		a = csssignals.Analyze(fn.Name, fn.Body, indexFn)
+		a = csssignals.AnalyzeIn(b.idPrefix, fn.Name, fn.Body, indexFn)
 	}
-	b.cssAnalyzers[fn] = a
+	b.cssAnalyzers[akey] = a
 	return a
+}
+
+// cssAnalyzerKey identifies a component's analysis at one nesting depth.
+type cssAnalyzerKey struct {
+	fn    *ast.FnDecl
+	depth int
 }
 
 // sigMap returns the signal context for the current component being built.

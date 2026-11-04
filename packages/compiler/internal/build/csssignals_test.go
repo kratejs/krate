@@ -512,3 +512,74 @@ func readAllCSS(t *testing.T, outDir string) string {
 	})
 	return sb.String()
 }
+
+// TestBuildCSSSignalsNestedInstancesDistinctScopes checks that an instance of a
+// CSS signal component nested in another instance of the same component gets
+// its own scope class, so the outer scope's selectors ignore the inner radios.
+func TestBuildCSSSignalsNestedInstancesDistinctScopes(t *testing.T) {
+	src := `function Tabs(props: { children?: any }) {
+	const [tab, setTab] = createCSSChoice('one');
+	return (
+		<div class="tabs">
+			<button onClick={() => setTab('one')}>One</button>
+			<button onClick={() => setTab('two')}>Two</button>
+			<div showIf={tab() === 'one'}>P1{props.children}</div>
+			<div showIf={tab() === 'two'}>P2</div>
+		</div>
+	);
+}
+export default function Page() { return <main><Tabs><Tabs/></Tabs><Tabs/></main>; }`
+	html, outDir, err := buildPageSrc(t, src)
+	if err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	roots := regexp.MustCompile(`class="tabs (krc[0-9A-Za-z]+)"`).FindAllStringSubmatch(html, -1)
+	if len(roots) != 3 {
+		t.Fatalf("want 3 tab roots, got %v\n%.1200s", roots, html)
+	}
+	if roots[0][1] == roots[1][1] {
+		t.Errorf("nested instance shares the outer scope class %s", roots[0][1])
+	}
+	if roots[0][1] != roots[2][1] {
+		t.Errorf("sibling instance should reuse the depth-0 scope: %v", roots)
+	}
+	css := readAllCSS(t, outDir)
+	if !strings.Contains(css, "."+roots[1][1]+":has(") {
+		t.Errorf("nested scope has no rules of its own:\n%s", css)
+	}
+}
+
+// TestBuildCSSSignalsLayoutAndPageScopesDistinct checks that a layout and a
+// page using the same CSS signal component never share a scope class.
+func TestBuildCSSSignalsLayoutAndPageScopesDistinct(t *testing.T) {
+	root := t.TempDir()
+	comp := `export function Pick(props: { children?: any }) {
+	const [v, setV] = createCSSChoice('one');
+	return (
+		<div class="pick">
+			<button onClick={() => setV('one')}>One</button>
+			<button onClick={() => setV('two')}>Two</button>
+			<div showIf={v() === 'one'}>{props.children}P1</div>
+			<div showIf={v() === 'two'}>P2</div>
+		</div>
+	);
+}
+`
+	writeFileRel(t, root, "src/components/pick.tsx", comp)
+	writeFileRel(t, root, "src/pages/_layout.tsx", "import { Pick } from '../components/pick';\nexport default function L(children) { return <div><Pick>LP</Pick>{children}</div>; }\n")
+	writeFileRel(t, root, "src/pages/index.tsx", "import { Pick } from '../components/pick';\nexport default function P() { return <main><Pick>PP</Pick></main>; }\n")
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := regexp.MustCompile(`class="pick (krc[0-9A-Za-z_]+)"`).FindAllStringSubmatch(string(data), -1)
+	if len(roots) != 2 || roots[0][1] == roots[1][1] {
+		t.Fatalf("layout and page scopes must differ, got %v\n%.1200s", roots, data)
+	}
+}
