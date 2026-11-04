@@ -4,8 +4,9 @@
 
 **A Go-native static site generator with signal-based reactivity.**
 
-Krate compiles TSX/JSX pages into static HTML at build time and generates a tiny
-hydration bundle that makes pages interactive on the client - no React, no
+Krate compiles TSX/JSX pages into static HTML at build time and generates a small
+hydration bundle (about 25 KB gzipped for a counter page, 17 KB without the
+SPA router) that makes pages interactive on the client - no React, no
 bundler subprocess, no Node.js required for core compilation.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)

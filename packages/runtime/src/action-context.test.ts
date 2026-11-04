@@ -35,7 +35,10 @@ describe('server action context', () => {
     };
     (globalThis as Record<symbol, unknown>)[KEY] = { getStore: () => ctx };
     expect(headers().get('x-test')).toBe('yes');
-    expect(cookies().get('sid')).toBe('abc');
+    expect(cookies().get('sid')).toEqual({ name: 'sid', value: 'abc' });
+    expect(cookies().get('sid')?.value).toBe('abc');
+    expect(cookies().get('missing')).toBeUndefined();
+    expect(getActionContext()?.cookies.get('sid')).toEqual({ name: 'sid', value: 'abc' });
     expect(getActionContext()?.actionId).toBe('a1');
   });
 

@@ -70,6 +70,10 @@ export function isServerAction(value: unknown): value is ServerActionProxy {
   return typeof value === 'function' && typeof (value as Partial<ServerActionProxy>).$$krateAction === 'string';
 }
 
+// Counts redirects the client followed, so useActionState can tell that an
+// action navigated away instead of producing a next state.
+let redirectsFollowed = 0;
+
 function navigateTo(url: string): void {
   const safe = safeRedirect(url);
   if (!safe) return;
@@ -145,7 +149,10 @@ export async function callServerAction(url: string, args: unknown[]): Promise<un
     throw errorFrom(payload, res.status, res.statusText);
   }
   if (payload.revalidated) dispatchRevalidate(payload.revalidation);
-  if (typeof payload.redirect === 'string' && payload.redirect) navigateTo(payload.redirect);
+  if (typeof payload.redirect === 'string' && payload.redirect) {
+    redirectsFollowed++;
+    navigateTo(payload.redirect);
+  }
   return payload.result;
 }
 
@@ -389,7 +396,10 @@ interface ActionTarget {
 }
 
 /** Binds a function action to a form or submit button (`action={fn}` / `formAction={fn}`). */
-export function __krateBindFormAction(el: Element, get: Getter): void {
+export function __krateBindFormAction(el: Element | null, get: Getter): void {
+  // The ref callback is called with null when the element detaches (a soft
+  // navigation replacing the page), which has nothing left to bind.
+  if (!el) return;
   (el as Element & ActionTarget).__krateFormAction = get;
   // The native POST target only serves the no-JS fallback; once the function
   // is bound the element matches React's client DOM (no action attribute).
@@ -562,8 +572,10 @@ export function __krateActionState<S>(
       const item = queue.shift() as QueuedAction;
       let ok = false;
       try {
+        const before = redirectsFollowed;
         const next = await runActionTransition(() => action(getState(), item.payload));
-        krateTransitionWrites(() => setState(next as S));
+        // A redirecting action has no next state: the page is being replaced.
+        if (redirectsFollowed === before) krateTransitionWrites(() => setState(next as S));
         ok = true;
       } catch (err) {
         const cancelled = queue.splice(0);

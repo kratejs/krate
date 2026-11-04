@@ -459,6 +459,27 @@ describe('server action proxies', () => {
     expect(nav).toHaveBeenCalledWith('/next');
   });
 
+  it('keeps the previous useActionState state when the action redirects', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true, result: null, redirect: '/next' })));
+    vi.stubGlobal('navigate', vi.fn());
+    const proxy = __krateAction('a4b');
+    let state: { error: string } | null = { error: '' };
+    const dispatch = __krateActionState<{ error: string } | null>(
+      (prev, payload) => proxy(prev, payload) as Promise<{ error: string } | null>,
+      () => state,
+      (next) => {
+        state = next;
+      },
+      () => {},
+    );
+    await (dispatch as unknown as { __krateRun: (p: unknown) => Promise<boolean> }).__krateRun(new FormData());
+    expect(state).toEqual({ error: '' });
+  });
+
+  it('ignores a null element when a form binding is detached', () => {
+    expect(() => __krateBindFormAction(null, () => () => {})).not.toThrow();
+  });
+
   it('dispatches krate:revalidate when the action revalidated server caches', async () => {
     const revalidation = { paths: [{ path: '/posts', type: 'page' }], tags: ['posts'] };
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true, result: 1, revalidated: true, revalidation })));
