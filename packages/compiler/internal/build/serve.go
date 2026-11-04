@@ -65,12 +65,7 @@ const fileCache = new Map();
 const moduleCache = new Map();
 ` + actionSidecarJS + actionSidecarNodeAdapter + apiSidecarClusterJS + apiSidecarSharedJS + `
 let middlewareModule = null;
-if (MIDDLEWARE_PATH && fs.existsSync(MIDDLEWARE_PATH)) {
-  try {
-    middlewareModule = await import(pathToFileURL(MIDDLEWARE_PATH).href + '?t=' + Date.now());
-  } catch (e) {
-  }
-}
+await krateLoadMiddleware();
 
 function routeParams(file, segments) {
   const rel = path.relative(API_DIR, file).replace(/\.[^.]+$/, '');
@@ -170,6 +165,7 @@ const server = http.createServer(async (req, res) => {
 
     // Middleware endpoint: execute middleware and return result
     if (urlPath === '/__krate/middleware') {
+      if (HOT) await krateLoadMiddleware();
       if (!middlewareModule || !middlewareModule.middleware) {
         res.setHeader('Content-Type', 'application/json');
         return res.end(JSON.stringify({ action: 'continue' }));
@@ -445,14 +441,12 @@ const fileCache = new Map();
 const moduleCache = new Map();
 
 let middlewareModule = null;
-if (MIDDLEWARE_PATH) {
-  try { middlewareModule = await import(pathToFileURL(MIDDLEWARE_PATH).href); } catch {}
-}
 
 function json(body, status) { return Response.json(body, { status: status || 200 }); }
 
 
 ` + actionSidecarJS + apiSidecarSharedJS + `
+await krateLoadMiddleware();
 function sanitize(p) {
   let rel = p || '/';
   try { rel = decodeURIComponent(rel); } catch { return null; }
@@ -484,12 +478,13 @@ function resolveFile(clean) {
 
 async function loadModule(file) {
   if (!HOT) { const cached = moduleCache.get(file); if (cached) return cached; }
-  const mod = await import(pathToFileURL(file).href + (HOT ? '?t=' + Date.now() : ''));
+  const mod = HOT ? await krateImportFresh(file, String(Date.now())) : await import(pathToFileURL(file).href);
   if (!HOT) moduleCache.set(file, mod);
   return mod;
 }
 
 async function handleMiddleware(req) {
+  if (HOT) await krateLoadMiddleware();
   if (!middlewareModule || !middlewareModule.middleware) return json({ action: 'continue', headers: [] });
   let body = {};
   try { body = await req.json(); } catch {}

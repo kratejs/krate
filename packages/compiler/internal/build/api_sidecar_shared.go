@@ -67,6 +67,36 @@ function krateRequestHeaders(map) {
   }
   return h;
 }
+// krateLoadMiddleware imports the middleware module, and in dev (HOT)
+// re-imports it whenever the file changes so edits apply without restarting the
+// sidecar. A failed reload keeps the previous module and logs the error.
+let krateMwStamp = '';
+// krateImportFresh imports a module with a cache-busting tag. Bun ignores the
+// query of a file:// URL (it would serve the first copy forever), but honors it
+// on a plain absolute path.
+function krateImportFresh(file, tag) {
+  const q = '?t=' + encodeURIComponent(tag);
+  return import(typeof Bun !== 'undefined' ? file + q : pathToFileURL(file).href + q);
+}
+async function krateLoadMiddleware() {
+  if (!MIDDLEWARE_PATH) return;
+  let stamp = '';
+  try {
+    const st = fs.statSync(MIDDLEWARE_PATH);
+    if (!st.isFile()) return;
+    stamp = st.mtimeMs + ':' + st.size;
+  } catch {
+    if (HOT) { middlewareModule = null; krateMwStamp = ''; }
+    return;
+  }
+  if (stamp === krateMwStamp) return;
+  krateMwStamp = stamp;
+  try {
+    middlewareModule = await krateImportFresh(MIDDLEWARE_PATH, stamp);
+  } catch (e) {
+    console.error('[krate] middleware load error: ' + ((e && e.stack) || e));
+  }
+}
 // krateMiddlewareJSON converts a middleware return value into the envelope the
 // Go host understands: continue (passthrough / rewrite) or a response.
 async function krateMiddlewareJSON(result) {

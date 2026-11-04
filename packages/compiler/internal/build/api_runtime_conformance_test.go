@@ -90,6 +90,13 @@ func startNodeConformance(t *testing.T, apiDir, middlewarePath string) string {
 // startSidecarConformance starts the real API sidecar script on node or bun.
 func startSidecarConformance(t *testing.T, runtime, apiDir, middlewarePath string) string {
 	t.Helper()
+	return startSidecarConformanceEnv(t, runtime, apiDir, middlewarePath)
+}
+
+// startSidecarConformanceEnv is startSidecarConformance with extra environment
+// (for example KRATE_API_HOT=1).
+func startSidecarConformanceEnv(t *testing.T, runtime, apiDir, middlewarePath string, env ...string) string {
+	t.Helper()
 	if _, err := exec.LookPath(runtime); err != nil {
 		if runtime == "node" {
 			requireE2E(t, "node is not installed")
@@ -109,7 +116,7 @@ func startSidecarConformance(t *testing.T, runtime, apiDir, middlewarePath strin
 		t.Fatal(err)
 	}
 	cmd := exec.Command(runtime, args...)
-	cmd.Env = append(os.Environ(), "KRATE_API_WORKERS=1")
+	cmd.Env = append(append(os.Environ(), "KRATE_API_WORKERS=1"), env...)
 	var logs syncBuffer
 	cmd.Stdout, cmd.Stderr = &logs, &logs
 	if err := cmd.Start(); err != nil {
@@ -401,6 +408,75 @@ export const config = { matcher: ["/teapot", "/rewrite", "/pass/:path*"] };
 		}
 		if n.Rewrite != q.Rewrite {
 			t.Errorf("%s: rewrite node=%q quickjs=%q", path, n.Rewrite, q.Rewrite)
+		}
+	}
+}
+
+// In dev (KRATE_API_HOT=1) the Node and Bun sidecars reload the middleware
+// module when its file changes; in production it is loaded once.
+func TestSidecarMiddlewareHotReload(t *testing.T) {
+	for _, runtime := range []string{"node", "bun"} {
+		for _, hot := range []bool{true, false} {
+			name := runtime + "/prod"
+			if hot {
+				name = runtime + "/dev"
+			}
+			t.Run(name, func(t *testing.T) {
+				mk := func(v string) string {
+					return `export function middleware(request) {
+  return new Response(null, { headers: { "x-middleware-next": "1", "x-version": "` + v + `" } });
+}
+`
+				}
+				dir := t.TempDir()
+				mwPath := filepath.Join(dir, "middleware.js")
+				if err := os.WriteFile(mwPath, []byte(mk("one")), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"type":"module"}`), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				apiDir := filepath.Join(dir, "api")
+				_ = os.MkdirAll(apiDir, 0o755)
+				var env []string
+				if hot {
+					env = append(env, "KRATE_API_HOT=1")
+				}
+				base := startSidecarConformanceEnv(t, runtime, apiDir, mwPath, env...)
+				version := func() string {
+					resp, err := http.Post(base+"/__krate/middleware", "application/json", strings.NewReader(`{"url":"http://x/a","method":"GET","path":"/a","headers":{}}`))
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer resp.Body.Close()
+					var out struct {
+						Headers [][2]string `json:"headers"`
+					}
+					raw, _ := io.ReadAll(resp.Body)
+					if err := json.Unmarshal(raw, &out); err != nil {
+						t.Fatalf("%v (%s)", err, raw)
+					}
+					for _, h := range out.Headers {
+						if h[0] == "x-version" {
+							return h[1]
+						}
+					}
+					return ""
+				}
+				if got := version(); got != "one" {
+					t.Fatalf("initial x-version = %q", got)
+				}
+				if err := os.WriteFile(mwPath, []byte(mk("two-changed")), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				want := "one"
+				if hot {
+					want = "two-changed"
+				}
+				if got := version(); got != want {
+					t.Errorf("after edit x-version = %q, want %q", got, want)
+				}
+			})
 		}
 	}
 }
