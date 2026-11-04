@@ -7,7 +7,7 @@ order: 20
 # CSS Signals Cookbook
 
 Copy-paste patterns for common widgets. All are zero-JS (plus the small inline
-ARIA synchroniser where the role needs it). See the
+keyboard and ARIA enhancer where the role needs it). See the
 [guide](/docs/core-concepts/css-signals/) and
 [reference](/docs/reference/css-signals/).
 

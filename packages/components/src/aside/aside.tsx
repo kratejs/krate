@@ -4,6 +4,7 @@ export interface AsideProps {
   children?: any;
   type?: string;
   title?: string;
+  /** Text or emoji shown instead of the built-in icon for the type. */
   icon?: string;
 }
 
@@ -40,7 +41,9 @@ export function Aside(props: AsideProps) {
   }
   return (
     <div class={"krate-aside krate-aside-" + type}>
-      <div class="krate-aside-title"><AsideIcon type={type} /> {title}</div>
+      <div class="krate-aside-title">
+        {props.icon ? <span class="krate-aside-icon" aria-hidden="true">{props.icon}</span> : <AsideIcon type={type} />} {title}
+      </div>
       <div class="krate-aside-content">{children}</div>
     </div>
   );

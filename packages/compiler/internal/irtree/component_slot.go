@@ -34,6 +34,12 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	if b.declaresCSSTScope(childFn) {
 		if spec := b.collectScopeSpec(el); len(spec.options) > 0 {
 			b.setScopeOverride(childFn, spec)
+			if spec.initial != "" {
+				if b.instanceInitial == nil {
+					b.instanceInitial = make(map[string]string)
+				}
+				b.instanceInitial[b.cssTokenFor(childID, childName)] = spec.initial
+			}
 		}
 	}
 	provider := b.providedScope(childFn, childID, childName)

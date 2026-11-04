@@ -88,6 +88,10 @@ func (b *builder) buildCSSTriggerAt(el *ast.JSXElement, t csssignals.Trigger, no
 	if t.Scope.Kind == csssignals.KindGroup && t.Scope.Sentinel == "" && t.Option != "" {
 		return b.buildGroupTrigger(clone, t)
 	}
+	mark := markOpen
+	if t.Scope.Kind == csssignals.KindGroup && t.Option == t.Scope.Sentinel {
+		mark = markClose
+	}
 	appendClass(clone, t.Scope.TriggerClass(t.Option))
 	// A null/closed group option has no controller input; clicking it cannot
 	// point at one, so close via the sentinel's hidden radio.
@@ -95,7 +99,7 @@ func (b *builder) buildCSSTriggerAt(el *ast.JSXElement, t csssignals.Trigger, no
 		Name:  "for",
 		Value: &ast.Literal{Kind: ast.StringLit, Value: t.Scope.ControlID(b.cssToken, t.Option)},
 	})
-	b.applyTriggerARIA(clone, t)
+	b.applyTriggerARIA(clone, t, mark)
 	return clone
 }
 
@@ -107,13 +111,13 @@ func (b *builder) buildGroupTrigger(base *ast.JSXElement, t csssignals.Trigger) 
 	selectLabel := shallowCloneJSX(base)
 	appendClass(selectLabel, s.TriggerClass(t.Option))
 	selectLabel.Opening.Attributes = append(selectLabel.Opening.Attributes, strJSXAttr("for", s.ControlID(b.cssToken, t.Option)))
-	b.applyTriggerARIA(selectLabel, t)
+	b.applyTriggerARIA(selectLabel, t, markOpen)
 
 	closeLabel := shallowCloneJSX(base)
 	appendClass(closeLabel, s.TriggerClass(t.Option))
 	appendClass(closeLabel, s.TriggerAltClass(t.Option))
 	closeLabel.Opening.Attributes = append(closeLabel.Opening.Attributes, strJSXAttr("for", s.ControlID(b.cssToken, s.Sentinel)))
-	b.applyTriggerARIA(closeLabel, t)
+	b.applyTriggerARIA(closeLabel, t, markAlt)
 
 	return &ast.JSXFragment{Children: []ast.JSXChild{
 		&ast.JSXElementChild{Element: selectLabel},
@@ -146,7 +150,7 @@ func (b *builder) buildRangeStepper(clone *ast.JSXElement, t csssignals.Trigger)
 			Name:  "for",
 			Value: &ast.Literal{Kind: ast.StringLit, Value: s.ControlID(b.cssToken, s.Options[j])},
 		})
-		b.applyTriggerARIA(lbl, t)
+		b.applyTriggerARIA(lbl, t, markOpen)
 		children = append(children, &ast.JSXElementChild{Element: lbl})
 	}
 	return wrapWithClassOnly(children, s.Class+"-st-"+t.StackAction)
@@ -170,10 +174,19 @@ func (b *builder) buildStackPopTrigger(clone *ast.JSXElement, t csssignals.Trigg
 	return clone
 }
 
+// Trigger marks (the data-ka attribute) tell the enhancer what a label does:
+// "t" opens/selects, "a" is the alternate label shown while open (closes), and
+// "c" closes or selects through the closed sentinel (menu items, Close buttons).
+const (
+	markOpen  = "t"
+	markAlt   = "a"
+	markClose = "c"
+)
+
 // applyTriggerARIA adds structural ARIA attributes to a trigger label based on
-// the scope's resolved role. Zero-JS presets only; stateful attributes
-// (aria-selected/aria-expanded) are left to the micro-runtime.
-func (b *builder) applyTriggerARIA(clone *ast.JSXElement, t csssignals.Trigger) {
+// the scope's resolved role. Stateful attributes (aria-selected/aria-expanded)
+// get their initial value here and are kept in sync by the enhancer.
+func (b *builder) applyTriggerARIA(clone *ast.JSXElement, t csssignals.Trigger, mark string) {
 	if t.Scope.IsDisabled(t.Option) {
 		clone.Opening.Attributes = append(clone.Opening.Attributes, strJSXAttr("aria-disabled", "true"))
 	}
@@ -181,22 +194,80 @@ func (b *builder) applyTriggerARIA(clone *ast.JSXElement, t csssignals.Trigger) 
 	if r.Trigger == "" {
 		return
 	}
-	// The role goes on the label, but a <label> whose `for` points at a radio
-	// keeps native activation. role=tab/button replaces the label semantics.
-	clone.Opening.Attributes = append(clone.Opening.Attributes, strJSXAttr("role", r.Trigger))
+	attrs := &clone.Opening.Attributes
+	set := func(name, value string) {
+		if !hasAttr(clone, name) {
+			*attrs = append(*attrs, strJSXAttr(name, value))
+		}
+	}
+	set("data-ka", mark)
+	// The role goes on the label, which the enhancer makes focusable; the
+	// hidden controller input is removed from the accessibility tree.
+	if mark == markClose {
+		item := r.Item
+		if item == "" {
+			item = "button"
+		}
+		set("role", item)
+		return
+	}
+	set("role", r.Trigger)
 	if r.Haspopup != "" {
-		clone.Opening.Attributes = append(clone.Opening.Attributes, strJSXAttr("aria-haspopup", r.Haspopup))
+		set("aria-haspopup", r.Haspopup)
 	}
 	if r.SyncExpanded {
 		// Initial state reflects whether this option starts selected; the
-		// micro-runtime keeps it in sync afterwards.
+		// enhancer keeps it in sync afterwards.
 		expanded := "false"
-		if t.Option == t.Scope.Initial {
+		if mark == markAlt || t.Option == b.initialFor(t.Scope, b.cssToken) {
 			expanded = "true"
 		}
-		clone.Opening.Attributes = append(clone.Opening.Attributes, strJSXAttr("aria-expanded", expanded))
+		set("aria-expanded", expanded)
 	}
-	_ = t
+	if t.Scope.Kind == csssignals.KindGroup || t.Scope.Kind == csssignals.KindChoice {
+		set("aria-controls", t.Scope.PanelID(b.cssToken, t.Option))
+	}
+}
+
+// hasAttr reports whether el carries an attribute with the given name.
+func hasAttr(el *ast.JSXElement, name string) bool {
+	for _, a := range el.Opening.Attributes {
+		if a != nil && !a.Spread && a.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// decoratePanel adds the ARIA surface to a panel element built from a scope
+// handle: its id (for aria-controls), the preset's role, aria-modal, and a
+// programmatic focus target for the enhancer.
+func (b *builder) decoratePanel(clone *ast.JSXElement, s *csssignals.Scope, opt string) {
+	r := s.Role
+	if !r.NeedsRuntime() {
+		return
+	}
+	set := func(name, value string) {
+		if !hasAttr(clone, name) {
+			clone.Opening.Attributes = append(clone.Opening.Attributes, strJSXAttr(name, value))
+		}
+	}
+	set("id", s.PanelID(b.cssToken, opt))
+	set("data-ka", "p")
+	if r.Panel == "" {
+		return
+	}
+	set("role", r.Panel)
+	if r.Modal && (r.Panel == "dialog" || r.Panel == "alertdialog") {
+		set("aria-modal", "true")
+	}
+	switch r.Panel {
+	case "dialog", "alertdialog", "menu":
+		set("tabindex", "-1")
+		if s.Label != "" {
+			set("aria-label", s.Label)
+		}
+	}
 }
 
 // buildCSSPanel rewrites a panel element: strip the showIf condition, add the
@@ -356,6 +427,14 @@ func (b *builder) prepareCSSRoot(ret ast.Expr, scopes []*csssignals.Scope, token
 // ARIA synchroniser.
 func applyContainerARIA(el *ast.JSXElement, scopes []*csssignals.Scope) {
 	for _, s := range scopes {
+		if s.Role.NeedsRuntime() {
+			// Marks the anchor the enhancer scopes its keyboard and focus
+			// handling to; the value is the preset name.
+			el.Opening.Attributes = append(el.Opening.Attributes, strJSXAttr("data-kz", s.Role.Name))
+			break
+		}
+	}
+	for _, s := range scopes {
 		if s.Role.Container == "" {
 			continue
 		}
@@ -378,7 +457,7 @@ func (b *builder) controllerChildren(scopes []*csssignals.Scope, token string) [
 		switch s.Kind {
 		case csssignals.KindChoice, csssignals.KindGroup, csssignals.KindRange, csssignals.KindStack:
 			for _, opt := range s.Options {
-				out = append(out, controllerInput(s, token, opt, "radio", opt == s.Initial))
+				out = append(out, controllerInput(s, token, opt, "radio", opt == b.initialFor(s, token)))
 			}
 		case csssignals.KindToggle:
 			out = append(out, controllerInput(s, token, "on", "checkbox", s.Initial == "true"))
@@ -413,6 +492,17 @@ func controllerInput(s *csssignals.Scope, token, opt, inputType string, checked 
 	}
 	if s.IsChoiceLike() {
 		attrs = append(attrs, strJSXAttr("value", opt))
+	}
+	if s.Role.NeedsRuntime() {
+		// The label triggers carry the semantics; the controller is neither
+		// focusable nor announced.
+		attrs = append(attrs, strJSXAttr("aria-hidden", "true"), strJSXAttr("tabindex", "-1"))
+		if s.Kind == csssignals.KindGroup && opt == s.Sentinel {
+			attrs = append(attrs, strJSXAttr("data-ka", "x"))
+		}
+	}
+	if s.Role.Control != "" && s.Kind == csssignals.KindToggle {
+		attrs = append(attrs, strJSXAttr("role", s.Role.Control))
 	}
 	if s.IsDisabled(opt) {
 		attrs = append(attrs, &ast.JSXAttr{Name: "disabled", Value: &ast.Literal{Kind: ast.BoolLit, Value: "true"}})
@@ -511,4 +601,18 @@ func appendClass(el *ast.JSXElement, cls string) bool {
 		Value: &ast.Literal{Kind: ast.StringLit, Value: cls},
 	})
 	return true
+}
+
+// initialFor returns the initially selected option of a scope for one instance:
+// the call site's defaultValue/defaultOpen when it names one of the scope's
+// options, else the scope's own initial.
+func (b *builder) initialFor(s *csssignals.Scope, token string) string {
+	if v, ok := b.instanceInitial[token]; ok && s.IsChoiceLike() {
+		for _, o := range s.Options {
+			if o == v {
+				return v
+			}
+		}
+	}
+	return s.Initial
 }

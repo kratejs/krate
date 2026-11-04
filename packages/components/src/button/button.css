@@ -98,11 +98,12 @@
 }
 .krate-button-link {
   background: transparent;
-  color: var(--krate-primary, #3b82f6);
+  color: var(--krate-primary-text, var(--krate-primary, #3b82f6));
   text-decoration: underline;
   text-underline-offset: 4px;
   padding: 0;
 }
 .krate-button-link:hover {
-  color: var(--krate-primary-hover, #2563eb);
+  color: var(--krate-primary-text, var(--krate-primary-hover, #2563eb));
+  text-decoration-thickness: 2px;
 }

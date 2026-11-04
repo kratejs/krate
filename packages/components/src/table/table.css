@@ -17,7 +17,7 @@
   font-size: 0.8rem;
 }
 .krate-table-head {
-  text-align: left;
+  text-align: start;
   padding: 10px 14px;
   font-weight: 600;
   color: var(--krate-text-muted, #71717a);

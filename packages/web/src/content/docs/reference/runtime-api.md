@@ -116,7 +116,7 @@ const [tier, setTier] = createCSSChoice('solo', {
 Every CSS primitive accepts an options object with an `as` role preset
 (`radio`/`tabs`/`listbox`/`menu`/`accordion`/`disclosure`/`dialog`/`popover`/
 `switch`), plus `label` and raw `aria` overrides. Native presets stay zero-JS;
-`tabs`/`listbox`/disclosure presets inject a tiny ARIA synchroniser (no page
+`tabs`/`listbox`/disclosure presets inject a tiny keyboard and ARIA enhancer (no page
 hydration bundle).
 
 ```typescript

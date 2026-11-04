@@ -425,6 +425,10 @@ type builder struct {
 	// components (their namespaced parts): fn -> options/initial. Consulted by
 	// cssAnalyzer so controllers/classes match the exact set of call-site parts.
 	scopeOverrides map[*ast.FnDecl]scopeSpec
+	// instanceInitial maps a CSS scope instance token to the initial option its
+	// call site asked for (defaultValue / defaultOpen). The analyzer is shared by
+	// every instance of a component, so per-instance state lives here.
+	instanceInitial map[string]string
 	// cssCollected holds every scope whose controller inputs were emitted, so
 	// the tree can expose the exact set of stylesheets the page needs.
 	cssCollected map[int]*csssignals.Scope

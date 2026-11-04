@@ -38,8 +38,10 @@
     --docs-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.04), 0 4px 12px -5px rgba(0, 0, 0, 0.03);
     
     /* Brand Accent Colors (Requested) */
-    --color-primary: #f97316;
-    --color-primary-hover: #ea580c;
+    /* Text-on-page accent. #c2410c is 5.2:1 on white and 4.6:1 on the accent
+       tint (WCAG AA); the dark scopes below use the lighter #f97316. */
+    --color-primary: #c2410c;
+    --color-primary-hover: #9a3412;
     --color-action: #c2410c;
     --color-action-hover: #9a3412;
 
@@ -48,8 +50,9 @@
        mapping them here makes every library component follow the docs palette in
        both light and dark mode. Values reference `--color-*`, so they resolve
        correctly under the dark / prefers-color-scheme overrides below. */
-    --krate-primary: var(--color-primary);
-    --krate-primary-hover: var(--color-primary-hover);
+    --krate-primary: var(--color-action);
+    --krate-primary-hover: var(--color-action-hover);
+    --krate-primary-text: var(--color-primary);
     --krate-text: var(--color-fg);
     --krate-text-muted: var(--color-text-main);
     --krate-border: var(--color-border);
@@ -1341,8 +1344,10 @@ a:hover {
     white-space: nowrap;
 }
 
-.sidebar-badge-new { color: #ffffff; background: var(--color-primary); border-color: var(--color-primary); }
-.sidebar-badge-beta { color: #7c3aed; background: rgba(124, 58, 237, 0.12); border-color: rgba(124, 58, 237, 0.3); }
+.sidebar-badge-new { color: #ffffff; background: var(--color-action); border-color: var(--color-action); }
+.sidebar-badge-beta { color: #6d28d9; background: rgba(124, 58, 237, 0.12); border-color: rgba(124, 58, 237, 0.3); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sidebar-badge-beta { color: #a78bfa; } }
+:root[data-theme="dark"] .sidebar-badge-beta { color: #a78bfa; }
 .sidebar-badge-default { color: var(--color-muted); background: transparent; border-color: var(--color-border); }
 
 .docs-description {

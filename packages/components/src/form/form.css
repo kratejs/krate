@@ -18,7 +18,7 @@
   color: var(--krate-text, #09090b);
 }
 .krate-form-required {
-  color: var(--krate-danger, #ef4444);
+  color: var(--krate-danger-text, #b91c1c);
 }
 .krate-form-field-control {
   display: block;
@@ -31,5 +31,5 @@
 .krate-form-field-error {
   margin: 0;
   font-size: 0.8rem;
-  color: var(--krate-danger, #ef4444);
+  color: var(--krate-danger-text, #b91c1c);
 }
