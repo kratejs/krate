@@ -16,8 +16,13 @@ export type ClassValue =
 /** Flatten a clsx-style value into an array of class tokens. */
 function flattenClass(value: ClassValue, out: string[]): void {
   if (value == null || value === false || value === true || value === '') return;
-  if (typeof value === 'string' || typeof value === 'number') {
-    out.push(String(value));
+  if (typeof value === 'string') {
+    out.push(value);
+    return;
+  }
+  if (typeof value === 'number') {
+    // clsx drops every falsy value, so 0 and NaN vanish.
+    if (value) out.push(String(value));
     return;
   }
   if (Array.isArray(value)) {

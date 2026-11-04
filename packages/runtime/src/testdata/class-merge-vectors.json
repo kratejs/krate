@@ -1547,5 +1547,528 @@
    "m-1"
   ],
   "expected": "p-4 m-1"
+ },
+ {
+  "name": "clsx(0)",
+  "fn": "clsx",
+  "args": [
+   0
+  ],
+  "expected": ""
+ },
+ {
+  "name": "clsx(1)",
+  "fn": "clsx",
+  "args": [
+   1
+  ],
+  "expected": "1"
+ },
+ {
+  "name": "clsx(a, 0, b)",
+  "fn": "clsx",
+  "args": [
+   "a",
+   0,
+   "b"
+  ],
+  "expected": "a b"
+ },
+ {
+  "name": "cn(p-2, 0, p-4)",
+  "fn": "cn",
+  "args": [
+   "p-2",
+   0,
+   "p-4"
+  ],
+  "expected": "p-4"
+ },
+ {
+  "name": "twMerge(0, 1, 2)",
+  "fn": "twMerge",
+  "args": [
+   0,
+   1,
+   2
+  ],
+  "expected": "1 2"
+ },
+ {
+  "name": "clsx(-1, 1.5)",
+  "fn": "clsx",
+  "args": [
+   -1,
+   1.5
+  ],
+  "expected": "-1 1.5"
+ },
+ {
+  "name": "clsx(NaN)",
+  "fn": "clsx",
+  "args": [],
+  "src": "NaN",
+  "expected": ""
+ },
+ {
+  "name": "cn(a, NaN, b)",
+  "fn": "cn",
+  "args": [],
+  "src": "'a', NaN, 'b'",
+  "expected": "a b"
+ },
+ {
+  "name": "cva: defaults",
+  "fn": "cva",
+  "base": "inline-flex rounded px-4 py-2",
+  "config": {
+   "variants": {
+    "variant": {
+     "default": "bg-blue-500 text-white",
+     "destructive": "bg-red-500 text-white"
+    },
+    "size": {
+     "sm": "px-2 text-sm",
+     "lg": "px-8 text-lg"
+    }
+   },
+   "defaultVariants": {
+    "variant": "default",
+    "size": "sm"
+   },
+   "compoundVariants": [
+    {
+     "variant": "destructive",
+     "size": "lg",
+     "class": "font-bold p-6"
+    },
+    {
+     "variant": [
+      "default",
+      "destructive"
+     ],
+     "size": "sm",
+     "class": "uppercase"
+    }
+   ]
+  },
+  "selection": {},
+  "expected": "inline-flex rounded py-2 bg-blue-500 text-white px-2 text-sm uppercase"
+ },
+ {
+  "name": "cva: explicit variant and size",
+  "fn": "cva",
+  "base": "inline-flex rounded px-4 py-2",
+  "config": {
+   "variants": {
+    "variant": {
+     "default": "bg-blue-500 text-white",
+     "destructive": "bg-red-500 text-white"
+    },
+    "size": {
+     "sm": "px-2 text-sm",
+     "lg": "px-8 text-lg"
+    }
+   },
+   "defaultVariants": {
+    "variant": "default",
+    "size": "sm"
+   },
+   "compoundVariants": [
+    {
+     "variant": "destructive",
+     "size": "lg",
+     "class": "font-bold p-6"
+    },
+    {
+     "variant": [
+      "default",
+      "destructive"
+     ],
+     "size": "sm",
+     "class": "uppercase"
+    }
+   ]
+  },
+  "selection": {
+   "variant": "destructive",
+   "size": "lg"
+  },
+  "expected": "inline-flex rounded bg-red-500 text-white text-lg font-bold p-6"
+ },
+ {
+  "name": "cva: class override conflicts with base padding",
+  "fn": "cva",
+  "base": "inline-flex rounded px-4 py-2",
+  "config": {
+   "variants": {
+    "variant": {
+     "default": "bg-blue-500 text-white",
+     "destructive": "bg-red-500 text-white"
+    },
+    "size": {
+     "sm": "px-2 text-sm",
+     "lg": "px-8 text-lg"
+    }
+   },
+   "defaultVariants": {
+    "variant": "default",
+    "size": "sm"
+   },
+   "compoundVariants": [
+    {
+     "variant": "destructive",
+     "size": "lg",
+     "class": "font-bold p-6"
+    },
+    {
+     "variant": [
+      "default",
+      "destructive"
+     ],
+     "size": "sm",
+     "class": "uppercase"
+    }
+   ]
+  },
+  "selection": {
+   "class": "px-10 bg-green-500"
+  },
+  "expected": "inline-flex rounded py-2 text-white text-sm uppercase px-10 bg-green-500"
+ },
+ {
+  "name": "cva: className override",
+  "fn": "cva",
+  "base": "inline-flex rounded px-4 py-2",
+  "config": {
+   "variants": {
+    "variant": {
+     "default": "bg-blue-500 text-white",
+     "destructive": "bg-red-500 text-white"
+    },
+    "size": {
+     "sm": "px-2 text-sm",
+     "lg": "px-8 text-lg"
+    }
+   },
+   "defaultVariants": {
+    "variant": "default",
+    "size": "sm"
+   },
+   "compoundVariants": [
+    {
+     "variant": "destructive",
+     "size": "lg",
+     "class": "font-bold p-6"
+    },
+    {
+     "variant": [
+      "default",
+      "destructive"
+     ],
+     "size": "sm",
+     "class": "uppercase"
+    }
+   ]
+  },
+  "selection": {
+   "className": "p-0 rounded-full"
+  },
+  "expected": "inline-flex bg-blue-500 text-white text-sm uppercase p-0 rounded-full"
+ },
+ {
+  "name": "cva: class wins over className",
+  "fn": "cva",
+  "base": "inline-flex rounded px-4 py-2",
+  "config": {
+   "variants": {
+    "variant": {
+     "default": "bg-blue-500 text-white",
+     "destructive": "bg-red-500 text-white"
+    },
+    "size": {
+     "sm": "px-2 text-sm",
+     "lg": "px-8 text-lg"
+    }
+   },
+   "defaultVariants": {
+    "variant": "default",
+    "size": "sm"
+   },
+   "compoundVariants": [
+    {
+     "variant": "destructive",
+     "size": "lg",
+     "class": "font-bold p-6"
+    },
+    {
+     "variant": [
+      "default",
+      "destructive"
+     ],
+     "size": "sm",
+     "class": "uppercase"
+    }
+   ]
+  },
+  "selection": {
+   "class": "p-1",
+   "className": "p-9"
+  },
+  "expected": "inline-flex rounded bg-blue-500 text-white text-sm uppercase p-1"
+ },
+ {
+  "name": "cva: null prop falls back to default",
+  "fn": "cva",
+  "base": "inline-flex rounded px-4 py-2",
+  "config": {
+   "variants": {
+    "variant": {
+     "default": "bg-blue-500 text-white",
+     "destructive": "bg-red-500 text-white"
+    },
+    "size": {
+     "sm": "px-2 text-sm",
+     "lg": "px-8 text-lg"
+    }
+   },
+   "defaultVariants": {
+    "variant": "default",
+    "size": "sm"
+   },
+   "compoundVariants": [
+    {
+     "variant": "destructive",
+     "size": "lg",
+     "class": "font-bold p-6"
+    },
+    {
+     "variant": [
+      "default",
+      "destructive"
+     ],
+     "size": "sm",
+     "class": "uppercase"
+    }
+   ]
+  },
+  "selection": {
+   "variant": null
+  },
+  "expected": "inline-flex rounded py-2 bg-blue-500 text-white px-2 text-sm uppercase"
+ },
+ {
+  "name": "cva: empty string prop disables default",
+  "fn": "cva",
+  "base": "inline-flex rounded px-4 py-2",
+  "config": {
+   "variants": {
+    "variant": {
+     "default": "bg-blue-500 text-white",
+     "destructive": "bg-red-500 text-white"
+    },
+    "size": {
+     "sm": "px-2 text-sm",
+     "lg": "px-8 text-lg"
+    }
+   },
+   "defaultVariants": {
+    "variant": "default",
+    "size": "sm"
+   },
+   "compoundVariants": [
+    {
+     "variant": "destructive",
+     "size": "lg",
+     "class": "font-bold p-6"
+    },
+    {
+     "variant": [
+      "default",
+      "destructive"
+     ],
+     "size": "sm",
+     "class": "uppercase"
+    }
+   ]
+  },
+  "selection": {
+   "variant": ""
+  },
+  "expected": "inline-flex rounded py-2 px-2 text-sm"
+ },
+ {
+  "name": "cva: unknown variant value adds nothing",
+  "fn": "cva",
+  "base": "inline-flex rounded px-4 py-2",
+  "config": {
+   "variants": {
+    "variant": {
+     "default": "bg-blue-500 text-white",
+     "destructive": "bg-red-500 text-white"
+    },
+    "size": {
+     "sm": "px-2 text-sm",
+     "lg": "px-8 text-lg"
+    }
+   },
+   "defaultVariants": {
+    "variant": "default",
+    "size": "sm"
+   },
+   "compoundVariants": [
+    {
+     "variant": "destructive",
+     "size": "lg",
+     "class": "font-bold p-6"
+    },
+    {
+     "variant": [
+      "default",
+      "destructive"
+     ],
+     "size": "sm",
+     "class": "uppercase"
+    }
+   ]
+  },
+  "selection": {
+   "variant": "nope"
+  },
+  "expected": "inline-flex rounded py-2 px-2 text-sm"
+ },
+ {
+  "name": "cva: compound with array condition",
+  "fn": "cva",
+  "base": "inline-flex rounded px-4 py-2",
+  "config": {
+   "variants": {
+    "variant": {
+     "default": "bg-blue-500 text-white",
+     "destructive": "bg-red-500 text-white"
+    },
+    "size": {
+     "sm": "px-2 text-sm",
+     "lg": "px-8 text-lg"
+    }
+   },
+   "defaultVariants": {
+    "variant": "default",
+    "size": "sm"
+   },
+   "compoundVariants": [
+    {
+     "variant": "destructive",
+     "size": "lg",
+     "class": "font-bold p-6"
+    },
+    {
+     "variant": [
+      "default",
+      "destructive"
+     ],
+     "size": "sm",
+     "class": "uppercase"
+    }
+   ]
+  },
+  "selection": {
+   "variant": "default"
+  },
+  "expected": "inline-flex rounded py-2 bg-blue-500 text-white px-2 text-sm uppercase"
+ },
+ {
+  "name": "cva: no config",
+  "fn": "cva",
+  "base": "p-2 p-4 flex",
+  "selection": {},
+  "expected": "p-4 flex"
+ },
+ {
+  "name": "cva: base only with class",
+  "fn": "cva",
+  "base": "p-2 flex",
+  "selection": {
+   "class": "p-8 hidden"
+  },
+  "expected": "p-8 hidden"
+ },
+ {
+  "name": "cva: null default variant",
+  "fn": "cva",
+  "base": "flex",
+  "config": {
+   "variants": {
+    "size": {
+     "sm": "h-8",
+     "lg": "h-12"
+    },
+    "tone": {
+     "a": "text-red-500",
+     "b": "text-blue-500"
+    }
+   },
+   "defaultVariants": {
+    "size": "sm",
+    "tone": null
+   }
+  },
+  "selection": {},
+  "expected": "flex h-8"
+ },
+ {
+  "name": "cva: config order not alphabetical",
+  "fn": "cva",
+  "base": "flex",
+  "config": {
+   "variants": {
+    "size": {
+     "sm": "h-8",
+     "lg": "h-12"
+    },
+    "tone": {
+     "a": "text-red-500",
+     "b": "text-blue-500"
+    }
+   },
+   "defaultVariants": {
+    "size": "sm",
+    "tone": null
+   }
+  },
+  "selection": {
+   "tone": "b",
+   "size": "lg"
+  },
+  "expected": "flex h-12 text-blue-500"
+ },
+ {
+  "name": "cva: hover variants dont conflict",
+  "fn": "cva",
+  "base": "hover:bg-red-500 bg-blue-500",
+  "selection": {
+   "class": "hover:bg-green-500"
+  },
+  "expected": "bg-blue-500 hover:bg-green-500"
+ },
+ {
+  "name": "cva: numeric variant value",
+  "fn": "cva",
+  "base": "flex",
+  "config": {
+   "variants": {
+    "n": {
+     "1": "gap-1",
+     "2": "gap-2"
+    }
+   },
+   "defaultVariants": {
+    "n": 1
+   }
+  },
+  "selection": {
+   "n": 2
+  },
+  "expected": "flex gap-2"
  }
 ]

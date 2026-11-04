@@ -709,29 +709,14 @@ func appendClassTokens(tokens []string, v jsvalue.Value) []string {
 // evalCVACall resolves a cva factory call to its class string using the
 // current bindings for the variant selection.
 func (e *SSREval) evalCVACall(spec *irtree.CVASpec, args []ast.Expr) jsvalue.Value {
-	selection := map[string]string{}
-	extra := ""
-	if len(args) >= 1 {
-		obj := e.value(args[0])
-		if obj.IsUnknown() {
-			return obj
-		}
-		for _, k := range obj.Keys() {
-			v, _ := obj.Get(k)
-			if v.IsUnknown() {
-				return v
-			}
-			if v.IsNullish() || (v.Kind() == jsvalue.KindString && v.StringValue() == "") {
-				continue
-			}
-			if k == "class" || k == "className" {
-				extra = v.ToString()
-				continue
-			}
-			selection[k] = v.ToString()
-		}
+	if len(args) == 0 {
+		return jsvalue.String(spec.Fold(nil, ""))
 	}
-	return jsvalue.String(spec.Fold(selection, extra))
+	obj := e.value(args[0])
+	if obj.IsUnknown() {
+		return obj
+	}
+	return spec.FoldValue(obj)
 }
 
 // Statement evaluation

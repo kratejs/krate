@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { cn, twMerge, clsx, type ClassValue } from './class-helpers';
+import { cn, twMerge, clsx, cva, type ClassValue, type CVAConfig } from './class-helpers';
 
 // Each case: input classes, expected merged output (later wins).
 const same = (a: string, b: string): void => {
@@ -156,14 +156,30 @@ describe('twMerge groups', () => {
 describe('shared class-merge vectors', () => {
   const vectors = JSON.parse(
     readFileSync('src/testdata/class-merge-vectors.json', 'utf8')
-  ) as Array<{ name: string; fn: 'twMerge' | 'cn' | 'clsx'; args: ClassValue[]; expected: string }>;
+  ) as Array<{
+    name: string;
+    fn: 'twMerge' | 'cn' | 'clsx' | 'cva';
+    args?: ClassValue[];
+    // JS source for the argument list, for values JSON cannot carry (NaN).
+    src?: string;
+    base?: string;
+    config?: CVAConfig;
+    selection?: Record<string, unknown>;
+    expected: string;
+  }>;
   const fns = { twMerge, cn, clsx };
   it('has vectors', () => {
     expect(vectors.length).toBeGreaterThan(100);
+    expect(vectors.some((v) => v.fn === 'cva')).toBe(true);
   });
   for (const v of vectors) {
     it(`${v.fn}: ${v.name}`, () => {
-      expect(fns[v.fn](...v.args)).toBe(v.expected);
+      if (v.fn === 'cva') {
+        expect(cva(v.base ?? '', v.config)(v.selection)).toBe(v.expected);
+        return;
+      }
+      const args = v.src ? (new Function(`return [${v.src}]`)() as ClassValue[]) : (v.args ?? []);
+      expect(fns[v.fn](...args)).toBe(v.expected);
     });
   }
 });

@@ -105,29 +105,14 @@ func (b *builder) constInterp(props valueMap) *jsvalue.Interp {
 
 // foldCVAValue folds a cva factory call against a statically-known selection.
 func foldCVAValue(in *jsvalue.Interp, spec *CVASpec, args []ast.Expr) jsvalue.Value {
-	selection := map[string]string{}
-	extra := ""
-	if len(args) >= 1 {
-		obj := in.Eval(args[0])
-		if obj.IsUnknown() {
-			return obj
-		}
-		for _, k := range obj.Keys() {
-			v, _ := obj.Get(k)
-			if v.IsUnknown() {
-				return v
-			}
-			if v.IsNullish() || (v.Kind() == jsvalue.KindString && v.StringValue() == "") {
-				continue
-			}
-			if k == "class" || k == "className" {
-				extra = v.ToString()
-				continue
-			}
-			selection[k] = v.ToString()
-		}
+	if len(args) == 0 {
+		return jsvalue.String(spec.Fold(nil, ""))
 	}
-	return jsvalue.String(spec.Fold(selection, extra))
+	obj := in.Eval(args[0])
+	if obj.IsUnknown() {
+		return obj
+	}
+	return spec.FoldValue(obj)
 }
 
 // evalAttrConst resolves a JSX attribute value at build time, folding class

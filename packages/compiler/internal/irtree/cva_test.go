@@ -56,16 +56,16 @@ func TestCVASpecFold(t *testing.T) {
 	`)
 	spec := CollectCVAFactories(prog)["b"]
 
-	// All defaults (variant groups are applied in sorted name order).
-	if got := spec.Fold(map[string]string{}, ""); got != "base h-9 bg-blue" {
+	// All defaults (variant groups are applied in config order).
+	if got := spec.Fold(map[string]string{}, ""); got != "base bg-blue h-9" {
 		t.Errorf("defaults fold = %q", got)
 	}
 	// Explicit selection overrides defaults.
-	if got := spec.Fold(map[string]string{"variant": "destructive", "size": "lg"}, ""); got != "base h-10 bg-red" {
+	if got := spec.Fold(map[string]string{"variant": "destructive", "size": "lg"}, ""); got != "base bg-red h-10" {
 		t.Errorf("selection fold = %q", got)
 	}
 	// Extra class appended last.
-	if got := spec.Fold(map[string]string{}, "custom"); got != "base h-9 bg-blue custom" {
+	if got := spec.Fold(map[string]string{}, "custom"); got != "base bg-blue h-9 custom" {
 		t.Errorf("extra class fold = %q", got)
 	}
 }
@@ -85,10 +85,10 @@ func TestCVASpecCompoundVariants(t *testing.T) {
 	`)
 	spec := CollectCVAFactories(prog)["b"]
 
-	if got := spec.Fold(map[string]string{"variant": "destructive", "size": "lg"}, ""); got != "base h-10 bg-red font-bold" {
+	if got := spec.Fold(map[string]string{"variant": "destructive", "size": "lg"}, ""); got != "base bg-red h-10 font-bold" {
 		t.Errorf("compound match fold = %q", got)
 	}
-	if got := spec.Fold(map[string]string{"variant": "destructive", "size": "default"}, ""); got != "base h-9 bg-red" {
+	if got := spec.Fold(map[string]string{"variant": "destructive", "size": "default"}, ""); got != "base bg-red h-9" {
 		t.Errorf("compound non-match fold = %q", got)
 	}
 }
