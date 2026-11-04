@@ -254,7 +254,7 @@ function utilityGroup(base: string): string | null {
       const k = arbitraryKind(rest);
       if (k === 'length') return 'bg-size';
       if (rest.startsWith('[') && /^\[(position|percentage):/.test(rest)) return 'bg-position';
-      if (rest.startsWith('[') && /^\[(image|url):/.test(rest)) return 'bg-image';
+      if (rest.startsWith('[') && (/^\[(image|url):/.test(rest) || rest.startsWith('[url('))) return 'bg-image';
       return 'bg-color';
     }
     case 'border': {

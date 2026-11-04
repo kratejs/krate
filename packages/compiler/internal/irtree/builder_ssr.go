@@ -94,7 +94,7 @@ func (b *builder) constInterp(props valueMap) *jsvalue.Interp {
 			}
 			if id.Name == "twMerge" {
 				if _, isProp := props[id.Name]; !isProp {
-					return foldClassValues(in, c.Args), true
+					return foldClassValues(in, c.Args, true), true
 				}
 			}
 		}

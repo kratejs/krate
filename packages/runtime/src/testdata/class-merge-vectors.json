@@ -1,0 +1,1551 @@
+[
+ {
+  "name": "twMerge(duration-700, duration-500)",
+  "fn": "twMerge",
+  "args": [
+   "duration-700",
+   "duration-500"
+  ],
+  "expected": "duration-500"
+ },
+ {
+  "name": "twMerge(delay-150, delay-300)",
+  "fn": "twMerge",
+  "args": [
+   "delay-150",
+   "delay-300"
+  ],
+  "expected": "delay-300"
+ },
+ {
+  "name": "twMerge(duration-75, duration-1000)",
+  "fn": "twMerge",
+  "args": [
+   "duration-75",
+   "duration-1000"
+  ],
+  "expected": "duration-1000"
+ },
+ {
+  "name": "twMerge(duration-500, duration-[2s])",
+  "fn": "twMerge",
+  "args": [
+   "duration-500",
+   "duration-[2s]"
+  ],
+  "expected": "duration-[2s]"
+ },
+ {
+  "name": "twMerge(duration-[2s], duration-(--d))",
+  "fn": "twMerge",
+  "args": [
+   "duration-[2s]",
+   "duration-(--d)"
+  ],
+  "expected": "duration-(--d)"
+ },
+ {
+  "name": "twMerge(p-4, p-[3px])",
+  "fn": "twMerge",
+  "args": [
+   "p-4",
+   "p-[3px]"
+  ],
+  "expected": "p-[3px]"
+ },
+ {
+  "name": "twMerge(w-1/2, w-[200px])",
+  "fn": "twMerge",
+  "args": [
+   "w-1/2",
+   "w-[200px]"
+  ],
+  "expected": "w-[200px]"
+ },
+ {
+  "name": "twMerge(mt-2, mt-(--gap))",
+  "fn": "twMerge",
+  "args": [
+   "mt-2",
+   "mt-(--gap)"
+  ],
+  "expected": "mt-(--gap)"
+ },
+ {
+  "name": "twMerge(p-0.5, p-12)",
+  "fn": "twMerge",
+  "args": [
+   "p-0.5",
+   "p-12"
+  ],
+  "expected": "p-12"
+ },
+ {
+  "name": "twMerge(w-1/2, w-1/3)",
+  "fn": "twMerge",
+  "args": [
+   "w-1/2",
+   "w-1/3"
+  ],
+  "expected": "w-1/3"
+ },
+ {
+  "name": "twMerge(-mt-2, mt-4)",
+  "fn": "twMerge",
+  "args": [
+   "-mt-2",
+   "mt-4"
+  ],
+  "expected": "mt-4"
+ },
+ {
+  "name": "twMerge(mt-4, -mt-2)",
+  "fn": "twMerge",
+  "args": [
+   "mt-4",
+   "-mt-2"
+  ],
+  "expected": "-mt-2"
+ },
+ {
+  "name": "twMerge(bg-red-500/50, bg-blue-500)",
+  "fn": "twMerge",
+  "args": [
+   "bg-red-500/50",
+   "bg-blue-500"
+  ],
+  "expected": "bg-blue-500"
+ },
+ {
+  "name": "twMerge(bg-red-500, bg-blue-500/20)",
+  "fn": "twMerge",
+  "args": [
+   "bg-red-500",
+   "bg-blue-500/20"
+  ],
+  "expected": "bg-blue-500/20"
+ },
+ {
+  "name": "twMerge(!p-2, !p-4)",
+  "fn": "twMerge",
+  "args": [
+   "!p-2",
+   "!p-4"
+  ],
+  "expected": "!p-4"
+ },
+ {
+  "name": "twMerge(p-2!, p-4!)",
+  "fn": "twMerge",
+  "args": [
+   "p-2!",
+   "p-4!"
+  ],
+  "expected": "p-4!"
+ },
+ {
+  "name": "twMerge(!p-2, p-4!)",
+  "fn": "twMerge",
+  "args": [
+   "!p-2",
+   "p-4!"
+  ],
+  "expected": "p-4!"
+ },
+ {
+  "name": "twMerge(!p-2, p-4)",
+  "fn": "twMerge",
+  "args": [
+   "!p-2",
+   "p-4"
+  ],
+  "expected": "!p-2 p-4"
+ },
+ {
+  "name": "twMerge(hover:duration-500, duration-700)",
+  "fn": "twMerge",
+  "args": [
+   "hover:duration-500",
+   "duration-700"
+  ],
+  "expected": "hover:duration-500 duration-700"
+ },
+ {
+  "name": "twMerge(hover:duration-500, hover:duration-700)",
+  "fn": "twMerge",
+  "args": [
+   "hover:duration-500",
+   "hover:duration-700"
+  ],
+  "expected": "hover:duration-700"
+ },
+ {
+  "name": "twMerge(md:hover:p-2, hover:md:p-4)",
+  "fn": "twMerge",
+  "args": [
+   "md:hover:p-2",
+   "hover:md:p-4"
+  ],
+  "expected": "hover:md:p-4"
+ },
+ {
+  "name": "twMerge(md:p-2, p-4)",
+  "fn": "twMerge",
+  "args": [
+   "md:p-2",
+   "p-4"
+  ],
+  "expected": "md:p-2 p-4"
+ },
+ {
+  "name": "twMerge([&>*]:p-2, [&>*]:p-4)",
+  "fn": "twMerge",
+  "args": [
+   "[&>*]:p-2",
+   "[&>*]:p-4"
+  ],
+  "expected": "[&>*]:p-4"
+ },
+ {
+  "name": "twMerge([&>*]:p-2, [&_a]:p-4)",
+  "fn": "twMerge",
+  "args": [
+   "[&>*]:p-2",
+   "[&_a]:p-4"
+  ],
+  "expected": "[&>*]:p-2 [&_a]:p-4"
+ },
+ {
+  "name": "twMerge(p-2, p-4)",
+  "fn": "twMerge",
+  "args": [
+   "p-2",
+   "p-4"
+  ],
+  "expected": "p-4"
+ },
+ {
+  "name": "twMerge(px-2, px-4)",
+  "fn": "twMerge",
+  "args": [
+   "px-2",
+   "px-4"
+  ],
+  "expected": "px-4"
+ },
+ {
+  "name": "twMerge(pt-2, pb-2)",
+  "fn": "twMerge",
+  "args": [
+   "pt-2",
+   "pb-2"
+  ],
+  "expected": "pt-2 pb-2"
+ },
+ {
+  "name": "twMerge(m-2, m-8)",
+  "fn": "twMerge",
+  "args": [
+   "m-2",
+   "m-8"
+  ],
+  "expected": "m-8"
+ },
+ {
+  "name": "twMerge(gap-2, gap-10)",
+  "fn": "twMerge",
+  "args": [
+   "gap-2",
+   "gap-10"
+  ],
+  "expected": "gap-10"
+ },
+ {
+  "name": "twMerge(gap-x-2, gap-y-2)",
+  "fn": "twMerge",
+  "args": [
+   "gap-x-2",
+   "gap-y-2"
+  ],
+  "expected": "gap-x-2 gap-y-2"
+ },
+ {
+  "name": "twMerge(w-10, w-full)",
+  "fn": "twMerge",
+  "args": [
+   "w-10",
+   "w-full"
+  ],
+  "expected": "w-full"
+ },
+ {
+  "name": "twMerge(h-10, h-screen)",
+  "fn": "twMerge",
+  "args": [
+   "h-10",
+   "h-screen"
+  ],
+  "expected": "h-screen"
+ },
+ {
+  "name": "twMerge(w-10, h-10)",
+  "fn": "twMerge",
+  "args": [
+   "w-10",
+   "h-10"
+  ],
+  "expected": "w-10 h-10"
+ },
+ {
+  "name": "twMerge(min-w-0, min-w-[10px])",
+  "fn": "twMerge",
+  "args": [
+   "min-w-0",
+   "min-w-[10px]"
+  ],
+  "expected": "min-w-[10px]"
+ },
+ {
+  "name": "twMerge(min-w-0, max-w-0)",
+  "fn": "twMerge",
+  "args": [
+   "min-w-0",
+   "max-w-0"
+  ],
+  "expected": "min-w-0 max-w-0"
+ },
+ {
+  "name": "twMerge(z-10, z-50)",
+  "fn": "twMerge",
+  "args": [
+   "z-10",
+   "z-50"
+  ],
+  "expected": "z-50"
+ },
+ {
+  "name": "twMerge(opacity-50, opacity-100)",
+  "fn": "twMerge",
+  "args": [
+   "opacity-50",
+   "opacity-100"
+  ],
+  "expected": "opacity-100"
+ },
+ {
+  "name": "twMerge(text-sm, text-red-500)",
+  "fn": "twMerge",
+  "args": [
+   "text-sm",
+   "text-red-500"
+  ],
+  "expected": "text-sm text-red-500"
+ },
+ {
+  "name": "twMerge(text-sm, text-lg)",
+  "fn": "twMerge",
+  "args": [
+   "text-sm",
+   "text-lg"
+  ],
+  "expected": "text-lg"
+ },
+ {
+  "name": "twMerge(text-sm, text-2xl)",
+  "fn": "twMerge",
+  "args": [
+   "text-sm",
+   "text-2xl"
+  ],
+  "expected": "text-2xl"
+ },
+ {
+  "name": "twMerge(text-red-500, text-blue-500)",
+  "fn": "twMerge",
+  "args": [
+   "text-red-500",
+   "text-blue-500"
+  ],
+  "expected": "text-blue-500"
+ },
+ {
+  "name": "twMerge(text-red-500, text-[#fff])",
+  "fn": "twMerge",
+  "args": [
+   "text-red-500",
+   "text-[#fff]"
+  ],
+  "expected": "text-[#fff]"
+ },
+ {
+  "name": "twMerge(text-sm, text-[14px])",
+  "fn": "twMerge",
+  "args": [
+   "text-sm",
+   "text-[14px]"
+  ],
+  "expected": "text-[14px]"
+ },
+ {
+  "name": "twMerge(text-[14px], text-[#fff])",
+  "fn": "twMerge",
+  "args": [
+   "text-[14px]",
+   "text-[#fff]"
+  ],
+  "expected": "text-[14px] text-[#fff]"
+ },
+ {
+  "name": "twMerge(text-sm, text-center)",
+  "fn": "twMerge",
+  "args": [
+   "text-sm",
+   "text-center"
+  ],
+  "expected": "text-sm text-center"
+ },
+ {
+  "name": "twMerge(text-left, text-center)",
+  "fn": "twMerge",
+  "args": [
+   "text-left",
+   "text-center"
+  ],
+  "expected": "text-center"
+ },
+ {
+  "name": "twMerge(leading-6, leading-tight)",
+  "fn": "twMerge",
+  "args": [
+   "leading-6",
+   "leading-tight"
+  ],
+  "expected": "leading-tight"
+ },
+ {
+  "name": "twMerge(tracking-tight, tracking-wide)",
+  "fn": "twMerge",
+  "args": [
+   "tracking-tight",
+   "tracking-wide"
+  ],
+  "expected": "tracking-wide"
+ },
+ {
+  "name": "twMerge(bg-red-500, bg-blue-500)",
+  "fn": "twMerge",
+  "args": [
+   "bg-red-500",
+   "bg-blue-500"
+  ],
+  "expected": "bg-blue-500"
+ },
+ {
+  "name": "twMerge(bg-red-500, bg-cover)",
+  "fn": "twMerge",
+  "args": [
+   "bg-red-500",
+   "bg-cover"
+  ],
+  "expected": "bg-red-500 bg-cover"
+ },
+ {
+  "name": "twMerge(bg-red-500, bg-center)",
+  "fn": "twMerge",
+  "args": [
+   "bg-red-500",
+   "bg-center"
+  ],
+  "expected": "bg-red-500 bg-center"
+ },
+ {
+  "name": "twMerge(bg-cover, bg-contain)",
+  "fn": "twMerge",
+  "args": [
+   "bg-cover",
+   "bg-contain"
+  ],
+  "expected": "bg-contain"
+ },
+ {
+  "name": "twMerge(bg-center, bg-top)",
+  "fn": "twMerge",
+  "args": [
+   "bg-center",
+   "bg-top"
+  ],
+  "expected": "bg-top"
+ },
+ {
+  "name": "twMerge(bg-cover, bg-center)",
+  "fn": "twMerge",
+  "args": [
+   "bg-cover",
+   "bg-center"
+  ],
+  "expected": "bg-cover bg-center"
+ },
+ {
+  "name": "twMerge(bg-red-500, bg-[#fff])",
+  "fn": "twMerge",
+  "args": [
+   "bg-red-500",
+   "bg-[#fff]"
+  ],
+  "expected": "bg-[#fff]"
+ },
+ {
+  "name": "twMerge(bg-cover, bg-[length:10px_10px])",
+  "fn": "twMerge",
+  "args": [
+   "bg-cover",
+   "bg-[length:10px_10px]"
+  ],
+  "expected": "bg-[length:10px_10px]"
+ },
+ {
+  "name": "twMerge(bg-no-repeat, bg-cover)",
+  "fn": "twMerge",
+  "args": [
+   "bg-no-repeat",
+   "bg-cover"
+  ],
+  "expected": "bg-no-repeat bg-cover"
+ },
+ {
+  "name": "twMerge(border-2, border-red-500)",
+  "fn": "twMerge",
+  "args": [
+   "border-2",
+   "border-red-500"
+  ],
+  "expected": "border-2 border-red-500"
+ },
+ {
+  "name": "twMerge(border-2, border-4)",
+  "fn": "twMerge",
+  "args": [
+   "border-2",
+   "border-4"
+  ],
+  "expected": "border-4"
+ },
+ {
+  "name": "twMerge(border, border-2)",
+  "fn": "twMerge",
+  "args": [
+   "border",
+   "border-2"
+  ],
+  "expected": "border-2"
+ },
+ {
+  "name": "twMerge(border-red-500, border-blue-500)",
+  "fn": "twMerge",
+  "args": [
+   "border-red-500",
+   "border-blue-500"
+  ],
+  "expected": "border-blue-500"
+ },
+ {
+  "name": "twMerge(border-solid, border-2)",
+  "fn": "twMerge",
+  "args": [
+   "border-solid",
+   "border-2"
+  ],
+  "expected": "border-solid border-2"
+ },
+ {
+  "name": "twMerge(border-solid, border-dashed)",
+  "fn": "twMerge",
+  "args": [
+   "border-solid",
+   "border-dashed"
+  ],
+  "expected": "border-dashed"
+ },
+ {
+  "name": "twMerge(border-t-2, border-b-2)",
+  "fn": "twMerge",
+  "args": [
+   "border-t-2",
+   "border-b-2"
+  ],
+  "expected": "border-t-2 border-b-2"
+ },
+ {
+  "name": "twMerge(border-t-2, border-t-4)",
+  "fn": "twMerge",
+  "args": [
+   "border-t-2",
+   "border-t-4"
+  ],
+  "expected": "border-t-4"
+ },
+ {
+  "name": "twMerge(border-t-2, border-t-red-500)",
+  "fn": "twMerge",
+  "args": [
+   "border-t-2",
+   "border-t-red-500"
+  ],
+  "expected": "border-t-2 border-t-red-500"
+ },
+ {
+  "name": "twMerge(border-[3px], border-2)",
+  "fn": "twMerge",
+  "args": [
+   "border-[3px]",
+   "border-2"
+  ],
+  "expected": "border-2"
+ },
+ {
+  "name": "twMerge(border-[3px], border-[#fff])",
+  "fn": "twMerge",
+  "args": [
+   "border-[3px]",
+   "border-[#fff]"
+  ],
+  "expected": "border-[3px] border-[#fff]"
+ },
+ {
+  "name": "twMerge(rounded, rounded-lg)",
+  "fn": "twMerge",
+  "args": [
+   "rounded",
+   "rounded-lg"
+  ],
+  "expected": "rounded-lg"
+ },
+ {
+  "name": "twMerge(rounded-t-md, rounded-t-lg)",
+  "fn": "twMerge",
+  "args": [
+   "rounded-t-md",
+   "rounded-t-lg"
+  ],
+  "expected": "rounded-t-lg"
+ },
+ {
+  "name": "twMerge(rounded-t-md, rounded-b-md)",
+  "fn": "twMerge",
+  "args": [
+   "rounded-t-md",
+   "rounded-b-md"
+  ],
+  "expected": "rounded-t-md rounded-b-md"
+ },
+ {
+  "name": "twMerge(shadow-sm, shadow-lg)",
+  "fn": "twMerge",
+  "args": [
+   "shadow-sm",
+   "shadow-lg"
+  ],
+  "expected": "shadow-lg"
+ },
+ {
+  "name": "twMerge(shadow, shadow-md)",
+  "fn": "twMerge",
+  "args": [
+   "shadow",
+   "shadow-md"
+  ],
+  "expected": "shadow-md"
+ },
+ {
+  "name": "twMerge(shadow-md, shadow-red-500)",
+  "fn": "twMerge",
+  "args": [
+   "shadow-md",
+   "shadow-red-500"
+  ],
+  "expected": "shadow-md shadow-red-500"
+ },
+ {
+  "name": "twMerge(shadow-red-500, shadow-blue-500)",
+  "fn": "twMerge",
+  "args": [
+   "shadow-red-500",
+   "shadow-blue-500"
+  ],
+  "expected": "shadow-blue-500"
+ },
+ {
+  "name": "twMerge(font-bold, font-light)",
+  "fn": "twMerge",
+  "args": [
+   "font-bold",
+   "font-light"
+  ],
+  "expected": "font-light"
+ },
+ {
+  "name": "twMerge(font-bold, font-sans)",
+  "fn": "twMerge",
+  "args": [
+   "font-bold",
+   "font-sans"
+  ],
+  "expected": "font-bold font-sans"
+ },
+ {
+  "name": "twMerge(font-sans, font-mono)",
+  "fn": "twMerge",
+  "args": [
+   "font-sans",
+   "font-mono"
+  ],
+  "expected": "font-mono"
+ },
+ {
+  "name": "twMerge(transition, transition-colors)",
+  "fn": "twMerge",
+  "args": [
+   "transition",
+   "transition-colors"
+  ],
+  "expected": "transition-colors"
+ },
+ {
+  "name": "twMerge(transition-all, transition-none)",
+  "fn": "twMerge",
+  "args": [
+   "transition-all",
+   "transition-none"
+  ],
+  "expected": "transition-none"
+ },
+ {
+  "name": "twMerge(ease-in, ease-out)",
+  "fn": "twMerge",
+  "args": [
+   "ease-in",
+   "ease-out"
+  ],
+  "expected": "ease-out"
+ },
+ {
+  "name": "twMerge(ease-in, ease-[cubic-bezier(0.4,0,0.2,1)])",
+  "fn": "twMerge",
+  "args": [
+   "ease-in",
+   "ease-[cubic-bezier(0.4,0,0.2,1)]"
+  ],
+  "expected": "ease-[cubic-bezier(0.4,0,0.2,1)]"
+ },
+ {
+  "name": "twMerge(animate-spin, animate-pulse)",
+  "fn": "twMerge",
+  "args": [
+   "animate-spin",
+   "animate-pulse"
+  ],
+  "expected": "animate-pulse"
+ },
+ {
+  "name": "twMerge(animate-spin, animate-none)",
+  "fn": "twMerge",
+  "args": [
+   "animate-spin",
+   "animate-none"
+  ],
+  "expected": "animate-none"
+ },
+ {
+  "name": "twMerge(grid-cols-2, grid-cols-12)",
+  "fn": "twMerge",
+  "args": [
+   "grid-cols-2",
+   "grid-cols-12"
+  ],
+  "expected": "grid-cols-12"
+ },
+ {
+  "name": "twMerge(grid-cols-2, grid-cols-[1fr_2fr])",
+  "fn": "twMerge",
+  "args": [
+   "grid-cols-2",
+   "grid-cols-[1fr_2fr]"
+  ],
+  "expected": "grid-cols-[1fr_2fr]"
+ },
+ {
+  "name": "twMerge(flex, block)",
+  "fn": "twMerge",
+  "args": [
+   "flex",
+   "block"
+  ],
+  "expected": "block"
+ },
+ {
+  "name": "twMerge(hidden, flex)",
+  "fn": "twMerge",
+  "args": [
+   "hidden",
+   "flex"
+  ],
+  "expected": "flex"
+ },
+ {
+  "name": "twMerge(flex, flex-col)",
+  "fn": "twMerge",
+  "args": [
+   "flex",
+   "flex-col"
+  ],
+  "expected": "flex flex-col"
+ },
+ {
+  "name": "twMerge(flex-row, flex-col)",
+  "fn": "twMerge",
+  "args": [
+   "flex-row",
+   "flex-col"
+  ],
+  "expected": "flex-col"
+ },
+ {
+  "name": "twMerge(absolute, relative)",
+  "fn": "twMerge",
+  "args": [
+   "absolute",
+   "relative"
+  ],
+  "expected": "relative"
+ },
+ {
+  "name": "twMerge(ring-2, ring-4)",
+  "fn": "twMerge",
+  "args": [
+   "ring-2",
+   "ring-4"
+  ],
+  "expected": "ring-4"
+ },
+ {
+  "name": "twMerge(ring-2, ring-red-500)",
+  "fn": "twMerge",
+  "args": [
+   "ring-2",
+   "ring-red-500"
+  ],
+  "expected": "ring-2 ring-red-500"
+ },
+ {
+  "name": "twMerge(outline-2, outline-4)",
+  "fn": "twMerge",
+  "args": [
+   "outline-2",
+   "outline-4"
+  ],
+  "expected": "outline-4"
+ },
+ {
+  "name": "twMerge(outline-2, outline-red-500)",
+  "fn": "twMerge",
+  "args": [
+   "outline-2",
+   "outline-red-500"
+  ],
+  "expected": "outline-2 outline-red-500"
+ },
+ {
+  "name": "twMerge([mask-type:alpha], [mask-type:luminance])",
+  "fn": "twMerge",
+  "args": [
+   "[mask-type:alpha]",
+   "[mask-type:luminance]"
+  ],
+  "expected": "[mask-type:luminance]"
+ },
+ {
+  "name": "twMerge([mask-type:alpha], [color:red])",
+  "fn": "twMerge",
+  "args": [
+   "[mask-type:alpha]",
+   "[color:red]"
+  ],
+  "expected": "[mask-type:alpha] [color:red]"
+ },
+ {
+  "name": "cn(duration-700, duration-500)",
+  "fn": "cn",
+  "args": [
+   "duration-700",
+   "duration-500"
+  ],
+  "expected": "duration-500"
+ },
+ {
+  "name": "twMerge(px-2, py-2)",
+  "fn": "twMerge",
+  "args": [
+   "px-2",
+   "py-2"
+  ],
+  "expected": "px-2 py-2"
+ },
+ {
+  "name": "twMerge(krate-card, krate-card-title, krate-card)",
+  "fn": "twMerge",
+  "args": [
+   "krate-card",
+   "krate-card-title",
+   "krate-card"
+  ],
+  "expected": "krate-card-title krate-card"
+ },
+ {
+  "name": "twMerge(foo-bar, foo-baz)",
+  "fn": "twMerge",
+  "args": [
+   "foo-bar",
+   "foo-baz"
+  ],
+  "expected": "foo-bar foo-baz"
+ },
+ {
+  "name": "twMerge(a b, c a)",
+  "fn": "twMerge",
+  "args": [
+   "a b",
+   "c a"
+  ],
+  "expected": "b c a"
+ },
+ {
+  "name": "twMerge(px-2, py-2, p-4)",
+  "fn": "twMerge",
+  "args": [
+   "px-2",
+   "py-2",
+   "p-4"
+  ],
+  "expected": "p-4"
+ },
+ {
+  "name": "twMerge(p-4, px-2)",
+  "fn": "twMerge",
+  "args": [
+   "p-4",
+   "px-2"
+  ],
+  "expected": "p-4 px-2"
+ },
+ {
+  "name": "twMerge(gap-x-2, gap-4)",
+  "fn": "twMerge",
+  "args": [
+   "gap-x-2",
+   "gap-4"
+  ],
+  "expected": "gap-4"
+ },
+ {
+  "name": "twMerge(w-4, h-4, size-8)",
+  "fn": "twMerge",
+  "args": [
+   "w-4",
+   "h-4",
+   "size-8"
+  ],
+  "expected": "size-8"
+ },
+ {
+  "name": "twMerge(leading-6, text-lg)",
+  "fn": "twMerge",
+  "args": [
+   "leading-6",
+   "text-lg"
+  ],
+  "expected": "text-lg"
+ },
+ {
+  "name": "twMerge(border-t-2, border-x-2, border-4)",
+  "fn": "twMerge",
+  "args": [
+   "border-t-2",
+   "border-x-2",
+   "border-4"
+  ],
+  "expected": "border-4"
+ },
+ {
+  "name": "twMerge(rounded-tl-md, rounded-t-lg)",
+  "fn": "twMerge",
+  "args": [
+   "rounded-tl-md",
+   "rounded-t-lg"
+  ],
+  "expected": "rounded-t-lg"
+ },
+ {
+  "name": "cn(p-2, false, [\"px-4\", {\"px-6\": true}])",
+  "fn": "cn",
+  "args": [
+   "p-2",
+   false,
+   [
+    "px-4",
+    {
+     "px-6": true
+    }
+   ]
+  ],
+  "expected": "p-2 px-6"
+ },
+ {
+  "name": "cn(p-2, null, [\"px-4\", {\"px-6\": true}])",
+  "fn": "cn",
+  "args": [
+   "p-2",
+   null,
+   [
+    "px-4",
+    {
+     "px-6": true
+    }
+   ]
+  ],
+  "expected": "p-2 px-6"
+ },
+ {
+  "name": "clsx(a, null, b)",
+  "fn": "clsx",
+  "args": [
+   "a",
+   null,
+   "b"
+  ],
+  "expected": "a b"
+ },
+ {
+  "name": "clsx(p-2, p-4)",
+  "fn": "clsx",
+  "args": [
+   "p-2",
+   "p-4"
+  ],
+  "expected": "p-2 p-4"
+ },
+ {
+  "name": "clsx(duration-700, duration-500)",
+  "fn": "clsx",
+  "args": [
+   "duration-700",
+   "duration-500"
+  ],
+  "expected": "duration-700 duration-500"
+ },
+ {
+  "name": "cn(p-2, p-4)",
+  "fn": "cn",
+  "args": [
+   "p-2",
+   "p-4"
+  ],
+  "expected": "p-4"
+ },
+ {
+  "name": "cn(p-2, [\"p-4\"])",
+  "fn": "cn",
+  "args": [
+   "p-2",
+   [
+    "p-4"
+   ]
+  ],
+  "expected": "p-4"
+ },
+ {
+  "name": "cn(p-2 px-1, p-4)",
+  "fn": "cn",
+  "args": [
+   "p-2 px-1",
+   "p-4"
+  ],
+  "expected": "p-4"
+ },
+ {
+  "name": "twMerge(duration-700, duration-500)",
+  "fn": "twMerge",
+  "args": [
+   "duration-700",
+   "duration-500"
+  ],
+  "expected": "duration-500"
+ },
+ {
+  "name": "twMerge(delay-150, delay-300)",
+  "fn": "twMerge",
+  "args": [
+   "delay-150",
+   "delay-300"
+  ],
+  "expected": "delay-300"
+ },
+ {
+  "name": "twMerge(ease-in, ease-out)",
+  "fn": "twMerge",
+  "args": [
+   "ease-in",
+   "ease-out"
+  ],
+  "expected": "ease-out"
+ },
+ {
+  "name": "twMerge(duration-700, delay-300, duration-500)",
+  "fn": "twMerge",
+  "args": [
+   "duration-700",
+   "delay-300",
+   "duration-500"
+  ],
+  "expected": "delay-300 duration-500"
+ },
+ {
+  "name": "twMerge(text-sm, text-red-500, text-lg)",
+  "fn": "twMerge",
+  "args": [
+   "text-sm",
+   "text-red-500",
+   "text-lg"
+  ],
+  "expected": "text-red-500 text-lg"
+ },
+ {
+  "name": "twMerge(text-red-500, text-sm)",
+  "fn": "twMerge",
+  "args": [
+   "text-red-500",
+   "text-sm"
+  ],
+  "expected": "text-red-500 text-sm"
+ },
+ {
+  "name": "twMerge(text-base leading-5, text-2xl)",
+  "fn": "twMerge",
+  "args": [
+   "text-base leading-5",
+   "text-2xl"
+  ],
+  "expected": "text-2xl"
+ },
+ {
+  "name": "twMerge(bg-red-500, bg-cover, bg-blue-500)",
+  "fn": "twMerge",
+  "args": [
+   "bg-red-500",
+   "bg-cover",
+   "bg-blue-500"
+  ],
+  "expected": "bg-cover bg-blue-500"
+ },
+ {
+  "name": "twMerge(bg-red-500, bg-center)",
+  "fn": "twMerge",
+  "args": [
+   "bg-red-500",
+   "bg-center"
+  ],
+  "expected": "bg-red-500 bg-center"
+ },
+ {
+  "name": "twMerge(border-2, border-red-500, border-4)",
+  "fn": "twMerge",
+  "args": [
+   "border-2",
+   "border-red-500",
+   "border-4"
+  ],
+  "expected": "border-red-500 border-4"
+ },
+ {
+  "name": "twMerge(border-red-500, border-2, border-blue-500)",
+  "fn": "twMerge",
+  "args": [
+   "border-red-500",
+   "border-2",
+   "border-blue-500"
+  ],
+  "expected": "border-2 border-blue-500"
+ },
+ {
+  "name": "twMerge(hover:p-2, p-4)",
+  "fn": "twMerge",
+  "args": [
+   "hover:p-2",
+   "p-4"
+  ],
+  "expected": "hover:p-2 p-4"
+ },
+ {
+  "name": "twMerge(p-4, hover:p-2, p-6)",
+  "fn": "twMerge",
+  "args": [
+   "p-4",
+   "hover:p-2",
+   "p-6"
+  ],
+  "expected": "hover:p-2 p-6"
+ },
+ {
+  "name": "twMerge(md:hover:p-2, hover:md:p-4)",
+  "fn": "twMerge",
+  "args": [
+   "md:hover:p-2",
+   "hover:md:p-4"
+  ],
+  "expected": "hover:md:p-4"
+ },
+ {
+  "name": "twMerge(hover:p-2, focus:p-2)",
+  "fn": "twMerge",
+  "args": [
+   "hover:p-2",
+   "focus:p-2"
+  ],
+  "expected": "hover:p-2 focus:p-2"
+ },
+ {
+  "name": "twMerge(dark:bg-black, dark:bg-white)",
+  "fn": "twMerge",
+  "args": [
+   "dark:bg-black",
+   "dark:bg-white"
+  ],
+  "expected": "dark:bg-white"
+ },
+ {
+  "name": "twMerge(!p-2, !p-4)",
+  "fn": "twMerge",
+  "args": [
+   "!p-2",
+   "!p-4"
+  ],
+  "expected": "!p-4"
+ },
+ {
+  "name": "twMerge(!p-2, p-4)",
+  "fn": "twMerge",
+  "args": [
+   "!p-2",
+   "p-4"
+  ],
+  "expected": "!p-2 p-4"
+ },
+ {
+  "name": "twMerge(p-4, p-2!)",
+  "fn": "twMerge",
+  "args": [
+   "p-4",
+   "p-2!"
+  ],
+  "expected": "p-4 p-2!"
+ },
+ {
+  "name": "twMerge(-mt-2, mt-4)",
+  "fn": "twMerge",
+  "args": [
+   "-mt-2",
+   "mt-4"
+  ],
+  "expected": "mt-4"
+ },
+ {
+  "name": "twMerge(mt-4, -mt-2)",
+  "fn": "twMerge",
+  "args": [
+   "mt-4",
+   "-mt-2"
+  ],
+  "expected": "-mt-2"
+ },
+ {
+  "name": "twMerge(-translate-x-1, translate-x-2)",
+  "fn": "twMerge",
+  "args": [
+   "-translate-x-1",
+   "translate-x-2"
+  ],
+  "expected": "translate-x-2"
+ },
+ {
+  "name": "twMerge(w-[10px], w-[20px])",
+  "fn": "twMerge",
+  "args": [
+   "w-[10px]",
+   "w-[20px]"
+  ],
+  "expected": "w-[20px]"
+ },
+ {
+  "name": "twMerge(w-[10px], h-[20px])",
+  "fn": "twMerge",
+  "args": [
+   "w-[10px]",
+   "h-[20px]"
+  ],
+  "expected": "w-[10px] h-[20px]"
+ },
+ {
+  "name": "twMerge(text-[14px], text-[#fff], text-[length:var(--x)])",
+  "fn": "twMerge",
+  "args": [
+   "text-[14px]",
+   "text-[#fff]",
+   "text-[length:var(--x)]"
+  ],
+  "expected": "text-[#fff] text-[length:var(--x)]"
+ },
+ {
+  "name": "twMerge(bg-[#fff], bg-[url(/a.png)])",
+  "fn": "twMerge",
+  "args": [
+   "bg-[#fff]",
+   "bg-[url(/a.png)]"
+  ],
+  "expected": "bg-[#fff] bg-[url(/a.png)]"
+ },
+ {
+  "name": "twMerge(bg-[url(/a.png)], bg-none)",
+  "fn": "twMerge",
+  "args": [
+   "bg-[url(/a.png)]",
+   "bg-none"
+  ],
+  "expected": "bg-none"
+ },
+ {
+  "name": "twMerge(duration-(--d), duration-300)",
+  "fn": "twMerge",
+  "args": [
+   "duration-(--d)",
+   "duration-300"
+  ],
+  "expected": "duration-300"
+ },
+ {
+  "name": "twMerge(p-(--pad), p-4)",
+  "fn": "twMerge",
+  "args": [
+   "p-(--pad)",
+   "p-4"
+  ],
+  "expected": "p-4"
+ },
+ {
+  "name": "twMerge(text-(--c), text-lg)",
+  "fn": "twMerge",
+  "args": [
+   "text-(--c)",
+   "text-lg"
+  ],
+  "expected": "text-(--c) text-lg"
+ },
+ {
+  "name": "twMerge(text-(length:--s), text-lg)",
+  "fn": "twMerge",
+  "args": [
+   "text-(length:--s)",
+   "text-lg"
+  ],
+  "expected": "text-lg"
+ },
+ {
+  "name": "twMerge([&>*]:p-2, [&>*]:p-4)",
+  "fn": "twMerge",
+  "args": [
+   "[&>*]:p-2",
+   "[&>*]:p-4"
+  ],
+  "expected": "[&>*]:p-4"
+ },
+ {
+  "name": "twMerge([--x:1], [--x:2])",
+  "fn": "twMerge",
+  "args": [
+   "[--x:1]",
+   "[--x:2]"
+  ],
+  "expected": "[--x:2]"
+ },
+ {
+  "name": "twMerge(p-2, px-4, pt-1)",
+  "fn": "twMerge",
+  "args": [
+   "p-2",
+   "px-4",
+   "pt-1"
+  ],
+  "expected": "p-2 px-4 pt-1"
+ },
+ {
+  "name": "twMerge(pt-1, px-4, p-2)",
+  "fn": "twMerge",
+  "args": [
+   "pt-1",
+   "px-4",
+   "p-2"
+  ],
+  "expected": "p-2"
+ },
+ {
+  "name": "twMerge(inset-0, top-4)",
+  "fn": "twMerge",
+  "args": [
+   "inset-0",
+   "top-4"
+  ],
+  "expected": "inset-0 top-4"
+ },
+ {
+  "name": "twMerge(top-4, inset-0)",
+  "fn": "twMerge",
+  "args": [
+   "top-4",
+   "inset-0"
+  ],
+  "expected": "inset-0"
+ },
+ {
+  "name": "twMerge(rounded-tl-md, rounded-lg)",
+  "fn": "twMerge",
+  "args": [
+   "rounded-tl-md",
+   "rounded-lg"
+  ],
+  "expected": "rounded-lg"
+ },
+ {
+  "name": "twMerge(rounded-lg, rounded-tl-md)",
+  "fn": "twMerge",
+  "args": [
+   "rounded-lg",
+   "rounded-tl-md"
+  ],
+  "expected": "rounded-lg rounded-tl-md"
+ },
+ {
+  "name": "twMerge(size-4, w-8)",
+  "fn": "twMerge",
+  "args": [
+   "size-4",
+   "w-8"
+  ],
+  "expected": "size-4 w-8"
+ },
+ {
+  "name": "twMerge(flex, hidden, block)",
+  "fn": "twMerge",
+  "args": [
+   "flex",
+   "hidden",
+   "block"
+  ],
+  "expected": "block"
+ },
+ {
+  "name": "twMerge(truncate, truncate)",
+  "fn": "twMerge",
+  "args": [
+   "truncate",
+   "truncate"
+  ],
+  "expected": "truncate"
+ },
+ {
+  "name": "twMerge(a, b, a)",
+  "fn": "twMerge",
+  "args": [
+   "a",
+   "b",
+   "a"
+  ],
+  "expected": "b a"
+ },
+ {
+  "name": "twMerge(shadow-md, shadow-red-500, shadow-lg)",
+  "fn": "twMerge",
+  "args": [
+   "shadow-md",
+   "shadow-red-500",
+   "shadow-lg"
+  ],
+  "expected": "shadow-red-500 shadow-lg"
+ },
+ {
+  "name": "twMerge(font-bold, font-sans, font-light)",
+  "fn": "twMerge",
+  "args": [
+   "font-bold",
+   "font-sans",
+   "font-light"
+  ],
+  "expected": "font-sans font-light"
+ },
+ {
+  "name": "twMerge(ring-2, ring-red-500, ring-offset-2, ring-4)",
+  "fn": "twMerge",
+  "args": [
+   "ring-2",
+   "ring-red-500",
+   "ring-offset-2",
+   "ring-4"
+  ],
+  "expected": "ring-red-500 ring-offset-2 ring-4"
+ },
+ {
+  "name": "twMerge(bg-red-500/50, bg-blue-500/20)",
+  "fn": "twMerge",
+  "args": [
+   "bg-red-500/50",
+   "bg-blue-500/20"
+  ],
+  "expected": "bg-blue-500/20"
+ },
+ {
+  "name": "twMerge(w-1/2, w-1/3)",
+  "fn": "twMerge",
+  "args": [
+   "w-1/2",
+   "w-1/3"
+  ],
+  "expected": "w-1/3"
+ },
+ {
+  "name": "twMerge(  p-2   , p-4)",
+  "fn": "twMerge",
+  "args": [
+   "  p-2   ",
+   "p-4"
+  ],
+  "expected": "p-4"
+ },
+ {
+  "name": "twMerge()",
+  "fn": "twMerge",
+  "args": [],
+  "expected": ""
+ },
+ {
+  "name": "twMerge([\"p-2\", {\"p-4\": true, \"p-6\": false}], m-1)",
+  "fn": "twMerge",
+  "args": [
+   [
+    "p-2",
+    {
+     "p-4": true,
+     "p-6": false
+    }
+   ],
+   "m-1"
+  ],
+  "expected": "p-4 m-1"
+ }
+]

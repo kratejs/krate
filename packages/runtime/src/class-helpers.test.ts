@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { cn, twMerge, clsx } from './class-helpers';
+import { readFileSync } from 'node:fs';
+import { cn, twMerge, clsx, type ClassValue } from './class-helpers';
 
 // Each case: input classes, expected merged output (later wins).
 const same = (a: string, b: string): void => {
@@ -148,4 +149,21 @@ describe('twMerge groups', () => {
     expect(cn('p-2', false && 'p-3', ['px-4', { 'px-6': true }])).toBe('p-2 px-6');
     expect(clsx('a', null, 'b')).toBe('a b');
   });
+});
+
+// The compiler folds literal cn/twMerge calls with a Go port of the merge; the
+// same vectors run in packages/compiler/internal/irtree/classmerge_test.go.
+describe('shared class-merge vectors', () => {
+  const vectors = JSON.parse(
+    readFileSync('src/testdata/class-merge-vectors.json', 'utf8')
+  ) as Array<{ name: string; fn: 'twMerge' | 'cn' | 'clsx'; args: ClassValue[]; expected: string }>;
+  const fns = { twMerge, cn, clsx };
+  it('has vectors', () => {
+    expect(vectors.length).toBeGreaterThan(100);
+  });
+  for (const v of vectors) {
+    it(`${v.fn}: ${v.name}`, () => {
+      expect(fns[v.fn](...v.args)).toBe(v.expected);
+    });
+  }
 });
