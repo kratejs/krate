@@ -16,7 +16,7 @@ import (
 )
 
 // Targets lists the supported deploy adapters.
-var Targets = []string{"netlify", "vercel", "cloudflare", "gh-pages", "docker"}
+var Targets = []string{"netlify", "vercel", "cloudflare", "gh-pages", "docker", "node"}
 
 // ServerFeatures lists the server-side features a built project uses. A static
 // host serves none of them, so deploying such a project to a static target
@@ -77,6 +77,10 @@ type Options struct {
 	// StaticOnly acknowledges that the project uses server features that a
 	// static target will not run, and deploys the static output anyway.
 	StaticOnly bool
+	// Server is the bundled portable server (build.BuildServerBundle). It is
+	// required for the node target and for platform targets of projects with
+	// server features (see WantsServer).
+	Server *ServerPlan
 }
 
 // Emit writes the adapter files for target and returns their paths. root is the
@@ -93,8 +97,12 @@ func Emit(target string, cfg *config.Config, root, outDir string, opts ...Option
 	if target == "docker" {
 		return emitDocker(cfg, root, outDir)
 	}
-	if features := ServerFeatures(root, outDir); len(features) > 0 && !opt.StaticOnly {
-		return nil, fmt.Errorf("this project uses server features (%s) that the %s target cannot run: the deployed site would be an empty shell for them. Deploy with `krate deploy --target docker` (or run `krate serve` on a Node/Go host), or pass --static-only to publish only the static pages", strings.Join(features, ", "), target)
+	features := ServerFeatures(root, outDir)
+	if WantsServer(target, features, opt.StaticOnly) {
+		return emitServer(target, cfg, root, outDir, opt.Server)
+	}
+	if len(features) > 0 && !opt.StaticOnly {
+		return nil, fmt.Errorf("this project uses server features (%s) that the %s target cannot run: the deployed site would be an empty shell for them. Deploy with `krate deploy --target docker`, `--target node`, vercel, netlify or cloudflare (they run the server), or pass --static-only to publish only the static pages", strings.Join(features, ", "), target)
 	}
 	// Server-only artifacts (bundles, manifests, renderer, ISR cache) must never be uploaded
 	// to a static host. Remove them before writing adapter files.

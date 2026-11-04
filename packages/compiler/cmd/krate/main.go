@@ -179,9 +179,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "       krate migrate rollback <backup-dir>\n\n")
 		fmt.Fprintf(w, "Plan or apply a framework migration. Dry-run by default.\n")
 	case "deploy":
-		writeHelp(w, "Usage: krate deploy [dir] [--target netlify|vercel|cloudflare|gh-pages|docker] [--static-only]\n\n")
+		writeHelp(w, "Usage: krate deploy [dir] [--target netlify|vercel|cloudflare|gh-pages|docker|node] [--static-only]\n\n")
 		writeHelp(w, "Build the site and write host adapter files (_redirects/_headers, vercel.json, Dockerfile).\n")
-		writeHelp(w, "Projects with SSR/ISR, API routes, actions or middleware need --target docker (or\n`krate serve`); --static-only publishes just their static pages.\n")
+		writeHelp(w, "Projects with SSR/ISR, API routes, actions or middleware deploy to vercel, netlify and\ncloudflare as a serverless function/worker, to --target node as a plain Node server\n(dist/.krate/server/server.mjs, no Go binary), or to --target docker. Go API routes and\nGo components need docker. --static-only publishes just the static pages.\n")
 	case "inspect":
 		fmt.Fprintf(w, "Usage: krate inspect [dir] [--json]\n\n")
 		fmt.Fprintf(w, "Build the site and print its model (routes, sources, modes, deps, outputs).\n")
@@ -705,7 +705,22 @@ func runDeploy(flags cliFlags, args []string) {
 		os.Exit(1)
 	}
 
-	files, err := deploy.Emit(target, cfg, root, cfg.OutDir, deploy.Options{StaticOnly: flags.StaticOnly})
+	dopts := deploy.Options{StaticOnly: flags.StaticOnly}
+	if deploy.WantsServer(target, deploy.ServerFeatures(root, cfg.OutDir), flags.StaticOnly) {
+		fmt.Printf("%s%s  Bundling the server for %s%s\n", cBold, cCyan, target, cReset)
+		plan, err := build.BuildServerBundle(root, cfg, target)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%sDeploy error:%s %v\n", cRed, cReset, err)
+			os.Exit(1)
+		}
+		dopts.Server = plan
+	}
+	files, err := deploy.Emit(target, cfg, root, cfg.OutDir, dopts)
+	if dopts.Server != nil {
+		for _, w := range dopts.Server.Warnings {
+			fmt.Fprintf(os.Stderr, "%s! warning:%s %s\n", cYellow, cReset, w)
+		}
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sDeploy error:%s %v\n", cRed, cReset, err)
 		os.Exit(1)

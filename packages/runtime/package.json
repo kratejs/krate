@@ -65,6 +65,18 @@
     "./slot": {
       "types": "./dist/slot.d.ts",
       "default": "./dist/slot.js"
+    },
+    "./server-handler": {
+      "types": "./dist/server-handler.d.ts",
+      "default": "./dist/server-handler.js"
+    },
+    "./node-server": {
+      "types": "./dist/node-server.d.ts",
+      "default": "./dist/node-server.js"
+    },
+    "./assets-static": {
+      "types": "./dist/assets-static.d.ts",
+      "default": "./dist/assets-static.js"
     }
   },
   "files": [

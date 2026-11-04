@@ -299,6 +299,7 @@ krate deploy --target vercel
 krate deploy --target cloudflare
 krate deploy --target gh-pages
 krate deploy --target docker
+krate deploy --target node
 ```
 
 | Target | Files written |
@@ -307,10 +308,17 @@ krate deploy --target docker
 | `vercel` | `vercel.json` at the project root (redirects, rewrites, headers, `outputDirectory`) |
 | `gh-pages` | `.nojekyll`, `404.html` |
 | `docker` | `Dockerfile` + `.dockerignore` at the project root (runs `krate serve`) |
+| `node` | `dist/.krate/server/server.mjs`, a plain Node server (SSR, ISR, API routes, actions, middleware; no Go binary) |
 
-Projects that use SSR/ISR/streaming, API routes, server actions or middleware
-cannot run on the static targets: `krate deploy` fails and lists those features
-unless you pass `--static-only` (or use `--target docker`).
+For a project with server features, `vercel`, `netlify` and `cloudflare` write
+the server as well: `.vercel/output/` (Build Output API v3, with a Node.js
+function), `netlify/functions/krate.mjs` + `netlify/server/krate-server.mjs` + `netlify.toml`, and
+`.krate/deploy/cloudflare/worker.mjs` + `wrangler.jsonc`.
+
+Go API routes, Go components and a custom API sidecar cannot run on the
+serverless targets: `krate deploy` fails naming them (use `--target docker`).
+Static-only hosts (`gh-pages`) fail for projects with server features unless you
+pass `--static-only`, which publishes only the static pages.
 
 See [Deployment](/docs/guides/deployment/) for details.
 
