@@ -44,15 +44,11 @@ in the output as static HTML with no client runtime.
 
 ## CSS pipeline
 
-Plain CSS imported or referenced in pages is collected, then split at the
-**rule level**:
-
-- Rules used by two or more pages are written once to a shared
-  `styles.<hash>.css` chunk, linked before per-page CSS on every page.
-- Rules unique to a page go into that page's own hashed chunk.
-
-Chunk order is deterministic (the shared chunk is sorted by canonical rule), so
-hashes are stable across builds. The processing steps are:
+Plain CSS imported or referenced in pages is collected per page and written as
+one stylesheet per page. Output filenames are content-hashed
+(`styles.<hash>.css`), so pages with byte-identical stylesheets share one file
+and hashes are stable across builds. There is no rule-level splitting: moving or
+sorting rules between files would reorder the cascade. The processing steps are:
 
 1. **Collect** CSS per page from its module graph (module CSS, layout CSS,
    CSS-signal rules), in source/import order.
@@ -61,12 +57,20 @@ hashes are stable across builds. The processing steps are:
    is honoured, not leaked.
 3. **Resolve `url(...)`** assets relative to the sheet, content-hash and copy
    them to `/assets/...`, and rewrite the URL.
-4. **Handle directives** - strip `@tailwind`, unwrap `@layer`, expand `@apply`.
-5. **Minify** (string/URL/comment aware) - whitespace collapse, `rgba()`/`rgb()`
-   -> hex, hex shortening, zero-unit removal, `calc()` simplification, empty-rule
-   and duplicate-declaration removal. Preserves strings, `url()`, `data:` URIs,
-   `/*!` license comments, vendor-prefixed fallbacks, and `!important`.
-6. **Chunk** into shared + per-page stylesheets and hash filenames.
+4. **Handle directives** - strip `@tailwind` and expand `@apply`; `@layer`
+   blocks are kept as written.
+5. **Minify** (string/URL/comment/escape aware) - whitespace collapse, then
+   value transforms that run only on declaration values (never on selectors,
+   at-rule preludes, names, or custom property values): `rgba()`/`rgb()` -> hex,
+   hex shortening, zero-length unit removal (not inside `calc()`/`min()`/`max()`/
+   `clamp()`, `flex`, or for `fr`, `%`, time and angle units), type-safe
+   `calc()` folding, empty-rule removal, and duplicate-declaration folding. A
+   duplicate fold keeps the last declaration at its own position and is skipped
+   when a related shorthand sits between the two or the earlier value looks like
+   an intentional fallback. Strings, `url()`, `data:` URIs, `/*!` license
+   comments, and `!important` are preserved. With minification off, only the
+   duplicate-declaration fold runs and formatting is kept.
+6. **Hash** the result into `styles.<hash>.css`; identical sheets share a file.
 
 CSS Modules names are hashed as `className_<fnv32a_hash>`, where the hash is
 FNV-32a of the absolute file path (6-char base36). Scoping is tokenizer-based:

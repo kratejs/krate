@@ -7,7 +7,7 @@ description: Style pages with CSS Modules, a Go-native Tailwind, and a built-in 
 # Styling
 
 Krate ships a CSS pipeline built into the compiler: CSS Modules, Go-native
-Tailwind, rule-level deduplication, minification, and `@import` inlining. No
+Tailwind, duplicate-declaration folding, minification, and `@import` inlining. No
 PostCSS or extra tooling is required.
 
 ## CSS Modules
@@ -77,7 +77,7 @@ Supported namespaces: `--color-*` (incl. `DEFAULT` and `name-<shade>`),
 `@apply` is supported in your CSS. Plain utilities are expanded in place;
 variant/descendant/unknown utilities cannot be represented as plain
 declarations and are reported as build warnings. `@tailwind` directives are
-stripped and `@layer { ... }` blocks are unwrapped (Krate owns the layer order).
+stripped and `@layer { ... }` blocks are left intact.
 
 - A **candidate scanner** extracts Tailwind tokens from every string and
   template literal in the scanned files, so classes inside
@@ -126,11 +126,12 @@ remain out of scope. Unrecognized classes produce no rule (enable
 
 ## Global CSS & code splitting
 
-Plain CSS imported or referenced in pages is collected and split at the
-**rule level**: rules used by two or more pages are written once to a shared
-`styles.<hash>.css` chunk, and page-unique rules go into that page's own hashed
-chunk. A component library imported across many pages therefore ships once, not
-per page. Chunk order is deterministic, so hashes are stable across builds. See
+Plain CSS imported or referenced in pages is collected per page, in source and
+import order, and written as **one stylesheet per page** to a content-hashed
+`styles.<hash>.css`. Pages whose stylesheets are byte-identical share a single
+file, so a layout-only site ships one stylesheet. Rules are never reordered or
+moved between files, so the cascade you wrote is the cascade that ships, and
+`@layer` blocks are preserved as authored. See
 [Contributing -> Architecture](/docs/contributing/architecture/#css-pipeline) for
 the full processing steps.
 
