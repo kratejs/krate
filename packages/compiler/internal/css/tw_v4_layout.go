@@ -35,6 +35,8 @@ type spacingRoot struct {
 
 // spacingRoots are matched in order (longest prefix of a family first).
 var spacingRoots = []spacingRoot{
+	{"inset-bs", []string{"inset-block-start"}, true, true, true},
+	{"inset-be", []string{"inset-block-end"}, true, true, true},
 	{"inset-x", []string{"inset-inline"}, true, true, true},
 	{"inset-y", []string{"inset-block"}, true, true, true},
 	{"inset-s", []string{"inset-inline-start"}, true, true, true},
@@ -46,6 +48,8 @@ var spacingRoots = []spacingRoot{
 	{"left", []string{"left"}, true, true, true},
 	{"start", []string{"inset-inline-start"}, true, true, true},
 	{"end", []string{"inset-inline-end"}, true, true, true},
+	{"mbs", []string{"margin-block-start"}, true, false, true},
+	{"mbe", []string{"margin-block-end"}, true, false, true},
 	{"mx", []string{"margin-inline"}, true, false, true},
 	{"my", []string{"margin-block"}, true, false, true},
 	{"mt", []string{"margin-top"}, true, false, true},
@@ -55,6 +59,8 @@ var spacingRoots = []spacingRoot{
 	{"ms", []string{"margin-inline-start"}, true, false, true},
 	{"me", []string{"margin-inline-end"}, true, false, true},
 	{"m", []string{"margin"}, true, false, true},
+	{"pbs", []string{"padding-block-start"}, false, false, false},
+	{"pbe", []string{"padding-block-end"}, false, false, false},
 	{"px", []string{"padding-inline"}, false, false, false},
 	{"py", []string{"padding-block"}, false, false, false},
 	{"pt", []string{"padding-top"}, false, false, false},
@@ -68,6 +74,28 @@ var spacingRoots = []spacingRoot{
 	{"gap-y", []string{"row-gap"}, false, false, false},
 	{"gap", []string{"gap"}, false, false, false},
 	{"indent", []string{"text-indent"}, false, false, true},
+	{"scroll-mt", []string{"scroll-margin-top"}, false, false, true},
+	{"scroll-mr", []string{"scroll-margin-right"}, false, false, true},
+	{"scroll-mb", []string{"scroll-margin-bottom"}, false, false, true},
+	{"scroll-ml", []string{"scroll-margin-left"}, false, false, true},
+	{"scroll-ms", []string{"scroll-margin-inline-start"}, false, false, true},
+	{"scroll-me", []string{"scroll-margin-inline-end"}, false, false, true},
+	{"scroll-mbs", []string{"scroll-margin-block-start"}, false, false, true},
+	{"scroll-mbe", []string{"scroll-margin-block-end"}, false, false, true},
+	{"scroll-mx", []string{"scroll-margin-inline"}, false, false, true},
+	{"scroll-my", []string{"scroll-margin-block"}, false, false, true},
+	{"scroll-m", []string{"scroll-margin"}, false, false, true},
+	{"scroll-pt", []string{"scroll-padding-top"}, false, false, false},
+	{"scroll-pr", []string{"scroll-padding-right"}, false, false, false},
+	{"scroll-pb", []string{"scroll-padding-bottom"}, false, false, false},
+	{"scroll-pl", []string{"scroll-padding-left"}, false, false, false},
+	{"scroll-ps", []string{"scroll-padding-inline-start"}, false, false, false},
+	{"scroll-pe", []string{"scroll-padding-inline-end"}, false, false, false},
+	{"scroll-pbs", []string{"scroll-padding-block-start"}, false, false, false},
+	{"scroll-pbe", []string{"scroll-padding-block-end"}, false, false, false},
+	{"scroll-px", []string{"scroll-padding-inline"}, false, false, false},
+	{"scroll-py", []string{"scroll-padding-block"}, false, false, false},
+	{"scroll-p", []string{"scroll-padding"}, false, false, false},
 }
 
 // spacingUtility resolves margin, padding, inset, gap and indent utilities.
@@ -158,15 +186,11 @@ func sizeValue(kind, key string, theme TailwindTheme) (string, bool) {
 		if isH {
 			return "100vh", true
 		}
-		if kind != "basis" {
+		if kind != "basis" && kind != "size" {
 			return "100vw", true
 		}
-	case "svh", "lvh", "dvh":
-		if isH {
-			return "100" + key, true
-		}
-	case "svw", "lvw", "dvw":
-		if !isH && kind != "basis" {
+	case "svh", "lvh", "dvh", "svw", "lvw", "dvw":
+		if kind != "basis" {
 			return "100" + key, true
 		}
 	case "lh":
@@ -185,7 +209,7 @@ func sizeValue(kind, key string, theme TailwindTheme) (string, bool) {
 			}
 		}
 	}
-	if kind == "w" || kind == "min-w" || kind == "max-w" || kind == "basis" || kind == "size" {
+	if kind == "w" || kind == "min-w" || kind == "max-w" || kind == "basis" {
 		if v, ok := containerSize(key, theme); ok {
 			return v, true
 		}
@@ -206,17 +230,26 @@ func sizeValue(kind, key string, theme TailwindTheme) (string, bool) {
 }
 
 var sizeProps = []struct {
-	root  string
+	root string
+	// kind selects the value set (see sizeValue); logical roots reuse the
+	// kind of the physical axis they map to.
+	kind  string
 	props []string
 }{
-	{"min-w", []string{"min-width"}},
-	{"min-h", []string{"min-height"}},
-	{"max-w", []string{"max-width"}},
-	{"max-h", []string{"max-height"}},
-	{"size", []string{"width", "height"}},
-	{"basis", []string{"flex-basis"}},
-	{"w", []string{"width"}},
-	{"h", []string{"height"}},
+	{"min-w", "min-w", []string{"min-width"}},
+	{"min-h", "min-h", []string{"min-height"}},
+	{"max-w", "max-w", []string{"max-width"}},
+	{"max-h", "max-h", []string{"max-height"}},
+	{"min-inline", "min-w", []string{"min-inline-size"}},
+	{"min-block", "min-h", []string{"min-block-size"}},
+	{"max-inline", "max-w", []string{"max-inline-size"}},
+	{"max-block", "max-h", []string{"max-block-size"}},
+	{"inline", "w", []string{"inline-size"}},
+	{"block", "h", []string{"block-size"}},
+	{"size", "size", []string{"width", "height"}},
+	{"basis", "basis", []string{"flex-basis"}},
+	{"w", "w", []string{"width"}},
+	{"h", "h", []string{"height"}},
 }
 
 // sizeUtility resolves w-*, h-*, min-*, max-*, size-* and basis-*.
@@ -226,7 +259,7 @@ func sizeUtility(cls string, theme TailwindTheme) (string, bool) {
 		if !ok || key == "" {
 			continue
 		}
-		v, ok := sizeValue(p.root, key, theme)
+		v, ok := sizeValue(p.kind, key, theme)
 		if !ok {
 			return "", false
 		}

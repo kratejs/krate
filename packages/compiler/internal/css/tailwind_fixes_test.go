@@ -314,12 +314,12 @@ func TestNthAndCapabilityVariants(t *testing.T) {
 func TestFilterFamilies(t *testing.T) {
 	tests := map[string]string{
 		"blur-sm":        "--tw-blur: blur(8px);",
-		"brightness-150": "--tw-brightness: brightness(1.5);",
-		"contrast-125":   "--tw-contrast: contrast(1.25);",
+		"brightness-150": "--tw-brightness: brightness(150%);",
+		"contrast-125":   "--tw-contrast: contrast(125%);",
 		"grayscale":      "--tw-grayscale: grayscale(100%);",
 		"hue-rotate-90":  "--tw-hue-rotate: hue-rotate(90deg);",
 		"invert":         "--tw-invert: invert(100%);",
-		"saturate-200":   "--tw-saturate: saturate(2);",
+		"saturate-200":   "--tw-saturate: saturate(200%);",
 		"sepia":          "--tw-sepia: sepia(100%);",
 		"drop-shadow-md": "--tw-drop-shadow: drop-shadow(",
 	}

@@ -259,7 +259,6 @@ func defaultSizing() map[string]string {
 	}
 }
 
-
 // defaultShadows is the v4 box-shadow scale (shadow == shadow-sm).
 func defaultShadows() map[string]string {
 	m := map[string]string{"none": "none"}

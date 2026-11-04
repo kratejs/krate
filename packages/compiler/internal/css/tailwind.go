@@ -177,9 +177,15 @@ func (g *TailwindGenerator) Generate(classes map[string]bool) string {
 // recognize an arbitrary key returns it verbatim (e.g. `margin: project`), which
 // would emit invalid CSS. Such declarations are rejected instead.
 func validDeclarationBlock(css string) bool {
-	for _, decl := range strings.Split(css, ";") {
+	for _, decl := range splitDecls(css) {
 		decl = strings.TrimSpace(decl)
 		if decl == "" {
+			continue
+		}
+		if _, inner, nested := nestedAtRule(decl); nested {
+			if !validDeclarationBlock(inner) {
+				return false
+			}
 			continue
 		}
 		prop, val, ok := strings.Cut(decl, ":")
@@ -260,8 +266,8 @@ func negatableRoot(base string) bool {
 	for _, p := range []string{
 		"m-", "mx-", "my-", "mt-", "mr-", "mb-", "ml-", "ms-", "me-", "inset-", "top-",
 		"right-", "bottom-", "left-", "start-", "end-", "z-", "order-", "indent-",
-		"scroll-m", "space-", "outline-offset-", "hue-rotate-", "col-start-", "col-end-",
-		"row-start-", "row-end-", "tracking-", "backdrop-hue-rotate-",
+		"scroll-m", "space-", "outline-offset-", "col-start-", "col-end-",
+		"row-start-", "row-end-", "tracking-",
 	} {
 		if strings.HasPrefix(base, p) {
 			return true
@@ -370,11 +376,15 @@ func radiusValue(key string, theme TailwindTheme) string {
 // addImportant appends !important to every declaration in a CSS declaration
 // block (the `!` prefix form).
 func addImportant(css string) string {
-	parts := strings.Split(css, ";")
+	parts := splitDecls(css)
 	var out []string
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
 		if p == "" {
+			continue
+		}
+		if head, inner, nested := nestedAtRule(p); nested {
+			out = append(out, head+"{"+addImportant(inner)+"}")
 			continue
 		}
 		out = append(out, p+" !important")
@@ -554,10 +564,10 @@ func generateCSS(cls string, theme TailwindTheme) string {
 		return "justify-self: auto;"
 	}
 	if cls == "justify-self-start" {
-		return "justify-self: start;"
+		return "justify-self: flex-start;"
 	}
 	if cls == "justify-self-end" {
-		return "justify-self: end;"
+		return "justify-self: flex-end;"
 	}
 	if cls == "justify-self-center" {
 		return "justify-self: center;"

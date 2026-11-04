@@ -55,7 +55,7 @@ type twProperty struct {
 func tp(name string) twProperty        { return twProperty{name: name} }
 func tpi(name, init string) twProperty { return twProperty{name: name, initial: init, hasInit: true} }
 
-var twProperties = []twProperty{
+var twProperties = append([]twProperty{
 	tp("--tw-backdrop-blur"), tp("--tw-backdrop-brightness"), tp("--tw-backdrop-contrast"),
 	tp("--tw-backdrop-grayscale"), tp("--tw-backdrop-hue-rotate"), tp("--tw-backdrop-invert"),
 	tp("--tw-backdrop-opacity"), tp("--tw-backdrop-saturate"), tp("--tw-backdrop-sepia"),
@@ -86,11 +86,13 @@ var twProperties = []twProperty{
 	tpi("--tw-scale-x", "1"), tpi("--tw-scale-y", "1"), tpi("--tw-scale-z", "1"),
 	tpi("--tw-translate-x", "0"), tpi("--tw-translate-y", "0"), tpi("--tw-translate-z", "0"),
 	tpi("--tw-scroll-snap-strictness", "proximity"),
+	tp("--tw-contain-size"), tp("--tw-contain-layout"), tp("--tw-contain-paint"), tp("--tw-contain-style"),
+	tpi("--tw-scrollbar-thumb", "#0000"), tpi("--tw-scrollbar-track", "#0000"),
 	tpi("--tw-space-x-reverse", "0"), tpi("--tw-space-y-reverse", "0"),
 	tp("--tw-pan-x"), tp("--tw-pan-y"), tp("--tw-pinch-zoom"),
 	tp("--tw-ordinal"), tp("--tw-slashed-zero"), tp("--tw-numeric-figure"),
 	tp("--tw-numeric-spacing"), tp("--tw-numeric-fraction"),
-}
+}, maskProperties()...)
 
 var twPropertyByName = func() map[string]twProperty {
 	m := make(map[string]twProperty, len(twProperties))

@@ -23,6 +23,12 @@ func v4UtilityRaw(cls string, theme TailwindTheme) (css string, handled bool) {
 	if css, ok := arbitraryProperty(cls); ok {
 		return css, true
 	}
+	if css, ok := maskUtility(base, neg, theme); ok {
+		return css, true
+	}
+	if css, ok := moreUtility(base, neg, theme); ok {
+		return css, true
+	}
 	if css, ok := transformUtility(base, neg, theme); ok {
 		return css, true
 	}
@@ -42,6 +48,12 @@ func v4UtilityRaw(cls string, theme TailwindTheme) (css string, handled bool) {
 		return css, true
 	}
 	if css, ok := gridLineUtility(base, neg); ok {
+		return css, true
+	}
+	if css, ok := filterFnUtility(base, neg); ok {
+		return css, true
+	}
+	if css, ok := backgroundGradientUtility(base, neg); ok {
 		return css, true
 	}
 	if neg {
@@ -81,9 +93,6 @@ func v4UtilityRaw(cls string, theme TailwindTheme) (css string, handled bool) {
 		return css, true
 	}
 	if css, ok := divideUtility(base, theme); ok {
-		return css, true
-	}
-	if css, ok := backgroundGradientUtility(base, false); ok {
 		return css, true
 	}
 	if css, ok := gradientStopUtility(base, theme); ok {
