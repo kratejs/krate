@@ -13,6 +13,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/css"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
@@ -494,11 +495,17 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 	}
 	src := string(data)
 	mcfg := markdown.DefaultConfig()
-	result := markdown.ParseMDX(src, mcfg)
-	if len(result.Frontmatter) > 0 {
-		b.frontmatter = result.Frontmatter
+	compiled := markdown.Compile(src, mcfg, markdown.Options{MDX: strings.HasSuffix(abs, ".mdx")})
+	for _, d := range compiled.Diags {
+		if !d.Warning {
+			return fmt.Errorf("%s:%d:%d: %s (hint: %s)", path, d.Line, d.Col, d.Msg, d.Hint)
+		}
 	}
-	tsxSource := generateMDXBundleTSX(path, src, result, mcfg)
+	if len(compiled.Frontmatter) > 0 {
+		b.frontmatter = compiled.Frontmatter
+	}
+	result := &markdown.MDXResult{Frontmatter: compiled.Frontmatter}
+	tsxSource := generateMDXBundleTSX(path, compiled, mcfg)
 
 	tokens := lexer.New(tsxSource).Tokenize()
 	p := parser.New(tokens)
@@ -899,14 +906,20 @@ func fileExists(path string) bool {
 // generateMDXBundleTSX creates a TSX source string from MDX content.
 // It preserves import statements and renders JSX blocks as actual JSX elements,
 // while markdown content is embedded as template literal strings.
-func generateMDXBundleTSX(path, src string, result *markdown.MDXResult, mcfg markdown.Config) string {
-	imports := markdown.ExtractImports(src)
-	_, segments := markdown.ParseMDXSegments(src, mcfg)
+func generateMDXBundleTSX(path string, compiled *markdown.Result, mcfg markdown.Config) string {
+	imports := compiled.ESM
+	segments := compiled.Segments
 
 	var sb strings.Builder
 	for _, imp := range imports {
 		sb.WriteString(imp)
 		sb.WriteString("\n")
+	}
+	for _, s := range segments {
+		if s.JSX != "" && strings.Contains(s.JSX, "frontmatter") {
+			sb.WriteString(markdown.FrontmatterDecl(compiled.Frontmatter, compiled.ESM))
+			break
+		}
 	}
 	if markdown.HasCodeSegments(segments) {
 		sb.WriteString("import { Code } from \"@krate/components\";\n")
@@ -916,6 +929,8 @@ func generateMDXBundleTSX(path, src string, result *markdown.MDXResult, mcfg mar
 	}
 	sb.WriteString("\nexport default function MDXContent() {\n")
 	sb.WriteString("  return (\n")
+	sb.WriteString("    <>\n")
+	sb.WriteString(mdxHeadJSX(compiled.Frontmatter))
 	sb.WriteString("    <div class=\"md-content\">\n")
 
 	for _, seg := range segments {
@@ -933,7 +948,7 @@ func generateMDXBundleTSX(path, src string, result *markdown.MDXResult, mcfg mar
 		}
 		if seg.Code != nil {
 			sb.WriteString("      ")
-			sb.WriteString(markdown.BuildCodeJSX(seg.Code.Lang, seg.Code.Code))
+			sb.WriteString(markdown.BuildCodeJSXMeta(seg.Code.Lang, seg.Code.Meta, seg.Code.Code))
 			sb.WriteString("\n")
 		}
 		if seg.Aside != nil {
@@ -944,8 +959,29 @@ func generateMDXBundleTSX(path, src string, result *markdown.MDXResult, mcfg mar
 	}
 
 	sb.WriteString("    </div>\n")
+	sb.WriteString("    </>\n")
 	sb.WriteString("  );\n")
 	sb.WriteString("}\n")
+	return sb.String()
+}
+
+// mdxHeadJSX emits a <Head> block for the frontmatter title and description so
+// markdown pages get a document <title> and meta description.
+func mdxHeadJSX(fm map[string]any) string {
+	title, _ := fm["title"].(string)
+	desc, _ := fm["description"].(string)
+	if title == "" && desc == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("      <Head>\n")
+	if title != "" {
+		sb.WriteString("        <title>{" + escape.JSStringDQ(title) + "}</title>\n")
+	}
+	if desc != "" {
+		sb.WriteString("        <meta name=\"description\" content={" + escape.JSStringDQ(desc) + "} />\n")
+	}
+	sb.WriteString("      </Head>\n")
 	return sb.String()
 }
 

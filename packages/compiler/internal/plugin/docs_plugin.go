@@ -421,7 +421,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 				defer wg.Done()
 
 				tocItems := pageTocItems(page)
-				breadcrumbs := docs.BuildBreadcrumbsURL(page.Locale, defaultLocale, page.Path)
+				breadcrumbs := docs.BuildBreadcrumbsTitled(page.Locale, defaultLocale, page.Path, b.pages)
 
 				fileLayoutRel := theme.importSpecifier(filepath.Dir(tsxPath))
 				tsxSource := p.generateTSX(ctx, cfg, page, fileLayoutRel, searchEnabled, b.sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, li, opts, themeOptions, cfg.Markdown, docs.DocsBasePath)
@@ -715,10 +715,13 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	var mdxImports []string
 	var segments []markdown.MDXSegment
 	var rawSrc string
+	var mdxFrontmatter string
 	if data, err := os.ReadFile(page.SourcePath); err == nil {
 		rawSrc = string(data)
-		mdxImports = markdown.ExtractImports(rawSrc)
-		_, segments = markdown.ParseMDXSegments(rawSrc, mdConfig)
+		res := markdown.Compile(rawSrc, mdConfig, markdown.Options{MDX: strings.HasSuffix(page.SourcePath, ".mdx")})
+		mdxImports = res.ESM
+		segments = res.Segments
+		mdxFrontmatter = markdown.FrontmatterDecl(res.Frontmatter, res.ESM)
 	}
 	useCode := markdown.HasCodeSegments(segments)
 	useAside := markdown.HasAsideSegments(segments)
@@ -726,6 +729,9 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	for _, imp := range mdxImports {
 		sb.WriteString(imp)
 		sb.WriteString("\n")
+	}
+	if segmentsReference(segments, "frontmatter") {
+		sb.WriteString(mdxFrontmatter)
 	}
 
 	// Auto-import the built-in components referenced by the page: Code/Aside
@@ -1013,7 +1019,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 			}
 			if seg.Code != nil {
 				sb.WriteString("        ")
-				sb.WriteString(markdown.BuildCodeJSX(seg.Code.Lang, seg.Code.Code))
+				sb.WriteString(markdown.BuildCodeJSXMeta(seg.Code.Lang, seg.Code.Meta, seg.Code.Code))
 				sb.WriteString("\n")
 			}
 			if seg.Aside != nil {
@@ -1130,4 +1136,14 @@ func (p *DocsPlugin) writeAssets(ctx *BuildHookCtx, sections []docs.SidebarItem,
 
 	searchData, _ := json.Marshal(docs.BuildSearchIndex(pages))
 	_ = os.WriteFile(filepath.Join(outDir, "data/search-index.json"), searchData, 0644)
+}
+
+// segmentsReference reports whether any JSX segment mentions the identifier.
+func segmentsReference(segs []markdown.MDXSegment, ident string) bool {
+	for _, s := range segs {
+		if s.JSX != "" && strings.Contains(s.JSX, ident) {
+			return true
+		}
+	}
+	return false
 }

@@ -79,3 +79,5 @@ func TestRenderInlineBlockedLinkPreservesLabel(t *testing.T) {
 		t.Errorf("expected no anchor for javascript: URL, got %q", got)
 	}
 }
+
+func renderInline(s string, cfg Config) string { return RenderToHTML(s, cfg) }

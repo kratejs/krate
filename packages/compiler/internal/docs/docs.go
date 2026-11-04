@@ -204,12 +204,11 @@ func scanPage(cfg Config, absPath, relPath string) (Page, error) {
 
 	pagePath := strings.TrimSuffix(relPath, filepath.Ext(relPath))
 
-	var htmlContent string
-	var fm *Frontmatter
-	if strings.HasSuffix(absPath, ".mdx") {
-		htmlContent, fm = ParseMDX(string(data), cfg.MDConfig)
-	} else {
-		htmlContent, fm = ParseMD(string(data), cfg.MDConfig)
+	htmlContent, fm, diags := parseDoc(string(data), cfg.MDConfig, strings.HasSuffix(absPath, ".mdx"))
+	for _, d := range diags {
+		if !d.Warning {
+			return Page{}, fmt.Errorf("%s:%d:%d: %s (hint: %s)", absPath, d.Line, d.Col, d.Msg, d.Hint)
+		}
 	}
 
 	if fm.Title == "" {
@@ -263,17 +262,21 @@ func scanPage(cfg Config, absPath, relPath string) (Page, error) {
 
 // ParseMD parses a .md file, extracting frontmatter and rendering markdown.
 func ParseMD(src string, cfg markdown.Config) (html string, fm *Frontmatter) {
-	raw, segments := markdown.ParseMDXSegments(src, cfg)
-	html = markdown.RenderSegmentsToHTML(segments)
-	fm = decodeFrontmatter(raw)
+	html, fm, _ = parseDoc(src, cfg, false)
 	return
 }
 
-// ParseMDX parses an .mdx file, extracting frontmatter and rendering with JSX
-// support. The result is identical to ParseMD since both delegate to the same
-// markdown renderer.
+// ParseMDX parses an .mdx file, extracting frontmatter and rendering it with
+// MDX semantics (ESM, JSX and expressions). The HTML is the static form used
+// for search and TOC extraction: components are dropped, code is highlighted.
 func ParseMDX(src string, cfg markdown.Config) (html string, fm *Frontmatter) {
-	return ParseMD(src, cfg)
+	html, fm, _ = parseDoc(src, cfg, true)
+	return
+}
+
+func parseDoc(src string, cfg markdown.Config, mdx bool) (string, *Frontmatter, []markdown.Diagnostic) {
+	res := markdown.Compile(src, cfg, markdown.Options{MDX: mdx})
+	return res.StaticHTML(cfg), decodeFrontmatter(res.Frontmatter), res.Diags
 }
 
 // ParseKeywords splits a frontmatter `keywords:` value (comma or space
