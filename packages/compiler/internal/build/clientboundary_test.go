@@ -352,3 +352,19 @@ export default async function Home() {
 		t.Fatalf("unexpected browser result: %+v", res)
 	}
 }
+
+// esbuild errors of a client component build are reported at the file and
+// position esbuild found them, not at the page that uses the component.
+func TestClientBoundaryBundleErrorKeepsEsbuildLocation(t *testing.T) {
+	b, projRoot := scProject(t, map[string]string{
+		"src/lib/broken.ts": "export const fine = 1;\n",
+		"src/components/Widget.tsx": `"use client";
+import { bad } from "../lib/broken";
+export default function Widget() { return <p>{String(bad)}</p>; }`,
+		"src/pages/index.tsx": `import Widget from "../components/Widget";
+export default async function Home() { await Promise.resolve(); return <main><Widget /></main>; }`,
+	})
+	withPreact(t, projRoot)
+	err := b.BuildAll()
+	wantCode(t, err, diag.CodeIslandAsset, "src/components/Widget.tsx:2:10: [KR8009]")
+}

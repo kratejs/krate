@@ -3,9 +3,11 @@ package build
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/evanw/esbuild/pkg/api"
@@ -214,13 +216,21 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 		clientSrc := b.islandClientSource(e, used)
 		out, err := b.buildIslandBundle(clientSrc, resolveDir, false, nil, sink)
 		if err != nil {
-			return "", "", nil, nil, diag.Diagnostic{
+			d := diag.Diagnostic{
 				File:    e.File,
 				Line:    e.Line,
 				Col:     e.Col,
 				Message: "island " + e.ID + " (<" + e.Local + ">) could not be built: " + err.Error(),
 				Hint:    "check the island package and its local imports, then rebuild",
-			}.WithCode(diag.CodeIslandAsset)
+			}
+			// The problem is in the package (or a module it imports), so
+			// point there and say which page island pulled it in.
+			var be *bundleError
+			if errors.As(err, &be) && be.Loc != nil {
+				d.File, d.Line, d.Col = be.Loc.File, be.Loc.Line, be.Loc.Col
+				d.Message = "island " + e.ID + " (<" + e.Local + "> used at " + b.relPath(e.File) + ":" + strconv.Itoa(e.Line) + ":" + strconv.Itoa(e.Col) + ") could not be built: " + err.Error()
+			}
+			return "", "", nil, nil, d.WithCode(diag.CodeIslandAsset)
 		}
 		name := "island." + hashContent(out) + ".js"
 		chunksDir := filepath.Join(b.Cfg.OutDir, "chunks")
@@ -397,6 +407,41 @@ func islandAlias(root string, ssr bool) map[string]string {
 	}
 }
 
+// bundleLocation is a source position reported by esbuild inside a package or
+// module the island pulls in.
+type bundleLocation struct {
+	File      string
+	Line, Col int
+}
+
+// bundleError is an island bundling failure; Loc is where esbuild found the
+// problem (the package file), when it reported one.
+type bundleError struct {
+	Loc *bundleLocation
+	Msg string
+}
+
+func (e *bundleError) Error() string { return e.Msg }
+
+// esbuildFile turns a path esbuild reported (relative to the process working
+// directory) into a project-relative slash path.
+func (b *Builder) esbuildFile(file string) string {
+	cwd, _ := os.Getwd()
+	return esbuildRelFile(b.Root, cwd, file)
+}
+
+// esbuildRelFile makes a path esbuild reported (relative to base, its working
+// directory) relative to the project root.
+func esbuildRelFile(root, base, file string) string {
+	if !filepath.IsAbs(file) && base != "" {
+		file = filepath.Join(base, file)
+	}
+	if rel, err := filepath.Rel(root, file); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(file)
+}
+
 func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *api.Plugin, sink *islandCSSSink) ([]byte, error) {
 	opts := api.BuildOptions{
 		Stdin: &api.StdinOptions{
@@ -433,18 +478,23 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 	result := api.Build(opts)
 	if len(result.Errors) > 0 {
 		var msgs []string
+		var loc *bundleLocation
 		for _, e := range result.Errors {
 			if e.Location != nil {
-				msgs = append(msgs, fmt.Sprintf("%s:%d:%d: %s", e.Location.File, e.Location.Line, e.Location.Column, e.Text))
+				file := b.esbuildFile(e.Location.File)
+				msgs = append(msgs, fmt.Sprintf("%s:%d:%d: %s", file, e.Location.Line, e.Location.Column+1, e.Text))
+				if loc == nil && !strings.HasPrefix(e.Location.File, "krate-island") {
+					loc = &bundleLocation{File: file, Line: e.Location.Line, Col: e.Location.Column + 1}
+				}
 			} else {
 				msgs = append(msgs, e.Text)
 			}
 		}
 		joined := strings.Join(msgs, "\n")
 		if strings.Contains(joined, "preact") {
-			return nil, fmt.Errorf("external React components require Preact, which is not installed in this project\n  hint: install it with `pnpm add preact` (or `npm install preact`)\n  detail: %s", joined)
+			return nil, &bundleError{Loc: loc, Msg: fmt.Sprintf("external React components require Preact, which is not installed in this project\n  hint: install it with `pnpm add preact` (or `npm install preact`)\n  detail: %s", joined)}
 		}
-		return nil, fmt.Errorf("bundling external React island:\n%s", joined)
+		return nil, &bundleError{Loc: loc, Msg: "bundling external React island:\n" + joined}
 	}
 	if len(result.OutputFiles) == 0 {
 		return nil, fmt.Errorf("external React island produced no output")

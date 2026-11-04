@@ -429,7 +429,7 @@ export function mount(el) {
 		LogLevel:          api.LogLevelSilent,
 	})
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
-		return "", clientBuildError(path, result.Errors)
+		return "", clientBuildError(b.Root, path, result.Errors)
 	}
 	out := result.OutputFiles[0].Contents
 	name := "chunks/client." + hashContent(out) + ".js"
@@ -473,8 +473,10 @@ func clientOnlyMarkersPlugin(client bool) api.Plugin {
 
 // clientBuildError converts esbuild errors of a client boundary build into a
 // diagnostic, recognizing the server-only marker.
-func clientBuildError(path string, errs []api.Message) error {
+func clientBuildError(root, path string, errs []api.Message) error {
 	var msgs []string
+	file, line, col := path, 0, 0
+	located := false
 	for _, e := range errs {
 		if strings.Contains(e.Text, serverOnlyMarker) {
 			importer := strings.TrimSpace(strings.TrimSuffix(strings.SplitN(e.Text, serverOnlyMarker+": ", 2)[1], "imports \"server-only\""))
@@ -483,7 +485,13 @@ func clientBuildError(path string, errs []api.Message) error {
 				"import the server-only module from a server component and pass the data to the client component as props", "").WithCode(diag.CodeServerOnlyInClient)
 		}
 		if e.Location != nil {
-			msgs = append(msgs, fmt.Sprintf("%s:%d:%d: %s", e.Location.File, e.Location.Line, e.Location.Column, e.Text))
+			rel := esbuildRelFile(root, root, e.Location.File)
+			msgs = append(msgs, fmt.Sprintf("%s:%d:%d: %s", rel, e.Location.Line, e.Location.Column+1, e.Text))
+			if !located {
+				// Point at the module esbuild found the problem in, which can be
+				// a package the client component imports.
+				file, line, col, located = rel, e.Location.Line, e.Location.Column+1, true
+			}
 		} else {
 			msgs = append(msgs, e.Text)
 		}
@@ -493,7 +501,7 @@ func clientBuildError(path string, errs []api.Message) error {
 	if strings.Contains(joined, "preact") {
 		hint = "\"use client\" components inside server components hydrate with Preact; install it with `pnpm add preact`"
 	}
-	return diag.Diagnostic{File: path, Message: "client component chunk could not be built:\n" + joined, Hint: hint}.WithCode(diag.CodeIslandAsset)
+	return diag.Diagnostic{File: file, Line: line, Col: col, Message: "client component chunk could not be built:\n" + joined, Hint: hint}.WithCode(diag.CodeIslandAsset)
 }
 
 // clientSSRImpls builds the server-side render module of each "use client"
@@ -552,7 +560,7 @@ export function __krate_render(C, props) {
 	})
 	var err error
 	if len(result.Errors) > 0 {
-		err = clientBuildError(cb.SourcePath, result.Errors)
+		err = clientBuildError(c.root, cb.SourcePath, result.Errors)
 	}
 	if c.done == nil {
 		c.done = map[string]error{}
