@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -108,5 +109,91 @@ func TestTailwindScansContainerAndAlphaVar(t *testing.T) {
 	}
 	if strings.Contains(logged, "matched no utility") {
 		t.Errorf("unexpected strict warning:\n%s", logged)
+	}
+}
+
+func countStr(s, sub string) int { return strings.Count(s, sub) }
+
+func TestTailwindApplyKeyframesNotDuplicated(t *testing.T) {
+	// Used in markup and via @apply: one @keyframes in total.
+	_, out, _ := buildFiles(t, map[string]string{
+		"src/pages/index.tsx": `import "./site.css";
+export default function P() { return <div class="animate-spin box">x</div>; }`,
+		"src/pages/site.css": `@import "tailwindcss"; .box{ @apply animate-spin; }`,
+	}, nil)
+	all := readAllCSS(t, out)
+	if n := countStr(all, "@keyframes spin"); n != 1 {
+		t.Errorf("want 1 @keyframes spin, got %d:\n%s", n, all)
+	}
+	// Used only via @apply: still defined once.
+	_, out, _ = buildFiles(t, map[string]string{
+		"src/pages/index.tsx": `import "./site.css";
+export default function P() { return <div class="box">x</div>; }`,
+		"src/pages/site.css": `@import "tailwindcss"; .box{ @apply animate-ping; }`,
+	}, nil)
+	all = readAllCSS(t, out)
+	if n := countStr(all, "@keyframes ping"); n != 1 {
+		t.Errorf("want 1 @keyframes ping, got %d:\n%s", n, all)
+	}
+	if !strings.Contains(all, "animation") {
+		t.Errorf("@apply animation missing:\n%s", all)
+	}
+}
+
+// linkedCSSAll returns the concatenated stylesheets the built page links.
+func linkedCSSAll(t *testing.T, outDir, page string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(outDir, page))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sb strings.Builder
+	for _, m := range regexp.MustCompile(`href="?/?([^"\s>]+\.css)`).FindAllStringSubmatch(string(data), -1) {
+		b, err := os.ReadFile(filepath.Join(outDir, m[1]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sb.Write(b)
+	}
+	return sb.String()
+}
+
+func TestTailwindThemeRemovalOnRebuild(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, c string) {
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page := filepath.Join(root, "src/pages/index.tsx")
+	write("src/pages/index.tsx", `import "./site.css";
+export default function P() { return <div class="bg-brand-500 p-2">x</div>; }`)
+	write("src/pages/site.css", `@import "tailwindcss"; @theme { --color-brand-500: #ff0000; }`)
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.Tailwind.Enabled = true
+	b := New(root, cfg)
+	b.DevMode = true
+	if err := b.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	if got := linkedCSSAll(t, cfg.OutDir, "index.html"); !strings.Contains(got, ".bg-brand-500") {
+		t.Fatalf("initial build lacks bg-brand-500:\n%s", got)
+	}
+	write("src/pages/site.css", `@import "tailwindcss";`)
+	if _, err := b.BuildPages([]string{page}); err != nil {
+		t.Fatal(err)
+	}
+	got := linkedCSSAll(t, cfg.OutDir, "index.html")
+	if strings.Contains(got, ".bg-brand-500") || strings.Contains(got, "--color-brand-500") {
+		t.Errorf("removed @theme token still applies after rebuild:\n%s", got)
+	}
+	if !strings.Contains(got, ".p-2") {
+		t.Errorf("p-2 missing after rebuild:\n%s", got)
 	}
 }
