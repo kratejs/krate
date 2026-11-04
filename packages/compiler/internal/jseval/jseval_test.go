@@ -133,3 +133,26 @@ func write(t *testing.T, dir, name, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestEvalIgnoresStyleAndAssetImports(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "plain.css"), []byte(".a { color: red }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "logo.svg"), []byte("<svg xmlns=\"http://www.w3.org/2000/svg\"/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "data.json"), []byte(`{"slugs":["a","b"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Eval(Options{
+		Source:     "import './plain.css';\nimport './logo.svg';\nimport data from './data.json';\nglobalThis.__krateEvalResult = data.slugs;",
+		ResolveDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("Eval: %v", err)
+	}
+	if string(out) != `["a","b"]` {
+		t.Errorf("out = %s", out)
+	}
+}

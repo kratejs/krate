@@ -63,6 +63,11 @@ func loadConfigMerged(path string, opts LoadOptions, seen map[string]bool) ([]by
 
 	raw, err := evaluateConfigJSON(path, opts)
 	if err != nil {
+		var thrown *ConfigThrownError
+		var invalid *ConfigValidationError
+		if errors.As(err, &thrown) || errors.As(err, &invalid) {
+			return nil, fmt.Errorf("config %s: %w", path, err)
+		}
 		src, _ := os.ReadFile(path)
 		if configUsesModules(string(src)) {
 			return nil, configNotExecutableError(path, err)

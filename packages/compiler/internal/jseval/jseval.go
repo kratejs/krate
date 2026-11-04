@@ -41,6 +41,10 @@ type Options struct {
 	// Await drains the QuickJS job queue after the module evaluates, so a result
 	// assigned from a resolved Promise becomes visible.
 	Await bool
+	// NodeShims resolves the Node built-ins configs use (node:path, node:url,
+	// node:fs, node:os) to small in-process implementations, and any other
+	// node: import to a stub that fails with a precise message.
+	NodeShims bool
 }
 
 // Eval bundles the entry (resolving imports) and runs it in the embedded QuickJS
@@ -67,12 +71,20 @@ func Eval(opts Options) (out json.RawMessage, err error) {
 	if len(opts.Env) > 0 {
 		_ = rt.SetEnv(opts.Env)
 	}
+	if opts.NodeShims {
+		registerNodeHost(rt, opts.ResolveDir)
+	}
 
 	if _, err := rt.ExecuteModule(bundle); err != nil {
 		return nil, err
 	}
 	if opts.Await {
 		rt.DrainJobs()
+	}
+	if msg, _ := rt.Execute(`typeof globalThis.` + ErrorGlobal + ` === "string" ? globalThis.` + ErrorGlobal + ` : ""`); msg != nil {
+		if text, _ := msg.(string); text != "" {
+			return nil, &ThrownError{Text: text}
+		}
 	}
 	res, err := rt.Execute(`JSON.stringify(globalThis.` + ResultGlobal + ` ?? null)`)
 	if err != nil {
@@ -102,6 +114,9 @@ func bundle(opts Options) (string, error) {
 		loader = api.LoaderTS
 	}
 	plugins := []api.Plugin{}
+	if opts.NodeShims {
+		plugins = append(plugins, nodeShimPlugin())
+	}
 	if opts.ResolveImport != nil {
 		plugins = append(plugins, resolveForwarder(opts.ResolveImport))
 	}
@@ -145,7 +160,16 @@ func importMetaPreserver() api.Plugin {
 	return api.Plugin{
 		Name: "krate-preserve-import-meta",
 		Setup: func(pb api.PluginBuild) {
-			pb.OnLoad(api.OnLoadOptions{Filter: `.*`}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+			// Style and asset imports carry no data for build-time evaluation;
+			// load them empty instead of parsing them as JavaScript.
+			pb.OnLoad(api.OnLoadOptions{Filter: assetFilter}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				if args.Namespace != "file" {
+					return api.OnLoadResult{}, nil
+				}
+				empty := ""
+				return api.OnLoadResult{Contents: &empty, Loader: api.LoaderJS}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `\.(?:[cm]?[jt]sx?|json)$`}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
 				if args.Namespace != "file" {
 					return api.OnLoadResult{}, nil
 				}
@@ -163,6 +187,10 @@ func importMetaPreserver() api.Plugin {
 		},
 	}
 }
+
+// assetFilter matches imports of styles, images, fonts and other non-code
+// assets.
+const assetFilter = `\.(?:css|scss|sass|less|styl|pcss|svg|png|jpe?g|gif|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|ogg|pdf|wasm)$`
 
 // importMetaURL is the meta-property importMetaPreserver rewrites.
 const importMetaURL = "import.meta.url"
