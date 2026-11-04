@@ -2140,7 +2140,7 @@ func (b *builder) buildListSlot(expr ast.Expr, parentID string) *ListSlot {
 	if call, ok := expr.(*ast.CallExpr); ok {
 		if plan := planMapCall(call); plan != nil {
 			slot.Keyed = plan.KeyJS != ""
-			slot.Bind = &ListBinding{Source: plan.SourceJS, Key: plan.KeyJS, Render: plan.RenderJS, Accessor: plan.Accessor}
+			slot.Bind = &ListBinding{Source: plan.SourceJS, Key: plan.KeyJS, Render: b.wrapRowContext(plan.RenderJS), Accessor: plan.Accessor}
 			b.checkListKeys(call, plan)
 		}
 	}

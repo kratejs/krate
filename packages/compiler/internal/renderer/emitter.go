@@ -403,11 +403,14 @@ func (e *Emitter) emitStatic(node *irtree.ComponentNode) SlotOutput {
 	// A static component built through the tree path may render {props.children}
 	// (e.g. a context-providing root or a scope-part component); fill the
 	// placeholder with its call-site slots, like emitClient.
-	if strings.Contains(out.HTML, "<!--__children__-->") && len(node.CallSiteSlots) > 0 {
+	// The placeholder sits in a hoisted <template> when it is inside the
+	// hidden branch of a conditional, so templates are spliced as well.
+	if (strings.Contains(out.HTML, "<!--__children__-->") || strings.Contains(out.Templates, "<!--__children__-->")) && len(node.CallSiteSlots) > 0 {
 		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
 		html := callSiteOut.HTML
 		callSiteOut.HTML = ""
 		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", html)
+		out.Templates = strings.ReplaceAll(out.Templates, "<!--__children__-->", html)
 		mergeSlotOutput(&out, callSiteOut)
 	}
 	return out
@@ -587,11 +590,12 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 	// Replace {props.children} placeholder with rendered call site children.
 	// This ensures interactive sub-components nested inside signal components
 	// retain their data-k/data-kh hydration markers.
-	if strings.Contains(out.HTML, "<!--__children__-->") && len(node.CallSiteSlots) > 0 {
+	if (strings.Contains(out.HTML, "<!--__children__-->") || strings.Contains(out.Templates, "<!--__children__-->")) && len(node.CallSiteSlots) > 0 {
 		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
 		html := callSiteOut.HTML
 		callSiteOut.HTML = ""
 		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", html)
+		out.Templates = strings.ReplaceAll(out.Templates, "<!--__children__-->", html)
 		if cond, branch, ok := childrenPlaceholderCond(node.Children); ok {
 			claimCond(callSiteOut.Signatures, cond, branch)
 		}
