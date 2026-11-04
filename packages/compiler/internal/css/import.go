@@ -261,7 +261,8 @@ func (st *importer) conditionHoisted(h string, outer importStmt) string {
 // locate finds the file an @import target refers to, warning when none exists.
 func (st *importer) locate(target, dir string) string {
 	t := strings.TrimPrefix(target, "~")
-	if filepath.IsAbs(t) {
+	if filepath.IsAbs(filepath.FromSlash(t)) {
+		t = filepath.FromSlash(t)
 		if fileExists(t) {
 			return filepath.Clean(t)
 		}
