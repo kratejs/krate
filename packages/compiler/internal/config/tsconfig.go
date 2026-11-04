@@ -969,6 +969,10 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				if s, ok := v.(string); ok {
 					cfg.Fonts.Display = s
 				}
+			case "preloadLimit":
+				if n, ok := v.(float64); ok && n >= 0 {
+					cfg.Fonts.PreloadLimit = int(n)
+				}
 			}
 		}
 	case "tailwind":

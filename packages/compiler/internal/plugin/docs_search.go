@@ -3,11 +3,13 @@ package plugin
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/docfind"
 	"github.com/kratejs/krate/packages/compiler/internal/docs"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin/searchassets"
@@ -131,6 +133,18 @@ func engineForBuild(engine string, dev bool) string {
 // It returns an error only when the WASM index build fails; the caller should
 // treat that as a warning and let the client fall back to the JSON index.
 func (p *DocsPlugin) buildSearchAssets(ctx *BuildHookCtx, pages []docs.Page, engine string, maxResults int, pf PagefindOptions) error {
+	basePath, locales := "", []string(nil)
+	if cfg, ok := ctx.Config.(*config.Config); ok {
+		basePath = cfg.BaseURLPath()
+		if cfg.I18n.Enabled() {
+			_, def := resolveLocales(cfg.I18n)
+			for _, l := range cfg.I18n.Locales {
+				if l != def {
+					locales = append(locales, l)
+				}
+			}
+		}
+	}
 	outDir := filepath.Join(ctx.OutDir, searchDir)
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return fmt.Errorf("creating search dir: %w", err)
@@ -147,7 +161,16 @@ func (p *DocsPlugin) buildSearchAssets(ctx *BuildHookCtx, pages []docs.Page, eng
 	}
 	searchJS = bytes.ReplaceAll(searchJS, []byte(`var ENGINE = "docfind";`),
 		[]byte(fmt.Sprintf("var ENGINE = %q;", engine)))
-	pagefindBase := "/" + filepath.ToSlash(pf.OutputSubdir) + "/"
+	searchJS = bytes.ReplaceAll(searchJS, []byte(`var SEARCH_BASE = "/docs/search/";`),
+		[]byte(fmt.Sprintf("var SEARCH_BASE = %q;", basePath+"/docs/search/")))
+	searchJS = bytes.ReplaceAll(searchJS, []byte(`var INDEX_JSON = "/docs/data/search-index.json";`),
+		[]byte(fmt.Sprintf("var INDEX_JSON = %q;", basePath+"/docs/data/search-index.json")))
+	localesJSON, _ := json.Marshal(locales)
+	searchJS = bytes.ReplaceAll(searchJS, []byte(`var LOCALES = [];`),
+		[]byte("var LOCALES = "+string(localesJSON)+";"))
+	searchJS = bytes.ReplaceAll(searchJS, []byte(`var BASE_PATH = "";`),
+		[]byte(fmt.Sprintf("var BASE_PATH = %q;", basePath)))
+	pagefindBase := basePath + "/" + filepath.ToSlash(pf.OutputSubdir) + "/"
 	searchJS = bytes.ReplaceAll(searchJS, []byte(`var PAGE_FIND_BASE = "/pagefind/";`),
 		[]byte(fmt.Sprintf("var PAGE_FIND_BASE = %q;", pagefindBase)))
 	if err := os.WriteFile(filepath.Join(outDir, "search.js"), searchJS, 0644); err != nil {
@@ -161,7 +184,7 @@ func (p *DocsPlugin) buildSearchAssets(ctx *BuildHookCtx, pages []docs.Page, eng
 		return nil
 	}
 
-	documents := docs.BuildSearchDocuments(pages)
+	documents := docs.BuildSearchDocumentsBase(pages, basePath)
 	if len(documents) == 0 {
 		return nil
 	}

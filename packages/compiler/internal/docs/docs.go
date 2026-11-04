@@ -322,7 +322,12 @@ type SearchEntry struct {
 }
 
 // BuildSearchIndex generates a search index from documentation pages.
-func BuildSearchIndex(pages []Page) []SearchEntry {
+func BuildSearchIndex(pages []Page) []SearchEntry { return BuildSearchIndexBase(pages, "") }
+
+// BuildSearchIndexBase is BuildSearchIndex with a site base path prefixed onto
+// every entry. Entries use each page's own (locale- and version-aware) URL, so
+// a section index is /docs/guides/, never /docs/guides/index/.
+func BuildSearchIndexBase(pages []Page, base string) []SearchEntry {
 	var entries []SearchEntry
 	for _, p := range pages {
 		plainText := StripHTMLTags(p.Content)
@@ -331,7 +336,7 @@ func BuildSearchIndex(pages []Page) []SearchEntry {
 		}
 		entries = append(entries, SearchEntry{
 			Title:      p.Title,
-			Path:       "/docs/" + p.Path + "/",
+			Path:       base + pagePathURL(p),
 			Content:    appendSearchTerms(plainText, p.Tags, p.Categories),
 			Tags:       p.Tags,
 			Categories: p.Categories,
@@ -356,6 +361,11 @@ func appendSearchTerms(plainText string, tags, categories []string) string {
 // against the tags/categories surface the page; the JSON fallback index gets
 // the same terms appended to content (see BuildSearchIndex).
 func BuildSearchDocuments(pages []Page) []docfind.Document {
+	return BuildSearchDocumentsBase(pages, "")
+}
+
+// BuildSearchDocumentsBase is BuildSearchDocuments with a base path prefix.
+func BuildSearchDocumentsBase(pages []Page, base string) []docfind.Document {
 	documents := make([]docfind.Document, 0, len(pages))
 	for _, p := range pages {
 		keywords := dedupeNonEmpty(p.Keywords, p.Tags, p.Categories)
@@ -366,7 +376,7 @@ func BuildSearchDocuments(pages []Page) []docfind.Document {
 		documents = append(documents, docfind.Document{
 			Title:    p.Title,
 			Category: p.Dir,
-			Href:     PageURL(p.Path),
+			Href:     base + pagePathURL(p),
 			Body:     body,
 			Keywords: keywords,
 		})

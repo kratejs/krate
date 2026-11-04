@@ -17,28 +17,28 @@ func init() {
 		CodeInfo{
 			Code:  CodeImageSource,
 			Title: "Image source cannot be used",
-			Explanation: "An <Image> is optimised while the site is built, so its src must name an image file that exists " +
+			Explanation: "An `<Image>` is optimised while the site is built, so its src must name an image file that exists " +
 				"(a path starting with / is relative to the public directory) and can be decoded. Krate reports the " +
 				"problem as a build error instead of shipping a broken image. Fix the path or the file.",
 		},
 		CodeInfo{
 			Code:  CodeImageRemote,
 			Title: "Remote image host is not allowed",
-			Explanation: "A remote <Image src=\"https://...\"> is only passed through when its host matches " +
+			Explanation: "A remote `<Image src=\"https://...\">` is only passed through when its host matches " +
 				"images.remotePatterns in krate.config.ts. Add the host to the allow list, or download the file into " +
 				"the public directory.",
 		},
 		CodeInfo{
 			Code:  CodeImageDynamicProp,
 			Title: "Image prop must be known at build time",
-			Explanation: "<Image> generates its variants during the build, so src, width, height, quality and priority " +
+			Explanation: "An `<Image>` generates its variants during the build, so src, width, height, quality and priority " +
 				"must be literals (or consts initialised with literals) by the time the page is rendered. A value " +
 				"that only exists in the browser cannot be used. alt, sizes and className may be expressions.",
 		},
 		CodeInfo{
 			Code:  CodeImageAlt,
 			Title: "Image has no alt text",
-			Explanation: "An <Image> without an alt attribute is announced by screen readers by its file name. Add a " +
+			Explanation: "An `<Image>` without an alt attribute is announced by screen readers by its file name. Add a " +
 				"description, or alt=\"\" when the image is purely decorative. This is a warning.",
 		},
 	)

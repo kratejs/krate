@@ -192,7 +192,6 @@ func hasTagPrefix(s, tag string) bool {
 
 var (
 	kindTableWrap = ast.NewNodeKind("KrateTableWrap")
-	kindAlert     = ast.NewNodeKind("KrateAlert")
 )
 
 type tableWrap struct{ ast.BaseBlock }

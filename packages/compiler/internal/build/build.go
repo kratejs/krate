@@ -42,10 +42,12 @@ import (
 )
 
 type PageResult struct {
-	Page          string
-	OutName       string
-	HTML          string
-	HeadHTML      string
+	Page     string
+	OutName  string
+	HTML     string
+	HeadHTML string
+	// FontURLs are the fonts this page's own stylesheet asks to preload.
+	FontURLs      []string
 	ScriptHTML    string
 	StyleHTML     string
 	HydrationJS   string
@@ -147,6 +149,8 @@ type Builder struct {
 	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
 	// in the global stylesheet; injected into every page head.
 	fontPreloadHTML string
+	// globalFonts are the font URLs already preloaded by the global stylesheet.
+	globalFonts []string
 
 	workerMu  sync.Mutex
 	workers   map[string]string // worker source path -> hashed site URL (/workers/...)
@@ -1152,6 +1156,8 @@ func (b *Builder) BuildAll() error {
 			HTML:     r.HTML,
 			HeadHTML: r.HeadHTML,
 			HasJS:    r.HasJS,
+
+			IsErrorPage: r.IsErrorPage,
 		}
 		if r.CSSFile != "" && !seenCSS[r.CSSFile] {
 			seenCSS[r.CSSFile] = true
@@ -1458,7 +1464,8 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 		processedCSS, _ = b.processCSSDirectives(processedCSS)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
 		if b.Cfg.Fonts.PreloadEnabled() {
-			b.fontPreloadHTML = fontPreloadHTML(collectFontURLs(processedCSS), b.Cfg.BaseURLPath())
+			b.globalFonts = collectFontPreloads(processedCSS, b.Cfg.Fonts.PreloadLimit)
+			b.fontPreloadHTML = fontPreloadHTML(b.globalFonts, b.Cfg.BaseURLPath())
 		}
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
@@ -1495,6 +1502,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		modernData []byte
 		legacyFile string
 		legacyData []byte
+		fonts      []string
 	}
 	memo := make(map[string]processed)
 	var chromaCSS string
@@ -1512,10 +1520,15 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, file), data, 0644)
 		written[file] = true
 	}
+	var lastFonts []string
 	process := func(pageCss string) (string, []byte, twPageInfo) {
 		processedCSS := b.inlineImports(pageCss)
 		processedCSS, info := b.processCSSDirectives(processedCSS)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
+		lastFonts = nil
+		if b.Cfg.Fonts.PreloadEnabled() {
+			lastFonts = collectFontPreloads(processedCSS, b.Cfg.Fonts.PreloadLimit)
+		}
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
 		} else {
@@ -1548,6 +1561,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		p, ok := memo[key]
 		if !ok {
 			p.file, p.data, p.twInfo = process(pageCss)
+			p.fonts = lastFonts
 			if variants && r.HasCSSSignals {
 				modernRaw, legacyRaw := splitVariantCSS(pageCss)
 				p.modernFile, p.modernData, _ = process(modernRaw)
@@ -1562,6 +1576,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 			memo[key] = p
 		}
 		r.CSSFile = p.file
+		r.FontURLs = p.fonts
 		b.setTailwindPage(r.Page, p.twInfo)
 		write(p.file, p.data)
 		if p.modernFile != "" {
@@ -1642,6 +1657,11 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				return
 			}
 
+			// 0. Head hygiene: the page head precedes the layout head, so the
+			// first <title>/meta/canonical per key wins; site.titleTemplate
+			// shapes the document title the same way it shapes og:title.
+			r.HeadHTML = templateHeadTitle(dedupeHead(r.HeadHTML), b.Cfg.SEO)
+
 			// 1. Construct structural HTML wrapper in memory.
 			// Site-global stylesheets (e.g. Tailwind) are linked first, then
 			// the page's own stylesheet (r.CSSFile). Tailwind output is
@@ -1668,6 +1688,10 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			runtimeHead := b.runtimeCommonHead()
 			if im := b.islandImportMapHTML(); im != "" {
 				runtimeHead = im + runtimeHead
+			}
+			// Fonts declared by the page's own CSS (not the global sheet).
+			if pf := b.pageFontPreloads(r.FontURLs); pf != "" {
+				runtimeHead += pf
 			}
 			chunkPreloads := dynamicChunkURLs(r.HydrationJS)
 			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
@@ -1723,7 +1747,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				}
 				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
 				if b.Cfg.SEO.BaseURL != "" {
-					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO)
+					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO, seoCtx{BasePath: b.Cfg.BaseURLPath(), ErrorPage: r.IsErrorPage})
 					if seoTags != "" {
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
 					}
@@ -4283,4 +4307,23 @@ func (b *Builder) mergeAPIRouteMeta(updates map[string]apiRouteMeta) {
 	if data, err := json.MarshalIndent(list, "", "  "); err == nil {
 		_ = fsutil.WriteFileAtomic(manifestPath, data, 0644)
 	}
+}
+
+// pageFontPreloads renders preload links for fonts the global stylesheet has
+// not already preloaded.
+func (b *Builder) pageFontPreloads(urls []string) string {
+	if len(urls) == 0 {
+		return ""
+	}
+	have := map[string]bool{}
+	for _, u := range b.globalFonts {
+		have[u] = true
+	}
+	var rest []string
+	for _, u := range urls {
+		if !have[u] {
+			rest = append(rest, u)
+		}
+	}
+	return fontPreloadHTML(rest, b.Cfg.BaseURLPath())
 }

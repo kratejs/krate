@@ -37,7 +37,6 @@ func safeURL(dest string) bool {
 // --- Emoji shortcodes -------------------------------------------------------
 
 var emojiRe = regexp.MustCompile(`:([a-z0-9_+-]+):`)
-var codeSpanRe = regexp.MustCompile(`(?s)<code>.*?</code>`)
 
 // emojiMap is a small built-in set of common GitHub-style shortcodes. Unknown
 // names are left untouched.
@@ -90,22 +89,6 @@ var emojiMap = map[string]string{
 	"globe_with_meridians": "\U0001F310",
 	"construction":         "\U0001F6A7",
 	"recycle":              "\u267B\uFE0F",
-}
-
-// replaceEmoji substitutes known `:shortcode:` tokens outside inline code.
-func replaceEmoji(text string) string {
-	if !strings.Contains(text, ":") {
-		return text
-	}
-	var b strings.Builder
-	last := 0
-	for _, loc := range codeSpanRe.FindAllStringIndex(text, -1) {
-		b.WriteString(emojiReplace(text[last:loc[0]]))
-		b.WriteString(text[loc[0]:loc[1]])
-		last = loc[1]
-	}
-	b.WriteString(emojiReplace(text[last:]))
-	return b.String()
 }
 
 func emojiReplace(s string) string {

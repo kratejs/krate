@@ -188,7 +188,9 @@ func (t *tokenTable) protect(text string, mdx bool, report reportFn) string {
 						mdOpen = mdOpen[:len(mdOpen)-1]
 						protect = true
 					}
-				} else if flow {
+				} else if flow && (tg.selfClose || strings.Contains(text[tg.end:], "</"+tg.name+">")) {
+					// An unclosed tag at the start of a line is prose (`<Image> is
+					// optimised ...`), not a component.
 					protect = true
 					if !tg.selfClose {
 						mdOpen = append(mdOpen, tg.name)

@@ -108,3 +108,16 @@ func TestRawHTMLBlocksPassThrough(t *testing.T) {
 	got := RenderToHTML("<div class=\"x\">\n\n**md**\n\n</div>\n", DefaultConfig())
 	mustContain(t, "html block", got, `<div class="x">`, "<strong>md</strong>", "</div>")
 }
+
+func TestPlainMarkdownProseWithAngleBracketsIsNotJSX(t *testing.T) {
+	r := Compile("<Image> is optimised at build time.\n\nThen a `Array<Foo>` here and <Bar> alone.\n", DefaultConfig(), Options{})
+	all := segsText(r)
+	// CommonMark passes the stray tag through as raw HTML; it must not be
+	// mistaken for a component (which would swallow the rest of the page).
+	mustContain(t, "prose", all, "is optimised at build time", "alone")
+	for _, s := range r.Segments {
+		if s.JSX != "" {
+			t.Errorf("unclosed tag in prose became JSX: %q", s.JSX)
+		}
+	}
+}
