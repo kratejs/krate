@@ -23,7 +23,7 @@ func TestVariantsEmitSelectors(t *testing.T) {
 		cls  string
 		want string
 	}{
-		{"hover:bg-red-500", ".hover\\:bg-red-500:hover{background-color: #ef4444;}"},
+		{"hover:bg-red-500", ".hover\\:bg-red-500:hover{background-color: oklch(63.7% 0.237 25.331);}"},
 		{"focus:ring-2", ".focus\\:ring-2:focus"},
 		{"active:opacity-50", ".active\\:opacity-50:active"},
 		{"disabled:opacity-50", ".disabled\\:opacity-50:disabled"},
@@ -146,9 +146,9 @@ func TestLeadingScale(t *testing.T) {
 func TestColorAlpha(t *testing.T) {
 	tests := map[string]string{
 		"text-white/70":   "color: rgb(255 255 255 / 0.7);",
-		"bg-blue-500/50":  "background-color: rgb(59 130 246 / 0.5);",
+		"bg-blue-500/50":  "background-color: color-mix(in oklab, oklch(62.3% 0.214 259.815) 50%, transparent);",
 		"border-black/10": "border-color: rgb(0 0 0 / 0.1);",
-		"bg-red-500/25":   "background-color: rgb(239 68 68 / 0.25);",
+		"bg-red-500/25":   "background-color: color-mix(in oklab, oklch(63.7% 0.237 25.331) 25%, transparent);",
 	}
 	for cls, want := range tests {
 		got := gen(t, cls)
@@ -183,7 +183,7 @@ func TestBorderConsistency(t *testing.T) {
 	}
 	// Colors must not be mistaken for widths.
 	got := gen(t, "border-red-500")
-	if !strings.Contains(got, "border-color: #ef4444;") || strings.Contains(got, "border-width") {
+	if !strings.Contains(got, "border-color: oklch(63.7% 0.237 25.331);") || strings.Contains(got, "border-width") {
 		t.Errorf("border-red-500 should be a color: %s", got)
 	}
 }

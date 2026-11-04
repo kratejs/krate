@@ -90,9 +90,9 @@ func TestTextSizeLineHeightAndTypography(t *testing.T) {
 
 func TestTextAlphaFromVar(t *testing.T) {
 	wantGen(t, map[string]string{
-		"text-red-500/(--alpha)": "color: rgb(239 68 68 / var(--alpha));",
-		"text-red-500/50":        "rgb(239 68 68 / 0.5)",
-		"text-red-500/[0.37]":    "rgb(239 68 68 / 0.37)",
+		"text-red-500/(--alpha)": "color: color-mix(in oklab, oklch(63.7% 0.237 25.331) var(--alpha), transparent);",
+		"text-red-500/50":        "color-mix(in oklab, oklch(63.7% 0.237 25.331) 50%, transparent)",
+		"text-red-500/[0.37]":    "color-mix(in oklab, oklch(63.7% 0.237 25.331) 37%, transparent)",
 	})
 	g := NewTailwindGenerator()
 	g.Theme.Colors["brand"] = map[string]string{"DEFAULT": "oklch(60% 0.2 250)"}
@@ -201,11 +201,11 @@ func TestOutlineDrawsAndRingOffsetComposes(t *testing.T) {
 		"-outline-offset-2": "outline-offset: -2px;",
 		"ring-2":            "calc(2px + var(--tw-ring-offset-width, 0px))",
 		"ring-offset-2":     "--tw-ring-offset-width: 2px; --tw-ring-offset-shadow:",
-		"ring-offset-white": "--tw-ring-offset-color: #ffffff;",
-		"ring-red-500":      "--tw-ring-color: #ef4444;",
+		"ring-offset-white": "--tw-ring-offset-color: #fff;",
+		"ring-red-500":      "--tw-ring-color: oklch(63.7% 0.237 25.331);",
 		"inset-ring-2":      "--tw-inset-ring-shadow: inset 0 0 0 2px",
 		"shadow-md":         "--tw-shadow: 0 4px 6px -1px var(--tw-shadow-color, rgb(0 0 0 / 0.1))",
-		"shadow-red-500":    "--tw-shadow-color: #ef4444;",
+		"shadow-red-500":    "--tw-shadow-color: oklch(63.7% 0.237 25.331);",
 		"inset-shadow-sm":   "--tw-inset-shadow: inset 0 2px 4px var(--tw-inset-shadow-color, rgb(0 0 0 / 0.05));",
 		"text-shadow-sm":    "text-shadow: 0px 1px 0px var(--tw-text-shadow-color, rgb(0 0 0 / 0.075))",
 		"drop-shadow-md":    "--tw-drop-shadow: drop-shadow(0 3px 3px var(--tw-drop-shadow-color, rgb(0 0 0 / 0.12)));",
@@ -223,7 +223,7 @@ func TestSpaceAndDivideTargetChildren(t *testing.T) {
 		"space-y-2":       "margin-block-start: calc(0.5rem * var(--tw-space-y-reverse, 0));",
 		"space-x-reverse": ":where(.space-x-reverse > :not(:last-child)){--tw-space-x-reverse: 1;}",
 		"divide-x":        ":where(.divide-x > :not(:last-child))",
-		"divide-red-500":  ":where(.divide-red-500 > :not(:last-child)){border-color: #ef4444;}",
+		"divide-red-500":  ":where(.divide-red-500 > :not(:last-child)){border-color: oklch(63.7% 0.237 25.331);}",
 		"divide-dashed":   ":where(.divide-dashed > :not(:last-child)){--tw-border-style: dashed; border-style: dashed;}",
 		"hover:space-x-2": ":where(.hover\\:space-x-2:hover > :not(:last-child))",
 		"divide-y-4":      "border-top-width: calc(4px * var(--tw-divide-y-reverse, 0));",
@@ -234,10 +234,10 @@ func TestGradientPositionsAndStops(t *testing.T) {
 	css, kf := genKF(t, NewTailwindGenerator(), "bg-linear-to-r from-red-500 via-blue-500 to-green-500 from-10% via-30% to-90%")
 	for _, want := range []string{
 		"--tw-gradient-position: to right in oklab; background-image: linear-gradient(var(--tw-gradient-stops));",
-		"--tw-gradient-from: #ef4444; --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from, #0000) var(--tw-gradient-from-position, 0%), var(--tw-gradient-to, #0000) var(--tw-gradient-to-position, 100%));",
-		"--tw-gradient-via: #3b82f6;",
+		"--tw-gradient-from: oklch(63.7% 0.237 25.331); --tw-gradient-stops: var(--tw-gradient-via-stops, var(--tw-gradient-position), var(--tw-gradient-from, #0000) var(--tw-gradient-from-position, 0%), var(--tw-gradient-to, #0000) var(--tw-gradient-to-position, 100%));",
+		"--tw-gradient-via: oklch(62.3% 0.214 259.815);",
 		"var(--tw-gradient-via, #0000) var(--tw-gradient-via-position, 50%)",
-		"--tw-gradient-to: #22c55e;",
+		"--tw-gradient-to: oklch(72.3% 0.219 149.579);",
 		".from-10\\%{--tw-gradient-from-position: 10%;}",
 		".via-30\\%{--tw-gradient-via-position: 30%;}",
 		".to-90\\%{--tw-gradient-to-position: 90%;}",
@@ -264,8 +264,8 @@ func TestBorderUsesStyleVariable(t *testing.T) {
 		"border":            "border-style: var(--tw-border-style, solid); border-width: 1px;",
 		"border-dashed":     "--tw-border-style: dashed; border-style: dashed;",
 		"border-t-2":        "border-top-style: var(--tw-border-style, solid); border-top-width: 2px;",
-		"border-t-red-500":  "border-top-color: #ef4444;",
-		"border-x-blue-500": "border-inline-color: #3b82f6;",
+		"border-t-red-500":  "border-top-color: oklch(63.7% 0.237 25.331);",
+		"border-x-blue-500": "border-inline-color: oklch(62.3% 0.214 259.815);",
 		"border-(--b)":      "border-color: var(--b);",
 		"border-[3px]":      "border-width: 3px;",
 		"border-s-2":        "border-inline-start-width: 2px;",
