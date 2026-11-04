@@ -336,3 +336,66 @@ export default function Page() {
 		t.Errorf("unexposed environment read left in the hydration script:\n%s", js)
 	}
 }
+
+// A static page reading a module-level factory value built with `new Set`
+// must not render an empty slot with no code and no diagnostic.
+func TestStaticReadOfFactoryModuleValueIsNotSilentlyEmpty(t *testing.T) {
+	outDir := buildWithFiles(t, map[string]string{
+		"src/lib/store.ts": `
+			export function create() {
+				const items = new Set<string>(["a", "b"]);
+				return { get: () => ({ count: items.size }) };
+			}
+		`,
+		"src/pages/index.tsx": `
+			import { create } from '../lib/store';
+			const store = create();
+			export default function Page() {
+				return <main><p id="c">count:{store.get().count}</p></main>;
+			}
+		`,
+	})
+	html := readOut(t, outDir, "index.html")
+	js := ""
+	if files, _ := filepath.Glob(filepath.Join(outDir, "index.*.js")); len(files) > 0 {
+		js = readOut(t, outDir, filepath.Base(files[0]))
+	}
+	if strings.Contains(html, "count:2") {
+		return
+	}
+	// Not foldable at build time: it must hydrate rather than stay empty.
+	if !strings.Contains(js, "kbindContent(") || !strings.Contains(js, "store.get().count") || !strings.Contains(js, "new Set(") {
+		t.Errorf("slot rendered empty with no hydration code:\nhtml=%s\njs=%s", html, js)
+	}
+	if !strings.Contains(html, `<script src="/index.`) {
+		t.Errorf("page must load its hydration script:\n%s", html)
+	}
+}
+
+// The same read from a child component (which would otherwise be rendered
+// once at build time and fail on `new Set`) hydrates too.
+func TestChildReadOfFactoryModuleValueHydrates(t *testing.T) {
+	outDir := buildWithFiles(t, map[string]string{
+		"src/lib/store.ts": `
+			export function create() {
+				const items = new Set<string>(["a", "b"]);
+				return { get: () => ({ count: items.size }) };
+			}
+		`,
+		"src/pages/index.tsx": `
+			import { create } from '../lib/store';
+			const store = create();
+			const LABEL = "items";
+			function Count() { return <p id="c">{LABEL}:{store.get().count}</p>; }
+			export default function Page() { return <main><Count /></main>; }
+		`,
+	})
+	html := readOut(t, outDir, "index.html")
+	js := readHydrationJS(t, outDir)
+	if !strings.Contains(js, "store.get().count") || !strings.Contains(js, "new Set(") {
+		t.Errorf("child must hydrate the module value:\n%s", js)
+	}
+	if !strings.Contains(html, "items:") {
+		t.Errorf("foldable module const should still render at build time:\n%s", html)
+	}
+}

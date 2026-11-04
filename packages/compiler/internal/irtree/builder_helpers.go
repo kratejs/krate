@@ -320,6 +320,11 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	if b.callsOpaqueHook(fn.Body) {
 		return true
 	}
+	// Module-level values the build-time interpreter cannot compute are
+	// read at hydration time.
+	if b.readsOpaqueModuleValue(fn) {
+		return true
+	}
 	// A component rendering an external (bare-package) component must take the
 	// IR path so the island placeholder is emitted; the SSREval shortcut would
 	// re-render the source and drop it.
@@ -1104,4 +1109,73 @@ func (b *builder) callsOpaqueHook(body []ast.Stmt) bool {
 		}
 	}
 	return false
+}
+
+// readsOpaqueModuleValue reports whether a component's JSX renders an
+// expression built only from module-level values (`{store.get().count}`)
+// that the build-time interpreter cannot fold (a factory using `new Set`, a
+// class instance). Such a component cannot be rendered once at build time, so
+// it takes the client path and the slot is filled at hydration.
+func (b *builder) readsOpaqueModuleValue(fn *ast.FnDecl) bool {
+	if len(b.moduleConstInits) == 0 {
+		return false
+	}
+	ret := findReturnStmt(fn.Body)
+	if ret == nil || ret.Value == nil {
+		return false
+	}
+	local := map[string]bool{}
+	for _, p := range extractParamNames(fn) {
+		local[p] = true
+	}
+	WalkAST(fn.Body, func(n any) bool {
+		if d, ok := n.(*ast.VarDecl); ok {
+			local[d.Name] = true
+			for _, nm := range d.Names {
+				local[nm] = true
+			}
+		}
+		return true
+	})
+	opaque := false
+	check := func(expr ast.Expr) {
+		if opaque || expr == nil {
+			return
+		}
+		switch expr.(type) {
+		case *ast.ArrowFn, *ast.Literal:
+			return
+		}
+		src := GenerateExprJS(expr, nil)
+		mentions := false
+		bad := false
+		scanJSIdents(src, func(name string) {
+			if local[name] {
+				bad = true
+			}
+			if _, ok := b.moduleConstInits[name]; ok {
+				mentions = true
+			}
+		})
+		if !mentions || bad {
+			return
+		}
+		if b.constInterp(nil).Eval(expr).ContainsUnknown() {
+			opaque = true
+		}
+	}
+	WalkAST(ret.Value, func(n any) bool {
+		switch x := n.(type) {
+		case *ast.JSXExprContainer:
+			check(x.Expression)
+			return false
+		case *ast.JSXAttr:
+			if !x.Spread && x.Value != nil && !strings.HasPrefix(x.Name, "on") {
+				check(x.Value)
+			}
+			return false
+		}
+		return !opaque
+	})
+	return opaque
 }
