@@ -73,3 +73,58 @@ func TestRouterBrowserE2E(t *testing.T) {
 	}
 	t.Logf("router e2e (%s):\n%s", browser, out)
 }
+
+// TestCSPSpeculationRulesInBrowser checks that the router's runtime-injected
+// speculation rules are not blocked by the generated CSP.
+func TestCSPSpeculationRulesInBrowser(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the CSP browser check")
+	}
+	if !canStopInProcessServer {
+		t.Skip("the in-process server needs a unix host")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	root := t.TempDir()
+	if err := copyTree(t, filepath.Join("testdata", "router_gallery"), root); err != nil {
+		t.Fatal(err)
+	}
+	repoRoot, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "packages"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(repoRoot, "packages", "runtime"), filepath.Join(root, "packages", "runtime")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "packages", "runtime", "dist", "krate-hydrate.js")); err != nil {
+		requireE2E(t, "runtime dist not built: %v", err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.CSP.Enabled = true
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	base, err := startKrateServer(t, root, cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "csp_speculation.cjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", script, base, browser).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "Cannot find module") {
+			requireE2E(t, "browser unavailable: %s", out)
+		}
+		t.Fatalf("CSP check failed: %v\n%s", err, out)
+	}
+	t.Logf("%s", out)
+}

@@ -92,3 +92,21 @@ func TestTailwindSourceInRootNoWarningAndInline(t *testing.T) {
 		}
 	}
 }
+
+func TestTailwindScansContainerAndAlphaVar(t *testing.T) {
+	_, out, logged := buildFiles(t, map[string]string{
+		"src/pages/index.tsx": `export default function P() { return <div class="@container/main text-red-500/(--alpha) @container"><i class="@md:p-2">x</i></div>; }`,
+	}, nil)
+	all := readAllCSS(t, out)
+	for _, want := range []string{`\@container\/main`, `.\@container{`, `text-red-500\/\(--alpha\)`} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %s in:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, `text-red-500\/{`) {
+		t.Errorf("truncated candidate rule:\n%s", all)
+	}
+	if strings.Contains(logged, "matched no utility") {
+		t.Errorf("unexpected strict warning:\n%s", logged)
+	}
+}

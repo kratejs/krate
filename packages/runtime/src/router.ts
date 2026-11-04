@@ -485,6 +485,10 @@ function setupPrefetch(): void {
 function setupSpeculationRules(): void {
   const supports = typeof HTMLScriptElement !== 'undefined' ? (HTMLScriptElement as any).supports : undefined;
   if (typeof supports !== 'function' || !supports('speculationrules')) return;
+  // An inline speculation-rules script needs a CSP hash or keyword that is not
+  // honoured next to script hashes, so under a CSP meta the JS prefetch path
+  // is used instead of emitting a blocked script.
+  if (document.querySelector('meta[http-equiv="Content-Security-Policy" i]')) return;
   try {
     const script = document.createElement('script');
     script.type = 'speculationrules';
