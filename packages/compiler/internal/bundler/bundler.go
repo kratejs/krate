@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -263,27 +264,101 @@ func (b *Bundler) resolveImportForModuleUncached(importer, imp string) string {
 			return p
 		}
 	}
-	resolved := resolveImport(importer, imp, b.fileExists)
-	if resolved != "" {
-		return resolved
-	}
+	// tsconfig paths win over node_modules, as in tsc.
 	if len(b.pathAliases) > 0 && b.tsBaseDir != "" {
-		resolved = resolvePathAlias(imp, b.pathAliases, b.tsBaseDir, b.fileExists)
-		if resolved != "" {
+		if resolved := resolvePathAlias(imp, b.pathAliases, b.tsBaseDir, b.fileExists); resolved != "" {
 			return resolved
 		}
-		// Fallback: tsconfig paths targets are normally relative to baseUrl,
-		// but many projects declare them relative to the project root (e.g.
-		// `@/*: ["./src/*"]`). When baseUrl resolution misses, try the root the
-		// tsconfig lives in.
-		if b.root != "" && b.root != b.tsBaseDir {
-			resolved = resolvePathAlias(imp, b.pathAliases, b.root, b.fileExists)
-			if resolved != "" {
-				return resolved
+	}
+	return resolveImport(importer, imp, b.fileExists)
+}
+
+// matchesPathAlias reports whether imp matches a configured tsconfig paths
+// pattern, so a miss is reported as a broken alias rather than a missing
+// package.
+func (b *Bundler) matchesPathAlias(imp string) (string, bool) {
+	for _, a := range b.pathAliases {
+		if strings.HasSuffix(a.prefix, "/*") {
+			base := strings.TrimSuffix(a.prefix, "/*")
+			if imp == base || strings.HasPrefix(imp, base+"/") {
+				return a.prefix, true
 			}
+		} else if imp == a.prefix {
+			return a.prefix, true
 		}
 	}
-	return ""
+	return "", false
+}
+
+// unresolvedImportError builds the diagnostic for an import in mod that no
+// resolution rule could satisfy. It returns nil for imports that are handled
+// elsewhere (compat runtime specifiers) or that live in third-party code,
+// which cannot act on the hint.
+func (b *Bundler) unresolvedImportError(mod *Module, imp string) error {
+	if mod.IsExternal || mod.Program == nil {
+		return nil
+	}
+	if strings.Contains(filepath.ToSlash(mod.Path), "/node_modules/") {
+		return nil
+	}
+	if reactCompatSpecifier(imp) != "" || strings.HasPrefix(imp, "node:") {
+		return nil
+	}
+	// The client runtime is shipped by the compiler (window globals), so its
+	// package need not be installed for a page to build.
+	// server-only / client-only are marker packages enforced by the build's
+	// client-boundary check, not modules to load.
+	if imp == "server-only" || imp == "client-only" {
+		return nil
+	}
+	if imp == "@krate/runtime" || strings.HasPrefix(imp, "@krate/runtime/") {
+		return nil
+	}
+	var pos ast.Pos
+	for _, stmt := range mod.Program.Body {
+		switch st := stmt.(type) {
+		case *ast.ImportStmt:
+			if strings.Trim(st.Source, "\"'") == imp {
+				pos = st.Position
+			}
+		case *ast.ExportStmt:
+			if strings.Trim(st.ReexportSource, "\"'") == imp {
+				pos = st.Position
+			}
+		}
+		if pos.Line > 0 {
+			break
+		}
+	}
+	d := diag.Diagnostic{File: mod.Path, Line: pos.Line, Col: pos.Col}
+	if mod.SourceCode != "" && pos.Line > 0 {
+		lines := strings.Split(mod.SourceCode, "\n")
+		if pos.Line <= len(lines) {
+			d.Source = strings.TrimRight(lines[pos.Line-1], "\r")
+		}
+	}
+	switch {
+	case strings.HasPrefix(imp, ".") || strings.HasPrefix(imp, "/"):
+		d.Message = "cannot resolve import " + strconv.Quote(imp)
+		d.Hint = "no file matches that path relative to " + filepath.Base(filepath.Dir(mod.Path)) + "/ (tried .tsx, .ts, .jsx, .js, .css, .json and index files); check the spelling and the file extension"
+	default:
+		if prefix, ok := b.matchesPathAlias(imp); ok {
+			d.Message = "cannot resolve import " + strconv.Quote(imp) + " (matched tsconfig path alias " + strconv.Quote(prefix) + ")"
+			d.Hint = "no file exists at the alias target; targets resolve relative to compilerOptions.baseUrl (" + b.tsBaseDir + ")"
+		} else {
+			d.Message = "cannot resolve import " + strconv.Quote(imp) + ": package is not installed"
+			d.Hint = "install it with `pnpm add " + packageNameOf(imp) + "`, or fix the import if it is a typo or a missing tsconfig paths alias"
+		}
+	}
+	return d
+}
+
+func packageNameOf(spec string) string {
+	parts := strings.Split(spec, "/")
+	if strings.HasPrefix(spec, "@") && len(parts) >= 2 {
+		return parts[0] + "/" + parts[1]
+	}
+	return parts[0]
 }
 
 func (b *Bundler) Bundle(entry string) (*Bundle, error) {
@@ -341,6 +416,24 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		Frontmatter:    b.frontmatter,
 		ActionImports:  b.actionImports,
 	}, nil
+}
+
+// resolveModuleImports resolves and loads every import of mod. An import no
+// rule can resolve is a build error located at the import statement.
+func (b *Bundler) resolveModuleImports(mod *Module) error {
+	for _, imp := range mod.Imports {
+		resolved := b.resolveImportForModule(mod.Path, imp)
+		if resolved == "" {
+			if err := b.unresolvedImportError(mod, imp); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := b.resolveModule(resolved, false); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (b *Bundler) resolveModule(path string, isEntry bool) error {
@@ -432,13 +525,8 @@ func (b *Bundler) resolveJSONModule(path, abs string, mtime time.Time, size int6
 			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry}
 			mod.Imports = append([]string(nil), e.imports...)
 			b.order = append(b.order, mod)
-			for _, imp := range mod.Imports {
-				resolved := b.resolveImportForModule(path, imp)
-				if resolved != "" {
-					if err := b.resolveModule(resolved, false); err != nil {
-						return err
-					}
-				}
+			if err := b.resolveModuleImports(mod); err != nil {
+				return err
 			}
 			return nil
 		}
@@ -456,15 +544,7 @@ func (b *Bundler) resolveJSONModule(path, abs string, mtime time.Time, size int6
 			mtime: mtime, size: size, program: prog, imports: append([]string(nil), mod.Imports...),
 		})
 	}
-	for _, imp := range mod.Imports {
-		resolved := b.resolveImportForModule(path, imp)
-		if resolved != "" {
-			if err := b.resolveModule(resolved, false); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return b.resolveModuleImports(mod)
 }
 
 func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size int64, statOK bool, isEntry bool) error {
@@ -476,13 +556,8 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry}
 			mod.Imports = append([]string(nil), e.imports...)
 			b.order = append(b.order, mod)
-			for _, imp := range mod.Imports {
-				resolved := b.resolveImportForModule(path, imp)
-				if resolved != "" {
-					if err := b.resolveModule(resolved, false); err != nil {
-						return err
-					}
-				}
+			if err := b.resolveModuleImports(mod); err != nil {
+				return err
 			}
 			return nil
 		}
@@ -519,15 +594,7 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 			imports: append([]string(nil), mod.Imports...), frontmatter: result.Frontmatter,
 		})
 	}
-	for _, imp := range mod.Imports {
-		resolved := b.resolveImportForModule(path, imp)
-		if resolved != "" {
-			if err := b.resolveModule(resolved, false); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return b.resolveModuleImports(mod)
 }
 
 func (b *Bundler) resolveAssetModule(path, abs string, mtime time.Time, size int64, statOK bool) error {
@@ -565,13 +632,8 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry, SourceCode: e.source, ComponentClass: e.compClass, Diagnostics: e.diags}
 			mod.Imports = append([]string(nil), e.imports...)
 			b.order = append(b.order, mod)
-			for _, imp := range mod.Imports {
-				resolved := b.resolveImportForModule(path, imp)
-				if resolved != "" {
-					if err := b.resolveModule(resolved, false); err != nil {
-						return err
-					}
-				}
+			if err := b.resolveModuleImports(mod); err != nil {
+				return err
 			}
 			return nil
 		}
@@ -614,15 +676,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 			diags: reactDiags,
 		})
 	}
-	for _, imp := range mod.Imports {
-		resolved := b.resolveImportForModule(path, imp)
-		if resolved != "" {
-			if err := b.resolveModule(resolved, false); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return b.resolveModuleImports(mod)
 }
 
 // isKrateRuntime reports whether an absolute path points into the krate client

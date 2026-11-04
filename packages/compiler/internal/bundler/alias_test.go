@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
 // TestAliasImportResolution verifies that the `@/*` TypeScript path alias
@@ -135,16 +137,14 @@ func TestNonAliasScopeDoesNotResolve(t *testing.T) {
 		filepath.Join(root, "src"),
 	)
 
-	// `@components/badge` is not an alias and is not a resolvable module - the
-	// bundled modules must NOT include the badge component under that name.
-	bundle, err := b.Bundle(page)
-	if err != nil {
-		t.Fatalf("Bundle: %v", err)
+	// `@components/badge` is not an alias and is not a resolvable module: the
+	// build must fail at the import instead of silently dropping it.
+	_, err := b.Bundle(page)
+	if err == nil {
+		t.Fatal("expected an unresolved-import error")
 	}
-	for _, mod := range bundle.Modules {
-		norm := filepath.ToSlash(mod.Path)
-		if strings.HasSuffix(norm, "components/badge.tsx") {
-			t.Errorf("@components/* should not resolve as an alias; found %s in bundle", norm)
-		}
+	d, ok := diag.FromError(err)
+	if !ok || d.Line != 1 || !strings.Contains(d.Message, "@components/badge") {
+		t.Fatalf("diagnostic = %+v", d)
 	}
 }
