@@ -121,3 +121,14 @@ func TestPlainMarkdownProseWithAngleBracketsIsNotJSX(t *testing.T) {
 		}
 	}
 }
+
+func TestScrollContainersAreFocusableAndNamed(t *testing.T) {
+	cfg := DefaultConfig()
+	got := RenderToHTML("| a | b |\n|---|---|\n| x | y |\n", cfg)
+	mustContain(t, "table wrapper", got, `class="table-wrap" role="region" aria-label="Table" tabindex="0"`)
+	got = RenderToHTML("```ts\nconst a = 1;\n```\n\n```\nplain\n```\n\n```js title=\"app.js\"\nx()\n```\n", cfg)
+	mustContain(t, "pre", got, `role="region" aria-label="ts code" tabindex="0"`, `role="region" aria-label="Code" tabindex="0"`, `aria-label="app.js"`)
+	cfg.CodeHighlight = false
+	got = RenderToHTML("```ts\nconst a = 1;\n```\n", cfg)
+	mustContain(t, "plain pre", got, `<pre role="region" aria-label="ts code" tabindex="0">`)
+}

@@ -373,7 +373,7 @@ func (r *krateRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
 
 func (r *krateRenderer) tableWrap(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
 	if entering {
-		_, _ = w.WriteString("<div class=\"table-wrap\">\n")
+		_, _ = w.WriteString("<div class=\"table-wrap\" role=\"region\" aria-label=\"Table\" tabindex=\"0\">\n")
 	} else {
 		_, _ = w.WriteString("</div>\n")
 	}
@@ -479,6 +479,14 @@ func renderCode(code, lang, meta string, cfg Config) string {
 	if lang != "" {
 		class = " class=\"language-" + escape.HTMLAttr(lang) + "\""
 	}
+	// A scrollable <pre> must be keyboard focusable and named.
+	label := "Code"
+	if title != "" {
+		label = title
+	} else if lang != "" {
+		label = lang + " code"
+	}
+	attrs += " role=\"region\" aria-label=\"" + escape.HTMLAttr(label) + "\" tabindex=\"0\""
 	if cfg.CodeHighlight && lang != "" {
 		code = strings.TrimRight(code, "\n")
 		hlCode := syntaxhighlight.HighlightTheme(code, syntaxhighlight.NormalizeLanguage(lang), cfg.CodeTheme)

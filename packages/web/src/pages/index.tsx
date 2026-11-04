@@ -83,7 +83,7 @@ export default function Home() {
           A Go-native compiler with whole-program knowledge, a signal runtime,
           and a static-first default.
         </p>
-        <div class="table-wrap">
+        <div class="table-wrap" role="region" aria-label="Framework comparison" tabindex="0">
           <table class="compare">
             <thead>
               <tr><th>Capability</th><th>Krate</th><th>Astro</th><th>Next.js</th></tr>

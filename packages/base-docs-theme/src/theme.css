@@ -653,6 +653,12 @@ a:hover {
     -webkit-overflow-scrolling: touch;
 }
 
+/* Scroll containers are keyboard focusable (tabindex=0); show where focus is. */
+.docs-content :is(pre, .table-wrap)[tabindex="0"]:focus-visible {
+    outline: 2px solid var(--color-action, currentColor);
+    outline-offset: 2px;
+}
+
 .docs-content a {
     font-weight: 500;
     text-underline-offset: 4px;

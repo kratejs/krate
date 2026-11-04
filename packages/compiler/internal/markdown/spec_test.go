@@ -17,8 +17,11 @@ type specExample struct {
 
 var voidSlashRe = regexp.MustCompile(` ?/>`)
 
+// preA11yRe matches the focus and name attributes Krate adds to every <pre>.
+var preA11yRe = regexp.MustCompile(` role="region" aria-label="[^"]*" tabindex="0"`)
+
 func normSpecHTML(s string) string {
-	s = strings.TrimSpace(s)
+	s = preA11yRe.ReplaceAllString(strings.TrimSpace(s), "")
 	return voidSlashRe.ReplaceAllString(s, ">")
 }
 
