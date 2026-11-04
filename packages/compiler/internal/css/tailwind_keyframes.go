@@ -103,7 +103,6 @@ var twPropertyByName = func() map[string]twProperty {
 }()
 
 var (
-	twVarRe        = regexp.MustCompile(`--tw-[a-z0-9-]+`)
 	animationDecl  = regexp.MustCompile(`(?:^|[;{\s])animation(?:-name)?:\s*([^;}]*)`)
 	animationIdent = regexp.MustCompile(`-?[A-Za-z_][A-Za-z0-9_-]*`)
 )
@@ -122,19 +121,30 @@ func (u *twUsage) reset() {
 
 // record scans one emitted rule.
 func (u *twUsage) record(rule string, theme TailwindTheme) {
-	for _, m := range animationDecl.FindAllStringSubmatch(rule, -1) {
-		for _, id := range animationIdent.FindAllString(m[1], -1) {
-			if _, ok := keyframesBody(id, theme); ok {
-				u.keyframes[id] = true
+	if strings.Contains(rule, "animation") {
+		for _, m := range animationDecl.FindAllStringSubmatch(rule, -1) {
+			for _, id := range animationIdent.FindAllString(m[1], -1) {
+				if _, ok := keyframesBody(id, theme); ok {
+					u.keyframes[id] = true
+				}
 			}
 		}
 	}
-	if strings.Contains(rule, "--tw-") {
-		for _, name := range twVarRe.FindAllString(rule, -1) {
-			if _, ok := twPropertyByName[name]; ok {
-				u.props[name] = true
-			}
+	for rest := rule; ; {
+		i := strings.Index(rest, "--tw-")
+		if i < 0 {
+			break
 		}
+		rest = rest[i:]
+		n := len("--tw-")
+		for n < len(rest) && (rest[n] >= 'a' && rest[n] <= 'z' || rest[n] >= '0' && rest[n] <= '9' || rest[n] == '-') {
+			n++
+		}
+		name := rest[:n]
+		if _, ok := twPropertyByName[name]; ok {
+			u.props[name] = true
+		}
+		rest = rest[n:]
 	}
 }
 

@@ -58,8 +58,9 @@ func TestV4FontSansStack(t *testing.T) {
 
 func TestJustifySelfMatchesV4(t *testing.T) {
 	wantGen(t, map[string]string{
-		"justify-self-end":   "justify-self: flex-end;",
-		"justify-self-start": "justify-self: flex-start;",
+		"justify-self-end-safe": "justify-self: safe flex-end;",
+		"justify-self-end":      "justify-self: flex-end;",
+		"justify-self-start":    "justify-self: flex-start;",
 	})
 }
 

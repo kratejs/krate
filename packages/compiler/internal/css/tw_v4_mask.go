@@ -206,6 +206,9 @@ func maskStopValue(key string, theme TailwindTheme) (maskStop, bool) {
 	}
 	if plainNumber(key) {
 		if v := spacingValue(key, theme); v != "" {
+			if v == "0" {
+				v = "0px"
+			}
 			return maskStop{"position", v}, true
 		}
 	}

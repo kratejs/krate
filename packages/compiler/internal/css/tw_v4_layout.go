@@ -527,21 +527,22 @@ var staticUtilities = map[string]string{
 
 // alignmentKeywords adds the v4 safe/last-baseline alignment keywords.
 func alignmentUtility(cls string) (string, bool) {
-	tbl := map[string]string{
-		"items-center-safe": "align-items: safe center;", "items-end-safe": "align-items: safe flex-end;",
-		"items-baseline-last": "align-items: last baseline;",
-		"self-center-safe":    "align-self: safe center;", "self-end-safe": "align-self: safe flex-end;",
-		"self-baseline-last":        "align-self: last baseline;",
-		"justify-center-safe":       "justify-content: safe center;",
-		"justify-end-safe":          "justify-content: safe flex-end;",
-		"justify-items-center-safe": "justify-items: safe center;",
-		"justify-items-end-safe":    "justify-items: safe end;",
-		"justify-self-center-safe":  "justify-self: safe center;",
-		"justify-self-end-safe":     "justify-self: safe end;",
-		"content-baseline-last":     "align-content: last baseline;",
-	}
-	v, ok := tbl[cls]
+	v, ok := alignmentTable[cls]
 	return v, ok
+}
+
+var alignmentTable = map[string]string{
+	"items-center-safe": "align-items: safe center;", "items-end-safe": "align-items: safe flex-end;",
+	"items-baseline-last": "align-items: last baseline;",
+	"self-center-safe":    "align-self: safe center;", "self-end-safe": "align-self: safe flex-end;",
+	"self-baseline-last":        "align-self: last baseline;",
+	"justify-center-safe":       "justify-content: safe center;",
+	"justify-end-safe":          "justify-content: safe flex-end;",
+	"justify-items-center-safe": "justify-items: safe center;",
+	"justify-items-end-safe":    "justify-items: safe end;",
+	"justify-self-center-safe":  "justify-self: safe center;",
+	"justify-self-end-safe":     "justify-self: safe flex-end;",
+	"content-baseline-last":     "align-content: last baseline;",
 }
 
 var cursorNames = map[string]bool{
