@@ -27,6 +27,10 @@ type DevServer struct {
 	Overlay *bool `json:"overlay,omitempty"`
 	// Toolbar toggles the dev toolbar (default true).
 	Toolbar *bool `json:"toolbar,omitempty"`
+	// Host is the dev server bind address. Empty means loopback only
+	// (127.0.0.1), so the dev endpoints are not reachable from the network.
+	// Set "0.0.0.0" (or a LAN address) to expose the dev server deliberately.
+	Host string `json:"host,omitempty"`
 	// Editor is the command used by the overlay's "open in editor" action
 	// (default "code", i.e. VS Code). May include flags, e.g. "code -g".
 	Editor string `json:"editor,omitempty"`

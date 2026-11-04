@@ -708,6 +708,12 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 					return fmt.Errorf("devServer.toolbar: expected boolean, got %T", v)
 				}
 				cfg.DevServer.Toolbar = &b
+			case "host":
+				s, ok := v.(string)
+				if !ok {
+					return fmt.Errorf("devServer.host: expected string, got %T", v)
+				}
+				cfg.DevServer.Host = s
 			case "editor":
 				s, ok := v.(string)
 				if !ok {

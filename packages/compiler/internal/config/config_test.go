@@ -926,6 +926,22 @@ func TestParseTSConfigCompress(t *testing.T) {
 	}
 }
 
+func TestParseTSConfigDevServerHost(t *testing.T) {
+	cfg := Default()
+	if err := parseTSConfig(`export default { devServer: { host: "0.0.0.0", port: 4000 } }`, cfg); err != nil {
+		t.Fatalf("parseTSConfig: %v", err)
+	}
+	if cfg.DevServer.Host != "0.0.0.0" || cfg.DevServer.Port != 4000 {
+		t.Fatalf("devServer not parsed: %+v", cfg.DevServer)
+	}
+	if w := UnknownKeyWarnings([]byte(`{"devServer":{"host":"127.0.0.1"}}`)); len(w) != 0 {
+		t.Errorf("devServer.host should be a known key, got %v", w)
+	}
+	if err := parseTSConfig(`export default { devServer: { host: 5 } }`, Default()); err == nil {
+		t.Error("expected an error for a non-string devServer.host")
+	}
+}
+
 func TestParseTSConfigDefaults(t *testing.T) {
 	src := `export default { entry: "src/app.tsx", outDir: "build" }`
 	cfg := Default()
