@@ -734,15 +734,6 @@ func apiRoute(target string) string {
 	return "/api/" + rel
 }
 
-func hasTarget(rep *Report, target string) bool {
-	for _, f := range rep.Files {
-		if f.Target == target {
-			return true
-		}
-	}
-	return false
-}
-
 func dedupeTargets(rep *Report) {
 	seen := map[string]string{}
 	for i := range rep.Files {

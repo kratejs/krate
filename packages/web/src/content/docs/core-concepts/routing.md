@@ -84,9 +84,9 @@ hydration code is not run again.
 
 A layout under a dynamic segment (`blog/[slug]/_layout.tsx`) is kept only while
 that segment's value is unchanged. A layout is remounted (and `krate dev`
-logs why) when the page hydrates through the class-component/error-boundary
-owner tree, or when the layout renders a `lazy()` component, a `<Suspense>`
-boundary, or an external island.
+logs why) when it renders a `lazy()` component, a `<Suspense>` boundary, or an
+external island. Class components and error boundaries on the page do not stop
+layouts from persisting.
 
 ### Templates
 
@@ -255,7 +255,10 @@ still mounted. Event handlers are not caught (the same rule as React's
 boundaries).
 
 - `reset()` mounts the segment's children again with fresh state.
-- Soft navigation away clears the error page.
+- Soft navigation clears the error page. A boundary that has not caught anything
+  stays mounted while the user moves between the pages it covers, so layouts
+  below it keep their state; one that caught an error is replaced on the next
+  navigation.
 - The nearest boundary catches first. If an error page throws itself, the error
   goes to the next boundary up.
 - Pages without an `error.tsx` above them ship no boundary code.

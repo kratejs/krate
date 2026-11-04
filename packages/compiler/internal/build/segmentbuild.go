@@ -3,6 +3,7 @@ package build
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
+	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
 
 // Build-time pieces of segment pages: the generated sources that adapt a
@@ -254,4 +256,28 @@ func errorPlaceholdersMangled(html string) bool {
 	}
 	lower := strings.ToLower(html)
 	return strings.Contains(lower, "krate_err") || strings.Contains(lower, "__kr")
+}
+
+// noteSegmentErrorPage adds a hint to build-time throws (KR3010) of a page that
+// has a segment error page: that page answers request-time errors, so it does
+// not stand in for a page that cannot be prerendered, and the build still fails.
+func (b *Builder) noteSegmentErrorPage(page string, errs []error) []error {
+	if kind, ok := segmentKindOfFile(page); ok && kind == SegmentError {
+		return errs
+	}
+	segs := b.segmentModel()
+	_, errSource := segs.forSource(b.Root, b.Cfg.PagesDir, page)
+	if errSource == "" {
+		return errs
+	}
+	out := make([]error, len(errs))
+	for i, err := range errs {
+		out[i] = err
+		var bt renderer.BuildThrow
+		if errors.As(err, &bt) {
+			bt.Hint += "; " + errSource + " is this page's error page, but it only answers errors at request time (an ssr or isr page, or a client error), so it is not used as a build-time fallback"
+			out[i] = bt
+		}
+	}
+	return out
 }

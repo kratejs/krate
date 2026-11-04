@@ -164,7 +164,33 @@ try {
   check((await text("#outer-msg")) === "Internal Server Error" && /^[0-9a-f]{10}$/.test(await text("#outer-digest")), "the soft-navigated error page is sanitized with a digest");
   errors.length = 0;
 
-  // 7. No boundary code on pages without an error boundary.
+  // 7. A healthy error boundary does not cost the layouts below it their state;
+  // one that caught an error is replaced when the user navigates.
+  await page.goto(base + "/deep/inner/a/");
+  await clickUntil("#inner-count", textIs, ["#inner-count", "1"]);
+  await page.evaluate(() => (window.__spa = 7));
+  await page.click("#to-deep-b");
+  await page.waitForSelector("#deep-b");
+  check((await text("#inner-count")) === "1", "a layout below a healthy error boundary keeps its state across navigation");
+  check((await page.evaluate(() => window.__spa)) === 7, "no document reload between the pages of one boundary");
+  await page.click("#to-deep-a");
+  await page.waitForSelector("#deep-a");
+  check((await text("#inner-count")) === "1", "... and across further navigations");
+  for (let i = 0; i < 40; i++) {
+    await page.click("#deep-arm");
+    try {
+      await page.waitForSelector("#deep-error", { timeout: 1000 });
+      break;
+    } catch {}
+  }
+  check((await text("#deep-msg")) === "deep page exploded", "the deep boundary caught the error");
+  await page.click("#to-deep-b");
+  await page.waitForSelector("#deep-b");
+  check((await count("#deep-error")) === 0, "navigating within the segment clears a caught error");
+  check((await text("#inner-count")) === "0", "the layouts below a replaced boundary start fresh");
+  errors.length = 0;
+
+  // 8. No boundary code on pages without an error boundary.
   const homeHtml = await (await fetch(base + "/")).text();
   const scripts = [...homeHtml.matchAll(/<script[^>]+src=["']?([^"' >]+)/g)].map((m) => m[1]);
   let shipped = homeHtml;

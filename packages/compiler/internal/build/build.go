@@ -2205,7 +2205,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	}
 
 	if len(emitResult.Errors) > 0 {
-		return nil, "", renderErrors(page, emitResult.Errors)
+		return nil, "", renderErrors(page, b.noteSegmentErrorPage(page, emitResult.Errors))
 	}
 
 	// Compile-time reactive dependency validation. Surfaced as warnings so
@@ -2542,7 +2542,9 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 	}
 
 	pageDir := filepath.Join(b.Cfg.OutDir, e.OutName)
-	_ = os.MkdirAll(pageDir, 0755)
+	if !e.IsErrorPage {
+		_ = os.MkdirAll(pageDir, 0755)
+	}
 	if len(e.JSBytes) > 0 && e.JSFile != "" {
 		_ = fsutil.WriteFileIfChanged(filepath.Join(pageDir, e.JSFile), e.JSBytes, 0644)
 	}
@@ -3499,7 +3501,7 @@ func routeInfoScript(chain []routeChainEntry, sigs []irtree.ComponentSignature) 
 		if e.Why == "" {
 			e.Why = blockers[e.ID]
 		}
-		e.Persist = e.Kind == "layout" && e.Why == ""
+		e.Persist = (e.Kind == "layout" || e.Kind == "error") && e.Why == ""
 		out[i] = e
 	}
 	data, err := json.Marshal(map[string]interface{}{"v": 1, "chain": out})

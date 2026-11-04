@@ -334,3 +334,120 @@ func TestErrorPageThatTransformsTheMessageReadsItOnTheClient(t *testing.T) {
 		t.Errorf("the page script should read the injected error block:\n%s", code)
 	}
 }
+
+// Segment pages stay out of the sitemap, the route list and the route types,
+// and the site graph shows each route's nearest pages.
+func TestSegmentPagesStayOutOfRouteInventories(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"src/pages/index.tsx":          devPage("home"),
+		"src/pages/404.tsx":            devPage("ROOT404"),
+		"src/pages/blog/index.tsx":     devPage("blog"),
+		"src/pages/blog/not-found.tsx": devPage("BLOG404"),
+		"src/pages/blog/error.tsx":     `export default function E({ error }: any) { return <p>{error.message}</p>; }`,
+		"src/pages/blog/[slug].tsx":    `export default function P() { return <p>post</p>; }`,
+	})
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.SEO.BaseURL = "https://example.com"
+	cfg.Plugins = []config.PluginConfig{{Name: "sitemap"}}
+	b := New(root, cfg)
+	if err := b.BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+
+	sitemap, err := os.ReadFile(filepath.Join(cfg.OutDir, "sitemap.xml"))
+	if err != nil {
+		t.Fatalf("sitemap.xml: %v", err)
+	}
+	for _, bad := range []string{"404", "500", "__", "not-found", "error"} {
+		if strings.Contains(string(sitemap), bad) {
+			t.Errorf("sitemap must not list segment pages (%q):\n%s", bad, sitemap)
+		}
+	}
+	if !strings.Contains(string(sitemap), "https://example.com/blog/") {
+		t.Errorf("sitemap lost the blog route:\n%s", sitemap)
+	}
+
+	g, err := b.SiteGraph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byRoute := map[string]SiteGraphRoute{}
+	for _, r := range g.Routes {
+		byRoute[r.Route] = r
+		if strings.Contains(r.Route, "404") || strings.Contains(r.Route, "500") || strings.Contains(r.Route, "__") {
+			t.Errorf("segment page leaked into the route list: %+v", r)
+		}
+	}
+	if r := byRoute["/blog/[slug]"]; r.NotFound != "src/pages/blog/not-found.tsx" || r.Error != "src/pages/blog/error.tsx" {
+		t.Errorf("nearest pages of /blog/[slug] = %q, %q", r.NotFound, r.Error)
+	}
+	if r := byRoute["/"]; r.NotFound != "src/pages/404.tsx" || r.Error != "" {
+		t.Errorf("nearest pages of / = %q, %q", r.NotFound, r.Error)
+	}
+	if len(g.Segments) != 2 || g.Segments[0].Dir != "/" || g.Segments[1].Dir != "/blog" ||
+		g.Segments[1].NotFound != "src/pages/blog/not-found.tsx" || g.Segments[1].Error != "src/pages/blog/error.tsx" {
+		t.Errorf("segments = %+v", g.Segments)
+	}
+
+	// Route types are generated for routes only.
+	if errs := GenerateTypes(root, cfg); len(errs) > 0 {
+		t.Fatalf("GenerateTypes: %v", errs)
+	}
+	types, err := os.ReadFile(filepath.Join(root, ".krate", "types", "routes.d.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(types), "404") || strings.Contains(string(types), "500") || strings.Contains(string(types), "__") {
+		t.Errorf("route types must not include segment pages:\n%s", types)
+	}
+	if !strings.Contains(string(types), "/blog/") && !strings.Contains(string(types), `"/blog`) {
+		t.Errorf("route types lost /blog:\n%s", types)
+	}
+}
+
+// Adding an error.tsx changes the pages below it, so the build cache must not
+// replay them.
+func TestRouteSignatureSeesErrorBoundaries(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"src/pages/blog/index.tsx": devPage("blog"),
+	})
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	b := New(root, cfg)
+	page := filepath.Join(cfg.PagesDir, "blog", "index.tsx")
+	before := b.routeSignature(page)
+	routeDirSigCache.Range(func(k, _ any) bool { routeDirSigCache.Delete(k); return true })
+	writeTree(t, root, map[string]string{"src/pages/blog/error.tsx": devPage("err")})
+	if after := b.routeSignature(page); after == before {
+		t.Error("an added error.tsx must change the route signature of the pages below it")
+	}
+}
+
+// A page that cannot be prerendered still fails the build; the hint says why
+// the segment's error page does not stand in for it.
+func TestBuildTimeThrowNamesTheSegmentErrorPage(t *testing.T) {
+	err := buildErr(t, map[string]string{
+		"src/pages/blog/error.tsx": `export default function E({ error }: any) { return <p>{error.message}</p>; }`,
+		"src/pages/blog/index.tsx": `function Broken(props: any) { if (!props.data) throw new Error('no data for ' + props.label); return <p>{props.data}</p>; }
+export default function Page() { return <main><Broken label="z" /></main>; }`,
+	})
+	if err == nil {
+		t.Fatal("a page that throws while prerendered must fail the build")
+	}
+	if !strings.Contains(err.Error(), "[KR3010]") || !strings.Contains(err.Error(), "no data for z") {
+		t.Errorf("error = %v", err)
+	}
+	var hint string
+	for _, d := range DiagnosticsFromError(err) {
+		hint += d.Hint
+	}
+	for _, want := range []string{"src/pages/blog/error.tsx", "not used as a build-time fallback"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("hint should mention %q: %q", want, hint)
+		}
+	}
+}

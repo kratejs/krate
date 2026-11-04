@@ -240,6 +240,19 @@ export function unmountOwner(owner: Owner): void {
   disposeTree(owner as OwnerImpl, 'dormant');
 }
 
+/**
+ * Reports whether an error boundary created under route scope `scope` is
+ * showing its fallback. The SPA router asks before it keeps such a boundary
+ * across a soft navigation: a failed boundary is not kept, so navigating clears
+ * the error.
+ */
+export function krateScopeFailed(scope: string): boolean {
+  for (const o of byId.values()) {
+    if (o.scope === scope && o.inError) return true;
+  }
+  return false;
+}
+
 /** Mounts a dormant owner (and its mountable descendants). */
 export function mountOwner(owner: Owner): void {
   const o = owner as OwnerImpl;

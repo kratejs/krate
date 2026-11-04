@@ -165,6 +165,40 @@ describe('layout persistence', () => {
     expect(document.getElementById('nav')).toBe(nav);
   });
 
+  describe('segment error boundaries', () => {
+    const ERR: Entry = { id: '_lerr_', k: 'error', d: 0, p: true };
+    const INNER: Entry = { id: '_linner_', k: 'layout', d: 0, p: true };
+    const nested = (page: string) =>
+      shell(`<!--kl:_lerr_--><section id="inner">Inner<!--kl:_linner_-->${page}<!--/kl:_linner_--></section><!--/kl:_lerr_-->`);
+
+    afterEach(() => {
+      delete (globalThis as any).krateScopeFailed;
+    });
+
+    it('keeps the layouts below a healthy error boundary', async () => {
+      const chain = [LAYOUT, ERR, INNER];
+      setup(nested('<main>Page A</main>'), chain);
+      const inner = document.getElementById('inner')!;
+      routes['/b'] = doc('B', nested('<main>Page B</main>'), chain);
+      await krateRouter.push('/b');
+      expect(document.querySelector('main')!.textContent).toBe('Page B');
+      expect(document.getElementById('inner')).toBe(inner);
+    });
+
+    it('replaces a boundary that caught an error, and what is below it', async () => {
+      const chain = [LAYOUT, ERR, INNER];
+      setup(nested('<main>Page A</main>'), chain);
+      const inner = document.getElementById('inner')!;
+      const nav = document.getElementById('nav')!;
+      (globalThis as any).krateScopeFailed = (scope: string) => scope === '_lerr_';
+      routes['/b'] = doc('B', nested('<main>Page B</main>'), chain);
+      await krateRouter.push('/b');
+      expect(document.querySelector('main')!.textContent).toBe('Page B');
+      expect(document.getElementById('inner')).not.toBe(inner);
+      expect(document.getElementById('nav')).toBe(nav);
+    });
+  });
+
   it('remounts layouts the compiler marked as not persistable', async () => {
     (globalThis as any).__KRATE_CFG__ = { viewTransitions: false, dev: true };
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

@@ -1089,7 +1089,7 @@ function runMutation(mutate: () => void): Promise<void> {
 /** One layout/template boundary of a page (emitted by the compiler as #__krate_route). */
 interface ChainEntry {
   id: string;
-  /** "layout" or "template". */
+  /** "layout", "template" or "error" (a segment's error boundary). */
   k: string;
   /** URL segments covered by the boundary's directory (-1: the rest). */
   d: number;
@@ -1197,14 +1197,22 @@ interface SwapPlan {
  * route has a matching slot page and otherwise keep their content (a soft
  * navigation never resets a slot to its default).
  */
+function boundaryFailed(scope: string): boolean {
+  const fn = (globalThis as any).krateScopeFailed;
+  return typeof fn === 'function' && !!fn(scope);
+}
+
 function planSwap(oldChain: ChainEntry[], newChain: ChainEntry[], fromUrl: string, toUrl: string, doc: Document): SwapPlan {
   const full: SwapPlan = { keep: [], skip: [], region: null, slots: [], chain: newChain };
   let k = 0;
   while (k < oldChain.length && k < newChain.length) {
     const a = oldChain[k];
     const b = newChain[k];
-    if (a.id !== b.id || a.k !== 'layout' || b.k !== 'layout') break;
+    if (a.id !== b.id || a.k !== b.k || (a.k !== 'layout' && a.k !== 'error')) break;
     if (segmentKey(fromUrl, a.d) !== segmentKey(toUrl, b.d)) break;
+    // A segment's error boundary stays mounted while it shows the page, so the
+    // layouts below it keep their state; one that caught an error is replaced.
+    if (a.k === 'error' && boundaryFailed(a.id)) break;
     if (!a.p || !b.p) {
       devWarn(`layout ${b.f || b.id} is remounted on this navigation: ${b.why || a.why || 'not persistable'}`);
       break;
