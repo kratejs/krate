@@ -2175,6 +2175,17 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			rawJS = strings.TrimSpace(rawJS + "\n" + islandJS)
 		}
 		if rawJS != "" {
+			// npm functions called by client code are bundled into the script.
+			vendor := collectVendorImports(bundle.Modules)
+			for _, rb := range findRouteStack(page, b.Cfg.PagesDir) {
+				if lv, ok := layoutVendorImports.Load(rb.Path); ok {
+					vendor = append(vendor, lv.([]vendorImport)...)
+				}
+			}
+			var verr error
+			if rawJS, verr = b.withVendorImports(rawJS, vendor, tree.ExternalComponents); verr != nil {
+				return nil, "", verr
+			}
 			hasJS = true
 			finalJS := rawJS
 			mapJSON := ""
@@ -2624,6 +2635,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if err != nil {
 		return nil, "", nil, false, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
 	}
+	layoutVendorImports.Store(layoutPath, collectVendorImports(layoutBundle.Modules))
 	printModuleWarnings(os.Stderr, layoutBundle.Modules)
 
 	b.modCSS.store(layoutPath, layoutBundle.CSSModules)

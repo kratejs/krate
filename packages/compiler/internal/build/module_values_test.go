@@ -1,8 +1,11 @@
 package build
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
 const moduleValuesLib = `
@@ -145,5 +148,108 @@ export default function Home() { return <div><p>{note}</p><img src={logo} alt=""
 	}
 	if !strings.Contains(html, `src=/assets/logo-`) && !strings.Contains(html, `src="/assets/logo-`) {
 		t.Errorf("?url asset URL missing:\n%s", html)
+	}
+}
+
+func tinylibFiles() map[string]string {
+	return map[string]string{
+		"node_modules/tinylib/package.json": `{"name":"tinylib","version":"1.0.0","exports":{".":{"node":"./n.js","browser":"./b.js","default":"./d.js"}}}`,
+		"node_modules/tinylib/b.js": `export function greet(n) { return "browser:" + n; }
+export function unusedExport() { return "tree-shaken-away"; }
+export default function def() { return "def-browser"; }`,
+		"node_modules/tinylib/n.js": `export function greet(n) { return "node:" + n; }`,
+		"node_modules/tinylib/d.js": `export function greet(n) { return "default:" + n; }`,
+	}
+}
+
+func TestNpmFunctionsUsedByClientCodeAreBundled(t *testing.T) {
+	files := tinylibFiles()
+	files["src/lib/ids.ts"] = `import { greet } from "tinylib";
+export function hello(n: string) { return greet(n); }`
+	files["src/pages/index.tsx"] = `
+import { createSignal } from "@krate/runtime";
+import def, { greet } from "tinylib";
+import { hello } from "../lib/ids";
+export default function Home() {
+  const [who, setWho] = createSignal("a");
+  return (
+    <div>
+      <p id="t">{greet(who())}</p>
+      <p id="d">{def()}</p>
+      <button onClick={() => setWho(hello("b"))}>go</button>
+    </div>
+  );
+}`
+	_, js, err := buildKrateProject(t, files)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(js, "__krateVendor") || !strings.Contains(js, "browser:") || !strings.Contains(js, "def-browser") {
+		t.Errorf("tinylib was not bundled for the browser:\n%s", js)
+	}
+	if strings.Contains(js, "node:") && !strings.Contains(js, "browser:") {
+		t.Errorf("server condition leaked into the client bundle")
+	}
+	if strings.Contains(js, "tree-shaken-away") {
+		t.Errorf("unused export was not tree-shaken:\n%s", js)
+	}
+}
+
+func TestNodeBuiltinUsedByClientCodeIsDiagnosed(t *testing.T) {
+	files := map[string]string{
+		"src/pages/index.tsx": `
+import { createSignal } from "@krate/runtime";
+import { join } from "node:path";
+export default function Home() {
+  const [p, setP] = createSignal("");
+  return <button onClick={() => setP(join("a", "b"))}>{p()}</button>;
+}`,
+	}
+	_, _, err := buildKrateProject(t, files)
+	if err == nil || !strings.Contains(err.Error(), "node:path") || !strings.Contains(err.Error(), "browser") {
+		t.Fatalf("expected a node: built-in diagnostic, got %v", err)
+	}
+}
+
+func TestUnbundledImportInTextIsDiagnosed(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "src/lib/counter.ts", "const pair = [5, 6];\nexport const [total] = pair;\n")
+	writeFileRel(t, root, "src/pages/index.tsx", `
+import { createSignal } from "@krate/runtime";
+import { total } from "../lib/counter";
+export default function Page() {
+  const [n, setN] = createSignal(0);
+  return <div><p>{total + n()}</p><button onClick={() => setN(n() + 1)}>go</button></div>;
+}
+`)
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.Minify = false
+	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	if !strings.Contains(out, "KR8302") || !strings.Contains(out, "`total` imported from") {
+		t.Errorf("a text-only use of an unbundleable import must be diagnosed:\n%s", out)
+	}
+}
+
+func TestHelperCallWithSignalArgIsNotDropped(t *testing.T) {
+	files := map[string]string{
+		"src/pages/index.tsx": `
+import { createSignal } from "@krate/runtime";
+const fmt = (n: number) => "v" + n;
+export default function Page() {
+  const [n, setN] = createSignal(1);
+  return <div><p>{fmt(n())}</p><button onClick={() => setN(n() + 1)}>go</button></div>;
+}`,
+	}
+	html, js, err := buildKrateProject(t, files)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(html, "v1") || !strings.Contains(js, "fmt(n())") {
+		t.Errorf("fmt(n()) must render and stay reactive:\nhtml=%s\njs=%s", html, js)
 	}
 }

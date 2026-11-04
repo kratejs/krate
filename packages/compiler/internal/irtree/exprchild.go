@@ -38,7 +38,8 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 		if slot := b.buildTextSlot(expr, parentID); slot != nil {
 			return []SlotNode{slot}
 		}
-		return nil
+		// A call to an ordinary function (`fmt(count())`) is not a getter;
+		// it is a reactive expression, never a dropped child.
 	}
 	// Complex expression (binary, member chain, template, etc.).
 	return []SlotNode{b.buildExprSlot(expr, parentID)}

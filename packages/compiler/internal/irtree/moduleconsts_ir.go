@@ -336,6 +336,12 @@ func (b *builder) checkUnbundledImports(node *ComponentNode) {
 		if !ok || !localCodeModule(imp.Source) {
 			continue
 		}
+		if imp.Default != "" {
+			imported[imp.Default] = origin{imp: imp, name: imp.Default}
+		}
+		if imp.Namespace != "" {
+			imported[imp.Namespace] = origin{imp: imp, name: imp.Namespace}
+		}
 		for _, n := range imp.Named {
 			local := n.Local
 			if local == "" {
@@ -353,6 +359,9 @@ func (b *builder) checkUnbundledImports(node *ComponentNode) {
 	for _, h := range node.Handlers {
 		sources = append(sources, h.Body)
 	}
+	for _, r := range node.RefBindings {
+		sources = append(sources, r.Callback, r.Target)
+	}
 	sources = append(sources, node.Effects...)
 	sources = append(sources, node.Memos...)
 	for _, attr := range node.AttrBindings {
@@ -363,6 +372,8 @@ func (b *builder) checkUnbundledImports(node *ComponentNode) {
 	}
 	sources = append(sources, node.ExtraVars...)
 	sources = append(sources, node.PreSignalVars...)
+	sources = append(sources, listBindingSources(node.Children)...)
+	sources = append(sources, listBindingSources(node.CallSiteSlots)...)
 	missing := map[string]bool{}
 	for _, src := range sources {
 		scanJSIdents(src, func(name string) {
@@ -373,7 +384,7 @@ func (b *builder) checkUnbundledImports(node *ComponentNode) {
 			if _, fn := b.functions[name]; fn {
 				return
 			}
-			if _, c := b.moduleConstInits[name]; c {
+			if b.isModuleBinding(name) {
 				return
 			}
 			if _, act := b.actionURLs[name]; act {
@@ -382,15 +393,15 @@ func (b *builder) checkUnbundledImports(node *ComponentNode) {
 			if _, goc := b.goComponents[name]; goc {
 				return
 			}
-			if r := name[0]; r >= 'A' && r <= 'Z' {
-				// Components and classes rendered through the slot tree.
+			if b.ann.UsedComponents[name] {
+				// Components rendered through the slot tree.
 				return
 			}
 			missing[name] = true
 			src := strings.Trim(o.imp.Source, "\"'`")
 			b.warnCodeAt(o.imp.Position, diag.CodeUnbundledImport,
 				"`"+name+"` imported from "+strconv.Quote(src)+" is used by hydration code of <"+node.Name+"> but could not be bundled into the page script; it is undefined in the browser",
-				"export it from "+strconv.Quote(src)+" as a function declaration or a const, or define it in this module")
+				"export it from "+strconv.Quote(src)+" as a function declaration, class or const (not a destructured binding), or define it in this module")
 		})
 	}
 }
@@ -507,3 +518,6 @@ func isIdentByte(c byte) bool {
 		(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
 		(c >= '0' && c <= '9')
 }
+
+// JSIdentRefs returns the free identifier names a JS fragment references.
+func JSIdentRefs(code string) map[string]bool { return jsIdentRefs(code) }
