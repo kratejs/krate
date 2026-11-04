@@ -145,6 +145,17 @@ try {
   await page.keyboard.press("Escape");
   check((await active()).endsWith("Open popover"), "Escape closes the popover and restores focus");
 
+  // Navigation menu: a disclosure of links, not a role=menu.
+  await focusTrigger("Getting Started");
+  const nav = await page.evaluate(() => ({ role: document.activeElement.getAttribute("role"), popup: document.activeElement.getAttribute("aria-haspopup") }));
+  check(nav.role === "button" && nav.popup === null, `navigation trigger is a plain disclosure button: ${JSON.stringify(nav)}`);
+  await page.keyboard.press("Enter");
+  check(await visible(".krate-navigation-menu-link"), "Enter opens the navigation menu");
+  check((await active()).includes("Getting Started"), "navigation trigger keeps focus after opening");
+  await page.keyboard.press("Escape");
+  check(!(await visible(".krate-navigation-menu-link")), "Escape closes the navigation menu");
+  check((await active()).endsWith("Getting Started"), "focus stays on the navigation trigger after Escape");
+
   // Accordion: Enter toggles, aria-expanded follows, focus is kept.
   await focusTrigger("Is it zero-JS?");
   await page.keyboard.press("Enter");
