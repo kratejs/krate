@@ -62,6 +62,8 @@ type cliFlags struct {
 	UpdatePackage bool
 	Report        string
 	Port          int
+	PortSet       bool
+	NoBuild       bool
 	Host          string
 	Token         string
 	Roots         []string
@@ -147,9 +149,19 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--verbose]\n\n")
 		fmt.Fprintf(w, "Start the dev server with file watching and live reload.\n")
 	case "serve", "preview", "start":
-		fmt.Fprintf(w, "Usage: krate %s [dir] [--config <path>]\n\n", cmd)
-		fmt.Fprintf(w, "Build, then serve the output (preview production locally).\n")
-		fmt.Fprintf(w, "`preview` and `start` are aliases for `serve`.\n")
+		noBuildFlag := " [--no-build]"
+		if cmd == "start" {
+			noBuildFlag = ""
+		}
+		_, _ = fmt.Fprintf(w, "Usage: krate %s [dir] [--config <path>] [--port <n>] [--host <addr>]%s\n\n", cmd, noBuildFlag)
+		if cmd == "start" {
+			_, _ = fmt.Fprintf(w, "Serve the existing build output without rebuilding (production start).\n")
+			_, _ = fmt.Fprintf(w, "Run `krate build` first. `krate serve` builds and then serves.\n")
+		} else {
+			_, _ = fmt.Fprintf(w, "Build, then serve the output (preview production locally).\n")
+			_, _ = fmt.Fprintf(w, "`preview` is an alias for `serve`; use `krate start` to serve an existing build.\n")
+		}
+		_, _ = fmt.Fprintf(w, "Port precedence: --port, KRATE_SERVE_PORT, PORT, then server.port / devServer.port.\n")
 	case "types":
 		fmt.Fprintf(w, "Usage: krate types [dir]\n\n")
 		fmt.Fprintf(w, "Generate route/content TypeScript declarations (krate-env.d.ts, .krate/types).\n")
@@ -210,7 +222,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "Commands:\n")
 	fmt.Fprintf(w, "  build     Build the project for production\n")
 	fmt.Fprintf(w, "  dev       Start the development server with hot reload\n")
-	fmt.Fprintf(w, "  serve     Build, then serve for preview (aliases: preview, start)\n")
+	_, _ = fmt.Fprintf(w, "  serve     Build, then serve for preview (alias: preview)\n")
+	_, _ = fmt.Fprintf(w, "  start     Serve the existing build without rebuilding (production)\n")
 	fmt.Fprintf(w, "  types     Generate route/content TypeScript declarations\n")
 	fmt.Fprintf(w, "  go:init   Set up go.mod/go.work for Go component intellisense\n")
 	fmt.Fprintf(w, "  check     Run compiler-enforced quality gates (a11y/SEO/perf)\n")
@@ -244,9 +257,23 @@ func printUsage(w io.Writer) {
 	writeHelp(w, "  --apply           Write changes (krate fix, krate migrate); dry-run otherwise\n")
 	writeHelp(w, "  --verify, --force, --update-package, --report <path>   krate migrate options\n")
 	writeHelp(w, "  --schema          Print a JSON Schema instead of the config (krate config)\n")
+	writeHelp(w, "  --port <n>        Listen port for dev/serve/start\n")
+	writeHelp(w, "  --host <addr>     Bind address for dev/serve/start\n")
+	writeHelp(w, "  --no-build        With serve: skip the build and serve the existing output\n")
 }
 
 func parseFlags(args []string) (cliFlags, []string) {
+	flags, remaining, err := parseFlagsChecked(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+	return flags, remaining
+}
+
+// parseFlagsChecked parses CLI flags, returning an error for malformed values
+// (a non-numeric --port, a flag missing its value).
+func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 	var flags cliFlags
 	var remaining []string
 	for i := 0; i < len(args); i++ {
@@ -300,14 +327,30 @@ func parseFlags(args []string) (cliFlags, []string) {
 		case args[i] == "--report" && i+1 < len(args):
 			flags.Report = args[i+1]
 			i++
-		case args[i] == "--host" && i+1 < len(args):
-			flags.Host = args[i+1]
-			i++
-		case args[i] == "--port" && i+1 < len(args):
-			if n, err := strconv.Atoi(args[i+1]); err == nil {
-				flags.Port = n
+		case args[i] == "--host" || args[i] == "--port":
+			if i+1 >= len(args) {
+				return flags, nil, fmt.Errorf("%s requires a value", args[i])
+			}
+			if args[i] == "--host" {
+				flags.Host = args[i+1]
+			} else {
+				n, err := parsePortValue("--port", args[i+1])
+				if err != nil {
+					return flags, nil, err
+				}
+				flags.Port, flags.PortSet = n, true
 			}
 			i++
+		case strings.HasPrefix(args[i], "--host="):
+			flags.Host = strings.TrimPrefix(args[i], "--host=")
+		case strings.HasPrefix(args[i], "--port="):
+			n, err := parsePortValue("--port", strings.TrimPrefix(args[i], "--port="))
+			if err != nil {
+				return flags, nil, err
+			}
+			flags.Port, flags.PortSet = n, true
+		case args[i] == "--no-build":
+			flags.NoBuild = true
 		case args[i] == "--token" && i+1 < len(args):
 			flags.Token = args[i+1]
 			i++
@@ -325,7 +368,7 @@ func parseFlags(args []string) (cliFlags, []string) {
 			remaining = append(remaining, args[i])
 		}
 	}
-	return flags, remaining
+	return flags, remaining, nil
 }
 
 func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
@@ -401,6 +444,10 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 	if flags.Precompress {
 		cfg.Compress.Brotli = true
 		cfg.Compress.Gzip = true
+	}
+	if err := applyServerFlags(command, flags, cfg, os.Getenv); err != nil {
+		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
 	}
 
 	return root, cfg, nil
@@ -566,6 +613,7 @@ func runDevOnce(flags cliFlags, args []string, first bool) bool {
 	errc := make(chan error, 2)
 
 	go func() {
+		// A clean shutdown (Ctrl+C / SIGTERM) returns nil.
 		errc <- build.ServeDev(root, cfg, hub, start)
 	}()
 
@@ -582,9 +630,11 @@ func runDevOnce(flags cliFlags, args []string, first bool) bool {
 			err = err2
 		}
 	}
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
+	if err == nil {
+		// A clean shutdown (Ctrl+C / SIGTERM).
+		return false
 	}
+	fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
 	os.Exit(1)
 	return false
 }
@@ -593,23 +643,43 @@ func runServe(flags cliFlags, args []string) {
 	root, cfg := resolveConfig(flags, args)
 	env := loadProjectEnv(root, "production", flags.Verbose)
 
-	fmt.Printf("%s%s  Building for preview...%s\n", cBold, cCyan, cReset)
+	// `krate start` (and `serve --no-build`) serves the existing build output
+	// as-is; `serve`/`preview` build first.
+	noBuild := flags.NoBuild || (len(args) > 0 && args[0] == "start")
 	start := time.Now()
-
-	builder := build.New(root, cfg)
-	builder.Verbose = flags.Verbose
-	builder.Env = env
-	if err := builder.BuildAll(); err != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+	if noBuild {
+		if !hasBuildOutput(cfg.OutDir) {
+			fmt.Fprintf(os.Stderr, "%sError:%s no build output found in %s\n", cRed, cReset, cfg.OutDir)
+			fmt.Fprintf(os.Stderr, "  Run `krate build` first, or use `krate serve` to build and serve in one step.\n")
+			os.Exit(1)
+		}
+		fmt.Printf("%s%s  Serving existing build in %s...%s\n", cBold, cCyan, cfg.OutDir, cReset)
+	} else {
+		fmt.Printf("%s%s  Building for preview...%s\n", cBold, cCyan, cReset)
+		builder := build.New(root, cfg)
+		builder.Verbose = flags.Verbose
+		builder.Env = env
+		if err := builder.BuildAll(); err != nil {
+			fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+			os.Exit(1)
+		}
+		fmt.Printf("%s%s  Build complete. Starting server...%s\n", cBold, cGreen, cReset)
 	}
-
-	fmt.Printf("%s%s  Build complete. Starting server...%s\n", cBold, cGreen, cReset)
 
 	if err := build.Serve(root, cfg, start); err != nil {
 		fmt.Fprintf(os.Stderr, "%sServe error:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
 	}
+}
+
+// hasBuildOutput reports whether outDir looks like a finished krate build.
+func hasBuildOutput(outDir string) bool {
+	for _, name := range []string{"manifest.json", "index.html"} {
+		if _, err := os.Stat(filepath.Join(outDir, name)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // runDeploy builds the site and writes host-specific adapter files so the

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -135,6 +136,8 @@ type goAPISupervisor struct {
 	// dials it instead of the loopback TCP port.
 	socket string
 	env    []string
+	// readyTimeout bounds how long Start waits for the host to listen.
+	readyTimeout time.Duration
 
 	proxy     *httputil.ReverseProxy
 	stopCh    chan struct{}
@@ -159,15 +162,23 @@ type goAPISupervisor struct {
 // route manifest.
 func newGoAPISupervisor(binPath, manifestPath string, port int) *goAPISupervisor {
 	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		fmt.Fprintf(os.Stderr, "  %sGo API proxy error%s %s %s: %v\n", cRed, cReset, r.Method, r.URL.Path, err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, `{"error":"Bad Gateway"}`)
+	}
 	return &goAPISupervisor{
 		binPath:      binPath,
 		manifestPath: manifestPath,
 		port:         port,
-		proxy:        httputil.NewSingleHostReverseProxy(target),
+		proxy:        proxy,
 		stopCh:       make(chan struct{}),
 		client:       &http.Client{Timeout: 30 * time.Second},
 		renderURL:    fmt.Sprintf("http://127.0.0.1:%d/__krate/gorender", port),
 		regionCache:  map[string]regionCacheEntry{},
+		readyTimeout: 10 * time.Second,
 	}
 }
 
@@ -353,6 +364,14 @@ func (g *goAPISupervisor) RouteMatches(method, path string) bool {
 	return goAPIRouteMatches(method, path, g.routes)
 }
 
+// AllowedMethods reports the methods the Go routes define for a path, and
+// whether any Go route matches the path at all.
+func (g *goAPISupervisor) AllowedMethods(path string) ([]string, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return goAPIAllowedMethods(path, g.routes)
+}
+
 // Proxy forwards a request to the Go sidecar.
 func (g *goAPISupervisor) Proxy(w http.ResponseWriter, r *http.Request) {
 	g.proxy.ServeHTTP(w, r)
@@ -401,16 +420,33 @@ func (g *goAPISupervisor) spawn() error {
 		}
 	}(cmd)
 	// Wait for the host to accept connections so the first proxied request does
-	// not race its listen().
-	g.waitReady(10 * time.Second)
+	// not race its listen(). A host that never comes up is a failed start, not
+	// a silent 10s stall followed by 502s on every Go route.
+	if !g.waitReady(g.readyTimeout) {
+		g.stop()
+		g.mu.Lock()
+		g.routes = nil
+		g.mu.Unlock()
+		where := fmt.Sprintf("127.0.0.1:%d", g.port)
+		if g.socket != "" {
+			where = g.socket
+		}
+		return fmt.Errorf("Go API host did not accept connections on %s within %s (check its output above)", where, g.readyTimeout)
+	}
 	return nil
 }
 
-// waitReady polls the sidecar socket/port until it accepts a connection or the
-// timeout elapses.
-func (g *goAPISupervisor) waitReady(timeout time.Duration) {
+// waitReady polls the sidecar socket/port until it accepts a connection. It
+// returns false when the timeout elapses or the process exits first.
+func (g *goAPISupervisor) waitReady(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
+		g.mu.Lock()
+		running := g.cmd != nil
+		g.mu.Unlock()
+		if !running {
+			return false
+		}
 		var conn net.Conn
 		var err error
 		if g.socket != "" {
@@ -425,10 +461,11 @@ func (g *goAPISupervisor) waitReady(timeout time.Duration) {
 		}
 		if err == nil {
 			_ = conn.Close()
-			return
+			return true
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	return false
 }
 
 func (g *goAPISupervisor) stop() {

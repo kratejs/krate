@@ -120,7 +120,7 @@ func compileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: []api.Plugin{serverCSSPlugin(root), cbPlugin, serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(actionModules, actionBasePath)},
+				Plugins: []api.Plugin{reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(actionModules, actionBasePath)},
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   injectedSource,
@@ -213,4 +213,28 @@ func injectServerGlobals(source string) string {
 
 	importLine := fmt.Sprintf("import { %s } from '@krate/runtime/server';", strings.Join(names, ", "))
 	return importLine + "\n" + source
+}
+
+// reactServerShimPlugin maps `import { Suspense } from "react"` in a server
+// bundle onto Krate's server Suspense. Without it the bare import stays
+// external and fails at load time (ERR_MODULE_NOT_FOUND) unless react happens
+// to be installed. Only the names Krate's server renderer implements are
+// exported, so any other React import fails the build with esbuild's "no
+// matching export" error instead of resolving to something that silently
+// behaves differently.
+func reactServerShimPlugin() api.Plugin {
+	return api.Plugin{
+		Name: "krate-react-server-shim",
+		Setup: func(b api.PluginBuild) {
+			b.OnResolve(api.OnResolveOptions{Filter: `^react$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				return api.OnResolveResult{Path: "react", Namespace: "krate-react-shim"}, nil
+			})
+			b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-react-shim"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				contents := "import { Suspense, Fragment, createSignal, createEffect, createMemo, onCleanup, onMount } from '@krate/runtime/server';\n" +
+					"export { Suspense, Fragment, createSignal, createEffect, createMemo, onCleanup, onMount };\n" +
+					"export default { Suspense, Fragment };\n"
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: ""}, nil
+			})
+		},
+	}
 }

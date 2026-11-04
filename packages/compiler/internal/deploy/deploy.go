@@ -352,8 +352,9 @@ func emitGitHubPages(outDir string) ([]string, error) {
 }
 
 // emitDocker writes a Dockerfile and .dockerignore at the project root. The
-// image builds the site and runs `krate serve`, which serves SSR/ISR pages, API
-// routes, actions and middleware that a static host cannot.
+// image builds the site once and runs `krate start`, which serves the built
+// output (SSR/ISR pages, API routes, actions and middleware that a static host
+// cannot) without rebuilding.
 func emitDocker(cfg *config.Config, root, outDir string) ([]string, error) {
 	install := "RUN npm install"
 	copyManifests := "COPY package.json package-lock.json* ./"
@@ -384,9 +385,7 @@ func emitDocker(cfg *config.Config, root, outDir string) ([]string, error) {
 	b.WriteString("RUN npx krate build\n")
 	fmt.Fprintf(&b, "ENV PORT=%d\n", port)
 	fmt.Fprintf(&b, "EXPOSE %d\n", port)
-	// `krate serve` rebuilds on start; switch to a no-build start mode once one
-	// is available to skip that second build.
-	b.WriteString("CMD [\"npx\", \"krate\", \"serve\"]\n")
+	b.WriteString("CMD [\"npx\", \"krate\", \"start\"]\n")
 
 	dockerfile := filepath.Join(root, "Dockerfile")
 	if existing, err := os.ReadFile(dockerfile); err == nil && !strings.Contains(string(existing), "krate deploy --target docker") {

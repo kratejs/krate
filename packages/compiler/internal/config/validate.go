@@ -112,6 +112,9 @@ func (c *Config) Validate() (warnings []string, err error) {
 	if c.Server.MaxBodySize < 0 {
 		return nil, fmt.Errorf("server.maxBodySize must be >= 0, got %d", c.Server.MaxBodySize)
 	}
+	if c.Server.ShutdownTimeout < 0 {
+		return nil, fmt.Errorf("server.shutdownTimeout must be >= 0 seconds, got %d", c.Server.ShutdownTimeout)
+	}
 	if c.Site != (SiteConfig{}) && c.SEO != (SEOConfig{}) {
 		warnings = append(warnings, "both `site` and `seo` are set; `site` wins - migrate to `site` and remove `seo`")
 	}

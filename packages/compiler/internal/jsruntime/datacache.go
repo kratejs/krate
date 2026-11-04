@@ -277,12 +277,3 @@ func fetchCacheKey(method, url string, headers map[string]string) string {
 	}
 	return b.String()
 }
-
-// fetchResult is a fetch response as handed to JS (and stored in the data
-// cache).
-type fetchResult struct {
-	Status     int               `json:"status"`
-	Headers    map[string]string `json:"headers"`
-	Body       string            `json:"body"`
-	StatusText string            `json:"statusText"`
-}

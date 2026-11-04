@@ -49,6 +49,13 @@ export interface ServerConfig {
   port?: number;
   /** Request body cap in bytes (default: 1 MiB pages, 25 MiB API). */
   maxBodySize?: number;
+  /**
+   * Trust X-Forwarded-Proto / X-Forwarded-Host / X-Forwarded-For from a
+   * reverse proxy (request URLs, CSRF origin check, client IP). Default false.
+   */
+  trustProxy?: boolean;
+  /** Graceful shutdown drain period in seconds (default 15). */
+  shutdownTimeout?: number;
 }
 
 export interface CORSConfig {

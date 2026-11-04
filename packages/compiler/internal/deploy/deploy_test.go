@@ -129,7 +129,7 @@ func TestEmitRemovesLegacyServerOutputFromPublicRoot(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := Emit("netlify", config.Default(), out); err != nil {
+	if _, err := Emit("netlify", config.Default(), t.TempDir(), out, Options{StaticOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, rel := range []string{"api-node", "server-manifest.json"} {

@@ -206,12 +206,12 @@ var middleware = function(request) {
 		URL:     "http://localhost:3000/blocked",
 		Method:  "GET",
 		Path:    "/blocked",
-		Headers: map[string]string{},
+		Headers: map[string][]string{},
 	})
 	if result.Status != 403 {
 		t.Errorf("Expected 403, got %d", result.Status)
 	}
-	if result.Body != "Blocked" {
+	if string(result.Body) != "Blocked" {
 		t.Errorf("Expected 'Blocked', got %s", result.Body)
 	}
 
@@ -220,9 +220,9 @@ var middleware = function(request) {
 		URL:     "http://localhost:3000/about",
 		Method:  "GET",
 		Path:    "/about",
-		Headers: map[string]string{},
+		Headers: map[string][]string{},
 	})
-	if result.Status != 0 || result.Action != "continue" {
+	if result.Action != "continue" {
 		t.Errorf("Expected continue, got status=%d action=%s", result.Status, result.Action)
 	}
 }
@@ -302,28 +302,28 @@ export {
 	result := mrt.Execute(MiddlewareRequest{
 		URL:     "http://localhost:3000/old-blog",
 		Path:    "/old-blog",
-		Headers: map[string]string{},
+		Headers: map[string][]string{},
 	})
 	if result.Status != 301 {
 		t.Errorf("Expected 301, got %d", result.Status)
 	}
-	if result.Headers["location"] != "/blog" {
-		t.Errorf("Expected Location: /blog, got %s", result.Headers["location"])
+	if mwHeader(result, "location") != "/blog" {
+		t.Errorf("Expected Location: /blog, got %s", mwHeader(result, "location"))
 	}
-	if result.Headers["x-frame-options"] != "DENY" {
-		t.Errorf("Expected X-Frame-Options: DENY, got %s", result.Headers["x-frame-options"])
+	if mwHeader(result, "x-frame-options") != "DENY" {
+		t.Errorf("Expected X-Frame-Options: DENY, got %s", mwHeader(result, "x-frame-options"))
 	}
 
 	// Test /admin -> 403
 	result = mrt.Execute(MiddlewareRequest{
 		URL:     "http://localhost:3000/admin/settings",
 		Path:    "/admin/settings",
-		Headers: map[string]string{},
+		Headers: map[string][]string{},
 	})
 	if result.Status != 403 {
 		t.Errorf("Expected 403, got %d", result.Status)
 	}
-	if result.Body != "Forbidden" {
+	if string(result.Body) != "Forbidden" {
 		t.Errorf("Expected 'Forbidden', got %s", result.Body)
 	}
 
@@ -331,9 +331,140 @@ export {
 	result = mrt.Execute(MiddlewareRequest{
 		URL:     "http://localhost:3000/about",
 		Path:    "/about",
-		Headers: map[string]string{},
+		Headers: map[string][]string{},
 	})
 	if result.Status != 200 {
 		t.Errorf("Expected 200, got %d", result.Status)
+	}
+}
+
+func mwHeader(r MiddlewareResult, name string) string {
+	for _, h := range r.Headers {
+		if h[0] == name {
+			return h[1]
+		}
+	}
+	return ""
+}
+
+func newTestMiddleware(t *testing.T, code string) *MiddlewareRuntime {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "middleware.js")
+	if err := os.WriteFile(p, []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewMiddlewareRuntime(p)
+	if err != nil {
+		t.Fatalf("NewMiddlewareRuntime: %v", err)
+	}
+	t.Cleanup(m.Close)
+	return m
+}
+
+func TestMiddlewareResponseRedirectAsyncAndHost(t *testing.T) {
+	m := newTestMiddleware(t, `
+export async function middleware(request) {
+  await new Promise((r) => setTimeout(r, 5));
+  const url = new URL(request.url);
+  if (url.pathname === "/admin") return Response.redirect(new URL("/login", request.url));
+  if (url.pathname === "/ok200") return new Response("hello", { status: 200 });
+  if (url.pathname === "/pass") return new Response(null, { headers: { "x-middleware-next": "1", "x-added": "yes" } });
+  if (url.pathname === "/cookies") { const h = new Headers({"x-middleware-next": "1"}); h.append("set-cookie", "a=1; Path=/"); h.append("set-cookie", "b=2"); return new Response(null, { headers: h }); }
+  if (url.pathname === "/rewrite") return new Response(null, { headers: { "x-middleware-rewrite": "/other" } });
+  if (request.cookies.get("sid")?.value === "42" && request.headers.get("Authorization") === "t") return new Response("authed", { status: 202 });
+}
+`)
+	r := m.Execute(MiddlewareRequest{URL: "http://blog.example.com/admin", Method: "GET", Path: "/admin"})
+	if r.Action != MiddlewareResponse || r.Status != 302 || mwHeader(r, "location") != "http://blog.example.com/login" {
+		t.Fatalf("redirect: %+v", r)
+	}
+	r = m.Execute(MiddlewareRequest{URL: "http://h/ok200", Path: "/ok200"})
+	if r.Action != MiddlewareResponse || r.Status != 200 || string(r.Body) != "hello" {
+		t.Fatalf("an explicit 200 Response must be honored: %+v", r)
+	}
+	r = m.Execute(MiddlewareRequest{URL: "http://h/pass", Path: "/pass"})
+	if r.Action != MiddlewareContinue || mwHeader(r, "x-added") != "yes" || mwHeader(r, "x-middleware-next") != "" {
+		t.Fatalf("passthrough: %+v", r)
+	}
+	r = m.Execute(MiddlewareRequest{URL: "http://h/cookies", Path: "/cookies"})
+	n := 0
+	for _, h := range r.Headers {
+		if h[0] == "set-cookie" {
+			n++
+		}
+	}
+	if r.Action != MiddlewareContinue || n != 2 {
+		t.Fatalf("multi set-cookie must survive: %+v", r)
+	}
+	r = m.Execute(MiddlewareRequest{URL: "http://h/rewrite", Path: "/rewrite"})
+	if r.Action != MiddlewareContinue || r.Rewrite != "/other" {
+		t.Fatalf("rewrite: %+v", r)
+	}
+	r = m.Execute(MiddlewareRequest{URL: "http://h/x", Path: "/x", Headers: map[string][]string{"Authorization": {"t"}, "Cookie": {"sid=42; other=1"}}})
+	if r.Action != MiddlewareResponse || r.Status != 202 {
+		t.Fatalf("headers.get + cookies: %+v", r)
+	}
+	r = m.Execute(MiddlewareRequest{URL: "http://h/none", Path: "/none"})
+	if r.Action != MiddlewareContinue {
+		t.Fatalf("undefined must continue: %+v", r)
+	}
+}
+
+func TestMiddlewareMatcher(t *testing.T) {
+	m := newTestMiddleware(t, `
+export function middleware() { return new Response("mw", { status: 200 }); }
+export const config = { matcher: ["/dashboard/:path*", "/account", "/((?!api|_next/static|favicon.ico).*)/private"] };
+`)
+	if !m.HasMatcher() {
+		t.Fatal("matcher export not detected")
+	}
+	cases := map[string]string{
+		"/dashboard": MiddlewareResponse, "/dashboard/a/b": MiddlewareResponse, "/account": MiddlewareResponse,
+		"/dashboards": MiddlewareSkip, "/other": MiddlewareSkip, "/x/private": MiddlewareResponse, "/api/private": MiddlewareSkip,
+	}
+	for path, want := range cases {
+		if got := m.Execute(MiddlewareRequest{URL: "http://h" + path, Path: path}).Action; got != want {
+			t.Errorf("%s: action = %s, want %s", path, got, want)
+		}
+	}
+}
+
+func TestMiddlewareReloadsWhenFileChanges(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "middleware.js")
+	write := func(body string) {
+		if err := os.WriteFile(p, []byte("export function middleware() { return new Response('"+body+"'); }"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("one")
+	m := NewLazyMiddlewareRuntime(p)
+	defer m.Close()
+	if r := m.Execute(MiddlewareRequest{Path: "/"}); string(r.Body) != "one" {
+		t.Fatalf("first load: %+v", r)
+	}
+	write("two-changed")
+	if r := m.Execute(MiddlewareRequest{Path: "/"}); string(r.Body) != "two-changed" {
+		t.Fatalf("expected reload, got %+v", r)
+	}
+	_ = os.Remove(p)
+	if r := m.Execute(MiddlewareRequest{Path: "/"}); r.Action != MiddlewareSkip {
+		t.Fatalf("missing file should skip, got %+v", r)
+	}
+}
+
+func TestMiddlewareConcurrent(t *testing.T) {
+	m := newTestMiddleware(t, `export async function middleware(request) { await new Promise((r) => setTimeout(r, 20)); return new Response(new URL(request.url).pathname); }`)
+	done := make(chan string, 8)
+	for i := 0; i < 8; i++ {
+		go func(i int) {
+			p := "/p" + string(rune('a'+i))
+			done <- p + "=" + string(m.Execute(MiddlewareRequest{URL: "http://h" + p, Path: p}).Body)
+		}(i)
+	}
+	for i := 0; i < 8; i++ {
+		s := <-done
+		if len(s) < 7 || s[:3] != s[4:7] {
+			t.Errorf("mismatched concurrent result %q", s)
+		}
 	}
 }

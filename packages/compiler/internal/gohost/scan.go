@@ -119,33 +119,76 @@ func ParseRoute(apiSrcDir, file string, src []byte) (Route, bool, error) {
 	return r, true, nil
 }
 
+// pathMatchesPattern reports whether path matches a route pattern whose
+// {param} segments match one path segment each.
+func pathMatchesPattern(path, pattern string) bool {
+	pathSegs := strings.Split(strings.Trim(path, "/"), "/")
+	patSegs := strings.Split(strings.Trim(pattern, "/"), "/")
+	if len(pathSegs) != len(patSegs) {
+		return false
+	}
+	for i, ps := range patSegs {
+		if strings.HasPrefix(ps, "{") && strings.HasSuffix(ps, "}") {
+			continue
+		}
+		if ps != pathSegs[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // RouteMatches reports whether any route entry matches the method and path.
-// Paths may contain {param} wildcards that match a single path segment.
+// Paths may contain {param} wildcards that match a single path segment. HEAD
+// matches GET routes (the Go mux serves HEAD from a GET pattern).
 func RouteMatches(method, path string, routes []RouteEntry) bool {
 	for _, r := range routes {
-		if r.Method != "" && !strings.EqualFold(r.Method, method) {
+		if r.Method != "" && !strings.EqualFold(r.Method, method) &&
+			!(strings.EqualFold(method, "HEAD") && strings.EqualFold(r.Method, "GET")) {
 			continue
 		}
-		pathSegs := strings.Split(strings.Trim(path, "/"), "/")
-		patSegs := strings.Split(strings.Trim(r.Path, "/"), "/")
-		if len(pathSegs) != len(patSegs) {
-			continue
-		}
-		ok := true
-		for i, ps := range patSegs {
-			if strings.HasPrefix(ps, "{") && strings.HasSuffix(ps, "}") {
-				continue
-			}
-			if ps != pathSegs[i] {
-				ok = false
-				break
-			}
-		}
-		if ok {
+		if pathMatchesPattern(path, r.Path) {
 			return true
 		}
 	}
 	return false
+}
+
+// AllowedMethods lists the methods the Go routes define for path (in a stable
+// order, with HEAD added for GET and OPTIONS always present). The second result
+// is false when no route matches the path at all. A method-less entry (one
+// handler for every method) reports "*".
+func AllowedMethods(path string, routes []RouteEntry) ([]string, bool) {
+	seen := map[string]bool{}
+	found := false
+	for _, r := range routes {
+		if !pathMatchesPattern(path, r.Path) {
+			continue
+		}
+		found = true
+		if r.Method == "" {
+			return []string{"*"}, true
+		}
+		seen[strings.ToUpper(r.Method)] = true
+	}
+	if !found {
+		return nil, false
+	}
+	if seen["GET"] {
+		seen["HEAD"] = true
+	}
+	seen["OPTIONS"] = true
+	var out []string
+	for _, m := range []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
+		if seen[m] {
+			out = append(out, m)
+			delete(seen, m)
+		}
+	}
+	for m := range seen {
+		out = append(out, m)
+	}
+	return out, true
 }
 
 // ScanComponents walks the component dirs, grouping files by directory so a

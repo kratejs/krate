@@ -545,6 +545,14 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				if n, ok := configInt64(v); ok {
 					cfg.Server.MaxBodySize = n
 				}
+			case "trustProxy":
+				if b, ok := v.(bool); ok {
+					cfg.Server.TrustProxy = b
+				}
+			case "shutdownTimeout":
+				if n, ok := configInt(v); ok {
+					cfg.Server.ShutdownTimeout = n
+				}
 			}
 		}
 	case "cors":

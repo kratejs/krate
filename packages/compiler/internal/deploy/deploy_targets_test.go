@@ -159,7 +159,7 @@ func TestEmitDockerfile(t *testing.T) {
 		t.Fatalf("files=%v err=%v", files, err)
 	}
 	df, _ := os.ReadFile(filepath.Join(root, "Dockerfile"))
-	for _, want := range []string{"pnpm install --frozen-lockfile", "npx krate build", "EXPOSE 4321", `CMD ["npx", "krate", "serve"]`} {
+	for _, want := range []string{"pnpm install --frozen-lockfile", "npx krate build", "EXPOSE 4321", `CMD ["npx", "krate", "start"]`} {
 		if !strings.Contains(string(df), want) {
 			t.Errorf("Dockerfile missing %q:\n%s", want, df)
 		}
