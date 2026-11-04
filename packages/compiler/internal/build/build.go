@@ -1490,23 +1490,23 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			}
 
 			// 1. Construct structural HTML wrapper in memory.
-			// A page links its own stylesheet (r.CSSFile) first, then any
-			// site-global stylesheets (e.g. Tailwind) so utility classes can
-			// override page/component styles.
-			pageCSS := []string{}
+			// Site-global stylesheets (e.g. Tailwind) are linked first, then
+			// the page's own stylesheet (r.CSSFile). Tailwind output is
+			// layered, so page CSS wins over preflight and utilities by
+			// layer precedence, and page `@layer base` rules follow preflight.
+			pageCSS := append([]string{}, cssFiles...)
 			if r.CSSFile != "" {
 				pageCSS = append(pageCSS, r.CSSFile)
 			}
-			pageCSS = append(pageCSS, cssFiles...)
 			// UA siblings link a variant-only stylesheet when the build emitted
 			// one (hybrid+userAgent); otherwise they share the page sheet.
 			legacyPageCSS := pageCSS
 			if r.CSSLegacyFile != "" {
-				legacyPageCSS = append([]string{r.CSSLegacyFile}, cssFiles...)
+				legacyPageCSS = append(append([]string{}, cssFiles...), r.CSSLegacyFile)
 			}
 			modernPageCSS := pageCSS
 			if r.CSSModernFile != "" {
-				modernPageCSS = append([]string{r.CSSModernFile}, cssFiles...)
+				modernPageCSS = append(append([]string{}, cssFiles...), r.CSSModernFile)
 			}
 			devBootstrap := ""
 			if b.DevMode {
