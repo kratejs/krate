@@ -116,9 +116,18 @@ type Bundler struct {
 	// tsOpts are the tsconfig options used when stripping TypeScript.
 	tsOpts tsstrip.Options
 
+	// dev selects development export conditions.
+	dev bool
+
 	// twImports controls how `@import "tailwindcss"` is treated in CSS.
 	twImports css.TailwindImportMode
 }
+
+// SetDevMode picks the development or production package.json export
+// conditions used to resolve npm packages.
+func (b *Bundler) SetDevMode(dev bool) { b.dev = dev }
+
+func (b *Bundler) conditions() resolver.Conditions { return resolver.ClientConditions(b.dev) }
 
 // SetTailwindImports configures the handling of Tailwind package imports.
 func (b *Bundler) SetTailwindImports(m css.TailwindImportMode) { b.twImports = m }
@@ -270,7 +279,7 @@ func (b *Bundler) resolveImportForModuleUncached(importer, imp string) string {
 			return resolved
 		}
 	}
-	return resolveImport(importer, imp, b.fileExists)
+	return resolveImport(importer, imp, b.fileExists, b.conditions())
 }
 
 // matchesPathAlias reports whether imp matches a configured tsconfig paths
@@ -298,7 +307,7 @@ func (b *Bundler) unresolvedImportError(mod *Module, imp string) error {
 	if mod.IsExternal || mod.Program == nil {
 		return nil
 	}
-	if strings.Contains(filepath.ToSlash(mod.Path), "/node_modules/") {
+	if resolver.IsCompiledDependency(mod.Path) {
 		return nil
 	}
 	if reactCompatSpecifier(imp) != "" || strings.HasPrefix(imp, "node:") {
@@ -500,7 +509,7 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 		// opaque external module. Its components are mounted at runtime (see the
 		// build's external-component bundling), so a parser gap in a third-party
 		// package must not fail the whole page.
-		if !isEntry && strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
+		if !isEntry && resolver.IsCompiledDependency(abs) {
 			b.order = append(b.order, &Module{Path: path, IsExternal: true})
 			return nil
 		}
@@ -512,7 +521,7 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 // isSourceExt reports whether a path is a JS/TS source file the bundler parses.
 func isSourceExt(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".tsx", ".ts", ".mts", ".jsx", ".js", ".mjs", ".cjs":
+	case ".tsx", ".ts", ".mts", ".cts", ".jsx", ".js", ".mjs", ".cjs":
 		return true
 	}
 	return false
@@ -795,25 +804,28 @@ func memoizedExists(path string) bool {
 
 func ResolveImport(importer, imp string) string {
 	if !resolverCacheEnabled {
-		return resolveImport(importer, imp, resolver.Exists)
+		return resolveImport(importer, imp, resolver.Exists, nil)
 	}
 	key := filepath.Dir(importer) + "\x00" + imp
 	if v, ok := resolveMemo.importResult(key); ok {
 		return v
 	}
-	v := resolveImport(importer, imp, memoizedExists)
+	v := resolveImport(importer, imp, memoizedExists, nil)
 	resolveMemo.putImport(key, v)
 	return v
 }
 
 // resolveImport resolves an import path to an absolute file path. exists is the
 // filesystem probe (memoized by the caller's build cache).
-func resolveImport(importer, imp string, exists func(string) bool) string {
+func resolveImport(importer, imp string, exists func(string) bool, conds resolver.Conditions) string {
 	dir := filepath.Dir(importer)
 
 	if strings.HasPrefix(imp, ".") || strings.HasPrefix(imp, "..") {
 		resolved := filepath.Clean(filepath.Join(dir, imp))
 
+		if ts := tsSourceForJSSpecifier(resolved, exists); ts != "" {
+			return ts
+		}
 		if exists(resolved) {
 			if resolver.StatPath(resolved).IsDir {
 				for _, index := range []string{"index.tsx", "index.ts", "index.mts", "index.jsx", "index.js", "index.mjs", "index.cjs", "index.md", "index.mdx"} {
@@ -841,7 +853,40 @@ func resolveImport(importer, imp string, exists func(string) bool) string {
 		return resolved
 	}
 
-	return resolver.NodeModule(dir, imp)
+	if conds == nil {
+		conds = resolver.ClientConditions(false)
+	}
+	if strings.HasPrefix(imp, "#") {
+		return resolver.PackageImport(dir, imp, conds)
+	}
+	return resolver.NodeModuleWith(dir, imp, conds)
+}
+
+// tsSourceForJSSpecifier maps a TypeScript ESM import written with a JS
+// extension (./util.js, ./x.mjs) to the TS source beside it, as tsc does under
+// moduleResolution node16/nodenext/bundler. Returns "" when path has no such
+// sibling.
+func tsSourceForJSSpecifier(path string, exists func(string) bool) string {
+	var alts []string
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".js":
+		alts = []string{".ts", ".tsx"}
+	case ".jsx":
+		alts = []string{".tsx"}
+	case ".mjs":
+		alts = []string{".mts"}
+	case ".cjs":
+		alts = []string{".cts"}
+	default:
+		return ""
+	}
+	stem := strings.TrimSuffix(path, filepath.Ext(path))
+	for _, ext := range alts {
+		if exists(stem + ext) {
+			return stem + ext
+		}
+	}
+	return ""
 }
 
 // resolvePathAlias tries to resolve an import using TypeScript path aliases.
@@ -865,6 +910,9 @@ func resolvePathAlias(imp string, aliases []pathAlias, tsBaseDir string, exists 
 					}
 					targetPath = filepath.Clean(targetPath)
 
+					if ts := tsSourceForJSSpecifier(targetPath, exists); ts != "" {
+						return ts
+					}
 					if exists(targetPath) {
 						if resolver.StatPath(targetPath).IsDir {
 							for _, index := range []string{"index.tsx", "index.ts", "index.jsx", "index.js"} {

@@ -7,6 +7,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/annotator"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 )
 
 // mergeModuleConstants builds a module-constant map for the IR builder from the
@@ -91,6 +92,5 @@ func mergeModuleConstants(entry *ast.Program, extra []annotator.ModuleSource) (m
 // must not leak into the page hydration scope. Workspace @krate packages are
 // Krate source and remain eligible.
 func isExternalModulePath(p string) bool {
-	norm := "/" + strings.TrimPrefix(filepath.ToSlash(p), "./")
-	return strings.Contains(norm, "/node_modules/") && !strings.Contains(norm, "/node_modules/@krate/")
+	return resolver.IsCompiledDependency("/" + strings.TrimPrefix(filepath.ToSlash(p), "./"))
 }

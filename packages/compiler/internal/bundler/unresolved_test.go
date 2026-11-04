@@ -129,3 +129,52 @@ func TestScaffoldTemplateAliasResolves(t *testing.T) {
 		}
 	}
 }
+
+func TestTSExtensionSpecifiersResolveToTSSources(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"src/pages/index.tsx": "import {h} from \"../util.js\";\nimport {m} from \"../m.mjs\";\nimport C from \"../c.jsx\";\nexport default function P(){ return <p>{h()}{m}<C/></p> }\n",
+		"src/util.ts":         "export const h = () => 'h'\n",
+		"src/m.mts":           "export const m = 'm'\n",
+		"src/c.tsx":           "export default function C(){ return <i/> }\n",
+	})
+	b := New(root)
+	bundle, err := b.Bundle(filepath.Join(root, "src/pages/index.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, m := range bundle.Modules {
+		got = append(got, filepath.Base(m.Path))
+	}
+	for _, want := range []string{"util.ts", "m.mts", "c.tsx"} {
+		found := false
+		for _, g := range got {
+			found = found || g == want
+		}
+		if !found {
+			t.Errorf("%s not bundled; modules = %v", want, got)
+		}
+	}
+}
+
+func TestPackageImportsSpecifierBundles(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"package.json":        `{"imports":{"#util":"./src/util.ts"}}`,
+		"src/pages/index.tsx": "import {u} from \"#util\";\nexport default function P(){ return <p>{u}</p> }\n",
+		"src/util.ts":         "export const u = 'u'\n",
+	})
+	b := New(root)
+	bundle, err := b.Bundle(filepath.Join(root, "src/pages/index.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, m := range bundle.Modules {
+		found = found || filepath.Base(m.Path) == "util.ts"
+	}
+	if !found {
+		t.Error("#util not bundled")
+	}
+}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 )
 
 // Helpers
@@ -841,7 +842,7 @@ func (b *builder) exprHasExternalComponent(expr ast.Expr) bool {
 		if imp, ok := b.externalImports[root]; ok && isExternalPackageSpecifier(imp.Source) {
 			if fn, known := b.functions[e.Opening.Name]; known && fn != nil {
 				src := strings.ReplaceAll(b.ann.ComponentSources[fn.Name], "\\", "/")
-				if !strings.Contains(src, "/node_modules/") {
+				if !resolver.IsCompiledDependency(src) {
 					// Resolved to local Krate source (e.g. a path alias).
 					root = ""
 				}

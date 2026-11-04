@@ -1759,6 +1759,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 		bnd.SetActionBasePath(b.Cfg.BaseURLPath())
 	}
 	bnd.SetModuleCache(b.moduleCache)
+	bnd.SetDevMode(b.DevMode)
 	bnd.SetTailwindImports(b.tailwindImportMode())
 	return bnd
 }
