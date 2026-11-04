@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -1225,5 +1226,38 @@ func TestDevPortPrefersDevServerPort(t *testing.T) {
 	cfg.DevServer.Port = 0
 	if cfg.DevPort() != 4000 {
 		t.Fatalf("DevPort fallback = %d, want server.port", cfg.DevPort())
+	}
+}
+
+// The documented Go plugin descriptor is an ES module (export default + import.meta);
+// importing it from krate.config.ts must work and must not warn about the
+// loader-only runtime/binaries/hooks keys.
+func TestGoPluginDescriptorLoadsFromConfig(t *testing.T) {
+	desc, err := filepath.Abs("../../../../examples/plugins/krate-plugin-demo-go/index.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(desc); err != nil {
+		t.Skipf("example plugin not present: %v", err)
+	}
+	root := t.TempDir()
+	cfgSrc := "import demoGoPlugin from " + strconv.Quote(filepath.ToSlash(desc)) + ";\nexport default { plugins: [demoGoPlugin()] };\n"
+	if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(cfgSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("loading config that imports the Go plugin descriptor: %v", err)
+	}
+	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Name != "demo-go" {
+		t.Fatalf("plugins = %+v", cfg.Plugins)
+	}
+	if !strings.HasPrefix(cfg.Plugins[0].Module, "file://") && !strings.HasSuffix(filepath.ToSlash(cfg.Plugins[0].Module), "index.js") {
+		t.Errorf("module not resolved to the descriptor: %q", cfg.Plugins[0].Module)
+	}
+	for _, w := range Warnings {
+		if strings.Contains(w, "plugins.") {
+			t.Errorf("descriptor keys must not warn: %s", w)
+		}
 	}
 }

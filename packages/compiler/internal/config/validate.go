@@ -251,7 +251,9 @@ func UnknownKeyWarnings(raw []byte) []string {
 	// (redirects[].permanant would otherwise be dropped silently).
 	cfgType := reflect.TypeOf(Config{})
 	for k, v := range m {
-		if k == "validate" || k == "$schema" || !knownTopLevelKeys[k] {
+		// Plugin entries are descriptors that carry loader-only keys
+		// (runtime, binaries, hooks), so their item keys are not checked.
+		if k == "validate" || k == "$schema" || k == "plugins" || !knownTopLevelKeys[k] {
 			continue
 		}
 		if ft, ok := fieldTypeByJSONName(cfgType, k); ok {

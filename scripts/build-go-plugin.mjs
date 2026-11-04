@@ -46,7 +46,9 @@ for (const target of targets) {
   // GOOS=windows yields a .exe suffix automatically; keep the rel path as-is.
   execFileSync('go', ['build', '-o', out, '.'], {
     cwd: pluginArg,
-    env: { ...process.env, GOOS: goos, GOARCH: goarch, CGO_ENABLED: '0' },
+    // GOWORK=off: the plugin is a standalone module; a go.work in a parent
+    // directory (created by builds of the examples project) would hijack it.
+    env: { ...process.env, GOOS: goos, GOARCH: goarch, CGO_ENABLED: '0', GOWORK: 'off' },
     stdio: 'inherit',
   });
 }

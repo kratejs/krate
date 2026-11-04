@@ -1,6 +1,6 @@
 // krate-plugin-demo-go - a community plugin written in Go.
 // This file is the plugin's npm-style descriptor. When Krate loads the plugin it
-// bundles this module and runs the factory once to discover the plugin's
+// bundles this ES module and runs the default-exported factory once to discover the plugin's
 // runtime and per-platform binaries (the manifest is static - no Node builtins).
 //   - runtime:   'go' routes this plugin through the Go subprocess host.
 //   - binaries:  a map from GOOS-GOARCH to the plugin binary shipped in this
@@ -11,14 +11,14 @@
 // To wire into krate.config.ts:
 //	import demoGoPlugin from 'krate-plugin-demo-go';
 //	export default { plugins: [demoGoPlugin()] };
-module.exports = function() {
+export default function demoGoPlugin() {
   return {
     name: "demo-go",
     order: 10,
     // Points Krate at this manifest module itself so relative binary paths can
-    // be resolved against the package root. In ESM contexts import.meta.url is
-    // a file:// URL; the compiler converts it to a filesystem path.
-    module: (typeof import.meta !== "undefined" && import.meta.url) ? import.meta.url : "",
+    // be resolved against the package root. import.meta.url is a file:// URL;
+    // the compiler converts it to a filesystem path.
+    module: import.meta.url,
     runtime: "go",
     hooks: { BeforeBuild: null, AfterParse: null, AfterRender: null, ServeRequest: null, ServeResponse: null },
     binaries: {
@@ -29,4 +29,4 @@ module.exports = function() {
       "linux-arm64": "bin/krate-plugin-demo-go-linux-arm64",
     },
   };
-};
+}
