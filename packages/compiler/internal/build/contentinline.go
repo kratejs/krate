@@ -797,13 +797,24 @@ func (b *Builder) warnShippedCollections(page string, prog *ast.Program, js stri
 	if len(b.contentCollections) == 0 || js == "" {
 		return
 	}
+	// An inlined entry is an object literal starting `slug: ..., path: ...`;
+	// a path that only appears on its own (an edit link) is not the collection.
+	compact := stripSpace(js)
 	var shipped []string
 	drafts := 0
 	for name, entries := range b.contentCollections {
 		hit := false
 		for _, e := range entries {
-			if e.Path != "" && strings.Contains(js, e.Path) {
-				hit = true
+			if e.Path == "" {
+				continue
+			}
+			for _, q := range []string{`"`, `'`, "`"} {
+				if strings.Contains(compact, stripSpace("slug:"+q+e.Slug+q+",path:"+q+e.Path+q)) {
+					hit = true
+					break
+				}
+			}
+			if hit {
 				break
 			}
 		}
@@ -837,4 +848,15 @@ func (b *Builder) warnShippedCollections(page string, prog *ast.Program, js stri
 	d.Code = diag.CodeCollectionShipped
 	d.Severity = diag.SeverityWarning
 	fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n      hint: %s\n", cYellow, cReset, d.Error(), d.Hint)
+}
+
+// stripSpace removes ASCII whitespace.
+func stripSpace(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\t', '\n', '\r':
+			return -1
+		}
+		return r
+	}, s)
 }
