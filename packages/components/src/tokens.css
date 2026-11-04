@@ -103,13 +103,21 @@
   --krate-overlay: rgba(9, 9, 11, 0.4);
 }
 
+/* Reduced motion: every component class (and its ::before/::after parts) loses
+   its transitions and animations. Animations run once for 0.01ms so end states
+   (dialog scale-in, skeleton shimmer) resolve to the element's base style. */
 @media (prefers-reduced-motion: reduce) {
-  .krate-button,
-  .krate-tabs-trigger,
-  .krate-switch,
-  .krate-switch-thumb,
-  .krate-accordion-trigger-icon,
-  .krate-collapsible-trigger-icon {
-    transition: none !important;
+  [class*="krate-"],
+  [class*="krate-"]::before,
+  [class*="krate-"]::after {
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+  }
+  .krate-progress::-webkit-progress-value {
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
   }
 }
