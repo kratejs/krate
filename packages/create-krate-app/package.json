@@ -33,7 +33,8 @@
     "templates"
   ],
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

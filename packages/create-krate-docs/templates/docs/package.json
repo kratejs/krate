@@ -6,12 +6,16 @@
   "scripts": {
     "dev": "krate dev",
     "build": "krate build",
-    "serve": "krate serve"
+    "serve": "krate serve",
+    "typecheck": "krate types && tsc --noEmit"
   },
   "dependencies": {
     "@krate/base-docs-theme": "__KRATE_DIST_TAG__",
     "@krate/core": "__KRATE_DIST_TAG__",
     "@krate/runtime": "__KRATE_DIST_TAG__",
     "@krate/components": "__KRATE_DIST_TAG__"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
   }
 }

@@ -4,8 +4,14 @@ node_modules/
 # Build output
 dist/
 
-# Krate cache
+# Krate cache and generated type bridges
 .krate/
+src/krate-env.d.ts
+src/krate-content.d.ts
+
+# Local environment overrides (may hold secrets)
+.env.local
+.env.*.local
 
 # Logs
 *.log

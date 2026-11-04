@@ -35,8 +35,8 @@ The mode depends on the command:
 `NODE_ENV` or `KRATE_ENV` overrides the default mode.
 
 Files named `.env.local` and `.env.*.local` (your local, machine-specific
-overrides) are covered by the repo's `.gitignore` so secrets are not
-committed. Keep non-secret defaults in committed `.env` files.
+overrides) are listed in the `.gitignore` that `create-krate-app` generates so
+secrets are not committed; add them to the `.gitignore` of an existing project. Keep non-secret defaults in committed `.env` files.
 
 ## File syntax
 
