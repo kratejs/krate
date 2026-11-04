@@ -572,6 +572,9 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 		}
 		if decl.Init != nil && c.isReactiveFactory(decl.Init) {
 			nameArrayPatternHoles(decl)
+			if f := c.frame(); f != nil && f.kind == frameHook && len(decl.Names) >= 1 && strings.HasPrefix(decl.Names[0], "__krate_hole") {
+				f.forceTriggers = append(f.forceTriggers, decl.Names[0])
+			}
 		}
 		if decl.Init != nil {
 			c.noteFnName(decl.Name, decl.Init)

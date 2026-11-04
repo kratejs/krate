@@ -139,7 +139,10 @@ func TestModuleStateIsSharedAndHelpersBundled(t *testing.T) {
 	}
 }
 
-func TestUnbundledImportIsDiagnosed(t *testing.T) {
+// A module-level array destructuring (`export const [total] = pair`) is
+// bundled into the page script: the initializer runs once under a synthetic
+// name and the binding reads its member.
+func TestDestructuredModuleConstIsBundled(t *testing.T) {
 	root := t.TempDir()
 	writeFileRel(t, root, "src/lib/counter.ts", `const pair = [5, 6];
 export const [total] = pair;`)
@@ -159,7 +162,37 @@ export const [total] = pair;`)
 	if err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
-	if !strings.Contains(out, "KR8302") || !strings.Contains(out, "`total` imported from") {
+	if strings.Contains(out, "KR8302") {
+		t.Errorf("destructured module const must be bundled, not reported:\n%s", out)
+	}
+	js := readHydrationJS(t, cfg.OutDir)
+	if !strings.Contains(js, "var total=") || !strings.Contains(js, "var pair=") {
+		t.Errorf("destructured module const and its source must be declared:\n%s", js)
+	}
+}
+
+// A binding the bundler cannot copy into the page script (a class here) is
+// still reported by KR8302.
+func TestUnbundledImportIsDiagnosed(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "src/lib/counter.ts", `export class tally { static n = 5; }`)
+	writeFileRel(t, root, "src/pages/index.tsx", `
+		import { useState } from 'react';
+		import { tally } from '../lib/counter';
+		export default function Page() {
+			const [n, setN] = useState(0);
+			return <button onClick={() => setN(tally.n + n)}>{n}</button>;
+		}
+	`)
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.Minify = false
+	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	if !strings.Contains(out, "KR8302") || !strings.Contains(out, "`tally` imported from") {
 		t.Errorf("expected a KR8302 warning for the unbundled import:\n%s", out)
 	}
 }

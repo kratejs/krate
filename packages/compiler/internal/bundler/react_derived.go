@@ -768,8 +768,23 @@ func (c *reactCtx) rewriteHookReturn(s *ast.ReturnStmt, sc *scope) {
 	}
 	r0 := c.reads
 	s.Value = c.rewriteExpr(s.Value, sc)
-	if c.reads > r0 && c.derivableInit(s.Value) {
-		s.Value = derivedCall(s.Value)
+	var triggers []string
+	if f := c.frame(); f != nil {
+		triggers = f.forceTriggers
+	}
+	if (c.reads > r0 || len(triggers) > 0) && c.derivableInit(s.Value) {
+		call := derivedCall(s.Value)
+		if len(triggers) > 0 {
+			// A hook that bumps a state it never reads (`const [, force] =
+			// useState(0)`) tells React to re-render its caller: the result
+			// is recomputed when that state changes.
+			reads := &ast.ArrayExpr{Position: s.Position}
+			for _, name := range triggers {
+				reads.Elements = append(reads.Elements, &ast.CallExpr{Position: s.Position, Callee: &ast.Identifier{Position: s.Position, Name: name}})
+			}
+			call.Args = append(call.Args, &ast.ArrowFn{Position: s.Position, Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: reads}}})
+		}
+		s.Value = call
 	}
 }
 

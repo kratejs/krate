@@ -2310,6 +2310,8 @@ type listParamSubstituter struct {
 	elem  ast.Expr
 	// keepSpread leaves JSX spread attributes (`{...rest}`) untouched.
 	keepSpread bool
+	// tagTo renames a JSX tag named param to this identifier.
+	tagTo string
 }
 
 func (s *listParamSubstituter) sub(expr ast.Expr) ast.Expr {
@@ -2543,6 +2545,15 @@ func substituteListParamJSX(el *ast.JSXElement, s *listParamSubstituter) *ast.JS
 		return el
 	}
 	opening := &ast.JSXOpening{Name: el.Opening.Name, SelfClosing: el.Opening.SelfClosing}
+	closing := el.Closing
+	if s.tagTo != "" && el.Opening.Name == s.param {
+		opening.Name = s.tagTo
+		if closing != nil {
+			c := *closing
+			c.Name = s.tagTo
+			closing = &c
+		}
+	}
 	for _, attr := range el.Opening.Attributes {
 		if attr == nil || attr.Value == nil || (attr.Spread && s.keepSpread) {
 			opening.Attributes = append(opening.Attributes, attr)
@@ -2554,7 +2565,7 @@ func substituteListParamJSX(el *ast.JSXElement, s *listParamSubstituter) *ast.JS
 		Position: el.Position,
 		Opening:  opening,
 		Children: subJSXChildrenList(s, el.Children),
-		Closing:  el.Closing,
+		Closing:  closing,
 	}
 }
 

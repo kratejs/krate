@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"hash/fnv"
 	"sort"
 	"strconv"
 	"strings"
@@ -52,10 +53,63 @@ func collectModuleConstInits(prog *ast.Program) map[string]ast.Expr {
 		for _, decl := range vs.Decls {
 			if decl.Name != "" && decl.Init != nil {
 				out[decl.Name] = decl.Init
+				continue
 			}
+			addDestructuredModuleConst(out, decl)
 		}
 	}
 	return out
+}
+
+// addDestructuredModuleConst records the bindings of a module-level
+// destructuring (`const { api, useStore } = create(...)`). The initializer
+// runs once under a synthetic name and each binding reads its member, so a
+// store factory is not instantiated per binding.
+func addDestructuredModuleConst(out map[string]ast.Expr, decl *ast.VarDecl) {
+	if decl == nil || !decl.IsDestructuring || decl.Init == nil || decl.Target == nil {
+		return
+	}
+	type member struct {
+		name string
+		key  ast.Expr
+	}
+	var members []member
+	switch t := decl.Target.(type) {
+	case *ast.ObjectExpr:
+		for _, p := range t.Properties {
+			if p == nil || p.Spread || p.Computed || p.Method || p.Key == "" {
+				return
+			}
+			name, isID := p.Value.(*ast.Identifier)
+			if !isID {
+				return
+			}
+			members = append(members, member{name: name.Name, key: &ast.Literal{Kind: ast.StringLit, Value: p.Key}})
+		}
+	case *ast.ArrayExpr:
+		for i, el := range t.Elements {
+			if el == nil {
+				continue
+			}
+			name, isID := el.(*ast.Identifier)
+			if !isID {
+				return
+			}
+			members = append(members, member{name: name.Name, key: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(i)}})
+		}
+	default:
+		return
+	}
+	if len(members) == 0 {
+		return
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(GenerateExprJS(decl.Init, nil)))
+	tmp := "__kmod_" + strconv.FormatUint(uint64(h.Sum32()), 16)
+	out[tmp] = decl.Init
+	for _, m := range members {
+		out[m.name] = &ast.MemberExpr{Object: &ast.Identifier{Name: tmp}, Property: m.key, Computed: true}
+	}
 }
 
 // evalValue folds expr against the current component scope (signals, props,
