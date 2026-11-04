@@ -570,3 +570,30 @@ func TestStylesheetLegacyOmitsAnchor(t *testing.T) {
 		t.Errorf("legacy must omit anchor positioning:\n%s", legacy)
 	}
 }
+
+func TestTransitionCSSHonorsReducedMotion(t *testing.T) {
+	s := &Scope{Kind: KindChoice, Index: 0, Initial: "a", Options: []string{"a", "b"}, Transition: true}
+	s.Class = s.base()
+	css := s.transitionCSS()
+	guard := "@media (prefers-reduced-motion:no-preference){"
+	if !strings.HasPrefix(css, guard) || !strings.HasSuffix(css, "}\n") {
+		t.Fatalf("transition CSS must be wrapped in %q:\n%s", guard, css)
+	}
+	inner := css[len(guard):]
+	for _, want := range []string{"transition:opacity .18s ease", "@starting-style{"} {
+		if !strings.Contains(inner, want) {
+			t.Errorf("missing %q inside the guard:\n%s", want, css)
+		}
+	}
+	if strings.Count(css, "@media") != 1 {
+		t.Errorf("expected a single media block:\n%s", css)
+	}
+	if strings.Count(css, "{") != strings.Count(css, "}") {
+		t.Errorf("unbalanced braces:\n%s", css)
+	}
+
+	s.Transition = false
+	if got := s.transitionCSS(); got != "" {
+		t.Errorf("no transition requested, got %q", got)
+	}
+}

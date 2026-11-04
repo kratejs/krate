@@ -118,7 +118,7 @@ const [stack, { push, pop, clear }] = createCSSStack(['root']);
 | `name` | `string` | submit the selected value under this `name` |
 | `disabled` | `T[]` | options whose controller input is disabled |
 | `anchor` | side | anchor-position panels (`bottom-start`, `top`, `right`, ...) |
-| `transition` | `boolean` | fade/slide panels on open |
+| `transition` | `boolean` | fade/slide panels on open (skipped under `prefers-reduced-motion: reduce`) |
 | `aria` | `false`, or an object with `role`/`panelRole`/`container-role` | raw ARIA overrides |
 | `vars` | `{ '--prop': { option: 'value' } }` | per-option custom properties |
 

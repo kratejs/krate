@@ -200,6 +200,7 @@ func anchorDecl(side string) string {
 
 // transitionCSS fades/slides a panel when it becomes rendered (open). Close is
 // not animated (the wrapper is display:none); this is a progressive enhancement.
+// Everything is emitted under prefers-reduced-motion:no-preference.
 func (s *Scope) transitionCSS() string {
 	if !s.Transition {
 		return ""
@@ -213,7 +214,11 @@ func (s *Scope) transitionCSS() string {
 		b.WriteString(child + "{transition:opacity .18s ease,translate .18s ease}\n")
 		b.WriteString("@starting-style{" + child + "{opacity:0;translate:0 -.25rem}}\n")
 	}
-	return b.String()
+	if b.Len() == 0 {
+		return ""
+	}
+	// Reduced-motion users get the panel without the entry animation.
+	return "@media (prefers-reduced-motion:no-preference){\n" + b.String() + "}\n"
 }
 
 // disabledCSS dims triggers whose option's controller input is disabled.
