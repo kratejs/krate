@@ -56,3 +56,14 @@ func endOfLine(s string, from int) int {
 	}
 	return len(s)
 }
+
+// ConfigThrownError is returned when the config module itself throws while it
+// is evaluated (a missing environment variable, a failed assertion, a rejected
+// promise). It carries the thrown message and stack verbatim.
+type ConfigThrownError struct {
+	Text string
+}
+
+func (e *ConfigThrownError) Error() string {
+	return "evaluating config: " + e.Text
+}

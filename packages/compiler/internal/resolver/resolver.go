@@ -24,6 +24,8 @@ type PkgJSON struct {
 	Main    string          `json:"main"`
 	Module  string          `json:"module"`
 	Exports json.RawMessage `json:"exports"`
+	Imports json.RawMessage `json:"imports"`
+	Krate   json.RawMessage `json:"krate"`
 }
 
 // Stat is a cached filesystem probe. Within a build a path's existence, kind,
@@ -99,6 +101,12 @@ var indexFiles = []string{
 // looking for node_modules/pkg. It returns the absolute path to the package
 // entry file, or "" if the package (or an entry file) cannot be found.
 func NodeModule(startDir, spec string) string {
+	return NodeModuleWith(startDir, spec, defaultConditions)
+}
+
+// NodeModuleWith is NodeModule with an explicit condition set for the
+// package's `exports` map.
+func NodeModuleWith(startDir, spec string, conds Conditions) string {
 	pkg, sub := splitSpec(spec)
 	if pkg == "" {
 		return ""
@@ -114,7 +122,15 @@ func NodeModule(startDir, spec string) string {
 	for {
 		base := filepath.Join(dir, "node_modules", pkg)
 		if s := StatPath(base); s.Exists && s.IsDir {
-			return resolvePackage(base, sub)
+			// A workspace package linked into node_modules (pnpm/npm workspaces)
+			// is project source: resolve through the link so its files are not
+			// mistaken for a compiled dependency.
+			if !strings.HasPrefix(pkg, "@krate/") {
+				if real, err := filepath.EvalSymlinks(base); err == nil && real != base && !strings.Contains(filepath.ToSlash(real), "/node_modules/") {
+					base = real
+				}
+			}
+			return resolvePackage(base, sub, conds)
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -123,6 +139,58 @@ func NodeModule(startDir, spec string) string {
 		dir = parent
 	}
 	return ""
+}
+
+// PackageImport resolves a package.json `imports` specifier ("#util") for a
+// file in importerDir against the nearest enclosing package.json. Returns ""
+// when there is no such mapping or its target is missing.
+func PackageImport(importerDir, spec string, conds Conditions) string {
+	for dir := importerDir; ; dir = filepath.Dir(dir) {
+		if Exists(filepath.Join(dir, "package.json")) {
+			pkg := readPkgJSON(dir)
+			if len(pkg.Imports) == 0 {
+				return ""
+			}
+			keys, m := orderedObject(pkg.Imports)
+			best, mid := "", ""
+			if _, ok := m[spec]; ok && !strings.Contains(spec, "*") {
+				best = spec
+			} else {
+				for _, pattern := range keys {
+					star := strings.IndexByte(pattern, '*')
+					if star < 0 || !strings.HasPrefix(spec, pattern[:star]) || !strings.HasSuffix(spec, pattern[star+1:]) || len(spec) < len(pattern)-1 {
+						continue
+					}
+					if best == "" || patternKeyLess(pattern, best) {
+						best, mid = pattern, spec[star:len(spec)-(len(pattern)-star-1)]
+					}
+				}
+			}
+			if best == "" {
+				return ""
+			}
+			for _, cs := range []Conditions{conds, conds.withRequire()} {
+				target, ok := pickTarget(m[best], cs)
+				if !ok || target == "" {
+					continue
+				}
+				target = strings.ReplaceAll(target, "*", mid)
+				if strings.HasPrefix(target, ".") {
+					if f := resolveFile(filepath.Join(dir, target)); f != "" {
+						return f
+					}
+					continue
+				}
+				if f := NodeModuleWith(dir, target, conds); f != "" {
+					return f
+				}
+			}
+			return ""
+		}
+		if filepath.Dir(dir) == dir {
+			return ""
+		}
+	}
 }
 
 // NodeModuleDir resolves a bare npm specifier that may include a subpath,
@@ -134,12 +202,12 @@ func NodeModuleDir(startDir, spec string) string {
 
 // resolvePackage resolves a package directory (optionally with a subpath) to a
 // concrete file, honoring `exports` first, then `module`/`main`, then index.
-func resolvePackage(pkgDir, sub string) string {
+func resolvePackage(pkgDir, sub string, conds Conditions) string {
 	pkg := readPkgJSON(pkgDir)
 
 	// A package's `exports` field is authoritative when present.
 	if len(pkg.Exports) > 0 {
-		if file := resolveExports(pkgDir, pkg.Exports, sub); file != "" {
+		if file := resolveExports(pkgDir, pkg.Exports, sub, conds); file != "" {
 			return file
 		}
 	}
@@ -164,116 +232,202 @@ func resolvePackage(pkgDir, sub string) string {
 	return resolveFile(pkgDir)
 }
 
-// resolveExports resolves a subpath against a package's `exports` field,
-// handling the common shapes: a top-level string target, a conditions object,
-// a subpath map (`"./x": ...`), and wildcard patterns (`"./*": "./dist/*.mjs"`).
-func resolveExports(pkgDir string, exports json.RawMessage, sub string) string {
-	// Top-level string or conditions object: only the root import is described.
-	if !isJSONObject(exports) {
-		if sub != "" {
-			return ""
-		}
-		return pickExportTarget(pkgDir, exports)
-	}
+// Conditions is the active set of package.json condition names, in addition to
+// the always-active "default". Order in the set is irrelevant: Node picks by
+// the key order of the package's own conditions object.
+type Conditions []string
 
-	var m map[string]json.RawMessage
-	if json.Unmarshal(exports, &m) != nil {
-		return ""
-	}
-
-	// A subpath map has keys starting with ".". A bare conditions map (no ".")
-	// describes the root import only.
-	_, hasRoot := m["."]
-	if !hasRoot && !hasSubpathKeys(m) {
-		if sub != "" {
-			return ""
-		}
-		return pickExportTarget(pkgDir, exports)
-	}
-
-	key := "."
-	if sub != "" {
-		key = "./" + sub
-	}
-
-	// Exact subpath match.
-	if raw, ok := m[key]; ok {
-		if target := pickExportTarget(pkgDir, raw); target != "" {
-			return target
-		}
-	}
-
-	// Wildcard patterns: "./foo/*": ...
-	for pattern, raw := range m {
-		star := strings.IndexByte(pattern, '*')
-		if star < 0 {
-			continue
-		}
-		prefix := pattern[:star]
-		suffix := pattern[star+1:]
-		if !strings.HasPrefix(key, prefix) || !strings.HasSuffix(key, suffix) {
-			continue
-		}
-		mid := key[len(prefix) : len(key)-len(suffix)]
-		target := pickExportTargetString(pkgDir, raw)
-		if target == "" {
-			continue
-		}
-		target = strings.ReplaceAll(target, "*", mid)
-		if file := resolveFile(filepath.Join(pkgDir, target)); file != "" {
-			return file
-		}
-	}
-	return ""
+// ClientConditions are the conditions for code that runs in the browser.
+func ClientConditions(dev bool) Conditions {
+	return Conditions{"browser", "import", "module", modeCondition(dev)}
 }
 
-// isJSONObject reports whether raw JSON denotes an object.
-func isJSONObject(raw json.RawMessage) bool {
-	trimmed := strings.TrimSpace(string(raw))
-	return strings.HasPrefix(trimmed, "{")
+// ServerConditions are the conditions for code that runs under Node-like
+// runtimes (build-time evaluation, SSR).
+func ServerConditions(dev bool) Conditions {
+	return Conditions{"node", "import", "module", modeCondition(dev)}
 }
 
-// hasSubpathKeys reports whether an exports map has any "./x" subpath keys.
-func hasSubpathKeys(m map[string]json.RawMessage) bool {
-	for k := range m {
-		if strings.HasPrefix(k, "./") {
+func modeCondition(dev bool) string {
+	if dev {
+		return "development"
+	}
+	return "production"
+}
+
+// defaultConditions backs NodeModule for callers that do not pick a side.
+var defaultConditions = ClientConditions(false)
+
+func (c Conditions) has(name string) bool {
+	if name == "default" {
+		return true
+	}
+	for _, n := range c {
+		if n == name {
 			return true
 		}
 	}
 	return false
 }
 
-// pickExportTarget returns the file a raw export value resolves to (a string
-// target or a conditions object).
-func pickExportTarget(pkgDir string, raw json.RawMessage) string {
-	target := pickExportTargetString(pkgDir, raw)
-	if target == "" {
+// withRequire widens the set with "require" for the CJS-only fallback pass.
+func (c Conditions) withRequire() Conditions {
+	return append(append(Conditions(nil), c...), "require")
+}
+
+// resolveExports resolves a subpath against a package's `exports` field,
+// following Node's package exports algorithm: exact subpath keys first, then
+// the best wildcard pattern, with conditions matched in the object's key order.
+func resolveExports(pkgDir string, exports json.RawMessage, sub string, conds Conditions) string {
+	if file := resolveExportsWith(pkgDir, exports, sub, conds); file != "" {
+		return file
+	}
+	// CJS-only packages describe themselves with "require" alone; fall back to
+	// them last, as earlier releases did.
+	return resolveExportsWith(pkgDir, exports, sub, conds.withRequire())
+}
+
+func resolveExportsWith(pkgDir string, exports json.RawMessage, sub string, conds Conditions) string {
+	keys, m := orderedObject(exports)
+	subpathMap := false
+	for _, k := range keys {
+		if strings.HasPrefix(k, ".") {
+			subpathMap = true
+			break
+		}
+	}
+	if !subpathMap {
+		// A string, array or bare conditions object describes the root only.
+		if sub != "" {
+			return ""
+		}
+		return targetFile(pkgDir, exports, "", conds)
+	}
+
+	key := "."
+	if sub != "" {
+		key = "./" + sub
+	}
+	if raw, ok := m[key]; ok && !strings.Contains(key, "*") {
+		return targetFile(pkgDir, raw, "", conds)
+	}
+
+	bestKey, bestMid := "", ""
+	for _, pattern := range keys {
+		star := strings.IndexByte(pattern, '*')
+		if star < 0 {
+			continue
+		}
+		prefix, suffix := pattern[:star], pattern[star+1:]
+		if len(key) < len(pattern)-1 || !strings.HasPrefix(key, prefix) || !strings.HasSuffix(key, suffix) {
+			continue
+		}
+		if bestKey == "" || patternKeyLess(pattern, bestKey) {
+			bestKey = pattern
+			bestMid = key[len(prefix) : len(key)-len(suffix)]
+		}
+	}
+	if bestKey == "" {
 		return ""
+	}
+	return targetFile(pkgDir, m[bestKey], bestMid, conds)
+}
+
+// patternKeyLess reports whether pattern a is a better match than b under
+// Node's PATTERN_KEY_COMPARE: the longer literal prefix wins, then the longer key.
+func patternKeyLess(a, b string) bool {
+	ai, bi := strings.IndexByte(a, '*'), strings.IndexByte(b, '*')
+	if ai != bi {
+		return ai > bi
+	}
+	if len(a) != len(b) {
+		return len(a) > len(b)
+	}
+	return a < b
+}
+
+// orderedObject returns the keys of a JSON object in source order plus the raw
+// values. A non-object yields no keys.
+func orderedObject(raw json.RawMessage) ([]string, map[string]json.RawMessage) {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	tok, err := dec.Token()
+	if err != nil || tok != json.Delim('{') {
+		return nil, nil
+	}
+	var keys []string
+	vals := map[string]json.RawMessage{}
+	for dec.More() {
+		kt, err := dec.Token()
+		if err != nil {
+			return nil, nil
+		}
+		k, _ := kt.(string)
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return nil, nil
+		}
+		if _, dup := vals[k]; !dup {
+			keys = append(keys, k)
+		}
+		vals[k] = v
+	}
+	return keys, vals
+}
+
+// targetFile resolves an exports/imports target to a file under pkgDir. mid
+// replaces "*" in the target for pattern keys.
+func targetFile(pkgDir string, raw json.RawMessage, mid string, conds Conditions) string {
+	target, ok := pickTarget(raw, conds)
+	if !ok || target == "" {
+		return ""
+	}
+	if mid != "" || strings.Contains(target, "*") {
+		target = strings.ReplaceAll(target, "*", mid)
 	}
 	return resolveFile(filepath.Join(pkgDir, target))
 }
 
-// pickExportTargetString returns the raw target string a conditions object (or
-// plain string) selects, preferring ESM-friendly conditions.
-func pickExportTargetString(pkgDir string, raw json.RawMessage) string {
-	var s string
-	if json.Unmarshal(raw, &s) == nil && s != "" {
-		return s
-	}
-	var cond map[string]json.RawMessage
-	if json.Unmarshal(raw, &cond) != nil {
-		return ""
-	}
-	// Preference order: import (ESM) is what the compiler consumes; then
-	// default; then require.
-	for _, key := range []string{"import", "default", "module", "browser", "require"} {
-		if nested, ok := cond[key]; ok {
-			if target := pickExportTargetString(pkgDir, nested); target != "" {
-				return target
+// pickTarget walks a target value: a string is the answer, an array is tried in
+// order, and an object is scanned in key order for the first active condition.
+// An explicit null blocks the path (ok is false, and callers stop).
+func pickTarget(raw json.RawMessage, conds Conditions) (string, bool) {
+	t := strings.TrimSpace(string(raw))
+	switch {
+	case t == "" || t == "null":
+		return "", false
+	case strings.HasPrefix(t, "\""):
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			return "", false
+		}
+		return s, true
+	case strings.HasPrefix(t, "["):
+		var arr []json.RawMessage
+		if json.Unmarshal(raw, &arr) != nil {
+			return "", false
+		}
+		for _, el := range arr {
+			if s, ok := pickTarget(el, conds); ok {
+				return s, true
+			}
+		}
+		return "", false
+	case strings.HasPrefix(t, "{"):
+		keys, m := orderedObject(raw)
+		for _, k := range keys {
+			if !conds.has(k) {
+				continue
+			}
+			v := strings.TrimSpace(string(m[k]))
+			if v == "null" {
+				return "", false
+			}
+			if s, ok := pickTarget(m[k], conds); ok {
+				return s, true
 			}
 		}
 	}
-	return ""
+	return "", false
 }
 
 // resolveFile resolves a candidate path to an existing file, trying the path as
@@ -359,5 +513,38 @@ func splitSpec(spec string) (pkg, sub string) {
 // (import/default), then `module`, then `main`, then a top-level index.* - or ""
 // if none exist. Kept for callers that already have a package directory.
 func PackageDir(pkgDir string) string {
-	return resolvePackage(pkgDir, "")
+	return resolvePackage(pkgDir, "", defaultConditions)
+}
+
+// IsCompiledDependency reports whether path is a file of a compiled third-party
+// package under node_modules (as opposed to project or Krate source). Krate
+// scope packages, packages declaring a "krate" field, and packages that ship
+// TypeScript source are Krate source and return false.
+func IsCompiledDependency(path string) bool {
+	norm := filepath.ToSlash(path)
+	i := strings.LastIndex(norm, "/node_modules/")
+	if i < 0 {
+		return false
+	}
+	rest := norm[i+len("/node_modules/"):]
+	if strings.HasPrefix(rest, "@krate/") {
+		return false
+	}
+	parts := strings.Split(rest, "/")
+	n := 1
+	if strings.HasPrefix(rest, "@") {
+		n = 2
+	}
+	if len(parts) <= n {
+		return true
+	}
+	pkgDir := filepath.FromSlash(norm[:i+len("/node_modules/")] + strings.Join(parts[:n], "/"))
+	if len(readPkgJSON(pkgDir).Krate) > 0 {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(norm)) {
+	case ".tsx", ".ts", ".mts", ".cts":
+		return strings.HasSuffix(norm, ".d.ts")
+	}
+	return true
 }

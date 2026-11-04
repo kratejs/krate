@@ -171,6 +171,9 @@ type ExprSlot struct {
 	ExprSource string
 	Initial    string
 	Signals    []string
+	// File and Pos locate the expression in its source (hydration source maps).
+	File string
+	Pos  ast.Pos
 }
 
 func (s *ExprSlot) slotNode()     {}
@@ -335,6 +338,10 @@ type HandlerDecl struct {
 	// non-bubbling events), bypassing the delegated bubble-phase listener.
 	Capture bool
 	Direct  bool
+	// File and Pos locate the handler expression in its original source, for
+	// hydration source maps.
+	File string
+	Pos  ast.Pos
 }
 
 // RefBinding - ref={someVar} on an element
@@ -648,6 +655,9 @@ type SlotBinding struct {
 	Signals []string // signal names this binding depends on
 	// List is set for list slots bound through the keyed list runtime.
 	List *ListBinding
+	// File and Pos locate the bound expression in its source, when known.
+	File string
+	Pos  ast.Pos
 }
 
 // Helpers

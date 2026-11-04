@@ -95,3 +95,25 @@ The SSR renderer uses `devServer.port + 10` (override with `ssr.rendererPort`).
 
 Run `krate types` to regenerate `.krate/types/*.d.ts`, then `npx tsc --noEmit`.
 Editors cache declarations - reload the TS server if types look stale.
+
+## Imports
+
+- **`cannot resolve import`** - the build stops at the import statement when a
+  relative path, a `tsconfig` path alias or an npm package cannot be found.
+  Check the spelling and extension (`./util.js` finds `util.ts`), the
+  `baseUrl` and `paths` in `tsconfig.json`, or run `pnpm add <package>`.
+- **JSON, `?raw` and `?url`** - `import data from "./data.json"` (default,
+  named or namespace imports), `import text from "./note.txt?raw"` (the file as
+  a string) and `import logo from "./logo.svg?url"` (the hashed asset URL) are
+  inlined as constants, so they render in static HTML and are available to
+  client code. Invalid JSON is reported with its file, line and column.
+- **npm packages in client code** - functions imported from an npm package
+  (`import { format } from "date-fns"`) and called from handlers, effects or
+  expressions are bundled for the browser into the page script, tree-shaken and
+  resolved with the `browser` (and `development` or `production`) export
+  conditions. Node built-ins (`node:fs`) cannot run in the browser and are
+  reported where they are imported.
+- **`package.json` `imports`** (`#util`) resolve like Node. Workspace packages
+  that ship Krate TSX source are compiled as source.
+- **Source maps** - with `--sourcemap` the hydration script maps event
+  handlers and expression bindings back to their position in the `.tsx` file.

@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 )
 
 // SSR expression helpers
@@ -38,13 +40,23 @@ func collectModuleConstInits(prog *ast.Program) map[string]ast.Expr {
 	}
 	for _, stmt := range prog.Body {
 		var vs *ast.VarStmt
+		var cls *ast.ClassDecl
 		switch s := stmt.(type) {
 		case *ast.VarStmt:
 			vs = s
+		case *ast.ClassDecl:
+			cls = s
 		case *ast.ExportStmt:
-			if v, ok := s.Declaration.(*ast.VarStmt); ok {
-				vs = v
+			switch d := s.Declaration.(type) {
+			case *ast.VarStmt:
+				vs = d
+			case *ast.ClassDecl:
+				cls = d
 			}
+		}
+		if cls != nil && cls.Name != "" && !isComponentClass(cls) {
+			// A plain class is a module value like any other binding.
+			out[cls.Name] = &ast.ClassExpr{Position: cls.Position, Class: cls}
 		}
 		if vs == nil {
 			continue
@@ -56,6 +68,20 @@ func collectModuleConstInits(prog *ast.Program) map[string]ast.Expr {
 		}
 	}
 	return out
+}
+
+// isComponentClass reports a class that extends a React component base; those
+// are lowered to function components, not emitted as values.
+func isComponentClass(c *ast.ClassDecl) bool {
+	switch sc := c.SuperClass.(type) {
+	case *ast.Identifier:
+		return sc.Name == "Component" || sc.Name == "PureComponent"
+	case *ast.MemberExpr:
+		if p, ok := sc.Property.(*ast.Identifier); ok {
+			return p.Name == "Component" || p.Name == "PureComponent"
+		}
+	}
+	return false
 }
 
 // evalValue folds expr against the current component scope (signals, props,
@@ -79,13 +105,20 @@ func (b *builder) evalValue(expr ast.Expr) jsvalue.Value {
 func (b *builder) constInterp(props valueMap) *jsvalue.Interp {
 	in := newConstInterp(b.sigMap(), props)
 	ident, call := in.Hooks.Ident, in.Hooks.Call
+	callables := map[string]jsvalue.Value{}
 	in.Hooks.Ident = func(name string) (jsvalue.Value, bool) {
 		if u, ok := b.actionURLs[name]; ok {
 			if _, shadowed := props[name]; !shadowed {
 				return jsvalue.String(u), true
 			}
 		}
-		return ident(name)
+		if v, ok := ident(name); ok {
+			return v, true
+		}
+		if _, shadowed := props[name]; !shadowed {
+			return b.moduleCallable(in, name, callables)
+		}
+		return jsvalue.Value{}, false
 	}
 	in.Hooks.Call = func(c *ast.CallExpr) (jsvalue.Value, bool) {
 		if id, ok := c.Callee.(*ast.Identifier); ok {
@@ -1189,4 +1222,36 @@ func (b *builder) readsLiveProp(expr ast.Expr) bool {
 	}
 	walk(expr)
 	return found
+}
+
+// moduleCallable exposes a module-level helper (a function declaration or a
+// const arrow, local or imported) to the constant interpreter, so a call such
+// as {shout("hi")} folds into the server HTML. The interpreter only evaluates
+// what it can model: a helper that reads the clock, the DOM or any other
+// unknown value stays unknown and renders on the client as before.
+func (b *builder) moduleCallable(in *jsvalue.Interp, name string, cache map[string]jsvalue.Value) (jsvalue.Value, bool) {
+	if v, ok := cache[name]; ok {
+		return v, true
+	}
+	var params []*ast.Param
+	var body []ast.Stmt
+	switch fn := b.functions[name]; {
+	case fn != nil && fn.Name == name && !fn.Async && !fn.Generator && !fnReturnsJSX(fn.Body):
+		if resolver.IsCompiledDependency(filepath.ToSlash(b.ann.ComponentSources[name])) {
+			return jsvalue.Value{}, false
+		}
+		params, body = fn.Params, fn.Body
+	default:
+		arrow, ok := b.moduleConstInits[name].(*ast.ArrowFn)
+		if !ok || arrow.Async || arrow.Generator || fnReturnsJSX(arrow.Body) {
+			return jsvalue.Value{}, false
+		}
+		params, body = arrow.Params, arrow.Body
+	}
+	saved := in.Scope
+	in.Scope = jsvalue.NewScope(nil)
+	v := in.Closure(name, params, body)
+	in.Scope = saved
+	cache[name] = v
+	return v, true
 }

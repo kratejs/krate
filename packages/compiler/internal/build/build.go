@@ -1816,6 +1816,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 	bnd.SetTSOptions(tsstrip.Options{
 		ExperimentalDecorators:  b.Cfg.TSCompilerOptions.ExperimentalDecorators,
 		UseDefineForClassFields: b.Cfg.TSCompilerOptions.UseDefineForClassFields,
+		Define:                  b.publicEnvDefines(),
 	})
 	if b.contentMods != nil {
 		bnd.SetVirtualModules(b.contentMods)
@@ -1825,6 +1826,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 		bnd.SetActionBasePath(b.Cfg.BaseURLPath())
 	}
 	bnd.SetModuleCache(b.moduleCache)
+	bnd.SetDevMode(b.DevMode)
 	bnd.SetTailwindImports(b.tailwindImportMode())
 	return bnd
 }
@@ -1989,7 +1991,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			// so its slot ids are namespaced like a layout's.
 			pageOpts.IDPrefix = b.layoutIDPrefix(page)
 		}
-		pageOpts.ModuleConsts, pageOpts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
+		applyModuleBindings(&pageOpts, entryModule.Path, entryModule.Program, extraPrograms)
 		pageOpts.ExternalImports = externalByLocal
 		pageOpts.LocalComponentImports = localImports
 		pageOpts.GoComponents = pageGoComponents
@@ -2240,6 +2242,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
 	if needsHydrate {
+		emitResult.TrackSources = b.Cfg.Sourcemap
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
 		dceJS = append(dceJS, rawJS)
 		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)
@@ -2247,11 +2250,31 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			rawJS = strings.TrimSpace(rawJS + "\n" + islandJS)
 		}
 		if rawJS != "" {
+			rawJS = neutralizeClientEnv(rawJS)
+			// npm functions called by client code are bundled into the script.
+			vendor := collectVendorImports(bundle.Modules)
+			for _, rb := range findRouteStack(page, b.Cfg.PagesDir) {
+				if lv, ok := layoutVendorImports.Load(rb.Path); ok {
+					vendor = append(vendor, lv.([]vendorImport)...)
+				}
+			}
+			var verr error
+			if rawJS, verr = b.withVendorImports(rawJS, vendor, tree.ExternalComponents); verr != nil {
+				return nil, "", verr
+			}
 			hasJS = true
+			// Source markers become a map from the generated code back to the
+			// original .tsx positions.
+			inputMap := ""
+			if len(emitResult.SrcMarks) > 0 {
+				rawJS, inputMap = buildHydrationMap(rawJS, emitResult.SrcMarks, pageDir)
+			}
 			finalJS := rawJS
 			mapJSON := ""
 			if b.shouldMinifyJS() {
-				if b.Cfg.Sourcemap {
+				if b.Cfg.Sourcemap && inputMap != "" {
+					finalJS, mapJSON = minifyJSWithInputMap(rawJS, inputMap)
+				} else if b.Cfg.Sourcemap {
 					// Minify with esbuild's own map so the minified output can be
 					// decoded back to the generated code. The hydration bundle is
 					// compiler-generated (no literal user TSX), so `sources` labels
@@ -2272,6 +2295,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 			if b.Cfg.Sourcemap {
 				sm := mapJSON
+				if sm == "" && inputMap != "" {
+					sm = inputMap
+				}
 				if sm == "" {
 					// Unminified output: emit a valid line-level map with the
 					// generated code embedded so devtools shows a coherent file.
@@ -2704,6 +2730,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if err != nil {
 		return nil, "", nil, false, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
 	}
+	layoutVendorImports.Store(layoutPath, collectVendorImports(layoutBundle.Modules))
 	printModuleWarnings(os.Stderr, layoutBundle.Modules)
 
 	b.modCSS.store(layoutPath, layoutBundle.CSSModules)
@@ -2753,7 +2780,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	}
 	opts := b.irBuildOptions()
 	opts.IDPrefix = b.layoutIDPrefix(layoutPath)
-	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(layoutModule.Program, extraLayoutPrograms)
+	applyModuleBindings(&opts, layoutModule.Path, layoutModule.Program, extraLayoutPrograms)
 	opts.GoComponents = b.collectGoComponents(layoutBundle, b.Root)
 	opts.ActionURLs = layoutBundle.ActionImports
 	tree := irtree.BuildWithOptions(layoutModule.Program, ann, opts)

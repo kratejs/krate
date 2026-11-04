@@ -100,3 +100,44 @@ func TestNodeModuleIndexFallback(t *testing.T) {
 		t.Errorf("NodeModule index fallback = %q, want %q", got, want)
 	}
 }
+
+func TestWorkspaceSymlinkResolvesToRealSourcePath(t *testing.T) {
+	root := t.TempDir()
+	ws := filepath.Join(root, "packages", "ui")
+	writeFile(t, filepath.Join(ws, "package.json"), `{"name":"ui","exports":{".":"./src/index.tsx"}}`)
+	writeFile(t, filepath.Join(ws, "src", "index.tsx"), "export const x = 1")
+	app := filepath.Join(root, "apps", "web")
+	if err := os.MkdirAll(filepath.Join(app, "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(ws, filepath.Join(app, "node_modules", "ui")); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	got := NodeModule(app, "ui")
+	want, _ := filepath.EvalSymlinks(filepath.Join(ws, "src", "index.tsx"))
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	if IsCompiledDependency(got) {
+		t.Error("workspace source must not count as a compiled dependency")
+	}
+}
+
+func TestIsCompiledDependency(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "node_modules", "react-lib", "package.json"), `{"main":"dist/i.js"}`)
+	writeFile(t, filepath.Join(root, "node_modules", "krate-lib", "package.json"), `{"krate":{"entry":"x"}}`)
+	writeFile(t, filepath.Join(root, "node_modules", "ts-lib", "package.json"), `{}`)
+	cases := map[string]bool{
+		filepath.Join(root, "node_modules", "react-lib", "dist", "i.js"):    true,
+		filepath.Join(root, "node_modules", "react-lib", "dist", "i.tsx"):   false,
+		filepath.Join(root, "node_modules", "krate-lib", "dist", "i.js"):    false,
+		filepath.Join(root, "node_modules", "@krate", "components", "a.js"): false,
+		filepath.Join(root, "src", "a.tsx"):                                 false,
+	}
+	for p, want := range cases {
+		if got := IsCompiledDependency(p); got != want {
+			t.Errorf("%s = %v want %v", p, got, want)
+		}
+	}
+}

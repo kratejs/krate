@@ -271,3 +271,15 @@ func (b *builder) expansionSignature(attrs map[string]ast.Expr, el *ast.JSXEleme
 	}
 	return sb.String()
 }
+
+// sourceLoc returns the file that holds the function being walked, for source
+// maps.
+func (b *builder) sourceLoc() string {
+	if b.ann == nil {
+		return ""
+	}
+	if file := b.ann.ComponentSources[b.srcFnName()]; file != "" {
+		return file
+	}
+	return b.ann.SourceFile
+}

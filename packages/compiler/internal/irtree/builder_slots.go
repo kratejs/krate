@@ -16,6 +16,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
@@ -51,7 +52,7 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 		// into the page hydration bundle: they are not valid Krate codegen input
 		// (e.g. hyphenated object keys), and they would duplicate the island.
 		// Workspace @krate packages are Krate source and stay eligible.
-		if src := filepath.ToSlash(b.ann.ComponentSources[name]); strings.Contains(src, "/node_modules/") && !strings.Contains(src, "/node_modules/@krate/") {
+		if src := filepath.ToSlash(b.ann.ComponentSources[name]); resolver.IsCompiledDependency(src) {
 			continue
 		}
 		candidates[name] = fn
@@ -1607,6 +1608,8 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 		ExprSource: exprSource,
 		Signals:    signals,
 		Initial:    initial,
+		File:       b.sourceLoc(),
+		Pos:        expr.Pos(),
 	}
 }
 
@@ -2650,6 +2653,10 @@ func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *Handler
 	body = b.bindLoopVars(body)
 	signals := b.collectSignalReads(attr.Value)
 
+	pos := attr.Position
+	if attr.Value != nil && attr.Value.Pos().Line > 0 {
+		pos = attr.Value.Pos()
+	}
 	return &HandlerDecl{
 		ElementSlotID: SlotID(elementID),
 		Prop:          attr.Name,
@@ -2658,6 +2665,8 @@ func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *Handler
 		Signals:       signals,
 		Capture:       capture,
 		Direct:        direct,
+		File:          b.sourceLoc(),
+		Pos:           pos,
 	}
 }
 
@@ -3920,7 +3929,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 	// fall through to the bare-import island path.
 	if fn, known := b.functions[name]; known && fn != nil {
 		src := b.ann.ComponentSources[fn.Name]
-		if !strings.Contains(strings.ReplaceAll(src, "\\", "/"), "/node_modules/") {
+		if !resolver.IsCompiledDependency(strings.ReplaceAll(src, "\\", "/")) {
 			return nil, false
 		}
 	}
@@ -3986,7 +3995,7 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 			continue
 		}
 		src := strings.ReplaceAll(b.ann.ComponentSources[fn.Name], "\\", "/")
-		if src != "" && strings.Contains(src, "/node_modules/") {
+		if src != "" && resolver.IsCompiledDependency(src) {
 			continue
 		}
 		pos := el.Position

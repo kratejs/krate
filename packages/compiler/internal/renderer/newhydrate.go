@@ -312,6 +312,10 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 				b.WriteString(sb.ExprJS)
 				b.WriteString(");\n")
 			case "expr":
+				if result.TrackSources && sb.Pos.Line > 0 && sb.File != "" {
+					b.WriteString(SrcMarkPrefix + itoa(len(result.SrcMarks)) + "*/")
+					result.SrcMarks = append(result.SrcMarks, SrcMark{File: sb.File, Line: sb.Pos.Line, Col: sb.Pos.Col})
+				}
 				b.WriteString("kbindContent(")
 				b.WriteString(strconv.Quote(string(sb.SlotID)))
 				b.WriteString(",()=>")
@@ -335,6 +339,10 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 				if h.Capture {
 					prop += "Capture"
 				}
+			}
+			if result.TrackSources && h.Pos.Line > 0 && h.File != "" {
+				b.WriteString(SrcMarkPrefix + itoa(len(result.SrcMarks)) + "*/")
+				result.SrcMarks = append(result.SrcMarks, SrcMark{File: h.File, Line: h.Pos.Line, Col: h.Pos.Col})
 			}
 			b.WriteString("kbindHandler(")
 			b.WriteString(strconv.Quote(string(h.ElementSlotID)))

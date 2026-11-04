@@ -17,15 +17,31 @@ import (
 )
 
 // EmitResult consolidates all page output from the emitter.
+// SrcMark locates a piece of generated hydration code in its original source.
+type SrcMark struct {
+	File string
+	Line int
+	Col  int
+}
+
+// SrcMarkPrefix opens the marker comment (/*@k:N*/) that GenerateNewHydrationJS
+// leaves before mapped statements when EmitResult.TrackSources is set. N
+// indexes EmitResult.SrcMarks; the build strips the markers and turns them
+// into a source map.
+const SrcMarkPrefix = "/*@k:"
+
 type EmitResult struct {
-	HTML       string
-	HeadHTML   string
-	ScriptHTML string
-	StyleHTML  string
-	Signatures []irtree.ComponentSignature
-	HasLinks   bool
-	UsedFuncs  map[string]bool
-	UsedCSS    map[string]bool
+	// TrackSources makes GenerateNewHydrationJS leave source markers.
+	TrackSources bool
+	SrcMarks     []SrcMark
+	HTML         string
+	HeadHTML     string
+	ScriptHTML   string
+	StyleHTML    string
+	Signatures   []irtree.ComponentSignature
+	HasLinks     bool
+	UsedFuncs    map[string]bool
+	UsedCSS      map[string]bool
 	// ListComponents are the client component functions referenced by dynamic
 	// list slots (e.g. <Toast> in a .map() body). They're emitted into the
 	// hydration scope so the runtime can re-render lists via h(Component, ...).
@@ -1145,6 +1161,8 @@ func collectSlotBindings(children []irtree.SlotNode) []irtree.SlotBinding {
 				Type:    "expr",
 				ExprJS:  s.ExprSource,
 				Signals: s.Signals,
+				File:    s.File,
+				Pos:     s.Pos,
 			})
 		case *irtree.ConditionalSlot:
 			bindings = append(bindings, irtree.SlotBinding{
