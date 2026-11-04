@@ -547,7 +547,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		emitResult = &renderer.EmitResult{}
 	} else {
 		opts := b.irBuildOptions()
-		opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
+		applyModuleBindings(&opts, entryModule.Path, entryModule.Program, extraPrograms)
 		opts.ActionURLs = bundle.ActionImports
 		tree = irtree.BuildWithOptions(entryModule.Program, ann, opts)
 		if len(tree.Errors) > 0 {

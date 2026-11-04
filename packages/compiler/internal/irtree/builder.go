@@ -69,6 +69,13 @@ type BuildOptions struct {
 	// component expressions. Entry-module values take precedence on collision.
 	ModuleConsts     map[string]string
 	ModuleConstInits map[string]ast.Expr
+	// ModuleDeclOnly names imported `var X;` bindings that only a module
+	// statement initializes (a lowered TS namespace). ModuleNamespaces maps a
+	// namespace-import binding (`import * as ns`) to its exports (name ->
+	// binding). ModuleStmts are the imported modules' top-level statements.
+	ModuleDeclOnly   map[string]bool
+	ModuleNamespaces map[string]map[string]string
+	ModuleStmts      []ast.Stmt
 	// ActionURLs maps an imported server-action binding to its POST endpoint.
 	// The binding is a client proxy at runtime, but SSR renders the URL so
 	// forms work without JavaScript.
@@ -130,8 +137,10 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		slotCounts:       make(map[string]int),
 		moduleConsts:     typedModuleConsts(moduleConstInits, moduleConsts),
 		moduleConstInits: moduleConstInits,
-		moduleStmts:      collectModuleStmts(prog),
+		moduleStmts:      append(append([]ast.Stmt(nil), opts.ModuleStmts...), collectModuleStmts(prog)...),
 		moduleLets:       collectModuleLets(prog),
+		moduleDeclOnly:   mergeDeclOnly(prog, opts),
+		moduleNS:         opts.ModuleNamespaces,
 		entryProg:        prog,
 		cvaFactories:     mergeCVAFactories(ann.CVAFactories, prog),
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
@@ -147,6 +156,10 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		evalJS:           opts.EvalJS,
 		transformIcon:    opts.TransformIcon,
 		transformImage:   opts.TransformImage,
+	}
+	for name := range b.moduleDeclOnly {
+		// Declared here, assigned by a module statement: shared mutable state.
+		b.moduleLets[name] = true
 	}
 	if entryFn := ann.Functions[ann.EntryPoint]; entryFn != nil {
 		b.expansion = []expansionFrame{{name: entryFn.Name}}
@@ -355,7 +368,10 @@ type builder struct {
 	moduleConstInits map[string]ast.Expr // module-level const initializers (name -> expr)
 	moduleStmts      []ast.Stmt          // entry module top-level statements that run code
 	moduleLets       map[string]bool     // module-level let/var bindings (mutable, so shared)
-	sharedModuleVars []string            // hoisted declarations for moduleLets and their dependencies
+	moduleDeclOnly   map[string]bool     // `var X;` bindings initialized by module statements
+	moduleNS         map[string]map[string]string
+	nsUse            map[string]map[string]bool
+	sharedModuleVars []string // hoisted declarations for moduleLets and their dependencies
 	sharedSeen       map[string]bool
 	entryProg        *ast.Program             // the entry module (imports for KR8302)
 	cvaFactories     map[string]*CVASpec      // module-level `const X = cva(...)` factories
@@ -612,4 +628,49 @@ func mergedModuleConstants(prog *ast.Program, opts BuildOptions) (map[string]str
 		}
 	}
 	return consts, inits
+}
+
+// CollectModuleDeclOnly returns the module-level `var X;` bindings declared
+// without an initializer (a lowered TS namespace or merged declaration).
+func CollectModuleDeclOnly(prog *ast.Program) map[string]bool {
+	out := map[string]bool{}
+	if prog == nil {
+		return out
+	}
+	for _, stmt := range prog.Body {
+		var vs *ast.VarStmt
+		switch s := stmt.(type) {
+		case *ast.VarStmt:
+			vs = s
+		case *ast.ExportStmt:
+			if v, ok := s.Declaration.(*ast.VarStmt); ok {
+				vs = v
+			}
+		}
+		if vs == nil || vs.Kind == ast.VarConst {
+			continue
+		}
+		for _, d := range vs.Decls {
+			if d != nil && d.Name != "" && d.Init == nil && !d.IsDestructuring {
+				out[d.Name] = true
+			}
+		}
+	}
+	return out
+}
+
+// CollectModuleStmts returns the top-level statements of prog that run code
+// when the module loads.
+func CollectModuleStmts(prog *ast.Program) []ast.Stmt { return collectModuleStmts(prog) }
+
+func mergeDeclOnly(prog *ast.Program, opts BuildOptions) map[string]bool {
+	out := CollectModuleDeclOnly(prog)
+	for k := range opts.ModuleDeclOnly {
+		out[k] = true
+	}
+	// A name with an initializer in the entry module is not declaration-only.
+	for k := range collectModuleConstInits(prog) {
+		delete(out, k)
+	}
+	return out
 }

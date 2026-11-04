@@ -21,7 +21,7 @@ import (
 // statements of the entry module that touch those constants (`window.__store
 // = store`) run once the same way.
 func (b *builder) referencedModuleConstVars(node *ComponentNode) []string {
-	if node == nil || len(b.moduleConstInits) == 0 {
+	if node == nil || (len(b.moduleConstInits) == 0 && len(b.moduleDeclOnly) == 0 && len(b.moduleNS) == 0) {
 		return nil
 	}
 
@@ -46,11 +46,15 @@ func (b *builder) referencedModuleConstVars(node *ComponentNode) []string {
 	sources = append(sources, listBindingSources(node.Children)...)
 	sources = append(sources, listBindingSources(node.CallSiteSlots)...)
 
+	// Members read through namespace imports (`ns.add`) decide which exports
+	// the namespace object carries.
+	b.nsUse = b.namespaceMembers(sources)
+
 	used := make(map[string]bool)
 	var queue []string
 	mark := func(src string) {
 		scanJSIdents(src, func(name string) {
-			if _, ok := b.moduleConstInits[name]; ok && !used[name] {
+			if b.isModuleBinding(name) && !used[name] {
 				used[name] = true
 				queue = append(queue, name)
 			}
@@ -73,9 +77,7 @@ func (b *builder) referencedModuleConstVars(node *ComponentNode) []string {
 		for len(queue) > 0 {
 			name := queue[0]
 			queue = queue[1:]
-			if init := b.moduleConstInits[name]; init != nil {
-				mark(generateExprJS(init, nil))
-			}
+			mark(b.moduleInitJS(name))
 		}
 		grew := false
 		for i, js := range stmtJS {
@@ -125,12 +127,15 @@ func (b *builder) referencedModuleConstVars(node *ComponentNode) []string {
 // moduleVarDecl returns the `var NAME=<init>` declaration of a module binding,
 // created once per page through __krateModule when the initializer runs code.
 func (b *builder) moduleVarDecl(name string) string {
+	if b.moduleDeclOnly[name] && b.moduleConstInits[name] == nil {
+		return "var " + name
+	}
 	init := b.moduleConstInits[name]
-	js := generateExprJS(init, nil)
+	js := b.moduleInitJS(name)
 	if js == "" {
 		return ""
 	}
-	if runsCode(init) {
+	if init != nil && runsCode(init) {
 		js = "__krateModule(" + strconv.Quote(name) + ",function(){return " + js + ";})"
 	}
 	return "var " + name + "=" + js
@@ -147,7 +152,7 @@ func (b *builder) hoistSharedModuleVars(used map[string]bool) {
 			return
 		}
 		closure[name] = true
-		for ref := range jsIdentRefs(generateExprJS(b.moduleConstInits[name], nil)) {
+		for ref := range jsIdentRefs(b.moduleInitJS(name)) {
 			add(ref)
 		}
 	}
@@ -218,9 +223,9 @@ func (b *builder) moduleConstOrder(used map[string]bool) []string {
 			return
 		}
 		state[name] = 1
-		if init := b.moduleConstInits[name]; init != nil {
+		if js := b.moduleInitJS(name); js != "" {
 			deps := make([]string, 0)
-			for ref := range jsIdentRefs(generateExprJS(init, nil)) {
+			for ref := range jsIdentRefs(js) {
 				if used[ref] && ref != name {
 					deps = append(deps, ref)
 				}
@@ -402,4 +407,103 @@ func localCodeModule(source string) bool {
 		return true
 	}
 	return false
+}
+
+// isModuleBinding reports whether name is a module-level value the hydration
+// scope can declare.
+func (b *builder) isModuleBinding(name string) bool {
+	if _, ok := b.moduleConstInits[name]; ok {
+		return true
+	}
+	return b.moduleDeclOnly[name] || b.moduleNS[name] != nil
+}
+
+// moduleInitJS renders the initializer of a module binding as JS: its
+// expression, or for a namespace import an object of the members read from it.
+func (b *builder) moduleInitJS(name string) string {
+	if init := b.moduleConstInits[name]; init != nil {
+		return generateExprJS(init, nil)
+	}
+	exports := b.moduleNS[name]
+	if exports == nil {
+		return ""
+	}
+	use := b.nsUse[name]
+	keys := make([]string, 0, len(exports))
+	for k := range exports {
+		if use == nil || use[k] {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, strconv.Quote(k)+":"+exports[k])
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
+// namespaceMembers finds, per namespace-import binding, the members read as
+// `ns.member`. A nil entry means the whole namespace is needed (bracket access
+// or the bare identifier used as a value).
+func (b *builder) namespaceMembers(sources []string) map[string]map[string]bool {
+	if len(b.moduleNS) == 0 {
+		return nil
+	}
+	out := map[string]map[string]bool{}
+	whole := map[string]bool{}
+	for _, src := range sources {
+		for ns := range b.moduleNS {
+			if !strings.Contains(src, ns) || strings.HasPrefix(src, "var "+ns+"=") {
+				continue
+			}
+			for i := 0; ; {
+				j := strings.Index(src[i:], ns)
+				if j < 0 {
+					break
+				}
+				start, end := i+j, i+j+len(ns)
+				i = end
+				if start > 0 && isIdentByte(src[start-1]) || start > 0 && src[start-1] == '.' {
+					continue
+				}
+				if end < len(src) && isIdentByte(src[end]) {
+					continue
+				}
+				if end < len(src) && src[end] == '.' {
+					k := end + 1
+					m := k
+					for m < len(src) && isIdentByte(src[m]) {
+						m++
+					}
+					if m > k {
+						if out[ns] == nil {
+							out[ns] = map[string]bool{}
+						}
+						out[ns][src[k:m]] = true
+						continue
+					}
+				}
+				whole[ns] = true
+			}
+		}
+	}
+	for ns := range whole {
+		delete(out, ns)
+	}
+	for ns := range b.moduleNS {
+		if out[ns] == nil && !whole[ns] {
+			out[ns] = map[string]bool{}
+		}
+	}
+	for ns := range whole {
+		out[ns] = nil
+	}
+	return out
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || c == '$' ||
+		(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9')
 }

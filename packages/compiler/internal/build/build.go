@@ -1919,7 +1919,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			// so its slot ids are namespaced like a layout's.
 			pageOpts.IDPrefix = b.layoutIDPrefix(page)
 		}
-		pageOpts.ModuleConsts, pageOpts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
+		applyModuleBindings(&pageOpts, entryModule.Path, entryModule.Program, extraPrograms)
 		pageOpts.ExternalImports = externalByLocal
 		pageOpts.LocalComponentImports = localImports
 		pageOpts.GoComponents = pageGoComponents
@@ -2673,7 +2673,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	}
 	opts := b.irBuildOptions()
 	opts.IDPrefix = b.layoutIDPrefix(layoutPath)
-	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(layoutModule.Program, extraLayoutPrograms)
+	applyModuleBindings(&opts, layoutModule.Path, layoutModule.Program, extraLayoutPrograms)
 	opts.GoComponents = b.collectGoComponents(layoutBundle, b.Root)
 	opts.ActionURLs = layoutBundle.ActionImports
 	tree := irtree.BuildWithOptions(layoutModule.Program, ann, opts)

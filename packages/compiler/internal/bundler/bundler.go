@@ -1,12 +1,10 @@
 package bundler
 
 import (
-	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +50,9 @@ func moduleNeedsRewrite(src string, imports []string) bool {
 			return true
 		}
 		if strings.HasSuffix(imp, ".module.css") {
+			return true
+		}
+		if isDataImport(imp) {
 			return true
 		}
 	}
@@ -392,6 +393,12 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	// "styles is not defined").
 	b.rewriteCSSModuleRefs()
 
+	// Inline JSON, ?raw and ?url imports as module constants so SSR text and
+	// hydration code both see the values.
+	if err := b.rewriteDataImports(); err != nil {
+		return nil, err
+	}
+
 	// Rewrite asset imports (`import logo from './logo.png'`) to their hashed
 	// site URL literal so both SSR HTML and hydration JS use the copied file.
 	b.rewriteAssetImportRefs()
@@ -431,6 +438,12 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 // rule can resolve is a build error located at the import statement.
 func (b *Bundler) resolveModuleImports(mod *Module) error {
 	for _, imp := range mod.Imports {
+		if base, query, ok := splitImportQuery(imp); ok {
+			if err := b.resolveQueryImport(mod, imp, base, query); err != nil {
+				return err
+			}
+			continue
+		}
 		resolved := b.resolveImportForModule(mod.Path, imp)
 		if resolved == "" {
 			if err := b.unresolvedImportError(mod, imp); err != nil {
@@ -544,7 +557,10 @@ func (b *Bundler) resolveJSONModule(path, abs string, mtime time.Time, size int6
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", path, err)
 	}
-	prog := jsonToAST(data)
+	prog, jerr := jsonToAST(data)
+	if jerr != nil {
+		return jsonDiagnostic(path, data, jerr)
+	}
 	mod := &Module{Path: path, Program: prog, IsEntry: isEntry}
 	b.collectImports(prog, mod)
 	b.order = append(b.order, mod)
@@ -2124,58 +2140,4 @@ func hashBytes(data []byte) string {
 		v /= 36
 	}
 	return string(buf[:])
-}
-
-func jsonToAST(data []byte) *ast.Program {
-	var val interface{}
-	if err := json.Unmarshal(data, &val); err != nil {
-		return &ast.Program{}
-	}
-	expr := jsonToExpr(val)
-	return &ast.Program{
-		Body: []ast.Stmt{
-			&ast.ExportStmt{
-				Default:     true,
-				Declaration: &ast.ExprStmt{Expression: expr},
-			},
-		},
-	}
-}
-
-func jsonToExpr(val interface{}) ast.Expr {
-	switch v := val.(type) {
-	case nil:
-		return &ast.Literal{Kind: ast.NullLit, Value: "null"}
-	case bool:
-		s := "false"
-		if v {
-			s = "true"
-		}
-		return &ast.Literal{Kind: ast.BoolLit, Value: s}
-	case float64:
-		return &ast.Literal{Kind: ast.NumberLit, Value: fmt.Sprintf("%v", v)}
-	case string:
-		return &ast.Literal{Kind: ast.StringLit, Value: v}
-	case []interface{}:
-		elems := make([]ast.Expr, len(v))
-		for i, e := range v {
-			elems[i] = jsonToExpr(e)
-		}
-		return &ast.ArrayExpr{Elements: elems}
-	case map[string]interface{}:
-		props := make([]*ast.ObjectProp, 0, len(v))
-		keys := make([]string, 0, len(v))
-		for k := range v {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			props = append(props, &ast.ObjectProp{
-				Key:   k,
-				Value: jsonToExpr(v[k]),
-			})
-		}
-		return &ast.ObjectExpr{Properties: props}
-	}
-	return &ast.Literal{Kind: ast.NullLit, Value: "null"}
 }
