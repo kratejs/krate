@@ -61,21 +61,21 @@ func TestCascadeOrderPseudoAfterBase(t *testing.T) {
 // descendant combinator.
 func TestPeerVariantUsesSiblingCombinator(t *testing.T) {
 	out := gen(t, "peer-checked:block")
-	if !strings.Contains(out, ".peer:checked ~ ") {
+	if !strings.Contains(out, ":where(.peer):checked ~ *") {
 		t.Errorf("peer variant must use the general-sibling combinator:\n%s", out)
 	}
 }
 
 func TestGroupVariantUsesDescendant(t *testing.T) {
 	out := gen(t, "group-hover:flex")
-	if !strings.Contains(out, ".group:hover ") {
+	if !strings.Contains(out, ":is(:where(.group):hover *)") {
 		t.Errorf("group variant must use a descendant combinator:\n%s", out)
 	}
 }
 
 func TestGroupAriaUsesAttributeSelector(t *testing.T) {
 	out := gen(t, "group-aria-checked:block")
-	if !strings.Contains(out, "[aria-checked='true']") {
+	if !strings.Contains(out, `[aria-checked="true"]`) {
 		t.Errorf("group-aria must emit an attribute selector:\n%s", out)
 	}
 	if strings.Contains(out, ":aria-checked") {

@@ -259,11 +259,11 @@ func TestScannerRejectsProse(t *testing.T) {
 
 func TestContainerQueryVariants(t *testing.T) {
 	got := gen(t, "@sm:flex")
-	if !strings.Contains(got, "@media (min-width: 24rem)") {
+	if !strings.Contains(got, "@container (width >= 24rem)") {
 		t.Errorf("@sm container query missing: %s", got)
 	}
 	got = gen(t, "@[400px]:grid")
-	if !strings.Contains(got, "@media (min-width: 400px)") {
+	if !strings.Contains(got, "@container (width >= 400px)") {
 		t.Errorf("@[400px] container query missing: %s", got)
 	}
 }
