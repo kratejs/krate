@@ -79,3 +79,23 @@ func isMixedUnitBreakpoint(c string) bool {
 	}
 	return false
 }
+
+func TestArbitraryBreakpointsSortBeforeNamed(t *testing.T) {
+	g := NewTailwindGenerator()
+	out := g.Generate(map[string]bool{
+		"max-[600px]:p-1": true, "max-sm:p-2": true, "max-md:p-3": true, "max-[700px]:p-4": true,
+		"min-[600px]:p-5": true, "sm:p-6": true, "md:p-7": true, "min-[300px]:p-8": true,
+	})
+	want := []string{
+		`max-\[700px\]`, `max-\[600px\]`, `max-md`, `max-sm`,
+		`min-\[300px\]`, `min-\[600px\]`, `.sm\:p-6`, `.md\:p-7`,
+	}
+	last := -1
+	for _, w := range want {
+		i := strings.Index(out, w)
+		if i < 0 || i < last {
+			t.Fatalf("%s out of order (want %v):\n%s", w, want, out)
+		}
+		last = i
+	}
+}

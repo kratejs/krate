@@ -382,7 +382,7 @@ func staticVariant(name string, theme TailwindTheme) (variant, bool) {
 	if bp, ok := theme.Screens[name]; ok && bp != "" && !strings.Contains(bp, "var(") {
 		return variant{
 			ats:  []string{"@media (min-width: " + bp + ")"},
-			rank: orderRank("#min", dimKey(bp, false)), comp: compAt,
+			rank: orderRank("#min", dimKey(bp, false, true)), comp: compAt,
 		}, true
 	}
 	if name == "dark" {
@@ -521,9 +521,9 @@ func functionalVariant(root, val string, hasVal bool, mod string, hasMod bool, t
 			return variant{}, false
 		}
 		if root == "max" {
-			return variant{ats: []string{"@media (width < " + w + ")"}, rank: orderRank("#max", dimKey(w, true)), comp: compAt}, true
+			return variant{ats: []string{"@media (width < " + w + ")"}, rank: orderRank("#max", dimKey(w, true, !arbitrary)), comp: compAt}, true
 		}
-		return variant{ats: []string{"@media (min-width: " + w + ")"}, rank: orderRank("#min", dimKey(w, false)), comp: compAt}, true
+		return variant{ats: []string{"@media (min-width: " + w + ")"}, rank: orderRank("#min", dimKey(w, false, !arbitrary)), comp: compAt}, true
 	case "@", "@min", "@max":
 		if !hasVal {
 			return variant{}, false
@@ -537,9 +537,9 @@ func functionalVariant(root, val string, hasVal bool, mod string, hasMod bool, t
 			name = mod + " "
 		}
 		if root == "@max" {
-			return variant{ats: []string{"@container " + name + "(width < " + w + ")"}, rank: orderRank("#cmax", dimKey(w, true)), comp: compAt}, true
+			return variant{ats: []string{"@container " + name + "(width < " + w + ")"}, rank: orderRank("#cmax", dimKey(w, true, false)), comp: compAt}, true
 		}
-		return variant{ats: []string{"@container " + name + "(width >= " + w + ")"}, rank: orderRank("#cmin", dimKey(w, false)), comp: compAt}, true
+		return variant{ats: []string{"@container " + name + "(width >= " + w + ")"}, rank: orderRank("#cmin", dimKey(w, false, false)), comp: compAt}, true
 	}
 	if !hasVal || hasMod {
 		return variant{}, false
@@ -665,8 +665,30 @@ var containerScreens = map[string]string{
 	"5xl": "64rem", "6xl": "72rem", "7xl": "80rem",
 }
 
-// dimToPx converts a CSS length to px (rem and em are 16px).
-func dimToPx(s string) (float64, bool) {
+// dimKey is the sort sub-key of a breakpoint value. Like Tailwind it groups by
+// unit (px before rem) and orders numerically within a unit, ascending or
+// descending, so an arbitrary `max-[600px]` lands before the named `max-sm`.
+// named marks theme breakpoints: the built-in px defaults stand for Tailwind's
+// rem defaults. Values that are not plain lengths sort after the rest.
+func dimKey(val string, desc, named bool) string {
+	n, unit, ok := splitDim(val)
+	if !ok {
+		return "1" + val
+	}
+	if named && unit == "px" && defaultScreenPx[n] {
+		n, unit = n/16, "rem"
+	}
+	if desc {
+		n = 1e7 - n
+	}
+	return "0" + unit + "|" + fmt.Sprintf("%016.4f", math.Max(n, 0))
+}
+
+// defaultScreenPx are the px widths of the built-in breakpoints.
+var defaultScreenPx = map[float64]bool{640: true, 768: true, 1024: true, 1280: true, 1536: true}
+
+// splitDim splits a plain CSS length into its number and lowercase unit.
+func splitDim(s string) (float64, string, bool) {
 	s = strings.TrimSpace(s)
 	i := 0
 	for i < len(s) && (s[i] >= '0' && s[i] <= '9' || s[i] == '.' || (i == 0 && (s[i] == '-' || s[i] == '+'))) {
@@ -674,28 +696,15 @@ func dimToPx(s string) (float64, bool) {
 	}
 	n, err := strconv.ParseFloat(s[:i], 64)
 	if err != nil {
-		return 0, false
+		return 0, "", false
 	}
-	switch strings.ToLower(s[i:]) {
-	case "", "px":
-		return n, true
-	case "rem", "em":
-		return n * 16, true
+	switch u := strings.ToLower(s[i:]); u {
+	case "":
+		return n, "px", true
+	case "px", "rem", "em":
+		return n, u, true
 	}
-	return 0, false
-}
-
-// dimKey is the sort sub-key of a breakpoint value: numeric in px, ascending
-// or descending. Values that are not plain lengths sort after the rest.
-func dimKey(val string, desc bool) string {
-	px, ok := dimToPx(val)
-	if !ok {
-		return "1" + val
-	}
-	if desc {
-		px = 1e7 - px
-	}
-	return "0" + fmt.Sprintf("%016.4f", math.Max(px, 0))
+	return 0, "", false
 }
 
 // repAmp replaces every "&" in sel with repl. With star set the replacement is
