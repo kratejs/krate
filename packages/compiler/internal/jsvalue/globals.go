@@ -95,6 +95,15 @@ func globalObject(name string) (Value, bool) {
 			}
 			return Func(derivedGetterName, func([]Value) Value { return fn.Call() })
 		}), true
+	case "krateParam":
+		// A custom hook parameter: a derived getter argument yields its value.
+		return Func("krateParam", func(args []Value) Value {
+			v := arg(args, 0)
+			if v.kind == KindFunction && v.fn != nil && v.fn.Name == derivedGetterName {
+				return v.Call()
+			}
+			return v
+		}), true
 	case "krateHook":
 		// A custom hook result normalized to a getter (see krateDerived).
 		return Func("krateHook", func(args []Value) Value {

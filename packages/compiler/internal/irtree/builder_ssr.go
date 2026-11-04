@@ -700,6 +700,10 @@ func (b *builder) propBindingsToLocalProps(fn *ast.FnDecl, attrs map[string]ast.
 func extractParamNames(fn *ast.FnDecl) []string {
 	var names []string
 	for _, p := range fn.Params {
+		// A normalized rest parameter (see normalizePropsFn) is not a prop.
+		if p.IsRest && p.Pattern != "" {
+			continue
+		}
 		switch p.Name {
 		case "{...}":
 			names = append(names, destructuredParamNames(p.Pattern)...)

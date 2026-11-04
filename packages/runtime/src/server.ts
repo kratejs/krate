@@ -53,6 +53,11 @@ export function krateHook<T>(value: T | (() => T)): () => T {
   return () => value as T;
 }
 
+// Reads a custom hook parameter that a call site passed as a derived getter.
+export function krateParam<T>(value: T | (() => T)): T {
+  return typeof value === "function" && derivedGetters.has(value) ? (value as () => T)() : (value as T);
+}
+
 export function onCleanup(_fn: () => void): void {
   // No-op on server
 }

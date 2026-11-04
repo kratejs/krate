@@ -101,6 +101,10 @@ type scope struct {
 	parent  *scope
 	getters map[string]bool
 	shadow  map[string]bool
+	// paramGetters are the parameters of a custom hook: a call site may pass
+	// a live getter for an argument that reads reactive state, so reads of
+	// the parameter unwrap it (krateParam).
+	paramGetters map[string]bool
 }
 
 func newScope(parent *scope) *scope {
@@ -119,6 +123,30 @@ func (s *scope) declareLocal(name string) {
 	if name != "" && !s.getters[name] {
 		s.shadow[name] = true
 	}
+}
+
+// declareParamGetter marks a custom hook parameter whose value may arrive as
+// a live getter (see rewriteHookArgs).
+func (s *scope) declareParamGetter(name string) {
+	if name == "" {
+		return
+	}
+	if s.paramGetters == nil {
+		s.paramGetters = map[string]bool{}
+	}
+	s.paramGetters[name] = true
+}
+
+func (s *scope) isParamGetter(name string) bool {
+	for cur := s; cur != nil; cur = cur.parent {
+		if cur.paramGetters[name] {
+			return true
+		}
+		if cur.getters[name] || cur.shadow[name] {
+			return false
+		}
+	}
+	return false
 }
 
 func (s *scope) isGetter(name string) bool {
@@ -167,7 +195,10 @@ type reactCtx struct {
 	callables   map[*scope]map[string]string
 	// fnNames are bindings known to hold functions (function declarations
 	// and const arrow/function expressions), used for lazy initializers.
-	fnNames     map[string]bool
+	fnNames map[string]bool
+	// localHooks are custom hooks imported from project modules (relative
+	// paths), which are lowered the same way as hooks of this module.
+	localHooks  map[string]bool
 	freshLocals map[*scope]map[string]bool
 	// formStatusSeq numbers lowered useFormStatus() mount refs per module and
 	// formStatusPos records their positions for diagnostics.
@@ -350,6 +381,20 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 				}
 			}
 		default:
+			if strings.HasPrefix(src, ".") {
+				if imp.Default != "" && isCustomHookName(imp.Default) {
+					ctx.markLocalHook(imp.Default)
+				}
+				for _, named := range imp.Named {
+					local := named.Local
+					if local == "" {
+						local = named.Remote
+					}
+					if isCustomHookName(local) {
+						ctx.markLocalHook(local)
+					}
+				}
+			}
 			continue
 		}
 	}
@@ -705,6 +750,13 @@ func (c *reactCtx) rewriteExprCtx(expr ast.Expr, sc *scope, valuePos bool) ast.E
 		}
 		done := c.enterFn(child, e.Params, e.Body)
 		if e.Expression {
+			if c.react && frameKindOf(c.fnName(e)) == frameHook {
+				for _, p := range e.Params {
+					if plainParam(p) {
+						child.declareParamGetter(p.Name)
+					}
+				}
+			}
 			c.rewriteStmts(e.Body, child)
 		} else {
 			c.rewriteFnBody(&e.Body, child, frameKindOf(c.fnName(e)), e.Params)
@@ -763,6 +815,10 @@ func (c *reactCtx) rewriteIdentifier(e *ast.Identifier, sc *scope, valuePos bool
 		if valuePos {
 			return &ast.CallExpr{Position: e.Position, Callee: e}
 		}
+	}
+	if valuePos && sc.isParamGetter(e.Name) {
+		c.reads++
+		return &ast.CallExpr{Position: e.Position, Callee: &ast.Identifier{Position: e.Position, Name: "krateParam"}, Args: []ast.Expr{e}}
 	}
 	return e
 }
@@ -885,6 +941,10 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 		e.Callee = &ast.CallExpr{Position: id.Position, Callee: id}
 	} else {
 		e.Callee = c.rewriteExprCtx(e.Callee, sc, false)
+	}
+	if id, ok := e.Callee.(*ast.Identifier); ok && !isReactAPI && c.isLiveHook(id.Name) {
+		c.rewriteHookArgs(e, sc)
+		return e
 	}
 	for i, arg := range e.Args {
 		e.Args[i] = c.rewriteExpr(arg, sc)
