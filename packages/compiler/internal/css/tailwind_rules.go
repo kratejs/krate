@@ -89,25 +89,18 @@ func DefaultTailwindTheme() TailwindTheme {
 		},
 		Radii: map[string]string{
 			"none": "0",
-			"sm":   "0.125rem",
+			"xs":   "0.125rem",
+			"sm":   "0.25rem",
 			"":     "0.25rem",
 			"md":   "0.375rem",
 			"lg":   "0.5rem",
 			"xl":   "0.75rem",
 			"2xl":  "1rem",
 			"3xl":  "1.5rem",
+			"4xl":  "2rem",
 			"full": "9999px",
 		},
-		Shadows: map[string]string{
-			"sm":    "0 1px 2px 0 rgb(0 0 0 / 0.05)",
-			"":      "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
-			"md":    "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
-			"lg":    "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
-			"xl":    "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
-			"2xl":   "0 25px 50px -12px rgb(0 0 0 / 0.25)",
-			"inner": "inset 0 2px 4px 0 rgb(0 0 0 / 0.05)",
-			"none":  "none",
-		},
+		Shadows: defaultShadows(),
 		BgColors: map[string]string{
 			"transparent": "transparent",
 			"current":     "currentColor",
@@ -291,4 +284,13 @@ func defaultColors() map[string]map[string]string {
 		"pink":    {"50": "#fdf2f8", "100": "#fce7f3", "200": "#fbcfe8", "300": "#f9a8d4", "400": "#f472b6", "500": "#ec4899", "600": "#db2777", "700": "#be185d", "800": "#9d174d", "900": "#831843", "950": "#500724"},
 		"rose":    {"50": "#fff1f2", "100": "#ffe4e6", "200": "#fecdd3", "300": "#fda4af", "400": "#fb7185", "500": "#f43f5e", "600": "#e11d48", "700": "#be123c", "800": "#9f1239", "900": "#881337", "950": "#4c0519"},
 	}
+}
+
+// defaultShadows is the v4 box-shadow scale (shadow == shadow-sm).
+func defaultShadows() map[string]string {
+	m := map[string]string{"none": "none"}
+	for k, v := range boxShadowScale {
+		m[k] = v
+	}
+	return m
 }

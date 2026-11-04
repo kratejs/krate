@@ -27,9 +27,7 @@ func indexOfRule(out, cls string) int {
 }
 
 // TestUtilityOrderMatchesTailwind compares the emitted order of ~100 common
-// utilities with Tailwind v4.3.3 (testdata/tw_util_order.json). Utilities
-// whose declarations differ from v4 (owned by other fixes) are listed in
-// knownDivergent and only checked for presence.
+// utilities with Tailwind v4.3.3 (testdata/tw_util_order.json).
 func TestUtilityOrderMatchesTailwind(t *testing.T) {
 	raw, err := os.ReadFile("testdata/tw_util_order.json")
 	if err != nil {
@@ -38,15 +36,6 @@ func TestUtilityOrderMatchesTailwind(t *testing.T) {
 	var golden struct{ Order []string }
 	if err := json.Unmarshal(raw, &golden); err != nil {
 		t.Fatal(err)
-	}
-	knownDivergent := map[string]bool{
-		// Declared with v3 physical or shorthand properties (utility
-		// generation is not part of the ordering fix), so their position in
-		// the property table differs from v4.
-		"mx-4": true, "my-2": true, "px-2": true, "py-2": true, "px-4": true,
-		"px-12": true, "border-x-2": true, "border-t-2": true, "border-l-4": true,
-		"border": true, "outline-none": true, "ease-in": true, "select-none": true,
-		"list-disc": true, "underline": true, "list-inside": true, "list-none": true, "-mt-2": true,
 	}
 	classes := map[string]bool{}
 	for _, c := range golden.Order {
@@ -64,9 +53,7 @@ func TestUtilityOrderMatchesTailwind(t *testing.T) {
 			t.Logf("no rule for %q", c)
 			continue
 		}
-		if !knownDivergent[c] {
-			got = append(got, pos{i, c})
-		}
+		got = append(got, pos{i, c})
 	}
 	sort.Slice(got, func(i, j int) bool { return got[i].idx < got[j].idx })
 	rank := map[string]int{}

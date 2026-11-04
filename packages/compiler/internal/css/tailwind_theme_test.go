@@ -20,8 +20,9 @@ func TestConfiguredFontSizeBareValue(t *testing.T) {
 	if got := generateCSS("text-huge", theme); got != "font-size: 4rem;" {
 		t.Errorf("bare configured font size = %q", got)
 	}
-	// A full declaration block (the built-in form) passes through unchanged.
-	if got := generateCSS("text-sm", theme); got != theme.TextSizes["sm"] {
+	// A declaration block (the built-in form) keeps its size; the line-height
+	// defers to --tw-leading so leading-* wins.
+	if got := generateCSS("text-sm", theme); got != "font-size: 0.875rem; line-height: var(--tw-leading, calc(1.25 / 0.875));" {
 		t.Errorf("declaration-block font size = %q", got)
 	}
 }

@@ -188,13 +188,38 @@ Supported features:
   (`w-[100px]`, `bg-[url(/a.png)]`, `bg-[length:8px]`, `text-[14px]` ->
   font-size vs `text-[#fff]` -> color, `grid-cols-[repeat(3,_1fr)]`), including
   typed hints (`text-[color:var(--fg)]`).
+- The v4 CSS-variable shorthand (`w-(--w)`, `text-(length:--s)`,
+  `bg-red-500/(--alpha)`), arbitrary properties (`[mask-type:luminance]`,
+  `[--x:1px]`, with variants), and v4 arbitrary-value normalization
+  (`w-[calc(100%-2rem)]` becomes `calc(100% - 2rem)`, `m-[0_auto]`, and
+  `url()` keeps its underscores).
 - Negatives (`-mt-4`), color opacity modifiers (`bg-blue-500/50`,
-  `from-indigo-400/50`), and arbitrary spacing multiples (`p-13`, `p-13.5`).
+  `from-indigo-400/50`), and arbitrary spacing multiples (`p-13`, `p-13.5`),
+  scaled by the configured `--spacing` unit.
+- **Animation**: `animate-spin|ping|pulse|bounce`, theme animations
+  (`--animate-*`), `animate-[wiggle_1s_infinite]` and `animate-(--var)`. Every
+  `@keyframes` an emitted animation references is output with the stylesheet,
+  as are the `@property` registrations of the `--tw-*` composition variables.
+- **Transitions** compose like v4: `duration-*` and `ease-*` set `--tw-duration`
+  and `--tw-ease`, which `transition`, `transition-colors`, ... read, so
+  `transition-colors duration-700` is 0.7s in any order.
+- **Transforms** use the individual `translate`, `rotate` and `scale`
+  properties (plus `transform` for skew and 3D rotation), so they compose with
+  each other and with keyframe animations such as `animate-spin rotate-45`.
+- Gradients compose like v4 (`bg-linear-*`, `bg-radial`, `bg-conic`, `from-*`,
+  `via-*`, `to-*` with colors and `10%` positions, interpolated in oklab; add
+  `/oklch` etc. to change it). Rings, shadows and `inset-ring` share the v4
+  box-shadow composition, so `ring-2 ring-offset-2 ring-offset-white` draws
+  both. `space-*` and `divide-*` style the children through a zero-specificity
+  `:where(& > :not(:last-child))` selector.
 - **Filters** (`blur-*`, `brightness-*`, `grayscale`, `hue-rotate-*`, `invert`,
   `saturate-*`, `sepia`, `drop-shadow-*`, and `backdrop-*`), **animation**
   (`animate-*`), **blend modes**, plus layout, typography, interactivity,
   3D-transform, border, and background families.
-- Preflight is emitted by default to match Tailwind. Set `tailwind.preflight: false` to opt out.
+- Preflight is Tailwind v4's reset (including `[hidden]` staying hidden) and
+  is emitted by default. Set `tailwind.preflight: false` to opt out.
+- Scale names follow v4: `rounded-xs|sm|md`, `shadow-2xs|xs|sm`, `blur-xs|sm`.
+  `container` has a `max-width` per configured breakpoint.
 
 ### Variant order, stacking, prefix and important
 

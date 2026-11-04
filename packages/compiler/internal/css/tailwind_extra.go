@@ -13,7 +13,7 @@ func generateExtraCSS(cls string, theme TailwindTheme) string {
 	if css, ok := filterUtility(cls, theme); ok {
 		return css
 	}
-	if css, ok := animationUtility(cls); ok {
+	if css, ok := animationUtility(cls, theme); ok {
 		return css
 	}
 	if css, ok := blendUtility(cls); ok {
@@ -32,9 +32,6 @@ func generateExtraCSS(cls string, theme TailwindTheme) string {
 		return css
 	}
 	if css, ok := borderExtraUtility(cls, theme); ok {
-		return css
-	}
-	if css, ok := backgroundExtraUtility(cls, theme); ok {
 		return css
 	}
 	if css, ok := miscUtility(cls, theme); ok {
@@ -68,8 +65,11 @@ func miscUtility(cls string, theme TailwindTheme) (string, bool) {
 		case "current":
 			return "stroke: currentColor;", true
 		}
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return "stroke: " + v + ";", true
+		if inner, hint, isArb := arbitraryValue(rest); isArb {
+			if hint == "length" || hint == "number" || (hint == "" && looksLikeLength(inner) && !isVarOnly(inner)) {
+				return "stroke-width: " + inner + ";", true
+			}
+			return "stroke: " + inner + ";", true
 		}
 		if n, err := strconv.Atoi(rest); err == nil {
 			return "stroke-width: " + strconv.Itoa(n) + ";", true
@@ -201,7 +201,7 @@ func backdropVar(name, value string) string {
 }
 
 var filterScales = map[string]map[string]string{
-	"blur":       {"": "8px", "none": "", "sm": "4px", "md": "12px", "lg": "16px", "xl": "24px", "2xl": "40px", "3xl": "64px"},
+	"blur":       {"": "8px", "none": "", "xs": "4px", "sm": "8px", "md": "12px", "lg": "16px", "xl": "24px", "2xl": "40px", "3xl": "64px"},
 	"brightness": {"": "100%", "50": ".5", "75": ".75", "90": ".9", "95": ".95", "100": "1", "105": "1.05", "110": "1.1", "125": "1.25", "150": "1.5", "200": "2"},
 	"contrast":   {"": "100%", "0": "0", "50": ".5", "75": ".75", "100": "1", "125": "1.25", "150": "1.5", "200": "2"},
 	"saturate":   {"": "100%", "0": "0", "50": ".5", "100": "1", "150": "1.5", "200": "2"},
@@ -308,7 +308,7 @@ func filterScaleValue(cls string, theme TailwindTheme, backdrop bool) (string, b
 			if v == "" {
 				// Empty override, not `none`: `none` would cancel the whole
 				// `filter:` chain (e.g. `filter: none var(--tw-brightness,)`).
-				return applyFilter(name, "", backdrop), true
+				return applyFilter(name, "initial", backdrop), true
 			}
 			return applyFilter(name, filterNamedValue(name, v), backdrop), true
 		}
@@ -341,7 +341,7 @@ func filterNamedValue(name, v string) string {
 // filterArbValue normalizes an arbitrary filter value (blur([...])) to a filter
 // function call, preserving a value that already contains the function.
 func filterArbValue(name, v string) string {
-	if strings.Contains(v, "(") {
+	if strings.Contains(v, "(") && !isVarOnly(v) {
 		return v
 	}
 	return name + "(" + v + ")"
@@ -350,28 +350,6 @@ func filterArbValue(name, v string) string {
 // ---------------------------------------------------------------------------
 // Animation (#30)
 // ---------------------------------------------------------------------------
-
-func animationUtility(cls string) (string, bool) {
-	if rest, ok := strings.CutPrefix(cls, "animate-"); ok {
-		if rest == "none" {
-			return "animation: none;", true
-		}
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return "animation: " + v + ";", true
-		}
-		switch rest {
-		case "spin":
-			return "animation: spin 1s linear infinite;", true
-		case "ping":
-			return "animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;", true
-		case "pulse":
-			return "animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;", true
-		case "bounce":
-			return "animation: bounce 1s infinite;", true
-		}
-	}
-	return "", false
-}
 
 // ---------------------------------------------------------------------------
 // Blend modes (#31)
@@ -769,13 +747,6 @@ func interactivityUtility(cls string, theme TailwindTheme) (string, bool) {
 	case "scroll-smooth":
 		return "scroll-behavior: smooth;", true
 	}
-	// Transition behavior.
-	switch cls {
-	case "transition-normal":
-		return "transition-behavior: normal;", true
-	case "transition-discrete":
-		return "transition-behavior: allow-discrete;", true
-	}
 	// Scroll margin / padding (logical and physical).
 	if css, ok := scrollSpacingUtility(cls, theme); ok {
 		return css, true
@@ -847,8 +818,11 @@ func transform3DUtility(cls string) (string, bool) {
 			return "perspective-origin: " + strings.ReplaceAll(rest, "-", " ") + ";", true
 		}
 	}
-	if rest, ok := strings.CutPrefix(cls, "transform-3d"); ok && rest == "" {
+	switch cls {
+	case "transform-3d":
 		return "transform-style: preserve-3d;", true
+	case "transform-flat":
+		return "transform-style: flat;", true
 	}
 	if rest, ok := strings.CutPrefix(cls, "transform-style-"); ok {
 		switch rest {
@@ -866,21 +840,6 @@ func transform3DUtility(cls string) (string, bool) {
 			return "backface-visibility: hidden;", true
 		}
 	}
-	if rest, ok := strings.CutPrefix(cls, "rotate-x-"); ok {
-		if v, ok := angleValue(rest); ok {
-			return "--tw-rotate-x: " + v + "; transform: " + transform3DCompose + ";", true
-		}
-	}
-	if rest, ok := strings.CutPrefix(cls, "rotate-y-"); ok {
-		if v, ok := angleValue(rest); ok {
-			return "--tw-rotate-y: " + v + "; transform: " + transform3DCompose + ";", true
-		}
-	}
-	if rest, ok := strings.CutPrefix(cls, "rotate-z-"); ok {
-		if v, ok := angleValue(rest); ok {
-			return "--tw-rotate-z: " + v + "; transform: " + transform3DCompose + ";", true
-		}
-	}
 	if rest, ok := strings.CutPrefix(cls, "zoom-"); ok {
 		if v, isArb := unwrapArbitrary(rest); isArb {
 			return "zoom: " + v + ";", true
@@ -891,10 +850,6 @@ func transform3DUtility(cls string) (string, bool) {
 	}
 	return "", false
 }
-
-// transform3DCompose extends the 2D compose with the translateZ/rotateX/Y/Z
-// variables used by the 3D transform utilities.
-const transform3DCompose = "translate3d(var(--tw-translate-x,0),var(--tw-translate-y,0),var(--tw-translate-z,0)) rotateX(var(--tw-rotate-x,0)) rotateY(var(--tw-rotate-y,0)) rotateZ(var(--tw-rotate-z,0)) skewX(var(--tw-skew-x,0)) skewY(var(--tw-skew-y,0)) scaleX(var(--tw-scale-x,1)) scaleY(var(--tw-scale-y,1)) scaleZ(var(--tw-scale-z,1))"
 
 // ---------------------------------------------------------------------------
 // Border extras (#37)
@@ -998,83 +953,3 @@ func borderSideWidth(rest string) (string, bool) {
 // ---------------------------------------------------------------------------
 // Background / gradient extras (#38)
 // ---------------------------------------------------------------------------
-
-func backgroundExtraUtility(cls string, theme TailwindTheme) (string, bool) {
-	// Tailwind v4 gradient direction names: bg-linear-to-r, bg-linear-45.
-	if rest, ok := strings.CutPrefix(cls, "bg-linear-"); ok {
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return "background-image: linear-gradient(" + v + ", var(--tw-gradient-stops));", true
-		}
-		if deg, err := strconv.ParseFloat(rest, 64); err == nil {
-			_ = deg
-			return "background-image: linear-gradient(" + rest + "deg, var(--tw-gradient-stops));", true
-		}
-		if dir, ok := gradientDirection(rest); ok {
-			return "background-image: linear-gradient(" + dir + ", var(--tw-gradient-stops));", true
-		}
-	}
-	if rest, ok := strings.CutPrefix(cls, "bg-radial-"); ok {
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return "background-image: radial-gradient(" + v + ", var(--tw-gradient-stops));", true
-		}
-		return "background-image: radial-gradient(var(--tw-gradient-stops));", true
-	}
-	if cls == "bg-radial" {
-		return "background-image: radial-gradient(var(--tw-gradient-stops));", true
-	}
-	if rest, ok := strings.CutPrefix(cls, "bg-conic-"); ok {
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return "background-image: conic-gradient(" + v + ", var(--tw-gradient-stops));", true
-		}
-		return "background-image: conic-gradient(from " + rest + ", var(--tw-gradient-stops));", true
-	}
-	// Percentage / length gradient stops: from-10%, via-50%, to-90%.
-	for _, prefix := range []string{"from", "via", "to"} {
-		rest, ok := strings.CutPrefix(cls, prefix+"-")
-		if !ok {
-			continue
-		}
-		if strings.HasSuffix(rest, "%") {
-			if _, err := strconv.ParseFloat(strings.TrimSuffix(rest, "%"), 64); err == nil {
-				return gradientPositionProperty(prefix, rest), true
-			}
-		}
-		if v, isArb := unwrapArbitrary(rest); isArb && looksLikeLength(v) {
-			return gradientPositionProperty(prefix, v), true
-		}
-	}
-	return "", false
-}
-
-func gradientPositionProperty(prefix, v string) string {
-	switch prefix {
-	case "from":
-		return "--tw-gradient-from-position: " + v + ";"
-	case "via":
-		return "--tw-gradient-via-position: " + v + ";"
-	default:
-		return "--tw-gradient-to-position: " + v + ";"
-	}
-}
-
-func gradientDirection(rest string) (string, bool) {
-	switch rest {
-	case "to-t":
-		return "to top", true
-	case "to-tr":
-		return "to top right", true
-	case "to-r":
-		return "to right", true
-	case "to-br":
-		return "to bottom right", true
-	case "to-b":
-		return "to bottom", true
-	case "to-bl":
-		return "to bottom left", true
-	case "to-l":
-		return "to left", true
-	case "to-tl":
-		return "to top left", true
-	}
-	return "", false
-}

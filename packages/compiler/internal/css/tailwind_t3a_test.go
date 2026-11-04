@@ -16,7 +16,7 @@ func TestExpandApplyAnywhereInRule(t *testing.T) {
 	if strings.Contains(out, "@apply") {
 		t.Fatalf("@apply left in output:\n%s", out)
 	}
-	for _, want := range []string{"padding-left", "font-weight", "color:red", "color: blue", "padding"} {
+	for _, want := range []string{"padding-inline", "font-weight", "color:red", "color: blue", "padding"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}

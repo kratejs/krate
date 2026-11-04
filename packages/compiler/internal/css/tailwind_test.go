@@ -177,7 +177,7 @@ func TestBorderConsistency(t *testing.T) {
 	// Every width form must produce a visible (styled) border.
 	for _, cls := range []string{"border", "border-2", "border-t", "border-t-2", "border-x", "border-y-4"} {
 		got := gen(t, cls)
-		if !strings.Contains(got, "border-style: solid;") {
+		if !strings.Contains(got, "-style: var(--tw-border-style, solid);") {
 			t.Errorf("%s: should emit border-style: solid: %s", cls, got)
 		}
 	}
@@ -190,7 +190,7 @@ func TestBorderConsistency(t *testing.T) {
 
 func TestSpaceSiblingSelector(t *testing.T) {
 	got := gen(t, "space-x-4")
-	if !strings.Contains(got, "> :not([hidden]) ~ :not([hidden])") {
+	if !strings.HasPrefix(got, ":where(.space-x-4 > :not(:last-child)){") {
 		t.Errorf("space-x-4 should use the sibling selector: %s", got)
 	}
 	if !strings.Contains(got, "--tw-space-x-reverse") {
@@ -200,8 +200,9 @@ func TestSpaceSiblingSelector(t *testing.T) {
 
 func TestTransformCompose(t *testing.T) {
 	got := gen(t, "translate-x-2 scale-95 rotate-45")
-	// All three utilities must reference the shared variables, not clobber.
-	for _, want := range []string{"--tw-translate-x:", "--tw-scale-x:", "--tw-rotate:", "translate(var(--tw-translate-x"} {
+	// v4 model: each utility sets its own individual property, so they
+	// compose with each other and with keyframe animations of `transform`.
+	for _, want := range []string{"--tw-translate-x: 0.5rem;", "translate: var(--tw-translate-x, 0)", "--tw-scale-x: 95%;", "scale: var(--tw-scale-x, 1)", "rotate: 45deg;"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("transform composition missing %q:\n%s", want, got)
 		}
@@ -271,7 +272,7 @@ func TestInvalidValueRejected(t *testing.T) {
 
 func TestPreflight(t *testing.T) {
 	got := TailwindPreflight(DefaultTailwindTheme())
-	for _, want := range []string{"box-sizing:border-box", "margin:0", "::before", "border-style:solid"} {
+	for _, want := range []string{"box-sizing:border-box", "margin:0", "::before", "border:0 solid", "::backdrop", "::file-selector-button"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("preflight missing %q", want)
 		}

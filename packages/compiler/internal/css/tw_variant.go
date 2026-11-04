@@ -865,7 +865,9 @@ func wrapAtRules(sel, decls string, ats []string) string {
 // deterministic sort key. An empty text means "unrecognized". A class that
 // expands to a union (not-hover) yields several rules in one text.
 func classToRule(cls string, theme TailwindTheme) (text, key string) {
-	tokens, base, important := splitClass(cls)
+	// text-(length:--s) has a ':' inside parentheses; normalize the v4
+	// (--var) shorthand to brackets before splitting variants.
+	tokens, base, important := splitClass(parenToBracket(cls))
 	if theme.Prefix != "" {
 		if len(tokens) == 0 || tokens[0] != theme.Prefix {
 			return "", ""
@@ -880,16 +882,16 @@ func classToRule(cls string, theme TailwindTheme) (text, key string) {
 	if css == "" {
 		css = generateCSS(base, theme)
 	}
-	if css == "" && strings.HasPrefix(base, "-") {
+	if css == "" && strings.HasPrefix(base, "-") && negatableRoot(base[1:]) {
 		css = negateCSS(strings.TrimPrefix(base, "-"), theme)
 	}
 	if css == "" {
 		css, _ = containerUtilityCSS(base)
 	}
-	if css == "" || !validDeclarationBlock(css) {
+	if css == "" || (css != containerMarker && !validDeclarationBlock(css)) {
 		return "", ""
 	}
-	if important || theme.Important == "true" {
+	if (important || theme.Important == "true") && css != containerMarker {
 		css = addImportant(css)
 	}
 
@@ -930,11 +932,18 @@ func classToRule(cls string, theme TailwindTheme) (text, key string) {
 	var rules []string
 	for _, c := range combos {
 		sel, ats := applyVariants(EscapeClass(cls), c)
-		if suffix != "" {
+		if isSiblingUtility(base) {
+			// space-* and divide-* style the children, with zero specificity.
+			sel = ":where(" + sel + " > :not(:last-child))"
+		} else if suffix != "" {
 			sel = appendToParts(sel, suffix)
 		}
 		if scope := theme.Important; scope != "" && scope != "true" {
 			sel = scopeParts(sel, scope)
+		}
+		if css == containerMarker {
+			rules = append(rules, containerRules(sel, ats, theme))
+			continue
 		}
 		rules = append(rules, wrapAtRules(sel, strings.TrimSpace(css), ats))
 	}
