@@ -131,6 +131,11 @@ rules come after preflight, and utilities beat preflight and any layered
 base/components rules. To make a utility win over an unlayered component rule,
 put that rule in `@layer components`.
 
+**Migrating a reset:** a global reset such as `*, *::before, *::after { margin: 0;
+padding: 0 }` written as plain unlayered CSS now beats every utility (`p-3`,
+`mt-2` compute to `0`). Unlayered CSS beats Tailwind utilities, so put resets in
+`@layer base { ... }`.
+
 ### `@apply`
 
 `@apply` is supported anywhere inside a rule body (`.btn { @apply px-4 py-2; }`,
