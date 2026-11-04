@@ -168,12 +168,102 @@ export default function Loading() {
 }
 ```
 
-## Custom 404 page
+## Not-found and error pages
 
-Create `src/pages/404.tsx` to customize the not-found page. Error pages are
-rendered with layout wrapping; during client navigation the router shows them
-in place without reloading the app (see the
-[SPA router reference](/docs/reference/runtime-api/#spa-router)).
+Any directory under `src/pages` can hold its own not-found and error page. They
+follow the same rules as `_layout`, `_template` and `loading`: a file applies to
+its directory and everything below it.
+
+| File | Role |
+|------|------|
+| `404.tsx` or `not-found.tsx` | The segment's not-found page (status 404) |
+| `error.tsx` or `500.tsx` | The segment's error page (status 500): a component that receives `{ error, reset }` |
+
+None of them is a route: `blog/404.tsx` does not serve `/blog/404`. Two files
+for one role in a directory (`404.tsx` and `not-found.tsx`, `error.tsx` and
+`500.tsx`) are a build error (`KR9001`), and so is a segment page inside a
+`@slot` or an intercepting `(.)x` directory (`KR9002`). The root `404.tsx` and
+`500.tsx` keep working as the global fallback and are still written to
+`dist/404.html` and `dist/500.html`.
+
+```tsx
+// src/pages/blog/not-found.tsx
+export default function BlogNotFound() {
+  return <p>That post does not exist. <Link href="/blog/">All posts</Link></p>;
+}
+```
+
+```tsx
+// src/pages/blog/error.tsx
+export default function BlogError({ error, reset }) {
+  return (
+    <div>
+      <p>Something went wrong ({error.digest})</p>
+      <button onClick={reset}>Try again</button>
+    </div>
+  );
+}
+```
+
+### Which page answers
+
+The page nearest to the failure is used, walking up from the requested URL (or
+from the route's source directory), and it renders inside that segment's
+layouts, so shared navigation stays in place:
+
+- **Not found** (status 404): a URL that matches no route; a dynamic route with
+  `dynamicParams = false` and an unknown param; `notFound()` thrown by a page or
+  a server component (the page nearest to the route that threw).
+- **Error** (status 500): an uncaught error while an SSR, ISR or async page is
+  rendered. The response keeps `X-Krate-Error: render` and is never cached.
+
+Route groups scope segment pages like they scope layouts. `(shop)/cart/404.tsx`
+answers `notFound()` and unknown params of routes inside `(shop)`, but not a URL
+that matches no route at all (no route says which group the URL belongs to);
+that URL gets the nearest page outside any group. Two groups cannot both define
+the page of the same URL directory.
+
+Segment pages are prerendered once (`blog/404.html`, `blog/500.html`) and picked
+per request from the `segments` map in the build manifest; request-time
+rendering modes on them are ignored (`KR9003`). They are `noindex` by default
+(a `robots` meta you set yourself wins), carry no canonical link, and are left
+out of the sitemap, the route list and `krate types`. `krate inspect` and the
+MCP `explain` tool list each route's nearest not-found and error page.
+
+The Krate server (`krate start`, `krate dev`) picks the nearest page per
+request. A static host that only knows `404.html` serves the root page for every
+missing URL; the per-directory files are in the output for hosts and handlers
+that look them up with the manifest's `segments` map.
+
+### The error prop
+
+On the server, `error` is `{ name, message, digest }`. In production the
+message is always `"Internal Server Error"`: the real error is written to the
+server log together with the same `digest`, so a visitor can quote the digest
+and you can find the log line. `krate dev` shows the real message and `stack`.
+The `message` and `digest` are filled into the HTML the server sends; text you
+derive from them while rendering (`error.message.toLowerCase()`) appears once
+the page hydrates.
+
+### Error boundary around the segment
+
+An `error.tsx` is also a client error boundary around the segment's pages, in
+Next.js order: the directory's layout, then the error boundary, then its
+template and the page. A render error, an error in an effect, or a reactive
+update that throws below it shows the error page in place, with the layouts
+still mounted. Event handlers are not caught (the same rule as React's
+boundaries).
+
+- `reset()` mounts the segment's children again with fresh state.
+- Soft navigation away clears the error page.
+- The nearest boundary catches first. If an error page throws itself, the error
+  goes to the next boundary up.
+- Pages without an `error.tsx` above them ship no boundary code.
+- `500.tsx` is the server error page only; it does not add a client boundary.
+
+During soft navigation the router shows a 404 or 500 page the server returns in
+place, keeps the layouts the two routes share (the boundary of an `error.tsx` is
+swapped with the page), and leaves the requested URL in the address bar.
 
 ## The SPA router
 
@@ -219,7 +309,8 @@ Programmatic navigation, events and error handling are documented in the
 | `src/pages/@slot/` | Parallel-route slot, rendered by the sibling layout as the `slot` prop |
 | `src/pages/@slot/default.tsx` | Slot content when no slot page matches |
 | `src/pages/@slot/(.)x/` | Intercepting route (soft navigation renders it into the slot) |
-| `src/pages/404.tsx` | Custom 404 page |
+| `src/pages/404.tsx`, `not-found.tsx` | Not-found page of the directory (the root one is the global fallback) |
+| `src/pages/error.tsx`, `500.tsx` | Error page of the directory; `error.tsx` is also a client error boundary |
 | `src/pages/loading.tsx` | Loading component during SPA transitions |
 | `middleware.ts` | Request middleware (runs before page rendering) |
 | `src/api/*.ts` | JS API routes |

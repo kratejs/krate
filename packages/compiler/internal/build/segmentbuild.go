@@ -94,12 +94,25 @@ func errorBoundarySource(spec, id string) string {
 // a JSON data block (#__krate_error), and the HTML carries no text for it until
 // the page hydrates.
 func errorPageSource(spec, variant string) string {
-	var errExpr string
 	if variant == "client" {
-		errExpr = "(typeof document !== \"undefined\" && JSON.parse(((document.getElementById(\"__krate_error\") || { textContent: \"null\" }) as any).textContent)) || { name: \"Error\", message: \"\", digest: \"\", stack: \"\" }"
-	} else {
-		errExpr = "{ name: \"" + errSentinelName + "\", message: \"" + errSentinelMessage + "\", digest: \"" + errSentinelDigest + "\", stack: \"" + errSentinelStack + "\" }"
+		// The error lives in component state, so the build treats the page as
+		// client code: the HTML carries no text for it and hydration fills it in.
+		return "import { useState } from \"react\";\n" +
+			"import ErrorPage from " + fmt.Sprintf("%q", spec) + ";\n\n" +
+			"function readServerError(): any {\n" +
+			"  const el = typeof document !== \"undefined\" ? document.getElementById(\"__krate_error\") : null;\n" +
+			"  try {\n" +
+			"    return JSON.parse((el && el.textContent) || \"null\") || { name: \"Error\", message: \"\", digest: \"\", stack: \"\" };\n" +
+			"  } catch (e) {\n" +
+			"    return { name: \"Error\", message: \"\", digest: \"\", stack: \"\" };\n" +
+			"  }\n" +
+			"}\n\n" +
+			"export default function KrateServerError() {\n" +
+			"  const [error] = useState(readServerError);\n" +
+			"  return <ErrorPage error={error} reset={() => location.reload()} />;\n" +
+			"}\n"
 	}
+	errExpr := "{ name: \"" + errSentinelName + "\", message: \"" + errSentinelMessage + "\", digest: \"" + errSentinelDigest + "\", stack: \"" + errSentinelStack + "\" }"
 	return "import ErrorPage from " + fmt.Sprintf("%q", spec) + ";\n\n" +
 		"const krateServerError: any = " + errExpr + ";\n\n" +
 		"export default function KrateServerError() {\n" +
@@ -229,4 +242,16 @@ func (m *segmentModel) forSource(root, pagesDir, source string) (notFound, errPa
 		errPage = m.sources[ep.File]
 	}
 	return notFound, errPage
+}
+
+// errorPlaceholdersMangled reports whether a statically built error page
+// altered a placeholder (lowercased, sliced, concatenated into a longer
+// token): the server could not fill it in, so the page must read the error on
+// the client instead.
+func errorPlaceholdersMangled(html string) bool {
+	for _, s := range []string{errSentinelName, errSentinelMessage, errSentinelDigest, errSentinelStack} {
+		html = strings.ReplaceAll(html, s, "")
+	}
+	lower := strings.ToLower(html)
+	return strings.Contains(lower, "krate_err") || strings.Contains(lower, "__kr")
 }

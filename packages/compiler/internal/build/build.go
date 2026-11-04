@@ -1926,14 +1926,15 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 // buildErrorPage builds a segment error page. The first pass bakes
 // placeholders for the error into plain HTML (the server fills them in per
-// request); an error component that ships client code is built again reading
-// the error the server injects, so hydration does not overwrite it with the
-// placeholders.
+// request); an error component that ships client code, or that transforms the
+// error text at render time (which would break a placeholder), is built again
+// reading the error the server injects, so hydration does not overwrite it and
+// no placeholder text can leak.
 func (b *Builder) buildErrorPage(page string) (*PageResult, string, error) {
 	segmentVariants.Store(page, "static")
 	defer segmentVariants.Delete(page)
 	r, css, err := b.buildPageOnce(page)
-	if err != nil || r == nil || !r.HasJS {
+	if err != nil || r == nil || (!r.HasJS && !errorPlaceholdersMangled(r.HTML+r.HeadHTML)) {
 		return r, css, err
 	}
 	segmentVariants.Store(page, "client")

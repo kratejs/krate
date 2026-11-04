@@ -127,7 +127,7 @@ const MIGRATION_PHASES = [
     tone: "gate",
     status: "Complete",
     title: "Components and app semantics",
-    body: "next/cache (revalidatePath, revalidateTag, tagged fetch, unstable_cache), async server components, \"use client\" boundaries, template.tsx, route groups, parallel and intercepting routes, catch-all routes, and a reworked SPA router with layout persistence are native Krate features the migrator maps onto. A real migrated App Router app runs in the browser conformance suite on Chromium, Firefox, and WebKit.",
+    body: "next/cache (revalidatePath, revalidateTag, tagged fetch, unstable_cache), async server components, \"use client\" boundaries, template.tsx, route groups, parallel and intercepting routes, catch-all routes, per-segment not-found and error pages (a client error boundary per directory with reset), and a reworked SPA router with layout persistence are native Krate features the migrator maps onto. A real migrated App Router app runs in the browser conformance suite on Chromium, Firefox, and WebKit.",
     exit: "A migrated Next.js app with async data, revalidation, client islands, a template, and an intercepting modal passes browser conformance.",
   },
   {

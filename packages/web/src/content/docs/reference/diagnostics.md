@@ -504,12 +504,6 @@ Two files define the same role for one URL directory: 404.tsx and not-found.tsx,
 
 Segment pages (404.tsx, not-found.tsx, error.tsx, 500.tsx) are prerendered once and written to the output; the server picks the right file per request. A request-time mode (ssr, isr, streaming, runtime components, async server components) on such a page is ignored. Read request data in the page's client code, or link to a normal route.
 
-### KR9004
-
-**Segment error page rendered as the build-time fallback**
-
-A page threw while it was built, and its directory has an error page (error.tsx or 500.tsx). Krate baked the error page in place of the page instead of failing the build. Fix the error, or keep the fallback if it is expected.
-
 ## See also
 
 - [React Compatibility](/docs/guides/react-compatibility/)

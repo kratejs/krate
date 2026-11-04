@@ -2,10 +2,9 @@ package diag
 
 // KR9xxx: routing, segment pages and rendering errors.
 const (
-	CodeSegmentConflict      Code = "KR9001"
-	CodeSegmentMisplaced     Code = "KR9002"
-	CodeSegmentRequestMode   Code = "KR9003"
-	CodeSegmentErrorFallback Code = "KR9004"
+	CodeSegmentConflict    Code = "KR9001"
+	CodeSegmentMisplaced   Code = "KR9002"
+	CodeSegmentRequestMode Code = "KR9003"
 )
 
 func init() {
@@ -16,7 +15,5 @@ func init() {
 			"404.tsx, not-found.tsx, error.tsx and 500.tsx are per-directory segment pages. They cannot live inside a parallel-route @slot or an intercepting (.)route directory, because those render inside their parent's layout. Move the file to the parent route directory."},
 		CodeInfo{CodeSegmentRequestMode, "Segment page ignores request-time rendering",
 			"Segment pages (404.tsx, not-found.tsx, error.tsx, 500.tsx) are prerendered once and written to the output; the server picks the right file per request. A request-time mode (ssr, isr, streaming, runtime components, async server components) on such a page is ignored. Read request data in the page's client code, or link to a normal route."},
-		CodeInfo{CodeSegmentErrorFallback, "Segment error page rendered as the build-time fallback",
-			"A page threw while it was built, and its directory has an error page (error.tsx or 500.tsx). Krate baked the error page in place of the page instead of failing the build. Fix the error, or keep the fallback if it is expected."},
 	)
 }

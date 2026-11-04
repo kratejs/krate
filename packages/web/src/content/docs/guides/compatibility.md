@@ -10,7 +10,7 @@ This is the support contract for React compatibility. A surface is only marked
 stable when the referenced corpus and browser tests pass. Known divergences are
 listed instead of silently hidden.
 
-Last verified: **2026-10-26**. See the [roadmap](/roadmap/) for phase
+Last verified: **2026-11-04**. See the [roadmap](/roadmap/) for phase
 status and the [React compatibility guide](/docs/guides/react-compatibility/)
 for usage.
 
@@ -31,6 +31,7 @@ for usage.
 | Transitions and deferred values | Beta | Beta | n/a | Documented semantics |
 | Class components | Beta | n/a | n/a | Full common subset |
 | Error boundaries | Beta | Beta | Partial | Source and island |
+| Per-segment not-found and error pages | Beta | n/a | Beta | Next.js not-found.tsx and error.tsx |
 | Children, keys, and refs | Partial | Partial | n/a | Documented semantics |
 | Events | Beta | Beta | n/a | React 18 parity |
 | Forms and inputs | Beta | Beta | n/a | React 18 parity |
@@ -104,6 +105,22 @@ Known limits:
 Diagnostics: `KR3008`, `KR3009`
 
 Evidence: `TestBoundaryBuildTimeFallback`, `TestBuildTimeThrowWithoutBoundaryFails`, `TestClassBoundaryChildrenBranch`, `browser:/react-class/`, `browser:/react-demo/`
+
+### Per-segment not-found and error pages
+
+**Source:** Beta - **Islands:** n/a - **SSR:** Beta
+
+404.tsx or not-found.tsx and error.tsx or 500.tsx in any pages directory are that segment's pages. The nearest not-found page answers an unmatched URL, a closed dynamic route's unknown param and notFound() (status 404, inside the segment's layouts); the nearest error page answers an uncaught server error (status 500, sanitized message plus a digest) and, as a client error boundary around the segment's children, render, effect and reactive errors, with reset() and a hand-over to the next boundary up when an error page itself fails. The router swaps either page in place and keeps shared layouts. Pages are noindex and stay out of the sitemap and the route list.
+
+Known limits:
+
+- A page that throws while it is prerendered still fails the build (KR3010); the segment error page is not baked in as a build-time fallback.
+- Segment pages are always prerendered; request-time rendering modes on them are ignored with KR9003.
+- In the server-rendered error page, error.message and error.digest are filled into the HTML before hydration; text derived from them at render time appears once the page hydrates.
+
+Diagnostics: `KR9001`, `KR9002`, `KR9003`
+
+Evidence: `TestLookupSegmentPageURLWalk`, `TestLookupSegmentPageRouteWalk`, `TestValidateSegmentPages`, `TestBuildWritesSegmentPagesAndManifest`, `TestSegmentPagesServe`, `TestSegmentPagesServeDev`, `TestWatchSegmentPages`, `TestNestedNotFoundBecomesSegmentPage`, `TestErrorBoundaryBecomesSegmentErrorPage`, `TestSegmentPagesBrowser`, `TestMigratedNextAppBrowser`, `browser:/r18/boundary_reset_state/`, `browser:/r18/boundary_fallback_throws/`
 
 ### Children, keys, and refs
 

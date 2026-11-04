@@ -290,3 +290,47 @@ func loadManifestForTest(t *testing.T, outDir string) *Manifest {
 	}
 	return &m
 }
+
+func TestErrorPlaceholdersMangled(t *testing.T) {
+	ok := "<p>" + errSentinelMessage + "</p><i>" + errSentinelDigest + "</i>"
+	if errorPlaceholdersMangled(ok) {
+		t.Error("untouched placeholders are fine")
+	}
+	for _, bad := range []string{
+		"<p>" + strings.ToLower(errSentinelMessage) + "</p>",
+		"<p>" + errSentinelDigest[:6] + "</p>",
+		"<p>x" + errSentinelName[2:] + "</p>",
+	} {
+		if !errorPlaceholdersMangled(bad) {
+			t.Errorf("mangled placeholder not detected: %s", bad)
+		}
+	}
+}
+
+// An error component that lowercases the message cannot be baked with a
+// placeholder: the page is built to read the error on the client, and no
+// placeholder text ends up in the HTML.
+func TestErrorPageThatTransformsTheMessageReadsItOnTheClient(t *testing.T) {
+	b, root := scProject(t, map[string]string{
+		"src/pages/index.tsx": devPage("home"),
+		"src/pages/error.tsx": `export default function E({ error }: any) { return <p id="m">{String(error.message).toLowerCase()}</p>; }`,
+	})
+	if err := b.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "dist", "500.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(data)), "krate_err") {
+		t.Errorf("placeholder text leaked into the page:\n%s", data)
+	}
+	js, _ := filepath.Glob(filepath.Join(root, "dist", "__500", "index.*.js"))
+	if len(js) != 1 {
+		t.Fatalf("the page should hydrate and read the injected error; scripts: %v", js)
+	}
+	code, _ := os.ReadFile(js[0])
+	if !strings.Contains(string(code), "__krate_error") {
+		t.Errorf("the page script should read the injected error block:\n%s", code)
+	}
+}
