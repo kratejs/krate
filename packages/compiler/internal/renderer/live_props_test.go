@@ -39,11 +39,12 @@ export default function Page() {
 	}
 }
 
-// A destructured parameter reads a signal-derived prop once; the compiler
-// says so instead of silently rendering a snapshot.
+// A destructured parameter that cannot be lowered to live props reads (here
+// the body reassigns it) still warns instead of silently rendering a snapshot.
 func TestSignalDerivedPropThroughDestructuringWarns(t *testing.T) {
 	tree, _, _ := buildTreeReact(t, `function Child({ title }) {
   const [open, setOpen] = createSignal(false);
+  title = title + "!";
   return <button onClick={() => setOpen(!open())}>{title}</button>;
 }
 export default function Page() {
@@ -58,7 +59,24 @@ export default function Page() {
 		t.Fatalf("want 1 warning, got %+v", tree.Warnings)
 	}
 	w := tree.Warnings[0]
-	if !w.IsWarning() || w.Line != 8 || !strings.Contains(w.Message, "title") || !strings.Contains(w.Hint, "props.title") {
+	if !w.IsWarning() || !strings.Contains(w.Message, "title") || !strings.Contains(w.Hint, "props.title") {
 		t.Errorf("warning = %+v", w)
+	}
+}
+
+// A plain destructured parameter is lowered to live props reads: no warning,
+// and the registration is a getter the child binding re-reads.
+func TestSignalDerivedPropThroughDestructuringIsLive(t *testing.T) {
+	_, js := fullPipelineWithReact(t, `import { useState } from 'react';
+function Child({ title }) {
+  const [open, setOpen] = useState(false);
+  return <button onClick={() => setOpen(!open)}>{title}</button>;
+}
+export default function Page() {
+  const [count, setCount] = useState(0);
+  return <div><Child title={String(count)} /><button onClick={() => setCount(count + 1)}>inc</button></div>;
+}`)
+	if !strings.Contains(js, "get title()") || !strings.Contains(js, "props.title") {
+		t.Errorf("destructured prop must stay a live getter read:\n%s", js)
 	}
 }

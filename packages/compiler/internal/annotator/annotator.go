@@ -29,6 +29,7 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 	// 1. Collect all function declarations
 	collectFunctionsWithSource(prog.Body, ann.Functions, ann.ComponentSources, ann.ComponentRaw, sourceFile, rawSource)
 	collectMemberComponents(prog.Body, ann.Functions)
+	collectHOCComponents(prog.Body, ann.Functions)
 	collectClassComponents(prog.Body, ann.ClassComponents)
 	collectClassRejections(prog.Body, ann, sourceFile, rawSource)
 	collectLazyComponents(prog.Body, ann, sourceFile, rawSource)
@@ -896,4 +897,64 @@ func isReactClassBase(super ast.Expr) bool {
 // against their own module sources.
 func ReclassifyTiers(ann *irtree.Annotations, cfg *config.Config) {
 	classifyTiers(ann, cfg)
+}
+
+// collectHOCComponents registers `const Wrapped = withX(Base)` bindings whose
+// factory is a simple higher-order component as component functions (see
+// irtree.InstantiateHOC).
+func collectHOCComponents(body []ast.Stmt, functions map[string]*ast.FnDecl) {
+	factories := map[string]irtree.HOCFactory{}
+	for _, stmt := range body {
+		if exp, ok := stmt.(*ast.ExportStmt); ok && exp.Declaration != nil {
+			stmt = exp.Declaration
+		}
+		switch s := stmt.(type) {
+		case *ast.FnDecl:
+			factories[s.Name] = irtree.HOCFactory{Params: s.Params, Body: s.Body}
+		case *ast.VarStmt:
+			for _, d := range s.Decls {
+				if d == nil || d.Name == "" {
+					continue
+				}
+				if arrow, ok := d.Init.(*ast.ArrowFn); ok {
+					body := arrow.Body
+					if arrow.Expression && len(body) == 1 {
+						if es, ok := body[0].(*ast.ExprStmt); ok {
+							body = []ast.Stmt{&ast.ReturnStmt{Value: es.Expression}}
+						}
+					}
+					factories[d.Name] = irtree.HOCFactory{Params: arrow.Params, Body: body}
+				}
+			}
+		}
+	}
+	for _, stmt := range body {
+		if exp, ok := stmt.(*ast.ExportStmt); ok && exp.Declaration != nil {
+			stmt = exp.Declaration
+		}
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok {
+			continue
+		}
+		for _, d := range vs.Decls {
+			if d == nil || len(d.Name) == 0 || d.Name[0] < 'A' || d.Name[0] > 'Z' || functions[d.Name] != nil {
+				continue
+			}
+			call, ok := d.Init.(*ast.CallExpr)
+			if !ok {
+				continue
+			}
+			callee, ok := call.Callee.(*ast.Identifier)
+			if !ok {
+				continue
+			}
+			factory, ok := factories[callee.Name]
+			if !ok {
+				continue
+			}
+			if fn := irtree.InstantiateHOC(d.Name, factory, call.Args); fn != nil {
+				functions[d.Name] = fn
+			}
+		}
+	}
 }

@@ -275,6 +275,38 @@ function applyProps(el: Element, props: Record<string, unknown>): void {
   }
 }
 
+const spreadKeys = new WeakMap<Element, Set<string>>();
+
+/**
+ * Applies a spread props object (`<input {...field} />`) to el and re-applies
+ * it when the state `get` reads changes: attributes, form state, styles and
+ * event handlers are set, and keys the previous object had but the new one
+ * lacks are removed.
+ */
+export function krateSpread(el: Element, get: () => Record<string, unknown> | null | undefined): void {
+  trackEffect(
+    el,
+    createEffect(() => {
+      const props = get() || {};
+      const next = new Set<string>();
+      for (const key of Object.keys(props)) {
+        if (key === 'children' || key === 'key' || key === 'dangerouslySetInnerHTML') continue;
+        next.add(key);
+        setAttr(el, key, props[key]);
+      }
+      const prev = spreadKeys.get(el);
+      if (prev) {
+        for (const key of prev) {
+          if (next.has(key)) continue;
+          if (key.startsWith('on')) krateOn(el, key, null);
+          else setAttr(el, key, undefined);
+        }
+      }
+      spreadKeys.set(el, next);
+    })
+  );
+}
+
 // Virtual nodes
 // While hydration adopts server-rendered list rows, h() returns lightweight
 // descriptors instead of DOM nodes (JS evaluates children before parents, so
@@ -333,8 +365,45 @@ function isAdoptable(v: unknown): v is KrateAdoptable {
   return !!v && typeof v === 'object' && (v as KrateAdoptable).__ka === 1;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// Tags that only exist in SVG. Ambiguous names (a, script, style, title) stay
+// HTML here and are re-created in the SVG namespace when appended to an SVG
+// parent (see adoptSvgChild).
+const SVG_TAGS = new Set([
+  'svg', 'g', 'defs', 'symbol', 'use', 'switch', 'desc', 'metadata', 'path', 'circle', 'ellipse', 'line',
+  'polygon', 'polyline', 'rect', 'text', 'tspan', 'textPath', 'image', 'foreignObject', 'marker', 'mask',
+  'pattern', 'clipPath', 'linearGradient', 'radialGradient', 'stop', 'filter', 'feBlend', 'feColorMatrix',
+  'feComponentTransfer', 'feComposite', 'feConvolveMatrix', 'feDiffuseLighting', 'feDisplacementMap',
+  'feDistantLight', 'feDropShadow', 'feFlood', 'feFuncA', 'feFuncB', 'feFuncG', 'feFuncR',
+  'feGaussianBlur', 'feImage', 'feMerge', 'feMergeNode', 'feMorphology', 'feOffset', 'fePointLight',
+  'feSpecularLighting', 'feSpotLight', 'feTile', 'feTurbulence', 'animate', 'animateMotion',
+  'animateTransform', 'set', 'mpath', 'view',
+]);
+
+/** Creates an element in the namespace its tag belongs to. */
+function createTagElement(tag: string): Element {
+  return SVG_TAGS.has(tag) ? document.createElementNS(SVG_NS, tag) : document.createElement(tag);
+}
+
+/** True when a child appended to parent belongs to the SVG namespace. */
+function inSvg(parent: Node): boolean {
+  const p = parent as Element;
+  return p.namespaceURI === SVG_NS && p.localName !== 'foreignObject';
+}
+
+/** Re-creates an HTML-namespace element (a, style, title, ...) as SVG. */
+function adoptSvgChild(parent: Node, child: Node): Node {
+  const c = child as Element;
+  if (c.nodeType !== 1 || c.namespaceURI === SVG_NS || !inSvg(parent)) return child;
+  const el = document.createElementNS(SVG_NS, c.localName);
+  for (const attr of Array.from(c.attributes)) el.setAttribute(attr.name, attr.value);
+  while (c.firstChild) el.appendChild(c.firstChild);
+  return el;
+}
+
 function buildElement(tag: string, props: Record<string, unknown> | null, children: unknown[]): Element {
-  const el = document.createElement(tag);
+  const el = createTagElement(tag);
   if (props) applyProps(el, props);
   if (!props || !props.dangerouslySetInnerHTML) {
     for (const child of children) appendChild(el, child);
@@ -369,7 +438,7 @@ export function appendChild(parent: Node, child: unknown): void {
   }
 
   if (isVNode(child)) {
-    parent.appendChild(materialize(child));
+    parent.appendChild(adoptSvgChild(parent, materialize(child)));
     return;
   }
 
@@ -378,7 +447,7 @@ export function appendChild(parent: Node, child: unknown): void {
     return;
   }
 
-  parent.appendChild(child instanceof Node ? child : document.createTextNode(String(child)));
+  parent.appendChild(child instanceof Node ? adoptSvgChild(parent, child) : document.createTextNode(String(child)));
 }
 
 // Reactive regions

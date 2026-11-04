@@ -40,6 +40,8 @@ window.kbindList=function(id,src,key,render,mode){var n=findSlot(id);if(!n||n.no
 window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(__krateFx(n,function(){var s=!!get();var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(window.__krateCondPre)window.__krateCondPre(id,s);if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');if(window.__krateCondPost)window.__krateCondPost(id,s);}));},n);};
 window.kbindTextContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__krateFx(n,function(){var v=get();n.textContent=v==null||typeof v==='boolean'?'':String(v);}));},n);};
 window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;var ad=/^(aria|data)-/.test(attr);__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(v==null||(v===false&&!ad))n.removeAttribute(attr);else if(v===true&&!ad)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){if(typeof krateApplyStyle==='function')krateApplyStyle(n,v);else{n.removeAttribute('style');Object.assign(n.style,v);}}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));}));},n);};
+window.kbindInnerHTML=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__krateFx(n,function(){var v=get();v=v==null?'':String(v);if(n.innerHTML!==v)n.innerHTML=v;}));},n);};
+window.kbindSpread=function(id,get){var n=findSlot(id);if(n)__safe(function(){krateSpread(n,get);},n);};
 window.kbindProp=function(id,attr,get){var n=findSlot(id);if(n)__safe(function(){krateControl(n,attr,get);},n);};
 window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){krateOn(n,prop,fn);},n);};
 window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);if(typeof window.onCleanup==='function')window.onCleanup(function(){n.removeEventListener(ev,fn,!!capture);});},n);};
@@ -371,6 +373,22 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			name := a.AttrName
 			if a.AttrName == irtree.TextContentAttr {
 				b.WriteString("kbindTextContent(")
+				b.WriteString(strconv.Quote(string(a.ElementSlotID)))
+				b.WriteString(",()=>")
+				b.WriteString(exprJS)
+				b.WriteString(");\n")
+				continue
+			}
+			if a.AttrName == irtree.SpreadAttr {
+				b.WriteString("kbindSpread(")
+				b.WriteString(strconv.Quote(string(a.ElementSlotID)))
+				b.WriteString(",()=>")
+				b.WriteString(exprJS)
+				b.WriteString(");\n")
+				continue
+			}
+			if a.AttrName == irtree.InnerHTMLAttr {
+				b.WriteString("kbindInnerHTML(")
 				b.WriteString(strconv.Quote(string(a.ElementSlotID)))
 				b.WriteString(",()=>")
 				b.WriteString(exprJS)

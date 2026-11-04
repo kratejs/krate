@@ -314,6 +314,12 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	if containsPortal(fn.Body) {
 		return true
 	}
+	// A hook the compiler cannot see into (a store hook built by a module
+	// level factory, `const useStore = create(...)`) holds state of its own,
+	// so the component hydrates instead of rendering once at build time.
+	if b.callsOpaqueHook(fn.Body) {
+		return true
+	}
 	// A component rendering an external (bare-package) component must take the
 	// IR path so the island placeholder is emitted; the SSREval shortcut would
 	// re-render the source and drop it.
@@ -482,7 +488,7 @@ func isAttrBinding(attr *ast.JSXAttr) bool {
 		return false
 	}
 	switch attr.Value.(type) {
-	case *ast.Identifier, *ast.CallExpr, *ast.MemberExpr, *ast.ConditionalExpr, *ast.BinaryExpr, *ast.ArrowFn, *ast.UnaryExpr, *ast.TemplateExpr:
+	case *ast.Identifier, *ast.CallExpr, *ast.MemberExpr, *ast.ConditionalExpr, *ast.BinaryExpr, *ast.ArrowFn, *ast.UnaryExpr, *ast.TemplateExpr, *ast.ParenExpr:
 		return true
 	case *ast.ObjectExpr:
 		// A style object that reads a reactive value (`style={{ fontSize:
@@ -1071,4 +1077,31 @@ func (b *builder) bindLoopVars(js string) string {
 		vals = append(vals, src)
 	}
 	return "((" + strings.Join(names, ",") + ")=>(" + js + "))(" + strings.Join(vals, ",") + ")"
+}
+
+// callsOpaqueHook reports a body binding that calls a custom hook
+// (`krateHook(useStore(...))`) whose definition is not a function declaration
+// the build can evaluate.
+func (b *builder) callsOpaqueHook(body []ast.Stmt) bool {
+	for _, stmt := range body {
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok {
+			continue
+		}
+		for _, decl := range vs.Decls {
+			if decl == nil || derivedCallee(decl.Init) != "krateHook" {
+				continue
+			}
+			call, ok := decl.Init.(*ast.CallExpr).Args[0].(*ast.CallExpr)
+			if !ok {
+				continue
+			}
+			if id, ok := call.Callee.(*ast.Identifier); ok {
+				if _, known := b.functions[id.Name]; !known {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

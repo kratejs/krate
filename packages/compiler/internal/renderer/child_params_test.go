@@ -17,14 +17,18 @@ func TestDestructuredChildPropsBoundInHydration(t *testing.T) {
 export default function Page() {
   return <div><Child label="A" /><Child label="B" step={3} /></div>;
 }`)
+	// Destructured params lower to live props reads (no one-shot snapshot).
 	for _, id := range []string{"Child_c0", "Child_c1"} {
-		want := `var props=__krate_props["1.Child.` + id + `"];var {label,step=2}=props;`
+		want := `var props=__krate_props["1.Child.` + id + `"];`
 		if !strings.Contains(js, want) {
-			t.Errorf("missing destructured param binding %q:\n%s", want, js)
+			t.Errorf("missing props binding %q:\n%s", want, js)
 		}
 		if !strings.Contains(js, `__krate_props["1.Child.`+id+`"]={`) {
 			t.Errorf("missing props registration for %s:\n%s", id, js)
 		}
+	}
+	if strings.Contains(js, "var {label") {
+		t.Errorf("destructured params must not be snapshotted:\n%s", js)
 	}
 	// The omitted prop takes its pattern default in SSR and the signal init.
 	if !strings.Contains(res.HTML, "A: <!--k:3-->2<!--/k:3-->") || !strings.Contains(js, "createSignal(2)") {
@@ -49,7 +53,8 @@ export default function Page() {
 	}
 }
 
-// Destructured props that only feed build-time output need no registry.
+// Destructured props are read through the props object, never re-bound as a
+// one-shot snapshot.
 func TestDestructuredChildPropsUnusedAtHydration(t *testing.T) {
 	_, js := fullPipeline(t, `function Child({ label }) {
   const [n, setN] = createSignal(0);
@@ -58,8 +63,8 @@ func TestDestructuredChildPropsUnusedAtHydration(t *testing.T) {
 export default function Page() {
   return <div><Child label="A" /></div>;
 }`)
-	if strings.Contains(js, "__krate_props[\"1.Child") {
-		t.Errorf("unexpected props registration:\n%s", js)
+	if strings.Contains(js, "var {label") || strings.Contains(js, "var label=") {
+		t.Errorf("destructured param snapshotted:\n%s", js)
 	}
 }
 

@@ -134,7 +134,7 @@ func TestCustomHookTupleAndObjectResults(t *testing.T) {
 	`)
 	mustContain(t, out,
 		"return krateDerived(() => [on(), toggle()])",
-		"return krateDerived(() => ({ n: n(), inc: () => setN(n() + step) }))",
+		"return krateDerived(() => ({ n: n(), inc: () => setN(n() + krateParam(step)) }))",
 		"= krateHook(useToggle(false))",
 		"const a = krateHook(useCounter(1))",
 		"onClick={toggleOpen()}",

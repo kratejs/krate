@@ -26,6 +26,7 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 	if childFn == nil {
 		return nil
 	}
+	el = b.expandComponentSpreads(el)
 	childID := joinSlotID(parentID, childName)
 
 	// Scope root: resolve its option universe from the call site (an explicit
@@ -53,6 +54,14 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 
 	childSignals := b.collectSignalDecls(childFn)
 	attrs := extractPropsAST(el)
+	// <Toggle>{(on, flip) => <button/>}</Toggle>: a function as the only child
+	// is the component's `children` prop, called with the component's values.
+	if fn := functionChild(el.Children); fn != nil {
+		attrs["children"] = fn
+		bare := *el
+		bare.Children = nil
+		el = &bare
+	}
 
 	// Recursion guard: expanding a component that is already being expanded
 	// with the same props can never terminate (see enterExpansion).
@@ -81,6 +90,40 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 		}
 	}
 	return b.buildClientComponentSlot(el, childFn, childID, attrs, provider)
+}
+
+// expandComponentSpreads resolves the spread attributes of a component call
+// (`<Inner {...props} count={n} />`) to the attributes they carry, so they
+// reach the child. Spreads whose value is not known at build time cannot be
+// passed and are reported.
+func (b *builder) expandComponentSpreads(el *ast.JSXElement) *ast.JSXElement {
+	hasSpread := false
+	for _, a := range el.Opening.Attributes {
+		if a != nil && a.Spread {
+			hasSpread = true
+			break
+		}
+	}
+	if !hasSpread {
+		return el
+	}
+	expanded, forwardsChildren := b.expandForwardedSpreadAttrs(el.Opening.Attributes)
+	cp := *el
+	opening := *el.Opening
+	opening.Attributes = expanded
+	cp.Opening = &opening
+	if forwardsChildren && len(cp.Children) == 0 {
+		cp.Children = b.callSiteChildren
+	}
+	if b.locateOnly == 0 {
+		for _, a := range expanded {
+			if a != nil && a.Spread && a.Value != nil && !isScopeHelperExpr(a.Value) {
+				b.warnAt(a.Position, "spread {..."+generateExprJS(a.Value, nil)+"} on <"+el.Opening.Name+"> has no build-time attribute list; its props are not passed",
+					"spread a props or rest parameter, or pass the props explicitly (e.g. label={x.label})")
+			}
+		}
+	}
+	return &cp
 }
 
 // scopeProvider is the CSS scope a context-providing component makes active
@@ -355,10 +398,7 @@ func (b *builder) installCallSiteInputs(el *ast.JSXElement, childFn *ast.FnDecl,
 	case fnRestParamName(childFn) != "":
 		// A rest parameter collects every call-site attr not bound by a
 		// named/destructured parameter.
-		bound := make(map[string]bool)
-		for _, n := range extractParamNames(childFn) {
-			bound[n] = true
-		}
+		bound := boundParamSet(childFn)
 		rest := make(map[string]ast.Expr)
 		for name, expr := range attrs {
 			if !bound[name] {

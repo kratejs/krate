@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"hash/fnv"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -64,7 +65,9 @@ func collectModuleConstInits(prog *ast.Program) map[string]ast.Expr {
 		for _, decl := range vs.Decls {
 			if decl.Name != "" && decl.Init != nil {
 				out[decl.Name] = decl.Init
+				continue
 			}
+			addDestructuredModuleConst(out, decl)
 		}
 	}
 	return out
@@ -82,6 +85,57 @@ func isComponentClass(c *ast.ClassDecl) bool {
 		}
 	}
 	return false
+}
+
+// addDestructuredModuleConst records the bindings of a module-level
+// destructuring (`const { api, useStore } = create(...)`). The initializer
+// runs once under a synthetic name and each binding reads its member, so a
+// store factory is not instantiated per binding.
+func addDestructuredModuleConst(out map[string]ast.Expr, decl *ast.VarDecl) {
+	if decl == nil || !decl.IsDestructuring || decl.Init == nil || decl.Target == nil {
+		return
+	}
+	type member struct {
+		name string
+		key  ast.Expr
+	}
+	var members []member
+	switch t := decl.Target.(type) {
+	case *ast.ObjectExpr:
+		for _, p := range t.Properties {
+			if p == nil || p.Spread || p.Computed || p.Method || p.Key == "" {
+				return
+			}
+			name, isID := p.Value.(*ast.Identifier)
+			if !isID {
+				return
+			}
+			members = append(members, member{name: name.Name, key: &ast.Literal{Kind: ast.StringLit, Value: p.Key}})
+		}
+	case *ast.ArrayExpr:
+		for i, el := range t.Elements {
+			if el == nil {
+				continue
+			}
+			name, isID := el.(*ast.Identifier)
+			if !isID {
+				return
+			}
+			members = append(members, member{name: name.Name, key: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(i)}})
+		}
+	default:
+		return
+	}
+	if len(members) == 0 {
+		return
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(GenerateExprJS(decl.Init, nil)))
+	tmp := "__kmod_" + strconv.FormatUint(uint64(h.Sum32()), 16)
+	out[tmp] = decl.Init
+	for _, m := range members {
+		out[m.name] = &ast.MemberExpr{Object: &ast.Identifier{Name: tmp}, Property: m.key, Computed: true}
+	}
 }
 
 // evalValue folds expr against the current component scope (signals, props,
@@ -457,6 +511,17 @@ func (b *builder) mergeRestSpreads(attrs []*ast.JSXAttr, viaProps bool) ([]*ast.
 // time becomes a hydration binding. Scope-helper spreads and values with no
 // build-time value stay unresolved.
 func (b *builder) constObjectSpread(attr *ast.JSXAttr) SpreadExpansion {
+	// A spread that reads state is applied by the runtime (SpreadAttr) so it
+	// re-applies when the state changes.
+	if b.referencesSignal(attr.Value) {
+		return SpreadExpansion{}
+	}
+	return b.constObjectSpreadInitial(attr)
+}
+
+// constObjectSpreadInitial expands a spread by its build-time (initial) value,
+// for the markup rendered before hydration.
+func (b *builder) constObjectSpreadInitial(attr *ast.JSXAttr) SpreadExpansion {
 	if isScopeHelperExpr(attr.Value) {
 		return SpreadExpansion{}
 	}
@@ -658,10 +723,7 @@ func restProps(fn *ast.FnDecl, attrs map[string]ast.Expr) map[string]ast.Expr {
 	if fnRestParamName(fn) == "" {
 		return nil
 	}
-	bound := make(map[string]bool)
-	for _, n := range extractParamNames(fn) {
-		bound[n] = true
-	}
+	bound := boundParamSet(fn)
 	rest := make(map[string]ast.Expr)
 	for name, expr := range attrs {
 		if !bound[name] {
@@ -669,6 +731,24 @@ func restProps(fn *ast.FnDecl, attrs map[string]ast.Expr) map[string]ast.Expr {
 		}
 	}
 	return rest
+}
+
+// boundParamSet lists the call-site prop names a function binds itself: its
+// parameter names plus the keys a normalized rest parameter excludes (see
+// normalizePropsFn).
+func boundParamSet(fn *ast.FnDecl) map[string]bool {
+	bound := make(map[string]bool)
+	for _, n := range extractParamNames(fn) {
+		bound[n] = true
+	}
+	for _, p := range fn.Params {
+		if p != nil && p.IsRest && p.Pattern != "" {
+			for _, n := range destructuredParamNames(p.Pattern) {
+				bound[n] = true
+			}
+		}
+	}
+	return bound
 }
 
 // restPropsFor builds the rest-parameter map (name -> collected attrs) for a
@@ -707,6 +787,10 @@ func (b *builder) propBindingsToLocalProps(fn *ast.FnDecl, attrs map[string]ast.
 func extractParamNames(fn *ast.FnDecl) []string {
 	var names []string
 	for _, p := range fn.Params {
+		// A normalized rest parameter (see normalizePropsFn) is not a prop.
+		if p.IsRest && p.Pattern != "" {
+			continue
+		}
 		switch p.Name {
 		case "{...}":
 			names = append(names, destructuredParamNames(p.Pattern)...)
@@ -1206,6 +1290,8 @@ func (b *builder) readsLiveProp(expr ast.Expr) bool {
 			walk(x.Right)
 		case *ast.UnaryExpr:
 			walk(x.Arg)
+		case *ast.ParenExpr:
+			walk(x.Expr)
 		case *ast.ConditionalExpr:
 			walk(x.Test)
 			walk(x.Consequent)

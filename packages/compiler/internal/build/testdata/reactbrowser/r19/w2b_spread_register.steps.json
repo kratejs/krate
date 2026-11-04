@@ -1,0 +1,1 @@
+{ "steps": [ {"op":"type","sel":"#email","text":"a@b"}, {"op":"type","sel":"#name","text":"zed"} ] }

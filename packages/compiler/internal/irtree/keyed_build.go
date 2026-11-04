@@ -96,7 +96,7 @@ func (b *builder) buildKeyedSlot(el *ast.JSXElement, key ast.Expr, parentID stri
 		Keyed:      true,
 		Signals:    b.collectSignalReads(el),
 		Components: collectListComponents(el),
-		Bind:       &ListBinding{Source: "[" + keyJS + "]", Key: "(k)=>k", Render: render, Accessor: true},
+		Bind:       &ListBinding{Source: "[" + keyJS + "]", Key: "(k)=>k", Render: b.wrapRowContext(render), Accessor: true},
 	}}
 }
 

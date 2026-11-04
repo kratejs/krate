@@ -128,7 +128,7 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 	}
 	moduleConsts, moduleConstInits := mergedModuleConstants(prog, opts)
 	b := &builder{
-		functions:        ann.Functions,
+		functions:        normalizeComponentFns(ann.Functions),
 		ann:              ann,
 		idCounter:        make(map[string]int),
 		instanceCounts:   make(map[string]int),
@@ -405,8 +405,10 @@ type builder struct {
 	selectStack   [][]string // selected option values of enclosing <select> elements
 	// svgDepth and metaDepth count the enclosing <svg> elements and <Head>
 	// blocks: document metadata is not hoisted inside either.
-	svgDepth  int
-	metaDepth int
+	svgDepth int
+	// derivedJSXDepth bounds nested inlining of derived JSX values.
+	derivedJSXDepth int
+	metaDepth       int
 	// branchDepth counts enclosing conditional branches and list items;
 	// metadata there stays in place (hoisting it needs a runtime head swap).
 	branchDepth int

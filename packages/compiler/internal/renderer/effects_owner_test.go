@@ -32,7 +32,7 @@ func TestHydrationDeclaresEffectOwners(t *testing.T) {
 		"__ko(null);\n")
 	// List rows are rendered and adopted by the keyed list runtime, which
 	// gives each row its own effect owner.
-	if !strings.Contains(js, `kbindList("7"`) || strings.Contains(js, `__ko("8.Child.Child_c1"`) {
+	if !strings.Contains(js, `kbindList("9"`) || strings.Contains(js, `.Child.Child_c1",`) {
 		t.Fatalf("list rows must not also hydrate as separate owners:\n%s", js)
 	}
 	if strings.Contains(js, "onMount(") {

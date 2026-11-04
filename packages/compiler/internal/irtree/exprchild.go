@@ -37,8 +37,17 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 	if !b.referencesSignal(expr) {
 		return b.nonReactiveChild(expr, parentID, doEscape)
 	}
+	// A derived value holding JSX renders like the equivalent inline
+	// conditional (server markup and updates included).
+	if name := b.extractSignalName(expr); name != "" && b.derivedJSXDepth < 4 {
+		if inlined, ok := b.derivedJSXChild(name); ok {
+			b.derivedJSXDepth++
+			defer func() { b.derivedJSXDepth-- }()
+			return b.exprChild(inlined, parentID, doEscape)
+		}
+	}
 	// Simple signal read: {count()}
-	if isSimpleSignalRead(expr) {
+	if isSimpleSignalRead(expr) && !b.signalHoldsJSX(b.extractSignalName(expr)) {
 		if slot := b.buildTextSlot(expr, parentID); slot != nil {
 			return []SlotNode{slot}
 		}
@@ -96,6 +105,9 @@ func (b *builder) jsxValueChild(expr ast.Expr, parentID string, doEscape bool) (
 			}
 		}
 		return slots, true
+	}
+	if resolved, ok := b.resolveChildrenArg(expr); ok {
+		expr = resolved
 	}
 	folded, ok := foldStructuralReact(expr)
 	if !ok {
