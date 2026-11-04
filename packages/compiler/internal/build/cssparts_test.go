@@ -391,7 +391,7 @@ export default function Page() {
 	if !regexp.MustCompile(`-ta-p"[^>]*>[^<]*Open`).MatchString(html) {
 		t.Errorf("close label lost its children:\n%.1200s", html)
 	}
-	if !strings.Contains(html, `value="" checked`) && !strings.Contains(html, `value="" checked=true`) {
+	if !regexp.MustCompile(`value="" [^>]*checked`).MatchString(html) {
 		t.Errorf("expected the closed sentinel selected initially:\n%.1200s", html)
 	}
 	css := readAllCSS(t, outDir)

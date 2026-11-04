@@ -171,6 +171,38 @@ try {
 
   check(pageErrors.length === 0, `page errors: ${pageErrors.join("; ")}`);
 
+  // Controlled and imperative open state.
+  const errs2 = [];
+  page.on("pageerror", (e) => errs2.push(e.message));
+  await page.goto(`${base}/overlay-control/`);
+  const titleVisible = (text) =>
+    page.evaluate((t) => [...document.querySelectorAll(".krate-dialog-title,.krate-sheet-title")].some((e) => e.textContent === t && e.getClientRects().length > 0), text);
+  check(await titleVisible("Open on load"), "defaultOpen must render the dialog open on load");
+  await page.keyboard.press("Escape");
+  check(!(await titleVisible("Open on load")), "Escape closes a defaultOpen dialog");
+  check(!(await titleVisible("Controlled dialog")), "controlled dialog starts closed");
+  await page.click("#ctl-open");
+  await page.waitForFunction(() => document.querySelector("#ctl-state").textContent === "open");
+  check(await titleVisible("Controlled dialog"), "open={true} must open the controlled dialog");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.querySelector("#ctl-state").textContent === "closed");
+  check(!(await titleVisible("Controlled dialog")), "closing must update the controlled state and hide the dialog");
+  const changes = await page.textContent("#ctl-changes");
+  check(Number(changes) >= 2, `onOpenChange must fire for open and close (got ${changes})`);
+  await page.click("#imp-open");
+  check(await titleVisible("Imperative sheet"), "openOverlay('#id') must open the sheet");
+  await page.keyboard.press("Escape");
+  check(!(await titleVisible("Imperative sheet")), "Escape closes the imperatively opened sheet");
+  await page.evaluate(() => document.querySelector("#imp-open").click());
+  await page.evaluate(() => document.querySelector("#imp-close").click());
+  check(!(await titleVisible("Imperative sheet")), "closeOverlay('#id') must close the sheet");
+  await page.click("#toast-btn");
+  check((await page.locator(".krate-toaster .krate-toast-title", { hasText: "Saved" }).count()) === 1, "toast() must render a toast");
+  check((await page.locator(".krate-toaster").getAttribute("aria-live")) === "polite", "toast viewport is a polite live region");
+  await page.click(".krate-toaster .krate-toast-close");
+  check((await page.locator(".krate-toaster .krate-toast").count()) === 0, "toast close button dismisses the toast");
+  check(errs2.length === 0, `overlay-control page errors: ${errs2.join("; ")}`);
+
   // Contrast of the primary button and badge, light and dark (WCAG AA 4.5:1).
   const ratio = (pageObj) =>
     pageObj.evaluate(() => {

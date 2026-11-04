@@ -64,6 +64,12 @@ if(alt&&alt.getAttribute("data-ka")==="a"&&vis(alt))tgt=alt;
 }
 }else if(from&&vis(from)){tgt=from}
 if(tgt)tgt.focus();
+var sx=a.querySelector("input[data-ka=x]");
+if(sx&&i.checked){
+var d={open:!sx.checked,value:sx.checked?"":i.value};
+a.dispatchEvent(new CustomEvent("krateopenchange",{detail:d}));
+$("[data-kzo]",a).filter(function(b){return b.closest("[data-kz]")===a}).forEach(function(b){b.dispatchEvent(new CustomEvent("toggle",{detail:d}))});
+}
 setTimeout(function(){
 if(!hid(D.activeElement))return;
 var f=tgt&&vis(tgt)?tgt:(from&&vis(from)?from:null);
@@ -72,6 +78,10 @@ if(f)f.focus();
 },true);
 D.addEventListener("keydown",function(e){
 var t=e.target,k=e.key,l=lab(t),p=t.closest?t.closest("[data-ka=p]"):null,a=t.closest?t.closest("[data-kz]"):null;
+if(!a&&k==="Escape"){
+var om=$("[aria-modal=true]").filter(vis)[0];
+if(om){t=om;p=om;a=om.closest("[data-kz]")}
+}
 if(!a)return;
 if(k==="Escape"){
 var x=a.querySelector("input[data-ka=x]");
@@ -118,13 +128,26 @@ D.addEventListener("focusin",function(e){
 var m=$("[aria-modal=true]").filter(vis)[0];
 if(m&&!m.contains(e.target))enter(m);
 },true);
+function drive(el){
+var a=el.closest("[data-kz]"),x=a&&a.querySelector("input[data-ka=x]"),w=el.getAttribute("data-kopen");
+if(!x)return;
+if(w==="open"&&x.checked){var r=$("input",a).filter(function(n){return n.type==="radio"&&n!==x&&n.closest("[data-kz]")===a})[0];if(r)r.click()}
+else if(w==="closed"&&!x.checked)x.click();
+}
 function init(){sync(D);link()}
+function first(){
+init();
+$("[data-kopen]").forEach(drive);
+var m=$("[aria-modal=true]").filter(vis)[0];
+if(m&&!m.contains(D.activeElement))enter(m);
+}
 if(window.MutationObserver){
+new MutationObserver(function(ms){ms.forEach(function(m){if(m.target.getAttribute("data-kopen"))drive(m.target)})}).observe(D.documentElement,{attributes:true,attributeFilter:["data-kopen"],subtree:true});
 new MutationObserver(function(){
 if(queued)return;
 queued=1;
 requestAnimationFrame(function(){queued=0;init()});
 }).observe(D.documentElement,{childList:true,subtree:true});
 }
-if(D.readyState!=="loading")init();else D.addEventListener("DOMContentLoaded",init);
+if(D.readyState!=="loading")first();else D.addEventListener("DOMContentLoaded",first);
 })();

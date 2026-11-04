@@ -121,6 +121,7 @@ export function OTPField(props: OTPFieldProps) {
         type="text"
         inputMode="numeric"
         maxLength={1}
+        autoFocus={props.autoFocus && i === 0 ? true : undefined}
         aria-label={(props.label || "Verification code") + " digit " + (i + 1) + " of " + length}
         data-otp-index={String(i)}
         disabled={props.disabled}

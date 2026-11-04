@@ -219,7 +219,7 @@ func (b *builder) applyTriggerARIA(clone *ast.JSXElement, t csssignals.Trigger, 
 		// Initial state reflects whether this option starts selected; the
 		// enhancer keeps it in sync afterwards.
 		expanded := "false"
-		if mark == markAlt || t.Option == t.Scope.Initial {
+		if mark == markAlt || t.Option == b.initialFor(t.Scope, b.cssToken) {
 			expanded = "true"
 		}
 		set("aria-expanded", expanded)
@@ -457,7 +457,7 @@ func (b *builder) controllerChildren(scopes []*csssignals.Scope, token string) [
 		switch s.Kind {
 		case csssignals.KindChoice, csssignals.KindGroup, csssignals.KindRange, csssignals.KindStack:
 			for _, opt := range s.Options {
-				out = append(out, controllerInput(s, token, opt, "radio", opt == s.Initial))
+				out = append(out, controllerInput(s, token, opt, "radio", opt == b.initialFor(s, token)))
 			}
 		case csssignals.KindToggle:
 			out = append(out, controllerInput(s, token, "on", "checkbox", s.Initial == "true"))
@@ -601,4 +601,18 @@ func appendClass(el *ast.JSXElement, cls string) bool {
 		Value: &ast.Literal{Kind: ast.StringLit, Value: cls},
 	})
 	return true
+}
+
+// initialFor returns the initially selected option of a scope for one instance:
+// the call site's defaultValue/defaultOpen when it names one of the scope's
+// options, else the scope's own initial.
+func (b *builder) initialFor(s *csssignals.Scope, token string) string {
+	if v, ok := b.instanceInitial[token]; ok && s.IsChoiceLike() {
+		for _, o := range s.Options {
+			if o == v {
+				return v
+			}
+		}
+	}
+	return s.Initial
 }

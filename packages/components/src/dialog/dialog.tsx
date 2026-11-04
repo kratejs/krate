@@ -1,10 +1,21 @@
 import './dialog.css';
 import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+import { OverlayBridge } from '../overlay/overlay-bridge';
 
 const DialogCtx = createScope<string | null>();
 
 export interface DialogProps {
   label?: string;
+  /** Value of the content shown initially (a literal, like Tabs `defaultValue`). */
+  defaultValue?: string;
+  /** Open the first content initially. */
+  defaultOpen?: boolean;
+  /** Controlled state: true opens the first content, false closes it. Hydrates a small bridge. */
+  open?: boolean;
+  /** Called with the new state when the overlay opens or closes. Hydrates a small bridge. */
+  onOpenChange?: (open: boolean) => void;
+  /** Element id: a handle for `openOverlay('#id')` / `closeOverlay('#id')`. */
+  id?: string;
   children?: any;
 }
 
@@ -13,7 +24,10 @@ export function Dialog(props: DialogProps) {
   const open = createCSSGroup<string>(null, { as: 'dialog', label: props.label });
   return (
     <DialogCtx.Provider value={open}>
-      <div class="krate-dialog">{props.children}</div>
+      <div class="krate-dialog" id={props.id}>
+        {props.open !== undefined || props.onOpenChange ? <OverlayBridge open={props.open} onOpenChange={props.onOpenChange} /> : null}
+        {props.children}
+      </div>
     </DialogCtx.Provider>
   );
 }

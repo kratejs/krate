@@ -12,7 +12,7 @@ whole theme change is just a few declarations. You usually only need to set
 
 ```css
 :root {
-  --krate-primary: #6366f1;
+  --krate-primary: #4f46e5;
 }
 ```
 
@@ -35,7 +35,7 @@ beat the bundle even if the bundle loads later.
 
 ```css
 :root {
-  --krate-primary: #6366f1;   /* accent: buttons, links, checkboxes, active state */
+  --krate-primary: #4f46e5;   /* accent: buttons, links, checkboxes, active state */
   --krate-radius: 10px;       /* corner radius */
 }
 ```
@@ -44,7 +44,7 @@ Dark mode is handled per scheme; override it the same way if needed:
 
 ```css
 @media (prefers-color-scheme: dark) {
-  :root { --krate-primary: #818cf8; }
+  :root { --krate-primary: #6366f1; }
 }
 ```
 
@@ -54,13 +54,20 @@ Dark mode is handled per scheme; override it the same way if needed:
 
 | Token | Default | Derived? |
 |-------|---------|----------|
-| `--krate-primary` | `#f97316` | - (set this) |
+| `--krate-primary` | `#c2410c` | - (set this) |
 | `--krate-primary-hover` | primary darkened 15% | yes |
 | `--krate-primary-fg` | `#ffffff` | no (text on primary) |
+| `--krate-primary-text` | primary (light), primary lightened 30% (dark) | yes (primary as text on the page) |
 | `--krate-focus-ring` | `var(--krate-primary)` | yes |
-| `--krate-danger` / `--krate-danger-hover` | `#ef4444` / derived | hover derived |
-| `--krate-success` | `#22c55e` | no |
-| `--krate-warning` | `#f59e0b` | no |
+| `--krate-danger` / `--krate-danger-hover` | `#dc2626` / derived | hover derived |
+| `--krate-danger-text` | `#b91c1c` light, `#f87171` dark | no |
+| `--krate-success` / `--krate-success-text` | `#22c55e` / `#15803d` light, `#4ade80` dark | no |
+| `--krate-warning` / `--krate-warning-text` | `#f59e0b` / `#854d0e` light, `#facc15` dark | no |
+
+The default primary meets WCAG AA (4.5:1) with white text. If you choose a
+lighter brand colour, also set `--krate-primary-fg` to a dark colour so filled
+buttons and badges stay readable; use `--krate-primary-text` for primary-coloured
+text on the page.
 
 ### Surfaces and text
 
@@ -68,7 +75,7 @@ Dark mode is handled per scheme; override it the same way if needed:
 |-------|-------|------|
 | `--krate-bg` | `#ffffff` | `#09090b` |
 | `--krate-fg` (aliased by `--krate-text`) | `#09090b` | `#fafafa` |
-| `--krate-muted` (aliased by `--krate-text-muted`) | `#71717a` | `#a1a1aa` |
+| `--krate-muted` (aliased by `--krate-text-muted`) | `#636368` | `#a1a1aa` |
 | `--krate-surface` | `#f4f4f5` | `#18181b` |
 | `--krate-surface-hover` | `#e4e4e7` | `#27272a` |
 | `--krate-border` | `#e4e4e7` | `#27272a` |

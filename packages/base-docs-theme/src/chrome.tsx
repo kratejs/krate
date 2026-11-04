@@ -586,7 +586,7 @@ export function Breadcrumbs(props: BreadcrumbsProps) {
   if (!items || items.length === 0) return <span />;
 
   return (
-    <nav class="breadcrumbs">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
       {items.map((item, i) => (
         <span>
           {i > 0 && <span class="sep"> / </span>}
