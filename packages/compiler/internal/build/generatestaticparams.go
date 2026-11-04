@@ -630,7 +630,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if layoutErr != nil {
 		return nil, "", layoutErr
 	}
-	bundle.CSS = layoutCSS + bundle.CSS
+	bundle.CSS = b.dedupeModuleCSS(spp.PagePath, layoutCSS+bundle.CSS, bundle.CSSModules)
 	deps = append(deps, layoutFiles...)
 	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures)
 

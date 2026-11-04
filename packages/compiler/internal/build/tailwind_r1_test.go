@@ -197,3 +197,18 @@ export default function P() { return <div class="bg-brand-500 p-2">x</div>; }`)
 		t.Errorf("p-2 missing after rebuild:\n%s", got)
 	}
 }
+
+func TestCSSModuleIncludedOncePerPage(t *testing.T) {
+	_, out, _ := buildFiles(t, map[string]string{
+		"src/pages/_layout.tsx": `import a from "./A.module.css";
+export default function L({ children }) { return <div class={a.card}>{children}</div>; }`,
+		"src/pages/A.module.css":    `.card{composes: base from "./base.module.css"; margin:0}`,
+		"src/pages/base.module.css": `.base{color:#123456}`,
+		"src/pages/index.tsx": `import base from "./base.module.css";
+export default function P() { return <p class={base.base}>x</p>; }`,
+	}, func(c *config.Config) { c.Tailwind.Enabled = false })
+	all := readAllCSS(t, out)
+	if n := strings.Count(all, "#123456"); n != 1 {
+		t.Errorf("module CSS appears %d times:\n%s", n, all)
+	}
+}

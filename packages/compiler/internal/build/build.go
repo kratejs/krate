@@ -128,6 +128,7 @@ type Builder struct {
 	// per page on each rebuild, cleared on a full build), and the warnings
 	// already printed.
 	twMu     sync.Mutex
+	modCSS   moduleCSSRegistry // layout/slot path -> its CSS Modules' scoped CSS
 	twPages  map[string]twPageInfo // page source (or "") -> its collected Tailwind CSS state
 	twWarned map[string]bool
 
@@ -2059,7 +2060,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		}
 	}
 	// Layouts come first (outermost first) so page CSS wins ties.
-	bundle.CSS = layoutCSS + bundle.CSS
+	bundle.CSS = b.dedupeModuleCSS(page, layoutCSS+bundle.CSS, bundle.CSSModules)
 	// Generated CSS signal rules land in the page's own hashed stylesheet, after
 	// layout CSS so author styles can override the defaults.
 	if choiceCSS != "" {
@@ -2515,6 +2516,7 @@ func layoutCacheFresh(e *layoutEmitCacheEntry) bool {
 // even if a build goroutine from a previous pass is still winding down.
 func (b *Builder) resetBuildCaches() {
 	layoutEmitCache.Clear()
+	b.modCSS.clear()
 	loadingEmitCache.Clear()
 	layoutCache.Clear()
 	routeDirSigCache.Clear()
@@ -2623,6 +2625,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	}
 	printModuleWarnings(os.Stderr, layoutBundle.Modules)
 
+	b.modCSS.store(layoutPath, layoutBundle.CSSModules)
 	layoutModule := findEntryModule(layoutBundle.Modules)
 	if layoutModule == nil || layoutModule.Program == nil {
 		return nil, "", nil, false, fmt.Errorf("layout module invalid or empty: %s (ensure the layout has a default export)", layoutPath)
