@@ -143,8 +143,8 @@ func isCodeGroup(src string, start, open, end int) bool {
 		prev = src[open-1]
 	}
 	if src[open] == '(' {
-		// Only `name-(--var)` style groups are utilities.
-		return prev != '-'
+		// Only `name-(--var)` and `name/(--var)` groups are utilities.
+		return prev != '-' && prev != '/'
 	}
 	if open == start || prev == '-' || prev == ':' || prev == '/' || prev == '@' {
 		if inner != "" && (inner[0] == '"' || inner[0] == '\'' || inner[0] == '`') {
@@ -261,7 +261,10 @@ func looksLikeUtility(tok string) bool {
 	if strings.Contains(base, "-") {
 		return true
 	}
-	// A bare keyword: compare the part before any "/" (none today) and groups.
+	// Container query markers: `@container`, `@container/name`.
+	if name, ok := strings.CutPrefix(base, "@container"); ok && (name == "" || name[0] == '/' && len(name) > 1) {
+		return true
+	}
 	return bareUtilities[base]
 }
 

@@ -141,3 +141,17 @@ func TestScanDeterministicOrder(t *testing.T) {
 		t.Fatal("non-deterministic")
 	}
 }
+
+func TestScanContainerMarker(t *testing.T) {
+	wantScanned(t, `<div class="@container">`, "@container")
+	wantScanned(t, `<div class="@container/main p-2">`, "@container/main", "p-2")
+}
+
+func TestScanAlphaVarModifier(t *testing.T) {
+	wantScanned(t, `<p class="text-red-500/(--alpha) bg-red-500/[0.3] w-(--w)">`,
+		"text-red-500/(--alpha)", "bg-red-500/[0.3]", "w-(--w)")
+	got := scanSet(`<p class="text-red-500/(--alpha)">`)
+	if got["text-red-500/"] {
+		t.Errorf("truncated candidate present: %v", got)
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/css"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
@@ -113,7 +114,13 @@ type Bundler struct {
 
 	// tsOpts are the tsconfig options used when stripping TypeScript.
 	tsOpts tsstrip.Options
+
+	// twImports controls how `@import "tailwindcss"` is treated in CSS.
+	twImports css.TailwindImportMode
 }
+
+// SetTailwindImports configures the handling of Tailwind package imports.
+func (b *Bundler) SetTailwindImports(m css.TailwindImportMode) { b.twImports = m }
 
 // SetTSOptions configures how TypeScript sources are lowered (decorators,
 // class-field semantics) before parsing.

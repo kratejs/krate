@@ -1192,6 +1192,19 @@ func (b *Builder) affectedPages(changedFiles []string) []string {
 	return pages
 }
 
+// tailwindImportMode maps the Tailwind setting to the CSS import handling.
+func (b *Builder) tailwindImportMode() css.TailwindImportMode {
+	if b.Cfg.Tailwind.Enabled {
+		return css.TailwindKeep
+	}
+	return css.TailwindOff
+}
+
+// inlineImports inlines @import directives of merged authored CSS.
+func (b *Builder) inlineImports(cssText string) string {
+	return css.InlineImportsWith(cssText, b.Root, css.ImportOptions{Root: b.Root, Tailwind: b.tailwindImportMode()})
+}
+
 // tailwindOptions builds the Tailwind options from config.
 func (b *Builder) tailwindOptions() css.TailwindOptions {
 	return css.TailwindOptions{
@@ -1307,7 +1320,7 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 	if mergedCSS != "" {
 		processedCSS := mergedCSS
 		// Inline @import directives before minification
-		processedCSS = css.InlineImports(processedCSS, b.Root)
+		processedCSS = b.inlineImports(processedCSS)
 		processedCSS = b.processCSSDirectives(processedCSS)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
 		if b.Cfg.Fonts.PreloadEnabled() {
@@ -1365,7 +1378,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		written[file] = true
 	}
 	process := func(pageCss string) (string, []byte) {
-		processedCSS := css.InlineImports(pageCss, b.Root)
+		processedCSS := b.inlineImports(pageCss)
 		processedCSS = b.processCSSDirectives(processedCSS)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
 		if b.Cfg.ShouldMinifyCSS() {
@@ -1663,6 +1676,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 		bnd.SetActionBasePath(b.Cfg.BaseURLPath())
 	}
 	bnd.SetModuleCache(b.moduleCache)
+	bnd.SetTailwindImports(b.tailwindImportMode())
 	return bnd
 }
 

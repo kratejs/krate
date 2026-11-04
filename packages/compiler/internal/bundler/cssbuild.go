@@ -73,6 +73,7 @@ func isExternalCSSURL(ref string) bool {
 // untouched; a relative file that cannot be found is reported.
 func (cs *cssSheet) rewriteURLs(cssText, dir string) string {
 	b := cs.b
+	cssText = css.AbsolutizeSourcePaths(cssText, dir)
 	return css.RewriteURLs(cssText, func(raw string) (string, bool) {
 		ref := strings.TrimSpace(raw)
 		if ref == "" || isExternalCSSURL(ref) {
@@ -270,6 +271,7 @@ func (b *Bundler) resolveCSSModule(path, abs string, mtime time.Time, size int64
 		RewriteURLs: cs.rewriteURLs,
 		OnRead:      cs.read,
 		Warn:        cs.warn,
+		Tailwind:    b.twImports,
 	})
 
 	isModule := strings.Contains(path, ".module.")

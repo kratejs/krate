@@ -379,9 +379,7 @@ func expandBraceWord(w string) []string {
 	}
 	var out []string
 	for _, a := range alts {
-		for _, e := range expandBraceWord(pre + a + post) {
-			out = append(out, e)
-		}
+		out = append(out, expandBraceWord(pre+a+post)...)
 	}
 	return out
 }
@@ -458,4 +456,30 @@ func (d *TailwindDirectives) MergeFrom(o *TailwindDirectives) {
 	for w := range o.warnings {
 		d.warnings[w] = true
 	}
+}
+
+var (
+	sourcePathRe  = regexp.MustCompile(`(@source\s+(?:not\s+)?)(["'])([^"'\n]+)(["'])`)
+	importSrcRe   = regexp.MustCompile(`(@import\s+["']tailwindcss(?:/[^"']*)?["'][^;{]*?\bsource\()(["'])([^"'\n]+)(["'])`)
+	absolutizeFns = []*regexp.Regexp{sourcePathRe, importSrcRe}
+)
+
+// AbsolutizeSourcePaths rewrites relative paths in `@source "..."` and
+// `@import "tailwindcss" source("...")` to absolute paths under dir, so they
+// still resolve once the sheet has been merged into another file.
+func AbsolutizeSourcePaths(cssText, dir string) string {
+	if !strings.Contains(cssText, "source") {
+		return cssText
+	}
+	for _, re := range absolutizeFns {
+		cssText = re.ReplaceAllStringFunc(cssText, func(m string) string {
+			sm := re.FindStringSubmatch(m)
+			p := sm[3]
+			if filepath.IsAbs(p) || strings.HasPrefix(p, "/") {
+				return m
+			}
+			return sm[1] + sm[2] + filepath.ToSlash(filepath.Join(dir, p)) + sm[4]
+		})
+	}
+	return cssText
 }

@@ -27,6 +27,25 @@ type ImportOptions struct {
 	OnRead func(path string)
 	// Warn receives a message for every import that could not be honoured.
 	Warn func(msg string)
+	// Tailwind says how `@import "tailwindcss"` and `tailwindcss/*` are
+	// treated: TailwindResolve (default) resolves them like any package,
+	// TailwindKeep leaves them for the Tailwind directive pass, and
+	// TailwindOff leaves them and warns that Tailwind is not enabled.
+	Tailwind TailwindImportMode
+}
+
+// TailwindImportMode selects the handling of Tailwind package imports.
+type TailwindImportMode int
+
+const (
+	TailwindResolve TailwindImportMode = iota
+	TailwindKeep
+	TailwindOff
+)
+
+// isTailwindImport reports `tailwindcss` and `tailwindcss/...` specifiers.
+func isTailwindImport(target string) bool {
+	return target == "tailwindcss" || strings.HasPrefix(target, "tailwindcss/")
 }
 
 // InlineImports resolves and inlines @import directives in CSS content. Paths
@@ -170,6 +189,12 @@ func (st *importer) expand(stmt importStmt, dir string, chain []string, depth in
 	}
 	if isExternalImport(stmt.target) {
 		return "", []string{stmt.text + ";"}, false
+	}
+	if st.opts.Tailwind != TailwindResolve && isTailwindImport(stmt.target) {
+		if st.opts.Tailwind == TailwindOff {
+			st.warn("@import %q needs Tailwind, which is not enabled; set tailwind.enabled in krate.config", stmt.target)
+		}
+		return "", nil, true
 	}
 	abs := st.locate(stmt.target, dir)
 	if abs == "" {
