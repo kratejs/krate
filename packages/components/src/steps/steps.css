@@ -1,12 +1,13 @@
 .krate-steps {
   margin: 24px 0;
-  padding-left: 0;
+  padding-inline-start: 0;
   counter-reset: krate-step;
-  border-left: 2px solid var(--krate-border, #e4e4e7);
+  border-inline-start: 2px solid var(--krate-border, #e4e4e7);
 }
 .krate-step {
   position: relative;
-  padding: 0 0 32px 32px;
+  padding-block: 0 32px;
+  padding-inline: 32px 0;
   counter-increment: krate-step;
 }
 .krate-step:last-child {
@@ -20,7 +21,7 @@
 }
 .krate-step-number {
   position: absolute;
-  left: -16px;
+  inset-inline-start: -16px;
   top: 0;
   width: 30px;
   height: 30px;

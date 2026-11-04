@@ -55,7 +55,7 @@ export interface SheetTitleProps {
 
 /** @deprecated Use `Sheet.Title` instead. */
 export function SheetTitle(props: SheetTitleProps) {
-  return <h2 class="krate-sheet-title">{props.children}</h2>;
+  return <h2 class="krate-sheet-title" data-ka="title">{props.children}</h2>;
 }
 
 export interface SheetDescriptionProps {
@@ -64,7 +64,7 @@ export interface SheetDescriptionProps {
 
 /** @deprecated Use `Sheet.Description` instead. */
 export function SheetDescription(props: SheetDescriptionProps) {
-  return <p class="krate-sheet-description">{props.children}</p>;
+  return <p class="krate-sheet-description" data-ka="desc">{props.children}</p>;
 }
 
 export interface SheetCloseProps {

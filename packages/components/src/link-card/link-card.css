@@ -36,6 +36,6 @@ div.krate-link-card .krate-link-card-description p {
   margin-bottom: 4px;
 }
 .krate-link-card-icon {
-  margin-left: 12px;
+  margin-inline-start: 12px;
   color: var(--krate-text-muted, #71717a);
 }

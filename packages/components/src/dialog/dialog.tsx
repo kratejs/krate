@@ -54,7 +54,7 @@ export interface DialogTitleProps {
 
 /** @deprecated Use `Dialog.Title` instead. */
 export function DialogTitle(props: DialogTitleProps) {
-  return <h2 class="krate-dialog-title">{props.children}</h2>;
+  return <h2 class="krate-dialog-title" data-ka="title">{props.children}</h2>;
 }
 
 export interface DialogDescriptionProps {
@@ -63,7 +63,7 @@ export interface DialogDescriptionProps {
 
 /** @deprecated Use `Dialog.Description` instead. */
 export function DialogDescription(props: DialogDescriptionProps) {
-  return <p class="krate-dialog-description">{props.children}</p>;
+  return <p class="krate-dialog-description" data-ka="desc">{props.children}</p>;
 }
 
 export interface DialogCloseProps {

@@ -6,6 +6,8 @@ export interface OTPFieldProps {
   value?: string;
   onValueChange?: (value: string) => void;
   disabled?: boolean;
+  /** Accessible name for the group; each digit is named "<label> digit N of M". */
+  label?: string;
   autoFocus?: boolean;
   onComplete?: (value: string) => void;
 }
@@ -119,6 +121,7 @@ export function OTPField(props: OTPFieldProps) {
         type="text"
         inputMode="numeric"
         maxLength={1}
+        aria-label={(props.label || "Verification code") + " digit " + (i + 1) + " of " + length}
         data-otp-index={String(i)}
         disabled={props.disabled}
         onInput={handleInputEvent}
@@ -128,7 +131,7 @@ export function OTPField(props: OTPFieldProps) {
   }
 
   return (
-    <div class="krate-otp-field" data-krate-otp-field="true" data-length={length} onPaste={handlePaste}>
+    <div class="krate-otp-field" role="group" aria-label={props.label || "Verification code"} data-krate-otp-field="true" data-length={length} onPaste={handlePaste}>
       {inputElements}
     </div>
   );

@@ -10,7 +10,7 @@ export interface NavigationMenuProps {
 
 /** Navigation menu. Zero JS: one radio group whose selected option is open. */
 export function NavigationMenu(props: NavigationMenuProps) {
-  const open = createCSSGroup<string>(null, { as: 'menu', label: props.label });
+  const open = createCSSGroup<string>(null, { as: 'nav', label: props.label });
   return (
     <NavigationMenuCtx.Provider value={open}>
       <div class="krate-navigation-menu">{props.children}</div>

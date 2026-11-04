@@ -54,7 +54,7 @@ export interface AlertDialogTitleProps {
 
 /** @deprecated Use `AlertDialog.Title` instead. */
 export function AlertDialogTitle(props: AlertDialogTitleProps) {
-  return <h2 class="krate-alert-dialog-title">{props.children}</h2>;
+  return <h2 class="krate-alert-dialog-title" data-ka="title">{props.children}</h2>;
 }
 
 export interface AlertDialogDescriptionProps {
@@ -63,7 +63,7 @@ export interface AlertDialogDescriptionProps {
 
 /** @deprecated Use `AlertDialog.Description` instead. */
 export function AlertDialogDescription(props: AlertDialogDescriptionProps) {
-  return <p class="krate-alert-dialog-description">{props.children}</p>;
+  return <p class="krate-alert-dialog-description" data-ka="desc">{props.children}</p>;
 }
 
 export interface AlertDialogActionProps {

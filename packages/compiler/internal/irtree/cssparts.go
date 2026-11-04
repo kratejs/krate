@@ -399,6 +399,7 @@ func (b *builder) rewriteScopeSpread(el *ast.JSXElement) ast.Expr {
 				return wrapWithClassOnly([]ast.JSXChild{&ast.JSXElementChild{Element: clone}}, ref.scope.PanelWrapperClass("on", negated))
 			}
 			opt := b.scopeOption(arg, "")
+			b.decoratePanel(clone, ref.scope, opt)
 			return wrapWithClassOnly([]ast.JSXChild{&ast.JSXElementChild{Element: clone}}, ref.scope.PanelWrapperClass(opt, false))
 		case "current":
 			clone.Children = []ast.JSXChild{}

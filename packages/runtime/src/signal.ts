@@ -609,7 +609,8 @@ export interface CSSARIAOptions {
    * Accessibility semantics to synthesize. Defaults are native (radios,
    * checkboxes) and ship no JS. Presets that need synthesized state
    * (`tabs`, `listbox`, `accordion`, `disclosure`, `dialog`, `menu`,
-   * `popover`) inject a tiny ARIA synchroniser automatically.
+   * `popover`, `nav`) inject a tiny keyboard and ARIA enhancer automatically:
+   * Enter/Space/Escape/arrow keys, focus move/trap/restore, aria-expanded.
    */
   as?:
     | 'radiogroup'
@@ -618,6 +619,7 @@ export interface CSSARIAOptions {
     | 'listbox'
     | 'menu'
     | 'menubar'
+    | 'nav'
     | 'accordion'
     | 'disclosure'
     | 'dialog'

@@ -41,7 +41,7 @@ export interface TabsListProps {
 
 /** @deprecated Use `Tabs.List` instead. */
 export function TabsList(props: TabsListProps) {
-  return <div class="krate-tabs-list">{props.children}</div>;
+  return <div class="krate-tabs-list" role="tablist" aria-orientation="horizontal">{props.children}</div>;
 }
 
 export interface TabsTriggerProps {

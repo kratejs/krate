@@ -12,6 +12,6 @@
   cursor: not-allowed;
 }
 .krate-label-required {
-  color: var(--krate-danger, #ef4444);
-  margin-left: 2px;
+  color: var(--krate-danger-text, #b91c1c);
+  margin-inline-start: 2px;
 }

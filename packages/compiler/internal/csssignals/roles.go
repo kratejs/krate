@@ -1,64 +1,81 @@
 package csssignals
 
 // Role describes the ARIA surface a CSS-signal scope synthesizes for a given
-// `as` preset. Structural roles/attributes are emitted statically (zero JS).
-// The two "state" flags mark widgets whose state ARIA the user agent does not
-// maintain on a native control (tabs, listbox, disclosure/dialog/popover), and
-// which therefore require the opt-in micro-runtime to keep in sync.
+// `as` preset. Structural roles/attributes are emitted statically. A role with a
+// Trigger is operated through the small keyboard/ARIA enhancer (internal/renderer
+// cssaria.go): it makes the label triggers focusable, maps Enter/Space/Escape and
+// arrow keys, manages focus, and keeps aria-selected/aria-expanded in sync. The
+// pointer path stays pure CSS.
 type Role struct {
+	// Name is the preset name (the `as` value); "" for none.
+	Name string
 	// Container is the role for the scope anchor (the element carrying the
 	// scope class), or "" for none.
 	Container string
-	// Trigger is the role for each trigger label, or "" for none.
+	// Trigger is the role for each opening trigger label, or "" for none.
 	Trigger string
-	// Panel is the role for each panel, or "" for none.
+	// Item is the role for labels that close/select (the closed-sentinel
+	// triggers: menu items, dialog close buttons). Defaults to "button".
+	Item string
+	// Panel is the role for each panel element, or "" for none.
 	Panel string
+	// Control is the role placed on the hidden controller input itself (a
+	// native checkbox with role=switch). Such inputs stay focusable and named.
+	Control string
 	// Orientation, when set, is emitted as aria-orientation on the container.
 	Orientation string
 	// Haspopup, when set, is emitted as aria-haspopup on triggers.
 	Haspopup string
 	// Modal marks dialogs that need aria-modal="true".
 	Modal bool
+	// Anchored positions the panel relative to its trigger (menus, popovers).
+	Anchored bool
 	// SyncSelected marks triggers whose aria-selected must be maintained by the
-	// micro-runtime (a native radio cannot carry role=tab/option semantics).
+	// enhancer (a native radio cannot carry role=tab/option semantics).
 	SyncSelected bool
 	// SyncExpanded marks triggers whose aria-expanded must be maintained by the
-	// micro-runtime.
+	// enhancer.
 	SyncExpanded bool
 }
 
-// NeedsRuntime reports whether the role requires the tiny ARIA micro-runtime to
-// keep synthesized state (aria-selected / aria-expanded) in sync. Roles that map
-// cleanly onto native controls leave this false, so the zero-JS default holds.
-func (r Role) NeedsRuntime() bool { return r.SyncSelected || r.SyncExpanded }
+// NeedsRuntime reports whether the role needs the enhancer script. Roles that
+// map cleanly onto native controls leave this false, so the zero-JS default
+// holds for them.
+func (r Role) NeedsRuntime() bool { return r.Trigger != "" || r.SyncSelected || r.SyncExpanded }
 
 // rolePresets maps an `as` value to its ARIA surface. The defaults are chosen so
-// the emitted markup uses native semantics and needs no JS; presets that cannot
-// be expressed natively opt into the micro-runtime.
+// the emitted markup uses native semantics where possible; presets that cannot
+// be expressed natively opt into the enhancer.
 var rolePresets = map[string]Role{
 	// Default choice: a native radio group already announces selection.
-	"radiogroup": {Container: "radiogroup"},
-	"radio":      {Container: "radiogroup"},
+	"radiogroup": {Name: "radiogroup", Container: "radiogroup"},
+	"radio":      {Name: "radio", Container: "radiogroup"},
 
-	// Real tablist semantics need synthesized aria-selected.
-	"tabs":    {Container: "tablist", Trigger: "tab", Panel: "tabpanel", SyncSelected: true, Orientation: "horizontal"},
-	"tablist": {Container: "tablist", Trigger: "tab", Panel: "tabpanel", SyncSelected: true, Orientation: "horizontal"},
+	// Real tablist semantics need synthesized aria-selected. The tablist role
+	// itself belongs on the component's list element (it must only own tabs).
+	"tabs":    {Name: "tabs", Trigger: "tab", Panel: "tabpanel", SyncSelected: true, Orientation: "horizontal"},
+	"tablist": {Name: "tablist", Trigger: "tab", Panel: "tabpanel", SyncSelected: true, Orientation: "horizontal"},
 
 	// Listbox / options.
-	"listbox": {Container: "listbox", Trigger: "option", SyncSelected: true},
-	"menu":    {Container: "menu", Trigger: "menuitemradio", Panel: "menu", SyncSelected: true, Haspopup: "true"},
-	"menubar": {Container: "menubar", Trigger: "menuitemradio", Panel: "menu", SyncSelected: true, Haspopup: "true", Orientation: "horizontal"},
+	"listbox": {Name: "listbox", Container: "listbox", Trigger: "option", SyncSelected: true},
+
+	// Menus: the trigger is a button that opens a role=menu panel of menuitems.
+	"menu":    {Name: "menu", Trigger: "button", Item: "menuitem", Panel: "menu", Haspopup: "menu", SyncExpanded: true, Anchored: true},
+	"menubar": {Name: "menubar", Trigger: "button", Item: "menuitem", Panel: "menu", Haspopup: "menu", SyncExpanded: true, Anchored: true, Orientation: "horizontal"},
+
+	// A disclosure navigation: buttons that reveal a panel of links.
+	"nav": {Name: "nav", Trigger: "button", SyncExpanded: true, Anchored: true},
 
 	// Disclosure family: aria-expanded must be synthesized.
-	"accordion":  {Trigger: "button", Panel: "region", SyncExpanded: true},
-	"disclosure": {Trigger: "button", Panel: "region", SyncExpanded: true},
-	"dialog":     {Trigger: "button", Panel: "dialog", Haspopup: "dialog", Modal: true, SyncExpanded: true},
-	"modal":      {Trigger: "button", Panel: "dialog", Haspopup: "dialog", Modal: true, SyncExpanded: true},
-	"popover":    {Trigger: "button", Panel: "group", Haspopup: "true", SyncExpanded: true},
+	"accordion":  {Name: "accordion", Trigger: "button", SyncExpanded: true},
+	"disclosure": {Name: "disclosure", Trigger: "button", SyncExpanded: true},
+	"dialog":     {Name: "dialog", Trigger: "button", Panel: "dialog", Haspopup: "dialog", Modal: true, SyncExpanded: true},
+	"modal":      {Name: "modal", Trigger: "button", Panel: "alertdialog", Haspopup: "dialog", Modal: true, SyncExpanded: true},
+	"popover":    {Name: "popover", Trigger: "button", Panel: "dialog", Haspopup: "dialog", SyncExpanded: true, Anchored: true},
 
-	// Native checkbox carries checked state for free.
-	"switch":   {Trigger: "switch"},
-	"checkbox": {},
+	// A native checkbox carries checked state; role=switch goes on the input.
+	"switch":   {Name: "switch", Control: "switch"},
+	"checkbox": {Name: "checkbox"},
 }
 
 // defaultRoleFor returns the preset used when no `as` is given. The empty Role

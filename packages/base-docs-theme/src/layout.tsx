@@ -341,7 +341,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
         <div class="toc-overlay" id="toc-overlay" ref={tocOverlayRef} onClick={closeNav}></div>
       )}
 
-      <nav class="sidebar" id="sidebar" ref={sidebarRef}>
+      <nav class="sidebar" id="sidebar" aria-label="Documentation" ref={sidebarRef}>
         <div class="sidebar-header">
           <div class="sidebar-header-row">
             <div class="sidebar-social-links">

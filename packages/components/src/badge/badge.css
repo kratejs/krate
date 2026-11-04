@@ -16,7 +16,7 @@
 }
 .krate-badge-default {
   background: var(--krate-primary, #3b82f6);
-  color: #fff;
+  color: var(--krate-primary-fg, #fff);
 }
 .krate-badge-secondary {
   background: var(--krate-surface-hover, #e4e4e7);
@@ -29,13 +29,13 @@
 }
 .krate-badge-success {
   background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
+  color: var(--krate-success-text, #15803d);
 }
 .krate-badge-warning {
   background: rgba(234, 179, 8, 0.15);
-  color: #eab308;
+  color: var(--krate-warning-text, #854d0e);
 }
 .krate-badge-destructive {
   background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  color: var(--krate-danger-text, #b91c1c);
 }
