@@ -144,6 +144,13 @@ type cssEntry struct {
 	// assets are the `url(...)` assets this sheet references (source path ->
 	// hashed URL), replayed into every bundle that reuses the cached CSS.
 	assets map[string]string
+	// deps are the imported sheets, url() assets and composes sources the
+	// cached CSS was built from; the entry is stale when any of them changed.
+	deps []cssDep
+	// composesFrom are the CSS module files this sheet composes from.
+	composesFrom []string
+	// diags are the warnings produced while building the sheet, replayed with it.
+	diags []diag.Diagnostic
 }
 
 type assetEntry struct {
@@ -195,6 +202,9 @@ func (c *ModuleCache) getCSS(abs string, mtime time.Time, size int64) (*cssEntry
 	defer c.mu.Unlock()
 	e, ok := c.css[abs]
 	if !ok || !e.mtime.Equal(mtime) || e.size != size || !stampMatches(abs, mtime, size, e.hash) {
+		return nil, false
+	}
+	if !cssDepsCurrent(e.deps) {
 		return nil, false
 	}
 	return e, true
