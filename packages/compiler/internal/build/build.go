@@ -214,6 +214,9 @@ type Builder struct {
 	// transformOnce guards the in-place universal transforms so a shared
 	// (cached) AST is transformed exactly once per build, never concurrently.
 	transformOnce sync.Map
+	// collectionSites records, per program, the getCollection calls whose
+	// result is left to run in the browser (see InlineContent).
+	collectionSites sync.Map
 	// deferInline marks entry programs whose getCollection inlining must wait
 	// until route params are bound (static-params pages), so lookups like
 	// `find((p) => p.slug === props.params.slug)` fold to a single entry.
@@ -2323,6 +2326,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	if needsHydrate {
 		emitResult.TrackSources = b.Cfg.Sourcemap
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		b.warnShippedCollections(page, entryModule.Program, rawJS)
 		dceJS = append(dceJS, rawJS)
 		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)
 		if islandJS != "" {
@@ -2712,6 +2716,7 @@ func (b *Builder) resetBuildCaches() {
 	// cache persists across builds; re-running the (idempotent) transforms on
 	// already-transformed ASTs is a no-op, and the guard keeps it race-free.
 	b.transformOnce = sync.Map{}
+	b.collectionSites = sync.Map{}
 	// Go component parses are per-build.
 	b.goParseCache = nil
 	// Client boundary chunks are per-build: a dev rebuild must pick up edits

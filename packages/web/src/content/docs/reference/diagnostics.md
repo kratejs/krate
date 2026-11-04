@@ -477,6 +477,12 @@ An `<Image>` generates its variants during the build, so src, width, height, qua
 
 An `<Image>` without an alt attribute is announced by screen readers by its file name. Add a description, or alt="" when the image is purely decorative. This is a warning.
 
+### KR8810
+
+**Content collection is shipped to the browser**
+
+A `getCollection("name")` chain is normally evaluated while the site is built and only its result is rendered. When the chain depends on a value that only exists in the browser (a signal, an event), the collection has to be evaluated there, so its entries are copied into the page script. Krate ships only the fields the page mentions (the body and rendered html only when referenced), but every entry in the collection, drafts included, is still included. Filter with build-time values, or compute the list on the server. This is a warning.
+
 ## See also
 
 - [React Compatibility](/docs/guides/react-compatibility/)

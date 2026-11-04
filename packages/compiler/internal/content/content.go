@@ -344,6 +344,26 @@ func GenerateModule(cfg *Config, entries map[string][]Entry) string {
 // a stable (slug-sorted) order. Used both by the generated `krate/content`
 // module and by build-time AST inlining of `getCollection("...")`.
 func CollectionJS(entries []Entry) string {
+	return CollectionJSFields(entries, nil)
+}
+
+// FieldUse names the entry fields a page's code mentions. A nil FieldUse (or
+// All) keeps every field.
+type FieldUse struct {
+	// All keeps every field; set when the code reads fields dynamically.
+	All bool
+	// Names holds every identifier or string the code mentions.
+	Names map[string]bool
+}
+
+func (u *FieldUse) keep(name string) bool {
+	return u == nil || u.All || u.Names[name]
+}
+
+// CollectionJSFields is CollectionJS limited to the fields use mentions: slug
+// and path always stay, body and html only when referenced, and data keeps the
+// referenced keys.
+func CollectionJSFields(entries []Entry, use *FieldUse) string {
 	sorted := make([]Entry, len(entries))
 	copy(sorted, entries)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Slug < sorted[j].Slug })
@@ -353,9 +373,22 @@ func CollectionJS(entries []Entry) string {
 		b.WriteString("  {")
 		b.WriteString(" slug: " + tsString(e.Slug) + ",")
 		b.WriteString(" path: " + tsString(e.Path) + ",")
-		b.WriteString(" body: " + tsString(e.Body) + ",")
-		b.WriteString(" html: " + tsString(e.HTML) + ",")
-		b.WriteString(" data: " + goValueToJS(e.Data) + ",")
+		if use.keep("body") {
+			b.WriteString(" body: " + tsString(e.Body) + ",")
+		}
+		if use.keep("html") {
+			b.WriteString(" html: " + tsString(e.HTML) + ",")
+		}
+		data := e.Data
+		if use != nil && !use.All {
+			data = make(map[string]any, len(e.Data))
+			for k, v := range e.Data {
+				if use.Names[k] {
+					data[k] = v
+				}
+			}
+		}
+		b.WriteString(" data: " + goValueToJS(data) + ",")
 		b.WriteString(" },\n")
 	}
 	b.WriteString("]")

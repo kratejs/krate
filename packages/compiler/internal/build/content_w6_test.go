@@ -124,3 +124,84 @@ export default function BlogPost(props: { params?: { slug: string } }) {
 		t.Error("hello page should render the entry html")
 	}
 }
+
+func TestUnfoldableCollectionChainDoesNotShipDrafts(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "src/pages/index.tsx", `import { getCollection } from "krate/content";
+import { createSignal } from "@krate/runtime";
+
+export default function Home() {
+  const [tag, setTag] = createSignal("a");
+  const posts = getCollection("blog").filter((p) => p.data.tag === tag());
+  return (
+    <main>
+      <button onClick={() => setTag("b")}>b</button>
+      <ul>{posts.map((p) => <li>{p.data.title}</li>)}</ul>
+    </main>
+  );
+}
+`)
+	writeFileRel(t, root, "content/blog/hello.md", "---\ntitle: Hello\ntag: a\n---\nPUBLICBODYMARK\n")
+	writeFileRel(t, root, "content/blog/secret.md", "---\ntitle: Secret\ntag: b\ndraft: true\n---\nDRAFTSECRETMARK\n")
+	cfg := contentConfigFor(root, map[string]any{"title": "string", "tag": "string?", "draft": "boolean?"})
+	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	var js string
+	_ = filepath.WalkDir(cfg.OutDir, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".js") {
+			data, _ := os.ReadFile(p)
+			js += string(data)
+		}
+		return nil
+	})
+	if !strings.Contains(out, "src/pages/index.tsx:6:") || !strings.Contains(out, "KR8810") || !strings.Contains(out, "draft entries included: 1") {
+		t.Errorf("expected a located KR8810 warning:\n%s", out)
+	}
+	for _, bad := range []string{"DRAFTSECRETMARK", "PUBLICBODYMARK"} {
+		if strings.Contains(js, bad) {
+			t.Errorf("%s shipped to the browser", bad)
+		}
+	}
+}
+
+// A page that mentions html does get it for the runtime chain; nothing else.
+func TestUnfoldableCollectionChainShipsOnlyMentionedFields(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "src/pages/index.tsx", `import { getCollection } from "krate/content";
+import { createSignal } from "@krate/runtime";
+
+export default function Home() {
+  const [tag, setTag] = createSignal("a");
+  const posts = getCollection("blog").filter((p) => p.data.tag === tag());
+  return (
+    <main>
+      <button onClick={() => setTag("b")}>b</button>
+      <div onClick={() => console.log(posts.map((p) => p.html))}>x</div>
+    </main>
+  );
+}
+`)
+	writeFileRel(t, root, "content/blog/hello.md", "---\ntitle: Hello\ntag: a\nsecretfield: SECRETFIELDMARK\n---\nPUBLICBODYMARK\n")
+	cfg := contentConfigFor(root, map[string]any{"title": "string", "tag": "string?", "secretfield": "string?"})
+	if _, err := captureOutput(func() error { return New(root, cfg).BuildAll() }); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	var js string
+	_ = filepath.WalkDir(cfg.OutDir, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".js") {
+			data, _ := os.ReadFile(p)
+			js += string(data)
+		}
+		return nil
+	})
+	if !strings.Contains(js, "<p>PUBLICBODYMARK</p>") {
+		t.Errorf("mentioned html must be shipped:\n%s", js)
+	}
+	for _, bad := range []string{"SECRETFIELDMARK", "body:", "title"} {
+		if strings.Contains(js, bad) {
+			t.Errorf("%q is not mentioned by the page and must not be shipped:\n%s", bad, js)
+		}
+	}
+}

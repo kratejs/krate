@@ -4,11 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/content"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
@@ -55,14 +59,96 @@ func (b *Builder) InlineContent(prog *ast.Program) {
 	if prog == nil || len(b.contentCollections) == 0 {
 		return
 	}
+	ic := &inlineCtx{collections: b.contentCollections, use: collectFieldUse(prog)}
+	defer func() {
+		if len(ic.sites) > 0 {
+			b.collectionSites.Store(prog, ic.sites)
+		}
+	}()
 	// Collect simple literal local bindings (e.g. `const slug = "hello"` after
 	// route-param substitution) so collection chains that reference them can be
 	// evaluated. Without this, `find((p) => p.slug === slug)` can't fold.
 	bindings := collectLiteralBindings(prog)
 	for _, stmt := range prog.Body {
-		inlineContentStmt(stmt, b.contentCollections, bindings)
+		inlineContentStmt(stmt, ic, bindings)
 	}
 }
+
+// inlineCtx carries the state of one program's content inlining.
+type inlineCtx struct {
+	collections map[string][]content.Entry
+	// use limits the inlined entry fields to the ones the program mentions.
+	use *content.FieldUse
+	// sites are the getCollection calls left to run in the browser: chains
+	// that could not be folded at build time and bare collection reads.
+	sites []ast.Pos
+	depth int
+}
+
+// collectFieldUse gathers every identifier and string the program mentions, so
+// collection entries are inlined with only the fields the code can read
+// (slug and path always stay). Code that reads fields dynamically keeps all.
+func collectFieldUse(prog *ast.Program) *content.FieldUse {
+	use := &content.FieldUse{Names: map[string]bool{}}
+	var walk func(v reflect.Value)
+	add := func(str string) {
+		for _, w := range identWordRe.FindAllString(str, -1) {
+			use.Names[w] = true
+			if w == "Object" || w == "JSON" || w == "Reflect" {
+				use.All = true
+			}
+		}
+	}
+	walk = func(v reflect.Value) {
+		switch v.Kind() {
+		case reflect.Interface:
+			if !v.IsNil() {
+				walk(v.Elem())
+			}
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			switch x := v.Interface().(type) {
+			case *ast.MemberExpr:
+				if x.Computed {
+					if _, lit := x.Property.(*ast.Literal); !lit {
+						use.All = true
+					}
+				}
+			case *ast.ObjectProp:
+				if x.Spread || x.Computed {
+					use.All = true
+				}
+			case *ast.JSXAttr:
+				if x.Spread {
+					use.All = true
+				}
+			case *ast.UnaryExpr:
+				if x.Op == "..." {
+					use.All = true
+				}
+			}
+			walk(v.Elem())
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				if v.Type().Field(i).IsExported() {
+					walk(v.Field(i))
+				}
+			}
+		case reflect.String:
+			add(v.String())
+		}
+	}
+	walk(reflect.ValueOf(prog.Body))
+	return use
+}
+
+var identWordRe = regexp.MustCompile(`[A-Za-z_$][A-Za-z0-9_$]*`)
 
 // collectLiteralBindings maps local/module identifiers bound to a literal
 // expression to their JS source, so collection chain evaluation can reference
@@ -129,56 +215,56 @@ func literalJS(expr ast.Expr) (string, bool) {
 
 // inlineContentStmt walks a statement, replacing getCollection call chains with
 // literal arrays.
-func inlineContentStmt(stmt ast.Stmt, collections map[string][]content.Entry, bindings map[string]string) {
+func inlineContentStmt(stmt ast.Stmt, ic *inlineCtx, bindings map[string]string) {
 	switch s := stmt.(type) {
 	case *ast.ExportStmt:
 		if s.Declaration != nil {
-			inlineContentStmt(s.Declaration, collections, bindings)
+			inlineContentStmt(s.Declaration, ic, bindings)
 		}
 	case *ast.FnDecl:
 		for _, inner := range s.Body {
-			inlineContentStmt(inner, collections, bindings)
+			inlineContentStmt(inner, ic, bindings)
 		}
 	case *ast.VarStmt:
 		for _, d := range s.Decls {
 			if d.Init != nil {
-				d.Init = inlineContentExpr(d.Init, collections, bindings)
+				d.Init = inlineContentExpr(d.Init, ic, bindings)
 			}
 		}
 	case *ast.ReturnStmt:
 		if s.Value != nil {
-			s.Value = inlineContentExpr(s.Value, collections, bindings)
+			s.Value = inlineContentExpr(s.Value, ic, bindings)
 		}
 	case *ast.ExprStmt:
 		if s.Expression != nil {
-			s.Expression = inlineContentExpr(s.Expression, collections, bindings)
+			s.Expression = inlineContentExpr(s.Expression, ic, bindings)
 		}
 	case *ast.IfStmt:
 		if s.Test != nil {
-			s.Test = inlineContentExpr(s.Test, collections, bindings)
+			s.Test = inlineContentExpr(s.Test, ic, bindings)
 		}
 		for _, inner := range s.Consequent {
-			inlineContentStmt(inner, collections, bindings)
+			inlineContentStmt(inner, ic, bindings)
 		}
 		for _, inner := range s.Alternate {
-			inlineContentStmt(inner, collections, bindings)
+			inlineContentStmt(inner, ic, bindings)
 		}
 	case *ast.BlockStmt:
 		for _, inner := range s.Body {
-			inlineContentStmt(inner, collections, bindings)
+			inlineContentStmt(inner, ic, bindings)
 		}
 	case *ast.ForStmt:
 		if s.Test != nil {
-			s.Test = inlineContentExpr(s.Test, collections, bindings)
+			s.Test = inlineContentExpr(s.Test, ic, bindings)
 		}
 		for _, inner := range s.Body {
-			inlineContentStmt(inner, collections, bindings)
+			inlineContentStmt(inner, ic, bindings)
 		}
 	}
 }
 
 // inlineContentExpr rewrites getCollection(...) chains within an expression.
-func inlineContentExpr(expr ast.Expr, collections map[string][]content.Entry, bindings map[string]string) ast.Expr {
+func inlineContentExpr(expr ast.Expr, ic *inlineCtx, bindings map[string]string) ast.Expr {
 	if expr == nil {
 		return nil
 	}
@@ -186,12 +272,15 @@ func inlineContentExpr(expr ast.Expr, collections map[string][]content.Entry, bi
 	case *ast.CallExpr:
 		// getCollection("name")
 		if lit := getCollectionName(e); lit != "" {
-			return literalArrayExpr(collections[lit])
+			if ic.depth == 0 {
+				ic.sites = append(ic.sites, e.Position)
+			}
+			return literalArrayExpr(ic.collections[lit], ic.use)
 		}
 		// `...map(fn)` rooted at getCollection: fold the receiver chain
 		// (filter/sort/etc.) to a literal array so the existing `.map()` list
 		// resolution sees real items. The `.map` itself is left intact.
-		if arr := foldContentMapReceiver(e, collections, bindings); arr != nil {
+		if arr := foldContentMapReceiver(e, ic.collections, bindings); arr != nil {
 			if mem, ok := e.Callee.(*ast.MemberExpr); ok {
 				mem.Object = arr
 			}
@@ -199,47 +288,62 @@ func inlineContentExpr(expr ast.Expr, collections map[string][]content.Entry, bi
 		}
 		// Any other chain rooted at getCollection (e.g. `.filter().sort()`)
 		// folds wholesale to a literal array.
-		if arr := foldCollectionChain(e, collections, bindings); arr != nil {
+		if arr := foldCollectionChain(e, ic.collections, bindings); arr != nil {
 			return arr
 		}
-		e.Callee = inlineContentExpr(e.Callee, collections, bindings)
+		if rootCollectionName(e) != "" {
+			// Unfoldable chain: the collection stays in the page script.
+			if ic.depth == 0 {
+				ic.sites = append(ic.sites, e.Position)
+			}
+			ic.depth++
+			defer func() { ic.depth-- }()
+		}
+		e.Callee = inlineContentExpr(e.Callee, ic, bindings)
 		for i, arg := range e.Args {
-			e.Args[i] = inlineContentExpr(arg, collections, bindings)
+			e.Args[i] = inlineContentExpr(arg, ic, bindings)
 		}
 		return e
 	case *ast.MemberExpr:
-		if arr := foldCollectionChain(e, collections, bindings); arr != nil {
+		if arr := foldCollectionChain(e, ic.collections, bindings); arr != nil {
 			return arr
 		}
-		e.Object = inlineContentExpr(e.Object, collections, bindings)
+		if rootCollectionName(e) != "" {
+			if ic.depth == 0 {
+				ic.sites = append(ic.sites, e.Position)
+			}
+			ic.depth++
+			defer func() { ic.depth-- }()
+		}
+		e.Object = inlineContentExpr(e.Object, ic, bindings)
 		return e
 	case *ast.ArrayExpr:
 		for i, el := range e.Elements {
-			e.Elements[i] = inlineContentExpr(el, collections, bindings)
+			e.Elements[i] = inlineContentExpr(el, ic, bindings)
 		}
 		return e
 	case *ast.ObjectExpr:
 		for _, prop := range e.Properties {
 			if prop.Value != nil {
-				prop.Value = inlineContentExpr(prop.Value, collections, bindings)
+				prop.Value = inlineContentExpr(prop.Value, ic, bindings)
 			}
 		}
 		return e
 	case *ast.BinaryExpr:
-		e.Left = inlineContentExpr(e.Left, collections, bindings)
-		e.Right = inlineContentExpr(e.Right, collections, bindings)
+		e.Left = inlineContentExpr(e.Left, ic, bindings)
+		e.Right = inlineContentExpr(e.Right, ic, bindings)
 		return e
 	case *ast.ConditionalExpr:
-		e.Test = inlineContentExpr(e.Test, collections, bindings)
-		e.Consequent = inlineContentExpr(e.Consequent, collections, bindings)
-		e.Alternate = inlineContentExpr(e.Alternate, collections, bindings)
+		e.Test = inlineContentExpr(e.Test, ic, bindings)
+		e.Consequent = inlineContentExpr(e.Consequent, ic, bindings)
+		e.Alternate = inlineContentExpr(e.Alternate, ic, bindings)
 		return e
 	case *ast.UnaryExpr:
-		e.Arg = inlineContentExpr(e.Arg, collections, bindings)
+		e.Arg = inlineContentExpr(e.Arg, ic, bindings)
 		return e
 	case *ast.TemplateExpr:
 		for i, part := range e.Parts {
-			e.Parts[i] = inlineContentExpr(part, collections, bindings)
+			e.Parts[i] = inlineContentExpr(part, ic, bindings)
 		}
 		return e
 	case *ast.ArrowFn:
@@ -247,34 +351,34 @@ func inlineContentExpr(expr ast.Expr, collections map[string][]content.Entry, bi
 		// the map callback contains an element binding, not getCollection.
 		return e
 	case *ast.JSXElement:
-		inlineContentJSX(e, collections, bindings)
+		inlineContentJSX(e, ic, bindings)
 		return e
 	case *ast.JSXFragment:
-		inlineContentJSXChildren(e.Children, collections, bindings)
+		inlineContentJSXChildren(e.Children, ic, bindings)
 		return e
 	}
 	return expr
 }
 
-func inlineContentJSX(el *ast.JSXElement, collections map[string][]content.Entry, bindings map[string]string) {
+func inlineContentJSX(el *ast.JSXElement, ic *inlineCtx, bindings map[string]string) {
 	for _, attr := range el.Opening.Attributes {
 		if attr.Spread || attr.Value == nil {
 			continue
 		}
-		attr.Value = inlineContentExpr(attr.Value, collections, bindings)
+		attr.Value = inlineContentExpr(attr.Value, ic, bindings)
 	}
-	inlineContentJSXChildren(el.Children, collections, bindings)
+	inlineContentJSXChildren(el.Children, ic, bindings)
 }
 
-func inlineContentJSXChildren(children []ast.JSXChild, collections map[string][]content.Entry, bindings map[string]string) {
+func inlineContentJSXChildren(children []ast.JSXChild, ic *inlineCtx, bindings map[string]string) {
 	for _, child := range children {
 		switch c := child.(type) {
 		case *ast.JSXExprContainer:
-			c.Expression = inlineContentExpr(c.Expression, collections, bindings)
+			c.Expression = inlineContentExpr(c.Expression, ic, bindings)
 		case *ast.JSXElementChild:
-			inlineContentJSX(c.Element, collections, bindings)
+			inlineContentJSX(c.Element, ic, bindings)
 		case *ast.JSXFragmentChild:
-			inlineContentJSXChildren(c.Fragment.Children, collections, bindings)
+			inlineContentJSXChildren(c.Fragment.Children, ic, bindings)
 		}
 	}
 }
@@ -664,8 +768,8 @@ func sortObjectProps(props []*ast.ObjectProp) {
 // content.CollectionJS) back into an AST ArrayExpr. Parsing the generated
 // source reuses the real lexer/parser, so nested objects, arrays, and escaping
 // are handled uniformly.
-func literalArrayExpr(entries []content.Entry) ast.Expr {
-	src := content.CollectionJS(entries)
+func literalArrayExpr(entries []content.Entry, use *content.FieldUse) ast.Expr {
+	src := content.CollectionJSFields(entries, use)
 	prog := parseInlineSource(src)
 	if prog == nil {
 		return &ast.ArrayExpr{}
@@ -684,4 +788,53 @@ func literalArrayExpr(entries []content.Entry) ast.Expr {
 func parseInlineSource(src string) *ast.Program {
 	toks := lexer.New(src).Tokenize()
 	return parser.New(toks).ParseProgram()
+}
+
+// warnShippedCollections reports a content collection whose entries ended up
+// in the page's hydration script because a getCollection chain could not be
+// folded at build time.
+func (b *Builder) warnShippedCollections(page string, prog *ast.Program, js string) {
+	if len(b.contentCollections) == 0 || js == "" {
+		return
+	}
+	var shipped []string
+	drafts := 0
+	for name, entries := range b.contentCollections {
+		hit := false
+		for _, e := range entries {
+			if e.Path != "" && strings.Contains(js, e.Path) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			continue
+		}
+		shipped = append(shipped, name)
+		for _, e := range entries {
+			if d, _ := e.Data["draft"].(bool); d {
+				drafts++
+			}
+		}
+	}
+	if len(shipped) == 0 {
+		return
+	}
+	sort.Strings(shipped)
+	pos := ast.Pos{Line: 1, Col: 1}
+	if v, ok := b.collectionSites.Load(prog); ok {
+		if sites := v.([]ast.Pos); len(sites) > 0 {
+			pos = sites[0]
+		}
+	}
+	msg := "collection " + strings.Join(shipped, ", ") + " is evaluated in the browser: its entries are copied into the page script"
+	if drafts > 0 {
+		msg += fmt.Sprintf(" (draft entries included: %d)", drafts)
+	}
+	d := diag.New(b.relPath(page), pos.Line, pos.Col, msg,
+		"fold the chain at build time (use literal or const values in filter/sort/find), or compute the list in generateStaticParams or a server-rendered page; only the fields this page mentions are shipped",
+		"")
+	d.Code = diag.CodeCollectionShipped
+	d.Severity = diag.SeverityWarning
+	fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n      hint: %s\n", cYellow, cReset, d.Error(), d.Hint)
 }

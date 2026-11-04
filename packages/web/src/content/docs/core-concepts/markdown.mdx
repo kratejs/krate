@@ -210,3 +210,12 @@ fails the build (and `krate check`) instead of being skipped.
 Collection data is folded into the page at build time and is never copied to
 the browser: a page that only reads one entry ships none of the collection (or
 its draft entries) in its JavaScript.
+
+A chain that depends on a browser-only value (for example
+`getCollection("blog").filter((p) => p.data.tag === tag())` with a signal) cannot
+be folded, so it runs in the browser and the entries are copied into the page
+script. Krate warns with `KR8810` at the call and ships only the fields the page
+mentions: `body` and `html` stay out unless the code reads them, but every
+entry, drafts included, is still part of the script. Filter with build-time
+values, or compute the list on the server, to keep the collection out of the
+browser.
