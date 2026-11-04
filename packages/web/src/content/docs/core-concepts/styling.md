@@ -99,12 +99,16 @@ stripped and `@layer { ... }` blocks are unwrapped (Krate owns the layer order).
 Supported features:
 
 - **Variants:** state (`hover:`, `focus:`, `active:`, `disabled:`, ...),
-  `group-*`/`peer-*` (incl. named), `data-*`/`aria-*`/`has-*`, responsive
-  breakpoints from `theme.screens` (`sm:`, `md:`, ..., plus `min-*`/`max-*`),
-  `dark:`, `motion-safe:`/`motion-reduce:`, `print:`, capability queries
+  `group-*`/`peer-*` (incl. named: `group-hover/item:`), `data-*`/`aria-*`/
+  `has-*`/`in-*` (these match the element itself: `data-[state=open]:` is
+  `.x[data-state="open"]`), responsive breakpoints from `theme.screens` (`sm:`,
+  `md:`, ..., plus `min-*`/`max-*` and `min-[900px]:`), `dark:`,
+  `motion-safe:`/`motion-reduce:`, `print:`, capability queries
   (`pointer-coarse:`, `noscript:`, `forced-colors:`, ...), positional
-  (`nth-*`, `first-line:`), `not-*`, child (`*:`, `**:`), container queries
-  (`@sm:`, `@[400px]:`), and arbitrary variants (`[&:nth-child(3)]:`).
+  (`nth-*`, `first-line:`), `not-*`, child (`*:`, `**:`), `starting:`, container
+  queries (`@container`, `@container/name`, `@sm:`, `@max-md:`, `@sm/name:`,
+  `@[400px]:`, sizes from `--container-*`), and arbitrary variants
+  (`[&:nth-child(3)]:`, `[&_p]:`, `[@media(min-width:900px)]:`).
 - **Arbitrary values** for nearly every property, with type disambiguation
   (`w-[100px]`, `bg-[url(/a.png)]`, `bg-[length:8px]`, `text-[14px]` ->
   font-size vs `text-[#fff]` -> color, `grid-cols-[repeat(3,_1fr)]`), including
@@ -116,6 +120,25 @@ Supported features:
   (`animate-*`), **blend modes**, plus layout, typography, interactivity,
   3D-transform, border, and background families.
 - Preflight is emitted by default to match Tailwind. Set `tailwind.preflight: false` to opt out.
+
+### Variant order, stacking, prefix and important
+
+- Stacked variants apply left to right as in Tailwind v4: `hover:before:` is
+  `.x:hover::before` and `*:hover:` is `:is(.x > *):hover`. `hover:` is gated by
+  `@media (hover: hover)`.
+- Rules are emitted in Tailwind's cascade order: utilities without variants
+  first, then variants by Tailwind's registration order (so `disabled:` beats
+  `hover:`, `dark:` beats breakpoints, and `max-md:` comes before `max-sm:`),
+  breakpoints by size (compared in px across `px` and `rem`), and utilities by
+  Tailwind's property order (so `pl-4` beats `px-2` regardless of name).
+- Class-mode dark mode uses `:where(.dark, .dark *)`; `darkMode:
+  ["class", "[data-mode=dark]"]` uses that selector instead of `.dark`.
+- `prefix: "tw"` makes utilities `tw:flex` / `tw:hover:flex`; unprefixed
+  utilities are then unknown. CSS variables are not prefixed (Krate resolves
+  theme values at build time).
+- `important: true` marks every utility `!important`; a selector string
+  (`important: "#app"`) scopes every utility under it (the Tailwind v3 form).
+  The per-class `!` works as a prefix (`!p-4`) or suffix (`p-4!`).
 
 ### Differences from Tailwind
 
