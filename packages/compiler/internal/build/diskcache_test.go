@@ -247,3 +247,62 @@ export default function Layout(props: any) { return <div class="shell">{props.ch
 		t.Fatalf("layout CSS rebuild wrote stale CSS: %s", data)
 	}
 }
+
+// A cached page must replay the warnings its cold build printed, and quality
+// checks (custom rules included) must see a parsed AST on cold, warm and
+// check-only runs alike.
+func TestDiskCacheReplaysWarningsAndKeepsAST(t *testing.T) {
+	t.Setenv("KRATE_NO_BUILD_CACHE", "")
+	root := t.TempDir()
+	writeFileRel(t, root, "src/pages/index.tsx", `export default function Page() { return <div><Counter /></div>; }
+`)
+	writeFileRel(t, root, "rules/ast.js", `export default function check(page) {
+  return [{ rule: "custom/ast", message: "ast=" + (page.ast ? "present" : "null") + " " + page.route, severity: "warning" }];
+}
+`)
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.Minify = false
+	cfg.Checks = map[string]any{"custom": []any{"rules/ast.js"}}
+
+	run := func() (*Builder, string) {
+		var b *Builder
+		out := captureStderr(t, func() {
+			b = New(root, cfg)
+			if err := b.BuildAll(); err != nil {
+				t.Fatalf("BuildAll: %v", err)
+			}
+		})
+		return b, out
+	}
+	_, cold := run()
+	b2, warm := run()
+	if hits, _ := b2.diskCache.stats(); hits == 0 {
+		t.Fatal("second build did not hit the cache; test is not exercising replay")
+	}
+	const needle = "Counter"
+	if !strings.Contains(cold, needle) {
+		t.Skipf("page produced no warning on a cold build: %q", cold)
+	}
+	if strings.Count(warm, needle) == 0 {
+		t.Errorf("warm build dropped the cold build's warning:\ncold:\n%s\nwarm:\n%s", cold, warm)
+	}
+
+	findings, _, err := b2.CheckSite(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := false
+	for _, f := range findings {
+		if f.Rule == "custom/ast" {
+			got = true
+			if !strings.Contains(f.Message, "ast=present") {
+				t.Errorf("krate check gave the custom rule %q, want page.ast present", f.Message)
+			}
+		}
+	}
+	if !got {
+		t.Fatalf("custom rule did not run under CheckSite: %+v", findings)
+	}
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/check"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/deploy"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/fix"
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
@@ -314,14 +316,24 @@ func parseFlags(args []string) (cliFlags, []string) {
 }
 
 func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
+	root, cfg, err := loadConfig(flags, args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sConfig error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+	return root, cfg
+}
+
+// loadConfig is resolveConfig without the exit, so the dev server can report a
+// broken config edit and keep running.
+func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 	root := "."
 	if len(args) > 1 {
 		root = args[1]
 	}
 	root, err := filepath.Abs(root)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		return "", nil, err
 	}
 
 	command := ""
@@ -341,14 +353,14 @@ func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 	loadProjectEnv(root, defaultMode, flags.Verbose)
 	mode := environ.Mode(defaultMode)
 
+	config.Warnings = nil
 	cfg, err := config.LoadWith(root, config.LoadOptions{
 		ConfigPath: flags.ConfigPath,
 		Command:    command,
 		Mode:       mode,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%sConfig error:%s %v\n", cRed, cReset, err)
-		os.Exit(1)
+		return "", nil, err
 	}
 	for _, w := range config.Warnings {
 		fmt.Fprintf(os.Stderr, "  %s! config:%s %s\n", cYellow, cReset, w)
@@ -378,7 +390,7 @@ func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 		cfg.Compress.Gzip = true
 	}
 
-	return root, cfg
+	return root, cfg, nil
 }
 
 // loadProjectEnv resolves the project environment mode (KRATE_ENV/NODE_ENV)
@@ -493,10 +505,26 @@ func writeHeapProfile(path string) {
 }
 
 func runDev(flags cliFlags, args []string) {
+	first := true
+	for {
+		if !runDevOnce(flags, args, first) {
+			return
+		}
+		first = false
+	}
+}
+
+// runDevOnce builds and serves the project until the process fails or a config
+// or env change asks for a restart (it then returns true).
+func runDevOnce(flags cliFlags, args []string, first bool) bool {
 	root, cfg := resolveConfig(flags, args)
 	env := loadProjectEnv(root, "development", flags.Verbose)
 
-	fmt.Printf("%s%s  Starting dev server...%s\n", cBold, cCyan, cReset)
+	if first {
+		fmt.Printf("%s%s  Starting dev server...%s\n", cBold, cCyan, cReset)
+	} else {
+		fmt.Printf("%s%s  Restarting dev server with the new settings...%s\n", cBold, cCyan, cReset)
+	}
 	start := time.Now()
 
 	builder := build.New(root, cfg)
@@ -505,6 +533,15 @@ func runDev(flags cliFlags, args []string) {
 	builder.Env = env
 
 	hub := build.NewDevHub()
+	builder.DevReload = func(reason string) bool {
+		fmt.Printf("  %s%s changed; reloading configuration...%s\n", cYellow, reason, cReset)
+		if _, _, err := loadConfig(flags, args); err != nil {
+			fmt.Fprintf(os.Stderr, "%sConfig error:%s %v\n", cRed, cReset, err)
+			hub.Publish(build.DevEvent{Type: "reload", Diagnostics: []diag.Diagnostic{{File: reason, Message: "config: " + err.Error(), Hint: "fix " + reason + "; the dev server keeps running with the previous settings"}}})
+			return false
+		}
+		return true
+	}
 	if err := builder.BuildAll(); err != nil {
 		// A failed initial build must not kill the dev server: keep serving and
 		// publish the diagnostics so the browser overlay shows them (and the
@@ -516,20 +553,27 @@ func runDev(flags cliFlags, args []string) {
 	errc := make(chan error, 2)
 
 	go func() {
-		if err := build.ServeDev(root, cfg, hub, start); err != nil {
-			errc <- err
-		}
+		errc <- build.ServeDev(root, cfg, hub, start)
 	}()
 
 	go func() {
-		if err := build.Watch(builder, 500*time.Millisecond, hub); err != nil {
-			errc <- err
-		}
+		errc <- build.Watch(builder, 75*time.Millisecond, hub)
 	}()
 
 	err := <-errc
-	fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
+	if errors.Is(err, build.ErrDevRestart) {
+		// Wait for the other side (the server finishing its sidecar cleanup).
+		if err2 := <-errc; errors.Is(err2, build.ErrDevRestart) {
+			return true
+		} else if err2 != nil {
+			err = err2
+		}
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
+	}
 	os.Exit(1)
+	return false
 }
 
 func runServe(flags cliFlags, args []string) {
@@ -681,6 +725,10 @@ func runInspect(flags cliFlags, args []string) {
 // drained to io.Discard, so library build chatter never corrupts structured
 // stdout output.
 func withSuppressedStdout(fn func()) {
+	// The build's progress writer captured os.Stdout when the package
+	// initialised, so swapping os.Stdout alone does not silence it.
+	build.SetOutput(io.Discard)
+	defer build.SetOutput(os.Stdout)
 	old := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {

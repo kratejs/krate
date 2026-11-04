@@ -646,6 +646,18 @@ func (c *Config) ServerPort() int {
 	return 3000
 }
 
+// DevPort returns the listen port for `krate dev`: devServer.port wins, then
+// server.port, then 3000.
+func (c *Config) DevPort() int {
+	if c.DevServer.Port != 0 {
+		return c.DevServer.Port
+	}
+	if c.Server.Port != 0 {
+		return c.Server.Port
+	}
+	return 3000
+}
+
 // MaxBodyBytes returns the request body cap for general (page/middleware)
 // requests, honoring server.maxBodySize when set.
 func (c *Config) MaxBodyBytes() int64 {

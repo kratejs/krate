@@ -16,6 +16,9 @@ type DevEvent struct {
 	BuildOK     bool              `json:"buildOk"`
 	ClientError *ClientError      `json:"clientError,omitempty"`
 	Page        string            `json:"page,omitempty"`
+	// CSSOnly marks a rebuild caused solely by stylesheet edits, so the
+	// browser can swap stylesheets in place instead of reloading.
+	CSSOnly bool `json:"cssOnly,omitempty"`
 }
 
 // ClientError is a runtime error reported by a browser client via
@@ -39,12 +42,37 @@ type DevHub struct {
 	mu   sync.Mutex
 	subs map[chan DevEvent]struct{}
 	last *DevEvent
+
+	// hook runs once per published rebuild event, before the fan-out, so
+	// server-side state (the SSR renderer cache) is invalidated exactly once
+	// whether zero, one or many tabs are connected.
+	hookMu sync.Mutex
+	hook   func(DevEvent)
+
+	restartOnce sync.Once
+	restart     chan struct{}
 }
 
 // NewDevHub creates an empty hub.
 func NewDevHub() *DevHub {
-	return &DevHub{subs: make(map[chan DevEvent]struct{})}
+	return &DevHub{subs: make(map[chan DevEvent]struct{}), restart: make(chan struct{})}
 }
+
+// SetReloadHook installs fn to run once for every "reload" event published.
+func (h *DevHub) SetReloadHook(fn func(DevEvent)) {
+	h.hookMu.Lock()
+	h.hook = fn
+	h.hookMu.Unlock()
+}
+
+// RequestRestart asks the running dev server to shut down so the caller can
+// start a fresh one (config or env changed). Safe to call more than once.
+func (h *DevHub) RequestRestart() {
+	h.restartOnce.Do(func() { close(h.restart) })
+}
+
+// RestartRequested is closed once RequestRestart has been called.
+func (h *DevHub) RestartRequested() <-chan struct{} { return h.restart }
 
 // Subscribe registers a listener. Every Publish is delivered to the returned
 // channel (dropped if the listener is too slow). Call cancel to unsubscribe.
@@ -68,6 +96,14 @@ func (h *DevHub) Subscribe() (<-chan DevEvent, func()) {
 // build state. BuildOK is derived from the diagnostics so callers cannot forget
 // to set it.
 func (h *DevHub) Publish(ev DevEvent) {
+	if ev.Type == "reload" {
+		h.hookMu.Lock()
+		hook := h.hook
+		h.hookMu.Unlock()
+		if hook != nil {
+			hook(ev)
+		}
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	ev.BuildOK = len(ev.Diagnostics) == 0

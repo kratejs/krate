@@ -95,6 +95,29 @@ describe('dev-overlay', () => {
   });
 });
 
+describe('dev-overlay rebuild handling', () => {
+  it('clears a build error when a rebuild of another route succeeds', () => {
+    history.pushState({}, '', '/current');
+    FakeEventSource.last!.emit('build-error', { diagnostics: [{ file: 'b.tsx', message: 'stale-build-error' }], buildOk: false });
+    const overlayEl = devRoot()!.querySelector('.overlay') as HTMLElement;
+    expect(overlayEl.hidden).toBe(false);
+    expect((devRoot()!.querySelector('.list') as HTMLElement).textContent).toContain('stale-build-error');
+
+    // The fix landed on a different route: no reload here, but the error goes.
+    FakeEventSource.last!.emit('reload', { pages: ['/elsewhere'] });
+    const text = (devRoot()!.querySelector('.list') as HTMLElement).textContent || '';
+    expect(text).not.toContain('stale-build-error');
+  });
+
+  it('shows a runtime error once when the server echoes it back', () => {
+    const before = ((devRoot()!.querySelector('.list') as HTMLElement).textContent || '').split('echo-dup-error').length - 1;
+    window.dispatchEvent(new ErrorEvent('error', { message: 'echo-dup-error', filename: 'x.js', lineno: 1, colno: 1 }));
+    FakeEventSource.last!.emit('client-error', { clientError: { message: 'echo-dup-error', stack: '' } });
+    const text = (devRoot()!.querySelector('.list') as HTMLElement).textContent || '';
+    expect(text.split('echo-dup-error').length - 1 - before).toBe(1);
+  });
+});
+
 describe('routeMatches', () => {
   it('matches unprefixed patterns against a base-path URL', () => {
     expect(overlay.routeMatches('/about', '/docs/about', '/docs')).toBe(true);

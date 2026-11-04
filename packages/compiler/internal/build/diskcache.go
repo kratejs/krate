@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	krateversion "github.com/kratejs/krate/packages/compiler/internal/version"
 )
@@ -44,7 +45,7 @@ type cachedFileHash struct {
 }
 
 // diskPageEntry is the serialized form of a cached page. Program is
-// intentionally omitted (checks treat a nil Program as "AST rules skipped").
+// not stored; quality checks re-parse the source when they need an AST.
 type diskPageEntry struct {
 	Key         string
 	OutName     string
@@ -74,6 +75,9 @@ type diskPageEntry struct {
 	DynamicParams     bool
 	StaticOnly        bool
 	IsDynamicTemplate bool
+
+	// Warnings are the page's build warnings, replayed on a cache hit.
+	Warnings []diag.Diagnostic
 
 	Deps        []string
 	DepHashes   []string
@@ -121,7 +125,7 @@ func (c *buildDiskCache) setContentHash(contentHash string) {
 // diskCacheSchema is bumped whenever the shape or the semantics of cached page
 // output change (e.g. new emit passes such as DCE or source maps) so entries
 // written by an older pipeline can never be replayed.
-var diskCacheSchema = "4"
+var diskCacheSchema = "5"
 
 var (
 	buildStampOnce  sync.Once
