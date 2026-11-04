@@ -704,6 +704,10 @@ type regionFrame struct {
 	// Fatal marks a failed render that has no usable baked content (an async
 	// server component): the response must be an error, not the shell.
 	Fatal bool `json:"fatal,omitempty"`
+	// Digest and Stack describe a failed render: the renderer logs the full
+	// error with the digest, and the server shows visitors only the digest.
+	Digest string `json:"digest,omitempty"`
+	Stack  string `json:"stack,omitempty"`
 }
 
 // regionPageResult carries sidecar outcome back to the caller so it can apply
@@ -731,6 +735,9 @@ type regionPageResult struct {
 	// noStore is true when any region read request state or otherwise opted
 	// out of caching. The page response must not be publicly cacheable.
 	noStore bool
+	// errStack and errDigest describe the failed render behind renderErr.
+	errStack  string
+	errDigest string
 }
 
 // regionBoundary is one splice marker and its nested markers.
@@ -863,7 +870,7 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, shells *regio
 }
 
 func streamRegionPageMode(w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string, outOfOrder bool) regionPageResult {
-	return streamRegionPageModeSC(w, flusher, shells, absOut, route, ssrPort, params, query, headers, goRenders, renderGo, isISR, revalidate, internalSecret, outOfOrder, false)
+	return streamRegionPageModeSC(w, flusher, shells, absOut, route, ssrPort, params, query, headers, goRenders, renderGo, isISR, revalidate, internalSecret, outOfOrder, false, false)
 }
 
 // streamRegionPageModeSC is streamRegionPageMode with serverComponents set for
@@ -871,7 +878,10 @@ func streamRegionPageMode(w http.ResponseWriter, flusher http.Flusher, shells *r
 // when every dynamic region is a Suspense boundary: a failed boundary then
 // keeps its fallback (React semantics), while a bare async component outside
 // Suspense stays on the ordered path so its failure can still become a 500.
-func streamRegionPageModeSC(w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string, outOfOrder, serverComponents bool) regionPageResult {
+// failOnRenderErr turns a failed page render into a fatal result (nothing is
+// written) so the caller can answer with the route's error page instead of
+// the baked body.
+func streamRegionPageModeSC(w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string, outOfOrder, serverComponents, failOnRenderErr bool) regionPageResult {
 	res := regionPageResult{}
 	relPath := strings.TrimPrefix(route, "/")
 	if relPath == "" {
@@ -961,6 +971,10 @@ func streamRegionPageModeSC(w http.ResponseWriter, flusher http.Flusher, shells 
 				regionHTML[id] = resolved
 			}
 		}
+	}
+
+	if failOnRenderErr && res.renderErr != "" && res.fatalErr == "" && !res.notFound && res.redirect == "" {
+		res.fatalErr = res.renderErr
 	}
 
 	// A page-region render that 404s (unknown dynamic variant) or redirects,
@@ -1114,6 +1128,7 @@ func fetchNodeRegions(ssrPort int, route string, params, query, headers map[stri
 				// Keep the baked content and surface the failure to the caller.
 				if frame.Status >= 500 || frame.Error != "" {
 					res.renderErr = frame.Error
+					res.errStack, res.errDigest = frame.Stack, frame.Digest
 					if res.renderErr == "" {
 						res.renderErr = fmt.Sprintf("page-region render failed with status %d", frame.Status)
 					}
@@ -1144,6 +1159,7 @@ func fetchNodeRegions(ssrPort int, route string, params, query, headers map[stri
 			}
 			if res.renderErr == "" {
 				res.renderErr = msg
+				res.errStack, res.errDigest = frame.Stack, frame.Digest
 			}
 			if frame.ID != "" {
 				framesLeft--
@@ -1543,9 +1559,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 	}
 
-	// Wrap file server to serve custom 404.html if it exists
-	notif404File := filepath.Join(absOut, "404.html")
-	custom404, _ := os.ReadFile(notif404File)
+	// Segment pages: the nearest 404/500 page for a request (see segments.go).
+	segs := newSegmentIndex(absOut)
+	devMode := hub != nil
 
 	// Scan for dynamic routes ([param] directories) in the output
 	dynRoutes := findDynamicRoutes(absOut)
@@ -1621,12 +1637,19 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 		// A concrete static file beats any dynamic [param] pattern: /items/alpha
 		// must resolve to the static page, not the /items/[id] template.
+		closedPattern := ""
 		if !staticRouteExists(absOut, r.URL.Path) {
 			// Check dynamic routes - if a URL matches a [param] pattern, serve the template
 			for _, dr := range dynRoutes {
 				if staticOnlyRoutes[normalizeRoutePattern(dr.pattern)] {
 					// Static-only route: valid params were baked at build time and
-					// the fallback template was not emitted. Unknown params 404.
+					// the fallback template was not emitted. Unknown params 404, with
+					// the not-found page nearest to that route.
+					if closedPattern == "" {
+						if _, ok := matchDynamicRoute(r.URL.Path, dr.pattern); ok {
+							closedPattern = dr.pattern
+						}
+					}
 					continue
 				}
 				if params, ok := matchDynamicRoute(r.URL.Path, dr.pattern); ok {
@@ -1649,8 +1672,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 
 		// Only buffer document requests. Buffering every asset just to detect a
-		// missing one would retain whole images/videos/fonts in memory.
-		if len(custom404) == 0 || (!isHTMLDocRequest(r.URL.Path) && !strings.Contains(r.Header.Get("Accept"), "text/html")) {
+		// missing one would retain whole images/videos/fonts in memory, and a
+		// site without segment pages has nothing to substitute.
+		if entries, _ := segs.load(); len(entries) == 0 || (!isHTMLDocRequest(r.URL.Path) && !strings.Contains(r.Header.Get("Accept"), "text/html")) {
 			staticServer.ServeHTTP(w, r)
 			return
 		}
@@ -1658,10 +1682,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		buf := &captureResponse{status: http.StatusOK}
 		staticServer.ServeHTTP(buf, r)
 		if buf.status == http.StatusNotFound {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write(custom404)
-			return
+			if m, ok := segs.forURL(SegmentNotFound, r.URL.Path, closedPattern); ok && respondSegment(w, segs, m, http.StatusNotFound, nil) {
+				return
+			}
 		}
 		// Non-404: forward the buffered response
 		for k, v := range buf.header {
@@ -1907,20 +1930,21 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			regionPort = ssrPort
 		}
 		outOfOrder := page != nil && page.Mode == RenderStreaming.String()
-		rr := streamRegionPageModeSC(w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo, isISR, reval, ssr.InternalSecret(), outOfOrder, page.ServerComponents)
+		errMatch, hasErrPage := segs.forRoute(SegmentError, r.URL.Path, page.SegDir)
+		rr := streamRegionPageModeSC(w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo, isISR, reval, ssr.InternalSecret(), outOfOrder, page.ServerComponents, hasErrPage)
 		if rr.served && rr.fatalErr != "" {
-			// A server component failed: there is no meaningful baked body to
-			// fall back to, so answer 500 (the custom 500 page when present).
-			fmt.Fprintf(os.Stderr, "  %sServer component error (%s):%s %s\n", cRed, route, cReset, rr.fatalErr)
+			// The render failed: answer 500 with the route's nearest error page
+			// (the full error stays in the log, the page gets a sanitized one).
+			srvErr := newServerError(rr.fatalErr, rr.errStack, rr.errDigest, devMode)
+			fmt.Fprintf(os.Stderr, "  %sRender error (%s) [digest %s]:%s %s\n", cRed, route, srvErr.Digest, cReset, rr.fatalErr)
 			w.Header().Set("X-Krate-Error", "render")
 			w.Header().Del("X-Krate-Cache")
+			if hasErrPage && respondSegment(w, segs, errMatch, http.StatusInternalServerError, &srvErr) {
+				return
+			}
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusInternalServerError)
-			if data, err := os.ReadFile(filepath.Join(absOut, "500.html")); err == nil {
-				_, _ = w.Write(data)
-			} else {
-				_, _ = w.Write([]byte("<!doctype html><title>500</title><h1>Internal Server Error</h1>"))
-			}
+			_, _ = w.Write([]byte("<!doctype html><title>500</title><h1>Internal Server Error</h1>"))
 			return
 		}
 		if rr.served {
@@ -1942,14 +1966,14 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				}
 			}
 			if rr.notFound {
-				if len(custom404) > 0 {
-					w.Header().Set("Content-Type", "text/html; charset=utf-8")
-					w.Header().Del("Cache-Control")
-					w.WriteHeader(404)
-					_, _ = w.Write(custom404)
-				} else {
-					http.NotFound(w, r)
+				// notFound() or an unmatched variant: the page nearest to the route,
+				// never cached as a success.
+				w.Header().Del("X-Krate-Cache")
+				if m, ok := segs.forRoute(SegmentNotFound, r.URL.Path, page.SegDir); ok && respondSegment(w, segs, m, http.StatusNotFound, nil) {
+					return
 				}
+				w.Header().Set("Cache-Control", "no-store")
+				http.NotFound(w, r)
 				return
 			}
 			if rr.redirect != "" {

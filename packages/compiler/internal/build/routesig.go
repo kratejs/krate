@@ -15,7 +15,7 @@ var routeDirSigCache sync.Map
 
 // routeSignature fingerprints the route-structure files that could wrap a page
 // without being among its dependencies yet: for every directory from the
-// page's own up to the pages root, which layout/template/loading files and
+// page's own up to the pages root, which layout/template/loading/error files and
 // @slot or (intercept) directories exist. A layout added or removed later
 // changes the signature, so the cached page is rebuilt.
 func (b *Builder) routeSignature(page string) string {
@@ -41,7 +41,7 @@ func routeDirSignature(dir string) string {
 		return v.(string)
 	}
 	special := map[string]bool{}
-	for _, names := range [][]string{layoutNames, templateNames, loadingNames} {
+	for _, names := range [][]string{layoutNames, templateNames, loadingNames, errorBoundaryNames} {
 		for _, n := range names {
 			special[n] = true
 		}

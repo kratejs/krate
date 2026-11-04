@@ -822,6 +822,21 @@ func runInspect(flags cliFlags, args []string) {
 		}
 		fmt.Printf("  %-7s %-44s %s%s\n", r.Mode, r.Route, r.Source, note)
 	}
+	if len(graph.Segments) > 0 {
+		fmt.Printf("\n  %d segment page dir(s)\n\n", len(graph.Segments))
+		for _, sg := range graph.Segments {
+			scope := ""
+			if sg.Group {
+				scope = " (route group)"
+			}
+			if sg.NotFound != "" {
+				fmt.Printf("  %-9s %-36s %s%s\n", "not-found", sg.Dir, sg.NotFound, scope)
+			}
+			if sg.Error != "" {
+				fmt.Printf("  %-9s %-36s %s%s\n", "error", sg.Dir, sg.Error, scope)
+			}
+		}
+	}
 }
 
 // withSuppressedStdout runs fn with os.Stdout redirected to a pipe that is

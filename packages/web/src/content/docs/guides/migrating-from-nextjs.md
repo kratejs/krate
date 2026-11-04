@@ -60,7 +60,8 @@ Next.js dependencies are left in place until the migrated app builds cleanly.
 The first pass:
 
 - copies `app/**/page.*`, `pages/**/*`, layouts, templates, `loading` files,
-  root `not-found`, and API handlers into `src/pages/` and `src/api/`, keeping
+  `not-found` and `error` files, and API handlers into `src/pages/` and
+  `src/api/`, keeping
   route groups, `@slot` directories, slot `default.tsx` files and intercepting
   `(.)x` segments in place (the Krate file router understands them);
 - copies Pages Router `_app` and wraps it as the root `_layout.tsx` shell;
@@ -76,8 +77,17 @@ The first pass:
 - rewrites `middleware.ts` to the standard `Request`/`Response` API, including a
   small `NextResponse` shim, static/local matcher checks, and cookie/IP/geo
   helpers; computed `config.matcher` arrays are checked at runtime;
-- strips root-layout `<html>`/`<body>` wrappers and generates error-boundary
-  layouts for `error.tsx`;
+- strips root-layout `<html>`/`<body>` wrappers;
+- maps `not-found.tsx` to `404.tsx` and `error.tsx` to `error.tsx` in the same
+  directory (route groups kept), where they are native
+  [segment pages](/docs/core-concepts/routing/#not-found-and-error-pages): the
+  nearest not-found page answers `notFound()` and unmatched URLs inside the
+  layouts, and `error.tsx` is the segment's error page and client error boundary
+  with `reset`. `global-error.tsx` becomes the root `error.tsx` (remove the
+  `<html>` and `<body>` it renders; Krate's root layout provides them), or a
+  manual item when a root `error.tsx` exists too. A directory that has a layout,
+  template, loading, error or not-found file keeps its page in that directory
+  (`dashboard/index.tsx`) so those files wrap it;
 - generates `next/navigation` hook helpers on the Krate router (with a hook-free
   server helper for `notFound`/`redirect`), maps `next/headers` and `next/cache`
   to `@krate/runtime/server`, rewrites common `next/server` API helpers, and maps

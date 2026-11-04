@@ -236,9 +236,10 @@ func TestLayoutWithoutChildrenIsNotPersistable(t *testing.T) {
 	}
 }
 
-// TestClassComponentLayoutNotPersistable: owner-tree pages hydrate layouts
-// through the owner tree, which cannot be partially skipped.
-func TestClassComponentLayoutNotPersistable(t *testing.T) {
+// TestClassComponentLayoutPersists: owner-tree pages register their scopes with
+// the owner tree, which tears owners down by route scope, so a layout stays
+// persistable and its scope is bracketed like on any other page.
+func TestClassComponentLayoutPersists(t *testing.T) {
 	root := lpWrite(t, map[string]string{
 		"src/pages/_layout.tsx": counterLayout,
 		"src/pages/index.tsx": `import { Component } from 'react';
@@ -255,11 +256,19 @@ export default function Home() { return <Clock />; }
 	}
 	html := lpRead(t, cfg, "index.html")
 	info := parseRouteInfo(t, html)
-	if info.Chain[0].Persist {
-		t.Errorf("layout on an owner-tree page must not be persistable: %+v", info.Chain)
+	if !info.Chain[0].Persist {
+		t.Errorf("layout on an owner-tree page should stay persistable: %+v", info.Chain)
 	}
-	if js := lpPageJS(t, cfg, "", html); strings.Contains(js, "krateEnterScope(") {
-		t.Errorf("owner-tree hydration must not be scoped:\n%s", js)
+	js := lpPageJS(t, cfg, "", html)
+	if !strings.Contains(js, "krateEnterScope(") {
+		t.Errorf("owner-tree hydration should bracket the layout scope:\n%s", js)
+	}
+	// The layout's owner is registered inside its scope, so the runtime can
+	// keep it while it drops the page's owners.
+	enter := strings.Index(js, "krateEnterScope(")
+	own := strings.Index(js[enter:], `__krateOwnF("Root_c0"`)
+	if own < 0 {
+		t.Errorf("layout owner should be registered inside the scope:\n%s", js)
 	}
 }
 

@@ -258,6 +258,34 @@ func TestBindServerListenerDevMovesToNextPort(t *testing.T) {
 func TestNestedErrorPagesConflict(t *testing.T) {
 	root := t.TempDir()
 	for rel, c := range map[string]string{
+		"src/pages/index.tsx":          devPage("home"),
+		"src/pages/blog/404.tsx":       devPage("BLOG404"),
+		"src/pages/blog/not-found.tsx": devPage("BLOG404B"),
+	} {
+		p := filepath.Join(root, rel)
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	err := New(root, cfg).BuildAll()
+	if err == nil {
+		t.Fatal("two not-found files for one directory must be a build error, not a coin flip")
+	}
+	for _, want := range []string{"blog/404.tsx", "blog/not-found.tsx", "KR9001"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %s: %v", want, err)
+		}
+	}
+}
+
+// A root 404 and a nested one are different segments: both build.
+func TestNestedNotFoundPagesAreNotAConflict(t *testing.T) {
+	root := t.TempDir()
+	for rel, c := range map[string]string{
 		"src/pages/index.tsx":    devPage("home"),
 		"src/pages/404.tsx":      devPage("ROOT404"),
 		"src/pages/blog/404.tsx": devPage("BLOG404"),
@@ -271,13 +299,13 @@ func TestNestedErrorPagesConflict(t *testing.T) {
 	cfg := config.Default()
 	cfg.PagesDir = filepath.Join(root, "src", "pages")
 	cfg.OutDir = filepath.Join(root, "dist")
-	err := New(root, cfg).BuildAll()
-	if err == nil {
-		t.Fatal("two 404 pages must be a build error, not a coin flip")
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("nested not-found pages must build: %v", err)
 	}
-	for _, want := range []string{"404.tsx", "blog/404.tsx"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error should name %s: %v", want, err)
+	for rel, want := range map[string]string{"404.html": "ROOT404", "blog/404.html": "BLOG404"} {
+		data, err := os.ReadFile(filepath.Join(cfg.OutDir, filepath.FromSlash(rel)))
+		if err != nil || !strings.Contains(string(data), want) {
+			t.Errorf("%s: want %s, got err=%v", rel, want, err)
 		}
 	}
 }
@@ -385,10 +413,13 @@ func TestIsRootRouteOutput(t *testing.T) {
 func TestDevRouteLabelNamesErrorPages(t *testing.T) {
 	pages := filepath.Join(string(filepath.Separator), "p", "src", "pages")
 	cases := map[string]string{
-		filepath.Join(pages, "index.tsx"):       "/",
-		filepath.Join(pages, "404.tsx"):         "/404",
-		filepath.Join(pages, "blog", "a.tsx"):   "/blog/a",
-		filepath.Join(pages, "blog", "500.tsx"): "/500",
+		filepath.Join(pages, "index.tsx"):                "/",
+		filepath.Join(pages, "404.tsx"):                  "/404",
+		filepath.Join(pages, "blog", "a.tsx"):            "/blog/a",
+		filepath.Join(pages, "blog", "500.tsx"):          "/blog/500",
+		filepath.Join(pages, "blog", "not-found.tsx"):    "/blog/404",
+		filepath.Join(pages, "error.tsx"):                "/500",
+		filepath.Join(pages, "(g)", "blog", "error.tsx"): "/blog/500",
 	}
 	for page, want := range cases {
 		if got := devRouteLabel(page, pages); got != want {
@@ -410,4 +441,63 @@ func TestPruneStaleHydrationKeepsCurrentBundle(t *testing.T) {
 			t.Errorf("%s exists=%v, want %v", n, !want, want)
 		}
 	}
+}
+
+// Adding, editing and removing segment pages in dev rebuilds their outputs and
+// the pages an error.tsx boundary wraps.
+func TestWatchSegmentPages(t *testing.T) {
+	root, _, _ := startDevWatch(t, map[string]string{
+		"src/pages/index.tsx":      devPage("home"),
+		"src/pages/404.tsx":        devPage("ROOT404"),
+		"src/pages/blog/index.tsx": devPage("blog"),
+	}, nil)
+	pages := filepath.Join(root, "src", "pages")
+	read := func(rel string) string {
+		data, _ := os.ReadFile(filepath.Join(root, "dist", filepath.FromSlash(rel)))
+		return string(data)
+	}
+	if exists(filepath.Join(root, "dist", "blog", "404.html")) {
+		t.Fatal("blog has no not-found page yet")
+	}
+	if err := os.WriteFile(filepath.Join(pages, "blog", "not-found.tsx"), []byte(devPage("BLOG404-v1")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "new segment page output", func() bool { return strings.Contains(read("blog/404.html"), "BLOG404-v1") })
+
+	if err := os.WriteFile(filepath.Join(pages, "blog", "not-found.tsx"), []byte(devPage("BLOG404-v2")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "edited segment page", func() bool { return strings.Contains(read("blog/404.html"), "BLOG404-v2") })
+
+	// The manifest follows structural changes: the segment map lists blog.
+	waitFor(t, "manifest lists the segment", func() bool {
+		data, _ := os.ReadFile(ManifestPath(filepath.Join(root, "dist")))
+		return strings.Contains(string(data), `"blog/404.html"`)
+	})
+
+	// An error.tsx wraps the pages below it; editing it rebuilds them.
+	errSrc := func(msg string) string {
+		return "export default function E({ error, reset }: any) { return <p onClick={reset}>" + msg + "</p>; }\n"
+	}
+	if err := os.WriteFile(filepath.Join(pages, "blog", "error.tsx"), []byte(errSrc("ERRPAGE-v1")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "boundary baked into the pages below", func() bool { return strings.Contains(read("blog/index.html"), "ERRPAGE-v1") })
+	if err := os.WriteFile(filepath.Join(pages, "blog", "error.tsx"), []byte(errSrc("ERRPAGE-v2")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "edited error page rebuilds the wrapped pages", func() bool {
+		return strings.Contains(read("blog/index.html"), "ERRPAGE-v2") && strings.Contains(read("blog/500.html"), "ERRPAGE")
+	})
+
+	if err := os.Remove(filepath.Join(pages, "blog", "not-found.tsx")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "removed segment page output", func() bool { return !exists(filepath.Join(root, "dist", "blog", "404.html")) })
+	if err := os.Remove(filepath.Join(pages, "blog", "error.tsx")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "boundary removed from the pages below", func() bool {
+		return !strings.Contains(read("blog/index.html"), "ERRPAGE") && !exists(filepath.Join(root, "dist", "blog", "500.html"))
+	})
 }

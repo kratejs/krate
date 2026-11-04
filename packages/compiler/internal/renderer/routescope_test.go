@@ -19,8 +19,10 @@ func TestRouteScopeBlockers(t *testing.T) {
 		t.Errorf("blockers = %v", got)
 	}
 	sigs = append(sigs, irtree.ComponentSignature{ComponentID: "k", Tier: irtree.TierClient, Class: true})
-	if RouteScopeBlockers(sigs)["_la_"] == "" {
-		t.Errorf("owner-tree pages must block every scope")
+	// Owner-tree pages keep layout persistence: the runtime tears owners down
+	// by route scope (boundary.ts), so a kept layout keeps its owners.
+	if RouteScopeBlockers(sigs)["_la_"] != "" {
+		t.Errorf("owner-tree pages must not block layout scopes: %v", RouteScopeBlockers(sigs))
 	}
 }
 

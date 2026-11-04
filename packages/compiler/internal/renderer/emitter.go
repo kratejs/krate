@@ -70,6 +70,9 @@ type EmitResult struct {
 	// BoundaryThrows lists error boundaries whose subtree threw while the page
 	// was built; the build re-renders them in their fallback state.
 	BoundaryThrows []irtree.BoundaryThrow
+	// BoundaryLink is set for a layout whose tree holds a lowered error boundary
+	// around {children}; see FindBoundaryLink.
+	BoundaryLink *BoundaryLink
 }
 
 // SlotOutput is the result of emitting a single slot node. Beyond HTML and

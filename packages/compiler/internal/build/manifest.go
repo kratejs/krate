@@ -25,6 +25,9 @@ type Manifest struct {
 	// such as "/styles.abc123.css"). Only these are served as immutable; user
 	// files from public/ that merely look hashed are not.
 	HashedAssets []string `json:"hashedAssets,omitempty"`
+	// Segments lists the directories that have their own not-found or error
+	// page (see LookupSegmentPage), sorted by key.
+	Segments []SegmentEntry `json:"segments,omitempty"`
 }
 
 // RuntimeComponentMeta describes a compiled runtime component bundle.
@@ -44,6 +47,8 @@ type ManifestPage struct {
 	// ServerComponents marks a page that renders async server components: a
 	// failed render is fatal (500), never the baked placeholder body.
 	ServerComponents bool `json:"serverComponents,omitempty"`
+	// SegDir mirrors PageMeta.SegDir.
+	SegDir string `json:"segDir,omitempty"`
 }
 
 // ServerManifest is the on-disk format read by the Node.js renderer server.
@@ -183,6 +188,7 @@ func WriteManifest(m *Manifest, outDir string, serverBundles map[string]string) 
 			BundlePath: bundlePath,
 
 			ServerComponents: p.ServerComponents,
+			SegDir:           p.SegDir,
 		}
 		serverPages = append(serverPages, sp)
 	}

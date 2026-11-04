@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-var codeRe = regexp.MustCompile(`^KR[1-8][0-9]{3}$`)
+var codeRe = regexp.MustCompile(`^KR[1-9][0-9]{3}$`)
 
 func TestRegisteredCodesAreWellFormed(t *testing.T) {
 	for _, info := range Codes() {

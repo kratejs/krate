@@ -152,6 +152,8 @@ export interface HandlerOptions {
   isrStore?: IsrStore;
   /** Overrides data.config.trustProxy (the serverless platforms always set X-Forwarded-*). */
   trustProxy?: boolean;
+  /** Hex sha256 for error digests; defaults to the portable implementation. */
+  sha256Hex?(input: string): string;
 }
 
 export type KrateHandler = (request: Request, ctx?: HandlerContext) => Promise<Response>;
@@ -312,6 +314,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const manifest = { pages: data.pages as ManifestPage[], regions: data.regions };
   const core: SSRCore = createSSRCore({
     manifest,
+    sha256Hex: options.sha256Hex,
     isrStore: options.isrStore || new MemoryIsrStore(cfg.ssr.maxCacheSize > 0 ? cfg.ssr.maxCacheSize : 512),
     loadPageModule: async (page) => {
       const mod = modules.pages && modules.pages[page.bundlePath || ""];

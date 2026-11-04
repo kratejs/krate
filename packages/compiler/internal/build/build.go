@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -1140,6 +1139,7 @@ func (b *Builder) BuildAll() error {
 	}
 	manifest := BuildManifest(results, manifestCSS, runtimeJS)
 	manifest.StaticOnlyRoutes = append([]string(nil), b.staticOnlyRoutes...)
+	b.addSegmentsToManifest(manifest, results)
 
 	// revalidatePath("/x") calls whose target page is static cannot refresh it.
 	printWarningsOnce(os.Stderr, staticRevalidateTargetWarnings(filepath.Dir(b.Cfg.PagesDir), b.Root, manifest.Pages))
@@ -1720,9 +1720,11 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				pageDir = filepath.Join(b.Cfg.OutDir, r.OutName)
 			}
 
-			if err := os.MkdirAll(pageDir, 0755); err != nil {
-				b.pluginFailed(fmt.Errorf("creating page dir %s: %w", pageDir, err))
-				return
+			if !r.IsErrorPage {
+				if err := os.MkdirAll(pageDir, 0755); err != nil {
+					b.pluginFailed(fmt.Errorf("creating page dir %s: %w", pageDir, err))
+					return
+				}
 			}
 
 			// 0. Head hygiene: the page head precedes the layout head, so the
@@ -1813,6 +1815,11 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				if state := b.durableStateScript(); state != "" {
 					h = strings.Replace(h, "</head>", state+"</head>", 1)
 				}
+				// 2a. Segment pages (404/500) are not content: keep them out of
+				// search indexes unless the page sets its own robots meta.
+				if r.IsErrorPage && !hasRobotsMeta(r.HeadHTML) {
+					h = strings.Replace(h, "</head>", `<meta name="robots" content="noindex">`+"</head>", 1)
+				}
 				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
 				if b.Cfg.SEO.BaseURL != "" || b.Cfg.SEO.Description != "" {
 					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO, seoCtx{BasePath: b.Cfg.BaseURLPath(), ErrorPage: r.IsErrorPage})
@@ -1843,8 +1850,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			// Error pages (404/500) are written directly at the output root as .html
 			var htmlPath string
 			if r.IsErrorPage {
-				base := strings.TrimSuffix(filepath.Base(r.Page), filepath.Ext(r.Page))
-				htmlPath = filepath.Join(b.Cfg.OutDir, base+".html")
+				htmlPath = filepath.Join(b.Cfg.OutDir, filepath.FromSlash(segmentHTMLRel(r.Page, b.Cfg.PagesDir)))
 			} else {
 				htmlPath = filepath.Join(pageDir, "index.html")
 			}
@@ -1912,8 +1918,45 @@ func (b *Builder) newBundler() *bundler.Bundler {
 }
 
 func (b *Builder) buildPage(page string) (*PageResult, string, error) {
+	if kind, ok := segmentKindOfFile(page); ok && kind == SegmentError {
+		return b.buildErrorPage(page)
+	}
+	return b.buildPageOnce(page)
+}
+
+// buildErrorPage builds a segment error page. The first pass bakes
+// placeholders for the error into plain HTML (the server fills them in per
+// request); an error component that ships client code, or that transforms the
+// error text at render time (which would break a placeholder), is built again
+// reading the error the server injects, so hydration does not overwrite it and
+// no placeholder text can leak.
+func (b *Builder) buildErrorPage(page string) (*PageResult, string, error) {
+	segmentVariants.Store(page, "static")
+	defer segmentVariants.Delete(page)
+	r, css, err := b.buildPageOnce(page)
+	if err != nil || r == nil || (!r.HasJS && !errorPlaceholdersMangled(r.HTML+r.HeadHTML)) {
+		return r, css, err
+	}
+	segmentVariants.Store(page, "client")
+	prev := r.JSFile
+	r2, css2, err2 := b.buildPageOnce(page)
+	if err2 == nil && r2 != nil && prev != "" && prev != r2.JSFile {
+		old := filepath.Join(b.Cfg.OutDir, filepath.FromSlash(r.OutName), prev)
+		_ = os.Remove(old)
+		_ = os.Remove(old + ".map")
+	}
+	return r2, css2, err2
+}
+
+func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	defer b.phase("page:total")()
 	if err := b.contextErr(); err != nil {
+		return nil, "", err
+	}
+	// The generated entry is written first: the disk cache hashes it as one of
+	// the page's inputs.
+	entryFile, err := b.segmentEntryFile(page)
+	if err != nil {
 		return nil, "", err
 	}
 	if pr, css, ok := b.tryDiskReplay(page); ok {
@@ -1921,7 +1964,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	}
 	stopBundle := b.phase("page:bundle")
 	bnd := b.newBundler()
-	bundle, err := bnd.Bundle(page)
+	bundle, err := bnd.Bundle(entryFile)
 	stopBundle()
 	if err != nil {
 		return nil, "", fmt.Errorf("bundling page %s: %w", page, err)
@@ -1973,6 +2016,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	// usage, falling back to the page's data-cache reads (tagged/timed fetch).
 	renderMode, revalidate, dataUsage := resolvePageRenderMode(page, entryModule, bundle.Modules)
 	explicitStatic := renderMode == RenderSSG
+	declaredMode := renderMode
 	pageLang := detectPageLang(entryModule.Program)
 
 	// If the page imports any runtime components, force streaming mode.
@@ -2025,11 +2069,27 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		}
 	}
 
+	pageBase := strings.TrimSuffix(filepath.Base(page), filepath.Ext(page))
+	isSegment := isSegmentPageBase(pageBase)
+	if isSegment && renderMode != RenderSSG {
+		// Segment pages are prerendered once and picked per request by the
+		// server, so a request-time mode cannot apply to them.
+		if declaredMode != RenderSSG || importsRuntimeComponent(bundle.Modules) {
+			d := diag.New(page, 1, 1, filepath.Base(page)+" is a segment page and is always prerendered; its "+renderMode.String()+" rendering mode is ignored",
+				"read request data in client code, or use a normal route for request-time content", "").WithCode(diag.CodeSegmentRequestMode)
+			d.Severity = diag.SeverityWarning
+			printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
+			pageWarnings = append(pageWarnings, d)
+		}
+		renderMode = RenderSSG
+		revalidate = 0
+	}
+
 	isDynRoute := isDynamicRoute(page, b.Cfg.PagesDir)
 	allowDynamic := dynamicParamsAllowed(entryModule.Program, staticMode)
 	// A dynamic route is "static only" when it must not be served for
 	// arbitrary params. Only meaningful for dynamic routes.
-	staticOnly := isDynRoute && !allowDynamic
+	staticOnly := isDynRoute && !allowDynamic && !isSegment
 
 	stopCompile := b.phase("page:compile")
 
@@ -2145,7 +2205,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	}
 
 	if len(emitResult.Errors) > 0 {
-		return nil, "", renderErrors(page, emitResult.Errors)
+		return nil, "", renderErrors(page, b.noteSegmentErrorPage(page, emitResult.Errors))
 	}
 
 	// Compile-time reactive dependency validation. Surfaced as warnings so
@@ -2250,7 +2310,6 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	outName := pageToOutput(page, b.Cfg.PagesDir)
 	pageDir := filepath.Join(b.Cfg.OutDir, outName)
-	pageBase := strings.TrimSuffix(filepath.Base(page), filepath.Ext(page))
 	relSrc, _ := filepath.Rel(b.Root, page)
 
 	// A static-only dynamic route has no fallback template: skip all page-dir
@@ -2268,7 +2327,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			StyleHTML:         emitResult.StyleHTML,
 			HasCSS:            pageCSS != "",
 			HasCSSSignals:     tree.HasCSSSignals || layoutHasSignals,
-			IsErrorPage:       pageBase == "404" || pageBase == "500",
+			IsErrorPage:       isSegment,
 			Warnings:          pageWarnings,
 			CSS:               pageCSS,
 			UsedCSS:           emitResult.UsedCSS,
@@ -2289,8 +2348,10 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		}, bundle.CSS, nil
 	}
 
-	if err := os.MkdirAll(pageDir, 0755); err != nil {
-		return nil, "", fmt.Errorf("creating page dir: %w", err)
+	if !isSegment {
+		if err := os.MkdirAll(pageDir, 0755); err != nil {
+			return nil, "", fmt.Errorf("creating page dir: %w", err)
+		}
 	}
 
 	jsFile := ""
@@ -2336,7 +2397,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			rawJS = neutralizeClientEnv(rawJS)
 			// npm functions called by client code are bundled into the script.
 			vendor := collectVendorImports(bundle.Modules)
-			for _, rb := range findRouteStack(page, b.Cfg.PagesDir) {
+			for _, rb := range b.routeStack(page) {
 				if lv, ok := layoutVendorImports.Load(rb.Path); ok {
 					vendor = append(vendor, lv.([]vendorImport)...)
 				}
@@ -2430,7 +2491,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		JSFile:        jsFile,
 		HasCSS:        pageCSS != "",
 		HasCSSSignals: tree.HasCSSSignals || layoutHasSignals,
-		IsErrorPage:   pageBase == "404" || pageBase == "500",
+		IsErrorPage:   isSegment,
 		Warnings:      pageWarnings,
 		CSS:           pageCSS,
 		UsedCSS:       emitResult.UsedCSS,
@@ -2481,7 +2542,9 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 	}
 
 	pageDir := filepath.Join(b.Cfg.OutDir, e.OutName)
-	_ = os.MkdirAll(pageDir, 0755)
+	if !e.IsErrorPage {
+		_ = os.MkdirAll(pageDir, 0755)
+	}
 	if len(e.JSBytes) > 0 && e.JSFile != "" {
 		_ = fsutil.WriteFileIfChanged(filepath.Join(pageDir, e.JSFile), e.JSBytes, 0644)
 	}
@@ -2660,6 +2723,7 @@ type layoutEmitCacheEntry struct {
 	signatures     []irtree.ComponentSignature
 	listComponents []*ast.FnDecl
 	hasLinks       bool
+	boundaryLink   *renderer.BoundaryLink
 	deps           []string
 	depTimes       map[string]time.Time
 }
@@ -2782,6 +2846,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 				Signatures:     entry.signatures,
 				ListComponents: entry.listComponents,
 				HasLinks:       entry.hasLinks,
+				BoundaryLink:   entry.boundaryLink,
 			}, entry.css, entry.deps, entry.hasSignals, nil
 		}
 	}
@@ -2805,6 +2870,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 				Signatures:     entry.signatures,
 				ListComponents: entry.listComponents,
 				HasLinks:       entry.hasLinks,
+				BoundaryLink:   entry.boundaryLink,
 			}, entry.css, entry.deps, entry.hasSignals, nil
 		}
 	}
@@ -2912,7 +2978,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		emitResult.ScriptHTML += "<script>" + renderer.CSSARIAJS + "</script>"
 	}
 
+	boundaryLink := renderer.FindBoundaryLink(tree)
 	layoutEmitCache.Store(layoutPath, &layoutEmitCacheEntry{
+		boundaryLink:   boundaryLink,
 		html:           emitResult.HTML,
 		headHTML:       emitResult.HeadHTML,
 		scriptHTML:     emitResult.ScriptHTML,
@@ -2935,6 +3003,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		Signatures:     emitResult.Signatures,
 		ListComponents: emitResult.ListComponents,
 		HasLinks:       emitResult.HasLinks,
+		BoundaryLink:   boundaryLink,
 	}, css, layoutDeps, tree.HasCSSSignals, nil
 }
 
@@ -3149,8 +3218,22 @@ func findLayout(pagePath, pagesDir string) string {
 // routeBoundary is one layout or template wrapping a page.
 type routeBoundary struct {
 	Path string
-	// Kind is "layout" or "template".
+	// Kind is "layout", "template" or "error" (a segment's error.tsx, run as a
+	// client error boundary; Path is then the source error page and
+	// Builder.routeStack swaps in the generated boundary layout).
 	Kind string
+	// Dir is the directory the boundary was found in.
+	Dir string
+	// Origin is the user's file when Path is a generated stand-in.
+	Origin string
+}
+
+// src returns the file the user wrote for the boundary.
+func (rb routeBoundary) src() string {
+	if rb.Origin != "" {
+		return rb.Origin
+	}
+	return rb.Path
 }
 
 // findLayoutStack returns every layout wrapping pagePath, ordered innermost
@@ -3176,13 +3259,24 @@ func findLayoutStack(pagePath, pagesDir string) []string {
 func findRouteStack(pagePath, pagesDir string) []routeBoundary {
 	var stack []routeBoundary
 	dir := filepath.Dir(pagePath)
+	// A segment's own error page renders outside that segment's boundary: an
+	// error it throws goes to the next boundary up.
+	ownDir := ""
+	if kind, ok := segmentKindOfFile(pagePath); ok && kind == SegmentError {
+		ownDir = dir
+	}
 	for {
 		if tpl := firstExisting(dir, templateNames); tpl != "" {
-			stack = append(stack, routeBoundary{Path: tpl, Kind: "template"})
+			stack = append(stack, routeBoundary{Path: tpl, Kind: "template", Dir: dir})
+		}
+		if dir != ownDir {
+			if ep := firstExisting(dir, errorBoundaryNames); ep != "" {
+				stack = append(stack, routeBoundary{Path: ep, Kind: "error", Dir: dir})
+			}
 		}
 		for _, name := range layoutNames {
 			if p := firstExisting(dir, []string{name}); p != "" {
-				stack = append(stack, routeBoundary{Path: p, Kind: "layout"})
+				stack = append(stack, routeBoundary{Path: p, Kind: "layout", Dir: dir})
 			}
 		}
 		if dir == pagesDir {
@@ -3304,13 +3398,13 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 	var used []string
 	hasSignals := false
 	var chain []routeChainEntry
-	for _, rb := range findRouteStack(page, b.Cfg.PagesDir) {
+	for _, rb := range b.routeStack(page) {
 		id := b.layoutIDPrefix(rb.Path)
 		open, end := "<!--kl:"+id+"-->", "<!--/kl:"+id+"-->"
 		var slotCSS string
 		layoutRes, layoutCSS, layoutDeps, layoutHasSignals, err := b.executeLayoutPipeline(rb.Path, open+emitResult.HTML+end, nil)
 		relPath := rb.Path
-		if rel, rerr := filepath.Rel(b.Root, rb.Path); rerr == nil {
+		if rel, rerr := filepath.Rel(b.Root, rb.src()); rerr == nil {
 			relPath = filepath.ToSlash(rel)
 		}
 		if err != nil {
@@ -3320,16 +3414,16 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 				return "", nil, false, nil, err
 			}
 			return "", nil, false, nil, diag.Diagnostic{
-				File:    rb.Path,
+				File:    rb.src(),
 				Message: fmt.Sprintf("%s %s failed to build: %v", rb.Kind, relPath, err),
 				Hint:    "fix the " + rb.Kind + " (it must default-export a component that renders {children}); every page under its directory depends on it",
 			}
 		}
-		entry := routeChainEntry{ID: id, Kind: rb.Kind, Depth: routeDepth(filepath.Dir(rb.Path), b.Cfg.PagesDir), File: relPath}
+		entry := routeChainEntry{ID: id, Kind: rb.Kind, Depth: routeDepth(rb.Dir, b.Cfg.PagesDir), File: relPath}
 		switch n := strings.Count(layoutRes.HTML, open); {
 		case n == 0:
 			b.printRouteWarning(diag.Diagnostic{
-				File:     rb.Path,
+				File:     rb.src(),
 				Message:  fmt.Sprintf("%s %s does not render {children}; the page content of %s is dropped", rb.Kind, relPath, filepath.Base(page)),
 				Hint:     "render {children} (or props.children) where the page should appear",
 				Severity: diag.SeverityWarning,
@@ -3357,11 +3451,21 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 		// interactivity hydrates. Their compact slot IDs are namespaced
 		// (IDPrefix) so they can't collide with the page's; RouteScope lets the
 		// router skip them while the layout stays mounted.
+		layoutSigs := make([]irtree.ComponentSignature, 0, len(layoutRes.Signatures))
 		for _, sig := range layoutRes.Signatures {
 			if sig.RouteScope == "" {
 				sig.RouteScope = id
 			}
-			emitResult.Signatures = append(emitResult.Signatures, sig)
+			layoutSigs = append(layoutSigs, sig)
+		}
+		if rb.Kind == "error" && layoutRes.BoundaryLink != nil {
+			// Everything inside the boundary (the page and nested layouts) hangs
+			// under it in the owner tree, and the boundary's scope runs first so
+			// those owners find it.
+			renderer.LinkUnderBoundary(emitResult.Signatures, layoutRes.BoundaryLink)
+			emitResult.Signatures = append(layoutSigs, emitResult.Signatures...)
+		} else {
+			emitResult.Signatures = append(emitResult.Signatures, layoutSigs...)
 		}
 		emitResult.ListComponents = append(emitResult.ListComponents, layoutRes.ListComponents...)
 		if layoutRes.HasLinks {
@@ -3397,7 +3501,7 @@ func routeInfoScript(chain []routeChainEntry, sigs []irtree.ComponentSignature) 
 		if e.Why == "" {
 			e.Why = blockers[e.ID]
 		}
-		e.Persist = e.Kind == "layout" && e.Why == ""
+		e.Persist = (e.Kind == "layout" || e.Kind == "error") && e.Why == ""
 		out[i] = e
 	}
 	data, err := json.Marshal(map[string]interface{}{"v": 1, "chain": out})
@@ -3427,6 +3531,9 @@ var (
 	layoutNames   = []string{"_layout.tsx", "_layout.ts", "_layout.jsx", "_layout.js"}
 	templateNames = []string{"_template.tsx", "_template.ts", "_template.jsx", "_template.js", "template.tsx", "template.ts", "template.jsx", "template.js"}
 	loadingNames  = []string{"loading.tsx", "loading.ts", "loading.jsx", "loading.js"}
+	// errorBoundaryNames are the files that become a client error boundary. 500.tsx
+	// is only the server error page, so existing static 500 pages stay static.
+	errorBoundaryNames = []string{"error.tsx", "error.ts", "error.jsx", "error.js"}
 )
 
 // findLayoutFile walks up from pagePath toward pagesDir checking each directory
@@ -3611,6 +3718,10 @@ func pageToOutput(page, pagesDir string) string {
 	// and region requests. Callers that touch the filesystem join it with
 	// filepath.Join, which re-applies the OS separator. Route groups
 	// "(name)" organize files without appearing in the URL.
+	if _, ok := segmentKindOfFile(page); ok {
+		// A segment page owns no URL; its assets live next to its HTML.
+		return segmentAssetOut(page, pagesDir)
+	}
 	name := stripRouteGroups(filepath.ToSlash(strings.TrimSuffix(rel, filepath.Ext(rel))))
 	// A nested index page (blog/index.tsx) is the directory's default page: it
 	// maps to the parent route (blog) so /blog/ serves it - not the odd
@@ -3618,12 +3729,6 @@ func pageToOutput(page, pagesDir string) string {
 	// Matches the .krate/gen behavior just above.
 	name = strings.TrimSuffix(name, "/index")
 	if name == "index" || name == "home" {
-		return "."
-	}
-	// Error pages output at root level (like index). name is slash-normalized,
-	// so use path.Base (slash-aware), not filepath.Base.
-	base := path.Base(name)
-	if base == "404" || base == "500" {
 		return "."
 	}
 	return name
@@ -3901,8 +4006,8 @@ func pruneStaleHydration(pageDir, keep string) {
 }
 
 func printResult(outName, jsFile, pageBase string) {
-	if pageBase == "404" || pageBase == "500" {
-		printf("    %s+%s %s (error page)\n", cGreen, cReset, pageBase+".html")
+	if kind, ok := segmentKindOfBase(pageBase); ok {
+		printf("    %s+%s %s (segment page)\n", cGreen, cReset, strings.TrimPrefix(strings.TrimSuffix(outName, kind.assetDirName())+kind.htmlName(), "/"))
 	} else if outName == "." {
 		printf("    %s+%s %s/index.html %s(root)%s\n", cGreen, cReset, outName, cGray, cReset)
 	} else {
@@ -4458,4 +4563,14 @@ func (b *Builder) pageFontPreloads(urls []string) string {
 		}
 	}
 	return fontPreloadHTML(rest, b.Cfg.BaseURLPath())
+}
+
+// importsRuntimeComponent reports whether any module is a runtime component.
+func importsRuntimeComponent(mods []*bundler.Module) bool {
+	for _, m := range mods {
+		if m.ComponentClass == bundler.ComponentClassRuntime {
+			return true
+		}
+	}
+	return false
 }

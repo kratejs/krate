@@ -6,6 +6,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { jsx, renderToStringAsync } from "./server.js";
+import { sha256Hex as portableSha256Hex } from "./sha256.js";
 import {
   isNotFoundSignal,
   parseCookieHeader,
@@ -94,6 +95,9 @@ export interface RenderResponse {
   cached?: boolean;
   cacheStatus?: CacheStatus;
   error?: string;
+  /** Short id of a failed render; the full error is logged with it. */
+  digest?: string;
+  stack?: string;
   noStore?: boolean;
 }
 // ISR Cache (variant-aware, SWR, persisted)
@@ -300,6 +304,12 @@ export interface SSRCoreOptions {
   timeoutMs?: number;
   ppr?: boolean;
   pprRevalidate?: number;
+  /**
+   * Hex sha256 of a string (UTF-8). Hosts inject node:crypto where they have
+   * it; the default is the portable synchronous implementation, so the error
+   * digest is the same value on every host.
+   */
+  sha256Hex?(input: string): string;
   /** Registers work that must outlive the response (stale-while-revalidate refreshes). */
   background?(work: Promise<unknown>): void;
   /** Called when the ISR cache changed; immediate is true for explicit invalidations. */
@@ -362,6 +372,21 @@ export interface SSRCore {
 }
 
 export function createSSRCore(opts: SSRCoreOptions): SSRCore {
+  const sha256Hex = opts.sha256Hex || portableSha256Hex;
+
+  // errorDigest is the short id tying the sanitized error a visitor sees to the
+  // full error in the server log. The Go server computes the same hash
+  // (build/segmentserve.go errorDigest).
+  function errorDigest(message: string, stack: string): string {
+    return sha256Hex(message + "\n" + stack).slice(0, 10);
+  }
+
+  function describeFailure(err: any): { error: string; stack: string; digest: string } {
+    const message = (err && err.message) || String(err);
+    const stack = (err && typeof err.stack === "string" && err.stack) || "";
+    return { error: message, stack, digest: errorDigest(message, stack) };
+  }
+
   // pageQueryReads remembers, per route+params variant, which query keys renders
   // have read ("all" when a render enumerated the whole query).
   const pageQueryReads = new Map<string, Set<string> | "all">();
@@ -561,8 +586,9 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     } catch (err: any) {
       const signal = renderSignal(err);
       if (signal) return signal;
-      console.error(`[krate] Error rendering ${req.route}:`, err);
-      return { html: "", status: 500, error: (err && err.message) || String(err) };
+      const failure = describeFailure(err);
+      console.error(`[krate] Error rendering ${req.route} (digest ${failure.digest}):`, err);
+      return { html: "", status: 500, ...failure };
     }
   }
 
@@ -857,10 +883,11 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
         if (signal.redirect) frame.redirect = signal.redirect;
         return frame;
       }
-      console.error(`[krate-ssr] Region render failed ${page.route}::${region.id}:`, err);
+      const failure = describeFailure(err);
+      console.error(`[krate-ssr] Region render failed ${page.route}::${region.id} (digest ${failure.digest}):`, err);
       // A server component region has no meaningful baked content, so its
       // failure is fatal for the response (the Go server answers 500).
-      return { type: "error", id: region.id, status: 500, error: (err && err.message) || String(err), fatal: !!(region.serverExport || page.serverComponents) };
+      return { type: "error", id: region.id, status: 500, ...failure, fatal: !!(region.serverExport || page.serverComponents) };
     }
   }
 
@@ -882,6 +909,8 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     if (result.notFound) frame.notFound = true;
     if (result.redirect) frame.redirect = result.redirect;
     if (result.error) frame.error = result.error;
+    if (result.digest) frame.digest = result.digest;
+    if (result.stack) frame.stack = result.stack;
     if (result.noStore) frame.noStore = true;
     if (page.serverComponents && frame.status >= 500) frame.fatal = true;
     // Title swap: the Go server replaces the baked <title> with the freshly

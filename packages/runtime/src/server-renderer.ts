@@ -8,7 +8,7 @@ import path from "node:path";
 import vm from "node:vm";
 import { pathToFileURL } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   createSSRCore,
   MemoryIsrStore,
@@ -214,6 +214,7 @@ const pprEnabledEnv = process.env.KRATE_PPR === "1";
 const isrMemory = new MemoryIsrStore(parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512);
 const core = createSSRCore({
   manifest,
+  sha256Hex: (input) => createHash("sha256").update(input).digest("hex"),
   isrStore: isrMemory,
   loadPageModule,
   loadRuntimeRenderer,

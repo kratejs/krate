@@ -89,7 +89,7 @@ func (b *Builder) RouteList() ([]RouteSummary, error) {
 		// 404/500 pages output at the root as error handlers, not navigable
 		// routes, so they never appear in RouteList.
 		base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
-		if base == "404" || base == "500" {
+		if isSegmentPageBase(base) {
 			continue
 		}
 		out := pageToOutput(p, b.Cfg.PagesDir)

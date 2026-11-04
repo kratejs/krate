@@ -53,6 +53,10 @@ type PageMeta struct {
 	StaticOnly bool `json:"staticOnly,omitempty"`
 	// ServerComponents marks a page that renders async server components.
 	ServerComponents bool `json:"serverComponents,omitempty"`
+	// SegDir is the page source's directory relative to the pages root, route
+	// groups kept ("" for the root). LookupSegmentPage walks up from it to find
+	// the page's nearest not-found or error page.
+	SegDir string `json:"segDir,omitempty"`
 }
 
 // pageConfig holds the merged page-level render config extracted from
