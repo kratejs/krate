@@ -423,8 +423,16 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		return []SlotNode{&StaticHTML{HTML: ""}}
 	case "Image":
 		if b.transformImage != nil {
-			if transformed := b.transformImage(el); transformed != nil && transformed != el {
+			transformed, ds := b.transformImage(el)
+			for _, d := range ds {
+				b.hookDiagAt(el.Position, d)
+			}
+			if transformed != nil && transformed != el {
 				return b.buildSlotNodes(transformed, parentID)
+			}
+			if len(ds) == 0 {
+				b.errorAt(el.Position, "<Image> could not be lowered at build time",
+					"Pass src as a string known at build time.")
 			}
 		}
 		return []SlotNode{&StaticHTML{HTML: ""}}

@@ -504,7 +504,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	// The entry program is fresh per generated page, so its getCollection
 	// calls are inlined after the route params are bound (below), not here.
 	b.deferInline.Store(entryModule.Program, true)
-	b.ensureTransformedModules(bundle.Modules)
+	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
+		return nil, "", err
+	}
 	renderMode, revalidate, _ := resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules)
 
 	// Global streaming override: if configured, all *static* pages stream.

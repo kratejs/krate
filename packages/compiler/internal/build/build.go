@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -31,7 +30,6 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 	"github.com/kratejs/krate/packages/compiler/internal/gotsgen"
 	"github.com/kratejs/krate/packages/compiler/internal/icons"
-	"github.com/kratejs/krate/packages/compiler/internal/imageproc"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
@@ -206,6 +204,8 @@ type Builder struct {
 	// until route params are bound (static-params pages), so lookups like
 	// `find((p) => p.slug === props.params.slug)` fold to a single entry.
 	deferInline sync.Map
+	// progImageDiags holds the <Image> diagnostics of each transformed program.
+	progImageDiags sync.Map
 
 	// diskCache persists per-page outputs across runs (see diskcache.go).
 	diskCache *buildDiskCache
@@ -337,30 +337,72 @@ func hasCommunityPlugins(cfg *config.Config) bool {
 // flattening, content inlining) to prog exactly once per build. Cached module
 // ASTs are shared across concurrent page builds, so these in-place mutations
 // must be serialized per program.
-func (b *Builder) ensureTransformed(prog *ast.Program) {
+func (b *Builder) ensureTransformed(prog *ast.Program, file string) error {
 	if prog == nil {
-		return
+		return nil
 	}
 	v, _ := b.transformOnce.LoadOrStore(prog, &sync.Once{})
 	v.(*sync.Once).Do(func() {
 		b.TransformUniversalIcons(prog)
-		b.TransformUniversalImages(prog)
+		if ds := b.transformImages(prog); len(ds) > 0 {
+			b.progImageDiags.Store(prog, ds)
+			for _, d := range ds {
+				if d.warn {
+					fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n      hint: %s\n", cYellow, cReset, imageDiagError(b.relPath(file), d).Error(), d.hint)
+				}
+			}
+		}
 		b.FlattenComponentSpreadAttrs(prog)
 		if _, deferred := b.deferInline.Load(prog); !deferred {
 			b.InlineContent(prog)
 		}
 	})
+	if v, ok := b.progImageDiags.Load(prog); ok {
+		var errs []error
+		for _, d := range v.([]imageDiag) {
+			if !d.warn {
+				errs = append(errs, imageDiagError(b.relPath(file), d))
+			}
+		}
+		if len(errs) > 0 {
+			return &diagList{errs: errs}
+		}
+	}
+	return nil
 }
+
+// diagList is a set of located diagnostics returned as one build error.
+type diagList struct{ errs []error }
+
+func (d *diagList) Error() string {
+	parts := make([]string, len(d.errs))
+	for i, e := range d.errs {
+		parts[i] = e.Error()
+		if dd, ok := e.(diag.Diagnostic); ok && dd.Hint != "" {
+			parts[i] += "\n      hint: " + dd.Hint
+		}
+	}
+	return strings.Join(parts, "\n  ")
+}
+
+func (d *diagList) Unwrap() []error { return d.errs }
 
 // ensureTransformedModules transforms every module in a page's bundle. Page
 // builds share cached ASTs, so this must finish before any AST reader runs.
-func (b *Builder) ensureTransformedModules(mods []*bundler.Module) {
+func (b *Builder) ensureTransformedModules(mods []*bundler.Module) error {
+	var errs []error
 	for _, mod := range mods {
 		if mod == nil || mod.IsExternal || mod.IsCSS || mod.Program == nil {
 			continue
 		}
-		b.ensureTransformed(mod.Program)
+		if err := b.ensureTransformed(mod.Program, mod.Path); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
 }
 
 // contentHashOf returns a stable hash of the build's content collections. It is
@@ -1825,7 +1867,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	// Universal transforms mutate shared cached ASTs. Run them for the whole
 	// module graph before any pass reads those ASTs, so concurrent page builds
 	// serialize on each module's sync.Once instead of racing a reader.
-	b.ensureTransformedModules(bundle.Modules)
+	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
+		return nil, "", err
+	}
 
 	// Detect rendering mode (SSR/ISR/Streaming) from AST exports + <Suspense>
 	// usage, falling back to the page's data-cache reads (tagged/timed fetch).
@@ -2656,7 +2700,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	// dependency of every page it wraps.
 	layoutDeps := layoutDepPaths(layoutPath, layoutBundle)
 
-	b.ensureTransformed(layoutModule.Program)
+	if err := b.ensureTransformed(layoutModule.Program, layoutModule.Path); err != nil {
+		return nil, "", nil, false, err
+	}
 	if isLayoutFile(layoutPath) {
 		slots, serr := cachedSlots(filepath.Dir(layoutPath), b.Cfg.PagesDir)
 		if serr != nil {
@@ -2674,7 +2720,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	ann := annotator.Annotate(layoutModule.Program, b.Cfg, layoutPath, layoutModule.SourceCode)
 	extraLayoutPrograms := moduleSources(layoutBundle.Modules, layoutModule)
 	for _, mp := range extraLayoutPrograms {
-		b.ensureTransformed(mp.Program)
+		if err := b.ensureTransformed(mp.Program, mp.Path); err != nil {
+			return nil, "", nil, false, err
+		}
 	}
 	annotator.MergeModuleFunctions(ann, extraLayoutPrograms)
 	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
@@ -3833,33 +3881,6 @@ func iconNameIsLiteral(el *ast.JSXElement) bool {
 	return false
 }
 
-// imageAttrsAreLiteral reports whether an <Image> can be lowered late. The
-// src must be a string literal, and every other supplied value must be a
-// literal too: compileImageToPicture consumes width/height/alt/etc, so a
-// dynamic value would be silently replaced with a zero value.
-func imageAttrsAreLiteral(el *ast.JSXElement) bool {
-	if el == nil || el.Opening == nil {
-		return false
-	}
-	hasSrc := false
-	for _, attr := range el.Opening.Attributes {
-		if attr.Spread || attr.Value == nil {
-			continue
-		}
-		lit, ok := attr.Value.(*ast.Literal)
-		if !ok {
-			return false
-		}
-		if attr.Name == "src" {
-			if lit.Kind != ast.StringLit {
-				return false
-			}
-			hasSrc = true
-		}
-	}
-	return hasSrc
-}
-
 func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
 	var iconName string
 	var forwardedAttrs []*ast.JSXAttr
@@ -4002,365 +4023,6 @@ func (b *Builder) iconResolver(iconName string, attrs []*ast.JSXAttr) (string, b
 	return b2.String(), true
 }
 
-func (b *Builder) TransformUniversalImages(prog *ast.Program) {
-	for _, stmt := range prog.Body {
-		b.walkAndTransformImages(stmt)
-	}
-}
-
-func (b *Builder) walkAndTransformImages(node ast.Node) {
-	if node == nil {
-		return
-	}
-	switch n := node.(type) {
-	case *ast.FnDecl:
-		for _, stmt := range n.Body {
-			b.walkAndTransformImages(stmt)
-		}
-	case *ast.ExportStmt:
-		if n.Declaration != nil {
-			b.walkAndTransformImages(n.Declaration)
-		}
-	case *ast.ReturnStmt:
-		n.Value = b.transformImageExpr(n.Value)
-	case *ast.ExprStmt:
-		n.Expression = b.transformImageExpr(n.Expression)
-	case *ast.IfStmt:
-		for _, s := range n.Consequent {
-			b.walkAndTransformImages(s)
-		}
-		for _, s := range n.Alternate {
-			b.walkAndTransformImages(s)
-		}
-	case *ast.ForStmt:
-		for _, stmt := range n.Body {
-			b.walkAndTransformImages(stmt)
-		}
-	case *ast.WhileStmt:
-		for _, stmt := range n.Body {
-			b.walkAndTransformImages(stmt)
-		}
-	case *ast.VarStmt:
-		for _, decl := range n.Decls {
-			if decl.Init != nil {
-				decl.Init = b.transformImageExpr(decl.Init)
-			}
-		}
-	}
-}
-
-func (b *Builder) transformImageExpr(expr ast.Expr) ast.Expr {
-	if expr == nil {
-		return nil
-	}
-
-	switch e := expr.(type) {
-	case *ast.JSXElement:
-		if e.Opening.Name == "Image" {
-			return b.compileImageToPicture(e)
-		}
-		b.transformJSXChildren(e.Children)
-	case *ast.JSXFragment:
-		b.transformJSXChildren(e.Children)
-	case *ast.CallExpr:
-		for i, arg := range e.Args {
-			e.Args[i] = b.transformImageExpr(arg)
-		}
-	}
-	return expr
-}
-
-// transformJSXChildren rewrites any <Image> descendants within a JSX child list.
-func (b *Builder) transformJSXChildren(children []ast.JSXChild) {
-	for i, child := range children {
-		if elChild, ok := child.(*ast.JSXElementChild); ok {
-			transformed := b.transformImageExpr(elChild.Element)
-			if jsxEl, ok := transformed.(*ast.JSXElement); ok {
-				elChild.Element = jsxEl
-				children[i] = elChild
-			}
-		}
-	}
-}
-
-func (b *Builder) compileImageToPicture(orig *ast.JSXElement) *ast.JSXElement {
-	var src string
-	var reqW, reqH int
-	var alt, loading, sizes, placeholder string
-	var priority bool
-	var quality int
-	var className string
-	var extraAttrs []*ast.JSXAttr
-
-	for _, attr := range orig.Opening.Attributes {
-		if attr.Spread {
-			extraAttrs = append(extraAttrs, attr)
-			continue
-		}
-		if attr.Value == nil {
-			// Bare boolean attribute (e.g. <Image priority />)
-			if attr.Name == "priority" {
-				priority = true
-			} else {
-				extraAttrs = append(extraAttrs, attr)
-			}
-			continue
-		}
-		val, _ := evalAttrString(attr.Value)
-		switch attr.Name {
-		case "src":
-			src = val
-		case "width":
-			reqW, _ = strconv.Atoi(val)
-		case "height":
-			reqH, _ = strconv.Atoi(val)
-		case "alt":
-			alt = val
-		case "loading":
-			loading = val
-		case "priority":
-			priority = val == "true"
-		case "quality":
-			quality, _ = strconv.Atoi(val)
-		case "sizes":
-			sizes = val
-		case "placeholder":
-			placeholder = val
-		case "className":
-			className = val
-		default:
-			extraAttrs = append(extraAttrs, attr)
-		}
-	}
-
-	if src == "" {
-		return imageErrorSpan("[Image: missing src]")
-	}
-
-	// Resolve image options from config, overridden by per-<Image> attributes.
-	imgCfg := b.Cfg.Images
-	if quality <= 0 {
-		quality = imgCfg.Quality
-	}
-	if sizes == "" {
-		sizes = imgCfg.Sizes
-	}
-	wantPlaceholder := imgCfg.PlaceholderEnabled()
-	if placeholder != "" {
-		wantPlaceholder = placeholder != "empty"
-	}
-
-	publicDir := b.Cfg.PublicDir
-	if publicDir == "" {
-		publicDir = filepath.Join(b.Root, "public")
-	}
-
-	// `src` is a URL, not a filesystem path. A leading "/" is the site root on
-	// every platform - do NOT let filepath.IsAbs treat it as an OS-absolute
-	// path (it does on Linux, which made `/hero.png` resolve to the drive root).
-	// Only a genuinely absolute filesystem path (e.g. `C:\assets\hero.png`) is
-	// used verbatim.
-	resolvedSrc := src
-	if strings.HasPrefix(src, "/") {
-		resolvedSrc = filepath.Join(publicDir, strings.TrimPrefix(src, "/"))
-	} else if !filepath.IsAbs(src) {
-		resolvedSrc = filepath.Join(publicDir, src)
-	}
-
-	var result *imageproc.ImageResult
-	switch {
-	case strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://"):
-		// Remote images are passed through unoptimized, but only when allowlisted.
-		u, perr := url.Parse(src)
-		if perr != nil || u.Hostname() == "" || !imgCfg.RemoteAllowed(u.Hostname(), u.Path) {
-			return imageErrorSpan("[Image: remote src not allowed - add its host to images.remotePatterns]")
-		}
-		result = &imageproc.ImageResult{Width: reqW, Height: reqH}
-	case imgCfg.Unoptimized:
-		result = &imageproc.ImageResult{Width: reqW, Height: reqH}
-	default:
-		var perr error
-		result, perr = imageproc.ProcessImageWith(b.Root, resolvedSrc, reqW, reqH, imageproc.Options{
-			Quality:     quality,
-			Breakpoints: imgCfg.Breakpoints,
-			Placeholder: wantPlaceholder,
-			Formats:     imgCfg.Formats,
-		})
-		if perr != nil {
-			return imageErrorSpan(fmt.Sprintf("[Image: %v]", perr))
-		}
-	}
-	result.Src = "/" + strings.TrimPrefix(src, "/")
-	if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
-		result.Src = src
-	}
-
-	if loading == "" {
-		loading = "lazy"
-	}
-	if priority {
-		loading = "eager"
-	}
-	if sizes == "" {
-		sizes = "(max-width: 768px) 100vw, 50vw"
-	}
-
-	// Vector sources (e.g. SVG) are passed through as-is: no decoding, no
-	// responsive variants, no compression. Emit a plain <img> pointing at the
-	// original file.
-	if len(result.WebP) == 0 && len(result.Fallback) == 0 {
-		imgAttrs := []*ast.JSXAttr{
-			{Name: "src", Value: &ast.Literal{Kind: ast.StringLit, Value: result.Src}},
-			{Name: "alt", Value: &ast.Literal{Kind: ast.StringLit, Value: alt}},
-			{Name: "loading", Value: &ast.Literal{Kind: ast.StringLit, Value: loading}},
-			{Name: "decoding", Value: &ast.Literal{Kind: ast.StringLit, Value: "async"}},
-		}
-		if result.Width > 0 {
-			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "width", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Width)}})
-		}
-		if result.Height > 0 {
-			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "height", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Height)}})
-		}
-		if className != "" {
-			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "className", Value: &ast.Literal{Kind: ast.StringLit, Value: className}})
-		}
-		if priority {
-			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "fetchpriority", Value: &ast.Literal{Kind: ast.StringLit, Value: "high"}})
-		}
-		imgAttrs = append(imgAttrs, extraAttrs...)
-		return &ast.JSXElement{
-			Position: orig.Position,
-			Opening:  &ast.JSXOpening{Name: "img", Attributes: imgAttrs, SelfClosing: true},
-		}
-	}
-
-	// CLS mitigation: reserve the intrinsic aspect ratio so the browser can
-	// size the image before it loads, plus a blurred LQIP background. Vectors
-	// (e.g. SVG) are passed through without decoding, so they may not know
-	// their intrinsic dimensions - don't force an aspect-ratio in that case.
-	style := ""
-	if result.Width > 0 && result.Height > 0 {
-		style = fmt.Sprintf("width:100%%;height:auto;aspect-ratio:%d/%d", result.Width, result.Height)
-		if result.Placeholder != "" {
-			style += ";background-image:url(" + result.Placeholder + ");background-size:cover;background-position:center"
-		}
-	}
-
-	pictureAttrs := []*ast.JSXAttr{}
-	if className != "" {
-		pictureAttrs = append(pictureAttrs, &ast.JSXAttr{
-			Name:  "className",
-			Value: &ast.Literal{Kind: ast.StringLit, Value: className},
-		})
-	}
-
-	webpSrcset := srcsetString(result.WebP)
-	fallbackSrcset := srcsetString(result.Fallback)
-
-	webpSource := &ast.JSXElement{
-		Opening: &ast.JSXOpening{
-			Name: "source",
-			Attributes: []*ast.JSXAttr{
-				{Name: "type", Value: &ast.Literal{Kind: ast.StringLit, Value: "image/webp"}},
-				{Name: "srcSet", Value: &ast.Literal{Kind: ast.StringLit, Value: webpSrcset}},
-				{Name: "sizes", Value: &ast.Literal{Kind: ast.StringLit, Value: sizes}},
-			},
-			SelfClosing: true,
-		},
-	}
-	fallbackSource := &ast.JSXElement{
-		Opening: &ast.JSXOpening{
-			Name: "source",
-			Attributes: []*ast.JSXAttr{
-				{Name: "type", Value: &ast.Literal{Kind: ast.StringLit, Value: result.FallbackMime}},
-				{Name: "srcSet", Value: &ast.Literal{Kind: ast.StringLit, Value: fallbackSrcset}},
-				{Name: "sizes", Value: &ast.Literal{Kind: ast.StringLit, Value: sizes}},
-			},
-			SelfClosing: true,
-		},
-	}
-
-	imgAttrs := []*ast.JSXAttr{
-		{Name: "src", Value: &ast.Literal{Kind: ast.StringLit, Value: result.Src}},
-		{Name: "alt", Value: &ast.Literal{Kind: ast.StringLit, Value: alt}},
-		{Name: "loading", Value: &ast.Literal{Kind: ast.StringLit, Value: loading}},
-		{Name: "decoding", Value: &ast.Literal{Kind: ast.StringLit, Value: "async"}},
-	}
-	if result.Width > 0 {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "width", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Width)}})
-	}
-	if result.Height > 0 {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "height", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Height)}})
-	}
-	if style != "" {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "style", Value: &ast.Literal{Kind: ast.StringLit, Value: style}})
-	}
-	if priority {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "fetchpriority", Value: &ast.Literal{Kind: ast.StringLit, Value: "high"}})
-	}
-	if className != "" {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{
-			Name:  "className",
-			Value: &ast.Literal{Kind: ast.StringLit, Value: className},
-		})
-	}
-	if fallbackSrcset != "" {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{
-			Name:  "srcSet",
-			Value: &ast.Literal{Kind: ast.StringLit, Value: fallbackSrcset},
-		})
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{
-			Name:  "sizes",
-			Value: &ast.Literal{Kind: ast.StringLit, Value: sizes},
-		})
-	}
-	imgAttrs = append(imgAttrs, extraAttrs...)
-
-	imgEl := &ast.JSXElement{
-		Opening: &ast.JSXOpening{
-			Name:        "img",
-			Attributes:  imgAttrs,
-			SelfClosing: true,
-		},
-	}
-
-	return &ast.JSXElement{
-		Position: orig.Position,
-		Opening: &ast.JSXOpening{
-			Name:        "picture",
-			Attributes:  pictureAttrs,
-			SelfClosing: false,
-		},
-		Children: []ast.JSXChild{
-			&ast.JSXElementChild{Element: webpSource},
-			&ast.JSXElementChild{Element: fallbackSource},
-			&ast.JSXElementChild{Element: imgEl},
-		},
-		Closing: &ast.JSXClosing{Name: "picture"},
-	}
-}
-
-// imageErrorSpan renders an inline error marker in place of a broken <Image>.
-func imageErrorSpan(msg string) *ast.JSXElement {
-	return &ast.JSXElement{
-		Opening:  &ast.JSXOpening{Name: "span", Attributes: nil, SelfClosing: false},
-		Children: []ast.JSXChild{&ast.JSXText{Value: msg}},
-		Closing:  &ast.JSXClosing{Name: "span"},
-	}
-}
-
-// srcsetString renders a responsive srcset attribute ("path 640w, path 1024w").
-func srcsetString(entries []imageproc.SrcsetEntry) string {
-	if len(entries) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(entries))
-	for _, e := range entries {
-		parts = append(parts, fmt.Sprintf("%s %dw", e.FilePath, e.Width))
-	}
-	return strings.Join(parts, ", ")
-}
-
 // copyImageCacheToOut copies processed <Image> variants from the build cache
 // into the output directory so they're served at /_krate/images/....
 func (b *Builder) copyImageCacheToOut() error {
@@ -4373,16 +4035,6 @@ func (b *Builder) copyImageCacheToOut() error {
 		return err
 	}
 	return copyDirToOut(src, dst)
-}
-
-func evalAttrString(expr ast.Expr) (string, bool) {
-	if lit, ok := expr.(*ast.Literal); ok {
-		return lit.Value, true
-	}
-	if ident, ok := expr.(*ast.Identifier); ok {
-		return ident.Name, false
-	}
-	return "", false
 }
 
 func (b *Builder) BuildAllAPI() error {

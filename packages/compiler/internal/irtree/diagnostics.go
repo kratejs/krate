@@ -262,3 +262,36 @@ func (b *builder) expansionSignature(attrs map[string]ast.Expr, el *ast.JSXEleme
 	}
 	return sb.String()
 }
+
+// HookDiag is a diagnostic reported by a lowering hook (BuildOptions.TransformImage).
+type HookDiag struct {
+	Code    diag.Code
+	Msg     string
+	Hint    string
+	Warning bool
+}
+
+// hookDiagAt records a hook diagnostic once per distinct message and position.
+func (b *builder) hookDiagAt(pos ast.Pos, h HookDiag) {
+	sev := diag.SeverityError
+	if h.Warning {
+		sev = diag.SeverityWarning
+	}
+	d := b.diagAt(pos, sev, h.Msg, h.Hint)
+	d.Code = h.Code
+	if h.Warning {
+		for _, have := range b.warnings {
+			if have.Error() == d.Error() {
+				return
+			}
+		}
+		b.warnings = append(b.warnings, d)
+		return
+	}
+	for _, have := range b.buildErrs {
+		if have.Error() == d.Error() {
+			return
+		}
+	}
+	b.buildErrs = append(b.buildErrs, d)
+}
