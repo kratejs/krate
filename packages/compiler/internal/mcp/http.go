@@ -16,6 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	krateversion "github.com/kratejs/krate/packages/compiler/internal/version"
 )
 
 type mcpHTTPServer struct {
@@ -63,7 +65,7 @@ func newMCPSession(svc *Service) *mcpHTTPSession {
 		pending:  map[string]chan []byte{},
 		subs:     map[int]chan sseEvent{},
 	}
-	s.srv = NewServer(s, "krate", "http")
+	s.srv = NewServer(s, "krate", krateversion.Value)
 	s.srv.SetClient(s.id, true)
 	svc.Register(s.srv)
 	go func() { _ = s.srv.Serve(pr) }()

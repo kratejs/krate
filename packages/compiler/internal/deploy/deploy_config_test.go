@@ -16,7 +16,7 @@ func TestEmitNetlifyHeaders(t *testing.T) {
 		Source:  "/assets/*",
 		Headers: map[string]string{"X-Test": "1", "Cache-Control": "public, max-age=31536000, immutable"},
 	}}}
-	files, err := Emit("netlify", cfg, out)
+	files, err := Emit("netlify", cfg, out, out)
 	if err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestEmitVercelHeaders(t *testing.T) {
 		Source:  "/assets/*",
 		Headers: map[string]string{"X-Test": "1"},
 	}}}
-	files, err := Emit("vercel", cfg, out)
+	files, err := Emit("vercel", cfg, out, out)
 	if err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestEmitVercelDeployOptions(t *testing.T) {
 		"cleanUrls":     "false",
 		"trailingSlash": "true",
 	}}}
-	files, err := Emit("vercel", cfg, out)
+	files, err := Emit("vercel", cfg, out, out)
 	if err != nil {
 		t.Fatalf("Emit: %v", err)
 	}

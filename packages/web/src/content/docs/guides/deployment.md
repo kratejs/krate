@@ -40,14 +40,41 @@ that static hosts need (redirects, 404 handling), so you can upload `dist/`
 unchanged:
 
 ```sh
-krate deploy --target netlify     # _redirects
-krate deploy --target cloudflare  # _redirects
-krate deploy --target vercel      # vercel.json
+krate deploy --target netlify     # _redirects (+ _headers)
+krate deploy --target cloudflare  # _redirects (+ _headers)
+krate deploy --target vercel      # vercel.json at the project root
 krate deploy --target gh-pages    # .nojekyll + 404.html
+krate deploy --target docker      # Dockerfile + .dockerignore (server hosting)
 ```
 
 Redirects and rewrites come from your `redirects`/`rewrites` config, so the
-same rules drive `krate serve` and the deployed host.
+same rules drive `krate serve` and the deployed host. Krate patterns are
+translated to each host's syntax: `/legacy/*` with `/docs/:splat` stays as is
+for Netlify and Cloudflare and becomes `/legacy/:path*` and `/docs/:path*` for
+Vercel; a trailing `:name*` becomes `/*` and `:splat` for Netlify and Cloudflare.
+Name the splat explicitly (`:splat`) in the destination: the dev server's
+implicit "append the rest of the path" is not portable and is not emitted.
+
+`vercel.json` is written to the **project root** (not `dist/`), where a
+Git-integrated Vercel project reads it, with `outputDirectory` pointing at your
+build output. Every redirect carries an explicit `permanent` flag (Vercel treats
+a missing flag as a 308). An existing `vercel.json` that krate did not write is
+never overwritten; merge by hand in that case.
+
+### Projects with server features
+
+SSR/ISR/streaming pages, API routes, server actions and middleware need a
+server process, so a static host would publish an empty shell for them.
+`krate deploy` therefore fails for the static targets when it finds any of
+them, and lists what it found. Use `--target docker` (or run `krate serve` on a
+Node/Go host). If you really want only the static pages, pass `--static-only`:
+
+```sh
+krate deploy --target netlify --static-only
+```
+
+Server-only folders under `dist/.krate/` are removed from the output of every
+static target so they cannot be uploaded.
 
 ## Node servers (SSR / ISR / API routes / middleware)
 
@@ -70,6 +97,13 @@ request-time pages alike.
 to restrict it). `krate dev` binds `127.0.0.1` only.
 
 ## Docker
+
+`krate deploy --target docker` writes a `Dockerfile` and `.dockerignore` at the
+project root: it installs dependencies with your lockfile's package manager,
+builds the site, and runs `krate serve` (SSR, ISR, API routes, actions and
+middleware all work). The image rebuilds on start because `krate serve` builds
+first; a no-build start mode will let it skip that step. Hand-written
+Dockerfiles are never overwritten. The manual equivalents:
 
 ```dockerfile
 FROM node:20-slim AS build

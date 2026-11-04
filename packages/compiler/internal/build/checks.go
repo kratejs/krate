@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/kratejs/krate/packages/compiler/internal/astprint"
 	"github.com/kratejs/krate/packages/compiler/internal/check"
 )
 
@@ -42,6 +43,7 @@ func (b *Builder) runQualityChecks(results []*PageResult, runtimeJSFile string) 
 	}
 
 	pages := b.checkPages(results, runtimeJSFile)
+	b.attachPrograms(pages, cfg)
 	cfg.Routes = routeSet(pages)
 	findings, err := check.Run(cfg, pages)
 	if err != nil {
@@ -126,12 +128,44 @@ func (b *Builder) CheckSite(useDefaults bool) ([]check.Finding, check.Config, er
 	if err != nil {
 		return nil, cfg, err
 	}
+	b.attachPrograms(pages, cfg)
 	cfg.Routes = routeSet(pages)
 	findings, err := check.Run(cfg, pages)
 	if err != nil {
 		return nil, cfg, err
 	}
 	return findings, cfg, nil
+}
+
+// attachPrograms gives AST-based rules a parsed program for every page. Pages
+// replayed from the build cache, and every page under `krate check` (which only
+// reads dist/), carry no in-memory AST; without this their AST rules and
+// custom-rule `page.ast` would silently see null. Custom rules always get the
+// freshly parsed source so cold, warm and `krate check` runs see the same shape.
+func (b *Builder) attachPrograms(pages []check.Page, cfg check.Config) {
+	for i := range pages {
+		p := &pages[i]
+		if p.RelSource == "" || (p.Program != nil && len(cfg.Custom) == 0) {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(p.RelSource)) {
+		case ".tsx", ".ts", ".jsx", ".js":
+		default:
+			continue
+		}
+		src := p.RelSource
+		if !filepath.IsAbs(src) {
+			src = filepath.Join(b.Root, filepath.FromSlash(src))
+		}
+		data, err := os.ReadFile(src)
+		if err != nil {
+			continue
+		}
+		prog, perrs, _ := astprint.Parse(string(data))
+		if len(perrs) == 0 && prog != nil {
+			p.Program = prog
+		}
+	}
 }
 
 // loadBuiltPages walks the output directory collecting each page's final HTML

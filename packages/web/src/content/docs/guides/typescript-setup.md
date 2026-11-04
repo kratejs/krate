@@ -71,8 +71,11 @@ attributes, `Krate.TypedRoutes`). Ensure your `tsconfig` resolves it - either
 via `jsxImportSource` above or a `/// <reference types="@krate/runtime" />`
 in an ambient `.d.ts`.
 
-`src/krate-env.d.ts` (shipped in the scaffold) bridges Krate's globals like
-`Head`, `Link`, `Image`, and `Icon`.
+`src/krate-env.d.ts` bridges Krate's globals like `Head`, `Link`, `Image`, and
+`Icon`. It is generated (by `krate dev`, `krate build` or `krate types`) and
+git-ignored by the scaffold, so run `krate types` once after cloning for editors
+and `tsc` to see it. The scaffold's `typecheck` script does exactly that:
+`krate types && tsc --noEmit`.
 
 ## Typechecking in CI
 

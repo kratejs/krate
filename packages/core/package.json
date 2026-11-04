@@ -39,7 +39,8 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "postinstall": "node ./install.js"
+    "postinstall": "node ./install.js",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@krate/plugin": "workspace:*"

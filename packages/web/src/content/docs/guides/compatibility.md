@@ -139,7 +139,7 @@ Evidence: `TestEventDelegationBubbles`, `TestNonBubblingEventUsesDirectListener`
 
 **Source:** Beta - **Islands:** Beta - **SSR:** n/a
 
-Controlled text, select (single and multiple), checkbox, radio group, textarea, number and range inputs restore to state after onChange; uncontrolled defaultValue/defaultChecked only set defaults; form reset and value={undefined} follow React. Form diagnostics: KR5004 to KR5007. React 19 form actions (action/formAction functions, reset after success, no-JS server action posts) run in the browser gate.
+Controlled text, select (single and multiple), checkbox, radio group, textarea, number and range inputs restore to state after onChange; uncontrolled defaultValue/defaultChecked only set defaults; form reset and value={undefined} follow React. Form diagnostics: KR5004 to KR5007. React 19 form actions (action/formAction functions, reset after success) run in the browser gate. No-JS server action posts reach the server and redirect back; the returned state is carried in a short-lived flash cookie that useActionState reads on the next page, but a pre-rendered page is not re-rendered with it without script.
 
 Known limits:
 

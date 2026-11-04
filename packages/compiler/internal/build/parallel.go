@@ -333,6 +333,7 @@ func findInterceptPages(pagesDir string) []string {
 // routes outside a slot.
 func validateRouteTree(pages []string, pagesDir string) error {
 	byURL := map[string]string{}
+	errorPages := map[string][]string{}
 	var errs []string
 	for _, p := range pages {
 		rel, err := filepath.Rel(pagesDir, p)
@@ -347,6 +348,9 @@ func validateRouteTree(pages []string, pagesDir string) error {
 		}
 		base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
 		if base == "404" || base == "500" {
+			if !pathHasSlot(relSlash) {
+				errorPages[base] = append(errorPages[base], filepath.ToSlash(rel))
+			}
 			continue
 		}
 		if base == "default" {
@@ -365,6 +369,16 @@ func validateRouteTree(pages []string, pagesDir string) error {
 			continue
 		}
 		byURL[out] = p
+	}
+	for _, name := range []string{"404", "500"} {
+		if files := errorPages[name]; len(files) > 1 {
+			sort.Strings(files)
+			return diag.Diagnostic{
+				File:    pagesDir,
+				Message: "multiple " + name + " pages all build to " + name + ".html: " + strings.Join(files, ", "),
+				Hint:    "keep a single " + name + ".tsx at the pages root; per-section not-found pages are not supported, so the others would overwrite it nondeterministically",
+			}
+		}
 	}
 	if len(errs) > 0 {
 		sort.Strings(errs)

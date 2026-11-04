@@ -481,18 +481,40 @@ class KrateDev {
     } catch {
       return;
     }
+    let connectedOnce = false;
+    sse.addEventListener('connected', () => {
+      // A second "connected" means the stream dropped and came back: the dev
+      // server restarted (config or env change), so the page is stale.
+      if (connectedOnce) location.reload();
+      connectedOnce = true;
+    });
     sse.addEventListener('reload', (e) => {
+      // A rebuild without diagnostics supersedes any compile error on screen,
+      // whichever route it touched.
+      if (this.buildDiags.length > 0) {
+        this.buildDiags = [];
+        this.setStatus(true);
+        this.render();
+      }
+      let cssOnly = false;
       try {
         const d = JSON.parse((e as MessageEvent).data);
+        cssOnly = d.cssOnly === true;
         if (
           d.pages &&
           Array.isArray(d.pages) &&
-          !d.pages.some((p: string) => routeMatches(p, location.pathname, this.cfg.basePath))
+          !d.pages.some(
+            (p: string) => p === '/404' || p === '/500' || routeMatches(p, location.pathname, this.cfg.basePath),
+          )
         ) {
           return;
         }
       } catch {
         /* full reload */
+      }
+      if (cssOnly) {
+        this.swapStylesheets().catch(() => location.reload());
+        return;
       }
       location.reload();
     });
@@ -511,11 +533,61 @@ class KrateDev {
         const d = JSON.parse((e as MessageEvent).data) as DevEvent;
         if (!d.clientError) return;
         const err = d.clientError;
+        // This tab reported the error itself and already shows it.
+        if (this.seen.has(err.message + '|' + (err.stack || ''))) return;
         this.addRuntime('Runtime Error', err.message, err.stack);
       } catch {
         /* ignore */
       }
     });
+  }
+
+  /**
+   * Apply a CSS-only rebuild without a full reload: fetch the freshly built
+   * document, add its stylesheet links, and drop the ones it no longer has.
+   * Inline <style> changes cannot be diffed safely, so they fall back to a
+   * reload (the caller reloads when this rejects).
+   */
+  private async swapStylesheets(): Promise<void> {
+    const res = await fetch(location.href, { cache: 'no-store', headers: { Accept: 'text/html' } });
+    if (!res.ok) throw new Error('fetch failed');
+    const next = new DOMParser().parseFromString(await res.text(), 'text/html');
+    const inline = (d: Document) =>
+      Array.from(d.querySelectorAll('style'))
+        .map((el) => el.textContent || '')
+        .join('\u0000');
+    if (inline(next) !== inline(document)) throw new Error('inline styles changed');
+    const abs = (href: string) => new URL(href, location.href).href;
+    const want = Array.from(next.querySelectorAll('link[rel~="stylesheet"]')).map((l) => abs(l.getAttribute('href') || ''));
+    const current = Array.from(document.querySelectorAll('link[rel~="stylesheet"]')) as HTMLLinkElement[];
+    const have = new Set(current.map((l) => abs(l.getAttribute('href') || '')));
+    const loads: Promise<void>[] = [];
+    for (const href of want) {
+      if (have.has(href)) continue;
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = href;
+      loads.push(
+        new Promise<void>((resolve, reject) => {
+          link.onload = () => resolve();
+          link.onerror = () => reject(new Error('stylesheet failed'));
+        }),
+      );
+      document.head.appendChild(link);
+    }
+    await Promise.all(loads);
+    const keep = new Set(want);
+    for (const l of current) {
+      if (!keep.has(abs(l.getAttribute('href') || ''))) l.remove();
+    }
+    // A same-named stylesheet is cache-busted in place.
+    for (const l of current) {
+      const href = abs(l.getAttribute('href') || '');
+      if (!keep.has(href) || !l.isConnected) continue;
+      const u = new URL(href);
+      u.searchParams.set('_krate', String(Date.now()));
+      l.href = u.href;
+    }
   }
 
   private captureRuntimeErrors(): void {

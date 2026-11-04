@@ -2,7 +2,7 @@
   "name": "krate-plugin-demo-go",
   "version": "0.0.1",
   "private": true,
-  "type": "commonjs",
+  "type": "module",
   "description": "Example Krate community plugin written in Go.",
   "main": "index.js",
   "files": [

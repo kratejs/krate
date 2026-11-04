@@ -59,7 +59,8 @@ src/
 - Don't run `krate build`/`dev` from inside `dist/`.
 - The compiler runs as a Go binary; runtime/type errors surface as compile
   errors on `dev`/`build`. If TypeScript typechecking is needed beyond what the
-  CLI reports, `npx tsc --noEmit` uses the project tsconfig.
+  CLI reports, `npm run typecheck` (`krate types && tsc --noEmit`) uses the project
+  tsconfig; `src/krate-env.d.ts` is generated, not committed.
 
 ## Docs
 

@@ -207,12 +207,24 @@ devServer: {
 accept requests whose `Host` and `Origin` are the dev server itself (this blocks
 DNS-rebinding and cross-site calls to `/__krate/open`). Set `devServer.host`
 (or `server.host`) to expose it, for example `"0.0.0.0"` to test on a phone; the
-`Host` check is then relaxed to the configured address. `editor` may include flags (for example `"code -g"`). It is used by the
+`Host` check is then relaxed to the configured address.
+
+`port` is the dev server port and takes precedence over `server.port` in
+`krate dev` (`krate serve` uses `server.port`, then `devServer.port`). If the
+port is busy, dev moves to the next free one and says so; `serve` fails with a
+hint instead.
+
+`editor` is the editor command (for example `"code"`, `"cursor"`, `"idea"`,
+`"subl"`, `"vim"` or `"zed"`) and may include flags. Krate adds the right
+line-number syntax for each (`-g file:line` for VS Code family editors,
+`--line N file` for JetBrains IDEs, `file:line` for Sublime and Zed, `+N file`
+for vim); an unknown editor is opened with the plain file path. It is used by the
 overlay's location links and by `GET /__krate/open`. `proxy` forwards matching
 path prefixes to a backend only in dev (longest prefix wins), so you can run a
-separate backend without CORS. In development, generated JavaScript is served
-unminified (with component comments) so devtools are readable; production output
-stays minified.
+separate backend without CORS. In development, the JavaScript generated for each
+page is unminified (with component comments) so devtools are readable; the shared
+`@krate/runtime` chunk is the prebuilt, already minified runtime in both modes.
+Production output minifies the page scripts too.
 
 ## Tailwind CSS
 

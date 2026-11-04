@@ -92,6 +92,11 @@ type PageResult struct {
 	// components) discovered from the IR tree. Populated for non-SSG pages.
 	Regions []Region
 
+	// Warnings are the positioned build warnings this page produced (module
+	// rewrite diagnostics, IR warnings). They are stored with a disk-cached page
+	// and replayed, so a warm build reports what a cold one does.
+	Warnings []diag.Diagnostic
+
 	// Program is the page's parsed (and plugin-transformed) AST. Consumed by
 	// compiler-enforced quality checks; nil for plugin-generated routes.
 	Program *ast.Program
@@ -114,15 +119,20 @@ type PageResult struct {
 }
 
 type Builder struct {
-	Root     string
-	Cfg      *config.Config
-	DevMode  bool
-	Verbose  bool
-	ctx      context.Context     // optional cancellation for long builds
-	Env      map[string]string   // resolved .env values (build/serve-time only, never client-facing)
-	depGraph map[string][]string // file path -> page source paths that depend on it
-	pageDeps map[string][]string // page source path -> files it depends on
-	depMu    sync.Mutex          // protects depGraph/pageDeps
+	Root    string
+	Cfg     *config.Config
+	DevMode bool
+	Verbose bool
+	// DevReload is called by the dev watcher when a config or env file
+	// changed. It reports whether the new settings load cleanly, in which case
+	// the watcher asks the dev server to restart; otherwise it has already
+	// surfaced the error and the current server keeps running.
+	DevReload func(reason string) bool
+	ctx       context.Context     // optional cancellation for long builds
+	Env       map[string]string   // resolved .env values (build/serve-time only, never client-facing)
+	depGraph  map[string][]string // file path -> page source paths that depend on it
+	pageDeps  map[string][]string // page source path -> files it depends on
+	depMu     sync.Mutex          // protects depGraph/pageDeps
 
 	// twMu guards twPages/twWarned: Tailwind CSS-first directives collected
 	// from the authored CSS that flows through processCSSDirectives (replaced
@@ -673,6 +683,12 @@ func (b *Builder) BuildAll() error {
 	defer b.ClosePlugins()
 
 	b.resetBuildCaches()
+	// A full build re-records every dependency; entries for deleted pages must
+	// not survive it.
+	b.depMu.Lock()
+	b.depGraph = make(map[string][]string)
+	b.pageDeps = make(map[string][]string)
+	b.depMu.Unlock()
 	// A full build starts from clean Tailwind state; partial rebuilds replace
 	// only the pages they rebuild.
 	b.twMu.Lock()
@@ -696,8 +712,10 @@ func (b *Builder) BuildAll() error {
 	// Intercepting slot pages are built as fragments the SPA router swaps
 	// into their slot (see parallel.go).
 	pages = append(pages, findInterceptPages(b.Cfg.PagesDir)...)
+	usedEntryFallback := false
 	if len(pages) == 0 {
 		pages = []string{b.Cfg.Entry}
+		usedEntryFallback = true
 	}
 
 	// Run BeforeBuild hooks (docs plugin generates .krategen/ pages here)
@@ -744,6 +762,29 @@ func (b *Builder) BuildAll() error {
 		b.pluginFailed(err)
 	}
 	stopPlugins()
+
+	if usedEntryFallback && len(genPages) == 0 && len(routes) == 0 {
+		if _, statErr := os.Stat(b.Cfg.Entry); statErr != nil {
+			rel := func(p string) string {
+				if r, err := filepath.Rel(b.Root, p); err == nil {
+					return filepath.ToSlash(r)
+				}
+				return p
+			}
+			if _, dirErr := os.Stat(b.Cfg.PagesDir); dirErr != nil {
+				return diag.Diagnostic{
+					File:    b.Cfg.PagesDir,
+					Message: "pagesDir " + rel(b.Cfg.PagesDir) + " does not exist",
+					Hint:    "create " + rel(b.Cfg.PagesDir) + " with at least one page, or fix the pagesDir setting in krate.config.ts",
+				}
+			}
+			return diag.Diagnostic{
+				File:    b.Cfg.PagesDir,
+				Message: "no pages found in " + rel(b.Cfg.PagesDir),
+				Hint:    "add a page such as " + rel(b.Cfg.PagesDir) + "/index.tsx",
+			}
+		}
+	}
 
 	// Plugins generated files during BeforeBuild/GenerateRoutes; drop resolver
 	// stat/package.json memos so negative probes made before those files existed
@@ -1185,6 +1226,22 @@ func (b *Builder) ClosePlugins() {
 func (b *Builder) recordDeps(page string, pageDeps []string) {
 	b.depMu.Lock()
 	defer b.depMu.Unlock()
+	// A rebuilt page replaces its earlier record, so a dependency it no longer
+	// has stops triggering it and repeated rebuilds do not grow the graph.
+	for _, old := range b.pageDeps[page] {
+		pages := b.depGraph[old]
+		kept := pages[:0]
+		for _, pg := range pages {
+			if pg != page {
+				kept = append(kept, pg)
+			}
+		}
+		if len(kept) == 0 {
+			delete(b.depGraph, old)
+		} else {
+			b.depGraph[old] = kept
+		}
+	}
 	b.pageDeps[page] = pageDeps
 	for _, dep := range pageDeps {
 		b.depGraph[dep] = append(b.depGraph[dep], page)
@@ -1677,7 +1734,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 					h = strings.Replace(h, "</head>", state+"</head>", 1)
 				}
 				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
-				if b.Cfg.SEO.BaseURL != "" {
+				if b.Cfg.SEO.BaseURL != "" || b.Cfg.SEO.Description != "" {
 					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO)
 					if seoTags != "" {
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
@@ -1791,6 +1848,10 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		return nil, "", err
 	}
 	printModuleWarnings(os.Stderr, bundle.Modules)
+	var pageWarnings []diag.Diagnostic
+	for _, m := range bundle.Modules {
+		pageWarnings = append(pageWarnings, m.Diagnostics...)
+	}
 
 	entryModule := findEntryModule(bundle.Modules)
 	if entryModule == nil || entryModule.Program == nil {
@@ -1876,6 +1937,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	if renderMode == RenderSSG && explicitStatic {
 		if d, ok := staticDataCacheWarning(page, entryModule.SourceCode, dataUsage, staticWhy); ok {
 			printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
+			pageWarnings = append(pageWarnings, d)
 		}
 	}
 
@@ -1939,6 +2001,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			return nil, "", renderErrors(page, tree.Errors)
 		}
 		printTreeWarnings(os.Stderr, tree.Warnings)
+		pageWarnings = append(pageWarnings, tree.Warnings...)
 		// CSS stylesheets are generated during IR construction (one shared,
 		// instance-agnostic stylesheet per scope). Append them to the page's own CSS
 		// so they land in the hashed external stylesheet.
@@ -2122,6 +2185,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			HasCSS:            pageCSS != "",
 			HasCSSSignals:     tree.HasCSSSignals || layoutHasSignals,
 			IsErrorPage:       pageBase == "404" || pageBase == "500",
+			Warnings:          pageWarnings,
 			CSS:               pageCSS,
 			UsedCSS:           emitResult.UsedCSS,
 			UsedFuncs:         emitResult.UsedFuncs,
@@ -2218,6 +2282,10 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 				_ = fsutil.WriteFileIfChanged(jsPath, []byte(finalJS), 0644)
 			}
 
+			if b.DevMode {
+				pruneStaleHydration(pageDir, jsFile)
+			}
+
 			// Keep the CSP hash and any other ingest in sync with the bytes
 			// actually written (which may differ from hydrationJS if
 			// import.meta.url was substituted or a sourcemap comment appended).
@@ -2234,7 +2302,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	b.registerWorkers(bundle.WorkerFiles, bundle.WorkerEsm)
 	b.registerDynamicChunks(bundle.DynImportFiles)
 
-	printResult(outName, jsFile)
+	printResult(outName, jsFile, pageBase)
 
 	loadingHTML := b.renderLoadingComponent(page)
 
@@ -2254,6 +2322,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		HasCSS:        pageCSS != "",
 		HasCSSSignals: tree.HasCSSSignals || layoutHasSignals,
 		IsErrorPage:   pageBase == "404" || pageBase == "500",
+		Warnings:      pageWarnings,
 		CSS:           pageCSS,
 		UsedCSS:       emitResult.UsedCSS,
 		UsedFuncs:     emitResult.UsedFuncs,
@@ -2314,6 +2383,8 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 	b.registerDynamicChunks(e.DynImports)
 	b.recordDeps(page, e.Deps)
 	c.markHit()
+	// A replayed page reports the warnings its cold build did (once per build).
+	printWarningsOnce(os.Stderr, e.Warnings)
 
 	return &PageResult{
 		Page:          page,
@@ -2340,8 +2411,8 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		DynamicParams:     e.DynamicParams,
 		StaticOnly:        e.StaticOnly,
 		IsDynamicTemplate: e.IsDynamicTemplate,
-		// Program is intentionally nil: AST-based checks are skipped for cached
-		// pages (their inputs - and therefore findings - are unchanged).
+		Warnings:          e.Warnings,
+		// Program stays nil; checks re-parse the source (attachPrograms).
 	}, e.CSS, true
 }
 
@@ -2396,6 +2467,7 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		StaticOnly:        r.StaticOnly,
 		IsDynamicTemplate: r.IsDynamicTemplate,
 
+		Warnings:    r.Warnings,
 		Deps:        sorted,
 		DepHashes:   hashes,
 		AssetFiles:  bundle.AssetFiles,
@@ -3696,8 +3768,27 @@ func (b *Builder) writeAssetFiles(assets map[string]string) error {
 	return nil
 }
 
-func printResult(outName, jsFile string) {
-	if outName == "." {
+// pruneStaleHydration removes superseded index.<hash>.js files (and their
+// sourcemaps) from a page directory. Every dev edit writes a new content-hashed
+// bundle, so without this they pile up in dist/ for the whole session.
+func pruneStaleHydration(pageDir, keep string) {
+	matches, err := filepath.Glob(filepath.Join(pageDir, "index.*.js*"))
+	if err != nil {
+		return
+	}
+	for _, m := range matches {
+		base := filepath.Base(m)
+		if base == keep || base == keep+".map" {
+			continue
+		}
+		_ = os.Remove(m)
+	}
+}
+
+func printResult(outName, jsFile, pageBase string) {
+	if pageBase == "404" || pageBase == "500" {
+		printf("    %s+%s %s (error page)\n", cGreen, cReset, pageBase+".html")
+	} else if outName == "." {
 		printf("    %s+%s %s/index.html %s(root)%s\n", cGreen, cReset, outName, cGray, cReset)
 	} else {
 		printf("    %s+%s %s/index.html\n", cGreen, cReset, outName)

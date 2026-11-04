@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -24,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -1164,6 +1166,28 @@ func Serve(root string, cfg *config.Config, startTime time.Time) error {
 
 func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
 	port := cfg.ServerPort()
+	if hub != nil {
+		port = cfg.DevPort()
+	}
+
+	// Bind the listener before any sidecar starts: a taken port must fail (or,
+	// in dev, move to the next free one) without leaving an orphaned renderer.
+	bindHost := strings.TrimSpace(cfg.Server.Host)
+	if hub != nil {
+		// Dev binds loopback unless devServer.host/server.host says otherwise.
+		bindHost = devBindHost(cfg)
+	}
+	listener, err := bindServerListener(bindHost, port, hub != nil)
+	if err != nil {
+		return err
+	}
+	listenerOwned := false
+	defer func() {
+		if !listenerOwned {
+			_ = listener.Close()
+		}
+	}()
+	port = listener.Addr().(*net.TCPAddr).Port
 	apiPort := internalPort(port + 1)
 
 	// On-demand revalidation (revalidatePath/revalidateTag) reaches this
@@ -1497,6 +1521,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// SSR/ISR/Streaming route handler - intercepts before static file server
 	if ssrStarted {
 		mux.HandleFunc("/__krate/ssr/", ssrInternalProxy(revalHost, ssrPort))
+		// Dev: invalidate the renderer's caches once per rebuild, not once per
+		// connected tab.
+		if hub != nil {
+			hub.SetReloadHook(func(ev DevEvent) { ssr.InvalidateDevRoutes(ev.Routes) })
+		}
 	}
 
 	// Wrap file server to serve custom 404.html if it exists
@@ -1667,18 +1696,6 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					}
 					routes := ev.Routes
 
-					// Invalidate SSR renderer cache for changed pages
-					if ssrStarted && len(routes) > 0 {
-						for _, route := range routes {
-							page := ssr.findPage(route)
-							if page != nil && page.Source != "" {
-								if err := ssr.InvalidateDev(route, page.Source, page.BundlePath); err != nil {
-									fmt.Fprintf(os.Stderr, "  %sSSR invalidation failed (%s):%s %v\n", cYellow, route, cReset, err)
-								}
-							}
-						}
-					}
-
 					switch {
 					case ev.Type == "client-error" && ev.ClientError != nil:
 						data, _ := json.Marshal(ev)
@@ -1690,17 +1707,15 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 						writeBuildError(w, ev)
 					case len(routes) > 0:
 						// Partial reload: send affected page routes
-						data := `{"pages":[`
-						for i, r := range routes {
-							if i > 0 {
-								data += ","
-							}
-							data += `"` + r + `"`
-						}
-						data += `]}`
+						data, _ := json.Marshal(struct {
+							Pages   []string `json:"pages"`
+							CSSOnly bool     `json:"cssOnly,omitempty"`
+						}{routes, ev.CSSOnly})
 						fmt.Fprintf(w, "event: reload\ndata: %s\n\n", data)
 					default:
-						fmt.Fprintf(w, "event: reload\ndata: {}\n\n")
+						// A reload with no diagnostics also clears any error
+						// the tab was showing; the client does that itself.
+						_, _ = fmt.Fprintf(w, "event: reload\ndata: {\"cssOnly\":%t}\n\n", ev.CSSOnly)
 					}
 					flusher.Flush()
 				case <-heartbeat.C:
@@ -2137,21 +2152,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	// Wrap the mux so every route (including /api/, /__krate/, health) gets
 	// request IDs, security headers, and panic recovery.
-	var rootHandler http.Handler = requestIDMiddleware(basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, mux))))))
-
-	bindHost := strings.TrimSpace(cfg.Server.Host)
+	var devMux http.Handler = mux
 	if hub != nil {
-		bindHost = devBindHost(cfg)
+		devMux = devErrorShell(hub, root, absOut, mux)
 	}
-	listenAddr := fmt.Sprintf(":%d", port)
-	if bindHost != "" {
-		listenAddr = net.JoinHostPort(bindHost, strconv.Itoa(port))
-	}
-	listener, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", listenAddr, err)
-	}
+	var rootHandler http.Handler = requestIDMiddleware(basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, devMux))))))
 
+	listenerOwned = true
 	addr := listener.Addr().(*net.TCPAddr)
 	label := "dev"
 	if hub == nil {
@@ -2215,13 +2222,26 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// connection can't hang shutdown forever.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 
 	httpServer := newHTTPServer(rootHandler)
 	isrCloseOnce := sync.Once{}
 
+	var restartCh <-chan struct{}
+	if hub != nil {
+		restartCh = hub.RestartRequested()
+	}
+	var restarting atomic.Bool
+	shutdownDone := make(chan struct{})
+
 	go func() {
-		<-sigCh
-		printf("\n%sShutting down...%s\n", cGray, cReset)
+		defer close(shutdownDone)
+		select {
+		case <-sigCh:
+			printf("\n%sShutting down...%s\n", cGray, cReset)
+		case <-restartCh:
+			restarting.Store(true)
+		}
 		defer func() {
 			if r := recover(); r != nil {
 				_ = safe.Recover(r)
@@ -2263,7 +2283,14 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	defer plugin.CloseGoPlugins()
 
-	return httpServer.Serve(listener)
+	err = httpServer.Serve(listener)
+	if errors.Is(err, http.ErrServerClosed) && restarting.Load() {
+		// Wait for the sidecars to stop before the caller starts a new server
+		// on the same ports.
+		<-shutdownDone
+		return ErrDevRestart
+	}
+	return err
 }
 
 type loggingResponseWriter struct {

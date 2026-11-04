@@ -107,7 +107,7 @@ func (b *Builder) routeOutputs(route string) ([]string, int64) {
 		entries, err := os.ReadDir(dir)
 		if err == nil {
 			for _, e := range entries {
-				if e.IsDir() {
+				if e.IsDir() || !isRootRouteOutput(e.Name()) {
 					continue
 				}
 				outs = append(outs, filepath.ToSlash(e.Name()))
@@ -134,4 +134,17 @@ func (b *Builder) routeOutputs(route string) ([]string, int64) {
 	})
 	sort.Strings(outs)
 	return outs, total
+}
+
+// isRootRouteOutput reports whether a top-level dist file belongs to the root
+// page (its document and hydration/stylesheet bundles) rather than being
+// site-wide output such as manifests, 404.html or the sitemap.
+func isRootRouteOutput(name string) bool {
+	if name == "index.html" {
+		return true
+	}
+	if !strings.HasPrefix(name, "index.") {
+		return false
+	}
+	return strings.Contains(name, ".js") || strings.Contains(name, ".css")
 }

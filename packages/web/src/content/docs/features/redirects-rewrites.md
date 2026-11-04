@@ -51,3 +51,11 @@ keeping clean public URLs.
 
 Both support pattern matching with wildcard (`*`) and parameterized
 (`:param`) segments, resolved at request time.
+
+## On hosted targets
+
+`krate deploy` translates these patterns for Netlify, Cloudflare Pages and
+Vercel (see [Deployment](/docs/guides/deployment/)). Write the splat explicitly
+in the destination (`/docs/:splat`): that form is portable, while the dev
+server's implicit "append the rest of the path" when a wildcard source has a
+destination without `:splat` is not carried to hosts.

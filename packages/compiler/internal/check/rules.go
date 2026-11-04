@@ -143,7 +143,7 @@ func ruleDescription(p *Page, _ *Config) []Finding {
 	if !ok || strings.TrimSpace(desc) == "" {
 		return []Finding{{
 			Message: "page has no meta description",
-			Hint:    "Set seo.description, or add <meta name=\"description\" content=\"...\">.",
+			Hint:    "Set site.description (or seo.description) in krate.config.ts, or add <meta name=\"description\" content=\"...\"> to the page.",
 		}}
 	}
 	if len([]rune(desc)) > 160 {

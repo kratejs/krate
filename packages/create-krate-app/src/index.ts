@@ -11,6 +11,8 @@ import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
+import { escapeDisplayName } from './escape.js';
+import { commandSpec } from './spawn.js';
 import { stdin as input, stdout as output } from 'node:process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -202,8 +204,10 @@ function copyTemplate(
       continue;
     }
     let content = readFileSync(src, 'utf-8');
+    const ext = extname(src);
     for (const [key, value] of Object.entries(vars)) {
-      content = content.split(key).join(value);
+      const v = key === '__PROJECT_DISPLAY_NAME__' ? escapeDisplayName(ext, value) : value;
+      content = content.split(key).join(v);
     }
     writeFileSync(dest, content);
   }
@@ -218,7 +222,11 @@ function installDependencies(pm: PackageManager, dir: string): void {
   process.stdout.write(
     `\n${c.bold}Installing dependencies with ${pm}...${c.reset}\n\n`,
   );
-  const result = spawnSync(pm, ['install'], { stdio: 'inherit', cwd: dir });
+  const spec = commandSpec(pm, ['install']);
+  const result = spawnSync(spec.command, spec.args, { stdio: 'inherit', cwd: dir, shell: spec.shell });
+  if (result.error) {
+    fail(`Could not run \`${pm} install\` (${result.error.message}). Run it manually.`);
+  }
   if (result.status !== 0) {
     fail(`Dependency installation failed. Run \`${pm} install\` manually.`);
   }
