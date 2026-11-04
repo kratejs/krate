@@ -31,7 +31,9 @@ d.setAttribute(p[1],t.id);
 }
 function enter(p){
 var f=p.getAttribute("role")==="menu"?$("[role=menuitem]",p).filter(vis):foc(p);
-(f[0]||p).focus();
+var t=f[0]||p;
+t.focus();
+return t;
 }
 function activate(l){last=l;l.click()}
 function move(list,from,k){
@@ -57,13 +59,13 @@ if(t&&vis(t)&&lost)tgt=t;
 }else if(i.checked&&a.querySelector("input[data-ka=x]")){
 a._o=i.id;
 var pid=from&&from.getAttribute("aria-controls"),p=pid&&D.getElementById(pid);
-if(p&&/^(dialog|alertdialog|menu)$/.test(p.getAttribute("role")||"")){enter(p)}
+if(p&&/^(dialog|alertdialog|menu)$/.test(p.getAttribute("role")||"")){tgt=enter(p)}
 else if(from&&lost){
 var alt=from.nextElementSibling;
 if(alt&&alt.getAttribute("data-ka")==="a"&&vis(alt))tgt=alt;
 }
 }else if(from&&vis(from)){tgt=from}
-if(tgt)tgt.focus();
+if(tgt&&tgt.ownerDocument.activeElement!==tgt)tgt.focus();
 var sx=a.querySelector("input[data-ka=x]");
 if(sx&&i.checked){
 var d={open:!sx.checked,value:sx.checked?"":i.value};
