@@ -191,6 +191,11 @@ devServer: {
 }
 ```
 
+`port` is the dev server port and takes precedence over `server.port` in
+`krate dev` (`krate serve` uses `server.port`, then `devServer.port`). If the
+port is busy, dev moves to the next free one and says so; `serve` fails with a
+hint instead.
+
 `editor` is the editor command (for example `"code"`, `"cursor"`, `"idea"`,
 `"subl"`, `"vim"` or `"zed"`) and may include flags. Krate adds the right
 line-number syntax for each (`-g file:line` for VS Code family editors,

@@ -1,14 +1,19 @@
 package build
 
 import (
+	"errors"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
 
 func devPage(name string) string {
@@ -235,7 +240,7 @@ func TestBindServerListenerDevMovesToNextPort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer first.Close()
+	defer func() { _ = first.Close() }()
 	taken := first.Addr().(*net.TCPAddr).Port
 	if _, err := bindServerListener("127.0.0.1", taken, false); err == nil {
 		t.Fatal("serve must fail on a taken port")
@@ -244,7 +249,7 @@ func TestBindServerListenerDevMovesToNextPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dev must auto-increment: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	if ln.Addr().(*net.TCPAddr).Port == taken {
 		t.Fatal("dev bound the taken port")
 	}
@@ -286,5 +291,123 @@ func TestMissingPagesDirIsAClearError(t *testing.T) {
 	err := New(root, cfg).BuildAll()
 	if err == nil || !strings.Contains(err.Error(), "pagesDir src/nope does not exist") {
 		t.Fatalf("got %v, want a pagesDir-does-not-exist error", err)
+	}
+}
+
+func httpGet(t *testing.T, url, accept string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest("GET", url, nil)
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return 0, err.Error()
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body)
+}
+
+func TestServeDevRestartsOnRequestAndShowsErrorShell(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.Server.Host = "127.0.0.1"
+	port := freePort(t)
+	cfg.DevServer.Port = port
+	if err := os.MkdirAll(cfg.PagesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// No pages and a published build error: the first build "failed".
+	hub := NewDevHub()
+	hub.Publish(DevEvent{Type: "reload", Diagnostics: []diag.Diagnostic{{File: "src/pages/index.tsx", Line: 3, Message: "boom <b>", Hint: "fix it"}}})
+
+	errc := make(chan error, 1)
+	go func() { errc <- ServeDev(root, cfg, hub, time.Now()) }()
+	base := "http://127.0.0.1:" + strconv.Itoa(port)
+	waitFor(t, "dev server up", func() bool {
+		code, _ := httpGet(t, base+"/healthz", "")
+		return code == 200
+	})
+
+	code, body := httpGet(t, base+"/", "text/html")
+	if code == 200 && strings.Contains(body, "Index of") {
+		t.Fatalf("failed build must not serve a directory listing:\n%s", body)
+	}
+	for _, want := range []string{"Build failed", "boom &lt;b&gt;", "hint: fix it", "/__krate/dev.js", "__KRATE_DEV__"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("error shell missing %q:\n%s", want, body)
+		}
+	}
+	if code, js := httpGet(t, base+"/__krate/dev.js", ""); code != 200 || js == "" {
+		t.Errorf("dev bundle endpoint = %d", code)
+	}
+
+	// A clean rebuild stops the shell.
+	hub.Publish(DevEvent{Type: "reload"})
+	if _, body := httpGet(t, base+"/", "text/html"); strings.Contains(body, "Build failed") {
+		t.Errorf("shell still served after the build recovered")
+	}
+
+	// Port is taken while it runs, free again after a restart request.
+	if _, err := bindServerListener("127.0.0.1", port, false); err == nil {
+		t.Error("expected the port to be in use while the dev server runs")
+	}
+	hub.RequestRestart()
+	select {
+	case err := <-errc:
+		if !errors.Is(err, ErrDevRestart) {
+			t.Fatalf("ServeDev returned %v, want ErrDevRestart", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("ServeDev did not shut down on a restart request")
+	}
+	ln, err := bindServerListener("127.0.0.1", port, false)
+	if err != nil {
+		t.Fatalf("port not released after restart: %v", err)
+	}
+	_ = ln.Close()
+}
+
+func TestIsRootRouteOutput(t *testing.T) {
+	for name, want := range map[string]bool{
+		"index.html": true, "index.ab12.js": true, "index.ab12.js.map": true, "index.x.css": true,
+		"manifest.json": false, "404.html": false, "sitemap.xml": false, "robots.txt": false,
+	} {
+		if got := isRootRouteOutput(name); got != want {
+			t.Errorf("isRootRouteOutput(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestDevRouteLabelNamesErrorPages(t *testing.T) {
+	pages := filepath.Join(string(filepath.Separator), "p", "src", "pages")
+	cases := map[string]string{
+		filepath.Join(pages, "index.tsx"):       "/",
+		filepath.Join(pages, "404.tsx"):         "/404",
+		filepath.Join(pages, "blog", "a.tsx"):   "/blog/a",
+		filepath.Join(pages, "blog", "500.tsx"): "/500",
+	}
+	for page, want := range cases {
+		if got := devRouteLabel(page, pages); got != want {
+			t.Errorf("devRouteLabel(%q) = %q, want %q", page, got, want)
+		}
+	}
+}
+
+func TestPruneStaleHydrationKeepsCurrentBundle(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"index.old1.js", "index.old1.js.map", "index.new.js", "index.html", "other.js"} {
+		if err := os.WriteFile(filepath.Join(dir, n), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pruneStaleHydration(dir, "index.new.js")
+	for n, want := range map[string]bool{"index.old1.js": false, "index.old1.js.map": false, "index.new.js": true, "index.html": true, "other.js": true} {
+		if exists(filepath.Join(dir, n)) != want {
+			t.Errorf("%s exists=%v, want %v", n, !want, want)
+		}
 	}
 }

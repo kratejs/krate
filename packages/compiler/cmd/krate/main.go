@@ -141,7 +141,7 @@ func main() {
 func printCommandUsage(w io.Writer, cmd string) {
 	switch cmd {
 	case "build":
-		fmt.Fprintf(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--mode <name>] [--watch] [--profile] [--cpuprofile <path>] [--memprofile <path>] [--precompress]\n\n")
+		writeHelp(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--mode <name>] [--watch] [--profile] [--cpuprofile <path>] [--memprofile <path>] [--precompress]\n\n")
 		fmt.Fprintf(w, "Compile the project to static output (and SSR/server bundles when needed).\n")
 	case "dev":
 		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--verbose]\n\n")
@@ -167,9 +167,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "       krate migrate rollback <backup-dir>\n\n")
 		fmt.Fprintf(w, "Plan or apply a framework migration. Dry-run by default.\n")
 	case "deploy":
-		fmt.Fprintf(w, "Usage: krate deploy [dir] [--target netlify|vercel|cloudflare|gh-pages|docker] [--static-only]\n\n")
-		fmt.Fprintf(w, "Build the site and write host adapter files (_redirects/_headers, vercel.json, Dockerfile).\n")
-		fmt.Fprintf(w, "Projects with SSR/ISR, API routes, actions or middleware need --target docker (or\n`krate serve`); --static-only publishes just their static pages.\n")
+		writeHelp(w, "Usage: krate deploy [dir] [--target netlify|vercel|cloudflare|gh-pages|docker] [--static-only]\n\n")
+		writeHelp(w, "Build the site and write host adapter files (_redirects/_headers, vercel.json, Dockerfile).\n")
+		writeHelp(w, "Projects with SSR/ISR, API routes, actions or middleware need --target docker (or\n`krate serve`); --static-only publishes just their static pages.\n")
 	case "inspect":
 		fmt.Fprintf(w, "Usage: krate inspect [dir] [--json]\n\n")
 		fmt.Fprintf(w, "Build the site and print its model (routes, sources, modes, deps, outputs).\n")
@@ -202,6 +202,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 	}
 }
 
+// writeHelp writes one help fragment; help output is best-effort.
+func writeHelp(w io.Writer, s string) { _, _ = io.WriteString(w, s) }
+
 func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage: krate [flags] <command> [dir]\n\n")
 	fmt.Fprintf(w, "Commands:\n")
@@ -233,14 +236,14 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --memprofile <p>  Write a Go heap profile to <p> (pprof)\n")
 	fmt.Fprintf(w, "  --sourcemap       Emit source maps for generated JS\n")
 	fmt.Fprintf(w, "  --no-dce          Disable CSS/JS dead-code elimination\n")
-	fmt.Fprintf(w, "  --precompress     Write .br/.gz siblings for compressible assets\n")
-	fmt.Fprintf(w, "  --mode <name>     Environment mode (like KRATE_ENV): loads .env.<name>\n")
-	fmt.Fprintf(w, "  --target <name>   Deploy adapter target (netlify|vercel|cloudflare|gh-pages|docker)\n")
-	fmt.Fprintf(w, "  --static-only     Deploy only the static pages of a project that also uses server features\n")
+	writeHelp(w, "  --precompress     Write .br/.gz siblings for compressible assets\n")
+	writeHelp(w, "  --mode <name>     Environment mode (like KRATE_ENV): loads .env.<name>\n")
+	writeHelp(w, "  --target <name>   Deploy adapter target (netlify|vercel|cloudflare|gh-pages|docker)\n")
+	writeHelp(w, "  --static-only     Deploy only the static pages of a project that also uses server features\n")
 	fmt.Fprintf(w, "  --json            Machine-readable output (krate inspect)\n")
-	fmt.Fprintf(w, "  --apply           Write changes (krate fix, krate migrate); dry-run otherwise\n")
-	fmt.Fprintf(w, "  --verify, --force, --update-package, --report <path>   krate migrate options\n")
-	fmt.Fprintf(w, "  --schema          Print a JSON Schema instead of the config (krate config)\n")
+	writeHelp(w, "  --apply           Write changes (krate fix, krate migrate); dry-run otherwise\n")
+	writeHelp(w, "  --verify, --force, --update-package, --report <path>   krate migrate options\n")
+	writeHelp(w, "  --schema          Print a JSON Schema instead of the config (krate config)\n")
 }
 
 func parseFlags(args []string) (cliFlags, []string) {

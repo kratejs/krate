@@ -1687,7 +1687,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					default:
 						// A reload with no diagnostics also clears any error
 						// the tab was showing; the client does that itself.
-						fmt.Fprintf(w, "event: reload\ndata: {\"cssOnly\":%t}\n\n", ev.CSSOnly)
+						_, _ = fmt.Fprintf(w, "event: reload\ndata: {\"cssOnly\":%t}\n\n", ev.CSSOnly)
 					}
 					flusher.Flush()
 				case <-heartbeat.C:

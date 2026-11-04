@@ -461,19 +461,6 @@ func (s *SSRServer) GetISRPages() []ISRPage {
 	return pages
 }
 
-// findPage returns the ManifestPage for a given route, or nil if not found.
-func (s *SSRServer) findPage(route string) *ManifestPage {
-	if s.manifest == nil {
-		return nil
-	}
-	for i := range s.manifest.Pages {
-		if s.manifest.Pages[i].Route == route {
-			return &s.manifest.Pages[i]
-		}
-	}
-	return nil
-}
-
 // FindPageForRoute matches a URL path against route patterns (including [param] segments)
 // and returns the matching page with extracted params. Returns nil if no match.
 func (s *SSRServer) FindPageForRoute(urlPath string) (*ManifestPage, map[string]string) {
