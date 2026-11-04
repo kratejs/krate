@@ -128,7 +128,7 @@ type Builder struct {
 	// per page on each rebuild, cleared on a full build), and the warnings
 	// already printed.
 	twMu     sync.Mutex
-	modCSS   moduleCSSRegistry // layout/slot path -> its CSS Modules' scoped CSS
+	modCSS   moduleCSSRegistry     // layout/slot path -> its CSS Modules' scoped CSS
 	twPages  map[string]twPageInfo // page source (or "") -> its collected Tailwind CSS state
 	twWarned map[string]bool
 

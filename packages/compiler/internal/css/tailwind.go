@@ -1059,55 +1059,6 @@ func spacingValue(key string, theme TailwindTheme) string {
 	return ""
 }
 
-func sizingValue(key string, theme TailwindTheme) string {
-	if val, ok := theme.Sizing[key]; ok {
-		return val
-	}
-	switch key {
-	case "1/2":
-		return "50%"
-	case "1/3":
-		return "33.333333%"
-	case "2/3":
-		return "66.666667%"
-	case "1/4":
-		return "25%"
-	case "3/4":
-		return "75%"
-	case "1/5":
-		return "20%"
-	case "2/5":
-		return "40%"
-	case "3/5":
-		return "60%"
-	case "4/5":
-		return "80%"
-	case "1/6":
-		return "16.666667%"
-	case "5/6":
-		return "83.333333%"
-	case "full":
-		return "100%"
-	case "screen":
-		return "100vw"
-	case "auto":
-		return "auto"
-	case "min":
-		return "min-content"
-	case "max":
-		return "max-content"
-	case "fit":
-		return "fit-content"
-	}
-	if _, err := strconv.ParseFloat(key, 64); err == nil {
-		return spacingValue(key, theme)
-	}
-	if v, ok := unwrapArbitrary(key); ok {
-		return v
-	}
-	return ""
-}
-
 func arbitraryPropToCSS(prop, val string) string {
 	switch prop {
 	case "w":

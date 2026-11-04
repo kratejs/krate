@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -107,8 +106,6 @@ func TestTailwindLayeringAndDirectivesBuild(t *testing.T) {
 		t.Errorf("arbitrary variants missing:\n%s", all)
 	}
 }
-
-var userSheetRe = regexp.MustCompile(`href="([^"]+\.css)"`)
 
 // Chromium check: unlayered user CSS beats preflight, utilities beat user
 // `@layer base` and preflight.

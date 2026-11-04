@@ -330,7 +330,6 @@ func parseVariantToken(v string, theme TailwindTheme) (variant, bool) {
 			inner := c.val
 			if hasMod && (c.root == "not" || c.root == "has" || c.root == "in") {
 				inner += "/" + mod
-				hasMod = false
 				mod = ""
 			}
 			iv, ok := parseVariantToken(inner, theme)
