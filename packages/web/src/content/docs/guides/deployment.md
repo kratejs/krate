@@ -98,12 +98,20 @@ cache policy (ISR `s-maxage` + `stale-while-revalidate`, `no-store` for SSR).
 |--------|--------|--------------|------|
 | `node` | `dist/.krate/server/server.mjs` | the handler's own file server on `dist/` (no dotfiles, no listings, hashed assets immutable, `.br`/`.gz` siblings, Range, `Last-Modified`) | `node dist/.krate/server/server.mjs` |
 | `vercel` | `.vercel/output/` (Build Output API v3): `config.json`, `static/`, `functions/__krate.func/` (Node.js function) | Vercel CDN | one Node.js function, response streaming on |
-| `netlify` | `netlify/functions/krate.mjs` (a thin wrapper with `config = { path: "/*", preferStatic: true }`) over `netlify/server/krate-server.mjs`, plus `netlify.toml`, `_redirects`, `_headers` | Netlify CDN (`dist/`) | one Netlify Function |
+| `netlify` | `netlify/functions/krate.mjs` (a thin wrapper with `config = { path: "/*", preferStatic: true }`, or `{ path: "/*", excludedPath: [...] }` when the project has middleware) over `netlify/server/krate-server.mjs`, plus `netlify.toml`, `_redirects`, `_headers` | Netlify CDN (`dist/`) | one Netlify Function |
 | `cloudflare` | `.krate/deploy/cloudflare/worker.mjs`, `wrangler.jsonc` | Workers static assets (`dist/`, `ASSETS` binding) | one Worker with `nodejs_compat` |
 
 All four support SSR, ISR, streaming, async server components, client islands,
 JS/TS API routes, server actions, middleware, redirects/rewrites/headers config,
-custom 404/500 pages, trailing-slash canonicalization and dynamic routes.
+custom 404/500 pages, [per-segment not-found and error pages](/docs/core-concepts/routing/),
+trailing-slash canonicalization and dynamic routes.
+
+| | node | vercel | netlify | cloudflare |
+| --- | --- | --- | --- | --- |
+| Segment 404/500 pages (nearest page, inside layouts, digest) | yes | yes | yes | yes |
+| Unmatched URL reaches the function (so `/blog/x` gets blog's 404) | yes | yes (filesystem miss falls through) | yes (`path: "/*"`) | yes (a path without an asset runs the Worker) |
+| Middleware runs for prerendered pages | yes | yes (HTML routes go to the function first) | yes (function first, assets excluded) | yes (`run_worker_first: true`) |
+| Prerendered HTML served by | the static layer | the function (from the bundle) when there is middleware, else the CDN | the function (from the bundle) when there is middleware, else the CDN | the `ASSETS` binding |
 
 ### Node, without the krate binary
 
@@ -179,10 +187,33 @@ named `GET`/`POST` handlers.
 
 ### Middleware and static files
 
-On Vercel and Netlify the CDN serves prerendered pages and assets before the
-function, so middleware does not run for them; `krate deploy` prints a warning.
-Make pages that middleware guards SSR or ISR. On Cloudflare and Node the
-handler sees every request.
+Middleware sees every page request on all four targets. With middleware,
+Vercel and Netlify no longer let the CDN answer prerendered pages first:
+
+- **Vercel** adds a route before `handle: filesystem` that sends every page
+  request (a path without a file extension, or ending in `.html`) to the
+  function.
+- **Netlify** drops `preferStatic` and lists the extension of every public
+  non-HTML file in `excludedPath` (`"/*.js"`, `"/*.png"`...), so only assets
+  go straight to the CDN.
+
+The function answers prerendered pages itself after the middleware ran: their
+HTML is carried in the bundle (it grows by the size of your static pages).
+Content-hashed and other assets keep being served by the CDN, so they never
+run middleware. The function applies your `config.matcher`, so the extra
+invocations for pages the matcher does not cover are cheap pass-throughs. A
+public file without an extension is treated as a page on these two targets.
+Without middleware nothing changes: the CDN serves static files first.
+
+### Segment pages
+
+`blog/404.tsx` and `blog/error.tsx` (see routing) travel in the bundle with
+the manifest's segment map. The nearest page answers unmatched URLs, closed
+dynamic params and `notFound()` with status 404 and `Cache-Control: no-store`,
+and a failed render with status 500, `X-Krate-Error: render` and a sanitized
+error plus a `digest` (the real error is logged with the same digest). Failed
+and not-found renders are never stored by ISR. The page files and their
+hydration directories (`dist/blog/__404`) stay in the published output.
 
 ## Node servers (SSR / ISR / API routes / middleware)
 

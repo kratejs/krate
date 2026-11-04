@@ -247,6 +247,9 @@ type serverData struct {
 	HashedAssets    []string                  `json:"hashedAssets"`
 	HTML404         string                    `json:"html404"`
 	HTML500         string                    `json:"html500"`
+	Segments        []SegmentEntry            `json:"segments"`
+	SegmentPages    map[string]string         `json:"segmentPages"`
+	StaticPages     map[string]string         `json:"staticPages,omitempty"`
 	APIRoutes       []string                  `json:"apiRoutes"`
 	Actions         []actionEntry             `json:"actions"`
 	HasMiddleware   bool                      `json:"hasMiddleware"`
@@ -258,6 +261,7 @@ type serverPage struct {
 	Revalidate       int    `json:"revalidate,omitempty"`
 	BundlePath       string `json:"bundlePath"`
 	ServerComponents bool   `json:"serverComponents,omitempty"`
+	SegDir           string `json:"segDir"`
 }
 
 type serverRegion struct {
@@ -271,8 +275,9 @@ type serverRegion struct {
 }
 
 type serverAllPage struct {
-	Route string `json:"route"`
-	Mode  string `json:"mode"`
+	Route  string `json:"route"`
+	Mode   string `json:"mode"`
+	SegDir string `json:"segDir"`
 }
 
 type serverTemplate struct {
@@ -354,6 +359,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 		Pages: []serverPage{}, Regions: map[string][]serverRegion{}, AllPages: []serverAllPage{},
 		Shells: map[string]string{}, Templates: []serverTemplate{}, StaticOnlyRoute: []string{},
 		HashedAssets: []string{}, APIRoutes: []string{}, Actions: []actionEntry{},
+		Segments: []SegmentEntry{}, SegmentPages: map[string]string{},
 	}
 	plan := &deploy.ServerPlan{Target: target}
 
@@ -366,17 +372,40 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	if b, err := os.ReadFile(ResolveManifestPath(outDir, "manifest.json")); err == nil {
 		var m struct {
 			Pages []struct {
-				Route string     `json:"route"`
-				Mode  RenderMode `json:"mode"`
+				Route  string     `json:"route"`
+				Mode   RenderMode `json:"mode"`
+				SegDir string     `json:"segDir"`
 			} `json:"pages"`
-			StaticOnlyRoutes []string `json:"staticOnlyRoutes"`
-			HashedAssets     []string `json:"hashedAssets"`
+			StaticOnlyRoutes []string       `json:"staticOnlyRoutes"`
+			HashedAssets     []string       `json:"hashedAssets"`
+			Segments         []SegmentEntry `json:"segments"`
 		}
 		if err := json.Unmarshal(b, &m); err != nil {
 			return nil, fmt.Errorf("reading manifest.json: %w", err)
 		}
 		for _, p := range m.Pages {
-			data.AllPages = append(data.AllPages, serverAllPage{Route: p.Route, Mode: p.Mode.String()})
+			data.AllPages = append(data.AllPages, serverAllPage{Route: p.Route, Mode: p.Mode.String(), SegDir: p.SegDir})
+		}
+		if m.Segments != nil {
+			data.Segments = m.Segments
+		}
+		// The segment pages travel in the bundle: the handler picks the nearest
+		// one for a request and fills it, so no file is read at request time.
+		for _, e := range m.Segments {
+			for _, rel := range []string{e.NotFound, e.Error} {
+				if rel == "" {
+					continue
+				}
+				clean := filepath.Clean(filepath.FromSlash(rel))
+				if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+					return nil, fmt.Errorf("manifest.json lists segment page %q outside the output directory", rel)
+				}
+				b, err := os.ReadFile(filepath.Join(outDir, clean))
+				if err != nil {
+					return nil, fmt.Errorf("segment page %s listed in manifest.json: %w (run `krate build` again)", rel, err)
+				}
+				data.SegmentPages[rel] = string(b)
+			}
 		}
 		if m.StaticOnlyRoutes != nil {
 			data.StaticOnlyRoute = m.StaticOnlyRoutes
@@ -396,7 +425,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 
 	pageMods := &strings.Builder{}
 	for _, p := range sm.Pages {
-		data.Pages = append(data.Pages, serverPage{Route: p.Route, Mode: p.Mode, Revalidate: p.Revalidate, BundlePath: p.BundlePath, ServerComponents: p.ServerComponents})
+		data.Pages = append(data.Pages, serverPage{Route: p.Route, Mode: p.Mode, Revalidate: p.Revalidate, BundlePath: p.BundlePath, ServerComponents: p.ServerComponents, SegDir: p.SegDir})
 		rel := strings.Trim(strings.TrimPrefix(p.Route, "/"), "/")
 		shellPath := filepath.Join(outDir, filepath.FromSlash(rel), "index.html")
 		if rel == "" {
@@ -507,6 +536,17 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 		plan.ServerPaths = append(plan.ServerPaths, "/__krate/action/*")
 	}
 	plan.HasMiddleware = data.HasMiddleware
+	if data.HasMiddleware && (target == "vercel" || target == "netlify") {
+		// The CDN would serve prerendered pages before the function and skip the
+		// middleware. Those targets route page requests to the function, which
+		// answers the prerendered HTML itself once the middleware has run.
+		pages, exts, err := collectStaticForMiddleware(outDir, plan.Exclude)
+		if err != nil {
+			return nil, err
+		}
+		data.StaticPages = pages
+		plan.AssetExts = exts
+	}
 	plan.HasActions = len(data.Actions) > 0
 	plan.HasAPI = len(data.APIRoutes) > 0
 	plan.UsesRevalidate = usesRevalidate(root, cfg)
@@ -532,6 +572,62 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	}
 	plan.Bundle = outFile
 	return plan, nil
+}
+
+// collectStaticForMiddleware reads the prerendered HTML pages of the output
+// (those that stay public: not request-time shells or templates) and lists the
+// extensions of every other public file, which keep being served by the CDN.
+func collectStaticForMiddleware(outDir string, exclude []string) (map[string]string, []string, error) {
+	skip := map[string]bool{}
+	for _, e := range exclude {
+		skip[e] = true
+	}
+	pages := map[string]string{}
+	extSet := map[string]bool{}
+	err := filepath.Walk(outDir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(outDir, p)
+		if rerr != nil {
+			return rerr
+		}
+		rel = filepath.ToSlash(rel)
+		if info.IsDir() {
+			if rel == ".krate" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(rel))
+		if ext == ".html" {
+			if skip[rel] {
+				return nil
+			}
+			b, rerr := os.ReadFile(p)
+			if rerr != nil {
+				return rerr
+			}
+			pages[rel] = string(b)
+			return nil
+		}
+		if ext != "" {
+			extSet[ext] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading prerendered pages: %w", err)
+	}
+	exts := make([]string, 0, len(extSet))
+	for e := range extSet {
+		exts = append(exts, e)
+	}
+	sort.Strings(exts)
+	return pages, exts, nil
 }
 
 func relOr(base, p string) string {

@@ -52,6 +52,12 @@ func TestServerlessNodeBrowser(t *testing.T) {
 		out := run(t, "router_gallery", "router_e2e.mjs")
 		t.Logf("%s", out)
 	})
+	t.Run("segment pages", func(t *testing.T) {
+		// Nested 404 on hard load and soft navigation with layout state kept,
+		// the server error page, client boundaries with reset().
+		out := run(t, "segments_app", "segments_e2e.mjs")
+		t.Logf("%s", out)
+	})
 	t.Run("server action redirect", func(t *testing.T) {
 		out := last(run(t, "action_redirect", "action_redirect.mjs"))
 		var res struct {

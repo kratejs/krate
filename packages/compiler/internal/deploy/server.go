@@ -27,6 +27,10 @@ type ServerPlan struct {
 	// ServerPaths are URL globs that must reach the function.
 	ServerPaths   []string
 	HasMiddleware bool
+	// AssetExts lists the extensions (".js") of the public non-HTML files; on
+	// platforms that route pages through the function for middleware they are
+	// carved out so assets keep going straight to the CDN.
+	AssetExts []string
 	HasActions    bool
 	HasAPI        bool
 	// UsesRevalidate reports revalidatePath/revalidateTag calls in the sources.
@@ -65,9 +69,6 @@ func emitServer(target string, cfg *config.Config, root, outDir string, plan *Se
 	}
 	if plan.UsesRevalidate {
 		plan.Warnings = append(plan.Warnings, "revalidatePath/revalidateTag are called by this project: on "+target+" they only reach the instance that handled the request; other instances keep their cached pages until the revalidate window ends (see guides/deployment: caches on serverless)")
-	}
-	if plan.HasMiddleware && target != "cloudflare" {
-		plan.Warnings = append(plan.Warnings, "middleware runs only for requests that reach the function: statically prerendered pages and assets are served by the "+target+" CDN first and bypass it. Make guarded pages SSR/ISR (config = { ssr: true }) so they run through the middleware")
 	}
 	if err := stripStatic(outDir, plan.Exclude); err != nil {
 		return nil, err
@@ -235,6 +236,13 @@ func emitVercelServer(cfg *config.Config, root, outDir string, plan *ServerPlan,
 		}
 		routes = append(routes, vcRoute{"src": headerSourceRegex(r.Source), "headers": r.Headers, "continue": true})
 	}
+	if plan.HasMiddleware {
+		// Page requests reach the function before the filesystem so the
+		// middleware guards prerendered pages too; the function serves their
+		// HTML from the bundle. Assets (anything with a file extension other
+		// than .html) keep going to the CDN.
+		routes = append(routes, vcRoute{"src": htmlRouteRegex, "dest": "/__krate"})
+	}
 	for _, r := range cfg.Redirects {
 		src, dst := ruleRegex(r.Source, r.Destination)
 		status := 302
@@ -262,6 +270,10 @@ func emitVercelServer(cfg *config.Config, root, outDir string, plan *ServerPlan,
 	return written, nil
 }
 
+// htmlRouteRegex matches page requests: no file extension anywhere in the
+// path, or an explicit .html file.
+const htmlRouteRegex = `^(?:/|/[^.]*|/.*\.html)$`
+
 // globRegex turns a URL glob (with "{,/}" or trailing "*") into an anchored regex.
 func globRegex(g string) string {
 	g = strings.ReplaceAll(g, "{,/}", "\x00")
@@ -284,7 +296,7 @@ func emitNetlifyServer(cfg *config.Config, root, outDir string, plan *ServerPlan
 	}
 	written = append(written, impl)
 	fn := filepath.Join(root, "netlify", "functions", "krate.mjs")
-	wrapper := "// " + generatedMarker + " --target netlify`.\nimport handler from \"../server/krate-server.mjs\";\n\nexport default handler;\nexport const config = { path: \"/*\", preferStatic: true };\n"
+	wrapper := "// " + generatedMarker + " --target netlify`.\nimport handler from \"../server/krate-server.mjs\";\n\nexport default handler;\nexport const config = " + netlifyConfigLiteral(plan) + ";\n"
 	if err := writeGenerated(fn, []byte(wrapper), "the function"); err != nil {
 		return nil, err
 	}
@@ -314,6 +326,21 @@ func emitNetlifyServer(cfg *config.Config, root, outDir string, plan *ServerPlan
 	written = append(written, files...)
 	written = append(written, hfiles...)
 	return written, nil
+}
+
+// netlifyConfigLiteral is the function's in-source config. Without middleware
+// static files win (preferStatic). With middleware the function runs first for
+// every path except the public assets, so prerendered pages are guarded too.
+func netlifyConfigLiteral(plan *ServerPlan) string {
+	if !plan.HasMiddleware {
+		return `{ path: "/*", preferStatic: true }`
+	}
+	excl := make([]string, 0, len(plan.AssetExts))
+	for _, e := range plan.AssetExts {
+		b, _ := json.Marshal("/*" + e)
+		excl = append(excl, string(b))
+	}
+	return `{ path: "/*", excludedPath: [` + strings.Join(excl, ", ") + `] }`
 }
 
 // Cloudflare

@@ -42,3 +42,9 @@ detailed changelog. This file records the release train at a glance.
   boundaries, cache/revalidation, and framework features.
 - Docs and marketing site updated to the new SVG logo and alpha.4 packages.
 - Server, MCP, migration, and runtime hardening fixes.
+- Serverless targets now serve per-segment not-found and error pages (nearest
+  page, inside layouts, `no-store`, sanitized error with a digest, never cached
+  by ISR) and run middleware for prerendered pages: with middleware, Vercel and
+  Netlify route page requests to the function (assets stay on the CDN) instead
+  of bypassing it, and the deploy warning is gone. The error digest is the same
+  value on every host (portable sha256 in the render core).

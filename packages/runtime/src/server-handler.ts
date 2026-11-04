@@ -54,6 +54,16 @@ import {
   rewriteDestination,
   staticCacheControl,
 } from "./handler-routing.js";
+import {
+  lookupSegmentPage,
+  newServerError,
+  renderSegmentPage,
+  type SegmentEntry,
+  type SegmentKind,
+  type SegmentMatch,
+} from "./handler-segments.js";
+import { sha256Hex as portableSha256Hex } from "./sha256.js";
+import { createMemoryStaticLayer } from "./static-memory.js";
 
 // Public types
 
@@ -83,6 +93,8 @@ export interface HandlerPage {
   revalidate?: number;
   bundlePath: string;
   serverComponents?: boolean;
+  /** Source directory relative to the pages root, route groups kept (segment page lookup). */
+  segDir?: string;
 }
 
 export interface ActionEntry {
@@ -100,7 +112,7 @@ export interface KrateServerData {
   pages: HandlerPage[];
   regions: Record<string, RegionMeta[]>;
   /** Every page of the build with its render mode (for revalidatePath). */
-  allPages: Array<{ route: string; mode: "ssg" | "ssr" | "isr" | "streaming" }>;
+  allPages: Array<{ route: string; mode: "ssg" | "ssr" | "isr" | "streaming"; segDir?: string }>;
   /** Baked shells of the request-time pages, keyed by manifest route. */
   shells: Record<string, string>;
   /** Dynamic SSG templates; pattern is the output dir ("blog/[slug]"). */
@@ -109,6 +121,12 @@ export interface KrateServerData {
   hashedAssets: string[];
   html404: string;
   html500: string;
+  /** Directories with their own not-found or error page (manifest segments[]). */
+  segments?: SegmentEntry[];
+  /** Segment page HTML keyed by its output path ("blog/404.html"). */
+  segmentPages?: Record<string, string>;
+  /** Prerendered pages (dist-relative path to HTML) the function serves itself after middleware. */
+  staticPages?: Record<string, string>;
   /** API route keys: file path under the API dir without extension ("items/[id]"). */
   apiRoutes: string[];
   actions: ActionEntry[];
@@ -291,15 +309,46 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const { data, modules } = options;
   const cfg = data.config;
   const target = options.target;
-  const staticLayer = options.static;
+  // Prerendered pages carried in the bundle (platforms that route pages through the function for middleware).
+  const staticLayer = options.static || (data.staticPages ? createMemoryStaticLayer(data.staticPages) : undefined);
   const trustProxy = options.trustProxy !== undefined ? options.trustProxy : cfg.trustProxy;
   const basePath = cfg.basePath || "";
   const hashed = new Set(data.hashedAssets);
   const staticOnly = new Set(data.staticOnlyRoutes.map(normalizeRoutePattern));
-  // errorPage is the single place that picks the error page for a request path.
-  // Today there is one global 404 and one global 500; per-segment error pages
-  // plug in here. An empty string means "no custom page".
-  const errorPage = (_urlPath: string, status: 404 | 500): string => (status === 404 ? data.html404 : data.html500);
+  const sha256Hex = options.sha256Hex || portableSha256Hex;
+  const segEntries = data.segments || [];
+  const segPages = data.segmentPages || {};
+  const segDirByRoute = new Map<string, string>();
+  for (const p of data.allPages) if (p.segDir !== undefined) segDirByRoute.set(normalizeRoutePattern(p.route), p.segDir);
+  for (const p of data.pages) if (p.segDir !== undefined) segDirByRoute.set(normalizeRoutePattern(p.route), p.segDir);
+
+  /** The page to answer a 404 or 500 with. match is null for the global page. */
+  interface ErrorPage {
+    html: string;
+    match: SegmentMatch | null;
+  }
+
+  /**
+   * errorPage is the single place that picks the error page for a request:
+   * the nearest segment page (build/segments.go LookupSegmentPage), else the
+   * global 404/500. segDir is the directory of the matched route; closed names
+   * a dynamic route that matched the URL but rejected its params. null means
+   * no custom page.
+   */
+  function errorPage(urlPath: string, status: 404 | 500, route?: { segDir?: string; closed?: string }): ErrorPage | null {
+    const kind: SegmentKind = status === 404 ? "notFound" : "error";
+    if (segEntries.length > 0) {
+      let m: SegmentMatch | null = null;
+      const closedDir = route && route.closed ? segDirByRoute.get(normalizeRoutePattern(route.closed)) : undefined;
+      if (closedDir !== undefined) m = lookupSegmentPage(segEntries, kind, urlPath, true, closedDir);
+      else if (route && route.segDir !== undefined) m = lookupSegmentPage(segEntries, kind, urlPath, true, route.segDir);
+      else m = lookupSegmentPage(segEntries, kind, urlPath, false, "");
+      const html = m ? segPages[m.file] : undefined;
+      if (m && html !== undefined) return { html, match: m };
+    }
+    const global = status === 404 ? data.html404 : data.html500;
+    return global ? { html: global, match: null } : null;
+  }
   let requestSeq = 0;
   let latestWaitUntil: ((p: Promise<unknown>) => void) | undefined;
 
@@ -542,9 +591,14 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return finish(rs, 301, null);
   }
 
-  function custom404(rs: ReqState, html: string): Response {
+  /** Answers 404 with a not-found page; segment pages are never cached. */
+  function custom404(rs: ReqState, page: ErrorPage): Response {
     rs.res.set("Content-Type", "text/html; charset=utf-8");
-    return finish(rs, 404, html);
+    rs.res.delete("Cache-Control");
+    rs.res.delete("Etag");
+    rs.res.delete("Last-Modified");
+    rs.res.set("Cache-Control", "no-store");
+    return finish(rs, 404, page.match ? renderSegmentPage(page.html, page.match) : page.html);
   }
 
   /** handlerWith404: internal-path guard, cache policy, dynamic templates, static files, custom 404. */
@@ -554,9 +608,13 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     if (p.endsWith(".map")) rs.res.set("Content-Type", "application/json; charset=utf-8");
     rs.res.set("Cache-Control", staticCacheControl(p, hashed));
 
+    let closedPattern = "";
     if (!(await staticRouteExists(p))) {
       for (const t of templates) {
-        if (staticOnly.has(normalizeRoutePattern(t.pattern))) continue;
+        if (staticOnly.has(normalizeRoutePattern(t.pattern))) {
+          if (!closedPattern && matchRoutePattern(p, t.pattern)) closedPattern = t.pattern;
+          continue;
+        }
         const params = matchRoutePattern(p, t.pattern);
         if (params) {
           const slash = redirectToCanonicalSlash(rs);
@@ -572,8 +630,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const sreq = rs.headers === rs.request.headers ? rs.request : new Request(rs.request.url, { method: rs.request.method, headers: rs.headers });
     const served = staticLayer ? await staticLayer.serve(sreq, p) : null;
     if (served && served.status !== 404) return mergeStaticResponse(rs, served);
-    const page404 = errorPage(p, 404);
-    if (page404 && wantsHTML) return custom404(rs, page404);
+    const page404 = wantsHTML ? errorPage(p, 404, { closed: closedPattern }) : null;
+    if (page404) return custom404(rs, page404);
     return notFoundText(rs, true);
   }
 
@@ -601,9 +659,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return httpError(rs, "method not allowed", 405);
   }
 
-  function errorShell(urlPath: string): string {
-    return errorPage(urlPath, 500) || "<!doctype html><title>500</title><h1>Internal Server Error</h1>";
-  }
+  const PLAIN_500 = "<!doctype html><title>500</title><h1>Internal Server Error</h1>";
 
   async function pageHandler(rs: ReqState): Promise<Response> {
     const denied = pageMethodAllowed(rs);
@@ -652,6 +708,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     status?: number;
     html?: string;
     error?: string;
+    digest?: string;
+    stack?: string;
     cacheStatus?: string;
     notFound?: boolean;
     redirect?: string;
@@ -674,8 +732,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
         if (region) return (await core.renderRegion(page as ManifestPage, region, renderReq)) as Frame;
         return { type: "skip", id: r.id };
       } catch (err: any) {
-        console.error(`[krate] region ${route}::${r.id} failed:`, err);
-        return { type: "error", id: r.id, status: 500, error: (err && err.message) || String(err) };
+        const message = (err && err.message) || String(err);
+        const stack = (err && typeof err.stack === "string" && err.stack) || "";
+        const digest = sha256Hex(message + "\n" + stack).slice(0, 10);
+        console.error(`[krate] region ${route}::${r.id} failed (digest ${digest}):`, err);
+        return { type: "error", id: r.id, status: 500, error: message, stack, digest };
       }
     });
   }
@@ -709,6 +770,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     let redirect = "";
     let renderErr = "";
     let fatalErr = "";
+    let errStack = "";
+    let errDigest = "";
     let noStore = false;
     for (const frame of await Promise.all(pending)) {
       switch (frame.type) {
@@ -728,6 +791,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
             titleOverride = frame.title || "";
             if ((frame.status || 0) >= 500 || frame.error) {
               renderErr = frame.error || `page-region render failed with status ${frame.status}`;
+              errStack = frame.stack || "";
+              errDigest = frame.digest || "";
               if (frame.fatal) fatalErr = renderErr;
               continue;
             }
@@ -739,28 +804,38 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
         case "error": {
           const msg = frame.error || `region ${frame.id} render failed with status ${frame.status}`;
           if (frame.fatal && !fatalErr) fatalErr = msg;
-          if (!renderErr) renderErr = msg;
+          if (!renderErr) {
+            renderErr = msg;
+            errStack = frame.stack || "";
+            errDigest = frame.digest || "";
+          }
           break;
         }
       }
     }
 
+    // A segment error page makes any failed render answer with that page
+    // instead of the baked body (build/serve.go failOnRenderErr).
+    const routeRef = { segDir: page.segDir !== undefined ? page.segDir : "" };
+    const segError = errorPage(rs.path, 500, routeRef);
+    if (segError && segError.match && renderErr && !fatalErr && !notFound && !redirect) fatalErr = renderErr;
     if (fatalErr) {
       // A server component failed: there is no meaningful baked body, so answer 500.
-      console.error(`[krate] Server component error (${route}): ${fatalErr}`);
+      const srvErr = newServerError(fatalErr, errStack, errDigest || sha256Hex(fatalErr + "\n" + errStack).slice(0, 10), false);
+      console.error(`[krate] Render error (${route}) [digest ${srvErr.digest}]: ${fatalErr}`);
+      if (errStack) console.error(errStack);
       rs.res.set("X-Krate-Error", "render");
       rs.res.delete("X-Krate-Cache");
       rs.res.set("Cache-Control", "no-store");
-      return finish(rs, 500, errorShell(rs.path));
+      rs.res.set("Content-Type", "text/html; charset=utf-8");
+      if (segError && segError.match) return finish(rs, 500, renderSegmentPage(segError.html, segError.match, srvErr));
+      return finish(rs, 500, segError ? segError.html : PLAIN_500);
     }
     if (notFound || redirect) {
       if (redirect) return goRedirect(redirect, rs.path, rs.method, 302, rs.res);
-      const page404 = errorPage(rs.path, 404);
-      if (page404) {
-        rs.res.set("Content-Type", "text/html; charset=utf-8");
-        rs.res.delete("Cache-Control");
-        return finish(rs, 404, page404);
-      }
+      const page404 = errorPage(rs.path, 404, routeRef);
+      if (page404) return custom404(rs, page404);
+      rs.res.set("Cache-Control", "no-store");
       return notFoundText(rs);
     }
 

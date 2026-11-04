@@ -17,6 +17,9 @@ type parityCase struct {
 	path    string
 	headers map[string]string
 	body    string
+	// contains and absent are checked on the node target's body.
+	contains []string
+	absent   []string
 }
 
 // parityHeaders are compared between `krate start` and the node target: the
@@ -29,7 +32,13 @@ var parityHeaders = []string{
 
 var timestampRe = regexp.MustCompile(`\d{10,}`)
 
-func normalizeBody(s string) string { return timestampRe.ReplaceAllString(s, "N") }
+// digestRe matches the error digest in a rendered error page (the digest of a
+// failed render depends on the stack, which differs between hosts).
+var digestRe = regexp.MustCompile(`(id=d>|id="d">|"digest":")[0-9a-f]{10}`)
+
+func normalizeBody(s string) string {
+	return digestRe.ReplaceAllString(timestampRe.ReplaceAllString(s, "N"), "${1}DIGEST")
+}
 
 func setCookieNames(h http.Header) string {
 	var names []string
@@ -120,6 +129,15 @@ func TestServerlessNodeParity(t *testing.T) {
 		{name: "traversal", method: "GET", path: "/..%2f..%2fetc/passwd"},
 		{name: "HEAD page", method: "HEAD", path: "/ssr/"},
 		{name: "isr query variant", method: "GET", path: "/isr/?x=1"},
+		// Per-segment pages, inside the blog layout.
+		{name: "segment 404 unmatched", method: "GET", path: "/blog/a/b/c/", contains: []string{"blog-404", "id=blog-layout"}},
+		{name: "segment 404 unmatched accept", method: "GET", path: "/blog/a/b/c", headers: map[string]string{"Accept": "text/html"}, contains: []string{"blog-404"}},
+		{name: "segment 404 closed dynamic", method: "GET", path: "/blog/post/zzz/", contains: []string{"blog-404", "id=blog-layout"}},
+		{name: "closed dynamic known", method: "GET", path: "/blog/post/a/", contains: []string{"closed a"}},
+		{name: "segment 404 notFound()", method: "GET", path: "/blog/ssr-gone/", contains: []string{"blog-404", "id=blog-layout"}},
+		{name: "segment 404 dynamic dir", method: "GET", path: "/shop/shoes/nothing/", contains: []string{"cat-404 shoes"}},
+		{name: "segment 500 digest", method: "GET", path: "/blog/ssr-crash/", contains: []string{"blog-error", "id=blog-layout", "Internal Server Error", `id="__krate_error"`}, absent: []string{"secret crash detail"}},
+		{name: "global 404 outside", method: "GET", path: "/elsewhere/deep/", contains: []string{"custom-404"}, absent: []string{"blog-404"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -139,7 +157,17 @@ func TestServerlessNodeParity(t *testing.T) {
 				t.Errorf("Set-Cookie names: krate start %q, node target %q", gc, nc)
 			}
 			if gb, nb := normalizeBody(g.body), normalizeBody(n.body); gb != nb {
-				t.Errorf("body differs\nkrate start: %.600s\nnode target: %.600s", gb, nb)
+				t.Errorf("body differs\nkrate start: %s\nnode target: %s", gb, nb)
+			}
+			for _, want := range c.contains {
+				if !strings.Contains(n.body, want) {
+					t.Errorf("node target body lacks %q:\n%.600s", want, n.body)
+				}
+			}
+			for _, bad := range c.absent {
+				if strings.Contains(n.body, bad) {
+					t.Errorf("node target body must not contain %q:\n%.600s", bad, n.body)
+				}
 			}
 		})
 	}

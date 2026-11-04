@@ -233,7 +233,9 @@ MCP `explain` tool list each route's nearest not-found and error page.
 The Krate server (`krate start`, `krate dev`) picks the nearest page per
 request. A static host that only knows `404.html` serves the root page for every
 missing URL; the per-directory files are in the output for hosts and handlers
-that look them up with the manifest's `segments` map.
+that look them up with the manifest's `segments` map. The serverless handler
+(`krate deploy --target node|vercel|netlify|cloudflare`) does the same lookup, so
+segment pages work there too (see the deployment guide).
 
 ### The error prop
 

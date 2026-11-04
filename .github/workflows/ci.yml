@@ -333,7 +333,7 @@ jobs:
       # components inside server components, and a migrated Next.js app (async
       # server components, revalidation).
       - name: App browser tests
-        run: go test -run 'TestRouterBrowserE2E|TestSegmentPagesBrowser|TestUseClientIslandBrowser|TestMigratedNextAppBrowser|TestTailwindLayeringInBrowser|TestComponentsA11yBrowser|TestServerActionRedirectInBrowser|TestNoJSActionStateFeedbackInBrowser|TestCSPSpeculationRulesInBrowser' -count=1 -v ./internal/build
+        run: go test -run 'TestRouterBrowserE2E|TestSegmentPagesBrowser|TestServerlessNodeBrowser|TestUseClientIslandBrowser|TestMigratedNextAppBrowser|TestTailwindLayeringInBrowser|TestComponentsA11yBrowser|TestServerActionRedirectInBrowser|TestNoJSActionStateFeedbackInBrowser|TestCSPSpeculationRulesInBrowser' -count=1 -v ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_BROWSER: ${{ matrix.browser }}

@@ -55,6 +55,11 @@ results.notFound = await req('/post/missing/');
 results.redirect = await req('/old-about');
 results.stream = await req('/stream/');
 results.template = await req('/blog/zzz/');
+results.segNotFound = await req('/blog/a/b/c/', { headers: { accept: 'text/html' } });
+results.segMissNoSlash = await req('/blog/a/b/c', { headers: { accept: 'text/html' } });
+results.segGone = await req('/blog/ssr-gone/');
+results.segCrash = await req('/blog/ssr-crash/');
+results.rootNotFound = await req('/elsewhere/deep/', { headers: { accept: 'text/html' } });
 console.log(JSON.stringify(results));
 `
 
@@ -90,6 +95,17 @@ func checkHandlerResults(t *testing.T, out string) {
 	}
 	if r["template"].Status != 200 || !strings.Contains(r["template"].Body, "zzz") {
 		t.Errorf("template: %+v", r["template"])
+	}
+	for _, k := range []string{"segNotFound", "segMissNoSlash", "segGone"} {
+		if r[k].Status != 404 || !strings.Contains(r[k].Body, "blog-404") || !strings.Contains(r[k].Body, "id=blog-layout") || r[k].Cc != "no-store" {
+			t.Errorf("%s must render blog's own 404 inside its layout: %+v", k, r[k])
+		}
+	}
+	if c := r["segCrash"]; c.Status != 500 || !strings.Contains(c.Body, "blog-error") || strings.Contains(c.Body, "secret crash detail") || c.Cc != "no-store" || !regexp.MustCompile(`"digest":"[0-9a-f]{10}"`).MatchString(c.Body) {
+		t.Errorf("segCrash must render blog's sanitized error page with a digest: %+v", c)
+	}
+	if r["rootNotFound"].Status != 404 || !strings.Contains(r["rootNotFound"].Body, "custom-404") || strings.Contains(r["rootNotFound"].Body, "blog-404") {
+		t.Errorf("rootNotFound: %+v", r["rootNotFound"])
 	}
 }
 
@@ -142,10 +158,39 @@ func TestVercelServerOutput(t *testing.T) {
 	if err := json.Unmarshal(data, &vc); err != nil || vc["runtime"] == nil || vc["handler"] != "index.mjs" || vc["launcherType"] != "Nodejs" {
 		t.Errorf(".vc-config.json: %v %s", err, data)
 	}
-	if len(plan.Warnings) == 0 {
-		t.Errorf("middleware on a CDN platform must warn about static bypass")
+	for _, w := range plan.Warnings {
+		if strings.Contains(w, "bypass") {
+			t.Errorf("middleware no longer bypasses prerendered pages, the warning must be gone: %s", w)
+		}
+	}
+	// Middleware: page requests reach the function before the filesystem.
+	htmlIdx, fsIdx := -1, -1
+	for i, r := range conf.Routes {
+		if r["handle"] == "filesystem" && fsIdx < 0 {
+			fsIdx = i
+		}
+		if r["src"] == `^(?:/|/[^.]*|/.*\.html)$` && r["dest"] == "/__krate" {
+			htmlIdx = i
+		}
+	}
+	if htmlIdx < 0 || fsIdx < 0 || htmlIdx > fsIdx {
+		t.Errorf("an HTML route to the function must precede handle:filesystem when there is middleware: %s", data)
+	}
+	htmlRe := regexp.MustCompile(`^(?:/|/[^.]*|/.*\.html)$`)
+	for path, want := range map[string]bool{"/": true, "/about/": true, "/admin": true, "/a/b.html": true, "/chunks/x.js": false, "/logo.png": false, "/favicon.ico": false} {
+		if htmlRe.MatchString(path) != want {
+			t.Errorf("HTML route regex on %s = %v, want %v", path, !want, want)
+		}
 	}
 	fn := filepath.Join(out, "functions", "__krate.func")
+	guard := runNodeScript(t, fn, `import { handleRequest as call } from './index.mjs';
+const r = await call(new Request('https://example.test/admin'));
+const h = await call(new Request('https://example.test/'));
+const a = await call(new Request('https://example.test/about/'));
+console.log(JSON.stringify({ admin: [r.status, r.headers.get('location')], home: [h.status, h.headers.get('x-mw'), (await h.text()).includes('static-home')], about: [a.status, (await a.text()).includes('about')] }));`)
+	if !strings.Contains(guard, `"admin":[307,"https://example.test/about"]`) || !strings.Contains(guard, `"home":[200,"ran",true]`) || !strings.Contains(guard, `"about":[200,true]`) {
+		t.Errorf("the function must run middleware for prerendered pages and then serve them: %s", guard)
+	}
 	res := runNodeScript(t, fn, `import { handleRequest as call } from './index.mjs';`+handlerChecks)
 	checkHandlerResults(t, res)
 }
@@ -154,8 +199,17 @@ func TestNetlifyServerOutput(t *testing.T) {
 	root, cfg := serverlessProject(t, "serverless")
 	_, _ = emitServerTarget(t, root, cfg, "netlify")
 	fn := filepath.Join(root, "netlify", "functions", "krate.mjs")
-	if data, _ := os.ReadFile(fn); !strings.Contains(string(data), `export const config = { path: "/*", preferStatic: true };`) {
-		t.Errorf("the function file must carry a literal config export for Netlify's parser:\n%s", data)
+	data, _ := os.ReadFile(fn)
+	if !strings.Contains(string(data), `export const config = { path: "/*", excludedPath: [`) || strings.Contains(string(data), "preferStatic") {
+		t.Errorf("with middleware the function runs first (no preferStatic) and excludes only assets, as a literal config export for Netlify's parser:\n%s", data)
+	}
+	for _, ext := range []string{`"/*.js"`} {
+		if !strings.Contains(string(data), ext) {
+			t.Errorf("assets %s must be excluded from the function:\n%s", ext, data)
+		}
+	}
+	if strings.Contains(string(data), `"/*.html"`) {
+		t.Errorf("HTML pages must reach the function:\n%s", data)
 	}
 	for _, p := range []string{fn, filepath.Join(root, "netlify", "server", "krate-server.mjs"), filepath.Join(root, "netlify.toml"), filepath.Join(cfg.OutDir, "_redirects"), filepath.Join(cfg.OutDir, "_headers")} {
 		if _, err := os.Stat(p); err != nil {
@@ -166,9 +220,32 @@ func TestNetlifyServerOutput(t *testing.T) {
 		t.Errorf("dist/.krate must not be published")
 	}
 	res := runNodeScript(t, filepath.Dir(fn), `import handler, { config } from './krate.mjs';
-if (config.path !== '/*' || config.preferStatic !== true) throw new Error('bad config ' + JSON.stringify(config));
-const call = (request) => handler(request, {});`+handlerChecks)
+if (config.path !== '/*' || config.preferStatic || !config.excludedPath.includes('/*.js')) throw new Error('bad config ' + JSON.stringify(config));
+const call = (request) => handler(request, {});
+const adm = await call(new Request('https://example.test/admin'));
+if (adm.status !== 307) throw new Error('middleware did not guard the prerendered /admin: ' + adm.status);`+handlerChecks)
 	checkHandlerResults(t, res)
+}
+
+func TestNetlifyAndVercelWithoutMiddlewareStayStaticFirst(t *testing.T) {
+	root, cfg := serverlessProject(t, "serverless")
+	if err := os.Remove(filepath.Join(root, "middleware.ts")); err != nil {
+		t.Fatal(err)
+	}
+	emitServerTarget(t, root, cfg, "netlify")
+	data, _ := os.ReadFile(filepath.Join(root, "netlify", "functions", "krate.mjs"))
+	if !strings.Contains(string(data), `export const config = { path: "/*", preferStatic: true };`) {
+		t.Errorf("without middleware the CDN serves static files first:\n%s", data)
+	}
+	root2, cfg2 := serverlessProject(t, "serverless")
+	if err := os.Remove(filepath.Join(root2, "middleware.ts")); err != nil {
+		t.Fatal(err)
+	}
+	emitServerTarget(t, root2, cfg2, "vercel")
+	conf, _ := os.ReadFile(filepath.Join(root2, ".vercel", "output", "config.json"))
+	if strings.Contains(string(conf), `/.*\\.html`) {
+		t.Errorf("without middleware there is no catch-all HTML route to the function:\n%s", conf)
+	}
 }
 
 func TestCloudflareServerOutput(t *testing.T) {
@@ -304,5 +381,49 @@ func TestDeployNeverOverwritesHandWrittenConfig(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "wrangler.jsonc")); err == nil {
 		t.Errorf("wrangler.jsonc must not be written next to a hand-written wrangler.toml")
+	}
+}
+
+// Platform deploys rewrite dist/: segment pages and their hydration dirs must
+// survive, and unmatched URLs must reach the function (not a CDN 404).
+func TestPlatformDeploysKeepSegmentPages(t *testing.T) {
+	for _, target := range []string{"vercel", "netlify", "cloudflare"} {
+		t.Run(target, func(t *testing.T) {
+			root, cfg := serverlessProject(t, "serverless")
+			emitServerTarget(t, root, cfg, target)
+			base := cfg.OutDir
+			if target == "vercel" {
+				base = filepath.Join(root, ".vercel", "output", "static")
+			}
+			for _, rel := range []string{"404.html", "500.html", "blog/404.html", "blog/500.html", "shop/[cat]/404.html"} {
+				if _, err := os.Stat(filepath.Join(base, filepath.FromSlash(rel))); err != nil {
+					t.Errorf("%s: segment page %s was removed from the public output", target, rel)
+				}
+			}
+			for _, rel := range []string{"blog/__404"} {
+				if fi, err := os.Stat(filepath.Join(base, filepath.FromSlash(rel))); err != nil || !fi.IsDir() {
+					t.Errorf("%s: hydration dir %s was removed", target, rel)
+				}
+			}
+			switch target {
+			case "vercel":
+				data, _ := os.ReadFile(filepath.Join(root, ".vercel", "output", "config.json"))
+				// Anything the filesystem does not have falls through to the function.
+				if !strings.Contains(string(data), `"handle": "filesystem"`) || !strings.Contains(string(data), `"src": "^/(.*)$"`) {
+					t.Errorf("vercel misses must reach the function: %s", data)
+				}
+			case "netlify":
+				data, _ := os.ReadFile(filepath.Join(root, "netlify", "functions", "krate.mjs"))
+				if !strings.Contains(string(data), `path: "/*"`) {
+					t.Errorf("netlify function must own every path so misses reach it: %s", data)
+				}
+			case "cloudflare":
+				// Workers assets fall back to the Worker for paths without an asset.
+				data, _ := os.ReadFile(filepath.Join(root, "wrangler.jsonc"))
+				if strings.Contains(string(data), "not_found_handling") {
+					t.Errorf("not_found_handling would answer misses with a global 404 page before the Worker: %s", data)
+				}
+			}
+		})
 	}
 }
