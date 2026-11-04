@@ -141,9 +141,9 @@ func TestArbitraryTypedUtilities(t *testing.T) {
 
 func TestGradientStopsWithAlpha(t *testing.T) {
 	tests := map[string]string{
-		"from-indigo-400/50": "--tw-gradient-from: rgb(129 140 248 / 0.5);",
-		"via-purple-500/50":  "rgb(168 85 247 / 0.5)",
-		"to-pink-500/25":     "--tw-gradient-to: rgb(236 72 153 / 0.25);",
+		"from-indigo-400/50": "--tw-gradient-from: color-mix(in oklab, oklch(67.3% 0.182 276.935) 50%, transparent);",
+		"via-purple-500/50":  "color-mix(in oklab, oklch(62.7% 0.265 303.9) 50%, transparent)",
+		"to-pink-500/25":     "--tw-gradient-to: color-mix(in oklab, oklch(65.6% 0.241 354.308) 25%, transparent);",
 		"from-[#bada55]":     "--tw-gradient-from: #bada55;",
 	}
 	for cls, want := range tests {
@@ -175,7 +175,7 @@ func TestSpacingArbitraryMultiples(t *testing.T) {
 }
 
 func TestRingOffsetColor(t *testing.T) {
-	if got := gen(t, "ring-offset-blue-500"); !strings.Contains(got, "--tw-ring-offset-color: #3b82f6;") {
+	if got := gen(t, "ring-offset-blue-500"); !strings.Contains(got, "--tw-ring-offset-color: oklch(62.3% 0.214 259.815);") {
 		t.Errorf("ring-offset color unsupported: %s", got)
 	}
 	if got := gen(t, "ring-offset-2"); !strings.Contains(got, "--tw-ring-offset-width: 2px;") {
@@ -314,12 +314,12 @@ func TestNthAndCapabilityVariants(t *testing.T) {
 func TestFilterFamilies(t *testing.T) {
 	tests := map[string]string{
 		"blur-sm":        "--tw-blur: blur(8px);",
-		"brightness-150": "--tw-brightness: brightness(1.5);",
-		"contrast-125":   "--tw-contrast: contrast(1.25);",
+		"brightness-150": "--tw-brightness: brightness(150%);",
+		"contrast-125":   "--tw-contrast: contrast(125%);",
 		"grayscale":      "--tw-grayscale: grayscale(100%);",
 		"hue-rotate-90":  "--tw-hue-rotate: hue-rotate(90deg);",
 		"invert":         "--tw-invert: invert(100%);",
-		"saturate-200":   "--tw-saturate: saturate(2);",
+		"saturate-200":   "--tw-saturate: saturate(200%);",
 		"sepia":          "--tw-sepia: sepia(100%);",
 		"drop-shadow-md": "--tw-drop-shadow: drop-shadow(",
 	}
@@ -411,8 +411,8 @@ func TestInteractivityFamilies(t *testing.T) {
 		"resize-none":           "resize: none;",
 		"touch-pan-x":           "--tw-pan-x: pan-x;",
 		"will-change-transform": "will-change: transform;",
-		"accent-pink-500":       "accent-color: #ec4899;",
-		"caret-red-500":         "caret-color: #ef4444;",
+		"accent-pink-500":       "accent-color: oklch(65.6% 0.241 354.308);",
+		"caret-red-500":         "caret-color: oklch(63.7% 0.237 25.331);",
 		"scroll-smooth":         "scroll-behavior: smooth;",
 		"field-sizing-content":  "field-sizing: content;",
 	}
@@ -444,7 +444,7 @@ func TestBorderExtras(t *testing.T) {
 	tests := map[string]string{
 		"outline-dashed":   "outline-style: dashed;",
 		"outline-offset-4": "outline-offset: 4px;",
-		"outline-blue-500": "outline-color: #3b82f6;",
+		"outline-blue-500": "outline-color: oklch(62.3% 0.214 259.815);",
 		"border-spacing-2": "--tw-border-spacing-x: 0.5rem; --tw-border-spacing-y: 0.5rem;",
 		"border-s-2":       "border-inline-start-width: 2px;",
 	}

@@ -201,10 +201,7 @@ func backdropVar(name, value string) string {
 }
 
 var filterScales = map[string]map[string]string{
-	"blur":       {"": "8px", "none": "", "xs": "4px", "sm": "8px", "md": "12px", "lg": "16px", "xl": "24px", "2xl": "40px", "3xl": "64px"},
-	"brightness": {"": "100%", "50": ".5", "75": ".75", "90": ".9", "95": ".95", "100": "1", "105": "1.05", "110": "1.1", "125": "1.25", "150": "1.5", "200": "2"},
-	"contrast":   {"": "100%", "0": "0", "50": ".5", "75": ".75", "100": "1", "125": "1.25", "150": "1.5", "200": "2"},
-	"saturate":   {"": "100%", "0": "0", "50": ".5", "100": "1", "150": "1.5", "200": "2"},
+	"blur": {"": "8px", "none": "", "xs": "4px", "sm": "8px", "md": "12px", "lg": "16px", "xl": "24px", "2xl": "40px", "3xl": "64px"},
 }
 
 func filterUtility(cls string, theme TailwindTheme) (string, bool) {
@@ -227,42 +224,6 @@ func filterUtility(cls string, theme TailwindTheme) (string, bool) {
 		}
 		if v, ok := unwrapArbitrary(strings.TrimPrefix(rest, "blur-")); ok && strings.HasPrefix(rest, "blur-") {
 			return backdropVar("blur", "blur("+v+")"), true
-		}
-	}
-	// grayscale / invert / sepia (toggles and numeric steps).
-	switch cls {
-	case "grayscale":
-		return filterVar("grayscale", "grayscale(100%)"), true
-	case "grayscale-0":
-		return filterVar("grayscale", "grayscale(0)"), true
-	case "invert":
-		return filterVar("invert", "invert(100%)"), true
-	case "invert-0":
-		return filterVar("invert", "invert(0)"), true
-	case "sepia":
-		return filterVar("sepia", "sepia(100%)"), true
-	case "sepia-0":
-		return filterVar("sepia", "sepia(0)"), true
-	}
-	// grayscale/invert/sepia numeric steps are percentages (grayscale-50 -> 50%).
-	for _, name := range []string{"grayscale", "invert", "sepia"} {
-		rest, ok := strings.CutPrefix(cls, name+"-")
-		if !ok {
-			continue
-		}
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return filterVar(name, name+"("+v+")"), true
-		}
-		if _, err := strconv.ParseFloat(rest, 64); err == nil {
-			return filterVar(name, name+"("+rest+"%)"), true
-		}
-	}
-	if rest, ok := strings.CutPrefix(cls, "hue-rotate-"); ok {
-		if v, ok := unwrapArbitrary(rest); ok {
-			return filterVar("hue-rotate", "hue-rotate("+v+")"), true
-		}
-		if _, err := strconv.ParseFloat(rest, 64); err == nil {
-			return filterVar("hue-rotate", "hue-rotate("+rest+"deg)"), true
 		}
 	}
 	if rest, ok := strings.CutPrefix(cls, "drop-shadow-"); ok {
@@ -290,8 +251,8 @@ func filterUtility(cls string, theme TailwindTheme) (string, bool) {
 	return filterScaleValue(cls, theme, false)
 }
 
-// filterScaleValue resolves blur-/brightness-/contrast-/saturate- (and their
-// backdrop- forms when backdrop is true) against the filter scales.
+// filterScaleValue resolves blur- (and backdrop-blur- when backdrop is true)
+// against the blur scale.
 func filterScaleValue(cls string, theme TailwindTheme, backdrop bool) (string, bool) {
 	for name, scale := range filterScales {
 		rest, ok := strings.CutPrefix(cls, name+"-")
@@ -328,12 +289,6 @@ func filterNamedValue(name, v string) string {
 	switch name {
 	case "blur":
 		return "blur(" + v + ")"
-	case "brightness":
-		return "brightness(" + v + ")"
-	case "contrast":
-		return "contrast(" + v + ")"
-	case "saturate":
-		return "saturate(" + v + ")"
 	}
 	return v
 }
@@ -663,20 +618,6 @@ func interactivityUtility(cls string, theme TailwindTheme) (string, bool) {
 			return "touch-action: auto;", true
 		case "none":
 			return "touch-action: none;", true
-		case "pan-x":
-			return "touch-action: pan-x;", true
-		case "pan-y":
-			return "touch-action: pan-y;", true
-		case "pan-left":
-			return "touch-action: pan-left;", true
-		case "pan-right":
-			return "touch-action: pan-right;", true
-		case "pan-up":
-			return "touch-action: pan-up;", true
-		case "pan-down":
-			return "touch-action: pan-down;", true
-		case "pinch-zoom":
-			return "touch-action: pinch-zoom;", true
 		case "manipulation":
 			return "touch-action: manipulation;", true
 		}
@@ -727,12 +668,6 @@ func interactivityUtility(cls string, theme TailwindTheme) (string, bool) {
 			return "color-scheme: " + strings.Replace(rest, "-", " ", 1) + ";", true
 		}
 	}
-	if rest, ok := strings.CutPrefix(cls, "color-scheme-"); ok {
-		switch rest {
-		case "normal", "light", "dark":
-			return "color-scheme: " + rest + ";", true
-		}
-	}
 	// Field sizing.
 	if rest, ok := strings.CutPrefix(cls, "field-sizing-"); ok {
 		switch rest {
@@ -746,41 +681,6 @@ func interactivityUtility(cls string, theme TailwindTheme) (string, bool) {
 		return "scroll-behavior: auto;", true
 	case "scroll-smooth":
 		return "scroll-behavior: smooth;", true
-	}
-	// Scroll margin / padding (logical and physical).
-	if css, ok := scrollSpacingUtility(cls, theme); ok {
-		return css, true
-	}
-	return "", false
-}
-
-// scrollSpacingUtility resolves scroll-m*/scroll-p* (including logical
-// scroll-mb/scroll-pi variants).
-func scrollSpacingUtility(cls string, theme TailwindTheme) (string, bool) {
-	prefixes := []struct{ prefix, prop string }{
-		{"scroll-mt-", "scroll-margin-top"}, {"scroll-mr-", "scroll-margin-right"},
-		{"scroll-mb-", "scroll-margin-bottom"}, {"scroll-ml-", "scroll-margin-left"},
-		{"scroll-ms-", "scroll-margin-inline-start"}, {"scroll-me-", "scroll-margin-inline-end"},
-		{"scroll-mx-", "scroll-margin-inline"}, {"scroll-my-", "scroll-margin-block"},
-		{"scroll-m-", "scroll-margin"},
-		{"scroll-pt-", "scroll-padding-top"}, {"scroll-pr-", "scroll-padding-right"},
-		{"scroll-pb-", "scroll-padding-bottom"}, {"scroll-pl-", "scroll-padding-left"},
-		{"scroll-ps-", "scroll-padding-inline-start"}, {"scroll-pe-", "scroll-padding-inline-end"},
-		{"scroll-px-", "scroll-padding-inline"}, {"scroll-py-", "scroll-padding-block"},
-		{"scroll-p-", "scroll-padding"},
-	}
-	// Longest prefixes first so `scroll-mt-` wins over `scroll-m-`.
-	for _, p := range prefixes {
-		rest, ok := strings.CutPrefix(cls, p.prefix)
-		if !ok || rest == "" {
-			continue
-		}
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return p.prop + ": " + v + ";", true
-		}
-		if _, err := strconv.ParseFloat(rest, 64); err == nil {
-			return p.prop + ": " + spacingValue(rest, theme) + ";", true
-		}
 	}
 	return "", false
 }
@@ -856,61 +756,6 @@ func transform3DUtility(cls string) (string, bool) {
 // ---------------------------------------------------------------------------
 
 func borderExtraUtility(cls string, theme TailwindTheme) (string, bool) {
-	// Logical borders: border-s / border-e with optional width.
-	if rest, ok := strings.CutPrefix(cls, "border-s-"); ok {
-		if v, ok := borderSideWidth(rest); ok {
-			return "border-inline-start-width: " + v + "; border-style: solid;", true
-		}
-	}
-	if rest, ok := strings.CutPrefix(cls, "border-e-"); ok {
-		if v, ok := borderSideWidth(rest); ok {
-			return "border-inline-end-width: " + v + "; border-style: solid;", true
-		}
-	}
-	// Outline styles and colors (widths are handled in the core chain).
-	switch cls {
-	case "outline-dashed":
-		return "outline-style: dashed;", true
-	case "outline-dotted":
-		return "outline-style: dotted;", true
-	case "outline-double":
-		return "outline-style: double;", true
-	case "outline-solid":
-		return "outline-style: solid;", true
-	case "outline-hidden":
-		return "outline: 2px solid transparent; outline-offset: 2px;", true
-	case "outline-offset-0":
-		return "outline-offset: 0px;", true
-	}
-	if rest, ok := strings.CutPrefix(cls, "outline-offset-"); ok {
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return "outline-offset: " + v + ";", true
-		}
-		if _, err := strconv.Atoi(rest); err == nil {
-			return "outline-offset: " + rest + "px;", true
-		}
-	}
-	if rest, ok := strings.CutPrefix(cls, "outline-"); ok {
-		if inner, hint, isArb := arbitraryValue(rest); isArb {
-			switch hint {
-			case "color":
-				return "outline-color: " + inner + ";", true
-			case "length":
-				return "outline-width: " + inner + "; outline-style: solid;", true
-			}
-			if looksLikeColor(inner) {
-				return "outline-color: " + inner + ";", true
-			}
-			if looksLikeLength(inner) {
-				return "outline-width: " + inner + "; outline-style: solid;", true
-			}
-			return "outline: " + inner + " solid;", true
-		}
-		key, alpha := splitColorModifier(rest)
-		if v, ok := colorValue(key, alpha, theme); ok {
-			return "outline-color: " + v + ";", true
-		}
-	}
 	// Border spacing. `border-spacing-x`/`-y` are not real CSS properties, so
 	// compose through variables (matching Tailwind) rather than emitting them.
 	const borderSpacingCompose = " border-spacing: var(--tw-border-spacing-x,0) var(--tw-border-spacing-y,0);"
@@ -932,20 +777,6 @@ func borderExtraUtility(cls string, theme TailwindTheme) (string, bool) {
 			v = isArb
 		}
 		return "--tw-border-spacing-x: " + v + "; --tw-border-spacing-y: " + v + ";" + borderSpacingCompose, true
-	}
-	return "", false
-}
-
-// borderSideWidth resolves a border-width suffix (numeric or arbitrary).
-func borderSideWidth(rest string) (string, bool) {
-	if v, ok := unwrapArbitrary(rest); ok {
-		return v, true
-	}
-	if _, err := strconv.ParseFloat(rest, 64); err == nil {
-		if rest == "0" {
-			return "0", true
-		}
-		return rest + "px", true
 	}
 	return "", false
 }

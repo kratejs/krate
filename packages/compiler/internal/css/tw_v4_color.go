@@ -54,6 +54,7 @@ var borderStyles = map[string]bool{"solid": true, "dashed": true, "dotted": true
 var borderSides = map[string][]string{
 	"t": {"top"}, "r": {"right"}, "b": {"bottom"}, "l": {"left"},
 	"x": {"inline"}, "y": {"block"}, "s": {"inline-start"}, "e": {"inline-end"},
+	"bs": {"block-start"}, "be": {"block-end"},
 }
 
 // borderUtility resolves border width, color and style utilities.
@@ -74,14 +75,11 @@ func borderUtility(cls string, theme TailwindTheme) (string, bool) {
 	}
 	side := ""
 	sideProps := []string{""}
-	if i := strings.IndexByte(rest, '-'); i == 1 || (i < 0 && len(rest) == 1) {
-		if props, ok := borderSides[rest[:1]]; ok {
-			side, sideProps = rest[:1], props
-			if i < 0 {
-				rest = ""
-			} else {
-				rest = rest[2:]
-			}
+	head, tail, hasTail := strings.Cut(rest, "-")
+	if props, ok := borderSides[head]; ok {
+		side, sideProps, rest = head, props, tail
+		if !hasTail {
+			rest = ""
 		}
 	}
 	prefix := func(p string) string {
@@ -158,7 +156,7 @@ func outlineUtility(cls string, neg bool, theme TailwindTheme) (string, bool) {
 	case "none":
 		return "--tw-outline-style: none; outline-style: none;", true
 	case "hidden":
-		return "outline: 2px solid transparent; outline-offset: 2px;", true
+		return "--tw-outline-style: none; outline-style: none; @media (forced-colors: active){outline: 2px solid transparent; outline-offset: 2px;}", true
 	}
 	if isDigits(rest) {
 		return "outline-style: var(--tw-outline-style); outline-width: " + rest + "px;", true

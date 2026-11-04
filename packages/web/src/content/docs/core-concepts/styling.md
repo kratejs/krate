@@ -217,10 +217,29 @@ Supported features:
   box-shadow composition, so `ring-2 ring-offset-2 ring-offset-white` draws
   both. `space-*` and `divide-*` style the children through a zero-specificity
   `:where(& > :not(:last-child))` selector.
-- **Filters** (`blur-*`, `brightness-*`, `grayscale`, `hue-rotate-*`, `invert`,
-  `saturate-*`, `sepia`, `drop-shadow-*`, and `backdrop-*`), **animation**
-  (`animate-*`), **blend modes**, plus layout, typography, interactivity,
-  3D-transform, border, and background families.
+- **Colors** use Tailwind v4's default palette in `oklch()` (including `mauve`,
+  `olive`, `mist` and `taupe`), so `bg-red-500` is
+  `oklch(63.7% 0.237 25.331)`. Opacity modifiers compile to
+  `color-mix(in oklab, <color> N%, transparent)`, and `@theme --color-*`
+  overrides replace any shade.
+- **Filters** (`blur-*`, `brightness-*`, `grayscale`, `hue-rotate-*` including
+  the negative form, `invert`, `saturate-*`, `sepia`, `drop-shadow-*`, and every
+  `backdrop-*` filter), **animation** (`animate-*`), **blend modes**, plus
+  layout, typography, interactivity, 3D-transform, border, and background
+  families.
+- **Masks**: `mask-none`, `mask-[...]`, `mask-linear-*`, `mask-radial-*`,
+  `mask-conic-*`, edge fades (`mask-t-from-50%`, `mask-x-to-transparent`, ...),
+  and `mask-position|size|repeat|origin|clip|composite|mode|type` utilities
+  compose through `--tw-mask-*` variables like v4.
+- **Logical properties**: `block-*`, `inline-*`, `min-/max-block-*`,
+  `min-/max-inline-*`, `mbs|mbe|pbs|pbe-*`, `inset-bs|be-*`, `border-bs|be-*`,
+  `scroll-mbs|mbe|pbs|pbe-*`. Also `scrollbar-thin|none|auto`,
+  `scrollbar-gutter-*`, `scrollbar-thumb|track-<color>`, `contain-*`, `tab-*`,
+  `transform-fill|border|...` (transform-box), the `*-safe` and `*-baseline`
+  alignment utilities and `w-dvh`/`h-dvw` style viewport sizes.
+- `outline-hidden` follows v4: `outline-style: none`, with a transparent
+  2px outline under `@media (forced-colors: active)` (emitted as a nested
+  at-rule inside the utility's rule).
 - Preflight is Tailwind v4's reset (including `[hidden]` staying hidden) and
   is emitted by default. Set `tailwind.preflight: false` to opt out.
 - Scale names follow v4: `rounded-xs|sm|md`, `shadow-2xs|xs|sm`, `blur-xs|sm`.
@@ -251,6 +270,19 @@ Krate implements Tailwind's utility and variant syntax but is not byte-identical
 to the Tailwind CLI. **JS plugins** and the `@tailwindcss/*` plugin ecosystem
 remain out of scope. Unrecognized classes produce no rule (enable
 `tailwind.strict` to surface them).
+
+Run against every class Tailwind v4.3 can generate, Krate produces a rule for
+all of them and the computed styles match in Chromium except for these
+deliberate differences:
+
+- `rounded-full` (and its side variants) is `9999px`, not
+  `calc(infinity * 1px)`. The rendering is identical for any real element.
+- Theme values are inlined at build time rather than referenced through
+  `var(--color-*)`/`var(--spacing)`, so opacity modifiers are emitted as
+  `color-mix(in oklab, ...)` without a separate `srgb` fallback and no
+  `@supports` guard.
+- Nothing is wrapped in `@layer properties`; the `--tw-*` composition
+  variables get plain `@property` registrations plus inline `var()` fallbacks.
 
 ## Global CSS & code splitting
 

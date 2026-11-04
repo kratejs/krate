@@ -55,7 +55,10 @@ func declProps(css string) ([]int, int) {
 	seen := map[int]bool{}
 	var idx []int
 	count := 0
-	for _, d := range topLevelSplit(css, ';') {
+	for _, d := range splitDecls(css) {
+		if _, _, nested := nestedAtRule(d); nested {
+			continue
+		}
 		name, val, ok := strings.Cut(d, ":")
 		if !ok || strings.TrimSpace(val) == "" {
 			continue
