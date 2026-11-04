@@ -24,6 +24,8 @@ let overlay: typeof import('./dev-overlay');
 // import, and the export is captured from the same module instance.
 beforeAll(async () => {
   (globalThis as any).EventSource = FakeEventSource;
+  // Error reports must not reach the (absent) dev server from the test.
+  (navigator as any).sendBeacon = () => true;
   (window as any).__KRATE_DEV__ = {
     sse: '/__krate/hotreload',
     errors: '/__krate/client-error',

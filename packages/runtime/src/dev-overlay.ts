@@ -622,7 +622,7 @@ class KrateDev {
       if (navigator.sendBeacon) {
         navigator.sendBeacon(this.cfg.errors, new Blob([body], { type: 'application/json' }));
       } else {
-        fetch(this.cfg.errors, { method: 'POST', body, headers: { 'Content-Type': 'application/json' }, keepalive: true });
+        fetch(this.cfg.errors, { method: 'POST', body, headers: { 'Content-Type': 'application/json' }, keepalive: true }).catch(() => {});
       }
     } catch {
       /* reporting is best-effort */
