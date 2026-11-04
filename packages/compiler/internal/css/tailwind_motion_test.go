@@ -1,6 +1,8 @@
 package css
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -164,9 +166,9 @@ func TestTransformsCompose(t *testing.T) {
 	for _, want := range []string{
 		".rotate-45{rotate: 45deg;}",
 		".-rotate-12{rotate: -12deg;}",
-		"--tw-translate-x: -50%; translate: var(--tw-translate-x) var(--tw-translate-y);",
+		"--tw-translate-x: -50%; translate: var(--tw-translate-x, 0) var(--tw-translate-y, 0);",
 		"--tw-translate-y: 0.5rem;",
-		"--tw-scale-x: 110%; --tw-scale-y: 110%; --tw-scale-z: 110%; scale: var(--tw-scale-x) var(--tw-scale-y);",
+		"--tw-scale-x: 110%; --tw-scale-y: 110%; --tw-scale-z: 110%; scale: var(--tw-scale-x, 1) var(--tw-scale-y, 1);",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("missing %q in:\n%s", want, css)
@@ -198,7 +200,7 @@ func TestTransformEdgeUtilities(t *testing.T) {
 		"translate-x-full":   "--tw-translate-x: 100%;",
 		"-translate-y-full":  "--tw-translate-y: -100%;",
 		"translate-x-px":     "--tw-translate-x: 1px;",
-		"translate-z-4":      "translate: var(--tw-translate-x) var(--tw-translate-y) var(--tw-translate-z);",
+		"translate-z-4":      "translate: var(--tw-translate-x, 0) var(--tw-translate-y, 0) var(--tw-translate-z, 0);",
 		"translate-4":        "--tw-translate-x: 1rem; --tw-translate-y: 1rem;",
 		"rotate-x-12":        "--tw-rotate-x: rotateX(12deg); transform: var(--tw-rotate-x,)",
 		"skew-6":             "--tw-skew-x: skewX(6deg); --tw-skew-y: skewY(6deg);",
@@ -222,5 +224,35 @@ func TestNegativeOfNonNegatableIsRejected(t *testing.T) {
 	genKF(t, g, "-flex -animate-spin -p-4")
 	if len(g.Unknown) != 3 {
 		t.Errorf("negative forms of non-negatable utilities must be unknown, Unknown=%v", g.Unknown)
+	}
+}
+
+func TestGenerateTailwindIncludesKeyframes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := `export default () => <div class="animate-spin border" />`
+	if err := os.WriteFile(filepath.Join(dir, "src", "a.tsx"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	css, err := GenerateTailwind(dir, &TailwindConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{".animate-spin{animation: spin 1s linear infinite;}", "@keyframes spin{to{transform:rotate(360deg)}}", "@property --tw-border-style"} {
+		if !strings.Contains(css, want) {
+			t.Errorf("missing %q in:\n%s", want, css)
+		}
+	}
+}
+
+func TestKeyframesAndPropertySurviveMinify(t *testing.T) {
+	css, kf := genKF(t, NewTailwindGenerator(), "animate-spin rotate-45 border")
+	out := Minify(css + kf)
+	for _, want := range []string{"@keyframes spin{to{transform:rotate(360deg)}}", "@property --tw-border-style{", "animation:spin 1s linear infinite"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("minified output missing %q:\n%s", want, out)
+		}
 	}
 }

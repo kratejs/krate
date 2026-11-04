@@ -115,6 +115,7 @@ func GenerateTailwindWithTheme(root string, cfg *TailwindConfig, opts TailwindOp
 	generator.Strict = opts.Strict
 
 	cssText := generator.Generate(classes)
+	cssText += generator.KeyframesCSS()
 	if opts.Preflight {
 		cssText = TailwindPreflight(generator.Theme) + cssText
 	}

@@ -34,9 +34,6 @@ func generateExtraCSS(cls string, theme TailwindTheme) string {
 	if css, ok := borderExtraUtility(cls, theme); ok {
 		return css
 	}
-	if css, ok := backgroundExtraUtility(cls, theme); ok {
-		return css
-	}
 	if css, ok := miscUtility(cls, theme); ok {
 		return css
 	}
@@ -68,8 +65,11 @@ func miscUtility(cls string, theme TailwindTheme) (string, bool) {
 		case "current":
 			return "stroke: currentColor;", true
 		}
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return "stroke: " + v + ";", true
+		if inner, hint, isArb := arbitraryValue(rest); isArb {
+			if hint == "length" || hint == "number" || (hint == "" && looksLikeLength(inner) && !isVarOnly(inner)) {
+				return "stroke-width: " + inner + ";", true
+			}
+			return "stroke: " + inner + ";", true
 		}
 		if n, err := strconv.Atoi(rest); err == nil {
 			return "stroke-width: " + strconv.Itoa(n) + ";", true
@@ -201,7 +201,7 @@ func backdropVar(name, value string) string {
 }
 
 var filterScales = map[string]map[string]string{
-	"blur":       {"": "8px", "none": "", "sm": "4px", "md": "12px", "lg": "16px", "xl": "24px", "2xl": "40px", "3xl": "64px"},
+	"blur":       {"": "8px", "none": "", "xs": "4px", "sm": "8px", "md": "12px", "lg": "16px", "xl": "24px", "2xl": "40px", "3xl": "64px"},
 	"brightness": {"": "100%", "50": ".5", "75": ".75", "90": ".9", "95": ".95", "100": "1", "105": "1.05", "110": "1.1", "125": "1.25", "150": "1.5", "200": "2"},
 	"contrast":   {"": "100%", "0": "0", "50": ".5", "75": ".75", "100": "1", "125": "1.25", "150": "1.5", "200": "2"},
 	"saturate":   {"": "100%", "0": "0", "50": ".5", "100": "1", "150": "1.5", "200": "2"},
@@ -308,7 +308,7 @@ func filterScaleValue(cls string, theme TailwindTheme, backdrop bool) (string, b
 			if v == "" {
 				// Empty override, not `none`: `none` would cancel the whole
 				// `filter:` chain (e.g. `filter: none var(--tw-brightness,)`).
-				return applyFilter(name, "", backdrop), true
+				return applyFilter(name, "initial", backdrop), true
 			}
 			return applyFilter(name, filterNamedValue(name, v), backdrop), true
 		}
@@ -341,7 +341,7 @@ func filterNamedValue(name, v string) string {
 // filterArbValue normalizes an arbitrary filter value (blur([...])) to a filter
 // function call, preserving a value that already contains the function.
 func filterArbValue(name, v string) string {
-	if strings.Contains(v, "(") {
+	if strings.Contains(v, "(") && !isVarOnly(v) {
 		return v
 	}
 	return name + "(" + v + ")"
@@ -953,83 +953,3 @@ func borderSideWidth(rest string) (string, bool) {
 // ---------------------------------------------------------------------------
 // Background / gradient extras (#38)
 // ---------------------------------------------------------------------------
-
-func backgroundExtraUtility(cls string, theme TailwindTheme) (string, bool) {
-	// Tailwind v4 gradient direction names: bg-linear-to-r, bg-linear-45.
-	if rest, ok := strings.CutPrefix(cls, "bg-linear-"); ok {
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return "background-image: linear-gradient(" + v + ", var(--tw-gradient-stops));", true
-		}
-		if deg, err := strconv.ParseFloat(rest, 64); err == nil {
-			_ = deg
-			return "background-image: linear-gradient(" + rest + "deg, var(--tw-gradient-stops));", true
-		}
-		if dir, ok := gradientDirection(rest); ok {
-			return "background-image: linear-gradient(" + dir + ", var(--tw-gradient-stops));", true
-		}
-	}
-	if rest, ok := strings.CutPrefix(cls, "bg-radial-"); ok {
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return "background-image: radial-gradient(" + v + ", var(--tw-gradient-stops));", true
-		}
-		return "background-image: radial-gradient(var(--tw-gradient-stops));", true
-	}
-	if cls == "bg-radial" {
-		return "background-image: radial-gradient(var(--tw-gradient-stops));", true
-	}
-	if rest, ok := strings.CutPrefix(cls, "bg-conic-"); ok {
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return "background-image: conic-gradient(" + v + ", var(--tw-gradient-stops));", true
-		}
-		return "background-image: conic-gradient(from " + rest + ", var(--tw-gradient-stops));", true
-	}
-	// Percentage / length gradient stops: from-10%, via-50%, to-90%.
-	for _, prefix := range []string{"from", "via", "to"} {
-		rest, ok := strings.CutPrefix(cls, prefix+"-")
-		if !ok {
-			continue
-		}
-		if strings.HasSuffix(rest, "%") {
-			if _, err := strconv.ParseFloat(strings.TrimSuffix(rest, "%"), 64); err == nil {
-				return gradientPositionProperty(prefix, rest), true
-			}
-		}
-		if v, isArb := unwrapArbitrary(rest); isArb && looksLikeLength(v) {
-			return gradientPositionProperty(prefix, v), true
-		}
-	}
-	return "", false
-}
-
-func gradientPositionProperty(prefix, v string) string {
-	switch prefix {
-	case "from":
-		return "--tw-gradient-from-position: " + v + ";"
-	case "via":
-		return "--tw-gradient-via-position: " + v + ";"
-	default:
-		return "--tw-gradient-to-position: " + v + ";"
-	}
-}
-
-func gradientDirection(rest string) (string, bool) {
-	switch rest {
-	case "to-t":
-		return "to top", true
-	case "to-tr":
-		return "to top right", true
-	case "to-r":
-		return "to right", true
-	case "to-br":
-		return "to bottom right", true
-	case "to-b":
-		return "to bottom", true
-	case "to-bl":
-		return "to bottom left", true
-	case "to-l":
-		return "to left", true
-	case "to-tl":
-		return "to top left", true
-	}
-	return "", false
-}

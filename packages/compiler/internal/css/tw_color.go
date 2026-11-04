@@ -111,21 +111,6 @@ func withAlpha(color, alpha string) string {
 	return "color-mix(in oklab, " + color + " " + pct + ", transparent)"
 }
 
-// transparentVersion returns the color at zero alpha, used as the automatic
-// fallback for gradient stops (Tailwind emits the same hue at 0 alpha rather
-// than plain `transparent`, which would fade toward black). Returns
-// `transparent` for color forms it cannot rewrite.
-func transparentVersion(color string) string {
-	if a := withAlpha(color, "0"); a != color {
-		return a
-	}
-	c := strings.TrimSpace(color)
-	if strings.HasPrefix(c, "rgb(") && strings.HasSuffix(c, ")") {
-		return strings.TrimSuffix(c, ")") + " / 0)"
-	}
-	return "transparent"
-}
-
 // negateValue returns the negated form of a length/number value, preserving
 // units: "1rem" -> "-1rem", "0" -> "-0" (rendered "0").
 func negateValue(v string) string {
