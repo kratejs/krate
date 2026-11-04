@@ -39,6 +39,11 @@ Notes:
   only used to typecheck (hence `noEmit`).
 - **`paths`** - `@/*` maps to `src/*`. The compiler reads the same `paths` and
   `baseUrl` from `tsconfig.json` for bundling resolution, so they stay in sync.
+  `tsconfig.json` may contain comments and trailing commas, and `extends`
+  (a relative path or a package) is followed. Targets in `paths` resolve
+  relative to `baseUrl` exactly as `tsc` does, so with `baseUrl: "."` write
+  `"@/*": ["./src/*"]`; an import that does not resolve fails the build at the
+  import statement. A tsconfig that cannot be parsed is reported as a warning.
 - **`include`** must cover `.krate/types` so generated route/content types are
   visible.
 

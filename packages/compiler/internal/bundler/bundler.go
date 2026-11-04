@@ -690,7 +690,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	mod := &Module{Path: path, Program: prog, IsEntry: isEntry, SourceCode: src, Diagnostics: reactDiags}
 	mod.ComponentClass = ClassifyComponent(src, path, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs)
 	if !strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
-		mod.Diagnostics = append(mod.Diagnostics, b.envReadDiags(path, src, mod.ComponentClass)...)
+		mod.Diagnostics = append(mod.Diagnostics, b.envReadDiags(path, src, prog, mod.ComponentClass)...)
 		reactDiags = mod.Diagnostics
 	}
 	b.collectImports(prog, mod)

@@ -167,12 +167,13 @@ func (b *Builder) vendorPreamble(used []vendorImport) (string, error) {
 	fmt.Fprintf(&src, "export { %s };\n", strings.Join(exports, ", "))
 
 	minify := b.shouldMinifyJS()
-	h := sha256.New()
-	fmt.Fprintf(h, "%v|%v|%s\n", minify, b.DevMode, src.String())
+	var keySrc strings.Builder
+	fmt.Fprintf(&keySrc, "%v|%v|%s\n", minify, b.DevMode, src.String())
 	for _, u := range used {
-		fmt.Fprintf(h, "%s|%s\n", u.Dir, u.Source)
+		fmt.Fprintf(&keySrc, "%s|%s\n", u.Dir, u.Source)
 	}
-	key := hex.EncodeToString(h.Sum(nil))
+	sum := sha256.Sum256([]byte(keySrc.String()))
+	key := hex.EncodeToString(sum[:])
 	if v, ok := vendorMemo.Load(key); ok {
 		return v.(string), nil
 	}
