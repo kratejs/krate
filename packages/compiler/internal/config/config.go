@@ -769,7 +769,7 @@ func LoadWith(root string, opts LoadOptions) (*Config, error) {
 		switch {
 		case loadErr == nil:
 			if uerr := json.Unmarshal(merged, cfg); uerr != nil {
-				return nil, fmt.Errorf("parsing config %s: %w", tsPath, uerr)
+				return nil, describeUnmarshalError(filepath.Base(tsPath), uerr)
 			}
 			Warnings = append(Warnings, UnknownKeyWarnings(merged)...)
 		case errors.Is(loadErr, errStaticFallback):

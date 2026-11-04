@@ -313,9 +313,16 @@ func sha256Base64(content string) string {
 // generateSEOTags produces canonical, OpenGraph, and Twitter Card meta tags.
 // It skips tags that are already present in headHTML to avoid duplication.
 func generateSEOTags(headHTML, route string, seo config.SEOConfig) string {
+	// The configured default description is a plain <meta name="description">
+	// too (search engines and `krate check` read that tag), independent of
+	// whether a base URL is set for the canonical/OpenGraph tags below.
+	descTag := ""
+	if seo.Description != "" && extractMetaAttr(headHTML, "description") == "" {
+		descTag = fmt.Sprintf("<meta name=\"description\" content=\"%s\">\n", escape.HTMLAttr(seo.Description))
+	}
 	baseURL := strings.TrimRight(seo.BaseURL, "/")
 	if baseURL == "" {
-		return ""
+		return descTag
 	}
 	siteName := seo.SiteName
 	defaultDescription := seo.Description
@@ -327,6 +334,9 @@ func generateSEOTags(headHTML, route string, seo config.SEOConfig) string {
 	}
 
 	var tags []string
+	if descTag != "" {
+		tags = append(tags, strings.TrimSuffix(descTag, "\n"))
+	}
 
 	if !strings.Contains(headHTML, "rel=\"canonical\"") && !strings.Contains(headHTML, "rel='canonical'") {
 		tags = append(tags, fmt.Sprintf("<link rel=\"canonical\" href=\"%s\">", canonical))

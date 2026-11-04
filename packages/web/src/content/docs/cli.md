@@ -11,7 +11,7 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | Command | Description |
 |---------|-------------|
 | `krate build [dir]` | Production build |
-| `krate dev [dir]` | Build + dev server (port 3000) + hot reload |
+| `krate dev [dir]` | Build + dev server (port 3000) + hot reload; restarts on config/env changes |
 | `krate serve [dir]` | Build + static HTTP server (production preview) |
 | `krate init [dir]` | Scaffold a new project (alias: `create`; via the npm wrapper) |
 | `krate types [dir]` | Generate route/content TypeScript declarations only |
@@ -20,10 +20,19 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate fix [dir]` | Apply conservative, parse-gated source fixes (dry-run unless `--apply`) |
 | `krate migrate nextjs [dir]` | Plan or apply a conservative Next.js migration |
 | `krate inspect [dir]` | Build and print the compiled site model (`--json`) |
-| `krate deploy [dir]` | Build, then write host adapter files (`--target`) |
+| `krate deploy [dir]` | Build, then write host adapter files (`--target`, `--static-only`) |
 | `krate clean [dir]` | Remove build output and the compiler cache |
-| `krate mcp [dir]` | Start the MCP (Model Context Protocol) server over stdio |
+| `krate doctor [dir]` | Print a diagnostic summary of the project and toolchain |
+| `krate config [dir]` | Print the fully resolved configuration (`--schema` for the JSON Schema) |
+| `krate plugin add <pkg>` | Install a plugin and register it in the config |
+| `krate mcp [dir]` | Start the MCP (Model Context Protocol) server (stdio, or `--http`) |
 | `krate version` | Print the version |
+| `krate help [command]` | Print usage; `krate <command> --help` prints one command's usage |
+
+Flags that apply to more than one command: `--config <path>`, `--out-dir <path>`,
+`--mode <name>` (environment mode, like `KRATE_ENV`; selects `.env.<name>` and is
+passed to a function-form `defineConfig`), `--verbose`, `--precompress`,
+`--sourcemap`, `--no-dce`, `--json`, and `--apply` (for `fix` and `migrate`).
 
 ## `krate init`
 
@@ -101,10 +110,21 @@ Starts a build + HTTP dev server with hot reload.
 krate dev
 ```
 
-- Serves the site on port 3000 (configurable via `devServer.port`).
-- Watches source files and rebuilds changed pages.
-- Uses SSE hot reload to push updates to open tabs.
-- Shows compilation errors inline via the dev error overlay.
+- Serves the site on port 3000 (configurable via `devServer.port`, which wins
+  over `server.port` in dev). If the port is taken, the next free one is used and
+  the terminal says so.
+- Watches source files, including new, renamed and deleted pages and
+  directories, and rebuilds only what changed. `public/` edits are mirrored into
+  the output immediately.
+- Editing `krate.config.*`, `tailwind.config.*`, `tsconfig.json` or `.env*`
+  reloads the settings and restarts the dev server in place (open tabs reload by
+  themselves). A config that fails to load keeps the previous server running and
+  shows the error in the overlay.
+- Uses SSE hot reload to push updates to open tabs after a short (75 ms)
+  debounce; stylesheet-only edits swap the CSS without reloading the page.
+- Shows compilation errors inline via the dev error overlay. If the first build
+  fails, the browser shows an error page with the overlay and recovers on the
+  next successful build.
 
 ## `krate serve`
 
@@ -251,13 +271,19 @@ krate deploy --target netlify
 krate deploy --target vercel
 krate deploy --target cloudflare
 krate deploy --target gh-pages
+krate deploy --target docker
 ```
 
 | Target | Files written |
 |--------|---------------|
-| `netlify`, `cloudflare` | `_redirects` (from `redirects`/`rewrites`) |
-| `vercel` | `vercel.json` (redirects + rewrites) |
+| `netlify`, `cloudflare` | `_redirects` (from `redirects`/`rewrites`), `_headers` (from `headers`) |
+| `vercel` | `vercel.json` at the project root (redirects, rewrites, headers, `outputDirectory`) |
 | `gh-pages` | `.nojekyll`, `404.html` |
+| `docker` | `Dockerfile` + `.dockerignore` at the project root (runs `krate serve`) |
+
+Projects that use SSR/ISR/streaming, API routes, server actions or middleware
+cannot run on the static targets: `krate deploy` fails and lists those features
+unless you pass `--static-only` (or use `--target docker`).
 
 See [Deployment](/docs/guides/deployment/) for details.
 
@@ -290,7 +316,8 @@ user-authored workspace. See
 
 ## `krate version`
 
-Prints the compiler version:
+Prints the compiler version (`krate v<version>`). `krate --version` and `krate -v`
+do the same.
 
 ## `krate mcp`
 

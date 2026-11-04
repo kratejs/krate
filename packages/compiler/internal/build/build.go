@@ -711,8 +711,10 @@ func (b *Builder) BuildAll() error {
 	// Intercepting slot pages are built as fragments the SPA router swaps
 	// into their slot (see parallel.go).
 	pages = append(pages, findInterceptPages(b.Cfg.PagesDir)...)
+	usedEntryFallback := false
 	if len(pages) == 0 {
 		pages = []string{b.Cfg.Entry}
+		usedEntryFallback = true
 	}
 
 	// Run BeforeBuild hooks (docs plugin generates .krategen/ pages here)
@@ -759,6 +761,29 @@ func (b *Builder) BuildAll() error {
 		b.pluginFailed(err)
 	}
 	stopPlugins()
+
+	if usedEntryFallback && len(genPages) == 0 && len(routes) == 0 {
+		if _, statErr := os.Stat(b.Cfg.Entry); statErr != nil {
+			rel := func(p string) string {
+				if r, err := filepath.Rel(b.Root, p); err == nil {
+					return filepath.ToSlash(r)
+				}
+				return p
+			}
+			if _, dirErr := os.Stat(b.Cfg.PagesDir); dirErr != nil {
+				return diag.Diagnostic{
+					File:    b.Cfg.PagesDir,
+					Message: "pagesDir " + rel(b.Cfg.PagesDir) + " does not exist",
+					Hint:    "create " + rel(b.Cfg.PagesDir) + " with at least one page, or fix the pagesDir setting in krate.config.ts",
+				}
+			}
+			return diag.Diagnostic{
+				File:    b.Cfg.PagesDir,
+				Message: "no pages found in " + rel(b.Cfg.PagesDir),
+				Hint:    "add a page such as " + rel(b.Cfg.PagesDir) + "/index.tsx",
+			}
+		}
+	}
 
 	// Plugins generated files during BeforeBuild/GenerateRoutes; drop resolver
 	// stat/package.json memos so negative probes made before those files existed
@@ -1700,7 +1725,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 					h = strings.Replace(h, "</head>", state+"</head>", 1)
 				}
 				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
-				if b.Cfg.SEO.BaseURL != "" {
+				if b.Cfg.SEO.BaseURL != "" || b.Cfg.SEO.Description != "" {
 					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO)
 					if seoTags != "" {
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)

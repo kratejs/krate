@@ -198,7 +198,7 @@ func TestBuildTestProject(t *testing.T) {
 	}
 
 	// Deploy adapters emit explicit header rules for static hosts.
-	if _, err := deploy.Emit("netlify", cfg, outDir); err != nil {
+	if _, err := deploy.Emit("netlify", cfg, outDir, outDir, deploy.Options{StaticOnly: true}); err != nil {
 		t.Errorf("deploy.Emit: %v", err)
 	} else if headers, err := os.ReadFile(filepath.Join(outDir, "_headers")); err != nil {
 		t.Error("deploy did not write _headers")

@@ -249,3 +249,42 @@ func TestBindServerListenerDevMovesToNextPort(t *testing.T) {
 		t.Fatal("dev bound the taken port")
 	}
 }
+
+func TestNestedErrorPagesConflict(t *testing.T) {
+	root := t.TempDir()
+	for rel, c := range map[string]string{
+		"src/pages/index.tsx":    devPage("home"),
+		"src/pages/404.tsx":      devPage("ROOT404"),
+		"src/pages/blog/404.tsx": devPage("BLOG404"),
+	} {
+		p := filepath.Join(root, rel)
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	err := New(root, cfg).BuildAll()
+	if err == nil {
+		t.Fatal("two 404 pages must be a build error, not a coin flip")
+	}
+	for _, want := range []string{"404.tsx", "blog/404.tsx"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name %s: %v", want, err)
+		}
+	}
+}
+
+func TestMissingPagesDirIsAClearError(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "nope")
+	cfg.Entry = filepath.Join(root, "src", "index.tsx")
+	cfg.OutDir = filepath.Join(root, "dist")
+	err := New(root, cfg).BuildAll()
+	if err == nil || !strings.Contains(err.Error(), "pagesDir src/nope does not exist") {
+		t.Fatalf("got %v, want a pagesDir-does-not-exist error", err)
+	}
+}

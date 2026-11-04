@@ -45,3 +45,15 @@ func TestGenerateSEOTagsTitleTemplateSkipsSuffixedTitles(t *testing.T) {
 		t.Errorf("template not applied to a bare title:\n%s", bare)
 	}
 }
+
+// A configured description becomes the page's meta description even without a
+// base URL, so `krate check` (seo/description) is satisfied by site.description.
+func TestGenerateSEOTagsEmitsDefaultMetaDescription(t *testing.T) {
+	got := generateSEOTags("<title>T</title>", "", config.SEOConfig{Description: "A site"})
+	if !strings.Contains(got, `<meta name="description" content="A site">`) {
+		t.Fatalf("missing default meta description: %q", got)
+	}
+	if got := generateSEOTags(`<meta name="description" content="Own">`, "", config.SEOConfig{Description: "A site"}); got != "" {
+		t.Fatalf("page description must win: %q", got)
+	}
+}

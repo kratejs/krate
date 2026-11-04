@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/build"
@@ -68,5 +69,11 @@ func captureStdout(fn func() error) (string, error) {
 	build.SetOutput(&buf)
 	defer build.SetOutput(os.Stdout)
 	err := fn()
-	return buf.String(), err
+	return stripANSI(buf.String()), err
 }
+
+var ansiRe = regexp.MustCompile("\x1b\\[[0-9;?]*[A-Za-z]")
+
+// stripANSI removes terminal color codes: tool output is read by an LLM or
+// rendered as plain text, where escape sequences are noise.
+func stripANSI(s string) string { return ansiRe.ReplaceAllString(s, "") }

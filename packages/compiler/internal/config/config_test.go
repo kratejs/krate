@@ -1180,3 +1180,50 @@ func TestConfigNotExecutableError(t *testing.T) {
 		t.Errorf("error should preserve underlying cause, got:\n%s", msg)
 	}
 }
+
+func TestUnknownKeyWarningsInsideArrays(t *testing.T) {
+	raw := []byte(`{"redirects":[{"source":"/a","destination":"/b","permanant":true}],"rewrites":[{"source":"/x","dest":"/y"}]}`)
+	joined := strings.Join(UnknownKeyWarnings(raw), "\n")
+	for _, want := range []string{"redirects.permanant", "rewrites.dest"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing warning for %s in: %s", want, joined)
+		}
+	}
+	if w := UnknownKeyWarnings([]byte(`{"redirects":[{"source":"/a","destination":"/b","permanent":true}]}`)); len(w) != 0 {
+		t.Errorf("valid redirect warned: %v", w)
+	}
+}
+
+func TestConfigTypeErrorNamesFileKeyAndType(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "krate.config.json"), []byte(`{"devServer":{"port":"3000"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("expected a type error")
+	}
+	want := "krate.config.json: devServer.port must be a number (got string)"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %q, want it to contain %q", err, want)
+	}
+	if strings.Contains(err.Error(), "Go struct") {
+		t.Fatalf("error leaks Go internals: %v", err)
+	}
+}
+
+func TestDevPortPrefersDevServerPort(t *testing.T) {
+	cfg := Default()
+	cfg.Server.Port = 4000
+	cfg.DevServer.Port = 5000
+	if cfg.DevPort() != 5000 {
+		t.Fatalf("DevPort = %d, want devServer.port", cfg.DevPort())
+	}
+	if cfg.ServerPort() != 4000 {
+		t.Fatalf("ServerPort = %d, want server.port", cfg.ServerPort())
+	}
+	cfg.DevServer.Port = 0
+	if cfg.DevPort() != 4000 {
+		t.Fatalf("DevPort fallback = %d, want server.port", cfg.DevPort())
+	}
+}

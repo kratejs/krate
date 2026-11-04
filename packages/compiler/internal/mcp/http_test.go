@@ -55,6 +55,9 @@ func TestHTTPTransport(t *testing.T) {
 	if resp.Header.Get("Mcp-Session-Id") == "" {
 		t.Error("missing Mcp-Session-Id")
 	}
+	if info, _ := decoded["result"].(map[string]any)["serverInfo"].(map[string]any); info == nil || info["version"] == "http" || info["version"] == "" {
+		t.Errorf("serverInfo.version must be the compiler version, got %v", info)
+	}
 
 	resp, _ = post(`{"jsonrpc":"2.0","method":"notifications/initialized"}`, "secret")
 	if resp.StatusCode != http.StatusAccepted {
@@ -252,5 +255,11 @@ func TestHTTPOriginRateLimitAndObservability(t *testing.T) {
 	}
 	if strings.Contains(log, "Bearer secret") {
 		t.Fatalf("audit log leaked the bearer token:\n%s", log)
+	}
+}
+
+func TestStripANSI(t *testing.T) {
+	if got := stripANSI("\x1b[36m>\x1b[0m page \x1b[1;31mfail\x1b[0m"); got != "> page fail" {
+		t.Fatalf("stripANSI = %q", got)
 	}
 }

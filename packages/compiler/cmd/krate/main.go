@@ -53,6 +53,7 @@ type cliFlags struct {
 	Mode          string
 	Schema        bool
 	Target        string
+	StaticOnly    bool
 	JSON          bool
 	HTTP          bool
 	Apply         bool
@@ -140,7 +141,7 @@ func main() {
 func printCommandUsage(w io.Writer, cmd string) {
 	switch cmd {
 	case "build":
-		fmt.Fprintf(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--watch] [--profile] [--cpuprofile <path>] [--memprofile <path>] [--precompress]\n\n")
+		fmt.Fprintf(w, "Usage: krate build [dir] [--config <path>] [--out-dir <path>] [--mode <name>] [--watch] [--profile] [--cpuprofile <path>] [--memprofile <path>] [--precompress]\n\n")
 		fmt.Fprintf(w, "Compile the project to static output (and SSR/server bundles when needed).\n")
 	case "dev":
 		fmt.Fprintf(w, "Usage: krate dev [dir] [--config <path>] [--verbose]\n\n")
@@ -166,8 +167,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 		fmt.Fprintf(w, "       krate migrate rollback <backup-dir>\n\n")
 		fmt.Fprintf(w, "Plan or apply a framework migration. Dry-run by default.\n")
 	case "deploy":
-		fmt.Fprintf(w, "Usage: krate deploy [dir] [--target netlify|vercel|cloudflare|gh-pages]\n\n")
-		fmt.Fprintf(w, "Build the site and write host adapter files (e.g. _redirects, vercel.json).\n")
+		fmt.Fprintf(w, "Usage: krate deploy [dir] [--target netlify|vercel|cloudflare|gh-pages|docker] [--static-only]\n\n")
+		fmt.Fprintf(w, "Build the site and write host adapter files (_redirects/_headers, vercel.json, Dockerfile).\n")
+		fmt.Fprintf(w, "Projects with SSR/ISR, API routes, actions or middleware need --target docker (or\n`krate serve`); --static-only publishes just their static pages.\n")
 	case "inspect":
 		fmt.Fprintf(w, "Usage: krate inspect [dir] [--json]\n\n")
 		fmt.Fprintf(w, "Build the site and print its model (routes, sources, modes, deps, outputs).\n")
@@ -231,8 +233,14 @@ func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "  --memprofile <p>  Write a Go heap profile to <p> (pprof)\n")
 	fmt.Fprintf(w, "  --sourcemap       Emit source maps for generated JS\n")
 	fmt.Fprintf(w, "  --no-dce          Disable CSS/JS dead-code elimination\n")
-	fmt.Fprintf(w, "  --target <name>   Deploy adapter target (netlify|vercel|cloudflare|gh-pages)\n")
+	fmt.Fprintf(w, "  --precompress     Write .br/.gz siblings for compressible assets\n")
+	fmt.Fprintf(w, "  --mode <name>     Environment mode (like KRATE_ENV): loads .env.<name>\n")
+	fmt.Fprintf(w, "  --target <name>   Deploy adapter target (netlify|vercel|cloudflare|gh-pages|docker)\n")
+	fmt.Fprintf(w, "  --static-only     Deploy only the static pages of a project that also uses server features\n")
 	fmt.Fprintf(w, "  --json            Machine-readable output (krate inspect)\n")
+	fmt.Fprintf(w, "  --apply           Write changes (krate fix, krate migrate); dry-run otherwise\n")
+	fmt.Fprintf(w, "  --verify, --force, --update-package, --report <path>   krate migrate options\n")
+	fmt.Fprintf(w, "  --schema          Print a JSON Schema instead of the config (krate config)\n")
 }
 
 func parseFlags(args []string) (cliFlags, []string) {
@@ -249,6 +257,8 @@ func parseFlags(args []string) (cliFlags, []string) {
 		case args[i] == "--target" && i+1 < len(args):
 			flags.Target = args[i+1]
 			i++
+		case args[i] == "--static-only":
+			flags.StaticOnly = true
 		case args[i] == "--watch":
 			flags.Watch = true
 		case args[i] == "--verbose":
@@ -622,14 +632,19 @@ func runDeploy(flags cliFlags, args []string) {
 		os.Exit(1)
 	}
 
-	files, err := deploy.Emit(target, cfg, cfg.OutDir)
+	files, err := deploy.Emit(target, cfg, root, cfg.OutDir, deploy.Options{StaticOnly: flags.StaticOnly})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sDeploy error:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
 	}
+	if flags.StaticOnly {
+		if features := deploy.ServerFeatures(root, cfg.OutDir); len(features) > 0 {
+			fmt.Fprintf(os.Stderr, "%s! --static-only:%s publishing static pages only; %s will not run on %s\n", cYellow, cReset, strings.Join(features, ", "), target)
+		}
+	}
 	fmt.Printf("%s%s  %s adapter ready%s (%d file(s))\n", cBold, cGreen, target, cReset, len(files))
 	for _, f := range files {
-		if rel, err := filepath.Rel(cfg.OutDir, f); err == nil {
+		if rel, err := filepath.Rel(root, f); err == nil {
 			fmt.Printf("    %s%s%s\n", cGray, filepath.ToSlash(rel), cReset)
 		}
 	}
