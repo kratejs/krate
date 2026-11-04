@@ -186,6 +186,8 @@ interface ReqState {
   method: string;
   /** Decoded URL path, after base-path stripping and rewrites. */
   path: string;
+  /** The escaped path as received (net/http.ServeMux cleans this form). */
+  rawPath: string;
   search: string;
   /** Headers set on the response so far (Go's w.Header()). */
   res: Headers;
@@ -208,7 +210,9 @@ function httpError(rs: ReqState, message: string, status: number): Response {
   return finish(rs, status, message + "\n");
 }
 
-function notFoundText(rs: ReqState): Response {
+/** http.NotFound; after a file-server miss Go also drops the entity headers. */
+function notFoundText(rs: ReqState, fileServer = false): Response {
+  if (fileServer) for (const h of ["Content-Encoding", "Etag", "Last-Modified", "Cache-Control"]) rs.res.delete(h);
   return httpError(rs, "404 page not found", 404);
 }
 
@@ -562,7 +566,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const served = staticLayer ? await staticLayer.serve(rs.request, p) : null;
     if (served && served.status !== 404) return mergeStaticResponse(rs, served);
     if (html404 && wantsHTML) return custom404(rs);
-    return notFoundText(rs);
+    return notFoundText(rs, true);
   }
 
   /** Static responses bring their own headers; layers that ran earlier (security, cache policy) stay unless replaced. */
@@ -889,7 +893,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   /** Port of APIRouteRuntime.resolveAPIFile over the inlined route keys. */
   function resolveAPIFile(relPath: string): string {
-    let rel = safeDecode(relPath).replace(/^\/+/, "");
+    let rel = safeDecode(relPath).split("/").filter((s) => s !== "").join("/");
     if (rel === "") rel = "index";
     if (rel.includes("\0") || rel.includes("\\")) return "";
     if (rel.split("/").includes("..")) return "";
@@ -1261,7 +1265,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       rs.res.set("Cache-Control", "no-store");
       if (wantsJSON) {
         rs.res.set("Content-Type", "application/json");
-        return finish(rs, status, JSON.stringify({ ok: false, error: { message: msg } }));
+        return finish(rs, status, JSON.stringify({ error: { message: msg }, ok: false }) + "\n");
       }
       return httpError(rs, msg, status);
     };
@@ -1454,16 +1458,17 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   async function mux(rs: ReqState): Promise<Response> {
     const p = rs.path;
-    // net/http.ServeMux cleans the path and redirects when it changed.
-    const cleaned = cleanPath(p) + (p.endsWith("/") && p !== "/" ? "/" : "");
-    if (p !== "" && cleaned !== p && rs.method !== "CONNECT") {
+    // net/http.ServeMux cleans the escaped path and redirects when it changed.
+    const raw = rs.rawPath;
+    const cleaned = cleanPath(raw) + (raw.endsWith("/") && raw !== "/" ? "/" : "");
+    if (raw !== "" && cleaned !== raw && rs.method !== "CONNECT") {
       let target = cleaned;
       if (rs.search) target += rs.search;
-      return goRedirect(target, p, rs.method, 301, rs.res);
+      return goRedirect(target, p, rs.method, 307, rs.res);
     }
     if (p === "/healthz") return textResponse(rs, 200, "ok\n");
     if (p === "/readyz") return textResponse(rs, 200, "ready\n");
-    if (p === "/api") return goRedirect("/api/", p, rs.method, 301, rs.res);
+    if (p === "/api") return goRedirect("/api/", p, rs.method, 307, rs.res);
     if (p.startsWith("/api/")) {
       const blocked = await runMiddleware(rs);
       if (blocked) return blocked;
@@ -1527,6 +1532,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       request,
       method: request.method.toUpperCase(),
       path: safeDecode(url.pathname),
+      rawPath: url.pathname,
       search: url.search,
       res: new Headers(),
       headers: request.headers,

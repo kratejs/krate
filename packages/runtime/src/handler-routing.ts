@@ -541,6 +541,6 @@ export function goRedirect(target: string, requestPath: string, method: string, 
   headers.set("Location", hexEscapeNonASCII(url));
   if (!hadCT && (method === "GET" || method === "HEAD")) headers.set("Content-Type", "text/html; charset=utf-8");
   let body: string | null = null;
-  if (method === "GET") body = "<a href=\"" + goHTMLEscape(headers.get("Location")!) + "\">" + (statusText[status] || "") + "</a>.\n\n";
+  if (!hadCT && method === "GET") body = "<a href=\"" + goHTMLEscape(headers.get("Location")!) + "\">" + (statusText[status] || "") + "</a>.\n\n";
   return new Response(body, { status, headers });
 }
