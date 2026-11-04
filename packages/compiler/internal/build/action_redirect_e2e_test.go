@@ -79,8 +79,8 @@ func TestServerActionRedirectInBrowser(t *testing.T) {
 // show the validation state the action returned.
 func TestNoJSActionStateFeedbackInBrowser(t *testing.T) {
 	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
-	if browser != "chromium" {
-		t.Skip("set KRATE_BROWSER=chromium to run the no-JS action state e2e")
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the no-JS action state e2e")
 	}
 	if !canStopInProcessServer {
 		t.Skip("the in-process server needs a unix host")
@@ -119,7 +119,7 @@ func TestNoJSActionStateFeedbackInBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command("node", script, base).CombinedOutput()
+	out, err := exec.Command("node", script, base, browser).CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "Cannot find module") {
 			requireE2E(t, "browser unavailable: %s", out)

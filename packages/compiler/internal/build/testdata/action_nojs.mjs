@@ -1,9 +1,9 @@
 // Posts a useActionState form with JavaScript disabled and checks the server
 // renders the returned validation state into the page.
-import { chromium } from "playwright";
+import { chromium, firefox, webkit } from "playwright";
 
-const [base] = process.argv.slice(2);
-const browser = await chromium.launch();
+const [base, browserName = "chromium"] = process.argv.slice(2);
+const browser = await { chromium, firefox, webkit }[browserName].launch();
 const result = {};
 try {
   const ctx = await browser.newContext({ javaScriptEnabled: false });
