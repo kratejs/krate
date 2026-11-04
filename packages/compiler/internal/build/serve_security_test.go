@@ -431,18 +431,11 @@ func TestImageSrcOutsidePublicIsRejected(t *testing.T) {
 	cfg := config.Default()
 	cfg.Images.Unoptimized = true
 	cfg.Resolve(root)
-	if err := New(root, cfg).BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
+	err := New(root, cfg).BuildAll()
+	if err == nil || !strings.Contains(err.Error(), "KR8801") || !strings.Contains(err.Error(), "resolves outside public/") {
+		t.Fatalf("an escaping Image src must fail the build with KR8801, got %v", err)
 	}
-	b, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	html := string(b)
-	if !strings.Contains(html, "resolves outside public/") {
-		t.Errorf("missing diagnostic for an escaping Image src:\n%.800s", html)
-	}
-	if !strings.Contains(html, "hero.svg") {
-		t.Errorf("a valid Image src was rejected:\n%.800s", html)
+	if strings.Contains(err.Error(), "hero.svg") {
+		t.Errorf("the valid Image src was reported: %v", err)
 	}
 }
