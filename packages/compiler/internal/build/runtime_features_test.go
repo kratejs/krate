@@ -88,6 +88,33 @@ func TestRuntimeChunkKeepsReferencedFeatures(t *testing.T) {
 	}
 }
 
+func TestRuntimeScanTextActionForms(t *testing.T) {
+	plain := runtimeScanText([]*PageResult{{HTML: "<button>x</button>", HydrationJS: "createSignal(0)"}})
+	if strings.Contains(plain, actionsMarkup) {
+		t.Fatal("a plain static page asked for the actions bundle")
+	}
+	for name, r := range map[string]*PageResult{
+		"form":      {HTML: `<form action=/__krate/action/abc data-krate-action method=post>`},
+		"ssr":       {Mode: RenderSSR},
+		"streaming": {Mode: RenderStreaming},
+		"regions":   {Regions: []Region{{}}},
+	} {
+		if !strings.Contains(runtimeScanText([]*PageResult{r}), actionsMarkup) {
+			t.Errorf("%s page did not request the actions bundle", name)
+		}
+	}
+	island := writeTrimmedChunk(t, runtimeChunkOptions{SPA: true, Scan: runtimeScanText([]*PageResult{{HTML: `<krate-island data-src="/chunks/x.js">`}})})
+	for _, m := range []string{markActions, markClasses, markHelpers, markList} {
+		if !strings.Contains(island, m) {
+			t.Errorf("runtime for a page with a client component is missing %s", m)
+		}
+	}
+	chunk := writeTrimmedChunk(t, runtimeChunkOptions{SPA: true, Scan: runtimeScanText([]*PageResult{{HTML: "<form data-krate-action>"}})})
+	if !strings.Contains(chunk, markActions) {
+		t.Error("runtime for a server action form is missing the actions bundle")
+	}
+}
+
 func TestRuntimeChunkTrimmedLiteRouter(t *testing.T) {
 	got := writeTrimmedChunk(t, runtimeChunkOptions{SPA: false, Scan: "createSignal(0)"})
 	if strings.Contains(got, "popstate") {

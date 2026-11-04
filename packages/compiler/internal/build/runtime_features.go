@@ -36,10 +36,19 @@ var optionalRuntimeFeatures = []string{"list", "helpers", "actions", "classes"}
 // unknownClientCodeMarkers mark client code the identifier scan cannot see:
 // dynamically imported chunks, lazy components and client islands load code
 // that may use any runtime API.
-var unknownClientCodeMarkers = []string{"import(", "__krateLazy", "krate-island"}
+const islandMarkup = "krate-island"
+
+var unknownClientCodeMarkers = []string{"import(", "__krateLazy", islandMarkup}
+
+// actionsMarkup is the attribute the compiler puts on a form that posts to a
+// server action. The actions bundle enhances such forms from a document
+// listener it installs at load, so no page code references it by name.
+const actionsMarkup = "data-krate-action"
 
 // runtimeScanText joins the client-side code of the built pages that runs
-// against the runtime globals.
+// against the runtime globals. A page whose markup carries server action
+// forms adds actionsMarkup so the actions bundle ships; a page with client
+// components or per-request HTML adds islandMarkup, which keeps every feature.
 func runtimeScanText(results []*PageResult) string {
 	var sb strings.Builder
 	for _, r := range results {
@@ -50,6 +59,18 @@ func runtimeScanText(results []*PageResult) string {
 		sb.WriteByte('\n')
 		sb.WriteString(r.ScriptHTML)
 		sb.WriteByte('\n')
+		// HTML produced per request can render forms and client components
+		// the build never saw: such a page keeps the whole runtime.
+		if r.Mode != RenderSSG || r.ServerPage || len(r.Regions) > 0 {
+			sb.WriteString(" " + islandMarkup + " " + actionsMarkup + " ")
+		}
+		// Client components load as separate modules that may call any API.
+		if strings.Contains(r.HTML, "<"+islandMarkup) {
+			sb.WriteString(" " + islandMarkup + " ")
+		}
+		if strings.Contains(r.HTML, actionsMarkup) || strings.Contains(r.HTML, "/__krate/action/") {
+			sb.WriteString(" " + actionsMarkup + " ")
+		}
 	}
 	return sb.String()
 }
@@ -105,7 +126,7 @@ func loadRuntimeFeatures(projectRoot string, spa bool, scan string) (string, []s
 		if !ok {
 			continue
 		}
-		if !all && !featureReferenced(f.Exports, refs) {
+		if !all && !featureReferenced(f.Exports, refs) && !(name == "actions" && strings.Contains(scan, actionsMarkup)) {
 			continue
 		}
 		body := loadNamedBundleFromDisk(projectRoot, f.File)
