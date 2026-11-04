@@ -157,11 +157,13 @@ func Generate(routes []Route) string {
 	b.WriteString("  readonly params: readonly string[];\n")
 	b.WriteString("  readonly mode?: string;\n")
 	b.WriteString("}\n\n")
-	b.WriteString("export const routes = [\n")
+	// An ambient declaration file cannot hold initializers, so the manifest is
+	// declared by type only (a `const` with a value is TS1254 there).
+	b.WriteString("export declare const routes: readonly [\n")
 	for _, e := range manifestEntries {
 		b.WriteString("  " + e + ",\n")
 	}
-	b.WriteString("] as const satisfies readonly RouteManifestEntry[];\n")
+	b.WriteString("];\n")
 
 	return b.String()
 }
@@ -223,16 +225,16 @@ func templateLiteral(pattern string) string {
 }
 
 func manifestEntry(r Route, params []string) string {
-	fields := []string{"route: " + tsString(r.Pattern), "source: " + tsString(r.Source)}
+	fields := []string{"readonly route: " + tsString(r.Pattern), "readonly source: " + tsString(r.Source)}
 	var quoted []string
 	for _, p := range params {
 		quoted = append(quoted, tsString(p))
 	}
-	fields = append(fields, "params: ["+strings.Join(quoted, ", ")+"]")
+	fields = append(fields, "readonly params: readonly ["+strings.Join(quoted, ", ")+"]")
 	if r.Mode != "" {
-		fields = append(fields, "mode: "+tsString(r.Mode))
+		fields = append(fields, "readonly mode: "+tsString(r.Mode))
 	}
-	return "{ " + strings.Join(fields, ", ") + " }"
+	return "{ " + strings.Join(fields, "; ") + " }"
 }
 
 func paramEntry(pattern string, params []string) string {
