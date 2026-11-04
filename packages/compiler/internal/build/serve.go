@@ -1568,6 +1568,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			if !isHTMLDocRequest(r.URL.Path) && path.Ext(r.URL.Path) != "" {
 				return false
 			}
+			// A page request carrying flash state is rendered with it, not
+			// answered from the build-time snapshot.
+			if hasFlashCookie(r) {
+				return true
+			}
 			page, _ := ssr.FindPageForRoute(requestRoute(r.URL.Path))
 			return page != nil && page.Mode != RenderSSG.String()
 		}, fileServer)
@@ -2018,6 +2023,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if len(cfg.Plugins) > 0 {
 		top = wirePluginServeHandlers(root, cfg, top)
 	}
+	// No-JS form feedback: render a pending flash state into the page.
+	top = flashNoticeMiddleware(top)
 	if hub == nil {
 		// Preview/static serving: gzip compressible assets, and serve
 		// build-time precompressed (.br/.gz) siblings when present.

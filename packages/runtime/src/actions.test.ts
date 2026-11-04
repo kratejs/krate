@@ -15,6 +15,7 @@ import {
   isServerAction,
   requestFormReset,
   setActionTransitionRunner,
+  takeFlash,
   type FormStatus,
 } from './actions.js';
 
@@ -534,5 +535,30 @@ describe('server action proxies', () => {
     } finally {
       window.removeEventListener('krate:revalidate', handler);
     }
+  });
+});
+
+describe('takeFlash', () => {
+  const encode = (payload: unknown) => btoa(unescape(encodeURIComponent(JSON.stringify(payload)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+    document.cookie = 'krate_flash=; Path=/; Max-Age=0';
+  });
+
+  it('reads the cookie for the matching action only', () => {
+    document.cookie = 'krate_flash=' + encode({ a: 'act1', r: { error: 'bad' } }) + '; Path=/';
+    expect(takeFlash('other')).toEqual({ found: false });
+    expect(takeFlash('act1')).toEqual({ found: true, value: { error: 'bad' } });
+    expect(takeFlash('act1')).toEqual({ found: false });
+  });
+
+  it('falls back to the notice the server rendered and removes it', () => {
+    document.body.innerHTML =
+      '<form><div data-krate-flash="' + encode({ a: 'act2', r: { error: 'server rendered' } }) + '" data-krate-action="act2">server rendered</div></form>';
+    expect(takeFlash('act1')).toEqual({ found: false });
+    expect(document.querySelector('[data-krate-flash]')).not.toBeNull();
+    expect(takeFlash('act2')).toEqual({ found: true, value: { error: 'server rendered' } });
+    expect(document.querySelector('[data-krate-flash]')).toBeNull();
   });
 });

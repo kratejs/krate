@@ -544,23 +544,51 @@ export function installActionForms(doc: Document | undefined = typeof document !
 
 // Flash state from native form posts
 
+function decodeFlash(value: string): { a?: string; r?: unknown } | null {
+  try {
+    const raw = value.replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(raw + '='.repeat((4 - (raw.length % 4)) % 4));
+    return JSON.parse(decodeURIComponent(escape(bin))) as { a?: string; r?: unknown };
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Reads and clears the `krate_flash` cookie the action endpoint sets after a
- * native form post, when it was written for action `id`.
+ * Reads and clears the flash state a native form post left for action `id`:
+ * the `krate_flash` cookie the action endpoint sets, or, when the server
+ * already rendered it into the page (a no-JS style notice carrying the same
+ * payload in `data-krate-flash`), that element, which is removed because the
+ * form state now shows it.
  */
 export function takeFlash(id: string): { found: boolean; value?: unknown } {
   if (typeof document === 'undefined') return { found: false };
   const m = /(?:^|;\s*)krate_flash=([^;]*)/.exec(document.cookie || '');
-  if (!m) return { found: false };
-  try {
-    const raw = m[1].replace(/-/g, '+').replace(/_/g, '/');
-    const bin = atob(raw + '='.repeat((4 - (raw.length % 4)) % 4));
-    const payload = JSON.parse(decodeURIComponent(escape(bin))) as { a?: string; r?: unknown };
-    if (payload.a !== id) return { found: false };
-    document.cookie = 'krate_flash=; Path=/; Max-Age=0; SameSite=Lax';
-    return { found: true, value: payload.r };
-  } catch {
+  if (m) {
+    const payload = decodeFlash(m[1]);
+    if (payload && payload.a === id) {
+      document.cookie = 'krate_flash=; Path=/; Max-Age=0; SameSite=Lax';
+      removeFlashNotices(id);
+      return { found: true, value: payload.r };
+    }
     return { found: false };
+  }
+  const notices = document.querySelectorAll('[data-krate-flash]');
+  for (let i = 0; i < notices.length; i++) {
+    const payload = decodeFlash(notices[i].getAttribute('data-krate-flash') || '');
+    if (payload && payload.a === id) {
+      removeFlashNotices(id);
+      return { found: true, value: payload.r };
+    }
+  }
+  return { found: false };
+}
+
+function removeFlashNotices(id: string): void {
+  const notices = document.querySelectorAll('[data-krate-flash]');
+  for (let i = 0; i < notices.length; i++) {
+    const payload = decodeFlash(notices[i].getAttribute('data-krate-flash') || '');
+    if (payload && payload.a === id) notices[i].parentNode?.removeChild(notices[i]);
   }
 }
 
