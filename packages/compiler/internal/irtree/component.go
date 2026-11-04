@@ -679,7 +679,7 @@ func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl) bool {
 		hasComponentRef = hasRefAttrExpr(ret.Value)
 	}
 	_, _, providesScope := providedScopeContext(fn)
-	return !slotsHaveExpr(node.Children) &&
+	return !slotsHaveExpr(node.Children, paramBindingSet(fn)) &&
 		len(node.Signals) == 0 && len(node.Effects) == 0 &&
 		len(node.Memos) == 0 && len(node.ExtraVars) == 0 &&
 		len(node.PreSignalVars) == 0 &&
@@ -688,25 +688,35 @@ func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl) bool {
 }
 
 // slotsHaveExpr reports whether any slot (at any depth of the node's own
-// tree) is an ExprSlot: a runtime-evaluated expression the build could not
-// fold, which needs the component's hydration script.
-func slotsHaveExpr(slots []SlotNode) bool {
+// tree) is an ExprSlot the build could not fold, which needs the component's
+// hydration script to produce its value. An expression over the component's
+// own props or route params stays static: the server renderer evaluates it
+// with the call-site or route bindings.
+func slotsHaveExpr(slots []SlotNode, params map[string]bool) bool {
 	for _, s := range slots {
 		switch v := s.(type) {
 		case *ExprSlot:
-			return true
+			usesParam := false
+			scanJSIdents(v.ExprSource, func(n string) {
+				if params[n] {
+					usesParam = true
+				}
+			})
+			if !usesParam {
+				return true
+			}
 		case *ConditionalSlot:
-			if slotsHaveExpr(v.Consequent) || slotsHaveExpr(v.Alternate) {
+			if slotsHaveExpr(v.Consequent, params) || slotsHaveExpr(v.Alternate, params) {
 				return true
 			}
 		case *ListSlot:
 			for _, it := range v.Items {
-				if it != nil && slotsHaveExpr(it.Contents) {
+				if it != nil && slotsHaveExpr(it.Contents, params) {
 					return true
 				}
 			}
 		case *SuspenseSlot:
-			if slotsHaveExpr(v.Fallback) || slotsHaveExpr(v.Resolved) {
+			if slotsHaveExpr(v.Fallback, params) || slotsHaveExpr(v.Resolved, params) {
 				return true
 			}
 		}
