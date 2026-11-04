@@ -1,8 +1,8 @@
-// Usage: node tailwind_layers.cjs <outDir>. Serves outDir over HTTP and checks computed styles.
+// Usage: node tailwind_layers.cjs <outDir> [chromium|firefox|webkit]. Serves outDir over HTTP and checks computed styles.
 const path = require("path");
 const http = require("http");
 const fs = require("fs");
-const { chromium } = require("playwright");
+const playwright = require("playwright");
 
 (async () => {
   const outDir = process.argv[2];
@@ -16,7 +16,7 @@ const { chromium } = require("playwright");
     res.end(fs.readFileSync(f));
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  const browser = await chromium.launch();
+  const browser = await playwright[process.argv[3] || "chromium"].launch();
   const page = await browser.newPage();
   await page.goto("http://127.0.0.1:" + server.address().port + "/");
   const cs = await page.evaluate(() => {

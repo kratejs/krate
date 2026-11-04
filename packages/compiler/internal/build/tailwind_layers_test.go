@@ -113,8 +113,9 @@ var userSheetRe = regexp.MustCompile(`href="([^"]+\.css)"`)
 // Chromium check: unlayered user CSS beats preflight, utilities beat user
 // `@layer base` and preflight.
 func TestTailwindLayeringInBrowser(t *testing.T) {
-	if strings.TrimSpace(os.Getenv("KRATE_BROWSER")) == "" {
-		t.Skip("set KRATE_BROWSER=chromium to run the browser layering check")
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the browser layering check")
 	}
 	if _, err := exec.LookPath("node"); err != nil {
 		requireE2E(t, "node is not installed")
@@ -124,7 +125,7 @@ func TestTailwindLayeringInBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("node", script, outDir)
+	cmd := exec.Command("node", script, outDir, browser)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "Cannot find module") {
