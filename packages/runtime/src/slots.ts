@@ -108,7 +108,18 @@ export function krateCondSwap(start: Comment, show: boolean, tpl: HTMLTemplateEl
   let incoming = st.other;
   if (!incoming) {
     incoming = document.createDocumentFragment();
-    if (st.tpl) incoming.appendChild(st.tpl.content);
+    if (st.tpl) {
+      incoming.appendChild(st.tpl.content);
+      // An SVG branch is wrapped in an <svg> so it parses in the SVG
+      // namespace; unwrap it.
+      if (st.tpl.getAttribute('data-kns') === 'svg') {
+        const wrap = incoming.firstChild as Element | null;
+        if (wrap && wrap.nodeType === 1) {
+          while (wrap.firstChild) incoming.insertBefore(wrap.firstChild, wrap);
+          incoming.removeChild(wrap);
+        }
+      }
+    }
   }
   detached.delete(incoming);
   // React focuses an autoFocus element when it mounts (and renders no

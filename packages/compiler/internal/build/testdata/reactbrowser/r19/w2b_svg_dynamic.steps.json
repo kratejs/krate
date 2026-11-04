@@ -1,0 +1,1 @@
+{ "steps": [ {"op":"click","sel":"#add"}, {"op":"click","sel":"#show"}, {"op":"eval","js":"window.__log=window.__log||[];window.__log.push([...document.querySelectorAll('svg *')].map(e=>e.namespaceURI.slice(-4)+e.localName).join(','))"} ] }

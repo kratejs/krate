@@ -1173,6 +1173,8 @@ func (b *builder) readsLiveProp(expr ast.Expr) bool {
 			walk(x.Right)
 		case *ast.UnaryExpr:
 			walk(x.Arg)
+		case *ast.ParenExpr:
+			walk(x.Expr)
 		case *ast.ConditionalExpr:
 			walk(x.Test)
 			walk(x.Consequent)

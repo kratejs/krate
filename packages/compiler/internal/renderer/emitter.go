@@ -939,7 +939,11 @@ func (e *Emitter) emitExprSlot(s *irtree.ExprSlot) SlotOutput {
 	// expressions (JSX-producing expressions route to ListSlot/ConditionalSlot),
 	// so they are always text and must be HTML-escaped to prevent template
 	// literals like `return <h1>x</h1>` from leaking real markup into the page.
-	html := slotMarker(id) + escape.Text(s.Initial) + slotEndMarker(id)
+	body := escape.Text(s.Initial)
+	if s.InitialHTML != "" {
+		body = s.InitialHTML
+	}
+	html := slotMarker(id) + body + slotEndMarker(id)
 	return SlotOutput{HTML: html}
 }
 
@@ -988,7 +992,16 @@ func (e *Emitter) emitConditionalSlot(s *irtree.ConditionalSlot) SlotOutput {
 	mergeSlotOutput(&out, cons)
 	mergeSlotOutput(&out, alt)
 	out.HTML = slotMarker(id) + activeHTML + slotEndMarker(id)
-	out.Templates = `<template data-kc="` + escape.HTMLAttr(id) + `" data-kb="` + held + `">` + inactiveHTML + `</template>` + out.Templates
+	tpl := `<template data-kc="` + escape.HTMLAttr(id) + `" data-kb="` + held + `"`
+	if s.SVG {
+		// Parsed outside an <svg>, template content would get the HTML
+		// namespace; the wrapper makes the parser build SVG elements and
+		// krateCondSwap unwraps it.
+		tpl += ` data-kns="svg"><svg>` + inactiveHTML + `</svg></template>`
+	} else {
+		tpl += `>` + inactiveHTML + `</template>`
+	}
+	out.Templates = tpl + out.Templates
 	return out
 }
 

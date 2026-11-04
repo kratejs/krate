@@ -166,7 +166,11 @@ type ExprSlot struct {
 	ID         SlotID
 	ExprSource string
 	Initial    string
-	Signals    []string
+	// InitialHTML is the SSR markup of a value that holds JSX (a derived
+	// `const badge = on ? <b/> : <i/>`); it is trusted, already-escaped
+	// output of the build-time renderer and replaces Initial.
+	InitialHTML string
+	Signals     []string
 }
 
 func (s *ExprSlot) slotNode()     {}
@@ -181,9 +185,12 @@ type ConditionalSlot struct {
 	TestJS        string // JS expression for the ternary test (used to toggle)
 	Initial       string
 	InitialActive bool // whether the consequent branch is active initially
-	Consequent    []SlotNode
-	Alternate     []SlotNode
-	Signals       []string
+	// SVG marks a conditional inside an <svg>: its hoisted template is
+	// parsed in the SVG namespace (wrapped in an <svg> element).
+	SVG        bool
+	Consequent []SlotNode
+	Alternate  []SlotNode
+	Signals    []string
 }
 
 func (s *ConditionalSlot) slotNode()     {}

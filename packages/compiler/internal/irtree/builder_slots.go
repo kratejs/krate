@@ -1154,23 +1154,23 @@ func (b *builder) buildMetaOpeningTag(el *ast.JSXElement, tag string) string {
 // evalInnerHTMLAttr extracts the statically-resolvable __html value from a
 // dangerouslySetInnerHTML={{__html: expr}} attribute. Returns ok=false when the
 // attribute is absent or the value cannot be resolved at build time.
-func (b *builder) evalInnerHTMLAttr(el *ast.JSXElement) (string, bool) {
+func (b *builder) evalInnerHTMLAttr(el *ast.JSXElement) (string, ast.Expr, bool) {
 	for _, attr := range el.Opening.Attributes {
 		if attr.Spread || attr.Name != "dangerouslySetInnerHTML" || attr.Value == nil {
 			continue
 		}
 		obj, ok := attr.Value.(*ast.ObjectExpr)
 		if !ok {
-			return "", false
+			return "", nil, false
 		}
 		for _, prop := range obj.Properties {
 			if prop.Spread || prop.Key != "__html" || prop.Value == nil {
 				continue
 			}
-			return evalConstWithSignals(prop.Value, b.sigMap(), b.localProps), true
+			return evalConstWithSignals(prop.Value, b.sigMap(), b.localProps), prop.Value, true
 		}
 	}
-	return "", false
+	return "", nil, false
 }
 
 // buildGoComponentSlot lowers `<Card/>` where Card is a Go component imported
@@ -1484,7 +1484,7 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 
 	// Dynamic attributes: emit the SSR initial value plus the hydration marker.
 	for _, a := range attrs {
-		if a.HydrateOnly {
+		if a.HydrateOnly || a.AttrName == InnerHTMLAttr || a.AttrName == TextContentAttr {
 			continue
 		}
 		// The SSR initial value goes through the same table as static
@@ -1600,14 +1600,45 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 	exprSource := generateExprJS(expr, b.sigMap())
 	// The SSR initial is the value rendered as child text (React semantics:
 	// false/null/undefined render nothing); the emitter escapes it.
-	initial, _ := childText(b.evalValue(expr))
-
-	return &ExprSlot{
+	value := b.evalValue(expr)
+	initial, _ := childText(value)
+	slot := &ExprSlot{
 		ID:         id,
 		ExprSource: exprSource,
 		Signals:    signals,
 		Initial:    initial,
 	}
+	// A value holding JSX renders as markup, not as escaped text.
+	if html, ok := renderChildValue(value); ok && html != escape.Text(initial) {
+		slot.InitialHTML = html
+	}
+	return slot
+}
+
+// signalHoldsJSX reports whether a derived render value (a `const x = cond ?
+// <a/> : <b/>` the bundler lowered to krateDerived) can hold JSX, so a child
+// `{x}` must render as content, not as text.
+func (b *builder) signalHoldsJSX(name string) bool {
+	init, ok := b.sigMap()[name]
+	if !ok || init == nil {
+		return false
+	}
+	call, ok := init.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	if _, derived := call.Callee.(*ast.CallExpr); !derived {
+		return false
+	}
+	found := false
+	WalkAST(call.Callee, func(n any) bool {
+		switch n.(type) {
+		case *ast.JSXElement, *ast.JSXFragment:
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // tryResolveForLoopArray detects the `var NAME = []; for (...) { NAME.push(<JSX/>) }`
@@ -1870,10 +1901,11 @@ func (b *builder) tryResolveGuard(bin *ast.BinaryExpr, parentID string) ([]SlotN
 }
 
 // buildGuardSlot converts a BinaryExpr guard ({A && B} / {A || B}) to a
-// ConditionalSlot.  For {A && B} the equivalent ternary is A ? B : <empty>;
-// for {A || B} it is A ? <empty> : B.
+// ConditionalSlot.  For {A && B} the equivalent ternary is A ? B : A; for
+// {A || B} it is A ? A : B. The operand that is not the JSX branch renders
+// as a child like React does (0 and NaN show as text, ""/null/false nothing),
+// unless A is statically boolean, where that branch is empty.
 func (b *builder) buildGuardSlot(bin *ast.BinaryExpr, parentID string) *ConditionalSlot {
-	// Normalize: {A && B} -> A ? B : <empty/nil>, {A || B} -> A ? nil : B.
 	var consequent, alternate ast.Expr
 	if bin.Op == "&&" {
 		consequent = bin.Right
@@ -1881,7 +1913,68 @@ func (b *builder) buildGuardSlot(bin *ast.BinaryExpr, parentID string) *Conditio
 		alternate = bin.Right
 	}
 	norm := &ast.ConditionalExpr{Test: bin.Left, Consequent: consequent, Alternate: alternate}
-	return b.buildConditionalSlot(norm, parentID)
+	slot := b.buildConditionalSlot(norm, parentID)
+	if isBooleanExpr(bin.Left) || !isPureChildRead(bin.Left) {
+		return slot
+	}
+	b.branchDepth++
+	defer func() { b.branchDepth-- }()
+	left := &ast.JSXExprContainer{Expression: bin.Left}
+	if bin.Op == "&&" {
+		slot.Alternate = b.buildExprContainerChildren(left, string(slot.ID)+".a")
+	} else {
+		slot.Consequent = b.buildExprContainerChildren(left, string(slot.ID)+".c")
+	}
+	return slot
+}
+
+// isBooleanExpr reports an expression whose value is always a boolean, so a
+// guard on it never renders its own value.
+func isBooleanExpr(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.ParenExpr:
+		return isBooleanExpr(x.Expr)
+	case *ast.Literal:
+		return x.Kind == ast.BoolLit
+	case *ast.UnaryExpr:
+		return x.Op == "!"
+	case *ast.BinaryExpr:
+		switch x.Op {
+		case "==", "!=", "===", "!==", "<", ">", "<=", ">=", "in", "instanceof":
+			return true
+		case "&&", "||":
+			return isBooleanExpr(x.Left) && isBooleanExpr(x.Right)
+		}
+	case *ast.CallExpr:
+		if id, ok := x.Callee.(*ast.Identifier); ok && id.Name == "Boolean" {
+			return true
+		}
+	}
+	return false
+}
+
+// isPureChildRead reports a guard operand that can be evaluated a second time
+// as a child: an identifier or a member chain of identifiers and literals.
+func isPureChildRead(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.Identifier:
+		return true
+	case *ast.ParenExpr:
+		return isPureChildRead(x.Expr)
+	case *ast.MemberExpr:
+		if x.Computed {
+			if _, ok := x.Property.(*ast.Literal); !ok {
+				return false
+			}
+		}
+		return isPureChildRead(x.Object)
+	case *ast.CallExpr:
+		// A zero-argument call on an identifier (a state getter such as count()).
+		if id, ok := x.Callee.(*ast.Identifier); ok && len(x.Args) == 0 {
+			return id.Name != ""
+		}
+	}
+	return false
 }
 
 // knownTestValue resolves a ternary test to a value and reports whether the
@@ -1968,6 +2061,7 @@ func (b *builder) buildConditionalSlot(expr ast.Expr, parentID string) *Conditio
 		Initial:       initial,
 		InitialActive: active,
 		Signals:       signals,
+		SVG:           b.svgDepth > 0,
 	}
 	if cond != nil {
 		// Build branches under branch-scoped parents so nested slots in the
@@ -2787,6 +2881,8 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 		return b.referencesSignal(e.Left) || b.referencesSignal(e.Right)
 	case *ast.ConditionalExpr:
 		return b.referencesSignal(e.Test) || b.referencesSignal(e.Consequent) || b.referencesSignal(e.Alternate)
+	case *ast.ParenExpr:
+		return b.referencesSignal(e.Expr)
 	case *ast.ArrayExpr:
 		for _, el := range e.Elements {
 			if b.referencesSignal(el) {

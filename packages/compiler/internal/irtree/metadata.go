@@ -28,6 +28,10 @@ const HoistMeta = "hoist"
 // element's text (a reactive <title>).
 const TextContentAttr = "textContent"
 
+// InnerHTMLAttr is the pseudo attribute of an AttrBinding that sets an
+// element's inner HTML (a reactive dangerouslySetInnerHTML).
+const InnerHTMLAttr = "innerHTML"
+
 // IsHoistableMetadata reports whether a lowercase <title>/<meta>/<link>
 // element is hoisted into <head> (see the package comment above).
 func IsHoistableMetadata(el *ast.JSXElement) bool {
