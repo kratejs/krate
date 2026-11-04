@@ -18,6 +18,28 @@ type TailwindTheme struct {
 	BgColors    map[string]string            `json:"bgColors"`
 	// DarkMode is "media" (default), "class", or "selector".
 	DarkMode string `json:"darkMode"`
+	// DarkSelector is the selector of class/selector dark mode
+	// (default ".dark"), e.g. "[data-mode=dark]".
+	DarkSelector string `json:"darkSelector"`
+
+	// Animation maps an animate-<name> utility to its animation value
+	// (theme.animation, @theme --animate-*).
+	Animation map[string]string `json:"animation"`
+	// Keyframes maps a keyframes name to its block body without the
+	// @keyframes wrapper, e.g. "to{transform:rotate(360deg)}".
+	Keyframes map[string]string `json:"keyframes"`
+	// Tracking maps tracking-<name> to a letter-spacing value.
+	Tracking map[string]string `json:"tracking"`
+	// Containers maps a container size name (@sm, max-w-sm in v4) to a width.
+	Containers map[string]string `json:"containers"`
+	// SpacingUnit is the v4 --spacing base unit (default 0.25rem) used for
+	// numeric spacing multiples.
+	SpacingUnit string `json:"spacingUnit"`
+	// Prefix is the configured class prefix (v4 "tw" -> tw:flex), or "".
+	Prefix string `json:"prefix"`
+	// Important makes every utility !important when "true"; any other
+	// non-empty value is a selector utilities are scoped under.
+	Important string `json:"important"`
 }
 
 // DefaultTailwindTheme returns the default Tailwind theme configuration.
