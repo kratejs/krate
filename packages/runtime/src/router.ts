@@ -514,16 +514,22 @@ function setupSpeculationRules(): void {
 
 // Visual transition
 
-/** Whether native View Transitions should wrap the SPA mutation. */
-function supportsViewTransitions(): boolean {
-  if (runtimeConfig().viewTransitions === false) return false;
+/** Whether the user asked the OS/browser for reduced motion. */
+function prefersReducedMotion(): boolean {
   if (typeof window !== 'undefined' && window.matchMedia) {
     try {
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+      return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     } catch {
       /* ignore */
     }
   }
+  return false;
+}
+
+/** Whether native View Transitions should wrap the SPA mutation. */
+function supportsViewTransitions(): boolean {
+  if (runtimeConfig().viewTransitions === false) return false;
+  if (prefersReducedMotion()) return false;
   return typeof (document as any).startViewTransition === 'function';
 }
 
@@ -542,7 +548,8 @@ function beginTransition(): void {
     loadingOverlay = Array.from(frag.childNodes);
     document.body.appendChild(frag);
   }
-  if (!supportsViewTransitions()) {
+  // Reduced motion: no fade at all (the overlay above is static).
+  if (!supportsViewTransitions() && !prefersReducedMotion()) {
     const el = appRoot(document);
     el.style.transition = `opacity ${TRANSITION_MS}ms ease`;
     el.style.opacity = '0';
