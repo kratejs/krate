@@ -275,8 +275,17 @@ func globRegex(g string) string {
 
 func emitNetlifyServer(cfg *config.Config, root, outDir string, plan *ServerPlan, bundle []byte) ([]string, error) {
 	var written []string
+	// The bundle lives outside the functions directory (every file there is a
+	// function). The function file is a thin wrapper with a literal `config`
+	// export, which is what Netlify's in-source configuration parser reads.
+	impl := filepath.Join(root, "netlify", "server", "krate-server.mjs")
+	if err := writeGenerated(impl, append([]byte("// "+generatedMarker+" --target netlify`.\n"), bundle...), "the server bundle"); err != nil {
+		return nil, err
+	}
+	written = append(written, impl)
 	fn := filepath.Join(root, "netlify", "functions", "krate.mjs")
-	if err := writeGenerated(fn, bundle, "the function"); err != nil {
+	wrapper := "// " + generatedMarker + " --target netlify`.\nimport handler from \"../server/krate-server.mjs\";\n\nexport default handler;\nexport const config = { path: \"/*\", preferStatic: true };\n"
+	if err := writeGenerated(fn, []byte(wrapper), "the function"); err != nil {
 		return nil, err
 	}
 	written = append(written, fn)

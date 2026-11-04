@@ -312,7 +312,7 @@ krate deploy --target node
 
 For a project with server features, `vercel`, `netlify` and `cloudflare` write
 the server as well: `.vercel/output/` (Build Output API v3, with a Node.js
-function), `netlify/functions/krate.mjs` + `netlify.toml`, and
+function), `netlify/functions/krate.mjs` + `netlify/server/krate-server.mjs` + `netlify.toml`, and
 `.krate/deploy/cloudflare/worker.mjs` + `wrangler.jsonc`.
 
 Go API routes, Go components and a custom API sidecar cannot run on the

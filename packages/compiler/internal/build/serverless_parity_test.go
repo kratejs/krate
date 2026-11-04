@@ -2,6 +2,7 @@ package build
 
 import (
 	"net/http"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -58,6 +59,12 @@ func TestServerlessNodeParity(t *testing.T) {
 	}
 	if len(plan.Warnings) > 0 {
 		t.Logf("warnings: %v", plan.Warnings)
+	}
+	if fi, err := os.Stat(plan.Bundle); err == nil {
+		t.Logf("server.mjs for the fixture: %d bytes", fi.Size())
+		if fi.Size() > 2<<20 {
+			t.Errorf("server.mjs is %d bytes; the handler should stay well under 2 MiB for this fixture", fi.Size())
+		}
 	}
 	nodeBase := startNodeBundle(t, root, cfg)
 

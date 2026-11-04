@@ -154,7 +154,10 @@ func TestNetlifyServerOutput(t *testing.T) {
 	root, cfg := serverlessProject(t, "serverless")
 	_, _ = emitServerTarget(t, root, cfg, "netlify")
 	fn := filepath.Join(root, "netlify", "functions", "krate.mjs")
-	for _, p := range []string{fn, filepath.Join(root, "netlify.toml"), filepath.Join(cfg.OutDir, "_redirects"), filepath.Join(cfg.OutDir, "_headers")} {
+	if data, _ := os.ReadFile(fn); !strings.Contains(string(data), `export const config = { path: "/*", preferStatic: true };`) {
+		t.Errorf("the function file must carry a literal config export for Netlify's parser:\n%s", data)
+	}
+	for _, p := range []string{fn, filepath.Join(root, "netlify", "server", "krate-server.mjs"), filepath.Join(root, "netlify.toml"), filepath.Join(cfg.OutDir, "_redirects"), filepath.Join(cfg.OutDir, "_headers")} {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("missing %s", p)
 		}

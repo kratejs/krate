@@ -98,7 +98,7 @@ cache policy (ISR `s-maxage` + `stale-while-revalidate`, `no-store` for SSR).
 |--------|--------|--------------|------|
 | `node` | `dist/.krate/server/server.mjs` | the handler's own file server on `dist/` (no dotfiles, no listings, hashed assets immutable, `.br`/`.gz` siblings, Range, `Last-Modified`) | `node dist/.krate/server/server.mjs` |
 | `vercel` | `.vercel/output/` (Build Output API v3): `config.json`, `static/`, `functions/__krate.func/` (Node.js function) | Vercel CDN | one Node.js function, response streaming on |
-| `netlify` | `netlify/functions/krate.mjs` (`config.path = "/*"`, `preferStatic`), `netlify.toml`, `_redirects`, `_headers` | Netlify CDN (`dist/`) | one Netlify Function |
+| `netlify` | `netlify/functions/krate.mjs` (a thin wrapper with `config = { path: "/*", preferStatic: true }`) over `netlify/server/krate-server.mjs`, plus `netlify.toml`, `_redirects`, `_headers` | Netlify CDN (`dist/`) | one Netlify Function |
 | `cloudflare` | `.krate/deploy/cloudflare/worker.mjs`, `wrangler.jsonc` | Workers static assets (`dist/`, `ASSETS` binding) | one Worker with `nodejs_compat` |
 
 All four support SSR, ISR, streaming, async server components, client islands,
@@ -138,7 +138,7 @@ required at runtime.
   they also apply to static files); everything that is not a file falls through
   to the function. An existing `.vercel/output` that krate did not write is never
   overwritten.
-- **Netlify**: the function lives in `netlify/functions/krate.mjs`. A hand-written
+- **Netlify**: the bundle is `netlify/server/krate-server.mjs` (outside the functions directory, where every file is a function) and `netlify/functions/krate.mjs` re-exports it with a literal `config` export, which is what Netlify reads. A hand-written
   `netlify.toml` is left alone and the settings you need are printed.
 - **Cloudflare**: `wrangler.jsonc` sets `nodejs_compat`, the assets directory
   and `run_worker_first`: a list of the server paths, or `true` when the project

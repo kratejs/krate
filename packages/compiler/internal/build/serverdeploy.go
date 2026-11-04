@@ -593,7 +593,6 @@ export default nodeRequestListener(handler, true);
 		b.WriteString(body)
 		b.WriteString(`export const handler = createKrateHandler({ target: 'netlify', data, modules, trustProxy: true });
 export default async (request, context) => handler(request, { waitUntil: context && context.waitUntil ? (p) => context.waitUntil(p) : undefined });
-export const config = { path: '/*', preferStatic: true };
 `)
 	case "cloudflare":
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\nimport { createAssetsStaticLayer } from '@krate/runtime/assets-static';\n")
@@ -749,7 +748,14 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		opts.MainFields = []string{"module", "main"}
 	} else {
 		opts.Platform = api.PlatformNode
-		opts.Banner = map[string]string{"js": "import { createRequire as __krateCreateRequire } from 'node:module'; const require = __krateCreateRequire(import.meta.url);"}
+		// CommonJS dependencies may call require() for built-ins. Platform
+		// bundlers (Netlify) re-bundle the file without import.meta support, so
+		// only the node target anchors the require on the bundle's own URL.
+		anchor := "process.cwd() + '/'"
+		if target == "node" {
+			anchor = "import.meta.url"
+		}
+		opts.Banner = map[string]string{"js": "import { createRequire as __krateCreateRequire } from 'node:module'; const require = __krateCreateRequire(" + anchor + ");"}
 	}
 	res := api.Build(opts)
 	if len(res.Errors) > 0 {
