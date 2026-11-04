@@ -46,7 +46,7 @@ func (b *Builder) dedupeModuleCSS(page, cssText string, own map[string]*bundler.
 		return cssText
 	}
 	cands := moduleTexts(own)
-	for _, rb := range findRouteStack(page, b.Cfg.PagesDir) {
+	for _, rb := range b.routeStack(page) {
 		cands = append(cands, b.modCSS.load(rb.Path)...)
 	}
 	for _, t := range cands {

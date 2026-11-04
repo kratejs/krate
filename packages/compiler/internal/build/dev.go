@@ -405,7 +405,7 @@ func (b *Builder) isStructuralChange(changed []string) bool {
 // events. Error pages are labelled by file ("/404") instead of the root.
 func devRouteLabel(page, pagesDir string) string {
 	name := strings.TrimSuffix(filepath.Base(page), filepath.Ext(page))
-	if name == "404" || name == "500" {
+	if isSegmentPageBase(name) {
 		return "/" + name
 	}
 	route := pageToOutput(page, pagesDir)

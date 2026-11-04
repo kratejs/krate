@@ -26,6 +26,7 @@ Codes are grouped by area:
 | `KR6xxx` | lists and keys |
 | `KR7xxx` | React 19 actions and server actions |
 | `KR8xxx` | islands, compiled packages and general React compatibility |
+| `KR9xxx` | routing, segment pages and rendering errors |
 
 ## KR1xxx: syntax and parsing
 
@@ -482,6 +483,32 @@ An `<Image>` without an alt attribute is announced by screen readers by its file
 **Content collection is shipped to the browser**
 
 A `getCollection("name")` chain is normally evaluated while the site is built and only its result is rendered. When the chain depends on a value that only exists in the browser (a signal, an event), the collection has to be evaluated there, so its entries are copied into the page script. Krate ships only the fields the page mentions (the body and rendered html only when referenced), but every entry in the collection, drafts included, is still included. Filter with build-time values, or compute the list on the server. This is a warning.
+
+## KR9xxx: routing, segment pages and rendering errors
+
+### KR9001
+
+**Conflicting segment pages**
+
+Two files define the same role for one URL directory: 404.tsx and not-found.tsx, error.tsx and 500.tsx, or the same file name in two route groups that resolve to one directory. Krate cannot tell which one to use. Keep one file per role in a directory.
+
+### KR9002
+
+**Segment page in an unsupported directory**
+
+404.tsx, not-found.tsx, error.tsx and 500.tsx are per-directory segment pages. They cannot live inside a parallel-route @slot or an intercepting (.)route directory, because those render inside their parent's layout. Move the file to the parent route directory.
+
+### KR9003
+
+**Segment page ignores request-time rendering**
+
+Segment pages (404.tsx, not-found.tsx, error.tsx, 500.tsx) are prerendered once and written to the output; the server picks the right file per request. A request-time mode (ssr, isr, streaming, runtime components, async server components) on such a page is ignored. Read request data in the page's client code, or link to a normal route.
+
+### KR9004
+
+**Segment error page rendered as the build-time fallback**
+
+A page threw while it was built, and its directory has an error page (error.tsx or 500.tsx). Krate baked the error page in place of the page instead of failing the build. Fix the error, or keep the fallback if it is expected.
 
 ## See also
 

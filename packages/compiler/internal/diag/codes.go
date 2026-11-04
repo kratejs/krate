@@ -20,6 +20,7 @@ import (
 //	KR6xxx  lists and keys
 //	KR7xxx  React 19 actions and server actions
 //	KR8xxx  islands, compiled packages and general React compatibility
+//	KR9xxx  routing, segment pages and rendering errors
 //
 // Each range is declared in its own codes_<area>.go file.
 type Code string
