@@ -30,6 +30,16 @@ const playwright = require("playwright");
       h2: g("h2", "fontSize"),
       util: g("u", "paddingTop"),
       utilColor: g("u", "color"),
+      // The text-red-500 value as this browser serializes it (oklch forms
+      // differ between engines), from an element styled inline.
+      redRef: (() => {
+        const el = document.createElement("span");
+        el.style.color = "oklch(63.7% 0.237 25.331)";
+        document.body.appendChild(el);
+        const v = getComputedStyle(el).color;
+        el.remove();
+        return v;
+      })(),
       brand: g("u", "backgroundColor"),
       apply: g("btnx", "paddingLeft"),
     };
@@ -38,7 +48,7 @@ const playwright = require("playwright");
   server.close();
   const want = {
     h1: "40px", a: "rgb(255, 0, 0)", ul: "30px", btnPad: "10px", btnBg: "rgb(0, 128, 0)",
-    h2: "33px", util: "24px", utilColor: "rgb(239, 68, 68)", brand: "rgb(255, 0, 0)", apply: "16px",
+    h2: "33px", util: "24px", utilColor: cs.redRef, brand: "rgb(255, 0, 0)", apply: "16px",
   };
   let bad = 0;
   for (const k of Object.keys(want)) {
