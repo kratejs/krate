@@ -32,6 +32,11 @@ const TextContentAttr = "textContent"
 // element's inner HTML (a reactive dangerouslySetInnerHTML).
 const InnerHTMLAttr = "innerHTML"
 
+// SpreadAttr is the pseudo attribute of an AttrBinding that applies a spread
+// object (`<input {...field} />`) to an element at runtime, re-applying it
+// when the state it reads changes.
+const SpreadAttr = "..."
+
 // IsHoistableMetadata reports whether a lowercase <title>/<meta>/<link>
 // element is hoisted into <head> (see the package comment above).
 func IsHoistableMetadata(el *ast.JSXElement) bool {

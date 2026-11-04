@@ -1408,6 +1408,10 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 
 	// Static attributes (spread rest params expanded to concrete attributes).
 	attrsForOpening, _ := b.expandForwardedSpreadAttrs(el.Opening.Attributes)
+	// Spreads applied by the runtime still render their initial attributes.
+	attrsForOpening, _ = MergeSpreadAttrs(attrsForOpening, func(attr *ast.JSXAttr) SpreadExpansion {
+		return b.constObjectSpreadInitial(attr)
+	})
 	// actionAttrs maps an action prop that names a server action (directly or
 	// through a useActionState dispatch) to its native POST target, so the
 	// form still submits without JavaScript.
@@ -1484,7 +1488,7 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 
 	// Dynamic attributes: emit the SSR initial value plus the hydration marker.
 	for _, a := range attrs {
-		if a.HydrateOnly || a.AttrName == InnerHTMLAttr || a.AttrName == TextContentAttr {
+		if a.HydrateOnly || a.AttrName == InnerHTMLAttr || a.AttrName == TextContentAttr || a.AttrName == SpreadAttr {
 			continue
 		}
 		// The SSR initial value goes through the same table as static
@@ -2304,6 +2308,8 @@ func substituteListParam(body ast.Expr, param string, elem ast.Expr) ast.Expr {
 type listParamSubstituter struct {
 	param string
 	elem  ast.Expr
+	// keepSpread leaves JSX spread attributes (`{...rest}`) untouched.
+	keepSpread bool
 }
 
 func (s *listParamSubstituter) sub(expr ast.Expr) ast.Expr {
@@ -2538,7 +2544,7 @@ func substituteListParamJSX(el *ast.JSXElement, s *listParamSubstituter) *ast.JS
 	}
 	opening := &ast.JSXOpening{Name: el.Opening.Name, SelfClosing: el.Opening.SelfClosing}
 	for _, attr := range el.Opening.Attributes {
-		if attr == nil || attr.Value == nil {
+		if attr == nil || attr.Value == nil || (attr.Spread && s.keepSpread) {
 			opening.Attributes = append(opening.Attributes, attr)
 			continue
 		}

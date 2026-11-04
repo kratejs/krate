@@ -424,6 +424,17 @@ func (b *builder) mergeRestSpreads(attrs []*ast.JSXAttr, viaProps bool) ([]*ast.
 // time becomes a hydration binding. Scope-helper spreads and values with no
 // build-time value stay unresolved.
 func (b *builder) constObjectSpread(attr *ast.JSXAttr) SpreadExpansion {
+	// A spread that reads state is applied by the runtime (SpreadAttr) so it
+	// re-applies when the state changes.
+	if b.referencesSignal(attr.Value) {
+		return SpreadExpansion{}
+	}
+	return b.constObjectSpreadInitial(attr)
+}
+
+// constObjectSpreadInitial expands a spread by its build-time (initial) value,
+// for the markup rendered before hydration.
+func (b *builder) constObjectSpreadInitial(attr *ast.JSXAttr) SpreadExpansion {
 	if isScopeHelperExpr(attr.Value) {
 		return SpreadExpansion{}
 	}
@@ -625,10 +636,7 @@ func restProps(fn *ast.FnDecl, attrs map[string]ast.Expr) map[string]ast.Expr {
 	if fnRestParamName(fn) == "" {
 		return nil
 	}
-	bound := make(map[string]bool)
-	for _, n := range extractParamNames(fn) {
-		bound[n] = true
-	}
+	bound := boundParamSet(fn)
 	rest := make(map[string]ast.Expr)
 	for name, expr := range attrs {
 		if !bound[name] {
@@ -636,6 +644,24 @@ func restProps(fn *ast.FnDecl, attrs map[string]ast.Expr) map[string]ast.Expr {
 		}
 	}
 	return rest
+}
+
+// boundParamSet lists the call-site prop names a function binds itself: its
+// parameter names plus the keys a normalized rest parameter excludes (see
+// normalizePropsFn).
+func boundParamSet(fn *ast.FnDecl) map[string]bool {
+	bound := make(map[string]bool)
+	for _, n := range extractParamNames(fn) {
+		bound[n] = true
+	}
+	for _, p := range fn.Params {
+		if p != nil && p.IsRest && p.Pattern != "" {
+			for _, n := range destructuredParamNames(p.Pattern) {
+				bound[n] = true
+			}
+		}
+	}
+	return bound
 }
 
 // restPropsFor builds the rest-parameter map (name -> collected attrs) for a

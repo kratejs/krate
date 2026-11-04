@@ -101,6 +101,9 @@ func (b *builder) jsxValueChild(expr ast.Expr, parentID string, doEscape bool) (
 		}
 		return slots, true
 	}
+	if resolved, ok := b.resolveChildrenArg(expr); ok {
+		expr = resolved
+	}
 	folded, ok := foldStructuralReact(expr)
 	if !ok {
 		return nil, false

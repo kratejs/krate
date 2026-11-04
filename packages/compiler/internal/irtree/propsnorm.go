@@ -1,6 +1,8 @@
 package irtree
 
 import (
+	"strings"
+
 	"github.com/kratejs/krate/packages/compiler/ast"
 )
 
@@ -22,6 +24,8 @@ const normalizedPropsParam = "props"
 // expression that reads it from the props object.
 type propsLocal struct {
 	name string
+	// key is the top-level props key the binding reads.
+	key  string
 	read ast.Expr
 }
 
@@ -45,42 +49,139 @@ func normalizeComponentFns(fns map[string]*ast.FnDecl) map[string]*ast.FnDecl {
 
 // normalizePropsFn returns the whole-props form of fn, or nil when fn does
 // not take a destructured props parameter or cannot be rewritten.
+//
+// Two source shapes are lowered: a destructured first parameter
+// (`function C({ a, b = 1, ...rest })`) and a top-level destructuring of a
+// plain props parameter (`const { a, ...rest } = props`). A rest element that
+// is only spread onto elements (`{...rest}`) or read by member (`rest.x`)
+// becomes a trailing rest parameter whose Pattern lists the excluded keys,
+// which the call-site rest machinery (restProps) understands.
 func normalizePropsFn(fn *ast.FnDecl) *ast.FnDecl {
-	if fn == nil || !isComponentName(fn.Name) || len(fn.Params) != 1 || fn.Generator {
+	if fn == nil || !isComponentName(fn.Name) || len(fn.Params) != 1 || fn.Generator || fn.Params[0] == nil {
 		return nil
 	}
 	p := fn.Params[0]
-	if p == nil || p.IsRest || p.Default != nil || p.Target == nil {
+	if p.IsRest || p.Default != nil {
 		return nil
 	}
-	obj, ok := p.Target.(*ast.ObjectExpr)
-	if !ok {
-		return nil
-	}
-	locals, ok := propsLocals(obj, &ast.Identifier{Name: normalizedPropsParam})
-	if !ok || len(locals) == 0 {
-		return nil
-	}
+	propsName := normalizedPropsParam
+	var pattern *ast.ObjectExpr
 	body := fn.Body
-	for _, l := range locals {
-		if bindingScopeDeclares(blockBindingNames(body), l.name) || l.name == normalizedPropsParam {
+	switch {
+	case p.Target != nil:
+		obj, ok := p.Target.(*ast.ObjectExpr)
+		if !ok {
 			return nil
 		}
+		pattern = obj
+	case p.Name != "" && p.Name != "{...}" && p.Name != "[...]" && p.Pattern == "":
+		propsName = p.Name
+		obj, idx := propsDestructureStmt(body, propsName)
+		if obj == nil {
+			return nil
+		}
+		pattern = obj
+		body = append(append([]ast.Stmt{}, body[:idx]...), body[idx+1:]...)
+	default:
+		return nil
+	}
+	locals, restName, ok := propsLocals(pattern, &ast.Identifier{Name: propsName})
+	if !ok || (len(locals) == 0 && restName == "") {
+		return nil
+	}
+	for _, l := range locals {
+		if bindingScopeDeclares(blockBindingNames(body), l.name) || l.name == propsName || l.name == restName {
+			return nil
+		}
+	}
+	if restName != "" && (bindingScopeDeclares(blockBindingNames(body), restName) || !restUsesAllowed(body, restName)) {
+		return nil
 	}
 	if assignsAny(body, bindingsOf(locals)) {
 		return nil
 	}
+	if restName != "" && restName == propsName {
+		// `{ a, ...props }`: the rest keeps working under another name.
+		s := &listParamSubstituter{param: propsName, elem: &ast.Identifier{Name: "__rest"}}
+		body = s.subStmts(body)
+		restName = "__rest"
+	}
 	for _, l := range locals {
 		s := &listParamSubstituter{param: l.name, elem: l.read}
+		body = s.subStmts(body)
+	}
+	if restName != "" {
+		s := &listParamSubstituter{param: restName, elem: &ast.Identifier{Name: propsName}, keepSpread: true}
 		body = s.subStmts(body)
 	}
 	if bodyMentionsAny(body, locals) {
 		return nil
 	}
 	cp := *fn
-	cp.Params = []*ast.Param{{Position: p.Position, Name: normalizedPropsParam}}
+	cp.Params = []*ast.Param{{Position: p.Position, Name: propsName}}
+	if restName != "" {
+		keys := make([]string, 0, len(locals))
+		for _, l := range locals {
+			keys = append(keys, l.key)
+		}
+		cp.Params = append(cp.Params, &ast.Param{Position: p.Position, Name: restName, IsRest: true, Pattern: "{" + strings.Join(keys, ",") + "}"})
+	}
 	cp.Body = body
 	return &cp
+}
+
+// propsDestructureStmt finds a top-level `const { ... } = <param>` statement
+// and returns its pattern and index.
+func propsDestructureStmt(body []ast.Stmt, param string) (*ast.ObjectExpr, int) {
+	for i, st := range body {
+		vs, ok := st.(*ast.VarStmt)
+		if !ok || len(vs.Decls) != 1 {
+			continue
+		}
+		d := vs.Decls[0]
+		if d == nil || !d.IsDestructuring || d.Target == nil {
+			continue
+		}
+		init, ok := d.Init.(*ast.Identifier)
+		if !ok || init.Name != param {
+			continue
+		}
+		if obj, ok := d.Target.(*ast.ObjectExpr); ok {
+			return obj, i
+		}
+	}
+	return nil, -1
+}
+
+// restUsesAllowed reports whether every use of the rest binding is a JSX
+// spread (`{...rest}`) or a member read (`rest.x`), the forms the call-site
+// rest machinery resolves.
+func restUsesAllowed(body []ast.Stmt, rest string) bool {
+	allowed := map[*ast.Identifier]bool{}
+	total := 0
+	WalkAST(body, func(n any) bool {
+		switch x := n.(type) {
+		case *ast.JSXAttr:
+			if x.Spread {
+				if id, ok := x.Value.(*ast.Identifier); ok && id.Name == rest {
+					allowed[id] = true
+				}
+			}
+		case *ast.MemberExpr:
+			if id, ok := x.Object.(*ast.Identifier); ok && id.Name == rest && !x.Computed {
+				allowed[id] = true
+			}
+		case *ast.Identifier:
+			if x.Name == rest {
+				total++
+				if !allowed[x] {
+					total += 1000
+				}
+			}
+		}
+		return true
+	})
+	return total < 1000
 }
 
 func bindingsOf(locals []propsLocal) []propsBinding {
@@ -113,12 +214,25 @@ func bodyMentionsAny(body []ast.Stmt, locals []propsLocal) bool {
 }
 
 // propsLocals flattens an object binding pattern read from base into its
-// bindings. Rest elements, computed keys and array patterns are rejected.
-func propsLocals(obj *ast.ObjectExpr, base ast.Expr) ([]propsLocal, bool) {
+// bindings, plus the name of a trailing rest element. Computed keys and array
+// patterns are rejected.
+func propsLocals(obj *ast.ObjectExpr, base ast.Expr) ([]propsLocal, string, bool) {
 	var out []propsLocal
-	for _, prop := range obj.Properties {
-		if prop == nil || prop.Spread || prop.Computed || prop.Method || prop.Key == "" || prop.KeyNumeric {
-			return nil, false
+	rest := ""
+	for i, prop := range obj.Properties {
+		if prop == nil {
+			return nil, "", false
+		}
+		if prop.Spread {
+			id, ok := prop.Value.(*ast.Identifier)
+			if !ok || i != len(obj.Properties)-1 || base == nil {
+				return nil, "", false
+			}
+			rest = id.Name
+			continue
+		}
+		if prop.Computed || prop.Method || prop.Key == "" || prop.KeyNumeric {
+			return nil, "", false
 		}
 		read := ast.Expr(&ast.MemberExpr{Object: cloneExpr(base), Property: &ast.Identifier{Name: prop.Key}})
 		if prop.KeyQuoted || !isJSIdentifier(prop.Key) {
@@ -138,16 +252,20 @@ func propsLocals(obj *ast.ObjectExpr, base ast.Expr) ([]propsLocal, bool) {
 		}
 		switch t := target.(type) {
 		case *ast.Identifier:
-			out = append(out, propsLocal{name: t.Name, read: read})
+			out = append(out, propsLocal{name: t.Name, key: prop.Key, read: read})
 		case *ast.ObjectExpr:
-			inner, ok := propsLocals(t, read)
-			if !ok {
-				return nil, false
+			inner, innerRest, ok := propsLocals(t, read)
+			if !ok || innerRest != "" {
+				return nil, "", false
+			}
+			// A nested pattern consumes the whole top-level key.
+			for j := range inner {
+				inner[j].key = prop.Key
 			}
 			out = append(out, inner...)
 		default:
-			return nil, false
+			return nil, "", false
 		}
 	}
-	return out, true
+	return out, rest, true
 }

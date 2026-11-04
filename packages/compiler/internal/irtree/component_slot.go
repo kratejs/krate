@@ -47,6 +47,14 @@ func (b *builder) buildComponentSlot(el *ast.JSXElement, parentID string) []Slot
 
 	childSignals := b.collectSignalDecls(childFn)
 	attrs := extractPropsAST(el)
+	// <Toggle>{(on, flip) => <button/>}</Toggle>: a function as the only child
+	// is the component's `children` prop, called with the component's values.
+	if fn := functionChild(el.Children); fn != nil {
+		attrs["children"] = fn
+		bare := *el
+		bare.Children = nil
+		el = &bare
+	}
 
 	// Recursion guard: expanding a component that is already being expanded
 	// with the same props can never terminate (see enterExpansion).
@@ -349,10 +357,7 @@ func (b *builder) installCallSiteInputs(el *ast.JSXElement, childFn *ast.FnDecl,
 	case fnRestParamName(childFn) != "":
 		// A rest parameter collects every call-site attr not bound by a
 		// named/destructured parameter.
-		bound := make(map[string]bool)
-		for _, n := range extractParamNames(childFn) {
-			bound[n] = true
-		}
+		bound := boundParamSet(childFn)
 		rest := make(map[string]ast.Expr)
 		for name, expr := range attrs {
 			if !bound[name] {

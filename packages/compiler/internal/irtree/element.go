@@ -83,9 +83,16 @@ func (b *builder) elementBindings(el *ast.JSXElement, id SlotID) (handlers []Han
 	attributes, _ := b.expandForwardedSpreadAttrs(el.Opening.Attributes)
 	for _, attr := range attributes {
 		if attr.Spread {
+			// A spread with no build-time attribute list (a hook result, a
+			// conditional object) is applied by the runtime and re-applied
+			// when the state it reads changes.
 			if attr.Value != nil && !isScopeHelperExpr(attr.Value) && b.locateOnly == 0 {
-				b.warnAt(attr.Position, "spread attribute {..."+generateExprJS(attr.Value, nil)+"} on <"+el.Opening.Name+"> has no build-time value; its attributes are not rendered",
-					"spread a rest/props parameter or an object whose value is known at build time, or pass the attributes explicitly")
+				attrs = append(attrs, AttrBinding{
+					ElementSlotID: id,
+					AttrName:      SpreadAttr,
+					ExprSource:    generateExprJS(attr.Value, b.sigMap()),
+					InitialExpr:   attr.Value,
+				})
 			}
 			continue
 		}

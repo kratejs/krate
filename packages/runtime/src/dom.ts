@@ -275,6 +275,38 @@ function applyProps(el: Element, props: Record<string, unknown>): void {
   }
 }
 
+const spreadKeys = new WeakMap<Element, Set<string>>();
+
+/**
+ * Applies a spread props object (`<input {...field} />`) to el and re-applies
+ * it when the state `get` reads changes: attributes, form state, styles and
+ * event handlers are set, and keys the previous object had but the new one
+ * lacks are removed.
+ */
+export function krateSpread(el: Element, get: () => Record<string, unknown> | null | undefined): void {
+  trackEffect(
+    el,
+    createEffect(() => {
+      const props = get() || {};
+      const next = new Set<string>();
+      for (const key of Object.keys(props)) {
+        if (key === 'children' || key === 'key' || key === 'dangerouslySetInnerHTML') continue;
+        next.add(key);
+        setAttr(el, key, props[key]);
+      }
+      const prev = spreadKeys.get(el);
+      if (prev) {
+        for (const key of prev) {
+          if (next.has(key)) continue;
+          if (key.startsWith('on')) krateOn(el, key, null);
+          else setAttr(el, key, undefined);
+        }
+      }
+      spreadKeys.set(el, next);
+    })
+  );
+}
+
 // Virtual nodes
 // While hydration adopts server-rendered list rows, h() returns lightweight
 // descriptors instead of DOM nodes (JS evaluates children before parents, so
