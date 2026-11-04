@@ -120,7 +120,7 @@ func compileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: []api.Plugin{cbPlugin, serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(actionModules, actionBasePath)},
+				Plugins: []api.Plugin{serverCSSPlugin(root), cbPlugin, serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(actionModules, actionBasePath)},
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   injectedSource,

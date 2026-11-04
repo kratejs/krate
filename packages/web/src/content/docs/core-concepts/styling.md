@@ -35,7 +35,16 @@ export default function Card() {
   deterministic per file and stable across builds.
 - Scoping is tokenizer-based: strings, comments, `url(...)`, attribute
   selectors, and `:global(...)` are handled correctly. `:global(.x)` stays
-  unscoped (the wrapper is removed), and `composes:` local names are mapped.
+  unscoped (the wrapper is removed); a bare `:global` or `:local` switches the
+  mode for the rest of the selector.
+- `@keyframes` names defined in a module are scoped, and `animation` /
+  `animation-name` references are rewritten; use `@keyframes :global(name)` to
+  keep a name global.
+- `composes: other;`, `composes: a b;`, `composes: x from global;` and
+  `composes: x from "./base.module.css";` add the composed classes to
+  `styles.<name>` and are removed from the output CSS.
+- Dashed names have camelCase aliases: `styles["card-title"]` and
+  `styles.cardTitle` are the same class.
 
 ## Tailwind CSS
 

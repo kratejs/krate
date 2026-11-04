@@ -183,16 +183,16 @@ func isBarePackageImport(src string) bool {
 //
 // resolveDir is the page module directory: relative local imports used inside
 // an island resolve from there, not from the project root.
-func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localImports []irtree.ExternalImport, resolveDir string) (string, string, map[string]string, error) {
+func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localImports []irtree.ExternalImport, resolveDir string) (string, string, map[string]string, *islandStyles, error) {
 	if len(exts) == 0 {
-		return "", "", nil, nil
+		return "", "", nil, nil, nil
 	}
 	if resolveDir == "" {
 		resolveDir = b.Root
 	}
 
 	if _, err := b.ensurePreactShared(); err != nil {
-		return "", "", nil, diag.Diagnostic{
+		return "", "", nil, nil, diag.Diagnostic{
 			Message: "island runtime could not be built: " + err.Error(),
 			Hint:    "install Preact 10.20 or newer with `pnpm add preact`, then rebuild",
 		}.WithCode(diag.CodeIslandAsset)
@@ -203,6 +203,7 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 	var boot strings.Builder
 	var importsJS strings.Builder
 	ssrHTML := map[string]string{}
+	sink := &islandCSSSink{root: b.Root}
 	allImports := append(append([]irtree.ExternalImport(nil), imports...), localImports...)
 
 	for _, e := range exts {
@@ -211,9 +212,9 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 		}
 		used := islandImportsFor(e.Subtree, allImports)
 		clientSrc := b.islandClientSource(e, used)
-		out, err := b.buildIslandBundle(clientSrc, resolveDir, false, nil)
+		out, err := b.buildIslandBundle(clientSrc, resolveDir, false, nil, sink)
 		if err != nil {
-			return "", "", nil, diag.Diagnostic{
+			return "", "", nil, nil, diag.Diagnostic{
 				File:    e.File,
 				Line:    e.Line,
 				Col:     e.Col,
@@ -224,10 +225,10 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 		name := "island." + hashContent(out) + ".js"
 		chunksDir := filepath.Join(b.Cfg.OutDir, "chunks")
 		if err := os.MkdirAll(chunksDir, 0755); err != nil {
-			return "", "", nil, fmt.Errorf("creating chunks dir: %w", err)
+			return "", "", nil, nil, fmt.Errorf("creating chunks dir: %w", err)
 		}
 		if err := fsutil.WriteFileIfChanged(filepath.Join(chunksDir, name), out, 0644); err != nil {
-			return "", "", nil, fmt.Errorf("writing island chunk: %w", err)
+			return "", "", nil, nil, fmt.Errorf("writing island chunk: %w", err)
 		}
 		url := "/chunks/" + name
 		if bp := b.Cfg.BaseURLPath(); bp != "" {
@@ -240,7 +241,7 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 			continue
 		}
 		ssrSrc := b.islandSSRSource(e, used)
-		html, err := b.buildIslandSSR(ssrSrc, resolveDir)
+		html, err := b.buildIslandSSR(ssrSrc, resolveDir, sink)
 		if err != nil {
 			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" stays client-only: server render failed: "+err.Error(), "fix the browser-only dependency or keep the island client-only intentionally")
 			continue
@@ -248,7 +249,11 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 		ssrHTML[e.ID] = html
 	}
 
-	return boot.String(), importsJS.String(), ssrHTML, nil
+	styles, err := b.buildIslandStyles(sink)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	return boot.String(), importsJS.String(), ssrHTML, styles, nil
 }
 
 // printIslandWarning emits a source-located island diagnostic. The build
@@ -392,7 +397,7 @@ func islandAlias(root string, ssr bool) map[string]string {
 	}
 }
 
-func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *api.Plugin) ([]byte, error) {
+func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *api.Plugin, sink *islandCSSSink) ([]byte, error) {
 	opts := api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
@@ -413,13 +418,14 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		JSXFragment:       "Fragment",
 		LogLevel:          api.LogLevelSilent,
 		Alias:             islandAlias(b.Root, ssr),
+		Plugins:           []api.Plugin{islandCSSPlugin(sink)},
 	}
 	if ssr {
 		opts.Format = api.FormatIIFE
 		opts.Platform = api.PlatformBrowser
 		opts.Stdin.Sourcefile = "krate-island-ssr.tsx"
 		if plugin != nil {
-			opts.Plugins = []api.Plugin{*plugin}
+			opts.Plugins = append(opts.Plugins, *plugin)
 		}
 	} else {
 		opts.External = []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"}
@@ -446,8 +452,8 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 	return result.OutputFiles[0].Contents, nil
 }
 
-func (b *Builder) buildIslandSSR(src, resolveDir string) (string, error) {
-	out, err := b.buildIslandBundle(src, resolveDir, true, islandRenderToStringPlugin(resolveDir))
+func (b *Builder) buildIslandSSR(src, resolveDir string, sink *islandCSSSink) (string, error) {
+	out, err := b.buildIslandBundle(src, resolveDir, true, islandRenderToStringPlugin(resolveDir), sink)
 	if err != nil {
 		return "", err
 	}

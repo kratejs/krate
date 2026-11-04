@@ -63,8 +63,6 @@ func (g *TailwindGenerator) ExpandApply(cssText string) (string, []string) {
 	return out.String(), unresolved
 }
 
-func isCSSSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
-
 // applyEnd returns the index of the ";" or "}" ending the @apply at start.
 func applyEnd(s string, start int) int {
 	depth := 0
