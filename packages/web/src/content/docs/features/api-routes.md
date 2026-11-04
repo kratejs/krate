@@ -51,6 +51,49 @@ transparently forwarded to the sidecar.
 - Go API routes (`src/api/*.go`) remain the fastest option; the sidecar binary
   is a compiled Go server.
 
+### Web APIs in the embedded runtime
+
+Route handlers receive a standard Web `Request` and return a `Response`; the
+embedded runtime implements the platform APIs they usually need, and behaves
+like the Node sidecar for them (the same route code is compared against both
+in the test suite):
+
+- `Request`, `Response` (`json`, `redirect`, `error`, body streams), `Headers`
+  (case-insensitive, iterable, `getSetCookie()`), `FormData` (urlencoded and
+  multipart bodies), `Blob`/`File`, `URL`/`URLSearchParams` (spec parsing; an
+  invalid URL throws), `AbortController`/`AbortSignal`, `ReadableStream`.
+- `request.json()`, `.text()`, `.formData()`, `.arrayBuffer()` and `.blob()`
+  return promises, so `await req.json().catch(() => null)` works.
+  `request.cookies.get(name)` is available as in Next.js.
+- `TextEncoder`/`TextDecoder` (UTF-8), `atob`/`btoa`, `structuredClone`,
+  `queueMicrotask`, `performance.now()`, real `setTimeout`/`setInterval`
+  (handlers can `await new Promise((r) => setTimeout(r, 100))`), `fetch`, and
+  `crypto.getRandomValues` / `randomUUID` / `subtle.digest` / HMAC
+  `subtle.importKey`, `sign` and `verify`.
+
+Anything the embedded runtime does not implement (for example `TransformStream`,
+`WritableStream`, `WebSocket`, AES in `crypto.subtle`) throws a clear error
+naming the API and suggesting `ssr.apiRuntime: "node"`, and the error is logged.
+A handler that stays pending longer than 30 seconds (`KRATE_API_TIMEOUT`) is
+failed. Reading a very large *binary* request body with `arrayBuffer()` inside
+the VM is slow (text, JSON and form bodies are fast); use the Node runtime for
+big uploads.
+
+### Methods, errors and streaming
+
+- Exporting only some methods returns `405` with an `Allow` header for the
+  rest; `HEAD` is served from `GET` (headers only), and `OPTIONS` is answered
+  automatically with `Allow`. A default export handles every method.
+- A handler that throws is logged (route, status, message, and the stack in
+  `krate dev`). In production the response body is the generic
+  `{"error":"Internal Server Error"}`; `krate dev` includes the message.
+- `/api` requests appear in the access log, and middleware (see
+  [Middleware](/docs/features/middleware/)) runs in front of them.
+- A `Response` with a `ReadableStream` body streams to the client as it is
+  produced (Server-Sent Events work on the QuickJS and Node runtimes); streaming
+  responses extend the server write deadline.
+- Several `Set-Cookie` headers on one response are all delivered.
+
 ### Modern pattern (recommended): named method exports
 
 ```typescript

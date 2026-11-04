@@ -12,7 +12,8 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 |---------|-------------|
 | `krate build [dir]` | Production build |
 | `krate dev [dir]` | Build + dev server (port 3000) + hot reload |
-| `krate serve [dir]` | Build + static HTTP server (production preview) |
+| `krate serve [dir]` | Build + HTTP server (production preview); `--no-build` serves the existing output |
+| `krate start [dir]` | Serve the existing build output without rebuilding (production start) |
 | `krate init [dir]` | Scaffold a new project (alias: `create`; via the npm wrapper) |
 | `krate types [dir]` | Generate route/content TypeScript declarations only |
 | `krate go:init [dir]` | Set up `go.mod`/`go.work` + vendored helpers for Go intellisense |
@@ -112,9 +113,34 @@ Builds the site and serves the production output over HTTP.
 
 ```sh
 krate serve
+krate serve --no-build     # serve the existing dist/ without rebuilding
 ```
 
 Useful for previewing `dist/` exactly as a static host would serve it.
+`preview` is an alias.
+
+## `krate start`
+
+Serves an existing build without rebuilding - the command to run in a
+container or on a server after `krate build`. It exits with an error and a hint
+when there is no build output.
+
+```sh
+krate build
+krate start
+```
+
+### Port and host
+
+`dev`, `serve` and `start` accept `--port <n>` and `--host <addr>`. For `serve`
+and `start` the port is resolved as: `--port`, then `KRATE_SERVE_PORT`, then
+`PORT`, then `server.port` / `devServer.port` (default 3000); `krate dev` uses
+`--port` then the config. `KRATE_SERVE_HOST` sets the bind address the same
+way. An invalid value (`--port abc`, `PORT=70000`) is an error. Internal
+sidecars pick free ports automatically.
+
+On `SIGINT`/`SIGTERM` the server drains in-flight requests (see
+`server.shutdownTimeout`) and exits with status 0.
 
 ## `krate check`
 

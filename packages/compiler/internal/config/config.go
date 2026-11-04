@@ -52,6 +52,13 @@ type ServerConfig struct {
 	// MaxBodySize caps request bodies in bytes. 0 uses defaults (1 MiB for
 	// pages/middleware, larger for API routes).
 	MaxBodySize int64 `json:"maxBodySize,omitempty"`
+	// TrustProxy makes the server honor X-Forwarded-Proto, X-Forwarded-Host and
+	// X-Forwarded-For (request URLs, CSRF origin checks, client IPs). Enable it
+	// only behind a proxy that sets or strips those headers.
+	TrustProxy bool `json:"trustProxy,omitempty"`
+	// ShutdownTimeout is the graceful-shutdown drain period in seconds
+	// (default 15). In-flight requests get this long to finish after SIGTERM.
+	ShutdownTimeout int `json:"shutdownTimeout,omitempty"`
 }
 
 // CORSConfig configures cross-origin resource sharing headers. Disabled by

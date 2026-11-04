@@ -25,9 +25,9 @@ export function middleware(request: Request) {
     })
   }
 
-  // Continue to page handler with headers
+  // Continue to the page handler, adding headers. Any other Response
+  // short-circuits; x-middleware-next marks a pass-through.
   return new Response(null, {
-    status: 200,
-    headers,
+    headers: { ...headers, 'x-middleware-next': '1' },
   })
 }

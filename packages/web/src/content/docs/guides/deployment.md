@@ -49,8 +49,11 @@ into your own Node process:
 
 ```sh
 krate build
-krate serve          # serves dist + sidecars
+krate start          # serves the existing dist + sidecars (no rebuild)
 ```
+
+`krate serve` builds first and then serves; `krate start` only serves what
+`krate build` produced.
 
 `manifest.json` records per-page modes so the runtime knows which routes need
 the renderer.
@@ -67,8 +70,8 @@ FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 ```
 
-For SSR/ISR/API deployments, use a Node base image and run `krate serve` as the
-container command instead of nginx:
+For SSR/ISR/API deployments, use a Node base image and run `krate start` as the
+container command instead of nginx (the image already contains the build):
 
 ```dockerfile
 FROM node:20-slim
@@ -79,8 +82,17 @@ ENV KRATE_SERVE_PORT=3000
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s \
   CMD node -e "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["krate", "serve"]
+CMD ["krate", "start"]
 ```
+
+`krate start` reads the port from `KRATE_SERVE_PORT` or `PORT` (platforms such
+as Heroku and Cloud Run set `PORT`). It handles `SIGTERM` by draining in-flight
+requests (15 seconds by default, `server.shutdownTimeout`), stopping its
+sidecars and exiting 0, so rolling deploys do not cut requests off.
+
+Behind a load balancer or reverse proxy that terminates TLS or rewrites `Host`,
+set `server: { trustProxy: true }` so middleware, API routes and the
+server-action origin check see the original scheme, host and client address.
 
 ### Health & readiness
 
