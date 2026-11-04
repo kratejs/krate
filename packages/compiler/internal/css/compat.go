@@ -63,6 +63,9 @@ func findPrefixBlock(s, prefix string, from int) (start, contentStart, close int
 	i := open
 	for i < len(s) {
 		switch s[i] {
+		case '\\':
+			i += 2
+			continue
 		case '"', '\'':
 			i = skipCSSString(s, i)
 			continue

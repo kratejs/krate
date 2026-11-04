@@ -499,8 +499,10 @@ func TestMinifierCalcNoSpaces(t *testing.T) {
 	tests := map[string]string{
 		"calc(1*2rem)": "2rem",
 		"calc(2rem*1)": "2rem",
-		"calc(0+2rem)": "2rem",
-		"calc(2rem+0)": "2rem",
+		// calc() needs whitespace around + and -, so these are invalid CSS and
+		// are left exactly as written rather than silently repaired.
+		"calc(0+2rem)": "calc(0+2rem)",
+		"calc(2rem+0)": "calc(2rem+0)",
 	}
 	for in, want := range tests {
 		out := Minify(".a{width:" + in + "}")
