@@ -563,7 +563,9 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     }
 
     const wantsHTML = isHTMLDocRequest(p) || (rs.headers.get("accept") || "").includes("text/html");
-    const served = staticLayer ? await staticLayer.serve(rs.request, p) : null;
+    // Conditional headers dropped by an outer layer (flash notices) must not reach the file server.
+    const sreq = rs.headers === rs.request.headers ? rs.request : new Request(rs.request.url, { method: rs.request.method, headers: rs.headers });
+    const served = staticLayer ? await staticLayer.serve(sreq, p) : null;
     if (served && served.status !== 404) return mergeStaticResponse(rs, served);
     if (html404 && wantsHTML) return custom404(rs);
     return notFoundText(rs, true);
