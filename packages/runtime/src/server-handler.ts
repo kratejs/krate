@@ -294,8 +294,10 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const basePath = cfg.basePath || "";
   const hashed = new Set(data.hashedAssets);
   const staticOnly = new Set(data.staticOnlyRoutes.map(normalizeRoutePattern));
-  const html404 = data.html404;
-  const html500 = data.html500;
+  // errorPage is the single place that picks the error page for a request path.
+  // Today there is one global 404 and one global 500; per-segment error pages
+  // plug in here. An empty string means "no custom page".
+  const errorPage = (_urlPath: string, status: 404 | 500): string => (status === 404 ? data.html404 : data.html500);
   let requestSeq = 0;
   let latestWaitUntil: ((p: Promise<unknown>) => void) | undefined;
 
@@ -537,9 +539,9 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return finish(rs, 301, null);
   }
 
-  function custom404(rs: ReqState): Response {
+  function custom404(rs: ReqState, html: string): Response {
     rs.res.set("Content-Type", "text/html; charset=utf-8");
-    return finish(rs, 404, html404);
+    return finish(rs, 404, html);
   }
 
   /** handlerWith404: internal-path guard, cache policy, dynamic templates, static files, custom 404. */
@@ -567,7 +569,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const sreq = rs.headers === rs.request.headers ? rs.request : new Request(rs.request.url, { method: rs.request.method, headers: rs.headers });
     const served = staticLayer ? await staticLayer.serve(sreq, p) : null;
     if (served && served.status !== 404) return mergeStaticResponse(rs, served);
-    if (html404 && wantsHTML) return custom404(rs);
+    const page404 = errorPage(p, 404);
+    if (page404 && wantsHTML) return custom404(rs, page404);
     return notFoundText(rs, true);
   }
 
@@ -595,8 +598,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return httpError(rs, "method not allowed", 405);
   }
 
-  function errorShell(): string {
-    return html500 || "<!doctype html><title>500</title><h1>Internal Server Error</h1>";
+  function errorShell(urlPath: string): string {
+    return errorPage(urlPath, 500) || "<!doctype html><title>500</title><h1>Internal Server Error</h1>";
   }
 
   async function pageHandler(rs: ReqState): Promise<Response> {
@@ -745,14 +748,15 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       rs.res.set("X-Krate-Error", "render");
       rs.res.delete("X-Krate-Cache");
       rs.res.set("Cache-Control", "no-store");
-      return finish(rs, 500, errorShell());
+      return finish(rs, 500, errorShell(rs.path));
     }
     if (notFound || redirect) {
       if (redirect) return goRedirect(redirect, rs.path, rs.method, 302, rs.res);
-      if (html404) {
+      const page404 = errorPage(rs.path, 404);
+      if (page404) {
         rs.res.set("Content-Type", "text/html; charset=utf-8");
         rs.res.delete("Cache-Control");
-        return finish(rs, 404, html404);
+        return finish(rs, 404, page404);
       }
       return notFoundText(rs);
     }

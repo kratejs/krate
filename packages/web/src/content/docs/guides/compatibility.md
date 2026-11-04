@@ -47,6 +47,7 @@ for usage.
 | Supported Preact versions | n/a | Beta | n/a | 10.20 through current |
 | Browser differential corpus | Beta | n/a | n/a | No P0/P1 divergence |
 | React 19 reference app | Beta | n/a | n/a | Same browser suite as React 18 |
+| Serverless and Node deployment | n/a | n/a | Beta | Vercel, Netlify, Cloudflare and Node hosting |
 
 ## Details
 
@@ -277,6 +278,21 @@ Evidence: `TestReactBrowserDifferential`, `TestReactBrowserCorpus`, `ci:browser-
 Fixtures for useActionState, useOptimistic, useFormStatus, form and button actions with auto-reset, use(promise) and use(context), ref as a prop, ref cleanup callbacks, async transitions, useDeferredValue initial values, document metadata, and server actions under the real server.
 
 Evidence: `TestReactBrowserDifferential`, `fixture:packages/compiler/internal/build/testdata/reactbrowser/r19/app_reference.tsx`
+
+### Serverless and Node deployment
+
+**Source:** n/a - **Islands:** n/a - **SSR:** Beta
+
+krate deploy bundles the portable server handler (SSR, ISR, streaming, async server components, JS/TS API routes, server actions, middleware, redirects, rewrites, headers) into one self-contained module for --target node, vercel, netlify and cloudflare. A request matrix gives the same status, security and cache headers, redirects and bodies as krate start; Go API routes, Go components and sidecars are refused at deploy time.
+
+Known limits:
+
+- ISR, region and data caches are per instance on serverless targets; revalidatePath/revalidateTag only reach the instance that handled the request (reported under skipped). Pass an isrStore to createKrateHandler to share the page cache.
+- On Vercel and Netlify the CDN serves prerendered pages and assets before the function, so middleware does not run for them; deploy warns when middleware exists.
+- Legacy (req, res) API handlers, Go API routes, Go components, the API sidecar and community plugin serve hooks are not supported on serverless targets.
+- Cloudflare bundles fail at build time for Node built-ins outside nodejs_compat (fs, vm, net, child_process).
+
+Evidence: `TestServerlessNodeParity`, `TestVercelServerOutput`, `TestNetlifyServerOutput`, `TestCloudflareServerOutput`, `TestServerBundleHasNoSecrets`, `TestServerlessRefusesGoAndSidecars`, `TestCloudflareRefusesNodeBuiltins`, `TestServerlessNodeBrowser`
 
 ## How claims are verified
 

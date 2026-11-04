@@ -112,7 +112,7 @@ func startNodeBundle(t *testing.T, root string, cfg *config.Config, env ...strin
 		default:
 		}
 		if resp, err := http.Get(base + "/healthz"); err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return base
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -141,7 +141,7 @@ func doMatrix(t *testing.T, base, method, path string, hdr map[string]string, bo
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(resp.Body)
 	return matrixResult{status: resp.StatusCode, headers: resp.Header, body: string(data)}
 }

@@ -5,6 +5,16 @@ detailed changelog. This file records the release train at a glance.
 
 ## Unreleased
 
+- `krate deploy` runs server features on more hosts. A portable server handler
+  (`@krate/runtime/server-handler`) is bundled with the build data into one
+  module for `--target node` (new: `dist/.krate/server/server.mjs`, no Go
+  binary), and for `vercel` (Build Output API v3), `netlify` (Functions) and
+  `cloudflare` (Workers with static assets) instead of refusing projects with
+  SSR/ISR/API routes/actions/middleware. A request matrix checks the node target
+  against `krate start`. Go API routes, Go components and sidecars are refused
+  with a hint to use Docker. Migration note: caches are per instance on the
+  serverless targets, so `revalidatePath`/`revalidateTag` reach only the
+  instance that handled the request (reported under `skipped`).
 - Tailwind output is layered like v4 (`@layer theme, base, components,
   utilities`). Migration note: unlayered CSS beats Tailwind utilities, so a
   global reset such as `* { margin: 0; padding: 0 }` must move into

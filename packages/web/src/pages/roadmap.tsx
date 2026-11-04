@@ -429,6 +429,24 @@ krate migrate rollback .krate/migrate/nextjs-<timestamp>`}</code></pre>
         </ol>
       </section>
 
+      <section class="roadmap-section" aria-labelledby="serverless">
+        <h2 id="serverless" class="roadmap-title">Serverless and edge status</h2>
+        <p class="roadmap-lede">
+          What runs where today, stated plainly. The same portable server
+          handler serves every target below; it is tested against `krate start`
+          request for request on Node, and the Cloudflare worker has been run
+          in a local workerd. Vercel and Netlify output is validated against
+          the platform file formats and by calling the handlers directly, not
+          by a live deployment.
+        </p>
+        <ul class="roadmap-list">
+          <li>Node (`krate deploy --target node`): SSR, ISR, streaming, API routes, actions, middleware. No Go binary needed.</li>
+          <li>Vercel, Netlify, Cloudflare: the same features through one function or worker; caches are per instance.</li>
+          <li>Not on serverless: Go API routes, Go components, a custom API sidecar, community plugins with serve hooks. `krate deploy` refuses them and points at Docker.</li>
+          <li>Planned: a shared cache store for ISR and revalidation across instances (the handler already takes an `isrStore`).</li>
+        </ul>
+      </section>
+
       <section class="roadmap-section" aria-labelledby="foundations">
         <h2 id="foundations" class="roadmap-title">What else has to be true</h2>
         <p class="roadmap-lede">

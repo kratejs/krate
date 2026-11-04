@@ -206,3 +206,14 @@ aid, not a full React runtime - see
 - [Getting Started](/docs/getting-started/)
 - [Routing & Layouts](/docs/core-concepts/routing/)
 - [Reactivity](/docs/core-concepts/reactivity/)
+
+## Deploying a migrated app
+
+A migrated app's server features (async server components, route handlers,
+server actions, `middleware`, ISR) deploy to Vercel, Netlify, Cloudflare or a
+plain Node server with `krate deploy --target vercel|netlify|cloudflare|node`.
+Differences from Next.js on those hosts: caches are per instance (`revalidatePath`
+and `revalidateTag` reach only the instance that handled the request and report
+the rest under `skipped`), Vercel and Netlify serve prerendered pages from the
+CDN before middleware runs, and Cloudflare builds fail at bundle time on Node
+built-ins that Workers lack. See [Deployment](/docs/guides/deployment/).

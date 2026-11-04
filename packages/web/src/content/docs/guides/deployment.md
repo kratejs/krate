@@ -1,6 +1,6 @@
 ---
 title: Deployment
-description: Ship a Krate site to static hosts, Node, or Docker.
+description: Ship a Krate site to static hosts, serverless platforms, plain Node, or Docker.
 order: 3
 ---
 
@@ -45,7 +45,11 @@ krate deploy --target cloudflare  # _redirects (+ _headers)
 krate deploy --target vercel      # vercel.json at the project root
 krate deploy --target gh-pages    # .nojekyll + 404.html
 krate deploy --target docker      # Dockerfile + .dockerignore (server hosting)
+krate deploy --target node        # dist/.krate/server/server.mjs (plain Node, no Go binary)
 ```
+
+Projects with server features also deploy to `vercel`, `netlify` and `cloudflare`
+as a function or worker; see [Serverless and Node targets](#serverless-and-node-targets).
 
 Redirects and rewrites come from your `redirects`/`rewrites` config, so the
 same rules drive `krate serve` and the deployed host. Krate patterns are
@@ -63,18 +67,122 @@ never overwritten; merge by hand in that case.
 
 ### Projects with server features
 
-SSR/ISR/streaming pages, API routes, server actions and middleware need a
-server process, so a static host would publish an empty shell for them.
-`krate deploy` therefore fails for the static targets when it finds any of
-them, and lists what it found. Use `--target docker` (or run `krate serve` on a
-Node/Go host). If you really want only the static pages, pass `--static-only`:
+SSR/ISR/streaming pages, API routes, server actions and middleware need server
+code. `krate deploy --target vercel|netlify|cloudflare` bundles it into a
+function or worker (next section); `--target node` and `--target docker` run it
+on your own host. For a project that has server features, the **static-only**
+adapters (`gh-pages`) fail and list what they found. If you really want only the
+static pages from a platform target, pass `--static-only`:
 
 ```sh
 krate deploy --target netlify --static-only
 ```
 
 Server-only folders under `dist/.krate/` are removed from the output of every
-static target so they cannot be uploaded.
+platform target so they cannot be uploaded.
+
+## Serverless and Node targets
+
+`krate deploy` bundles a portable server handler (`@krate/runtime/server-handler`)
+together with your build data, page bundles, API routes, server actions and
+middleware into **one self-contained ES module**. It has no Go and no dynamic
+imports of your files, so the same code runs on Node, Vercel, Netlify and
+Cloudflare Workers. It does per request what `krate start` does: config
+redirects, rewrites and headers, middleware, route matching, dynamic-route
+templates, SSR/ISR/streaming pages (including async server components under
+`Suspense`, `notFound()` and `redirect()`), JS/TS API routes, server actions
+(origin check, multipart, redirect, flash cookie), the security headers and the
+cache policy (ISR `s-maxage` + `stale-while-revalidate`, `no-store` for SSR).
+
+| Target | Output | Static files | Runs |
+|--------|--------|--------------|------|
+| `node` | `dist/.krate/server/server.mjs` | the handler's own file server on `dist/` (no dotfiles, no listings, hashed assets immutable, `.br`/`.gz` siblings, Range, `Last-Modified`) | `node dist/.krate/server/server.mjs` |
+| `vercel` | `.vercel/output/` (Build Output API v3): `config.json`, `static/`, `functions/__krate.func/` (Node.js function) | Vercel CDN | one Node.js function, response streaming on |
+| `netlify` | `netlify/functions/krate.mjs` (`config.path = "/*"`, `preferStatic`), `netlify.toml`, `_redirects`, `_headers` | Netlify CDN (`dist/`) | one Netlify Function |
+| `cloudflare` | `.krate/deploy/cloudflare/worker.mjs`, `wrangler.jsonc` | Workers static assets (`dist/`, `ASSETS` binding) | one Worker with `nodejs_compat` |
+
+All four support SSR, ISR, streaming, async server components, client islands,
+JS/TS API routes, server actions, middleware, redirects/rewrites/headers config,
+custom 404/500 pages, trailing-slash canonicalization and dynamic routes.
+
+### Node, without the krate binary
+
+```sh
+krate deploy --target node          # build + bundle once, in CI
+PORT=8080 node dist/.krate/server/server.mjs
+```
+
+`server.mjs` binds `PORT` (default `server.port`/3000) and `HOST` (default
+`0.0.0.0`), serves static files from the `dist/` directory it sits in
+(override with `KRATE_DIST`), and on `SIGTERM`/`SIGINT` stops accepting
+connections and drains in-flight requests (15 seconds, `server.shutdownTimeout`).
+It also answers `/healthz` and `/readyz`. A container needs only Node and the
+build output:
+
+```dockerfile
+FROM node:22-slim
+WORKDIR /app
+COPY dist ./dist
+ENV NODE_ENV=production PORT=3000
+EXPOSE 3000
+CMD ["node", "dist/.krate/server/server.mjs"]
+```
+
+Everything the server needs is inside the bundle, so no `node_modules` is
+required at runtime.
+
+### What each platform really supports
+
+- **Vercel**: `.vercel/output/` is written for `vercel deploy --prebuilt`.
+  Config redirects, rewrites and header rules are emitted as native routes (so
+  they also apply to static files); everything that is not a file falls through
+  to the function. An existing `.vercel/output` that krate did not write is never
+  overwritten.
+- **Netlify**: the function lives in `netlify/functions/krate.mjs`. A hand-written
+  `netlify.toml` is left alone and the settings you need are printed.
+- **Cloudflare**: `wrangler.jsonc` sets `nodejs_compat`, the assets directory
+  and `run_worker_first`: a list of the server paths, or `true` when the project
+  has middleware so it sees every request (static files then come through the
+  `ASSETS` binding). A hand-written `wrangler.*` is left alone and the settings
+  are printed. There is no filesystem on Workers: a route or action that imports
+  a Node built-in outside `nodejs_compat` (`fs`, `vm`, `child_process`, `net`...)
+  **fails at bundle time** naming the module and the importing file.
+
+### Environment variables
+
+Runtime values come from the platform (`process.env`; on Cloudflare the string
+bindings and secrets are copied into `process.env`). Only `KRATE_PUBLIC_*`
+values are inlined at build time. Secrets are never written into the bundle
+(a test builds with a secret in `.env` and checks the output).
+
+### Caches on serverless
+
+ISR pages, regions and the data cache live in memory **per instance** and are
+bounded (`ssr.maxCacheSize`); durability comes from the CDN headers
+(`s-maxage` + `stale-while-revalidate`). `revalidatePath` and `revalidateTag`
+therefore reach only the instance that handled the request: they are applied
+there, and the response reports every target under `skipped` with that reason
+(the node target is a single process and is not affected). `krate deploy` warns
+when your sources call them. The page cache is pluggable: pass your own
+`isrStore` (get/set/delete/deleteRoute/deleteVariant/deleteTags/entriesForRoute)
+to `createKrateHandler` to share it across instances. Krate does not ship a KV
+or Redis store yet.
+
+### What is refused
+
+`krate deploy` fails, naming the feature and suggesting `--target docker`, for
+anything that cannot run in JavaScript: Go API routes (`src/api/*.go`), Go
+components rendered at request time, a custom API sidecar (`api.sidecar`),
+`compat.userAgent`, and community plugins (they may use serve hooks). Legacy
+`(req, res)` API handlers are not supported by the portable server: export
+named `GET`/`POST` handlers.
+
+### Middleware and static files
+
+On Vercel and Netlify the CDN serves prerendered pages and assets before the
+function, so middleware does not run for them; `krate deploy` prints a warning.
+Make pages that middleware guards SSR or ISR. On Cloudflare and Node the
+handler sees every request.
 
 ## Node servers (SSR / ISR / API routes / middleware)
 
