@@ -221,6 +221,12 @@ csp: {
 }
 ```
 
+The generated policy hashes the final (minified) document: inline `<script>` and
+`<style>` blocks, the inline speculation-rules script, and `style="..."`
+attributes (allowed with `'unsafe-hashes'` plus one SHA-256 hash per distinct
+value). Styles set at runtime through the CSSOM (`el.style.x = ...`) are not
+affected by CSP.
+
 ## Markdown
 
 ```typescript

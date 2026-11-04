@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 
+	"golang.org/x/net/html"
+
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 )
@@ -188,6 +190,9 @@ func generateCSPMeta(scriptHTML, styleHTML, hydrationJS, directive string) strin
 		styleHashes = append(styleHashes, sha256Base64(inline))
 	}
 
+	// style="..." attributes need 'unsafe-hashes' plus a hash of each value.
+	attrStyles, specRules := inlineStyleAttrsAndSpecRules(styleHTML, scriptHTML)
+
 	// A base 'self' policy is meaningful even with no inline assets, so CSP is
 	// always enforced once enabled. Inline assets, when present, are allowlisted
 	// individually via their SHA-256 hashes.
@@ -198,15 +203,58 @@ func generateCSPMeta(scriptHTML, styleHTML, hydrationJS, directive string) strin
 	for _, h := range scriptHashes {
 		scriptSrc += " " + h
 	}
+	if specRules {
+		scriptSrc += " 'inline-speculation-rules'"
+	}
 	directives = append(directives, scriptSrc)
 
 	styleSrc := "style-src 'self'"
 	for _, h := range styleHashes {
 		styleSrc += " " + h
 	}
+	if len(attrStyles) > 0 {
+		styleSrc += " 'unsafe-hashes'"
+		for _, h := range attrStyles {
+			styleSrc += " " + h
+		}
+	}
 	directives = append(directives, styleSrc)
 
 	return fmt.Sprintf("<meta http-equiv=\"Content-Security-Policy\" content=\"%s\">\n", strings.Join(directives, "; "))
+}
+
+// inlineStyleAttrsAndSpecRules returns the deduplicated hashes of every
+// non-empty style="..." attribute value in styleDoc (decoded the way a browser
+// hashes them) and whether scriptDoc has an inline speculation-rules script.
+func inlineStyleAttrsAndSpecRules(styleDoc, scriptDoc string) ([]string, bool) {
+	var hashes []string
+	seen := map[string]bool{}
+	z := html.NewTokenizer(strings.NewReader(styleDoc))
+	for {
+		tt := z.Next()
+		if tt == html.ErrorToken {
+			break
+		}
+		if tt != html.StartTagToken && tt != html.SelfClosingTagToken {
+			continue
+		}
+		_, hasAttr := z.TagName()
+		for hasAttr {
+			var k, v []byte
+			k, v, hasAttr = z.TagAttr()
+			if string(k) != "style" || strings.TrimSpace(string(v)) == "" {
+				continue
+			}
+			h := sha256Base64(string(v))
+			if !seen[h] {
+				seen[h] = true
+				hashes = append(hashes, h)
+			}
+		}
+	}
+	spec := strings.Contains(strings.ToLower(scriptDoc), `type="speculationrules"`) ||
+		strings.Contains(strings.ToLower(scriptDoc), `type=speculationrules`)
+	return hashes, spec
 }
 
 // extractInlineContent finds content between <tag>...</tag> tags (inline, not src).

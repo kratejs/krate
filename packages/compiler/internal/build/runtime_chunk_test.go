@@ -1,6 +1,7 @@
 package build
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,5 +84,28 @@ func TestRuntimeChunkCompatConditional(t *testing.T) {
 	}
 	if !strings.Contains(readChunk(true), "useImperativeHandle") {
 		t.Error("compat bootstrap was omitted when requested")
+	}
+}
+
+func TestWarnMissingRuntime(t *testing.T) {
+	capture := func(runtimeJS string, results []*PageResult) string {
+		old := os.Stderr
+		r, w, _ := os.Pipe()
+		os.Stderr = w
+		warnMissingRuntime(runtimeJS, results)
+		_ = w.Close()
+		os.Stderr = old
+		data, _ := io.ReadAll(r)
+		return string(data)
+	}
+	if out := capture("", []*PageResult{{HasJS: false}}); out != "" {
+		t.Fatalf("static sites need no runtime: %q", out)
+	}
+	if out := capture("chunks/runtime.x.js", []*PageResult{{HasJS: true}}); out != "" {
+		t.Fatalf("unexpected warning: %q", out)
+	}
+	out := capture("", []*PageResult{{HasJS: true, SourcePath: "src/pages/index.tsx"}})
+	if !strings.Contains(out, "krate-hydrate.js") || !strings.Contains(out, "hint:") {
+		t.Fatalf("want missing-runtime warning with hint, got %q", out)
 	}
 }

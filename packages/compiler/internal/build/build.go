@@ -580,6 +580,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 
 	// Write shared runtime chunk (extracted from per-page bundles)
 	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results), Suspense: runtimeNeedsSuspense(results)})
+	warnMissingRuntime(runtimeJS, results)
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)
 	}
@@ -928,6 +929,8 @@ func (b *Builder) BuildAll() error {
 	runtimeJS := ""
 	if anyPageHasJS {
 		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results), Suspense: runtimeNeedsSuspense(results)})
+
+		warnMissingRuntime(runtimeJS, results)
 	}
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)
@@ -1510,17 +1513,18 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
 					}
 				}
-				// 2c. CSP meta tag injection. Hash against the FULLY ASSEMBLED
-				// document so every inline script/style is allow-listed.
+				// 3. Minify code in memory
+				if b.Cfg.ShouldMinifyHTML() {
+					h = minifyHTML(h)
+				}
+				// 4. CSP meta tag injection. Hash the FINAL document (after
+				// minification rewrote inline content) so every inline
+				// script/style/style attribute is allow-listed.
 				if b.Cfg.CSP.Enabled {
 					cspMeta := generateCSPMeta(h, h, r.HydrationJS, b.Cfg.CSP.Directive)
 					if cspMeta != "" {
 						h = strings.Replace(h, "</head>", cspMeta+"</head>", 1)
 					}
-				}
-				// 3. Minify code in memory
-				if b.Cfg.ShouldMinifyHTML() {
-					h = minifyHTML(h)
 				}
 				return h
 			}
@@ -1528,7 +1532,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			html = finish(html)
 			r.FinalHTML = html
 
-			// 4. Single Write to physical media
+			// Single write to physical media
 			// Error pages (404/500) are written directly at the output root as .html
 			var htmlPath string
 			if r.IsErrorPage {
@@ -1890,7 +1894,8 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			return nil, "", layoutErr
 		}
 	}
-	bundle.CSS += layoutCSS
+	// Layouts come first (outermost first) so page CSS wins ties.
+	bundle.CSS = layoutCSS + bundle.CSS
 	// Generated CSS signal rules land in the page's own hashed stylesheet, after
 	// layout CSS so author styles can override the defaults.
 	if choiceCSS != "" {
@@ -1984,8 +1989,12 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	}
 	emitResult.IslandBootJS = islandBoot
 	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
+	// Client-side JS scanned by CSS DCE for classes applied after hydration.
+	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
+	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
 	if needsHydrate {
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		dceJS = append(dceJS, rawJS)
 		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)
 		if islandJS != "" {
 			rawJS = strings.TrimSpace(rawJS + "\n" + islandJS)
@@ -2046,7 +2055,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	loadingHTML := b.renderLoadingComponent(page)
 
-	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
+	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML, dceJS...)
 
 	// Return data structures without triggering an intermediate disk write
 	result := &PageResult{
@@ -2925,6 +2934,7 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 	for _, rb := range findRouteStack(page, b.Cfg.PagesDir) {
 		id := b.layoutIDPrefix(rb.Path)
 		open, end := "<!--kl:"+id+"-->", "<!--/kl:"+id+"-->"
+		var slotCSS string
 		layoutRes, layoutCSS, layoutDeps, layoutHasSignals, err := b.executeLayoutPipeline(rb.Path, open+emitResult.HTML+end, nil)
 		relPath := rb.Path
 		if rel, rerr := filepath.Rel(b.Root, rb.Path); rerr == nil {
@@ -2961,7 +2971,7 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 				return "", nil, false, nil, serr
 			}
 			entry.Slots = slotRes.info
-			css += slotRes.css
+			slotCSS = slotRes.css
 			used = append(used, slotRes.deps...)
 			hasSignals = hasSignals || slotRes.hasSignals
 		}
@@ -2984,7 +2994,9 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 		if layoutRes.HasLinks {
 			emitResult.HasLinks = true
 		}
-		css += layoutCSS
+		// Boundaries are visited innermost first; prepend so the outermost
+		// layout ends up first and inner ones override it.
+		css = layoutCSS + slotCSS + css
 		used = append(used, layoutDeps...)
 		chain = append([]routeChainEntry{entry}, chain...)
 	}
