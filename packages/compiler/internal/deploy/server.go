@@ -30,9 +30,9 @@ type ServerPlan struct {
 	// AssetExts lists the extensions (".js") of the public non-HTML files; on
 	// platforms that route pages through the function for middleware they are
 	// carved out so assets keep going straight to the CDN.
-	AssetExts []string
-	HasActions    bool
-	HasAPI        bool
+	AssetExts  []string
+	HasActions bool
+	HasAPI     bool
 	// UsesRevalidate reports revalidatePath/revalidateTag calls in the sources.
 	UsesRevalidate  bool
 	ShutdownTimeout int
