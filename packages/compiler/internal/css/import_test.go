@@ -179,8 +179,8 @@ func TestInlineImportsAbsoluteAndURLRejected(t *testing.T) {
 
 	mainCSS := `@import "https://evil.example/x.css";
 @import "file:///etc/passwd";
-@import "` + filepath.Join(dir, "abs.css") + `";
-@import "` + outside + `";
+@import "` + filepath.ToSlash(filepath.Join(dir, "abs.css")) + `";
+@import "` + filepath.ToSlash(outside) + `";
 .ok {}`
 	result := InlineImports(mainCSS, dir)
 	if !contains(result, ".abs { color: red; }") {
@@ -267,5 +267,17 @@ func TestInlineImportsLayerPrelude(t *testing.T) {
 	}
 	if !strings.Contains(out, ".x{color:red}") {
 		t.Fatalf("import not inlined: %s", out)
+	}
+}
+
+func TestInlineImportsEscapedBackslashDecoded(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "esc.css"), []byte(".esc { color: red; }"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// A backslash escapes the next character, so this target is "esc.css".
+	result := InlineImports(`@import "e\sc.css";`, dir)
+	if !contains(result, ".esc { color: red; }") {
+		t.Errorf("escaped import target should decode per CSS rules:\n%s", result)
 	}
 }

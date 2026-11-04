@@ -23,13 +23,13 @@ func TestVariantsEmitSelectors(t *testing.T) {
 		cls  string
 		want string
 	}{
-		{"hover:bg-red-500", ".hover\\:bg-red-500:hover{background-color: #ef4444;}"},
+		{"hover:bg-red-500", ".hover\\:bg-red-500:hover{background-color: oklch(63.7% 0.237 25.331);}"},
 		{"focus:ring-2", ".focus\\:ring-2:focus"},
 		{"active:opacity-50", ".active\\:opacity-50:active"},
 		{"disabled:opacity-50", ".disabled\\:opacity-50:disabled"},
 		{"before:block", ".before\\:block::before"},
 		{"after:content-none", ".after\\:content-none::after"},
-		{"group-hover:underline", ".group:hover .group-hover\\:underline"},
+		{"group-hover:underline", ".group-hover\\:underline:is(:where(.group):hover *)"},
 		{"odd:bg-white", ".odd\\:bg-white:nth-child(odd)"},
 		{"first:mt-0", ".first\\:mt-0:first-child"},
 	}
@@ -66,7 +66,7 @@ func TestDarkModeVariants(t *testing.T) {
 	g := NewTailwindGenerator()
 	g.Theme.DarkMode = "class"
 	out := g.Generate(map[string]bool{"dark:bg-zinc-900": true})
-	if !strings.Contains(out, ".dark .dark\\:bg-zinc-900") {
+	if !strings.Contains(out, ".dark\\:bg-zinc-900:where(.dark, .dark *)") {
 		t.Errorf("dark:class should use ancestor selector:\n%s", out)
 	}
 }
@@ -146,9 +146,9 @@ func TestLeadingScale(t *testing.T) {
 func TestColorAlpha(t *testing.T) {
 	tests := map[string]string{
 		"text-white/70":   "color: rgb(255 255 255 / 0.7);",
-		"bg-blue-500/50":  "background-color: rgb(59 130 246 / 0.5);",
+		"bg-blue-500/50":  "background-color: color-mix(in oklab, oklch(62.3% 0.214 259.815) 50%, transparent);",
 		"border-black/10": "border-color: rgb(0 0 0 / 0.1);",
-		"bg-red-500/25":   "background-color: rgb(239 68 68 / 0.25);",
+		"bg-red-500/25":   "background-color: color-mix(in oklab, oklch(63.7% 0.237 25.331) 25%, transparent);",
 	}
 	for cls, want := range tests {
 		got := gen(t, cls)
@@ -177,20 +177,20 @@ func TestBorderConsistency(t *testing.T) {
 	// Every width form must produce a visible (styled) border.
 	for _, cls := range []string{"border", "border-2", "border-t", "border-t-2", "border-x", "border-y-4"} {
 		got := gen(t, cls)
-		if !strings.Contains(got, "border-style: solid;") {
+		if !strings.Contains(got, "-style: var(--tw-border-style, solid);") {
 			t.Errorf("%s: should emit border-style: solid: %s", cls, got)
 		}
 	}
 	// Colors must not be mistaken for widths.
 	got := gen(t, "border-red-500")
-	if !strings.Contains(got, "border-color: #ef4444;") || strings.Contains(got, "border-width") {
+	if !strings.Contains(got, "border-color: oklch(63.7% 0.237 25.331);") || strings.Contains(got, "border-width") {
 		t.Errorf("border-red-500 should be a color: %s", got)
 	}
 }
 
 func TestSpaceSiblingSelector(t *testing.T) {
 	got := gen(t, "space-x-4")
-	if !strings.Contains(got, "> :not([hidden]) ~ :not([hidden])") {
+	if !strings.HasPrefix(got, ":where(.space-x-4 > :not(:last-child)){") {
 		t.Errorf("space-x-4 should use the sibling selector: %s", got)
 	}
 	if !strings.Contains(got, "--tw-space-x-reverse") {
@@ -200,8 +200,9 @@ func TestSpaceSiblingSelector(t *testing.T) {
 
 func TestTransformCompose(t *testing.T) {
 	got := gen(t, "translate-x-2 scale-95 rotate-45")
-	// All three utilities must reference the shared variables, not clobber.
-	for _, want := range []string{"--tw-translate-x:", "--tw-scale-x:", "--tw-rotate:", "translate(var(--tw-translate-x"} {
+	// v4 model: each utility sets its own individual property, so they
+	// compose with each other and with keyframe animations of `transform`.
+	for _, want := range []string{"--tw-translate-x: 0.5rem;", "translate: var(--tw-translate-x, 0)", "--tw-scale-x: 95%;", "scale: var(--tw-scale-x, 1)", "rotate: 45deg;"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("transform composition missing %q:\n%s", want, got)
 		}
@@ -271,7 +272,7 @@ func TestInvalidValueRejected(t *testing.T) {
 
 func TestPreflight(t *testing.T) {
 	got := TailwindPreflight(DefaultTailwindTheme())
-	for _, want := range []string{"box-sizing:border-box", "margin:0", "::before", "border-style:solid"} {
+	for _, want := range []string{"box-sizing:border-box", "margin:0", "::before", "border:0 solid", "::backdrop", "::file-selector-button"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("preflight missing %q", want)
 		}

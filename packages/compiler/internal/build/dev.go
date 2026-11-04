@@ -124,7 +124,7 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 			if (ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename)) && isDir(ev.Name) {
 				_ = watcher.Remove(ev.Name)
 			}
-			if !trackedFile(ev.Name) {
+			if !b.watchedFile(ev.Name) {
 				continue
 			}
 			pending = append(pending, ev.Name)
@@ -391,6 +391,18 @@ func skippedDir(path string) bool {
 		}
 	}
 	return false
+}
+
+// watchedFile reports whether a change to path should trigger a rebuild: a
+// tracked source extension, or any file (such as a url() image or font) that a
+// built page recorded as a dependency.
+func (b *Builder) watchedFile(path string) bool {
+	if trackedFile(path) {
+		return true
+	}
+	b.depMu.Lock()
+	defer b.depMu.Unlock()
+	return len(b.depGraph[path]) > 0
 }
 
 // trackedFile reports whether path has an extension krate rebuilds on.

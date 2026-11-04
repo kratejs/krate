@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 )
 
@@ -110,4 +111,13 @@ func readOnlyPageCSS(t *testing.T, outDir string) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+func TestModuleClassSetSplitsComposedNames(t *testing.T) {
+	set := moduleClassSet(map[string]*bundler.CSSModuleInfo{
+		"a": {Mappings: map[string]string{"card": "card_x other_y"}},
+	})
+	if !set["card_x"] || !set["other_y"] || set["card_x other_y"] {
+		t.Fatalf("set = %v", set)
+	}
 }

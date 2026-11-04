@@ -6,7 +6,6 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -65,10 +64,13 @@ type CSSModuleInfo struct {
 }
 
 type Bundle struct {
-	EntryPath      string
-	Modules        []*Module
-	CSS            string
-	CSSModules     map[string]*CSSModuleInfo
+	EntryPath  string
+	Modules    []*Module
+	CSS        string
+	CSSModules map[string]*CSSModuleInfo
+	// CSSDeps are the files the page's CSS was built from beyond its modules:
+	// @import targets, url() assets and composes sources.
+	CSSDeps        []string
 	AssetFiles     map[string]string // resolved source path -> hashed site URL (/assets/...)
 	WorkerFiles    map[string]string // worker source path -> hashed site URL (/workers/...)
 	WorkerEsm      map[string]bool   // worker source path -> true when built with `type: 'module'`
@@ -83,6 +85,7 @@ type Bundler struct {
 	order             []*Module
 	css               []string
 	cssModules        map[string]*CSSModuleInfo
+	cssDeps           map[string]bool
 	assets            map[string]string // resolved source path -> hashed site URL
 	workers           map[string]string // worker source path -> hashed site URL (/workers/...)
 	workerEsm         map[string]bool   // worker source path -> built as ES module
@@ -111,7 +114,13 @@ type Bundler struct {
 
 	// tsOpts are the tsconfig options used when stripping TypeScript.
 	tsOpts tsstrip.Options
+
+	// twImports controls how `@import "tailwindcss"` is treated in CSS.
+	twImports css.TailwindImportMode
 }
+
+// SetTailwindImports configures the handling of Tailwind package imports.
+func (b *Bundler) SetTailwindImports(m css.TailwindImportMode) { b.twImports = m }
 
 // SetTSOptions configures how TypeScript sources are lowered (decorators,
 // class-field semantics) before parsing.
@@ -282,6 +291,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	b.order = nil
 	b.css = nil
 	b.cssModules = make(map[string]*CSSModuleInfo)
+	b.cssDeps = make(map[string]bool)
 	b.frontmatter = nil
 	b.actionImports = make(map[string]string)
 	b.actionErr = nil
@@ -323,6 +333,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		Modules:        b.order,
 		CSS:            strings.Join(b.css, "\n"),
 		CSSModules:     b.cssModules,
+		CSSDeps:        sortedKeys(b.cssDeps),
 		AssetFiles:     b.assets,
 		WorkerFiles:    b.workers,
 		WorkerEsm:      b.workerEsm,
@@ -412,58 +423,6 @@ func isSourceExt(path string) bool {
 		return true
 	}
 	return false
-}
-
-func (b *Bundler) resolveCSSModule(path, abs string, mtime time.Time, size int64, statOK bool) error {
-	if statOK {
-		if e, ok := b.cache.getCSS(abs, mtime, size); ok {
-			if e.isModule {
-				b.css = append(b.css, e.css)
-				b.cssModules[abs] = &CSSModuleInfo{ResolvedPath: abs, ScopedCSS: e.css, Mappings: e.mapping}
-			} else {
-				b.css = append(b.css, e.css)
-			}
-			for k, v := range e.assets {
-				b.assets[k] = v
-			}
-			b.order = append(b.order, &Module{Path: path, IsCSS: true})
-			return nil
-		}
-	}
-
-	data, err := os.ReadFile(abs)
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", path, err)
-	}
-
-	// Inline @imports here, relative to THIS file's directory. Inlining later on
-	// the concatenated page CSS loses per-file origin, so a first-level
-	// `@import "./tokens.css"` would resolve against the wrong directory.
-	inlined := css.InlineImports(string(data), filepath.Dir(abs))
-	// Resolve and hash `url(...)` assets relative to this sheet so CSS images
-	// and fonts are content-addressed and copied like JS-imported assets.
-	inlined, assets := b.rewriteCSSUrls(inlined, filepath.Dir(abs))
-
-	isModule := strings.Contains(path, ".module.")
-	entry := &cssEntry{mtime: mtime, size: size, isModule: isModule, assets: assets}
-	if isModule {
-		scopedCSS, mapping, err := css.ProcessModule(abs, inlined)
-		if err != nil {
-			return fmt.Errorf("processing css module %s: %w", path, err)
-		}
-		b.css = append(b.css, scopedCSS)
-		b.cssModules[abs] = &CSSModuleInfo{ResolvedPath: abs, ScopedCSS: scopedCSS, Mappings: mapping}
-		entry.css = scopedCSS
-		entry.mapping = mapping
-	} else {
-		b.css = append(b.css, inlined)
-		entry.css = inlined
-	}
-	if statOK {
-		b.cache.putCSS(abs, entry)
-	}
-	b.order = append(b.order, &Module{Path: path, IsCSS: true})
-	return nil
 }
 
 func (b *Bundler) resolveJSONModule(path, abs string, mtime time.Time, size int64, statOK bool, isEntry bool) error {
@@ -1133,8 +1092,8 @@ func rewriteCSSModuleExpr(expr ast.Expr, locals map[string]map[string]string) as
 	case *ast.MemberExpr:
 		if id, ok := e.Object.(*ast.Identifier); ok {
 			if mappings, ok := locals[id.Name]; ok {
-				if prop, ok := e.Property.(*ast.Identifier); ok && !e.Computed {
-					if hash, ok := mappings[prop.Name]; ok {
+				if key, ok := cssModuleMemberKey(e); ok {
+					if hash, ok := mappings[key]; ok {
 						return &ast.Literal{Kind: ast.StringLit, Value: hash}
 					}
 				}
@@ -1208,6 +1167,21 @@ func rewriteCSSModuleExpr(expr ast.Expr, locals map[string]map[string]string) as
 	return expr
 }
 
+// cssModuleMemberKey returns the class key read by `styles.key` or
+// `styles["key"]`.
+func cssModuleMemberKey(e *ast.MemberExpr) (string, bool) {
+	if !e.Computed {
+		if prop, ok := e.Property.(*ast.Identifier); ok {
+			return prop.Name, true
+		}
+		return "", false
+	}
+	if lit, ok := e.Property.(*ast.Literal); ok && lit.Kind == ast.StringLit {
+		return lit.Value, true
+	}
+	return "", false
+}
+
 func rewriteCSSModuleJSXChild(child ast.JSXChild, locals map[string]map[string]string) ast.JSXChild {
 	switch c := child.(type) {
 	case *ast.JSXExprContainer:
@@ -1221,74 +1195,6 @@ func rewriteCSSModuleJSXChild(child ast.JSXChild, locals map[string]map[string]s
 		return c
 	}
 	return child
-}
-
-// cssURLRe matches `url(...)` references in CSS (quoted or bare).
-var cssURLRe = regexp.MustCompile(`url\(\s*(['"]?)([^'")]+)(['"]?)\s*\)`)
-
-// rewriteCSSUrls resolves relative `url(...)` references in a stylesheet
-// against the sheet's directory, registers each asset in the bundle's asset map
-// (content-hashed, served from /assets/), and rewrites the URL. External URLs,
-// data URIs, fragments, `var(...)` and root-absolute paths are left untouched.
-// rewriteCSSUrls resolves and content-hashes `url(...)` assets relative to the
-// sheet's directory, returning the rewritten CSS and the assets it referenced
-// (source path -> hashed site URL) so the mapping can be cached and replayed.
-func (b *Bundler) rewriteCSSUrls(cssText, cssDir string) (string, map[string]string) {
-	used := make(map[string]string)
-	out := cssURLRe.ReplaceAllStringFunc(cssText, func(m string) string {
-		sub := cssURLRe.FindStringSubmatch(m)
-		if len(sub) < 4 {
-			return m
-		}
-		quote := sub[1]
-		ref := strings.TrimSpace(sub[2])
-		if ref == "" || isExternalCSSURL(ref) {
-			return m
-		}
-		frag := ""
-		if i := strings.IndexAny(ref, "?#"); i >= 0 {
-			frag = ref[i:]
-			ref = ref[:i]
-		}
-		if ref == "" {
-			return m
-		}
-		abs := filepath.Clean(filepath.Join(cssDir, filepath.FromSlash(ref)))
-		if rel, err := filepath.Rel(b.root, abs); err != nil || rel == ".." ||
-			strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return m
-		}
-		if _, err := os.Stat(abs); err != nil {
-			return m
-		}
-		url, ok := b.assets[abs]
-		if !ok {
-			data, err := os.ReadFile(abs)
-			if err != nil {
-				return m
-			}
-			base := filepath.Base(abs)
-			ext := filepath.Ext(base)
-			name := strings.TrimSuffix(base, ext)
-			url = "/assets/" + name + "-" + hashBytes(data) + ext
-			b.assets[abs] = url
-		}
-		used[abs] = url
-		return "url(" + quote + url + frag + quote + ")"
-	})
-	return out, used
-}
-
-// isExternalCSSURL reports whether a CSS url() target is not a project-relative
-// file path.
-func isExternalCSSURL(ref string) bool {
-	l := strings.ToLower(ref)
-	for _, p := range []string{"http://", "https://", "//", "data:", "blob:", "#", "var("} {
-		if strings.HasPrefix(l, p) {
-			return true
-		}
-	}
-	return false
 }
 
 // rewriteAssetImportRefs replaces imported-asset binding reads with their

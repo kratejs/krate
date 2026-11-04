@@ -630,7 +630,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if layoutErr != nil {
 		return nil, "", layoutErr
 	}
-	bundle.CSS += layoutCSS
+	bundle.CSS = b.dedupeModuleCSS(spp.PagePath, layoutCSS+bundle.CSS, bundle.CSSModules)
 	deps = append(deps, layoutFiles...)
 	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures)
 
@@ -643,6 +643,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 			deps = append(deps, mod.Path)
 		}
 	}
+	deps = append(deps, bundle.CSSDeps...)
 	b.recordDeps(spp.PagePath, deps)
 
 	pageDir := filepath.Join(b.Cfg.OutDir, spp.OutPath)
@@ -654,8 +655,10 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	hydrationJS := ""
 	hasJS := false
 	needsHydrate := len(emitResult.Signatures) > 0
+	dceJS := append(lazyChunkSources(emitResult.LazyChunks), b.clientChunkSources(clientBoundaries)...)
 	if needsHydrate {
 		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
+		dceJS = append(dceJS, hydrationJS)
 		hydrationJS = b.writeLazyChunks(hydrationJS, emitResult.LazyChunks, pageDir, spp.OutPath)
 		if strings.TrimSpace(hydrationJS) != "" {
 			hasJS = true
@@ -680,7 +683,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 	b.registerWorkers(bundle.WorkerFiles, bundle.WorkerEsm)
 	b.registerDynamicChunks(bundle.DynImportFiles)
-	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
+	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML, dceJS...)
 	return &PageResult{
 		Page:        spp.PagePath,
 		OutName:     spp.OutPath,

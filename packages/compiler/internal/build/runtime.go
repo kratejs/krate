@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
@@ -217,4 +218,26 @@ func writeDevChunk(outDir, projectRoot string) string {
 	relPath := "chunks/krate-dev.js"
 	_ = fsutil.WriteFileAtomic(filepath.Join(outDir, relPath), []byte(content), 0644)
 	return relPath
+}
+
+// warnMissingRuntime prints a diagnostic when pages ship hydration JS but the
+// runtime chunk could not be written, which would otherwise produce pages that
+// fail in the browser (e.g. "refreshSlots is not defined"). It is a warning,
+// not an error, because the runtime may be supplied by a later deploy step.
+func warnMissingRuntime(runtimeJS string, results []*PageResult) {
+	if runtimeJS != "" {
+		return
+	}
+	for _, r := range results {
+		if r != nil && r.HasJS {
+			d := diag.Diagnostic{
+				File:     r.SourcePath,
+				Message:  "the @krate/runtime hydration bundle (krate-hydrate.js) was not found; interactive pages will fail to hydrate in the browser",
+				Hint:     "build the runtime (`pnpm --filter @krate/runtime build`) or install @krate/runtime so packages/runtime/dist or node_modules/@krate/runtime/dist exists",
+				Severity: diag.SeverityWarning,
+			}
+			fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n      hint: %s\n", cYellow, cReset, d.Error(), d.Hint)
+			return
+		}
+	}
 }

@@ -10,10 +10,10 @@ import (
 
 func TestScaleAxisUtilities(t *testing.T) {
 	tests := map[string]string{
-		"scale-x-50":  "--tw-scale-x: 0.5;",
-		"scale-y-110": "--tw-scale-y: 1.1;",
-		"scale-95":    "--tw-scale-x: 0.95; --tw-scale-y: 0.95;",
-		"scale-[1.7]": "--tw-scale-x: 1.7; --tw-scale-y: 1.7;",
+		"scale-x-50":  "--tw-scale-x: 50%;",
+		"scale-y-110": "--tw-scale-y: 110%;",
+		"scale-95":    "--tw-scale-x: 95%; --tw-scale-y: 95%;",
+		"scale-[1.7]": "scale: 1.7;",
 	}
 	for cls, want := range tests {
 		got := gen(t, cls)
@@ -30,10 +30,10 @@ func TestScaleAxisUtilities(t *testing.T) {
 
 func TestRotateAndSkewArbitrary(t *testing.T) {
 	tests := map[string]string{
-		"rotate-[17deg]": "--tw-rotate: 17deg;",
-		"rotate-45":      "--tw-rotate: 45deg;",
-		"skew-x-[12deg]": "--tw-skew-x: 12deg;",
-		"skew-y-6":       "--tw-skew-y: 6deg;",
+		"rotate-[17deg]": "rotate: 17deg;",
+		"rotate-45":      "rotate: 45deg;",
+		"skew-x-[12deg]": "--tw-skew-x: skewX(12deg);",
+		"skew-y-6":       "--tw-skew-y: skewY(6deg);",
 	}
 	for cls, want := range tests {
 		got := gen(t, cls)
@@ -124,7 +124,7 @@ func TestArbitraryTypedUtilities(t *testing.T) {
 		"duration-[2s]":                              "transition-duration: 2s;",
 		"ease-[cubic-bezier(0.1,0.2,0.3,0.4)]":       "transition-timing-function: cubic-bezier(0.1,0.2,0.3,0.4);",
 		"ring-offset-[3px]":                          "--tw-ring-offset-width: 3px;",
-		"shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)]": "--tw-shadow: 0 35px 60px -15px rgba(0,0,0,0.3);",
+		"shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)]": "--tw-shadow: 0 35px 60px -15px var(--tw-shadow-color, rgba(0,0,0,0.3));",
 	}
 	for cls, want := range tests {
 		got := gen(t, cls)
@@ -141,9 +141,9 @@ func TestArbitraryTypedUtilities(t *testing.T) {
 
 func TestGradientStopsWithAlpha(t *testing.T) {
 	tests := map[string]string{
-		"from-indigo-400/50": "--tw-gradient-from: rgb(129 140 248 / 0.5);",
-		"via-purple-500/50":  "rgb(168 85 247 / 0.5)",
-		"to-pink-500/25":     "--tw-gradient-to: rgb(236 72 153 / 0.25);",
+		"from-indigo-400/50": "--tw-gradient-from: color-mix(in oklab, oklch(67.3% 0.182 276.935) 50%, transparent);",
+		"via-purple-500/50":  "color-mix(in oklab, oklch(62.7% 0.265 303.9) 50%, transparent)",
+		"to-pink-500/25":     "--tw-gradient-to: color-mix(in oklab, oklch(65.6% 0.241 354.308) 25%, transparent);",
 		"from-[#bada55]":     "--tw-gradient-from: #bada55;",
 	}
 	for cls, want := range tests {
@@ -159,7 +159,7 @@ func TestSpacingArbitraryMultiples(t *testing.T) {
 		"p-13":    "padding: 3.25rem;",
 		"p-15":    "padding: 3.75rem;",
 		"p-13.5":  "padding: 3.375rem;",
-		"px-13":   "padding-left: 3.25rem; padding-right: 3.25rem;",
+		"px-13":   "padding-inline: 3.25rem;",
 		"gap-13":  "gap: 3.25rem;",
 		"top-1/2": "top: 50%;",
 	}
@@ -175,7 +175,7 @@ func TestSpacingArbitraryMultiples(t *testing.T) {
 }
 
 func TestRingOffsetColor(t *testing.T) {
-	if got := gen(t, "ring-offset-blue-500"); !strings.Contains(got, "--tw-ring-offset-color: #3b82f6;") {
+	if got := gen(t, "ring-offset-blue-500"); !strings.Contains(got, "--tw-ring-offset-color: oklch(62.3% 0.214 259.815);") {
 		t.Errorf("ring-offset color unsupported: %s", got)
 	}
 	if got := gen(t, "ring-offset-2"); !strings.Contains(got, "--tw-ring-offset-width: 2px;") {
@@ -192,14 +192,14 @@ func TestSpaceReverseSelector(t *testing.T) {
 		t.Errorf("space-x-reverse missing: %s", got)
 	}
 	// space-x-4 still uses the suffix.
-	if got := gen(t, "space-x-4"); !strings.Contains(got, "> :not([hidden]) ~ :not([hidden])") {
+	if got := gen(t, "space-x-4"); !strings.Contains(got, ":where(.space-x-4 > :not(:last-child))") {
 		t.Errorf("space-x-4 should still use the suffix: %s", got)
 	}
 }
 
 func TestDivideBareAndReverse(t *testing.T) {
 	tests := map[string]string{
-		"divide-x":         "border-left-width",
+		"divide-x":         "border-inline-start-width",
 		"divide-y":         "border-top-width",
 		"divide-y-reverse": "--tw-divide-y-reverse: 1;",
 	}
@@ -215,10 +215,10 @@ func TestDivideBareAndReverse(t *testing.T) {
 }
 
 func TestShadow2xlAndNone(t *testing.T) {
-	if got := gen(t, "shadow-2xl"); !strings.Contains(got, "--tw-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);") {
+	if got := gen(t, "shadow-2xl"); !strings.Contains(got, "--tw-shadow: 0 25px 50px -12px var(--tw-shadow-color, rgb(0 0 0 / 0.25));") {
 		t.Errorf("shadow-2xl rejected: %s", got)
 	}
-	if got := gen(t, "shadow-none"); !strings.Contains(got, "box-shadow: none;") {
+	if got := gen(t, "shadow-none"); !strings.Contains(got, "--tw-shadow: 0 0 #0000;") {
 		t.Errorf("shadow-none failed: %s", got)
 	}
 }
@@ -259,11 +259,11 @@ func TestScannerRejectsProse(t *testing.T) {
 
 func TestContainerQueryVariants(t *testing.T) {
 	got := gen(t, "@sm:flex")
-	if !strings.Contains(got, "@media (min-width: 24rem)") {
+	if !strings.Contains(got, "@container (width >= 24rem)") {
 		t.Errorf("@sm container query missing: %s", got)
 	}
 	got = gen(t, "@[400px]:grid")
-	if !strings.Contains(got, "@media (min-width: 400px)") {
+	if !strings.Contains(got, "@container (width >= 400px)") {
 		t.Errorf("@[400px] container query missing: %s", got)
 	}
 }
@@ -313,13 +313,13 @@ func TestNthAndCapabilityVariants(t *testing.T) {
 
 func TestFilterFamilies(t *testing.T) {
 	tests := map[string]string{
-		"blur-sm":        "--tw-blur: blur(4px);",
-		"brightness-150": "--tw-brightness: brightness(1.5);",
-		"contrast-125":   "--tw-contrast: contrast(1.25);",
+		"blur-sm":        "--tw-blur: blur(8px);",
+		"brightness-150": "--tw-brightness: brightness(150%);",
+		"contrast-125":   "--tw-contrast: contrast(125%);",
 		"grayscale":      "--tw-grayscale: grayscale(100%);",
 		"hue-rotate-90":  "--tw-hue-rotate: hue-rotate(90deg);",
 		"invert":         "--tw-invert: invert(100%);",
-		"saturate-200":   "--tw-saturate: saturate(2);",
+		"saturate-200":   "--tw-saturate: saturate(200%);",
 		"sepia":          "--tw-sepia: sepia(100%);",
 		"drop-shadow-md": "--tw-drop-shadow: drop-shadow(",
 	}
@@ -409,10 +409,10 @@ func TestTypographyFamilies(t *testing.T) {
 func TestInteractivityFamilies(t *testing.T) {
 	tests := map[string]string{
 		"resize-none":           "resize: none;",
-		"touch-pan-x":           "touch-action: pan-x;",
+		"touch-pan-x":           "--tw-pan-x: pan-x;",
 		"will-change-transform": "will-change: transform;",
-		"accent-pink-500":       "accent-color: #ec4899;",
-		"caret-red-500":         "caret-color: #ef4444;",
+		"accent-pink-500":       "accent-color: oklch(65.6% 0.241 354.308);",
+		"caret-red-500":         "caret-color: oklch(63.7% 0.237 25.331);",
 		"scroll-smooth":         "scroll-behavior: smooth;",
 		"field-sizing-content":  "field-sizing: content;",
 	}
@@ -429,7 +429,7 @@ func TestTransform3DFamilies(t *testing.T) {
 		"perspective-normal": "perspective: 500px;",
 		"transform-style-3d": "transform-style: preserve-3d;",
 		"backface-hidden":    "backface-visibility: hidden;",
-		"rotate-x-45":        "--tw-rotate-x: 45deg;",
+		"rotate-x-45":        "--tw-rotate-x: rotateX(45deg);",
 		"zoom-75":            "zoom: 0.75;",
 	}
 	for cls, want := range tests {
@@ -444,7 +444,7 @@ func TestBorderExtras(t *testing.T) {
 	tests := map[string]string{
 		"outline-dashed":   "outline-style: dashed;",
 		"outline-offset-4": "outline-offset: 4px;",
-		"outline-blue-500": "outline-color: #3b82f6;",
+		"outline-blue-500": "outline-color: oklch(62.3% 0.214 259.815);",
 		"border-spacing-2": "--tw-border-spacing-x: 0.5rem; --tw-border-spacing-y: 0.5rem;",
 		"border-s-2":       "border-inline-start-width: 2px;",
 	}
@@ -457,7 +457,7 @@ func TestBorderExtras(t *testing.T) {
 }
 
 func TestBackgroundExtras(t *testing.T) {
-	if got := gen(t, "bg-linear-to-r"); !strings.Contains(got, "linear-gradient(to right") {
+	if got := gen(t, "bg-linear-to-r"); !strings.Contains(got, "--tw-gradient-position: to right in oklab") {
 		t.Errorf("bg-linear-to-r failed: %s", got)
 	}
 	if got := gen(t, "from-50%"); !strings.Contains(got, "--tw-gradient-from-position: 50%;") {
@@ -499,8 +499,10 @@ func TestMinifierCalcNoSpaces(t *testing.T) {
 	tests := map[string]string{
 		"calc(1*2rem)": "2rem",
 		"calc(2rem*1)": "2rem",
-		"calc(0+2rem)": "2rem",
-		"calc(2rem+0)": "2rem",
+		// calc() needs whitespace around + and -, so these are invalid CSS and
+		// are left exactly as written rather than silently repaired.
+		"calc(0+2rem)": "calc(0+2rem)",
+		"calc(2rem+0)": "calc(2rem+0)",
 	}
 	for in, want := range tests {
 		out := Minify(".a{width:" + in + "}")
@@ -517,8 +519,8 @@ func TestPreflightNoGlobalScrollBehavior(t *testing.T) {
 	if strings.Contains(got, "scroll-behavior:smooth") {
 		t.Errorf("preflight must not set global scroll-behavior: %s", got)
 	}
-	if !strings.Contains(got, "--tw-divide-x-reverse:0") {
-		t.Errorf("preflight missing divide reverse defaults: %s", got)
+	if !strings.Contains(got, "[hidden]:where(:not([hidden='until-found'])){display:none !important}") {
+		t.Errorf("preflight must keep [hidden] elements hidden: %s", got)
 	}
 }
 

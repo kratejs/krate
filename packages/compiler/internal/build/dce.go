@@ -1,12 +1,15 @@
 package build
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/css"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
+	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
 
 // aggressiveDCE reports whether JS dead-code elimination may drop local helper
@@ -31,7 +34,7 @@ func (b *Builder) dceCSSEnabled() bool {
 // pageCSSAfterDCE prunes unused CSS-module rules from a page's own CSS. It is a
 // no-op unless DCE is enabled and the page is statically rendered (SSR/ISR pages
 // are left untouched).
-func (b *Builder) pageCSSAfterDCE(renderMode RenderMode, cssText string, modules map[string]*bundler.CSSModuleInfo, html string) string {
+func (b *Builder) pageCSSAfterDCE(renderMode RenderMode, cssText string, modules map[string]*bundler.CSSModuleInfo, html string, clientJS ...string) string {
 	if !b.dceCSSEnabled() || renderMode != RenderSSG || cssText == "" {
 		return cssText
 	}
@@ -39,7 +42,47 @@ func (b *Builder) pageCSSAfterDCE(renderMode RenderMode, cssText string, modules
 	if len(scoped) == 0 {
 		return cssText
 	}
-	return pruneModuleCSS(cssText, scoped, collectClassTokens(html))
+	used := collectClassTokens(html)
+	// Classes applied only on the client (signal-driven class expressions) show
+	// up in the emitted JS. Scoped names carry a unique hash suffix, so a
+	// substring search over the JS is safe.
+	for cls := range scoped {
+		if used[cls] {
+			continue
+		}
+		for _, js := range clientJS {
+			if js != "" && strings.Contains(js, cls) {
+				used[cls] = true
+				break
+			}
+		}
+	}
+	return pruneModuleCSS(cssText, scoped, used)
+}
+
+// clientChunkSources returns the contents of the "use client" chunks already
+// written under the output directory, for the CSS usage scan.
+func (b *Builder) clientChunkSources(boundaries []ClientBoundary) []string {
+	var out []string
+	for _, cb := range boundaries {
+		i := strings.LastIndex(cb.ChunkURL, "chunks/")
+		if i < 0 {
+			continue
+		}
+		if data, err := os.ReadFile(filepath.Join(b.Cfg.OutDir, filepath.FromSlash(cb.ChunkURL[i:]))); err == nil {
+			out = append(out, string(data))
+		}
+	}
+	return out
+}
+
+// lazyChunkSources returns the hydration code of lazy() chunks.
+func lazyChunkSources(chunks []renderer.LazyChunk) []string {
+	out := make([]string, 0, len(chunks))
+	for _, c := range chunks {
+		out = append(out, c.JS)
+	}
+	return out
 }
 
 var classAttrRe = regexp.MustCompile(`class="([^"]*)"`)
@@ -61,7 +104,10 @@ func moduleClassSet(modules map[string]*bundler.CSSModuleInfo) map[string]bool {
 	set := make(map[string]bool)
 	for _, m := range modules {
 		for _, scoped := range m.Mappings {
-			set[scoped] = true
+			// Composed classes map to "a_h b_h".
+			for _, cls := range strings.Fields(scoped) {
+				set[cls] = true
+			}
 		}
 	}
 	return set

@@ -20,11 +20,7 @@ func ParseTailwindConfigStatic(path string) (*TailwindConfig, bool) {
 
 	cfg := &TailwindConfig{Theme: DefaultTailwindTheme()}
 
-	// darkMode: 'class' | 'media' | 'selector' | ['class', '.dark'] | ['selector', ...]
-	if v, ok := parseDarkMode(src); ok {
-		cfg.Theme.DarkMode = v
-		cfg.DarkMode = v
-	}
+	applyConfigScalars(src, cfg)
 
 	// Locate `theme: { ... }`.
 	themeSrc, ok := extractBlock(src, "theme")
@@ -39,17 +35,21 @@ func ParseTailwindConfigStatic(path string) (*TailwindConfig, bool) {
 	// passes the current (already-defaulted) theme value as the merge base -
 	// this also covers borderRadius/boxShadow/fontSize/fontWeight, which
 	// previously had no base and so discarded the whole default scale.
-	applyThemeKey("spacing", override, extend, &cfg.Theme.Spacing)
-	applyThemeKey("screens", override, extend, &cfg.Theme.Screens)
-	applyThemeKey("maxWidth", override, extend, &cfg.Theme.MaxWidth)
-	applyThemeKey("minWidth", override, extend, &cfg.Theme.MinWidth)
-	applyThemeKey("lineHeight", override, extend, &cfg.Theme.LineHeight)
-	applyThemeKey("opacity", override, extend, &cfg.Theme.Opacity)
-	applyThemeKey("fontFamily", override, extend, &cfg.Theme.FontFamily)
-	applyThemeKey("borderRadius", override, extend, &cfg.Theme.Radii)
-	applyThemeKey("boxShadow", override, extend, &cfg.Theme.Shadows)
-	applyThemeKey("fontSize", override, extend, &cfg.Theme.TextSizes)
-	applyThemeKey("fontWeight", override, extend, &cfg.Theme.FontWeights)
+	w := func(msg string) { cfg.Warnings = append(cfg.Warnings, msg) }
+	applyThemeKey("spacing", override, extend, &cfg.Theme.Spacing, nil, w)
+	applyThemeKey("screens", override, extend, &cfg.Theme.Screens, screenValue, w)
+	applyThemeKey("maxWidth", override, extend, &cfg.Theme.MaxWidth, nil, w)
+	applyThemeKey("minWidth", override, extend, &cfg.Theme.MinWidth, nil, w)
+	applyThemeKey("lineHeight", override, extend, &cfg.Theme.LineHeight, nil, w)
+	applyThemeKey("opacity", override, extend, &cfg.Theme.Opacity, nil, w)
+	applyThemeKey("fontFamily", override, extend, &cfg.Theme.FontFamily, fontFamilyValue, w)
+	applyThemeKey("borderRadius", override, extend, &cfg.Theme.Radii, nil, w)
+	applyThemeKey("boxShadow", override, extend, &cfg.Theme.Shadows, nil, w)
+	applyThemeKey("fontSize", override, extend, &cfg.Theme.TextSizes, fontSizeValue, w)
+	applyThemeKey("fontWeight", override, extend, &cfg.Theme.FontWeights, nil, w)
+	applyThemeKey("letterSpacing", override, extend, &cfg.Theme.Tracking, nil, w)
+	applyThemeKey("animation", override, extend, &cfg.Theme.Animation, nil, w)
+	applyKeyframes(override, extend, &cfg.Theme.Keyframes, w)
 
 	// Colors: nested map (name -> shade -> value). Replaced when top-level.
 	if colors, ok := parseColorMap(override, "colors"); ok {
@@ -66,25 +66,6 @@ func ParseTailwindConfigStatic(path string) (*TailwindConfig, bool) {
 	return cfg, true
 }
 
-var (
-	reDarkMode    = regexp.MustCompile(`darkMode\s*:\s*['"]([a-zA-Z]+)['"]`)
-	reDarkModeArr = regexp.MustCompile(`darkMode\s*:\s*\[\s*['"]([a-zA-Z]+)['"]`)
-)
-
-// parseDarkMode extracts the dark-mode strategy from either the string form
-// (`darkMode: 'class'`) or the array form (`darkMode: ['class', '.dark']`).
-func parseDarkMode(src string) (string, bool) {
-	for _, re := range []*regexp.Regexp{reDarkModeArr, reDarkMode} {
-		if m := re.FindStringSubmatch(src); m != nil {
-			switch m[1] {
-			case "class", "selector", "media":
-				return m[1], true
-			}
-		}
-	}
-	return "", false
-}
-
 // splitThemeBlocks extracts the top-level theme source and the `extend` source.
 func splitThemeBlocks(themeSrc string) (override, extend string) {
 	if ext, ok := extractBlock(themeSrc, "extend"); ok {
@@ -95,15 +76,17 @@ func splitThemeBlocks(themeSrc string) (override, extend string) {
 	return themeSrc, ""
 }
 
-// applyThemeKey parses a flat string/number map under `key`. A top-level theme
-// key replaces the target map; an `extend` key merges onto the target's
-// existing (default) contents.
-func applyThemeKey(key, override, extend string, target *map[string]string) {
-	if m, ok := parseFlatMap(override, key); ok && len(m) > 0 {
+// applyThemeKey parses a flat map under `key`. A top-level theme key replaces
+// the target map; an `extend` key merges onto the target's existing (default)
+// contents. conv converts one raw value (nil means a plain scalar); entries the
+// static parser cannot evaluate are reported through warn, never dropped
+// silently.
+func applyThemeKey(key, override, extend string, target *map[string]string, conv func(string) (string, bool), warn func(string)) {
+	if m, ok := parseFlatMap(override, key, conv, warn); ok && len(m) > 0 {
 		*target = m
 		return
 	}
-	if m, ok := parseFlatMap(extend, key); ok && len(m) > 0 {
+	if m, ok := parseFlatMap(extend, key, conv, warn); ok && len(m) > 0 {
 		if *target == nil {
 			*target = map[string]string{}
 		}
@@ -114,16 +97,321 @@ func applyThemeKey(key, override, extend string, target *map[string]string) {
 }
 
 // parseFlatMap parses `key: { a: 'x', b: 4 }` into a string map.
-func parseFlatMap(src, key string) (map[string]string, bool) {
+func parseFlatMap(src, key string, conv func(string) (string, bool), warn func(string)) (map[string]string, bool) {
 	block, ok := extractBlock(src, key)
 	if !ok {
 		return nil, false
 	}
+	if conv == nil {
+		conv = scalarValue
+	}
 	out := map[string]string{}
-	for _, m := range reKV.FindAllStringSubmatch(block, -1) {
-		out[unquote(m[1])] = unquote(m[2])
+	for _, kv := range topLevelEntriesOrdered(block) {
+		if v, ok := conv(kv.val); ok {
+			out[kv.key] = v
+		} else if warn != nil {
+			warn("tailwind.config theme." + key + "." + kv.key + ": value `" + abbreviate(kv.val) + "` cannot be evaluated statically; set tailwind.executeConfig to evaluate the config")
+		}
 	}
 	return out, len(out) > 0
+}
+
+func abbreviate(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 60 {
+		return s[:57] + "..."
+	}
+	return s
+}
+
+// screenValue accepts plain min-width screens; {min,max} / {raw} objects need
+// the range form Krate's screens map cannot hold.
+func screenValue(raw string) (string, bool) { return scalarValue(raw) }
+
+// fontFamilyValue accepts a string or an array of family names.
+func fontFamilyValue(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "[") {
+		inner, ok := bracketBody(raw)
+		if !ok {
+			return "", false
+		}
+		var parts []string
+		for _, item := range splitTopLevelCommas(inner) {
+			v, ok := scalarValue(item)
+			if !ok {
+				return "", false
+			}
+			parts = append(parts, quoteFamily(v))
+		}
+		return strings.Join(parts, ", "), len(parts) > 0
+	}
+	return scalarValue(raw)
+}
+
+func quoteFamily(v string) string {
+	if strings.ContainsAny(v, " \t") && !strings.HasPrefix(v, "\"") && !strings.HasPrefix(v, "'") {
+		return "\"" + v + "\""
+	}
+	return v
+}
+
+// bracketBody returns the inner text of a `[ ... ]` value.
+func bracketBody(s string) (string, bool) {
+	if len(s) < 2 || s[0] != '[' {
+		return "", false
+	}
+	depth := 0
+	for j := 0; j < len(s); j++ {
+		switch s[j] {
+		case '\'', '"', '`':
+			j = skipString(s, j) - 1
+		case '[', '{', '(':
+			depth++
+		case ']', '}', ')':
+			depth--
+			if depth == 0 {
+				return s[1:j], true
+			}
+		}
+	}
+	return "", false
+}
+
+// fontSizeValue accepts '1rem' and the tuple form
+// ['0.875rem', { lineHeight: '1.25rem', letterSpacing: '...' }] / ['1rem', '1.5'].
+func fontSizeValue(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "[") {
+		return scalarValue(raw)
+	}
+	inner, ok := bracketBody(raw)
+	if !ok {
+		return "", false
+	}
+	items := splitTopLevelCommas(inner)
+	if len(items) == 0 {
+		return "", false
+	}
+	size, ok := scalarValue(items[0])
+	if !ok {
+		return "", false
+	}
+	out := "font-size: " + size + ";"
+	if len(items) > 1 {
+		second := strings.TrimSpace(items[1])
+		if strings.HasPrefix(second, "{") {
+			body, _ := braceBody(second)
+			for _, e := range topLevelEntriesOrdered(body) {
+				if v, ok := scalarValue(e.val); ok {
+					out += " " + camelToKebab(e.key) + ": " + v + ";"
+				}
+			}
+		} else if v, ok := scalarValue(second); ok {
+			out += " line-height: " + v + ";"
+		}
+	}
+	return out, true
+}
+
+// splitTopLevelCommas splits a list body on commas outside strings/groups.
+func splitTopLevelCommas(body string) []string {
+	var out []string
+	depth, start := 0, 0
+	for i := 0; i < len(body); i++ {
+		switch body[i] {
+		case '\'', '"', '`':
+			i = skipString(body, i) - 1
+		case '{', '[', '(':
+			depth++
+		case '}', ']', ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				if t := strings.TrimSpace(body[start:i]); t != "" {
+					out = append(out, t)
+				}
+				start = i + 1
+			}
+		}
+	}
+	if t := strings.TrimSpace(body[start:]); t != "" {
+		out = append(out, t)
+	}
+	return out
+}
+
+func camelToKebab(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			b.WriteByte('-')
+			c += 'a' - 'A'
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// applyKeyframes parses `keyframes: { name: { '0%, 100%': { prop: 'v' } } }`
+// from the override and extend sources into @keyframes bodies.
+func applyKeyframes(override, extend string, target *map[string]string, warn func(string)) {
+	parse := func(src string) map[string]string {
+		block, ok := extractBlock(src, "keyframes")
+		if !ok {
+			return nil
+		}
+		out := map[string]string{}
+		for _, kf := range topLevelEntriesOrdered(block) {
+			body, ok := braceBody(kf.val)
+			if !ok {
+				warn("tailwind.config theme.keyframes." + kf.key + ": expected an object of frames")
+				continue
+			}
+			var sb strings.Builder
+			for _, frame := range topLevelEntriesOrdered(body) {
+				props, ok := braceBody(frame.val)
+				if !ok {
+					warn("tailwind.config theme.keyframes." + kf.key + "." + frame.key + ": expected an object of declarations")
+					continue
+				}
+				sb.WriteString(frame.key + "{")
+				for _, p := range topLevelEntriesOrdered(props) {
+					v, ok := scalarValue(p.val)
+					if !ok {
+						warn("tailwind.config theme.keyframes." + kf.key + "." + frame.key + "." + p.key + ": value cannot be evaluated statically")
+						continue
+					}
+					sb.WriteString(camelToKebab(unquote(p.key)) + ":" + v + ";")
+				}
+				sb.WriteString("}")
+			}
+			out[kf.key] = sb.String()
+		}
+		return out
+	}
+	if m := parse(override); len(m) > 0 {
+		*target = m
+		return
+	}
+	if m := parse(extend); len(m) > 0 {
+		if *target == nil {
+			*target = map[string]string{}
+		}
+		for k, v := range m {
+			(*target)[k] = v
+		}
+	}
+}
+
+// applyConfigScalars reads the top-level darkMode, prefix, important and the
+// unsupported keys (plugins, presets, ...) from the config source.
+func applyConfigScalars(src string, cfg *TailwindConfig) {
+	if raw, ok := rawValueAfterKey(src, "darkMode"); ok {
+		strategy, selector, warn := parseDarkModeValue(raw)
+		if strategy != "" {
+			cfg.Theme.DarkMode = strategy
+			cfg.DarkMode = strategy
+			cfg.Theme.DarkSelector = selector
+		}
+		if warn != "" {
+			cfg.Warnings = append(cfg.Warnings, warn)
+		}
+	}
+	if raw, ok := rawValueAfterKey(src, "prefix"); ok {
+		if v, ok := scalarValue(raw); ok && v != "" {
+			p := strings.TrimRight(v, "-:")
+			cfg.Theme.Prefix = p
+			cfg.Warnings = append(cfg.Warnings, "tailwind.config prefix '"+v+"': Krate uses the v4 prefix syntax ("+p+":flex)")
+		}
+	}
+	if raw, ok := rawValueAfterKey(src, "important"); ok {
+		raw = strings.TrimSpace(raw)
+		if raw == "true" {
+			cfg.Theme.Important = "true"
+		} else if v, ok := scalarValue(raw); ok && raw != "false" && v != "" {
+			cfg.Theme.Important = v
+		}
+	}
+	if raw, ok := rawValueAfterKey(src, "plugins"); ok {
+		if inner, ok := bracketBody(strings.TrimSpace(raw)); !ok || strings.TrimSpace(inner) != "" {
+			cfg.Warnings = append(cfg.Warnings, "tailwind.config plugins: JS plugins are not executed by Krate; utilities and variants they add will not be generated")
+		}
+	}
+	for _, k := range []string{"presets", "corePlugins", "safelist", "blocklist", "separator"} {
+		if raw, ok := rawValueAfterKey(src, k); ok {
+			if inner := strings.TrimSpace(raw); inner != "[]" && inner != "{}" && inner != "" {
+				cfg.Warnings = append(cfg.Warnings, "tailwind.config "+k+" is not supported by Krate and was ignored")
+			}
+		}
+	}
+}
+
+// parseDarkModeValue interprets 'class' | 'media' | 'selector' |
+// ['class', sel] | ['selector', sel] | ['media'] | ['variant', ...].
+func parseDarkModeValue(raw string) (strategy, selector, warn string) {
+	raw = strings.TrimSpace(raw)
+	var items []string
+	if strings.HasPrefix(raw, "[") {
+		inner, ok := bracketBody(raw)
+		if !ok {
+			return "", "", "tailwind.config darkMode: could not parse the value"
+		}
+		for _, item := range splitTopLevelCommas(inner) {
+			v, _ := scalarValue(item)
+			items = append(items, v)
+		}
+	} else if v, ok := scalarValue(raw); ok {
+		items = []string{v}
+	}
+	if len(items) == 0 {
+		return "", "", ""
+	}
+	switch items[0] {
+	case "class", "selector":
+		if len(items) > 1 {
+			selector = items[1]
+		}
+		return items[0], selector, ""
+	case "media":
+		return "media", "", ""
+	case "variant":
+		return "class", "", "tailwind.config darkMode: the 'variant' form is not supported; use ['selector', '.dark'] or @custom-variant dark"
+	}
+	return "", "", "tailwind.config darkMode: unknown strategy '" + items[0] + "'"
+}
+
+// rawValueAfterKey returns the raw source of a top-level-looking `key: value`
+// pair (first occurrence), reading up to the next top-level comma or closer.
+func rawValueAfterKey(src, key string) (string, bool) {
+	re := regexp.MustCompile(`(?m)(?:^|[\s{,])['"]?` + regexp.QuoteMeta(key) + `['"]?\s*:\s*`)
+	loc := re.FindStringIndex(src)
+	if loc == nil {
+		return "", false
+	}
+	i := loc[1]
+	start := i
+	depth := 0
+	for i < len(src) {
+		c := src[i]
+		if c == '\'' || c == '"' || c == '`' {
+			i = skipString(src, i)
+			continue
+		}
+		if c == '{' || c == '[' || c == '(' {
+			depth++
+		} else if c == '}' || c == ']' || c == ')' {
+			if depth == 0 {
+				break
+			}
+			depth--
+		} else if c == ',' && depth == 0 {
+			break
+		}
+		i++
+	}
+	return strings.TrimSpace(src[start:i]), true
 }
 
 // parseColorMap parses `colors: { name: { shade: 'value' } }`, the flatter
@@ -166,6 +454,17 @@ func parseColorMap(src, key string) (map[string]map[string]string, bool) {
 // raw-value pairs, honouring nested braces, brackets, parens, and strings.
 func topLevelEntries(body string) map[string]string {
 	out := map[string]string{}
+	for _, kv := range topLevelEntriesOrdered(body) {
+		out[kv.key] = kv.val
+	}
+	return out
+}
+
+type kvEntry struct{ key, val string }
+
+// topLevelEntriesOrdered is topLevelEntries preserving source order.
+func topLevelEntriesOrdered(body string) []kvEntry {
+	var out []kvEntry
 	i, n := 0, len(body)
 	for i < n {
 		// Read a key up to the top-level ':'.
@@ -177,6 +476,10 @@ func topLevelEntries(body string) map[string]string {
 		}
 		keyStart := i
 		for i < n && body[i] != ':' && body[i] != ',' {
+			if body[i] == '\'' || body[i] == '"' || body[i] == '`' {
+				i = skipString(body, i)
+				continue
+			}
 			i++
 		}
 		if i >= n || body[i] == ',' {
@@ -206,7 +509,7 @@ func topLevelEntries(body string) map[string]string {
 		}
 	done:
 		if key != "" {
-			out[key] = strings.TrimSpace(body[valStart:i])
+			out = append(out, kvEntry{key, strings.TrimSpace(body[valStart:i])})
 		}
 		if i < n && body[i] == ',' {
 			i++
@@ -280,8 +583,6 @@ func scalarValue(s string) (string, bool) {
 	}
 	return s, true
 }
-
-var reKV = regexp.MustCompile(`['"]?([A-Za-z0-9_.-]+)['"]?\s*:\s*(['"][^'"]*['"]|[0-9.]+|[A-Za-z_][A-Za-z0-9_.]*)`)
 
 // extractBlock finds `key: { ... }` and returns the inner source, honouring
 // nested braces and string literals.

@@ -123,6 +123,15 @@ type Builder struct {
 	pageDeps map[string][]string // page source path -> files it depends on
 	depMu    sync.Mutex          // protects depGraph/pageDeps
 
+	// twMu guards twPages/twWarned: Tailwind CSS-first directives collected
+	// from the authored CSS that flows through processCSSDirectives (replaced
+	// per page on each rebuild, cleared on a full build), and the warnings
+	// already printed.
+	twMu     sync.Mutex
+	modCSS   moduleCSSRegistry     // layout/slot path -> its CSS Modules' scoped CSS
+	twPages  map[string]twPageInfo // page source (or "") -> its collected Tailwind CSS state
+	twWarned map[string]bool
+
 	// goHostMu serialises Go host scaffolding/compilation so concurrent page
 	// builds that lazily need the host (e.g. incremental dev rebuilds) don't
 	// race on the generated module dir.
@@ -580,6 +589,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 
 	// Write shared runtime chunk (extracted from per-page bundles)
 	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results), Suspense: runtimeNeedsSuspense(results)})
+	warnMissingRuntime(runtimeJS, results)
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)
 	}
@@ -662,6 +672,11 @@ func (b *Builder) BuildAll() error {
 	defer b.ClosePlugins()
 
 	b.resetBuildCaches()
+	// A full build starts from clean Tailwind state; partial rebuilds replace
+	// only the pages they rebuild.
+	b.twMu.Lock()
+	b.twPages = nil
+	b.twMu.Unlock()
 	if err := b.prepareActions(); err != nil {
 		return err
 	}
@@ -928,6 +943,8 @@ func (b *Builder) BuildAll() error {
 	runtimeJS := ""
 	if anyPageHasJS {
 		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results), Suspense: runtimeNeedsSuspense(results)})
+
+		warnMissingRuntime(runtimeJS, results)
 	}
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)
@@ -1182,6 +1199,19 @@ func (b *Builder) affectedPages(changedFiles []string) []string {
 	return pages
 }
 
+// tailwindImportMode maps the Tailwind setting to the CSS import handling.
+func (b *Builder) tailwindImportMode() css.TailwindImportMode {
+	if b.Cfg.Tailwind.Enabled {
+		return css.TailwindKeep
+	}
+	return css.TailwindOff
+}
+
+// inlineImports inlines @import directives of merged authored CSS.
+func (b *Builder) inlineImports(cssText string) string {
+	return css.InlineImportsWith(cssText, b.Root, css.ImportOptions{Root: b.Root, Tailwind: b.tailwindImportMode()})
+}
+
 // tailwindOptions builds the Tailwind options from config.
 func (b *Builder) tailwindOptions() css.TailwindOptions {
 	return css.TailwindOptions{
@@ -1194,44 +1224,175 @@ func (b *Builder) tailwindOptions() css.TailwindOptions {
 	}
 }
 
-// processCSSDirectives handles Tailwind build-time directives in authored CSS:
-// `@tailwind` is stripped (Krate generates utilities itself) and `@layer` is
-// unwrapped to its inner rules. When Tailwind is enabled, plain `@apply`
-// utilities are expanded; unsupported ones are reported with a warning.
-func (b *Builder) processCSSDirectives(cssText string) string {
+// twPageInfo is the Tailwind state one page's authored CSS contributes: its
+// CSS-first directives and the @keyframes/@property blocks that @apply expanded
+// (carried by the shared Tailwind sheet instead of every page sheet).
+type twPageInfo struct {
+	dirs   *css.TailwindDirectives
+	extras []string
+}
+
+// processCSSDirectives handles Tailwind build-time directives in authored CSS.
+// `@tailwind` is always stripped (Krate generates utilities itself). When
+// Tailwind is enabled the CSS-first directives (`@import "tailwindcss"`,
+// `@theme`, `@source`, `@utility`, `@custom-variant`, `@config`, `@plugin`)
+// are collected for the generator and removed, and `@apply` is expanded;
+// anything that cannot be honoured is reported with a warning. The returned
+// info is what the caller records for the page via setTailwindPage.
+func (b *Builder) processCSSDirectives(cssText string) (string, twPageInfo) {
+	var info twPageInfo
 	// `@layer` is left intact: it is valid CSS and unwrapping it would change
 	// the authored cascade.
-	cssText = css.StripAtTailwind(cssText)
-	if !b.Cfg.Tailwind.Enabled || !strings.Contains(cssText, "@apply") {
-		return cssText
+	if !b.Cfg.Tailwind.Enabled {
+		return css.StripAtTailwind(cssText), info
+	}
+	info.dirs = b.parseTailwindDirectives(cssText)
+	cssText = css.StripTailwindDirectives(cssText)
+	if !strings.Contains(cssText, "@apply") && !strings.Contains(cssText, "@variant") {
+		return cssText, info
 	}
 	opts := b.tailwindOptions()
 	gen := css.NewTailwindGenerator()
 	gen.MergeConfig(css.LoadTailwindConfigWithOptions(b.Root, opts))
-	out, unresolved := css.ExpandApply(cssText, gen.Theme)
+	if info.dirs != nil {
+		info.dirs.ApplyTo(&gen.Theme)
+	}
+	out, unresolved := gen.ExpandApply(cssText)
 	if len(unresolved) > 0 {
-		fmt.Fprintf(os.Stderr, "  %sTailwind @apply: could not expand %s%s\n", cYellow, strings.Join(unresolved, ", "), cReset)
+		b.warnOnce("Tailwind @apply: could not expand " + strings.Join(unresolved, ", ") + " (variants and multi-rule utilities are not supported in @apply)")
+	}
+	if strings.Contains(out, "@variant") {
+		b.warnOnce("Tailwind @variant inside rules is not supported and was left in the CSS; use the variant:utility class form instead")
+	}
+	// The shared Tailwind sheet is linked on every page, so it carries the
+	// keyframes instead of each page sheet repeating them.
+	info.extras = splitTopLevelBlocks(gen.KeyframesCSS())
+	return out, info
+}
+
+// splitTopLevelBlocks splits CSS made of top-level at-rule blocks into one
+// string per block.
+func splitTopLevelBlocks(text string) []string {
+	var out []string
+	depth, start := 0, 0
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '{':
+			depth++
+		case '}':
+			if depth > 0 {
+				depth--
+			}
+			if depth == 0 {
+				if blk := strings.TrimSpace(text[start : i+1]); blk != "" {
+					out = append(out, blk)
+				}
+				start = i + 1
+			}
+		}
 	}
 	return out
 }
 
+// parseTailwindDirectives records the directives of one authored stylesheet.
+func (b *Builder) parseTailwindDirectives(cssText string) *css.TailwindDirectives {
+	if !strings.Contains(cssText, "@") && !strings.Contains(cssText, "var(") {
+		return nil
+	}
+	d := css.NewTailwindDirectives(b.Root)
+	d.Add(cssText, b.Root)
+	return d
+}
+
+// setTailwindPage replaces the Tailwind state recorded for a page, so a
+// directive removed from its CSS stops applying on the next rebuild.
+func (b *Builder) setTailwindPage(page string, info twPageInfo) {
+	b.twMu.Lock()
+	defer b.twMu.Unlock()
+	if info.dirs == nil && len(info.extras) == 0 {
+		delete(b.twPages, page)
+		return
+	}
+	if b.twPages == nil {
+		b.twPages = map[string]twPageInfo{}
+	}
+	b.twPages[page] = info
+}
+
+// warnOnce prints a yellow Tailwind warning once per message per builder.
+func (b *Builder) warnOnce(msg string) {
+	b.twMu.Lock()
+	if b.twWarned == nil {
+		b.twWarned = map[string]bool{}
+	}
+	seen := b.twWarned[msg]
+	b.twWarned[msg] = true
+	b.twMu.Unlock()
+	if !seen {
+		fmt.Fprintf(os.Stderr, "  %s%s%s\n", cYellow, msg, cReset)
+	}
+}
+
 // tailwindCSS generates the site-global Tailwind stylesheet honoring the
-// tailwind config (scanDirs/content, darkMode, preflight, strict). Returns ""
-// when Tailwind is disabled or no classes were found.
+// tailwind config (scanDirs/content, darkMode, preflight, strict) and the
+// CSS-first directives found in project CSS. Returns "" when Tailwind is
+// disabled or nothing was generated.
 func (b *Builder) tailwindCSS() string {
 	if !b.Cfg.Tailwind.Enabled {
 		return ""
 	}
 	opts := b.tailwindOptions()
 	twCfg := css.LoadTailwindConfigWithOptions(b.Root, opts)
-	// v4 CSS-first config: merge `@theme { --... }` variables found in project CSS.
-	atTheme := css.ScanAtTheme(b.Root, opts)
-	twCSS, err := css.GenerateTailwindWithTheme(b.Root, twCfg, opts, atTheme)
+	// v4 CSS-first config: directives from project CSS files plus those seen
+	// in the authored CSS processed so far (covers CSS outside the scan dirs).
+	d := css.NewTailwindDirectives(b.Root)
+	var extras []string
+	b.twMu.Lock()
+	pages := make([]string, 0, len(b.twPages))
+	for p := range b.twPages {
+		pages = append(pages, p)
+	}
+	sort.Strings(pages)
+	for _, p := range pages {
+		if info := b.twPages[p]; info.dirs != nil {
+			d.MergeFrom(info.dirs)
+		}
+		extras = append(extras, b.twPages[p].extras...)
+	}
+	b.twMu.Unlock()
+	d.MergeFrom(css.ScanTailwindDirectives(b.Root, opts))
+	res, err := css.GenerateTailwindDirectives(b.Root, twCfg, opts, d)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  %sTailwind error:%s %v\n", cYellow, cReset, err)
 		return ""
 	}
-	return twCSS
+	for _, w := range res.Warnings {
+		b.warnOnce("Tailwind: " + w)
+	}
+	if opts.Strict && len(res.Unknown) > 0 {
+		b.warnOnce("Tailwind strict: " + strconv.Itoa(len(res.Unknown)) + " class candidate(s) matched no utility: " + strings.Join(res.Unknown, ", "))
+	}
+	return appendMissingBlocks(res.CSS, extras)
+}
+
+// appendMissingBlocks appends the at-rule blocks whose header is not already
+// present in sheet (used for @keyframes that @apply pulled into page CSS).
+func appendMissingBlocks(sheet string, blocks []string) string {
+	seen := map[string]bool{}
+	compact := strings.Join(strings.Fields(sheet), "")
+	for _, blk := range blocks {
+		head := blk[:strings.IndexByte(blk, '{')+1]
+		key := strings.Join(strings.Fields(head), "")
+		if seen[key] || strings.Contains(compact, key) {
+			continue
+		}
+		seen[key] = true
+		if sheet != "" && !strings.HasSuffix(sheet, "\n") {
+			sheet += "\n"
+		}
+		sheet += blk + "\n"
+	}
+	return sheet
 }
 
 func (b *Builder) writeGlobalCSS(mergedCSS string) string {
@@ -1239,8 +1400,8 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 	if mergedCSS != "" {
 		processedCSS := mergedCSS
 		// Inline @import directives before minification
-		processedCSS = css.InlineImports(processedCSS, b.Root)
-		processedCSS = b.processCSSDirectives(processedCSS)
+		processedCSS = b.inlineImports(processedCSS)
+		processedCSS, _ = b.processCSSDirectives(processedCSS)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
 		if b.Cfg.Fonts.PreloadEnabled() {
 			b.fontPreloadHTML = fontPreloadHTML(collectFontURLs(processedCSS), b.Cfg.BaseURLPath())
@@ -1275,6 +1436,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 	type processed struct {
 		file       string
 		data       []byte
+		twInfo     twPageInfo
 		modernFile string
 		modernData []byte
 		legacyFile string
@@ -1296,9 +1458,9 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, file), data, 0644)
 		written[file] = true
 	}
-	process := func(pageCss string) (string, []byte) {
-		processedCSS := css.InlineImports(pageCss, b.Root)
-		processedCSS = b.processCSSDirectives(processedCSS)
+	process := func(pageCss string) (string, []byte, twPageInfo) {
+		processedCSS := b.inlineImports(pageCss)
+		processedCSS, info := b.processCSSDirectives(processedCSS)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
@@ -1307,13 +1469,14 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		}
 		bs := []byte(processedCSS)
 		if strings.TrimSpace(processedCSS) == "" {
-			return "", nil
+			return "", nil, info
 		}
-		return "styles." + hashContent(bs) + ".css", bs
+		return "styles." + hashContent(bs) + ".css", bs, info
 	}
 
 	for _, r := range results {
 		if r.CSS == "" && !pageRendersCode(r.HTML) {
+			b.setTailwindPage(r.Page, twPageInfo{})
 			continue
 		}
 		pageCss := r.CSS
@@ -1330,14 +1493,14 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		key := hashContent([]byte(pageCss))
 		p, ok := memo[key]
 		if !ok {
-			p.file, p.data = process(pageCss)
+			p.file, p.data, p.twInfo = process(pageCss)
 			if variants && r.HasCSSSignals {
 				modernRaw, legacyRaw := splitVariantCSS(pageCss)
-				p.modernFile, p.modernData = process(modernRaw)
+				p.modernFile, p.modernData, _ = process(modernRaw)
 				if p.modernFile != "" {
 					p.modernFile = strings.TrimSuffix(p.modernFile, ".css") + ".modern.css"
 				}
-				p.legacyFile, p.legacyData = process(legacyRaw)
+				p.legacyFile, p.legacyData, _ = process(legacyRaw)
 				if p.legacyFile != "" {
 					p.legacyFile = strings.TrimSuffix(p.legacyFile, ".css") + ".legacy.css"
 				}
@@ -1345,6 +1508,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 			memo[key] = p
 		}
 		r.CSSFile = p.file
+		b.setTailwindPage(r.Page, p.twInfo)
 		write(p.file, p.data)
 		if p.modernFile != "" {
 			r.CSSModernFile = p.modernFile
@@ -1425,23 +1589,23 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			}
 
 			// 1. Construct structural HTML wrapper in memory.
-			// A page links its own stylesheet (r.CSSFile) first, then any
-			// site-global stylesheets (e.g. Tailwind) so utility classes can
-			// override page/component styles.
-			pageCSS := []string{}
+			// Site-global stylesheets (e.g. Tailwind) are linked first, then
+			// the page's own stylesheet (r.CSSFile). Tailwind output is
+			// layered, so page CSS wins over preflight and utilities by
+			// layer precedence, and page `@layer base` rules follow preflight.
+			pageCSS := append([]string{}, cssFiles...)
 			if r.CSSFile != "" {
 				pageCSS = append(pageCSS, r.CSSFile)
 			}
-			pageCSS = append(pageCSS, cssFiles...)
 			// UA siblings link a variant-only stylesheet when the build emitted
 			// one (hybrid+userAgent); otherwise they share the page sheet.
 			legacyPageCSS := pageCSS
 			if r.CSSLegacyFile != "" {
-				legacyPageCSS = append([]string{r.CSSLegacyFile}, cssFiles...)
+				legacyPageCSS = append(append([]string{}, cssFiles...), r.CSSLegacyFile)
 			}
 			modernPageCSS := pageCSS
 			if r.CSSModernFile != "" {
-				modernPageCSS = append([]string{r.CSSModernFile}, cssFiles...)
+				modernPageCSS = append(append([]string{}, cssFiles...), r.CSSModernFile)
 			}
 			devBootstrap := ""
 			if b.DevMode {
@@ -1510,17 +1674,18 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
 					}
 				}
-				// 2c. CSP meta tag injection. Hash against the FULLY ASSEMBLED
-				// document so every inline script/style is allow-listed.
+				// 3. Minify code in memory
+				if b.Cfg.ShouldMinifyHTML() {
+					h = minifyHTML(h)
+				}
+				// 4. CSP meta tag injection. Hash the FINAL document (after
+				// minification rewrote inline content) so every inline
+				// script/style/style attribute is allow-listed.
 				if b.Cfg.CSP.Enabled {
 					cspMeta := generateCSPMeta(h, h, r.HydrationJS, b.Cfg.CSP.Directive)
 					if cspMeta != "" {
 						h = strings.Replace(h, "</head>", cspMeta+"</head>", 1)
 					}
-				}
-				// 3. Minify code in memory
-				if b.Cfg.ShouldMinifyHTML() {
-					h = minifyHTML(h)
 				}
 				return h
 			}
@@ -1528,7 +1693,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			html = finish(html)
 			r.FinalHTML = html
 
-			// 4. Single Write to physical media
+			// Single write to physical media
 			// Error pages (404/500) are written directly at the output root as .html
 			var htmlPath string
 			if r.IsErrorPage {
@@ -1594,6 +1759,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 		bnd.SetActionBasePath(b.Cfg.BaseURLPath())
 	}
 	bnd.SetModuleCache(b.moduleCache)
+	bnd.SetTailwindImports(b.tailwindImportMode())
 	return bnd
 }
 
@@ -1629,6 +1795,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			deps = append(deps, mod.Path)
 		}
 	}
+	// Files the CSS was built from (@import targets, url() assets, composes
+	// sources) are not modules but must invalidate the page when edited.
+	deps = append(deps, bundle.CSSDeps...)
 
 	// Run AfterParse hooks
 	parseCtx := &plugin.ParseHookCtx{
@@ -1890,7 +2059,8 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			return nil, "", layoutErr
 		}
 	}
-	bundle.CSS += layoutCSS
+	// Layouts come first (outermost first) so page CSS wins ties.
+	bundle.CSS = b.dedupeModuleCSS(page, layoutCSS+bundle.CSS, bundle.CSSModules)
 	// Generated CSS signal rules land in the page's own hashed stylesheet, after
 	// layout CSS so author styles can override the defaults.
 	if choiceCSS != "" {
@@ -1970,7 +2140,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	hydrationJS := ""
 	var jsBytes []byte
 	hasJS := false
-	islandBoot, islandJS, islandSSR, islandErr := b.buildIslands(
+	islandBoot, islandJS, islandSSR, islandStyles, islandErr := b.buildIslands(
 		tree.ExternalComponents,
 		externalImports,
 		entryLocalImports(entryModule.Program),
@@ -1979,13 +2149,26 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	if islandErr != nil {
 		return nil, "", islandErr
 	}
+	if islandStyles != nil {
+		// Stylesheets imported by compiled package islands join the page CSS and
+		// the page's dependencies like any other imported stylesheet.
+		bundle.CSS += islandStyles.CSS
+		for src, url := range islandStyles.Assets {
+			bundle.AssetFiles[src] = url
+		}
+		deps = append(deps, islandStyles.Deps...)
+	}
 	if len(islandSSR) > 0 {
 		emitResult.HTML = injectIslandSSR(emitResult.HTML, islandSSR)
 	}
 	emitResult.IslandBootJS = islandBoot
 	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
+	// Client-side JS scanned by CSS DCE for classes applied after hydration.
+	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
+	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
 	if needsHydrate {
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		dceJS = append(dceJS, rawJS)
 		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)
 		if islandJS != "" {
 			rawJS = strings.TrimSpace(rawJS + "\n" + islandJS)
@@ -2046,7 +2229,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	loadingHTML := b.renderLoadingComponent(page)
 
-	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
+	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML, dceJS...)
 
 	// Return data structures without triggering an intermediate disk write
 	result := &PageResult{
@@ -2104,7 +2287,7 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		c.markMiss()
 		return nil, "", false
 	}
-	key, _, _, ok := c.computeKey(e.Deps)
+	key, _, _, ok := c.computeKey(e.Deps, b.routeSignature(page))
 	if !ok || key != e.Key {
 		c.markMiss()
 		return nil, "", false
@@ -2173,7 +2356,7 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		}
 		absDeps = append(absDeps, filepath.Clean(d))
 	}
-	key, sorted, hashes, ok := c.computeKey(absDeps)
+	key, sorted, hashes, ok := c.computeKey(absDeps, b.routeSignature(page))
 	if !ok {
 		return
 	}
@@ -2333,8 +2516,10 @@ func layoutCacheFresh(e *layoutEmitCacheEntry) bool {
 // even if a build goroutine from a previous pass is still winding down.
 func (b *Builder) resetBuildCaches() {
 	layoutEmitCache.Clear()
+	b.modCSS.clear()
 	loadingEmitCache.Clear()
 	layoutCache.Clear()
+	routeDirSigCache.Clear()
 	interceptCache.Clear()
 	slotCache.Clear()
 	// Re-arm the per-program transform guard for this build. The parsed module
@@ -2440,6 +2625,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	}
 	printModuleWarnings(os.Stderr, layoutBundle.Modules)
 
+	b.modCSS.store(layoutPath, layoutBundle.CSSModules)
 	layoutModule := findEntryModule(layoutBundle.Modules)
 	if layoutModule == nil || layoutModule.Program == nil {
 		return nil, "", nil, false, fmt.Errorf("layout module invalid or empty: %s (ensure the layout has a default export)", layoutPath)
@@ -2925,6 +3111,7 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 	for _, rb := range findRouteStack(page, b.Cfg.PagesDir) {
 		id := b.layoutIDPrefix(rb.Path)
 		open, end := "<!--kl:"+id+"-->", "<!--/kl:"+id+"-->"
+		var slotCSS string
 		layoutRes, layoutCSS, layoutDeps, layoutHasSignals, err := b.executeLayoutPipeline(rb.Path, open+emitResult.HTML+end, nil)
 		relPath := rb.Path
 		if rel, rerr := filepath.Rel(b.Root, rb.Path); rerr == nil {
@@ -2961,7 +3148,7 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 				return "", nil, false, nil, serr
 			}
 			entry.Slots = slotRes.info
-			css += slotRes.css
+			slotCSS = slotRes.css
 			used = append(used, slotRes.deps...)
 			hasSignals = hasSignals || slotRes.hasSignals
 		}
@@ -2984,7 +3171,9 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 		if layoutRes.HasLinks {
 			emitResult.HasLinks = true
 		}
-		css += layoutCSS
+		// Boundaries are visited innermost first; prepend so the outermost
+		// layout ends up first and inner ones override it.
+		css = layoutCSS + slotCSS + css
 		used = append(used, layoutDeps...)
 		chain = append([]routeChainEntry{entry}, chain...)
 	}

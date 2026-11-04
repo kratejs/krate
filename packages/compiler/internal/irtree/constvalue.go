@@ -1,6 +1,8 @@
 package irtree
 
 import (
+	"strings"
+
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
@@ -131,7 +133,7 @@ func newConstInterp(signals map[string]ast.Expr, props valueMap) *jsvalue.Interp
 				}
 				if callee.Name == "cn" || callee.Name == "clsx" {
 					if _, isProp := props[callee.Name]; !isProp {
-						return foldClassValues(in, c.Args), true
+						return foldClassValues(in, c.Args, callee.Name == "cn"), true
 					}
 				}
 			case *ast.MemberExpr:
@@ -149,8 +151,10 @@ func newConstInterp(signals map[string]ast.Expr, props valueMap) *jsvalue.Interp
 	return in
 }
 
-// foldClassValues folds cn/clsx arguments with clsx semantics.
-func foldClassValues(in *jsvalue.Interp, args []ast.Expr) jsvalue.Value {
+// foldClassValues folds cn/clsx/twMerge arguments with clsx semantics. With
+// merge set (cn, twMerge) conflicting Tailwind utilities are resolved the way
+// the runtime does; clsx is a plain join.
+func foldClassValues(in *jsvalue.Interp, args []ast.Expr, merge bool) jsvalue.Value {
 	var tokens []string
 	for _, a := range args {
 		v := in.Eval(a)
@@ -159,14 +163,10 @@ func foldClassValues(in *jsvalue.Interp, args []ast.Expr) jsvalue.Value {
 		}
 		tokens = appendClassTokens(tokens, v)
 	}
-	out := ""
-	for i, t := range tokens {
-		if i > 0 {
-			out += " "
-		}
-		out += t
+	if merge {
+		return jsvalue.String(mergeTailwindClasses(tokens))
 	}
-	return jsvalue.String(out)
+	return jsvalue.String(strings.Join(tokens, " "))
 }
 
 // appendClassTokens flattens one clsx argument: strings/numbers are tokens,

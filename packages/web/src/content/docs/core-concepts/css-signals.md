@@ -208,7 +208,9 @@ Pass `aria: false` to opt out, or `aria: { role, panelRole }` for raw overrides.
   `anchor: 'bottom-start' | 'top' | 'right' | ...` to choose a side. Progressive -
   browsers without support use the component's own CSS.
 - **Transitions**: `transition: true` fades/slides a panel when it opens
-  (`@starting-style`).
+  (`@starting-style`). The transition is emitted under
+  `prefers-reduced-motion: no-preference`, so reduced-motion users get the panel
+  without animation. Closing is never animated.
 
 ## How it compiles
 

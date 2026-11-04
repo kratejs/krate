@@ -5,12 +5,12 @@ import (
 	"strings"
 )
 
-// unwrapArbitrary returns the inner text of an arbitrary `[..]` value with
-// underscores converted to spaces (Tailwind's convention), and whether v was a
+// unwrapArbitrary returns the inner text of an arbitrary `[..]` value,
+// normalized like Tailwind v4 (see normalizeArbitrary), and whether v was a
 // bracketed arbitrary value.
 func unwrapArbitrary(v string) (string, bool) {
 	if len(v) >= 2 && v[0] == '[' && v[len(v)-1] == ']' {
-		return strings.ReplaceAll(v[1:len(v)-1], "_", " "), true
+		return normalizeArbitrary(v[1 : len(v)-1]), true
 	}
 	return "", false
 }
@@ -56,7 +56,7 @@ func looksLikeColor(v string) bool {
 		return true
 	}
 	if strings.HasPrefix(lv, "var(") {
-		return strings.Contains(lv, "color")
+		return isVarOnly(lv)
 	}
 	return false
 }
@@ -112,12 +112,6 @@ func isDigits(s string) bool {
 	return true
 }
 
-// formatRem formats a numeric spacing multiple (n x 0.25rem) without float
-// noise: 13 -> "3.25rem", 13.5 -> "3.375rem", 0.5 -> "0.125rem".
-func formatRem(n float64) string {
-	return strconv.FormatFloat(n/4, 'f', -1, 64) + "rem"
-}
-
 // angleValue resolves a rotate/skew value: arbitrary values pass through; bare
 // numbers get a `deg` suffix.
 func angleValue(key string) (string, bool) {
@@ -140,75 +134,4 @@ func scaleFactor(key string) string {
 		return strconv.FormatFloat(f/100, 'f', -1, 64)
 	}
 	return key
-}
-
-// heightValue resolves a height utility key, mapping `screen` to 100vh (not
-// 100vw) and supporting the dynamic viewport units.
-func heightValue(key string, theme TailwindTheme) string {
-	switch key {
-	case "screen":
-		return "100vh"
-	case "svh":
-		return "100svh"
-	case "lvh":
-		return "100lvh"
-	case "dvh":
-		return "100dvh"
-	case "auto":
-		return "auto"
-	case "min":
-		return "min-content"
-	case "max":
-		return "max-content"
-	case "fit":
-		return "fit-content"
-	}
-	if v, ok := unwrapArbitrary(key); ok {
-		return v
-	}
-	return sizingValue(key, theme)
-}
-
-// gradientStop resolves a gradient color-stop utility (`from-*`, `via-*`,
-// `to-*`) to a CSS color. It accepts named colors, shade colors, an optional
-// alpha modifier (`/50`, `/[0.42]`), and arbitrary values. A bare percentage
-// (`from-10%`) is a position, not a color, and is not handled here.
-func gradientStop(cls, prefix string, theme TailwindTheme) (string, bool) {
-	rest, ok := strings.CutPrefix(cls, prefix+"-")
-	if !ok || rest == "" {
-		return "", false
-	}
-	if v, hint, isArb := arbitraryValue(rest); isArb {
-		if hint == "color" {
-			return v, true
-		}
-		if looksLikeColor(v) || !looksLikeLength(v) {
-			return v, true
-		}
-		return "", false
-	}
-	key, alpha := splitColorModifier(rest)
-	if v, ok := colorValue(key, alpha, theme); ok {
-		return v, true
-	}
-	return "", false
-}
-
-// widthValue resolves a width utility key, supporting the viewport-relative
-// dynamic units in addition to the shared sizing scale.
-func widthValue(key string, theme TailwindTheme) string {
-	switch key {
-	case "screen":
-		return "100vw"
-	case "svw":
-		return "100svw"
-	case "lvw":
-		return "100lvw"
-	case "dvw":
-		return "100dvw"
-	}
-	if v, ok := unwrapArbitrary(key); ok {
-		return v
-	}
-	return sizingValue(key, theme)
 }

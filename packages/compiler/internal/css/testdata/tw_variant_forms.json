@@ -1,0 +1,890 @@
+{
+ "*:p-1": [
+  {
+   "ats": [],
+   "sel": ":is(& > *)"
+  }
+ ],
+ "**:p-1": [
+  {
+   "ats": [],
+   "sel": ":is(& *)"
+  }
+ ],
+ "not-first:p-1": [
+  {
+   "ats": [],
+   "sel": "&:not(:first-child)"
+  }
+ ],
+ "not-hover:p-1": [
+  {
+   "ats": [],
+   "sel": "&:not(:hover)"
+  },
+  {
+   "ats": [
+    "@media not (hover: hover)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "not-focus:p-1": [
+  {
+   "ats": [],
+   "sel": "&:not(:focus)"
+  }
+ ],
+ "not-data-[a]:p-1": [
+  {
+   "ats": [],
+   "sel": "&:not([data-a])"
+  }
+ ],
+ "not-supports-[display:grid]:p-1": [
+  {
+   "ats": [
+    "@supports not (display:grid)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "not-dark:p-1": [
+  {
+   "ats": [
+    "@media not (prefers-color-scheme: dark)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "not-print:p-1": [
+  {
+   "ats": [
+    "@media not print"
+   ],
+   "sel": "&"
+  }
+ ],
+ "not-[.x]:p-1": [
+  {
+   "ats": [],
+   "sel": "&:not(:is(.x))"
+  }
+ ],
+ "group-hover:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&:is(:where(.group):hover *)"
+  }
+ ],
+ "group-hover/item:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&:is(:where(.group\\/item):hover *)"
+  }
+ ],
+ "group-focus:p-1": [
+  {
+   "ats": [],
+   "sel": "&:is(:where(.group):focus *)"
+  }
+ ],
+ "group-has-[img]:p-1": [
+  {
+   "ats": [],
+   "sel": "&:is(:where(.group):has(:is(img)) *)"
+  }
+ ],
+ "group-aria-busy:p-1": [
+  {
+   "ats": [],
+   "sel": "&:is(:where(.group)[aria-busy=\"true\"] *)"
+  }
+ ],
+ "group-data-[x=y]:p-1": [
+  {
+   "ats": [],
+   "sel": "&:is(:where(.group)[data-x=\"y\"] *)"
+  }
+ ],
+ "peer-checked:p-1": [
+  {
+   "ats": [],
+   "sel": "&:is(:where(.peer):checked ~ *)"
+  }
+ ],
+ "peer-hover:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&:is(:where(.peer):hover ~ *)"
+  }
+ ],
+ "peer-hover/name:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&:is(:where(.peer\\/name):hover ~ *)"
+  }
+ ],
+ "peer-focus:p-1": [
+  {
+   "ats": [],
+   "sel": "&:is(:where(.peer):focus ~ *)"
+  }
+ ],
+ "peer-has-checked:p-1": [
+  {
+   "ats": [],
+   "sel": "&:is(:where(.peer):has(:checked) ~ *)"
+  }
+ ],
+ "first-letter:p-1": [
+  {
+   "ats": [],
+   "sel": "&::first-letter"
+  }
+ ],
+ "first-line:p-1": [
+  {
+   "ats": [],
+   "sel": "&::first-line"
+  }
+ ],
+ "marker:p-1": [
+  {
+   "ats": [],
+   "sel": "& ::marker"
+  },
+  {
+   "ats": [],
+   "sel": "&::marker"
+  },
+  {
+   "ats": [],
+   "sel": "& ::-webkit-details-marker"
+  },
+  {
+   "ats": [],
+   "sel": "&::-webkit-details-marker"
+  }
+ ],
+ "selection:p-1": [
+  {
+   "ats": [],
+   "sel": "& ::selection"
+  },
+  {
+   "ats": [],
+   "sel": "&::selection"
+  }
+ ],
+ "file:p-1": [
+  {
+   "ats": [],
+   "sel": "&::file-selector-button"
+  }
+ ],
+ "placeholder:p-1": [
+  {
+   "ats": [],
+   "sel": "&::placeholder"
+  }
+ ],
+ "backdrop:p-1": [
+  {
+   "ats": [],
+   "sel": "&::backdrop"
+  }
+ ],
+ "details-content:p-1": [
+  {
+   "ats": [],
+   "sel": "&::details-content"
+  }
+ ],
+ "before:p-1": [
+  {
+   "ats": [],
+   "sel": "&::before"
+  }
+ ],
+ "*:before:p-1": [
+  {
+   "ats": [],
+   "sel": ":is(& > *)::before"
+  }
+ ],
+ "after:p-1": [
+  {
+   "ats": [],
+   "sel": "&::after"
+  }
+ ],
+ "first:p-1": [
+  {
+   "ats": [],
+   "sel": "&:first-child"
+  }
+ ],
+ "last:p-1": [
+  {
+   "ats": [],
+   "sel": "&:last-child"
+  }
+ ],
+ "only:p-1": [
+  {
+   "ats": [],
+   "sel": "&:only-child"
+  }
+ ],
+ "odd:p-1": [
+  {
+   "ats": [],
+   "sel": "&:nth-child(odd)"
+  }
+ ],
+ "even:p-1": [
+  {
+   "ats": [],
+   "sel": "&:nth-child(even)"
+  }
+ ],
+ "odd:even:p-1": [
+  {
+   "ats": [],
+   "sel": "&:nth-child(odd):nth-child(even)"
+  }
+ ],
+ "first-of-type:p-1": [
+  {
+   "ats": [],
+   "sel": "&:first-of-type"
+  }
+ ],
+ "last-of-type:p-1": [
+  {
+   "ats": [],
+   "sel": "&:last-of-type"
+  }
+ ],
+ "only-of-type:p-1": [
+  {
+   "ats": [],
+   "sel": "&:only-of-type"
+  }
+ ],
+ "visited:p-1": [
+  {
+   "ats": [],
+   "sel": "&:visited"
+  }
+ ],
+ "target:p-1": [
+  {
+   "ats": [],
+   "sel": "&:target"
+  }
+ ],
+ "open:p-1": [
+  {
+   "ats": [],
+   "sel": "&:is([open], :popover-open, :open)"
+  }
+ ],
+ "default:p-1": [
+  {
+   "ats": [],
+   "sel": "&:default"
+  }
+ ],
+ "checked:p-1": [
+  {
+   "ats": [],
+   "sel": "&:checked"
+  }
+ ],
+ "indeterminate:p-1": [
+  {
+   "ats": [],
+   "sel": "&:indeterminate"
+  }
+ ],
+ "placeholder-shown:p-1": [
+  {
+   "ats": [],
+   "sel": "&:placeholder-shown"
+  }
+ ],
+ "autofill:p-1": [
+  {
+   "ats": [],
+   "sel": "&:autofill"
+  }
+ ],
+ "optional:p-1": [
+  {
+   "ats": [],
+   "sel": "&:optional"
+  }
+ ],
+ "required:p-1": [
+  {
+   "ats": [],
+   "sel": "&:required"
+  }
+ ],
+ "valid:p-1": [
+  {
+   "ats": [],
+   "sel": "&:valid"
+  }
+ ],
+ "invalid:p-1": [
+  {
+   "ats": [],
+   "sel": "&:invalid"
+  }
+ ],
+ "user-valid:p-1": [
+  {
+   "ats": [],
+   "sel": "&:user-valid"
+  }
+ ],
+ "user-invalid:p-1": [
+  {
+   "ats": [],
+   "sel": "&:user-invalid"
+  }
+ ],
+ "in-range:p-1": [
+  {
+   "ats": [],
+   "sel": "&:in-range"
+  }
+ ],
+ "out-of-range:p-1": [
+  {
+   "ats": [],
+   "sel": "&:out-of-range"
+  }
+ ],
+ "read-only:p-1": [
+  {
+   "ats": [],
+   "sel": "&:read-only"
+  }
+ ],
+ "empty:p-1": [
+  {
+   "ats": [],
+   "sel": "&:empty"
+  }
+ ],
+ "focus-within:p-1": [
+  {
+   "ats": [],
+   "sel": "&:focus-within"
+  }
+ ],
+ "hover:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&:hover"
+  }
+ ],
+ "*:hover:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": ":is(& > *):hover"
+  }
+ ],
+ "hover:*:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": ":is(&:hover > *)"
+  }
+ ],
+ "hover:before:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&:hover::before"
+  }
+ ],
+ "first:hover:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&:first-child:hover"
+  }
+ ],
+ "hover:first:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&:hover:first-child"
+  }
+ ],
+ "focus:p-1": [
+  {
+   "ats": [],
+   "sel": "&:focus"
+  }
+ ],
+ "focus:hover:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&:focus:hover"
+  }
+ ],
+ "hover:focus:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&:hover:focus"
+  }
+ ],
+ "focus-visible:p-1": [
+  {
+   "ats": [],
+   "sel": "&:focus-visible"
+  }
+ ],
+ "active:p-1": [
+  {
+   "ats": [],
+   "sel": "&:active"
+  }
+ ],
+ "enabled:p-1": [
+  {
+   "ats": [],
+   "sel": "&:enabled"
+  }
+ ],
+ "disabled:p-1": [
+  {
+   "ats": [],
+   "sel": "&:disabled"
+  }
+ ],
+ "inert:p-1": [
+  {
+   "ats": [],
+   "sel": "&:is([inert], [inert] *)"
+  }
+ ],
+ "in-focus:p-1": [
+  {
+   "ats": [],
+   "sel": ":where(:focus) &"
+  }
+ ],
+ "in-data-[a]:p-1": [
+  {
+   "ats": [],
+   "sel": ":where([data-a]) &"
+  }
+ ],
+ "in-[.x]:p-1": [
+  {
+   "ats": [],
+   "sel": ":where(:is(.x)) &"
+  }
+ ],
+ "has-checked:p-1": [
+  {
+   "ats": [],
+   "sel": "&:has(:checked)"
+  }
+ ],
+ "has-hover:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&:has(:hover)"
+  }
+ ],
+ "has-[img]:p-1": [
+  {
+   "ats": [],
+   "sel": "&:has(:is(img))"
+  }
+ ],
+ "aria-busy:p-1": [
+  {
+   "ats": [],
+   "sel": "&[aria-busy=\"true\"]"
+  }
+ ],
+ "aria-checked:p-1": [
+  {
+   "ats": [],
+   "sel": "&[aria-checked=\"true\"]"
+  }
+ ],
+ "aria-expanded:p-1": [
+  {
+   "ats": [],
+   "sel": "&[aria-expanded=\"true\"]"
+  }
+ ],
+ "aria-expanded:hover:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&[aria-expanded=\"true\"]:hover"
+  }
+ ],
+ "hover:aria-expanded:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)"
+   ],
+   "sel": "&:hover[aria-expanded=\"true\"]"
+  }
+ ],
+ "aria-[sort=ascending]:p-1": [
+  {
+   "ats": [],
+   "sel": "&[aria-sort=\"ascending\"]"
+  }
+ ],
+ "data-bar:p-1": [
+  {
+   "ats": [],
+   "sel": "&[data-bar]"
+  }
+ ],
+ "data-foo:p-1": [
+  {
+   "ats": [],
+   "sel": "&[data-foo]"
+  }
+ ],
+ "data-[a=b]:p-1": [
+  {
+   "ats": [],
+   "sel": "&[data-a=\"b\"]"
+  }
+ ],
+ "data-[state=open]:p-1": [
+  {
+   "ats": [],
+   "sel": "&[data-state=\"open\"]"
+  }
+ ],
+ "nth-2:p-1": [
+  {
+   "ats": [],
+   "sel": "&:nth-child(2)"
+  }
+ ],
+ "nth-3:p-1": [
+  {
+   "ats": [],
+   "sel": "&:nth-child(3)"
+  }
+ ],
+ "nth-[2n+1]:p-1": [
+  {
+   "ats": [],
+   "sel": "&:nth-child(2n+1)"
+  }
+ ],
+ "nth-last-2:p-1": [
+  {
+   "ats": [],
+   "sel": "&:nth-last-child(2)"
+  }
+ ],
+ "nth-of-type-2:p-1": [
+  {
+   "ats": [],
+   "sel": "&:nth-of-type(2)"
+  }
+ ],
+ "nth-last-of-type-[2n]:p-1": [
+  {
+   "ats": [],
+   "sel": "&:nth-last-of-type(2n)"
+  }
+ ],
+ "supports-[(display:grid)]:p-1": [
+  {
+   "ats": [
+    "@supports (display:grid)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "supports-[--x]:p-1": [
+  {
+   "ats": [
+    "@supports (--x: var(--tw))"
+   ],
+   "sel": "&"
+  }
+ ],
+ "supports-[display:grid]:p-1": [
+  {
+   "ats": [
+    "@supports (display:grid)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "motion-safe:p-1": [
+  {
+   "ats": [
+    "@media (prefers-reduced-motion: no-preference)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "motion-reduce:p-1": [
+  {
+   "ats": [
+    "@media (prefers-reduced-motion: reduce)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "contrast-more:p-1": [
+  {
+   "ats": [
+    "@media (prefers-contrast: more)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "contrast-less:p-1": [
+  {
+   "ats": [
+    "@media (prefers-contrast: less)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "portrait:p-1": [
+  {
+   "ats": [
+    "@media (orientation: portrait)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "landscape:p-1": [
+  {
+   "ats": [
+    "@media (orientation: landscape)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "ltr:p-1": [
+  {
+   "ats": [],
+   "sel": "&:where(:dir(ltr), [dir=\"ltr\"], [dir=\"ltr\"] *)"
+  }
+ ],
+ "rtl:p-1": [
+  {
+   "ats": [],
+   "sel": "&:where(:dir(rtl), [dir=\"rtl\"], [dir=\"rtl\"] *)"
+  }
+ ],
+ "dark:p-1": [
+  {
+   "ats": [
+    "@media (prefers-color-scheme: dark)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "peer-checked:dark:p-1": [
+  {
+   "ats": [
+    "@media (prefers-color-scheme: dark)"
+   ],
+   "sel": "&:is(:where(.peer):checked ~ *)"
+  }
+ ],
+ "dark:hover:p-1": [
+  {
+   "ats": [
+    "@media (prefers-color-scheme: dark)",
+    "@media (hover: hover)"
+   ],
+   "sel": "&:hover"
+  }
+ ],
+ "hover:dark:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)",
+    "@media (prefers-color-scheme: dark)"
+   ],
+   "sel": "&:hover"
+  }
+ ],
+ "starting:p-1": [
+  {
+   "ats": [
+    "@starting-style"
+   ],
+   "sel": "&"
+  }
+ ],
+ "print:p-1": [
+  {
+   "ats": [
+    "@media print"
+   ],
+   "sel": "&"
+  }
+ ],
+ "hover:print:p-1": [
+  {
+   "ats": [
+    "@media (hover: hover)",
+    "@media print"
+   ],
+   "sel": "&:hover"
+  }
+ ],
+ "print:hover:p-1": [
+  {
+   "ats": [
+    "@media print",
+    "@media (hover: hover)"
+   ],
+   "sel": "&:hover"
+  }
+ ],
+ "forced-colors:p-1": [
+  {
+   "ats": [
+    "@media (forced-colors: active)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "inverted-colors:p-1": [
+  {
+   "ats": [
+    "@media (inverted-colors: inverted)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "pointer-none:p-1": [
+  {
+   "ats": [
+    "@media (pointer: none)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "pointer-coarse:p-1": [
+  {
+   "ats": [
+    "@media (pointer: coarse)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "pointer-fine:p-1": [
+  {
+   "ats": [
+    "@media (pointer: fine)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "any-pointer-none:p-1": [
+  {
+   "ats": [
+    "@media (any-pointer: none)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "any-pointer-coarse:p-1": [
+  {
+   "ats": [
+    "@media (any-pointer: coarse)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "any-pointer-fine:p-1": [
+  {
+   "ats": [
+    "@media (any-pointer: fine)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "noscript:p-1": [
+  {
+   "ats": [
+    "@media (scripting: none)"
+   ],
+   "sel": "&"
+  }
+ ],
+ "[&_a]:p-1": [
+  {
+   "ats": [],
+   "sel": "& a"
+  }
+ ],
+ "[&_p]:p-1": [
+  {
+   "ats": [],
+   "sel": "& p"
+  }
+ ],
+ "[dir=rtl]:p-1": [
+  {
+   "ats": [],
+   "sel": "&:is(dir=rtl)"
+  }
+ ],
+ "[&:nth-child(3)]:p-1": [
+  {
+   "ats": [],
+   "sel": "&:nth-child(3)"
+  }
+ ],
+ "[&>*]:p-1": [
+  {
+   "ats": [],
+   "sel": "& > *"
+  }
+ ]
+}

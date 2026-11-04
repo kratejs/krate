@@ -78,7 +78,7 @@ formatting is preserved when it is off.
 
 ## CSS
 
-CSS is merged across pages (rule-level deduplication), `@import`s are inlined,
+Each page gets one stylesheet (identical sheets share one hashed file), `@import`s are inlined,
 and the merged stylesheet is minified when `minifyCSS` (or `minify`) is on.
 Tailwind generates CSS only for classes detected in the scanned sources, so
 unused utility classes never ship. There are no per-feature CSS config toggles.
@@ -220,6 +220,14 @@ csp: {
   directive: "",              // custom CSP string (empty = auto-generate)
 }
 ```
+
+The generated policy hashes the final (minified) document: inline `<script>` and
+`<style>` blocks, the inline speculation-rules script, and `style="..."`
+attributes (allowed with `'unsafe-hashes'` plus one SHA-256 hash per distinct
+value). Styles set at runtime through the CSSOM (`el.style.x = ...`) are not
+affected by CSP. When a CSP meta tag is present the client router does not
+inject its runtime speculation-rules script (it would be blocked) and uses its
+JS link prefetching instead.
 
 ## Markdown
 

@@ -44,35 +44,56 @@ in the output as static HTML with no client runtime.
 
 ## CSS pipeline
 
-Plain CSS imported or referenced in pages is collected, then split at the
-**rule level**:
-
-- Rules used by two or more pages are written once to a shared
-  `styles.<hash>.css` chunk, linked before per-page CSS on every page.
-- Rules unique to a page go into that page's own hashed chunk.
-
-Chunk order is deterministic (the shared chunk is sorted by canonical rule), so
-hashes are stable across builds. The processing steps are:
+Plain CSS imported or referenced in pages is collected per page and written as
+one stylesheet per page. Output filenames are content-hashed
+(`styles.<hash>.css`), so pages with byte-identical stylesheets share one file
+and hashes are stable across builds. There is no rule-level splitting: moving or
+sorting rules between files would reorder the cascade. The processing steps are:
 
 1. **Collect** CSS per page from its module graph (module CSS, layout CSS,
    CSS-signal rules), in source/import order.
-2. **Inline `@import`** recursively, relative to each file's own directory
-   (circular-safe, depth limit 10); a trailing media/`supports`/`layer` prelude
-   is honoured, not leaked.
-3. **Resolve `url(...)`** assets relative to the sheet, content-hash and copy
-   them to `/assets/...`, and rewrite the URL.
-4. **Handle directives** - strip `@tailwind`, unwrap `@layer`, expand `@apply`.
-5. **Minify** (string/URL/comment aware) - whitespace collapse, `rgba()`/`rgb()`
-   -> hex, hex shortening, zero-unit removal, `calc()` simplification, empty-rule
-   and duplicate-declaration removal. Preserves strings, `url()`, `data:` URIs,
-   `/*!` license comments, vendor-prefixed fallbacks, and `!important`.
-6. **Chunk** into shared + per-page stylesheets and hash filenames.
+2. **Inline `@import`** recursively with a comment- and string-aware scan,
+   relative to each file's own directory (files anywhere under the project root
+   and bare `node_modules` specifiers, including a package's `style` field).
+   Cycles are detected along the import chain only, so the same file can be
+   imported twice with different conditions (depth limit 10). The prelude
+   becomes nested at-rules: `@supports (...){@media ...{@layer name{...}}}`.
+   External `@import url(https://...)` statements are hoisted to the top of the
+   page stylesheet. An import that cannot be resolved stays in place and is
+   reported as a warning.
+3. **Resolve `url(...)`** assets (`url(x)`, `url("x")`, `url( 'x' )`) relative to
+   the file that contains them, including imported files, content-hash and copy
+   them to `/assets/...`, and rewrite the URL. Root-absolute and external URLs
+   are untouched; a relative file that does not exist is reported. Every
+   imported file and asset is a dependency of the page, so editing one rebuilds
+   it (build cache and `krate dev`).
+4. **Handle directives** - strip `@tailwind` and expand `@apply`; `@layer`
+   blocks are kept as written.
+5. **Minify** (string/URL/comment/escape aware) - whitespace collapse, then
+   value transforms that run only on declaration values (never on selectors,
+   at-rule preludes, names, or custom property values): `rgba()`/`rgb()` -> hex,
+   hex shortening, zero-length unit removal (not inside `calc()`/`min()`/`max()`/
+   `clamp()`, `flex`, or for `fr`, `%`, time and angle units), type-safe
+   `calc()` folding, empty-rule removal, and duplicate-declaration folding. A
+   duplicate fold keeps the last declaration at its own position and is skipped
+   when a related shorthand sits between the two or the earlier value looks like
+   an intentional fallback. Strings, `url()`, `data:` URIs, `/*!` license
+   comments, and `!important` are preserved. With minification off, only the
+   duplicate-declaration fold runs and formatting is kept.
+6. **Hash** the result into `styles.<hash>.css`; identical sheets share a file.
 
 CSS Modules names are hashed as `className_<fnv32a_hash>`, where the hash is
 FNV-32a of the absolute file path (6-char base36). Scoping is tokenizer-based:
 strings, comments, `url(...)`, attribute selectors, and `:global(...)` are
-handled correctly; `:global(.x)` stays unscoped and `composes:` local names are
-mapped.
+handled correctly. `:global(.x)` and bare `:global` / `:local` switch scoping
+for the rest of the selector. Local `@keyframes` names, and their uses in
+`animation` / `animation-name`, are scoped too. `composes: a b`,
+`composes: x from global` and `composes: x from "./other.module.css"` are
+removed from the CSS and appended to the class mapping (the composed module's
+CSS joins the page). The mapping also contains camelCase aliases of dashed names
+and the scoped keyframes names, so `styles["card-title"]` and
+`styles.cardTitle` both work. SSR, ISR and streaming server bundles use the
+same mapping, so server-rendered class names match the stylesheet.
 
 ## Tailwind generation
 

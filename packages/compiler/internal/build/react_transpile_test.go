@@ -218,14 +218,14 @@ func TestShadcnButtonFoldsVariantsAndSpread(t *testing.T) {
 		}
 	`)
 	// Defaults fold.
-	if !strings.Contains(html, "h-9 px-4 bg-blue-600 text-white") {
+	if !strings.Contains(html, "bg-blue-600 text-white h-9 px-4") {
 		t.Errorf("default variant classes missing:\n%.600s", html)
 	}
 	if !strings.Contains(html, ">Default<") {
 		t.Errorf("children should render:\n%.600s", html)
 	}
 	// Explicit selection folds and spread props reach the element.
-	if !strings.Contains(html, "h-10 px-8 bg-red-600 text-white") {
+	if !strings.Contains(html, "bg-red-600 text-white h-10 px-8") {
 		t.Errorf("destructive/lg classes missing:\n%.600s", html)
 	}
 	if !strings.Contains(html, "disabled") {

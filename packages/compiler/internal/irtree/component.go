@@ -76,6 +76,14 @@ func (b *builder) newComponentNode(fn *ast.FnDecl, parentID string) *ComponentNo
 func (b *builder) buildComponentScoped(fn *ast.FnDecl, node *ComponentNode, isPageRoot bool) componentResult {
 	b.pushComponentCtx()
 	defer b.popComponentCtx()
+	cssEnteredMark := len(b.cssEntered)
+	defer func() {
+		for len(b.cssEntered) > cssEnteredMark {
+			n := len(b.cssEntered) - 1
+			b.cssActive[b.cssEntered[n]]--
+			b.cssEntered = b.cssEntered[:n]
+		}
+	}()
 	// The caller's sibling counters survive the child's walk; otherwise an
 	// element after a child component reuses an earlier sibling's slot ID.
 	savedCounts := maps.Clone(b.elementCounts)
@@ -575,6 +583,11 @@ func (b *builder) enterCSSScope(fn *ast.FnDecl, node *ComponentNode, returnStmt 
 	}
 	b.cssSignals = analyzer
 	b.cssToken = csssignals.SanitizeToken(string(node.ID))
+	if b.cssActive == nil {
+		b.cssActive = make(map[*ast.FnDecl]int)
+	}
+	b.cssActive[fn]++
+	b.cssEntered = append(b.cssEntered, fn)
 	for _, s := range analyzer.Scopes() {
 		b.collectCSSScope(s)
 	}

@@ -485,6 +485,10 @@ function setupPrefetch(): void {
 function setupSpeculationRules(): void {
   const supports = typeof HTMLScriptElement !== 'undefined' ? (HTMLScriptElement as any).supports : undefined;
   if (typeof supports !== 'function' || !supports('speculationrules')) return;
+  // An inline speculation-rules script needs a CSP hash or keyword that is not
+  // honoured next to script hashes, so under a CSP meta the JS prefetch path
+  // is used instead of emitting a blocked script.
+  if (document.querySelector('meta[http-equiv="Content-Security-Policy" i]')) return;
   try {
     const script = document.createElement('script');
     script.type = 'speculationrules';
@@ -510,16 +514,22 @@ function setupSpeculationRules(): void {
 
 // Visual transition
 
-/** Whether native View Transitions should wrap the SPA mutation. */
-function supportsViewTransitions(): boolean {
-  if (runtimeConfig().viewTransitions === false) return false;
+/** Whether the user asked the OS/browser for reduced motion. */
+function prefersReducedMotion(): boolean {
   if (typeof window !== 'undefined' && window.matchMedia) {
     try {
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+      return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     } catch {
       /* ignore */
     }
   }
+  return false;
+}
+
+/** Whether native View Transitions should wrap the SPA mutation. */
+function supportsViewTransitions(): boolean {
+  if (runtimeConfig().viewTransitions === false) return false;
+  if (prefersReducedMotion()) return false;
   return typeof (document as any).startViewTransition === 'function';
 }
 
@@ -538,7 +548,8 @@ function beginTransition(): void {
     loadingOverlay = Array.from(frag.childNodes);
     document.body.appendChild(frag);
   }
-  if (!supportsViewTransitions()) {
+  // Reduced motion: no fade at all (the overlay above is static).
+  if (!supportsViewTransitions() && !prefersReducedMotion()) {
     const el = appRoot(document);
     el.style.transition = `opacity ${TRANSITION_MS}ms ease`;
     el.style.opacity = '0';
@@ -568,31 +579,96 @@ function applyViewTransitionNames(root: ParentNode): void {
 
 // Document reconciliation
 
-/** Diff stylesheet <link>s by absolute URL (base-path and format safe). */
-function reconcileStylesheets(doc: Document, baseUrl: string): void {
-  const newStyles = doc.querySelectorAll('link[rel="stylesheet"]');
-  const newHrefs = new Set<string>();
-  newStyles.forEach((s) => {
-    const href = s.getAttribute('href');
-    if (href) newHrefs.add(new URL(href, baseUrl).href);
-  });
-  document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => {
-    const abs = (l as HTMLLinkElement).href;
-    if (abs && !newHrefs.has(abs)) l.remove();
-  });
-  const existing = new Set<string>();
-  document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => existing.add((l as HTMLLinkElement).href));
-  newStyles.forEach((s) => {
+/** How long a navigation waits for new stylesheets before swapping anyway. */
+const STYLESHEET_TIMEOUT_MS = 3000;
+
+interface StylesheetPlan {
+  /** Resolves once every added stylesheet has loaded, failed or timed out. */
+  ready: Promise<void>;
+  /** Swap time: activates the added links and removes the stale ones. */
+  commit(): void;
+  /** Navigation superseded: drop the links added for it. */
+  abort(): void;
+}
+
+/**
+ * Diff stylesheet <link>s by absolute URL (base-path and format safe). New
+ * links are inserted at the position they have in the incoming document (before
+ * the next kept link), so the cascade order matches a hard load. They load with
+ * media="not all" so they do not affect the outgoing page; stale links stay
+ * until commit() so the old page keeps its styles while the new ones load.
+ */
+function prepareStylesheets(doc: Document, baseUrl: string): StylesheetPlan {
+  const incoming: string[] = [];
+  doc.querySelectorAll('link[rel="stylesheet"]').forEach((s) => {
     const href = s.getAttribute('href');
     if (!href) return;
     const abs = new URL(href, baseUrl).href;
-    if (!existing.has(abs)) {
+    if (!incoming.includes(abs)) incoming.push(abs);
+  });
+  const live = new Map<string, HTMLLinkElement>();
+  const stale: HTMLLinkElement[] = [];
+  document.querySelectorAll('link[rel="stylesheet"]').forEach((l) => {
+    const el = l as HTMLLinkElement;
+    if (!el.href) return;
+    if (incoming.includes(el.href) && !live.has(el.href)) live.set(el.href, el);
+    else stale.push(el);
+  });
+  const added: Array<{ link: HTMLLinkElement; media: string | null }> = [];
+  const pending: Promise<void>[] = [];
+  let prev: HTMLLinkElement | null = null;
+  incoming.forEach((abs, i) => {
+    let el = live.get(abs) || null;
+    if (!el) {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
       link.href = abs;
-      document.head.appendChild(link);
+      // Listen before insertion so a synchronous settle is not missed.
+      pending.push(
+        new Promise<void>((resolve) => {
+          const done = () => {
+            link.removeEventListener('load', done);
+            link.removeEventListener('error', done);
+            resolve();
+          };
+          link.addEventListener('load', done);
+          link.addEventListener('error', done);
+        })
+      );
+      added.push({ link, media: link.getAttribute('media') });
+      link.media = 'not all';
+      if (prev) {
+        prev.after(link);
+      } else {
+        const nextKept = incoming.slice(i + 1).map((h) => live.get(h)).find((l) => !!l);
+        if (nextKept) nextKept.before(link);
+        else document.head.appendChild(link);
+      }
+      el = link;
     }
+    prev = el;
   });
+  let ready: Promise<void> = Promise.resolve();
+  if (pending.length > 0) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, STYLESHEET_TIMEOUT_MS);
+    });
+    ready = Promise.race([Promise.all(pending).then(() => undefined), timeout]).then(() => clearTimeout(timer));
+  }
+  return {
+    ready,
+    commit() {
+      for (const { link, media } of added) {
+        if (media === null) link.removeAttribute('media');
+        else link.setAttribute('media', media);
+      }
+      stale.forEach((l) => l.remove());
+    },
+    abort() {
+      added.forEach(({ link }) => link.remove());
+    },
+  };
 }
 
 // Document-level <head> tags that change per page and must follow a swap.
@@ -886,6 +962,15 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
   const newChain = readRouteChain(doc);
   const plan = planSwap(currentChain, newChain, location.href, url, doc);
 
+  // Load the incoming stylesheets before swapping so the new page (and kept
+  // layouts whose rules live in the per-page sheet) never renders unstyled.
+  const sheets = prepareStylesheets(doc, url);
+  await sheets.ready;
+  if (seq !== navSeq) {
+    sheets.abort();
+    return;
+  }
+
   const mutate = () => {
     const title = doc.querySelector('title');
     if (title) document.title = title.textContent || '';
@@ -911,7 +996,7 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
     currentChain = plan.chain;
     // Detached slot content of earlier intercepts belonged to the old page.
     interceptSnapshots.clear();
-    reconcileStylesheets(doc, url);
+    sheets.commit();
     reconcileHeadMeta(doc);
     applyViewTransitionNames(document);
   };

@@ -458,3 +458,45 @@ describe('focus', () => {
     expect(root.hasAttribute('tabindex')).toBe(false);
   });
 });
+
+describe('fallback fade and reduced motion', () => {
+  function stubReducedMotion(reduce: boolean): void {
+    vi.stubGlobal('matchMedia', (q: string) => ({
+      matches: reduce && q.includes('prefers-reduced-motion'),
+      media: q,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+    }));
+    (window as any).matchMedia = (globalThis as any).matchMedia;
+  }
+
+  async function rootStyleDuringFetch(): Promise<{ transition: string; opacity: string }> {
+    let release!: () => void;
+    routes['/about'].gate = new Promise<void>((r) => (release = r));
+    const p = krateRouter.push('/about');
+    await settle();
+    const el = document.getElementById('root')!;
+    const seen = { transition: el.style.transition, opacity: el.style.opacity };
+    release();
+    await p;
+    await settle();
+    return seen;
+  }
+
+  it('applies the opacity fade without View Transitions', async () => {
+    stubReducedMotion(false);
+    const seen = await rootStyleDuringFetch();
+    expect(seen.opacity).toBe('0');
+    expect(seen.transition).toContain('opacity');
+  });
+
+  it('applies no fade under prefers-reduced-motion', async () => {
+    stubReducedMotion(true);
+    const seen = await rootStyleDuringFetch();
+    expect(seen.opacity).toBe('');
+    expect(seen.transition).toBe('');
+    expect(document.querySelector('#root h1')!.textContent).toBe('About');
+  });
+});
