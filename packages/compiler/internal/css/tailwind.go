@@ -312,62 +312,6 @@ func (g *TailwindGenerator) Generate(classes map[string]bool) string {
 	return b.String()
 }
 
-// classToRule converts a single Tailwind class to its CSS rule text plus a
-// deterministic sort key. An empty text means "unrecognized".
-func classToRule(cls string, theme TailwindTheme) (text, key string) {
-	important := strings.Contains(cls, "!")
-	variantTokens, base := parseVariants(cls)
-	base = strings.TrimPrefix(base, "!")
-	if base == "" {
-		return "", ""
-	}
-
-	css := generateCSS(base, theme)
-	if css == "" && strings.HasPrefix(base, "-") {
-		// Negative utility: generate the positive form, then negate numeric values.
-		css = negateCSS(strings.TrimPrefix(base, "-"), theme)
-	}
-	if css == "" || !validDeclarationBlock(css) {
-		return "", ""
-	}
-	if important {
-		css = addImportant(css)
-	}
-
-	// Resolve every variant; any unknown variant means we cannot faithfully
-	// represent the class, so skip it rather than emit it unconditionally.
-	var variants []variant
-	for _, vt := range variantTokens {
-		v, ok := resolveVariant(vt, theme)
-		if !ok {
-			return "", ""
-		}
-		variants = append(variants, v)
-	}
-
-	// The before/after variants inject the pseudo-element content hook so that
-	// `content-*` utilities (which set --tw-content) take effect.
-	if usesContentHook(variants) && !strings.Contains(css, "content:") {
-		css = "content: var(--tw-content); " + strings.TrimSpace(css)
-	}
-
-	sel, ats := applyVariants(EscapeClass(cls), variants)
-	// Utilities that target child/sibling/pseudo elements append a suffix.
-	if suffix := selectorSuffix(base); suffix != "" {
-		if strings.HasPrefix(suffix, "::") {
-			sel += suffix
-		} else {
-			sel += " " + suffix
-		}
-	}
-	text = wrapAtRules(sel, strings.TrimSpace(css), ats)
-
-	// Sort key reproduces Tailwind's cascade order (base before variants,
-	// responsive ascending) so later, more specific utilities win.
-	key = variantOrderKey(cls, variants, ats)
-	return text, key
-}
-
 // borderWidthCSS resolves a border width utility (sides and shorthands) so all
 // forms emit a consistent, visible border (width + solid style). It only matches
 // width forms: `border`, `border-2`, `border-t`, `border-t-2`, `border-t-[3px]`,
@@ -647,17 +591,6 @@ func shadowRule(val string) string {
 // shadowColorRule applies a shadow color and switches to the colorable shadow.
 func shadowColorRule(color string) string {
 	return "--tw-shadow-color: " + color + "; --tw-shadow: var(--tw-shadow-colored); " + shadowCompose
-}
-
-// usesContentHook reports whether any variant is the ::before/::after
-// pseudo-element, which requires the `content` property to render.
-func usesContentHook(variants []variant) bool {
-	for _, v := range variants {
-		if v.kind == "pseudo" && (v.sel == "::before" || v.sel == "::after") {
-			return true
-		}
-	}
-	return false
 }
 
 // selectorSuffix returns the descendant/sibling selector a utility applies to,

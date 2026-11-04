@@ -29,7 +29,7 @@ func TestVariantsEmitSelectors(t *testing.T) {
 		{"disabled:opacity-50", ".disabled\\:opacity-50:disabled"},
 		{"before:block", ".before\\:block::before"},
 		{"after:content-none", ".after\\:content-none::after"},
-		{"group-hover:underline", ".group:hover .group-hover\\:underline"},
+		{"group-hover:underline", ".group-hover\\:underline:is(:where(.group):hover *)"},
 		{"odd:bg-white", ".odd\\:bg-white:nth-child(odd)"},
 		{"first:mt-0", ".first\\:mt-0:first-child"},
 	}
@@ -66,7 +66,7 @@ func TestDarkModeVariants(t *testing.T) {
 	g := NewTailwindGenerator()
 	g.Theme.DarkMode = "class"
 	out := g.Generate(map[string]bool{"dark:bg-zinc-900": true})
-	if !strings.Contains(out, ".dark .dark\\:bg-zinc-900") {
+	if !strings.Contains(out, ".dark\\:bg-zinc-900:where(.dark, .dark *)") {
 		t.Errorf("dark:class should use ancestor selector:\n%s", out)
 	}
 }
