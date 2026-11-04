@@ -1022,6 +1022,7 @@ async function commitDocument(loaded: LoadedDoc, req: NavRequest, seq: number): 
   renderedPath = pathOf(location.href);
   docPath = renderedPath;
   syncParams(doc);
+  syncErrorData(doc);
 
   applyScroll(url, req);
   if (req.kind !== 'pop' && req.kind !== 'refresh') focusContent();
@@ -1370,6 +1371,24 @@ function syncParams(doc: Document): void {
     return;
   }
   delete (globalThis as any).__KRATE_PARAMS__;
+}
+
+/**
+ * Moves the server-rendered error (a JSON data block the Go server injects into
+ * a 500 page, read by error components while they hydrate) from the incoming
+ * document to the live one, so an error page shown by soft navigation sees the
+ * error of its own response. The block is removed when the new page has none.
+ */
+function syncErrorData(doc: Document): void {
+  const next = doc.getElementById('__krate_error');
+  const live = document.getElementById('__krate_error');
+  if (!next) {
+    if (live) live.remove();
+    return;
+  }
+  const copy = document.importNode(next, true);
+  if (live) live.replaceWith(copy);
+  else document.head.appendChild(copy);
 }
 
 function disposeScopes(ids: string[]): void {

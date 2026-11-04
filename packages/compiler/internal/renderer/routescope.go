@@ -12,7 +12,6 @@ import (
 // is always re-hydrated, so the router must swap (not keep) its DOM.
 func RouteScopeBlockers(sigs []irtree.ComponentSignature) map[string]string {
 	out := map[string]string{}
-	owned := needsOwnerTree(sigs)
 	for _, sig := range sigs {
 		if sig.RouteScope == "" {
 			continue
@@ -24,8 +23,6 @@ func RouteScopeBlockers(sigs []irtree.ComponentSignature) map[string]string {
 			continue
 		}
 		switch {
-		case owned:
-			out[sig.RouteScope] = "the page uses class components or error boundaries (owner tree hydration)"
 		case sig.Lazy:
 			out[sig.RouteScope] = "the layout renders a lazy() component"
 		case sig.Boundary != "":

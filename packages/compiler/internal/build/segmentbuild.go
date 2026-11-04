@@ -28,7 +28,7 @@ const (
 
 // segmentVariants records which source variant of an error page is being built
 // (see errorPageSource).
-var segmentVariants sync.Map // page path -> "static" | "window"
+var segmentVariants sync.Map // page path -> "static" | "client"
 
 // segmentGenDir is where generated segment sources live. It is not under
 // .krate/gen, which the docs plugin clears on every build.
@@ -68,10 +68,11 @@ func importSpec(from, target string) string {
 // a client error boundary around the segment's children. It reuses the class
 // component boundary machinery, so render, effect and reactive errors below it
 // show the error page in place and reset() re-mounts the children.
-func errorBoundarySource(spec string) string {
+func errorBoundarySource(spec, id string) string {
+	cls, layout := "KrateSegmentBoundary"+id, "KrateSegmentLayout"+id
 	return "import { Component } from \"react\";\n" +
 		"import ErrorPage from " + fmt.Sprintf("%q", spec) + ";\n\n" +
-		"class KrateSegmentBoundary extends Component {\n" +
+		"class " + cls + " extends Component {\n" +
 		"  state = { error: null };\n" +
 		"  static getDerivedStateFromError(error: any) { return { error }; }\n" +
 		"  componentDidCatch(error: any) { console.error(error); }\n" +
@@ -81,21 +82,21 @@ func errorBoundarySource(spec string) string {
 		"    return this.props.children;\n" +
 		"  }\n" +
 		"}\n\n" +
-		"export default function KrateSegmentBoundaryLayout(props: any) {\n" +
-		"  return <KrateSegmentBoundary><div style={{ display: \"contents\" }}>{props.children}</div></KrateSegmentBoundary>;\n" +
+		"export default function " + layout + "(props: any) {\n" +
+		"  return <" + cls + "><div style={{ display: \"contents\" }}>{props.children}</div></" + cls + ">;\n" +
 		"}\n"
 }
 
 // errorPageSource is the generated entry for the server-rendered error page.
 // The static variant bakes placeholders into the HTML, which the server
 // replaces per request; a page whose error component needs client code uses
-// the window variant, where the component reads the error the server injects
-// as window.__KRATE_ERROR__ (and the HTML carries no text for it until the page
-// hydrates).
+// the client variant, where the component reads the error the server injects as
+// a JSON data block (#__krate_error), and the HTML carries no text for it until
+// the page hydrates.
 func errorPageSource(spec, variant string) string {
 	var errExpr string
-	if variant == "window" {
-		errExpr = "(typeof window !== \"undefined\" && (window as any).__KRATE_ERROR__) || { name: \"Error\", message: \"\", digest: \"\", stack: \"\" }"
+	if variant == "client" {
+		errExpr = "(typeof document !== \"undefined\" && JSON.parse(((document.getElementById(\"__krate_error\") || { textContent: \"null\" }) as any).textContent)) || { name: \"Error\", message: \"\", digest: \"\", stack: \"\" }"
 	} else {
 		errExpr = "{ name: \"" + errSentinelName + "\", message: \"" + errSentinelMessage + "\", digest: \"" + errSentinelDigest + "\", stack: \"" + errSentinelStack + "\" }"
 	}
@@ -115,7 +116,8 @@ func (b *Builder) writeSegmentGen(path, src string) error {
 // boundaryLayout returns the generated boundary layout for an error.tsx.
 func (b *Builder) boundaryLayout(errFile string) (string, error) {
 	path := b.segmentGenPath(errFile, "boundary")
-	if err := b.writeSegmentGen(path, errorBoundarySource(importSpec(path, errFile))); err != nil {
+	id := filepath.Base(filepath.Dir(path))[:8]
+	if err := b.writeSegmentGen(path, errorBoundarySource(importSpec(path, errFile), id)); err != nil {
 		return "", fmt.Errorf("writing generated error boundary for %s: %w", errFile, err)
 	}
 	return path, nil

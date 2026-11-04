@@ -8,7 +8,7 @@ import path from "node:path";
 import vm from "node:vm";
 import { pathToFileURL } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { jsx, renderToStringAsync } from "./server.js";
 import {
   isNotFoundSignal,
@@ -196,6 +196,9 @@ interface RenderResponse {
   cached?: boolean;
   cacheStatus?: CacheStatus;
   error?: string;
+  /** Short id of a failed render; the full error is logged with it. */
+  digest?: string;
+  stack?: string;
   noStore?: boolean;
 }
 
@@ -576,6 +579,25 @@ function withRequest<T>(req: RenderRequest, fn: () => Promise<T>, tracker?: Quer
   return requestStore.run(requestContextFor(req, tracker), fn);
 }
 
+// errorDigest is the short id tying the sanitized error a visitor sees to the
+// full error in the server log. The Go server computes the same hash when the
+// renderer does not supply one (build/segmentserve.go errorDigest).
+function errorDigest(message: string, stack: string): string {
+  return createHash("sha256").update(message + "\n" + stack).digest("hex").slice(0, 10);
+}
+
+interface RenderFailure {
+  error: string;
+  stack: string;
+  digest: string;
+}
+
+function describeFailure(err: any): RenderFailure {
+  const message = (err && err.message) || String(err);
+  const stack = (err && typeof err.stack === "string" && err.stack) || "";
+  return { error: message, stack, digest: errorDigest(message, stack) };
+}
+
 // renderSignal maps notFound()/redirect() thrown during a render to a response.
 function renderSignal(err: unknown): RenderResponse | null {
   if (isNotFoundSignal(err)) return { html: "", status: 404, notFound: true };
@@ -656,8 +678,9 @@ async function renderFresh(page: ManifestPage, req: RenderRequest): Promise<Rend
   } catch (err: any) {
     const signal = renderSignal(err);
     if (signal) return signal;
-    console.error(`[krate] Error rendering ${req.route}:`, err);
-    return { html: "", status: 500, error: (err && err.message) || String(err) };
+    const failure = describeFailure(err);
+    console.error(`[krate] Error rendering ${req.route} (digest ${failure.digest}):`, err);
+    return { html: "", status: 500, ...failure };
   }
 }
 
@@ -981,10 +1004,11 @@ async function renderRegion(page: ManifestPage, region: RegionMeta, req: RenderR
       if (signal.redirect) frame.redirect = signal.redirect;
       return frame;
     }
-    console.error(`[krate-ssr] Region render failed ${page.route}::${region.id}:`, err);
+    const failure = describeFailure(err);
+    console.error(`[krate-ssr] Region render failed ${page.route}::${region.id} (digest ${failure.digest}):`, err);
     // A server component region has no meaningful baked content, so its
     // failure is fatal for the response (the Go server answers 500).
-    return { type: "error", id: region.id, status: 500, error: (err && err.message) || String(err), fatal: !!(region.serverExport || page.serverComponents) };
+    return { type: "error", id: region.id, status: 500, ...failure, fatal: !!(region.serverExport || page.serverComponents) };
   }
 }
 
@@ -1010,6 +1034,8 @@ async function renderPageRegion(page: ManifestPage, id: string, req: RenderReque
   if (result.notFound) frame.notFound = true;
   if (result.redirect) frame.redirect = result.redirect;
   if (result.error) frame.error = result.error;
+  if (result.digest) frame.digest = result.digest;
+  if (result.stack) frame.stack = result.stack;
   if (result.noStore) frame.noStore = true;
   if (page.serverComponents && frame.status >= 500) frame.fatal = true;
   // Title swap: the Go server replaces the baked <title> with the freshly

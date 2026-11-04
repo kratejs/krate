@@ -15,7 +15,7 @@
 // componentWillUnmount and state resets match React. A dormant owner keeps its
 // setup function and is remounted by running it again.
 
-import { setOwnerHooks, untrack, onCleanup, krateGetOwner, krateSetOwner } from './signal.js';
+import { setOwnerHooks, untrack, krateGetOwner, krateSetOwner, krateCurrentScope, krateOnDispose, krateScopeOfId } from './signal.js';
 import { krateForgetOwner, krateOnHookError } from './effects.js';
 
 /** Second argument of componentDidCatch. */
@@ -61,6 +61,11 @@ export interface Owner {
   readonly setup: (() => void) | null;
   /** Free-form per-owner storage (class instances live here). */
   readonly data: Record<string, unknown>;
+  /**
+   * Route scope (layout/template id) whose hydration created the owner, null for
+   * page code. A soft navigation that keeps a layout keeps its owners.
+   */
+  readonly scope: string | null;
 }
 
 interface OwnerImpl extends Owner {
@@ -72,7 +77,6 @@ let nextOrder = 0;
 const byId = new Map<string, OwnerImpl>();
 const condState = new Map<string, string>();
 const condOwners = new Map<string, OwnerImpl[]>();
-let resetRegistered = false;
 let mountDepth = 0;
 const deferredMounts: OwnerImpl[] = [];
 
@@ -100,6 +104,7 @@ function makeOwner(
     branch,
     setup,
     data: {},
+    scope: krateCurrentScope(),
     cleanups: [],
   };
   if (parent) parent.children.push(o);
@@ -118,7 +123,6 @@ export function getOwner(): Owner | null {
 export function createOwner(name: string, parent: Owner | null = current): Owner {
   const o = makeOwner('', name, (parent as OwnerImpl) || null, (parent as OwnerImpl) || null, '', '', null);
   o.state = parent && parent.state !== 'mounted' ? 'dormant' : 'mounted';
-  if (!parent) registerReset();
   return o;
 }
 
@@ -331,12 +335,13 @@ function mount(o: OwnerImpl): void {
   }
 }
 
-function registerReset(): void {
-  if (resetRegistered) return;
-  resetRegistered = true;
-  // Top-level registration: runs on disposeAll() (SPA navigation).
-  onCleanup(resetOwners);
-}
+// Page teardown (SPA navigation). A full teardown drops every owner; a partial
+// one, which keeps some layouts mounted, drops only the owners whose route scope
+// is gone and leaves the kept layouts' owners (and their lifecycles) alone.
+krateOnDispose((gone) => {
+  if (gone === null) resetOwners();
+  else disposeScopedOwners(gone);
+});
 
 function resetOwners(): void {
   const roots: OwnerImpl[] = [];
@@ -346,7 +351,31 @@ function resetOwners(): void {
   condState.clear();
   condOwners.clear();
   deferredMounts.length = 0;
-  resetRegistered = false;
+}
+
+function disposeScopedOwners(gone: (scope: string | null) => boolean): void {
+  const dead: OwnerImpl[] = [];
+  for (const o of byId.values()) if (gone(o.scope)) dead.push(o);
+  for (const o of dead) {
+    if (o.state !== 'disposed') disposeTree(o, 'disposed');
+  }
+  for (const o of dead) {
+    byId.delete(o.id);
+    const p = o.parent as OwnerImpl | null;
+    if (p && !gone(p.scope)) {
+      const i = p.children.indexOf(o);
+      if (i >= 0) p.children.splice(i, 1);
+    }
+  }
+  for (const id of Array.from(condState.keys())) {
+    if (gone(krateScopeOfId(id))) {
+      condState.delete(id);
+      condOwners.delete(id);
+    }
+  }
+  for (let i = deferredMounts.length - 1; i >= 0; i--) {
+    if (deferredMounts[i].state === 'disposed') deferredMounts.splice(i, 1);
+  }
 }
 
 /** Compact registration metadata emitted by the compiler. */
@@ -375,7 +404,6 @@ export function __krateOwn(id: string, meta: OwnMeta | null, setup: () => void):
   const creator = (m.k && byId.get(m.k)) || null;
   const o = makeOwner(id, m.n || id, parent, creator, m.c || '', m.b || '', setup);
   byId.set(id, o);
-  registerReset();
   if (o.cond) {
     let list = condOwners.get(o.cond);
     if (!list) {

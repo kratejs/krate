@@ -1936,7 +1936,7 @@ func (b *Builder) buildErrorPage(page string) (*PageResult, string, error) {
 	if err != nil || r == nil || !r.HasJS {
 		return r, css, err
 	}
-	segmentVariants.Store(page, "window")
+	segmentVariants.Store(page, "client")
 	prev := r.JSFile
 	r2, css2, err2 := b.buildPageOnce(page)
 	if err2 == nil && r2 != nil && prev != "" && prev != r2.JSFile {
@@ -2720,6 +2720,7 @@ type layoutEmitCacheEntry struct {
 	signatures     []irtree.ComponentSignature
 	listComponents []*ast.FnDecl
 	hasLinks       bool
+	boundaryLink   *renderer.BoundaryLink
 	deps           []string
 	depTimes       map[string]time.Time
 }
@@ -2842,6 +2843,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 				Signatures:     entry.signatures,
 				ListComponents: entry.listComponents,
 				HasLinks:       entry.hasLinks,
+				BoundaryLink:   entry.boundaryLink,
 			}, entry.css, entry.deps, entry.hasSignals, nil
 		}
 	}
@@ -2865,6 +2867,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 				Signatures:     entry.signatures,
 				ListComponents: entry.listComponents,
 				HasLinks:       entry.hasLinks,
+				BoundaryLink:   entry.boundaryLink,
 			}, entry.css, entry.deps, entry.hasSignals, nil
 		}
 	}
@@ -2972,7 +2975,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		emitResult.ScriptHTML += "<script>" + renderer.CSSARIAJS + "</script>"
 	}
 
+	boundaryLink := renderer.FindBoundaryLink(tree)
 	layoutEmitCache.Store(layoutPath, &layoutEmitCacheEntry{
+		boundaryLink:   boundaryLink,
 		html:           emitResult.HTML,
 		headHTML:       emitResult.HeadHTML,
 		scriptHTML:     emitResult.ScriptHTML,
@@ -2995,6 +3000,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		Signatures:     emitResult.Signatures,
 		ListComponents: emitResult.ListComponents,
 		HasLinks:       emitResult.HasLinks,
+		BoundaryLink:   boundaryLink,
 	}, css, layoutDeps, tree.HasCSSSignals, nil
 }
 
@@ -3442,11 +3448,21 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 		// interactivity hydrates. Their compact slot IDs are namespaced
 		// (IDPrefix) so they can't collide with the page's; RouteScope lets the
 		// router skip them while the layout stays mounted.
+		layoutSigs := make([]irtree.ComponentSignature, 0, len(layoutRes.Signatures))
 		for _, sig := range layoutRes.Signatures {
 			if sig.RouteScope == "" {
 				sig.RouteScope = id
 			}
-			emitResult.Signatures = append(emitResult.Signatures, sig)
+			layoutSigs = append(layoutSigs, sig)
+		}
+		if rb.Kind == "error" && layoutRes.BoundaryLink != nil {
+			// Everything inside the boundary (the page and nested layouts) hangs
+			// under it in the owner tree, and the boundary's scope runs first so
+			// those owners find it.
+			renderer.LinkUnderBoundary(emitResult.Signatures, layoutRes.BoundaryLink)
+			emitResult.Signatures = append(layoutSigs, emitResult.Signatures...)
+		} else {
+			emitResult.Signatures = append(emitResult.Signatures, layoutSigs...)
 		}
 		emitResult.ListComponents = append(emitResult.ListComponents, layoutRes.ListComponents...)
 		if layoutRes.HasLinks {
