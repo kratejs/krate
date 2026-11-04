@@ -17,9 +17,17 @@ Because Krate is **SSG-first**, most sites are just a folder of static files.
 dist/          deploy this
 ```
 
-Static hosts should exclude `dist/.krate/`. It contains server-only bundles,
-the SSR renderer, and the persisted ISR cache; `krate serve` needs it, but a
-static host must never publish it.
+Static hosts should exclude `dist/.krate/`. It contains every server-only file:
+the API route bundles (`api/`, `api-node/`, with their source maps), the
+server components and SSR page bundles, `manifest.json`, `server-manifest.json`,
+the SSR renderer, and the persisted ISR cache. `krate serve` needs it, but a
+static host must never publish it (`krate deploy` removes it for you). Nothing
+under `dist/.krate/` is ever served by `krate serve` or `krate dev`.
+
+`krate serve` also never lists directories (a directory without an
+`index.html` is a 404) and never serves dotfiles; only `.well-known/` is
+published from `public/`. Dotfiles such as `.env` or `.git` in `public/` are
+skipped at build time with a warning.
 
 
 Any static host works. The output has no server runtime dependency - pages are
@@ -52,8 +60,14 @@ krate build
 krate serve          # serves dist + sidecars
 ```
 
-`manifest.json` records per-page modes so the runtime knows which routes need
-the renderer.
+`dist/.krate/manifest.json` records per-page modes so the runtime knows which
+routes need the renderer. Page routes answer `GET` and `HEAD` only (other
+methods get `405` with `Allow: GET, HEAD`), and a page URL without its trailing
+slash (`/dash`) redirects to the one canonical form (`/dash/`) for static and
+request-time pages alike.
+
+`krate serve` binds all interfaces so it works in containers (set `server.host`
+to restrict it). `krate dev` binds `127.0.0.1` only.
 
 ## Docker
 

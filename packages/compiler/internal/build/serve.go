@@ -1194,8 +1194,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// default, so the Node API sidecar only needs to start when it is actually
 	// selected (apiRuntime / middlewareRuntime is node/bun/deno) or when a route
 	// uses external imports the embedded runtime cannot run.
-	apiDir := filepath.Join(cfg.OutDir, "api")
-	nodeAPIDir := filepath.Join(cfg.OutDir, "api-node")
+	apiDir := apiBundleDir(cfg.OutDir)
+	nodeAPIDir := apiNodeBundleDir(cfg.OutDir)
 	actionDir := filepath.Join(root, ".krate", "actions")
 	hasActions := hasActionManifest(root)
 	middlewarePath := filepath.Join(root, ".krate", "middleware.js")
@@ -1330,7 +1330,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	absOut := revalOut
 
-	fileServer := http.FileServer(http.Dir(absOut))
+	fileServer := http.FileServer(hardenedDir{http.Dir(absOut)})
 	mux := http.NewServeMux()
 
 	// Load the build manifest to learn which dynamic routes are closed
@@ -1512,6 +1512,23 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Opt-in User-Agent document selection (compat.mode hybrid + userAgent).
 	uaOn := uaOptIn(cfg.Compat)
 
+	// Files the build content-hashed; only these are cached as immutable.
+	hashedAssets := loadHashedAssets(absOut)
+
+	// Static file layer. In serve mode, build-time precompressed siblings are
+	// used here, after middleware, redirects and the request-time page
+	// decision, and never for the HTML shell of an ssr/isr/streaming page.
+	var staticServer http.Handler = fileServer
+	if hub == nil {
+		staticServer = precompressedMiddlewareIf(absOut, func(r *http.Request) bool {
+			if !isHTMLDocRequest(r.URL.Path) && path.Ext(r.URL.Path) != "" {
+				return false
+			}
+			page, _ := ssr.FindPageForRoute(requestRoute(r.URL.Path))
+			return page != nil && page.Mode != RenderSSG.String()
+		}, fileServer)
+	}
+
 	handlerWith404 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Server-only build artifacts live under dist/.krate. Never serve them
 		// from the static handler; they contain bundles, the renderer, and the
@@ -1529,7 +1546,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Hashed assets (styles.<hash>.css, index.<hash>.js, chunks/*.<hash>.js,
 		// assets/<name>-<hash>.*) are content-addressed, so they can be cached
 		// immutably. HTML must never be, since it changes per build.
-		w.Header().Set("Cache-Control", staticCacheControl(r.URL.Path, hub != nil))
+		w.Header().Set("Cache-Control", staticCacheControl(r.URL.Path, hub != nil, hashedAssets))
 
 		// Opt-in UA variant: serve the modern or legacy sibling document to
 		// classified visitors (the default document stays the full hybrid).
@@ -1564,6 +1581,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					continue
 				}
 				if params, ok := matchDynamicRoute(r.URL.Path, dr.pattern); ok {
+					if redirectToCanonicalSlash(w, r) {
+						return
+					}
 					templatePath := filepath.Join(dr.dir, "index.html")
 					templateHTML, err := os.ReadFile(templatePath)
 					if err != nil {
@@ -1582,12 +1602,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Only buffer document requests. Buffering every asset just to detect a
 		// missing one would retain whole images/videos/fonts in memory.
 		if len(custom404) == 0 || (!isHTMLDocRequest(r.URL.Path) && !strings.Contains(r.Header.Get("Accept"), "text/html")) {
-			fileServer.ServeHTTP(w, r)
+			staticServer.ServeHTTP(w, r)
 			return
 		}
 		// Buffer the response so we can replace Go's default "404 page not found"
 		buf := &captureResponse{status: http.StatusOK}
-		fileServer.ServeHTTP(buf, r)
+		staticServer.ServeHTTP(buf, r)
 		if buf.status == http.StatusNotFound {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusNotFound)
@@ -1606,7 +1626,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Dev-only live-reload SSE + overlay endpoints. The hub broadcasts every
 	// event to all connected tabs and retains the latest build state.
 	if hub != nil {
-		mux.HandleFunc("/__krate/hotreload", func(w http.ResponseWriter, r *http.Request) {
+		devHost := devBindHost(cfg)
+		guard := func(pattern string, h http.HandlerFunc) {
+			mux.Handle(pattern, devEndpointGuard(devHost, h))
+		}
+		guard("/__krate/hotreload", func(w http.ResponseWriter, r *http.Request) {
 			flusher, ok := w.(http.Flusher)
 			if !ok {
 				http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -1690,7 +1714,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 		// Runtime errors reported by the browser. Logged to the terminal and
 		// rebroadcast to every tab so multi-tab sessions stay in sync.
-		mux.HandleFunc("/__krate/client-error", func(w http.ResponseWriter, r *http.Request) {
+		guard("/__krate/client-error", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
@@ -1712,7 +1736,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		})
 
 		// Status for the dev toolbar: fanned-out build state without SSE.
-		mux.HandleFunc("/__krate/status", func(w http.ResponseWriter, r *http.Request) {
+		guard("/__krate/status", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			if cur, ok := hub.Current(); ok {
 				_ = json.NewEncoder(w).Encode(cur)
@@ -1724,7 +1748,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Open a file in the developer's editor. The path is validated against
 		// the project root so the endpoint cannot be used to launch arbitrary
 		// files.
-		mux.HandleFunc("/__krate/open", func(w http.ResponseWriter, r *http.Request) {
+		guard("/__krate/open", func(w http.ResponseWriter, r *http.Request) {
 			file := r.URL.Query().Get("file")
 			line := r.URL.Query().Get("line")
 			rel, ok := safeProjectPath(root, file)
@@ -1742,6 +1766,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	// SSR/ISR/Streaming page handler - proxies dynamic pages to the Node.js renderer
 	var ssrPageHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Pages are read-only resources. Mutations go to /api or server
+		// actions, which are routed before this handler.
+		if !pageMethodAllowed(w, r) {
+			return
+		}
 		// Gate on the manifest (route lookup), not the Node process: a page whose
 		// regions are all Go renders without any Node renderer running.
 		if !ssr.HasManifest() {
@@ -1778,6 +1807,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		if page == nil {
 			// Not an SSR/ISR/streaming page (SSG or unknown).
 			handlerWith404.ServeHTTP(w, r)
+			return
+		}
+		// SSG pages answer /x with a 301 to /x/; request-time pages use the
+		// same single canonical form.
+		if redirectToCanonicalSlash(w, r) {
 			return
 		}
 		isISR := page.Mode == RenderISR.String()
@@ -1929,6 +1963,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		for _, rw := range cfg.Rewrites {
 			if matchRedirect(path, rw.Source) {
 				rewritten := rewriteDestination(path, rw.Source, rw.Destination)
+				// rewriteDestination percent-encodes substituted values; the
+				// request path holds the decoded form.
+				if dec, err := url.PathUnescape(rewritten); err == nil {
+					rewritten = dec
+				}
 				r.URL.Path = rewritten
 				r.URL.RawPath = ""
 				break
@@ -2071,7 +2110,6 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Preview/static serving: gzip compressible assets, and serve
 		// build-time precompressed (.br/.gz) siblings when present.
 		top = gzipMiddleware(top)
-		top = precompressedMiddleware(absOut, top)
 	} else {
 		// Dev: proxy configured prefixes (e.g. /api) to a backend.
 		top = devProxyMiddleware(cfg.DevServer.Proxy, top)
@@ -2102,6 +2140,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	var rootHandler http.Handler = requestIDMiddleware(basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, mux))))))
 
 	bindHost := strings.TrimSpace(cfg.Server.Host)
+	if hub != nil {
+		bindHost = devBindHost(cfg)
+	}
 	listenAddr := fmt.Sprintf(":%d", port)
 	if bindHost != "" {
 		listenAddr = net.JoinHostPort(bindHost, strconv.Itoa(port))
@@ -2117,7 +2158,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		label = "serve"
 	}
 	displayHost := bindHost
-	if displayHost == "" || displayHost == "0.0.0.0" || displayHost == "::" {
+	if displayHost == "" || displayHost == "0.0.0.0" || displayHost == "::" || displayHost == "127.0.0.1" {
 		displayHost = "localhost"
 	}
 	printf("%s  %s server -> %shttp://%s:%d%s %s(started in %s)%s\n", cGreen, label, cCyan, displayHost, addr.Port, cReset, cGray, time.Since(startTime).Round(time.Millisecond), cReset)
@@ -2291,14 +2332,24 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func copyDirToOut(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+func copyDirToOut(src, dst string) ([]string, error) {
+	var copied []string
+	err := filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
+		}
+		if rel != "." && isHiddenName(info.Name()) {
+			// Dotfiles (.env, .git, .DS_Store) are never served, so copying them
+			// would only ship secrets inside a static deploy.
+			fmt.Fprintf(os.Stderr, "  %sWarning: not copying %s (dotfiles are not published; only .well-known is)%s\n", cYellow, filepath.ToSlash(path), cReset)
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
@@ -2308,8 +2359,13 @@ func copyDirToOut(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, data, 0644)
+		if err := os.WriteFile(target, data, 0644); err != nil {
+			return err
+		}
+		copied = append(copied, filepath.ToSlash(rel))
+		return nil
 	})
+	return copied, err
 }
 
 func openBrowser(url string) {
@@ -2347,51 +2403,89 @@ func matchRedirect(path, source string) bool {
 }
 
 func matchRedirectParams(path, source string) (map[string]string, bool) {
+	params, _, ok := matchRedirectParamsMods(path, source)
+	return params, ok
+}
+
+// matchRedirectParamsMods is matchRedirectParams that also returns the modifier
+// ('*', '+' or '?') each named parameter was declared with in the source.
+func matchRedirectParamsMods(path, source string) (map[string]string, map[string]byte, bool) {
 	params := map[string]string{}
+	mods := map[string]byte{}
 	// Literal sources match exactly; splitURLPath below intentionally ignores
 	// trailing slashes for route matching, which must not make /old match /old/.
 	if source == path {
-		return params, true
+		return params, mods, true
 	}
 	if !strings.ContainsAny(source, "*:") {
-		return nil, false
+		return nil, nil, false
 	}
 	if strings.HasSuffix(source, "/*") {
 		prefix := strings.TrimSuffix(source, "/*")
 		if path == prefix {
 			params["splat"] = ""
-			return params, true
+			return params, mods, true
 		}
 		if !strings.HasPrefix(path, prefix+"/") {
-			return nil, false
+			return nil, nil, false
 		}
 		params["splat"] = strings.TrimPrefix(strings.TrimPrefix(path, prefix), "/")
-		return params, true
+		return params, mods, true
 	}
 
 	sourceParts := splitURLPath(source)
 	pathParts := splitURLPath(path)
-	for i, part := range sourceParts {
+	pi := 0
+	for _, part := range sourceParts {
 		if strings.HasPrefix(part, ":") {
-			name := strings.TrimSuffix(part[1:], "*")
-			if strings.HasSuffix(part, "*") {
-				params[name] = strings.Join(pathParts[i:], "/")
-				return params, true
+			name, mod := splitParamModifier(part[1:])
+			mods[name] = mod
+			switch mod {
+			case '*':
+				params[name] = strings.Join(pathParts[pi:], "/")
+				return params, mods, true
+			case '+':
+				if pi >= len(pathParts) {
+					return nil, nil, false
+				}
+				params[name] = strings.Join(pathParts[pi:], "/")
+				return params, mods, true
+			case '?':
+				if pi < len(pathParts) {
+					params[name] = pathParts[pi]
+					pi++
+				} else {
+					params[name] = ""
+				}
+				continue
 			}
-			if i >= len(pathParts) {
-				return nil, false
+			if pi >= len(pathParts) {
+				return nil, nil, false
 			}
-			params[name] = pathParts[i]
+			params[name] = pathParts[pi]
+			pi++
 			continue
 		}
-		if i >= len(pathParts) || part != pathParts[i] {
-			return nil, false
+		if pi >= len(pathParts) || part != pathParts[pi] {
+			return nil, nil, false
+		}
+		pi++
+	}
+	if pi != len(pathParts) {
+		return nil, nil, false
+	}
+	return params, mods, true
+}
+
+// splitParamModifier splits a trailing '*', '+' or '?' off a parameter name.
+func splitParamModifier(name string) (string, byte) {
+	if n := len(name); n > 0 {
+		switch name[n-1] {
+		case '*', '+', '?':
+			return name[:n-1], name[n-1]
 		}
 	}
-	if len(pathParts) != len(sourceParts) {
-		return nil, false
-	}
-	return params, true
+	return name, 0
 }
 
 func splitURLPath(p string) []string {
@@ -2402,30 +2496,95 @@ func splitURLPath(p string) []string {
 	return strings.Split(p, "/")
 }
 
-// rewriteDestination replaces wildcards and :param segments in the destination.
+var destParamRe = regexp.MustCompile(`:([A-Za-z_][A-Za-z0-9_]*)`)
+
+// escapeRedirectValue percent-encodes a matched (already decoded) path value
+// for use inside a destination: each segment is escaped on its own so a "\"
+// or an encoded "/" can never turn into a scheme-relative URL, while "/"
+// between segments of a multi-segment value is kept.
+func escapeRedirectValue(v string) string {
+	if v == "" {
+		return ""
+	}
+	segs := strings.Split(v, "/")
+	for i, seg := range segs {
+		segs[i] = url.PathEscape(seg)
+	}
+	return strings.Join(segs, "/")
+}
+
+// rewriteDestination fills ":splat" and ":name" (also ":name*", ":name+" and
+// ":name?") placeholders in destination from the matched request path. Matched
+// values are percent-encoded, and a path destination never starts with "//" or
+// "/\" (an open redirect), whatever the request contained.
 func rewriteDestination(path, source, destination string) string {
-	params, ok := matchRedirectParams(path, source)
+	params, mods, ok := matchRedirectParamsMods(path, source)
 	if !ok {
 		return destination
 	}
+	var out string
 	if splat, ok := params["splat"]; ok {
-		if strings.Contains(destination, ":splat") {
-			return strings.ReplaceAll(destination, ":splat", splat)
+		switch {
+		case strings.Contains(destination, ":splat"):
+			out = strings.ReplaceAll(destination, ":splat", escapeRedirectValue(splat))
+		case splat != "":
+			out = strings.TrimRight(destination, "/") + "/" + escapeRedirectValue(splat)
+		default:
+			out = destination
 		}
-		if splat != "" {
-			return strings.TrimRight(destination, "/") + "/" + splat
+	} else {
+		out = replaceDestParams(destination, params, mods)
+	}
+	return sanitizeRedirectTarget(destination, out)
+}
+
+// replaceDestParams substitutes ":name" placeholders. A '*', '+' or '?' right
+// after the name is part of the placeholder only when the source declared the
+// parameter with that modifier, so "/x/:id?ref=1" keeps its query string.
+func replaceDestParams(destination string, params map[string]string, mods map[string]byte) string {
+	var sb strings.Builder
+	last := 0
+	for _, m := range destParamRe.FindAllStringSubmatchIndex(destination, -1) {
+		name := destination[m[2]:m[3]]
+		val, ok := params[name]
+		if !ok {
+			continue
 		}
-		return destination
+		end := m[1]
+		if mod := mods[name]; mod != 0 && end < len(destination) && destination[end] == mod {
+			end++
+		}
+		sb.WriteString(destination[last:m[0]])
+		sb.WriteString(escapeRedirectValue(val))
+		last = end
 	}
-	keys := make([]string, 0, len(params))
-	for k := range params {
-		keys = append(keys, k)
+	sb.WriteString(destination[last:])
+	return sb.String()
+}
+
+// sanitizeRedirectTarget keeps a substituted path destination on-site. When the
+// configured destination is a plain path (one leading slash), any run of
+// leading slashes or backslashes produced by substitution collapses to a
+// single slash and control characters are percent-encoded. Absolute URLs and
+// an explicitly configured "//host" destination are left as configured.
+func sanitizeRedirectTarget(configured, out string) string {
+	if !strings.HasPrefix(configured, "/") || strings.HasPrefix(configured, "//") || strings.HasPrefix(configured, "/\\") {
+		return out
 	}
-	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
-	for _, k := range keys {
-		destination = strings.ReplaceAll(destination, ":"+k, params[k])
+	var sb strings.Builder
+	for _, r := range out {
+		if r < 0x20 || r == 0x7f {
+			fmt.Fprintf(&sb, "%%%02X", r)
+			continue
+		}
+		sb.WriteRune(r)
 	}
-	return destination
+	out = sb.String()
+	trimmed := strings.TrimLeft(out, "/\\")
+	if trimmed != out {
+		return "/" + trimmed
+	}
+	return out
 }
 
 // staticRouteExists reports whether the output dir holds a concrete static
@@ -2439,7 +2598,12 @@ func isInternalOutputPath(urlPath string) bool {
 	}
 	p := strings.ReplaceAll(urlPath, "\\", "/")
 	p = path.Clean("/" + p)
-	return p == "/.krate" || strings.HasPrefix(p, "/.krate/")
+	if p == "/.krate" || strings.HasPrefix(p, "/.krate/") {
+		return true
+	}
+	// Defense in depth: where older builds wrote server-only files into the
+	// public root, they stay unreachable.
+	return p == "/server-manifest.json" || p == "/api-node" || strings.HasPrefix(p, "/api-node/")
 }
 
 func staticRouteExists(absOut, urlPath string) bool {
@@ -2512,7 +2676,7 @@ type dynamicRoute struct {
 // ("/blog/[slug]" and "blog/[slug]" are equivalent).
 func loadStaticOnlyRoutes(absOut string) map[string]bool {
 	out := map[string]bool{}
-	data, err := os.ReadFile(filepath.Join(absOut, "manifest.json"))
+	data, err := os.ReadFile(ResolveManifestPath(absOut, "manifest.json"))
 	if err != nil {
 		return out
 	}
@@ -2530,7 +2694,7 @@ func loadStaticOnlyRoutes(absOut string) map[string]bool {
 // Go-component regions (region id -> render request) so the server can route
 // them to the Go host instead of the Node SSR sidecar.
 func loadGoRegions(absOut string) map[string]map[string]goRenderRegion {
-	data, err := os.ReadFile(filepath.Join(absOut, "manifest.json"))
+	data, err := os.ReadFile(ResolveManifestPath(absOut, "manifest.json"))
 	if err != nil {
 		return nil
 	}

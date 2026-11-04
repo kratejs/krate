@@ -79,3 +79,10 @@ Static files under `public/` are served with Go's standard `http.FileServer`
 headers and content types derived from the file extension. Asset files in the
 build output (`_krate/images/...`, hashed bundles under `chunks/`, etc.) are
 immutable per build, so they are safe to cache aggressively at the CDN layer.
+
+`krate serve` sends `Cache-Control: public, max-age=31536000, immutable` only
+for files the build itself content-hashed (they are listed in the build
+manifest). Your own `public/` files, even ones whose names look hashed such as
+`team-leader.png` or `app.bundle.js`, are sent with `Cache-Control: no-cache`
+so edits are picked up. To cache them longer, set a `headers` rule for their
+path.

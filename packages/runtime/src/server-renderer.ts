@@ -1098,7 +1098,8 @@ if (manifestPath && fs.existsSync(manifestPath)) {
   console.log(`[krate-ssr] Loaded manifest: ${manifest!.pages.length} SSR/ISR/streaming pages`);
 } else {
   // Try default location
-  const defaultPath = path.join(OUT_DIR, "server-manifest.json");
+  const krateDefault = path.join(OUT_DIR, ".krate", "server-manifest.json");
+  const defaultPath = fs.existsSync(krateDefault) ? krateDefault : path.join(OUT_DIR, "server-manifest.json");
   if (fs.existsSync(defaultPath)) {
     const data = fs.readFileSync(defaultPath, "utf-8");
     manifest = JSON.parse(data);

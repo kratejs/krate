@@ -78,7 +78,7 @@ func TestBuildServerModesManifestE2E(t *testing.T) {
 	outDir := cfg.OutDir
 
 	// Full manifest: every page (including ssg) appears with its mode.
-	manData, err := os.ReadFile(filepath.Join(outDir, "manifest.json"))
+	manData, err := os.ReadFile(ManifestPath(outDir))
 	if err != nil {
 		t.Fatalf("reading manifest.json: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestBuildServerModesManifestE2E(t *testing.T) {
 	}
 
 	// Server manifest: only non-SSG pages, with string modes + revalidate.
-	srvData, err := os.ReadFile(filepath.Join(outDir, "server-manifest.json"))
+	srvData, err := os.ReadFile(ServerManifestPath(outDir))
 	if err != nil {
 		t.Fatalf("reading server-manifest.json: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestBuildServerModesManifestE2E(t *testing.T) {
 	// region) get a compiled server bundle; a streaming page with no dynamic
 	// regions is served statically and has none.
 	var bundleManifest Manifest
-	if data, err := os.ReadFile(filepath.Join(outDir, "manifest.json")); err == nil {
+	if data, err := os.ReadFile(ManifestPath(outDir)); err == nil {
 		_ = json.Unmarshal(data, &bundleManifest)
 	}
 	needsNode := func(route, mode string) bool {
@@ -208,7 +208,7 @@ func TestBuildServerModesManifestE2E(t *testing.T) {
 	// Region registry: the /live page owns a suspense-primary region backed by
 	// the Live runtime component.
 	var fullMan2 Manifest
-	manData2, err := os.ReadFile(filepath.Join(outDir, "manifest.json"))
+	manData2, err := os.ReadFile(ManifestPath(outDir))
 	if err != nil {
 		t.Fatalf("re-reading manifest.json: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestBuildServerModesManifestE2E(t *testing.T) {
 	var srvMan2 struct {
 		Regions map[string][]RegionMeta `json:"regions"`
 	}
-	srvData2, err := os.ReadFile(filepath.Join(outDir, "server-manifest.json"))
+	srvData2, err := os.ReadFile(ServerManifestPath(outDir))
 	if err != nil {
 		t.Fatalf("re-reading server-manifest.json: %v", err)
 	}
@@ -619,7 +619,7 @@ func TestRegionSidecarE2E(t *testing.T) {
 	cmd := exec.Command(node, staged)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("KRATE_SSR_PORT=%d", port),
-		fmt.Sprintf("KRATE_MANIFEST=%s", filepath.Join(outDir, "server-manifest.json")),
+		fmt.Sprintf("KRATE_MANIFEST=%s", ServerManifestPath(outDir)),
 		fmt.Sprintf("KRATE_ROOT=%s", root),
 	)
 	cmd.Stdout = os.Stdout
@@ -722,7 +722,7 @@ func TestNestedRuntimeSuspenseSidecarE2E(t *testing.T) {
 
 	// The manifest region for the nested runtime component must be resolvable
 	// (component + bundle linked).
-	manData, err := os.ReadFile(filepath.Join(outDir, "manifest.json"))
+	manData, err := os.ReadFile(ManifestPath(outDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +743,7 @@ func TestNestedRuntimeSuspenseSidecarE2E(t *testing.T) {
 	cmd := exec.Command(node, staged)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("KRATE_SSR_PORT=%d", port),
-		fmt.Sprintf("KRATE_MANIFEST=%s", filepath.Join(outDir, "server-manifest.json")),
+		fmt.Sprintf("KRATE_MANIFEST=%s", ServerManifestPath(outDir)),
 		fmt.Sprintf("KRATE_ROOT=%s", root),
 	)
 	cmd.Stdout = os.Stdout
@@ -851,7 +851,7 @@ export default function V(props: any) {
 	cmd := exec.Command(node, staged)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("KRATE_SSR_PORT=%d", port),
-		fmt.Sprintf("KRATE_MANIFEST=%s", filepath.Join(outDir, "server-manifest.json")),
+		fmt.Sprintf("KRATE_MANIFEST=%s", ServerManifestPath(outDir)),
 		fmt.Sprintf("KRATE_ROOT=%s", root),
 	)
 	cmd.Stdout = os.Stdout
@@ -964,7 +964,7 @@ export default function VideoPage(props: any) {
 	cmd := exec.Command(node, staged)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("KRATE_SSR_PORT=%d", port),
-		fmt.Sprintf("KRATE_MANIFEST=%s", filepath.Join(outDir, "server-manifest.json")),
+		fmt.Sprintf("KRATE_MANIFEST=%s", ServerManifestPath(outDir)),
 		fmt.Sprintf("KRATE_ROOT=%s", root),
 	)
 	cmd.Stdout = os.Stdout

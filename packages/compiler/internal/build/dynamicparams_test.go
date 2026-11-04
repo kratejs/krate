@@ -91,7 +91,7 @@ export default function Post(props) {
 		t.Error("static-only route should not emit a [slug] fallback template")
 	}
 	// Manifest records it.
-	data, _ := os.ReadFile(filepath.Join(root, "dist", "manifest.json"))
+	data, _ := os.ReadFile(ManifestPath(filepath.Join(root, "dist")))
 	if !containsStr(string(data), `"/blog/[slug]"`) || !containsStr(string(data), "staticOnlyRoutes") {
 		t.Errorf("manifest should list /blog/[slug] as static-only:\n%s", data)
 	}

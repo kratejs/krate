@@ -15,7 +15,7 @@ import (
 type RuntimeComponentBundle struct {
 	Name       string // Component name derived from filename (e.g. "Counter")
 	SourcePath string // Absolute path to original source file
-	BundlePath string // Path to compiled JS relative to outDir (e.g. "server-components/Counter.runtime.js")
+	BundlePath string // Path to compiled JS relative to outDir (e.g. ".krate/server-components/Counter.runtime.js")
 }
 
 // jsxShimCode is the server-side JSX runtime that serializes JSX to HTML strings.
@@ -96,7 +96,7 @@ func CompileRuntimeComponents(root, outDir string, serverComponents, runtimeComp
 		return nil
 	}
 
-	bundleDir := filepath.Join(outDir, "server-components")
+	bundleDir := ServerOutPath(outDir, "server-components")
 	if err := os.MkdirAll(bundleDir, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sx Runtime components: cannot create output dir:%s %v\n", cRed, cReset, err)
 		return nil
@@ -210,7 +210,7 @@ func isPathInDirs(filePath string, dirs []string) bool {
 // compileSingleRuntimeComponent compiles one runtime component source file into
 // a self-contained IIFE bundle that defines globalThis.__krate_render(propsJSON).
 func compileSingleRuntimeComponent(root, outDir, sourcePath string) (*RuntimeComponentBundle, error) {
-	bundleDir := filepath.Join(outDir, "server-components")
+	bundleDir := ServerOutPath(outDir, "server-components")
 	componentName := extractBuildComponentName(sourcePath)
 	outPath := filepath.Join(bundleDir, componentName+".runtime.js")
 

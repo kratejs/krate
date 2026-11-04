@@ -101,7 +101,8 @@ Starts a build + HTTP dev server with hot reload.
 krate dev
 ```
 
-- Serves the site on port 3000 (configurable via `devServer.port`).
+- Serves the site on port 3000 (configurable via `devServer.port`), bound to `127.0.0.1`
+  only. Use `devServer.host` to expose it on the network.
 - Watches source files and rebuilds changed pages.
 - Uses SSE hot reload to push updates to open tabs.
 - Shows compilation errors inline via the dev error overlay.

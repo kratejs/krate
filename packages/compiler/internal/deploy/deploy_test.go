@@ -118,3 +118,26 @@ func TestEmitRemovesServerOnlyArtifacts(t *testing.T) {
 		t.Fatalf(".krate still present after deploy: %v", err)
 	}
 }
+
+func TestEmitRemovesLegacyServerOutputFromPublicRoot(t *testing.T) {
+	out := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(out, "api-node"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"api-node/hello.js", "server-manifest.json", "index.html"} {
+		if err := os.WriteFile(filepath.Join(out, filepath.FromSlash(rel)), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Emit("netlify", config.Default(), out); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"api-node", "server-manifest.json"} {
+		if _, err := os.Stat(filepath.Join(out, rel)); !os.IsNotExist(err) {
+			t.Errorf("%s still present after deploy: %v", rel, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(out, "index.html")); err != nil {
+		t.Errorf("index.html was removed: %v", err)
+	}
+}

@@ -106,12 +106,14 @@ func (b *Builder) refreshRuntimeComponents(results []*PageResult) []RuntimeCompo
 // the entries for the rebuilt pages/components, and writes them back. Missing
 // manifests are left absent (nothing to update).
 func (b *Builder) mergeManifests(cssFile, runtimeJS string, serverBundles map[string]string, runtimeBundles []RuntimeComponentBundle) error {
-	manifestPath := filepath.Join(b.Cfg.OutDir, "manifest.json")
-	serverManifestPath := filepath.Join(b.Cfg.OutDir, "server-manifest.json")
+	manifestPath := ManifestPath(b.Cfg.OutDir)
+	serverManifestPath := ServerManifestPath(b.Cfg.OutDir)
+	readManifest := ResolveManifestPath(b.Cfg.OutDir, "manifest.json")
+	readServerManifest := ResolveManifestPath(b.Cfg.OutDir, "server-manifest.json")
 
 	// Full manifest
 	var man Manifest
-	if data, err := os.ReadFile(manifestPath); err == nil {
+	if data, err := os.ReadFile(readManifest); err == nil {
 		_ = json.Unmarshal(data, &man)
 	}
 	if man.Routes == nil {
@@ -132,7 +134,7 @@ func (b *Builder) mergeManifests(cssFile, runtimeJS string, serverBundles map[st
 
 	// Server manifest (read by the Node sidecar)
 	var sm ServerManifest
-	if data, err := os.ReadFile(serverManifestPath); err == nil {
+	if data, err := os.ReadFile(readServerManifest); err == nil {
 		_ = json.Unmarshal(data, &sm)
 	}
 	if cssFile != "" {
@@ -198,6 +200,9 @@ func writeJSONIfChanged(path string, v any) error {
 	}
 	if existing, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(existing)) == strings.TrimSpace(string(data)) {
 		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
 	}
 	return os.WriteFile(path, data, 0644)
 }

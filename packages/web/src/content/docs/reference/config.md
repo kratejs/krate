@@ -104,7 +104,10 @@ compress: {                   // opt-in; also enabled by `krate build --precompr
 Build-time precompression writes `.br`/`.gz` siblings beside compressible assets
 (HTML, CSS, JS, JSON, SVG, XML, ...). `krate serve` negotiates them per request
 by `Accept-Encoding` (brotli > gzip > raw) and always sends
-`Vary: Accept-Encoding`, falling back to on-the-fly gzip for dynamic responses.
+`Vary: Accept-Encoding`, falling back to on-the-fly gzip for dynamic responses. Siblings are used only
+by the static file handler, after middleware, redirects and the SSR/ISR
+decision, so they never bypass them and are never used for the HTML of a
+request-time page. Range requests are answered uncompressed.
 Static hosts such as Cloudflare Pages and Netlify serve the siblings
 automatically. Assets under 1 KB, already-compressed formats (images, fonts,
 wasm), and internal `.krate/` build artifacts are skipped.
@@ -183,6 +186,7 @@ format; **AVIF is not supported** (it needs a separate encoder).
 ```typescript
 devServer: {
   port: 3000,
+  host: "127.0.0.1", // bind address (default loopback; "0.0.0.0" exposes the dev server on the network)
   open: true,
   overlay: true,   // show the dev error overlay (default true)
   toolbar: true,   // show the dev toolbar (default true)
@@ -191,7 +195,11 @@ devServer: {
 }
 ```
 
-`editor` may include flags (for example `"code -g"`). It is used by the
+`krate dev` binds to loopback by default, and its `/__krate/*` endpoints only
+accept requests whose `Host` and `Origin` are the dev server itself (this blocks
+DNS-rebinding and cross-site calls to `/__krate/open`). Set `devServer.host`
+(or `server.host`) to expose it, for example `"0.0.0.0"` to test on a phone; the
+`Host` check is then relaxed to the configured address. `editor` may include flags (for example `"code -g"`). It is used by the
 overlay's location links and by `GET /__krate/open`. `proxy` forwards matching
 path prefixes to a backend only in dev (longest prefix wins), so you can run a
 separate backend without CORS. In development, generated JavaScript is served
@@ -663,7 +671,7 @@ with the prefix (or use relative URLs).
 
 ```typescript
 server: {
-  host: "",             // bind address (default: all interfaces)
+  host: "",             // bind address for `krate serve` (default: all interfaces, for containers)
   port: 3000,           // falls back to devServer.port, then 3000
   maxBodySize: 1048576, // request body cap in bytes (0 = defaults)
 },

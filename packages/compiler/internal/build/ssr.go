@@ -169,7 +169,7 @@ func (s *SSRServer) LoadManifest() error {
 // loadManifestLocked reads the server manifest into s.manifest. The caller must
 // hold s.mu.
 func (s *SSRServer) loadManifestLocked() error {
-	manifestPath := filepath.Join(s.outputDirLocked(), "server-manifest.json")
+	manifestPath := ResolveManifestPath(s.outputDirLocked(), "server-manifest.json")
 	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
 		return fmt.Errorf("server-manifest.json not found in dist/ - no SSR/ISR pages to render")
 	}
@@ -232,7 +232,7 @@ func (s *SSRServer) Start() error {
 		s.mu.Unlock()
 		return err
 	}
-	manifestPath := filepath.Join(s.outputDirLocked(), "server-manifest.json")
+	manifestPath := ResolveManifestPath(s.outputDirLocked(), "server-manifest.json")
 
 	runtimeCmd, runtimeArgs, err := ssrRuntimeCommand(s.runtime, rendererPath)
 	if err != nil {

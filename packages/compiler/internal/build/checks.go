@@ -345,7 +345,7 @@ func (m manifestInfo) sourceFor(route string) string {
 // error (e.g. a plugin-only build); callers fall back to route-derived data.
 func readManifestPages(outDir string) (manifestInfo, error) {
 	var m manifestInfo
-	data, err := os.ReadFile(filepath.Join(outDir, "manifest.json"))
+	data, err := os.ReadFile(ResolveManifestPath(outDir, "manifest.json"))
 	if err != nil {
 		return m, nil
 	}

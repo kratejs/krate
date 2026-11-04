@@ -35,6 +35,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
+	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
@@ -993,9 +994,16 @@ func (b *Builder) BuildAll() error {
 		errorCount++
 	}
 
+	// publicFiles are the user's own static files; the build did not hash them,
+	// so they must never be cached as immutable.
+	publicFiles := map[string]bool{}
 	if b.Cfg.PublicDir != "" {
 		if info, err := os.Stat(b.Cfg.PublicDir); err == nil && info.IsDir() {
-			if err := copyDirToOut(b.Cfg.PublicDir, b.Cfg.OutDir); err != nil {
+			copied, err := copyDirToOut(b.Cfg.PublicDir, b.Cfg.OutDir)
+			for _, rel := range copied {
+				publicFiles[rel] = true
+			}
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "  %sPublic copy error:%s %v\n", cYellow, cReset, err)
 				failureMessages = append(failureMessages, "  public: "+err.Error())
 				failureErrs = append(failureErrs, err)
@@ -1061,6 +1069,7 @@ func (b *Builder) BuildAll() error {
 	manifest.SetRuntimeComponents(runtimeCompBundles)
 	stopTools()
 
+	manifest.HashedAssets = collectHashedAssets(b.Cfg.OutDir, publicFiles)
 	if err := WriteManifest(manifest, b.Cfg.OutDir, serverBundles); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sWarning: failed to write manifest:%s %v\n", cYellow, cReset, err)
 	}
@@ -3548,7 +3557,7 @@ func (b *Builder) writeWorkerBundles() error {
 	// Emit a tiny index of emitted workers for tooling/debugging.
 	if len(built) > 0 {
 		idx, _ := json.MarshalIndent(built, "", "  ")
-		_ = fsutil.WriteFileAtomic(filepath.Join(b.Cfg.OutDir, "workers.json"), idx, 0644)
+		_ = fsutil.WriteFileAtomic(ServerOutPath(b.Cfg.OutDir, "workers.json"), idx, 0644)
 	}
 	return nil
 }
@@ -4155,6 +4164,16 @@ func (b *Builder) compileImageToPicture(orig *ast.JSXElement) *ast.JSXElement {
 		resolvedSrc = filepath.Join(publicDir, src)
 	}
 
+	// A local src must stay inside public/ (or, for a genuine absolute
+	// filesystem path, inside the project): "/../../x" must not read outside.
+	if !strings.HasPrefix(src, "http://") && !strings.HasPrefix(src, "https://") {
+		inPublic := pluginapi.WithinRoot(publicDir, resolvedSrc)
+		inProject := !strings.HasPrefix(src, "/") && filepath.IsAbs(src) && pluginapi.WithinRoot(b.Root, resolvedSrc)
+		if !inPublic && !inProject {
+			return imageErrorSpan(fmt.Sprintf("[Image: src %q resolves outside public/ - keep image paths inside the public directory]", src))
+		}
+	}
+
 	var result *imageproc.ImageResult
 	switch {
 	case strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://"):
@@ -4360,7 +4379,8 @@ func (b *Builder) copyImageCacheToOut() error {
 	if err := os.MkdirAll(dst, 0755); err != nil {
 		return err
 	}
-	return copyDirToOut(src, dst)
+	_, err := copyDirToOut(src, dst)
+	return err
 }
 
 func evalAttrString(expr ast.Expr) (string, bool) {
@@ -4479,10 +4499,10 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 	outName := strings.TrimSuffix(relPath, filepath.Ext(relPath)) + ".js"
 
 	// Two artifacts so each runtime gets the shape it wants:
-	//   dist/api/<name>.js       IIFE + bundled  -> embedded QuickJS
-	//   dist/api-node/<name>.js  ESM  + externals -> Node sidecar
-	quickjsPath := filepath.Join(b.Cfg.OutDir, "api", outName)
-	nodePath := filepath.Join(b.Cfg.OutDir, "api-node", outName)
+	//   dist/.krate/api/<name>.js       IIFE + bundled  -> embedded QuickJS
+	//   dist/.krate/api-node/<name>.js  ESM  + externals -> Node sidecar
+	quickjsPath := filepath.Join(apiBundleDir(b.Cfg.OutDir), outName)
+	nodePath := filepath.Join(apiNodeBundleDir(b.Cfg.OutDir), outName)
 	for _, p := range []string{quickjsPath, nodePath} {
 		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 			return apiRouteMeta{}, err

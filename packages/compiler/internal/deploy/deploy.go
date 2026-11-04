@@ -22,11 +22,19 @@ func Emit(target string, cfg *config.Config, outDir string) ([]string, error) {
 	if fi, err := os.Stat(outDir); err != nil || !fi.IsDir() {
 		return nil, fmt.Errorf("output directory %q not found; run `krate build` first", outDir)
 	}
-	// Server-only artifacts (bundles, renderer, ISR cache) must never be uploaded
+	// Server-only artifacts (bundles, manifests, renderer, ISR cache) must never be uploaded
 	// to a static host. Remove them before writing adapter files.
 	internal := filepath.Join(outDir, ".krate")
 	if err := os.RemoveAll(internal); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("removing server-only artifacts %s: %w", internal, err)
+	}
+	// Builds from before server-only output moved under .krate left these in
+	// the public root.
+	for _, legacy := range []string{"api-node", "server-manifest.json"} {
+		p := filepath.Join(outDir, legacy)
+		if err := os.RemoveAll(p); err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("removing server-only artifacts %s: %w", p, err)
+		}
 	}
 	switch target {
 	case "netlify", "cloudflare":

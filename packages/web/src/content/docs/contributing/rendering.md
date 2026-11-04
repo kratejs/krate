@@ -17,7 +17,7 @@ implemented.
 - The Node (or bun/deno) sidecar renders **only** the regions the Go server asks
   for - via `/__krate/regions` - using the compiled page bundle
   (`dist/.krate/server-bundles/...`) or the compiled runtime-component bundles
-  (`dist/server-components/...`). The Go server splices the returned HTML into the
+  (`dist/.krate/server-components/...`). The Go server splices the returned HTML into the
   shell and streams it.
 - The Go server resolves the concrete URL to the page's canonical route
   (e.g. `/video/abc` -> `/video/[id]`), forwards the URL params, and keys ISR

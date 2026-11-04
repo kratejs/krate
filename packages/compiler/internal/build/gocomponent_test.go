@@ -161,7 +161,7 @@ func TestGoComponentRuntimeRegion(t *testing.T) {
 	if !strings.Contains(string(html), "<!--region:") {
 		t.Errorf("expected a region marker for the runtime Go component:\n%s", html)
 	}
-	man, err := os.ReadFile(filepath.Join(cfg.OutDir, "manifest.json"))
+	man, err := os.ReadFile(ManifestPath(cfg.OutDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestGoComponentRuntimeChildren(t *testing.T) {
 	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
-	man, err := os.ReadFile(filepath.Join(cfg.OutDir, "manifest.json"))
+	man, err := os.ReadFile(ManifestPath(cfg.OutDir))
 	if err != nil {
 		t.Fatal(err)
 	}
