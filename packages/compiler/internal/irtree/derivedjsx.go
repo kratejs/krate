@@ -115,7 +115,7 @@ func foldSwitch(s *ast.SwitchStmt, rest []ast.Stmt, env map[string]ast.Expr, dep
 	var arms []arm
 	var pending []ast.Expr
 	pendingDefault := false
-	for _, c := range s.Cases {
+	for ci, c := range s.Cases {
 		if c == nil {
 			return nil, false
 		}
@@ -130,7 +130,7 @@ func foldSwitch(s *ast.SwitchStmt, rest []ast.Stmt, env map[string]ast.Expr, dep
 		body := c.Body
 		if br, ok := body[len(body)-1].(*ast.BreakStmt); ok && br.Label == "" {
 			body = body[:len(body)-1]
-		} else if _, ok := body[len(body)-1].(*ast.ReturnStmt); !ok {
+		} else if _, ok := body[len(body)-1].(*ast.ReturnStmt); !ok && ci != len(s.Cases)-1 {
 			// Falls through into the next case with statements.
 			return nil, false
 		}
