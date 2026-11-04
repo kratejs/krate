@@ -79,3 +79,52 @@ func TestDCEKeepsModuleClassesAppliedOnClient(t *testing.T) {
 		t.Errorf("unused class should still be pruned:\n%s", css)
 	}
 }
+
+func TestCSPCoversMinifiedInlineStylesAndAttrs(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "src/pages/index.tsx", "export default function P() {\n"+
+		" return <div style={{color: 'red', 'margin-top': '3px'}}><style>{`.a  {  color : blue ;  }\n\n .b{color:green}`}</style><p>x</p></div>;\n}\n")
+	cfg, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.CSP.Enabled = true
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(data)
+	meta := doc[strings.Index(doc, "Content-Security-Policy"):]
+	meta = meta[:strings.Index(meta, ">")]
+	for _, inline := range extractInlineContent(doc, "style") {
+		if !strings.Contains(meta, sha256Base64(inline)) {
+			t.Errorf("style block %q not hashed in %s", inline, meta)
+		}
+	}
+	attrs, _ := inlineStyleAttrsAndSpecRules(doc, "")
+	if len(attrs) == 0 {
+		t.Fatalf("no style attribute found in %s", doc)
+	}
+	if !strings.Contains(meta, "'unsafe-hashes'") {
+		t.Errorf("missing unsafe-hashes: %s", meta)
+	}
+	for _, h := range attrs {
+		if !strings.Contains(meta, h) {
+			t.Errorf("style attr hash %s missing in %s", h, meta)
+		}
+	}
+}
+
+func TestGenerateCSPMeta_StyleAttrsAndSpeculationRules(t *testing.T) {
+	doc := `<div style="color:red"></div><script type="speculationrules">{"prefetch":[]}</script>`
+	meta := generateCSPMeta(doc, doc, "", "")
+	if !strings.Contains(meta, "'unsafe-hashes' "+sha256Base64("color:red")) {
+		t.Errorf("style attr hash missing: %s", meta)
+	}
+	if !strings.Contains(meta, sha256Base64(`{"prefetch":[]}`)) || !strings.Contains(meta, "'inline-speculation-rules'") {
+		t.Errorf("speculation rules not allowed: %s", meta)
+	}
+}

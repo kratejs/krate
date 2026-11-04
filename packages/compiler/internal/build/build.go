@@ -1510,17 +1510,18 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
 					}
 				}
-				// 2c. CSP meta tag injection. Hash against the FULLY ASSEMBLED
-				// document so every inline script/style is allow-listed.
+				// 3. Minify code in memory
+				if b.Cfg.ShouldMinifyHTML() {
+					h = minifyHTML(h)
+				}
+				// 4. CSP meta tag injection. Hash the FINAL document (after
+				// minification rewrote inline content) so every inline
+				// script/style/style attribute is allow-listed.
 				if b.Cfg.CSP.Enabled {
 					cspMeta := generateCSPMeta(h, h, r.HydrationJS, b.Cfg.CSP.Directive)
 					if cspMeta != "" {
 						h = strings.Replace(h, "</head>", cspMeta+"</head>", 1)
 					}
-				}
-				// 3. Minify code in memory
-				if b.Cfg.ShouldMinifyHTML() {
-					h = minifyHTML(h)
 				}
 				return h
 			}
@@ -1528,7 +1529,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			html = finish(html)
 			r.FinalHTML = html
 
-			// 4. Single Write to physical media
+			// Single write to physical media
 			// Error pages (404/500) are written directly at the output root as .html
 			var htmlPath string
 			if r.IsErrorPage {
