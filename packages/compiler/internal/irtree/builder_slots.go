@@ -1597,7 +1597,7 @@ func (b *builder) buildTextSlot(expr ast.Expr, parentID string) *TextSlot {
 func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 	id := b.assignSlotID(b.nextDynamicSlot(parentID, "expr"))
 	signals := b.collectSignalReads(expr)
-	exprSource := generateExprJS(expr, b.sigMap())
+	exprSource := b.bindLoopVars(generateExprJS(expr, b.sigMap()))
 	// The SSR initial is the value rendered as child text (React semantics:
 	// false/null/undefined render nothing); the emitter escapes it.
 	initial, _ := childText(b.evalValue(expr))
@@ -1703,8 +1703,8 @@ func (b *builder) evalForLoopArray(fs *ast.ForStmt, pushArgs []ast.Expr, parentI
 		}
 	}
 
-	savedProps := b.localProps
-	defer func() { b.localProps = savedProps }()
+	savedProps, savedLoop := b.localProps, b.loopBindings
+	defer func() { b.localProps, b.loopBindings = savedProps, savedLoop }()
 
 	var nodes []SlotNode
 	for iter := 0; iter < 1000; iter++ {
@@ -1712,6 +1712,13 @@ func (b *builder) evalForLoopArray(fs *ast.ForStmt, pushArgs []ast.Expr, parentI
 			break
 		}
 		b.localProps = evalProps()
+		b.loopBindings = make(valueMap, len(loopVars)+len(savedLoop))
+		for k, v := range savedLoop {
+			b.loopBindings[k] = v
+		}
+		for k, v := range loopVars {
+			b.loopBindings[k] = v
+		}
 		for _, arg := range pushArgs {
 			nodes = append(nodes, b.buildSlotNodes(arg, parentID)...)
 		}
@@ -2640,6 +2647,7 @@ func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *Handler
 	if body == "" {
 		return nil
 	}
+	body = b.bindLoopVars(body)
 	signals := b.collectSignalReads(attr.Value)
 
 	return &HandlerDecl{
@@ -2664,7 +2672,7 @@ func (b *builder) buildAttrBinding(attr *ast.JSXAttr, elementID string) *AttrBin
 	signalName := b.extractSignalName(attr.Value)
 	exprSource := ""
 	if signalName == "" {
-		exprSource = generateExprJS(attr.Value, b.sigMap())
+		exprSource = b.bindLoopVars(generateExprJS(attr.Value, b.sigMap()))
 	}
 
 	return &AttrBinding{
@@ -2869,7 +2877,7 @@ func isSimpleSignalRead(expr ast.Expr) bool {
 		return len(e.Name) > 0 && e.Name[0] >= 'a' && e.Name[0] <= 'z'
 	case *ast.CallExpr:
 		// count() - call to a signal getter function
-		if id, ok := e.Callee.(*ast.Identifier); ok {
+		if id, ok := e.Callee.(*ast.Identifier); ok && len(e.Args) == 0 {
 			return len(id.Name) > 0 && id.Name[0] >= 'a' && id.Name[0] <= 'z'
 		}
 	}

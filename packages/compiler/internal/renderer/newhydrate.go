@@ -20,8 +20,9 @@ window.__krateErrs=[];
 window.__krateModule=function(k,f){var m=window.__krate_mod||(window.__krate_mod={});if(!Object.prototype.hasOwnProperty.call(m,k))m[k]=f();return m[k];};
 window.__krate_props={};
 window.$esc=function(v){var d=document.createElement('div');d.textContent=v;return d.innerHTML};
-window.__safe=function(fn,n){try{return fn();}catch(e){if(window.__krateOnError&&window.__krateOnError(e,n))return null;try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}return null;}};
-window.__krateFx=function(n,f){return function(){try{return f();}catch(e){if(n&&n.isConnected===false){try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}return;}throw e;}};};
+window.__krateLog=function(e){try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}try{console.error(e);}catch(_){}};
+window.__safe=function(fn,n){try{return fn();}catch(e){if(window.__krateOnError&&window.__krateOnError(e,n))return null;__krateLog(e);return null;}};
+window.__krateFx=function(n,f){return function(){try{return f();}catch(e){if(n&&n.isConnected===false){__krateLog(e);return;}throw e;}};};
 (function(){
 var __root=document.getElementById('root')||document.body;
 var __cache=new Map();

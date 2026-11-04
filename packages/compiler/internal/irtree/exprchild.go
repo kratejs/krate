@@ -17,6 +17,10 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 	if expr == nil {
 		return nil
 	}
+	// A spread child `{...kids}` renders the array like `{kids}`.
+	if sp, ok := expr.(*ast.UnaryExpr); ok && sp.Op == "..." && !sp.Postfix && sp.Arg != nil {
+		expr = sp.Arg
+	}
 	if nodes, ok := b.jsxValueChild(expr, parentID, doEscape); ok {
 		return nodes
 	}
@@ -38,7 +42,6 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 		if slot := b.buildTextSlot(expr, parentID); slot != nil {
 			return []SlotNode{slot}
 		}
-		return nil
 	}
 	// Complex expression (binary, member chain, template, etc.).
 	return []SlotNode{b.buildExprSlot(expr, parentID)}

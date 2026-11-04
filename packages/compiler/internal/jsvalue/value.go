@@ -120,6 +120,9 @@ type Array struct {
 type Object struct {
 	keys  []string
 	props map[string]Value
+	// getters marks keys whose stored value is an accessor function that
+	// Get invokes (`{ get v() { ... } }`).
+	getters map[string]bool
 }
 
 // Function is a callable value (an arrow function closure or a built-in).
@@ -322,7 +325,22 @@ func (v Value) Get(key string) (Value, bool) {
 		return undefinedValue, false
 	}
 	p, ok := v.obj.props[key]
+	if ok && v.obj.getters[key] {
+		return p.Call(), true
+	}
 	return p, ok
+}
+
+// SetGetter defines an accessor property: Get calls fn with no arguments.
+func (v Value) SetGetter(key string, fn Value) {
+	if v.kind != KindObject || v.obj == nil {
+		return
+	}
+	v.Set(key, fn)
+	if v.obj.getters == nil {
+		v.obj.getters = map[string]bool{}
+	}
+	v.obj.getters[key] = true
 }
 
 // Set assigns an object property in place.
@@ -334,6 +352,7 @@ func (v Value) Set(key string, val Value) {
 		v.obj.keys = append(v.obj.keys, key)
 	}
 	v.obj.props[key] = val
+	delete(v.obj.getters, key)
 }
 
 // ObjectFrom builds an object from ordered key/value pairs.

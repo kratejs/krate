@@ -49,10 +49,12 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 	case *ast.Identifier:
 		return e.Name
 	case *ast.CallExpr:
-		calleeJS := generateExprJS(e.Callee, signals)
+		calleeJS := operandJS(e.Callee, signals)
 		switch e.Callee.(type) {
-		case *ast.ArrowFn, *ast.BinaryExpr, *ast.ConditionalExpr:
-			calleeJS = "(" + calleeJS + ")"
+		case *ast.BinaryExpr, *ast.ConditionalExpr:
+			if !strings.HasPrefix(calleeJS, "(") {
+				calleeJS = "(" + calleeJS + ")"
+			}
 		}
 		opt := ""
 		if e.Optional {
@@ -64,7 +66,7 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 		}
 		return calleeJS + opt + "(" + strings.Join(argsJS, ", ") + ")"
 	case *ast.MemberExpr:
-		objJS := generateExprJS(e.Object, signals)
+		objJS := operandJS(e.Object, signals)
 		if e.Computed {
 			propJS := generateExprJS(e.Property, signals)
 			if e.Optional {
@@ -90,6 +92,9 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 			}
 		}
 		left := generateExprJS(e.Left, signals)
+		if e.Op == "**" && isPrefixOperator(e.Left) {
+			left = "(" + left + ")"
+		}
 		right := generateExprJS(e.Right, signals)
 		// Preserve real JS semantics for `&&` (falsy left operand is returned
 		// unchanged rather than collapsed to ''). The runtime and SSR renderer
@@ -121,7 +126,7 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 	case *ast.ClassExpr:
 		return "(" + renderClassJS(e.Class, signals, 0) + ")"
 	case *ast.TaggedTemplateExpr:
-		return generateExprJS(e.Tag, signals) + generateTemplateExpr(e.Quasi, signals)
+		return operandJS(e.Tag, signals) + generateTemplateExpr(e.Quasi, signals)
 	case *ast.MetaProperty:
 		return e.Meta + "." + e.Property
 	case *ast.ParenExpr:
@@ -132,6 +137,9 @@ func generateExprJS(expr ast.Expr, signals map[string]ast.Expr) string {
 		return generateTemplateExpr(e, signals)
 	case *ast.NewExpr:
 		calleeJS := generateExprJS(e.Callee, signals)
+		if !isPlainNewCallee(e.Callee) {
+			calleeJS = "(" + calleeJS + ")"
+		}
 		var argsJS []string
 		for _, arg := range e.Args {
 			argsJS = append(argsJS, generateExprJS(arg, signals))
@@ -233,7 +241,7 @@ func renderArrowFn(fn *ast.ArrowFn, signals map[string]ast.Expr) string {
 		bodyExpr := arrowBodyExpr(fn)
 		if bodyExpr != nil {
 			js := generateExprJS(bodyExpr, signals)
-			if _, isObject := bodyExpr.(*ast.ObjectExpr); isObject {
+			if strings.HasPrefix(js, "{") {
 				b.WriteByte('(')
 				b.WriteString(js)
 				b.WriteByte(')')
@@ -299,7 +307,11 @@ func renderStmt(stmt ast.Stmt, signals map[string]ast.Expr, level int) string {
 		}
 		return "return;"
 	case *ast.ExprStmt:
-		return generateExprJS(s.Expression, signals) + ";"
+		js := generateExprJS(s.Expression, signals)
+		if startsAmbiguously(js) {
+			js = "(" + js + ")"
+		}
+		return js + ";"
 	case *ast.VarStmt:
 		var parts []string
 		keyword := varKeyword(s.Kind)
@@ -1154,3 +1166,101 @@ func codegenIssues(fn *ast.FnDecl, mk func(pos ast.Pos, msg, hint string) error)
 // String literal values are decoded once at parse time (see
 // parser.decodeStringToken -> escape.UnescapeJSString), so consumers here read
 // the literal runtime value directly.
+
+// unwrapTypes strips type-only wrappers that print as their inner expression.
+func unwrapTypes(e ast.Expr) ast.Expr {
+	for {
+		ta, ok := e.(*ast.TypeAssertion)
+		if !ok {
+			return e
+		}
+		e = ta.Expr
+	}
+}
+
+// isPrefixOperator reports a prefix unary (or await) expression, which is
+// not a valid left operand of ** and not a valid member object.
+func isPrefixOperator(e ast.Expr) bool {
+	switch v := unwrapTypes(e).(type) {
+	case *ast.UnaryExpr:
+		return !v.Postfix
+	case *ast.AwaitExpr:
+		return true
+	}
+	return false
+}
+
+// operandJS renders e as the object of a member access, a callee or a tag.
+// The parser drops source parentheses, so the printer restores the ones the
+// grammar needs: unary and await operands, arrow functions, and integer
+// literals (255.x is a syntax error, (255).x is not).
+func operandJS(e ast.Expr, signals map[string]ast.Expr) string {
+	js := generateExprJS(e, signals)
+	wrap := false
+	switch v := unwrapTypes(e).(type) {
+	case *ast.UnaryExpr, *ast.AwaitExpr:
+		wrap = true
+	case *ast.ArrowFn:
+		wrap = !v.Function
+	case *ast.Literal:
+		wrap = v.Kind == ast.NumberLit && isDecimalInteger(v.Value)
+		if v.Kind == ast.NumberLit && strings.HasPrefix(v.Value, "-") {
+			wrap = true
+		}
+	}
+	if wrap {
+		return "(" + js + ")"
+	}
+	return js
+}
+
+func isDecimalInteger(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9') && c != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+// isPlainNewCallee reports whether `new <callee>(...)` parses the callee as
+// written: a name or a member chain with no call, optional link or computed
+// base that would end the callee early.
+func isPlainNewCallee(e ast.Expr) bool {
+	switch v := unwrapTypes(e).(type) {
+	case *ast.Identifier, *ast.ThisExpr, *ast.ImportMetaExpr, *ast.MetaProperty:
+		return true
+	case *ast.MemberExpr:
+		return !v.Optional && isPlainNewCallee(v.Object)
+	case *ast.ClassExpr, *ast.ParenExpr:
+		return true
+	case *ast.ArrowFn:
+		return v.Function
+	}
+	return false
+}
+
+// startsAmbiguously reports statement text that would parse as a block,
+// function declaration or class declaration instead of an expression.
+func startsAmbiguously(js string) bool {
+	if strings.HasPrefix(js, "{") || strings.HasPrefix(js, "let [") {
+		return true
+	}
+	for _, kw := range []string{"function", "class", "async function"} {
+		if strings.HasPrefix(js, kw) {
+			rest := js[len(kw):]
+			if rest == "" {
+				return true
+			}
+			c := rest[0]
+			if !(c == '_' || c == '$' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
+				return true
+			}
+		}
+	}
+	return false
+}

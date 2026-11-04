@@ -7,6 +7,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // Helpers
@@ -1036,4 +1037,37 @@ func hasRefAttrChildren(children []ast.JSXChild) bool {
 		}
 	}
 	return false
+}
+
+// bindLoopVars closes generated JS over the values of the unrolled for-loop
+// variables it reads. A statically unrolled `for (let i...)` iteration has no
+// runtime binding for i, so a handler or expression written in the loop body
+// is wrapped as ((i)=>(js))(value) with the iteration's value.
+func (b *builder) bindLoopVars(js string) string {
+	if len(b.loopBindings) == 0 || js == "" {
+		return js
+	}
+	used := map[string]bool{}
+	scanJSIdents(js, func(name string) {
+		if _, ok := b.loopBindings[name]; ok {
+			used[name] = true
+		}
+	})
+	if len(used) == 0 {
+		return js
+	}
+	names := make([]string, 0, len(used))
+	for n := range used {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var vals []string
+	for _, n := range names {
+		src, ok := jsvalue.JSSource(b.loopBindings[n])
+		if !ok {
+			src = "undefined"
+		}
+		vals = append(vals, src)
+	}
+	return "((" + strings.Join(names, ",") + ")=>(" + js + "))(" + strings.Join(vals, ",") + ")"
 }
