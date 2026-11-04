@@ -76,84 +76,6 @@ func (s *TailwindScanner) ScanClasses(dirs []string) map[string]bool {
 	return classes
 }
 
-// candidateTokens extracts Tailwind-looking tokens from source text. It scans
-// every string literal ('...', "...") and template literal (`...`, with static
-// segments only) and keeps whitespace-separated tokens that look like utility
-// classes (optionally variant-prefixed, possibly with `/`, `[`, `]`, `.`, `-`).
-func candidateTokens(src string) []string {
-	var out []string
-	seen := map[string]bool{}
-	add := func(s string) {
-		for _, tok := range strings.Fields(s) {
-			tok = strings.Trim(tok, "\"'`,;(){}")
-			if tok == "" || seen[tok] || !looksLikeUtility(tok) {
-				continue
-			}
-			seen[tok] = true
-			out = append(out, tok)
-		}
-	}
-	for _, lit := range stringLiterals(src) {
-		add(lit)
-	}
-	return out
-}
-
-// looksLikeUtility is a conservative shape filter so prose and code identifiers
-// are not emitted as utilities. A candidate must consist only of characters
-// valid in a utility (letters, digits, `- _ / . [ ] % ( ) # ! :` plus `,` for
-// arbitrary values) and must contain a `-` (all utilities are hyphenated or
-// standalone keywords).
-func looksLikeUtility(tok string) bool {
-	if len(tok) == 0 || len(tok) > 200 {
-		return false
-	}
-	// Reject obvious non-classes.
-	if strings.ContainsAny(tok, "\n\t ") {
-		return false
-	}
-	hasHyphen := false
-	depth := 0
-	for _, r := range tok {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case r == '-':
-			hasHyphen = true
-		case r == '_' || r == '/' || r == '.' || r == '%' || r == '#' || r == '!':
-		case r == '@' || r == '*':
-			// Container-query variants (@sm:) and child variants (*:, **:).
-		case r == '[':
-			depth++
-		case r == ']':
-			if depth == 0 {
-				return false
-			}
-			depth--
-		case r == '(' || r == ')':
-			// allowed inside arbitrary values
-		case r == ':':
-			// variant separator
-		case r == ',':
-			// arbitrary value list
-		default:
-			return false
-		}
-	}
-	if depth != 0 {
-		return false
-	}
-	if !hasHyphen {
-		// The token may be a variant-prefixed standalone keyword (`sm:flex`,
-		// `hover:block`, `dark:hidden`); check the base after the last colon.
-		base := tok
-		if i := strings.LastIndexByte(tok, ':'); i >= 0 {
-			base = tok[i+1:]
-		}
-		return bareUtilities[base]
-	}
-	return true
-}
-
 // bareUtilities is the set of valid Tailwind utilities that contain no hyphen.
 // The scanner needs it because a hyphen-less token is otherwise indistinguishable
 // from a prose word or identifier.
@@ -170,74 +92,10 @@ var bareUtilities = map[string]bool{
 	"inline-table": true, "table": true, "flow-root": true, "list-item": true,
 	"isolate": true, "grayscale": true, "sepia": true, "invert": true,
 	"grow": true, "shrink": true, "resize": true, "filter": true, "outline": true,
+	"transition": true, "blur": true,
 	"ordinal": true, "slashed-zero": true, "lining-nums": true,
 	"oldstyle-nums": true, "proportional-nums": true, "tabular-nums": true,
 	"diagonal-fractions": true, "stacked-fractions": true, "hyphens": true,
-}
-
-// stringLiterals returns the contents of every string and template literal in
-// src, with `${...}` interpolations stripped from template bodies. Escapes are
-// not fully unwound; the shape filter tolerates that.
-func stringLiterals(src string) []string {
-	var out []string
-	i, n := 0, len(src)
-	for i < n {
-		c := src[i]
-		// Skip line comments.
-		if c == '/' && i+1 < n && src[i+1] == '/' {
-			for i < n && src[i] != '\n' {
-				i++
-			}
-			continue
-		}
-		// Skip block comments.
-		if c == '/' && i+1 < n && src[i+1] == '*' {
-			i += 2
-			for i+1 < n && !(src[i] == '*' && src[i+1] == '/') {
-				i++
-			}
-			i += 2
-			continue
-		}
-		if c == '"' || c == '\'' || c == '`' {
-			quote := c
-			i++
-			start := i
-			var sb strings.Builder
-			for i < n && src[i] != quote {
-				if src[i] == '\\' && i+1 < n {
-					sb.WriteByte(src[i])
-					sb.WriteByte(src[i+1])
-					i += 2
-					continue
-				}
-				if quote == '`' && src[i] == '$' && i+1 < n && src[i+1] == '{' {
-					// Skip the interpolation (nested braces).
-					i += 2
-					depth := 1
-					for i < n && depth > 0 {
-						switch src[i] {
-						case '{':
-							depth++
-						case '}':
-							depth--
-						}
-						i++
-					}
-					sb.WriteByte(' ')
-					continue
-				}
-				sb.WriteByte(src[i])
-				i++
-			}
-			_ = start
-			out = append(out, sb.String())
-			i++ // closing quote
-			continue
-		}
-		i++
-	}
-	return out
 }
 
 // TailwindGenerator converts class names to CSS rules.
