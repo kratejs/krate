@@ -351,6 +351,36 @@ describe('useActionState', () => {
   });
 });
 
+describe('useActionState flash from a native form post', () => {
+  const flash = (id: string, result: unknown) =>
+    btoa(JSON.stringify({ a: id, r: result })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  afterEach(() => {
+    document.cookie = 'krate_flash=; Path=/; Max-Age=0';
+  });
+
+  it('starts from the state the server returned to the redirected native post', () => {
+    document.cookie = 'krate_flash=' + flash('save', { errors: { name: 'required' } }) + '; Path=/';
+    const [state, setState] = createSignal<unknown>({ errors: {} });
+    const [, setPending] = createSignal(false);
+    __krateActionState(__krateAction('save') as never, state, setState, setPending);
+    expect(state()).toEqual({ errors: { name: 'required' } });
+    // The flash is single use.
+    expect(document.cookie).not.toContain('krate_flash=' + flash('save', { errors: { name: 'required' } }));
+    const [again, setAgain] = createSignal<unknown>('init');
+    __krateActionState(__krateAction('save') as never, again, setAgain, setPending);
+    expect(again()).toBe('init');
+  });
+
+  it('ignores a flash written for another action', () => {
+    document.cookie = 'krate_flash=' + flash('other', 'x') + '; Path=/';
+    const [state, setState] = createSignal<unknown>('init');
+    const [, setPending] = createSignal(false);
+    __krateActionState(__krateAction('save') as never, state, setState, setPending);
+    expect(state()).toBe('init');
+  });
+});
+
 describe('useOptimistic', () => {
   it('applies updates while an action is pending and reverts to the latest base', async () => {
     const [base, setBase] = createSignal<string[]>(['a']);

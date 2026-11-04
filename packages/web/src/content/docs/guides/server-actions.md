@@ -140,9 +140,16 @@ export default function Todos() {
 - **Without JavaScript**, the form posts to the server action with the initial
   state (evaluated at build time) as the previous state, and the server
   redirects to the optional `permalink` (third argument, a same-origin path) or
-  back to the page. The returned state is not shown in that case. A non-literal
+  back to the page. The state the action returned travels across that redirect
+  in a short-lived (60 s), single-use `krate_flash` cookie, and a
+  `useActionState` for the same action that mounts on the next page starts from
+  it, so validation errors appear as soon as the page hydrates (for example when
+  the script loads after the post). Pages are pre-rendered HTML, so a browser
+  that never runs the script still sees the page with its build-time initial
+  state; the flash cookie is not rendered into the markup. A non-literal
   initial state is sent as `null` and reported as
-  [`KR7003`](#diagnostics).
+  [`KR7003`](#diagnostics). The state must stay under about 3 KB once encoded;
+  larger results are dropped with a server warning.
 
 ### useFormStatus
 

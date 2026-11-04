@@ -111,7 +111,7 @@ const MIGRATION_PHASES = [
     tone: "gate",
     status: "Complete",
     title: "Inventory and report",
-    body: "Detect Next.js App Router and Pages Router routes, layouts, loading/error boundaries, API routes, middleware, config, public env, fonts, and images.",
+    body: "Detect Next.js App Router and Pages Router routes, layouts, loading/error boundaries, API routes, middleware, config, NEXT_PUBLIC_* environment values, fonts, and images.",
     exit: "Dry run writes migration-report.json with routes, dependencies, manual items, warnings, and per-route status.",
   },
   {
@@ -119,7 +119,7 @@ const MIGRATION_PHASES = [
     tone: "gate",
     status: "Complete",
     title: "Routing, shell, and config",
-    body: "Move routes and layouts, rewrite links, images, head/metadata, navigation, headers, dynamic imports, public env, redirects, rewrites, headers, tsconfig, aliases, and package scripts.",
+    body: "Move routes and layouts, rewrite links, images, head/metadata, navigation, headers, dynamic imports, public env, redirects, rewrites, headers, tsconfig, aliases, and package scripts. NEXT_PUBLIC_* values are inlined at migration time.",
     exit: "Routing, shell, and config migration is covered by unit tests; end-to-end reference-app validation remains N5.",
   },
   {
@@ -135,8 +135,8 @@ const MIGRATION_PHASES = [
     tone: "gate",
     status: "Complete",
     title: "Actions, RSC, and route handlers",
-    body: "Server actions, form actions in server components, route-handler params and NextRequest/NextResponse helpers, server-component error boundaries, out-of-order sibling Suspense streaming, and useParams/useSelectedLayoutSegment(s) are implemented.",
-    exit: "Forms and mutations work without a client-side React runtime; unsupported RSC features are reported.",
+    body: "Server actions, form actions in server components, route-handler params, common next/server helpers rewritten onto the standard Request/Response API (there are no NextRequest/NextResponse classes), server-component error boundaries, out-of-order sibling Suspense streaming, and useParams/useSelectedLayoutSegment(s) are implemented.",
+    exit: "Forms and mutations work without a client-side React runtime; unsupported RSC features are reported. A no-JS action post carries its returned state across the redirect in a flash cookie, but pre-rendered pages do not display it without script.",
   },
   {
     id: "N5",

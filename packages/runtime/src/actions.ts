@@ -532,6 +532,28 @@ export function installActionForms(doc: Document | undefined = typeof document !
   doc.addEventListener('submit', onSubmit, false);
 }
 
+// Flash state from native form posts
+
+/**
+ * Reads and clears the `krate_flash` cookie the action endpoint sets after a
+ * native form post, when it was written for action `id`.
+ */
+export function takeFlash(id: string): { found: boolean; value?: unknown } {
+  if (typeof document === 'undefined') return { found: false };
+  const m = /(?:^|;\s*)krate_flash=([^;]*)/.exec(document.cookie || '');
+  if (!m) return { found: false };
+  try {
+    const raw = m[1].replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(raw + '='.repeat((4 - (raw.length % 4)) % 4));
+    const payload = JSON.parse(decodeURIComponent(escape(bin))) as { a?: string; r?: unknown };
+    if (payload.a !== id) return { found: false };
+    document.cookie = 'krate_flash=; Path=/; Max-Age=0; SameSite=Lax';
+    return { found: true, value: payload.r };
+  } catch {
+    return { found: false };
+  }
+}
+
 // useActionState
 
 interface QueuedAction {
@@ -555,6 +577,13 @@ export function __krateActionState<S>(
 ): RunnableAction {
   const queue: QueuedAction[] = [];
   let running = false;
+
+  // A native (no-JS or not-yet-hydrated) form post redirected back to this page
+  // with the action's returned state in a short-lived cookie: start from it.
+  if (isServerAction(action)) {
+    const flashed = takeFlash(action.$$krateAction);
+    if (flashed.found) setState(flashed.value as S);
+  }
 
   const drain = async (): Promise<void> => {
     running = true;
