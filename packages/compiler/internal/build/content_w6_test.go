@@ -115,7 +115,7 @@ export default function BlogPost(props: { params?: { slug: string } }) {
 		if strings.HasSuffix(p, ".js") && strings.Contains(s, "PUBLICBODYMARK") {
 			t.Errorf("entry body shipped to the browser in %s (only the rendered HTML needs to exist)", p)
 		}
-		if strings.HasSuffix(p, "hello/index.html") && strings.Contains(s, "PUBLICBODYMARK") {
+		if strings.HasSuffix(filepath.ToSlash(p), "hello/index.html") && strings.Contains(s, "PUBLICBODYMARK") {
 			sawPublicHTML = true
 		}
 		return nil

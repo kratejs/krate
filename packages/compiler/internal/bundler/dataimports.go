@@ -335,12 +335,25 @@ func jsonToAST(data []byte) (*ast.Program, error) {
 func jsonDiagnostic(path string, data []byte, err error) diag.Diagnostic {
 	d := diag.Diagnostic{File: path, Line: 1, Col: 1, Message: "invalid JSON: " + err.Error(), Hint: "fix the JSON syntax (no comments or trailing commas), or import a .js/.ts module instead"}
 	var off int64 = -1
-	if se, ok := err.(*json.SyntaxError); ok {
-		off = se.Offset
-	} else if ute, ok := err.(*json.UnmarshalTypeError); ok {
-		off = ute.Offset
-	} else if err == io.ErrUnexpectedEOF {
-		off = int64(len(data))
+	// The token decoder's offsets are not absolute file offsets on every Go
+	// version, so locate the error with a whole-file parse instead.
+	var perr error
+	if perr = json.Unmarshal(data, new(any)); perr == nil {
+		perr = err
+	}
+	switch e := perr.(type) {
+	case *json.SyntaxError:
+		off = e.Offset
+		if e.Error() != "unexpected end of JSON input" && off > 0 {
+			// Offset counts the bytes read including the offending one.
+			off--
+		}
+	case *json.UnmarshalTypeError:
+		off = e.Offset
+	default:
+		if perr == io.ErrUnexpectedEOF {
+			off = int64(len(data))
+		}
 	}
 	if off > int64(len(data)) {
 		off = int64(len(data))

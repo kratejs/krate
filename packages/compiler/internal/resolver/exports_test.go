@@ -3,6 +3,7 @@ package resolver
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -135,7 +136,7 @@ func TestExportsWildcardLongestPrefixDeterministic(t *testing.T) {
 	writeFile(t, filepath.Join(pkg, "special", "a.mjs"), "")
 	for i := 0; i < 30; i++ {
 		got := NodeModule(root, "wild/features/special/a")
-		if filepath.ToSlash(got) != filepath.ToSlash(filepath.Join(pkg, "special", "a.mjs")) {
+		if !strings.HasSuffix(filepath.ToSlash(got), "node_modules/wild/special/a.mjs") {
 			t.Fatalf("run %d: got %q", i, got)
 		}
 	}
