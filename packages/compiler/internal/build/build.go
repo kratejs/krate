@@ -1890,7 +1890,8 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			return nil, "", layoutErr
 		}
 	}
-	bundle.CSS += layoutCSS
+	// Layouts come first (outermost first) so page CSS wins ties.
+	bundle.CSS = layoutCSS + bundle.CSS
 	// Generated CSS signal rules land in the page's own hashed stylesheet, after
 	// layout CSS so author styles can override the defaults.
 	if choiceCSS != "" {
@@ -1984,8 +1985,12 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	}
 	emitResult.IslandBootJS = islandBoot
 	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
+	// Client-side JS scanned by CSS DCE for classes applied after hydration.
+	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
+	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
 	if needsHydrate {
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		dceJS = append(dceJS, rawJS)
 		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)
 		if islandJS != "" {
 			rawJS = strings.TrimSpace(rawJS + "\n" + islandJS)
@@ -2046,7 +2051,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 	loadingHTML := b.renderLoadingComponent(page)
 
-	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML)
+	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML, dceJS...)
 
 	// Return data structures without triggering an intermediate disk write
 	result := &PageResult{
@@ -2925,6 +2930,7 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 	for _, rb := range findRouteStack(page, b.Cfg.PagesDir) {
 		id := b.layoutIDPrefix(rb.Path)
 		open, end := "<!--kl:"+id+"-->", "<!--/kl:"+id+"-->"
+		var slotCSS string
 		layoutRes, layoutCSS, layoutDeps, layoutHasSignals, err := b.executeLayoutPipeline(rb.Path, open+emitResult.HTML+end, nil)
 		relPath := rb.Path
 		if rel, rerr := filepath.Rel(b.Root, rb.Path); rerr == nil {
@@ -2961,7 +2967,7 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 				return "", nil, false, nil, serr
 			}
 			entry.Slots = slotRes.info
-			css += slotRes.css
+			slotCSS = slotRes.css
 			used = append(used, slotRes.deps...)
 			hasSignals = hasSignals || slotRes.hasSignals
 		}
@@ -2984,7 +2990,9 @@ func (b *Builder) applyLayoutStack(page string, emitResult *renderer.EmitResult)
 		if layoutRes.HasLinks {
 			emitResult.HasLinks = true
 		}
-		css += layoutCSS
+		// Boundaries are visited innermost first; prepend so the outermost
+		// layout ends up first and inner ones override it.
+		css = layoutCSS + slotCSS + css
 		used = append(used, layoutDeps...)
 		chain = append([]routeChainEntry{entry}, chain...)
 	}
