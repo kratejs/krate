@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -31,11 +30,9 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 	"github.com/kratejs/krate/packages/compiler/internal/gotsgen"
 	"github.com/kratejs/krate/packages/compiler/internal/icons"
-	"github.com/kratejs/krate/packages/compiler/internal/imageproc"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
-	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
@@ -45,10 +42,12 @@ import (
 )
 
 type PageResult struct {
-	Page          string
-	OutName       string
-	HTML          string
-	HeadHTML      string
+	Page     string
+	OutName  string
+	HTML     string
+	HeadHTML string
+	// FontURLs are the fonts this page's own stylesheet asks to preload.
+	FontURLs      []string
 	ScriptHTML    string
 	StyleHTML     string
 	HydrationJS   string
@@ -160,6 +159,8 @@ type Builder struct {
 	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
 	// in the global stylesheet; injected into every page head.
 	fontPreloadHTML string
+	// globalFonts are the font URLs already preloaded by the global stylesheet.
+	globalFonts []string
 
 	workerMu  sync.Mutex
 	workers   map[string]string // worker source path -> hashed site URL (/workers/...)
@@ -213,6 +214,12 @@ type Builder struct {
 	// transformOnce guards the in-place universal transforms so a shared
 	// (cached) AST is transformed exactly once per build, never concurrently.
 	transformOnce sync.Map
+	// deferInline marks entry programs whose getCollection inlining must wait
+	// until route params are bound (static-params pages), so lookups like
+	// `find((p) => p.slug === props.params.slug)` fold to a single entry.
+	deferInline sync.Map
+	// progImageDiags holds the <Image> diagnostics of each transformed program.
+	progImageDiags sync.Map
 
 	// diskCache persists per-page outputs across runs (see diskcache.go).
 	diskCache *buildDiskCache
@@ -344,28 +351,72 @@ func hasCommunityPlugins(cfg *config.Config) bool {
 // flattening, content inlining) to prog exactly once per build. Cached module
 // ASTs are shared across concurrent page builds, so these in-place mutations
 // must be serialized per program.
-func (b *Builder) ensureTransformed(prog *ast.Program) {
+func (b *Builder) ensureTransformed(prog *ast.Program, file string) error {
 	if prog == nil {
-		return
+		return nil
 	}
 	v, _ := b.transformOnce.LoadOrStore(prog, &sync.Once{})
 	v.(*sync.Once).Do(func() {
 		b.TransformUniversalIcons(prog)
-		b.TransformUniversalImages(prog)
+		if ds := b.transformImages(prog); len(ds) > 0 {
+			b.progImageDiags.Store(prog, ds)
+			for _, d := range ds {
+				if d.warn {
+					fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n      hint: %s\n", cYellow, cReset, imageDiagError(b.relPath(file), d).Error(), d.hint)
+				}
+			}
+		}
 		b.FlattenComponentSpreadAttrs(prog)
-		b.InlineContent(prog)
+		if _, deferred := b.deferInline.Load(prog); !deferred {
+			b.InlineContent(prog)
+		}
 	})
+	if v, ok := b.progImageDiags.Load(prog); ok {
+		var errs []error
+		for _, d := range v.([]imageDiag) {
+			if !d.warn {
+				errs = append(errs, imageDiagError(b.relPath(file), d))
+			}
+		}
+		if len(errs) > 0 {
+			return &diagList{errs: errs}
+		}
+	}
+	return nil
 }
+
+// diagList is a set of located diagnostics returned as one build error.
+type diagList struct{ errs []error }
+
+func (d *diagList) Error() string {
+	parts := make([]string, len(d.errs))
+	for i, e := range d.errs {
+		parts[i] = e.Error()
+		if dd, ok := e.(diag.Diagnostic); ok && dd.Hint != "" {
+			parts[i] += "\n      hint: " + dd.Hint
+		}
+	}
+	return strings.Join(parts, "\n  ")
+}
+
+func (d *diagList) Unwrap() []error { return d.errs }
 
 // ensureTransformedModules transforms every module in a page's bundle. Page
 // builds share cached ASTs, so this must finish before any AST reader runs.
-func (b *Builder) ensureTransformedModules(mods []*bundler.Module) {
+func (b *Builder) ensureTransformedModules(mods []*bundler.Module) error {
+	var errs []error
 	for _, mod := range mods {
 		if mod == nil || mod.IsExternal || mod.IsCSS || mod.Program == nil {
 			continue
 		}
-		b.ensureTransformed(mod.Program)
+		if err := b.ensureTransformed(mod.Program, mod.Path); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
 }
 
 // contentHashOf returns a stable hash of the build's content collections. It is
@@ -818,8 +869,14 @@ func (b *Builder) BuildAll() error {
 	for _, w := range cres.Warnings {
 		fmt.Fprintf(os.Stderr, "  %sWarning: content:%s %v\n", cYellow, cReset, w)
 	}
-	for _, ve := range cres.Validation {
-		fmt.Fprintf(os.Stderr, "  %sContent error:%s %v\n", cRed, cReset, ve)
+	if len(cres.Validation) > 0 {
+		// Schema violations are content bugs: fail the build (and `krate
+		// check`, which builds first) instead of emitting pages built from
+		// invalid entries. The error also reaches the dev overlay.
+		for _, ve := range cres.Validation {
+			fmt.Fprintf(os.Stderr, "  %sContent error:%s %v\n", cRed, cReset, ve)
+		}
+		return &ContentValidationError{Errors: cres.Validation}
 	}
 
 	// Build the Go host (API routes + components) before pages, so pages that
@@ -1148,6 +1205,8 @@ func (b *Builder) BuildAll() error {
 			HTML:     r.HTML,
 			HeadHTML: r.HeadHTML,
 			HasJS:    r.HasJS,
+
+			IsErrorPage: r.IsErrorPage,
 		}
 		if r.CSSFile != "" && !seenCSS[r.CSSFile] {
 			seenCSS[r.CSSFile] = true
@@ -1470,7 +1529,8 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 		processedCSS, _ = b.processCSSDirectives(processedCSS)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
 		if b.Cfg.Fonts.PreloadEnabled() {
-			b.fontPreloadHTML = fontPreloadHTML(collectFontURLs(processedCSS), b.Cfg.BaseURLPath())
+			b.globalFonts = collectFontPreloads(processedCSS, b.Cfg.Fonts.PreloadLimit)
+			b.fontPreloadHTML = fontPreloadHTML(b.globalFonts, b.Cfg.BaseURLPath())
 		}
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
@@ -1507,6 +1567,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		modernData []byte
 		legacyFile string
 		legacyData []byte
+		fonts      []string
 	}
 	memo := make(map[string]processed)
 	var chromaCSS string
@@ -1524,10 +1585,15 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, file), data, 0644)
 		written[file] = true
 	}
+	var lastFonts []string
 	process := func(pageCss string) (string, []byte, twPageInfo) {
 		processedCSS := b.inlineImports(pageCss)
 		processedCSS, info := b.processCSSDirectives(processedCSS)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
+		lastFonts = nil
+		if b.Cfg.Fonts.PreloadEnabled() {
+			lastFonts = collectFontPreloads(processedCSS, b.Cfg.Fonts.PreloadLimit)
+		}
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
 		} else {
@@ -1560,6 +1626,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		p, ok := memo[key]
 		if !ok {
 			p.file, p.data, p.twInfo = process(pageCss)
+			p.fonts = lastFonts
 			if variants && r.HasCSSSignals {
 				modernRaw, legacyRaw := splitVariantCSS(pageCss)
 				p.modernFile, p.modernData, _ = process(modernRaw)
@@ -1574,6 +1641,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 			memo[key] = p
 		}
 		r.CSSFile = p.file
+		r.FontURLs = p.fonts
 		b.setTailwindPage(r.Page, p.twInfo)
 		write(p.file, p.data)
 		if p.modernFile != "" {
@@ -1654,6 +1722,11 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				return
 			}
 
+			// 0. Head hygiene: the page head precedes the layout head, so the
+			// first <title>/meta/canonical per key wins; site.titleTemplate
+			// shapes the document title the same way it shapes og:title.
+			r.HeadHTML = templateHeadTitle(dedupeHead(r.HeadHTML), b.Cfg.SEO)
+
 			// 1. Construct structural HTML wrapper in memory.
 			// Site-global stylesheets (e.g. Tailwind) are linked first, then
 			// the page's own stylesheet (r.CSSFile). Tailwind output is
@@ -1680,6 +1753,10 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			runtimeHead := b.runtimeCommonHead()
 			if im := b.islandImportMapHTML(); im != "" {
 				runtimeHead = im + runtimeHead
+			}
+			// Fonts declared by the page's own CSS (not the global sheet).
+			if pf := b.pageFontPreloads(r.FontURLs); pf != "" {
+				runtimeHead += pf
 			}
 			chunkPreloads := dynamicChunkURLs(r.HydrationJS)
 			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
@@ -1735,7 +1812,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				}
 				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
 				if b.Cfg.SEO.BaseURL != "" || b.Cfg.SEO.Description != "" {
-					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO)
+					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO, seoCtx{BasePath: b.Cfg.BaseURLPath(), ErrorPage: r.IsErrorPage})
 					if seoTags != "" {
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
 					}
@@ -1885,7 +1962,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	// Universal transforms mutate shared cached ASTs. Run them for the whole
 	// module graph before any pass reads those ASTs, so concurrent page builds
 	// serialize on each module's sync.Once instead of racing a reader.
-	b.ensureTransformedModules(bundle.Modules)
+	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
+		return nil, "", err
+	}
 
 	// Detect rendering mode (SSR/ISR/Streaming) from AST exports + <Suspense>
 	// usage, falling back to the page's data-cache reads (tagged/timed fetch).
@@ -2752,7 +2831,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	// dependency of every page it wraps.
 	layoutDeps := layoutDepPaths(layoutPath, layoutBundle)
 
-	b.ensureTransformed(layoutModule.Program)
+	if err := b.ensureTransformed(layoutModule.Program, layoutModule.Path); err != nil {
+		return nil, "", nil, false, err
+	}
 	if isLayoutFile(layoutPath) {
 		slots, serr := cachedSlots(filepath.Dir(layoutPath), b.Cfg.PagesDir)
 		if serr != nil {
@@ -2770,7 +2851,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	ann := annotator.Annotate(layoutModule.Program, b.Cfg, layoutPath, layoutModule.SourceCode)
 	extraLayoutPrograms := moduleSources(layoutBundle.Modules, layoutModule)
 	for _, mp := range extraLayoutPrograms {
-		b.ensureTransformed(mp.Program)
+		if err := b.ensureTransformed(mp.Program, mp.Path); err != nil {
+			return nil, "", nil, false, err
+		}
 	}
 	annotator.MergeModuleFunctions(ann, extraLayoutPrograms)
 	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
@@ -3948,33 +4031,6 @@ func iconNameIsLiteral(el *ast.JSXElement) bool {
 	return false
 }
 
-// imageAttrsAreLiteral reports whether an <Image> can be lowered late. The
-// src must be a string literal, and every other supplied value must be a
-// literal too: compileImageToPicture consumes width/height/alt/etc, so a
-// dynamic value would be silently replaced with a zero value.
-func imageAttrsAreLiteral(el *ast.JSXElement) bool {
-	if el == nil || el.Opening == nil {
-		return false
-	}
-	hasSrc := false
-	for _, attr := range el.Opening.Attributes {
-		if attr.Spread || attr.Value == nil {
-			continue
-		}
-		lit, ok := attr.Value.(*ast.Literal)
-		if !ok {
-			return false
-		}
-		if attr.Name == "src" {
-			if lit.Kind != ast.StringLit {
-				return false
-			}
-			hasSrc = true
-		}
-	}
-	return hasSrc
-}
-
 func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
 	var iconName string
 	var forwardedAttrs []*ast.JSXAttr
@@ -4117,375 +4173,6 @@ func (b *Builder) iconResolver(iconName string, attrs []*ast.JSXAttr) (string, b
 	return b2.String(), true
 }
 
-func (b *Builder) TransformUniversalImages(prog *ast.Program) {
-	for _, stmt := range prog.Body {
-		b.walkAndTransformImages(stmt)
-	}
-}
-
-func (b *Builder) walkAndTransformImages(node ast.Node) {
-	if node == nil {
-		return
-	}
-	switch n := node.(type) {
-	case *ast.FnDecl:
-		for _, stmt := range n.Body {
-			b.walkAndTransformImages(stmt)
-		}
-	case *ast.ExportStmt:
-		if n.Declaration != nil {
-			b.walkAndTransformImages(n.Declaration)
-		}
-	case *ast.ReturnStmt:
-		n.Value = b.transformImageExpr(n.Value)
-	case *ast.ExprStmt:
-		n.Expression = b.transformImageExpr(n.Expression)
-	case *ast.IfStmt:
-		for _, s := range n.Consequent {
-			b.walkAndTransformImages(s)
-		}
-		for _, s := range n.Alternate {
-			b.walkAndTransformImages(s)
-		}
-	case *ast.ForStmt:
-		for _, stmt := range n.Body {
-			b.walkAndTransformImages(stmt)
-		}
-	case *ast.WhileStmt:
-		for _, stmt := range n.Body {
-			b.walkAndTransformImages(stmt)
-		}
-	case *ast.VarStmt:
-		for _, decl := range n.Decls {
-			if decl.Init != nil {
-				decl.Init = b.transformImageExpr(decl.Init)
-			}
-		}
-	}
-}
-
-func (b *Builder) transformImageExpr(expr ast.Expr) ast.Expr {
-	if expr == nil {
-		return nil
-	}
-
-	switch e := expr.(type) {
-	case *ast.JSXElement:
-		if e.Opening.Name == "Image" {
-			return b.compileImageToPicture(e)
-		}
-		b.transformJSXChildren(e.Children)
-	case *ast.JSXFragment:
-		b.transformJSXChildren(e.Children)
-	case *ast.CallExpr:
-		for i, arg := range e.Args {
-			e.Args[i] = b.transformImageExpr(arg)
-		}
-	}
-	return expr
-}
-
-// transformJSXChildren rewrites any <Image> descendants within a JSX child list.
-func (b *Builder) transformJSXChildren(children []ast.JSXChild) {
-	for i, child := range children {
-		if elChild, ok := child.(*ast.JSXElementChild); ok {
-			transformed := b.transformImageExpr(elChild.Element)
-			if jsxEl, ok := transformed.(*ast.JSXElement); ok {
-				elChild.Element = jsxEl
-				children[i] = elChild
-			}
-		}
-	}
-}
-
-func (b *Builder) compileImageToPicture(orig *ast.JSXElement) *ast.JSXElement {
-	var src string
-	var reqW, reqH int
-	var alt, loading, sizes, placeholder string
-	var priority bool
-	var quality int
-	var className string
-	var extraAttrs []*ast.JSXAttr
-
-	for _, attr := range orig.Opening.Attributes {
-		if attr.Spread {
-			extraAttrs = append(extraAttrs, attr)
-			continue
-		}
-		if attr.Value == nil {
-			// Bare boolean attribute (e.g. <Image priority />)
-			if attr.Name == "priority" {
-				priority = true
-			} else {
-				extraAttrs = append(extraAttrs, attr)
-			}
-			continue
-		}
-		val, _ := evalAttrString(attr.Value)
-		switch attr.Name {
-		case "src":
-			src = val
-		case "width":
-			reqW, _ = strconv.Atoi(val)
-		case "height":
-			reqH, _ = strconv.Atoi(val)
-		case "alt":
-			alt = val
-		case "loading":
-			loading = val
-		case "priority":
-			priority = val == "true"
-		case "quality":
-			quality, _ = strconv.Atoi(val)
-		case "sizes":
-			sizes = val
-		case "placeholder":
-			placeholder = val
-		case "className":
-			className = val
-		default:
-			extraAttrs = append(extraAttrs, attr)
-		}
-	}
-
-	if src == "" {
-		return imageErrorSpan("[Image: missing src]")
-	}
-
-	// Resolve image options from config, overridden by per-<Image> attributes.
-	imgCfg := b.Cfg.Images
-	if quality <= 0 {
-		quality = imgCfg.Quality
-	}
-	if sizes == "" {
-		sizes = imgCfg.Sizes
-	}
-	wantPlaceholder := imgCfg.PlaceholderEnabled()
-	if placeholder != "" {
-		wantPlaceholder = placeholder != "empty"
-	}
-
-	publicDir := b.Cfg.PublicDir
-	if publicDir == "" {
-		publicDir = filepath.Join(b.Root, "public")
-	}
-
-	// `src` is a URL, not a filesystem path. A leading "/" is the site root on
-	// every platform - do NOT let filepath.IsAbs treat it as an OS-absolute
-	// path (it does on Linux, which made `/hero.png` resolve to the drive root).
-	// Only a genuinely absolute filesystem path (e.g. `C:\assets\hero.png`) is
-	// used verbatim.
-	resolvedSrc := src
-	if strings.HasPrefix(src, "/") {
-		resolvedSrc = filepath.Join(publicDir, strings.TrimPrefix(src, "/"))
-	} else if !filepath.IsAbs(src) {
-		resolvedSrc = filepath.Join(publicDir, src)
-	}
-
-	// A local src must stay inside public/ (or, for a genuine absolute
-	// filesystem path, inside the project): "/../../x" must not read outside.
-	if !strings.HasPrefix(src, "http://") && !strings.HasPrefix(src, "https://") {
-		inPublic := pluginapi.WithinRoot(publicDir, resolvedSrc)
-		inProject := !strings.HasPrefix(src, "/") && filepath.IsAbs(src) && pluginapi.WithinRoot(b.Root, resolvedSrc)
-		if !inPublic && !inProject {
-			return imageErrorSpan(fmt.Sprintf("[Image: src %q resolves outside public/ - keep image paths inside the public directory]", src))
-		}
-	}
-
-	var result *imageproc.ImageResult
-	switch {
-	case strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://"):
-		// Remote images are passed through unoptimized, but only when allowlisted.
-		u, perr := url.Parse(src)
-		if perr != nil || u.Hostname() == "" || !imgCfg.RemoteAllowed(u.Hostname(), u.Path) {
-			return imageErrorSpan("[Image: remote src not allowed - add its host to images.remotePatterns]")
-		}
-		result = &imageproc.ImageResult{Width: reqW, Height: reqH}
-	case imgCfg.Unoptimized:
-		result = &imageproc.ImageResult{Width: reqW, Height: reqH}
-	default:
-		var perr error
-		result, perr = imageproc.ProcessImageWith(b.Root, resolvedSrc, reqW, reqH, imageproc.Options{
-			Quality:     quality,
-			Breakpoints: imgCfg.Breakpoints,
-			Placeholder: wantPlaceholder,
-			Formats:     imgCfg.Formats,
-		})
-		if perr != nil {
-			return imageErrorSpan(fmt.Sprintf("[Image: %v]", perr))
-		}
-	}
-	result.Src = "/" + strings.TrimPrefix(src, "/")
-	if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
-		result.Src = src
-	}
-
-	if loading == "" {
-		loading = "lazy"
-	}
-	if priority {
-		loading = "eager"
-	}
-	if sizes == "" {
-		sizes = "(max-width: 768px) 100vw, 50vw"
-	}
-
-	// Vector sources (e.g. SVG) are passed through as-is: no decoding, no
-	// responsive variants, no compression. Emit a plain <img> pointing at the
-	// original file.
-	if len(result.WebP) == 0 && len(result.Fallback) == 0 {
-		imgAttrs := []*ast.JSXAttr{
-			{Name: "src", Value: &ast.Literal{Kind: ast.StringLit, Value: result.Src}},
-			{Name: "alt", Value: &ast.Literal{Kind: ast.StringLit, Value: alt}},
-			{Name: "loading", Value: &ast.Literal{Kind: ast.StringLit, Value: loading}},
-			{Name: "decoding", Value: &ast.Literal{Kind: ast.StringLit, Value: "async"}},
-		}
-		if result.Width > 0 {
-			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "width", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Width)}})
-		}
-		if result.Height > 0 {
-			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "height", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Height)}})
-		}
-		if className != "" {
-			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "className", Value: &ast.Literal{Kind: ast.StringLit, Value: className}})
-		}
-		if priority {
-			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "fetchpriority", Value: &ast.Literal{Kind: ast.StringLit, Value: "high"}})
-		}
-		imgAttrs = append(imgAttrs, extraAttrs...)
-		return &ast.JSXElement{
-			Position: orig.Position,
-			Opening:  &ast.JSXOpening{Name: "img", Attributes: imgAttrs, SelfClosing: true},
-		}
-	}
-
-	// CLS mitigation: reserve the intrinsic aspect ratio so the browser can
-	// size the image before it loads, plus a blurred LQIP background. Vectors
-	// (e.g. SVG) are passed through without decoding, so they may not know
-	// their intrinsic dimensions - don't force an aspect-ratio in that case.
-	style := ""
-	if result.Width > 0 && result.Height > 0 {
-		style = fmt.Sprintf("width:100%%;height:auto;aspect-ratio:%d/%d", result.Width, result.Height)
-		if result.Placeholder != "" {
-			style += ";background-image:url(" + result.Placeholder + ");background-size:cover;background-position:center"
-		}
-	}
-
-	pictureAttrs := []*ast.JSXAttr{}
-	if className != "" {
-		pictureAttrs = append(pictureAttrs, &ast.JSXAttr{
-			Name:  "className",
-			Value: &ast.Literal{Kind: ast.StringLit, Value: className},
-		})
-	}
-
-	webpSrcset := srcsetString(result.WebP)
-	fallbackSrcset := srcsetString(result.Fallback)
-
-	webpSource := &ast.JSXElement{
-		Opening: &ast.JSXOpening{
-			Name: "source",
-			Attributes: []*ast.JSXAttr{
-				{Name: "type", Value: &ast.Literal{Kind: ast.StringLit, Value: "image/webp"}},
-				{Name: "srcSet", Value: &ast.Literal{Kind: ast.StringLit, Value: webpSrcset}},
-				{Name: "sizes", Value: &ast.Literal{Kind: ast.StringLit, Value: sizes}},
-			},
-			SelfClosing: true,
-		},
-	}
-	fallbackSource := &ast.JSXElement{
-		Opening: &ast.JSXOpening{
-			Name: "source",
-			Attributes: []*ast.JSXAttr{
-				{Name: "type", Value: &ast.Literal{Kind: ast.StringLit, Value: result.FallbackMime}},
-				{Name: "srcSet", Value: &ast.Literal{Kind: ast.StringLit, Value: fallbackSrcset}},
-				{Name: "sizes", Value: &ast.Literal{Kind: ast.StringLit, Value: sizes}},
-			},
-			SelfClosing: true,
-		},
-	}
-
-	imgAttrs := []*ast.JSXAttr{
-		{Name: "src", Value: &ast.Literal{Kind: ast.StringLit, Value: result.Src}},
-		{Name: "alt", Value: &ast.Literal{Kind: ast.StringLit, Value: alt}},
-		{Name: "loading", Value: &ast.Literal{Kind: ast.StringLit, Value: loading}},
-		{Name: "decoding", Value: &ast.Literal{Kind: ast.StringLit, Value: "async"}},
-	}
-	if result.Width > 0 {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "width", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Width)}})
-	}
-	if result.Height > 0 {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "height", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Height)}})
-	}
-	if style != "" {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "style", Value: &ast.Literal{Kind: ast.StringLit, Value: style}})
-	}
-	if priority {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "fetchpriority", Value: &ast.Literal{Kind: ast.StringLit, Value: "high"}})
-	}
-	if className != "" {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{
-			Name:  "className",
-			Value: &ast.Literal{Kind: ast.StringLit, Value: className},
-		})
-	}
-	if fallbackSrcset != "" {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{
-			Name:  "srcSet",
-			Value: &ast.Literal{Kind: ast.StringLit, Value: fallbackSrcset},
-		})
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{
-			Name:  "sizes",
-			Value: &ast.Literal{Kind: ast.StringLit, Value: sizes},
-		})
-	}
-	imgAttrs = append(imgAttrs, extraAttrs...)
-
-	imgEl := &ast.JSXElement{
-		Opening: &ast.JSXOpening{
-			Name:        "img",
-			Attributes:  imgAttrs,
-			SelfClosing: true,
-		},
-	}
-
-	return &ast.JSXElement{
-		Position: orig.Position,
-		Opening: &ast.JSXOpening{
-			Name:        "picture",
-			Attributes:  pictureAttrs,
-			SelfClosing: false,
-		},
-		Children: []ast.JSXChild{
-			&ast.JSXElementChild{Element: webpSource},
-			&ast.JSXElementChild{Element: fallbackSource},
-			&ast.JSXElementChild{Element: imgEl},
-		},
-		Closing: &ast.JSXClosing{Name: "picture"},
-	}
-}
-
-// imageErrorSpan renders an inline error marker in place of a broken <Image>.
-func imageErrorSpan(msg string) *ast.JSXElement {
-	return &ast.JSXElement{
-		Opening:  &ast.JSXOpening{Name: "span", Attributes: nil, SelfClosing: false},
-		Children: []ast.JSXChild{&ast.JSXText{Value: msg}},
-		Closing:  &ast.JSXClosing{Name: "span"},
-	}
-}
-
-// srcsetString renders a responsive srcset attribute ("path 640w, path 1024w").
-func srcsetString(entries []imageproc.SrcsetEntry) string {
-	if len(entries) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(entries))
-	for _, e := range entries {
-		parts = append(parts, fmt.Sprintf("%s %dw", e.FilePath, e.Width))
-	}
-	return strings.Join(parts, ", ")
-}
-
 // copyImageCacheToOut copies processed <Image> variants from the build cache
 // into the output directory so they're served at /_krate/images/....
 func (b *Builder) copyImageCacheToOut() error {
@@ -4499,16 +4186,6 @@ func (b *Builder) copyImageCacheToOut() error {
 	}
 	_, err := copyDirToOut(src, dst)
 	return err
-}
-
-func evalAttrString(expr ast.Expr) (string, bool) {
-	if lit, ok := expr.(*ast.Literal); ok {
-		return lit.Value, true
-	}
-	if ident, ok := expr.(*ast.Identifier); ok {
-		return ident.Name, false
-	}
-	return "", false
 }
 
 func (b *Builder) BuildAllAPI() error {
@@ -4757,4 +4434,23 @@ func (b *Builder) mergeAPIRouteMeta(updates map[string]apiRouteMeta) {
 	if data, err := json.MarshalIndent(list, "", "  "); err == nil {
 		_ = fsutil.WriteFileAtomic(manifestPath, data, 0644)
 	}
+}
+
+// pageFontPreloads renders preload links for fonts the global stylesheet has
+// not already preloaded.
+func (b *Builder) pageFontPreloads(urls []string) string {
+	if len(urls) == 0 {
+		return ""
+	}
+	have := map[string]bool{}
+	for _, u := range b.globalFonts {
+		have[u] = true
+	}
+	var rest []string
+	for _, u := range urls {
+		if !have[u] {
+			rest = append(rest, u)
+		}
+	}
+	return fontPreloadHTML(rest, b.Cfg.BaseURLPath())
 }

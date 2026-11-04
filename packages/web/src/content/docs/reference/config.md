@@ -392,6 +392,16 @@ plugins: [
 ]
 ```
 
+The `sitemap` plugin lists every statically generated page once, at the URL the
+site is served from (with a trailing slash and the `basePath`), percent-encoded
+and XML-escaped. It leaves out error pages, dynamic-route fallback templates
+(`blog/[slug]`) and pages with `<meta name="robots" content="noindex">`. Pass
+`exclude: ["/admin/*", "/private/"]` (`path.Match` patterns) to drop SSR or
+private routes. Canonical URLs, `og:url`, hreflang links and the `robots.txt`
+`Sitemap:` line use the same form, and the document `<title>` follows
+`site.titleTemplate`. A layout and a page that both emit `<title>`, a meta
+description or `og:image` produce a single tag: the page wins.
+
 The `feed` plugin emits `feed.xml` (RSS), `atom.xml`, and `feed.json` from the
 docs content and adds `<link rel="alternate">` discovery plus JSON-LD
 structured data to docs pages. `robots` and `llms` are typed factories like the
@@ -635,8 +645,16 @@ output; use `--no-dce` to disable DCE entirely.
 fonts: {
   preload: true,      // <link rel="preload"> for @font-face fonts (default true)
   display: "swap",    // default font-display injected when a face omits it ("off" to skip)
+  preloadLimit: 4,    // most fonts preloaded per page
 },
 ```
+
+Preloading covers every stylesheet (global and page-imported). Each
+`@font-face` contributes its first `woff2` source (woff/ttf fallbacks are never
+preloaded unless they are the only source); relative `url()`s resolve against the
+stylesheet, not the page. Faces for non-Latin `unicode-range` subsets are
+skipped, and a `/* no-preload */` comment inside an `@font-face` block opts that
+face out.
 
 ## Go (components & API routes)
 

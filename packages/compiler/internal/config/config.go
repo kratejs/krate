@@ -474,6 +474,9 @@ func (c *Config) EffectiveGo() GoCfg {
 type FontsCfg struct {
 	Preload *bool  `json:"preload,omitempty"`
 	Display string `json:"display,omitempty"`
+	// PreloadLimit caps how many fonts are preloaded per page (default 4). A
+	// `/* no-preload */` comment inside an @font-face block opts that face out.
+	PreloadLimit int `json:"preloadLimit,omitempty"`
 }
 
 func (f FontsCfg) PreloadEnabled() bool { return f.Preload == nil || *f.Preload }

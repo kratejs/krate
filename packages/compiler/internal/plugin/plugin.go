@@ -169,6 +169,8 @@ type PageHookCtx struct {
 	HTML     string `json:"html"`     // mutable - plugin can modify final HTML
 	HeadHTML string `json:"headHTML"` // mutable - plugin can inject head content
 	HasJS    bool   `json:"hasJS"`
+	// IsErrorPage marks 404/500 pages, which are not part of the site's URL space.
+	IsErrorPage bool `json:"isErrorPage,omitempty"`
 }
 
 // BuildResultHookCtx is passed to AfterBuild hook after all pages are built.
@@ -188,6 +190,8 @@ type PageResult struct {
 	HTML     string `json:"html"`
 	HeadHTML string `json:"headHTML"`
 	HasJS    bool   `json:"hasJS"`
+	// IsErrorPage marks 404/500 pages, which are not part of the site's URL space.
+	IsErrorPage bool `json:"isErrorPage,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

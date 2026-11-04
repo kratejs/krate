@@ -92,7 +92,7 @@ type BuildOptions struct {
 	// The build pipeline supplies the resolver; nil leaves the icon unresolved.
 	TransformIcon func(*ast.JSXElement) *ast.JSXElement
 	// TransformImage is the equivalent late lowering hook for <Image>.
-	TransformImage func(*ast.JSXElement) *ast.JSXElement
+	TransformImage func(*ast.JSXElement) (*ast.JSXElement, []HookDiag)
 }
 
 // Build constructs a ComponentTree from a parsed program and its annotations
@@ -391,7 +391,7 @@ type builder struct {
 	actionURLs       map[string]string         // server-action binding -> POST URL
 	evalJS           func(string) (string, error)
 	transformIcon    func(*ast.JSXElement) *ast.JSXElement
-	transformImage   func(*ast.JSXElement) *ast.JSXElement
+	transformImage   func(*ast.JSXElement) (*ast.JSXElement, []HookDiag)
 	// dynamicListRows is non-zero while building rows for a runtime-bound list.
 	// Maps nested in those rows must keep runtime list bindings.
 	dynamicListRows int

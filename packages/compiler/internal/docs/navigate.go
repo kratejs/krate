@@ -269,6 +269,32 @@ func BuildBreadcrumbs(path string) []Breadcrumb {
 	return result
 }
 
+// BuildBreadcrumbsTitled is BuildBreadcrumbsURL with real page titles: a crumb
+// whose path matches a page (keyed by NormalizePagePath) uses that page's
+// title instead of the humanised file name.
+func BuildBreadcrumbsTitled(locale, defaultLocale, path string, pages []Page) []Breadcrumb {
+	crumbs := BuildBreadcrumbsURL(locale, defaultLocale, path)
+	if len(crumbs) == 0 {
+		return crumbs
+	}
+	titles := make(map[string]string, len(pages))
+	for _, p := range pages {
+		if p.Title != "" {
+			titles[NormalizePagePath(p.Path)] = p.Title
+		}
+	}
+	norm := strings.Split(NormalizePagePath(path), "/")
+	for i := range crumbs {
+		if i >= len(norm) {
+			break
+		}
+		if t, ok := titles[strings.Join(norm[:i+1], "/")]; ok {
+			crumbs[i].Label = t
+		}
+	}
+	return crumbs
+}
+
 // PathToTitle converts a file path or directory name to a human-readable title.
 func PathToTitle(path string) string {
 	base := path

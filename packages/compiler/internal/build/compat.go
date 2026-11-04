@@ -54,12 +54,7 @@ func (b *Builder) irBuildOptions() irtree.BuildOptions {
 			}
 			return b.compileIconToSVG(el)
 		},
-		TransformImage: func(el *ast.JSXElement) *ast.JSXElement {
-			if !imageAttrsAreLiteral(el) {
-				return nil
-			}
-			return b.compileImageToPicture(el)
-		},
+		TransformImage: b.lowerImageLate,
 	}
 }
 

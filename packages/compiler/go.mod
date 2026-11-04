@@ -4,6 +4,7 @@ go 1.26.1
 
 require (
 	github.com/alecthomas/chroma/v2 v2.27.0
+	github.com/andybalholm/brotli v1.2.6
 	github.com/evanw/esbuild v0.28.1
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/hashicorp/go-hclog v0.14.1
@@ -11,6 +12,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/skrashevich/go-webp v0.1.0
 	github.com/tetratelabs/wazero v1.12.0
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/image v0.44.0
 	golang.org/x/net v0.34.0
 	golang.org/x/text v0.40.0
@@ -18,7 +20,6 @@ require (
 )
 
 require (
-	github.com/andybalholm/brotli v1.2.6 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fatih/color v1.7.0 // indirect

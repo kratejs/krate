@@ -426,6 +426,8 @@ func loadImageMeta(outDir, cacheKey string, quality int, optsKey string, wantPla
 // displayDims applies a requested width/height while preserving aspect ratio.
 func displayDims(origW, origH, reqW, reqH int) (int, int) {
 	switch {
+	case reqW > 0 && reqH > 0:
+		return reqW, reqH
 	case reqW > 0:
 		return reqW, ComputeHeight(origW, origH, reqW)
 	case reqH > 0:

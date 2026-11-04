@@ -204,12 +204,11 @@ func scanPage(cfg Config, absPath, relPath string) (Page, error) {
 
 	pagePath := strings.TrimSuffix(relPath, filepath.Ext(relPath))
 
-	var htmlContent string
-	var fm *Frontmatter
-	if strings.HasSuffix(absPath, ".mdx") {
-		htmlContent, fm = ParseMDX(string(data), cfg.MDConfig)
-	} else {
-		htmlContent, fm = ParseMD(string(data), cfg.MDConfig)
+	htmlContent, fm, diags := parseDoc(string(data), cfg.MDConfig, strings.HasSuffix(absPath, ".mdx"))
+	for _, d := range diags {
+		if !d.Warning {
+			return Page{}, fmt.Errorf("%s:%d:%d: %s (hint: %s)", absPath, d.Line, d.Col, d.Msg, d.Hint)
+		}
 	}
 
 	if fm.Title == "" {
@@ -263,17 +262,21 @@ func scanPage(cfg Config, absPath, relPath string) (Page, error) {
 
 // ParseMD parses a .md file, extracting frontmatter and rendering markdown.
 func ParseMD(src string, cfg markdown.Config) (html string, fm *Frontmatter) {
-	raw, segments := markdown.ParseMDXSegments(src, cfg)
-	html = markdown.RenderSegmentsToHTML(segments)
-	fm = decodeFrontmatter(raw)
+	html, fm, _ = parseDoc(src, cfg, false)
 	return
 }
 
-// ParseMDX parses an .mdx file, extracting frontmatter and rendering with JSX
-// support. The result is identical to ParseMD since both delegate to the same
-// markdown renderer.
+// ParseMDX parses an .mdx file, extracting frontmatter and rendering it with
+// MDX semantics (ESM, JSX and expressions). The HTML is the static form used
+// for search and TOC extraction: components are dropped, code is highlighted.
 func ParseMDX(src string, cfg markdown.Config) (html string, fm *Frontmatter) {
-	return ParseMD(src, cfg)
+	html, fm, _ = parseDoc(src, cfg, true)
+	return
+}
+
+func parseDoc(src string, cfg markdown.Config, mdx bool) (string, *Frontmatter, []markdown.Diagnostic) {
+	res := markdown.Compile(src, cfg, markdown.Options{MDX: mdx})
+	return res.StaticHTML(cfg), decodeFrontmatter(res.Frontmatter), res.Diags
 }
 
 // ParseKeywords splits a frontmatter `keywords:` value (comma or space
@@ -319,7 +322,12 @@ type SearchEntry struct {
 }
 
 // BuildSearchIndex generates a search index from documentation pages.
-func BuildSearchIndex(pages []Page) []SearchEntry {
+func BuildSearchIndex(pages []Page) []SearchEntry { return BuildSearchIndexBase(pages, "") }
+
+// BuildSearchIndexBase is BuildSearchIndex with a site base path prefixed onto
+// every entry. Entries use each page's own (locale- and version-aware) URL, so
+// a section index is /docs/guides/, never /docs/guides/index/.
+func BuildSearchIndexBase(pages []Page, base string) []SearchEntry {
 	var entries []SearchEntry
 	for _, p := range pages {
 		plainText := StripHTMLTags(p.Content)
@@ -328,7 +336,7 @@ func BuildSearchIndex(pages []Page) []SearchEntry {
 		}
 		entries = append(entries, SearchEntry{
 			Title:      p.Title,
-			Path:       "/docs/" + p.Path + "/",
+			Path:       base + pagePathURL(p),
 			Content:    appendSearchTerms(plainText, p.Tags, p.Categories),
 			Tags:       p.Tags,
 			Categories: p.Categories,
@@ -353,6 +361,11 @@ func appendSearchTerms(plainText string, tags, categories []string) string {
 // against the tags/categories surface the page; the JSON fallback index gets
 // the same terms appended to content (see BuildSearchIndex).
 func BuildSearchDocuments(pages []Page) []docfind.Document {
+	return BuildSearchDocumentsBase(pages, "")
+}
+
+// BuildSearchDocumentsBase is BuildSearchDocuments with a base path prefix.
+func BuildSearchDocumentsBase(pages []Page, base string) []docfind.Document {
 	documents := make([]docfind.Document, 0, len(pages))
 	for _, p := range pages {
 		keywords := dedupeNonEmpty(p.Keywords, p.Tags, p.Categories)
@@ -363,7 +376,7 @@ func BuildSearchDocuments(pages []Page) []docfind.Document {
 		documents = append(documents, docfind.Document{
 			Title:    p.Title,
 			Category: p.Dir,
-			Href:     PageURL(p.Path),
+			Href:     base + pagePathURL(p),
 			Body:     body,
 			Keywords: keywords,
 		})

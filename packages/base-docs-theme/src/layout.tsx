@@ -55,6 +55,8 @@ interface AltLink {
   code?: string;
   label: string;
   url: string;
+  /** No translation of this page: the link goes to that locale's home. */
+  fallback?: boolean;
 }
 
 interface I18nProps {
@@ -301,7 +303,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
                 </summary>
                 <div class="krate-switcher-menu">
                   {localeLinks.map((l) => (
-                    <Link class={l.code === i18n.locale ? "active" : ""} href={l.url}>
+                    <Link class={(l.code === i18n.locale ? "active" : "") + (l.fallback ? " fallback" : "")} href={l.url} title={l.fallback ? "Not translated - opens the home page" : undefined}>
                       {l.label}
                     </Link>
                   ))}
@@ -374,7 +376,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
                 </summary>
                 <div class="krate-switcher-menu">
                   {localeLinks.map((l) => (
-                    <Link class={l.code === i18n.locale ? "active" : ""} href={l.url}>
+                    <Link class={(l.code === i18n.locale ? "active" : "") + (l.fallback ? " fallback" : "")} href={l.url} title={l.fallback ? "Not translated - opens the home page" : undefined}>
                       {l.label}
                     </Link>
                   ))}

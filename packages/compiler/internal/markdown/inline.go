@@ -4,100 +4,9 @@ import (
 	"html"
 	"regexp"
 	"strings"
-
-	"github.com/kratejs/krate/packages/compiler/internal/escape"
 )
 
-var (
-	boldRe     = regexp.MustCompile(`\*\*(.+?)\*\*`)
-	italicRe   = regexp.MustCompile(`\*(.+?)\*`)
-	strikeRe   = regexp.MustCompile(`~~(.+?)~~`)
-	codeRe     = regexp.MustCompile("`([^`]+)`")
-	autoLinkRe = regexp.MustCompile(`https?://[^\s<">]+`)
-	schemeRe   = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*$`)
-)
-
-func renderInline(text string, cfg Config) string {
-	text = escape.HTML(text)
-
-	// Images (before links). The URL is entity-escaped before this runs, so a
-	// scheme hidden behind entities (e.g. javascript&#58;) can never reach the
-	// browser as a colon - but a literal javascript:/data: href would. Reject
-	// script-capable schemes outright.
-	text = imageRe.ReplaceAllStringFunc(text, func(match string) string {
-		parts := imageRe.FindStringSubmatch(match)
-		if len(parts) < 3 {
-			return match
-		}
-		alt, src := parts[1], parts[2]
-		if !safeURL(src) {
-			return alt
-		}
-		return `<img src="` + src + `" alt="` + alt + `">`
-	})
-
-	// Links
-	text = linkRe.ReplaceAllStringFunc(text, func(match string) string {
-		parts := linkRe.FindStringSubmatch(match)
-		if len(parts) < 3 {
-			return match
-		}
-		label, dest := parts[1], parts[2]
-		if !safeURL(dest) {
-			return label
-		}
-		return `<a href="` + dest + `">` + label + `</a>`
-	})
-
-	// Inline code
-	text = codeRe.ReplaceAllString(text, "<code>$1</code>")
-
-	// Bold
-	text = boldRe.ReplaceAllString(text, "<strong>$1</strong>")
-
-	// Italic
-	text = italicRe.ReplaceAllString(text, "<em>$1</em>")
-
-	// Strikethrough (GFM)
-	if cfg.GFM {
-		text = strikeRe.ReplaceAllString(text, "<del>$1</del>")
-	}
-
-	// Emoji shortcodes (`:smile:` -> ), outside inline code spans.
-	text = replaceEmoji(text)
-
-	// Autolinks (GFM) - skip URLs already inside HTML attributes (e.g.
-	// href="...") to avoid double-wrapping in <a> tags.
-	if cfg.GFM {
-		var buf strings.Builder
-		rest := text
-		for {
-			loc := autoLinkRe.FindStringIndex(rest)
-			if loc == nil {
-				buf.WriteString(rest)
-				break
-			}
-			// If the character before the match is a quote, this URL lives
-			// inside an HTML attribute - leave it alone.
-			if loc[0] > 0 && (rest[loc[0]-1] == '"' || rest[loc[0]-1] == '\'') {
-				buf.WriteString(rest[:loc[1]])
-				rest = rest[loc[1]:]
-				continue
-			}
-			buf.WriteString(rest[:loc[0]])
-			u := rest[loc[0]:loc[1]]
-			buf.WriteString(`<a href="`)
-			buf.WriteString(u)
-			buf.WriteString(`">`)
-			buf.WriteString(u)
-			buf.WriteString(`</a>`)
-			rest = rest[loc[1]:]
-		}
-		text = buf.String()
-	}
-
-	return text
-}
+var schemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.\-]*$`)
 
 // safeURL reports whether a link/image destination may be emitted as an href or
 // src. It allows scheme-less URLs (relative paths, anchors, protocol-relative)
@@ -128,7 +37,6 @@ func safeURL(dest string) bool {
 // --- Emoji shortcodes -------------------------------------------------------
 
 var emojiRe = regexp.MustCompile(`:([a-z0-9_+-]+):`)
-var codeSpanRe = regexp.MustCompile(`(?s)<code>.*?</code>`)
 
 // emojiMap is a small built-in set of common GitHub-style shortcodes. Unknown
 // names are left untouched.
@@ -181,22 +89,6 @@ var emojiMap = map[string]string{
 	"globe_with_meridians": "\U0001F310",
 	"construction":         "\U0001F6A7",
 	"recycle":              "\u267B\uFE0F",
-}
-
-// replaceEmoji substitutes known `:shortcode:` tokens outside inline code.
-func replaceEmoji(text string) string {
-	if !strings.Contains(text, ":") {
-		return text
-	}
-	var b strings.Builder
-	last := 0
-	for _, loc := range codeSpanRe.FindAllStringIndex(text, -1) {
-		b.WriteString(emojiReplace(text[last:loc[0]]))
-		b.WriteString(text[loc[0]:loc[1]])
-		last = loc[1]
-	}
-	b.WriteString(emojiReplace(text[last:]))
-	return b.String()
 }
 
 func emojiReplace(s string) string {

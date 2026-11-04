@@ -429,7 +429,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 
 	b.WriteString("})();\n")
 
-	return finishSuspenseHydration(result, b.String(), spans, listFns.String())
+	return dropUnusedPureVars(finishSuspenseHydration(result, b.String(), spans, listFns.String()))
 }
 
 // pageNeedsOwners reports whether any client component registers effects,
