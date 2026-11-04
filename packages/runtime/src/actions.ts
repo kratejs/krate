@@ -567,7 +567,7 @@ export function takeFlash(id: string): { found: boolean; value?: unknown } {
   if (m) {
     const payload = decodeFlash(m[1]);
     if (payload && payload.a === id) {
-      document.cookie = 'krate_flash=; Path=/; Max-Age=0; SameSite=Lax';
+      document.cookie = 'krate_flash=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
       removeFlashNotices(id);
       return { found: true, value: payload.r };
     }

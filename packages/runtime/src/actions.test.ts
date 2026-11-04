@@ -357,7 +357,7 @@ describe('useActionState flash from a native form post', () => {
     btoa(JSON.stringify({ a: id, r: result })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
   afterEach(() => {
-    document.cookie = 'krate_flash=; Path=/; Max-Age=0';
+    document.cookie = 'krate_flash=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT';
   });
 
   it('starts from the state the server returned to the redirected native post', () => {
@@ -543,7 +543,7 @@ describe('takeFlash', () => {
 
   afterEach(() => {
     document.body.innerHTML = '';
-    document.cookie = 'krate_flash=; Path=/; Max-Age=0';
+    document.cookie = 'krate_flash=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT';
   });
 
   it('reads the cookie for the matching action only', () => {
