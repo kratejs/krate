@@ -33,6 +33,7 @@ const (
 	KindAPI        FileKind = "api"
 	KindLoading    FileKind = "loading"
 	KindNotFound   FileKind = "not-found"
+	KindError      FileKind = "error"
 	KindConfig     FileKind = "config"
 	KindPackage    FileKind = "package"
 	KindAsset      FileKind = "asset"
@@ -302,7 +303,43 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	return rep, nil
 }
 
+// scopedBases are the App Router files that apply to a directory's subtree. A
+// directory with one of them keeps its page in the directory (x/index.tsx), so
+// the layout, template, loading, error and not-found files next to it wrap it
+// (a flat x.tsx would live outside x/).
+var scopedBases = map[string]bool{"layout": true, "template": true, "loading": true, "error": true, "not-found": true}
+
+// scopedAppDirs returns the filesystem routes of directories holding scoped files.
+func scopedAppDirs(appDir string) map[string]bool {
+	out := map[string]bool{}
+	_ = filepath.WalkDir(appDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if skipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(appDir, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		ext := strings.ToLower(filepath.Ext(rel))
+		if !isSourceExt(ext) || !scopedBases[strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))] {
+			return nil
+		}
+		_, fsRoute, _ := appRoute(filepath.ToSlash(filepath.Dir(rel)))
+		out[fsRoute] = true
+		return nil
+	})
+	return out
+}
+
 func scanNextApp(root, appDir, prefix string, rep *Report) error {
+	scoped := scopedAppDirs(appDir)
 	return filepath.WalkDir(appDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -335,7 +372,7 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 		switch base {
 		case "page":
 			target := routeFile("src/pages", fsRoute, ext)
-			if isSlotRoute(fsRoute) {
+			if isSlotRoute(fsRoute) || (scoped[fsRoute] && fsRoute != "." && fsRoute != "") {
 				target = "src/pages/" + fsRoute + "/index" + ext
 			}
 			rep.Files = append(rep.Files, planned(root, source, target, KindPage, ext, rep))
@@ -354,37 +391,28 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 		case "loading":
 			rep.Files = append(rep.Files, planned(root, source, loadingFile("src/pages", fsRoute, ext), KindLoading, ext, rep))
 		case "not-found":
-			if fsRoute == "." {
-				rep.Files = append(rep.Files, planned(root, source, "src/pages/404"+ext, KindNotFound, ext, rep))
-			} else {
-				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "nested not-found.tsx has no automatic equivalent", Hint: "handle the missing case in the page"})
-			}
-		case "error", "global-error":
-			assetTarget := "src/migrated/" + strings.TrimPrefix(prefix, "src/") + "/" + rel
-			rep.Files = append(rep.Files, planned(root, source, assetTarget, KindAsset, ext, rep))
-			layoutTarget := layoutFile("src/pages", fsRoute, ext)
-			if fileExists(filepath.Join(root, filepath.FromSlash(layoutTarget))) || hasTarget(rep, layoutTarget) {
-				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "error boundary was copied but an existing layout must be merged manually", Hint: "wrap children with the generated error boundary"})
+			if isSlotRoute(fsRoute) {
+				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "not-found.tsx inside a parallel-route slot has no equivalent", Hint: "move the not-found UI to the slot's parent directory"})
 				return nil
 			}
-			mod := relativeModulePath(layoutTarget, assetTarget)
-			body := "import { Component } from \"react\";\nimport ErrorPage from " + strconv.Quote(mod) + ";\n\n" +
-				"class __KrateErrorBoundary extends Component {\n" +
-				"  state = { error: null };\n" +
-				"  static getDerivedStateFromError(error: any) { return { error }; }\n" +
-				"  componentDidCatch(error: any) { console.error(error); }\n" +
-				"  reset = () => this.setState({ error: null });\n" +
-				"  render() {\n" +
-				"    if (this.state.error) return <ErrorPage error={this.state.error} reset={this.reset} />;\n" +
-				"    return this.props.children;\n" +
-				"  }\n" +
-				"}\n\n" +
-				"export default function Layout(props: any) {\n" +
-				"  return <__KrateErrorBoundary><div>{props.children}</div></__KrateErrorBoundary>;\n" +
-				"}\n"
-			rep.Files = append(rep.Files, PlannedFile{Kind: KindLayout, Target: layoutTarget, Content: []byte(body), Rewrites: []string{"generated error boundary layout"}, Dependencies: []string{assetTarget}})
-			rep.Warnings = append(rep.Warnings, source+": copied error boundary and generated "+layoutTarget)
-			return nil
+			rep.Files = append(rep.Files, planned(root, source, segmentFile("src/pages", fsRoute, "404", ext), KindNotFound, ext, rep))
+		case "error":
+			if isSlotRoute(fsRoute) {
+				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "error.tsx inside a parallel-route slot has no equivalent", Hint: "move the error UI to the slot's parent directory"})
+				return nil
+			}
+			rep.Files = append(rep.Files, planned(root, source, segmentFile("src/pages", fsRoute, "error", ext), KindError, ext, rep))
+		case "global-error":
+			if fsRoute != "." {
+				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "global-error.tsx outside the app root has no equivalent", Hint: "use error.tsx in the directory instead"})
+				return nil
+			}
+			if nextRootHas(appDir, "error") {
+				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "global-error.tsx and the root error.tsx both map to the root error page", Hint: "merge them into src/pages/error.tsx; global-error.tsx renders its own <html> and <body>, which Krate's root layout already provides"})
+				return nil
+			}
+			rep.Files = append(rep.Files, planned(root, source, segmentFile("src/pages", fsRoute, "error", ext), KindError, ext, rep))
+			rep.Warnings = append(rep.Warnings, source+": global-error.tsx became the root error page (src/pages/error.tsx). Krate renders it inside the root layout, so remove the <html> and <body> elements it renders")
 		case "template":
 			target := "src/pages/_template" + ext
 			if fsRoute != "." {
@@ -1009,7 +1037,7 @@ func linkRelativeImports(rep *Report) {
 	}
 	for i := range rep.Files {
 		f := &rep.Files[i]
-		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI) {
+		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindNotFound && f.Kind != KindError) {
 			continue
 		}
 		body, rewrites, unresolved, deps := rewriteRelativeImports(string(f.Content), f.Source, f.Target, assets)
@@ -1100,7 +1128,7 @@ func targetPath(root, rel string) (string, error) {
 func warnClientBoundaryRuntime(rep *Report) {
 	var client, server bool
 	for _, f := range rep.Files {
-		if f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAsset {
+		if f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAsset && f.Kind != KindNotFound && f.Kind != KindError {
 			continue
 		}
 		src := string(f.Content)
@@ -1114,4 +1142,24 @@ func warnClientBoundaryRuntime(rep *Report) {
 	if client && server {
 		rep.Warnings = append(rep.Warnings, `"use client" components inside async server components hydrate with Preact; install preact (krate migrate nextjs --update-package adds it)`)
 	}
+}
+
+// segmentFile returns the target of a segment page (404.tsx / error.tsx) for a
+// filesystem route, keeping route groups.
+func segmentFile(base, fsRoute, name, ext string) string {
+	if fsRoute == "." || fsRoute == "" {
+		return base + "/" + name + ext
+	}
+	return base + "/" + fsRoute + "/" + name + ext
+}
+
+// nextRootHas reports whether the app root has a source file with the given
+// base name (error.tsx, error.js, ...).
+func nextRootHas(appDir, name string) bool {
+	for _, ext := range []string{".tsx", ".ts", ".jsx", ".js"} {
+		if _, err := os.Stat(filepath.Join(appDir, name+ext)); err == nil {
+			return true
+		}
+	}
+	return false
 }

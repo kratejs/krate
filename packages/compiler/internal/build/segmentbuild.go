@@ -181,3 +181,52 @@ func hasRobotsMeta(head string) bool {
 }
 
 var robotsMetaRe = regexp.MustCompile(`(?i)<meta[^>]+name\s*=\s*["']?robots["']?`)
+
+// segmentModel is the source-level view of the project's segment pages, used by
+// `krate inspect`, the MCP tools and the route types.
+type segmentModel struct {
+	entries  []SegmentEntry
+	sources  map[string]string // output path -> project-relative source
+	graph    []SiteGraphSegment
+	pagesDir string
+}
+
+// segmentModel reads the segment pages from the source tree.
+func (b *Builder) segmentModel() *segmentModel {
+	files := collectSegmentFiles(b.Cfg.PagesDir)
+	var pages []string
+	m := &segmentModel{sources: map[string]string{}, pagesDir: b.Cfg.PagesDir}
+	for _, f := range files {
+		if pathHasSlot(relOrSelf(b.Cfg.PagesDir, f.Path)) {
+			continue
+		}
+		pages = append(pages, f.Path)
+		rel := f.Path
+		if r, err := filepath.Rel(b.Root, f.Path); err == nil {
+			rel = r
+		}
+		m.sources[segmentHTMLRel(f.Path, b.Cfg.PagesDir)] = filepath.ToSlash(rel)
+	}
+	m.entries = segmentEntries(pages, b.Cfg.PagesDir)
+	for _, e := range m.entries {
+		dir := "/" + e.Dir
+		m.graph = append(m.graph, SiteGraphSegment{Dir: dir, NotFound: m.sources[e.NotFound], Error: m.sources[e.Error], Group: e.Group})
+	}
+	return m
+}
+
+// forSource returns the sources of the nearest not-found and error pages of the
+// route defined by a page source file.
+func (m *segmentModel) forSource(root, pagesDir, source string) (notFound, errPage string) {
+	if source == "" || len(m.entries) == 0 {
+		return "", ""
+	}
+	dir := routeSegDir(root, pagesDir, source)
+	if nf, ok := LookupSegmentPage(m.entries, SegmentNotFound, "", true, dir); ok {
+		notFound = m.sources[nf.File]
+	}
+	if ep, ok := LookupSegmentPage(m.entries, SegmentError, "", true, dir); ok {
+		errPage = m.sources[ep.File]
+	}
+	return notFound, errPage
+}

@@ -12,19 +12,37 @@ import (
 // files. It backs `krate inspect --json`, the MCP `explain` tool, and the
 // krate://graph resource.
 type SiteGraph struct {
-	Root   string              `json:"root"`
-	Routes []SiteGraphRoute    `json:"routes"`
-	Files  map[string][]string `json:"files,omitempty"` // file -> routes that depend on it
+	Root   string           `json:"root"`
+	Routes []SiteGraphRoute `json:"routes"`
+	// Segments lists the directories with their own not-found or error page.
+	Segments []SiteGraphSegment  `json:"segments,omitempty"`
+	Files    map[string][]string `json:"files,omitempty"` // file -> routes that depend on it
+}
+
+// SiteGraphSegment is one directory's segment pages (404.tsx, not-found.tsx,
+// error.tsx, 500.tsx). Sources are project-relative.
+type SiteGraphSegment struct {
+	// Dir is the URL directory ("/" for the root, "/blog", "/blog/[slug]").
+	Dir      string `json:"dir"`
+	NotFound string `json:"notFound,omitempty"`
+	Error    string `json:"error,omitempty"`
+	// Group is true for a directory inside a route group, whose pages only
+	// serve routes that live in the group.
+	Group bool `json:"group,omitempty"`
 }
 
 // SiteGraphRoute is one route in a SiteGraph.
 type SiteGraphRoute struct {
-	Route        string   `json:"route"`
-	Source       string   `json:"source,omitempty"`
-	Mode         string   `json:"mode"`
-	Params       []string `json:"params,omitempty"`
-	Built        bool     `json:"built"`
-	StaticOnly   bool     `json:"staticOnly,omitempty"`
+	Route      string   `json:"route"`
+	Source     string   `json:"source,omitempty"`
+	Mode       string   `json:"mode"`
+	Params     []string `json:"params,omitempty"`
+	Built      bool     `json:"built"`
+	StaticOnly bool     `json:"staticOnly,omitempty"`
+	// NotFound and Error are the source files of the route's nearest
+	// not-found and error pages (empty when the route has none).
+	NotFound     string   `json:"notFound,omitempty"`
+	Error        string   `json:"error,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
 	Dependents   []string `json:"dependents,omitempty"`
 	Outputs      []string `json:"outputs,omitempty"`
@@ -42,6 +60,8 @@ func (b *Builder) SiteGraph() (*SiteGraph, error) {
 	pageDeps, depGraph := b.PageGraph()
 
 	g := &SiteGraph{Root: ".", Routes: make([]SiteGraphRoute, 0, len(routes))}
+	segs := b.segmentModel()
+	g.Segments = segs.graph
 	for _, r := range routes {
 		n := SiteGraphRoute{
 			Route:      r.Route,
@@ -60,6 +80,7 @@ func (b *Builder) SiteGraph() (*SiteGraph, error) {
 			n.Dependents = b.relPaths(depGraph[abs])
 		}
 		n.Outputs, n.Bytes = b.routeOutputs(r.Route)
+		n.NotFound, n.Error = segs.forSource(b.Root, b.Cfg.PagesDir, r.Source)
 		g.Routes = append(g.Routes, n)
 	}
 
