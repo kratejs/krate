@@ -289,6 +289,9 @@ func validNamedValue(s string) bool {
 // "unknown variant" so the caller can skip the class rather than emit it
 // unconditionally.
 func resolveVariant(v string, theme TailwindTheme) (variant, bool) {
+	if cv, ok := customVariant(v, theme); ok {
+		return cv, true
+	}
 	r, ok := parseVariantToken(v, theme)
 	if !ok || r.rel {
 		return variant{}, false
@@ -873,7 +876,10 @@ func classToRule(cls string, theme TailwindTheme) (text, key string) {
 		return "", ""
 	}
 
-	css := generateCSS(base, theme)
+	css := customUtilityCSS(base, theme)
+	if css == "" {
+		css = generateCSS(base, theme)
+	}
 	if css == "" && strings.HasPrefix(base, "-") {
 		css = negateCSS(strings.TrimPrefix(base, "-"), theme)
 	}

@@ -123,6 +123,13 @@ type Builder struct {
 	pageDeps map[string][]string // page source path -> files it depends on
 	depMu    sync.Mutex          // protects depGraph/pageDeps
 
+	// twMu guards twDir/twWarned: Tailwind CSS-first directives collected from
+	// the authored CSS that flows through processCSSDirectives, and the
+	// warnings already printed.
+	twMu     sync.Mutex
+	twDir    *css.TailwindDirectives
+	twWarned map[string]bool
+
 	// goHostMu serialises Go host scaffolding/compilation so concurrent page
 	// builds that lazily need the host (e.g. incremental dev rebuilds) don't
 	// race on the generated module dir.
@@ -1197,44 +1204,102 @@ func (b *Builder) tailwindOptions() css.TailwindOptions {
 	}
 }
 
-// processCSSDirectives handles Tailwind build-time directives in authored CSS:
-// `@tailwind` is stripped (Krate generates utilities itself) and `@layer` is
-// unwrapped to its inner rules. When Tailwind is enabled, plain `@apply`
-// utilities are expanded; unsupported ones are reported with a warning.
+// processCSSDirectives handles Tailwind build-time directives in authored CSS.
+// `@tailwind` is always stripped (Krate generates utilities itself). When
+// Tailwind is enabled the CSS-first directives (`@import "tailwindcss"`,
+// `@theme`, `@source`, `@utility`, `@custom-variant`, `@config`, `@plugin`)
+// are collected for the generator and removed, and `@apply` is expanded;
+// anything that cannot be honoured is reported with a warning.
 func (b *Builder) processCSSDirectives(cssText string) string {
 	// `@layer` is left intact: it is valid CSS and unwrapping it would change
 	// the authored cascade.
-	cssText = css.StripAtTailwind(cssText)
-	if !b.Cfg.Tailwind.Enabled || !strings.Contains(cssText, "@apply") {
+	if !b.Cfg.Tailwind.Enabled {
+		return css.StripAtTailwind(cssText)
+	}
+	b.collectTailwindDirectives(cssText)
+	cssText = css.StripTailwindDirectives(cssText)
+	if !strings.Contains(cssText, "@apply") && !strings.Contains(cssText, "@variant") {
 		return cssText
 	}
 	opts := b.tailwindOptions()
 	gen := css.NewTailwindGenerator()
 	gen.MergeConfig(css.LoadTailwindConfigWithOptions(b.Root, opts))
-	out, unresolved := css.ExpandApply(cssText, gen.Theme)
+	b.twMu.Lock()
+	if b.twDir != nil {
+		b.twDir.ApplyTo(&gen.Theme)
+	}
+	b.twMu.Unlock()
+	out, unresolved := gen.ExpandApply(cssText)
 	if len(unresolved) > 0 {
-		fmt.Fprintf(os.Stderr, "  %sTailwind @apply: could not expand %s%s\n", cYellow, strings.Join(unresolved, ", "), cReset)
+		b.warnOnce("Tailwind @apply: could not expand " + strings.Join(unresolved, ", ") + " (variants and multi-rule utilities are not supported in @apply)")
+	}
+	if strings.Contains(out, "@variant") {
+		b.warnOnce("Tailwind @variant inside rules is not supported and was left in the CSS; use the variant:utility class form instead")
+	}
+	if kf := gen.KeyframesCSS(); kf != "" {
+		out += "\n" + kf
 	}
 	return out
 }
 
+// collectTailwindDirectives records the directives of one authored stylesheet.
+func (b *Builder) collectTailwindDirectives(cssText string) {
+	if !strings.Contains(cssText, "@") && !strings.Contains(cssText, "var(") {
+		return
+	}
+	b.twMu.Lock()
+	defer b.twMu.Unlock()
+	if b.twDir == nil {
+		b.twDir = css.NewTailwindDirectives(b.Root)
+	}
+	b.twDir.Add(cssText, b.Root)
+}
+
+// warnOnce prints a yellow Tailwind warning once per message per builder.
+func (b *Builder) warnOnce(msg string) {
+	b.twMu.Lock()
+	if b.twWarned == nil {
+		b.twWarned = map[string]bool{}
+	}
+	seen := b.twWarned[msg]
+	b.twWarned[msg] = true
+	b.twMu.Unlock()
+	if !seen {
+		fmt.Fprintf(os.Stderr, "  %s%s%s\n", cYellow, msg, cReset)
+	}
+}
+
 // tailwindCSS generates the site-global Tailwind stylesheet honoring the
-// tailwind config (scanDirs/content, darkMode, preflight, strict). Returns ""
-// when Tailwind is disabled or no classes were found.
+// tailwind config (scanDirs/content, darkMode, preflight, strict) and the
+// CSS-first directives found in project CSS. Returns "" when Tailwind is
+// disabled or nothing was generated.
 func (b *Builder) tailwindCSS() string {
 	if !b.Cfg.Tailwind.Enabled {
 		return ""
 	}
 	opts := b.tailwindOptions()
 	twCfg := css.LoadTailwindConfigWithOptions(b.Root, opts)
-	// v4 CSS-first config: merge `@theme { --... }` variables found in project CSS.
-	atTheme := css.ScanAtTheme(b.Root, opts)
-	twCSS, err := css.GenerateTailwindWithTheme(b.Root, twCfg, opts, atTheme)
+	// v4 CSS-first config: directives from project CSS files plus those seen
+	// in the authored CSS processed so far (covers CSS outside the scan dirs).
+	d := css.NewTailwindDirectives(b.Root)
+	b.twMu.Lock()
+	if b.twDir != nil {
+		d.MergeFrom(b.twDir)
+	}
+	b.twMu.Unlock()
+	d.MergeFrom(css.ScanTailwindDirectives(b.Root, opts))
+	res, err := css.GenerateTailwindDirectives(b.Root, twCfg, opts, d)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  %sTailwind error:%s %v\n", cYellow, cReset, err)
 		return ""
 	}
-	return twCSS
+	for _, w := range res.Warnings {
+		b.warnOnce("Tailwind: " + w)
+	}
+	if opts.Strict && len(res.Unknown) > 0 {
+		b.warnOnce("Tailwind strict: " + strconv.Itoa(len(res.Unknown)) + " class candidate(s) matched no utility: " + strings.Join(res.Unknown, ", "))
+	}
+	return res.CSS
 }
 
 func (b *Builder) writeGlobalCSS(mergedCSS string) string {
@@ -1428,23 +1493,23 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			}
 
 			// 1. Construct structural HTML wrapper in memory.
-			// A page links its own stylesheet (r.CSSFile) first, then any
-			// site-global stylesheets (e.g. Tailwind) so utility classes can
-			// override page/component styles.
-			pageCSS := []string{}
+			// Site-global stylesheets (e.g. Tailwind) are linked first, then
+			// the page's own stylesheet (r.CSSFile). Tailwind output is
+			// layered, so page CSS wins over preflight and utilities by
+			// layer precedence, and page `@layer base` rules follow preflight.
+			pageCSS := append([]string{}, cssFiles...)
 			if r.CSSFile != "" {
 				pageCSS = append(pageCSS, r.CSSFile)
 			}
-			pageCSS = append(pageCSS, cssFiles...)
 			// UA siblings link a variant-only stylesheet when the build emitted
 			// one (hybrid+userAgent); otherwise they share the page sheet.
 			legacyPageCSS := pageCSS
 			if r.CSSLegacyFile != "" {
-				legacyPageCSS = append([]string{r.CSSLegacyFile}, cssFiles...)
+				legacyPageCSS = append(append([]string{}, cssFiles...), r.CSSLegacyFile)
 			}
 			modernPageCSS := pageCSS
 			if r.CSSModernFile != "" {
-				modernPageCSS = append([]string{r.CSSModernFile}, cssFiles...)
+				modernPageCSS = append(append([]string{}, cssFiles...), r.CSSModernFile)
 			}
 			devBootstrap := ""
 			if b.DevMode {
