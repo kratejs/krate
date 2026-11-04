@@ -89,6 +89,10 @@ type Annotations struct {
 	// static or private member, an unknown this.x read, ...). The builder
 	// reports it when the component is used.
 	ClassRejections map[string]diag.Diagnostic
+	// DecoratedClasses holds, per top-level class that carries decorators
+	// (lowered by esbuild into a reassignment of the class binding), the
+	// warning reported where the class is used as a component.
+	DecoratedClasses map[string]diag.Diagnostic
 	// LazyComponents maps a component binding declared with React.lazy() to
 	// its declaration. Its hydration code goes into a separate chunk.
 	LazyComponents map[string]LazyComponent

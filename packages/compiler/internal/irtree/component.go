@@ -189,6 +189,7 @@ func (b *builder) collectHydrationBody(fn *ast.FnDecl, node *ComponentNode) hydr
 	factoryPre, factoryPost := b.collectReactiveFactoryJS(fn.Body, body.order)
 	body.pre = append(body.pre, factoryPre...)
 	body.post = append(body.post, factoryPost...)
+	body.pre, body.post = promoteTransitive(body.pre, body.post)
 	node.PreSignalVars = mergeBodyJS(body.pre)
 	node.ExtraVars = mergeBodyJS(body.post)
 	return body
@@ -340,8 +341,10 @@ func (b *builder) foldComponentLocals(fn *ast.FnDecl, node *ComponentNode, isPag
 		}
 	}
 	if client {
-		node.PreSignalVars = mergeBodyJS(body.pre, preLocals)
-		node.ExtraVars = append(useIdVars, mergeBodyJS(body.post, postLocals)...)
+		pre, post := promoteTransitive(append(append([]bodyJS(nil), body.pre...), preLocals...),
+			append(append([]bodyJS(nil), body.post...), postLocals...))
+		node.PreSignalVars = mergeBodyJS(pre)
+		node.ExtraVars = append(useIdVars, mergeBodyJS(post)...)
 		if len(funcPropAliases) > 0 {
 			// The alias reads props.<funcProp>, emitted after the registry
 			// read that binds `props`.
@@ -676,9 +679,37 @@ func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl) bool {
 		hasComponentRef = hasRefAttrExpr(ret.Value)
 	}
 	_, _, providesScope := providedScopeContext(fn)
-	return len(node.Signals) == 0 && len(node.Effects) == 0 &&
+	return !slotsHaveExpr(node.Children) &&
+		len(node.Signals) == 0 && len(node.Effects) == 0 &&
 		len(node.Memos) == 0 && len(node.ExtraVars) == 0 &&
 		len(node.PreSignalVars) == 0 &&
 		len(node.Handlers) == 0 && len(node.AttrBindings) == 0 &&
 		len(node.RefBindings) == 0 && !hasComponentRef && !providesScope
+}
+
+// slotsHaveExpr reports whether any slot (at any depth of the node's own
+// tree) is an ExprSlot: a runtime-evaluated expression the build could not
+// fold, which needs the component's hydration script.
+func slotsHaveExpr(slots []SlotNode) bool {
+	for _, s := range slots {
+		switch v := s.(type) {
+		case *ExprSlot:
+			return true
+		case *ConditionalSlot:
+			if slotsHaveExpr(v.Consequent) || slotsHaveExpr(v.Alternate) {
+				return true
+			}
+		case *ListSlot:
+			for _, it := range v.Items {
+				if it != nil && slotsHaveExpr(it.Contents) {
+					return true
+				}
+			}
+		case *SuspenseSlot:
+			if slotsHaveExpr(v.Fallback) || slotsHaveExpr(v.Resolved) {
+				return true
+			}
+		}
+	}
+	return false
 }

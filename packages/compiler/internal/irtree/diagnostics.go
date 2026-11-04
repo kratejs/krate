@@ -12,6 +12,15 @@ import (
 // warnUnrenderedComponent reports a component tag that renders nothing
 // because it could not be resolved or (for a React class) lowered.
 func (b *builder) warnUnrenderedComponent(name string, el *ast.JSXElement) {
+	if b.ann != nil {
+		if d, ok := b.ann.DecoratedClasses[name]; ok {
+			use := b.diagAt(el.Position, diag.SeverityWarning, "", "")
+			d.Message += " (rendered at " + diagLocation(use) + ", where it renders nothing)"
+			d.Severity = diag.SeverityWarning
+			b.warnings = append(b.warnings, d)
+			return
+		}
+	}
 	if b.ann != nil && b.ann.ClassComponents[name] {
 		if d, ok := b.ann.ClassRejections[name]; ok {
 			use := b.diagAt(el.Position, diag.SeverityWarning, "", "")

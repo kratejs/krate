@@ -349,6 +349,18 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 					ctx.fragmentNames[local] = true
 				}
 			}
+		case "@krate/runtime", "@krate/runtime/jsx-runtime", "@krate/runtime/jsx-dev-runtime":
+			// The runtime's Fragment is React's Fragment. The import stays
+			// (it also carries other runtime names); only the tag lowers.
+			for _, named := range imp.Named {
+				if named.Remote == "Fragment" {
+					local := named.Local
+					if local == "" {
+						local = named.Remote
+					}
+					ctx.fragmentNames[local] = true
+				}
+			}
 		default:
 			continue
 		}

@@ -145,6 +145,10 @@ func GetProperty(v Value, key string) Value {
 			return boundMethod(v, key)
 		}
 	case KindString:
+		// Locale-dependent methods vary by host locale and are never folded.
+		if strings.HasPrefix(key, "toLocale") || key == "localeCompare" {
+			return Unsupported("String.prototype." + key + " depends on the runtime locale")
+		}
 		units := utf16.Encode([]rune(v.s))
 		if key == "length" {
 			return Number(float64(len(units)))
@@ -193,7 +197,7 @@ var arrayMethods = map[string]bool{
 }
 
 var stringMethods = map[string]bool{
-	"toUpperCase": true, "toLowerCase": true, "toLocaleUpperCase": true, "toLocaleLowerCase": true,
+	"toUpperCase": true, "toLowerCase": true,
 	"trim": true, "trimStart": true, "trimEnd": true, "split": true, "slice": true, "substring": true,
 	"startsWith": true, "endsWith": true, "includes": true, "indexOf": true, "lastIndexOf": true,
 	"replace": true, "replaceAll": true, "padStart": true, "padEnd": true, "repeat": true,
@@ -573,10 +577,10 @@ func stringMethod(s, name string, args []Value) Value {
 	u := units(s)
 	n := len(u)
 	switch name {
-	case "toUpperCase", "toLocaleUpperCase":
-		return String(strings.ToUpper(s))
-	case "toLowerCase", "toLocaleLowerCase":
-		return String(strings.ToLower(s))
+	case "toUpperCase":
+		return String(jsUpper(s))
+	case "toLowerCase":
+		return String(jsLower(s))
 	case "trim":
 		return String(strings.TrimFunc(s, isJSWhitespace))
 	case "trimStart":
@@ -815,7 +819,12 @@ func numberMethod(f float64, name string, args []Value) Value {
 	case "toString", "valueOf":
 		if r := arg(args, 0); r.kind != KindUndefined && r.ToNumber() != 10 {
 			if name == "toString" {
-				return Unsupported("Number.prototype.toString with a radix other than 10")
+				radix := r.ToNumber()
+				if radix >= 2 && radix <= 36 && radix == math.Trunc(radix) &&
+					f == math.Trunc(f) && math.Abs(f) <= 1<<53 {
+					return String(strconv.FormatInt(int64(f), int(radix)))
+				}
+				return Unsupported("Number.prototype.toString with this radix or a fractional value")
 			}
 		}
 		if name == "valueOf" {

@@ -368,3 +368,60 @@ func stmtsHaveReturn(stmts []ast.Stmt) bool {
 	}
 	return false
 }
+
+// declaredNamesOf returns the names a var/let/const fragment declares.
+func declaredNamesOf(js string) []string {
+	var rest string
+	switch {
+	case strings.HasPrefix(js, "var "):
+		rest = js[4:]
+	case strings.HasPrefix(js, "let "):
+		rest = js[4:]
+	case strings.HasPrefix(js, "const "):
+		rest = js[6:]
+	default:
+		return nil
+	}
+	if i := strings.Index(rest, "="); i >= 0 {
+		rest = rest[:i]
+	}
+	var names []string
+	scanJSIdents(rest, func(n string) { names = append(names, n) })
+	return names
+}
+
+// promoteTransitive moves pre fragments that read a name declared by a post
+// fragment into post. A fragment is post when it reads a signal directly;
+// without this a memo chained on another memo (q reads d, d reads the
+// signal) would be emitted before the signals it depends on.
+func promoteTransitive(pre, post []bodyJS) ([]bodyJS, []bodyJS) {
+	declared := map[string]bool{}
+	for _, f := range post {
+		for _, n := range declaredNamesOf(f.js) {
+			declared[n] = true
+		}
+	}
+	for changed := true; changed && len(pre) > 0; {
+		changed = false
+		kept := pre[:0:0]
+		for _, f := range pre {
+			hit := false
+			scanJSIdents(f.js, func(n string) {
+				if declared[n] {
+					hit = true
+				}
+			})
+			if !hit {
+				kept = append(kept, f)
+				continue
+			}
+			post = append(post, f)
+			for _, n := range declaredNamesOf(f.js) {
+				declared[n] = true
+			}
+			changed = true
+		}
+		pre = kept
+	}
+	return pre, post
+}
