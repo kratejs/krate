@@ -343,8 +343,10 @@ user-authored workspace. See
 
 ## `krate version`
 
-Prints the compiler version (`krate v<version>`). `krate --version` and `krate -v`
-do the same.
+Prints the version of the native compiler binary (`krate v<version>`), which is
+the code that actually runs. `krate --version` and `krate -v` do the same. When
+it differs from the `@krate/core` npm package, a warning goes to stderr; reinstall
+to get the matching platform package.
 
 ## `krate mcp`
 

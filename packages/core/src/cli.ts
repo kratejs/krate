@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
-import { execBinary } from './binary.js';
+import { execBinary, printVersion } from './binary.js';
 import { commandSpec } from './spawn.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -78,7 +78,12 @@ async function main() {
       }
       break;
     case 'version':
-      console.log(`krate v${version}`);
+      try {
+        await printVersion(args, version);
+      } catch (err: any) {
+        console.error(err.message);
+        process.exit(1);
+      }
       break;
     case '--help':
     case '-h':

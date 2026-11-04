@@ -5,6 +5,10 @@ detailed changelog. This file records the release train at a glance.
 
 ## Unreleased
 
+- `krate version` reports the native binary instead of the npm wrapper, and warns
+  when the two differ.
+- Backslashes in tsconfig `baseUrl` and `paths` are normalized, so a config
+  written on Windows resolves on Linux and macOS.
 - Tailwind output is layered like v4 (`@layer theme, base, components,
   utilities`). Migration note: unlayered CSS beats Tailwind utilities, so a
   global reset such as `* { margin: 0; padding: 0 }` must move into
