@@ -300,6 +300,8 @@ export interface SSRCoreOptions {
   timeoutMs?: number;
   ppr?: boolean;
   pprRevalidate?: number;
+  /** Registers work that must outlive the response (stale-while-revalidate refreshes). */
+  background?(work: Promise<unknown>): void;
   /** Called when the ISR cache changed; immediate is true for explicit invalidations. */
   onIsrChange?(immediate: boolean): void;
 }
@@ -587,6 +589,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     })();
 
     inFlightRevalidations.set(key, p);
+    opts.background?.(p);
   }
 
   // Time-based ISR regeneration: re-render every cached variant of a route while
@@ -809,6 +812,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
       }
     })();
     inFlightRegionRevalidations.set(key, p);
+    opts.background?.(p);
   }
 
   // renderRegion renders one region, applying region-level ISR caching for ISR
