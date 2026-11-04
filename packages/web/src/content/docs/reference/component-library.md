@@ -113,9 +113,8 @@ Every compound component is used **namespaced** - `Breadcrumb.List`,
 `Dialog.Content`, `Toolbar.Button`, and so on. The flat exports
 (`BreadcrumbList`, `TableRow`, ...) still work as deprecated aliases.
 
-An instance's `value`s must be literals, and every instance of the same
-component on a page shares one option set: give two `Dialog`s the same content
-`value` (for example `"c"`).
+An instance's `value`s must be literals. Each instance on a page gets its own
+option set, so two `Dialog`s can use different content `value`s.
 
 For data-driven option sets (options known only at runtime), use the native
 `<Select options={...}/>` component rather than a scope component.

@@ -3,6 +3,7 @@ package irtree
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
@@ -522,7 +523,15 @@ func (b *builder) cssAnalyzer(fn *ast.FnDecl) *csssignals.Analyzer {
 	// share its scope classes: the outer scope's descendant selectors would
 	// otherwise react to the inner controls.
 	depth := b.cssActive[fn]
-	akey := cssAnalyzerKey{fn: fn, depth: depth}
+	// Instances whose call-site option universe differs (two Dialogs with
+	// different literal values) need their own analysis and scope classes.
+	spec, hasSpec := b.scopeOverrides[fn]
+	hasSpec = hasSpec && len(spec.options) > 0
+	specKey := ""
+	if hasSpec {
+		specKey = strings.Join(spec.options, "\x01") + "\x02" + spec.initial
+	}
+	akey := cssAnalyzerKey{fn: fn, depth: depth, spec: specKey}
 	if a, ok := b.cssAnalyzers[akey]; ok {
 		return a
 	}
@@ -530,7 +539,7 @@ func (b *builder) cssAnalyzer(fn *ast.FnDecl) *csssignals.Analyzer {
 		b.cssIndex = make(map[string]int)
 	}
 	indexFn := func(component, variable string) int {
-		key := component + "\x00" + variable + "\x00" + itoa(depth)
+		key := component + "\x00" + variable + "\x00" + itoa(depth) + "\x00" + specKey
 		if idx, ok := b.cssIndex[key]; ok {
 			return idx
 		}
@@ -539,7 +548,7 @@ func (b *builder) cssAnalyzer(fn *ast.FnDecl) *csssignals.Analyzer {
 		return idx
 	}
 	var a *csssignals.Analyzer
-	if spec, ok := b.scopeOverrides[fn]; ok && len(spec.options) > 0 {
+	if hasSpec {
 		a = csssignals.AnalyzePartsIn(b.idPrefix, fn.Name, fn.Body, indexFn, spec.options, spec.initial)
 	} else {
 		a = csssignals.AnalyzeIn(b.idPrefix, fn.Name, fn.Body, indexFn)
@@ -552,6 +561,7 @@ func (b *builder) cssAnalyzer(fn *ast.FnDecl) *csssignals.Analyzer {
 type cssAnalyzerKey struct {
 	fn    *ast.FnDecl
 	depth int
+	spec  string
 }
 
 // sigMap returns the signal context for the current component being built.

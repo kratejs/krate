@@ -402,3 +402,47 @@ export default function Page() {
 		t.Errorf("expected the close label shown when selected:\n%s", css)
 	}
 }
+
+// Two instances of one scope component with different literal values each get
+// their own option set: every label resolves to a controller of its own scope.
+func TestBuildCSSScopeInstancesHaveOwnOptions(t *testing.T) {
+	src := `const PopCtx = createContext(null);
+function Pop(props) {
+	const open = createCSSGroup(null, { as: 'popover' });
+	return <PopCtx.Provider value={open}><div class="pop">{props.children}</div></PopCtx.Provider>;
+}
+function PopTrigger(props) { const open = PopCtx.useContext(); return <button {...open.trigger(props.value)}>{props.children}</button>; }
+function PopContent(props) { const open = PopCtx.useContext(); return <div {...open.panel(props.value)}>{props.children}</div>; }
+export default function Page() {
+	return <main>
+		<Pop><PopTrigger value="one">T1</PopTrigger><PopContent value="one">Body1</PopContent></Pop>
+		<Pop><PopTrigger value="two">T2</PopTrigger><PopContent value="two">Body2</PopContent></Pop>
+	</main>;
+}`
+	html, outDir, err := buildPageSrc(t, src)
+	if err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	if hasHydrationScript(html) {
+		t.Errorf("zero-JS expected:\n%.1500s", html)
+	}
+	assertForResolves(t, html)
+	ids := regexp.MustCompile(`id=("?)([^"\s>]+)`).FindAllStringSubmatch(html, -1)
+	seen := map[string]bool{}
+	for _, m := range ids {
+		if seen[m[2]] {
+			t.Errorf("duplicate id %q:\n%.1500s", m[2], html)
+		}
+		seen[m[2]] = true
+	}
+	opt := func(v string) bool {
+		return regexp.MustCompile(`value=` + `"?` + v + `[" >]`).MatchString(html)
+	}
+	if !opt("one") || !opt("two") {
+		t.Errorf("each instance needs a radio for its own value:\n%.1800s", html)
+	}
+	css := readAllCSS(t, outDir)
+	if !strings.Contains(css, "-p-one") || !strings.Contains(css, "-p-two") {
+		t.Errorf("CSS must cover both instances' options:\n%s", css)
+	}
+}
