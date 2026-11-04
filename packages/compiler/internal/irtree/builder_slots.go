@@ -1608,6 +1608,8 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 		ExprSource: exprSource,
 		Signals:    signals,
 		Initial:    initial,
+		File:       b.sourceLoc(),
+		Pos:        expr.Pos(),
 	}
 }
 
@@ -2643,6 +2645,10 @@ func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *Handler
 	}
 	signals := b.collectSignalReads(attr.Value)
 
+	pos := attr.Position
+	if attr.Value != nil && attr.Value.Pos().Line > 0 {
+		pos = attr.Value.Pos()
+	}
 	return &HandlerDecl{
 		ElementSlotID: SlotID(elementID),
 		Prop:          attr.Name,
@@ -2651,6 +2657,8 @@ func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *Handler
 		Signals:       signals,
 		Capture:       capture,
 		Direct:        direct,
+		File:          b.sourceLoc(),
+		Pos:           pos,
 	}
 }
 

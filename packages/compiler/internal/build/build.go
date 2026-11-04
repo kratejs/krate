@@ -2169,6 +2169,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
 	if needsHydrate {
+		emitResult.TrackSources = b.Cfg.Sourcemap
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
 		dceJS = append(dceJS, rawJS)
 		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)
@@ -2189,10 +2190,18 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 				return nil, "", verr
 			}
 			hasJS = true
+			// Source markers become a map from the generated code back to the
+			// original .tsx positions.
+			inputMap := ""
+			if len(emitResult.SrcMarks) > 0 {
+				rawJS, inputMap = buildHydrationMap(rawJS, emitResult.SrcMarks, pageDir)
+			}
 			finalJS := rawJS
 			mapJSON := ""
 			if b.shouldMinifyJS() {
-				if b.Cfg.Sourcemap {
+				if b.Cfg.Sourcemap && inputMap != "" {
+					finalJS, mapJSON = minifyJSWithInputMap(rawJS, inputMap)
+				} else if b.Cfg.Sourcemap {
 					// Minify with esbuild's own map so the minified output can be
 					// decoded back to the generated code. The hydration bundle is
 					// compiler-generated (no literal user TSX), so `sources` labels
@@ -2213,6 +2222,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 			if b.Cfg.Sourcemap {
 				sm := mapJSON
+				if sm == "" && inputMap != "" {
+					sm = inputMap
+				}
 				if sm == "" {
 					// Unminified output: emit a valid line-level map with the
 					// generated code embedded so devtools shows a coherent file.
