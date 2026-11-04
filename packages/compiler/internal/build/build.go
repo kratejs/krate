@@ -1750,6 +1750,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 	bnd.SetTSOptions(tsstrip.Options{
 		ExperimentalDecorators:  b.Cfg.TSCompilerOptions.ExperimentalDecorators,
 		UseDefineForClassFields: b.Cfg.TSCompilerOptions.UseDefineForClassFields,
+		Define:                  b.publicEnvDefines(),
 	})
 	if b.contentMods != nil {
 		bnd.SetVirtualModules(b.contentMods)
@@ -2175,6 +2176,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			rawJS = strings.TrimSpace(rawJS + "\n" + islandJS)
 		}
 		if rawJS != "" {
+			rawJS = neutralizeClientEnv(rawJS)
 			// npm functions called by client code are bundled into the script.
 			vendor := collectVendorImports(bundle.Modules)
 			for _, rb := range findRouteStack(page, b.Cfg.PagesDir) {

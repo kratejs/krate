@@ -18,6 +18,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -35,6 +36,29 @@ import (
 type Options struct {
 	ExperimentalDecorators  bool
 	UseDefineForClassFields *bool
+	// Define replaces global identifiers and member chains with constant JS
+	// expressions (import.meta.env.MODE, process.env.KRATE_PUBLIC_X).
+	Define map[string]string
+}
+
+// defineKey is a stable encoding of Define for the strip cache.
+func (o Options) defineKey() string {
+	if len(o.Define) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(o.Define))
+	for k := range o.Define {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(o.Define[k])
+		b.WriteByte(0)
+	}
+	return b.String()
 }
 
 func (o Options) tsconfigRaw() string {
@@ -123,6 +147,8 @@ func cacheKey(path, src string, opts Options) [32]byte {
 	h.Write([]byte{0})
 	h.Write([]byte(opts.tsconfigRaw()))
 	h.Write([]byte{0})
+	h.Write([]byte(opts.defineKey()))
+	h.Write([]byte{0})
 	h.Write([]byte(src))
 	var k [32]byte
 	copy(k[:], h.Sum(nil))
@@ -177,6 +203,7 @@ func strip(path, src string, opts Options) cacheEntry {
 		SourcesContent: api.SourcesContentExclude,
 		Sourcefile:     path,
 		TsconfigRaw:    opts.tsconfigRaw(),
+		Define:         opts.Define,
 		LogLevel:       api.LogLevelSilent,
 	})
 	full := newTextIndex(src)
