@@ -22,7 +22,7 @@ func testConfig() *config.Config {
 
 func TestEmitNetlifyRedirects(t *testing.T) {
 	out := t.TempDir()
-	files, err := Emit("netlify", testConfig(), out)
+	files, err := Emit("netlify", testConfig(), out, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestEmitNetlifyRedirects(t *testing.T) {
 
 func TestEmitVercel(t *testing.T) {
 	out := t.TempDir()
-	if _, err := Emit("vercel", testConfig(), out); err != nil {
+	if _, err := Emit("vercel", testConfig(), out, out); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(out, "vercel.json"))
@@ -80,7 +80,7 @@ func TestEmitGitHubPages(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(out, "404", "index.html"), []byte("<h1>404</h1>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	files, err := Emit("gh-pages", config.Default(), out)
+	files, err := Emit("gh-pages", config.Default(), out, out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestEmitGitHubPages(t *testing.T) {
 }
 
 func TestEmitUnknownTarget(t *testing.T) {
-	if _, err := Emit("nowhere", config.Default(), t.TempDir()); err == nil {
+	if _, err := Emit("nowhere", config.Default(), t.TempDir(), t.TempDir()); err == nil {
 		t.Fatal("expected error for unknown target")
 	}
 }
@@ -111,10 +111,33 @@ func TestEmitRemovesServerOnlyArtifacts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(internal, "page.server.mjs"), []byte("secret"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Emit("netlify", config.Default(), out); err != nil {
+	if _, err := Emit("netlify", config.Default(), out, out); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(out, ".krate")); !os.IsNotExist(err) {
 		t.Fatalf(".krate still present after deploy: %v", err)
+	}
+}
+
+func TestEmitRemovesLegacyServerOutputFromPublicRoot(t *testing.T) {
+	out := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(out, "api-node"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"api-node/hello.js", "server-manifest.json", "index.html"} {
+		if err := os.WriteFile(filepath.Join(out, filepath.FromSlash(rel)), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Emit("netlify", config.Default(), t.TempDir(), out, Options{StaticOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"api-node", "server-manifest.json"} {
+		if _, err := os.Stat(filepath.Join(out, rel)); !os.IsNotExist(err) {
+			t.Errorf("%s still present after deploy: %v", rel, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(out, "index.html")); err != nil {
+		t.Errorf("index.html was removed: %v", err)
 	}
 }

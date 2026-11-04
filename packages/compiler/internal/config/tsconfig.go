@@ -545,6 +545,14 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				if n, ok := configInt64(v); ok {
 					cfg.Server.MaxBodySize = n
 				}
+			case "trustProxy":
+				if b, ok := v.(bool); ok {
+					cfg.Server.TrustProxy = b
+				}
+			case "shutdownTimeout":
+				if n, ok := configInt(v); ok {
+					cfg.Server.ShutdownTimeout = n
+				}
 			}
 		}
 	case "cors":
@@ -708,6 +716,12 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 					return fmt.Errorf("devServer.toolbar: expected boolean, got %T", v)
 				}
 				cfg.DevServer.Toolbar = &b
+			case "host":
+				s, ok := v.(string)
+				if !ok {
+					return fmt.Errorf("devServer.host: expected string, got %T", v)
+				}
+				cfg.DevServer.Host = s
 			case "editor":
 				s, ok := v.(string)
 				if !ok {
@@ -968,6 +982,10 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			case "display":
 				if s, ok := v.(string); ok {
 					cfg.Fonts.Display = s
+				}
+			case "preloadLimit":
+				if n, ok := v.(float64); ok && n >= 0 {
+					cfg.Fonts.PreloadLimit = int(n)
 				}
 			}
 		}

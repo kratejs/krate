@@ -39,6 +39,11 @@ Notes:
   only used to typecheck (hence `noEmit`).
 - **`paths`** - `@/*` maps to `src/*`. The compiler reads the same `paths` and
   `baseUrl` from `tsconfig.json` for bundling resolution, so they stay in sync.
+  `tsconfig.json` may contain comments and trailing commas, and `extends`
+  (a relative path or a package) is followed. Targets in `paths` resolve
+  relative to `baseUrl` exactly as `tsc` does, so with `baseUrl: "."` write
+  `"@/*": ["./src/*"]`; an import that does not resolve fails the build at the
+  import statement. A tsconfig that cannot be parsed is reported as a warning.
 - **`include`** must cover `.krate/types` so generated route/content types are
   visible.
 
@@ -71,8 +76,11 @@ attributes, `Krate.TypedRoutes`). Ensure your `tsconfig` resolves it - either
 via `jsxImportSource` above or a `/// <reference types="@krate/runtime" />`
 in an ambient `.d.ts`.
 
-`src/krate-env.d.ts` (shipped in the scaffold) bridges Krate's globals like
-`Head`, `Link`, `Image`, and `Icon`.
+`src/krate-env.d.ts` bridges Krate's globals like `Head`, `Link`, `Image`, and
+`Icon`. It is generated (by `krate dev`, `krate build` or `krate types`) and
+git-ignored by the scaffold, so run `krate types` once after cloning for editors
+and `tsc` to see it. The scaffold's `typecheck` script does exactly that:
+`krate types && tsc --noEmit`.
 
 ## Typechecking in CI
 

@@ -176,9 +176,9 @@ export default function App() {
 				Closing: &ast.JSXClosing{Name: "svg"},
 			}
 		},
-		TransformImage: func(*ast.JSXElement) *ast.JSXElement {
+		TransformImage: func(*ast.JSXElement) (*ast.JSXElement, []irtree.HookDiag) {
 			imageCalls++
-			return &ast.JSXElement{Opening: &ast.JSXOpening{Name: "img", SelfClosing: true}}
+			return &ast.JSXElement{Opening: &ast.JSXOpening{Name: "img", SelfClosing: true}}, nil
 		},
 	})
 	html := renderStaticHTML(tree.Root.Children)

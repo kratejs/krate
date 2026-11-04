@@ -180,7 +180,7 @@ func TestQuickJSFetchOptions(t *testing.T) {
 	}
 	defer rt.Close()
 	if _, err := rt.Execute(`var out; fetch(` + fmt.Sprintf("%q", srv.URL) + `, { method: "POST", headers: { "X-Test": "yes" }, body: "payload" })
-	  .then(function (r) { out = r.status + " " + r.headers["X-Echo"] + " " + r.text(); }, function (e) { out = "ERR " + e; });`); err != nil {
+	  .then(function (r) { return r.text().then(function (t) { out = r.status + " " + r.headers.get("X-Echo") + " " + t; }); }, function (e) { out = "ERR " + e; });`); err != nil {
 		t.Fatal(err)
 	}
 	rt.DrainJobs()

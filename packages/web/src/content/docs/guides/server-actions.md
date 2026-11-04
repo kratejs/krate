@@ -140,9 +140,23 @@ export default function Todos() {
 - **Without JavaScript**, the form posts to the server action with the initial
   state (evaluated at build time) as the previous state, and the server
   redirects to the optional `permalink` (third argument, a same-origin path) or
-  back to the page. The returned state is not shown in that case. A non-literal
+  back to the page. The state the action returned travels across that redirect
+  in a short-lived (60 s), single-use `krate_flash` cookie, and a
+  `useActionState` for the same action that mounts on the next page starts from
+  it, so validation errors appear as soon as the page hydrates.
+  Pages are pre-rendered HTML, so a browser that never runs the script would
+  still see the build-time initial state. To give it feedback, the server
+  renders the strings of the returned state (a string, or the string values of
+  an object such as `{ error: "..." }` or `{ errors: { name: "..." } }`) into
+  `<div class="krate-flash" role="alert">` at the top of the form that posted,
+  and clears the cookie. This is a notice built from the returned text, not a
+  re-render of your component: markup that depends on the state (conditional
+  elements, lists) stays as built until the script runs, and when it does the
+  form starts from the same state and removes the notice. Style
+  `.krate-flash` as you like. A non-literal
   initial state is sent as `null` and reported as
-  [`KR7003`](#diagnostics).
+  [`KR7003`](#diagnostics). The state must stay under about 3 KB once encoded;
+  larger results are dropped with a server warning.
 
 ### useFormStatus
 
@@ -219,7 +233,7 @@ Inside an action, `@krate/runtime/server` exposes the request:
 import { cookies, headers, redirect } from "@krate/runtime/server";
 
 export async function signOut() {
-  const session = cookies().get("session");
+  const session = cookies().get("session")?.value;
   const agent = headers().get("user-agent");
   cookies().delete("session");
   redirect("/");
@@ -227,7 +241,7 @@ export async function signOut() {
 ```
 
 - `headers()` returns the request `Headers`.
-- `cookies()` has `get`, `getAll`, `has`, `set(name, value, options)` and
+- `cookies()` has `get` (returns `{ name, value }` or `undefined`, as in Next.js), `getAll`, `has`, `set(name, value, options)` and
   `delete(name)`. `set` defaults to `HttpOnly; Path=/; SameSite=Lax`.
 - `getActionContext()` returns `{ actionId, url, method, headers, cookies }`, or
   `undefined` outside an action. `headers()`/`cookies()` throw outside one.

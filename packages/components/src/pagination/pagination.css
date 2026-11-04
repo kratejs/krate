@@ -33,7 +33,7 @@
 }
 .krate-pagination-active {
   background: var(--krate-primary, #3b82f6);
-  color: #fff;
+  color: var(--krate-primary-fg, #fff);
   font-weight: 600;
 }
 .krate-pagination-disabled {

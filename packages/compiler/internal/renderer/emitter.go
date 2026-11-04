@@ -17,15 +17,31 @@ import (
 )
 
 // EmitResult consolidates all page output from the emitter.
+// SrcMark locates a piece of generated hydration code in its original source.
+type SrcMark struct {
+	File string
+	Line int
+	Col  int
+}
+
+// SrcMarkPrefix opens the marker comment (/*@k:N*/) that GenerateNewHydrationJS
+// leaves before mapped statements when EmitResult.TrackSources is set. N
+// indexes EmitResult.SrcMarks; the build strips the markers and turns them
+// into a source map.
+const SrcMarkPrefix = "/*@k:"
+
 type EmitResult struct {
-	HTML       string
-	HeadHTML   string
-	ScriptHTML string
-	StyleHTML  string
-	Signatures []irtree.ComponentSignature
-	HasLinks   bool
-	UsedFuncs  map[string]bool
-	UsedCSS    map[string]bool
+	// TrackSources makes GenerateNewHydrationJS leave source markers.
+	TrackSources bool
+	SrcMarks     []SrcMark
+	HTML         string
+	HeadHTML     string
+	ScriptHTML   string
+	StyleHTML    string
+	Signatures   []irtree.ComponentSignature
+	HasLinks     bool
+	UsedFuncs    map[string]bool
+	UsedCSS      map[string]bool
 	// ListComponents are the client component functions referenced by dynamic
 	// list slots (e.g. <Toast> in a .map() body). They're emitted into the
 	// hydration scope so the runtime can re-render lists via h(Component, ...).
@@ -403,11 +419,14 @@ func (e *Emitter) emitStatic(node *irtree.ComponentNode) SlotOutput {
 	// A static component built through the tree path may render {props.children}
 	// (e.g. a context-providing root or a scope-part component); fill the
 	// placeholder with its call-site slots, like emitClient.
-	if strings.Contains(out.HTML, "<!--__children__-->") && len(node.CallSiteSlots) > 0 {
+	// The placeholder sits in a hoisted <template> when it is inside the
+	// hidden branch of a conditional, so templates are spliced as well.
+	if (strings.Contains(out.HTML, "<!--__children__-->") || strings.Contains(out.Templates, "<!--__children__-->")) && len(node.CallSiteSlots) > 0 {
 		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
 		html := callSiteOut.HTML
 		callSiteOut.HTML = ""
 		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", html)
+		out.Templates = strings.ReplaceAll(out.Templates, "<!--__children__-->", html)
 		mergeSlotOutput(&out, callSiteOut)
 	}
 	return out
@@ -587,11 +606,12 @@ func (e *Emitter) emitClient(node *irtree.ComponentNode) SlotOutput {
 	// Replace {props.children} placeholder with rendered call site children.
 	// This ensures interactive sub-components nested inside signal components
 	// retain their data-k/data-kh hydration markers.
-	if strings.Contains(out.HTML, "<!--__children__-->") && len(node.CallSiteSlots) > 0 {
+	if (strings.Contains(out.HTML, "<!--__children__-->") || strings.Contains(out.Templates, "<!--__children__-->")) && len(node.CallSiteSlots) > 0 {
 		callSiteOut := e.emitSlotsParallel(node.CallSiteSlots)
 		html := callSiteOut.HTML
 		callSiteOut.HTML = ""
 		out.HTML = strings.ReplaceAll(out.HTML, "<!--__children__-->", html)
+		out.Templates = strings.ReplaceAll(out.Templates, "<!--__children__-->", html)
 		if cond, branch, ok := childrenPlaceholderCond(node.Children); ok {
 			claimCond(callSiteOut.Signatures, cond, branch)
 		}
@@ -939,7 +959,11 @@ func (e *Emitter) emitExprSlot(s *irtree.ExprSlot) SlotOutput {
 	// expressions (JSX-producing expressions route to ListSlot/ConditionalSlot),
 	// so they are always text and must be HTML-escaped to prevent template
 	// literals like `return <h1>x</h1>` from leaking real markup into the page.
-	html := slotMarker(id) + escape.Text(s.Initial) + slotEndMarker(id)
+	body := escape.Text(s.Initial)
+	if s.InitialHTML != "" {
+		body = s.InitialHTML
+	}
+	html := slotMarker(id) + body + slotEndMarker(id)
 	return SlotOutput{HTML: html}
 }
 
@@ -988,7 +1012,16 @@ func (e *Emitter) emitConditionalSlot(s *irtree.ConditionalSlot) SlotOutput {
 	mergeSlotOutput(&out, cons)
 	mergeSlotOutput(&out, alt)
 	out.HTML = slotMarker(id) + activeHTML + slotEndMarker(id)
-	out.Templates = `<template data-kc="` + escape.HTMLAttr(id) + `" data-kb="` + held + `">` + inactiveHTML + `</template>` + out.Templates
+	tpl := `<template data-kc="` + escape.HTMLAttr(id) + `" data-kb="` + held + `"`
+	if s.SVG {
+		// Parsed outside an <svg>, template content would get the HTML
+		// namespace; the wrapper makes the parser build SVG elements and
+		// krateCondSwap unwraps it.
+		tpl += ` data-kns="svg"><svg>` + inactiveHTML + `</svg></template>`
+	} else {
+		tpl += `>` + inactiveHTML + `</template>`
+	}
+	out.Templates = tpl + out.Templates
 	return out
 }
 
@@ -1145,6 +1178,8 @@ func collectSlotBindings(children []irtree.SlotNode) []irtree.SlotBinding {
 				Type:    "expr",
 				ExprJS:  s.ExprSource,
 				Signals: s.Signals,
+				File:    s.File,
+				Pos:     s.Pos,
 			})
 		case *irtree.ConditionalSlot:
 			bindings = append(bindings, irtree.SlotBinding{

@@ -1,18 +1,18 @@
 package bundler
 
 import (
-	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"os"
 	"path/filepath"
-	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/css"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/markdown"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
@@ -51,6 +51,9 @@ func moduleNeedsRewrite(src string, imports []string) bool {
 			return true
 		}
 		if strings.HasSuffix(imp, ".module.css") {
+			return true
+		}
+		if isDataImport(imp) {
 			return true
 		}
 	}
@@ -115,9 +118,18 @@ type Bundler struct {
 	// tsOpts are the tsconfig options used when stripping TypeScript.
 	tsOpts tsstrip.Options
 
+	// dev selects development export conditions.
+	dev bool
+
 	// twImports controls how `@import "tailwindcss"` is treated in CSS.
 	twImports css.TailwindImportMode
 }
+
+// SetDevMode picks the development or production package.json export
+// conditions used to resolve npm packages.
+func (b *Bundler) SetDevMode(dev bool) { b.dev = dev }
+
+func (b *Bundler) conditions() resolver.Conditions { return resolver.ClientConditions(b.dev) }
 
 // SetTailwindImports configures the handling of Tailwind package imports.
 func (b *Bundler) SetTailwindImports(m css.TailwindImportMode) { b.twImports = m }
@@ -263,27 +275,101 @@ func (b *Bundler) resolveImportForModuleUncached(importer, imp string) string {
 			return p
 		}
 	}
-	resolved := resolveImport(importer, imp, b.fileExists)
-	if resolved != "" {
-		return resolved
-	}
+	// tsconfig paths win over node_modules, as in tsc.
 	if len(b.pathAliases) > 0 && b.tsBaseDir != "" {
-		resolved = resolvePathAlias(imp, b.pathAliases, b.tsBaseDir, b.fileExists)
-		if resolved != "" {
+		if resolved := resolvePathAlias(imp, b.pathAliases, b.tsBaseDir, b.fileExists); resolved != "" {
 			return resolved
 		}
-		// Fallback: tsconfig paths targets are normally relative to baseUrl,
-		// but many projects declare them relative to the project root (e.g.
-		// `@/*: ["./src/*"]`). When baseUrl resolution misses, try the root the
-		// tsconfig lives in.
-		if b.root != "" && b.root != b.tsBaseDir {
-			resolved = resolvePathAlias(imp, b.pathAliases, b.root, b.fileExists)
-			if resolved != "" {
-				return resolved
+	}
+	return resolveImport(importer, imp, b.fileExists, b.conditions())
+}
+
+// matchesPathAlias reports whether imp matches a configured tsconfig paths
+// pattern, so a miss is reported as a broken alias rather than a missing
+// package.
+func (b *Bundler) matchesPathAlias(imp string) (string, bool) {
+	for _, a := range b.pathAliases {
+		if strings.HasSuffix(a.prefix, "/*") {
+			base := strings.TrimSuffix(a.prefix, "/*")
+			if imp == base || strings.HasPrefix(imp, base+"/") {
+				return a.prefix, true
 			}
+		} else if imp == a.prefix {
+			return a.prefix, true
 		}
 	}
-	return ""
+	return "", false
+}
+
+// unresolvedImportError builds the diagnostic for an import in mod that no
+// resolution rule could satisfy. It returns nil for imports that are handled
+// elsewhere (compat runtime specifiers) or that live in third-party code,
+// which cannot act on the hint.
+func (b *Bundler) unresolvedImportError(mod *Module, imp string) error {
+	if mod.IsExternal || mod.Program == nil {
+		return nil
+	}
+	if resolver.IsCompiledDependency(mod.Path) {
+		return nil
+	}
+	if reactCompatSpecifier(imp) != "" || strings.HasPrefix(imp, "node:") {
+		return nil
+	}
+	// The client runtime is shipped by the compiler (window globals), so its
+	// package need not be installed for a page to build.
+	// server-only / client-only are marker packages enforced by the build's
+	// client-boundary check, not modules to load.
+	if imp == "server-only" || imp == "client-only" {
+		return nil
+	}
+	if imp == "@krate/runtime" || strings.HasPrefix(imp, "@krate/runtime/") {
+		return nil
+	}
+	var pos ast.Pos
+	for _, stmt := range mod.Program.Body {
+		switch st := stmt.(type) {
+		case *ast.ImportStmt:
+			if strings.Trim(st.Source, "\"'") == imp {
+				pos = st.Position
+			}
+		case *ast.ExportStmt:
+			if strings.Trim(st.ReexportSource, "\"'") == imp {
+				pos = st.Position
+			}
+		}
+		if pos.Line > 0 {
+			break
+		}
+	}
+	d := diag.Diagnostic{File: mod.Path, Line: pos.Line, Col: pos.Col}
+	if mod.SourceCode != "" && pos.Line > 0 {
+		lines := strings.Split(mod.SourceCode, "\n")
+		if pos.Line <= len(lines) {
+			d.Source = strings.TrimRight(lines[pos.Line-1], "\r")
+		}
+	}
+	switch {
+	case strings.HasPrefix(imp, ".") || strings.HasPrefix(imp, "/"):
+		d.Message = "cannot resolve import " + strconv.Quote(imp)
+		d.Hint = "no file matches that path relative to " + filepath.Base(filepath.Dir(mod.Path)) + "/ (tried .tsx, .ts, .jsx, .js, .css, .json and index files); check the spelling and the file extension"
+	default:
+		if prefix, ok := b.matchesPathAlias(imp); ok {
+			d.Message = "cannot resolve import " + strconv.Quote(imp) + " (matched tsconfig path alias " + strconv.Quote(prefix) + ")"
+			d.Hint = "no file exists at the alias target; targets resolve relative to compilerOptions.baseUrl (" + b.tsBaseDir + ")"
+		} else {
+			d.Message = "cannot resolve import " + strconv.Quote(imp) + ": package is not installed"
+			d.Hint = "install it with `pnpm add " + packageNameOf(imp) + "`, or fix the import if it is a typo or a missing tsconfig paths alias"
+		}
+	}
+	return d
+}
+
+func packageNameOf(spec string) string {
+	parts := strings.Split(spec, "/")
+	if strings.HasPrefix(spec, "@") && len(parts) >= 2 {
+		return parts[0] + "/" + parts[1]
+	}
+	return parts[0]
 }
 
 func (b *Bundler) Bundle(entry string) (*Bundle, error) {
@@ -307,6 +393,12 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	// runtime (class bindings degrade to data-kattr-class markers that throw
 	// "styles is not defined").
 	b.rewriteCSSModuleRefs()
+
+	// Inline JSON, ?raw and ?url imports as module constants so SSR text and
+	// hydration code both see the values.
+	if err := b.rewriteDataImports(); err != nil {
+		return nil, err
+	}
 
 	// Rewrite asset imports (`import logo from './logo.png'`) to their hashed
 	// site URL literal so both SSR HTML and hydration JS use the copied file.
@@ -341,6 +433,30 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 		Frontmatter:    b.frontmatter,
 		ActionImports:  b.actionImports,
 	}, nil
+}
+
+// resolveModuleImports resolves and loads every import of mod. An import no
+// rule can resolve is a build error located at the import statement.
+func (b *Bundler) resolveModuleImports(mod *Module) error {
+	for _, imp := range mod.Imports {
+		if base, query, ok := splitImportQuery(imp); ok {
+			if err := b.resolveQueryImport(mod, imp, base, query); err != nil {
+				return err
+			}
+			continue
+		}
+		resolved := b.resolveImportForModule(mod.Path, imp)
+		if resolved == "" {
+			if err := b.unresolvedImportError(mod, imp); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := b.resolveModule(resolved, false); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (b *Bundler) resolveModule(path string, isEntry bool) error {
@@ -407,7 +523,7 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 		// opaque external module. Its components are mounted at runtime (see the
 		// build's external-component bundling), so a parser gap in a third-party
 		// package must not fail the whole page.
-		if !isEntry && strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
+		if !isEntry && resolver.IsCompiledDependency(abs) {
 			b.order = append(b.order, &Module{Path: path, IsExternal: true})
 			return nil
 		}
@@ -419,7 +535,7 @@ func (b *Bundler) resolveModule(path string, isEntry bool) error {
 // isSourceExt reports whether a path is a JS/TS source file the bundler parses.
 func isSourceExt(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".tsx", ".ts", ".mts", ".jsx", ".js", ".mjs", ".cjs":
+	case ".tsx", ".ts", ".mts", ".cts", ".jsx", ".js", ".mjs", ".cjs":
 		return true
 	}
 	return false
@@ -432,13 +548,8 @@ func (b *Bundler) resolveJSONModule(path, abs string, mtime time.Time, size int6
 			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry}
 			mod.Imports = append([]string(nil), e.imports...)
 			b.order = append(b.order, mod)
-			for _, imp := range mod.Imports {
-				resolved := b.resolveImportForModule(path, imp)
-				if resolved != "" {
-					if err := b.resolveModule(resolved, false); err != nil {
-						return err
-					}
-				}
+			if err := b.resolveModuleImports(mod); err != nil {
+				return err
 			}
 			return nil
 		}
@@ -447,7 +558,10 @@ func (b *Bundler) resolveJSONModule(path, abs string, mtime time.Time, size int6
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", path, err)
 	}
-	prog := jsonToAST(data)
+	prog, jerr := jsonToAST(data)
+	if jerr != nil {
+		return jsonDiagnostic(path, data, jerr)
+	}
 	mod := &Module{Path: path, Program: prog, IsEntry: isEntry}
 	b.collectImports(prog, mod)
 	b.order = append(b.order, mod)
@@ -456,15 +570,7 @@ func (b *Bundler) resolveJSONModule(path, abs string, mtime time.Time, size int6
 			mtime: mtime, size: size, program: prog, imports: append([]string(nil), mod.Imports...),
 		})
 	}
-	for _, imp := range mod.Imports {
-		resolved := b.resolveImportForModule(path, imp)
-		if resolved != "" {
-			if err := b.resolveModule(resolved, false); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return b.resolveModuleImports(mod)
 }
 
 func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size int64, statOK bool, isEntry bool) error {
@@ -476,13 +582,8 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry}
 			mod.Imports = append([]string(nil), e.imports...)
 			b.order = append(b.order, mod)
-			for _, imp := range mod.Imports {
-				resolved := b.resolveImportForModule(path, imp)
-				if resolved != "" {
-					if err := b.resolveModule(resolved, false); err != nil {
-						return err
-					}
-				}
+			if err := b.resolveModuleImports(mod); err != nil {
+				return err
 			}
 			return nil
 		}
@@ -494,11 +595,17 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 	}
 	src := string(data)
 	mcfg := markdown.DefaultConfig()
-	result := markdown.ParseMDX(src, mcfg)
-	if len(result.Frontmatter) > 0 {
-		b.frontmatter = result.Frontmatter
+	compiled := markdown.Compile(src, mcfg, markdown.Options{MDX: strings.HasSuffix(abs, ".mdx")})
+	for _, d := range compiled.Diags {
+		if !d.Warning {
+			return fmt.Errorf("%s:%d:%d: %s (hint: %s)", path, d.Line, d.Col, d.Msg, d.Hint)
+		}
 	}
-	tsxSource := generateMDXBundleTSX(path, src, result, mcfg)
+	if len(compiled.Frontmatter) > 0 {
+		b.frontmatter = compiled.Frontmatter
+	}
+	result := &markdown.MDXResult{Frontmatter: compiled.Frontmatter}
+	tsxSource := generateMDXBundleTSX(path, compiled, mcfg)
 
 	tokens := lexer.New(tsxSource).Tokenize()
 	p := parser.New(tokens)
@@ -519,15 +626,7 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 			imports: append([]string(nil), mod.Imports...), frontmatter: result.Frontmatter,
 		})
 	}
-	for _, imp := range mod.Imports {
-		resolved := b.resolveImportForModule(path, imp)
-		if resolved != "" {
-			if err := b.resolveModule(resolved, false); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return b.resolveModuleImports(mod)
 }
 
 func (b *Bundler) resolveAssetModule(path, abs string, mtime time.Time, size int64, statOK bool) error {
@@ -565,13 +664,8 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 			mod := &Module{Path: path, Program: e.program, IsEntry: isEntry, SourceCode: e.source, ComponentClass: e.compClass, Diagnostics: e.diags}
 			mod.Imports = append([]string(nil), e.imports...)
 			b.order = append(b.order, mod)
-			for _, imp := range mod.Imports {
-				resolved := b.resolveImportForModule(path, imp)
-				if resolved != "" {
-					if err := b.resolveModule(resolved, false); err != nil {
-						return err
-					}
-				}
+			if err := b.resolveModuleImports(mod); err != nil {
+				return err
 			}
 			return nil
 		}
@@ -602,6 +696,10 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 
 	mod := &Module{Path: path, Program: prog, IsEntry: isEntry, SourceCode: src, Diagnostics: reactDiags}
 	mod.ComponentClass = ClassifyComponent(src, path, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs)
+	if !strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
+		mod.Diagnostics = append(mod.Diagnostics, b.envReadDiags(path, src, prog, mod.ComponentClass)...)
+		reactDiags = mod.Diagnostics
+	}
 	b.collectImports(prog, mod)
 	// Modules a rewrite pass may mutate are parsed fresh per bundle (never
 	// shared), since those rewrites are not idempotent.
@@ -614,15 +712,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 			diags: reactDiags,
 		})
 	}
-	for _, imp := range mod.Imports {
-		resolved := b.resolveImportForModule(path, imp)
-		if resolved != "" {
-			if err := b.resolveModule(resolved, false); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return b.resolveModuleImports(mod)
 }
 
 // isKrateRuntime reports whether an absolute path points into the krate client
@@ -741,25 +831,28 @@ func memoizedExists(path string) bool {
 
 func ResolveImport(importer, imp string) string {
 	if !resolverCacheEnabled {
-		return resolveImport(importer, imp, resolver.Exists)
+		return resolveImport(importer, imp, resolver.Exists, nil)
 	}
 	key := filepath.Dir(importer) + "\x00" + imp
 	if v, ok := resolveMemo.importResult(key); ok {
 		return v
 	}
-	v := resolveImport(importer, imp, memoizedExists)
+	v := resolveImport(importer, imp, memoizedExists, nil)
 	resolveMemo.putImport(key, v)
 	return v
 }
 
 // resolveImport resolves an import path to an absolute file path. exists is the
 // filesystem probe (memoized by the caller's build cache).
-func resolveImport(importer, imp string, exists func(string) bool) string {
+func resolveImport(importer, imp string, exists func(string) bool, conds resolver.Conditions) string {
 	dir := filepath.Dir(importer)
 
 	if strings.HasPrefix(imp, ".") || strings.HasPrefix(imp, "..") {
 		resolved := filepath.Clean(filepath.Join(dir, imp))
 
+		if ts := tsSourceForJSSpecifier(resolved, exists); ts != "" {
+			return ts
+		}
 		if exists(resolved) {
 			if resolver.StatPath(resolved).IsDir {
 				for _, index := range []string{"index.tsx", "index.ts", "index.mts", "index.jsx", "index.js", "index.mjs", "index.cjs", "index.md", "index.mdx"} {
@@ -787,7 +880,40 @@ func resolveImport(importer, imp string, exists func(string) bool) string {
 		return resolved
 	}
 
-	return resolver.NodeModule(dir, imp)
+	if conds == nil {
+		conds = resolver.ClientConditions(false)
+	}
+	if strings.HasPrefix(imp, "#") {
+		return resolver.PackageImport(dir, imp, conds)
+	}
+	return resolver.NodeModuleWith(dir, imp, conds)
+}
+
+// tsSourceForJSSpecifier maps a TypeScript ESM import written with a JS
+// extension (./util.js, ./x.mjs) to the TS source beside it, as tsc does under
+// moduleResolution node16/nodenext/bundler. Returns "" when path has no such
+// sibling.
+func tsSourceForJSSpecifier(path string, exists func(string) bool) string {
+	var alts []string
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".js":
+		alts = []string{".ts", ".tsx"}
+	case ".jsx":
+		alts = []string{".tsx"}
+	case ".mjs":
+		alts = []string{".mts"}
+	case ".cjs":
+		alts = []string{".cts"}
+	default:
+		return ""
+	}
+	stem := strings.TrimSuffix(path, filepath.Ext(path))
+	for _, ext := range alts {
+		if exists(stem + ext) {
+			return stem + ext
+		}
+	}
+	return ""
 }
 
 // resolvePathAlias tries to resolve an import using TypeScript path aliases.
@@ -811,6 +937,9 @@ func resolvePathAlias(imp string, aliases []pathAlias, tsBaseDir string, exists 
 					}
 					targetPath = filepath.Clean(targetPath)
 
+					if ts := tsSourceForJSSpecifier(targetPath, exists); ts != "" {
+						return ts
+					}
 					if exists(targetPath) {
 						if resolver.StatPath(targetPath).IsDir {
 							for _, index := range []string{"index.tsx", "index.ts", "index.jsx", "index.js"} {
@@ -899,14 +1028,20 @@ func fileExists(path string) bool {
 // generateMDXBundleTSX creates a TSX source string from MDX content.
 // It preserves import statements and renders JSX blocks as actual JSX elements,
 // while markdown content is embedded as template literal strings.
-func generateMDXBundleTSX(path, src string, result *markdown.MDXResult, mcfg markdown.Config) string {
-	imports := markdown.ExtractImports(src)
-	_, segments := markdown.ParseMDXSegments(src, mcfg)
+func generateMDXBundleTSX(path string, compiled *markdown.Result, mcfg markdown.Config) string {
+	imports := compiled.ESM
+	segments := compiled.Segments
 
 	var sb strings.Builder
 	for _, imp := range imports {
 		sb.WriteString(imp)
 		sb.WriteString("\n")
+	}
+	for _, s := range segments {
+		if s.JSX != "" && strings.Contains(s.JSX, "frontmatter") {
+			sb.WriteString(markdown.FrontmatterDecl(compiled.Frontmatter, compiled.ESM))
+			break
+		}
 	}
 	if markdown.HasCodeSegments(segments) {
 		sb.WriteString("import { Code } from \"@krate/components\";\n")
@@ -916,6 +1051,8 @@ func generateMDXBundleTSX(path, src string, result *markdown.MDXResult, mcfg mar
 	}
 	sb.WriteString("\nexport default function MDXContent() {\n")
 	sb.WriteString("  return (\n")
+	sb.WriteString("    <>\n")
+	sb.WriteString(mdxHeadJSX(compiled.Frontmatter))
 	sb.WriteString("    <div class=\"md-content\">\n")
 
 	for _, seg := range segments {
@@ -933,7 +1070,7 @@ func generateMDXBundleTSX(path, src string, result *markdown.MDXResult, mcfg mar
 		}
 		if seg.Code != nil {
 			sb.WriteString("      ")
-			sb.WriteString(markdown.BuildCodeJSX(seg.Code.Lang, seg.Code.Code))
+			sb.WriteString(markdown.BuildCodeJSXMeta(seg.Code.Lang, seg.Code.Meta, seg.Code.Code))
 			sb.WriteString("\n")
 		}
 		if seg.Aside != nil {
@@ -944,8 +1081,29 @@ func generateMDXBundleTSX(path, src string, result *markdown.MDXResult, mcfg mar
 	}
 
 	sb.WriteString("    </div>\n")
+	sb.WriteString("    </>\n")
 	sb.WriteString("  );\n")
 	sb.WriteString("}\n")
+	return sb.String()
+}
+
+// mdxHeadJSX emits a <Head> block for the frontmatter title and description so
+// markdown pages get a document <title> and meta description.
+func mdxHeadJSX(fm map[string]any) string {
+	title, _ := fm["title"].(string)
+	desc, _ := fm["description"].(string)
+	if title == "" && desc == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("      <Head>\n")
+	if title != "" {
+		sb.WriteString("        <title>{" + escape.JSStringDQ(title) + "}</title>\n")
+	}
+	if desc != "" {
+		sb.WriteString("        <meta name=\"description\" content={" + escape.JSStringDQ(desc) + "} />\n")
+	}
+	sb.WriteString("      </Head>\n")
 	return sb.String()
 }
 
@@ -2022,58 +2180,4 @@ func hashBytes(data []byte) string {
 		v /= 36
 	}
 	return string(buf[:])
-}
-
-func jsonToAST(data []byte) *ast.Program {
-	var val interface{}
-	if err := json.Unmarshal(data, &val); err != nil {
-		return &ast.Program{}
-	}
-	expr := jsonToExpr(val)
-	return &ast.Program{
-		Body: []ast.Stmt{
-			&ast.ExportStmt{
-				Default:     true,
-				Declaration: &ast.ExprStmt{Expression: expr},
-			},
-		},
-	}
-}
-
-func jsonToExpr(val interface{}) ast.Expr {
-	switch v := val.(type) {
-	case nil:
-		return &ast.Literal{Kind: ast.NullLit, Value: "null"}
-	case bool:
-		s := "false"
-		if v {
-			s = "true"
-		}
-		return &ast.Literal{Kind: ast.BoolLit, Value: s}
-	case float64:
-		return &ast.Literal{Kind: ast.NumberLit, Value: fmt.Sprintf("%v", v)}
-	case string:
-		return &ast.Literal{Kind: ast.StringLit, Value: v}
-	case []interface{}:
-		elems := make([]ast.Expr, len(v))
-		for i, e := range v {
-			elems[i] = jsonToExpr(e)
-		}
-		return &ast.ArrayExpr{Elements: elems}
-	case map[string]interface{}:
-		props := make([]*ast.ObjectProp, 0, len(v))
-		keys := make([]string, 0, len(v))
-		for k := range v {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			props = append(props, &ast.ObjectProp{
-				Key:   k,
-				Value: jsonToExpr(v[k]),
-			})
-		}
-		return &ast.ObjectExpr{Properties: props}
-	}
-	return &ast.Literal{Kind: ast.NullLit, Value: "null"}
 }

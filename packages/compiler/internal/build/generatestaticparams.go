@@ -501,7 +501,12 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	b.runPageHook("AfterParse", spp.PagePath, parseCtx, func() error { return plugin.RunAfterParse(parseCtx) })
 	entryModule.Program = parseCtx.Program
 
-	b.ensureTransformedModules(bundle.Modules)
+	// The entry program is fresh per generated page, so its getCollection
+	// calls are inlined after the route params are bound (below), not here.
+	b.deferInline.Store(entryModule.Program, true)
+	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
+		return nil, "", err
+	}
 	renderMode, revalidate, _ := resolvePageRenderMode(spp.PagePath, entryModule, bundle.Modules)
 
 	// Global streaming override: if configured, all *static* pages stream.
@@ -547,7 +552,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		emitResult = &renderer.EmitResult{}
 	} else {
 		opts := b.irBuildOptions()
-		opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
+		applyModuleBindings(&opts, entryModule.Path, entryModule.Program, extraPrograms)
 		opts.ActionURLs = bundle.ActionImports
 		tree = irtree.BuildWithOptions(entryModule.Program, ann, opts)
 		if len(tree.Errors) > 0 {

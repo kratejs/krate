@@ -50,3 +50,6 @@ export * from './toggle/toggle';
 export * from './toggle-group/toggle-group';
 export * from './toolbar/toolbar';
 export * from './tooltip/tooltip';
+export * from './overlay/overlay';
+export * from './overlay/overlay-bridge';
+export * from './toast/toast-api';

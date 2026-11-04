@@ -1,10 +1,21 @@
 import './dropdown-menu.css';
 import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+import { OverlayBridge } from '../overlay/overlay-bridge';
 
 const DropdownMenuCtx = createScope<string | null>();
 
 export interface DropdownMenuProps {
   label?: string;
+  /** Value of the content shown initially (a literal, like Tabs `defaultValue`). */
+  defaultValue?: string;
+  /** Open the first content initially. */
+  defaultOpen?: boolean;
+  /** Controlled state: true opens the first content, false closes it. Hydrates a small bridge. */
+  open?: boolean;
+  /** Called with the new state when the overlay opens or closes. Hydrates a small bridge. */
+  onOpenChange?: (open: boolean) => void;
+  /** Element id: a handle for `openOverlay('#id')` / `closeOverlay('#id')`. */
+  id?: string;
   children?: any;
 }
 
@@ -24,7 +35,10 @@ export function DropdownMenu(props: DropdownMenuProps) {
   const open = createCSSGroup<string>(null, { as: 'menu', label: props.label });
   return (
     <DropdownMenuCtx.Provider value={open}>
-      <div class="krate-dropdown-menu">{props.children}</div>
+      <div class="krate-dropdown-menu" id={props.id}>
+        {props.open !== undefined || props.onOpenChange ? <OverlayBridge open={props.open} onOpenChange={props.onOpenChange} /> : null}
+        {props.children}
+      </div>
     </DropdownMenuCtx.Provider>
   );
 }

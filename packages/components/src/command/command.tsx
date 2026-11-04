@@ -12,13 +12,18 @@ export interface CommandProps {
   items: CommandItem[];
   placeholder?: string;
   emptyText?: string;
+  /** Accessible name for the input and the results list. */
+  label?: string;
   class?: string;
   onSelect?: (value: string) => void;
 }
 
 // Command is a searchable list (command palette / combobox list). Filtering is
 // client-side over the supplied items; selection is reported via onSelect.
+var commandSeq = 0;
+
 export function Command(props: CommandProps) {
+  var listId = "krate-command-list-" + ++commandSeq;
   var [query, setQuery] = createSignal('');
   var [active, setActive] = createSignal(0);
   var className = "krate-command";
@@ -78,11 +83,13 @@ export function Command(props: CommandProps) {
         role="combobox"
         aria-expanded="true"
         aria-autocomplete="list"
+        aria-controls={listId}
+        aria-label={props.label || props.placeholder || "Search"}
         placeholder={props.placeholder || "Type to search..."}
         onInput={handleInput}
         onKeyDown={handleKeyDown}
       />
-      <ul class="krate-command-list" role="listbox">
+      <ul class="krate-command-list" role="listbox" id={listId} aria-label={props.label || "Results"}>
         {visible().map((item, i) => (
           <li
             key={item.value}

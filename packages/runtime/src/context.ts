@@ -18,6 +18,17 @@ export interface Context<T> {
   useContext: () => T;
   /** Alias for {@link Context.useContext}. */
   use: () => T;
+  /**
+   * Like useContext, but returns a getter that keeps reading the provider's
+   * live value after the call (inside a list row rendered by
+   * {@link krateContextRows}).
+   */
+  useContextLive: () => () => T;
+}
+
+/** A provider value that is read through a getter on every use. */
+class LiveContext {
+  constructor(readonly get: () => unknown) {}
 }
 
 function toNode(v: unknown): Node {
@@ -71,9 +82,17 @@ export function createContext<T>(defaultValue: T): Context<T> {
   const useContext = (): T => {
     const stack = contextStack.get(id);
     if (stack && stack.length > 0) {
-      return stack[stack.length - 1] as T;
+      const top = stack[stack.length - 1];
+      return (top instanceof LiveContext ? top.get() : top) as T;
     }
     return defaultValue;
+  };
+
+  const useContextLive = (): (() => T) => {
+    const stack = contextStack.get(id);
+    const top = stack && stack.length > 0 ? stack[stack.length - 1] : defaultValue;
+    if (top instanceof LiveContext) return () => top.get() as T;
+    return () => top as T;
   };
 
   const Provider = (props: { value: T; children?: any }): Node => {
@@ -122,5 +141,33 @@ export function createContext<T>(defaultValue: T): Context<T> {
   ctx.Consumer = Consumer;
   ctx.useContext = useContext;
   ctx.use = useContext;
+  ctx.useContextLive = useContextLive;
   return ctx;
+}
+
+/**
+ * Wraps a list row render function so the provider values of the enclosing
+ * `<Ctx.Provider value={...}>` (given as getters over the provider's state)
+ * are visible to the rows it creates, and stay live when the state changes.
+ * The compiler flattens providers at build time, so rows rendered later by
+ * the list runtime have no provider on the stack otherwise.
+ */
+export function krateContextRows<A extends unknown[], R>(
+  entries: Array<[Context<any>, () => unknown]>,
+  render: (...args: A) => R,
+): (...args: A) => R {
+  return (...args: A): R => {
+    const pushed: unknown[][] = [];
+    for (const [ctx, get] of entries) {
+      const stack = contextStack.get(ctx.id);
+      if (!stack) continue;
+      stack.push(new LiveContext(get));
+      pushed.push(stack);
+    }
+    try {
+      return render(...args);
+    } finally {
+      for (const stack of pushed) stack.pop();
+    }
+  };
 }

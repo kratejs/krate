@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -36,7 +37,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
 
-const apiServerScriptContent = `import http from 'node:http';
+var apiServerScriptContent = `import http from 'node:http';
 import path from 'node:path';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -62,14 +63,9 @@ const WORKERS = Math.max(1, parseInt(process.env.KRATE_API_WORKERS || '1', 10) |
 // The module cache is bypassed in dev (HOT) so edits are picked up.
 const fileCache = new Map();
 const moduleCache = new Map();
-` + actionSidecarJS + actionSidecarNodeAdapter + apiSidecarClusterJS + `
+` + actionSidecarJS + actionSidecarNodeAdapter + apiSidecarClusterJS + apiSidecarSharedJS + `
 let middlewareModule = null;
-if (MIDDLEWARE_PATH && fs.existsSync(MIDDLEWARE_PATH)) {
-  try {
-    middlewareModule = await import(pathToFileURL(MIDDLEWARE_PATH).href + '?t=' + Date.now());
-  } catch (e) {
-  }
-}
+await krateLoadMiddleware();
 
 function routeParams(file, segments) {
   const rel = path.relative(API_DIR, file).replace(/\.[^.]+$/, '');
@@ -169,6 +165,7 @@ const server = http.createServer(async (req, res) => {
 
     // Middleware endpoint: execute middleware and return result
     if (urlPath === '/__krate/middleware') {
+      if (HOT) await krateLoadMiddleware();
       if (!middlewareModule || !middlewareModule.middleware) {
         res.setHeader('Content-Type', 'application/json');
         return res.end(JSON.stringify({ action: 'continue' }));
@@ -176,40 +173,25 @@ const server = http.createServer(async (req, res) => {
 
       const bodyChunks = [];
       for await (const chunk of req) { bodyChunks.push(chunk); }
-      const bodyStr = Buffer.concat(bodyChunks).toString();
       let body = {};
-      try { body = JSON.parse(bodyStr); } catch {}
+      try { body = JSON.parse(Buffer.concat(bodyChunks).toString()); } catch {}
 
-      const headers = {};
-      for (const [key, value] of Object.entries(req.headers)) {
-        headers[key] = Array.isArray(value) ? value.join(', ') : value;
-      }
-      for (const [key, value] of Object.entries(body.headers || {})) {
-        if (typeof value === 'string') headers[key] = value;
-      }
-
-      const request = new Request(body.url || ('http://localhost' + urlPath), {
+      const request = krateAttach(new Request(body.url || ('http://localhost' + urlPath), {
         method: body.method || 'GET',
-        headers: new Headers(headers),
-      });
+        headers: krateRequestHeaders(body.headers),
+      }));
 
+      res.setHeader('Content-Type', 'application/json');
       try {
-        const result = await middlewareModule.middleware(request);
-        if (result && typeof result.status === 'number') {
-          const respHeaders = {};
-          for (const [k, v] of result.headers.entries()) { respHeaders[k] = v; }
-          res.setHeader('Content-Type', 'application/json');
-          return res.end(JSON.stringify({
-            status: result.status,
-            headers: respHeaders,
-            body: result.status === 204 ? null : await result.text(),
-          }));
+        const hasMatcher = !!krateMatchersFor(middlewareModule);
+        if (!krateMiddlewareMatches(middlewareModule, body.path || urlObj.pathname)) {
+          return res.end(JSON.stringify({ action: 'continue', headers: [], matcher: hasMatcher }));
         }
-        res.setHeader('Content-Type', 'application/json');
-        return res.end(JSON.stringify({ action: 'continue' }));
+        const result = await middlewareModule.middleware(request);
+        return res.end(JSON.stringify({ ...(await krateMiddlewareJSON(result)), matcher: hasMatcher }));
       } catch (e) {
-        res.setHeader('Content-Type', 'application/json');
-        return res.end(JSON.stringify({ action: 'error', error: e.message }));
+        console.error('[krate] middleware error: ' + ((e && e.stack) || e));
+        return res.end(JSON.stringify({ action: 'error', error: (e && e.message) || String(e) }));
       }
     }
     
@@ -271,24 +253,30 @@ const server = http.createServer(async (req, res) => {
       if (!HOT) moduleCache.set(targetFile, routeModule);
     }
     const method = req.method.toUpperCase();
-
-    // Check for named method exports (GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD)
-    const namedHandler = routeModule[method];
-    const methodHandler = namedHandler || routeModule.default;
+    const picked = krateHandler(routeModule, method);
     const routeParamsValue = routeParams(targetFile, cleanRel);
 
-    if (typeof methodHandler === 'function') {
-      // Modern pattern: check if function expects Request (web standard API)
-      const fnStr = methodHandler.toString();
+    if (!picked.fn) {
+      res.statusCode = picked.status;
+      if (picked.allow) res.setHeader('Allow', picked.allow.join(', '));
+      if (picked.status === 204) return res.end();
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify(picked.status === 405 ? { error: 'Method Not Allowed' } : { error: picked.error }));
+    }
+    const methodHandler = picked.fn;
+    const namedHandler = picked.named;
+
+    {
+      // Web standard API: handler(request, { params }) => Response, unless the
+      // default export takes (req, res) (legacy Node style).
       const argCount = methodHandler.length;
-      
       if (namedHandler || argCount <= 1) {
-        // Web standard API: handler(request, { params }) => Response
-        const headers = {};
+        const headers = new Headers();
         for (const [key, value] of Object.entries(req.headers)) {
-          headers[key] = Array.isArray(value) ? value.join(', ') : value;
+          if (Array.isArray(value)) { for (const v of value) headers.append(key, v); }
+          else if (value !== undefined) headers.append(key, value);
         }
-        
+
         let body = null;
         if (req.method !== 'GET' && req.method !== 'HEAD') {
           const chunks = [];
@@ -297,30 +285,51 @@ const server = http.createServer(async (req, res) => {
           }
           body = Buffer.concat(chunks);
         }
-        
-        const request = new Request(urlObj.href, {
+
+        const ac = new AbortController();
+        res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+        const request = krateAttach(new Request(urlObj.href, {
           method: req.method,
-          headers: new Headers(headers),
+          headers,
           body: body && body.length > 0 ? body : undefined,
-        });
-        
+          signal: ac.signal,
+        }));
+
         const revalidateScope = newRevalidateScope('api');
         const response = await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(request, { params: routeParamsValue }));
         // revalidatePath/revalidateTag calls are applied before responding.
         await flushRevalidate(revalidateScope);
-        
+
         if (response instanceof Response || (response && typeof response.status === 'number' && typeof response.headers === 'object')) {
           res.statusCode = response.status;
-          for (const [key, value] of response.headers.entries()) {
-            res.setHeader(key, value);
+          for (const [key, value] of krateHeaderPairs(response.headers)) {
+            if (key === 'set-cookie') {
+              const prev = res.getHeader('set-cookie');
+              res.setHeader('set-cookie', prev ? [].concat(prev, value) : [value]);
+            } else {
+              res.setHeader(key, value);
+            }
           }
-          const responseBody = await response.text();
-          res.end(responseBody);
+          if (picked.headOnly || !response.body || response.status === 204 || response.status === 304) {
+            if (typeof response.text === 'function' && response.body) { try { await response.body.cancel(); } catch {} }
+            return res.end();
+          }
+          // Pipe the body so SSE / chunked responses reach the client as they
+          // are produced instead of after the handler finishes.
+          const reader = response.body.getReader();
+          res.on('close', () => { reader.cancel().catch(() => {}); });
+          for (;;) {
+            const r = await reader.read();
+            if (r.done) break;
+            const chunk = typeof r.value === 'string' ? r.value : Buffer.from(r.value);
+            if (!res.write(chunk)) await new Promise((ok) => res.once('drain', ok));
+          }
+          res.end();
         } else if (response !== undefined && response !== null) {
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify(response));
         } else {
-          res.statusCode = 200;
+          res.statusCode = 204;
           res.end();
         }
       } else {
@@ -341,15 +350,12 @@ const server = http.createServer(async (req, res) => {
         };
         await REVALIDATE_STORE.run(revalidateScope, () => methodHandler(req, res));
       }
-    } else {
-      res.statusCode = 500;
-      res.setHeader('Content-Type', 'application/json');
-      return res.end(JSON.stringify({ error: "API route must export a handler function (GET, POST, etc. or default)." }));
     }
   } catch (err) {
+    if (res.headersSent) { res.destroy(err); return; }
     res.statusCode = 500;
     res.setHeader('Content-Type', 'application/json');
-    return res.end(JSON.stringify({ error: "Internal Server Error", details: err.message }));
+    return res.end(JSON.stringify(krateErrorBody(err, req.method + ' ' + req.url)));
   }
 });
 
@@ -418,7 +424,7 @@ if (WORKERS > 1 && cluster.isPrimary) {
 // for higher throughput. It serves the same dist/api-node ESM routes and the
 // /__krate/middleware endpoint. Selected by ssr.apiRuntime: "bun" (or the
 // top-level runtime: "bun").
-const apiServerBunScriptContent = `import path from 'node:path';
+var apiServerBunScriptContent = `import path from 'node:path';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
@@ -435,14 +441,12 @@ const fileCache = new Map();
 const moduleCache = new Map();
 
 let middlewareModule = null;
-if (MIDDLEWARE_PATH) {
-  try { middlewareModule = await import(pathToFileURL(MIDDLEWARE_PATH).href); } catch {}
-}
 
 function json(body, status) { return Response.json(body, { status: status || 200 }); }
 
 
-` + actionSidecarJS + `
+` + actionSidecarJS + apiSidecarSharedJS + `
+await krateLoadMiddleware();
 function sanitize(p) {
   let rel = p || '/';
   try { rel = decodeURIComponent(rel); } catch { return null; }
@@ -474,30 +478,26 @@ function resolveFile(clean) {
 
 async function loadModule(file) {
   if (!HOT) { const cached = moduleCache.get(file); if (cached) return cached; }
-  const mod = await import(pathToFileURL(file).href + (HOT ? '?t=' + Date.now() : ''));
+  const mod = HOT ? await krateImportFresh(file, String(Date.now())) : await import(pathToFileURL(file).href);
   if (!HOT) moduleCache.set(file, mod);
   return mod;
 }
 
 async function handleMiddleware(req) {
-  if (!middlewareModule || !middlewareModule.middleware) return json({ action: 'continue' });
+  if (HOT) await krateLoadMiddleware();
+  if (!middlewareModule || !middlewareModule.middleware) return json({ action: 'continue', headers: [] });
   let body = {};
   try { body = await req.json(); } catch {}
-  const headers = new Headers();
-  for (const [key, value] of Object.entries(body.headers || {})) {
-    if (typeof value === 'string') headers.set(key, value);
-  }
   try {
-    const request = new Request(body.url || req.url, { method: body.method || 'GET', headers });
+    const hasMatcher = !!krateMatchersFor(middlewareModule);
+    if (!krateMiddlewareMatches(middlewareModule, body.path || new URL(req.url).pathname)) return json({ action: 'continue', headers: [], matcher: hasMatcher });
+    const request = krateAttach(new Request(body.url || req.url, { method: body.method || 'GET', headers: krateRequestHeaders(body.headers) }));
     const result = await middlewareModule.middleware(request);
-    if (result && typeof result.status === 'number') {
-      const headers = {};
-      for (const [k, v] of result.headers.entries()) headers[k] = v;
-      const body = result.status === 204 ? null : await result.text();
-      return json({ status: result.status, headers, body });
-    }
-    return json({ action: 'continue' });
-  } catch (e) { return json({ action: 'error', error: e.message }); }
+    return json({ ...(await krateMiddlewareJSON(result)), matcher: hasMatcher });
+  } catch (e) {
+    console.error('[krate] middleware error: ' + ((e && e.stack) || e));
+    return json({ action: 'error', error: (e && e.message) || String(e) });
+  }
 }
 
 async function toResponse(out) {
@@ -529,7 +529,7 @@ async function legacyInvoke(fn, req, url) {
     const nodeReq = { url: url.href, method: req.method, headers, body: bodyStr, socket: { remoteAddress: '127.0.0.1' } };
     const res = {
       statusCode: 200,
-      setHeader(k, v) { outHeaders[k] = String(v); },
+      setHeader(k, v) { outHeaders[k] = Array.isArray(v) ? v.map(String).join(', ') : String(v); },
       getHeader(k) { return outHeaders[k]; },
       removeHeader(k) { delete outHeaders[k]; },
       write(c) { outBody += c; },
@@ -644,18 +644,26 @@ Bun.serve({
     const file = resolveFile(clean);
     if (!file) return json({ error: 'API Route Not Found: ' + urlPath }, 404);
     let mod;
-    try { mod = await loadModule(file); } catch (e) { return json({ error: 'Internal Server Error', details: e.message }, 500); }
-    const namedHandler = mod[req.method.toUpperCase()];
-    const fn = namedHandler || mod.default;
-    if (typeof fn !== 'function') return json({ error: 'API route must export a handler function (GET, POST, etc. or default).' }, 500);
+    try { mod = await loadModule(file); } catch (e) { return json(krateErrorBody(e, 'load ' + urlPath), 500); }
+    const picked = krateHandler(mod, req.method.toUpperCase());
+    if (!picked.fn) {
+      if (picked.status === 204) return new Response(null, { status: 204, headers: { Allow: picked.allow.join(', ') } });
+      const r = json(picked.status === 405 ? { error: 'Method Not Allowed' } : { error: picked.error }, picked.status);
+      if (picked.allow) r.headers.set('Allow', picked.allow.join(', '));
+      return r;
+    }
+    const fn = picked.fn;
+    const namedHandler = picked.named;
     const routeParamsValue = routeParams(file, clean);
     try {
       const revalidateScope = newRevalidateScope('api');
-      const out = await REVALIDATE_STORE.run(revalidateScope, async () => ((fn.length >= 2 && !namedHandler) ? legacyInvoke(fn, req, url) : toResponse(await fn(req, { params: routeParamsValue }))));
+      const request = krateAttach(req);
+      const out = await REVALIDATE_STORE.run(revalidateScope, async () => ((fn.length >= 2 && !namedHandler) ? legacyInvoke(fn, req, url) : toResponse(await fn(request, { params: routeParamsValue }))));
       // revalidatePath/revalidateTag calls are applied before responding.
       await flushRevalidate(revalidateScope);
+      if (picked.headOnly) return new Response(null, { status: out.status, headers: out.headers });
       return out;
-    } catch (e) { return json({ error: 'Internal Server Error', details: e.message }, 500); }
+    } catch (e) { return json(krateErrorBody(e, req.method + ' ' + urlPath), 500); }
   },
 });`
 
@@ -855,6 +863,15 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, shells *regio
 }
 
 func streamRegionPageMode(w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string, outOfOrder bool) regionPageResult {
+	return streamRegionPageModeSC(w, flusher, shells, absOut, route, ssrPort, params, query, headers, goRenders, renderGo, isISR, revalidate, internalSecret, outOfOrder, false)
+}
+
+// streamRegionPageModeSC is streamRegionPageMode with serverComponents set for
+// pages that render async server components. Those stream out of order only
+// when every dynamic region is a Suspense boundary: a failed boundary then
+// keeps its fallback (React semantics), while a bare async component outside
+// Suspense stays on the ordered path so its failure can still become a 500.
+func streamRegionPageModeSC(w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string, outOfOrder, serverComponents bool) regionPageResult {
 	res := regionPageResult{}
 	relPath := strings.TrimPrefix(route, "/")
 	if relPath == "" {
@@ -903,7 +920,7 @@ func streamRegionPageMode(w http.ResponseWriter, flusher http.Flusher, shells *r
 	// first and each region chunk inserts itself at its marker, so a slow region
 	// never holds up the rest of the page. Page/ISR and nested regions keep the
 	// ordered assembly path because they carry status or contain child markers.
-	if outOfOrder && !isISR && canStreamOutOfOrder(all) {
+	if outOfOrder && !isISR && canStreamOutOfOrder(all) && (!serverComponents || allSuspense(all)) {
 		return streamSiblingRegions(w, flusher, shell, regionList, goReq, renderGo, string(reqCtx), ssrPort, route, params, query, headers, internalSecret)
 	}
 
@@ -1164,6 +1181,28 @@ func Serve(root string, cfg *config.Config, startTime time.Time) error {
 
 func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
 	port := cfg.ServerPort()
+	if hub != nil {
+		port = cfg.DevPort()
+	}
+
+	// Bind the listener before any sidecar starts: a taken port must fail (or,
+	// in dev, move to the next free one) without leaving an orphaned renderer.
+	bindHost := strings.TrimSpace(cfg.Server.Host)
+	if hub != nil {
+		// Dev binds loopback unless devServer.host/server.host says otherwise.
+		bindHost = devBindHost(cfg)
+	}
+	listener, err := bindServerListener(bindHost, port, hub != nil)
+	if err != nil {
+		return err
+	}
+	listenerOwned := false
+	defer func() {
+		if !listenerOwned {
+			_ = listener.Close()
+		}
+	}()
+	port = listener.Addr().(*net.TCPAddr).Port
 	apiPort := internalPort(port + 1)
 
 	// On-demand revalidation (revalidatePath/revalidateTag) reaches this
@@ -1187,15 +1226,24 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	var middlewareRT *jsruntime.MiddlewareRuntime
 	middlewareRTOption := strings.ToLower(cfg.SSR.MiddlewareRuntime)
 	if middlewareRTOption == "" || middlewareRTOption == "quickjs" {
-		middlewareRT = jsruntime.LoadMiddlewareRuntime(root)
+		if hub != nil {
+			// Dev reloads the module whenever .krate/middleware.js changes (and
+			// picks it up if it is added after startup).
+			middlewareRT = jsruntime.NewLazyMiddlewareRuntime(filepath.Join(root, ".krate", "middleware.js"))
+		} else {
+			middlewareRT = jsruntime.LoadMiddlewareRuntime(root)
+		}
+		if middlewareRT != nil {
+			middlewareRT.SetEnv(serverEnv)
+		}
 	}
 
 	// The embedded QuickJS runtime serves JS/TS API routes in-process by
 	// default, so the Node API sidecar only needs to start when it is actually
 	// selected (apiRuntime / middlewareRuntime is node/bun/deno) or when a route
 	// uses external imports the embedded runtime cannot run.
-	apiDir := filepath.Join(cfg.OutDir, "api")
-	nodeAPIDir := filepath.Join(cfg.OutDir, "api-node")
+	apiDir := apiBundleDir(cfg.OutDir)
+	nodeAPIDir := apiNodeBundleDir(cfg.OutDir)
 	actionDir := filepath.Join(root, ".krate", "actions")
 	hasActions := hasActionManifest(root)
 	middlewarePath := filepath.Join(root, ".krate", "middleware.js")
@@ -1218,6 +1266,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		sidecarRuntime := strings.ToLower(cfg.Runtime)
 		if isNodeFamilyRuntime(apiRTOption) {
 			sidecarRuntime = apiRTOption
+		}
+		if sidecarRuntime == "" {
+			sidecarRuntime = "node"
 		}
 		printf("  %s*%s API sidecar (%s) -> %shttp://localhost:%d%s\n", cCyan, cReset, sidecarRuntime, cCyan, apiPort, cReset)
 		revalHost.SetNodeAPI(fmt.Sprintf("http://127.0.0.1:%d", apiPort))
@@ -1257,6 +1308,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				cmd.Env = append(os.Environ(),
 					fmt.Sprintf("KRATE_API_WORKERS=%d", nodeWorkers),
 					fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hub != nil)),
+					fmt.Sprintf("KRATE_API_DEV=%d", boolToInt(hub != nil)),
 					fmt.Sprintf("KRATE_ACTION_MAX_BODY=%d", apiBodyLimit),
 				)
 				cmd.Env = append(cmd.Env, revalHost.EnvList()...)
@@ -1307,13 +1359,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	var goAPI *goAPISupervisor
 	goAPIManifestPath := gohost.RoutesManifestPath(root)
 	if _, err := os.Stat(goAPIManifestPath); err == nil {
-		goAPIPort := port + 2
+		goAPIPort := internalPort(port + 2)
 		goAPI = newGoAPISupervisor(goAPIServerBinPath(root), goAPIManifestPath, goAPIPort)
 		// Prefer an AF_UNIX socket so the sidecar needs no port and the hop
-		// skips the loopback TCP stack. Fall back to the TCP port only if the
-		// socket directory can't be created.
-		goAPISocket := filepath.Join(root, ".krate", "run", "goapi.sock")
-		if err := os.MkdirAll(filepath.Dir(goAPISocket), 0o700); err == nil {
+		// skips the loopback TCP stack. The path is chosen here and handed to
+		// the child verbatim, so both sides always agree; when no usable socket
+		// path exists the child listens on the TCP port instead.
+		if goAPISocket := goAPISocketPath(root); goAPISocket != "" {
 			_ = os.Remove(goAPISocket)
 			goAPI.SetSocket(goAPISocket)
 		}
@@ -1321,6 +1373,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		revalHost.SetGoAPI(goAPI)
 		if err := goAPI.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "  %s! Go API sidecar not started:%s %v\n", cYellow, cReset, err)
+			goAPI.Close()
+			goAPI = nil
 		} else if goAPI.socket != "" {
 			printf("  %s*%s Go API -> %s%s%s\n", cCyan, cReset, cCyan, goAPI.socket, cReset)
 		} else {
@@ -1330,7 +1384,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	absOut := revalOut
 
-	fileServer := http.FileServer(http.Dir(absOut))
+	fileServer := http.FileServer(hardenedDir{http.Dir(absOut)})
 	mux := http.NewServeMux()
 
 	// Load the build manifest to learn which dynamic routes are closed
@@ -1395,11 +1449,20 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		mux.HandleFunc(p, customSidecarHandler)
 	}
 
-	if hasActions {
-		mux.HandleFunc("/__krate/action/", actionHandler(apiProxy, apiBodyLimit))
+	// Middleware (matcher-scoped) runs in front of pages, API routes and
+	// server actions alike.
+	gate := &middlewareGate{
+		rt:         middlewareRT,
+		dev:        hub != nil,
+		sidecarURL: fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort),
+		file:       middlewarePath,
 	}
 
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+	if hasActions {
+		mux.Handle("/__krate/action/", loggingMiddleware(gate.wrap(http.HandlerFunc(actionHandler(apiProxy, apiBodyLimit)))))
+	}
+
+	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, apiBodyLimit)
 		}
@@ -1416,55 +1479,31 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			return
 		}
 
+		// A path owned only by Go routes answers methods it does not define
+		// the way the JS runtimes do: 405 + Allow, and automatic OPTIONS.
+		if goAPI != nil && goAPI.Active() && apiRT != nil && apiRT.ResolveFile(r.URL.Path) == "" {
+			if allowed, ok := goAPI.AllowedMethods(r.URL.Path); ok && writeGoMethodResponse(w, r, allowed) {
+				return
+			}
+		}
+
 		// Routes that need Node (external imports the embedded runtime cannot
 		// run) are forwarded to the Node sidecar even when QuickJS is default.
 		if apiRT != nil && nodeOnlyRoutes[apiRT.ResolveFile(r.URL.Path)] {
-			apiProxy.ServeHTTP(w, r)
+			apiProxy.ServeHTTP(newDeadlineWriter(w), r)
 			return
 		}
 
 		// Use embedded quickjs runtime if available
 		if apiRT != nil {
-			headers := make(map[string]string)
-			for k, v := range r.Header {
-				headers[k] = strings.Join(v, ", ")
-			}
-
-			var body string
-			if r.Method != "GET" && r.Method != "HEAD" {
-				b, err := readBodyLimited(r)
-				if err != nil {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(http.StatusRequestEntityTooLarge)
-					_, _ = io.WriteString(w, `{"error":"Request Entity Too Large"}`)
-					return
-				}
-				body = string(b)
-			}
-
-			result := apiRT.Execute(jsruntime.APIRequest{
-				URL:     fmt.Sprintf("http://localhost:%d%s", port, r.URL.RequestURI()),
-				Method:  r.Method,
-				Path:    r.URL.Path,
-				Headers: headers,
-				Body:    body,
-			})
-
-			for k, v := range result.Headers {
-				w.Header().Set(k, v)
-			}
-			if result.Status > 0 {
-				w.WriteHeader(result.Status)
-			}
-			if result.Body != "" {
-				_, _ = w.Write([]byte(result.Body))
-			}
+			serveQuickJSAPI(w, r, apiRT, hub != nil)
 			return
 		}
 
 		// Fallback: proxy to sidecar
-		apiProxy.ServeHTTP(w, r)
+		apiProxy.ServeHTTP(newDeadlineWriter(w), r)
 	})
+	mux.Handle("/api/", loggingMiddleware(gate.wrap(apiHandler)))
 
 	// Load the SSR manifest for route lookup (server-manifest.json). The Node
 	// renderer process only starts when a page/region actually needs it - a site
@@ -1497,6 +1536,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// SSR/ISR/Streaming route handler - intercepts before static file server
 	if ssrStarted {
 		mux.HandleFunc("/__krate/ssr/", ssrInternalProxy(revalHost, ssrPort))
+		// Dev: invalidate the renderer's caches once per rebuild, not once per
+		// connected tab.
+		if hub != nil {
+			hub.SetReloadHook(func(ev DevEvent) { ssr.InvalidateDevRoutes(ev.Routes) })
+		}
 	}
 
 	// Wrap file server to serve custom 404.html if it exists
@@ -1511,6 +1555,28 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	// Opt-in User-Agent document selection (compat.mode hybrid + userAgent).
 	uaOn := uaOptIn(cfg.Compat)
+
+	// Files the build content-hashed; only these are cached as immutable.
+	hashedAssets := loadHashedAssets(absOut)
+
+	// Static file layer. In serve mode, build-time precompressed siblings are
+	// used here, after middleware, redirects and the request-time page
+	// decision, and never for the HTML shell of an ssr/isr/streaming page.
+	var staticServer http.Handler = fileServer
+	if hub == nil {
+		staticServer = precompressedMiddlewareIf(absOut, func(r *http.Request) bool {
+			if !isHTMLDocRequest(r.URL.Path) && path.Ext(r.URL.Path) != "" {
+				return false
+			}
+			// A page request carrying flash state is rendered with it, not
+			// answered from the build-time snapshot.
+			if hasFlashCookie(r) {
+				return true
+			}
+			page, _ := ssr.FindPageForRoute(requestRoute(r.URL.Path))
+			return page != nil && page.Mode != RenderSSG.String()
+		}, fileServer)
+	}
 
 	handlerWith404 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Server-only build artifacts live under dist/.krate. Never serve them
@@ -1529,7 +1595,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Hashed assets (styles.<hash>.css, index.<hash>.js, chunks/*.<hash>.js,
 		// assets/<name>-<hash>.*) are content-addressed, so they can be cached
 		// immutably. HTML must never be, since it changes per build.
-		w.Header().Set("Cache-Control", staticCacheControl(r.URL.Path, hub != nil))
+		w.Header().Set("Cache-Control", staticCacheControl(r.URL.Path, hub != nil, hashedAssets))
 
 		// Opt-in UA variant: serve the modern or legacy sibling document to
 		// classified visitors (the default document stays the full hybrid).
@@ -1564,6 +1630,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					continue
 				}
 				if params, ok := matchDynamicRoute(r.URL.Path, dr.pattern); ok {
+					if redirectToCanonicalSlash(w, r) {
+						return
+					}
 					templatePath := filepath.Join(dr.dir, "index.html")
 					templateHTML, err := os.ReadFile(templatePath)
 					if err != nil {
@@ -1582,12 +1651,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Only buffer document requests. Buffering every asset just to detect a
 		// missing one would retain whole images/videos/fonts in memory.
 		if len(custom404) == 0 || (!isHTMLDocRequest(r.URL.Path) && !strings.Contains(r.Header.Get("Accept"), "text/html")) {
-			fileServer.ServeHTTP(w, r)
+			staticServer.ServeHTTP(w, r)
 			return
 		}
 		// Buffer the response so we can replace Go's default "404 page not found"
 		buf := &captureResponse{status: http.StatusOK}
-		fileServer.ServeHTTP(buf, r)
+		staticServer.ServeHTTP(buf, r)
 		if buf.status == http.StatusNotFound {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusNotFound)
@@ -1606,7 +1675,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// Dev-only live-reload SSE + overlay endpoints. The hub broadcasts every
 	// event to all connected tabs and retains the latest build state.
 	if hub != nil {
-		mux.HandleFunc("/__krate/hotreload", func(w http.ResponseWriter, r *http.Request) {
+		devHost := devBindHost(cfg)
+		guard := func(pattern string, h http.HandlerFunc) {
+			mux.Handle(pattern, devEndpointGuard(devHost, h))
+		}
+		guard("/__krate/hotreload", func(w http.ResponseWriter, r *http.Request) {
 			flusher, ok := w.(http.Flusher)
 			if !ok {
 				http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -1643,18 +1716,6 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					}
 					routes := ev.Routes
 
-					// Invalidate SSR renderer cache for changed pages
-					if ssrStarted && len(routes) > 0 {
-						for _, route := range routes {
-							page := ssr.findPage(route)
-							if page != nil && page.Source != "" {
-								if err := ssr.InvalidateDev(route, page.Source, page.BundlePath); err != nil {
-									fmt.Fprintf(os.Stderr, "  %sSSR invalidation failed (%s):%s %v\n", cYellow, route, cReset, err)
-								}
-							}
-						}
-					}
-
 					switch {
 					case ev.Type == "client-error" && ev.ClientError != nil:
 						data, _ := json.Marshal(ev)
@@ -1666,17 +1727,15 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 						writeBuildError(w, ev)
 					case len(routes) > 0:
 						// Partial reload: send affected page routes
-						data := `{"pages":[`
-						for i, r := range routes {
-							if i > 0 {
-								data += ","
-							}
-							data += `"` + r + `"`
-						}
-						data += `]}`
+						data, _ := json.Marshal(struct {
+							Pages   []string `json:"pages"`
+							CSSOnly bool     `json:"cssOnly,omitempty"`
+						}{routes, ev.CSSOnly})
 						fmt.Fprintf(w, "event: reload\ndata: %s\n\n", data)
 					default:
-						fmt.Fprintf(w, "event: reload\ndata: {}\n\n")
+						// A reload with no diagnostics also clears any error
+						// the tab was showing; the client does that itself.
+						_, _ = fmt.Fprintf(w, "event: reload\ndata: {\"cssOnly\":%t}\n\n", ev.CSSOnly)
 					}
 					flusher.Flush()
 				case <-heartbeat.C:
@@ -1690,7 +1749,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 		// Runtime errors reported by the browser. Logged to the terminal and
 		// rebroadcast to every tab so multi-tab sessions stay in sync.
-		mux.HandleFunc("/__krate/client-error", func(w http.ResponseWriter, r *http.Request) {
+		guard("/__krate/client-error", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
@@ -1712,7 +1771,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		})
 
 		// Status for the dev toolbar: fanned-out build state without SSE.
-		mux.HandleFunc("/__krate/status", func(w http.ResponseWriter, r *http.Request) {
+		guard("/__krate/status", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			if cur, ok := hub.Current(); ok {
 				_ = json.NewEncoder(w).Encode(cur)
@@ -1724,7 +1783,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		// Open a file in the developer's editor. The path is validated against
 		// the project root so the endpoint cannot be used to launch arbitrary
 		// files.
-		mux.HandleFunc("/__krate/open", func(w http.ResponseWriter, r *http.Request) {
+		guard("/__krate/open", func(w http.ResponseWriter, r *http.Request) {
 			file := r.URL.Query().Get("file")
 			line := r.URL.Query().Get("line")
 			rel, ok := safeProjectPath(root, file)
@@ -1742,6 +1801,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	// SSR/ISR/Streaming page handler - proxies dynamic pages to the Node.js renderer
 	var ssrPageHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Pages are read-only resources. Mutations go to /api or server
+		// actions, which are routed before this handler.
+		if !pageMethodAllowed(w, r) {
+			return
+		}
 		// Gate on the manifest (route lookup), not the Node process: a page whose
 		// regions are all Go renders without any Node renderer running.
 		if !ssr.HasManifest() {
@@ -1778,6 +1842,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		if page == nil {
 			// Not an SSR/ISR/streaming page (SSG or unknown).
 			handlerWith404.ServeHTTP(w, r)
+			return
+		}
+		// SSG pages answer /x with a 301 to /x/; request-time pages use the
+		// same single canonical form.
+		if redirectToCanonicalSlash(w, r) {
 			return
 		}
 		isISR := page.Mode == RenderISR.String()
@@ -1837,8 +1906,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		if ssrStarted {
 			regionPort = ssrPort
 		}
-		outOfOrder := page != nil && page.Mode == RenderStreaming.String() && !page.ServerComponents
-		rr := streamRegionPageMode(w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo, isISR, reval, ssr.InternalSecret(), outOfOrder)
+		outOfOrder := page != nil && page.Mode == RenderStreaming.String()
+		rr := streamRegionPageModeSC(w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo, isISR, reval, ssr.InternalSecret(), outOfOrder, page.ServerComponents)
 		if rr.served && rr.fatalErr != "" {
 			// A server component failed: there is no meaningful baked body to
 			// fall back to, so answer 500 (the custom 500 page when present).
@@ -1929,6 +1998,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		for _, rw := range cfg.Rewrites {
 			if matchRedirect(path, rw.Source) {
 				rewritten := rewriteDestination(path, rw.Source, rw.Destination)
+				// rewriteDestination percent-encodes substituted values; the
+				// request path holds the decoded form.
+				if dec, err := url.PathUnescape(rewritten); err == nil {
+					rewritten = dec
+				}
 				r.URL.Path = rewritten
 				r.URL.RawPath = ""
 				break
@@ -1938,127 +2012,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		ssrPageHandler.ServeHTTP(w, r)
 	})
 
-	// User middleware handler - calls middleware.ts via embedded quickjs or sidecar
-	middlewareFile := filepath.Join(root, ".krate", "middleware.js")
-	var middlewareHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Skip __krate internal endpoints and API routes
-		if strings.HasPrefix(r.URL.Path, "/__krate/") || strings.HasPrefix(r.URL.Path, "/api/") {
-			redirectRewriteHandler.ServeHTTP(w, r)
-			return
-		}
-
-		if _, err := os.Stat(middlewareFile); os.IsNotExist(err) {
-			redirectRewriteHandler.ServeHTTP(w, r)
-			return
-		}
-
-		// Use embedded quickjs runtime if available
-		if middlewareRT != nil {
-			reqHeaders := make(map[string]string)
-			for k, v := range r.Header {
-				reqHeaders[k] = strings.Join(v, ", ")
-			}
-			result := middlewareRT.Execute(jsruntime.MiddlewareRequest{
-				URL:     fmt.Sprintf("http://localhost:%d%s", port, r.URL.RequestURI()),
-				Method:  r.Method,
-				Path:    r.URL.Path,
-				Headers: reqHeaders,
-			})
-
-			if result.Error != "" || result.Action == "error" {
-				fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %s\n", cRed, cReset, result.Error)
-				w.Header().Set("Cache-Control", "no-store")
-				http.Error(w, "middleware failed", http.StatusServiceUnavailable)
-				return
-			}
-
-			if result.Status > 0 && result.Status != 200 {
-				for k, v := range result.Headers {
-					w.Header().Set(k, v)
-				}
-				w.WriteHeader(result.Status)
-				if result.Body != "" {
-					_, _ = w.Write([]byte(result.Body))
-				}
-				return
-			}
-
-			if result.Headers != nil {
-				for k, v := range result.Headers {
-					w.Header().Set(k, v)
-				}
-			}
-
-			redirectRewriteHandler.ServeHTTP(w, r)
-			return
-		}
-
-		// Fallback: call middleware via sidecar
-		fullURL := fmt.Sprintf("http://localhost:%d%s", port, r.URL.RequestURI())
-		reqHeaders := make(map[string]string, len(r.Header))
-		for k, v := range r.Header {
-			reqHeaders[k] = strings.Join(v, ", ")
-		}
-		middlewareBody, _ := json.Marshal(map[string]interface{}{
-			"url":     fullURL,
-			"method":  r.Method,
-			"path":    r.URL.Path,
-			"headers": reqHeaders,
-		})
-		middlewareURL := fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort)
-		resp, err := sidecarClient.Post(middlewareURL, "application/json", bytes.NewReader(middlewareBody))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "  %sMiddleware unavailable:%s %v\n", cRed, cReset, err)
-			w.Header().Set("Cache-Control", "no-store")
-			http.Error(w, "middleware unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		defer resp.Body.Close()
-
-		respBody, _ := io.ReadAll(resp.Body)
-		var middlewareResult struct {
-			Action  string            `json:"action"`
-			Status  int               `json:"status"`
-			Headers map[string]string `json:"headers"`
-			Body    string            `json:"body"`
-			Error   string            `json:"error"`
-		}
-		if err := json.Unmarshal(respBody, &middlewareResult); err != nil {
-			w.Header().Set("Cache-Control", "no-store")
-			http.Error(w, "middleware failed", http.StatusServiceUnavailable)
-			return
-		}
-
-		// A middleware error must fail closed: continuing would turn a broken
-		// auth check into an unauthenticated request.
-		if middlewareResult.Error != "" || middlewareResult.Action == "error" {
-			fmt.Fprintf(os.Stderr, "  %sMiddleware error:%s %s\n", cRed, cReset, middlewareResult.Error)
-			w.Header().Set("Cache-Control", "no-store")
-			http.Error(w, "middleware failed", http.StatusServiceUnavailable)
-			return
-		}
-
-		// If middleware returned a response (redirect, rewrite, custom response)
-		if middlewareResult.Status > 0 && middlewareResult.Status != 200 {
-			for k, v := range middlewareResult.Headers {
-				w.Header().Set(k, v)
-			}
-			w.WriteHeader(middlewareResult.Status)
-			if middlewareResult.Body != "" {
-				_, _ = w.Write([]byte(middlewareResult.Body))
-			}
-			return
-		}
-
-		// Apply middleware headers but continue to page handler
-		if middlewareResult.Headers != nil {
-			for k, v := range middlewareResult.Headers {
-				w.Header().Set(k, v)
-			}
-		}
-
-		redirectRewriteHandler.ServeHTTP(w, r)
-	})
+	// User middleware handler for pages (also wraps /api and server actions
+	// above).
+	var middlewareHandler http.Handler = gate.wrap(redirectRewriteHandler)
 
 	// Final handler chain: userMiddleware -> redirectRewrite -> logging -> ssrPageHandler.
 	// When community plugins with serve hooks are configured, wrap the chain in
@@ -2067,11 +2023,12 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if len(cfg.Plugins) > 0 {
 		top = wirePluginServeHandlers(root, cfg, top)
 	}
+	// No-JS form feedback: render a pending flash state into the page.
+	top = flashNoticeMiddleware(top)
 	if hub == nil {
 		// Preview/static serving: gzip compressible assets, and serve
 		// build-time precompressed (.br/.gz) siblings when present.
 		top = gzipMiddleware(top)
-		top = precompressedMiddleware(absOut, top)
 	} else {
 		// Dev: proxy configured prefixes (e.g. /api) to a backend.
 		top = devProxyMiddleware(cfg.DevServer.Proxy, top)
@@ -2099,25 +2056,21 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	// Wrap the mux so every route (including /api/, /__krate/, health) gets
 	// request IDs, security headers, and panic recovery.
-	var rootHandler http.Handler = requestIDMiddleware(basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, mux))))))
-
-	bindHost := strings.TrimSpace(cfg.Server.Host)
-	listenAddr := fmt.Sprintf(":%d", port)
-	if bindHost != "" {
-		listenAddr = net.JoinHostPort(bindHost, strconv.Itoa(port))
+	var devMux http.Handler = mux
+	if hub != nil {
+		devMux = devErrorShell(hub, root, absOut, mux)
 	}
-	listener, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", listenAddr, err)
-	}
+	proxyTrust.Store(cfg.Server.TrustProxy)
+	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, devMux)))))))
 
+	listenerOwned = true
 	addr := listener.Addr().(*net.TCPAddr)
 	label := "dev"
 	if hub == nil {
 		label = "serve"
 	}
 	displayHost := bindHost
-	if displayHost == "" || displayHost == "0.0.0.0" || displayHost == "::" {
+	if displayHost == "" || displayHost == "0.0.0.0" || displayHost == "::" || displayHost == "127.0.0.1" {
 		displayHost = "localhost"
 	}
 	printf("%s  %s server -> %shttp://%s:%d%s %s(started in %s)%s\n", cGreen, label, cCyan, displayHost, addr.Port, cReset, cGray, time.Since(startTime).Round(time.Millisecond), cReset)
@@ -2131,6 +2084,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	// before the timer fires.
 	var isrWg sync.WaitGroup
 	isrDone := make(chan struct{})
+	var isrDoneOnce sync.Once
 	if ssrStarted {
 		isrPages := ssr.GetISRPages()
 		if len(isrPages) > 0 {
@@ -2169,25 +2123,31 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 	}
 
-	// Graceful shutdown: handle SIGINT and SIGTERM (containers send SIGTERM),
-	// stop sidecars, then drain with a bounded deadline so a stalled/streaming
-	// connection can't hang shutdown forever.
-	sigCh := make(chan os.Signal, 1)
+	// Graceful shutdown: SIGINT/SIGTERM (containers send SIGTERM) stop the
+	// listener, let in-flight requests finish within the grace period, and only
+	// then stop the sidecars they may still be using. A clean shutdown returns
+	// nil (exit 0); a second signal forces an immediate exit.
+	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 
 	httpServer := newHTTPServer(rootHandler)
-	isrCloseOnce := sync.Once{}
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- httpServer.Serve(listener) }()
 
-	go func() {
-		<-sigCh
-		printf("\n%sShutting down...%s\n", cGray, cReset)
+	if cfg.DevServer.Open {
+		openBrowser(fmt.Sprintf("http://localhost:%d", addr.Port))
+	}
+
+	defer plugin.CloseGoPlugins()
+
+	stopSidecars := func() {
 		defer func() {
 			if r := recover(); r != nil {
 				_ = safe.Recover(r)
 			}
 		}()
-		// Stop ISR revalidation goroutine
-		isrCloseOnce.Do(func() { close(isrDone) })
+		isrDoneOnce.Do(func() { close(isrDone) })
 		nodeAPIStopOnce.Do(func() { close(nodeAPIStop) })
 		if ssrStarted {
 			ssr.Stop()
@@ -2208,21 +2168,67 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 			execx.KillTree(nc)
 			printf("  %s+%s Node API sidecar stopped\n", cGreen, cReset)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
-		defer cancel()
-		if err := httpServer.Shutdown(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "  %s! graceful shutdown timed out, forcing close:%s %v\n", cYellow, cReset, err)
-			_ = httpServer.Close()
-		}
-	}()
-
-	if cfg.DevServer.Open {
-		openBrowser(fmt.Sprintf("http://localhost:%d", addr.Port))
 	}
 
-	defer plugin.CloseGoPlugins()
+	var restartCh <-chan struct{}
+	if hub != nil {
+		restartCh = hub.RestartRequested()
+	}
+	select {
+	case err := <-serveErr:
+		// The listener failed on its own (not a shutdown).
+		stopSidecars()
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-restartCh:
+		// A config change restarts the dev server in place: close this server,
+		// stop its sidecars, and let the caller start a new one on the same
+		// ports.
+		ctx, cancel := context.WithTimeout(context.Background(), serverShutdownGrace(cfg, true))
+		if err := httpServer.Shutdown(ctx); err != nil {
+			_ = httpServer.Close()
+		}
+		cancel()
+		<-serveErr
+		stopSidecars()
+		return ErrDevRestart
+	case <-sigCh:
+	}
 
-	return httpServer.Serve(listener)
+	printf("\n%sShutting down...%s\n", cGray, cReset)
+	go func() {
+		<-sigCh
+		fmt.Fprintf(os.Stderr, "  %s! second signal, exiting immediately%s\n", cYellow, cReset)
+		os.Exit(130)
+	}()
+	grace := serverShutdownGrace(cfg, hub != nil)
+	ctx, cancel := context.WithTimeout(context.Background(), grace)
+	defer cancel()
+	if err := httpServer.Shutdown(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "  %s! requests still running after %s, forcing close:%s %v\n", cYellow, grace, cReset, err)
+		_ = httpServer.Close()
+	}
+	if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		stopSidecars()
+		return err
+	}
+	stopSidecars()
+	return nil
+}
+
+// serverShutdownGrace is how long in-flight requests get to finish after a
+// shutdown signal: server.shutdownTimeout seconds, default 15s. Dev keeps it
+// short because its live-reload streams never finish on their own.
+func serverShutdownGrace(cfg *config.Config, dev bool) time.Duration {
+	if cfg.Server.ShutdownTimeout > 0 {
+		return time.Duration(cfg.Server.ShutdownTimeout) * time.Second
+	}
+	if dev {
+		return time.Second
+	}
+	return shutdownGrace
 }
 
 type loggingResponseWriter struct {
@@ -2291,14 +2297,24 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func copyDirToOut(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+func copyDirToOut(src, dst string) ([]string, error) {
+	var copied []string
+	err := filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
+		}
+		if rel != "." && isHiddenName(info.Name()) {
+			// Dotfiles (.env, .git, .DS_Store) are never served, so copying them
+			// would only ship secrets inside a static deploy.
+			fmt.Fprintf(os.Stderr, "  %sWarning: not copying %s (dotfiles are not published; only .well-known is)%s\n", cYellow, filepath.ToSlash(path), cReset)
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
@@ -2308,8 +2324,13 @@ func copyDirToOut(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(target, data, 0644)
+		if err := os.WriteFile(target, data, 0644); err != nil {
+			return err
+		}
+		copied = append(copied, filepath.ToSlash(rel))
+		return nil
 	})
+	return copied, err
 }
 
 func openBrowser(url string) {
@@ -2347,51 +2368,89 @@ func matchRedirect(path, source string) bool {
 }
 
 func matchRedirectParams(path, source string) (map[string]string, bool) {
+	params, _, ok := matchRedirectParamsMods(path, source)
+	return params, ok
+}
+
+// matchRedirectParamsMods is matchRedirectParams that also returns the modifier
+// ('*', '+' or '?') each named parameter was declared with in the source.
+func matchRedirectParamsMods(path, source string) (map[string]string, map[string]byte, bool) {
 	params := map[string]string{}
+	mods := map[string]byte{}
 	// Literal sources match exactly; splitURLPath below intentionally ignores
 	// trailing slashes for route matching, which must not make /old match /old/.
 	if source == path {
-		return params, true
+		return params, mods, true
 	}
 	if !strings.ContainsAny(source, "*:") {
-		return nil, false
+		return nil, nil, false
 	}
 	if strings.HasSuffix(source, "/*") {
 		prefix := strings.TrimSuffix(source, "/*")
 		if path == prefix {
 			params["splat"] = ""
-			return params, true
+			return params, mods, true
 		}
 		if !strings.HasPrefix(path, prefix+"/") {
-			return nil, false
+			return nil, nil, false
 		}
 		params["splat"] = strings.TrimPrefix(strings.TrimPrefix(path, prefix), "/")
-		return params, true
+		return params, mods, true
 	}
 
 	sourceParts := splitURLPath(source)
 	pathParts := splitURLPath(path)
-	for i, part := range sourceParts {
+	pi := 0
+	for _, part := range sourceParts {
 		if strings.HasPrefix(part, ":") {
-			name := strings.TrimSuffix(part[1:], "*")
-			if strings.HasSuffix(part, "*") {
-				params[name] = strings.Join(pathParts[i:], "/")
-				return params, true
+			name, mod := splitParamModifier(part[1:])
+			mods[name] = mod
+			switch mod {
+			case '*':
+				params[name] = strings.Join(pathParts[pi:], "/")
+				return params, mods, true
+			case '+':
+				if pi >= len(pathParts) {
+					return nil, nil, false
+				}
+				params[name] = strings.Join(pathParts[pi:], "/")
+				return params, mods, true
+			case '?':
+				if pi < len(pathParts) {
+					params[name] = pathParts[pi]
+					pi++
+				} else {
+					params[name] = ""
+				}
+				continue
 			}
-			if i >= len(pathParts) {
-				return nil, false
+			if pi >= len(pathParts) {
+				return nil, nil, false
 			}
-			params[name] = pathParts[i]
+			params[name] = pathParts[pi]
+			pi++
 			continue
 		}
-		if i >= len(pathParts) || part != pathParts[i] {
-			return nil, false
+		if pi >= len(pathParts) || part != pathParts[pi] {
+			return nil, nil, false
+		}
+		pi++
+	}
+	if pi != len(pathParts) {
+		return nil, nil, false
+	}
+	return params, mods, true
+}
+
+// splitParamModifier splits a trailing '*', '+' or '?' off a parameter name.
+func splitParamModifier(name string) (string, byte) {
+	if n := len(name); n > 0 {
+		switch name[n-1] {
+		case '*', '+', '?':
+			return name[:n-1], name[n-1]
 		}
 	}
-	if len(pathParts) != len(sourceParts) {
-		return nil, false
-	}
-	return params, true
+	return name, 0
 }
 
 func splitURLPath(p string) []string {
@@ -2402,30 +2461,95 @@ func splitURLPath(p string) []string {
 	return strings.Split(p, "/")
 }
 
-// rewriteDestination replaces wildcards and :param segments in the destination.
+var destParamRe = regexp.MustCompile(`:([A-Za-z_][A-Za-z0-9_]*)`)
+
+// escapeRedirectValue percent-encodes a matched (already decoded) path value
+// for use inside a destination: each segment is escaped on its own so a "\"
+// or an encoded "/" can never turn into a scheme-relative URL, while "/"
+// between segments of a multi-segment value is kept.
+func escapeRedirectValue(v string) string {
+	if v == "" {
+		return ""
+	}
+	segs := strings.Split(v, "/")
+	for i, seg := range segs {
+		segs[i] = url.PathEscape(seg)
+	}
+	return strings.Join(segs, "/")
+}
+
+// rewriteDestination fills ":splat" and ":name" (also ":name*", ":name+" and
+// ":name?") placeholders in destination from the matched request path. Matched
+// values are percent-encoded, and a path destination never starts with "//" or
+// "/\" (an open redirect), whatever the request contained.
 func rewriteDestination(path, source, destination string) string {
-	params, ok := matchRedirectParams(path, source)
+	params, mods, ok := matchRedirectParamsMods(path, source)
 	if !ok {
 		return destination
 	}
+	var out string
 	if splat, ok := params["splat"]; ok {
-		if strings.Contains(destination, ":splat") {
-			return strings.ReplaceAll(destination, ":splat", splat)
+		switch {
+		case strings.Contains(destination, ":splat"):
+			out = strings.ReplaceAll(destination, ":splat", escapeRedirectValue(splat))
+		case splat != "":
+			out = strings.TrimRight(destination, "/") + "/" + escapeRedirectValue(splat)
+		default:
+			out = destination
 		}
-		if splat != "" {
-			return strings.TrimRight(destination, "/") + "/" + splat
+	} else {
+		out = replaceDestParams(destination, params, mods)
+	}
+	return sanitizeRedirectTarget(destination, out)
+}
+
+// replaceDestParams substitutes ":name" placeholders. A '*', '+' or '?' right
+// after the name is part of the placeholder only when the source declared the
+// parameter with that modifier, so "/x/:id?ref=1" keeps its query string.
+func replaceDestParams(destination string, params map[string]string, mods map[string]byte) string {
+	var sb strings.Builder
+	last := 0
+	for _, m := range destParamRe.FindAllStringSubmatchIndex(destination, -1) {
+		name := destination[m[2]:m[3]]
+		val, ok := params[name]
+		if !ok {
+			continue
 		}
-		return destination
+		end := m[1]
+		if mod := mods[name]; mod != 0 && end < len(destination) && destination[end] == mod {
+			end++
+		}
+		sb.WriteString(destination[last:m[0]])
+		sb.WriteString(escapeRedirectValue(val))
+		last = end
 	}
-	keys := make([]string, 0, len(params))
-	for k := range params {
-		keys = append(keys, k)
+	sb.WriteString(destination[last:])
+	return sb.String()
+}
+
+// sanitizeRedirectTarget keeps a substituted path destination on-site. When the
+// configured destination is a plain path (one leading slash), any run of
+// leading slashes or backslashes produced by substitution collapses to a
+// single slash and control characters are percent-encoded. Absolute URLs and
+// an explicitly configured "//host" destination are left as configured.
+func sanitizeRedirectTarget(configured, out string) string {
+	if !strings.HasPrefix(configured, "/") || strings.HasPrefix(configured, "//") || strings.HasPrefix(configured, "/\\") {
+		return out
 	}
-	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
-	for _, k := range keys {
-		destination = strings.ReplaceAll(destination, ":"+k, params[k])
+	var sb strings.Builder
+	for _, r := range out {
+		if r < 0x20 || r == 0x7f {
+			fmt.Fprintf(&sb, "%%%02X", r)
+			continue
+		}
+		sb.WriteRune(r)
 	}
-	return destination
+	out = sb.String()
+	trimmed := strings.TrimLeft(out, "/\\")
+	if trimmed != out {
+		return "/" + trimmed
+	}
+	return out
 }
 
 // staticRouteExists reports whether the output dir holds a concrete static
@@ -2439,7 +2563,12 @@ func isInternalOutputPath(urlPath string) bool {
 	}
 	p := strings.ReplaceAll(urlPath, "\\", "/")
 	p = path.Clean("/" + p)
-	return p == "/.krate" || strings.HasPrefix(p, "/.krate/")
+	if p == "/.krate" || strings.HasPrefix(p, "/.krate/") {
+		return true
+	}
+	// Defense in depth: where older builds wrote server-only files into the
+	// public root, they stay unreachable.
+	return p == "/server-manifest.json" || p == "/api-node" || strings.HasPrefix(p, "/api-node/")
 }
 
 func staticRouteExists(absOut, urlPath string) bool {
@@ -2512,7 +2641,7 @@ type dynamicRoute struct {
 // ("/blog/[slug]" and "blog/[slug]" are equivalent).
 func loadStaticOnlyRoutes(absOut string) map[string]bool {
 	out := map[string]bool{}
-	data, err := os.ReadFile(filepath.Join(absOut, "manifest.json"))
+	data, err := os.ReadFile(ResolveManifestPath(absOut, "manifest.json"))
 	if err != nil {
 		return out
 	}
@@ -2530,7 +2659,7 @@ func loadStaticOnlyRoutes(absOut string) map[string]bool {
 // Go-component regions (region id -> render request) so the server can route
 // them to the Go host instead of the Node SSR sidecar.
 func loadGoRegions(absOut string) map[string]map[string]goRenderRegion {
-	data, err := os.ReadFile(filepath.Join(absOut, "manifest.json"))
+	data, err := os.ReadFile(ResolveManifestPath(absOut, "manifest.json"))
 	if err != nil {
 		return nil
 	}
@@ -2703,7 +2832,7 @@ func sameOriginActionRequest(r *http.Request) bool {
 	if err != nil || u.Host == "" {
 		return false
 	}
-	return strings.EqualFold(u.Host, r.Host)
+	return strings.EqualFold(u.Host, requestHost(r))
 }
 
 // sanitizeActionReturn accepts only a same-origin path for the post-action
@@ -2722,7 +2851,7 @@ func sanitizeActionReturn(value string, r *http.Request) string {
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return ""
 	}
-	if !strings.EqualFold(u.Host, r.Host) || (u.Scheme != "http" && u.Scheme != "https") {
+	if !strings.EqualFold(u.Host, requestHost(r)) || (u.Scheme != "http" && u.Scheme != "https") {
 		return ""
 	}
 	return u.RequestURI()

@@ -7,8 +7,8 @@ order: 5
 # CSS Signals API
 
 All primitives are imported from `@krate/runtime` and compile to zero client
-JavaScript (a small inline ARIA synchroniser is added only for roles that need
-it). See the [CSS Signals guide](/docs/core-concepts/css-signals/) for concepts.
+JavaScript (a small inline keyboard and ARIA enhancer is added only for roles that
+need it). See the [CSS Signals guide](/docs/core-concepts/css-signals/) for concepts.
 
 :::warning Experimental
 CSS Signals are **experimental**. The API, generated markup and class names, and
@@ -124,19 +124,27 @@ const [stack, { push, pop, clear }] = createCSSStack(['root']);
 
 ## ARIA role presets (`as`)
 
-| Preset | Container | Trigger | Panel | Runtime |
-|--------|-----------|---------|-------|---------|
-| *(none)* | - | - | - | none |
-| `switch` | - | `role=switch` | - | none |
-| `checkbox` | - | - | - | none |
-| `radiogroup` / `radio` | `radiogroup` | - | - | none |
-| `tabs` / `tablist` | `tablist` | `tab` | `tabpanel` | +aria-selected |
-| `listbox` | `listbox` | `option` | - | +aria-selected |
-| `menu` | `menu` | `menuitemradio` | `menu` | +aria-selected |
-| `menubar` | `menubar` | `menuitemradio` | `menu` | +aria-selected |
-| `accordion` / `disclosure` | - | `button` | `region` | +aria-expanded |
-| `dialog` / `modal` | - | `button` | `dialog` | +aria-expanded |
-| `popover` | - | `button` | `group` | +aria-expanded |
+| Preset | Container | Trigger | Item (close) | Panel | Enhancer |
+|--------|-----------|---------|--------------|-------|----------|
+| *(none)* | - | - | - | - | none |
+| `switch` | - | - | - | - | none (`role=switch` on the native checkbox) |
+| `checkbox` | - | - | - | - | none |
+| `radiogroup` / `radio` | `radiogroup` | - | - | - | none |
+| `tabs` / `tablist` | - | `tab` | - | `tabpanel` | roving tabindex, arrows, `aria-selected` |
+| `listbox` | `listbox` | `option` | - | - | roving tabindex, arrows, `aria-selected` |
+| `menu` | - | `button` + `aria-haspopup=menu` | `menuitem` | `menu` | Enter/Space/ArrowDown open, arrows, Escape, `aria-expanded` |
+| `menubar` | - | `button` + `aria-haspopup=menu` | `menuitem` | `menu` | as `menu`, plus Left/Right between menus |
+| `nav` | - | `button` | - | - | Enter/Space, Escape, `aria-expanded` |
+| `accordion` / `disclosure` | - | `button` | - | - | Enter/Space, `aria-expanded` |
+| `dialog` | - | `button` + `aria-haspopup=dialog` | `button` | `dialog` + `aria-modal` | focus move/trap/restore, Escape |
+| `modal` | - | `button` + `aria-haspopup=dialog` | `button` | `alertdialog` + `aria-modal` | focus move/trap/restore, Escape |
+| `popover` | - | `button` + `aria-haspopup=dialog` | `button` | `dialog` | focus move/restore, Escape |
+
+The hidden controller inputs of an enhanced preset are `aria-hidden` and
+`tabindex="-1"`; the trigger labels carry the role, get `tabindex`, and
+`aria-controls` pointing at the panel's generated id. Without the enhancer
+script (JavaScript disabled) the pointer behavior still works through the
+radios; keyboard operation needs the script.
 
 ## Composition
 

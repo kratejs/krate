@@ -1,0 +1,1 @@
+{ "captureHead": true, "steps": [ {"op":"click","sel":"#inc"}, {"op":"wait","ms":120}, {"op":"click","sel":"#inc"}, {"op":"wait","ms":120} ] }

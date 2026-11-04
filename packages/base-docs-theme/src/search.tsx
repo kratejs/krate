@@ -12,8 +12,19 @@ export interface DocsSearchProps {
   placeholder?: string;
   maxResults?: number;
   label?: string;
-  /** Keyboard shortcut hint rendered next to the input (e.g. "mod+k"). */
+  /**
+   * Keyboard shortcut that focuses the input (e.g. "mod+k", "/"). Defaults to
+   * "mod+k" (Cmd+K on macOS, Ctrl+K elsewhere); pass "off" (or "none" / "")
+   * to disable it.
+   */
   hotkey?: string;
+}
+
+/** The effective hotkey: "mod+k" unless one is configured or turned off. */
+export function resolveSearchHotkey(hotkey: string | undefined): string | undefined {
+  if (hotkey === undefined) return "mod+k";
+  const h = hotkey.trim().toLowerCase();
+  return h === "" || h === "off" || h === "none" || h === "false" ? undefined : hotkey;
 }
 
 interface Hit {
@@ -105,6 +116,7 @@ export function DocsSearch(props: DocsSearchProps) {
   const placeholder = props.placeholder || "Search";
   const limit = props.maxResults || 8;
   const label = props.label || "Search documentation";
+  const hotkey = resolveSearchHotkey(props.hotkey);
 
   const [results, setResults] = createSignal<Hit[]>([]);
   const [open, setOpen] = createSignal(false);
@@ -210,7 +222,7 @@ export function DocsSearch(props: DocsSearchProps) {
     }
     document.addEventListener("click", onDocClick);
 
-    const combo = parseHotkey(props.hotkey);
+    const combo = parseHotkey(hotkey);
     function onHotkey(e: KeyboardEvent) {
       if (!combo) return;
       if (e.key.toLowerCase() !== combo.key) return;
@@ -276,7 +288,7 @@ export function DocsSearch(props: DocsSearchProps) {
           }, 0);
         }}
       />
-      {props.hotkey && <kbd class="krate-docs-search-kbd" aria-hidden="true">{hotkeyLabel(props.hotkey)}</kbd>}
+      {hotkey && <kbd class="krate-docs-search-kbd" aria-hidden="true">{hotkeyLabel(hotkey)}</kbd>}
       <div class="krate-docs-search-status" id={statusId} role="status" aria-live="polite">
         {loading()
           ? "Searching"

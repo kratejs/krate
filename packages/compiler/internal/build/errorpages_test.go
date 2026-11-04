@@ -57,7 +57,7 @@ func TestBuildErrorPages(t *testing.T) {
 	}
 
 	// Manifest must not list error pages.
-	if data, err := os.ReadFile(filepath.Join(cfg.OutDir, "manifest.json")); err == nil {
+	if data, err := os.ReadFile(ManifestPath(cfg.OutDir)); err == nil {
 		if strings.Contains(string(data), "\"404\"") || strings.Contains(string(data), "\"500\"") {
 			t.Fatalf("error pages leaked into manifest:\n%.800s", data)
 		}

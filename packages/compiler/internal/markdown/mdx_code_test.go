@@ -42,7 +42,7 @@ Trailing.`
 		}
 	}
 
-	want := []string{"HTML", "Code(tsx)", "HTML", "JSX", "HTML", "Code(go)", "HTML"}
+	want := []string{"HTML", "Code(tsx)", "HTML", "JSX", "Code(go)", "HTML"}
 	if len(kinds) != len(want) {
 		t.Fatalf("segment order = %v, want %v", kinds, want)
 	}
@@ -125,7 +125,7 @@ Tail.`
 		}
 	}
 
-	want := []string{"HTML", "Aside(note)", "HTML", "Aside(tip)", "HTML", "Aside(warning)", "HTML"}
+	want := []string{"HTML", "Aside(note)", "Aside(tip)", "Aside(warning)", "HTML"}
 	if len(kinds) != len(want) {
 		t.Fatalf("segment kinds = %v, want %v", kinds, want)
 	}

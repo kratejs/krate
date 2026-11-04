@@ -20,9 +20,16 @@ redirects: [
 
 | Option | Description |
 |--------|-------------|
-| `source` | The path to match (supports `*` splats and `:param` segments) |
+| `source` | The path to match (supports `*` splats and `:param`, `:param*`, `:param+`, `:param?` segments) |
 | `destination` | Where to send the visitor |
 | `permanent` | `true` -> `301`, `false` (default) -> `302` |
+
+`:param*` matches zero or more segments, `:param+` one or more, `:param?` one
+optional segment; reuse the name (with or without the modifier) in the
+destination. Matched values are percent-encoded when they are put in the
+destination, and a path destination can never become an off-site URL: values
+like `/\evil.com` or an encoded `//evil.com` are escaped or collapsed so the
+`Location` always starts with a single `/`.
 
 ## Rewrites
 
@@ -44,3 +51,11 @@ keeping clean public URLs.
 
 Both support pattern matching with wildcard (`*`) and parameterized
 (`:param`) segments, resolved at request time.
+
+## On hosted targets
+
+`krate deploy` translates these patterns for Netlify, Cloudflare Pages and
+Vercel (see [Deployment](/docs/guides/deployment/)). Write the splat explicitly
+in the destination (`/docs/:splat`): that form is portable, while the dev
+server's implicit "append the rest of the path" when a wildcard source has a
+destination without `:splat` is not carried to hosts.

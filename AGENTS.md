@@ -5,7 +5,8 @@ monorepo). For the AGENTS.md that ships inside scaffolded apps, see
 `packages/create-krate-app/templates/app/AGENTS.md`.
 
 Krate is a Go-native web framework. A single Go binary (`krate`) lexes, parses
-and bundles TSX into static HTML plus a tiny signal-based hydration runtime, with
+and bundles TSX into static HTML plus a small signal-based hydration runtime (about 25 KB gzipped for a counter
+page; production builds ship only the runtime features a site references), with
 optional SSR/ISR/streaming and JS/Go API routes served via Node (`node`/`bun`/
 `deno`) and Go sidecars. There is no required bundler/JS toolchain on the client:
 the compiler emits plain HTML/CSS/JS.

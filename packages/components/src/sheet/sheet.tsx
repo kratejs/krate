@@ -1,10 +1,21 @@
 import './sheet.css';
 import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+import { OverlayBridge } from '../overlay/overlay-bridge';
 
 const SheetCtx = createScope<string | null>();
 
 export interface SheetProps {
   label?: string;
+  /** Value of the content shown initially (a literal, like Tabs `defaultValue`). */
+  defaultValue?: string;
+  /** Open the first content initially. */
+  defaultOpen?: boolean;
+  /** Controlled state: true opens the first content, false closes it. Hydrates a small bridge. */
+  open?: boolean;
+  /** Called with the new state when the overlay opens or closes. Hydrates a small bridge. */
+  onOpenChange?: (open: boolean) => void;
+  /** Element id: a handle for `openOverlay('#id')` / `closeOverlay('#id')`. */
+  id?: string;
   children?: any;
 }
 
@@ -13,7 +24,10 @@ export function Sheet(props: SheetProps) {
   const open = createCSSGroup<string>(null, { as: 'dialog', label: props.label });
   return (
     <SheetCtx.Provider value={open}>
-      <div class="krate-sheet">{props.children}</div>
+      <div class="krate-sheet" id={props.id}>
+        {props.open !== undefined || props.onOpenChange ? <OverlayBridge open={props.open} onOpenChange={props.onOpenChange} /> : null}
+        {props.children}
+      </div>
     </SheetCtx.Provider>
   );
 }
@@ -55,7 +69,7 @@ export interface SheetTitleProps {
 
 /** @deprecated Use `Sheet.Title` instead. */
 export function SheetTitle(props: SheetTitleProps) {
-  return <h2 class="krate-sheet-title">{props.children}</h2>;
+  return <h2 class="krate-sheet-title" data-ka="title">{props.children}</h2>;
 }
 
 export interface SheetDescriptionProps {
@@ -64,7 +78,7 @@ export interface SheetDescriptionProps {
 
 /** @deprecated Use `Sheet.Description` instead. */
 export function SheetDescription(props: SheetDescriptionProps) {
-  return <p class="krate-sheet-description">{props.children}</p>;
+  return <p class="krate-sheet-description" data-ka="desc">{props.children}</p>;
 }
 
 export interface SheetCloseProps {

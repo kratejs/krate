@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"reflect"
@@ -110,6 +111,9 @@ func (c *Config) Validate() (warnings []string, err error) {
 	}
 	if c.Server.MaxBodySize < 0 {
 		return nil, fmt.Errorf("server.maxBodySize must be >= 0, got %d", c.Server.MaxBodySize)
+	}
+	if c.Server.ShutdownTimeout < 0 {
+		return nil, fmt.Errorf("server.shutdownTimeout must be >= 0 seconds, got %d", c.Server.ShutdownTimeout)
 	}
 	if c.Site != (SiteConfig{}) && c.SEO != (SEOConfig{}) {
 		warnings = append(warnings, "both `site` and `seo` are set; `site` wins - migrate to `site` and remove `seo`")
@@ -246,7 +250,21 @@ func UnknownKeyWarnings(raw []byte) []string {
 		unknown = append(unknown, unknownArrayItemKeys("go.replaces", rawGo, "replaces", []string{"from", "to"})...)
 		unknown = append(unknown, unknownArrayItemKeys("go.exclude", rawGo, "exclude", []string{"path", "version"})...)
 	}
+	// Unknown keys at any depth, including inside arrays of objects
+	// (redirects[].permanant would otherwise be dropped silently).
+	cfgType := reflect.TypeOf(Config{})
+	for k, v := range m {
+		// Plugin entries are descriptors that carry loader-only keys
+		// (runtime, binaries, hooks), so their item keys are not checked.
+		if k == "validate" || k == "$schema" || k == "plugins" || !knownTopLevelKeys[k] {
+			continue
+		}
+		if ft, ok := fieldTypeByJSONName(cfgType, k); ok {
+			unknown = append(unknown, unknownDeep(k, ft, v)...)
+		}
+	}
 	sort.Strings(unknown)
+	unknown = dedupeSorted(unknown)
 	var out []string
 	for _, k := range unknown {
 		out = append(out, fmt.Sprintf("unknown config key %q (ignored)", k))
@@ -300,4 +318,119 @@ func unknownArrayItemKeys(parent string, raw json.RawMessage, field string, know
 		}
 	}
 	return out
+}
+
+func dedupeSorted(in []string) []string {
+	out := in[:0]
+	for i, v := range in {
+		if i == 0 || v != in[i-1] {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// fieldTypeByJSONName finds the type of the struct field serialized as name.
+func fieldTypeByJSONName(t reflect.Type, name string) (reflect.Type, bool) {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil, false
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		if n, ok := schemaFieldName(f); ok && n == name {
+			return f.Type, true
+		}
+	}
+	return nil, false
+}
+
+// unknownDeep walks raw alongside t and returns the unrecognized keys of every
+// struct found, including those inside slices and maps of structs. Paths omit
+// array indexes ("redirects.permanant").
+func unknownDeep(path string, t reflect.Type, raw json.RawMessage) []string {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		keys := structJSONKeys(t)
+		if keys == nil {
+			return nil
+		}
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(raw, &obj) != nil {
+			return nil
+		}
+		var out []string
+		for k, v := range obj {
+			if !keys[k] {
+				out = append(out, path+"."+k)
+				continue
+			}
+			if ft, ok := fieldTypeByJSONName(t, k); ok {
+				out = append(out, unknownDeep(path+"."+k, ft, v)...)
+			}
+		}
+		return out
+	case reflect.Slice:
+		var arr []json.RawMessage
+		if json.Unmarshal(raw, &arr) != nil {
+			return nil
+		}
+		var out []string
+		for _, item := range arr {
+			out = append(out, unknownDeep(path, t.Elem(), item)...)
+		}
+		return out
+	case reflect.Map:
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(raw, &obj) != nil {
+			return nil
+		}
+		var out []string
+		for _, v := range obj {
+			out = append(out, unknownDeep(path, t.Elem(), v)...)
+		}
+		return out
+	}
+	return nil
+}
+
+// describeUnmarshalError rewrites encoding/json type errors, which read like Go
+// internals ("json: cannot unmarshal string into Go struct field
+// Config.devServer.port of type int"), into a config-author message with the
+// file and key path.
+func describeUnmarshalError(file string, err error) error {
+	var te *json.UnmarshalTypeError
+	if !errors.As(err, &te) {
+		return fmt.Errorf("%s: %w", file, err)
+	}
+	want := "a value of the right type"
+	if te.Type != nil {
+		switch te.Type.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+			reflect.Float32, reflect.Float64:
+			want = "a number"
+		case reflect.Bool:
+			want = "a boolean"
+		case reflect.String:
+			want = "a string"
+		case reflect.Slice, reflect.Array:
+			want = "an array"
+		case reflect.Struct, reflect.Map:
+			want = "an object"
+		}
+	}
+	key := strings.TrimPrefix(te.Field, "Config.")
+	if key == "" {
+		key = "value"
+	}
+	return fmt.Errorf("%s: %s must be %s (got %s)", file, key, want, te.Value)
 }

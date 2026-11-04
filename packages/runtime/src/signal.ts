@@ -609,7 +609,8 @@ export interface CSSARIAOptions {
    * Accessibility semantics to synthesize. Defaults are native (radios,
    * checkboxes) and ship no JS. Presets that need synthesized state
    * (`tabs`, `listbox`, `accordion`, `disclosure`, `dialog`, `menu`,
-   * `popover`) inject a tiny ARIA synchroniser automatically.
+   * `popover`, `nav`) inject a tiny keyboard and ARIA enhancer automatically:
+   * Enter/Space/Escape/arrow keys, focus move/trap/restore, aria-expanded.
    */
   as?:
     | 'radiogroup'
@@ -618,6 +619,7 @@ export interface CSSARIAOptions {
     | 'listbox'
     | 'menu'
     | 'menubar'
+    | 'nav'
     | 'accordion'
     | 'disclosure'
     | 'dialog'
@@ -1092,8 +1094,10 @@ function flushEffectsInner(): void {
   // microtask can run. Otherwise code running between passes (an action's
   // settle callback) would read React state that is written but not yet
   // committed.
-  for (let pass = 0; pending.length > 0 && pass < 100; pass++) {
+  let pass = 0;
+  for (; pending.length > 0 && pass < MAX_UPDATE_PASSES; pass++) {
     const effects = pending.splice(0);
+    lastPassEffects = effects;
     for (const effect of effects) {
       if (effect.disposed) {
         continue;
@@ -1107,21 +1111,21 @@ function flushEffectsInner(): void {
       }
     }
   }
+  if (pending.length > 0) abortUpdateLoop();
   if (pending.length === 0) {
     // The cascade is done: a flush the passes scheduled has nothing to do.
     flushMode = 0;
     flushScheduled = false;
     flushToken++;
   }
-  // A cascade longer than the pass cap continues in the scheduled flush; the
-  // commit runs once it settles, so it sees the final DOM.
   if (pending.length === 0) {
     // Settle hooks (the class component render phase) may write signals;
     // flush those in this same pass so the commit sees every DOM write.
     for (const hook of settleHooks) {
       hook();
     }
-    if (pending.length > 0 && settleDepth < 50) {
+    if (pending.length > 0) {
+      if (settleDepth >= 50) abortUpdateLoop();
       settleDepth++;
       try {
         flushEffects();
@@ -1132,6 +1136,36 @@ function flushEffectsInner(): void {
     }
     runAfterFlush();
   }
+}
+
+// A flush chain that needs more passes than this is an update loop (two
+// effects feeding each other), not a cascade that settles.
+const MAX_UPDATE_PASSES = 100;
+let lastPassEffects: EffectState[] = [];
+
+// Drops the pending queue and reports the loop as React does, so the page
+// stays responsive instead of re-flushing forever.
+function abortUpdateLoop(): void {
+  const looping = pending.splice(0);
+  for (const effect of looping) effect.queued = false;
+  flushScheduled = false;
+  flushMode = 0;
+  flushToken++;
+  const culprits = looping.length > 0 ? looping : lastPassEffects;
+  lastPassEffects = [];
+  const who = Array.from(new Set(culprits.map((e) => e.fn.name || 'anonymous effect')))
+    .slice(0, 3)
+    .join(', ');
+  const err = new Error(
+    'Maximum update depth exceeded. An effect keeps writing state that re-runs itself or another effect (' +
+      who +
+      '). Make the write conditional or remove the dependency that changes on every run.',
+  );
+  // The nearest error boundary of a looping effect handles it, as React does.
+  for (const effect of culprits) {
+    if (effect.boundaryOwner && ownerHooks && ownerHooks.error(effect.boundaryOwner, err)) return;
+  }
+  throw err;
 }
 
 const settleHooks: Array<() => void> = [];
@@ -1180,7 +1214,8 @@ export function krateFlushSync(): void {
   }
   // flushEffects runs the after-flush hooks itself once nothing is pending.
   let guard = 0;
-  while (pending.length > 0 && guard++ < 100) {
+  while (pending.length > 0) {
+    if (guard++ >= MAX_UPDATE_PASSES) abortUpdateLoop();
     flushEffects();
   }
 }
@@ -1200,6 +1235,12 @@ function runEffect(effect: EffectState): void {
     for (const cleanup of effect.cleanups.splice(0)) {
       cleanup();
     }
+    // Re-track from scratch so a dependency the last run did not read stops
+    // re-running the effect.
+    for (const set of effect.sources) {
+      set.delete(effect);
+    }
+    effect.sources.clear();
     context.push(effect);
     pushed = true;
     // Support Solid-style `return () => {...}` cleanup functions. Many
@@ -1241,7 +1282,10 @@ export function createEffect(fn: () => void): () => void {
     ownerHooks.cleanup(effect.boundaryOwner, dispose);
   }
   runEffect(effect);
-  if (owner && owner.root) addOwnerCleanup(owner, dispose);
+  // A nested effect belongs to the running parent: it is disposed when the
+  // parent re-runs or is disposed.
+  if (owner && !owner.disposed) owner.cleanups.push(dispose);
+  else if (owner && owner.root) addOwnerCleanup(owner, dispose);
   return dispose;
 }
 
@@ -1354,33 +1398,68 @@ function flushMounts(): void {
 // when the recomputed value is unchanged, avoiding thundering re-renders.
 export function createMemo<T>(fn: () => T): () => T {
   const [get, set] = createSignal<T>(undefined as T);
+  let stale = true;
 
-  const effect = newEffectState(() => {
-    const next = fn();
+  // The node tracks fn's sources and only marks the memo stale; the value is
+  // recomputed on read, so a read right after a write is current.
+  const node = newEffectState(() => {});
+  allEffects.add(node);
+  const recompute = (): void => {
+    for (const cleanup of node.cleanups.splice(0)) cleanup();
+    for (const source of node.sources) source.delete(node);
+    node.sources.clear();
+    stale = false;
+    context.push(node);
+    let next: T;
+    try {
+      next = fn();
+    } catch (err) {
+      stale = true;
+      throw err;
+    } finally {
+      context.pop();
+    }
     set(next);
+  };
+  // Settles the memo in the next flush even when nothing reads it, so
+  // subscribers of an unread memo still hear about a changed value.
+  const checker = newEffectState(() => {
+    if (stale && !node.disposed) recompute();
   });
+  allEffects.add(checker);
+  node.mark = () => {
+    stale = true;
+    if (!checker.queued && !checker.disposed) {
+      checker.queued = true;
+      pending.push(checker);
+    }
+  };
 
-  allEffects.add(effect);
+  runEffect(checker);
 
-  // Run the effect to establish subscriptions (pushes to context briefly for tracking)
-  runEffect(effect);
+  const read = (): T => {
+    if (stale && !node.disposed) recompute();
+    return get();
+  };
 
-  // Register cleanup on the parent context so this memo effect is disposed
-  // when the parent re-runs or is disposed.
+  // Registered on the parent context so the memo is disposed when the parent
+  // re-runs or is disposed.
   const parent = currentEffect();
   const disposeMemo = (): void => {
-    if (!effect.disposed) {
-      disposeEffect(effect);
-      allEffects.delete(effect);
+    if (!node.disposed) {
+      disposeEffect(node);
+      allEffects.delete(node);
+      disposeEffect(checker);
+      allEffects.delete(checker);
     }
   };
   if (parent) {
     parent.cleanups.push(disposeMemo);
-  } else if (effect.boundaryOwner && ownerHooks) {
-    ownerHooks.cleanup(effect.boundaryOwner, disposeMemo);
+  } else if (checker.boundaryOwner && ownerHooks) {
+    ownerHooks.cleanup(checker.boundaryOwner, disposeMemo);
   }
 
-  return get;
+  return read;
 }
 
 /**

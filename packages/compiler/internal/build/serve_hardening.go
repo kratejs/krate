@@ -3,8 +3,10 @@ package build
 import (
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -428,7 +430,9 @@ func gzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gw := &gzipResponseWriter{
 			ResponseWriter: w,
-			wantsGzip:      acceptsEncoding(r.Header.Get("Accept-Encoding"), "gzip"),
+			// A Range request is answered with raw bytes of the identity
+			// representation, so it is never compressed on the fly.
+			wantsGzip: r.Header.Get("Range") == "" && acceptsEncoding(r.Header.Get("Accept-Encoding"), "gzip"),
 		}
 		defer gw.close()
 		next.ServeHTTP(gw, r)
@@ -444,7 +448,7 @@ type gzipResponseWriter struct {
 	wroteHeader bool
 }
 
-func (g *gzipResponseWriter) decide() {
+func (g *gzipResponseWriter) decide(status int) {
 	if g.decided {
 		return
 	}
@@ -453,7 +457,9 @@ func (g *gzipResponseWriter) decide() {
 		return
 	}
 	g.Header().Add("Vary", "Accept-Encoding")
-	if !g.wantsGzip {
+	// Already encoded (a precompressed sibling) or a partial response: gzipping
+	// either would corrupt the body or its Content-Range.
+	if !g.wantsGzip || g.Header().Get("Content-Encoding") != "" || status == http.StatusPartialContent || g.Header().Get("Content-Range") != "" {
 		return
 	}
 	g.useGzip = true
@@ -466,7 +472,7 @@ func (g *gzipResponseWriter) WriteHeader(code int) {
 	if g.wroteHeader {
 		return
 	}
-	g.decide()
+	g.decide(code)
 	g.wroteHeader = true
 	g.ResponseWriter.WriteHeader(code)
 }
@@ -485,7 +491,7 @@ func (g *gzipResponseWriter) Flush() {
 	if !g.wroteHeader {
 		g.WriteHeader(http.StatusOK)
 	} else {
-		g.decide()
+		g.decide(http.StatusOK)
 	}
 	if g.useGzip && g.zw != nil {
 		g.zw.Flush()
@@ -510,9 +516,18 @@ func (g *gzipResponseWriter) close() {
 // remote content-coding is fixed before ServeContent so Range/HEAD work on the
 // compressed bytes.
 func precompressedMiddleware(root string, next http.Handler) http.Handler {
+	return precompressedMiddlewareIf(root, nil, next)
+}
+
+// precompressedMiddlewareIf is precompressedMiddleware with a skip predicate.
+// It must wrap only the final static file handler (after middleware, redirects
+// and the request-time page decision), never the whole chain: a sibling is a
+// build-time snapshot and would bypass all of those. skip reports requests that
+// must not use a sibling (request-time pages whose baked HTML is only a shell).
+func precompressedMiddlewareIf(root string, skip func(*http.Request) bool, next http.Handler) http.Handler {
 	root = filepath.Clean(root)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if (r.Method != http.MethodGet && r.Method != http.MethodHead) || (skip != nil && skip(r)) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -555,6 +570,9 @@ func precompressedMiddleware(root string, next http.Handler) http.Handler {
 // precompressedBase maps a URL path to a file under root, rejecting traversal.
 // The root and any directory path target their index.html.
 func precompressedBase(root, urlPath string) (string, bool) {
+	if isInternalOutputPath(urlPath) || isHiddenPath(urlPath) {
+		return "", false
+	}
 	clean := path.Clean("/" + urlPath)
 	if clean == "/" {
 		return filepath.Join(root, "index.html"), true
@@ -565,6 +583,11 @@ func precompressedBase(root, urlPath string) (string, bool) {
 		return "", false
 	}
 	if fi, err := os.Stat(full); err == nil && fi.IsDir() {
+		// /dir without a trailing slash is the file server's canonical redirect
+		// to /dir/; do not answer it with the sibling body.
+		if !strings.HasSuffix(urlPath, "/") {
+			return "", false
+		}
 		return filepath.Join(full, "index.html"), true
 	}
 	return full, true
@@ -618,6 +641,56 @@ func precompressedContentType(p string) string {
 	}
 }
 
+// isHiddenName reports whether a single file name is a dotfile that must not be
+// published. ".well-known" is the one allowed exception (ACME, app links).
+func isHiddenName(name string) bool {
+	return strings.HasPrefix(name, ".") && name != ".well-known" && name != "." && name != ".."
+}
+
+// isHiddenPath reports whether any segment of a URL path (decoded, slash or
+// backslash separated) is a dotfile name.
+func isHiddenPath(urlPath string) bool {
+	if decoded, err := url.PathUnescape(urlPath); err == nil {
+		urlPath = decoded
+	}
+	for _, seg := range strings.FieldsFunc(urlPath, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if isHiddenName(seg) {
+			return true
+		}
+	}
+	return false
+}
+
+// hardenedDir is the http.FileSystem behind the static file server. It never
+// lists directories (a directory without index.html is not found) and refuses
+// dotfiles and Krate's server-only output, so even a stale or hand-copied file
+// in the output directory is not reachable.
+type hardenedDir struct{ dir http.Dir }
+
+func (h hardenedDir) Open(name string) (http.File, error) {
+	if isInternalOutputPath(name) || isHiddenPath(name) {
+		return nil, os.ErrNotExist
+	}
+	f, err := h.dir.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if fi.IsDir() {
+		idx, err := h.dir.Open(path.Join(name, "index.html"))
+		if err != nil {
+			_ = f.Close()
+			return nil, os.ErrNotExist
+		}
+		_ = idx.Close()
+	}
+	return f, nil
+}
+
 // devProxyMiddleware forwards configured path prefixes to a backend during dev
 // (config `devServer.proxy`). Longest prefix wins; unmatched requests fall
 // through to the normal dev handler.
@@ -661,18 +734,72 @@ func devProxyMiddleware(proxy map[string]string, next http.Handler) http.Handler
 // so a one-year immutable cache is safe.
 var hashedAssetRe = regexp.MustCompile(`\.[0-9a-z]{6,}\.[a-z0-9]+$|-[0-9a-z]{6,}\.[a-z0-9]+$`)
 
-// staticCacheControl returns the cache policy for a static file. Hashed assets
-// are immutable. In dev, HTML and unhashed files must not be stored at all:
-// a same-second rebuild can otherwise revalidate to the old document (and its
-// old stylesheet hash) because Last-Modified has one-second precision.
-func staticCacheControl(urlPath string, dev bool) string {
-	if isHashedAsset(urlPath) {
+// staticCacheControl returns the cache policy for a static file. Only files the
+// build itself content-hashed (the manifest's hashedAssets set) are immutable;
+// a user file that merely looks hashed (team-leader.png, app.bundle.js) is
+// revalidated. In dev, everything else must not be stored at all: a same-second
+// rebuild can otherwise revalidate to the old document (and its old stylesheet
+// hash) because Last-Modified has one-second precision.
+func staticCacheControl(urlPath string, dev bool, hashed map[string]bool) string {
+	if hashed[urlPath] {
 		return "public, max-age=31536000, immutable"
 	}
 	if dev {
 		return "no-store"
 	}
 	return "no-cache"
+}
+
+// collectHashedAssets lists the content-hashed files under outDir that the
+// build emitted, as URL paths. userFiles (slash paths relative to outDir copied
+// from public/) are excluded even when their name has a hash-like segment.
+func collectHashedAssets(outDir string, userFiles map[string]bool) []string {
+	var out []string
+	_ = filepath.WalkDir(outDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if isUnderKrateDir(outDir, p) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(outDir, p)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if userFiles[rel] || userFiles[strings.TrimSuffix(rel, ".map")] {
+			return nil
+		}
+		if isHashedAsset("/" + rel) {
+			out = append(out, "/"+rel)
+		}
+		return nil
+	})
+	sort.Strings(out)
+	return out
+}
+
+// loadHashedAssets reads the manifest's hashedAssets set. A missing manifest
+// yields an empty set (nothing is immutable), never a guess from file names.
+func loadHashedAssets(outDir string) map[string]bool {
+	set := map[string]bool{}
+	data, err := os.ReadFile(ResolveManifestPath(outDir, "manifest.json"))
+	if err != nil {
+		return set
+	}
+	var m struct {
+		HashedAssets []string `json:"hashedAssets"`
+	}
+	if json.Unmarshal(data, &m) != nil {
+		return set
+	}
+	for _, p := range m.HashedAssets {
+		set[p] = true
+	}
+	return set
 }
 
 func isHashedAsset(urlPath string) bool {

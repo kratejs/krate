@@ -6,7 +6,7 @@ A community Krate plugin written in Go, demonstrating:
 - The `BeforeBuild`, `AfterParse` (editing the live AST), and `AfterRender`
   build hooks.
 - The request-time `ServeRequest` and `ServeResponse` serve hooks.
-- A static npm-style descriptor (`index.js`) that reports `runtime: "go"`, its
+- A static ES-module descriptor (`index.js`, `export default`, package `"type": "module"`) that reports `runtime: "go"`, its
   own `module` URL, and per-platform binaries in `bin/`.
 
 ## Layout

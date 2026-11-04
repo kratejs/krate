@@ -3,6 +3,7 @@ package irtree
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
@@ -69,6 +70,13 @@ type BuildOptions struct {
 	// component expressions. Entry-module values take precedence on collision.
 	ModuleConsts     map[string]string
 	ModuleConstInits map[string]ast.Expr
+	// ModuleDeclOnly names imported `var X;` bindings that only a module
+	// statement initializes (a lowered TS namespace). ModuleNamespaces maps a
+	// namespace-import binding (`import * as ns`) to its exports (name ->
+	// binding). ModuleStmts are the imported modules' top-level statements.
+	ModuleDeclOnly   map[string]bool
+	ModuleNamespaces map[string]map[string]string
+	ModuleStmts      []ast.Stmt
 	// ActionURLs maps an imported server-action binding to its POST endpoint.
 	// The binding is a client proxy at runtime, but SSR renders the URL so
 	// forms work without JavaScript.
@@ -85,7 +93,7 @@ type BuildOptions struct {
 	// The build pipeline supplies the resolver; nil leaves the icon unresolved.
 	TransformIcon func(*ast.JSXElement) *ast.JSXElement
 	// TransformImage is the equivalent late lowering hook for <Image>.
-	TransformImage func(*ast.JSXElement) *ast.JSXElement
+	TransformImage func(*ast.JSXElement) (*ast.JSXElement, []HookDiag)
 }
 
 // Build constructs a ComponentTree from a parsed program and its annotations
@@ -121,7 +129,7 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 	}
 	moduleConsts, moduleConstInits := mergedModuleConstants(prog, opts)
 	b := &builder{
-		functions:        ann.Functions,
+		functions:        normalizeComponentFns(ann.Functions),
 		ann:              ann,
 		idCounter:        make(map[string]int),
 		instanceCounts:   make(map[string]int),
@@ -130,8 +138,10 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		slotCounts:       make(map[string]int),
 		moduleConsts:     typedModuleConsts(moduleConstInits, moduleConsts),
 		moduleConstInits: moduleConstInits,
-		moduleStmts:      collectModuleStmts(prog),
+		moduleStmts:      append(append([]ast.Stmt(nil), opts.ModuleStmts...), collectModuleStmts(prog)...),
 		moduleLets:       collectModuleLets(prog),
+		moduleDeclOnly:   mergeDeclOnly(prog, opts),
+		moduleNS:         opts.ModuleNamespaces,
 		entryProg:        prog,
 		cvaFactories:     mergeCVAFactories(ann.CVAFactories, prog),
 		contextDefaults:  mergeContextDefaults(ann.ContextDefaults, prog),
@@ -147,6 +157,10 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		evalJS:           opts.EvalJS,
 		transformIcon:    opts.TransformIcon,
 		transformImage:   opts.TransformImage,
+	}
+	for name := range b.moduleDeclOnly {
+		// Declared here, assigned by a module statement: shared mutable state.
+		b.moduleLets[name] = true
 	}
 	if entryFn := ann.Functions[ann.EntryPoint]; entryFn != nil {
 		b.expansion = []expansionFrame{{name: entryFn.Name}}
@@ -251,6 +265,7 @@ func (b *builder) cssStylesheets() (stylesheet, noJSFallback string) {
 type componentCtx struct {
 	// Call-site inputs.
 	localProps       valueMap        // resolved props, params, locals and module consts (name -> value)
+	loopBindings     valueMap        // unrolled for-loop variables of the iteration being built
 	localFuncProps   map[string]bool // prop names whose values are function references
 	callSiteChildren []ast.JSXChild  // call-site children of the current component
 	// restProps maps a rest (or whole-props) parameter name to the call-site
@@ -355,7 +370,10 @@ type builder struct {
 	moduleConstInits map[string]ast.Expr // module-level const initializers (name -> expr)
 	moduleStmts      []ast.Stmt          // entry module top-level statements that run code
 	moduleLets       map[string]bool     // module-level let/var bindings (mutable, so shared)
-	sharedModuleVars []string            // hoisted declarations for moduleLets and their dependencies
+	moduleDeclOnly   map[string]bool     // `var X;` bindings initialized by module statements
+	moduleNS         map[string]map[string]string
+	nsUse            map[string]map[string]bool
+	sharedModuleVars []string // hoisted declarations for moduleLets and their dependencies
 	sharedSeen       map[string]bool
 	entryProg        *ast.Program             // the entry module (imports for KR8302)
 	cvaFactories     map[string]*CVASpec      // module-level `const X = cva(...)` factories
@@ -374,7 +392,7 @@ type builder struct {
 	actionURLs       map[string]string         // server-action binding -> POST URL
 	evalJS           func(string) (string, error)
 	transformIcon    func(*ast.JSXElement) *ast.JSXElement
-	transformImage   func(*ast.JSXElement) *ast.JSXElement
+	transformImage   func(*ast.JSXElement) (*ast.JSXElement, []HookDiag)
 	// dynamicListRows is non-zero while building rows for a runtime-bound list.
 	// Maps nested in those rows must keep runtime list bindings.
 	dynamicListRows int
@@ -388,8 +406,10 @@ type builder struct {
 	selectStack   [][]string // selected option values of enclosing <select> elements
 	// svgDepth and metaDepth count the enclosing <svg> elements and <Head>
 	// blocks: document metadata is not hoisted inside either.
-	svgDepth  int
-	metaDepth int
+	svgDepth int
+	// derivedJSXDepth bounds nested inlining of derived JSX values.
+	derivedJSXDepth int
+	metaDepth       int
 	// branchDepth counts enclosing conditional branches and list items;
 	// metadata there stays in place (hoisting it needs a runtime head swap).
 	branchDepth int
@@ -408,6 +428,10 @@ type builder struct {
 	// components (their namespaced parts): fn -> options/initial. Consulted by
 	// cssAnalyzer so controllers/classes match the exact set of call-site parts.
 	scopeOverrides map[*ast.FnDecl]scopeSpec
+	// instanceInitial maps a CSS scope instance token to the initial option its
+	// call site asked for (defaultValue / defaultOpen). The analyzer is shared by
+	// every instance of a component, so per-instance state lives here.
+	instanceInitial map[string]string
 	// cssCollected holds every scope whose controller inputs were emitted, so
 	// the tree can expose the exact set of stylesheets the page needs.
 	cssCollected map[int]*csssignals.Scope
@@ -499,7 +523,15 @@ func (b *builder) cssAnalyzer(fn *ast.FnDecl) *csssignals.Analyzer {
 	// share its scope classes: the outer scope's descendant selectors would
 	// otherwise react to the inner controls.
 	depth := b.cssActive[fn]
-	akey := cssAnalyzerKey{fn: fn, depth: depth}
+	// Instances whose call-site option universe differs (two Dialogs with
+	// different literal values) need their own analysis and scope classes.
+	spec, hasSpec := b.scopeOverrides[fn]
+	hasSpec = hasSpec && len(spec.options) > 0
+	specKey := ""
+	if hasSpec {
+		specKey = strings.Join(spec.options, "\x01") + "\x02" + spec.initial
+	}
+	akey := cssAnalyzerKey{fn: fn, depth: depth, spec: specKey}
 	if a, ok := b.cssAnalyzers[akey]; ok {
 		return a
 	}
@@ -507,7 +539,7 @@ func (b *builder) cssAnalyzer(fn *ast.FnDecl) *csssignals.Analyzer {
 		b.cssIndex = make(map[string]int)
 	}
 	indexFn := func(component, variable string) int {
-		key := component + "\x00" + variable + "\x00" + itoa(depth)
+		key := component + "\x00" + variable + "\x00" + itoa(depth) + "\x00" + specKey
 		if idx, ok := b.cssIndex[key]; ok {
 			return idx
 		}
@@ -516,7 +548,7 @@ func (b *builder) cssAnalyzer(fn *ast.FnDecl) *csssignals.Analyzer {
 		return idx
 	}
 	var a *csssignals.Analyzer
-	if spec, ok := b.scopeOverrides[fn]; ok && len(spec.options) > 0 {
+	if hasSpec {
 		a = csssignals.AnalyzePartsIn(b.idPrefix, fn.Name, fn.Body, indexFn, spec.options, spec.initial)
 	} else {
 		a = csssignals.AnalyzeIn(b.idPrefix, fn.Name, fn.Body, indexFn)
@@ -529,6 +561,7 @@ func (b *builder) cssAnalyzer(fn *ast.FnDecl) *csssignals.Analyzer {
 type cssAnalyzerKey struct {
 	fn    *ast.FnDecl
 	depth int
+	spec  string
 }
 
 // sigMap returns the signal context for the current component being built.
@@ -612,4 +645,49 @@ func mergedModuleConstants(prog *ast.Program, opts BuildOptions) (map[string]str
 		}
 	}
 	return consts, inits
+}
+
+// CollectModuleDeclOnly returns the module-level `var X;` bindings declared
+// without an initializer (a lowered TS namespace or merged declaration).
+func CollectModuleDeclOnly(prog *ast.Program) map[string]bool {
+	out := map[string]bool{}
+	if prog == nil {
+		return out
+	}
+	for _, stmt := range prog.Body {
+		var vs *ast.VarStmt
+		switch s := stmt.(type) {
+		case *ast.VarStmt:
+			vs = s
+		case *ast.ExportStmt:
+			if v, ok := s.Declaration.(*ast.VarStmt); ok {
+				vs = v
+			}
+		}
+		if vs == nil || vs.Kind == ast.VarConst {
+			continue
+		}
+		for _, d := range vs.Decls {
+			if d != nil && d.Name != "" && d.Init == nil && !d.IsDestructuring {
+				out[d.Name] = true
+			}
+		}
+	}
+	return out
+}
+
+// CollectModuleStmts returns the top-level statements of prog that run code
+// when the module loads.
+func CollectModuleStmts(prog *ast.Program) []ast.Stmt { return collectModuleStmts(prog) }
+
+func mergeDeclOnly(prog *ast.Program, opts BuildOptions) map[string]bool {
+	out := CollectModuleDeclOnly(prog)
+	for k := range opts.ModuleDeclOnly {
+		out[k] = true
+	}
+	// A name with an initializer in the entry module is not declaration-only.
+	for k := range collectModuleConstInits(prog) {
+		delete(out, k)
+	}
+	return out
 }

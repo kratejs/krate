@@ -96,7 +96,7 @@ func TestBuildTestProject(t *testing.T) {
 		{path: filepath.Join(outDir, "syntax-robustness", "index.html"), contains: []string{"<!DOCTYPE html>", "Syntax Robustness"}},
 		{path: filepath.Join(outDir, "go-component", "index.html"), contains: []string{"<!DOCTYPE html>", "krate-go-badge", "go-native"}},
 		{path: filepath.Join(outDir, "server-runtime-demo", "index.html"), contains: []string{"go-server-time", "Go build time"}},
-		{path: filepath.Join(outDir, "manifest.json"), contains: []string{"\"pages\"", "\"runtime\": \"go\"", "\"component\": \"GoRuntimeTime\""}},
+		{path: ManifestPath(outDir), contains: []string{"\"pages\"", "\"runtime\": \"go\"", "\"component\": \"GoRuntimeTime\""}},
 	}
 
 	for _, c := range checks {
@@ -198,7 +198,7 @@ func TestBuildTestProject(t *testing.T) {
 	}
 
 	// Deploy adapters emit explicit header rules for static hosts.
-	if _, err := deploy.Emit("netlify", cfg, outDir); err != nil {
+	if _, err := deploy.Emit("netlify", cfg, outDir, outDir, deploy.Options{StaticOnly: true}); err != nil {
 		t.Errorf("deploy.Emit: %v", err)
 	} else if headers, err := os.ReadFile(filepath.Join(outDir, "_headers")); err != nil {
 		t.Error("deploy did not write _headers")

@@ -168,6 +168,12 @@ func (s *Scope) TriggerAltClass(option string) string {
 	return s.Class + "-ta-" + sanitizeToken(option)
 }
 
+// PanelID returns the DOM id of the panel element shown for an option. It is
+// the target of the opening trigger's aria-controls.
+func (s *Scope) PanelID(token, option string) string {
+	return s.ControlName(token, option) + "--" + sanitizeToken(option)
+}
+
 // ScopeClass is the class the builder adds to the scope anchor.
 func (s *Scope) ScopeClass() string { return s.Class }
 
@@ -538,7 +544,7 @@ func analyzeBody(ns, component string, body []ast.Stmt, index indexFor, partsOpt
 		// Only menus/popovers anchor their panel to the trigger; dialogs and
 		// sheets are fixed/centered (never anchored), so they are excluded.
 		if s.Anchor == "" && s.Kind == KindGroup {
-			if s.Role.Container == "menu" || s.Role.Container == "menubar" || s.Role.Panel == "group" {
+			if s.Role.Anchored {
 				s.Anchor = "bottom-start"
 			}
 		}

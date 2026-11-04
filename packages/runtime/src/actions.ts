@@ -70,6 +70,10 @@ export function isServerAction(value: unknown): value is ServerActionProxy {
   return typeof value === 'function' && typeof (value as Partial<ServerActionProxy>).$$krateAction === 'string';
 }
 
+// Counts redirects the client followed, so useActionState can tell that an
+// action navigated away instead of producing a next state.
+let redirectsFollowed = 0;
+
 function navigateTo(url: string): void {
   const safe = safeRedirect(url);
   if (!safe) return;
@@ -145,7 +149,10 @@ export async function callServerAction(url: string, args: unknown[]): Promise<un
     throw errorFrom(payload, res.status, res.statusText);
   }
   if (payload.revalidated) dispatchRevalidate(payload.revalidation);
-  if (typeof payload.redirect === 'string' && payload.redirect) navigateTo(payload.redirect);
+  if (typeof payload.redirect === 'string' && payload.redirect) {
+    redirectsFollowed++;
+    navigateTo(payload.redirect);
+  }
   return payload.result;
 }
 
@@ -389,7 +396,10 @@ interface ActionTarget {
 }
 
 /** Binds a function action to a form or submit button (`action={fn}` / `formAction={fn}`). */
-export function __krateBindFormAction(el: Element, get: Getter): void {
+export function __krateBindFormAction(el: Element | null, get: Getter): void {
+  // The ref callback is called with null when the element detaches (a soft
+  // navigation replacing the page), which has nothing left to bind.
+  if (!el) return;
   (el as Element & ActionTarget).__krateFormAction = get;
   // The native POST target only serves the no-JS fallback; once the function
   // is bound the element matches React's client DOM (no action attribute).
@@ -532,6 +542,56 @@ export function installActionForms(doc: Document | undefined = typeof document !
   doc.addEventListener('submit', onSubmit, false);
 }
 
+// Flash state from native form posts
+
+function decodeFlash(value: string): { a?: string; r?: unknown } | null {
+  try {
+    const raw = value.replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(raw + '='.repeat((4 - (raw.length % 4)) % 4));
+    return JSON.parse(decodeURIComponent(escape(bin))) as { a?: string; r?: unknown };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads and clears the flash state a native form post left for action `id`:
+ * the `krate_flash` cookie the action endpoint sets, or, when the server
+ * already rendered it into the page (a no-JS style notice carrying the same
+ * payload in `data-krate-flash`), that element, which is removed because the
+ * form state now shows it.
+ */
+export function takeFlash(id: string): { found: boolean; value?: unknown } {
+  if (typeof document === 'undefined') return { found: false };
+  const m = /(?:^|;\s*)krate_flash=([^;]*)/.exec(document.cookie || '');
+  if (m) {
+    const payload = decodeFlash(m[1]);
+    if (payload && payload.a === id) {
+      document.cookie = 'krate_flash=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
+      removeFlashNotices(id);
+      return { found: true, value: payload.r };
+    }
+    return { found: false };
+  }
+  const notices = document.querySelectorAll('[data-krate-flash]');
+  for (let i = 0; i < notices.length; i++) {
+    const payload = decodeFlash(notices[i].getAttribute('data-krate-flash') || '');
+    if (payload && payload.a === id) {
+      removeFlashNotices(id);
+      return { found: true, value: payload.r };
+    }
+  }
+  return { found: false };
+}
+
+function removeFlashNotices(id: string): void {
+  const notices = document.querySelectorAll('[data-krate-flash]');
+  for (let i = 0; i < notices.length; i++) {
+    const payload = decodeFlash(notices[i].getAttribute('data-krate-flash') || '');
+    if (payload && payload.a === id) notices[i].parentNode?.removeChild(notices[i]);
+  }
+}
+
 // useActionState
 
 interface QueuedAction {
@@ -556,14 +616,23 @@ export function __krateActionState<S>(
   const queue: QueuedAction[] = [];
   let running = false;
 
+  // A native (no-JS or not-yet-hydrated) form post redirected back to this page
+  // with the action's returned state in a short-lived cookie: start from it.
+  if (isServerAction(action)) {
+    const flashed = takeFlash(action.$$krateAction);
+    if (flashed.found) setState(flashed.value as S);
+  }
+
   const drain = async (): Promise<void> => {
     running = true;
     while (queue.length > 0) {
       const item = queue.shift() as QueuedAction;
       let ok = false;
       try {
+        const before = redirectsFollowed;
         const next = await runActionTransition(() => action(getState(), item.payload));
-        krateTransitionWrites(() => setState(next as S));
+        // A redirecting action has no next state: the page is being replaced.
+        if (redirectsFollowed === before) krateTransitionWrites(() => setState(next as S));
         ok = true;
       } catch (err) {
         const cancelled = queue.splice(0);

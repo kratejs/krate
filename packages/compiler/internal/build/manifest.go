@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Manifest is written to dist/manifest.json and read by the SSR server at runtime.
+// Manifest is written to dist/.krate/manifest.json and read by the SSR server at runtime.
 type Manifest struct {
 	Pages             []PageMeta             `json:"pages"`
 	Stylesheet        string                 `json:"stylesheet,omitempty"`        // global CSS filename
@@ -21,6 +21,10 @@ type Manifest struct {
 	// parameters are closed - the server must 404 for params not baked at build
 	// time. Populated from `output: "static"` or `dynamicParams = false`.
 	StaticOnlyRoutes []string `json:"staticOnlyRoutes,omitempty"`
+	// HashedAssets lists the content-hashed files this build emitted (URL paths
+	// such as "/styles.abc123.css"). Only these are served as immutable; user
+	// files from public/ that merely look hashed are not.
+	HashedAssets []string `json:"hashedAssets,omitempty"`
 }
 
 // RuntimeComponentMeta describes a compiled runtime component bundle.
@@ -157,7 +161,10 @@ func WriteManifest(m *Manifest, outDir string, serverBundles map[string]string) 
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(outDir, "manifest.json"), data, 0644); err != nil {
+	if err := os.MkdirAll(ServerOutPath(outDir), 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(ManifestPath(outDir), data, 0644); err != nil {
 		return err
 	}
 
@@ -192,7 +199,7 @@ func WriteManifest(m *Manifest, outDir string, serverBundles map[string]string) 
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(outDir, "server-manifest.json"), smData, 0644); err != nil {
+		if err := os.WriteFile(ServerManifestPath(outDir), smData, 0644); err != nil {
 			return err
 		}
 	}

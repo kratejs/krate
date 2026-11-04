@@ -27,6 +27,10 @@ type DevServer struct {
 	Overlay *bool `json:"overlay,omitempty"`
 	// Toolbar toggles the dev toolbar (default true).
 	Toolbar *bool `json:"toolbar,omitempty"`
+	// Host is the dev server bind address. Empty means loopback only
+	// (127.0.0.1), so the dev endpoints are not reachable from the network.
+	// Set "0.0.0.0" (or a LAN address) to expose the dev server deliberately.
+	Host string `json:"host,omitempty"`
 	// Editor is the command used by the overlay's "open in editor" action
 	// (default "code", i.e. VS Code). May include flags, e.g. "code -g".
 	Editor string `json:"editor,omitempty"`
@@ -52,6 +56,13 @@ type ServerConfig struct {
 	// MaxBodySize caps request bodies in bytes. 0 uses defaults (1 MiB for
 	// pages/middleware, larger for API routes).
 	MaxBodySize int64 `json:"maxBodySize,omitempty"`
+	// TrustProxy makes the server honor X-Forwarded-Proto, X-Forwarded-Host and
+	// X-Forwarded-For (request URLs, CSRF origin checks, client IPs). Enable it
+	// only behind a proxy that sets or strips those headers.
+	TrustProxy bool `json:"trustProxy,omitempty"`
+	// ShutdownTimeout is the graceful-shutdown drain period in seconds
+	// (default 15). In-flight requests get this long to finish after SIGTERM.
+	ShutdownTimeout int `json:"shutdownTimeout,omitempty"`
 }
 
 // CORSConfig configures cross-origin resource sharing headers. Disabled by
@@ -470,6 +481,9 @@ func (c *Config) EffectiveGo() GoCfg {
 type FontsCfg struct {
 	Preload *bool  `json:"preload,omitempty"`
 	Display string `json:"display,omitempty"`
+	// PreloadLimit caps how many fonts are preloaded per page (default 4). A
+	// `/* no-preload */` comment inside an @font-face block opts that face out.
+	PreloadLimit int `json:"preloadLimit,omitempty"`
 }
 
 func (f FontsCfg) PreloadEnabled() bool { return f.Preload == nil || *f.Preload }
@@ -646,6 +660,18 @@ func (c *Config) ServerPort() int {
 	return 3000
 }
 
+// DevPort returns the listen port for `krate dev`: devServer.port wins, then
+// server.port, then 3000.
+func (c *Config) DevPort() int {
+	if c.DevServer.Port != 0 {
+		return c.DevServer.Port
+	}
+	if c.Server.Port != 0 {
+		return c.Server.Port
+	}
+	return 3000
+}
+
 // MaxBodyBytes returns the request body cap for general (page/middleware)
 // requests, honoring server.maxBodySize when set.
 func (c *Config) MaxBodyBytes() int64 {
@@ -757,7 +783,7 @@ func LoadWith(root string, opts LoadOptions) (*Config, error) {
 		switch {
 		case loadErr == nil:
 			if uerr := json.Unmarshal(merged, cfg); uerr != nil {
-				return nil, fmt.Errorf("parsing config %s: %w", tsPath, uerr)
+				return nil, describeUnmarshalError(filepath.Base(tsPath), uerr)
 			}
 			Warnings = append(Warnings, UnknownKeyWarnings(merged)...)
 		case errors.Is(loadErr, errStaticFallback):
@@ -858,65 +884,4 @@ func (c *Config) Resolve(root string) {
 type TSCompilerOptions struct {
 	ExperimentalDecorators  bool
 	UseDefineForClassFields *bool
-}
-
-// LoadTSConfigPaths reads tsconfig.json and extracts compilerOptions.paths
-// and compilerOptions.baseUrl into the Config's PathAliases and TSBaseDir fields,
-// plus the decorator/class-field options into TSCompilerOptions.
-func (c *Config) LoadTSConfigPaths(root string) {
-	tsconfigPath := filepath.Join(root, "tsconfig.json")
-	data, err := os.ReadFile(tsconfigPath)
-	if err != nil {
-		return // no tsconfig.json, nothing to do
-	}
-
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return // invalid JSON, skip silently
-	}
-
-	compilerOpts, ok := raw["compilerOptions"].(map[string]interface{})
-	if !ok {
-		return
-	}
-
-	if v, ok := compilerOpts["experimentalDecorators"].(bool); ok {
-		c.TSCompilerOptions.ExperimentalDecorators = v
-	}
-	if v, ok := compilerOpts["useDefineForClassFields"].(bool); ok {
-		c.TSCompilerOptions.UseDefineForClassFields = &v
-	}
-
-	var baseDir string
-	if baseUrl, ok := compilerOpts["baseUrl"].(string); ok && baseUrl != "" {
-		baseDir = filepath.Join(root, baseUrl)
-	} else {
-		baseDir = root
-	}
-	c.TSBaseDir = baseDir
-
-	pathsRaw, ok := compilerOpts["paths"].(map[string]interface{})
-	if !ok {
-		return
-	}
-
-	for prefix, targetsRaw := range pathsRaw {
-		var targets []string
-		switch v := targetsRaw.(type) {
-		case []interface{}:
-			for _, t := range v {
-				if s, ok := t.(string); ok {
-					targets = append(targets, s)
-				}
-			}
-		case string:
-			targets = []string{v}
-		}
-		if len(targets) > 0 {
-			c.PathAliases = append(c.PathAliases, PathAlias{
-				Prefix:  prefix,
-				Targets: targets,
-			})
-		}
-	}
 }

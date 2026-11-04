@@ -155,4 +155,9 @@ concern: `@krate/base-docs-theme` renders its `DocsSearch` component
 (combobox input, keyboard navigation, live result count) and styles it with the
 `.krate-docs-search-*` classes. Override those classes from your own stylesheet,
 or render your own search UI against the headless `window.__krateSearch` API.
-Set `search.hotkey` (for example `"mod+k"`) to change the keyboard shortcut.
+`Ctrl+K` (`Cmd+K` on macOS) focuses the search box by default. Set
+`search.hotkey` (for example `"/"`) to change the shortcut, or `"off"` to
+disable it.
+
+With [i18n](/docs/guides/internationalization/) enabled the index spans every
+locale and results are limited to the language of the page being viewed.

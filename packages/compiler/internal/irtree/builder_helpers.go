@@ -7,6 +7,8 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 )
 
 // Helpers
@@ -312,6 +314,17 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	if containsPortal(fn.Body) {
 		return true
 	}
+	// A hook the compiler cannot see into (a store hook built by a module
+	// level factory, `const useStore = create(...)`) holds state of its own,
+	// so the component hydrates instead of rendering once at build time.
+	if b.callsOpaqueHook(fn.Body) {
+		return true
+	}
+	// Module-level values the build-time interpreter cannot compute are
+	// read at hydration time.
+	if b.readsOpaqueModuleValue(fn) {
+		return true
+	}
 	// A component rendering an external (bare-package) component must take the
 	// IR path so the island placeholder is emitted; the SSREval shortcut would
 	// re-render the source and drop it.
@@ -480,7 +493,7 @@ func isAttrBinding(attr *ast.JSXAttr) bool {
 		return false
 	}
 	switch attr.Value.(type) {
-	case *ast.Identifier, *ast.CallExpr, *ast.MemberExpr, *ast.ConditionalExpr, *ast.BinaryExpr, *ast.ArrowFn, *ast.UnaryExpr, *ast.TemplateExpr:
+	case *ast.Identifier, *ast.CallExpr, *ast.MemberExpr, *ast.ConditionalExpr, *ast.BinaryExpr, *ast.ArrowFn, *ast.UnaryExpr, *ast.TemplateExpr, *ast.ParenExpr:
 		return true
 	case *ast.ObjectExpr:
 		// A style object that reads a reactive value (`style={{ fontSize:
@@ -841,7 +854,7 @@ func (b *builder) exprHasExternalComponent(expr ast.Expr) bool {
 		if imp, ok := b.externalImports[root]; ok && isExternalPackageSpecifier(imp.Source) {
 			if fn, known := b.functions[e.Opening.Name]; known && fn != nil {
 				src := strings.ReplaceAll(b.ann.ComponentSources[fn.Name], "\\", "/")
-				if !strings.Contains(src, "/node_modules/") {
+				if !resolver.IsCompiledDependency(src) {
 					// Resolved to local Krate source (e.g. a path alias).
 					root = ""
 				}
@@ -1036,4 +1049,133 @@ func hasRefAttrChildren(children []ast.JSXChild) bool {
 		}
 	}
 	return false
+}
+
+// bindLoopVars closes generated JS over the values of the unrolled for-loop
+// variables it reads. A statically unrolled `for (let i...)` iteration has no
+// runtime binding for i, so a handler or expression written in the loop body
+// is wrapped as ((i)=>(js))(value) with the iteration's value.
+func (b *builder) bindLoopVars(js string) string {
+	if len(b.loopBindings) == 0 || js == "" {
+		return js
+	}
+	used := map[string]bool{}
+	scanJSIdents(js, func(name string) {
+		if _, ok := b.loopBindings[name]; ok {
+			used[name] = true
+		}
+	})
+	if len(used) == 0 {
+		return js
+	}
+	names := make([]string, 0, len(used))
+	for n := range used {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var vals []string
+	for _, n := range names {
+		src, ok := jsvalue.JSSource(b.loopBindings[n])
+		if !ok {
+			src = "undefined"
+		}
+		vals = append(vals, src)
+	}
+	return "((" + strings.Join(names, ",") + ")=>(" + js + "))(" + strings.Join(vals, ",") + ")"
+}
+
+// callsOpaqueHook reports a body binding that calls a custom hook
+// (`krateHook(useStore(...))`) whose definition is not a function declaration
+// the build can evaluate.
+func (b *builder) callsOpaqueHook(body []ast.Stmt) bool {
+	for _, stmt := range body {
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok {
+			continue
+		}
+		for _, decl := range vs.Decls {
+			if decl == nil || derivedCallee(decl.Init) != "krateHook" {
+				continue
+			}
+			call, ok := decl.Init.(*ast.CallExpr).Args[0].(*ast.CallExpr)
+			if !ok {
+				continue
+			}
+			if id, ok := call.Callee.(*ast.Identifier); ok {
+				if _, known := b.functions[id.Name]; !known {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// readsOpaqueModuleValue reports whether a component's JSX renders an
+// expression built only from module-level values (`{store.get().count}`)
+// that the build-time interpreter cannot fold (a factory using `new Set`, a
+// class instance). Such a component cannot be rendered once at build time, so
+// it takes the client path and the slot is filled at hydration.
+func (b *builder) readsOpaqueModuleValue(fn *ast.FnDecl) bool {
+	if len(b.moduleConstInits) == 0 {
+		return false
+	}
+	ret := findReturnStmt(fn.Body)
+	if ret == nil || ret.Value == nil {
+		return false
+	}
+	local := map[string]bool{}
+	for _, p := range extractParamNames(fn) {
+		local[p] = true
+	}
+	WalkAST(fn.Body, func(n any) bool {
+		if d, ok := n.(*ast.VarDecl); ok {
+			local[d.Name] = true
+			for _, nm := range d.Names {
+				local[nm] = true
+			}
+		}
+		return true
+	})
+	opaque := false
+	check := func(expr ast.Expr) {
+		if opaque || expr == nil {
+			return
+		}
+		switch expr.(type) {
+		case *ast.ArrowFn, *ast.Literal:
+			return
+		}
+		src := GenerateExprJS(expr, nil)
+		mentions := false
+		bad := false
+		scanJSIdents(src, func(name string) {
+			if local[name] {
+				bad = true
+			}
+			if _, ok := b.moduleConstInits[name]; ok {
+				mentions = true
+			}
+		})
+		if !mentions || bad {
+			return
+		}
+		if b.constInterp(nil).Eval(expr).ContainsUnknown() {
+			opaque = true
+		}
+	}
+	WalkAST(ret.Value, func(n any) bool {
+		switch x := n.(type) {
+		case *ast.JSXExprContainer:
+			check(x.Expression)
+			return false
+		case *ast.JSXAttr:
+			if !x.Spread && x.Value != nil && !strings.HasPrefix(x.Name, "on") {
+				check(x.Value)
+			}
+			return false
+		}
+		return !opaque
+	})
+	return opaque
 }

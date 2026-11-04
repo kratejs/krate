@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -292,6 +294,7 @@ func TestGzipMiddlewareSkipsBinary(t *testing.T) {
 }
 
 func TestStaticCacheControl(t *testing.T) {
+	hashed := map[string]bool{"/styles.abc123.css": true, "/chunks/island.x1y2z3.js": true}
 	cases := []struct {
 		path string
 		dev  bool
@@ -303,31 +306,46 @@ func TestStaticCacheControl(t *testing.T) {
 		{"/react-demo/", false, "no-cache"},
 		{"/styles.abc123.css", true, "public, max-age=31536000, immutable"},
 		{"/styles.abc123.css", false, "public, max-age=31536000, immutable"},
+		{"/chunks/island.x1y2z3.js", false, "public, max-age=31536000, immutable"},
+		// User files that merely look hashed are revalidated, not immutable.
+		{"/images/team-leader.png", false, "no-cache"},
+		{"/og-default.png", false, "no-cache"},
+		{"/jquery.slider.js", false, "no-cache"},
+		{"/app.bundle.js", false, "no-cache"},
 	}
 	for _, c := range cases {
-		if got := staticCacheControl(c.path, c.dev); got != c.want {
+		if got := staticCacheControl(c.path, c.dev, hashed); got != c.want {
 			t.Errorf("staticCacheControl(%q, %v) = %q, want %q", c.path, c.dev, got, c.want)
 		}
 	}
+	if got := staticCacheControl("/styles.abc123.css", false, nil); got != "no-cache" {
+		t.Errorf("without a manifest set nothing is immutable, got %q", got)
+	}
 }
 
-func TestHashedAssetDetection(t *testing.T) {
-	cases := map[string]bool{
-		"/styles.abc123.css":        true,
-		"/index.abc123.js":          true,
-		"/chunks/runtime.x1y2z3.js": true,
-		"/assets/logo-abc123.png":   true,
-		"/index.abc123.js.map":      true,
-		"/about/index.html":         false,
-		"/about/":                   false,
-		"/main.js":                  false,
-		"/site.css":                 false,
-		"/main.js.map":              false,
-	}
-	for p, want := range cases {
-		if got := isHashedAsset(p); got != want {
-			t.Errorf("isHashedAsset(%q) = %v, want %v", p, got, want)
+func TestCollectHashedAssetsExcludesPublicFiles(t *testing.T) {
+	out := t.TempDir()
+	write := func(rel string) {
+		p := filepath.Join(out, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
 		}
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, rel := range []string{
+		"styles.abc123.css", "chunks/island.x1y2z3.js", "chunks/island.x1y2z3.js.map",
+		"images/team-leader.png", "og-default.png", "jquery.slider.js", "app.bundle.js",
+		"index.html", ".krate/api-node/hello-abcdef.js",
+	} {
+		write(rel)
+	}
+	user := map[string]bool{"images/team-leader.png": true, "og-default.png": true, "jquery.slider.js": true, "app.bundle.js": true}
+	got := collectHashedAssets(out, user)
+	want := []string{"/chunks/island.x1y2z3.js", "/chunks/island.x1y2z3.js.map", "/styles.abc123.css"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("collectHashedAssets = %v, want %v", got, want)
 	}
 }
 

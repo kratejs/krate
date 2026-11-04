@@ -34,7 +34,7 @@
 }
 .krate-link-button-primary {
   background: var(--krate-primary, #3b82f6);
-  color: #fff;
+  color: var(--krate-primary-fg, #fff);
 }
 .krate-link-button-primary:hover {
   background: var(--krate-primary-hover, #2563eb);

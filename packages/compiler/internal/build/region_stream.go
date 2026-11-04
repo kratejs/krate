@@ -32,6 +32,16 @@ func canStreamOutOfOrder(all []*regionBoundary) bool {
 	return true
 }
 
+// allSuspense reports whether every boundary is a Suspense boundary.
+func allSuspense(all []*regionBoundary) bool {
+	for _, b := range all {
+		if b.kind != "suspense" {
+			return false
+		}
+	}
+	return true
+}
+
 // splitBodyScripts keeps the document markup in the streamed prefix and defers
 // the page/runtime scripts until every region chunk has been inserted. That way
 // hydration sees the completed server markup even when regions finish out of
@@ -83,6 +93,7 @@ func streamSiblingRegions(w http.ResponseWriter, flusher http.Flusher, shell str
 
 	prefix, tail := splitBodyScripts(shell)
 	flush := func() {
+		extendStreamDeadline(w)
 		if flusher != nil {
 			flusher.Flush()
 		}

@@ -25,6 +25,11 @@ func loadGoAPIManifest(path string) ([]gohost.RouteEntry, time.Time, error) {
 	return gohost.LoadManifest(path)
 }
 
+// goAPIAllowedMethods lists the methods Go routes define for a path.
+func goAPIAllowedMethods(path string, routes []gohost.RouteEntry) ([]string, bool) {
+	return gohost.AllowedMethods(path, routes)
+}
+
 func goAPIRouteMatches(method, path string, routes []gohost.RouteEntry) bool {
 	return gohost.RouteMatches(method, path, routes)
 }

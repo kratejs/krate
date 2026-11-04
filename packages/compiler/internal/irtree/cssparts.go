@@ -399,6 +399,7 @@ func (b *builder) rewriteScopeSpread(el *ast.JSXElement) ast.Expr {
 				return wrapWithClassOnly([]ast.JSXChild{&ast.JSXElementChild{Element: clone}}, ref.scope.PanelWrapperClass("on", negated))
 			}
 			opt := b.scopeOption(arg, "")
+			b.decoratePanel(clone, ref.scope, opt)
 			return wrapWithClassOnly([]ast.JSXChild{&ast.JSXElementChild{Element: clone}}, ref.scope.PanelWrapperClass(opt, false))
 		case "current":
 			clone.Children = []ast.JSXChild{}
@@ -499,6 +500,21 @@ func literalAttr(el *ast.JSXElement, name string) (string, bool) {
 	return "", false
 }
 
+// boolAttrTrue reports whether el carries a bare or literal-true boolean attribute.
+func boolAttrTrue(el *ast.JSXElement, name string) bool {
+	for _, attr := range el.Opening.Attributes {
+		if attr == nil || attr.Spread || attr.Name != name {
+			continue
+		}
+		if attr.Value == nil {
+			return true
+		}
+		lit, ok := attr.Value.(*ast.Literal)
+		return ok && lit.Kind == ast.BoolLit && lit.Value == "true"
+	}
+	return false
+}
+
 // collectScopeSpec determines a scope root's option universe and initial value
 // from its call site: an explicit literal `options` array prop, or every
 // descendant element's literal `value`, plus a literal `defaultValue`/`value`.
@@ -524,6 +540,9 @@ func (b *builder) collectScopeSpec(el *ast.JSXElement) scopeSpec {
 		initial = v
 	} else if v, ok := literalAttr(el, "value"); ok {
 		initial = v
+	} else if boolAttrTrue(el, "defaultOpen") && len(options) > 0 {
+		// defaultOpen opens the first panel of a group scope.
+		initial = options[0]
 	}
 	return scopeSpec{options: options, initial: initial}
 }

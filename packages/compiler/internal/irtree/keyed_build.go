@@ -96,7 +96,7 @@ func (b *builder) buildKeyedSlot(el *ast.JSXElement, key ast.Expr, parentID stri
 		Keyed:      true,
 		Signals:    b.collectSignalReads(el),
 		Components: collectListComponents(el),
-		Bind:       &ListBinding{Source: "[" + keyJS + "]", Key: "(k)=>k", Render: render, Accessor: true},
+		Bind:       &ListBinding{Source: "[" + keyJS + "]", Key: "(k)=>k", Render: b.wrapRowContext(render), Accessor: true},
 	}}
 }
 
@@ -149,7 +149,15 @@ func listBindingSources(slots []SlotNode) []string {
 			if v.Bind != nil {
 				out = append(out, v.Bind.Source, v.Bind.Key, v.Bind.Render)
 			}
+		case *ExprSlot:
+			out = append(out, v.ExprSource)
+		case *ComponentSlot:
+			if v.Component != nil {
+				out = append(out, listBindingSources(v.Component.Children)...)
+				out = append(out, listBindingSources(v.Component.CallSiteSlots)...)
+			}
 		case *ConditionalSlot:
+			out = append(out, v.TestJS)
 			out = append(out, listBindingSources(v.Consequent)...)
 			out = append(out, listBindingSources(v.Alternate)...)
 		}

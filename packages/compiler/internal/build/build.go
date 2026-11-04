@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -31,7 +30,6 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 	"github.com/kratejs/krate/packages/compiler/internal/gotsgen"
 	"github.com/kratejs/krate/packages/compiler/internal/icons"
-	"github.com/kratejs/krate/packages/compiler/internal/imageproc"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
@@ -44,10 +42,12 @@ import (
 )
 
 type PageResult struct {
-	Page          string
-	OutName       string
-	HTML          string
-	HeadHTML      string
+	Page     string
+	OutName  string
+	HTML     string
+	HeadHTML string
+	// FontURLs are the fonts this page's own stylesheet asks to preload.
+	FontURLs      []string
 	ScriptHTML    string
 	StyleHTML     string
 	HydrationJS   string
@@ -91,6 +91,11 @@ type PageResult struct {
 	// components) discovered from the IR tree. Populated for non-SSG pages.
 	Regions []Region
 
+	// Warnings are the positioned build warnings this page produced (module
+	// rewrite diagnostics, IR warnings). They are stored with a disk-cached page
+	// and replayed, so a warm build reports what a cold one does.
+	Warnings []diag.Diagnostic
+
 	// Program is the page's parsed (and plugin-transformed) AST. Consumed by
 	// compiler-enforced quality checks; nil for plugin-generated routes.
 	Program *ast.Program
@@ -113,15 +118,20 @@ type PageResult struct {
 }
 
 type Builder struct {
-	Root     string
-	Cfg      *config.Config
-	DevMode  bool
-	Verbose  bool
-	ctx      context.Context     // optional cancellation for long builds
-	Env      map[string]string   // resolved .env values (build/serve-time only, never client-facing)
-	depGraph map[string][]string // file path -> page source paths that depend on it
-	pageDeps map[string][]string // page source path -> files it depends on
-	depMu    sync.Mutex          // protects depGraph/pageDeps
+	Root    string
+	Cfg     *config.Config
+	DevMode bool
+	Verbose bool
+	// DevReload is called by the dev watcher when a config or env file
+	// changed. It reports whether the new settings load cleanly, in which case
+	// the watcher asks the dev server to restart; otherwise it has already
+	// surfaced the error and the current server keeps running.
+	DevReload func(reason string) bool
+	ctx       context.Context     // optional cancellation for long builds
+	Env       map[string]string   // resolved .env values (build/serve-time only, never client-facing)
+	depGraph  map[string][]string // file path -> page source paths that depend on it
+	pageDeps  map[string][]string // page source path -> files it depends on
+	depMu     sync.Mutex          // protects depGraph/pageDeps
 
 	// twMu guards twPages/twWarned: Tailwind CSS-first directives collected
 	// from the authored CSS that flows through processCSSDirectives (replaced
@@ -149,6 +159,8 @@ type Builder struct {
 	// fontPreloadHTML holds the `<link rel="preload">` tags for fonts declared
 	// in the global stylesheet; injected into every page head.
 	fontPreloadHTML string
+	// globalFonts are the font URLs already preloaded by the global stylesheet.
+	globalFonts []string
 
 	workerMu  sync.Mutex
 	workers   map[string]string // worker source path -> hashed site URL (/workers/...)
@@ -202,6 +214,15 @@ type Builder struct {
 	// transformOnce guards the in-place universal transforms so a shared
 	// (cached) AST is transformed exactly once per build, never concurrently.
 	transformOnce sync.Map
+	// collectionSites records, per program, the getCollection calls whose
+	// result is left to run in the browser (see InlineContent).
+	collectionSites sync.Map
+	// deferInline marks entry programs whose getCollection inlining must wait
+	// until route params are bound (static-params pages), so lookups like
+	// `find((p) => p.slug === props.params.slug)` fold to a single entry.
+	deferInline sync.Map
+	// progImageDiags holds the <Image> diagnostics of each transformed program.
+	progImageDiags sync.Map
 
 	// diskCache persists per-page outputs across runs (see diskcache.go).
 	diskCache *buildDiskCache
@@ -333,28 +354,72 @@ func hasCommunityPlugins(cfg *config.Config) bool {
 // flattening, content inlining) to prog exactly once per build. Cached module
 // ASTs are shared across concurrent page builds, so these in-place mutations
 // must be serialized per program.
-func (b *Builder) ensureTransformed(prog *ast.Program) {
+func (b *Builder) ensureTransformed(prog *ast.Program, file string) error {
 	if prog == nil {
-		return
+		return nil
 	}
 	v, _ := b.transformOnce.LoadOrStore(prog, &sync.Once{})
 	v.(*sync.Once).Do(func() {
 		b.TransformUniversalIcons(prog)
-		b.TransformUniversalImages(prog)
+		if ds := b.transformImages(prog); len(ds) > 0 {
+			b.progImageDiags.Store(prog, ds)
+			for _, d := range ds {
+				if d.warn {
+					fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n      hint: %s\n", cYellow, cReset, imageDiagError(b.relPath(file), d).Error(), d.hint)
+				}
+			}
+		}
 		b.FlattenComponentSpreadAttrs(prog)
-		b.InlineContent(prog)
+		if _, deferred := b.deferInline.Load(prog); !deferred {
+			b.InlineContent(prog)
+		}
 	})
+	if v, ok := b.progImageDiags.Load(prog); ok {
+		var errs []error
+		for _, d := range v.([]imageDiag) {
+			if !d.warn {
+				errs = append(errs, imageDiagError(b.relPath(file), d))
+			}
+		}
+		if len(errs) > 0 {
+			return &diagList{errs: errs}
+		}
+	}
+	return nil
 }
+
+// diagList is a set of located diagnostics returned as one build error.
+type diagList struct{ errs []error }
+
+func (d *diagList) Error() string {
+	parts := make([]string, len(d.errs))
+	for i, e := range d.errs {
+		parts[i] = e.Error()
+		if dd, ok := e.(diag.Diagnostic); ok && dd.Hint != "" {
+			parts[i] += "\n      hint: " + dd.Hint
+		}
+	}
+	return strings.Join(parts, "\n  ")
+}
+
+func (d *diagList) Unwrap() []error { return d.errs }
 
 // ensureTransformedModules transforms every module in a page's bundle. Page
 // builds share cached ASTs, so this must finish before any AST reader runs.
-func (b *Builder) ensureTransformedModules(mods []*bundler.Module) {
+func (b *Builder) ensureTransformedModules(mods []*bundler.Module) error {
+	var errs []error
 	for _, mod := range mods {
 		if mod == nil || mod.IsExternal || mod.IsCSS || mod.Program == nil {
 			continue
 		}
-		b.ensureTransformed(mod.Program)
+		if err := b.ensureTransformed(mod.Program, mod.Path); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
 }
 
 // contentHashOf returns a stable hash of the build's content collections. It is
@@ -588,7 +653,7 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	}
 
 	// Write shared runtime chunk (extracted from per-page bundles)
-	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results), Suspense: runtimeNeedsSuspense(results)})
+	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, b.runtimeChunkOptions(results))
 	warnMissingRuntime(runtimeJS, results)
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)
@@ -672,6 +737,12 @@ func (b *Builder) BuildAll() error {
 	defer b.ClosePlugins()
 
 	b.resetBuildCaches()
+	// A full build re-records every dependency; entries for deleted pages must
+	// not survive it.
+	b.depMu.Lock()
+	b.depGraph = make(map[string][]string)
+	b.pageDeps = make(map[string][]string)
+	b.depMu.Unlock()
 	// A full build starts from clean Tailwind state; partial rebuilds replace
 	// only the pages they rebuild.
 	b.twMu.Lock()
@@ -695,8 +766,10 @@ func (b *Builder) BuildAll() error {
 	// Intercepting slot pages are built as fragments the SPA router swaps
 	// into their slot (see parallel.go).
 	pages = append(pages, findInterceptPages(b.Cfg.PagesDir)...)
+	usedEntryFallback := false
 	if len(pages) == 0 {
 		pages = []string{b.Cfg.Entry}
+		usedEntryFallback = true
 	}
 
 	// Run BeforeBuild hooks (docs plugin generates .krategen/ pages here)
@@ -744,6 +817,29 @@ func (b *Builder) BuildAll() error {
 	}
 	stopPlugins()
 
+	if usedEntryFallback && len(genPages) == 0 && len(routes) == 0 {
+		if _, statErr := os.Stat(b.Cfg.Entry); statErr != nil {
+			rel := func(p string) string {
+				if r, err := filepath.Rel(b.Root, p); err == nil {
+					return filepath.ToSlash(r)
+				}
+				return p
+			}
+			if _, dirErr := os.Stat(b.Cfg.PagesDir); dirErr != nil {
+				return diag.Diagnostic{
+					File:    b.Cfg.PagesDir,
+					Message: "pagesDir " + rel(b.Cfg.PagesDir) + " does not exist",
+					Hint:    "create " + rel(b.Cfg.PagesDir) + " with at least one page, or fix the pagesDir setting in krate.config.ts",
+				}
+			}
+			return diag.Diagnostic{
+				File:    b.Cfg.PagesDir,
+				Message: "no pages found in " + rel(b.Cfg.PagesDir),
+				Hint:    "add a page such as " + rel(b.Cfg.PagesDir) + "/index.tsx",
+			}
+		}
+	}
+
 	// Plugins generated files during BeforeBuild/GenerateRoutes; drop resolver
 	// stat/package.json memos so negative probes made before those files existed
 	// don't hide them from page bundling.
@@ -776,8 +872,14 @@ func (b *Builder) BuildAll() error {
 	for _, w := range cres.Warnings {
 		fmt.Fprintf(os.Stderr, "  %sWarning: content:%s %v\n", cYellow, cReset, w)
 	}
-	for _, ve := range cres.Validation {
-		fmt.Fprintf(os.Stderr, "  %sContent error:%s %v\n", cRed, cReset, ve)
+	if len(cres.Validation) > 0 {
+		// Schema violations are content bugs: fail the build (and `krate
+		// check`, which builds first) instead of emitting pages built from
+		// invalid entries. The error also reaches the dev overlay.
+		for _, ve := range cres.Validation {
+			fmt.Fprintf(os.Stderr, "  %sContent error:%s %v\n", cRed, cReset, ve)
+		}
+		return &ContentValidationError{Errors: cres.Validation}
 	}
 
 	// Build the Go host (API routes + components) before pages, so pages that
@@ -942,7 +1044,7 @@ func (b *Builder) BuildAll() error {
 	}
 	runtimeJS := ""
 	if anyPageHasJS {
-		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results), Suspense: runtimeNeedsSuspense(results)})
+		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, b.runtimeChunkOptions(results))
 
 		warnMissingRuntime(runtimeJS, results)
 	}
@@ -993,9 +1095,16 @@ func (b *Builder) BuildAll() error {
 		errorCount++
 	}
 
+	// publicFiles are the user's own static files; the build did not hash them,
+	// so they must never be cached as immutable.
+	publicFiles := map[string]bool{}
 	if b.Cfg.PublicDir != "" {
 		if info, err := os.Stat(b.Cfg.PublicDir); err == nil && info.IsDir() {
-			if err := copyDirToOut(b.Cfg.PublicDir, b.Cfg.OutDir); err != nil {
+			copied, err := copyDirToOut(b.Cfg.PublicDir, b.Cfg.OutDir)
+			for _, rel := range copied {
+				publicFiles[rel] = true
+			}
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "  %sPublic copy error:%s %v\n", cYellow, cReset, err)
 				failureMessages = append(failureMessages, "  public: "+err.Error())
 				failureErrs = append(failureErrs, err)
@@ -1061,6 +1170,7 @@ func (b *Builder) BuildAll() error {
 	manifest.SetRuntimeComponents(runtimeCompBundles)
 	stopTools()
 
+	manifest.HashedAssets = collectHashedAssets(b.Cfg.OutDir, publicFiles)
 	if err := WriteManifest(manifest, b.Cfg.OutDir, serverBundles); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sWarning: failed to write manifest:%s %v\n", cYellow, cReset, err)
 	}
@@ -1098,6 +1208,8 @@ func (b *Builder) BuildAll() error {
 			HTML:     r.HTML,
 			HeadHTML: r.HeadHTML,
 			HasJS:    r.HasJS,
+
+			IsErrorPage: r.IsErrorPage,
 		}
 		if r.CSSFile != "" && !seenCSS[r.CSSFile] {
 			seenCSS[r.CSSFile] = true
@@ -1176,6 +1288,22 @@ func (b *Builder) ClosePlugins() {
 func (b *Builder) recordDeps(page string, pageDeps []string) {
 	b.depMu.Lock()
 	defer b.depMu.Unlock()
+	// A rebuilt page replaces its earlier record, so a dependency it no longer
+	// has stops triggering it and repeated rebuilds do not grow the graph.
+	for _, old := range b.pageDeps[page] {
+		pages := b.depGraph[old]
+		kept := pages[:0]
+		for _, pg := range pages {
+			if pg != page {
+				kept = append(kept, pg)
+			}
+		}
+		if len(kept) == 0 {
+			delete(b.depGraph, old)
+		} else {
+			b.depGraph[old] = kept
+		}
+	}
 	b.pageDeps[page] = pageDeps
 	for _, dep := range pageDeps {
 		b.depGraph[dep] = append(b.depGraph[dep], page)
@@ -1404,7 +1532,8 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 		processedCSS, _ = b.processCSSDirectives(processedCSS)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
 		if b.Cfg.Fonts.PreloadEnabled() {
-			b.fontPreloadHTML = fontPreloadHTML(collectFontURLs(processedCSS), b.Cfg.BaseURLPath())
+			b.globalFonts = collectFontPreloads(processedCSS, b.Cfg.Fonts.PreloadLimit)
+			b.fontPreloadHTML = fontPreloadHTML(b.globalFonts, b.Cfg.BaseURLPath())
 		}
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
@@ -1441,6 +1570,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		modernData []byte
 		legacyFile string
 		legacyData []byte
+		fonts      []string
 	}
 	memo := make(map[string]processed)
 	var chromaCSS string
@@ -1458,10 +1588,15 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, file), data, 0644)
 		written[file] = true
 	}
+	var lastFonts []string
 	process := func(pageCss string) (string, []byte, twPageInfo) {
 		processedCSS := b.inlineImports(pageCss)
 		processedCSS, info := b.processCSSDirectives(processedCSS)
 		processedCSS = injectFontDisplay(processedCSS, b.Cfg.Fonts.DisplayValue())
+		lastFonts = nil
+		if b.Cfg.Fonts.PreloadEnabled() {
+			lastFonts = collectFontPreloads(processedCSS, b.Cfg.Fonts.PreloadLimit)
+		}
 		if b.Cfg.ShouldMinifyCSS() {
 			processedCSS = css.Minify(processedCSS)
 		} else {
@@ -1494,6 +1629,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		p, ok := memo[key]
 		if !ok {
 			p.file, p.data, p.twInfo = process(pageCss)
+			p.fonts = lastFonts
 			if variants && r.HasCSSSignals {
 				modernRaw, legacyRaw := splitVariantCSS(pageCss)
 				p.modernFile, p.modernData, _ = process(modernRaw)
@@ -1508,6 +1644,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 			memo[key] = p
 		}
 		r.CSSFile = p.file
+		r.FontURLs = p.fonts
 		b.setTailwindPage(r.Page, p.twInfo)
 		write(p.file, p.data)
 		if p.modernFile != "" {
@@ -1588,6 +1725,11 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				return
 			}
 
+			// 0. Head hygiene: the page head precedes the layout head, so the
+			// first <title>/meta/canonical per key wins; site.titleTemplate
+			// shapes the document title the same way it shapes og:title.
+			r.HeadHTML = templateHeadTitle(dedupeHead(r.HeadHTML), b.Cfg.SEO)
+
 			// 1. Construct structural HTML wrapper in memory.
 			// Site-global stylesheets (e.g. Tailwind) are linked first, then
 			// the page's own stylesheet (r.CSSFile). Tailwind output is
@@ -1614,6 +1756,10 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			runtimeHead := b.runtimeCommonHead()
 			if im := b.islandImportMapHTML(); im != "" {
 				runtimeHead = im + runtimeHead
+			}
+			// Fonts declared by the page's own CSS (not the global sheet).
+			if pf := b.pageFontPreloads(r.FontURLs); pf != "" {
+				runtimeHead += pf
 			}
 			chunkPreloads := dynamicChunkURLs(r.HydrationJS)
 			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
@@ -1668,8 +1814,8 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 					h = strings.Replace(h, "</head>", state+"</head>", 1)
 				}
 				// 2b. SEO meta tag injection (canonical, OG, Twitter Card)
-				if b.Cfg.SEO.BaseURL != "" {
-					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO)
+				if b.Cfg.SEO.BaseURL != "" || b.Cfg.SEO.Description != "" {
+					seoTags := generateSEOTags(r.HeadHTML, routeFromOutName(r.OutName), b.Cfg.SEO, seoCtx{BasePath: b.Cfg.BaseURLPath(), ErrorPage: r.IsErrorPage})
 					if seoTags != "" {
 						h = strings.Replace(h, "</head>", seoTags+"</head>", 1)
 					}
@@ -1750,6 +1896,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 	bnd.SetTSOptions(tsstrip.Options{
 		ExperimentalDecorators:  b.Cfg.TSCompilerOptions.ExperimentalDecorators,
 		UseDefineForClassFields: b.Cfg.TSCompilerOptions.UseDefineForClassFields,
+		Define:                  b.publicEnvDefines(),
 	})
 	if b.contentMods != nil {
 		bnd.SetVirtualModules(b.contentMods)
@@ -1759,6 +1906,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 		bnd.SetActionBasePath(b.Cfg.BaseURLPath())
 	}
 	bnd.SetModuleCache(b.moduleCache)
+	bnd.SetDevMode(b.DevMode)
 	bnd.SetTailwindImports(b.tailwindImportMode())
 	return bnd
 }
@@ -1782,6 +1930,10 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		return nil, "", err
 	}
 	printModuleWarnings(os.Stderr, bundle.Modules)
+	var pageWarnings []diag.Diagnostic
+	for _, m := range bundle.Modules {
+		pageWarnings = append(pageWarnings, m.Diagnostics...)
+	}
 
 	entryModule := findEntryModule(bundle.Modules)
 	if entryModule == nil || entryModule.Program == nil {
@@ -1813,7 +1965,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	// Universal transforms mutate shared cached ASTs. Run them for the whole
 	// module graph before any pass reads those ASTs, so concurrent page builds
 	// serialize on each module's sync.Once instead of racing a reader.
-	b.ensureTransformedModules(bundle.Modules)
+	if err := b.ensureTransformedModules(bundle.Modules); err != nil {
+		return nil, "", err
+	}
 
 	// Detect rendering mode (SSR/ISR/Streaming) from AST exports + <Suspense>
 	// usage, falling back to the page's data-cache reads (tagged/timed fetch).
@@ -1867,6 +2021,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	if renderMode == RenderSSG && explicitStatic {
 		if d, ok := staticDataCacheWarning(page, entryModule.SourceCode, dataUsage, staticWhy); ok {
 			printWarningsOnce(os.Stderr, []diag.Diagnostic{d})
+			pageWarnings = append(pageWarnings, d)
 		}
 	}
 
@@ -1918,7 +2073,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			// so its slot ids are namespaced like a layout's.
 			pageOpts.IDPrefix = b.layoutIDPrefix(page)
 		}
-		pageOpts.ModuleConsts, pageOpts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
+		applyModuleBindings(&pageOpts, entryModule.Path, entryModule.Program, extraPrograms)
 		pageOpts.ExternalImports = externalByLocal
 		pageOpts.LocalComponentImports = localImports
 		pageOpts.GoComponents = pageGoComponents
@@ -1930,6 +2085,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			return nil, "", renderErrors(page, tree.Errors)
 		}
 		printTreeWarnings(os.Stderr, tree.Warnings)
+		pageWarnings = append(pageWarnings, tree.Warnings...)
 		// CSS stylesheets are generated during IR construction (one shared,
 		// instance-agnostic stylesheet per scope). Append them to the page's own CSS
 		// so they land in the hashed external stylesheet.
@@ -2113,6 +2269,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			HasCSS:            pageCSS != "",
 			HasCSSSignals:     tree.HasCSSSignals || layoutHasSignals,
 			IsErrorPage:       pageBase == "404" || pageBase == "500",
+			Warnings:          pageWarnings,
 			CSS:               pageCSS,
 			UsedCSS:           emitResult.UsedCSS,
 			UsedFuncs:         emitResult.UsedFuncs,
@@ -2167,18 +2324,40 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
 	if needsHydrate {
+		emitResult.TrackSources = b.Cfg.Sourcemap
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		b.warnShippedCollections(page, entryModule.Program, rawJS)
 		dceJS = append(dceJS, rawJS)
 		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)
 		if islandJS != "" {
 			rawJS = strings.TrimSpace(rawJS + "\n" + islandJS)
 		}
 		if rawJS != "" {
+			rawJS = neutralizeClientEnv(rawJS)
+			// npm functions called by client code are bundled into the script.
+			vendor := collectVendorImports(bundle.Modules)
+			for _, rb := range findRouteStack(page, b.Cfg.PagesDir) {
+				if lv, ok := layoutVendorImports.Load(rb.Path); ok {
+					vendor = append(vendor, lv.([]vendorImport)...)
+				}
+			}
+			var verr error
+			if rawJS, verr = b.withVendorImports(rawJS, vendor, tree.ExternalComponents); verr != nil {
+				return nil, "", verr
+			}
 			hasJS = true
+			// Source markers become a map from the generated code back to the
+			// original .tsx positions.
+			inputMap := ""
+			if len(emitResult.SrcMarks) > 0 {
+				rawJS, inputMap = buildHydrationMap(rawJS, emitResult.SrcMarks, pageDir)
+			}
 			finalJS := rawJS
 			mapJSON := ""
 			if b.shouldMinifyJS() {
-				if b.Cfg.Sourcemap {
+				if b.Cfg.Sourcemap && inputMap != "" {
+					finalJS, mapJSON = minifyJSWithInputMap(rawJS, inputMap)
+				} else if b.Cfg.Sourcemap {
 					// Minify with esbuild's own map so the minified output can be
 					// decoded back to the generated code. The hydration bundle is
 					// compiler-generated (no literal user TSX), so `sources` labels
@@ -2199,6 +2378,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 
 			if b.Cfg.Sourcemap {
 				sm := mapJSON
+				if sm == "" && inputMap != "" {
+					sm = inputMap
+				}
 				if sm == "" {
 					// Unminified output: emit a valid line-level map with the
 					// generated code embedded so devtools shows a coherent file.
@@ -2207,6 +2389,10 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 				_ = fsutil.WriteFileAtomic(jsPath+".map", []byte(sm), 0644)
 				finalJS = appendSourceMappingURL(finalJS, jsFile+".map")
 				_ = fsutil.WriteFileIfChanged(jsPath, []byte(finalJS), 0644)
+			}
+
+			if b.DevMode {
+				pruneStaleHydration(pageDir, jsFile)
 			}
 
 			// Keep the CSP hash and any other ingest in sync with the bytes
@@ -2225,7 +2411,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	b.registerWorkers(bundle.WorkerFiles, bundle.WorkerEsm)
 	b.registerDynamicChunks(bundle.DynImportFiles)
 
-	printResult(outName, jsFile)
+	printResult(outName, jsFile, pageBase)
 
 	loadingHTML := b.renderLoadingComponent(page)
 
@@ -2245,6 +2431,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 		HasCSS:        pageCSS != "",
 		HasCSSSignals: tree.HasCSSSignals || layoutHasSignals,
 		IsErrorPage:   pageBase == "404" || pageBase == "500",
+		Warnings:      pageWarnings,
 		CSS:           pageCSS,
 		UsedCSS:       emitResult.UsedCSS,
 		UsedFuncs:     emitResult.UsedFuncs,
@@ -2305,6 +2492,8 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 	b.registerDynamicChunks(e.DynImports)
 	b.recordDeps(page, e.Deps)
 	c.markHit()
+	// A replayed page reports the warnings its cold build did (once per build).
+	printWarningsOnce(os.Stderr, e.Warnings)
 
 	return &PageResult{
 		Page:          page,
@@ -2331,8 +2520,8 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		DynamicParams:     e.DynamicParams,
 		StaticOnly:        e.StaticOnly,
 		IsDynamicTemplate: e.IsDynamicTemplate,
-		// Program is intentionally nil: AST-based checks are skipped for cached
-		// pages (their inputs - and therefore findings - are unchanged).
+		Warnings:          e.Warnings,
+		// Program stays nil; checks re-parse the source (attachPrograms).
 	}, e.CSS, true
 }
 
@@ -2387,6 +2576,7 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		StaticOnly:        r.StaticOnly,
 		IsDynamicTemplate: r.IsDynamicTemplate,
 
+		Warnings:    r.Warnings,
 		Deps:        sorted,
 		DepHashes:   hashes,
 		AssetFiles:  bundle.AssetFiles,
@@ -2526,6 +2716,7 @@ func (b *Builder) resetBuildCaches() {
 	// cache persists across builds; re-running the (idempotent) transforms on
 	// already-transformed ASTs is a no-op, and the guard keeps it race-free.
 	b.transformOnce = sync.Map{}
+	b.collectionSites = sync.Map{}
 	// Go component parses are per-build.
 	b.goParseCache = nil
 	// Client boundary chunks are per-build: a dev rebuild must pick up edits
@@ -2623,6 +2814,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if err != nil {
 		return nil, "", nil, false, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
 	}
+	layoutVendorImports.Store(layoutPath, collectVendorImports(layoutBundle.Modules))
 	printModuleWarnings(os.Stderr, layoutBundle.Modules)
 
 	b.modCSS.store(layoutPath, layoutBundle.CSSModules)
@@ -2644,7 +2836,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	// dependency of every page it wraps.
 	layoutDeps := layoutDepPaths(layoutPath, layoutBundle)
 
-	b.ensureTransformed(layoutModule.Program)
+	if err := b.ensureTransformed(layoutModule.Program, layoutModule.Path); err != nil {
+		return nil, "", nil, false, err
+	}
 	if isLayoutFile(layoutPath) {
 		slots, serr := cachedSlots(filepath.Dir(layoutPath), b.Cfg.PagesDir)
 		if serr != nil {
@@ -2662,7 +2856,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	ann := annotator.Annotate(layoutModule.Program, b.Cfg, layoutPath, layoutModule.SourceCode)
 	extraLayoutPrograms := moduleSources(layoutBundle.Modules, layoutModule)
 	for _, mp := range extraLayoutPrograms {
-		b.ensureTransformed(mp.Program)
+		if err := b.ensureTransformed(mp.Program, mp.Path); err != nil {
+			return nil, "", nil, false, err
+		}
 	}
 	annotator.MergeModuleFunctions(ann, extraLayoutPrograms)
 	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
@@ -2672,7 +2868,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	}
 	opts := b.irBuildOptions()
 	opts.IDPrefix = b.layoutIDPrefix(layoutPath)
-	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(layoutModule.Program, extraLayoutPrograms)
+	applyModuleBindings(&opts, layoutModule.Path, layoutModule.Program, extraLayoutPrograms)
 	opts.GoComponents = b.collectGoComponents(layoutBundle, b.Root)
 	opts.ActionURLs = layoutBundle.ActionImports
 	tree := irtree.BuildWithOptions(layoutModule.Program, ann, opts)
@@ -3548,7 +3744,7 @@ func (b *Builder) writeWorkerBundles() error {
 	// Emit a tiny index of emitted workers for tooling/debugging.
 	if len(built) > 0 {
 		idx, _ := json.MarshalIndent(built, "", "  ")
-		_ = fsutil.WriteFileAtomic(filepath.Join(b.Cfg.OutDir, "workers.json"), idx, 0644)
+		_ = fsutil.WriteFileAtomic(ServerOutPath(b.Cfg.OutDir, "workers.json"), idx, 0644)
 	}
 	return nil
 }
@@ -3687,8 +3883,27 @@ func (b *Builder) writeAssetFiles(assets map[string]string) error {
 	return nil
 }
 
-func printResult(outName, jsFile string) {
-	if outName == "." {
+// pruneStaleHydration removes superseded index.<hash>.js files (and their
+// sourcemaps) from a page directory. Every dev edit writes a new content-hashed
+// bundle, so without this they pile up in dist/ for the whole session.
+func pruneStaleHydration(pageDir, keep string) {
+	matches, err := filepath.Glob(filepath.Join(pageDir, "index.*.js*"))
+	if err != nil {
+		return
+	}
+	for _, m := range matches {
+		base := filepath.Base(m)
+		if base == keep || base == keep+".map" {
+			continue
+		}
+		_ = os.Remove(m)
+	}
+}
+
+func printResult(outName, jsFile, pageBase string) {
+	if pageBase == "404" || pageBase == "500" {
+		printf("    %s+%s %s (error page)\n", cGreen, cReset, pageBase+".html")
+	} else if outName == "." {
 		printf("    %s+%s %s/index.html %s(root)%s\n", cGreen, cReset, outName, cGray, cReset)
 	} else {
 		printf("    %s+%s %s/index.html\n", cGreen, cReset, outName)
@@ -3819,33 +4034,6 @@ func iconNameIsLiteral(el *ast.JSXElement) bool {
 		return ok
 	}
 	return false
-}
-
-// imageAttrsAreLiteral reports whether an <Image> can be lowered late. The
-// src must be a string literal, and every other supplied value must be a
-// literal too: compileImageToPicture consumes width/height/alt/etc, so a
-// dynamic value would be silently replaced with a zero value.
-func imageAttrsAreLiteral(el *ast.JSXElement) bool {
-	if el == nil || el.Opening == nil {
-		return false
-	}
-	hasSrc := false
-	for _, attr := range el.Opening.Attributes {
-		if attr.Spread || attr.Value == nil {
-			continue
-		}
-		lit, ok := attr.Value.(*ast.Literal)
-		if !ok {
-			return false
-		}
-		if attr.Name == "src" {
-			if lit.Kind != ast.StringLit {
-				return false
-			}
-			hasSrc = true
-		}
-	}
-	return hasSrc
 }
 
 func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
@@ -3990,365 +4178,6 @@ func (b *Builder) iconResolver(iconName string, attrs []*ast.JSXAttr) (string, b
 	return b2.String(), true
 }
 
-func (b *Builder) TransformUniversalImages(prog *ast.Program) {
-	for _, stmt := range prog.Body {
-		b.walkAndTransformImages(stmt)
-	}
-}
-
-func (b *Builder) walkAndTransformImages(node ast.Node) {
-	if node == nil {
-		return
-	}
-	switch n := node.(type) {
-	case *ast.FnDecl:
-		for _, stmt := range n.Body {
-			b.walkAndTransformImages(stmt)
-		}
-	case *ast.ExportStmt:
-		if n.Declaration != nil {
-			b.walkAndTransformImages(n.Declaration)
-		}
-	case *ast.ReturnStmt:
-		n.Value = b.transformImageExpr(n.Value)
-	case *ast.ExprStmt:
-		n.Expression = b.transformImageExpr(n.Expression)
-	case *ast.IfStmt:
-		for _, s := range n.Consequent {
-			b.walkAndTransformImages(s)
-		}
-		for _, s := range n.Alternate {
-			b.walkAndTransformImages(s)
-		}
-	case *ast.ForStmt:
-		for _, stmt := range n.Body {
-			b.walkAndTransformImages(stmt)
-		}
-	case *ast.WhileStmt:
-		for _, stmt := range n.Body {
-			b.walkAndTransformImages(stmt)
-		}
-	case *ast.VarStmt:
-		for _, decl := range n.Decls {
-			if decl.Init != nil {
-				decl.Init = b.transformImageExpr(decl.Init)
-			}
-		}
-	}
-}
-
-func (b *Builder) transformImageExpr(expr ast.Expr) ast.Expr {
-	if expr == nil {
-		return nil
-	}
-
-	switch e := expr.(type) {
-	case *ast.JSXElement:
-		if e.Opening.Name == "Image" {
-			return b.compileImageToPicture(e)
-		}
-		b.transformJSXChildren(e.Children)
-	case *ast.JSXFragment:
-		b.transformJSXChildren(e.Children)
-	case *ast.CallExpr:
-		for i, arg := range e.Args {
-			e.Args[i] = b.transformImageExpr(arg)
-		}
-	}
-	return expr
-}
-
-// transformJSXChildren rewrites any <Image> descendants within a JSX child list.
-func (b *Builder) transformJSXChildren(children []ast.JSXChild) {
-	for i, child := range children {
-		if elChild, ok := child.(*ast.JSXElementChild); ok {
-			transformed := b.transformImageExpr(elChild.Element)
-			if jsxEl, ok := transformed.(*ast.JSXElement); ok {
-				elChild.Element = jsxEl
-				children[i] = elChild
-			}
-		}
-	}
-}
-
-func (b *Builder) compileImageToPicture(orig *ast.JSXElement) *ast.JSXElement {
-	var src string
-	var reqW, reqH int
-	var alt, loading, sizes, placeholder string
-	var priority bool
-	var quality int
-	var className string
-	var extraAttrs []*ast.JSXAttr
-
-	for _, attr := range orig.Opening.Attributes {
-		if attr.Spread {
-			extraAttrs = append(extraAttrs, attr)
-			continue
-		}
-		if attr.Value == nil {
-			// Bare boolean attribute (e.g. <Image priority />)
-			if attr.Name == "priority" {
-				priority = true
-			} else {
-				extraAttrs = append(extraAttrs, attr)
-			}
-			continue
-		}
-		val, _ := evalAttrString(attr.Value)
-		switch attr.Name {
-		case "src":
-			src = val
-		case "width":
-			reqW, _ = strconv.Atoi(val)
-		case "height":
-			reqH, _ = strconv.Atoi(val)
-		case "alt":
-			alt = val
-		case "loading":
-			loading = val
-		case "priority":
-			priority = val == "true"
-		case "quality":
-			quality, _ = strconv.Atoi(val)
-		case "sizes":
-			sizes = val
-		case "placeholder":
-			placeholder = val
-		case "className":
-			className = val
-		default:
-			extraAttrs = append(extraAttrs, attr)
-		}
-	}
-
-	if src == "" {
-		return imageErrorSpan("[Image: missing src]")
-	}
-
-	// Resolve image options from config, overridden by per-<Image> attributes.
-	imgCfg := b.Cfg.Images
-	if quality <= 0 {
-		quality = imgCfg.Quality
-	}
-	if sizes == "" {
-		sizes = imgCfg.Sizes
-	}
-	wantPlaceholder := imgCfg.PlaceholderEnabled()
-	if placeholder != "" {
-		wantPlaceholder = placeholder != "empty"
-	}
-
-	publicDir := b.Cfg.PublicDir
-	if publicDir == "" {
-		publicDir = filepath.Join(b.Root, "public")
-	}
-
-	// `src` is a URL, not a filesystem path. A leading "/" is the site root on
-	// every platform - do NOT let filepath.IsAbs treat it as an OS-absolute
-	// path (it does on Linux, which made `/hero.png` resolve to the drive root).
-	// Only a genuinely absolute filesystem path (e.g. `C:\assets\hero.png`) is
-	// used verbatim.
-	resolvedSrc := src
-	if strings.HasPrefix(src, "/") {
-		resolvedSrc = filepath.Join(publicDir, strings.TrimPrefix(src, "/"))
-	} else if !filepath.IsAbs(src) {
-		resolvedSrc = filepath.Join(publicDir, src)
-	}
-
-	var result *imageproc.ImageResult
-	switch {
-	case strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://"):
-		// Remote images are passed through unoptimized, but only when allowlisted.
-		u, perr := url.Parse(src)
-		if perr != nil || u.Hostname() == "" || !imgCfg.RemoteAllowed(u.Hostname(), u.Path) {
-			return imageErrorSpan("[Image: remote src not allowed - add its host to images.remotePatterns]")
-		}
-		result = &imageproc.ImageResult{Width: reqW, Height: reqH}
-	case imgCfg.Unoptimized:
-		result = &imageproc.ImageResult{Width: reqW, Height: reqH}
-	default:
-		var perr error
-		result, perr = imageproc.ProcessImageWith(b.Root, resolvedSrc, reqW, reqH, imageproc.Options{
-			Quality:     quality,
-			Breakpoints: imgCfg.Breakpoints,
-			Placeholder: wantPlaceholder,
-			Formats:     imgCfg.Formats,
-		})
-		if perr != nil {
-			return imageErrorSpan(fmt.Sprintf("[Image: %v]", perr))
-		}
-	}
-	result.Src = "/" + strings.TrimPrefix(src, "/")
-	if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
-		result.Src = src
-	}
-
-	if loading == "" {
-		loading = "lazy"
-	}
-	if priority {
-		loading = "eager"
-	}
-	if sizes == "" {
-		sizes = "(max-width: 768px) 100vw, 50vw"
-	}
-
-	// Vector sources (e.g. SVG) are passed through as-is: no decoding, no
-	// responsive variants, no compression. Emit a plain <img> pointing at the
-	// original file.
-	if len(result.WebP) == 0 && len(result.Fallback) == 0 {
-		imgAttrs := []*ast.JSXAttr{
-			{Name: "src", Value: &ast.Literal{Kind: ast.StringLit, Value: result.Src}},
-			{Name: "alt", Value: &ast.Literal{Kind: ast.StringLit, Value: alt}},
-			{Name: "loading", Value: &ast.Literal{Kind: ast.StringLit, Value: loading}},
-			{Name: "decoding", Value: &ast.Literal{Kind: ast.StringLit, Value: "async"}},
-		}
-		if result.Width > 0 {
-			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "width", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Width)}})
-		}
-		if result.Height > 0 {
-			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "height", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Height)}})
-		}
-		if className != "" {
-			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "className", Value: &ast.Literal{Kind: ast.StringLit, Value: className}})
-		}
-		if priority {
-			imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "fetchpriority", Value: &ast.Literal{Kind: ast.StringLit, Value: "high"}})
-		}
-		imgAttrs = append(imgAttrs, extraAttrs...)
-		return &ast.JSXElement{
-			Position: orig.Position,
-			Opening:  &ast.JSXOpening{Name: "img", Attributes: imgAttrs, SelfClosing: true},
-		}
-	}
-
-	// CLS mitigation: reserve the intrinsic aspect ratio so the browser can
-	// size the image before it loads, plus a blurred LQIP background. Vectors
-	// (e.g. SVG) are passed through without decoding, so they may not know
-	// their intrinsic dimensions - don't force an aspect-ratio in that case.
-	style := ""
-	if result.Width > 0 && result.Height > 0 {
-		style = fmt.Sprintf("width:100%%;height:auto;aspect-ratio:%d/%d", result.Width, result.Height)
-		if result.Placeholder != "" {
-			style += ";background-image:url(" + result.Placeholder + ");background-size:cover;background-position:center"
-		}
-	}
-
-	pictureAttrs := []*ast.JSXAttr{}
-	if className != "" {
-		pictureAttrs = append(pictureAttrs, &ast.JSXAttr{
-			Name:  "className",
-			Value: &ast.Literal{Kind: ast.StringLit, Value: className},
-		})
-	}
-
-	webpSrcset := srcsetString(result.WebP)
-	fallbackSrcset := srcsetString(result.Fallback)
-
-	webpSource := &ast.JSXElement{
-		Opening: &ast.JSXOpening{
-			Name: "source",
-			Attributes: []*ast.JSXAttr{
-				{Name: "type", Value: &ast.Literal{Kind: ast.StringLit, Value: "image/webp"}},
-				{Name: "srcSet", Value: &ast.Literal{Kind: ast.StringLit, Value: webpSrcset}},
-				{Name: "sizes", Value: &ast.Literal{Kind: ast.StringLit, Value: sizes}},
-			},
-			SelfClosing: true,
-		},
-	}
-	fallbackSource := &ast.JSXElement{
-		Opening: &ast.JSXOpening{
-			Name: "source",
-			Attributes: []*ast.JSXAttr{
-				{Name: "type", Value: &ast.Literal{Kind: ast.StringLit, Value: result.FallbackMime}},
-				{Name: "srcSet", Value: &ast.Literal{Kind: ast.StringLit, Value: fallbackSrcset}},
-				{Name: "sizes", Value: &ast.Literal{Kind: ast.StringLit, Value: sizes}},
-			},
-			SelfClosing: true,
-		},
-	}
-
-	imgAttrs := []*ast.JSXAttr{
-		{Name: "src", Value: &ast.Literal{Kind: ast.StringLit, Value: result.Src}},
-		{Name: "alt", Value: &ast.Literal{Kind: ast.StringLit, Value: alt}},
-		{Name: "loading", Value: &ast.Literal{Kind: ast.StringLit, Value: loading}},
-		{Name: "decoding", Value: &ast.Literal{Kind: ast.StringLit, Value: "async"}},
-	}
-	if result.Width > 0 {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "width", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Width)}})
-	}
-	if result.Height > 0 {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "height", Value: &ast.Literal{Kind: ast.NumberLit, Value: strconv.Itoa(result.Height)}})
-	}
-	if style != "" {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "style", Value: &ast.Literal{Kind: ast.StringLit, Value: style}})
-	}
-	if priority {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{Name: "fetchpriority", Value: &ast.Literal{Kind: ast.StringLit, Value: "high"}})
-	}
-	if className != "" {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{
-			Name:  "className",
-			Value: &ast.Literal{Kind: ast.StringLit, Value: className},
-		})
-	}
-	if fallbackSrcset != "" {
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{
-			Name:  "srcSet",
-			Value: &ast.Literal{Kind: ast.StringLit, Value: fallbackSrcset},
-		})
-		imgAttrs = append(imgAttrs, &ast.JSXAttr{
-			Name:  "sizes",
-			Value: &ast.Literal{Kind: ast.StringLit, Value: sizes},
-		})
-	}
-	imgAttrs = append(imgAttrs, extraAttrs...)
-
-	imgEl := &ast.JSXElement{
-		Opening: &ast.JSXOpening{
-			Name:        "img",
-			Attributes:  imgAttrs,
-			SelfClosing: true,
-		},
-	}
-
-	return &ast.JSXElement{
-		Position: orig.Position,
-		Opening: &ast.JSXOpening{
-			Name:        "picture",
-			Attributes:  pictureAttrs,
-			SelfClosing: false,
-		},
-		Children: []ast.JSXChild{
-			&ast.JSXElementChild{Element: webpSource},
-			&ast.JSXElementChild{Element: fallbackSource},
-			&ast.JSXElementChild{Element: imgEl},
-		},
-		Closing: &ast.JSXClosing{Name: "picture"},
-	}
-}
-
-// imageErrorSpan renders an inline error marker in place of a broken <Image>.
-func imageErrorSpan(msg string) *ast.JSXElement {
-	return &ast.JSXElement{
-		Opening:  &ast.JSXOpening{Name: "span", Attributes: nil, SelfClosing: false},
-		Children: []ast.JSXChild{&ast.JSXText{Value: msg}},
-		Closing:  &ast.JSXClosing{Name: "span"},
-	}
-}
-
-// srcsetString renders a responsive srcset attribute ("path 640w, path 1024w").
-func srcsetString(entries []imageproc.SrcsetEntry) string {
-	if len(entries) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(entries))
-	for _, e := range entries {
-		parts = append(parts, fmt.Sprintf("%s %dw", e.FilePath, e.Width))
-	}
-	return strings.Join(parts, ", ")
-}
-
 // copyImageCacheToOut copies processed <Image> variants from the build cache
 // into the output directory so they're served at /_krate/images/....
 func (b *Builder) copyImageCacheToOut() error {
@@ -4360,17 +4189,8 @@ func (b *Builder) copyImageCacheToOut() error {
 	if err := os.MkdirAll(dst, 0755); err != nil {
 		return err
 	}
-	return copyDirToOut(src, dst)
-}
-
-func evalAttrString(expr ast.Expr) (string, bool) {
-	if lit, ok := expr.(*ast.Literal); ok {
-		return lit.Value, true
-	}
-	if ident, ok := expr.(*ast.Identifier); ok {
-		return ident.Name, false
-	}
-	return "", false
+	_, err := copyDirToOut(src, dst)
+	return err
 }
 
 func (b *Builder) BuildAllAPI() error {
@@ -4479,10 +4299,10 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 	outName := strings.TrimSuffix(relPath, filepath.Ext(relPath)) + ".js"
 
 	// Two artifacts so each runtime gets the shape it wants:
-	//   dist/api/<name>.js       IIFE + bundled  -> embedded QuickJS
-	//   dist/api-node/<name>.js  ESM  + externals -> Node sidecar
-	quickjsPath := filepath.Join(b.Cfg.OutDir, "api", outName)
-	nodePath := filepath.Join(b.Cfg.OutDir, "api-node", outName)
+	//   dist/.krate/api/<name>.js       IIFE + bundled  -> embedded QuickJS
+	//   dist/.krate/api-node/<name>.js  ESM  + externals -> Node sidecar
+	quickjsPath := filepath.Join(apiBundleDir(b.Cfg.OutDir), outName)
+	nodePath := filepath.Join(apiNodeBundleDir(b.Cfg.OutDir), outName)
 	for _, p := range []string{quickjsPath, nodePath} {
 		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 			return apiRouteMeta{}, err
@@ -4619,4 +4439,23 @@ func (b *Builder) mergeAPIRouteMeta(updates map[string]apiRouteMeta) {
 	if data, err := json.MarshalIndent(list, "", "  "); err == nil {
 		_ = fsutil.WriteFileAtomic(manifestPath, data, 0644)
 	}
+}
+
+// pageFontPreloads renders preload links for fonts the global stylesheet has
+// not already preloaded.
+func (b *Builder) pageFontPreloads(urls []string) string {
+	if len(urls) == 0 {
+		return ""
+	}
+	have := map[string]bool{}
+	for _, u := range b.globalFonts {
+		have[u] = true
+	}
+	var rest []string
+	for _, u := range urls {
+		if !have[u] {
+			rest = append(rest, u)
+		}
+	}
+	return fontPreloadHTML(rest, b.Cfg.BaseURLPath())
 }

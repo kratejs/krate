@@ -61,7 +61,8 @@ try {
   // Soft navigation into an async server component page.
   await page.click("#nav-posts");
   await page.waitForSelector("#posts li");
-  check(path() === "/posts", "soft navigation reaches /posts");
+  // Request-time pages redirect /posts to the canonical /posts/ like static pages.
+  check(path() === "/posts/", "soft navigation reaches /posts/");
   check((await page.locator("#posts li").count()) === 2, "the async page rendered the fetched posts");
   check((await text("#layout-count")) === "2", "layout state persists across the navigation" + (errors.length ? " (page errors: " + errors.join(" | ") + ")" : ""));
   check((await page.evaluate(() => window.__spaMarker)) === 1, "navigation did not reload the document");

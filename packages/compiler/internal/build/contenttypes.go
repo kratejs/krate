@@ -25,6 +25,23 @@ type contentTypeResult struct {
 	Validation []error
 }
 
+// ContentValidationError reports content entries that violate their
+// collection schema. It fails the build so invalid content is never shipped.
+type ContentValidationError struct {
+	Errors []error
+}
+
+func (e *ContentValidationError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d content validation error(s):", len(e.Errors))
+	for _, err := range e.Errors {
+		b.WriteString("\n  ")
+		b.WriteString(err.Error())
+	}
+	b.WriteString("\n  hint: fix the frontmatter above, or relax the collection schema in krate.config.ts")
+	return b.String()
+}
+
 // contentConfig returns the effective typed content config: the `content:`
 // declarations from `krate.config.ts` (`defineContent({...})` or a plain
 // object) merged with collections contributed by registered plugins (e.g. the
@@ -59,14 +76,22 @@ func (b *Builder) prepareContent() contentTypeResult {
 		return res
 	}
 
+	userCols := content.ParseConfig(b.Cfg.Content)
 	entries := map[string][]content.Entry{}
 	for name, col := range cfg.Collections {
+		// Plugin-contributed collections (docs) render their pages themselves,
+		// so static-HTML omissions would only be noise there.
+		userDeclared := false
+		if userCols != nil {
+			_, userDeclared = userCols.Collections[name]
+		}
 		dir := col.Dir
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(b.Root, filepath.FromSlash(dir))
 		}
-		found, walkErrs := discoverContentEntries(b.Root, dir, b.Cfg.Markdown)
+		found, walkErrs, badMD := discoverContentEntries(b.Root, dir, b.Cfg.Markdown, userDeclared)
 		res.Warnings = append(res.Warnings, walkErrs...)
+		res.Validation = append(res.Validation, badMD...)
 		for _, e := range found {
 			content.ApplyDefaults(col.Schema, e.Data)
 			if schemaErrs := content.Validate(col.Schema, e.Data); len(schemaErrs) > 0 {
@@ -128,12 +153,10 @@ func (b *Builder) contentAmbientPath() string {
 
 // discoverContentEntries walks a collection dir for .md/.mdx files and parses
 // each one's frontmatter plus rendered body.
-func discoverContentEntries(root, dir string, mdCfg markdown.Config) ([]content.Entry, []error) {
-	var entries []content.Entry
-	var errs []error
+func discoverContentEntries(root, dir string, mdCfg markdown.Config, warnStatic bool) (entries []content.Entry, errs, bad []error) {
 	fi, err := os.Stat(dir)
 	if err != nil || !fi.IsDir() {
-		return nil, nil // a declared collection with no dir yet is not an error
+		return nil, nil, nil // a declared collection with no dir yet is not an error
 	}
 	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -162,15 +185,23 @@ func discoverContentEntries(root, dir string, mdCfg markdown.Config) ([]content.
 			data = map[string]any{}
 		}
 		body := docs.StripFrontmatter(raw)
-		var html string
-		if ext == ".mdx" {
-			html, _ = docs.ParseMDX(raw, mdCfg)
-		} else {
-			html, _ = docs.ParseMD(raw, mdCfg)
-		}
 		projRel := path
 		if pr, rerr := filepath.Rel(root, path); rerr == nil {
 			projRel = pr
+		}
+		compiled := markdown.Compile(raw, mdCfg, markdown.Options{MDX: ext == ".mdx"})
+		html := compiled.StaticHTML(mdCfg)
+		diags := compiled.Diags
+		if ext == ".mdx" && warnStatic {
+			diags = append(diags, compiled.StaticWarnings()...)
+		}
+		for _, d := range diags {
+			err := fmt.Errorf("%s:%d:%d: %s (hint: %s)", filepath.ToSlash(projRel), d.Line, d.Col, d.Msg, d.Hint)
+			if d.Warning {
+				errs = append(errs, err)
+			} else {
+				bad = append(bad, err)
+			}
 		}
 		entries = append(entries, content.Entry{
 			Slug: slug,
@@ -184,5 +215,5 @@ func discoverContentEntries(root, dir string, mdCfg markdown.Config) ([]content.
 	if walkErr != nil {
 		errs = append(errs, fmt.Errorf("walking %s: %w", dir, walkErr))
 	}
-	return entries, errs
+	return entries, errs, bad
 }

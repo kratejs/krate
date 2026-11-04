@@ -22,7 +22,8 @@ export interface ActionCookieOptions {
 
 /** Cookie access for the current action request. */
 export interface ActionCookies {
-  get(name: string): string | undefined;
+  /** Returns `{ name, value }` like Next.js, or undefined when the cookie is absent. */
+  get(name: string): { name: string; value: string } | undefined;
   getAll(): Array<{ name: string; value: string }>;
   has(name: string): boolean;
   /** Adds a Set-Cookie header to the action response. */
@@ -46,7 +47,32 @@ interface ActionStore {
 /** The current action context, or undefined outside a server action. */
 export function getActionContext(): ActionContext | undefined {
   const store = (globalThis as Record<symbol, unknown>)[Symbol.for('krate.action.store')] as ActionStore | undefined;
-  return store && typeof store.getStore === 'function' ? store.getStore() : undefined;
+  const ctx = store && typeof store.getStore === 'function' ? store.getStore() : undefined;
+  return ctx ? withNextCookies(ctx) : undefined;
+}
+
+// The sidecar's jar returns the bare value from get(); expose the Next.js
+// shape ({ name, value }) the server-component view already uses.
+const wrapped = new WeakMap<object, ActionContext>();
+function withNextCookies(ctx: ActionContext): ActionContext {
+  let out = wrapped.get(ctx);
+  if (!out) {
+    const jar = ctx.cookies;
+    const cookies: ActionCookies = {
+      get: (name) => {
+        const v = (jar.get as (n: string) => unknown)(name);
+        if (v === undefined || v === null) return undefined;
+        return typeof v === 'object' ? (v as { name: string; value: string }) : { name, value: String(v) };
+      },
+      getAll: () => jar.getAll(),
+      has: (name) => jar.has(name),
+      set: (name, value, options) => jar.set(name, value, options),
+      delete: (name, options) => jar.delete(name, options),
+    };
+    out = { ...ctx, cookies };
+    wrapped.set(ctx, out);
+  }
+  return out;
 }
 
 function requireContext(api: string): ActionContext {

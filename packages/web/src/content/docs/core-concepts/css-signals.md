@@ -186,18 +186,19 @@ The controllers submit `plan=<selected>`; disabled options' inputs are
 ## ARIA roles (`as`)
 
 Native defaults (radio groups, checkboxes) ship **no JavaScript**. Roles that
-need synthesized state inject a tiny inline synchroniser (still no page bundle):
+need synthesized state or keyboard handling inject a tiny inline enhancer (still no page bundle; about 3 KB, once per page):
 
 | `as` | Widget | Extra JS |
 |------|--------|----------|
 | *(default)* | radio group / checkboxes | none |
 | `switch` | on/off | none |
-| `tabs` / `tablist` | tabbed panels | ~0.4 KB inline |
-| `listbox` | options list | ~0.4 KB inline |
-| `accordion` / `disclosure` | single-open | ~0.4 KB inline |
-| `menu` / `menubar` | dropdown | ~0.4 KB inline |
-| `dialog` / `modal` | modal | ~0.4 KB inline |
-| `popover` | popover | ~0.4 KB inline |
+| `tabs` / `tablist` | tabbed panels | enhancer |
+| `listbox` | options list | enhancer |
+| `accordion` / `disclosure` | single-open | enhancer |
+| `menu` / `menubar` | dropdown | enhancer |
+| `nav` | disclosure navigation | enhancer |
+| `dialog` / `modal` | modal | enhancer |
+| `popover` | popover | enhancer |
 
 Pass `aria: false` to opt out, or `aria: { role, panelRole }` for raw overrides.
 

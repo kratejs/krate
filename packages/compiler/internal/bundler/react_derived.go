@@ -164,6 +164,9 @@ func (c *reactCtx) rewriteFnBody(body *[]ast.Stmt, sc *scope, kind frameKind, pa
 	if kind == frameComponent && len(params) >= 1 && plainParam(params[0]) {
 		f.propsName = params[0].Name
 	}
+	if kind == frameHook {
+		c.declareHookParams(body, sc, params)
+	}
 	stmts := *body
 	plan := planRenderBody(stmts)
 	drop := map[ast.Stmt]bool{}
@@ -190,6 +193,11 @@ func (c *reactCtx) rewriteFnBody(body *[]ast.Stmt, sc *scope, kind frameKind, pa
 				c.rewriteHookReturn(s, sc)
 			} else {
 				c.rewriteStmt(s, sc)
+			}
+		case *ast.IfStmt:
+			c.rewriteStmt(stmt, sc)
+			if c.setsStateInRender(s) {
+				stmts[i] = renderPhaseEffect(s)
 			}
 		default:
 			c.rewriteStmt(stmt, sc)
@@ -760,8 +768,23 @@ func (c *reactCtx) rewriteHookReturn(s *ast.ReturnStmt, sc *scope) {
 	}
 	r0 := c.reads
 	s.Value = c.rewriteExpr(s.Value, sc)
-	if c.reads > r0 && c.derivableInit(s.Value) {
-		s.Value = derivedCall(s.Value)
+	var triggers []string
+	if f := c.frame(); f != nil {
+		triggers = f.forceTriggers
+	}
+	if (c.reads > r0 || len(triggers) > 0) && c.derivableInit(s.Value) {
+		call := derivedCall(s.Value)
+		if len(triggers) > 0 {
+			// A hook that bumps a state it never reads (`const [, force] =
+			// useState(0)`) tells React to re-render its caller: the result
+			// is recomputed when that state changes.
+			reads := &ast.ArrayExpr{Position: s.Position}
+			for _, name := range triggers {
+				reads.Elements = append(reads.Elements, &ast.CallExpr{Position: s.Position, Callee: &ast.Identifier{Position: s.Position, Name: name}})
+			}
+			call.Args = append(call.Args, &ast.ArrowFn{Position: s.Position, Expression: true, Body: []ast.Stmt{&ast.ReturnStmt{Value: reads}}})
+		}
+		s.Value = call
 	}
 }
 
@@ -769,4 +792,118 @@ func (c *reactCtx) warnStale(v *ast.VarStmt, name, why string) {
 	c.warn(v.Position, diag.CodeStaleRenderValue,
 		"`"+name+"` is computed from state or props but "+why+"; it keeps its first value after hydration",
 		"compute it in one expression, e.g. const "+name+" = cond ? a : b, or keep it in state")
+}
+
+// markLocalHook records a custom hook defined in a project module.
+func (c *reactCtx) markLocalHook(name string) {
+	if c.localHooks == nil {
+		c.localHooks = map[string]bool{}
+	}
+	c.localHooks[name] = true
+}
+
+// isLiveHook reports a call to a custom hook whose definition is lowered by
+// this pass (declared in this module or imported from a project module) made
+// from a component or hook body.
+func (c *reactCtx) isLiveHook(name string) bool {
+	if !c.react || !isCustomHookName(name) {
+		return false
+	}
+	if _, isAPI := c.localAPI(name); isAPI {
+		return false
+	}
+	f := c.renderFrame()
+	if f == nil {
+		return false
+	}
+	return c.fnNames[name] || c.localHooks[name]
+}
+
+// rewriteHookArgs rewrites a custom hook call's arguments. React re-runs the
+// hook with new arguments on every render; Krate runs it once, so an argument
+// that reads reactive state is passed as a derived getter that the hook's
+// parameter reads unwrap (declareHookParams), keeping its effects, memos and
+// state initializers current.
+func (c *reactCtx) rewriteHookArgs(e *ast.CallExpr, sc *scope) {
+	for i, arg := range e.Args {
+		switch unparen(arg).(type) {
+		case *ast.ArrowFn:
+			e.Args[i] = c.rewriteExpr(arg, sc)
+			continue
+		}
+		if u, ok := arg.(*ast.UnaryExpr); ok && u.Op == "..." {
+			e.Args[i] = c.rewriteExpr(arg, sc)
+			continue
+		}
+		r0 := c.reads
+		rewritten := c.rewriteExpr(arg, sc)
+		if c.reads == r0 {
+			e.Args[i] = rewritten
+			continue
+		}
+		e.Args[i] = derivedCall(rewritten)
+	}
+}
+
+// declareHookParams makes the plain parameters of a custom hook live-argument
+// aware. A destructured parameter is read once from the unwrapped argument.
+func (c *reactCtx) declareHookParams(body *[]ast.Stmt, sc *scope, params []*ast.Param) {
+	var prelude []ast.Stmt
+	for i, p := range params {
+		if p == nil || p.IsRest {
+			continue
+		}
+		if plainParam(p) {
+			sc.declareParamGetter(p.Name)
+			continue
+		}
+		if p.Target != nil && p.Pattern != "" && p.Default == nil {
+			tmp := "__krp" + strconv.Itoa(i)
+			prelude = append(prelude, &ast.VarStmt{Position: p.Position, Kind: ast.VarConst, Decls: []*ast.VarDecl{{
+				Target:          p.Target,
+				Pattern:         p.Pattern,
+				IsDestructuring: true,
+				Init:            &ast.CallExpr{Position: p.Position, Callee: &ast.Identifier{Name: "krateParam"}, Args: []ast.Expr{&ast.Identifier{Name: tmp}}},
+			}}})
+			params[i] = &ast.Param{Position: p.Position, Name: tmp}
+			sc.declareLocal(tmp)
+		}
+	}
+	if len(prelude) > 0 {
+		*body = append(prelude, *body...)
+	}
+}
+
+// setsStateInRender reports a top-level `if` of a component or hook body that
+// calls a state setter directly: React's "derive state from a previous value"
+// pattern (`if (value !== prev) { setPrev(value); setCount(n + 1); }`).
+func (c *reactCtx) setsStateInRender(s *ast.IfStmt) bool {
+	found := false
+	visitStmt(s, false, func(n any, inFn bool) bool {
+		if found || inFn {
+			return false
+		}
+		if call, ok := n.(*ast.CallExpr); ok {
+			if id, ok := call.Callee.(*ast.Identifier); ok && c.setters[id.Name] {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
+}
+
+// renderPhaseEffect runs a render-phase state update as a reactive effect: it
+// re-evaluates its condition whenever the state or props it reads change and
+// applies the update until the condition settles, which is the outcome of
+// React's re-render on setState during render.
+func renderPhaseEffect(s *ast.IfStmt) ast.Stmt {
+	return &ast.ExprStmt{Position: s.Position, Expression: &ast.CallExpr{
+		Position: s.Position,
+		Callee:   &ast.Identifier{Position: s.Position, Name: "createEffect"},
+		Args: []ast.Expr{&ast.ArrowFn{
+			Position: s.Position,
+			Body:     []ast.Stmt{s},
+		}},
+	}}
 }

@@ -24,6 +24,8 @@ let overlay: typeof import('./dev-overlay');
 // import, and the export is captured from the same module instance.
 beforeAll(async () => {
   (globalThis as any).EventSource = FakeEventSource;
+  // Error reports must not reach the (absent) dev server from the test.
+  (navigator as any).sendBeacon = () => true;
   (window as any).__KRATE_DEV__ = {
     sse: '/__krate/hotreload',
     errors: '/__krate/client-error',
@@ -92,6 +94,29 @@ describe('dev-overlay', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     const overlay = devRoot()!.querySelector('.overlay') as HTMLElement;
     expect(overlay.hidden).toBe(true);
+  });
+});
+
+describe('dev-overlay rebuild handling', () => {
+  it('clears a build error when a rebuild of another route succeeds', () => {
+    history.pushState({}, '', '/current');
+    FakeEventSource.last!.emit('build-error', { diagnostics: [{ file: 'b.tsx', message: 'stale-build-error' }], buildOk: false });
+    const overlayEl = devRoot()!.querySelector('.overlay') as HTMLElement;
+    expect(overlayEl.hidden).toBe(false);
+    expect((devRoot()!.querySelector('.list') as HTMLElement).textContent).toContain('stale-build-error');
+
+    // The fix landed on a different route: no reload here, but the error goes.
+    FakeEventSource.last!.emit('reload', { pages: ['/elsewhere'] });
+    const text = (devRoot()!.querySelector('.list') as HTMLElement).textContent || '';
+    expect(text).not.toContain('stale-build-error');
+  });
+
+  it('shows a runtime error once when the server echoes it back', () => {
+    const before = ((devRoot()!.querySelector('.list') as HTMLElement).textContent || '').split('echo-dup-error').length - 1;
+    window.dispatchEvent(new ErrorEvent('error', { message: 'echo-dup-error', filename: 'x.js', lineno: 1, colno: 1 }));
+    FakeEventSource.last!.emit('client-error', { clientError: { message: 'echo-dup-error', stack: '' } });
+    const text = (devRoot()!.querySelector('.list') as HTMLElement).textContent || '';
+    expect(text.split('echo-dup-error').length - 1 - before).toBe(1);
   });
 });
 

@@ -1,6 +1,9 @@
 package routetypes
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -83,7 +86,7 @@ func TestGenerateStaticAndDynamic(t *testing.T) {
 		t.Errorf("expected multi-param RouteParams entry, got:\n%s", out)
 	}
 	// Manifest entry with mode.
-	if !strings.Contains(out, `route: "/video/[id]", source: "src/pages/video/[id].tsx", params: ["id"], mode: "ssr"`) {
+	if !strings.Contains(out, `readonly route: "/video/[id]"; readonly source: "src/pages/video/[id].tsx"; readonly params: readonly ["id"]; readonly mode: "ssr"`) {
 		t.Errorf("expected manifest entry, got:\n%s", out)
 	}
 }
@@ -157,5 +160,51 @@ func TestOptionalCatchAll(t *testing.T) {
 	}
 	if got := templateLiteral("/[[...all]]"); got != "`/` | `/${string}`" {
 		t.Errorf("templateLiteral(root) = %s", got)
+	}
+}
+
+func findTSC(t *testing.T) string {
+	t.Helper()
+	dir, _ := os.Getwd()
+	for i := 0; i < 8; i++ {
+		for _, rel := range []string{"node_modules/.bin/tsc", "packages/runtime/node_modules/.bin/tsc"} {
+			p := filepath.Join(dir, filepath.FromSlash(rel))
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+		dir = filepath.Dir(dir)
+	}
+	return ""
+}
+
+// The routes manifest lives in an ambient .d.ts; an initializer there is TS1254
+// (hidden when skipLibCheck is on), so the file must type-check with it off.
+func TestGeneratedRoutesTypeCheckWithoutSkipLibCheck(t *testing.T) {
+	src := Generate([]Route{
+		{Pattern: "/", Source: "src/pages/index.tsx"},
+		{Pattern: "/blog/[slug]", Source: "src/pages/blog/[slug].tsx", Mode: "ssr"},
+		{Pattern: "/docs/[...rest]", Source: "src/pages/docs/[...rest].tsx"},
+	})
+	if strings.Contains(src, "satisfies") || strings.Contains(src, "= [") {
+		t.Fatalf("ambient file must not contain an initializer:\n%s", src)
+	}
+	if !strings.Contains(src, "export declare const routes: readonly [") {
+		t.Fatalf("routes must be declared by type:\n%s", src)
+	}
+	tsc := findTSC(t)
+	if tsc == "" {
+		if os.Getenv("KRATE_REQUIRE_E2E") != "" {
+			t.Fatal("tsc not found")
+		}
+		t.Skip("tsc not installed")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "routes.d.ts"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(tsc, "--noEmit", "--strict", "--skipLibCheck", "false", filepath.Join(dir, "routes.d.ts")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("tsc rejected the generated file: %v\n%s\n%s", err, out, src)
 	}
 }

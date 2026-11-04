@@ -1,7 +1,7 @@
 import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { createRequire } from 'module';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -36,6 +36,12 @@ export function resolveBinary(): string {
   const override = process.env.KRATE_BINARY;
   if (override && existsSync(override)) return override;
 
+  // A binary built from source into this package's bin/ is a deliberate local
+  // choice; it wins over a platform package that happens to be installed from
+  // the registry (published tarballs ship only the JS launcher in bin/).
+  const localFirst = join(BIN_DIR, binaryName());
+  if (existsSync(localFirst)) return localFirst;
+
   const pkgName = platformPackage();
   try {
     const pkgPath = dirname(require.resolve(`${pkgName}/package.json`));
@@ -54,9 +60,40 @@ export function resolveBinary(): string {
   return local;
 }
 
-export function execBinary(args: string[], cwd?: string): Promise<void> {
+/**
+ * Compare the output of `krate version` ("krate v0.1.0") with the npm package
+ * version. Returns a warning when they differ, or null when they match or the
+ * binary is an unversioned local build ("krate vdev").
+ */
+export function versionMismatchWarning(binaryOutput: string, packageVersion: string): string | null {
+  const m = /v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)/.exec(binaryOutput);
+  if (!m) return null;
+  if (m[1] === packageVersion) return null;
+  return (
+    `warning: the krate binary is v${m[1]} but @krate/core is v${packageVersion}. ` +
+    'Reinstall the matching platform package, or point KRATE_BINARY at the right binary.'
+  );
+}
+
+let versionChecked = false;
+
+function warnOnVersionMismatch(bin: string, packageVersion: string): void {
+  if (versionChecked) return;
+  versionChecked = true;
+  try {
+    const res = spawnSync(bin, ['version'], { encoding: 'utf-8', timeout: 5000 });
+    if (res.status !== 0 || typeof res.stdout !== 'string') return;
+    const warning = versionMismatchWarning(res.stdout, packageVersion);
+    if (warning) console.error(warning);
+  } catch {
+    // The real invocation below reports an unusable binary.
+  }
+}
+
+export function execBinary(args: string[], cwd?: string, packageVersion?: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const bin = resolveBinary();
+    if (packageVersion && args[0] !== 'version' && args[0] !== '--version') warnOnVersionMismatch(bin, packageVersion);
     const proc = spawn(bin, args, {
       stdio: 'inherit',
       cwd: cwd || process.cwd(),

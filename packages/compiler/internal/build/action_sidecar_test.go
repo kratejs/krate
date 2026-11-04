@@ -1,6 +1,7 @@
 package build
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -198,6 +199,27 @@ func TestActionSidecarTransport(t *testing.T) {
 			r = doAction(t, actionRequest(t, srv, "/__krate/action/astep?__krate_args=%5B1%5D&__krate_return=%2Ftodos", "application/x-www-form-urlencoded", "n=3", false))
 			if r.status != http.StatusSeeOther || r.header.Get("Location") != "/todos" {
 				t.Fatalf("no-JS step: %d %v %s", r.status, r.header, r.raw)
+			}
+			// The returned state survives the 303 in a short-lived flash cookie.
+			var flash string
+			for _, c := range r.header.Values("Set-Cookie") {
+				if strings.HasPrefix(c, "krate_flash=") {
+					flash = strings.TrimPrefix(strings.SplitN(c, ";", 2)[0], "krate_flash=")
+				}
+			}
+			if flash == "" {
+				t.Fatalf("no-JS step must set a krate_flash cookie: %v", r.header)
+			}
+			raw, err := base64.RawURLEncoding.DecodeString(flash)
+			if err != nil {
+				t.Fatalf("flash is not base64url: %v", err)
+			}
+			var fl struct {
+				A string `json:"a"`
+				R any    `json:"r"`
+			}
+			if err := json.Unmarshal(raw, &fl); err != nil || fl.A != "astep" || fl.R != float64(4) {
+				t.Fatalf("flash payload = %s (%v)", raw, err)
 			}
 			req := actionRequest(t, srv, "/__krate/action/aecho?__krate_return=https%3A%2F%2Fevil.example%2F", "application/x-www-form-urlencoded", "x=1", false)
 			req.Header.Set("Referer", srv.URL+"/form/?q=1")

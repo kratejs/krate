@@ -11,6 +11,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 )
 
 // dynChunkURLRe matches the chunk URLs a page's hydration JS dynamically imports
@@ -312,40 +313,50 @@ func sha256Base64(content string) string {
 
 // generateSEOTags produces canonical, OpenGraph, and Twitter Card meta tags.
 // It skips tags that are already present in headHTML to avoid duplication.
-func generateSEOTags(headHTML, route string, seo config.SEOConfig) string {
+func generateSEOTags(headHTML, route string, seo config.SEOConfig, ctx ...seoCtx) string {
+	// The configured default description is a plain <meta name="description">
+	// too (search engines and `krate check` read that tag), independent of
+	// whether a base URL is set for the canonical/OpenGraph tags below.
+	descTag := ""
+	if seo.Description != "" && extractMetaAttr(headHTML, "description") == "" {
+		descTag = fmt.Sprintf("<meta name=\"description\" content=\"%s\">\n", escape.HTMLAttr(seo.Description))
+	}
 	baseURL := strings.TrimRight(seo.BaseURL, "/")
 	if baseURL == "" {
-		return ""
+		return descTag
+	}
+	var sc seoCtx
+	if len(ctx) > 0 {
+		sc = ctx[0]
 	}
 	siteName := seo.SiteName
 	defaultDescription := seo.Description
 	defaultImage := seo.Image
 
-	canonical := baseURL + "/"
-	if route != "" && route != "." {
-		canonical = baseURL + "/" + strings.TrimPrefix(route, "/")
-	}
+	// Canonical and og:url use the form the site is actually served at
+	// (trailing slash, base path), the same as the sitemap and hreflang links.
+	canonical := plugin.CanonicalURL(baseURL, sc.BasePath, route)
 
 	var tags []string
+	if descTag != "" {
+		tags = append(tags, strings.TrimSuffix(descTag, "\n"))
+	}
 
-	if !strings.Contains(headHTML, "rel=\"canonical\"") && !strings.Contains(headHTML, "rel='canonical'") {
-		tags = append(tags, fmt.Sprintf("<link rel=\"canonical\" href=\"%s\">", canonical))
+	if !sc.ErrorPage && !strings.Contains(headHTML, "rel=\"canonical\"") && !strings.Contains(headHTML, "rel='canonical'") {
+		tags = append(tags, fmt.Sprintf("<link rel=\"canonical\" href=\"%s\">", escape.HTMLAttr(canonical)))
 	}
 
 	// Extract title from headHTML if present (for OG tags)
-	title := extractMetaContent(headHTML, "title")
+	// The head's text is already HTML-escaped; decode it so the attribute
+	// escaping below does not escape it twice.
+	title := html.UnescapeString(extractMetaContent(headHTML, "title"))
 	if title == "" {
 		title = siteName
 	}
-	// Apply the title template only to a bare page title. Titles that already
-	// carry a site/section suffix (e.g. docs pages: "Guide - Site Docs") are left
-	// alone so the suffix is not duplicated.
-	if seo.TitleTemplate != "" && isBareTitle(title, siteName) {
-		title = strings.ReplaceAll(seo.TitleTemplate, "%s", title)
-	}
+	title = applyTitleTemplateText(title, siteName, seo.TitleTemplate)
 
 	// Extract description from headHTML <meta name="description"> if present
-	desc := extractMetaAttr(headHTML, "description")
+	desc := html.UnescapeString(extractMetaAttr(headHTML, "description"))
 	if desc == "" {
 		desc = defaultDescription
 	}
@@ -354,8 +365,8 @@ func generateSEOTags(headHTML, route string, seo config.SEOConfig) string {
 	if !strings.Contains(headHTML, "og:title") && title != "" {
 		tags = append(tags, fmt.Sprintf("<meta property=\"og:title\" content=\"%s\">", escape.HTMLAttr(title)))
 	}
-	if !strings.Contains(headHTML, "og:url") {
-		tags = append(tags, fmt.Sprintf("<meta property=\"og:url\" content=\"%s\">", canonical))
+	if !sc.ErrorPage && !strings.Contains(headHTML, "og:url") {
+		tags = append(tags, fmt.Sprintf("<meta property=\"og:url\" content=\"%s\">", escape.HTMLAttr(canonical)))
 	}
 	if !strings.Contains(headHTML, "og:type") {
 		tags = append(tags, "<meta property=\"og:type\" content=\"website\">")
@@ -372,7 +383,8 @@ func generateSEOTags(headHTML, route string, seo config.SEOConfig) string {
 	// Resolve the default OG image once (absolute URL when a base is set).
 	ogImage := defaultImage
 	if ogImage != "" && !strings.HasPrefix(ogImage, "http") {
-		ogImage = baseURL + "/" + strings.TrimPrefix(ogImage, "/")
+		ogImage = plugin.CanonicalURL(baseURL, sc.BasePath, "/"+strings.TrimPrefix(ogImage, "/"))
+		ogImage = strings.TrimSuffix(ogImage, "/")
 	}
 	if !strings.Contains(headHTML, "og:image") && ogImage != "" {
 		tags = append(tags, fmt.Sprintf("<meta property=\"og:image\" content=\"%s\">", ogImage))
@@ -407,6 +419,158 @@ func generateSEOTags(headHTML, route string, seo config.SEOConfig) string {
 		return ""
 	}
 	return strings.Join(tags, "\n") + "\n"
+}
+
+// seoCtx carries per-page context for generateSEOTags.
+type seoCtx struct {
+	BasePath  string
+	ErrorPage bool
+}
+
+// applyTitleTemplateText applies site.titleTemplate to a bare page title.
+// Titles that already carry a site/section suffix (e.g. docs pages: "Guide -
+// Site Docs") or the template's own text are left alone.
+func applyTitleTemplateText(title, siteName, tmpl string) string {
+	if tmpl == "" || !isBareTitle(title, siteName) {
+		return title
+	}
+	if i := strings.Index(tmpl, "%s"); i >= 0 {
+		prefix, suffix := tmpl[:i], tmpl[i+2:]
+		if (prefix != "" || suffix != "") && strings.HasPrefix(title, prefix) && strings.HasSuffix(title, suffix) && len(title) > len(prefix)+len(suffix) {
+			return title
+		}
+	}
+	return strings.ReplaceAll(tmpl, "%s", title)
+}
+
+// headKey returns the dedupe key of a head tag, or "" for tags that may repeat.
+func headKey(tag string) string {
+	lower := strings.ToLower(tag)
+	attr := func(name string) string {
+		for _, q := range []string{`"`, `'`} {
+			if i := strings.Index(lower, name+"="+q); i >= 0 {
+				rest := lower[i+len(name)+2:]
+				if j := strings.Index(rest, q); j >= 0 {
+					return rest[:j]
+				}
+			}
+		}
+		return ""
+	}
+	switch {
+	case strings.HasPrefix(lower, "<title"):
+		return "title"
+	case strings.HasPrefix(lower, "<meta"):
+		if n := attr("name"); n != "" {
+			return "meta:name:" + n
+		}
+		if p := attr("property"); p != "" {
+			return "meta:property:" + p
+		}
+	case strings.HasPrefix(lower, "<link"):
+		switch rel := attr("rel"); rel {
+		case "canonical", "manifest", "icon", "shortcut icon", "apple-touch-icon":
+			return "link:" + rel
+		case "alternate":
+			if h := attr("hreflang"); h != "" {
+				return "link:alternate:" + h
+			}
+		}
+	}
+	return ""
+}
+
+// dedupeHead keeps the first <title>, <meta name|property> and singleton <link>
+// per key. Page heads are placed before layout heads, so the page wins.
+func dedupeHead(head string) string {
+	if head == "" {
+		return head
+	}
+	var out strings.Builder
+	seen := map[string]bool{}
+	i := 0
+	for i < len(head) {
+		lt := strings.IndexByte(head[i:], '<')
+		if lt < 0 {
+			out.WriteString(head[i:])
+			break
+		}
+		out.WriteString(head[i : i+lt])
+		start := i + lt
+		var end int
+		lower := strings.ToLower(head[start:])
+		switch {
+		case strings.HasPrefix(lower, "<!--"):
+			if e := strings.Index(lower, "-->"); e >= 0 {
+				end = start + e + 3
+			} else {
+				end = len(head)
+			}
+			out.WriteString(head[start:end])
+			i = end
+			continue
+		case strings.HasPrefix(lower, "<script"), strings.HasPrefix(lower, "<style"), strings.HasPrefix(lower, "<title"), strings.HasPrefix(lower, "<noscript"):
+			name := "script"
+			for _, n := range []string{"style", "title", "noscript"} {
+				if strings.HasPrefix(lower, "<"+n) {
+					name = n
+				}
+			}
+			if e := strings.Index(lower, "</"+name+">"); e >= 0 {
+				end = start + e + len(name) + 3
+			} else {
+				end = len(head)
+			}
+		default:
+			if e := htmlTagEnd(head, start); e > start {
+				end = e
+			} else {
+				end = len(head)
+			}
+		}
+		tag := head[start:end]
+		if key := headKey(tag); key != "" {
+			if seen[key] {
+				i = end
+				// Drop the newline that separated the removed tag.
+				if i < len(head) && head[i] == '\n' {
+					i++
+				}
+				continue
+			}
+			seen[key] = true
+		}
+		out.WriteString(tag)
+		i = end
+	}
+	return out.String()
+}
+
+// templateHeadTitle applies site.titleTemplate to the document <title>.
+func templateHeadTitle(head string, seo config.SEOConfig) string {
+	if seo.TitleTemplate == "" {
+		return head
+	}
+	lower := strings.ToLower(head)
+	open := strings.Index(lower, "<title")
+	if open < 0 {
+		return head
+	}
+	gt := strings.IndexByte(head[open:], '>')
+	if gt < 0 {
+		return head
+	}
+	start := open + gt + 1
+	end := strings.Index(lower[start:], "</title>")
+	if end < 0 {
+		return head
+	}
+	title := html.UnescapeString(strings.TrimSpace(head[start : start+end]))
+	templated := applyTitleTemplateText(title, seo.SiteName, seo.TitleTemplate)
+	if templated == title {
+		return head
+	}
+	return head[:start] + escape.HTML(templated) + head[start+end:]
 }
 
 // isBareTitle reports whether a document title is a plain page title with no
@@ -484,4 +648,24 @@ func extractMetaAttr(headHTML, name string) string {
 		return ""
 	}
 	return strings.TrimSpace(after[start : start+end])
+}
+
+// htmlTagEnd returns the index just past the tag starting at s[i], honoring
+// quoted attribute values.
+func htmlTagEnd(s string, i int) int {
+	var q byte
+	for j := i + 1; j < len(s); j++ {
+		c := s[j]
+		switch {
+		case q != 0:
+			if c == q {
+				q = 0
+			}
+		case c == '"' || c == '\'':
+			q = c
+		case c == '>':
+			return j + 1
+		}
+	}
+	return len(s)
 }

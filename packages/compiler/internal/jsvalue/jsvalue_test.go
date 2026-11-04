@@ -358,7 +358,7 @@ func TestInterpUnknownAndUnsupported(t *testing.T) {
 		`n.x`,
 		`undefined.y`,
 		`"a".replace(/a/, "b")`,
-		`count.toString(2)`,
+		`(0.5).toString(2)`,
 		`(1)()`,
 	}
 	for _, src := range unsupported {

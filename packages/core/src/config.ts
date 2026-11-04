@@ -34,6 +34,8 @@ export interface DevServerConfig {
   overlay?: boolean;
   /** Show the dev toolbar (default: true). */
   toolbar?: boolean;
+  /** Dev server bind address (default: "127.0.0.1", loopback only). Use "0.0.0.0" to expose on the network. */
+  host?: string;
   /** Editor command for the overlay's "open in editor" action (default: "code"). */
   editor?: string;
   /** Proxy matching path prefixes to a backend during dev, e.g. `{ "/api": "http://localhost:8080" }`. */
@@ -47,6 +49,13 @@ export interface ServerConfig {
   port?: number;
   /** Request body cap in bytes (default: 1 MiB pages, 25 MiB API). */
   maxBodySize?: number;
+  /**
+   * Trust X-Forwarded-Proto / X-Forwarded-Host / X-Forwarded-For from a
+   * reverse proxy (request URLs, CSRF origin check, client IP). Default false.
+   */
+  trustProxy?: boolean;
+  /** Graceful shutdown drain period in seconds (default 15). */
+  shutdownTimeout?: number;
 }
 
 export interface CORSConfig {

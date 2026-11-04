@@ -22,6 +22,14 @@ Set `spa: false` to use normal full-page navigation and omit the SPA router,
 prefetch, and history code from the shared runtime. `navigate()` still works and
 performs a full navigation.
 
+The shared runtime chunk is assembled per site in production builds: the core
+(signals, DOM bindings, events) plus the router, and only those optional pieces
+(list rendering, class helpers such as `cn`/`twMerge`, server action forms,
+error boundaries and class components) that the site's pages reference. A
+counter page ships about 25 KB of gzipped runtime JS (about 17 KB with
+`spa: false`); each extra piece adds between 2 and 5 KB gzipped. `krate dev`
+always serves the full runtime.
+
 ## Site metadata
 
 `site` is the canonical site metadata; `seo` is a deprecated alias (a config
@@ -104,7 +112,10 @@ compress: {                   // opt-in; also enabled by `krate build --precompr
 Build-time precompression writes `.br`/`.gz` siblings beside compressible assets
 (HTML, CSS, JS, JSON, SVG, XML, ...). `krate serve` negotiates them per request
 by `Accept-Encoding` (brotli > gzip > raw) and always sends
-`Vary: Accept-Encoding`, falling back to on-the-fly gzip for dynamic responses.
+`Vary: Accept-Encoding`, falling back to on-the-fly gzip for dynamic responses. Siblings are used only
+by the static file handler, after middleware, redirects and the SSR/ISR
+decision, so they never bypass them and are never used for the HTML of a
+request-time page. Range requests are answered uncompressed.
 Static hosts such as Cloudflare Pages and Netlify serve the siblings
 automatically. Assets under 1 KB, already-compressed formats (images, fonts,
 wasm), and internal `.krate/` build artifacts are skipped.
@@ -183,6 +194,7 @@ format; **AVIF is not supported** (it needs a separate encoder).
 ```typescript
 devServer: {
   port: 3000,
+  host: "127.0.0.1", // bind address (default loopback; "0.0.0.0" exposes the dev server on the network)
   open: true,
   overlay: true,   // show the dev error overlay (default true)
   toolbar: true,   // show the dev toolbar (default true)
@@ -191,12 +203,28 @@ devServer: {
 }
 ```
 
-`editor` may include flags (for example `"code -g"`). It is used by the
+`krate dev` binds to loopback by default, and its `/__krate/*` endpoints only
+accept requests whose `Host` and `Origin` are the dev server itself (this blocks
+DNS-rebinding and cross-site calls to `/__krate/open`). Set `devServer.host`
+(or `server.host`) to expose it, for example `"0.0.0.0"` to test on a phone; the
+`Host` check is then relaxed to the configured address.
+
+`port` is the dev server port and takes precedence over `server.port` in
+`krate dev` (`krate serve` uses `server.port`, then `devServer.port`). If the
+port is busy, dev moves to the next free one and says so; `serve` fails with a
+hint instead.
+
+`editor` is the editor command (for example `"code"`, `"cursor"`, `"idea"`,
+`"subl"`, `"vim"` or `"zed"`) and may include flags. Krate adds the right
+line-number syntax for each (`-g file:line` for VS Code family editors,
+`--line N file` for JetBrains IDEs, `file:line` for Sublime and Zed, `+N file`
+for vim); an unknown editor is opened with the plain file path. It is used by the
 overlay's location links and by `GET /__krate/open`. `proxy` forwards matching
 path prefixes to a backend only in dev (longest prefix wins), so you can run a
-separate backend without CORS. In development, generated JavaScript is served
-unminified (with component comments) so devtools are readable; production output
-stays minified.
+separate backend without CORS. In development, the JavaScript generated for each
+page is unminified (with component comments) so devtools are readable; the shared
+`@krate/runtime` chunk is the prebuilt, already minified runtime in both modes.
+Production output minifies the page scripts too.
 
 ## Tailwind CSS
 
@@ -363,6 +391,16 @@ plugins: [
   docs({ contentDir: "src/content/docs", title: "Docs" }),
 ]
 ```
+
+The `sitemap` plugin lists every statically generated page once, at the URL the
+site is served from (with a trailing slash and the `basePath`), percent-encoded
+and XML-escaped. It leaves out error pages, dynamic-route fallback templates
+(`blog/[slug]`) and pages with `<meta name="robots" content="noindex">`. Pass
+`exclude: ["/admin/*", "/private/"]` (`path.Match` patterns) to drop SSR or
+private routes. Canonical URLs, `og:url`, hreflang links and the `robots.txt`
+`Sitemap:` line use the same form, and the document `<title>` follows
+`site.titleTemplate`. A layout and a page that both emit `<title>`, a meta
+description or `og:image` produce a single tag: the page wins.
 
 The `feed` plugin emits `feed.xml` (RSS), `atom.xml`, and `feed.json` from the
 docs content and adds `<link rel="alternate">` discovery plus JSON-LD
@@ -607,8 +645,16 @@ output; use `--no-dce` to disable DCE entirely.
 fonts: {
   preload: true,      // <link rel="preload"> for @font-face fonts (default true)
   display: "swap",    // default font-display injected when a face omits it ("off" to skip)
+  preloadLimit: 4,    // most fonts preloaded per page
 },
 ```
+
+Preloading covers every stylesheet (global and page-imported). Each
+`@font-face` contributes its first `woff2` source (woff/ttf fallbacks are never
+preloaded unless they are the only source); relative `url()`s resolve against the
+stylesheet, not the page. Faces for non-Latin `unicode-range` subsets are
+skipped, and a `/* no-preload */` comment inside an `@font-face` block opts that
+face out.
 
 ## Go (components & API routes)
 
@@ -663,16 +709,32 @@ with the prefix (or use relative URLs).
 
 ```typescript
 server: {
-  host: "",             // bind address (default: all interfaces)
+  host: "",             // bind address for `krate serve` (default: all interfaces, for containers)
   port: 3000,           // falls back to devServer.port, then 3000
   maxBodySize: 1048576, // request body cap in bytes (0 = defaults)
+  trustProxy: false,    // honor X-Forwarded-Proto/Host/For from a reverse proxy
+  shutdownTimeout: 15,  // seconds in-flight requests get to finish on SIGTERM
 },
 ```
 
-`krate serve` uses `server.port` (or `devServer.port`). Request bodies are capped
+The port comes from `--port`, then the `KRATE_SERVE_PORT` and `PORT`
+environment variables (serve/start only), then `server.port` (or
+`devServer.port`); `--host` overrides `server.host` the same way
+(`KRATE_SERVE_HOST` for serve/start). Request bodies are capped
 (1 MiB for pages/middleware, 25 MiB for API routes by default). `GET /healthz`
 is a liveness probe; `GET /readyz` is readiness (fails while an expected SSR
 sidecar is down). Both stay reachable at the root even under a `basePath`.
+
+By default the server ignores client-supplied `X-Forwarded-*` headers and
+replaces them with what it observed, so handlers cannot be spoofed. Behind a
+trusted reverse proxy set `trustProxy: true`: request URLs seen by middleware
+and API routes use `X-Forwarded-Proto` / `X-Forwarded-Host`, the server-action
+CSRF origin check compares against the forwarded host, and the client address is
+the first `X-Forwarded-For` entry.
+
+On `SIGINT`/`SIGTERM` the server stops accepting connections, lets in-flight
+requests finish for `shutdownTimeout` seconds (default 15), then stops its
+sidecars and exits with status 0. A second signal exits immediately.
 
 ## CORS
 

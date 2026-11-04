@@ -6,14 +6,14 @@ export default function Home() {
     <>
       <Head>
         <title>Krate - Go-native web framework</title>
-        <meta name="description" content="Krate compiles TSX pages to static HTML with a tiny signal runtime. Write server components and API routes in Go - one binary, no Node required to build." />
+        <meta name="description" content="Krate compiles TSX pages to static HTML with a small signal runtime. Write server components and API routes in Go - one binary, no Node required to build." />
       </Head>
 
       <section class="hero">
         <h1 class="hero-title">Web applications with the power of a compiler.</h1>
         <p class="hero-subtitle">
-          Krate compiles TSX/JSX into static HTML at build time and ships a tiny
-          signal-based hydration bundle. Fine-grained reactivity, file-based
+          Krate compiles TSX/JSX into static HTML at build time and ships a small
+          signal-based hydration bundle (about 25 KB gzipped for a counter page). Fine-grained reactivity, file-based
           routing, SSR/ISR/streaming, a CSS pipeline, and a plugin system - all
           driven by a custom Go compiler. Drop into Go for server components and
           API routes whenever you want.
@@ -83,7 +83,7 @@ export default function Home() {
           A Go-native compiler with whole-program knowledge, a signal runtime,
           and a static-first default.
         </p>
-        <div class="table-wrap">
+        <div class="table-wrap" role="region" aria-label="Framework comparison" tabindex={0}>
           <table class="compare">
             <thead>
               <tr><th>Capability</th><th>Krate</th><th>Astro</th><th>Next.js</th></tr>

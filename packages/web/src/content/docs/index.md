@@ -1,7 +1,7 @@
 ---
 title: Welcome to Krate
 order: 1
-description: Krate is a Go-native static site generator with signal-based reactivity. Compiles TSX/JSX to static HTML in milliseconds with a tiny client hydration bundle.
+description: Krate is a Go-native static site generator with signal-based reactivity. Compiles TSX/JSX to static HTML in milliseconds with a small client hydration bundle.
 sidebar:
   label: Overview
   order: 1
@@ -28,7 +28,8 @@ output, and configuration may change between releases.
 :::
 
 **Krate** compiles TSX/JSX pages into static HTML at build time and generates a
-tiny hydration bundle that makes pages interactive on the client. Builds run in
+small hydration bundle (about 25 KB gzipped for a counter page) that makes
+pages interactive on the client. Builds run in
 milliseconds on a single Go binary - no bundler subprocess and no Node.js
 required to build.
 

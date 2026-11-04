@@ -202,7 +202,6 @@ re-exports the plugin context types and the go-plugin bridge.
 package main
 
 import (
-	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/pluginsdk"
 )
 
@@ -216,7 +215,10 @@ func main() {
 			return nil
 		},
 		AfterParse: func(ctx *plug.ParseArgs) error {
-			// ctx.Program is a live *ast.Program; edit it in place.
+			// ctx.Program is a live *ast.Program; edit it in place. (Import
+			// github.com/kratejs/krate/packages/compiler/ast to name its
+			// node types in your own helpers.)
+			plug.Log("top-level statements:", len(ctx.Program.Body))
 			return nil
 		},
 		AfterRender: func(ctx *plug.RenderArgs) error {
@@ -302,17 +304,20 @@ Version semantics follow Go's rules:
 
 Build one binary per platform and ship them in an npm package. The package's
 `index.js` is a **static descriptor factory** that reports the `runtime` and
-the per-platform binary paths (resolved relative to the package root). Set
-`module` to the manifest's own URL so Krate can resolve those relative paths
-(`import.meta.url` is a `file://` URL in ESM; the compiler converts it to a
-filesystem path):
+the per-platform binary paths (resolved relative to the package root). Write it
+as an **ES module** (`export default`, with `"type": "module"` in the package's
+`package.json`): the descriptor reads `import.meta.url`, and a file that mixes
+`module.exports` with `import.meta` is treated as ESM by the bundler, which then
+fails with `No matching export ... for import "default"`. Set `module` to the
+manifest's own URL so Krate can resolve those relative paths (`import.meta.url`
+is a `file://` URL; the compiler converts it to a filesystem path):
 
 ```javascript
-module.exports = function () {
+export default function myPlugin() {
   return {
     name: 'my-plugin',
     order: 10,
-    module: (typeof import.meta !== 'undefined' && import.meta.url) ? import.meta.url : '',
+    module: import.meta.url,
     runtime: 'go',
     hooks: { AfterRender: null, ServeRequest: null, ServeResponse: null },
     binaries: {
@@ -323,7 +328,7 @@ module.exports = function () {
       'linux-arm64': 'bin/my-plugin-linux-arm64',
     },
   };
-};
+}
 ```
 
 Krate discovers the manifest by running this factory once (bundled with esbuild
@@ -337,7 +342,8 @@ node scripts/build-go-plugin.mjs <plugin-dir>
 ```
 
 It reads the `binaries` map from `index.js` and runs `go build` per platform
-(with `CGO_ENABLED=0`), placing the results in `<plugin-dir>/bin`.
+(with `CGO_ENABLED=0` and `GOWORK=off`, so a `go.work` in a parent directory
+cannot hijack the plugin's own module), placing the results in `<plugin-dir>/bin`.
 
 Go plugin binaries are **trusted dependencies**: they run as a subprocess with
 full filesystem and network access. Only install plugins from authors you trust.

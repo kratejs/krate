@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -332,7 +331,7 @@ func (h *revalidateHost) warnSkipped(s skippedTarget) {
 // manifestPages returns every page of the build (dist/manifest.json, all
 // modes), reloaded when a dev rebuild rewrites the manifest.
 func (h *revalidateHost) manifestPages() []PageMeta {
-	file := filepath.Join(h.outDir, "manifest.json")
+	file := ResolveManifestPath(h.outDir, "manifest.json")
 	fi, err := os.Stat(file)
 	h.manifestMu.Lock()
 	defer h.manifestMu.Unlock()

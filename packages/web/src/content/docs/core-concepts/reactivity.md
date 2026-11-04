@@ -139,14 +139,23 @@ export default function Page() {
 }
 ```
 
-Destructuring reads the value once: `function Badge({ label })` sees only the
-initial value of a signal-derived prop, and the build warns about it. Keep the
-`props` parameter (and read `props.label`), or pass an accessor
-(`label={() => ...}`) and call it in the child.
+Destructured parameters stay live too: `function Badge({ label, tone = "x",
+...rest })` is compiled as if it read `props.label`, `props.tone` (with the
+default applied when the prop is `undefined`) and `props` minus the listed
+keys on every use, so `<Badge label={...} />` follows a signal-derived value.
+The same holds for `const { label, ...rest } = props` at the top of the body.
+A destructuring the compiler cannot lower this way (a destructured name that
+is reassigned, used as a JSX tag, or a rest object used for anything but
+`{...rest}` and `rest.x`) still reads the value once; the build warns when a
+signal-derived prop reaches such a parameter, and the fix is to read
+`props.label` or pass an accessor (`label={() => ...}`).
 
 Custom hooks are plain functions: a call such as `useTitle("Home")` runs once
 per component instance during hydration, in source order with the rest of the
-component body.
+component body. In a React source module, a project custom hook called with an
+argument that reads state (`useDebounce(value, 300)`, `useDocumentTitle("n" +
+n)`) receives the argument as a live getter that the hook's parameters read
+through, so its effects, memos and state initializers follow the argument.
 
 ## Render values in React source components
 

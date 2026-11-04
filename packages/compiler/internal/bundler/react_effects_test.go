@@ -87,7 +87,7 @@ export default function Page() {
   return <p>x</p>;
 }`
 	out, diags := rewriteDiag(t, src)
-	mustContain(t, out, "}, () => {\n    return deps;\n  });")
+	mustContain(t, out, "}, () => {\n    return krateParam(deps);\n  });")
 	d := findDiag(t, diags, diag.CodeDepsUnresolved)
 	if d.Line != 3 || d.Col != 36 || d.File != "page.tsx" || !d.IsWarning() {
 		t.Fatalf("diagnostic position/severity = %s:%d:%d warning=%v", d.File, d.Line, d.Col, d.IsWarning())

@@ -15,6 +15,7 @@ import {
   isServerAction,
   requestFormReset,
   setActionTransitionRunner,
+  takeFlash,
   type FormStatus,
 } from './actions.js';
 
@@ -351,6 +352,36 @@ describe('useActionState', () => {
   });
 });
 
+describe('useActionState flash from a native form post', () => {
+  const flash = (id: string, result: unknown) =>
+    btoa(JSON.stringify({ a: id, r: result })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  afterEach(() => {
+    document.cookie = 'krate_flash=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT';
+  });
+
+  it('starts from the state the server returned to the redirected native post', () => {
+    document.cookie = 'krate_flash=' + flash('save', { errors: { name: 'required' } }) + '; Path=/';
+    const [state, setState] = createSignal<unknown>({ errors: {} });
+    const [, setPending] = createSignal(false);
+    __krateActionState(__krateAction('save') as never, state, setState, setPending);
+    expect(state()).toEqual({ errors: { name: 'required' } });
+    // The flash is single use.
+    expect(document.cookie).not.toContain('krate_flash=' + flash('save', { errors: { name: 'required' } }));
+    const [again, setAgain] = createSignal<unknown>('init');
+    __krateActionState(__krateAction('save') as never, again, setAgain, setPending);
+    expect(again()).toBe('init');
+  });
+
+  it('ignores a flash written for another action', () => {
+    document.cookie = 'krate_flash=' + flash('other', 'x') + '; Path=/';
+    const [state, setState] = createSignal<unknown>('init');
+    const [, setPending] = createSignal(false);
+    __krateActionState(__krateAction('save') as never, state, setState, setPending);
+    expect(state()).toBe('init');
+  });
+});
+
 describe('useOptimistic', () => {
   it('applies updates while an action is pending and reverts to the latest base', async () => {
     const [base, setBase] = createSignal<string[]>(['a']);
@@ -459,6 +490,27 @@ describe('server action proxies', () => {
     expect(nav).toHaveBeenCalledWith('/next');
   });
 
+  it('keeps the previous useActionState state when the action redirects', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true, result: null, redirect: '/next' })));
+    vi.stubGlobal('navigate', vi.fn());
+    const proxy = __krateAction('a4b');
+    let state: { error: string } | null = { error: '' };
+    const dispatch = __krateActionState<{ error: string } | null>(
+      (prev, payload) => proxy(prev, payload) as Promise<{ error: string } | null>,
+      () => state,
+      (next) => {
+        state = next;
+      },
+      () => {},
+    );
+    await (dispatch as unknown as { __krateRun: (p: unknown) => Promise<boolean> }).__krateRun(new FormData());
+    expect(state).toEqual({ error: '' });
+  });
+
+  it('ignores a null element when a form binding is detached', () => {
+    expect(() => __krateBindFormAction(null, () => () => {})).not.toThrow();
+  });
+
   it('dispatches krate:revalidate when the action revalidated server caches', async () => {
     const revalidation = { paths: [{ path: '/posts', type: 'page' }], tags: ['posts'] };
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true, result: 1, revalidated: true, revalidation })));
@@ -483,5 +535,30 @@ describe('server action proxies', () => {
     } finally {
       window.removeEventListener('krate:revalidate', handler);
     }
+  });
+});
+
+describe('takeFlash', () => {
+  const encode = (payload: unknown) => btoa(unescape(encodeURIComponent(JSON.stringify(payload)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+    document.cookie = 'krate_flash=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT';
+  });
+
+  it('reads the cookie for the matching action only', () => {
+    document.cookie = 'krate_flash=' + encode({ a: 'act1', r: { error: 'bad' } }) + '; Path=/';
+    expect(takeFlash('other')).toEqual({ found: false });
+    expect(takeFlash('act1')).toEqual({ found: true, value: { error: 'bad' } });
+    expect(takeFlash('act1')).toEqual({ found: false });
+  });
+
+  it('falls back to the notice the server rendered and removes it', () => {
+    document.body.innerHTML =
+      '<form><div data-krate-flash="' + encode({ a: 'act2', r: { error: 'server rendered' } }) + '" data-krate-action="act2">server rendered</div></form>';
+    expect(takeFlash('act1')).toEqual({ found: false });
+    expect(document.querySelector('[data-krate-flash]')).not.toBeNull();
+    expect(takeFlash('act2')).toEqual({ found: true, value: { error: 'server rendered' } });
+    expect(document.querySelector('[data-krate-flash]')).toBeNull();
   });
 });

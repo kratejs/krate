@@ -556,6 +556,10 @@ func TestIslandBundleFailureUsesKR8009(t *testing.T) {
 	if !strings.Contains(err.Error(), "[KR8009]") {
 		t.Fatalf("expected KR8009, got: %v", err)
 	}
+	// The position is the broken package file, not the page that uses it.
+	if !strings.Contains(err.Error(), "node_modules/fake-lib/index.js:1:24: [KR8009]") || !strings.Contains(err.Error(), "used at src/pages/index.tsx:8:6") {
+		t.Fatalf("error must be attributed to the package file, got: %v", err)
+	}
 }
 
 // TestIslandMissingPreactHint verifies the build fails with an actionable

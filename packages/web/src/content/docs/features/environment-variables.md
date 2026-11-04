@@ -35,8 +35,8 @@ The mode depends on the command:
 `NODE_ENV` or `KRATE_ENV` overrides the default mode.
 
 Files named `.env.local` and `.env.*.local` (your local, machine-specific
-overrides) are covered by the repo's `.gitignore` so secrets are not
-committed. Keep non-secret defaults in committed `.env` files.
+overrides) are listed in the `.gitignore` that `create-krate-app` generates so
+secrets are not committed; add them to the `.gitignore` of an existing project. Keep non-secret defaults in committed `.env` files.
 
 ## File syntax
 
@@ -77,10 +77,36 @@ See the `krate-examples` project for a working setup: `examples/.env` and
 In every case the embedded/child process sees the merged map: shell env
 overridden only where files define a variable the shell does not.
 
+## Client-side variables
+
+Variables whose name starts with `KRATE_PUBLIC_` are inlined as string literals
+at build time into both the statically rendered HTML and the browser
+JavaScript, so a page can read them with either spelling:
+
+```tsx
+<a href={import.meta.env.KRATE_PUBLIC_API_URL}>API</a>
+const base = process.env.KRATE_PUBLIC_API_URL;
+```
+
+Values come from the `.env` files described above and from the shell
+environment (the shell wins). These build constants are always available, with
+no prefix: `import.meta.env.MODE` (the environment mode), `DEV`, `PROD`,
+`BASE_URL` (the base path with a trailing slash) and `SSR` (always `false` in
+client and static code); `process.env.NODE_ENV` is `"development"` or
+`"production"`.
+
+Reading any other `process.env.X` or `import.meta.env.X` in a client component
+or a statically rendered page is not possible: the value is never written to
+output and the read is `undefined`. Krate reports it as warning
+[KR8310](/docs/reference/diagnostics/) with the file, line and column.
+Server components, API routes, plugins and server actions keep full access to
+`process.env`.
+
 ## Security
 
 Environment values are **build/serve-time only** and are **never emitted into
-client HTML, JavaScript, or hydration payloads**. Do not put secrets in values
+client HTML, JavaScript, or hydration payloads**, except variables you opt in
+with the `KRATE_PUBLIC_` prefix. Do not put secrets in values
 you render into a page component tree; only server-only contexts (API routes,
 server components, plugins) may read them. Krate logs only that a given env
 file was found/loaded - never its values.

@@ -17,6 +17,10 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 	if expr == nil {
 		return nil
 	}
+	// A spread child `{...kids}` renders the array like `{kids}`.
+	if sp, ok := expr.(*ast.UnaryExpr); ok && sp.Op == "..." && !sp.Postfix && sp.Arg != nil {
+		expr = sp.Arg
+	}
 	if nodes, ok := b.jsxValueChild(expr, parentID, doEscape); ok {
 		return nodes
 	}
@@ -33,12 +37,22 @@ func (b *builder) buildExprContainerChildrenMode(ec *ast.JSXExprContainer, paren
 	if !b.referencesSignal(expr) {
 		return b.nonReactiveChild(expr, parentID, doEscape)
 	}
+	// A derived value holding JSX renders like the equivalent inline
+	// conditional (server markup and updates included).
+	if name := b.extractSignalName(expr); name != "" && b.derivedJSXDepth < 4 {
+		if inlined, ok := b.derivedJSXChild(name); ok {
+			b.derivedJSXDepth++
+			defer func() { b.derivedJSXDepth-- }()
+			return b.exprChild(inlined, parentID, doEscape)
+		}
+	}
 	// Simple signal read: {count()}
-	if isSimpleSignalRead(expr) {
+	if isSimpleSignalRead(expr) && !b.signalHoldsJSX(b.extractSignalName(expr)) {
 		if slot := b.buildTextSlot(expr, parentID); slot != nil {
 			return []SlotNode{slot}
 		}
-		return nil
+		// A call to an ordinary function (`fmt(count())`) is not a getter;
+		// it is a reactive expression, never a dropped child.
 	}
 	// Complex expression (binary, member chain, template, etc.).
 	return []SlotNode{b.buildExprSlot(expr, parentID)}
@@ -91,6 +105,9 @@ func (b *builder) jsxValueChild(expr ast.Expr, parentID string, doEscape bool) (
 			}
 		}
 		return slots, true
+	}
+	if resolved, ok := b.resolveChildrenArg(expr); ok {
+		expr = resolved
 	}
 	folded, ok := foldStructuralReact(expr)
 	if !ok {

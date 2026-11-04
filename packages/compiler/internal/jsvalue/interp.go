@@ -477,6 +477,13 @@ func (in *Interp) object(e *ast.ObjectExpr) Value {
 			}
 			continue
 		}
+		if p.Setter {
+			continue
+		}
+		if p.Getter && p.Value != nil {
+			obj.SetGetter(p.Key, in.Eval(p.Value))
+			continue
+		}
 		var v Value
 		switch {
 		case p.Value == nil && p.Shorthand:

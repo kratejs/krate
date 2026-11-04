@@ -97,9 +97,9 @@ export default function NotFound() {
 
 ## API route errors
 
-A handler that throws returns `500` with a JSON body (embedded QuickJS runtime)
-or the error surfaced by the sidecar. Validate input and return explicit
-statuses:
+A handler that throws is logged and returns `500`. In production the JSON body
+is the generic `{"error":"Internal Server Error"}`; in `krate dev` it also
+carries the message. Validate input and return explicit statuses:
 
 ```ts
 export async function POST(req: Request) {

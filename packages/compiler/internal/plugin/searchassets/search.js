@@ -19,6 +19,27 @@
     var PAGE_FIND_BASE = "/pagefind/";
     var MAX_RESULTS = 8;
     var ENGINE = "docfind";
+    // Non-default locale codes and the site base path (filled in by the docs
+    // plugin). Hits are limited to the locale of the page being viewed.
+    var LOCALES = [];
+    var BASE_PATH = "";
+
+    function stripBase(p) {
+        if (BASE_PATH && (p === BASE_PATH || p.indexOf(BASE_PATH + "/") === 0)) return p.slice(BASE_PATH.length) || "/";
+        return p;
+    }
+
+    function localeOf(href) {
+        var p = stripBase(String(href || "").replace(/^[a-z]+:\/\/[^\/]+/i, ""));
+        var m = /^\/([^\/]+)(\/|$)/.exec(p);
+        return m && LOCALES.indexOf(m[1]) !== -1 ? m[1] : "";
+    }
+
+    function filterLocale(hits) {
+        if (!LOCALES.length || !Array.isArray(hits)) return hits;
+        var cur = localeOf(window.location.pathname);
+        return hits.filter(function (h) { return localeOf(h.href || h.path || h.url) === cur; });
+    }
 
     var trigger = null;
     var backdrop = null;
@@ -218,14 +239,18 @@
     function queryEngine(query, max) {
         var limit = max || MAX_RESULTS;
         if (!query) return Promise.resolve([]);
+        // Over-fetch when the index spans locales, then keep the current one.
+        var fetchLimit = LOCALES.length ? limit * (LOCALES.length + 1) : limit;
         return loadEngine().then(function () {
             if (mode === "pagefind") {
-                return searchPagefind(query, limit).catch(function () { return searchJSON(query, limit); });
+                return searchPagefind(query, fetchLimit).catch(function () { return searchJSON(query, fetchLimit); });
             }
             if (mode === "docfind") {
-                return Promise.resolve(docfind(query, limit)).catch(function () { return searchJSON(query, limit); });
+                return Promise.resolve(docfind(query, fetchLimit)).catch(function () { return searchJSON(query, fetchLimit); });
             }
-            return Promise.resolve(searchJSON(query, limit));
+            return Promise.resolve(searchJSON(query, fetchLimit));
+        }).then(function (hits) {
+            return filterLocale(hits).slice(0, limit);
         });
     }
 

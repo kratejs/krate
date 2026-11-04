@@ -7,6 +7,7 @@ export interface PasswordToggleFieldProps {
   disabled?: boolean;
   id?: string;
   name?: string;
+  /** Render the show/hide button (default true). */
   showToggle?: boolean;
 }
 
@@ -28,7 +29,7 @@ export function PasswordToggleField(props: PasswordToggleFieldProps) {
         id={props.id || ""}
         name={props.name || ""}
       />
-      <button
+      {props.showToggle === false ? null : <button
         class="krate-password-toggle-button"
         type="button"
         onClick={toggle}
@@ -47,7 +48,7 @@ export function PasswordToggleField(props: PasswordToggleFieldProps) {
             <circle cx="12" cy="12" r="3"/>
           </svg>
         )}
-      </button>
+      </button>}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { execBinary } from './binary.js';
+import { commandSpec } from './spawn.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const version = JSON.parse(
@@ -14,11 +15,11 @@ const version = JSON.parse(
 // works on every platform and follows the core package's release channel.
 function scaffold(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
     const channel = /^[^-]+-([A-Za-z]+)/.exec(version);
     const npxArgs = ['--yes', 'create-krate-app@' + (channel ? channel[1] : 'latest'), ...args.slice(1)];
 
-    const proc = spawn(npxCmd, npxArgs, { stdio: 'inherit' });
+    const spec = commandSpec('npx', npxArgs);
+    const proc = spawn(spec.command, spec.args, { stdio: 'inherit', shell: spec.shell });
     proc.on('close', (code) => {
       if (code === 0) resolve();
       else {
@@ -85,7 +86,7 @@ async function main() {
       // Forward help so command-specific help and the canonical command list
       // come from the native binary instead of drifting here.
       try {
-        await execBinary(args);
+        await execBinary(args, undefined, version);
       } catch (err: any) {
         console.error(err.message);
         process.exit(err.exitCode || 1);
@@ -93,7 +94,7 @@ async function main() {
       break;
     default:
       try {
-        await execBinary(args);
+        await execBinary(args, undefined, version);
       } catch (err: any) {
         console.error(err.message);
         process.exit(err.exitCode || 1);

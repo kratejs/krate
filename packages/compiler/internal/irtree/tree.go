@@ -89,6 +89,10 @@ type Annotations struct {
 	// static or private member, an unknown this.x read, ...). The builder
 	// reports it when the component is used.
 	ClassRejections map[string]diag.Diagnostic
+	// DecoratedClasses holds, per top-level class that carries decorators
+	// (lowered by esbuild into a reassignment of the class binding), the
+	// warning reported where the class is used as a component.
+	DecoratedClasses map[string]diag.Diagnostic
 	// LazyComponents maps a component binding declared with React.lazy() to
 	// its declaration. Its hydration code goes into a separate chunk.
 	LazyComponents map[string]LazyComponent
@@ -166,7 +170,14 @@ type ExprSlot struct {
 	ID         SlotID
 	ExprSource string
 	Initial    string
-	Signals    []string
+	// InitialHTML is the SSR markup of a value that holds JSX (a derived
+	// `const badge = on ? <b/> : <i/>`); it is trusted, already-escaped
+	// output of the build-time renderer and replaces Initial.
+	InitialHTML string
+	Signals     []string
+	// File and Pos locate the expression in its source (hydration source maps).
+	File string
+	Pos  ast.Pos
 }
 
 func (s *ExprSlot) slotNode()     {}
@@ -181,9 +192,12 @@ type ConditionalSlot struct {
 	TestJS        string // JS expression for the ternary test (used to toggle)
 	Initial       string
 	InitialActive bool // whether the consequent branch is active initially
-	Consequent    []SlotNode
-	Alternate     []SlotNode
-	Signals       []string
+	// SVG marks a conditional inside an <svg>: its hoisted template is
+	// parsed in the SVG namespace (wrapped in an <svg> element).
+	SVG        bool
+	Consequent []SlotNode
+	Alternate  []SlotNode
+	Signals    []string
 }
 
 func (s *ConditionalSlot) slotNode()     {}
@@ -331,6 +345,10 @@ type HandlerDecl struct {
 	// non-bubbling events), bypassing the delegated bubble-phase listener.
 	Capture bool
 	Direct  bool
+	// File and Pos locate the handler expression in its original source, for
+	// hydration source maps.
+	File string
+	Pos  ast.Pos
 }
 
 // RefBinding - ref={someVar} on an element
@@ -644,6 +662,9 @@ type SlotBinding struct {
 	Signals []string // signal names this binding depends on
 	// List is set for list slots bound through the keyed list runtime.
 	List *ListBinding
+	// File and Pos locate the bound expression in its source, when known.
+	File string
+	Pos  ast.Pos
 }
 
 // Helpers

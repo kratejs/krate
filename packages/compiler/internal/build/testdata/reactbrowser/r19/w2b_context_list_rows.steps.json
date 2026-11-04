@@ -1,0 +1,1 @@
+{ "steps": [ {"op":"click","sel":"#row-b"}, {"op":"click","sel":"#add"}, {"op":"click","sel":"#row-d"} ] }

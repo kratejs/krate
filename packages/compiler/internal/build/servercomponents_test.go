@@ -34,7 +34,7 @@ func scProject(t *testing.T, files map[string]string) (*Builder, string) {
 
 func readManifest(t *testing.T, root string) Manifest {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(root, "dist", "manifest.json"))
+	data, err := os.ReadFile(ManifestPath(filepath.Join(root, "dist")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestAsyncPageIsServerRendered(t *testing.T) {
 	if strings.Contains(string(shell), "<script src=/post/index.") {
 		t.Errorf("async page must not ship hydration code:\n%s", shell)
 	}
-	sm, err := os.ReadFile(filepath.Join(root, "dist", "server-manifest.json"))
+	sm, err := os.ReadFile(ServerManifestPath(filepath.Join(root, "dist")))
 	if err != nil {
 		t.Fatal(err)
 	}

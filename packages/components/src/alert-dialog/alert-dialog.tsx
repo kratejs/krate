@@ -1,10 +1,21 @@
 import './alert-dialog.css';
 import { createScope, createScopeFlags, createCSSGroup, type CSSScope } from '@krate/runtime';
+import { OverlayBridge } from '../overlay/overlay-bridge';
 
 const AlertDialogCtx = createScope<string | null>();
 
 export interface AlertDialogProps {
   label?: string;
+  /** Value of the content shown initially (a literal, like Tabs `defaultValue`). */
+  defaultValue?: string;
+  /** Open the first content initially. */
+  defaultOpen?: boolean;
+  /** Controlled state: true opens the first content, false closes it. Hydrates a small bridge. */
+  open?: boolean;
+  /** Called with the new state when the overlay opens or closes. Hydrates a small bridge. */
+  onOpenChange?: (open: boolean) => void;
+  /** Element id: a handle for `openOverlay('#id')` / `closeOverlay('#id')`. */
+  id?: string;
   children?: any;
 }
 
@@ -13,7 +24,10 @@ export function AlertDialog(props: AlertDialogProps) {
   const open = createCSSGroup<string>(null, { as: 'modal', label: props.label });
   return (
     <AlertDialogCtx.Provider value={open}>
-      <div class="krate-alert-dialog">{props.children}</div>
+      <div class="krate-alert-dialog" id={props.id}>
+        {props.open !== undefined || props.onOpenChange ? <OverlayBridge open={props.open} onOpenChange={props.onOpenChange} /> : null}
+        {props.children}
+      </div>
     </AlertDialogCtx.Provider>
   );
 }
@@ -54,7 +68,7 @@ export interface AlertDialogTitleProps {
 
 /** @deprecated Use `AlertDialog.Title` instead. */
 export function AlertDialogTitle(props: AlertDialogTitleProps) {
-  return <h2 class="krate-alert-dialog-title">{props.children}</h2>;
+  return <h2 class="krate-alert-dialog-title" data-ka="title">{props.children}</h2>;
 }
 
 export interface AlertDialogDescriptionProps {
@@ -63,7 +77,7 @@ export interface AlertDialogDescriptionProps {
 
 /** @deprecated Use `AlertDialog.Description` instead. */
 export function AlertDialogDescription(props: AlertDialogDescriptionProps) {
-  return <p class="krate-alert-dialog-description">{props.children}</p>;
+  return <p class="krate-alert-dialog-description" data-ka="desc">{props.children}</p>;
 }
 
 export interface AlertDialogActionProps {

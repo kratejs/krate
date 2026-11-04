@@ -14,17 +14,26 @@
   --krate-radius-lg: 12px;
   --krate-gap: 8px;
 
-  --krate-primary: #f97316;
+  /* Solid fills carry --krate-primary-fg text: #c2410c with white is 5.2:1
+     (WCAG AA). --krate-primary-text is the same hue as readable text on the
+     page background (lighter in dark mode). */
+  --krate-primary: #c2410c;
   --krate-primary-hover: color-mix(in srgb, var(--krate-primary) 85%, black);
   --krate-primary-fg: #ffffff;
+  --krate-primary-text: var(--krate-primary);
   --krate-focus-ring: var(--krate-primary);
-  --krate-danger: #ef4444;
+  --krate-danger: #dc2626;
   --krate-danger-hover: color-mix(in srgb, var(--krate-danger) 85%, black);
   --krate-success: #22c55e;
   --krate-warning: #f59e0b;
+  /* Readable text variants of the status colors (AA on the page background and
+     on their 15% tints); the dark scopes switch to lighter hues. */
+  --krate-danger-text: #b91c1c;
+  --krate-success-text: #15803d;
+  --krate-warning-text: #854d0e;
 
   --krate-fg: #09090b;
-  --krate-muted: #71717a;
+  --krate-muted: #636368;
   --krate-bg: #ffffff;
   --krate-bg-subtle: #fafafa;
   --krate-surface: #f4f4f5;
@@ -69,6 +78,10 @@
     --krate-shadow-md: 0 2px 6px rgba(0, 0, 0, 0.4), 0 14px 32px -10px rgba(0, 0, 0, 0.55);
     --krate-shadow-lg: 0 6px 14px rgba(0, 0, 0, 0.45), 0 30px 60px -20px rgba(0, 0, 0, 0.65);
     --krate-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+    --krate-primary-text: color-mix(in srgb, var(--krate-primary) 70%, white);
+    --krate-danger-text: #f87171;
+    --krate-success-text: #4ade80;
+    --krate-warning-text: #facc15;
   }
 }
 
@@ -88,11 +101,15 @@
   --krate-shadow-md: 0 2px 6px rgba(0, 0, 0, 0.4), 0 14px 32px -10px rgba(0, 0, 0, 0.55);
   --krate-shadow-lg: 0 6px 14px rgba(0, 0, 0, 0.45), 0 30px 60px -20px rgba(0, 0, 0, 0.65);
   --krate-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --krate-primary-text: color-mix(in srgb, var(--krate-primary) 70%, white);
+  --krate-danger-text: #f87171;
+  --krate-success-text: #4ade80;
+  --krate-warning-text: #facc15;
 }
 
 :where(:root[data-theme='light']) {
   --krate-fg: #09090b;
-  --krate-muted: #71717a;
+  --krate-muted: #636368;
   --krate-bg: #ffffff;
   --krate-bg-subtle: #fafafa;
   --krate-surface: #f4f4f5;
@@ -101,6 +118,10 @@
   --krate-border-strong: #d4d4d8;
   --krate-card-bg: #ffffff;
   --krate-overlay: rgba(9, 9, 11, 0.4);
+  --krate-primary-text: var(--krate-primary);
+  --krate-danger-text: #b91c1c;
+  --krate-success-text: #15803d;
+  --krate-warning-text: #854d0e;
 }
 
 /* Reduced motion: every component class (and its ::before/::after parts) loses

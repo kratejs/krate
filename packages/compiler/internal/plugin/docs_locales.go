@@ -13,6 +13,9 @@ type altLink struct {
 	Code  string `json:"code,omitempty"`
 	Label string `json:"label"`
 	URL   string `json:"url"`
+	// Fallback marks a locale with no translation of this page: URL is that
+	// locale's home, not an equivalent page, so it never becomes an hreflang.
+	Fallback bool `json:"fallback,omitempty"`
 }
 
 // docsLocaleInfo carries the per-page i18n/versioning context into the generated
@@ -147,18 +150,35 @@ func docsRoute(locale, defaultLocale, version, currentVersion, path string) stri
 // localeSwitchLinksWithLabels builds the LocaleSwitcher entries for a page from
 // a translation map (locale -> URL), falling back to each locale's docs root.
 // Per-locale labels (i18n.localeLabels) override the built-in endonyms.
-func localeSwitchLinksWithLabels(locales []string, defaultLocale string, byLocale, labels map[string]string) []altLink {
+//
+// roots maps a locale to the URL of its landing page. When given, a locale
+// without a translation of this page links to its landing page (marked
+// Fallback) or, with no landing page either, is left out of the switcher.
+func localeSwitchLinksWithLabels(locales []string, defaultLocale string, byLocale, labels map[string]string, roots ...map[string]string) []altLink {
 	out := make([]altLink, 0, len(locales))
+	var rootBy map[string]string
+	if len(roots) > 0 {
+		rootBy = roots[0]
+	}
 	for _, loc := range locales {
 		url := byLocale[loc]
+		fallback := false
 		if url == "" {
-			url = docs.LocaleURL(loc, defaultLocale, "index")
+			if rootBy != nil {
+				url = rootBy[loc]
+				if url == "" {
+					continue
+				}
+				fallback = true
+			} else {
+				url = docs.LocaleURL(loc, defaultLocale, "index")
+			}
 		}
 		label := localeLabel(loc)
 		if l := labels[loc]; l != "" {
 			label = l
 		}
-		out = append(out, altLink{Code: loc, Label: label, URL: url})
+		out = append(out, altLink{Code: loc, Label: label, URL: url, Fallback: fallback})
 	}
 	return out
 }

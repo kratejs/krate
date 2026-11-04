@@ -347,7 +347,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 
 	// Sidebar assets + the search index use the default locale/current version.
 	defaultBundle := bundles[0]
-	p.writeAssets(ctx, defaultBundle.sections, defaultBundle.pages, opts)
+	p.writeAssets(ctx, defaultBundle.sections, allPages, opts)
 
 	// Search index (built across every locale/version).
 	searchEnabled, searchEngine, searchMaxResults := searchConfig(opts)
@@ -405,7 +405,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 				DefaultLocale:  defaultLocale,
 				Version:        page.Version,
 				CurrentVersion: currentVersion,
-				Locales:        localeSwitchLinksWithLabels(locales, defaultLocale, localeAlts[page.Version+"\x00"+page.Path], cfg.I18n.LocaleLabels),
+				Locales:        localeSwitchLinksWithLabels(locales, defaultLocale, localeAlts[page.Version+"\x00"+page.Path], cfg.I18n.LocaleLabels, localeRoots(locales, page.Version, versionRoot)),
 				Versions:       versionSwitchLinksWithLabels(versions, currentVersion, page.Locale, defaultLocale, versionAlts[page.Locale+"\x00"+page.Path], versionRoot, cfg.Versions.Labels),
 				VersionBanner:  cfg.Versions.Enabled() && cfg.Versions.BannerEnabled() && page.Version != currentVersion,
 			}
@@ -421,7 +421,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 				defer wg.Done()
 
 				tocItems := pageTocItems(page)
-				breadcrumbs := docs.BuildBreadcrumbsURL(page.Locale, defaultLocale, page.Path)
+				breadcrumbs := docs.BuildBreadcrumbsTitled(page.Locale, defaultLocale, page.Path, b.pages)
 
 				fileLayoutRel := theme.importSpecifier(filepath.Dir(tsxPath))
 				tsxSource := p.generateTSX(ctx, cfg, page, fileLayoutRel, searchEnabled, b.sections, tocItems, breadcrumbs, prevTitle, prevLink, nextTitle, nextLink, li, opts, themeOptions, cfg.Markdown, docs.DocsBasePath)
@@ -715,10 +715,13 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	var mdxImports []string
 	var segments []markdown.MDXSegment
 	var rawSrc string
+	var mdxFrontmatter string
 	if data, err := os.ReadFile(page.SourcePath); err == nil {
 		rawSrc = string(data)
-		mdxImports = markdown.ExtractImports(rawSrc)
-		_, segments = markdown.ParseMDXSegments(rawSrc, mdConfig)
+		res := markdown.Compile(rawSrc, mdConfig, markdown.Options{MDX: strings.HasSuffix(page.SourcePath, ".mdx")})
+		mdxImports = res.ESM
+		segments = res.Segments
+		mdxFrontmatter = markdown.FrontmatterDecl(res.Frontmatter, res.ESM)
 	}
 	useCode := markdown.HasCodeSegments(segments)
 	useAside := markdown.HasAsideSegments(segments)
@@ -726,6 +729,9 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	for _, imp := range mdxImports {
 		sb.WriteString(imp)
 		sb.WriteString("\n")
+	}
+	if segmentsReference(segments, "frontmatter") {
+		sb.WriteString(mdxFrontmatter)
 	}
 
 	// Auto-import the built-in components referenced by the page: Code/Aside
@@ -758,7 +764,11 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	if len(page.CustomSidebar) > 0 {
 		sidebarItems = page.CustomSidebar
 	}
-	enriched := docs.EnrichSidebarItemsURL(sidebarItems, page.URL)
+	bp := cfg.BaseURLPath()
+	enriched := prefixSidebarURLs(docs.EnrichSidebarItemsURL(sidebarItems, page.URL), bp)
+	breadcrumbs = prefixBreadcrumbURLs(breadcrumbs, bp)
+	prevLink, nextLink = prefixURL(bp, prevLink), prefixURL(bp, nextLink)
+	li.Locales, li.Versions = prefixAltLinks(li.Locales, bp), prefixAltLinks(li.Versions, bp)
 	sidebarJSON := marshalJSONArray(enriched)
 	tocJSON := marshalJSONArray(tocItems)
 	breadcrumbsJSON := marshalJSONArray(breadcrumbs)
@@ -767,7 +777,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	siteTitleJSON, _ := json.Marshal(siteTitle)
 	currentPathJSON, _ := json.Marshal(page.Path)
 	templateJSON, _ := json.Marshal(page.Template)
-	routeBaseJSON, _ := json.Marshal(strings.TrimRight(routeBase, "/"))
+	routeBaseJSON, _ := json.Marshal(bp + strings.TrimRight(routeBase, "/"))
 
 	// Per-page document language (the shell ships lang="en"; the build applies
 	// this override server-side so crawlers/no-JS see the right language).
@@ -860,7 +870,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		sb.WriteString(string(tagsJSON))
 		sb.WriteString(",\n")
 		sb.WriteString("    tagLinks: ")
-		sb.WriteString(string(marshalJSONArray(taxonomyLinks(routeBase, "tags", page.Tags))))
+		sb.WriteString(string(marshalJSONArray(taxonomyLinks(bp+routeBase, "tags", page.Tags))))
 		sb.WriteString(",\n")
 	}
 	if len(page.Categories) > 0 {
@@ -869,7 +879,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		sb.WriteString(string(catsJSON))
 		sb.WriteString(",\n")
 		sb.WriteString("    categoryLinks: ")
-		sb.WriteString(string(marshalJSONArray(taxonomyLinks(routeBase, "categories", page.Categories))))
+		sb.WriteString(string(marshalJSONArray(taxonomyLinks(bp+routeBase, "categories", page.Categories))))
 		sb.WriteString(",\n")
 	}
 	if page.Date != "" {
@@ -941,20 +951,21 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	// Load the headless search module (defines `window.__krateSearch`) so the
 	// theme's search UI can query the index. The theme owns all markup/styles.
 	if searchEnabled {
-		sb.WriteString("        <script src=\"/docs/search/search.js\" defer={true}></script>\n")
+		sb.WriteString("        <script src=\"" + bp + "/docs/search/search.js\" defer={true}></script>\n")
 	}
 	// hreflang alternates for every configured locale (absolute when seo.baseUrl
 	// is set, so crawlers can match translations).
 	if len(li.Locales) > 0 {
-		base := strings.TrimRight(cfg.SEO.BaseURL, "/")
 		for _, alt := range li.Locales {
-			if alt.Code == "" {
+			// Only real translations are alternates; a fallback entry points at
+			// the locale's home page, which is not an equivalent of this page.
+			if alt.Code == "" || alt.Fallback {
 				continue
 			}
 			sb.WriteString("        <link rel=\"alternate\" hreflang=")
 			sb.WriteString(jsxAttrExpr(alt.Code))
 			sb.WriteString(" href=")
-			sb.WriteString(jsxAttrExpr(base + alt.URL))
+			sb.WriteString(jsxAttrExpr(absoluteDocsURL(cfg, alt.URL)))
 			sb.WriteString(" />\n")
 		}
 	}
@@ -1013,7 +1024,7 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 			}
 			if seg.Code != nil {
 				sb.WriteString("        ")
-				sb.WriteString(markdown.BuildCodeJSX(seg.Code.Lang, seg.Code.Code))
+				sb.WriteString(markdown.BuildCodeJSXMeta(seg.Code.Lang, seg.Code.Meta, seg.Code.Code))
 				sb.WriteString("\n")
 			}
 			if seg.Aside != nil {
@@ -1128,6 +1139,87 @@ func (p *DocsPlugin) writeAssets(ctx *BuildHookCtx, sections []docs.SidebarItem,
 	sidebarData, _ := json.Marshal(sections)
 	_ = os.WriteFile(filepath.Join(outDir, "data/sidebar.json"), sidebarData, 0644)
 
-	searchData, _ := json.Marshal(docs.BuildSearchIndex(pages))
+	basePath := ""
+	if cfg, ok := ctx.Config.(*config.Config); ok {
+		basePath = cfg.BaseURLPath()
+	}
+	searchData, _ := json.Marshal(docs.BuildSearchIndexBase(pages, basePath))
 	_ = os.WriteFile(filepath.Join(outDir, "data/search-index.json"), searchData, 0644)
+}
+
+// segmentsReference reports whether any JSX segment mentions the identifier.
+func segmentsReference(segs []markdown.MDXSegment, ident string) bool {
+	for _, s := range segs {
+		if s.JSX != "" && strings.Contains(s.JSX, ident) {
+			return true
+		}
+	}
+	return false
+}
+
+// absoluteDocsURL returns the absolute (when seo.baseUrl is set) or
+// base-path-prefixed form of a docs URL path.
+func absoluteDocsURL(cfg *config.Config, urlPath string) string {
+	bp := cfg.BaseURLPath()
+	if cfg.SEO.BaseURL != "" {
+		return CanonicalURL(cfg.SEO.BaseURL, bp, urlPath)
+	}
+	return bp + urlPath
+}
+
+// prefixURL prepends the site base path to a root-relative URL.
+func prefixURL(bp, u string) string {
+	if bp == "" || !strings.HasPrefix(u, "/") || strings.HasPrefix(u, "//") {
+		return u
+	}
+	return bp + u
+}
+
+func prefixSidebarURLs(items []docs.SidebarItem, bp string) []docs.SidebarItem {
+	if bp == "" || len(items) == 0 {
+		return items
+	}
+	out := make([]docs.SidebarItem, len(items))
+	for i, it := range items {
+		it.URL = prefixURL(bp, it.URL)
+		it.IndexURL = prefixURL(bp, it.IndexURL)
+		it.Children = prefixSidebarURLs(it.Children, bp)
+		out[i] = it
+	}
+	return out
+}
+
+func prefixBreadcrumbURLs(items []docs.Breadcrumb, bp string) []docs.Breadcrumb {
+	if bp == "" || len(items) == 0 {
+		return items
+	}
+	out := make([]docs.Breadcrumb, len(items))
+	for i, it := range items {
+		it.URL = prefixURL(bp, it.URL)
+		out[i] = it
+	}
+	return out
+}
+
+func prefixAltLinks(links []altLink, bp string) []altLink {
+	if bp == "" || len(links) == 0 {
+		return links
+	}
+	out := make([]altLink, len(links))
+	for i, l := range links {
+		l.URL = prefixURL(bp, l.URL)
+		out[i] = l
+	}
+	return out
+}
+
+// localeRoots maps each locale to its landing URL for a version.
+func localeRoots(locales []string, version string, versionRoot map[string]string) map[string]string {
+	out := make(map[string]string, len(locales))
+	for _, l := range locales {
+		if u := versionRoot[l+"\x00"+version]; u != "" {
+			out[l] = u
+		}
+	}
+	return out
 }

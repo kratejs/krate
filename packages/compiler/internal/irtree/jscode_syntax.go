@@ -194,6 +194,9 @@ func renderUnaryJS(e *ast.UnaryExpr, signals map[string]ast.Expr) string {
 		return e.Op
 	}
 	arg := generateExprJS(e.Arg, signals)
+	if fn, ok := unwrapTypes(e.Arg).(*ast.ArrowFn); ok && !fn.Function && e.Op != "..." {
+		arg = "(" + arg + ")"
+	}
 	switch {
 	case e.Postfix:
 		return arg + e.Op

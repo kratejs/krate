@@ -203,7 +203,7 @@ func startSidecar(t *testing.T, node, repoRoot, root, outDir string) (string, fu
 	cmd := exec.Command(node, staged)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("KRATE_SSR_PORT=%d", port),
-		fmt.Sprintf("KRATE_MANIFEST=%s", filepath.Join(outDir, "server-manifest.json")),
+		fmt.Sprintf("KRATE_MANIFEST=%s", ServerManifestPath(outDir)),
 		fmt.Sprintf("KRATE_ROOT=%s", root),
 	)
 	cmd.Stdout = os.Stdout

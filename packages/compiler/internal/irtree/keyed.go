@@ -1,6 +1,7 @@
 package irtree
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -774,8 +775,83 @@ func reactiveComponentFn(fn *ast.FnDecl) *ast.FnDecl {
 			cp.Params = []*ast.Param{{Position: fn.Params[0].Position, Name: reactivePropsParam}}
 		}
 	}
-	cp.Body = reactifyReturns(inlineComponentLocals(body))
+	cp.Body = reactifyReturns(inlineComponentLocals(liveContextReads(body)))
 	return &cp
+}
+
+// liveContextReads rewrites the derived context reads of a row component
+// (`const sel = krateDerived(() => Sel.useContext())`) to
+// `Sel.useContextLive()`: the provider is flattened at build time, so the row
+// captures the live provider getter when it is created (see
+// krateContextRows) and keeps reading it after the row is built.
+func liveContextReads(body []ast.Stmt) []ast.Stmt {
+	out := make([]ast.Stmt, 0, len(body))
+	changed := false
+	for _, stmt := range body {
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok {
+			out = append(out, stmt)
+			continue
+		}
+		decls := make([]*ast.VarDecl, 0, len(vs.Decls))
+		stmtChanged := false
+		for _, d := range vs.Decls {
+			if d != nil && !d.IsDestructuring && d.Name != "" {
+				if ctx, ok := derivedContextRead(d.Init); ok {
+					cp := *d
+					cp.Init = &ast.CallExpr{Callee: &ast.MemberExpr{Object: &ast.Identifier{Name: ctx}, Property: &ast.Identifier{Name: "useContextLive"}}}
+					d = &cp
+					stmtChanged = true
+				}
+			}
+			decls = append(decls, d)
+		}
+		if stmtChanged {
+			changed = true
+			out = append(out, &ast.VarStmt{Position: vs.Position, Kind: vs.Kind, Decls: decls})
+		} else {
+			out = append(out, stmt)
+		}
+	}
+	if !changed {
+		return body
+	}
+	return out
+}
+
+// rowContextEntries renders the live provider getters of the active dynamic
+// contexts as krateContextRows entries, or "" when none are active.
+func (b *builder) rowContextEntries() string {
+	if len(b.contextValues) == 0 {
+		return ""
+	}
+	ctxs := make([]string, 0, len(b.contextValues))
+	for ctx := range b.contextValues {
+		ctxs = append(ctxs, ctx)
+	}
+	sort.Strings(ctxs)
+	var parts []string
+	for _, ctx := range ctxs {
+		js := generateExprJS(b.contextValues[ctx], b.sigMap())
+		if js == "" {
+			continue
+		}
+		parts = append(parts, "["+ctx+",()=>("+js+")]")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+// wrapRowContext makes the active dynamic providers visible to the rows a
+// list binding renders later.
+func (b *builder) wrapRowContext(render string) string {
+	entries := b.rowContextEntries()
+	if entries == "" {
+		return render
+	}
+	return "krateContextRows(" + entries + "," + render + ")"
 }
 
 // fnReturnsJSX reports whether a function body returns JSX at top level.
@@ -956,4 +1032,21 @@ func assignsIdent(js, name string) bool {
 		}
 	}
 	return false
+}
+
+// derivedContextRead matches `krateDerived(() => Ctx.useContext())` with an
+// expression or single-return block body.
+func derivedContextRead(expr ast.Expr) (string, bool) {
+	if derivedCallee(expr) != "krateDerived" {
+		return "", false
+	}
+	arrow, ok := expr.(*ast.CallExpr).Args[0].(*ast.ArrowFn)
+	if !ok || len(arrow.Params) != 0 {
+		return "", false
+	}
+	body := arrowBodyExpr(arrow)
+	if body == nil || !isContextRead(body) {
+		return "", false
+	}
+	return contextReadTarget(body)
 }

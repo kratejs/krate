@@ -827,7 +827,7 @@ func (s *Service) toolCheck(ctx context.Context, _ map[string]any) (ToolResult, 
 	reportProgress(ctx, 0, 1, "running checks")
 	s.logMessage("info", "running quality checks")
 	// Build if the output directory is not present, then evaluate gates.
-	if _, err := os.Stat(filepath.Join(s.cfg.OutDir, "manifest.json")); err != nil {
+	if _, err := os.Stat(build.ResolveManifestPath(s.cfg.OutDir, "manifest.json")); err != nil {
 		if out, buildErr := s.runBuild(ctx); buildErr != nil {
 			return ErrorResult(fmt.Sprintf("build failed: %v\n\n%s", buildErr, out)), nil
 		}
@@ -1687,7 +1687,7 @@ func (s *Service) readContentResource(ctx context.Context, uri string) (Resource
 }
 
 func (s *Service) readManifestResource(ctx context.Context, uri string) (ResourceContents, *rpcError) {
-	data, err := os.ReadFile(filepath.Join(s.cfg.OutDir, "manifest.json"))
+	data, err := os.ReadFile(build.ResolveManifestPath(s.cfg.OutDir, "manifest.json"))
 	if err != nil {
 		return jsonResource(uri, map[string]any{"built": false})
 	}

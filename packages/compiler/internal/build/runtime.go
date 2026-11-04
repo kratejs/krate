@@ -49,6 +49,11 @@ type runtimeChunkOptions struct {
 	Compat bool
 	// Suspense appends the Suspense/use()/lazy/transition runtime.
 	Suspense bool
+	// Trim assembles only the runtime features Scan references (production
+	// builds); otherwise the full hydration bundle is written.
+	Trim bool
+	// Scan is the client code checked for runtime feature references.
+	Scan string
 }
 
 // runtimeNeedsCompat reports whether any page's hydration script references a
@@ -159,7 +164,13 @@ func probeNamedBundleFromDisk(projectRoot string, names []string) string {
 // Returns the relative path (e.g. "chunks/runtime.abc123.js") for use in <script> tags.
 // Returns empty string if runtime is unavailable.
 func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opts runtimeChunkOptions) string {
-	runtime := loadRuntimeFromDiskFor(projectRoot, opts.SPA)
+	runtime := ""
+	if opts.Trim {
+		runtime, _ = loadRuntimeFeatures(projectRoot, opts.SPA, opts.Scan)
+	}
+	if runtime == "" {
+		runtime = loadRuntimeFromDiskFor(projectRoot, opts.SPA)
+	}
 	if runtime == "" {
 		return ""
 	}
@@ -239,5 +250,18 @@ func warnMissingRuntime(runtimeJS string, results []*PageResult) {
 			fmt.Fprintf(os.Stderr, "  %sWarning:%s %s\n      hint: %s\n", cYellow, cReset, d.Error(), d.Hint)
 			return
 		}
+	}
+}
+
+// runtimeChunkOptions derives the shared runtime chunk's contents from the
+// built pages. Dev builds always write the full runtime: a rebuild of a few
+// pages must not change what the others were built against.
+func (b *Builder) runtimeChunkOptions(results []*PageResult) runtimeChunkOptions {
+	return runtimeChunkOptions{
+		SPA:      b.Cfg.SPAEnabled(),
+		Compat:   runtimeNeedsCompat(results),
+		Suspense: runtimeNeedsSuspense(results),
+		Trim:     !b.DevMode,
+		Scan:     runtimeScanText(results),
 	}
 }

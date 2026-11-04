@@ -597,3 +597,44 @@ func TestTransitionCSSHonorsReducedMotion(t *testing.T) {
 		t.Errorf("no transition requested, got %q", got)
 	}
 }
+
+// TestRolePresetsAccessibleSurface pins the widget roles the keyboard enhancer
+// relies on: triggers are buttons/tabs, close items have their own role, and a
+// native switch keeps its role on the input.
+func TestRolePresetsAccessibleSurface(t *testing.T) {
+	cases := []struct {
+		as                                string
+		trigger, item, panel, control, hp string
+		modal, anchored                   bool
+	}{
+		{"dialog", "button", "", "dialog", "", "dialog", true, false},
+		{"modal", "button", "", "alertdialog", "", "dialog", true, false},
+		{"popover", "button", "", "dialog", "", "dialog", false, true},
+		{"menu", "button", "menuitem", "menu", "", "menu", false, true},
+		{"menubar", "button", "menuitem", "menu", "", "menu", false, true},
+		{"nav", "button", "", "", "", "", false, true},
+		{"tabs", "tab", "", "tabpanel", "", "", false, false},
+		{"switch", "", "", "", "switch", "", false, false},
+	}
+	for _, c := range cases {
+		r, ok := rolePresets[c.as]
+		if !ok {
+			t.Fatalf("missing preset %q", c.as)
+		}
+		if r.Trigger != c.trigger || r.Item != c.item || r.Panel != c.panel || r.Control != c.control || r.Haspopup != c.hp || r.Modal != c.modal || r.Anchored != c.anchored {
+			t.Errorf("%s: got %+v", c.as, r)
+		}
+		if r.Name != c.as {
+			t.Errorf("%s: Name=%q", c.as, r.Name)
+		}
+		if want := c.trigger != ""; r.NeedsRuntime() != want {
+			t.Errorf("%s: NeedsRuntime=%v want %v", c.as, r.NeedsRuntime(), want)
+		}
+	}
+	// No preset puts a container role over the panels of a menu or tabs.
+	for _, as := range []string{"menu", "menubar", "tabs", "tablist"} {
+		if rolePresets[as].Container != "" {
+			t.Errorf("%s must not set a container role", as)
+		}
+	}
+}

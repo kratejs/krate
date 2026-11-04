@@ -77,7 +77,15 @@ func foldStructuralReact(expr ast.Expr) (ast.Expr, bool) {
 	}
 
 	if id, ok := call.Callee.(*ast.Identifier); ok && id.Name == "cloneElement" && len(call.Args) >= 1 {
-		el, ok := call.Args[0].(*ast.JSXElement)
+		first := call.Args[0]
+		for {
+			ta, ok := first.(*ast.TypeAssertion)
+			if !ok {
+				break
+			}
+			first = ta.Expr
+		}
+		el, ok := first.(*ast.JSXElement)
 		if !ok {
 			return nil, false
 		}

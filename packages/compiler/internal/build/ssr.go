@@ -98,6 +98,33 @@ func (s *SSRServer) InvalidateDev(route, source, bundlePath string) error {
 	return s.internalPost("/__krate/ssr/invalidate", map[string]string{"route": route, "source": source, "bundlePath": bundlePath})
 }
 
+// InvalidateDevRoutes refreshes the server manifest after a dev rebuild and
+// drops the renderer's cached modules for the rebuilt routes (every request-time
+// page when routes is empty, as after a full rebuild). It runs once per rebuild
+// regardless of how many browser tabs are connected.
+func (s *SSRServer) InvalidateDevRoutes(routes []string) {
+	want := make(map[string]bool, len(routes))
+	for _, r := range routes {
+		want[r] = true
+	}
+	s.mu.Lock()
+	_ = s.loadManifestLocked()
+	var pages []ManifestPage
+	if s.manifest != nil {
+		for _, p := range s.manifest.Pages {
+			if p.Source != "" && (len(want) == 0 || want[p.Route]) {
+				pages = append(pages, p)
+			}
+		}
+	}
+	s.mu.Unlock()
+	for _, p := range pages {
+		if err := s.InvalidateDev(p.Route, p.Source, p.BundlePath); err != nil && !errors.Is(err, errSSRNotRunning) {
+			fmt.Fprintf(os.Stderr, "  %sSSR invalidation failed (%s):%s %v\n", cYellow, p.Route, cReset, err)
+		}
+	}
+}
+
 // SetTuning configures the render timeout (ms) and ISR cache size exported to
 // the sidecar via KRATE_SSR_TIMEOUT / KRATE_SSR_MAX_CACHE.
 func (s *SSRServer) SetTuning(timeoutMs, maxCacheSize int) {
@@ -169,7 +196,7 @@ func (s *SSRServer) LoadManifest() error {
 // loadManifestLocked reads the server manifest into s.manifest. The caller must
 // hold s.mu.
 func (s *SSRServer) loadManifestLocked() error {
-	manifestPath := filepath.Join(s.outputDirLocked(), "server-manifest.json")
+	manifestPath := ResolveManifestPath(s.outputDirLocked(), "server-manifest.json")
 	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
 		return fmt.Errorf("server-manifest.json not found in dist/ - no SSR/ISR pages to render")
 	}
@@ -232,7 +259,7 @@ func (s *SSRServer) Start() error {
 		s.mu.Unlock()
 		return err
 	}
-	manifestPath := filepath.Join(s.outputDirLocked(), "server-manifest.json")
+	manifestPath := ResolveManifestPath(s.outputDirLocked(), "server-manifest.json")
 
 	runtimeCmd, runtimeArgs, err := ssrRuntimeCommand(s.runtime, rendererPath)
 	if err != nil {
@@ -432,19 +459,6 @@ func (s *SSRServer) GetISRPages() []ISRPage {
 		}
 	}
 	return pages
-}
-
-// findPage returns the ManifestPage for a given route, or nil if not found.
-func (s *SSRServer) findPage(route string) *ManifestPage {
-	if s.manifest == nil {
-		return nil
-	}
-	for i := range s.manifest.Pages {
-		if s.manifest.Pages[i].Route == route {
-			return &s.manifest.Pages[i]
-		}
-	}
-	return nil
 }
 
 // FindPageForRoute matches a URL path against route patterns (including [param] segments)

@@ -78,7 +78,10 @@ func generateRobotsTxt(ctx *BuildResultHookCtx) error {
 	disallow := firstNonEmpty(opts.Disallow, cfg.Robots.Disallow)
 	sitemapURL := firstNonEmpty(opts.Sitemap, cfg.Robots.Sitemap)
 	if sitemapURL == "" && baseURL != "" {
-		sitemapURL = baseURL + "/sitemap.xml"
+		sitemapURL = baseURL + cfg.BaseURLPath() + "/sitemap.xml"
+		if bp := cfg.BaseURLPath(); bp != "" && strings.HasSuffix(baseURL, bp) {
+			sitemapURL = baseURL + "/sitemap.xml"
+		}
 	}
 
 	var b strings.Builder

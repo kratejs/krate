@@ -20,8 +20,9 @@ window.__krateErrs=[];
 window.__krateModule=function(k,f){var m=window.__krate_mod||(window.__krate_mod={});if(!Object.prototype.hasOwnProperty.call(m,k))m[k]=f();return m[k];};
 window.__krate_props={};
 window.$esc=function(v){var d=document.createElement('div');d.textContent=v;return d.innerHTML};
-window.__safe=function(fn,n){try{return fn();}catch(e){if(window.__krateOnError&&window.__krateOnError(e,n))return null;try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}return null;}};
-window.__krateFx=function(n,f){return function(){try{return f();}catch(e){if(n&&n.isConnected===false){try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}return;}throw e;}};};
+window.__krateLog=function(e){try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}try{console.error(e);}catch(_){}};
+window.__safe=function(fn,n){try{return fn();}catch(e){if(window.__krateOnError&&window.__krateOnError(e,n))return null;__krateLog(e);return null;}};
+window.__krateFx=function(n,f){return function(){try{return f();}catch(e){if(n&&n.isConnected===false){__krateLog(e);return;}throw e;}};};
 (function(){
 var __root=document.getElementById('root')||document.body;
 var __cache=new Map();
@@ -33,12 +34,14 @@ function scan(){__cache.clear();__tpls.clear();if(typeof krateCondReset==='funct
 scan();
 window.findSlot=function(id){var q='[data-k="k:'+id+'"]';var el=__root.querySelector(q);if(el)return el;var c=__cache.get(id);if(c)return c;var found=null;__tpls.forEach(function(t){if(!found)found=t.content.querySelector(q);});if(!found&&typeof krateCondDetached==='function'){var ds=krateCondDetached();for(var i=0;i<ds.length&&!found;i++)found=ds[i].querySelector(q);}if(!found&&typeof kratePortalFind==='function'){var pr=__portalRoots();if(typeof krateCondDetached==='function')pr=pr.concat(krateCondDetached());found=kratePortalFind(q,pr);}if(!found&&document.head)found=document.head.querySelector(q);return found;};
 window.refreshSlots=scan;
-window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(v==null||v===false)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}}));},n);};
-window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;var __first=true;__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}var _fa=document.activeElement,_fid=_fa&&_fa!==document.body&&_fa.id&&n.parentNode&&n.parentNode.contains(_fa)?_fa.id:null;while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);if(_fid&&!_fa.isConnected){var _fn=document.getElementById(_fid);if(_fn&&_fn.focus)_fn.focus();}}));},n);};
+window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(v==null||v===false||v===true)v='';if(n.nextSibling&&n.nextSibling.nodeType===3){n.nextSibling.textContent=String(v);}else{var t=document.createTextNode(String(v));n.parentNode.insertBefore(t,n.nextSibling);}}));},n);};
+window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;var __first=true;__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}var _fa=document.activeElement,_fid=_fa&&_fa!==document.body&&_fa.id&&n.parentNode&&n.parentNode.contains(_fa)?_fa.id:null;while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false||v===true)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);if(_fid&&!_fa.isConnected){var _fn=document.getElementById(_fid);if(_fn&&_fn.focus)_fn.focus();}}));},n);};
 window.kbindList=function(id,src,key,render,mode){var n=findSlot(id);if(!n||n.nodeType!==8||typeof krateBindList!=='function')return;__safe(function(){krateBindList(n,src,key,render,mode);});};
 window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(__krateFx(n,function(){var s=!!get();var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(window.__krateCondPre)window.__krateCondPre(id,s);if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');if(window.__krateCondPost)window.__krateCondPost(id,s);}));},n);};
 window.kbindTextContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__krateFx(n,function(){var v=get();n.textContent=v==null||typeof v==='boolean'?'':String(v);}));},n);};
 window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;var ad=/^(aria|data)-/.test(attr);__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(v==null||(v===false&&!ad))n.removeAttribute(attr);else if(v===true&&!ad)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){if(typeof krateApplyStyle==='function')krateApplyStyle(n,v);else{n.removeAttribute('style');Object.assign(n.style,v);}}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));}));},n);};
+window.kbindInnerHTML=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__krateFx(n,function(){var v=get();v=v==null?'':String(v);if(n.innerHTML!==v)n.innerHTML=v;}));},n);};
+window.kbindSpread=function(id,get){var n=findSlot(id);if(n)__safe(function(){krateSpread(n,get);},n);};
 window.kbindProp=function(id,attr,get){var n=findSlot(id);if(n)__safe(function(){krateControl(n,attr,get);},n);};
 window.kbindHandler=function(id,prop,fn){if(typeof fn!=='function')return;var n=findSlot(id);if(n)__safe(function(){krateOn(n,prop,fn);},n);};
 window.kbindEvent=function(id,ev,fn,capture){var n=findSlot(id);if(n)__safe(function(){n.addEventListener(ev,fn,!!capture);if(typeof window.onCleanup==='function')window.onCleanup(function(){n.removeEventListener(ev,fn,!!capture);});},n);};
@@ -311,6 +314,10 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 				b.WriteString(sb.ExprJS)
 				b.WriteString(");\n")
 			case "expr":
+				if result.TrackSources && sb.Pos.Line > 0 && sb.File != "" {
+					b.WriteString(SrcMarkPrefix + itoa(len(result.SrcMarks)) + "*/")
+					result.SrcMarks = append(result.SrcMarks, SrcMark{File: sb.File, Line: sb.Pos.Line, Col: sb.Pos.Col})
+				}
 				b.WriteString("kbindContent(")
 				b.WriteString(strconv.Quote(string(sb.SlotID)))
 				b.WriteString(",()=>")
@@ -334,6 +341,10 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 				if h.Capture {
 					prop += "Capture"
 				}
+			}
+			if result.TrackSources && h.Pos.Line > 0 && h.File != "" {
+				b.WriteString(SrcMarkPrefix + itoa(len(result.SrcMarks)) + "*/")
+				result.SrcMarks = append(result.SrcMarks, SrcMark{File: h.File, Line: h.Pos.Line, Col: h.Pos.Col})
 			}
 			b.WriteString("kbindHandler(")
 			b.WriteString(strconv.Quote(string(h.ElementSlotID)))
@@ -362,6 +373,22 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			name := a.AttrName
 			if a.AttrName == irtree.TextContentAttr {
 				b.WriteString("kbindTextContent(")
+				b.WriteString(strconv.Quote(string(a.ElementSlotID)))
+				b.WriteString(",()=>")
+				b.WriteString(exprJS)
+				b.WriteString(");\n")
+				continue
+			}
+			if a.AttrName == irtree.SpreadAttr {
+				b.WriteString("kbindSpread(")
+				b.WriteString(strconv.Quote(string(a.ElementSlotID)))
+				b.WriteString(",()=>")
+				b.WriteString(exprJS)
+				b.WriteString(");\n")
+				continue
+			}
+			if a.AttrName == irtree.InnerHTMLAttr {
+				b.WriteString("kbindInnerHTML(")
 				b.WriteString(strconv.Quote(string(a.ElementSlotID)))
 				b.WriteString(",()=>")
 				b.WriteString(exprJS)
@@ -420,7 +447,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 
 	b.WriteString("})();\n")
 
-	return finishSuspenseHydration(result, b.String(), spans, listFns.String())
+	return dropUnusedPureVars(finishSuspenseHydration(result, b.String(), spans, listFns.String()))
 }
 
 // pageNeedsOwners reports whether any client component registers effects,

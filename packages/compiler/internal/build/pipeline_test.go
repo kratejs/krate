@@ -138,7 +138,7 @@ func TestBuildMixedTierPage(t *testing.T) {
 func TestBuildRuntimeComponentBundlesCompiled(t *testing.T) {
 	outDir := buildTestProject(t)
 	for _, name := range []string{"RuntimeWidget.runtime.js", "RuntimeCard.runtime.js"} {
-		p := filepath.Join(outDir, "server-components", name)
+		p := ServerOutPath(outDir, "server-components", name)
 		if !fileExists(p) {
 			t.Errorf("expected compiled runtime component bundle: %s", p)
 			continue

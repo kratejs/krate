@@ -1,10 +1,13 @@
 package build
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +16,10 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
+
+// ErrDevRestart is returned by Watch and the dev server when a config or env
+// file changed and the caller should rebuild everything from the new settings.
+var ErrDevRestart = errors.New("dev server restart requested")
 
 // Watch watches the builder's project root for filesystem changes using native
 // OS events (inotify, FSEvents, kqueue, ReadDirectoryChangesW via fsnotify).
@@ -24,7 +31,8 @@ import (
 // rebuild only the affected pages/APIs, and the rebuilt routes are sent on
 // reload. debounceDelay is the coalescing window: a single save (or an
 // atomic-rename editor) can emit many events in a burst, so only one rebuild
-// runs per burst. It returns an error only if the watcher fails to start.
+// runs per burst. It returns an error only if the watcher fails to start, or
+// ErrDevRestart when Builder.DevReload accepted a config/env change.
 func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 	// DevMode is owned by the caller (`krate dev` sets it so output stays
 	// readable); `krate build --watch` leaves it off and keeps minifying.
@@ -59,16 +67,59 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 	}
 	outDir = filepath.Clean(outDir)
 
+	publicDir := b.publicDir()
+
 	// Register every non-ignored directory so new and renamed files in any
 	// tracked location are observed without a full-tree rescan on each tick.
 	dirs, err := watchedDirs(root, outDir)
 	if err != nil {
 		return fmt.Errorf("scanning directories to watch: %w", err)
 	}
+	watched := make(map[string]bool, len(dirs))
 	for _, d := range dirs {
 		if err := watcher.Add(d); err != nil {
 			return fmt.Errorf("watching %s: %w", d, err)
 		}
+		watched[d] = true
+	}
+
+	// addTree watches dir and every subdirectory and returns the files found.
+	// A directory created (or renamed in) after startup may already hold files
+	// whose own create events fired before the watch existed, so they are
+	// returned for the caller to queue.
+	addTree := func(dir string) []string {
+		var files []string
+		_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				if skippedDir(p) || isWithin(p, outDir) {
+					return filepath.SkipDir
+				}
+				if !watched[p] {
+					if watcher.Add(p) == nil {
+						watched[p] = true
+					}
+				}
+				return nil
+			}
+			files = append(files, p)
+			return nil
+		})
+		return files
+	}
+	// dropTree stops watching dir and everything beneath it.
+	dropTree := func(dir string) bool {
+		found := false
+		for d := range watched {
+			if d == dir || isWithin(d, dir) {
+				_ = watcher.Remove(d)
+				delete(watched, d)
+				found = true
+			}
+		}
+		return found
 	}
 
 	printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
@@ -79,22 +130,60 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 	}
 
 	var pending []string
+	var publicOps []string
+	var restartReasons []string
 	var timer *time.Timer
 	var timerC <-chan time.Time
 
-	flush := func() {
+	arm := func() {
+		if timer == nil {
+			timer = time.NewTimer(debounce)
+			timerC = timer.C
+			return
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(debounce)
+	}
+
+	flush := func() error {
 		if timer != nil {
 			timer.Stop()
 			timer = nil
 		}
 		timerC = nil
+		if len(restartReasons) > 0 {
+			reasons := uniqueStrings(restartReasons)
+			restartReasons = nil
+			if b.DevReload == nil {
+				printf("  %s%s changed; restart the process to apply it.%s\n", cYellow, strings.Join(reasons, ", "), cReset)
+			} else if b.DevReload(strings.Join(reasons, ", ")) {
+				if hub != nil {
+					hub.RequestRestart()
+				}
+				return ErrDevRestart
+			}
+		}
+		publicChanged := false
+		if len(publicOps) > 0 {
+			publicChanged = b.syncPublic(publicDir, uniqueStrings(publicOps))
+			publicOps = nil
+		}
 		if len(pending) == 0 {
-			return
+			if publicChanged && hub != nil {
+				hub.Publish(DevEvent{Type: "reload"})
+			}
+			return nil
 		}
 		changed := uniqueStrings(pending)
 		pending = nil
 		b.processChanges(changed, hub)
 		printf("%s  Watching %s for changes...%s\n", cBlue, root, cReset)
+		return nil
 	}
 
 	for {
@@ -106,6 +195,32 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 			if !managedPath(ev.Name, outDir) {
 				continue
 			}
+			if reason := restartTrigger(root, ev.Name); reason != "" {
+				restartReasons = append(restartReasons, reason)
+				arm()
+				continue
+			}
+			isDirEvent := false
+			if ev.Op.Has(fsnotify.Create) && isDir(ev.Name) {
+				isDirEvent = true
+			}
+			removed := ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename)
+			wasDir := false
+			if removed {
+				wasDir = dropTree(ev.Name)
+			}
+
+			// public/ is mirrored into the output directory rather than
+			// compiled, and dotfiles there (.well-known) are real assets.
+			if publicDir != "" && ev.Name != publicDir && isWithin(ev.Name, publicDir) {
+				if isDirEvent {
+					publicOps = append(publicOps, addTree(ev.Name)...)
+				}
+				publicOps = append(publicOps, ev.Name)
+				arm()
+				continue
+			}
+
 			// Skip krate's own internal artifacts: files whose basename starts
 			// with '_' or '.' are private/convention-skipped everywhere else in
 			// the compiler (private API files, _layout.*, runtime-component
@@ -117,29 +232,32 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 				continue
 			}
 			// Keep the recursive watch in sync as directories are created,
-			// removed, or renamed (editors and atomic renames produce these).
-			if ev.Op.Has(fsnotify.Create) && isDir(ev.Name) {
-				_ = watcher.Add(ev.Name)
+			// removed, or renamed (editors and atomic renames produce these),
+			// and queue the files already inside a new directory.
+			if isDirEvent {
+				for _, f := range addTree(ev.Name) {
+					if (internalName(f) && !layoutOrLoadingFile(f)) || generatedDeclaration(f) {
+						continue
+					}
+					if b.watchedFile(f) {
+						pending = append(pending, f)
+					}
+				}
+				arm()
+				continue
 			}
-			if (ev.Op.Has(fsnotify.Remove) || ev.Op.Has(fsnotify.Rename)) && isDir(ev.Name) {
-				_ = watcher.Remove(ev.Name)
+			if wasDir {
+				// A removed or renamed directory takes its pages with it; the
+				// directory path itself marks the batch as structural.
+				pending = append(pending, ev.Name)
+				arm()
+				continue
 			}
 			if !b.watchedFile(ev.Name) {
 				continue
 			}
 			pending = append(pending, ev.Name)
-			if timer == nil {
-				timer = time.NewTimer(debounce)
-				timerC = timer.C
-			} else {
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
-					}
-				}
-				timer.Reset(debounce)
-			}
+			arm()
 
 		case err, ok := <-watcher.Errors:
 			if !ok {
@@ -150,21 +268,112 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 			}
 
 		case <-timerC:
-			flush()
+			if err := flush(); err != nil {
+				return err
+			}
 		}
 	}
 }
 
-// isManagedGoFile reports whether a Go file is one krate compiles (an API route
-// under src/api or a Go component under a configured component dir).
+// restartTrigger reports a human-readable reason when path is a project file
+// whose change cannot be applied by an incremental rebuild: the krate and
+// tailwind configs, tsconfig.json, and .env files at the project root.
+func restartTrigger(root, p string) string {
+	if filepath.Dir(p) != filepath.Clean(root) {
+		return ""
+	}
+	base := filepath.Base(p)
+	switch {
+	case strings.HasPrefix(base, "krate.config."), strings.HasPrefix(base, "tailwind.config."), base == "tsconfig.json":
+		return base
+	case base == ".env" || strings.HasPrefix(base, ".env."):
+		return base
+	}
+	return ""
+}
+
+// publicDir returns the absolute public directory, or "" when it is unset or
+// would swallow the whole project.
+func (b *Builder) publicDir() string {
+	dir := b.Cfg.PublicDir
+	if dir == "" {
+		dir = "public"
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(b.Root, dir)
+	}
+	dir = filepath.Clean(dir)
+	if dir == filepath.Clean(b.Root) || isWithin(b.Root, dir) {
+		return ""
+	}
+	return dir
+}
+
+// syncPublic mirrors changed public/ entries into the output directory (copy
+// when the source exists, delete when it is gone) and reports whether anything
+// was applied.
+func (b *Builder) syncPublic(publicDir string, paths []string) bool {
+	if publicDir == "" {
+		return false
+	}
+	out := b.Cfg.OutDir
+	if !filepath.IsAbs(out) {
+		out = filepath.Join(b.Root, out)
+	}
+	applied := false
+	for _, p := range paths {
+		rel, err := filepath.Rel(publicDir, p)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		dst := filepath.Join(out, rel)
+		info, err := os.Stat(p)
+		switch {
+		case err != nil:
+			if rmErr := os.RemoveAll(dst); rmErr == nil {
+				applied = true
+			}
+		case info.IsDir():
+			if mkErr := os.MkdirAll(dst, 0755); mkErr == nil {
+				applied = true
+			}
+		default:
+			data, rdErr := os.ReadFile(p)
+			if rdErr != nil {
+				continue
+			}
+			if mkErr := os.MkdirAll(filepath.Dir(dst), 0755); mkErr != nil {
+				continue
+			}
+			if wrErr := os.WriteFile(dst, data, 0644); wrErr != nil {
+				fmt.Fprintf(os.Stderr, "  %sWarning: copying public/%s:%s %v\n", cYellow, filepath.ToSlash(rel), cReset, wrErr)
+				continue
+			}
+			applied = true
+		}
+		if applied {
+			printf("  %s*%s public/%s synced\n", cCyan, cReset, filepath.ToSlash(rel))
+		}
+	}
+	return applied
+}
+
+// isManagedGoFile reports whether a Go file is one krate compiles: an API
+// route under a configured go.apiDirs entry (default src/api) or a Go
+// component under a configured component dir.
 func (b *Builder) isManagedGoFile(p string) bool {
 	slash := filepath.ToSlash(p)
-	if strings.Contains(slash, "src/api/") {
-		return true
-	}
-	for _, d := range b.Cfg.Go.ComponentDirList() {
+	eg := b.Cfg.EffectiveGo()
+	dirs := append(append([]string{}, eg.APIDirList()...), eg.ComponentDirList()...)
+	for _, d := range dirs {
 		dd := strings.Trim(filepath.ToSlash(d), "/")
 		if dd == "" {
+			continue
+		}
+		if filepath.IsAbs(d) {
+			if isWithin(p, filepath.Clean(d)) {
+				return true
+			}
 			continue
 		}
 		if strings.Contains(slash, "/"+dd+"/") || strings.HasSuffix(slash, "/"+dd) {
@@ -172,6 +381,38 @@ func (b *Builder) isManagedGoFile(p string) bool {
 		}
 	}
 	return false
+}
+
+// isStructuralChange reports whether the batch adds, removes or renames
+// pages/directories, which a dependency-graph rebuild cannot express: removed
+// files must lose their outputs and new files have no graph entry yet.
+func (b *Builder) isStructuralChange(changed []string) bool {
+	b.depMu.Lock()
+	defer b.depMu.Unlock()
+	for _, p := range changed {
+		info, err := os.Stat(p)
+		if err != nil || info.IsDir() {
+			return true
+		}
+		if len(b.depGraph[p]) == 0 && len(b.pageDeps[p]) == 0 && isWithin(p, b.Cfg.PagesDir) {
+			return true
+		}
+	}
+	return false
+}
+
+// devRouteLabel names the route a changed page serves, for logs and reload
+// events. Error pages are labelled by file ("/404") instead of the root.
+func devRouteLabel(page, pagesDir string) string {
+	name := strings.TrimSuffix(filepath.Base(page), filepath.Ext(page))
+	if name == "404" || name == "500" {
+		return "/" + name
+	}
+	route := pageToOutput(page, pagesDir)
+	if route == "." {
+		return "/"
+	}
+	return "/" + route
 }
 
 // processChanges routes a batch of changed files through the dependency graph
@@ -204,6 +445,7 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 	var apiToBuild []string
 	var pagesToBuild []string
 	var goAPIChanged bool
+	structural := b.isStructuralChange(changed)
 
 	for _, p := range changed {
 		if strings.HasSuffix(p, ".go") {
@@ -219,12 +461,14 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 		}
 	}
 
-	affectedEntries := b.affectedPages(changed)
-	for _, entry := range affectedEntries {
-		if strings.Contains(filepath.ToSlash(entry), "src/api/") {
-			apiToBuild = append(apiToBuild, entry)
-		} else {
-			pagesToBuild = append(pagesToBuild, entry)
+	if !structural {
+		affectedEntries := b.affectedPages(changed)
+		for _, entry := range affectedEntries {
+			if strings.Contains(filepath.ToSlash(entry), "src/api/") {
+				apiToBuild = append(apiToBuild, entry)
+			} else {
+				pagesToBuild = append(pagesToBuild, entry)
+			}
 		}
 	}
 
@@ -242,15 +486,38 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 		}
 	}
 
+	if structural {
+		printf("  %sFiles or directories were added, removed or renamed; rebuilding all...%s\n", cYellow, cReset)
+		if err := b.BuildAll(); err != nil {
+			fmt.Fprintf(os.Stderr, "  %sError: %v%s\n", cRed, err, cReset)
+			addDiags("", err)
+		}
+		if err := b.BuildAllAPI(); err != nil {
+			fmt.Fprintf(os.Stderr, "  %sError: %v%s\n", cRed, err, cReset)
+			addDiags("", err)
+		}
+		if hub != nil {
+			hub.Publish(DevEvent{Type: "reload", Diagnostics: diags})
+		}
+		return
+	}
+
+	cssOnly := len(changed) > 0
+	for _, p := range changed {
+		if strings.ToLower(filepath.Ext(p)) != ".css" {
+			cssOnly = false
+			break
+		}
+	}
+
 	if len(pagesToBuild) > 0 {
+		seen := map[string]bool{}
 		for _, p := range pagesToBuild {
-			route := pageToOutput(p, b.Cfg.PagesDir)
-			if route == "." {
-				route = "/"
-			} else {
-				route = "/" + route
+			route := devRouteLabel(p, b.Cfg.PagesDir)
+			if !seen[route] {
+				seen[route] = true
+				routes = append(routes, route)
 			}
-			routes = append(routes, route)
 		}
 		printf("  %sAffected pages:%s %v\n", cBlue, cReset, routes)
 		if _, err := b.BuildPages(pagesToBuild); err != nil {
@@ -288,7 +555,7 @@ func (b *Builder) processChanges(changed []string, hub *DevHub) {
 	}
 
 	if hub != nil {
-		hub.Publish(DevEvent{Type: "reload", Routes: routes, Diagnostics: diags})
+		hub.Publish(DevEvent{Type: "reload", Routes: routes, Diagnostics: diags, CSSOnly: cssOnly && len(diags) == 0})
 	}
 }
 
@@ -431,4 +698,39 @@ func isWithin(path, dir string) bool {
 		return true
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// bindServerListener binds the HTTP listener. A port that is already taken is
+// an error with a hint for `krate serve`; in dev it moves to the next free
+// port and says so, since a second dev server in another terminal is common.
+func bindServerListener(host string, port int, dev bool) (net.Listener, error) {
+	try := func(p int) (net.Listener, error) {
+		addr := fmt.Sprintf(":%d", p)
+		if host != "" {
+			addr = net.JoinHostPort(host, strconv.Itoa(p))
+		}
+		return net.Listen("tcp", addr)
+	}
+	ln, err := try(port)
+	if err == nil {
+		return ln, nil
+	}
+	if !dev || port == 0 || !isAddrInUse(err) {
+		if isAddrInUse(err) {
+			return nil, fmt.Errorf("port %d is already in use (%w); stop the other process or choose another port with --port or server.port", port, err)
+		}
+		return nil, fmt.Errorf("listen on port %d: %w", port, err)
+	}
+	for next := port + 1; next <= port+50 && next <= 65535; next++ {
+		if ln, nerr := try(next); nerr == nil {
+			fmt.Fprintf(os.Stderr, "  %s! Port %d is in use, using %d instead%s\n", cYellow, port, next, cReset)
+			return ln, nil
+		}
+	}
+	return nil, fmt.Errorf("port %d is already in use and no free port was found in %d-%d; set devServer.port to a free port", port, port+1, port+50)
+}
+
+func isAddrInUse(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "address already in use") ||
+		err != nil && strings.Contains(strings.ToLower(err.Error()), "only one usage of each socket address")
 }

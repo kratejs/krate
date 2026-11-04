@@ -15,7 +15,8 @@ package build
 //	            200 {"ok":true,"result":R,"redirect":"/path"?}
 //	            4xx/5xx {"ok":false,"error":{"message":M,"digest":D?}}
 //	          native form post: 303 to the action's redirect, the sanitized
-//	          X-Krate-Return path, or "/"
+//	          X-Krate-Return path, or "/"; a returned state without a
+//	          redirect is carried in a krate_flash cookie (60 s)
 //
 // Actions run inside an AsyncLocalStorage scope published on
 // globalThis[Symbol.for('krate.action.store')]; @krate/runtime/server reads it
@@ -294,6 +295,16 @@ async function krateRunAction(req, urlPath, search) {
   if (fetchMode) return new Response(body, { status: 200, headers: actionHeaders('application/json', ctx.setCookies) });
   const headers = actionHeaders('text/plain; charset=utf-8', ctx.setCookies);
   headers.set('location', redirect || req.headers.get('x-krate-return') || '/');
+  // The returned state (validation errors, "saved") would be lost across the
+  // 303. Carry it in a short-lived cookie that the next page's useActionState
+  // reads for this action (see __krateActionState).
+  if (!redirect && result !== undefined) {
+    try {
+      const flash = Buffer.from(JSON.stringify({ a: id, r: result })).toString('base64url');
+      if (flash.length <= 3000) headers.append('set-cookie', 'krate_flash=' + flash + '; Path=/; Max-Age=60; SameSite=Lax');
+      else console.warn('[krate] action ' + entry.export + ' returned state too large to carry across the redirect; it is not shown after a no-JS submit');
+    } catch {}
+  }
   return new Response(null, { status: 303, headers });
 }
 `

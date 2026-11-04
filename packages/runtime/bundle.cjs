@@ -14,6 +14,13 @@
  *   whose hydration code uses them; it reads signals and slot helpers from the
  *   globals of the hydration bundle instead of bundling a second copy.
  *
+ * - krate-core.js + krate-f-*.js + krate-features.json - the same hydration
+ *   runtime split into a core and optional feature bundles (SPA router,
+ *   class helpers, server actions, error boundaries/class components). The
+ *   compiler assembles only the features a site's hydration code references
+ *   (see packages/compiler/internal/build/runtime_features.go); the full
+ *   bundles above remain the fallback for dev mode and unknown code.
+ *
  * esbuild minification here is complemented by the compiler, which re-minifies
  * the shared chunk with its embedded esbuild when writing dist/chunks/.
  */
@@ -30,6 +37,7 @@ export * from './src/jsx-runtime';
 export * from './src/router';
 export * from './src/class-helpers';
 export * from './src/context';
+export * from './src/hook-args';
 export * from './src/storage';
 export * from './src/boundary';
 export * from './src/class-component';
@@ -46,6 +54,7 @@ export * from './src/resource';
 export * from './src/router';
 export * from './src/class-helpers';
 export * from './src/context';
+export * from './src/hook-args';
 export * from './src/storage';
 export * from './src/boundary';
 export * from './src/class-component';
@@ -64,6 +73,7 @@ export * from './src/resource';
 export * from './src/router-lite';
 export * from './src/class-helpers';
 export * from './src/context';
+export * from './src/hook-args';
 export * from './src/storage';
 export * from './src/boundary';
 export * from './src/class-component';
@@ -95,6 +105,54 @@ const sharedGlobalsPlugin = {
   },
 };
 
+// Core of the split runtime: everything the other pieces build on. refs,
+// events and portal are exported too, because feature bundles import them
+// from the shared window globals.
+const CORE_MODULES = ['signal', 'effects', 'dom', 'slots', 'resource', 'context', 'storage', 'refs', 'events', 'portal'];
+const CORE_ENTRY = CORE_MODULES.map((m) => `export * from './src/${m}';`).join('\n');
+
+// Optional features. A feature bundle imports core modules through window
+// globals (one signal graph) and is appended after krate-core.js.
+const FEATURES = {
+  router: { file: 'krate-f-router.js', modules: ['router'] },
+  'router-lite': { file: 'krate-f-router-lite.js', modules: ['router-lite'] },
+  helpers: { file: 'krate-f-helpers.js', modules: ['class-helpers'] },
+  list: { file: 'krate-f-list.js', modules: ['list'] },
+  actions: { file: 'krate-f-actions.js', modules: ['actions'] },
+  classes: { file: 'krate-f-classes.js', modules: ['boundary', 'class-component'] },
+};
+
+async function exportNames(entry) {
+  const result = await esbuild.build({
+    stdin: { contents: entry, resolveDir: __dirname, sourcefile: 'krate-exports.ts' },
+    bundle: true,
+    write: false,
+    format: 'esm',
+    metafile: true,
+    outfile: 'exports.js',
+    logLevel: 'silent',
+  });
+  return Object.values(result.metafile.outputs)[0].exports.slice().sort();
+}
+
+// Resolves './signal'-style imports of core modules to window globals.
+function coreGlobalsPlugin(coreExports) {
+  return {
+    name: 'krate-core-globals',
+    setup(build) {
+      build.onResolve({ filter: /^\.\/[a-z-]+(\.js)?$/ }, (args) => {
+        const name = args.path.replace(/^\.\//, '').replace(/\.js$/, '');
+        if (!coreExports[name]) return null;
+        return { path: name, namespace: 'krate-core-global' };
+      });
+      build.onLoad({ filter: /.*/, namespace: 'krate-core-global' }, (args) => ({
+        contents: coreExports[args.path].map((n) => `export const ${n} = /* @__PURE__ */ (() => window.${n})();`).join('\n'),
+        loader: 'js',
+      }));
+    },
+  };
+}
+
 // Dev-only overlay + toolbar. Loaded by `krate dev` only, never in production.
 const DEV_ENTRY = `import './src/dev-overlay';`;
 
@@ -122,6 +180,21 @@ async function buildBundle(outFile, entry, minify = true, plugins = []) {
   console.log(`Built ${outFile} (${(result.outputFiles[0].text.length / 1024).toFixed(1)} KB)`);
 }
 
+async function buildSplitRuntime() {
+  const fs = require('fs');
+  const path = require('path');
+  const coreExports = {};
+  for (const m of CORE_MODULES) coreExports[m] = await exportNames(`export * from './src/${m}';`);
+  await buildBundle('krate-core.js', CORE_ENTRY);
+  const manifest = { version: 1, core: { file: 'krate-core.js', exports: await exportNames(CORE_ENTRY) }, features: {} };
+  for (const [name, f] of Object.entries(FEATURES)) {
+    const entry = f.modules.map((m) => `export * from './src/${m}';`).join('\n');
+    await buildBundle(f.file, entry, true, [coreGlobalsPlugin(coreExports)]);
+    manifest.features[name] = { file: f.file, exports: await exportNames(entry) };
+  }
+  fs.writeFileSync(path.join(__dirname, 'dist', 'krate-features.json'), JSON.stringify(manifest, null, 1) + '\n');
+}
+
 async function main() {
   const fs = require('fs');
   const path = require('path');
@@ -130,6 +203,7 @@ async function main() {
   await buildBundle('krate-hydrate.js', HYDRATE_ENTRY);
   await buildBundle('krate-hydrate-lite.js', LITE_ENTRY);
   await buildBundle('krate-suspense.js', SUSPENSE_ENTRY, true, [sharedGlobalsPlugin]);
+  await buildSplitRuntime();
   await buildBundle('krate-dev.js', DEV_ENTRY, false);
   console.log('Runtime bundled! (krate-runtime.js + krate-hydrate.js + krate-hydrate-lite.js + krate-suspense.js + krate-dev.js)');
 }

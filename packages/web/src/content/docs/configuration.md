@@ -31,6 +31,21 @@ React syntax (`useState`, `useEffect`, `useRef`, JSX) is transpiled to Krate
 signals and effects automatically - no config is required. See
 [React Compatibility](/docs/guides/react-compatibility/).
 
+## Validation
+
+Beyond editor type-checking, the compiler validates the file when it loads it:
+
+- An unknown key at any depth, including inside arrays of objects
+  (`redirects[].permanant`), is reported as a warning and ignored.
+- A value of the wrong type is an error that names the file, the key and the
+  expected type, for example
+  `krate.config.ts: devServer.port must be a number (got string)`.
+- A `pagesDir` that does not exist (with no `entry` to fall back to) is an error:
+  `pagesDir src/nope does not exist`.
+- In `krate dev`, editing `krate.config.*`, `tailwind.config.*`, `tsconfig.json`
+  or an `.env*` file reloads the configuration and restarts the dev server; an
+  invalid edit is reported and the running server is left alone.
+
 ## Option groups
 
 This page is a map; the [Config Reference](/docs/reference/config/) documents

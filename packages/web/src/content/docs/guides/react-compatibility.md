@@ -93,7 +93,7 @@ export default function Counter() {
 | `react/jsx-runtime`, `jsx`, `jsxs`, `jsxDEV` | lowered to Krate JSX |
 | `react-dom` / `react-dom/client` | `createPortal` and `flushSync` map to the compat runtime; `useFormStatus` and `requestFormReset` are supported; `findDOMNode`, `render`, `hydrate` and `unmountComponentAtNode` (removed in React 19) report KR8001 |
 | `Children.only` / `toArray` / `count` | folded at build time on literal input, otherwise compat shim |
-| `Children.map` | folded at build time for a literal list and inline arrow, otherwise compat shim |
+| `Children.map` | folded at build time for a literal list and inline arrow, including `props.children` of a call site written with literal elements (Tabs / RadioGroup); otherwise compat shim |
 | `cloneElement` | folded at build time on a literal element and props, otherwise compat shim |
 | `isValidElement` | folded at build time on literal input, otherwise compat shim |
 | `createPortal` / `<Portal>` | mounted into its container after hydration (see [Portals](#portals)) |
@@ -340,8 +340,54 @@ function useToggle(initial: boolean) {
 const [open, toggleOpen] = useToggle(false); // open is current, toggleOpen works
 ```
 
-Hook arguments are read when the hook is called; a hook that must react to a
-changing argument should receive it through state it owns or a getter.
+A project custom hook (declared in the module or imported from a relative
+path) called with an argument that reads state or props gets that argument as
+a live getter; the hook's plain parameters read through it, so
+`useDebounce(value, 300)` and `useDocumentTitle("count " + n)` follow `value`
+and `n`. A destructured hook parameter is read once, when the hook is called.
+Hooks from packages are called with plain values. A hook that bumps a state it
+never reads (`const [, force] = useState(0)` in a store hook) recomputes its
+result when the bump happens.
+
+An `if` at the top of a component or hook body that calls a state setter
+(`if (props.value !== prev) { setPrev(props.value); setChanges(changes + 1); }`,
+React's "derive state from props" pattern) runs as an effect that re-checks the
+condition when the state or props it reads change.
+
+### Component patterns
+
+These React patterns compile to live DOM, not a one-time snapshot:
+
+- **Destructured props** (`function Label({ value, tone = "x", ...rest })`)
+  follow call-site changes; see
+  [Passing signals as props](/docs/core-concepts/reactivity/#passing-signals-as-props).
+- **Function as children and render props**: `<Toggle>{(on, flip) => ...}</Toggle>`
+  passes the function as `children`, and `props.children(on, flip)` /
+  `props.render(n)` render its result. Their markup is created in the browser,
+  so the server HTML of that slot is empty.
+- **`Children.map(props.children, (c, i) => cloneElement(c, {...}))`** unrolls
+  over the elements the caller wrote. A child whose props read the caller's
+  state is reported (the unrolled element would move into the wrong scope).
+- **Higher-order components**: `const Counted = withCounter(Button)` where
+  `withCounter` declares one inner function component and returns it compiles
+  as that component with the wrapped component substituted. Wrappers with other
+  statements, patterns or rest parameters are reported as unresolved.
+- **Spread props**: `<Inner {...props} />`, `<input {...field} />` and
+  conditional spreads apply their attributes and handlers, and re-apply them
+  when the state they read changes. A component spread whose attributes are not
+  known at build time (an arbitrary object) is reported and not passed.
+- **JSX held in a variable** (`const badge = on ? <b/> : <i/>`, a `let content`
+  assigned in a `switch`) renders and updates like an inline conditional.
+- **`{n && <b/>}`** renders `0` for `n === 0` like React, and `{name || <i/>}`
+  renders `name` when it is truthy.
+- **`dangerouslySetInnerHTML`** that reads state re-applies when it changes;
+  **SVG** elements created at runtime (list rows, conditional `<g>`) keep the
+  SVG namespace, and a `<foreignObject>` is HTML again.
+- **Context in list rows**: rows of a list inside `<Ctx.Provider value={...}>`
+  read the provider's live value.
+- **Store hooks made by a module-level factory** (`const useStore = create(...)`,
+  `const { api, useStore } = create(...)`) run in the browser; the component that
+  calls them renders its slot empty on the server.
 
 ### Context values
 

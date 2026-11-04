@@ -47,6 +47,10 @@ type hookFrame struct {
 	// noDeps are synthesized dependency arrays of effects without a
 	// dependency array, filled once the whole body has been rewritten.
 	noDeps []*ast.ArrayExpr
+	// forceTriggers names the state getters of a custom hook that exist only to
+	// force an update (`const [, force] = useState(0)`); the hook's result is
+	// recomputed when they change (see rewriteHookReturn).
+	forceTriggers []string
 	// guards is the stack of conditions and loops enclosing the statement
 	// being rewritten, within this function.
 	guards []string

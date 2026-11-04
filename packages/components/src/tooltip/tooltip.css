@@ -28,3 +28,7 @@
   opacity: 1;
   visibility: visible;
 }
+
+:dir(rtl) .krate-tooltip-content {
+  transform: translateX(50%);
+}

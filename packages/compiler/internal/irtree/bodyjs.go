@@ -224,7 +224,62 @@ func (b *builder) extraVarDeclJS(decl *ast.VarDecl) (string, bool) {
 	if derivedCallee(decl.Init) != "" {
 		return "var " + decl.Name + "=" + generateExprJS(b.derivedDeclInit(decl.Init), b.sigMap()), true
 	}
-	return "var " + decl.Name + "=" + generateExprJS(decl.Init, b.sigMap()), true
+	js := "var " + decl.Name + "=" + generateExprJS(decl.Init, b.sigMap())
+	if isPureDataExpr(decl.Init) {
+		// Build-time data (a folded content entry, a literal table) is only
+		// needed by the client when something else references it; the
+		// renderer drops the declaration otherwise (PureVarMarker).
+		js = PureVarBegin + js + PureVarEnd
+	}
+	return js, true
+}
+
+// PureVarBegin and PureVarEnd wrap a hydration `var x=<literal>` declaration
+// the renderer may drop when no other hydration code mentions x.
+const (
+	PureVarBegin = "/*krate:pure*/"
+	PureVarEnd   = "/*krate:end*/"
+)
+
+// isPureDataExpr reports whether expr is an object/array literal made only of
+// literals, so evaluating (or skipping) it has no side effects.
+func isPureDataExpr(expr ast.Expr) bool {
+	switch expr.(type) {
+	case *ast.ObjectExpr, *ast.ArrayExpr:
+		return pureData(expr)
+	}
+	return false
+}
+
+func pureData(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.Literal:
+		return true
+	case *ast.ArrayExpr:
+		for _, el := range e.Elements {
+			if el == nil || !pureData(el) {
+				return false
+			}
+		}
+		return true
+	case *ast.ObjectExpr:
+		for _, p := range e.Properties {
+			if p.Computed || p.Spread || p.Value == nil || !pureData(p.Value) {
+				return false
+			}
+		}
+		return true
+	case *ast.UnaryExpr:
+		return (e.Op == "-" || e.Op == "+") && pureData(e.Arg)
+	case *ast.TemplateExpr:
+		for _, p := range e.Parts {
+			if _, ok := p.(*ast.Literal); !ok {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // isReplayedBodyExpr reports whether a body-level expression statement must
@@ -367,4 +422,61 @@ func stmtsHaveReturn(stmts []ast.Stmt) bool {
 		}
 	}
 	return false
+}
+
+// declaredNamesOf returns the names a var/let/const fragment declares.
+func declaredNamesOf(js string) []string {
+	var rest string
+	switch {
+	case strings.HasPrefix(js, "var "):
+		rest = js[4:]
+	case strings.HasPrefix(js, "let "):
+		rest = js[4:]
+	case strings.HasPrefix(js, "const "):
+		rest = js[6:]
+	default:
+		return nil
+	}
+	if i := strings.Index(rest, "="); i >= 0 {
+		rest = rest[:i]
+	}
+	var names []string
+	scanJSIdents(rest, func(n string) { names = append(names, n) })
+	return names
+}
+
+// promoteTransitive moves pre fragments that read a name declared by a post
+// fragment into post. A fragment is post when it reads a signal directly;
+// without this a memo chained on another memo (q reads d, d reads the
+// signal) would be emitted before the signals it depends on.
+func promoteTransitive(pre, post []bodyJS) ([]bodyJS, []bodyJS) {
+	declared := map[string]bool{}
+	for _, f := range post {
+		for _, n := range declaredNamesOf(f.js) {
+			declared[n] = true
+		}
+	}
+	for changed := true; changed && len(pre) > 0; {
+		changed = false
+		kept := pre[:0:0]
+		for _, f := range pre {
+			hit := false
+			scanJSIdents(f.js, func(n string) {
+				if declared[n] {
+					hit = true
+				}
+			})
+			if !hit {
+				kept = append(kept, f)
+				continue
+			}
+			post = append(post, f)
+			for _, n := range declaredNamesOf(f.js) {
+				declared[n] = true
+			}
+			changed = true
+		}
+		pre = kept
+	}
+	return pre, post
 }

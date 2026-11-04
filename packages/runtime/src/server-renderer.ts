@@ -14,6 +14,7 @@ import {
   isNotFoundSignal,
   parseCookieHeader,
   redirectTarget,
+  thenable,
   thenableRecord,
   type RequestContext,
 } from "./request-context.js";
@@ -212,6 +213,74 @@ function variantKey(req: { route: string; params?: Record<string, string>; query
   if (params) key += "?" + params;
   if (query) key += "#" + query;
   return key;
+}
+
+// Query tracking for the page ISR cache. A page is keyed by route + params
+// only; query keys join the key only when the render actually read them, so
+// /isr/1?utm_source=x and a random ?zz= share the cached page unless the page
+// looks at searchParams. A render that enumerates searchParams (spread,
+// Object.keys, JSON) reads "everything" and is keyed by the full query.
+interface QueryTracker {
+  keys: Set<string>;
+  all: boolean;
+}
+
+function newQueryTracker(): QueryTracker {
+  return { keys: new Set(), all: false };
+}
+
+function trackedQuery(query: Record<string, string> | undefined, t: QueryTracker): Record<string, string> {
+  const target: Record<string, string> = { ...(query || {}) };
+  const note = (prop: string | symbol) => {
+    if (typeof prop === "string" && prop !== "then" && prop !== "toJSON" && prop !== "constructor") t.keys.add(prop);
+  };
+  return new Proxy(target, {
+    get(obj, prop, recv) {
+      note(prop);
+      return Reflect.get(obj, prop, recv);
+    },
+    has(obj, prop) {
+      note(prop);
+      return Reflect.has(obj, prop);
+    },
+    ownKeys(obj) {
+      t.all = true;
+      return Reflect.ownKeys(obj);
+    },
+    getOwnPropertyDescriptor(obj, prop) {
+      note(prop);
+      return Reflect.getOwnPropertyDescriptor(obj, prop);
+    },
+  });
+}
+
+// pageQueryReads remembers, per route+params variant, which query keys renders
+// have read ("all" when a render enumerated the whole query).
+const pageQueryReads = new Map<string, Set<string> | "all">();
+
+function pageBaseKey(req: { route: string; params?: Record<string, string> }): string {
+  return variantKey({ route: req.route, params: req.params });
+}
+
+// pageKey is the ISR cache key for a request: params, plus only the query keys
+// previous renders of this variant read.
+function pageKey(req: { route: string; params?: Record<string, string>; query?: Record<string, string> }): string {
+  const reads = pageQueryReads.get(pageBaseKey(req));
+  if (!reads) return pageBaseKey(req);
+  if (reads === "all") return variantKey(req);
+  const picked: Record<string, string> = {};
+  for (const k of [...reads].sort()) {
+    if (req.query && Object.prototype.hasOwnProperty.call(req.query, k)) picked[k] = req.query[k];
+  }
+  return variantKey({ route: req.route, params: req.params, query: picked });
+}
+
+function recordQueryReads(req: { route: string; params?: Record<string, string> }, t: QueryTracker): void {
+  const base = pageBaseKey(req);
+  let cur = pageQueryReads.get(base);
+  if (t.all) cur = "all";
+  else if (t.keys.size > 0 && cur !== "all") cur = new Set([...(cur || []), ...t.keys]);
+  if (cur) pageQueryReads.set(base, cur);
 }
 
 class ISRCache {
@@ -482,7 +551,7 @@ const requestStore: AsyncLocalStorage<RequestContext> = (() => {
   return g[key] as AsyncLocalStorage<RequestContext>;
 })();
 
-function requestContextFor(req: RenderRequest): RequestContext {
+function requestContextFor(req: RenderRequest, tracker?: QueryTracker): RequestContext {
   const h = new Headers();
   for (const [k, v] of Object.entries(req.headers || {})) {
     if (typeof v === "string") {
@@ -499,12 +568,12 @@ function requestContextFor(req: RenderRequest): RequestContext {
     headers: h,
     cookies: parseCookieHeader(h.get("cookie")),
     params: { ...(req.params || {}) },
-    searchParams: { ...(req.query || {}) },
+    searchParams: tracker ? trackedQuery(req.query, tracker) : { ...(req.query || {}) },
   };
 }
 
-function withRequest<T>(req: RenderRequest, fn: () => Promise<T>): Promise<T> {
-  return requestStore.run(requestContextFor(req), fn);
+function withRequest<T>(req: RenderRequest, fn: () => Promise<T>, tracker?: QueryTracker): Promise<T> {
+  return requestStore.run(requestContextFor(req, tracker), fn);
 }
 
 // renderSignal maps notFound()/redirect() thrown during a render to a response.
@@ -515,7 +584,7 @@ function renderSignal(err: unknown): RenderResponse | null {
   return null;
 }
 
-function buildProps(req: RenderRequest): Record<string, any> {
+function buildProps(req: RenderRequest, tracker?: QueryTracker): Record<string, any> {
   // Page-level data fetching (getStaticProps/getServerSideProps) has been
   // removed; per-request data is provided by server components (@server),
   // runtime components (@runtime), and middleware instead. Dynamic-route
@@ -527,6 +596,14 @@ function buildProps(req: RenderRequest): Record<string, any> {
   // request without them keeps params undefined, as before.
   const props: Record<string, any> = {};
   if (req.params) props.params = thenableRecord(req.params);
+  if (tracker) {
+    // Reads through the view are recorded; awaiting it resolves to another
+    // tracked view so `const { page } = await searchParams` records "page".
+    const view = trackedQuery(req.query, tracker);
+    props.searchParams = thenable(view, () => trackedQuery(req.query, tracker));
+    if (req.query) props.query = trackedQuery(req.query, tracker);
+    return props;
+  }
   props.searchParams = thenableRecord(req.query);
   if (req.query) props.query = req.query;
   return props;
@@ -547,9 +624,10 @@ async function renderFresh(page: ManifestPage, req: RenderRequest): Promise<Rend
     // Async server components (and plain sync pages) render through
     // renderToStringAsync inside the request scope. The timeout bounds slow
     // awaits (fetch); a page that blocks synchronously still blocks the loop.
+    const tracker = newQueryTracker();
     const { result: html, scope, invalidated } = await withRenderTimeout(
       withCacheScope(page.route, () =>
-        withRequest(req, () => renderToStringAsync(jsx(Component, buildProps(req)))),
+        withRequest(req, () => renderToStringAsync(jsx(Component, buildProps(req, tracker))), tracker),
       ),
     );
 
@@ -562,7 +640,8 @@ async function renderFresh(page: ManifestPage, req: RenderRequest): Promise<Rend
     // An uncacheable read (no-store) keeps the render out of the ISR cache, and
     // a revalidation that landed mid-render means the HTML may be stale.
     if (page.mode === "isr" && !scope.noStore && !invalidated) {
-      isrCache.set(variantKey(req), {
+      recordQueryReads(req, tracker);
+      isrCache.set(pageKey(req), {
         html,
         timestamp: Date.now(),
         params: req.params,
@@ -588,7 +667,7 @@ async function renderFresh(page: ManifestPage, req: RenderRequest): Promise<Rend
 const inFlightRevalidations = new Map<string, Promise<void>>();
 
 function revalidateInBackground(page: ManifestPage, req: RenderRequest) {
-  const key = variantKey(req);
+  const key = pageKey(req);
   if (inFlightRevalidations.has(key)) return;
 
   const p = (async () => {
@@ -654,7 +733,7 @@ async function renderPage(req: RenderRequest): Promise<RenderResponse> {
   if (page.mode === "isr") {
     const interval = page.revalidate || 60;
     isrCache.setRevalidation(page.route, interval);
-    const key = variantKey(req);
+    const key = pageKey(req);
     const cached = isrCache.get(key);
 
     if (cached && !isrCache.isStale(key)) {
@@ -1098,7 +1177,8 @@ if (manifestPath && fs.existsSync(manifestPath)) {
   console.log(`[krate-ssr] Loaded manifest: ${manifest!.pages.length} SSR/ISR/streaming pages`);
 } else {
   // Try default location
-  const defaultPath = path.join(OUT_DIR, "server-manifest.json");
+  const krateDefault = path.join(OUT_DIR, ".krate", "server-manifest.json");
+  const defaultPath = fs.existsSync(krateDefault) ? krateDefault : path.join(OUT_DIR, "server-manifest.json");
   if (fs.existsSync(defaultPath)) {
     const data = fs.readFileSync(defaultPath, "utf-8");
     manifest = JSON.parse(data);

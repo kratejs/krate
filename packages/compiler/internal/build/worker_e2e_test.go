@@ -82,7 +82,7 @@ func TestBuildPageWorker(t *testing.T) {
 	}
 
 	// workers.json index should list the source -> URL mapping.
-	if idx, err := os.ReadFile(filepath.Join(cfg.OutDir, "workers.json")); err == nil {
+	if idx, err := os.ReadFile(ServerOutPath(cfg.OutDir, "workers.json")); err == nil {
 		if !strings.Contains(string(idx), url) {
 			t.Fatalf("workers.json missing worker URL:\n%.800s", idx)
 		}

@@ -118,7 +118,7 @@ func generateFeeds(ctx *BuildResultHookCtx) error {
 		if p.Draft {
 			continue
 		}
-		url := baseURL + docsPageURL(prefix, p.Path)
+		url := CanonicalURL(baseURL, cfg.BaseURLPath(), feedPagePath(cfg, prefix, p.Path))
 		date := p.Date
 		if date == "" {
 			date = p.Updated
@@ -360,7 +360,7 @@ func docsHeadExtras(cfg *config.Config, page docs.Page, siteTitle string) string
 			"@context": "https://schema.org",
 			"@type":    typ,
 			"headline": page.Title,
-			"url":      baseURL + docsPageURL("/docs", page.Path),
+			"url":      docsJSONLDURL(cfg, baseURL, page),
 		}
 		if page.Description != "" {
 			ld["description"] = page.Description
@@ -425,4 +425,51 @@ func renderJSONFeed(baseURL, title, description string, items []feedItem) string
 	}
 	data, _ := json.MarshalIndent(feed, "", "  ")
 	return string(data) + "\n"
+}
+
+// docsJSONLDURL is the absolute URL of a docs page for structured data. It uses
+// the page's own locale- and version-aware URL (set by the docs plugin) so a
+// translated page does not point at the English one.
+func docsJSONLDURL(cfg *config.Config, baseURL string, page docs.Page) string {
+	u := page.URL
+	if u == "" {
+		u = docsPageURL("/docs", page.Path)
+	}
+	return CanonicalURL(baseURL, cfg.BaseURLPath(), u)
+}
+
+// feedPagePath maps a content file path (which includes locale and version
+// directories) to the URL path the docs plugin serves it at: the locale
+// prefixes the whole URL (/fr/docs/guide/) and a non-current version sits under
+// the docs prefix (/docs/v1/guide/).
+func feedPagePath(cfg *config.Config, prefix, pagePath string) string {
+	locales, defLocale := resolveLocales(cfg.I18n)
+	versions, curVersion := resolveVersions(cfg.Versions)
+	parts := strings.Split(pagePath, "/")
+	locale, version := "", ""
+	if len(parts) > 1 && parts[0] != defLocale {
+		for _, l := range locales {
+			if l != "" && l == parts[0] {
+				locale, parts = l, parts[1:]
+				break
+			}
+		}
+	}
+	if len(parts) > 1 {
+		for _, v := range versions {
+			if v != "" && v != curVersion && v == parts[0] {
+				version, parts = v, parts[1:]
+				break
+			}
+		}
+	}
+	u := prefix
+	if version != "" {
+		u += "/" + version
+	}
+	u = docsPageURL(u, strings.Join(parts, "/"))
+	if locale != "" {
+		u = "/" + locale + u
+	}
+	return u
 }

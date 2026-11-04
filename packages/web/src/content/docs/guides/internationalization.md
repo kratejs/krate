@@ -43,8 +43,13 @@ is just a copy under `<locale>/`.
   that has it.
 - **`hreflang` alternates** - the head advertises each available translation
   (`<link rel="alternate" hreflang="fr" href="...">`) so search engines can pair
-  them. A page that has not been translated yet falls back to the target
-  locale's docs home in its switcher link.
+  them. Only real translations are advertised: a page that has not been
+  translated yet gets no hreflang for that locale, and its switcher entry links
+  to the locale's docs home (marked as a fallback), or is hidden when that
+  locale has no pages at all.
+- **Search and feeds** - the search index covers every locale and results are
+  limited to the language being viewed; feed items and JSON-LD use each page's
+  own `/<locale>/docs/...` URL.
 - **Document language** - non-default locales set `<html lang>` before paint.
 
 ## Translating a page
