@@ -202,6 +202,10 @@ type Builder struct {
 	// transformOnce guards the in-place universal transforms so a shared
 	// (cached) AST is transformed exactly once per build, never concurrently.
 	transformOnce sync.Map
+	// deferInline marks entry programs whose getCollection inlining must wait
+	// until route params are bound (static-params pages), so lookups like
+	// `find((p) => p.slug === props.params.slug)` fold to a single entry.
+	deferInline sync.Map
 
 	// diskCache persists per-page outputs across runs (see diskcache.go).
 	diskCache *buildDiskCache
@@ -342,7 +346,9 @@ func (b *Builder) ensureTransformed(prog *ast.Program) {
 		b.TransformUniversalIcons(prog)
 		b.TransformUniversalImages(prog)
 		b.FlattenComponentSpreadAttrs(prog)
-		b.InlineContent(prog)
+		if _, deferred := b.deferInline.Load(prog); !deferred {
+			b.InlineContent(prog)
+		}
 	})
 }
 
@@ -776,8 +782,14 @@ func (b *Builder) BuildAll() error {
 	for _, w := range cres.Warnings {
 		fmt.Fprintf(os.Stderr, "  %sWarning: content:%s %v\n", cYellow, cReset, w)
 	}
-	for _, ve := range cres.Validation {
-		fmt.Fprintf(os.Stderr, "  %sContent error:%s %v\n", cRed, cReset, ve)
+	if len(cres.Validation) > 0 {
+		// Schema violations are content bugs: fail the build (and `krate
+		// check`, which builds first) instead of emitting pages built from
+		// invalid entries. The error also reaches the dev overlay.
+		for _, ve := range cres.Validation {
+			fmt.Fprintf(os.Stderr, "  %sContent error:%s %v\n", cRed, cReset, ve)
+		}
+		return &ContentValidationError{Errors: cres.Validation}
 	}
 
 	// Build the Go host (API routes + components) before pages, so pages that

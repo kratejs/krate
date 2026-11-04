@@ -224,7 +224,62 @@ func (b *builder) extraVarDeclJS(decl *ast.VarDecl) (string, bool) {
 	if derivedCallee(decl.Init) != "" {
 		return "var " + decl.Name + "=" + generateExprJS(b.derivedDeclInit(decl.Init), b.sigMap()), true
 	}
-	return "var " + decl.Name + "=" + generateExprJS(decl.Init, b.sigMap()), true
+	js := "var " + decl.Name + "=" + generateExprJS(decl.Init, b.sigMap())
+	if isPureDataExpr(decl.Init) {
+		// Build-time data (a folded content entry, a literal table) is only
+		// needed by the client when something else references it; the
+		// renderer drops the declaration otherwise (PureVarMarker).
+		js = PureVarBegin + js + PureVarEnd
+	}
+	return js, true
+}
+
+// PureVarBegin and PureVarEnd wrap a hydration `var x=<literal>` declaration
+// the renderer may drop when no other hydration code mentions x.
+const (
+	PureVarBegin = "/*krate:pure*/"
+	PureVarEnd   = "/*krate:end*/"
+)
+
+// isPureDataExpr reports whether expr is an object/array literal made only of
+// literals, so evaluating (or skipping) it has no side effects.
+func isPureDataExpr(expr ast.Expr) bool {
+	switch expr.(type) {
+	case *ast.ObjectExpr, *ast.ArrayExpr:
+		return pureData(expr)
+	}
+	return false
+}
+
+func pureData(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.Literal:
+		return true
+	case *ast.ArrayExpr:
+		for _, el := range e.Elements {
+			if el == nil || !pureData(el) {
+				return false
+			}
+		}
+		return true
+	case *ast.ObjectExpr:
+		for _, p := range e.Properties {
+			if p.Computed || p.Spread || p.Value == nil || !pureData(p.Value) {
+				return false
+			}
+		}
+		return true
+	case *ast.UnaryExpr:
+		return (e.Op == "-" || e.Op == "+") && pureData(e.Arg)
+	case *ast.TemplateExpr:
+		for _, p := range e.Parts {
+			if _, ok := p.(*ast.Literal); !ok {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // isReplayedBodyExpr reports whether a body-level expression statement must
