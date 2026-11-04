@@ -1629,6 +1629,9 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 			deps = append(deps, mod.Path)
 		}
 	}
+	// Files the CSS was built from (@import targets, url() assets, composes
+	// sources) are not modules but must invalidate the page when edited.
+	deps = append(deps, bundle.CSSDeps...)
 
 	// Run AfterParse hooks
 	parseCtx := &plugin.ParseHookCtx{
@@ -1970,7 +1973,7 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	hydrationJS := ""
 	var jsBytes []byte
 	hasJS := false
-	islandBoot, islandJS, islandSSR, islandErr := b.buildIslands(
+	islandBoot, islandJS, islandSSR, islandStyles, islandErr := b.buildIslands(
 		tree.ExternalComponents,
 		externalImports,
 		entryLocalImports(entryModule.Program),
@@ -1978,6 +1981,15 @@ func (b *Builder) buildPage(page string) (*PageResult, string, error) {
 	)
 	if islandErr != nil {
 		return nil, "", islandErr
+	}
+	if islandStyles != nil {
+		// Stylesheets imported by compiled package islands join the page CSS and
+		// the page's dependencies like any other imported stylesheet.
+		bundle.CSS += islandStyles.CSS
+		for src, url := range islandStyles.Assets {
+			bundle.AssetFiles[src] = url
+		}
+		deps = append(deps, islandStyles.Deps...)
 	}
 	if len(islandSSR) > 0 {
 		emitResult.HTML = injectIslandSSR(emitResult.HTML, islandSSR)
@@ -2104,7 +2116,7 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		c.markMiss()
 		return nil, "", false
 	}
-	key, _, _, ok := c.computeKey(e.Deps)
+	key, _, _, ok := c.computeKey(e.Deps, b.routeSignature(page))
 	if !ok || key != e.Key {
 		c.markMiss()
 		return nil, "", false
@@ -2173,7 +2185,7 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		}
 		absDeps = append(absDeps, filepath.Clean(d))
 	}
-	key, sorted, hashes, ok := c.computeKey(absDeps)
+	key, sorted, hashes, ok := c.computeKey(absDeps, b.routeSignature(page))
 	if !ok {
 		return
 	}
@@ -2335,6 +2347,7 @@ func (b *Builder) resetBuildCaches() {
 	layoutEmitCache.Clear()
 	loadingEmitCache.Clear()
 	layoutCache.Clear()
+	routeDirSigCache.Clear()
 	interceptCache.Clear()
 	slotCache.Clear()
 	// Re-arm the per-program transform guard for this build. The parsed module

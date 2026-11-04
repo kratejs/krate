@@ -40,7 +40,7 @@ func InlineImports(css, basePath string) string {
 // baseDir is the directory of the sheet that css came from.
 func InlineImportsWith(css, baseDir string, opts ImportOptions) string {
 	if !hasImport(css) {
-		return css
+		return HoistImports(css)
 	}
 	if opts.Root == "" {
 		opts.Root = baseDir

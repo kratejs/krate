@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -639,5 +640,39 @@ func TestIslandChunksMinified(t *testing.T) {
 	}
 	if strings.Contains(string(preact), "// ../../node_modules") {
 		t.Errorf("production Preact chunk is not minified")
+	}
+}
+
+// A compiled package whose entry imports a stylesheet must still build, and
+// the stylesheet (with its url() assets) must reach the page CSS.
+func TestIslandPackageCSSImport(t *testing.T) {
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	lib := filepath.Join(root, "node_modules", "fake-lib")
+	writeFileRel(t, lib, "index.js", `import './widget.css';
+import { jsx } from 'react/jsx-runtime';
+export function Badge({ label }) { return jsx('span', { className: 'badge', children: label }); }
+`)
+	writeFileRel(t, lib, "widget.css", `.badge{color:rgb(1,2,3);background:url(./dot.png)}`)
+	writeFileRel(t, lib, "dot.png", "DOT")
+
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	files, _ := filepath.Glob(filepath.Join(cfg.OutDir, "styles.*.css"))
+	var all string
+	for _, f := range files {
+		d, _ := os.ReadFile(f)
+		all += string(d)
+	}
+	if !strings.Contains(all, "rgb(1,2,3)") {
+		t.Fatalf("package stylesheet missing from page CSS:\n%s", all)
+	}
+	m := regexp.MustCompile(`/assets/dot-[a-z0-9]+\.png`).FindString(all)
+	if m == "" {
+		t.Fatalf("url() in the package stylesheet was not rebased:\n%s", all)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.OutDir, strings.TrimPrefix(m, "/"))); err != nil {
+		t.Fatalf("asset not copied: %v", err)
 	}
 }

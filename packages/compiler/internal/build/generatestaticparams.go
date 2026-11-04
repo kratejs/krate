@@ -643,6 +643,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 			deps = append(deps, mod.Path)
 		}
 	}
+	deps = append(deps, bundle.CSSDeps...)
 	b.recordDeps(spp.PagePath, deps)
 
 	pageDir := filepath.Join(b.Cfg.OutDir, spp.OutPath)

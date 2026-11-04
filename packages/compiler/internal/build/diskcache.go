@@ -121,7 +121,7 @@ func (c *buildDiskCache) setContentHash(contentHash string) {
 // diskCacheSchema is bumped whenever the shape or the semantics of cached page
 // output change (e.g. new emit passes such as DCE or source maps) so entries
 // written by an older pipeline can never be replayed.
-var diskCacheSchema = "3"
+var diskCacheSchema = "4"
 
 var (
 	buildStampOnce  sync.Once
@@ -187,9 +187,9 @@ func (c *buildDiskCache) hashFile(path string) (string, bool) {
 	return hash, true
 }
 
-// computeKey hashes (fingerprint + sorted deps with their content hashes).
-// ok=false when any dep is missing.
-func (c *buildDiskCache) computeKey(deps []string) (key string, sorted, hashes []string, ok bool) {
+// computeKey hashes (fingerprint + route signature + sorted deps with their
+// content hashes). ok=false when any dep is missing.
+func (c *buildDiskCache) computeKey(deps []string, routeSig string) (key string, sorted, hashes []string, ok bool) {
 	sorted = append([]string(nil), deps...)
 	sort.Strings(sorted)
 	hashes = make([]string, len(sorted))
@@ -202,6 +202,8 @@ func (c *buildDiskCache) computeKey(deps []string) (key string, sorted, hashes [
 	}
 	h := sha256.New()
 	h.Write([]byte(c.fingerprint))
+	h.Write([]byte{0})
+	h.Write([]byte(routeSig))
 	h.Write([]byte{0})
 	for i := range sorted {
 		h.Write([]byte(sorted[i]))

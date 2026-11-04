@@ -61,7 +61,10 @@ func moduleClassSet(modules map[string]*bundler.CSSModuleInfo) map[string]bool {
 	set := make(map[string]bool)
 	for _, m := range modules {
 		for _, scoped := range m.Mappings {
-			set[scoped] = true
+			// A composed class maps to several space-separated names.
+			for _, name := range strings.Fields(scoped) {
+				set[name] = true
+			}
 		}
 	}
 	return set

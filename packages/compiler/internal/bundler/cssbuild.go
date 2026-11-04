@@ -322,3 +322,52 @@ func (b *Bundler) composedMapping(from, spec string, cs *cssSheet, entry *cssEnt
 	entry.composesFrom = append(entry.composesFrom, resolved)
 	return info.Mappings, nil
 }
+
+// CSSModuleMapping runs a CSS Module through the same pipeline the page bundler
+// uses (imports, url() rewriting, scoping, composes) and returns its class
+// mapping plus any warnings. SSR builds use it so server-rendered class names
+// match the stylesheet the page links.
+func CSSModuleMapping(root, abs string) (map[string]string, []diag.Diagnostic, error) {
+	res, err := BuildStylesheet(root, abs)
+	if err != nil {
+		return nil, nil, err
+	}
+	if res.Mapping == nil {
+		return nil, nil, fmt.Errorf("%s is not a CSS module", abs)
+	}
+	return res.Mapping, res.Warnings, nil
+}
+
+// StylesheetResult is a stylesheet built outside a page's module graph.
+type StylesheetResult struct {
+	CSS      string
+	Mapping  map[string]string // set for CSS Modules
+	Assets   map[string]string // asset source path -> hashed site URL
+	Deps     []string          // every file read besides the stylesheet itself
+	Warnings []diag.Diagnostic
+}
+
+// BuildStylesheet runs one stylesheet through the page pipeline (imports,
+// url() rewriting, CSS Module scoping) for CSS reached from outside the
+// bundler's module graph, such as compiled package islands.
+func BuildStylesheet(root, abs string) (*StylesheetResult, error) {
+	b := New(root)
+	b.cssModules = make(map[string]*CSSModuleInfo)
+	b.cssDeps = make(map[string]bool)
+	abs = filepath.Clean(abs)
+	if err := b.resolveModule(abs, false); err != nil {
+		return nil, err
+	}
+	res := &StylesheetResult{
+		CSS:    strings.Join(b.css, "\n"),
+		Assets: b.assets,
+		Deps:   sortedKeys(b.cssDeps),
+	}
+	if info, ok := b.cssModules[abs]; ok {
+		res.Mapping = info.Mappings
+	}
+	for _, m := range b.order {
+		res.Warnings = append(res.Warnings, m.Diagnostics...)
+	}
+	return res, nil
+}

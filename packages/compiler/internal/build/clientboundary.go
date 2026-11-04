@@ -547,7 +547,7 @@ export function __krate_render(C, props) {
 		TsconfigRaw:     clientTsconfigRaw(c.root),
 		Alias:           islandAlias(c.root, false),
 		External:        []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
-		Plugins:         []api.Plugin{*plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.actions, c.basePath)},
+		Plugins:         []api.Plugin{serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.actions, c.basePath)},
 		LogLevel:        api.LogLevelSilent,
 	})
 	var err error
