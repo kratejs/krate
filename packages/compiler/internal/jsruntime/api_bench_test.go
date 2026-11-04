@@ -28,7 +28,7 @@ func benchRouteDir(b *testing.B) string {
 func BenchmarkAPIRoutePool(b *testing.B) {
 	rt := NewAPIRouteRuntime(benchRouteDir(b))
 	rt.SetPool(8, false)
-	req := APIRequest{Method: "GET", Path: "/api/json", Headers: map[string]string{}}
+	req := APIRequest{Method: "GET", Path: "/api/json", Headers: map[string][]string{}}
 
 	// Warm the pool / load the route before timing.
 	for i := 0; i < 8; i++ {
@@ -52,7 +52,7 @@ func BenchmarkAPIRoutePool(b *testing.B) {
 func BenchmarkAPIRouteIsolation(b *testing.B) {
 	rt := NewAPIRouteRuntime(benchRouteDir(b))
 	rt.SetPool(1, true)
-	req := APIRequest{Method: "GET", Path: "/api/json", Headers: map[string]string{}}
+	req := APIRequest{Method: "GET", Path: "/api/json", Headers: map[string][]string{}}
 
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {

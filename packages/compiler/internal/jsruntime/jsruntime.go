@@ -20,7 +20,11 @@ const (
 
 // Runtime wraps a quickjs VM with krate-specific Web API polyfills
 type Runtime struct {
-	vm        *quickjs.VM
+	vm       *quickjs.VM
+	memLimit uintptr
+	// curBody is the request body of the in-flight API request; the JS side
+	// reads it lazily through the __go_body_* host functions.
+	curBody   []byte
 	logPrefix string // optional prefix for console output (e.g. "[plugin:demo]")
 	// dataCache, when set, caches fetch responses requested with Next-style
 	// options ({ next: { revalidate, tags } } / cache: "force-cache").
@@ -62,7 +66,8 @@ func New() (*Runtime, error) {
 	// Resource limits are configurable so an unusual project can raise them:
 	// KRATE_JS_MEMORY_MB (default 32), KRATE_JS_STACK_KB (default 256),
 	// KRATE_JS_TIMEOUT (Go duration, default 30s).
-	vm.SetMemoryLimit(envUnits("KRATE_JS_MEMORY_MB", 32, 1<<20))
+	memLimit := envUnits("KRATE_JS_MEMORY_MB", 32, 1<<20)
+	vm.SetMemoryLimit(memLimit)
 	vm.SetMaxStackSize(envUnits("KRATE_JS_STACK_KB", 256, 1024))
 
 	if err := vm.SetEvalTimeout(envDuration("KRATE_JS_TIMEOUT", 30*time.Second)); err != nil {
@@ -70,7 +75,7 @@ func New() (*Runtime, error) {
 		return nil, fmt.Errorf("failed to set eval timeout: %w", err)
 	}
 
-	r := &Runtime{vm: vm}
+	r := &Runtime{vm: vm, memLimit: memLimit}
 
 	// Inject Web API polyfills
 	if err := r.injectPolyfills(); err != nil {
@@ -100,6 +105,12 @@ func envDuration(key string, def time.Duration) time.Duration {
 		}
 	}
 	return def
+}
+
+// setMemoryHeadroom raises (or restores, with 0) the VM memory limit so a
+// request with a large body fits beside the configured base limit.
+func (r *Runtime) setMemoryHeadroom(extra uintptr) {
+	r.vm.SetMemoryLimit(r.memLimit + extra)
 }
 
 // Execute evaluates JavaScript code and returns the result

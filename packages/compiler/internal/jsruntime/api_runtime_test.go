@@ -87,13 +87,13 @@ function GET(request) {
 		URL:     "http://localhost:3000/api/test",
 		Method:  "GET",
 		Path:    "/api/test",
-		Headers: map[string]string{},
+		Headers: map[string][]string{},
 	})
 
 	if result.Status != 200 {
 		t.Errorf("Expected 200, got %d", result.Status)
 	}
-	if result.Body != `{"message":"hello"}` {
+	if string(result.Body) != `{"message":"hello"}` {
 		t.Errorf("Expected {message:hello}, got %s", result.Body)
 	}
 }
@@ -119,7 +119,7 @@ function GET(request) {
 	if result.Status != 200 {
 		t.Fatalf("Expected 200, got %d (%s)", result.Status, result.Error)
 	}
-	if result.Body != "api-env" {
+	if string(result.Body) != "api-env" {
 		t.Errorf("Body = %q, want %q (process.env not visible in route)", result.Body, "api-env")
 	}
 }
@@ -164,7 +164,7 @@ function GET(request) {
 		URL:     "http://localhost:3000/api/test",
 		Method:  "GET",
 		Path:    "/api/test",
-		Headers: map[string]string{},
+		Headers: map[string][]string{},
 	})
 
 	if result.Status != 200 {
@@ -175,10 +175,10 @@ function GET(request) {
 			t.Errorf("Headers internals leaked into response headers: %v", result.Headers)
 		}
 	}
-	if result.Headers["x-custom"] != "1" {
+	if result.Header("x-custom") != "1" {
 		t.Errorf("expected x-custom header preserved, got %v", result.Headers)
 	}
-	if result.Headers["content-type"] != "application/json" {
+	if result.Header("content-type") != "application/json" {
 		t.Errorf("expected content-type application/json, got %v", result.Headers)
 	}
 }
@@ -214,7 +214,7 @@ func TestAPIRoutePathTraversalRejected(t *testing.T) {
 		if result.Status != 404 {
 			t.Errorf("path %q: expected 404 (rejected), got %d", path, result.Status)
 		}
-		if result.Body != `{"error":"API Route Not Found"}` {
+		if string(result.Body) != `{"error":"API Route Not Found"}` {
 			t.Errorf("path %q: expected not-found body, got %q", path, result.Body)
 		}
 	}
@@ -242,7 +242,7 @@ function POST(request) {
 		Method: "GET",
 		Path:   "/api/methods",
 	})
-	if result.Status != 200 || result.Body != "GET" {
+	if result.Status != 200 || string(result.Body) != "GET" {
 		t.Errorf("GET: expected 200/GET, got %d/%s", result.Status, result.Body)
 	}
 
@@ -251,7 +251,7 @@ function POST(request) {
 		Method: "POST",
 		Path:   "/api/methods",
 	})
-	if result.Status != 201 || result.Body != "POST" {
+	if result.Status != 201 || string(result.Body) != "POST" {
 		t.Errorf("POST: expected 201/POST, got %d/%s", result.Status, result.Body)
 	}
 }
@@ -272,7 +272,7 @@ async function GET(request, context) {
 	}
 	rt := NewAPIRouteRuntime(apiDir)
 	result := rt.Execute(APIRequest{Method: "GET", Path: "/api/items/42"})
-	if result.Status != 200 || result.Body != `{"id":"42"}` {
+	if result.Status != 200 || string(result.Body) != `{"id":"42"}` {
 		t.Fatalf("params context: status=%d body=%s error=%s", result.Status, result.Body, result.Error)
 	}
 }
@@ -297,7 +297,7 @@ export { handler as default };
 		Path:   "/api/default",
 	})
 
-	if result.Status != 200 || result.Body != "default" {
+	if result.Status != 200 || string(result.Body) != "default" {
 		t.Errorf("Expected 200/default, got %d/%s", result.Status, result.Body)
 	}
 }
@@ -324,7 +324,7 @@ function GET(request) {
 		t.Errorf("Expected 200, got %d", result.Status)
 	}
 	// JSON return should be auto-stringified
-	if result.Body != `{"name":"test","value":42}` {
+	if string(result.Body) != `{"name":"test","value":42}` {
 		t.Errorf("Expected JSON body, got %s", result.Body)
 	}
 }
@@ -379,10 +379,10 @@ export { handler as default };
 	if result.Status != 200 {
 		t.Errorf("Expected 200, got %d", result.Status)
 	}
-	if result.Body != `{"message":"Hello"}` {
+	if string(result.Body) != `{"message":"Hello"}` {
 		t.Errorf("Expected {message:Hello}, got %s", result.Body)
 	}
-	if result.Headers["content-type"] != "application/json" {
+	if result.Header("content-type") != "application/json" {
 		t.Errorf("Expected content-type header, got %v", result.Headers)
 	}
 }
@@ -402,7 +402,7 @@ func TestAPIRouteEsbuildMinified(t *testing.T) {
 	result := rt.Execute(APIRequest{
 		Method:  "GET",
 		Path:    "/api/videos",
-		Headers: map[string]string{},
+		Headers: map[string][]string{},
 	})
 	t.Logf("GET /api/videos: status=%d body=%s error=%s", result.Status, result.Body, result.Error)
 	if result.Status != 200 {
@@ -414,7 +414,7 @@ func TestAPIRouteEsbuildMinified(t *testing.T) {
 		URL:     "http://localhost:3000/api/videos?id=demo-42",
 		Method:  "GET",
 		Path:    "/api/videos",
-		Headers: map[string]string{},
+		Headers: map[string][]string{},
 	})
 	t.Logf("GET /api/videos?id=demo-42: status=%d body=%s", result.Status, result.Body)
 	if result.Status != 200 {
@@ -426,7 +426,7 @@ func TestAPIRouteEsbuildMinified(t *testing.T) {
 		URL:     "http://localhost:3000/api/videos?id=nonexistent",
 		Method:  "GET",
 		Path:    "/api/videos",
-		Headers: map[string]string{},
+		Headers: map[string][]string{},
 	})
 	t.Logf("GET /api/videos?id=nonexistent: status=%d body=%s", result.Status, result.Body)
 	if result.Status != 404 {
@@ -437,8 +437,8 @@ func TestAPIRouteEsbuildMinified(t *testing.T) {
 	result = rt.Execute(APIRequest{
 		Method:  "POST",
 		Path:    "/api/videos",
-		Headers: map[string]string{"content-type": "application/json"},
-		Body:    `{"title":"New Video","duration":120}`,
+		Headers: map[string][]string{"content-type": {"application/json"}},
+		Body:    []byte(`{"title":"New Video","duration":120}`),
 	})
 	t.Logf("POST /api/videos: status=%d body=%s error=%s", result.Status, result.Body, result.Error)
 	if result.Status != 201 {
@@ -449,8 +449,8 @@ func TestAPIRouteEsbuildMinified(t *testing.T) {
 	result = rt.Execute(APIRequest{
 		Method:  "POST",
 		Path:    "/api/videos",
-		Headers: map[string]string{"content-type": "application/json"},
-		Body:    `{"title":"Missing duration"}`,
+		Headers: map[string][]string{"content-type": {"application/json"}},
+		Body:    []byte(`{"title":"Missing duration"}`),
 	})
 	t.Logf("POST /api/videos (bad): status=%d body=%s", result.Status, result.Body)
 	if result.Status != 400 {
@@ -476,15 +476,15 @@ func TestAPIRouteIIFEOutput(t *testing.T) {
 	rt := NewAPIRouteRuntime(apiDir)
 
 	get := rt.Execute(APIRequest{Method: "GET", Path: "/api/iife"})
-	if get.Status != 200 || get.Body != `{"ok":true,"id":7}` {
+	if get.Status != 200 || string(get.Body) != `{"ok":true,"id":7}` {
 		t.Fatalf("GET: status=%d body=%s error=%s", get.Status, get.Body, get.Error)
 	}
-	if get.Headers["content-type"] != "application/json" {
-		t.Errorf("GET: content-type = %q", get.Headers["content-type"])
+	if get.Header("content-type") != "application/json" {
+		t.Errorf("GET: content-type = %q", get.Header("content-type"))
 	}
 
 	post := rt.Execute(APIRequest{Method: "POST", Path: "/api/iife"})
-	if post.Status != 201 || post.Body != `{"created":true}` {
+	if post.Status != 201 || string(post.Body) != `{"created":true}` {
 		t.Fatalf("POST: status=%d body=%s error=%s", post.Status, post.Body, post.Error)
 	}
 }
@@ -511,7 +511,7 @@ function GET(request) { n++; return Response.json({ n: n }); }`
 			defer wg.Done()
 			r := rt.Execute(APIRequest{Method: "GET", Path: "/api/count"})
 			if r.Status != 200 {
-				errCh <- r.Body
+				errCh <- string(r.Body)
 			}
 		}()
 	}
@@ -538,7 +538,7 @@ function GET(request) { n++; return Response.json({ n: n }); }`
 
 	for i := 0; i < 3; i++ {
 		r := rt.Execute(APIRequest{Method: "GET", Path: "/api/iso"})
-		if r.Status != 200 || r.Body != `{"n":1}` {
+		if r.Status != 200 || string(r.Body) != `{"n":1}` {
 			t.Fatalf("request %d: status=%d body=%s (expected fresh state)", i, r.Status, r.Body)
 		}
 	}

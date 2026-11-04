@@ -95,28 +95,6 @@ func TestSharedBytecodeAcrossVMs(t *testing.T) {
 	}
 }
 
-func TestSharedInvokeBytecodeCaches(t *testing.T) {
-	apiInvokeBytecode.Delete("cachetest\x00GET")
-	compiles := 0
-	compile := func() ([]byte, error) {
-		compiles++
-		rt, err := New()
-		if err != nil {
-			return nil, err
-		}
-		defer rt.Close()
-		return rt.Compile(apiInvokeJS("cachetest", "GET"), EvalGlobal)
-	}
-	for i := 0; i < 5; i++ {
-		if _, err := sharedInvokeBytecode("cachetest\x00GET", compile); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if compiles != 1 {
-		t.Fatalf("compiled %d times, want 1", compiles)
-	}
-}
-
 // BenchmarkEvaluateExpr measures the pooled path.
 func BenchmarkEvaluateExpr(b *testing.B) {
 	expr := "Math.round(3.14) + Date.parse('1970-01-01')/1000"
@@ -143,21 +121,5 @@ func BenchmarkNewRuntime(b *testing.B) {
 			b.Fatal(err)
 		}
 		_ = rt.Close()
-	}
-}
-
-// BenchmarkCompileInvokeWrapper measures the per-(route,method) compile that each
-// worker previously performed on its first request for a route.
-func BenchmarkCompileInvokeWrapper(b *testing.B) {
-	rt, err := New()
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer rt.Close()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := rt.Compile(apiInvokeJS("src/api/users/[id].ts", "GET"), EvalGlobal); err != nil {
-			b.Fatal(err)
-		}
 	}
 }

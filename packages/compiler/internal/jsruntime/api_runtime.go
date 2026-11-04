@@ -1,6 +1,7 @@
 package jsruntime
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // APIRouteRuntime executes compiled API routes via embedded quickjs.
@@ -35,24 +37,49 @@ type APIRouteRuntime struct {
 	prep   map[string]*preparedRoute
 }
 
-// APIRequest is the input to an API route handler
+// APIRequest is the input to an API route handler.
 type APIRequest struct {
-	URL     string            `json:"url"`
-	Method  string            `json:"method"`
-	Path    string            `json:"path"`
-	Headers map[string]string `json:"headers"`
-	Body    string            `json:"body"`
+	URL    string
+	Method string
+	Path   string
+	// Headers are the request headers as received (multi-valued).
+	Headers map[string][]string
+	// Body is the raw request body; it crosses into the VM as base64.
+	Body []byte
 	// Params are the dynamic route segments ([id], [...slug]), matching the
 	// second argument Next.js route handlers receive.
-	Params map[string]string `json:"params,omitempty"`
+	Params map[string]string
+	// RemoteAddr is the client address (host:port) for legacy handlers.
+	RemoteAddr string
 }
 
-// APIResult is the output of an API route handler
+// APIResult is a fully buffered API response (used by tests and callers that
+// do not stream).
 type APIResult struct {
-	Status  int               `json:"status"`
-	Headers map[string]string `json:"headers"`
-	Body    string            `json:"body"`
-	Error   string            `json:"error"`
+	Status  int
+	Headers map[string][]string
+	Body    []byte
+	Error   string
+	Stack   string
+	Allow   []string
+}
+
+// APISink receives a response as the handler produces it.
+type APISink interface {
+	// Start is called once, before any Write, with the response head.
+	Start(status int, headers [][2]string) error
+	// Write delivers one body chunk; an error means the client is gone.
+	Write(p []byte) error
+}
+
+// APIFailure describes a request that did not produce a response head (or a
+// stream that broke afterwards, with Started set).
+type APIFailure struct {
+	Status  int
+	Message string
+	Stack   string
+	Allow   []string
+	Started bool
 }
 
 // stripExports removes ESM export statements and converts named exports to globals.
@@ -101,7 +128,7 @@ func stripExports(code string) string {
 	var result []string
 
 	reExportDefaultDecl := regexp.MustCompile(`^export\s+default\s+`)
-	reExportDecl := regexp.MustCompile(`^export\s+(const|let|var|function|class)\s+`)
+	reExportDecl := regexp.MustCompile(`^export\s+(async\s+function|const|let|var|function|class)\s+`)
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -193,9 +220,50 @@ func (a *APIRouteRuntime) Close() {
 	}
 }
 
-// Execute runs the API route handler for the given path.
+// bufferSink collects a response into memory.
+type bufferSink struct {
+	status  int
+	headers [][2]string
+	body    []byte
+}
+
+func (b *bufferSink) Start(status int, headers [][2]string) error {
+	b.status, b.headers = status, headers
+	return nil
+}
+
+func (b *bufferSink) Write(p []byte) error {
+	b.body = append(b.body, p...)
+	return nil
+}
+
+// Execute runs the API route handler for the given path and buffers the
+// whole response.
 func (a *APIRouteRuntime) Execute(req APIRequest) APIResult {
-	// Resolve the API file
+	sink := &bufferSink{}
+	fail := a.Serve(context.Background(), req, sink)
+	if fail != nil && !fail.Started {
+		res := APIResult{Status: fail.Status, Error: fail.Message, Stack: fail.Stack, Allow: fail.Allow, Body: []byte(jsonError(fail.Message))}
+		res.Headers = map[string][]string{"content-type": {"application/json"}}
+		return res
+	}
+	res := APIResult{Status: sink.status, Body: sink.body, Headers: map[string][]string{}}
+	for _, h := range sink.headers {
+		res.Headers[h[0]] = append(res.Headers[h[0]], h[1])
+	}
+	if fail != nil {
+		res.Error = fail.Message
+	}
+	return res
+}
+
+// apiTimeout bounds how long a handler may stay pending (per phase: waiting
+// for the response head, and waiting for each streamed chunk).
+func apiTimeout() time.Duration { return envDuration("KRATE_API_TIMEOUT", 30*time.Second) }
+
+// Serve runs the route and streams the response into sink. It returns nil on
+// success, or a failure describing what went wrong.
+func (a *APIRouteRuntime) Serve(ctx context.Context, req APIRequest, sink APISink) *APIFailure {
 	relPath := strings.TrimPrefix(req.Path, "/api")
 	if relPath == "" {
 		relPath = "/index"
@@ -203,51 +271,27 @@ func (a *APIRouteRuntime) Execute(req APIRequest) APIResult {
 
 	targetFile := a.resolveAPIFile(relPath)
 	if targetFile == "" {
-		return APIResult{Status: 404, Body: `{"error":"API Route Not Found"}`}
+		return &APIFailure{Status: 404, Message: "API Route Not Found"}
 	}
 
 	version := fileVersion(targetFile)
 	prep, err := a.prepared(targetFile, version)
 	if err != nil {
-		return APIResult{Status: 500, Body: `{"error":"Failed to read API route"}`}
+		return &APIFailure{Status: 500, Message: "Failed to read API route: " + err.Error()}
 	}
 
 	worker, err := a.acquireWorker()
 	if err != nil {
-		return APIResult{Status: 500, Body: `{"error":"Failed to create JS runtime"}`}
+		return &APIFailure{Status: 500, Message: "Failed to create JS runtime: " + err.Error()}
 	}
 	defer a.releaseWorker(worker)
 
 	if err := worker.ensure(targetFile, prep.code, version); err != nil {
-		return APIResult{Status: 500, Body: jsonError(err.Error())}
+		return &APIFailure{Status: 500, Message: err.Error()}
 	}
 
 	req.Params = apiRouteParams(a.apiDir, targetFile, req.Path)
-	reqJSON, _ := json.Marshal(req)
-	if err := worker.rt.SetGlobal("__krate_req", string(reqJSON)); err != nil {
-		return APIResult{Status: 500, Body: jsonError(err.Error())}
-	}
-
-	body, err := worker.invoke(targetFile, req.Method)
-	if err != nil {
-		return APIResult{Status: 500, Body: jsonError(err.Error())}
-	}
-
-	if body == krateAsyncPending {
-		// The handler returned a promise; drain microtasks and read the result.
-		worker.rt.DrainJobs()
-		body, err = worker.formatPending()
-		if err != nil {
-			return APIResult{Status: 500, Body: jsonError(err.Error())}
-		}
-	}
-
-	var apiResult APIResult
-	if err := json.Unmarshal([]byte(body), &apiResult); err != nil {
-		return APIResult{Status: 500, Body: `{"error":"Invalid handler response"}`}
-	}
-
-	return apiResult
+	return worker.run(ctx, targetFile, req, sink)
 }
 
 // prepared returns the (export-stripped) source for a route, cached by content
@@ -485,4 +529,12 @@ func (a *APIRouteRuntime) containedPath(rel string, ext string) string {
 func jsonError(msg string) string {
 	b, _ := json.Marshal(map[string]string{"error": msg})
 	return string(b)
+}
+
+// Header returns the first value of a (lowercase) response header.
+func (r APIResult) Header(name string) string {
+	if v := r.Headers[strings.ToLower(name)]; len(v) > 0 {
+		return v[0]
+	}
+	return ""
 }
