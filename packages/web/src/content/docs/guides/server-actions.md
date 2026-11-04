@@ -219,7 +219,7 @@ Inside an action, `@krate/runtime/server` exposes the request:
 import { cookies, headers, redirect } from "@krate/runtime/server";
 
 export async function signOut() {
-  const session = cookies().get("session");
+  const session = cookies().get("session")?.value;
   const agent = headers().get("user-agent");
   cookies().delete("session");
   redirect("/");
@@ -227,7 +227,7 @@ export async function signOut() {
 ```
 
 - `headers()` returns the request `Headers`.
-- `cookies()` has `get`, `getAll`, `has`, `set(name, value, options)` and
+- `cookies()` has `get` (returns `{ name, value }` or `undefined`, as in Next.js), `getAll`, `has`, `set(name, value, options)` and
   `delete(name)`. `set` defaults to `HttpOnly; Path=/; SameSite=Lax`.
 - `getActionContext()` returns `{ actionId, url, method, headers, cookies }`, or
   `undefined` outside an action. `headers()`/`cookies()` throw outside one.
