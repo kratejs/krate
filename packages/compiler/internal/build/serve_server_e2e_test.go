@@ -111,7 +111,7 @@ func TestServeW5Behaviors(t *testing.T) {
 
 	t.Run("streaming shell and fallback arrive before the slow region", func(t *testing.T) {
 		start := time.Now()
-		resp, err := client.Get(base + "/stream")
+		resp, err := client.Get(base + "/stream/")
 		if err != nil {
 			t.Fatal(err)
 		}

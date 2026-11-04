@@ -30,7 +30,7 @@ func secProject(t *testing.T) (root string, cfg *config.Config) {
   if (url.pathname.startsWith('/admin')) {
     return new Response('Forbidden', { status: 403, headers: { 'X-Mw': 'blocked' } });
   }
-  return new Response(null, { status: 200, headers: { 'X-Mw': 'pass' } });
+  return new Response(null, { status: 200, headers: { 'X-Mw': 'pass', 'x-middleware-next': '1' } });
 }
 `,
 		"public/.env":                     "SECRET=1",

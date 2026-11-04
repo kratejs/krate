@@ -211,9 +211,13 @@ export default function Home() {
 	}
 }
 
+// A re-export from another module is not copied into the page script; a
+// text-only use of it is still reported by KR8302. (Destructured module
+// consts are bundled now and no longer reach this path.)
 func TestUnbundledImportInTextIsDiagnosed(t *testing.T) {
 	root := t.TempDir()
-	writeFileRel(t, root, "src/lib/counter.ts", "const pair = [5, 6];\nexport const [total] = pair;\n")
+	writeFileRel(t, root, "src/lib/other.ts", "export const value = 5;\n")
+	writeFileRel(t, root, "src/lib/counter.ts", "export { value as total } from \"./other\";\n")
 	writeFileRel(t, root, "src/pages/index.tsx", `
 import { createSignal } from "@krate/runtime";
 import { total } from "../lib/counter";

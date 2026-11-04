@@ -171,11 +171,12 @@ export const [total] = pair;`)
 	}
 }
 
-// A binding the bundler cannot copy into the page script (a class here) is
-// still reported by KR8302.
+// A binding the bundler cannot copy into the page script (a re-export here;
+// classes, lets and namespaces are bundled now) is still reported by KR8302.
 func TestUnbundledImportIsDiagnosed(t *testing.T) {
 	root := t.TempDir()
-	writeFileRel(t, root, "src/lib/counter.ts", `export class tally { static n = 5; }`)
+	writeFileRel(t, root, "src/lib/other.ts", `export const base = { n: 5 };`)
+	writeFileRel(t, root, "src/lib/counter.ts", `export { base as tally } from './other';`)
 	writeFileRel(t, root, "src/pages/index.tsx", `
 		import { useState } from 'react';
 		import { tally } from '../lib/counter';
