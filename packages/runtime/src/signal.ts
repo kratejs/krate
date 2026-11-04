@@ -1143,23 +1143,27 @@ let lastPassEffects: EffectState[] = [];
 
 // Drops the pending queue and reports the loop as React does, so the page
 // stays responsive instead of re-flushing forever.
-function abortUpdateLoop(): never {
+function abortUpdateLoop(): void {
   const looping = pending.splice(0);
   for (const effect of looping) effect.queued = false;
   flushScheduled = false;
   flushMode = 0;
   flushToken++;
-  const names = new Set<string>();
-  for (const effect of looping.length > 0 ? looping : lastPassEffects) {
-    names.add(effect.fn.name || 'anonymous effect');
-  }
+  const culprits = looping.length > 0 ? looping : lastPassEffects;
   lastPassEffects = [];
-  const who = Array.from(names).slice(0, 3).join(', ');
-  throw new Error(
+  const who = Array.from(new Set(culprits.map((e) => e.fn.name || 'anonymous effect')))
+    .slice(0, 3)
+    .join(', ');
+  const err = new Error(
     'Maximum update depth exceeded. An effect keeps writing state that re-runs itself or another effect (' +
       who +
       '). Make the write conditional or remove the dependency that changes on every run.',
   );
+  // The nearest error boundary of a looping effect handles it, as React does.
+  for (const effect of culprits) {
+    if (effect.boundaryOwner && ownerHooks && ownerHooks.error(effect.boundaryOwner, err)) return;
+  }
+  throw err;
 }
 
 const settleHooks: Array<() => void> = [];
