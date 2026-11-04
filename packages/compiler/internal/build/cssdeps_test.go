@@ -168,3 +168,79 @@ export default function Page() { return <div class="reset">hi</div>; }
 		t.Fatalf("layer(base) not honoured:\n%s", out)
 	}
 }
+
+func TestDevURLAssetDependencyTriggersRebuild(t *testing.T) {
+	root := t.TempDir()
+	page := filepath.Join(root, "src", "pages", "index.tsx")
+	png := filepath.Join(root, "src", "pages", "img", "bg.png")
+	writeFileRel(t, root, "src/pages/index.tsx", `import './app.css';
+export default function Page() { return <div class="p">hi</div>; }
+`)
+	writeFileRel(t, root, "src/pages/app.css", `.p{background:url(./img/bg.png)}`)
+	writeFileRel(t, root, "src/pages/img/bg.png", "ONE")
+	cfg := cssTestConfig(root)
+	b := New(root, cfg)
+	b.DevMode = true
+	if err := b.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	if pages := b.affectedPages([]string{png}); len(pages) != 1 || pages[0] != page {
+		t.Fatalf("affectedPages(bg.png) = %v, want [%s]", pages, page)
+	}
+	// The watcher must not drop the asset because of its extension.
+	if !b.watchedFile(png) {
+		t.Error("watcher ignores a url() asset that pages depend on")
+	}
+	if b.watchedFile(filepath.Join(root, "src", "pages", "img", "other.png")) {
+		t.Error("watcher tracks an unrelated image")
+	}
+	before := linkedCSS(t, cfg)
+	if !strings.Contains(before, "/assets/bg-") {
+		t.Fatalf("asset url not rewritten:\n%s", before)
+	}
+	writeFileRel(t, root, "src/pages/img/bg.png", "TWO-DIFFERENT")
+	b.processChanges([]string{png}, nil)
+	if after := linkedCSS(t, cfg); after == before {
+		t.Errorf("stylesheet still points at the old asset:\n%s", after)
+	}
+}
+
+func TestDevNewSlotDirectoryRebuilds(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "src/pages/_layout.tsx", `export default function L({ children, modal }) { return <div><main>{children}</main><aside id="slot">{modal}</aside></div>; }
+`)
+	writeFileRel(t, root, "src/pages/index.tsx", `export default function Page() { return <p>home</p>; }
+`)
+	writeFileRel(t, root, "src/pages/photo/[id].tsx", `export default function Photo() { return <p>photo</p>; }
+`)
+	cfg := cssTestConfig(root)
+	b := New(root, cfg)
+	b.DevMode = true
+	if err := b.BuildAll(); err != nil {
+		t.Fatal(err)
+	}
+	read := func() string {
+		data, err := os.ReadFile(filepath.Join(cfg.OutDir, "index.html"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	if strings.Contains(read(), "SLOTDEFAULT") {
+		t.Fatal("slot content present before the slot exists")
+	}
+	slot := filepath.Join(root, "src/pages/@modal/default.tsx")
+	writeFileRel(t, root, "src/pages/@modal/default.tsx", `export default function D() { return <b>SLOTDEFAULT</b>; }
+`)
+	b.processChanges([]string{slot}, nil)
+	if !strings.Contains(read(), "SLOTDEFAULT") {
+		t.Errorf("adding an @modal slot directory did not rebuild the pages that render it:\n%s", read())
+	}
+	icept := filepath.Join(root, "src/pages/@modal/(.)photo/[id].tsx")
+	writeFileRel(t, root, "src/pages/@modal/(.)photo/[id].tsx", `export default function M() { return <b>MODAL</b>; }
+`)
+	b.processChanges([]string{icept}, nil)
+	if _, err := os.Stat(filepath.Join(cfg.OutDir, "photo")); err != nil {
+		t.Errorf("photo route missing after adding an intercepting route: %v", err)
+	}
+}
