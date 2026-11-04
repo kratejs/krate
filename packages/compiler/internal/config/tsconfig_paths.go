@@ -157,7 +157,7 @@ func loadTSOpts(path string, seen map[string]bool, warn func(string)) (tsOpts, b
 	}
 	if b, ok := co["baseUrl"].(string); ok && b != "" {
 		own.hasBaseURL = true
-		own.baseURL = filepath.Join(dir, filepath.FromSlash(b))
+		own.baseURL = filepath.Join(dir, filepath.FromSlash(tsSlashes(b)))
 	}
 	if pm, ok := co["paths"].(map[string]any); ok {
 		own.paths = map[string][]string{}
@@ -168,11 +168,11 @@ func loadTSOpts(path string, seen map[string]bool, warn func(string)) (tsOpts, b
 			case []any:
 				for _, t := range v {
 					if s, ok := t.(string); ok {
-						targets = append(targets, s)
+						targets = append(targets, tsSlashes(s))
 					}
 				}
 			case string:
-				targets = []string{v}
+				targets = []string{tsSlashes(v)}
 			}
 			if len(targets) > 0 {
 				own.paths[prefix] = targets
@@ -180,6 +180,13 @@ func loadTSOpts(path string, seen map[string]bool, warn func(string)) (tsOpts, b
 		}
 	}
 	return mergeTSOpts(res, own), true
+}
+
+// tsSlashes normalizes a tsconfig path to forward slashes. A path written with
+// backslashes resolves on Windows, where they are separators, so it must
+// resolve the same on Linux and macOS, where they are filename characters.
+func tsSlashes(p string) string {
+	return strings.ReplaceAll(p, `\`, "/")
 }
 
 // mergeTSOpts overlays child on base. A child `paths` replaces the base map

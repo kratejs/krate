@@ -101,3 +101,25 @@ func TestTSConfigAliasOrderDeterministic(t *testing.T) {
 		}
 	}
 }
+
+func TestTSConfigBackslashPathsAreNormalized(t *testing.T) {
+	dir := t.TempDir()
+	writeTS(t, filepath.Join(dir, "tsconfig.json"), `{
+  "compilerOptions": {
+    "baseUrl": ".\\app",
+    "paths": { "@/*": [".\\src\\*"], "one": "lib\\one.ts" }
+  }
+}`)
+	c := &Config{}
+	c.LoadTSConfigPaths(dir)
+	got := map[string]string{}
+	for _, a := range c.PathAliases {
+		got[a.Prefix] = strings.Join(a.Targets, ",")
+	}
+	if got["@/*"] != "./src/*" || got["one"] != "lib/one.ts" {
+		t.Fatalf("targets = %v", got)
+	}
+	if want := filepath.Join(dir, "app"); c.TSBaseDir != want {
+		t.Fatalf("TSBaseDir = %q, want %q", c.TSBaseDir, want)
+	}
+}
