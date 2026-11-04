@@ -85,3 +85,16 @@ func TestRuntimeChunkCompatConditional(t *testing.T) {
 		t.Error("compat bootstrap was omitted when requested")
 	}
 }
+
+func TestRequireRuntimeChunk(t *testing.T) {
+	if err := requireRuntimeChunk("", []*PageResult{{HasJS: false}}); err != nil {
+		t.Fatalf("static sites need no runtime: %v", err)
+	}
+	if err := requireRuntimeChunk("chunks/runtime.x.js", []*PageResult{{HasJS: true}}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	err := requireRuntimeChunk("", []*PageResult{{HasJS: true, SourcePath: "src/pages/index.tsx"}})
+	if err == nil || !strings.Contains(err.Error(), "krate-hydrate.js") {
+		t.Fatalf("want missing-runtime diagnostic, got %v", err)
+	}
+}

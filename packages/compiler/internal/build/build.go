@@ -580,6 +580,9 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 
 	// Write shared runtime chunk (extracted from per-page bundles)
 	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results), Suspense: runtimeNeedsSuspense(results)})
+	if err := requireRuntimeChunk(runtimeJS, results); err != nil {
+		return nil, err
+	}
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)
 	}
@@ -928,6 +931,10 @@ func (b *Builder) BuildAll() error {
 	runtimeJS := ""
 	if anyPageHasJS {
 		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, runtimeChunkOptions{SPA: b.Cfg.SPAEnabled(), Compat: runtimeNeedsCompat(results), Suspense: runtimeNeedsSuspense(results)})
+
+		if err := requireRuntimeChunk(runtimeJS, results); err != nil {
+			return err
+		}
 	}
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)

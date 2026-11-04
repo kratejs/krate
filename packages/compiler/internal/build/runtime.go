@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
@@ -217,4 +218,23 @@ func writeDevChunk(outDir, projectRoot string) string {
 	relPath := "chunks/krate-dev.js"
 	_ = fsutil.WriteFileAtomic(filepath.Join(outDir, relPath), []byte(content), 0644)
 	return relPath
+}
+
+// requireRuntimeChunk fails the build when pages ship hydration JS but the
+// runtime chunk could not be written, which would otherwise produce pages that
+// fail in the browser (e.g. "refreshSlots is not defined").
+func requireRuntimeChunk(runtimeJS string, results []*PageResult) error {
+	if runtimeJS != "" {
+		return nil
+	}
+	for _, r := range results {
+		if r != nil && r.HasJS {
+			return diag.Diagnostic{
+				File:    r.SourcePath,
+				Message: "the @krate/runtime hydration bundle (krate-hydrate.js) was not found, so interactive pages cannot hydrate",
+				Hint:    "build the runtime (`pnpm --filter @krate/runtime build`) or install @krate/runtime so packages/runtime/dist or node_modules/@krate/runtime/dist exists",
+			}
+		}
+	}
+	return nil
 }
