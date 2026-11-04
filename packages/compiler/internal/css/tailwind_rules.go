@@ -40,6 +40,12 @@ type TailwindTheme struct {
 	// Important makes every utility !important when "true"; any other
 	// non-empty value is a selector utilities are scoped under.
 	Important string `json:"important"`
+	// CustomUtilities maps a static `@utility name { ... }` to its declarations.
+	CustomUtilities map[string]string `json:"customUtilities"`
+	// CustomVariants maps `@custom-variant name (...)` to a selector template
+	// containing "&" (e.g. "&:where([data-t=x] *)") or an at-rule such as
+	// "@media (print)".
+	CustomVariants map[string]string `json:"customVariants"`
 }
 
 // DefaultTailwindTheme returns the default Tailwind theme configuration.

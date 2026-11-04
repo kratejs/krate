@@ -264,3 +264,13 @@ func looksLikeUtility(tok string) bool {
 	// A bare keyword: compare the part before any "/" (none today) and groups.
 	return bareUtilities[base]
 }
+
+// excluded reports whether path lies under an excluded directory.
+func (s *TailwindScanner) excluded(path string) bool {
+	for _, ex := range s.Exclude {
+		if withinPath(ex, path) {
+			return true
+		}
+	}
+	return false
+}

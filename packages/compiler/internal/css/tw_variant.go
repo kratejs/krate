@@ -50,6 +50,9 @@ func parseVariants(cls string) ([]string, string) {
 // breakpoints and dark-mode strategy). ok=false means "unknown variant" so the
 // caller can skip the class rather than emit it unconditionally.
 func resolveVariant(v string, theme TailwindTheme) (variant, bool) {
+	if cv, ok := customVariant(v, theme); ok {
+		return cv, true
+	}
 	// Arbitrary variant: [&:nth-child(3)], [@media(min-width:900px)], [dir=rtl].
 	if strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") {
 		inner := strings.ReplaceAll(v[1:len(v)-1], "_", " ")

@@ -37,11 +37,16 @@ var (
 // TailwindScanner extracts Tailwind utility class names from source files.
 type TailwindScanner struct {
 	Root string
+	// Exclude lists absolute directories skipped during the scan (@source not).
+	Exclude []string
+	// VarRefs collects the custom properties referenced via var(--name) in the
+	// scanned files, so referenced theme variables can be emitted.
+	VarRefs map[string]bool
 }
 
 // NewTailwindScanner creates a scanner for the given project root.
 func NewTailwindScanner(root string) *TailwindScanner {
-	return &TailwindScanner{Root: root}
+	return &TailwindScanner{Root: root, VarRefs: map[string]bool{}}
 }
 
 // ScanClasses walks the project and extracts every Tailwind class candidate
@@ -66,8 +71,17 @@ func (s *TailwindScanner) ScanClasses(dirs []string) map[string]bool {
 			if err != nil {
 				return nil
 			}
-			for _, tok := range candidateTokens(string(data)) {
+			if s.excluded(path) {
+				return nil
+			}
+			text := string(data)
+			for _, tok := range candidateTokens(text) {
 				classes[tok] = true
+			}
+			if strings.Contains(text, "var(") {
+				for _, m := range varRefRe.FindAllStringSubmatch(text, -1) {
+					s.VarRefs[m[1]] = true
+				}
 			}
 			return nil
 		})
@@ -180,7 +194,10 @@ func classToRule(cls string, theme TailwindTheme) (text, key string) {
 		return "", ""
 	}
 
-	css := generateCSS(base, theme)
+	css := customUtilityCSS(base, theme)
+	if css == "" {
+		css = generateCSS(base, theme)
+	}
 	if css == "" && strings.HasPrefix(base, "-") {
 		// Negative utility: generate the positive form, then negate numeric values.
 		css = negateCSS(strings.TrimPrefix(base, "-"), theme)
