@@ -247,6 +247,9 @@ type TailwindGenerator struct {
 	Strict bool
 	// Unknown collects class names that yielded no rule (populated when Strict).
 	Unknown []string
+
+	// usage tracks keyframes and --tw-* properties the last Generate used.
+	usage twUsage
 }
 
 // NewTailwindGenerator creates a generator with default theme.
@@ -267,6 +270,7 @@ type generatedRule struct {
 // deterministic: rules are sorted by a stable key so identical inputs always
 // produce byte-identical stylesheets (stable content hashing).
 func (g *TailwindGenerator) Generate(classes map[string]bool) string {
+	g.usage.reset()
 	if len(classes) == 0 {
 		return ""
 	}
@@ -289,6 +293,7 @@ func (g *TailwindGenerator) Generate(classes map[string]bool) string {
 				}
 				continue
 			}
+			g.usage.record(text, g.Theme)
 			rules = append(rules, generatedRule{key: key, text: text})
 		}
 	}
@@ -323,7 +328,7 @@ func classToRule(cls string, theme TailwindTheme) (text, key string) {
 	}
 
 	css := generateCSS(base, theme)
-	if css == "" && strings.HasPrefix(base, "-") {
+	if css == "" && strings.HasPrefix(base, "-") && negatableRoot(base[1:]) {
 		// Negative utility: generate the positive form, then negate numeric values.
 		css = negateCSS(strings.TrimPrefix(base, "-"), theme)
 	}
@@ -539,6 +544,22 @@ var keywordWhitelist = map[string]bool{
 	"visible": true, "collapse": true, "separate": true, "normal": true,
 }
 
+// negatableRoot reports whether a utility accepts a leading "-" (Tailwind only
+// defines negative values for these families).
+func negatableRoot(base string) bool {
+	for _, p := range []string{
+		"m-", "mx-", "my-", "mt-", "mr-", "mb-", "ml-", "ms-", "me-", "inset-", "top-",
+		"right-", "bottom-", "left-", "start-", "end-", "z-", "order-", "indent-",
+		"scroll-m", "space-", "outline-offset-", "hue-rotate-", "col-start-", "col-end-",
+		"row-start-", "row-end-", "tracking-", "backdrop-hue-rotate-",
+	} {
+		if strings.HasPrefix(base, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // negateCSS generates the positive form of a utility and negates the numeric
 // values in its declarations (for `-mt-4`, `-translate-x-1/2`, `-top-2`, ...).
 func negateCSS(positive string, theme TailwindTheme) string {
@@ -547,6 +568,7 @@ func negateCSS(positive string, theme TailwindTheme) string {
 		return ""
 	}
 	// Negate the first length/number token after each `:`.
+	changed := false
 	var parts []string
 	for _, decl := range strings.Split(css, ";") {
 		decl = strings.TrimSpace(decl)
@@ -561,10 +583,11 @@ func negateCSS(positive string, theme TailwindTheme) string {
 		val = strings.TrimSpace(val)
 		if isLengthLike(val) {
 			val = negateValue(val)
+			changed = true
 		}
 		parts = append(parts, strings.TrimSpace(prop)+": "+val)
 	}
-	if len(parts) == 0 {
+	if len(parts) == 0 || !changed {
 		return ""
 	}
 	return strings.Join(parts, "; ") + ";"
@@ -724,6 +747,11 @@ func addImportant(css string) string {
 }
 
 func generateCSS(cls string, theme TailwindTheme) string {
+	cls = parenToBracket(cls)
+	if css, handled := v4Utility(cls, theme); handled {
+		return css
+	}
+
 	// Display
 	if cls == "block" {
 		return "display: block;"
@@ -1713,103 +1741,6 @@ func generateCSS(cls string, theme TailwindTheme) string {
 	// Appearance
 	if cls == "appearance-none" {
 		return "appearance: none;"
-	}
-
-	// Transition property
-	if cls == "transition" {
-		return "transition-property: all; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;"
-	}
-	if cls == "transition-all" {
-		return "transition-property: all; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;"
-	}
-	if cls == "transition-colors" {
-		return "transition-property: color, background-color, border-color, text-decoration-color, fill, stroke; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;"
-	}
-	if cls == "transition-opacity" {
-		return "transition-property: opacity; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;"
-	}
-	if cls == "transition-shadow" {
-		return "transition-property: box-shadow; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;"
-	}
-	if cls == "transition-transform" {
-		return "transition-property: transform; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;"
-	}
-	if cls == "transition-none" {
-		return "transition-property: none;"
-	}
-
-	if match := regexp.MustCompile(`^duration-(\d+)$`).FindStringSubmatch(cls); match != nil {
-		return fmt.Sprintf("transition-duration: %sms;", match[1])
-	}
-	if v, ok := unwrapArbitrary(strings.TrimPrefix(cls, "duration-")); ok && strings.HasPrefix(cls, "duration-") {
-		return "transition-duration: " + v + ";"
-	}
-	if match := regexp.MustCompile(`^delay-(\d+)$`).FindStringSubmatch(cls); match != nil {
-		return fmt.Sprintf("transition-delay: %sms;", match[1])
-	}
-	if v, ok := unwrapArbitrary(strings.TrimPrefix(cls, "delay-")); ok && strings.HasPrefix(cls, "delay-") {
-		return "transition-delay: " + v + ";"
-	}
-	if cls == "ease-linear" {
-		return "transition-timing-function: linear;"
-	}
-	if cls == "ease-in" {
-		return "transition-timing-function: cubic-bezier(0.4, 0, 1, 1);"
-	}
-	if cls == "ease-out" {
-		return "transition-timing-function: cubic-bezier(0, 0, 0.2, 1);"
-	}
-	if cls == "ease-in-out" {
-		return "transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);"
-	}
-	if v, ok := unwrapArbitrary(strings.TrimPrefix(cls, "ease-")); ok && strings.HasPrefix(cls, "ease-") {
-		return "transition-timing-function: " + v + ";"
-	}
-	if v, ok := unwrapArbitrary(strings.TrimPrefix(cls, "transition-")); ok && strings.HasPrefix(cls, "transition-") {
-		return "transition-property: " + v + "; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;"
-	}
-
-	// Transform: composed via CSS variables so utilities stack instead of
-	// overwriting each other (translate/rotate/skew/scale).
-	if cls == "transform" {
-		return "transform: " + transformCompose + ";"
-	}
-	if cls == "transform-gpu" {
-		// Force a compositing layer via translate3d, matching Tailwind.
-		return "transform: " + transform3DCompose + ";"
-	}
-	if cls == "transform-none" {
-		return "transform: none;"
-	}
-	if match := translateRe.FindStringSubmatch(cls); match != nil {
-		axis, val := match[1], match[2]
-		return "--tw-translate-" + axis + ": " + translateValue(val, theme) + "; transform: " + transformCompose + ";"
-	}
-	if match := rotateRe.FindStringSubmatch(cls); match != nil {
-		if v, ok := angleValue(match[1]); ok {
-			return "--tw-rotate: " + v + "; transform: " + transformCompose + ";"
-		}
-	}
-	if match := skewRe.FindStringSubmatch(cls); match != nil {
-		axis, val := match[1], match[2]
-		if v, ok := angleValue(val); ok {
-			return "--tw-skew-" + axis + ": " + v + "; transform: " + transformCompose + ";"
-		}
-	}
-	// Axis-specific scale: scale-x-50 / scale-y-110.
-	if match := scaleAxisRe.FindStringSubmatch(cls); match != nil {
-		axis, val := match[1], match[2]
-		return "--tw-scale-" + axis + ": " + scaleFactor(val) + "; transform: " + transformCompose + ";"
-	}
-	if match := scaleRe.FindStringSubmatch(cls); match != nil {
-		v := scaleFactor(match[1])
-		return "--tw-scale-x: " + v + "; --tw-scale-y: " + v + "; transform: " + transformCompose + ";"
-	}
-	if match := originRe.FindStringSubmatch(cls); match != nil {
-		if v, ok := unwrapArbitrary(match[1]); ok {
-			return "transform-origin: " + v + ";"
-		}
-		return "transform-origin: " + match[1] + ";"
 	}
 
 	// Ring (box-shadow ring) - width, color, offset, inset.

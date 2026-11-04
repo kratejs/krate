@@ -13,7 +13,7 @@ func generateExtraCSS(cls string, theme TailwindTheme) string {
 	if css, ok := filterUtility(cls, theme); ok {
 		return css
 	}
-	if css, ok := animationUtility(cls); ok {
+	if css, ok := animationUtility(cls, theme); ok {
 		return css
 	}
 	if css, ok := blendUtility(cls); ok {
@@ -350,28 +350,6 @@ func filterArbValue(name, v string) string {
 // ---------------------------------------------------------------------------
 // Animation (#30)
 // ---------------------------------------------------------------------------
-
-func animationUtility(cls string) (string, bool) {
-	if rest, ok := strings.CutPrefix(cls, "animate-"); ok {
-		if rest == "none" {
-			return "animation: none;", true
-		}
-		if v, isArb := unwrapArbitrary(rest); isArb {
-			return "animation: " + v + ";", true
-		}
-		switch rest {
-		case "spin":
-			return "animation: spin 1s linear infinite;", true
-		case "ping":
-			return "animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;", true
-		case "pulse":
-			return "animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;", true
-		case "bounce":
-			return "animation: bounce 1s infinite;", true
-		}
-	}
-	return "", false
-}
 
 // ---------------------------------------------------------------------------
 // Blend modes (#31)
@@ -769,13 +747,6 @@ func interactivityUtility(cls string, theme TailwindTheme) (string, bool) {
 	case "scroll-smooth":
 		return "scroll-behavior: smooth;", true
 	}
-	// Transition behavior.
-	switch cls {
-	case "transition-normal":
-		return "transition-behavior: normal;", true
-	case "transition-discrete":
-		return "transition-behavior: allow-discrete;", true
-	}
 	// Scroll margin / padding (logical and physical).
 	if css, ok := scrollSpacingUtility(cls, theme); ok {
 		return css, true
@@ -847,8 +818,11 @@ func transform3DUtility(cls string) (string, bool) {
 			return "perspective-origin: " + strings.ReplaceAll(rest, "-", " ") + ";", true
 		}
 	}
-	if rest, ok := strings.CutPrefix(cls, "transform-3d"); ok && rest == "" {
+	switch cls {
+	case "transform-3d":
 		return "transform-style: preserve-3d;", true
+	case "transform-flat":
+		return "transform-style: flat;", true
 	}
 	if rest, ok := strings.CutPrefix(cls, "transform-style-"); ok {
 		switch rest {
@@ -866,21 +840,6 @@ func transform3DUtility(cls string) (string, bool) {
 			return "backface-visibility: hidden;", true
 		}
 	}
-	if rest, ok := strings.CutPrefix(cls, "rotate-x-"); ok {
-		if v, ok := angleValue(rest); ok {
-			return "--tw-rotate-x: " + v + "; transform: " + transform3DCompose + ";", true
-		}
-	}
-	if rest, ok := strings.CutPrefix(cls, "rotate-y-"); ok {
-		if v, ok := angleValue(rest); ok {
-			return "--tw-rotate-y: " + v + "; transform: " + transform3DCompose + ";", true
-		}
-	}
-	if rest, ok := strings.CutPrefix(cls, "rotate-z-"); ok {
-		if v, ok := angleValue(rest); ok {
-			return "--tw-rotate-z: " + v + "; transform: " + transform3DCompose + ";", true
-		}
-	}
 	if rest, ok := strings.CutPrefix(cls, "zoom-"); ok {
 		if v, isArb := unwrapArbitrary(rest); isArb {
 			return "zoom: " + v + ";", true
@@ -891,10 +850,6 @@ func transform3DUtility(cls string) (string, bool) {
 	}
 	return "", false
 }
-
-// transform3DCompose extends the 2D compose with the translateZ/rotateX/Y/Z
-// variables used by the 3D transform utilities.
-const transform3DCompose = "translate3d(var(--tw-translate-x,0),var(--tw-translate-y,0),var(--tw-translate-z,0)) rotateX(var(--tw-rotate-x,0)) rotateY(var(--tw-rotate-y,0)) rotateZ(var(--tw-rotate-z,0)) skewX(var(--tw-skew-x,0)) skewY(var(--tw-skew-y,0)) scaleX(var(--tw-scale-x,1)) scaleY(var(--tw-scale-y,1)) scaleZ(var(--tw-scale-z,1))"
 
 // ---------------------------------------------------------------------------
 // Border extras (#37)

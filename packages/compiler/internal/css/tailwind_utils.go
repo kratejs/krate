@@ -5,12 +5,12 @@ import (
 	"strings"
 )
 
-// unwrapArbitrary returns the inner text of an arbitrary `[..]` value with
-// underscores converted to spaces (Tailwind's convention), and whether v was a
+// unwrapArbitrary returns the inner text of an arbitrary `[..]` value,
+// normalized like Tailwind v4 (see normalizeArbitrary), and whether v was a
 // bracketed arbitrary value.
 func unwrapArbitrary(v string) (string, bool) {
 	if len(v) >= 2 && v[0] == '[' && v[len(v)-1] == ']' {
-		return strings.ReplaceAll(v[1:len(v)-1], "_", " "), true
+		return normalizeArbitrary(v[1 : len(v)-1]), true
 	}
 	return "", false
 }

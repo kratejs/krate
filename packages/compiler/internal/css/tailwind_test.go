@@ -200,8 +200,9 @@ func TestSpaceSiblingSelector(t *testing.T) {
 
 func TestTransformCompose(t *testing.T) {
 	got := gen(t, "translate-x-2 scale-95 rotate-45")
-	// All three utilities must reference the shared variables, not clobber.
-	for _, want := range []string{"--tw-translate-x:", "--tw-scale-x:", "--tw-rotate:", "translate(var(--tw-translate-x"} {
+	// v4 model: each utility sets its own individual property, so they
+	// compose with each other and with keyframe animations of `transform`.
+	for _, want := range []string{"--tw-translate-x: 0.5rem;", "translate: var(--tw-translate-x)", "--tw-scale-x: 95%;", "scale: var(--tw-scale-x)", "rotate: 45deg;"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("transform composition missing %q:\n%s", want, got)
 		}

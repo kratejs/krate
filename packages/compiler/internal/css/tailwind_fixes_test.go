@@ -10,10 +10,10 @@ import (
 
 func TestScaleAxisUtilities(t *testing.T) {
 	tests := map[string]string{
-		"scale-x-50":  "--tw-scale-x: 0.5;",
-		"scale-y-110": "--tw-scale-y: 1.1;",
-		"scale-95":    "--tw-scale-x: 0.95; --tw-scale-y: 0.95;",
-		"scale-[1.7]": "--tw-scale-x: 1.7; --tw-scale-y: 1.7;",
+		"scale-x-50":  "--tw-scale-x: 50%;",
+		"scale-y-110": "--tw-scale-y: 110%;",
+		"scale-95":    "--tw-scale-x: 95%; --tw-scale-y: 95%;",
+		"scale-[1.7]": "scale: 1.7;",
 	}
 	for cls, want := range tests {
 		got := gen(t, cls)
@@ -30,10 +30,10 @@ func TestScaleAxisUtilities(t *testing.T) {
 
 func TestRotateAndSkewArbitrary(t *testing.T) {
 	tests := map[string]string{
-		"rotate-[17deg]": "--tw-rotate: 17deg;",
-		"rotate-45":      "--tw-rotate: 45deg;",
-		"skew-x-[12deg]": "--tw-skew-x: 12deg;",
-		"skew-y-6":       "--tw-skew-y: 6deg;",
+		"rotate-[17deg]": "rotate: 17deg;",
+		"rotate-45":      "rotate: 45deg;",
+		"skew-x-[12deg]": "--tw-skew-x: skewX(12deg);",
+		"skew-y-6":       "--tw-skew-y: skewY(6deg);",
 	}
 	for cls, want := range tests {
 		got := gen(t, cls)
@@ -429,7 +429,7 @@ func TestTransform3DFamilies(t *testing.T) {
 		"perspective-normal": "perspective: 500px;",
 		"transform-style-3d": "transform-style: preserve-3d;",
 		"backface-hidden":    "backface-visibility: hidden;",
-		"rotate-x-45":        "--tw-rotate-x: 45deg;",
+		"rotate-x-45":        "--tw-rotate-x: rotateX(45deg);",
 		"zoom-75":            "zoom: 0.75;",
 	}
 	for cls, want := range tests {

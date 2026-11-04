@@ -88,23 +88,27 @@ func colorValue(key, alpha string, theme TailwindTheme) (string, bool) {
 	return "", false
 }
 
-// withAlpha converts a hex or rgb color to an `rgb(r g b / a)` form when the
-// input is a 3/6-digit hex; other values are returned unchanged.
+// withAlpha applies an alpha component to a color. 3/6-digit hex colors become
+// `rgb(r g b / a)`; any other color (oklch, var(), named, ...) is mixed with
+// transparent so the alpha is never silently dropped.
 func withAlpha(color, alpha string) string {
 	hex := strings.TrimPrefix(color, "#")
 	if len(hex) == 3 {
 		hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
 	}
-	if len(hex) != 6 {
-		return color
+	if strings.HasPrefix(color, "#") && len(hex) == 6 {
+		r, err1 := strconv.ParseUint(hex[0:2], 16, 8)
+		g, err2 := strconv.ParseUint(hex[2:4], 16, 8)
+		b, err3 := strconv.ParseUint(hex[4:6], 16, 8)
+		if err1 == nil && err2 == nil && err3 == nil {
+			return "rgb(" + strconv.Itoa(int(r)) + " " + strconv.Itoa(int(g)) + " " + strconv.Itoa(int(b)) + " / " + alpha + ")"
+		}
 	}
-	r, err1 := strconv.ParseUint(hex[0:2], 16, 8)
-	g, err2 := strconv.ParseUint(hex[2:4], 16, 8)
-	b, err3 := strconv.ParseUint(hex[4:6], 16, 8)
-	if err1 != nil || err2 != nil || err3 != nil {
-		return color
+	pct := alpha
+	if f, err := strconv.ParseFloat(alpha, 64); err == nil {
+		pct = formatNum(f*100) + "%"
 	}
-	return "rgb(" + strconv.Itoa(int(r)) + " " + strconv.Itoa(int(g)) + " " + strconv.Itoa(int(b)) + " / " + alpha + ")"
+	return "color-mix(in oklab, " + color + " " + pct + ", transparent)"
 }
 
 // transparentVersion returns the color at zero alpha, used as the automatic
