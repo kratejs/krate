@@ -194,9 +194,8 @@ func TestTierDecoratorWithBoundNameOnFunction(t *testing.T) {
 
 func TestTierDecoratorOnDefaultExpressionExplainsHowToName(t *testing.T) {
 	for name, src := range map[string]string{
-		"call":           "@client\nexport default withTheme(View);\n",
-		"object":         "@client\nexport default { title: 'x' };\n",
-		"memo of a name": "@client\nexport default memo(View);\n",
+		"object": "@client\nexport default { title: 'x' };\n",
+		"member": "@client\nexport default Themes.dark(View);\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, errs := Parse("a.tsx", src, Options{})
@@ -223,6 +222,9 @@ func TestTierDecoratorOnInlineDefaultComponent(t *testing.T) {
 		"memo":         "@static\nexport default memo(function V() { return <div/>; });\n",
 		"forwardRef":   "@static\nexport default forwardRef((props, ref) => <div ref={ref}/>);\n",
 		"memo forward": "@static\nexport default memo(forwardRef((props, ref) => <div ref={ref}/>));\n",
+		"hoc":          "@static\nexport default withTheme(View);\n",
+		"hoc in memo":  "@static\nexport default memo(withTheme(View));\n",
+		"memo of name": "@static\nexport default memo(View);\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			prog := parseOK(t, "a.tsx", src)

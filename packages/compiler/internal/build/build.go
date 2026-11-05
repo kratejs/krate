@@ -2211,6 +2211,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	if serverPage && len(reactIslands) > 0 {
 		return nil, "", reactIslandDiag(firstReactIsland(reactIslands), "a server-rendered page")
 	}
+	if errs := annotator.CheckInteractiveTierComponents(ann, bundle.ActionImports); len(errs) > 0 {
+		return nil, "", errs[0]
+	}
 	intercept := cachedInterceptForPage(page, b.Cfg.PagesDir)
 	clientBoundaries, cbErr := b.prepareClientBoundaries(bundle, ann, serverPage)
 	if cbErr != nil {

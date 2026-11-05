@@ -9,18 +9,22 @@ import (
 )
 
 // isComponentExpr reports an expression that defines a component inline: a
-// function (arrow or `function` expression), or such a function wrapped in
-// memo()/forwardRef().
-func isComponentExpr(e ast.Expr) bool {
+// function (arrow or `function` expression), such a function wrapped in
+// memo()/forwardRef(), or a higher-order component application `withX(Inner)`.
+func isComponentExpr(e ast.Expr, allowHOC bool) bool {
 	switch x := e.(type) {
 	case *ast.ArrowFn:
 		return !x.Generator
 	case *ast.CallExpr:
 		id, ok := x.Callee.(*ast.Identifier)
-		if !ok || (id.Name != "memo" && id.Name != "forwardRef") || len(x.Args) == 0 {
+		if !ok || len(x.Args) == 0 {
 			return false
 		}
-		return isComponentExpr(x.Args[0])
+		if id.Name != "memo" && id.Name != "forwardRef" {
+			// A higher-order component application: `withX(Inner)`.
+			return allowHOC
+		}
+		return isComponentExpr(x.Args[0], allowHOC)
 	}
 	return false
 }
@@ -38,7 +42,24 @@ func lowerDefaultExpressionExport(prog *ast.Program, path string) {
 			continue
 		}
 		es, ok := exp.Declaration.(*ast.ExprStmt)
-		if !ok || !isComponentExpr(es.Expression) {
+		if ok {
+			// memo(Inner) and forwardRef(Inner) wrap a component by name: the
+			// default export is that component.
+			// (The React rewrite may already have removed the wrapper.)
+			id := wrappedIdentifier(es.Expression)
+			if ident, isIdent := es.Expression.(*ast.Identifier); isIdent {
+				id = ident.Name
+			}
+			if id != "" {
+				prog.Body[i] = &ast.ExportStmt{Position: exp.Position, Default: true, Local: id}
+				return
+			}
+		}
+		// A call is taken for a higher-order component only in a JSX module
+		// or under a tier decorator, so a plain module's `export default
+		// create()` is left alone.
+		ext := strings.ToLower(filepath.Ext(path))
+		if !ok || !isComponentExpr(es.Expression, ext == ".tsx" || ext == ".jsx" || prog.Tier != "") {
 			continue
 		}
 		name := defaultExportName(prog, path)
@@ -52,6 +73,26 @@ func lowerDefaultExpressionExport(prog *ast.Program, path string) {
 		prog.Body = body
 		return
 	}
+}
+
+// wrappedIdentifier returns Inner for `memo(Inner)` and `forwardRef(Inner)`
+// (also nested), or "".
+func wrappedIdentifier(e ast.Expr) string {
+	call, ok := e.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return ""
+	}
+	id, ok := call.Callee.(*ast.Identifier)
+	if !ok || (id.Name != "memo" && id.Name != "forwardRef") {
+		return ""
+	}
+	switch a := call.Args[0].(type) {
+	case *ast.Identifier:
+		return a.Name
+	case *ast.CallExpr:
+		return wrappedIdentifier(a)
+	}
+	return ""
 }
 
 // defaultExportName derives a component name from the file name, avoiding

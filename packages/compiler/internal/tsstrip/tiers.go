@@ -148,10 +148,10 @@ func scanTiers(path, src string, opts Options) *tierScan {
 		if decl == nil {
 			if exportDefaultExprRe.MatchString(src[rest:]) {
 				if fn, ok := inlineDefaultComponent(prog, 1+strings.Count(src[:rest], "\n")); ok {
-					// `export default () => ...` / `export default memo(...)`:
-					// the file's default component. The bundler names it, so the
-					// mark is the file tier only.
-					if fn.Async && m.tier != "runtime" {
+					// `export default () => ...` / `export default memo(...)` /
+					// `export default withX(Inner)`: the file's default component.
+					// The bundler names it, so the mark is the file tier only.
+					if fn != nil && fn.Async && m.tier != "runtime" {
 						fail("@"+m.tier+" cannot be used on an async component",
 							"an async component always renders per request; use @runtime or make it synchronous")
 						continue
@@ -219,7 +219,9 @@ func scanTiers(path, src string, opts Options) *tierScan {
 }
 
 // inlineDefaultComponent finds the `export default <component expression>`
-// statement starting on line and returns its function.
+// statement starting on line and returns its function. A higher-order
+// component application (`export default withX(Inner)`) has no function of its
+// own: it returns ok with a nil function.
 func inlineDefaultComponent(prog *ast.Program, line int) (*ast.ArrowFn, bool) {
 	for _, stmt := range prog.Body {
 		exp, ok := stmt.(*ast.ExportStmt)
@@ -237,10 +239,16 @@ func inlineDefaultComponent(prog *ast.Program, line int) (*ast.ArrowFn, bool) {
 				break
 			}
 			id, isID := call.Callee.(*ast.Identifier)
-			if !isID || (id.Name != "memo" && id.Name != "forwardRef") || len(call.Args) == 0 {
+			if !isID || len(call.Args) == 0 {
 				return nil, false
 			}
+			if id.Name != "memo" && id.Name != "forwardRef" {
+				return nil, true
+			}
 			e = call.Args[0]
+			if _, named := e.(*ast.Identifier); named {
+				return nil, true
+			}
 		}
 		if fn, isFn := e.(*ast.ArrowFn); isFn && !fn.Generator {
 			return fn, true

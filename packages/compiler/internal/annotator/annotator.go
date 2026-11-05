@@ -8,6 +8,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	irtree "github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
@@ -30,7 +31,7 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 	// 1. Collect all function declarations
 	collectFunctionsWithSource(prog.Body, ann.Functions, ann.ComponentSources, ann.ComponentRaw, sourceFile, rawSource)
 	collectMemberComponents(prog.Body, ann.Functions)
-	collectHOCComponents(prog.Body, ann.Functions)
+	collectHOCComponents(ann, prog.Body, sourceFile, rawSource)
 	collectClassComponents(prog.Body, ann.ClassComponents)
 	collectClassRejections(prog.Body, ann, sourceFile, rawSource)
 	collectLazyComponents(prog.Body, ann, sourceFile, rawSource)
@@ -241,11 +242,7 @@ func detectFileConventionTier(sourceFile string) irtree.ComponentTier {
 
 // matchesDir checks if a file path is within a directory.
 func matchesDir(filePath, dir string) bool {
-	rel, err := filepath.Rel(dir, filePath)
-	if err != nil {
-		return false
-	}
-	return !strings.HasPrefix(rel, "..")
+	return bundler.PathInDirs(filePath, []string{dir})
 }
 
 // detectStreamingConfig checks for `export const config = { streaming: true }`.
@@ -771,11 +768,18 @@ func MergeImportAliases(ann *irtree.Annotations, modules []ModuleSource, entry M
 	}
 	markLazyDefaults(ann, modules)
 	lowerContextUses(ann, modules)
+	collectCrossModuleHOCs(ann, modules)
 	aliases := BuildImportAliases(modules)
 	for local, declared := range aliases {
 		if fn := ann.Functions[declared]; fn != nil {
 			if _, exists := ann.Functions[local]; !exists {
 				ann.Functions[local] = fn
+				// The alias is classified against the file that declares the
+				// component, not an empty source.
+				if src, ok := ann.ComponentSources[declared]; ok && ann.ComponentSources[local] == "" {
+					ann.ComponentSources[local] = src
+					ann.ComponentRaw[local] = ann.ComponentRaw[declared]
+				}
 			}
 		}
 	}
@@ -1044,9 +1048,34 @@ func ReclassifyTiers(ann *irtree.Annotations, cfg *config.Config) {
 
 // collectHOCComponents registers `const Wrapped = withX(Base)` bindings whose
 // factory is a simple higher-order component as component functions (see
-// irtree.InstantiateHOC).
-func collectHOCComponents(body []ast.Stmt, functions map[string]*ast.FnDecl) {
+// irtree.InstantiateHOC). Factories are looked up in the same module; see
+// collectCrossModuleHOCs for factories declared elsewhere.
+func collectHOCComponents(ann *irtree.Annotations, body []ast.Stmt, sourcePath, rawSource string) {
 	factories := map[string]irtree.HOCFactory{}
+	collectHOCFactories(body, factories)
+	instantiateHOCComponents(ann, body, factories, sourcePath, rawSource)
+}
+
+// collectCrossModuleHOCs resolves higher-order component applications whose
+// factory lives in another bundled module (`import { withX } from "./hoc"`).
+func collectCrossModuleHOCs(ann *irtree.Annotations, modules []ModuleSource) {
+	factories := map[string]irtree.HOCFactory{}
+	for _, m := range modules {
+		if m.Program != nil {
+			collectHOCFactories(m.Program.Body, factories)
+		}
+	}
+	if len(factories) == 0 {
+		return
+	}
+	for _, m := range modules {
+		if m.Program != nil {
+			instantiateHOCComponents(ann, m.Program.Body, factories, m.Path, m.RawSource)
+		}
+	}
+}
+
+func collectHOCFactories(body []ast.Stmt, factories map[string]irtree.HOCFactory) {
 	for _, stmt := range body {
 		if exp, ok := stmt.(*ast.ExportStmt); ok && exp.Declaration != nil {
 			stmt = exp.Declaration
@@ -1071,6 +1100,10 @@ func collectHOCComponents(body []ast.Stmt, functions map[string]*ast.FnDecl) {
 			}
 		}
 	}
+}
+
+func instantiateHOCComponents(ann *irtree.Annotations, body []ast.Stmt, factories map[string]irtree.HOCFactory, sourcePath, rawSource string) {
+	functions := ann.Functions
 	for _, stmt := range body {
 		if exp, ok := stmt.(*ast.ExportStmt); ok && exp.Declaration != nil {
 			stmt = exp.Declaration
@@ -1083,22 +1116,64 @@ func collectHOCComponents(body []ast.Stmt, functions map[string]*ast.FnDecl) {
 			if d == nil || len(d.Name) == 0 || d.Name[0] < 'A' || d.Name[0] > 'Z' || functions[d.Name] != nil {
 				continue
 			}
-			call, ok := d.Init.(*ast.CallExpr)
+			// memo(withX(Inner)) is the HOC application inside the wrappers.
+			init := d.Init
+			for {
+				outer, isCall := init.(*ast.CallExpr)
+				if !isCall || len(outer.Args) == 0 {
+					break
+				}
+				id, isID := outer.Callee.(*ast.Identifier)
+				if !isID || (id.Name != "memo" && id.Name != "forwardRef") {
+					break
+				}
+				init = outer.Args[0]
+			}
+			call, ok := init.(*ast.CallExpr)
 			if !ok {
 				continue
 			}
 			callee, ok := call.Callee.(*ast.Identifier)
-			if !ok {
+			if !ok || reactWrapperCallee(callee.Name) {
 				continue
+			}
+			fail := func(reason string) {
+				if ann.UnresolvedHOCs == nil {
+					ann.UnresolvedHOCs = map[string]diag.Diagnostic{}
+				}
+				pos := vs.Position
+				ann.UnresolvedHOCs[d.Name] = diag.New(sourcePath, pos.Line, pos.Col,
+					d.Name+" is "+callee.Name+"(...), a higher-order component that cannot be resolved at build time: "+reason,
+					"declare "+callee.Name+" in the project as a function that returns one component function, `function "+callee.Name+"(C) { return function Wrapped(props) { ... <C {...props} /> } }`, or write the wrapped component out by hand",
+					lineOf(rawSource, pos.Line)).WithCode(diag.CodeHOCUnresolved)
 			}
 			factory, ok := factories[callee.Name]
 			if !ok {
+				fail(callee.Name + " is not a function declared in the project's source (is it imported from a package?)")
 				continue
 			}
-			if fn := irtree.InstantiateHOC(d.Name, factory, call.Args); fn != nil {
-				fn.Tier = d.Tier
-				functions[d.Name] = fn
+			fn := irtree.InstantiateHOC(d.Name, factory, call.Args)
+			if fn == nil {
+				fail(callee.Name + " is not a simple wrapper (its body must only declare and return one component function, with plain parameters)")
+				continue
+			}
+			fn.Tier = d.Tier
+			functions[d.Name] = fn
+			delete(ann.UnresolvedHOCs, d.Name)
+			if ann.ComponentSources != nil && sourcePath != "" {
+				ann.ComponentSources[d.Name] = sourcePath
+				ann.ComponentRaw[d.Name] = rawSource
 			}
 		}
 	}
+}
+
+// reactWrapperCallee reports calls that wrap a component without creating a
+// new one, which other passes handle.
+func reactWrapperCallee(name string) bool {
+	switch name {
+	case "memo", "forwardRef", "lazy", "createContext", "__name":
+		return true
+	}
+	return false
 }
