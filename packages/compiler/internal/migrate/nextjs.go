@@ -49,10 +49,13 @@ type ManualItem struct {
 
 // PlannedFile is one file the migrator can copy or generate.
 type PlannedFile struct {
-	Kind         FileKind `json:"kind"`
-	Source       string   `json:"source,omitempty"`
-	Target       string   `json:"target"`
-	Conflict     bool     `json:"conflict,omitempty"`
+	Kind     FileKind `json:"kind"`
+	Source   string   `json:"source,omitempty"`
+	Target   string   `json:"target"`
+	Conflict bool     `json:"conflict,omitempty"`
+	// Overwrites marks a target that already exists. --apply refuses to
+	// replace it without --force (the original is backed up first).
+	Overwrites   bool     `json:"overwrites,omitempty"`
 	Rewrites     []string `json:"rewrites,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
 	Content      []byte   `json:"-"`
@@ -114,6 +117,10 @@ type manifestFile struct {
 type ScanOptions struct {
 	// UpdatePackage adds a package.json plan with Krate scripts and dependencies.
 	UpdatePackage bool
+	// KrateVersion is the version of the running compiler. The @krate/*
+	// dependencies the package plan adds are pinned to it; empty or "dev"
+	// means "latest".
+	KrateVersion string
 }
 
 // ScanNext detects a Next.js project and returns a copy plan. It reads the
@@ -174,7 +181,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	nextConfigStatic := false
 	if nextConfig != "" {
 		rep.Detected = append(rep.Detected, filepath.Base(nextConfig))
-		data, warnings, ok := readNextConfig(nextConfig)
+		data, warnings, skipped, ok := readNextConfig(nextConfig)
 		for _, w := range warnings {
 			rep.Warnings = append(rep.Warnings, filepath.Base(nextConfig)+": "+w)
 		}
@@ -182,6 +189,13 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 			nextCfg = data
 			nextConfigStatic = true
 			rep.Warnings = append(rep.Warnings, "translated static next.config redirects/rewrites/headers/basePath/images; review custom image loaders, env, and experimental keys manually")
+			if len(skipped) > 0 {
+				rep.Manual = append(rep.Manual, ManualItem{
+					Source: filepath.Base(nextConfig),
+					Reason: "next.config keys were not translated: " + strings.Join(skipped, ", ") + "; the other static keys were",
+					Hint:   "write the skipped keys into krate.config.ts by hand",
+				})
+			}
 		} else {
 			rep.Manual = append(rep.Manual, ManualItem{
 				Source: filepath.Base(nextConfig),
@@ -191,7 +205,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		}
 	}
 	if opts.UpdatePackage {
-		if pkg, ok := packagePlan(abs); ok {
+		if pkg, ok := packagePlan(abs, opts.KrateVersion); ok {
 			rep.Files = append(rep.Files, pkg)
 			rep.Manual = append(rep.Manual, ManualItem{
 				Source: "package.json",
@@ -290,6 +304,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	for i := range rep.Files {
 		if fileExists(filepath.Join(abs, filepath.FromSlash(rep.Files[i].Target))) {
 			rep.Files[i].Conflict = true
+			rep.Files[i].Overwrites = true
 		}
 	}
 	sort.SliceStable(rep.Files, func(i, j int) bool { return rep.Files[i].Target < rep.Files[j].Target })
@@ -590,7 +605,65 @@ func rewriteNextSource(src string, kind FileKind) (string, []string, []string) {
 		}
 	}
 	manual = append(manual, applyManual(src, kind)...)
+	notes, layoutManual := segmentConfigNotes(src, kind)
+	rewrites = append(rewrites, notes...)
+	manual = append(manual, layoutManual...)
 	return src, rewrites, manual
+}
+
+var (
+	revalidateExport    = regexp.MustCompile(`(?m)^export\s+const\s+revalidate\s*=\s*(false|\d+)\s*;?`)
+	dynamicExport       = regexp.MustCompile(`(?m)^export\s+const\s+dynamic\s*=\s*["'](auto|force-dynamic|force-static|error)["']`)
+	dynamicParamsExport = regexp.MustCompile(`(?m)^export\s+const\s+dynamicParams\s*=\s*(true|false)\b`)
+)
+
+// segmentConfigNotes explains what Krate does with the Next.js route segment
+// exports it reads natively (revalidate, dynamic, dynamicParams). On a page
+// they are kept and honored, which is a rendering mode change worth stating.
+// In a layout Krate does not read them, so that is manual work.
+func segmentConfigNotes(src string, kind FileKind) (notes, manual []string) {
+	type finding struct{ text, name string }
+	var found []finding
+	if m := revalidateExport.FindStringSubmatch(src); m != nil {
+		var text string
+		switch m[1] {
+		case "false":
+			text = "export const revalidate = false is kept: the page stays static"
+		case "0":
+			text = "export const revalidate = 0 is kept: the page renders per request (SSR)"
+		default:
+			text = "export const revalidate = " + m[1] + " is kept: the page renders as ISR, revalidated every " + m[1] + "s"
+		}
+		found = append(found, finding{text, "revalidate"})
+	}
+	if m := dynamicExport.FindStringSubmatch(src); m != nil {
+		var text string
+		switch m[1] {
+		case "force-dynamic":
+			text = `export const dynamic = "force-dynamic" is kept: the page renders per request (SSR)`
+		case "force-static", "error":
+			text = "export const dynamic = \"" + m[1] + "\" is kept: the page is built statically"
+		default:
+			text = `export const dynamic = "auto" is kept: Krate picks the render mode from the page`
+		}
+		found = append(found, finding{text, "dynamic"})
+	}
+	if m := dynamicParamsExport.FindStringSubmatch(src); m != nil {
+		text := "export const dynamicParams = true is kept: params that generateStaticParams did not list render on demand"
+		if m[1] == "false" {
+			text = "export const dynamicParams = false is kept: params that generateStaticParams did not list answer 404"
+		}
+		found = append(found, finding{text, "dynamicParams"})
+	}
+	for _, f := range found {
+		switch kind {
+		case KindPage:
+			notes = append(notes, f.text)
+		case KindLayout:
+			manual = append(manual, "route segment config "+f.name+" in a layout is not read by Krate")
+		}
+	}
+	return notes, manual
 }
 
 // appRoute maps an app-router directory to its URL route (groups, slots and
@@ -785,7 +858,7 @@ func fileExists(path string) bool {
 
 // packagePlan adds Krate scripts and dependencies without removing Next.js
 // dependencies. Removing Next itself is left to the user after verification.
-func packagePlan(root string) (PlannedFile, bool) {
+func packagePlan(root, krateVersion string) (PlannedFile, bool) {
 	path := filepath.Join(root, "package.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -795,6 +868,7 @@ func packagePlan(root string) (PlannedFile, bool) {
 	if err := json.Unmarshal(data, &pkg); err != nil {
 		return PlannedFile{}, false
 	}
+	var rewrites []string
 	scripts, _ := pkg["scripts"].(map[string]any)
 	if scripts == nil {
 		scripts = map[string]any{}
@@ -802,10 +876,16 @@ func packagePlan(root string) (PlannedFile, bool) {
 	for _, name := range []string{"dev", "build", "serve", "start"} {
 		if old, ok := scripts[name].(string); !ok || strings.Contains(old, "next") {
 			scripts[name] = "krate " + name
+			if ok {
+				rewrites = append(rewrites, fmt.Sprintf("scripts.%s: %q -> %q (the original is in the backup)", name, old, "krate "+name))
+			} else {
+				rewrites = append(rewrites, fmt.Sprintf("scripts.%s: added %q", name, "krate "+name))
+			}
 		}
 	}
 	if _, ok := scripts["serve"]; !ok {
 		scripts["serve"] = "krate serve"
+		rewrites = append(rewrites, `scripts.serve: added "krate serve"`)
 	}
 	pkg["scripts"] = scripts
 
@@ -813,15 +893,34 @@ func packagePlan(root string) (PlannedFile, bool) {
 	if deps == nil {
 		deps = map[string]any{}
 	}
+	spec := "latest"
+	if v := strings.TrimPrefix(krateVersion, "v"); v != "" && v != "dev" {
+		spec = "^" + v
+	}
+	var added []string
 	for _, dep := range []string{"@krate/core", "@krate/runtime", "@krate/components"} {
 		if _, ok := deps[dep]; !ok {
-			deps[dep] = "latest"
+			deps[dep] = spec
+			added = append(added, dep+"@"+spec)
 		}
 	}
 	if _, ok := deps["preact"]; !ok {
 		// Optional for apps without compiled islands, but required by the island
 		// runtime the migrator may copy in.
 		deps["preact"] = "^10.20.0"
+		added = append(added, "preact@^10.20.0 (runs islands and \"use client\" components)")
+	}
+	if len(added) > 0 {
+		rewrites = append(rewrites, "dependencies added: "+strings.Join(added, ", "))
+	}
+	var kept []string
+	for _, dep := range []string{"next", "react", "react-dom"} {
+		if _, ok := deps[dep]; ok {
+			kept = append(kept, dep)
+		}
+	}
+	if len(kept) > 0 {
+		rewrites = append(rewrites, "dependencies kept: "+strings.Join(kept, ", ")+" (remove them once the app builds)")
 	}
 	pkg["dependencies"] = deps
 
@@ -830,7 +929,7 @@ func packagePlan(root string) (PlannedFile, bool) {
 		return PlannedFile{}, false
 	}
 	out = append(out, '\n')
-	return PlannedFile{Kind: KindPackage, Target: "package.json", Content: out}, true
+	return PlannedFile{Kind: KindPackage, Source: "package.json", Target: "package.json", Content: out, Rewrites: rewrites}, true
 }
 
 // Apply writes a plan atomically after preflighting every target. Existing

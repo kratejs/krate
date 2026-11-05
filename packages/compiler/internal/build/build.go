@@ -660,7 +660,9 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 
 	if len(results) == 0 {
 		if len(pageErrs) > 0 {
-			return nil, &multiError{summary: fmt.Sprintf("build failed: no pages built successfully (%d error(s)); check that pagesDir (%s) contains at least one page", len(pageErrs), b.Cfg.PagesDir), errs: pageErrs}
+			// The pages exist; they failed. The pagesDir hint is only for an
+			// empty directory (below).
+			return nil, &multiError{summary: fmt.Sprintf("build failed: %d error(s)", len(pageErrs)), errs: pageErrs}
 		}
 		return nil, fmt.Errorf("no pages built successfully; check that pagesDir (%s) contains at least one page", b.Cfg.PagesDir)
 	}
@@ -2162,6 +2164,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		pageOpts.LocalComponentImports = localImports
 		pageOpts.GoComponents = pageGoComponents
 		pageOpts.ActionURLs = bundle.ActionImports
+		if isDynamicRoute(page, b.Cfg.PagesDir) {
+			pageOpts.PageParams = dynamicRouteSentinels(extractParamNames(page, b.Cfg.PagesDir))
+		}
 		tree = irtree.BuildWithOptions(entryModule.Program, ann, pageOpts)
 		// CSS primitive declarations that cannot be compiled to CSS are hard errors
 		// (there is no fallback to client signals).

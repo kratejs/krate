@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { platformManifest, platforms } from "./platform-package.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => fs.readFileSync(path.join(root, rel), "utf8");
@@ -114,6 +115,20 @@ if (!read("packages/compiler/internal/build/next_migrate_verify_test.go").includ
 }
 if (!read("packages/compiler/internal/migrate/nextjs.go").includes("func Rollback(")) {
   fail("migration rollback API is missing");
+}
+
+// 7. Platform packages must not declare `bin`. They are optional dependencies
+// of @krate/core; npm 10 rolls back the ones that do not match the machine and
+// removes node_modules/.bin/krate, the link @krate/core created.
+const coreVersion = JSON.parse(read("packages/core/package.json")).version;
+for (const target of platforms) {
+  if (platformManifest(target, coreVersion).bin !== undefined) {
+    fail(`${target.pkg}: generated manifest declares bin (breaks node_modules/.bin/krate on npm 10)`);
+  }
+  const generated = path.join(root, "dist-platform", target.pkg, "package.json");
+  if (fs.existsSync(generated) && JSON.parse(fs.readFileSync(generated, "utf8")).bin !== undefined) {
+    fail(`dist-platform/${target.pkg}/package.json declares bin (breaks node_modules/.bin/krate on npm 10)`);
+  }
 }
 
 if (!ci.includes("check:release")) fail("CI does not run check:release");

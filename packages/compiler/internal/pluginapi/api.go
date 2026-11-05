@@ -47,25 +47,39 @@ func SafeJoin(root, rel string) (string, error) {
 		return "", fmt.Errorf("path %q escapes the project root", rel)
 	}
 
-	// Resolve symlinks on the deepest existing ancestor of the target and
-	// re-check containment. This prevents a symlinked directory within the
-	// root from redirecting a write outside it.
-	probe := joined
+	if escapesViaSymlink(rootAbs, joined) {
+		return "", fmt.Errorf("path %q escapes the project root via a symlink", rel)
+	}
+	return joined, nil
+}
+
+// escapesViaSymlink resolves symlinks on the deepest existing ancestor of p
+// (the path itself may not exist yet, for a write) and reports whether the
+// result leaves root. This catches a symlinked directory inside the project
+// that points outside it, before anything is read or written through it.
+func escapesViaSymlink(rootAbs, p string) bool {
+	probe := p
 	for {
-		resolved, rerr := filepath.EvalSymlinks(probe)
-		if rerr == nil {
-			if !WithinRootEval(rootAbs, resolved) {
-				return "", fmt.Errorf("path %q escapes the project root via a symlink", rel)
-			}
-			break
+		resolved, err := filepath.EvalSymlinks(probe)
+		if err == nil {
+			return !WithinRootEval(rootAbs, resolved)
 		}
 		parent := filepath.Dir(probe)
 		if parent == probe {
-			break
+			return false
 		}
 		probe = parent
 	}
-	return joined, nil
+}
+
+// containedPath reports whether p, which must already be inside root
+// lexically, also stays inside it once symlinks are resolved.
+func containedPath(root, p string) bool {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	return WithinRoot(rootAbs, p) && !escapesViaSymlink(rootAbs, p)
 }
 
 // WithinRootEval is WithinRoot but also resolves symlinks on both root and p so
@@ -110,6 +124,9 @@ func Resolve(root, spec string) (string, error) {
 		if !WithinRoot(root, p) {
 			return "", fmt.Errorf("path %q resolves outside the project root", spec)
 		}
+		if !containedPath(root, p) {
+			return "", fmt.Errorf("path %q resolves outside the project root via a symlink", spec)
+		}
 		if !resolver.Exists(p) {
 			return "", fmt.Errorf("file not found: %s", spec)
 		}
@@ -120,6 +137,9 @@ func Resolve(root, spec string) (string, error) {
 		p := filepath.Clean(filepath.Join(root, spec))
 		if !WithinRoot(root, p) {
 			return "", fmt.Errorf("path %q escapes the project root", spec)
+		}
+		if !containedPath(root, p) {
+			return "", fmt.Errorf("path %q escapes the project root via a symlink", spec)
 		}
 		if !resolver.Exists(p) {
 			return "", fmt.Errorf("file not found: %s", spec)
@@ -132,7 +152,7 @@ func Resolve(root, spec string) (string, error) {
 	}
 
 	p := filepath.Clean(filepath.Join(root, spec))
-	if WithinRoot(root, p) && resolver.Exists(p) {
+	if containedPath(root, p) && resolver.Exists(p) {
 		return p, nil
 	}
 	return "", fmt.Errorf("could not resolve %q", spec)
@@ -161,6 +181,9 @@ func WriteFileToRoot(root, rel string, content []byte) error {
 	p := filepath.Clean(filepath.Join(root, rel))
 	if !WithinRoot(root, p) {
 		return fmt.Errorf("path %q escapes the project root", rel)
+	}
+	if !containedPath(root, p) {
+		return fmt.Errorf("path %q escapes the project root via a symlink", rel)
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 		return fmt.Errorf("creating directory for %s: %w", rel, err)

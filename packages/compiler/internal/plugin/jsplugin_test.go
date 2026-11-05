@@ -296,6 +296,34 @@ export default {
 	}
 }
 
+func TestJSPluginRouteTitleIsEscaped(t *testing.T) {
+	root, outDir, cfg := writeTestPlugin(t, `
+export default {
+  name: "routes-plugin",
+  order: 10,
+  hooks: {
+    GenerateRoutes(ctx, options, krate) {
+      return { routes: [{ path: "generated/hello", title: "Q&A </title><script>x()</script>", content: "<h1>hi</h1>" }] };
+    },
+  },
+};
+`)
+	ctx := &BuildHookCtx{Root: root, OutDir: outDir, Pages: nil}
+	if err := RunCommunityPlugins("GenerateRoutes", []config.PluginConfig{cfg}, root, outDir, ctx); err != nil {
+		t.Fatalf("RunCommunityPlugins: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(outDir, "generated", "hello", "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(data), "<title>Q&amp;A &lt;/title&gt;&lt;script&gt;x()&lt;/script&gt;</title>") {
+		t.Errorf("route title was not escaped: %q", data)
+	}
+	if contains(string(data), "<script>x()") {
+		t.Errorf("route title injected markup: %q", data)
+	}
+}
+
 func TestJSPluginPathTraversalRejected(t *testing.T) {
 	root, outDir, cfg := writeTestPlugin(t, `
 export default {

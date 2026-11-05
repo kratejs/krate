@@ -31,6 +31,11 @@ release claims; do not publish a release that leaves a roadmap row `planned`.
   `@krate/base-docs-theme`, `create-krate-app`, `create-krate-docs`, and
   `@krate/core`.
 
+Scaffolded projects (`create-krate-app`, `create-krate-docs`) pin every `@krate/*`
+dependency to the scaffolder's own version: `^x.y.z` for a stable release, the
+exact version for a prerelease. The templates carry a `__KRATE_VERSION__`
+placeholder that `scripts/check-version.mjs` requires.
+
 `node scripts/set-version.mjs <version>` updates every publishable manifest,
 the platform optional dependencies, and the runtime peer range. Run
 `node scripts/check-version.mjs` before tagging; both CI and the release

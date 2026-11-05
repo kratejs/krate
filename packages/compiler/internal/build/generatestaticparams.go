@@ -83,6 +83,15 @@ func dynamicParamSentinel(name string) string {
 	return dynamicParamSentinelPrefix + name + "__"
 }
 
+// dynamicRouteSentinels maps each route param to its placeholder token.
+func dynamicRouteSentinels(paramNames []string) map[string]string {
+	out := make(map[string]string, len(paramNames))
+	for _, name := range paramNames {
+		out[name] = dynamicParamSentinel(name)
+	}
+	return out
+}
+
 // injectDynamicRoutePlaceholders binds each dynamic-route [param] to a unique
 // sentinel so a statically built template's evaluated output (body text, title,
 // meta attributes) contains a marker the server substitutes per request.
@@ -552,6 +561,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		emitResult = &renderer.EmitResult{}
 	} else {
 		opts := b.irBuildOptions()
+		opts.PageParams = spp.Params
 		applyModuleBindings(&opts, entryModule.Path, entryModule.Program, extraPrograms)
 		opts.ActionURLs = bundle.ActionImports
 		tree = irtree.BuildWithOptions(entryModule.Program, ann, opts)

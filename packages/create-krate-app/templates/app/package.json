@@ -10,12 +10,12 @@
     "typecheck": "krate typecheck"
   },
   "dependencies": {
-    "@krate/core": "__KRATE_DIST_TAG__",
-    "@krate/runtime": "__KRATE_DIST_TAG__",
-    "@krate/components": "__KRATE_DIST_TAG__"
+    "@krate/core": "__KRATE_VERSION__",
+    "@krate/runtime": "__KRATE_VERSION__",
+    "@krate/components": "__KRATE_VERSION__"
   },
   "devDependencies": {
-    "@krate/ts-plugin": "__KRATE_DIST_TAG__",
+    "@krate/ts-plugin": "__KRATE_VERSION__",
     "typescript": "^5.5.0"
   }
 }

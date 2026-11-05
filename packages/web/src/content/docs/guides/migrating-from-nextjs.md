@@ -53,9 +53,16 @@ krate migrate nextjs --apply
 krate migrate nextjs --report migration-report.json
 ```
 
+The dry run marks every file that already exists (`tsconfig.json`,
+`middleware.ts`, `package.json`, ...) and says so at the end: `--apply` then
+needs `--force`. The originals are backed up first and `krate migrate rollback`
+restores them.
+
 Add `--update-package` to also add `krate` scripts and `@krate/*` dependencies
-to `package.json`; `package.json` already exists, so pair it with `--force`.
-Next.js dependencies are left in place until the migrated app builds cleanly.
+(pinned to the version of the compiler you run) and `preact` to `package.json`;
+`package.json` already exists, so pair it with `--force`. The plan lists each
+script it replaces and each dependency it adds or keeps. Next.js dependencies are
+left in place until the migrated app builds cleanly.
 
 The first pass:
 
@@ -71,9 +78,16 @@ The first pass:
   default imports from `next/link`, `next/image`, and `next/head` (Krate exposes
   those as globals);
 - translates static `next.config.*` redirects, rewrites, headers, `basePath`, and
-  image breakpoints/formats/remote patterns into the generated config, maps
-  static root `metadata` to `site` config, and wraps static, synchronous, and
-  async `generateMetadata` results in `<Head>`;
+  image breakpoints/formats/remote patterns into the generated config (also when
+  `redirects()`, `rewrites()` or `headers()` is an `async` function that returns a
+  literal array), maps static root `metadata` to `site` config, and wraps static,
+  synchronous, and async `generateMetadata` results in `<Head>`. A key it cannot
+  prove static is reported as manual work on its own; the other keys still
+  translate. An `async` page keeps `async` and its wrapper is `async` too, so the
+  page renders per request;
+- keeps `export const revalidate`, `dynamic` and `dynamicParams` on pages, which
+  Krate honors, and notes in the plan what each does (ISR, SSR, 404 for unlisted
+  params); the same exports in a layout are manual work;
 - rewrites `middleware.ts` to the standard `Request`/`Response` API, including a
   small `NextResponse` shim, static/local matcher checks, and cookie/IP/geo
   helpers; computed `config.matcher` arrays are checked at runtime;
@@ -127,7 +141,7 @@ exports without an equivalent (`updateTag`, `cacheLife`, `cacheTag`, `"use cache
 route segment config without an equivalent (`runtime`, `preferredRegion`,
 `fetchCache`, `maxDuration`), a `default.tsx` outside a parallel-route slot, nested
 `not-found`, unresolved relative imports, and function/plugin
-`next.config.*` files are not rewritten automatically. Resolve those before
+`next.config.*` files (or keys of one) are not rewritten automatically. Resolve those before
 running `krate build`. `useParams` and
 `useSelectedLayoutSegment(s)` are generated from the migrated navigation helper.
 

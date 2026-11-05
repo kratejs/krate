@@ -387,6 +387,23 @@ func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 	return root, cfg
 }
 
+// checkProjectDir fails with a plain message when the project directory is
+// missing, so a typo is not reported as a missing pagesDir (or, worse, turned
+// into a new directory by the first build step that writes to it).
+func checkProjectDir(root string) error {
+	info, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("project directory %s does not exist (check the path; `krate init` creates a new project)", root)
+		}
+		return fmt.Errorf("cannot read project directory %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("project path %s is not a directory", root)
+	}
+	return nil
+}
+
 // loadConfig is resolveConfig without the exit, so the dev server can report a
 // broken config edit and keep running.
 func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
@@ -396,6 +413,9 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 	}
 	root, err := filepath.Abs(root)
 	if err != nil {
+		return "", nil, err
+	}
+	if err := checkProjectDir(root); err != nil {
 		return "", nil, err
 	}
 
@@ -500,7 +520,7 @@ func runBuild(flags cliFlags, args []string) {
 		writeHeapProfile(flags.MemProfile)
 	}
 	if buildErr != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, buildErr)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(buildErr))
 		os.Exit(1)
 	}
 
@@ -613,7 +633,7 @@ func runDevOnce(flags cliFlags, args []string, first bool) bool {
 		// A failed initial build must not kill the dev server: keep serving and
 		// publish the diagnostics so the browser overlay shows them (and the
 		// watcher can recover on the next save).
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 		hub.Publish(build.DevEvent{Type: "reload", Diagnostics: build.DiagnosticsFromError(err)})
 	}
 
@@ -667,7 +687,7 @@ func runServe(flags cliFlags, args []string) {
 		builder.Verbose = flags.Verbose
 		builder.Env = env
 		if err := builder.BuildAll(); err != nil {
-			fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+			fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 			os.Exit(1)
 		}
 		fmt.Printf("%s%s  Build complete. Starting server...%s\n", cBold, cGreen, cReset)
@@ -708,7 +728,7 @@ func runDeploy(flags cliFlags, args []string) {
 	builder.Verbose = flags.Verbose
 	builder.Env = env
 	if err := builder.BuildAll(); err != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 		os.Exit(1)
 	}
 
@@ -755,6 +775,9 @@ func runFix(flags cliFlags, args []string) {
 		root = args[1]
 	}
 	abs, err := filepath.Abs(root)
+	if err == nil {
+		err = checkProjectDir(abs)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
@@ -801,7 +824,7 @@ func runInspect(flags cliFlags, args []string) {
 	var buildErr error
 	withSuppressedStdout(func() { buildErr = builder.BuildAll() })
 	if buildErr != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, buildErr)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(buildErr))
 		os.Exit(1)
 	}
 	graph, err := builder.SiteGraph()
@@ -947,7 +970,7 @@ func runCheck(flags cliFlags, args []string) {
 	// suppress the in-build gates to avoid duplicate reporting.
 	builder.SkipQualityChecks = true
 	if err := builder.BuildAll(); err != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 		os.Exit(1)
 	}
 
