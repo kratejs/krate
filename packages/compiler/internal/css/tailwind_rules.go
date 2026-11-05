@@ -49,6 +49,14 @@ type TailwindTheme struct {
 	// containing "&" (e.g. "&:where([data-t=x] *)") or an at-rule such as
 	// "@media (print)".
 	CustomVariants map[string]string `json:"customVariants"`
+	// ThemeVars holds every `@theme` variable by name without the leading
+	// `--`, so `--value(--tab-size-*)` can read namespaces Krate has no
+	// utilities for.
+	ThemeVars map[string]string `json:"themeVars,omitempty"`
+
+	// utilStack lists the custom utilities being expanded, to stop @apply
+	// cycles between them.
+	utilStack []string
 }
 
 // DefaultTailwindTheme returns the default Tailwind theme configuration.

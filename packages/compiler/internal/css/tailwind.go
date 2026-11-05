@@ -189,7 +189,7 @@ func validDeclarationBlock(css string) bool {
 			continue
 		}
 		prop, val, ok := strings.Cut(decl, ":")
-		if !ok || strings.TrimSpace(prop) == "" {
+		if !ok || strings.TrimSpace(prop) == "" || strings.ContainsAny(prop, "{}") {
 			return false
 		}
 		val = strings.TrimSpace(val)

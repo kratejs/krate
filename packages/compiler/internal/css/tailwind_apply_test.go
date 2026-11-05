@@ -110,11 +110,30 @@ func TestFunctionalUtility(t *testing.T) {
 	}
 }
 
-func TestFunctionalUtilityModifierIsReported(t *testing.T) {
+func TestFunctionalUtilityModifier(t *testing.T) {
+	g := NewTailwindGenerator()
 	d := NewTailwindDirectives(t.TempDir())
-	d.handleUtilityForTest("m-*", "margin: --modifier(integer);")
-	if len(d.Functional) != 0 || len(d.Warnings()) != 1 {
-		t.Fatalf("functional=%v warnings=%v", d.Functional, d.Warnings())
+	d.handleUtilityForTest("m-*", "margin: --value(integer); opacity: --modifier(number);")
+	d.ApplyTo(&g.Theme)
+	if len(d.Warnings()) != 0 {
+		t.Fatalf("unexpected warnings: %v", d.Warnings())
+	}
+	out := g.Generate(map[string]bool{"m-4": true, "m-4/0.5": true, "m-4/x": true})
+	for _, want := range []string{".m-4{margin: 4;}", "margin: 4; opacity: 0.5;"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "m-4\\/x") {
+		t.Errorf("a modifier that does not resolve must not match:\n%s", out)
+	}
+}
+
+func TestUtilityUnsupportedArgumentIsReported(t *testing.T) {
+	d := NewTailwindDirectives(t.TempDir())
+	d.handleUtilityForTest("c-*", "color: --value(color); width: --value([nope]);")
+	if len(d.Warnings()) != 2 {
+		t.Fatalf("warnings=%v", d.Warnings())
 	}
 }
 

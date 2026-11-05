@@ -27,6 +27,13 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- Tailwind `@utility`: `--modifier()` works (`name-VALUE/MODIFIER`), including the typed
+  forms (`--value(--color-*, [color])`, `--value(integer)`, `--value([length])`,
+  `--modifier(number)`, `--default()`), and nested rules, `@media`, `@supports`,
+  `@layer`, `@variant` and `@apply` inside a utility body no longer warn. Unresolvable
+  declarations are dropped like Tailwind v4 does, custom `@theme` namespaces
+  (`--tab-size-*`) work in `--value()`, and `@utility` arguments Tailwind rejects warn.
+  Output is compared with Tailwind 4.3 in a golden test.
 - `krate fix` repairs the 0.4 template's `tsconfig.json`: `"baseUrl": "./src"` with
   `"@/*": ["./src/*"]` can only mean the project root, so it sets `baseUrl` to `"."`
   (`KR7125`). The edited file also builds on 0.4. The build error for an alias that

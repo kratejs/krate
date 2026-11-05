@@ -139,6 +139,10 @@ func (at *AtTheme) Apply(theme *TailwindTheme) {
 			theme.resetNamespace(strings.TrimSuffix(strings.TrimSuffix(name, "*"), "-"))
 			continue
 		}
+		if theme.ThemeVars == nil {
+			theme.ThemeVars = map[string]string{}
+		}
+		theme.ThemeVars[name] = val
 		switch {
 		case strings.HasPrefix(name, "color-"):
 			rest := name[len("color-"):]
@@ -250,6 +254,11 @@ func (t *TailwindTheme) ensureMaps() {
 
 // resetNamespace implements `--ns-*: initial` (and `--*: initial` for "").
 func (t *TailwindTheme) resetNamespace(ns string) {
+	for k := range t.ThemeVars {
+		if ns == "" || strings.HasPrefix(k, ns+"-") {
+			delete(t.ThemeVars, k)
+		}
+	}
 	clear := func(m map[string]string) {
 		for k := range m {
 			delete(m, k)
@@ -407,8 +416,16 @@ func themeLayerVars(theme *TailwindTheme, at *AtTheme, refs map[string]bool) []T
 }
 
 // themeVarValue resolves a v4 theme variable name (no leading "--") against
-// the theme maps.
+// the theme maps, then against the raw `@theme` variables.
 func themeVarValue(theme *TailwindTheme, name string) (string, bool) {
+	if v, ok := mappedThemeVar(theme, name); ok {
+		return v, true
+	}
+	v, ok := theme.ThemeVars[name]
+	return v, ok && v != ""
+}
+
+func mappedThemeVar(theme *TailwindTheme, name string) (string, bool) {
 	get := func(m map[string]string, key string) (string, bool) {
 		v, ok := m[key]
 		return v, ok && v != ""

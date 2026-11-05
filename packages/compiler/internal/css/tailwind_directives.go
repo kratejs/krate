@@ -191,9 +191,9 @@ func (d *TailwindDirectives) handleSource(prelude, baseDir string) {
 	d.warn("@source %s: unrecognized form; use @source \"path\", @source not \"path\" or @source inline(\"classes\")", prelude)
 }
 
-// handleUtility supports static `@utility name { decl; }` and functional
-// `@utility name-* { decl: --value(...); }` (see functionalUtilityCSS). Nested
-// rules and --modifier() need more of Tailwind's resolver and are reported.
+// handleUtility supports static `@utility name { ... }` and functional
+// `@utility name-* { ... }` blocks. The body is kept as written; each class
+// that uses the utility resolves it (see customUtility).
 func (d *TailwindDirectives) handleUtility(r cssAtRule) {
 	name := strings.TrimSpace(r.Prelude)
 	if !r.HasBody || name == "" {
@@ -205,27 +205,18 @@ func (d *TailwindDirectives) handleUtility(r cssAtRule) {
 		d.warn("@utility %s: the wildcard must end the name (`name-*`); the utility was skipped", name)
 		return
 	}
-	decls, nested := splitCSSBody(r.Body)
-	if len(nested) > 0 {
-		d.warn("@utility %s: nested rules/at-rules are not supported (only declarations); the utility was skipped", name)
+	body := strings.TrimSpace(r.Body)
+	if len(splitCSSNodes(body)) == 0 {
 		return
 	}
-	var parts []string
-	for _, dd := range decls {
-		if functional && strings.Contains(dd.Value, "--modifier(") {
-			d.warn("@utility %s: --modifier() is not supported; the utility was skipped", name)
-			return
-		}
-		parts = append(parts, dd.Name+": "+dd.Value+";")
-	}
-	if len(parts) == 0 {
-		return
+	for _, w := range utilityWarnings(name, body) {
+		d.warn("%s", w)
 	}
 	if functional {
-		d.Functional[strings.TrimSuffix(name, "-*")] = strings.Join(parts, " ")
+		d.Functional[strings.TrimSuffix(name, "-*")] = body
 		return
 	}
-	d.Utilities[name] = strings.Join(parts, " ")
+	d.Utilities[name] = body
 }
 
 // handleCustomVariant supports `@custom-variant name (selector);` and the
