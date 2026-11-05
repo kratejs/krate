@@ -478,10 +478,30 @@ func (s *SSRServer) FindPageForRoute(urlPath string) (*ManifestPage, map[string]
 	for _, i := range order {
 		p := &s.manifest.Pages[i]
 		if params, ok := matchRoute(urlPath, p.Route); ok {
+			if len(params) == 0 {
+				params = s.patternParams(p, urlPath)
+			}
 			return p, params
 		}
 	}
 	return nil, nil
+}
+
+// patternParams returns the dynamic params of a pre-generated page (a
+// generateStaticParams variant such as "/blog/hello", whose route is a plain
+// path) from the [param] route its source file also serves. Without them the
+// page would render with empty params at request time.
+func (s *SSRServer) patternParams(page *ManifestPage, urlPath string) map[string]string {
+	for i := range s.manifest.Pages {
+		q := &s.manifest.Pages[i]
+		if q.Source != page.Source || q.Route == page.Route || !strings.Contains(q.Route, "[") {
+			continue
+		}
+		if params, ok := matchRoute(urlPath, q.Route); ok {
+			return params
+		}
+	}
+	return nil
 }
 
 func (s *SSRServer) findRendererScript() string {
