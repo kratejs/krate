@@ -8,9 +8,9 @@
 //     return new ImageResponse(<div style={{ fontSize: 96, background: "white" }}>Hello</div>, { width: 1200, height: 630 });
 //   }
 
-export interface ImageResponseFont {
 import { readLocalImage } from './og-files.js';
 
+export interface ImageResponseFont {
   name: string;
   data: ArrayBuffer | ArrayBufferView;
   weight?: number;
