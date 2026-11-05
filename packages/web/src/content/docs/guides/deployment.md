@@ -243,7 +243,8 @@ to restrict it). `krate dev` binds `127.0.0.1` only.
 `krate deploy --target docker` writes a `Dockerfile` and `.dockerignore` at the
 project root: it installs dependencies with your lockfile's package manager,
 builds the site once in the image, and runs `krate start` (SSR, ISR, API
-routes, actions and middleware all work) without rebuilding on start.
+routes, actions and middleware all work) without rebuilding on start. The
+image runs as the unprivileged `node` user and has a `HEALTHCHECK` on `/healthz`.
 Hand-written Dockerfiles are never overwritten. The manual equivalents:
 
 ```dockerfile
@@ -279,6 +280,11 @@ sidecars and exiting 0, so rolling deploys do not cut requests off.
 Behind a load balancer or reverse proxy that terminates TLS or rewrites `Host`,
 set `server: { trustProxy: true }` so middleware, API routes and the
 server-action origin check see the original scheme, host and client address.
+The client address is the `X-Forwarded-For` entry `server.trustedProxies` hops
+from the right (default 1), never an entry the client put at the front. On
+Cloudflare Workers the request URL is already the public one and a client can
+send its own `X-Forwarded-*`, so the Worker trusts them only with
+`server.trustProxy: true` (set it when your own proxy sits in front of the Worker).
 
 ### Health & readiness
 
@@ -287,6 +293,13 @@ The server exposes two probes that stay at the root even under a `basePath`:
 - `GET /healthz` - liveness; returns `200 ok` while the process serves.
 - `GET /readyz` - readiness; returns `503 ssr-unavailable` while an expected SSR
   sidecar is down, otherwise `200 ready`.
+
+The SSR renderer is supervised: if it crashes, `krate start` restarts it with a
+growing delay and logs the exit. Until it is back, pages that need it answer
+`503` with `Cache-Control: no-store` (and `X-Krate-Error: renderer-unavailable`)
+instead of the build-time shell, so a CDN never caches an empty page. The
+sidecars also exit with the server: they die with it on Linux, and elsewhere
+they watch the parent process.
 
 Wire these into your orchestrator (Kubernetes `livenessProbe`/`readinessProbe`,
 Docker `HEALTHCHECK`, load-balancer health checks).

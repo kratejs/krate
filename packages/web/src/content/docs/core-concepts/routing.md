@@ -304,6 +304,27 @@ navigation the link matching the current path gets `aria-current="page"`.
 Programmatic navigation, events and error handling are documented in the
 [runtime API reference](/docs/reference/runtime-api/#spa-router).
 
+## Prerendered endpoints
+
+A `.ts` or `.js` file under `src/pages` whose name ends in a data extension
+(`json`, `xml`, `txt`, `csv`, `rss`, `atom`, `webmanifest`, `ics`, `yml`, `yaml`)
+is not a page. Its `GET` export runs once at build time, on Node (or the
+configured runtime), and the response body is written to the output as a file:
+
+```ts
+// src/pages/data.json.ts  ->  dist/data.json
+export async function GET() {
+  return Response.json({ items: [1, 2, 3] });
+}
+```
+
+`src/pages/blog/feed.xml.ts` becomes `dist/blog/feed.xml`. The build fails
+(`KR7121`) when there is no `GET`, it throws, or it answers a non-2xx status.
+The path cannot have a dynamic segment; for a response that depends on the
+request, use an [API route](/docs/features/api-routes/). A `.ts` or `.js` file
+under `src/pages/api` is not an API route and warns with `KR7120`: API routes
+live in `src/api`.
+
 ## File conventions reference
 
 | File | Purpose |
@@ -318,5 +339,6 @@ Programmatic navigation, events and error handling are documented in the
 | `src/pages/error.tsx`, `500.tsx` | Error page of the directory; `error.tsx` is also a client error boundary |
 | `src/pages/loading.tsx` | Loading component during SPA transitions |
 | `middleware.ts` | Request middleware (runs before page rendering) |
+| `src/pages/name.json.ts` | Prerendered endpoint: `GET` runs at build time and writes `name.json` |
 | `src/api/*.ts` | JS API routes |
 | `src/api/*.go` | Go API routes |
