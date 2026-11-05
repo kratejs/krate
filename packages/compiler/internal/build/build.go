@@ -1223,6 +1223,8 @@ func (b *Builder) BuildAll() error {
 	}
 	manifest := BuildManifest(results, manifestCSS, runtimeJS)
 	manifest.StaticOnlyRoutes = append([]string(nil), b.staticOnlyRoutes...)
+	hasMiddleware := findMiddlewareSource(b.Root) != ""
+	manifest.Middleware = &hasMiddleware
 	b.addSegmentsToManifest(manifest, results)
 
 	// revalidatePath("/x") calls whose target page is static cannot refresh it.

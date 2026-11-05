@@ -71,6 +71,10 @@ function krateRequestHeaders(map) {
 // re-imports it whenever the file changes so edits apply without restarting the
 // sidecar. A failed reload keeps the previous module and logs the error.
 let krateMwStamp = '';
+// krateMwError holds the load error of a module that exists but failed to
+// import. With no previously loaded module the host must fail closed instead
+// of treating the app as having no middleware.
+let krateMwError = '';
 // krateImportFresh imports a module with a cache-busting tag. Bun ignores the
 // query of a file:// URL (it would serve the first copy forever), but honors it
 // on a plain absolute path.
@@ -86,14 +90,16 @@ async function krateLoadMiddleware() {
     if (!st.isFile()) return;
     stamp = st.mtimeMs + ':' + st.size;
   } catch {
-    if (HOT) { middlewareModule = null; krateMwStamp = ''; }
+    if (HOT) { middlewareModule = null; krateMwStamp = ''; krateMwError = ''; }
     return;
   }
   if (stamp === krateMwStamp) return;
   krateMwStamp = stamp;
   try {
     middlewareModule = await krateImportFresh(MIDDLEWARE_PATH, stamp);
+    krateMwError = '';
   } catch (e) {
+    krateMwError = (e && e.message) || String(e);
     console.error('[krate] middleware load error: ' + ((e && e.stack) || e));
   }
 }
