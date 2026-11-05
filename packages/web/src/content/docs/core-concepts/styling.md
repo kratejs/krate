@@ -61,6 +61,11 @@ tailwind: {
 }
 ```
 
+Tailwind is off until `enabled: true` is set. If a `tailwind.config.{ts,js,mjs}`
+file exists, or your CSS uses `@tailwind` or `@import "tailwindcss"`, while it
+is off, the build warns once ([KR7140](/docs/reference/diagnostics/)) instead of
+quietly shipping a nearly empty stylesheet.
+
 ### CSS-first directives
 
 Krate reads the Tailwind v4 CSS-first directives from your stylesheets (files

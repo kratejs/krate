@@ -1465,6 +1465,11 @@ func (b *Builder) tailwindImportMode() css.TailwindImportMode {
 
 // inlineImports inlines @import directives of merged authored CSS.
 func (b *Builder) inlineImports(cssText string) string {
+	if !b.Cfg.Tailwind.Enabled {
+		if d := css.TailwindDirectiveUse(cssText); d != "" {
+			b.warnTailwindOff("", d)
+		}
+	}
 	return css.InlineImportsWith(cssText, b.Root, css.ImportOptions{Root: b.Root, Tailwind: b.tailwindImportMode()})
 }
 
@@ -1500,6 +1505,9 @@ func (b *Builder) processCSSDirectives(cssText string) (string, twPageInfo) {
 	// `@layer` is left intact: it is valid CSS and unwrapping it would change
 	// the authored cascade.
 	if !b.Cfg.Tailwind.Enabled {
+		if d := css.TailwindDirectiveUse(cssText); d != "" {
+			b.warnTailwindOff("", d)
+		}
 		return css.StripAtTailwind(cssText), info
 	}
 	info.dirs = b.parseTailwindDirectives(cssText)
@@ -1596,6 +1604,9 @@ func (b *Builder) warnOnce(msg string) {
 // disabled or nothing was generated.
 func (b *Builder) tailwindCSS() string {
 	if !b.Cfg.Tailwind.Enabled {
+		if p := css.FindTailwindConfig(b.Root); p != "" {
+			b.warnTailwindOff(b.relPath(p), "a Tailwind config file")
+		}
 		return ""
 	}
 	opts := b.tailwindOptions()
