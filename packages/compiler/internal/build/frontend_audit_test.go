@@ -95,3 +95,19 @@ func TestScssImportIsABuildError(t *testing.T) {
 		t.Errorf("build error = %q", got)
 	}
 }
+
+func TestMemberAssignedFunctionComponents(t *testing.T) {
+	html, logged := buildPlain(t, map[string]string{
+		"src/components/Table.tsx": "export function Table(props) { return <table>{props.children}</table>; }\n" +
+			"Table.Cell = function (props) { return <td class=\"c\">{props.children}</td>; };\n" +
+			"Table.Head = (props) => <th>{props.children}</th>;\n" +
+			"Table.Named = function Inner(props) { return <td class=\"n\">{props.children}</td>; };\n",
+		"src/pages/index.tsx": "import { Table } from '../components/Table';\n" +
+			"function Local(props) { return <i>{props.children}</i>; }\nLocal.Part = function (props) { return <b>{props.children}</b>; };\n" +
+			"export default function Home() { return <Table><tr><Table.Head>h</Table.Head><Table.Cell>x</Table.Cell><Table.Named>y</Table.Named></tr><Local><Local.Part>z</Local.Part></Local></Table>; }\n",
+	})
+	want := `<tr><th>h</th><td class=c>x</td><td class=n>y</td></tr><i><b>z</b></i>`
+	if !strings.Contains(html, want) || strings.Contains(logged, "could not be resolved") {
+		t.Errorf("member components missing:\n%s\nlog:\n%s", html, logged)
+	}
+}

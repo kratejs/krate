@@ -446,6 +446,21 @@ func collectMemberComponents(body []ast.Stmt, functions map[string]*ast.FnDecl) 
 						functions[tag] = fn
 					}
 				}
+			} else if inner := unwrapComponentInit(assign.Right); inner != nil {
+				// `Table.Cell = function (props) {...}` or an arrow: the
+				// function has no declaration of its own, so give it one.
+				if _, exists := functions[tag]; exists {
+					continue
+				}
+				name := inner.Name
+				if name == "" {
+					name = obj.Name + "$" + prop.Name
+				}
+				fn := &ast.FnDecl{Name: name, Params: inner.Params, Body: inner.Body, Async: inner.Async}
+				functions[tag] = fn
+				if _, exists := functions[name]; !exists {
+					functions[name] = fn
+				}
 			}
 		case *ast.BlockStmt:
 			collectMemberComponents(s.Body, functions)
