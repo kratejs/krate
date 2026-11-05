@@ -39,6 +39,12 @@ the break folds to a space. Anchors, aliases and tags are not supported. A
 `+++` (TOML) block, or a `---` block that is never closed, is not read; Krate
 warns with the line instead of rendering it as text.
 
+Frontmatter that is closed but malformed fails the build with the file, line and
+column, instead of shipping a wrong value: a quoted value that is never closed
+(`title: "bad`), text after a closing quote (`title: "a" b`), a `[` or `{` that
+is never closed, or a line that is not `key: value`. Quote a value that contains
+`: ` or `#`; `title: "Hello: World"` is fine.
+
 ## Markdown features
 
 Markdown is parsed by [goldmark](https://github.com/yuin/goldmark), a
