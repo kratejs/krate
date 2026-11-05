@@ -91,7 +91,7 @@ func TestScssImportIsABuildError(t *testing.T) {
 		"src/pages/index.tsx": "import './a.scss';\nexport default function P() { return <p>x</p>; }\n",
 		"src/pages/a.scss":    "a { b { color: red } }\n",
 	})
-	if !strings.Contains(got, "KR7120") || !strings.Contains(got, "a.scss") || !strings.Contains(got, "Sass") {
+	if !strings.Contains(got, "KR7123") || !strings.Contains(got, "a.scss") || !strings.Contains(got, "Sass") {
 		t.Errorf("build error = %q", got)
 	}
 }

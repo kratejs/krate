@@ -830,6 +830,145 @@ Primitives that keep internal pointer state (for example Radix Tooltip) work
 when controlled: bind `open` to a page signal and wire `onOpenChange` plus
 explicit pointer/focus handlers on the trigger.
 
+### Choosing when an island mounts
+
+By default an island mounts as soon as the page script runs. Put a client
+directive on the island's root tag to defer it:
+
+```tsx
+import { LineChart, Line } from 'recharts';
+
+<LineChart client:visible width={600} height={300} data={data}>
+  <Line dataKey="sales" />
+</LineChart>
+```
+
+| Directive | Mounts |
+|-----------|--------|
+| `client:load` | at load (the default) |
+| `client:idle` | when the browser is idle (`requestIdleCallback`, 2 s at most) |
+| `client:visible` | when the island comes within 200 px of the viewport (`IntersectionObserver`) |
+
+A deferred island keeps its server-rendered markup, which is not interactive
+until it mounts. Its chunk is not preloaded and is not fetched before then, so
+a heavy island below the fold costs nothing until it is needed. The directive is
+removed at build time and never reaches the component. On anything that is
+not an island the directive does nothing, and the build says so (`KR8012`).
+Without `IntersectionObserver` the island mounts at load. A page that is itself a
+React-library island (below) always mounts at load.
+
+## Libraries built on React hooks (islands)
+
+State, forms and data-fetching libraries from the React ecosystem call React's
+hooks from their own code (`useSyncExternalStore`, `useRef`, `useContext`).
+Krate's source components do not have React's render model: they run once and
+update through signals, and a library's hooks cannot be lowered. A
+component that calls such a hook therefore runs in a **Preact island**, where
+React's model exists, instead of being lowered.
+
+Krate decides this at build time. A user module is routed to the island path
+when it:
+
+- calls a `use*` hook imported from an npm package that depends on `react`
+  (`useForm`, `useSWR`, `useQuery`, `useStore`, ...), or a store hook made at
+  module level (`const useStore = create(...)`),
+- calls a hook exported by another module that does (a custom hook wrapping
+  `useSWR`, a store hook exported from `store.ts`),
+- renders a component built by such a package at module level
+  (``const Box = styled.div`...` ``, `motion(Button)`),
+- hands a value built by such a package to a JSX attribute
+  (`const queryClient = new QueryClient()` then `client={queryClient}`), or
+- starts with `/** @jsxImportSource <react package> */` (emotion's `css` prop).
+
+```tsx
+// src/components/Counter.tsx
+import { useStore } from '../store';        // const useStore = create(...)
+
+export function Counter() {
+  const n = useStore((s) => s.n);
+  const inc = useStore((s) => s.inc);
+  return <button onClick={inc}>clicked {n}</button>;
+}
+```
+
+```tsx
+// src/pages/index.tsx: Counter is rendered as an island
+import { Counter } from '../components/Counter';
+
+export default function Home() {
+  return <main><Counter /><Counter /></main>;
+}
+```
+
+The module is compiled for Preact (`react` resolves to `preact/compat`) and
+rendered on the server with the same code, then hydrated. Props follow the
+island rules above: serializable values, signals bridged as live getters, and
+function references. A page whose own module calls the hook is one island.
+
+What was checked in Chromium (Preact 10.29): each page loaded without console
+errors and rendered the expected markup, and where the library has an
+interaction it was clicked or typed into.
+
+| Library | Result | Version checked |
+|---------|--------|-----------------|
+| zustand | works: store hooks, selectors, state shared by the islands of a page | 5.0.16 |
+| valtio, jotai | work: `useSnapshot`, `useAtom` | 2.3.2, 2.20.3 |
+| react-redux with Redux Toolkit | works: `Provider`, `useSelector`, `useDispatch`, a slice and `configureStore` | 9.3.1, 2.14.0 |
+| react-hook-form | works: `register`, `required` validation, `handleSubmit`, `formState` | 7.91.0 |
+| SWR | works: `useSWR` directly or inside a custom hook | 2.5.1 |
+| TanStack Query | works: `useQuery` under a `QueryClientProvider` in the same island | 5.106.1 |
+| TanStack Table | works: `useReactTable` with `flexRender`, rendered on the server | 8.21.3 |
+| react-i18next | works: `useTranslation` after `i18n.use(initReactI18next).init()` | 15.7.4 |
+| usehooks-ts | works: `useCounter`, `useToggle` | 3.1.1 |
+| recharts, Headless UI | work (they need `import React from "react"`) | 2.15.4, 2.2.10 |
+| framer-motion | works: `motion.*` and `useAnimation` | 11.18.2 |
+| styled-components, `@emotion/styled`, emotion `css` prop, MUI `Button` | work, client-only (see below) | 6.6.0, 11.14.1, 11.14.0, 9.5.0 |
+
+These were run by hand against the real packages. The repository tests run
+stand-ins with the same import shapes (default `import React`, namespace
+import, `require("react")`), because the repository does not install the
+libraries, so the table is not covered by CI. A library that is not listed
+may work, but nothing was run for it.
+
+### CSS-in-JS
+
+styled-components, emotion and MUI create their styles in the browser while
+rendering. Their islands are **client-only**: the build prints a `KR8008`
+notice, the placeholder is empty in the server HTML, and the component and its
+styles appear when the island mounts. For content that must be styled before
+JavaScript loads (above-the-fold text, SEO content), use CSS modules, Tailwind
+or a stylesheet. A `css={...}` prop on a DOM element in a module without
+`/** @jsxImportSource @emotion/react */` is reported as `KR8014` (the styles
+would be dropped). Setting `jsxImportSource` to emotion in `tsconfig.json`
+for the whole project is not supported.
+
+### Limits, and what the build refuses
+
+Each limit below is either a build error or a documented behavior, never a
+silent failure in the browser:
+
+- **Layouts and server pages cannot host these hooks.** A layout, a template or
+  an `async` server page that (through its imports) calls a React-library hook
+  fails with `KR8013`, naming the package and the hook. Render the component
+  from a synchronous page instead, or use `createSignal` / `createResource`.
+- **Providers must be inside the island.** A `QueryClientProvider`,
+  `ThemeProvider` or similar wrapped around `{children}` in a layout does not
+  reach islands in pages: each island is its own Preact tree, so put the
+  provider in the module that uses the hook.
+- **State is per page.** A store module is shared by all islands on one page
+  (they are bundled into one chunk), but each page has its own chunk, so store
+  state does not survive client-side navigation.
+- **No bridge to Krate state from inside.** The island reads the page's
+  signals only as props, and the page cannot read the island's store. Krate
+  components that import the same store module do not see it.
+- **A page that is itself an island** cannot take props (`params`,
+  `searchParams`): the build fails with `KR8013`. Move the component that calls
+  the hook into its own module and render it from a page that passes the
+  values in. Such a module also cannot use Krate-only APIs (`createSignal`,
+  `<Head>`).
+- **Pages rendered per request** (`dynamic`, ISR or SSR modes) were not
+  verified with these islands; use static pages.
+
 ## Events, forms and refs
 
 Event handlers, form controls and refs follow React 18/19 semantics as
@@ -951,6 +1090,15 @@ observed in a browser. The browser conformance suite (`/react-events/` in
 
 - **Running React itself.** There is no React runtime; compiled packages run
   through Preact islands, not React.
+- **React libraries' hooks in lowered source components.** `zustand`,
+  `react-hook-form`, `swr` and `@tanstack/react-query` hooks need React's render
+  model, so the module that calls them is run as a Preact island instead (see
+  [Libraries built on React hooks](#libraries-built-on-react-hooks-islands)).
+  Where an island cannot be used (layouts, server pages) the build fails with
+  `KR8013`. The signal-based replacements are `createSignal` (with a module-level
+  signal for shared state) for client state and `createResource` for fetching.
+- **CSS-in-JS at first paint.** styled-components, emotion and MUI work only as
+  client-only islands; their styles do not exist in the server HTML.
 - **React 19-only semantics** in compiled packages. Preact's compatibility layer
   is close to React 18 behavior; version-specific APIs may differ.
 - **Hook ordering and rules-of-hooks** for transpiled source. Components run

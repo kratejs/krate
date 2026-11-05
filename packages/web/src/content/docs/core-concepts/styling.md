@@ -288,7 +288,7 @@ deliberate differences:
 ## Sass, Less and Stylus
 
 Krate has no Sass, Less or Stylus compiler. Importing a `.scss`, `.sass`, `.less`
-or `.styl` file (including `.module.scss`) is a build error (`KR7120`) rather
+or `.styl` file (including `.module.scss`) is a build error (`KR7123`) rather
 than a page that silently ships without its styles. Compile the file to CSS
 first, for example with the `sass` CLI in a prebuild script
 (`sass src/styles.scss src/styles.css`), and import the `.css` file, or port the

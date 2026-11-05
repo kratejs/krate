@@ -3,10 +3,10 @@ package diag
 // KR712x: imports the compiler can see are wrong before the page runs.
 const (
 	// CodeUnsupportedStylesheet: a Sass, Less or Stylus file is imported.
-	CodeUnsupportedStylesheet Code = "KR7120"
+	CodeUnsupportedStylesheet Code = "KR7123"
 	// CodeRuntimeExportMissing: a name is imported from @krate/runtime that
 	// the package does not export.
-	CodeRuntimeExportMissing Code = "KR7121"
+	CodeRuntimeExportMissing Code = "KR7124"
 )
 
 func init() {

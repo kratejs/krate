@@ -851,8 +851,8 @@ func (b *builder) exprHasExternalComponent(expr ast.Expr) bool {
 		if i := strings.IndexByte(root, '.'); i >= 0 {
 			root = root[:i]
 		}
-		if imp, ok := b.externalImports[root]; ok && isExternalPackageSpecifier(imp.Source) {
-			if fn, known := b.functions[e.Opening.Name]; known && fn != nil {
+		if imp, ok := b.externalImports[root]; ok && (imp.ReactIsland || isExternalPackageSpecifier(imp.Source)) {
+			if fn, known := b.functions[e.Opening.Name]; known && fn != nil && !imp.ReactIsland {
 				src := strings.ReplaceAll(b.ann.ComponentSources[fn.Name], "\\", "/")
 				if !resolver.IsCompiledDependency(src) {
 					// Resolved to local Krate source (e.g. a path alias).

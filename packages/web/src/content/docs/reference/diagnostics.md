@@ -376,18 +376,6 @@ Two modules export the same name and a page imports it from both, for example `i
 
 ### KR7120
 
-**Sass, Less and Stylus files are not compiled**
-
-Krate compiles CSS (including CSS modules and Tailwind) but has no Sass, Less or Stylus compiler, so importing a `.scss`, `.sass`, `.less` or `.styl` file would ship no styles at all. Compile the file to CSS first (for example with the `sass` CLI in a prebuild script) and import the `.css` result, or port the styles to CSS or Tailwind. This is an error.
-
-### KR7121
-
-**Name is not exported by @krate/runtime**
-
-A named import from `@krate/runtime` (or one of its subpaths) asks for something the package does not export. The import is removed from the page, so the name would be undefined in the browser and fail with a ReferenceError. Check the spelling against the runtime API reference; names from other frameworks (`signal`, `usePathname`) have Krate equivalents such as `createSignal` and `getNavigationState`. This is an error.
-
-### KR7120
-
 **API route file in the pages directory**
 
 API routes are served from src/api, not from the pages directory. A `.ts` or `.js` file under src/pages/api used to build into an empty page while /api/... answered 502. Move the file to src/api/. This is a warning.
@@ -403,6 +391,18 @@ A file such as `src/pages/data.json.ts` is a prerendered endpoint: its `GET` exp
 **Page metadata could not be read at build time**
 
 A page's `export const metadata` (or a `generateMetadata` that returns an object literal) becomes the document `<title>`, description, canonical link, Open Graph and Twitter tags when its values are literals. When none can be resolved (the values are computed, or `generateMetadata` reads params), no tags are emitted. Write literal values, or render `<Head>` from the component for values that depend on props. This is a warning.
+
+### KR7123
+
+**Sass, Less and Stylus files are not compiled**
+
+Krate compiles CSS (including CSS modules and Tailwind) but has no Sass, Less or Stylus compiler, so importing a `.scss`, `.sass`, `.less` or `.styl` file would ship no styles at all. Compile the file to CSS first (for example with the `sass` CLI in a prebuild script) and import the `.css` result, or port the styles to CSS or Tailwind. This is an error.
+
+### KR7124
+
+**Name is not exported by @krate/runtime**
+
+A named import from `@krate/runtime` (or one of its subpaths) asks for something the package does not export. The import is removed from the page, so the name would be undefined in the browser and fail with a ReferenceError. Check the spelling against the runtime API reference; names from other frameworks (`signal`, `usePathname`) have Krate equivalents such as `createSignal` and `getNavigationState`. This is an error.
 
 ## KR8xxx: islands, compiled packages and general React compatibility
 
@@ -471,6 +471,24 @@ Krate lowers `createPortal(children, container)` when it is a child (`{createPor
 **Expression has no build-time value and no client binding**
 
 The compiler could not compute the value of this expression while building the page (it calls a function it cannot see into, reads an unsupported built-in, or depends on data that only exists at runtime) and the component has no client code that could fill it in, so the page renders it as empty text. Move the value into component state or an effect, compute it from values the build can see, or make the component interactive so the browser evaluates it.
+
+### KR8012
+
+**Client directive on a component that is not an island**
+
+`client:visible`, `client:idle` and `client:load` choose when an island mounts, and only apply to the root tag of a compiled package component (or a module that uses a React library) rendered as an island. On a Krate component or an HTML element they do nothing; Krate hydrates those with the page. Remove the directive, or put it on the package component itself.
+
+### KR8013
+
+**React library hook used where no island can run it**
+
+A component calls a hook of an npm React library (zustand, react-hook-form, swr, @tanstack/react-query, ...). Those hooks need React's render model, which Krate's lowered components do not have, so Krate runs the module that calls them as a Preact island. That is not possible for a layout or template, or for a server or runtime tier component. Move the component into its own module and render it from a page or client component, or replace the library with createSignal / createResource.
+
+### KR8014
+
+**css prop is emotion's, not a DOM attribute**
+
+A `css={...}` prop on a DOM element is understood only by emotion's JSX runtime. In a module that does not use it Krate renders `css` as a plain attribute, so the styles are lost. Add `/** @jsxImportSource @emotion/react */` to the top of the file so the module runs as a Preact island with emotion, or use CSS modules, Tailwind or a stylesheet.
 
 ### KR8301
 

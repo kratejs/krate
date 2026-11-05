@@ -41,6 +41,12 @@ declare global {
       showIf?: unknown;
       /** Alias of `showIf`. */
       visibleIf?: unknown;
+      /** On a compiled package component (an island): mount it when it scrolls into view. */
+      'client:visible'?: boolean;
+      /** On a compiled package component (an island): mount it when the browser is idle. */
+      'client:idle'?: boolean;
+      /** On a compiled package component (an island): mount it at load (the default). */
+      'client:load'?: boolean;
     }
 
     type Booleanish = boolean | 'true' | 'false';

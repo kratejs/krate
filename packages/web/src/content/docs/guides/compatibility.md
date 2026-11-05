@@ -10,7 +10,7 @@ This is the support contract for React compatibility. A surface is only marked
 stable when the referenced corpus and browser tests pass. Known divergences are
 listed instead of silently hidden.
 
-Last verified: **2026-11-04**. See the [roadmap](/roadmap/) for phase
+Last verified: **2026-11-05**. See the [roadmap](/roadmap/) for phase
 status and the [React compatibility guide](/docs/guides/react-compatibility/)
 for usage.
 
@@ -44,6 +44,9 @@ for usage.
 | shadcn-style dashboard | Beta | n/a | n/a | Stable |
 | Next.js app corpus | Beta | n/a | n/a | Migration-ready |
 | Local components in islands | n/a | Beta | n/a | Supported |
+| npm React hook libraries (zustand, react-hook-form, SWR, TanStack Query, ...) | n/a | Partial | Beta | Run as Preact islands |
+| CSS-in-JS (styled-components, emotion, MUI) | n/a | Partial | Partial | Client-only islands |
+| Island hydration control (client:visible, client:idle) | n/a | Beta | n/a | Astro-style directives |
 | SSR island hydration | n/a | Beta | Beta | Hydration-safe |
 | Supported Preact versions | n/a | Beta | n/a | 10.20 through current |
 | Browser differential corpus | Beta | n/a | n/a | No P0/P1 divergence |
@@ -257,6 +260,51 @@ Imported local React-compatible modules can be used as tags inside a compiled is
 Diagnostics: `KR8007`
 
 Evidence: `TestIslandLocalComponent`, `browser:/react-demo/`, `TestIslandSameFileLocalWarning`
+
+### npm React hook libraries (zustand, react-hook-form, SWR, TanStack Query, ...)
+
+**Source:** n/a - **Islands:** Partial - **SSR:** Beta
+
+A user module that calls a hook of an npm package built on React (or a store hook made by its factory, or a custom hook wrapping one) is bundled for Preact (react resolves to preact/compat, CommonJS require of react is bridged), rendered on the server and hydrated in place. The islands of one page share one chunk, so a store module is one store. Checked by hand in Chromium against zustand 5, valtio 2, jotai 2, react-redux 9 with Redux Toolkit 2, react-hook-form 7, SWR 2, TanStack Query 5, TanStack Table 8, react-i18next 15 and usehooks-ts 3; the repository tests use stand-in packages with the same import shapes.
+
+Known limits:
+
+- A layout, template or server-rendered page cannot host these hooks; the build fails with KR8010.
+- Providers wrapped around children in a layout do not reach islands in pages; put the provider in the island module.
+- Store state is per page: it does not survive client-side navigation.
+- A page that is itself such an island cannot take route props (KR8010) or use Krate-only APIs in the same module.
+- Pages rendered per request (dynamic, ISR, SSR) were not verified with these islands.
+- Only Chromium was run for the browser check.
+
+Diagnostics: `KR8010`
+
+Evidence: `TestReactHookLibraryPageIsland`, `TestReactHookLibraryComponentIslands`, `TestReactHookLibraryPageForms`, `TestReactLibraryValueInPageMakesIsland`, `TestReactIslandModulesAreNotKrateSource`, `TestReactHookLibraryInLayoutDiagnostic`, `TestPreactCompatChunkHasDefaultExport`, `TestBrowserReactLibraryIslands`
+
+### CSS-in-JS (styled-components, emotion, MUI)
+
+**Source:** n/a - **Islands:** Partial - **SSR:** Partial
+
+Components built with styled-components, @emotion/styled, the emotion css prop (with the jsxImportSource pragma) or MUI run as Preact islands and are styled in the browser. They are client-only because the styles are created while rendering, so the server HTML holds an empty placeholder (KR8008 notice). A css prop without emotion's runtime is reported (KR8011). Checked by hand in Chromium against styled-components 6, @emotion/styled and @emotion/react 11 and MUI 9.
+
+Known limits:
+
+- No server-rendered markup or styles: content appears when the island mounts.
+- A project-wide jsxImportSource for emotion in tsconfig is not supported; use the per-file pragma.
+- A ThemeProvider around the whole app in a layout does not reach islands.
+
+Diagnostics: `KR8008`, `KR8011`
+
+Evidence: `TestReactCSSInJSIsland`, `TestBrowserReactLibraryIslands`
+
+### Island hydration control (client:visible, client:idle)
+
+**Source:** n/a - **Islands:** Beta - **SSR:** n/a
+
+client:visible and client:idle on an island's root tag defer mounting until the island is near the viewport or the browser is idle. The server markup stays; the chunk is neither preloaded nor fetched before then, and the directive never reaches the component. client:load is the default.
+
+Diagnostics: `KR8012`
+
+Evidence: `TestIslandClientDirectives`, `TestClientDirectiveOnNonIslandWarns`, `TestBrowserReactLibraryIslands`
 
 ### SSR island hydration
 

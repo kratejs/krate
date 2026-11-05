@@ -165,6 +165,24 @@ detailed changelog. This file records the release train at a glance.
   `aria-invalid`; `Card` titles are headings; `Slider` takes `id` and `disabled`.
   Focus rings use one colour and no longer rely on a 15% glow.
 - Fixed: docs search snippets showed `&quot;` and `&#39;`.
+- Libraries built on React hooks now work. A module that calls a hook of an npm
+  React package (zustand, react-hook-form, SWR, TanStack Query, a custom hook
+  wrapping one) is bundled for Preact and rendered as an island: server-rendered,
+  hydrated, and sharing one store per page. They used to build with no
+  diagnostic and throw in the browser. A layout or server page that needs one
+  fails with `KR8013`. See "Libraries built on React hooks" in the React
+  compatibility guide.
+- CSS-in-JS: styled-components, `@emotion/styled`, emotion's `css` prop (with
+  `/** @jsxImportSource @emotion/react */`) and MUI run as client-only islands.
+  A `css` prop without emotion's runtime warns (`KR8014`).
+- `client:visible` and `client:idle` on an island's root tag defer mounting (and
+  the chunk download) until the island is near the viewport or the browser is
+  idle. A directive on anything else warns (`KR8012`).
+- Fixed: islands from libraries written as `import React from "react"` (recharts,
+  Headless UI) failed in the browser because the shared `preact/compat` chunk
+  had no default export.
+- Islands now compile project modules with Preact's JSX runtime even when
+  `tsconfig.json` sets `jsxImportSource` to `@krate/runtime`.
 - Tier decorators: `@server`, `@static`, `@runtime` and `@client` can go directly
   on a function, class or const. On a file's default export or only exported
   component they classify the whole file, like a `// @server` comment; elsewhere
@@ -248,8 +266,8 @@ detailed changelog. This file records the release train at a glance.
   `__dirname`, `__filename`, `module.exports` beside imports, `node:os` and a
   small `Buffer` are provided. Plugin hooks see the same environment.
 - Build errors instead of silent output: importing `.scss`, `.sass`, `.less` or
-  `.styl` (`KR7120`, Krate has no compiler for them), and importing a name
-  `@krate/runtime` does not export (`KR7121`, it used to fail in the browser with
+  `.styl` (`KR7123`, Krate has no compiler for them), and importing a name
+  `@krate/runtime` does not export (`KR7124`, it used to fail in the browser with
   `x is not defined`).
 - Fixed: an asset imported through a tsconfig alias (`@/assets/logo.png`) was
   emitted but referenced as a bare identifier.

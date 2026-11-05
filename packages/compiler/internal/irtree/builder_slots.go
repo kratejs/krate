@@ -464,6 +464,10 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 				return []SlotNode{slot}
 			}
 		}
+		if _, directive := clientDirectiveOf(el); directive != "" {
+			b.warnCodeAt(el.Position, diag.CodeClientDirective, "`"+directive+"` only applies to a compiled package component rendered as an island; <"+name+"> is not one",
+				"remove the directive, or render the package component directly")
+		}
 	}
 
 	// Context provider: render children (a display:contents passthrough). When
@@ -4101,14 +4105,15 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		members = strings.Split(name[i+1:], ".")
 	}
 	imp, ok := b.externalImports[root]
-	if !ok || !isExternalPackageSpecifier(imp.Source) {
+	if !ok || !(imp.ReactIsland || isExternalPackageSpecifier(imp.Source)) {
 		return nil, false
 	}
 	// A component that resolved to Krate source (for example a path-aliased
 	// local module) is compiled normally. Only components whose implementation
 	// lives in node_modules become runtime islands; unresolved ones (no function)
-	// fall through to the bare-import island path.
-	if fn, known := b.functions[name]; known && fn != nil {
+	// fall through to the bare-import island path. A React island module is
+	// Krate source that is bundled for Preact on purpose.
+	if fn, known := b.functions[name]; known && fn != nil && !imp.ReactIsland {
 		src := b.ann.ComponentSources[fn.Name]
 		if !resolver.IsCompiledDependency(strings.ReplaceAll(src, "\\", "/")) {
 			return nil, false
@@ -4118,6 +4123,10 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		return nil, false
 	}
 	id := "island-" + strconv.Itoa(len(b.externals)+1)
+	// client:visible / client:idle / client:load choose when the island mounts.
+	// They are directives for Krate, never props of the component.
+	hydrate := ""
+	el, hydrate = splitClientDirective(el)
 	// Replace page-scope signal reads with island props and collect their value
 	// expressions for the page hydration boot.
 	usedSignals := map[string]bool{}
@@ -4211,10 +4220,57 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		ID: id, Source: imp.Source, Local: root, Members: members,
 		Namespace: imp.Namespace, Props: props, Subtree: subtree, PropsJS: propsJS,
 		SSRPropsJS: ssrPropsJS, SSRPropsKnown: ssrKnown,
+		ReactIsland: imp.ReactIsland, ClientOnly: imp.ClientOnly, Hydrate: hydrate,
 		File: b.ann.SourceFile, Line: el.Position.Line, Col: el.Position.Col,
 	})
 	html := `<div data-krate-island="` + id + `" style="display:contents"></div>`
 	return &StaticHTML{HTML: html}, true
+}
+
+// clientDirectiveOf returns the first `client:*` attribute of an element.
+func clientDirectiveOf(el *ast.JSXElement) (*ast.JSXAttr, string) {
+	if el == nil || el.Opening == nil {
+		return nil, ""
+	}
+	for _, attr := range el.Opening.Attributes {
+		if attr != nil && !attr.Spread && strings.HasPrefix(attr.Name, "client:") {
+			return attr, attr.Name
+		}
+	}
+	return nil, ""
+}
+
+// splitClientDirective removes the `client:*` directive from an island root and
+// returns the hydration strategy it names ("" for load, "visible" or "idle").
+// The element is copied, never modified: the same JSX may be built again.
+func splitClientDirective(el *ast.JSXElement) (*ast.JSXElement, string) {
+	if el == nil || el.Opening == nil {
+		return el, ""
+	}
+	strategy := ""
+	found := false
+	var kept []*ast.JSXAttr
+	for _, attr := range el.Opening.Attributes {
+		if attr != nil && !attr.Spread && strings.HasPrefix(attr.Name, "client:") {
+			found = true
+			switch attr.Name {
+			case "client:visible":
+				strategy = "visible"
+			case "client:idle":
+				strategy = "idle"
+			}
+			continue
+		}
+		kept = append(kept, attr)
+	}
+	if !found {
+		return el, ""
+	}
+	cp := *el
+	opening := *el.Opening
+	opening.Attributes = kept
+	cp.Opening = &opening
+	return &cp, strategy
 }
 
 // isExternalPackageSpecifier reports whether src is a bare npm package import
