@@ -85,6 +85,8 @@ interface BaseDocsLayoutProps {
   /** URL prefix the docs are mounted under (default "/docs"). */
   routeBase?: string;
   description?: string;
+  /** The page's leading <h1>, when the docs plugin passes it separately. */
+  titleHTML?: string;
   template?: "doc" | "hero";
   hero?: HeroData;
   tocHidden?: boolean;
@@ -395,6 +397,9 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
       <div class="docs-body">
         <main class="docs-main" id="main">
           <Breadcrumbs items={props.breadcrumbs} />
+          {props.titleHTML && (
+            <div class="docs-content docs-title" data-pagefind-body dangerouslySetInnerHTML={{ __html: props.titleHTML }} />
+          )}
           {description && <p class="docs-description">{description}</p>}
           {isHero && (
             <section class="docs-hero">

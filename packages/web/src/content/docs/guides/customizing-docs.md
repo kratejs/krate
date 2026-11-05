@@ -82,6 +82,13 @@ object (`pageTitle`, `siteTitle`, `sidebarItems`, `tocItems`, `breadcrumbs`,
 optional `options`). It renders `{children}` for the content and owns all
 surrounding chrome.
 
+A page's `# Heading` is part of `children`, so a layout cannot put the frontmatter
+`description` below the title by itself. A theme can opt in with
+`titleSlot: true` in the descriptor it returns from `defineDocsTheme`. The docs
+plugin then removes the leading `<h1>` from `children` and passes it as
+`titleHTML`; render it, then the description, then `{children}`. Themes without
+the flag keep the heading in `children`. Both built-in themes use it.
+
 ## Theming
 
 The default `@krate/base-docs-theme` package ships the stock shell - navbar,

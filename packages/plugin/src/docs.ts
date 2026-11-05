@@ -116,6 +116,12 @@ export interface DocsLayoutProps<Options = DocsThemeOptions> {
   routeBase?: string;
   /** Page description (from frontmatter) for subtitle/meta rendering. */
   description?: string;
+  /**
+   * The page's leading `<h1>` as rendered HTML. Passed (and removed from
+   * `children`) only to themes whose descriptor sets `titleSlot`, so the layout
+   * can render the title, then the description, then the content.
+   */
+  titleHTML?: string;
   /** Page layout template: "doc" (default) or "hero". */
   template?: "doc" | "hero";
   /** Hero block for `template: hero` pages. */
@@ -213,6 +219,13 @@ export interface DocsThemeDescriptor<Options = DocsThemeOptions> {
   layout?: string;
   /** Options forwarded to the layout component as `props.options`. */
   options?: Options;
+  /**
+   * Set when the layout renders `props.titleHTML` itself. The docs plugin then
+   * takes the page's leading `<h1>` out of the content and passes it as
+   * `titleHTML`, so the layout can show the description below the title.
+   * Themes without it keep the heading in the content.
+   */
+  titleSlot?: boolean;
 }
 
 /**

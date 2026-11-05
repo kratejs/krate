@@ -54,6 +54,7 @@ export function baseDocsTheme(options: BaseDocsThemeOptions = {}) {
     name: "@krate/base-docs-theme",
     module: new URL("./layout.tsx", import.meta.url).href,
     options,
+    titleSlot: true,
   });
 }
 

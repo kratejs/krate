@@ -800,6 +800,17 @@ a:hover {
     line-height: 1.55;
 }
 
+/* The description sits under the page title when the plugin passes the title
+   separately. */
+.docs-title h1 {
+    margin-bottom: 0.5rem;
+}
+
+.docs-title + .docs-description {
+    margin-bottom: 1.5rem;
+    font-size: 1.0625rem;
+}
+
 .docs-hero {
     margin: 0 0 2rem;
     padding: 1rem 0 2rem;

@@ -627,6 +627,12 @@ body:has(.simple-page) {
     text-wrap: pretty;
 }
 
+/* The description sits under the page title when the plugin passes the title
+   separately. */
+.simple-title h1 {
+    margin-bottom: 0.35em;
+}
+
 /* Hero */
 .simple-hero {
     margin-bottom: 1rem;
