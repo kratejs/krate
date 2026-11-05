@@ -23,6 +23,7 @@ import (
 type PkgJSON struct {
 	Main    string          `json:"main"`
 	Module  string          `json:"module"`
+	Browser json.RawMessage `json:"browser"`
 	Exports json.RawMessage `json:"exports"`
 	Imports json.RawMessage `json:"imports"`
 	Krate   json.RawMessage `json:"krate"`
@@ -212,21 +213,52 @@ func resolvePackage(pkgDir, sub string, conds Conditions) string {
 		}
 	}
 
+	// Without `exports`, a client build prefers the `browser` field: a string
+	// replaces the entry, an object replaces individual files.
+	browser := conds.has("browser") && len(pkg.Browser) > 0
+	var browserMap map[string]json.RawMessage
+	browserEntry := ""
+	if browser {
+		if err := json.Unmarshal(pkg.Browser, &browserEntry); err != nil {
+			browserEntry = ""
+			_ = json.Unmarshal(pkg.Browser, &browserMap)
+		}
+	}
+	mapped := func(file string) string {
+		if len(browserMap) == 0 {
+			return file
+		}
+		rel, err := filepath.Rel(pkgDir, file)
+		if err != nil {
+			return file
+		}
+		rel = "./" + filepath.ToSlash(rel)
+		for _, key := range []string{rel, strings.TrimSuffix(rel, filepath.Ext(rel))} {
+			var to string
+			if raw, ok := browserMap[key]; ok && json.Unmarshal(raw, &to) == nil && to != "" {
+				if repl := resolveFile(filepath.Join(pkgDir, to)); repl != "" {
+					return repl
+				}
+			}
+		}
+		return file
+	}
+
 	if sub != "" {
 		candidate := filepath.Join(pkgDir, filepath.FromSlash(sub))
 		if file := resolveFile(candidate); file != "" {
-			return file
+			return mapped(file)
 		}
 		return ""
 	}
 
 	// Entry fields.
-	for _, field := range []string{pkg.Module, pkg.Main} {
+	for _, field := range []string{browserEntry, pkg.Module, pkg.Main} {
 		if field == "" {
 			continue
 		}
 		if file := resolveFile(filepath.Join(pkgDir, field)); file != "" {
-			return file
+			return mapped(file)
 		}
 	}
 	return resolveFile(pkgDir)
