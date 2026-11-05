@@ -404,6 +404,12 @@ Krate compiles CSS (including CSS modules and Tailwind) but has no Sass, Less or
 
 A named import from `@krate/runtime` (or one of its subpaths) asks for something the package does not export. The import is removed from the page, so the name would be undefined in the browser and fail with a ReferenceError. Check the spelling against the runtime API reference; names from other frameworks (`signal`, `usePathname`) have Krate equivalents such as `createSignal` and `getNavigationState`. This is an error.
 
+### KR7125
+
+**tsconfig baseUrl and paths disagree**
+
+`compilerOptions.paths` targets resolve against `baseUrl`, in tsc and in Krate. A `baseUrl` of `./src` together with `"@/*": ["./src/*"]` points at `src/src`, so every `@/` import fails with "cannot resolve import ... (matched tsconfig path alias)". Krate 0.4 ignored `baseUrl` for aliases, so a project scaffolded then still has it. `krate fix --apply` sets `baseUrl` to `"."` when every target repeats the baseUrl directory, exists under the project root and does not exist under `baseUrl`. Otherwise edit `tsconfig.json` by hand. This is not a build diagnostic: it is reported by `krate fix`.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

@@ -7,6 +7,9 @@ const (
 	// CodeRuntimeExportMissing: a name is imported from @krate/runtime that
 	// the package does not export.
 	CodeRuntimeExportMissing Code = "KR7124"
+	// CodeTSConfigBaseURL: tsconfig baseUrl names a subdirectory that the
+	// paths targets repeat.
+	CodeTSConfigBaseURL Code = "KR7125"
 )
 
 func init() {
@@ -28,6 +31,17 @@ func init() {
 				"undefined in the browser and fail with a ReferenceError. Check the spelling against the " +
 				"runtime API reference; names from other frameworks (`signal`, `usePathname`) have Krate " +
 				"equivalents such as `createSignal` and `getNavigationState`. This is an error.",
+		},
+		CodeInfo{
+			Code:  CodeTSConfigBaseURL,
+			Title: "tsconfig baseUrl and paths disagree",
+			Explanation: "`compilerOptions.paths` targets resolve against `baseUrl`, in tsc and in Krate. A " +
+				"`baseUrl` of `./src` together with `\"@/*\": [\"./src/*\"]` points at `src/src`, so every " +
+				"`@/` import fails with \"cannot resolve import ... (matched tsconfig path alias)\". " +
+				"Krate 0.4 ignored `baseUrl` for aliases, so a project scaffolded then still has it. " +
+				"`krate fix --apply` sets `baseUrl` to `\".\"` when every target repeats the baseUrl " +
+				"directory, exists under the project root and does not exist under `baseUrl`. Otherwise " +
+				"edit `tsconfig.json` by hand. This is not a build diagnostic: it is reported by `krate fix`.",
 		},
 	)
 }
