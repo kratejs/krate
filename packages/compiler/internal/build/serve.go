@@ -1991,7 +1991,10 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 		var renderGo func([]goRenderRegion) (map[string]string, error)
 		if goAPI != nil && goAPI.Active() {
-			renderGo = goAPI.Render
+			requestCtx := r.Context()
+			renderGo = func(regions []goRenderRegion) (map[string]string, error) {
+				return goAPI.RenderContext(requestCtx, regions)
+			}
 		}
 		// 0 when no Node renderer runs: streamRegionPage only dials the sidecar
 		// if the page has a region it must render.
