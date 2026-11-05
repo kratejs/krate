@@ -2021,12 +2021,12 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	if len(reactIslands) > 0 {
 		reactIslandImps = reactIslandImports(bundle.Modules, reactIslands, bnd.Resolve)
 		if im, ok := reactIslands[entryModule.Path]; ok {
-			rewritten, ok := reactIslandPage(entryModule, im.Pos)
-			if !ok {
+			rewritten, why := reactIslandPage(entryModule, im.Pos)
+			if why != "" {
 				return nil, "", diag.Diagnostic{
 					File: entryModule.Path, Line: im.Pos.Line, Col: im.Pos.Col,
-					Message: "`" + im.Name + "` from \"" + im.Pkg + "\" needs React's render model, but this page's default export is not a function component Krate can run as an island",
-					Hint:    "declare the page as `export default function Page() { ... }`",
+					Message: "`" + im.Name + "` from \"" + im.Pkg + "\" needs React's render model, so this page would run as a Preact island, but it cannot",
+					Hint:    why,
 				}.WithCode(diag.CodeReactLibNotInIsland)
 			}
 			for i, m := range bundle.Modules {
@@ -2051,6 +2051,12 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	// Files the CSS was built from (@import targets, url() assets, composes
 	// sources) are not modules but must invalidate the page when edited.
 	deps = append(deps, bundle.CSSDeps...)
+	// The modules an island bundles for Preact are not Krate source from here
+	// on: the lowering, module-state and vendor passes would try to compile
+	// their hooks and initializers. Their files stay in deps above.
+	if len(reactIslands) > 0 {
+		bundle.Modules = krateSideModules(bundle.Modules, entryModule, reactIslands, bnd.Resolve)
+	}
 
 	// Run AfterParse hooks
 	parseCtx := &plugin.ParseHookCtx{

@@ -276,7 +276,13 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 		ssrSrc := b.islandSSRSource(e, used)
 		html, err := b.buildIslandSSR(ssrSrc, resolveDir, sink)
 		if err != nil {
-			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" stays client-only: server render failed: "+err.Error(), "fix the browser-only dependency or keep the island client-only intentionally")
+			hint := "fix the browser-only dependency or keep the island client-only intentionally"
+			if strings.Contains(strings.ToLower(err.Error()), "provider") {
+				// A provider in a layout is a Krate component; islands are
+				// separate Preact trees and do not see it.
+				hint = "a missing provider must be rendered inside the island (in the module that uses the hook), not in a layout; " + hint
+			}
+			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" stays client-only: server render failed: "+err.Error(), hint)
 			continue
 		}
 		ssrHTML[e.ID] = html

@@ -365,3 +365,111 @@ func TestClientDirectiveOnNonIslandWarns(t *testing.T) {
 		t.Fatalf("the directive leaked into the HTML:\n%s", html)
 	}
 }
+
+// TestReactHookLibraryPageForms: the island page works for an arrow function
+// default export, and a page that takes route props is refused with a reason
+// instead of rendering an island that reads undefined params.
+func TestReactHookLibraryPageForms(t *testing.T) {
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	reactLibFixture(t, root)
+	writeProjectFile(t, root, "src/pages/index.tsx", `
+		import { create } from 'fake-store';
+		const useCount = create(() => ({ n: 7 }));
+		const Page = () => <b id="n">{useCount((s) => s.n)}</b>;
+		export default Page;
+	`)
+	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	if html := readBuilt(t, filepath.Join(cfg.OutDir, "index.html")); !strings.Contains(html, `id="n">7`) {
+		t.Fatalf("arrow page was not rendered as an island:\n%s", html)
+	}
+
+	writeProjectFile(t, root, "src/pages/index.tsx", `
+		import { create } from 'fake-store';
+		const useCount = create(() => ({ n: 7 }));
+		export default function Page({ params }) { return <b>{useCount((s) => s.n)}{params.id}</b>; }
+	`)
+	_, err = captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err == nil || !strings.Contains(err.Error(), "[KR8010]") || !strings.Contains(err.Error(), "params") {
+		t.Fatalf("expected KR8010 about route props, got: %v", err)
+	}
+}
+
+// TestReactIslandModulesAreNotKrateSource: the store and library an island
+// imports are bundled by the island build only. Krate must not try to compile
+// their initializers into the page script (a library function that declares a
+// class inside a function, as immer does, failed the whole page build).
+func TestReactIslandModulesAreNotKrateSource(t *testing.T) {
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	reactLibFixture(t, root)
+	dir := filepath.Join(root, "node_modules", "fake-redux")
+	writeProjectFile(t, root, "node_modules/fake-redux/package.json", `{"name":"fake-redux","version":"1.0.0","main":"index.js","peerDependencies":{"react":"*"}}`)
+	_ = dir
+	writeProjectFile(t, root, "node_modules/fake-redux/index.js", `
+		import React from 'react';
+		export function createStore(initial) {
+			function enableDrafts() { class Draft { constructor(v) { this.v = v; } } return new Draft(initial); }
+			return enableDrafts();
+		}
+		export function useSelector(store, pick) {
+			return React.useMemo(function () { return pick(store.v); }, [store, pick]);
+		}
+	`)
+	writeProjectFile(t, root, "src/store.ts", `
+		import { createStore } from 'fake-redux';
+		export const store = createStore({ n: 5 });
+	`)
+	writeProjectFile(t, root, "src/pages/index.tsx", `
+		import { useSelector } from 'fake-redux';
+		import { store } from '../store';
+		export default function Page() { return <b id="n">{useSelector(store, (s) => s.n)}</b>; }
+	`)
+	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	if html := readBuilt(t, filepath.Join(cfg.OutDir, "index.html")); !strings.Contains(html, `id="n">5`) {
+		t.Fatalf("island was not rendered:\n%s", html)
+	}
+}
+
+// TestReactLibraryValueInPageMakesIsland: `const client = new Client()` handed
+// to a provider tag in the page (the standard TanStack Query setup) cannot
+// cross into a separate island as a free variable, so the page module itself
+// runs as the island and the child component is bundled with it.
+func TestReactLibraryValueInPageMakesIsland(t *testing.T) {
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	reactLibFixture(t, root)
+	writeProjectFile(t, root, "node_modules/fake-store/index.js", `
+		import React from 'react';
+		const Ctx = React.createContext(null);
+		export class Client { constructor() { this.n = 3; } }
+		export function Provider(props) { return React.createElement(Ctx.Provider, { value: props.client }, props.children); }
+		export function useClient() { return React.useContext(Ctx); }
+	`)
+	writeProjectFile(t, root, "src/components/Todos.tsx", `
+		import { useClient } from 'fake-store';
+		export default function Todos() { return <p id="todos">n={useClient().n}</p>; }
+	`)
+	writeProjectFile(t, root, "src/pages/index.tsx", `
+		import { Client, Provider } from 'fake-store';
+		import Todos from '../components/Todos';
+		const client = new Client();
+		export default function App() { return <Provider client={client}><Todos /></Provider>; }
+	`)
+	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "KR8008") || strings.Contains(out, "KR8007") {
+		t.Fatalf("unexpected island warnings:\n%s", out)
+	}
+	if html := readBuilt(t, filepath.Join(cfg.OutDir, "index.html")); !strings.Contains(html, "n=3") {
+		t.Fatalf("provider and child were not rendered together:\n%s", html)
+	}
+}

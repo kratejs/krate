@@ -101,6 +101,10 @@ func TestBrowserReactLibraryIslands(t *testing.T) {
 			return <div><div style={{ height: 2400 }}>spacer</div><Badge client:visible label="deferred" /></div>;
 		}
 	`)
+	writeProjectFile(t, root, "src/pages/idle.tsx", `
+		import { Badge } from 'fake-lib';
+		export default function Page() { return <Badge client:idle label="idle" />; }
+	`)
 	writeProjectFile(t, root, "src/pages/styled.tsx", `
 		import styled from 'styled-components';
 		const Box = styled.div`+"`color: rgb(255, 0, 0);`"+`;

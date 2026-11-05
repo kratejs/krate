@@ -127,6 +127,8 @@ func factoryRoot(e ast.Expr) string {
 		switch x := e.(type) {
 		case *ast.CallExpr:
 			e = x.Callee
+		case *ast.NewExpr:
+			e = x.Callee
 		case *ast.Identifier:
 			return x.Name
 		case *ast.MemberExpr:
@@ -163,6 +165,7 @@ type reactHookInfo struct {
 	nsLibs    map[string]string
 	hooks     map[string]string // local hook name -> package
 	factories map[string]string // component name -> package that built it
+	instances map[string]string // value name -> package that built it
 	libPkgs   map[string]bool   // every React-bound package the module imports
 	pragma    string            // package named by @jsxImportSource
 }
@@ -215,7 +218,7 @@ func detectReactIslandModules(mods []*bundler.Module, resolve func(importer, spe
 			continue
 		}
 		libs, nsLibs := reactLibBindings(m, resolve)
-		in := &reactHookInfo{m: m, nsLibs: nsLibs, hooks: map[string]string{}, factories: map[string]string{}, libPkgs: map[string]bool{}}
+		in := &reactHookInfo{m: m, nsLibs: nsLibs, hooks: map[string]string{}, factories: map[string]string{}, instances: map[string]string{}, libPkgs: map[string]bool{}}
 		for _, pkg := range libs {
 			in.libPkgs[pkg] = true
 		}
@@ -252,6 +255,10 @@ func detectReactIslandModules(mods []*bundler.Module, resolve func(importer, spe
 				// A component built by a library factory: styled.div`...`,
 				// styled(Base)(...), motion(Button), connect(...)(View).
 				in.factories[d.Name] = pkg
+			} else if d.Name != "" {
+				// A value built by a library (new QueryClient(), createTheme()),
+				// which only means something to that library's components.
+				in.instances[d.Name] = pkg
 			}
 		}
 		// A file-level pragma switches the JSX runtime to a React library's
@@ -267,6 +274,9 @@ func detectReactIslandModules(mods []*bundler.Module, resolve func(importer, spe
 
 	scan := func(in *reactHookInfo) bool {
 		if _, done := out[in.m.Path]; done {
+			return false
+		}
+		if len(in.hooks) == 0 && len(in.nsLibs) == 0 && len(in.factories) == 0 && len(in.instances) == 0 && in.pragma == "" {
 			return false
 		}
 		var hit *reactIslandModule
@@ -291,6 +301,20 @@ func detectReactIslandModules(mods []*bundler.Module, resolve func(importer, spe
 		irtree.WalkAST(in.m.Program.Body, func(n any) bool {
 			if hit != nil {
 				return false
+			}
+			// A library-built value handed to a JSX attribute (client={qc},
+			// theme={theme}) cannot reach a component rendered in an island
+			// from outside it.
+			if attr, ok := n.(*ast.JSXAttr); ok && len(in.instances) > 0 && attr.Value != nil {
+				irtree.WalkAST(attr.Value, func(v any) bool {
+					if id, ok := v.(*ast.Identifier); ok && hit == nil {
+						if pkg, ok := in.instances[id.Name]; ok {
+							hit = &reactIslandModule{Path: in.m.Path, Pkg: pkg, Name: id.Name, Pos: attr.Position}
+						}
+					}
+					return hit == nil
+				})
+				return hit == nil
 			}
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -449,17 +473,19 @@ func reactIslandImports(mods []*bundler.Module, islands map[string]*reactIslandM
 // component renders one island rooted at the page module itself. The original
 // module is bundled for Preact from disk, so the program is only used here for
 // the rest of the route (metadata, params, layouts). The input is not modified.
-func reactIslandPage(mod *bundler.Module, pos ast.Pos) (*bundler.Module, bool) {
+func reactIslandPage(mod *bundler.Module, pos ast.Pos) (*bundler.Module, string) {
 	prog := mod.Program
 	name := annotator.FindDefaultExport(prog.Body)
 	if name == "" {
-		return nil, false
+		return nil, "declare the page as `export default function Page() { ... }`"
 	}
+	props := false
 	body := []ast.Stmt{&ast.ReturnStmt{Value: &ast.JSXElement{
 		Position: pos,
 		Opening:  &ast.JSXOpening{Name: reactIslandPageLocal, SelfClosing: true},
 	}}}
 	stub := func(fn *ast.FnDecl) *ast.FnDecl {
+		props = props || len(fn.Params) > 0
 		c := *fn
 		c.Params = nil
 		c.Body = body
@@ -488,6 +514,7 @@ func reactIslandPage(mod *bundler.Module, pos ast.Pos) (*bundler.Module, bool) {
 			copy(decls, s.Decls)
 			for j, d := range decls {
 				if arrow, ok := d.Init.(*ast.ArrowFn); ok && d.Name == name {
+					props = props || len(arrow.Params) > 0
 					a := *arrow
 					a.Params, a.Body, a.Expression, a.Async = nil, body, false, false
 					dc := *d
@@ -504,13 +531,27 @@ func reactIslandPage(mod *bundler.Module, pos ast.Pos) (*bundler.Module, bool) {
 		}
 	}
 	if !rewritten {
-		return nil, false
+		return nil, "declare the page as `export default function Page() { ... }`"
+	}
+	if props {
+		return nil, "the page component takes props (params, searchParams), which an island cannot receive; move the component that uses the hook into its own module and render it from a page without props"
 	}
 	np := *prog
-	np.Body = newBody
+	np.Body = pruneIslandPageBody(newBody, name)
 	nm := *mod
 	nm.Program = &np
-	return &nm, true
+	nm.Imports = nil
+	for _, st := range np.Body {
+		switch v := st.(type) {
+		case *ast.ImportStmt:
+			nm.Imports = append(nm.Imports, strings.Trim(v.Source, "\"'"))
+		case *ast.ExportStmt:
+			if v.ReexportSource != "" {
+				nm.Imports = append(nm.Imports, strings.Trim(v.ReexportSource, "\"'"))
+			}
+		}
+	}
+	return &nm, ""
 }
 
 // reactIslandDiag is the build error for a module that needs React's render
@@ -540,6 +581,9 @@ func firstReactIsland(islands map[string]*reactIslandModule) *reactIslandModule 
 // not run as a React island: emotion's css prop is only understood by emotion's
 // JSX runtime, so Krate would render it as a plain attribute and drop the styles.
 func cssPropWarnings(m *bundler.Module) []diag.Diagnostic {
+	if !strings.Contains(m.SourceCode, "css=") {
+		return nil
+	}
 	var out []diag.Diagnostic
 	irtree.WalkAST(m.Program.Body, func(n any) bool {
 		el, ok := n.(*ast.JSXElement)
@@ -562,5 +606,133 @@ func cssPropWarnings(m *bundler.Module) []diag.Diagnostic {
 		}
 		return true
 	})
+	return out
+}
+
+// pruneIslandPageBody drops what the Krate side of an island page does not need
+// (helper components, module-level values, side-effect statements): the module
+// runs in full inside the island, and the Krate pipeline would otherwise try to
+// compile its hooks and initializers for the page script. Imports, exports
+// (metadata, generateStaticParams) and whatever the exports reference stay.
+func pruneIslandPageBody(body []ast.Stmt, defaultName string) []ast.Stmt {
+	declares := func(st ast.Stmt) []string {
+		switch d := st.(type) {
+		case *ast.FnDecl:
+			return []string{d.Name}
+		case *ast.ClassDecl:
+			return []string{d.Name}
+		case *ast.VarStmt:
+			var names []string
+			for _, decl := range d.Decls {
+				names = append(names, decl.Name)
+				names = append(names, decl.Names...)
+			}
+			return names
+		}
+		return nil
+	}
+	needed := map[string]bool{defaultName: true}
+	refs := func(st ast.Stmt) {
+		irtree.WalkAST(st, func(n any) bool {
+			if id, ok := n.(*ast.Identifier); ok {
+				needed[id.Name] = true
+			}
+			return true
+		})
+	}
+	for _, st := range body {
+		if exp, ok := st.(*ast.ExportStmt); ok && !exp.Default {
+			refs(st)
+			if exp.Local != "" {
+				needed[exp.Local] = true
+			}
+			for _, n := range exp.Named {
+				needed[n.Local] = true
+			}
+		}
+	}
+	keep := make([]bool, len(body))
+	for changed := true; changed; {
+		changed = false
+		for i, st := range body {
+			if keep[i] {
+				continue
+			}
+			for _, n := range declares(st) {
+				if n != "" && needed[n] {
+					keep[i] = true
+					refs(st)
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	out := make([]ast.Stmt, 0, len(body))
+	for i, st := range body {
+		switch v := st.(type) {
+		case *ast.ExportStmt:
+			out = append(out, st)
+		case *ast.ImportStmt:
+			// Side-effect imports (stylesheets) stay; a binding nothing kept
+			// reads has no use on this side.
+			bound := v.Default != "" || v.Namespace != "" || len(v.Named) > 0
+			used := !bound || needed[v.Default] || needed[v.Namespace]
+			for _, n := range v.Named {
+				local := n.Local
+				if local == "" {
+					local = n.Remote
+				}
+				used = used || needed[local]
+			}
+			if used {
+				out = append(out, st)
+			}
+		default:
+			if keep[i] {
+				out = append(out, st)
+			}
+		}
+	}
+	return out
+}
+
+// krateSideModules keeps the modules the Krate pipeline still compiles: those
+// reachable from the entry without going through an island module. A module
+// that only an island imports (its store, its hooks, the library) is bundled by
+// the island build alone.
+func krateSideModules(mods []*bundler.Module, entry *bundler.Module, islands map[string]*reactIslandModule, resolve func(importer, spec string) string) []*bundler.Module {
+	byPath := make(map[string]*bundler.Module, len(mods))
+	for _, m := range mods {
+		if m != nil {
+			byPath[m.Path] = m
+		}
+	}
+	keep := map[string]bool{entry.Path: true}
+	queue := []*bundler.Module{entry}
+	for len(queue) > 0 {
+		m := queue[0]
+		queue = queue[1:]
+		// The entry of an island page is the Krate shell of the page; its own
+		// imports were pruned with the rest of its body.
+		for _, spec := range m.Imports {
+			path := resolve(m.Path, spec)
+			next := byPath[path]
+			if next == nil || keep[path] {
+				continue
+			}
+			if _, isIsland := islands[path]; isIsland {
+				continue
+			}
+			keep[path] = true
+			queue = append(queue, next)
+		}
+	}
+	out := make([]*bundler.Module, 0, len(mods))
+	for _, m := range mods {
+		if m != nil && keep[m.Path] {
+			out = append(out, m)
+		}
+	}
 	return out
 }

@@ -69,6 +69,10 @@ try {
   check("client:visible mounts after scrolling", (await page.locator("[data-krate-island-hydrated]").count()) === 1);
   check("the island chunk loads on demand", islandRequests.length === 1, String(islandRequests.length));
 
+  await page.goto(base + "/idle/", { waitUntil: "load" });
+  await hydrated(5000).catch(() => {});
+  check("client:idle mounts once the browser is idle", (await page.locator("[data-krate-island-hydrated]").count()) === 1);
+
   await page.goto(base + "/styled/", { waitUntil: "load" });
   await hydrated();
   check("CSS-in-JS island has no server markup", (await page.evaluate(() => document.documentElement.outerHTML)).includes("fs-div"));
