@@ -22,6 +22,7 @@ window.__krate_props={};
 window.$esc=function(v){var d=document.createElement('div');d.textContent=v;return d.innerHTML};
 window.__krateLog=function(e){try{window.__krateErrs.push(String((e&&e.stack)||(e&&e.message)||e));}catch(_){}try{console.error(e);}catch(_){}};
 window.__safe=function(fn,n){try{return fn();}catch(e){if(window.__krateOnError&&window.__krateOnError(e,n))return null;__krateLog(e);return null;}};
+window.__krateScopeErr=function(e){if(e&&e.thenable&&typeof e.thenable.then==='function')throw e;if(window.__krateOnError&&window.__krateOnError(e))return;__krateLog(e);};
 window.__krateFx=function(n,f){return function(){try{return f();}catch(e){if(n&&n.isConnected===false){__krateLog(e);return;}throw e;}};};
 (function(){
 var __root=document.getElementById('root')||document.body;
@@ -155,6 +156,9 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 				b.WriteString(");\n")
 			}
 		}
+		// One failing component must not stop the scopes after it, or the
+		// router. Suspense signals pass through to the boundary run.
+		b.WriteString("try{\n")
 
 		// The component's own props object declaration must precede signal
 		// initializers: signal RawInits like `createSignal(props.x || "")`
@@ -411,6 +415,7 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 			b.WriteString(");\n")
 		}
 
+		b.WriteString("}catch(e){__krateScopeErr(e);}\n")
 		if owned || remountable {
 			b.WriteString("});\n")
 		} else {

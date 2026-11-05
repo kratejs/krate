@@ -1198,6 +1198,11 @@ func collectSlotBindings(children []irtree.SlotNode) []irtree.SlotBinding {
 			// against.
 			bindings = append(bindings, collectSlotBindings(s.Consequent)...)
 			bindings = append(bindings, collectSlotBindings(s.Alternate)...)
+		case *irtree.SuspenseSlot:
+			// Content and fallback are ordinary slots; only a boundary that
+			// can suspend moves them into templates, which the bootstrap binds.
+			bindings = append(bindings, collectSlotBindings(s.Resolved)...)
+			bindings = append(bindings, collectSlotBindings(s.Fallback)...)
 		case *irtree.ListSlot:
 			bindings = append(bindings, irtree.SlotBinding{
 				SlotID:  s.ID,
