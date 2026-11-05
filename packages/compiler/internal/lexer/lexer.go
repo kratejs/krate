@@ -1107,7 +1107,13 @@ func (l *Lexer) looksLikeTypeParams() bool {
 			return true
 		}
 		r, _ := utf8.DecodeRuneInString(src[after:])
-		return !isIDContinue(r)
+		if isIDContinue(r) {
+			return false
+		}
+		// `<div extends="a" />` and `<T extends />` use "extends" as an
+		// attribute name; a type parameter's constraint is a type.
+		j := skipSpaces(src, after)
+		return j >= len(src) || (src[j] != '=' && src[j] != '/' && src[j] != '>')
 	}
 	return false
 }
