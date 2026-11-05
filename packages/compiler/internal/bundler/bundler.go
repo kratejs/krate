@@ -667,8 +667,14 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 	p.Filename = path
 	prog := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
-		// The parser saw generated code, so its line:col do not match the
-		// markdown file. Say so, and point at the usual cause.
+		// The parser saw generated code. Positions that fall on a tag or
+		// expression of the document are mapped back to the .mdx source.
+		if mapped, exact := mapMDXDiagnostics(path, src, tsxSource, compiled.Uses, errs); mapped != "" {
+			if exact {
+				return fmt.Errorf("the compiled markdown is not valid JSX (check that every JSX tag is closed and nested properly, and put a blank line between a JSX tag and a block it wraps):\n%s", mapped)
+			}
+			return fmt.Errorf("the compiled markdown is not valid JSX (positions are near the tag or expression named, not exact; check that every JSX tag is closed and nested properly, and put a blank line between a JSX tag and a block it wraps):\n%s", mapped)
+		}
 		return fmt.Errorf("%s: the compiled markdown is not valid JSX (line:col below refer to the generated code, not this file; check that every JSX tag is closed and nested properly, and put a blank line between a JSX tag and a block it wraps): %s", path, parser.FormatDiagnostics(errs))
 	}
 	RewriteReact(prog)
