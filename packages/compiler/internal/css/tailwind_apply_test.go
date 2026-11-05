@@ -125,3 +125,18 @@ func TestExpandApplyUnknownClass(t *testing.T) {
 		t.Fatalf("expected unknown class unresolved, got %v", unresolved)
 	}
 }
+
+// The nested rules @apply writes survive the CSS minifier.
+func TestApplyNestedRulesSurviveMinify(t *testing.T) {
+	out, _ := ExpandApply(".btn { @apply hover:underline md:flex space-x-2; color: red; }", NewTailwindGenerator().Theme)
+	min := Minify(out)
+	// A rule that holds nested rules is kept as written; it must stay intact.
+	if strings.Count(min, "{") != strings.Count(min, "}") {
+		t.Errorf("unbalanced after minify:\n%s", min)
+	}
+	for _, want := range []string{"color: red;", "&:hover{text-decoration-line:underline}", "&{display:flex}", ":where(& > :not(:last-child)){"} {
+		if !strings.Contains(min, want) {
+			t.Errorf("minified output lost %q:\n%s", want, min)
+		}
+	}
+}
