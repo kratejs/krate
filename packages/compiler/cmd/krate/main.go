@@ -500,7 +500,7 @@ func runBuild(flags cliFlags, args []string) {
 		writeHeapProfile(flags.MemProfile)
 	}
 	if buildErr != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, buildErr)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(buildErr))
 		os.Exit(1)
 	}
 
@@ -613,7 +613,7 @@ func runDevOnce(flags cliFlags, args []string, first bool) bool {
 		// A failed initial build must not kill the dev server: keep serving and
 		// publish the diagnostics so the browser overlay shows them (and the
 		// watcher can recover on the next save).
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 		hub.Publish(build.DevEvent{Type: "reload", Diagnostics: build.DiagnosticsFromError(err)})
 	}
 
@@ -667,7 +667,7 @@ func runServe(flags cliFlags, args []string) {
 		builder.Verbose = flags.Verbose
 		builder.Env = env
 		if err := builder.BuildAll(); err != nil {
-			fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+			fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 			os.Exit(1)
 		}
 		fmt.Printf("%s%s  Build complete. Starting server...%s\n", cBold, cGreen, cReset)
@@ -708,7 +708,7 @@ func runDeploy(flags cliFlags, args []string) {
 	builder.Verbose = flags.Verbose
 	builder.Env = env
 	if err := builder.BuildAll(); err != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 		os.Exit(1)
 	}
 
@@ -801,7 +801,7 @@ func runInspect(flags cliFlags, args []string) {
 	var buildErr error
 	withSuppressedStdout(func() { buildErr = builder.BuildAll() })
 	if buildErr != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, buildErr)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(buildErr))
 		os.Exit(1)
 	}
 	graph, err := builder.SiteGraph()
@@ -947,7 +947,7 @@ func runCheck(flags cliFlags, args []string) {
 	// suppress the in-build gates to avoid duplicate reporting.
 	builder.SkipQualityChecks = true
 	if err := builder.BuildAll(); err != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 		os.Exit(1)
 	}
 

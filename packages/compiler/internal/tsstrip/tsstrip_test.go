@@ -194,8 +194,13 @@ func TestStripSyntaxErrorDiagnostic(t *testing.T) {
 	if d.File != "bad.ts" || d.Line != 3 || d.Col != 10 {
 		t.Errorf("diagnostic at %s:%d:%d, want bad.ts:3:10 (%s)", d.File, d.Line, d.Col, d.Message)
 	}
-	if d.Source != "const x: = 5;" || d.Hint == "" {
-		t.Errorf("source/hint = %q / %q", d.Source, d.Hint)
+	if d.Source != "const x: = 5;" {
+		t.Errorf("source = %q", d.Source)
+	}
+	// esbuild gave no note, so there is no hint: a generic one on every
+	// syntax error was noise.
+	if d.Hint != "" || strings.Contains(err.Error(), "hint:") {
+		t.Errorf("unexpected hint %q in %s", d.Hint, err)
 	}
 	if !strings.Contains(err.Error(), "bad.ts:3:10") {
 		t.Errorf("formatted error lacks location: %s", err)
@@ -407,5 +412,25 @@ func TestApplies(t *testing.T) {
 		if Applies(p) != want {
 			t.Errorf("Applies(%s) = %v", p, !want)
 		}
+	}
+}
+
+func TestStripNoteLocationIsPartOfHint(t *testing.T) {
+	src := "// header\nexport default function P() { return <div><p>hi</div>; }\n"
+	_, err := Strip("bad.tsx", src, Options{})
+	if err == nil {
+		t.Fatal("expected a syntax error")
+	}
+	var e *Error
+	if !errors.As(err, &e) || len(e.Diags) == 0 {
+		t.Fatalf("not a tsstrip.Error: %T %v", err, err)
+	}
+	d := e.Diags[0]
+	if !strings.Contains(d.Message, "does not match opening") {
+		t.Fatalf("message = %q", d.Message)
+	}
+	// esbuild points at the tag name: line 2, column 44 (1-based).
+	if d.Hint != `The opening "p" tag is here (2:44)` {
+		t.Errorf("hint = %q", d.Hint)
 	}
 }

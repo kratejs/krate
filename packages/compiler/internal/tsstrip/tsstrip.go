@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -249,18 +250,34 @@ func internalErr(path string, err error) *Error {
 // messageDiag converts an esbuild error to a diagnostic at the original
 // file:line:col (1-based rune column).
 func messageDiag(path string, m api.Message, orig, full *textIndex, bom bool) diag.Diagnostic {
-	hint := "Krate strips TypeScript with esbuild before compiling; fix the TypeScript/JSX syntax at this location"
+	// esbuild's own notes are the useful hint. When a note points elsewhere
+	// ("The opening "p" tag is here:") the position is part of the hint, since
+	// the diagnostic only carries the primary location.
+	hint := ""
 	for _, n := range m.Notes {
-		if n.Text != "" {
-			hint = n.Text
-			break
+		if n.Text == "" {
+			continue
 		}
+		hint = n.Text
+		if n.Location != nil {
+			line, col := locate(n.Location, orig, full, bom)
+			hint = strings.TrimSuffix(hint, ":") + " (" + strconv.Itoa(line) + ":" + strconv.Itoa(col) + ")"
+		}
+		break
 	}
 	d := diag.New(path, 0, 0, m.Text, hint, "")
 	if m.Location == nil {
 		return d
 	}
-	loc := m.Location
+	line, col := locate(m.Location, orig, full, bom)
+	d.Line, d.Col = line, col
+	d.Source = full.line(line)
+	return d
+}
+
+// locate maps an esbuild location in the stripped body to Krate's
+// 1-based line and column in the original file.
+func locate(loc *api.Location, orig, full *textIndex, bom bool) (line, col int) {
 	// esbuild reports a 1-based line and a 0-based byte column.
 	off := 0
 	if ln := loc.Line - 1; ln >= 0 && ln < len(orig.es) {
@@ -274,10 +291,7 @@ func messageDiag(path string, m api.Message, orig, full *textIndex, bom bool) di
 	if bom {
 		off += len(utf8BOM)
 	}
-	line, col := full.kratePos(off)
-	d.Line, d.Col = line, col
-	d.Source = full.line(line)
-	return d
+	return full.kratePos(off)
 }
 
 // line returns the text of 1-based line n without its terminator.
