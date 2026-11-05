@@ -44,6 +44,11 @@ Notes:
   relative to `baseUrl` exactly as `tsc` does, so with `baseUrl: "."` write
   `"@/*": ["./src/*"]`; an import that does not resolve fails the build at the
   import statement. A tsconfig that cannot be parsed is reported as a warning.
+  With `baseUrl` set, a bare import that no `paths` entry and no installed
+  package satisfies is tried as a path under it (`import Btn from
+  "components/Btn"` with `baseUrl: "src"`); an installed package always wins.
+  Asset imports through an alias (`import logo from "@/assets/logo.png"`) work
+  like relative ones.
 - **`include`** must cover `.krate/types` so generated route/content types are
   visible.
 

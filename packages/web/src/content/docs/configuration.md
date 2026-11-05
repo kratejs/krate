@@ -46,6 +46,27 @@ Beyond editor type-checking, the compiler validates the file when it loads it:
   or an `.env*` file reloads the configuration and restarts the dev server; an
   invalid edit is reported and the running server is left alone.
 
+## What a config file can use
+
+`krate.config.ts` runs in-process (esbuild plus an embedded JavaScript engine),
+not under Node, so it sees a subset of the Node API:
+
+- `process.env` holds the shell environment overlaid with the project's `.env`
+  files (the shell wins), and `NODE_ENV` is `"development"` in `krate dev` and
+  `"production"` otherwise unless the shell sets it. `process.cwd()` is the
+  project root; `process.platform` and `process.argv` are available.
+- `node:path`, `node:url`, `node:fs` (`readFileSync`, `existsSync`, `readdirSync`,
+  `statSync`) and `node:os` (`platform`, `homedir`, `tmpdir`, `EOL`, `arch`,
+  `type`, `cpus`). Relative `fs` paths resolve against the project root.
+- `__dirname` and `__filename` for each module, `import.meta.url`,
+  `module.exports` (alone or beside imports), top-level `await`, `URL`,
+  `crypto.randomUUID` and a small `Buffer` (`from`, `alloc`, `concat`,
+  `toString` as utf8, base64 or hex).
+
+Any other `node:` import (`node:child_process`, `node:net`, ...) fails with an
+error that names it. Compute such values in a script and read them from the
+environment, or move the logic into a plugin.
+
 ## Option groups
 
 This page is a map; the [Config Reference](/docs/reference/config/) documents
