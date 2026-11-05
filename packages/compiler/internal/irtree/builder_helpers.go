@@ -7,6 +7,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
+	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 )
@@ -340,6 +341,10 @@ func (b *builder) componentNeedsClient(fn *ast.FnDecl, attrs map[string]ast.Expr
 	// A component reading a dynamic context must stay reactive (IR path) so the
 	// provider value can be bound through its synthetic prop.
 	if b.readsActiveContext(fn.Body) || b.readsActiveDerivedContext(fn.Body) {
+		return true
+	}
+	// A custom element's object and function props are set by hydration code.
+	if rendersCustomElementProps(fn.Body) {
 		return true
 	}
 	for _, expr := range attrs {
@@ -1178,4 +1183,28 @@ func (b *builder) readsOpaqueModuleValue(fn *ast.FnDecl) bool {
 		return !opaque
 	})
 	return opaque
+}
+
+// rendersCustomElementProps reports whether a component renders a custom
+// element with a prop that is not a plain string, number or boolean: those are
+// properties, which only hydration code can set.
+func rendersCustomElementProps(body []ast.Stmt) bool {
+	found := false
+	WalkAST(body, func(n any) bool {
+		el, ok := n.(*ast.JSXElement)
+		if !ok || el.Opening == nil || !htmlspec.IsCustomElement(el.Opening.Name) {
+			return true
+		}
+		for _, a := range el.Opening.Attributes {
+			if a == nil || a.Spread || a.Value == nil || isOnEvent(a.Name) || isReactDirectiveAttr(a.Name) {
+				continue
+			}
+			if lit, ok := a.Value.(*ast.Literal); ok && lit.Kind != ast.NullLit {
+				continue
+			}
+			found = true
+		}
+		return true
+	})
+	return found
 }

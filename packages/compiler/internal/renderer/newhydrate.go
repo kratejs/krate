@@ -39,8 +39,9 @@ window.kbindText=function(id,get){var n=findSlot(id);if(!n)return;__safe(functio
 window.kbindContent=function(id,get){var n=findSlot(id);if(!n)return;var __first=true;__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(__first){__first=false;if(typeof krateSlotReplaced==='function')krateSlotReplaced(id);}var _fa=document.activeElement,_fid=_fa&&_fa!==document.body&&_fa.id&&n.parentNode&&n.parentNode.contains(_fa)?_fa.id:null;while(n.nextSibling&&!(n.nextSibling.nodeType===8&&n.nextSibling.nodeValue==='/k:'+n.nodeValue.slice(2))){var _d=n.nextSibling;n.parentNode.removeChild(_d);if(typeof disposeNode==='function')disposeNode(_d);}if(v==null||v===false||v===true)v='';if(typeof v==='string'||typeof v==='number')v=document.createTextNode(String(v));if(Array.isArray(v)){var ref=n.nextSibling;for(var i=0;i<v.length;i++)n.parentNode.insertBefore(v[i],ref);}else n.parentNode.insertBefore(v,n.nextSibling);if(_fid&&!_fa.isConnected){var _fn=document.getElementById(_fid);if(_fn&&_fn.focus)_fn.focus();}}));},n);};
 window.kbindList=function(id,src,key,render,mode){var n=findSlot(id);if(!n||n.nodeType!==8||typeof krateBindList!=='function')return;__safe(function(){krateBindList(n,src,key,render,mode);});};
 window.kbindCond=function(id,get){var n=findSlot(id);if(!n)return;var t=__tpls.get(id)||null;__safe(function(){createEffect(__krateFx(n,function(){var s=!!get();var ca=typeof krateCondActivity==='function'?krateCondActivity:null;if(window.__krateCondPre)window.__krateCondPre(id,s);if(ca&&!s)ca(id,'a');krateCondSwap(n,s,t);if(ca&&s)ca(id,'c');if(window.__krateCondPost)window.__krateCondPost(id,s);}));},n);};
+window.kbindActivity=function(id,get){var n=findSlot(id);if(!n)return;var w=n.nextSibling;while(w&&w.nodeType!==1)w=w.nextSibling;if(!w)return;__safe(function(){createEffect(__krateFx(n,function(){var s=!!get();var ca=typeof krateCondActivity==='function'?krateCondActivity:null;w.style.display=s?'contents':'none';if(ca)ca(id,s?'c':'a');}));},n);};
 window.kbindTextContent=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__krateFx(n,function(){var v=get();n.textContent=v==null||typeof v==='boolean'?'':String(v);}));},n);};
-window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;var ad=/^(aria|data)-/.test(attr);__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(v==null||(v===false&&!ad))n.removeAttribute(attr);else if(v===true&&!ad)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){if(typeof krateApplyStyle==='function')krateApplyStyle(n,v);else{n.removeAttribute('style');Object.assign(n.style,v);}}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));}));},n);};
+window.kbindAttr=function(id,attr,get){var n=findSlot(id);if(!n)return;var ad=/^(aria|data)-/.test(attr);__safe(function(){createEffect(__krateFx(n,function(){var v=get();if(n.localName.indexOf('-')>0&&attr!=='class'&&attr!=='style'&&typeof krateCustomProp==='function'&&krateCustomProp(n,attr,v))return;if(v==null||(v===false&&!ad))n.removeAttribute(attr);else if(v===true&&!ad)n.setAttribute(attr,'');else if(attr==='style'&&typeof v==='object'){if(typeof krateApplyStyle==='function')krateApplyStyle(n,v);else{n.removeAttribute('style');Object.assign(n.style,v);}}else n.setAttribute(attr,krateSanitizeAttr(attr,String(v)));}));},n);};
 window.kbindInnerHTML=function(id,get){var n=findSlot(id);if(!n)return;__safe(function(){createEffect(__krateFx(n,function(){var v=get();v=v==null?'':String(v);if(n.innerHTML!==v)n.innerHTML=v;}));},n);};
 window.kbindSpread=function(id,get){var n=findSlot(id);if(n)__safe(function(){krateSpread(n,get);},n);};
 window.kbindProp=function(id,attr,get){var n=findSlot(id);if(n)__safe(function(){krateControl(n,attr,get);},n);};
@@ -327,6 +328,12 @@ func GenerateNewHydrationJS(result *EmitResult) string {
 				b.WriteString(",()=>")
 				b.WriteString(sb.ExprJS)
 				b.WriteString(");\n")
+			case "activity":
+				b.WriteString("kbindActivity(")
+				b.WriteString(strconv.Quote(string(sb.SlotID)))
+				b.WriteString(",()=>(")
+				b.WriteString(sb.ExprJS)
+				b.WriteString("));\n")
 			case "conditional":
 				b.WriteString("kbindCond(")
 				b.WriteString(strconv.Quote(string(sb.SlotID)))

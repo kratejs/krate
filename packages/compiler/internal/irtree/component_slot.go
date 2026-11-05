@@ -211,20 +211,27 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 	childID = SlotID(string(childID) + "_c" + itoa(instanceIdx))
 
 	bindings := b.buildPropBindings(extractParamNames(childFn), attrs, childFn)
+	var useIDs []string
+	nextID := b.useIDSequence(childID)
 	childNode := &ComponentNode{
-		ID:               childID,
-		Name:             childName,
-		Tier:             TierStatic,
-		Fn:               childFn,
-		SSREvalBindings:  bindings,
-		SSREvalAttrs:     attrs,
-		LocalVars:        b.foldLocalConsts(childFn, bindings, useIdSequence(childID)),
+		ID:              childID,
+		Name:            childName,
+		Tier:            TierStatic,
+		Fn:              childFn,
+		SSREvalBindings: bindings,
+		SSREvalAttrs:    attrs,
+		LocalVars: b.foldLocalConsts(childFn, bindings, func() string {
+			id := nextID()
+			useIDs = append(useIDs, id)
+			return id
+		}),
 		IsSSREval:        true,
 		CallSiteChildren: el.Children,
 		RestProps:        restProps(childFn, attrs),
 		RestPropsName:    fnRestParamName(childFn),
 		ContextValues:    b.activeContextMarkers(),
 	}
+	childNode.UseIDs = useIDs
 
 	// The call-site children may contain interactive components that need
 	// their own hydration even though this component has no signals.
@@ -246,6 +253,27 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 		childNode.ReturnSlots = b.discoverReturnSlots(childFn, childID, attrs, ret.Value)
 	}
 	return []SlotNode{&ComponentSlot{ID: childID, Component: childNode}}
+}
+
+// useIDRow numbers the useId() calls of one keyed list row.
+type useIDRow struct {
+	prefix string
+	n      int
+}
+
+// useIDSequence returns the useId() generator for the component with the
+// given slot ID: the row sequence inside a keyed list row, else the
+// component's own sequence.
+func (b *builder) useIDSequence(id SlotID) func() string {
+	row := b.useIDRow
+	if row == nil {
+		return useIdSequence(id)
+	}
+	return func() string {
+		n := row.n
+		row.n++
+		return "krate-" + row.prefix + "-u" + itoa(n)
+	}
 }
 
 // useIdSequence returns the useId() literal generator of a component

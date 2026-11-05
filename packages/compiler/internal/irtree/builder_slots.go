@@ -437,6 +437,8 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		return []SlotNode{&StaticHTML{HTML: ""}}
 	case "Suspense":
 		return []SlotNode{b.buildSuspenseSlot(el, parentID)}
+	case ActivityTag:
+		return b.buildActivitySlot(el, parentID)
 	}
 
 	// A tag name bound to a local variable (e.g. `const Comp = asChild ? Slot :
@@ -2315,7 +2317,10 @@ func (b *builder) tryResolveArrayItems(arr *ast.ArrayExpr, mapExpr ast.Expr, lis
 		itemID := joinSlotIDKey(SlotID(listID), key)
 		restore := b.pushShadow(blockBindingNames(arrow.Body))
 		mark := b.markRowBindings()
+		savedRow := b.useIDRow
+		b.useIDRow = &useIDRow{prefix: string(itemID)}
 		contents := b.buildSlotNodes(concrete, string(itemID))
+		b.useIDRow = savedRow
 		b.tagRowBindings(mark, SlotID(listID))
 		restore()
 		if len(contents) == 0 {

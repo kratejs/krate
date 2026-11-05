@@ -40,12 +40,19 @@ const (
 	// which JSX defines as `true`. Non-boolean bare attributes are emitted
 	// bare as well so internal marker attributes stay compact.
 	Bare
+	// Complex is an object, array or function. Elsewhere it stringifies (an
+	// array joins, an object is "[object Object]", a function is dropped), but
+	// a custom element never gets it as an attribute: React 19 passes it as a
+	// property instead, which the hydration code does.
+	Complex
 )
 
 // Value is an attribute or style value with its (possibly unknown) JS type.
 type Value struct {
 	Kind Kind
 	Str  string
+	// Func marks a Complex value that is a function.
+	Func bool
 	// Items holds the element texts when the value is a JS array (used by
 	// <select multiple> selections).
 	Items []string
@@ -334,6 +341,15 @@ func Attr(tag, jsxName string, v Value) string {
 	if v.IsNullish() {
 		return ""
 	}
+	if v.Kind == Complex {
+		if IsCustomElement(tag) || v.Func {
+			return ""
+		}
+		v.Kind = String
+	}
+	if IsCustomElement(tag) {
+		return customElementAttr(name, v)
+	}
 	lower := strings.ToLower(name)
 	switch {
 	case booleanAttrs[lower]:
@@ -370,6 +386,31 @@ func Attr(tag, jsxName string, v Value) string {
 		val = SanitizeURL(val)
 	}
 	return " " + name + `="` + escape.HTMLAttr(val) + `"`
+}
+
+// IsCustomElement reports a custom element tag name (it contains a hyphen).
+func IsCustomElement(tag string) bool {
+	return strings.Contains(tag, "-") && !strings.ContainsAny(tag, ".:")
+}
+
+// customElementAttr serializes an attribute of a custom element the way React
+// 19 renders one on the server: strings and numbers are attributes, `true`
+// is an empty attribute, `false` is omitted. Objects, arrays and functions
+// never reach this function (see Complex).
+func customElementAttr(name string, v Value) string {
+	switch v.Kind {
+	case Bool:
+		if v.Str == "true" {
+			return " " + name + `=""`
+		}
+		return ""
+	case Bare:
+		return " " + name + `=""`
+	}
+	if IsURLAttr(strings.ToLower(name)) {
+		return " " + name + `="` + escape.HTMLAttr(SanitizeURL(v.Str)) + `"`
+	}
+	return " " + name + `="` + escape.HTMLAttr(v.Str) + `"`
 }
 
 // ContentValue reports whether jsxName on tag is rendered as element content
