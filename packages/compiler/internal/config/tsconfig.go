@@ -1066,6 +1066,49 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				}
 			}
 		}
+	case "cache":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "adapter":
+				if s, ok := v.(string); ok {
+					cfg.Cache.Adapter = s
+				}
+			case "url":
+				if s, ok := v.(string); ok {
+					cfg.Cache.URL = s
+				}
+			case "urlEnv":
+				if s, ok := v.(string); ok {
+					cfg.Cache.URLEnv = s
+				}
+			case "prefix":
+				if s, ok := v.(string); ok {
+					cfg.Cache.Prefix = s
+				}
+			case "timeoutMs":
+				switch n := v.(type) {
+				case int64:
+					cfg.Cache.TimeoutMs = int(n)
+				case float64:
+					cfg.Cache.TimeoutMs = int(n)
+				}
+			case "ttlSeconds":
+				switch n := v.(type) {
+				case int64:
+					cfg.Cache.TTLSeconds = int(n)
+				case float64:
+					cfg.Cache.TTLSeconds = int(n)
+				}
+			case "options":
+				if o, ok := v.(map[string]interface{}); ok {
+					cfg.Cache.Options = o
+				}
+			}
+		}
 	case "ssr":
 		m, ok := val.(map[string]interface{})
 		if !ok {

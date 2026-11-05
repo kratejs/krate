@@ -171,6 +171,18 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   `Metadata` types from the runtime instead of wrapping pages in `<Head>`.
 - Concurrent identical cached `fetch` calls in one process share one upstream
   request, so a page and its `generateMetadata` reading the same URL ask it once.
+- Shared caches. `cache: { adapter: "redis", url }` in `krate.config` moves the ISR
+  page cache and the data cache (`fetch` with `next` options, `unstable_cache`) into
+  Redis, so instances behind a load balancer serve each other's pages, and
+  `revalidatePath` / `revalidateTag` on one instance refresh all of them (a pub/sub
+  message also clears the others' region caches and the Go host's caches; a missed
+  message flushes). Redis uses a built-in RESP client with no dependency (Go and
+  Node); other stores plug in through the documented `CacheAdapter` interface
+  (`cache.adapter` names a module). Every cache call has a timeout and a circuit
+  breaker: a slow or dead store costs the sharing, never a request, and per-user
+  renders are never written. `createKrateHandler({ cache })` and `krate deploy` carry
+  it to the serverless targets (the bundle never contains the URL; it reads
+  `KRATE_CACHE_URL` or `cache.urlEnv`).
 
 ### Fixed
 

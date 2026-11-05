@@ -1100,7 +1100,8 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
           : [];
         // Path targets also drop the data their renders cached (implicit tag).
         const dataTags = tags.concat(targets.map((t) => routeDataTag(t.route)));
-        const { dataEntries } = cacheRuntime().invalidate({ tags: dataTags });
+        const { dataEntries: localEntries } = cacheRuntime().invalidate({ tags: dataTags });
+        const dataEntries = localEntries + (await cacheRuntime().invalidateShared(dataTags));
         let isrEntries = 0;
         let regionEntries = 0;
         for (const t of targets) {

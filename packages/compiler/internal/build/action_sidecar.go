@@ -95,11 +95,16 @@ function sidecarAuthorized(value) {
 }
 
 // applyInternalLocal applies a host operation to this process's caches.
-function applyInternalLocal(op, payload) {
+async function applyInternalLocal(op, payload) {
   if (op === 'cache-invalidate') {
     const rt = globalThis[Symbol.for('krate.cache.runtime')];
     const tags = Array.isArray(payload && payload.tags) ? payload.tags.filter((t) => typeof t === 'string') : [];
-    if (rt && typeof rt.invalidate === 'function') return rt.invalidate({ tags });
+    if (rt && typeof rt.invalidate === 'function') {
+      const out = rt.invalidate({ tags });
+      // With a shared cache adapter the entries live outside this process too.
+      if (tags.length && typeof rt.invalidateShared === 'function') out.dataEntries += await rt.invalidateShared(tags);
+      return out;
+    }
     return { dataEntries: 0 };
   }
   return { error: 'unknown internal op ' + op };
@@ -107,7 +112,7 @@ function applyInternalLocal(op, payload) {
 
 // broadcastInternal applies an operation on every worker; the Node script
 // replaces it with a cluster fan-out when clustered.
-let broadcastInternal = async (op, payload) => [applyInternalLocal(op, payload)];
+let broadcastInternal = async (op, payload) => [await applyInternalLocal(op, payload)];
 
 async function internalCacheInvalidate(headerValue, bodyText) {
   if (!internalAuthorized(headerValue)) return { status: 403, body: { error: 'forbidden' } };
@@ -429,9 +434,10 @@ if (WORKERS > 1 && cluster.isPrimary) {
   process.on('message', (msg) => {
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'krate:apply') {
-      let result;
-      try { result = applyInternalLocal(msg.op, msg.payload || {}); } catch (e) { result = { error: String((e && e.message) || e) }; }
-      process.send({ type: 'krate:applied', id: msg.id, result });
+      Promise.resolve()
+        .then(() => applyInternalLocal(msg.op, msg.payload || {}))
+        .catch((e) => ({ error: String((e && e.message) || e) }))
+        .then((result) => process.send({ type: 'krate:applied', id: msg.id, result }));
     } else if (msg.type === 'krate:bcast-done') {
       const done = waiters.get(msg.id);
       if (done) { waiters.delete(msg.id); done(Array.isArray(msg.results) ? msg.results : []); }

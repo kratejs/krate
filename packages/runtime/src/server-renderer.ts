@@ -18,6 +18,8 @@ import {
   type ServerManifest,
 } from "./ssr-core.js";
 import { installRenderStore, patchFetch, type CacheScope } from "./cache-scope.js";
+import { cacheSpecFromEnv } from "./cache-adapter.js";
+import { isrStoreFor } from "./shared-isr.js";
 
 // Render cache scopes (tags / revalidate windows read during a render) and the
 // Next-style fetch data cache. Installed once per process; page bundles share
@@ -225,10 +227,13 @@ function loadRuntimeRenderer(relPath: string): (propsJSON: string) => string {
 
 const pprEnabledEnv = process.env.KRATE_PPR === "1";
 const isrMemory = new MemoryIsrStore(parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512);
+// With a shared cache adapter (KRATE_CACHE) the ISR cache and the data cache live
+// in the adapter, so every instance serves and invalidates the same pages.
+const sharedCache = isrStoreFor(cacheSpecFromEnv(process.env), isrMemory);
 const core = createSSRCore({
   manifest,
   sha256Hex: (input) => createHash("sha256").update(input).digest("hex"),
-  isrStore: isrMemory,
+  isrStore: sharedCache.store,
   loadPageModule,
   loadRuntimeRenderer,
   maxCacheSize: parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512,

@@ -1337,6 +1337,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		return err
 	}
 	defer revalHost.Close()
+	if err := revalHost.SetCache(cfg.Cache, hub == nil); err != nil {
+		return err
+	}
 	serverEnv := withEnv(environ.Current, revalHost.Env())
 
 	// Load embedded middleware runtime if configured (default: quickjs)

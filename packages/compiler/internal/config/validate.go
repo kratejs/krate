@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -169,6 +170,15 @@ func (c *Config) Validate() (warnings []string, err error) {
 	}
 	if c.SSR.Timeout < 0 {
 		return nil, fmt.Errorf("ssr.timeout must be >= 0, got %d", c.SSR.Timeout)
+	}
+	if c.Cache.TimeoutMs < 0 || c.Cache.TTLSeconds < 0 {
+		return nil, fmt.Errorf("cache.timeoutMs and cache.ttlSeconds must be >= 0")
+	}
+	if c.Cache.Adapter == "redis" && c.Cache.URL == "" && c.Cache.URLEnv == "" && os.Getenv("KRATE_CACHE_URL") == "" {
+		return nil, fmt.Errorf("cache.adapter \"redis\" needs cache.url (redis://host:6379) or cache.urlEnv; none is set")
+	}
+	if u := c.Cache.URL; u != "" && c.Cache.Adapter == "redis" && !strings.HasPrefix(u, "redis://") && !strings.HasPrefix(u, "rediss://") {
+		return nil, fmt.Errorf("cache.url must start with redis:// or rediss://, got %q", redactURL(u))
 	}
 	if c.SSR.MaxCacheSize < 0 {
 		return nil, fmt.Errorf("ssr.maxCacheSize must be >= 0, got %d", c.SSR.MaxCacheSize)
@@ -436,4 +446,14 @@ func describeUnmarshalError(file string, err error) error {
 		key = "value"
 	}
 	return fmt.Errorf("%s: %s must be %s (got %s)", file, key, want, te.Value)
+}
+
+// redactURL hides the credentials of a URL for messages.
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	u.User = url.User("***")
+	return u.String()
 }

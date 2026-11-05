@@ -16,8 +16,8 @@ import {
   cacheRuntime,
   currentRenderScope,
   currentRevalidateScope,
-  dataCacheGetJSON,
-  dataCacheSetJSON,
+  dataCacheGetJSONAsync,
+  dataCacheSetJSONAsync,
   markNoStore,
   recordCacheRead,
 } from './cache-scope.js';
@@ -133,6 +133,8 @@ export function revalidateTag(tag: string): void {
   request('revalidateTag', { paths: [], tags: [tag] });
 }
 
+export type { CacheAdapter, CacheSetOptions, CacheSpec } from './cache-adapter.js';
+
 /** Options for `unstable_cache`. */
 export interface UnstableCacheOptions {
   /** Tags that `revalidateTag` can invalidate this entry by. */
@@ -167,7 +169,7 @@ export function unstable_cache<A extends unknown[], R>(
     recordCacheRead(tags, revalidate === undefined ? false : revalidate);
     if (ttl === 0) return fn(...args);
     const key = 'uc:' + base + '\u0000' + JSON.stringify(args);
-    const hit = dataCacheGetJSON(key);
+    const hit = await dataCacheGetJSONAsync(key);
     if (hit !== undefined) return JSON.parse(hit) as R;
     const running = pending.get(key);
     if (running) return running as Promise<R>;
@@ -178,7 +180,7 @@ export function unstable_cache<A extends unknown[], R>(
       if (json === undefined) {
         throw new TypeError('unstable_cache() results must be JSON-serializable (got undefined or a function)');
       }
-      dataCacheSetJSON(key, json, ttl, tags, epoch);
+      await dataCacheSetJSONAsync(key, json, ttl, tags, epoch);
       return value;
     })();
     pending.set(key, p);

@@ -10,9 +10,9 @@ Krate caches request-time work in three places:
 
 | Cache | Holds | Lives in |
 |-------|-------|----------|
-| ISR page cache | The rendered body of each ISR page variant (route + params + query) | SSR renderer (one per worker) |
+| ISR page cache | The rendered body of each ISR page variant (route + params + query) | SSR renderer (one per worker), or a [shared cache](#sharing-caches-between-instances) |
 | Region cache | Rendered dynamic regions (Suspense/runtime components, Go regions) | SSR renderer and Go host |
-| Data cache | `unstable_cache` results and `fetch` responses requested with cache options | Each server process (renderer, Node API sidecar, Go host for QuickJS routes) |
+| Data cache | `unstable_cache` results and `fetch` responses requested with cache options | Each server process (renderer, Node API sidecar, Go host for QuickJS routes), or a shared cache |
 
 `@krate/runtime/cache` (also re-exported from `@krate/runtime/server`) is the
 API for all three. It mirrors `next/cache`.
@@ -173,11 +173,104 @@ The renderer's mutating endpoints (`/__krate/ssr/revalidate`, `/refresh`,
 `/invalidate`, `/cache-invalidate`) require the same secret; the public server
 only forwards `/__krate/ssr/health` without it.
 
+## Sharing caches between instances
+
+By default each `krate start` process (and each serverless instance) keeps its
+own caches. Several instances behind a load balancer then render every page once
+each, and `revalidateTag` on one leaves the others serving the old page. A shared
+cache fixes both:
+
+```ts
+// krate.config.ts
+export default {
+  cache: { adapter: "redis", url: process.env.REDIS_URL },
+};
+```
+
+| Cache | With a shared adapter |
+|-------|-----------------------|
+| ISR page cache | Entries live in the store. An instance serves a page another one rendered; stale-while-revalidate and the tags a render read work across instances. |
+| Data cache (`fetch` with `next` options, `unstable_cache`) | Entries live in the store, tagged. Concurrent identical misses in one process still share one upstream call. |
+| Region caches (Suspense/runtime component and Go regions) and the embedded QuickJS data cache | Stay in each instance's memory (they hold request-keyed fragments), but a revalidation clears them on every instance. |
+| `revalidatePath` / `revalidateTag` | The originating instance purges the store, then publishes the revalidation on the store's channel; every other instance clears what it keeps in memory. A missed message (a dropped connection) makes the instance clear everything. |
+
+Redis is built in (a small RESP client with no dependency; `rediss://` for TLS,
+`AUTH` and a database number from the URL). `krate start` joins the invalidation
+channel itself, so the Go host's caches are cleared too.
+
+**A broken cache never breaks a page.** Every call is bounded by `timeoutMs`
+(250 ms), a failure is logged once, and after three in a row the store is skipped
+for five seconds. Meanwhile pages render and are cached in the instance's own
+memory; when the store answers again, sharing resumes without a restart. A
+revalidation while the store is down purges the instance's own cache and the
+response stays 200, but other instances keep the shared copy until the store is
+back and its entries expire or are revalidated again.
+
+**Per-user responses are never shared.** Only renders that are cacheable are
+stored, the same rule as the in-process cache: a render that read cookies or
+headers, called `unstable_noStore()` or fetched with `cache: "no-store"` is not
+written, and neither is a page answering 4xx or 5xx.
+
+### Writing an adapter
+
+An adapter is a small key-value store with tag deletion and pub/sub:
+
+```ts
+import type { CacheAdapter } from "@krate/runtime/cache";
+
+export default function createAdapter(options: { url?: string; prefix?: string }): CacheAdapter {
+  return {
+    name: "my-store",
+    async get(key) { /* the string stored under key, or null */ },
+    async set(key, value, { ttlSeconds, tags } = {}) { /* store; remember the tags */ },
+    async delete(key) { /* remove one key */ },
+    async keysByTag(tag) { /* keys stored with tag */ },
+    async deleteByTags(tags) { /* remove every key stored with one of tags; return how many */ },
+    async publish(channel, message) { /* deliver to every subscriber, this process included */ },
+    async subscribe(channel, handler) { /* call handler(message); handler("*") after missed messages; return an unsubscribe function */ },
+    async close() {},
+  };
+}
+```
+
+Point `cache.adapter` at the module (`"./cache-adapter.ts"` or a package name) and
+Krate imports its default export (a factory called with `{ url, prefix, timeoutMs,
+...options }`, or an adapter object). Methods may reject: Krate bounds and
+tolerates them. The Go host joins the invalidation channel for `redis` only; with
+a custom adapter the shared ISR and data caches and revalidation work, but the
+Go-host regions and QuickJS data cache of other instances are not cleared.
+
+### Serverless targets
+
+`krate deploy` writes the cache settings (without the URL) into the bundle. The
+`node`, `vercel` and `netlify` targets read the URL from `KRATE_CACHE_URL`, or
+from the variable `cache.urlEnv` names, at run time; the Redis adapter needs
+outbound TCP. A custom `cache.adapter` module is imported into the bundle at
+deploy time, so an HTTP-based store (Upstash REST, Vercel KV, Cloudflare KV)
+works wherever `fetch` does. On Cloudflare Workers use such an adapter: the
+deploy warns when `cache.adapter` is `"redis"` there.
+
+Without `krate deploy`, pass the adapter to the handler yourself:
+
+```ts
+import { createKrateHandler } from "@krate/runtime/server-handler";
+import { createRedisAdapter } from "@krate/runtime/cache-redis";
+
+const handler = createKrateHandler({ target: "node", data, modules, cache: createRedisAdapter({ url: process.env.REDIS_URL! }) });
+```
+
+With a shared adapter configured, `revalidatePath` and `revalidateTag` no longer
+report instances as `skipped`, and `krate deploy` stops warning about them. In
+the serverless handler, instances that live long enough (the node target) also
+subscribe to the invalidation channel to clear their region caches; short-lived
+functions simply read the store on every request.
+
 ## Limits
 
-- Caches are in memory per server process. Several `krate serve` instances
-  behind a load balancer do not share them, and a CDN that holds an ISR
-  response (`s-maxage`) keeps serving it until its own TTL expires.
+- Without a shared cache the caches are in memory per server process. Several
+  `krate serve` instances behind a load balancer do not share them, and a CDN that
+  holds an ISR response (`s-maxage`) keeps serving it until its own TTL expires.
+  See [Sharing caches between instances](#sharing-caches-between-instances).
 - Go components cannot read tagged data, so `revalidateTag` does not target Go
   region renders; `revalidatePath` does.
 - Region renders run synchronously today, so tags are only recorded for data

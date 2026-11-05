@@ -67,6 +67,8 @@ import {
 } from "./handler-segments.js";
 import { httpFallbackStatus } from "./request-context.js";
 import { sha256Hex as portableSha256Hex } from "./sha256.js";
+import { INVALIDATE_CHANNEL, cacheSpecFromConfig, type CacheAdapter, type CacheSpec } from "./cache-adapter.js";
+import { isrStoreFor } from "./shared-isr.js";
 import { createMemoryStaticLayer } from "./static-memory.js";
 
 // Public types
@@ -74,6 +76,8 @@ import { createMemoryStaticLayer } from "./static-memory.js";
 export type DeployTarget = "node" | "vercel" | "netlify" | "cloudflare";
 
 export interface HandlerConfig {
+  /** The shared cache (krate.config cache), without its URL; see HandlerOptions.cache. */
+  cache?: CacheSpec & { urlEnv?: string };
   /** URL prefix the site is mounted under ("" or "/prefix"). */
   basePath: string;
   trustProxy: boolean;
@@ -172,6 +176,14 @@ export interface HandlerOptions {
   static?: StaticLayer;
   /** Page ISR cache storage. Defaults to a bounded in-memory store per instance. */
   isrStore?: IsrStore;
+  /**
+   * A shared cache for the ISR page cache and the data cache: a CacheAdapter
+   * (your own, or createRedisAdapter from @krate/runtime/cache-redis) or a spec
+   * such as { adapter: "redis", url }. Without it each instance keeps its own
+   * caches. data.config.cache (from krate.config) is the default; its URL comes
+   * from the environment (KRATE_CACHE_URL, or the variable named by urlEnv).
+   */
+  cache?: CacheSpec | CacheAdapter | Promise<CacheAdapter>;
   /** Overrides data.config.trustProxy (the serverless platforms always set X-Forwarded-*). */
   trustProxy?: boolean;
   /** Hex sha256 for error digests; defaults to the portable implementation. */
@@ -376,13 +388,21 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   if (!cacheRuntime().renderStore) installRenderStore(new AsyncLocalStorage());
   patchFetch();
 
+  // The ISR and data caches: this instance's memory, or the shared cache adapter.
+  const memoryIsr = new MemoryIsrStore(cfg.ssr.maxCacheSize > 0 ? cfg.ssr.maxCacheSize : 512);
+  const sharedCache = options.isrStore
+    ? { store: options.isrStore, ready: Promise.resolve<CacheAdapter | null>(null) }
+    : isrStoreFor(options.cache ?? cacheSpecFromConfig(cfg.cache), memoryIsr);
+  let sharedAdapter: CacheAdapter | null = null;
+  const instanceId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
   // Pages: most specific route first, like SSRServer.FindPageForRoute.
   const pagesBySpecificity = [...data.pages].sort((a, b) => compareRouteSpecificity(a.route, b.route));
   const manifest = { pages: data.pages as ManifestPage[], regions: data.regions };
   const core: SSRCore = createSSRCore({
     manifest,
     sha256Hex: options.sha256Hex,
-    isrStore: options.isrStore || new MemoryIsrStore(cfg.ssr.maxCacheSize > 0 ? cfg.ssr.maxCacheSize : 512),
+    isrStore: sharedCache.store,
     loadPageModule: async (page) => {
       const mod = modules.pages && modules.pages[page.bundlePath || ""];
       if (!mod) throw new Error(`server bundle for ${page.route} is not part of this deployment (${page.bundlePath})`);
@@ -1146,6 +1166,30 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   // Revalidation, applied to this instance's caches.
 
+  // Other instances' revalidations: their shared-cache entries are gone already,
+  // so only this instance's in-memory caches need clearing.
+  void sharedCache.ready.then(async (adapter) => {
+    if (!adapter) return;
+    sharedAdapter = adapter;
+    try {
+      await adapter.subscribe(INVALIDATE_CHANNEL, (message) => {
+        if (message === "*") {
+          core.devInvalidate("");
+          return;
+        }
+        try {
+          const m = JSON.parse(message) as { origin?: string; targets?: unknown[]; tags?: string[] };
+          if (m.origin === instanceId) return;
+          void core.applyInternalOp("cache-invalidate", { targets: m.targets || [], tags: m.tags || [] });
+        } catch {
+          /* not ours */
+        }
+      });
+    } catch (err) {
+      console.warn(`[krate] could not subscribe to cache invalidations: ${(err as Error)?.message || err}`);
+    }
+  });
+
   async function applyRevalidation(payload: { paths: Array<{ path: string; type?: string }>; tags: string[] }) {
     const revalidated: Array<{ target: string; kind: string; routes?: string[] }> = [];
     const skipped: Array<{ target: string; reason: string }> = [];
@@ -1165,8 +1209,17 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const tags = payload.tags.map((t) => t.trim()).filter(Boolean);
     for (const t of tags) revalidated.push({ target: t, kind: "tag" });
     if (targets.length || tags.length) {
+      await sharedCache.ready;
       await core.applyInternalOp("cache-invalidate", { targets, tags });
-      if (target !== "node") {
+      if (sharedAdapter) {
+        // The shared store is already purged; tell the other instances to drop
+        // what they hold in memory (their region caches).
+        try {
+          await sharedAdapter.publish(INVALIDATE_CHANNEL, JSON.stringify({ origin: instanceId, targets, tags }));
+        } catch (err) {
+          console.warn(`[krate] could not tell the other instances about the revalidation: ${(err as Error)?.message || err}`);
+        }
+      } else if (target !== "node") {
         for (const r of revalidated) {
           skipped.push({
             target: r.target,

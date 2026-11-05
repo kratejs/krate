@@ -757,8 +757,15 @@ func stageCacheRuntime(root, outDir string) string {
 		Write:         true,
 		LogLevel:      api.LogLevelSilent,
 		Stdin: &api.StdinOptions{
-			Loader:     api.LoaderTS,
-			Contents:   "import { patchFetch, cacheRuntime } from './cache-scope.js';\ncacheRuntime();\npatchFetch();\n",
+			Loader: api.LoaderTS,
+			Contents: "import { patchFetch, cacheRuntime } from './cache-scope.js';\n" +
+				"import { loadCacheAdapter, installCacheAdapter, cacheSpecFromEnv } from './cache-adapter.js';\n" +
+				"cacheRuntime();\npatchFetch();\n" +
+				"const spec = cacheSpecFromEnv(process.env);\n" +
+				"if (spec && spec.adapter && spec.adapter !== 'memory') {\n" +
+				"  try { const adapter = await loadCacheAdapter(spec); if (adapter) installCacheAdapter(adapter, spec); }\n" +
+				"  catch (e) { console.error('[krate] cache adapter failed to start; using the in-process data cache:', e); }\n" +
+				"}\n",
 			ResolveDir: filepath.Dir(source),
 			Sourcefile: "krate-cache-runtime.ts",
 		},

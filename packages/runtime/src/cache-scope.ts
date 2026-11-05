@@ -128,8 +128,19 @@ export class DataCache {
   }
 }
 
+/** A data cache shared by several processes (see cache-adapter.ts). */
+export interface SharedDataStore {
+  /** { ok: false } when the shared store could not be reached. */
+  get(key: string): Promise<{ ok: true; value: string | undefined } | { ok: false }>;
+  /** Resolves false when the entry could not be stored. */
+  set(key: string, json: string, ttlSeconds: number, tags: string[]): Promise<boolean>;
+  deleteTags(tags: string[]): Promise<number>;
+}
+
 /** Process-wide cache runtime shared by every bundled copy of this module. */
 export interface CacheRuntime {
+  /** The data cache shared with other instances, when a cache adapter is configured. */
+  shared?: SharedDataStore;
   dataCache: DataCache;
   /** Render scope storage; installed by the SSR renderer. */
   renderStore?: AsyncStore<CacheScope>;
@@ -137,6 +148,8 @@ export interface CacheRuntime {
   epoch: number;
   /** Applies a tag invalidation to the local data cache. */
   invalidate(payload: { tags?: string[] }): { dataEntries: number };
+  /** Deletes the entries stored with tags in the shared cache (0 when there is none). */
+  invalidateShared(tags: string[]): Promise<number>;
   fetchPatched?: boolean;
 }
 
@@ -153,6 +166,9 @@ export function cacheRuntime(): CacheRuntime {
         created.epoch++;
         const tags = Array.isArray(payload.tags) ? payload.tags.filter((t) => typeof t === 'string') : [];
         return { dataEntries: tags.length ? created.dataCache.invalidateTags(tags) : 0 };
+      },
+      async invalidateShared(tags) {
+        return created.shared && tags.length ? created.shared.deleteTags(tags) : 0;
       },
     };
     rt = created;
@@ -236,6 +252,32 @@ function goBridge(): Required<GoCacheBridge> | null {
   return typeof g._go_cache_get === 'function' && typeof g._go_cache_set === 'function'
     ? (g as Required<GoCacheBridge>)
     : null;
+}
+
+/**
+ * Reads a JSON value from the data cache; undefined on a miss. With a shared
+ * cache the instances' common store answers; when it cannot, this process's own
+ * cache does.
+ */
+export async function dataCacheGetJSONAsync(key: string): Promise<string | undefined> {
+  const shared = cacheRuntime().shared;
+  if (shared && !goBridge()) {
+    const r = await shared.get(key);
+    if (r.ok) return r.value;
+  }
+  return dataCacheGetJSON(key);
+}
+
+/** Stores a JSON value in the shared cache when there is one, else in this process's cache. */
+export async function dataCacheSetJSONAsync(key: string, json: string, ttlSeconds: number, tags: string[], epoch: number): Promise<void> {
+  const shared = cacheRuntime().shared;
+  if (shared && !goBridge()) {
+    const scope = currentRenderScope();
+    const all = scope ? [...tags, routeDataTag(scope.route)] : tags;
+    if (cacheRuntime().epoch !== epoch) return;
+    if (await shared.set(key, json, ttlSeconds, all)) return;
+  }
+  dataCacheSetJSON(key, json, ttlSeconds, tags, epoch);
 }
 
 /** Reads a JSON value from the data cache; undefined on a miss. */
@@ -356,7 +398,7 @@ export function patchFetch(): void {
     if (ttl === 0 || (method !== 'GET' && method !== 'HEAD')) return original(input, plainInit);
 
     const key = fetchCacheKey(method, requestURL(input), plainInit);
-    const hit = dataCacheGetJSON(key);
+    const hit = await dataCacheGetJSONAsync(key);
     if (hit !== undefined) return responseOf(JSON.parse(hit) as CachedResponse, method);
     // Concurrent misses for one request share a single upstream call, so a
     // page and its generateMetadata that read the same URL ask it once.
@@ -375,7 +417,7 @@ export function patchFetch(): void {
         if (k.toLowerCase() !== 'set-cookie') headers.push([k, v]);
       });
       const entry: CachedResponse = { status: res.status, statusText: res.statusText, headers, body: toBase64(bytes) };
-      dataCacheSetJSON(key, JSON.stringify(entry), ttl, tags, epoch);
+      await dataCacheSetJSONAsync(key, JSON.stringify(entry), ttl, tags, epoch);
       return { res, entry };
     })();
     inflight.set(key, fetching);

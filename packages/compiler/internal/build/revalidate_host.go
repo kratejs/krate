@@ -18,7 +18,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/compiler/internal/rediscache"
 )
 
 // internalSecretHeader carries the per-process secret on host <-> sidecar
@@ -96,6 +98,15 @@ type revalidateHost struct {
 
 	warnMu sync.Mutex
 	warned map[string]bool
+
+	// cacheEnv is the shared cache setting (KRATE_CACHE) every Node runtime
+	// receives, "" without one. bus carries revalidations to the other
+	// instances of a cluster (Redis pub/sub); instanceID tells a message's
+	// origin apart from this process.
+	cacheEnv   string
+	bus        *rediscache.Bus
+	instanceID string
+	stopBus    func()
 }
 
 // newRevalidateHost creates the host with a fresh random secret.
@@ -113,6 +124,70 @@ func newRevalidateHost(outDir string) (*revalidateHost, error) {
 	}, nil
 }
 
+// clusterMessage is what instances send each other on a revalidation.
+type clusterMessage struct {
+	Origin string              `json:"origin"`
+	Paths  []revalidatePathReq `json:"paths,omitempty"`
+	Tags   []string            `json:"tags,omitempty"`
+}
+
+// SetCache applies the shared cache setting: the runtimes get it in KRATE_CACHE,
+// and with Redis this process joins the cluster's invalidation channel, so a
+// revalidatePath or revalidateTag on any instance reaches all of them.
+func (h *revalidateHost) SetCache(c config.CacheConfig, subscribe bool) error {
+	if !c.Shared() {
+		return nil
+	}
+	url := c.URL
+	if url == "" && c.URLEnv != "" {
+		url = os.Getenv(c.URLEnv)
+	}
+	if url == "" {
+		url = os.Getenv("KRATE_CACHE_URL")
+	}
+	spec := map[string]any{"adapter": c.Adapter, "url": url, "prefix": c.Prefix, "timeoutMs": c.TimeoutMs, "ttlSeconds": c.TTLSeconds, "options": c.Options}
+	b, err := json.Marshal(spec)
+	if err != nil {
+		return err
+	}
+	h.cacheEnv = string(b)
+	if c.Adapter != "redis" || !subscribe {
+		return nil
+	}
+	opts, err := rediscache.ParseURL(url)
+	if err != nil {
+		return fmt.Errorf("cache.url: %w", err)
+	}
+	if c.TimeoutMs > 0 {
+		opts.Timeout = time.Duration(c.TimeoutMs) * time.Millisecond
+	}
+	idb := make([]byte, 8)
+	_, _ = rand.Read(idb)
+	h.instanceID = hex.EncodeToString(idb)
+	h.bus = rediscache.NewBus(opts, c.Prefix)
+	h.stopBus = h.bus.Subscribe(h.onClusterMessage)
+	return nil
+}
+
+// onClusterMessage applies another instance's revalidation to this one's caches.
+func (h *revalidateHost) onClusterMessage(msg string) {
+	if msg == "*" {
+		// The channel dropped messages: nothing in memory can be trusted.
+		h.data.Clear()
+		if _, err := h.apply(revalidateRequest{Paths: []revalidatePathReq{{Path: "/", Type: "layout"}}}); err != nil {
+			fmt.Fprintf(os.Stderr, "  %sCache resync:%s %v\n", cYellow, cReset, err)
+		}
+		return
+	}
+	var m clusterMessage
+	if err := json.Unmarshal([]byte(msg), &m); err != nil || m.Origin == h.instanceID {
+		return
+	}
+	if _, err := h.apply(revalidateRequest{Paths: m.Paths, Tags: m.Tags}); err != nil {
+		fmt.Fprintf(os.Stderr, "  %sCluster revalidation:%s %v\n", cYellow, cReset, err)
+	}
+}
+
 // Start listens on 127.0.0.1 (random port) and serves the internal endpoint.
 func (h *revalidateHost) Start() error {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -128,6 +203,9 @@ func (h *revalidateHost) Start() error {
 
 // Close stops the internal listener.
 func (h *revalidateHost) Close() {
+	if h.stopBus != nil {
+		h.stopBus()
+	}
 	if h.listener != nil {
 		_ = h.listener.Close()
 	}
@@ -135,15 +213,23 @@ func (h *revalidateHost) Close() {
 
 // Env returns the variables every server-side runtime needs to reach the host.
 func (h *revalidateHost) Env() map[string]string {
-	return map[string]string{
+	env := map[string]string{
 		"KRATE_HOST_URL":        h.url,
 		"KRATE_INTERNAL_SECRET": h.secret,
 	}
+	if h.cacheEnv != "" {
+		env["KRATE_CACHE"] = h.cacheEnv
+	}
+	return env
 }
 
 // EnvList is Env as KEY=VALUE pairs.
 func (h *revalidateHost) EnvList() []string {
-	return []string{"KRATE_HOST_URL=" + h.url, "KRATE_INTERNAL_SECRET=" + h.secret}
+	list := []string{"KRATE_HOST_URL=" + h.url, "KRATE_INTERNAL_SECRET=" + h.secret}
+	if h.cacheEnv != "" {
+		list = append(list, "KRATE_CACHE="+h.cacheEnv)
+	}
+	return list
 }
 
 // Authorized reports whether r carries the internal secret (constant-time).
@@ -233,6 +319,21 @@ func (h *revalidateHost) ApplyJSON(payload string) string {
 // name static (SSG) pages or no page are reported under Skipped (with a
 // one-time warning per route); a failure to reach a cache is an error.
 func (h *revalidateHost) Apply(req revalidateRequest) (revalidateResult, error) {
+	res, err := h.apply(req)
+	// Tell the other instances (best effort: the shared stores are purged
+	// already; this clears what they keep in memory).
+	if h.bus != nil && (len(res.Revalidated) > 0) {
+		msg, _ := json.Marshal(clusterMessage{Origin: h.instanceID, Paths: req.Paths, Tags: req.Tags})
+		if perr := h.bus.Publish(string(msg)); perr != nil {
+			fmt.Fprintf(os.Stderr, "  %sCluster revalidation not sent:%s %v\n", cYellow, cReset, perr)
+		}
+	}
+	return res, err
+}
+
+// apply is Apply without telling the cluster (also the entry for messages that
+// came from it).
+func (h *revalidateHost) apply(req revalidateRequest) (revalidateResult, error) {
 	res := revalidateResult{Revalidated: []revalidatedTarget{}, Skipped: []skippedTarget{}}
 	pages := h.manifestPages()
 

@@ -147,6 +147,39 @@ type CSPConfig struct {
 	Directive string `json:"directive,omitempty"` // custom CSP directive string; empty = auto-generate
 }
 
+// CacheConfig selects where request-time caches live. The default keeps the ISR
+// page cache, the data cache and the region caches in each process's memory.
+// With a shared adapter, instances behind a load balancer serve and invalidate
+// the same pages (see the caching guide).
+type CacheConfig struct {
+	// Adapter is "memory" (default), "redis", or the path or package name of a
+	// module that default-exports a cache adapter factory.
+	Adapter string `json:"adapter,omitempty"`
+	// URL is the store's address (redis://[user:password@]host:6379/0, or
+	// rediss:// for TLS). Read it from the environment in krate.config.ts:
+	// `url: process.env.REDIS_URL`.
+	URL string `json:"url,omitempty"`
+	// URLEnv names the environment variable that holds the URL at run time. A
+	// deployed bundle never contains the URL itself; it reads this variable (or
+	// KRATE_CACHE_URL).
+	URLEnv string `json:"urlEnv,omitempty"`
+	// Prefix namespaces the keys, so several apps can share one store.
+	// Default "krate:".
+	Prefix string `json:"prefix,omitempty"`
+	// TimeoutMs bounds one cache call; a slower store counts as down and the
+	// page is rendered instead. Default 250.
+	TimeoutMs int `json:"timeoutMs,omitempty"`
+	// TTLSeconds is how long ISR entries stay in the shared store. Default 7 days.
+	TTLSeconds int `json:"ttlSeconds,omitempty"`
+	// Options are passed to a custom adapter factory.
+	Options map[string]any `json:"options,omitempty"`
+}
+
+// Shared reports whether the config selects a store other than process memory.
+func (c CacheConfig) Shared() bool {
+	return c.Adapter != "" && c.Adapter != "memory"
+}
+
 type SSRConfig struct {
 	// RendererPort is the port for the Node.js SSR renderer server.
 	// If 0, defaults to DevServer.Port + 10 (dev) or 3100 (prod).
@@ -562,6 +595,7 @@ type Config struct {
 	CSP         CSPConfig       `json:"csp,omitempty"`
 	Runtime     string          `json:"runtime,omitempty"`
 	SSR         SSRConfig       `json:"ssr,omitempty"`
+	Cache       CacheConfig     `json:"cache,omitempty"`
 	PathAliases PathAliases     `json:"pathAliases,omitempty"` // from tsconfig.json paths or config object
 	TSBaseDir   string          `json:"tsBaseDir,omitempty"`   // baseUrl resolved to absolute path
 	TSBaseURL   string          `json:"-"`                     // tsconfig baseUrl, absolute; empty when tsconfig sets none
