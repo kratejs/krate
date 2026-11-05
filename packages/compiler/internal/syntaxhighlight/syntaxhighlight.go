@@ -16,9 +16,10 @@ var formatter = html.New(
 	html.WithLineNumbers(false),
 )
 
-// DefaultTheme is the chroma theme name used when none is configured. It is
-// shared with CSSForTheme so the class output and the generated CSS agree.
-const DefaultTheme = "github-dark"
+// DefaultTheme is the chroma theme name used when a caller names none. The
+// class-based HTML does not depend on the theme (colours live in ThemeCSS), so
+// this only picks the style handed to the formatter.
+const DefaultTheme = DefaultLightTheme
 
 // Highlight returns HTML with CSS class annotations for the given code and
 // language, using the default theme. Callers that know the configured code
@@ -27,9 +28,8 @@ func Highlight(code, lang string) string {
 	return HighlightTheme(code, lang, DefaultTheme)
 }
 
-// HighlightTheme is Highlight with an explicit chroma theme. The theme affects
-// the token->class mapping, so it must match the stylesheet produced by
-// CSSForTheme or the highlighted code is styled (or unstyled) incorrectly.
+// HighlightTheme is Highlight with an explicit chroma theme. In class mode the
+// markup is the same for every theme; the colours come from ThemeCSS.
 func HighlightTheme(code, lang, theme string) string {
 	return HighlightThemeLines(code, lang, theme, "")
 }
@@ -78,10 +78,7 @@ func HighlightThemeLines(code, lang, theme, lines string) string {
 		return escapeHTML(code)
 	}
 
-	style := styles.Get(theme)
-	if style == nil {
-		style = styles.Get(DefaultTheme)
-	}
+	style := styleFor(theme)
 
 	f := formatter
 	if ranges := ParseLineRanges(lines); len(ranges) > 0 {
@@ -118,26 +115,6 @@ func stripWrapper(s string) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s)
-}
-
-// CSSForTheme returns the CSS stylesheet for the given chroma theme name.
-// The returned CSS targets the class-based output from the HTML formatter.
-func CSSForTheme(theme string) string {
-	if theme == "" {
-		theme = DefaultTheme
-	}
-
-	style := styles.Get(theme)
-	if style == nil {
-		style = styles.Get("monokai")
-	}
-
-	var buf bytes.Buffer
-	if err := formatter.WriteCSS(&buf, style); err != nil {
-		return ""
-	}
-
-	return buf.String()
 }
 
 // AvailableThemes returns a list of built-in chroma theme names.

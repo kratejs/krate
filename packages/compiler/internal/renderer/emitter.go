@@ -177,9 +177,8 @@ type Emitter struct {
 	moduleConsts map[string]ast.Expr
 
 	// CodeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
-	// during SSREval. It must match the stylesheet generated for the same theme
-	// (syntaxhighlight.CSSForTheme). Wire it from the build; empty selects the
-	// default theme.
+	// during SSREval. The markup is the same for every theme; the colours come
+	// from syntaxhighlight.ThemeCSS. Empty selects the default theme.
 	CodeTheme string
 
 	// errs collects diagnostics for unsupported constructs encountered during

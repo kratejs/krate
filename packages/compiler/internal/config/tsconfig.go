@@ -777,9 +777,7 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 					cfg.Markdown.CodeHighlight = b
 				}
 			case "codeTheme":
-				if s, ok := v.(string); ok {
-					cfg.Markdown.CodeTheme = s
-				}
+				cfg.Markdown.SetCodeTheme(v)
 			case "math":
 				if b, ok := v.(bool); ok {
 					cfg.Markdown.Math = b

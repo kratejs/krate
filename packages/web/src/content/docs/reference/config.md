@@ -265,10 +265,20 @@ markdown: {
   headingAnchors: true,
   admonitions: true,
   codeHighlight: true,
+  codeTheme: { light: "github", dark: "github-dark" }, // or one name for both modes
   math: false,          // load KaTeX (CDN) and render $...$ / $$...$$
   plugins: ["./md/transform.ts"], // AfterMarkdownParse HTML transforms
 }
 ```
+
+`codeTheme` picks the syntax colours. A plain string (`"monokai"`) is one theme
+for both colour modes; `{ light, dark }` picks one per mode, and a missing side
+keeps its default (`github`, `github-dark`). Any chroma style name works, and an
+unknown one warns (`KR7150`) and falls back to the default for that mode. The
+stylesheet follows the page's mode - the system preference, or a `data-theme`
+attribute on `<html>` - and the markup is the same in both modes, so switching
+needs no JavaScript and no second copy of the HTML. It applies to the `Code`
+component and to fenced blocks alike.
 
 Beyond GFM (tables, task lists, strikethrough, autolinks), the renderer supports
 definition lists, footnotes (`[^1]`), emoji shortcodes (`:rocket:`), and

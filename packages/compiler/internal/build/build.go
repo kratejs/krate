@@ -1612,6 +1612,12 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 	memo := make(map[string]processed)
 	var chromaCSS string
 	chromaLoaded := false
+	var codeTheme syntaxhighlight.Theme
+	if b.Cfg.Markdown.CodeHighlight {
+		// Resolve up front so an unknown theme name is reported even on a
+		// build that renders no code.
+		codeTheme = b.codeTheme()
+	}
 
 	// Per-variant stylesheets: in hybrid+userAgent mode the UA sibling should
 	// download only the legacy signal rules (and the default document only the
@@ -1654,7 +1660,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		pageCss := r.CSS
 		if b.Cfg.Markdown.CodeHighlight && pageRendersCode(r.HTML) {
 			if !chromaLoaded {
-				chromaCSS = syntaxhighlight.CSSForTheme(b.Cfg.Markdown.CodeTheme)
+				chromaCSS = syntaxhighlight.ThemeCSS(codeTheme)
 				chromaLoaded = true
 			}
 			if chromaCSS != "" {
@@ -1694,6 +1700,26 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 		}
 	}
 	return written
+}
+
+// codeTheme resolves the configured light and dark code themes. An unknown
+// name is reported once (KR7150) and replaced by the default for its mode.
+func (b *Builder) codeTheme() syntaxhighlight.Theme {
+	th, unknown := syntaxhighlight.ResolveTheme(b.Cfg.Markdown.CodeTheme, b.Cfg.Markdown.CodeThemeDark)
+	var ds []diag.Diagnostic
+	for _, name := range unknown {
+		ds = append(ds, diag.Diagnostic{
+			File:     "krate.config.ts",
+			Severity: diag.SeverityWarning,
+			Code:     diag.CodeUnknownCodeTheme,
+			Message:  fmt.Sprintf("unknown code theme %q; using the default for that mode", name),
+			Hint:     "use a chroma theme name such as " + strings.Join(syntaxhighlight.SimilarThemes(name, 3), ", ") + ", or { light, dark } to pick one per mode",
+		})
+	}
+	if len(ds) > 0 {
+		printWarningsOnce(os.Stderr, ds)
+	}
+	return th
 }
 
 // pageRendersCode reports whether a page's markup contains syntax-highlighted

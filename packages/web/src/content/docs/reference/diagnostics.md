@@ -416,6 +416,12 @@ A named import from `@krate/runtime` (or one of its subpaths) asks for something
 
 `import logo from "./logo.png"` binds the file's hashed URL. The compiler replaces reads of the binding in the module that imports the file, so a binding that another module re-exports (`export { logo }`), or a read the rewrite cannot reach, has no value in the browser script: it is a ReferenceError there, or renders as the bare name. Import the asset directly where it is used, or export the URL as a string constant. This is a warning.
 
+### KR7150
+
+**Unknown code theme**
+
+`markdown.codeTheme` names a syntax theme that Krate does not ship, so code is highlighted with the default theme for that colour mode instead (`github` for light, `github-dark` for dark). Use a chroma style name such as `github`, `github-dark`, `monokai`, `dracula` or `nord`. Give one name to use it in both modes, or `{ light: "github", dark: "github-dark" }` to pick a theme per mode. This is a warning.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

@@ -871,7 +871,7 @@ body:has(.simple-page) {
     color: var(--simple-tok-keyword);
 }
 
-.simple-content .chroma :is(.kc, .kp, .no, .nl, .py, .nv, .vc, .vg, .vi, .vm, .sa, .dl, .se, .sh, .sr, .ld, .gh, .gu) {
+.simple-content .chroma :is(.kc, .kp, .bp, .no, .nl, .py, .nv, .vc, .vg, .vi, .vm, .sa, .dl, .se, .sh, .sr, .ld, .gh, .gu) {
     color: var(--simple-tok-const);
 }
 

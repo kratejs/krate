@@ -135,8 +135,12 @@ export interface MarkdownConfig {
   headingAnchors?: boolean;
   admonitions?: boolean;
   codeHighlight?: boolean;
-  /** chroma theme for syntax highlighting (default "github-dark"). */
-  codeTheme?: string;
+  /**
+   * chroma theme for syntax highlighting. A name applies to both colour modes;
+   * `{ light, dark }` picks one per mode. Defaults to
+   * `{ light: "github", dark: "github-dark" }`.
+   */
+  codeTheme?: string | { light?: string; dark?: string };
   math?: boolean;
   /** Render ```` ```mermaid ```` code blocks as diagrams (loads Mermaid from a CDN). */
   mermaid?: boolean;

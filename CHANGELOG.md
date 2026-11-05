@@ -27,6 +27,15 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- Code follows the colour mode. `markdown.codeTheme` takes `{ light, dark }` (a plain
+  name still means one theme for both modes) and defaults to `github` in light and
+  `github-dark` in dark; one stylesheet serves system preference and `data-theme`,
+  switching needs no JavaScript, and the HTML keeps one span per token. `<Code>` and
+  fenced blocks no longer assume a dark surface: with a light theme the text was
+  near-invisible (`#fafafa` on `#f7f7f7`), and the copy button hover was white on any
+  background. An unknown theme name warns (`KR7150`). `@krate/base-docs-theme` code
+  blocks now follow the page's mode (light blocks in light mode) with AA colours.
+  Override the surface with `--krate-code-bg` / `--krate-code-text`.
 - `krate fix` repairs the 0.4 template's `tsconfig.json`: `"baseUrl": "./src"` with
   `"@/*": ["./src/*"]` can only mean the project root, so it sets `baseUrl` to `"."`
   (`KR7125`). The edited file also builds on 0.4. The build error for an alias that
