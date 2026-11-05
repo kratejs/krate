@@ -4,6 +4,8 @@ package diag
 const (
 	// CodeTailwindDisabled: Tailwind input is present but tailwind.enabled is off.
 	CodeTailwindDisabled Code = "KR7140"
+	// CodeCSSSyntax: unbalanced braces, or an unclosed comment or string, in authored CSS.
+	CodeCSSSyntax Code = "KR7141"
 )
 
 func init() {
@@ -17,6 +19,15 @@ func init() {
 				"The warning appears once per build when a `tailwind.config.{ts,js,mjs}` file exists or one of those " +
 				"directives is found. Enable Tailwind, or delete the config file and directives if you do not use it. " +
 				"This is a warning.",
+		},
+		CodeInfo{
+			Code:  CodeCSSSyntax,
+			Title: "CSS has unbalanced braces or an unclosed comment",
+			Explanation: "A stylesheet with a `{` that is never closed, a `}` with no `{`, or a comment that never ends " +
+				"is not valid CSS, and browsers recover by dropping or merging the rules that follow it. Krate reports " +
+				"the line and column, and closes the damage at the end of the file so it cannot swallow the next " +
+				"stylesheet in the page: a stray `}` is removed and a missing one is added. The file is still shipped " +
+				"as written otherwise, so fix the source. This is a warning.",
 		},
 	)
 }

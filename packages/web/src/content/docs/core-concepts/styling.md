@@ -350,6 +350,17 @@ first, for example with the `sass` CLI in a prebuild script
 (`sass src/styles.scss src/styles.css`), and import the `.css` file, or port the
 styles to CSS or Tailwind.
 
+## Invalid CSS
+
+Krate does not rewrite your CSS, but it checks each stylesheet file for
+unbalanced braces, an unclosed comment or an unclosed string. A problem is
+reported as a warning with the file, line and column
+([KR7141](/docs/reference/diagnostics/)). Because the sheets a page imports are
+joined into one file, Krate also closes the damage at the end of the file that
+caused it (a stray `}` is dropped, a missing `}` is added), so a mistake in one
+file cannot swallow the rules of the next. Fix the source: the rest of the file
+is shipped as written.
+
 ## Global CSS & code splitting
 
 Plain CSS imported or referenced in pages is collected per page, in source and

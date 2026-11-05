@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kratejs/krate/packages/compiler/internal/astprint"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 )
 
@@ -176,5 +177,50 @@ export default function P(){
 	if !strings.Contains(printed, a.Mappings["card-title"]) || !strings.Contains(printed, b.Mappings["cardTitle"]) ||
 		strings.Contains(printed, `a["card-title"]`) || strings.Contains(printed, "b.cardTitle") {
 		t.Errorf("computed/camelCase member reads not rewritten:\n%s", printed)
+	}
+}
+
+func TestUnbalancedCSSIsReportedAndDoesNotLeakIntoTheNextSheet(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"src/page.tsx":  "import './a.css';\nimport './b.css';\nexport default function P(){return <div/>;}",
+		"src/a.css":     ".a{color:red}\n.broken {\n  color:green;\n",
+		"src/b.css":     ".b{color:blue}",
+		"src/page2.tsx": "import './c.css';\nexport default function P(){return <div/>;}",
+		"src/c.css":     "@import './d.css';\n.c{color:red}",
+		"src/d.css":     ".d{color:red}\n}\n.d2{color:blue}",
+	})
+	bundle := bundleEntry(t, root, "src/page.tsx", nil)
+	if idx := strings.Index(bundle.CSS, ".b{color:blue}"); idx < 0 ||
+		strings.Count(bundle.CSS[:idx], "{") != strings.Count(bundle.CSS[:idx], "}") {
+		t.Errorf("the unclosed block of a.css swallows b.css:\n%s", bundle.CSS)
+	}
+	var found bool
+	for _, m := range bundle.Modules {
+		for _, d := range m.Diagnostics {
+			if d.Code == diag.CodeCSSSyntax && d.File == "src/a.css" && d.Line == 2 && d.Col == 9 {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no KR7141 warning at src/a.css:2:9 in %+v", bundle.Modules)
+	}
+
+	// A stray brace in an imported file is reported against that file.
+	bundle = bundleEntry(t, root, "src/page2.tsx", nil)
+	found = false
+	for _, m := range bundle.Modules {
+		for _, d := range m.Diagnostics {
+			if d.Code == diag.CodeCSSSyntax && d.File == "src/d.css" && d.Line == 2 {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no KR7141 warning at src/d.css:2 for the imported file")
+	}
+	if strings.Count(bundle.CSS, "{") != strings.Count(bundle.CSS, "}") {
+		t.Errorf("imported sheet left unbalanced:\n%s", bundle.CSS)
 	}
 }

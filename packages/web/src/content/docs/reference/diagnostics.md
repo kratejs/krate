@@ -446,6 +446,12 @@ An `opengraph-image` or `twitter-image` file inside a dynamic segment (`blog/[sl
 
 Krate generates Tailwind utility CSS only when `tailwind: { enabled: true }` is set in `krate.config.ts`. Without it, `@tailwind base|components|utilities` and `@import "tailwindcss"` are removed from your CSS and no utilities are generated, so the page ships almost no styles. The warning appears once per build when a `tailwind.config.{ts,js,mjs}` file exists or one of those directives is found. Enable Tailwind, or delete the config file and directives if you do not use it. This is a warning.
 
+### KR7141
+
+**CSS has unbalanced braces or an unclosed comment**
+
+A stylesheet with a `{` that is never closed, a `}` with no `{`, or a comment that never ends is not valid CSS, and browsers recover by dropping or merging the rules that follow it. Krate reports the line and column, and closes the damage at the end of the file so it cannot swallow the next stylesheet in the page: a stray `}` is removed and a missing one is added. The file is still shipped as written otherwise, so fix the source. This is a warning.
+
 ### KR7150
 
 **Unknown code theme**
