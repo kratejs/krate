@@ -87,6 +87,17 @@ type Interp struct {
 	Scope *Scope
 	steps int
 	depth int
+	// Volatile lets `new Date()`, `Date.now()` and `Math.random()` evaluate to
+	// the build clock and a random number. Only a host that bakes the result
+	// into HTML may set it: such a value is wrong as a constant in code that
+	// runs in the browser, where it is computed again. Without it these
+	// expressions are unknown, as they have no value that holds at run time.
+	Volatile bool
+	// randSeq counts Math.random() calls, to derive a reproducible value per
+	// call site when SOURCE_DATE_EPOCH is set.
+	randSeq map[ast.Pos]int
+	// callPos is the position of the call being dispatched, for Math.random().
+	callPos ast.Pos
 }
 
 // New returns an interpreter with a fresh root scope.
@@ -193,6 +204,13 @@ func (in *Interp) eval(expr ast.Expr) (Value, bool) {
 			}
 			return arrayFromArgs(args), false
 		}
+		if ctor := in.Eval(e.Callee); ctor.kind == KindFunction && ctor.fn.Construct != nil {
+			args, bad := in.Args(e.Args)
+			if bad.IsUnknown() {
+				return bad, false
+			}
+			return ctor.fn.Construct(args), false
+		}
 		return Unsupported("new " + calleeName(e.Callee) + "(...)"), false
 	case *ast.JSXElement, *ast.JSXFragment:
 		if in.Hooks.JSX != nil {
@@ -253,7 +271,7 @@ func (in *Interp) ident(name string) Value {
 	case "Infinity":
 		return Number(math.Inf(1))
 	}
-	if g, ok := globalObject(name); ok {
+	if g, ok := globalObject(in, name); ok {
 		return g
 	}
 	return Dynamic("unresolved identifier " + name)
@@ -268,7 +286,11 @@ func (in *Interp) template(e *ast.TemplateExpr) Value {
 			if v.IsUnknown() {
 				return v
 			}
-			b.WriteString(v.ToPrimitive().ToString())
+			p := v.ToPrimitive()
+			if p.IsUnknown() {
+				return p
+			}
+			b.WriteString(p.ToString())
 		}
 	}
 	return String(b.String())
@@ -441,21 +463,6 @@ func unknownOr(v Value, reason string) Value {
 	return Unsupported(reason)
 }
 
-// iterate returns the elements produced by iterating v (arrays and strings).
-func iterate(v Value) ([]Value, bool) {
-	switch v.kind {
-	case KindArray:
-		return v.Elems(), true
-	case KindString:
-		var out []Value
-		for _, r := range v.s {
-			out = append(out, String(string(r)))
-		}
-		return out, true
-	}
-	return nil, false
-}
-
 func (in *Interp) object(e *ast.ObjectExpr) Value {
 	obj := NewObject()
 	for _, p := range e.Properties {
@@ -474,7 +481,7 @@ func (in *Interp) object(e *ast.ObjectExpr) Value {
 				for i, v := range src.Elems() {
 					obj.Set(NumberToString(float64(i)), v)
 				}
-			case KindUndefined, KindNull, KindBool, KindNumber:
+			case KindUndefined, KindNull, KindBool, KindNumber, KindDate, KindMap, KindSet, KindIterator:
 			case KindString:
 				for i, r := range []rune(src.s) {
 					obj.Set(NumberToString(float64(i)), String(string(r)))
@@ -594,7 +601,21 @@ func (in *Interp) destructure(scope *Scope, pattern string, v Value) Value {
 	inner := pattern[1 : len(pattern)-1]
 	parts := splitTopLevel(inner)
 	if pattern[0] == '[' {
-		elems, ok := iterate(v)
+		// Pull only the elements the pattern names, so an iterator that is
+		// destructured keeps its remaining items; a rest element takes all.
+		need := len(parts)
+		for _, part := range parts {
+			if strings.HasPrefix(strings.TrimSpace(part), "...") {
+				need = -1
+			}
+		}
+		var elems []Value
+		var ok bool
+		if need < 0 {
+			elems, ok = iterate(v)
+		} else {
+			elems, ok = iterateN(v, need)
+		}
 		if !ok {
 			if v.IsUnknown() {
 				elems = nil
@@ -673,6 +694,105 @@ func (in *Interp) destructure(scope *Scope, pattern string, v Value) Value {
 		}
 	}
 	return v
+}
+
+// bindPatternExpr binds a destructuring target given as an AST (the left side
+// of a for-of loop) to v in scope. It returns Unsupported for targets it
+// cannot bind.
+func (in *Interp) bindPatternExpr(scope *Scope, target ast.Expr, v Value) Value {
+	switch t := target.(type) {
+	case nil:
+		return v
+	case *ast.Identifier:
+		scope.Define(t.Name, v)
+		return v
+	case *ast.ParenExpr:
+		return in.bindPatternExpr(scope, t.Expr, v)
+	case *ast.BinaryExpr:
+		if t.Op != "=" {
+			break
+		}
+		if v.kind == KindUndefined {
+			v = in.EvalIn(scope, t.Right)
+		}
+		return in.bindPatternExpr(scope, t.Left, v)
+	case *ast.ArrayExpr:
+		need := len(t.Elements)
+		for _, el := range t.Elements {
+			if u, ok := el.(*ast.UnaryExpr); ok && u.Op == "..." {
+				need = -1
+			}
+		}
+		var elems []Value
+		var ok bool
+		if need < 0 {
+			elems, ok = iterate(v)
+		} else {
+			elems, ok = iterateN(v, need)
+		}
+		if !ok {
+			return unknownOr(v, "array destructuring of a non-iterable value")
+		}
+		for i, el := range t.Elements {
+			if el == nil {
+				continue
+			}
+			if u, ok := el.(*ast.UnaryExpr); ok && u.Op == "..." {
+				rest := NewArray()
+				if i < len(elems) {
+					rest = ArrayOf(elems[i:])
+				}
+				if r := in.bindPatternExpr(scope, u.Arg, rest); r.IsUnsupported() {
+					return r
+				}
+				continue
+			}
+			item := Undefined()
+			if i < len(elems) {
+				item = elems[i]
+			}
+			if r := in.bindPatternExpr(scope, el, item); r.IsUnsupported() {
+				return r
+			}
+		}
+		return v
+	case *ast.ObjectExpr:
+		if v.IsNullish() || v.IsUnknown() {
+			return unknownOr(v, "object destructuring of "+v.ToString())
+		}
+		used := map[string]bool{}
+		for _, p := range t.Properties {
+			if p == nil {
+				continue
+			}
+			if p.Spread {
+				rest := NewObject()
+				for _, k := range v.Keys() {
+					if !used[k] {
+						pv, _ := v.Get(k)
+						rest.Set(k, pv)
+					}
+				}
+				if r := in.bindPatternExpr(scope, p.Value, rest); r.IsUnsupported() {
+					return r
+				}
+				continue
+			}
+			if p.Computed || p.Method {
+				return Unsupported("destructuring with a computed key")
+			}
+			used[p.Key] = true
+			target := p.Value
+			if target == nil {
+				target = &ast.Identifier{Name: p.Key}
+			}
+			if r := in.bindPatternExpr(scope, target, GetProperty(v, p.Key)); r.IsUnsupported() {
+				return r
+			}
+		}
+		return v
+	}
+	return Unsupported("destructuring target")
 }
 
 // propertyOf reads key from v for destructuring (Unknown propagates).
@@ -1082,10 +1202,10 @@ func (in *Interp) execSwitch(s *ast.SwitchStmt) (Value, control) {
 func (in *Interp) execForIn(s *ast.ForInStmt) (Value, control) {
 	src := in.Eval(s.Right)
 	var items []Value
+	var next func() (Value, bool)
 	if s.IsForOf {
 		var ok bool
-		items, ok = iterate(src)
-		if !ok {
+		if next, ok = iterSource(src); !ok {
 			return unknownOr(src, "for...of over a non-iterable value"), ctlError
 		}
 	} else {
@@ -1101,19 +1221,41 @@ func (in *Interp) execForIn(s *ast.ForInStmt) (Value, control) {
 		default:
 			return unknownOr(src, "for...in"), ctlError
 		}
+		pos := 0
+		next = func() (Value, bool) {
+			if pos >= len(items) {
+				return Value{}, false
+			}
+			pos++
+			return items[pos-1], true
+		}
 	}
 	name := ""
+	pattern := ast.Expr(nil)
 	switch l := s.Left.(type) {
 	case *ast.Identifier:
 		name = l.Name
+	case *ast.ArrayExpr, *ast.ObjectExpr:
+		pattern = l
 	default:
 		return Unsupported("for loop binding"), ctlError
 	}
 	saved := in.Scope
 	defer func() { in.Scope = saved }()
-	for _, it := range items {
+	for count := 0; ; count++ {
+		it, more := next()
+		if !more {
+			break
+		}
+		if count >= maxLoopIterations {
+			return Unsupported("loop iteration limit exceeded"), ctlError
+		}
 		in.Scope = NewScope(saved)
-		if s.Keyword != "" || !in.Scope.Assign(name, it) {
+		if pattern != nil {
+			if r := in.bindPatternExpr(in.Scope, pattern, it); r.IsUnknown() {
+				return r, ctlError
+			}
+		} else if s.Keyword != "" || !in.Scope.Assign(name, it) {
 			in.Scope.Define(name, it)
 		}
 		v, ctl := in.exec(s.Body)

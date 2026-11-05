@@ -37,9 +37,22 @@ func (v Value) ToBoolean() bool {
 // ToPrimitive converts objects to primitives (hint "default"/"number" behave
 // alike for plain arrays and objects: valueOf returns the object itself, so
 // toString is used).
-func (v Value) ToPrimitive() Value {
+func (v Value) ToPrimitive() Value { return v.toPrimitive(false) }
+
+// toPrimitive converts an object to a primitive. A Date converts to its time
+// value under the number hint (relational operators, subtraction) and to its
+// string form otherwise (+, ==, template literals).
+func (v Value) toPrimitive(numberHint bool) Value {
 	switch v.kind {
-	case KindArray, KindObject, KindJSX, KindFunction:
+	case KindDate:
+		if numberHint {
+			return Number(v.date.ms)
+		}
+		if !v.date.env {
+			return dateNeedsEnv("the string form of a Date")
+		}
+		return String(v.ToString())
+	case KindArray, KindObject, KindJSX, KindFunction, KindIterator, KindMap, KindSet:
 		return String(v.ToString())
 	}
 	return v
@@ -63,6 +76,8 @@ func (v Value) ToNumber() float64 {
 		return StringToNumber(v.s)
 	case KindBigInt:
 		return StringToNumber(v.s)
+	case KindDate:
+		return v.date.ms
 	}
 	return v.ToPrimitive().ToNumber()
 }
@@ -89,6 +104,14 @@ func (v Value) ToString() string {
 		return "function " + v.fn.Name + "() { [native code] }"
 	case KindObject, KindJSX:
 		return "[object Object]"
+	case KindDate:
+		return dateString(v.date.ms)
+	case KindMap:
+		return "[object Map]"
+	case KindSet:
+		return "[object Set]"
+	case KindIterator:
+		return "[object " + v.iter.Tag + "]"
 	}
 	return ""
 }
@@ -112,7 +135,7 @@ func (v Value) TypeOf() string {
 	switch v.kind {
 	case KindUndefined:
 		return "undefined"
-	case KindNull, KindArray, KindObject, KindJSX:
+	case KindNull, KindArray, KindObject, KindJSX, KindIterator, KindMap, KindSet, KindDate:
 		return "object"
 	case KindBool:
 		return "boolean"

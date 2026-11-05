@@ -139,6 +139,46 @@ func writeJSSource(b *strings.Builder, v Value) bool {
 			}
 		}
 		b.WriteByte('}')
+	case KindDate:
+		if math.IsNaN(v.date.ms) {
+			b.WriteString("new Date(NaN)")
+		} else {
+			b.WriteString("new Date(" + NumberToString(v.date.ms) + ")")
+		}
+	case KindMap, KindSet:
+		if v.kind == KindMap {
+			b.WriteString("new Map([")
+		} else {
+			b.WriteString("new Set([")
+		}
+		cur := v.coll.cursor()
+		first := true
+		for {
+			e, ok := cur()
+			if !ok {
+				break
+			}
+			if !first {
+				b.WriteByte(',')
+			}
+			first = false
+			if v.kind == KindSet {
+				if !writeJSSource(b, e.key) {
+					return false
+				}
+				continue
+			}
+			b.WriteByte('[')
+			if !writeJSSource(b, e.key) {
+				return false
+			}
+			b.WriteByte(',')
+			if !writeJSSource(b, e.val) {
+				return false
+			}
+			b.WriteByte(']')
+		}
+		b.WriteString("])")
 	default:
 		return false
 	}
@@ -323,6 +363,14 @@ func writeJSON(b *strings.Builder, v Value, gap, indent string) jsonResult {
 			b.WriteString(indent)
 		}
 		b.WriteByte('}')
+	case KindDate:
+		if math.IsNaN(v.date.ms) {
+			b.WriteString("null")
+		} else {
+			writeJSONString(b, dateISO(v.date.ms))
+		}
+	case KindMap, KindSet, KindIterator:
+		b.WriteString("{}")
 	case KindJSX:
 		// A React element serializes as its (opaque) object form; there is no
 		// faithful build-time equivalent.
@@ -409,6 +457,12 @@ func ToAST(v Value) ast.Expr {
 			props = append(props, &ast.ObjectProp{Key: k, Value: x})
 		}
 		return &ast.ObjectExpr{Properties: props}
+	case KindDate:
+		arg := ast.Expr(&ast.Identifier{Name: "NaN"})
+		if !math.IsNaN(v.date.ms) {
+			arg = ToAST(Number(v.date.ms))
+		}
+		return &ast.NewExpr{Callee: &ast.Identifier{Name: "Date"}, Args: []ast.Expr{arg}}
 	}
 	return nil
 }

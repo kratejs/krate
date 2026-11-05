@@ -19,7 +19,7 @@ func StrictEquals(a, b Value) bool {
 		return a.n == b.n // NaN != NaN, +0 == -0
 	case KindString, KindBigInt:
 		return a.s == b.s
-	case KindArray, KindObject, KindFunction:
+	case KindArray, KindObject, KindFunction, KindIterator, KindMap, KindSet, KindDate:
 		return a.same(b)
 	}
 	// JSX elements are fresh objects per evaluation; Unknown is never equal.
@@ -63,12 +63,22 @@ func LooseEquals(a, b Value) bool {
 }
 
 func isObjectKind(k Kind) bool {
-	return k == KindArray || k == KindObject || k == KindFunction || k == KindJSX
+	switch k {
+	case KindArray, KindObject, KindFunction, KindJSX, KindIterator, KindMap, KindSet, KindDate:
+		return true
+	}
+	return false
 }
 
 // Add implements the + operator.
 func Add(a, b Value) Value {
 	pa, pb := a.ToPrimitive(), b.ToPrimitive()
+	if pa.kind == KindUnknown {
+		return pa
+	}
+	if pb.kind == KindUnknown {
+		return pb
+	}
 	if pa.kind == KindString || pb.kind == KindString {
 		return String(pa.ToString() + pb.ToString())
 	}
@@ -112,7 +122,7 @@ func compareStrings(a, b string) int {
 // lessThan implements IsLessThan; known=false means the result is undefined
 // (a NaN operand), which every relational operator treats as false.
 func lessThan(a, b Value) (less, known bool) {
-	pa, pb := a.ToPrimitive(), b.ToPrimitive()
+	pa, pb := a.toPrimitive(true), b.toPrimitive(true)
 	if pa.kind == KindString && pb.kind == KindString {
 		return compareStrings(pa.s, pb.s) < 0, true
 	}
@@ -148,10 +158,11 @@ func BinaryOp(op string, a, b Value) Value {
 		return Number(math.Mod(a.ToNumber(), b.ToNumber()))
 	case "**":
 		return Number(Pow(a.ToNumber(), b.ToNumber()))
-	case "==":
-		return Bool(LooseEquals(a, b))
-	case "!=":
-		return Bool(!LooseEquals(a, b))
+	case "==", "!=":
+		if u := dateEqualityUnknown(a, b); u.kind == KindUnknown {
+			return u
+		}
+		return Bool(LooseEquals(a, b) == (op == "=="))
 	case "===":
 		return Bool(StrictEquals(a, b))
 	case "!==":
@@ -224,4 +235,18 @@ func UnaryOp(op string, a Value) Value {
 		return Undefined()
 	}
 	return Unsupported("unary operator " + op)
+}
+
+// dateEqualityUnknown is the Unknown a loose comparison of a Date with a
+// non-Date gives when the Date's string form would be needed but depends on
+// the environment.
+func dateEqualityUnknown(a, b Value) Value {
+	if (a.kind == KindDate) != (b.kind == KindDate) {
+		for _, v := range [2]Value{a, b} {
+			if v.kind == KindDate && !v.date.env {
+				return v.ToPrimitive()
+			}
+		}
+	}
+	return Value{}
 }
