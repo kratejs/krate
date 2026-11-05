@@ -805,8 +805,11 @@ How it works:
 
   Preact 10.20 or newer is required. If Preact is missing, the build fails with an actionable error rather than
   shipping a broken island.
-- Each island gets its own chunk (`chunks/island.<hash>.js`). Shared Preact
-  modules are emitted once and wired through an import map.
+- Each island gets an entry file (`chunks/island_<id>.js`). The entries of all
+  pages are bundled together with code splitting, so a module two pages import
+  (a store, a query client, the library itself) is one shared file with one
+  instance, and the Preact modules are emitted once and wired through an import
+  map. See [State across navigation](#state-across-navigation).
 - Where all bridged props have build-time initial values, Krate renders the
   island with `preact-render-to-string` and places that markup inside the
   placeholder. The client then **hydrates** it instead of replacing it. Islands
@@ -913,22 +916,123 @@ interaction it was clicked or typed into.
 |---------|--------|-----------------|
 | zustand | works: store hooks, selectors, state shared by the islands of a page | 5.0.16 |
 | valtio, jotai | work: `useSnapshot`, `useAtom` | 2.3.2, 2.20.3 |
-| react-redux with Redux Toolkit | works: `Provider`, `useSelector`, `useDispatch`, a slice and `configureStore` | 9.3.1, 2.14.0 |
+| react-redux with Redux Toolkit | works: `Provider` in the island's module or in a layout, `useSelector`, `useDispatch`, a slice and `configureStore` | 9.3.1, 2.14.0 |
 | react-hook-form | works: `register`, `required` validation, `handleSubmit`, `formState` | 7.91.0 |
 | SWR | works: `useSWR` directly or inside a custom hook | 2.5.1 |
-| TanStack Query | works: `useQuery` under a `QueryClientProvider` in the same island | 5.106.1 |
+| TanStack Query | works: `useQuery` under a `QueryClientProvider` in the island's module or in a layout, one client for every island | 5.106.1, 5.105.3 |
 | TanStack Table | works: `useReactTable` with `flexRender`, rendered on the server | 8.21.3 |
 | react-i18next | works: `useTranslation` after `i18n.use(initReactI18next).init()` | 15.7.4 |
 | usehooks-ts | works: `useCounter`, `useToggle` | 3.1.1 |
 | recharts, Headless UI | work (they need `import React from "react"`) | 2.15.4, 2.2.10 |
 | framer-motion | works: `motion.*` and `useAnimation` | 11.18.2 |
-| styled-components, `@emotion/styled`, emotion `css` prop, MUI `Button` | work, client-only (see below) | 6.6.0, 11.14.1, 11.14.0, 9.5.0 |
+| styled-components, `@emotion/styled`, emotion `css` prop, MUI `Button` | work, client-only (see below); a `ThemeProvider` in a layout reaches them | 6.6.0, 11.14.1, 11.14.0, 9.5.0 |
 
 These were run by hand against the real packages. The repository tests run
 stand-ins with the same import shapes (default `import React`, namespace
-import, `require("react")`), because the repository does not install the
-libraries, so the table is not covered by CI. A library that is not listed
-may work, but nothing was run for it.
+import, `require("react")`) and the same behavior (a store with module-level
+state, a query client with a context provider, a theme provider), because the
+repository does not install the libraries; they cover the behavior described on
+this page in Chromium, but not the libraries themselves. A library that is not
+listed may work, but nothing was run for it.
+
+### Providers in layouts
+
+A context provider a layout wraps around `{children}` reaches the islands of
+every page under that layout, with one provider instance for all of them:
+
+```tsx
+// src/pages/_layout.tsx
+import { useState } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Provider } from 'react-redux';
+import { ThemeProvider } from 'styled-components';
+import { store } from '../store';
+
+const theme = { name: 'light' };
+
+export default function Layout({ children }) {
+  const [client] = useState(() => new QueryClient());
+  return (
+    <div>
+      <nav><Link href="/">Home</Link></nav>
+      <Provider store={store}>
+        <QueryClientProvider client={client}>
+          <ThemeProvider theme={theme}>{children}</ThemeProvider>
+        </QueryClientProvider>
+      </Provider>
+    </div>
+  );
+}
+```
+
+The layout itself is compiled by Krate, and an island is a Preact tree, so
+context cannot cross between them. Krate therefore lifts the wrappers out of the
+layout: the layout renders `{children}` as if they were not there, and the chain
+(`Provider > QueryClientProvider > ThemeProvider`, with the props as written)
+becomes a generated module that every island of the page renders inside. This
+holds on the server too: the markup rendered at build time already contains the
+context, and the island hydrates onto it.
+
+- **One instance per page and site.** The props are evaluated once, in the
+  generated module, and that module is shared by all islands and all pages, so
+  they receive the same `QueryClient`, store or theme object. A client created
+  with `useState(() => new QueryClient())` in the layout is created once, not per
+  render and not per island.
+- **Nested layouts** compose: the providers of the outer layout wrap those of
+  the inner one, so an inner `ThemeProvider` overrides the outer one for the
+  pages under it.
+- **Which wrappers.** A tag on the path to `{children}` that comes from an npm
+  package built on React, or from a module of the project that renders such a
+  component around its `children` (a `Providers` component), is lifted. Other
+  elements stay in the layout.
+- **Props.** A prop can be a literal, an import, a module-level value, or a
+  value the layout component computes from those: a plain `const`,
+  `useState(() => value)` with no setter in use, or `useMemo(() => value, [])`.
+  Computing a prop from the layout's own `params`, from a signal, or from a
+  state setter cannot work, because the islands would not see it change: the
+  build reports `KR8015` with the reason.
+- **No markup of its own.** A lifted wrapper must render only its children. One
+  that adds elements (a `<div>` around them) cannot move into the islands, since
+  Krate renders the page content; the wrapper then stays in the layout and the
+  build reports `KR8016`.
+- **Layout components stay Krate's.** Krate components in the layout still
+  cannot read the provider's context, and a hook of a React library called
+  inside the layout is still `KR8013`.
+
+### State across navigation
+
+The islands of all pages are bundled together, so a module-level store is one
+store for the whole site, as in a React single-page app. A zustand or Redux
+store, a query client and the library modules they use are evaluated once; when
+the client-side router moves to another page, the new page's islands import the
+modules that are already loaded.
+
+- **Same instance, same value.** The count in a zustand store, a Redux slice and
+  the cache of a query client survive navigation, forward and back.
+- **Components start fresh.** An island is a Preact tree under the page's
+  content, and the router replaces that content: when a page changes, its
+  islands unmount (effects clean up, store subscriptions and query observers are
+  released) and the next page's islands mount. State inside a component
+  (`useState`) therefore resets, as when a React router swaps route elements.
+  Keep what must last in a store.
+- **Static pages stay static.** A page without islands loads no island code, and
+  the Preact import map is a small JSON block.
+- **Caching.** The entry file of an island (`island_<id>.js`) is revalidated on
+  every visit; the shared chunks (`isl-<hash>.js`) are content-hashed and cached
+  as immutable.
+
+### Pages rendered per request
+
+Pages with `dynamic = "force-dynamic"`, `revalidate = N` (ISR) or a streaming
+region run their JSX in Node on every request, where a component that needs
+React's render model cannot run. Their islands are therefore not executed there:
+the server answers with the placeholder of each island and the markup rendered
+for it at build time, and the page script mounts it as on a static page. The rest
+of the page is rendered per request as usual.
+
+Because that markup is rendered at build time, an island's props must be known
+then: a prop that only exists per request (a search parameter, a cookie) makes
+the island client-only, as on a static page, and the build says so (`KR8008`).
 
 ### CSS-in-JS
 
@@ -951,13 +1055,6 @@ silent failure in the browser:
   an `async` server page that (through its imports) calls a React-library hook
   fails with `KR8013`, naming the package and the hook. Render the component
   from a synchronous page instead, or use `createSignal` / `createResource`.
-- **Providers must be inside the island.** A `QueryClientProvider`,
-  `ThemeProvider` or similar wrapped around `{children}` in a layout does not
-  reach islands in pages: each island is its own Preact tree, so put the
-  provider in the module that uses the hook.
-- **State is per page.** A store module is shared by all islands on one page
-  (they are bundled into one chunk), but each page has its own chunk, so store
-  state does not survive client-side navigation.
 - **No bridge to Krate state from inside.** The island reads the page's
   signals only as props, and the page cannot read the island's store. Krate
   components that import the same store module do not see it.
@@ -966,8 +1063,12 @@ silent failure in the browser:
   the hook into its own module and render it from a page that passes the
   values in. Such a module also cannot use Krate-only APIs (`createSignal`,
   `<Head>`).
-- **Pages rendered per request** (`dynamic`, ISR or SSR modes) were not
-  verified with these islands; use static pages.
+- **Component state is not kept across pages.** Module-level state is (see
+  [State across navigation](#state-across-navigation)); the state of a
+  component resets when its island unmounts.
+- **No islands in layouts.** A layout is rendered by Krate and persists across
+  pages; a React-library island has to be rendered by a page. (Providers are
+  the exception, see [Providers in layouts](#providers-in-layouts).)
 
 ## Events, forms and refs
 

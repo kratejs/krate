@@ -398,3 +398,20 @@ func TestPerRequestPageIslandStubs(t *testing.T) {
 		}
 	}
 }
+
+// TestIslandChunkCachePolicy: the entry of an island changes when the shared
+// chunks around it do, so it is revalidated; the shared chunks are content
+// hashed and immutable.
+func TestIslandChunkCachePolicy(t *testing.T) {
+	if isHashedAsset("/chunks/island_5a00314fb962.js") {
+		t.Error("an island entry must not look content-hashed")
+	}
+	if !isHashedAsset("/chunks/isl-7fg65dz5.js") {
+		t.Error("a shared island chunk must be recognized as content-hashed")
+	}
+	for _, name := range []string{"island_0123456789ab", "island_ffffffffffff"} {
+		if isHashedAsset("/chunks/" + name + ".js") {
+			t.Errorf("%s must not look content-hashed", name)
+		}
+	}
+}
