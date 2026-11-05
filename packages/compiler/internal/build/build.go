@@ -1930,6 +1930,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 	bnd.SetDevMode(b.DevMode)
 	bnd.SetTailwindImports(b.tailwindImportMode())
 	bnd.SetMarkdownConfig(b.Cfg.Markdown)
+	bnd.SetMarkdownBasePath(b.Cfg.BaseURLPath())
 	return bnd
 }
 

@@ -3,6 +3,7 @@ package build
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -111,5 +112,39 @@ func TestMarkdownPageHonoursMarkdownConfig(t *testing.T) {
 	}
 	if strings.Contains(off, "krate-math") || !strings.Contains(off, "$a+b$") {
 		t.Errorf("math: false should leave $a+b$ alone:\n%s", off)
+	}
+}
+
+// A relative image in a page-level .md file is copied and linked at its hashed
+// URL, under the site base path exactly once.
+func TestMarkdownPageRelativeImages(t *testing.T) {
+	for _, base := range []string{"", "/docs"} {
+		root := t.TempDir()
+		writeFileRel(t, root, "src/pages/notes.md", "# N\n\n![a cat](./cat.png)\n")
+		writeFileRel(t, root, "src/pages/cat.png", "png-bytes")
+		cfg, err := config.Load(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Minify = false
+		cfg.BasePath = base
+		if err := New(root, cfg).BuildAll(); err != nil {
+			t.Fatalf("BuildAll (base %q): %v", base, err)
+		}
+		data, err := os.ReadFile(filepath.Join(cfg.OutDir, "notes", "index.html"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := regexp.MustCompile(`src="?(` + regexp.QuoteMeta(base) + `/assets/cat-[0-9a-f]+\.png)`).FindStringSubmatch(string(data))
+		if m == nil {
+			t.Fatalf("base %q: image not rewritten:\n%s", base, data)
+		}
+		file := filepath.Join(cfg.OutDir, filepath.FromSlash(strings.TrimPrefix(m[1], base)))
+		if _, err := os.Stat(file); err != nil {
+			t.Errorf("base %q: image not copied: %v", base, err)
+		}
+		if strings.Contains(string(data), "/docs/docs/") {
+			t.Errorf("base path applied twice:\n%s", data)
+		}
 	}
 }

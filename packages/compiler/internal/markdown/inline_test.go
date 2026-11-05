@@ -1,6 +1,8 @@
 package markdown
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -95,5 +97,38 @@ func TestRenderInlineBlockedAutolinkKeepsText(t *testing.T) {
 	}
 	if !strings.Contains(got, "javascript:alert(5)") {
 		t.Errorf("expected autolink text preserved, got %q", got)
+	}
+}
+
+func TestRelativeImagesResolveThroughImageURL(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "img"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "img", "a b.png"), []byte("png-bytes"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "secret.png"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	registered := map[string]string{}
+	cfg := DefaultConfig()
+	cfg.ImageURL = LocalImageResolver(filepath.Join(root, "docs"), filepath.Join(root, "docs", "page.md"), "/base", func(abs, u string) {
+		registered[abs] = u
+	})
+	got := RenderToHTML("![a](./img/a%20b.png?x=1) ![b](img/missing.png) ![c](https://e.test/c.png) ![d](/abs.png) ![e](../secret.png)\n", cfg)
+	if !strings.Contains(got, `src="/base/assets/a-b-`) {
+		t.Errorf("relative image not rewritten:\n%s", got)
+	}
+	if !strings.Contains(got, `.png?x=1`) {
+		t.Errorf("query lost:\n%s", got)
+	}
+	for _, keep := range []string{`src="img/missing.png"`, `src="https://e.test/c.png"`, `src="/abs.png"`, `src="../secret.png"`} {
+		if !strings.Contains(got, keep) {
+			t.Errorf("expected %s untouched:\n%s", keep, got)
+		}
+	}
+	if len(registered) != 1 {
+		t.Errorf("want exactly one registered asset, got %v", registered)
 	}
 }

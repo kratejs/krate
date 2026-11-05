@@ -232,6 +232,10 @@ func (t *transformer) Transform(root *ast.Document, reader text.Reader, pc parse
 		case *ast.Image:
 			if !safeURL(string(v.Destination)) {
 				unsafe = append(unsafe, n)
+			} else if t.d.cfg.ImageURL != nil {
+				if u, ok := t.d.cfg.ImageURL(string(v.Destination)); ok {
+					v.Destination = []byte(u)
+				}
 			}
 		case *ast.AutoLink:
 			if !safeURL(string(v.URL(src))) {

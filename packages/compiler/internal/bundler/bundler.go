@@ -128,7 +128,13 @@ type Bundler struct {
 	// value (mdSet false) means markdown.DefaultConfig().
 	mdCfg markdown.Config
 	mdSet bool
+	// mdBase is the site base path prefixed to image URLs found in markdown.
+	mdBase string
 }
+
+// SetMarkdownBasePath sets the site base path prepended to relative images
+// that markdown files reference.
+func (b *Bundler) SetMarkdownBasePath(base string) { b.mdBase = base }
 
 // SetMarkdownConfig sets the markdown options used when compiling .md and
 // .mdx modules (page-level and imported).
@@ -615,6 +621,11 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 	}
 	src := string(data)
 	mcfg := b.markdownConfig()
+	mdImages := 0
+	mcfg.ImageURL = markdown.LocalImageResolver(b.root, abs, b.mdBase, func(imgAbs, siteURL string) {
+		b.assets[imgAbs] = siteURL
+		mdImages++
+	})
 	compiled := markdown.Compile(src, mcfg, markdown.Options{MDX: strings.HasSuffix(abs, ".mdx")})
 	for _, d := range compiled.Diags {
 		if !d.Warning {
@@ -642,7 +653,9 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 	b.collectImports(prog, mod)
 	mod.Rewritable = moduleNeedsRewrite(tsxSource, mod.Imports)
 	b.order = append(b.order, mod)
-	if statOK && !mod.Rewritable {
+	// A page that references local images is not cached: the cache keys on the
+	// markdown file alone, so a changed image would keep its old hashed URL.
+	if statOK && !mod.Rewritable && mdImages == 0 {
 		b.cache.putProgram(abs, &programEntry{
 			mtime: mtime, size: size, program: prog,
 			imports: append([]string(nil), mod.Imports...), frontmatter: result.Frontmatter,
