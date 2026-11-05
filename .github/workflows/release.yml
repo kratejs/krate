@@ -112,6 +112,11 @@ jobs:
       - name: Generate platform packages
         run: node scripts/build-platform-packages.mjs
 
+      # Re-run now that dist-platform/ exists, so the generated manifests are
+      # checked too (no platform package may declare bin).
+      - name: Check generated platform packages
+        run: pnpm run check:release
+
       # The step above leaves a dev binary in packages/core/bin. Publishing it
       # would make the wrapper run a non-executable, single-platform file.
       - name: Check @krate/core ships no compiler binary
