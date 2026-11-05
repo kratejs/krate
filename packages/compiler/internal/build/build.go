@@ -1778,6 +1778,12 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			if pf := b.pageFontPreloads(r.FontURLs); pf != "" {
 				runtimeHead += pf
 			}
+			// Only pages that call into the runtime load it; a static page of
+			// a site with islands elsewhere ships no JavaScript.
+			runtimeJSFile := runtimeJSFile
+			if !pageNeedsRuntime(r) {
+				runtimeJSFile = ""
+			}
 			chunkPreloads := dynamicChunkURLs(r.HydrationJS)
 			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
 			var html string

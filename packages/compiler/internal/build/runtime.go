@@ -78,6 +78,29 @@ func runtimeNeedsCompat(results []*PageResult) bool {
 	return false
 }
 
+// pageNeedsRuntime reports whether a page's document must load the shared
+// runtime chunk. A page that renders once at build time, has no hydration
+// script, no client islands and no server action forms never calls into the
+// runtime, so it ships none even when other pages of the site do. Pages whose
+// HTML is produced per request (SSR, ISR, streaming, regions) always get it:
+// the build cannot see what they render. The SPA router is started by a page's
+// hydration script, so a static page has no router to lose; one already loaded
+// by an earlier page stays in memory across client-side navigations.
+func pageNeedsRuntime(r *PageResult) bool {
+	if r == nil {
+		return false
+	}
+	if r.HasJS || r.JSFile != "" || r.HydrationJS != "" {
+		return true
+	}
+	if r.Mode != RenderSSG || r.ServerPage || len(r.Regions) > 0 {
+		return true
+	}
+	return strings.Contains(r.HTML, "<"+islandMarkup) ||
+		strings.Contains(r.HTML, actionsMarkup) ||
+		strings.Contains(r.HTML, "/__krate/action/")
+}
+
 // loadDevBundleFromDisk loads the dev-only overlay/toolbar bundle
 // (krate-dev.js) from the @krate/runtime dist directory, if present.
 func loadDevBundleFromDisk(projectRoot string) string {
