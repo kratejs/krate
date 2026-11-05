@@ -387,6 +387,23 @@ func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 	return root, cfg
 }
 
+// checkProjectDir fails with a plain message when the project directory is
+// missing, so a typo is not reported as a missing pagesDir (or, worse, turned
+// into a new directory by the first build step that writes to it).
+func checkProjectDir(root string) error {
+	info, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("project directory %s does not exist (check the path; `krate init` creates a new project)", root)
+		}
+		return fmt.Errorf("cannot read project directory %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("project path %s is not a directory", root)
+	}
+	return nil
+}
+
 // loadConfig is resolveConfig without the exit, so the dev server can report a
 // broken config edit and keep running.
 func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
@@ -396,6 +413,9 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 	}
 	root, err := filepath.Abs(root)
 	if err != nil {
+		return "", nil, err
+	}
+	if err := checkProjectDir(root); err != nil {
 		return "", nil, err
 	}
 
@@ -755,6 +775,9 @@ func runFix(flags cliFlags, args []string) {
 		root = args[1]
 	}
 	abs, err := filepath.Abs(root)
+	if err == nil {
+		err = checkProjectDir(abs)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
 		os.Exit(1)

@@ -25,6 +25,10 @@ func runDoctor(flags cliFlags, args []string) {
 		root = args[1]
 	}
 	root, _ = filepath.Abs(root)
+	if err := checkProjectDir(root); err != nil {
+		fmt.Fprintf(os.Stderr, "%sDoctor error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
 
 	fmt.Printf("%sKrate doctor%s\n\n", cBold, cReset)
 	fmt.Printf("  krate        v%s\n", version)
@@ -148,7 +152,8 @@ func configPathFor(root, explicit string) string {
 
 func displayOutput(o string) string {
 	if o == "" {
-		return "server (SSR/ISR/streaming enabled)"
+		// Unset: every page is static unless it opts in to SSR, ISR or streaming.
+		return "auto (static pages; SSR/ISR/streaming where a page opts in)"
 	}
 	return o
 }
