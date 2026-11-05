@@ -1498,3 +1498,61 @@ func TestNextForbiddenAndUnauthorizedPagesMigrate(t *testing.T) {
 		}
 	}
 }
+
+func TestMetadataRoutesMigrateNatively(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "package.json", `{"dependencies":{"next":"15.0.0"}}`)
+	writeNextFile(t, root, "app/page.tsx", `export default function P() { return <h1>x</h1>; }`)
+	writeNextFile(t, root, "app/sitemap.ts", `import type { MetadataRoute } from "next";
+import { posts } from "./lib/posts";
+export default function sitemap(): MetadataRoute.Sitemap { return posts.map((p) => ({ url: "https://x.example/" + p })); }`)
+	writeNextFile(t, root, "app/lib/posts.ts", `export const posts = ["a"];`)
+	writeNextFile(t, root, "app/(site)/robots.ts", `import type { MetadataRoute } from "next";
+export default function robots(): MetadataRoute.Robots { return { rules: { userAgent: "*", allow: "/" } }; }`)
+	writeNextFile(t, root, "app/manifest.ts", `export default function manifest() { return { name: "X" }; }`)
+	writeNextFile(t, root, "app/blog/[slug]/opengraph-image.tsx", `import { ImageResponse } from "next/og";
+export const alt = "Post";
+export default async function Image({ params }: any) { return new ImageResponse(<div>{(await params).slug}</div>); }`)
+	writeNextFile(t, root, "app/twitter-image.png", "PNGDATA")
+	writeNextFile(t, root, "app/opengraph-image.alt.txt", "alt")
+	writeNextFile(t, root, "app/robots.txt", "User-Agent: *")
+	writeNextFile(t, root, "app/icon.tsx", `export default function Icon() { return null; }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"src/pages/sitemap.ts", "src/pages/(site)/robots.ts", "src/pages/manifest.ts", "src/pages/blog/[slug]/opengraph-image.tsx"} {
+		if f := findPlan(rep, target); f == nil || f.Kind != KindMetadataRoute {
+			t.Errorf("%s should be planned as a metadata route: %+v", target, f)
+		}
+	}
+	if f := findPlan(rep, "src/pages/sitemap.ts"); f != nil {
+		if !strings.Contains(string(f.Content), `from "@krate/runtime/server"`) || strings.Contains(string(f.Content), "./lib/posts") && !strings.Contains(string(f.Content), "migrated") {
+			t.Errorf("sitemap imports: %s", f.Content)
+		}
+	}
+	if f := findPlan(rep, "src/pages/blog/[slug]/opengraph-image.tsx"); f != nil && !strings.Contains(string(f.Content), `from "@krate/runtime/og"`) {
+		t.Errorf("next/og should become @krate/runtime/og: %s", f.Content)
+	}
+	if f := findPlan(rep, "src/pages/twitter-image.png"); f == nil || string(f.Content) != "PNGDATA" {
+		t.Errorf("a static twitter image is copied byte for byte: %+v", f)
+	}
+	if f := findPlan(rep, "public/robots.txt"); f == nil || f.Kind != KindPublic {
+		t.Errorf("a static robots.txt goes to public/: %+v", f)
+	}
+	var manual []string
+	for _, m := range rep.Manual {
+		manual = append(manual, m.Source)
+	}
+	joined := strings.Join(manual, " ")
+	for _, want := range []string{"app/icon.tsx", "app/opengraph-image.alt.txt"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("%s stays a manual item: %v", want, manual)
+		}
+	}
+	for _, m := range rep.Manual {
+		if strings.Contains(m.Source, "sitemap") || strings.Contains(m.Source, "robots.ts") || strings.Contains(m.Source, "manifest") || strings.Contains(m.Source, "opengraph-image.tsx") {
+			t.Errorf("a supported metadata file is a manual item: %+v", m)
+		}
+	}
+}

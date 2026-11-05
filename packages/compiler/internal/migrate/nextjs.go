@@ -39,7 +39,13 @@ const (
 	KindConfig       FileKind = "config"
 	KindPackage      FileKind = "package"
 	KindAsset        FileKind = "asset"
-	KindMiddleware   FileKind = "middleware"
+	// KindMetadataRoute is a sitemap/robots/manifest/opengraph-image/twitter-image
+	// module; Krate runs it natively from src/pages.
+	KindMetadataRoute FileKind = "metadata-route"
+	// KindPublic is a static metadata file (robots.txt, opengraph-image.png, ...)
+	// copied byte for byte into public/.
+	KindPublic     FileKind = "public"
+	KindMiddleware FileKind = "middleware"
 )
 
 // ManualItem is a migration decision the CLI will not make automatically.
@@ -370,6 +376,9 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 		rel = filepath.ToSlash(rel)
 		base := strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))
 		ext := strings.ToLower(filepath.Ext(rel))
+		if planStaticMetadata(root, appDir, prefix, rel, rep) {
+			return nil
+		}
 		if !isSourceExt(ext) && !isAssetExt(ext) {
 			return nil
 		}
@@ -450,7 +459,7 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 			}
 		default:
 			if isNextMetadataRoute(base) {
-				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "Next.js metadata route " + base + "." + strings.TrimPrefix(ext, ".") + " is not migrated", Hint: "generate the same sitemap/robots/manifest/icon in Krate"})
+				planMetadataRoute(root, source, base, ext, fsRoute, rep)
 				return nil
 			}
 			if isAssetExt(ext) {
@@ -1073,6 +1082,68 @@ func Rollback(backupDir string) error {
 	return os.RemoveAll(backupDir)
 }
 
+// metadataRouteExts are the module extensions Krate runs for each convention.
+var metadataRouteExts = map[string]map[string]bool{
+	"sitemap":         {".ts": true, ".js": true, ".mjs": true},
+	"robots":          {".ts": true, ".js": true, ".mjs": true},
+	"manifest":        {".ts": true, ".js": true, ".mjs": true},
+	"opengraph-image": {".ts": true, ".tsx": true, ".js": true, ".jsx": true},
+	"twitter-image":   {".ts": true, ".tsx": true, ".js": true, ".jsx": true},
+}
+
+// planMetadataRoute maps a Next.js metadata route module to the same file in
+// the same segment of src/pages. icon, apple-icon and instrumentation have no
+// equivalent and stay manual items.
+func planMetadataRoute(root, source, base, ext, fsRoute string, rep *Report) {
+	if exts, ok := metadataRouteExts[base]; ok && exts[ext] {
+		rep.Files = append(rep.Files, planned(root, source, segmentFile("src/pages", fsRoute, base, ext), KindMetadataRoute, ext, rep))
+		return
+	}
+	reason := "Next.js metadata route " + base + "." + strings.TrimPrefix(ext, ".") + " is not migrated"
+	hint := "generate the same icon/apple-icon in Krate (a file under public/ and metadata.icons)"
+	if _, ok := metadataRouteExts[base]; ok {
+		hint = "Krate runs " + base + " files with the extensions .ts, .js, .mjs (sitemap, robots, manifest) or .ts, .tsx, .js, .jsx (images)"
+	}
+	rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: reason, Hint: hint})
+}
+
+var staticMetadataNames = map[string]bool{"sitemap.xml": true, "robots.txt": true, "manifest.json": true, "manifest.webmanifest": true}
+var staticMetadataImageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true}
+
+// planStaticMetadata handles the non-module metadata files: static sitemap.xml,
+// robots.txt and manifest are served from public/, a static opengraph-image or
+// twitter-image is copied next to its segment's page (where Krate's own
+// convention picks it up). opengraph-image.alt.txt is a manual item: export alt
+// from a module instead. It reports whether the file was one of these.
+func planStaticMetadata(root, appDir, prefix, rel string, rep *Report) bool {
+	name := filepath.Base(rel)
+	ext := strings.ToLower(filepath.Ext(name))
+	stem := strings.TrimSuffix(name, filepath.Ext(name))
+	dir := filepath.ToSlash(filepath.Dir(rel))
+	_, fsRoute, _ := appRoute(dir)
+	source := prefix + "/" + rel
+	var target string
+	switch {
+	case staticMetadataNames[name]:
+		target = segmentFile("public", fsRoute, name, "")
+	case (stem == "opengraph-image" || stem == "twitter-image") && staticMetadataImageExts[ext]:
+		target = segmentFile("src/pages", fsRoute, stem, ext)
+	case name == "opengraph-image.alt.txt" || name == "twitter-image.alt.txt":
+		rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "the " + name + " alt text file is not read", Hint: "export const alt = \"...\" from an opengraph-image/twitter-image module, or set metadata.openGraph.images[].alt"})
+		return true
+	default:
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(source)))
+	if err != nil {
+		rep.Warnings = append(rep.Warnings, source+": could not read source: "+err.Error())
+		return true
+	}
+	kind := KindPublic
+	rep.Files = append(rep.Files, PlannedFile{Kind: kind, Source: source, Target: filepath.ToSlash(target), Content: data, Rewrites: []string{"copied unchanged"}})
+	return true
+}
+
 func isNextMetadataRoute(base string) bool {
 	switch base {
 	case "sitemap", "robots", "manifest", "opengraph-image", "twitter-image", "icon", "apple-icon", "instrumentation", "instrumentation-client":
@@ -1103,7 +1174,7 @@ func linkRelativeImports(rep *Report) {
 	}
 	for i := range rep.Files {
 		f := &rep.Files[i]
-		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError) {
+		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindMetadataRoute && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError) {
 			continue
 		}
 		body, rewrites, unresolved, deps := rewriteRelativeImports(string(f.Content), f.Source, f.Target, assets)

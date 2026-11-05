@@ -15,7 +15,7 @@ import (
 func rewriteNextModuleImports(rep *Report, root string) {
 	for i := range rep.Files {
 		f := &rep.Files[i]
-		if len(f.Content) == 0 {
+		if len(f.Content) == 0 || f.Kind == KindPublic {
 			continue
 		}
 		src := string(f.Content)
@@ -56,6 +56,10 @@ func rewriteNextModuleImports(rep *Report, root string) {
 			}
 			src = replaceModule(src, "next/headers", "@krate/runtime/server")
 			f.Rewrites = append(f.Rewrites, "rewrote next/headers imports to @krate/runtime/server")
+		}
+		if strings.Contains(src, "next/og") {
+			src = replaceModule(src, "next/og", "@krate/runtime/og")
+			f.Rewrites = append(f.Rewrites, "rewrote next/og to @krate/runtime/og")
 		}
 		f.Content = []byte(src)
 	}
