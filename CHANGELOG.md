@@ -157,6 +157,11 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   closures shared one binding, and `[...Array(n)].map(...)` rendered one row.
   `Array.from({ length: n }, fn)` renders its rows in the static HTML.
 - The HTML minifier collapsed white space in elements styled `white-space: pre*`.
+- Build-time evaluation: `lastIndexOf` ignored its position argument (`"abcabc".lastIndexOf("b", 3)`
+  gave 4, `[1, 2, 1].lastIndexOf(1, -2)` gave 2), and a standard member the interpreter lacks
+  (`arr.splice`, `str.match`) read as `undefined`, so `typeof arr.splice` or `if (arr.toSpliced)`
+  folded to the wrong branch; it stays unresolved now. A differential test checks the interpreter
+  against Node for 240 expressions.
 - Modules on a page shared one namespace, so two files with a private `up`, `Row` or
   `LABEL`, or two default exports named `Card`, showed one module's value for both. They
   are kept apart; `KR7116` is reported only for modules that cannot move (re-exported,
