@@ -37,24 +37,24 @@
   color: var(--krate-primary-fg, #fff);
 }
 .krate-link-button-primary:hover {
-  background: var(--krate-primary-hover, #2563eb);
+  background: var(--krate-primary-hover, #9a3412);
   box-shadow: 0 2px 8px rgba(194, 65, 12, 0.3);
 }
 .krate-link-button-secondary {
-  background: var(--krate-surface-hover, #e4e4e7);
-  color: var(--krate-text, #09090b);
-  border: 1px solid var(--krate-border, #e4e4e7);
+  background: var(--krate-surface-hover, #e5e5e5);
+  color: var(--krate-text, #0a0a0a);
+  border: 1px solid var(--krate-border, #e5e5e5);
 }
 .krate-link-button-secondary:hover {
   background: rgba(255, 255, 255, 0.1);
-  border-color: var(--krate-text-muted, #71717a);
+  border-color: var(--krate-text-muted, #737373);
 }
 .krate-link-button-ghost {
   background: transparent;
-  color: var(--krate-text, #09090b);
+  color: var(--krate-text, #0a0a0a);
 }
 .krate-link-button-ghost:hover {
-  background: var(--krate-surface-hover, #e4e4e7);
+  background: var(--krate-surface-hover, #e5e5e5);
 }
 .krate-link-button-destructive {
   background: var(--krate-danger, #ef4444);

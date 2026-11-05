@@ -1,15 +1,15 @@
 .krate-card {
   margin: 24px 0;
-  border: 1px solid var(--krate-border, #e4e4e7);
+  border: 1px solid var(--krate-border, #e5e5e5);
   border-radius: var(--krate-radius-lg, 12px);
   overflow: hidden;
   background: var(--krate-card-bg, #ffffff);
-  box-shadow: var(--krate-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.06)), var(--krate-hairline, none);
+  box-shadow: var(--krate-shadow-xs, 0 1px 2px rgba(23, 23, 23, 0.06)), var(--krate-hairline, none);
   transition: box-shadow 0.2s var(--krate-ease-in-out, ease), border-color 0.2s var(--krate-ease-in-out, ease);
 }
 .krate-card:hover {
-  border-color: var(--krate-border-strong, #d4d4d8);
-  box-shadow: var(--krate-shadow-md, 0 2px 4px rgba(24, 24, 27, 0.05), 0 10px 24px -8px rgba(24, 24, 27, 0.12)), var(--krate-hairline, none);
+  border-color: var(--krate-border-strong, #d4d4d4);
+  box-shadow: var(--krate-shadow-md, 0 2px 4px rgba(23, 23, 23, 0.05), 0 10px 24px -8px rgba(23, 23, 23, 0.12)), var(--krate-hairline, none);
 }
 .krate-card-title {
   margin: 0;
@@ -17,11 +17,11 @@
   padding: 12px 16px;
   font-weight: 600;
   font-size: 0.95rem;
-  border-bottom: 1px solid var(--krate-border, #e4e4e7);
-  color: var(--krate-text, #09090b);
+  border-bottom: 1px solid var(--krate-border, #e5e5e5);
+  color: var(--krate-text, #0a0a0a);
 }
 .krate-card-body {
   padding: 16px;
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
   line-height: 1.6;
 }

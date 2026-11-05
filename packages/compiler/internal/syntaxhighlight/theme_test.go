@@ -286,6 +286,33 @@ func TestThemeCSSSingleThemeHasNoModeBlocks(t *testing.T) {
 	}
 }
 
+func TestKrateDarkSharesGithubDarkTokensOnNeutralSurface(t *testing.T) {
+	css := ThemeCSS(Theme{DefaultDarkTheme, DefaultDarkTheme})
+	if !strings.Contains(css, ":where(:root){--chroma-bg:#171717;--chroma-fg:#e5e5e5}") {
+		t.Fatalf("the default dark surface must be the neutral card colour:\n%s", css)
+	}
+	if strings.Contains(strings.ToLower(css), "#0d1117") {
+		t.Fatalf("the default dark theme must not carry the github-dark surface:\n%s", css)
+	}
+	krate, github := classEntries(styleFor(DefaultDarkTheme)), classEntries(styleFor("github-dark"))
+	classes := map[string]bool{}
+	for class := range krate {
+		classes[class] = true
+	}
+	for class := range github {
+		classes[class] = true
+	}
+	for class := range classes {
+		if class != "hl" && krate[class] != github[class] {
+			t.Errorf("token %q: got %+v, want github-dark %+v", class, krate[class], github[class])
+		}
+	}
+	// Registering the Krate style must not alter the style it is derived from.
+	if bg, fg := baseColors(styleFor("github-dark")); bg != "#0d1117" || fg != "#e6edf3" {
+		t.Fatalf("github-dark changed: %s %s", bg, fg)
+	}
+}
+
 func TestThemeCSSBoldItalicCarryOver(t *testing.T) {
 	// Find a theme with italic comments and one without, then check the rule
 	// switches with the mode instead of picking one side.
@@ -299,7 +326,7 @@ func TestThemeCSSBoldItalicCarryOver(t *testing.T) {
 
 func TestResolveTheme(t *testing.T) {
 	th, unknown := ResolveTheme("", "")
-	if th.Light != "github" || th.Dark != "github-dark" || len(unknown) != 0 {
+	if th.Light != "github" || th.Dark != "krate-dark" || len(unknown) != 0 {
 		t.Fatalf("defaults: %+v %v", th, unknown)
 	}
 	th, unknown = ResolveTheme("nope", "nope")

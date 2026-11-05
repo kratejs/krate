@@ -27,11 +27,13 @@ they match chroma token for token (see [How it stays exact](#how-it-stays-exact)
 
 ```ts
 markdown: {
-  codeTheme: { light: "github", dark: "github-dark" }, // the default
+  codeTheme: { light: "github", dark: "krate-dark" }, // the default
 }
 ```
 
-A plain string, `codeTheme: "monokai"`, is one theme for both modes. The
+`krate-dark` is `github-dark`'s syntax colours on the neutral surface Krate's
+cards use, and `github-dark` is still available by name. A plain string,
+`codeTheme: "monokai"`, is one theme for both modes. The
 stylesheet follows the page: the system preference, or a `data-theme="light"` or
 `data-theme="dark"` attribute on `<html>`, including when it changes at run time.
 It applies to the `Code` component, fenced Markdown blocks and the docs themes.

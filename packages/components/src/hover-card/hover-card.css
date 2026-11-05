@@ -15,9 +15,9 @@
   padding: 16px;
   border-radius: 8px;
   background: var(--krate-card-bg, #ffffff);
-  border: 1px solid var(--krate-border, #e4e4e7);
+  border: 1px solid var(--krate-border, #e5e5e5);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
   font-size: 0.875rem;
   line-height: 1.5;
   opacity: 0;

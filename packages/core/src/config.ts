@@ -138,7 +138,7 @@ export interface MarkdownConfig {
   /**
    * chroma theme for syntax highlighting. A name applies to both colour modes;
    * `{ light, dark }` picks one per mode. Defaults to
-   * `{ light: "github", dark: "github-dark" }`.
+   * `{ light: "github", dark: "krate-dark" }`.
    */
   codeTheme?: string | { light?: string; dark?: string };
   math?: boolean;

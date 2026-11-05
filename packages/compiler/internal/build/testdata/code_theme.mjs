@@ -45,7 +45,7 @@ const probe = () => {
     spans: [...code.querySelectorAll("span")].filter((s) => s.className === "kr" || s.className === "kd").length,
   };
 };
-const PAIRS = { light: { bg: "247,247,247", text: "31,35,40", keyword: "207,34,46" }, dark: { bg: "13,17,23", text: "230,237,243", keyword: "255,123,114" } };
+const PAIRS = { light: { bg: "247,247,247", text: "38,38,38", keyword: "207,34,46" }, dark: { bg: "23,23,23", text: "229,229,229", keyword: "255,123,114" } };
 
 try {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

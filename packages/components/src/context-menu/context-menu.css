@@ -17,7 +17,7 @@
   padding: 4px;
   border-radius: 8px;
   background: var(--krate-card-bg, #ffffff);
-  border: 1px solid var(--krate-border, #e4e4e7);
+  border: 1px solid var(--krate-border, #e5e5e5);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   z-index: 9999;
 }
@@ -28,7 +28,7 @@
   padding: 6px 8px;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -39,13 +39,13 @@
   padding: 6px 8px;
   border-radius: 4px;
   font-size: 0.875rem;
-  color: var(--krate-text, #09090b);
+  color: var(--krate-text, #0a0a0a);
   cursor: pointer;
   transition: background 0.1s;
 }
 .krate-context-menu-item:hover,
 .krate-context-menu-item:focus-visible {
-  background: var(--krate-surface-hover, #e4e4e7);
+  background: var(--krate-surface-hover, #e5e5e5);
 }
 .krate-context-menu-item:focus-visible {
   outline: 2px solid var(--krate-focus-ring, #c2410c);
@@ -58,5 +58,5 @@
 .krate-context-menu-separator {
   height: 1px;
   margin: 4px 0;
-  background: var(--krate-border, #e4e4e7);
+  background: var(--krate-border, #e5e5e5);
 }

@@ -257,8 +257,9 @@ the old behaviour.
 ### Code blocks follow light and dark mode
 
 `<Code>` and fenced code used to be dark in every mode. The default is now `github`
-in light mode and `github-dark` in dark mode, so code on a light page turns light.
-To keep one theme in both modes, set it as a string:
+in light mode and `krate-dark` (`github-dark`'s syntax colours on Krate's neutral
+surface) in dark mode, so code on a light page turns light. To keep one theme in
+both modes, set it as a string:
 
 ```ts
 export default defineConfig({ codeTheme: "github-dark" });

@@ -14,9 +14,9 @@
   font-size: 1.25rem;
   font-weight: 600;
   font-family: "SF Mono", "Fira Code", monospace;
-  color: var(--krate-text, #09090b);
-  background: var(--krate-surface, #f4f4f5);
-  border: 1.5px solid var(--krate-border, #e4e4e7);
+  color: var(--krate-text, #0a0a0a);
+  background: var(--krate-surface, #f5f5f5);
+  border: 1.5px solid var(--krate-border, #e5e5e5);
   border-radius: 8px;
   transition: border-color 0.15s, box-shadow 0.15s;
   caret-color: var(--krate-primary, #c2410c);

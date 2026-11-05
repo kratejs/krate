@@ -68,7 +68,7 @@ try {
   await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
   const dark = await page.evaluate(() => ({ kw: getComputedStyle(window.__code.querySelector(".kr")).color, same: window.__first === window.__code.querySelector(".line"), bg: getComputedStyle(window.__code.closest("pre")).backgroundColor }));
   check(before === "rgb(207, 34, 46)", `light keyword colour ${before}`);
-  check(dark.kw === "rgb(255, 123, 114)" && dark.same && dark.bg === "rgb(13, 17, 23)", `dark mode: ${JSON.stringify(dark)}`);
+  check(dark.kw === "rgb(255, 123, 114)" && dark.same && dark.bg === "rgb(23, 23, 23)", `dark mode: ${JSON.stringify(dark)}`);
   await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
 
   // An update shows plain text at once, then the highlighted markup.
