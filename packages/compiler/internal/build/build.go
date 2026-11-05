@@ -4190,21 +4190,16 @@ func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
 	// over the defaults, so any default whose name appears in the forwarded
 	// attributes is dropped (duplicate attributes in HTML resolve to the first,
 	// which would silently ignore the user's override).
-	viewBox := icon.ViewBox
-	if viewBox == "" {
-		viewBox = "0 0 24 24"
-	}
-	baseSvgAttrs := []*ast.JSXAttr{
-		{Name: "xmlns", Value: &ast.Literal{Kind: ast.StringLit, Value: "http://www.w3.org/2000/svg"}},
-		{Name: "viewBox", Value: &ast.Literal{Kind: ast.StringLit, Value: viewBox}},
-		{Name: "fill", Value: &ast.Literal{Kind: ast.StringLit, Value: "none"}},
-		{Name: "stroke", Value: &ast.Literal{Kind: ast.StringLit, Value: "currentColor"}},
-		{Name: "stroke-width", Value: &ast.Literal{Kind: ast.StringLit, Value: "2"}},
+	var baseSvgAttrs []*ast.JSXAttr
+	for _, kv := range iconBaseAttrs(icon) {
+		baseSvgAttrs = append(baseSvgAttrs, &ast.JSXAttr{Name: kv[0], Value: &ast.Literal{Kind: ast.StringLit, Value: kv[1]}})
 	}
 
 	// Combine default engine SVG properties with user-defined attributes,
-	// letting the user override any default.
-	allAttrs := append(baseSvgAttrs, forwardedAttrs...)
+	// letting the user override any default. `size` is shorthand for both
+	// width and height.
+	allAttrs := append(baseSvgAttrs, iconSizeAttrs(forwardedAttrs)...)
+	allAttrs = append(allAttrs, withoutSize(forwardedAttrs)...)
 	// The icon body is trusted SVG markup from the icon set, injected raw.
 	allAttrs = append(allAttrs, &ast.JSXAttr{Name: "dangerouslySetInnerHTML", Value: &ast.ObjectExpr{
 		Properties: []*ast.ObjectProp{{Key: "__html", Value: &ast.Literal{Kind: ast.StringLit, Value: icon.Inner}}},
@@ -4223,24 +4218,66 @@ func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
 	}
 }
 
+// iconBaseAttrs returns the default attributes of an inlined icon's <svg>: the
+// namespace, the source geometry, a 1em size so the icon scales with text, and
+// the paint the source intended (see icons.Icon.PaintAttrs).
+func iconBaseAttrs(icon icons.Icon) [][2]string {
+	viewBox := icon.ViewBox
+	if viewBox == "" {
+		viewBox = "0 0 24 24"
+	}
+	attrs := [][2]string{
+		{"xmlns", "http://www.w3.org/2000/svg"},
+		{"viewBox", viewBox},
+		{"width", "1em"},
+		{"height", "1em"},
+	}
+	return append(attrs, icon.PaintAttrs()...)
+}
+
+// iconSizeAttrs expands a `size` attribute into width and height, and removes
+// it from attrs so no meaningless size attribute reaches the SVG.
+func iconSizeAttrs(attrs []*ast.JSXAttr) []*ast.JSXAttr {
+	var out []*ast.JSXAttr
+	for _, a := range attrs {
+		if a.Name == "size" && !a.Spread && a.Value != nil {
+			out = append(out,
+				&ast.JSXAttr{Name: "width", Value: a.Value},
+				&ast.JSXAttr{Name: "height", Value: a.Value})
+		}
+	}
+	return out
+}
+
+// withoutSize returns attrs minus any `size` attribute.
+func withoutSize(attrs []*ast.JSXAttr) []*ast.JSXAttr {
+	out := make([]*ast.JSXAttr, 0, len(attrs))
+	for _, a := range attrs {
+		if a.Name == "size" && !a.Spread {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // dedupeAttrs keeps the LAST occurrence of each attribute name, so user-supplied
 // attributes override the engine's defaults. Duplicate attributes in HTML are
 // resolved to the FIRST occurrence by browsers, so dropping earlier defaults is
 // the only reliable way to let callers override them.
 func dedupeAttrs(attrs []*ast.JSXAttr) []*ast.JSXAttr {
 	var out []*ast.JSXAttr
+	seen := map[string]bool{}
 	for i := len(attrs) - 1; i >= 0; i-- {
-		name := attrs[i].Name
-		dup := false
-		for _, keep := range out {
-			if keep.Name == name {
-				dup = true
-				break
+		if !attrs[i].Spread {
+			// strokeWidth and stroke-width are the same attribute.
+			key := ast.HTMLAttrName(attrs[i].Name)
+			if seen[key] {
+				continue
 			}
+			seen[key] = true
 		}
-		if !dup {
-			out = append([]*ast.JSXAttr{attrs[i]}, out...)
-		}
+		out = append([]*ast.JSXAttr{attrs[i]}, out...)
 	}
 	return out
 }
@@ -4264,16 +4301,17 @@ func (b *Builder) iconResolver(iconName string, attrs []*ast.JSXAttr) (string, b
 		return fmt.Sprintf("<span>%s</span>", escape.HTMLAttr(fmt.Sprintf("[%v]", err))), false
 	}
 
-	viewBox := icon.ViewBox
-	if viewBox == "" {
-		viewBox = "0 0 24 24"
-	}
-
 	var b2 strings.Builder
-	b2.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="`)
-	b2.WriteString(escape.HTMLAttr(viewBox))
-	b2.WriteString(`" fill="none" stroke="currentColor" stroke-width="2"`)
-	for _, attr := range dedupeAttrs(forwardedAttrs) {
+	b2.WriteString("<svg")
+	// Defaults first, then size, then the caller's own attributes; the last
+	// occurrence of a name wins.
+	var attrs2 []*ast.JSXAttr
+	for _, kv := range iconBaseAttrs(icon) {
+		attrs2 = append(attrs2, &ast.JSXAttr{Name: kv[0], Value: &ast.Literal{Kind: ast.StringLit, Value: kv[1]}})
+	}
+	attrs2 = append(attrs2, iconSizeAttrs(forwardedAttrs)...)
+	attrs2 = append(attrs2, withoutSize(forwardedAttrs)...)
+	for _, attr := range dedupeAttrs(attrs2) {
 		if attr.Spread {
 			continue
 		}

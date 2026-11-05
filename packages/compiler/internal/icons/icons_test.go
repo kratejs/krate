@@ -174,3 +174,30 @@ func TestGetIconContentWrapper(t *testing.T) {
 		t.Errorf("expected inner content, got %q", inner)
 	}
 }
+
+func TestPaintAttrs(t *testing.T) {
+	cases := []struct {
+		name string
+		svg  string
+		want string
+	}{
+		{"solid root", `<svg fill="currentColor" viewBox="0 0 20 20"><path d="M0 0"/></svg>`, "fill=currentColor"},
+		{"outline root", `<svg fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M0 0"/></svg>`, "fill=none stroke=currentColor stroke-width=1.5 stroke-linecap=round"},
+		{"iconify filled", `<svg viewBox="0 0 24 24" width="1em" height="1em"><path fill="currentColor" d="M0 0"/></svg>`, ""},
+		{"iconify outline", `<svg viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><path d="M0 0"/></g></svg>`, ""},
+		{"bare paths", `<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>`, "fill=none stroke=currentColor stroke-width=2"},
+	}
+	for _, c := range cases {
+		ic, err := parseSVG(c.svg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var parts []string
+		for _, kv := range ic.PaintAttrs() {
+			parts = append(parts, kv[0]+"="+kv[1])
+		}
+		if got := strings.Join(parts, " "); got != c.want {
+			t.Errorf("%s: PaintAttrs = %q, want %q", c.name, got, c.want)
+		}
+	}
+}

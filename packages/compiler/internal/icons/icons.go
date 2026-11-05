@@ -31,7 +31,45 @@ type Icon struct {
 	// ViewBox is the viewBox attribute from the source <svg> element. Empty for
 	// Iconify-sourced icons, which always use the default 24x24 geometry.
 	ViewBox string
+
+	// Paint attributes copied from the source <svg> root element.
+	Fill, Stroke, StrokeWidth, StrokeLinecap, StrokeLinejoin string
 }
+
+// PaintAttrs returns the root attributes an <svg> wrapper should carry so the
+// icon draws the way its source intended:
+//   - a source root that sets fill or stroke (a solid heroicons-style icon, or
+//     an outline one) keeps exactly those values;
+//   - an icon whose inner markup sets paint itself (Iconify sets do) needs
+//     nothing, and forcing a stroke would outline its filled shapes;
+//   - a bare icon with no paint anywhere is drawn as a 2px currentColor stroke.
+func (i Icon) PaintAttrs() [][2]string {
+	var out [][2]string
+	add := func(k, v string) {
+		if v != "" {
+			out = append(out, [2]string{k, v})
+		}
+	}
+	switch {
+	case i.Fill != "" || i.Stroke != "":
+		add("fill", i.Fill)
+		add("stroke", i.Stroke)
+		add("stroke-width", i.StrokeWidth)
+	case innerSetsPaint(i.Inner):
+		// The markup carries its own paint.
+	default:
+		add("fill", "none")
+		add("stroke", "currentColor")
+		add("stroke-width", "2")
+	}
+	add("stroke-linecap", i.StrokeLinecap)
+	add("stroke-linejoin", i.StrokeLinejoin)
+	return out
+}
+
+var innerPaintRe = regexp.MustCompile(`(?i)\s(?:fill|stroke)\s*=`)
+
+func innerSetsPaint(inner string) bool { return innerPaintRe.MatchString(inner) }
 
 // validIconName is a conservative character set for icon names/prefixes. It
 // excludes path separators, "..", query strings, and control characters so a
@@ -205,8 +243,31 @@ func parseSVG(data string) (Icon, error) {
 		return Icon{Inner: sanitizeSVG(strings.TrimSpace(data))}, nil
 	}
 	ic := Icon{Inner: sanitizeSVG(strings.TrimSpace(matches[1]))}
-	if vm := viewBoxRegex.FindStringSubmatch(data); len(vm) > 1 {
-		ic.ViewBox = vm[1]
+	if loc := svgInnerRegex.FindStringIndex(data); loc != nil {
+		if st, ok := parseStartTag(data, loc[0]); ok {
+			for _, a := range st.attrs {
+				v := strings.TrimSpace(html.UnescapeString(a.value))
+				switch strings.ToLower(a.name) {
+				case "viewbox":
+					ic.ViewBox = v
+				case "fill":
+					ic.Fill = v
+				case "stroke":
+					ic.Stroke = v
+				case "stroke-width":
+					ic.StrokeWidth = v
+				case "stroke-linecap":
+					ic.StrokeLinecap = v
+				case "stroke-linejoin":
+					ic.StrokeLinejoin = v
+				}
+			}
+		}
+	}
+	if ic.ViewBox == "" {
+		if vm := viewBoxRegex.FindStringSubmatch(data); len(vm) > 1 {
+			ic.ViewBox = vm[1]
+		}
 	}
 	return ic, nil
 }

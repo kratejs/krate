@@ -758,3 +758,61 @@ func writePNG(t *testing.T, path string, img image.Image) {
 		t.Fatal(err)
 	}
 }
+
+// Icons size to the text by default, keep the source's own paint, and accept
+// `size` as width and height, through both the literal-name and the
+// evaluated-name lowering paths.
+func TestBuildIconSizingAndPaint(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "icons/solid.svg", `<svg viewBox="0 0 20 20" fill="currentColor"><path d="M0 0h20v20z"/></svg>`)
+	writeFileRel(t, root, "icons/line.svg", `<svg viewBox="0 0 24 24"><path d="M4 6h16"/></svg>`)
+	writeFileRel(t, root, "src/pages/index.tsx", `function Tag(props: { icon: string }) {
+  return <i><Icon name={props.icon} size={40} /></i>;
+}
+export default function Page() {
+  return (
+    <main>
+      <p>text <Icon name="solid" /> more</p>
+      <Icon name="solid" size={32} />
+      <Icon name="line" width="48" />
+      <Tag icon="solid" />
+    </main>
+  );
+}`)
+	cfg := config.Default()
+	cfg.Resolve(root)
+	cfg.Minify = false
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	html := readOut(t, cfg.OutDir, "index.html")
+	svgs := regexp.MustCompile(`<svg[^>]*>`).FindAllString(html, -1)
+	if len(svgs) != 4 {
+		t.Fatalf("want 4 svgs, got %d:\n%s", len(svgs), html)
+	}
+	has := func(s, attr string) bool {
+		return strings.Contains(s, " "+attr+"=") || strings.Contains(s, " "+attr+" ")
+	}
+	attrVal := func(s, name string) string {
+		m := regexp.MustCompile(`\s` + name + `="?([^"\s>]+)`).FindStringSubmatch(s)
+		if m == nil {
+			return ""
+		}
+		return m[1]
+	}
+	if attrVal(svgs[0], "width") != "1em" || attrVal(svgs[0], "height") != "1em" {
+		t.Errorf("default size should be 1em: %s", svgs[0])
+	}
+	if attrVal(svgs[0], "fill") != "currentColor" || has(svgs[0], "stroke") || has(svgs[0], "stroke-width") {
+		t.Errorf("solid icon must keep its fill and not gain a stroke: %s", svgs[0])
+	}
+	if attrVal(svgs[1], "width") != "32" || attrVal(svgs[1], "height") != "32" || has(svgs[1], "size") {
+		t.Errorf("size={32} should become width and height: %s", svgs[1])
+	}
+	if attrVal(svgs[2], "width") != "48" || attrVal(svgs[2], "fill") != "none" || attrVal(svgs[2], "stroke") != "currentColor" {
+		t.Errorf("bare icon keeps the stroke default and an explicit width wins: %s", svgs[2])
+	}
+	if attrVal(svgs[3], "width") != "40" || attrVal(svgs[3], "fill") != "currentColor" {
+		t.Errorf("evaluated-name path should size and paint the same way: %s", svgs[3])
+	}
+}
