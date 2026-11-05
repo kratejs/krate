@@ -53,7 +53,7 @@ func TestConfigProcessAndOSGlobals(t *testing.T) {
 }
 
 func TestConfigBuffer(t *testing.T) {
-	got := siteName(t, "export default { site: { name: Buffer.from('héllo €').toString('base64') + '|' + Buffer.from('aGk=', 'base64').toString() + '|' + Buffer.from('hi').toString('hex') } };")
+	got := siteName(t, "export default { site: { name: Buffer.from('h\u00e9llo \u20ac').toString('base64') + '|' + Buffer.from('aGk=', 'base64').toString() + '|' + Buffer.from('hi').toString('hex') } };")
 	if got != "aMOpbGxvIOKCrA==|hi|6869" {
 		t.Errorf("site.name = %q", got)
 	}
