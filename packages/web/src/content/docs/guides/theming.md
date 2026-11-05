@@ -23,8 +23,8 @@ update automatically.
 ## Why overrides always work
 
 The library's defaults are emitted at **zero specificity** (`:where(:root){...}`),
-so any rule of yours - a plain `:root`, `[data-theme]`, a wrapper class, whatever
-- wins no matter which stylesheet loads first. There is no ordering footgun.
+so any rule of yours - a plain `:root`, `[data-theme]`, a wrapper class, whatever -
+wins no matter which stylesheet loads first. There is no ordering footgun.
 
 :::tip
 Put your overrides in a global stylesheet (e.g. `src/styles/global.css`). They
