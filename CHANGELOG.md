@@ -13,6 +13,12 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   has no compiler for them); the styles used to be dropped silently. Importing a name
   `@krate/runtime` does not export is a build error too (`KR7124`); it used to fail
   in the browser with `x is not defined`.
+- Builds that used to pass and ship broken output now fail: a `@server`, `@static` or
+  `@runtime` component with state, effects or event handlers (`KR7110`), a component
+  whose tier sources disagree (`KR7115`), and a higher-order component Krate cannot
+  inline (`KR8030`). `serverDirs` and `runtimeDirs` now match project-relative paths
+  as documented, so components in those directories are server or runtime components
+  (and are checked as such).
 - A page that renders inside an error boundary no longer disables layout
   persistence (the runtime tears down class-component owners by route scope).
 - Content collections: `date` fields must hold an ISO date (a validation error
@@ -27,6 +33,10 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `<Activity mode>` (children stay in the page and keep state while hidden; effects clean
+  up and run again), `<ViewTransition name default>` (names its element child for the
+  router's view transitions) and `useEffectEvent`, with `unstable_` names accepted. Props
+  with no effect warn (`KR8031`). New diagnostics: `KR8030`, `KR8031`.
 - `krate fix` repairs the 0.4 template's `tsconfig.json`: `"baseUrl": "./src"` with
   `"@/*": ["./src/*"]` can only mean the project root, so it sets `baseUrl` to `"."`
   (`KR7125`). The edited file also builds on 0.4. The build error for an alias that
@@ -268,6 +278,30 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   (`<Link href="/docs/page#section">` landed at the top).
 - `krate start` refused a site that has no root page (no top-level
   `index.html`) with "no build output found".
+- A `@server`, `@static` or `@runtime` component that uses `useState`, effects, class state or
+  event handlers fails the build with `KR7110` (it used to build and ship a dead page),
+  for `// @server`, `*.server.tsx`, decorators, config lists and class components.
+- `useId()` in a child component no longer fails with `unresolved identifier
+  __krate_useId`. Ids are unique per instance and the same in the static HTML and the
+  hydration code, in children, lists (also rows added at runtime), conditional branches
+  and layouts.
+- `useEffectEvent` is lowered (it used to leave a bare call in client JS that threw).
+- `<Activity>` and `<ViewTransition>` render their children instead of dropping them.
+  `<SuspenseList>`, `cache`, `flushSync`, `useFormState`, the `react-dom` resource hints,
+  `version` and `captureOwnerStack` no longer throw `x is not defined` in the browser or
+  drop content.
+- `@server` on `export default withX(Inner)` (and `memo(Inner)`) renders the component
+  with the HOC applied, also when the HOC is declared in another module. A wrapper Krate
+  cannot inline fails with `KR8030` instead of rendering nothing.
+- Conflicting tiers fail with `KR7115`: `// @runtime` above `@server`, `Foo.server.tsx` with
+  `@runtime`, a decorator against `serverComponents`/`runtimeDirs`, a `"@server"` body
+  directive against a decorator. `@client` on one component of a `// @server` file still
+  works. The rule is in Component Tiers.
+- Imported components are classified against the file that declares them, and relative
+  `serverDirs`/`runtimeDirs` entries match project-relative paths (they never matched).
+- Custom elements no longer render `data="[object Object]"`: objects, arrays and functions
+  are omitted from the HTML and set as properties on the client; `true` renders an empty
+  attribute.
 
 ### Security
 

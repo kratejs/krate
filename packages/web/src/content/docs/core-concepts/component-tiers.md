@@ -49,6 +49,10 @@ The tier is resolved in this order (highest wins):
 
 An `async` component is always a runtime component, whatever else it says.
 
+Only one source may name a tier for a component. When two of them name different
+tiers the build fails with [KR7115](/docs/reference/diagnostics/#kr7115) instead of
+picking one; see [Tiers that disagree](#tiers-that-disagree).
+
 ## Tier decorators
 
 `@server`, `@static`, `@runtime` and `@client` can go directly on a component.
@@ -91,6 +95,65 @@ A decorator above `export default () => <div />` or `export default memo(...)`
 expression, name the component (`@client` above `const View = ...;`, then
 `export default View;`). If your project already imports its own decorator named
 `server` or `client` and applies it to a class, that one is used instead.
+
+A decorator can also go on a higher-order component application. `@server`
+above `export default withBox(Inner)` classifies the file's default component and
+the wrapper is applied, whether `withBox` is declared in the same module or in
+another one of your modules. `export default memo(Inner)` and
+`export default forwardRef(Inner)` name `Inner` as the default component. A wrapper
+Krate cannot inline (one imported from a package, or one with statements besides
+the component it returns) fails the build with
+[KR8030](/docs/reference/diagnostics/#kr8030), since the component would otherwise
+render nothing.
+
+### Tiers that disagree
+
+These sources name a tier for a whole file, and must all agree:
+
+- the leading `// @server` / `// @static` / `// @runtime` / `// @client` comment,
+- the `.server` / `.runtime` / `.static` part of the file name,
+- the `serverComponents` and `runtimeComponents` config lists (by name or path),
+- the `serverDirs` and `runtimeDirs` config lists (paths are relative to the
+  project root).
+
+A tier written on a component, as a decorator or as a `"@server"` string at the top
+of its body, must agree with the other one on that component, and a tier on the
+file's default export or on its only exported component must also agree with the
+file-wide sources above, because it classifies the whole file.
+
+A decorator on any *other* component overrides the file's tier for that component
+alone. This is how `@client` opts one component out of a `// @server` file:
+
+```tsx
+// @server
+@client
+function LikeButton() { /* useState, onClick */ }
+
+export default function Post() { return <article><LikeButton /></article>; }
+```
+
+Everything else is a contradiction and fails with KR7115: `// @runtime` above
+`@server`, `@runtime` in `Card.server.tsx`, `@runtime` on a component listed in
+`serverComponents`, `@client` on the default export of a `// @server` file, or
+`@static` together with a `"@server"` directive in the same function. Remove one
+of the two.
+
+## Build-time tiers have no JavaScript
+
+Server, static and runtime components render to HTML and ship no JavaScript, so
+state, effects, class state and lifecycles, and event handlers cannot work in them.
+They fail the build with [KR7110](/docs/reference/diagnostics/#kr7110), naming the
+hook or handler, instead of producing a button that does nothing. Either remove the
+tier from the component, or move the interactive part into a client child:
+
+```tsx
+// @server
+import LikeButton from "./LikeButton"; // no tier marker: a client component
+
+export default function Post() {
+  return <article><h1>Static</h1><LikeButton /></article>;
+}
+```
 
 ### TypeScript
 

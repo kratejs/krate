@@ -38,6 +38,9 @@ for usage.
 | Portals | Beta | Beta | n/a | SSR-safe |
 | Suspense | Beta | Beta | n/a | SSR-safe |
 | React 19 actions and forms | Beta | Partial | n/a | Source semantics |
+| React 19.2: useId, useEffectEvent, Activity, ViewTransition | Beta | n/a | n/a | Source semantics |
+| Custom elements | Beta | n/a | n/a | React 19 semantics |
+| Component tiers: client APIs, conflicts and higher-order components | Beta | n/a | n/a | Krate semantics |
 | Server actions | Beta | n/a | Beta | Progressive enhancement |
 | Data cache and revalidation | Beta | n/a | Beta | next/cache parity |
 | Compiled React packages | n/a | Beta | Beta | Documented compat |
@@ -202,6 +205,34 @@ Known limits:
 Diagnostics: `KR7001`
 
 Evidence: `TestLowerUseActionState`, `TestReactBrowserDifferential`, `TestLowerUseFormStatusDestructured`, `TestLowerUseOptimistic`, `TestReactActionFormsCompile`, `browser:/react-actions/`
+
+### React 19.2: useId, useEffectEvent, Activity, ViewTransition
+
+**Source:** Beta - **Islands:** n/a - **SSR:** n/a
+
+useId gives every component instance (children, nested children, lists, repeated components, conditional branches, layouts, rows added at runtime) an id that is the same in the static HTML and the hydration code, so htmlFor and id pairs match. useEffectEvent lowers to a stable function that reads the latest props and state and does not subscribe the effect that calls it. <Activity mode> renders its children in a wrapper that hides them while keeping state, cleans their effects up while hidden and runs them again when visible. <ViewTransition> names its element child for the router's view transition support (name and default class). The experimental names (unstable_Activity, unstable_ViewTransition, unstable_useEffectEvent, SuspenseList) are accepted; props with no effect warn (KR8031).
+
+Diagnostics: `KR8031`
+
+Evidence: `TestUseIdInChildComponents`, `TestUseIdInHydratedChildMatchesHTML`, `TestUseIdInDynamicListRowsIsNumberedPerRow`, `TestUseEffectEventIsLowered`, `TestActivityRendersChildrenAndHidesThem`, `TestActivityUnsupportedPropWarns`, `TestViewTransitionNamesItsChild`, `TestReact19Browser`
+
+### Custom elements
+
+**Source:** Beta - **Islands:** n/a - **SSR:** n/a
+
+Strings and numbers render as attributes, true as an empty attribute and false is omitted. Objects, arrays and functions render no attribute on the server and are set as properties on the client, also when the element class is defined after the page loads. Components that render such props hydrate so the property is set.
+
+Evidence: `TestCustomElementPropsFollowReact19`, `TestCustomElementAttrs`, `TestReact19Browser`
+
+### Component tiers: client APIs, conflicts and higher-order components
+
+**Source:** Beta - **Islands:** n/a - **SSR:** n/a
+
+A server, static or runtime component that uses state, effects or event handlers fails the build (KR7110) with the fix, instead of shipping a dead page. Two tier sources that disagree for one component fail (KR7115). A tier decorator on an HOC-wrapped default export classifies the component and the HOC is applied, also when it is declared in another module; an HOC that cannot be inlined fails (KR8030).
+
+Diagnostics: `KR7110`, `KR7115`, `KR8030`
+
+Evidence: `TestBuildTimeTierRejectsClientAPIs`, `TestConflictingTiersFail`, `TestTierConflictRule`, `TestTierDecoratorOnHOCDefaultExport`, `TestHOCFromAnotherModuleIsApplied`, `TestUnresolvableHOCFailsTheBuild`
 
 ### Server actions
 

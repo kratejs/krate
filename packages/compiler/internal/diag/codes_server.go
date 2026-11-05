@@ -77,11 +77,17 @@ func init() {
 		},
 		CodeInfo{
 			Code:  CodeTierDecorator,
-			Title: "Tier decorator cannot apply here",
+			Title: "Tier decorator cannot apply here, or two tiers conflict",
 			Explanation: "`@server`, `@static`, `@runtime` and `@client` go on a function, class or const " +
 				"declaration, once per declaration. An async component always renders per request, so only " +
 				"`@runtime` fits it. A runtime component is bundled per file, so `@runtime` must be on the " +
-				"default export or the only exported component of its file.",
+				"default export or the only exported component of its file. A component also has one tier: the " +
+				"leading `// @tier` comment, the `.server`/`.runtime`/`.static` file name, the `serverComponents`, " +
+				"`runtimeComponents`, `serverDirs` and `runtimeDirs` config entries, a decorator and a `\"@tier\"` " +
+				"string at the top of a function body must agree. A decorator on a component that is not the " +
+				"file's default export or only exported component may override the file's tier (`@client` in a " +
+				"`// @server` file); on the default export it must match. See \"Tiers that disagree\" in " +
+				"Component Tiers.",
 		},
 		CodeInfo{
 			Code:  CodeAsyncLayout,
@@ -123,10 +129,14 @@ func init() {
 		CodeInfo{
 			Code:  CodeClientAPIInServer,
 			Title: "Client-only API used in a server component",
-			Explanation: "Components rendered by a server component (an async component) render once per request " +
-				"on the server and ship no JavaScript, so hooks such as useState/useEffect, Krate signals and " +
-				"event handlers cannot work there. Move the interactive part into a module that starts with " +
-				"`\"use client\"`; it is server-rendered and then hydrated in the browser.",
+			Explanation: "Server, static and runtime components, and the components an async component renders, render " +
+				"once (at build time or per request) and ship no JavaScript, so hooks such as useState/useEffect, " +
+				"Krate signals, class state and lifecycles, and event handlers cannot work there; they used to build " +
+				"and leave a page that did nothing. Remove the server tier from the component (the `// @server` " +
+				"comment or decorator, the `.server` file name or the config entry) to make it a client component, or " +
+				"move the interactive part into a client child component (one with no tier, or marked `@client`, or " +
+				"a module that starts with `\"use client\"` under an async component) and render that from the server " +
+				"component; it is server-rendered and then hydrated in the browser.",
 		},
 		CodeInfo{
 			Code:  CodeClientPropNotSerializable,

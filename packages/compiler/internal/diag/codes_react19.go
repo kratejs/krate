@@ -7,9 +7,6 @@ const (
 	CodeHOCUnresolved Code = "KR8030"
 	// CodeReact19Prop: a prop of Activity or ViewTransition that is ignored.
 	CodeReact19Prop Code = "KR8031"
-	// CodeEffectEventMisuse: a useEffectEvent function used where React
-	// forbids it.
-	CodeEffectEventMisuse Code = "KR8032"
 )
 
 func init() {
@@ -27,18 +24,12 @@ func init() {
 		},
 		CodeInfo{
 			Code:  CodeReact19Prop,
-			Title: "Prop of Activity or ViewTransition is not supported",
+			Title: "Prop of Activity, ViewTransition or SuspenseList is not supported",
 			Explanation: "`<Activity>` supports `mode=\"visible\"` and `mode=\"hidden\"`. `<ViewTransition>` supports " +
 				"`name`, `default`, `enter`, `exit`, `update` and `share` as strings, and ignores the event callbacks " +
-				"(`onEnter`, `onExit`, `onUpdate`, `onShare`). Other props have no effect and are reported once per " +
+				"(`onEnter`, `onExit`, `onUpdate`, `onShare`). `<SuspenseList>` renders its children and ignores " +
+				"`revealOrder` and `tail`. Other props have no effect and are reported once per " +
 				"element. This is a warning: the children always render.",
-		},
-		CodeInfo{
-			Code:  CodeEffectEventMisuse,
-			Title: "useEffectEvent function used outside an effect",
-			Explanation: "A function returned by `useEffectEvent` is meant to be called from an effect (or from another " +
-				"Effect Event), not passed to children or read during render, as in React 19.2. Krate keeps it working, " +
-				"so this is a warning about code that React's lint rules reject.",
 		},
 	)
 }

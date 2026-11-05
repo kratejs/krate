@@ -336,7 +336,7 @@ A server component used from a synchronous page renders as its own request-time 
 
 **Client-only API used in a server component**
 
-Components rendered by a server component (an async component) render once per request on the server and ship no JavaScript, so hooks such as useState/useEffect, Krate signals and event handlers cannot work there. Move the interactive part into a module that starts with `"use client"`; it is server-rendered and then hydrated in the browser.
+Server, static and runtime components, and the components an async component renders, render once (at build time or per request) and ship no JavaScript, so hooks such as useState/useEffect, Krate signals, class state and lifecycles, and event handlers cannot work there; they used to build and leave a page that did nothing. Remove the server tier from the component (the `// @server` comment or decorator, the `.server` file name or the config entry) to make it a client component, or move the interactive part into a client child component (one with no tier, or marked `@client`, or a module that starts with `"use client"` under an async component) and render that from the server component; it is server-rendered and then hydrated in the browser.
 
 ### KR7111
 
@@ -364,9 +364,9 @@ Krate wraps each export of a `"use client"` module in a client boundary, so it m
 
 ### KR7115
 
-**Tier decorator cannot apply here**
+**Tier decorator cannot apply here, or two tiers conflict**
 
-`@server`, `@static`, `@runtime` and `@client` go on a function, class or const declaration, once per declaration. An async component always renders per request, so only `@runtime` fits it. A runtime component is bundled per file, so `@runtime` must be on the default export or the only exported component of its file.
+`@server`, `@static`, `@runtime` and `@client` go on a function, class or const declaration, once per declaration. An async component always renders per request, so only `@runtime` fits it. A runtime component is bundled per file, so `@runtime` must be on the default export or the only exported component of its file. A component also has one tier: the leading `// @tier` comment, the `.server`/`.runtime`/`.static` file name, the `serverComponents`, `runtimeComponents`, `serverDirs` and `runtimeDirs` config entries, a decorator and a `"@tier"` string at the top of a function body must agree. A decorator on a component that is not the file's default export or only exported component may override the file's tier (`@client` in a `// @server` file); on the default export it must match. See "Tiers that disagree" in Component Tiers.
 
 ### KR7116
 
@@ -510,15 +510,9 @@ A `css={...}` prop on a DOM element is understood only by emotion's JSX runtime.
 
 ### KR8031
 
-**Prop of Activity or ViewTransition is not supported**
+**Prop of Activity, ViewTransition or SuspenseList is not supported**
 
-`<Activity>` supports `mode="visible"` and `mode="hidden"`. `<ViewTransition>` supports `name`, `default`, `enter`, `exit`, `update` and `share` as strings, and ignores the event callbacks (`onEnter`, `onExit`, `onUpdate`, `onShare`). Other props have no effect and are reported once per element. This is a warning: the children always render.
-
-### KR8032
-
-**useEffectEvent function used outside an effect**
-
-A function returned by `useEffectEvent` is meant to be called from an effect (or from another Effect Event), not passed to children or read during render, as in React 19.2. Krate keeps it working, so this is a warning about code that React's lint rules reject.
+`<Activity>` supports `mode="visible"` and `mode="hidden"`. `<ViewTransition>` supports `name`, `default`, `enter`, `exit`, `update` and `share` as strings, and ignores the event callbacks (`onEnter`, `onExit`, `onUpdate`, `onShare`). `<SuspenseList>` renders its children and ignores `revealOrder` and `tail`. Other props have no effect and are reported once per element. This is a warning: the children always render.
 
 ### KR8301
 
