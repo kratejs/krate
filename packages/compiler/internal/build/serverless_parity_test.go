@@ -26,7 +26,7 @@ type parityCase struct {
 	absent   []string
 	// inHead and notInHead are checked on the document head of both hosts,
 	// notInBody on everything after </head>.
-	inHead, notInHead, notInBody []string
+	inHead, notInHead, notInBody, onceInHead []string
 }
 
 // parityHeaders are compared between `krate start` and the node target: the
@@ -164,6 +164,19 @@ func TestServerlessNodeParity(t *testing.T) {
 		{name: "head isr hit", method: "GET", path: "/headisr/",
 			inHead:    []string{"<title>ISR head title</title>", `<meta name="robots" content="noindex">`},
 			notInBody: []string{"<meta ", "<title"}},
+		// generateMetadata and <Head> on one async ISR page merge into one head:
+		// <Head> wins a repeated name, a repeated property keeps every distinct
+		// value, identical tags appear once, and ISR hits serve the same head.
+		{name: "generateMetadata and Head miss", method: "GET", path: "/mixhead/",
+			inHead:     []string{"<title>From generateMetadata</title>", `<meta name="description" content="head description">`, `<meta name="author" content="Head">`, `<meta property="og:title" content="OG from meta">`, `<meta property="og:image" content="https://example.com/head.png">`, `<meta property="og:image" content="https://example.com/meta.png">`},
+			notInHead:  []string{`content="meta description"`},
+			onceInHead: []string{"<title>", `name="description"`, `name="robots"`, `og:title`, `https://example.com/meta.png`, `https://example.com/head.png`},
+			notInBody:  []string{"<meta ", "<title"}},
+		{name: "generateMetadata and Head hit", method: "GET", path: "/mixhead/",
+			inHead:     []string{"<title>From generateMetadata</title>", `<meta name="description" content="head description">`, `<meta property="og:image" content="https://example.com/meta.png">`},
+			notInHead:  []string{`content="meta description"`},
+			onceInHead: []string{"<title>", `name="description"`, `name="robots"`, `og:title`, `https://example.com/meta.png`, `https://example.com/head.png`},
+			notInBody:  []string{"<meta ", "<title"}},
 		{name: "head server component region", method: "GET", path: "/headcomponent/",
 			inHead:    []string{"<title>Written by Ada</title>", `<meta name="author" content="Ada">`},
 			notInBody: []string{"<meta ", "<title"}},
@@ -246,6 +259,11 @@ func TestServerlessNodeParity(t *testing.T) {
 				for _, want := range c.inHead {
 					if !strings.Contains(unquoted(head), unquoted(want)) {
 						t.Errorf("%s: <head> lacks %q:\n%.1500s", host, want, head)
+					}
+				}
+				for _, once := range c.onceInHead {
+					if n := strings.Count(unquoted(head), unquoted(once)); n != 1 {
+						t.Errorf("%s: <head> must hold %q exactly once, found %d:\n%.1500s", host, once, n, head)
 					}
 				}
 				for _, bad := range c.notInHead {
