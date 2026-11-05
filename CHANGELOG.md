@@ -5,6 +5,12 @@ detailed changelog. This file records the release train at a glance.
 
 ## Unreleased
 
+- `@krate/core` no longer publishes a stray Linux compiler binary, and the npm
+  wrapper picks the platform package when installed from a registry. In
+  `0.5.0-beta.1` a clean npm or pnpm install failed on Linux with
+  `spawn .../bin/krate EACCES`.
+- Build failures print the diagnostic hint. A broken tsconfig path alias now
+  shows the directory its targets resolved against.
 - `krate version` reports the native binary instead of the npm wrapper, and warns
   when the two differ.
 - Backslashes in tsconfig `baseUrl` and `paths` are normalized, so a config

@@ -112,6 +112,16 @@ jobs:
       - name: Generate platform packages
         run: node scripts/build-platform-packages.mjs
 
+      # The step above leaves a dev binary in packages/core/bin. Publishing it
+      # would make the wrapper run a non-executable, single-platform file.
+      - name: Check @krate/core ships no compiler binary
+        working-directory: packages/core
+        run: |
+          if npm pack --dry-run --json | grep -E '"path": "bin/krate(\.exe)?"'; then
+            echo "@krate/core would publish a compiler binary" >&2
+            exit 1
+          fi
+
       - name: Publish platform packages
         run: |
           set -e

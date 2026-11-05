@@ -32,7 +32,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
-    "bin",
+    "bin/krate.js",
     "dist",
     "install.js"
   ],
