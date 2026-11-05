@@ -11,7 +11,6 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
-	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
 
@@ -38,14 +37,14 @@ type highlightChunks struct {
 
 // highlightCore writes the shared tokenizer chunk and returns its path
 // relative to the output directory ("" when the runtime package is missing).
-func (b *Builder) highlightCore() string {
+func (b *Builder) highlightCore() (string, error) {
 	hc := &b.hl
 	if hc.core != "" {
-		return hc.core
+		return hc.core, nil
 	}
 	src := loadNamedBundleFromDisk(b.Root, "highlight.js")
 	if src == "" {
-		return ""
+		return "", nil
 	}
 	res := api.Transform(src, api.TransformOptions{
 		MinifyWhitespace:  true,
@@ -57,16 +56,15 @@ func (b *Builder) highlightCore() string {
 		Loader:            api.LoaderJS,
 	})
 	if len(res.Errors) > 0 {
-		return ""
+		return "", nil
 	}
 	code := strings.TrimSpace(string(res.Code))
 	rel := "chunks/hl." + hashContent([]byte(code)) + ".js"
-	if err := os.MkdirAll(filepath.Join(b.Cfg.OutDir, "chunks"), 0o755); err != nil {
-		return ""
+	if err := writeOutput(filepath.Join(b.Cfg.OutDir, rel), []byte(code)); err != nil {
+		return "", err
 	}
-	_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, rel), []byte(code), 0o644)
 	hc.core = rel
-	return rel
+	return rel, nil
 }
 
 // highlightLangChunk writes the chunk for a lexer (and the lexers it calls
@@ -76,7 +74,10 @@ func (b *Builder) highlightLangChunk(lexer string) (string, error) {
 	if rel, ok := hc.langs[lexer]; ok {
 		return rel, nil
 	}
-	core := b.highlightCore()
+	core, err := b.highlightCore()
+	if err != nil {
+		return "", err
+	}
 	if core == "" {
 		return "", fmt.Errorf("the highlighter (highlight.js) was not found next to the hydration runtime; rebuild @krate/runtime")
 	}
@@ -118,7 +119,9 @@ func (b *Builder) highlightLangChunk(lexer string) (string, error) {
 	sb.WriteString(`export*from"./` + strings.TrimPrefix(core, "chunks/") + `";`)
 	code := sb.String()
 	rel := "chunks/hl-" + sanitizeChunkName(lexer) + "." + hashContent([]byte(code)) + ".js"
-	_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, rel), []byte(code), 0o644)
+	if err := writeOutput(filepath.Join(b.Cfg.OutDir, rel), []byte(code)); err != nil {
+		return "", err
+	}
 	if hc.langs == nil {
 		hc.langs = map[string]string{}
 	}
@@ -187,10 +190,10 @@ func hlJSString(v string) string {
 // to its script: the language-to-chunk map and, when the page has dynamic
 // code, the call that starts it. It returns js unchanged for pages without
 // either.
-func (b *Builder) attachHighlight(js, html string) string {
+func (b *Builder) attachHighlight(js, html string) (string, error) {
 	hasCode := strings.Contains(html, highlightMarkup)
 	if !hasCode && !strings.Contains(js, highlightAPI) {
-		return js
+		return js, nil
 	}
 	langs := map[string]bool{}
 	for _, m := range highlightMarkupRe.FindAllStringSubmatch(html, -1) {
@@ -218,22 +221,25 @@ func (b *Builder) attachHighlight(js, html string) string {
 		}
 		rel, err := b.highlightLangChunk(lexer)
 		if err != nil {
+			if isOutputWriteError(err) {
+				return "", err
+			}
 			b.warnHighlightChunk(lang, err)
 			continue
 		}
 		entries = append(entries, hlJSString(lang)+":"+hlJSString(base+"/"+rel))
 	}
 	if len(entries) == 0 {
-		return js
+		return js, nil
 	}
 	snippet := "window.__KRATE_HL=Object.assign(window.__KRATE_HL||{},{" + strings.Join(entries, ",") + "});"
 	if hasCode {
 		snippet += "if(typeof krateHighlightInit==='function')krateHighlightInit();"
 	}
 	if strings.TrimSpace(js) == "" {
-		return snippet
+		return snippet, nil
 	}
-	return js + "\n" + snippet
+	return js + "\n" + snippet, nil
 }
 
 func (b *Builder) warnHighlightLanguage(lang string) {
@@ -270,11 +276,11 @@ var serverLangRe = regexp.MustCompile(`\blang\s*:\s*["']([A-Za-z0-9_+#.-]{1,24})
 // highlight.languages and the literal languages of the server pages. The
 // renderer loads dist/.krate/highlight.json at startup; without it, such code
 // is written as plain text.
-func (b *Builder) writeHighlightTables(serverBundles map[string]string) {
+func (b *Builder) writeHighlightTables(serverBundles map[string]string) error {
 	path := filepath.Join(b.Cfg.OutDir, ".krate", "highlight.json")
 	if len(serverBundles) == 0 {
 		_ = os.Remove(path)
-		return
+		return nil
 	}
 	lexers := map[string]bool{}
 	add := func(lang string) {
@@ -296,7 +302,7 @@ func (b *Builder) writeHighlightTables(serverBundles map[string]string) {
 	}
 	if len(lexers) == 0 {
 		_ = os.Remove(path)
-		return
+		return nil
 	}
 	names := make([]string, 0, len(lexers))
 	for l := range lexers {
@@ -306,8 +312,7 @@ func (b *Builder) writeHighlightTables(serverBundles map[string]string) {
 	bundle, err := syntaxhighlight.BuildBundle(names)
 	if err != nil {
 		b.warnHighlightChunk(strings.Join(names, ", "), err)
-		return
+		return nil
 	}
-	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	_ = fsutil.WriteFileAtomic(path, bundle.JSON(), 0o644)
+	return writeOutput(path, bundle.JSON())
 }

@@ -122,7 +122,10 @@ func TestSafeProjectPath(t *testing.T) {
 
 func TestWriteDevChunkFallback(t *testing.T) {
 	dir := t.TempDir()
-	rel := writeDevChunk(dir, dir)
+	rel, err := writeDevChunk(dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if rel != "chunks/krate-dev.js" {
 		t.Fatalf("unexpected dev chunk path: %q", rel)
 	}

@@ -47,6 +47,10 @@ var configFileNames = []string{
 	"tailwind.config.ts", "tailwind.config.js", "tailwind.config.mjs",
 }
 
+// FindTailwindConfig returns the path of the project's tailwind config file,
+// or "" when there is none.
+func FindTailwindConfig(root string) string { return findTailwindConfig(root) }
+
 // findTailwindConfig returns the first existing config path under root.
 func findTailwindConfig(root string) string {
 	for _, c := range configFileNames {
@@ -420,6 +424,20 @@ func resolveScanDirs(root string, opts TailwindOptions) []string {
 
 // atTailwindRe matches a `@tailwind base|components|utilities;` directive.
 var atTailwindRe = regexp.MustCompile(`(?m)^[ \t]*@tailwind[^;{}]*;[ \t]*\r?\n?`)
+
+var atTailwindImportRe = regexp.MustCompile(`@import\s+(?:url\(\s*)?["']tailwindcss(?:/[A-Za-z0-9._/-]*)?["']`)
+
+// TailwindDirectiveUse returns the first Tailwind-only directive found in
+// authored CSS (`@tailwind utilities` or `@import "tailwindcss"`), or "".
+func TailwindDirectiveUse(css string) string {
+	if m := atTailwindImportRe.FindString(css); m != "" {
+		return m
+	}
+	if m := atTailwindRe.FindString(css); m != "" {
+		return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(m), ";"))
+	}
+	return ""
+}
 
 // StripAtTailwind removes `@tailwind base|components|utilities;` directives.
 // Krate generates Tailwind output itself, so a leftover directive would ship as

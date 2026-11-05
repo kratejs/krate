@@ -17,7 +17,10 @@ func writeTrimmedChunk(t *testing.T, opts runtimeChunkOptions) string {
 	}
 	opts.Trim = true
 	outDir := t.TempDir()
-	rel := writeRuntimeChunk(outDir, true, repoRoot, opts)
+	rel, err := writeRuntimeChunk(outDir, true, repoRoot, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if rel == "" {
 		requireE2E(t, "runtime dist not built")
 		t.Skip("runtime dist not available")

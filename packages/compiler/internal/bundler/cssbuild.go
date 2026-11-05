@@ -39,6 +39,8 @@ type cssSheet struct {
 	assets map[string]string // asset source path -> hashed URL
 	deps   map[string]bool   // every other file read
 	diags  []diag.Diagnostic
+	// lastRead is the most recently read imported file.
+	lastRead string
 }
 
 func (cs *cssSheet) warn(msg string) {
@@ -49,7 +51,33 @@ func (cs *cssSheet) warn(msg string) {
 	})
 }
 
-func (cs *cssSheet) read(path string) { cs.deps[path] = true }
+func (cs *cssSheet) read(path string) {
+	cs.deps[path] = true
+	cs.lastRead = path
+}
+
+// checkSyntax records a warning for every structural problem in the source of
+// one stylesheet file.
+func (cs *cssSheet) checkSyntax(file, src string) {
+	if file == "" {
+		file = cs.file
+	}
+	shown := file
+	if rel, err := filepath.Rel(cs.b.root, file); err == nil && !strings.HasPrefix(rel, "..") {
+		shown = filepath.ToSlash(rel)
+	}
+	for _, p := range css.CheckSyntax(src) {
+		cs.diags = append(cs.diags, diag.Diagnostic{
+			File:     shown,
+			Line:     p.Line,
+			Col:      p.Col,
+			Message:  p.Message,
+			Hint:     "fix the braces in this file; Krate closes the damage at the end of the file so later stylesheets are not affected",
+			Severity: diag.SeverityWarning,
+			Code:     diag.CodeCSSSyntax,
+		})
+	}
+}
 
 var schemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
 
@@ -264,14 +292,20 @@ func (b *Bundler) resolveCSSModule(path, abs string, mtime time.Time, size int64
 	// Rewrite this file's url() references first, then inline @imports
 	// relative to THIS file's directory; every imported file has its own
 	// url() references rewritten relative to itself before it is spliced in.
-	text := cs.rewriteURLs(string(data), dir)
+	cs.checkSyntax(abs, string(data))
+	text := css.Balance(cs.rewriteURLs(string(data), dir))
 	text = css.InlineImportsWith(text, dir, css.ImportOptions{
-		Root:        b.root,
-		Resolve:     b.resolveCSSSpecifier,
-		RewriteURLs: cs.rewriteURLs,
-		OnRead:      cs.read,
-		Warn:        cs.warn,
-		Tailwind:    b.twImports,
+		Root:    b.root,
+		Resolve: b.resolveCSSSpecifier,
+		// An imported sheet is balanced before it is spliced in, so it cannot
+		// swallow the rest of the importing sheet.
+		RewriteURLs: func(c, d string) string {
+			cs.checkSyntax(cs.lastRead, c)
+			return css.Balance(cs.rewriteURLs(c, d))
+		},
+		OnRead:   cs.read,
+		Warn:     cs.warn,
+		Tailwind: b.twImports,
 	})
 
 	isModule := strings.Contains(path, ".module.")

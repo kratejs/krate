@@ -26,6 +26,33 @@ func TestInjectFontDisplay(t *testing.T) {
 	}
 }
 
+func TestInjectFontDisplayAfterUnterminatedDeclaration(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"minified, no final semicolon",
+			`@font-face{font-family:Inter;src:url(/f.woff2) format("woff2")}`,
+			`@font-face{font-family:Inter;src:url(/f.woff2) format("woff2");font-display:swap;}`},
+		{"spaced, no final semicolon",
+			"@font-face { font-family: Inter; src: url('/f.woff2') format('woff2') }",
+			"@font-face { font-family: Inter; src: url('/f.woff2') format('woff2') ;font-display:swap;}"},
+		{"final semicolon is not doubled",
+			"@font-face{font-family:Inter;src:url(/f.woff2);}",
+			"@font-face{font-family:Inter;src:url(/f.woff2);font-display:swap;}"},
+		{"trailing comment after an unterminated declaration",
+			"@font-face{src:url(/f.woff2) /* v2 */}",
+			"@font-face{src:url(/f.woff2) /* v2 */;font-display:swap;}"},
+		{"empty block",
+			"@font-face{}",
+			"@font-face{font-display:swap;}"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := injectFontDisplay(tc.in, "swap"); got != tc.want {
+				t.Fatalf("got  %s\nwant %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCollectFontURLs(t *testing.T) {
 	in := "@font-face { src: url('/fonts/a.woff2') format('woff2'), url(\"/fonts/a.woff\") format('woff'); }\n@font-face { src: url(data:font/woff2;base64,AAAA); }\n@font-face { src: url('/fonts/a.woff2'); }"
 	urls := collectFontURLs(in)

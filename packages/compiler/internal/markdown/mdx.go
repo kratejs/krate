@@ -213,6 +213,10 @@ func Compile(src string, cfg Config, opts Options) *Result {
 		}
 		res.Diags = append(res.Diags, d)
 	}
+	for _, is := range frontmatter.Check(src) {
+		res.Diags = append(res.Diags, Diagnostic{Line: is.Line, Col: is.Col,
+			Msg: "invalid frontmatter: " + is.Msg, Hint: is.Hint})
+	}
 	lineOff := strings.Count(src, "\n") - strings.Count(body, "\n")
 	if lineOff < 0 {
 		lineOff = 0

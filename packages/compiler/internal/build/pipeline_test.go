@@ -280,30 +280,36 @@ export default function Page() {
 	}
 }
 
-// TestBuildLocalIconsFolderMissing verifies a missing local icon produces an
-// escaped error span instead of raw file content and does not break the build.
-func TestBuildLocalIconsFolderMissing(t *testing.T) {
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "src", "pages"), 0755); err != nil {
-		t.Fatal(err)
+// TestBuildMissingIconFailsTheBuild verifies an <Icon> that cannot be resolved
+// is a KR8840 build error: the message never reaches the page and the icon
+// path appears only in the diagnostic, relative to the project.
+func TestBuildMissingIconFailsTheBuild(t *testing.T) {
+	cases := map[string]string{
+		"literal name": `export default function Page() { return <main><Icon name="not-registered" /></main>; }`,
+		"dynamic name": `const items = [{ icon: "not-registered" }];
+export default function Page() { return <main>{items.map((m) => <Icon name={m.icon} />)}</main>; }`,
 	}
-	page := `export default function Page() { return <Icon name="not-registered" />; }`
-	if err := os.WriteFile(filepath.Join(root, "src", "pages", "index.tsx"), []byte(page), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := config.Default()
-	cfg.Resolve(root)
-	b := New(root, cfg)
-	if err := b.BuildAll(); err != nil {
-		t.Fatalf("BuildAll: %v", err)
-	}
-	html := readOut(t, cfg.OutDir, filepath.Join("index.html"))
-	if !strings.Contains(html, `[local icon`) {
-		t.Errorf("expected escaped error span for missing icon, got:\n%.800s", html)
-	}
-	if strings.Contains(html, `&lt;`) {
-		t.Errorf("error span should not double-escape HTML, got:\n%.800s", html)
+	for name, page := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFileRel(t, root, "src/pages/index.tsx", page)
+			cfg := config.Default()
+			cfg.Resolve(root)
+			err := New(root, cfg).BuildAll()
+			if err == nil {
+				t.Fatal("BuildAll succeeded although the icon does not exist")
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "KR8840") || !strings.Contains(msg, "not-registered") {
+				t.Errorf("error lacks the code or icon name:\n%s", msg)
+			}
+			if strings.Contains(msg, filepath.Join(root, "icons")) {
+				t.Errorf("diagnostic shows the absolute icon path, want a project-relative one:\n%s", msg)
+			}
+			if data, rerr := os.ReadFile(filepath.Join(cfg.OutDir, "index.html")); rerr == nil && strings.Contains(string(data), "not-registered") {
+				t.Errorf("icon error text reached the page:\n%.600s", data)
+			}
+		})
 	}
 }
 

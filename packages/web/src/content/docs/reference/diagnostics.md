@@ -440,6 +440,24 @@ An `opengraph-image` or `twitter-image` file inside a dynamic segment (`blog/[sl
 
 `sitemap.ts` or `robots.ts` defines the file, so the sitemap or robots plugin (and the `robots` and `seo` config that feed it) did not write its own. The metadata file wins. Remove one of them to silence this warning. This is a warning.
 
+### KR7140
+
+**Tailwind input found but Tailwind is not enabled**
+
+Krate generates Tailwind utility CSS only when `tailwind: { enabled: true }` is set in `krate.config.ts`. Without it, `@tailwind base|components|utilities` and `@import "tailwindcss"` are removed from your CSS and no utilities are generated, so the page ships almost no styles. The warning appears once per build when a `tailwind.config.{ts,js,mjs}` file exists or one of those directives is found. Enable Tailwind, or delete the config file and directives if you do not use it. This is a warning.
+
+### KR7141
+
+**CSS has unbalanced braces or an unclosed comment**
+
+A stylesheet with a `{` that is never closed, a `}` with no `{`, or a comment that never ends is not valid CSS, and browsers recover by dropping or merging the rules that follow it. Krate reports the line and column, and closes the damage at the end of the file so it cannot swallow the next stylesheet in the page: a stray `}` is removed and a missing one is added. The file is still shipped as written otherwise, so fix the source. This is a warning.
+
+### KR7142
+
+**generateStaticParams entry cannot produce a page**
+
+Each object returned by `generateStaticParams` becomes one page, so it needs a value for every dynamic segment of the route (`{ slug: "a" }` for `[slug].tsx`), and each value becomes a directory name: it must be non-empty and contain no `..`, backslash or, outside a catch-all route, `/`. An entry that misses a param would have been written to the literal path `[slug]/index.html`; two different entries that produce the same path would overwrite each other. Both are build errors that name the entry. An exact duplicate entry is dropped. Fix the function, or remove the entry.
+
 ### KR7150
 
 **Unknown code theme**
@@ -639,6 +657,12 @@ A `getCollection("name")` chain is normally evaluated while the site is built an
 **Component option value must be a literal**
 
 Tabs, Accordion and the other zero-JS components turn each part's value into CSS while the site is built, so every `value` on their parts must be a string literal in the source. A value read from data (for example `value={item.id}` inside `items.map(...)`) cannot be enumerated: the panels for that value get no show/hide rules, defaultValue is ignored and every panel stays visible. Write the values out, or use `<Select>`/a `createSignal` based component for data-driven options. This is a warning.
+
+### KR8840
+
+**Icon cannot be resolved**
+
+An `<Icon name="...">` is compiled to inline SVG while the site is built. A name without a colon is a local icon and must exist as `icons/<name>.svg` in the project; `set:name` (for example `lucide:home`) is fetched from the Iconify API and cached under `.krate/cache/icons`. When neither works the build fails and names the file or lookup that failed, instead of putting an error message in the page. Fix the name, add the file, or pre-populate the cache for offline builds. This is an error.
 
 ## KR9xxx: routing, segment pages and rendering errors
 

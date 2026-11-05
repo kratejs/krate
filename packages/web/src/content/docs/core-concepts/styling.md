@@ -61,6 +61,11 @@ tailwind: {
 }
 ```
 
+Tailwind is off until `enabled: true` is set. If a `tailwind.config.{ts,js,mjs}`
+file exists, or your CSS uses `@tailwind` or `@import "tailwindcss"`, while it
+is off, the build warns once ([KR7140](/docs/reference/diagnostics/)) instead of
+quietly shipping a nearly empty stylesheet.
+
 ### CSS-first directives
 
 Krate reads the Tailwind v4 CSS-first directives from your stylesheets (files
@@ -344,6 +349,17 @@ than a page that silently ships without its styles. Compile the file to CSS
 first, for example with the `sass` CLI in a prebuild script
 (`sass src/styles.scss src/styles.css`), and import the `.css` file, or port the
 styles to CSS or Tailwind.
+
+## Invalid CSS
+
+Krate does not rewrite your CSS, but it checks each stylesheet file for
+unbalanced braces, an unclosed comment or an unclosed string. A problem is
+reported as a warning with the file, line and column
+([KR7141](/docs/reference/diagnostics/)). Because the sheets a page imports are
+joined into one file, Krate also closes the damage at the end of the file that
+caused it (a stray `}` is dropped, a missing `}` is added), so a mistake in one
+file cannot swallow the rules of the next. Fix the source: the rest of the file
+is shipped as written.
 
 ## Global CSS & code splitting
 
