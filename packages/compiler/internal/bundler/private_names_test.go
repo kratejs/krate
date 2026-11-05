@@ -98,6 +98,61 @@ func TestPageNamesWinOverImportedOnes(t *testing.T) {
 	}
 }
 
+func TestDefaultImportFollowsTheRename(t *testing.T) {
+	dir := writeModules(t, map[string]string{
+		"a.tsx":    "export default function Card() { return <p />; }\n",
+		"b.tsx":    "export default function Card() { return <b />; }\n",
+		"x.tsx":    "import Card from './a';\nexport function X() { return <Card />; }\n",
+		"y.tsx":    "import Card from './b';\nexport function Y() { return <Card />; }\n",
+		"page.tsx": "import { X } from './x';\nimport { Y } from './y';\nexport default function P() { return <main><X /><Y /></main>; }\n",
+	})
+	bundle, err := New(dir).Bundle(filepath.Join(dir, "page.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	importOf := func(mod *Module) string {
+		for _, stmt := range mod.Program.Body {
+			if imp, ok := stmt.(*ast.ImportStmt); ok {
+				return imp.Default
+			}
+		}
+		return ""
+	}
+	x, y := importOf(moduleNamed(t, bundle, "x.tsx")), importOf(moduleNamed(t, bundle, "y.tsx"))
+	if x == y || OriginalName(x) != "Card" || OriginalName(y) != "Card" {
+		t.Errorf("imports: %q, %q", x, y)
+	}
+}
+
+// One module with a default export is not a collision, whatever importers call it.
+func TestOrdinaryImportsRenameNothing(t *testing.T) {
+	dir := writeModules(t, map[string]string{
+		"card.tsx": "function up() { return 1; }\nexport default function Card() { return <p>{up()}</p>; }\n",
+		"page.tsx": "import Card from './card';\nexport default function P() { return <Card />; }\n",
+	})
+	bundle, err := New(dir).Bundle(filepath.Join(dir, "page.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := topNames(moduleNamed(t, bundle, "card.tsx").Program); !names["Card"] || !names["up"] {
+		t.Errorf("names: %v", names)
+	}
+}
+
+func TestLazyTargetKeepsItsName(t *testing.T) {
+	dir := writeModules(t, map[string]string{
+		"heavy.tsx": "export default function Heavy() { return <p />; }\n",
+		"page.tsx":  "import { lazy } from 'react';\nconst Heavy = lazy(() => import('./heavy'));\nexport default function P() { return <Heavy />; }\n",
+	})
+	bundle, err := New(dir).Bundle(filepath.Join(dir, "page.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !topNames(moduleNamed(t, bundle, "heavy.tsx").Program)["Heavy"] {
+		t.Error("the lazy target was renamed")
+	}
+}
+
 func TestDefaultExportsCanShareAName(t *testing.T) {
 	dir := writeModules(t, map[string]string{
 		"a.tsx":    "export default function Card() { return <p />; }\n",

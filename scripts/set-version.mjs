@@ -6,7 +6,7 @@
  *   node scripts/set-version.mjs <version>
  *
  * Updates packages/core, packages/runtime, packages/components,
- * packages/plugin, packages/base-docs-theme, packages/simple-docs-theme, and the
+ * packages/plugin, packages/ts-plugin, packages/base-docs-theme, packages/simple-docs-theme, and the
  * create-krate scaffolds,
  * and aligns @krate/core's
  * optionalDependencies (the platform packages) to the same version. Also keeps
@@ -29,6 +29,7 @@ const manifests = [
   join(root, 'packages', 'runtime', 'package.json'),
   join(root, 'packages', 'components', 'package.json'),
   join(root, 'packages', 'plugin', 'package.json'),
+  join(root, 'packages', 'ts-plugin', 'package.json'),
   join(root, 'packages', 'base-docs-theme', 'package.json'),
   join(root, 'packages', 'simple-docs-theme', 'package.json'),
   join(root, 'packages', 'create-krate-app', 'package.json'),

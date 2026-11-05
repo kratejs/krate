@@ -7,7 +7,7 @@
     "dev": "krate dev",
     "build": "krate build",
     "serve": "krate serve",
-    "typecheck": "krate types && tsc --noEmit"
+    "typecheck": "krate typecheck"
   },
   "dependencies": {
     "@krate/core": "__KRATE_DIST_TAG__",
@@ -15,6 +15,7 @@
     "@krate/components": "__KRATE_DIST_TAG__"
   },
   "devDependencies": {
+    "@krate/ts-plugin": "__KRATE_DIST_TAG__",
     "typescript": "^5.5.0"
   }
 }

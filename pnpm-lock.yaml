@@ -193,6 +193,15 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  packages/ts-plugin:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.43
+        version: 20.19.43
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
   packages/web:
     devDependencies:
       '@krate/base-docs-theme':
@@ -412,77 +421,35 @@ packages:
     cpu: [arm64]
     os: [darwin]
 
-  '@krate/core-darwin-arm64@0.5.0-alpha.4':
-    resolution: {integrity: sha512-O7bH3qEOvVvgOd5DylWGf7w8+VzZAiCBFZvfCwHxDpeyMUI7fVBbRKDZvdMBqHiZaowthTesiAgL9X4mLrif6Q==}
-    cpu: [arm64]
-    os: [darwin]
-    hasBin: true
-
   '@krate/core-darwin-x64@0.1.0':
     resolution: {integrity: sha512-zhT/NUimyQ3uRP+Vzp69nJFNBNL7OQrKuCcbPztnKLwFdjyQLS3c+S3jP/9QPXL1wQk9R+ZLjdDX0IH6zhwY0Q==}
     cpu: [x64]
     os: [darwin]
-
-  '@krate/core-darwin-x64@0.5.0-alpha.4':
-    resolution: {integrity: sha512-clY0sI0PcmgVxNub9dCcXj5VOrXGJCjCEO3Rl1rMquqs0YO8IgsJ7kNFh4aMftn0cZoma0Poq3IQ+jzTXj/yiw==}
-    cpu: [x64]
-    os: [darwin]
-    hasBin: true
 
   '@krate/core-linux-arm64@0.1.0':
     resolution: {integrity: sha512-nLKFsLRhA4VJsVZbMVrNiKF9TYwrKmqAnXag/wIhoYhRLGBjYX7WStnZ5n3xMpQ3y1o/N+ItO3KOTegbX4MBmg==}
     cpu: [arm64]
     os: [linux]
 
-  '@krate/core-linux-arm64@0.5.0-alpha.4':
-    resolution: {integrity: sha512-e/PPN3jRwWRyleP0nnNHGeI5v/LbgkN4p0hm4t1f+OzlBPbot66+DL2t2uBUdFDMED02/9Gi89u1VXA09eDZWQ==}
-    cpu: [arm64]
-    os: [linux]
-    hasBin: true
-
   '@krate/core-linux-x64-musl@0.1.0':
     resolution: {integrity: sha512-/nb4E2N5tnMAXvyGrahUD7WgSXAbpFFZcbNUq/9rvthponOD/j9k3WUUwKdHo3hVRh0jP28rME46ZK3ikP2VzA==}
     cpu: [x64]
     os: [linux]
-
-  '@krate/core-linux-x64-musl@0.5.0-alpha.4':
-    resolution: {integrity: sha512-DzICzJ78sTHxauQhdSD11fLhzzZQ8NW0PQyKLwmFkw3gmD3PzOylDfVb6I01nSvujSsiu1AQ7FMx1VxYHc1CqA==}
-    cpu: [x64]
-    os: [linux]
-    hasBin: true
 
   '@krate/core-linux-x64@0.1.0':
     resolution: {integrity: sha512-VHjRivVNJfk7IqCC5kNUN3Udmmix2bjL1E9I81w92P4Z9zsr3rddnETv03lvQXOdxvhUySgR1TdZhKh+KpTx+A==}
     cpu: [x64]
     os: [linux]
 
-  '@krate/core-linux-x64@0.5.0-alpha.4':
-    resolution: {integrity: sha512-gosl1SV4cT113jK0JxO5T+r/VTLY3mJimvI2vk6xIqm/3GiGPQ3FJakXZh7k4V/Rz9NEkwaVOMChcmkB/U2o1g==}
-    cpu: [x64]
-    os: [linux]
-    hasBin: true
-
   '@krate/core-win32-arm64@0.1.0':
     resolution: {integrity: sha512-7jCcyfvOWZNFLUwKbCdOHrOV9WdLFYWU4NC3YUkJgTmHuasA4N3SwCCUu+k7ZvLcvZ3cKyFgQlMKgybKIlhS1g==}
     cpu: [arm64]
     os: [win32]
 
-  '@krate/core-win32-arm64@0.5.0-alpha.4':
-    resolution: {integrity: sha512-WoTlQC0Rzdz5xKGdhgT3zKircuCfSs5hOnH2OgjmWJ5piW3zdJoytVakfxY2516nePa+uSaePFfzSSiVEJpFKA==}
-    cpu: [arm64]
-    os: [win32]
-    hasBin: true
-
   '@krate/core-win32-x64@0.1.0':
     resolution: {integrity: sha512-b0/QBgocnFlrftTQ6umXKNZXU8bN96aTtlVlM1n8NBWzuxi6Xxxyc1ZMZaH4H+oxhC4h16MO4CrwHzRyn4L0oQ==}
     cpu: [x64]
     os: [win32]
-
-  '@krate/core-win32-x64@0.5.0-alpha.4':
-    resolution: {integrity: sha512-p4W/KPMjWy25r65TiuTzjXF3iQ6oJb5A+tYKPGAsv4ZwNial5vt6h+TEqNocp5zlGN+E8DerkaNnuI/VDhjWZA==}
-    cpu: [x64]
-    os: [win32]
-    hasBin: true
 
   '@krate/core@0.5.0-alpha.4':
     resolution: {integrity: sha512-u5mP2WwD3/zMq9UEJsgJmCj3MqaBGSh21dnRdxaBIlAplIAUwT/LcKJ3BXJDHt68xNMVXI7BFK9zxc5sUWUKkA==}
@@ -2073,56 +2040,27 @@ snapshots:
   '@krate/core-darwin-arm64@0.1.0':
     optional: true
 
-  '@krate/core-darwin-arm64@0.5.0-alpha.4':
-    optional: true
-
   '@krate/core-darwin-x64@0.1.0':
-    optional: true
-
-  '@krate/core-darwin-x64@0.5.0-alpha.4':
     optional: true
 
   '@krate/core-linux-arm64@0.1.0':
     optional: true
 
-  '@krate/core-linux-arm64@0.5.0-alpha.4':
-    optional: true
-
   '@krate/core-linux-x64-musl@0.1.0':
-    optional: true
-
-  '@krate/core-linux-x64-musl@0.5.0-alpha.4':
     optional: true
 
   '@krate/core-linux-x64@0.1.0':
     optional: true
 
-  '@krate/core-linux-x64@0.5.0-alpha.4':
-    optional: true
-
   '@krate/core-win32-arm64@0.1.0':
-    optional: true
-
-  '@krate/core-win32-arm64@0.5.0-alpha.4':
     optional: true
 
   '@krate/core-win32-x64@0.1.0':
     optional: true
 
-  '@krate/core-win32-x64@0.5.0-alpha.4':
-    optional: true
-
   '@krate/core@0.5.0-alpha.4':
     dependencies:
       '@krate/plugin': 0.5.0-alpha.4
-    optionalDependencies:
-      '@krate/core-darwin-arm64': 0.5.0-alpha.4
-      '@krate/core-darwin-x64': 0.5.0-alpha.4
-      '@krate/core-linux-arm64': 0.5.0-alpha.4
-      '@krate/core-linux-x64': 0.5.0-alpha.4
-      '@krate/core-linux-x64-musl': 0.5.0-alpha.4
-      '@krate/core-win32-arm64': 0.5.0-alpha.4
-      '@krate/core-win32-x64': 0.5.0-alpha.4
 
   '@krate/plugin@0.5.0-alpha.4': {}
 

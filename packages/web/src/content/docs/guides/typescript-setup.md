@@ -80,16 +80,39 @@ in an ambient `.d.ts`.
 `Icon`. It is generated (by `krate dev`, `krate build` or `krate types`) and
 git-ignored by the scaffold, so run `krate types` once after cloning for editors
 and `tsc` to see it. The scaffold's `typecheck` script does exactly that:
-`krate types && tsc --noEmit`.
+`krate typecheck`.
 
 ## Typechecking in CI
 
 ```sh
-krate types && npx tsc --noEmit
+krate typecheck
 ```
 
 Add this after `krate build`. It catches type errors the compiler tolerates
-(Krate strips types rather than validating them).
+(Krate strips types rather than validating them). It generates the types, then
+runs your project's `tsc --noEmit` without the errors `tsc` reports for
+[tier decorators](/docs/core-concepts/component-tiers/#tier-decorators). Any other
+error fails it, including a misspelled decorator.
+
+## Editor support
+
+Tier decorators are errors to TypeScript, so editors underline them. The scaffold
+turns that off with a language service plugin in `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "plugins": [{ "name": "@krate/ts-plugin" }]
+  }
+}
+```
+
+For an existing project, install `@krate/ts-plugin` as a dev dependency and add
+the entry above. In VS Code, run **TypeScript: Select TypeScript Version** and
+choose the workspace version, since plugins load from your project.
+
+Plugins only run in editors, which is why the command line uses `krate typecheck`
+instead of `tsc`.
 
 ## How Krate compiles TypeScript
 

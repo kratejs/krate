@@ -43,6 +43,7 @@ packages/
   components/          @krate/components - component library (TSX)
   core/                @krate/core - npm CLI wrapper + platform binaries
   plugin/              @krate/plugin - plugin authoring types (TS)
+  ts-plugin/           @krate/ts-plugin - TS language service plugin for editors
   base-docs-theme/     @krate/base-docs-theme - default docs theme
   web/                 the krate.js.org docs site (also a build smoke test)
   create-krate-app/    app scaffolder + templates

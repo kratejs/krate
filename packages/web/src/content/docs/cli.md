@@ -16,6 +16,7 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate start [dir]` | Serve the existing build output without rebuilding (production start) |
 | `krate init [dir]` | Scaffold a new project (alias: `create`; via the npm wrapper) |
 | `krate types [dir]` | Generate route/content TypeScript declarations only |
+| `krate typecheck [dir]` | Generate types, then run `tsc --noEmit` without its errors about tier decorators |
 | `krate go:init [dir]` | Set up `go.mod`/`go.work` + vendored helpers for Go intellisense |
 | `krate check [dir]` | Build and run quality gates (a11y/SEO/perf); non-zero on failure |
 | `krate fix [dir]` | Apply conservative, parse-gated source fixes (dry-run unless `--apply`) |

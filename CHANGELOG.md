@@ -8,8 +8,14 @@ detailed changelog. This file records the release train at a glance.
 - Tier decorators: `@server`, `@static`, `@runtime` and `@client` can go directly
   on a function, class or const. On a file's default export or only exported
   component they classify the whole file, like a `// @server` comment; elsewhere
-  they classify one component. Misplaced ones fail with `KR7115`. `tsc` reports
-  them, see the component tiers guide.
+  they classify one component. Misplaced ones fail with `KR7115`.
+- `krate typecheck` runs `krate types` and `tsc --noEmit` without the errors `tsc`
+  reports for tier decorators, and `@krate/ts-plugin` does the same in editors.
+  Scaffolds use both.
+- Fixed: modules on a page shared one namespace, so two files with a private
+  `up`, `Row` or `LABEL`, or two default exports named `Card`, showed one module's
+  value for both, in static HTML and in client code. They are now kept apart. A
+  page that imports one name from two modules gets `KR7116`.
 - Decorators work in `.js` and `.jsx` files, not only TypeScript.
 - A decorated class component now always warns (`KR3011`), including member
   decorators and legacy decorators, which used to report an unresolved component

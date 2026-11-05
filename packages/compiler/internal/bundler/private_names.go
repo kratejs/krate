@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,9 +17,10 @@ import (
 // Every module of a page ends up in one namespace: the component table, module
 // constants and the hydration script are all keyed by name. Two modules with a
 // private `function up()` would otherwise share whichever came last.
-// isolatePrivateNames renames such a binding in all modules but one. A default
-// export can move too, since importers ask for "the default", not for its name.
-// A name only changes when it really collides, so generated code stays readable.
+// isolatePrivateNames renames such a binding in all modules but the first. A
+// default export can move too: importers ask for "the default", and one that
+// binds it under the old name follows the rename. A name only changes when two
+// modules really declare it, so generated code stays readable.
 //
 // Named exports cannot move without rewriting every importer, so two modules
 // that export one name and are both imported by it get a warning instead.
@@ -35,36 +37,26 @@ func OriginalName(name string) string {
 
 // moduleNames holds a module's top-level names.
 type moduleNames struct {
-	private map[string]bool
-	taken   map[string]bool // exported or imported: cannot be renamed here
+	private map[string]bool // renameable: private bindings and the default export
+	fixed   map[string]bool // named exports, which cannot move
 }
 
 func collectModuleNames(prog *ast.Program) moduleNames {
-	n := moduleNames{private: map[string]bool{}, taken: map[string]bool{}}
+	n := moduleNames{private: map[string]bool{}, fixed: map[string]bool{}}
 	for _, stmt := range prog.Body {
-		if exp, ok := stmt.(*ast.ExportStmt); ok && exp.Default {
+		exp, isExport := stmt.(*ast.ExportStmt)
+		switch {
+		case isExport && exp.Default:
 			for _, name := range declaredNames(exp.Declaration) {
 				n.private[name] = true
 			}
-			continue
-		}
-		switch s := stmt.(type) {
-		case *ast.ImportStmt:
-			n.taken[s.Default], n.taken[s.Namespace] = true, true
-			for _, spec := range s.Named {
-				if spec.Local != "" {
-					n.taken[spec.Local] = true
-				} else {
-					n.taken[spec.Remote] = true
-				}
+		case isExport:
+			n.fixed[exp.Local] = true
+			for _, spec := range exp.Named {
+				n.fixed[spec.Local] = true
 			}
-		case *ast.ExportStmt:
-			n.taken[s.Local] = true
-			for _, spec := range s.Named {
-				n.taken[spec.Local] = true
-			}
-			for _, name := range declaredNames(s.Declaration) {
-				n.taken[name] = true
+			for _, name := range declaredNames(exp.Declaration) {
+				n.fixed[name] = true
 			}
 		default:
 			for _, name := range declaredNames(stmt) {
@@ -72,15 +64,42 @@ func collectModuleNames(prog *ast.Program) moduleNames {
 			}
 		}
 	}
-	delete(n.taken, "")
+	delete(n.fixed, "")
 	for name := range n.private {
 		// esbuild helpers such as __publicField are the same in every file, so
 		// sharing one copy is correct and smaller.
-		if name == "" || n.taken[name] || strings.HasPrefix(name, "__") {
+		if name == "" || n.fixed[name] || strings.HasPrefix(name, "__") {
 			delete(n.private, name)
 		}
 	}
 	return n
+}
+
+func (n moduleNames) declares(name string) bool { return n.private[name] || n.fixed[name] }
+
+// importLocals calls fn with each name a module binds by importing, and the
+// module the binding comes from ("" when it is not part of the bundle).
+func (b *Bundler) importLocals(mod *Module, fn func(local, target string, isDefault bool)) {
+	for _, stmt := range mod.Program.Body {
+		imp, ok := stmt.(*ast.ImportStmt)
+		if !ok {
+			continue
+		}
+		target := b.resolveImportForModule(mod.Path, strings.Trim(imp.Source, "\"'`"))
+		if imp.Default != "" {
+			fn(imp.Default, target, true)
+		}
+		if imp.Namespace != "" {
+			fn(imp.Namespace, "", false)
+		}
+		for _, spec := range imp.Named {
+			local := spec.Local
+			if local == "" {
+				local = spec.Remote
+			}
+			fn(local, target, false)
+		}
+	}
 }
 
 func declaredNames(stmt ast.Stmt) []string {
@@ -112,39 +131,86 @@ func (b *Bundler) isolatePrivateNames() {
 		return
 	}
 	b.warnExportCollisions(mods)
-	// The entry keeps its names, then modules in bundle order. Exports and
-	// imports of every module are claimed first, since they cannot move.
+	// The entry keeps its names, then modules in bundle order.
 	sort.SliceStable(mods, func(i, j int) bool { return mods[i].IsEntry && !mods[j].IsEntry })
-	names := make([]moduleNames, len(mods))
+
+	dynamic := b.dynamicImportTargets(mods)
+	names := make(map[string]moduleNames, len(mods))
 	used := map[string]bool{}
-	for i, mod := range mods {
-		names[i] = collectModuleNames(mod.Program)
-		if ownsExports(mod) {
-			// Their export lists and actions are built from source by name.
-			for name := range names[i].private {
-				names[i].taken[name] = true
+	for _, mod := range mods {
+		n := collectModuleNames(mod.Program)
+		if ownsExports(mod) || dynamic[mod.Path] {
+			for name := range n.private {
+				n.fixed[name] = true
 			}
-			names[i].private = nil
+			n.private = nil
 		}
-		for name := range names[i].taken {
+		names[mod.Path] = n
+		for name := range n.fixed {
 			used[name] = true
 		}
 	}
-	for i, mod := range mods {
-		var clash []string
-		for name := range names[i].private {
-			if used[name] {
-				clash = append(clash, name)
+	// An import is a reference to the module that declares the name. Only one
+	// that binds some other name, or a package, occupies it.
+	for _, mod := range mods {
+		b.importLocals(mod, func(local, target string, _ bool) {
+			if n, ok := names[target]; !ok || !n.declares(local) {
+				used[local] = true
+			}
+		})
+	}
+
+	renames := make(map[string]map[string]string, len(mods))
+	for _, mod := range mods {
+		n := names[mod.Path]
+		for name := range n.private {
+			if !mod.IsEntry && used[name] {
+				if renames[mod.Path] == nil {
+					renames[mod.Path] = map[string]string{}
+				}
+				renames[mod.Path][name] = name + b.privateSuffix(mod.Path)
 			}
 		}
-		for name := range names[i].private {
+		for name := range n.private {
 			used[name] = true
 		}
-		if len(clash) > 0 {
-			sort.Strings(clash)
-			b.renamePrivate(mod, clash)
+	}
+
+	// A default import under the old name would now find another module's
+	// binding, so it follows the rename.
+	imports := map[string]map[string]string{}
+	for _, mod := range mods {
+		b.importLocals(mod, func(local, target string, isDefault bool) {
+			if to, ok := renames[target][local]; ok && isDefault {
+				if imports[mod.Path] == nil {
+					imports[mod.Path] = map[string]string{}
+				}
+				imports[mod.Path][local] = to
+			}
+		})
+	}
+	for _, mod := range mods {
+		if len(renames[mod.Path]) > 0 || len(imports[mod.Path]) > 0 {
+			b.applyPrivateRenames(mod, renames[mod.Path], imports[mod.Path])
 		}
 	}
+}
+
+var dynamicImportRe = regexp.MustCompile("\\bimport\\(\\s*['\"`]([^'\"`]+)['\"`]\\s*\\)")
+
+// dynamicImportTargets returns the modules loaded with import(). lazy() finds
+// its component by the target's default export name.
+func (b *Bundler) dynamicImportTargets(mods []*Module) map[string]bool {
+	out := map[string]bool{}
+	for _, mod := range mods {
+		if !strings.Contains(mod.SourceCode, "import(") {
+			continue
+		}
+		for _, m := range dynamicImportRe.FindAllStringSubmatch(mod.SourceCode, -1) {
+			out[b.resolveImportForModule(mod.Path, m[1])] = true
+		}
+	}
+	return out
 }
 
 func ownsExports(mod *Module) bool {
@@ -160,6 +226,10 @@ func ownsExports(mod *Module) bool {
 func (b *Bundler) warnExportCollisions(mods []*Module) {
 	owners := map[string]map[string]bool{}
 	for _, mod := range mods {
+		// A package's own copies are out of the project's hands.
+		if strings.Contains(filepath.ToSlash(mod.Path), "/node_modules/") {
+			continue
+		}
 		for _, stmt := range mod.Program.Body {
 			if exp, ok := stmt.(*ast.ExportStmt); ok && !exp.Default {
 				for _, name := range declaredNames(exp.Declaration) {
@@ -219,13 +289,13 @@ func (b *Bundler) warnExportCollisions(mods []*Module) {
 	}
 }
 
-// renamePrivate renames names in mod. Cached programs are shared between
-// pages, so the rename happens on a copy, and the copy is kept for the next page
-// that needs the same names renamed.
-func (b *Bundler) renamePrivate(mod *Module, names []string) {
+// applyPrivateRenames renames bindings and default imports in mod. Cached
+// programs are shared between pages, so this happens on a copy, and the copy is
+// kept for the next page that needs the same renames.
+func (b *Bundler) applyPrivateRenames(mod *Module, bindings, imports map[string]string) {
 	orig := mod.Program
 	shared := !mod.IsEntry && !mod.Rewritable
-	key := strings.Join(names, ",")
+	key := renameKey(bindings) + "|" + renameKey(imports)
 	if shared {
 		if prog := b.cache.getRenamed(mod.Path, orig, key); prog != nil {
 			mod.Program = prog
@@ -233,14 +303,33 @@ func (b *Bundler) renamePrivate(mod *Module, names []string) {
 		}
 		mod.Program = cloneProgram(orig)
 	}
-	set := make(map[string]bool, len(names))
-	for _, n := range names {
-		set[n] = true
+	all := make(map[string]string, len(bindings)+len(imports))
+	for name := range renamableNames(mod.Program, func(n string) bool { _, ok := bindings[n]; return ok }) {
+		all[name] = bindings[name]
 	}
-	renameBindings(mod.Program, func(name string) bool { return set[name] }, b.privateSuffix(mod.Path))
+	for from, to := range imports {
+		all[from] = to
+	}
+	applyRenames(mod.Program, all)
+	for _, stmt := range mod.Program.Body {
+		if imp, ok := stmt.(*ast.ImportStmt); ok {
+			if to, ok := imports[imp.Default]; ok {
+				imp.Default = to
+			}
+		}
+	}
 	if shared {
 		b.cache.putRenamed(mod.Path, orig, key, mod.Program)
 	}
+}
+
+func renameKey(names map[string]string) string {
+	keys := make([]string, 0, len(names))
+	for k := range names {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
 }
 
 // privateSuffix depends on the path within the project, so builds are

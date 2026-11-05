@@ -25,7 +25,7 @@ src/pages/about.tsx:20:0: expected ), got EOF
 deploying - a failed build never writes a partial `dist/`.
 
 To surface errors early in CI, run `krate check` (quality gates) and
-`krate types && tsc --noEmit` (type errors) after `krate build`.
+`krate typecheck` (type errors) after `krate build`.
 
 ## Render-time errors (SSR/ISR/streaming)
 

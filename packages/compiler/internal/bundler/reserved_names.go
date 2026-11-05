@@ -74,6 +74,20 @@ func renameReservedBindings(prog *ast.Program) {
 // renameBindings appends suffix to every binding whose name matches, and to
 // every reference resolving to it, throughout the module.
 func renameBindings(prog *ast.Program, match func(string) bool, suffix string) {
+	declared := renamableNames(prog, match)
+	if len(declared) == 0 {
+		return
+	}
+	names := make(map[string]string, len(declared))
+	for name := range declared {
+		names[name] = name + suffix
+	}
+	applyRenames(prog, names)
+}
+
+// renamableNames returns the bindings of prog that match. A name bound by an
+// import or kept as source text in a destructuring pattern is left out.
+func renamableNames(prog *ast.Program, match func(string) bool) map[string]bool {
 	declared := map[string]bool{}
 	skip := map[string]bool{}
 	note := func(name string) {
@@ -159,12 +173,14 @@ func renameBindings(prog *ast.Program, match func(string) bool, suffix string) {
 	for name := range skip {
 		delete(declared, name)
 	}
-	if len(declared) == 0 {
-		return
-	}
+	return declared
+}
+
+// applyRenames renames bindings and the references resolving to them.
+func applyRenames(prog *ast.Program, names map[string]string) {
 	rn := func(name string) string {
-		if declared[name] {
-			return name + suffix
+		if to, ok := names[name]; ok {
+			return to
 		}
 		return name
 	}
@@ -194,8 +210,10 @@ func renameBindings(prog *ast.Program, match func(string) bool, suffix string) {
 					continue
 				}
 				// `{ h }` keeps its key: `{ h: h$u }`.
-				if id, ok := p.Value.(*ast.Identifier); ok && declared[id.Name] {
-					p.Shorthand = false
+				if id, ok := p.Value.(*ast.Identifier); ok {
+					if _, renamed := names[id.Name]; renamed {
+						p.Shorthand = false
+					}
 				}
 			}
 		case *ast.FnDecl:

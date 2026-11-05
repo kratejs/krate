@@ -268,7 +268,7 @@ krate types ./site   # explicit project directory
 A typical CI type-check:
 
 ```sh
-krate types && tsc --noEmit
+krate typecheck
 ```
 
 :::note

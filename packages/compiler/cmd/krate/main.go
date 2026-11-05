@@ -24,6 +24,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 	"github.com/kratejs/krate/packages/compiler/internal/mcp"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
+	"github.com/kratejs/krate/packages/compiler/internal/typecheck"
 	krateversion "github.com/kratejs/krate/packages/compiler/internal/version"
 )
 
@@ -99,6 +100,8 @@ func main() {
 		runServe(flags, args)
 	case "types":
 		runTypes(flags, args)
+	case "typecheck":
+		runTypecheck(flags, args)
 	case "go:init":
 		runGoInit(flags, args)
 	case "check":
@@ -165,6 +168,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "types":
 		fmt.Fprintf(w, "Usage: krate types [dir]\n\n")
 		fmt.Fprintf(w, "Generate route/content TypeScript declarations (krate-env.d.ts, .krate/types).\n")
+	case "typecheck":
+		fmt.Fprintf(w, "Usage: krate typecheck [dir]\n\n")
+		fmt.Fprintf(w, "Generate types, then run tsc --noEmit without its errors about tier decorators.\n")
 	case "go:init":
 		fmt.Fprintf(w, "Usage: krate go:init [dir]\n\n")
 		fmt.Fprintf(w, "Set up go.mod/go.work and vendored helpers for Go component intellisense.\n")
@@ -225,6 +231,7 @@ func printUsage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, "  serve     Build, then serve for preview (alias: preview)\n")
 	_, _ = fmt.Fprintf(w, "  start     Serve the existing build without rebuilding (production)\n")
 	fmt.Fprintf(w, "  types     Generate route/content TypeScript declarations\n")
+	fmt.Fprintf(w, "  typecheck Generate types and run tsc\n")
 	fmt.Fprintf(w, "  go:init   Set up go.mod/go.work for Go component intellisense\n")
 	fmt.Fprintf(w, "  check     Run compiler-enforced quality gates (a11y/SEO/perf)\n")
 	fmt.Fprintf(w, "  fix       Apply safe source fixes (dry-run unless --apply)\n")
@@ -880,6 +887,31 @@ func runTypes(flags cliFlags, args []string) {
 	}
 
 	fmt.Printf("%s%s  Types written to %s%s\n", cBold, cGreen, filepath.Join(root, ".krate", "types"), cReset)
+}
+
+// runTypecheck generates types and runs the project's tsc.
+func runTypecheck(flags cliFlags, args []string) {
+	root, cfg := resolveConfig(flags, args)
+	if errs := build.GenerateTypes(root, cfg); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "%s  Type error:%s %v\n", cRed, cReset, e)
+		}
+		os.Exit(1)
+	}
+	out, ok, err := typecheck.Run(root)
+	if errors.Is(err, typecheck.ErrNoTSC) {
+		fmt.Fprintf(os.Stderr, "%sType check error:%s %v; add it with `pnpm add -D typescript`\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sType check error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+	fmt.Print(out)
+	if !ok {
+		os.Exit(1)
+	}
+	fmt.Printf("%s%s  No type errors%s\n", cBold, cGreen, cReset)
 }
 
 // runGoInit sets up the Go workspace (go.mod/go.work + vendored helpers) so

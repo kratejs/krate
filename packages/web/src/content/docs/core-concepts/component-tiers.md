@@ -90,9 +90,14 @@ its own decorator named `server` or `client`, that one is used instead.
 
 ### TypeScript
 
-`tsc` and editors do not know these are compile-time only. They report TS1206 on a
-function or const, and "Cannot find name" on a class. Krate's build is unaffected.
-To keep `tsc --noEmit` passing, add a comment on the line above:
+To TypeScript these are errors, since it does not know they are compile-time
+only. Scaffolded projects handle that for you: `npm run typecheck` runs
+[`krate typecheck`](/docs/cli/), which leaves them out, and
+[`@krate/ts-plugin`](/docs/guides/typescript-setup/#editor-support) does the same
+in editors.
+
+Plain `tsc --noEmit` still reports them. If you have to run it, add a comment on
+the line above each decorator:
 
 ```tsx
 // @ts-expect-error tier decorator
@@ -100,8 +105,8 @@ To keep `tsc --noEmit` passing, add a comment on the line above:
 export default function Stats() { ... }
 ```
 
-A `// @server` comment or a `*.server.tsx` file name needs no such comment, and
-classifies the whole file.
+A `// @server` comment or a `*.server.tsx` file name needs neither, and classifies
+the whole file.
 
 ## Composition rules
 

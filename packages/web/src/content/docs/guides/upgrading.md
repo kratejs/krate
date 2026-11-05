@@ -47,7 +47,7 @@ When upgrading across a minor:
 2. Re-read [Configuration](/docs/reference/config/) for renamed/removed keys -
    Krate now warns on unknown config keys.
 3. Regenerate types: `krate types`.
-4. Run `krate build && krate check && npx tsc --noEmit`.
+4. Run `krate build && krate check && krate typecheck`.
 5. Diff `dist/` if output shape matters to you.
 
 ## Version compatibility

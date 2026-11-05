@@ -10,6 +10,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    "plugins": [{ "name": "@krate/ts-plugin" }],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
