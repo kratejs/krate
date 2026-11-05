@@ -1844,7 +1844,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				}
 				// 3. Minify code in memory
 				if b.Cfg.ShouldMinifyHTML() {
-					h = minifyHTML(h)
+					h = minifyHTMLWith(h, b.linkedWhiteSpaceRules(h))
 				}
 				// 4. CSP meta tag injection. Hash the FINAL document (after
 				// minification rewrote inline content) so every inline
