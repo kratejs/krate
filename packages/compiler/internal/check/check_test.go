@@ -245,3 +245,60 @@ func TestFromMapAbsentInactive(t *testing.T) {
 		t.Errorf("inactive run should produce no findings, got %+v", fs)
 	}
 }
+
+func TestFromMapFailOnRejectsUnknownValues(t *testing.T) {
+	for _, bad := range []any{"bogus", "warnings", "", "off", "OFF", " nope "} {
+		_, err := FromMap(map[string]any{"failOn": bad}, "/root", nil)
+		if err == nil {
+			t.Errorf("failOn %q: want an error, got none", bad)
+			continue
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "checks.failOn") || !strings.Contains(msg, `"error"`) || !strings.Contains(msg, `"warning"`) {
+			t.Errorf("failOn %q: error should name the key and list valid values, got %q", bad, msg)
+		}
+	}
+	if _, err := FromMap(map[string]any{"failOn": float64(1)}, "/root", nil); err == nil {
+		t.Error("failOn: a non-string value should be an error")
+	}
+}
+
+func TestFromMapFailOnValidValues(t *testing.T) {
+	for in, want := range map[string]Severity{
+		"error": Error, "warning": Warning, "Warning": Warning, "ERROR": Error, " warn ": Warning,
+	} {
+		cfg, err := FromMap(map[string]any{"failOn": in}, "/root", nil)
+		if err != nil {
+			t.Errorf("failOn %q: %v", in, err)
+			continue
+		}
+		if cfg.FailOn != want {
+			t.Errorf("failOn %q = %v, want %v", in, cfg.FailOn, want)
+		}
+	}
+	// Absent failOn keeps the default.
+	cfg, err := FromMap(map[string]any{"seo": "warning"}, "/root", nil)
+	if err != nil || cfg.FailOn != Error {
+		t.Errorf("default failOn = %v, %v; want error", cfg.FailOn, err)
+	}
+}
+
+func TestFromMapSeverityStringsAreStrict(t *testing.T) {
+	for name, m := range map[string]map[string]any{
+		"category": {"a11y": "loud"},
+		"rule":     {"rules": map[string]any{"a11y/img-alt": "fatal"}},
+	} {
+		if _, err := FromMap(m, "/root", nil); err == nil {
+			t.Errorf("%s: unknown severity accepted", name)
+		}
+	}
+}
+
+func TestFromMapRejectsNonStringListEntries(t *testing.T) {
+	if _, err := FromMap(map[string]any{"ignore": []any{"seo/og", 7.0}}, "/root", nil); err == nil || !strings.Contains(err.Error(), "checks.ignore[1]") {
+		t.Errorf("ignore: err = %v", err)
+	}
+	if _, err := FromMap(map[string]any{"custom": []any{"a.ts", true}}, "/root", nil); err == nil || !strings.Contains(err.Error(), "checks.custom[1]") {
+		t.Errorf("custom: err = %v", err)
+	}
+}

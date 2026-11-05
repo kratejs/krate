@@ -31,7 +31,10 @@ The `krate` CLI is the single entry point for building and serving Krate sites.
 | `krate version` | Print the version |
 | `krate help [command]` | Print usage; `krate <command> --help` prints one command's usage |
 
-Flags that apply to more than one command: `--config <path>`, `--out-dir <path>`,
+Flags that apply to more than one command: `--config <path>` (an explicit path
+that does not exist fails the command with an error naming the path, rather than
+falling back to the defaults; with no `--config`, a project without a config file
+uses the defaults), `--out-dir <path>`,
 `--mode <name>` (environment mode, like `KRATE_ENV`; selects `.env.<name>` and is
 passed to a function-form `defineConfig`), `--verbose`, `--precompress`,
 `--sourcemap`, `--no-dce`, `--json`, and `--apply` (for `fix` and `migrate`).
@@ -67,7 +70,7 @@ krate build ./my-site
 
 | Flag | Description |
 |------|-------------|
-| `--config <path>` | Path to a config file (default `krate.config.ts`) |
+| `--config <path>` | Path to a config file (default `krate.config.ts`). Relative paths resolve against the project directory; a path that does not exist is an error |
 | `--out-dir <path>` | Override the output directory |
 | `--watch` | Rebuild when files change |
 | `--verbose` | Print diagnostic detail during the build (e.g. reactive validation warnings) |

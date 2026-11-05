@@ -382,10 +382,32 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 	root, cfg, err := loadConfig(flags, args)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%sConfig error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(os.Stderr, "%sConfig error:%s %s\n", cRed, cReset, formatConfigError(err))
 		os.Exit(1)
 	}
 	return root, cfg
+}
+
+// formatConfigError renders a config load error. A source-located diagnostic
+// (a syntax error in the config file) prints with its source line, caret and
+// hint; anything else prints as its message.
+func formatConfigError(err error) string {
+	var d diag.Diagnostic
+	if errors.As(err, &d) && d.Line > 0 {
+		return "\n" + diag.FormatDiagnostics([]error{d})
+	}
+	return err.Error()
+}
+
+// requireConfigFlag exits when --config names a file that does not exist. The
+// commands that load the config get this from config.LoadWith; this covers the
+// ones that accept the flag but do not read a config (fix, migrate, plugin add,
+// doctor), so a mistyped path is never ignored.
+func requireConfigFlag(root string, flags cliFlags) {
+	if err := config.CheckExplicitConfig(root, flags.ConfigPath); err != nil {
+		fmt.Fprintf(os.Stderr, "%sConfig error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
 }
 
 // checkProjectDir fails with a plain message when the project directory is
@@ -448,6 +470,13 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 	}
 	for _, w := range config.Warnings {
 		fmt.Fprintf(os.Stderr, "  %s! config:%s %s\n", cYellow, cReset, w)
+	}
+	// Validate `checks` up front so a bad failOn fails every command, not only
+	// at the end of a build.
+	if cfg.Checks != nil {
+		if _, err := check.FromMap(cfg.Checks, root, nil); err != nil {
+			return "", nil, fmt.Errorf("invalid config: %w", err)
+		}
 	}
 	for _, w := range plugin.ConfigWarnings(cfg) {
 		fmt.Fprintf(os.Stderr, "  %s! config:%s %s\n", cYellow, cReset, w)
@@ -624,7 +653,7 @@ func runDevOnce(flags cliFlags, args []string, first bool) bool {
 	builder.DevReload = func(reason string) bool {
 		fmt.Printf("  %s%s changed; reloading configuration...%s\n", cYellow, reason, cReset)
 		if _, _, err := loadConfig(flags, args); err != nil {
-			fmt.Fprintf(os.Stderr, "%sConfig error:%s %v\n", cRed, cReset, err)
+			fmt.Fprintf(os.Stderr, "%sConfig error:%s %s\n", cRed, cReset, formatConfigError(err))
 			hub.Publish(build.DevEvent{Type: "reload", Diagnostics: []diag.Diagnostic{{File: reason, Message: "config: " + err.Error(), Hint: "fix " + reason + "; the dev server keeps running with the previous settings"}}})
 			return false
 		}
@@ -796,6 +825,7 @@ func runFix(flags cliFlags, args []string) {
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
 	}
+	requireConfigFlag(abs, flags)
 	res, err := fix.Run(abs, flags.Apply)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sFix error:%s %v\n", cRed, cReset, err)

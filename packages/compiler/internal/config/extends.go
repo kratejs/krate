@@ -36,8 +36,22 @@ func (s *StringList) UnmarshalJSON(data []byte) error {
 }
 
 // errStaticFallback signals that the embedded evaluator could not run a
-// non-module config, so Load should parse it statically instead.
+// non-module config (for example the JS runtime failed to start), so Load
+// should parse it statically instead. A config that does not parse at all is
+// never routed here; see configSyntaxError.
 var errStaticFallback = errors.New("static fallback")
+
+// staticFallbackError carries why evaluation failed, so a failing static parse
+// can report the original cause.
+type staticFallbackError struct{ cause error }
+
+func (e *staticFallbackError) Error() string        { return "static fallback: " + e.cause.Error() }
+func (e *staticFallbackError) Is(target error) bool { return target == errStaticFallback }
+func (e *staticFallbackError) Unwrap() error        { return e.cause }
+
+// evaluateTSConfig is the module evaluator; tests replace it to simulate a
+// runtime that cannot run.
+var evaluateTSConfig = evaluateEmbeddedTSConfig
 
 // evaluateConfigJSON returns a config file's raw JSON. `.json` files are read
 // directly; everything else is evaluated in the embedded runtime.
@@ -45,7 +59,7 @@ func evaluateConfigJSON(path string, opts LoadOptions) ([]byte, error) {
 	if strings.EqualFold(filepath.Ext(path), ".json") {
 		return os.ReadFile(path)
 	}
-	return evaluateEmbeddedTSConfig(path, opts)
+	return evaluateTSConfig(path, opts)
 }
 
 // loadConfigMerged evaluates path and recursively merges any `extends` bases
@@ -69,10 +83,18 @@ func loadConfigMerged(path string, opts LoadOptions, seen map[string]bool) ([]by
 			return nil, fmt.Errorf("config %s: %w", path, err)
 		}
 		src, _ := os.ReadFile(path)
+		if serr := configSyntaxError(path, src); serr != nil {
+			return nil, serr
+		}
 		if configUsesModules(string(src)) {
 			return nil, configNotExecutableError(path, err)
 		}
-		return nil, errStaticFallback
+		return nil, &staticFallbackError{cause: err}
+	}
+	if strings.EqualFold(filepath.Ext(path), ".json") {
+		if serr := jsonSyntaxError(path, raw); serr != nil {
+			return nil, serr
+		}
 	}
 	// Resolve relative module paths against the config that declares them, before
 	// merging, so a base config's plugins/themes still resolve correctly.
