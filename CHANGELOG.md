@@ -27,6 +27,28 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `<meta>`, `<link>`, `<script>` and the title inside `<Head>` of an async page or
+  async server component are in the `<head>` of the first response bytes in every
+  request-time mode (SSR, ISR, streaming, async components), in `krate start` and the
+  portable handler alike. They used to render in the body, where crawlers ignore them.
+  A page tag replaces a baked layout or config tag with the same `name`, `property`,
+  `http-equiv`, `charset` or canonical link; a `<Head>` inside a Suspense region that
+  streams out of order is applied by the region script and logs a warning, because the
+  head had already been sent. A page title is added when the shell has none (it used to
+  be lost), and `<script>`/`<style>` text in a request-time render is no longer entity
+  escaped, so JSON-LD is valid.
+- Go components: `kr.Request` has recording accessors `Header`, `Cookie`, `QueryValue`
+  and `Param`. A runtime Go component cached with `revalidate` is keyed on the values it
+  read through them (like `Vary`), so visitors with different cookies never share a
+  render and an unrelated cookie, header or query key no longer splits the cache.
+- The Docker target writes a multi-stage Dockerfile: the runtime image has only the build
+  output, the server parts of `.krate`, the config and production dependencies (no
+  sources, dev dependencies or Go toolchain), runs as `node` and keeps the healthcheck.
+  `--build-arg KEEP_DEV_DEPS=true` keeps dev dependencies. A small SSR + API + action
+  project went from 543 MB to 419 MB (329 MB of it the base image).
+- `KRATE_FLASH_SECRET` sets the key the no-JS flash cookie is signed with, for the Go
+  host, the action sidecar and the portable handler (see Security).
+
 - `krate fix` repairs the 0.4 template's `tsconfig.json`: `"baseUrl": "./src"` with
   `"@/*": ["./src/*"]` can only mean the project root, so it sets `baseUrl` to `"."`
   (`KR7125`). The edited file also builds on 0.4. The build error for an alias that
@@ -142,6 +164,14 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   hydrate.
 
 ### Fixed
+
+- Runtime-bundle regions are keyed on the query keys they read (they were keyed on the
+  whole query, so any random value filled the cache), and the page and region caches use
+  a segmented LRU: a client requesting hundreds of one-off `[param]` variants can no
+  longer flush the pages that were requested twice (plain LRU still lost a hot page to
+  512 requests). A request that has a query is rendered, not answered from the cache,
+  while no render has shown what the page or region reads (after a restart the entry of
+  the bare URL used to answer `?page=2`).
 
 - In production builds a keyed list (`items.map(...)` in a component with state) never
   updated after the first render, because the trimmed runtime dropped the list feature.
@@ -281,6 +311,20 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 - With `server.trustProxy`, the client address is the `X-Forwarded-For` entry
   `server.trustedProxies` hops (default 1) from the right, not the leftmost entry a client
   controls.
+- The portable handler (Node target, Vercel, Netlify, Cloudflare) signs the flash cookie
+  with HMAC-SHA256 through Web Crypto and never reads an unsigned or forged one. The key is
+  `KRATE_FLASH_SECRET` (shared by every instance); without it the Node target uses a
+  random per-process key and the serverless targets carry no flash state and log a
+  warning. Go and TypeScript use one format, pinned by a shared test vector.
+- Vercel, Netlify and Cloudflare follow `server.trustProxy` (it used to be hard-coded on
+  for Vercel and Netlify). Not set means what each platform guarantees (Vercel's
+  `x-forwarded-host`/`-proto`/`x-real-ip`, Netlify's `x-nf-client-connection-ip`,
+  Cloudflare's `cf-connecting-ip`, the request URL elsewhere), `true` adds the forwarded
+  headers of a proxy of yours, `false` trusts none; `x-forwarded-for`, `x-real-ip` and
+  `forwarded` a client wrote never reach middleware or API routes. See Deployment.
+- A Go region render is never served to another visitor: the cache key covers every value
+  the component read of the request, or the whole request (headers like `Referer` and
+  `X-Forwarded-For` included) when its reads cannot be recorded.
 - The no-JS flash cookie is HMAC-signed, action cookies are `Secure` over https and
   whenever `SameSite=None`, CORS responses carry `Vary: Origin` for disallowed origins too,
   request paths are escaped in logs, request headers are capped at 64 KiB, and the Go API

@@ -21,6 +21,37 @@ API for all three. It mirrors `next/cache`.
 import { revalidatePath, revalidateTag, unstable_cache, unstable_noStore } from "@krate/runtime/cache";
 ```
 
+## What keys a cached entry
+
+An ISR page is cached per route + params, plus only the query keys its render read
+(`searchParams`, `useSearchParams`-style accessors): `/blog?utm_source=x` and a
+random `?zz=1` share the entry of `/blog` unless the page looks at them, and a
+page that enumerates the query is keyed by all of it. Regions work the same way,
+for async server components and for runtime component bundles alike: the render
+sees `props.query` through a view that records the keys it touches. Until a render
+has shown what a page or region reads, a request that carries a query renders
+instead of being answered from the cache (a restart, or an evicted record, costs
+one render), so an entry is never matched to a query it was not made for.
+
+The caches are bounded (`ssr.maxCacheSize`, 512 by default) with a segmented LRU:
+a new entry starts in a probation segment and is promoted by its first hit, so a
+client requesting thousands of one-off variants (any slug renders on an open
+`[param]` route) only churns probation and cannot flush the pages and regions that
+were requested twice. Unknown params still render; nothing 404s because of the
+cache.
+
+A Go region (`*.runtime.go` with `// krate:revalidate`) is keyed on what the
+component **read** of its `kr.Request`: `r.Header(name)`, `r.Cookie(name)`,
+`r.QueryValue(name)` and `r.Param(name)` record the names they were asked for (like
+the `Vary` header of a response), and the entry is keyed on the values of those
+names only. A cookie or header the component never reads cannot split the cache,
+and one it reads always does, so two visitors with different cookies never share a
+render. A component that reads the `Headers`, `Query`, `Params`, `Method` or `URL`
+fields, or passes the `Request` to another function, cannot be recorded: its
+renders are keyed on the whole request (every header included, so only an
+identical request hits). A component without a `kr.Request` parameter shares one
+entry.
+
 ## Choosing a render mode
 
 A page picks its mode with the `config` object or with Next.js-style segment
