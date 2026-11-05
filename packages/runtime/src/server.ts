@@ -2,6 +2,7 @@
 // Provides the same API as the client runtime but renders to HTML strings.
 
 import { ATTR_ALIASES } from './htmlspec-attributes.js';
+import { highlight as highlightCode, trimSpace } from './highlight.js';
 
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
@@ -568,10 +569,19 @@ export function Icon(_props: { name?: string; [key: string]: any }): JSXNode {
   return raw("<span></span>");
 }
 
-// SyntaxHighlight - renders a <pre><code> block (Go compiler handles chroma highlighting at build time).
+// SyntaxHighlight - renders a <pre><code> block. The Go compiler highlights code it knows at build
+// time; code that only exists at request time is highlighted here with the same lexers (see
+// highlight.ts), when the language's tables are loaded and the text is within its limits, and is
+// written as plain text otherwise.
 export function SyntaxHighlight(props: { lang?: string; highlight?: string; children?: any }): JSXNode {
   const lang = props.lang || "";
   const code = props.children != null ? String(props.children) : "";
+  const lines = props.highlight || "";
+  const html = lang ? highlightCode(trimSpace(code), lang, lines || undefined) : null;
+  if (html !== null) {
+    const attr = lines ? ` data-highlight-lines="${escapeHTML(lines)}"` : "";
+    return raw(`<pre class="chroma"${attr}><code class="language-${escapeHTML(lang)}">${html}</code></pre>`);
+  }
   const cls = lang ? `chroma language-${lang}` : "chroma";
   return raw(`<pre class="chroma"><code class="${escapeHTML(cls)}">${escapeHTML(code)}</code></pre>`);
 }

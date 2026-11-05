@@ -42,6 +42,7 @@ export * from './src/storage';
 export * from './src/boundary';
 export * from './src/class-component';
 export * from './src/actions';
+export * from './src/highlight-bind';
 `;
 
 const HYDRATE_ENTRY = `
@@ -59,6 +60,7 @@ export * from './src/storage';
 export * from './src/boundary';
 export * from './src/class-component';
 export * from './src/actions';
+export * from './src/highlight-bind';
 `;
 
 // Lite hydration bundle for sites with the SPA router disabled. It keeps the
@@ -78,6 +80,7 @@ export * from './src/storage';
 export * from './src/boundary';
 export * from './src/class-component';
 export * from './src/actions';
+export * from './src/highlight-bind';
 `;
 
 const SUSPENSE_ENTRY = `export * from './src/suspense';`;
@@ -122,6 +125,7 @@ const FEATURES = {
   list: { file: 'krate-f-list.js', modules: ['list'] },
   actions: { file: 'krate-f-actions.js', modules: ['actions'] },
   classes: { file: 'krate-f-classes.js', modules: ['boundary', 'class-component'] },
+  highlight: { file: 'krate-f-highlight.js', modules: ['highlight-bind'] },
 };
 
 async function exportNames(entry) {

@@ -73,8 +73,23 @@ export const HIGHLIGHT_MAX_LINE = 2000;
 let deadline = Infinity;
 let steps = 0;
 
-const lexers = new Map<string, Lexer>();
-const langKeys = new Map<string, string>();
+// Languages registered so far. The registry lives on globalThis so every copy
+// of this module in a process shares it: the Node renderer is bundled with its
+// own copy while page bundles import the package's, and both must see the
+// tables the renderer loads at startup.
+interface Registry {
+  lexers: Map<string, Lexer>;
+  langKeys: Map<string, string>;
+  fenceKnown?: (name: string) => boolean;
+}
+const REGISTRY_KEY = Symbol.for("krate.highlight.registry");
+const registry: Registry = ((globalThis as Record<symbol, unknown>)[REGISTRY_KEY] as Registry | undefined) || {
+  lexers: new Map(),
+  langKeys: new Map(),
+};
+(globalThis as Record<symbol, unknown>)[REGISTRY_KEY] = registry;
+const lexers = registry.lexers;
+const langKeys = registry.langKeys;
 
 /**
  * Registers a lexer table and the language names that select it. Names are
@@ -239,22 +254,19 @@ function emitTokens(lx: Lexer, emit: Emit, groups: ArrayLike<string | undefined>
   }
 }
 
-/** Resolves the language named after a fence; unknown names mean "no sublexer". */
-let fenceKnown: ((name: string) => boolean) | undefined;
-
 /**
  * Tells the tokenizer which names chroma itself would resolve to a lexer. A
  * fence naming a lexer that chroma has but that is not loaded cannot be
  * highlighted exactly, so the whole snippet is left as plain text.
  */
 export function setFenceResolver(known: (name: string) => boolean): void {
-  fenceKnown = known;
+  registry.fenceKnown = known;
 }
 
 function fenceLexer(name: string): Lexer | undefined {
   const lx = lexerFor(name);
   if (lx) return lx;
-  if (fenceKnown && fenceKnown(name)) throw new Incomplete(name);
+  if (registry.fenceKnown && registry.fenceKnown(name)) throw new Incomplete(name);
   return undefined;
 }
 

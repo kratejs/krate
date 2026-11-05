@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -26,6 +27,9 @@ func codeThemeProject(t *testing.T, pages map[string]string) string {
 	if err := os.MkdirAll(filepath.Join(root, "node_modules", "@krate"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	// The build finds @krate/runtime's dist through node_modules relative to
+	// the working directory.
+	t.Chdir(root)
 	for _, pkg := range []string{"runtime", "components", "core"} {
 		if err := os.Symlink(filepath.Join(repoRoot, "packages", pkg), filepath.Join(root, "node_modules", "@krate", pkg)); err != nil {
 			t.Skipf("cannot link workspace packages: %v", err)
@@ -51,10 +55,9 @@ func requireBrowserTest(t *testing.T) string {
 
 func runBrowserScript(t *testing.T, script, outDir, browser string, extra ...string) {
 	t.Helper()
-	abs, err := filepath.Abs(filepath.Join("testdata", script))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The working directory may have moved into a test project.
+	_, here, _, _ := runtime.Caller(0)
+	abs := filepath.Join(filepath.Dir(here), "testdata", script)
 	args := append([]string{abs, outDir, browser}, extra...)
 	out, err := exec.Command("node", args...).CombinedOutput()
 	if err != nil {

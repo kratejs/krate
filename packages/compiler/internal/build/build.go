@@ -117,6 +117,8 @@ type PageResult struct {
 }
 
 type Builder struct {
+	// hl holds the highlighter chunks written for code highlighted in the browser.
+	hl      highlightChunks
 	Root    string
 	Cfg     *config.Config
 	DevMode bool
@@ -1183,6 +1185,7 @@ func (b *Builder) BuildAll() error {
 
 	// Compile server bundles for SSR/ISR/streaming pages
 	serverBundles, serverBundleErrs := compileServerBundles(b.importResolver(), results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+	b.writeHighlightTables(serverBundles)
 	for _, err := range serverBundleErrs {
 		failureMessages = append(failureMessages, "  "+err.Error())
 		failureErrs = append(failureErrs, err)
@@ -1653,12 +1656,12 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 	}
 
 	for _, r := range results {
-		if r.CSS == "" && !pageRendersCode(r.HTML) {
+		if r.CSS == "" && !pageRendersCode(r) {
 			b.setTailwindPage(r.Page, twPageInfo{})
 			continue
 		}
 		pageCss := r.CSS
-		if b.Cfg.Markdown.CodeHighlight && pageRendersCode(r.HTML) {
+		if b.Cfg.Markdown.CodeHighlight && pageRendersCode(r) {
 			if !chromaLoaded {
 				chromaCSS = syntaxhighlight.ThemeCSS(codeTheme)
 				chromaLoaded = true
@@ -1722,10 +1725,12 @@ func (b *Builder) codeTheme() syntaxhighlight.Theme {
 	return th
 }
 
-// pageRendersCode reports whether a page's markup contains syntax-highlighted
-// code, in which case the chroma stylesheet is needed on that page.
-func pageRendersCode(html string) bool {
-	return strings.Contains(html, "chroma")
+// pageRendersCode reports whether a page shows syntax-highlighted code, in
+// which case the chroma stylesheet is needed on that page: its markup has a
+// highlighted block, or its script highlights code itself (the browser
+// highlighter writes into blocks the markup does not mark).
+func pageRendersCode(r *PageResult) bool {
+	return strings.Contains(r.HTML, "chroma") || strings.Contains(r.HydrationJS, highlightAPI)
 }
 
 // writeHTMLPages builds the layout wrapper, applies placeholders, minifies,
@@ -2536,13 +2541,19 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		emitResult.HTML = injectIslandSSR(emitResult.HTML, islandSSR)
 	}
 	emitResult.IslandBootJS = islandBoot
-	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
+	// Request-time pages are rendered by the server, which highlights their
+	// code itself; only static pages highlight in the browser.
+	browserHighlight := renderMode == RenderSSG && strings.Contains(emitResult.HTML, highlightMarkup)
+	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal") || browserHighlight
 	// Client-side JS scanned by CSS DCE for classes applied after hydration.
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
 	if needsHydrate {
 		emitResult.TrackSources = b.Cfg.Sourcemap
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		if renderMode == RenderSSG {
+			rawJS = b.attachHighlight(rawJS, emitResult.HTML)
+		}
 		b.warnShippedCollections(page, entryModule.Program, rawJS)
 		dceJS = append(dceJS, rawJS)
 		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)

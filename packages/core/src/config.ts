@@ -151,6 +151,16 @@ export interface MarkdownConfig {
   plugins?: string[];
 }
 
+export interface HighlightConfig {
+  /**
+   * Languages to load for code highlighted in the browser or at request time when
+   * the language is not known at build time (a variable `lang`, or a
+   * `krateHighlight()` call). A literal `lang` on a dynamic `<Code>` is found
+   * automatically.
+   */
+  languages?: string[];
+}
+
 export type RuntimeName = "quickjs" | "node" | "bun" | "deno";
 
 export interface SSRConfig {
@@ -538,6 +548,8 @@ export interface KrateConfig {
   tailwind?: TailwindConfig;
   csp?: CSPConfig;
   markdown?: MarkdownConfig;
+  /** Code highlighted after the build: in the browser and at request time. */
+  highlight?: HighlightConfig;
   runtime?: "node" | "bun" | "deno";
   ssr?: SSRConfig;
   redirects?: RedirectConfig[];

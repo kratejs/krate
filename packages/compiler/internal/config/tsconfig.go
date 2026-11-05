@@ -1047,6 +1047,21 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				}
 			}
 		}
+	case "highlight":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			if k == "languages" {
+				switch l := v.(type) {
+				case string:
+					cfg.Highlight.Languages = StringList{l}
+				case []interface{}:
+					cfg.Highlight.Languages = StringList(interfaceStrings(l))
+				}
+			}
+		}
 	case "csp":
 		m, ok := val.(map[string]interface{})
 		if !ok {

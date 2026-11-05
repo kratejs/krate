@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 )
 
 // corpusSpec says which real-world files exercise a lexer.
@@ -37,6 +38,26 @@ var corpusSpecs = []corpusSpec{
 	{"TOML", []string{"toml"}, []string{".toml"}},
 	{"XML", []string{"xml"}, []string{".xml", ".svg"}},
 	{"C", []string{"c"}, []string{".c", ".h"}},
+	{"plaintext", []string{"text"}, []string{".txt"}},
+}
+
+// TestEveryShippedLanguageHasACorpus keeps the parity test in step with the
+// shipped list: a language cannot be added without code to check it against.
+func TestEveryShippedLanguageHasACorpus(t *testing.T) {
+	covered := map[string]bool{}
+	for _, s := range corpusSpecs {
+		covered[strings.ToLower(s.lexer)] = true
+	}
+	for _, l := range ShippedLanguages {
+		if !covered[strings.ToLower(l)] {
+			t.Errorf("%s is shipped but has no entry in corpusSpecs", l)
+		}
+	}
+	for _, s := range corpusSpecs {
+		if _, ok := ShippedLexer(s.langs[0]); !ok {
+			t.Errorf("corpus spec %s is not a shipped language", s.langs[0])
+		}
+	}
 }
 
 const (
@@ -141,6 +162,11 @@ func corpusFor(t *testing.T, spec corpusSpec, vendored []string) []string {
 		}
 		st, err := os.Stat(f)
 		if err != nil {
+			continue
+		}
+		// Text is a JavaScript string on the other side, which cannot hold
+		// invalid UTF-8; the two sides would each repair it their own way.
+		if data, err := os.ReadFile(f); err != nil || !utf8.Valid(data) {
 			continue
 		}
 		out = append(out, f)
