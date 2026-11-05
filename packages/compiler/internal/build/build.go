@@ -237,6 +237,8 @@ type Builder struct {
 	// until route params are bound (static-params pages), so lookups like
 	// `find((p) => p.slug === props.params.slug)` fold to a single entry.
 	deferInline sync.Map
+	// progIconDiags holds the unresolved <Icon> diagnostics of each program.
+	progIconDiags sync.Map
 	// progImageDiags holds the <Image> diagnostics of each transformed program.
 	progImageDiags sync.Map
 
@@ -383,7 +385,9 @@ func (b *Builder) ensureTransformed(prog *ast.Program, file string) error {
 	}
 	v, _ := b.transformOnce.LoadOrStore(prog, &sync.Once{})
 	v.(*sync.Once).Do(func() {
-		b.TransformUniversalIcons(prog)
+		if ds := b.TransformUniversalIcons(prog); len(ds) > 0 {
+			b.progIconDiags.Store(prog, ds)
+		}
 		if ds := b.transformImages(prog); len(ds) > 0 {
 			b.progImageDiags.Store(prog, ds)
 			for _, d := range ds {
@@ -397,16 +401,21 @@ func (b *Builder) ensureTransformed(prog *ast.Program, file string) error {
 			b.InlineContent(prog)
 		}
 	})
+	var errs []error
+	if v, ok := b.progIconDiags.Load(prog); ok {
+		for _, d := range v.([]imageDiag) {
+			errs = append(errs, imageDiagError(b.relPath(file), d))
+		}
+	}
 	if v, ok := b.progImageDiags.Load(prog); ok {
-		var errs []error
 		for _, d := range v.([]imageDiag) {
 			if !d.warn {
 				errs = append(errs, imageDiagError(b.relPath(file), d))
 			}
 		}
-		if len(errs) > 0 {
-			return &diagList{errs: errs}
-		}
+	}
+	if len(errs) > 0 {
+		return &diagList{errs: errs}
 	}
 	return nil
 }
@@ -2396,7 +2405,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		if _, isSeg := segmentKindOfFile(page); !isSeg {
 			pageOpts.RoutePath = routePathFor(page, b.Cfg.PagesDir, pageOpts.PageParams)
 		}
-		tree = irtree.BuildWithOptions(entryModule.Program, ann, pageOpts)
+		tree = b.buildTree(entryModule.Program, ann, pageOpts)
 		// CSS primitive declarations that cannot be compiled to CSS are hard errors
 		// (there is no fallback to client signals).
 		if len(tree.Errors) > 0 {
@@ -2423,7 +2432,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		emitter.GoComponents = pageOpts.GoComponents
 		emitResult = emitter.Emit(tree)
 		tree, emitResult = applyBoundaryFallbacks(page, tree, emitResult, pageOpts, func(opts irtree.BuildOptions) (*irtree.ComponentTree, *renderer.EmitResult) {
-			t := irtree.BuildWithOptions(entryModule.Program, ann, opts)
+			t := b.buildTree(entryModule.Program, ann, opts)
 			if isDynamicRoute(page, b.Cfg.PagesDir) {
 				injectDynamicRoutePlaceholders(t, extractParamNames(page, b.Cfg.PagesDir))
 			}
@@ -3299,7 +3308,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	applyModuleBindings(&opts, layoutModule.Path, layoutModule.Program, extraLayoutPrograms)
 	opts.GoComponents = b.collectGoComponents(layoutBundle, b.Root)
 	opts.ActionURLs = layoutBundle.ActionImports
-	tree := irtree.BuildWithOptions(layoutModule.Program, ann, opts)
+	tree := b.buildTree(layoutModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		return nil, "", nil, false, renderErrors(layoutPath, tree.Errors)
 	}
@@ -3419,7 +3428,7 @@ func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*
 
 	opts := b.irBuildOptions()
 	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, nil)
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, opts)
+	tree := b.buildTree(entryModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		return nil, renderErrors(page, tree.Errors)
 	}
@@ -3556,7 +3565,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	opts := b.irBuildOptions()
 	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
-	tree := irtree.BuildWithOptions(entryModule.Program, ann, opts)
+	tree := b.buildTree(entryModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		for _, e := range tree.Errors {
 			fmt.Fprintf(os.Stderr, "  %sx Error (loading %s):%s %v\n", cRed, loadingPath, cReset, e)
@@ -4433,13 +4442,24 @@ func printResult(outName, jsFile, pageBase string) {
 	}
 }
 
-func (b *Builder) TransformUniversalIcons(prog *ast.Program) {
-	for _, stmt := range prog.Body {
-		b.walkAndTransformIcons(stmt)
-	}
+// iconWalker compiles the literal-name <Icon> elements of one program and
+// collects the icons that cannot be resolved.
+type iconWalker struct {
+	b     *Builder
+	diags []imageDiag
 }
 
-func (b *Builder) walkAndTransformIcons(node ast.Node) {
+// TransformUniversalIcons compiles every literal-name <Icon> in prog to inline
+// SVG and returns a diagnostic for each icon that cannot be resolved.
+func (b *Builder) TransformUniversalIcons(prog *ast.Program) []imageDiag {
+	w := &iconWalker{b: b}
+	for _, stmt := range prog.Body {
+		w.walk(stmt)
+	}
+	return w.diags
+}
+
+func (w *iconWalker) walk(node ast.Node) {
 	if node == nil {
 		return
 	}
@@ -4448,42 +4468,42 @@ func (b *Builder) walkAndTransformIcons(node ast.Node) {
 	case *ast.ExportStmt:
 		// `export default function Foo()` wraps the FnDecl in an ExportStmt.
 		if n.Declaration != nil {
-			b.walkAndTransformIcons(n.Declaration)
+			w.walk(n.Declaration)
 		}
 	case *ast.FnDecl:
 		for _, stmt := range n.Body {
-			b.walkAndTransformIcons(stmt)
+			w.walk(stmt)
 		}
 	case *ast.ReturnStmt:
-		n.Value = b.transformIconExpr(n.Value)
+		n.Value = w.expr(n.Value)
 	case *ast.ExprStmt:
-		n.Expression = b.transformIconExpr(n.Expression)
+		n.Expression = w.expr(n.Expression)
 	case *ast.ArrowFn:
 		for _, stmt := range n.Body {
-			b.walkAndTransformIcons(stmt)
+			w.walk(stmt)
 		}
 	case *ast.IfStmt:
-		b.walkAndTransformIcons(n.Test)
+		w.walk(n.Test)
 		for _, s := range n.Consequent {
-			b.walkAndTransformIcons(s)
+			w.walk(s)
 		}
 		for _, s := range n.Alternate {
-			b.walkAndTransformIcons(s)
+			w.walk(s)
 		}
 	case *ast.BlockStmt:
 		for _, s := range n.Body {
-			b.walkAndTransformIcons(s)
+			w.walk(s)
 		}
 	case *ast.VarStmt:
 		for _, d := range n.Decls {
 			if d.Init != nil {
-				d.Init = b.transformIconExpr(d.Init)
+				d.Init = w.expr(d.Init)
 			}
 		}
 	}
 }
 
-func (b *Builder) transformIconExpr(expr ast.Expr) ast.Expr {
+func (w *iconWalker) expr(expr ast.Expr) ast.Expr {
 	if expr == nil {
 		return nil
 	}
@@ -4491,50 +4511,55 @@ func (b *Builder) transformIconExpr(expr ast.Expr) ast.Expr {
 	switch e := expr.(type) {
 	case *ast.JSXElement:
 		if e.Opening.Name == "Icon" && iconNameIsLiteral(e) {
-			return b.compileIconToSVG(e)
+			svg, err := w.b.compileIconToSVG(e)
+			if err != nil {
+				w.diags = append(w.diags, w.b.iconDiag(e, err))
+				return e
+			}
+			return svg
 		}
 
 		for i, child := range e.Children {
 			switch c := child.(type) {
 			case *ast.JSXElementChild:
-				c.Element = b.transformIconExpr(c.Element).(*ast.JSXElement)
+				c.Element = w.expr(c.Element).(*ast.JSXElement)
 				e.Children[i] = c
 			case *ast.JSXExprContainer:
 				if c.Expression != nil {
-					c.Expression = b.transformIconExpr(c.Expression)
+					c.Expression = w.expr(c.Expression)
 				}
 			}
 		}
 	case *ast.ConditionalExpr:
-		e.Test = b.transformIconExpr(e.Test)
-		e.Consequent = b.transformIconExpr(e.Consequent)
-		e.Alternate = b.transformIconExpr(e.Alternate)
+		e.Test = w.expr(e.Test)
+		e.Consequent = w.expr(e.Consequent)
+		e.Alternate = w.expr(e.Alternate)
 	case *ast.JSXFragment:
 		for i, child := range e.Children {
 			switch c := child.(type) {
 			case *ast.JSXElementChild:
-				c.Element = b.transformIconExpr(c.Element).(*ast.JSXElement)
+				c.Element = w.expr(c.Element).(*ast.JSXElement)
 				e.Children[i] = c
 			case *ast.JSXExprContainer:
 				if c.Expression != nil {
-					c.Expression = b.transformIconExpr(c.Expression)
+					c.Expression = w.expr(c.Expression)
 				}
 			}
 		}
 	case *ast.BinaryExpr:
 		// `{cond && <Icon .../>}` (and other operators) - recurse both sides so
 		// icons inside short-circuit guards still compile to SVG.
-		e.Left = b.transformIconExpr(e.Left)
-		e.Right = b.transformIconExpr(e.Right)
+		e.Left = w.expr(e.Left)
+		e.Right = w.expr(e.Right)
 	case *ast.CallExpr:
 		// `{items.map((x) => <Icon .../>)}` and similar call-argument JSX.
-		e.Callee = b.transformIconExpr(e.Callee)
+		e.Callee = w.expr(e.Callee)
 		for i := range e.Args {
-			e.Args[i] = b.transformIconExpr(e.Args[i])
+			e.Args[i] = w.expr(e.Args[i])
 		}
 	case *ast.ArrowFn:
 		for _, stmt := range e.Body {
-			b.walkAndTransformIcons(stmt)
+			w.walk(stmt)
 		}
 	}
 	return expr
@@ -4556,7 +4581,9 @@ func iconNameIsLiteral(el *ast.JSXElement) bool {
 	return false
 }
 
-func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
+// compileIconToSVG inlines a literal-name <Icon> as an <svg>. An icon that
+// cannot be resolved is an error: its text must never reach the page.
+func (b *Builder) compileIconToSVG(orig *ast.JSXElement) (*ast.JSXElement, error) {
 	var iconName string
 	var forwardedAttrs []*ast.JSXAttr
 
@@ -4574,14 +4601,7 @@ func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
 	// Fetch or read from local disk cache / the project's icons/ directory.
 	icon, err := icons.ResolveIcon(b.Root, iconName)
 	if err != nil {
-		// Return a graceful error fallback inside the HTML rather than crashing
-		// the compiler. JSX text is escaped by the emitters, so the
-		// (possibly attacker-influenced) name cannot inject markup.
-		return &ast.JSXElement{
-			Opening:  &ast.JSXOpening{Name: "span", Attributes: forwardedAttrs, SelfClosing: false},
-			Children: []ast.JSXChild{&ast.JSXText{Value: fmt.Sprintf("[%v]", err)}},
-			Closing:  &ast.JSXClosing{Name: "span"},
-		}
+		return nil, err
 	}
 
 	// Base structural SVG properties. User-provided attributes take precedence
@@ -4613,6 +4633,25 @@ func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
 		Closing: &ast.JSXClosing{
 			Name: "svg",
 		},
+	}, nil
+}
+
+// iconDiag builds the build error for an <Icon> that cannot be resolved. The
+// resolver's message may name a filesystem path, so it is shown only here and
+// made project-relative.
+func (b *Builder) iconDiag(el *ast.JSXElement, err error) imageDiag {
+	name := ""
+	for _, attr := range el.Opening.Attributes {
+		if lit, ok := attr.Value.(*ast.Literal); ok && attr.Name == "name" {
+			name = lit.Value
+		}
+	}
+	detail := strings.ReplaceAll(err.Error(), b.Root+string(filepath.Separator), "")
+	return imageDiag{
+		pos:  el.Position,
+		code: diag.CodeIconUnresolved,
+		msg:  fmt.Sprintf("<Icon name=%q> could not be resolved: %s", name, detail),
+		hint: "add icons/<name>.svg for a local icon, or check the set:name (such as lucide:home) and network access to api.iconify.design; fetched icons are cached under .krate/cache/icons",
 	}
 }
 
@@ -4696,7 +4735,7 @@ func (b *Builder) iconResolver(iconName string, attrs []*ast.JSXAttr) (string, b
 
 	icon, err := icons.ResolveIcon(b.Root, iconName)
 	if err != nil {
-		return fmt.Sprintf("<span>%s</span>", escape.HTMLAttr(fmt.Sprintf("[%v]", err))), false
+		return "", false
 	}
 
 	var b2 strings.Builder

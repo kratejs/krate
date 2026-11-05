@@ -44,18 +44,35 @@ func (b *Builder) compatStyleMode() csssignals.StyleMode {
 // including the compat style mode.
 func (b *Builder) irBuildOptions() irtree.BuildOptions {
 	return irtree.BuildOptions{
-		CodeTheme:     b.Cfg.Markdown.CodeTheme,
-		AggressiveDCE: b.aggressiveDCE(),
-		Compat:        b.compatStyleMode(),
-		EvalJS:        b.jsExprEvaluator(),
-		TransformIcon: func(el *ast.JSXElement) *ast.JSXElement {
-			if el == nil || el.Opening == nil || !iconNameIsLiteral(el) {
-				return nil
-			}
-			return b.compileIconToSVG(el)
-		},
+		CodeTheme:      b.Cfg.Markdown.CodeTheme,
+		AggressiveDCE:  b.aggressiveDCE(),
+		Compat:         b.compatStyleMode(),
+		EvalJS:         b.jsExprEvaluator(),
 		TransformImage: b.lowerImageLate,
 	}
+}
+
+// buildTree builds the IR for prog. <Icon> elements whose name only becomes
+// known after folding are compiled here, and an icon that cannot be resolved
+// is returned as a build error with its position.
+func (b *Builder) buildTree(prog *ast.Program, ann *irtree.Annotations, opts irtree.BuildOptions) *irtree.ComponentTree {
+	var iconErrs []error
+	opts.TransformIcon = func(el *ast.JSXElement) *ast.JSXElement {
+		if el == nil || el.Opening == nil || !iconNameIsLiteral(el) {
+			return nil
+		}
+		svg, err := b.compileIconToSVG(el)
+		if err != nil {
+			iconErrs = append(iconErrs, imageDiagError("", b.iconDiag(el, err)))
+			return nil
+		}
+		return svg
+	}
+	tree := irtree.BuildWithOptions(prog, ann, opts)
+	if tree != nil {
+		tree.Errors = append(tree.Errors, iconErrs...)
+	}
+	return tree
 }
 
 // legacyDocEnabled reports whether per-page UA sibling documents should be

@@ -626,7 +626,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		opts.ExternalImports = externalByLocal
 		opts.LocalComponentImports = localImports
 		opts.ActionURLs = bundle.ActionImports
-		tree = irtree.BuildWithOptions(entryModule.Program, ann, opts)
+		tree = b.buildTree(entryModule.Program, ann, opts)
 		if len(tree.Errors) > 0 {
 			return nil, "", renderErrors(spp.PagePath, tree.Errors)
 		}

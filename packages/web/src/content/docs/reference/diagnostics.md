@@ -640,6 +640,12 @@ A `getCollection("name")` chain is normally evaluated while the site is built an
 
 Tabs, Accordion and the other zero-JS components turn each part's value into CSS while the site is built, so every `value` on their parts must be a string literal in the source. A value read from data (for example `value={item.id}` inside `items.map(...)`) cannot be enumerated: the panels for that value get no show/hide rules, defaultValue is ignored and every panel stays visible. Write the values out, or use `<Select>`/a `createSignal` based component for data-driven options. This is a warning.
 
+### KR8840
+
+**Icon cannot be resolved**
+
+An `<Icon name="...">` is compiled to inline SVG while the site is built. A name without a colon is a local icon and must exist as `icons/<name>.svg` in the project; `set:name` (for example `lucide:home`) is fetched from the Iconify API and cached under `.krate/cache/icons`. When neither works the build fails and names the file or lookup that failed, instead of putting an error message in the page. Fix the name, add the file, or pre-populate the cache for offline builds. This is an error.
+
 ## KR9xxx: routing, segment pages and rendering errors
 
 ### KR9001
