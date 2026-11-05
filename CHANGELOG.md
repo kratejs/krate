@@ -309,6 +309,8 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- The YAML number rule no longer takes quadratic time on a long run of digits in the runtime
+  highlighter.
 - A data race between island detection and the universal AST transforms on modules shared
   across pages.
 - Security: middleware fails closed. A middleware module that disappears after startup
