@@ -37,7 +37,8 @@ var timestampRe = regexp.MustCompile(`\d{10,}`)
 var digestRe = regexp.MustCompile(`(id=d>|id="d">|"digest":")[0-9a-f]{10}`)
 
 func normalizeBody(s string) string {
-	return digestRe.ReplaceAllString(timestampRe.ReplaceAllString(s, "N"), "${1}DIGEST")
+	// Digests first: a digest of only decimal digits also looks like a timestamp.
+	return timestampRe.ReplaceAllString(digestRe.ReplaceAllString(s, "${1}DIGEST"), "N")
 }
 
 func setCookieNames(h http.Header) string {
@@ -172,4 +173,11 @@ func TestServerlessNodeParity(t *testing.T) {
 		})
 	}
 	_ = deploy.ServerFeatures
+}
+
+func TestNormalizeBodyTreatsAllDigitDigests(t *testing.T) {
+	const a, b = `"digest":"1234567890"`, `"digest":"abcdef0123"`
+	if normalizeBody(a) != normalizeBody(b) {
+		t.Errorf("%q and %q normalize differently", normalizeBody(a), normalizeBody(b))
+	}
 }
