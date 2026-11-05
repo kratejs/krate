@@ -284,6 +284,15 @@ deliberate differences:
 - Nothing is wrapped in `@layer properties`; the `--tw-*` composition
   variables get plain `@property` registrations plus inline `var()` fallbacks.
 
+## Sass, Less and Stylus
+
+Krate has no Sass, Less or Stylus compiler. Importing a `.scss`, `.sass`, `.less`
+or `.styl` file (including `.module.scss`) is a build error (`KR7120`) rather
+than a page that silently ships without its styles. Compile the file to CSS
+first, for example with the `sass` CLI in a prebuild script
+(`sass src/styles.scss src/styles.css`), and import the `.css` file, or port the
+styles to CSS or Tailwind.
+
 ## Global CSS & code splitting
 
 Plain CSS imported or referenced in pages is collected per page, in source and

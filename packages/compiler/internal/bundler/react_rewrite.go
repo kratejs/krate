@@ -294,6 +294,9 @@ func RewriteReact(prog *ast.Program) {
 // codes_effects.go). file and src position the diagnostics.
 func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	renameReservedBindings(prog)
+	if !inNodeModules(file) {
+		normalizePropsParam(prog)
+	}
 	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src, susp: newSuspenseState()}
 	ctx.fnNames = functionNames(prog.Body)
 	ctx.refDiagnostics(prog)

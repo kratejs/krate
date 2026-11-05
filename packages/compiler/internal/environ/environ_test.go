@@ -243,3 +243,31 @@ func TestKVListSorted(t *testing.T) {
 		}
 	}
 }
+
+func TestScriptEnvOverlaysProjectOnShell(t *testing.T) {
+	old := Current
+	t.Cleanup(func() { Current = old })
+	setEnv(t, "KRATE_TEST_SHELL", "shell")
+	unsetEnv(t, "NODE_ENV")
+	Current = map[string]string{"KRATE_TEST_FILE": "file"}
+	if _, err := Load(t.TempDir(), "development"); err != nil {
+		t.Fatal(err)
+	}
+	env := ScriptEnv()
+	if env["KRATE_TEST_SHELL"] != "shell" || env["KRATE_TEST_FILE"] != "file" {
+		t.Errorf("shell and project values must both be visible: %v", env["KRATE_TEST_SHELL"])
+	}
+	if env["NODE_ENV"] != "development" {
+		t.Errorf("NODE_ENV = %q, want development", env["NODE_ENV"])
+	}
+	if _, err := Load(t.TempDir(), "staging"); err != nil {
+		t.Fatal(err)
+	}
+	if got := ScriptEnv()["NODE_ENV"]; got != "production" {
+		t.Errorf("NODE_ENV = %q, want production for a custom mode", got)
+	}
+	setEnv(t, "NODE_ENV", "test")
+	if got := ScriptEnv()["NODE_ENV"]; got != "test" {
+		t.Errorf("a shell NODE_ENV must win, got %q", got)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -100,6 +101,7 @@ type Bundler struct {
 	actionErr         error
 	pathAliases       []pathAlias
 	tsBaseDir         string
+	baseURL           string
 	serverComponents  []string
 	runtimeComponents []string
 	serverDirs        []string
@@ -205,7 +207,12 @@ func (b *Bundler) SetPathAliases(prefixes []string, targets [][]string, tsBaseDi
 			b.pathAliases = append(b.pathAliases, pathAlias{prefix: prefix, targets: targets[i]})
 		}
 	}
+	registerPathAliases(b.pathAliases, tsBaseDir)
 }
+
+// SetBaseURL sets tsconfig compilerOptions.baseUrl (absolute). A bare import
+// that node_modules cannot satisfy is then tried as a path under it.
+func (b *Bundler) SetBaseURL(dir string) { b.baseURL = dir }
 
 // SetServerComponents configures the server component name lists and directory
 // lists for classification. Components in serverDirs are treated as @server,
@@ -281,7 +288,21 @@ func (b *Bundler) resolveImportForModuleUncached(importer, imp string) string {
 			return resolved
 		}
 	}
-	return resolveImport(importer, imp, b.fileExists, b.conditions())
+	resolved := resolveImport(importer, imp, b.fileExists, b.conditions())
+	if resolved == "" && b.baseURL != "" && isBareSpecifier(imp) {
+		// baseUrl without a matching paths entry: tsc resolves non-relative
+		// specifiers against it. node_modules wins here, so an installed
+		// package is never shadowed by a same-named folder.
+		resolved = resolveFileOrDir(filepath.Join(b.baseURL, filepath.FromSlash(imp)), b.fileExists)
+	}
+	return resolved
+}
+
+// isBareSpecifier reports whether imp names a package or baseUrl-relative path
+// (not relative, absolute, a URL, or a #subpath import).
+func isBareSpecifier(imp string) bool {
+	return imp != "" && !strings.HasPrefix(imp, ".") && !strings.HasPrefix(imp, "/") &&
+		!strings.HasPrefix(imp, "#") && !strings.Contains(imp, ":")
 }
 
 // matchesPathAlias reports whether imp matches a configured tsconfig paths
@@ -439,7 +460,13 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 // resolveModuleImports resolves and loads every import of mod. An import no
 // rule can resolve is a build error located at the import statement.
 func (b *Bundler) resolveModuleImports(mod *Module) error {
+	if err := b.checkRuntimeImports(mod); err != nil {
+		return err
+	}
 	for _, imp := range mod.Imports {
+		if err := checkUnsupportedStylesheet(mod, imp); err != nil {
+			return err
+		}
 		if base, query, ok := splitImportQuery(imp); ok {
 			if err := b.resolveQueryImport(mod, imp, base, query); err != nil {
 				return err
@@ -754,8 +781,9 @@ func (b *Bundler) collectImports(prog *ast.Program, mod *Module) {
 			}
 		}
 		if exp, ok := stmt.(*ast.ExportStmt); ok {
-			// A star or namespace re-export depends on its source module.
-			if (exp.StarReexport || exp.Namespace != "") && exp.ReexportSource != "" {
+			// Any re-export (`export *`, `export * as`, `export { X } from`)
+			// depends on its source module.
+			if exp.ReexportSource != "" {
 				src := strings.Trim(exp.ReexportSource, "\"'")
 				mod.Imports = append(mod.Imports, src)
 			}
@@ -836,15 +864,42 @@ func memoizedExists(path string) bool {
 
 func ResolveImport(importer, imp string) string {
 	if !resolverCacheEnabled {
-		return resolveImport(importer, imp, resolver.Exists, nil)
+		return resolveImportAliased(importer, imp, resolver.Exists)
 	}
 	key := filepath.Dir(importer) + "\x00" + imp
 	if v, ok := resolveMemo.importResult(key); ok {
 		return v
 	}
-	v := resolveImport(importer, imp, memoizedExists, nil)
+	v := resolveImportAliased(importer, imp, memoizedExists)
 	resolveMemo.putImport(key, v)
 	return v
+}
+
+// aliasRegistry holds the tsconfig path aliases of the build in progress, for
+// callers of ResolveImport that hold no Bundler (the annotator follows imports
+// to the module that declares a component, and `@/components` is one).
+var aliasRegistry struct {
+	sync.RWMutex
+	aliases []pathAlias
+	baseDir string
+}
+
+func registerPathAliases(aliases []pathAlias, baseDir string) {
+	aliasRegistry.Lock()
+	aliasRegistry.aliases, aliasRegistry.baseDir = aliases, baseDir
+	aliasRegistry.Unlock()
+}
+
+func resolveImportAliased(importer, imp string, exists func(string) bool) string {
+	aliasRegistry.RLock()
+	aliases, base := aliasRegistry.aliases, aliasRegistry.baseDir
+	aliasRegistry.RUnlock()
+	if len(aliases) > 0 && base != "" && !strings.HasPrefix(imp, ".") {
+		if resolved := resolvePathAlias(imp, aliases, base, exists); resolved != "" {
+			return resolved
+		}
+	}
+	return resolveImport(importer, imp, exists, nil)
 }
 
 // resolveImport resolves an import path to an absolute file path. exists is the
@@ -858,26 +913,7 @@ func resolveImport(importer, imp string, exists func(string) bool, conds resolve
 		if ts := tsSourceForJSSpecifier(resolved, exists); ts != "" {
 			return ts
 		}
-		if exists(resolved) {
-			if resolver.StatPath(resolved).IsDir {
-				for _, index := range []string{"index.tsx", "index.ts", "index.mts", "index.jsx", "index.js", "index.mjs", "index.cjs", "index.md", "index.mdx"} {
-					candidate := filepath.Join(resolved, index)
-					if exists(candidate) {
-						return candidate
-					}
-				}
-			}
-			return resolved
-		}
-
-		extensions := []string{".tsx", ".ts", ".mts", ".jsx", ".js", ".mjs", ".cjs", ".md", ".mdx", ".css", ".json"}
-		for _, ext := range extensions {
-			candidate := resolved + ext
-			if exists(candidate) {
-				return candidate
-			}
-		}
-		return ""
+		return resolveFileOrDir(resolved, exists)
 	}
 
 	// Resolve krate/* virtual packages (e.g., krate/components)
@@ -945,25 +981,8 @@ func resolvePathAlias(imp string, aliases []pathAlias, tsBaseDir string, exists 
 					if ts := tsSourceForJSSpecifier(targetPath, exists); ts != "" {
 						return ts
 					}
-					if exists(targetPath) {
-						if resolver.StatPath(targetPath).IsDir {
-							for _, index := range []string{"index.tsx", "index.ts", "index.jsx", "index.js"} {
-								candidate := filepath.Join(targetPath, index)
-								if exists(candidate) {
-									return candidate
-								}
-							}
-						}
-						return targetPath
-					}
-
-					// Try with extensions
-					extensions := []string{".tsx", ".ts", ".mts", ".jsx", ".js", ".mjs", ".cjs", ".css", ".json"}
-					for _, ext := range extensions {
-						candidate := targetPath + ext
-						if exists(candidate) {
-							return candidate
-						}
+					if found := resolveFileOrDir(targetPath, exists); found != "" {
+						return found
 					}
 				}
 			}
@@ -976,10 +995,45 @@ func resolvePathAlias(imp string, aliases []pathAlias, tsBaseDir string, exists 
 						targetPath = filepath.Join(tsBaseDir, targetPath)
 					}
 					targetPath = filepath.Clean(targetPath)
-					if exists(targetPath) {
-						return targetPath
+					if found := resolveFileOrDir(targetPath, exists); found != "" {
+						return found
 					}
 				}
+			}
+		}
+	}
+	return ""
+}
+
+// sourceExtensions are the extensions tried, in order, after an extensionless
+// path; sourceIndexes are the directory index files.
+var (
+	sourceExtensions = []string{".tsx", ".ts", ".mts", ".jsx", ".js", ".mjs", ".cjs", ".md", ".mdx", ".css", ".json"}
+	sourceIndexes    = []string{"index.tsx", "index.ts", "index.mts", "index.jsx", "index.js", "index.mjs", "index.cjs", "index.md", "index.mdx"}
+)
+
+// resolveFileOrDir resolves an extensionless or exact path the way Node and tsc
+// do: an exact file first, then the path plus each extension, and only then a
+// directory's index file. A directory that shares its stem with a file (Button.tsx
+// beside Button/style.css) therefore never shadows the file. Returns "" when
+// nothing matches.
+func resolveFileOrDir(path string, exists func(string) bool) string {
+	isDir := false
+	if exists(path) {
+		if !resolver.StatPath(path).IsDir {
+			return path
+		}
+		isDir = true
+	}
+	for _, ext := range sourceExtensions {
+		if candidate := path + ext; exists(candidate) {
+			return candidate
+		}
+	}
+	if isDir {
+		for _, index := range sourceIndexes {
+			if candidate := filepath.Join(path, index); exists(candidate) {
+				return candidate
 			}
 		}
 	}
@@ -1378,15 +1432,19 @@ func (b *Bundler) rewriteAssetImportRefs() {
 				continue
 			}
 			src := strings.Trim(imp.Source, "\"'")
-			resolved := src
-			if !filepath.IsAbs(resolved) {
-				resolved = filepath.Join(b.root, resolved)
-			}
-			if strings.HasPrefix(src, ".") {
-				modDir := filepath.Dir(mod.Path)
-				resolved = filepath.Join(modDir, src)
+			// Resolve the way the import itself was resolved, so a tsconfig
+			// alias (`@/assets/logo.png`) finds the same file as a relative path.
+			resolved := b.resolveImportForModule(mod.Path, src)
+			if resolved == "" {
+				resolved = src
 				if !filepath.IsAbs(resolved) {
 					resolved = filepath.Join(b.root, resolved)
+				}
+				if strings.HasPrefix(src, ".") {
+					resolved = filepath.Join(filepath.Dir(mod.Path), src)
+					if !filepath.IsAbs(resolved) {
+						resolved = filepath.Join(b.root, resolved)
+					}
 				}
 			}
 			resolved = filepath.Clean(resolved)

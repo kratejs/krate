@@ -154,8 +154,9 @@ const (
 	LT_SLASH
 	SPREAD
 
-	// Apostrophe is a literal quote character that is NOT a string delimiter
-	// (a quote directly after a value, e.g. `5" screen`).
+	// Apostrophe is a literal quote character that is NOT a string delimiter.
+	// The lexer no longer emits it (JSX text is lexed separately); the kind
+	// stays so token values keep their numbering.
 	Apostrophe
 
 	TEMPLATE_START
@@ -529,11 +530,10 @@ func (l *Lexer) Tokenize() []Token {
 		case '\'', '"':
 			if l.inJSXTag() {
 				l.readJSXString(byte(ch))
-			} else if isValueEnd(l.lastKind) {
-				// A quote directly after a value (5" screen) is a literal
-				// character, not the start of a string.
-				l.emit(Apostrophe)
 			} else {
+				// JSX text (5" screen) is lexed by lexJSXChildren, so a quote
+				// here always opens a string, including right after an
+				// identifier or `}` as in minified `import{a}from"./b.js"`.
 				l.readString(byte(ch))
 			}
 		case '`':
@@ -1107,7 +1107,13 @@ func (l *Lexer) looksLikeTypeParams() bool {
 			return true
 		}
 		r, _ := utf8.DecodeRuneInString(src[after:])
-		return !isIDContinue(r)
+		if isIDContinue(r) {
+			return false
+		}
+		// `<div extends="a" />` and `<T extends />` use "extends" as an
+		// attribute name; a type parameter's constraint is a type.
+		j := skipSpaces(src, after)
+		return j >= len(src) || (src[j] != '=' && src[j] != '/' && src[j] != '>')
 	}
 	return false
 }

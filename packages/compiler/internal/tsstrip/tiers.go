@@ -24,8 +24,10 @@ import (
 // a top-level expression statement.
 
 var (
-	tierRe = regexp.MustCompile(`(?m)^(?:\x{FEFF})?[ \t]*(@(server|static|runtime|client))(?:[ \t]|\r?$)`)
-	declRe = regexp.MustCompile(`^(export\s+)?(default\s+)?(async\s+)?(?:function\s*\*?\s*([A-Za-z_$][\w$]*)?|class\b\s*([A-Za-z_$][\w$]*)?|(?:const|let|var)\s+([A-Za-z_$][\w$]*))`)
+	tierRe              = regexp.MustCompile(`(?m)^(?:\x{FEFF})?[ \t]*(@(server|static|runtime|client))(?:[ \t]|\r?$)`)
+	classDeclRe         = regexp.MustCompile(`^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\b`)
+	exportDefaultExprRe = regexp.MustCompile(`^export\s+default\b`)
+	declRe              = regexp.MustCompile(`^(export\s+)?(default\s+)?(async\s+)?(?:function\s*\*?\s*([A-Za-z_$][\w$]*)?|class\b\s*([A-Za-z_$][\w$]*)?|(?:const|let|var)\s+([A-Za-z_$][\w$]*))`)
 )
 
 // tierMark is one confirmed tier decorator.
@@ -128,7 +130,7 @@ func scanTiers(path, src string, opts Options) *tierScan {
 		m := tierMark{tier: src[c[4]:c[5]], start: at, end: end}
 		m.line = 1 + strings.Count(src[:at], "\n")
 		m.col = at - (strings.LastIndexByte(src[:at], '\n') + 1) + 1
-		if !top[fmt.Sprintf("$%s:%d", m.tier, m.line)] || bound[m.tier] {
+		if !top[fmt.Sprintf("$%s:%d", m.tier, m.line)] {
 			continue
 		}
 		fail := func(msg, hint string) {
@@ -136,10 +138,21 @@ func scanTiers(path, src string, opts Options) *tierScan {
 			s.errs = append(s.errs, d)
 		}
 		rest := skipDecoratorTrivia(src, end)
+		// A file that binds the same name (`import { client } from "./x"`) can
+		// mean a real class decorator. Only a class can take one, so anything
+		// else carrying the tier name is a tier decorator.
+		if bound[m.tier] && classDeclRe.MatchString(src[rest:]) {
+			continue
+		}
 		decl := declRe.FindStringSubmatch(src[rest:])
 		if decl == nil {
-			fail("@"+m.tier+" must be placed on a function, class or const declaration",
-				"put it on the line above the component, e.g. `@"+m.tier+"` then `export default function Stats() {}`")
+			if exportDefaultExprRe.MatchString(src[rest:]) {
+				fail("@"+m.tier+" cannot be placed on `export default` of an expression",
+					"name the component and export it by name: put `@"+m.tier+"` above `const View = ...;` and write `export default View;`")
+			} else {
+				fail("@"+m.tier+" must be placed on a function, class or const declaration",
+					"put it on the line above the component, e.g. `@"+m.tier+"` then `export default function Stats() {}`")
+			}
 			continue
 		}
 		m.isDefault = decl[2] != ""

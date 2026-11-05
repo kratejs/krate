@@ -135,7 +135,7 @@ func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir strin
 	defer func() { releasePluginVM(vm, healthy) }()
 	rt := vm.rt
 
-	_ = rt.SetEnv(environ.Current)
+	_ = rt.SetEnv(environ.ScriptEnv())
 
 	// Attribute all console/log output to this plugin.
 	rt.SetLogPrefix("[plugin:" + pc.Name + "]")

@@ -163,3 +163,52 @@ func TestJSDecoratorsAreLowered(t *testing.T) {
 		}
 	}
 }
+
+// A tier name that the file also binds only means a user decorator on a class;
+// on a function or const it is still the tier decorator.
+func TestTierDecoratorWithBoundNameOnFunction(t *testing.T) {
+	for name, src := range map[string]string{
+		"imported": "import { client } from './x';\n@client\nexport function S() { return <p>{client}</p>; }\n",
+		"const":    "const client = 1;\n@client\nexport default function S() { return <p>{client}</p>; }\n",
+		"arrow":    "import { server } from './x';\n@server\nexport const S = () => <p>{server}</p>;\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			prog := parseOK(t, "a.tsx", src)
+			found := false
+			for _, stmt := range prog.Body {
+				if exp, ok := stmt.(*ast.ExportStmt); ok {
+					switch d := exp.Declaration.(type) {
+					case *ast.FnDecl:
+						found = found || d.Tier != ""
+					case *ast.VarStmt:
+						found = found || (len(d.Decls) > 0 && d.Decls[0].Tier != "")
+					}
+				}
+			}
+			if !found {
+				t.Error("tier was not applied")
+			}
+		})
+	}
+}
+
+func TestTierDecoratorOnDefaultExpressionExplainsHowToName(t *testing.T) {
+	for name, src := range map[string]string{
+		"arrow": "@client\nexport default () => <div/>;\n",
+		"call":  "@client\nexport default memo(function V() { return <div/>; });\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, errs := Parse("a.tsx", src, Options{})
+			if len(errs) == 0 {
+				t.Fatal("expected a diagnostic")
+			}
+			d, ok := errs[0].(diag.Diagnostic)
+			if !ok || d.Code != diag.CodeTierDecorator {
+				t.Fatalf("got %T %v", errs[0], errs[0])
+			}
+			if !strings.Contains(d.Message, "export default") || !strings.Contains(d.Hint, "export default View") {
+				t.Errorf("diagnostic: %+v", d)
+			}
+		})
+	}
+}

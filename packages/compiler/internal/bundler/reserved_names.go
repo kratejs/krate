@@ -31,6 +31,25 @@ func reservedRuntimeName(name string) bool {
 	return strings.HasPrefix(name, "kbind") || strings.HasPrefix(name, "krate") || strings.HasPrefix(name, "__k")
 }
 
+// builtinComponentName reports whether the compiler gives a JSX tag of this
+// name a meaning of its own (<Link>, <Head>, ...). A component the project
+// declares or imports under such a name would otherwise be replaced by the
+// built-in without a word, so its bindings are renamed like runtime names and
+// the tag resolves to the project's component. Imports from packages and the
+// runtime are left alone: `import { Link } from "@krate/runtime"` is the
+// built-in itself.
+func builtinComponentName(name string) bool {
+	switch name {
+	case "Head", "Script", "Style", "Link", "Icon", "Image", "Suspense", "Slot", "SyntaxHighlight", "Portal":
+		return true
+	}
+	return false
+}
+
+func reservedBindingName(name string) bool {
+	return reservedRuntimeName(name) || builtinComponentName(name)
+}
+
 // reservedSuffix is appended to a renamed user binding.
 const reservedSuffix = "$u"
 
@@ -64,11 +83,141 @@ func isolateDecoratorTemps(prog *ast.Program, src string) {
 }
 
 // renameReservedBindings renames user-declared bindings that collide with
-// runtime-reserved names throughout the module. Names bound by an import are
-// left alone (`import { h } from "@krate/runtime"` is the runtime itself), as
-// are names bound only by a destructuring pattern kept as source text.
+// runtime-reserved names throughout the module. Names bound by an import from
+// the runtime or a package are left alone (`import { h } from "@krate/runtime"`
+// is the runtime itself), as are names bound only by a destructuring pattern
+// kept as source text.
+//
+// The public surface of a module does not change: an exported binding keeps its
+// export name (`export const krateTheme` becomes `const krateTheme$u` plus
+// `export { krateTheme$u as krateTheme }`), and an import from a project file
+// keeps the name it asks for while its local binding is renamed
+// (`import { h as h$u }`).
 func renameReservedBindings(prog *ast.Program) {
-	renameBindings(prog, reservedRuntimeName, reservedSuffix)
+	declared := renamableNames(prog, reservedBindingName)
+	if _, isAction := isUseServerDirective(prog.Body); isAction {
+		// Actions are addressed by export name and run no hydration code.
+		for _, stmt := range prog.Body {
+			if exp, ok := stmt.(*ast.ExportStmt); ok && !exp.Default {
+				for _, name := range declaredNames(exp.Declaration) {
+					delete(declared, name)
+				}
+				for _, spec := range exp.Named {
+					delete(declared, spec.Local)
+				}
+			}
+		}
+	}
+	imported := reservedImportLocals(prog)
+	if len(declared) == 0 && len(imported) == 0 {
+		return
+	}
+	names := make(map[string]string, len(declared)+len(imported))
+	for name := range declared {
+		names[name] = name + reservedSuffix
+	}
+	for name := range imported {
+		names[name] = name + reservedSuffix
+	}
+
+	// Collect what applyRenames cannot express while names are still original.
+	type split struct {
+		at    int
+		pairs []ast.NamedExport
+	}
+	var splits []split
+	for i, stmt := range prog.Body {
+		exp, ok := stmt.(*ast.ExportStmt)
+		if !ok || exp.Default || exp.ReexportSource != "" {
+			continue
+		}
+		var pairs []ast.NamedExport
+		for _, name := range declaredNames(exp.Declaration) {
+			if to, ok := names[name]; ok {
+				pairs = append(pairs, ast.NamedExport{Local: to, Remote: name})
+			}
+		}
+		if len(pairs) > 0 {
+			splits = append(splits, split{at: i, pairs: pairs})
+		}
+		for j, spec := range exp.Named {
+			if to, ok := names[spec.Local]; ok {
+				exp.Named[j].Local = to
+			}
+		}
+	}
+
+	applyRenames(prog, names)
+
+	for _, stmt := range prog.Body {
+		imp, ok := stmt.(*ast.ImportStmt)
+		if !ok {
+			continue
+		}
+		if to, ok := names[imp.Default]; ok && imported[imp.Default] {
+			imp.Default = to
+		}
+		if to, ok := names[imp.Namespace]; ok && imported[imp.Namespace] {
+			imp.Namespace = to
+		}
+		for i, spec := range imp.Named {
+			local := spec.Local
+			if local == "" {
+				local = spec.Remote
+			}
+			if to, ok := names[local]; ok && imported[local] {
+				imp.Named[i] = ast.NamedImport{Local: to, Remote: spec.Remote}
+			}
+		}
+	}
+	// Insert the export lists after their declarations, last first so earlier
+	// indexes stay valid.
+	for k := len(splits) - 1; k >= 0; k-- {
+		sp := splits[k]
+		exp := prog.Body[sp.at].(*ast.ExportStmt)
+		decl := exp.Declaration
+		list := &ast.ExportStmt{Position: exp.Position, Named: sp.pairs}
+		body := make([]ast.Stmt, 0, len(prog.Body)+1)
+		body = append(body, prog.Body[:sp.at]...)
+		body = append(body, decl, list)
+		body = append(body, prog.Body[sp.at+1:]...)
+		prog.Body = body
+	}
+}
+
+// reservedImportLocals returns the reserved-name bindings the module imports
+// from files of the project (relative or alias paths). Runtime and package
+// imports are not included: they are the runtime globals themselves.
+func reservedImportLocals(prog *ast.Program) map[string]bool {
+	out := map[string]bool{}
+	for _, stmt := range prog.Body {
+		imp, ok := stmt.(*ast.ImportStmt)
+		if !ok || !isProjectSpecifier(strings.Trim(imp.Source, "\"'`")) {
+			continue
+		}
+		add := func(name string) {
+			if name != "" && reservedBindingName(name) {
+				out[name] = true
+			}
+		}
+		add(imp.Default)
+		add(imp.Namespace)
+		for _, spec := range imp.Named {
+			if spec.Local != "" {
+				add(spec.Local)
+			} else {
+				add(spec.Remote)
+			}
+		}
+	}
+	return out
+}
+
+// isProjectSpecifier reports whether an import specifier names a file of the
+// project: a relative path or the conventional "@/" and "~/" aliases.
+func isProjectSpecifier(src string) bool {
+	return strings.HasPrefix(src, ".") || strings.HasPrefix(src, "/") ||
+		strings.HasPrefix(src, "@/") || strings.HasPrefix(src, "~/")
 }
 
 // renameBindings appends suffix to every binding whose name matches, and to

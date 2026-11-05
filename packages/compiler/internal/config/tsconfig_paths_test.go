@@ -123,3 +123,21 @@ func TestTSConfigBackslashPathsAreNormalized(t *testing.T) {
 		t.Fatalf("TSBaseDir = %q, want %q", c.TSBaseDir, want)
 	}
 }
+
+func TestTSBaseURLOnlySetWhenTsconfigDeclaresIt(t *testing.T) {
+	dir := t.TempDir()
+	writeTS(t, filepath.Join(dir, "tsconfig.json"), `{"compilerOptions":{"baseUrl":"src"}}`)
+	cfg := &Config{}
+	cfg.LoadTSConfigPaths(dir)
+	if want := filepath.Join(dir, "src"); cfg.TSBaseURL != want || cfg.TSBaseDir != want {
+		t.Errorf("TSBaseURL = %q, TSBaseDir = %q, want %q", cfg.TSBaseURL, cfg.TSBaseDir, want)
+	}
+
+	dir = t.TempDir()
+	writeTS(t, filepath.Join(dir, "tsconfig.json"), `{"compilerOptions":{"paths":{"@/*":["./src/*"]}}}`)
+	cfg = &Config{}
+	cfg.LoadTSConfigPaths(dir)
+	if cfg.TSBaseURL != "" {
+		t.Errorf("TSBaseURL = %q without a baseUrl", cfg.TSBaseURL)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/evanw/esbuild/pkg/api"
@@ -122,7 +123,7 @@ func bundle(opts Options) (string, error) {
 	if opts.ResolveImport != nil {
 		plugins = append(plugins, resolveForwarder(opts.ResolveImport))
 	}
-	plugins = append(plugins, krateResolver(), importMetaPreserver())
+	plugins = append(plugins, krateResolver(), importMetaPreserver(opts.NodeShims))
 	buildOpts := api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   opts.Source,
@@ -160,7 +161,7 @@ func bundle(opts Options) (string, error) {
 // literal of that file's own file:// URL, so bundling every module together does
 // not collapse their URLs onto the bundle's location. Plugin and theme factories
 // rely on this to point the compiler back at their real source on disk.
-func importMetaPreserver() api.Plugin {
+func importMetaPreserver(nodeShims bool) api.Plugin {
 	return api.Plugin{
 		Name: "krate-preserve-import-meta",
 		Setup: func(pb api.PluginBuild) {
@@ -187,10 +188,41 @@ func importMetaPreserver() api.Plugin {
 				}
 				contents := src
 				contents = tsstrip.BlankTierDecorators(args.Path, contents)
+				if nodeShims {
+					contents = injectDirnameVars(args.Path, contents)
+				}
 				return api.OnLoadResult{Contents: &contents, Loader: loaderForPath(args.Path)}, nil
 			})
 		},
 	}
+}
+
+var (
+	dirnameDeclRe  = regexp.MustCompile(`\b(?:const|let|var|function|class)\s+__dirname\b`)
+	filenameDeclRe = regexp.MustCompile(`\b(?:const|let|var|function|class)\s+__filename\b`)
+)
+
+// injectDirnameVars gives a module the CommonJS __dirname and __filename of its
+// own file, which QuickJS does not define. The declaration goes on the first
+// line (no newline) so positions in errors stay put, and only for a name the
+// module uses without declaring it (`const __dirname = dirname(fileURLToPath(
+// import.meta.url))` is the usual ESM idiom and must keep working).
+func injectDirnameVars(path, src string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".json":
+		return src
+	}
+	if strings.HasPrefix(src, "#!") {
+		return src
+	}
+	var decl string
+	if strings.Contains(src, "__dirname") && !dirnameDeclRe.MatchString(src) {
+		decl += fmt.Sprintf("var __dirname=%q;", filepath.ToSlash(filepath.Dir(path)))
+	}
+	if strings.Contains(src, "__filename") && !filenameDeclRe.MatchString(src) {
+		decl += fmt.Sprintf("var __filename=%q;", filepath.ToSlash(path))
+	}
+	return decl + src
 }
 
 // assetFilter matches imports of styles, images, fonts and other non-code

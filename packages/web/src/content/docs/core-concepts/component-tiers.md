@@ -85,8 +85,11 @@ export default function Dashboard() {
 - On an `async` component only `@runtime` is accepted.
 
 Misplaced decorators fail the build with
-[KR7115](/docs/reference/diagnostics/#kr7115). If your project already imports
-its own decorator named `server` or `client`, that one is used instead.
+[KR7115](/docs/reference/diagnostics/#kr7115). A decorator goes on a declaration,
+so `@client` above `export default () => <div />` or `export default memo(...)` is
+an error; name the component (`@client` above `const View = ...;`, then
+`export default View;`). If your project already imports its own decorator named
+`server` or `client` and applies it to a class, that one is used instead.
 
 ### TypeScript
 

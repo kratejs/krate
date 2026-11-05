@@ -94,6 +94,44 @@ detailed changelog. This file records the release train at a glance.
   utilities`). Migration note: unlayered CSS beats Tailwind utilities, so a
   global reset such as `* { margin: 0; padding: 0 }` must move into
   `@layer base { ... }` or it will override `p-*`/`m-*` utilities.
+- Fixed: `export { Card } from "./Card"` and `export { default as Card }` barrels
+  never loaded the module, so `<Card />` rendered nothing; named re-exports and
+  `default as` renames now resolve, also through a tsconfig alias like
+  `@/components`.
+- Fixed: two same-named exports imported by one page (`import { Card as A } from
+  "./a"`, `import { Card as B } from "./b"`) showed one module's component for
+  both. One module's export now gets a private name and its importers are
+  rewritten. `KR7116` is reported only for modules that cannot move (re-exported,
+  imported as a namespace, `import()`ed, or "use client"/"use server").
+- Fixed: a file beside a same-named directory (`Button.tsx` and `Button/`)
+  resolved to the directory; a file now wins, as in Node and tsc.
+- A bare import that `paths` and `node_modules` cannot satisfy is tried against
+  tsconfig `baseUrl`. The package.json `browser` field is honoured for client
+  builds.
+- Fixed: minified code with a string right after an identifier or `}`
+  (`import{a}from"./b.js"`) failed to parse, and so did a JSX attribute named
+  `extends`.
+- Fixed: a binding named like a runtime name (`export const krateTheme`,
+  `export function h`) lost its export or import name; it now keeps both. A
+  project component named `Link`, `Head`, `Script`, `Style`, `Icon`, `Image` or
+  `Suspense` replaces the built-in instead of being silently ignored.
+- Fixed: `function Box(p)` next to any module-level const failed the build with
+  `cannot read properties of undefined`; a lone component parameter is now
+  treated as the props object whatever its name. `Table.Cell = function ...`
+  (or an arrow) is now a component.
+- `krate.config.ts`: shell environment variables and `NODE_ENV` are visible in
+  `process.env`, `fs.existsSync` works, and `process.cwd/argv/platform`,
+  `__dirname`, `__filename`, `module.exports` beside imports, `node:os` and a
+  small `Buffer` are provided. Plugin hooks see the same environment.
+- Build errors instead of silent output: importing `.scss`, `.sass`, `.less` or
+  `.styl` (`KR7120`, Krate has no compiler for them), and importing a name
+  `@krate/runtime` does not export (`KR7121`, it used to fail in the browser with
+  `x is not defined`).
+- Fixed: an asset imported through a tsconfig alias (`@/assets/logo.png`) was
+  emitted but referenced as a bare identifier.
+- A tier decorator on a function or const wins over a same-named binding in the
+  file (it used to leave an esbuild "Decorators are not valid here" error), and
+  `@client export default <expression>` now explains how to name the component.
 
 ## 0.5.0-alpha.4
 

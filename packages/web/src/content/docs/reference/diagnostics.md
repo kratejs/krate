@@ -372,7 +372,19 @@ Krate wraps each export of a `"use client"` module in a client boundary, so it m
 
 **One name imported from two modules**
 
-Two modules export the same name and a page imports it from both, for example `import { Card as A } from "./a"` and `import { Card as B } from "./b"`. Modules on a page share one namespace, so both imports resolve to one declaration and the page shows the wrong output. Rename one of the exports. Private names and default exports do not have this problem. This is a warning.
+Two modules export the same name and a page imports it from both, for example `import { Card as A } from "./a"` and `import { Card as B } from "./b"`. Modules on a page share one namespace, so Krate gives one of the exports a private name and rewrites the imports to match, and this is not reported. It is reported when neither module can be renamed because something reads export names from source: a re-export (`export { Card } from`, `export *`, or an import followed by an export), a namespace import (`import * as ns`), an `import()`, or a "use client" or "use server" module. Both imports then resolve to one declaration and the page shows the wrong output. Rename one of the exports. Private names and default exports do not have this problem. This is a warning.
+
+### KR7120
+
+**Sass, Less and Stylus files are not compiled**
+
+Krate compiles CSS (including CSS modules and Tailwind) but has no Sass, Less or Stylus compiler, so importing a `.scss`, `.sass`, `.less` or `.styl` file would ship no styles at all. Compile the file to CSS first (for example with the `sass` CLI in a prebuild script) and import the `.css` result, or port the styles to CSS or Tailwind. This is an error.
+
+### KR7121
+
+**Name is not exported by @krate/runtime**
+
+A named import from `@krate/runtime` (or one of its subpaths) asks for something the package does not export. The import is removed from the page, so the name would be undefined in the browser and fail with a ReferenceError. Check the spelling against the runtime API reference; names from other frameworks (`signal`, `usePathname`) have Krate equivalents such as `createSignal` and `getNavigationState`. This is an error.
 
 ## KR8xxx: islands, compiled packages and general React compatibility
 

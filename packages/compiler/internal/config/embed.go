@@ -20,7 +20,7 @@ func evaluateEmbeddedTSConfig(configPath string, opts LoadOptions) ([]byte, erro
 		Source:     configEvalBootstrap("./"+filepath.Base(configPath), opts),
 		ResolveDir: root,
 		Sourcefile: "krate-config-bootstrap.ts",
-		Env:        environ.Current,
+		Env:        environ.ScriptEnv(),
 		Await:      true,
 		NodeShims:  true,
 	})
@@ -69,6 +69,11 @@ try {
   var __krateEnv = { command: %s, mode: %s, isDev: %t, dev: %t };
   var cfg = await import(%s);
   var config = (cfg && cfg.default) ? cfg.default : cfg;
+  // A config that mixes imports with module.exports = cfg exports nothing as
+  // ESM; take the CommonJS value instead.
+  if (!(cfg && (cfg.default || Object.keys(cfg).length)) && globalThis.module && globalThis.module.exports && Object.keys(globalThis.module.exports).length) {
+    config = globalThis.module.exports.default || globalThis.module.exports;
+  }
   if (typeof config === 'function') {
     config = config(__krateEnv);
   }

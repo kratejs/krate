@@ -559,6 +559,7 @@ type Config struct {
 	SSR         SSRConfig       `json:"ssr,omitempty"`
 	PathAliases PathAliases     `json:"pathAliases,omitempty"` // from tsconfig.json paths or config object
 	TSBaseDir   string          `json:"tsBaseDir,omitempty"`   // baseUrl resolved to absolute path
+	TSBaseURL   string          `json:"-"`                     // tsconfig baseUrl, absolute; empty when tsconfig sets none
 	Redirects   []Redirect      `json:"redirects,omitempty"`   // config-based redirects
 	Rewrites    []Rewrite       `json:"rewrites,omitempty"`    // config-based rewrites
 	SEO         SEOConfig       `json:"seo,omitempty"`         // SEO metadata (baseUrl, siteName, description)
