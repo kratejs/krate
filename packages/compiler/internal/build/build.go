@@ -239,6 +239,9 @@ type Builder struct {
 	// actions holds the discovered `"use server"` modules and their compiled
 	// bundles for this build. It is refreshed by prepareActions before pages.
 	actions *actionRegistry
+
+	segmentGenMu sync.Mutex
+	segmentGen   map[string]string // generated segment source path -> content written
 }
 
 // shouldMinifyJS reports whether generated JavaScript should be minified.

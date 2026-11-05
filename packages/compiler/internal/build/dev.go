@@ -32,7 +32,8 @@ var ErrDevRestart = errors.New("dev server restart requested")
 // reload. debounceDelay is the coalescing window: a single save (or an
 // atomic-rename editor) can emit many events in a burst, so only one rebuild
 // runs per burst. It returns an error only if the watcher fails to start, or
-// ErrDevRestart when Builder.DevReload accepted a config/env change.
+// ErrDevRestart when Builder.DevReload accepted a config/env change. It returns
+// nil when the context from Builder.SetContext is cancelled.
 func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 	// DevMode is owned by the caller (`krate dev` sets it so output stays
 	// readable); `krate build --watch` leaves it off and keeps minifying.
@@ -186,8 +187,14 @@ func Watch(b *Builder, debounceDelay time.Duration, hub *DevHub) error {
 		return nil
 	}
 
+	var stop <-chan struct{}
+	if b.ctx != nil {
+		stop = b.ctx.Done()
+	}
 	for {
 		select {
+		case <-stop:
+			return nil
 		case ev, ok := <-watcher.Events:
 			if !ok {
 				return nil

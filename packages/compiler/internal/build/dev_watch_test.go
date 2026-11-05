@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -49,7 +50,19 @@ func startDevWatch(t *testing.T, files map[string]string, mutate func(*config.Co
 	hub := NewDevHub()
 	events, cancel := hub.Subscribe()
 	t.Cleanup(cancel)
-	go func() { _ = Watch(b, 30*time.Millisecond, hub) }()
+	// Stop the watcher and wait for it before t.TempDir's cleanup, which runs
+	// later: a rebuild in flight would otherwise write into the removed tree.
+	ctx, stop := context.WithCancel(context.Background())
+	b.SetContext(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = Watch(b, 30*time.Millisecond, hub)
+	}()
+	t.Cleanup(func() {
+		stop()
+		<-done
+	})
 	time.Sleep(300 * time.Millisecond)
 	return root, b, events
 }

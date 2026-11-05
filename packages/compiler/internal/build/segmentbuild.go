@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -123,9 +124,25 @@ func errorPageSource(spec, variant string) string {
 }
 
 // writeSegmentGen writes a generated source (only when it changed, so module
-// caches and mtimes stay stable).
+// caches and mtimes stay stable). Pages build in parallel and share these files,
+// so a source is written once: on Windows, replacing a file fails a concurrent
+// open by another page with a sharing violation.
 func (b *Builder) writeSegmentGen(path, src string) error {
-	return fsutil.WriteFileIfChanged(path, []byte(src), 0o644)
+	b.segmentGenMu.Lock()
+	defer b.segmentGenMu.Unlock()
+	if b.segmentGen[path] == src {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		}
+	}
+	if err := fsutil.WriteFileIfChanged(path, []byte(src), 0o644); err != nil {
+		return err
+	}
+	if b.segmentGen == nil {
+		b.segmentGen = map[string]string{}
+	}
+	b.segmentGen[path] = src
+	return nil
 }
 
 // boundaryLayout returns the generated boundary layout for an error.tsx.
