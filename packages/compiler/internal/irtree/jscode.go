@@ -1003,6 +1003,9 @@ func codegenIssues(fn *ast.FnDecl, mk func(pos ast.Pos, msg, hint string) error)
 			}
 		case *ast.ObjectExpr:
 			for _, p := range v.Properties {
+				if p.Computed {
+					walkExpr(p.KeyExpr)
+				}
 				walkExpr(p.Value)
 			}
 		case *ast.ArrayExpr:

@@ -771,7 +771,7 @@ func referencesProps(expr ast.Expr) bool {
 		return false
 	case *ast.ObjectExpr:
 		for _, prop := range e.Properties {
-			if referencesProps(prop.Value) {
+			if referencesProps(prop.Value) || (prop.Computed && referencesProps(prop.KeyExpr)) {
 				return true
 			}
 		}
@@ -1001,7 +1001,7 @@ func (b *builder) exprReadsActiveContext(expr ast.Expr) bool {
 		}
 	case *ast.ObjectExpr:
 		for _, prop := range e.Properties {
-			if prop != nil && b.exprReadsActiveContext(prop.Value) {
+			if prop != nil && (b.exprReadsActiveContext(prop.Value) || (prop.Computed && b.exprReadsActiveContext(prop.KeyExpr))) {
 				return true
 			}
 		}

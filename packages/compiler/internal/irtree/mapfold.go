@@ -147,12 +147,21 @@ func bindPatternTarget(target, value ast.Expr, out map[string]ast.Expr) {
 	case *ast.ObjectExpr:
 		used := map[string]bool{}
 		var rest ast.Expr
+		computedKey := false
 		for _, p := range t.Properties {
 			if p == nil {
 				continue
 			}
 			if p.Spread {
 				rest = p.Value
+				continue
+			}
+			if p.Computed && p.KeyExpr != nil {
+				// The key is an expression: read the member through it, and
+				// leave a rest element unbound since which keys it excludes
+				// is not known here.
+				computedKey = true
+				bindPatternTarget(p.Value, &ast.MemberExpr{Object: cloneExpr(value), Property: p.KeyExpr, Computed: true}, out)
 				continue
 			}
 			key := p.Key
@@ -171,7 +180,7 @@ func bindPatternTarget(target, value ast.Expr, out map[string]ast.Expr) {
 			}
 			bindPatternTarget(p.Value, child, out)
 		}
-		if rest != nil {
+		if rest != nil && !computedKey {
 			bindPatternTarget(rest, objectRest(value, used), out)
 		}
 	case *ast.ArrayExpr:
@@ -258,15 +267,10 @@ func objectRest(value ast.Expr, used map[string]bool) ast.Expr {
 	}
 	out := &ast.ObjectExpr{Position: obj.Position}
 	for _, p := range obj.Properties {
-		if p == nil || p.Spread || used[p.Key] {
+		if p == nil || p.Spread || (!p.Computed && used[p.Key]) {
 			continue
 		}
-		out.Properties = append(out.Properties, &ast.ObjectProp{
-			Key:       p.Key,
-			Value:     cloneExpr(p.Value),
-			Shorthand: p.Shorthand,
-			Method:    p.Method,
-		})
+		out.Properties = append(out.Properties, cloneObjectProp(p, cloneExpr))
 	}
 	return out
 }

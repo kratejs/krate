@@ -121,6 +121,9 @@ func subParamExpr(expr ast.Expr, params map[string]string) ast.Expr {
 			if prop.Value != nil {
 				prop.Value = subParamExpr(prop.Value, params)
 			}
+			if prop.Computed && prop.KeyExpr != nil {
+				prop.KeyExpr = subParamExpr(prop.KeyExpr, params)
+			}
 		}
 		return e
 	case *ast.JSXElement:

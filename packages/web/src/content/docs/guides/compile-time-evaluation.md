@@ -28,6 +28,11 @@ no runtime expression for either value.
 ## What is evaluated
 
 - Literals, arrays, objects, templates, operators, and conditionals.
+- Computed object keys (`{ [KEY]: value }`, `{ [`${a}-${b}`]: value }`,
+  `{ [Kind.Primary]: value }`) whose key folds to a string or number. A key
+  that does not fold (it reads a signal, or something only known at request
+  time) leaves the whole object to the runtime; the key is never replaced by
+  the expression's spelling.
 - Module constants and imported constants that resolve to literal values.
 - Component locals, including destructuring.
 - Local helper functions whose bodies stay within the pure subset.

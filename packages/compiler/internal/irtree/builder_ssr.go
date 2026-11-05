@@ -356,7 +356,7 @@ func evalConst(expr ast.Expr) string {
 			if prop.Spread {
 				continue
 			}
-			parts = append(parts, prop.Key+`:`+constExprToJS(prop.Value))
+			parts = append(parts, objectPropKeyJS(prop, false)+`:`+constExprToJS(prop.Value))
 		}
 		return "{" + strings.Join(parts, ",") + "}"
 	case *ast.ConditionalExpr:
@@ -419,7 +419,7 @@ func constExprToJS(expr ast.Expr) string {
 			if prop.Spread {
 				continue
 			}
-			parts = append(parts, jsObjectKey(prop.Key)+":"+constExprToJS(prop.Value))
+			parts = append(parts, objectPropKeyJS(prop, true)+":"+constExprToJS(prop.Value))
 		}
 		return "{" + strings.Join(parts, ",") + "}"
 	case *ast.UnaryExpr:
@@ -1360,7 +1360,7 @@ func (s *propsMemberSubstituter) sub(expr ast.Expr) ast.Expr {
 	case *ast.ObjectExpr:
 		out := make([]*ast.ObjectProp, len(e.Properties))
 		for i, p := range e.Properties {
-			out[i] = &ast.ObjectProp{Key: p.Key, Value: s.sub(p.Value), Shorthand: p.Shorthand, Spread: p.Spread, Method: p.Method}
+			out[i] = cloneObjectProp(p, s.sub)
 		}
 		return &ast.ObjectExpr{Position: e.Position, Properties: out}
 	case *ast.TemplateExpr:
@@ -1456,4 +1456,30 @@ func (b *builder) moduleCallable(in *jsvalue.Interp, name string, cache map[stri
 	in.Scope = saved
 	cache[name] = v
 	return v, true
+}
+
+// objectPropKeyJS renders a property key as JS source. A computed key keeps its
+// expression (`[K]`); quote selects quoting of names that are not identifiers.
+func objectPropKeyJS(p *ast.ObjectProp, quote bool) string {
+	if p.Computed && p.KeyExpr != nil {
+		return "[" + generateExprJS(p.KeyExpr, nil) + "]"
+	}
+	if quote {
+		return jsObjectKey(p.Key)
+	}
+	return p.Key
+}
+
+// cloneObjectProp copies an object property, keeping every flag (computed,
+// getter, quoted key, ...) and mapping its value, and for a computed key its
+// key expression, through sub.
+func cloneObjectProp(p *ast.ObjectProp, sub func(ast.Expr) ast.Expr) *ast.ObjectProp {
+	cp := *p
+	if p.Value != nil {
+		cp.Value = sub(p.Value)
+	}
+	if p.Computed && p.KeyExpr != nil {
+		cp.KeyExpr = sub(p.KeyExpr)
+	}
+	return &cp
 }

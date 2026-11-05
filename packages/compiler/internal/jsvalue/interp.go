@@ -491,11 +491,20 @@ func (in *Interp) object(e *ast.ObjectExpr) Value {
 			}
 			continue
 		}
+		key := p.Key
+		if p.Computed {
+			k, bad := in.computedKey(p.KeyExpr)
+			if bad.IsUnknown() {
+				// The key is not known, so neither are the object's keys.
+				return bad
+			}
+			key = k
+		}
 		if p.Setter {
 			continue
 		}
 		if p.Getter && p.Value != nil {
-			obj.SetGetter(p.Key, in.Eval(p.Value))
+			obj.SetGetter(key, in.Eval(p.Value))
 			continue
 		}
 		var v Value
@@ -507,9 +516,27 @@ func (in *Interp) object(e *ast.ObjectExpr) Value {
 		default:
 			v = in.Eval(p.Value)
 		}
-		obj.Set(p.Key, v)
+		obj.Set(key, v)
 	}
 	return obj
+}
+
+// computedKey evaluates the key of a `[expr]: value` property or a computed
+// destructuring key. When the key is not statically known the returned Value
+// is the unknown to propagate (the key string is then empty).
+func (in *Interp) computedKey(expr ast.Expr) (string, Value) {
+	if expr == nil {
+		return "", Unsupported("computed property key")
+	}
+	k := in.Eval(expr)
+	if k.IsUnknown() {
+		return "", k
+	}
+	p := k.ToPrimitive()
+	if p.IsUnknown() {
+		return "", p
+	}
+	return p.ToString(), Value{}
 }
 
 // Closure builds a function value from params/body capturing the current
@@ -656,6 +683,9 @@ func (in *Interp) destructure(scope *Scope, pattern string, v Value) Value {
 		return v
 	}
 	used := map[string]bool{}
+	// unknownKey is set once a computed key could not be evaluated: which
+	// keys a rest element then excludes is not known either.
+	var unknownKey Value
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
 		if part == "" {
@@ -665,6 +695,8 @@ func (in *Interp) destructure(scope *Scope, pattern string, v Value) Value {
 			rest := NewObject()
 			if v.IsUnknown() {
 				rest = v
+			} else if unknownKey.IsUnknown() {
+				rest = unknownKey
 			} else {
 				for _, k := range v.Keys() {
 					if !used[k] {
@@ -686,9 +718,26 @@ func (in *Interp) destructure(scope *Scope, pattern string, v Value) Value {
 			key = strings.TrimSpace(k)
 			target = part
 		}
-		key = strings.Trim(key, `'"`)
-		used[key] = true
-		pv := in.propertyOf(v, key)
+		var pv Value
+		if hasColon && len(key) >= 2 && key[0] == '[' && key[len(key)-1] == ']' {
+			// `[expr]: target`: the key is the expression's value.
+			expr := ParseExprSource(strings.TrimSpace(key[1 : len(key)-1]))
+			if expr == nil {
+				return Unsupported("computed destructuring key " + key)
+			}
+			k, bad := in.computedKey(expr)
+			if bad.IsUnknown() {
+				unknownKey = bad
+				pv = bad
+			} else {
+				used[k] = true
+				pv = in.propertyOf(v, k)
+			}
+		} else {
+			key = strings.Trim(key, `'"`)
+			used[key] = true
+			pv = in.propertyOf(v, key)
+		}
 		if r := in.destructure(scope, strings.TrimSpace(target), pv); r.IsUnsupported() {
 			return r
 		}
@@ -778,15 +827,23 @@ func (in *Interp) bindPatternExpr(scope *Scope, target ast.Expr, v Value) Value 
 				}
 				continue
 			}
-			if p.Computed || p.Method {
-				return Unsupported("destructuring with a computed key")
+			if p.Method {
+				return Unsupported("destructuring with a method key")
 			}
-			used[p.Key] = true
+			key := p.Key
+			if p.Computed {
+				k, bad := in.computedKey(p.KeyExpr)
+				if bad.IsUnknown() {
+					return bad
+				}
+				key = k
+			}
+			used[key] = true
 			target := p.Value
 			if target == nil {
 				target = &ast.Identifier{Name: p.Key}
 			}
-			if r := in.bindPatternExpr(scope, target, GetProperty(v, p.Key)); r.IsUnsupported() {
+			if r := in.bindPatternExpr(scope, target, GetProperty(v, key)); r.IsUnsupported() {
 				return r
 			}
 		}

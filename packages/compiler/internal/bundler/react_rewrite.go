@@ -1121,6 +1121,13 @@ func (c *reactCtx) lowerJSXCall(call *ast.CallExpr, sc *scope) (ast.Expr, bool) 
 			attrs = append(attrs, &ast.JSXAttr{Spread: true, Value: c.rewriteExpr(prop.Value, sc)})
 			continue
 		}
+		if prop.Computed {
+			// An attribute named by an expression is a spread of one property.
+			one := *prop
+			one.Value = c.rewriteExpr(prop.Value, sc)
+			attrs = append(attrs, &ast.JSXAttr{Spread: true, Value: &ast.ObjectExpr{Properties: []*ast.ObjectProp{&one}}})
+			continue
+		}
 		switch prop.Key {
 		case "children":
 			children = prop.Value
@@ -1155,7 +1162,7 @@ func (c *reactCtx) jsxChildrenFromProps(props ast.Expr, sc *scope) []ast.JSXChil
 		return nil
 	}
 	for _, prop := range obj.Properties {
-		if prop != nil && !prop.Spread && prop.Key == "children" {
+		if prop != nil && !prop.Spread && !prop.Computed && prop.Key == "children" {
 			return c.jsxChildrenFromExpr(prop.Value, sc)
 		}
 	}
@@ -1319,7 +1326,7 @@ func styleObjectToCSS(value ast.Expr) (string, bool) {
 	}
 	entries := make([]htmlspec.StyleEntry, 0, len(obj.Properties))
 	for _, prop := range obj.Properties {
-		if prop == nil || prop.Spread || prop.Key == "" {
+		if prop == nil || prop.Spread || prop.Computed || prop.Key == "" {
 			return "", false
 		}
 		lit, ok := prop.Value.(*ast.Literal)

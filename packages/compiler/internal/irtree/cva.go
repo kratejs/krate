@@ -61,6 +61,11 @@ func CollectCVAFactories(prog *ast.Program) map[string]*CVASpec {
 			if !ok {
 				continue
 			}
+			if len(call.Args) >= 2 && hasComputedKey(call.Args[1]) {
+				// A variant named by an expression cannot be folded; the
+				// factory's calls stay runtime values.
+				continue
+			}
 			spec := &CVASpec{Base: base, Variants: map[string]map[string]string{}, Defaults: map[string]string{}}
 			if len(call.Args) >= 2 {
 				parseCVAConfig(call.Args[1], spec)
@@ -273,4 +278,17 @@ func literalString(expr ast.Expr) (string, bool) {
 		return lit.Value, true
 	}
 	return "", false
+}
+
+// hasComputedKey reports whether any object literal under expr has a
+// `[expr]: value` key.
+func hasComputedKey(expr ast.Expr) bool {
+	found := false
+	WalkAST(expr, func(n any) bool {
+		if p, ok := n.(*ast.ObjectProp); ok && p.Computed {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
