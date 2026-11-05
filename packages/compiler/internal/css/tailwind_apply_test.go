@@ -140,3 +140,8 @@ func TestApplyNestedRulesSurviveMinify(t *testing.T) {
 		}
 	}
 }
+
+// handleUtilityForTest feeds one `@utility name { body }` to handleUtility.
+func (d *TailwindDirectives) handleUtilityForTest(name, body string) {
+	d.handleUtility(cssAtRule{Name: "utility", Prelude: name, Body: body, HasBody: true})
+}

@@ -8,10 +8,10 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 )
 
-// IsComponentExpr reports an expression that defines a component inline: a
+// isComponentExpr reports an expression that defines a component inline: a
 // function (arrow or `function` expression), or such a function wrapped in
 // memo()/forwardRef().
-func IsComponentExpr(e ast.Expr) bool {
+func isComponentExpr(e ast.Expr) bool {
 	switch x := e.(type) {
 	case *ast.ArrowFn:
 		return !x.Generator
@@ -20,7 +20,7 @@ func IsComponentExpr(e ast.Expr) bool {
 		if !ok || (id.Name != "memo" && id.Name != "forwardRef") || len(x.Args) == 0 {
 			return false
 		}
-		return IsComponentExpr(x.Args[0])
+		return isComponentExpr(x.Args[0])
 	}
 	return false
 }
@@ -38,7 +38,7 @@ func lowerDefaultExpressionExport(prog *ast.Program, path string) {
 			continue
 		}
 		es, ok := exp.Declaration.(*ast.ExprStmt)
-		if !ok || !IsComponentExpr(es.Expression) {
+		if !ok || !isComponentExpr(es.Expression) {
 			continue
 		}
 		name := defaultExportName(prog, path)

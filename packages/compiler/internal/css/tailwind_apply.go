@@ -109,13 +109,6 @@ func applyEnd(s string, start int) int {
 	return len(s)
 }
 
-// applyDecls is applyRules without the nested rules, for callers that only
-// take declarations.
-func (g *TailwindGenerator) applyDecls(utils []string) (string, []string) {
-	decls, _, bad := g.applyRules(utils)
-	return decls, bad
-}
-
 // applyRules resolves utilities through the generator. It returns the joined
 // declarations of the plain utilities, the nested rules of the variant ones,
 // and the utilities it could not express.

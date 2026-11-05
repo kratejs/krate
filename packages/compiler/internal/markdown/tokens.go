@@ -231,8 +231,9 @@ func (t *tokenTable) protect(text string, mdx bool, report reportFn) string {
 
 // codeSpanEnd finds the end of the code span opened by the backtick run
 // text[open:runEnd]. Per CommonMark the span closes at the next backtick run of
-// exactly the same length (a longer or shorter run inside it is content, so
-// “ ` ```ts {1} ` “ is one span), and it never crosses a blank line.
+// exactly the same length (a longer or shorter run inside it is content, so a
+// single-backtick span can hold a triple-backtick fence), and it never crosses a
+// blank line.
 func codeSpanEnd(text string, open, runEnd int) (int, bool) {
 	want := runEnd - open
 	n := len(text)
