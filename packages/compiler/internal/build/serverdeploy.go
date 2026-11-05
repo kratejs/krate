@@ -853,7 +853,7 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		}
 		opts.Banner = map[string]string{"js": "import { createRequire as __krateCreateRequire } from 'node:module'; const require = __krateCreateRequire(" + anchor + ");"}
 	}
-	res := api.Build(opts)
+	res := esbuildBuild(opts)
 	if len(res.Errors) > 0 {
 		var msgs []string
 		for _, e := range res.Errors {

@@ -20,27 +20,88 @@ and how much JavaScript reaches the client.
 
 The tier is resolved in this order (highest wins):
 
-1. **Directive in source** (first non-comment line):
+1. **Tier decorator** on the declaration, see [below](#tier-decorators):
+   ```tsx
+   @server
+   export default function Stats() { ... }
+   ```
+2. **Directive in source** (first non-comment line):
    ```tsx
    // @server
    // @runtime
    // @static
    ```
-2. **File convention**:
+3. **File convention**:
    - `*.server.tsx` -> server
    - `*.runtime.tsx` -> runtime
    - `*.static.tsx` -> static
-3. **Config name list**:
+4. **Config name list**:
    ```ts
    serverComponents: ["DataTable"]
    runtimeComponents: ["AuthCheck"]
    ```
-4. **Directory membership**:
+5. **Directory membership**:
    ```ts
    serverDirs: ["src/components/server"]
    runtimeDirs: ["src/components/runtime"]
    ```
-5. **Default** -> client.
+6. **Default** -> client.
+
+An `async` component is always a runtime component, whatever else it says.
+
+## Tier decorators
+
+`@server`, `@static`, `@runtime` and `@client` can go directly on a component.
+They work on functions, classes and consts, which ordinary JavaScript decorators
+do not, because Krate removes them at compile time. Nothing runs at load time.
+
+```tsx
+import { Component } from "react";
+
+@static
+const Badge = ({ label }) => <b>{label}</b>;
+
+@server
+class Report extends Component {
+  render() {
+    return <table>...</table>;
+  }
+}
+
+@server
+export default function Dashboard() {
+  return <main><Badge label="New" /><Report /></main>;
+}
+```
+
+- On the **default export**, or on the **only exported component** of a file, the
+  decorator classifies the whole file, exactly like a `// @server` comment at the
+  top. The composition rules below apply.
+- On **any other declaration** it classifies only that component, so one file can
+  mix tiers. `@client` is useful here, to opt one component out of a `// @server`
+  file.
+- `@runtime` must be on the default export or the only exported component,
+  because a runtime component is bundled per file.
+- On an `async` component only `@runtime` is accepted.
+
+Misplaced decorators fail the build with
+[KR7115](/docs/reference/diagnostics/#kr7115). If your project already imports
+its own decorator named `server` or `client`, that one is used instead.
+
+### TypeScript
+
+`tsc` and editors do not know these are compile-time only. They report TS1206 on a
+function or const, and "Cannot find name" on a class. Krate's build is unaffected.
+To keep `tsc --noEmit` passing, add a comment on the line above:
+
+```tsx
+// @ts-expect-error tier decorator
+@server
+export default function Stats() { ... }
+```
+
+A `// @server` comment or a `*.server.tsx` file name needs no such comment, and
+classifies the whole file.
 
 ## Composition rules
 

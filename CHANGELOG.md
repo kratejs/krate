@@ -5,6 +5,17 @@ detailed changelog. This file records the release train at a glance.
 
 ## Unreleased
 
+- Tier decorators: `@server`, `@static`, `@runtime` and `@client` can go directly
+  on a function, class or const. On a file's default export or only exported
+  component they classify the whole file, like a `// @server` comment; elsewhere
+  they classify one component. Misplaced ones fail with `KR7115`. `tsc` reports
+  them, see the component tiers guide.
+- Decorators work in `.js` and `.jsx` files, not only TypeScript.
+- A decorated class component now always warns (`KR3011`), including member
+  decorators and legacy decorators, which used to report an unresolved component
+  or drop the decorator silently.
+- Fixed: an import from an alias like `@server/lib` near the top of a file changed
+  the tier of its components.
 - `@krate/core` no longer publishes a stray Linux compiler binary, and the npm
   wrapper picks the platform package when installed from a registry. In
   `0.5.0-beta.1` a clean npm or pnpm install failed on Linux with

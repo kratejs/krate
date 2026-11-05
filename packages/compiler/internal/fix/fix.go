@@ -17,6 +17,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 // Change is one safe rewrite.
@@ -180,7 +181,8 @@ func fixSource(src string) (string, []Change, error) {
 }
 
 func fixSourceFiltered(src string, allow map[string]bool) (string, []Change, error) {
-	p := parser.New(lexer.New(src).Tokenize())
+	// Blanking keeps every offset, so edits still apply to src.
+	p := parser.New(lexer.New(tsstrip.BlankTierDecorators("source.tsx", src)).Tokenize())
 	prog := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
 		return src, nil, errs[0]

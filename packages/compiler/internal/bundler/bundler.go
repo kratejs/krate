@@ -683,6 +683,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	if len(errs) > 0 {
 		return &parseError{summary: parser.FormatDiagnostics(errs), errs: errs}
 	}
+	isolateDecoratorTemps(prog, src)
 	reactDiags, err := splitReactDiags(RewriteReactDiag(prog, path, src))
 	if err != nil {
 		return err
@@ -696,6 +697,9 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 
 	mod := &Module{Path: path, Program: prog, IsEntry: isEntry, SourceCode: src, Diagnostics: reactDiags}
 	mod.ComponentClass = ClassifyComponent(src, path, b.serverComponents, b.runtimeComponents, b.serverDirs, b.runtimeDirs)
+	if class, ok := classFromTier(prog.Tier); ok {
+		mod.ComponentClass = class
+	}
 	if !strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
 		mod.Diagnostics = append(mod.Diagnostics, b.envReadDiags(path, src, prog, mod.ComponentClass)...)
 		reactDiags = mod.Diagnostics

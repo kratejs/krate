@@ -11,6 +11,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/astjson"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 // workspaceRoot is one read/index root. The primary root keeps an empty name
@@ -174,7 +175,7 @@ func (idx *workspaceIndex) snapshot() ([]symbolOccurrence, symbolIndexStats) {
 
 func parseSymbolFile(root, rel string, data []byte) *symbolFileIndex {
 	entry := &symbolFileIndex{Root: root, Path: rel}
-	p := parser.New(lexer.New(string(data)).Tokenize())
+	p := parser.New(lexer.New(tsstrip.BlankTierDecorators(rel, string(data))).Tokenize())
 	prog := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
 		entry.Error = errs[0].Error()

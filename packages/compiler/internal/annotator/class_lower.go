@@ -57,6 +57,7 @@ func synthesizeClassComponent(class *ast.ClassDecl) (*ast.FnDecl, bool) {
 		Name:     class.Name,
 		Params:   []*ast.Param{{Name: "props"}},
 		Body:     l.body(),
+		Tier:     class.Tier,
 	}, true
 }
 

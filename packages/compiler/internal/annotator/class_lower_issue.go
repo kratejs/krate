@@ -65,6 +65,7 @@ func collectClassRejections(body []ast.Stmt, ann *irtree.Annotations, file, raw 
 				}
 			}
 		}
+		noteDroppedDecorators(class, ann)
 	}
 }
 
@@ -91,65 +92,93 @@ func lineOf(raw string, line int) string {
 	return strings.TrimRight(lines[line-1], "\r")
 }
 
+// noteDroppedDecorators warns about a class that lowers despite its decorators:
+// legacy member decorators leave the class intact, but it becomes a function
+// component, so they never run.
+func noteDroppedDecorators(class *ast.ClassDecl, ann *irtree.Annotations) {
+	d, ok := ann.DecoratedClasses[class.Name]
+	if !ok {
+		return
+	}
+	d.Message = "decorated class <" + class.Name + "> is rendered without running its decorators"
+	d.Hint = "a class component is compiled to a function component, so its member decorators do not apply; move their logic into the methods"
+	for _, n := range ann.ClassNotes[class.Name] {
+		if n.Message == d.Message {
+			return
+		}
+	}
+	if ann.ClassNotes == nil {
+		ann.ClassNotes = make(map[string][]diag.Diagnostic)
+	}
+	ann.ClassNotes[class.Name] = append(ann.ClassNotes[class.Name], d)
+}
+
 // collectDecoratedClasses records top-level classes whose decorators esbuild
-// lowered to `Name = __decorateElement(...)` / `Name = __decorateClass(...)`.
-// The decorators run at load time and may replace the class, so Krate cannot
-// compile the class as a component and says so instead of a generic
-// "could not be resolved".
+// lowered to `__decorateElement(...)` / `__decorateClass(...)` calls, for the
+// class itself or for a member. The decorators run at load time and may replace
+// the class or its methods, so Krate cannot compile the class as a component and
+// says so instead of a generic "could not be resolved".
 func collectDecoratedClasses(body []ast.Stmt, ann *irtree.Annotations, file, raw string) {
-	classes := map[string]*ast.ClassDecl{}
+	classes := map[string]ast.Pos{}
 	for _, stmt := range body {
+		if exp, ok := stmt.(*ast.ExportStmt); ok && exp.Declaration != nil {
+			stmt = exp.Declaration
+		}
 		switch s := stmt.(type) {
 		case *ast.ClassDecl:
-			classes[s.Name] = s
-		case *ast.ExportStmt:
-			if c, ok := s.Declaration.(*ast.ClassDecl); ok {
-				classes[c.Name] = c
+			classes[s.Name] = s.Position
+		case *ast.VarStmt:
+			// A legacy class decorator lowers to `let Box = class extends ... {}`.
+			for _, d := range s.Decls {
+				if d == nil {
+					continue
+				}
+				if c, ok := d.Init.(*ast.ClassExpr); ok {
+					classes[d.Name] = c.Position
+				}
 			}
 		}
 	}
-	var visit func(e ast.Expr)
-	visit = func(e ast.Expr) {
-		bin, ok := e.(*ast.BinaryExpr)
+	record := func(name string) {
+		pos, ok := classes[name]
 		if !ok {
-			return
-		}
-		if bin.Op == "," {
-			visit(bin.Left)
-			visit(bin.Right)
-			return
-		}
-		if bin.Op != "=" {
-			return
-		}
-		id, ok := bin.Left.(*ast.Identifier)
-		if !ok {
-			return
-		}
-		call, ok := bin.Right.(*ast.CallExpr)
-		if !ok {
-			return
-		}
-		fn, ok := call.Callee.(*ast.Identifier)
-		if !ok || (fn.Name != "__decorateElement" && fn.Name != "__decorateClass") {
-			return
-		}
-		class := classes[id.Name]
-		if class == nil {
 			return
 		}
 		if ann.DecoratedClasses == nil {
 			ann.DecoratedClasses = make(map[string]diag.Diagnostic)
 		}
-		if _, exists := ann.DecoratedClasses[id.Name]; exists {
+		if _, exists := ann.DecoratedClasses[name]; exists {
 			return
 		}
-		d := diag.New(file, class.Position.Line, class.Position.Col,
-			"decorated class <"+id.Name+"> is not rendered as a component",
-			"decorators run code at load time and can replace the class, which a build cannot evaluate; remove the decorator, or convert <"+id.Name+"> to a function component and apply the decorator's logic in ordinary code",
-			lineOf(raw, class.Position.Line)).WithCode(diag.CodeClassNotLowered)
+		d := diag.New(file, pos.Line, pos.Col,
+			"decorated class <"+name+"> is not rendered as a component",
+			"decorators run code at load time and can replace the class or its methods, which a build cannot evaluate; remove the decorator, or convert <"+name+"> to a function component and apply the decorator's logic in ordinary code. Tier decorators such as @server are fine",
+			lineOf(raw, pos.Line)).WithCode(diag.CodeClassNotLowered)
 		d.Severity = diag.SeverityWarning
-		ann.DecoratedClasses[id.Name] = d
+		ann.DecoratedClasses[name] = d
+	}
+	var visit func(e ast.Expr)
+	visit = func(e ast.Expr) {
+		switch x := e.(type) {
+		case *ast.BinaryExpr:
+			if x.Op == "," || x.Op == "=" {
+				visit(x.Left)
+				visit(x.Right)
+			}
+		case *ast.CallExpr:
+			fn, ok := x.Callee.(*ast.Identifier)
+			if !ok || (fn.Name != "__decorateElement" && fn.Name != "__decorateClass") {
+				return
+			}
+			for _, arg := range x.Args {
+				if m, ok := arg.(*ast.MemberExpr); ok {
+					arg = m.Object
+				}
+				if id, ok := arg.(*ast.Identifier); ok {
+					record(id.Name)
+				}
+			}
+		}
 	}
 	for _, stmt := range body {
 		if es, ok := stmt.(*ast.ExprStmt); ok {

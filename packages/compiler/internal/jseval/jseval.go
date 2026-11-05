@@ -12,8 +12,10 @@ import (
 	"strings"
 
 	"github.com/evanw/esbuild/pkg/api"
+
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 // ResultGlobal is the global the entry assigns its result to. Eval returns its
@@ -121,7 +123,7 @@ func bundle(opts Options) (string, error) {
 		plugins = append(plugins, resolveForwarder(opts.ResolveImport))
 	}
 	plugins = append(plugins, krateResolver(), importMetaPreserver())
-	result := api.Build(api.BuildOptions{
+	buildOpts := api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   opts.Source,
 			ResolveDir: opts.ResolveDir,
@@ -134,7 +136,9 @@ func bundle(opts Options) (string, error) {
 		Write:    false,
 		LogLevel: api.LogLevelSilent,
 		Plugins:  plugins,
-	})
+	}
+	tsstrip.HandleTierDecorators(&buildOpts)
+	result := api.Build(buildOpts)
 	if len(result.Errors) > 0 {
 		var sb strings.Builder
 		for _, e := range result.Errors {
@@ -182,6 +186,7 @@ func importMetaPreserver() api.Plugin {
 					src = rewriteImportMetaURL(src, fmt.Sprintf("%q", fileURL(args.Path)))
 				}
 				contents := src
+				contents = tsstrip.BlankTierDecorators(args.Path, contents)
 				return api.OnLoadResult{Contents: &contents, Loader: loaderForPath(args.Path)}, nil
 			})
 		},

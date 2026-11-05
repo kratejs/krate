@@ -23,10 +23,20 @@ const (
 	CodeAsyncClientComponent Code = "KR7113"
 	// CodeClientBoundaryExports: a "use client" module's exports cannot be listed.
 	CodeClientBoundaryExports Code = "KR7114"
+	// CodeTierDecorator: a tier decorator cannot apply where it is placed.
+	CodeTierDecorator Code = "KR7115"
 )
 
 func init() {
 	Register(
+		CodeInfo{
+			Code:  CodeTierDecorator,
+			Title: "Tier decorator cannot apply here",
+			Explanation: "`@server`, `@static`, `@runtime` and `@client` go on a function, class or const " +
+				"declaration, once per declaration. An async component always renders per request, so only " +
+				"`@runtime` fits it. A runtime component is bundled per file, so `@runtime` must be on the " +
+				"default export or the only exported component of its file.",
+		},
 		CodeInfo{
 			Code:  CodeAsyncLayout,
 			Title: "Async layouts are not supported",

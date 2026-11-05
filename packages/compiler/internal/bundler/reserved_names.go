@@ -1,6 +1,8 @@
 package bundler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -32,15 +34,50 @@ func reservedRuntimeName(name string) bool {
 // reservedSuffix is appended to a renamed user binding.
 const reservedSuffix = "$u"
 
+// isolateDecoratorTemps gives the temporaries esbuild generates for decorators
+// (`_init`, `_m_dec`, `_a`) names private to this file. They sit at module level
+// under the same names in every file, and client code shares one scope, so a
+// class would otherwise read another module's decorator state.
+func isolateDecoratorTemps(prog *ast.Program, src string) {
+	temps := map[string]bool{}
+	lowered := false
+	for _, stmt := range prog.Body {
+		vs, ok := stmt.(*ast.VarStmt)
+		if !ok {
+			continue
+		}
+		for _, d := range vs.Decls {
+			switch {
+			case d == nil:
+			case d.Name == "__decoratorStart" || d.Name == "__decorateClass":
+				lowered = true
+			case d.Init == nil && strings.HasPrefix(d.Name, "_") && !strings.HasPrefix(d.Name, "__"):
+				temps[d.Name] = true
+			}
+		}
+	}
+	if !lowered || len(temps) == 0 {
+		return
+	}
+	sum := sha256.Sum256([]byte(src))
+	renameBindings(prog, func(name string) bool { return temps[name] }, "$d"+hex.EncodeToString(sum[:3]))
+}
+
 // renameReservedBindings renames user-declared bindings that collide with
 // runtime-reserved names throughout the module. Names bound by an import are
 // left alone (`import { h } from "@krate/runtime"` is the runtime itself), as
 // are names bound only by a destructuring pattern kept as source text.
 func renameReservedBindings(prog *ast.Program) {
+	renameBindings(prog, reservedRuntimeName, reservedSuffix)
+}
+
+// renameBindings appends suffix to every binding whose name matches, and to
+// every reference resolving to it, throughout the module.
+func renameBindings(prog *ast.Program, match func(string) bool, suffix string) {
 	declared := map[string]bool{}
 	skip := map[string]bool{}
 	note := func(name string) {
-		if name != "" && reservedRuntimeName(name) {
+		if name != "" && match(name) {
 			declared[name] = true
 		}
 	}
@@ -127,7 +164,7 @@ func renameReservedBindings(prog *ast.Program) {
 	}
 	rn := func(name string) string {
 		if declared[name] {
-			return name + reservedSuffix
+			return name + suffix
 		}
 		return name
 	}

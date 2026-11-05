@@ -404,7 +404,7 @@ export function mount(el) {
   el.setAttribute("data-krate-island-hydrated", "");
 }
 `
-	result := api.Build(api.BuildOptions{
+	result := esbuildBuild(api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
 			ResolveDir: filepath.Dir(path),
@@ -536,7 +536,7 @@ export function __krate_render(C, props) {
 }
 `
 	plugin := islandRenderToStringPlugin(filepath.Dir(cb.SourcePath))
-	result := api.Build(api.BuildOptions{
+	result := esbuildBuild(api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
 			ResolveDir: filepath.Dir(cb.SourcePath),

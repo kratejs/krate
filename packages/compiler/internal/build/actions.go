@@ -142,7 +142,7 @@ func (b *Builder) compileActionModule(dir string, mod *actionModule) error {
 		opts.MinifyIdentifiers = true
 		opts.MinifySyntax = true
 	}
-	result := api.Build(opts)
+	result := esbuildBuild(opts)
 	if len(result.Errors) > 0 {
 		return fmt.Errorf("compiling server action %s:\n%s", mod.RelPath, formatEsbuildErrors(result.Errors))
 	}

@@ -3613,7 +3613,7 @@ func (b *Builder) BuildMiddleware() error {
 	_ = os.MkdirAll(outDir, 0755)
 	outPath := filepath.Join(outDir, "middleware.js")
 
-	result := api.Build(api.BuildOptions{
+	result := esbuildBuild(api.BuildOptions{
 		EntryPoints: []string{middlewarePath},
 		Outdir:      outDir,
 		Bundle:      true,
@@ -3837,7 +3837,7 @@ func (b *Builder) writeWorkerBundles() error {
 			format = api.FormatESModule
 		}
 
-		result := api.Build(api.BuildOptions{
+		result := esbuildBuild(api.BuildOptions{
 			AbsWorkingDir:    b.Root,
 			EntryPoints:      []string{src},
 			Bundle:           true,
@@ -3937,7 +3937,7 @@ func (b *Builder) writeDynamicChunkBundles() error {
 			loader = api.LoaderJSX
 		}
 
-		result := api.Build(api.BuildOptions{
+		result := esbuildBuild(api.BuildOptions{
 			AbsWorkingDir:    b.Root,
 			EntryPoints:      []string{src},
 			Bundle:           true,
@@ -4466,11 +4466,11 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		nodeOpts.MinifySyntax = true
 	}
 
-	quickjsResult := api.Build(quickjsOpts)
+	quickjsResult := esbuildBuild(quickjsOpts)
 	if len(quickjsResult.Errors) > 0 {
 		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(quickjsResult.Errors))
 	}
-	nodeResult := api.Build(nodeOpts)
+	nodeResult := esbuildBuild(nodeOpts)
 	if len(nodeResult.Errors) > 0 {
 		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(nodeResult.Errors))
 	}

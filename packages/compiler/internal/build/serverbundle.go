@@ -103,7 +103,7 @@ func compileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 				return
 			}
 
-			result := api.Build(api.BuildOptions{
+			result := esbuildBuild(api.BuildOptions{
 				AbsWorkingDir:   root,
 				Bundle:          true,
 				Format:          api.FormatESModule,

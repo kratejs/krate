@@ -475,7 +475,7 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 	} else {
 		opts.External = []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"}
 	}
-	result := api.Build(opts)
+	result := esbuildBuild(opts)
 	if len(result.Errors) > 0 {
 		var msgs []string
 		var loc *bundleLocation
@@ -607,7 +607,7 @@ func (b *Builder) ensurePreactShared() (map[string]string, error) {
 			contents += `
 export { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useReducer, useContext, useId, useDebugValue, useImperativeHandle } from "preact/hooks";`
 		}
-		result := api.Build(api.BuildOptions{
+		result := esbuildBuild(api.BuildOptions{
 			Stdin: &api.StdinOptions{
 				Contents:   contents,
 				ResolveDir: b.Root,

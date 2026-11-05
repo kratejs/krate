@@ -182,3 +182,19 @@ func TestRunDryRunAndApply(t *testing.T) {
 		t.Fatalf("second apply should be a no-op: %+v", res.Changes)
 	}
 }
+
+// A tier decorator is valid source for fix: it must not read as a parse error,
+// and edits land at the right offsets because blanking preserves them.
+func TestFixAcceptsTierDecorators(t *testing.T) {
+	src := "@server\nexport default function P() { return <button onclick={f}>x</button>; }\n"
+	out, _, err := fixSource(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, "@server\n") {
+		t.Errorf("decorator lost: %q", out)
+	}
+	if !strings.Contains(out, "onClick={f}") {
+		t.Errorf("fix not applied: %q", out)
+	}
+}

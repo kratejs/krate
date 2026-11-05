@@ -344,6 +344,7 @@ func goServerBundlePlugin(baked map[string]string, root string) api.Plugin {
 // annotateGoModuleSource annotates the Go-component call sites of a nested
 // project module so they can inline baked HTML in the server bundle.
 func annotateGoModuleSource(path, src string) string {
+	src = tsstrip.BlankTierDecorators(path, src)
 	if strings.Contains(src, ".go\"") || strings.Contains(src, ".go'") {
 		if locals := goComponentLocals(path, src, ""); len(locals) > 0 {
 			src = annotateGoCalls(src, path, locals)

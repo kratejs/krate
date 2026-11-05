@@ -654,6 +654,22 @@ try {
     if (nojsFeedback.status() !== 303 || !nojsFeedbackURL.endsWith("/react-actions/")) fail(`no-JS server action post: ${JSON.stringify(actions.nojs)}`);
   }
 
+  // Decorators lowered by esbuild run in client code, with each module's
+  // temporaries kept apart, and a tier decorator is gone from the output.
+  await page.goto(baseURL + "/decorators/", { waitUntil: "networkidle" });
+  await page.click("#dec-button");
+  await page.waitForFunction(() => document.querySelector("#dec-button").textContent === "1");
+  const decorated = await page.evaluate(() => ({
+    js: document.querySelector("#dec-js").textContent,
+    ts: document.querySelector("#dec-ts").textContent,
+    other: document.querySelector("#dec-other").textContent,
+    label: document.querySelector("#dec-static").textContent,
+  }));
+  if (decorated.js !== "FROM JS") fail(`.js method decorator: ${decorated.js}`);
+  if (decorated.ts !== "one-ts two-ts") fail(`.ts field decorators: ${decorated.ts}`);
+  if (decorated.other !== "three-other") fail(`field decorator in a second module: ${decorated.other}`);
+  if (decorated.label !== "static label") fail(`@static component: ${decorated.label}`);
+
   await settleErrors();
   for (let i = errors.length - 1; i >= 0; i--) {
     if (/krate external island.*island explosion|island explosion.*krate external island/.test(errors[i])) {

@@ -2,6 +2,7 @@ package annotator
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -68,7 +69,8 @@ func Annotate(prog *ast.Program, cfg *config.Config, sourceFile string, rawSourc
 
 // classifyTiers determines component tiers based on the priority rules:
 // 0. async function components are always TierRuntime (server components)
-// 1. Directive in source (@server, @static, @runtime)
+// 1. Tier decorator on the declaration (@server function Stats() {})
+// 1b. Directive in source (@server, @static, @runtime)
 // 2. File convention (*.server.tsx, *.static.tsx, *.runtime.tsx)
 // 3. Config name lists (serverComponents, runtimeComponents)
 // 4. Config directory lists (serverDirs, runtimeDirs)
@@ -92,14 +94,21 @@ func classifyComponent(name string, fn *ast.FnDecl, cfg *config.Config, sourceFi
 		return irtree.TierRuntime
 	}
 
-	// 1. Directive in source (leading string literal with @annotation)
+	// 1. Tier decorator on the declaration
+	if fn != nil {
+		if tier := tierFromName(fn.Tier); tier != irtree.TierUnknown {
+			return tier
+		}
+	}
+
+	// 1b. Directive in source (leading string literal with @annotation)
 	if fn != nil {
 		if tier := detectDirectiveTier(fn); tier != irtree.TierUnknown {
 			return tier
 		}
 	}
 
-	// 1b. Directive in raw source comments (// @server, // @static, // @runtime)
+	// 1c. Directive in raw source comments (// @server, // @static, // @runtime)
 	if tier := detectDirectiveTierFromSource(rawSource); tier != irtree.TierUnknown {
 		return tier
 	}
@@ -168,8 +177,26 @@ func detectDirectiveTier(fn *ast.FnDecl) irtree.ComponentTier {
 	return irtree.TierUnknown
 }
 
-// detectDirectiveTierFromSource checks raw source text for comment-based directives
-// like "// @server", "// @static", "// @runtime".
+// tierFromName maps a decorator's tier name to its tier.
+func tierFromName(name string) irtree.ComponentTier {
+	switch name {
+	case "static":
+		return irtree.TierStatic
+	case "server":
+		return irtree.TierServer
+	case "runtime":
+		return irtree.TierRuntime
+	case "client":
+		return irtree.TierClient
+	}
+	return irtree.TierUnknown
+}
+
+var directiveCommentRe = regexp.MustCompile(`@(static|server|runtime|client)\b`)
+
+// detectDirectiveTierFromSource checks the comments at the start of a file for
+// directives like "// @server". Code is ignored, so an import from an `@server/*`
+// alias or a tier decorator does not classify the file.
 func detectDirectiveTierFromSource(source string) irtree.ComponentTier {
 	if source == "" {
 		return irtree.TierUnknown
@@ -178,18 +205,24 @@ func detectDirectiveTierFromSource(source string) irtree.ComponentTier {
 	if len(check) > 200 {
 		check = check[:200]
 	}
-	switch {
-	case strings.Contains(check, "@static"):
-		return irtree.TierStatic
-	case strings.Contains(check, "@server"):
-		return irtree.TierServer
-	case strings.Contains(check, "@runtime"):
-		return irtree.TierRuntime
-	case strings.Contains(check, "@client"):
-		return irtree.TierClient
+	best := irtree.TierUnknown
+	bestRank := len(directiveRank)
+	for _, line := range strings.Split(check, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "//") && !strings.HasPrefix(trimmed, "/*") && !strings.HasPrefix(trimmed, "*") {
+			continue
+		}
+		for _, m := range directiveCommentRe.FindAllStringSubmatch(trimmed, -1) {
+			if rank := directiveRank[m[1]]; rank < bestRank {
+				best, bestRank = tierFromName(m[1]), rank
+			}
+		}
 	}
-	return irtree.TierUnknown
+	return best
 }
+
+// directiveRank orders directives when a file names several.
+var directiveRank = map[string]int{"static": 0, "server": 1, "runtime": 2, "client": 3}
 
 // detectFileConventionTier checks the source file name for tier conventions.
 func detectFileConventionTier(sourceFile string) irtree.ComponentTier {
@@ -595,6 +628,7 @@ func extractComponentFromVar(decl *ast.VarDecl) *ast.FnDecl {
 		Params: innerFn.Params,
 		Body:   innerFn.Body,
 		Async:  innerFn.Async,
+		Tier:   decl.Tier,
 	}
 }
 
@@ -953,6 +987,7 @@ func collectHOCComponents(body []ast.Stmt, functions map[string]*ast.FnDecl) {
 				continue
 			}
 			if fn := irtree.InstantiateHOC(d.Name, factory, call.Args); fn != nil {
+				fn.Tier = d.Tier
 				functions[d.Name] = fn
 			}
 		}

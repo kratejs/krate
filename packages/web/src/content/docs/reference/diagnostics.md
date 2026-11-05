@@ -362,6 +362,12 @@ Components in a `"use client"` module run in the browser and cannot be async. Mo
 
 Krate wraps each export of a `"use client"` module in a client boundary, so it must know the export names. `export * from` cannot be enumerated: list the re-exported names explicitly (`export { A, B } from "./x"`).
 
+### KR7115
+
+**Tier decorator cannot apply here**
+
+`@server`, `@static`, `@runtime` and `@client` go on a function, class or const declaration, once per declaration. An async component always renders per request, so only `@runtime` fits it. A runtime component is bundled per file, so `@runtime` must be on the default export or the only exported component of its file.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

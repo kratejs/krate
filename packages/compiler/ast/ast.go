@@ -300,6 +300,8 @@ const (
 type Program struct {
 	Position Pos
 	Body     []Stmt
+	// Tier is the tier a decorator gives the whole file ("" for none).
+	Tier string `json:"tier,omitempty"`
 }
 
 func (p *Program) node()    {}
@@ -379,6 +381,8 @@ type VarDecl struct {
 	Pattern         string
 	RestName        string
 	Init            Expr
+	// Tier comes from a tier decorator such as `@server` ("" for none).
+	Tier string `json:"tier,omitempty"`
 }
 
 type FnDecl struct {
@@ -390,6 +394,8 @@ type FnDecl struct {
 	Generator bool
 	Export    bool
 	Default   bool
+	// Tier comes from a tier decorator such as `@server` ("" for none).
+	Tier string `json:"tier,omitempty"`
 }
 
 func (f *FnDecl) node()    {}
@@ -440,6 +446,8 @@ type ClassDecl struct {
 	Name       string
 	SuperClass Expr
 	Members    []*ClassMember
+	// Tier comes from a tier decorator such as `@server` ("" for none).
+	Tier string `json:"tier,omitempty"`
 }
 
 func (c *ClassDecl) node()    {}

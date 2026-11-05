@@ -877,24 +877,25 @@ func generateJSXFragmentJS(frag *ast.JSXFragment, signals map[string]ast.Expr) s
 
 // renderVarInitJS renders a VarStmt for use as a for-loop init (no trailing semicolon).
 func renderVarInitJS(s *ast.VarStmt, signals map[string]ast.Expr) string {
-	keyword := varKeyword(s.Kind)
 	var parts []string
 	for _, decl := range s.Decls {
 		if decl.IsDestructuring {
 			pattern := decl.Pattern
-			if pattern == "" {
+			if decl.Target != nil {
+				pattern = renderPattern(decl.Target, signals)
+			} else if pattern == "" {
 				pattern = "[" + strings.Join(decl.Names, ",") + "]"
 			}
-			parts = append(parts, keyword+" "+pattern+"="+generateExprJS(decl.Init, signals))
+			parts = append(parts, pattern+"="+generateExprJS(decl.Init, signals))
 		} else if decl.Name != "" {
 			init := ""
 			if decl.Init != nil {
 				init = "=" + generateExprJS(decl.Init, signals)
 			}
-			parts = append(parts, keyword+" "+decl.Name+init)
+			parts = append(parts, decl.Name+init)
 		}
 	}
-	return strings.Join(parts, ", ")
+	return varKeyword(s.Kind) + " " + strings.Join(parts, ", ")
 }
 
 // jsObjectKey renders an object-literal key, quoting it when it is not a

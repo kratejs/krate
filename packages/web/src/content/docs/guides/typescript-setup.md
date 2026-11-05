@@ -111,6 +111,17 @@ From your `tsconfig.json`, Krate honours `experimentalDecorators` and
 `useDefineForClassFields`. TypeScript syntax errors fail the build with the
 original `file:line:col`. Comment directives such as `// @server` still apply.
 
+### Decorators
+
+Decorators on classes and their members work on ordinary classes, in `.js` and
+`.jsx` files too. Those always use standard decorators, since
+`experimentalDecorators` is a TypeScript option.
+
+A class component is compiled to a function component, so most decorators cannot
+apply to it: the build warns with
+[KR3011](/docs/reference/diagnostics/#kr3011). Decorators on class components are
+only supported for [tiers](/docs/core-concepts/component-tiers/#tier-decorators).
+
 ## Strictness
 
 Keep `strict: true`. Krate's generated types assume it. If you need looser

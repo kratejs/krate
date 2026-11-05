@@ -152,10 +152,26 @@ func (cc ComponentClass) String() string {
 	}
 }
 
+// classFromTier maps a file-level tier decorator to its class.
+func classFromTier(tier string) (ComponentClass, bool) {
+	switch tier {
+	case "static":
+		return ComponentClassStatic, true
+	case "client":
+		return ComponentClassClient, true
+	case "server":
+		return ComponentClassServer, true
+	case "runtime":
+		return ComponentClassRuntime, true
+	}
+	return ComponentClassClient, false
+}
+
 // ClassifyComponent determines if a file is a server/runtime/static component.
 // Checks directive in source code first, then file convention, then config lists,
 // then directory membership. Last fallback is ComponentClassClient.
-// Priority order:
+// A tier decorator on the file's default export takes precedence over all of
+// these (see classFromTier). Priority order:
 //  1. Directive in source code (@server, @runtime, @static)
 //  2. File convention (*.server.tsx, *.runtime.tsx, *.static.tsx)
 //  3. Config name/path list match (serverComponents, runtimeComponents)

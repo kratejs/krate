@@ -88,6 +88,9 @@ func Applies(path string) bool {
 }
 
 func loaderFor(path string) api.Loader {
+	if !Applies(path) {
+		return api.LoaderJSX
+	}
 	if strings.EqualFold(filepath.Ext(path), ".tsx") {
 		return api.LoaderTSX
 	}
@@ -493,17 +496,36 @@ func (r *Result) remapDiag(d diag.Diagnostic) diag.Diagnostic {
 	return d
 }
 
-// Parse lexes and parses a page/component/module source for compilation. For
-// TypeScript paths the source is stripped first and all AST positions and
-// parser diagnostics are mapped back to the original; other paths are parsed
-// as-is. A TypeScript syntax error returns a nil program and its diagnostics.
+// Parse lexes and parses a page/component/module source for compilation. Tier
+// decorators are removed and recorded on the declarations they mark. TypeScript
+// sources are stripped first and all AST positions and parser diagnostics are
+// mapped back to the original; a TypeScript syntax error returns a nil program
+// and its diagnostics. Other paths are parsed as-is unless they use decorators,
+// which only esbuild can lower.
 func Parse(path, src string, opts Options) (*ast.Program, []error) {
+	scan := scanTiers(path, src, opts)
+	if scan != nil {
+		if len(scan.errs) > 0 {
+			return nil, scan.errs
+		}
+		src = scan.src
+	}
+	prog, errs := parseSource(path, src, opts)
+	if scan != nil && prog != nil {
+		scan.apply(prog)
+	}
+	return prog, errs
+}
+
+func parseSource(path, src string, opts Options) (*ast.Program, []error) {
 	if !Applies(path) {
 		p := parser.New(lexer.New(src).Tokenize())
 		p.Filename = path
 		p.SetSource(src)
 		prog := p.ParseProgram()
-		return prog, p.Errors()
+		if !usesDecorators(p.Errors()) {
+			return prog, p.Errors()
+		}
 	}
 	res, err := Strip(path, src, opts)
 	if err != nil {
@@ -518,4 +540,13 @@ func Parse(path, src string, opts Options) (*ast.Program, []error) {
 	prog := p.ParseProgram()
 	res.RemapProgram(prog)
 	return prog, res.RemapErrors(p.Errors())
+}
+
+func usesDecorators(errs []error) bool {
+	for _, err := range errs {
+		if strings.Contains(err.Error(), parser.DecoratorsUnsupported) {
+			return true
+		}
+	}
+	return false
 }

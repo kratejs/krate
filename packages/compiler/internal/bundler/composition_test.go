@@ -113,3 +113,34 @@ func TestCompositionRules_ClientImportsClient(t *testing.T) {
 		t.Fatalf("client importing client should be allowed, got error: %v", err)
 	}
 }
+
+// A tier decorator on the default export classifies the file like a directive
+// comment, so the composition rules apply; one on a helper does not.
+func TestCompositionRules_TierDecorators(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, src string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(src), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	write("Stats.tsx", "@server\nexport default function Stats() { return <p/>; }\n")
+
+	client := write("client.tsx", "import Stats from './Stats';\nexport default function P() { return <Stats/>; }\n")
+	var compErr *CompositionError
+	if _, err := New(dir).Bundle(client); !errors.As(err, &compErr) {
+		t.Fatalf("client importing @server: %v", err)
+	}
+
+	server := write("server.tsx", "import Stats from './Stats';\n@server\nexport default function P() { return <Stats/>; }\n")
+	if _, err := New(dir).Bundle(server); err != nil {
+		t.Fatalf("@server importing @server: %v", err)
+	}
+
+	write("Parts.tsx", "@server\nfunction Inner() { return <p/>; }\nexport default function Outer() { return <Inner/>; }\n")
+	mixed := write("mixed.tsx", "import Outer from './Parts';\nexport default function P() { return <Outer/>; }\n")
+	if _, err := New(dir).Bundle(mixed); err != nil {
+		t.Fatalf("helper decorator classified its file: %v", err)
+	}
+}

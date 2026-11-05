@@ -591,7 +591,7 @@ func stageServerRenderer(root, outDir string) string {
 	}
 	outPath := filepath.Join(stageDir, "server-renderer.mjs")
 
-	result := api.Build(api.BuildOptions{
+	result := esbuildBuild(api.BuildOptions{
 		AbsWorkingDir: root,
 		Bundle:        true,
 		Format:        api.FormatESModule,
@@ -647,7 +647,7 @@ func stageCacheRuntime(root, outDir string) string {
 		return ""
 	}
 	outPath := filepath.Join(stageDir, "cache-runtime.mjs")
-	result := api.Build(api.BuildOptions{
+	result := esbuildBuild(api.BuildOptions{
 		AbsWorkingDir: root,
 		Bundle:        true,
 		Format:        api.FormatESModule,

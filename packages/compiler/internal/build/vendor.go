@@ -182,7 +182,7 @@ func (b *Builder) vendorPreamble(used []vendorImport) (string, error) {
 	if b.DevMode {
 		mode = "development"
 	}
-	res := api.Build(api.BuildOptions{
+	res := esbuildBuild(api.BuildOptions{
 		Stdin:             &api.StdinOptions{Contents: src.String(), ResolveDir: b.Root, Sourcefile: "krate-vendor.js", Loader: api.LoaderJS},
 		Bundle:            true,
 		Write:             false,
