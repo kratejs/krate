@@ -268,6 +268,11 @@ file itself. Those require an explicit `allow` entry. A committed policy at
 
 Every write also rejects absolute paths and traversal outside the project root,
 resolving symlinks so a symlinked directory cannot redirect a write elsewhere.
+Path rules are applied to a symlink's own name and to the path it resolves to,
+so a link named `notes.txt` that points at `.env` is as protected as `.env`. The
+default-deny list, `deny`, `readOnly` and the generated trees match without regard
+to case (`.ENV` is `.env` on macOS and Windows); `allow` and `writeRoots` match
+exactly.
 
 ### Remote operations
 
