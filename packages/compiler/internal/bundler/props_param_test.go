@@ -14,6 +14,7 @@ func TestSingleParamComponentsGetThePropsName(t *testing.T) {
 			"function Keep(props, ref) { return <u>{props.x}</u>; }\n" +
 			"function Busy(p) { const props = 1; return <u>{p.x}{props}</u>; }\n" +
 			"function helper(z) { return z.a; }\n" +
+			"function Layout(children) { return <div>{children}</div>; }\n" +
 			"export default function P() { return <main><Box title=\"t\" p=\"v\" /><Arrow x=\"1\" /><Keep x=\"2\" /><Busy x=\"3\" /></main>; }\n",
 	})
 	bundle, err := New(dir).Bundle(filepath.Join(dir, "page.tsx"))
@@ -36,7 +37,7 @@ func TestSingleParamComponentsGetThePropsName(t *testing.T) {
 			}
 		}
 	}
-	want := map[string]string{"Box": "props", "Arrow": "props", "Keep": "props", "Busy": "p", "helper": "z"}
+	want := map[string]string{"Box": "props", "Arrow": "props", "Keep": "props", "Busy": "p", "helper": "z", "Layout": "children"}
 	for name, param := range want {
 		if paramOf[name] != param {
 			t.Errorf("%s: parameter %q, want %q", name, paramOf[name], param)

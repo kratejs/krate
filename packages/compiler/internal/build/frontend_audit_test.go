@@ -139,3 +139,27 @@ func TestComponentWithPlainParamAndModuleConst(t *testing.T) {
 		t.Errorf("want %s in:\n%s\nlog:\n%s", want, html, logged)
 	}
 }
+
+func TestProjectComponentsNamedLikeBuiltinsWin(t *testing.T) {
+	html, logged := buildPlain(t, map[string]string{
+		"src/ui/Image.tsx": "export default function Image(p) { return <figure>{p.alt}</figure>; }\n",
+		"src/ui/parts.tsx": "export function Head(p) { return <header>{p.children}</header>; }\n",
+		"src/pages/index.tsx": "import Image from '../ui/Image';\nimport { Head } from '../ui/parts';\nconst sib = 5;\n" +
+			"function Link(p) { return <i class=\"mine\">{p.children}</i>; }\n" +
+			"function Icon(p) { return <u>{p.name}{sib}</u>; }\n" +
+			"export default function A() { return <main><Link>l</Link><Head>h</Head><Image alt=\"a\" src=\"/missing.png\" /><Icon name=\"i\" /></main>; }\n",
+	})
+	want := `<main><i class=mine>l</i><header>h</header><figure>a</figure><u>i5</u></main>`
+	if !strings.Contains(html, want) {
+		t.Errorf("want %s in:\n%s\nlog:\n%s", want, html, logged)
+	}
+}
+
+func TestRuntimeLinkStillBuiltIn(t *testing.T) {
+	html, _ := buildPlain(t, map[string]string{
+		"src/pages/index.tsx": "import { Link } from '@krate/runtime';\nexport default function A() { return <main><Link href=\"/about\">go</Link></main>; }\n",
+	})
+	if !strings.Contains(html, "data-krate-link") {
+		t.Errorf("the built-in <Link> was lost:\n%s", html)
+	}
+}

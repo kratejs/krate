@@ -31,6 +31,25 @@ func reservedRuntimeName(name string) bool {
 	return strings.HasPrefix(name, "kbind") || strings.HasPrefix(name, "krate") || strings.HasPrefix(name, "__k")
 }
 
+// builtinComponentName reports whether the compiler gives a JSX tag of this
+// name a meaning of its own (<Link>, <Head>, ...). A component the project
+// declares or imports under such a name would otherwise be replaced by the
+// built-in without a word, so its bindings are renamed like runtime names and
+// the tag resolves to the project's component. Imports from packages and the
+// runtime are left alone: `import { Link } from "@krate/runtime"` is the
+// built-in itself.
+func builtinComponentName(name string) bool {
+	switch name {
+	case "Head", "Script", "Style", "Link", "Icon", "Image", "Suspense", "Slot", "SyntaxHighlight", "Portal":
+		return true
+	}
+	return false
+}
+
+func reservedBindingName(name string) bool {
+	return reservedRuntimeName(name) || builtinComponentName(name)
+}
+
 // reservedSuffix is appended to a renamed user binding.
 const reservedSuffix = "$u"
 
@@ -75,7 +94,7 @@ func isolateDecoratorTemps(prog *ast.Program, src string) {
 // keeps the name it asks for while its local binding is renamed
 // (`import { h as h$u }`).
 func renameReservedBindings(prog *ast.Program) {
-	declared := renamableNames(prog, reservedRuntimeName)
+	declared := renamableNames(prog, reservedBindingName)
 	if _, isAction := isUseServerDirective(prog.Body); isAction {
 		// Actions are addressed by export name and run no hydration code.
 		for _, stmt := range prog.Body {
@@ -177,7 +196,7 @@ func reservedImportLocals(prog *ast.Program) map[string]bool {
 			continue
 		}
 		add := func(name string) {
-			if name != "" && reservedRuntimeName(name) {
+			if name != "" && reservedBindingName(name) {
 				out[name] = true
 			}
 		}

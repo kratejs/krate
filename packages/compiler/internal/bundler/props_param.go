@@ -53,7 +53,8 @@ func renamePropsParam(fn any, params []*ast.Param) {
 	if p == nil || p.Name == "" || p.Name == "props" || p.Pattern != "" || p.Target != nil || p.IsRest {
 		return
 	}
-	if strings.ContainsAny(p.Name, "{[.") {
+	// `Layout(children)` receives the children directly, and keeps doing so.
+	if p.Name == "children" || strings.ContainsAny(p.Name, "{[.") {
 		return
 	}
 	if usesName(fn, "props") {
