@@ -52,6 +52,7 @@ for usage.
 | Browser differential corpus | Beta | n/a | n/a | No P0/P1 divergence |
 | React 19 reference app | Beta | n/a | n/a | Same browser suite as React 18 |
 | Serverless and Node deployment | n/a | n/a | Beta | Vercel, Netlify, Cloudflare and Node hosting |
+| Code highlighting (build, request time, browser) | Beta | Beta | Beta | chroma parity |
 
 ## Details
 
@@ -358,6 +359,22 @@ Known limits:
 - Cloudflare bundles fail at build time for Node built-ins outside nodejs_compat (fs, vm, net, child_process).
 
 Evidence: `TestServerlessNodeParity`, `TestVercelServerOutput`, `TestNetlifyServerOutput`, `TestCloudflareServerOutput`, `TestServerBundleHasNoSecrets`, `TestServerlessRefusesGoAndSidecars`, `TestCloudflareRefusesNodeBuiltins`, `TestServerlessNodeBrowser`, `TestPlatformDeploysKeepSegmentPages`, `TestNetlifyAndVercelWithoutMiddlewareStayStaticFirst`
+
+### Code highlighting (build, request time, browser)
+
+**Source:** Beta - **Islands:** Beta - **SSR:** Beta
+
+Code is highlighted by chroma at build time, by the same lexers in the Node renderer for request-time code, and by the same lexers loaded on demand for code that changes in the browser. The lexers are exported from the binary's own chroma and run token for token (the markup is identical), in light and dark from one stylesheet, with a size, line and time limit that leaves text plain instead of stalling.
+
+Known limits:
+
+- Request-time highlighting runs in the Node renderer; serverless deploy targets write plain text.
+- The browser and request-time highlighters ship 16 languages; other languages are highlighted at build time only.
+- A Markdown fence that names a language outside the shipped set leaves the snippet plain.
+
+Diagnostics: `KR7150`, `KR7151`
+
+Evidence: `TestParityCorpus`, `TestTranspiledRegexesMatchRegexp2`, `TestPatternOverrides`, `TestAdversarialInputs`, `TestRuleProfile`, `TestThemeCSSMatchesChromaPerMode`, `TestCodeThemeBrowser`, `TestDynamicCodeBrowser`, `TestSSRCodeHighlightingE2E`, `TestDynamicCodeShipsHighlighterOnlyWhereUsed`, `ci:code highlighting size budget`
 
 ## How claims are verified
 

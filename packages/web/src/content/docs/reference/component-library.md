@@ -24,7 +24,7 @@ import { Button, Card, CardGrid, Badge, Aside, Steps, Tabs, Tooltip } from '@kra
 | `LinkButton` | Button that renders as a link | `href`, `variant`, `size`, `icon`, `iconPosition`, `class`, `className`, `id` |
 | `Button` | `<button>` with variants, sizes, and `asChild` | `variant`, `size`, `type`, `disabled`, `asChild`, `class`, `onClick` |
 | `Badge` | Small status/label pill (variants + sizes) | `variant`, `size`, `class`, `className`, `id` |
-| `Code` | Inline/code block with highlighting | `lang`, `title`, `showCopy`, `highlight` |
+| `Code` | Code block with highlighting that follows light and dark, also for text that changes at run time ([guide](/docs/guides/code-highlighting/)) | `lang`, `title`, `showCopy`, `highlight` |
 | `Aside` | Callout / aside box | `type`, `title`, `icon`, `class`, `className` |
 | `Alert` | Inline alert with title/description and variants | `variant`, `title`, `class`, `className`, `id` |
 | `FileTree` | File tree display (`FileTree.Item`/`FileTree.Folder`) | `class`, `className` |

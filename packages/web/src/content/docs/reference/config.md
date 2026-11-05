@@ -280,6 +280,10 @@ attribute on `<html>` - and the markup is the same in both modes, so switching
 needs no JavaScript and no second copy of the HTML. It applies to the `Code`
 component and to fenced blocks alike.
 
+Code that changes in the browser or is only known per request is highlighted
+after the build; `highlight: { languages: ["ts"] }` lists the languages to load when
+`lang` is not a literal (see [Code Highlighting](/docs/guides/code-highlighting/)).
+
 Beyond GFM (tables, task lists, strikethrough, autolinks), the renderer supports
 definition lists, footnotes (`[^1]`), emoji shortcodes (`:rocket:`), and
 component directives - `:::card`, `:::steps` (`::step`), `:::tabs` (`::tab`),

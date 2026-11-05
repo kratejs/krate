@@ -599,6 +599,37 @@
         "Legacy (req, res) API handlers, Go API routes, Go components, the API sidecar and community plugin serve hooks are not supported on serverless targets.",
         "Cloudflare bundles fail at build time for Node built-ins outside nodejs_compat (fs, vm, net, child_process)."
       ]
+    },
+    {
+      "id": "code-highlighting",
+      "area": "Code highlighting (build, request time, browser)",
+      "source": "beta",
+      "islands": "beta",
+      "ssr": "beta",
+      "target": "chroma parity",
+      "summary": "Code is highlighted by chroma at build time, by the same lexers in the Node renderer for request-time code, and by the same lexers loaded on demand for code that changes in the browser. The lexers are exported from the binary's own chroma and run token for token (the markup is identical), in light and dark from one stylesheet, with a size, line and time limit that leaves text plain instead of stalling.",
+      "tests": [
+        "TestParityCorpus",
+        "TestTranspiledRegexesMatchRegexp2",
+        "TestPatternOverrides",
+        "TestAdversarialInputs",
+        "TestRuleProfile",
+        "TestThemeCSSMatchesChromaPerMode",
+        "TestCodeThemeBrowser",
+        "TestDynamicCodeBrowser",
+        "TestSSRCodeHighlightingE2E",
+        "TestDynamicCodeShipsHighlighterOnlyWhereUsed",
+        "ci:code highlighting size budget"
+      ],
+      "diagnostics": [
+        "KR7150",
+        "KR7151"
+      ],
+      "knownLimits": [
+        "Request-time highlighting runs in the Node renderer; serverless deploy targets write plain text.",
+        "The browser and request-time highlighters ship 16 languages; other languages are highlighted at build time only.",
+        "A Markdown fence that names a language outside the shipped set leaves the snippet plain."
+      ]
     }
   ]
 }
