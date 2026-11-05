@@ -50,6 +50,23 @@ func TestConfigUnsupportedNodeBuiltinIsPrecise(t *testing.T) {
 	}
 }
 
+// The prefix is optional in Node, so a bare built-in the config runtime does
+// not provide must be reported the same way, not as a missing package.
+func TestConfigUnsupportedBareBuiltinIsPrecise(t *testing.T) {
+	for _, spec := range []string{"child_process", "crypto", "fs/promises", "zlib"} {
+		_, err := loadCfgSrc(t, "import m from '"+spec+"';\nexport default { outDir: String(typeof m) };\n")
+		if err == nil || !strings.Contains(err.Error(), "node:"+spec) || !strings.Contains(err.Error(), "does not provide") {
+			t.Errorf("%s: err = %v", spec, err)
+		} else if strings.Contains(err.Error(), "isn't installed") {
+			t.Errorf("%s: misleading dependency hint: %v", spec, err)
+		}
+	}
+	cfg, err := loadCfgSrc(t, "import path from 'path';\nexport default { outDir: path.join('a', 'b') };\n")
+	if err != nil || !strings.HasSuffix(filepath.ToSlash(cfg.OutDir), "a/b") {
+		t.Fatalf("bare path: %v, %v", cfg, err)
+	}
+}
+
 func TestConfigTopLevelAwait(t *testing.T) {
 	cfg, err := loadCfgSrc(t, "const v = await Promise.resolve('built');\nexport default { outDir: v };\n")
 	if err != nil {

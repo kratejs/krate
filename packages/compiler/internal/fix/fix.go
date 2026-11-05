@@ -95,6 +95,19 @@ func Run(root string, apply bool) (Result, error) {
 	if err != nil {
 		return res, err
 	}
+	if out, changes, ok := fixTSConfig(root); ok {
+		res.Changes = append(res.Changes, changes...)
+		if apply {
+			file := filepath.Join(root, "tsconfig.json")
+			mode := os.FileMode(0644)
+			if info, statErr := os.Stat(file); statErr == nil {
+				mode = info.Mode().Perm()
+			}
+			if err := fsutil.WriteFileAtomic(file, []byte(out), mode); err != nil {
+				return res, fmt.Errorf("writing tsconfig.json: %w", err)
+			}
+		}
+	}
 	return res, nil
 }
 
@@ -157,6 +170,10 @@ func PlanWithCodes(root string, codes []string) (map[string]string, []Change, []
 	})
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if out, tsChanges, ok := fixTSConfig(root); ok && (allow == nil || allow[string(diag.CodeTSConfigBaseURL)]) {
+		files["tsconfig.json"] = out
+		changes = append(changes, tsChanges...)
 	}
 	return files, changes, skipped, nil
 }

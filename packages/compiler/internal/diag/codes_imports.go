@@ -9,7 +9,10 @@ const (
 	CodeRuntimeExportMissing Code = "KR7124"
 	// CodeAssetBindingUnresolved: an imported asset (image, font, ...) is read
 	// where the compiler cannot replace the binding with the file's URL.
-	CodeAssetBindingUnresolved Code = "KR7125"
+	CodeAssetBindingUnresolved Code = "KR7126"
+	// CodeTSConfigBaseURL: tsconfig baseUrl names a subdirectory that the
+	// paths targets repeat.
+	CodeTSConfigBaseURL Code = "KR7125"
 )
 
 func init() {
@@ -40,6 +43,17 @@ func init() {
 				"re-exports (`export { logo }`), or a read the rewrite cannot reach, has no value in the " +
 				"browser script: it is a ReferenceError there, or renders as the bare name. Import the asset " +
 				"directly where it is used, or export the URL as a string constant. This is a warning.",
+		},
+		CodeInfo{
+			Code:  CodeTSConfigBaseURL,
+			Title: "tsconfig baseUrl and paths disagree",
+			Explanation: "`compilerOptions.paths` targets resolve against `baseUrl`, in tsc and in Krate. A " +
+				"`baseUrl` of `./src` together with `\"@/*\": [\"./src/*\"]` points at `src/src`, so every " +
+				"`@/` import fails with \"cannot resolve import ... (matched tsconfig path alias)\". " +
+				"Krate 0.4 ignored `baseUrl` for aliases, so a project scaffolded then still has it. " +
+				"`krate fix --apply` sets `baseUrl` to `\".\"` when every target repeats the baseUrl " +
+				"directory, exists under the project root and does not exist under `baseUrl`. Otherwise " +
+				"edit `tsconfig.json` by hand. This is not a build diagnostic: it is reported by `krate fix`.",
 		},
 	)
 }

@@ -1097,6 +1097,10 @@ observed in a browser. The browser conformance suite (`/react-events/` in
   Where an island cannot be used (layouts, server pages) the build fails with
   `KR8013`. The signal-based replacements are `createSignal` (with a module-level
   signal for shared state) for client state and `createResource` for fetching.
+- **Sass, Less and Stylus.** There is no compiler for them: importing a `.scss`,
+  `.sass`, `.less` or `.styl` file is a build error (`KR7123`). Compile it to CSS
+  in a prebuild step, or use CSS modules or Tailwind (see
+  [Styling](/docs/core-concepts/styling/#sass-less-and-stylus)).
 - **CSS-in-JS at first paint.** styled-components, emotion and MUI work only as
   client-only islands; their styles do not exist in the server HTML.
 - **React 19-only semantics** in compiled packages. Preact's compatibility layer

@@ -194,8 +194,61 @@ func GetProperty(v Value, key string) Value {
 	case KindJSX:
 		return Dynamic("property " + key + " of a JSX element")
 	}
+	// A standard member the interpreter has no implementation for must not read
+	// as undefined: `typeof arr.splice` or `if (arr.toSpliced)` would fold to the
+	// wrong branch. It stays unresolved and the browser computes it.
+	if realBuiltinMember(v.kind, key) {
+		return Unsupported(builtinTypeName(v.kind) + ".prototype." + key + " is not available at build time")
+	}
 	return Undefined()
 }
+
+func builtinTypeName(k Kind) string {
+	switch k {
+	case KindArray:
+		return "Array"
+	case KindString:
+		return "String"
+	case KindNumber:
+		return "Number"
+	case KindBool:
+		return "Boolean"
+	}
+	return "Object"
+}
+
+// realBuiltinMember reports whether key names a member that exists on the
+// prototype of values of kind k (ES2024, plus the Object.prototype members every
+// value inherits). Implemented members are handled before this is reached.
+func realBuiltinMember(k Kind, key string) bool {
+	if sharedBuiltinMembers[key] {
+		return k == KindArray || k == KindString || k == KindNumber || k == KindBool
+	}
+	switch k {
+	case KindArray:
+		return arrayBuiltinMembers[key]
+	case KindString:
+		return stringBuiltinMembers[key]
+	case KindNumber:
+		return numberBuiltinMembers[key]
+	}
+	return false
+}
+
+func memberSet(names string) map[string]bool {
+	m := map[string]bool{}
+	for _, n := range strings.Fields(names) {
+		m[n] = true
+	}
+	return m
+}
+
+var (
+	sharedBuiltinMembers = memberSet("constructor hasOwnProperty isPrototypeOf propertyIsEnumerable toLocaleString toString valueOf __proto__ __defineGetter__ __defineSetter__ __lookupGetter__ __lookupSetter__")
+	arrayBuiltinMembers  = memberSet("at concat copyWithin entries every fill filter find findIndex findLast findLastIndex flat flatMap forEach includes indexOf join keys lastIndexOf map pop push reduce reduceRight reverse shift slice some sort splice toReversed toSorted toSpliced unshift values with")
+	stringBuiltinMembers = memberSet("anchor at big blink bold charAt charCodeAt codePointAt concat endsWith fixed fontcolor fontsize includes indexOf isWellFormed italics lastIndexOf link localeCompare match matchAll normalize padEnd padStart repeat replace replaceAll search slice small split startsWith strike sub substr substring sup toLocaleLowerCase toLocaleUpperCase toLowerCase toUpperCase toWellFormed trim trimEnd trimLeft trimRight trimStart")
+	numberBuiltinMembers = memberSet("toExponential toFixed toPrecision")
+)
 
 var arrayMethods = map[string]bool{
 	"map": true, "filter": true, "find": true, "findIndex": true, "findLast": true, "findLastIndex": true,
@@ -423,7 +476,21 @@ func arrayMethod(recv Value, name string, args []Value) Value {
 		return Number(-1)
 	case "lastIndexOf":
 		target := arg(args, 0)
-		for i := n - 1; i >= 0; i-- {
+		start := n - 1
+		if len(args) > 1 {
+			k := ToIntegerOrInfinity(args[1].ToNumber())
+			switch {
+			case k >= float64(n):
+				start = n - 1
+			case k >= 0:
+				start = int(k)
+			case k+float64(n) >= 0:
+				start = n + int(k)
+			default:
+				start = -1
+			}
+		}
+		for i := start; i >= 0; i-- {
 			if elems[i].IsUnknown() {
 				return elems[i]
 			}
@@ -573,8 +640,10 @@ func indexUnits(hay, needle []uint16, from int) int {
 	return -1
 }
 
-func lastIndexUnits(hay, needle []uint16) int {
-	for i := len(hay) - len(needle); i >= 0; i-- {
+// lastIndexUnitsFrom is lastIndexOf with a position: the last match that
+// starts at or before from.
+func lastIndexUnitsFrom(hay, needle []uint16, from int) int {
+	for i := min(from, len(hay)-len(needle)); i >= 0; i-- {
 		if indexUnits(hay[i:i+len(needle)], needle, 0) == 0 {
 			return i
 		}
@@ -668,7 +737,11 @@ func stringMethod(s, name string, args []Value) Value {
 		case "indexOf":
 			return Number(float64(indexUnits(u, needle, relIndexClamp(arg(args, 1), n, 0))))
 		default:
-			return Number(float64(lastIndexUnits(u, needle)))
+			start := n
+			if p := arg(args, 1); p.kind != KindUndefined && !math.IsNaN(p.ToNumber()) {
+				start = relIndexClamp(p, n, n)
+			}
+			return Number(float64(lastIndexUnitsFrom(u, needle, start)))
 		}
 	case "replace", "replaceAll":
 		pat := arg(args, 0)

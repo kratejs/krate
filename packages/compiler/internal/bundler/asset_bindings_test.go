@@ -89,7 +89,7 @@ export default function P() { return <p>{String(Object.keys(byUrl))}</p>; }
 	})
 	d := assetDiags(assetModuleNamed(bundle, "index.tsx"))
 	if len(d) != 1 || !strings.Contains(d[0].Message, "`logo`") || d[0].Severity != diag.SeverityWarning {
-		t.Fatalf("want one KR7125 warning naming logo, got %v", d)
+		t.Fatalf("want one KR7126 warning naming logo, got %v", d)
 	}
 }
 

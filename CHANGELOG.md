@@ -1,350 +1,394 @@
 # Changelog
 
 Krate uses [GitHub Releases](https://github.com/kratejs/krate/releases) for the
-detailed changelog. This file records the release train at a glance.
+detailed changelog. This file records the release train at a glance: each release
+lists what breaks first, then what is new, fixed and security-relevant. Upgrading
+from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-to-05).
 
 ## Unreleased
 
-- Fixed: in production builds a keyed list (`items.map(...)` in a component with
-  state) never updated after the first render, because the trimmed runtime
-  dropped the list feature. Production builds now ship every runtime feature a
-  page's helper calls need, and a test checks that every runtime name the emitted
-  code uses is defined by the trimmed runtime.
-- Fixed: a custom hook that takes an argument threw `krateParam is not defined`
-  in production builds and stopped every component after it. One component
-  that throws while hydrating no longer stops the rest of the page.
-- Fixed: text, conditionals and lists directly inside `<Suspense>` were never
-  bound, so they stayed as rendered; the slots of a conditional's inactive
-  branch (`{user && <p>{user.name}</p>}`) no longer run while the branch is
-  hidden, which logged a `TypeError` on every load.
-- Fixed: destructuring with a function or runtime value (`const { fmt } = cfg`,
-  `const { title } = getInfo()`) declared every name as the whole object, and
-  declared nothing in a page component. A module-level destructure
-  (`const { a } = cfg`) read its source before it was declared and aborted
-  hydration.
-- Fixed: a component that calls a function prop from an expression
-  (`fmt={(s) => s.toUpperCase()}`, render props, `children` as a function) rendered
-  nothing and shipped no JavaScript; the browser now fills it in.
-- Fixed: `{open && createPortal(...)}` and `{open ? createPortal(...) : null}`
-  failed with `createPortal is not defined`. A portal left as a call reports
-  KR8010.
-- Fixed: the HTML minifier collapsed white space in elements styled
-  `white-space: pre*` (`whitespace-pre-wrap`, an inline style, or a rule in any
-  linked stylesheet).
-- Fixed at build time: `JSON.stringify(value, null, 2)` indented nothing,
-  `Number.MAX_SAFE_INTEGER` and `Math.SQRT2` rendered empty, built-in members the
-  compiler lacks evaluated to `undefined` instead of staying unknown,
-  `for (let ...)` closures shared one binding, and `[...Array(n)].map(...)`
-  rendered one row. `Array.from({ length: n }, fn)` now renders its rows in the
-  static HTML.
-- Fixed: two `const [a] = useState(...)` declarations without setters in one
-  component redeclared `__krate_hole1`, a SyntaxError that stopped the page script.
-- A slot with no build-time value and no client code to fill it now warns
-  (`KR8011`) instead of rendering empty silently.
-- Security: a matcher-less `middleware` no longer skips URLs that merely end in a
-  static extension. `/api/files/report.pdf` used to reach the API route without
-  middleware; it now runs it, and only a real static file skips it (Go host and
-  portable handler).
-- Security: the canonical-slash redirect starts with `./`, so a last path segment
-  like `ftp:3232235777` cannot redirect off-site.
-- Security: the Node, Bun and Deno API sidecar only answers the Krate host (it
-  checks a per-process secret), so its loopback port can no longer be used to
-  skip middleware, CSRF and body limits.
-- Security: with `server.trustProxy`, the client address is the `X-Forwarded-For`
-  entry `server.trustedProxies` hops (default 1) from the right, not the leftmost
-  entry a client controls.
-- Security: the no-JS flash cookie is HMAC-signed, action cookies are `Secure` over
-  https and whenever `SameSite=None`, CORS responses carry `Vary: Origin` for
-  disallowed origins too, request paths are escaped in logs, request headers are
-  capped at 64 KiB, and the Go API socket directory must be private to the user.
-- Fixed: the SSR renderer is supervised. After a crash every SSR/ISR page used to
-  answer `200` with the empty build-time shell and ISR refresh stopped for good;
-  the renderer now restarts, and pages answer `503` (`no-store`) while it is down.
-  A region stream cut short is no longer a cacheable success.
-- Fixed: sidecars no longer outlive a killed host (Linux parent-death signal, and a
-  parent watchdog in the Node scripts).
-- Fixed: ISR caches evict the least recently used entry (a client could flush the
-  whole page cache with 512 cheap requests), background refresh re-renders only
-  variants older than their window, and the first refresh waits one interval.
-- Fixed: a middleware or config rewrite to a page path without a trailing slash
-  (`/feedback`) answered `301` and changed the URL; it is now served in place.
-- Fixed: a page whose default export is `@runtime` (or `// @runtime`) rendered an
-  empty region.
-- `src/pages/data.json.ts`, `feed.xml.ts`, `robots.txt.ts` and similar build as
-  files: `GET` runs once at build time and its body is written to the output,
-  instead of an empty HTML shell (`KR7121` for failures).
+### Breaking
+
+- Importing `.scss`, `.sass`, `.less` or `.styl` is a build error (`KR7123`, Krate
+  has no compiler for them); the styles used to be dropped silently. Importing a name
+  `@krate/runtime` does not export is a build error too (`KR7124`); it used to fail
+  in the browser with `x is not defined`.
+- A page that renders inside an error boundary no longer disables layout
+  persistence (the runtime tears down class-component owners by route scope).
+- Content collections: `date` fields must hold an ISO date (a validation error
+  otherwise), two entries with the same slug (`a.md` and `a.mdx`) are an error,
+  enum fields are typed as unions, and fields with a `default` are no longer optional.
+- Static pages no longer load the shared runtime chunk when other pages of the site
+  have islands (26.1 KB gzip, 17.8 KB with `spa: false`, saved per static page). A
+  site with no islands already shipped none.
+- Behaviour changes for servers behind a proxy or with middleware are listed under
+  Security: matcher-less middleware runs on URLs with a static extension, and
+  `server.trustProxy` reads `X-Forwarded-For` from the right.
+
+### Added
+
+- `krate fix` repairs the 0.4 template's `tsconfig.json`: `"baseUrl": "./src"` with
+  `"@/*": ["./src/*"]` can only mean the project root, so it sets `baseUrl` to `"."`
+  (`KR7125`). The edited file also builds on 0.4. The build error for an alias that
+  does not resolve names this command.
+- Tier decorators: `@server`, `@static`, `@runtime` and `@client` can go directly on
+  a function, class or const. On a file's default export or only exported component
+  they classify the whole file, like a `// @server` comment; elsewhere they classify
+  one component. Misplaced ones fail with `KR7115`. They work in `.js` and `.jsx`
+  files too, and a decorator on a function or const wins over a same-named binding.
+- `krate typecheck` runs `krate types` and `tsc --noEmit` without the errors `tsc`
+  reports for tier decorators, and the new `@krate/ts-plugin` does the same in
+  editors. Scaffolds use both.
+- Libraries built on React hooks now work. A module that calls a hook of an npm React
+  package (zustand, react-hook-form, SWR, TanStack Query, a custom hook wrapping one)
+  is bundled for Preact and rendered as an island: server-rendered, hydrated, and
+  sharing one store per page. A layout or server page that needs one fails with
+  `KR8013`. See "Libraries built on React hooks" in the React compatibility guide.
+- CSS-in-JS: styled-components, `@emotion/styled`, emotion's `css` prop (with
+  `/** @jsxImportSource @emotion/react */`) and MUI run as client-only islands. A
+  `css` prop without emotion's runtime warns (`KR8014`).
+- `client:visible` and `client:idle` on an island's root tag defer mounting (and the
+  chunk download) until the island is near the viewport or the browser is idle. A
+  directive on anything else warns (`KR8012`).
+- Islands compile project modules with Preact's JSX runtime even when `tsconfig.json`
+  sets `jsxImportSource` to `@krate/runtime`.
+- `src/pages/data.json.ts`, `feed.xml.ts`, `robots.txt.ts` and similar build as files:
+  `GET` runs once at build time and its body is written to the output, instead of an
+  empty HTML shell (`KR7121` for failures).
 - A page's `export const metadata` (or a `generateMetadata` that returns a literal)
   becomes head tags; an explicit `<Head>` still wins. Values the build cannot read
-  warn (`KR7122`).
-- `src/pages/api/*.ts` no longer builds an empty page; it warns (`KR7120`) that API
-  routes live in `src/api`.
-- `krate deploy --target docker` runs as the `node` user and adds a `HEALTHCHECK`;
-  the Cloudflare entry trusts `X-Forwarded-*` only with `server.trustProxy`.
-- Fixed: `node_modules/.bin/krate` was missing after `npm install @krate/core` on
-  npm 10. The platform packages declared `bin`, and npm 10 removes the shared
-  link when it rolls back the ones that do not match the machine. They no
-  longer declare it (`check:release` enforces that); the fix reaches users with
-  the next release of the platform packages. Until then `npx krate` works, as
-  does `npm rebuild`.
-- Fixed: `krate migrate nextjs` corrupted an `export default async function`
-  page that has `generateMetadata` (it emitted `<async {...props} />`), and the
-  generated metadata component was rejected by the renderer
-  (`invalid element name "__KrateMetadata"`). An async page keeps `async` and is
-  rendered per request.
-- Fixed: a page whose default export forwards `{...props}` to another component
-  (what the migrator generates) lost its route params at build time, and an async
-  `[slug]` page listed by `generateStaticParams` rendered with empty params.
-- `krate migrate nextjs` translates the static keys of a `next.config.*` even
-  when another key is computed, accepts `async redirects()`, `rewrites()` and
-  `headers()` that return a literal array, explains `revalidate`/`dynamic`/
-  `dynamicParams` on pages and flags them in layouts, lists every `package.json`
-  change, pins `@krate/*` to the running compiler version, and marks the files
-  `--apply` would overwrite in the dry run.
-- A dev rebuild whose only page fails reports the failure instead of blaming
-  `pagesDir`; `krate build` no longer prints each failure twice; esbuild's
-  "the opening tag is here" note includes its position; and the generic
-  TypeScript hint is gone from syntax errors.
-- `krate build ./typo` fails with "project directory ... does not exist" instead
-  of creating the directory, and `krate doctor` no longer calls an unset `output`
-  a server build.
-- `create-krate-app` and `create-krate-docs` pin every `@krate/*` dependency to
-  their own version (`^x.y.z`, or the exact version of a prerelease) instead of
-  `latest`.
-- Fixed: plugins could read and write outside the project through a symlink
-  (`pluginapi`), and the MCP policy let `read_file` serve `.env` through a link
-  to it or under another case (`.ENV`, `.GIT/config`). The title of a page
-  generated by a plugin route is escaped.
-- Fixed: a markdown autolink such as `<javascript:alert(1)>` or `<data:text/html,x>`
-  was emitted as a link. Autolinks go through the same scheme check as `[x](url)`
-  links now and render as text. The icon sanitizer also drops SMIL `set`/`animate`
-  that target `href`, `<style>` that imports or fetches external files,
-  external `<image>`, `<iframe>`, `<object>` and `<embed>`.
-- Fixed: `<Image width={1000}>` (also 2000, 3000, 10000) failed with `KR8803`.
-  Images are now sized to what you ask for: `width={100}` ships 100w and 200w
-  variants and `sizes="100px"` instead of six 640-2000w files. JPEGs with an EXIF
-  orientation (phone photos) are rotated before resizing, so the variants and their
-  dimensions match what the browser shows, and GIFs work (animated ones are served
-  as they are).
-- Fixed: page-level and imported `.md`/`.mdx` ignored the `markdown` config (`math`,
-  `mermaid`, `gfm`, `admonitions`, `headingAnchors`, `codeTheme`).
-- Fixed: a markdown list, quote or table directly inside a multi-line JSX element
-  in MDX swallowed the closing tag and failed the build with an error pointing into
-  generated code. A parse failure in compiled markdown now says its position refers
-  to the generated code.
+  warn (`KR7122`). `src/pages/api/*.ts` warns (`KR7120`) that API routes live in
+  `src/api`, instead of building an empty page.
+- `krate deploy` runs server features on more hosts. A portable server handler
+  (`@krate/runtime/server-handler`) is bundled with the build data into one module
+  for `--target node` (`dist/.krate/server/server.mjs`, no Go binary), and for `vercel`
+  (Build Output API v3), `netlify` (Functions) and `cloudflare` (Workers with static
+  assets) instead of refusing projects with SSR/ISR/API routes/actions/middleware. A
+  request matrix checks the node target against `krate start`. Go API routes, Go
+  components and sidecars are refused with a hint to use Docker. Caches are per
+  instance on the serverless targets, so `revalidatePath`/`revalidateTag` reach only
+  the instance that handled the request (reported under `skipped`). They also serve
+  per-segment not-found and error pages and run middleware for prerendered pages
+  (Vercel and Netlify route page requests to the function, assets stay on the CDN).
+  The error digest is the same value on every host. `--target docker` runs as the
+  `node` user and adds a `HEALTHCHECK`; the Cloudflare entry trusts `X-Forwarded-*`
+  only with `server.trustProxy`.
+- Per-segment not-found and error pages: `404.tsx`/`not-found.tsx` and
+  `error.tsx`/`500.tsx` in any pages directory. The nearest not-found page answers
+  unmatched URLs, closed dynamic params and `notFound()` (404, inside the segment's
+  layouts); the nearest error page answers uncaught server errors (500, sanitized
+  message plus a digest, never cached) and is a client error boundary around the
+  segment with `reset()`. Two files for one role, or a segment page in a `@slot`, are
+  build errors (`KR9001`, `KR9002`). The Next.js migrator maps nested
+  `not-found.tsx`, `error.tsx` and `global-error.tsx` to native files.
+- `krate.config.ts` and plugin hooks see shell environment variables and `NODE_ENV` in
+  `process.env`; `fs.existsSync`, `process.cwd/argv/platform`, `__dirname`,
+  `__filename`, `module.exports` beside imports, `node:os` and a small `Buffer` are
+  provided. A Node built-in the sandbox lacks fails with its name, also when imported
+  without the `node:` prefix.
+- `krate migrate nextjs` translates the static keys of a `next.config.*` even when
+  another key is computed, accepts `async redirects()`, `rewrites()` and `headers()`
+  that return a literal array, explains `revalidate`/`dynamic`/`dynamicParams` on
+  pages and flags them in layouts, lists every `package.json` change, pins `@krate/*`
+  to the running compiler version, and marks the files `--apply` would overwrite in
+  the dry run.
+- `create-krate-app` and `create-krate-docs` pin every `@krate/*` dependency to their
+  own version (`^x.y.z`, or the exact version of a prerelease) instead of `latest`.
+- `krate version` reports the native binary instead of the npm wrapper, and warns when
+  the two differ. Backslashes in tsconfig `baseUrl` and `paths` are normalized, so a
+  config written on Windows resolves on Linux and macOS. A bare import that `paths`
+  and `node_modules` cannot satisfy is tried against `baseUrl`, and the package.json
+  `browser` field is honoured for client builds.
 - Relative images in markdown, MDX and content collections (`![x](./pic.png)`) are
-  copied to `/assets/` with a hashed name and linked there, under `basePath`.
-- Content: enum fields are typed as unions, fields with a `default` are no longer
-  optional, `date` fields must hold an ISO date (a validation error otherwise),
-  hidden files such as editor lock files are skipped, and two entries with the same
-  slug (`a.md` and `a.mdx`) are an error. Frontmatter folds multi-line quoted
-  strings, and a `+++` (TOML) or unterminated block warns instead of silently
-  rendering as text.
-- Markdown code: fences with `{1,3-5}` highlight those lines on pages as well as in
-  collections, titled fences keep their header inside asides, `mdx`/`astro`/`prisma`
-  are highlighted, and short code blocks and tables no longer add a focus stop and a
-  landmark each (only those likely to scroll do).
-- `<Icon>` sizes to the text (`1em`) like Iconify's own SVGs, keeps a solid icon's
-  `fill` instead of outlining it, and maps `size={n}` to width and height.
-- Tailwind: `shadow-xl/20`, `drop-shadow-xl/50`, `inset-shadow-*/n`, `text-shadow-*/n`,
-  `bg-size-[...]` and `bg-position-[...]` are generated.
-- Fixed: `Tabs`, `Accordion` and other zero-JS components built from a `.map()` over a
-  build-time array silently showed every panel and ignored `defaultValue`. Their
-  values are collected from the unrolled array now; a value that cannot be read at
-  build time warns with `KR8820`. A trigger's `class` may be computed.
+  copied to `/assets/` with a hashed name and linked there, under `basePath`. Fences
+  with `{1,3-5}` highlight those lines on pages as well as in collections, titled
+  fences keep their header inside asides, and `mdx`/`astro`/`prisma` are highlighted.
+- Docs themes: a theme can set `titleSlot: true` in its `defineDocsTheme` descriptor to
+  receive the page's leading `<h1>` as `titleHTML`. `@krate/base-docs-theme` marks the
+  current nav link with `aria-current` (`SiteNavLink.match: "exact"` limits a link to its
+  own page), takes a footer brand block (`footerBrand`), and labels the search shortcut
+  with the platform's modifier (`Ctrl K`, or the command key on Apple devices).
 - Components: `OTPField` edits the visible digits (Backspace, paste, autofill) and
   submits under `name`; the searchable `Select` and `Command` are keyboard operable
-  comboboxes with an active descendant; `NativeSelect` shows its placeholder;
-  `ContextMenu` opens from the keyboard (ContextMenu key, Shift+F10) with menu roles
-  and focus management; `Tooltip` and `HoverCard` are linked with `aria-describedby`,
-  close on Escape, can be hovered, and take `asChild` for a real button or link;
-  `Pagination` links use `param` and keep the other query parameters; `Checkbox` and
-  `Switch` are native inputs with `name`, `value`, `defaultChecked`, `disabled` and
-  `id`; every component takes `class`/`className`; modal `Dialog`, `AlertDialog`
-  and `Sheet` dim the page, make it inert, lock scrolling and close on an outside
-  click; `Form.Field` links its description and error to the control and marks it
-  `aria-invalid`; `Card` titles are headings; `Slider` takes `id` and `disabled`.
-  Focus rings use one colour and no longer rely on a 15% glow.
-- Fixed: docs search snippets showed `&quot;` and `&#39;`.
-- Libraries built on React hooks now work. A module that calls a hook of an npm
-  React package (zustand, react-hook-form, SWR, TanStack Query, a custom hook
-  wrapping one) is bundled for Preact and rendered as an island: server-rendered,
-  hydrated, and sharing one store per page. They used to build with no
-  diagnostic and throw in the browser. A layout or server page that needs one
-  fails with `KR8013`. See "Libraries built on React hooks" in the React
-  compatibility guide.
-- CSS-in-JS: styled-components, `@emotion/styled`, emotion's `css` prop (with
-  `/** @jsxImportSource @emotion/react */`) and MUI run as client-only islands.
-  A `css` prop without emotion's runtime warns (`KR8014`).
-- `client:visible` and `client:idle` on an island's root tag defer mounting (and
-  the chunk download) until the island is near the viewport or the browser is
-  idle. A directive on anything else warns (`KR8012`).
-- Fixed: islands from libraries written as `import React from "react"` (recharts,
-  Headless UI) failed in the browser because the shared `preact/compat` chunk
-  had no default export.
-- Islands now compile project modules with Preact's JSX runtime even when
-  `tsconfig.json` sets `jsxImportSource` to `@krate/runtime`.
-- A docs theme can set `titleSlot: true` in its `defineDocsTheme` descriptor to
-  receive the page's leading `<h1>` as `titleHTML`, removed from the content, so
-  the description can sit below the title. Both built-in themes do; themes
-  without the flag are unchanged.
-- `@krate/base-docs-theme` site shell: the nav link for the current page gets
-  `aria-current` (`page`, or `true` for a page below the link) and follows client-side
-  navigation; `SiteNavLink.match: "exact"` limits a link to its own page. The footer
-  takes a brand block (`footerBrand`: logo, name, tagline).
-- Search shortcut labels name the platform's modifier (`Ctrl K`, or the command key
-  on Apple devices) instead of always printing the command-key glyph, which many
-  fonts lack. `ThemePrePaint` sets `data-platform` on `<html>`.
-- The docs table of contents indicator measures layout once and draws when the page
-  is idle instead of on every scroll frame and during hydration.
-- Static pages no longer load the shared runtime chunk when other pages of the
-  site have islands (26.1 KB gzip, 17.8 KB with `spa: false`, per static page).
-  A site with no islands already shipped none.
-- JS plugin hooks and custom check rules are much cheaper on large pages: the
-  page, AST and hook context were embedded in the call script as JavaScript
-  source and compiled by QuickJS on every call. They are passed as JSON, and only
-  when the plugin implements the hook. `examples/` builds in about 6 s cold
-  (was about 12 s) on a loaded machine.
-- Tier decorators: `@server`, `@static`, `@runtime` and `@client` can go directly
-  on a function, class or const. On a file's default export or only exported
-  component they classify the whole file, like a `// @server` comment; elsewhere
-  they classify one component. Misplaced ones fail with `KR7115`.
-- `krate typecheck` runs `krate types` and `tsc --noEmit` without the errors `tsc`
-  reports for tier decorators, and `@krate/ts-plugin` does the same in editors.
-  Scaffolds use both.
-- Fixed: modules on a page shared one namespace, so two files with a private
-  `up`, `Row` or `LABEL`, or two default exports named `Card`, showed one module's
-  value for both, in static HTML and in client code. They are now kept apart. A
-  page that imports one name from two modules gets `KR7116`.
-- Decorators work in `.js` and `.jsx` files, not only TypeScript.
-- A decorated class component now always warns (`KR3011`), including member
-  decorators and legacy decorators, which used to report an unresolved component
-  or drop the decorator silently.
-- Fixed: an import from an alias like `@server/lib` near the top of a file changed
-  the tier of its components.
-- `@krate/core` no longer publishes a stray Linux compiler binary, and the npm
-  wrapper picks the platform package when installed from a registry. In
-  `0.5.0-beta.1` a clean npm or pnpm install failed on Linux with
-  `spawn .../bin/krate EACCES`.
-- Build failures print the diagnostic hint. A broken tsconfig path alias now
-  shows the directory its targets resolved against.
-- `krate version` reports the native binary instead of the npm wrapper, and warns
-  when the two differ.
-- Backslashes in tsconfig `baseUrl` and `paths` are normalized, so a config
-  written on Windows resolves on Linux and macOS.
-- `krate deploy` runs server features on more hosts. A portable server handler
-  (`@krate/runtime/server-handler`) is bundled with the build data into one
-  module for `--target node` (new: `dist/.krate/server/server.mjs`, no Go
-  binary), and for `vercel` (Build Output API v3), `netlify` (Functions) and
-  `cloudflare` (Workers with static assets) instead of refusing projects with
-  SSR/ISR/API routes/actions/middleware. A request matrix checks the node target
-  against `krate start`. Go API routes, Go components and sidecars are refused
-  with a hint to use Docker. Migration note: caches are per instance on the
-  serverless targets, so `revalidatePath`/`revalidateTag` reach only the
-  instance that handled the request (reported under `skipped`).
-- Per-segment not-found and error pages: `404.tsx`/`not-found.tsx` and
-  `error.tsx`/`500.tsx` in any pages directory. The nearest not-found page
-  answers unmatched URLs, closed dynamic params and `notFound()` (404, inside
-  the segment's layouts); the nearest error page answers uncaught server errors
-  (500, sanitized message plus a digest, never cached) and is a client error
-  boundary around the segment with `reset()`. Two files for one role, or a
-  segment page in a `@slot`, are build errors (`KR9001`, `KR9002`). The Next.js
-  migrator maps nested `not-found.tsx`, `error.tsx` and `global-error.tsx` to
-  native files instead of manual items or a generated class-boundary layout.
-  Behavior change: a page that renders inside an error boundary no longer
-  disables layout persistence (the runtime now tears down class-component owners
-  by route scope).
-- Tailwind output is layered like v4 (`@layer theme, base, components,
-  utilities`). Migration note: unlayered CSS beats Tailwind utilities, so a
-  global reset such as `* { margin: 0; padding: 0 }` must move into
-  `@layer base { ... }` or it will override `p-*`/`m-*` utilities.
-- Fixed: `export { Card } from "./Card"` and `export { default as Card }` barrels
-  never loaded the module, so `<Card />` rendered nothing; named re-exports and
-  `default as` renames now resolve, also through a tsconfig alias like
-  `@/components`.
-- Fixed: two same-named exports imported by one page (`import { Card as A } from
-  "./a"`, `import { Card as B } from "./b"`) showed one module's component for
-  both. One module's export now gets a private name and its importers are
-  rewritten. `KR7116` is reported only for modules that cannot move (re-exported,
-  imported as a namespace, `import()`ed, or "use client"/"use server").
-- Fixed: a file beside a same-named directory (`Button.tsx` and `Button/`)
-  resolved to the directory; a file now wins, as in Node and tsc.
-- A bare import that `paths` and `node_modules` cannot satisfy is tried against
-  tsconfig `baseUrl`. The package.json `browser` field is honoured for client
-  builds.
-- Fixed: minified code with a string right after an identifier or `}`
-  (`import{a}from"./b.js"`) failed to parse, and so did a JSX attribute named
-  `extends`.
-- Fixed: a binding named like a runtime name (`export const krateTheme`,
-  `export function h`) lost its export or import name; it now keeps both. A
-  project component named `Link`, `Head`, `Script`, `Style`, `Icon`, `Image` or
-  `Suspense` replaces the built-in instead of being silently ignored.
-- Fixed: `function Box(p)` next to any module-level const failed the build with
-  `cannot read properties of undefined`; a lone component parameter is now
-  treated as the props object whatever its name. `Table.Cell = function ...`
-  (or an arrow) is now a component.
-- `krate.config.ts`: shell environment variables and `NODE_ENV` are visible in
-  `process.env`, `fs.existsSync` works, and `process.cwd/argv/platform`,
-  `__dirname`, `__filename`, `module.exports` beside imports, `node:os` and a
-  small `Buffer` are provided. Plugin hooks see the same environment.
-- Build errors instead of silent output: importing `.scss`, `.sass`, `.less` or
-  `.styl` (`KR7123`, Krate has no compiler for them), and importing a name
-  `@krate/runtime` does not export (`KR7124`, it used to fail in the browser with
-  `x is not defined`).
-- Fixed: an asset imported through a tsconfig alias (`@/assets/logo.png`) was
+  comboboxes; `ContextMenu` opens from the keyboard; `Tooltip` and `HoverCard` are
+  linked with `aria-describedby`, close on Escape and take `asChild`; `Pagination`
+  links use `param` and keep other query parameters; `Checkbox` and `Switch` are native
+  inputs with `name`, `value`, `defaultChecked`, `disabled` and `id`; every component
+  takes `class`/`className`; modal `Dialog`, `AlertDialog` and `Sheet` dim the page,
+  make it inert, lock scrolling and close on an outside click; `Form.Field` links its
+  description and error to the control and marks it `aria-invalid`; `Card` titles are
+  headings. `<Icon>` sizes to the text (`1em`), keeps a solid icon's `fill` and maps
+  `size={n}`. Focus rings use one colour.
+- Tailwind: `shadow-xl/20`, `drop-shadow-xl/50`, `inset-shadow-*/n`, `text-shadow-*/n`,
+  `bg-size-[...]` and `bg-position-[...]` are generated.
+- A slot with no build-time value and no client code to fill it warns (`KR8011`)
+  instead of rendering empty silently. A decorated class component always warns
+  (`KR3011`). `Tabs`, `Accordion` and other zero-JS components built from a `.map()` over
+  a value that cannot be read at build time warn with `KR8820`.
+- JS plugin hooks and custom check rules are much cheaper on large pages: the page, AST
+  and hook context are passed as JSON, and only when the plugin implements the hook.
+  `examples/` builds in about 6 s cold (was about 12 s) on a loaded machine. The docs
+  table of contents indicator measures layout once and draws when the page is idle.
+- `export default () => <div />`, `export default memo(...)` and
+  `forwardRef(...)` are components (they built to an empty page), and a tier
+  decorator above them applies to the file's default component.
+- server component regions are cached by the query keys they read, not the
+  whole query string, so random query values no longer fill the region cache.
+- `@apply` takes variants (`@apply hover:underline md:flex`) and
+  descendant utilities (`space-x-2`), expanded as CSS nested rules, and
+  functional `@utility name-* { ... --value(...) / --spacing(...) }` is supported.
+- `Slider` takes `onChange` and `onInput`. A handler on an optional prop the
+  call site does not pass binds nothing, so only the sliders that pass one
+  hydrate.
+
+### Fixed
+
+- In production builds a keyed list (`items.map(...)` in a component with state) never
+  updated after the first render, because the trimmed runtime dropped the list feature.
+  Production builds ship every runtime feature a page's helper calls need, and a test
+  checks that every runtime name the emitted code uses is defined by the trimmed runtime.
+- A custom hook that takes an argument threw `krateParam is not defined` in production
+  builds and stopped every component after it. One component that throws while hydrating
+  no longer stops the rest of the page.
+- Text, conditionals and lists directly inside `<Suspense>` were never bound; the slots
+  of a conditional's inactive branch (`{user && <p>{user.name}</p>}`) no longer run while
+  the branch is hidden, which logged a `TypeError` on every load.
+- Destructuring with a function or runtime value (`const { fmt } = cfg`) declared every
+  name as the whole object, and declared nothing in a page component. A module-level
+  destructure read its source before it was declared and aborted hydration. Two
+  `const [a] = useState(...)` without setters in one component redeclared
+  `__krate_hole1`.
+- A component that calls a function prop from an expression (`fmt={(s) => ...}`, render
+  props, `children` as a function) rendered nothing and shipped no JavaScript.
+  `{open && createPortal(...)}` failed with `createPortal is not defined`; a portal left
+  as a call reports `KR8010`.
+- Build-time evaluation: `JSON.stringify(value, null, 2)` indented nothing,
+  `Number.MAX_SAFE_INTEGER` and `Math.SQRT2` rendered empty, built-in members the
+  compiler lacks evaluated to `undefined` instead of staying unknown, `for (let ...)`
+  closures shared one binding, and `[...Array(n)].map(...)` rendered one row.
+  `Array.from({ length: n }, fn)` renders its rows in the static HTML.
+- The HTML minifier collapsed white space in elements styled `white-space: pre*`.
+- Build-time evaluation: `lastIndexOf` ignored its position argument (`"abcabc".lastIndexOf("b", 3)`
+  gave 4, `[1, 2, 1].lastIndexOf(1, -2)` gave 2), and a standard member the interpreter lacks
+  (`arr.splice`, `str.match`) read as `undefined`, so `typeof arr.splice` or `if (arr.toSpliced)`
+  folded to the wrong branch; it stays unresolved now. A differential test checks the interpreter
+  against Node for 250 expressions.
+- Modules on a page shared one namespace, so two files with a private `up`, `Row` or
+  `LABEL`, or two default exports named `Card`, showed one module's value for both. They
+  are kept apart; `KR7116` is reported only for modules that cannot move (re-exported,
+  imported as a namespace, `import()`ed, or "use client"/"use server"). An import from an
+  alias like `@server/lib` near the top of a file no longer changes the tier of its
+  components.
+- `export { Card } from "./Card"` and `export { default as Card }` barrels never loaded
+  the module; they resolve now, also through a tsconfig alias. A file beside a
+  same-named directory (`Button.tsx` and `Button/`) resolved to the directory; the file
+  wins, as in Node and tsc. An asset imported through an alias (`@/assets/logo.png`) was
   emitted but referenced as a bare identifier.
+- Minified code with a string right after an identifier or `}` (`import{a}from"./b.js"`)
+  and a JSX attribute named `extends` failed to parse. A binding named like a runtime
+  name (`export const krateTheme`, `export function h`) lost its export or import name.
+  A project component named `Link`, `Head`, `Script`, `Style`, `Icon`, `Image` or
+  `Suspense` replaces the built-in. `function Box(p)` next to a module-level const failed
+  the build, and `Table.Cell = function ...` is a component now.
+- A page whose default export is `@runtime` (or `// @runtime`) rendered an empty region.
+- The SSR renderer is supervised: after a crash every SSR/ISR page used to answer `200`
+  with the empty build-time shell and ISR refresh stopped for good. It restarts, and pages
+  answer `503` (`no-store`) while it is down. A region stream cut short is no longer a
+  cacheable success. Sidecars no longer outlive a killed host.
+- ISR caches evict the least recently used entry, background refresh re-renders only
+  variants older than their window, and the first refresh waits one interval.
+- A middleware or config rewrite to a page path without a trailing slash (`/feedback`)
+  answered `301` and changed the URL; it is served in place.
+- `node_modules/.bin/krate` was missing after `npm install @krate/core` on npm 10. The
+  platform packages no longer declare `bin` (`check:release` enforces it); the fix reaches
+  users with the next release of the platform packages. Until then `npx krate` works, as
+  does `npm rebuild`. `@krate/core` no longer publishes a stray Linux compiler binary and
+  the wrapper picks the platform package when installed from a registry; in
+  `0.5.0-beta.1` a clean install failed on Linux with `spawn .../bin/krate EACCES`.
+- `krate migrate nextjs` corrupted an `export default async function` page that has
+  `generateMetadata` (it emitted `<async {...props} />`), and the generated metadata
+  component was rejected by the renderer. A page that forwards `{...props}` lost its route
+  params at build time, and an async `[slug]` page listed by `generateStaticParams`
+  rendered with empty params.
+- Build output and messages: a dev rebuild whose only page fails reports the failure
+  instead of blaming `pagesDir`; `krate build` prints each failure once and keeps the
+  diagnostic hint; esbuild's "the opening tag is here" note includes its position;
+  `krate build ./typo` fails with "project directory ... does not exist" instead of
+  creating the directory; `krate doctor` no longer calls an unset `output` a server build.
+- Plugins could read and write outside the project through a symlink (`pluginapi`), and the
+  MCP policy let `read_file` serve `.env` through a link or under another case (`.ENV`). The
+  title of a page generated by a plugin route is escaped.
+- A markdown autolink such as `<javascript:alert(1)>` was emitted as a link; it goes through
+  the same scheme check as `[x](url)` and renders as text. The icon sanitizer also drops SMIL
+  `set`/`animate` that target `href`, `<style>` that fetches external files, external
+  `<image>`, `<iframe>`, `<object>` and `<embed>`.
+- `<Image width={1000}>` (also 2000, 3000, 10000) failed with `KR8803`. Images are sized to
+  what you ask for: `width={100}` ships 100w and 200w variants and `sizes="100px"` instead of
+  six 640-2000w files. JPEGs with an EXIF orientation are rotated before resizing and GIFs
+  work (animated ones are served as they are).
+- Page-level and imported `.md`/`.mdx` ignored the `markdown` config; a list, quote or table
+  directly inside a multi-line JSX element in MDX swallowed the closing tag. Frontmatter folds
+  multi-line quoted strings, and a `+++` (TOML) or unterminated block warns. Hidden files such
+  as editor lock files are skipped in collections. Short code blocks and tables no longer add
+  a focus stop and a landmark each.
+- `Tabs`, `Accordion` and other zero-JS components built from a `.map()` over a build-time
+  array showed every panel and ignored `defaultValue`; the values are collected from the
+  unrolled array. Islands from libraries written as `import React from "react"` (recharts,
+  Headless UI) failed because the shared `preact/compat` chunk had no default export. Docs
+  search snippets showed `&quot;` and `&#39;`.
 - A tier decorator on a function or const wins over a same-named binding in the
   file (it used to leave an esbuild "Decorators are not valid here" error), and
   `@client export default <expression>` now explains how to name the component.
-- Fixed: an aliased import of a helper (`import { plain as pp } from "./x"` then
+- An aliased import of a helper (`import { plain as pp } from "./x"` then
   `{pp()}`) rendered nothing and threw `pp is not defined` in the browser. The
   compiler no longer keeps path aliases in process-wide state, so builds of
   different projects in one process cannot see each other's tsconfig aliases.
-- Fixed: a code span that holds a longer backtick run (`` ` ```ts {1,3-5} ` ``) in
+- A code span that holds a longer backtick run (`` ` ```ts {1,3-5} ` ``) in
   an MDX page evaluated its `{1,3-5}` as an expression (it showed `-2`).
-- Fixed: the docs theme header put the GitHub and Twitter buttons edge to edge.
-- Fixed: an async page that sets `<title>` in `<Head>` served the title twice, and
+- The docs theme header put the GitHub and Twitter buttons edge to edge.
+- An async page that sets `<title>` in `<Head>` served the title twice, and
   when the title's length differed from the baked one, the page body was spliced
   into the wrong place (inside a comment). Both the Go host and the portable
   handler are fixed; other `<Head>` children (`<meta>`) still render in place.
-- Fixed: a page that imports a module whose top-level code runs Redux Toolkit's
+- A page that imports a module whose top-level code runs Redux Toolkit's
   `createSlice` or `configureStore` failed to build with "class declaration
   DraftMap inside a component or helper function" from immer. Library code under
   `node_modules` is no longer checked for client code generation.
-- Fixed: attribute bindings and nested conditional tests in a hidden branch
+- Attribute bindings and nested conditional tests in a hidden branch
   (`{user && <a href={user.url}>x</a>}`) no longer run while the branch is hidden.
-- Fixed: `import { default as logo }`, `import * as ns` (`ns.default`) and reads
+- `import { default as logo }`, `import * as ns` (`ns.default`) and reads
   of an asset binding inside a class or parentheses did not resolve to the file's
   URL. An asset binding that stays unresolved, including one re-exported by a barrel
-  module (`export { logo }`), now warns with KR7125 instead of failing silently
+  module (`export { logo }`), now warns with KR7126 instead of failing silently
   in the browser.
-- Added: `export default () => <div />`, `export default memo(...)` and
-  `forwardRef(...)` are components (they built to an empty page), and a tier
-  decorator above them applies to the file's default component.
-- Fixed: the Go host component render is cancelled with its request.
-- Added: server component regions are cached by the query keys they read, not the
-  whole query string, so random query values no longer fill the region cache.
-- Added: `@apply` takes variants (`@apply hover:underline md:flex`) and
-  descendant utilities (`space-x-2`), expanded as CSS nested rules, and
-  functional `@utility name-* { ... --value(...) / --spacing(...) }` is supported.
-- Fixed: an MDX parse error now points at the line and column of the offending tag
+- The Go host component render is cancelled with its request.
+- An MDX parse error now points at the line and column of the offending tag
   or expression in the `.mdx` file instead of a position in generated code.
-- Added: `Slider` takes `onChange` and `onInput`. A handler on an optional prop the
-  call site does not pass binds nothing, so only the sliders that pass one
-  hydrate.
-- Fixed: a SPA navigation to a prefetched page dropped the link's `#fragment`
+- A SPA navigation to a prefetched page dropped the link's `#fragment`
   (`<Link href="/docs/page#section">` landed at the top).
-- Fixed: `krate start` refused a site that has no root page (no top-level
+- `krate start` refused a site that has no root page (no top-level
   `index.html`) with "no build output found".
 
-## 0.5.0-alpha.4
+### Security
 
-- Next.js migration maps App Router routing, server components, client
-  boundaries, cache/revalidation, and framework features.
-- Docs and marketing site updated to the new SVG logo and alpha.4 packages.
-- Server, MCP, migration, and runtime hardening fixes.
-- Serverless targets now serve per-segment not-found and error pages (nearest
-  page, inside layouts, `no-store`, sanitized error with a digest, never cached
-  by ISR) and run middleware for prerendered pages: with middleware, Vercel and
-  Netlify route page requests to the function (assets stay on the CDN) instead
-  of bypassing it, and the deploy warning is gone. The error digest is the same
-  value on every host (portable sha256 in the render core).
+- A matcher-less `middleware` no longer skips URLs that merely end in a static extension.
+  `/api/files/report.pdf` used to reach the API route without middleware; only a real static
+  file skips it (Go host and portable handler).
+- The canonical-slash redirect starts with `./`, so a last path segment like
+  `ftp:3232235777` cannot redirect off-site.
+- The Node, Bun and Deno API sidecar only answers the Krate host (it checks a per-process
+  secret), so its loopback port cannot be used to skip middleware, CSRF and body limits.
+- With `server.trustProxy`, the client address is the `X-Forwarded-For` entry
+  `server.trustedProxies` hops (default 1) from the right, not the leftmost entry a client
+  controls.
+- The no-JS flash cookie is HMAC-signed, action cookies are `Secure` over https and
+  whenever `SameSite=None`, CORS responses carry `Vary: Origin` for disallowed origins too,
+  request paths are escaped in logs, request headers are capped at 64 KiB, and the Go API
+  socket directory must be private to the user.
+
+## 0.5.0-beta.1 (2026-11-04)
+
+### Breaking
+
+- tsconfig `paths` resolve exactly like `tsc`: targets are relative to `baseUrl`. The 0.4
+  template (`"baseUrl": "./src"` with `"@/*": ["./src/*"]`) fails with `cannot resolve import
+  "@/..."`; set `"baseUrl": "."`. A broken tsconfig is reported, and `extends` is followed.
+- Tailwind output follows v4: oklch palette and the v4 font stack, renamed scale
+  (`shadow-sm` is the old `shadow`, `shadow-xs` the old `shadow-sm`, likewise `blur`,
+  `rounded`), `ring` is 1px `currentcolor`, `outline-none` removes the outline, and Preflight is
+  the v4 one, on by default since alpha.1 (`tailwind.preflight: false` opts out). Output is layered
+  (`@layer theme, base, components, utilities`): unlayered CSS beats Tailwind utilities, so
+  a global reset such as `* { margin: 0; padding: 0 }` must move into `@layer base { ... }` or it
+  overrides `p-*`/`m-*`.
+- `krate dev` binds `127.0.0.1` (new `devServer.host`; `krate serve` still binds all interfaces).
+- `krate start` only serves an existing `dist/`; `krate serve` builds and serves.
+- Server-only output moved under `dist/.krate/`, including `manifest.json` (was
+  `dist/manifest.json`). Static serving no longer lists directories or serves dotfiles.
+- Unresolved imports, content schema errors and `<Image>` problems (`KR8801`..`KR8804`) fail
+  the build with located errors; config values of the wrong type fail with the key and the
+  expected type, and unknown keys warn.
+- The production hydration runtime ships a core plus feature bundles; a build includes only the
+  features its pages reference.
+
+### Added
+
+- Markdown renders with goldmark, with real MDX (ESM, inline JSX, expressions) and GFM alerts.
+- A real CSS pipeline: `@import` with layers and cycles, CSS modules (keyframes, `composes`,
+  `:global`), per-page CSS output, `@theme` and CSS-first Tailwind directives, `@apply`
+  anywhere, container queries, and a candidate extractor for the whole file.
+- `KRATE_PUBLIC_*` and `import.meta.env` constants are inlined and unexposed reads warn
+  (`KR8310`); JSON, `?raw` and `?url` imports inline as constants; `KR8302` flags imported
+  values that hydration code cannot see; `KR8810` flags collections shipped to the browser.
+- No-JS server action posts carry state back in a flash cookie; `useActionState` keeps its
+  state on redirect.
+- Hydration source maps point at the `.tsx` handlers; the dev server reloads config and env,
+  watches new directories and `public/`, and shows an error shell.
+- Components: keyboard-operable overlays, ARIA roles, AA contrast, logical RTL properties,
+  controlled overlays, `toast()`, higher-order components and store factories.
+- SEO, `basePath`, fonts and search hotkey options; spec-shaped Web APIs in the embedded
+  API/middleware runtime; Node `exports` semantics in the resolver.
+
+### Fixed
+
+- Several runtime fixes: update-depth errors reach the error boundary, effects re-track
+  dependencies and report loops, `createMemo` is pull-based, `twMerge` groups derive from the
+  utility. Tailwind candidates with apostrophes, regexes and template literals are found.
+- Windows spawn in the npm wrapper and scaffolders, and a binary version check.
+- Static serving: an open redirect and path handling were hardened.
+
+## 0.5.0-alpha.4 (2026-10-28)
+
+### Added
+
+- Next.js migration (`krate migrate nextjs`) maps App Router routing, server components,
+  client boundaries, cache/revalidation, and framework features.
+- `@krate/runtime/cache` with `revalidatePath`, `revalidateTag` and `unstable_cache`, Next-style
+  `revalidate`/`dynamic` segment exports, and an authenticated on-demand revalidation host.
+- React islands: compiled React packages run as Preact islands, with React SSR.
+- MCP server overhaul (M2-M5), the Simple docs theme, and the new SVG logo.
+
+### Fixed
+
+- Server, MCP, migration and runtime hardening, including ISR safety.
+
+## 0.5.0-alpha.3 (2026-10-23)
+
+### Added
+
+- Server actions, with React 19 action hooks on the same transport.
+- React parity: Suspense, `lazy`, `use()` and transitions, class lifecycles and error
+  boundaries, keyed lists, React 18/19 events, forms and refs; a browser differential suite
+  against React 19.
+- Stable diagnostic codes (`KRxxxx`) with a registry, and a typed build-time interpreter for
+  compile-time evaluation.
+- A rewritten lexer and parser for ES2024 and JSX with source positions.
+
+### Fixed
+
+- Sidecar port collisions between concurrent servers, and a cluster bind retry on Windows.
+- Minifier whitespace and comment handling; module-level `let`/`var` shared across components.
+
+## 0.5.0-alpha.2 (2026-10-21)
+
+- `tsx` is gone: `generateStaticParams`, API routes and the SSR renderer are bundled to
+  JavaScript and run on plain Node.
+- A lite router and a smaller runtime bundle.
+- React compatibility R1 complete.
+
+## 0.5.0-alpha.1 (2026-10-20)
+
+- Precompressed assets (`--precompress`, gzip and brotli), router prefetch and reconcile
+  batching, i18n, a config schema (`krate config --schema`) with unknown-key warnings.
+- Faster builds: esbuild context reuse, image processing cache, a cached file resolver, an
+  expression evaluation VM pool, CPU and heap profile flags.
+- Tailwind Preflight on by default; no dev serve cache; MCP overhaul; React compatibility R1 beta.
+
+## 0.4.0 (2026-10-16)
+
+- Persistent build cache, CSS dead-code elimination and de-duplication, `krate inspect --json`,
+  profiling, and a parallel page pipeline.
+- `krate.config.ts` is evaluated in-process (esbuild plus QuickJS) instead of through `tsx`.
+- Go runtime and server components with a unified Go API, a Bun API sidecar and Unix sockets
+  for Go API routes, API timeouts and panic protection.
+- CSS signals and CSS-only components, legacy browser support, and a docs theme with versioning,
+  i18n and customisable search.

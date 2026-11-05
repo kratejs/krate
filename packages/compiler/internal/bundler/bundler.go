@@ -397,7 +397,7 @@ func (b *Bundler) unresolvedImportError(mod *Module, imp string) error {
 	default:
 		if prefix, ok := b.matchesPathAlias(imp); ok {
 			d.Message = "cannot resolve import " + strconv.Quote(imp) + " (matched tsconfig path alias " + strconv.Quote(prefix) + ")"
-			d.Hint = "no file exists at the alias target; targets resolve relative to compilerOptions.baseUrl (" + b.tsBaseDir + ")"
+			d.Hint = "no file exists at the alias target; targets resolve relative to compilerOptions.baseUrl (" + b.tsBaseDir + "). If baseUrl is \"./src\" and the targets also start with ./src/, run `krate fix --apply` to set baseUrl to \".\""
 		} else {
 			d.Message = "cannot resolve import " + strconv.Quote(imp) + ": package is not installed"
 			d.Hint = "install it with `pnpm add " + packageNameOf(imp) + "`, or fix the import if it is a typo or a missing tsconfig paths alias"

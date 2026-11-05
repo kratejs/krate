@@ -22,7 +22,7 @@ implemented.
 - The Go server resolves the concrete URL to the page's canonical route
   (e.g. `/video/abc` -> `/video/[id]`), forwards the URL params, and keys ISR
   caching by route + params + query.
-- `manifest.json` records each page's mode, and `server-manifest.json` lists the
+- `dist/.krate/manifest.json` records each page's mode, and `dist/.krate/server-manifest.json` lists the
   page bundles and each page's region registry for the sidecar.
 
 See [Choosing an approach](/docs/core-concepts/rendering/) for what to use when.

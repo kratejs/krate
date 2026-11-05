@@ -32,14 +32,18 @@ to the component as `params`:
 
 ```tsx
 // src/pages/video/[id].tsx -> /video/abc123
+export function generateStaticParams() {
+  return [{ id: "abc123" }];
+}
+
 export default function VideoPage({ params }) {
   return <h1>Video {params.id}</h1>;
 }
 ```
 
-For a statically-built dynamic route, provide `generateStaticParams` to expand
-the route into concrete pages. Each param value is passed to the component as
-`params` (so `params.id` matches the `[id]` segment).
+A statically-built dynamic route provides `generateStaticParams` (as above) to
+expand the route into concrete pages. Each param value is passed to the
+component as `params` (so `params.id` matches the `[id]` segment).
 
 A catch-all param is the matched segments joined with `/`
 (`/docs/a/b` gives `params.slug === "a/b"`); an empty optional catch-all is

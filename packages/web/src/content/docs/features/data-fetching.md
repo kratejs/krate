@@ -18,13 +18,17 @@ JavaScript:
 
 ```tsx
 // @server
-export default function ServerTime() {
-  return <time>{new Date().toUTCString()}</time>;
+export default function Totals() {
+  const prices = [12, 30, 8];
+  return <p>{prices.length} items, total {prices.reduce((a, b) => a + b, 0)}</p>;
 }
 ```
 
-Because server components run at build time, they can `fetch` external data and
-render the result - ideal for data that doesn't change per request.
+A synchronous server component only sees values the build can compute, so
+`new Date()` has no value there. A server component that is `async`
+(it `await`s a `fetch`, a database call) is rendered per request by the SSR
+sidecar and streamed into the static shell (`KR7104`, informational); use it for
+data that changes, and `output: "static"` rejects it (`KR7103`).
 
 ## Per-request data (runtime components)
 

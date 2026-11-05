@@ -25,7 +25,9 @@ and building your first page.
 
 ## Prerequisites
 
-- **Node.js 20+** - for the npm CLI wrapper and running `krate.config.ts`
+- **Node.js 20+** - for the npm CLI wrapper, `generateStaticParams`, and the SSR /
+  API-route sidecars. A static site with a plain config builds without running
+  any Node code: the `krate` binary evaluates `krate.config.ts` itself
 - **Go 1.26+** - only needed when building the compiler from source
 
 The published CLI ships pre-built binaries for macOS, Linux and Windows, so you
@@ -97,8 +99,9 @@ functions:
 
 ```tsx
 // @server - evaluated at build time, HTML baked in
-export default function ServerTime() {
-  return <time>{new Date().toUTCString()}</time>;
+export default function Totals() {
+  const prices = [12, 30, 8];
+  return <p>{prices.length} items, total {prices.reduce((a, b) => a + b, 0)}</p>;
 }
 ```
 
@@ -134,6 +137,10 @@ Files named `[param].tsx` become dynamic segments:
 
 ```tsx
 // src/pages/video/[id].tsx -> /video/abc123
+export function generateStaticParams() {
+  return [{ id: "abc123" }];
+}
+
 export default function VideoPage({ params }) {
   return <h1>Video {params.id}</h1>;
 }
