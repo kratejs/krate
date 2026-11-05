@@ -873,7 +873,9 @@ when it:
 - calls a hook exported by another module that does (a custom hook wrapping
   `useSWR`, a store hook exported from `store.ts`),
 - renders a component built by such a package at module level
-  (``const Box = styled.div`...` ``, `motion(Button)`), or
+  (``const Box = styled.div`...` ``, `motion(Button)`),
+- hands a value built by such a package to a JSX attribute
+  (`const queryClient = new QueryClient()` then `client={queryClient}`), or
 - starts with `/** @jsxImportSource <react package> */` (emotion's `css` prop).
 
 ```tsx
@@ -901,22 +903,30 @@ rendered on the server with the same code, then hydrated. Props follow the
 island rules above: serializable values, signals bridged as live getters, and
 function references. A page whose own module calls the hook is one island.
 
-What was checked in Chromium, with the versions in the third column:
+What was checked in Chromium (Preact 10.29): each page loaded without console
+errors and rendered the expected markup, and where the library has an
+interaction it was clicked or typed into.
 
-| Library | Status | Checked with |
-|---------|--------|--------------|
-| zustand | works: store hooks, selectors, state shared by islands of one page | 5.0 |
-| react-hook-form | works: `register`, validation, `handleSubmit`, `formState` | 7.x |
-| SWR | works: `useSWR` directly or inside a custom hook; fetches in the browser | 2.x |
-| TanStack Query | works: `useQuery` under a `QueryClientProvider` in the same island | 5.x |
-| recharts, Headless UI, framer-motion (components and `useAnimation`) | work | 2.x, 2.x, 11.x |
-| styled-components, `@emotion/styled`, emotion `css` prop, MUI | work, client-only (see below) | 6.x, 11.x, 11.x, 9.x |
+| Library | Result | Version checked |
+|---------|--------|-----------------|
+| zustand | works: store hooks, selectors, state shared by the islands of a page | 5.0.16 |
+| valtio, jotai | work: `useSnapshot`, `useAtom` | 2.3.2, 2.20.3 |
+| react-redux with Redux Toolkit | works: `Provider`, `useSelector`, `useDispatch`, a slice and `configureStore` | 9.3.1, 2.14.0 |
+| react-hook-form | works: `register`, `required` validation, `handleSubmit`, `formState` | 7.91.0 |
+| SWR | works: `useSWR` directly or inside a custom hook | 2.5.1 |
+| TanStack Query | works: `useQuery` under a `QueryClientProvider` in the same island | 5.106.1 |
+| TanStack Table | works: `useReactTable` with `flexRender`, rendered on the server | 8.21.3 |
+| react-i18next | works: `useTranslation` after `i18n.use(initReactI18next).init()` | 15.7.4 |
+| usehooks-ts | works: `useCounter`, `useToggle` | 3.1.1 |
+| recharts, Headless UI | work (they need `import React from "react"`) | 2.15.4, 2.2.10 |
+| framer-motion | works: `motion.*` and `useAnimation` | 11.18.2 |
+| styled-components, `@emotion/styled`, emotion `css` prop, MUI `Button` | work, client-only (see below) | 6.6.0, 11.14.1, 11.14.0, 9.5.0 |
 
-These were verified by hand against the real packages; the repository tests run
+These were run by hand against the real packages. The repository tests run
 stand-ins with the same import shapes (default `import React`, namespace
-import, `require("react")`), because the repository does not install them.
-Other libraries that follow the same patterns are expected to work, but only
-the table above was run.
+import, `require("react")`), because the repository does not install the
+libraries, so the table is not covered by CI. A library that is not listed
+may work, but nothing was run for it.
 
 ### CSS-in-JS
 
@@ -949,9 +959,11 @@ silent failure in the browser:
 - **No bridge to Krate state from inside.** The island reads the page's
   signals only as props, and the page cannot read the island's store. Krate
   components that import the same store module do not see it.
-- **A page that is an island** does not receive route props (`params`,
-  `searchParams`), and it cannot also use Krate-only APIs (`createSignal`,
-  `<Head>`) in the same module.
+- **A page that is itself an island** cannot take props (`params`,
+  `searchParams`): the build fails with `KR8010`. Move the component that calls
+  the hook into its own module and render it from a page that passes the
+  values in. Such a module also cannot use Krate-only APIs (`createSignal`,
+  `<Head>`).
 - **Pages rendered per request** (`dynamic`, ISR or SSR modes) were not
   verified with these islands; use static pages.
 
