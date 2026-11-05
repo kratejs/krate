@@ -341,6 +341,14 @@ func (b *builder) foldComponentLocals(fn *ast.FnDecl, node *ComponentNode, isPag
 		}
 	}
 	if client {
+		// Destructured names without a build-time value are declared by
+		// replaying the declaration, also in a page root (whose other locals
+		// are baked into the HTML).
+		pre, post := b.leakedDestructDecls(fold, body.order)
+		preLocals = append(preLocals, pre...)
+		postLocals = append(postLocals, post...)
+	}
+	if client {
 		pre, post := promoteTransitive(append(append([]bodyJS(nil), body.pre...), preLocals...),
 			append(append([]bodyJS(nil), body.post...), postLocals...))
 		node.PreSignalVars = mergeBodyJS(pre)
@@ -372,8 +380,9 @@ func (b *builder) foldLocals(fn *ast.FnDecl, node *ComponentNode) *localFold {
 	// Re-fold locals whose initializer needs the cva/cn table (e.g. shadcn's
 	// `const classes = cn(buttonVariants({ variant }), className)`), so JSX
 	// attributes reference the class value instead of the variable name.
+	destructured := destructNames(fold.destructs)
 	for name, init := range fold.inits {
-		if init == nil || fold.changed[name] {
+		if init == nil || fold.changed[name] || destructured[name] {
 			continue
 		}
 		// Array/object/JSX locals may be mutated by loops or emitted as
@@ -452,13 +461,14 @@ func (b *builder) bindFoldedLocals(fold *localFold) {
 // signal declarations and those that read signals.
 func (b *builder) localDecls(fn *ast.FnDecl, node *ComponentNode, fold *localFold, order *bodyOrder) (pre, post []bodyJS) {
 	declared := declaredLocalNames(node, fn)
+	replayed := destructNames(b.replayedDestructs(fold))
 	// Source order, not alphabetical: a local may reference an earlier local
 	// (e.g. `basePath` derives from `themeOptions`).
 	for _, name := range fold.order {
 		if _, ok := fold.locals[name]; !ok {
 			continue
 		}
-		if declared[name] {
+		if declared[name] || replayed[name] {
 			continue
 		}
 		init := fold.inits[name]
@@ -466,6 +476,58 @@ func (b *builder) localDecls(fn *ast.FnDecl, node *ComponentNode, fold *localFol
 		// Signal-referencing locals must be declared after the signal
 		// declarations; everything else merges with the pre fragments.
 		if init != nil && b.referencesSignal(init) {
+			post = append(post, frag)
+		} else {
+			pre = append(pre, frag)
+		}
+	}
+	return pre, post
+}
+
+// replayedDestructs returns the destructuring declarations the hydration
+// scope evaluates as written: one with a name that has no build-time value or
+// is changed later, or whose initializer reads props, another local or a
+// reference. Names of the others are plain folded values.
+func (b *builder) replayedDestructs(fold *localFold) []*ast.VarDecl {
+	var out []*ast.VarDecl
+	for _, d := range fold.destructs {
+		replay := d.Init != nil && (referencesProps(d.Init) || referencesAnyLocal(d.Init, b.sigMap(), fold.locals) || isReferenceInit(d.Init))
+		for _, n := range d.Names {
+			if fold.leaked[n] || fold.changed[n] {
+				replay = true
+			}
+		}
+		if replay {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// destructNames returns the names bound by the declarations.
+func destructNames(decls []*ast.VarDecl) map[string]bool {
+	names := make(map[string]bool)
+	for _, d := range decls {
+		for _, n := range d.Names {
+			names[n] = true
+		}
+	}
+	return names
+}
+
+// leakedDestructDecls renders each replayed destructuring declaration as one
+// `var {a, b: c} = init` fragment, split like localDecls into those that may
+// precede the signal declarations and those that read signals.
+func (b *builder) leakedDestructDecls(fold *localFold, order *bodyOrder) (pre, post []bodyJS) {
+	for _, d := range b.replayedDestructs(fold) {
+		pattern := d.Pattern
+		if d.Target != nil {
+			pattern = renderPattern(d.Target, b.sigMap())
+		} else if pattern == "" {
+			pattern = "[" + strings.Join(d.Names, ",") + "]"
+		}
+		frag := bodyJS{ord: order.of(d), js: "var " + pattern + "=" + generateExprJS(d.Init, b.sigMap())}
+		if b.referencesSignal(d.Init) {
 			post = append(post, frag)
 		} else {
 			pre = append(pre, frag)

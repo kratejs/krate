@@ -47,3 +47,51 @@ export default function Page() {
 		t.Errorf("conditional inside <Suspense> is not bound:\n%s", js)
 	}
 }
+
+func TestDestructuredLocalsWithoutBuildTimeValueAreReplayed(t *testing.T) {
+	src := `import { useState } from "react";
+const cfg = { label: "L", fmt: (s) => s.toUpperCase() };
+function getInfo() { return { title: "T", count: 3 }; }
+function Child() {
+  const { label, fmt } = cfg;
+  const [n, setN] = useState(0);
+  return <div><span>{label}</span><span>{fmt("y")}</span><button onClick={() => setN(n + 1)}>{n}</button></div>;
+}
+export default function Page() {
+  const { title, count } = getInfo();
+  const { fmt: f } = cfg;
+  const [n, setN] = useState(0);
+  return <main><Child /><h1>{title}</h1><p>{count + n}</p><i>{f("z")}</i><button onClick={() => setN(n + 1)}>b</button></main>;
+}`
+	res, js := fullPipeline(t, src)
+	for _, want := range []string{"{title", "count", "fmt", "}=getInfo()", "fmt:"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("hydration JS lacks the replayed destructuring (%q):\n%s", want, js)
+		}
+	}
+	// A name must not be initialized with the whole right-hand side.
+	for _, bad := range []string{"var title=", "var count=", "var fmt=cfg", "var f=cfg"} {
+		if strings.Contains(js, bad) {
+			t.Errorf("destructured name initialized from the whole initializer (%q):\n%s", bad, js)
+		}
+	}
+	if strings.Contains(res.HTML, "[object Object]") {
+		t.Errorf("SSR baked an object into the text:\n%s", res.HTML)
+	}
+}
+
+func TestModuleDestructureIsDeclaredAfterItsSource(t *testing.T) {
+	src := `const cfg = { label: "L", fmt: (s) => s.toUpperCase() };
+const { label, fmt } = cfg;
+export default function Page() { return <main><p>{label}</p><p>{fmt("y")}</p></main>; }`
+	_, js := fullPipeline(t, src)
+	cfg := strings.Index(js, "var cfg=")
+	tmp := strings.Index(js, "var __kmod_")
+	member := strings.Index(js, "var fmt=__kmod_")
+	if cfg < 0 || tmp < 0 || member < 0 {
+		t.Fatalf("missing declarations (cfg %d, temp %d, member %d):\n%s", cfg, tmp, member, js)
+	}
+	if !(cfg < tmp && tmp < member) {
+		t.Errorf("declarations out of order (cfg %d, temp %d, member %d):\n%s", cfg, tmp, member, js)
+	}
+}

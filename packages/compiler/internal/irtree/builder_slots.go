@@ -4410,8 +4410,9 @@ func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func
 	b.localProps = props
 	fold := collectLocalVars(fn.Body, b.sigMap(), props, nextUseId)
 	locals, inits := fold.locals, fold.inits
+	destructured := destructNames(fold.destructs)
 	for name, init := range inits {
-		if init == nil || fold.changed[name] {
+		if init == nil || fold.changed[name] || destructured[name] {
 			continue
 		}
 		switch init.(type) {
