@@ -49,3 +49,17 @@ func TestComponentFileBesideSameNamedDirectory(t *testing.T) {
 		t.Errorf("Button missing:\n%s\nlog:\n%s", html, logged)
 	}
 }
+
+func TestReservedNameExportsRenderAndHydrate(t *testing.T) {
+	html, logged := buildPlain(t, map[string]string{
+		"src/lib/theme.ts": "export const krateTheme = { name: 'dark' };\nexport function h() { return 'H'; }\n",
+		"src/pages/index.tsx": "import { createSignal } from '@krate/runtime';\nimport { krateTheme, h } from '../lib/theme';\n" +
+			"export default function Home() { const [n, setN] = createSignal(0); return <main><p>{krateTheme.name}</p><p>{h()}</p><button onClick={() => setN(n() + 1)}>{n()}{krateTheme.name}</button></main>; }\n",
+	})
+	if !strings.Contains(html, "<p>dark</p><p>H</p>") {
+		t.Errorf("exports with reserved names did not render:\n%s", html)
+	}
+	if strings.Contains(logged, "KR8302") {
+		t.Errorf("unexpected KR8302:\n%s", logged)
+	}
+}
