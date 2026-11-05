@@ -159,3 +159,52 @@ func TestNodeReturnAndField(t *testing.T) {
 		t.Errorf("kr.Node field not mapped:\n%s", ts)
 	}
 }
+
+func TestRequestTrackedOnlyWhenReadViaAccessors(t *testing.T) {
+	src := `package c
+
+import kr "github.com/kratejs/krate/packages/compiler/goext/krate"
+
+type P struct{}
+
+func Accessors(p P, r kr.Request) string { return r.Cookie("sid") + r.Header("X") + r.QueryValue("q") + r.Param("id") }
+func Closure(p P, r kr.Request) string {
+	f := func() string { return r.Cookie("sid") }
+	return f()
+}
+func Unnamed(p P, _ kr.Request) string { return "x" }
+func Field(p P, r kr.Request) string { return r.Headers["Cookie"] }
+func Method(p P, r kr.Request) string { return r.Method }
+func Passed(p P, r kr.Request) string { return helper(r) }
+func Alias(p P, r kr.Request) string { x := r; return x.Cookie("a") }
+func MethodValue(p P, r kr.Request) string { f := r.Cookie; return f("a") }
+func Nested(p P, r kr.Request) string { return r.Cookie(r.Header("X")) }
+func NestedField(p P, r kr.Request) string { return r.Cookie(r.Query["x"]) }
+func NoRequest(p P) string { return "x" }
+`
+	comps, err := ParseFile("/x/c.runtime.go", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]Component{}
+	for _, c := range comps {
+		got[c.Name] = c
+	}
+	want := map[string]bool{
+		"Accessors": true, "Closure": true, "Unnamed": true, "Nested": true,
+		"Field": false, "Method": false, "Passed": false, "Alias": false, "MethodValue": false, "NestedField": false,
+	}
+	for name, tracked := range want {
+		c, ok := got[name]
+		if !ok || !c.HasRequest {
+			t.Errorf("%s: missing or without a request", name)
+			continue
+		}
+		if c.RequestTracked != tracked {
+			t.Errorf("%s: RequestTracked = %v, want %v", name, c.RequestTracked, tracked)
+		}
+	}
+	if got["NoRequest"].HasRequest || got["NoRequest"].RequestTracked {
+		t.Errorf("NoRequest should have no request: %+v", got["NoRequest"])
+	}
+}

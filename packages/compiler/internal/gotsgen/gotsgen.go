@@ -34,6 +34,11 @@ type Component struct {
 	// HasRequest is true when the function takes a second `krate.Request`
 	// parameter (runtime components can read the incoming request).
 	HasRequest bool
+	// RequestTracked is true when the body reads its Request only through the
+	// recording accessors (Header, Cookie, QueryValue, Param), so what a render
+	// reads can be recorded. A component that touches the fields or passes the
+	// Request on is not tracked: its renders vary on the whole request.
+	RequestTracked bool
 }
 
 // ParseFile parses one Go file and returns its components. A file is a component
@@ -82,6 +87,7 @@ func ParseFile(path string, src []byte) ([]Component, error) {
 			}
 			if len(types) >= 2 {
 				c.HasRequest = true
+				c.RequestTracked = requestOnlyViaAccessors(fn)
 			}
 		}
 		// Result kind: HTML/string vs scalar, and (T, error).
@@ -372,4 +378,50 @@ func goTypeToTS(e ast.Expr, structs map[string]*ast.StructType) string {
 		return "unknown"
 	}
 	return "unknown"
+}
+
+// requestAccessors are the Request methods that record what they read.
+var requestAccessors = map[string]bool{"Header": true, "Cookie": true, "QueryValue": true, "Param": true}
+
+// requestOnlyViaAccessors reports whether every use of the function's Request
+// parameter (its second one) is a call of one of the recording accessors. Any
+// other use (a field, the value passed or stored, a method value) could read
+// the request without leaving a trace, so it makes the answer false.
+func requestOnlyViaAccessors(fn *ast.FuncDecl) bool {
+	if fn.Body == nil || fn.Type.Params == nil || len(fn.Type.Params.List) < 2 {
+		return false
+	}
+	req := fn.Type.Params.List[1]
+	names := map[string]bool{}
+	for _, n := range req.Names {
+		if n.Name != "_" {
+			names[n.Name] = true
+		}
+	}
+	if len(names) == 0 {
+		return true // unnamed or blank: the body cannot reach it
+	}
+	allowed := map[*ast.Ident]bool{}
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || !requestAccessors[sel.Sel.Name] {
+			return true
+		}
+		if x, ok := sel.X.(*ast.Ident); ok && names[x.Name] {
+			allowed[x] = true
+		}
+		return true
+	})
+	tracked := true
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && names[id.Name] && !allowed[id] {
+			tracked = false
+		}
+		return tracked
+	})
+	return tracked
 }

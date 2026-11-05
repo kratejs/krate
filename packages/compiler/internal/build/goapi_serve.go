@@ -99,6 +99,10 @@ type regionCacheEntry struct {
 	html  string
 	exp   time.Time
 	route string
+	// hits and seq drive eviction: an entry nobody asked for twice goes first,
+	// oldest first, so a client minting variants cannot flush the hot ones.
+	hits uint32
+	seq  uint64
 }
 
 // goRegionCacheMax bounds the Go region cache so a long-lived server cannot
@@ -121,22 +125,54 @@ func regionRoute(r goRenderRegion) string {
 	return ""
 }
 
-// volatileRequestHeaders never make a component render differently, but change
-// on nearly every request; leaving them out of the key lets equal requests hit.
-var volatileRequestHeaders = map[string]bool{
-	"referer": true, "x-request-id": true, "traceparent": true, "tracestate": true,
-	"cache-control": true, "pragma": true, "if-none-match": true, "if-modified-since": true,
-	"if-match": true, "if-unmodified-since": true, "if-range": true, "range": true,
-	"connection": true, "keep-alive": true, "upgrade-insecure-requests": true, "priority": true,
-	"sec-fetch-site": true, "sec-fetch-mode": true, "sec-fetch-dest": true, "sec-fetch-user": true,
-	"x-forwarded-for": true, "x-real-ip": true, "forwarded": true,
+// regionVary is what renders of one Go component have read of the request,
+// learned from the "vary" of its frames (the Go host records the reads of a
+// krate.Request, like the Vary header of an HTTP response). A render is cached
+// per the values of exactly these names, so a cookie the component never reads
+// cannot split its entries, and one it reads always does.
+type regionVary struct {
+	// full: the component reads the request in a way that cannot be recorded
+	// (or the host predates recording): the entry is keyed on the whole request.
+	full                            bool
+	headers, cookies, query, params map[string]bool
 }
 
-// regionKey identifies a Go region render: name + props + the request context.
-// A component that takes a krate.Request may read any header (a cookie makes it
-// per-user), so the headers stay part of the key, but as a digest: raw cookies
-// and Authorization values do not sit in the cache map, and volatile headers
-// that cannot change the output are left out.
+// goVaryFrame is the "vary" member of a gorender frame.
+type goVaryFrame struct {
+	Full    bool     `json:"full"`
+	Headers []string `json:"headers"`
+	Cookies []string `json:"cookies"`
+	Query   []string `json:"query"`
+	Params  []string `json:"params"`
+}
+
+func (v *regionVary) merge(f *goVaryFrame) {
+	if f == nil {
+		v.full = true // no record: assume it read everything
+		return
+	}
+	if f.Full {
+		v.full = true
+	}
+	add := func(dst *map[string]bool, names []string) {
+		for _, n := range names {
+			if *dst == nil {
+				*dst = map[string]bool{}
+			}
+			(*dst)[n] = true
+		}
+	}
+	add(&v.headers, f.Headers)
+	add(&v.cookies, f.Cookies)
+	add(&v.query, f.Query)
+	add(&v.params, f.Params)
+}
+
+// regionKey identifies a Go region render by everything the component could
+// have read: name + props + a digest of the whole request context (method, url,
+// params, query and every header). It is the key of a component whose reads are
+// not recorded. Raw cookies and Authorization values never sit in the cache
+// map, only their digest.
 func regionKey(r goRenderRegion) string {
 	return r.Name + "\x00" + r.Props + "\x00" + requestDigest(r.Request)
 }
@@ -145,21 +181,99 @@ func requestDigest(request string) string {
 	if request == "" {
 		return ""
 	}
-	var ctx map[string]any
+	var ctx any
 	if err := json.Unmarshal([]byte(request), &ctx); err != nil {
 		sum := sha256.Sum256([]byte(request))
 		return hex.EncodeToString(sum[:])
 	}
-	if hdrs, ok := ctx["headers"].(map[string]any); ok {
-		for k := range hdrs {
-			if volatileRequestHeaders[strings.ToLower(k)] {
-				delete(hdrs, k)
-			}
-		}
-	}
 	canon, _ := json.Marshal(ctx) // map keys are sorted: the form is canonical
 	sum := sha256.Sum256(canon)
 	return hex.EncodeToString(sum[:])
+}
+
+// requestParts is the request context a region render is given.
+type requestParts struct {
+	Params  map[string]string `json:"params"`
+	Query   map[string]string `json:"query"`
+	Headers map[string]string `json:"headers"`
+}
+
+func (p requestParts) header(name string) (string, bool) {
+	for k, v := range p.Headers {
+		if strings.EqualFold(k, name) {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+func (p requestParts) cookie(name string) (string, bool) {
+	raw, ok := p.header("Cookie")
+	if !ok {
+		return "", false
+	}
+	probe := http.Request{Header: http.Header{"Cookie": []string{raw}}}
+	c, err := probe.Cookie(name)
+	if err != nil {
+		return "", false
+	}
+	return c.Value, true
+}
+
+// trackedRegionKey is the key of a component whose reads are recorded: name +
+// props + a digest of the values of the names it read (absent is not the same
+// as empty). Equal keys mean equal inputs, so the render is the same.
+func trackedRegionKey(r goRenderRegion, v *regionVary) string {
+	var parts requestParts
+	if r.Request != "" {
+		if err := json.Unmarshal([]byte(r.Request), &parts); err != nil {
+			return regionKey(r) // unreadable context: key on all of it
+		}
+	}
+	pick := func(names map[string]bool, get func(string) (string, bool)) map[string]*string {
+		out := make(map[string]*string, len(names))
+		for n := range names {
+			if val, ok := get(n); ok {
+				v := val
+				out[n] = &v
+			} else {
+				out[n] = nil
+			}
+		}
+		return out
+	}
+	lookup := func(m map[string]string) func(string) (string, bool) {
+		return func(n string) (string, bool) { val, ok := m[n]; return val, ok }
+	}
+	canon, _ := json.Marshal(map[string]any{
+		"h": pick(lowerNames(v.headers), parts.header),
+		"c": pick(v.cookies, parts.cookie),
+		"q": pick(v.query, lookup(parts.Query)),
+		"p": pick(v.params, lookup(parts.Params)),
+	})
+	sum := sha256.Sum256(canon)
+	return r.Name + "\x00" + r.Props + "\x00v\x00" + hex.EncodeToString(sum[:])
+}
+
+func lowerNames(in map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(in))
+	for k := range in {
+		out[strings.ToLower(k)] = true
+	}
+	return out
+}
+
+// regionCacheKeyLocked returns the cache key of a render, or false when no
+// render of the component has shown what it reads yet (it must render).
+func (g *goAPISupervisor) regionCacheKeyLocked(r goRenderRegion) (string, bool) {
+	v := g.vary[r.Name]
+	if v == nil {
+		return "", false
+	}
+	if v.full {
+		return regionKey(r), true
+	}
+	return trackedRegionKey(r, v), true
 }
 
 // goAPISupervisor manages the compiled Go API sidecar subprocess. It starts
@@ -191,6 +305,10 @@ type goAPISupervisor struct {
 	lastMod time.Time
 	// regionCache memoizes Go region renders that declare a revalidate window.
 	regionCache map[string]regionCacheEntry
+	// vary is what each component has been seen to read of the request.
+	vary map[string]*regionVary
+	// seq orders cache uses for eviction.
+	seq uint64
 	// invalidations counts InvalidateRoutes calls (render/invalidate race guard).
 	invalidations uint64
 }
@@ -261,9 +379,15 @@ func (g *goAPISupervisor) RenderContext(ctx context.Context, regions []goRenderR
 	startGen := g.invalidations
 	for _, r := range regions {
 		if r.Revalidate > 0 {
-			if e, ok := g.regionCache[regionKey(r)]; ok && now.Before(e.exp) {
-				out[r.ID] = e.html
-				continue
+			if key, ok := g.regionCacheKeyLocked(r); ok {
+				if e, ok := g.regionCache[key]; ok && now.Before(e.exp) {
+					g.seq++
+					e.hits++
+					e.seq = g.seq
+					g.regionCache[key] = e
+					out[r.ID] = e.html
+					continue
+				}
 			}
 		}
 		miss = append(miss, r)
@@ -288,15 +412,24 @@ func (g *goAPISupervisor) RenderContext(ctx context.Context, regions []goRenderR
 	defer resp.Body.Close()
 	dec := json.NewDecoder(resp.Body)
 	firstErr := ""
+	nameOf := make(map[string]string, len(miss))
+	for _, r := range miss {
+		nameOf[r.ID] = r.Name
+	}
+	varyOf := map[string]*goVaryFrame{}
 	for {
 		var frame struct {
-			Type  string `json:"type"`
-			ID    string `json:"id"`
-			HTML  string `json:"html"`
-			Error string `json:"error"`
+			Type  string       `json:"type"`
+			ID    string       `json:"id"`
+			HTML  string       `json:"html"`
+			Error string       `json:"error"`
+			Vary  *goVaryFrame `json:"vary"`
 		}
 		if err := dec.Decode(&frame); err != nil {
 			break
+		}
+		if frame.ID != "" && frame.Error == "" {
+			varyOf[frame.ID] = frame.Vary
 		}
 		if frame.Error != "" && firstErr == "" {
 			firstErr = frame.Error
@@ -311,13 +444,34 @@ func (g *goAPISupervisor) RenderContext(ctx context.Context, regions []goRenderR
 	// Cache renders that declare a revalidate window, unless a revalidation
 	// ran while they rendered (their HTML may predate it).
 	g.mu.Lock()
+	// What the renders read of the request is learned first: the entries below
+	// are keyed on it.
+	if g.vary == nil {
+		g.vary = map[string]*regionVary{}
+	}
+	for id, vf := range varyOf {
+		name := nameOf[id]
+		if name == "" {
+			continue
+		}
+		v := g.vary[name]
+		if v == nil {
+			v = &regionVary{}
+			g.vary[name] = v
+		}
+		v.merge(vf)
+	}
 	if g.invalidations == startGen {
 		for _, r := range miss {
 			if r.Revalidate <= 0 {
 				continue
 			}
 			if html, ok := out[r.ID]; ok {
-				g.regionCacheSetLocked(regionKey(r), regionCacheEntry{
+				key, known := g.regionCacheKeyLocked(r)
+				if !known {
+					continue
+				}
+				g.regionCacheSetLocked(key, regionCacheEntry{
 					html:  html,
 					exp:   time.Now().Add(time.Duration(r.Revalidate) * time.Second),
 					route: regionRoute(r),
@@ -329,21 +483,37 @@ func (g *goAPISupervisor) RenderContext(ctx context.Context, regions []goRenderR
 	return out, nil
 }
 
-// regionCacheSetLocked stores an entry, evicting expired entries and then an
-// arbitrary one when the cache is full. The caller holds g.mu.
+// regionCacheSetLocked stores an entry. When the cache is full, expired
+// entries go first, then the oldest entry nobody asked for twice (so a client
+// minting request variants cannot flush the entries that are being hit), then
+// the oldest. The caller holds g.mu.
 func (g *goAPISupervisor) regionCacheSetLocked(key string, e regionCacheEntry) {
-	if _, ok := g.regionCache[key]; !ok && len(g.regionCache) >= goRegionCacheMax {
+	g.seq++
+	e.seq = g.seq
+	if old, ok := g.regionCache[key]; ok {
+		e.hits = old.hits
+	} else if len(g.regionCache) >= goRegionCacheMax {
 		now := time.Now()
 		for k, v := range g.regionCache {
 			if !now.Before(v.exp) {
 				delete(g.regionCache, k)
 			}
 		}
-		for k := range g.regionCache {
-			if len(g.regionCache) < goRegionCacheMax {
-				break
+		for len(g.regionCache) >= goRegionCacheMax {
+			victim, once := "", false
+			var oldest uint64
+			for k, v := range g.regionCache {
+				cold := v.hits == 0
+				switch {
+				case victim == "":
+				case cold && !once:
+				case cold == once && v.seq < oldest:
+				default:
+					continue
+				}
+				victim, once, oldest = k, cold, v.seq
 			}
-			delete(g.regionCache, k)
+			delete(g.regionCache, victim)
 		}
 	}
 	g.regionCache[key] = e
