@@ -276,9 +276,24 @@ export async function resolveMetadata(segments: MetadataSegment[], rawProps: Met
       const { themeColor, colorScheme, ...rest } = mod.viewport;
       acc = mergeSegment(acc, { viewport: rest, ...(themeColor !== undefined ? { themeColor } : {}), ...(colorScheme !== undefined ? { colorScheme } : {}) });
     }
-    if (seg.files) acc = mergeFiles(acc, seg.files, own);
+    if (seg.files) acc = mergeFiles(acc, fillParams(seg.files, rawProps.params), own);
   }
   return { metadata: acc.metadata, templates: { openGraph: acc.openGraphTemplate, twitter: acc.twitterTemplate }, errors };
+}
+
+// Fills [param], [...param] and [[...param]] placeholders in the URLs of a file
+// convention's metadata with the request's params (an image route in a dynamic
+// segment is built once per param set, at a URL named after it).
+function fillParams(files: Metadata, params: unknown): Metadata {
+  const values = (params && typeof params === 'object' ? params : {}) as Record<string, string>;
+  const fill = (url: string): string =>
+    url.replace(/\/?\[\[?(?:\.\.\.)?([^\]]+)\]\]?/g, (_m, name: string) => (values[name] ? '/' + values[name] : ''));
+  const fixImages = (images: unknown): unknown =>
+    Array.isArray(images) ? images.map((i) => (i && typeof i === 'object' && typeof (i as { url?: unknown }).url === 'string' ? { ...i, url: fill((i as { url: string }).url) } : i)) : images;
+  const out: Metadata = { ...files };
+  if (files.openGraph) out.openGraph = { ...files.openGraph, images: fixImages(files.openGraph.images) as OpenGraph['images'] };
+  if (files.twitter) out.twitter = { ...files.twitter, images: fixImages(files.twitter.images) as Twitter['images'] };
+  return out;
 }
 
 // A file convention fills the fields the segment's own metadata left out.

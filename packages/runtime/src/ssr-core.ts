@@ -400,7 +400,7 @@ export function takeHeadTitle(html: string): { title: string; html: string } {
  */
 function metadataSegmentsOf(mod: any): MetadataSegment[] | null {
   const layouts: MetadataSegment[] = Array.isArray(mod.__krateMetadata) ? mod.__krateMetadata : [];
-  const segments: MetadataSegment[] = [...layouts, { mod, file: "page" }];
+  const segments: MetadataSegment[] = [...layouts, { mod, file: "page", files: mod.__krateMetadataFiles }];
   return segments.some((s) => s.mod && typeof s.mod.generateMetadata === "function") ? segments : null;
 }
 

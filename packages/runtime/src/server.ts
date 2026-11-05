@@ -20,6 +20,10 @@ export {
 export type { AppRouterInstance } from './navigation-server.js';
 export type { RequestContext, RequestCookies } from './request-context.js';
 export { resolveMetadata, renderMetadataTags, metadataHeadTags } from './metadata.js';
+export { renderSitemapXML, renderRobotsTXT, renderManifestJSON } from './metadata-routes.js';
+export type { MetadataRoute, SitemapEntry, RobotsFile, RobotsRule, ManifestFile } from './metadata-routes.js';
+export { ImageResponse } from './og.js';
+export type { ImageResponseOptions } from './og.js';
 export type { Metadata, ResolvingMetadata, ResolvingViewport, Viewport, MetadataSegment, MetadataModule, MetadataProps } from './metadata.js';
 
 // Signal (server: returns initial value, no reactivity)

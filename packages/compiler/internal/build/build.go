@@ -110,10 +110,13 @@ type PageResult struct {
 	// ServerExports lists the async server components rendered as regions of
 	// this page; the page server bundle exports each one (serverbundle.go).
 	ServerExports []ServerExport
-	// MetadataLayouts are the layouts above the page that export metadata or
-	// generateMetadata (absolute paths, outermost first); the page server bundle
-	// exports their modules so the renderer can merge the chain per request.
-	MetadataLayouts []string
+	// MetadataSegments are the layouts above the page that export metadata or
+	// generateMetadata, and the images of the directories above it (outermost
+	// first); the page server bundle exports them so the renderer can merge the
+	// chain per request.
+	MetadataSegments []metaSegment
+	// MetadataPageFiles is the convention-file metadata (images) of the page's own route.
+	MetadataPageFiles string
 	// ClientBoundaries lists the "use client" modules in the module graph of a
 	// page that renders server components. The page server bundle wraps their
 	// exports in client boundaries (clientboundary.go).
@@ -121,6 +124,10 @@ type PageResult struct {
 }
 
 type Builder struct {
+	// metaImages indexes the images the opengraph-image and twitter-image
+	// convention files produced in this build.
+	metaImages *metaImages
+
 	Root    string
 	Cfg     *config.Config
 	DevMode bool
@@ -793,6 +800,14 @@ func (b *Builder) BuildAll() error {
 	}
 	if err := validateRouteTree(pages, b.Cfg.PagesDir); err != nil {
 		return err
+	}
+	// Metadata routes (sitemap, robots, manifest, opengraph-image) run first:
+	// the pages' <head> carries the image URLs they produce.
+	if errs := b.buildMetadataRoutes(pages); len(errs) > 0 {
+		for _, err := range errs {
+			fmt.Fprintf(os.Stderr, "  %sMetadata route error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{err}), "\n", "\n    "))
+		}
+		return errors.Join(errs...)
 	}
 	// Intercepting slot pages are built as fragments the SPA router swaps
 	// into their slot (see parallel.go).
@@ -2374,13 +2389,14 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	emitResult.HTML = renderCtx.HTML
 	emitResult.HeadHTML = renderCtx.HeadHTML
 	bundle.CSS = renderCtx.RawCSS
+	metaSegs, metaPageFiles := b.metadataSegments(page)
 	{
 		var metaParams map[string]string
 		if isDynRoute {
 			metaParams = dynamicRouteSentinels(extractParamNames(page, b.Cfg.PagesDir))
 		}
 		requestTime := renderMode == RenderSSR || renderMode == RenderISR
-		emitResult.HeadHTML += b.pageMetadataHeadFor(page, entryModule.SourceCode, requestTime, metaParams, bnd)
+		emitResult.HeadHTML += b.pageMetadataHeadFor(page, entryModule.SourceCode, requestTime, metaParams, bnd, metaSegs, metaPageFiles)
 	}
 
 	// Run AfterMarkdownParse hooks for markdown pages (plugins can modify the
@@ -2501,7 +2517,8 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			GoBaked:           goBaked,
 			ServerPage:        serverPage,
 			ServerExports:     serverExportsOf(regions),
-			MetadataLayouts:   b.metadataLayouts(page),
+			MetadataSegments:  metaSegs,
+			MetadataPageFiles: metaPageFiles,
 			ClientBoundaries:  clientBoundaries,
 		}, bundle.CSS, nil
 	}
@@ -2669,7 +2686,8 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		GoBaked:           goBaked,
 		ServerPage:        serverPage,
 		ServerExports:     serverExportsOf(regions),
-		MetadataLayouts:   b.metadataLayouts(page),
+		MetadataSegments:  metaSegs,
+		MetadataPageFiles: metaPageFiles,
 		ClientBoundaries:  clientBoundaries,
 	}
 	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes)
@@ -3277,6 +3295,9 @@ func findPages(dir string) ([]string, error) {
 		}
 		if isPagesEndpointFile(base) {
 			return nil // a prerendered endpoint, built by buildPagesEndpoints
+		}
+		if isMetadataRouteFile(base) {
+			return nil // sitemap.ts, robots.ts, opengraph-image.tsx...: built by buildMetadataRoutes
 		}
 		if !strings.HasPrefix(base, "_") && !isRouteConventionFile(base) && !isUseServerFile(path) {
 			pages = append(pages, path)

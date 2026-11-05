@@ -85,6 +85,10 @@
     "./cache-redis": {
       "types": "./dist/cache-redis.d.ts",
       "default": "./dist/cache-redis.js"
+    },
+    "./og": {
+      "types": "./dist/og.d.ts",
+      "default": "./dist/og.js"
     }
   },
   "files": [

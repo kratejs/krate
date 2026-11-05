@@ -609,7 +609,8 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	b.printReactiveDiags(reactive.Build(emitResult.Signatures).Validate())
 
 	requestTime := renderMode == RenderSSR || renderMode == RenderISR
-	emitResult.HeadHTML += b.pageMetadataHeadFor(spp.PagePath, entryModule.SourceCode, requestTime, spp.Params, bnd)
+	metaSegs, metaPageFiles := b.metadataSegments(spp.PagePath)
+	emitResult.HeadHTML += b.pageMetadataHeadFor(spp.PagePath, entryModule.SourceCode, requestTime, spp.Params, bnd, metaSegs, metaPageFiles)
 
 	// Run AfterRender hooks (pre-layout) so plugins can modify HTML/head/CSS for
 	// statically generated dynamic-param pages, matching buildPage.
@@ -728,9 +729,10 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		Regions:     regions,
 		GoBaked:     goBaked,
 
-		ServerPage:       serverPage,
-		ServerExports:    serverExportsOf(regions),
-		MetadataLayouts:  b.metadataLayouts(spp.PagePath),
-		ClientBoundaries: clientBoundaries,
+		ServerPage:        serverPage,
+		ServerExports:     serverExportsOf(regions),
+		MetadataSegments:  metaSegs,
+		MetadataPageFiles: metaPageFiles,
+		ClientBoundaries:  clientBoundaries,
 	}, bundle.CSS, nil
 }

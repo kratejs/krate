@@ -20,6 +20,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/compiler/internal/ogimage"
 	"github.com/kratejs/krate/packages/compiler/internal/rediscache"
 )
 
@@ -294,6 +295,31 @@ func (h *revalidateHost) handler() http.Handler {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(res)
+	})
+	// ImageResponse drawn per request by a server runtime (Node API routes):
+	// the same renderer the build uses for opengraph-image files.
+	mux.HandleFunc("/__krate/internal/image", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !h.Authorized(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(r.Body, 32<<20))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		spec, err := ogimage.ParseSpec(body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		png, err := ogimage.Render(spec)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(png)
 	})
 	return mux
 }

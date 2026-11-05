@@ -33,6 +33,20 @@ func generateSitemap(ctx *BuildResultHookCtx) error {
 	opts := &SitemapPluginOptions{}
 	configured := false
 
+	// A sitemap.ts file in the pages directory is the sitemap: it wins.
+	if cfg, ok := ctx.Config.(*config.Config); ok {
+		if file, found := conventionFile(cfg, "sitemap"); found {
+			wouldRun := cfg.SEO.BaseURL != ""
+			for _, pc := range cfg.Plugins {
+				wouldRun = wouldRun || pc.Name == "sitemap"
+			}
+			if wouldRun {
+				announceOverride(file, "sitemap.xml", "the sitemap plugin")
+			}
+			return nil
+		}
+	}
+
 	if cfg, ok := ctx.Config.(*config.Config); ok {
 		for _, pc := range cfg.Plugins {
 			if pc.Name == "sitemap" {

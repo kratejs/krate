@@ -63,18 +63,29 @@ func paramsKey(params map[string]string) string {
 
 // metadataEntrySource builds the module that resolves the chain for each
 // param set and assigns the results to the eval global (or prints them).
-func metadataEntrySource(page string, layouts []string, root string, sets []map[string]string, print bool) string {
+func metadataEntrySource(page string, segs []metaSegment, pageFiles, root string, sets []map[string]string, print bool) string {
 	var b strings.Builder
 	b.WriteString("import { metadataHeadTags } from \"@krate/runtime/server\";\n")
 	fmt.Fprintf(&b, "import * as __page from %s;\n", strconv.Quote(filepath.ToSlash(page)))
-	var segs []string
-	for i, l := range layouts {
-		fmt.Fprintf(&b, "import * as __l%d from %s;\n", i, strconv.Quote(filepath.ToSlash(l)))
-		segs = append(segs, fmt.Sprintf("{ file: %s, mod: __l%d }", strconv.Quote(relTo(root, l)), i))
+	var chain []string
+	for i, sg := range segs {
+		var fields []string
+		if sg.Path != "" {
+			fmt.Fprintf(&b, "import * as __l%d from %s;\n", i, strconv.Quote(filepath.ToSlash(sg.Path)))
+			fields = append(fields, fmt.Sprintf("file: %s", strconv.Quote(relTo(root, sg.Path))), fmt.Sprintf("mod: __l%d", i))
+		}
+		if sg.Files != "" {
+			fields = append(fields, "files: "+sg.Files)
+		}
+		chain = append(chain, "{ "+strings.Join(fields, ", ")+" }")
 	}
-	segs = append(segs, fmt.Sprintf("{ file: %s, mod: __page }", strconv.Quote(relTo(root, page))))
+	pageSeg := fmt.Sprintf("{ file: %s, mod: __page", strconv.Quote(relTo(root, page)))
+	if pageFiles != "" {
+		pageSeg += ", files: " + pageFiles
+	}
+	chain = append(chain, pageSeg+" }")
 	setsJSON, _ := json.Marshal(sets)
-	fmt.Fprintf(&b, "const __sets = %s;\nconst __chain = [%s];\n", setsJSON, strings.Join(segs, ", "))
+	fmt.Fprintf(&b, "const __sets = %s;\nconst __chain = [%s];\n", setsJSON, strings.Join(chain, ", "))
 	b.WriteString(`const __results = [];
 for (const params of __sets) {
   const errors = [];
@@ -103,7 +114,7 @@ func relTo(root, path string) string {
 }
 
 // evalMetadata resolves the chain of page for every param set.
-func (b *Builder) evalMetadata(page string, layouts []string, sets []map[string]string, bnd *bundler.Bundler) ([]metadataResult, error) {
+func (b *Builder) evalMetadata(page string, segs []metaSegment, pageFiles string, sets []map[string]string, bnd *bundler.Bundler) ([]metadataResult, error) {
 	abs, err := filepath.Abs(page)
 	if err != nil {
 		return nil, err
@@ -128,7 +139,7 @@ func (b *Builder) evalMetadata(page string, layouts []string, sets []map[string]
 	}
 
 	raw, eerr := jseval.Eval(jseval.Options{
-		Source:        metadataEntrySource(abs, layouts, b.Root, sets, false),
+		Source:        metadataEntrySource(abs, segs, pageFiles, b.Root, sets, false),
 		ResolveDir:    filepath.Dir(abs),
 		Sourcefile:    "krate-metadata-entry.ts",
 		Loader:        api.LoaderTSX,
@@ -146,7 +157,7 @@ func (b *Builder) evalMetadata(page string, layouts []string, sets []map[string]
 		}
 	}
 
-	output, err := b.runBootstrapBundle(abs, metadataEntrySource(abs, layouts, b.Root, sets, true), "metadata", bnd)
+	output, err := b.runBootstrapBundle(abs, metadataEntrySource(abs, segs, pageFiles, b.Root, sets, true), "metadata", bnd)
 	if err != nil {
 		if eerr != nil {
 			return nil, fmt.Errorf("%v (embedded engine: %v)", err, eerr)
@@ -231,7 +242,8 @@ func (b *Builder) prefetchMetadata(page string, sets []map[string]string, bnd *b
 	if len(sets) == 0 || !b.pageNeedsMetadataEval(page) {
 		return
 	}
-	results, err := b.evalMetadata(page, b.metadataLayouts(page), sets, bnd)
+	segs, pageFiles := b.metadataSegments(page)
+	results, err := b.evalMetadata(page, segs, pageFiles, sets, bnd)
 	for i, set := range sets {
 		r := metadataResult{}
 		if err != nil {
@@ -254,7 +266,8 @@ func (b *Builder) pageNeedsMetadataEval(page string) bool {
 	if _, fn := moduleMetadataExports(string(src)); fn {
 		return true
 	}
-	return len(b.metadataLayouts(page)) > 0
+	segs, pageFiles := b.metadataSegments(page)
+	return len(segs) > 0 || pageFiles != ""
 }
 
 // pageMetadataHeadFor returns the head tags for a page's metadata chain.
@@ -262,19 +275,21 @@ func (b *Builder) pageNeedsMetadataEval(page string) bool {
 // requestTime is true for a page that renders per request with a server
 // bundle: when its chain has a generateMetadata function, the renderer
 // resolves the whole chain per request and the build bakes nothing.
-func (b *Builder) pageMetadataHeadFor(page, source string, requestTime bool, params map[string]string, bnd *bundler.Bundler) string {
+func (b *Builder) pageMetadataHeadFor(page, source string, requestTime bool, params map[string]string, bnd *bundler.Bundler, segs []metaSegment, pageFiles string) string {
 	switch strings.ToLower(filepath.Ext(page)) {
 	case ".md", ".mdx":
 		return ""
 	}
 	pageMeta, pageFn := moduleMetadataExports(source)
-	layouts := b.metadataLayouts(page)
-	if !pageMeta && !pageFn && len(layouts) == 0 {
+	if !pageMeta && !pageFn && len(segs) == 0 && pageFiles == "" {
 		return ""
 	}
 	chainFn := pageFn
-	for _, l := range layouts {
-		if data, err := os.ReadFile(l); err == nil {
+	for _, sg := range segs {
+		if sg.Path == "" {
+			continue
+		}
+		if data, err := os.ReadFile(sg.Path); err == nil {
 			if _, fn := moduleMetadataExports(string(data)); fn {
 				chainFn = true
 			}
@@ -284,7 +299,7 @@ func (b *Builder) pageMetadataHeadFor(page, source string, requestTime bool, par
 		return ""
 	}
 	// A page-only literal, with nothing to merge, reads without running code.
-	if !chainFn && len(layouts) == 0 && !viewportExportRe.MatchString(source) {
+	if !chainFn && len(segs) == 0 && pageFiles == "" && !viewportExportRe.MatchString(source) {
 		if tags, declared := pageMetadataLiteral(page, source); tags != "" || !declared {
 			return tags
 		}
@@ -294,7 +309,7 @@ func (b *Builder) pageMetadataHeadFor(page, source string, requestTime bool, par
 	if ok {
 		r = res.(metadataResult)
 	} else {
-		results, err := b.evalMetadata(page, layouts, []map[string]string{params}, bnd)
+		results, err := b.evalMetadata(page, segs, pageFiles, []map[string]string{params}, bnd)
 		if err != nil {
 			r = metadataResult{Errors: []string{err.Error()}}
 		} else {
