@@ -37,7 +37,9 @@ var timestampRe = regexp.MustCompile(`\d{10,}`)
 var digestRe = regexp.MustCompile(`(id=d>|id="d">|"digest":")[0-9a-f]{10}`)
 
 func normalizeBody(s string) string {
-	return digestRe.ReplaceAllString(timestampRe.ReplaceAllString(s, "N"), "${1}DIGEST")
+	// The digest goes first: a digest of ten decimal digits (about 1 run in 100,
+	// as the stack in it holds a random temp path) looks like a timestamp.
+	return timestampRe.ReplaceAllString(digestRe.ReplaceAllString(s, "${1}DIGEST"), "N")
 }
 
 func setCookieNames(h http.Header) string {
