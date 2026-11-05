@@ -428,10 +428,14 @@ func (l *imageLowerer) lower(orig *ast.JSXElement) *ast.JSXElement {
 	if quality <= 0 {
 		quality = imgCfg.Quality
 	}
-	if sizes == "" && sizesExpr == nil {
+	// Without an explicit sizes, an image with a requested width is shown at
+	// that width, so describe it that way; the generated variants are 1x/2x of
+	// it. Otherwise fall back to the configured or default layout guess.
+	autoSizes := sizes == "" && sizesExpr == nil && (reqW > 0 || reqH > 0)
+	if sizes == "" && sizesExpr == nil && !autoSizes {
 		sizes = imgCfg.Sizes
 	}
-	if sizes == "" && sizesExpr == nil {
+	if sizes == "" && sizesExpr == nil && !autoSizes {
 		sizes = "(max-width: 768px) 100vw, 50vw"
 	}
 	wantPlaceholder := imgCfg.PlaceholderEnabled()
@@ -505,6 +509,15 @@ func (l *imageLowerer) lower(orig *ast.JSXElement) *ast.JSXElement {
 					"Use a PNG, JPEG, GIF, WebP or SVG file.")
 			}
 			return nil
+		}
+	}
+
+	if autoSizes && result.Width > 0 {
+		sizes = fmt.Sprintf("%dpx", result.Width)
+	} else if autoSizes {
+		sizes = imgCfg.Sizes
+		if sizes == "" {
+			sizes = "(max-width: 768px) 100vw, 50vw"
 		}
 	}
 

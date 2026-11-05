@@ -213,3 +213,33 @@ func TestParsePixels(t *testing.T) {
 		}
 	}
 }
+
+func TestImageSizesFollowRequestedWidth(t *testing.T) {
+	html, _, err := buildImagePage(t, `export default function P() {
+  return <main>
+    <Image src="/square.png" alt="a" width={100} />
+    <Image src="/square.png" alt="b" width={100} sizes="50vw" />
+    <Image src="/square.png" alt="c" />
+  </main>;
+}
+`, nil)
+	if err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	pics := regexp.MustCompile(`(?s)<picture>.*?</picture>`).FindAllString(html, -1)
+	if len(pics) != 3 {
+		t.Fatalf("want 3 pictures, got %d:\n%s", len(pics), html)
+	}
+	if !regexp.MustCompile(`sizes="?100px`).MatchString(pics[0]) || strings.Contains(pics[0], "100vw") {
+		t.Errorf("width={100} should give sizes=100px: %s", pics[0])
+	}
+	if strings.Contains(pics[0], " 640w") || !strings.Contains(pics[0], " 100w") || !strings.Contains(pics[0], " 200w") {
+		t.Errorf("width={100} should ship 100w and 200w only: %s", pics[0])
+	}
+	if !regexp.MustCompile(`sizes="?50vw`).MatchString(pics[1]) {
+		t.Errorf("explicit sizes must win: %s", pics[1])
+	}
+	if !strings.Contains(pics[2], "(max-width: 768px) 100vw, 50vw") {
+		t.Errorf("no width keeps the default sizes: %s", pics[2])
+	}
+}
