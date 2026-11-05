@@ -172,6 +172,15 @@ func TestValidateServerAndSidecar(t *testing.T) {
 	}
 
 	c = Default()
+	c.Server.TrustedProxies = -1
+	if _, err := c.Validate(); err == nil {
+		t.Error("expected error for negative server.trustedProxies")
+	}
+	if w := UnknownKeyWarnings([]byte(`{"server":{"trustProxy":true,"trustedProxies":2}}`)); len(w) != 0 {
+		t.Errorf("server.trustedProxies must be a known key, got warnings %v", w)
+	}
+
+	c = Default()
 	c.BasePath = "docs"
 	if _, err := c.Validate(); err == nil {
 		t.Error("expected error for basePath without leading /")

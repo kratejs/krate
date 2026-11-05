@@ -428,6 +428,9 @@ export default function VideoPage(props) {
 	// called the destructive /__krate/ssr/revalidate endpoint (deleteRoute +
 	// render the paramless base), so every dynamic variant was wiped and the
 	// next request that should have been a HIT came back MISS.
+	// The refresh only re-renders variants older than the window, so let the
+	// freshly revalidated entries age past it first.
+	time.Sleep(2600 * time.Millisecond)
 	postRefresh := postJSON(t, base, "/__krate/ssr/refresh", `{"route":"/video/[id]"}`)
 	if postRefresh.status != 200 {
 		t.Fatalf("refresh endpoint status %d: %s", postRefresh.status, postRefresh.body)

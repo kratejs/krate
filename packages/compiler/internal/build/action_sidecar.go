@@ -87,6 +87,13 @@ function internalAuthorized(value) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// sidecarAuthorized gates every request to the sidecar on the host's secret.
+// With no secret configured (the script run on its own) it lets requests in.
+function sidecarAuthorized(value) {
+  if (!KRATE_INTERNAL_SECRET) return true;
+  return internalAuthorized(value);
+}
+
 // applyInternalLocal applies a host operation to this process's caches.
 function applyInternalLocal(op, payload) {
   if (op === 'cache-invalidate') {

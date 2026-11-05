@@ -221,3 +221,33 @@ func TestMiddlewareGateStaticExtensionBypass(t *testing.T) {
 		t.Errorf("with no static layer middleware must always run, got %d", code)
 	}
 }
+
+// A client-supplied X-Forwarded-For entry must never decide the address: the
+// proxy appends the real client, so the answer is that hop, not the first one.
+func TestClientIPIgnoresClientSuppliedForwardedEntries(t *testing.T) {
+	proxyTrust.Store(true)
+	t.Cleanup(func() { proxyTrust.Store(false); proxyHops.Store(0) })
+	var got string
+	capture := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = clientIP(r) })
+	do := func(xff, peer string) string {
+		r := httptest.NewRequest("GET", "http://svc/", nil)
+		r.RemoteAddr = peer + ":4000"
+		if xff != "" {
+			r.Header.Set("X-Forwarded-For", xff)
+		}
+		forwardedHeadersMiddleware(true, capture).ServeHTTP(httptest.NewRecorder(), r)
+		return got
+	}
+	// One proxy (10.0.0.5) that appended the real client to a spoofed value.
+	if ip := do("6.6.6.6, 203.0.113.9", "10.0.0.5"); ip != "203.0.113.9" {
+		t.Errorf("one proxy: clientIP = %q, want 203.0.113.9", ip)
+	}
+	if ip := do("", "198.51.100.4"); ip != "198.51.100.4" {
+		t.Errorf("no header: clientIP = %q, want the peer", ip)
+	}
+	// Two proxies in front: the client is two hops from the right.
+	proxyHops.Store(2)
+	if ip := do("6.6.6.6, 203.0.113.9, 10.0.0.2", "10.0.0.5"); ip != "203.0.113.9" {
+		t.Errorf("two proxies: clientIP = %q, want 203.0.113.9", ip)
+	}
+}

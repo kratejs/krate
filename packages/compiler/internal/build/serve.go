@@ -152,6 +152,13 @@ function resolveDynamicFile(dir, segments, exts) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    // Only the Krate host (which adds the per-process secret after running
+    // middleware and the action checks) may call the sidecar.
+    if (!sidecarAuthorized(req.headers['x-krate-internal'])) {
+      res.statusCode = 403;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.end('forbidden');
+    }
     const urlObj = new URL(req.url, "http://" + req.headers.host);
     const urlPath = urlObj.pathname;
 
@@ -647,6 +654,9 @@ Bun.serve({
   port: PORT,
   hostname: '127.0.0.1',
   async fetch(req) {
+    if (!sidecarAuthorized(req.headers.get('x-krate-internal'))) {
+      return new Response('forbidden', { status: 403, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    }
     const url = new URL(req.url);
     const urlPath = url.pathname;
     if (urlPath === '/__krate/internal/cache-invalidate') {
@@ -1464,6 +1474,14 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	sidecarURL, _ := url.Parse(fmt.Sprintf("http://localhost:%d", apiPort))
 	apiProxy := httputil.NewSingleHostReverseProxy(sidecarURL)
+	// Every request the host forwards carries the per-process secret (replacing
+	// anything the client sent), so the sidecar can refuse direct connections
+	// that bypass the middleware, CSRF and body-limit checks done here.
+	baseDirector := apiProxy.Director
+	apiProxy.Director = func(r *http.Request) {
+		baseDirector(r)
+		r.Header.Set(internalSecretHeader, revalHost.secret)
+	}
 	apiProxy.Transport = newSidecarTransport()
 
 	// Optional user-provided API sidecar. Requests it owns are forwarded first;
@@ -1509,6 +1527,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		dev:        hub != nil,
 		sidecarURL: fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort),
 		file:       middlewarePath,
+		secret:     revalHost.secret,
 		staticExists: func(urlPath string) bool {
 			f, err := hardenedDir{http.Dir(absOut)}.Open(urlPath)
 			if err != nil {
@@ -2147,6 +2166,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		devMux = devErrorShell(hub, root, absOut, mux)
 	}
 	proxyTrust.Store(cfg.Server.TrustProxy)
+	proxyHops.Store(int32(cfg.Server.TrustedProxies))
 	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, devMux)))))))
 
 	listenerOwned = true

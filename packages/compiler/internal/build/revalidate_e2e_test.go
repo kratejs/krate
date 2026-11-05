@@ -447,7 +447,14 @@ func startCacheAPISidecar(t *testing.T, host *revalidateHost, actionsSrc, routes
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	srv := httptest.NewServer(actionHandler(httputil.NewSingleHostReverseProxy(target), 1<<20))
+	// Like the real host, the proxy adds the per-process secret the sidecar requires.
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	baseDirector := proxy.Director
+	proxy.Director = func(r *http.Request) {
+		baseDirector(r)
+		r.Header.Set(internalSecretHeader, host.secret)
+	}
+	srv := httptest.NewServer(actionHandler(proxy, 1<<20))
 	t.Cleanup(srv.Close)
 	return srv, base
 }
@@ -579,7 +586,9 @@ export async function GET() { return Response.json({ pid: process.pid, n: await 
 	}
 
 	read := func() (string, float64) {
-		resp, err := freshConnClient.Get(base + "/api/read")
+		req, _ := http.NewRequest(http.MethodGet, base+"/api/read", nil)
+		req.Header.Set(internalSecretHeader, host.secret)
+		resp, err := freshConnClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -611,7 +620,10 @@ export async function GET() { return Response.json({ pid: process.pid, n: await 
 	}
 
 	// The write route's revalidateTag reaches the host before it answers.
-	resp, err = http.Post(base+"/api/write", "application/json", nil)
+	writeReq, _ := http.NewRequest(http.MethodPost, base+"/api/write", nil)
+	writeReq.Header.Set("Content-Type", "application/json")
+	writeReq.Header.Set(internalSecretHeader, host.secret)
+	resp, err = http.DefaultClient.Do(writeReq)
 	if err != nil {
 		t.Fatal(err)
 	}
