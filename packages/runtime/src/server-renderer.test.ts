@@ -72,7 +72,7 @@ function bundles() {
   );
   write(
     "rt/price.js",
-    `globalThis.__krate_render = (json) => { const p = JSON.parse(json); return "<b>" + p.price + "/" + (p.params ? p.params.id : "-") + "</b>"; };\n`,
+    `globalThis.__krate_render = (json) => { const p = typeof json === "string" ? JSON.parse(json) : json; return "<b>" + p.price + "/" + (p.params ? p.params.id : "-") + "</b>"; };\n`,
   );
   write("404.html", "<h1>custom not found</h1>");
   write("500.html", "<h1>custom error</h1>");
