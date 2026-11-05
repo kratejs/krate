@@ -36,8 +36,13 @@ var timestampRe = regexp.MustCompile(`\d{10,}`)
 // failed render depends on the stack, which differs between hosts).
 var digestRe = regexp.MustCompile(`(id=d>|id="d">|"digest":")[0-9a-f]{10}`)
 
+// normalizeBody blanks what legitimately differs between hosts. Digests go
+// first: a digest is ten hex characters, and one that happens to be all
+// decimal digits (about 1 in 100) looks like a timestamp, so normalizing
+// timestamps first turned it into "N" on one host and "DIGEST" on the other,
+// and the 500 page comparison failed on that run only.
 func normalizeBody(s string) string {
-	return digestRe.ReplaceAllString(timestampRe.ReplaceAllString(s, "N"), "${1}DIGEST")
+	return timestampRe.ReplaceAllString(digestRe.ReplaceAllString(s, "${1}DIGEST"), "N")
 }
 
 func setCookieNames(h http.Header) string {
@@ -172,4 +177,16 @@ func TestServerlessNodeParity(t *testing.T) {
 		})
 	}
 	_ = deploy.ServerFeatures
+}
+
+func TestNormalizeBodyDigestOfOnlyDigits(t *testing.T) {
+	const page = `<script type="application/json" id="__krate_error">{"name":"Error","message":"Internal Server Error","digest":"%s"}</script> t=1700000000000`
+	letters := normalizeBody(strings.Replace(page, "%s", "08926a4e5a", 1))
+	digits := normalizeBody(strings.Replace(page, "%s", "0123456789", 1))
+	if letters != digits {
+		t.Errorf("two digests must normalize alike:\n%s\n%s", letters, digits)
+	}
+	if !strings.Contains(digits, "t=N") {
+		t.Errorf("timestamps must still be blanked: %s", digits)
+	}
 }
