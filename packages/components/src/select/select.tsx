@@ -16,6 +16,11 @@ export interface NativeSelectProps {
   options?: SelectOption[];
   defaultValue?: string;
   disabled?: boolean;
+  id?: string;
+  required?: boolean;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /**
@@ -25,7 +30,9 @@ export interface NativeSelectProps {
 export function NativeSelect(props: NativeSelectProps) {
   return (
     <select
-      class="krate-native-select"
+      class={"krate-native-select" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}
+      id={props.id}
+      required={props.required}
       name={props.name}
       aria-label={props.label}
       multiple={false}

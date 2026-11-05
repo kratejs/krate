@@ -18,70 +18,70 @@ import { Button, Card, CardGrid, Badge, Aside, Steps, Tabs, Tooltip } from '@kra
 
 | Component | Description | Props |
 |-----------|-------------|-------|
-| `Card` | Card container with title and children | `title` |
-| `CardGrid` | Responsive grid of cards | - |
-| `LinkCard` | Card that renders as a link | `title`, `href`, `icon` |
-| `LinkButton` | Button that renders as a link | `href`, `variant`, `size`, `icon`, `iconPosition` |
+| `Card` | Card container with title and children | `title`, `titleAs`, `class`, `className`, `id` |
+| `CardGrid` | Responsive grid of cards | `class`, `className`, `id` |
+| `LinkCard` | Card that renders as a link | `title`, `href`, `icon`, `class`, `className`, `id` |
+| `LinkButton` | Button that renders as a link | `href`, `variant`, `size`, `icon`, `iconPosition`, `class`, `className`, `id` |
 | `Button` | `<button>` with variants, sizes, and `asChild` | `variant`, `size`, `type`, `disabled`, `asChild`, `class`, `onClick` |
-| `Badge` | Small status/label pill (variants + sizes) | `variant`, `size` |
-| `Code` | Inline/code block with highlighting | `lang`, `title`, `showCopy` |
-| `Aside` | Callout / aside box | `type`, `title`, `icon` |
-| `Alert` | Inline alert with title/description and variants | `variant`, `title` |
-| `FileTree` | File tree display (`FileTree.Item`/`FileTree.Folder`) | - |
-| `Steps` | Ordered steps (`Steps.Step`) with numbered indicators | - |
-| `Tabs` | Tabbed panels (`Tabs.List`/`Tabs.Trigger`/`Tabs.Content`) | `defaultValue` |
+| `Badge` | Small status/label pill (variants + sizes) | `variant`, `size`, `class`, `className`, `id` |
+| `Code` | Inline/code block with highlighting | `lang`, `title`, `showCopy`, `highlight` |
+| `Aside` | Callout / aside box | `type`, `title`, `icon`, `class`, `className` |
+| `Alert` | Inline alert with title/description and variants | `variant`, `title`, `class`, `className`, `id` |
+| `FileTree` | File tree display (`FileTree.Item`/`FileTree.Folder`) | `class`, `className` |
+| `Steps` | Ordered steps (`Steps.Step`) with numbered indicators | `class`, `className` |
+| `Tabs` | Tabbed panels (`Tabs.List`/`Tabs.Trigger`/`Tabs.Content`) | `defaultValue`, `class`, `className` |
 | `Table` | Accessible table (`Table.Header`/`Table.Body`/`Table.Row`/`Table.Head`/`Table.Cell`/`Table.Caption`/`Table.Footer`) | `class` |
 | `Breadcrumb` | Breadcrumb trail (`Breadcrumb.List`/`Breadcrumb.Item`/`Breadcrumb.Link`/`Breadcrumb.Page`/`Breadcrumb.Separator`) | `class` |
-| `Pagination` | Prev/next + page links (pair with `paginationRange`) | `page`, `total`, `window`, `hrefPrefix`, `param`, `class` |
+| `Pagination` | Prev/next + page links (pair with `paginationRange`) | `page`, `total`, `window`, `hrefPrefix`, `param`, `class`, `id`, `className` |
 | `Skeleton` | CSS shimmer placeholder | `class` |
 
 ## Form controls
 
 | Component | Description | Props |
 |-----------|-------------|-------|
-| `Checkbox` | Checkbox input | - |
-| `RadioGroup` | Grouped radio inputs | `defaultValue`, `label` |
-| `Switch` | Toggle switch | `label` |
-| `Slider` | Range slider | `min`, `max`, `step`, `defaultValue`, `label`, `name` |
-| `Select` / `NativeSelect` | Searchable select / native `<select>` | Select: `options`, `placeholder`, `name`, `label`, `defaultValue`; NativeSelect: `name`, `label`, `placeholder`, `options`, `defaultValue`, `disabled` |
+| `Checkbox` | Checkbox input | `name`, `value`, `defaultChecked`, `disabled`, `required`, `id`, `class`, `className`, `label` |
+| `RadioGroup` | Grouped radio inputs | `defaultValue`, `label`, `class`, `className`, `id` |
+| `Switch` | Toggle switch | `label`, `name`, `value`, `defaultChecked`, `disabled`, `required`, `id`, `class`, `className` |
+| `Slider` | Range slider | `min`, `max`, `step`, `defaultValue`, `label`, `name`, `disabled`, `id`, `class`, `className` |
+| `Select` / `NativeSelect` | Searchable select / native `<select>` | Select: `options`, `placeholder`, `name`, `label`, `defaultValue`, `disabled`, `id`, `class`, `className`; NativeSelect: `name`, `label`, `placeholder`, `options`, `defaultValue`, `disabled`, `id`, `required`, `class`, `className` |
 | `Input` | Text input | `type`, `value`, `placeholder`, `name`, `id`, `disabled`, `required`, `readonly`, `autocomplete`, `class`, `onInput` |
 | `Textarea` | Multi-line text input | `value`, `placeholder`, `name`, `id`, `rows`, `disabled`, `required`, `readonly`, `class`, `onInput` |
-| `Label` | Form label | `htmlFor`, `disabled`, `required` |
-| `Form` | Form container (`Form.Field`/`Form.Input`/`Form.Textarea`/`Form.Submit`) | `action`, `method`, `className` |
-| `OTPField` | One-time-password input | `length`, `value`, `onValueChange`, `disabled`, `label`, `autoFocus`, `onComplete` |
-| `PasswordToggleField` | Password input with visibility toggle | `placeholder`, `value`, `disabled`, `id`, `name`, `showToggle` |
-| `Toggle` / `ToggleGroup` | Toggle button(s) | Toggle: `variant`, `size`; ToggleGroup: `defaultValue`, `label` |
+| `Label` | Form label | `htmlFor`, `disabled`, `required`, `class`, `className`, `id` |
+| `Form` | Form container (`Form.Field`/`Form.Input`/`Form.Textarea`/`Form.Submit`) | `action`, `method`, `class`, `className`, `id` |
+| `OTPField` | One-time-password input | `length`, `value`, `name`, `onValueChange`, `disabled`, `label`, `autoFocus`, `onComplete` |
+| `PasswordToggleField` | Password input with visibility toggle | `placeholder`, `value`, `disabled`, `id`, `name`, `showToggle`, `required`, `autoComplete`, `class`, `className` |
+| `Toggle` / `ToggleGroup` | Toggle button(s) | Toggle: `variant`, `size`, `label`, `id`, `class`, `className`; ToggleGroup: `defaultValue`, `label`, `class`, `className` |
 
 ## Overlays & navigation
 
 | Component | Description | Props |
 |-----------|-------------|-------|
-| `Accordion` | Collapsible sections | `defaultValue`, `label` |
-| `Collapsible` | Collapsible container | `defaultValue`, `label` |
-| `Dialog` | Modal dialog | `label`, `defaultValue`, `defaultOpen`, `open`, `onOpenChange`, `id` |
-| `AlertDialog` | Confirmation dialog | `label`, `defaultValue`, `defaultOpen`, `open`, `onOpenChange`, `id` |
-| `Popover` | Floating popover | `label`, `defaultValue`, `defaultOpen`, `open`, `onOpenChange`, `id` |
-| `Sheet` | Edge-anchored dialog/drawer (`Sheet.Trigger`/`Sheet.Content`/`Sheet.Close`/`Sheet.Title`/`Sheet.Description`) | `label`, `defaultValue`, `defaultOpen`, `open`, `onOpenChange`, `id` |
-| `Command` | Filterable command list / palette | `items`, `placeholder`, `emptyText`, `label`, `class`, `onSelect` |
-| `HoverCard` | Card revealed on hover | - |
-| `DropdownMenu` | Menu triggered by a button | `label`, `defaultValue`, `defaultOpen`, `open`, `onOpenChange`, `id` |
-| `ContextMenu` | Right-click menu | - |
-| `MenuBar` | Horizontal menu bar | `label` |
-| `NavigationMenu` | Navigation menu | `label` |
-| `Tooltip` | Hover tooltip | - |
+| `Accordion` | Collapsible sections | `defaultValue`, `label`, `class`, `className` |
+| `Collapsible` | Collapsible container | `defaultValue`, `label`, `class`, `className` |
+| `Dialog` | Modal dialog | `label`, `defaultValue`, `defaultOpen`, `open`, `onOpenChange`, `id`, `class`, `className` |
+| `AlertDialog` | Confirmation dialog | `label`, `defaultValue`, `defaultOpen`, `open`, `onOpenChange`, `id`, `class`, `className` |
+| `Popover` | Floating popover | `label`, `defaultValue`, `defaultOpen`, `open`, `onOpenChange`, `id`, `class`, `className` |
+| `Sheet` | Edge-anchored dialog/drawer (`Sheet.Trigger`/`Sheet.Content`/`Sheet.Close`/`Sheet.Title`/`Sheet.Description`) | `label`, `defaultValue`, `defaultOpen`, `open`, `onOpenChange`, `id`, `class`, `className` |
+| `Command` | Filterable command list / palette | `items`, `placeholder`, `emptyText`, `label`, `class`, `id`, `onSelect` |
+| `HoverCard` | Card revealed on hover | `id`, `class`, `className` |
+| `DropdownMenu` | Menu triggered by a button | `label`, `defaultValue`, `defaultOpen`, `open`, `onOpenChange`, `id`, `class`, `className` |
+| `ContextMenu` | Right-click menu | `class`, `className` |
+| `MenuBar` | Horizontal menu bar | `label`, `class`, `className` |
+| `NavigationMenu` | Navigation menu | `label`, `class`, `className` |
+| `Tooltip` | Hover tooltip | `id`, `class`, `className` |
 | `Toast` | Toast notifications | `variant` |
 
 ## Feedback & display
 
 | Component | Description | Props |
 |-----------|-------------|-------|
-| `Progress` | Progress indicator | `value`, `max`, `label` |
-| `Avatar` | Avatar image/fallback | `src`, `alt`, `fallback`, `size` |
-| `Separator` | Horizontal/vertical divider | `orientation`, `decorative`, `style` |
-| `AspectRatio` | Fixed aspect-ratio box | `ratio` |
-| `ScrollArea` | Styled scroll container | `orientation`, `maxHeight` |
-| `VisuallyHidden` | Accessible hidden content | - |
-| `Toolbar` | Toolbar of controls | `label` |
+| `Progress` | Progress indicator | `value`, `max`, `label`, `class`, `className`, `id` |
+| `Avatar` | Avatar image/fallback | `src`, `alt`, `fallback`, `size`, `class`, `className`, `id` |
+| `Separator` | Horizontal/vertical divider | `orientation`, `decorative`, `style`, `class`, `className`, `id` |
+| `AspectRatio` | Fixed aspect-ratio box | `ratio`, `class`, `className`, `id` |
+| `ScrollArea` | Styled scroll container | `orientation`, `maxHeight`, `label`, `class`, `className`, `id` |
+| `VisuallyHidden` | Accessible hidden content | `class`, `className`, `id` |
+| `Toolbar` | Toolbar of controls | `label`, `class`, `className` |
 
 ## Zero-JS compound components
 
