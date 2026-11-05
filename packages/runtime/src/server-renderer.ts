@@ -529,6 +529,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (result.denied) {
+    const denied = path.join(OUT_DIR, result.denied + ".html");
+    const fallback = result.denied === 403 ? "<html><body><h1>403 Forbidden</h1></body></html>" : "<html><body><h1>401 Unauthorized</h1></body></html>";
+    res.writeHead(result.denied, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(fs.existsSync(denied) ? fs.readFileSync(denied, "utf-8") : fallback);
+    return;
+  }
+
   if (result.redirect) {
     res.writeHead(result.status === 307 ? 307 : 302, { Location: result.redirect });
     res.end();

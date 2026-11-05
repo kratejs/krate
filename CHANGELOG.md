@@ -140,6 +140,23 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 - `Slider` takes `onChange` and `onInput`. A handler on an optional prop the
   call site does not pass binds nothing, so only the sliders that pass one
   hydrate.
+- Next.js router hooks are exported from `@krate/runtime`: `usePathname`,
+  `useParams`, `useSearchParams`, `useRouter` (`push`, `replace`, `back`,
+  `forward`, `refresh`, `prefetch`) and `useSelectedLayoutSegment(s)`. A module
+  that imports one reads it live, so values follow SPA navigation, back and
+  forward. The static HTML carries the page's own route (`/blog/a` for a page from
+  `generateStaticParams`), SSR pages see their request, and the hooks ship as
+  their own runtime feature (about 1.3 KB gzip) only when a page calls them.
+  `krate migrate nextjs` imports them from the runtime instead of generating
+  `src/migrated/next-navigation*.ts`.
+- `forbidden()` and `unauthorized()` (and the `forbidden.tsx` / `unauthorized.tsx`
+  pages, or `403.tsx` / `401.tsx`) answer 403 and 401 the way `notFound()` answers
+  404: the nearest segment page inside its layouts, never cached, with soft
+  navigation swapping the page in place. They work in SSR, ISR and streaming
+  pages, async server components, server actions and API routes, in `krate start`
+  and the portable handler. A statically built page or a layout that calls one
+  warns (`KR8604`). The migrator maps both pages and the `authInterrupts` flag.
+  API routes that call `notFound()` now answer 404 instead of 500.
 
 ### Fixed
 

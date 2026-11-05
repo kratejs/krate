@@ -7,7 +7,17 @@ export { getActionContext, headers, cookies, redirect } from './action-context.j
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
 export { revalidatePath, revalidateTag, unstable_cache, unstable_noStore } from './cache.js';
 export type { RevalidatePathType, UnstableCacheOptions } from './cache.js';
-export { getRequestContext, notFound } from './request-context.js';
+export { getRequestContext, notFound, forbidden, unauthorized } from './request-context.js';
+export {
+  usePathname,
+  useSearchParams,
+  useParams,
+  useRouter,
+  useSelectedLayoutSegment,
+  useSelectedLayoutSegments,
+  permanentRedirect,
+} from './navigation-server.js';
+export type { AppRouterInstance } from './navigation-server.js';
 export type { RequestContext, RequestCookies } from './request-context.js';
 
 // Signal (server: returns initial value, no reactivity)

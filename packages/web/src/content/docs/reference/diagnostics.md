@@ -538,6 +538,12 @@ The page reads data with cache tags, a revalidate window or `cache: "no-store"`,
 
 A revalidatePath() call names a route that is rendered statically (SSG). The page's HTML is a file baked at build time, so revalidation cannot rebuild it: at runtime the call reports the route under `skipped` and logs a warning. Make the target page ISR (`export const revalidate = N`) or SSR (`export const dynamic = "force-dynamic"`), or rebuild the site to refresh it.
 
+### KR8604
+
+**forbidden() or unauthorized() never runs per request**
+
+forbidden() and unauthorized() answer one request with a 403 or 401 page, so they only work in code that runs on every request: a page rendered with ssr, isr or streaming, an async server component, a server action or an API route. This call sits in a statically built page, or in a layout (layouts are baked into the shell at build time), so it never runs and the page is served to everyone. Make the page request-time (`export const dynamic = "force-dynamic"`), or call the function from an async server component that the page renders.
+
 ### KR8801
 
 **Image source cannot be used**

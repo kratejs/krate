@@ -131,13 +131,18 @@ content again. Event-handler errors are not caught; handle them where they
 happen. Nested `error.tsx` files catch from the inside out, and an error page
 that fails hands the error to the next one up.
 
+`forbidden.tsx` (403) and `unauthorized.tsx` (401) work the same way for the
+`forbidden()` and `unauthorized()` calls; see
+[Forbidden and unauthorized](/docs/core-concepts/routing/#forbidden-and-unauthorized).
+
 A page that throws while it is **prerendered** still fails the build with
 `KR3010`, because there is no meaningful page to ship. Catch the failure with a
 class error boundary inside the page, or move the failing work to request time.
 
 ## API route errors
 
-A handler that throws is logged and returns `500`. In production the JSON body
+A handler that calls `notFound()`, `forbidden()` or `unauthorized()` answers
+`404`, `403` or `401` with a JSON `{ "error": ... }` body. Any other handler that throws is logged and returns `500`. In production the JSON body
 is the generic `{"error":"Internal Server Error"}`; in `krate dev` it also
 carries the message. Validate input and return explicit statuses:
 

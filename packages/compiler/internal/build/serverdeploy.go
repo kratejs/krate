@@ -392,7 +392,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 		// The segment pages travel in the bundle: the handler picks the nearest
 		// one for a request and fills it, so no file is read at request time.
 		for _, e := range m.Segments {
-			for _, rel := range []string{e.NotFound, e.Error} {
+			for _, rel := range e.pages() {
 				if rel == "" {
 					continue
 				}

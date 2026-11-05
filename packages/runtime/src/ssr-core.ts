@@ -9,6 +9,7 @@ import { jsx, renderToStringAsync } from "./server.js";
 import { sha256Hex as portableSha256Hex } from "./sha256.js";
 import {
   isNotFoundSignal,
+  accessDeniedStatus,
   parseCookieHeader,
   redirectTarget,
   thenable,
@@ -92,6 +93,8 @@ export interface RenderResponse {
   status: number;
   redirect?: string;
   notFound?: boolean;
+  /** 401 or 403 when the render called unauthorized() or forbidden(). */
+  denied?: 401 | 403;
   cached?: boolean;
   cacheStatus?: CacheStatus;
   error?: string;
@@ -562,6 +565,8 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   // renderSignal maps notFound()/redirect() thrown during a render to a response.
   function renderSignal(err: unknown): RenderResponse | null {
     if (isNotFoundSignal(err)) return { html: "", status: 404, notFound: true };
+    const denied = accessDeniedStatus(err);
+    if (denied) return { html: "", status: denied, denied };
     const to = redirectTarget(err);
     if (to) return { html: "", status: 307, redirect: to };
     return null;
@@ -989,6 +994,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
       if (signal) {
         const frame: Record<string, any> = { type: "region", id: region.id, status: signal.status, html: "" };
         if (signal.notFound) frame.notFound = true;
+        if (signal.denied) frame.denied = signal.denied;
         if (signal.redirect) frame.redirect = signal.redirect;
         return frame;
       }
@@ -1016,6 +1022,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     };
     if (result.cacheStatus) frame.cacheStatus = result.cacheStatus;
     if (result.notFound) frame.notFound = true;
+    if (result.denied) frame.denied = result.denied;
     if (result.redirect) frame.redirect = result.redirect;
     if (result.error) frame.error = result.error;
     if (result.digest) frame.digest = result.digest;

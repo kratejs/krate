@@ -2170,6 +2170,19 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		}
 	}
 
+	if renderMode == RenderSSG {
+		for _, mod := range bundle.Modules {
+			if strings.Contains(filepath.ToSlash(mod.Path), "/node_modules/") {
+				continue
+			}
+			if d := warnStaticAccessDenied(mod.Path, mod.Program, mod.SourceCode, "page"); d != nil {
+				printAccessDeniedWarning(d)
+				pageWarnings = append(pageWarnings, *d)
+				break
+			}
+		}
+	}
+
 	pageBase := strings.TrimSuffix(filepath.Base(page), filepath.Ext(page))
 	isSegment := isSegmentPageBase(pageBase)
 	if isSegment && renderMode != RenderSSG {
@@ -2260,6 +2273,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		pageOpts.ActionURLs = bundle.ActionImports
 		if isDynamicRoute(page, b.Cfg.PagesDir) {
 			pageOpts.PageParams = dynamicRouteSentinels(extractParamNames(page, b.Cfg.PagesDir))
+		}
+		if _, isSeg := segmentKindOfFile(page); !isSeg {
+			pageOpts.RoutePath = routePathFor(page, b.Cfg.PagesDir, pageOpts.PageParams)
 		}
 		tree = irtree.BuildWithOptions(entryModule.Program, ann, pageOpts)
 		// CSS primitive declarations that cannot be compiled to CSS are hard errors
@@ -2436,7 +2452,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 
 	b.recordDeps(page, deps)
 
-	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + fragmentInfo
+	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + fragmentInfo + pageRouteScript(page, b.Cfg.PagesDir)
 
 	outName := pageToOutput(page, b.Cfg.PagesDir)
 	pageDir := filepath.Join(b.Cfg.OutDir, outName)
@@ -3052,6 +3068,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		}
 	}
 
+	if isLayoutFile(layoutPath) {
+		passLayoutDepth(layoutModule.Program, layoutURLDepth(layoutPath, b.Cfg.PagesDir))
+	}
 	ann := annotator.Annotate(layoutModule.Program, b.Cfg, layoutPath, layoutModule.SourceCode)
 	extraLayoutPrograms := moduleSources(layoutBundle, layoutModule)
 	for _, mp := range extraLayoutPrograms {
@@ -3065,6 +3084,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if err := asyncLayoutError(layoutPath, ann, layoutModule.SourceCode); err != nil {
 		return nil, "", nil, false, err
 	}
+	printAccessDeniedWarning(warnStaticAccessDenied(layoutPath, layoutModule.Program, layoutModule.SourceCode, "layout"))
 	opts := b.irBuildOptions()
 	opts.IDPrefix = b.layoutIDPrefix(layoutPath)
 	applyModuleBindings(&opts, layoutModule.Path, layoutModule.Program, extraLayoutPrograms)
@@ -3648,6 +3668,48 @@ func routeInfoScript(chain []routeChainEntry, sigs []irtree.ComponentSignature) 
 		return ""
 	}
 	return `<script type="application/json" id="__krate_route">` + escapeJSONForScript(string(data)) + `</script>`
+}
+
+// routePathFor is the URL path of a page with its dynamic segments filled from
+// params ("/blog/hello"), or "" for a page that has no route of its own.
+func routePathFor(page, pagesDir string, params map[string]string) string {
+	out := pageToOutput(page, pagesDir)
+	if out == "" {
+		return ""
+	}
+	var parts []string
+	for _, seg := range strings.Split(strings.Trim(routeFromOutName(out), "/"), "/") {
+		if seg == "" {
+			continue
+		}
+		if rs := parseRouteSeg(seg); rs.kind != segStatic {
+			v, ok := params[rs.text]
+			if !ok {
+				if rs.kind == segOptionalCatchAll {
+					continue
+				}
+				v = dynamicParamSentinel(rs.text)
+			}
+			parts = append(parts, v)
+			continue
+		}
+		parts = append(parts, seg)
+	}
+	return "/" + strings.Join(parts, "/")
+}
+
+// pageRouteScript carries the route pattern of a dynamic page ("/blog/[slug]")
+// so useParams() can match the address bar against it in the browser. Pages
+// without dynamic segments need none: their params are empty.
+func pageRouteScript(page, pagesDir string) string {
+	if !isDynamicRoute(page, pagesDir) {
+		return ""
+	}
+	data, err := json.Marshal(map[string]string{"r": routeFromOutName(pageToOutput(page, pagesDir))})
+	if err != nil {
+		return ""
+	}
+	return `<script type="application/json" id="__krate_page">` + escapeJSONForScript(string(data)) + `</script>`
 }
 
 // fragmentInfoScript is the route info of an intercepting-route fragment.

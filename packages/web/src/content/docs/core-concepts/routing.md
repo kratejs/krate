@@ -182,10 +182,12 @@ its directory and everything below it.
 |------|------|
 | `404.tsx` or `not-found.tsx` | The segment's not-found page (status 404) |
 | `error.tsx` or `500.tsx` | The segment's error page (status 500): a component that receives `{ error, reset }` |
+| `forbidden.tsx` or `403.tsx` | The page for `forbidden()` (status 403) |
+| `unauthorized.tsx` or `401.tsx` | The page for `unauthorized()` (status 401) |
 
 None of them is a route: `blog/404.tsx` does not serve `/blog/404`. Two files
 for one role in a directory (`404.tsx` and `not-found.tsx`, `error.tsx` and
-`500.tsx`) are a build error (`KR9001`), and so is a segment page inside a
+`500.tsx`, `forbidden.tsx` and `403.tsx`) are a build error (`KR9001`), and so is a segment page inside a
 `@slot` or an intercepting `(.)x` directory (`KR9002`). The root `404.tsx` and
 `500.tsx` keep working as the global fallback and are still written to
 `dist/404.html` and `dist/500.html`.
@@ -220,6 +222,11 @@ layouts, so shared navigation stays in place:
   a server component (the page nearest to the route that threw).
 - **Error** (status 500): an uncaught error while an SSR, ISR or async page is
   rendered. The response keeps `X-Krate-Error: render` and is never cached.
+- **Forbidden** (status 403) and **unauthorized** (status 401): `forbidden()` or
+  `unauthorized()` called while a page renders, in an async server component, in a
+  server action or in an API route. The nearest `forbidden.tsx` / `unauthorized.tsx`
+  answers, inside its layouts, like a not-found page. See
+  [Forbidden and unauthorized](#forbidden-and-unauthorized).
 
 Route groups scope segment pages like they scope layouts. `(shop)/cart/404.tsx`
 answers `notFound()` and unknown params of routes inside `(shop)`, but not a URL
@@ -240,6 +247,60 @@ missing URL; the per-directory files are in the output for hosts and handlers
 that look them up with the manifest's `segments` map. The serverless handler
 (`krate deploy --target node|vercel|netlify|cloudflare`) does the same lookup, so
 segment pages work there too (see the deployment guide).
+
+### Forbidden and unauthorized
+
+`forbidden()` and `unauthorized()` stop a render the way `notFound()` does and
+answer with 403 or 401. They come from `@krate/runtime/server` (from
+`@krate/runtime` in a client file) and are what `next/navigation` exports under
+the same names.
+
+```tsx
+// src/pages/admin/index.tsx
+import { cookies, forbidden, unauthorized } from "@krate/runtime/server";
+
+export default async function Admin() {
+  const session = (await cookies()).get("session")?.value;
+  if (!session) unauthorized();          // 401, nearest unauthorized.tsx
+  if (session !== "admin") forbidden();  // 403, nearest forbidden.tsx
+  return <h1>Admin</h1>;
+}
+```
+
+```tsx
+// src/pages/forbidden.tsx (or admin/forbidden.tsx for /admin only)
+export default function Forbidden() {
+  return <p>You are not allowed to see this. <Link href="/">Home</Link></p>;
+}
+```
+
+| Where it is called | Result |
+|--------------------|--------|
+| An SSR, ISR or streaming page, or an async server component it renders | The nearest `forbidden.tsx` / `unauthorized.tsx` with that status; without one, a plain-text `403 Forbidden` / `401 Unauthorized` |
+| A server action | Fetch actions get JSON (`{ "ok": false, "error": { "message": "Forbidden" } }`) with status 403 / 401. A no-JS form post gets the nearest page for the page the form was posted from |
+| An API route | JSON `{ "error": "Forbidden" }` or `{ "error": "Unauthorized" }` with that status; `notFound()` answers `{ "error": "Not Found" }` with 404 |
+
+The response is never cached: ISR does not store it, it carries
+`Cache-Control: no-store`, and a CDN never keeps it. A client navigation
+(`<Link>`, `router.push`) to a URL that answers 403 or 401 swaps the page in
+place like a 404 does: layout state is kept and back and forward work.
+
+Everything above holds in the Go server (`krate start`, `krate dev`) and in the
+portable handler (`krate deploy --target node|vercel|netlify|cloudflare`).
+
+Two limits follow from how Krate renders:
+
+- **Static pages and layouts never run per request.** A page that is built
+  statically, and every layout (layouts are baked into the shell), cannot call
+  `forbidden()` usefully: the call never runs and the page is served to
+  everyone. The build warns (`KR8604`). Make the page request-time
+  (`export const dynamic = "force-dynamic"`), or call the function from an async
+  server component that the page renders. Where a whole directory must be gated,
+  use [middleware](/docs/features/middleware/).
+- **Streaming has already sent the status.** In an out-of-order streamed page the
+  shell is on the wire before an async child runs, so a `forbidden()` raised by
+  such a child cannot change the status. Gate the page itself, not a streamed
+  fragment.
 
 ### The error prop
 
@@ -346,6 +407,8 @@ live in `src/api`.
 | `src/pages/@slot/(.)x/` | Intercepting route (soft navigation renders it into the slot) |
 | `src/pages/404.tsx`, `not-found.tsx` | Not-found page of the directory (the root one is the global fallback) |
 | `src/pages/error.tsx`, `500.tsx` | Error page of the directory; `error.tsx` is also a client error boundary |
+| `src/pages/forbidden.tsx`, `403.tsx` | Page for `forbidden()` in the directory (status 403) |
+| `src/pages/unauthorized.tsx`, `401.tsx` | Page for `unauthorized()` in the directory (status 401) |
 | `src/pages/loading.tsx` | Loading component during SPA transitions |
 | `middleware.ts` | Request middleware (runs before page rendering) |
 | `src/pages/name.json.ts` | Prerendered endpoint: `GET` runs at build time and writes `name.json` |

@@ -11,7 +11,15 @@ import {
   trimSlashes,
 } from "./handler-routing.js";
 
-export type SegmentKind = "notFound" | "error";
+export type SegmentKind = "notFound" | "error" | "forbidden" | "unauthorized";
+
+/** The segment page role that answers each status. */
+export const SEGMENT_KIND_OF_STATUS: Record<401 | 403 | 404 | 500, SegmentKind> = {
+  401: "unauthorized",
+  403: "forbidden",
+  404: "notFound",
+  500: "error",
+};
 
 /** One directory's segment pages (manifest.json segments[]). */
 export interface SegmentEntry {
@@ -20,6 +28,8 @@ export interface SegmentEntry {
   group?: boolean;
   notFound?: string;
   error?: string;
+  forbidden?: string;
+  unauthorized?: string;
 }
 
 export interface SegmentMatch {
@@ -31,7 +41,16 @@ export interface SegmentMatch {
 }
 
 function entryPage(e: SegmentEntry, kind: SegmentKind): string {
-  return (kind === "error" ? e.error : e.notFound) || "";
+  switch (kind) {
+    case "error":
+      return e.error || "";
+    case "forbidden":
+      return e.forbidden || "";
+    case "unauthorized":
+      return e.unauthorized || "";
+    default:
+      return e.notFound || "";
+  }
 }
 
 /**

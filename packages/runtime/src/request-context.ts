@@ -125,6 +125,57 @@ export function isNotFoundSignal(err: unknown): boolean {
     (typeof e.digest === 'string' && e.digest.startsWith('NEXT_HTTP_ERROR_FALLBACK;404'));
 }
 
+/** Thrown by forbidden() and unauthorized(); the host answers 403 or 401. */
+export interface HTTPFallbackSignal extends Error {
+  __krateHTTPStatus: 401 | 403;
+  digest: string;
+}
+
+function httpFallback(status: 401 | 403): never {
+  const err = new Error(status === 403 ? 'NEXT_FORBIDDEN' : 'NEXT_UNAUTHORIZED') as HTTPFallbackSignal;
+  err.__krateHTTPStatus = status;
+  err.digest = 'NEXT_HTTP_ERROR_FALLBACK;' + status;
+  throw err;
+}
+
+/**
+ * Stops rendering and responds with 403 and the nearest forbidden page
+ * (forbidden.tsx or 403.tsx). Works in pages, layouts, async server
+ * components, server actions and API routes.
+ */
+export function forbidden(): never {
+  return httpFallback(403);
+}
+
+/**
+ * Stops rendering and responds with 401 and the nearest unauthorized page
+ * (unauthorized.tsx or 401.tsx). Works wherever forbidden() does.
+ */
+export function unauthorized(): never {
+  return httpFallback(401);
+}
+
+/**
+ * accessDeniedStatus returns 403 or 401 when err was thrown by forbidden() or
+ * unauthorized() (or the matching Next.js digest), else 0.
+ */
+export function accessDeniedStatus(err: unknown): 401 | 403 | 0 {
+  if (!err || typeof err !== 'object') return 0;
+  const e = err as Record<string, unknown>;
+  if (e.__krateHTTPStatus === 403 || e.__krateHTTPStatus === 401) return e.__krateHTTPStatus;
+  if (typeof e.digest === 'string') {
+    if (e.digest === 'NEXT_HTTP_ERROR_FALLBACK;403') return 403;
+    if (e.digest === 'NEXT_HTTP_ERROR_FALLBACK;401') return 401;
+  }
+  return 0;
+}
+
+/** httpFallbackStatus is 404, 403 or 401 for notFound(), forbidden() and unauthorized() signals, else 0. */
+export function httpFallbackStatus(err: unknown): 401 | 403 | 404 | 0 {
+  if (isNotFoundSignal(err)) return 404;
+  return accessDeniedStatus(err);
+}
+
 /** redirectTarget returns the URL of a redirect() signal, or "" for other errors. */
 export function redirectTarget(err: unknown): string {
   if (!err || typeof err !== 'object') return '';

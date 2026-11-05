@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSSRCore, variantKey, type ManifestPage, type RegionMeta, type SSRCoreOptions } from "./ssr-core.js";
 import { installRenderStore, markNoStore, recordCacheRead, type CacheScope } from "./cache-scope.js";
-import { notFound } from "./request-context.js";
+import { forbidden, notFound, unauthorized } from "./request-context.js";
 import { jsx } from "./server.js";
 
 // The renderer installs the cache scope store once per process; so does this file.
@@ -183,6 +183,18 @@ describe("renderPage", () => {
       const r = await core.renderPage(req("/n"));
       expect(r.status).toBe(500);
       expect(r.error).toContain("no module");
+    });
+
+    it("maps forbidden() to 403 and unauthorized() to 401 and never caches them", async () => {
+      const { core } = make({
+        pages: [{ ...page("/fb"), mode: "isr", revalidate: 60 } as any, page("/un")],
+        modules: { "/fb": { default: () => forbidden() }, "/un": { default: () => unauthorized() } },
+      });
+      expect(await core.renderPage(req("/fb"))).toMatchObject({ status: 403, denied: 403, html: "" });
+      expect(await core.renderPage(req("/fb"))).toMatchObject({ status: 403, denied: 403 });
+      expect((await core.renderPage(req("/fb"))).cacheStatus).not.toBe("hit");
+      expect(await core.renderPage(req("/un"))).toMatchObject({ status: 401, denied: 401 });
+      expect(await core.renderPage(req("/un"))).not.toHaveProperty("notFound");
     });
 
     it("maps notFound() to 404 and a redirect signal to 307", async () => {
@@ -484,6 +496,15 @@ describe("regions", () => {
     expect(plain).toMatchObject({ type: "error", id: "a", status: 500, error: "boom", digest: "8a2474a04d", fatal: false });
     const server = await core.renderRegion(page("/p"), { id: "s", serverExport: "Broken" }, req("/p"));
     expect(server).toMatchObject({ type: "error", status: 500, fatal: true });
+  });
+
+  it("answers a region that calls forbidden() or unauthorized() with a 403 or 401 frame", async () => {
+    const { core } = make({
+      pages: [page("/p")],
+      runtime: { "r/fb": () => forbidden(), "r/un": () => unauthorized() },
+    });
+    expect(await core.renderRegion(page("/p"), region("fb"), req("/p"))).toEqual({ type: "region", id: "fb", status: 403, html: "", denied: 403 });
+    expect(await core.renderRegion(page("/p"), region("un"), req("/p"))).toEqual({ type: "region", id: "un", status: 401, html: "", denied: 401 });
   });
 
   it("answers a region that calls notFound() with a 404 frame and a redirect with a 307 frame", async () => {

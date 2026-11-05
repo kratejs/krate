@@ -876,25 +876,17 @@ export default function Page() {
 		t.Fatal("page missing")
 	}
 	body := string(page.Content)
-	if !strings.Contains(body, `"../migrated/next-navigation"`) {
-		t.Errorf("next/navigation not rewritten:\n%s", body)
+	if !strings.Contains(body, `import { useParams, usePathname, useRouter, useSearchParams, useSelectedLayoutSegment, useSelectedLayoutSegments } from "@krate/runtime";`) {
+		t.Errorf("next/navigation hooks must come from @krate/runtime:\n%s", body)
+	}
+	if strings.Contains(body, "next/navigation") || strings.Contains(body, "migrated/next-navigation") {
+		t.Errorf("no next/navigation import or generated shim may remain:\n%s", body)
 	}
 	if !strings.Contains(body, `"@krate/runtime/server"`) {
 		t.Errorf("next/headers not rewritten:\n%s", body)
 	}
-	helper := findPlan(rep, "src/migrated/next-navigation.ts")
-	if helper == nil {
-		t.Fatalf("navigation helper missing: %+v", helper)
-	}
-	for _, want := range []string{
-		"export function usePathname",
-		"export function useParams",
-		"export function useSelectedLayoutSegment",
-		"export function useSelectedLayoutSegments",
-	} {
-		if !strings.Contains(string(helper.Content), want) {
-			t.Errorf("navigation helper missing %q", want)
-		}
+	if findPlan(rep, "src/migrated/next-navigation.ts") != nil || findPlan(rep, "src/migrated/next-navigation-server.ts") != nil {
+		t.Errorf("the navigation shims are gone: the runtime exports the hooks")
 	}
 	for _, item := range rep.Manual {
 		for _, hook := range []string{"useParams", "useSelectedLayoutSegment", "useSelectedLayoutSegments"} {
@@ -1270,15 +1262,16 @@ func TestNextParallelInterceptingTemplateAndGroups(t *testing.T) {
 	}
 }
 
-func TestNextNavigationServerHelpersAreHookFree(t *testing.T) {
+func TestNextNavigationSignalsComeFromTheRuntime(t *testing.T) {
 	root := t.TempDir()
-	writeNextFile(t, root, "app/blog/[slug]/page.tsx", `import { notFound, redirect } from "next/navigation";
-import Nav from "../../nav";
+	writeNextFile(t, root, "app/blog/[slug]/page.tsx", `import { notFound, redirect, forbidden, unauthorized } from "next/navigation";
 export default async function P({ params }: any) {
   const { slug } = await params;
   if (!slug) notFound();
   if (slug === "old") redirect("/blog/new");
-  return <p>{slug}<Nav /></p>;
+  if (slug === "secret") forbidden();
+  if (slug === "anon") unauthorized();
+  return <p>{slug}</p>;
 }`)
 	writeNextFile(t, root, "app/nav.tsx", `"use client";
 import { redirect, useRouter } from "next/navigation";
@@ -1288,25 +1281,46 @@ export default function Nav() { const r = useRouter(); return <button onClick={(
 		t.Fatal(err)
 	}
 	page := findPlan(rep, "src/pages/blog/[slug].tsx")
-	if page == nil || !strings.Contains(string(page.Content), `import { notFound, redirect } from "../../migrated/next-navigation-server";`) {
-		t.Fatalf("server names must use the hook-free helper: %+v", page)
-	}
-	server := findPlan(rep, "src/migrated/next-navigation-server.ts")
-	if server == nil || strings.Contains(string(server.Content), "useState") || !strings.Contains(string(server.Content), "export function notFound") {
-		t.Fatalf("server helper missing or uses hooks: %+v", server)
-	}
-	shim := findPlan(rep, "src/migrated/next-navigation.ts")
-	if shim == nil || !strings.Contains(string(shim.Content), "krateRouter") {
-		t.Fatalf("client helper must use the Krate router: %+v", shim)
+	if page == nil || !strings.Contains(string(page.Content), `import { notFound, redirect, forbidden, unauthorized } from "@krate/runtime/server";`) {
+		t.Fatalf("a server file takes the signals from @krate/runtime/server: %+v", page)
 	}
 	var nav *PlannedFile
 	for i := range rep.Files {
-		if strings.Contains(string(rep.Files[i].Content), "useRouter") && rep.Files[i].Target != "src/migrated/next-navigation.ts" {
+		if strings.Contains(string(rep.Files[i].Content), "useRouter") {
 			nav = &rep.Files[i]
 		}
 	}
-	if nav == nil || strings.Contains(string(nav.Content), "next-navigation-server") {
-		t.Fatalf("a client file keeps the client redirect: %+v", nav)
+	if nav == nil || !strings.Contains(string(nav.Content), `import { useRouter } from "@krate/runtime";`) || !strings.Contains(string(nav.Content), `import { redirect } from "@krate/runtime";`) {
+		t.Fatalf("a client file takes hooks and signals from @krate/runtime: %+v", nav)
+	}
+	for _, item := range rep.Manual {
+		if strings.Contains(item.Reason, "forbidden") || strings.Contains(item.Reason, "unauthorized") {
+			t.Errorf("forbidden() and unauthorized() map natively: %+v", item)
+		}
+	}
+}
+
+func TestNextNavigationUnsupportedNamesAreReported(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `import { usePathname, useServerInsertedHTML } from "next/navigation";
+export default function P() { useServerInsertedHTML(() => null); return <p>{usePathname()}</p>; }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := findPlan(rep, "src/pages/index.tsx")
+	body := string(page.Content)
+	if !strings.Contains(body, `import { usePathname } from "@krate/runtime";`) || !strings.Contains(body, `import { useServerInsertedHTML } from "next/navigation";`) {
+		t.Errorf("supported names move, others stay put:\n%s", body)
+	}
+	found := false
+	for _, item := range rep.Manual {
+		if strings.Contains(item.Reason, "useServerInsertedHTML") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("an unsupported name is a manual item: %+v", rep.Manual)
 	}
 }
 
@@ -1554,5 +1568,37 @@ func TestSegmentConfigExportsAreExplained(t *testing.T) {
 	}
 	if !hasManual(rep, "app/layout.tsx", "route segment config revalidate in a layout") {
 		t.Errorf("a layout segment export needs a manual item: %+v", rep.Manual)
+	}
+}
+
+func TestNextForbiddenAndUnauthorizedPagesMigrate(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function P() { return <p>x</p>; }`)
+	writeNextFile(t, root, "app/forbidden.tsx", `export default function F() { return <p>no</p>; }`)
+	writeNextFile(t, root, "app/admin/page.tsx", `export default function A() { return <p>admin</p>; }`)
+	writeNextFile(t, root, "app/admin/unauthorized.tsx", `export default function U() { return <p>sign in</p>; }`)
+	writeNextFile(t, root, "next.config.mjs", `export default { experimental: { authInterrupts: true } };`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findPlan(rep, "src/pages/403.tsx") == nil {
+		t.Errorf("forbidden.tsx must map to 403.tsx: %+v", rep.Files)
+	}
+	if findPlan(rep, "src/pages/admin/401.tsx") == nil {
+		t.Errorf("unauthorized.tsx must map to admin/401.tsx")
+	}
+	if findPlan(rep, "src/pages/admin/index.tsx") == nil {
+		t.Errorf("a directory with a scoped file keeps its page in the directory")
+	}
+	for _, item := range rep.Manual {
+		if strings.Contains(item.Reason, "forbidden") || strings.Contains(item.Reason, "unauthorized") {
+			t.Errorf("not a manual item: %+v", item)
+		}
+	}
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "experimental keys are not translated") {
+			t.Errorf("authInterrupts alone must not warn: %s", w)
+		}
 	}
 }

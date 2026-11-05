@@ -82,6 +82,19 @@ func TestBootstrapHelperFeatureDeps(t *testing.T) {
 // runtime: custom hooks with arguments, keyed lists, conditionals, context,
 // class components and error boundaries, server actions forms and portals.
 var emittedCorpus = map[string]string{
+	// The router hooks ship as their own optional feature: a page that calls
+	// them must get it.
+	"src/pages/nav.tsx": `import { usePathname, useParams, useSearchParams, useRouter, useSelectedLayoutSegment, useSelectedLayoutSegments } from "@krate/runtime";
+export default function Page() {
+	const pathname = usePathname();
+	const params = useParams();
+	const search = useSearchParams();
+	const router = useRouter();
+	const segment = useSelectedLayoutSegment();
+	const segments = useSelectedLayoutSegments();
+	return <nav><p>{pathname}{params.id}{search.get("q")}{segment}{segments.length}</p><button onClick={() => router.push("/x")}>go</button></nav>;
+}
+`,
 	"src/pages/index.tsx": `import { useState } from "react";
 function useCounter(init) { const [c, setC] = useState(init); return { c, inc: () => setC(c + 1) }; }
 function Counter({ start }) { const { c, inc } = useCounter(start); return <button id="c" onClick={inc}>{c}</button>; }

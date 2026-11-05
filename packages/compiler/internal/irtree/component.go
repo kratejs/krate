@@ -272,6 +272,17 @@ func (b *builder) installComponentProps(fn *ast.FnDecl, node *ComponentNode) {
 			}
 		}
 	}
+	// Router hooks fold to the page's route.
+	if len(b.routeHooks) > 0 {
+		if b.localProps == nil {
+			b.localProps = make(valueMap)
+		}
+		for k, v := range b.routeHooks {
+			if _, exists := b.localProps[k]; !exists {
+				b.localProps[k] = v
+			}
+		}
+	}
 	// `createContext(default)` bindings are seeded under a reserved key so
 	// `Ctx.useContext()` folds to the default at build time (no Provider
 	// exists during SSG).

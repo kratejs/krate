@@ -60,9 +60,11 @@ import {
   newServerError,
   renderSegmentPage,
   type SegmentEntry,
+  SEGMENT_KIND_OF_STATUS,
   type SegmentKind,
   type SegmentMatch,
 } from "./handler-segments.js";
+import { httpFallbackStatus } from "./request-context.js";
 import { sha256Hex as portableSha256Hex } from "./sha256.js";
 import { createMemoryStaticLayer } from "./static-memory.js";
 
@@ -350,8 +352,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
    * a dynamic route that matched the URL but rejected its params. null means
    * no custom page.
    */
-  function errorPage(urlPath: string, status: 404 | 500, route?: { segDir?: string; closed?: string }): ErrorPage | null {
-    const kind: SegmentKind = status === 404 ? "notFound" : "error";
+  function errorPage(urlPath: string, status: 401 | 403 | 404 | 500, route?: { segDir?: string; closed?: string }): ErrorPage | null {
+    const kind: SegmentKind = SEGMENT_KIND_OF_STATUS[status];
     if (segEntries.length > 0) {
       let m: SegmentMatch | null = null;
       const closedDir = route && route.closed ? segDirByRoute.get(normalizeRoutePattern(route.closed)) : undefined;
@@ -361,7 +363,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       const html = m ? segPages[m.file] : undefined;
       if (m && html !== undefined) return { html, match: m };
     }
-    const global = status === 404 ? data.html404 : data.html500;
+    const global = status === 404 ? data.html404 : status === 500 ? data.html500 : "";
     return global ? { html: global, match: null } : null;
   }
   let requestSeq = 0;
@@ -619,13 +621,22 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   }
 
   /** Answers 404 with a not-found page; segment pages are never cached. */
-  function custom404(rs: ReqState, page: ErrorPage): Response {
+  function custom404(rs: ReqState, page: ErrorPage, status: 401 | 403 | 404 = 404): Response {
     rs.res.set("Content-Type", "text/html; charset=utf-8");
     rs.res.delete("Cache-Control");
     rs.res.delete("Etag");
     rs.res.delete("Last-Modified");
     rs.res.set("Cache-Control", "no-store");
-    return finish(rs, 404, page.match ? renderSegmentPage(page.html, page.match) : page.html);
+    return finish(rs, status, page.match ? renderSegmentPage(page.html, page.match) : page.html);
+  }
+
+  /** The 403 or 401 response of a request whose render called forbidden() or unauthorized(). */
+  function accessDenied(rs: ReqState, status: 401 | 403, route?: { segDir?: string; closed?: string }): Response {
+    rs.res.delete("X-Krate-Cache");
+    const page = errorPage(rs.path, status, route);
+    if (page) return custom404(rs, page, status);
+    rs.res.set("Cache-Control", "no-store");
+    return httpError(rs, status === 403 ? "403 Forbidden" : "401 Unauthorized", status);
   }
 
   /** handlerWith404: internal-path guard, cache policy, dynamic templates, static files, custom 404. */
@@ -739,6 +750,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     stack?: string;
     cacheStatus?: string;
     notFound?: boolean;
+    denied?: 401 | 403;
     redirect?: string;
     title?: string;
     noStore?: boolean;
@@ -794,6 +806,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     let cacheStatus = "";
     let titleOverride = "";
     let notFound = false;
+    let denied: 401 | 403 | 0 = 0;
     let redirect = "";
     let renderErr = "";
     let fatalErr = "";
@@ -804,8 +817,9 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       switch (frame.type) {
         case "region": {
           const id = frame.id || "";
-          if (id !== "page" && (frame.notFound || frame.redirect)) {
+          if (id !== "page" && (frame.notFound || frame.denied || frame.redirect)) {
             notFound = notFound || !!frame.notFound;
+            denied = denied || frame.denied || 0;
             if (!redirect) redirect = frame.redirect || "";
             continue;
           }
@@ -814,6 +828,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
             isISRFrame = !!frame.cacheStatus;
             cacheStatus = frame.cacheStatus || "";
             notFound = !!frame.notFound;
+            denied = denied || frame.denied || 0;
             redirect = frame.redirect || "";
             titleOverride = frame.title || "";
             if ((frame.status || 0) >= 500 || frame.error) {
@@ -823,7 +838,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
               if (frame.fatal) fatalErr = renderErr;
               continue;
             }
-            if (frame.notFound) continue;
+            if (frame.notFound || frame.denied) continue;
           }
           regionHTML.set(id, frame.html || "");
           break;
@@ -845,7 +860,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     // instead of the baked body (build/serve.go failOnRenderErr).
     const routeRef = { segDir: page.segDir !== undefined ? page.segDir : "" };
     const segError = errorPage(rs.path, 500, routeRef);
-    if (segError && segError.match && renderErr && !fatalErr && !notFound && !redirect) fatalErr = renderErr;
+    if (segError && segError.match && renderErr && !fatalErr && !notFound && !denied && !redirect) fatalErr = renderErr;
     if (fatalErr) {
       // A server component failed: there is no meaningful baked body, so answer 500.
       const srvErr = newServerError(fatalErr, errStack, errDigest || sha256Hex(fatalErr + "\n" + errStack).slice(0, 10), false);
@@ -858,8 +873,9 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       if (segError && segError.match) return finish(rs, 500, renderSegmentPage(segError.html, segError.match, srvErr));
       return finish(rs, 500, segError ? segError.html : PLAIN_500);
     }
-    if (notFound || redirect) {
+    if (notFound || denied || redirect) {
       if (redirect) return goRedirect(redirect, rs.path, rs.method, 302, rs.res);
+      if (denied) return accessDenied(rs, denied, routeRef);
       const page404 = errorPage(rs.path, 404, routeRef);
       if (page404) return custom404(rs, page404);
       rs.res.set("Cache-Control", "no-store");
@@ -899,7 +915,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
           pending.map(async (p) => {
             const f = await p;
             if (f.type !== "region" || !f.id) return;
-            if (f.notFound || f.redirect || f.fatal || (f.status || 0) >= 500 || f.error) {
+            if (f.notFound || f.denied || f.redirect || f.fatal || (f.status || 0) >= 500 || f.error) {
               // The shell is already on the wire: keep the baked fallback for this region.
               if (f.error) console.error(`[krate] region ${f.id} failed: ${f.error}`);
               return;
@@ -1046,6 +1062,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     rs.res.set("Content-Type", "application/json");
     rs.res.set("Cache-Control", "no-store");
     if (status === 404) return finish(rs, 404, '{"error":"API Route Not Found"}');
+    if (status === 403) return finish(rs, 403, '{"error":"Forbidden"}');
+    if (status === 401) return finish(rs, 401, '{"error":"Unauthorized"}');
     if (status === 405) {
       rs.res.set("Allow", (allow || []).join(", "));
       return finish(rs, 405, '{"error":"Method Not Allowed"}');
@@ -1248,6 +1266,14 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
       return new Response(out.body, { status, headers: rs.res });
     } catch (err) {
+      // notFound(), forbidden() and unauthorized() end the request with that status.
+      const fallback = httpFallbackStatus(err);
+      if (fallback === 403 || fallback === 401) return apiFailure(rs, fallback);
+      if (fallback === 404) {
+        rs.res.set("Content-Type", "application/json");
+        rs.res.set("Cache-Control", "no-store");
+        return finish(rs, 404, '{"error":"Not Found"}');
+      }
       console.error(`[krate] API error (${rs.method} ${rs.path}): ${(err && (err as any).stack) || err}`);
       return apiFailure(rs, 500);
     }
@@ -1358,6 +1384,29 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return new Response(JSON.stringify({ ok: false, error }), { status, headers: actionHeaders("application/json", cookies) });
   }
 
+  /**
+   * actionFallback answers an action that called notFound(), forbidden() or
+   * unauthorized(): JSON for the fetch client, else the nearest segment page of
+   * the page the form was posted from (the sanitized return path).
+   */
+  function actionFallback(rs: ReqState, status: 401 | 403 | 404, fetchMode: boolean, cookies: string[], returnTo: string): Response {
+    const label = status === 403 ? "Forbidden" : status === 401 ? "Unauthorized" : "Not Found";
+    if (fetchMode) return actionFail(status, label, undefined, cookies);
+    const headers = actionHeaders("text/html; charset=utf-8", cookies);
+    headers.set("Cache-Control", "no-store");
+    let from = "/";
+    try {
+      if (returnTo) from = safeDecode(new URL(returnTo, "http://x").pathname);
+      if (basePath && (from === basePath || from.startsWith(basePath + "/"))) from = from.slice(basePath.length) || "/";
+    } catch {
+      from = "/";
+    }
+    const page = errorPage(from, status);
+    if (page) return new Response(page.match ? renderSegmentPage(page.html, page.match) : page.html, { status, headers });
+    headers.set("Content-Type", "text/plain; charset=utf-8");
+    return new Response(status + " " + label + "\n", { status, headers });
+  }
+
   function randomDigest(): string {
     const bytes = new Uint8Array(6);
     crypto.getRandomValues(bytes);
@@ -1462,10 +1511,12 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     let result: any;
     let redirect = "";
     let failure: any = null;
+    let fallback: 401 | 403 | 404 | 0 = 0;
     try {
       result = await revalidateStore.run(scope, () => actionStore.run(ctx, () => fn(...args)));
     } catch (e: any) {
       if (e && typeof e.__krateRedirect === "string") redirect = e.__krateRedirect;
+      else if ((fallback = httpFallbackStatus(e))) failure = null;
       else failure = e === undefined ? new Error("undefined") : e;
     }
     let revalidation: { paths: unknown[]; tags: string[] } | null = null;
@@ -1476,6 +1527,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     }
     if (!redirect && result && typeof result === "object" && typeof result.redirect === "string") redirect = result.redirect;
     redirect = safeActionRedirect(redirect);
+    if (fallback && !failure) return withHeaders(rs, actionFallback(rs, fallback, fetchMode, ctx.setCookies, reqHeaders.get("x-krate-return") || ""));
     let body = "";
     if (!failure && fetchMode) {
       const envelope: Record<string, unknown> = { ok: true, result: result === undefined ? null : result };

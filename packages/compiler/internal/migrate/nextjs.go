@@ -28,16 +28,18 @@ const nextFramework = "nextjs"
 type FileKind string
 
 const (
-	KindPage       FileKind = "page"
-	KindLayout     FileKind = "layout"
-	KindAPI        FileKind = "api"
-	KindLoading    FileKind = "loading"
-	KindNotFound   FileKind = "not-found"
-	KindError      FileKind = "error"
-	KindConfig     FileKind = "config"
-	KindPackage    FileKind = "package"
-	KindAsset      FileKind = "asset"
-	KindMiddleware FileKind = "middleware"
+	KindPage         FileKind = "page"
+	KindLayout       FileKind = "layout"
+	KindAPI          FileKind = "api"
+	KindLoading      FileKind = "loading"
+	KindNotFound     FileKind = "not-found"
+	KindForbidden    FileKind = "forbidden"
+	KindUnauthorized FileKind = "unauthorized"
+	KindError        FileKind = "error"
+	KindConfig       FileKind = "config"
+	KindPackage      FileKind = "package"
+	KindAsset        FileKind = "asset"
+	KindMiddleware   FileKind = "middleware"
 )
 
 // ManualItem is a migration decision the CLI will not make automatically.
@@ -322,7 +324,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 // directory with one of them keeps its page in the directory (x/index.tsx), so
 // the layout, template, loading, error and not-found files next to it wrap it
 // (a flat x.tsx would live outside x/).
-var scopedBases = map[string]bool{"layout": true, "template": true, "loading": true, "error": true, "not-found": true}
+var scopedBases = map[string]bool{"layout": true, "template": true, "loading": true, "error": true, "not-found": true, "forbidden": true, "unauthorized": true}
 
 // scopedAppDirs returns the filesystem routes of directories holding scoped files.
 func scopedAppDirs(appDir string) map[string]bool {
@@ -411,6 +413,16 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 				return nil
 			}
 			rep.Files = append(rep.Files, planned(root, source, segmentFile("src/pages", fsRoute, "404", ext), KindNotFound, ext, rep))
+		case "forbidden", "unauthorized":
+			if isSlotRoute(fsRoute) {
+				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: base + ".tsx inside a parallel-route slot has no equivalent", Hint: "move the page to the slot's parent directory"})
+				return nil
+			}
+			kind, status := KindForbidden, "403"
+			if base == "unauthorized" {
+				kind, status = KindUnauthorized, "401"
+			}
+			rep.Files = append(rep.Files, planned(root, source, segmentFile("src/pages", fsRoute, status, ext), kind, ext, rep))
 		case "error":
 			if isSlotRoute(fsRoute) {
 				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "error.tsx inside a parallel-route slot has no equivalent", Hint: "move the error UI to the slot's parent directory"})
@@ -1127,7 +1139,7 @@ func linkRelativeImports(rep *Report) {
 	}
 	for i := range rep.Files {
 		f := &rep.Files[i]
-		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindNotFound && f.Kind != KindError) {
+		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError) {
 			continue
 		}
 		body, rewrites, unresolved, deps := rewriteRelativeImports(string(f.Content), f.Source, f.Target, assets)
@@ -1218,7 +1230,7 @@ func targetPath(root, rel string) (string, error) {
 func warnClientBoundaryRuntime(rep *Report) {
 	var client, server bool
 	for _, f := range rep.Files {
-		if f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAsset && f.Kind != KindNotFound && f.Kind != KindError {
+		if f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAsset && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError {
 			continue
 		}
 		src := string(f.Content)

@@ -133,6 +133,18 @@ function loadActionManifest() {
   return actionManifest;
 }
 
+// krateHTTPFallback maps the signal thrown by notFound(), forbidden() and
+// unauthorized() to its status (0 for any other error).
+function krateHTTPFallback(err) {
+  if (!err || typeof err !== 'object') return 0;
+  const d = err.digest;
+  if (d === 'NEXT_NOT_FOUND' || d === 'NEXT_HTTP_ERROR_FALLBACK;404' || err.__krateNotFound === true) return 404;
+  if (d === 'NEXT_HTTP_ERROR_FALLBACK;403' || err.__krateHTTPStatus === 403) return 403;
+  if (d === 'NEXT_HTTP_ERROR_FALLBACK;401' || err.__krateHTTPStatus === 401) return 401;
+  return 0;
+}
+const KRATE_FALLBACK_LABEL = { 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found' };
+
 function actionHeaders(type, cookies) {
   const headers = new Headers({ 'content-type': type, 'cache-control': 'no-store' });
   for (const c of cookies || []) headers.append('set-cookie', c);
@@ -285,10 +297,12 @@ async function krateRunAction(req, urlPath, search) {
   let result;
   let redirect = '';
   let failure = null;
+  let fallback = 0;
   try {
     result = await REVALIDATE_STORE.run(revalidateScope, () => ACTION_STORE.run(ctx, () => fn(...args)));
   } catch (e) {
     if (e && typeof e.__krateRedirect === 'string') redirect = e.__krateRedirect;
+    else if ((fallback = krateHTTPFallback(e))) failure = null;
     else failure = e === undefined ? new Error('undefined') : e;
   }
   // Revalidations are applied before the response (also when the action
@@ -301,6 +315,16 @@ async function krateRunAction(req, urlPath, search) {
   }
   if (!redirect && result && typeof result === 'object' && typeof result.redirect === 'string') redirect = result.redirect;
   redirect = safeActionRedirect(redirect);
+  if (fallback && !failure) {
+    // notFound(), forbidden() or unauthorized() in an action: JSON for the fetch
+    // client; a native form post gets the status and the host swaps in the
+    // nearest segment page (X-Krate-Fallback).
+    const label = KRATE_FALLBACK_LABEL[fallback];
+    if (fetchMode) return actionFail(fallback, label, undefined, ctx.setCookies);
+    const fh = actionHeaders('text/plain; charset=utf-8', ctx.setCookies);
+    fh.set('x-krate-fallback', String(fallback));
+    return new Response(fallback + ' ' + label + '\n', { status: fallback, headers: fh });
+  }
   let body = '';
   if (!failure && fetchMode) {
     const envelope = { ok: true, result: result === undefined ? null : result };

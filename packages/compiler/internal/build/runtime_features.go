@@ -33,7 +33,7 @@ type runtimeFeat struct {
 // optionalRuntimeFeatures lists the features included only when referenced,
 // in assembly order. The router (or its lite variant) is chosen by the
 // `spa` setting and always included.
-var optionalRuntimeFeatures = []string{"list", "helpers", "actions", "classes"}
+var optionalRuntimeFeatures = []string{"list", "navigation", "helpers", "actions", "classes"}
 
 // unknownClientCodeMarkers mark client code the identifier scan cannot see:
 // dynamically imported chunks, lazy components and client islands load code

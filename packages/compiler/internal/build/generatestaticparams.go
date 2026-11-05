@@ -562,6 +562,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	} else {
 		opts := b.irBuildOptions()
 		opts.PageParams = spp.Params
+		opts.RoutePath = routePathFor(spp.PagePath, b.Cfg.PagesDir, spp.Params)
 		applyModuleBindings(&opts, entryModule.Path, entryModule.Program, extraPrograms)
 		opts.ActionURLs = bundle.ActionImports
 		tree = irtree.BuildWithOptions(entryModule.Program, ann, opts)
@@ -647,7 +648,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 	bundle.CSS = b.dedupeModuleCSS(spp.PagePath, layoutCSS+bundle.CSS, bundle.CSSModules)
 	deps = append(deps, layoutFiles...)
-	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures)
+	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + pageRouteScript(spp.PagePath, b.Cfg.PagesDir)
 
 	// Record the dynamic-route template's module graph (plus any wrapping
 	// layouts) so editing blog/[slug].tsx or a layout rebuilds its expanded
