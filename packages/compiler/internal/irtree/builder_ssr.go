@@ -201,6 +201,24 @@ func (b *builder) constInterp(props valueMap) *jsvalue.Interp {
 		}
 		return jsvalue.Value{}, false
 	}
+	member := in.Hooks.Member
+	in.Hooks.Member = func(m *ast.MemberExpr) (jsvalue.Value, bool) {
+		// A function prop passed by the caller has no const value; reading it
+		// as props.X must not look like an omitted prop (undefined), or a
+		// destructuring default would replace it.
+		if len(b.localFuncProps) > 0 && !m.Computed {
+			if id, ok := m.Object.(*ast.Identifier); ok && id.Name == "props" {
+				if p, ok := m.Property.(*ast.Identifier); ok && b.localFuncProps[p.Name] {
+					if _, known := props[p.Name]; !known {
+						if _, shadowed := in.Scope.Lookup(id.Name); !shadowed {
+							return jsvalue.Dynamic("function prop " + p.Name), true
+						}
+					}
+				}
+			}
+		}
+		return member(m)
+	}
 	in.Hooks.Call = func(c *ast.CallExpr) (jsvalue.Value, bool) {
 		if id, ok := c.Callee.(*ast.Identifier); ok {
 			if spec, ok := b.cvaFactories[id.Name]; ok {

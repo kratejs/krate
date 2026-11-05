@@ -253,7 +253,9 @@ func (b *builder) installComponentProps(fn *ast.FnDecl, node *ComponentNode) {
 		if b.localProps == nil {
 			b.localProps = make(valueMap)
 		}
-		if _, exists := b.localProps[name]; !exists {
+		// A function prop the caller passed replaces the default. It lives in
+		// localFuncProps, not localProps, so absence here does not mean omitted.
+		if _, exists := b.localProps[name]; !exists && !b.localFuncProps[name] {
 			b.localProps[name] = b.paramDefaultValue(fn, name)
 		}
 	}

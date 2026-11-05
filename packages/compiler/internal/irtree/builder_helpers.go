@@ -751,6 +751,8 @@ func referencesProps(expr ast.Expr) bool {
 		return referencesProps(e.Left) || referencesProps(e.Right)
 	case *ast.UnaryExpr:
 		return referencesProps(e.Arg)
+	case *ast.ParenExpr:
+		return referencesProps(e.Expr)
 	case *ast.ConditionalExpr:
 		return referencesProps(e.Test) || referencesProps(e.Consequent) || referencesProps(e.Alternate)
 	case *ast.TemplateExpr:
