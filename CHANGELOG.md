@@ -154,7 +154,6 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   directives found in project CSS, so they never generated anything outside unit tests.
   A hyphen-free `@utility card` is no longer discarded by the class scanner as prose, and a
   class like `w-[red;}x{display:none]` can no longer break out of its rule.
-
 - In production builds a keyed list (`items.map(...)` in a component with state) never
   updated after the first render, because the trimmed runtime dropped the list feature.
   Production builds ship every runtime feature a page's helper calls need, and a test
