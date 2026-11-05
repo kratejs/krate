@@ -163,19 +163,48 @@ func TestEmitDockerfile(t *testing.T) {
 		t.Fatalf("files=%v err=%v", files, err)
 	}
 	df, _ := os.ReadFile(filepath.Join(root, "Dockerfile"))
-	for _, want := range []string{"RUN corepack enable\n", "pnpm install --frozen-lockfile", "npx krate build", "EXPOSE 4321", "USER node", "COPY --chown=node:node . .", "HEALTHCHECK", "/healthz", `CMD ["npx", "krate", "start"]`} {
-		if !strings.Contains(string(df), want) {
+	text := string(df)
+	for _, want := range []string{
+		"FROM node:22-bookworm-slim AS build", "RUN corepack enable\n", "pnpm install --frozen-lockfile", "npx krate build", "pnpm prune --prod",
+		"EXPOSE 4321", "USER node", "COPY --chown=node:node . .", "HEALTHCHECK", "/healthz",
+		"COPY --from=build --chown=node:node /app/node_modules ./node_modules", "COPY --from=build --chown=node:node /tmp/runtime/ ./",
+		`CMD ["node", "node_modules/@krate/core/bin/krate.js", "start"]`, "ARG KEEP_DEV_DEPS=false",
+	} {
+		if !strings.Contains(text, want) {
 			t.Errorf("Dockerfile missing %q:\n%s", want, df)
 		}
 	}
+	// Two stages: the runtime stage starts from a clean base, copies the build
+	// output and runs as the unprivileged user, with no toolchain and no sources.
+	stages := strings.Split(text, "\nFROM ")
+	if len(stages) != 3 { // the header comment, then the two stages
+		t.Fatalf("want a build stage and a runtime stage, got %d FROMs:\n%s", len(stages)-1, df)
+	}
+	runtime := stages[2]
+	for _, bad := range []string{"npx", "pnpm", "COPY . .", "golang", "src"} {
+		if strings.Contains(runtime, bad) {
+			t.Errorf("runtime stage must not contain %q:\n%s", bad, runtime)
+		}
+	}
+	if !strings.Contains(runtime, "USER node") || !strings.Contains(runtime, "HEALTHCHECK") {
+		t.Errorf("runtime stage must run as node with a healthcheck:\n%s", runtime)
+	}
 	// corepack needs root, so it comes before the switch to the unprivileged user,
-	// and the build and server both run as that user.
-	text := string(df)
+	// and the build runs as that user.
 	if !(strings.Index(text, "corepack enable") < strings.Index(text, "USER node") && strings.Index(text, "USER node") < strings.Index(text, "RUN npx krate build")) {
 		t.Errorf("expected corepack enable, then USER node, then the build:\n%s", df)
 	}
 	if strings.Contains(text, "corepack enable && ") {
 		t.Errorf("root-only corepack step must not run after USER node:\n%s", df)
+	}
+	// The build-only parts of .krate are dropped; the server's parts stay.
+	for _, dropped := range []string{"/tmp/runtime/.krate/cache", "/tmp/runtime/.krate/types", "/tmp/runtime/.krate/segments", "/tmp/runtime/.krate/goext"} {
+		if !strings.Contains(text, dropped) {
+			t.Errorf("Dockerfile should drop %s from the runtime image:\n%s", dropped, df)
+		}
+	}
+	if strings.Contains(text, "rm -rf /tmp/runtime/.krate/actions") || strings.Contains(text, "/tmp/runtime/.krate/middleware") {
+		t.Errorf("actions and middleware are runtime files:\n%s", df)
 	}
 	di, _ := os.ReadFile(filepath.Join(root, ".dockerignore"))
 	if !strings.Contains(string(di), ".krate") || !strings.Contains(string(di), ".env*") {
@@ -210,5 +239,29 @@ func TestWantsServer(t *testing.T) {
 	}
 	if WantsServer("vercel", nil, false) || WantsServer("vercel", feats, true) || WantsServer("gh-pages", feats, false) || WantsServer("docker", feats, false) {
 		t.Error("static projects, --static-only, gh-pages and docker keep their own path")
+	}
+}
+
+func TestEmitDockerfilePackageManagersAndOutDir(t *testing.T) {
+	for lock, want := range map[string]string{"": "npm prune --omit=dev", "package-lock.json": "npm prune --omit=dev", "yarn.lock": "yarn install --production --frozen-lockfile"} {
+		root := t.TempDir()
+		out := filepath.Join(root, "build-out")
+		_ = os.MkdirAll(out, 0o755)
+		if lock != "" {
+			_ = os.WriteFile(filepath.Join(root, lock), []byte(""), 0o644)
+		}
+		if _, err := Emit("docker", config.Default(), root, out); err != nil {
+			t.Fatal(err)
+		}
+		df, _ := os.ReadFile(filepath.Join(root, "Dockerfile"))
+		if !strings.Contains(string(df), want) || !strings.Contains(string(df), `cp -a "build-out/." "/tmp/runtime/build-out/"`) {
+			t.Errorf("%q: Dockerfile lacks %q or the custom outDir copy:\n%s", lock, want, df)
+		}
+	}
+	root := t.TempDir()
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+	_ = os.MkdirAll(elsewhere, 0o755)
+	if _, err := Emit("docker", config.Default(), root, elsewhere); err == nil || !strings.Contains(err.Error(), "outDir") {
+		t.Errorf("an outDir outside the project cannot go into the image, got %v", err)
 	}
 }
