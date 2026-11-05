@@ -403,6 +403,17 @@ func (d *diagList) Error() string {
 
 func (d *diagList) Unwrap() []error { return d.errs }
 
+// errWithHint renders err for the build log. A Diagnostic wrapped by fmt.Errorf
+// carries its Hint only as a field, so the error text alone would lose it.
+func errWithHint(err error) string {
+	msg := err.Error()
+	var d diag.Diagnostic
+	if errors.As(err, &d) && d.Hint != "" && !strings.Contains(msg, d.Hint) {
+		msg += "\n      hint: " + d.Hint
+	}
+	return msg
+}
+
 // ensureTransformedModules transforms every module in a page's bundle. Page
 // builds share cached ASTs, so this must finish before any AST reader runs.
 func (b *Builder) ensureTransformedModules(mods []*bundler.Module) error {
@@ -932,8 +943,9 @@ func (b *Builder) BuildAll() error {
 
 	for res := range resultsCh {
 		if res.err != nil {
-			fmt.Fprintf(os.Stderr, "\n  %sx Error (%s):%s %v\n", cRed, res.page, cReset, res.err)
-			failureMessages = append(failureMessages, fmt.Sprintf("  %s: %v", res.page, res.err))
+			detail := errWithHint(res.err)
+			fmt.Fprintf(os.Stderr, "\n  %sx Error (%s):%s %s\n", cRed, res.page, cReset, detail)
+			failureMessages = append(failureMessages, fmt.Sprintf("  %s: %s", res.page, detail))
 			failureErrs = append(failureErrs, res.err)
 			errorCount++
 			continue

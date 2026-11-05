@@ -31,27 +31,33 @@ function platformPackage(): string {
   return `@krate/core-${platform}-${arch}`;
 }
 
-export function resolveBinary(): string {
+// A copy of this package under node_modules came from a registry, so only a
+// source checkout (or a linked one, which resolves to its real path) can hold a
+// binary built on purpose in bin/.
+export function isInstalledPackage(dir: string): boolean {
+  return dir.split(/[\\/]/).includes('node_modules');
+}
+
+export function resolveBinary(binDir: string = BIN_DIR, resolvePackage: (id: string) => string = require.resolve): string {
   // Explicit override for tests and custom deployments.
   const override = process.env.KRATE_BINARY;
   if (override && existsSync(override)) return override;
 
-  // A binary built from source into this package's bin/ is a deliberate local
-  // choice; it wins over a platform package that happens to be installed from
-  // the registry (published tarballs ship only the JS launcher in bin/).
-  const localFirst = join(BIN_DIR, binaryName());
-  if (existsSync(localFirst)) return localFirst;
+  const local = join(binDir, binaryName());
+
+  // A binary built from source wins over a platform package that happens to be
+  // installed from the registry, which would be an older compiler.
+  if (!isInstalledPackage(binDir) && existsSync(local)) return local;
 
   const pkgName = platformPackage();
   try {
-    const pkgPath = dirname(require.resolve(`${pkgName}/package.json`));
+    const pkgPath = dirname(resolvePackage(`${pkgName}/package.json`));
     const binary = join(pkgPath, 'bin', binaryName());
     if (existsSync(binary)) return binary;
   } catch (e) {
     // Ignore, try local path
   }
 
-  const local = join(BIN_DIR, binaryName());
   if (existsSync(local)) return local;
 
   const pathBin = binaryName();

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { commandSpec, quoteWindowsArg } from '../src/spawn.js';
-import { printVersion, versionMismatchWarning } from '../src/binary.js';
+import { isInstalledPackage, printVersion, resolveBinary, versionMismatchWarning } from '../src/binary.js';
 
 describe('commandSpec', () => {
   it('spawns directly without a shell on POSIX', () => {
@@ -82,5 +83,57 @@ describe('printVersion', () => {
     await expect(printVersion(['version'], '0.5.0', run)).rejects.toThrow(
       'cannot read the krate binary version (@krate/core is v0.5.0): Failed to run krate binary: ENOENT',
     );
+  });
+});
+
+describe('resolveBinary', () => {
+  const name = process.platform === 'win32' ? 'krate.exe' : 'krate';
+
+  function layout(coreDir: string) {
+    const root = mkdtempSync(join(tmpdir(), 'krate-bin-'));
+    const binDir = join(root, coreDir, 'bin');
+    const platformDir = join(root, 'platform');
+    mkdirSync(binDir, { recursive: true });
+    mkdirSync(join(platformDir, 'bin'), { recursive: true });
+    const local = join(binDir, name);
+    const platform = join(platformDir, 'bin', name);
+    writeFileSync(local, '');
+    writeFileSync(platform, '');
+    return { root, binDir, local, platform, platformManifest: join(platformDir, 'package.json') };
+  }
+
+  it('prefers the platform package over a file in bin/ for an installed package', () => {
+    const t = layout(join('node_modules', '@krate', 'core'));
+    expect(resolveBinary(t.binDir, () => t.platformManifest)).toBe(t.platform);
+    rmSync(t.root, { recursive: true, force: true });
+  });
+
+  it('prefers a binary built into bin/ in a source checkout', () => {
+    const t = layout(join('packages', 'core'));
+    expect(resolveBinary(t.binDir, () => t.platformManifest)).toBe(t.local);
+    rmSync(t.root, { recursive: true, force: true });
+  });
+
+  it('falls back to bin/ when no platform package is installed', () => {
+    const t = layout(join('node_modules', '@krate', 'core'));
+    const missing = () => {
+      throw new Error('not found');
+    };
+    expect(resolveBinary(t.binDir, missing)).toBe(t.local);
+    rmSync(t.root, { recursive: true, force: true });
+  });
+
+  it('recognizes installed packages on POSIX and Windows paths', () => {
+    expect(isInstalledPackage('/app/node_modules/@krate/core/bin')).toBe(true);
+    expect(isInstalledPackage('C:\\app\\node_modules\\@krate\\core\\bin')).toBe(true);
+    expect(isInstalledPackage('/home/me/krate/packages/core/bin')).toBe(false);
+  });
+});
+
+describe('published files', () => {
+  it('ships the launcher from bin/ and no compiler binary', () => {
+    const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
+    expect(pkg.files).toContain('bin/krate.js');
+    expect(pkg.files).not.toContain('bin');
   });
 });
