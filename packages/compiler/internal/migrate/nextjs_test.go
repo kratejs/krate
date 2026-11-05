@@ -1398,3 +1398,24 @@ func TestNamedDefaultOnlyMatchesWholeStatements(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanMarksExistingTargetsAsOverwrites(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Hi</h1>; }`)
+	writeNextFile(t, root, "tsconfig.json", `{"compilerOptions":{"strict":true}}`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := findPlan(rep, "tsconfig.json")
+	if ts == nil || !ts.Overwrites {
+		t.Fatalf("existing tsconfig.json must be flagged as an overwrite: %+v", ts)
+	}
+	page := findPlan(rep, "src/pages/index.tsx")
+	if page == nil || page.Overwrites {
+		t.Fatalf("a new page is not an overwrite: %+v", page)
+	}
+	if _, err := Apply(rep, ApplyOptions{}); err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("apply without --force must refuse, got %v", err)
+	}
+}

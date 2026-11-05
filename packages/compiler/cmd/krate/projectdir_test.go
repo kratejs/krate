@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kratejs/krate/packages/compiler/internal/migrate"
 )
 
 func TestLoadConfigRejectsMissingProjectDir(t *testing.T) {
@@ -33,5 +35,16 @@ func TestDisplayOutputUnsetIsNotServer(t *testing.T) {
 	}
 	if got := displayOutput("static"); got != "static" {
 		t.Errorf("static output shown as %q", got)
+	}
+}
+
+func TestOverwriteCount(t *testing.T) {
+	rep := &migrate.Report{Files: []migrate.PlannedFile{
+		{Target: "a", Overwrites: true},
+		{Target: "b"},
+		{Target: "c", Overwrites: true},
+	}}
+	if got := overwriteCount(rep); got != 2 {
+		t.Errorf("overwriteCount = %d, want 2", got)
 	}
 }

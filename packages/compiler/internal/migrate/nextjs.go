@@ -49,10 +49,13 @@ type ManualItem struct {
 
 // PlannedFile is one file the migrator can copy or generate.
 type PlannedFile struct {
-	Kind         FileKind `json:"kind"`
-	Source       string   `json:"source,omitempty"`
-	Target       string   `json:"target"`
-	Conflict     bool     `json:"conflict,omitempty"`
+	Kind     FileKind `json:"kind"`
+	Source   string   `json:"source,omitempty"`
+	Target   string   `json:"target"`
+	Conflict bool     `json:"conflict,omitempty"`
+	// Overwrites marks a target that already exists. --apply refuses to
+	// replace it without --force (the original is backed up first).
+	Overwrites   bool     `json:"overwrites,omitempty"`
 	Rewrites     []string `json:"rewrites,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
 	Content      []byte   `json:"-"`
@@ -290,6 +293,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	for i := range rep.Files {
 		if fileExists(filepath.Join(abs, filepath.FromSlash(rep.Files[i].Target))) {
 			rep.Files[i].Conflict = true
+			rep.Files[i].Overwrites = true
 		}
 	}
 	sort.SliceStable(rep.Files, func(i, j int) bool { return rep.Files[i].Target < rep.Files[j].Target })

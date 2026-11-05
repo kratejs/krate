@@ -62,7 +62,11 @@ func runMigrateNext(flags cliFlags, args []string) {
 		}
 		printMigrationPlan(rep)
 		if len(rep.Files) > 0 {
-			fmt.Println("\nDry run. Re-run with --apply to write these files.")
+			if n := overwriteCount(rep); n > 0 {
+				fmt.Printf("\nDry run. %d file(s) above already exist, so --apply needs --force.\nThe originals are backed up first and `krate migrate rollback` restores them.\n", n)
+			} else {
+				fmt.Println("\nDry run. Re-run with --apply to write these files.")
+			}
 		}
 		return
 	}
@@ -136,7 +140,11 @@ func printMigrationPlan(rep *migrate.Report) {
 		if src == "" {
 			src = "(generated)"
 		}
-		fmt.Printf("  %s %s -> %s\n", marker, src, f.Target)
+		note := ""
+		if f.Overwrites {
+			note = "  (exists: needs --force, backup is made)"
+		}
+		fmt.Printf("  %s %s -> %s%s\n", marker, src, f.Target, note)
 		for _, r := range f.Rewrites {
 			fmt.Printf("      %s\n", r)
 		}
@@ -145,6 +153,17 @@ func printMigrationPlan(rep *migrate.Report) {
 		fmt.Printf("  warning: %s\n", w)
 	}
 	printMigrationManual(rep)
+}
+
+// overwriteCount is the number of planned files whose target already exists.
+func overwriteCount(rep *migrate.Report) int {
+	n := 0
+	for _, f := range rep.Files {
+		if f.Overwrites {
+			n++
+		}
+	}
+	return n
 }
 
 func printMigrationManual(rep *migrate.Report) {
