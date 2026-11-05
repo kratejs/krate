@@ -111,3 +111,18 @@ func TestMemberAssignedFunctionComponents(t *testing.T) {
 		t.Errorf("member components missing:\n%s\nlog:\n%s", html, logged)
 	}
 }
+
+func TestSameNamedExportsRenderEachOwnComponent(t *testing.T) {
+	html, logged := buildPlain(t, map[string]string{
+		"src/ui/a.tsx": "export function Card(props) { return <p class=\"a\">A{props.label}</p>; }\n",
+		"src/ui/b.tsx": "export function Card(props) { return <b class=\"b\">B{props.label}</b>; }\n",
+		"src/pages/index.tsx": "import { Card as A } from '../ui/a';\nimport { Card as B } from '../ui/b';\n" +
+			"export default function Home() { return <main><A label=\"1\" /><B label=\"2\" /></main>; }\n",
+	})
+	if !strings.Contains(html, `<p class=a>A1</p><b class=b>B2</b>`) {
+		t.Errorf("each Card should render its own module's component:\n%s", html)
+	}
+	if strings.Contains(logged, "KR7116") {
+		t.Errorf("collision should be resolved:\n%s", logged)
+	}
+}
