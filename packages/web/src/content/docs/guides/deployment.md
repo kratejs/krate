@@ -19,7 +19,8 @@ dist/          deploy this
 
 Static hosts should exclude `dist/.krate/`. It contains every server-only file:
 the API route bundles (`api/`, `api-node/`, with their source maps), the
-server components and SSR page bundles, `manifest.json`, `server-manifest.json`,
+server components and SSR page bundles, `manifest.json`, `server-manifest.json`
+(0.4 wrote `manifest.json` at the top of `dist/`),
 the SSR renderer, and the persisted ISR cache. `krate serve` needs it, but a
 static host must never publish it (`krate deploy` removes it for you). Nothing
 under `dist/.krate/` is ever served by `krate serve` or `krate dev`.

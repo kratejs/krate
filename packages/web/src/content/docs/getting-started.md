@@ -25,7 +25,9 @@ and building your first page.
 
 ## Prerequisites
 
-- **Node.js 20+** - for the npm CLI wrapper and running `krate.config.ts`
+- **Node.js 20+** - for the npm CLI wrapper, `generateStaticParams`, and the SSR /
+  API-route sidecars. A static site with a plain config builds without running
+  any Node code: the `krate` binary evaluates `krate.config.ts` itself
 - **Go 1.26+** - only needed when building the compiler from source
 
 The published CLI ships pre-built binaries for macOS, Linux and Windows, so you

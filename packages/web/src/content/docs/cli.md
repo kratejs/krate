@@ -82,7 +82,7 @@ During the build the compiler:
 1. Runs plugin `BeforeBuild` hooks (the docs plugin generates pages here).
 2. Builds every page in parallel (SSR evaluation + hydration codegen).
 3. Merges CSS, inlines `@import`s, folds duplicate declarations (always), and runs minification when enabled.
-4. Writes hashed JS chunks, the shared runtime chunk, and `manifest.json`.
+4. Writes hashed JS chunks, the shared runtime chunk, and `.krate/manifest.json`.
 5. Copies `publicDir` assets, compiles API routes, middleware, and runtime components.
 
 ## Build caching
@@ -182,8 +182,9 @@ built-in rule list.
 
 Applies safe codemods for diagnostics with an unambiguous rewrite. Dry-run by
 default; `--apply` writes atomically. Files that fail to parse are skipped and
-never partially rewritten. The first shipped fix is `KR5002` lowercase event
-names on built-in elements (`onclick` -> `onClick`).
+never partially rewritten. Fixes include `KR5002` lowercase event names on
+built-in elements (`onclick` -> `onClick`) and `KR7125`, the `tsconfig.json`
+`baseUrl` of a 0.4 project (`"./src"` -> `"."`).
 
 ```sh
 krate fix
@@ -381,6 +382,6 @@ dist/
   index.<hash>.js            # per-page hydration bundles
   styles.<hash>.css          # merged, deduplicated CSS
   chunks/runtime.<hash>.js   # shared runtime chunk
-  manifest.json              # page + SSR/ISR metadata
+  .krate/manifest.json       # page + SSR/ISR metadata (build metadata, not published)
   _krate/images/...          # processed <Image> variants
 ```

@@ -29,6 +29,13 @@ no-op. Writes are atomic and preserve the file mode.
 | `KR5005` | Remove an ignored form default when a controlled prop is present | `value={v} defaultValue="x"` -> `value={v}` |
 | `KR5005` | Remove the ignored checked default | `checked={on} defaultChecked` -> `checked={on}` |
 | `KR5007` | Rename `onChange` on `contentEditable` to `onInput` | `onChange={edit}` -> `onInput={edit}` |
+| `KR7125` | Set `tsconfig.json` `baseUrl` to the project root when it names a directory that every `paths` target repeats | `"baseUrl": "./src"` with `"@/*": ["./src/*"]` -> `"baseUrl": "."` |
+
+The `KR7125` rule edits `tsconfig.json` (comments and layout stay as they are)
+and only fires when each `paths` target starts with the `baseUrl` directory,
+exists under the project root and does not exist under `baseUrl`. That is the
+0.4 project template; see [Upgrading](/docs/guides/upgrading/#tsconfigjson-baseurl-is-strict).
+Any other `baseUrl`/`paths` combination is left for you to edit.
 
 String-valued inline handlers such as `onclick="native()"` are HTML event
 attributes, not React handlers, and are left unchanged. Component props,
