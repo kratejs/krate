@@ -44,7 +44,7 @@ import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 import cluster from 'node:cluster';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const API_DIR = path.resolve(process.argv[2] || './src/api');
 const PORT = parseInt(process.argv[3] || '3001', 10);
@@ -57,6 +57,19 @@ const HOT = process.env.KRATE_API_HOT === '1';
 const LOOPBACK = '127.0.0.1';
 // Cluster across cores so the Node API sidecar uses more than one thread.
 const WORKERS = Math.max(1, parseInt(process.env.KRATE_API_WORKERS || '1', 10) || 1);
+
+// Exit when the Krate host dies: a SIGKILL or OOM kill gives it no chance to stop its sidecars.
+const PARENT_PID = parseInt(process.env.KRATE_PARENT_PID || '', 10);
+if (PARENT_PID > 0) {
+  const parentWatch = setInterval(() => {
+    try {
+      process.kill(PARENT_PID, 0);
+    } catch (e) {
+      if (!e || e.code !== 'EPERM') process.exit(0);
+    }
+  }, 2000);
+  if (parentWatch.unref) parentWatch.unref();
+}
 
 // Per-process caches so a request does no filesystem probing and no module
 // re-import: URL path -> resolved route file, and file -> imported namespace.
@@ -139,6 +152,13 @@ function resolveDynamicFile(dir, segments, exts) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    // Only the Krate host (which adds the per-process secret after running
+    // middleware and the action checks) may call the sidecar.
+    if (!sidecarAuthorized(req.headers['x-krate-internal'])) {
+      res.statusCode = 403;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.end('forbidden');
+    }
     const urlObj = new URL(req.url, "http://" + req.headers.host);
     const urlPath = urlObj.pathname;
 
@@ -429,13 +449,26 @@ import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const API_DIR = path.resolve(process.argv[2] || './src/api');
 const PORT = parseInt(process.argv[3] || '3001', 10);
 const MIDDLEWARE_PATH = process.argv[4] ? path.resolve(process.argv[4]) : '';
 const ACTION_DIR = process.argv[5] ? path.resolve(process.argv[5]) : path.resolve('./.krate/actions');
 const HOT = process.env.KRATE_API_HOT === '1';
+
+// Exit when the Krate host dies: a SIGKILL or OOM kill gives it no chance to stop its sidecars.
+const PARENT_PID = parseInt(process.env.KRATE_PARENT_PID || '', 10);
+if (PARENT_PID > 0) {
+  const parentWatch = setInterval(() => {
+    try {
+      process.kill(PARENT_PID, 0);
+    } catch (e) {
+      if (!e || e.code !== 'EPERM') process.exit(0);
+    }
+  }, 2000);
+  if (parentWatch.unref) parentWatch.unref();
+}
 
 const fileCache = new Map();
 const moduleCache = new Map();
@@ -621,6 +654,9 @@ Bun.serve({
   port: PORT,
   hostname: '127.0.0.1',
   async fetch(req) {
+    if (!sidecarAuthorized(req.headers.get('x-krate-internal'))) {
+      return new Response('forbidden', { status: 403, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    }
     const url = new URL(req.url);
     const urlPath = url.pathname;
     if (urlPath === '/__krate/internal/cache-invalidate') {
@@ -738,6 +774,10 @@ type regionPageResult struct {
 	// errStack and errDigest describe the failed render behind renderErr.
 	errStack  string
 	errDigest string
+	// unavailable is non-empty when the renderer could not be reached at all.
+	// Nothing was written; the caller answers 503 rather than serving the baked
+	// shell as if the page had rendered.
+	unavailable string
 }
 
 // regionBoundary is one splice marker and its nested markers.
@@ -870,7 +910,7 @@ func streamRegionPage(w http.ResponseWriter, flusher http.Flusher, shells *regio
 }
 
 func streamRegionPageMode(w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string, outOfOrder bool) regionPageResult {
-	return streamRegionPageModeSC(w, flusher, shells, absOut, route, ssrPort, params, query, headers, goRenders, renderGo, isISR, revalidate, internalSecret, outOfOrder, false, false)
+	return streamRegionPageModeSC(context.Background(), w, flusher, shells, absOut, route, ssrPort, params, query, headers, goRenders, renderGo, isISR, revalidate, internalSecret, outOfOrder, false, false)
 }
 
 // streamRegionPageModeSC is streamRegionPageMode with serverComponents set for
@@ -881,7 +921,7 @@ func streamRegionPageMode(w http.ResponseWriter, flusher http.Flusher, shells *r
 // failOnRenderErr turns a failed page render into a fatal result (nothing is
 // written) so the caller can answer with the route's error page instead of
 // the baked body.
-func streamRegionPageModeSC(w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string, outOfOrder, serverComponents, failOnRenderErr bool) regionPageResult {
+func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, shells *regionShellCache, absOut, route string, ssrPort int, params, query, headers map[string]string, goRenders map[string]goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), isISR bool, revalidate int, internalSecret string, outOfOrder, serverComponents, failOnRenderErr bool) regionPageResult {
 	res := regionPageResult{}
 	relPath := strings.TrimPrefix(route, "/")
 	if relPath == "" {
@@ -931,15 +971,15 @@ func streamRegionPageModeSC(w http.ResponseWriter, flusher http.Flusher, shells 
 	// never holds up the rest of the page. Page/ISR and nested regions keep the
 	// ordered assembly path because they carry status or contain child markers.
 	if outOfOrder && !isISR && canStreamOutOfOrder(all) && (!serverComponents || allSuspense(all)) {
-		return streamSiblingRegions(w, flusher, shell, regionList, goReq, renderGo, string(reqCtx), ssrPort, route, params, query, headers, internalSecret)
+		return streamSiblingRegions(ctx, w, flusher, shell, regionList, goReq, renderGo, string(reqCtx), ssrPort, route, params, query, headers, internalSecret)
 	}
 
 	// Only involve the Node SSR sidecar when it has something to render. A page
 	// whose regions are all Go (or static) is served by the Go server + Go host
 	// alone - no node/bun process, no extra hop.
 	if len(regionList) > 0 {
-		if err := fetchNodeRegions(ssrPort, route, params, query, headers, regionList, regionHTML, &res, internalSecret); err != nil {
-			res.served = false
+		if err := fetchNodeRegions(ctx, ssrPort, route, params, query, headers, regionList, regionHTML, &res, internalSecret); err != nil {
+			res.unavailable = err.Error()
 			return res
 		}
 	}
@@ -1062,7 +1102,7 @@ func streamRegionPageModeSC(w http.ResponseWriter, flusher http.Flusher, shells 
 // for a Node hop. It reuses the pooled keep-alive sidecar client (no per-request
 // TCP handshake) and bounds the whole exchange so a stalled sidecar can't pin the
 // request goroutine forever.
-func fetchNodeRegions(ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, regionHTML map[string]string, res *regionPageResult, internalSecret string) error {
+func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, regionHTML map[string]string, res *regionPageResult, internalSecret string) error {
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"route":   route,
 		"url":     route,
@@ -1072,7 +1112,7 @@ func fetchNodeRegions(ssrPort int, route string, params, query, headers map[stri
 		"query":   query,
 		"regions": regionList,
 	})
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/__krate/regions", ssrPort), bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/__krate/regions", ssrPort), bytes.NewReader(reqBody))
 	if err != nil {
 		return err
 	}
@@ -1096,6 +1136,12 @@ func fetchNodeRegions(ssrPort int, route string, params, query, headers map[stri
 	for framesLeft > 0 {
 		line, err := tcpBuf.ReadBytes('\n')
 		if err != nil {
+			// The renderer died or the stream was cut mid-way: the regions that
+			// never arrived keep their baked content, which must not pass as a
+			// successful (and cacheable) render.
+			if res.renderErr == "" {
+				res.renderErr = fmt.Sprintf("ssr regions: stream ended with %d of %d regions missing", framesLeft, len(regionList))
+			}
 			break
 		}
 		var frame regionFrame
@@ -1173,12 +1219,13 @@ func fetchNodeRegions(ssrPort int, route string, params, query, headers map[stri
 	return nil
 }
 
+var titleElementRe = regexp.MustCompile(`(?i)<title[^>]*>[\s\S]*?</title>`)
+
 // replaceTitle swaps the baked <title> content in a shell for a freshly
 // rendered one. Minified shells may have unquoted/empty titles; a simple
 // scan/replace on the first <title>...</title> span is sufficient.
 func replaceTitle(shell, title string) string {
-	re := regexp.MustCompile(`(?i)<title[^>]*>[\s\S]*?</title>`)
-	loc := re.FindStringIndex(shell)
+	loc := titleElementRe.FindStringIndex(shell)
 	if loc == nil {
 		return shell
 	}
@@ -1326,6 +1373,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					fmt.Sprintf("KRATE_API_HOT=%d", boolToInt(hub != nil)),
 					fmt.Sprintf("KRATE_API_DEV=%d", boolToInt(hub != nil)),
 					fmt.Sprintf("KRATE_ACTION_MAX_BODY=%d", apiBodyLimit),
+					fmt.Sprintf("KRATE_PARENT_PID=%d", os.Getpid()),
 				)
 				cmd.Env = append(cmd.Env, revalHost.EnvList()...)
 				if cacheRuntime != "" {
@@ -1427,6 +1475,14 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 
 	sidecarURL, _ := url.Parse(fmt.Sprintf("http://localhost:%d", apiPort))
 	apiProxy := httputil.NewSingleHostReverseProxy(sidecarURL)
+	// Every request the host forwards carries the per-process secret (replacing
+	// anything the client sent), so the sidecar can refuse direct connections
+	// that bypass the middleware, CSRF and body-limit checks done here.
+	baseDirector := apiProxy.Director
+	apiProxy.Director = func(r *http.Request) {
+		baseDirector(r)
+		r.Header.Set(internalSecretHeader, revalHost.secret)
+	}
 	apiProxy.Transport = newSidecarTransport()
 
 	// Optional user-provided API sidecar. Requests it owns are forwarded first;
@@ -1472,6 +1528,16 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		dev:        hub != nil,
 		sidecarURL: fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort),
 		file:       middlewarePath,
+		secret:     revalHost.secret,
+		staticExists: func(urlPath string) bool {
+			f, err := hardenedDir{http.Dir(absOut)}.Open(urlPath)
+			if err != nil {
+				return false
+			}
+			defer f.Close()
+			fi, err := f.Stat()
+			return err == nil && !fi.IsDir()
+		},
 	}
 
 	if hasActions {
@@ -1537,6 +1603,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	ssr.SetPPR(cfg.PPR, cfg.PPRRevalidate)
 	ssr.SetRendererWorkers(cfg.SSR.RendererWorkers)
 	ssrStarted := false
+	ssrStop := make(chan struct{})
+	var ssrStopOnce sync.Once
 	if err := ssr.LoadManifest(); err != nil {
 		// No request-time pages: nothing routes through the renderer.
 	} else if !ssr.NeedsNodeRenderer() {
@@ -1546,6 +1614,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	} else {
 		ssrStarted = true
 		revalHost.SetSSR(ssr, ssrPort)
+		go ssr.Supervise(ssrStop)
 		printf("  %s*%s SSR renderer -> %shttp://localhost:%d%s\n", cCyan, cReset, cCyan, ssrPort, cReset)
 	}
 
@@ -1931,7 +2000,23 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		}
 		outOfOrder := page != nil && page.Mode == RenderStreaming.String()
 		errMatch, hasErrPage := segs.forRoute(SegmentError, r.URL.Path, page.SegDir)
-		rr := streamRegionPageModeSC(w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo, isISR, reval, ssr.InternalSecret(), outOfOrder, page.ServerComponents, hasErrPage)
+		rr := streamRegionPageModeSC(r.Context(), w, flusher, regionShells, absOut, route, regionPort, params, query, headers, routeGo, renderGo, isISR, reval, ssr.InternalSecret(), outOfOrder, page.ServerComponents, hasErrPage)
+		if rr.served && rr.unavailable != "" {
+			// The renderer is down or unreachable. Serving the baked shell with a
+			// 200 would hide the outage (and let a CDN cache the empty page).
+			if r.Context().Err() != nil {
+				return // the client went away; there is nobody to answer
+			}
+			fmt.Fprintf(os.Stderr, "  %sSSR renderer unavailable (%s):%s %s\n", cRed, route, cReset, rr.unavailable)
+			h := w.Header()
+			h.Set("X-Krate-Error", "renderer-unavailable")
+			h.Set("Cache-Control", "no-store")
+			h.Set("Retry-After", "1")
+			h.Del("X-Krate-Cache")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("<!doctype html><title>503</title><h1>Service Unavailable</h1>"))
+			return
+		}
 		if rr.served && rr.fatalErr != "" {
 			// The render failed: answer 500 with the route's nearest error page
 			// (the full error stays in the log, the page gets a sanitized one).
@@ -2027,7 +2112,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				if dec, err := url.PathUnescape(rewritten); err == nil {
 					rewritten = dec
 				}
-				r.URL.Path = rewritten
+				r.URL.Path = rewriteTargetPath(rewritten)
 				r.URL.RawPath = ""
 				break
 			}
@@ -2085,6 +2170,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		devMux = devErrorShell(hub, root, absOut, mux)
 	}
 	proxyTrust.Store(cfg.Server.TrustProxy)
+	flashSecret.Store(revalHost.secret)
+	proxyHops.Store(int32(cfg.Server.TrustedProxies))
 	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, devMux)))))))
 
 	listenerOwned = true
@@ -2129,17 +2216,22 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 					}
 					ticker := time.NewTicker(interval)
 					defer ticker.Stop()
+					// The first refresh waits a full interval: the entries a
+					// request just rendered are fresh, and refreshing at t=0
+					// would re-render them (and change their body) right away.
+					// A tick that lands while the renderer is restarting is
+					// skipped; the supervisor brings it back.
 					for {
-						if !ssr.IsRunning() {
-							return
-						}
-						if err := ssr.RefreshPage(page.Route); err != nil {
-							fmt.Fprintf(os.Stderr, "  %sISR revalidation failed (%s):%s %v\n", cYellow, page.Route, cReset, err)
-						}
 						select {
 						case <-ticker.C:
 						case <-isrDone:
 							return
+						}
+						if !ssr.IsRunning() {
+							continue
+						}
+						if err := ssr.RefreshPage(page.Route); err != nil {
+							fmt.Fprintf(os.Stderr, "  %sISR revalidation failed (%s):%s %v\n", cYellow, page.Route, cReset, err)
 						}
 					}
 				}()
@@ -2174,7 +2266,8 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		isrDoneOnce.Do(func() { close(isrDone) })
 		nodeAPIStopOnce.Do(func() { close(nodeAPIStop) })
 		if ssrStarted {
-			ssr.Stop()
+			ssrStopOnce.Do(func() { close(ssrStop) })
+			ssr.Shutdown()
 			printf("  %s+%s SSR renderer stopped\n", cGreen, cReset)
 		}
 		if goAPI != nil {
@@ -2314,7 +2407,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		emitAccessLog(accessRecord{
 			id:       requestIDFrom(r.Context()),
 			method:   r.Method,
-			path:     r.URL.Path,
+			path:     r.URL.EscapedPath(),
 			status:   lrw.statusCode,
 			duration: time.Since(start),
 		})

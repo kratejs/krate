@@ -123,6 +123,19 @@ const manifestPath = process.env.KRATE_MANIFEST || "";
 const root = process.env.KRATE_ROOT || process.cwd();
 const OUT_DIR = process.env.KRATE_OUT_DIR || path.join(root, "dist");
 
+// Exit when the Krate host dies: a SIGKILL or OOM kill gives it no chance to stop its sidecars.
+const PARENT_PID = parseInt(process.env.KRATE_PARENT_PID || "", 10);
+if (PARENT_PID > 0) {
+  const parentWatch = setInterval(() => {
+    try {
+      process.kill(PARENT_PID, 0);
+    } catch (e: any) {
+      if (!e || e.code !== "EPERM") process.exit(0);
+    }
+  }, 2000);
+  parentWatch.unref();
+}
+
 let manifest: ServerManifest | null = null;
 
 if (manifestPath && fs.existsSync(manifestPath)) {

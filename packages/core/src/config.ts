@@ -54,6 +54,11 @@ export interface ServerConfig {
    * reverse proxy (request URLs, CSRF origin check, client IP). Default false.
    */
   trustProxy?: boolean;
+  /**
+   * Reverse proxies in front of Krate when trustProxy is on (default 1). The
+   * client IP is the X-Forwarded-For entry that many hops from the right.
+   */
+  trustedProxies?: number;
   /** Graceful shutdown drain period in seconds (default 15). */
   shutdownTimeout?: number;
 }

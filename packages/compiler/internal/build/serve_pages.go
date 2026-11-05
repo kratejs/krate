@@ -47,6 +47,22 @@ func CanonicalPagePath(route string, cfg *config.Config) string {
 	return p
 }
 
+// rewriteTargetPath is the internal path a rewrite (middleware
+// x-middleware-rewrite or config rewrites) serves. Page URLs are canonical with
+// a trailing slash and the server redirects the slashless spelling, so a rewrite
+// to "/feedback" would answer 301 and change the visible URL. Serving the
+// canonical form directly keeps the rewrite invisible. API routes, internal
+// paths and file-like paths are left alone.
+func rewriteTargetPath(p string) string {
+	if p == "" || p == "/" || strings.HasSuffix(p, "/") || isFileLikePath(p) {
+		return p
+	}
+	if p == "/api" || strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/__krate/") {
+		return p
+	}
+	return p + "/"
+}
+
 // redirectToCanonicalSlash answers a GET/HEAD for a directory-style page URL
 // without its trailing slash with a 301 to the slash form (query preserved),
 // matching what the static file server does for SSG pages. It reports whether
@@ -59,9 +75,10 @@ func redirectToCanonicalSlash(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
 	}
-	// A relative Location (like the file server's) stays correct under a base
-	// path and cannot be turned into an off-site redirect by the path.
-	target := path.Base(p) + "/"
+	// A relative Location stays correct under a base path. The "./" matters: a
+	// last segment like "ftp:3232235777" or "\\host" would otherwise parse as
+	// an absolute or scheme-relative URL and turn the redirect off-site.
+	target := "./" + path.Base(p) + "/"
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}

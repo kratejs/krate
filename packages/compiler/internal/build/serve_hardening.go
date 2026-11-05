@@ -49,6 +49,10 @@ const (
 	serverWriteTimeout = 60 * time.Second
 	serverIdleTimeout  = 120 * time.Second
 
+	// serverMaxHeaderBytes caps the request line and headers. Go's default is
+	// 1 MiB, far more than any real client sends (cookies included).
+	serverMaxHeaderBytes = 64 << 10
+
 	// shutdownGrace bounds graceful shutdown before the server is forced closed.
 	shutdownGrace = 15 * time.Second
 )
@@ -162,6 +166,12 @@ func corsMiddleware(cfg *config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		allowed := ""
+		// With an origin list the headers depend on Origin even when this
+		// request gets none (a disallowed origin): a cache must not hand that
+		// answer to an allowed origin, so Vary goes on every response.
+		if !allowAll {
+			w.Header().Add("Vary", "Origin")
+		}
 		switch {
 		case allowAll && c.Credentials:
 			// A wildcard cannot be combined with credentials: reflecting any
@@ -170,7 +180,6 @@ func corsMiddleware(cfg *config.Config, next http.Handler) http.Handler {
 			allowed = "*"
 		case origin != "" && originAllowed(origin, origins) && !(c.Credentials && hasWildcard):
 			allowed = origin
-			w.Header().Add("Vary", "Origin")
 		}
 		if allowed != "" {
 			h := w.Header()
@@ -186,6 +195,9 @@ func corsMiddleware(cfg *config.Config, next http.Handler) http.Handler {
 		}
 		// Preflight: short-circuit (only when it is actually a preflight).
 		if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+			if !allowAll {
+				w.Header().Add("Vary", "Access-Control-Request-Method, Access-Control-Request-Headers")
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -219,6 +231,7 @@ func newHTTPServer(handler http.Handler) *http.Server {
 		ReadTimeout:       serverReadTimeout,
 		WriteTimeout:      serverWriteTimeout,
 		IdleTimeout:       serverIdleTimeout,
+		MaxHeaderBytes:    serverMaxHeaderBytes,
 	}
 }
 

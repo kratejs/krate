@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mattn/go-isatty"
 )
@@ -39,10 +41,41 @@ func formatDuration(d time.Duration) string {
 	return strconv.FormatInt(d.Milliseconds(), 10) + "ms"
 }
 
+// safeLogText makes request-controlled text safe to print on one log line:
+// control characters (including ESC and newlines) and Unicode line separators
+// become %XX escapes, so a crafted URL cannot forge log lines or terminal
+// escape sequences.
+func safeLogText(s string) string {
+	clean := true
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || r == 0x85 || r == 0x2028 || r == 0x2029 {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || r == 0x85 || r == 0x2028 || r == 0x2029 {
+			var buf [4]byte
+			n := utf8.EncodeRune(buf[:], r)
+			for _, c := range buf[:n] {
+				fmt.Fprintf(&b, "%%%02X", c)
+			}
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // formatRequestLine renders a single request log line. With color it mirrors
 // the CLI's build output (dim timestamp, colored status, dim duration);
 // otherwise it emits a clean, aligned plain-text line for CI and piped output.
 func formatRequestLine(method, path string, status int, dur time.Duration, color bool) string {
+	method, path = safeLogText(method), safeLogText(path)
 	durStr := formatDuration(dur)
 	if !color {
 		return fmt.Sprintf("%s %s %s %d %s", time.Now().Format("15:04:05"), method, path, status, durStr)

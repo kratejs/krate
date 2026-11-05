@@ -427,3 +427,49 @@ func TestDevProxyMiddleware(t *testing.T) {
 		t.Fatal("expected /other to fall through")
 	}
 }
+
+// With an origin list the answer depends on Origin even for a disallowed
+// origin that gets no CORS headers, so a shared cache must be told to vary.
+func TestCORSMiddlewareVaryOnDisallowedOrigin(t *testing.T) {
+	cfg := config.Default()
+	cfg.CORS.Enabled = true
+	cfg.CORS.Origins = []string{"https://ok.example"}
+	h := corsMiddleware(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+
+	for _, origin := range []string{"https://evil.example", "https://ok.example", ""} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/", nil)
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		h.ServeHTTP(rec, req)
+		if got := rec.Header().Values("Vary"); strings.Join(got, ",") != "Origin" {
+			t.Errorf("origin %q: Vary = %v, want Origin", origin, got)
+		}
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("OPTIONS", "/api/x", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	h.ServeHTTP(rec, req)
+	if got := strings.Join(rec.Header().Values("Vary"), ", "); !strings.Contains(got, "Access-Control-Request-Headers") || !strings.Contains(got, "Origin") {
+		t.Errorf("preflight Vary = %q", got)
+	}
+
+	// A wildcard answer is the same for everyone and needs no Vary.
+	cfg.CORS.Origins = nil
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Origin", "https://a.example")
+	corsMiddleware(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(rec, req)
+	if got := rec.Header().Values("Vary"); len(got) != 0 {
+		t.Errorf("wildcard CORS should not vary, got %v", got)
+	}
+}
+
+func TestNewHTTPServerCapsHeaderSize(t *testing.T) {
+	srv := newHTTPServer(http.NotFoundHandler())
+	if srv.MaxHeaderBytes <= 0 || srv.MaxHeaderBytes > 128<<10 {
+		t.Errorf("MaxHeaderBytes = %d, want a cap well under Go's 1 MiB default", srv.MaxHeaderBytes)
+	}
+}

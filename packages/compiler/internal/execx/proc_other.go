@@ -8,12 +8,15 @@ import (
 )
 
 // configureTree starts the child in its own process group so the whole group can
-// be signalled when the command is cancelled.
+// be signalled when the command is cancelled. Where the OS supports it the child
+// is also killed when this process dies, so a SIGKILL or OOM kill of the parent
+// does not leave sidecars running on their ports.
 func configureTree(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	cmd.SysProcAttr.Setpgid = true
+	setParentDeathSignal(cmd.SysProcAttr)
 }
 
 // KillTree terminates cmd and all of its child processes.

@@ -23,6 +23,10 @@ import (
 // them (request URLs, CSRF origin check, client IP).
 var proxyTrust atomic.Bool
 
+// proxyHops is server.trustedProxies: how many proxies sit in front of the
+// server when proxyTrust is set.
+var proxyHops atomic.Int32
+
 // firstForwarded returns the first element of a comma-separated forwarded
 // header value.
 func firstForwarded(v string) string {
@@ -68,12 +72,28 @@ func requestFullURL(r *http.Request) string {
 	return requestBaseURL(r) + r.URL.RequestURI()
 }
 
-// clientIP is the peer address, or the first X-Forwarded-For entry behind a
-// trusted proxy.
+// clientIP is the peer address, or behind a trusted proxy the X-Forwarded-For
+// entry that trustedProxies hops (default 1) from the right. The leftmost entry
+// is whatever the client sent, so it never decides the address.
+// forwardedHeadersMiddleware has already appended the peer as the last entry.
 func clientIP(r *http.Request) string {
 	if proxyTrust.Load() {
-		if ip := firstForwarded(r.Header.Get("X-Forwarded-For")); ip != "" {
-			return ip
+		var chain []string
+		for _, part := range strings.Split(r.Header.Get("X-Forwarded-For"), ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				chain = append(chain, part)
+			}
+		}
+		if n := len(chain); n > 0 {
+			hops := int(proxyHops.Load())
+			if hops < 1 {
+				hops = 1
+			}
+			i := n - 1 - hops
+			if i < 0 {
+				i = 0
+			}
+			return chain[i]
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -307,6 +327,20 @@ func isStaticAssetPath(p string) bool {
 	return staticAssetExts[strings.ToLower(path.Ext(p))]
 }
 
+// skipsMiddleware reports whether a matcher-less middleware may be skipped for
+// p. The extension alone is not enough: /api/files/x.pdf is a dynamic route
+// that merely looks like a file, so the path must also resolve to a real file
+// in the static layer and must not be an API route or server action.
+func (g *middlewareGate) skipsMiddleware(p string) bool {
+	if g.staticExists == nil || !isStaticAssetPath(p) {
+		return false
+	}
+	if p == "/api" || strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/__krate/") {
+		return false
+	}
+	return g.staticExists(p)
+}
+
 // middlewareGate runs the user middleware in front of next. api selects the
 // request kinds it applies to: pages always; /api and server actions too.
 type middlewareGate struct {
@@ -318,6 +352,12 @@ type middlewareGate struct {
 	// sidecarMatcher is what the sidecar last reported about the module's
 	// matcher: 0 unknown, 1 none declared, 2 declared.
 	sidecarMatcher atomic.Int32
+	// staticExists reports whether a URL path is a file served by the static
+	// layer. Nil means nothing is: middleware then runs for every request.
+	staticExists func(urlPath string) bool
+	// secret is sent to the sidecar as X-Krate-Internal; the sidecar refuses
+	// requests without it.
+	secret string
 }
 
 func (g *middlewareGate) wrap(next http.Handler) http.Handler {
@@ -328,7 +368,7 @@ func (g *middlewareGate) wrap(next http.Handler) http.Handler {
 			return
 		}
 		if g.rt != nil {
-			if !g.rt.HasMatcher() && isStaticAssetPath(p) {
+			if !g.rt.HasMatcher() && g.skipsMiddleware(p) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -349,7 +389,7 @@ func (g *middlewareGate) wrap(next http.Handler) http.Handler {
 		// Until the sidecar reports a matcher, forward everything; once it says
 		// there is none, static assets skip the round trip like the embedded
 		// runtime does.
-		if g.sidecarMatcher.Load() == 1 && isStaticAssetPath(p) {
+		if g.sidecarMatcher.Load() == 1 && g.skipsMiddleware(p) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -411,7 +451,7 @@ func applyRewrite(r *http.Request, target string) {
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p
 	}
-	r.URL.Path = p
+	r.URL.Path = rewriteTargetPath(p)
 	r.URL.RawPath = ""
 	if q != "" {
 		r.URL.RawQuery = q
@@ -430,7 +470,7 @@ func (g *middlewareGate) viaSidecar(w http.ResponseWriter, r *http.Request, next
 		"path":    r.URL.Path,
 		"headers": hdrs,
 	})
-	resp, err := sidecarPost(r.Context(), g.sidecarURL, payload)
+	resp, err := sidecarPost(r.Context(), g.sidecarURL, payload, g.secret)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  %sMiddleware unavailable:%s %v\n", cRed, cReset, err)
 		w.Header().Set("Cache-Control", "no-store")
@@ -468,12 +508,15 @@ func (g *middlewareGate) viaSidecar(w http.ResponseWriter, r *http.Request, next
 	g.apply(w, r, next, res)
 }
 
-func sidecarPost(ctx context.Context, url string, payload []byte) ([]byte, error) {
+func sidecarPost(ctx context.Context, url string, payload []byte, secret string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if secret != "" {
+		req.Header.Set(internalSecretHeader, secret)
+	}
 	resp, err := sidecarClient.Do(req)
 	if err != nil {
 		return nil, err

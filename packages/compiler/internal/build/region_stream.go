@@ -3,6 +3,7 @@ package build
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -61,7 +62,7 @@ func splitBodyScripts(shell string) (string, string) {
 	return shell, ""
 }
 
-func streamSiblingRegions(w http.ResponseWriter, flusher http.Flusher, shell string, regionList []map[string]string, goReq []goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), reqCtx string, ssrPort int, route string, params, query, headers map[string]string, internalSecret string) regionPageResult {
+func streamSiblingRegions(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, shell string, regionList []map[string]string, goReq []goRenderRegion, renderGo func([]goRenderRegion) (map[string]string, error), reqCtx string, ssrPort int, route string, params, query, headers map[string]string, internalSecret string) regionPageResult {
 	res := regionPageResult{served: true}
 	frames := make(chan regionFrameEvent, len(regionList)+len(goReq)+1)
 	var wg sync.WaitGroup
@@ -69,7 +70,7 @@ func streamSiblingRegions(w http.ResponseWriter, flusher http.Flusher, shell str
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			streamNodeRegionEvents(ssrPort, route, params, query, headers, regionList, internalSecret, frames)
+			streamNodeRegionEvents(ctx, ssrPort, route, params, query, headers, regionList, internalSecret, frames)
 		}()
 	}
 	if len(goReq) > 0 && renderGo != nil {
@@ -144,7 +145,7 @@ func streamSiblingRegions(w http.ResponseWriter, flusher http.Flusher, shell str
 
 // streamNodeRegionEvents reads the sidecar's NDJSON stream and forwards each
 // frame as soon as it arrives (completion order, not document order).
-func streamNodeRegionEvents(ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, internalSecret string, out chan<- regionFrameEvent) {
+func streamNodeRegionEvents(ctx context.Context, ssrPort int, route string, params, query, headers map[string]string, regionList []map[string]string, internalSecret string, out chan<- regionFrameEvent) {
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"route":   route,
 		"url":     route,
@@ -154,7 +155,7 @@ func streamNodeRegionEvents(ssrPort int, route string, params, query, headers ma
 		"query":   query,
 		"regions": regionList,
 	})
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/__krate/regions", ssrPort), bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/__krate/regions", ssrPort), bytes.NewReader(reqBody))
 	if err != nil {
 		out <- regionFrameEvent{err: err}
 		return

@@ -3,7 +3,9 @@ package build
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -119,10 +121,45 @@ func regionRoute(r goRenderRegion) string {
 	return ""
 }
 
-// regionKey uniquely identifies a Go region render (name + props + request
-// context, so per-URL request reads are not cached across URLs).
+// volatileRequestHeaders never make a component render differently, but change
+// on nearly every request; leaving them out of the key lets equal requests hit.
+var volatileRequestHeaders = map[string]bool{
+	"referer": true, "x-request-id": true, "traceparent": true, "tracestate": true,
+	"cache-control": true, "pragma": true, "if-none-match": true, "if-modified-since": true,
+	"if-match": true, "if-unmodified-since": true, "if-range": true, "range": true,
+	"connection": true, "keep-alive": true, "upgrade-insecure-requests": true, "priority": true,
+	"sec-fetch-site": true, "sec-fetch-mode": true, "sec-fetch-dest": true, "sec-fetch-user": true,
+	"x-forwarded-for": true, "x-real-ip": true, "forwarded": true,
+}
+
+// regionKey identifies a Go region render: name + props + the request context.
+// A component that takes a krate.Request may read any header (a cookie makes it
+// per-user), so the headers stay part of the key, but as a digest: raw cookies
+// and Authorization values do not sit in the cache map, and volatile headers
+// that cannot change the output are left out.
 func regionKey(r goRenderRegion) string {
-	return r.Name + "\x00" + r.Props + "\x00" + r.Request
+	return r.Name + "\x00" + r.Props + "\x00" + requestDigest(r.Request)
+}
+
+func requestDigest(request string) string {
+	if request == "" {
+		return ""
+	}
+	var ctx map[string]any
+	if err := json.Unmarshal([]byte(request), &ctx); err != nil {
+		sum := sha256.Sum256([]byte(request))
+		return hex.EncodeToString(sum[:])
+	}
+	if hdrs, ok := ctx["headers"].(map[string]any); ok {
+		for k := range hdrs {
+			if volatileRequestHeaders[strings.ToLower(k)] {
+				delete(hdrs, k)
+			}
+		}
+	}
+	canon, _ := json.Marshal(ctx) // map keys are sorted: the form is canonical
+	sum := sha256.Sum256(canon)
+	return hex.EncodeToString(sum[:])
 }
 
 // goAPISupervisor manages the compiled Go API sidecar subprocess. It starts

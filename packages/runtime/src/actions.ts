@@ -546,7 +546,8 @@ export function installActionForms(doc: Document | undefined = typeof document !
 
 function decodeFlash(value: string): { a?: string; r?: unknown } | null {
   try {
-    const raw = value.replace(/-/g, '+').replace(/_/g, '/');
+    // The server signs the cookie as "<payload>.<signature>"; only the payload decodes.
+    const raw = value.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
     const bin = atob(raw + '='.repeat((4 - (raw.length % 4)) % 4));
     return JSON.parse(decodeURIComponent(escape(bin))) as { a?: string; r?: unknown };
   } catch {

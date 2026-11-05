@@ -110,7 +110,16 @@ func serveActionSidecar(t *testing.T, runtime, actionDir string, hot bool) *http
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	srv := httptest.NewServer(actionHandler(httputil.NewSingleHostReverseProxy(target), 1<<20))
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	if secret := os.Getenv("KRATE_INTERNAL_SECRET"); secret != "" {
+		// Like the real host: the sidecar refuses requests without the secret.
+		baseDirector := proxy.Director
+		proxy.Director = func(r *http.Request) {
+			baseDirector(r)
+			r.Header.Set(internalSecretHeader, secret)
+		}
+	}
+	srv := httptest.NewServer(actionHandler(proxy, 1<<20))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -346,5 +355,50 @@ func TestActionHandlerSecurity(t *testing.T) {
 	check("spoofed return", spoof, http.StatusNoContent, false)
 	if lastReturn != "" {
 		t.Fatalf("unsafe return header must be dropped, got %q", lastReturn)
+	}
+}
+
+// With the host secret set, the flash cookie is signed (so another origin
+// cannot plant one), Secure over https, and the Go reader accepts only that.
+func TestActionSidecarSignsFlashCookie(t *testing.T) {
+	t.Setenv("KRATE_INTERNAL_SECRET", "flash-test-secret")
+	srv := startActionSidecar(t, "node", false)
+	req := actionRequest(t, srv, "/__krate/action/astep?__krate_args=%5B1%5D&__krate_return=%2Ftodos", "application/x-www-form-urlencoded", "n=3", false)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	r := doAction(t, req)
+	var cookie string
+	for _, c := range r.header.Values("Set-Cookie") {
+		if strings.HasPrefix(c, "krate_flash=") {
+			cookie = c
+		}
+	}
+	if cookie == "" {
+		t.Fatalf("no flash cookie: %v", r.header)
+	}
+	if !strings.Contains(cookie, "; Secure") {
+		t.Errorf("flash cookie over https must be Secure: %s", cookie)
+	}
+	value := strings.TrimPrefix(strings.SplitN(cookie, ";", 2)[0], "krate_flash=")
+	if !strings.Contains(value, ".") {
+		t.Fatalf("flash cookie is not signed: %q", value)
+	}
+
+	flashSecret.Store("flash-test-secret")
+	t.Cleanup(func() { flashSecret.Store("") })
+	get := func(v string) bool {
+		req := httptest.NewRequest("GET", "/todos", nil)
+		req.AddCookie(&http.Cookie{Name: "krate_flash", Value: v})
+		_, p, ok := requestFlash(req)
+		return ok && p.A == "astep"
+	}
+	if !get(value) {
+		t.Error("the Go reader rejected the sidecar's own signed cookie")
+	}
+	payload, _, _ := strings.Cut(value, ".")
+	if get(payload) {
+		t.Error("an unsigned cookie must be ignored once a secret is configured")
+	}
+	if get(payload + ".AAAA") {
+		t.Error("a cookie with a wrong signature must be ignored")
 	}
 }

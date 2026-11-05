@@ -386,6 +386,24 @@ Krate compiles CSS (including CSS modules and Tailwind) but has no Sass, Less or
 
 A named import from `@krate/runtime` (or one of its subpaths) asks for something the package does not export. The import is removed from the page, so the name would be undefined in the browser and fail with a ReferenceError. Check the spelling against the runtime API reference; names from other frameworks (`signal`, `usePathname`) have Krate equivalents such as `createSignal` and `getNavigationState`. This is an error.
 
+### KR7120
+
+**API route file in the pages directory**
+
+API routes are served from src/api, not from the pages directory. A `.ts` or `.js` file under src/pages/api used to build into an empty page while /api/... answered 502. Move the file to src/api/. This is a warning.
+
+### KR7121
+
+**Prerendered endpoint failed**
+
+A file such as `src/pages/data.json.ts` is a prerendered endpoint: its `GET` export runs once at build time and the response body is written to the output as a file (`data.json`). The build fails when the module has no `GET` export, `GET` throws, answers a non-2xx status, or the name has a dynamic segment. Endpoints run on Node (or the configured runtime) with the project's environment. For a response that depends on the request, use an API route in `src/api`.
+
+### KR7122
+
+**Page metadata could not be read at build time**
+
+A page's `export const metadata` (or a `generateMetadata` that returns an object literal) becomes the document `<title>`, description, canonical link, Open Graph and Twitter tags when its values are literals. When none can be resolved (the values are computed, or `generateMetadata` reads params), no tags are emitted. Write literal values, or render `<Head>` from the component for values that depend on props. This is a warning.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

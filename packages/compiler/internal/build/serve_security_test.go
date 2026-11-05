@@ -322,9 +322,11 @@ func TestRedirectToCanonicalSlash(t *testing.T) {
 		redirect       bool
 		loc            string
 	}{
-		{"GET", "/dash", true, "dash/"},
-		{"GET", "/a/b?x=1", true, "b/?x=1"},
-		{"HEAD", "/dash", true, "dash/"},
+		{"GET", "/dash", true, "./dash/"},
+		{"GET", "/a/b?x=1", true, "./b/?x=1"},
+		{"HEAD", "/dash", true, "./dash/"},
+		{"GET", "/plain/ftp:3232235777", true, "./ftp:3232235777/"},
+		{"GET", "/plain/https:3232235777", true, "./https:3232235777/"},
 		{"GET", "/dash/", false, ""},
 		{"GET", "/", false, ""},
 		{"GET", "/feed.xml", false, ""},

@@ -386,13 +386,25 @@ func emitDocker(cfg *config.Config, root, outDir string) ([]string, error) {
 		b.WriteString("ENV PATH=/usr/local/go/bin:$PATH\n")
 	}
 	b.WriteString("WORKDIR /app\n")
-	b.WriteString(copyManifests + "\n")
+	if strings.Contains(install, "corepack") {
+		b.WriteString("RUN corepack enable\n")
+		install = strings.Replace(install, "corepack enable && ", "", 1)
+	}
+	// The server does not need root: the app directory belongs to the image's
+	// unprivileged node user, which also owns .krate where `krate start` stages
+	// its sidecar scripts.
+	b.WriteString("RUN chown node:node /app\n")
+	b.WriteString("USER node\n")
+	b.WriteString(strings.Replace(copyManifests, "COPY ", "COPY --chown=node:node ", 1) + "\n")
 	b.WriteString(install + "\n")
-	b.WriteString("COPY . .\n")
+	b.WriteString("COPY --chown=node:node . .\n")
 	b.WriteString("ENV NODE_ENV=production\n")
 	b.WriteString("RUN npx krate build\n")
 	fmt.Fprintf(&b, "ENV PORT=%d\n", port)
 	fmt.Fprintf(&b, "EXPOSE %d\n", port)
+	// /healthz is the liveness probe krate start serves at the root, base path or not.
+	b.WriteString("HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \\\n")
+	b.WriteString("  CMD node -e \"fetch('http://127.0.0.1:'+(process.env.PORT||" + fmt.Sprint(port) + ")+'/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\"\n")
 	b.WriteString("CMD [\"npx\", \"krate\", \"start\"]\n")
 
 	dockerfile := filepath.Join(root, "Dockerfile")

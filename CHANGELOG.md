@@ -41,6 +41,45 @@ detailed changelog. This file records the release train at a glance.
   component redeclared `__krate_hole1`, a SyntaxError that stopped the page script.
 - A slot with no build-time value and no client code to fill it now warns
   (`KR8011`) instead of rendering empty silently.
+- Security: a matcher-less `middleware` no longer skips URLs that merely end in a
+  static extension. `/api/files/report.pdf` used to reach the API route without
+  middleware; it now runs it, and only a real static file skips it (Go host and
+  portable handler).
+- Security: the canonical-slash redirect starts with `./`, so a last path segment
+  like `ftp:3232235777` cannot redirect off-site.
+- Security: the Node, Bun and Deno API sidecar only answers the Krate host (it
+  checks a per-process secret), so its loopback port can no longer be used to
+  skip middleware, CSRF and body limits.
+- Security: with `server.trustProxy`, the client address is the `X-Forwarded-For`
+  entry `server.trustedProxies` hops (default 1) from the right, not the leftmost
+  entry a client controls.
+- Security: the no-JS flash cookie is HMAC-signed, action cookies are `Secure` over
+  https and whenever `SameSite=None`, CORS responses carry `Vary: Origin` for
+  disallowed origins too, request paths are escaped in logs, request headers are
+  capped at 64 KiB, and the Go API socket directory must be private to the user.
+- Fixed: the SSR renderer is supervised. After a crash every SSR/ISR page used to
+  answer `200` with the empty build-time shell and ISR refresh stopped for good;
+  the renderer now restarts, and pages answer `503` (`no-store`) while it is down.
+  A region stream cut short is no longer a cacheable success.
+- Fixed: sidecars no longer outlive a killed host (Linux parent-death signal, and a
+  parent watchdog in the Node scripts).
+- Fixed: ISR caches evict the least recently used entry (a client could flush the
+  whole page cache with 512 cheap requests), background refresh re-renders only
+  variants older than their window, and the first refresh waits one interval.
+- Fixed: a middleware or config rewrite to a page path without a trailing slash
+  (`/feedback`) answered `301` and changed the URL; it is now served in place.
+- Fixed: a page whose default export is `@runtime` (or `// @runtime`) rendered an
+  empty region.
+- `src/pages/data.json.ts`, `feed.xml.ts`, `robots.txt.ts` and similar build as
+  files: `GET` runs once at build time and its body is written to the output,
+  instead of an empty HTML shell (`KR7121` for failures).
+- A page's `export const metadata` (or a `generateMetadata` that returns a literal)
+  becomes head tags; an explicit `<Head>` still wins. Values the build cannot read
+  warn (`KR7122`).
+- `src/pages/api/*.ts` no longer builds an empty page; it warns (`KR7120`) that API
+  routes live in `src/api`.
+- `krate deploy --target docker` runs as the `node` user and adds a `HEALTHCHECK`;
+  the Cloudflare entry trusts `X-Forwarded-*` only with `server.trustProxy`.
 - Tier decorators: `@server`, `@static`, `@runtime` and `@client` can go directly
   on a function, class or const. On a file's default export or only exported
   component they classify the whole file, like a `// @server` comment; elsewhere

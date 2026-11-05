@@ -60,6 +60,11 @@ type ServerConfig struct {
 	// X-Forwarded-For (request URLs, CSRF origin checks, client IPs). Enable it
 	// only behind a proxy that sets or strips those headers.
 	TrustProxy bool `json:"trustProxy,omitempty"`
+	// TrustedProxies is how many reverse proxies sit in front of Krate when
+	// TrustProxy is on (default 1). The client address is the X-Forwarded-For
+	// entry that many hops from the right, so entries a client puts at the front
+	// of the header never count.
+	TrustedProxies int `json:"trustedProxies,omitempty"`
 	// ShutdownTimeout is the graceful-shutdown drain period in seconds
 	// (default 15). In-flight requests get this long to finish after SIGTERM.
 	ShutdownTimeout int `json:"shutdownTimeout,omitempty"`

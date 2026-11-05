@@ -713,6 +713,7 @@ server: {
   port: 3000,           // falls back to devServer.port, then 3000
   maxBodySize: 1048576, // request body cap in bytes (0 = defaults)
   trustProxy: false,    // honor X-Forwarded-Proto/Host/For from a reverse proxy
+  trustedProxies: 1,    // reverse proxies in front of Krate (with trustProxy)
   shutdownTimeout: 15,  // seconds in-flight requests get to finish on SIGTERM
 },
 ```
@@ -730,7 +731,10 @@ replaces them with what it observed, so handlers cannot be spoofed. Behind a
 trusted reverse proxy set `trustProxy: true`: request URLs seen by middleware
 and API routes use `X-Forwarded-Proto` / `X-Forwarded-Host`, the server-action
 CSRF origin check compares against the forwarded host, and the client address is
-the first `X-Forwarded-For` entry.
+the `X-Forwarded-For` entry `trustedProxies` hops from the right (default 1: the
+address your proxy saw). Entries a client puts at the front of the header never
+count. Set `trustedProxies` to the number of proxies in front of Krate if there
+is more than one (a CDN and a load balancer, for example).
 
 On `SIGINT`/`SIGTERM` the server stops accepting connections, lets in-flight
 requests finish for `shutdownTimeout` seconds (default 15), then stops its

@@ -272,8 +272,8 @@ func TestServeStaticHardeningEndToEnd(t *testing.T) {
 				continue // blocked by middleware
 			}
 			resp, _ := getRaw(t, base, p+"?a=1", nil)
-			if resp.StatusCode != 301 || resp.Header.Get("Location") != "dash/?a=1" {
-				t.Errorf("%s: %d Location %q, want 301 dash/?a=1", p, resp.StatusCode, resp.Header.Get("Location"))
+			if resp.StatusCode != 301 || resp.Header.Get("Location") != "./dash/?a=1" {
+				t.Errorf("%s: %d Location %q, want 301 ./dash/?a=1", p, resp.StatusCode, resp.Header.Get("Location"))
 			}
 		}
 	})

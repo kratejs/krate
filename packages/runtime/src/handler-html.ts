@@ -152,6 +152,10 @@ export function requestFlash(cookieHeader: string | null): { raw: string; payloa
     }
   }
   if (raw === "") return null;
+  // A signed cookie is "<payload>.<signature>"; the portable handler has no
+  // secret to verify with, so it reads the payload part.
+  const dot = raw.indexOf(".");
+  if (dot >= 0) raw = raw.slice(0, dot);
   const text = b64urlDecode(raw);
   if (text === null) return null;
   try {

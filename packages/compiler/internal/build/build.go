@@ -1133,6 +1133,14 @@ func (b *Builder) BuildAll() error {
 	}
 
 	stopTools := b.phase("build:tools")
+	strays := findPagesStrays(b.Cfg.PagesDir)
+	printWarningsOnce(os.Stderr, b.strayAPIWarnings(strays.apiFiles))
+	for _, err := range b.buildPagesEndpoints(strays.endpoints) {
+		fmt.Fprintf(os.Stderr, "  %sEndpoint error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{err}), "\n", "\n    "))
+		failureMessages = append(failureMessages, "  endpoint: "+err.Error())
+		failureErrs = append(failureErrs, err)
+		errorCount++
+	}
 	if err := b.BuildAllAPI(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sAPI Build error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  API: "+err.Error())
@@ -2243,6 +2251,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	emitResult.HTML = renderCtx.HTML
 	emitResult.HeadHTML = renderCtx.HeadHTML
 	bundle.CSS = renderCtx.RawCSS
+	emitResult.HeadHTML += b.pageMetadataHead(page, entryModule.SourceCode)
 
 	// Run AfterMarkdownParse hooks for markdown pages (plugins can modify the
 	// rendered HTML). Markdown pages flow through the normal bundler/emitter
@@ -3123,6 +3132,12 @@ func findPages(dir string) ([]string, error) {
 		// layout; intercepting slot pages are added by findInterceptPages.
 		if rel, err := filepath.Rel(dir, path); err == nil && pathHasSlot(rel) {
 			return nil
+		}
+		if rel, err := filepath.Rel(dir, path); err == nil && isStrayAPIFile(filepath.ToSlash(rel)) {
+			return nil // reported by findPagesStrays, never a page
+		}
+		if isPagesEndpointFile(base) {
+			return nil // a prerendered endpoint, built by buildPagesEndpoints
 		}
 		if !strings.HasPrefix(base, "_") && !isRouteConventionFile(base) && !isUseServerFile(path) {
 			pages = append(pages, path)

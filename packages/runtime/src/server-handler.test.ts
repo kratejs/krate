@@ -121,3 +121,149 @@ describe("createKrateHandler", () => {
     expect(seen.revalidation.paths).toEqual([{ path: "/live", type: "page" }]);
   });
 });
+
+describe("middleware without a matcher", () => {
+  const seen: string[] = [];
+  const mw = {
+    middleware: (req: Request) => {
+      const p = new URL(req.url).pathname;
+      seen.push(p);
+      if (req.headers.get("x-auth") !== "yes") return new Response("denied", { status: 401 });
+      return new Response(null, { headers: { "x-middleware-next": "1" } });
+    },
+  };
+  const staticLayer = {
+    exists: (p: string) => p === "/doc.pdf",
+    isAsset: (p: string) => p === "/doc.pdf",
+    serve: async (_r: Request, p: string) => (p === "/doc.pdf" ? new Response("pdf") : null),
+  };
+  const h = createKrateHandler({
+    target: "node",
+    data: data({ apiRoutes: ["files/[name]"] }),
+    modules: { ...modules, api: { "files/[name]": { GET: () => Response.json({ secret: "TOP" }) } }, middleware: mw },
+    static: staticLayer,
+  });
+  const get = (path: string) => h(new Request("http://localhost" + path));
+
+  it("does not skip dynamic API routes that end in a static extension", async () => {
+    for (const ext of ["pdf", "txt", "xml", "zip", "js", "css"]) {
+      const r = await get("/api/files/report." + ext);
+      expect(r.status, ext).toBe(401);
+    }
+  });
+
+  it("still skips a real static file", async () => {
+    seen.length = 0;
+    const r = await get("/doc.pdf");
+    expect(r.status).toBe(200);
+    expect(seen).not.toContain("/doc.pdf");
+  });
+
+  it("runs middleware for a static-looking page path that is not a file", async () => {
+    expect((await get("/missing.pdf")).status).toBe(401);
+  });
+});
+
+describe("canonical slash redirect", () => {
+  const h = createKrateHandler({
+    target: "node",
+    data: data({ hasMiddleware: false, templates: [{ pattern: "plain/[id]", html: "<p>[id]</p>" }] }),
+    modules,
+  });
+  const get = (path: string) => h(new Request("http://localhost" + path, { redirect: "manual" }));
+
+  it("never emits a Location that can parse as an absolute URL", async () => {
+    for (const seg of ["ftp:3232235777", "https:3232235777", "http:1"]) {
+      const r = await get("/plain/" + seg);
+      expect(r.status, seg).toBe(301);
+      const loc = r.headers.get("location")!;
+      expect(loc, seg).toBe("./" + seg + "/");
+      expect(new URL(loc, "http://localhost/plain/" + seg).origin, seg).toBe("http://localhost");
+    }
+  });
+
+  it("keeps the query on an ordinary segment", async () => {
+    const r = await get("/plain/7?a=1");
+    expect(r.headers.get("location")).toBe("./7/?a=1");
+  });
+});
+
+describe("action cookies", () => {
+  const h = createKrateHandler({
+    target: "node",
+    data: data({ hasMiddleware: false, actions: [{ id: "setc", export: "setc", file: "acts" }, { id: "flash", export: "flash", file: "acts" }] }),
+    modules: {
+      ...modules,
+      actions: {
+        acts: {
+          setc: async () => {
+            const { cookies } = await import("./action-context.js");
+            cookies().set("none", "1", { sameSite: "None" });
+            cookies().set("plain", "2");
+            cookies().set("optout", "3", { secure: false });
+            return 1;
+          },
+          flash: () => ({ error: "bad" }),
+        },
+      },
+    },
+  });
+  const post = (id: string, headers: Record<string, string>) =>
+    h(new Request("http://localhost/__krate/action/" + id, { method: "POST", headers: { "sec-fetch-site": "same-origin", ...headers }, body: "{}" }));
+  const cookiesOf = (r: Response) => (r.headers as any).getSetCookie() as string[];
+
+  it("marks SameSite=None cookies Secure and defaults Secure on https", async () => {
+    const insecure = cookiesOf(await post("setc", { "x-krate-action": "fetch", "content-type": "application/json" }));
+    expect(insecure.find((c) => c.startsWith("none="))).toContain("; Secure");
+    expect(insecure.find((c) => c.startsWith("plain="))).not.toContain("Secure");
+
+    const https = cookiesOf(await post("setc", { "x-krate-action": "fetch", "content-type": "application/json", "x-forwarded-proto": "https" }));
+    expect(https.find((c) => c.startsWith("plain="))).toContain("; Secure");
+    expect(https.find((c) => c.startsWith("optout="))).not.toContain("Secure");
+  });
+
+  it("marks the flash cookie Secure on https", async () => {
+    const r = await post("flash", { "content-type": "application/x-www-form-urlencoded", "x-forwarded-proto": "https", referer: "http://localhost/form" });
+    const flash = cookiesOf(r).find((c) => c.startsWith("krate_flash="));
+    expect(flash).toContain("; Secure");
+  });
+});
+
+describe("rewrites to a slashless page path", () => {
+  const h = createKrateHandler({
+    target: "node",
+    data: data({
+      hasMiddleware: true,
+      templates: [{ pattern: "feedback", html: "<p>feedback form</p>" }],
+      config: { ...config, rewrites: [{ source: "/contact", destination: "/feedback" }] },
+    } as any),
+    modules: {
+      ...modules,
+      middleware: {
+        middleware: (req: Request) => {
+          if (new URL(req.url).pathname === "/go") return new Response(null, { headers: { "x-middleware-rewrite": "/feedback" } });
+          return undefined;
+        },
+        config: { matcher: ["/go"] },
+      },
+    },
+    static: {
+      exists: (p: string) => p === "/feedback/",
+      isAsset: () => false,
+      serve: async (_r: Request, p: string) => (p === "/feedback/" ? new Response("<p>feedback form</p>", { headers: { "content-type": "text/html" } }) : null),
+    },
+  });
+  const get = (path: string) => h(new Request("http://localhost" + path, { redirect: "manual" }));
+
+  it("serves a middleware rewrite in place (no 301)", async () => {
+    const r = await get("/go");
+    expect(r.status).toBe(200);
+    expect(await r.text()).toContain("feedback form");
+  });
+
+  it("serves a config rewrite in place (no 301)", async () => {
+    const r = await get("/contact");
+    expect(r.status).toBe(200);
+    expect(await r.text()).toContain("feedback form");
+  });
+});

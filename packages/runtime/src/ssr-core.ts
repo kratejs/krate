@@ -169,8 +169,15 @@ export class ISRCache {
     this.revalidationIntervals.set(route, seconds);
   }
 
+  // get marks the entry most recently used, so eviction drops the coldest
+  // page and one client cannot flush the hot ones by requesting new variants.
   get(key: string): CacheEntry | undefined {
-    return this.cache.get(key);
+    const entry = this.cache.get(key);
+    if (entry) {
+      this.cache.delete(key);
+      this.cache.set(key, entry);
+    }
+    return entry;
   }
 
   set(key: string, entry: CacheEntry) {
@@ -408,12 +415,24 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     return variantKey({ route: req.route, params: req.params, query: picked });
   }
 
+  // The map is keyed by params, which a client chooses, so it is bounded like
+  // the cache it describes. Losing an entry only costs one extra render, which
+  // records the reads again.
+  const PAGE_QUERY_READS_MAX = Math.max(4 * (opts.maxCacheSize && opts.maxCacheSize > 0 ? opts.maxCacheSize : 512), 1024);
+
   function recordQueryReads(req: { route: string; params?: Record<string, string> }, t: QueryTracker): void {
     const base = pageBaseKey(req);
     let cur = pageQueryReads.get(base);
     if (t.all) cur = "all";
     else if (t.keys.size > 0 && cur !== "all") cur = new Set([...(cur || []), ...t.keys]);
-    if (cur) pageQueryReads.set(base, cur);
+    if (cur) {
+      pageQueryReads.delete(base);
+      pageQueryReads.set(base, cur);
+      if (pageQueryReads.size > PAGE_QUERY_READS_MAX) {
+        const oldest = pageQueryReads.keys().next().value;
+        if (oldest !== undefined) pageQueryReads.delete(oldest);
+      }
+    }
   }
 
   // ISR cache size and the render timeout are configurable via the compiler
@@ -633,7 +652,11 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
       try {
         const variants = await isrStore.entriesForRoute(page.route);
         let refreshed = 0;
-        for (const [, entry] of variants) {
+        for (const [key, entry] of variants) {
+          // A variant rendered within its own window is still fresh; re-rendering
+          // it on every tick would multiply the render load by the variant count
+          // and replace an entry a request has only just produced.
+          if (!entryStale(key, entry)) continue;
           const req: RenderRequest = {
             route: page.route,
             url: page.route,
@@ -723,19 +746,28 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     tags?: string[];
   }
   const regionCache = new Map<string, RegionEntry>();
-  const regionRevalidation = new Map<string, number>();
   const inFlightRegionRevalidations = new Map<string, Promise<void>>();
 
-  // Region cache is bounded (FIFO eviction) so a long-lived sidecar cannot grow
-  // without limit across many dynamic region variants.
+  // Region cache is bounded (least recently used goes first) so a long-lived
+  // sidecar cannot grow without limit across many dynamic region variants.
   const REGION_CACHE_MAX = opts.maxCacheSize && opts.maxCacheSize > 0 ? opts.maxCacheSize : 512;
 
   function paramsKeyOf(params?: Record<string, string>): string {
     return variantKey({ route: "", params });
   }
 
+  function regionCacheGet(key: string): RegionEntry | undefined {
+    const entry = regionCache.get(key);
+    if (entry) {
+      regionCache.delete(key);
+      regionCache.set(key, entry);
+    }
+    return entry;
+  }
+
   function regionCacheSet(key: string, html: string, page: ManifestPage, req: RenderRequest, scope?: CacheScope): void {
-    if (regionCache.size >= REGION_CACHE_MAX && !regionCache.has(key)) {
+    regionCache.delete(key);
+    if (regionCache.size >= REGION_CACHE_MAX) {
       const oldest = regionCache.keys().next().value;
       if (oldest !== undefined) regionCache.delete(oldest);
     }
@@ -766,7 +798,6 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
 
   function clearRegionCache(): void {
     regionCache.clear();
-    regionRevalidation.clear();
   }
 
   function clearRegionCacheForRoute(route: string): void {
@@ -853,8 +884,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     const cacheable = interval > 0;
 
     if (cacheable) {
-      regionRevalidation.set(key, interval);
-      const cached = regionCache.get(key);
+      const cached = regionCacheGet(key);
       const stale = cached && (Date.now() - cached.timestamp) / 1000 > interval;
       if (cached && !stale) {
         return { type: "region", id: region.id, status: 200, html: cached.html, cached: true, cacheStatus: "hit" };
