@@ -127,7 +127,7 @@ const MIGRATION_PHASES = [
     tone: "gate",
     status: "Complete",
     title: "Components and app semantics",
-    body: "next/cache (revalidatePath, revalidateTag, tagged fetch, unstable_cache), async server components, \"use client\" boundaries, template.tsx, route groups, parallel and intercepting routes, catch-all routes, and a reworked SPA router with layout persistence are native Krate features the migrator maps onto. A real migrated App Router app runs in the browser conformance suite on Chromium, Firefox, and WebKit.",
+    body: "next/cache (revalidatePath, revalidateTag, tagged fetch, unstable_cache), async server components, \"use client\" boundaries, template.tsx, route groups, parallel and intercepting routes, catch-all routes, per-segment not-found and error pages (a client error boundary per directory with reset), and a reworked SPA router with layout persistence are native Krate features the migrator maps onto. A real migrated App Router app runs in the browser conformance suite on Chromium, Firefox, and WebKit.",
     exit: "A migrated Next.js app with async data, revalidation, client islands, a template, and an intercepting modal passes browser conformance.",
   },
   {
@@ -427,6 +427,24 @@ krate migrate rollback .krate/migrate/nextjs-<timestamp>`}</code></pre>
             </li>
           ))}
         </ol>
+      </section>
+
+      <section class="roadmap-section" aria-labelledby="serverless">
+        <h2 id="serverless" class="roadmap-title">Serverless and edge status</h2>
+        <p class="roadmap-lede">
+          What runs where today, stated plainly. The same portable server
+          handler serves every target below; it is tested against `krate start`
+          request for request on Node, and the Cloudflare worker has been run
+          in a local workerd. Vercel and Netlify output is validated against
+          the platform file formats and by calling the handlers directly, not
+          by a live deployment.
+        </p>
+        <ul class="roadmap-list">
+          <li>Node (`krate deploy --target node`): SSR, ISR, streaming, API routes, actions, middleware. No Go binary needed.</li>
+          <li>Vercel, Netlify, Cloudflare: the same features through one function or worker; caches are per instance.</li>
+          <li>Not on serverless: Go API routes, Go components, a custom API sidecar, community plugins with serve hooks. `krate deploy` refuses them and points at Docker.</li>
+          <li>Planned: a shared cache store for ISR and revalidation across instances (the handler already takes an `isrStore`).</li>
+        </ul>
       </section>
 
       <section class="roadmap-section" aria-labelledby="foundations">

@@ -124,10 +124,14 @@ func TestServerFeaturesBlockStaticTargets(t *testing.T) {
 	if len(feats) != 2 {
 		t.Fatalf("features = %v, want SSR + middleware", feats)
 	}
-	for _, target := range []string{"netlify", "vercel", "cloudflare", "gh-pages"} {
-		_, err := Emit(target, config.Default(), root, out)
-		if err == nil || !strings.Contains(err.Error(), "server features") || !strings.Contains(err.Error(), "--static-only") {
-			t.Errorf("%s: expected a server-features error, got %v", target, err)
+	_, err := Emit("gh-pages", config.Default(), root, out)
+	if err == nil || !strings.Contains(err.Error(), "server features") || !strings.Contains(err.Error(), "--static-only") {
+		t.Errorf("gh-pages: expected a server-features error, got %v", err)
+	}
+	// The platform targets run the server, which needs the bundle from the build.
+	for _, target := range []string{"netlify", "vercel", "cloudflare"} {
+		if _, err := Emit(target, config.Default(), root, out); err == nil || !strings.Contains(err.Error(), "server bundle") {
+			t.Errorf("%s: expected a missing server bundle error, got %v", target, err)
 		}
 	}
 	if _, err := Emit("netlify", config.Default(), root, out, Options{StaticOnly: true}); err != nil {
@@ -172,5 +176,30 @@ func TestEmitDockerfile(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(root, "Dockerfile"), []byte("FROM scratch\n"), 0o644)
 	if _, err := Emit("docker", cfg, root, out); err == nil {
 		t.Fatal("expected refusal to overwrite a hand-written Dockerfile")
+	}
+}
+
+func TestRuleRegexForVercelRoutes(t *testing.T) {
+	tests := []struct{ source, dest, wantSrc, wantDest string }{
+		{"/old", "/new", `^/old$`, "/new"},
+		{"/legacy/:slug", "/blog/:slug", `^/legacy/(?<slug>[^/]+)$`, "/blog/$slug"},
+		{"/old/*", "/new/:splat", `^/old(?:/(?<splat>.*))?$`, "/new/$splat"},
+		{"/files/:path*", "/static/:path", `^/files(?:/(?<path>.*))?$`, "/static/$path"},
+	}
+	for _, tt := range tests {
+		src, dst := ruleRegex(tt.source, tt.dest)
+		if src != tt.wantSrc || dst != tt.wantDest {
+			t.Errorf("ruleRegex(%q, %q) = %q, %q; want %q, %q", tt.source, tt.dest, src, dst, tt.wantSrc, tt.wantDest)
+		}
+	}
+}
+
+func TestWantsServer(t *testing.T) {
+	feats := []string{"middleware"}
+	if !WantsServer("node", nil, false) || !WantsServer("vercel", feats, false) {
+		t.Error("node always, platform targets with features")
+	}
+	if WantsServer("vercel", nil, false) || WantsServer("vercel", feats, true) || WantsServer("gh-pages", feats, false) || WantsServer("docker", feats, false) {
+		t.Error("static projects, --static-only, gh-pages and docker keep their own path")
 	}
 }

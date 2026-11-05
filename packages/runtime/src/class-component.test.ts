@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEffect, createSignal, disposeAll } from './signal.js';
-import { __krateOwn, __krateOwner, __krateCondPre, __krateCondPost, __krateOnError } from './boundary.js';
+import { createEffect, createSignal, disposeAll, krateDisposeExcept, krateEnterScope, krateLeaveScope } from './signal.js';
+import { __krateOwn, __krateOwner, __krateCondPre, __krateCondPost, __krateOnError, handleError } from './boundary.js';
 import { __krateClass, type ClassInstance, type ClassSpec } from './class-component.js';
 
 type Obj = Record<string, unknown>;
@@ -411,6 +411,31 @@ describe('error boundaries', () => {
     expect(log2.filter((l) => l.includes('gDSFE'))).toEqual(['O gDSFE fallback broke']);
   });
 
+  it('does not catch an error raised while the boundary already shows its fallback', async () => {
+    const log: string[] = [];
+    boundary('Outer', {}, log, 'Outer');
+    boundary('Inner', { p: 'Outer' }, log, 'Inner');
+    const [fail, setFail] = createSignal(false);
+    __krateOwn('Page', { p: 'Inner', n: 'Page' }, () => {
+      createEffect(() => {
+        if (fail()) throw new Error('page failed');
+      });
+    });
+    await settle();
+    setFail(true);
+    await settle();
+    // (An update-phase error runs getDerivedStateFromError twice, as in React 18.)
+    expect(new Set(log.filter((l) => l.includes('gDSFE')))).toEqual(new Set(['Inner gDSFE page failed']));
+    expect(__krateOwner('Inner')!.inError).toBe(true);
+    // The fallback is the boundary's own render output: what it throws is not
+    // the boundary's to catch.
+    handleError(new Error('fallback failed'), __krateOwner('Page'));
+    await settle();
+    const caught = log.filter((l) => l.includes('gDSFE'));
+    expect(caught).toContain('Outer gDSFE fallback failed');
+    expect(caught).not.toContain('Inner gDSFE fallback failed');
+  });
+
   it('reports uncaught errors and unmounts only the failing component', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     let siblingRan = false;
@@ -434,5 +459,34 @@ describe('error boundaries', () => {
       routed = __krateOnError(new Error('hidden'), detached);
     });
     expect(routed).toBe(false);
+  });
+});
+
+describe('owner teardown by route scope', () => {
+  it('keeps the owners of a kept layout and drops the page owners', async () => {
+    const log: string[] = [];
+    krateEnterScope('_lroot_');
+    __krateOwn('Layout', { n: 'Layout' }, () => {
+      classScope({}, {}, { componentWillUnmount: () => log.push('layout unmount') });
+    });
+    krateLeaveScope();
+    __krateOwn('Page', { p: 'Layout', n: 'Page' }, () => {
+      classScope({}, {}, { componentWillUnmount: () => log.push('page unmount') });
+    });
+    await settle();
+    expect(__krateOwner('Page')!.state).toBe('mounted');
+
+    // A soft navigation keeps the layout: only page-scope owners go.
+    krateDisposeExcept(['_lroot_']);
+    expect(log).toEqual(['page unmount']);
+    expect(__krateOwner('Page')).toBeNull();
+    const layout = __krateOwner('Layout')!;
+    expect(layout.state).toBe('mounted');
+    expect(layout.children).toHaveLength(0);
+
+    // A full teardown drops everything.
+    disposeAll();
+    expect(log).toEqual(['page unmount', 'layout unmount']);
+    expect(__krateOwner('Layout')).toBeNull();
   });
 });

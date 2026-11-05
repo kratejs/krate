@@ -23,6 +23,7 @@ var rangeTitles = map[byte]string{
 	'6': "KR6xxx: lists and keys",
 	'7': "KR7xxx: React 19 actions and server actions",
 	'8': "KR8xxx: islands, compiled packages and general React compatibility",
+	'9': "KR9xxx: routing, segment pages and rendering errors",
 }
 
 // renderDiagnosticsDoc returns the markdown for the diagnostics reference.
@@ -49,7 +50,7 @@ Codes are grouped by area:
 | Range | Area |
 |-------|------|
 `)
-	for c := byte('1'); c <= '8'; c++ {
+	for c := byte('1'); c <= '9'; c++ {
 		title := rangeTitles[c]
 		parts := strings.SplitN(title, ": ", 2)
 		fmt.Fprintf(&b, "| `%s` | %s |\n", parts[0], parts[1])
@@ -60,7 +61,7 @@ Codes are grouped by area:
 			byRange[info.Code[2]] = append(byRange[info.Code[2]], info)
 		}
 	}
-	for c := byte('1'); c <= '8'; c++ {
+	for c := byte('1'); c <= '9'; c++ {
 		fmt.Fprintf(&b, "\n## %s\n\n", rangeTitles[c])
 		list := byRange[c]
 		if len(list) == 0 {

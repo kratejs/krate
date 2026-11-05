@@ -93,7 +93,7 @@ function warnOnVersionMismatch(bin: string, packageVersion: string): void {
 export function execBinary(args: string[], cwd?: string, packageVersion?: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const bin = resolveBinary();
-    if (packageVersion && args[0] !== 'version' && args[0] !== '--version') warnOnVersionMismatch(bin, packageVersion);
+    if (packageVersion) warnOnVersionMismatch(bin, packageVersion);
     const proc = spawn(bin, args, {
       stdio: 'inherit',
       cwd: cwd || process.cwd(),
@@ -110,4 +110,23 @@ export function execBinary(args: string[], cwd?: string, packageVersion?: string
       reject(new Error(`Failed to run krate binary: ${err.message}`));
     });
   });
+}
+
+/**
+ * `krate version` reports the native binary, the code that actually runs. The
+ * npm wrapper's version can differ from it, so printing that instead would hide
+ * a stale platform package. Exec failures surface as a rejection.
+ */
+export async function printVersion(
+  args: string[],
+  packageVersion: string,
+  run: typeof execBinary = execBinary,
+): Promise<void> {
+  try {
+    await run(args, undefined, packageVersion);
+  } catch (err) {
+    throw new Error(
+      `cannot read the krate binary version (@krate/core is v${packageVersion}): ${(err as Error).message}`,
+    );
+  }
 }

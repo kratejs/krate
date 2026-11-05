@@ -83,8 +83,8 @@ export async function GET(req: NextRequest) { return NextResponse.json({ ok: tru
 			t.Errorf("missing target %s", target)
 		}
 	}
-	if findPlan(rep, "src/pages/dashboard/error.tsx") != nil {
-		t.Error("error.tsx must not be copied as a page")
+	if plan := findPlan(rep, "src/pages/dashboard/error.tsx"); plan == nil || plan.Kind != KindError {
+		t.Errorf("error.tsx should become the segment error page: %+v", plan)
 	}
 
 	page := findPlan(rep, "src/pages/index.tsx")
@@ -724,9 +724,10 @@ func TestScanRejectsNonNextProject(t *testing.T) {
 	}
 }
 
-func TestErrorBoundaryBecomesLayout(t *testing.T) {
+func TestErrorBoundaryBecomesSegmentErrorPage(t *testing.T) {
 	root := t.TempDir()
 	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "app/dashboard/layout.tsx", `export default function L({ children }: any) { return <section>{children}</section>; }`)
 	writeNextFile(t, root, "app/dashboard/error.tsx", `"use client";
 export default function ErrorPage({ error, reset }: any) { return <button onClick={reset}>{error.message}</button>; }
 `)
@@ -734,15 +735,117 @@ export default function ErrorPage({ error, reset }: any) { return <button onClic
 	if err != nil {
 		t.Fatal(err)
 	}
-	if findPlan(rep, "src/migrated/app/dashboard/error.tsx") == nil {
-		t.Errorf("error asset missing: %+v", rep.Files)
+	plan := findPlan(rep, "src/pages/dashboard/error.tsx")
+	if plan == nil || plan.Kind != KindError {
+		t.Fatalf("segment error page missing: %+v", rep.Files)
 	}
-	layout := findPlan(rep, "src/pages/dashboard/_layout.tsx")
-	if layout == nil || !strings.Contains(string(layout.Content), "__KrateErrorBoundary") {
-		t.Fatalf("error boundary layout missing: %+v", layout)
+	if findPlan(rep, "src/migrated/app/dashboard/error.tsx") != nil {
+		t.Error("error.tsx is a native segment page now, not a copied asset")
 	}
-	if strings.Contains(string(layout.Content), "use client") {
-		t.Errorf("client directive leaked into generated layout:\n%s", layout.Content)
+	for _, f := range rep.Files {
+		if strings.Contains(string(f.Content), "__KrateErrorBoundary") {
+			t.Errorf("no generated class boundary layout is needed: %s", f.Target)
+		}
+	}
+	for _, m := range rep.Manual {
+		if strings.Contains(m.Reason, "error boundary") {
+			t.Errorf("error.tsx must not be a manual item: %+v", m)
+		}
+	}
+}
+
+func TestScopedDirectoryPageStaysInDirectory(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "app/dashboard/layout.tsx", `export default function L({ children }: any) { return <section>{children}</section>; }`)
+	writeNextFile(t, root, "app/dashboard/page.tsx", `export default function D() { return <h1>D</h1>; }`)
+	writeNextFile(t, root, "app/dashboard/not-found.tsx", `export default function NF() { return <p>nf</p>; }`)
+	writeNextFile(t, root, "app/plain/page.tsx", `export default function P() { return <h1>P</h1>; }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findPlan(rep, "src/pages/dashboard/index.tsx") == nil {
+		t.Errorf("a directory with scoped files keeps its page inside it: %+v", rep.Files)
+	}
+	if findPlan(rep, "src/pages/dashboard.tsx") != nil {
+		t.Error("the flat dashboard.tsx would live outside its layout and not-found page")
+	}
+	if findPlan(rep, "src/pages/plain.tsx") == nil {
+		t.Error("a directory without scoped files keeps the flat page")
+	}
+}
+
+func TestNestedNotFoundBecomesSegmentPage(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "app/not-found.tsx", `export default function NF() { return <h1>root</h1>; }`)
+	writeNextFile(t, root, "app/blog/not-found.tsx", `export default function NF() { return <h1>blog</h1>; }`)
+	writeNextFile(t, root, "app/(shop)/cart/not-found.tsx", `export default function NF() { return <h1>cart</h1>; }`)
+	writeNextFile(t, root, "app/@modal/not-found.tsx", `export default function NF() { return <h1>modal</h1>; }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"src/pages/404.tsx", "src/pages/blog/404.tsx", "src/pages/(shop)/cart/404.tsx"} {
+		if plan := findPlan(rep, target); plan == nil || plan.Kind != KindNotFound {
+			t.Errorf("missing %s: %+v", target, rep.Files)
+		}
+	}
+	var slotItem bool
+	for _, m := range rep.Manual {
+		if strings.Contains(m.Source, "@modal") && strings.Contains(m.Reason, "slot") {
+			slotItem = true
+		}
+		if strings.Contains(m.Reason, "nested not-found") {
+			t.Errorf("nested not-found must be native: %+v", m)
+		}
+	}
+	if !slotItem {
+		t.Errorf("a not-found inside a slot should be a manual item: %+v", rep.Manual)
+	}
+}
+
+func TestGlobalErrorBecomesRootErrorPage(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "app/global-error.tsx", `"use client";
+export default function G({ error, reset }: any) { return <html><body><button onClick={reset}>{error.message}</button></body></html>; }
+`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan := findPlan(rep, "src/pages/error.tsx"); plan == nil || plan.Kind != KindError {
+		t.Fatalf("root error page missing: %+v", rep.Files)
+	}
+	var noted bool
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "global-error.tsx") && strings.Contains(w, "<html>") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Errorf("expected a note about the <html> wrapper: %v", rep.Warnings)
+	}
+
+	// With a root error.tsx as well, the two cannot both be the root page.
+	writeNextFile(t, root, "app/error.tsx", `"use client"; export default function E() { return <p>e</p>; }`)
+	rep, err = ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manual bool
+	for _, m := range rep.Manual {
+		if strings.Contains(m.Source, "global-error") {
+			manual = true
+		}
+	}
+	if !manual {
+		t.Errorf("global-error next to error should be a manual item: %+v", rep.Manual)
+	}
+	if plan := findPlan(rep, "src/pages/error.tsx"); plan == nil || !strings.Contains(string(plan.Content), "<p>e</p>") {
+		t.Errorf("the root error.tsx should win: %+v", plan)
 	}
 }
 

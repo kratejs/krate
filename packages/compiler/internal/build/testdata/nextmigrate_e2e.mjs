@@ -1,8 +1,8 @@
 // Migrated Next.js app, driven in a real browser against the real Go server:
 // async server components with tagged fetch, a client island inside an async
 // page, revalidateTag from a server action refreshing the open route, layout
-// persistence, template remount, notFound(), and a parallel + intercepting
-// modal route. Every wait is a condition wait.
+// persistence, template remount, notFound(), per-segment not-found and error
+// pages, and a parallel + intercepting modal route. Every wait is a condition wait.
 import { chromium, firefox, webkit } from "playwright";
 
 const [base, browserName = "chromium", dataBase] = process.argv.slice(2);
@@ -90,14 +90,92 @@ try {
   check((await page.evaluate(() => window.__spaMarker)) === 2, "the refresh swapped content without a document reload");
   check((await gets()) > g1, "the data was refetched after revalidation");
 
-  // notFound() in an async server component answers 404.
+  // notFound() in an async server component answers 404 with the page nearest
+  // to the route (app/posts/not-found.tsx), inside the root layout.
   const missing = await page.goto(base + "/posts/missing");
   check(missing.status() === 404, `notFound() answers 404 (got ${missing.status()})`);
+  check((await page.locator("#posts-404").count()) === 1, "the nested not-found page renders for notFound()");
+  check((await page.locator("#nav-home").count()) === 1, "the not-found page renders inside the root layout");
   // The browser logs the expected 404 as a console error; it is not a page error.
   errors.length = 0;
   const known = await page.goto(base + "/posts/first-post");
   check(known.status() === 200, "an existing post renders");
   check((await text("#post h1")) === "First post", "params are awaited in the async page");
+  // An unmatched URL outside /posts has no not-found page of its own here.
+  const stray = await page.goto(base + "/nowhere");
+  check(stray.status() === 404, "an unmatched URL answers 404");
+  check((await page.locator("#posts-404").count()) === 0, "the posts not-found page does not answer URLs outside /posts");
+  errors.length = 0;
+
+  // Soft navigation to a not-found URL keeps the shared layout mounted.
+  await page.goto(base + "/");
+  await clickUntil("#layout-count", countIs(), ["#layout-count", "1"]);
+  await page.evaluate(() => (window.__spaMarker = 4));
+  const missingResponse = page.waitForResponse((r) => r.url().endsWith("/posts/missing/"));
+  await page.click("#nav-missing");
+  await page.waitForSelector("#posts-404");
+  check((await missingResponse).status() === 404, "the soft navigation was answered with 404");
+  check(path().startsWith("/posts/missing"), "the address bar keeps the requested URL");
+  check((await text("#layout-count")) === "1", "the layout state survives the soft navigation to a not-found page");
+  check((await page.evaluate(() => window.__spaMarker)) === 4, "the not-found page was swapped in without a document reload");
+  errors.length = 0;
+
+  // Client error boundary (app/crash/error.tsx): a render error after a click
+  // shows the segment error page in place; reset() re-mounts the children.
+  await page.click("#nav-crash");
+  await page.waitForSelector("#crash");
+  check((await text("#layout-count")) === "1", "the layout state survives navigation into a segment with an error boundary");
+  for (let i = 0; i < 40; i++) {
+    await page.click("#arm");
+    try {
+      await page.waitForSelector("#crash-error", { timeout: 1000 });
+      break;
+    } catch {}
+  }
+  check((await text("#crash-msg")) === "boom from the crash page", "the error boundary shows the error page with the thrown error");
+  check((await page.locator("#nav-home").count()) === 1 && (await text("#layout-count")) === "1", "the layouts stay alive while the error page shows");
+  await page.click("#crash-reset");
+  await page.waitForSelector("#crash-ok");
+  check((await page.locator("#crash-error").count()) === 0, "reset() re-mounts the children");
+  check((await page.evaluate(() => window.__spaMarker)) === 4, "no document reload happened for the client error");
+  // Break it again, then leave: soft navigation away clears the error page.
+  for (let i = 0; i < 40; i++) {
+    await page.click("#arm");
+    try {
+      await page.waitForSelector("#crash-error", { timeout: 1000 });
+      break;
+    } catch {}
+  }
+  await page.click("#nav-posts");
+  await page.waitForSelector("#posts li");
+  check((await page.locator("#crash-error").count()) === 0, "navigating away clears the error page");
+  // Coming back mounts a fresh page, not the failed one.
+  await page.click("#nav-crash");
+  await page.waitForSelector("#crash-ok");
+  check((await page.locator("#crash-error").count()) === 0, "returning to the segment shows a fresh page");
+  errors.length = 0;
+
+  // Server error page (app/boom/error.tsx): the uncaught error of an async
+  // server component answers 500 with the segment's error page inside the
+  // layouts; production shows a sanitized message and a digest.
+  const boom = await page.goto(base + "/boom");
+  check(boom.status() === 500, `an uncaught server error answers 500 (got ${boom.status()})`);
+  await page.waitForFunction(() => (document.querySelector("#boom-msg") || {}).textContent);
+  check((await text("#boom-msg")) === "Internal Server Error", "the error message is sanitized: " + (await text("#boom-msg")));
+  check(/^[0-9a-f]{10}$/.test((await text("#boom-digest")) || ""), "the error carries a digest: " + (await text("#boom-digest")));
+  check((await page.content()).indexOf("secret server failure") < 0, "the real error message never reaches the page");
+  check((await page.locator("#nav-home").count()) === 1, "the error page renders inside the root layout");
+  errors.length = 0;
+  // The same page reached by soft navigation shows in place.
+  await page.goto(base + "/");
+  await clickUntil("#layout-count", countIs(), ["#layout-count", "1"]);
+  await page.evaluate(() => (window.__spaMarker = 5));
+  await page.click("#nav-boom");
+  await page.waitForFunction(() => (document.querySelector("#boom-msg") || {}).textContent);
+  check((await text("#layout-count")) === "1", "the layout state survives a soft navigation to a server error page");
+  check((await page.evaluate(() => window.__spaMarker)) === 5, "the server error page was swapped in without a reload");
+  check((await text("#boom-msg")) === "Internal Server Error", "the soft-navigated error page is sanitized too");
+  errors.length = 0;
 
   // Parallel + intercepting route.
   await page.goto(base + "/");

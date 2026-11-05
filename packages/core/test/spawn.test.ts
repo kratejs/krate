@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { commandSpec, quoteWindowsArg } from '../src/spawn.js';
-import { versionMismatchWarning } from '../src/binary.js';
+import { printVersion, versionMismatchWarning } from '../src/binary.js';
 
 describe('commandSpec', () => {
   it('spawns directly without a shell on POSIX', () => {
@@ -63,5 +63,24 @@ describe('scaffolder copies', () => {
     for (const pkg of ['create-krate-app', 'create-krate-docs']) {
       expect(readFileSync(join(base, pkg, 'src', 'spawn.ts'), 'utf-8')).toBe(core);
     }
+  });
+});
+
+describe('printVersion', () => {
+  it('asks the native binary and passes the package version for the mismatch check', async () => {
+    const calls: unknown[][] = [];
+    await printVersion(['version'], '0.5.0', async (...args) => {
+      calls.push(args);
+    });
+    expect(calls).toEqual([[['version'], undefined, '0.5.0']]);
+  });
+
+  it('fails loudly instead of printing the wrapper version when the binary cannot run', async () => {
+    const run = async () => {
+      throw new Error('Failed to run krate binary: ENOENT');
+    };
+    await expect(printVersion(['version'], '0.5.0', run)).rejects.toThrow(
+      'cannot read the krate binary version (@krate/core is v0.5.0): Failed to run krate binary: ENOENT',
+    );
   });
 });

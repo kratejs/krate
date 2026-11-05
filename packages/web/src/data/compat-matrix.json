@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-26",
+  "updated": "2026-11-04",
   "rows": [
     {
       "id": "hooks-state",
@@ -119,6 +119,43 @@
       "diagnostics": [
         "KR3008",
         "KR3009"
+      ]
+    },
+    {
+      "id": "segment-pages",
+      "area": "Per-segment not-found and error pages",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "beta",
+      "target": "Next.js not-found.tsx and error.tsx",
+      "summary": "404.tsx or not-found.tsx and error.tsx or 500.tsx in any pages directory are that segment's pages. The nearest not-found page answers an unmatched URL, a closed dynamic route's unknown param and notFound() (status 404, inside the segment's layouts); the nearest error page answers an uncaught server error (status 500, sanitized message plus a digest) and, as a client error boundary around the segment's children, render, effect and reactive errors, with reset() and a hand-over to the next boundary up when an error page itself fails. The router swaps either page in place and keeps shared layouts. Pages are noindex and stay out of the sitemap and the route list.",
+      "tests": [
+        "TestLookupSegmentPageURLWalk",
+        "TestLookupSegmentPageRouteWalk",
+        "TestValidateSegmentPages",
+        "TestBuildWritesSegmentPagesAndManifest",
+        "TestSegmentPagesServe",
+        "TestSegmentPagesServeDev",
+        "TestWatchSegmentPages",
+        "TestNestedNotFoundBecomesSegmentPage",
+        "TestErrorBoundaryBecomesSegmentErrorPage",
+        "TestSegmentPagesBrowser",
+        "TestServerlessNodeParity",
+        "TestPlatformDeploysKeepSegmentPages",
+        "TestMigratedNextAppBrowser",
+        "browser:/r18/boundary_reset_state/",
+        "browser:/r18/boundary_fallback_throws/"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "A page that throws while it is prerendered still fails the build (KR3010); the segment error page is not baked in as a build-time fallback.",
+        "Segment pages are always prerendered; request-time rendering modes on them are ignored with KR9003.",
+        "In the server-rendered error page, error.message and error.digest are filled into the HTML before hydration; text derived from them at render time appears once the page hydrates."
+      ],
+      "diagnostics": [
+        "KR9001",
+        "KR9002",
+        "KR9003"
       ]
     },
     {
@@ -463,6 +500,33 @@
         "fixture:packages/compiler/internal/build/testdata/reactbrowser/r19/app_reference.tsx"
       ],
       "roadmap": true
+    },
+    {
+      "id": "serverless-deploy",
+      "area": "Serverless and Node deployment",
+      "source": "n/a",
+      "islands": "n/a",
+      "ssr": "beta",
+      "target": "Vercel, Netlify, Cloudflare and Node hosting",
+      "summary": "krate deploy bundles the portable server handler (SSR, ISR, streaming, async server components, JS/TS API routes, server actions, middleware, redirects, rewrites, headers) into one self-contained module for --target node, vercel, netlify and cloudflare. Per-segment not-found and error pages and middleware on prerendered pages work on every target. A request matrix gives the same status, security and cache headers, redirects and bodies as krate start; Go API routes, Go components and sidecars are refused at deploy time.",
+      "tests": [
+        "TestServerlessNodeParity",
+        "TestVercelServerOutput",
+        "TestNetlifyServerOutput",
+        "TestCloudflareServerOutput",
+        "TestServerBundleHasNoSecrets",
+        "TestServerlessRefusesGoAndSidecars",
+        "TestCloudflareRefusesNodeBuiltins",
+        "TestServerlessNodeBrowser",
+        "TestPlatformDeploysKeepSegmentPages",
+        "TestNetlifyAndVercelWithoutMiddlewareStayStaticFirst"
+      ],
+      "knownLimits": [
+        "ISR, region and data caches are per instance on serverless targets; revalidatePath/revalidateTag only reach the instance that handled the request (reported under skipped). Pass an isrStore to createKrateHandler to share the page cache.",
+        "With middleware, Vercel and Netlify send every page request to the function, which serves prerendered HTML from the bundle (bundle size grows with static pages); assets keep going to the CDN. A public file without an extension is treated as a page there.",
+        "Legacy (req, res) API handlers, Go API routes, Go components, the API sidecar and community plugin serve hooks are not supported on serverless targets.",
+        "Cloudflare bundles fail at build time for Node built-ins outside nodejs_compat (fs, vm, net, child_process)."
+      ]
     }
   ]
 }

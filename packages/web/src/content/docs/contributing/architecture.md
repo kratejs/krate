@@ -129,7 +129,7 @@ krate binary, and documents are passed through WASM memory directly. There is no
 ## Typed routes & content
 
 - Routes come from the page tree (`src/pages/**`), including plugin-generated
-  pages and dynamic `[param]` segments. Error pages (`404`/`500`) are excluded.
+  pages and dynamic `[param]` segments. Segment pages (`404`/`not-found`/`500`/`error`) are excluded.
 - Collection entries are discovered under each collection's `dir`; frontmatter
   is parsed with the same mini-YAML parser used by the docs plugin, and each
   entry's body is rendered through the markdown pipeline.

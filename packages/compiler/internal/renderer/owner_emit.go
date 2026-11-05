@@ -134,3 +134,69 @@ func ownerOpen(sig irtree.ComponentSignature, present map[irtree.SlotID]bool) st
 	b.WriteString("},function(){\n")
 	return b.String()
 }
+
+// BoundaryLink says where the content injected into a layout's {children}
+// hangs in the owner tree: under the layout's error boundary, in the given
+// conditional branch, so an error thrown by that content reaches the boundary
+// and the boundary's fallback unmounts it.
+type BoundaryLink struct {
+	ParentID irtree.SlotID
+	CondID   irtree.SlotID
+	Branch   string
+}
+
+// FindBoundaryLink finds the lowered error boundary in a layout tree and the
+// conditional branch that holds its {children} placeholder. It returns nil when
+// the layout has no such boundary.
+func FindBoundaryLink(tree *irtree.ComponentTree) *BoundaryLink {
+	if tree == nil || tree.Root == nil {
+		return nil
+	}
+	return findBoundaryLink(tree.Root)
+}
+
+func findBoundaryLink(node *irtree.ComponentNode) *BoundaryLink {
+	if node == nil {
+		return nil
+	}
+	if node.Boundary {
+		if cond, branch, ok := childrenPlaceholderCond(node.Children); ok {
+			return &BoundaryLink{ParentID: node.ID, CondID: cond, Branch: branch}
+		}
+	}
+	return findBoundaryLinkInSlots(node.Children)
+}
+
+func findBoundaryLinkInSlots(slots []irtree.SlotNode) *BoundaryLink {
+	for _, s := range slots {
+		switch v := s.(type) {
+		case *irtree.ComponentSlot:
+			if l := findBoundaryLink(v.Component); l != nil {
+				return l
+			}
+		case *irtree.ConditionalSlot:
+			if l := findBoundaryLinkInSlots(v.Consequent); l != nil {
+				return l
+			}
+			if l := findBoundaryLinkInSlots(v.Alternate); l != nil {
+				return l
+			}
+		}
+	}
+	return nil
+}
+
+// LinkUnderBoundary hangs signatures that have no parent under the boundary
+// link: they become its children in the owner tree and render in its children
+// branch.
+func LinkUnderBoundary(sigs []irtree.ComponentSignature, link *BoundaryLink) {
+	if link == nil {
+		return
+	}
+	for i := range sigs {
+		if sigs[i].ParentID == "" {
+			sigs[i].ParentID = link.ParentID
+		}
+	}
+	claimCond(sigs, link.CondID, link.Branch)
+}

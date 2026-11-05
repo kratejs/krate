@@ -75,7 +75,7 @@ func (b *Builder) writeRouteTypes(results []*PageResult) error {
 		// 404/500 pages are served at the root as error handlers, not as
 		// navigable routes.
 		base := strings.TrimSuffix(filepath.Base(src), filepath.Ext(src))
-		if base == "404" || base == "500" {
+		if isSegmentPageBase(base) {
 			continue
 		}
 		// SourcePath is already project-relative; only relativize if absolute.

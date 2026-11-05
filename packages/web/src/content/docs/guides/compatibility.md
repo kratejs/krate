@@ -10,7 +10,7 @@ This is the support contract for React compatibility. A surface is only marked
 stable when the referenced corpus and browser tests pass. Known divergences are
 listed instead of silently hidden.
 
-Last verified: **2026-10-26**. See the [roadmap](/roadmap/) for phase
+Last verified: **2026-11-04**. See the [roadmap](/roadmap/) for phase
 status and the [React compatibility guide](/docs/guides/react-compatibility/)
 for usage.
 
@@ -31,6 +31,7 @@ for usage.
 | Transitions and deferred values | Beta | Beta | n/a | Documented semantics |
 | Class components | Beta | n/a | n/a | Full common subset |
 | Error boundaries | Beta | Beta | Partial | Source and island |
+| Per-segment not-found and error pages | Beta | n/a | Beta | Next.js not-found.tsx and error.tsx |
 | Children, keys, and refs | Partial | Partial | n/a | Documented semantics |
 | Events | Beta | Beta | n/a | React 18 parity |
 | Forms and inputs | Beta | Beta | n/a | React 18 parity |
@@ -47,6 +48,7 @@ for usage.
 | Supported Preact versions | n/a | Beta | n/a | 10.20 through current |
 | Browser differential corpus | Beta | n/a | n/a | No P0/P1 divergence |
 | React 19 reference app | Beta | n/a | n/a | Same browser suite as React 18 |
+| Serverless and Node deployment | n/a | n/a | Beta | Vercel, Netlify, Cloudflare and Node hosting |
 
 ## Details
 
@@ -104,6 +106,22 @@ Known limits:
 Diagnostics: `KR3008`, `KR3009`
 
 Evidence: `TestBoundaryBuildTimeFallback`, `TestBuildTimeThrowWithoutBoundaryFails`, `TestClassBoundaryChildrenBranch`, `browser:/react-class/`, `browser:/react-demo/`
+
+### Per-segment not-found and error pages
+
+**Source:** Beta - **Islands:** n/a - **SSR:** Beta
+
+404.tsx or not-found.tsx and error.tsx or 500.tsx in any pages directory are that segment's pages. The nearest not-found page answers an unmatched URL, a closed dynamic route's unknown param and notFound() (status 404, inside the segment's layouts); the nearest error page answers an uncaught server error (status 500, sanitized message plus a digest) and, as a client error boundary around the segment's children, render, effect and reactive errors, with reset() and a hand-over to the next boundary up when an error page itself fails. The router swaps either page in place and keeps shared layouts. Pages are noindex and stay out of the sitemap and the route list.
+
+Known limits:
+
+- A page that throws while it is prerendered still fails the build (KR3010); the segment error page is not baked in as a build-time fallback.
+- Segment pages are always prerendered; request-time rendering modes on them are ignored with KR9003.
+- In the server-rendered error page, error.message and error.digest are filled into the HTML before hydration; text derived from them at render time appears once the page hydrates.
+
+Diagnostics: `KR9001`, `KR9002`, `KR9003`
+
+Evidence: `TestLookupSegmentPageURLWalk`, `TestLookupSegmentPageRouteWalk`, `TestValidateSegmentPages`, `TestBuildWritesSegmentPagesAndManifest`, `TestSegmentPagesServe`, `TestSegmentPagesServeDev`, `TestWatchSegmentPages`, `TestNestedNotFoundBecomesSegmentPage`, `TestErrorBoundaryBecomesSegmentErrorPage`, `TestSegmentPagesBrowser`, `TestServerlessNodeParity`, `TestPlatformDeploysKeepSegmentPages`, `TestMigratedNextAppBrowser`, `browser:/r18/boundary_reset_state/`, `browser:/r18/boundary_fallback_throws/`
 
 ### Children, keys, and refs
 
@@ -277,6 +295,21 @@ Evidence: `TestReactBrowserDifferential`, `TestReactBrowserCorpus`, `ci:browser-
 Fixtures for useActionState, useOptimistic, useFormStatus, form and button actions with auto-reset, use(promise) and use(context), ref as a prop, ref cleanup callbacks, async transitions, useDeferredValue initial values, document metadata, and server actions under the real server.
 
 Evidence: `TestReactBrowserDifferential`, `fixture:packages/compiler/internal/build/testdata/reactbrowser/r19/app_reference.tsx`
+
+### Serverless and Node deployment
+
+**Source:** n/a - **Islands:** n/a - **SSR:** Beta
+
+krate deploy bundles the portable server handler (SSR, ISR, streaming, async server components, JS/TS API routes, server actions, middleware, redirects, rewrites, headers) into one self-contained module for --target node, vercel, netlify and cloudflare. Per-segment not-found and error pages and middleware on prerendered pages work on every target. A request matrix gives the same status, security and cache headers, redirects and bodies as krate start; Go API routes, Go components and sidecars are refused at deploy time.
+
+Known limits:
+
+- ISR, region and data caches are per instance on serverless targets; revalidatePath/revalidateTag only reach the instance that handled the request (reported under skipped). Pass an isrStore to createKrateHandler to share the page cache.
+- With middleware, Vercel and Netlify send every page request to the function, which serves prerendered HTML from the bundle (bundle size grows with static pages); assets keep going to the CDN. A public file without an extension is treated as a page there.
+- Legacy (req, res) API handlers, Go API routes, Go components, the API sidecar and community plugin serve hooks are not supported on serverless targets.
+- Cloudflare bundles fail at build time for Node built-ins outside nodejs_compat (fs, vm, net, child_process).
+
+Evidence: `TestServerlessNodeParity`, `TestVercelServerOutput`, `TestNetlifyServerOutput`, `TestCloudflareServerOutput`, `TestServerBundleHasNoSecrets`, `TestServerlessRefusesGoAndSidecars`, `TestCloudflareRefusesNodeBuiltins`, `TestServerlessNodeBrowser`, `TestPlatformDeploysKeepSegmentPages`, `TestNetlifyAndVercelWithoutMiddlewareStayStaticFirst`
 
 ## How claims are verified
 
