@@ -643,6 +643,9 @@ checks: {
 },
 ```
 
+`failOn` accepts only `"error"` or `"warning"`; any other value is a config
+error (checked when the config loads, for every command).
+
 When a `checks` object is present, `krate build` runs the quality gates and
 fails on findings at or above `failOn`. `krate check` runs the same rules
 against the emitted output. Alongside the a11y/SEO/perf rules, Krate checks

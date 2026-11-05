@@ -460,6 +460,13 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 	for _, w := range config.Warnings {
 		fmt.Fprintf(os.Stderr, "  %s! config:%s %s\n", cYellow, cReset, w)
 	}
+	// Validate `checks` up front so a bad failOn fails every command, not only
+	// at the end of a build.
+	if cfg.Checks != nil {
+		if _, err := check.FromMap(cfg.Checks, root, nil); err != nil {
+			return "", nil, fmt.Errorf("invalid config: %w", err)
+		}
+	}
 	for _, w := range plugin.ConfigWarnings(cfg) {
 		fmt.Fprintf(os.Stderr, "  %s! config:%s %s\n", cYellow, cReset, w)
 	}
