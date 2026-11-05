@@ -1403,15 +1403,19 @@ func (b *Bundler) rewriteAssetImportRefs() {
 				continue
 			}
 			src := strings.Trim(imp.Source, "\"'")
-			resolved := src
-			if !filepath.IsAbs(resolved) {
-				resolved = filepath.Join(b.root, resolved)
-			}
-			if strings.HasPrefix(src, ".") {
-				modDir := filepath.Dir(mod.Path)
-				resolved = filepath.Join(modDir, src)
+			// Resolve the way the import itself was resolved, so a tsconfig
+			// alias (`@/assets/logo.png`) finds the same file as a relative path.
+			resolved := b.resolveImportForModule(mod.Path, src)
+			if resolved == "" {
+				resolved = src
 				if !filepath.IsAbs(resolved) {
 					resolved = filepath.Join(b.root, resolved)
+				}
+				if strings.HasPrefix(src, ".") {
+					resolved = filepath.Join(filepath.Dir(mod.Path), src)
+					if !filepath.IsAbs(resolved) {
+						resolved = filepath.Join(b.root, resolved)
+					}
 				}
 			}
 			resolved = filepath.Clean(resolved)

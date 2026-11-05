@@ -10,8 +10,8 @@ import (
 
 func fakeRuntime() map[string]string {
 	return map[string]string{
-		"node_modules/@krate/runtime/package.json": `{"name":"@krate/runtime","type":"module","main":"./dist/index.js","exports":{".":"./dist/index.js"}}`,
-		"node_modules/@krate/runtime/dist/index.js": "export { createSignal, onMount as mounted } from './signal.js';\nexport * from './more.js';\nexport const direct = 1;\nexport default {};\n",
+		"node_modules/@krate/runtime/package.json":   `{"name":"@krate/runtime","type":"module","main":"./dist/index.js","exports":{".":"./dist/index.js"}}`,
+		"node_modules/@krate/runtime/dist/index.js":  "export { createSignal, onMount as mounted } from './signal.js';\nexport * from './more.js';\nexport const direct = 1;\nexport default {};\n",
 		"node_modules/@krate/runtime/dist/signal.js": "export function createSignal() {}\nexport function onMount() {}\n",
 		"node_modules/@krate/runtime/dist/more.js":   "export function navigate() {}\nexport function getNavigationState() {}\n",
 	}
