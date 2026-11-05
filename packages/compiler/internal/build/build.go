@@ -230,6 +230,9 @@ type Builder struct {
 	// transformOnce guards the in-place universal transforms so a shared
 	// (cached) AST is transformed exactly once per build, never concurrently.
 	transformOnce sync.Map
+	// progLocks guards each program while its transforms rewrite it, for the
+	// readers that must run before them (see readProgram).
+	progLocks sync.Map
 	// collectionSites records, per program, the getCollection calls whose
 	// result is left to run in the browser (see InlineContent).
 	collectionSites sync.Map
@@ -375,6 +378,21 @@ func hasCommunityPlugins(cfg *config.Config) bool {
 	return false
 }
 
+func (b *Builder) progLock(prog *ast.Program) *sync.RWMutex {
+	v, _ := b.progLocks.LoadOrStore(prog, &sync.RWMutex{})
+	return v.(*sync.RWMutex)
+}
+
+// readProgram holds prog against its transforms until the returned function
+// runs. Island detection needs this: it has to run before the transforms,
+// since islands are filtered out of them, on ASTs shared with other pages.
+// Hold one program at a time, so readers cannot deadlock on queued writers.
+func (b *Builder) readProgram(prog *ast.Program) func() {
+	lock := b.progLock(prog)
+	lock.RLock()
+	return lock.RUnlock
+}
+
 // ensureTransformed applies the universal AST transforms (icons, images, spread
 // flattening, content inlining) to prog exactly once per build. Cached module
 // ASTs are shared across concurrent page builds, so these in-place mutations
@@ -385,6 +403,9 @@ func (b *Builder) ensureTransformed(prog *ast.Program, file string) error {
 	}
 	v, _ := b.transformOnce.LoadOrStore(prog, &sync.Once{})
 	v.(*sync.Once).Do(func() {
+		lock := b.progLock(prog)
+		lock.Lock()
+		defer lock.Unlock()
 		if ds := b.TransformUniversalIcons(prog); len(ds) > 0 {
 			b.progIconDiags.Store(prog, ds)
 		}
@@ -2165,7 +2186,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	// Modules that call hooks of an npm React library run on Preact in an
 	// island; the Krate lowering of their source is unused, so its warnings
 	// are not shown either.
-	reactIslands := detectReactIslandModules(bundle.Modules, bnd.Resolve)
+	reactIslands := b.detectReactIslandModules(bundle.Modules, bnd.Resolve)
 	for i, m := range bundle.Modules {
 		if m == nil || m.Program == nil || m.IsExternal || resolver.IsCompiledDependency(m.Path) {
 			continue
@@ -2176,7 +2197,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 				quiet.Diagnostics = nil
 				bundle.Modules[i] = &quiet
 			}
-		} else if ws := cssPropWarnings(m); len(ws) > 0 {
+		} else if ws := b.cssPropWarnings(m); len(ws) > 0 {
 			noted := *m
 			noted.Diagnostics = append(append([]diag.Diagnostic(nil), m.Diagnostics...), ws...)
 			bundle.Modules[i] = &noted
@@ -3257,7 +3278,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		}
 	}
 	layoutProviderCache.Store(layoutPath, lifted)
-	if islands := detectReactIslandModules(layoutBundle.Modules, bnd.Resolve); len(islands) > 0 {
+	if islands := b.detectReactIslandModules(layoutBundle.Modules, bnd.Resolve); len(islands) > 0 {
 		return nil, "", nil, false, reactIslandDiag(firstReactIsland(islands), "a layout")
 	}
 	layoutVendorImports.Store(layoutPath, collectVendorImports(layoutBundle))

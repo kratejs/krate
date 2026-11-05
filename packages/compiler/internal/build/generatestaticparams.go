@@ -616,7 +616,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	// Modules that call hooks of an npm React library run on Preact in an
 	// island, exactly as in buildPage. The module list is captured before the
 	// island modules leave it: their files stay dependencies of the page.
-	reactIslands := detectReactIslandModules(bundle.Modules, bnd.Resolve)
+	reactIslands := b.detectReactIslandModules(bundle.Modules, bnd.Resolve)
 	var reactIslandImps []irtree.ExternalImport
 	if len(reactIslands) > 0 {
 		reactIslandImps = reactIslandImports(bundle.Modules, reactIslands, bnd.Resolve)

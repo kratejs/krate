@@ -439,7 +439,7 @@ func (b *Builder) planLayoutProviders(layoutPath string, layout *bundler.Module,
 			byPath[m.Path] = m
 		}
 	}
-	islands := detectReactIslandModules(mods, resolve)
+	islands := b.detectReactIslandModules(mods, resolve)
 	if len(libs) == 0 && len(nsLibs) == 0 {
 		hasUser := false
 		for _, st := range layout.Program.Body {
