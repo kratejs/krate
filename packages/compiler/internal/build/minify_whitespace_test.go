@@ -67,3 +67,24 @@ func TestParseWhiteSpaceRules(t *testing.T) {
 		t.Error("rules reported for a stylesheet without any")
 	}
 }
+
+// Invalid UTF-8 grows under strings.ToLower, so offsets found in a lowered copy
+// ran past the end of the document.
+func TestMinifyHTMLKeepsOffsetsOnInvalidUTF8(t *testing.T) {
+	for _, doc := range []string{"<style>\xff", "\xff<style>a{}</style>", "<STYLE>\xff\xff</style>"} {
+		if got := minifyHTML(doc); got == "" {
+			t.Errorf("%q minified to nothing", doc)
+		}
+	}
+}
+
+func TestSelfClosingSlashOnlyClosesForeignElements(t *testing.T) {
+	// A parser ignores "/>" on <pre>, so what follows is preformatted.
+	if got := minifyHTML("<pre />  a"); !strings.Contains(got, "  a") {
+		t.Errorf("text after <pre /> collapsed: %q", got)
+	}
+	// In SVG it closes the element, so white space outside collapses as usual.
+	if got := minifyHTML(`<svg><path d="M0"/></svg>  a`); strings.Contains(got, "  a") {
+		t.Errorf("text after svg kept its spaces: %q", got)
+	}
+}

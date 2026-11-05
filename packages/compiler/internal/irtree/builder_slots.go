@@ -294,17 +294,11 @@ func (b *builder) buildSlotNodes(expr ast.Expr, parentID string) []SlotNode {
 		if e.Op == "&&" || e.Op == "||" || e.Op == "??" {
 			return []SlotNode{b.buildExprSlot(e, parentID)}
 		}
-		if slot := b.buildStaticTextSlot(e, parentID); slot != nil {
-			return []SlotNode{slot}
-		}
-		return nil
+		return []SlotNode{b.buildStaticTextSlot(e, parentID)}
 	case *ast.CallExpr:
 		return b.buildCallExprSlots(e, parentID)
 	case *ast.Literal, *ast.Identifier, *ast.MemberExpr, *ast.TemplateExpr, *ast.UnaryExpr, *ast.ArrayExpr:
-		if slot := b.buildStaticTextSlot(e, parentID); slot != nil {
-			return []SlotNode{slot}
-		}
-		return nil
+		return []SlotNode{b.buildStaticTextSlot(e, parentID)}
 	case *ast.ArrowFn:
 		bodyExpr := arrowBodyExpr(e)
 		if bodyExpr != nil {
@@ -339,10 +333,7 @@ func (b *builder) buildCallExprSlots(call *ast.CallExpr, parentID string) []Slot
 	if b.referencesSignal(call) {
 		return []SlotNode{b.buildExprSlot(call, parentID)}
 	}
-	if slot := b.buildStaticTextSlot(call, parentID); slot != nil {
-		return []SlotNode{slot}
-	}
-	return nil
+	return []SlotNode{b.buildStaticTextSlot(call, parentID)}
 }
 
 // buildJSXSlot - lowercase HTML or uppercase component

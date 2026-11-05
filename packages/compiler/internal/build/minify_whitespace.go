@@ -62,7 +62,7 @@ func parseWhiteSpaceRules(css string) *whiteSpaceRules {
 // declaresWhiteSpace reports whether a declaration block sets white-space
 // (not white-space-collapse etc.) to a value that keeps spaces.
 func declaresWhiteSpace(body string) bool {
-	rest := strings.ToLower(body)
+	rest := lowerASCII(body)
 	for {
 		i := strings.Index(rest, "white-space")
 		if i < 0 {
@@ -199,10 +199,23 @@ func (r *whiteSpaceRules) preserves(tag, class, id, style string) bool {
 	return r.all || r.tags[tag] || (id != "" && r.ids[id])
 }
 
+// lowerASCII lowers A-Z only. strings.ToLower can change a string's byte length
+// (invalid UTF-8 becomes U+FFFD), and these callers index the original with
+// offsets found in the result.
+func lowerASCII(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
+	}
+	return string(b)
+}
+
 // inlineStyleRules reads the rules of every <style> element in a document.
 func inlineStyleRules(doc string) *whiteSpaceRules {
 	var rules *whiteSpaceRules
-	lower := strings.ToLower(doc)
+	lower := lowerASCII(doc)
 	for from := 0; ; {
 		open := strings.Index(lower[from:], "<style")
 		if open < 0 {

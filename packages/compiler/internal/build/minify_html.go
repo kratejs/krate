@@ -299,7 +299,7 @@ func (m *minifier) tag(i int) (int, bool) {
 	lname := strings.ToLower(name)
 	if isEnd {
 		m.closeElement(lname)
-	} else if !voidElements[lname] && !slash {
+	} else if !voidElements[lname] && !(slash && m.selfClosingHonored(lname)) {
 		preserve := lname == "pre" || m.rules.preserves(lname, classVal, idVal, styleVal)
 		m.open = append(m.open, openElement{name: lname, preserve: preserve})
 		if preserve {
@@ -325,6 +325,24 @@ func (m *minifier) tag(i int) (int, bool) {
 
 // closeElement pops the open element an end tag closes, and the elements
 // left open inside it. An end tag with no open element is ignored.
+// selfClosingHonored reports whether "/>" closes the element named. HTML parsers
+// ignore it on an HTML element, so `<pre />` stays open, and only honour it in
+// SVG and MathML.
+func (m *minifier) selfClosingHonored(name string) bool {
+	if name == "svg" || name == "math" {
+		return true
+	}
+	for i := len(m.open) - 1; i >= 0; i-- {
+		switch m.open[i].name {
+		case "svg", "math":
+			return true
+		case "foreignobject", "desc", "title":
+			return false
+		}
+	}
+	return false
+}
+
 func (m *minifier) closeElement(name string) {
 	for i := len(m.open) - 1; i >= 0; i-- {
 		if m.open[i].name != name {

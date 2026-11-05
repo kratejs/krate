@@ -660,40 +660,6 @@ func numberAttr(el *ast.JSXElement, name string) (string, bool) {
 	return "", false
 }
 
-// collectValueLiterals gathers the distinct literal `value` attributes of every
-// descendant element (any component or intrinsic tag), in source order.
-func collectValueLiterals(children []ast.JSXChild) []string {
-	seen := make(map[string]bool)
-	var options []string
-	var walk func([]ast.JSXChild)
-	walk = func(cs []ast.JSXChild) {
-		for _, child := range cs {
-			switch c := child.(type) {
-			case *ast.JSXElementChild:
-				if c.Element == nil || c.Element.Opening == nil {
-					continue
-				}
-				// Only component tags (e.g. <Tabs.Trigger value="a">) contribute
-				// options; an intrinsic <input value="..."> must not.
-				name := c.Element.Opening.Name
-				if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
-					if v, ok := literalAttr(c.Element, "value"); ok && !seen[v] {
-						seen[v] = true
-						options = append(options, v)
-					}
-				}
-				walk(c.Element.Children)
-			case *ast.JSXFragmentChild:
-				if c.Fragment != nil {
-					walk(c.Fragment.Children)
-				}
-			}
-		}
-	}
-	walk(children)
-	return options
-}
-
 // rewritePartChildren returns a copy of children with every namespaced part of
 // part markup never shares mutable AST with the source component. Without this,
 // appendClass on one instance would leak into every instance.

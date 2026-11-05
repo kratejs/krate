@@ -218,8 +218,7 @@ func TestAssetImportThroughAliasRewrites(t *testing.T) {
 		}
 	}
 	found := 0
-	var walk func(n any)
-	walk = func(n any) {
+	walk := func(n any) {
 		switch x := n.(type) {
 		case *ast.Literal:
 			if x.Value == url {

@@ -269,14 +269,14 @@ A user module that calls a hook of an npm package built on React (or a store hoo
 
 Known limits:
 
-- A layout, template or server-rendered page cannot host these hooks; the build fails with KR8010.
+- A layout, template or server-rendered page cannot host these hooks; the build fails with KR8013.
 - Providers wrapped around children in a layout do not reach islands in pages; put the provider in the island module.
 - Store state is per page: it does not survive client-side navigation.
-- A page that is itself such an island cannot take route props (KR8010) or use Krate-only APIs in the same module.
+- A page that is itself such an island cannot take route props (KR8013) or use Krate-only APIs in the same module.
 - Pages rendered per request (dynamic, ISR, SSR) were not verified with these islands.
 - Only Chromium was run for the browser check.
 
-Diagnostics: `KR8010`
+Diagnostics: `KR8013`
 
 Evidence: `TestReactHookLibraryPageIsland`, `TestReactHookLibraryComponentIslands`, `TestReactHookLibraryPageForms`, `TestReactLibraryValueInPageMakesIsland`, `TestReactIslandModulesAreNotKrateSource`, `TestReactHookLibraryInLayoutDiagnostic`, `TestPreactCompatChunkHasDefaultExport`, `TestBrowserReactLibraryIslands`
 
@@ -284,7 +284,7 @@ Evidence: `TestReactHookLibraryPageIsland`, `TestReactHookLibraryComponentIsland
 
 **Source:** n/a - **Islands:** Partial - **SSR:** Partial
 
-Components built with styled-components, @emotion/styled, the emotion css prop (with the jsxImportSource pragma) or MUI run as Preact islands and are styled in the browser. They are client-only because the styles are created while rendering, so the server HTML holds an empty placeholder (KR8008 notice). A css prop without emotion's runtime is reported (KR8011). Checked by hand in Chromium against styled-components 6, @emotion/styled and @emotion/react 11 and MUI 9.
+Components built with styled-components, @emotion/styled, the emotion css prop (with the jsxImportSource pragma) or MUI run as Preact islands and are styled in the browser. They are client-only because the styles are created while rendering, so the server HTML holds an empty placeholder (KR8008 notice). A css prop without emotion's runtime is reported (KR8014). Checked by hand in Chromium against styled-components 6, @emotion/styled and @emotion/react 11 and MUI 9.
 
 Known limits:
 
@@ -292,7 +292,7 @@ Known limits:
 - A project-wide jsxImportSource for emotion in tsconfig is not supported; use the per-file pragma.
 - A ThemeProvider around the whole app in a layout does not reach islands.
 
-Diagnostics: `KR8008`, `KR8011`
+Diagnostics: `KR8008`, `KR8014`
 
 Evidence: `TestReactCSSInJSIsland`, `TestBrowserReactLibraryIslands`
 
