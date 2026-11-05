@@ -85,6 +85,9 @@ type diskPageEntry struct {
 	WorkerFiles map[string]string
 	WorkerEsm   []string
 	DynImports  map[string]string
+	// IslandEntries are the island chunk entries of the page; a replay
+	// registers them so the site-wide island bundle still contains them.
+	IslandEntries []islandEntry
 }
 
 // diskCacheEnabled reports whether the cross-run page cache is active. It is

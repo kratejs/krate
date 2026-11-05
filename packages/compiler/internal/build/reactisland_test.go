@@ -151,7 +151,7 @@ func TestReactHookLibraryPageIsland(t *testing.T) {
 			t.Fatalf("the store library leaked into the page script:\n%.400s", js)
 		}
 	}
-	chunk := readBuilt(t, mustGlobOne(t, filepath.Join(cfg.OutDir, "chunks", "island.*.js")))
+	chunk := islandCode(t, cfg.OutDir)
 	if !strings.Contains(chunk, "preact/compat") || strings.Contains(chunk, "react.production") {
 		t.Fatalf("island chunk must run on preact/compat:\n%.600s", chunk)
 	}
@@ -227,11 +227,11 @@ func TestReactHookLibraryComponentIslands(t *testing.T) {
 			t.Fatalf("server render lacks %q:\n%s", want, html)
 		}
 	}
-	chunks, _ := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "island.*.js"))
+	chunks := islandEntryFiles(cfg.OutDir)
 	if len(chunks) != 1 {
 		t.Fatalf("islands that run the project's own modules must share one chunk, got %v", chunks)
 	}
-	chunk := readBuilt(t, chunks[0])
+	chunk := islandCode(t, cfg.OutDir)
 	if n := strings.Count(chunk, "useSyncExternalStore"); n != 1 {
 		t.Fatalf("the store library must be bundled once (shared store state), found %d copies", n)
 	}
@@ -334,10 +334,10 @@ func TestIslandClientDirectives(t *testing.T) {
 			if !strings.Contains(js, tc.marker) {
 				t.Fatalf("page script lacks %s:\n%s", tc.marker, js)
 			}
-			if regexp.MustCompile(`["']/chunks/island\.[a-z0-9]+\.js["']`).MatchString(js) {
+			if regexp.MustCompile(`["']/chunks/island_[a-z0-9]+\.js["']`).MatchString(js) {
 				t.Fatalf("the island URL must not appear as a preloadable literal:\n%s", js)
 			}
-			chunk := readBuilt(t, mustGlobOne(t, filepath.Join(cfg.OutDir, "chunks", "island.*.js")))
+			chunk := islandCode(t, cfg.OutDir)
 			if strings.Contains(chunk, "client:") {
 				t.Fatalf("the directive leaked into the island:\n%s", chunk)
 			}

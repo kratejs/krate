@@ -230,6 +230,10 @@ type Builder struct {
 	islandMu        sync.Mutex
 	islandImportMap string
 	preactChunks    map[string]string
+	// islandEntries are the island chunk entry modules of each page; they are
+	// bundled together after the pages (see islandgraph.go).
+	islandEntries map[string][]islandEntry
+	islandDirty   bool
 
 	// clientChunkMu guards clientChunks: "use client" module path -> URL of
 	// its hydration chunk, built once per build (clientboundary.go).
@@ -685,6 +689,14 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)
 	}
+	// Island chunks are bundled for the whole site, so a page rebuilt alone
+	// refreshes the shared files its siblings import.
+	if b.takeIslandDirty() {
+		if err := b.writeIslandBundles(); err != nil {
+			fmt.Fprintf(os.Stderr, "\n  %sx Error:%s %v\n", cRed, cReset, err)
+			pageErrs = append(pageErrs, err)
+		}
+	}
 
 	// Per-page stylesheets: each page links only the CSS its own module graph
 	// imported (deduplicated across pages sharing identical CSS).
@@ -764,6 +776,7 @@ func (b *Builder) BuildAll() error {
 	defer b.ClosePlugins()
 
 	b.resetBuildCaches()
+	b.resetIslandEntries()
 	// A full build re-records every dependency; entries for deleted pages must
 	// not survive it.
 	b.depMu.Lock()
@@ -1090,6 +1103,15 @@ func (b *Builder) BuildAll() error {
 		if f := b.writeGlobalCSS(twCSS); f != "" {
 			globalCSS = append(globalCSS, f)
 		}
+	}
+
+	// Bundle the island chunks of every page together so modules the pages
+	// share (stores, query clients) are shared files.
+	if err := b.writeIslandBundles(); err != nil {
+		fmt.Fprintf(os.Stderr, "  %sIsland bundle error:%s %v\n", cRed, cReset, err)
+		failureMessages = append(failureMessages, "  islands: "+err.Error())
+		failureErrs = append(failureErrs, err)
+		errorCount++
 	}
 
 	// In-memory HTML generation + string swap + single disk write per page
@@ -2488,11 +2510,18 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	hydrationJS := ""
 	var jsBytes []byte
 	hasJS := false
+	var pageProviders *islandProviders
+	if len(tree.ExternalComponents) > 0 {
+		pageProviders = b.pageProviders(page)
+		printProviderNotes(pageProviders)
+	}
 	islandBoot, islandJS, islandSSR, islandStyles, islandErr := b.buildIslands(
+		page,
 		tree.ExternalComponents,
 		externalImports,
 		entryLocalImports(entryModule.Program),
 		filepath.Dir(entryModule.Path),
+		pageProviders,
 	)
 	if islandErr != nil {
 		return nil, "", islandErr
@@ -2683,6 +2712,7 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 	}
 	b.registerWorkers(e.WorkerFiles, trueSet(e.WorkerEsm))
 	b.registerDynamicChunks(e.DynImports)
+	b.setIslandEntries(page, e.IslandEntries)
 	b.recordDeps(page, e.Deps)
 	c.markHit()
 	// A replayed page reports the warnings its cold build did (once per build).
@@ -2776,6 +2806,8 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		WorkerFiles: bundle.WorkerFiles,
 		WorkerEsm:   sliceFromSet(bundle.WorkerEsm),
 		DynImports:  bundle.DynImportFiles,
+
+		IslandEntries: b.islandEntriesOf(page),
 	})
 }
 
@@ -2856,6 +2888,9 @@ type layoutEmitCacheEntry struct {
 	boundaryLink   *renderer.BoundaryLink
 	deps           []string
 	depTimes       map[string]time.Time
+	// providers are the provider wrappers lifted out of the layout for the
+	// islands of its pages (nil when there are none).
+	providers *layoutProviders
 }
 
 // layoutIDPrefix returns a stable, collision-free namespace for a layout's
@@ -2968,6 +3003,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if cached, ok := layoutEmitCache.Load(layoutPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
 		if layoutCacheFresh(entry) {
+			layoutProviderCache.Store(layoutPath, entry.providers)
 			return &renderer.EmitResult{
 				HTML:           strings.Replace(entry.html, "<!--__children__-->", content, -1),
 				HeadHTML:       entry.headHTML,
@@ -2992,6 +3028,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if cached, ok := layoutEmitCache.Load(layoutPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
 		if layoutCacheFresh(entry) {
+			layoutProviderCache.Store(layoutPath, entry.providers)
 			return &renderer.EmitResult{
 				HTML:           strings.Replace(entry.html, "<!--__children__-->", content, -1),
 				HeadHTML:       entry.headHTML,
@@ -3010,6 +3047,32 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if err != nil {
 		return nil, "", nil, false, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
 	}
+	// Every file the layout reads, including the modules of provider wrappers
+	// lifted out below, invalidates it when edited.
+	allLayoutDeps := layoutDepPaths(layoutPath, layoutBundle)
+	var lifted *layoutProviders
+	if isLayoutFile(layoutPath) {
+		if lm := findEntryModule(layoutBundle.Modules); lm != nil {
+			plan, notes := b.planLayoutProviders(layoutPath, lm, layoutBundle.Modules, bnd.Resolve)
+			if plan != nil {
+				if why := b.verifyProviderChain(plan.providers); why != nil {
+					notes = append(notes, *why)
+				} else {
+					for i, m := range layoutBundle.Modules {
+						if m == lm {
+							layoutBundle.Modules[i] = plan.module
+						}
+					}
+					layoutBundle.Modules = krateSideModules(layoutBundle.Modules, plan.module, nil, bnd.Resolve)
+					lifted = plan.providers
+				}
+			}
+			if lifted == nil && len(notes) > 0 {
+				lifted = &layoutProviders{Layout: layoutPath, Notes: notes}
+			}
+		}
+	}
+	layoutProviderCache.Store(layoutPath, lifted)
 	if islands := detectReactIslandModules(layoutBundle.Modules, bnd.Resolve); len(islands) > 0 {
 		return nil, "", nil, false, reactIslandDiag(firstReactIsland(islands), "a layout")
 	}
@@ -3033,7 +3096,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 
 	// The layout's full module graph is both its cache-invalidation key and a
 	// dependency of every page it wraps.
-	layoutDeps := layoutDepPaths(layoutPath, layoutBundle)
+	layoutDeps := allLayoutDeps
 
 	if err := b.ensureTransformed(layoutModule.Program, layoutModule.Path); err != nil {
 		return nil, "", nil, false, err
@@ -3125,6 +3188,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		hasSignals:     tree.HasCSSSignals,
 		deps:           layoutDeps,
 		depTimes:       modTimesOf(layoutDeps),
+		providers:      lifted,
 	})
 
 	// Inject page content at {children} slot
