@@ -55,13 +55,34 @@
     --shadow-md: 0 2px 4px rgba(24, 24, 27, 0.05), 0 10px 24px -8px rgba(24, 24, 27, 0.12);
     --shadow-lg: 0 4px 10px rgba(24, 24, 27, 0.06), 0 24px 48px -16px rgba(24, 24, 27, 0.16);
     --hairline: none;
-    --grid-line: rgba(24, 24, 27, 0.055);
-    --ink: #0e0e11;
-    --ink-border: #27272a;
+    --panel: var(--color-bg-subtle);
+    --panel-border: var(--color-border);
+    --panel-value: var(--color-link);
+    --panel-label: var(--color-muted);
+    --code-bg: #f6f8fa;
+    --code-bar: #eef1f4;
+    --code-fg: #1f2328;
+    --code-muted: #57606a;
+    --code-keyword: #cf222e;
+    --code-constant: #0550ae;
+    --code-function: #8250df;
+    --code-type: #953800;
+    --code-tag: #116329;
+    --code-string: #0a3069;
+    --code-comment: #57606a;
+    --code-faint: #6e7781;
+    --krate-code-bg: var(--code-bg);
+    --krate-code-text: var(--code-fg);
+    --krate-code-title-bg: var(--code-bar);
+    --krate-code-title-text: var(--code-muted);
 
     /* Motion */
     --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
     --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+:root[data-theme="light"] {
+    color-scheme: light;
 }
 
 :root[data-theme="dark"] {
@@ -86,8 +107,22 @@
     --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.4), 0 14px 32px -10px rgba(0, 0, 0, 0.55);
     --shadow-lg: 0 6px 14px rgba(0, 0, 0, 0.45), 0 30px 60px -20px rgba(0, 0, 0, 0.65);
     --hairline: inset 0 1px 0 rgba(255, 255, 255, 0.045);
-    --grid-line: rgba(255, 255, 255, 0.045);
-    --ink: #121216;
+    --panel: #121216;
+    --panel-border: #27272a;
+    --panel-value: #fb923c;
+    --panel-label: #a1a1aa;
+    --code-bg: #0d1117;
+    --code-bar: #161b22;
+    --code-fg: #e6edf3;
+    --code-muted: #8b949e;
+    --code-keyword: #ff7b72;
+    --code-constant: #79c0ff;
+    --code-function: #d2a8ff;
+    --code-type: #f0883e;
+    --code-tag: #7ee787;
+    --code-string: #a5d6ff;
+    --code-comment: #8b949e;
+    --code-faint: #6e7681;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -113,10 +148,22 @@
         --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.4), 0 14px 32px -10px rgba(0, 0, 0, 0.55);
         --shadow-lg: 0 6px 14px rgba(0, 0, 0, 0.45), 0 30px 60px -20px rgba(0, 0, 0, 0.65);
         --hairline: inset 0 1px 0 rgba(255, 255, 255, 0.045);
-        --grid-line: rgba(255, 255, 255, 0.045);
-        --ink: #121216;
-    --grid-line: rgba(255, 255, 255, 0.045);
-    --ink: #121216;
+        --panel: #121216;
+        --panel-border: #27272a;
+        --panel-value: #fb923c;
+        --panel-label: #a1a1aa;
+        --code-bg: #0d1117;
+        --code-bar: #161b22;
+        --code-fg: #e6edf3;
+        --code-muted: #8b949e;
+        --code-keyword: #ff7b72;
+        --code-constant: #79c0ff;
+        --code-function: #d2a8ff;
+        --code-type: #f0883e;
+        --code-tag: #7ee787;
+        --code-string: #a5d6ff;
+        --code-comment: #8b949e;
+        --code-faint: #6e7681;
     }
 }
 
@@ -518,7 +565,7 @@ video {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--color-primary);
+    color: var(--color-link);
 }
 
 .hero-demo-live .demo {
@@ -700,7 +747,7 @@ video {
 
 /* ---- Sections ---- */
 .krate-code-block .krate-code-header {
-    border-bottom-color: rgba(255, 255, 255, 0.09);
+    border-bottom-color: var(--color-border);
 }
 
 .section {
@@ -825,20 +872,20 @@ video {
     color: var(--color-muted);
 }
 
-/* ---- Stats: a dark spec readout in both themes ---- */
+/* ---- Stats: a spec readout on the theme's panel colour ---- */
 .stats {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    border: 1px solid var(--ink-border);
+    border: 1px solid var(--panel-border);
     border-radius: var(--radius-lg);
     overflow: hidden;
-    background: var(--ink);
+    background: var(--panel);
     box-shadow: var(--shadow-md);
 }
 
 .stat {
     padding: clamp(1.5rem, 3vw, 2.25rem) clamp(1rem, 2vw, 1.75rem);
-    border-left: 1px solid var(--ink-border);
+    border-left: 1px solid var(--panel-border);
 }
 
 .stat:first-child {
@@ -851,13 +898,13 @@ video {
     font-weight: 700;
     line-height: 1.05;
     letter-spacing: -0.04em;
-    color: #fb923c;
+    color: var(--panel-value);
     font-variant-numeric: tabular-nums;
 }
 
 .stat-label {
     margin-top: 0.6rem;
-    color: #a1a1aa;
+    color: var(--panel-label);
     font-size: 0.82rem;
     font-weight: 500;
     line-height: 1.4;
@@ -1228,6 +1275,112 @@ video {
     margin: 0 0 1.75rem;
 }
 
+/* ---- Code colours: the compiled stylesheet is dark-only, so the token
+   colours are remapped here and follow the page theme. ---- */
+body .chroma {
+    color: var(--code-fg);
+    background-color: var(--code-bg);
+}
+
+body .krate-code-block {
+    border-color: var(--color-border);
+}
+
+body .krate-code-copy:hover {
+    background: color-mix(in srgb, var(--code-fg) 10%, transparent);
+    color: var(--code-fg);
+}
+
+body .chroma .err,
+body .chroma .k,
+body .chroma .kd,
+body .chroma .kn,
+body .chroma .kr,
+body .chroma .kt,
+body .chroma .nn,
+body .chroma .o,
+body .chroma .ow,
+body .chroma .or,
+body .chroma .gd,
+body .chroma .gr,
+body .chroma .gt {
+    color: var(--code-keyword);
+}
+
+body .chroma .kc,
+body .chroma .kp,
+body .chroma .no,
+body .chroma .nl,
+body .chroma .py,
+body .chroma .nv,
+body .chroma .vc,
+body .chroma .vg,
+body .chroma .vi,
+body .chroma .vm,
+body .chroma .ld,
+body .chroma .sa,
+body .chroma .dl,
+body .chroma .se,
+body .chroma .sh,
+body .chroma .sr,
+body .chroma .gh,
+body .chroma .gu {
+    color: var(--code-constant);
+}
+
+body .chroma .nd,
+body .chroma .nf,
+body .chroma .fm {
+    color: var(--code-function);
+}
+
+body .chroma .nc,
+body .chroma .ni,
+body .chroma .ne {
+    color: var(--code-type);
+}
+
+body .chroma .nt,
+body .chroma .gi {
+    color: var(--code-tag);
+}
+
+body .chroma .l,
+body .chroma .s,
+body .chroma .sb,
+body .chroma .sc,
+body .chroma .sd,
+body .chroma .s2,
+body .chroma .si,
+body .chroma .sx,
+body .chroma .s1,
+body .chroma .ss,
+body .chroma .m,
+body .chroma .mb,
+body .chroma .mf,
+body .chroma .mh,
+body .chroma .mi,
+body .chroma .il,
+body .chroma .mo {
+    color: var(--code-string);
+}
+
+body .chroma .c,
+body .chroma .ch,
+body .chroma .cm,
+body .chroma .c1,
+body .chroma .cs,
+body .chroma .cp,
+body .chroma .cpf,
+body .chroma .go,
+body .chroma .gp {
+    color: var(--code-comment);
+}
+
+body .chroma .w {
+    color: var(--code-faint);
+}
+
 /* ---- Code-block guards (from the Code component) ---- */
 .krate-code-block {
     min-width: 0;
@@ -1372,8 +1525,8 @@ video {
     }
 
     .stat {
-        border-left: 1px solid var(--ink-border);
-        border-top: 1px solid var(--ink-border);
+        border-left: 1px solid var(--panel-border);
+        border-top: 1px solid var(--panel-border);
     }
 
     .stat:nth-child(odd) {
