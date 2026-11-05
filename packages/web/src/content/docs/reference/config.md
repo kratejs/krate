@@ -265,7 +265,7 @@ markdown: {
   headingAnchors: true,
   admonitions: true,
   codeHighlight: true,
-  codeTheme: { light: "github", dark: "github-dark" }, // or one name for both modes
+  codeTheme: { light: "github", dark: "krate-dark" }, // or one name for both modes
   math: false,          // load KaTeX (CDN) and render $...$ / $$...$$
   plugins: ["./md/transform.ts"], // AfterMarkdownParse HTML transforms
 }
@@ -273,7 +273,7 @@ markdown: {
 
 `codeTheme` picks the syntax colours. A plain string (`"monokai"`) is one theme
 for both colour modes; `{ light, dark }` picks one per mode, and a missing side
-keeps its default (`github`, `github-dark`). Any chroma style name works, and an
+keeps its default (`github`, `krate-dark`). Any chroma style name works, and an
 unknown one warns (`KR7150`) and falls back to the default for that mode. The
 stylesheet follows the page's mode - the system preference, or a `data-theme`
 attribute on `<html>` - and the markup is the same in both modes, so switching

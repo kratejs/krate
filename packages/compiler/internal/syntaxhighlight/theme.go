@@ -14,8 +14,33 @@ import (
 // one.
 const (
 	DefaultLightTheme = "github"
-	DefaultDarkTheme  = "github-dark"
+	DefaultDarkTheme  = "krate-dark"
 )
+
+// krate-dark keeps the github-dark token colours on the neutral surface of the
+// component tokens (--krate-card-bg), so a highlighted block matches the cards
+// around it. github-dark itself stays available under its own name.
+func init() {
+	base := styles.Get("github-dark").Get(chroma.Background)
+	surface, text := chroma.MustParseColour("#171717"), chroma.MustParseColour("#e5e5e5")
+	s, err := styles.Get("github-dark").Builder().
+		Transform(func(e chroma.StyleEntry) chroma.StyleEntry {
+			if e.Colour == base.Colour {
+				e.Colour = text
+			}
+			if e.Background == base.Background {
+				e.Background = surface
+			}
+			return e
+		}).
+		Add(chroma.LineHighlight, "bg:#262626").
+		Build()
+	if err != nil {
+		panic(err)
+	}
+	s.Name = DefaultDarkTheme
+	styles.Register(s)
+}
 
 // Theme names the chroma style used in each colour mode.
 type Theme struct {
@@ -75,8 +100,8 @@ func SimilarThemes(name string, n int) []string {
 // Fallback text colours for themes that do not set one, chosen by whether the
 // background is light or dark.
 const (
-	fallbackLightFG = "#1f2328"
-	fallbackDarkFG  = "#e6edf3"
+	fallbackLightFG = "#262626"
+	fallbackDarkFG  = "#e5e5e5"
 )
 
 // decl is one CSS declaration that may differ between the two modes. An empty

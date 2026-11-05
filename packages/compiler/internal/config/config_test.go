@@ -1282,7 +1282,7 @@ func TestMarkdownCodeThemeForms(t *testing.T) {
 	cases := []struct {
 		name, src, light, dark string
 	}{
-		{"default", `export default { entry: "src/pages/index.tsx" };`, "github", "github-dark"},
+		{"default", `export default { entry: "src/pages/index.tsx" };`, "github", "krate-dark"},
 		{"string applies to both", `export default { markdown: { codeTheme: "monokai" } };`, "monokai", "monokai"},
 		{"object", `export default { markdown: { codeTheme: { light: "github", dark: "dracula" } } };`, "github", "dracula"},
 		{"object with one side", `export default { markdown: { codeTheme: { dark: "nord" } } };`, "github", "nord"},
