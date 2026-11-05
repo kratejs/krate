@@ -33,6 +33,15 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- Metadata routes: `sitemap.ts`, `robots.ts`, `manifest.ts`, `opengraph-image` and
+  `twitter-image` files in the pages directory, the same shape as Next.js, including per-segment
+  and per-`generateStaticParams` image files. `ImageResponse` (`@krate/runtime/og`) draws a real PNG at
+  build time in pure Go (flex layout, text and fonts, colours, gradients, images); anything it cannot
+  draw is a build error (`KR7130`-`KR7133`). The image URLs reach `og:image` and `twitter:image`
+  automatically, a metadata file wins over a plugin, and `krate migrate nextjs` maps all of it natively.
+- The Cloudflare bundle no longer imports `node:net`, `node:tls` or `node:fs/promises` (the Redis
+  cache adapter and the local image reader are left out of it); `cache.adapter: "redis"` on the
+  cloudflare target is a build error that says to use your own HTTP cache adapter or another target.
 - `<meta>`, `<link>`, `<script>` and the title inside `<Head>` of an async page or
   async server component are in the `<head>` of the first response bytes in every
   request-time mode (SSR, ISR, streaming, async components), in `krate start` and the

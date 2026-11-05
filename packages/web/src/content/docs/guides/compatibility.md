@@ -55,6 +55,7 @@ for usage.
 | Browser differential corpus | Beta | n/a | n/a | No P0/P1 divergence |
 | React 19 reference app | Beta | n/a | n/a | Same browser suite as React 18 |
 | Serverless and Node deployment | n/a | n/a | Beta | Vercel, Netlify, Cloudflare and Node hosting |
+| Metadata routes and ImageResponse | Beta | n/a | Beta | Next.js sitemap.ts, robots.ts, manifest.ts, opengraph-image and twitter-image |
 
 ## Details
 
@@ -388,6 +389,14 @@ Known limits:
 - Cloudflare bundles fail at build time for Node built-ins outside nodejs_compat (fs, vm, net, child_process).
 
 Evidence: `TestServerlessNodeParity`, `TestVercelServerOutput`, `TestNetlifyServerOutput`, `TestCloudflareServerOutput`, `TestServerBundleHasNoSecrets`, `TestServerlessRefusesGoAndSidecars`, `TestCloudflareRefusesNodeBuiltins`, `TestServerlessNodeBrowser`, `TestPlatformDeploysKeepSegmentPages`, `TestNetlifyAndVercelWithoutMiddlewareStayStaticFirst`
+
+### Metadata routes and ImageResponse
+
+**Source:** Beta - **Islands:** n/a - **SSR:** Beta
+
+sitemap.ts, robots.ts and manifest.ts build sitemap.xml, robots.txt and manifest.webmanifest; opengraph-image and twitter-image files (including per-segment and per-generateStaticParams ones) build real PNGs from ImageResponse JSX with a pure Go renderer (flex layout, text and fonts, colours, gradients, images), and feed og:image and twitter:image. Anything the renderer cannot draw is a build error (KR7131). A file wins over a plugin (KR7133). Per-request ImageResponse works in Node API routes under krate start only; Workers and serverless functions have no renderer. krate migrate nextjs maps these files natively. Not supported: CSS grid, transform, filter, SVG, icon and apple-icon files, opengraph-image.alt.txt.
+
+Evidence: `TestMetadataRouteFilesBuild`, `TestImageResponseUnsupportedFailsTheBuild`, `TestMetadataRoutePluginOverrideIsSaid`, `TestImageResponsePerRequestOnTheHost`, `TestMetadataRoutesMigrateNatively`
 
 ## How claims are verified
 

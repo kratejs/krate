@@ -2,10 +2,13 @@ package build
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	_ "image/png"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -176,5 +179,51 @@ func TestMetadataRouteDetection(t *testing.T) {
 		if got := isMetadataRouteFile(name); got != want {
 			t.Errorf("isMetadataRouteFile(%q) = %v, want %v", name, got, want)
 		}
+	}
+}
+
+// ImageResponse in a Node route is drawn by the Krate host over the internal
+// endpoint, with the same renderer and diagnostics as the build.
+func TestImageResponsePerRequestOnTheHost(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed")
+	}
+	ensureHandlerDist(t)
+	repo, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newTestRevalidateHost(t)
+	script := fmt.Sprintf(`import { ImageResponse } from %q;
+const card = { type: "div", props: { style: { width: "100%%", height: "100%%", display: "flex", backgroundColor: "#0b3d91", color: "white", fontSize: 40 } }, children: ["hello"] };
+const ok = new ImageResponse(card, { width: 320, height: 160 });
+const bytes = new Uint8Array(await ok.arrayBuffer());
+console.log(ok.headers.get("content-type"), bytes.length > 100, Array.from(bytes.slice(0, 4)).join(","));
+const bad = new ImageResponse({ type: "div", props: { style: { display: "grid" } }, children: [] }, { width: 10, height: 10 });
+try { await bad.arrayBuffer(); console.log("no error"); } catch (e) { console.log("error:", String(e.message).includes("display: grid")); }
+`, "file://"+filepath.ToSlash(filepath.Join(repo, "packages", "runtime", "dist", "og.js")))
+	dir := t.TempDir()
+	f := filepath.Join(dir, "check.mjs")
+	if err := os.WriteFile(f, []byte(script), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("node", f)
+	cmd.Env = append(os.Environ(), h.EnvList()...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	want := "image/png true 137,80,78,71\nerror: true\n"
+	if string(out) != want {
+		t.Errorf("got %q, want %q", out, want)
+	}
+	// Without the secret the endpoint refuses.
+	resp, err := http.Post(h.url+"/__krate/internal/image", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("unauthenticated image request: %d", resp.StatusCode)
 	}
 }

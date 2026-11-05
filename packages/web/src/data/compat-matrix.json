@@ -671,6 +671,22 @@
         "Legacy (req, res) API handlers, Go API routes, Go components, the API sidecar and community plugin serve hooks are not supported on serverless targets.",
         "Cloudflare bundles fail at build time for Node built-ins outside nodejs_compat (fs, vm, net, child_process)."
       ]
+    },
+    {
+      "id": "metadata-routes",
+      "area": "Metadata routes and ImageResponse",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "beta",
+      "target": "Next.js sitemap.ts, robots.ts, manifest.ts, opengraph-image and twitter-image",
+      "summary": "sitemap.ts, robots.ts and manifest.ts build sitemap.xml, robots.txt and manifest.webmanifest; opengraph-image and twitter-image files (including per-segment and per-generateStaticParams ones) build real PNGs from ImageResponse JSX with a pure Go renderer (flex layout, text and fonts, colours, gradients, images), and feed og:image and twitter:image. Anything the renderer cannot draw is a build error (KR7131). A file wins over a plugin (KR7133). Per-request ImageResponse works in Node API routes under krate start only; Workers and serverless functions have no renderer. krate migrate nextjs maps these files natively. Not supported: CSS grid, transform, filter, SVG, icon and apple-icon files, opengraph-image.alt.txt.",
+      "tests": [
+        "TestMetadataRouteFilesBuild",
+        "TestImageResponseUnsupportedFailsTheBuild",
+        "TestMetadataRoutePluginOverrideIsSaid",
+        "TestImageResponsePerRequestOnTheHost",
+        "TestMetadataRoutesMigrateNatively"
+      ]
     }
   ]
 }
