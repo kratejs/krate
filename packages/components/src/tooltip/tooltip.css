@@ -18,15 +18,28 @@
   font-size: 0.8rem;
   font-weight: 500;
   white-space: nowrap;
-  pointer-events: none;
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.12s ease;
+}
+/* Invisible bridge over the gap, so the pointer can travel from the trigger
+   onto the tip without leaving the hover area. */
+.krate-tooltip-content::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+  height: 8px;
 }
 .krate-tooltip:hover > .krate-tooltip-content,
 .krate-tooltip:focus-within > .krate-tooltip-content {
   opacity: 1;
   visibility: visible;
+}
+/* Escape hides the tip until the pointer or focus leaves and returns. */
+.krate-tooltip[data-dismissed='true'] > .krate-tooltip-content {
+  opacity: 0;
+  visibility: hidden;
 }
 
 :dir(rtl) .krate-tooltip-content {

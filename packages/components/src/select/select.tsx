@@ -57,6 +57,11 @@ export interface SelectProps {
   label?: string;
   defaultValue?: string;
   disabled?: boolean;
+  /** Base for the ids that link the button to its list (chosen automatically when omitted). */
+  id?: string;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /**
@@ -68,10 +73,10 @@ export interface SelectProps {
  * option, Home/End jump to the first/last, Enter chooses, Escape closes and
  * returns to the button, and Tab closes. Typing filters the list.
  */
-var selectSeq = 0;
-
 export function Select(props: SelectProps) {
-  const uid = 'krate-select-' + ++selectSeq;
+  // Unique per instance, so it is chosen on mount (not known at build time)
+  // unless the author passes an `id`.
+  const [uidSig, setUid] = createSignal(props.id || '');
   const options = props.options || [];
   function labelOf(v: string): string {
     for (var i = 0; i < options.length; i++) {
@@ -166,6 +171,7 @@ export function Select(props: SelectProps) {
         setOpen(false);
       }
     }
+    if (!uidSig()) setUid('krate-select-' + Math.random().toString(36).slice(2, 8));
     document.addEventListener('mousedown', onDoc);
     onCleanup(function () {
       document.removeEventListener('mousedown', onDoc);
@@ -217,7 +223,7 @@ export function Select(props: SelectProps) {
   }
 
   return (
-    <div class="krate-select" ref={function (el: Element) { root = el as HTMLElement; }} onBlur={onFocusOut}>
+    <div class={"krate-select" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} ref={function (el: Element) { root = el as HTMLElement; }} onBlur={onFocusOut}>
       <input type="hidden" name={props.name} value={value()} />
       <button
         class="krate-select-trigger"
@@ -225,7 +231,7 @@ export function Select(props: SelectProps) {
         role="combobox"
         aria-haspopup="listbox"
         aria-expanded={open() ? 'true' : 'false'}
-        aria-controls={open() ? uid + '-list' : undefined}
+        aria-controls={open() ? uidSig() + '-list' : undefined}
         aria-label={props.label}
         disabled={props.disabled}
         onClick={function () { if (open()) { closeList(false); } else { openList(); } }}
@@ -246,8 +252,8 @@ export function Select(props: SelectProps) {
               type="text"
               role="combobox"
               aria-expanded="true"
-              aria-controls={uid + '-list'}
-              aria-activedescendant={active() >= 0 ? uid + '-opt-' + active() : undefined}
+              aria-controls={uidSig() + '-list'}
+              aria-activedescendant={active() >= 0 ? uidSig() + '-opt-' + active() : undefined}
               aria-autocomplete="list"
               placeholder="Search..."
               aria-label="Search options"
@@ -259,12 +265,12 @@ export function Select(props: SelectProps) {
               onKeyDown={onFilterKeyDown}
             />
           </div>
-          <div class="krate-select-viewport" role="listbox" id={uid + '-list'} aria-label={props.label}>
+          <div class="krate-select-viewport" role="listbox" id={uidSig() + '-list'} aria-label={props.label}>
             {options.filter(function (o) { return matches(o, query()); }).map(function (o, i) {
               return (
                 <div
                   key={o.value}
-                  id={uid + '-opt-' + i}
+                  id={uidSig() + '-opt-' + i}
                   class={'krate-select-item' + (o.value === value() ? ' krate-select-item-selected' : '') + (o.disabled ? ' krate-select-item-disabled' : '') + (i === active() ? ' krate-select-item-active' : '')}
                   role="option"
                   data-active={i === active() ? 'true' : undefined}
