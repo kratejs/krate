@@ -115,3 +115,44 @@ func TestTierDecoratorOnInlineDefaultExportBuilds(t *testing.T) {
 		t.Errorf("page rendered empty:\n%s", html)
 	}
 }
+
+// A component that forwards an optional handler (`onChange={props.onChange}`)
+// hydrates only at the call sites that pass one.
+func TestOptionalHandlerPropHydratesOnlyWhenPassed(t *testing.T) {
+	slider := `export function Slider(props: { id?: string; onChange?: (e: Event) => void }) {
+  return <input type="range" id={props.id} onChange={props.onChange} />;
+}
+export function Plain({ onPick, label }: { onPick?: () => void; label: string }) {
+  return <button onClick={onPick}>{label}</button>;
+}
+`
+	t.Run("not passed", func(t *testing.T) {
+		html, js, err := buildKrateProject(t, map[string]string{
+			"src/components.tsx": slider,
+			"src/pages/index.tsx": `import { Slider, Plain } from "../components";
+export default function Page() { return <div><Slider id="a" /><Plain label="x" /></div>; }`,
+		})
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		if js != "" || strings.Contains(html, "kbindHandler") {
+			t.Errorf("a slider without a handler must not hydrate:\n%s", js)
+		}
+	})
+	t.Run("passed", func(t *testing.T) {
+		_, js, err := buildKrateProject(t, map[string]string{
+			"src/components.tsx": slider,
+			"src/pages/index.tsx": `import { Slider, Plain } from "../components";
+export default function Page() { return <div><Slider id="a" /><Slider id="b" onChange={() => console.log("b")} /><Plain label="x" onPick={() => console.log("p")} /></div>; }`,
+		})
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		if n := strings.Count(js, `"onChange"`); n != 1 {
+			t.Errorf("want one onChange binding (slider b only), got %d:\n%s", n, js)
+		}
+		if n := strings.Count(js, `"onClick"`); n != 1 {
+			t.Errorf("the destructured handler passed at its call site must bind, got %d:\n%s", n, js)
+		}
+	})
+}

@@ -2816,9 +2816,38 @@ func (b *builder) buildFragmentSlots(frag *ast.JSXFragment, parentID string) []S
 	return result
 }
 
+// handlerPropAbsent reports a handler that reads an optional prop its call
+// site did not pass (`onChange={props.onChange}`, or a destructured
+// `onChange`). It binds nothing, so a component that needs no script without
+// the handler stays script-free: Slider takes onChange, and only the sliders
+// that pass one hydrate.
+func (b *builder) handlerPropAbsent(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.Identifier:
+		if !b.localParamNames[x.Name] || (b.localFuncProps != nil && b.localFuncProps[x.Name]) {
+			return false
+		}
+	case *ast.MemberExpr:
+		obj, ok := x.Object.(*ast.Identifier)
+		if x.Computed || !ok || obj.Name != "props" {
+			return false
+		}
+		if prop, ok := x.Property.(*ast.Identifier); !ok || (b.localFuncProps != nil && b.localFuncProps[prop.Name]) {
+			return false
+		}
+	default:
+		return false
+	}
+	k := b.evalValue(e).Kind()
+	return k == jsvalue.KindUndefined || k == jsvalue.KindNull
+}
+
 // buildHandlerDecl - extract event handler
 
 func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *HandlerDecl {
+	if b.handlerPropAbsent(attr.Value) {
+		return nil
+	}
 	eventName, capture, direct := reactEventName(attr.Name)
 	// A handler forwarded as a prop must invoke the function from the child's
 	// props registry (created in the parent scope), not an inlined parent-local
