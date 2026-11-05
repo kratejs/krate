@@ -35,6 +35,11 @@ const contextPropPrefix = "__krate_ctx_"
 
 // BuildOptions configures IR construction.
 type BuildOptions struct {
+	// PageParams are the dynamic-route params of the entry page (name ->
+	// value, or the placeholder a template carries for it). The page's own
+	// props include them as `params`, so a wrapper that forwards `{...props}`
+	// to the page body passes them on.
+	PageParams map[string]string
 	// CodeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
 	// at build time. It must match the stylesheet generated for the same theme
 	// (syntaxhighlight.CSSForTheme). Empty selects the default theme.
@@ -115,6 +120,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 
 	builder := newBuilder(prog, ann, opts)
 	builder.checkLazyComponents()
+	builder.seedPageParams(entryFn, opts.PageParams)
 	root := builder.buildComponentNode(entryFn, "")
 	root.SourceFile = ann.SourceFile
 	builder.warnSuspendOutsideBoundary(entryFn, entryFn.Position)

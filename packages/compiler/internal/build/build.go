@@ -2153,6 +2153,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		pageOpts.LocalComponentImports = localImports
 		pageOpts.GoComponents = pageGoComponents
 		pageOpts.ActionURLs = bundle.ActionImports
+		if isDynamicRoute(page, b.Cfg.PagesDir) {
+			pageOpts.PageParams = dynamicRouteSentinels(extractParamNames(page, b.Cfg.PagesDir))
+		}
 		tree = irtree.BuildWithOptions(entryModule.Program, ann, pageOpts)
 		// CSS primitive declarations that cannot be compiled to CSS are hard errors
 		// (there is no fallback to client signals).
