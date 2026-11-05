@@ -28,7 +28,7 @@ package build
 // the queue to the Krate host (KRATE_HOST_URL, authenticated with
 // KRATE_INTERNAL_SECRET) and waits for it to be applied before it responds.
 // A fetch-mode action response then carries "revalidated":true and
-// "revalidation":{paths,tags}. It expects timingSafeEqual to be imported.
+// "revalidation":{paths,tags}. It expects timingSafeEqual and createHmac to be imported.
 const actionSidecarJS = `
 const actionModuleCache = new Map();
 let actionManifest = null;
@@ -184,21 +184,40 @@ function serializeActionCookie(name, value, opts) {
   if (typeof o.maxAge === 'number' && isFinite(o.maxAge)) s += '; Max-Age=' + Math.floor(o.maxAge);
   if (o.expires instanceof Date) s += '; Expires=' + o.expires.toUTCString();
   if (o.httpOnly !== false) s += '; HttpOnly';
-  if (o.secure) s += '; Secure';
   const same = o.sameSite === undefined ? 'Lax' : o.sameSite;
-  if (same) s += '; SameSite=' + (same === true ? 'Strict' : String(same).replace(/[^A-Za-z]/g, ''));
+  const sameText = same ? (same === true ? 'Strict' : String(same).replace(/[^A-Za-z]/g, '')) : '';
+  // Browsers drop SameSite=None cookies that are not Secure.
+  if (o.secure || sameText.toLowerCase() === 'none') s += '; Secure';
+  if (sameText) s += '; SameSite=' + sameText;
   return s;
+}
+
+// requestIsHTTPS: the host sets X-Forwarded-Proto from what it observed (or from
+// the trusted proxy), so it is the scheme the client used.
+function requestIsHTTPS(headers) {
+  return String(headers.get('x-forwarded-proto') || '').split(',')[0].trim().toLowerCase() === 'https';
+}
+
+// signFlash ties the flash cookie to this server with an HMAC, so a page on a
+// sibling subdomain cannot plant a notice. Without a secret (the script run on
+// its own) the value stays unsigned.
+function signFlash(payload) {
+  if (!KRATE_INTERNAL_SECRET) return payload;
+  return payload + '.' + createHmac('sha256', KRATE_INTERNAL_SECRET).update('krate-flash\0' + payload).digest('base64url');
 }
 
 function makeActionContext(req, id, urlPath) {
   const jar = parseActionCookies(req.headers.get('cookie'));
   const setCookies = [];
+  const https = requestIsHTTPS(req.headers);
+  // Cookies set over https are Secure unless the action says otherwise.
+  const withSecure = (opts) => Object.assign({}, opts, { secure: opts && opts.secure !== undefined ? opts.secure : https });
   const cookies = {
     get(name) { return jar.get(name); },
     getAll() { return Array.from(jar, ([name, value]) => ({ name, value })); },
     has(name) { return jar.has(name); },
-    set(name, value, opts) { setCookies.push(serializeActionCookie(name, value, opts)); jar.set(name, String(value)); },
-    delete(name, opts) { setCookies.push(serializeActionCookie(name, '', Object.assign({}, opts, { maxAge: 0 }))); jar.delete(name); },
+    set(name, value, opts) { setCookies.push(serializeActionCookie(name, value, withSecure(opts))); jar.set(name, String(value)); },
+    delete(name, opts) { setCookies.push(serializeActionCookie(name, '', withSecure(Object.assign({}, opts, { maxAge: 0 })))); jar.delete(name); },
   };
   return { actionId: id, url: urlPath, method: 'POST', headers: req.headers, cookies, setCookies };
 }
@@ -308,7 +327,7 @@ async function krateRunAction(req, urlPath, search) {
   if (!redirect && result !== undefined) {
     try {
       const flash = Buffer.from(JSON.stringify({ a: id, r: result })).toString('base64url');
-      if (flash.length <= 3000) headers.append('set-cookie', 'krate_flash=' + flash + '; Path=/; Max-Age=60; SameSite=Lax');
+      if (flash.length <= 3000) headers.append('set-cookie', 'krate_flash=' + signFlash(flash) + '; Path=/; Max-Age=60; SameSite=Lax' + (requestIsHTTPS(req.headers) ? '; Secure' : ''));
       else console.warn('[krate] action ' + entry.export + ' returned state too large to carry across the redirect; it is not shown after a no-JS submit');
     } catch {}
   }

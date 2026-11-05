@@ -187,3 +187,44 @@ describe("canonical slash redirect", () => {
     expect(r.headers.get("location")).toBe("./7/?a=1");
   });
 });
+
+describe("action cookies", () => {
+  const h = createKrateHandler({
+    target: "node",
+    data: data({ hasMiddleware: false, actions: [{ id: "setc", export: "setc", file: "acts" }, { id: "flash", export: "flash", file: "acts" }] }),
+    modules: {
+      ...modules,
+      actions: {
+        acts: {
+          setc: async () => {
+            const { cookies } = await import("./action-context.js");
+            cookies().set("none", "1", { sameSite: "None" });
+            cookies().set("plain", "2");
+            cookies().set("optout", "3", { secure: false });
+            return 1;
+          },
+          flash: () => ({ error: "bad" }),
+        },
+      },
+    },
+  });
+  const post = (id: string, headers: Record<string, string>) =>
+    h(new Request("http://localhost/__krate/action/" + id, { method: "POST", headers: { "sec-fetch-site": "same-origin", ...headers }, body: "{}" }));
+  const cookiesOf = (r: Response) => (r.headers as any).getSetCookie() as string[];
+
+  it("marks SameSite=None cookies Secure and defaults Secure on https", async () => {
+    const insecure = cookiesOf(await post("setc", { "x-krate-action": "fetch", "content-type": "application/json" }));
+    expect(insecure.find((c) => c.startsWith("none="))).toContain("; Secure");
+    expect(insecure.find((c) => c.startsWith("plain="))).not.toContain("Secure");
+
+    const https = cookiesOf(await post("setc", { "x-krate-action": "fetch", "content-type": "application/json", "x-forwarded-proto": "https" }));
+    expect(https.find((c) => c.startsWith("plain="))).toContain("; Secure");
+    expect(https.find((c) => c.startsWith("optout="))).not.toContain("Secure");
+  });
+
+  it("marks the flash cookie Secure on https", async () => {
+    const r = await post("flash", { "content-type": "application/x-www-form-urlencoded", "x-forwarded-proto": "https", referer: "http://localhost/form" });
+    const flash = cookiesOf(r).find((c) => c.startsWith("krate_flash="));
+    expect(flash).toContain("; Secure");
+  });
+});

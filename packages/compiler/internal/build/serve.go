@@ -44,7 +44,7 @@ import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 import cluster from 'node:cluster';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const API_DIR = path.resolve(process.argv[2] || './src/api');
 const PORT = parseInt(process.argv[3] || '3001', 10);
@@ -449,7 +449,7 @@ import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const API_DIR = path.resolve(process.argv[2] || './src/api');
 const PORT = parseInt(process.argv[3] || '3001', 10);
@@ -2170,6 +2170,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		devMux = devErrorShell(hub, root, absOut, mux)
 	}
 	proxyTrust.Store(cfg.Server.TrustProxy)
+	flashSecret.Store(revalHost.secret)
 	proxyHops.Store(int32(cfg.Server.TrustedProxies))
 	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, devMux)))))))
 

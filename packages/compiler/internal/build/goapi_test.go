@@ -171,3 +171,23 @@ func waitForAPI(t *testing.T, base string) {
 	}
 	t.Fatal("Go API sidecar did not start in time")
 }
+
+func TestRegionKeyIgnoresVolatileHeadersButNotCookies(t *testing.T) {
+	req := func(headers string) goRenderRegion {
+		return goRenderRegion{Name: "Card", Props: `{"a":1}`, Request: `{"method":"GET","url":"/p","params":{},"query":{},"headers":` + headers + `}`}
+	}
+	base := regionKey(req(`{"Cookie":"sid=1","Referer":"/a","X-Request-Id":"r1"}`))
+	if got := regionKey(req(`{"Cookie":"sid=1","Referer":"/b","X-Request-Id":"r2"}`)); got != base {
+		t.Error("volatile headers must not change the key")
+	}
+	if got := regionKey(req(`{"Cookie":"sid=2","Referer":"/a","X-Request-Id":"r1"}`)); got == base {
+		t.Error("a different cookie must change the key (the render may be per-user)")
+	}
+	if strings.Contains(base, "sid=1") {
+		t.Errorf("the key must not hold raw cookie values: %q", base)
+	}
+	other := goRenderRegion{Name: "Card", Props: `{"a":1}`, Request: `{"method":"GET","url":"/q","headers":{"Cookie":"sid=1"}}`}
+	if regionKey(other) == base {
+		t.Error("a different URL must change the key")
+	}
+}

@@ -2,6 +2,8 @@ package build
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 )
@@ -29,7 +32,11 @@ func requestFlash(r *http.Request) (string, flashPayload, bool) {
 	if err != nil || c.Value == "" {
 		return "", flashPayload{}, false
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(c.Value, "="))
+	value, ok := verifyFlash(c.Value)
+	if !ok {
+		return "", flashPayload{}, false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(value, "="))
 	if err != nil {
 		return "", flashPayload{}, false
 	}
@@ -37,7 +44,37 @@ func requestFlash(r *http.Request) (string, flashPayload, bool) {
 	if json.Unmarshal(raw, &p) != nil || p.A == "" {
 		return "", flashPayload{}, false
 	}
-	return c.Value, p, true
+	return value, p, true
+}
+
+// flashSecret is the per-process secret the action sidecar signs flash cookies
+// with ("" accepts unsigned cookies: tests and a sidecar run on its own).
+var flashSecret atomic.Value
+
+// signFlashValue is the sidecar's signFlash: payload.base64url(HMAC-SHA256).
+func signFlashValue(secret, payload string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte("krate-flash\x00" + payload))
+	return payload + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// verifyFlash returns the payload part of a flash cookie value. When a secret
+// is configured the value must carry a valid signature, so a cookie planted by
+// another origin (a sibling subdomain) is ignored rather than shown.
+func verifyFlash(value string) (string, bool) {
+	secret, _ := flashSecret.Load().(string)
+	payload, sig, signed := strings.Cut(value, ".")
+	if secret == "" {
+		return payload, true
+	}
+	if !signed {
+		return "", false
+	}
+	want := signFlashValue(secret, payload)
+	if !hmac.Equal([]byte(want), []byte(payload+"."+sig)) {
+		return "", false
+	}
+	return payload, true
 }
 
 // hasFlashCookie reports a page request that carries flash state, which must

@@ -269,6 +269,11 @@ function headerPairs(headers: Headers): Array<[string, string]> {
   return out;
 }
 
+/** The scheme the client used, from the X-Forwarded-Proto the server sets or a trusted proxy sends. */
+function isHTTPSRequest(headers: Headers): boolean {
+  return (headers.get("x-forwarded-proto") || "").split(",")[0].trim().toLowerCase() === "https";
+}
+
 function isStaticAssetPath(p: string): boolean {
   return STATIC_ASSET_EXTS.has(extName(p).toLowerCase());
 }
@@ -279,7 +284,16 @@ function requestCookiesOf(headers: Headers): Map<string, string> {
     const i = part.indexOf("=");
     if (i <= 0) continue;
     const name = part.slice(0, i).trim();
-    if (name && !jar.has(name)) jar.set(name, part.slice(i + 1).trim());
+    if (!name || jar.has(name)) continue;
+    // Same parsing as the action context and the Node sidecar: unquote, then percent-decode.
+    let value = part.slice(i + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      // keep the raw value
+    }
+    jar.set(name, value);
   }
   return jar;
 }
@@ -1252,9 +1266,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     if (typeof o.maxAge === "number" && isFinite(o.maxAge)) s += "; Max-Age=" + Math.floor(o.maxAge);
     if (o.expires instanceof Date) s += "; Expires=" + o.expires.toUTCString();
     if (o.httpOnly !== false) s += "; HttpOnly";
-    if (o.secure) s += "; Secure";
     const same = o.sameSite === undefined ? "Lax" : o.sameSite;
-    if (same) s += "; SameSite=" + (same === true ? "Strict" : String(same).replace(/[^A-Za-z]/g, ""));
+    const sameText = same ? (same === true ? "Strict" : String(same).replace(/[^A-Za-z]/g, "")) : "";
+    // Browsers drop SameSite=None cookies that are not Secure.
+    if (o.secure || sameText.toLowerCase() === "none") s += "; Secure";
+    if (sameText) s += "; SameSite=" + sameText;
     return s;
   }
 
@@ -1280,6 +1296,9 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   function makeActionContext(headers: Headers, id: string, urlPath: string) {
     const jar = parseActionCookies(headers.get("cookie"));
     const setCookies: string[] = [];
+    // Cookies set over https are Secure unless the action says otherwise.
+    const https = isHTTPSRequest(headers);
+    const withSecure = (opts?: any) => Object.assign({}, opts, { secure: opts && opts.secure !== undefined ? opts.secure : https });
     const cookies = {
       get(name: string) {
         return jar.get(name);
@@ -1291,11 +1310,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
         return jar.has(name);
       },
       set(name: string, value: unknown, opts?: any) {
-        setCookies.push(serializeActionCookie(name, value, opts));
+        setCookies.push(serializeActionCookie(name, value, withSecure(opts)));
         jar.set(name, String(value));
       },
       delete(name: string, opts?: any) {
-        setCookies.push(serializeActionCookie(name, "", Object.assign({}, opts, { maxAge: 0 })));
+        setCookies.push(serializeActionCookie(name, "", withSecure(Object.assign({}, opts, { maxAge: 0 }))));
         jar.delete(name);
       },
     };
@@ -1489,7 +1508,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
         let bin = "";
         for (const b of bytes) bin += String.fromCharCode(b);
         const flash = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-        if (flash.length <= 3000) headers.append("set-cookie", FLASH_COOKIE + "=" + flash + "; Path=/; Max-Age=60; SameSite=Lax");
+        if (flash.length <= 3000) headers.append("set-cookie", FLASH_COOKIE + "=" + flash + "; Path=/; Max-Age=60; SameSite=Lax" + (isHTTPSRequest(reqHeaders) ? "; Secure" : ""));
         else console.warn(`[krate] action ${entry.export} returned state too large to carry across the redirect; it is not shown after a no-JS submit`);
       } catch {
         // unserializable state is not carried
