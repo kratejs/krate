@@ -84,20 +84,41 @@ export function replaceTitle(shell: string, title: string): string {
   return shell.slice(0, m.index) + "<title>" + title + "</title>" + shell.slice(m.index + m[0].length);
 }
 
-/** Inline script that inserts one region chunk at its marker pair. */
-export function regionReplaceScript(id: string, html: string): string {
-  const payload = JSON.stringify(html)
+function scriptJSON(v: string): string {
+  return JSON.stringify(v)
     .replace(/</g, "\\u003c")
     .replace(/>/g, "\\u003e")
     .replace(/&/g, "\\u0026")
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
+}
+
+// The client half of a streamed region's <Head>: the head is already on the
+// wire, so the tags are applied by script. A same-key meta/canonical replaces
+// the one in the document; scripts are recreated so they run.
+const HEAD_APPLY =
+  'if(tt){var d=document.createElement("textarea");d.innerHTML=tt;document.title=d.value;}' +
+  'if(hd){var ht=document.createElement("template");ht.innerHTML=hd;[].slice.call(ht.content.children).forEach(function(e){' +
+  'var k=e.tagName,q="";' +
+  'if(k==="META"){if(e.hasAttribute("name"))q=\'meta[name="\'+e.getAttribute("name")+\'"]\';else if(e.hasAttribute("http-equiv"))q=\'meta[http-equiv="\'+e.getAttribute("http-equiv")+\'"]\';}' +
+  'else if(k==="LINK"&&(e.getAttribute("rel")||"").toLowerCase()==="canonical")q=\'link[rel="canonical"]\';' +
+  'if(q){try{var o=document.head.querySelector(q);if(o)o.remove();}catch(x){}}' +
+  'var n=e;if(k==="SCRIPT"){n=document.createElement("script");[].slice.call(e.attributes).forEach(function(a){n.setAttribute(a.name,a.value);});n.text=e.textContent;}' +
+  'document.head.appendChild(n);});}';
+
+/**
+ * Inline script that inserts one region chunk at its marker pair. head and
+ * title are the region's <Head> content, applied to the document head.
+ */
+export function regionReplaceScript(id: string, html: string, head = "", title = ""): string {
+  const payload = scriptJSON(html);
+  const headPart = head || title ? "var hd=" + scriptJSON(head) + ",tt=" + scriptJSON(title) + ";" + HEAD_APPLY : "";
   return (
     "<script data-krate-stream>(function(){var id=" +
     JSON.stringify(id) +
     ";var html=" +
     payload +
-    ';var kinds=["suspense:","region:"];var open=null,kind="";var w=document.createTreeWalker(document.documentElement,NodeFilter.SHOW_COMMENT,null,false);while(w.nextNode()){var v=w.currentNode.nodeValue||"";for(var i=0;i<kinds.length;i++){if(v===kinds[i]+id){open=w.currentNode;kind=kinds[i];break;}}if(open)break;}if(!open)return;var close=null,n=open.nextSibling;while(n){if(n.nodeType===8&&n.nodeValue==="/"+kind+id){close=n;break;}n=n.nextSibling;}if(!close)return;var r=document.createRange();r.setStartAfter(open);r.setEndBefore(close);r.deleteContents();var t=document.createElement("template");t.innerHTML=html;r.insertNode(t.content);})();</script>'
+    ';var kinds=["suspense:","region:"];var open=null,kind="";var w=document.createTreeWalker(document.documentElement,NodeFilter.SHOW_COMMENT,null,false);while(w.nextNode()){var v=w.currentNode.nodeValue||"";for(var i=0;i<kinds.length;i++){if(v===kinds[i]+id){open=w.currentNode;kind=kinds[i];break;}}if(open)break;}if(!open)return;var close=null,n=open.nextSibling;while(n){if(n.nodeType===8&&n.nodeValue==="/"+kind+id){close=n;break;}n=n.nextSibling;}if(!close)return;var r=document.createRange();r.setStartAfter(open);r.setEndBefore(close);r.deleteContents();var t=document.createElement("template");t.innerHTML=html;r.insertNode(t.content);' + headPart + '})();</script>'
   );
 }
 

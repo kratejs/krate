@@ -24,6 +24,9 @@ type parityCase struct {
 	// contains and absent are checked on the node target's body.
 	contains []string
 	absent   []string
+	// inHead and notInHead are checked on the document head of both hosts,
+	// notInBody on everything after </head>.
+	inHead, notInHead, notInBody []string
 }
 
 // parityHeaders are compared between `krate start` and the node target: the
@@ -139,6 +142,37 @@ func TestServerlessNodeParity(t *testing.T) {
 		{name: "traversal", method: "GET", path: "/..%2f..%2fetc/passwd"},
 		{name: "HEAD page", method: "HEAD", path: "/ssr/"},
 		{name: "isr query variant", method: "GET", path: "/isr/?x=1"},
+		// <Head> children of async pages land in the initial <head>.
+		{name: "head ssr", method: "GET", path: "/headtags/hello/",
+			inHead: []string{
+				"<title>Post hello | Krate</title>",
+				`<meta name="description" content="About &lt;&quot;hello&quot;&gt; &amp; more">`,
+				`<meta property="og:title" content="OG hello">`,
+				`<meta property="og:image" content="https://example.com/a.png">`,
+				`<meta property="og:image" content="https://example.com/b.png">`,
+				`<link rel="canonical" href="https://example.com/headtags/hello">`,
+				`<script type="application/ld+json">{"@type":"Article","name":"hello","note":"<\/script>"}</script>`,
+				"og:site_name",
+			},
+			notInHead: []string{"layout description", "https://example.com/layout"},
+			notInBody: []string{"<meta ", "<title", "<link rel=\"canonical", "ld+json"}},
+		{name: "head ssr other slug", method: "GET", path: "/headtags/other/",
+			inHead: []string{"<title>Post other | Krate</title>", `href="https://example.com/headtags/other"`}},
+		{name: "head isr miss", method: "GET", path: "/headisr/",
+			inHead:    []string{"<title>ISR head title</title>", `<meta name="robots" content="noindex">`, `<meta property="og:type" content="website">`},
+			notInBody: []string{"<meta ", "<title"}},
+		{name: "head isr hit", method: "GET", path: "/headisr/",
+			inHead:    []string{"<title>ISR head title</title>", `<meta name="robots" content="noindex">`},
+			notInBody: []string{"<meta ", "<title"}},
+		{name: "head server component region", method: "GET", path: "/headcomponent/",
+			inHead:    []string{"<title>Written by Ada</title>", `<meta name="author" content="Ada">`},
+			notInBody: []string{"<meta ", "<title"}},
+		// A streamed Suspense region renders after the head was sent: its tags are
+		// applied by the region script, the baked ones stay in the head.
+		{name: "head streamed region", method: "GET", path: "/headstream/",
+			inHead:    []string{`<meta name=keywords content="baked, static"/>`},
+			notInHead: []string{"from a streamed region"},
+			contains:  []string{"from a streamed region", "data-krate-stream"}},
 		// Per-segment pages, inside the blog layout.
 		{name: "segment 404 unmatched", method: "GET", path: "/blog/a/b/c/", contains: []string{"blog-404", "id=blog-layout"}},
 		{name: "segment 404 unmatched accept", method: "GET", path: "/blog/a/b/c", headers: map[string]string{"Accept": "text/html"}, contains: []string{"blog-404"}},
@@ -191,6 +225,27 @@ func TestServerlessNodeParity(t *testing.T) {
 				for host, r := range map[string]matrixResult{"krate start": g, "node target": n} {
 					if r.headers.Get("X-Krate-Cache") != "" || !strings.Contains(r.headers.Get("Cache-Control"), "no-store") {
 						t.Errorf("%s: a denied response must not be cached: Cache-Control %q, X-Krate-Cache %q", host, r.headers.Get("Cache-Control"), r.headers.Get("X-Krate-Cache"))
+					}
+				}
+			}
+			for host, body := range map[string]string{"krate start": g.body, "node target": n.body} {
+				head, rest := body, ""
+				if i := strings.Index(strings.ToLower(body), "</head>"); i >= 0 {
+					head, rest = body[:i], body[i:]
+				}
+				for _, want := range c.inHead {
+					if !strings.Contains(head, want) {
+						t.Errorf("%s: <head> lacks %q:\n%.1500s", host, want, head)
+					}
+				}
+				for _, bad := range c.notInHead {
+					if strings.Contains(head, bad) {
+						t.Errorf("%s: <head> must not contain %q:\n%.1500s", host, bad, head)
+					}
+				}
+				for _, bad := range c.notInBody {
+					if strings.Contains(rest, bad) {
+						t.Errorf("%s: body must not contain %q:\n%.1500s", host, bad, rest)
 					}
 				}
 			}

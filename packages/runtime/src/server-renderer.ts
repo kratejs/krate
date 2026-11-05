@@ -565,7 +565,9 @@ const server = http.createServer(async (req, res) => {
     headers_extra["X-Krate-Cache"] = result.cacheStatus === "stale" ? "STALE" : "HIT";
   }
   res.writeHead(result.status, headers_extra);
-  res.end(result.html);
+  // A direct page response has no document to merge into: <Head> children stay
+  // where they rendered, without their markers.
+  res.end(result.html.replace(/<!--\/?krate-head-->/g, ""));
 });
 
 if (isClusterPrimary) {

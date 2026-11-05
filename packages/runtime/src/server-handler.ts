@@ -28,12 +28,13 @@ import {
   injectFlashNotice,
   parseRegionShell,
   regionReplaceScript,
-  replaceTitle,
   requestFlash,
   spliceShell,
   splitBodyScripts,
+  type RegionBoundary,
   type RegionShell,
 } from "./handler-html.js";
+import { mergeHead } from "./head-tags.js";
 import {
   applyDynamicRouteParams,
   baseName,
@@ -753,6 +754,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     denied?: 401 | 403;
     redirect?: string;
     title?: string;
+    /** <Head> tags (meta, link, script) the region rendered. */
+    head?: string;
     noStore?: boolean;
     fatal?: boolean;
   }
@@ -797,14 +800,15 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const pending = startRegionRenders(page, route, shellInfo, renderReq);
 
     if (outOfOrder && !isISR && canStreamOutOfOrder(shellInfo.all) && (!page.serverComponents || allSuspense(shellInfo.all))) {
-      return streamSiblingRegions(rs, shell, shellInfo, pending);
+      return streamSiblingRegions(rs, route, shell, shellInfo, pending);
     }
 
     // Ordered assembly: wait for every region, then decide status, headers and body.
     const regionHTML = new Map<string, string>();
     let isISRFrame = false;
     let cacheStatus = "";
-    let titleOverride = "";
+    // The <title> and <Head> tags each region rendered, by region id.
+    const frameHead = new Map<string, { title: string; head: string }>();
     let notFound = false;
     let denied: 401 | 403 | 0 = 0;
     let redirect = "";
@@ -830,7 +834,6 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
             notFound = !!frame.notFound;
             denied = denied || frame.denied || 0;
             redirect = frame.redirect || "";
-            titleOverride = frame.title || "";
             if ((frame.status || 0) >= 500 || frame.error) {
               renderErr = frame.error || `page-region render failed with status ${frame.status}`;
               errStack = frame.stack || "";
@@ -841,6 +844,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
             if (frame.notFound || frame.denied) continue;
           }
           regionHTML.set(id, frame.html || "");
+          if (frame.title || frame.head) frameHead.set(id, { title: frame.title || "", head: frame.head || "" });
           break;
         }
         case "error": {
@@ -898,13 +902,47 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     }
     let html = "";
     spliceShell(shell, shellInfo.roots, regionHTML, (c) => (html += c));
-    // Swap the title after splicing: the marker offsets belong to the baked shell.
-    if (titleOverride) html = replaceTitle(html, titleOverride);
+    // The title and <Head> tags go into the head after splicing: the marker
+    // offsets belong to the baked shell. Only regions that ended up in the
+    // page count (the children of a replaced region are dropped with it).
+    if (frameHead.size > 0) {
+      const live = new Set<string>();
+      const walk = (children: RegionBoundary[]) => {
+        for (const b of children) {
+          if (regionHTML.has(b.id)) live.add(b.id);
+          else if (b.kind === "suspense") walk(b.children);
+        }
+      };
+      walk(shellInfo.roots);
+      let title = "";
+      let head = "";
+      for (const b of shellInfo.all) {
+        const h = live.has(b.id) ? frameHead.get(b.id) : undefined;
+        if (!h) continue;
+        if (h.title) title = h.title;
+        head += h.head;
+      }
+      html = mergeHead(html, title, head);
+    }
     return finish(rs, 200, html);
   }
 
+  // A <Head> inside a streamed Suspense region renders after the head of the
+  // response has been sent. It is applied by the region's script instead, which
+  // crawlers that do not run scripts never see: warn once per region.
+  const warnedStreamedHead = new Set<string>();
+  function warnStreamedHead(route: string, id: string): void {
+    const key = route + "::" + id;
+    if (warnedStreamedHead.has(key)) return;
+    warnedStreamedHead.add(key);
+    console.warn(
+      `[krate] <Head> inside the streamed region ${id} of ${route} reaches the document only through the region's script: ` +
+        "crawlers that do not run scripts will not see it. Move it into the page component outside <Suspense>.",
+    );
+  }
+
   /** Sibling Suspense regions stream in completion order after the shell. */
-  function streamSiblingRegions(rs: ReqState, shell: string, shellInfo: RegionShell, pending: Array<Promise<Frame>>): Response {
+  function streamSiblingRegions(rs: ReqState, route: string, shell: string, shellInfo: RegionShell, pending: Array<Promise<Frame>>): Response {
     const [prefix, tail] = splitBodyScripts(shell);
     const enc = new TextEncoder();
     const method = rs.method;
@@ -920,8 +958,9 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
               if (f.error) console.error(`[krate] region ${f.id} failed: ${f.error}`);
               return;
             }
-            if (!f.html) return;
-            controller.enqueue(enc.encode(regionReplaceScript(f.id, f.html)));
+            if (!f.html && !f.head && !f.title) return;
+            if (f.head || f.title) warnStreamedHead(route, f.id);
+            controller.enqueue(enc.encode(regionReplaceScript(f.id, f.html || "", f.head, f.title)));
           }),
         );
         controller.enqueue(enc.encode(tail));
