@@ -16,7 +16,7 @@ import {
   thenableRecord,
   type RequestContext,
 } from "./request-context.js";
-import { takeHead } from "./head-tags.js";
+import { HEAD_CLOSE, HEAD_OPEN, takeHead } from "./head-tags.js";
 import { metadataHeadTags, type MetadataSegment } from "./metadata.js";
 import { SegmentedLRU } from "./segmented-lru.js";
 import {

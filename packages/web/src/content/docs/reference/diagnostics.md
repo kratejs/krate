@@ -416,6 +416,30 @@ A named import from `@krate/runtime` (or one of its subpaths) asks for something
 
 `import logo from "./logo.png"` binds the file's hashed URL. The compiler replaces reads of the binding with that URL, in the module that imports the file and in every module that imports it through `export { logo }`, `export default logo`, `export { default as logo } from "./logo.png"`, `export *` or `export * as ns` and `ns.logo`. A read it cannot reach, such as a computed property key (`{ [logo]: 1 }`) or `ns.default` of a namespace that is passed on whole, has no value in the browser script: it is a ReferenceError there, or renders as the bare name. Use the binding as a plain value in JSX or a component, or import the file with a `?url` suffix. This is a warning.
 
+### KR7130
+
+**Metadata route could not be built**
+
+A `sitemap.ts`, `robots.ts`, `manifest.ts`, `opengraph-image` or `twitter-image` file under the pages directory runs once at build time and its result becomes `sitemap.xml`, `robots.txt`, `manifest.webmanifest` or a PNG. The file threw, returned a value of the wrong shape (a sitemap entry without a `url`, a robots file without `rules`), or could not be loaded. Fix the error named in the message. This is an error: the file would otherwise silently produce nothing.
+
+### KR7131
+
+**ImageResponse uses something the renderer cannot draw**
+
+ImageResponse draws a documented JSX subset with a built-in renderer (no headless browser): flexbox layout, text, colours, gradients, borders, box shadows, opacity, overflow hidden and images. Anything else (an element such as `<svg>`, a style such as `transform` or `filter`, a unit such as `vh`, a character the font has no glyph for) is listed here instead of being drawn wrong. Use the supported subset, or pass a font with `options.fonts` for other characters. This is an error.
+
+### KR7132
+
+**Image route in a dynamic segment has no params to build with**
+
+An `opengraph-image` or `twitter-image` file inside a dynamic segment (`blog/[slug]/`) is built once per entry of the segment page's `generateStaticParams`. This one has no matching page or no `generateStaticParams`, so no image was built and no `og:image` tag is emitted for it. Export `generateStaticParams` from the segment's page. This is a warning.
+
+### KR7133
+
+**A metadata file replaces a plugin or config output**
+
+`sitemap.ts` or `robots.ts` defines the file, so the sitemap or robots plugin (and the `robots` and `seo` config that feed it) did not write its own. The metadata file wins. Remove one of them to silence this warning. This is a warning.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001
