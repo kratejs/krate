@@ -74,7 +74,7 @@ config can reference it with `"$schema": "./.krate/config.schema.json"`.
 
 ```typescript
 minify: true,                 // Enable all minification (default: true)
-minifyHTML: false,            // HTML minification (inherits minify)
+minifyHTML: false,            // HTML minification (inherits minify); text keeps its white space inside <pre> and where CSS sets white-space to pre, pre-wrap, pre-line or break-spaces
 minifyCSS: false,             // CSS minification (inherits minify)
 minifyJS: false,              // JS minification (inherits minify)
 ```
@@ -265,10 +265,24 @@ markdown: {
   headingAnchors: true,
   admonitions: true,
   codeHighlight: true,
+  codeTheme: { light: "github", dark: "github-dark" }, // or one name for both modes
   math: false,          // load KaTeX (CDN) and render $...$ / $$...$$
   plugins: ["./md/transform.ts"], // AfterMarkdownParse HTML transforms
 }
 ```
+
+`codeTheme` picks the syntax colours. A plain string (`"monokai"`) is one theme
+for both colour modes; `{ light, dark }` picks one per mode, and a missing side
+keeps its default (`github`, `github-dark`). Any chroma style name works, and an
+unknown one warns (`KR7150`) and falls back to the default for that mode. The
+stylesheet follows the page's mode - the system preference, or a `data-theme`
+attribute on `<html>` - and the markup is the same in both modes, so switching
+needs no JavaScript and no second copy of the HTML. It applies to the `Code`
+component and to fenced blocks alike.
+
+Code that changes in the browser or is only known per request is highlighted
+after the build; `highlight: { languages: ["ts"] }` lists the languages to load when
+`lang` is not a literal (see [Code Highlighting](/docs/guides/code-highlighting/)).
 
 Beyond GFM (tables, task lists, strikethrough, autolinks), the renderer supports
 definition lists, footnotes (`[^1]`), emoji shortcodes (`:rocket:`), and
@@ -345,6 +359,26 @@ Page-level rendering is opted into per page via
 the sidecar, which resolves only the page's dynamic regions against the baked
 static shell; the embedded QuickJS runtime is used for middleware, API routes,
 and community plugins.
+
+## Shared cache
+
+```typescript
+cache: {
+  adapter: "redis",                 // "memory" (default) | "redis" | a module path / package
+  url: process.env.REDIS_URL,       // redis://[user:password@]host:6379/0, rediss:// for TLS
+  urlEnv: "REDIS_URL",              // variable a deployed bundle reads the URL from
+  prefix: "krate:",                 // key prefix, so apps can share one store
+  timeoutMs: 250,                   // one cache call; slower counts as down
+  ttlSeconds: 604800,               // how long ISR entries stay in the shared store
+  options: {},                      // passed to a custom adapter
+}
+```
+
+Moves the ISR page cache and the data cache out of process memory and makes
+`revalidatePath` / `revalidateTag` reach every instance. See
+[Sharing caches between instances](/docs/guides/caching-and-revalidation/#sharing-caches-between-instances).
+`krate deploy` bundles the settings without `url`; the deployed server reads
+`urlEnv` (or `KRATE_CACHE_URL`).
 
 ## Partial prerendering (PPR)
 
@@ -713,6 +747,7 @@ server: {
   port: 3000,           // falls back to devServer.port, then 3000
   maxBodySize: 1048576, // request body cap in bytes (0 = defaults)
   trustProxy: false,    // honor X-Forwarded-Proto/Host/For from a reverse proxy
+  trustedProxies: 1,    // reverse proxies in front of Krate (with trustProxy)
   shutdownTimeout: 15,  // seconds in-flight requests get to finish on SIGTERM
 },
 ```
@@ -730,7 +765,15 @@ replaces them with what it observed, so handlers cannot be spoofed. Behind a
 trusted reverse proxy set `trustProxy: true`: request URLs seen by middleware
 and API routes use `X-Forwarded-Proto` / `X-Forwarded-Host`, the server-action
 CSRF origin check compares against the forwarded host, and the client address is
-the first `X-Forwarded-For` entry.
+the `X-Forwarded-For` entry `trustedProxies` hops from the right (default 1: the
+address your proxy saw). Entries a client puts at the front of the header never
+count. Set `trustedProxies` to the number of proxies in front of Krate if there
+is more than one (a CDN and a load balancer, for example).
+
+On the Vercel, Netlify and Cloudflare targets `trustProxy` has a third state: not
+set means "what the platform guarantees", `true` adds the forwarded headers of a
+proxy of yours, `false` trusts none. See
+[Proxy trust on the serverless targets](/docs/guides/deployment/#proxy-trust-on-the-serverless-targets).
 
 On `SIGINT`/`SIGTERM` the server stops accepting connections, lets in-flight
 requests finish for `shutdownTimeout` seconds (default 15), then stops its
@@ -775,9 +818,9 @@ See [API Routes](/docs/features/api-routes/#custom-api-sidecar).
 ## Tailwind `@apply`
 
 Plain utility `@apply` is expanded in your CSS (`p-4`, `font-bold`, ...).
-Variant (`hover:*`, `md:*`), descendant-selector (`space-x-*`) and unknown
-utilities cannot be expressed as plain declarations; they are reported as build
-warnings and left unexpanded.
+Variant (`hover:*`, `md:*`) and descendant-selector (`space-x-*`) utilities
+become nested rules inside the rule that applies them (native CSS nesting).
+Unknown utilities are reported as build warnings and left unexpanded.
 
 ## Validation
 

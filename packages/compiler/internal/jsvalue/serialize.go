@@ -139,6 +139,46 @@ func writeJSSource(b *strings.Builder, v Value) bool {
 			}
 		}
 		b.WriteByte('}')
+	case KindDate:
+		if math.IsNaN(v.date.ms) {
+			b.WriteString("new Date(NaN)")
+		} else {
+			b.WriteString("new Date(" + NumberToString(v.date.ms) + ")")
+		}
+	case KindMap, KindSet:
+		if v.kind == KindMap {
+			b.WriteString("new Map([")
+		} else {
+			b.WriteString("new Set([")
+		}
+		cur := v.coll.cursor()
+		first := true
+		for {
+			e, ok := cur()
+			if !ok {
+				break
+			}
+			if !first {
+				b.WriteByte(',')
+			}
+			first = false
+			if v.kind == KindSet {
+				if !writeJSSource(b, e.key) {
+					return false
+				}
+				continue
+			}
+			b.WriteByte('[')
+			if !writeJSSource(b, e.key) {
+				return false
+			}
+			b.WriteByte(',')
+			if !writeJSSource(b, e.val) {
+				return false
+			}
+			b.WriteByte(']')
+		}
+		b.WriteString("])")
 	default:
 		return false
 	}
@@ -173,12 +213,66 @@ func isIdent(s string) bool {
 // ok=false when the result is undefined (top-level undefined or function) or
 // the value contains Unknown parts.
 func JSONStringify(v Value) (string, bool) {
+	return JSONStringifyGap(v, "")
+}
+
+// JSONStringifyGap is JSON.stringify(v, null, gap) for a gap string already
+// reduced to at most ten characters (see JSONGap).
+func JSONStringifyGap(v Value, gap string) (string, bool) {
 	var b strings.Builder
-	switch r := writeJSON(&b, v); r {
+	switch r := writeJSON(&b, v, gap, ""); r {
 	case jsonOK:
 		return b.String(), true
 	}
 	return "", false
+}
+
+// JSONGap converts the third argument of JSON.stringify to its indent string:
+// a number is that many spaces (at most ten), a string its first ten
+// characters, anything else no indentation.
+func JSONGap(space Value) string {
+	switch space.kind {
+	case KindNumber:
+		n := int(math.Trunc(space.n))
+		if math.IsNaN(space.n) || n < 1 {
+			return ""
+		}
+		if n > 10 {
+			n = 10
+		}
+		return strings.Repeat(" ", n)
+	case KindString:
+		r := []rune(space.s)
+		if len(r) > 10 {
+			r = r[:10]
+		}
+		return string(r)
+	}
+	return ""
+}
+
+// hasToJSON reports whether v holds an object with a toJSON function, which
+// JSON.stringify would call.
+func hasToJSON(v Value) bool {
+	switch v.kind {
+	case KindArray:
+		for _, e := range v.Elems() {
+			if hasToJSON(e) {
+				return true
+			}
+		}
+	case KindObject:
+		if m, ok := v.Get("toJSON"); ok && m.kind == KindFunction {
+			return true
+		}
+		for _, k := range v.Keys() {
+			p, _ := v.Get(k)
+			if hasToJSON(p) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type jsonResult int
@@ -189,7 +283,7 @@ const (
 	jsonFail
 )
 
-func writeJSON(b *strings.Builder, v Value) jsonResult {
+func writeJSON(b *strings.Builder, v Value, gap, indent string) jsonResult {
 	switch v.kind {
 	case KindUndefined, KindFunction:
 		return jsonSkip
@@ -206,13 +300,23 @@ func writeJSON(b *strings.Builder, v Value) jsonResult {
 	case KindString:
 		writeJSONString(b, v.s)
 	case KindArray:
+		elems := v.Elems()
+		if len(elems) == 0 {
+			b.WriteString("[]")
+			break
+		}
+		inner := indent + gap
 		b.WriteByte('[')
-		for i, e := range v.Elems() {
+		for i, e := range elems {
 			if i > 0 {
 				b.WriteByte(',')
 			}
+			if gap != "" {
+				b.WriteByte('\n')
+				b.WriteString(inner)
+			}
 			var eb strings.Builder
-			switch writeJSON(&eb, e) {
+			switch writeJSON(&eb, e, gap, inner) {
 			case jsonFail:
 				return jsonFail
 			case jsonSkip:
@@ -221,14 +325,19 @@ func writeJSON(b *strings.Builder, v Value) jsonResult {
 				b.WriteString(eb.String())
 			}
 		}
+		if gap != "" {
+			b.WriteByte('\n')
+			b.WriteString(indent)
+		}
 		b.WriteByte(']')
 	case KindObject:
+		inner := indent + gap
 		b.WriteByte('{')
 		first := true
 		for _, k := range v.Keys() {
 			p, _ := v.Get(k)
 			var pb strings.Builder
-			switch writeJSON(&pb, p) {
+			switch writeJSON(&pb, p, gap, inner) {
 			case jsonFail:
 				return jsonFail
 			case jsonSkip:
@@ -238,11 +347,30 @@ func writeJSON(b *strings.Builder, v Value) jsonResult {
 				b.WriteByte(',')
 			}
 			first = false
+			if gap != "" {
+				b.WriteByte('\n')
+				b.WriteString(inner)
+			}
 			writeJSONString(b, k)
 			b.WriteByte(':')
+			if gap != "" {
+				b.WriteByte(' ')
+			}
 			b.WriteString(pb.String())
 		}
+		if !first && gap != "" {
+			b.WriteByte('\n')
+			b.WriteString(indent)
+		}
 		b.WriteByte('}')
+	case KindDate:
+		if math.IsNaN(v.date.ms) {
+			b.WriteString("null")
+		} else {
+			writeJSONString(b, dateISO(v.date.ms))
+		}
+	case KindMap, KindSet, KindIterator:
+		b.WriteString("{}")
 	case KindJSX:
 		// A React element serializes as its (opaque) object form; there is no
 		// faithful build-time equivalent.
@@ -329,6 +457,12 @@ func ToAST(v Value) ast.Expr {
 			props = append(props, &ast.ObjectProp{Key: k, Value: x})
 		}
 		return &ast.ObjectExpr{Properties: props}
+	case KindDate:
+		arg := ast.Expr(&ast.Identifier{Name: "NaN"})
+		if !math.IsNaN(v.date.ms) {
+			arg = ToAST(Number(v.date.ms))
+		}
+		return &ast.NewExpr{Callee: &ast.Identifier{Name: "Date"}, Args: []ast.Expr{arg}}
 	}
 	return nil
 }

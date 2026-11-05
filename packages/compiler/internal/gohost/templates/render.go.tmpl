@@ -10,9 +10,21 @@ import (
 	"sync"
 )
 
+// Vary lists what a render read from the request, like the Vary header of an
+// HTTP response: the host keys its cache of the render on those values only.
+// Full means the render may have read anything (it touches the Request fields
+// or passes the Request on), so it varies on the whole request.
+type Vary struct {
+	Full    bool     `json:"full,omitempty"`
+	Headers []string `json:"headers,omitempty"`
+	Cookies []string `json:"cookies,omitempty"`
+	Query   []string `json:"query,omitempty"`
+	Params  []string `json:"params,omitempty"`
+}
+
 // Func renders one component: it decodes propsJSON (and optional reqJSON, the
-// incoming request context) and returns HTML.
-type Func func(propsJSON, reqJSON string) (string, error)
+// incoming request context) and returns HTML and what it read of the request.
+type Func func(propsJSON, reqJSON string) (string, Vary, error)
 
 var (
 	mu       sync.RWMutex
@@ -28,11 +40,17 @@ func Register(name string, fn Func) {
 
 // Render invokes a registered component by name.
 func Render(name, propsJSON, reqJSON string) (string, error) {
+	html, _, err := RenderVary(name, propsJSON, reqJSON)
+	return html, err
+}
+
+// RenderVary is Render that also reports what the render read of the request.
+func RenderVary(name, propsJSON, reqJSON string) (string, Vary, error) {
 	mu.RLock()
 	fn, ok := registry[name]
 	mu.RUnlock()
 	if !ok {
-		return "", fmt.Errorf("krate: unknown Go component %q", name)
+		return "", Vary{Full: true}, fmt.Errorf("krate: unknown Go component %q", name)
 	}
 	return fn(propsJSON, reqJSON)
 }
@@ -101,11 +119,13 @@ func Handle(w http.ResponseWriter, r *http.Request) {
 	enc.SetEscapeHTML(false)
 	flusher, _ := w.(http.Flusher)
 	for _, reg := range req.Regions {
-		html, err := Render(reg.Name, reg.Props, reg.Request)
+		html, vary, err := RenderVary(reg.Name, reg.Props, reg.Request)
 		if err != nil {
 			_ = enc.Encode(map[string]any{"type": "region", "id": reg.ID, "status": 500, "error": err.Error()})
 		} else {
-			_ = enc.Encode(map[string]any{"type": "region", "id": reg.ID, "status": 200, "html": html})
+			// vary is always sent: a frame without it comes from a host that
+			// does not record reads, and the server then keys on everything.
+			_ = enc.Encode(map[string]any{"type": "region", "id": reg.ID, "status": 200, "html": html, "vary": vary})
 		}
 		if flusher != nil {
 			flusher.Flush()

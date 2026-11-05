@@ -52,6 +52,9 @@ type Policy struct {
 	// Redact lists literal values to mask in tool output and audit logs.
 	Redact []string `json:"redact,omitempty"`
 
+	// root is the project root the policy was loaded from. It lets path checks
+	// see through symlinks: a link to a protected file is that file.
+	root string
 	// loaded is true when a config file was found (informational).
 	loaded bool
 	// invalid is true when a policy file exists but could not be parsed. The
@@ -167,28 +170,38 @@ const policyFileName = ".krate/mcp.json"
 // the default policy (empty lists) rather than an error, so the server always
 // starts.
 func loadPolicy(root string) *Policy {
-	p := &Policy{}
+	p := &Policy{root: root}
 	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(policyFileName)))
 	if err != nil {
 		return p
 	}
 	if err := json.Unmarshal(data, p); err != nil {
-		return &Policy{invalid: true}
+		return &Policy{root: root, invalid: true}
 	}
+	p.root = root
 	p.loaded = true
 	return p
 }
 
 // denied reports whether rel is refused for both reading and writing. An
 // explicit `allow` pattern overrides the default sensitive list but not an
-// explicit `deny` entry.
+// explicit `deny` entry. A symlink is judged by its own name and by the path
+// it resolves to, so a link cannot reach a protected file.
 func (p *Policy) denied(rel string) bool {
+	if p.deniedLexical(rel) {
+		return true
+	}
+	alias := p.aliasOf(rel)
+	return alias != "" && p.deniedLexical(alias)
+}
+
+func (p *Policy) deniedLexical(rel string) bool {
 	if p.invalid {
 		return true
 	}
 	rel = normalizeRel(rel)
 	for _, pat := range p.Deny {
-		if globMatch(pat, rel) {
+		if globMatchFold(pat, rel) {
 			return true
 		}
 	}
@@ -198,7 +211,7 @@ func (p *Policy) denied(rel string) bool {
 		}
 	}
 	for _, pat := range defaultDeniedPatterns {
-		if globMatch(pat, rel) {
+		if globMatchFold(pat, rel) {
 			return true
 		}
 	}
@@ -207,11 +220,20 @@ func (p *Policy) denied(rel string) bool {
 
 // writable reports whether rel may be written: not denied, not read-only,
 // inside writeRoots when configured, and not in a generated output tree.
+// Like denied, it also judges the path a symlink resolves to.
 func (p *Policy) writable(rel string) bool {
+	if !p.writableLexical(rel) {
+		return false
+	}
+	alias := p.aliasOf(rel)
+	return alias == "" || p.writableLexical(alias)
+}
+
+func (p *Policy) writableLexical(rel string) bool {
 	if p.ReadOnlyMode {
 		return false
 	}
-	if p.denied(rel) {
+	if p.deniedLexical(rel) {
 		return false
 	}
 	rel = normalizeRel(rel)
@@ -219,12 +241,12 @@ func (p *Policy) writable(rel string) bool {
 		return false
 	}
 	for _, pat := range p.ReadOnly {
-		if globMatch(pat, rel) {
+		if globMatchFold(pat, rel) {
 			return false
 		}
 	}
 	for _, pat := range defaultWriteDeniedPatterns {
-		if globMatch(pat, rel) {
+		if globMatchFold(pat, rel) {
 			return false
 		}
 	}
@@ -254,8 +276,22 @@ func (p *Policy) withinWriteRoots(rel string) bool {
 	return false
 }
 
-// describe returns a short human-readable summary of why a path is denied.
+// deniedReason returns a short human-readable summary of why a path is denied.
 func (p *Policy) deniedReason(rel string) string {
+	reason := p.reasonLexical(rel)
+	if reason == notPermitted {
+		if alias := p.aliasOf(rel); alias != "" {
+			if r := p.reasonLexical(alias); r != notPermitted {
+				return "is a link to " + alias + ", which " + r
+			}
+		}
+	}
+	return reason
+}
+
+const notPermitted = "is not permitted"
+
+func (p *Policy) reasonLexical(rel string) string {
 	if p.invalid {
 		return "the project policy file is malformed; fix .krate/mcp.json"
 	}
@@ -267,29 +303,75 @@ func (p *Policy) deniedReason(rel string) string {
 		return "is a binary file; set allowBinary in .krate/mcp.json to permit writing it"
 	}
 	for _, pat := range p.Deny {
-		if globMatch(pat, rel) {
+		if globMatchFold(pat, rel) {
 			return "matches the project deny rule " + strconvQuote(pat)
 		}
 	}
 	for _, pat := range defaultDeniedPatterns {
-		if globMatch(pat, rel) {
+		if globMatchFold(pat, rel) {
 			return "is a protected path (" + strconvQuote(pat) + "); add it to allow in .krate/mcp.json to permit access"
 		}
 	}
 	for _, pat := range p.ReadOnly {
-		if globMatch(pat, rel) {
+		if globMatchFold(pat, rel) {
 			return "is marked read-only in .krate/mcp.json"
 		}
 	}
 	for _, pat := range defaultWriteDeniedPatterns {
-		if globMatch(pat, rel) {
+		if globMatchFold(pat, rel) {
 			return "is a generated or output path (" + strconvQuote(pat) + ") and cannot be edited"
 		}
 	}
 	if len(p.WriteRoots) > 0 && !p.withinWriteRoots(rel) {
 		return "is outside writeRoots in .krate/mcp.json"
 	}
-	return "is not permitted"
+	return notPermitted
+}
+
+// aliasOf returns the project-relative path rel really names once symlinks are
+// resolved, or "" when it is the same path, does not resolve, or the policy
+// has no project root. The part of rel that does not exist yet (a file about to
+// be created) is kept, so a write through a linked directory is judged by its
+// real location.
+func (p *Policy) aliasOf(rel string) string {
+	if p == nil || p.root == "" || rel == "" {
+		return ""
+	}
+	rootReal, err := filepath.EvalSymlinks(p.root)
+	if err != nil {
+		return ""
+	}
+	abs := filepath.Join(rootReal, filepath.FromSlash(normalizeRel(rel)))
+	real, ok := evalDeepest(abs)
+	if !ok {
+		return ""
+	}
+	back, err := filepath.Rel(rootReal, real)
+	if err != nil || back == ".." || strings.HasPrefix(back, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	back = filepath.ToSlash(back)
+	if back == "." || back == normalizeRel(rel) {
+		return ""
+	}
+	return back
+}
+
+// evalDeepest resolves symlinks in the longest existing prefix of p and
+// appends the rest unchanged.
+func evalDeepest(p string) (string, bool) {
+	rest := ""
+	for probe := p; ; {
+		if real, err := filepath.EvalSymlinks(probe); err == nil {
+			return filepath.Join(real, rest), true
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return "", false
+		}
+		rest = filepath.Join(filepath.Base(probe), rest)
+		probe = parent
+	}
 }
 
 func normalizeRel(rel string) string {
@@ -335,6 +417,13 @@ func globMatch(pattern, rel string) bool {
 		}
 	}
 	return false
+}
+
+// globMatchFold is globMatch ignoring case. The deny side of the policy uses it:
+// on macOS and Windows .ENV and .Git name the same files as .env and .git, so
+// a protected name must stay protected in any spelling.
+func globMatchFold(pattern, rel string) bool {
+	return globMatch(strings.ToLower(pattern), strings.ToLower(rel))
 }
 
 func segmentMatch(pattern, rel string) bool {

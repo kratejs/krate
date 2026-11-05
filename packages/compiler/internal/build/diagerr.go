@@ -1,8 +1,10 @@
 package build
 
 import (
+	"errors"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 )
@@ -49,6 +51,22 @@ type multiError struct {
 func (e *multiError) Error() string { return e.summary }
 func (e *multiError) Unwrap() []error {
 	return e.errs
+}
+
+// BuildErrorSummary is the text the CLI prints after a failed build. The
+// builder prints each failure as it happens, so an aggregate error is reduced
+// to its headline ("build failed: 2 error(s)") instead of repeating every
+// message a second time. Any other error is returned in full.
+func BuildErrorSummary(err error) string {
+	if err == nil {
+		return ""
+	}
+	var me *multiError
+	if !errors.As(err, &me) {
+		return err.Error()
+	}
+	head, _, _ := strings.Cut(me.summary, "\n")
+	return strings.TrimRight(head, ": ") + " (details above)"
 }
 
 // DiagnosticsFromError extracts structured diagnostics from a build error,

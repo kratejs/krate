@@ -14,8 +14,10 @@ import (
 // bundle.
 
 type runtimeFeatureManifest struct {
-	Version int                    `json:"version"`
-	Core    runtimeFeatureFile     `json:"core"`
+	Version int                `json:"version"`
+	Core    runtimeFeatureFile `json:"core"`
+	// Full lists every export of the full hydration bundle.
+	Full    []string               `json:"full"`
 	Feature map[string]runtimeFeat `json:"features"`
 }
 
@@ -31,7 +33,7 @@ type runtimeFeat struct {
 // optionalRuntimeFeatures lists the features included only when referenced,
 // in assembly order. The router (or its lite variant) is chosen by the
 // `spa` setting and always included.
-var optionalRuntimeFeatures = []string{"list", "helpers", "actions", "classes"}
+var optionalRuntimeFeatures = []string{"list", "navigation", "helpers", "actions", "classes", "highlight"}
 
 // unknownClientCodeMarkers mark client code the identifier scan cannot see:
 // dynamically imported chunks, lazy components and client islands load code
@@ -108,6 +110,7 @@ func loadRuntimeFeatures(projectRoot string, spa bool, scan string) (string, []s
 	// probe optional features (typeof / window.x checks), so only the page
 	// code decides which features ship.
 	refs := identifierSet(scan)
+	addHelperRefs(refs, &m)
 	all := false
 	for _, marker := range unknownClientCodeMarkers {
 		if strings.Contains(scan, marker) {
@@ -139,6 +142,30 @@ func loadRuntimeFeatures(projectRoot string, spa bool, scan string) (string, []s
 		included = append(included, name)
 	}
 	return sb.String(), included
+}
+
+// helperFeatures lists the optional runtime features a bootstrap helper needs.
+// Page code calls helpers by name and never mentions the runtime API they
+// use, so the identifier scan alone would drop the feature (kbindList probes
+// krateBindList and silently does nothing when it is missing). The test
+// TestBootstrapHelperFeatureDeps keeps this table in step with the helpers.
+var helperFeatures = map[string][]string{
+	"kbindList": {"list"},
+}
+
+// addHelperRefs adds the exports of every feature that a referenced bootstrap
+// helper needs.
+func addHelperRefs(refs map[string]bool, m *runtimeFeatureManifest) {
+	for helper, features := range helperFeatures {
+		if !refs[helper] {
+			continue
+		}
+		for _, name := range features {
+			for _, export := range m.Feature[name].Exports {
+				refs[export] = true
+			}
+		}
+	}
 }
 
 func featureReferenced(exports []string, refs map[string]bool) bool {

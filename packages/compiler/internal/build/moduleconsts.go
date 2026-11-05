@@ -117,12 +117,12 @@ func applyModuleBindings(opts *irtree.BuildOptions, entryPath string, entry *ast
 		opts.ModuleDeclOnly = declOnly
 	}
 	opts.ModuleStmts = stmts
-	opts.ModuleNamespaces = moduleNamespaces(entryPath, entry, extra)
+	opts.ModuleNamespaces = moduleNamespaces(annotator.ResolverOf(extra), entryPath, entry, extra)
 }
 
 // moduleNamespaces maps each namespace-import binding (`import * as ns from`,
 // `export * as ns from`) to the export names of the module it names.
-func moduleNamespaces(entryPath string, entry *ast.Program, extra []annotator.ModuleSource) map[string]map[string]string {
+func moduleNamespaces(res *bundler.ImportResolver, entryPath string, entry *ast.Program, extra []annotator.ModuleSource) map[string]map[string]string {
 	byPath := map[string]*ast.Program{}
 	for _, m := range extra {
 		if m.Program != nil && !isExternalModulePath(m.Path) {
@@ -145,7 +145,7 @@ func moduleNamespaces(entryPath string, entry *ast.Program, extra []annotator.Mo
 			if ns == "" || src == "" {
 				continue
 			}
-			target := bundler.ResolveImport(path, strings.Trim(src, "\"'"))
+			target := res.Resolve(path, strings.Trim(src, "\"'"))
 			tp := byPath[filepath.Clean(target)]
 			if tp == nil {
 				continue
@@ -153,7 +153,7 @@ func moduleNamespaces(entryPath string, entry *ast.Program, extra []annotator.Mo
 			if _, dup := out[ns]; dup {
 				continue
 			}
-			out[ns] = exportBindings(filepath.Clean(target), byPath, map[string]bool{})
+			out[ns] = exportBindings(res, filepath.Clean(target), byPath, map[string]bool{})
 		}
 	}
 	visit(entryPath, entry)
@@ -170,7 +170,7 @@ func moduleNamespaces(entryPath string, entry *ast.Program, extra []annotator.Mo
 
 // exportBindings lists a module's exports as exported name -> flattened
 // binding name, following `export *` through bundled modules.
-func exportBindings(path string, byPath map[string]*ast.Program, seen map[string]bool) map[string]string {
+func exportBindings(res *bundler.ImportResolver, path string, byPath map[string]*ast.Program, seen map[string]bool) map[string]string {
 	out := map[string]string{}
 	prog := byPath[path]
 	if prog == nil || seen[path] {
@@ -204,10 +204,10 @@ func exportBindings(path string, byPath map[string]*ast.Program, seen map[string
 			}
 		}
 		if exp.ReexportSource != "" {
-			target := filepath.Clean(bundler.ResolveImport(path, strings.Trim(exp.ReexportSource, "\"'")))
+			target := filepath.Clean(res.Resolve(path, strings.Trim(exp.ReexportSource, "\"'")))
 			switch {
 			case exp.StarReexport:
-				for k, v := range exportBindings(target, byPath, seen) {
+				for k, v := range exportBindings(res, target, byPath, seen) {
 					if _, dup := out[k]; !dup {
 						out[k] = v
 					}

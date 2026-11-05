@@ -51,7 +51,11 @@ func (in *Interp) propertyKey(e *ast.MemberExpr) (string, bool) {
 	if k.IsUnknown() {
 		return "", false
 	}
-	return k.ToPrimitive().ToString(), true
+	p := k.ToPrimitive()
+	if p.IsUnknown() {
+		return "", false
+	}
+	return p.ToString(), true
 }
 
 // call evaluates a call expression.
@@ -101,6 +105,7 @@ func (in *Interp) call(e *ast.CallExpr) (Value, bool) {
 	if bad.IsUnknown() {
 		return bad, false
 	}
+	in.callPos = e.Position
 	return fn.Call(args...), false
 }
 
@@ -178,15 +183,107 @@ func GetProperty(v Value, key string) Value {
 		if objectMethods[key] {
 			return boundMethod(v, key)
 		}
+		if v.obj.builtin != "" {
+			return Unsupported(v.obj.builtin + "." + key + " is not available at build time")
+		}
 	case KindFunction:
 		if key == "name" {
 			return String(v.fn.Name)
 		}
+		if p, ok := v.fn.Props[key]; ok {
+			return p
+		}
+		if v.fn.Builtin {
+			return Unsupported(v.fn.Name + "." + key + " is not available at build time")
+		}
 	case KindJSX:
 		return Dynamic("property " + key + " of a JSX element")
+	case KindIterator:
+		if iteratorMembers[key] {
+			return boundMethod(v, key)
+		}
+	case KindMap, KindSet:
+		if p, ok := collectionProperty(v, key); ok {
+			return p
+		}
+	case KindDate:
+		if dateMethods[key] {
+			return boundMethod(v, key)
+		}
+	}
+	// A standard member the interpreter has no implementation for must not read
+	// as undefined: `typeof arr.splice` or `if (arr.toSpliced)` would fold to the
+	// wrong branch. It stays unresolved and the browser computes it.
+	if realBuiltinMember(v.kind, key) {
+		return Unsupported(builtinTypeName(v.kind) + ".prototype." + key + " is not available at build time")
 	}
 	return Undefined()
 }
+
+func builtinTypeName(k Kind) string {
+	switch k {
+	case KindArray:
+		return "Array"
+	case KindString:
+		return "String"
+	case KindNumber:
+		return "Number"
+	case KindBool:
+		return "Boolean"
+	case KindIterator:
+		return "Iterator"
+	case KindMap:
+		return "Map"
+	case KindSet:
+		return "Set"
+	case KindDate:
+		return "Date"
+	}
+	return "Object"
+}
+
+// realBuiltinMember reports whether key names a member that exists on the
+// prototype of values of kind k (ES2024, plus the Object.prototype members every
+// value inherits). Implemented members are handled before this is reached.
+func realBuiltinMember(k Kind, key string) bool {
+	switch k {
+	case KindIterator:
+		return iteratorBuiltinMembers[key]
+	case KindMap:
+		return mapBuiltinMembers[key]
+	case KindSet:
+		return setBuiltinMembers[key]
+	case KindDate:
+		return dateBuiltinMembers[key]
+	}
+	if sharedBuiltinMembers[key] {
+		return k == KindArray || k == KindString || k == KindNumber || k == KindBool
+	}
+	switch k {
+	case KindArray:
+		return arrayBuiltinMembers[key]
+	case KindString:
+		return stringBuiltinMembers[key]
+	case KindNumber:
+		return numberBuiltinMembers[key]
+	}
+	return false
+}
+
+func memberSet(names string) map[string]bool {
+	m := map[string]bool{}
+	for _, n := range strings.Fields(names) {
+		m[n] = true
+	}
+	return m
+}
+
+var (
+	sharedBuiltinMembers = memberSet("constructor hasOwnProperty isPrototypeOf propertyIsEnumerable toLocaleString toString valueOf __proto__ __defineGetter__ __defineSetter__ __lookupGetter__ __lookupSetter__")
+	arrayBuiltinMembers  = memberSet("at concat copyWithin entries every fill filter find findIndex findLast findLastIndex flat flatMap forEach includes indexOf join keys lastIndexOf map pop push reduce reduceRight reverse shift slice some sort splice toReversed toSorted toSpliced unshift values with")
+	stringBuiltinMembers = memberSet("anchor at big blink bold charAt charCodeAt codePointAt concat endsWith fixed fontcolor fontsize includes indexOf isWellFormed italics lastIndexOf link localeCompare match matchAll normalize padEnd padStart repeat replace replaceAll search slice small split startsWith strike sub substr substring sup toLocaleLowerCase toLocaleUpperCase toLowerCase toUpperCase toWellFormed trim trimEnd trimLeft trimRight trimStart")
+	numberBuiltinMembers = memberSet("toExponential toFixed toPrecision")
+)
 
 var arrayMethods = map[string]bool{
 	"map": true, "filter": true, "find": true, "findIndex": true, "findLast": true, "findLastIndex": true,
@@ -224,6 +321,10 @@ func boundMethod(recv Value, name string) Value {
 			return numberMethod(recv.n, name, args)
 		case KindBool:
 			return String(recv.ToString())
+		case KindIterator:
+			return iteratorMethod(recv, name, args)
+		case KindDate:
+			return dateMethod(recv, name, args)
 		case KindObject:
 			switch name {
 			case "hasOwnProperty":
@@ -414,7 +515,21 @@ func arrayMethod(recv Value, name string, args []Value) Value {
 		return Number(-1)
 	case "lastIndexOf":
 		target := arg(args, 0)
-		for i := n - 1; i >= 0; i-- {
+		start := n - 1
+		if len(args) > 1 {
+			k := ToIntegerOrInfinity(args[1].ToNumber())
+			switch {
+			case k >= float64(n):
+				start = n - 1
+			case k >= 0:
+				start = int(k)
+			case k+float64(n) >= 0:
+				start = n + int(k)
+			default:
+				start = -1
+			}
+		}
+		for i := start; i >= 0; i-- {
 			if elems[i].IsUnknown() {
 				return elems[i]
 			}
@@ -504,18 +619,7 @@ func arrayMethod(recv Value, name string, args []Value) Value {
 		}
 		return NewArray(out...)
 	case "keys", "entries", "values":
-		out := make([]Value, n)
-		for i, el := range elems {
-			switch name {
-			case "keys":
-				out[i] = Number(float64(i))
-			case "values":
-				out[i] = el
-			default:
-				out[i] = NewArray(Number(float64(i)), el)
-			}
-		}
-		return NewArray(out...)
+		return arrayIterator(recv.arr, name)
 	case "fill":
 		out := append([]Value(nil), elems...)
 		s := relIndex(arg(args, 1), n, 0)
@@ -564,8 +668,10 @@ func indexUnits(hay, needle []uint16, from int) int {
 	return -1
 }
 
-func lastIndexUnits(hay, needle []uint16) int {
-	for i := len(hay) - len(needle); i >= 0; i-- {
+// lastIndexUnitsFrom is lastIndexOf with a position: the last match that
+// starts at or before from.
+func lastIndexUnitsFrom(hay, needle []uint16, from int) int {
+	for i := min(from, len(hay)-len(needle)); i >= 0; i-- {
 		if indexUnits(hay[i:i+len(needle)], needle, 0) == 0 {
 			return i
 		}
@@ -659,7 +765,11 @@ func stringMethod(s, name string, args []Value) Value {
 		case "indexOf":
 			return Number(float64(indexUnits(u, needle, relIndexClamp(arg(args, 1), n, 0))))
 		default:
-			return Number(float64(lastIndexUnits(u, needle)))
+			start := n
+			if p := arg(args, 1); p.kind != KindUndefined && !math.IsNaN(p.ToNumber()) {
+				start = relIndexClamp(p, n, n)
+			}
+			return Number(float64(lastIndexUnitsFrom(u, needle, start)))
 		}
 	case "replace", "replaceAll":
 		pat := arg(args, 0)

@@ -2,9 +2,11 @@ package build
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
@@ -17,6 +19,8 @@ import (
 //
 //	404.tsx or not-found.tsx   the segment's not-found page (status 404)
 //	error.tsx or 500.tsx       the segment's error page (status 500)
+//	forbidden.tsx or 403.tsx   the page for forbidden() (status 403)
+//	unauthorized.tsx or 401.tsx   the page for unauthorized() (status 401)
 //
 // They are not routes. Each is built like a page inside its directory's
 // layouts and written to <dir>/404.html or <dir>/500.html in the output; the
@@ -29,8 +33,10 @@ import (
 type SegmentKind string
 
 const (
-	SegmentNotFound SegmentKind = "notFound"
-	SegmentError    SegmentKind = "error"
+	SegmentNotFound     SegmentKind = "notFound"
+	SegmentError        SegmentKind = "error"
+	SegmentForbidden    SegmentKind = "forbidden"
+	SegmentUnauthorized SegmentKind = "unauthorized"
 )
 
 // segmentBaseKinds maps a file base name (no extension) to its role.
@@ -39,6 +45,11 @@ var segmentBaseKinds = map[string]SegmentKind{
 	"not-found": SegmentNotFound,
 	"500":       SegmentError,
 	"error":     SegmentError,
+
+	"403":          SegmentForbidden,
+	"forbidden":    SegmentForbidden,
+	"401":          SegmentUnauthorized,
+	"unauthorized": SegmentUnauthorized,
 }
 
 // segmentKindOfBase returns the role of a page base name.
@@ -60,19 +71,26 @@ func isSegmentPageBase(base string) bool {
 
 // htmlName is the output file name of a segment page.
 func (k SegmentKind) htmlName() string {
-	if k == SegmentError {
-		return "500.html"
+	return strconv.Itoa(k.status()) + ".html"
+}
+
+// status is the HTTP status the kind answers with.
+func (k SegmentKind) status() int {
+	switch k {
+	case SegmentError:
+		return http.StatusInternalServerError
+	case SegmentForbidden:
+		return http.StatusForbidden
+	case SegmentUnauthorized:
+		return http.StatusUnauthorized
 	}
-	return "404.html"
+	return http.StatusNotFound
 }
 
 // assetDirName is the directory (next to the segment HTML) that holds the
 // page's hydration script, so it never collides with the index page's.
 func (k SegmentKind) assetDirName() string {
-	if k == SegmentError {
-		return "__500"
-	}
-	return "__404"
+	return "__" + strconv.Itoa(k.status())
 }
 
 // segmentDirKey returns the directory of a segment page relative to pagesDir,
@@ -144,16 +162,48 @@ type SegmentEntry struct {
 	Group bool `json:"group,omitempty"`
 	// NotFound and Error are the output paths (relative to the output dir) of
 	// the directory's pages; empty when the directory has none.
-	NotFound string `json:"notFound,omitempty"`
-	Error    string `json:"error,omitempty"`
+	NotFound     string `json:"notFound,omitempty"`
+	Error        string `json:"error,omitempty"`
+	Forbidden    string `json:"forbidden,omitempty"`
+	Unauthorized string `json:"unauthorized,omitempty"`
 }
 
 // page returns the output path for a kind.
 func (e SegmentEntry) page(kind SegmentKind) string {
-	if kind == SegmentError {
+	switch kind {
+	case SegmentError:
 		return e.Error
+	case SegmentForbidden:
+		return e.Forbidden
+	case SegmentUnauthorized:
+		return e.Unauthorized
 	}
 	return e.NotFound
+}
+
+// setPage records the output path of a kind.
+func (e *SegmentEntry) setPage(kind SegmentKind, rel string) {
+	switch kind {
+	case SegmentError:
+		e.Error = rel
+	case SegmentForbidden:
+		e.Forbidden = rel
+	case SegmentUnauthorized:
+		e.Unauthorized = rel
+	default:
+		e.NotFound = rel
+	}
+}
+
+// pages lists the output paths of every page the entry holds.
+func (e SegmentEntry) pages() []string {
+	var out []string
+	for _, p := range []string{e.NotFound, e.Error, e.Forbidden, e.Unauthorized} {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // SegmentMatch is the result of LookupSegmentPage.
@@ -318,15 +368,20 @@ func validateSegmentPages(pagesDir string) error {
 		return diag.Diagnostic{
 			File:    pagesDir,
 			Message: "conflicting segment pages: " + strings.Join(errs, "; "),
-			Hint:    "keep one file per role in a directory (404.tsx or not-found.tsx, error.tsx or 500.tsx); route groups do not appear in the URL, so groups cannot hold separate pages for the same directory",
+			Hint:    "keep one file per role in a directory (404.tsx or not-found.tsx, error.tsx or 500.tsx, 403.tsx or forbidden.tsx, 401.tsx or unauthorized.tsx); route groups do not appear in the URL, so groups cannot hold separate pages for the same directory",
 		}.WithCode(diag.CodeSegmentConflict)
 	}
 	return nil
 }
 
 func (k SegmentKind) label() string {
-	if k == SegmentError {
+	switch k {
+	case SegmentError:
 		return "error"
+	case SegmentForbidden:
+		return "forbidden"
+	case SegmentUnauthorized:
+		return "unauthorized"
 	}
 	return "not-found"
 }
@@ -353,11 +408,7 @@ func segmentEntries(pages []string, pagesDir string) []SegmentEntry {
 			e = &SegmentEntry{Key: key, Dir: segmentURLDir(key), Group: segmentHasGroup(key)}
 			byKey[key] = e
 		}
-		if kind == SegmentError {
-			e.Error = segmentHTMLRel(p, pagesDir)
-		} else {
-			e.NotFound = segmentHTMLRel(p, pagesDir)
-		}
+		e.setPage(kind, segmentHTMLRel(p, pagesDir))
 	}
 	out := make([]SegmentEntry, 0, len(byKey))
 	for _, e := range byKey {

@@ -41,6 +41,7 @@ export function middleware(request) {
   if (p === "/cookies") { const h = new Headers({ "x-middleware-next": "1" }); h.append("set-cookie", "a=1"); h.append("set-cookie", "b=2"); return new Response(null, { headers: h }); }
   if (p === "/assets.css") throw new Error("must not run for static assets");
 }`, false)
+	g.staticExists = func(p string) bool { return p == "/assets.css" }
 	h := g.wrap(next)
 
 	do := func(path string) *httptest.ResponseRecorder {
@@ -60,7 +61,7 @@ export function middleware(request) {
 		t.Errorf("dev middleware error should include the message: %d %q", rec.Code, rec.Body)
 	}
 	seen = nil
-	if rec := do("/rewrite"); rec.Code != 200 || len(seen) != 1 || !strings.HasSuffix(seen[0], "/other?x=1") {
+	if rec := do("/rewrite"); rec.Code != 200 || len(seen) != 1 || !strings.HasSuffix(seen[0], "/other/?x=1") {
 		t.Errorf("rewrite: code=%d seen=%v", rec.Code, seen)
 	}
 	if rec := do("/cookies"); len(rec.Header().Values("Set-Cookie")) != 2 {
@@ -192,5 +193,90 @@ func TestWriteGoMethodResponse(t *testing.T) {
 	}
 	if writeGoMethodResponse(httptest.NewRecorder(), httptest.NewRequest("DELETE", "/api/x", nil), []string{"*"}) {
 		t.Error("an any-method route must not be answered here")
+	}
+}
+
+// A matcher-less middleware must not be skipped just because the URL ends in a
+// static extension: API routes and missing files still go through it.
+func TestMiddlewareGateStaticExtensionBypass(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "secret") })
+	g := newGate(t, `export function middleware(request) { return new Response("denied", { status: 401 }); }`, false)
+	g.staticExists = func(p string) bool { return p == "/real.pdf" }
+	h := g.wrap(next)
+	do := func(path string) int {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "http://example.com"+path, nil))
+		return rec.Code
+	}
+	for _, p := range []string{"/api/files/report.pdf", "/api/files/a.txt", "/api/x.js", "/__krate/action/id.css", "/missing.pdf"} {
+		if code := do(p); code != 401 {
+			t.Errorf("%s: middleware skipped (status %d), want 401", p, code)
+		}
+	}
+	if code := do("/real.pdf"); code != 200 {
+		t.Errorf("real static file should skip middleware, got %d", code)
+	}
+	g.staticExists = nil
+	if code := do("/real.pdf"); code != 401 {
+		t.Errorf("with no static layer middleware must always run, got %d", code)
+	}
+}
+
+// A client-supplied X-Forwarded-For entry must never decide the address: the
+// proxy appends the real client, so the answer is that hop, not the first one.
+func TestClientIPIgnoresClientSuppliedForwardedEntries(t *testing.T) {
+	proxyTrust.Store(true)
+	t.Cleanup(func() { proxyTrust.Store(false); proxyHops.Store(0) })
+	var got string
+	capture := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = clientIP(r) })
+	do := func(xff, peer string) string {
+		r := httptest.NewRequest("GET", "http://svc/", nil)
+		r.RemoteAddr = peer + ":4000"
+		if xff != "" {
+			r.Header.Set("X-Forwarded-For", xff)
+		}
+		forwardedHeadersMiddleware(true, capture).ServeHTTP(httptest.NewRecorder(), r)
+		return got
+	}
+	// One proxy (10.0.0.5) that appended the real client to a spoofed value.
+	if ip := do("6.6.6.6, 203.0.113.9", "10.0.0.5"); ip != "203.0.113.9" {
+		t.Errorf("one proxy: clientIP = %q, want 203.0.113.9", ip)
+	}
+	if ip := do("", "198.51.100.4"); ip != "198.51.100.4" {
+		t.Errorf("no header: clientIP = %q, want the peer", ip)
+	}
+	// Two proxies in front: the client is two hops from the right.
+	proxyHops.Store(2)
+	if ip := do("6.6.6.6, 203.0.113.9, 10.0.0.2", "10.0.0.5"); ip != "203.0.113.9" {
+		t.Errorf("two proxies: clientIP = %q, want 203.0.113.9", ip)
+	}
+}
+
+// A rewrite to a page path without a trailing slash must be served in place,
+// not answered with the canonical-slash 301 that changes the visible URL.
+func TestRewriteTargetPathKeepsRewritesInvisible(t *testing.T) {
+	cases := map[string]string{
+		"/feedback":      "/feedback/",
+		"/feedback/":     "/feedback/",
+		"/":              "/",
+		"/blog/post":     "/blog/post/",
+		"/feed.xml":      "/feed.xml",
+		"/api/users":     "/api/users",
+		"/api":           "/api",
+		"/__krate/x":     "/__krate/x",
+		"/img/logo.webp": "/img/logo.webp",
+	}
+	for in, want := range cases {
+		if got := rewriteTargetPath(in); got != want {
+			t.Errorf("rewriteTargetPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+	r := httptest.NewRequest("GET", "http://example.com/old?x=1", nil)
+	applyRewrite(r, "/feedback?src=mw")
+	if r.URL.Path != "/feedback/" || r.URL.RawQuery != "src=mw" {
+		t.Errorf("applyRewrite: path %q query %q", r.URL.Path, r.URL.RawQuery)
+	}
+	if redirectToCanonicalSlash(httptest.NewRecorder(), r) {
+		t.Error("the rewritten request must not be redirected")
 	}
 }

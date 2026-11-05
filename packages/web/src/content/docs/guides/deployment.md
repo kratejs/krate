@@ -19,7 +19,8 @@ dist/          deploy this
 
 Static hosts should exclude `dist/.krate/`. It contains every server-only file:
 the API route bundles (`api/`, `api-node/`, with their source maps), the
-server components and SSR page bundles, `manifest.json`, `server-manifest.json`,
+server components and SSR page bundles, `manifest.json`, `server-manifest.json`
+(0.4 wrote `manifest.json` at the top of `dist/`),
 the SSR renderer, and the persisted ISR cache. `krate serve` needs it, but a
 static host must never publish it (`krate deploy` removes it for you). Nothing
 under `dist/.krate/` is ever served by `krate serve` or `krate dev`.
@@ -173,8 +174,12 @@ there, and the response reports every target under `skipped` with that reason
 (the node target is a single process and is not affected). `krate deploy` warns
 when your sources call them. The page cache is pluggable: pass your own
 `isrStore` (get/set/delete/deleteRoute/deleteVariant/deleteTags/entriesForRoute)
-to `createKrateHandler` to share it across instances. Krate does not ship a KV
-or Redis store yet.
+to `createKrateHandler` to share it across instances, or set `cache` in
+`krate.config` to share the ISR page cache and the data cache and make
+`revalidatePath` / `revalidateTag` reach every instance: Redis is built in and
+any other store plugs in through a small adapter interface (see
+[Sharing caches between instances](/docs/guides/caching-and-revalidation/#sharing-caches-between-instances)).
+With it the revalidation warning above does not apply.
 
 ### What is refused
 
@@ -240,10 +245,34 @@ to restrict it). `krate dev` binds `127.0.0.1` only.
 
 ## Docker
 
-`krate deploy --target docker` writes a `Dockerfile` and `.dockerignore` at the
-project root: it installs dependencies with your lockfile's package manager,
-builds the site once in the image, and runs `krate start` (SSR, ISR, API
-routes, actions and middleware all work) without rebuilding on start.
+`krate deploy --target docker` writes a multi-stage `Dockerfile` and a
+`.dockerignore` at the project root. The **build stage** installs dependencies
+with your lockfile's package manager, builds the site and drops the dev
+dependencies. The **runtime stage** starts from a clean `node` image and copies
+in only what `krate start` reads:
+
+- the build output (`dist`, with its `.krate` server bundles and sidecar scripts),
+- the project's `.krate` directory without its build-only parts (server actions,
+  middleware and the Go host binary stay; the build cache, generated types,
+  config schema and segment sources go),
+- `krate.config.*` (the server evaluates it, imports included),
+- `package.json` and `node_modules` without dev dependencies.
+
+No sources and no Go toolchain end up in the runtime image (Go API routes compile
+in the build stage). The image runs as the unprivileged `node` user, has a
+`HEALTHCHECK` on `/healthz`, and starts `krate start` (SSR, ISR, API routes,
+actions and middleware all work) without rebuilding.
+
+`@krate/core` (the config imports it and the binary lives next to it) and the
+other `@krate/*` packages are moved to `dependencies` inside the build stage when
+you list them as `devDependencies`, because the server bundles import
+`@krate/runtime` and the config imports `@krate/core` at runtime. Any other
+package that `krate.config.*` or a page imports must be in `dependencies`; if one
+is only a dev dependency, build with `--build-arg KEEP_DEV_DEPS=true` to keep
+them all. For a small test project the runtime image was 419 MB against 543 MB
+for the old single-stage image (the `node:22-bookworm-slim` base is 329 MB of
+that).
+
 Hand-written Dockerfiles are never overwritten. The manual equivalents:
 
 ```dockerfile
@@ -279,6 +308,50 @@ sidecars and exiting 0, so rolling deploys do not cut requests off.
 Behind a load balancer or reverse proxy that terminates TLS or rewrites `Host`,
 set `server: { trustProxy: true }` so middleware, API routes and the
 server-action origin check see the original scheme, host and client address.
+The client address is the `X-Forwarded-For` entry `server.trustedProxies` hops
+from the right (default 1), never an entry the client put at the front.
+
+### Proxy trust on the serverless targets
+
+The Vercel, Netlify and Cloudflare targets follow `server.trustProxy` too, and
+before any of your code runs the handler rewrites `x-forwarded-host`,
+`x-forwarded-proto`, `x-forwarded-for`, `x-real-ip` and `forwarded`, so
+middleware, API routes and actions only ever see values the platform vouches for.
+`trustProxy` has three states:
+
+| Target | not set (default) | `trustProxy: true` | `trustProxy: false` |
+|--------|-------------------|--------------------|---------------------|
+| Vercel | host and protocol from `x-forwarded-host` / `x-forwarded-proto` (Vercel sets them); client address from `x-real-ip` (Vercel overwrites it) | as default, and the headers are taken as your own proxy sent them (`x-forwarded-for` is left as delivered) | host and protocol from the request URL; no client address |
+| Netlify | host and protocol from the request URL; client address from `x-nf-client-connection-ip` | `x-forwarded-host` / `x-forwarded-proto` honoured, `x-forwarded-for` left as delivered | host and protocol from the request URL; no client address |
+| Cloudflare | host and protocol from the request URL; client address from `cf-connecting-ip` | `x-forwarded-host` / `x-forwarded-proto` honoured, `x-forwarded-for` left as delivered | host and protocol from the request URL; no client address |
+
+`x-forwarded-for` and `x-real-ip` carry exactly one address (the platform's) when
+the table says "client address"; a chain a visitor wrote, a `Forwarded` header or
+an `x-forwarded-host` on Netlify or Cloudflare (where nothing sets it) never
+reaches your code. Set `trustProxy: true` only when a proxy of yours sits in front
+of the platform and sets those headers; `trustedProxies` applies to `krate start`
+and the Node target, not to the serverless platforms. The Node target
+(`server.mjs`) trusts forwarded headers only with `trustProxy: true`, like
+`krate start`. The platform headers above come from each platform's
+documentation; Netlify does not document `x-nf-client-connection-ip` on the page
+about functions, so check that header on your site before you rely on it.
+
+### Flash cookie secret
+
+The no-JS form feedback cookie (`krate_flash`, see
+[Server Actions](/docs/guides/server-actions/)) is signed with HMAC-SHA256 and an
+unsigned or forged one is never read. `krate start` uses a per-process secret; set
+`KRATE_FLASH_SECRET` to a random string of at least 32 bytes to share the key
+between instances (replicas behind a load balancer, serverless instances). It is
+read by the Go host, the Node action sidecar and the portable handler, so a cookie
+one instance wrote is accepted by the others. When it is not set:
+
+- the Node target and `krate start` sign with a random per-process key (no-JS
+  feedback works on a single instance; behind several replicas without a shared
+  key a redirect that lands on another replica shows no notice);
+- Vercel, Netlify and Cloudflare carry no flash state at all (the action still
+  redirects, and the server logs a warning once), because serverless instances
+  share no memory and a per-instance key would make the notice appear at random.
 
 ### Health & readiness
 
@@ -287,6 +360,13 @@ The server exposes two probes that stay at the root even under a `basePath`:
 - `GET /healthz` - liveness; returns `200 ok` while the process serves.
 - `GET /readyz` - readiness; returns `503 ssr-unavailable` while an expected SSR
   sidecar is down, otherwise `200 ready`.
+
+The SSR renderer is supervised: if it crashes, `krate start` restarts it with a
+growing delay and logs the exit. Until it is back, pages that need it answer
+`503` with `Cache-Control: no-store` (and `X-Krate-Error: renderer-unavailable`)
+instead of the build-time shell, so a CDN never caches an empty page. The
+sidecars also exit with the server: they die with it on Linux, and elsewhere
+they watch the parent process.
 
 Wire these into your orchestrator (Kubernetes `livenessProbe`/`readinessProbe`,
 Docker `HEALTHCHECK`, load-balancer health checks).

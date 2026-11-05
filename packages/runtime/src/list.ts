@@ -36,6 +36,7 @@ import {
   type AdoptCursor,
   type KrateAdoptable,
 } from './dom.js';
+import { krateWithIdScope } from './use-id.js';
 
 type KeyFn = ((item: unknown, index: number) => unknown) | null;
 type RenderFn = (item: unknown, index: unknown) => unknown;
@@ -98,14 +99,17 @@ function renderInRoot(state: ListState, row: Row, item: unknown, i: number, body
     trackEffect(row.start, dispose);
     // The row is an effect owner: components it renders are its children, so
     // removing the row unmounts them (React effect cleanups) in one call.
-    const { value, owner } = krateWithOwner(() => {
-      if (!state.accessor) return state.render(item, i);
-      const [getItem, setItem] = createSignal<unknown>(item);
-      const [getIndex, setIndex] = createSignal<number>(i);
-      row.setItem = setItem as (v: () => unknown) => void;
-      row.setIndex = setIndex;
-      return state.render(getItem, getIndex);
-    });
+    const listId = (state.start.nodeValue || '').slice(2);
+    const { value, owner } = krateWithOwner(() =>
+      krateWithIdScope(listId ? listId + ':' + row.key : '', () => {
+        if (!state.accessor) return state.render(item, i);
+        const [getItem, setItem] = createSignal<unknown>(item);
+        const [getIndex, setIndex] = createSignal<number>(i);
+        row.setItem = setItem as (v: () => unknown) => void;
+        row.setIndex = setIndex;
+        return state.render(getItem, getIndex);
+      }),
+    );
     onCleanup(() => krateUnmount(owner));
     body(value);
   });

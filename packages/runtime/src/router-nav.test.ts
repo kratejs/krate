@@ -223,6 +223,18 @@ describe('view transitions', () => {
   });
 });
 
+describe('view transition names', () => {
+  it('names elements and applies their transition class after a swap', async () => {
+    routes['/vt'] = {
+      body: page('VT', '<h1 id="hero" data-view-transition="hero" data-view-transition-class="slow-fade">x</h1>'),
+    };
+    await krateRouter.push('/vt');
+    const hero = document.getElementById('hero') as HTMLElement;
+    expect(hero.style.viewTransitionName).toBe('hero');
+    expect(hero.style.getPropertyValue('view-transition-class')).toBe('slow-fade');
+  });
+});
+
 describe('hash navigation', () => {
   it('handles hash-only links in place without fetching', async () => {
     document.getElementById('root')!.innerHTML = `${link('#sec', 'Sec')}<div id="sec">x</div>`;
@@ -363,6 +375,22 @@ describe('prefetch cache', () => {
     await krateRouter.push('/about');
     // The cache hit was consumed: revisiting fetches fresh HTML.
     expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/about')).length).toBe(2);
+  });
+
+  it('keeps the fragment of the link when the document was prefetched', async () => {
+    routes['/about'] = { body: page('About', '<h1>About</h1><h2 id="team">Team</h2>') };
+    const original = Element.prototype.scrollIntoView;
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    try {
+      await krateRouter.prefetch('/about#team');
+      await krateRouter.push('/about#team');
+      await settle();
+      expect(location.pathname + location.hash).toBe('/about#team');
+      expect(scrolled).toHaveBeenCalled();
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 
   it('expires entries after the TTL', async () => {

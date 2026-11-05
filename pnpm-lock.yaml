@@ -193,6 +193,15 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  packages/ts-plugin:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.19.43
+        version: 20.19.43
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
   packages/web:
     devDependencies:
       '@krate/base-docs-theme':

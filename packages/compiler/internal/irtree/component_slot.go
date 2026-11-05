@@ -211,20 +211,27 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 	childID = SlotID(string(childID) + "_c" + itoa(instanceIdx))
 
 	bindings := b.buildPropBindings(extractParamNames(childFn), attrs, childFn)
+	var useIDs []string
+	nextID := b.useIDSequence(childID)
 	childNode := &ComponentNode{
-		ID:               childID,
-		Name:             childName,
-		Tier:             TierStatic,
-		Fn:               childFn,
-		SSREvalBindings:  bindings,
-		SSREvalAttrs:     attrs,
-		LocalVars:        b.foldLocalConsts(childFn, bindings, useIdSequence(childID)),
+		ID:              childID,
+		Name:            childName,
+		Tier:            TierStatic,
+		Fn:              childFn,
+		SSREvalBindings: bindings,
+		SSREvalAttrs:    attrs,
+		LocalVars: b.foldLocalConsts(childFn, bindings, func() string {
+			id := nextID()
+			useIDs = append(useIDs, id)
+			return id
+		}),
 		IsSSREval:        true,
 		CallSiteChildren: el.Children,
 		RestProps:        restProps(childFn, attrs),
 		RestPropsName:    fnRestParamName(childFn),
 		ContextValues:    b.activeContextMarkers(),
 	}
+	childNode.UseIDs = useIDs
 
 	// The call-site children may contain interactive components that need
 	// their own hydration even though this component has no signals.
@@ -246,6 +253,45 @@ func (b *builder) buildSSREvalComponentSlot(el *ast.JSXElement, childFn *ast.FnD
 		childNode.ReturnSlots = b.discoverReturnSlots(childFn, childID, attrs, ret.Value)
 	}
 	return []SlotNode{&ComponentSlot{ID: childID, Component: childNode}}
+}
+
+// useIDRow numbers the useId() calls of one keyed list row.
+type useIDRow struct {
+	prefix string
+	n      int
+}
+
+// useIDSequence returns the useId() generator for the component with the
+// given slot ID: the row sequence inside a keyed list row, else the
+// component's own sequence.
+func (b *builder) useIDSequence(id SlotID) func() string {
+	row := b.useIDRow
+	if row == nil {
+		return useIdSequence(id)
+	}
+	return func() string {
+		n := row.n
+		row.n++
+		return "krate-" + idSafe(row.prefix) + "-u" + itoa(n)
+	}
+}
+
+// idSafe percent-encodes every byte of an id part outside [A-Za-z0-9_.:$-],
+// so a list key such as "a b" still makes a valid id. The runtime
+// (runtime/src/use-id.ts) applies the same rule.
+func idSafe(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '.', c == ':', c == '$', c == '-':
+			b.WriteByte(c)
+		default:
+			b.WriteString("%")
+			b.WriteString(strings.ToUpper(strconv.FormatInt(int64(c)+0x100, 16)[1:]))
+		}
+	}
+	return b.String()
 }
 
 // useIdSequence returns the useId() literal generator of a component
@@ -487,7 +533,7 @@ func (b *builder) registerChildProps(childNode *ComponentNode, childFn *ast.FnDe
 		// Replayed locals derived from live props (`var hits=...props.query`).
 		(childFn != nil && plainPropsParamName(childFn) != "" && hydrationReadsAny(childNode, []string{plainPropsParamName(childFn)})) ||
 		// Replayed body statements (a render-time throw guard) read props too.
-		len(childNode.ExtraVars) > 0 ||
+		len(childNode.ExtraVars) > 0 || len(childNode.PreSignalVars) > 0 ||
 		// Bindings of getter-registered props (`{props.title}`).
 		(childFn != nil && plainPropsParamName(childFn) != "" && slotsReadProps(childNode.Children, plainPropsParamName(childFn)))
 	if !hasHydration {

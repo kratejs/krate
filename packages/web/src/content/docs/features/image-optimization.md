@@ -22,9 +22,18 @@ to `.krate/cache/images/` and copied to `<outDir>/_krate/images/` (served at
   the original codec (JPEG, or PNG when the source has transparency). The
   `<img>` falls back to the untouched original file for browsers without
   `<picture>` support.
-- **Responsive `srcset`** - sources at breakpoints
-  `640 / 768 / 1024 / 1280 / original-width` for both codecs, plus a `sizes`
-  attribute you set per use site: `<Image sizes="(max-width: 768px) 100vw, 50vw" />`.
+- **Responsive `srcset`** - without a `width`/`height`, sources at the
+  `images.breakpoints` (default `640 / 768 / 1024 / 1280 / 1536`, then the
+  original width) for both codecs, plus a `sizes` attribute you set per use
+  site: `<Image sizes="(max-width: 768px) 100vw, 50vw" />`. With a `width` (or
+  `height`) the image is shown at that size, so only 1x and 2x variants are made
+  (`width={100}` gives 100w and 200w, never wider than the source) and `sizes`
+  defaults to `"100px"`. An explicit `sizes` always wins.
+- **Orientation** - a JPEG with an EXIF orientation (most phone photos) is
+  rotated before it is resized, so the variants and the reported dimensions match
+  what the browser shows for the original. Other EXIF data is not copied.
+- **GIF** - a still GIF is converted like a PNG; an animated GIF is served
+  unchanged (re-encoding would keep only the first frame).
 - **CLS mitigation** - `width` and `height` attributes plus
   `style="max-width:100%;height:auto;aspect-ratio:W/H"` reserve space before the
   image paints. The image is never stretched past its `width`. With only

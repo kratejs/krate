@@ -6,6 +6,9 @@ const NavigationMenuCtx = createScope<string | null>();
 export interface NavigationMenuProps {
   label?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** Navigation menu. Zero JS: one radio group whose selected option is open. */
@@ -13,7 +16,7 @@ export function NavigationMenu(props: NavigationMenuProps) {
   const open = createCSSGroup<string>(null, { as: 'nav', label: props.label });
   return (
     <NavigationMenuCtx.Provider value={open}>
-      <div class="krate-navigation-menu">{props.children}</div>
+      <div class={"krate-navigation-menu" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>{props.children}</div>
     </NavigationMenuCtx.Provider>
   );
 }
@@ -21,13 +24,16 @@ export function NavigationMenu(props: NavigationMenuProps) {
 export interface NavigationMenuTriggerProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `NavigationMenu.Trigger` instead. */
 export function NavigationMenuTrigger(props: NavigationMenuTriggerProps) {
   const open = NavigationMenuCtx.use();
   return (
-    <button class="krate-navigation-menu-trigger" type="button" {...open.trigger(props.value)}>
+    <button class={"krate-navigation-menu-trigger" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} type="button" {...open.trigger(props.value)}>
       {props.children}
     </button>
   );
@@ -36,13 +42,16 @@ export function NavigationMenuTrigger(props: NavigationMenuTriggerProps) {
 export interface NavigationMenuContentProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `NavigationMenu.Content` instead. */
 export function NavigationMenuContent(props: NavigationMenuContentProps) {
   const open = NavigationMenuCtx.use();
   return (
-    <div class="krate-navigation-menu-content" {...open.panel(props.value)}>
+    <div class={"krate-navigation-menu-content" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} {...open.panel(props.value)}>
       {props.children}
     </div>
   );
@@ -51,12 +60,15 @@ export function NavigationMenuContent(props: NavigationMenuContentProps) {
 export interface NavigationMenuLinkProps {
   href?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `NavigationMenu.Link` instead. */
 export function NavigationMenuLink(props: NavigationMenuLinkProps) {
   return (
-    <a class="krate-navigation-menu-link" href={props.href}>
+    <a class={"krate-navigation-menu-link" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} href={props.href}>
       {props.children}
     </a>
   );

@@ -142,7 +142,7 @@ func (b *Builder) compileActionModule(dir string, mod *actionModule) error {
 		opts.MinifyIdentifiers = true
 		opts.MinifySyntax = true
 	}
-	result := api.Build(opts)
+	result := esbuildBuild(opts)
 	if len(result.Errors) > 0 {
 		return fmt.Errorf("compiling server action %s:\n%s", mod.RelPath, formatEsbuildErrors(result.Errors))
 	}
@@ -385,7 +385,7 @@ func (b *Builder) actionModules() map[string]map[string]string {
 // actionServerBundlePlugin keeps server-action source out of SSR page bundles.
 // Imports of a `"use server"` module resolve to a small proxy that renders as
 // the action URL during SSR and is never executed on the server.
-func actionServerBundlePlugin(modules map[string]map[string]string, basePath string) api.Plugin {
+func actionServerBundlePlugin(res *bundler.ImportResolver, modules map[string]map[string]string, basePath string) api.Plugin {
 	if len(modules) == 0 {
 		return api.Plugin{Name: "krate-actions-empty", Setup: func(api.PluginBuild) {}}
 	}
@@ -397,7 +397,7 @@ func actionServerBundlePlugin(modules map[string]map[string]string, basePath str
 					return api.OnResolveResult{}, nil
 				}
 				importer := filepath.Join(args.ResolveDir, "__krate_server__.tsx")
-				target := bundler.ResolveImport(importer, args.Path)
+				target := res.Resolve(importer, args.Path)
 				if target == "" {
 					return api.OnResolveResult{}, nil
 				}

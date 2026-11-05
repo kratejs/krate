@@ -28,15 +28,23 @@ const nextFramework = "nextjs"
 type FileKind string
 
 const (
-	KindPage       FileKind = "page"
-	KindLayout     FileKind = "layout"
-	KindAPI        FileKind = "api"
-	KindLoading    FileKind = "loading"
-	KindNotFound   FileKind = "not-found"
-	KindError      FileKind = "error"
-	KindConfig     FileKind = "config"
-	KindPackage    FileKind = "package"
-	KindAsset      FileKind = "asset"
+	KindPage         FileKind = "page"
+	KindLayout       FileKind = "layout"
+	KindAPI          FileKind = "api"
+	KindLoading      FileKind = "loading"
+	KindNotFound     FileKind = "not-found"
+	KindForbidden    FileKind = "forbidden"
+	KindUnauthorized FileKind = "unauthorized"
+	KindError        FileKind = "error"
+	KindConfig       FileKind = "config"
+	KindPackage      FileKind = "package"
+	KindAsset        FileKind = "asset"
+	// KindMetadataRoute is a sitemap/robots/manifest/opengraph-image/twitter-image
+	// module; Krate runs it natively from src/pages.
+	KindMetadataRoute FileKind = "metadata-route"
+	// KindPublic is a static metadata file (robots.txt, opengraph-image.png, ...)
+	// copied byte for byte into public/.
+	KindPublic     FileKind = "public"
 	KindMiddleware FileKind = "middleware"
 )
 
@@ -49,10 +57,13 @@ type ManualItem struct {
 
 // PlannedFile is one file the migrator can copy or generate.
 type PlannedFile struct {
-	Kind         FileKind `json:"kind"`
-	Source       string   `json:"source,omitempty"`
-	Target       string   `json:"target"`
-	Conflict     bool     `json:"conflict,omitempty"`
+	Kind     FileKind `json:"kind"`
+	Source   string   `json:"source,omitempty"`
+	Target   string   `json:"target"`
+	Conflict bool     `json:"conflict,omitempty"`
+	// Overwrites marks a target that already exists. --apply refuses to
+	// replace it without --force (the original is backed up first).
+	Overwrites   bool     `json:"overwrites,omitempty"`
 	Rewrites     []string `json:"rewrites,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
 	Content      []byte   `json:"-"`
@@ -114,6 +125,10 @@ type manifestFile struct {
 type ScanOptions struct {
 	// UpdatePackage adds a package.json plan with Krate scripts and dependencies.
 	UpdatePackage bool
+	// KrateVersion is the version of the running compiler. The @krate/*
+	// dependencies the package plan adds are pinned to it; empty or "dev"
+	// means "latest".
+	KrateVersion string
 }
 
 // ScanNext detects a Next.js project and returns a copy plan. It reads the
@@ -174,7 +189,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	nextConfigStatic := false
 	if nextConfig != "" {
 		rep.Detected = append(rep.Detected, filepath.Base(nextConfig))
-		data, warnings, ok := readNextConfig(nextConfig)
+		data, warnings, skipped, ok := readNextConfig(nextConfig)
 		for _, w := range warnings {
 			rep.Warnings = append(rep.Warnings, filepath.Base(nextConfig)+": "+w)
 		}
@@ -182,6 +197,13 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 			nextCfg = data
 			nextConfigStatic = true
 			rep.Warnings = append(rep.Warnings, "translated static next.config redirects/rewrites/headers/basePath/images; review custom image loaders, env, and experimental keys manually")
+			if len(skipped) > 0 {
+				rep.Manual = append(rep.Manual, ManualItem{
+					Source: filepath.Base(nextConfig),
+					Reason: "next.config keys were not translated: " + strings.Join(skipped, ", ") + "; the other static keys were",
+					Hint:   "write the skipped keys into krate.config.ts by hand",
+				})
+			}
 		} else {
 			rep.Manual = append(rep.Manual, ManualItem{
 				Source: filepath.Base(nextConfig),
@@ -191,7 +213,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		}
 	}
 	if opts.UpdatePackage {
-		if pkg, ok := packagePlan(abs); ok {
+		if pkg, ok := packagePlan(abs, opts.KrateVersion); ok {
 			rep.Files = append(rep.Files, pkg)
 			rep.Manual = append(rep.Manual, ManualItem{
 				Source: "package.json",
@@ -235,11 +257,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		publicEnv[k] = v
 	}
 	rewritePublicEnv(rep, publicEnv)
-	if site := rootMetadataSite(rep); len(site) > 0 {
-		nextCfg.Site = site
-		rep.Warnings = append(rep.Warnings, "mapped static root metadata to site config; the metadata export is left in place for review, as are icons, alternates, and per-page metadata")
-	}
-	convertPageMetadata(rep)
+	rewriteMetadataTypes(rep)
 
 	hasKrateConfig := fileExists(filepath.Join(abs, "krate.config.ts")) || fileExists(filepath.Join(abs, "krate.config.js")) || fileExists(filepath.Join(abs, "krate.config.mjs")) || fileExists(filepath.Join(abs, "krate.config.json"))
 	if !hasKrateConfig {
@@ -290,6 +308,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 	for i := range rep.Files {
 		if fileExists(filepath.Join(abs, filepath.FromSlash(rep.Files[i].Target))) {
 			rep.Files[i].Conflict = true
+			rep.Files[i].Overwrites = true
 		}
 	}
 	sort.SliceStable(rep.Files, func(i, j int) bool { return rep.Files[i].Target < rep.Files[j].Target })
@@ -307,7 +326,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 // directory with one of them keeps its page in the directory (x/index.tsx), so
 // the layout, template, loading, error and not-found files next to it wrap it
 // (a flat x.tsx would live outside x/).
-var scopedBases = map[string]bool{"layout": true, "template": true, "loading": true, "error": true, "not-found": true}
+var scopedBases = map[string]bool{"layout": true, "template": true, "loading": true, "error": true, "not-found": true, "forbidden": true, "unauthorized": true}
 
 // scopedAppDirs returns the filesystem routes of directories holding scoped files.
 func scopedAppDirs(appDir string) map[string]bool {
@@ -357,6 +376,9 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 		rel = filepath.ToSlash(rel)
 		base := strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))
 		ext := strings.ToLower(filepath.Ext(rel))
+		if planStaticMetadata(root, appDir, prefix, rel, rep) {
+			return nil
+		}
 		if !isSourceExt(ext) && !isAssetExt(ext) {
 			return nil
 		}
@@ -396,6 +418,16 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 				return nil
 			}
 			rep.Files = append(rep.Files, planned(root, source, segmentFile("src/pages", fsRoute, "404", ext), KindNotFound, ext, rep))
+		case "forbidden", "unauthorized":
+			if isSlotRoute(fsRoute) {
+				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: base + ".tsx inside a parallel-route slot has no equivalent", Hint: "move the page to the slot's parent directory"})
+				return nil
+			}
+			kind, status := KindForbidden, "403"
+			if base == "unauthorized" {
+				kind, status = KindUnauthorized, "401"
+			}
+			rep.Files = append(rep.Files, planned(root, source, segmentFile("src/pages", fsRoute, status, ext), kind, ext, rep))
 		case "error":
 			if isSlotRoute(fsRoute) {
 				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "error.tsx inside a parallel-route slot has no equivalent", Hint: "move the error UI to the slot's parent directory"})
@@ -427,7 +459,7 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 			}
 		default:
 			if isNextMetadataRoute(base) {
-				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "Next.js metadata route " + base + "." + strings.TrimPrefix(ext, ".") + " is not migrated", Hint: "generate the same sitemap/robots/manifest/icon in Krate"})
+				planMetadataRoute(root, source, base, ext, fsRoute, rep)
 				return nil
 			}
 			if isAssetExt(ext) {
@@ -529,9 +561,8 @@ func applyManual(src string, kind FileKind) []string {
 		needle string
 		reason string
 	}{
-		{"export const metadata", "Next.js metadata export is not translated; use <Head> or krate site config"},
-		{"export async function generateMetadata", "generateMetadata is not translated; render <Head> or use site config"},
-		{"export function generateMetadata", "generateMetadata is not translated; render <Head> or use site config"},
+		{"export function generateViewport", "generateViewport is not supported; export a static `viewport` object or set the viewport meta in <Head>"},
+		{"export async function generateViewport", "generateViewport is not supported; export a static `viewport` object or set the viewport meta in <Head>"},
 		{"getStaticProps", "getStaticProps is not supported; use build-time data or createResource"},
 		{"getServerSideProps", "getServerSideProps is not supported; use a server render mode or createResource"},
 		{"from 'next/server'", "next/server request/response helpers need a Request/Response migration"},
@@ -590,7 +621,65 @@ func rewriteNextSource(src string, kind FileKind) (string, []string, []string) {
 		}
 	}
 	manual = append(manual, applyManual(src, kind)...)
+	notes, layoutManual := segmentConfigNotes(src, kind)
+	rewrites = append(rewrites, notes...)
+	manual = append(manual, layoutManual...)
 	return src, rewrites, manual
+}
+
+var (
+	revalidateExport    = regexp.MustCompile(`(?m)^export\s+const\s+revalidate\s*=\s*(false|\d+)\s*;?`)
+	dynamicExport       = regexp.MustCompile(`(?m)^export\s+const\s+dynamic\s*=\s*["'](auto|force-dynamic|force-static|error)["']`)
+	dynamicParamsExport = regexp.MustCompile(`(?m)^export\s+const\s+dynamicParams\s*=\s*(true|false)\b`)
+)
+
+// segmentConfigNotes explains what Krate does with the Next.js route segment
+// exports it reads natively (revalidate, dynamic, dynamicParams). On a page
+// they are kept and honored, which is a rendering mode change worth stating.
+// In a layout Krate does not read them, so that is manual work.
+func segmentConfigNotes(src string, kind FileKind) (notes, manual []string) {
+	type finding struct{ text, name string }
+	var found []finding
+	if m := revalidateExport.FindStringSubmatch(src); m != nil {
+		var text string
+		switch m[1] {
+		case "false":
+			text = "export const revalidate = false is kept: the page stays static"
+		case "0":
+			text = "export const revalidate = 0 is kept: the page renders per request (SSR)"
+		default:
+			text = "export const revalidate = " + m[1] + " is kept: the page renders as ISR, revalidated every " + m[1] + "s"
+		}
+		found = append(found, finding{text, "revalidate"})
+	}
+	if m := dynamicExport.FindStringSubmatch(src); m != nil {
+		var text string
+		switch m[1] {
+		case "force-dynamic":
+			text = `export const dynamic = "force-dynamic" is kept: the page renders per request (SSR)`
+		case "force-static", "error":
+			text = "export const dynamic = \"" + m[1] + "\" is kept: the page is built statically"
+		default:
+			text = `export const dynamic = "auto" is kept: Krate picks the render mode from the page`
+		}
+		found = append(found, finding{text, "dynamic"})
+	}
+	if m := dynamicParamsExport.FindStringSubmatch(src); m != nil {
+		text := "export const dynamicParams = true is kept: params that generateStaticParams did not list render on demand"
+		if m[1] == "false" {
+			text = "export const dynamicParams = false is kept: params that generateStaticParams did not list answer 404"
+		}
+		found = append(found, finding{text, "dynamicParams"})
+	}
+	for _, f := range found {
+		switch kind {
+		case KindPage:
+			notes = append(notes, f.text)
+		case KindLayout:
+			manual = append(manual, "route segment config "+f.name+" in a layout is not read by Krate")
+		}
+	}
+	return notes, manual
 }
 
 // appRoute maps an app-router directory to its URL route (groups, slots and
@@ -785,7 +874,7 @@ func fileExists(path string) bool {
 
 // packagePlan adds Krate scripts and dependencies without removing Next.js
 // dependencies. Removing Next itself is left to the user after verification.
-func packagePlan(root string) (PlannedFile, bool) {
+func packagePlan(root, krateVersion string) (PlannedFile, bool) {
 	path := filepath.Join(root, "package.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -795,6 +884,7 @@ func packagePlan(root string) (PlannedFile, bool) {
 	if err := json.Unmarshal(data, &pkg); err != nil {
 		return PlannedFile{}, false
 	}
+	var rewrites []string
 	scripts, _ := pkg["scripts"].(map[string]any)
 	if scripts == nil {
 		scripts = map[string]any{}
@@ -802,10 +892,16 @@ func packagePlan(root string) (PlannedFile, bool) {
 	for _, name := range []string{"dev", "build", "serve", "start"} {
 		if old, ok := scripts[name].(string); !ok || strings.Contains(old, "next") {
 			scripts[name] = "krate " + name
+			if ok {
+				rewrites = append(rewrites, fmt.Sprintf("scripts.%s: %q -> %q (the original is in the backup)", name, old, "krate "+name))
+			} else {
+				rewrites = append(rewrites, fmt.Sprintf("scripts.%s: added %q", name, "krate "+name))
+			}
 		}
 	}
 	if _, ok := scripts["serve"]; !ok {
 		scripts["serve"] = "krate serve"
+		rewrites = append(rewrites, `scripts.serve: added "krate serve"`)
 	}
 	pkg["scripts"] = scripts
 
@@ -813,15 +909,34 @@ func packagePlan(root string) (PlannedFile, bool) {
 	if deps == nil {
 		deps = map[string]any{}
 	}
+	spec := "latest"
+	if v := strings.TrimPrefix(krateVersion, "v"); v != "" && v != "dev" {
+		spec = "^" + v
+	}
+	var added []string
 	for _, dep := range []string{"@krate/core", "@krate/runtime", "@krate/components"} {
 		if _, ok := deps[dep]; !ok {
-			deps[dep] = "latest"
+			deps[dep] = spec
+			added = append(added, dep+"@"+spec)
 		}
 	}
 	if _, ok := deps["preact"]; !ok {
 		// Optional for apps without compiled islands, but required by the island
 		// runtime the migrator may copy in.
 		deps["preact"] = "^10.20.0"
+		added = append(added, "preact@^10.20.0 (runs islands and \"use client\" components)")
+	}
+	if len(added) > 0 {
+		rewrites = append(rewrites, "dependencies added: "+strings.Join(added, ", "))
+	}
+	var kept []string
+	for _, dep := range []string{"next", "react", "react-dom"} {
+		if _, ok := deps[dep]; ok {
+			kept = append(kept, dep)
+		}
+	}
+	if len(kept) > 0 {
+		rewrites = append(rewrites, "dependencies kept: "+strings.Join(kept, ", ")+" (remove them once the app builds)")
 	}
 	pkg["dependencies"] = deps
 
@@ -830,7 +945,7 @@ func packagePlan(root string) (PlannedFile, bool) {
 		return PlannedFile{}, false
 	}
 	out = append(out, '\n')
-	return PlannedFile{Kind: KindPackage, Target: "package.json", Content: out}, true
+	return PlannedFile{Kind: KindPackage, Source: "package.json", Target: "package.json", Content: out, Rewrites: rewrites}, true
 }
 
 // Apply writes a plan atomically after preflighting every target. Existing
@@ -967,35 +1082,66 @@ func Rollback(backupDir string) error {
 	return os.RemoveAll(backupDir)
 }
 
-// rootMetadataSite extracts static metadata from the root app layout and maps
-// the common fields to site config. The export remains in the layout because
-// Krate ignores it; the warning tells the user what was mapped.
-func rootMetadataSite(rep *Report) map[string]any {
-	for i := range rep.Files {
-		f := &rep.Files[i]
-		if f.Kind != KindLayout || !strings.HasPrefix(f.Target, "src/pages/_layout.") {
-			continue
-		}
-		obj, ok := staticMetadata(f.Content)
-		if !ok {
-			return nil
-		}
-		site := metadataSite(obj)
-		if len(site) == 0 {
-			return nil
-		}
-		// The generic "metadata is not translated" note no longer applies.
-		var kept []ManualItem
-		for _, m := range rep.Manual {
-			if m.Source == f.Source && strings.Contains(m.Reason, "metadata export is not translated") {
-				continue
-			}
-			kept = append(kept, m)
-		}
-		rep.Manual = kept
-		return site
+// metadataRouteExts are the module extensions Krate runs for each convention.
+var metadataRouteExts = map[string]map[string]bool{
+	"sitemap":         {".ts": true, ".js": true, ".mjs": true},
+	"robots":          {".ts": true, ".js": true, ".mjs": true},
+	"manifest":        {".ts": true, ".js": true, ".mjs": true},
+	"opengraph-image": {".ts": true, ".tsx": true, ".js": true, ".jsx": true},
+	"twitter-image":   {".ts": true, ".tsx": true, ".js": true, ".jsx": true},
+}
+
+// planMetadataRoute maps a Next.js metadata route module to the same file in
+// the same segment of src/pages. icon, apple-icon and instrumentation have no
+// equivalent and stay manual items.
+func planMetadataRoute(root, source, base, ext, fsRoute string, rep *Report) {
+	if exts, ok := metadataRouteExts[base]; ok && exts[ext] {
+		rep.Files = append(rep.Files, planned(root, source, segmentFile("src/pages", fsRoute, base, ext), KindMetadataRoute, ext, rep))
+		return
 	}
-	return nil
+	reason := "Next.js metadata route " + base + "." + strings.TrimPrefix(ext, ".") + " is not migrated"
+	hint := "generate the same icon/apple-icon in Krate (a file under public/ and metadata.icons)"
+	if _, ok := metadataRouteExts[base]; ok {
+		hint = "Krate runs " + base + " files with the extensions .ts, .js, .mjs (sitemap, robots, manifest) or .ts, .tsx, .js, .jsx (images)"
+	}
+	rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: reason, Hint: hint})
+}
+
+var staticMetadataNames = map[string]bool{"sitemap.xml": true, "robots.txt": true, "manifest.json": true, "manifest.webmanifest": true}
+var staticMetadataImageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true}
+
+// planStaticMetadata handles the non-module metadata files: static sitemap.xml,
+// robots.txt and manifest are served from public/, a static opengraph-image or
+// twitter-image is copied next to its segment's page (where Krate's own
+// convention picks it up). opengraph-image.alt.txt is a manual item: export alt
+// from a module instead. It reports whether the file was one of these.
+func planStaticMetadata(root, appDir, prefix, rel string, rep *Report) bool {
+	name := filepath.Base(rel)
+	ext := strings.ToLower(filepath.Ext(name))
+	stem := strings.TrimSuffix(name, filepath.Ext(name))
+	dir := filepath.ToSlash(filepath.Dir(rel))
+	_, fsRoute, _ := appRoute(dir)
+	source := prefix + "/" + rel
+	var target string
+	switch {
+	case staticMetadataNames[name]:
+		target = segmentFile("public", fsRoute, name, "")
+	case (stem == "opengraph-image" || stem == "twitter-image") && staticMetadataImageExts[ext]:
+		target = segmentFile("src/pages", fsRoute, stem, ext)
+	case name == "opengraph-image.alt.txt" || name == "twitter-image.alt.txt":
+		rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "the " + name + " alt text file is not read", Hint: "export const alt = \"...\" from an opengraph-image/twitter-image module, or set metadata.openGraph.images[].alt"})
+		return true
+	default:
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(source)))
+	if err != nil {
+		rep.Warnings = append(rep.Warnings, source+": could not read source: "+err.Error())
+		return true
+	}
+	kind := KindPublic
+	rep.Files = append(rep.Files, PlannedFile{Kind: kind, Source: source, Target: filepath.ToSlash(target), Content: data, Rewrites: []string{"copied unchanged"}})
+	return true
 }
 
 func isNextMetadataRoute(base string) bool {
@@ -1028,7 +1174,7 @@ func linkRelativeImports(rep *Report) {
 	}
 	for i := range rep.Files {
 		f := &rep.Files[i]
-		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindNotFound && f.Kind != KindError) {
+		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindMetadataRoute && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError) {
 			continue
 		}
 		body, rewrites, unresolved, deps := rewriteRelativeImports(string(f.Content), f.Source, f.Target, assets)
@@ -1119,7 +1265,7 @@ func targetPath(root, rel string) (string, error) {
 func warnClientBoundaryRuntime(rep *Report) {
 	var client, server bool
 	for _, f := range rep.Files {
-		if f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAsset && f.Kind != KindNotFound && f.Kind != KindError {
+		if f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAsset && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError {
 			continue
 		}
 		src := string(f.Content)

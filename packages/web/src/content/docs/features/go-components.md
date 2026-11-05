@@ -179,6 +179,15 @@ func Show(p ShowProps, r kr.Request) kr.HTML {
 }
 ```
 
+Read the request through the accessors `r.Header(name)`, `r.Cookie(name)`,
+`r.QueryValue(name)` and `r.Param(name)`: they record what the render looked at, and
+a region cached with `revalidate` is keyed on the values of exactly those, so
+visitors with different cookies never get each other's render while a cookie the
+component ignores does not split the cache. Reading the `Headers`, `Query`,
+`Params`, `Method` or `URL` fields directly, or handing the `Request` to a helper,
+still works, but the region is then cached per whole request (see
+[Caching and Revalidation](/docs/guides/caching-and-revalidation/#what-keys-a-cached-entry)).
+
 Add a `// krate:revalidate 60` comment to cache the region for 60 seconds (the
 Go equivalent of `export const revalidate = 60`).
 

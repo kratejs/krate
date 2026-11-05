@@ -246,9 +246,12 @@ CSS Signals express a fixed, enumerated state with no JS. Reach for
 - **Continuous values** (a drag slider) - `createCSSRange` is discrete integers.
 - **Arbitrary push/pop history** - `createCSSStack` is a declared tree.
 
-Also: a trigger must be a labelable element with a **static** class; option
-values must be **literals**; a non-compilable declaration is a **hard build
-error**, never a silent fallback.
+Also: a trigger must be a labelable element (its `class` may be computed, for
+example a forwarded `class` prop); option values must be **literals**, or
+come from a `.map()` over an array that is known at build time - parts built
+that way are unrolled and each value gets its rules. A value that cannot be read
+at build time is reported as `KR8820`, because its panel would never be hidden. A
+non-compilable declaration is a **hard build error**, never a silent fallback.
 
 | Need | Use |
 |------|-----|

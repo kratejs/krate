@@ -1277,3 +1277,31 @@ func TestGoPluginDescriptorLoadsFromConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestMarkdownCodeThemeForms(t *testing.T) {
+	cases := []struct {
+		name, src, light, dark string
+	}{
+		{"default", `export default { entry: "src/pages/index.tsx" };`, "github", "github-dark"},
+		{"string applies to both", `export default { markdown: { codeTheme: "monokai" } };`, "monokai", "monokai"},
+		{"object", `export default { markdown: { codeTheme: { light: "github", dark: "dracula" } } };`, "github", "dracula"},
+		{"object with one side", `export default { markdown: { codeTheme: { dark: "nord" } } };`, "github", "nord"},
+		{"function form (executed)", `export default ({ isDev }) => ({ markdown: { codeTheme: { light: "solarized-light", dark: "solarized-dark" } } });`, "solarized-light", "solarized-dark"},
+		{"function form string", `export default ({ isDev }) => ({ markdown: { codeTheme: "dracula" } });`, "dracula", "dracula"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "krate.config.ts"), []byte(tc.src), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := LoadWith(root, LoadOptions{Command: "build", Mode: "production"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Markdown.CodeTheme != tc.light || cfg.Markdown.CodeThemeDark != tc.dark {
+				t.Fatalf("codeTheme = %q / %q, want %q / %q", cfg.Markdown.CodeTheme, cfg.Markdown.CodeThemeDark, tc.light, tc.dark)
+			}
+		})
+	}
+}

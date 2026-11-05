@@ -213,3 +213,34 @@ func TestSetPathAliasesMismatchedLengths(t *testing.T) {
 		t.Errorf("expected 1 alias (clamped to shorter slice), got %d", len(b.pathAliases))
 	}
 }
+
+// Path aliases belong to one ImportResolver: configuring a second project
+// leaves the first one's resolution alone.
+func TestImportResolversDoNotShareAliases(t *testing.T) {
+	setup := func(name string) (*ImportResolver, string, string) {
+		dir := t.TempDir()
+		_ = os.MkdirAll(filepath.Join(dir, "src", "components"), 0755)
+		importer := filepath.Join(dir, "src", "main.tsx")
+		target := filepath.Join(dir, "src", "components", name+".tsx")
+		_ = os.WriteFile(importer, []byte(""), 0644)
+		_ = os.WriteFile(target, []byte("export default function X() {}"), 0644)
+		b := New(dir)
+		b.SetPathAliases([]string{"@/*"}, [][]string{{"./*"}}, filepath.Join(dir, "src"))
+		return b.ImportResolver(), importer, target
+	}
+	resA, impA, wantA := setup("A")
+	resB, impB, wantB := setup("B")
+	if got := resA.Resolve(impA, "@/components/A"); got != wantA {
+		t.Errorf("project A resolved %q, want %q", got, wantA)
+	}
+	if got := resB.Resolve(impB, "@/components/B"); got != wantB {
+		t.Errorf("project B resolved %q, want %q", got, wantB)
+	}
+	if got := resA.Resolve(impA, "@/components/B"); got != "" {
+		t.Errorf("project A resolved project B's module: %q", got)
+	}
+	var none *ImportResolver
+	if got := none.Resolve(impA, "@/components/A"); got != "" {
+		t.Errorf("a nil resolver must not apply aliases, got %q", got)
+	}
+}

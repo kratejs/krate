@@ -93,6 +93,11 @@ type Annotations struct {
 	// (lowered by esbuild into a reassignment of the class binding), the
 	// warning reported where the class is used as a component.
 	DecoratedClasses map[string]diag.Diagnostic
+	// UnresolvedHOCs holds, per `const Name = withX(...)` binding that looks
+	// like a higher-order component application but could not be turned into
+	// a component function, why. Rendering one fails the build: it would
+	// otherwise render nothing.
+	UnresolvedHOCs map[string]diag.Diagnostic
 	// LazyComponents maps a component binding declared with React.lazy() to
 	// its declaration. Its hydration code goes into a separate chunk.
 	LazyComponents map[string]LazyComponent
@@ -178,6 +183,9 @@ type ExprSlot struct {
 	// File and Pos locate the expression in its source (hydration source maps).
 	File string
 	Pos  ast.Pos
+	// Unresolved is set when the build could not compute the value, so Initial
+	// is empty only because it is unknown.
+	Unresolved bool
 }
 
 func (s *ExprSlot) slotNode()     {}
@@ -198,6 +206,10 @@ type ConditionalSlot struct {
 	Consequent []SlotNode
 	Alternate  []SlotNode
 	Signals    []string
+	// Activity marks a React <Activity>: the Consequent is always in the page
+	// (inside a wrapper element) and TestJS only shows or hides it, keeping
+	// state while hidden.
+	Activity bool
 }
 
 func (s *ConditionalSlot) slotNode()     {}
@@ -326,6 +338,11 @@ type AttrBinding struct {
 	// statically (a constant controlled value); only the hydration call is
 	// emitted.
 	HydrateOnly bool
+	// Guard is a JS condition the binding's expression may run under. An
+	// element inside a conditional's branch is bound while that branch is
+	// hidden (it sits in a template), and `user.url` under `{user && <a/>}`
+	// must not be evaluated while user is null. Empty means always.
+	Guard string
 }
 
 // HandlerDecl - event handler: onClick={() => fn()}
@@ -468,6 +485,10 @@ type ComponentNode struct {
 	// The emitter uses SSREval to render these at build time.
 	IsSSREval       bool
 	SSREvalBindings map[string]jsvalue.Value
+	// UseIDs are the useId() values of the component's own body, in call
+	// order, as the local fold resolved them. SSREval hands out the same
+	// values so the HTML and the hydration code agree.
+	UseIDs []string
 	// SSREvalAttrs holds the call-site attribute expressions of an SSREval
 	// component, so props the IR folder cannot represent (JSX values) are
 	// evaluated by the SSR evaluator itself.
@@ -689,6 +710,12 @@ type ExternalImport struct {
 	Remote    string
 	Default   bool
 	Namespace bool
+	// ReactIsland marks a binding from a user module that needs React's render
+	// model (it calls hooks of an npm React library). Source is then the
+	// module's absolute path and the tag renders as an island bundling it.
+	ReactIsland bool
+	// ClientOnly skips the build-time server render of the island.
+	ClientOnly bool
 }
 
 // ExternalComponent is an unresolved package component that is mounted at
@@ -713,8 +740,19 @@ type ExternalComponent struct {
 	// which case the island stays client-only.
 	SSRPropsJS    string
 	SSRPropsKnown bool
-	// File/Line/Col locate the usage for diagnostics.
-	File string
-	Line int
-	Col  int
+	// ReactIsland is set when the island runs a user module that needs React's
+	// render model (see ExternalImport.ReactIsland).
+	ReactIsland bool
+	// ClientOnly means the island has no server render: its package creates
+	// the markup (styles) in the browser.
+	ClientOnly bool
+	// Hydrate is the client directive that defers mounting: "" (at load),
+	// "visible" or "idle".
+	Hydrate string
+	// File/Line/Col locate the usage for diagnostics; Offset is the byte offset
+	// of the island's opening `<` in File.
+	File   string
+	Line   int
+	Col    int
+	Offset int
 }

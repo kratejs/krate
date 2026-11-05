@@ -154,10 +154,37 @@ func (b *builder) evalValue(expr ast.Expr) jsvalue.Value {
 	return v
 }
 
+// bakesOnly reports whether the component being built ships no code to the
+// browser (a server or static component): everything it computes is final at
+// build time, so the build clock and the random number generator are fair game
+// for every value, locals included.
+func (b *builder) bakesOnly() bool {
+	return b.currentNode != nil && (b.currentNode.Tier == TierServer || b.currentNode.Tier == TierStatic)
+}
+
+// evalValueVolatile is evalValue for text that is baked into the HTML: it may
+// read the build clock (`new Date()`, `Date.now()`) and `Math.random()`. A
+// value computed this way is wrong as a constant in hydration code, where the
+// expression runs again, so only slot initials and static attribute values
+// use it.
+func (b *builder) evalValueVolatile(expr ast.Expr) jsvalue.Value {
+	if expr == nil {
+		return jsvalue.Undefined()
+	}
+	in := b.constInterp(b.localProps)
+	in.Volatile = true
+	v := in.Eval(expr)
+	if !v.ContainsUnknown() {
+		return v
+	}
+	return b.evalValue(expr)
+}
+
 // constInterp returns a const-folding interpreter over props that also knows
 // the builder's cva factories and server-action URLs.
 func (b *builder) constInterp(props valueMap) *jsvalue.Interp {
 	in := newConstInterp(b.sigMap(), props)
+	in.Volatile = b.bakesOnly()
 	ident, call := in.Hooks.Ident, in.Hooks.Call
 	callables := map[string]jsvalue.Value{}
 	in.Hooks.Ident = func(name string) (jsvalue.Value, bool) {
@@ -221,6 +248,23 @@ func (b *builder) evalAttrConst(expr ast.Expr) jsvalue.Value {
 		}
 	}
 	return b.evalValue(expr)
+}
+
+// evalAttrInitial is evalAttrConst for the value written into the HTML, which
+// may read the build clock (see evalValueVolatile). Folding a local from an
+// attribute value keeps using evalAttrConst.
+func (b *builder) evalAttrInitial(expr ast.Expr) jsvalue.Value {
+	if expr != nil {
+		if v := b.evalAttrConst(expr); !v.ContainsUnknown() {
+			return v
+		}
+	}
+	return b.evalValueVolatile(expr)
+}
+
+// evalAttrInitialString is evalAttrInitial in the legacy string form.
+func (b *builder) evalAttrInitialString(expr ast.Expr) string {
+	return legacyConstString(expr, b.evalAttrInitial(expr))
 }
 
 // evalAttrValue is evalAttrConst in the legacy string form expected by the
@@ -1322,8 +1366,10 @@ func (b *builder) moduleCallable(in *jsvalue.Interp, name string, cache map[stri
 	var params []*ast.Param
 	var body []ast.Stmt
 	switch fn := b.functions[name]; {
-	case fn != nil && fn.Name == name && !fn.Async && !fn.Generator && !fnReturnsJSX(fn.Body):
-		if resolver.IsCompiledDependency(filepath.ToSlash(b.ann.ComponentSources[name])) {
+	case fn != nil && !fn.Async && !fn.Generator && !fnReturnsJSX(fn.Body):
+		// An import alias maps the local name to the declaration, whose own
+		// name keys its source file.
+		if resolver.IsCompiledDependency(filepath.ToSlash(b.ann.ComponentSources[fn.Name])) {
 			return jsvalue.Value{}, false
 		}
 		params, body = fn.Params, fn.Body

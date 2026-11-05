@@ -28,6 +28,11 @@ type localFold struct {
 	// interpreter. They are emitted as runtime functions separately, not as
 	// folded values.
 	callables map[string]jsvalue.Value
+	// destructs lists the destructuring declarations in source order. Their
+	// names cannot each be initialized from the whole right-hand side, so a
+	// declaration the client must evaluate is replayed as written (see
+	// builder.replayedDestructs).
+	destructs []*ast.VarDecl
 }
 
 // collectLocalVars resolves top-level local variable declarations in a
@@ -64,6 +69,7 @@ func collectLocalVarsWithBuilder(body []ast.Stmt, sigMap map[string]ast.Expr, pr
 		f.working[k] = v
 	}
 	f.in = newConstInterp(sigMap, f.working)
+	f.in.Volatile = owner != nil && owner.bakesOnly()
 	f.preloadFunctions(body)
 	f.stmts(body)
 	return f.res
@@ -337,18 +343,22 @@ func (f *localFolder) decl(decl *ast.VarDecl) {
 // This keeps `const { name } = user` and `const [first] = items` available to
 // later JSX reads.
 func (f *localFolder) destructuredDecl(decl *ast.VarDecl) {
+	f.res.destructs = append(f.res.destructs, decl)
 	v := f.eval(decl.Init)
 	names := decl.Names
+	leak := func(name string) {
+		if name == "" || name == "children" {
+			return
+		}
+		f.res.locals[name] = jsvalue.Dynamic("local " + name)
+		f.res.inits[name] = decl.Init
+		f.res.leaked[name] = true
+		f.record(name)
+	}
 	if v.ContainsUnknown() || v.IsFunction() || v.IsJSX() {
 		for _, name := range names {
-			if name == "" || name == "children" {
-				continue
-			}
 			if _, exists := f.res.locals[name]; !exists {
-				f.res.locals[name] = jsvalue.Dynamic("local " + name)
-				f.res.inits[name] = decl.Init
-				f.res.leaked[name] = true
-				f.record(name)
+				leak(name)
 			}
 		}
 		return
@@ -360,14 +370,8 @@ func (f *localFolder) destructuredDecl(decl *ast.VarDecl) {
 	f.in.Scope = saved
 	if result.IsUnsupported() {
 		for _, name := range names {
-			if name == "" || name == "children" {
-				continue
-			}
 			if _, exists := f.res.locals[name]; !exists {
-				f.res.locals[name] = jsvalue.Dynamic("local " + name)
-				f.res.inits[name] = decl.Init
-				f.res.leaked[name] = true
-				f.record(name)
+				leak(name)
 			}
 		}
 		return
@@ -378,10 +382,7 @@ func (f *localFolder) destructuredDecl(decl *ast.VarDecl) {
 		}
 		val, ok := scope.Lookup(name)
 		if !ok || val.ContainsUnknown() || val.IsFunction() || val.IsJSX() {
-			f.res.locals[name] = jsvalue.Dynamic("local " + name)
-			f.res.inits[name] = decl.Init
-			f.res.leaked[name] = true
-			f.record(name)
+			leak(name)
 			continue
 		}
 		f.res.locals[name] = val

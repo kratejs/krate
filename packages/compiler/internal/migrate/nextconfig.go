@@ -41,13 +41,15 @@ type nextHeaderRule struct {
 var nextConfigWrapper = regexp.MustCompile(`(?m)(?:export\s+default|module\.exports\s*=)\s*[A-Za-z_$][\w$]*(?:\.[\w$]+)*\s*\(`)
 
 // readNextConfig extracts static redirects/rewrites/headers/basePath from a
-// next.config file. It returns ok=false for function configs, plugin wrappers,
-// and anything it cannot prove static.
-func readNextConfig(path string) (nextConfigData, []string, bool) {
+// next.config file. Each key is translated on its own: a key it cannot prove
+// static is listed in skipped (with the reason) and the others still
+// translate. ok is false only when the config as a whole is not a static
+// default export object (function configs, plugin wrappers, computed values).
+func readNextConfig(path string) (data nextConfigData, warnings, skipped []string, ok bool) {
 	var out nextConfigData
 	src, err := os.ReadFile(path)
 	if err != nil {
-		return out, []string{err.Error()}, false
+		return out, []string{err.Error()}, nil, false
 	}
 	var wrapperWarnings []string
 	if nextConfigWrapper.Match(src) {
@@ -56,7 +58,7 @@ func readNextConfig(path string) (nextConfigData, []string, bool) {
 	prog := parser.New(lexer.New(string(src)).Tokenize()).ParseProgram()
 	obj := defaultExportObject(prog)
 	if obj == nil {
-		return out, []string{"config is not a static default export object"}, false
+		return out, []string{"config is not a static default export object"}, nil, false
 	}
 
 	if v := prop(obj, "basePath"); v != nil {
@@ -65,94 +67,146 @@ func readNextConfig(path string) (nextConfigData, []string, bool) {
 		}
 	}
 	if v := prop(obj, "redirects"); v != nil {
-		arr, ok := v.(*ast.ArrayExpr)
-		if !ok {
-			return out, []string{"redirects is not a static array"}, false
-		}
-		for i, el := range arr.Elements {
-			item, ok := el.(*ast.ObjectExpr)
-			if !ok {
-				return out, []string{fmt.Sprintf("redirects[%d] is not an object", i)}, false
-			}
-			source, ok1 := stringValue(prop(item, "source"))
-			dest, ok2 := stringValue(prop(item, "destination"))
-			if !ok1 || !ok2 {
-				return out, []string{fmt.Sprintf("redirects[%d] has a non-static source or destination", i)}, false
-			}
-			perm := false
-			if p := prop(item, "permanent"); p != nil {
-				if b, ok := boolValue(p); ok {
-					perm = b
-				}
-			}
-			if sc := prop(item, "statusCode"); sc != nil {
-				if n, ok := intValue(sc); ok {
-					perm = n == 301 || n == 308
-				}
-			}
-			out.Redirects = append(out.Redirects, nextRedirect{Source: source, Destination: dest, Permanent: perm})
+		rules, reason := redirectRules(v)
+		if reason != "" {
+			skipped = append(skipped, "redirects ("+reason+")")
+		} else {
+			out.Redirects = rules
 		}
 	}
 	if v := prop(obj, "rewrites"); v != nil {
-		rws, ok := rewritesValue(v)
+		rws, ok := rewritesValue(returnedValue(v))
 		if !ok {
-			return out, []string{"rewrites is not a static array or beforeFiles/afterFiles/fallback object"}, false
+			skipped = append(skipped, "rewrites (not a static array or beforeFiles/afterFiles/fallback object)")
+		} else {
+			out.Rewrites = rws
 		}
-		out.Rewrites = rws
 	}
 	if v := prop(obj, "headers"); v != nil {
-		arr, ok := v.(*ast.ArrayExpr)
-		if !ok {
-			return out, []string{"headers is not a static array"}, false
-		}
-		for i, el := range arr.Elements {
-			item, ok := el.(*ast.ObjectExpr)
-			if !ok {
-				return out, []string{fmt.Sprintf("headers[%d] is not an object", i)}, false
-			}
-			source, ok := stringValue(prop(item, "source"))
-			if !ok {
-				return out, []string{fmt.Sprintf("headers[%d] has a non-static source", i)}, false
-			}
-			harr, ok := prop(item, "headers").(*ast.ArrayExpr)
-			if !ok {
-				return out, []string{fmt.Sprintf("headers[%d].headers is not a static array", i)}, false
-			}
-			rule := nextHeaderRule{Source: source, Headers: map[string]string{}}
-			for j, hel := range harr.Elements {
-				hm, ok := hel.(*ast.ObjectExpr)
-				if !ok {
-					return out, []string{fmt.Sprintf("headers[%d].headers[%d] is not an object", i, j)}, false
-				}
-				k, ok1 := stringValue(prop(hm, "key"))
-				val, ok2 := stringValue(prop(hm, "value"))
-				if !ok1 || !ok2 {
-					return out, []string{fmt.Sprintf("headers[%d].headers[%d] has a non-static key or value", i, j)}, false
-				}
-				rule.Headers[k] = val
-			}
-			out.Headers = append(out.Headers, rule)
+		rules, reason := headerRules(v)
+		if reason != "" {
+			skipped = append(skipped, "headers ("+reason+")")
+		} else {
+			out.Headers = rules
 		}
 	}
-	var warnings []string
+	var notes []string
 	if v := prop(obj, "images"); v != nil {
 		images, imageWarnings := imagesConfig(v)
 		if len(images) > 0 {
 			out.Images = images
 		}
-		warnings = append(warnings, imageWarnings...)
+		notes = append(notes, imageWarnings...)
 	}
 	if v := prop(obj, "env"); v != nil {
 		if env, ok := staticStringMap(v); ok {
 			out.Env = env
 		} else {
-			warnings = append(warnings, "next.config env is not a static string map")
+			notes = append(notes, "next.config env is not a static string map")
 		}
 	}
-	if prop(obj, "experimental") != nil {
-		warnings = append(warnings, "next.config experimental keys are not translated")
+	if exp := prop(obj, "experimental"); exp != nil {
+		// authInterrupts only enables forbidden() and unauthorized(), which
+		// Krate always supports.
+		if eo, ok := exp.(*ast.ObjectExpr); !ok || len(eo.Properties) != 1 || eo.Properties[0].Key != "authInterrupts" {
+			notes = append(notes, "next.config experimental keys are not translated")
+		}
 	}
-	return out, append(wrapperWarnings, warnings...), true
+	return out, append(wrapperWarnings, notes...), skipped, true
+}
+
+// returnedValue unwraps `async () => value` and `async function () { return
+// value }` (what Next's redirects/rewrites/headers usually are) to value. Any
+// other expression is returned unchanged.
+func returnedValue(v ast.Expr) ast.Expr {
+	fn, ok := v.(*ast.ArrowFn)
+	if !ok || fn.Generator {
+		return v
+	}
+	body := fn.Body
+	if len(body) != 1 {
+		return v
+	}
+	ret, ok := body[0].(*ast.ReturnStmt)
+	if !ok || ret.Value == nil {
+		return v
+	}
+	if paren, ok := ret.Value.(*ast.ParenExpr); ok {
+		return paren.Expr
+	}
+	return ret.Value
+}
+
+// redirectRules reads a static redirects array (or a function returning one).
+// The second result is empty on success, else why the value is not static.
+func redirectRules(v ast.Expr) ([]nextRedirect, string) {
+	arr, ok := returnedValue(v).(*ast.ArrayExpr)
+	if !ok {
+		return nil, "not a static array"
+	}
+	var out []nextRedirect
+	for i, el := range arr.Elements {
+		item, ok := el.(*ast.ObjectExpr)
+		if !ok {
+			return nil, fmt.Sprintf("redirects[%d] is not an object", i)
+		}
+		source, ok1 := stringValue(prop(item, "source"))
+		dest, ok2 := stringValue(prop(item, "destination"))
+		if !ok1 || !ok2 {
+			return nil, fmt.Sprintf("redirects[%d] has a non-static source or destination", i)
+		}
+		perm := false
+		if p := prop(item, "permanent"); p != nil {
+			if b, ok := boolValue(p); ok {
+				perm = b
+			}
+		}
+		if sc := prop(item, "statusCode"); sc != nil {
+			if n, ok := intValue(sc); ok {
+				perm = n == 301 || n == 308
+			}
+		}
+		out = append(out, nextRedirect{Source: source, Destination: dest, Permanent: perm})
+	}
+	return out, ""
+}
+
+// headerRules reads a static headers array (or a function returning one).
+func headerRules(v ast.Expr) ([]nextHeaderRule, string) {
+	arr, ok := returnedValue(v).(*ast.ArrayExpr)
+	if !ok {
+		return nil, "not a static array"
+	}
+	var out []nextHeaderRule
+	for i, el := range arr.Elements {
+		item, ok := el.(*ast.ObjectExpr)
+		if !ok {
+			return nil, fmt.Sprintf("headers[%d] is not an object", i)
+		}
+		source, ok := stringValue(prop(item, "source"))
+		if !ok {
+			return nil, fmt.Sprintf("headers[%d] has a non-static source", i)
+		}
+		harr, ok := prop(item, "headers").(*ast.ArrayExpr)
+		if !ok {
+			return nil, fmt.Sprintf("headers[%d].headers is not a static array", i)
+		}
+		rule := nextHeaderRule{Source: source, Headers: map[string]string{}}
+		for j, hel := range harr.Elements {
+			hm, ok := hel.(*ast.ObjectExpr)
+			if !ok {
+				return nil, fmt.Sprintf("headers[%d].headers[%d] is not an object", i, j)
+			}
+			k, ok1 := stringValue(prop(hm, "key"))
+			val, ok2 := stringValue(prop(hm, "value"))
+			if !ok1 || !ok2 {
+				return nil, fmt.Sprintf("headers[%d].headers[%d] has a non-static key or value", i, j)
+			}
+			rule.Headers[k] = val
+		}
+		out = append(out, rule)
+	}
+	return out, ""
 }
 
 func rewritesValue(v ast.Expr) ([]nextRewrite, bool) {

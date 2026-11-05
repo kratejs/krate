@@ -25,7 +25,7 @@
   transform: translateY(1px) scale(0.99);
 }
 .krate-button:focus-visible {
-  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
   outline-offset: 2px;
 }
 .krate-button:disabled,
@@ -53,14 +53,14 @@
   padding: 0;
 }
 .krate-button-primary {
-  background: var(--krate-primary, #3b82f6);
+  background: var(--krate-primary, #c2410c);
   color: var(--krate-primary-fg, #fff);
   box-shadow: var(--krate-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.06));
 }
 .krate-button-primary:hover {
   background: var(--krate-primary-hover, #2563eb);
   color: var(--krate-primary-fg, #fff);
-  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--krate-primary, #3b82f6) 65%, transparent);
+  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--krate-primary, #c2410c) 65%, transparent);
 }
 .krate-button-secondary {
   background: var(--krate-surface, #f4f4f5);
@@ -98,7 +98,7 @@
 }
 .krate-button-link {
   background: transparent;
-  color: var(--krate-primary-text, var(--krate-primary, #3b82f6));
+  color: var(--krate-primary-text, var(--krate-primary, #c2410c));
   text-decoration: underline;
   text-underline-offset: 4px;
   padding: 0;

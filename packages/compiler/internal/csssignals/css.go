@@ -14,7 +14,7 @@ import (
 // --krate-active-bg is emitted twice: a static fallback first, then the
 // color-mix() value. Browsers without color-mix() (e.g. Chrome < 111) keep the
 // fallback; modern browsers take the color-mix() value.
-const activeTriggerDecl = "color:var(--krate-css-active-fg,inherit);font-weight:600;--krate-active:1;--krate-active-color:var(--krate-css-active,var(--krate-primary,#f97316));--krate-active-bg:#f9731626;--krate-active-bg:color-mix(in srgb,var(--krate-css-active,var(--krate-primary,#f97316)) 15%,transparent)"
+const activeTriggerDecl = "color:var(--krate-css-active-fg,inherit);font-weight:600;--krate-active:1;--krate-active-color:var(--krate-css-active,var(--krate-primary,#c2410c));--krate-active-bg:#c2410c26;--krate-active-bg:color-mix(in srgb,var(--krate-css-active,var(--krate-primary,#c2410c)) 15%,transparent)"
 
 // HiddenCSS is the base rule for the visually-hidden controller inputs. They
 // stay focusable (unlike display:none) so keyboard navigation and screen readers
@@ -24,7 +24,7 @@ const HiddenCSS = "." + HiddenClass + "{position:absolute;width:1px;height:1px;m
 // focusMarkerCSS is the legacy focus ring: the scoped shim marks the trigger
 // label of the focused controller input with the `krc-f` class (legacy mode has
 // no :has() to express "trigger of the focused input").
-const focusMarkerCSS = ".krc-f{outline:2px solid var(--krate-focus-ring,#f97316);outline-offset:2px}"
+const focusMarkerCSS = ".krc-f{outline:2px solid var(--krate-focus-ring,#c2410c);outline-offset:2px}"
 
 // Stylesheet returns the generated stylesheet in the default (modern) mode.
 func Stylesheet(scopes []*Scope, conditions []*Condition) string {
@@ -145,7 +145,7 @@ func (s *Scope) focusCSS(mode StyleMode) string {
 		}
 		t := s.TriggerClass(opt)
 		b.WriteString("." + s.Class + ":has(." + ctrl + ":focus-visible) ." + t + ",." + s.Class + "." + t + ":has(." + ctrl + ":focus-visible)")
-		b.WriteString("{outline:2px solid var(--krate-focus-ring,#f97316);outline-offset:2px}\n")
+		b.WriteString("{outline:2px solid var(--krate-focus-ring,#c2410c);outline-offset:2px}\n")
 	}
 	return b.String()
 }

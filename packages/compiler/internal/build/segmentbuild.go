@@ -242,7 +242,7 @@ func (b *Builder) segmentModel() *segmentModel {
 	m.entries = segmentEntries(pages, b.Cfg.PagesDir)
 	for _, e := range m.entries {
 		dir := "/" + e.Dir
-		m.graph = append(m.graph, SiteGraphSegment{Dir: dir, NotFound: m.sources[e.NotFound], Error: m.sources[e.Error], Group: e.Group})
+		m.graph = append(m.graph, SiteGraphSegment{Dir: dir, NotFound: m.sources[e.NotFound], Error: m.sources[e.Error], Forbidden: m.sources[e.Forbidden], Unauthorized: m.sources[e.Unauthorized], Group: e.Group})
 	}
 	return m
 }
@@ -261,6 +261,18 @@ func (m *segmentModel) forSource(root, pagesDir, source string) (notFound, errPa
 		errPage = m.sources[ep.File]
 	}
 	return notFound, errPage
+}
+
+// sourceFor returns the source of the nearest page of a kind for the route
+// defined by a page source file.
+func (m *segmentModel) sourceFor(kind SegmentKind, root, pagesDir, source string) string {
+	if source == "" || len(m.entries) == 0 {
+		return ""
+	}
+	if hit, ok := LookupSegmentPage(m.entries, kind, "", true, routeSegDir(root, pagesDir, source)); ok {
+		return m.sources[hit.File]
+	}
+	return ""
 }
 
 // errorPlaceholdersMangled reports whether a statically built error page

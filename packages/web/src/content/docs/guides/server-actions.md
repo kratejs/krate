@@ -141,7 +141,9 @@ export default function Todos() {
   state (evaluated at build time) as the previous state, and the server
   redirects to the optional `permalink` (third argument, a same-origin path) or
   back to the page. The state the action returned travels across that redirect
-  in a short-lived (60 s), single-use `krate_flash` cookie, and a
+  in a short-lived (60 s), single-use `krate_flash` cookie (HMAC-signed, so
+  another origin cannot plant one; set `KRATE_FLASH_SECRET` to share the key between
+  instances, see [Deployment](/docs/guides/deployment/#flash-cookie-secret)), and a
   `useActionState` for the same action that mounts on the next page starts from
   it, so validation errors appear as soon as the page hydrates.
   Pages are pre-rendered HTML, so a browser that never runs the script would
@@ -242,7 +244,8 @@ export async function signOut() {
 
 - `headers()` returns the request `Headers`.
 - `cookies()` has `get` (returns `{ name, value }` or `undefined`, as in Next.js), `getAll`, `has`, `set(name, value, options)` and
-  `delete(name)`. `set` defaults to `HttpOnly; Path=/; SameSite=Lax`.
+  `delete(name)`. `set` defaults to `HttpOnly; Path=/; SameSite=Lax`, plus `Secure` when the request came over
+  https or `sameSite` is `"none"`.
 - `getActionContext()` returns `{ actionId, url, method, headers, cookies }`, or
   `undefined` outside an action. `headers()`/`cookies()` throw outside one.
 - `redirect(url)` ends the action and navigates the client (`303` for native

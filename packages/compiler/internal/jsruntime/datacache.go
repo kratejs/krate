@@ -101,6 +101,14 @@ func (c *DataCache) InvalidateTags(tags []string) int {
 	return n
 }
 
+// Clear drops every entry.
+func (c *DataCache) Clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m = map[string]dataEntry{}
+	c.byTag = map[string]map[string]struct{}{}
+}
+
 // Len returns the number of stored entries.
 func (c *DataCache) Len() int {
 	c.mu.Lock()

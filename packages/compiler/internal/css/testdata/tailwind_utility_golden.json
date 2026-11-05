@@ -1,0 +1,637 @@
+{
+ "tailwind": "4.3.4",
+ "cases": [
+  {
+   "name": "integer",
+   "css": "@utility xi-* { order: --value(integer); }",
+   "classes": {
+    "xi-4": ".xi-4 {\n  order: 4;\n}",
+    "xi-0": ".xi-0 {\n  order: 0;\n}",
+    "xi-007": "",
+    "xi-1.5": "",
+    "xi--2": "",
+    "xi-[3]": "",
+    "xi-[1.5]": "",
+    "xi-foo": "",
+    "xi": "",
+    "md:xi-2": "@media (width >= 48rem) {\n  .md\\:xi-2 {\n    order: 2;\n  }\n}",
+    "xi-4!": ".xi-4\\! {\n  order: 4 !important;\n}",
+    "!xi-4": ".\\!xi-4 {\n  order: 4 !important;\n}",
+    "hover:xi-3": "@media (hover: hover) {\n  .hover\\:xi-3:hover {\n    order: 3;\n  }\n}",
+    "xi-4/2": ""
+   }
+  },
+  {
+   "name": "number",
+   "css": "@utility xn-* { order: --value(number); }",
+   "classes": {
+    "xn-1.5": ".xn-1\\.5 {\n  order: 1.5;\n}",
+    "xn-01": "",
+    "xn-1.": "",
+    "xn-.5": "",
+    "xn-0": ".xn-0 {\n  order: 0;\n}",
+    "xn-2": ".xn-2 {\n  order: 2;\n}",
+    "xn--2": "",
+    "xn-1e3": ""
+   }
+  },
+  {
+   "name": "ratio",
+   "css": "@utility xr-* { aspect-ratio: --value(ratio); }",
+   "classes": {
+    "xr-3/2": ".xr-3\\/2 {\n  aspect-ratio: 3 / 2;\n}",
+    "xr-16/9": ".xr-16\\/9 {\n  aspect-ratio: 16 / 9;\n}",
+    "xr-3": "",
+    "xr-1.5/2": "",
+    "xr-[3/2]": "",
+    "xr-3/foo": ""
+   }
+  },
+  {
+   "name": "percentage",
+   "css": "@utility xpc-* { opacity: --value(percentage); }",
+   "classes": {
+    "xpc-50%": ".xpc-50\\% {\n  opacity: 50%;\n}",
+    "xpc-0%": ".xpc-0\\% {\n  opacity: 0%;\n}",
+    "xpc-5.5%": "",
+    "xpc-50": "",
+    "xpc--5%": ""
+   }
+  },
+  {
+   "name": "literals",
+   "css": "@utility xl-* { width: --value(\"auto\", 'full', \"half-1\"); }",
+   "classes": {
+    "xl-auto": ".xl-auto {\n  width: auto;\n}",
+    "xl-full": ".xl-full {\n  width: full;\n}",
+    "xl-half-1": ".xl-half-1 {\n  width: half-1;\n}",
+    "xl-half": "",
+    "xl-[auto]": ""
+   }
+  },
+  {
+   "name": "arb-star",
+   "css": "@utility xs-* { width: --value([*]); }",
+   "classes": {
+    "xs-[10px]": ".xs-\\[10px\\] {\n  width: 10px;\n}",
+    "xs-[red]": ".xs-\\[red\\] {\n  width: red;\n}",
+    "xs-(--x)": ".xs-\\(--x\\) {\n  width: var(--x);\n}",
+    "xs-[length:var(--x)]": ".xs-\\[length\\:var\\(--x\\)\\] {\n  width: var(--x);\n}",
+    "xs-foo": "",
+    "xs-[calc(1px+2px)]": ".xs-\\[calc\\(1px\\+2px\\)\\] {\n  width: calc(1px + 2px);\n}",
+    "xs-[a_b]": ".xs-\\[a_b\\] {\n  width: a b;\n}"
+   }
+  },
+  {
+   "name": "arb-length",
+   "css": "@utility xlen-* { width: --value([length]); }",
+   "classes": {
+    "xlen-[10px]": ".xlen-\\[10px\\] {\n  width: 10px;\n}",
+    "xlen-[calc(1px+2px)]": ".xlen-\\[calc\\(1px\\+2px\\)\\] {\n  width: calc(1px + 2px);\n}",
+    "xlen-[0]": "",
+    "xlen-[10]": "",
+    "xlen-[50%]": "",
+    "xlen-[1.5rem]": ".xlen-\\[1\\.5rem\\] {\n  width: 1.5rem;\n}",
+    "xlen-[length:var(--x)]": ".xlen-\\[length\\:var\\(--x\\)\\] {\n  width: var(--x);\n}",
+    "xlen-(length:--x)": ".xlen-\\(length\\:--x\\) {\n  width: var(--x);\n}",
+    "xlen-(--x)": "",
+    "xlen-[min(1px,2px)]": ".xlen-\\[min\\(1px\\,2px\\)\\] {\n  width: min(1px, 2px);\n}",
+    "xlen-[var(--x)]": "",
+    "xlen-[1Q]": ".xlen-\\[1Q\\] {\n  width: 1Q;\n}",
+    "xlen-[-1px]": ".xlen-\\[-1px\\] {\n  width: -1px;\n}",
+    "xlen-[.5px]": ".xlen-\\[\\.5px\\] {\n  width: .5px;\n}",
+    "xlen-[1PX]": "",
+    "xlen-[red]": "",
+    "xlen-[percentage:var(--x)]": ""
+   }
+  },
+  {
+   "name": "arb-color",
+   "css": "@utility xc-* { color: --value([color]); }",
+   "classes": {
+    "xc-[#fff]": ".xc-\\[\\#fff\\] {\n  color: #fff;\n}",
+    "xc-[red]": ".xc-\\[red\\] {\n  color: red;\n}",
+    "xc-[RED]": ".xc-\\[RED\\] {\n  color: RED;\n}",
+    "xc-[rgb(0_0_0)]": ".xc-\\[rgb\\(0_0_0\\)\\] {\n  color: rgb(0 0 0);\n}",
+    "xc-[oklch(0.5_0.1_20)]": ".xc-\\[oklch\\(0\\.5_0\\.1_20\\)\\] {\n  color: oklch(0.5 0.1 20);\n}",
+    "xc-[transparent]": ".xc-\\[transparent\\] {\n  color: transparent;\n}",
+    "xc-[currentColor]": ".xc-\\[currentColor\\] {\n  color: currentColor;\n}",
+    "xc-[10px]": "",
+    "xc-[color:var(--c)]": ".xc-\\[color\\:var\\(--c\\)\\] {\n  color: var(--c);\n}",
+    "xc-(color:--c)": ".xc-\\(color\\:--c\\) {\n  color: var(--c);\n}",
+    "xc-[var(--c)]": "",
+    "xc-[color-mix(in_srgb,red,blue)]": ".xc-\\[color-mix\\(in_srgb\\,red\\,blue\\)\\] {\n  color: color-mix(in srgb,red,blue);\n}",
+    "xc-[hsl(0,0%,0%)]": ".xc-\\[hsl\\(0\\,0\\%\\,0\\%\\)\\] {\n  color: hsl(0,0%,0%);\n}",
+    "xc-[inherit]": "",
+    "xc-[rebeccapurple]": ".xc-\\[rebeccapurple\\] {\n  color: rebeccapurple;\n}",
+    "xc-[ButtonText]": ".xc-\\[ButtonText\\] {\n  color: ButtonText;\n}"
+   }
+  },
+  {
+   "name": "arb-percentage",
+   "css": "@utility xp-* { width: --value([percentage]); }",
+   "classes": {
+    "xp-[50%]": ".xp-\\[50\\%\\] {\n  width: 50%;\n}",
+    "xp-[0.5]": "",
+    "xp-[calc(1%+2%)]": ".xp-\\[calc\\(1\\%\\+2\\%\\)\\] {\n  width: calc(1% + 2%);\n}",
+    "xp-[+5%]": ".xp-\\[\\+5\\%\\] {\n  width: +5%;\n}",
+    "xp-[10px]": ""
+   }
+  },
+  {
+   "name": "arb-number",
+   "css": "@utility xnum-* { order: --value([number]); }",
+   "classes": {
+    "xnum-[1]": ".xnum-\\[1\\] {\n  order: 1;\n}",
+    "xnum-[1.5]": ".xnum-\\[1\\.5\\] {\n  order: 1.5;\n}",
+    "xnum-[-1]": ".xnum-\\[-1\\] {\n  order: -1;\n}",
+    "xnum-[.5]": ".xnum-\\[\\.5\\] {\n  order: .5;\n}",
+    "xnum-[1e3]": ".xnum-\\[1e3\\] {\n  order: 1e3;\n}",
+    "xnum-[1px]": "",
+    "xnum-[calc(1+2)]": ".xnum-\\[calc\\(1\\+2\\)\\] {\n  order: calc(1 + 2);\n}"
+   }
+  },
+  {
+   "name": "arb-integer",
+   "css": "@utility xint-* { order: --value([integer]); }",
+   "classes": {
+    "xint-[3]": ".xint-\\[3\\] {\n  order: 3;\n}",
+    "xint-[3.5]": "",
+    "xint-[-3]": "",
+    "xint-[007]": "",
+    "xint-[0]": ".xint-\\[0\\] {\n  order: 0;\n}"
+   }
+  },
+  {
+   "name": "arb-ratio",
+   "css": "@utility xrat-* { aspect-ratio: --value([ratio]); }",
+   "classes": {
+    "xrat-[3/2]": ".xrat-\\[3\\/2\\] {\n  aspect-ratio: 3/2;\n}",
+    "xrat-[3_/_2]": ".xrat-\\[3_\\/_2\\] {\n  aspect-ratio: 3 / 2;\n}",
+    "xrat-[3]": "",
+    "xrat-[1.5/2]": ".xrat-\\[1\\.5\\/2\\] {\n  aspect-ratio: 1.5/2;\n}",
+    "xrat-[calc(1/2)]": ".xrat-\\[calc\\(1\\/2\\)\\] {\n  aspect-ratio: calc(1 / 2);\n}"
+   }
+  },
+  {
+   "name": "arb-url-image",
+   "css": "@utility xu-* { background-image: --value([url]); }\n@utility xim-* { background-image: --value([image]); }",
+   "classes": {
+    "xu-[url(x.png)]": ".xu-\\[url\\(x\\.png\\)\\] {\n  background-image: url(x.png);\n}",
+    "xu-[url(\"x.png\")]": ".xu-\\[url\\(\\\"x\\.png\\\"\\)\\] {\n  background-image: url(\"x.png\");\n}",
+    "xu-[red]": "",
+    "xim-[url(x.png)]": ".xim-\\[url\\(x\\.png\\)\\] {\n  background-image: url(x.png);\n}",
+    "xim-[linear-gradient(red,blue)]": ".xim-\\[linear-gradient\\(red\\,blue\\)\\] {\n  background-image: linear-gradient(red,blue);\n}",
+    "xim-[red]": "",
+    "xim-[repeating-linear-gradient(red,blue)]": ".xim-\\[repeating-linear-gradient\\(red\\,blue\\)\\] {\n  background-image: repeating-linear-gradient(red,blue);\n}",
+    "xim-[image-set(red)]": ".xim-\\[image-set\\(red\\)\\] {\n  background-image: image-set(red);\n}",
+    "xim-[url(a.png),linear-gradient(red,blue)]": ".xim-\\[url\\(a\\.png\\)\\,linear-gradient\\(red\\,blue\\)\\] {\n  background-image: url(a.png),linear-gradient(red,blue);\n}"
+   }
+  },
+  {
+   "name": "arb-position-size",
+   "css": "@utility xpos-* { background-position: --value([position]); }\n@utility xbs-* { background-size: --value([bg-size]); }",
+   "classes": {
+    "xpos-[center]": ".xpos-\\[center\\] {\n  background-position: center;\n}",
+    "xpos-[10px_20px]": ".xpos-\\[10px_20px\\] {\n  background-position: 10px 20px;\n}",
+    "xpos-[left_top]": ".xpos-\\[left_top\\] {\n  background-position: left top;\n}",
+    "xpos-[10px]": ".xpos-\\[10px\\] {\n  background-position: 10px;\n}",
+    "xpos-[50%]": ".xpos-\\[50\\%\\] {\n  background-position: 50%;\n}",
+    "xpos-[red]": "",
+    "xbs-[cover]": ".xbs-\\[cover\\] {\n  background-size: cover;\n}",
+    "xbs-[10px_20px]": ".xbs-\\[10px_20px\\] {\n  background-size: 10px 20px;\n}",
+    "xbs-[auto_10px]": ".xbs-\\[auto_10px\\] {\n  background-size: auto 10px;\n}",
+    "xbs-[10px]": ".xbs-\\[10px\\] {\n  background-size: 10px;\n}",
+    "xbs-[red]": "",
+    "xbs-[10px_20px_30px]": "",
+    "xbs-[50%]": ".xbs-\\[50\\%\\] {\n  background-size: 50%;\n}"
+   }
+  },
+  {
+   "name": "arb-misc-types",
+   "css": "@utility xlw-* { border-width: --value([line-width]); }\n@utility xfn-* { font-family: --value([family-name]); }\n@utility xgn-* { font-family: --value([generic-name]); }\n@utility xang-* { rotate: --value([angle]); }\n@utility xas-* { font-size: --value([absolute-size]); }\n@utility xrs-* { font-size: --value([relative-size]); }\n@utility xvec-* { translate: --value([vector]); }",
+   "classes": {
+    "xlw-[thin]": ".xlw-\\[thin\\] {\n  border-width: thin;\n}",
+    "xlw-[2px]": ".xlw-\\[2px\\] {\n  border-width: 2px;\n}",
+    "xfn-[Arial]": ".xfn-\\[Arial\\] {\n  font-family: Arial;\n}",
+    "xfn-[Arial,sans-serif]": ".xfn-\\[Arial\\,sans-serif\\] {\n  font-family: Arial,sans-serif;\n}",
+    "xfn-[1abc]": "",
+    "xfn-[var(--f)]": "",
+    "xgn-[serif]": ".xgn-\\[serif\\] {\n  font-family: serif;\n}",
+    "xgn-[Arial]": "",
+    "xang-[45deg]": ".xang-\\[45deg\\] {\n  rotate: 45deg;\n}",
+    "xang-[0.5turn]": ".xang-\\[0\\.5turn\\] {\n  rotate: 0.5turn;\n}",
+    "xang-[45]": "",
+    "xang-[10px]": "",
+    "xas-[small]": ".xas-\\[small\\] {\n  font-size: small;\n}",
+    "xas-[larger]": "",
+    "xrs-[larger]": ".xrs-\\[larger\\] {\n  font-size: larger;\n}",
+    "xrs-[small]": "",
+    "xvec-[1_2_3]": ".xvec-\\[1_2_3\\] {\n  translate: 1 2 3;\n}",
+    "xvec-[1_2]": "",
+    "xvec-[a_b_c]": ""
+   }
+  },
+  {
+   "name": "theme-color",
+   "css": "@utility xbg-* { background-color: --value(--color-*, [color]); }",
+   "classes": {
+    "xbg-red-500": ".xbg-red-500 {\n  background-color: var(--color-red-500);\n}",
+    "xbg-red-500/50": "",
+    "xbg-[#fff]": ".xbg-\\[\\#fff\\] {\n  background-color: #fff;\n}",
+    "xbg-[#fff]/50": "",
+    "xbg-[red]": ".xbg-\\[red\\] {\n  background-color: red;\n}",
+    "xbg-[10px]": "",
+    "xbg-(--c)": "",
+    "xbg-(color:--c)": ".xbg-\\(color\\:--c\\) {\n  background-color: var(--c);\n}",
+    "xbg-transparent": "",
+    "xbg-white": ".xbg-white {\n  background-color: var(--color-white);\n}",
+    "xbg-black": ".xbg-black {\n  background-color: var(--color-black);\n}",
+    "xbg-nope": "",
+    "xbg-slate-50": ".xbg-slate-50 {\n  background-color: var(--color-slate-50);\n}",
+    "dark:xbg-blue-600": "@media (prefers-color-scheme: dark) {\n  .dark\\:xbg-blue-600 {\n    background-color: var(--color-blue-600);\n  }\n}",
+    "hover:xbg-blue-600": "@media (hover: hover) {\n  .hover\\:xbg-blue-600:hover {\n    background-color: var(--color-blue-600);\n  }\n}"
+   }
+  },
+  {
+   "name": "theme-custom-ns",
+   "css": "@theme { --tab-size-github: 8; --tab-size-wide: 12; --width-wide: 90ch; --width-a-b: 5px; }\n@utility xtab-* { tab-size: --value(--tab-size-*, integer, [integer]); }\n@utility xw-* { width: --value(--width-*); }",
+   "classes": {
+    "xtab-github": ".xtab-github {\n  tab-size: var(--tab-size-github);\n}",
+    "xtab-wide": ".xtab-wide {\n  tab-size: var(--tab-size-wide);\n}",
+    "xtab-4": ".xtab-4 {\n  tab-size: 4;\n}",
+    "xtab-[3]": ".xtab-\\[3\\] {\n  tab-size: 3;\n}",
+    "xtab-[3px]": "",
+    "xtab-nope": "",
+    "xw-wide": ".xw-wide {\n  width: var(--width-wide);\n}",
+    "xw-a-b": ".xw-a-b {\n  width: var(--width-a-b);\n}",
+    "xw-a": "",
+    "xw-[3px]": ""
+   }
+  },
+  {
+   "name": "theme-nonstar",
+   "css": "@theme { --tab-size-github: 8; }\n@utility xtab-* { tab-size: --value(--tab-size); }",
+   "classes": {
+    "xtab-github": ".xtab-github {\n  tab-size: var(--tab-size-github);\n}",
+    "xtab-4": ""
+   }
+  },
+  {
+   "name": "theme-namespaces",
+   "css": "@utility xr-* { border-radius: --value(--radius-*); }\n@utility xsh-* { box-shadow: --value(--shadow-*); }\n@utility xlead-* { line-height: --value(--leading-*); }\n@utility xtr-* { letter-spacing: --value(--tracking-*); }\n@utility xfs-* { font-size: --value(--text-*); }\n@utility xff-* { font-family: --value(--font-*); }\n@utility xfw-* { font-weight: --value(--font-weight-*); }\n@utility xsp-* { margin-left: --value(--spacing-*); }",
+   "classes": {
+    "xr-lg": ".xr-lg {\n  border-radius: var(--radius-lg);\n}",
+    "xr-full": "",
+    "xr-nope": "",
+    "xsh-md": ".xsh-md {\n  box-shadow: var(--shadow-md);\n}",
+    "xlead-tight": ".xlead-tight {\n  line-height: var(--leading-tight);\n}",
+    "xtr-wide": ".xtr-wide {\n  letter-spacing: var(--tracking-wide);\n}",
+    "xfs-lg": ".xfs-lg {\n  font-size: var(--text-lg);\n}",
+    "xfs-xl": ".xfs-xl {\n  font-size: var(--text-xl);\n}",
+    "xff-sans": ".xff-sans {\n  font-family: var(--font-sans);\n}",
+    "xfw-bold": ".xfw-bold {\n  font-weight: var(--font-weight-bold);\n}",
+    "xsp-4": ""
+   }
+  },
+  {
+   "name": "spacing-fn",
+   "css": "@utility xp-* { padding: --spacing(--value(integer)); }\n@utility xq-* { padding: --spacing(--value(number)); }\n@utility xcalc-* { width: calc(--value(integer) * 1px); }\n@utility xspm-* { margin: --spacing(--value(integer)) --spacing(--value(integer)); }",
+   "classes": {
+    "xp-3": ".xp-3 {\n  padding: calc(var(--spacing) * 3);\n}",
+    "xp-0": ".xp-0 {\n  padding: calc(var(--spacing) * 0);\n}",
+    "xp-1": ".xp-1 {\n  padding: calc(var(--spacing) * 1);\n}",
+    "xp-1.5": "",
+    "xp-[3px]": "",
+    "xp-px": "",
+    "xq-3": ".xq-3 {\n  padding: calc(var(--spacing) * 3);\n}",
+    "xq-1.5": ".xq-1\\.5 {\n  padding: calc(var(--spacing) * 1.5);\n}",
+    "xq-0.5": ".xq-0\\.5 {\n  padding: calc(var(--spacing) * 0.5);\n}",
+    "xq--2": "",
+    "xcalc-3": ".xcalc-3 {\n  width: calc(3 * 1px);\n}",
+    "xspm-2": ".xspm-2 {\n  margin: calc(var(--spacing) * 2) calc(var(--spacing) * 2);\n}"
+   }
+  },
+  {
+   "name": "fallthrough",
+   "css": "@utility xf-* { width: --value(--width-*, integer, [length]); }\n@theme { --width-wide: 90ch; }",
+   "classes": {
+    "xf-wide": ".xf-wide {\n  width: var(--width-wide);\n}",
+    "xf-3": ".xf-3 {\n  width: 3;\n}",
+    "xf-[3px]": ".xf-\\[3px\\] {\n  width: 3px;\n}",
+    "xf-[red]": ""
+   }
+  },
+  {
+   "name": "prefix-fallback",
+   "css": "@utility xq-* { order: --value(integer); }\n@utility xq-foo-* { order: --value(\"a\"); margin: 1px; }",
+   "classes": {
+    "xq-foo-a": ".xq-foo-a {\n  order: a;\n  margin: 1px;\n}",
+    "xq-foo-1": "",
+    "xq-1": ".xq-1 {\n  order: 1;\n}",
+    "xq-foo": ""
+   }
+  },
+  {
+   "name": "mod-text",
+   "css": "@utility xtext-* { font-size: --value(--text-*, [length]); line-height: --modifier(--leading-*, [length], [*]); }",
+   "classes": {
+    "xtext-lg": ".xtext-lg {\n  font-size: var(--text-lg);\n}",
+    "xtext-lg/6": "",
+    "xtext-lg/tight": ".xtext-lg\\/tight {\n  font-size: var(--text-lg);\n  line-height: var(--leading-tight);\n}",
+    "xtext-lg/[2rem]": ".xtext-lg\\/\\[2rem\\] {\n  font-size: var(--text-lg);\n  line-height: 2rem;\n}",
+    "xtext-lg/(--lh)": ".xtext-lg\\/\\(--lh\\) {\n  font-size: var(--text-lg);\n  line-height: var(--lh);\n}",
+    "xtext-[14px]/7": "",
+    "xtext-[14px]/[1.5]": ".xtext-\\[14px\\]\\/\\[1\\.5\\] {\n  font-size: 14px;\n  line-height: 1.5;\n}",
+    "xtext-lg/foo": "",
+    "xtext-[14px]": ".xtext-\\[14px\\] {\n  font-size: 14px;\n}",
+    "xtext-xl/loose": ".xtext-xl\\/loose {\n  font-size: var(--text-xl);\n  line-height: var(--leading-loose);\n}",
+    "md:xtext-lg/snug": "@media (width >= 48rem) {\n  .md\\:xtext-lg\\/snug {\n    font-size: var(--text-lg);\n    line-height: var(--leading-snug);\n  }\n}"
+   }
+  },
+  {
+   "name": "mod-number",
+   "css": "@utility xm-* { margin: --value(integer); opacity: --modifier(number); }",
+   "classes": {
+    "xm-4": ".xm-4 {\n  margin: 4;\n}",
+    "xm-4/5": ".xm-4\\/5 {\n  margin: 4;\n  opacity: 5;\n}",
+    "xm-4/0.5": ".xm-4\\/0\\.5 {\n  margin: 4;\n  opacity: 0.5;\n}",
+    "xm-4/50%": "",
+    "xm-4/-1": "",
+    "xm-4/[0.3]": "",
+    "xm-4/foo": "",
+    "xm-4/(--o)": "",
+    "xm-4/[color:red]": ""
+   }
+  },
+  {
+   "name": "mod-integer",
+   "css": "@utility xmi-* { margin: --value(integer); z-index: --modifier(integer); }",
+   "classes": {
+    "xmi-4/5": ".xmi-4\\/5 {\n  margin: 4;\n  z-index: 5;\n}",
+    "xmi-4/1.5": "",
+    "xmi-4/0": ".xmi-4\\/0 {\n  margin: 4;\n  z-index: 0;\n}",
+    "xmi-4": ".xmi-4 {\n  margin: 4;\n}"
+   }
+  },
+  {
+   "name": "mod-percentage-ratio",
+   "css": "@utility xmp-* { margin: --value(integer); opacity: --modifier(percentage); }\n@utility xmr-* { margin: --value(integer); aspect-ratio: --modifier(ratio); }",
+   "classes": {
+    "xmp-4/50%": ".xmp-4\\/50\\% {\n  margin: 4;\n  opacity: 50%;\n}",
+    "xmp-4/50": "",
+    "xmr-4/3": "",
+    "xmr-4/[3/2]": ""
+   }
+  },
+  {
+   "name": "mod-literals-color",
+   "css": "@utility xml-* { margin: --value(integer); --tw-x: --modifier(\"a\", \"b\"); }\n@utility xmc-* { margin: --value(integer); color: --modifier(--color-*, [color]); }",
+   "classes": {
+    "xml-4/a": ".xml-4\\/a {\n  margin: 4;\n  --tw-x: a;\n}",
+    "xml-4/b": ".xml-4\\/b {\n  margin: 4;\n  --tw-x: b;\n}",
+    "xml-4/c": "",
+    "xmc-4/red-500": ".xmc-4\\/red-500 {\n  margin: 4;\n  color: var(--color-red-500);\n}",
+    "xmc-4/[#fff]": ".xmc-4\\/\\[\\#fff\\] {\n  margin: 4;\n  color: #fff;\n}",
+    "xmc-4/[10px]": "",
+    "xmc-4/nope": ""
+   }
+  },
+  {
+   "name": "mod-optional",
+   "css": "@utility xo-* { margin: --value(integer); opacity: --modifier(number); padding: 3px; }",
+   "classes": {
+    "xo-4": ".xo-4 {\n  margin: 4;\n  padding: 3px;\n}",
+    "xo-4/2": ".xo-4\\/2 {\n  margin: 4;\n  opacity: 2;\n  padding: 3px;\n}"
+   }
+  },
+  {
+   "name": "mod-unused",
+   "css": "@utility xu-* { margin: --value(integer); }",
+   "classes": {
+    "xu-4/2": "",
+    "xu-4/[2]": "",
+    "xu-4/(--x)": ""
+   }
+  },
+  {
+   "name": "mod-ratio-combo",
+   "css": "@utility xrc-* { aspect-ratio: --value(ratio); width: --value(integer); opacity: --modifier(integer); }",
+   "classes": {
+    "xrc-3/2": "",
+    "xrc-3": ".xrc-3 {\n  width: 3;\n}",
+    "xrc-3/foo": ""
+   }
+  },
+  {
+   "name": "mod-only-spacing",
+   "css": "@utility xms-* { margin: --value(integer); padding: --spacing(--modifier(integer)); }",
+   "classes": {
+    "xms-1/4": ".xms-1\\/4 {\n  margin: 1;\n  padding: calc(var(--spacing) * 4);\n}",
+    "xms-1/2.5": "",
+    "xms-1": ".xms-1 {\n  margin: 1;\n}"
+   }
+  },
+  {
+   "name": "default",
+   "css": "@utility xd-* { width: --value(--default(10px), integer); }\n@utility xe-* { width: --value(integer); height: --modifier(--default(5px), integer); }",
+   "classes": {
+    "xd": ".xd {\n  width: 10px;\n}",
+    "xd-4": ".xd-4 {\n  width: 4;\n}",
+    "xe-4": ".xe-4 {\n  width: 4;\n  height: 5px;\n}",
+    "xe-4/2": ".xe-4\\/2 {\n  width: 4;\n  height: 2;\n}"
+   }
+  },
+  {
+   "name": "nested-hover",
+   "css": "@utility xa { color: red; &:hover { color: blue; } }",
+   "classes": {
+    "xa": ".xa {\n  color: red;\n  &:hover {\n    color: blue;\n  }\n}",
+    "md:xa": "@media (width >= 48rem) {\n  .md\\:xa {\n    color: red;\n  }\n  .md\\:xa:hover {\n    color: blue;\n  }\n}",
+    "hover:xa": "@media (hover: hover) {\n  .hover\\:xa:hover {\n    color: red;\n  }\n  .hover\\:xa:hover:hover {\n    color: blue;\n  }\n}",
+    "dark:xa": "@media (prefers-color-scheme: dark) {\n  .dark\\:xa {\n    color: red;\n  }\n  .dark\\:xa:hover {\n    color: blue;\n  }\n}",
+    "xa!": ".xa\\! {\n  color: red !important;\n  &:hover {\n    color: blue !important;\n  }\n}",
+    "focus:xa": ".focus\\:xa:focus {\n  color: red;\n  &:hover {\n    color: blue;\n  }\n}"
+   }
+  },
+  {
+   "name": "nested-media",
+   "css": "@utility xb { color: red; @media (min-width: 600px) { color: blue; } }\n@utility xd { @media print { display: none; } }\n@utility xi { @media (width>=40rem) { &:hover { color: red } } }\n@utility xj { @supports (display:grid) { display: grid } }",
+   "classes": {
+    "xb": ".xb {\n  color: red;\n  @media (min-width: 600px) {\n    color: blue;\n  }\n}",
+    "dark:xb": "@media (prefers-color-scheme: dark) {\n  .dark\\:xb {\n    color: red;\n  }\n  @media (min-width: 600px) {\n    .dark\\:xb {\n      color: blue;\n    }\n  }\n}",
+    "md:xb": "@media (width >= 48rem) {\n  .md\\:xb {\n    color: red;\n  }\n  @media (min-width: 600px) {\n    .md\\:xb {\n      color: blue;\n    }\n  }\n}",
+    "xd": "@media print {\n  .xd {\n    display: none;\n  }\n}",
+    "hover:xd": "@media (hover: hover) {\n  @media print {\n    .hover\\:xd:hover {\n      display: none;\n    }\n  }\n}",
+    "xi": "@media (width>=40rem) {\n  .xi:hover {\n    color: red;\n  }\n}",
+    "xj": "@supports (display:grid) {\n  .xj {\n    display: grid;\n  }\n}",
+    "md:xj": "@media (width >= 48rem) {\n  @supports (display:grid) {\n    .md\\:xj {\n      display: grid;\n    }\n  }\n}"
+   }
+  },
+  {
+   "name": "nested-variant",
+   "css": "@utility xc { color: red; @variant hover { color: blue; } @variant md { padding: 1px } }\n@utility xv2 { @variant dark { @variant hover { color: blue; } } }\n@utility xv3 { @variant md { @media print { color: red } } }\n@utility xv4 { @variant hover, focus { color: red } }",
+   "classes": {
+    "xc": ".xc {\n  color: red;\n  &:hover {\n    @media (hover: hover) {\n      color: blue;\n    }\n  }\n  @media (width >= 48rem) {\n    padding: 1px;\n  }\n}",
+    "md:xc": "@media (width >= 48rem) {\n  .md\\:xc {\n    color: red;\n  }\n  @media (hover: hover) {\n    .md\\:xc:hover {\n      color: blue;\n    }\n  }\n  @media (width >= 48rem) {\n    .md\\:xc {\n      padding: 1px;\n    }\n  }\n}",
+    "xv2": "@media (prefers-color-scheme: dark) {\n  @media (hover: hover) {\n    .xv2:hover {\n      color: blue;\n    }\n  }\n}",
+    "xv3": "@media (width >= 48rem) {\n  @media print {\n    .xv3 {\n      color: red;\n    }\n  }\n}",
+    "xv4": "@media (hover: hover) {\n  .xv4:hover {\n    color: red;\n  }\n}\n.xv4:focus {\n  color: red;\n}"
+   }
+  },
+  {
+   "name": "nested-selectors",
+   "css": "@utility xf { &::before { content: \"\"; } .child & { color: red } & .child { color: blue } & > * { margin: 0 } &:is(.a, .b) { top: 0 } }",
+   "classes": {
+    "xf": ".xf::before {\n  content: \"\";\n}\n.child .xf {\n  color: red;\n}\n.xf .child {\n  color: blue;\n}\n.xf > * {\n  margin: 0;\n}\n.xf:is(.a, .b) {\n  top: 0;\n}",
+    "hover:xf": "@media (hover: hover) {\n  .hover\\:xf:hover::before {\n    content: \"\";\n  }\n  .child .hover\\:xf:hover {\n    color: red;\n  }\n  .hover\\:xf:hover .child {\n    color: blue;\n  }\n  .hover\\:xf:hover > * {\n    margin: 0;\n  }\n  .hover\\:xf:hover:is(.a, .b) {\n    top: 0;\n  }\n}",
+    "md:xf": "@media (width >= 48rem) {\n  .md\\:xf::before {\n    content: \"\";\n  }\n  .child .md\\:xf {\n    color: red;\n  }\n  .md\\:xf .child {\n    color: blue;\n  }\n  .md\\:xf > * {\n    margin: 0;\n  }\n  .md\\:xf:is(.a, .b) {\n    top: 0;\n  }\n}"
+   }
+  },
+  {
+   "name": "nested-selector-list",
+   "css": "@utility xsl { &:hover, &:focus { color: red } .a &, .b & { color: blue } }",
+   "classes": {
+    "xsl": ".xsl:hover, .xsl:focus {\n  color: red;\n}\n.a .xsl, .b .xsl {\n  color: blue;\n}",
+    "dark:xsl": "@media (prefers-color-scheme: dark) {\n  .dark\\:xsl:hover, .dark\\:xsl:focus {\n    color: red;\n  }\n  .a .dark\\:xsl, .b .dark\\:xsl {\n    color: blue;\n  }\n}"
+   }
+  },
+  {
+   "name": "nested-bare-child",
+   "css": "@utility xbc { .child { color: red } > p { color: blue } }",
+   "classes": {
+    "xbc": ".xbc .child {\n  color: red;\n}\n.xbc > p {\n  color: blue;\n}"
+   }
+  },
+  {
+   "name": "nested-amp",
+   "css": "@utility xh { color: red; & { top: 0 } }\n@utility xk { @layer base { color: red } }",
+   "classes": {
+    "xh": ".xh {\n  color: red;\n  & {\n    top: 0;\n  }\n}",
+    "xk": "@layer base {\n  .xk {\n    color: red;\n  }\n}"
+   }
+  },
+  {
+   "name": "nested-functional",
+   "css": "@utility xe-* { &:hover { color: --value(--color-*, [color]); } & > * { margin: --spacing(--value(integer)); } }",
+   "classes": {
+    "xe-red-500": ".xe-red-500:hover {\n  color: var(--color-red-500);\n}",
+    "xe-3": ".xe-3 > * {\n  margin: calc(var(--spacing) * 3);\n}",
+    "xe-foo": "",
+    "md:xe-red-500": "@media (width >= 48rem) {\n  .md\\:xe-red-500:hover {\n    color: var(--color-red-500);\n  }\n}",
+    "xe-[#fff]": ".xe-\\[\\#fff\\]:hover {\n  color: #fff;\n}"
+   }
+  },
+  {
+   "name": "nested-functional-mod",
+   "css": "@utility xfm-* { color: --value(--color-*, [color]); &:hover { opacity: --modifier(number); } @media (min-width: 40rem) { padding: --spacing(--modifier(integer)); } }",
+   "classes": {
+    "xfm-red-500": ".xfm-red-500 {\n  color: var(--color-red-500);\n}",
+    "xfm-red-500/2": ".xfm-red-500\\/2 {\n  color: var(--color-red-500);\n  &:hover {\n    opacity: 2;\n  }\n  @media (min-width: 40rem) {\n    padding: calc(var(--spacing) * 2);\n  }\n}",
+    "xfm-red-500/0.5": ".xfm-red-500\\/0\\.5 {\n  color: var(--color-red-500);\n  &:hover {\n    opacity: 0.5;\n  }\n}",
+    "xfm-red-500/foo": ""
+   }
+  },
+  {
+   "name": "nested-functional-all-dropped",
+   "css": "@utility xad-* { &:hover { color: --value(--color-*); } }",
+   "classes": {
+    "xad-red-500": ".xad-red-500:hover {\n  color: var(--color-red-500);\n}",
+    "xad-3": ""
+   }
+  },
+  {
+   "name": "empty-rule-dropped",
+   "css": "@utility xer-* { margin: --value(integer); &:hover { opacity: --modifier(number); } }",
+   "classes": {
+    "xer-4": ".xer-4 {\n  margin: 4;\n}",
+    "xer-4/2": ".xer-4\\/2 {\n  margin: 4;\n  &:hover {\n    opacity: 2;\n  }\n}"
+   }
+  },
+  {
+   "name": "apply",
+   "css": "@utility xg { @apply flex items-center; color: red }\n@utility xg2 { &:hover { @apply underline; } }",
+   "classes": {
+    "xg": ".xg {\n  display: flex;\n  align-items: center;\n  color: red;\n}",
+    "xg2": ".xg2:hover {\n  text-decoration-line: underline;\n}",
+    "md:xg": "@media (width >= 48rem) {\n  .md\\:xg {\n    display: flex;\n    align-items: center;\n    color: red;\n  }\n}"
+   }
+  },
+  {
+   "name": "static-and-functional",
+   "css": "@utility xs { width: 1px; }\n@utility xs-* { width: --value(integer); }",
+   "classes": {
+    "xs": ".xs {\n  width: 1px;\n}",
+    "xs-4": ".xs-4 {\n  width: 4;\n}"
+   }
+  },
+  {
+   "name": "custom-variant",
+   "css": "@custom-variant xth (&:where([data-theme=x] *));\n@utility xcv { color: red; @variant xth { color: blue; } }",
+   "classes": {
+    "xcv": ".xcv {\n  color: red;\n  &:where([data-theme=x] *) {\n    color: blue;\n  }\n}",
+    "xth:xcv": ".xth\\:xcv:where([data-theme=x] *) {\n  color: red;\n  &:where([data-theme=x] *) {\n    color: blue;\n  }\n}"
+   }
+  },
+  {
+   "name": "prefix-in-value",
+   "css": "@utility xp-* { padding-left: --value(--spacing-*, integer); }\n@theme { --spacing-big: 2rem; }",
+   "classes": {
+    "xp-big": ".xp-big {\n  padding-left: var(--spacing-big);\n}",
+    "xp-3": ".xp-3 {\n  padding-left: 3;\n}",
+    "xp-4": ".xp-4 {\n  padding-left: 4;\n}"
+   }
+  },
+  {
+   "name": "value-in-function",
+   "css": "@utility xcc-* { width: calc(100% - --value(--spacing-*, [length])); border: --value(integer)px solid red; }\n@theme { --spacing-big: 2rem; }",
+   "classes": {
+    "xcc-big": ".xcc-big {\n  width: calc(100% - var(--spacing-big));\n}",
+    "xcc-[3px]": ".xcc-\\[3px\\] {\n  width: calc(100% - 3px);\n}",
+    "xcc-3": ".xcc-3 {\n  border: 3px solid red;\n}"
+   }
+  },
+  {
+   "name": "multiple-decls-some-drop",
+   "css": "@utility xmd-* { width: --value(integer); height: --value([length]); }",
+   "classes": {
+    "xmd-3": ".xmd-3 {\n  width: 3;\n}",
+    "xmd-[3px]": ".xmd-\\[3px\\] {\n  height: 3px;\n}"
+   }
+  },
+  {
+   "name": "important-theme",
+   "css": "@utility xim-* { width: --value(integer); &:hover { top: 1px; } }",
+   "classes": {
+    "xim-3!": ".xim-3\\! {\n  width: 3 !important;\n  &:hover {\n    top: 1px !important;\n  }\n}",
+    "!xim-3": ".\\!xim-3 {\n  width: 3 !important;\n  &:hover {\n    top: 1px !important;\n  }\n}",
+    "hover:xim-3!": "@media (hover: hover) {\n  .hover\\:xim-3\\!:hover {\n    width: 3 !important;\n  }\n  .hover\\:xim-3\\!:hover:hover {\n    top: 1px !important;\n  }\n}"
+   }
+  },
+  {
+   "name": "arbitrary-variant",
+   "css": "@utility xav { color: red; &:hover { color: blue } }",
+   "classes": {
+    "has-[:checked]:xav": ".has-\\[\\:checked\\]\\:xav:has(:is(:checked)) {\n  color: red;\n  &:hover {\n    color: blue;\n  }\n}",
+    "print:xav": "@media print {\n  .print\\:xav {\n    color: red;\n  }\n  .print\\:xav:hover {\n    color: blue;\n  }\n}",
+    "not-hover:xav": ".not-hover\\:xav:not(:hover) {\n  color: red;\n  &:hover {\n    color: blue;\n  }\n}\n@media not (hover: hover) {\n  .not-hover\\:xav {\n    color: red;\n  }\n  .not-hover\\:xav:hover {\n    color: blue;\n  }\n}",
+    "sm:hover:xav": "@media (width >= 40rem) {\n  @media (hover: hover) {\n    .sm\\:hover\\:xav:hover {\n      color: red;\n    }\n    .sm\\:hover\\:xav:hover:hover {\n      color: blue;\n    }\n  }\n}"
+   }
+  },
+  {
+   "name": "no-value-usage",
+   "css": "@utility xnv-* { color: red; }",
+   "classes": {
+    "xnv-1": "",
+    "xnv": ""
+   }
+  },
+  {
+   "name": "decl-without-colon-ws",
+   "css": "@utility xw-* { width:--value(integer);height : --value( integer ) ; }",
+   "classes": {
+    "xw-3": ".xw-3 {\n  width: 3;\n  height: 3;\n}"
+   }
+  }
+ ]
+}

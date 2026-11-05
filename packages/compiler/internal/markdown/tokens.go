@@ -160,12 +160,11 @@ func (t *tokenTable) protect(text string, mdx bool, report reportFn) string {
 			for j < n && text[j] == '`' {
 				j++
 			}
-			run := text[i:j]
-			if end := strings.Index(text[j:], run); end >= 0 && !strings.HasPrefix(text[j+end:], run+"`") {
-				out.WriteString(text[i : j+end+len(run)])
-				i = j + end + len(run)
+			if end, ok := codeSpanEnd(text, i, j); ok {
+				out.WriteString(text[i:end])
+				i = end
 			} else {
-				out.WriteString(run)
+				out.WriteString(text[i:j])
 				i = j
 			}
 		case c == '<':
@@ -206,6 +205,9 @@ func (t *tokenTable) protect(text string, mdx bool, report reportFn) string {
 			if flow {
 				kind = 'F'
 			}
+			if flow && tg.closing && strings.TrimSpace(restOfLine(text, tg.end)) == "" {
+				separateFromContainer(&out)
+			}
 			out.WriteString(t.add(kind, text[i:tg.end], i))
 			i = tg.end
 		case c == '{' && mdx:
@@ -225,6 +227,76 @@ func (t *tokenTable) protect(text string, mdx bool, report reportFn) string {
 		}
 	}
 	return out.String()
+}
+
+// codeSpanEnd finds the end of the code span opened by the backtick run
+// text[open:runEnd]. Per CommonMark the span closes at the next backtick run of
+// exactly the same length (a longer or shorter run inside it is content, so a
+// single-backtick span can hold a triple-backtick fence), and it never crosses a
+// blank line.
+func codeSpanEnd(text string, open, runEnd int) (int, bool) {
+	want := runEnd - open
+	n := len(text)
+	for k := runEnd; k < n; {
+		switch text[k] {
+		case '\n':
+			// A blank line ends the paragraph, so the opener is literal.
+			m := k + 1
+			for m < n && (text[m] == ' ' || text[m] == '\t') {
+				m++
+			}
+			if m >= n || text[m] == '\n' {
+				return 0, false
+			}
+			k++
+		case '`':
+			e := k
+			for e < n && text[e] == '`' {
+				e++
+			}
+			if e-k == want {
+				return e, true
+			}
+			k = e
+		default:
+			k++
+		}
+	}
+	return 0, false
+}
+
+func restOfLine(text string, from int) string {
+	if nl := strings.IndexByte(text[from:], '\n'); nl >= 0 {
+		return text[from : from+nl]
+	}
+	return text[from:]
+}
+
+var containerLineRe = regexp.MustCompile(`^(?:\s*(?:[-*+]|\d{1,9}[.)])\s|\s*>|\s*\|| {2,}\S|\t)`)
+
+// separateFromContainer ends the markdown block before a closing JSX tag that
+// stands on its own line. Without a blank line, the opaque tag token is read as
+// a lazy continuation of the last list item, quote or table row above it, and
+// the component would close inside that block. Plain paragraphs are left
+// alone so the tag stays in the same inline run as its text.
+func separateFromContainer(out *strings.Builder) {
+	cur := out.String()
+	// Drop the indentation already written for this line.
+	cur = strings.TrimRight(cur, " \t")
+	if !strings.HasSuffix(cur, "\n") {
+		return
+	}
+	body := strings.TrimRight(cur, "\n")
+	if strings.HasSuffix(cur, "\n\n") || body == "" {
+		return
+	}
+	prev := body[strings.LastIndexByte(body, '\n')+1:]
+	if !containerLineRe.MatchString(prev) && !strings.HasSuffix(strings.TrimSpace(prev), "|") {
+		return
+	}
+	out.Reset()
+	out.WriteString(cur)
+	out.WriteByte('\n')
 }
 
 type tagInfo struct {

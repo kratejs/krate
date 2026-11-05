@@ -6,6 +6,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/sigutil"
 )
 
@@ -533,7 +534,7 @@ func (b *builder) collectScopeSpec(el *ast.JSXElement) scopeSpec {
 		}
 	}
 	if len(options) == 0 {
-		options = collectValueLiterals(el.Children)
+		options = b.collectPartValues(el)
 	}
 	initial := ""
 	if v, ok := literalAttr(el, "defaultValue"); ok {
@@ -547,38 +548,116 @@ func (b *builder) collectScopeSpec(el *ast.JSXElement) scopeSpec {
 	return scopeSpec{options: options, initial: initial}
 }
 
-// collectValueLiterals gathers the distinct literal `value` attributes of every
-// descendant element (any component or intrinsic tag), in source order.
-func collectValueLiterals(children []ast.JSXChild) []string {
+// collectPartValues gathers the option values of a scope root's parts. Besides
+// literal `value` attributes written in the JSX, it expands a `.map()` over an
+// array known at build time (`faqs.map(f => <Accordion.Item value={f.id}>)`),
+// so data-driven parts get their per-value CSS. A part whose value still is not
+// a literal after that cannot be enumerated and is reported (KR8820).
+func (b *builder) collectPartValues(root *ast.JSXElement) []string {
+	rootName := root.Opening.Name
 	seen := make(map[string]bool)
 	var options []string
-	var walk func([]ast.JSXChild)
-	walk = func(cs []ast.JSXChild) {
-		for _, child := range cs {
-			switch c := child.(type) {
-			case *ast.JSXElementChild:
-				if c.Element == nil || c.Element.Opening == nil {
-					continue
+	add := func(v string) {
+		if !seen[v] {
+			seen[v] = true
+			options = append(options, v)
+		}
+	}
+	reported := make(map[*ast.JSXElement]bool)
+	var walkChildren func([]ast.JSXChild, int)
+	var walkExpr func(ast.Expr, int)
+	walkEl := func(el *ast.JSXElement, depth int) {
+		if el == nil || el.Opening == nil {
+			return
+		}
+		name := el.Opening.Name
+		if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
+			if v, ok := literalAttr(el, "value"); ok {
+				add(v)
+			} else if v, ok := numberAttr(el, "value"); ok && depth > 0 {
+				add(v)
+			} else if hasAttr(el, "value") && strings.HasPrefix(name, rootName) && name != rootName && !reported[el] {
+				reported[el] = true
+				d := b.diagAt(el.Position, diag.SeverityWarning,
+					"<"+name+" value> is not a literal, so the options of <"+rootName+"> cannot be generated",
+					"write the value as a string literal, or map over an array that is known at build time; for data read at runtime use <Select> or a createSignal based component")
+				b.warnings = append(b.warnings, d.WithCode(diag.CodeScopeDynamicOption))
+			}
+		}
+		walkChildren(el.Children, depth)
+	}
+	walkExpr = func(expr ast.Expr, depth int) {
+		switch e := expr.(type) {
+		case *ast.JSXElement:
+			walkEl(e, depth)
+		case *ast.JSXFragment:
+			walkChildren(e.Children, depth)
+		case *ast.ArrayExpr:
+			for _, item := range e.Elements {
+				walkExpr(item, depth)
+			}
+		case *ast.ConditionalExpr:
+			walkExpr(e.Consequent, depth)
+			walkExpr(e.Alternate, depth)
+		case *ast.BinaryExpr:
+			walkExpr(e.Right, depth)
+		case *ast.CallExpr:
+			call, mem, ok := mapCallParts(e)
+			if !ok || b.referencesSignal(mem.Object) {
+				return
+			}
+			arrow := b.resolveMapCallback(call.Args[0])
+			if arrow == nil {
+				return
+			}
+			body, bodyOK := staticMapCallbackBody(arrow)
+			arr := b.resolveArrayLiteralExpr(e)
+			if arr == nil || !bodyOK {
+				// Not expandable: still report parts whose value is dynamic.
+				if bodyOK {
+					walkExpr(body, depth+1)
 				}
-				// Only component tags (e.g. <Tabs.Trigger value="a">) contribute
-				// options; an intrinsic <input value="..."> must not.
-				name := c.Element.Opening.Name
-				if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
-					if v, ok := literalAttr(c.Element, "value"); ok && !seen[v] {
-						seen[v] = true
-						options = append(options, v)
-					}
+				return
+			}
+			for i, elem := range arr.Elements {
+				bindings := mapCallbackBindings(arrow, elem, i, arr)
+				concrete, ok := b.substituteCallbackLocalsBound(arrow, body, bindings, false)
+				if !ok {
+					return
 				}
-				walk(c.Element.Children)
-			case *ast.JSXFragmentChild:
-				if c.Fragment != nil {
-					walk(c.Fragment.Children)
-				}
+				walkExpr(concrete, depth+1)
 			}
 		}
 	}
-	walk(children)
+	walkChildren = func(cs []ast.JSXChild, depth int) {
+		for _, child := range cs {
+			switch c := child.(type) {
+			case *ast.JSXElementChild:
+				walkEl(c.Element, depth)
+			case *ast.JSXFragmentChild:
+				if c.Fragment != nil {
+					walkChildren(c.Fragment.Children, depth)
+				}
+			case *ast.JSXExprContainer:
+				walkExpr(c.Expression, depth)
+			}
+		}
+	}
+	walkChildren(root.Children, 0)
 	return options
+}
+
+// numberAttr returns the text of a numeric-literal attribute.
+func numberAttr(el *ast.JSXElement, name string) (string, bool) {
+	for _, attr := range el.Opening.Attributes {
+		if attr == nil || attr.Name != name || attr.Value == nil {
+			continue
+		}
+		if lit, ok := attr.Value.(*ast.Literal); ok && lit.Kind == ast.NumberLit {
+			return lit.Value, true
+		}
+	}
+	return "", false
 }
 
 // rewritePartChildren returns a copy of children with every namespaced part of

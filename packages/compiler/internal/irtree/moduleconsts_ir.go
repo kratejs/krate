@@ -225,7 +225,7 @@ func (b *builder) moduleConstOrder(used map[string]bool) []string {
 		state[name] = 1
 		if js := b.moduleInitJS(name); js != "" {
 			deps := make([]string, 0)
-			for ref := range jsIdentRefs(js) {
+			for ref := range b.moduleInitRefs(name, js) {
 				if used[ref] && ref != name {
 					deps = append(deps, ref)
 				}
@@ -242,6 +242,25 @@ func (b *builder) moduleConstOrder(used map[string]bool) []string {
 		visit(name)
 	}
 	return out
+}
+
+// moduleInitRefs returns the identifiers a module binding's initializer
+// reads. An initializer with an AST is walked, because the text scan counts
+// object keys as references: `const cfg = {label, fmt}` would then depend on
+// the bindings `const { label, fmt } = cfg` creates and the order would loop.
+func (b *builder) moduleInitRefs(name, js string) map[string]bool {
+	init := b.moduleConstInits[name]
+	if init == nil {
+		return jsIdentRefs(js)
+	}
+	refs := map[string]bool{}
+	WalkAST(init, func(n any) bool {
+		if id, ok := n.(*ast.Identifier); ok {
+			refs[id.Name] = true
+		}
+		return true
+	})
+	return refs
 }
 
 // runsCode reports whether an initializer calls or constructs something

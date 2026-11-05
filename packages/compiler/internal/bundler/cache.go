@@ -48,6 +48,43 @@ type ModuleCache struct {
 	css      map[string]*cssEntry
 	assets   map[string]*assetEntry
 	res      *resolverMemo
+	renamed  map[string]*renamedEntry
+}
+
+// renamedEntry holds copies of one parsed module with private names renamed,
+// keyed by the names. It belongs to one parse of the module.
+type renamedEntry struct {
+	orig   *ast.Program
+	copies map[string]*ast.Program
+}
+
+func (c *ModuleCache) getRenamed(path string, orig *ast.Program, names string) *ast.Program {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e := c.renamed[path]; e != nil && e.orig == orig {
+		return e.copies[names]
+	}
+	return nil
+}
+
+func (c *ModuleCache) putRenamed(path string, orig *ast.Program, names string, prog *ast.Program) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.renamed == nil {
+		c.renamed = map[string]*renamedEntry{}
+	}
+	e := c.renamed[path]
+	if e == nil || e.orig != orig {
+		e = &renamedEntry{orig: orig, copies: map[string]*ast.Program{}}
+		c.renamed[path] = e
+	}
+	e.copies[names] = prog
 }
 
 // resolverMemo memoizes filesystem-existence probes and import resolutions for a

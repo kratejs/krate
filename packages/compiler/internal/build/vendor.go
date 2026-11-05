@@ -40,9 +40,9 @@ var layoutVendorImports sync.Map // layout path -> []vendorImport
 // collectVendorImports lists the npm bindings imported by the bundled modules.
 // Compat runtime specifiers, Krate packages, Node built-ins and packages that
 // are Krate source (workspace links) are not vendor code.
-func collectVendorImports(mods []*bundler.Module) []vendorImport {
+func collectVendorImports(bundle *bundler.Bundle) []vendorImport {
 	var out []vendorImport
-	for _, m := range mods {
+	for _, m := range bundle.Modules {
 		if m == nil || m.Program == nil || m.IsExternal || resolver.IsCompiledDependency(m.Path) {
 			continue
 		}
@@ -57,7 +57,7 @@ func collectVendorImports(mods []*bundler.Module) []vendorImport {
 				continue
 			}
 			if !strings.HasPrefix(src, "node:") {
-				resolved := bundler.ResolveImport(m.Path, src)
+				resolved := bundle.Resolver.Resolve(m.Path, src)
 				if resolved == "" || !resolver.IsCompiledDependency(resolved) || isStylePath(resolved) {
 					continue
 				}
@@ -182,7 +182,7 @@ func (b *Builder) vendorPreamble(used []vendorImport) (string, error) {
 	if b.DevMode {
 		mode = "development"
 	}
-	res := api.Build(api.BuildOptions{
+	res := esbuildBuild(api.BuildOptions{
 		Stdin:             &api.StdinOptions{Contents: src.String(), ResolveDir: b.Root, Sourcefile: "krate-vendor.js", Loader: api.LoaderJS},
 		Bundle:            true,
 		Write:             false,

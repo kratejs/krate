@@ -548,6 +548,11 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			case "trustProxy":
 				if b, ok := v.(bool); ok {
 					cfg.Server.TrustProxy = b
+					cfg.Server.TrustProxySet = true
+				}
+			case "trustedProxies":
+				if n, ok := configInt(v); ok {
+					cfg.Server.TrustedProxies = n
 				}
 			case "shutdownTimeout":
 				if n, ok := configInt(v); ok {
@@ -773,9 +778,7 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 					cfg.Markdown.CodeHighlight = b
 				}
 			case "codeTheme":
-				if s, ok := v.(string); ok {
-					cfg.Markdown.CodeTheme = s
-				}
+				cfg.Markdown.SetCodeTheme(v)
 			case "math":
 				if b, ok := v.(bool); ok {
 					cfg.Markdown.Math = b
@@ -1045,6 +1048,21 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 				}
 			}
 		}
+	case "highlight":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			if k == "languages" {
+				switch l := v.(type) {
+				case string:
+					cfg.Highlight.Languages = StringList{l}
+				case []interface{}:
+					cfg.Highlight.Languages = StringList(interfaceStrings(l))
+				}
+			}
+		}
 	case "csp":
 		m, ok := val.(map[string]interface{})
 		if !ok {
@@ -1059,6 +1077,49 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			case "directive":
 				if s, ok := v.(string); ok {
 					cfg.CSP.Directive = s
+				}
+			}
+		}
+	case "cache":
+		m, ok := val.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("expected object, got %T", val)
+		}
+		for k, v := range m {
+			switch k {
+			case "adapter":
+				if s, ok := v.(string); ok {
+					cfg.Cache.Adapter = s
+				}
+			case "url":
+				if s, ok := v.(string); ok {
+					cfg.Cache.URL = s
+				}
+			case "urlEnv":
+				if s, ok := v.(string); ok {
+					cfg.Cache.URLEnv = s
+				}
+			case "prefix":
+				if s, ok := v.(string); ok {
+					cfg.Cache.Prefix = s
+				}
+			case "timeoutMs":
+				switch n := v.(type) {
+				case int64:
+					cfg.Cache.TimeoutMs = int(n)
+				case float64:
+					cfg.Cache.TimeoutMs = int(n)
+				}
+			case "ttlSeconds":
+				switch n := v.(type) {
+				case int64:
+					cfg.Cache.TTLSeconds = int(n)
+				case float64:
+					cfg.Cache.TTLSeconds = int(n)
+				}
+			case "options":
+				if o, ok := v.(map[string]interface{}); ok {
+					cfg.Cache.Options = o
 				}
 			}
 		}

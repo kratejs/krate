@@ -16,7 +16,7 @@ import zlib from "node:zlib";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import type { KrateHandler, StaticLayer } from "./server-handler.js";
-import { requestFlash } from "./handler-html.js";
+import { hasFlashCookie } from "./handler-html.js";
 import { extName, isHiddenPath, isInternalOutputPath } from "./handler-routing.js";
 
 export interface NodeServerOptions {
@@ -204,7 +204,7 @@ export function createNodeStaticLayer(distDir: string): StaticLayer {
       let size = st.size;
       let mtime = st.mtime;
       // Build-time precompressed siblings, never for a page carrying flash state.
-      if (!request.headers.get("range") && !requestFlash(request.headers.get("cookie"))) {
+      if (!request.headers.get("range") && !hasFlashCookie(request.headers.get("cookie"))) {
         for (const [enc, suffix] of [["br", ".br"], ["gzip", ".gz"]] as const) {
           if (!acceptsEncoding(ae, enc === "gzip" ? "gzip" : "br")) continue;
           const sib = await statFile(target + suffix);

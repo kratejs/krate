@@ -566,7 +566,8 @@ function endTransition(): void {
 }
 
 /**
- * Apply `data-view-transition="name"` to `view-transition-name`. Persistent
+ * Apply `data-view-transition="name"` to `view-transition-name` (and
+ * `data-view-transition-class` to `view-transition-class`). Persistent
  * chrome (navbar/sidebar) keeps its name across mutations so it morphs
  * instead of cross-fading.
  */
@@ -574,6 +575,9 @@ function applyViewTransitionNames(root: ParentNode): void {
   root.querySelectorAll('[data-view-transition]').forEach((el) => {
     const name = (el as HTMLElement).getAttribute('data-view-transition');
     if (name) (el as HTMLElement).style.viewTransitionName = name;
+    // `<ViewTransition default="slow-fade">` selects ::view-transition-*(*.slow-fade).
+    const cls = (el as HTMLElement).getAttribute('data-view-transition-class');
+    if (cls) (el as HTMLElement).style.setProperty('view-transition-class', cls);
   });
 }
 
@@ -863,7 +867,13 @@ async function loadDocument(req: NavRequest, signal: AbortSignal): Promise<LoadR
     if (inflight) await inflight;
     if (signal.aborted) return { ok: false, aborted: true };
     const hit = cacheTake(key);
-    if (hit) return { ok: true, doc: { html: hit.html, url: hit.url, status: hit.status } };
+    if (hit) {
+      // The prefetch fetched the URL without its fragment: keep the one the
+      // link asked for, so `/docs/page#section` still scrolls to the section.
+      const hash = new URL(req.url, location.href).hash;
+      const target = hash && !new URL(hit.url, location.href).hash ? hit.url + hash : hit.url;
+      return { ok: true, doc: { html: hit.html, url: target, status: hit.status } };
+    }
   }
   let res: Response;
   try {
@@ -1368,6 +1378,20 @@ function setSlotInfo(key: string, next: SlotInfo): void {
 }
 
 function syncParams(doc: Document): void {
+  // The route pattern of a dynamic page, for useParams(). A static page has
+  // none; the empty string says so (the first page's block is not in the DOM
+  // any more once the router swapped it out).
+  let route = '';
+  const routeEl = doc.getElementById('__krate_page');
+  if (routeEl) {
+    try {
+      const data = JSON.parse(routeEl.textContent || '{}') as { r?: unknown };
+      if (typeof data.r === 'string') route = data.r;
+    } catch {
+      /* ignore */
+    }
+  }
+  (globalThis as any).__KRATE_ROUTE__ = route;
   for (const script of Array.from(doc.querySelectorAll('script:not([src])'))) {
     const m = /window\.__KRATE_PARAMS__\s*=\s*(\{[\s\S]*?\})\s*;?\s*$/.exec(script.textContent || '');
     if (!m) continue;

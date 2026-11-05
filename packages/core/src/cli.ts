@@ -45,6 +45,7 @@ async function main() {
     console.log('  dev       Start development server');
     console.log('  serve     Build and serve for preview');
     console.log('  types     Generate route/content TypeScript declarations');
+    console.log('  typecheck Generate types and run tsc');
     console.log('  check     Run compiler-enforced quality gates (a11y/SEO/perf)');
     console.log('  fix       Apply safe source fixes');
     console.log('  migrate   Plan or apply a framework migration');

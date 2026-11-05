@@ -339,7 +339,7 @@ func isHookCallee(name string) bool {
 	switch name {
 	case "createEffect", "createEffectDeps", "onMount", "onCleanup",
 		"createMemo", "createMemoDeps", "createSignal", "createResource",
-		"createReducer", "createContext",
+		"createReducer", "createContext", "createEffectEvent",
 		"__krateUse", "createDeferredValue", "createExternalStore":
 		return true
 	}
@@ -358,7 +358,7 @@ var runtimeHooks = map[string]bool{
 	"useRef": true, "useCallback": true, "useId": true, "useContext": true,
 	"useSyncExternalStore": true, "useTransition": true, "useDeferredValue": true,
 	"useOptimistic": true, "useActionState": true, "useFormStatus": true,
-	"useImperativeHandle": true, "useDebugValue": true,
+	"useImperativeHandle": true, "useDebugValue": true, "useEffectEvent": true,
 }
 
 // isCustomHookCallee reports whether name is a `use*` hook defined by the

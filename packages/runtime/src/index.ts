@@ -22,6 +22,7 @@ export { clearPersisted, readPersisted, writePersisted } from './storage.js';
 export type { PersistOptions, PersistSpec, PersistStore, StorageLike } from './storage.js';
 export { h, mount, hydrate, insert, clearNodes, disposeNode, krateApplyStyle } from './dom.js';
 export { krateList, krateBindList } from './list.js';
+export { krateHighlightInit, krateHighlight } from './highlight-bind.js';
 export { krateCondSwap, krateCondDetached, krateCondReset, krateSanitizeAttr, BLOCKED_URL } from './slots.js';
 export { Fragment, jsx, jsxs } from './jsx-runtime.js';
 export {
@@ -36,6 +37,20 @@ export {
   invalidatePrefetchCache,
 } from './router.js';
 export type { NavigateOptions, NavigationState } from './router.js';
+export {
+  usePathname,
+  useSearchParams,
+  useParams,
+  useRouter,
+  useSelectedLayoutSegment,
+  useSelectedLayoutSegments,
+  redirect,
+  permanentRedirect,
+  notFound,
+  forbidden,
+  unauthorized,
+} from './navigation.js';
+export type { AppRouterInstance } from './navigation.js';
 export { clsx, cn, cva, twMerge, Slot, cloneElement } from './class-helpers.js';
 export type { ClassValue, CVAConfig } from './class-helpers.js';
 export { krateParam } from './hook-args.js';

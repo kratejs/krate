@@ -536,8 +536,34 @@ func TestRewriteReactDOMNamespaceFlushSync(t *testing.T) {
 	if strings.Contains(out, "ReactDOM") {
 		t.Errorf("ReactDOM namespace should be removed:\n%s", out)
 	}
-	if !strings.Contains(out, "flushSync(") {
-		t.Errorf("expected a flushSync call:\n%s", out)
+	// State changes apply synchronously, so flushSync(fn) is fn(): the
+	// compat runtime's flushSync is not a global of the page script.
+	if strings.Contains(out, "flushSync") || !strings.Contains(out, "(() => {})()") {
+		t.Errorf("expected flushSync(fn) to lower to fn():\n%s", out)
+	}
+}
+
+func TestRewriteReact19Aliases(t *testing.T) {
+	out := rewriteSrc(t, `
+		import { cache, version, captureOwnerStack, unstable_useEffectEvent as useEvent } from 'react';
+		import { useFormState, preload } from 'react-dom';
+		const get = cache(async () => 1);
+		export default function Page() {
+			const [s, act] = useFormState(async (p) => p, 0);
+			const ev = useEvent(() => s);
+			preload('/a.css', { as: 'style' });
+			return <p>{version}{String(captureOwnerStack())}</p>;
+		}
+	`)
+	for _, bad := range []string{"cache(", "useFormState", "useEvent(", "unstable_", "captureOwnerStack"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("%q should be lowered away:\n%s", bad, out)
+		}
+	}
+	for _, want := range []string{"createEffectEvent(", "krateHintPreload(", `"19.2.0"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -557,5 +583,27 @@ func TestRewriteReactUseTransitionLowered(t *testing.T) {
 	}
 	if !strings.Contains(out, "startTransition") {
 		t.Errorf("expected the starter binding:\n%s", out)
+	}
+}
+
+// Two getter-only useState declarations in one component each padded the
+// pattern with `__krate_hole1`, a redeclaration that is a SyntaxError and kept
+// the whole page script from running.
+func TestGetterOnlyUseStateHolesAreUnique(t *testing.T) {
+	out := rewriteSrc(t, `import { useState } from "react";
+export default function Page() {
+  const [a] = useState(1);
+  const [b] = useState(2);
+  const [c] = useState(3);
+  return <p>{a}{b}{c}</p>;
+}`)
+	seen := map[string]int{}
+	for _, name := range []string{"__krate_hole1", "__krate_hole1_2", "__krate_hole1_3"} {
+		seen[name] = strings.Count(out, name+"]")
+	}
+	for name, n := range seen {
+		if n != 1 {
+			t.Errorf("%s is declared %d times, want once:\n%s", name, n, out)
+		}
 	}
 }

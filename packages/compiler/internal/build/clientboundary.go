@@ -404,7 +404,7 @@ export function mount(el) {
   el.setAttribute("data-krate-island-hydrated", "");
 }
 `
-	result := api.Build(api.BuildOptions{
+	result := esbuildBuild(api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
 			ResolveDir: filepath.Dir(path),
@@ -425,7 +425,7 @@ export function mount(el) {
 		TsconfigRaw:       clientTsconfigRaw(b.Root),
 		Alias:             islandAlias(b.Root, false),
 		External:          []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
-		Plugins:           []api.Plugin{clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.actionModules(), b.Cfg.BaseURLPath())},
+		Plugins:           []api.Plugin{clientOnlyMarkersPlugin(true), actionServerBundlePlugin(b.importResolver(), b.actionModules(), b.Cfg.BaseURLPath())},
 		LogLevel:          api.LogLevelSilent,
 	})
 	if len(result.Errors) > 0 || len(result.OutputFiles) == 0 {
@@ -512,6 +512,7 @@ type clientSSRImpls struct {
 	// actions are the "use server" modules; a client module that imports one
 	// gets the action proxy instead of the server source.
 	actions  map[string]map[string]string
+	res      *bundler.ImportResolver
 	basePath string
 	mu       sync.Mutex
 	done     map[string]error
@@ -536,7 +537,7 @@ export function __krate_render(C, props) {
 }
 `
 	plugin := islandRenderToStringPlugin(filepath.Dir(cb.SourcePath))
-	result := api.Build(api.BuildOptions{
+	result := esbuildBuild(api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
 			ResolveDir: filepath.Dir(cb.SourcePath),
@@ -555,7 +556,7 @@ export function __krate_render(C, props) {
 		TsconfigRaw:     clientTsconfigRaw(c.root),
 		Alias:           islandAlias(c.root, false),
 		External:        []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"},
-		Plugins:         []api.Plugin{serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.actions, c.basePath)},
+		Plugins:         []api.Plugin{serverCSSPlugin(c.root), *plugin, clientOnlyMarkersPlugin(false), actionServerBundlePlugin(c.res, c.actions, c.basePath)},
 		LogLevel:        api.LogLevelSilent,
 	})
 	var err error

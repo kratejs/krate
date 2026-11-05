@@ -141,3 +141,56 @@ func TestIsCompiledDependency(t *testing.T) {
 		}
 	}
 }
+
+func TestPackageBrowserField(t *testing.T) {
+	root := tempRoot(t)
+	writePkg(t, filepath.Join(root, "node_modules", "strfield"), map[string]string{
+		"package.json": `{"main": "node.js", "browser": "browser.js"}`,
+		"node.js":      "module.exports = 'node';",
+		"browser.js":   "module.exports = 'browser';",
+	})
+	writePkg(t, filepath.Join(root, "node_modules", "objfield"), map[string]string{
+		"package.json": `{"main": "./lib/node.js", "browser": {"./lib/node.js": "./lib/web.js", "fs": false}}`,
+		"lib/node.js":  "module.exports = 'node';",
+		"lib/web.js":   "module.exports = 'web';",
+	})
+	writePkg(t, filepath.Join(root, "node_modules", "withexports"), map[string]string{
+		"package.json": `{"main": "node.js", "browser": "browser.js", "exports": {".": "./node.js"}}`,
+		"node.js":      "x",
+		"browser.js":   "y",
+	})
+	nm := func(name string) string { return filepath.Join(root, "node_modules", name) }
+	for _, tt := range []struct {
+		pkg   string
+		conds Conditions
+		want  string
+	}{
+		{"strfield", ClientConditions(false), filepath.Join(nm("strfield"), "browser.js")},
+		{"strfield", ServerConditions(false), filepath.Join(nm("strfield"), "node.js")},
+		{"objfield", ClientConditions(false), filepath.Join(nm("objfield"), "lib", "web.js")},
+		{"objfield", ServerConditions(false), filepath.Join(nm("objfield"), "lib", "node.js")},
+		{"withexports", ClientConditions(false), filepath.Join(nm("withexports"), "node.js")},
+	} {
+		if got := NodeModuleWith(root, tt.pkg, tt.conds); got != tt.want {
+			t.Errorf("%s %v = %q, want %q", tt.pkg, tt.conds, got, tt.want)
+		}
+	}
+}
+
+func TestPackageSubpathFileBeatsDirectory(t *testing.T) {
+	root := tempRoot(t)
+	pkg := filepath.Join(root, "node_modules", "stem")
+	writePkg(t, pkg, map[string]string{
+		"package.json":  `{"main": "index.js"}`,
+		"index.js":      "x",
+		"util.js":       "file",
+		"util/data.js":  "dir without index",
+		"both.js":       "file",
+		"both/index.js": "dir",
+	})
+	for sub, want := range map[string]string{"util": "util.js", "both": "both.js"} {
+		if got := NodeModuleWith(root, "stem/"+sub, ClientConditions(false)); got != filepath.Join(pkg, want) {
+			t.Errorf("stem/%s = %q, want %q", sub, got, want)
+		}
+	}
+}

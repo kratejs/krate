@@ -1040,3 +1040,16 @@ export default function Page() {
 		t.Errorf("expected chroma-highlighted output for static children, got:\n%s", result.HTML)
 	}
 }
+
+func TestSSREvalSyntaxHighlightMarksHighlightedLines(t *testing.T) {
+	src := `function Shell(props) {
+	return <div><SyntaxHighlight lang={props.lang} highlight={props.hl}>{props.children}</SyntaxHighlight></div>;
+}
+export default function Page() {
+	return <Shell lang="js" hl="2">{` + "`const a = 1;\nconst b = 2;\nconst c = 3;`" + `}</Shell>;
+}`
+	result, _ := fullPipeline(t, src)
+	if strings.Count(result.HTML, `class="line hl"`) != 1 || !strings.Contains(result.HTML, `data-highlight-lines`) {
+		t.Errorf("expected exactly the second line marked, got:\n%s", result.HTML)
+	}
+}

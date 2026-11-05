@@ -8,6 +8,7 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 // RuntimeComponentBundle represents a compiled runtime server component
@@ -119,7 +120,8 @@ func CompileRuntimeComponents(root, outDir string, serverComponents, runtimeComp
 }
 
 // findRuntimeComponentFiles walks src/ (and pagesDir) to find files that are
-// runtime components by convention (*.runtime.tsx), directive (// @runtime),
+// runtime components by convention (*.runtime.tsx), directive (// @runtime or a
+// file-level @runtime decorator),
 // config list (runtimeComponents), or directory membership (runtimeDirs).
 func findRuntimeComponentFiles(root string, serverComponents, runtimeComponents []string, runtimeDirs []string) []string {
 	dirs := []string{filepath.Join(root, "src")}
@@ -160,7 +162,7 @@ func findRuntimeComponentFiles(root string, serverComponents, runtimeComponents 
 				return nil
 			}
 			src := string(data)
-			if bundler.HasRuntimeDirective(src) {
+			if bundler.HasRuntimeDirective(src) || tsstrip.ModuleTier(path, src) == "runtime" {
 				seen[path] = true
 				files = append(files, path)
 				return nil
@@ -264,7 +266,7 @@ globalThis.__krate_render = function(__propsJSON) {
 	defer os.Remove(shimPath)
 
 	// Compile with esbuild: IIFE format, all deps bundled, JSX automatic transform
-	result := api.Build(api.BuildOptions{
+	result := esbuildBuild(api.BuildOptions{
 		EntryPoints:       []string{wrapperPath},
 		Bundle:            true,
 		Format:            api.FormatIIFE,

@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-04",
+  "updated": "2026-11-05",
   "rows": [
     {
       "id": "hooks-state",
@@ -308,6 +308,69 @@
       ]
     },
     {
+      "id": "react-19-hooks",
+      "area": "React 19.2: useId, useEffectEvent, Activity, ViewTransition",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "n/a",
+      "target": "Source semantics",
+      "summary": "useId gives every component instance (children, nested children, lists, repeated components, conditional branches, layouts, rows added at runtime) an id that is the same in the static HTML and the hydration code, so htmlFor and id pairs match. useEffectEvent lowers to a stable function that reads the latest props and state and does not subscribe the effect that calls it. <Activity mode> renders its children in a wrapper that hides them while keeping state, cleans their effects up while hidden and runs them again when visible. <ViewTransition> names its element child for the router's view transition support (name and default class). The experimental names (unstable_Activity, unstable_ViewTransition, unstable_useEffectEvent, SuspenseList) are accepted; props with no effect warn (KR8031).",
+      "tests": [
+        "TestUseIdInChildComponents",
+        "TestUseIdInHydratedChildMatchesHTML",
+        "TestUseIdInDynamicListRowsIsNumberedPerRow",
+        "TestUseEffectEventIsLowered",
+        "TestActivityRendersChildrenAndHidesThem",
+        "TestActivityUnsupportedPropWarns",
+        "TestViewTransitionNamesItsChild",
+        "TestExperimentalReactNamesRenderTheirChildren",
+        "TestRewriteReact19Aliases",
+        "TestReact19Browser"
+      ],
+      "roadmap": true,
+      "diagnostics": [
+        "KR8031"
+      ]
+    },
+    {
+      "id": "custom-elements",
+      "area": "Custom elements",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "n/a",
+      "target": "React 19 semantics",
+      "summary": "Strings and numbers render as attributes, true as an empty attribute and false is omitted. Objects, arrays and functions render no attribute on the server and are set as properties on the client, also when the element class is defined after the page loads. Components that render such props hydrate so the property is set.",
+      "tests": [
+        "TestCustomElementPropsFollowReact19",
+        "TestCustomElementAttrs",
+        "TestReact19Browser"
+      ],
+      "roadmap": true
+    },
+    {
+      "id": "tier-decorators",
+      "area": "Component tiers: client APIs, conflicts and higher-order components",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "n/a",
+      "target": "Krate semantics",
+      "summary": "A server, static or runtime component that uses state, effects or event handlers fails the build (KR7110) with the fix, instead of shipping a dead page. Two tier sources that disagree for one component fail (KR7115). A tier decorator on an HOC-wrapped default export classifies the component and the HOC is applied, also when it is declared in another module; an HOC that cannot be inlined fails (KR8030).",
+      "tests": [
+        "TestBuildTimeTierRejectsClientAPIs",
+        "TestConflictingTiersFail",
+        "TestTierConflictRule",
+        "TestTierDecoratorOnHOCDefaultExport",
+        "TestHOCFromAnotherModuleIsApplied",
+        "TestUnresolvableHOCFailsTheBuild"
+      ],
+      "roadmap": true,
+      "diagnostics": [
+        "KR7110",
+        "KR7115",
+        "KR8030"
+      ]
+    },
+    {
       "id": "server-actions",
       "area": "Server actions",
       "source": "beta",
@@ -366,7 +429,7 @@
       "islands": "beta",
       "ssr": "beta",
       "target": "Documented compat",
-      "summary": "Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island chunks, server-rendered initial markup, hydration, and an island error boundary.",
+      "summary": "Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island entries bundled with shared modules, server-rendered initial markup, hydration, and an island error boundary.",
       "tests": [
         "TestIslandSignalPropBridge",
         "TestIslandLocalComponent",
@@ -429,13 +492,91 @@
       ]
     },
     {
+      "id": "react-hook-libraries",
+      "area": "npm React hook libraries (zustand, react-hook-form, SWR, TanStack Query, ...)",
+      "source": "n/a",
+      "islands": "beta",
+      "ssr": "beta",
+      "target": "Run as Preact islands",
+      "summary": "A user module that calls a hook of an npm package built on React (or a store hook made by its factory, or a custom hook wrapping one) is bundled for Preact (react resolves to preact/compat, CommonJS require of react is bridged), rendered on the server and hydrated in place. The islands of all pages are bundled together with code splitting, so a store module is one store for the whole site and its state survives client-side navigation, forward and back; a leaving island unmounts and releases its subscriptions. A provider a layout wraps around its children (a query client, a Redux store, a theme) is lifted into the islands, one instance for every island of the page, with nested layouts composing; a provider that cannot be lifted is reported (KR8015, KR8016). Pages rendered per request (SSR, ISR) answer with the islands' build-time markup and hydrate. Checked by hand in Chromium against zustand 5.0.16, TanStack Query 5.105.3, react-redux 9.3.1 with Redux Toolkit 2.14.0 and styled-components 6.6.0 (ThemeProvider), and earlier against valtio 2, jotai 2, react-hook-form 7, SWR 2, TanStack Table 8, react-i18next 15 and usehooks-ts 3; the repository tests use stand-in packages with the same import shapes and behavior.",
+      "tests": [
+        "TestReactHookLibraryPageIsland",
+        "TestReactHookLibraryComponentIslands",
+        "TestReactHookLibraryPageForms",
+        "TestReactLibraryValueInPageMakesIsland",
+        "TestReactIslandModulesAreNotKrateSource",
+        "TestReactHookLibraryInLayoutDiagnostic",
+        "TestPreactCompatChunkHasDefaultExport",
+        "TestBrowserReactLibraryIslands",
+        "TestLayoutProvidersReachIslands",
+        "TestIslandModulesAreSharedAcrossPages",
+        "TestLayoutProviderDiagnostics",
+        "TestIslandChunksSurviveDiskCache",
+        "TestPerRequestPageIslandStubs"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "A layout, template or server-rendered page cannot host these hooks; the build fails with KR8013.",
+        "A layout provider whose props read the layout's params, a signal or a state setter, or that renders markup of its own, cannot reach the islands (KR8015, KR8016).",
+        "State inside a component resets when its island unmounts on navigation; module-level state is kept.",
+        "A page that is itself such an island cannot take route props (KR8013) or use Krate-only APIs in the same module.",
+        "An island in a page rendered per request is server-rendered from build-time props; a prop known only per request makes it client-only.",
+        "Only Chromium was run for the browser check."
+      ],
+      "diagnostics": [
+        "KR8013",
+        "KR8015",
+        "KR8016"
+      ]
+    },
+    {
+      "id": "css-in-js",
+      "area": "CSS-in-JS (styled-components, emotion, MUI)",
+      "source": "n/a",
+      "islands": "partial",
+      "ssr": "partial",
+      "target": "Client-only islands",
+      "summary": "Components built with styled-components, @emotion/styled, the emotion css prop (with the jsxImportSource pragma) or MUI run as Preact islands and are styled in the browser. They are client-only because the styles are created while rendering, so the server HTML holds an empty placeholder (KR8008 notice). A css prop without emotion's runtime is reported (KR8014). A ThemeProvider in a layout reaches them. Checked by hand in Chromium against styled-components 6, @emotion/styled and @emotion/react 11 and MUI 9.",
+      "tests": [
+        "TestReactCSSInJSIsland",
+        "TestBrowserReactLibraryIslands"
+      ],
+      "roadmap": false,
+      "knownLimits": [
+        "No server-rendered markup or styles: content appears when the island mounts.",
+        "A project-wide jsxImportSource for emotion in tsconfig is not supported; use the per-file pragma."
+      ],
+      "diagnostics": [
+        "KR8008",
+        "KR8014"
+      ]
+    },
+    {
+      "id": "island-client-directives",
+      "area": "Island hydration control (client:visible, client:idle)",
+      "source": "n/a",
+      "islands": "beta",
+      "ssr": "n/a",
+      "target": "Astro-style directives",
+      "summary": "client:visible and client:idle on an island's root tag defer mounting until the island is near the viewport or the browser is idle. The server markup stays; the chunk is neither preloaded nor fetched before then, and the directive never reaches the component. client:load is the default.",
+      "tests": [
+        "TestIslandClientDirectives",
+        "TestClientDirectiveOnNonIslandWarns",
+        "TestBrowserReactLibraryIslands"
+      ],
+      "roadmap": false,
+      "diagnostics": [
+        "KR8012"
+      ]
+    },
+    {
       "id": "ssr-islands",
       "area": "SSR island hydration",
       "source": "n/a",
       "islands": "beta",
       "ssr": "beta",
       "target": "Hydration-safe",
-      "summary": "Islands with build-time-known props are server-rendered with Preact and hydrated in place. Each island has its own chunk; unknown props, browser-only components, and portals fall back to client-only with a warning. Request-time SSR and streaming island regions remain separate work.",
+      "summary": "Islands with build-time-known props are server-rendered with Preact and hydrated in place. The island entries of all pages are bundled together, so modules pages share are shared files. Unknown props, browser-only components, and portals fall back to client-only with a warning. A page rendered per request (SSR, ISR, streaming) answers with the placeholders and build-time markup of its islands instead of running them in the Node renderer; request-time props for an island are not supported.",
       "tests": [
         "TestIslandSignalPropBridge",
         "TestIslandSSRWithHooks",
@@ -448,7 +589,10 @@
         "TestIslandPerIslandChunks",
         "TestIslandChunksMinified",
         "browser:/react-demo/",
-        "TestIslandBundleFailureUsesKR8009"
+        "TestIslandBundleFailureUsesKR8009",
+        "TestPerRequestPageIslandStubs",
+        "TestIslandChunksSurviveDiskCache",
+        "TestBrowserReactLibraryIslands"
       ],
       "roadmap": false,
       "diagnostics": [
@@ -526,6 +670,53 @@
         "With middleware, Vercel and Netlify send every page request to the function, which serves prerendered HTML from the bundle (bundle size grows with static pages); assets keep going to the CDN. A public file without an extension is treated as a page there.",
         "Legacy (req, res) API handlers, Go API routes, Go components, the API sidecar and community plugin serve hooks are not supported on serverless targets.",
         "Cloudflare bundles fail at build time for Node built-ins outside nodejs_compat (fs, vm, net, child_process)."
+      ]
+    },
+    {
+      "id": "metadata-routes",
+      "area": "Metadata routes and ImageResponse",
+      "source": "beta",
+      "islands": "n/a",
+      "ssr": "beta",
+      "target": "Next.js sitemap.ts, robots.ts, manifest.ts, opengraph-image and twitter-image",
+      "summary": "sitemap.ts, robots.ts and manifest.ts build sitemap.xml, robots.txt and manifest.webmanifest; opengraph-image and twitter-image files (including per-segment and per-generateStaticParams ones) build real PNGs from ImageResponse JSX with a pure Go renderer (flex layout, text and fonts, colours, gradients, images), and feed og:image and twitter:image. Anything the renderer cannot draw is a build error (KR7131). A file wins over a plugin (KR7133). Per-request ImageResponse works in Node API routes under krate start only; Workers and serverless functions have no renderer. krate migrate nextjs maps these files natively. Not supported: CSS grid, transform, filter, SVG, icon and apple-icon files, opengraph-image.alt.txt.",
+      "tests": [
+        "TestMetadataRouteFilesBuild",
+        "TestImageResponseUnsupportedFailsTheBuild",
+        "TestMetadataRoutePluginOverrideIsSaid",
+        "TestImageResponsePerRequestOnTheHost",
+        "TestMetadataRoutesMigrateNatively"
+      ]
+    },
+    {
+      "id": "code-highlighting",
+      "area": "Code highlighting (build, request time, browser)",
+      "source": "beta",
+      "islands": "beta",
+      "ssr": "beta",
+      "target": "chroma parity",
+      "summary": "Code is highlighted by chroma at build time, by the same lexers in the Node renderer for request-time code, and by the same lexers loaded on demand for code that changes in the browser. The lexers are exported from the binary's own chroma and run token for token (the markup is identical), in light and dark from one stylesheet, with a size, line and time limit that leaves text plain instead of stalling.",
+      "tests": [
+        "TestParityCorpus",
+        "TestTranspiledRegexesMatchRegexp2",
+        "TestPatternOverrides",
+        "TestAdversarialInputs",
+        "TestRuleProfile",
+        "TestThemeCSSMatchesChromaPerMode",
+        "TestCodeThemeBrowser",
+        "TestDynamicCodeBrowser",
+        "TestSSRCodeHighlightingE2E",
+        "TestDynamicCodeShipsHighlighterOnlyWhereUsed",
+        "ci:code highlighting size budget"
+      ],
+      "diagnostics": [
+        "KR7150",
+        "KR7151"
+      ],
+      "knownLimits": [
+        "Request-time highlighting runs in the Node renderer; serverless deploy targets write plain text.",
+        "The browser and request-time highlighters ship 16 languages; other languages are highlighted at build time only.",
+        "A Markdown fence that names a language outside the shipped set leaves the snippet plain."
       ]
     }
   ]

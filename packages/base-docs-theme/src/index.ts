@@ -3,6 +3,7 @@ import { defineDocsTheme } from "@krate/plugin";
 export {
   defineSite,
   SiteHeader,
+  SiteNav,
   SiteFooter,
   HomeLayout,
   ThemeToggle,
@@ -14,6 +15,8 @@ export type {
   SiteSocial,
   SiteFooterColumn,
 } from "./shell";
+export { activeNavLink, normalizeNavPath } from "./nav";
+export type { ActiveNav, ActiveNavLink } from "./nav";
 export { DocsSearch, DocsSearchComponent } from "./search";
 export type { DocsSearchProps } from "./search";
 
@@ -54,6 +57,7 @@ export function baseDocsTheme(options: BaseDocsThemeOptions = {}) {
     name: "@krate/base-docs-theme",
     module: new URL("./layout.tsx", import.meta.url).href,
     options,
+    titleSlot: true,
   });
 }
 

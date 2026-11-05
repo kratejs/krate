@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -88,6 +89,9 @@ func Applies(path string) bool {
 }
 
 func loaderFor(path string) api.Loader {
+	if !Applies(path) {
+		return api.LoaderJSX
+	}
 	if strings.EqualFold(filepath.Ext(path), ".tsx") {
 		return api.LoaderTSX
 	}
@@ -246,18 +250,34 @@ func internalErr(path string, err error) *Error {
 // messageDiag converts an esbuild error to a diagnostic at the original
 // file:line:col (1-based rune column).
 func messageDiag(path string, m api.Message, orig, full *textIndex, bom bool) diag.Diagnostic {
-	hint := "Krate strips TypeScript with esbuild before compiling; fix the TypeScript/JSX syntax at this location"
+	// esbuild's own notes are the useful hint. When a note points elsewhere
+	// ("The opening "p" tag is here:") the position is part of the hint, since
+	// the diagnostic only carries the primary location.
+	hint := ""
 	for _, n := range m.Notes {
-		if n.Text != "" {
-			hint = n.Text
-			break
+		if n.Text == "" {
+			continue
 		}
+		hint = n.Text
+		if n.Location != nil {
+			line, col := locate(n.Location, orig, full, bom)
+			hint = strings.TrimSuffix(hint, ":") + " (" + strconv.Itoa(line) + ":" + strconv.Itoa(col) + ")"
+		}
+		break
 	}
 	d := diag.New(path, 0, 0, m.Text, hint, "")
 	if m.Location == nil {
 		return d
 	}
-	loc := m.Location
+	line, col := locate(m.Location, orig, full, bom)
+	d.Line, d.Col = line, col
+	d.Source = full.line(line)
+	return d
+}
+
+// locate maps an esbuild location in the stripped body to Krate's
+// 1-based line and column in the original file.
+func locate(loc *api.Location, orig, full *textIndex, bom bool) (line, col int) {
 	// esbuild reports a 1-based line and a 0-based byte column.
 	off := 0
 	if ln := loc.Line - 1; ln >= 0 && ln < len(orig.es) {
@@ -271,10 +291,7 @@ func messageDiag(path string, m api.Message, orig, full *textIndex, bom bool) di
 	if bom {
 		off += len(utf8BOM)
 	}
-	line, col := full.kratePos(off)
-	d.Line, d.Col = line, col
-	d.Source = full.line(line)
-	return d
+	return full.kratePos(off)
 }
 
 // line returns the text of 1-based line n without its terminator.
@@ -493,17 +510,36 @@ func (r *Result) remapDiag(d diag.Diagnostic) diag.Diagnostic {
 	return d
 }
 
-// Parse lexes and parses a page/component/module source for compilation. For
-// TypeScript paths the source is stripped first and all AST positions and
-// parser diagnostics are mapped back to the original; other paths are parsed
-// as-is. A TypeScript syntax error returns a nil program and its diagnostics.
+// Parse lexes and parses a page/component/module source for compilation. Tier
+// decorators are removed and recorded on the declarations they mark. TypeScript
+// sources are stripped first and all AST positions and parser diagnostics are
+// mapped back to the original; a TypeScript syntax error returns a nil program
+// and its diagnostics. Other paths are parsed as-is unless they use decorators,
+// which only esbuild can lower.
 func Parse(path, src string, opts Options) (*ast.Program, []error) {
+	scan := scanTiers(path, src, opts)
+	if scan != nil {
+		if len(scan.errs) > 0 {
+			return nil, scan.errs
+		}
+		src = scan.src
+	}
+	prog, errs := parseSource(path, src, opts)
+	if scan != nil && prog != nil {
+		scan.apply(prog)
+	}
+	return prog, errs
+}
+
+func parseSource(path, src string, opts Options) (*ast.Program, []error) {
 	if !Applies(path) {
 		p := parser.New(lexer.New(src).Tokenize())
 		p.Filename = path
 		p.SetSource(src)
 		prog := p.ParseProgram()
-		return prog, p.Errors()
+		if !usesDecorators(p.Errors()) {
+			return prog, p.Errors()
+		}
 	}
 	res, err := Strip(path, src, opts)
 	if err != nil {
@@ -518,4 +554,13 @@ func Parse(path, src string, opts Options) (*ast.Program, []error) {
 	prog := p.ParseProgram()
 	res.RemapProgram(prog)
 	return prog, res.RemapErrors(p.Errors())
+}
+
+func usesDecorators(errs []error) bool {
+	for _, err := range errs {
+		if strings.Contains(err.Error(), parser.DecoratorsUnsupported) {
+			return true
+		}
+	}
+	return false
 }

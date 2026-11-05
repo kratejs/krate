@@ -36,14 +36,14 @@ export default function App() {
 func TestNonFoldableValuesOnComponentWithoutSignals(t *testing.T) {
 	src := `
 export default function App() {
-  return <p>{new Date(0).toISOString()} {"abc".localeCompare("abd")} {(255).toString(16)}</p>;
+  return <p>{new Date(0).toLocaleDateString("de-DE")} {"abc".localeCompare("abd")} {(255).toString(16)}</p>;
 }
 `
 	res, hjs := fullPipeline(t, src)
 	if !strings.Contains(res.HTML, "ff") {
 		t.Errorf("(255).toString(16) not folded at build time:\n%s", res.HTML)
 	}
-	for _, want := range []string{"new Date(0).toISOString()", "localeCompare"} {
+	for _, want := range []string{`new Date(0).toLocaleDateString('de-DE')`, "localeCompare"} {
 		if !strings.Contains(hjs, want) {
 			t.Errorf("non-foldable expression %q has no hydration binding:\n%s", want, hjs)
 		}
@@ -167,8 +167,8 @@ export default function App() {
 }
 
 func TestDecoratedClassComponentWarns(t *testing.T) {
-	raw := `import React from "react";
-function track(c: any) { return c; }
+	class := `import React from "react";
+function track(c: any, _?: any) { return c; }
 @track
 class Box extends React.Component<{ n: number }> {
   render() { return <p>box {this.props.n}</p>; }
@@ -177,24 +177,72 @@ export default function App() {
   return <div><Box n={2} /></div>;
 }
 `
-	stripped, err := tsstrip.Strip("test.tsx", raw, tsstrip.Options{})
-	if err != nil {
-		t.Fatal(err)
+	member := `import React from "react";
+function track(c: any, _?: any, d?: any) { return d ?? c; }
+class Box extends React.Component<{ n: number }> {
+  @track label() { return "box"; }
+  render() { return <p>{this.label()}</p>; }
+}
+export default function App() {
+  return <div><Box n={2} /></div>;
+}
+`
+	tests := []struct {
+		name, raw string
+		opts      tsstrip.Options
+	}{
+		{"class", class, tsstrip.Options{}},
+		{"member", member, tsstrip.Options{}},
+		{"legacy class", class, tsstrip.Options{ExperimentalDecorators: true}},
+		{"legacy member", member, tsstrip.Options{ExperimentalDecorators: true}},
 	}
-	prog := parseProg(t, stripped.Code)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stripped, err := tsstrip.Strip("test.tsx", tt.raw, tt.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prog := parseProg(t, stripped.Code)
+			bundler.RewriteReact(prog)
+			ann := annotator.Annotate(prog, &config.Config{}, "test.tsx", tt.raw)
+			tree := irtree.Build(prog, ann)
+			found := false
+			for _, w := range tree.Warnings {
+				if strings.Contains(w.Message, "decorated class <Box>") && strings.Contains(w.Hint, "decorator") {
+					found = true
+				}
+				if strings.Contains(w.Message, "could not be resolved") {
+					t.Errorf("generic message instead of the decorator diagnostic: %s", w.Message)
+				}
+			}
+			if !found {
+				t.Errorf("no decorator warning: %+v", tree.Warnings)
+			}
+		})
+	}
+}
+
+// A tier decorator is compile-time syntax, so it leaves the class lowerable.
+func TestTierDecoratedClassComponentRenders(t *testing.T) {
+	raw := `import { Component } from "react";
+@server
+class Box extends Component {
+  render() { return <p>box</p>; }
+}
+export default function App() {
+  return <div><Box /></div>;
+}
+`
+	prog, errs := tsstrip.Parse("test.tsx", raw, tsstrip.Options{})
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
 	bundler.RewriteReact(prog)
 	ann := annotator.Annotate(prog, &config.Config{}, "test.tsx", raw)
-	tree := irtree.Build(prog, ann)
-	found := false
-	for _, w := range tree.Warnings {
-		if strings.Contains(w.Message, "decorated class <Box>") && strings.Contains(w.Hint, "decorator") {
-			found = true
-		}
-		if strings.Contains(w.Message, "could not be resolved") {
-			t.Errorf("generic message instead of the decorator diagnostic: %s", w.Message)
-		}
+	if ann.ComponentTiers["Box"] != irtree.TierServer {
+		t.Errorf("Box tier = %v", ann.ComponentTiers["Box"])
 	}
-	if !found {
-		t.Errorf("no decorator warning: %+v", tree.Warnings)
+	if tree := irtree.Build(prog, ann); len(tree.Warnings) != 0 {
+		t.Errorf("warnings: %+v", tree.Warnings)
 	}
 }

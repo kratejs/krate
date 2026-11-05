@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	krateversion "github.com/kratejs/krate/packages/compiler/internal/version"
 )
@@ -85,6 +87,9 @@ type diskPageEntry struct {
 	WorkerFiles map[string]string
 	WorkerEsm   []string
 	DynImports  map[string]string
+	// IslandEntries are the island chunk entries of the page; a replay
+	// registers them so the site-wide island bundle still contains them.
+	IslandEntries []islandEntry
 }
 
 // diskCacheEnabled reports whether the cross-run page cache is active. It is
@@ -125,7 +130,7 @@ func (c *buildDiskCache) setContentHash(contentHash string) {
 // diskCacheSchema is bumped whenever the shape or the semantics of cached page
 // output change (e.g. new emit passes such as DCE or source maps) so entries
 // written by an older pipeline can never be replayed.
-var diskCacheSchema = "5"
+var diskCacheSchema = "6"
 
 var (
 	buildStampOnce  sync.Once
@@ -157,7 +162,13 @@ func compilerBuildStamp() string {
 // fingerprintFor is the build-wide cache namespace: compiler build stamp +
 // cache schema + the resolved config + the content-collection hash.
 func (c *buildDiskCache) fingerprintFor(contentHash string) string {
-	sum := sha256.Sum256([]byte(compilerBuildStamp() + "\x00" + diskCacheSchema + "\x00" + c.cfgHash + "\x00" + contentHash))
+	// A page can bake the build clock (new Date(), Date.now()); the instant
+	// SOURCE_DATE_EPOCH names is part of what it was built from.
+	epoch := ""
+	if t, ok := jsvalue.SourceDateEpoch(); ok {
+		epoch = strconv.FormatInt(t.Unix(), 10)
+	}
+	sum := sha256.Sum256([]byte(compilerBuildStamp() + "\x00" + diskCacheSchema + "\x00" + c.cfgHash + "\x00" + contentHash + "\x00" + epoch))
 	return hex.EncodeToString(sum[:])
 }
 

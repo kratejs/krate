@@ -46,8 +46,13 @@
   --krate-text-muted: var(--krate-muted);
   --krate-card-bg: var(--krate-bg);
 
-  --krate-code-bg: #18181b;
-  --krate-code-text: #fafafa;
+  /* Code surfaces. The base values are what a block with no theme stylesheet
+     (an unhighlighted <Code>) uses; a highlighted block takes its colours from
+     the code theme (--chroma-bg / --chroma-fg), and --krate-code-bg,
+     --krate-code-text, --krate-code-title-bg and --krate-code-title-text, when
+     set, override both. They follow the colour mode like the rest. */
+  --krate-code-bg-base: #f7f7f7;
+  --krate-code-text-base: #1f2328;
 
   /* Elevation - offset + soft blur, low alpha. `--krate-hairline` is a top
      inner highlight the dark ramp turns on to separate surfaces without depth. */
@@ -82,6 +87,8 @@
     --krate-danger-text: #f87171;
     --krate-success-text: #4ade80;
     --krate-warning-text: #facc15;
+    --krate-code-bg-base: #0d1117;
+    --krate-code-text-base: #e6edf3;
   }
 }
 
@@ -105,6 +112,8 @@
   --krate-danger-text: #f87171;
   --krate-success-text: #4ade80;
   --krate-warning-text: #facc15;
+  --krate-code-bg-base: #0d1117;
+  --krate-code-text-base: #e6edf3;
 }
 
 :where(:root[data-theme='light']) {
@@ -122,6 +131,8 @@
   --krate-danger-text: #b91c1c;
   --krate-success-text: #15803d;
   --krate-warning-text: #854d0e;
+  --krate-code-bg-base: #f7f7f7;
+  --krate-code-text-base: #1f2328;
 }
 
 /* Reduced motion: every component class (and its ::before/::after parts) loses

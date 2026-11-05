@@ -1,8 +1,11 @@
 package jseval
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -108,25 +111,46 @@ export var URL = globalThis.URL;
 export default { fileURLToPath: fileURLToPath, pathToFileURL: pathToFileURL, URL: URL };
 `,
 	"fs": `
+function enoent(op, p) { var e = new Error("ENOENT: no such file or directory, " + op + " '" + p + "'"); e.code = 'ENOENT'; return e; }
 export function readFileSync(p) {
   var r = globalThis.__krateFsRead(String(p));
-  if (r === null || r === undefined) { var e = new Error("ENOENT: no such file or directory, open '" + p + "'"); e.code = 'ENOENT'; throw e; }
+  if (r === null || r === undefined) throw enoent('open', p);
   return r;
 }
-export function existsSync(p) { return !!globalThis.__krateFsExists(String(p)); }
+export function existsSync(p) { return globalThis.__krateFsExists(String(p)) === 1; }
 export function readdirSync(p) {
   var r = globalThis.__krateFsReaddir(String(p));
-  if (r === null || r === undefined) { var e = new Error("ENOENT: no such file or directory, scandir '" + p + "'"); e.code = 'ENOENT'; throw e; }
+  if (r === null || r === undefined) throw enoent('scandir', p);
   return r;
 }
-export default { readFileSync: readFileSync, existsSync: existsSync, readdirSync: readdirSync };
+export function statSync(p, opts) {
+  var kind = globalThis.__krateFsStat(String(p));
+  if (kind === null || kind === undefined) {
+    if (opts && opts.throwIfNoEntry === false) return undefined;
+    throw enoent('stat', p);
+  }
+  return { isFile: function () { return kind === 'f'; }, isDirectory: function () { return kind === 'd'; }, isSymbolicLink: function () { return false; } };
+}
+export var lstatSync = statSync;
+export default { readFileSync: readFileSync, existsSync: existsSync, readdirSync: readdirSync, statSync: statSync, lstatSync: lstatSync };
 `,
 	"os": `
-export var EOL = '\n';
-export function platform() { return 'linux'; }
-export default { EOL: EOL, platform: platform };
+export var EOL = globalThis.__krateOS.eol;
+export function platform() { return globalThis.__krateOS.platform; }
+export function type() { return globalThis.__krateOS.type; }
+export function arch() { return globalThis.__krateOS.arch; }
+export function homedir() { return globalThis.__krateOS.homedir; }
+export function tmpdir() { return globalThis.__krateOS.tmpdir; }
+export function cpus() { var out = []; for (var i = 0; i < globalThis.__krateOS.cpus; i++) out.push({ model: '', speed: 0 }); return out; }
+export default { EOL: EOL, platform: platform, type: type, arch: arch, homedir: homedir, tmpdir: tmpdir, cpus: cpus };
 `,
 }
+
+// bareBuiltinFilter matches the Node built-ins that are imported without the
+// node: prefix. The shimmed ones load their implementation, the others the
+// stub that names the module, instead of falling through to "could not load
+// module" with advice to run npm install.
+const bareBuiltinFilter = `^(?:path|url|fs|os|fs/promises|child_process|crypto|http|https|http2|net|tls|dgram|dns|stream|zlib|util|module|assert|buffer|events|readline|worker_threads|cluster|vm|v8|perf_hooks|querystring|string_decoder|timers|tty|process|constants|punycode|async_hooks|inspector|repl|diagnostics_channel)$`
 
 // nodeShimPlugin resolves Node built-ins for config evaluation: the shimmed
 // ones load real implementations, all others a stub that throws a clear error
@@ -135,7 +159,7 @@ func nodeShimPlugin() api.Plugin {
 	return api.Plugin{
 		Name: "krate-node-shims",
 		Setup: func(pb api.PluginBuild) {
-			pb.OnResolve(api.OnResolveOptions{Filter: `^(?:path|url|fs|os)$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			pb.OnResolve(api.OnResolveOptions{Filter: bareBuiltinFilter}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				return api.OnResolveResult{Path: args.Path, Namespace: nodeShimNamespace}, nil
 			})
 			pb.OnResolve(api.OnResolveOptions{Filter: `^node:`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
@@ -176,25 +200,44 @@ func jsQuote(s string) string {
 	return b.String()
 }
 
-// registerNodeHost installs the host functions the fs shim calls.
+// registerNodeHost installs the host functions the fs shim calls and the
+// process, module and Buffer globals config files commonly touch. Relative fs
+// paths resolve against cwd (the project root), which is also process.cwd().
 func registerNodeHost(rt *jsruntime.Runtime, cwd string) {
 	_ = rt.SetGlobal("__krateCwd", filepath.ToSlash(cwd))
-	_ = rt.RegisterFunc("__krateFsRead", func(args []any) (any, error) {
+	abs := func(args []any) string {
 		p, _ := args[0].(string)
-		data, err := os.ReadFile(p)
+		if p != "" && !filepath.IsAbs(p) {
+			p = filepath.Join(cwd, p)
+		}
+		return p
+	}
+	_ = rt.RegisterFunc("__krateFsRead", func(args []any) (any, error) {
+		data, err := os.ReadFile(abs(args))
 		if err != nil {
 			return nil, nil
 		}
 		return string(data), nil
 	})
+	// QuickJS callbacks cannot return a Go bool, so existence is 1 or 0.
 	_ = rt.RegisterFunc("__krateFsExists", func(args []any) (any, error) {
-		p, _ := args[0].(string)
-		_, err := os.Stat(p)
-		return err == nil, nil
+		if _, err := os.Stat(abs(args)); err != nil {
+			return 0, nil
+		}
+		return 1, nil
+	})
+	_ = rt.RegisterFunc("__krateFsStat", func(args []any) (any, error) {
+		st, err := os.Stat(abs(args))
+		if err != nil {
+			return nil, nil
+		}
+		if st.IsDir() {
+			return "d", nil
+		}
+		return "f", nil
 	})
 	_ = rt.RegisterFunc("__krateFsReaddir", func(args []any) (any, error) {
-		p, _ := args[0].(string)
-		ents, err := os.ReadDir(p)
+		ents, err := os.ReadDir(abs(args))
 		if err != nil {
 			return nil, nil
 		}
@@ -204,4 +247,48 @@ func registerNodeHost(rt *jsruntime.Runtime, cwd string) {
 		}
 		return out, nil
 	})
+	home, _ := os.UserHomeDir()
+	osInfo := map[string]any{
+		"platform": nodePlatform(),
+		"arch":     nodeArch(),
+		"type":     nodeOSType(),
+		"eol":      "\n",
+		"homedir":  home,
+		"tmpdir":   os.TempDir(),
+		"cpus":     runtime.NumCPU(),
+	}
+	if runtime.GOOS == "windows" {
+		osInfo["eol"] = "\r\n"
+	}
+	_ = rt.SetGlobal("__krateOS", osInfo)
+	argv := append([]string(nil), os.Args...)
+	argvJSON, _ := json.Marshal(argv)
+	_, _ = rt.Execute(fmt.Sprintf(nodeGlobalsPrelude, argvJSON, jsQuote(nodePlatform())))
+}
+
+func nodePlatform() string {
+	if runtime.GOOS == "windows" {
+		return "win32"
+	}
+	return runtime.GOOS
+}
+
+func nodeArch() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x64"
+	case "386":
+		return "ia32"
+	}
+	return runtime.GOARCH
+}
+
+func nodeOSType() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "Windows_NT"
+	case "darwin":
+		return "Darwin"
+	}
+	return "Linux"
 }

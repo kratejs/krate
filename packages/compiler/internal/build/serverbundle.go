@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/evanw/esbuild/pkg/api"
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
 
@@ -16,15 +17,15 @@ import (
 //   - JSX automatic transform using @krate/runtime/jsx-runtime
 //   - Head, Suspense, Script, Style imported from @krate/runtime/server
 //   - All dependencies bundled (except node_modules externals)
-func CompileServerBundles(results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) map[string]string {
-	bundles, _ := compileServerBundles(results, root, outDir, sourcemap, actionModules, actionBasePath)
+func CompileServerBundles(res *bundler.ImportResolver, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) map[string]string {
+	bundles, _ := compileServerBundles(res, results, root, outDir, sourcemap, actionModules, actionBasePath)
 	return bundles
 }
 
 // compileServerBundles is CompileServerBundles that also returns the bundle
 // failures of pages that render server components. Those pages have no baked
 // body to fall back to, so a missing bundle must fail the build.
-func compileServerBundles(results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) (map[string]string, []error) {
+func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, root, outDir string, sourcemap bool, actionModules map[string]map[string]string, actionBasePath string) (map[string]string, []error) {
 	// Collect non-SSG pages that actually need the Node renderer. A streaming
 	// page whose regions are all Go (or that has no dynamic regions at all) is
 	// rendered by the Go server + Go host alone, so its page bundle is never
@@ -43,7 +44,7 @@ func compileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 	_ = os.MkdirAll(bundleDir, 0755)
 
 	bundles := make(map[string]string, len(ssrPages))
-	impls := &clientSSRImpls{root: root, bundleDir: bundleDir, actions: actionModules, basePath: actionBasePath}
+	impls := &clientSSRImpls{res: res, root: root, bundleDir: bundleDir, actions: actionModules, basePath: actionBasePath}
 	var fatal []error
 	var mu sync.Mutex
 	fail := func(page *PageResult, err error) {
@@ -80,12 +81,15 @@ func compileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 			// Inject Head/Suspense/Script/Style imports at the top of the file
 			// so pages can use them as globals (matching krate compiler behavior)
 			pageSrc := string(sourceData)
+			if page.IslandStubs != nil {
+				pageSrc = page.IslandStubs.applyAttrs(pageSrc)
+			}
 			// Annotate Go-component call sites with __krateGoId so the shim can
 			// inline a server-tier component's build-time HTML (page.GoBaked).
 			if locals := goComponentLocals(absSource, pageSrc, root); len(locals) > 0 {
 				pageSrc = annotateGoCalls(pageSrc, absSource, locals)
 			}
-			injectedSource := injectServerGlobals(pageSrc) + serverExportEntrySuffix(page.ServerExports, absSource)
+			injectedSource := injectServerGlobals(pageSrc) + serverExportEntrySuffix(page.ServerExports, absSource) + metadataEntrySuffix(page.MetadataSegments, page.MetadataPageFiles, root)
 
 			// Compile with esbuild - use stdin so esbuild resolves relative imports
 			// from the project root (AbsWorkingDir) rather than a temp file location
@@ -103,7 +107,7 @@ func compileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 				return
 			}
 
-			result := api.Build(api.BuildOptions{
+			result := esbuildBuild(api.BuildOptions{
 				AbsWorkingDir:   root,
 				Bundle:          true,
 				Format:          api.FormatESModule,
@@ -120,7 +124,7 @@ func compileServerBundles(results []*PageResult, root, outDir string, sourcemap 
 					"@krate/runtime",
 					"@krate/runtime/*",
 				},
-				Plugins: []api.Plugin{reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(actionModules, actionBasePath)},
+				Plugins: serverBundlePlugins(page, absSource, reactServerShimPlugin(), serverCSSPlugin(root), cbPlugin, unusedClientModulePlugin(), serverExportPlugin(page.ServerExports, absSource), goServerBundlePlugin(page.GoBaked, root), actionServerBundlePlugin(res, actionModules, actionBasePath)),
 				Stdin: &api.StdinOptions{
 					Loader:     api.LoaderTSX,
 					Contents:   injectedSource,
@@ -237,4 +241,13 @@ func reactServerShimPlugin() api.Plugin {
 			})
 		},
 	}
+}
+
+// serverBundlePlugins adds the island stubs of the page, first, so they see
+// the page's imports before any other plugin.
+func serverBundlePlugins(page *PageResult, absSource string, plugins ...api.Plugin) []api.Plugin {
+	if page.IslandStubs == nil {
+		return plugins
+	}
+	return append([]api.Plugin{islandServerStubPlugin(page.IslandStubs, absSource)}, plugins...)
 }

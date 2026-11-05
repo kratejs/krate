@@ -11,6 +11,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/astjson"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
+	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/safe"
 )
@@ -106,7 +107,7 @@ func applyPluginOutput(hookName string, output *communityOutput, outDir string, 
 		if title == "" {
 			title = "Krate"
 		}
-		html := "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>" + title + "</title>\n</head>\n<body>\n<div id=\"root\">" + r.Content + "</div>\n</body>\n</html>\n"
+		html := "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>" + escape.Text(title) + "</title>\n</head>\n<body>\n<div id=\"root\">" + r.Content + "</div>\n</body>\n</html>\n"
 		htmlPath := filepath.Join(pageDir, "index.html")
 		if err := fsutil.WriteFileAtomic(htmlPath, []byte(html), 0644); err != nil {
 			return fmt.Errorf("writing route %s: %w", r.Path, err)

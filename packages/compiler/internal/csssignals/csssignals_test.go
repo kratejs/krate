@@ -409,14 +409,14 @@ func TestErrorNonLabelableTrigger(t *testing.T) {
 	}
 }
 
-func TestErrorDynamicTriggerClass(t *testing.T) {
+func TestDynamicTriggerClassIsAllowed(t *testing.T) {
 	src := `export default function T() {
 	const [tab, setTab] = createCSSChoice('a');
 	return <div><button class={x} onClick={() => setTab('b')}>B</button><div showIf={tab() === 'b'}>B</div></div>;
 }`
 	a := analyze(t, src)
-	if a.OK() {
-		t.Fatal("expected an error for a dynamic trigger class")
+	if !a.OK() {
+		t.Fatalf("a computed trigger class should be accepted, got %v", a.Errors())
 	}
 }
 

@@ -31,6 +31,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/icons"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
@@ -110,13 +111,29 @@ type PageResult struct {
 	// ServerExports lists the async server components rendered as regions of
 	// this page; the page server bundle exports each one (serverbundle.go).
 	ServerExports []ServerExport
+	// MetadataSegments are the layouts above the page that export metadata or
+	// generateMetadata, and the images of the directories above it (outermost
+	// first); the page server bundle exports them so the renderer can merge the
+	// chain per request.
+	MetadataSegments []metaSegment
+	// MetadataPageFiles is the convention-file metadata (images) of the page's own route.
+	MetadataPageFiles string
 	// ClientBoundaries lists the "use client" modules in the module graph of a
 	// page that renders server components. The page server bundle wraps their
 	// exports in client boundaries (clientboundary.go).
 	ClientBoundaries []ClientBoundary
+	// IslandStubs replaces the islands of a page rendered per request in its
+	// server bundle (nil for static pages and pages without islands).
+	IslandStubs *islandServerStubs
 }
 
 type Builder struct {
+	// metaImages indexes the images the opengraph-image and twitter-image
+	// convention files produced in this build.
+	metaImages *metaImages
+
+	// hl holds the highlighter chunks written for code highlighted in the browser.
+	hl      highlightChunks
 	Root    string
 	Cfg     *config.Config
 	DevMode bool
@@ -230,6 +247,10 @@ type Builder struct {
 	islandMu        sync.Mutex
 	islandImportMap string
 	preactChunks    map[string]string
+	// islandEntries are the island chunk entry modules of each page; they are
+	// bundled together after the pages (see islandgraph.go).
+	islandEntries map[string][]islandEntry
+	islandDirty   bool
 
 	// clientChunkMu guards clientChunks: "use client" module path -> URL of
 	// its hydration chunk, built once per build (clientboundary.go).
@@ -388,6 +409,18 @@ func (b *Builder) ensureTransformed(prog *ast.Program, file string) error {
 		}
 	}
 	return nil
+}
+
+// withoutTemplateSlotWarnings drops KR8011 from the template pass of a dynamic
+// route: `{params.id}` has no value there, but each generated page does.
+func withoutTemplateSlotWarnings(warnings []diag.Diagnostic) []diag.Diagnostic {
+	var out []diag.Diagnostic
+	for _, w := range warnings {
+		if w.Code != diag.CodeSlotUnresolved {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 // diagList is a set of located diagnostics returned as one build error.
@@ -660,7 +693,9 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 
 	if len(results) == 0 {
 		if len(pageErrs) > 0 {
-			return nil, &multiError{summary: fmt.Sprintf("build failed: no pages built successfully (%d error(s)); check that pagesDir (%s) contains at least one page", len(pageErrs), b.Cfg.PagesDir), errs: pageErrs}
+			// The pages exist; they failed. The pagesDir hint is only for an
+			// empty directory (below).
+			return nil, &multiError{summary: fmt.Sprintf("build failed: %d error(s)", len(pageErrs)), errs: pageErrs}
 		}
 		return nil, fmt.Errorf("no pages built successfully; check that pagesDir (%s) contains at least one page", b.Cfg.PagesDir)
 	}
@@ -670,6 +705,14 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	warnMissingRuntime(runtimeJS, results)
 	if b.DevMode {
 		writeDevChunk(b.Cfg.OutDir, b.Root)
+	}
+	// Island chunks are bundled for the whole site, so a page rebuilt alone
+	// refreshes the shared files its siblings import.
+	if b.takeIslandDirty() {
+		if err := b.writeIslandBundles(); err != nil {
+			fmt.Fprintf(os.Stderr, "\n  %sx Error:%s %v\n", cRed, cReset, err)
+			pageErrs = append(pageErrs, err)
+		}
 	}
 
 	// Per-page stylesheets: each page links only the CSS its own module graph
@@ -750,6 +793,7 @@ func (b *Builder) BuildAll() error {
 	defer b.ClosePlugins()
 
 	b.resetBuildCaches()
+	b.resetIslandEntries()
 	// A full build re-records every dependency; entries for deleted pages must
 	// not survive it.
 	b.depMu.Lock()
@@ -775,6 +819,14 @@ func (b *Builder) BuildAll() error {
 	}
 	if err := validateRouteTree(pages, b.Cfg.PagesDir); err != nil {
 		return err
+	}
+	// Metadata routes (sitemap, robots, manifest, opengraph-image) run first:
+	// the pages' <head> carries the image URLs they produce.
+	if errs := b.buildMetadataRoutes(pages); len(errs) > 0 {
+		for _, err := range errs {
+			fmt.Fprintf(os.Stderr, "  %sMetadata route error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{err}), "\n", "\n    "))
+		}
+		return errors.Join(errs...)
 	}
 	// Intercepting slot pages are built as fragments the SPA router swaps
 	// into their slot (see parallel.go).
@@ -1078,6 +1130,15 @@ func (b *Builder) BuildAll() error {
 		}
 	}
 
+	// Bundle the island chunks of every page together so modules the pages
+	// share (stores, query clients) are shared files.
+	if err := b.writeIslandBundles(); err != nil {
+		fmt.Fprintf(os.Stderr, "  %sIsland bundle error:%s %v\n", cRed, cReset, err)
+		failureMessages = append(failureMessages, "  islands: "+err.Error())
+		failureErrs = append(failureErrs, err)
+		errorCount++
+	}
+
 	// In-memory HTML generation + string swap + single disk write per page
 	b.writeHTMLPages(results, globalCSS, runtimeJS)
 	stopWrite()
@@ -1133,6 +1194,14 @@ func (b *Builder) BuildAll() error {
 	}
 
 	stopTools := b.phase("build:tools")
+	strays := findPagesStrays(b.Cfg.PagesDir)
+	printWarningsOnce(os.Stderr, b.strayAPIWarnings(strays.apiFiles))
+	for _, err := range b.buildPagesEndpoints(strays.endpoints) {
+		fmt.Fprintf(os.Stderr, "  %sEndpoint error:%s %s\n", cRed, cReset, strings.ReplaceAll(diag.FormatDiagnostics([]error{err}), "\n", "\n    "))
+		failureMessages = append(failureMessages, "  endpoint: "+err.Error())
+		failureErrs = append(failureErrs, err)
+		errorCount++
+	}
 	if err := b.BuildAllAPI(); err != nil {
 		fmt.Fprintf(os.Stderr, "  %sAPI Build error:%s %v\n", cRed, cReset, err)
 		failureMessages = append(failureMessages, "  API: "+err.Error())
@@ -1160,7 +1229,8 @@ func (b *Builder) BuildAll() error {
 	printWarningsOnce(os.Stderr, staticRevalidateTargetWarnings(filepath.Dir(b.Cfg.PagesDir), b.Root, manifest.Pages))
 
 	// Compile server bundles for SSR/ISR/streaming pages
-	serverBundles, serverBundleErrs := compileServerBundles(results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+	serverBundles, serverBundleErrs := compileServerBundles(b.importResolver(), results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
+	b.writeHighlightTables(serverBundles)
 	for _, err := range serverBundleErrs {
 		failureMessages = append(failureMessages, "  "+err.Error())
 		failureErrs = append(failureErrs, err)
@@ -1402,7 +1472,7 @@ func (b *Builder) processCSSDirectives(cssText string) (string, twPageInfo) {
 	}
 	out, unresolved := gen.ExpandApply(cssText)
 	if len(unresolved) > 0 {
-		b.warnOnce("Tailwind @apply: could not expand " + strings.Join(unresolved, ", ") + " (variants and multi-rule utilities are not supported in @apply)")
+		b.warnOnce("Tailwind @apply: could not expand " + strings.Join(unresolved, ", ") + " (not a known utility; check the spelling, or define it with @utility)")
 	}
 	if strings.Contains(out, "@variant") {
 		b.warnOnce("Tailwind @variant inside rules is not supported and was left in the CSS; use the variant:utility class form instead")
@@ -1590,6 +1660,12 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 	memo := make(map[string]processed)
 	var chromaCSS string
 	chromaLoaded := false
+	var codeTheme syntaxhighlight.Theme
+	if b.Cfg.Markdown.CodeHighlight {
+		// Resolve up front so an unknown theme name is reported even on a
+		// build that renders no code.
+		codeTheme = b.codeTheme()
+	}
 
 	// Per-variant stylesheets: in hybrid+userAgent mode the UA sibling should
 	// download only the legacy signal rules (and the default document only the
@@ -1625,14 +1701,14 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 	}
 
 	for _, r := range results {
-		if r.CSS == "" && !pageRendersCode(r.HTML) {
+		if r.CSS == "" && !pageRendersCode(r) {
 			b.setTailwindPage(r.Page, twPageInfo{})
 			continue
 		}
 		pageCss := r.CSS
-		if b.Cfg.Markdown.CodeHighlight && pageRendersCode(r.HTML) {
+		if b.Cfg.Markdown.CodeHighlight && pageRendersCode(r) {
 			if !chromaLoaded {
-				chromaCSS = syntaxhighlight.CSSForTheme(b.Cfg.Markdown.CodeTheme)
+				chromaCSS = syntaxhighlight.ThemeCSS(codeTheme)
 				chromaLoaded = true
 			}
 			if chromaCSS != "" {
@@ -1674,10 +1750,32 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 	return written
 }
 
-// pageRendersCode reports whether a page's markup contains syntax-highlighted
-// code, in which case the chroma stylesheet is needed on that page.
-func pageRendersCode(html string) bool {
-	return strings.Contains(html, "chroma")
+// codeTheme resolves the configured light and dark code themes. An unknown
+// name is reported once (KR7150) and replaced by the default for its mode.
+func (b *Builder) codeTheme() syntaxhighlight.Theme {
+	th, unknown := syntaxhighlight.ResolveTheme(b.Cfg.Markdown.CodeTheme, b.Cfg.Markdown.CodeThemeDark)
+	var ds []diag.Diagnostic
+	for _, name := range unknown {
+		ds = append(ds, diag.Diagnostic{
+			File:     "krate.config.ts",
+			Severity: diag.SeverityWarning,
+			Code:     diag.CodeUnknownCodeTheme,
+			Message:  fmt.Sprintf("unknown code theme %q; using the default for that mode", name),
+			Hint:     "use a chroma theme name such as " + strings.Join(syntaxhighlight.SimilarThemes(name, 3), ", ") + ", or { light, dark } to pick one per mode",
+		})
+	}
+	if len(ds) > 0 {
+		printWarningsOnce(os.Stderr, ds)
+	}
+	return th
+}
+
+// pageRendersCode reports whether a page shows syntax-highlighted code, in
+// which case the chroma stylesheet is needed on that page: its markup has a
+// highlighted block, or its script highlights code itself (the browser
+// highlighter writes into blocks the markup does not mark).
+func pageRendersCode(r *PageResult) bool {
+	return strings.Contains(r.HTML, "chroma") || strings.Contains(r.HydrationJS, highlightAPI)
 }
 
 // writeHTMLPages builds the layout wrapper, applies placeholders, minifies,
@@ -1778,6 +1876,12 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 			if pf := b.pageFontPreloads(r.FontURLs); pf != "" {
 				runtimeHead += pf
 			}
+			// Only pages that call into the runtime load it; a static page of
+			// a site with islands elsewhere ships no JavaScript.
+			runtimeJSFile := runtimeJSFile
+			if !pageNeedsRuntime(r) {
+				runtimeJSFile = ""
+			}
 			chunkPreloads := dynamicChunkURLs(r.HydrationJS)
 			chunkPreloads = append(chunkPreloads, lazyChunkPreloads(r.HydrationJS, b.Cfg.BaseURLPath())...)
 			var html string
@@ -1844,7 +1948,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				}
 				// 3. Minify code in memory
 				if b.Cfg.ShouldMinifyHTML() {
-					h = minifyHTML(h)
+					h = minifyHTMLWith(h, b.linkedWhiteSpaceRules(h))
 				}
 				// 4. CSP meta tag injection. Hash the FINAL document (after
 				// minification rewrote inline content) so every inline
@@ -1908,11 +2012,18 @@ func (b *Builder) cfgPathAliasTargets() [][]string {
 	return targets
 }
 
+// importResolver resolves imports with this build's tsconfig path aliases, for
+// code that has no Bundler or Bundle in hand.
+func (b *Builder) importResolver() *bundler.ImportResolver {
+	return bundler.NewImportResolver(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
+}
+
 // newBundler creates a bundler configured with this build's path aliases,
 // component tiers, and virtual modules (codegen'd `krate/content`).
 func (b *Builder) newBundler() *bundler.Bundler {
 	bnd := bundler.New(b.Root)
 	bnd.SetPathAliases(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
+	bnd.SetBaseURL(b.Cfg.TSBaseURL)
 	bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)
 	bnd.SetTSOptions(tsstrip.Options{
 		ExperimentalDecorators:  b.Cfg.TSCompilerOptions.ExperimentalDecorators,
@@ -1929,6 +2040,8 @@ func (b *Builder) newBundler() *bundler.Bundler {
 	bnd.SetModuleCache(b.moduleCache)
 	bnd.SetDevMode(b.DevMode)
 	bnd.SetTailwindImports(b.tailwindImportMode())
+	bnd.SetMarkdownConfig(b.Cfg.Markdown)
+	bnd.SetMarkdownBasePath(b.Cfg.BaseURLPath())
 	return bnd
 }
 
@@ -1987,6 +2100,26 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	if err := b.contextErr(); err != nil {
 		return nil, "", err
 	}
+	// Modules that call hooks of an npm React library run on Preact in an
+	// island; the Krate lowering of their source is unused, so its warnings
+	// are not shown either.
+	reactIslands := detectReactIslandModules(bundle.Modules, bnd.Resolve)
+	for i, m := range bundle.Modules {
+		if m == nil || m.Program == nil || m.IsExternal || resolver.IsCompiledDependency(m.Path) {
+			continue
+		}
+		if _, ok := reactIslands[m.Path]; ok {
+			if len(m.Diagnostics) > 0 {
+				quiet := *m
+				quiet.Diagnostics = nil
+				bundle.Modules[i] = &quiet
+			}
+		} else if ws := cssPropWarnings(m); len(ws) > 0 {
+			noted := *m
+			noted.Diagnostics = append(append([]diag.Diagnostic(nil), m.Diagnostics...), ws...)
+			bundle.Modules[i] = &noted
+		}
+	}
 	printModuleWarnings(os.Stderr, bundle.Modules)
 	var pageWarnings []diag.Diagnostic
 	for _, m := range bundle.Modules {
@@ -1996,6 +2129,29 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	entryModule := findEntryModule(bundle.Modules)
 	if entryModule == nil || entryModule.Program == nil {
 		return nil, "", fmt.Errorf("page %s has no entry module (no default export found); a page must export a default component", page)
+	}
+	var reactIslandImps []irtree.ExternalImport
+	if len(reactIslands) > 0 {
+		reactIslandImps = reactIslandImports(bundle.Modules, reactIslands, bnd.Resolve)
+		if im, ok := reactIslands[entryModule.Path]; ok {
+			rewritten, why := reactIslandPage(entryModule, im.Pos)
+			if why != "" {
+				return nil, "", diag.Diagnostic{
+					File: entryModule.Path, Line: im.Pos.Line, Col: im.Pos.Col,
+					Message: "`" + im.Name + "` from \"" + im.Pkg + "\" needs React's render model, so this page would run as a Preact island, but it cannot",
+					Hint:    why,
+				}.WithCode(diag.CodeReactLibNotInIsland)
+			}
+			for i, m := range bundle.Modules {
+				if m == entryModule {
+					bundle.Modules[i] = rewritten
+				}
+			}
+			entryModule = rewritten
+			reactIslandImps = append(reactIslandImps, irtree.ExternalImport{
+				Source: rewritten.Path, Local: reactIslandPageLocal, Default: true, ReactIsland: true, ClientOnly: im.ClientOnly,
+			})
+		}
 	}
 
 	// Collect dependencies for partial reloads
@@ -2008,6 +2164,12 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	// Files the CSS was built from (@import targets, url() assets, composes
 	// sources) are not modules but must invalidate the page when edited.
 	deps = append(deps, bundle.CSSDeps...)
+	// The modules an island bundles for Preact are not Krate source from here
+	// on: the lowering, module-state and vendor passes would try to compile
+	// their hooks and initializers. Their files stay in deps above.
+	if len(reactIslands) > 0 {
+		bundle.Modules = krateSideModules(bundle.Modules, entryModule, reactIslands, bnd.Resolve)
+	}
 
 	// Run AfterParse hooks
 	parseCtx := &plugin.ParseHookCtx{
@@ -2110,9 +2272,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 
 	// New pipeline: Annotate -> Build IR -> Emit
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, page, entryModule.SourceCode)
-	extraPrograms := moduleSources(bundle.Modules, entryModule)
+	extraPrograms := moduleSources(bundle, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
-	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
+	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	// Re-classify tiers for any newly discovered components
 	annotator.ReclassifyTiers(ann, b.Cfg)
 	serverPage, serverErr := b.applyServerComponentMode(page, entryModule, ann, staticMode, &renderMode, &revalidate)
@@ -2121,6 +2283,25 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	}
 	if serverErr != nil {
 		return nil, "", serverErr
+	}
+	// forbidden() and unauthorized() only run when the page renders per request.
+	if renderMode == RenderSSG && !serverPage {
+		for _, mod := range bundle.Modules {
+			if strings.Contains(filepath.ToSlash(mod.Path), "/node_modules/") {
+				continue
+			}
+			if d := warnStaticAccessDenied(mod.Path, mod.Program, mod.SourceCode, "page"); d != nil {
+				printAccessDeniedWarning(d)
+				pageWarnings = append(pageWarnings, *d)
+				break
+			}
+		}
+	}
+	if serverPage && len(reactIslands) > 0 {
+		return nil, "", reactIslandDiag(firstReactIsland(reactIslands), "a server-rendered page")
+	}
+	if errs := annotator.CheckInteractiveTierComponents(ann, bundle.ActionImports); len(errs) > 0 {
+		return nil, "", errs[0]
 	}
 	intercept := cachedInterceptForPage(page, b.Cfg.PagesDir)
 	clientBoundaries, cbErr := b.prepareClientBoundaries(bundle, ann, serverPage)
@@ -2135,6 +2316,22 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		regions    []Region
 	)
 	externalByLocal, externalImports, localImports := entryExternalImports(entryModule.Program)
+	// A path alias ("@/components/X") looks like a package scope, so the page's
+	// own import list already holds it as a package binding; the island
+	// binding replaces it.
+	for _, imp := range reactIslandImps {
+		if _, dup := externalByLocal[imp.Local]; dup {
+			kept := externalImports[:0]
+			for _, old := range externalImports {
+				if old.Local != imp.Local {
+					kept = append(kept, old)
+				}
+			}
+			externalImports = kept
+		}
+		externalByLocal[imp.Local] = imp
+		externalImports = append(externalImports, imp)
+	}
 	if serverPage {
 		// An async page renders entirely per request in the SSR sidecar: no
 		// build-time body and no hydration code. The shell keeps only the
@@ -2153,6 +2350,12 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		pageOpts.LocalComponentImports = localImports
 		pageOpts.GoComponents = pageGoComponents
 		pageOpts.ActionURLs = bundle.ActionImports
+		if isDynamicRoute(page, b.Cfg.PagesDir) {
+			pageOpts.PageParams = dynamicRouteSentinels(extractParamNames(page, b.Cfg.PagesDir))
+		}
+		if _, isSeg := segmentKindOfFile(page); !isSeg {
+			pageOpts.RoutePath = routePathFor(page, b.Cfg.PagesDir, pageOpts.PageParams)
+		}
 		tree = irtree.BuildWithOptions(entryModule.Program, ann, pageOpts)
 		// CSS primitive declarations that cannot be compiled to CSS are hard errors
 		// (there is no fallback to client signals).
@@ -2192,6 +2395,12 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			return t, em.Emit(t)
 		})
 		renderer.EmitMeta(tree, emitResult)
+		warnings := emitResult.Warnings
+		if isDynRoute {
+			warnings = withoutTemplateSlotWarnings(warnings)
+		}
+		printTreeWarnings(os.Stderr, warnings)
+		pageWarnings = append(pageWarnings, warnings...)
 		// Render imported Go components (server tier, slot path + SSREval'd) via the
 		// Go host in one batch, then inline their HTML at the emitted markers.
 		if len(emitResult.GoRenders) > 0 {
@@ -2240,6 +2449,15 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	emitResult.HTML = renderCtx.HTML
 	emitResult.HeadHTML = renderCtx.HeadHTML
 	bundle.CSS = renderCtx.RawCSS
+	metaSegs, metaPageFiles := b.metadataSegments(page)
+	{
+		var metaParams map[string]string
+		if isDynRoute {
+			metaParams = dynamicRouteSentinels(extractParamNames(page, b.Cfg.PagesDir))
+		}
+		requestTime := renderMode == RenderSSR || renderMode == RenderISR
+		emitResult.HeadHTML += b.pageMetadataHeadFor(page, entryModule.SourceCode, requestTime, metaParams, bnd, metaSegs, metaPageFiles)
+	}
 
 	// Run AfterMarkdownParse hooks for markdown pages (plugins can modify the
 	// rendered HTML). Markdown pages flow through the normal bundler/emitter
@@ -2321,7 +2539,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 
 	b.recordDeps(page, deps)
 
-	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + fragmentInfo
+	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + fragmentInfo + pageRouteScript(page, b.Cfg.PagesDir)
 
 	outName := pageToOutput(page, b.Cfg.PagesDir)
 	pageDir := filepath.Join(b.Cfg.OutDir, outName)
@@ -2359,6 +2577,8 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			GoBaked:           goBaked,
 			ServerPage:        serverPage,
 			ServerExports:     serverExportsOf(regions),
+			MetadataSegments:  metaSegs,
+			MetadataPageFiles: metaPageFiles,
 			ClientBoundaries:  clientBoundaries,
 		}, bundle.CSS, nil
 	}
@@ -2373,11 +2593,17 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	hydrationJS := ""
 	var jsBytes []byte
 	hasJS := false
+	var pageProviders *islandProviders
+	if len(tree.ExternalComponents) > 0 {
+		pageProviders = b.pageProviders(page)
+	}
 	islandBoot, islandJS, islandSSR, islandStyles, islandErr := b.buildIslands(
+		page,
 		tree.ExternalComponents,
 		externalImports,
 		entryLocalImports(entryModule.Program),
 		filepath.Dir(entryModule.Path),
+		pageProviders,
 	)
 	if islandErr != nil {
 		return nil, "", islandErr
@@ -2395,13 +2621,19 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		emitResult.HTML = injectIslandSSR(emitResult.HTML, islandSSR)
 	}
 	emitResult.IslandBootJS = islandBoot
-	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
+	// Request-time pages are rendered by the server, which highlights their
+	// code itself; only static pages highlight in the browser.
+	browserHighlight := renderMode == RenderSSG && strings.Contains(emitResult.HTML, highlightMarkup)
+	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal") || browserHighlight
 	// Client-side JS scanned by CSS DCE for classes applied after hydration.
 	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
 	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
 	if needsHydrate {
 		emitResult.TrackSources = b.Cfg.Sourcemap
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
+		if renderMode == RenderSSG {
+			rawJS = b.attachHighlight(rawJS, emitResult.HTML)
+		}
 		b.warnShippedCollections(page, entryModule.Program, rawJS)
 		dceJS = append(dceJS, rawJS)
 		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)
@@ -2411,7 +2643,7 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		if rawJS != "" {
 			rawJS = neutralizeClientEnv(rawJS)
 			// npm functions called by client code are bundled into the script.
-			vendor := collectVendorImports(bundle.Modules)
+			vendor := collectVendorImports(bundle)
 			for _, rb := range b.routeStack(page) {
 				if lv, ok := layoutVendorImports.Load(rb.Path); ok {
 					vendor = append(vendor, lv.([]vendorImport)...)
@@ -2526,7 +2758,12 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		GoBaked:           goBaked,
 		ServerPage:        serverPage,
 		ServerExports:     serverExportsOf(regions),
+		MetadataSegments:  metaSegs,
+		MetadataPageFiles: metaPageFiles,
 		ClientBoundaries:  clientBoundaries,
+	}
+	if renderMode != RenderSSG {
+		result.IslandStubs = newIslandServerStubs(entryModule.Program, tree.ExternalComponents, islandSSR)
 	}
 	b.maybeStoreDiskPage(page, result, deps, bundle, jsBytes)
 	return result, bundle.CSS, nil
@@ -2568,6 +2805,7 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 	}
 	b.registerWorkers(e.WorkerFiles, trueSet(e.WorkerEsm))
 	b.registerDynamicChunks(e.DynImports)
+	b.setIslandEntries(page, e.IslandEntries)
 	b.recordDeps(page, e.Deps)
 	c.markHit()
 	// A replayed page reports the warnings its cold build did (once per build).
@@ -2661,6 +2899,8 @@ func (b *Builder) maybeStoreDiskPage(page string, r *PageResult, deps []string, 
 		WorkerFiles: bundle.WorkerFiles,
 		WorkerEsm:   sliceFromSet(bundle.WorkerEsm),
 		DynImports:  bundle.DynImportFiles,
+
+		IslandEntries: b.islandEntriesOf(page),
 	})
 }
 
@@ -2741,6 +2981,9 @@ type layoutEmitCacheEntry struct {
 	boundaryLink   *renderer.BoundaryLink
 	deps           []string
 	depTimes       map[string]time.Time
+	// providers are the provider wrappers lifted out of the layout for the
+	// islands of its pages (nil when there are none).
+	providers *layoutProviders
 }
 
 // layoutIDPrefix returns a stable, collision-free namespace for a layout's
@@ -2784,6 +3027,9 @@ func layoutCacheFresh(e *layoutEmitCacheEntry) bool {
 // created after the first build. Cleared in place (sync.Map.Clear) so it is safe
 // even if a build goroutine from a previous pass is still winding down.
 func (b *Builder) resetBuildCaches() {
+	// One instant for this build: new Date() and Date.now() in static and
+	// server components read it (SOURCE_DATE_EPOCH when set).
+	jsvalue.StartBuildClock()
 	layoutEmitCache.Clear()
 	b.modCSS.clear()
 	loadingEmitCache.Clear()
@@ -2853,6 +3099,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if cached, ok := layoutEmitCache.Load(layoutPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
 		if layoutCacheFresh(entry) {
+			layoutProviderCache.Store(layoutPath, entry.providers)
 			return &renderer.EmitResult{
 				HTML:           strings.Replace(entry.html, "<!--__children__-->", content, -1),
 				HeadHTML:       entry.headHTML,
@@ -2877,6 +3124,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if cached, ok := layoutEmitCache.Load(layoutPath); ok {
 		entry := cached.(*layoutEmitCacheEntry)
 		if layoutCacheFresh(entry) {
+			layoutProviderCache.Store(layoutPath, entry.providers)
 			return &renderer.EmitResult{
 				HTML:           strings.Replace(entry.html, "<!--__children__-->", content, -1),
 				HeadHTML:       entry.headHTML,
@@ -2895,7 +3143,39 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	if err != nil {
 		return nil, "", nil, false, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
 	}
-	layoutVendorImports.Store(layoutPath, collectVendorImports(layoutBundle.Modules))
+	// Every file the layout reads, including the modules of provider wrappers
+	// lifted out below, invalidates it when edited.
+	allLayoutDeps := layoutDepPaths(layoutPath, layoutBundle)
+	var lifted *layoutProviders
+	if isLayoutFile(layoutPath) {
+		if lm := findEntryModule(layoutBundle.Modules); lm != nil {
+			plan, notes := b.planLayoutProviders(layoutPath, lm, layoutBundle.Modules, bnd.Resolve)
+			if plan != nil {
+				if why := b.verifyProviderChain(plan.providers); why != nil {
+					notes = append(notes, *why)
+				} else {
+					for i, m := range layoutBundle.Modules {
+						if m == lm {
+							layoutBundle.Modules[i] = plan.module
+						}
+					}
+					layoutBundle.Modules = krateSideModules(layoutBundle.Modules, plan.module, nil, bnd.Resolve)
+					lifted = plan.providers
+				}
+			}
+			if lifted == nil && len(notes) > 0 {
+				lifted = &layoutProviders{Layout: layoutPath, Notes: notes}
+			}
+			// Said now: when the wrapper then fails to compile as part of the
+			// layout, this is the explanation that matters.
+			printWarningsOnce(os.Stderr, notes)
+		}
+	}
+	layoutProviderCache.Store(layoutPath, lifted)
+	if islands := detectReactIslandModules(layoutBundle.Modules, bnd.Resolve); len(islands) > 0 {
+		return nil, "", nil, false, reactIslandDiag(firstReactIsland(islands), "a layout")
+	}
+	layoutVendorImports.Store(layoutPath, collectVendorImports(layoutBundle))
 	printModuleWarnings(os.Stderr, layoutBundle.Modules)
 
 	b.modCSS.store(layoutPath, layoutBundle.CSSModules)
@@ -2915,7 +3195,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 
 	// The layout's full module graph is both its cache-invalidation key and a
 	// dependency of every page it wraps.
-	layoutDeps := layoutDepPaths(layoutPath, layoutBundle)
+	layoutDeps := allLayoutDeps
 
 	if err := b.ensureTransformed(layoutModule.Program, layoutModule.Path); err != nil {
 		return nil, "", nil, false, err
@@ -2934,19 +3214,23 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		}
 	}
 
+	if isLayoutFile(layoutPath) {
+		passLayoutDepth(layoutModule.Program, layoutURLDepth(layoutPath, b.Cfg.PagesDir))
+	}
 	ann := annotator.Annotate(layoutModule.Program, b.Cfg, layoutPath, layoutModule.SourceCode)
-	extraLayoutPrograms := moduleSources(layoutBundle.Modules, layoutModule)
+	extraLayoutPrograms := moduleSources(layoutBundle, layoutModule)
 	for _, mp := range extraLayoutPrograms {
 		if err := b.ensureTransformed(mp.Program, mp.Path); err != nil {
 			return nil, "", nil, false, err
 		}
 	}
 	annotator.MergeModuleFunctions(ann, extraLayoutPrograms)
-	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode})
+	annotator.MergeImportAliases(ann, extraLayoutPrograms, annotator.ModuleSource{Program: layoutModule.Program, Path: layoutModule.Path, RawSource: layoutModule.SourceCode, Resolver: layoutBundle.Resolver})
 	annotator.ReclassifyTiers(ann, b.Cfg)
 	if err := asyncLayoutError(layoutPath, ann, layoutModule.SourceCode); err != nil {
 		return nil, "", nil, false, err
 	}
+	printAccessDeniedWarning(warnStaticAccessDenied(layoutPath, layoutModule.Program, layoutModule.SourceCode, "layout"))
 	opts := b.irBuildOptions()
 	opts.IDPrefix = b.layoutIDPrefix(layoutPath)
 	applyModuleBindings(&opts, layoutModule.Path, layoutModule.Program, extraLayoutPrograms)
@@ -3007,6 +3291,7 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 		hasSignals:     tree.HasCSSSignals,
 		deps:           layoutDeps,
 		depTimes:       modTimesOf(layoutDeps),
+		providers:      lifted,
 	})
 
 	// Inject page content at {children} slot
@@ -3121,6 +3406,15 @@ func findPages(dir string) ([]string, error) {
 		if rel, err := filepath.Rel(dir, path); err == nil && pathHasSlot(rel) {
 			return nil
 		}
+		if rel, err := filepath.Rel(dir, path); err == nil && isStrayAPIFile(filepath.ToSlash(rel)) {
+			return nil // reported by findPagesStrays, never a page
+		}
+		if isPagesEndpointFile(base) {
+			return nil // a prerendered endpoint, built by buildPagesEndpoints
+		}
+		if isMetadataRouteFile(base) {
+			return nil // sitemap.ts, robots.ts, opengraph-image.tsx...: built by buildMetadataRoutes
+		}
 		if !strings.HasPrefix(base, "_") && !isRouteConventionFile(base) && !isUseServerFile(path) {
 			pages = append(pages, path)
 		}
@@ -3194,9 +3488,9 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	}
 	deps := layoutDepPaths(loadingPath, bundle)
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, loadingPath, entryModule.SourceCode)
-	extraPrograms := moduleSources(bundle.Modules, entryModule)
+	extraPrograms := moduleSources(bundle, entryModule)
 	annotator.MergeModuleFunctions(ann, extraPrograms)
-	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode})
+	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	opts := b.irBuildOptions()
 	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
 	tree := irtree.BuildWithOptions(entryModule.Program, ann, opts)
@@ -3526,6 +3820,48 @@ func routeInfoScript(chain []routeChainEntry, sigs []irtree.ComponentSignature) 
 	return `<script type="application/json" id="__krate_route">` + escapeJSONForScript(string(data)) + `</script>`
 }
 
+// routePathFor is the URL path of a page with its dynamic segments filled from
+// params ("/blog/hello"), or "" for a page that has no route of its own.
+func routePathFor(page, pagesDir string, params map[string]string) string {
+	out := pageToOutput(page, pagesDir)
+	if out == "" {
+		return ""
+	}
+	var parts []string
+	for _, seg := range strings.Split(strings.Trim(routeFromOutName(out), "/"), "/") {
+		if seg == "" {
+			continue
+		}
+		if rs := parseRouteSeg(seg); rs.kind != segStatic {
+			v, ok := params[rs.text]
+			if !ok {
+				if rs.kind == segOptionalCatchAll {
+					continue
+				}
+				v = dynamicParamSentinel(rs.text)
+			}
+			parts = append(parts, v)
+			continue
+		}
+		parts = append(parts, seg)
+	}
+	return "/" + strings.Join(parts, "/")
+}
+
+// pageRouteScript carries the route pattern of a dynamic page ("/blog/[slug]")
+// so useParams() can match the address bar against it in the browser. Pages
+// without dynamic segments need none: their params are empty.
+func pageRouteScript(page, pagesDir string) string {
+	if !isDynamicRoute(page, pagesDir) {
+		return ""
+	}
+	data, err := json.Marshal(map[string]string{"r": routeFromOutName(pageToOutput(page, pagesDir))})
+	if err != nil {
+		return ""
+	}
+	return `<script type="application/json" id="__krate_page">` + escapeJSONForScript(string(data)) + `</script>`
+}
+
 // fragmentInfoScript is the route info of an intercepting-route fragment.
 func fragmentInfoScript(key, scope, target string) string {
 	data, err := json.Marshal(map[string]interface{}{"v": 1, "frag": map[string]string{"key": key, "scope": scope, "target": target}})
@@ -3613,7 +3949,7 @@ func (b *Builder) BuildMiddleware() error {
 	_ = os.MkdirAll(outDir, 0755)
 	outPath := filepath.Join(outDir, "middleware.js")
 
-	result := api.Build(api.BuildOptions{
+	result := esbuildBuild(api.BuildOptions{
 		EntryPoints: []string{middlewarePath},
 		Outdir:      outDir,
 		Bundle:      true,
@@ -3671,16 +4007,17 @@ func findEntryModule(modules []*bundler.Module) *bundler.Module {
 // moduleSources converts a bundle's non-entry, non-CSS module programs (plus
 // their source paths and raw text) into annotator.ModuleSource values so the
 // annotator can classify imported components against their own files.
-func moduleSources(modules []*bundler.Module, entry *bundler.Module) []annotator.ModuleSource {
+func moduleSources(bundle *bundler.Bundle, entry *bundler.Module) []annotator.ModuleSource {
 	var out []annotator.ModuleSource
-	for _, mod := range modules {
-		if mod == nil || mod.Program == nil || mod.IsCSS || mod.IsExternal || mod == entry {
+	for _, mod := range bundle.Modules {
+		if mod == nil || mod.Program == nil || mod.IsCSS || mod.IsExternal || mod == entry || mod.Path == entry.Path {
 			continue
 		}
 		out = append(out, annotator.ModuleSource{
 			Program:   mod.Program,
 			Path:      mod.Path,
 			RawSource: mod.SourceCode,
+			Resolver:  bundle.Resolver,
 		})
 	}
 	return out
@@ -3837,7 +4174,7 @@ func (b *Builder) writeWorkerBundles() error {
 			format = api.FormatESModule
 		}
 
-		result := api.Build(api.BuildOptions{
+		result := esbuildBuild(api.BuildOptions{
 			AbsWorkingDir:    b.Root,
 			EntryPoints:      []string{src},
 			Bundle:           true,
@@ -3937,7 +4274,7 @@ func (b *Builder) writeDynamicChunkBundles() error {
 			loader = api.LoaderJSX
 		}
 
-		result := api.Build(api.BuildOptions{
+		result := esbuildBuild(api.BuildOptions{
 			AbsWorkingDir:    b.Root,
 			EntryPoints:      []string{src},
 			Bundle:           true,
@@ -4188,21 +4525,16 @@ func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
 	// over the defaults, so any default whose name appears in the forwarded
 	// attributes is dropped (duplicate attributes in HTML resolve to the first,
 	// which would silently ignore the user's override).
-	viewBox := icon.ViewBox
-	if viewBox == "" {
-		viewBox = "0 0 24 24"
-	}
-	baseSvgAttrs := []*ast.JSXAttr{
-		{Name: "xmlns", Value: &ast.Literal{Kind: ast.StringLit, Value: "http://www.w3.org/2000/svg"}},
-		{Name: "viewBox", Value: &ast.Literal{Kind: ast.StringLit, Value: viewBox}},
-		{Name: "fill", Value: &ast.Literal{Kind: ast.StringLit, Value: "none"}},
-		{Name: "stroke", Value: &ast.Literal{Kind: ast.StringLit, Value: "currentColor"}},
-		{Name: "stroke-width", Value: &ast.Literal{Kind: ast.StringLit, Value: "2"}},
+	var baseSvgAttrs []*ast.JSXAttr
+	for _, kv := range iconBaseAttrs(icon) {
+		baseSvgAttrs = append(baseSvgAttrs, &ast.JSXAttr{Name: kv[0], Value: &ast.Literal{Kind: ast.StringLit, Value: kv[1]}})
 	}
 
 	// Combine default engine SVG properties with user-defined attributes,
-	// letting the user override any default.
-	allAttrs := append(baseSvgAttrs, forwardedAttrs...)
+	// letting the user override any default. `size` is shorthand for both
+	// width and height.
+	allAttrs := append(baseSvgAttrs, iconSizeAttrs(forwardedAttrs)...)
+	allAttrs = append(allAttrs, withoutSize(forwardedAttrs)...)
 	// The icon body is trusted SVG markup from the icon set, injected raw.
 	allAttrs = append(allAttrs, &ast.JSXAttr{Name: "dangerouslySetInnerHTML", Value: &ast.ObjectExpr{
 		Properties: []*ast.ObjectProp{{Key: "__html", Value: &ast.Literal{Kind: ast.StringLit, Value: icon.Inner}}},
@@ -4221,24 +4553,66 @@ func (b *Builder) compileIconToSVG(orig *ast.JSXElement) *ast.JSXElement {
 	}
 }
 
+// iconBaseAttrs returns the default attributes of an inlined icon's <svg>: the
+// namespace, the source geometry, a 1em size so the icon scales with text, and
+// the paint the source intended (see icons.Icon.PaintAttrs).
+func iconBaseAttrs(icon icons.Icon) [][2]string {
+	viewBox := icon.ViewBox
+	if viewBox == "" {
+		viewBox = "0 0 24 24"
+	}
+	attrs := [][2]string{
+		{"xmlns", "http://www.w3.org/2000/svg"},
+		{"viewBox", viewBox},
+		{"width", "1em"},
+		{"height", "1em"},
+	}
+	return append(attrs, icon.PaintAttrs()...)
+}
+
+// iconSizeAttrs expands a `size` attribute into width and height, and removes
+// it from attrs so no meaningless size attribute reaches the SVG.
+func iconSizeAttrs(attrs []*ast.JSXAttr) []*ast.JSXAttr {
+	var out []*ast.JSXAttr
+	for _, a := range attrs {
+		if a.Name == "size" && !a.Spread && a.Value != nil {
+			out = append(out,
+				&ast.JSXAttr{Name: "width", Value: a.Value},
+				&ast.JSXAttr{Name: "height", Value: a.Value})
+		}
+	}
+	return out
+}
+
+// withoutSize returns attrs minus any `size` attribute.
+func withoutSize(attrs []*ast.JSXAttr) []*ast.JSXAttr {
+	out := make([]*ast.JSXAttr, 0, len(attrs))
+	for _, a := range attrs {
+		if a.Name == "size" && !a.Spread {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // dedupeAttrs keeps the LAST occurrence of each attribute name, so user-supplied
 // attributes override the engine's defaults. Duplicate attributes in HTML are
 // resolved to the FIRST occurrence by browsers, so dropping earlier defaults is
 // the only reliable way to let callers override them.
 func dedupeAttrs(attrs []*ast.JSXAttr) []*ast.JSXAttr {
 	var out []*ast.JSXAttr
+	seen := map[string]bool{}
 	for i := len(attrs) - 1; i >= 0; i-- {
-		name := attrs[i].Name
-		dup := false
-		for _, keep := range out {
-			if keep.Name == name {
-				dup = true
-				break
+		if !attrs[i].Spread {
+			// strokeWidth and stroke-width are the same attribute.
+			key := ast.HTMLAttrName(attrs[i].Name)
+			if seen[key] {
+				continue
 			}
+			seen[key] = true
 		}
-		if !dup {
-			out = append([]*ast.JSXAttr{attrs[i]}, out...)
-		}
+		out = append([]*ast.JSXAttr{attrs[i]}, out...)
 	}
 	return out
 }
@@ -4262,16 +4636,17 @@ func (b *Builder) iconResolver(iconName string, attrs []*ast.JSXAttr) (string, b
 		return fmt.Sprintf("<span>%s</span>", escape.HTMLAttr(fmt.Sprintf("[%v]", err))), false
 	}
 
-	viewBox := icon.ViewBox
-	if viewBox == "" {
-		viewBox = "0 0 24 24"
-	}
-
 	var b2 strings.Builder
-	b2.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="`)
-	b2.WriteString(escape.HTMLAttr(viewBox))
-	b2.WriteString(`" fill="none" stroke="currentColor" stroke-width="2"`)
-	for _, attr := range dedupeAttrs(forwardedAttrs) {
+	b2.WriteString("<svg")
+	// Defaults first, then size, then the caller's own attributes; the last
+	// occurrence of a name wins.
+	var attrs2 []*ast.JSXAttr
+	for _, kv := range iconBaseAttrs(icon) {
+		attrs2 = append(attrs2, &ast.JSXAttr{Name: kv[0], Value: &ast.Literal{Kind: ast.StringLit, Value: kv[1]}})
+	}
+	attrs2 = append(attrs2, iconSizeAttrs(forwardedAttrs)...)
+	attrs2 = append(attrs2, withoutSize(forwardedAttrs)...)
+	for _, attr := range dedupeAttrs(attrs2) {
 		if attr.Spread {
 			continue
 		}
@@ -4466,11 +4841,11 @@ func (b *Builder) compileSingleRoute(file string, apiSrcDir string) (apiRouteMet
 		nodeOpts.MinifySyntax = true
 	}
 
-	quickjsResult := api.Build(quickjsOpts)
+	quickjsResult := esbuildBuild(quickjsOpts)
 	if len(quickjsResult.Errors) > 0 {
 		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(quickjsResult.Errors))
 	}
-	nodeResult := api.Build(nodeOpts)
+	nodeResult := esbuildBuild(nodeOpts)
 	if len(nodeResult.Errors) > 0 {
 		return apiRouteMeta{}, fmt.Errorf("esbuild compilation failed:\n%s", formatEsbuildErrors(nodeResult.Errors))
 	}

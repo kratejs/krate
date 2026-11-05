@@ -24,6 +24,7 @@ var reactNames = map[string]string{
 	"useReducer":         "createReducer",
 	"useRef":             "useRef",
 	"useCallback":        "useCallback",
+	"useEffectEvent":     "createEffectEvent",
 	"forwardRef":         "forwardRef",
 	"createContext":      "createContext",
 	"createElement":      "h",
@@ -32,6 +33,13 @@ var reactNames = map[string]string{
 	"useId": "__krate_useId",
 	// React DOM's requestFormReset is a runtime global (runtime/src/actions.ts).
 	"requestFormReset": "requestFormReset",
+	// React DOM's resource hints are runtime globals (runtime/src/hints.ts).
+	"preload":       "krateHintPreload",
+	"preinit":       "krateHintPreinit",
+	"preconnect":    "krateHintPreconnect",
+	"prefetchDNS":   "krateHintPrefetchDNS",
+	"preloadModule": "krateHintPreloadModule",
+	"preinitModule": "krateHintPreinitModule",
 }
 
 // structuralReactAPIs are React APIs lowered structurally (identity/passthrough
@@ -39,6 +47,7 @@ var reactNames = map[string]string{
 var structuralReactAPIs = map[string]bool{
 	"memo":       true,
 	"lazy":       true,
+	"cache":      true,
 	"useContext": true,
 }
 
@@ -70,6 +79,11 @@ var compatReactNames = map[string]bool{
 	"PureComponent":        true,
 	"StrictMode":           true,
 	"Profiler":             true,
+	"Activity":             true,
+	"ViewTransition":       true,
+	"SuspenseList":         true,
+	"version":              true,
+	"captureOwnerStack":    true,
 }
 
 // reactiveFactories are React APIs whose first destructured binding is a value
@@ -82,6 +96,36 @@ var reactiveFactories = map[string]bool{
 	"useOptimistic":  true,
 	// The compat useSyncExternalStore returns a getter of the snapshot.
 	"useSyncExternalStore": true,
+}
+
+// reactVersion is the React release whose API Krate follows.
+const reactVersion = "19.2.0"
+
+// reactAliases maps the canary and experimental names of React APIs, and the
+// renamed react-dom form hook, to the API they are today.
+var reactAliases = map[string]string{
+	"unstable_Activity":           "Activity",
+	"unstable_ViewTransition":     "ViewTransition",
+	"unstable_SuspenseList":       "SuspenseList",
+	"unstable_useEffectEvent":     "useEffectEvent",
+	"experimental_useEffectEvent": "useEffectEvent",
+	"useFormState":                "useActionState",
+}
+
+// canonicalReactAPI returns the API an exported name stands for.
+func canonicalReactAPI(name string) string {
+	if canon, ok := reactAliases[name]; ok {
+		return canon
+	}
+	return name
+}
+
+// routerHooks are the runtime hooks (usePathname and friends) whose results
+// follow the URL. A module that imports one is lowered like React source, so
+// `const pathname = usePathname()` reads the current path wherever it is used.
+var routerHooks = map[string]bool{
+	"usePathname": true, "useSearchParams": true, "useParams": true, "useRouter": true,
+	"useSelectedLayoutSegment": true, "useSelectedLayoutSegments": true,
 }
 
 // reactAPI reports whether name is a known React API (rename, structural, or
@@ -198,12 +242,17 @@ type reactCtx struct {
 	fnNames map[string]bool
 	// localHooks are custom hooks imported from project modules (relative
 	// paths), which are lowered the same way as hooks of this module.
-	localHooks  map[string]bool
+	localHooks map[string]bool
+	// routerHooks is set when the module imports usePathname, useParams or
+	// another router hook from the runtime.
+	routerHooks bool
 	freshLocals map[*scope]map[string]bool
 	// formStatusSeq numbers lowered useFormStatus() mount refs per module and
 	// formStatusPos records their positions for diagnostics.
 	formStatusSeq int
 	formStatusPos []ast.Pos
+	// vtSeq numbers the auto-named <ViewTransition> elements of the module.
+	vtSeq int
 
 	// Render-scope lowering state (react_derived.go). react is set for a
 	// module that imports React; reads counts reactive reads seen while
@@ -242,6 +291,9 @@ func (c *reactCtx) compatMember(mem *ast.MemberExpr) (ast.Expr, bool) {
 	if !isReactMember && !isDOMMember {
 		return nil, false
 	}
+	if isReactMember && propID.Name == "version" {
+		return &ast.Literal{Position: mem.Position, Kind: ast.StringLit, Value: reactVersion}, true
+	}
 	c.compat[propID.Name] = true
 	return &ast.Identifier{Position: mem.Position, Name: propID.Name}, true
 }
@@ -259,11 +311,11 @@ func (c *reactCtx) memberAPI(mem *ast.MemberExpr) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if c.alias != "" && objID.Name == c.alias && reactAPI(propID.Name) {
-		return propID.Name, true
+	if canon := canonicalReactAPI(propID.Name); c.alias != "" && objID.Name == c.alias && reactAPI(canon) {
+		return canon, true
 	}
-	if c.domAlias != "" && objID.Name == c.domAlias && reactDOMAPI(propID.Name) {
-		return propID.Name, true
+	if canon := canonicalReactAPI(propID.Name); c.domAlias != "" && objID.Name == c.domAlias && reactDOMAPI(canon) {
+		return canon, true
 	}
 	return "", false
 }
@@ -294,6 +346,9 @@ func RewriteReact(prog *ast.Program) {
 // codes_effects.go). file and src position the diagnostics.
 func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	renameReservedBindings(prog)
+	if !inNodeModules(file) {
+		normalizePropsParam(prog)
+	}
 	ctx := &reactCtx{imports: map[string]string{}, fragmentNames: map[string]bool{}, jsxCall: map[string]string{}, compat: map[string]bool{}, file: file, src: src, susp: newSuspenseState()}
 	ctx.fnNames = functionNames(prog.Body)
 	ctx.refDiagnostics(prog)
@@ -324,8 +379,8 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 					ctx.alias = local
 					continue
 				}
-				if reactAPI(named.Remote) {
-					ctx.imports[local] = named.Remote
+				if canon := canonicalReactAPI(named.Remote); reactAPI(canon) {
+					ctx.imports[local] = canon
 				}
 				if named.Remote == "Fragment" {
 					ctx.fragmentNames[local] = true
@@ -353,8 +408,8 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 					ctx.domAlias = local
 					continue
 				}
-				if reactDOMAPI(named.Remote) {
-					ctx.imports[local] = named.Remote
+				if canon := canonicalReactAPI(named.Remote); reactDOMAPI(canon) {
+					ctx.imports[local] = canon
 				}
 			}
 		case "react/jsx-runtime", "react/jsx-dev-runtime":
@@ -380,16 +435,22 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 					ctx.fragmentNames[local] = true
 				}
 			}
-		case "@krate/runtime", "@krate/runtime/jsx-runtime", "@krate/runtime/jsx-dev-runtime":
+		case "@krate/runtime", "@krate/runtime/server", "@krate/runtime/jsx-runtime", "@krate/runtime/jsx-dev-runtime":
 			// The runtime's Fragment is React's Fragment. The import stays
 			// (it also carries other runtime names); only the tag lowers.
 			for _, named := range imp.Named {
+				local := named.Local
+				if local == "" {
+					local = named.Remote
+				}
 				if named.Remote == "Fragment" {
-					local := named.Local
-					if local == "" {
-						local = named.Remote
-					}
 					ctx.fragmentNames[local] = true
+				}
+				// The router hooks return derived getters, like a custom hook
+				// compiled from React source: the module reads them live.
+				if src != "@krate/runtime/jsx-runtime" && src != "@krate/runtime/jsx-dev-runtime" && routerHooks[named.Remote] {
+					ctx.markLocalHook(local)
+					ctx.routerHooks = true
 				}
 			}
 		default:
@@ -413,7 +474,7 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	if ctx.alias != "" {
 		ctx.fragmentNames[ctx.alias] = true
 	}
-	ctx.react = len(ctx.imports) > 0 || ctx.alias != "" || ctx.domAlias != ""
+	ctx.react = len(ctx.imports) > 0 || ctx.alias != "" || ctx.domAlias != "" || ctx.routerHooks
 
 	for i := len(toRemove) - 1; i >= 0; i-- {
 		idx := toRemove[i]
@@ -446,7 +507,8 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 // reactDOMAPI reports the react-dom exports Krate lowers or provides.
 func reactDOMAPI(name string) bool {
 	switch name {
-	case "createPortal", "flushSync", "useFormStatus", "requestFormReset":
+	case "createPortal", "flushSync", "useFormStatus", "requestFormReset", "useActionState",
+		"preload", "preinit", "preconnect", "prefetchDNS", "preloadModule", "preinitModule":
 		return true
 	}
 	return false
@@ -583,7 +645,7 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 			continue
 		}
 		if decl.Init != nil && c.isReactiveFactory(decl.Init) {
-			nameArrayPatternHoles(decl)
+			nameArrayPatternHoles(decl, func(n string) bool { return sc.shadow[n] || sc.getters[n] })
 			if f := c.frame(); f != nil && f.kind == frameHook && len(decl.Names) >= 1 && strings.HasPrefix(decl.Names[0], "__krate_hole") {
 				f.forceTriggers = append(f.forceTriggers, decl.Names[0])
 			}
@@ -640,7 +702,11 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 // the bound names, but the hook lowering reads it positionally (getter, then
 // setter), so a skipped element would make the setter look like the getter,
 // and a missing one would leave the getter undeclared.
-func nameArrayPatternHoles(decl *ast.VarDecl) {
+//
+// taken reports names already bound in the scope: a second getter-only
+// declaration pads with `__krate_hole1_2` rather than redeclaring
+// `__krate_hole1`, which is a SyntaxError that stops the whole page script.
+func nameArrayPatternHoles(decl *ast.VarDecl, taken func(string) bool) {
 	arr, ok := decl.Target.(*ast.ArrayExpr)
 	if !ok || !decl.IsDestructuring {
 		return
@@ -658,13 +724,20 @@ func nameArrayPatternHoles(decl *ast.VarDecl) {
 	if !holes && len(arr.Elements) != 1 {
 		return
 	}
+	unique := func(base string) string {
+		name := base
+		for n := 2; taken != nil && taken(name); n++ {
+			name = base + "_" + strconv.Itoa(n)
+		}
+		return name
+	}
 	for i, el := range arr.Elements {
 		if el == nil {
-			arr.Elements[i] = &ast.Identifier{Position: arr.Position, Name: "__krate_hole" + strconv.Itoa(i)}
+			arr.Elements[i] = &ast.Identifier{Position: arr.Position, Name: unique("__krate_hole" + strconv.Itoa(i))}
 		}
 	}
 	if len(arr.Elements) == 1 {
-		arr.Elements = append(arr.Elements, &ast.Identifier{Position: arr.Position, Name: "__krate_hole1"})
+		arr.Elements = append(arr.Elements, &ast.Identifier{Position: arr.Position, Name: unique("__krate_hole1")})
 	}
 	names := make([]string, 0, len(arr.Elements))
 	for _, el := range arr.Elements {
@@ -816,6 +889,9 @@ func (c *reactCtx) rewriteIdentifier(e *ast.Identifier, sc *scope, valuePos bool
 			e.Name = target
 			return e
 		}
+		if api == "version" {
+			return &ast.Literal{Position: e.Position, Kind: ast.StringLit, Value: reactVersion}
+		}
 		if compatReactNames[api] {
 			c.compat[api] = true
 			e.Name = api
@@ -878,15 +954,26 @@ func (c *reactCtx) rewriteCall(e *ast.CallExpr, sc *scope) ast.Expr {
 		}
 	}
 
-	// `memo`/`lazy` are identity wrappers.
+	// `memo`/`lazy` are identity wrappers, and so is `cache`: React's cache()
+	// only memoizes on the server, where Krate renders each page once.
 	switch api {
-	case "memo", "lazy":
+	case "memo", "lazy", "cache":
 		if isReactAPI && api == "lazy" {
 			// Valid lazy() declarations were lowered at module level.
 			c.reportStrayLazy(e)
 		}
 		if isReactAPI && len(e.Args) >= 1 {
 			return c.rewriteExpr(e.Args[0], sc)
+		}
+	case "captureOwnerStack":
+		// Production React returns null; the owner stack is a development aid.
+		if isReactAPI {
+			return &ast.Literal{Position: e.Position, Kind: ast.NullLit, Value: "null"}
+		}
+	case "flushSync":
+		// Krate applies state changes synchronously, so flushSync(fn) is fn().
+		if isReactAPI && len(e.Args) >= 1 {
+			return &ast.CallExpr{Position: e.Position, Callee: &ast.ParenExpr{Expr: c.rewriteExpr(e.Args[0], sc)}}
 		}
 	case "use":
 		if isReactAPI {

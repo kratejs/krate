@@ -44,6 +44,11 @@ Notes:
   relative to `baseUrl` exactly as `tsc` does, so with `baseUrl: "."` write
   `"@/*": ["./src/*"]`; an import that does not resolve fails the build at the
   import statement. A tsconfig that cannot be parsed is reported as a warning.
+  With `baseUrl` set, a bare import that no `paths` entry and no installed
+  package satisfies is tried as a path under it (`import Btn from
+  "components/Btn"` with `baseUrl: "src"`); an installed package always wins.
+  Asset imports through an alias (`import logo from "@/assets/logo.png"`) work
+  like relative ones.
 - **`include`** must cover `.krate/types` so generated route/content types are
   visible.
 
@@ -80,16 +85,39 @@ in an ambient `.d.ts`.
 `Icon`. It is generated (by `krate dev`, `krate build` or `krate types`) and
 git-ignored by the scaffold, so run `krate types` once after cloning for editors
 and `tsc` to see it. The scaffold's `typecheck` script does exactly that:
-`krate types && tsc --noEmit`.
+`krate typecheck`.
 
 ## Typechecking in CI
 
 ```sh
-krate types && npx tsc --noEmit
+krate typecheck
 ```
 
 Add this after `krate build`. It catches type errors the compiler tolerates
-(Krate strips types rather than validating them).
+(Krate strips types rather than validating them). It generates the types, then
+runs your project's `tsc --noEmit` without the errors `tsc` reports for
+[tier decorators](/docs/core-concepts/component-tiers/#tier-decorators). Any other
+error fails it, including a misspelled decorator.
+
+## Editor support
+
+Tier decorators are errors to TypeScript, so editors underline them. The scaffold
+turns that off with a language service plugin in `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "plugins": [{ "name": "@krate/ts-plugin" }]
+  }
+}
+```
+
+For an existing project, install `@krate/ts-plugin` as a dev dependency and add
+the entry above. In VS Code, run **TypeScript: Select TypeScript Version** and
+choose the workspace version, since plugins load from your project.
+
+Plugins only run in editors, which is why the command line uses `krate typecheck`
+instead of `tsc`.
 
 ## How Krate compiles TypeScript
 
@@ -110,6 +138,17 @@ type-only imports from modules that have no runtime export of that name.
 From your `tsconfig.json`, Krate honours `experimentalDecorators` and
 `useDefineForClassFields`. TypeScript syntax errors fail the build with the
 original `file:line:col`. Comment directives such as `// @server` still apply.
+
+### Decorators
+
+Decorators on classes and their members work on ordinary classes, in `.js` and
+`.jsx` files too. Those always use standard decorators, since
+`experimentalDecorators` is a TypeScript option.
+
+A class component is compiled to a function component, so most decorators cannot
+apply to it: the build warns with
+[KR3011](/docs/reference/diagnostics/#kr3011). Decorators on class components are
+only supported for [tiers](/docs/core-concepts/component-tiers/#tier-decorators).
 
 ## Strictness
 

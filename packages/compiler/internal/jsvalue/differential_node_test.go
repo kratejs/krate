@@ -1,0 +1,375 @@
+package jsvalue
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+)
+
+// TestInterpreterNeverDisagreesWithNode is a differential test. Each case is
+// an expression with the string Node.js produces for String(value). The
+// interpreter folds expressions at build time into static HTML, so it may
+// decline (an unknown or unsupported value is computed in the browser instead)
+// but must never resolve to a value that differs from JavaScript's. Expected
+// values were taken from Node 24; regenerate by running the expressions there.
+func TestInterpreterNeverDisagreesWithNode(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{"7 % 3", "1"},
+		{"-7 % 3", "-1"},
+		{"7 % -3", "1"},
+		{"5.5 % 2", "1.5"},
+		{"2 ** 10", "1024"},
+		{"2 ** -1", "0.5"},
+		{"(-8) ** (1/3)", "NaN"},
+		{"0 / 0", "NaN"},
+		{"1 / 0", "Infinity"},
+		{"-1 / 0", "-Infinity"},
+		{"0 === -0", "true"},
+		{"1 / -0", "-Infinity"},
+		{"5 >>> 1", "2"},
+		{"-5 >>> 1", "2147483645"},
+		{"-5 >> 1", "-3"},
+		{"1 << 31", "-2147483648"},
+		{"1 << 32", "1"},
+		{"~5", "-6"},
+		{"~-1", "0"},
+		{"5 & 3", "1"},
+		{"5 | 3", "7"},
+		{"5 ^ 3", "6"},
+		{"2 ** 32 | 0", "0"},
+		{"2 ** 31 | 0", "-2147483648"},
+		{"4294967295 >>> 0", "4294967295"},
+		{"-1 >>> 0", "4294967295"},
+		{"\"3\" * \"4\"", "12"},
+		{"\"3\" - 1", "2"},
+		{"\"a\" - 1", "NaN"},
+		{"\"5\" + 3", "53"},
+		{"5 + \"3\"", "53"},
+		{"1 + 2 + \"3\"", "33"},
+		{"\"1\" + 2 + 3", "123"},
+		{"true + 1", "2"},
+		{"null + 1", "1"},
+		{"undefined + 1", "NaN"},
+		{"[] + []", ""},
+		{"[1,2] + [3]", "1,23"},
+		{"({}) + \"\"", "[object Object]"},
+		{"1 == \"1\"", "true"},
+		{"0 == \"\"", "true"},
+		{"null == undefined", "true"},
+		{"null === undefined", "false"},
+		{"NaN == NaN", "false"},
+		{"\"b\" > \"a\"", "true"},
+		{"\"10\" < \"9\"", "true"},
+		{"10 < 9", "false"},
+		{"\"10\" < 9", "false"},
+		{"null >= 0", "true"},
+		{"undefined == 0", "false"},
+		{"typeof null", "object"},
+		{"typeof undefined", "undefined"},
+		{"typeof 1", "number"},
+		{"typeof \"s\"", "string"},
+		{"typeof (() => 1)", "function"},
+		{"typeof {}", "object"},
+		{"typeof []", "object"},
+		{"void 0", "undefined"},
+		{"!\"\" ", "true"},
+		{"!!\"0\"", "true"},
+		{"-\"3\"", "-3"},
+		{"+\"  42  \"", "42"},
+		{"+\"\"", "0"},
+		{"+\"0x10\"", "16"},
+		{"+\"1e3\"", "1000"},
+		{"+\"abc\"", "NaN"},
+		{"+[]", "0"},
+		{"+[5]", "5"},
+		{"+{}", "NaN"},
+		{"null ?? \"d\"", "d"},
+		{"0 ?? \"d\"", "0"},
+		{"\"\" || \"d\"", "d"},
+		{"0 && \"x\"", "0"},
+		{"1 && \"x\"", "x"},
+		{"undefined?.a", "undefined"},
+		{"null?.a.b", "undefined"},
+		{"String(1e21)", "1e+21"},
+		{"String(1e-7)", "1e-7"},
+		{"String(123456789012345680000)", "123456789012345680000"},
+		{"String(0.1 + 0.2)", "0.30000000000000004"},
+		{"String(-0)", "0"},
+		{"(25).toString(2)", "11001"},
+		{"(0.5).toString(2)", "0.1"},
+		{"(1234.5678).toFixed(2)", "1234.57"},
+		{"(0).toFixed(2)", "0.00"},
+		{"(1.005).toFixed(2)", "1.00"},
+		{"(1e21).toFixed(2)", "1e+21"},
+		{"(255).toString(16).toUpperCase()", "FF"},
+		{"Number(\"12px\")", "NaN"},
+		{"parseInt(\"12px\")", "12"},
+		{"parseInt(\"0x1f\")", "31"},
+		{"parseInt(\"101\", 2)", "5"},
+		{"parseFloat(\"3.14abc\")", "3.14"},
+		{"Math.round(-0.5)", "0"},
+		{"Math.round(2.5)", "3"},
+		{"Math.round(-2.5)", "-2"},
+		{"Math.max()", "-Infinity"},
+		{"Math.min()", "Infinity"},
+		{"Math.max(1, \"3\", 2)", "3"},
+		{"Math.sign(-3)", "-1"},
+		{"Math.trunc(-4.7)", "-4"},
+		{"Math.hypot(3, 4)", "5"},
+		{"Number.isInteger(5.0)", "true"},
+		{"Number.isSafeInteger(2 ** 53)", "false"},
+		{"\"a-b-c\".replace(\"-\", \"+\")", "a+b-c"},
+		{"\"a-b-c\".replaceAll(\"-\", \"+\")", "a+b+c"},
+		{"\"abc\".replace(\"b\", \"[$&]\")", "a[b]c"},
+		{"\"abc\".replace(\"b\", \"$$\")", "a$c"},
+		{"\"abc\".replace(\"b\", \"$`|$'\")", "aa|cc"},
+		{"\"abc\".replace(\"b\", (m) => m.toUpperCase())", "aBc"},
+		{"\"aaa\".replaceAll(\"a\", \"$&$&\")", "aaaaaa"},
+		{"\"abc\".at(-1)", "c"},
+		{"\"abc\".slice(-2)", "bc"},
+		{"\"abc\".slice(1, -1)", "b"},
+		{"\"abc\".substring(2, 0)", "ab"},
+		{"\"abc\".substr(-2, 1)", "b"},
+		{"\"abc\".charAt(5)", ""},
+		{"\"abc\".charCodeAt(1)", "98"},
+		{"\"abc\".codePointAt(1)", "98"},
+		{"\"a,b,,c\".split(\",\")", "a,b,,c"},
+		{"\"abc\".split(\"\")", "a,b,c"},
+		{"\"a b\".split(\" \", 1)", "a"},
+		{"\"abc\".indexOf(\"c\", -5)", "2"},
+		{"\"abcabc\".lastIndexOf(\"b\")", "4"},
+		{"\"abcabc\".lastIndexOf(\"b\", 3)", "1"},
+		{"\"abc\".includes(\"\")", "true"},
+		{"\"abc\".startsWith(\"b\", 1)", "true"},
+		{"\"abc\".endsWith(\"b\", 2)", "true"},
+		{"\"  x \".trim() + \"|\"", "x|"},
+		{"\"  x \".trimStart() + \"|\"", "x |"},
+		{"\"  x \".trimEnd() + \"|\"", "  x|"},
+		{"\"ab\".padStart(5, \"xy\")", "xyxab"},
+		{"\"ab\".padEnd(5, \"xy\")", "abxyx"},
+		{"\"ab\".repeat(3)", "ababab"},
+		{"\"ab\".concat(\"c\", 1)", "abc1"},
+		{"\"abc\".localeCompare === undefined", "false"},
+		{"\"a\\nb\".length", "3"},
+		{"\"\U0001f600\".length", "2"},
+		{"[...\"\U0001f600a\"].length", "2"},
+		{"\"\U0001f600\".codePointAt(0)", "128512"},
+		{"String.fromCharCode(72, 105)", "Hi"},
+		{"\"Hello\"[0]", "H"},
+		{"\"Hello\"[10]", "undefined"},
+		{"[3, 1, 2].sort()", "1,2,3"},
+		{"[10, 9, 1].sort()", "1,10,9"},
+		{"[10, 9, 1].sort((a, b) => a - b)", "1,9,10"},
+		{"[\"b\", \"a\", undefined, \"c\"].sort()", "a,b,c,"},
+		{"[1, 2, 3].reverse()", "3,2,1"},
+		{"[1, 2, 3].indexOf(4)", "-1"},
+		{"[NaN].indexOf(NaN)", "-1"},
+		{"[NaN].includes(NaN)", "true"},
+		{"[1, [2, [3, [4]]]].flat()", "1,2,3,4"},
+		{"[1, [2, [3, [4]]]].flat(Infinity)", "1,2,3,4"},
+		{"[1, 2].flatMap((x) => [x, x * 2])", "1,2,2,4"},
+		{"[1, 2, 3].slice(-2)", "2,3"},
+		{"[1, 2, 3, 4].splice === undefined", "false"},
+		{"[1, 2, 3].join(\"-\")", "1-2-3"},
+		{"[null, undefined, 1].join()", ",,1"},
+		{"[[1, 2], [3]].join(\";\")", "1,2;3"},
+		{"[1, 2, 3].reduce((a, b) => a + b)", "6"},
+		{"[].reduce((a, b) => a + b, \"init\")", "init"},
+		{"[1, 2, 3].reduceRight((a, b) => a + \"\" + b)", "321"},
+		{"[1, 2, 3].find((x) => x > 1)", "2"},
+		{"[1, 2, 3].findLast((x) => x < 3)", "2"},
+		{"[1, 2, 3].findIndex((x) => x > 5)", "-1"},
+		{"[1, 2, 3].every((x) => x > 0)", "true"},
+		{"[].every((x) => false)", "true"},
+		{"[].some((x) => true)", "false"},
+		{"[1, 2, 3].fill(0, 1)", "1,0,0"},
+		{"Array(3).fill(7)", "7,7,7"},
+		{"Array.from({length: 3}, (_, i) => i * i)", "0,1,4"},
+		{"Array.from(\"abc\")", "a,b,c"},
+		{"Array.from(new Set([1, 1, 2]))", "1,2"},
+		{"Array.of(7, 8)", "7,8"},
+		{"[3, 2, 1].toSorted()", "1,2,3"},
+		{"[1, 2, 3].toReversed()", "3,2,1"},
+		{"[1, 2, 3].with(1, 9)", "1,9,3"},
+		{"[1, 2, 3].at(-1)", "3"},
+		{"Array.isArray([])", "true"},
+		{"[...\"ab\"].map((c, i) => c + i)", "a0,b1"},
+		{"Object.keys([4, 5])", "0,1"},
+		{"[, 1].length", "2"},
+		{"[1, 2, 3].length = 1", "1"},
+		{"Object.keys({b: 1, a: 2, 1: 3, 0: 4})", "0,1,b,a"},
+		{"Object.values({a: 1, b: [2]})", "1,2"},
+		{"JSON.stringify(Object.entries({a: 1, b: 2}))", "[[\"a\",1],[\"b\",2]]"},
+		{"JSON.stringify(Object.fromEntries([[\"a\", 1], [\"b\", 2]]))", "{\"a\":1,\"b\":2}"},
+		{"JSON.stringify(Object.assign({a: 1}, {b: 2}, null, {a: 3}))", "{\"a\":3,\"b\":2}"},
+		{"JSON.stringify({...{a: 1, b: 2}, b: 3})", "{\"a\":1,\"b\":3}"},
+		{"JSON.stringify({a: 1, ...null, ...undefined})", "{\"a\":1}"},
+		{"JSON.stringify({a: undefined, b: () => 1, c: Symbol ? 1 : 0})", "{\"c\":1}"},
+		{"JSON.stringify([undefined, () => 1, NaN, Infinity, -0])", "[null,null,null,null,0]"},
+		{"JSON.stringify(\"he\\\"llo\\n\\u2028\")", "\"he\\\"llo\\n\u2028\""},
+		{"JSON.stringify({d: new Date(0)})", "{\"d\":\"1970-01-01T00:00:00.000Z\"}"},
+		{"JSON.stringify({a: [1, {b: 2}]}, null, 2)", "{\n  \"a\": [\n    1,\n    {\n      \"b\": 2\n    }\n  ]\n}"},
+		{"JSON.stringify({a: 1, b: 2}, [\"a\"])", "{\"a\":1}"},
+		{"JSON.stringify({a: 1}, (k, v) => typeof v === \"number\" ? v + 1 : v)", "{\"a\":2}"},
+		{"JSON.parse('{\"a\":[1,2,{\"b\":null}]}').a[2].b", "null"},
+		{"({a: 1}).hasOwnProperty(\"a\")", "true"},
+		{"Object.hasOwn({a: 1}, \"b\")", "false"},
+		{"\"a\" in {a: 1}", "true"},
+		{"0 in [5]", "true"},
+		{"delete ({a: 1}).a", "true"},
+		{"Object.freeze({a: 1}).a", "1"},
+		{"({a: {b: 1}}).a?.[\"b\"]", "1"},
+		{"({}).toString()", "[object Object]"},
+		{"String({})", "[object Object]"},
+		{"String([1, [2, 3]])", "1,2,3"},
+		{"String(null)", "null"},
+		{"String(undefined)", "undefined"},
+		{"String(Symbol(\"s\"))", "Symbol(s)"},
+		{"`${1 + 1}${\"a\"}${[1, 2]}${null}`", "2a1,2null"},
+		{"new Map([[1, \"a\"]]).get(1)", "a"},
+		{"new Set([1, 2, 2]).size", "2"},
+		{"[...new Set(\"aab\")].join(\"\")", "ab"},
+		{"new Map([[\"a\", 1]]).has(\"b\")", "false"},
+		{"isNaN(\"abc\")", "true"},
+		{"isNaN(\"\")", "false"},
+		{"Number.isNaN(\"abc\")", "false"},
+		{"isFinite(\"5\")", "true"},
+		{"Number.MAX_SAFE_INTEGER", "9007199254740991"},
+		{"Number.EPSILON > 0", "true"},
+		{"Number.MIN_VALUE", "5e-324"},
+		{"Math.PI.toFixed(3)", "3.142"},
+		{"Math.SQRT2", "1.4142135623730951"},
+		{"Math.E", "2.718281828459045"},
+		{"Number.MAX_VALUE", "1.7976931348623157e+308"},
+		{"encodeURIComponent(\"a b&c/d\")", "a%20b%26c%2Fd"},
+		{"decodeURIComponent(\"%E2%82%AC\")", "\u20ac"},
+		{"encodeURI(\"a b/c?d\")", "a%20b/c?d"},
+		{"escape === undefined", "false"},
+		{"parseInt(\"  7  \")", "7"},
+		{"(5).toString().padStart(3, \"0\")", "005"},
+		{"new Date(0).toISOString()", "1970-01-01T00:00:00.000Z"},
+		{"new Date(2020, 0, 31).getMonth()", "0"},
+		{"new Date(\"2024-03-05T10:00:00Z\").getUTCDay()", "2"},
+		{"Date.UTC(2000, 0, 1)", "946684800000"},
+		// lastIndexOf with a position
+		{"[1,2,1,2].lastIndexOf(1, 1)", "0"},
+		{"[1,2,1].lastIndexOf(1, -2)", "0"},
+		{"[1,2,1].lastIndexOf(1, -5)", "-1"},
+		{"[1,2,1].lastIndexOf(1, 10)", "2"},
+		{"[1,2,1].lastIndexOf(1, undefined)", "0"},
+		{"[1,2,1].lastIndexOf(1, 0)", "0"},
+		{"\"abcabc\".lastIndexOf(\"c\", -3)", "-1"},
+		{"\"abcabc\".lastIndexOf(\"\", 2)", "2"},
+		{"\"abcabc\".lastIndexOf(\"b\", NaN)", "4"},
+		{"\"abc\".lastIndexOf(\"c\", 99)", "2"},
+		{"\"abcabc\".lastIndexOf(\"abc\", 2)", "0"},
+		{"\"abcabc\".lastIndexOf(\"abc\", 3)", "3"},
+		{"\"abcabc\".lastIndexOf(\"c\", 2.9)", "2"},
+	}
+	cases = append(cases, extraNodeCases...)
+	resolved := 0
+	for _, tc := range cases {
+		v := evalSrcVolatile(t, tc.src, true)
+		if v.IsUnknown() || v.IsUnsupported() {
+			continue
+		}
+		resolved++
+		if got := v.ToString(); got != tc.want {
+			t.Errorf("%s\n  interpreter: %q\n  node:        %q", tc.src, got, tc.want)
+		}
+	}
+	// A guard against the table silently turning into a no-op.
+	if resolved < len(cases)/2 {
+		t.Errorf("only %d of %d expressions resolved; the interpreter lost coverage", resolved, len(cases))
+	}
+}
+
+// A standard member without an implementation here must not read as
+// undefined: `typeof arr.splice` or `if (arr.toSpliced)` would fold to the wrong
+// branch at build time. It stays unresolved so the browser computes it.
+func TestMissingBuiltinMembersStayUnresolved(t *testing.T) {
+	for _, src := range []string{
+		`[1, 2, 3].splice`, `typeof [1, 2].pop`, `[1].toSpliced === undefined`, `[1].copyWithin`,
+		`"abc".match`, `typeof "abc".normalize`, `"abc".search === undefined`, `"abc".codePointAt === undefined`,
+		`(1.5).toPrecision`, `typeof (5).toExponential`, `[1].constructor`,
+	} {
+		if v := evalSrc(t, src); !v.IsUnknown() && !v.IsUnsupported() {
+			t.Errorf("%s folded to %q; a real built-in member the interpreter lacks must stay unresolved", src, v.ToString())
+		}
+	}
+	// A property that does not exist is still undefined.
+	for src, want := range map[string]string{`"abc".nope`: "undefined", `[1, 2].nope === undefined`: "true", `(5).nope`: "undefined"} {
+		if got := evalSrc(t, src).ToString(); got != want {
+			t.Errorf("%s = %q, want %q", src, got, want)
+		}
+	}
+}
+
+// A fraction of the extra cases may stay unresolved: the build clock and the
+// engine-specific Object.is are not available at build time.
+func TestExtraNodeCasesMostlyResolve(t *testing.T) {
+	unresolved := 0
+	for _, tc := range extraNodeCases {
+		if v := evalSrcVolatile(t, tc.src, true); v.IsUnknown() || v.IsUnsupported() {
+			unresolved++
+		}
+	}
+	if unresolved > 4 {
+		t.Errorf("%d of %d iterator, Map, Set and Date expressions no longer resolve", unresolved, len(extraNodeCases))
+	}
+}
+
+// TestDateLocaleMatchesNode checks toLocaleDateString, toLocaleTimeString and
+// toLocaleString for en-US/UTC against Node. An option combination the
+// evaluator does not reproduce exactly must stay unresolved; one it does
+// resolve must match.
+func TestDateLocaleMatchesNode(t *testing.T) {
+	raw, err := os.ReadFile("testdata/date_locale_golden.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var golden struct {
+		Node     string
+		Instants []string
+		Cases    [][5]any
+	}
+	if err := json.Unmarshal(raw, &golden); err != nil {
+		t.Fatal(err)
+	}
+	resolved, refusedRight := 0, 0
+	for _, c := range golden.Cases {
+		ts, method, locale, opts, want := golden.Instants[int(c[0].(float64))], c[1].(string), c[2].(string), c[3].(string), c[4].(string)
+		args := strings.Join(nonEmpty(locale, opts, locale == "" && opts != ""), ", ")
+		src := "new Date(" + ts + ")." + method + "(" + args + ")"
+		v := evalSrcVolatile(t, src, true)
+		if v.IsUnknown() || v.IsUnsupported() {
+			if strings.HasPrefix(want, "THROWS") {
+				refusedRight++
+			}
+			continue
+		}
+		resolved++
+		if got := v.ToString(); got != want {
+			t.Errorf("%s\n  interpreter: %q\n  node %s:   %q", src, got, golden.Node, want)
+		}
+	}
+	// The matrix must keep exercising the formatter.
+	if resolved < 1000 {
+		t.Errorf("only %d of %d locale cases resolved; the formatter lost coverage", resolved, len(golden.Cases))
+	}
+	t.Logf("%d of %d locale cases resolved, %d refused where Node throws", resolved, len(golden.Cases), refusedRight)
+}
+
+func nonEmpty(locale, opts string, undefinedLocale bool) []string {
+	var out []string
+	if locale != "" {
+		out = append(out, locale)
+	} else if undefinedLocale {
+		out = append(out, "undefined")
+	}
+	if opts != "" {
+		out = append(out, opts)
+	}
+	return out
+}

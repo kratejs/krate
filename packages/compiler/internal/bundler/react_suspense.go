@@ -575,6 +575,21 @@ func (c *reactCtx) lowerSuspenseJSX(el *ast.JSXElement, sc *scope) (ast.Expr, bo
 				el.Closing.Name = "Suspense"
 			}
 		}
+	case "SuspenseList":
+		// SuspenseList only orders reveals; the boundaries inside render
+		// as ordinary <Suspense> ones, each when it is ready.
+		for _, attr := range el.Opening.Attributes {
+			if attr != nil && !attr.Spread && attr.Name != "key" && attr.Name != "children" {
+				c.report(attr.Position, diag.SeverityWarning, diag.CodeReact19Prop,
+					"<SuspenseList "+attr.Name+"> has no effect: each Suspense boundary inside reveals on its own",
+					"SuspenseList is experimental in React; its children render unchanged")
+			}
+		}
+		return c.lowerFragment(el, sc), true
+	case "Activity":
+		c.lowerActivity(el)
+	case "ViewTransition":
+		return c.lowerViewTransition(el, sc), true
 	case "StrictMode", "Profiler":
 		if api == "Profiler" {
 			for _, attr := range el.Opening.Attributes {
@@ -596,12 +611,15 @@ func (c *reactCtx) jsxTagAPI(name string) string {
 	if c.susp.suspense[name] {
 		return "Suspense"
 	}
-	if api, ok := c.imports[name]; ok && (api == "StrictMode" || api == "Profiler") {
-		return api
+	if api, ok := c.imports[name]; ok {
+		switch api {
+		case "StrictMode", "Profiler", "Activity", "ViewTransition", "SuspenseList":
+			return api
+		}
 	}
 	if i := strings.LastIndex(name, "."); i > 0 && c.alias != "" && name[:i] == c.alias {
-		switch prop := name[i+1:]; prop {
-		case "Suspense", "StrictMode", "Profiler":
+		switch prop := canonicalReactAPI(name[i+1:]); prop {
+		case "Suspense", "StrictMode", "Profiler", "Activity", "ViewTransition", "SuspenseList":
 			return prop
 		}
 	}

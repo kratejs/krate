@@ -131,12 +131,103 @@ func parseMap(lines []string, indent int) (map[string]any, int) {
 			out[key] = val
 			i += 1 + n
 			continue
+		} else if joined, n, ok := multiLineQuoted(rest, lines[i+1:]); ok {
+			out[key] = joined
+			i += 1 + n
+			continue
 		} else {
 			out[key] = parseScalar(rest)
 		}
 		i++
 	}
 	return out, i
+}
+
+// quoteEnd returns the index of the quote that closes the quoted scalar
+// starting at s[0], or -1 when it is not closed in s.
+func quoteEnd(s string) int {
+	q := s[0]
+	for i := 1; i < len(s); i++ {
+		switch {
+		case q == '"' && s[i] == '\\':
+			i++
+		case s[i] == q:
+			if q == '\'' && i+1 < len(s) && s[i+1] == '\'' {
+				i++ // '' is an escaped single quote
+				continue
+			}
+			return i
+		}
+	}
+	return -1
+}
+
+// multiLineQuoted joins a quoted scalar that continues onto the following
+// lines, folding line breaks the YAML way: a break becomes one space, and a
+// blank line becomes a newline. It returns the decoded value and the number of
+// extra lines consumed, or ok=false when rest is not an unterminated quote.
+func multiLineQuoted(rest string, following []string) (any, int, bool) {
+	if rest == "" || (rest[0] != '"' && rest[0] != '\'') || quoteEnd(rest) >= 0 {
+		return "", 0, false
+	}
+	var b strings.Builder
+	b.WriteString(rest)
+	pendingBreaks := 0
+	for n, l := range following {
+		t := strings.TrimSpace(l)
+		if t == "" {
+			pendingBreaks++
+			continue
+		}
+		if pendingBreaks > 0 {
+			b.WriteString(strings.Repeat("\n", pendingBreaks))
+		} else {
+			b.WriteByte(' ')
+		}
+		pendingBreaks = 0
+		b.WriteString(t)
+		if quoteEnd(strings.TrimSpace(b.String())) >= 0 {
+			return parseScalar(strings.TrimSpace(b.String())), n + 1, true
+		}
+	}
+	return "", 0, false
+}
+
+// Problem describes frontmatter that Parse cannot read, so a caller can warn
+// instead of silently treating it as body text. Kind is "toml" or
+// "unterminated"; both are empty for readable or absent frontmatter.
+type Problem struct {
+	Kind string
+	Line int
+}
+
+// Detect reports a frontmatter block that Parse ignores: a +++ (TOML) block,
+// or a --- block that is never closed.
+func Detect(src string) (Problem, bool) {
+	src = strings.TrimPrefix(src, "\ufeff")
+	lines := strings.Split(src, "\n")
+	if len(lines) < 2 {
+		return Problem{}, false
+	}
+	switch strings.TrimSpace(lines[0]) {
+	case "+++":
+		for i := 1; i < len(lines); i++ {
+			if strings.TrimSpace(lines[i]) == "+++" {
+				return Problem{Kind: "toml", Line: 1}, true
+			}
+		}
+	case "---":
+		for i := 1; i < len(lines); i++ {
+			if strings.TrimSpace(lines[i]) == "---" {
+				return Problem{}, false
+			}
+		}
+		// Only suspicious when the first line after it looks like a key.
+		if _, _, ok := splitKeyValue(strings.TrimSpace(lines[1])); ok {
+			return Problem{Kind: "unterminated", Line: 1}, true
+		}
+	}
+	return Problem{}, false
 }
 
 // blockScalarHeader recognises a YAML block scalar indicator: `|` (literal) or

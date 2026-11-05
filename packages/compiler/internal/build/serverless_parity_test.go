@@ -17,9 +17,16 @@ type parityCase struct {
 	path    string
 	headers map[string]string
 	body    string
+	// status, when set, is the status both hosts must answer with.
+	status int
+	// uncached requires Cache-Control: no-store and no X-Krate-Cache header.
+	uncached bool
 	// contains and absent are checked on the node target's body.
 	contains []string
 	absent   []string
+	// inHead and notInHead are checked on the document head of both hosts,
+	// notInBody on everything after </head>.
+	inHead, notInHead, notInBody, onceInHead []string
 }
 
 // parityHeaders are compared between `krate start` and the node target: the
@@ -36,8 +43,14 @@ var timestampRe = regexp.MustCompile(`\d{10,}`)
 // failed render depends on the stack, which differs between hosts).
 var digestRe = regexp.MustCompile(`(id=d>|id="d">|"digest":")[0-9a-f]{10}`)
 
+// normalizeBody blanks what legitimately differs between hosts. Digests go
+// first: a digest is ten hex characters, and one that happens to be all
+// decimal digits (about 1 in 100) looks like a timestamp, so normalizing
+// timestamps first turned it into "N" on one host and "DIGEST" on the other,
+// and the 500 page comparison failed on that run only.
 func normalizeBody(s string) string {
-	return digestRe.ReplaceAllString(timestampRe.ReplaceAllString(s, "N"), "${1}DIGEST")
+	// Digests first: a digest of only decimal digits also looks like a timestamp.
+	return timestampRe.ReplaceAllString(digestRe.ReplaceAllString(s, "${1}DIGEST"), "N")
 }
 
 func setCookieNames(h http.Header) string {
@@ -129,6 +142,50 @@ func TestServerlessNodeParity(t *testing.T) {
 		{name: "traversal", method: "GET", path: "/..%2f..%2fetc/passwd"},
 		{name: "HEAD page", method: "HEAD", path: "/ssr/"},
 		{name: "isr query variant", method: "GET", path: "/isr/?x=1"},
+		// <Head> children of async pages land in the initial <head>.
+		{name: "head ssr", method: "GET", path: "/headtags/hello/",
+			inHead: []string{
+				"<title>Post hello | Krate</title>",
+				`<meta name="description" content="About &lt;&quot;hello&quot;&gt; &amp; more">`,
+				`<meta property="og:title" content="OG hello">`,
+				`<meta property="og:image" content="https://example.com/a.png">`,
+				`<meta property="og:image" content="https://example.com/b.png">`,
+				`<link rel="canonical" href="https://example.com/headtags/hello">`,
+				`<script type="application/ld+json">{"@type":"Article","name":"hello","note":"<\/script>"}</script>`,
+				"og:site_name",
+			},
+			notInHead: []string{"layout description", "https://example.com/layout"},
+			notInBody: []string{"<meta ", "<title", "<link rel=\"canonical", "ld+json"}},
+		{name: "head ssr other slug", method: "GET", path: "/headtags/other/",
+			inHead: []string{"<title>Post other | Krate</title>", `href="https://example.com/headtags/other"`}},
+		{name: "head isr miss", method: "GET", path: "/headisr/",
+			inHead:    []string{"<title>ISR head title</title>", `<meta name="robots" content="noindex">`, `<meta property="og:type" content="website">`},
+			notInBody: []string{"<meta ", "<title"}},
+		{name: "head isr hit", method: "GET", path: "/headisr/",
+			inHead:    []string{"<title>ISR head title</title>", `<meta name="robots" content="noindex">`},
+			notInBody: []string{"<meta ", "<title"}},
+		// generateMetadata and <Head> on one async ISR page merge into one head:
+		// <Head> wins a repeated name, a repeated property keeps every distinct
+		// value, identical tags appear once, and ISR hits serve the same head.
+		{name: "generateMetadata and Head miss", method: "GET", path: "/mixhead/",
+			inHead:     []string{"<title>From generateMetadata</title>", `<meta name="description" content="head description">`, `<meta name="author" content="Head">`, `<meta property="og:title" content="OG from meta">`, `<meta property="og:image" content="https://example.com/head.png">`, `<meta property="og:image" content="https://example.com/meta.png">`},
+			notInHead:  []string{`content="meta description"`},
+			onceInHead: []string{"<title>", `name="description"`, `name="robots"`, `og:title`, `https://example.com/meta.png`, `https://example.com/head.png`},
+			notInBody:  []string{"<meta ", "<title"}},
+		{name: "generateMetadata and Head hit", method: "GET", path: "/mixhead/",
+			inHead:     []string{"<title>From generateMetadata</title>", `<meta name="description" content="head description">`, `<meta property="og:image" content="https://example.com/meta.png">`},
+			notInHead:  []string{`content="meta description"`},
+			onceInHead: []string{"<title>", `name="description"`, `name="robots"`, `og:title`, `https://example.com/meta.png`, `https://example.com/head.png`},
+			notInBody:  []string{"<meta ", "<title"}},
+		{name: "head server component region", method: "GET", path: "/headcomponent/",
+			inHead:    []string{"<title>Written by Ada</title>", `<meta name="author" content="Ada">`},
+			notInBody: []string{"<meta ", "<title"}},
+		// A streamed Suspense region renders after the head was sent: its tags are
+		// applied by the region script, the baked ones stay in the head.
+		{name: "head streamed region", method: "GET", path: "/headstream/",
+			inHead:    []string{`<meta name=keywords content="baked, static"/>`},
+			notInHead: []string{"from a streamed region"},
+			contains:  []string{"from a streamed region", "data-krate-stream"}},
 		// Per-segment pages, inside the blog layout.
 		{name: "segment 404 unmatched", method: "GET", path: "/blog/a/b/c/", contains: []string{"blog-404", "id=blog-layout"}},
 		{name: "segment 404 unmatched accept", method: "GET", path: "/blog/a/b/c", headers: map[string]string{"Accept": "text/html"}, contains: []string{"blog-404"}},
@@ -137,6 +194,29 @@ func TestServerlessNodeParity(t *testing.T) {
 		{name: "segment 404 notFound()", method: "GET", path: "/blog/ssr-gone/", contains: []string{"blog-404", "id=blog-layout"}},
 		{name: "segment 404 dynamic dir", method: "GET", path: "/shop/shoes/nothing/", contains: []string{"cat-404 shoes"}},
 		{name: "segment 500 digest", method: "GET", path: "/blog/ssr-crash/", contains: []string{"blog-error", "id=blog-layout", "Internal Server Error", `id="__krate_error"`}, absent: []string{"secret crash detail"}},
+		// forbidden() and unauthorized(): 403 and 401 with the nearest segment page.
+		{name: "forbidden() server component", method: "GET", path: "/post/secret/", status: 403, uncached: true, contains: []string{"root-403"}},
+		{name: "unauthorized() server component", method: "GET", path: "/post/anon/", status: 401, uncached: true, contains: []string{"root-401"}},
+		{name: "segment 403 nearest", method: "GET", path: "/blog/gated/", status: 403, uncached: true, contains: []string{"blog-403", "id=blog-layout"}},
+		{name: "segment 401 falls back to root", method: "GET", path: "/blog/signin/", status: 401, uncached: true, contains: []string{"root-401"}},
+		{name: "forbidden() on an ISR page is not cached", method: "GET", path: "/isr-denied/", status: 403, uncached: true, contains: []string{"root-403"}},
+		{name: "forbidden() again after ISR", method: "GET", path: "/isr-denied/", status: 403, uncached: true, contains: []string{"root-403"}},
+		{name: "forbidden() in a child server component", method: "GET", path: "/guarded/", status: 403, uncached: true, headers: map[string]string{"Cookie": "role=banned"}, contains: []string{"root-403"}, absent: []string{"guarded page"}},
+		{name: "child server component allows others", method: "GET", path: "/guarded/", contains: []string{"guarded page", `id=guarded`}},
+		{name: "api forbidden()", method: "GET", path: "/api/denied", status: 403, contains: []string{`"Forbidden"`}},
+		{name: "api unauthorized()", method: "GET", path: "/api/anon", status: 401, contains: []string{`"Unauthorized"`}},
+		{name: "api notFound()", method: "GET", path: "/api/anon?missing=1", status: 404, contains: []string{`"Not Found"`}},
+		{name: "action forbidden() fetch", method: "POST", path: "/__krate/action/" + ids["secret"], status: 403, headers: same, body: `{"args":[]}`},
+		{name: "action unauthorized() fetch", method: "POST", path: "/__krate/action/" + ids["signin"], status: 401, headers: same, body: `{"args":[]}`},
+		{name: "action forbidden() form", method: "POST", path: "/__krate/action/" + ids["secret"], status: 403, headers: map[string]string{"Sec-Fetch-Site": "same-origin", "Content-Type": "application/x-www-form-urlencoded", "Referer": "/blog/post/a/"}, body: "x=1", contains: []string{"blog-403"}},
+		// generateMetadata: real tags in the first bytes of the head.
+		{name: "generateMetadata per request", method: "GET", path: "/meta/hello/", status: 200, inHead: []string{"<title>Hello | Krate</title>", `<meta name="description" content="first post">`, `<link rel="canonical" href="https://example.com/meta/hello">`, `<meta property="og:title" content="Hello">`, `<meta property="og:image" content="/og/hello.png">`, `content="layout description"`}, notInHead: []string{"og:site_name"}, contains: []string{"meta-page"}},
+		{name: "generateMetadata sees searchParams", method: "GET", path: "/meta/hello/?draft=1", status: 200, inHead: []string{`<meta name="robots" content="noindex, nofollow">`}},
+		{name: "generateMetadata without search", method: "GET", path: "/meta/hello/", notInHead: []string{`name="robots"`}},
+		{name: "generateMetadata that throws keeps the page", method: "GET", path: "/meta/boom/", status: 200, inHead: []string{"<title>Meta</title>", `content="layout description"`}, notInHead: []string{"secret detail"}, contains: []string{"post boom"}, absent: []string{"secret detail"}},
+		{name: "notFound() in generateMetadata", method: "GET", path: "/meta/gone/", status: 404},
+		{name: "generateMetadata baked per generateStaticParams entry", method: "GET", path: "/smeta/one/", status: 200, inHead: []string{"<title>Entry one - Static</title>", `<meta name="description" content="about one">`, `<meta property="og:title" content="OG one">`, `<meta property="og:image" content="https://static.example.com/img/one.png">`}, notInHead: []string{"og:site_name", "__KRATE_PARAM"}},
+		{name: "generateMetadata of the next entry", method: "GET", path: "/smeta/two/", status: 200, inHead: []string{"<title>Entry two - Static</title>", `content="about two"`, `https://static.example.com/img/two.png`}},
 		{name: "global 404 outside", method: "GET", path: "/elsewhere/deep/", contains: []string{"custom-404"}, absent: []string{"blog-404"}},
 	}
 	for _, c := range cases {
@@ -159,6 +239,44 @@ func TestServerlessNodeParity(t *testing.T) {
 			if gb, nb := normalizeBody(g.body), normalizeBody(n.body); gb != nb {
 				t.Errorf("body differs\nkrate start: %s\nnode target: %s", gb, nb)
 			}
+			if c.status != 0 && (g.status != c.status || n.status != c.status) {
+				t.Errorf("status: want %d, krate start %d, node target %d", c.status, g.status, n.status)
+			}
+			if c.uncached {
+				for host, r := range map[string]matrixResult{"krate start": g, "node target": n} {
+					if r.headers.Get("X-Krate-Cache") != "" || !strings.Contains(r.headers.Get("Cache-Control"), "no-store") {
+						t.Errorf("%s: a denied response must not be cached: Cache-Control %q, X-Krate-Cache %q", host, r.headers.Get("Cache-Control"), r.headers.Get("X-Krate-Cache"))
+					}
+				}
+			}
+			for host, body := range map[string]string{"krate start": g.body, "node target": n.body} {
+				head, rest := body, ""
+				if i := strings.Index(strings.ToLower(body), "</head>"); i >= 0 {
+					head, rest = body[:i], body[i:]
+				}
+				// The build minifies static heads (unquoted attributes); compare without quotes.
+				unquoted := func(s string) string { return strings.ReplaceAll(s, `"`, "") }
+				for _, want := range c.inHead {
+					if !strings.Contains(unquoted(head), unquoted(want)) {
+						t.Errorf("%s: <head> lacks %q:\n%.1500s", host, want, head)
+					}
+				}
+				for _, once := range c.onceInHead {
+					if n := strings.Count(unquoted(head), unquoted(once)); n != 1 {
+						t.Errorf("%s: <head> must hold %q exactly once, found %d:\n%.1500s", host, once, n, head)
+					}
+				}
+				for _, bad := range c.notInHead {
+					if strings.Contains(unquoted(head), unquoted(bad)) {
+						t.Errorf("%s: <head> must not contain %q:\n%.1500s", host, bad, head)
+					}
+				}
+				for _, bad := range c.notInBody {
+					if strings.Contains(rest, bad) {
+						t.Errorf("%s: body must not contain %q:\n%.1500s", host, bad, rest)
+					}
+				}
+			}
 			for _, want := range c.contains {
 				if !strings.Contains(n.body, want) {
 					t.Errorf("node target body lacks %q:\n%.600s", want, n.body)
@@ -172,4 +290,16 @@ func TestServerlessNodeParity(t *testing.T) {
 		})
 	}
 	_ = deploy.ServerFeatures
+}
+
+func TestNormalizeBodyDigestOfOnlyDigits(t *testing.T) {
+	const page = `<script type="application/json" id="__krate_error">{"name":"Error","message":"Internal Server Error","digest":"%s"}</script> t=1700000000000`
+	letters := normalizeBody(strings.Replace(page, "%s", "08926a4e5a", 1))
+	digits := normalizeBody(strings.Replace(page, "%s", "0123456789", 1))
+	if letters != digits {
+		t.Errorf("two digests must normalize alike:\n%s\n%s", letters, digits)
+	}
+	if !strings.Contains(digits, "t=N") {
+		t.Errorf("timestamps must still be blanked: %s", digits)
+	}
 }

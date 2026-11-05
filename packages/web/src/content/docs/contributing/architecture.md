@@ -24,7 +24,7 @@ Source (.tsx/.ts/.md/.mdx)
     Hydration Codegen (signals -> JS bundle with data-k/data-kh bindings)
         |
         v
-    Build Output (HTML + hashed JS + hashed CSS + manifest.json)
+    Build Output (HTML + hashed JS + hashed CSS + .krate/manifest.json)
 ```
 
 The compiler is 100% Go: lexer, parser, bundler, renderer, CSS pipeline, and

@@ -74,17 +74,11 @@ func (a *Analyzer) validateJSX(el *ast.JSXElement, names map[string]bool) string
 		if !CanBeLabel(el.Opening.Name) {
 			return "trigger <" + el.Opening.Name + "> cannot become a <label>; use <button> (or switch to createSignal)"
 		}
-		if !hasStaticClass(el) {
-			return "trigger <" + el.Opening.Name + "> has a dynamic class; use a static string class (or switch to createSignal)"
-		}
-	} else if isPanel {
-		if !hasStaticClass(el) {
-			return "panel <" + el.Opening.Name + "> has a dynamic class; use a static string class (or switch to createSignal)"
-		}
+		// A dynamic class is fine: the builder concatenates the scope class
+		// onto whatever the expression produces.
 	}
-	// A dynamic class on the component root is fine: the scope class is then
-	// applied to a display:contents wrapper by the builder. Only triggers and
-	// panels (which need the class inline) require a static class.
+	// A dynamic class on a panel or the component root is fine too: the scope
+	// class lives on a display:contents wrapper the builder adds.
 
 	for _, attr := range el.Opening.Attributes {
 		if attr == nil || attr.Value == nil || attr.Spread {
@@ -162,22 +156,6 @@ func (a *Analyzer) validateFragment(frag *ast.JSXFragment, names map[string]bool
 		}
 	}
 	return ""
-}
-
-// hasStaticClass reports whether the element's class (if present) is a static
-// string literal.
-func hasStaticClass(el *ast.JSXElement) bool {
-	for _, attr := range el.Opening.Attributes {
-		if attr == nil || (attr.Name != "class" && attr.Name != "className") {
-			continue
-		}
-		if attr.Value == nil {
-			return true
-		}
-		lit, ok := attr.Value.(*ast.Literal)
-		return ok && lit.Kind == ast.StringLit
-	}
-	return true
 }
 
 // validateStmts rejects any use of the state outside the return JSX and the

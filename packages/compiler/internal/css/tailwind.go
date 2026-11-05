@@ -25,6 +25,9 @@ type TailwindScanner struct {
 	// VarRefs collects the custom properties referenced via var(--name) in the
 	// scanned files, so referenced theme variables can be emitted.
 	VarRefs map[string]bool
+	// Names are extra hyphen-free utility names to keep, the project's own
+	// `@utility card` and `@utility card-*` roots.
+	Names map[string]bool
 }
 
 // NewTailwindScanner creates a scanner for the given project root.
@@ -58,7 +61,7 @@ func (s *TailwindScanner) ScanClasses(dirs []string) map[string]bool {
 				return nil
 			}
 			text := string(data)
-			for _, tok := range candidateTokens(text) {
+			for _, tok := range candidateTokensNames(text, s.Names) {
 				classes[tok] = true
 			}
 			if strings.Contains(text, "var(") {
@@ -189,7 +192,7 @@ func validDeclarationBlock(css string) bool {
 			continue
 		}
 		prop, val, ok := strings.Cut(decl, ":")
-		if !ok || strings.TrimSpace(prop) == "" {
+		if !ok || strings.TrimSpace(prop) == "" || strings.ContainsAny(prop, "{}") {
 			return false
 		}
 		val = strings.TrimSpace(val)
@@ -773,6 +776,19 @@ func generateCSS(cls string, theme TailwindTheme) string {
 	}
 	if cls == "bg-auto" {
 		return "background-size: auto;"
+	}
+
+	// Explicit arbitrary size and position: bg-size-[auto_100px],
+	// bg-position-[center_top], and the bg-size-(--var) shorthand.
+	for _, bg := range [...]struct{ prefix, prop string }{{"bg-size-", "background-size"}, {"bg-position-", "background-position"}} {
+		if rest, ok := strings.CutPrefix(cls, bg.prefix); ok {
+			if v, _, isArb := arbitraryValue(rest); isArb {
+				return bg.prop + ": " + v + ";"
+			}
+			if strings.HasPrefix(rest, "(") && strings.HasSuffix(rest, ")") && len(rest) > 2 {
+				return bg.prop + ": var(" + normalizeArbitrary(rest[1:len(rest)-1]) + ");"
+			}
+		}
 	}
 
 	// Background repeat

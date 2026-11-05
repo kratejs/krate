@@ -61,6 +61,48 @@ func pluginGlobalName(absPath string) string {
 	return pluginGlobalPrefix + strconv.FormatUint(uint64(h.Sum32()), 16)
 }
 
+// pluginInvokeJS defines __krateInvoke(global, hook, optionsJSON), the driver
+// every hook call goes through. It is evaluated once per VM, so the per-call
+// work is a function call with three short strings: the hook context and the
+// krate metadata are fetched with _krate_hookInput only when the plugin
+// implements the hook, and parsed with JSON.parse rather than lexed as
+// JavaScript.
+const pluginInvokeJS = `
+globalThis.__krateInvoke = function(g, hookName, optionsJSON) {
+  try {
+    if (!(g in globalThis)) throw new ReferenceError(g + ' is not defined');
+    var mod = globalThis[g] || {};
+    var plugin = mod.default || mod;
+    if (typeof plugin === 'function') plugin = plugin(JSON.parse(optionsJSON));
+    // Hooks live on the descriptor's .hooks, the module's named ` + "`hooks`" + ` export
+    // (factory style), or the descriptor itself (single-hook shorthand).
+    var hooks = (plugin && plugin.hooks) || mod.hooks || plugin || {};
+    var fn = hooks[hookName];
+    if (typeof fn !== 'function') return JSON.stringify({ skip: true });
+    var input = JSON.parse(_krate_hookInput());
+    var krate = input.krate;
+    krate.resolveFile = function(spec) { return _krate_resolveFile(String(spec)); };
+    krate.readFile = function(spec) { return _krate_readFile(String(spec)); };
+    krate.emitFile = function(path, content) { _krate_emitFile(String(path), String(content)); };
+    krate.writeFileToRoot = function(rel, content) { _krate_writeFileToRoot(String(rel), String(content)); };
+    krate.injectHead = function(html) { return _krate_injectHead(String(html)); };
+    krate.injectCSS = function(css) { return _krate_injectCSS(String(css)); };
+    krate.log = function() { _krate_log(JSON.stringify(Array.prototype.slice.call(arguments))); };
+    krate.warn = function() { _krate_warn(JSON.stringify(Array.prototype.slice.call(arguments))); };
+    var out = fn(input.ctx, JSON.parse(optionsJSON), krate);
+    if (out && typeof out.then === 'function') {
+      __krateResult = undefined;
+      __krateError = '';
+      out.then(function(v) { __krateResult = v; }, function(e) { __krateError = (e && e.message) || String(e); });
+      return JSON.stringify({ pending: true });
+    }
+    return JSON.stringify({ result: out });
+  } catch (e) {
+    return JSON.stringify({ error: (e && e.message) || String(e) });
+  }
+};
+`
+
 // pluginVM is a pooled QuickJS VM used for JS plugin hook invocations. Creating a
 // VM and injecting the polyfill bundle dominates a hook call, so VMs are reused.
 // The krate host functions are registered once (they read the current
@@ -95,6 +137,10 @@ func acquirePluginVM() (*pluginVM, error) {
 	if err := registerKrateHostFuncs(vm); err != nil {
 		_ = rt.Close()
 		return nil, err
+	}
+	if _, err := rt.Execute(pluginInvokeJS); err != nil {
+		_ = rt.Close()
+		return nil, fmt.Errorf("installing plugin driver: %w", err)
 	}
 	return vm, nil
 }
@@ -135,7 +181,7 @@ func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir strin
 	defer func() { releasePluginVM(vm, healthy) }()
 	rt := vm.rt
 
-	_ = rt.SetEnv(environ.Current)
+	_ = rt.SetEnv(environ.ScriptEnv())
 
 	// Attribute all console/log output to this plugin.
 	rt.SetLogPrefix("[plugin:" + pc.Name + "]")
@@ -154,54 +200,12 @@ func runJSPluginHook(hookName string, pc config.PluginConfig, root, outDir strin
 		return fmt.Errorf("loading plugin bundle: %w", err)
 	}
 
-	ctxJSON, err := marshalHookContext(hookName, hookCtx)
-	if err != nil {
-		return fmt.Errorf("serializing hook context: %w", err)
-	}
 	optionsJSON, err := json.Marshal(pc.Options)
 	if err != nil {
 		return fmt.Errorf("serializing plugin options: %w", err)
 	}
-	krateJSON, err := json.Marshal(cap.metadata())
-	if err != nil {
-		return fmt.Errorf("serializing krate metadata: %w", err)
-	}
 
-	callScript := fmt.Sprintf(`
-(function() {
-  try {
-    var mod = %[1]s || {};
-    var plugin = mod.default || mod;
-    if (typeof plugin === 'function') plugin = plugin(%[2]s);
-    // Hooks live on the descriptor's .hooks, the module's named `+"`hooks`"+` export
-    // (factory style), or the descriptor itself (single-hook shorthand).
-    var hooks = (plugin && plugin.hooks) || mod.hooks || plugin || {};
-    var fn = hooks[%[4]s];
-    if (typeof fn !== 'function') return JSON.stringify({ skip: true });
-    var krate = %[5]s;
-    krate.resolveFile = function(spec) { return _krate_resolveFile(String(spec)); };
-    krate.readFile = function(spec) { return _krate_readFile(String(spec)); };
-    krate.emitFile = function(path, content) { _krate_emitFile(String(path), String(content)); };
-    krate.writeFileToRoot = function(rel, content) { _krate_writeFileToRoot(String(rel), String(content)); };
-    krate.injectHead = function(html) { return _krate_injectHead(String(html)); };
-    krate.injectCSS = function(css) { return _krate_injectCSS(String(css)); };
-    krate.log = function() { _krate_log(JSON.stringify(Array.prototype.slice.call(arguments))); };
-    krate.warn = function() { _krate_warn(JSON.stringify(Array.prototype.slice.call(arguments))); };
-    var out = fn(%[3]s, %[2]s, krate);
-    if (out && typeof out.then === 'function') {
-      __krateResult = undefined;
-      __krateError = '';
-      out.then(function(v) { __krateResult = v; }, function(e) { __krateError = (e && e.message) || String(e); });
-      return JSON.stringify({ pending: true });
-    }
-    return JSON.stringify({ result: out });
-  } catch (e) {
-    return JSON.stringify({ error: (e && e.message) || String(e) });
-  }
-})()
-`, globalName, string(optionsJSON), string(ctxJSON), jsString(hookName), string(krateJSON))
-
-	res, err := rt.Execute(callScript)
+	res, err := rt.Call("__krateInvoke", globalName, hookName, string(optionsJSON))
 	if err != nil {
 		return fmt.Errorf("invoking %s hook: %w", hookName, err)
 	}

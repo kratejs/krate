@@ -264,7 +264,7 @@ func TestCloudflareServerOutput(t *testing.T) {
 			t.Errorf("worker imports %s, which Workers do not provide", m[1])
 		}
 	}
-	for _, bad := range []string{"node:fs", "node:vm", "node:http", "node:child_process", "node:worker_threads", "node:cluster"} {
+	for _, bad := range []string{"node:fs", "node:vm", "node:http", "node:child_process", "node:worker_threads", "node:cluster", "node:net", "node:tls", "node:fs/promises", "RespConnection"} {
 		if strings.Contains(string(src), bad) {
 			t.Errorf("worker bundle references %s", bad)
 		}
@@ -425,5 +425,72 @@ func TestPlatformDeploysKeepSegmentPages(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// No target hard-codes trusting forwarded headers: all three follow
+// server.trustProxy (unset means what the platform guarantees, see PLATFORMS in
+// the handler).
+func TestServerEntryFollowsTrustProxyOnEveryTarget(t *testing.T) {
+	for _, target := range []string{"vercel", "netlify", "cloudflare"} {
+		entry := serverEntry(target, "", "")
+		if strings.Contains(entry, "trustProxy: true") || strings.Contains(entry, "trustProxy: !!") {
+			t.Errorf("%s entry must not override server.trustProxy:\n%s", target, entry)
+		}
+	}
+}
+
+func TestHandlerConfigTrustProxyIsThreeState(t *testing.T) {
+	cfg := config.Default()
+	if hc := trustProxyOf(cfg); hc != nil {
+		t.Errorf("unset trustProxy must be null, got %v", *hc)
+	}
+	cfg.Server.TrustProxySet = true
+	if v := trustProxyOf(cfg); v == nil || *v {
+		t.Errorf("explicit false must stay false, got %v", v)
+	}
+	cfg.Server.TrustProxy = true
+	if v := trustProxyOf(cfg); v == nil || !*v {
+		t.Errorf("explicit true must stay true, got %v", v)
+	}
+}
+
+// The Redis cache adapter and the ImageResponse file reader are Node-only and
+// must stay out of non-Node bundles, while the Node-based targets keep Redis.
+func TestRedisCacheTargets(t *testing.T) {
+	root, cfg := serverlessProject(t, "serverless")
+	cfg.Cache.Adapter = "redis"
+	cfg.Cache.URLEnv = "REDIS_URL"
+	_, err := BuildServerBundle(root, cfg, "cloudflare")
+	if err == nil || !strings.Contains(err.Error(), "cache.adapter \"redis\"") || !strings.Contains(err.Error(), "--target node") {
+		t.Fatalf("cloudflare with the redis adapter must fail with advice, got %v", err)
+	}
+	for _, target := range []string{"node", "vercel", "netlify"} {
+		plan, err := BuildServerBundle(root, cfg, target)
+		if err != nil {
+			t.Fatalf("%s keeps the redis adapter: %v", target, err)
+		}
+		src, _ := os.ReadFile(plan.Bundle)
+		if !strings.Contains(string(src), "node:net") {
+			t.Errorf("%s bundle should still carry the Redis client", target)
+		}
+	}
+}
+
+func TestCloudflareCustomCacheAdapter(t *testing.T) {
+	root, cfg := serverlessProject(t, "serverless")
+	if err := os.WriteFile(filepath.Join(root, "my-cache.mjs"), []byte("export default () => ({ get: async () => null, set: async () => {}, delete: async () => {}, close: async () => {} });\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Cache.Adapter = "./my-cache.mjs"
+	plan, err := BuildServerBundle(root, cfg, "cloudflare")
+	if err != nil {
+		t.Fatalf("a custom adapter module must build for cloudflare: %v", err)
+	}
+	src, _ := os.ReadFile(plan.Bundle)
+	for _, bad := range []string{"node:net", "node:tls", "node:fs"} {
+		if strings.Contains(string(src), bad) {
+			t.Errorf("worker bundle references %s", bad)
+		}
 	}
 }

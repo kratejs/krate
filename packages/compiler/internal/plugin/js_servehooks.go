@@ -64,7 +64,7 @@ func runJSServeHook(module, hookName, root string, payload map[string]interface{
 	defer func() { releasePluginVM(vm, healthy) }()
 	rt := vm.rt
 
-	_ = rt.SetEnv(environ.Current)
+	_ = rt.SetEnv(environ.ScriptEnv())
 	if _, err := rt.Execute(bundleCode); err != nil {
 		return nil, fmt.Errorf("loading plugin bundle: %w", err)
 	}

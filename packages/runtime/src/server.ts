@@ -2,13 +2,30 @@
 // Provides the same API as the client runtime but renders to HTML strings.
 
 import { ATTR_ALIASES } from './htmlspec-attributes.js';
+import { highlight as highlightCode, trimSpace } from './highlight.js';
 
 export { getActionContext, headers, cookies, redirect } from './action-context.js';
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
 export { revalidatePath, revalidateTag, unstable_cache, unstable_noStore } from './cache.js';
 export type { RevalidatePathType, UnstableCacheOptions } from './cache.js';
-export { getRequestContext, notFound } from './request-context.js';
+export { getRequestContext, notFound, forbidden, unauthorized } from './request-context.js';
+export {
+  usePathname,
+  useSearchParams,
+  useParams,
+  useRouter,
+  useSelectedLayoutSegment,
+  useSelectedLayoutSegments,
+  permanentRedirect,
+} from './navigation-server.js';
+export type { AppRouterInstance } from './navigation-server.js';
 export type { RequestContext, RequestCookies } from './request-context.js';
+export { resolveMetadata, renderMetadataTags, metadataHeadTags } from './metadata.js';
+export { renderSitemapXML, renderRobotsTXT, renderManifestJSON } from './metadata-routes.js';
+export type { MetadataRoute, SitemapEntry, RobotsFile, RobotsRule, ManifestFile } from './metadata-routes.js';
+export { ImageResponse } from './og.js';
+export type { ImageResponseOptions } from './og.js';
+export type { Metadata, ResolvingMetadata, ResolvingViewport, Viewport, MetadataSegment, MetadataModule, MetadataProps } from './metadata.js';
 
 // Signal (server: returns initial value, no reactivity)
 
@@ -319,6 +336,20 @@ async function resolveTree(node: unknown): Promise<JSXNode> {
   return resolveTree(out);
 }
 
+// rawTextContent renders the children of <script>/<style>: their text is raw
+// text in HTML, so entity escaping would corrupt JSON-LD and inline code. The
+// static compiler emits it the same way; only a sequence that could end the
+// element or open a comment is neutralised.
+function rawTextContent(tag: string, children: JSXNode[]): string {
+  let out = "";
+  for (const c of children) {
+    if (typeof c === "string") out += c;
+    else out += renderNode(c);
+  }
+  out = out.replace(tag === "script" ? /<\/(script)/gi : /<\/(style)/gi, "<\\/$1");
+  return tag === "script" ? out.replace(/<!--/g, "<\\!--") : out;
+}
+
 function renderElement(el: JSXElement): string {
   const { type, props, children } = el;
 
@@ -354,6 +385,8 @@ function renderElement(el: JSXElement): string {
   const dangerous = props.dangerouslySetInnerHTML;
   const inner = dangerous && typeof dangerous === "object" && typeof dangerous.__html === "string"
     ? dangerous.__html
+    : tag === "script" || tag === "style"
+    ? rawTextContent(tag, children)
     : children.map(renderNode).join("");
   return `<${tag}${attrs}>${inner}</${tag}>`;
 }
@@ -492,10 +525,15 @@ export function clientBoundary(
 
 // Built-in Components (server stubs)
 
-// Head - renders children into the page head at build time.
-// On the server, we just render children; the build pipeline extracts them.
+// Head - renders children into the page head. At build time the compiler
+// hoists them. In a request-time render the children come out between two
+// comment markers, and the host (ssr-core takeHead) moves what sits between
+// them into the document <head> of the response instead of leaving it in the
+// body.
+export const HEAD_OPEN = "<!--krate-head-->";
+export const HEAD_CLOSE = "<!--/krate-head-->";
 export function Head(props: { children?: JSXNode }): JSXNode {
-  return props.children ?? "";
+  return [raw(HEAD_OPEN), props.children ?? "", raw(HEAD_CLOSE)];
 }
 
 // Script - renders a <script> tag.
@@ -568,10 +606,19 @@ export function Icon(_props: { name?: string; [key: string]: any }): JSXNode {
   return raw("<span></span>");
 }
 
-// SyntaxHighlight - renders a <pre><code> block (Go compiler handles chroma highlighting at build time).
-export function SyntaxHighlight(props: { lang?: string; children?: any }): JSXNode {
+// SyntaxHighlight - renders a <pre><code> block. The Go compiler highlights code it knows at build
+// time; code that only exists at request time is highlighted here with the same lexers (see
+// highlight.ts), when the language's tables are loaded and the text is within its limits, and is
+// written as plain text otherwise.
+export function SyntaxHighlight(props: { lang?: string; highlight?: string; children?: any }): JSXNode {
   const lang = props.lang || "";
   const code = props.children != null ? String(props.children) : "";
+  const lines = props.highlight || "";
+  const html = lang ? highlightCode(trimSpace(code), lang, lines || undefined) : null;
+  if (html !== null) {
+    const attr = lines ? ` data-highlight-lines="${escapeHTML(lines)}"` : "";
+    return raw(`<pre class="chroma"${attr}><code class="language-${escapeHTML(lang)}">${html}</code></pre>`);
+  }
   const cls = lang ? `chroma language-${lang}` : "chroma";
   return raw(`<pre class="chroma"><code class="${escapeHTML(cls)}">${escapeHTML(code)}</code></pre>`);
 }

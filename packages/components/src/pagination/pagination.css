@@ -32,7 +32,7 @@
   background: rgba(255, 255, 255, 0.06);
 }
 .krate-pagination-active {
-  background: var(--krate-primary, #3b82f6);
+  background: var(--krate-primary, #c2410c);
   color: var(--krate-primary-fg, #fff);
   font-weight: 600;
 }
@@ -42,6 +42,6 @@
 }
 .krate-pagination-link:focus-visible,
 .krate-pagination-page:focus-visible {
-  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline: 2px solid var(--krate-primary, #c2410c);
   outline-offset: 2px;
 }

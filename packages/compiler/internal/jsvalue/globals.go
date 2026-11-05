@@ -1,7 +1,9 @@
 package jsvalue
 
 import (
+	"github.com/kratejs/krate/packages/compiler/ast"
 	"math"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 )
@@ -9,14 +11,71 @@ import (
 // globalObject returns the built-in global with the given name. Only pure,
 // deterministic built-ins are provided; everything else (Date, Intl, Math.random,
 // ...) is left to the host (see Hooks) or reported as unresolved.
-func globalObject(name string) (Value, bool) {
+func globalObject(in *Interp, name string) (Value, bool) {
+	v, ok := globalValue(in, name)
+	if !ok {
+		return v, false
+	}
+	switch v.kind {
+	case KindObject:
+		v.obj.builtin = name
+	case KindFunction:
+		v.fn.Builtin = true
+		if name == "Number" {
+			v.fn.Props = numberStatics()
+		}
+	}
+	return v, true
+}
+
+// numberStatics are the constants and predicates of the Number constructor.
+func numberStatics() map[string]Value {
+	const maxSafe = 1<<53 - 1
+	num := func(name string, f func(float64) bool) Value {
+		return Func(name, func(args []Value) Value {
+			if a := arg(args, 0); a.IsUnknown() {
+				return a
+			}
+			a := arg(args, 0)
+			return Bool(a.kind == KindNumber && f(a.n))
+		})
+	}
+	integer := func(x float64) bool { return !math.IsInf(x, 0) && !math.IsNaN(x) && x == math.Trunc(x) }
+	return map[string]Value{
+		"MAX_SAFE_INTEGER":  Number(maxSafe),
+		"MIN_SAFE_INTEGER":  Number(-maxSafe),
+		"MAX_VALUE":         Number(math.MaxFloat64),
+		"MIN_VALUE":         Number(math.SmallestNonzeroFloat64),
+		"EPSILON":           Number(math.Pow(2, -52)),
+		"POSITIVE_INFINITY": Number(math.Inf(1)),
+		"NEGATIVE_INFINITY": Number(math.Inf(-1)),
+		"NaN":               Number(math.NaN()),
+		"isInteger":         num("isInteger", integer),
+		"isSafeInteger":     num("isSafeInteger", func(x float64) bool { return integer(x) && math.Abs(x) <= maxSafe }),
+		"isFinite":          num("isFinite", func(x float64) bool { return !math.IsInf(x, 0) && !math.IsNaN(x) }),
+		"isNaN":             num("isNaN", math.IsNaN),
+	}
+}
+
+func globalValue(in *Interp, name string) (Value, bool) {
 	switch name {
 	case "Math":
-		return mathObject(), true
+		m := mathObject()
+		m.Set("random", Func("random", func([]Value) Value { return in.mathRandom() }))
+		return m, true
+	case "Date":
+		return dateCtor(in), true
+	case "Map":
+		return mapCtor(), true
+	case "Set":
+		return setCtor(), true
 	case "Object":
 		return objectCtor(), true
 	case "Array":
-		return arrayCtor(), true
+		ctor := arrayCtor()
+		fn := Func("Array", arrayFromArgs)
+		fn.fn.Props = ctor.obj.props
+		return fn, true
 	case "JSON":
 		o := NewObject()
 		o.Set("stringify", Func("stringify", func(args []Value) Value {
@@ -25,9 +84,19 @@ func globalObject(name string) (Value, bool) {
 				return v.firstUnknown()
 			}
 			if len(args) > 1 && !args[1].IsNullish() {
-				return Unsupported("JSON.stringify with a replacer or indentation")
+				return Unsupported("JSON.stringify with a replacer")
 			}
-			s, ok := JSONStringify(v)
+			if hasToJSON(v) {
+				return Unsupported("JSON.stringify of a value with a toJSON method")
+			}
+			gap := ""
+			if len(args) > 2 {
+				if args[2].ContainsUnknown() {
+					return args[2].firstUnknown()
+				}
+				gap = JSONGap(args[2])
+			}
+			s, ok := JSONStringifyGap(v, gap)
 			if !ok {
 				if v.kind == KindUndefined || v.kind == KindFunction {
 					return Undefined()
@@ -45,7 +114,11 @@ func globalObject(name string) (Value, bool) {
 			if args[0].IsUnknown() {
 				return args[0]
 			}
-			return String(args[0].ToPrimitive().ToString())
+			p := args[0].ToPrimitive()
+			if p.IsUnknown() {
+				return p
+			}
+			return String(p.ToString())
 		}), true
 	case "Number":
 		return Func("Number", func(args []Value) Value {
@@ -156,6 +229,12 @@ func mathObject() Value {
 	o := NewObject()
 	o.Set("PI", Number(math.Pi))
 	o.Set("E", Number(math.E))
+	o.Set("LN2", Number(math.Ln2))
+	o.Set("LN10", Number(math.Ln10))
+	o.Set("LOG2E", Number(math.Log2E))
+	o.Set("LOG10E", Number(math.Log10E))
+	o.Set("SQRT2", Number(math.Sqrt2))
+	o.Set("SQRT1_2", Number(math.Sqrt2/2))
 	unary := map[string]func(float64) float64{
 		"abs": math.Abs, "floor": math.Floor, "ceil": math.Ceil, "trunc": math.Trunc,
 		"sqrt": math.Sqrt, "cbrt": math.Cbrt, "log": math.Log, "log10": math.Log10, "log2": math.Log2,
@@ -243,7 +322,7 @@ func objectCtor() Value {
 				vals = append(vals, String(fromUnits([]uint16{c})))
 			}
 			return keys, vals, true
-		case KindNumber, KindBool:
+		case KindNumber, KindBool, KindDate, KindMap, KindSet, KindIterator:
 			return nil, nil, true
 		}
 		return nil, nil, false
@@ -283,15 +362,16 @@ func objectCtor() Value {
 		if src.IsUnknown() {
 			return src
 		}
-		if !src.IsArray() {
-			return Unsupported("Object.fromEntries of a non-array")
+		entries, ok := iterate(src)
+		if !ok {
+			return Unsupported("Object.fromEntries of a non-iterable value")
 		}
 		out := NewObject()
-		for _, e := range src.Elems() {
+		for _, e := range entries {
 			if !e.IsArray() {
 				return unknownOr(e, "Object.fromEntries entry is not an array")
 			}
-			out.Set(arg(e.Elems(), 0).ToString(), arg(e.Elems(), 1))
+			out.Set(arg(e.Elems(), 0).ToPrimitive().ToString(), arg(e.Elems(), 1))
 		}
 		return out
 	}))
@@ -313,6 +393,28 @@ func objectCtor() Value {
 	return o
 }
 
+// arrayFromArgs is Array(...) and new Array(...): a single number is a length
+// (the items are undefined), anything else the items themselves.
+func arrayFromArgs(args []Value) Value {
+	for _, a := range args {
+		if a.IsUnknown() {
+			return a
+		}
+	}
+	if len(args) == 1 && args[0].kind == KindNumber {
+		n := args[0].n
+		if n < 0 || n != math.Trunc(n) || n > maxLoopIterations {
+			return Unsupported("Array length out of range")
+		}
+		items := make([]Value, int(n))
+		for i := range items {
+			items[i] = Undefined()
+		}
+		return NewArray(items...)
+	}
+	return ArrayOf(args)
+}
+
 func arrayCtor() Value {
 	o := NewObject()
 	o.Set("isArray", Func("isArray", func(args []Value) Value {
@@ -328,6 +430,9 @@ func arrayCtor() Value {
 		}
 		var items []Value
 		if it, ok := iterate(src); ok {
+			if len(it) > maxIterated {
+				return Unsupported("Array.from of a very long iterable")
+			}
 			items = append([]Value(nil), it...)
 		} else if src.IsObject() {
 			// Array-like `{ length: n }`.
@@ -429,4 +534,30 @@ func parseFloat(s string) float64 {
 		}
 	}
 	return math.NaN()
+}
+
+// mathRandom is Math.random(). It is only known where the host allows volatile
+// values; with SOURCE_DATE_EPOCH set it is a function of the epoch, the call
+// site and how often the site ran, so reproducible builds repeat.
+func (in *Interp) mathRandom() Value {
+	if !in.Volatile {
+		return Dynamic("Math.random() has no value that holds at run time")
+	}
+	epoch, ok := SourceDateEpoch()
+	if !ok {
+		return Number(rand.Float64())
+	}
+	pos := in.callPos
+	if in.randSeq == nil {
+		in.randSeq = map[ast.Pos]int{}
+	}
+	n := in.randSeq[pos]
+	in.randSeq[pos] = n + 1
+	x := uint64(epoch.Unix()) ^ uint64(pos.Line)<<40 ^ uint64(pos.Col)<<24 ^ uint64(n)*0x9e3779b97f4a7c15
+	// splitmix64
+	x += 0x9e3779b97f4a7c15
+	x = (x ^ x>>30) * 0xbf58476d1ce4e5b9
+	x = (x ^ x>>27) * 0x94d049bb133111eb
+	x ^= x >> 31
+	return Number(float64(x>>11) / (1 << 53))
 }

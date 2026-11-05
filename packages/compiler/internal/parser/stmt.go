@@ -1632,12 +1632,17 @@ func (p *Parser) skipBalanced() {
 	p.pos = len(p.tokens) - 1
 }
 
+// DecoratorsUnsupported marks the error for decorator syntax. Sources reach this
+// parser with decorators already lowered by esbuild (see tsstrip), so it only
+// fires for callers that parse raw text.
+const DecoratorsUnsupported = "decorators are not supported by the Krate parser"
+
 // parseDecorators reports decorators (which run code the parser cannot
 // represent) and skips them.
 func (p *Parser) parseDecorators() {
 	for p.kind() == lexer.AT {
 		at := p.next()
-		p.errorAt(at, "decorators are not supported by the Krate parser",
+		p.errorAt(at, DecoratorsUnsupported,
 			"remove the decorator and apply it explicitly, e.g. `const C = decorate(class { ... })`")
 		if p.kind() == lexer.LPAREN {
 			p.skipBalanced()

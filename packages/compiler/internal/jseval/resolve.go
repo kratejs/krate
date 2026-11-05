@@ -5,10 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/evanw/esbuild/pkg/api"
 )
+
+const reactDefaultNS = "krate-react-default"
+
+// reactDefaultSpecs are the React specifiers a library may import by default.
+var reactDefaultSpecs = map[string]bool{"react": true, "react-dom": true, "react-dom/client": true}
 
 // resolveForwarder lets a caller resolve import specifiers esbuild can't see -
 // virtual modules (`krate/content`) and tsconfig path aliases - to absolute
@@ -23,9 +29,19 @@ func resolveForwarder(fn func(importer, spec string) (string, bool)) api.Plugin 
 					return api.OnResolveResult{}, nil
 				}
 				if path, ok := fn(args.Importer, args.Path); ok {
+					if reactDefaultSpecs[args.Path] {
+						// Libraries do `import React from "react"`; the compat
+						// runtime only has named exports.
+						return api.OnResolveResult{Path: path, Namespace: reactDefaultNS}, nil
+					}
 					return api.OnResolveResult{Path: path, Namespace: "file"}, nil
 				}
 				return api.OnResolveResult{}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: reactDefaultNS}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				target := strconv.Quote(filepath.ToSlash(args.Path))
+				contents := "export * from " + target + ";\nimport * as ns from " + target + ";\nexport default ns;\n"
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS, ResolveDir: filepath.Dir(args.Path)}, nil
 			})
 		},
 	}

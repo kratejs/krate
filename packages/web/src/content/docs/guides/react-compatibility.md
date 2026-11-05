@@ -57,11 +57,12 @@ export default function Timer() {
 | `useRef` | `{ current: initial }` |
 | `useCallback` | `createCallbackDeps(fn, () => deps)`; without deps, the wrapped function |
 | `useContext` | `Context.useContext()` |
-| `useId` | a build-time literal (see below) |
+| `useId` | a per-instance id shared by the HTML and the hydration code (see [`useId`](#useid)) |
 | `useTransition` | a pending signal plus an async-aware `startTransition` (see [Suspense](#suspense-lazy-use-and-transitions)) |
 | `useDeferredValue` | a deferred getter (`createDeferredValue`) |
 | `useSyncExternalStore` | a store getter (`createExternalStore`) |
 | `useImperativeHandle` / `useDebugValue` | compat shim |
+| `useEffectEvent` | a stable function over live state that does not subscribe its caller (see [`useEffectEvent`](#useeffectevent)) |
 | `use` | `use(promise)` suspends the nearest `<Suspense>`; `use(Context)` is a context read |
 
 Named imports, aliased imports (`import { useState as state }`), and the
@@ -104,6 +105,15 @@ export default function Counter() {
 | `useFormStatus` | form-scoped status (`pending`, `data`, `method`, `action`) of the form containing the component |
 | `<form action={fn}>` / `formAction={fn}` | server actions and client functions, run in an async transition without a page reload, form reset on success |
 | `StrictMode` / `Profiler` | render their children; `Profiler`'s `onRender` is never called (warning KR4005) |
+| `<Activity mode>` | children render in a wrapper that hides them while keeping their state; effects clean up while hidden (see [`Activity`](#activity)) |
+| `<ViewTransition>` | names its element child for view transitions (see [`ViewTransition`](#viewtransition)) |
+| `<SuspenseList>` | renders its children; `revealOrder` and `tail` are ignored (warning KR8031) |
+| `cache` | identity: Krate renders each page once |
+| `flushSync` | `flushSync(fn)` is `fn()`: state changes already apply synchronously |
+| `useFormState` (react-dom) | `useActionState` |
+| `preload`, `preinit`, `preconnect`, `prefetchDNS`, `preloadModule`, `preinitModule` (react-dom) | add the `<link>` or `<script>` to the document head once, on the client |
+| `version`, `captureOwnerStack` | `"19.2.0"` and `null` (as in production React) |
+| custom element props | strings, numbers and booleans are attributes; objects, arrays and functions are properties (see [Custom elements](#custom-elements)) |
 
 ### Class components
 
@@ -258,8 +268,10 @@ part of the server-rendered HTML. The container can be `document.body`,
 expression the component can evaluate in the browser (a container that cannot
 be resolved reports KR8006 and falls back to `document.body`). React events
 bubble from portal content to the component's ancestors, a portal inside a
-conditional branch mounts and unmounts with the branch, and its content is
-removed when the component goes away.
+conditional branch mounts and unmounts with the branch (`{open &&
+createPortal(...)}` and `{open ? createPortal(...) : null}` both work), and its
+content is removed when the component goes away. A `createPortal` call anywhere
+else, such as inside a `.map()` callback, is not lowered and reports KR8010.
 
 ### Document metadata
 
@@ -411,10 +423,68 @@ User bindings named like runtime helpers (`h`, `findSlot`, `kbind*`,
 `krate*`) are renamed in the compiled output, so `hits.map((h) => <li>{h}</li>)`
 works.
 
-### `useId`
+### useId
 
-`useId()` resolves to a **stable, per-instance build-time literal** rather than
-a runtime counter. The server-rendered id and the hydrated id always agree.
+`useId()` gives every component instance its own id, and the id in the static HTML is
+the one the hydrated page uses, so `htmlFor`/`id` and `aria-*` pairs match before
+and after hydration. It works in the page, in child components (also ones with no
+state, rendered once at build time), in nested children, in lists, when a component
+is rendered more than once, in conditional branches and in layouts.
+
+The ids look like `krate-<component path>`, not React's `:r0:`. A component in a keyed list
+row takes `krate-<list>:$<key>-u<n>`, numbered in render order within the row, and
+rows the client creates later number theirs the same way, so a row has the same ids
+whether the server or the browser rendered it. A hook of your own that calls `useId`
+works too, but its ids exist only after hydration (the HTML has no `id` yet).
+
+### useEffectEvent
+
+`const onTick = useEffectEvent(() => log(count))` returns a function that always
+runs the latest closure, so it sees the latest props and state, and the effect that
+calls it does not depend on what it reads (React 19.2 semantics). Call it from
+effects (or other effect events); it is lowered to `createEffectEvent`, which is also
+in the compat runtime and the trimmed runtime.
+
+### Activity
+
+`<Activity mode="visible" | "hidden">` renders its children inside a
+`<krate-activity>` wrapper with `display: contents`. In `hidden` mode the wrapper is
+`display: none` and:
+
+- the children stay in the page and keep their state, including DOM state such as
+  an input's text and scroll position,
+- their effects are cleaned up when the mode becomes `hidden` and set up again when
+  it becomes `visible`, and effects do not run at all while the page loads hidden,
+- `mode` may be a literal or any expression, and a missing `mode` means `visible`.
+
+Differences from React: there is a wrapper element (React adds none and hides the
+children themselves), class components inside run their lifecycles as usual rather
+than unmounting, and nothing is rendered at lower priority. Props other than `mode`
+warn (`KR8031`).
+
+### ViewTransition
+
+`<ViewTransition name="hero" default="slow-fade">` gives its first element child
+`data-view-transition="hero"` and `data-view-transition-class="slow-fade"`; the
+router turns them into `view-transition-name` and `view-transition-class` and runs
+navigations inside `document.startViewTransition`, as it does for any element with
+`data-view-transition`. Without `name` Krate generates one; `default="none"` turns it
+off. Style the animation with `::view-transition-group(*.slow-fade)`. Children that
+are not a host element are wrapped in a `<div>`, and only the first element child of
+several is named. `enter`, `exit`, `update` and `share` classes and the `onEnter`,
+`onExit`, `onUpdate` and `onShare` callbacks have no effect and warn (`KR8031`): put
+the class in `default` and select the event in CSS. `unstable_ViewTransition` is
+accepted too. The router needs `spa` and `viewTransitions` left on.
+
+### Custom elements
+
+As in React 19, `<my-card title="x" count={3} open data={{ a: 1 }} onSelect={fn} />`
+renders `title`, `count` and an empty `open` attribute; `false` is omitted; and
+objects, arrays and functions render no attribute at all (the server HTML used to
+contain `data="[object Object]"`). The client sets those as properties on the element,
+and again when the element class is defined after the page loaded, so a property
+setter on the class sees the value. A component that renders such a prop is
+hydrated even when it has no state, because nothing else sets the property.
 
 ### `useReducer`
 
@@ -803,8 +873,11 @@ How it works:
 
   Preact 10.20 or newer is required. If Preact is missing, the build fails with an actionable error rather than
   shipping a broken island.
-- Each island gets its own chunk (`chunks/island.<hash>.js`). Shared Preact
-  modules are emitted once and wired through an import map.
+- Each island gets an entry file (`chunks/island_<id>.js`). The entries of all
+  pages are bundled together with code splitting, so a module two pages import
+  (a store, a query client, the library itself) is one shared file with one
+  instance, and the Preact modules are emitted once and wired through an import
+  map. See [State across navigation](#state-across-navigation).
 - Where all bridged props have build-time initial values, Krate renders the
   island with `preact-render-to-string` and places that markup inside the
   placeholder. The client then **hydrates** it instead of replacing it. Islands
@@ -827,6 +900,243 @@ bridged signal getters, or function references (handlers and setters).
 Primitives that keep internal pointer state (for example Radix Tooltip) work
 when controlled: bind `open` to a page signal and wire `onOpenChange` plus
 explicit pointer/focus handlers on the trigger.
+
+### Choosing when an island mounts
+
+By default an island mounts as soon as the page script runs. Put a client
+directive on the island's root tag to defer it:
+
+```tsx
+import { LineChart, Line } from 'recharts';
+
+<LineChart client:visible width={600} height={300} data={data}>
+  <Line dataKey="sales" />
+</LineChart>
+```
+
+| Directive | Mounts |
+|-----------|--------|
+| `client:load` | at load (the default) |
+| `client:idle` | when the browser is idle (`requestIdleCallback`, 2 s at most) |
+| `client:visible` | when the island comes within 200 px of the viewport (`IntersectionObserver`) |
+
+A deferred island keeps its server-rendered markup, which is not interactive
+until it mounts. Its chunk is not preloaded and is not fetched before then, so
+a heavy island below the fold costs nothing until it is needed. The directive is
+removed at build time and never reaches the component. On anything that is
+not an island the directive does nothing, and the build says so (`KR8012`).
+Without `IntersectionObserver` the island mounts at load. A page that is itself a
+React-library island (below) always mounts at load.
+
+## Libraries built on React hooks (islands)
+
+State, forms and data-fetching libraries from the React ecosystem call React's
+hooks from their own code (`useSyncExternalStore`, `useRef`, `useContext`).
+Krate's source components do not have React's render model: they run once and
+update through signals, and a library's hooks cannot be lowered. A
+component that calls such a hook therefore runs in a **Preact island**, where
+React's model exists, instead of being lowered.
+
+Krate decides this at build time. A user module is routed to the island path
+when it:
+
+- calls a `use*` hook imported from an npm package that depends on `react`
+  (`useForm`, `useSWR`, `useQuery`, `useStore`, ...), or a store hook made at
+  module level (`const useStore = create(...)`),
+- calls a hook exported by another module that does (a custom hook wrapping
+  `useSWR`, a store hook exported from `store.ts`),
+- renders a component built by such a package at module level
+  (``const Box = styled.div`...` ``, `motion(Button)`),
+- hands a value built by such a package to a JSX attribute
+  (`const queryClient = new QueryClient()` then `client={queryClient}`), or
+- starts with `/** @jsxImportSource <react package> */` (emotion's `css` prop).
+
+```tsx
+// src/components/Counter.tsx
+import { useStore } from '../store';        // const useStore = create(...)
+
+export function Counter() {
+  const n = useStore((s) => s.n);
+  const inc = useStore((s) => s.inc);
+  return <button onClick={inc}>clicked {n}</button>;
+}
+```
+
+```tsx
+// src/pages/index.tsx: Counter is rendered as an island
+import { Counter } from '../components/Counter';
+
+export default function Home() {
+  return <main><Counter /><Counter /></main>;
+}
+```
+
+The module is compiled for Preact (`react` resolves to `preact/compat`) and
+rendered on the server with the same code, then hydrated. Props follow the
+island rules above: serializable values, signals bridged as live getters, and
+function references. A page whose own module calls the hook is one island.
+
+What was checked in Chromium (Preact 10.29): each page loaded without console
+errors and rendered the expected markup, and where the library has an
+interaction it was clicked or typed into.
+
+| Library | Result | Version checked |
+|---------|--------|-----------------|
+| zustand | works: store hooks, selectors, state shared by the islands of a page | 5.0.16 |
+| valtio, jotai | work: `useSnapshot`, `useAtom` | 2.3.2, 2.20.3 |
+| react-redux with Redux Toolkit | works: `Provider` in the island's module or in a layout, `useSelector`, `useDispatch`, a slice and `configureStore` | 9.3.1, 2.14.0 |
+| react-hook-form | works: `register`, `required` validation, `handleSubmit`, `formState` | 7.91.0 |
+| SWR | works: `useSWR` directly or inside a custom hook | 2.5.1 |
+| TanStack Query | works: `useQuery` under a `QueryClientProvider` in the island's module or in a layout, one client for every island | 5.106.1, 5.105.3 |
+| TanStack Table | works: `useReactTable` with `flexRender`, rendered on the server | 8.21.3 |
+| react-i18next | works: `useTranslation` after `i18n.use(initReactI18next).init()` | 15.7.4 |
+| usehooks-ts | works: `useCounter`, `useToggle` | 3.1.1 |
+| recharts, Headless UI | work (they need `import React from "react"`) | 2.15.4, 2.2.10 |
+| framer-motion | works: `motion.*` and `useAnimation` | 11.18.2 |
+| styled-components, `@emotion/styled`, emotion `css` prop, MUI `Button` | work, client-only (see below); a `ThemeProvider` in a layout reaches them | 6.6.0, 11.14.1, 11.14.0, 9.5.0 |
+
+These were run by hand against the real packages. The repository tests run
+stand-ins with the same import shapes (default `import React`, namespace
+import, `require("react")`) and the same behavior (a store with module-level
+state, a query client with a context provider, a theme provider), because the
+repository does not install the libraries; they cover the behavior described on
+this page in Chromium, but not the libraries themselves. A library that is not
+listed may work, but nothing was run for it.
+
+### Providers in layouts
+
+A context provider a layout wraps around `{children}` reaches the islands of
+every page under that layout, with one provider instance for all of them:
+
+```tsx
+// src/pages/_layout.tsx
+import { useState } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Provider } from 'react-redux';
+import { ThemeProvider } from 'styled-components';
+import { store } from '../store';
+
+const theme = { name: 'light' };
+
+export default function Layout({ children }) {
+  const [client] = useState(() => new QueryClient());
+  return (
+    <div>
+      <nav><Link href="/">Home</Link></nav>
+      <Provider store={store}>
+        <QueryClientProvider client={client}>
+          <ThemeProvider theme={theme}>{children}</ThemeProvider>
+        </QueryClientProvider>
+      </Provider>
+    </div>
+  );
+}
+```
+
+The layout itself is compiled by Krate, and an island is a Preact tree, so
+context cannot cross between them. Krate therefore lifts the wrappers out of the
+layout: the layout renders `{children}` as if they were not there, and the chain
+(`Provider > QueryClientProvider > ThemeProvider`, with the props as written)
+becomes a generated module that every island of the page renders inside. This
+holds on the server too: the markup rendered at build time already contains the
+context, and the island hydrates onto it.
+
+- **One instance per page and site.** The props are evaluated once, in the
+  generated module, and that module is shared by all islands and all pages, so
+  they receive the same `QueryClient`, store or theme object. A client created
+  with `useState(() => new QueryClient())` in the layout is created once, not per
+  render and not per island.
+- **Nested layouts** compose: the providers of the outer layout wrap those of
+  the inner one, so an inner `ThemeProvider` overrides the outer one for the
+  pages under it.
+- **Which wrappers.** A tag on the path to `{children}` that comes from an npm
+  package built on React, or from a module of the project that renders such a
+  component around its `children` (a `Providers` component), is lifted. Other
+  elements stay in the layout.
+- **Props.** A prop can be a literal, an import, a module-level value, or a
+  value the layout component computes from those: a plain `const`,
+  `useState(() => value)` with no setter in use, or `useMemo(() => value, [])`.
+  Computing a prop from the layout's own `params`, from a signal, or from a
+  state setter cannot work, because the islands would not see it change: the
+  build reports `KR8015` with the reason.
+- **No markup of its own.** A lifted wrapper must render only its children. One
+  that adds elements (a `<div>` around them) cannot move into the islands, since
+  Krate renders the page content; the wrapper then stays in the layout and the
+  build reports `KR8016`.
+- **Layout components stay Krate's.** Krate components in the layout still
+  cannot read the provider's context, and a hook of a React library called
+  inside the layout is still `KR8013`.
+
+### State across navigation
+
+The islands of all pages are bundled together, so a module-level store is one
+store for the whole site, as in a React single-page app. A zustand or Redux
+store, a query client and the library modules they use are evaluated once; when
+the client-side router moves to another page, the new page's islands import the
+modules that are already loaded.
+
+- **Same instance, same value.** The count in a zustand store, a Redux slice and
+  the cache of a query client survive navigation, forward and back.
+- **Components start fresh.** An island is a Preact tree under the page's
+  content, and the router replaces that content: when a page changes, its
+  islands unmount (effects clean up, store subscriptions and query observers are
+  released) and the next page's islands mount. State inside a component
+  (`useState`) therefore resets, as when a React router swaps route elements.
+  Keep what must last in a store.
+- **Static pages stay static.** A page without islands loads no island code, and
+  the Preact import map is a small JSON block.
+- **Caching.** The entry file of an island (`island_<id>.js`) is revalidated on
+  every visit; the shared chunks (`isl-<hash>.js`) are content-hashed and cached
+  as immutable.
+
+### Pages rendered per request
+
+Pages with `dynamic = "force-dynamic"`, `revalidate = N` (ISR) or a streaming
+region run their JSX in Node on every request, where a component that needs
+React's render model cannot run. Their islands are therefore not executed there:
+the server answers with the placeholder of each island and the markup rendered
+for it at build time, and the page script mounts it as on a static page. The rest
+of the page is rendered per request as usual.
+
+Because that markup is rendered at build time, an island's props must be known
+then: a prop that only exists per request (a search parameter, a cookie) makes
+the island client-only, as on a static page, and the build says so (`KR8008`).
+
+### CSS-in-JS
+
+styled-components, emotion and MUI create their styles in the browser while
+rendering. Their islands are **client-only**: the build prints a `KR8008`
+notice, the placeholder is empty in the server HTML, and the component and its
+styles appear when the island mounts. For content that must be styled before
+JavaScript loads (above-the-fold text, SEO content), use CSS modules, Tailwind
+or a stylesheet. A `css={...}` prop on a DOM element in a module without
+`/** @jsxImportSource @emotion/react */` is reported as `KR8014` (the styles
+would be dropped). Setting `jsxImportSource` to emotion in `tsconfig.json`
+for the whole project is not supported.
+
+### Limits, and what the build refuses
+
+Each limit below is either a build error or a documented behavior, never a
+silent failure in the browser:
+
+- **Layouts and server pages cannot host these hooks.** A layout, a template or
+  an `async` server page that (through its imports) calls a React-library hook
+  fails with `KR8013`, naming the package and the hook. Render the component
+  from a synchronous page instead, or use `createSignal` / `createResource`.
+- **No bridge to Krate state from inside.** The island reads the page's
+  signals only as props, and the page cannot read the island's store. Krate
+  components that import the same store module do not see it.
+- **A page that is itself an island** cannot take props (`params`,
+  `searchParams`): the build fails with `KR8013`. Move the component that calls
+  the hook into its own module and render it from a page that passes the
+  values in. Such a module also cannot use Krate-only APIs (`createSignal`,
+  `<Head>`).
+- **Component state is not kept across pages.** Module-level state is (see
+  [State across navigation](#state-across-navigation)); the state of a
+  component resets when its island unmounts.
+- **No islands in layouts.** A layout is rendered by Krate and persists across
+  pages; a React-library island has to be rendered by a page. (Providers are
+  the exception, see [Providers in layouts](#providers-in-layouts).)
 
 ## Events, forms and refs
 
@@ -949,10 +1259,26 @@ observed in a browser. The browser conformance suite (`/react-events/` in
 
 - **Running React itself.** There is no React runtime; compiled packages run
   through Preact islands, not React.
+- **React libraries' hooks in lowered source components.** `zustand`,
+  `react-hook-form`, `swr` and `@tanstack/react-query` hooks need React's render
+  model, so the module that calls them is run as a Preact island instead (see
+  [Libraries built on React hooks](#libraries-built-on-react-hooks-islands)).
+  Where an island cannot be used (layouts, server pages) the build fails with
+  `KR8013`. The signal-based replacements are `createSignal` (with a module-level
+  signal for shared state) for client state and `createResource` for fetching.
+- **Sass, Less and Stylus.** There is no compiler for them: importing a `.scss`,
+  `.sass`, `.less` or `.styl` file is a build error (`KR7123`). Compile it to CSS
+  in a prebuild step, or use CSS modules or Tailwind (see
+  [Styling](/docs/core-concepts/styling/#sass-less-and-stylus)).
+- **CSS-in-JS at first paint.** styled-components, emotion and MUI work only as
+  client-only islands; their styles do not exist in the server HTML.
 - **React 19-only semantics** in compiled packages. Preact's compatibility layer
   is close to React 18 behavior; version-specific APIs may differ.
 - **Hook ordering and rules-of-hooks** for transpiled source. Components run
   once per mount, so there is no hook order to preserve.
+- **`Activity` DOM structure, `SuspenseList` ordering, `ViewTransition` events.**
+  See the sections above.
+- **A custom hook that calls `useId`** has no id in the static HTML.
 - **Dynamic `Children.*` / `cloneElement`** inputs that are not statically
   known. Literal inputs fold at build time; dynamic inputs use the compat shim.
 - **`Children.forEach`** and dynamic `Children.map` callbacks run in the compat

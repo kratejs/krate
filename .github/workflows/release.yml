@@ -88,7 +88,7 @@ jobs:
 
       - name: Browser conformance
         working-directory: packages/compiler
-        run: go test -run TestBrowserConformance -count=1 -v ./internal/build
+        run: go test -run "TestBrowserConformance|TestTrimmedRuntimeBrowser" -count=1 -v ./internal/build
         env:
           KRATE_BROWSER: chromium
           KRATE_REQUIRE_E2E: "1"
@@ -111,6 +111,11 @@ jobs:
 
       - name: Generate platform packages
         run: node scripts/build-platform-packages.mjs
+
+      # Re-run now that dist-platform/ exists, so the generated manifests are
+      # checked too (no platform package may declare bin).
+      - name: Check generated platform packages
+        run: pnpm run check:release
 
       # The step above leaves a dev binary in packages/core/bin. Publishing it
       # would make the wrapper run a non-executable, single-platform file.
@@ -135,7 +140,7 @@ jobs:
       - name: Publish npm packages
         run: |
           set -e
-          for dir in packages/runtime packages/components packages/plugin packages/base-docs-theme packages/simple-docs-theme packages/create-krate-app packages/create-krate-docs packages/core; do
+          for dir in packages/runtime packages/components packages/plugin packages/ts-plugin packages/base-docs-theme packages/simple-docs-theme packages/create-krate-app packages/create-krate-docs packages/core; do
             echo "Publishing $(basename "$dir") with tag ${{ steps.tag.outputs.dist_tag }}..."
             (cd "$dir" && pnpm publish --access public --no-git-checks --tag "${{ steps.tag.outputs.dist_tag }}")
           done
@@ -195,6 +200,7 @@ jobs:
             printf -- '- `@krate/runtime@%s`\n' "${VERSION}"
             printf -- '- `@krate/components@%s`\n' "${VERSION}"
             printf -- '- `@krate/plugin@%s`\n' "${VERSION}"
+            printf -- '- `@krate/ts-plugin@%s`\n' "${VERSION}"
             printf -- '- `@krate/base-docs-theme@%s`\n' "${VERSION}"
             printf -- '- `@krate/simple-docs-theme@%s`\n' "${VERSION}"
             printf -- '- `@krate/create-krate-app@%s`\n' "${VERSION}"

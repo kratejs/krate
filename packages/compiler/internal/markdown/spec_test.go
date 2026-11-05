@@ -17,8 +17,9 @@ type specExample struct {
 
 var voidSlashRe = regexp.MustCompile(` ?/>`)
 
-// preA11yRe matches the focus and name attributes Krate adds to every <pre>.
-var preA11yRe = regexp.MustCompile(` role="region" aria-label="[^"]*" tabindex="0"`)
+// preA11yRe matches the focus and name attributes Krate adds to a <pre> that
+// is likely to scroll.
+var preA11yRe = regexp.MustCompile(` role="group" aria-label="[^"]*" tabindex="0"`)
 
 func normSpecHTML(s string) string {
 	s = preA11yRe.ReplaceAllString(strings.TrimSpace(s), "")
@@ -41,7 +42,12 @@ func loadSpec(t *testing.T, name string) []specExample {
 // commonmarkDeviations lists spec examples Krate intentionally renders
 // differently, with the reason. Everything else must match the CommonMark
 // 0.31 reference output exactly.
-var commonmarkDeviations = map[int]string{}
+var commonmarkDeviations = map[int]string{
+	596: "autolink with a scheme outside the safeURL allowlist renders as text",
+	598: "autolink with a scheme outside the safeURL allowlist renders as text",
+	599: "autolink with a scheme outside the safeURL allowlist renders as text",
+	601: "autolink with a scheme outside the safeURL allowlist renders as text",
+}
 
 func TestCommonMarkSpec(t *testing.T) {
 	cfg := Config{} // no anchors, no highlighting, no GFM: pure CommonMark

@@ -14,8 +14,8 @@ PostCSS or extra tooling is required.
 
 Files named `*.module.css` are scoped automatically:
 
-```tsx
-// Card.module.css
+```css
+/* Card.module.css */
 .card {
   padding: 1rem;
   border-radius: 8px;
@@ -84,6 +84,7 @@ configure the generator, and **removes them from the shipped CSS**:
 @source inline("underline p-{1,2}");  /* always generate these */
 
 @utility tab-4 { tab-size: 4; }       /* static custom utility, works with variants */
+@utility pad-* { padding: --spacing(--value(integer)); }  /* functional: pad-3 */
 @custom-variant theme-mid (&:where([data-theme=mid] *));
 @custom-variant dark (&:where(.dark, .dark *));
 ```
@@ -103,8 +104,40 @@ configure the generator, and **removes them from the shipped CSS**:
   emits every user-defined `@theme` variable (v4 emits only the used ones unless
   `static`) plus any built-in theme variable you reference as `var(--color-red-500)`,
   `var(--spacing)`, etc. in your CSS or scanned files.
-- `@utility` supports static declaration blocks only; functional utilities
-  (`name-*` with `--value()`) and nested rules are reported and skipped.
+- `@utility` follows Tailwind v4. A functional utility (`name-*`) takes its
+  value from the rest of the class (`name-VALUE`) through `--value()` and its
+  modifier (`name-VALUE/MODIFIER`) through `--modifier()`; `--spacing()` wraps
+  either. Both accept, tried in order: `integer`, `number`, `percentage`, `ratio`
+  (value only), `[type]` for an arbitrary value of that type (`[length]`,
+  `[color]`, `[percentage]`, `[number]`, `[integer]`, `[ratio]`, `[url]`,
+  `[image]`, `[position]`, `[bg-size]`, `[line-width]`, `[family-name]`,
+  `[generic-name]`, `[absolute-size]`, `[relative-size]`, `[angle]`,
+  `[vector]`, or `[*]` for any), `"literal"` keywords, theme namespaces such as
+  `--color-*` or your own `--tab-size-*`, and `--default(x)` for a class with no
+  value or modifier. A declaration whose call cannot resolve is dropped, and a
+  class that resolves nothing generates nothing, so `bg-red-500/50` is not a
+  match for a utility that has no `--modifier()`.
+
+  ```css
+  @theme { --tab-size-github: 8; }
+  @utility tab-* { tab-size: --value(--tab-size-*, integer, [integer]); }
+  @utility text-fit-* {
+    font-size: --value(--text-*, [length]);
+    line-height: --modifier(--leading-*, [length], [*]);   /* text-fit-lg/tight */
+    &:hover { text-decoration: underline; }
+    @media print { font-size: 12pt; }
+    @variant dark { color: white; }
+  }
+  ```
+
+  Nested rules (`&:hover`, `.parent &`, `& > *`), at-rules (`@media`,
+  `@supports`, `@layer`), `@variant name { ... }` and `@apply` work inside the
+  body, in static and functional utilities alike; they are written as CSS
+  nesting inside the class rule. Theme values are inlined rather than
+  referenced as `var(--name)`, and only `@theme` variables count for
+  `--value(--spacing-*)` (Tailwind v3's numeric spacing scale is not a v4 theme
+  variable). Output is checked against Tailwind v4 in
+  `internal/css/testdata/tailwind_utility_golden.json`.
   `@custom-variant` supports the `(selector)` form, `@media`/`@supports`, and the
   single `selector { @slot; }` block form.
 - `@config` and `@plugin` are **not supported**: they are removed and reported
@@ -140,10 +173,13 @@ padding: 0 }` written as plain unlayered CSS now beats every utility (`p-3`,
 
 `@apply` is supported anywhere inside a rule body (`.btn { @apply px-4 py-2; }`,
 including on one line). Plain utilities are expanded in place in utility sort
-order; animation utilities also emit their `@keyframes`. Variant,
-descendant-selector (`space-x-*`) and unknown utilities cannot be represented as
-plain declarations and are reported as build warnings. `@tailwind` directives are
-stripped, and `@layer` blocks are left as authored.
+order; animation utilities also emit their `@keyframes`. Variant utilities
+(`@apply hover:underline md:flex;`) and descendant-selector ones (`space-x-*`)
+become CSS nesting inside the rule (`@media (hover: hover) { &:hover { ... } }`),
+after the rule's own declarations, so they need a browser with native CSS
+nesting. Unknown utilities cannot be expressed and are reported as build
+warnings. `@tailwind` directives are stripped, and `@layer` blocks are left as
+authored.
 
 - A **candidate scanner** extracts Tailwind tokens from the whole file, in the
   spirit of Tailwind's own extractor: it does not depend on string tokenization,
@@ -224,7 +260,8 @@ Supported features:
   overrides replace any shade.
 - **Filters** (`blur-*`, `brightness-*`, `grayscale`, `hue-rotate-*` including
   the negative form, `invert`, `saturate-*`, `sepia`, `drop-shadow-*`, and every
-  `backdrop-*` filter), **animation** (`animate-*`), **blend modes**, plus
+  `backdrop-*` filter; `shadow-*`, `inset-shadow-*`, `text-shadow-*` and
+  `drop-shadow-*` take an opacity such as `shadow-xl/20`), **animation** (`animate-*`), **blend modes**, plus
   layout, typography, interactivity, 3D-transform, border, and background
   families.
 - **Masks**: `mask-none`, `mask-[...]`, `mask-linear-*`, `mask-radial-*`,
@@ -283,6 +320,15 @@ deliberate differences:
   `@supports` guard.
 - Nothing is wrapped in `@layer properties`; the `--tw-*` composition
   variables get plain `@property` registrations plus inline `var()` fallbacks.
+
+## Sass, Less and Stylus
+
+Krate has no Sass, Less or Stylus compiler. Importing a `.scss`, `.sass`, `.less`
+or `.styl` file (including `.module.scss`) is a build error (`KR7123`) rather
+than a page that silently ships without its styles. Compile the file to CSS
+first, for example with the `sass` CLI in a prebuild script
+(`sass src/styles.scss src/styles.css`), and import the `.css` file, or port the
+styles to CSS or Tailwind.
 
 ## Global CSS & code splitting
 

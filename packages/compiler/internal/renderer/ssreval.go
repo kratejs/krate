@@ -3,6 +3,7 @@ package renderer
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -54,6 +55,12 @@ type SSREval struct {
 	// signature) instead of as flat static HTML. Return handled=true when the
 	// component was emitted through the tree path.
 	interactiveEmit func(el *ast.JSXElement) (html string, handled bool)
+
+	// externalIsland is an optional hook set by the emitter: an element the IR
+	// builder turned into a runtime island (a package or React-library
+	// component) renders as that island's placeholder, never as a build-time
+	// evaluated component.
+	externalIsland func(el *ast.JSXElement) (html string, handled bool)
 
 	// iconEmit is an optional hook set by the emitter to resolve a <Icon>
 	// element whose `name` attribute is an expression. The hook receives the
@@ -115,6 +122,30 @@ type SSREval struct {
 	// selectStack holds the selected option values of enclosing <select>
 	// elements (nil when the select has no value/defaultValue).
 	selectStack [][]string
+
+	// useIDBase and useIDSeq generate useId() values: every call in this
+	// evaluation, including those of nested components, gets the next
+	// "<base>-s<n>", so instances never share an id and a rebuild repeats them.
+	useIDBase string
+	useIDSeq  int
+	useIDs    []string
+}
+
+// SetUseIDBase sets the prefix of the ids useId() returns.
+func (e *SSREval) SetUseIDBase(base string) { e.useIDBase = base }
+
+// SetUseIDs sets the ids the first useId() calls return, in call order.
+func (e *SSREval) SetUseIDs(ids []string) { e.useIDs = ids }
+
+func (e *SSREval) nextUseID() string {
+	if e.useIDSeq < len(e.useIDs) {
+		id := e.useIDs[e.useIDSeq]
+		e.useIDSeq++
+		return id
+	}
+	id := fmt.Sprintf("%s-s%d", e.useIDBase, e.useIDSeq)
+	e.useIDSeq++
+	return id
 }
 
 // maxEvalDepth bounds nested component evaluation (a recursion guard, not a
@@ -131,7 +162,9 @@ func NewSSREval(functions map[string]*ast.FnDecl) *SSREval {
 	}
 	e.module = jsvalue.NewScope(nil)
 	e.frame = jsvalue.NewScope(e.module)
-	e.in = &jsvalue.Interp{Scope: e.frame}
+	// Static and server components are baked into HTML, so the build clock and
+	// Math.random() may be read here.
+	e.in = &jsvalue.Interp{Scope: e.frame, Volatile: true}
 	e.in.Hooks = jsvalue.Hooks{
 		Ident: e.resolveIdent,
 		Call:  e.interceptCall,
@@ -449,6 +482,9 @@ func (e *SSREval) interceptCall(call *ast.CallExpr) (jsvalue.Value, bool) {
 		if e.isBound(callee.Name) {
 			break
 		}
+		if callee.Name == "__krate_useId" {
+			return jsvalue.String(e.nextUseID()), true
+		}
 		if callee.Name == "cn" || callee.Name == "clsx" {
 			if v, ok := e.foldClassCall(call.Args); ok {
 				return jsvalue.String(v), true
@@ -489,7 +525,7 @@ func (e *SSREval) isBound(name string) bool {
 // nativeGlobals are the built-ins jsvalue implements itself. Their calls run
 // natively and only fall back to the JS engine for members jsvalue lacks.
 var nativeGlobals = map[string]bool{
-	"Math": true, "JSON": true, "String": true, "Number": true, "Boolean": true,
+	"Date": true, "Math": true, "JSON": true, "String": true, "Number": true, "Boolean": true,
 	"Object": true, "Array": true, "parseInt": true, "parseFloat": true,
 	"isNaN": true, "isFinite": true,
 }
@@ -505,7 +541,11 @@ func (e *SSREval) maybeDelegate(expr ast.Expr, callee ast.Expr) (jsvalue.Value, 
 		e.nativeGuard[expr] = true
 		v := e.in.Eval(expr)
 		delete(e.nativeGuard, expr)
-		if !v.IsUnsupported() {
+		// The embedded engine runs in the build machine's time zone and
+		// locale and reads its own clock, so a Date it computes would differ
+		// from the build environment jsvalue models. A Date expression the
+		// evaluator cannot reproduce stays unresolved instead.
+		if !v.IsUnsupported() || root == "Date" {
 			return v, true
 		}
 	}
@@ -566,7 +606,14 @@ func (e *SSREval) delegateJS(expr ast.Expr) jsvalue.Value {
 	if code == "" {
 		return jsvalue.Unsupported("expression cannot be compiled for the JS engine")
 	}
-	wrapped := "((" + strings.Join(params, ",") + ")=>{const v=(" + code + ");" +
+	// An expression that makes its own Date reads the build clock, like the
+	// ones jsvalue evaluates itself.
+	clock := ""
+	if strings.Contains(code, "Date") {
+		clock = "const Date=(function(D,n){return class extends D{constructor(...a){a.length?super(...a):super(n)}static now(){return n}}})(globalThis.Date," +
+			strconv.FormatFloat(jsvalue.BuildNowMS(), 'f', -1, 64) + ");"
+	}
+	wrapped := "((" + strings.Join(params, ",") + ")=>{" + clock + "const v=(" + code + ");" +
 		"const t=v===null?'null':Array.isArray(v)?'array':typeof v;" +
 		"return JSON.stringify([t,(t==='object'&&Object.getPrototypeOf(v)!==Object.prototype)?String(v):(t==='undefined'||t==='function'||t==='symbol'||t==='bigint')?String(v):v]);})(" +
 		strings.Join(args, ",") + ")"
@@ -1100,13 +1147,20 @@ func (e *SSREval) tryEvalSyntaxHighlight(el *ast.JSXElement) (string, bool) {
 	if normalizedLang == "" {
 		return "<pre><code>" + escape.HTML(codeStr) + "</code></pre>", true
 	}
-	highlighted := syntaxhighlight.HighlightTheme(codeStr, normalizedLang, e.codeTheme)
-	return "<pre class=\"chroma\"><code class=\"language-" + escape.HTML(lang) + "\">" + highlighted + "</code></pre>", true
+	hl := e.stringAttr(el, "highlight")
+	highlighted := syntaxhighlight.HighlightThemeLines(codeStr, normalizedLang, e.codeTheme, hl)
+	attr := ""
+	if hl != "" {
+		attr = " data-highlight-lines=\"" + escape.HTMLAttr(hl) + "\""
+	}
+	return "<pre class=\"chroma\"" + attr + "><code class=\"language-" + escape.HTML(lang) + "\">" + highlighted + "</code></pre>", true
 }
 
-func (e *SSREval) langAttr(el *ast.JSXElement) string {
+func (e *SSREval) langAttr(el *ast.JSXElement) string { return e.stringAttr(el, "lang") }
+
+func (e *SSREval) stringAttr(el *ast.JSXElement, name string) string {
 	for _, attr := range el.Opening.Attributes {
-		if attr.Spread || attr.Value == nil || attr.Name != "lang" {
+		if attr.Spread || attr.Value == nil || attr.Name != name {
 			continue
 		}
 		if v := e.value(attr.Value); !v.IsNullish() && !v.IsUnknown() {
@@ -1305,6 +1359,11 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 
 	// Uppercase = component - resolve and evaluate recursively.
 	if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
+		if e.externalIsland != nil {
+			if html, handled := e.externalIsland(el); handled {
+				return html
+			}
+		}
 		if e.interactiveEmit != nil {
 			if html, handled := e.interactiveEmit(el); handled {
 				return html

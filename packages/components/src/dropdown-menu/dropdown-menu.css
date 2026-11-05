@@ -9,7 +9,7 @@
   cursor: pointer;
 }
 .krate-dropdown-menu-trigger:focus-visible {
-  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
   outline-offset: 2px;
 }
 .krate-dropdown-menu-content {
@@ -47,7 +47,7 @@
   background: var(--krate-surface, #f4f4f5);
 }
 .krate-dropdown-menu-item:focus-visible {
-  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
   outline-offset: -2px;
 }
 .krate-dropdown-menu-separator {

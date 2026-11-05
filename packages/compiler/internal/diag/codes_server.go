@@ -23,10 +23,74 @@ const (
 	CodeAsyncClientComponent Code = "KR7113"
 	// CodeClientBoundaryExports: a "use client" module's exports cannot be listed.
 	CodeClientBoundaryExports Code = "KR7114"
+	// CodeTierDecorator: a tier decorator cannot apply where it is placed.
+	CodeTierDecorator Code = "KR7115"
+	// CodeExportCollision: a page imports one name from two modules.
+	CodeExportCollision Code = "KR7116"
+	// CodeAPIRouteInPages: a .ts or .js file under src/pages/api is not served.
+	CodeAPIRouteInPages Code = "KR7120"
+	// CodePagesEndpoint: a prerendered endpoint (src/pages/data.json.ts) failed.
+	CodePagesEndpoint Code = "KR7121"
+	// CodeMetadataNotStatic: a page's metadata export has no build-time value.
+	CodeMetadataNotStatic Code = "KR7122"
 )
 
 func init() {
 	Register(
+		CodeInfo{
+			Code:  CodeAPIRouteInPages,
+			Title: "API route file in the pages directory",
+			Explanation: "API routes are served from src/api, not from the pages directory. A `.ts` or `.js` " +
+				"file under src/pages/api used to build into an empty page while /api/... answered 502. Move " +
+				"the file to src/api/. This is a warning.",
+		},
+		CodeInfo{
+			Code:  CodeMetadataNotStatic,
+			Title: "Page metadata could not be evaluated at build time",
+			Explanation: "A static page's `export const metadata` and `generateMetadata` (and those of the layouts above " +
+				"it) run at build time, once per `generateStaticParams` entry, and become the document `<title>`, " +
+				"description, canonical link, Open Graph and Twitter tags. This one could not run: it threw, it " +
+				"needs something the build does not have (a browser global, a service that is down), or the module " +
+				"could not be loaded. The segment's tags were left out and the page still builds. Fix the error, " +
+				"or render the page per request (`export const dynamic = \"force-dynamic\"`, or `revalidate = N`) so " +
+				"`generateMetadata` runs with the request. This is a warning.",
+		},
+		CodeInfo{
+			Code:  CodePagesEndpoint,
+			Title: "Prerendered endpoint failed",
+			Explanation: "A file such as `src/pages/data.json.ts` is a prerendered endpoint: its `GET` export runs " +
+				"once at build time and the response body is written to the output as a file (`data.json`). " +
+				"The build fails when the module has no `GET` export, `GET` throws, answers a non-2xx status, or the " +
+				"name has a dynamic segment. Endpoints run on Node (or the configured runtime) with the " +
+				"project's environment. For a response that depends on the request, use an API route in `src/api`.",
+		},
+		CodeInfo{
+			Code:  CodeExportCollision,
+			Title: "One name imported from two modules",
+			Explanation: "Two modules export the same name and a page imports it from both, for example " +
+				"`import { Card as A } from \"./a\"` and `import { Card as B } from \"./b\"`. Modules on a page " +
+				"share one namespace, so Krate gives one of the exports a private name and rewrites the " +
+				"imports to match, and this is not reported. It is reported when neither module can be " +
+				"renamed because something reads export names from source: a re-export (`export { Card } " +
+				"from`, `export *`, or an import followed by an export), a namespace import " +
+				"(`import * as ns`), an `import()`, or a \"use client\" or \"use server\" module. Both imports " +
+				"then resolve to one declaration and the page shows the wrong output. Rename one of the " +
+				"exports. Private names and default exports do not have this problem. This is a warning.",
+		},
+		CodeInfo{
+			Code:  CodeTierDecorator,
+			Title: "Tier decorator cannot apply here, or two tiers conflict",
+			Explanation: "`@server`, `@static`, `@runtime` and `@client` go on a function, class or const " +
+				"declaration, once per declaration. An async component always renders per request, so only " +
+				"`@runtime` fits it. A runtime component is bundled per file, so `@runtime` must be on the " +
+				"default export or the only exported component of its file. A component also has one tier: the " +
+				"leading `// @tier` comment, the `.server`/`.runtime`/`.static` file name, the `serverComponents`, " +
+				"`runtimeComponents`, `serverDirs` and `runtimeDirs` config entries, a decorator and a `\"@tier\"` " +
+				"string at the top of a function body must agree. A decorator on a component that is not the " +
+				"file's default export or only exported component may override the file's tier (`@client` in a " +
+				"`// @server` file); on the default export it must match. See \"Tiers that disagree\" in " +
+				"Component Tiers.",
+		},
 		CodeInfo{
 			Code:  CodeAsyncLayout,
 			Title: "Async layouts are not supported",
@@ -67,10 +131,14 @@ func init() {
 		CodeInfo{
 			Code:  CodeClientAPIInServer,
 			Title: "Client-only API used in a server component",
-			Explanation: "Components rendered by a server component (an async component) render once per request " +
-				"on the server and ship no JavaScript, so hooks such as useState/useEffect, Krate signals and " +
-				"event handlers cannot work there. Move the interactive part into a module that starts with " +
-				"`\"use client\"`; it is server-rendered and then hydrated in the browser.",
+			Explanation: "Server, static and runtime components, and the components an async component renders, render " +
+				"once (at build time or per request) and ship no JavaScript, so hooks such as useState/useEffect, " +
+				"Krate signals, class state and lifecycles, and event handlers cannot work there; they used to build " +
+				"and leave a page that did nothing. Remove the server tier from the component (the `// @server` " +
+				"comment or decorator, the `.server` file name or the config entry) to make it a client component, or " +
+				"move the interactive part into a client child component (one with no tier, or marked `@client`, or " +
+				"a module that starts with `\"use client\"` under an async component) and render that from the server " +
+				"component; it is server-rendered and then hydrated in the browser.",
 		},
 		CodeInfo{
 			Code:  CodeClientPropNotSerializable,

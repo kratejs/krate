@@ -114,11 +114,11 @@ export async function GET(req: NextRequest) { return NextResponse.json({ ok: tru
 	if !hasWarning(rep, "translated static next.config") {
 		t.Errorf("next.config translation warning missing: %+v", rep.Warnings)
 	}
-	if !hasWarning(rep, "mapped static root metadata") {
-		t.Errorf("metadata warning missing: %+v", rep.Warnings)
+	if hasManual(rep, "app/layout.tsx", "metadata") {
+		t.Errorf("layout metadata runs natively, it is not manual work: %+v", rep.Manual)
 	}
-	if hasManual(rep, "app/layout.tsx", "metadata export is not translated") {
-		t.Errorf("metadata should be mapped, not manual: %+v", rep.Manual)
+	if layoutPlan := findPlan(rep, "src/pages/_layout.tsx"); layoutPlan == nil || !strings.Contains(string(layoutPlan.Content), "export const metadata") {
+		t.Errorf("the layout keeps its metadata export: %+v", layoutPlan)
 	}
 	cfg := findPlan(rep, "krate.config.ts")
 	if cfg == nil || !strings.Contains(string(cfg.Content), `"entry": "src/pages/index.tsx"`) {
@@ -130,8 +130,6 @@ export async function GET(req: NextRequest) { return NextResponse.json({ ok: tru
 		`"destination": "/new"`,
 		`"Cache-Control": "public, max-age=60"`,
 		`"rewrites":`,
-		`"site": {`,
-		`"name": "Example"`,
 	} {
 		if !strings.Contains(string(cfg.Content), want) {
 			t.Errorf("config missing %s:\n%s", want, cfg.Content)
@@ -508,134 +506,84 @@ func TestUnresolvedRelativeImportIsManual(t *testing.T) {
 	}
 }
 
-func TestStaticPageMetadataBecomesHead(t *testing.T) {
-	root := t.TempDir()
-	writeNextFile(t, root, "app/page.tsx", `export const metadata = {
-  title: "About",
-  description: "About page",
-  openGraph: { images: ["/og.png"] },
-};
-export default function Page(props: { params: any }) { return <h1>About</h1>; }`)
-	rep, err := ScanNext(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	page := findPlan(rep, "src/pages/index.tsx")
-	if page == nil {
-		t.Fatal("page missing")
-	}
-	body := string(page.Content)
-	for _, want := range []string{
-		"function Page(props: { params: any })",
-		"<Head>",
-		"<title>About</title>",
-		`<meta name="description" content="About page" />`,
-		`<meta property="og:image" content="/og.png" />`,
-		"export default function PageWithHead(props: any)",
-		"<Page {...props} />",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("page missing %q:\n%s", want, body)
-		}
-	}
-	p := parser.New(lexer.New(body).Tokenize())
-	if prog := p.ParseProgram(); prog == nil || len(p.Errors()) > 0 {
-		t.Fatalf("transformed page does not parse: %v\n%s", p.Errors(), body)
-	}
-	if hasManual(rep, "app/page.tsx", "metadata export is not translated") {
-		t.Errorf("metadata should be wrapped, not manual: %+v", rep.Manual)
-	}
+// metadata and generateMetadata run natively (pages and layouts export them as
+// in Next.js), so the migrator leaves the exports alone: no <Head> wrapper, no
+// helper component, no manual item.
+func TestMetadataExportsMigrateUntouched(t *testing.T) {
+	cases := map[string]string{
+		"static": `export const metadata = { title: "About", description: "About page", openGraph: { images: ["/og.png"] } };
+export default function Page() { return <h1>About</h1>; }`,
+		"async generateMetadata": `export async function generateMetadata({ params }: any) {
+  const { slug } = await params;
+  return { title: slug };
 }
-
-func TestStaticGenerateMetadataBecomesHead(t *testing.T) {
-	root := t.TempDir()
-	writeNextFile(t, root, "app/page.tsx", `export async function generateMetadata({ params }: any) {
-  return { title: "About", description: "About page" };
-}
-export default function Page() { return <h1>About</h1>; }
-`)
-	rep, err := ScanNext(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	page := findPlan(rep, "src/pages/index.tsx")
-	if page == nil {
-		t.Fatal("page missing")
-	}
-	body := string(page.Content)
-	if !strings.Contains(body, "<title>About</title>") || !strings.Contains(body, `content="About page"`) {
-		t.Fatalf("static generateMetadata not wrapped:\n%s", body)
-	}
-	if hasManual(rep, "app/page.tsx", "generateMetadata") {
-		t.Errorf("static generateMetadata should be handled: %+v", rep.Manual)
-	}
-}
-
-func TestDynamicSyncGenerateMetadataBecomesHead(t *testing.T) {
-	root := t.TempDir()
-	writeNextFile(t, root, "app/page.tsx", `export function generateMetadata({ params }: any) {
-  return { title: params.slug, description: "Dynamic" };
-}
-export default function Page() { return <h1>About</h1>; }
-`)
-	rep, err := ScanNext(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	page := findPlan(rep, "src/pages/index.tsx")
-	if page == nil {
-		t.Fatal("page missing")
-	}
-	body := string(page.Content)
-	for _, want := range []string{"<__KrateMetadata {...props} />", "function __KrateMetadata", "generateMetadata(props)"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("dynamic metadata wrapper missing %q:\n%s", want, body)
-		}
-	}
-	if hasManual(rep, "app/page.tsx", "generateMetadata") {
-		t.Errorf("sync generateMetadata should be handled: %+v", rep.Manual)
-	}
-}
-
-func TestAsyncGenerateMetadataBecomesHead(t *testing.T) {
-	root := t.TempDir()
-	writeNextFile(t, root, "app/page.tsx", `export async function generateMetadata({ params }: any) {
-  return { title: params.slug };
-}
-export default function Page() { return <h1>About</h1>; }
-`)
-	rep, err := ScanNext(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	page := findPlan(rep, "src/pages/index.tsx")
-	if page == nil || !strings.Contains(string(page.Content), "<Suspense") || !strings.Contains(string(page.Content), "__krateMetadataCache") {
-		t.Fatalf("async generateMetadata not wrapped: %+v", page)
-	}
-	if hasManual(rep, "app/page.tsx", "generateMetadata") {
-		t.Fatalf("async generateMetadata should be handled: %+v", rep.Manual)
-	}
-}
-
-func TestArrowPageMetadataBecomesHead(t *testing.T) {
-	root := t.TempDir()
-	writeNextFile(t, root, "app/page.tsx", `export const metadata = { title: "About" };
+export default function Page() { return <h1>About</h1>; }`,
+		"sync generateMetadata": `export function generateMetadata({ params }: any) { return { title: params.slug, description: "Dynamic" }; }
+export default function Page() { return <h1>About</h1>; }`,
+		"arrow page": `export const metadata = { title: "About" };
 const Page = () => <h1>About</h1>;
-export default Page;`)
+export default Page;`,
+		"async page": `export const metadata = { title: "Post" };
+export default async function Post({ params }: any) { return <h1>{(await params).slug}</h1>; }`,
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeNextFile(t, root, "app/blog/[slug]/page.tsx", src)
+			rep, err := ScanNext(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			page := findPlan(rep, "src/pages/blog/[slug].tsx")
+			if page == nil {
+				t.Fatal("page missing")
+			}
+			body := string(page.Content)
+			for _, gone := range []string{"PageWithHead", "KrateMetadata", "Page__krateBody", "<Head>"} {
+				if strings.Contains(body, gone) {
+					t.Errorf("the page must not be wrapped (%s):\n%s", gone, body)
+				}
+			}
+			if !strings.Contains(body, "metadata") && !strings.Contains(body, "generateMetadata") {
+				t.Errorf("the metadata export is kept:\n%s", body)
+			}
+			if hasManual(rep, "app/blog/[slug]/page.tsx", "etadata") {
+				t.Errorf("metadata is native: %+v", rep.Manual)
+			}
+			p := parser.New(lexer.New(body).Tokenize())
+			if prog := p.ParseProgram(); prog == nil || len(p.Errors()) > 0 {
+				t.Fatalf("the page does not parse: %v\n%s", p.Errors(), body)
+			}
+		})
+	}
+}
+
+func TestMetadataTypesComeFromTheRuntime(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/layout.tsx", `import type { Metadata } from "next";
+export const metadata: Metadata = { title: { default: "Site", template: "%s | Site" } };
+export default function Layout({ children }: any) { return <html><body>{children}</body></html>; }`)
+	writeNextFile(t, root, "app/blog/[slug]/page.tsx", `import type { Metadata, ResolvingMetadata } from "next";
+import { type Viewport } from 'next';
+export async function generateMetadata({ params }: any, parent: ResolvingMetadata): Promise<Metadata> { return { title: (await params).slug }; }
+export default function Page() { return <h1>x</h1>; }`)
+	writeNextFile(t, root, "app/other/page.tsx", `import { NextPage, Metadata } from "next";
+export default function Page() { return <h1>x</h1>; }`)
 	rep, err := ScanNext(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := findPlan(rep, "src/pages/index.tsx")
-	if page == nil {
-		t.Fatal("page missing")
+	layout := findPlan(rep, "src/pages/_layout.tsx")
+	if layout == nil || !strings.Contains(string(layout.Content), `import type { Metadata } from "@krate/runtime/server";`) {
+		t.Errorf("the layout's type import moves to the runtime: %+v", layout)
 	}
-	body := string(page.Content)
-	if !strings.Contains(body, "export default function PageWithHead") || !strings.Contains(body, "<Page {...props} />") {
-		t.Fatalf("arrow page not wrapped:\n%s", body)
+	page := findPlan(rep, "src/pages/blog/[slug].tsx")
+	if page == nil || !strings.Contains(string(page.Content), `import type { Metadata, ResolvingMetadata } from "@krate/runtime/server";`) || !strings.Contains(string(page.Content), `import { type Viewport } from '@krate/runtime/server';`) {
+		t.Errorf("Metadata and Viewport types move to the runtime: %+v", page)
 	}
-	if hasManual(rep, "app/page.tsx", "metadata export is not translated") {
-		t.Fatalf("arrow metadata should be wrapped: %+v", rep.Manual)
+	other := findPlan(rep, "src/pages/other.tsx")
+	if other == nil || !strings.Contains(string(other.Content), `from "next"`) {
+		t.Errorf("an import with other names is left alone: %+v", other)
 	}
 }
 
@@ -873,25 +821,17 @@ export default function Page() {
 		t.Fatal("page missing")
 	}
 	body := string(page.Content)
-	if !strings.Contains(body, `"../migrated/next-navigation"`) {
-		t.Errorf("next/navigation not rewritten:\n%s", body)
+	if !strings.Contains(body, `import { useParams, usePathname, useRouter, useSearchParams, useSelectedLayoutSegment, useSelectedLayoutSegments } from "@krate/runtime";`) {
+		t.Errorf("next/navigation hooks must come from @krate/runtime:\n%s", body)
+	}
+	if strings.Contains(body, "next/navigation") || strings.Contains(body, "migrated/next-navigation") {
+		t.Errorf("no next/navigation import or generated shim may remain:\n%s", body)
 	}
 	if !strings.Contains(body, `"@krate/runtime/server"`) {
 		t.Errorf("next/headers not rewritten:\n%s", body)
 	}
-	helper := findPlan(rep, "src/migrated/next-navigation.ts")
-	if helper == nil {
-		t.Fatalf("navigation helper missing: %+v", helper)
-	}
-	for _, want := range []string{
-		"export function usePathname",
-		"export function useParams",
-		"export function useSelectedLayoutSegment",
-		"export function useSelectedLayoutSegments",
-	} {
-		if !strings.Contains(string(helper.Content), want) {
-			t.Errorf("navigation helper missing %q", want)
-		}
+	if findPlan(rep, "src/migrated/next-navigation.ts") != nil || findPlan(rep, "src/migrated/next-navigation-server.ts") != nil {
+		t.Errorf("the navigation shims are gone: the runtime exports the hooks")
 	}
 	for _, item := range rep.Manual {
 		for _, hook := range []string{"useParams", "useSelectedLayoutSegment", "useSelectedLayoutSegments"} {
@@ -1267,15 +1207,16 @@ func TestNextParallelInterceptingTemplateAndGroups(t *testing.T) {
 	}
 }
 
-func TestNextNavigationServerHelpersAreHookFree(t *testing.T) {
+func TestNextNavigationSignalsComeFromTheRuntime(t *testing.T) {
 	root := t.TempDir()
-	writeNextFile(t, root, "app/blog/[slug]/page.tsx", `import { notFound, redirect } from "next/navigation";
-import Nav from "../../nav";
+	writeNextFile(t, root, "app/blog/[slug]/page.tsx", `import { notFound, redirect, forbidden, unauthorized } from "next/navigation";
 export default async function P({ params }: any) {
   const { slug } = await params;
   if (!slug) notFound();
   if (slug === "old") redirect("/blog/new");
-  return <p>{slug}<Nav /></p>;
+  if (slug === "secret") forbidden();
+  if (slug === "anon") unauthorized();
+  return <p>{slug}</p>;
 }`)
 	writeNextFile(t, root, "app/nav.tsx", `"use client";
 import { redirect, useRouter } from "next/navigation";
@@ -1285,25 +1226,46 @@ export default function Nav() { const r = useRouter(); return <button onClick={(
 		t.Fatal(err)
 	}
 	page := findPlan(rep, "src/pages/blog/[slug].tsx")
-	if page == nil || !strings.Contains(string(page.Content), `import { notFound, redirect } from "../../migrated/next-navigation-server";`) {
-		t.Fatalf("server names must use the hook-free helper: %+v", page)
-	}
-	server := findPlan(rep, "src/migrated/next-navigation-server.ts")
-	if server == nil || strings.Contains(string(server.Content), "useState") || !strings.Contains(string(server.Content), "export function notFound") {
-		t.Fatalf("server helper missing or uses hooks: %+v", server)
-	}
-	shim := findPlan(rep, "src/migrated/next-navigation.ts")
-	if shim == nil || !strings.Contains(string(shim.Content), "krateRouter") {
-		t.Fatalf("client helper must use the Krate router: %+v", shim)
+	if page == nil || !strings.Contains(string(page.Content), `import { notFound, redirect, forbidden, unauthorized } from "@krate/runtime/server";`) {
+		t.Fatalf("a server file takes the signals from @krate/runtime/server: %+v", page)
 	}
 	var nav *PlannedFile
 	for i := range rep.Files {
-		if strings.Contains(string(rep.Files[i].Content), "useRouter") && rep.Files[i].Target != "src/migrated/next-navigation.ts" {
+		if strings.Contains(string(rep.Files[i].Content), "useRouter") {
 			nav = &rep.Files[i]
 		}
 	}
-	if nav == nil || strings.Contains(string(nav.Content), "next-navigation-server") {
-		t.Fatalf("a client file keeps the client redirect: %+v", nav)
+	if nav == nil || !strings.Contains(string(nav.Content), `import { useRouter } from "@krate/runtime";`) || !strings.Contains(string(nav.Content), `import { redirect } from "@krate/runtime";`) {
+		t.Fatalf("a client file takes hooks and signals from @krate/runtime: %+v", nav)
+	}
+	for _, item := range rep.Manual {
+		if strings.Contains(item.Reason, "forbidden") || strings.Contains(item.Reason, "unauthorized") {
+			t.Errorf("forbidden() and unauthorized() map natively: %+v", item)
+		}
+	}
+}
+
+func TestNextNavigationUnsupportedNamesAreReported(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `import { usePathname, useServerInsertedHTML } from "next/navigation";
+export default function P() { useServerInsertedHTML(() => null); return <p>{usePathname()}</p>; }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := findPlan(rep, "src/pages/index.tsx")
+	body := string(page.Content)
+	if !strings.Contains(body, `import { usePathname } from "@krate/runtime";`) || !strings.Contains(body, `import { useServerInsertedHTML } from "next/navigation";`) {
+		t.Errorf("supported names move, others stay put:\n%s", body)
+	}
+	found := false
+	for _, item := range rep.Manual {
+		if strings.Contains(item.Reason, "useServerInsertedHTML") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("an unsupported name is a manual item: %+v", rep.Manual)
 	}
 }
 
@@ -1325,5 +1287,272 @@ export default async function P() { return <p>x</p>; }`)
 	}
 	if hasManual(rep, "app/page.tsx", "route segment config revalidate") {
 		t.Errorf("revalidate is native and must not be reported")
+	}
+}
+
+func TestNamedDefaultOnlyMatchesWholeStatements(t *testing.T) {
+	for _, src := range []string{
+		"export default async function Post() {}",
+		"export default function Post() {}",
+		"export default class Post {}",
+		"export default Post(props);",
+		"export default Post + 1;",
+	} {
+		if namedDefault.MatchString(src) {
+			t.Errorf("namedDefault matched %q", src)
+		}
+	}
+	for _, src := range []string{"export default Post;", "export default Post", "export default Post\n"} {
+		if !namedDefault.MatchString(src) {
+			t.Errorf("namedDefault missed %q", src)
+		}
+	}
+}
+
+func TestPlanMarksExistingTargetsAsOverwrites(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Hi</h1>; }`)
+	writeNextFile(t, root, "tsconfig.json", `{"compilerOptions":{"strict":true}}`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := findPlan(rep, "tsconfig.json")
+	if ts == nil || !ts.Overwrites {
+		t.Fatalf("existing tsconfig.json must be flagged as an overwrite: %+v", ts)
+	}
+	page := findPlan(rep, "src/pages/index.tsx")
+	if page == nil || page.Overwrites {
+		t.Fatalf("a new page is not an overwrite: %+v", page)
+	}
+	if _, err := Apply(rep, ApplyOptions{}); err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("apply without --force must refuse, got %v", err)
+	}
+}
+
+func TestNextConfigAsyncStaticRedirectsTranslate(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "next.config.js", `module.exports = {
+  reactStrictMode: true,
+  async redirects() {
+    return [{ source: "/old", destination: "/new", permanent: true }];
+  },
+  async headers() {
+    return [{ source: "/(.*)", headers: [{ key: "X-Frame-Options", value: "DENY" }] }];
+  },
+  rewrites: async () => [{ source: "/a", destination: "/b" }],
+};`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := findPlan(rep, "krate.config.ts")
+	if cfg == nil {
+		t.Fatal("config missing")
+	}
+	body := string(cfg.Content)
+	for _, want := range []string{`"source": "/old"`, `"destination": "/new"`, `X-Frame-Options`, `"source": "/a"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("config missing %q:\n%s", want, body)
+		}
+	}
+	if hasManual(rep, "next.config.js", "") {
+		t.Errorf("a static async config needs no manual work: %+v", rep.Manual)
+	}
+}
+
+func TestNextConfigComputedKeyDoesNotDropStaticKeys(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "next.config.js", `module.exports = {
+  basePath: "/docs",
+  images: { remotePatterns: [{ protocol: "https", hostname: "images.example.com" }] },
+  async redirects() {
+    const rules = await loadRules();
+    return rules;
+  },
+};`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := findPlan(rep, "krate.config.ts")
+	if cfg == nil {
+		t.Fatal("config missing")
+	}
+	body := string(cfg.Content)
+	for _, want := range []string{"/docs", "images.example.com"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("static key %q was dropped:\n%s", want, body)
+		}
+	}
+	if !hasManual(rep, "next.config.js", "redirects") || hasManual(rep, "next.config.js", "could not be proven static") {
+		t.Errorf("expected a manual item naming only redirects: %+v", rep.Manual)
+	}
+}
+
+func TestUpdatePackagePlanReportsItsChanges(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "package.json", `{
+  "scripts": {"dev": "next dev", "build": "next build", "test": "vitest"},
+  "dependencies": {"next": "15.0.0", "react": "19.0.0", "react-dom": "19.0.0"}
+}`)
+	rep, err := ScanNextWithOptions(root, ScanOptions{UpdatePackage: true, KrateVersion: "0.5.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg := findPlan(rep, "package.json")
+	if pkg == nil {
+		t.Fatal("package.json plan missing")
+	}
+	var got struct {
+		Dependencies map[string]string `json:"dependencies"`
+	}
+	if err := json.Unmarshal(pkg.Content, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Dependencies["@krate/core"] != "^0.5.0" || got.Dependencies["@krate/runtime"] != "^0.5.0" {
+		t.Errorf("@krate dependencies must follow the compiler version: %+v", got.Dependencies)
+	}
+	all := strings.Join(pkg.Rewrites, "\n")
+	for _, want := range []string{`scripts.dev: "next dev" -> "krate dev"`, `scripts.build: "next build" -> "krate build"`, "preact@^10.20.0", "@krate/core@^0.5.0", "dependencies kept: next, react, react-dom"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("rewrites miss %q:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "scripts.test") {
+		t.Errorf("an untouched script must not be reported:\n%s", all)
+	}
+
+	rep, err = ScanNextWithOptions(root, ScanOptions{UpdatePackage: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(findPlan(rep, "package.json").Content, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Dependencies["@krate/core"] != "latest" {
+		t.Errorf("an unknown compiler version falls back to latest: %+v", got.Dependencies)
+	}
+}
+
+func TestSegmentConfigExportsAreExplained(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/layout.tsx", "export const revalidate = 30;\nexport default function Layout({ children }: any) { return <html><body>{children}</body></html>; }")
+	writeNextFile(t, root, "app/(marketing)/pricing/page.tsx", "export const revalidate = 60;\nexport default function Page() { return <h1>Pricing</h1>; }")
+	writeNextFile(t, root, "app/live/page.tsx", "export const dynamic = \"force-dynamic\";\nexport default function Page() { return <h1>Live</h1>; }")
+	writeNextFile(t, root, "app/blog/[slug]/page.tsx", "export const dynamicParams = false;\nexport function generateStaticParams() { return [{ slug: \"a\" }]; }\nexport default function Page() { return <h1>Post</h1>; }")
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"src/pages/(marketing)/pricing.tsx": "renders as ISR, revalidated every 60s",
+		"src/pages/live.tsx":                "renders per request (SSR)",
+		"src/pages/blog/[slug].tsx":         "answer 404",
+	}
+	for target, text := range want {
+		f := findPlan(rep, target)
+		if f == nil {
+			t.Fatalf("%s missing", target)
+		}
+		if !strings.Contains(strings.Join(f.Rewrites, "\n"), text) {
+			t.Errorf("%s: rewrites %q lack %q", target, f.Rewrites, text)
+		}
+	}
+	if !hasManual(rep, "app/layout.tsx", "route segment config revalidate in a layout") {
+		t.Errorf("a layout segment export needs a manual item: %+v", rep.Manual)
+	}
+}
+
+func TestNextForbiddenAndUnauthorizedPagesMigrate(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function P() { return <p>x</p>; }`)
+	writeNextFile(t, root, "app/forbidden.tsx", `export default function F() { return <p>no</p>; }`)
+	writeNextFile(t, root, "app/admin/page.tsx", `export default function A() { return <p>admin</p>; }`)
+	writeNextFile(t, root, "app/admin/unauthorized.tsx", `export default function U() { return <p>sign in</p>; }`)
+	writeNextFile(t, root, "next.config.mjs", `export default { experimental: { authInterrupts: true } };`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findPlan(rep, "src/pages/403.tsx") == nil {
+		t.Errorf("forbidden.tsx must map to 403.tsx: %+v", rep.Files)
+	}
+	if findPlan(rep, "src/pages/admin/401.tsx") == nil {
+		t.Errorf("unauthorized.tsx must map to admin/401.tsx")
+	}
+	if findPlan(rep, "src/pages/admin/index.tsx") == nil {
+		t.Errorf("a directory with a scoped file keeps its page in the directory")
+	}
+	for _, item := range rep.Manual {
+		if strings.Contains(item.Reason, "forbidden") || strings.Contains(item.Reason, "unauthorized") {
+			t.Errorf("not a manual item: %+v", item)
+		}
+	}
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "experimental keys are not translated") {
+			t.Errorf("authInterrupts alone must not warn: %s", w)
+		}
+	}
+}
+
+func TestMetadataRoutesMigrateNatively(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "package.json", `{"dependencies":{"next":"15.0.0"}}`)
+	writeNextFile(t, root, "app/page.tsx", `export default function P() { return <h1>x</h1>; }`)
+	writeNextFile(t, root, "app/sitemap.ts", `import type { MetadataRoute } from "next";
+import { posts } from "./lib/posts";
+export default function sitemap(): MetadataRoute.Sitemap { return posts.map((p) => ({ url: "https://x.example/" + p })); }`)
+	writeNextFile(t, root, "app/lib/posts.ts", `export const posts = ["a"];`)
+	writeNextFile(t, root, "app/(site)/robots.ts", `import type { MetadataRoute } from "next";
+export default function robots(): MetadataRoute.Robots { return { rules: { userAgent: "*", allow: "/" } }; }`)
+	writeNextFile(t, root, "app/manifest.ts", `export default function manifest() { return { name: "X" }; }`)
+	writeNextFile(t, root, "app/blog/[slug]/opengraph-image.tsx", `import { ImageResponse } from "next/og";
+export const alt = "Post";
+export default async function Image({ params }: any) { return new ImageResponse(<div>{(await params).slug}</div>); }`)
+	writeNextFile(t, root, "app/twitter-image.png", "PNGDATA")
+	writeNextFile(t, root, "app/opengraph-image.alt.txt", "alt")
+	writeNextFile(t, root, "app/robots.txt", "User-Agent: *")
+	writeNextFile(t, root, "app/icon.tsx", `export default function Icon() { return null; }`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"src/pages/sitemap.ts", "src/pages/(site)/robots.ts", "src/pages/manifest.ts", "src/pages/blog/[slug]/opengraph-image.tsx"} {
+		if f := findPlan(rep, target); f == nil || f.Kind != KindMetadataRoute {
+			t.Errorf("%s should be planned as a metadata route: %+v", target, f)
+		}
+	}
+	if f := findPlan(rep, "src/pages/sitemap.ts"); f != nil {
+		if !strings.Contains(string(f.Content), `from "@krate/runtime/server"`) || strings.Contains(string(f.Content), "./lib/posts") && !strings.Contains(string(f.Content), "migrated") {
+			t.Errorf("sitemap imports: %s", f.Content)
+		}
+	}
+	if f := findPlan(rep, "src/pages/blog/[slug]/opengraph-image.tsx"); f != nil && !strings.Contains(string(f.Content), `from "@krate/runtime/og"`) {
+		t.Errorf("next/og should become @krate/runtime/og: %s", f.Content)
+	}
+	if f := findPlan(rep, "src/pages/twitter-image.png"); f == nil || string(f.Content) != "PNGDATA" {
+		t.Errorf("a static twitter image is copied byte for byte: %+v", f)
+	}
+	if f := findPlan(rep, "public/robots.txt"); f == nil || f.Kind != KindPublic {
+		t.Errorf("a static robots.txt goes to public/: %+v", f)
+	}
+	var manual []string
+	for _, m := range rep.Manual {
+		manual = append(manual, m.Source)
+	}
+	joined := strings.Join(manual, " ")
+	for _, want := range []string{"app/icon.tsx", "app/opengraph-image.alt.txt"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("%s stays a manual item: %v", want, manual)
+		}
+	}
+	for _, m := range rep.Manual {
+		if strings.Contains(m.Source, "sitemap") || strings.Contains(m.Source, "robots.ts") || strings.Contains(m.Source, "manifest") || strings.Contains(m.Source, "opengraph-image.tsx") {
+			t.Errorf("a supported metadata file is a manual item: %+v", m)
+		}
 	}
 }

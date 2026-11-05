@@ -18,6 +18,9 @@ import {
   type ServerManifest,
 } from "./ssr-core.js";
 import { installRenderStore, patchFetch, type CacheScope } from "./cache-scope.js";
+import { cacheSpecFromEnv } from "./cache-adapter.js";
+import { isrStoreFor } from "./shared-isr.js";
+import { registerLanguage, setFenceResolver, type HighlightTable } from "./highlight.js";
 
 // Render cache scopes (tags / revalidate windows read during a render) and the
 // Next-style fetch data cache. Installed once per process; page bundles share
@@ -123,6 +126,19 @@ const manifestPath = process.env.KRATE_MANIFEST || "";
 const root = process.env.KRATE_ROOT || process.cwd();
 const OUT_DIR = process.env.KRATE_OUT_DIR || path.join(root, "dist");
 
+// Exit when the Krate host dies: a SIGKILL or OOM kill gives it no chance to stop its sidecars.
+const PARENT_PID = parseInt(process.env.KRATE_PARENT_PID || "", 10);
+if (PARENT_PID > 0) {
+  const parentWatch = setInterval(() => {
+    try {
+      process.kill(PARENT_PID, 0);
+    } catch (e: any) {
+      if (!e || e.code !== "EPERM") process.exit(0);
+    }
+  }, 2000);
+  parentWatch.unref();
+}
+
 let manifest: ServerManifest | null = null;
 
 if (manifestPath && fs.existsSync(manifestPath)) {
@@ -142,6 +158,30 @@ if (manifestPath && fs.existsSync(manifestPath)) {
   }
 }
 
+
+// Request-time syntax highlighting: the build writes the lexer tables of the
+// languages the server pages use, and <SyntaxHighlight> highlights with them.
+(function loadHighlightTables() {
+  const file = path.join(OUT_DIR, ".krate", "highlight.json");
+  if (!fs.existsSync(file)) return;
+  try {
+    const bundle = JSON.parse(fs.readFileSync(file, "utf-8")) as {
+      tables: HighlightTable[];
+      keys: Record<string, string>;
+      fences?: Record<string, string>;
+    };
+    const names = new Map<string, string[]>();
+    for (const [k, v] of Object.entries(bundle.keys)) {
+      if (!names.has(v)) names.set(v, []);
+      names.get(v)!.push(k);
+    }
+    for (const t of bundle.tables) registerLanguage(t, names.get(t.n.toLowerCase()));
+    const fences = bundle.fences;
+    if (fences) setFenceResolver((n) => Object.prototype.hasOwnProperty.call(fences, n.trim().toLowerCase()));
+  } catch (e) {
+    console.error("[krate-ssr] Could not load highlight tables; code is rendered as plain text:", e);
+  }
+})();
 
 // Module loaders (node:fs / node:vm live here, not in the render core)
 
@@ -177,11 +217,11 @@ async function loadPageModule(page: ManifestPage): Promise<any> {
   }
 }
 
-const runtimeBundleCache = new Map<string, (propsJSON: string) => string>();
+const runtimeBundleCache = new Map<string, (props: string | Record<string, any>) => string>();
 
 // loadRuntimeRenderer loads a compiled runtime component bundle and returns its
-// __krate_render(propsJSON) function. Bundles are cached by bundle path.
-function loadRuntimeRenderer(relPath: string): (propsJSON: string) => string {
+// __krate_render(props) function (props as an object or JSON). Bundles are cached by bundle path.
+function loadRuntimeRenderer(relPath: string): (props: string | Record<string, any>) => string {
   const cached = runtimeBundleCache.get(relPath);
   if (cached) return cached;
 
@@ -212,10 +252,13 @@ function loadRuntimeRenderer(relPath: string): (propsJSON: string) => string {
 
 const pprEnabledEnv = process.env.KRATE_PPR === "1";
 const isrMemory = new MemoryIsrStore(parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512);
+// With a shared cache adapter (KRATE_CACHE) the ISR cache and the data cache live
+// in the adapter, so every instance serves and invalidates the same pages.
+const sharedCache = isrStoreFor(cacheSpecFromEnv(process.env), isrMemory);
 const core = createSSRCore({
   manifest,
   sha256Hex: (input) => createHash("sha256").update(input).digest("hex"),
-  isrStore: isrMemory,
+  isrStore: sharedCache.store,
   loadPageModule,
   loadRuntimeRenderer,
   maxCacheSize: parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512,
@@ -516,6 +559,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (result.denied) {
+    const denied = path.join(OUT_DIR, result.denied + ".html");
+    const fallback = result.denied === 403 ? "<html><body><h1>403 Forbidden</h1></body></html>" : "<html><body><h1>401 Unauthorized</h1></body></html>";
+    res.writeHead(result.denied, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(fs.existsSync(denied) ? fs.readFileSync(denied, "utf-8") : fallback);
+    return;
+  }
+
   if (result.redirect) {
     res.writeHead(result.status === 307 ? 307 : 302, { Location: result.redirect });
     res.end();
@@ -544,7 +595,9 @@ const server = http.createServer(async (req, res) => {
     headers_extra["X-Krate-Cache"] = result.cacheStatus === "stale" ? "STALE" : "HIT";
   }
   res.writeHead(result.status, headers_extra);
-  res.end(result.html);
+  // A direct page response has no document to merge into: <Head> children stay
+  // where they rendered, without their markers.
+  res.end(result.html.replace(/<!--\/?krate-head-->/g, ""));
 });
 
 if (isClusterPrimary) {

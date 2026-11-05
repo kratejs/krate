@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/gohost"
 	"github.com/kratejs/krate/packages/compiler/internal/mcp"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
+	"github.com/kratejs/krate/packages/compiler/internal/typecheck"
 	krateversion "github.com/kratejs/krate/packages/compiler/internal/version"
 )
 
@@ -99,6 +101,8 @@ func main() {
 		runServe(flags, args)
 	case "types":
 		runTypes(flags, args)
+	case "typecheck":
+		runTypecheck(flags, args)
 	case "go:init":
 		runGoInit(flags, args)
 	case "check":
@@ -165,6 +169,9 @@ func printCommandUsage(w io.Writer, cmd string) {
 	case "types":
 		fmt.Fprintf(w, "Usage: krate types [dir]\n\n")
 		fmt.Fprintf(w, "Generate route/content TypeScript declarations (krate-env.d.ts, .krate/types).\n")
+	case "typecheck":
+		fmt.Fprintf(w, "Usage: krate typecheck [dir]\n\n")
+		fmt.Fprintf(w, "Generate types, then run tsc --noEmit without its errors about tier decorators.\n")
 	case "go:init":
 		fmt.Fprintf(w, "Usage: krate go:init [dir]\n\n")
 		fmt.Fprintf(w, "Set up go.mod/go.work and vendored helpers for Go component intellisense.\n")
@@ -225,6 +232,7 @@ func printUsage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, "  serve     Build, then serve for preview (alias: preview)\n")
 	_, _ = fmt.Fprintf(w, "  start     Serve the existing build without rebuilding (production)\n")
 	fmt.Fprintf(w, "  types     Generate route/content TypeScript declarations\n")
+	fmt.Fprintf(w, "  typecheck Generate types and run tsc\n")
 	fmt.Fprintf(w, "  go:init   Set up go.mod/go.work for Go component intellisense\n")
 	fmt.Fprintf(w, "  check     Run compiler-enforced quality gates (a11y/SEO/perf)\n")
 	fmt.Fprintf(w, "  fix       Apply safe source fixes (dry-run unless --apply)\n")
@@ -380,6 +388,23 @@ func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 	return root, cfg
 }
 
+// checkProjectDir fails with a plain message when the project directory is
+// missing, so a typo is not reported as a missing pagesDir (or, worse, turned
+// into a new directory by the first build step that writes to it).
+func checkProjectDir(root string) error {
+	info, err := os.Stat(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("project directory %s does not exist (check the path; `krate init` creates a new project)", root)
+		}
+		return fmt.Errorf("cannot read project directory %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("project path %s is not a directory", root)
+	}
+	return nil
+}
+
 // loadConfig is resolveConfig without the exit, so the dev server can report a
 // broken config edit and keep running.
 func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
@@ -389,6 +414,9 @@ func loadConfig(flags cliFlags, args []string) (string, *config.Config, error) {
 	}
 	root, err := filepath.Abs(root)
 	if err != nil {
+		return "", nil, err
+	}
+	if err := checkProjectDir(root); err != nil {
 		return "", nil, err
 	}
 
@@ -493,7 +521,7 @@ func runBuild(flags cliFlags, args []string) {
 		writeHeapProfile(flags.MemProfile)
 	}
 	if buildErr != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, buildErr)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(buildErr))
 		os.Exit(1)
 	}
 
@@ -606,7 +634,7 @@ func runDevOnce(flags cliFlags, args []string, first bool) bool {
 		// A failed initial build must not kill the dev server: keep serving and
 		// publish the diagnostics so the browser overlay shows them (and the
 		// watcher can recover on the next save).
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 		hub.Publish(build.DevEvent{Type: "reload", Diagnostics: build.DiagnosticsFromError(err)})
 	}
 
@@ -660,7 +688,7 @@ func runServe(flags cliFlags, args []string) {
 		builder.Verbose = flags.Verbose
 		builder.Env = env
 		if err := builder.BuildAll(); err != nil {
-			fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+			fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 			os.Exit(1)
 		}
 		fmt.Printf("%s%s  Build complete. Starting server...%s\n", cBold, cGreen, cReset)
@@ -674,12 +702,25 @@ func runServe(flags cliFlags, args []string) {
 
 // hasBuildOutput reports whether outDir looks like a finished krate build.
 func hasBuildOutput(outDir string) bool {
-	for _, name := range []string{"manifest.json", "index.html"} {
+	for _, name := range []string{"manifest.json", "index.html", ".krate"} {
 		if _, err := os.Stat(filepath.Join(outDir, name)); err == nil {
 			return true
 		}
 	}
-	return false
+	// A site with no root page (only /docs/..., or SSR pages and an API) has no
+	// top-level index.html: any built page counts.
+	found := false
+	_ = filepath.WalkDir(outDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || found {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".html") {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
 }
 
 // runDeploy builds the site and writes host-specific adapter files so the
@@ -701,7 +742,7 @@ func runDeploy(flags cliFlags, args []string) {
 	builder.Verbose = flags.Verbose
 	builder.Env = env
 	if err := builder.BuildAll(); err != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 		os.Exit(1)
 	}
 
@@ -748,6 +789,9 @@ func runFix(flags cliFlags, args []string) {
 		root = args[1]
 	}
 	abs, err := filepath.Abs(root)
+	if err == nil {
+		err = checkProjectDir(abs)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
@@ -794,7 +838,7 @@ func runInspect(flags cliFlags, args []string) {
 	var buildErr error
 	withSuppressedStdout(func() { buildErr = builder.BuildAll() })
 	if buildErr != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, buildErr)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(buildErr))
 		os.Exit(1)
 	}
 	graph, err := builder.SiteGraph()
@@ -882,6 +926,31 @@ func runTypes(flags cliFlags, args []string) {
 	fmt.Printf("%s%s  Types written to %s%s\n", cBold, cGreen, filepath.Join(root, ".krate", "types"), cReset)
 }
 
+// runTypecheck generates types and runs the project's tsc.
+func runTypecheck(flags cliFlags, args []string) {
+	root, cfg := resolveConfig(flags, args)
+	if errs := build.GenerateTypes(root, cfg); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "%s  Type error:%s %v\n", cRed, cReset, e)
+		}
+		os.Exit(1)
+	}
+	out, ok, err := typecheck.Run(root)
+	if errors.Is(err, typecheck.ErrNoTSC) {
+		fmt.Fprintf(os.Stderr, "%sType check error:%s %v; add it with `pnpm add -D typescript`\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%sType check error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+	fmt.Print(out)
+	if !ok {
+		os.Exit(1)
+	}
+	fmt.Printf("%s%s  No type errors%s\n", cBold, cGreen, cReset)
+}
+
 // runGoInit sets up the Go workspace (go.mod/go.work + vendored helpers) so
 // editors resolve the goext import path for Go API routes and components.
 func runGoInit(flags cliFlags, args []string) {
@@ -915,7 +984,7 @@ func runCheck(flags cliFlags, args []string) {
 	// suppress the in-build gates to avoid duplicate reporting.
 	builder.SkipQualityChecks = true
 	if err := builder.BuildAll(); err != nil {
-		fmt.Fprintf(os.Stderr, "%sBuild error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(os.Stderr, "%sBuild error:%s %s\n", cRed, cReset, build.BuildErrorSummary(err))
 		os.Exit(1)
 	}
 

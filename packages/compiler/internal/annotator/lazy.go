@@ -189,7 +189,7 @@ func markLazyDefaults(ann *irtree.Annotations, modules []ModuleSource) {
 		if owner == nil || !importsDefaultAs(owner.Body, name) {
 			continue
 		}
-		target := byPath[bundler.ResolveImport(lc.File, lc.Spec)]
+		target := byPath[resolverOf(modules).Resolve(lc.File, lc.Spec)]
 		if target != nil && FindDefaultExport(target.Body) == "" {
 			lc.NoDefaultExport = true
 			ann.LazyComponents[name] = lc

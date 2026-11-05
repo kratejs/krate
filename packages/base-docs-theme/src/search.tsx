@@ -1,4 +1,5 @@
 import { createSignal, onMount, onCleanup, useRef } from "@krate/runtime";
+import { PLATFORM_PREPAINT } from "./platform";
 
 /**
  * Headless docs search - the theme places this wherever it wants and styles it
@@ -57,19 +58,25 @@ interface HotkeyCombo {
   alt: boolean;
 }
 
-/** Human-readable hint ("mod+k" -> the command icon plus "K"). Kept
- * platform-neutral so the server-rendered markup matches hydration. */
-function hotkeyLabel(hotkey: string): string {
-  return hotkey
-    .split("+")
-    .map((part) => {
-      const p = part.trim().toLowerCase();
-      if (p === "mod" || p === "cmd" || p === "meta") return "\u2318";
-      if (p === "ctrl" || p === "control") return "Ctrl";
-      if (p === "alt" || p === "option") return "Alt";
-      return p.toUpperCase();
-    })
-    .join(" ");
+/**
+ * The key names of a hotkey such as "mod+k" for one platform: "mod" is the
+ * command key on Apple devices and Ctrl elsewhere. (Defined here, not imported:
+ * the build evaluates same-module functions while it renders the page.)
+ */
+export function hotkeyKeys(hotkey: string, platform: "mac" | "other"): string[] {
+  return hotkey.split("+").map((part) => {
+    const p = part.trim().toLowerCase();
+    if (p === "mod") return platform === "mac" ? "\u2318" : "Ctrl";
+    if (p === "cmd" || p === "meta") return platform === "mac" ? "\u2318" : "Meta";
+    if (p === "ctrl" || p === "control") return "Ctrl";
+    if (p === "alt" || p === "option") return platform === "mac" ? "\u2325" : "Alt";
+    return p.toUpperCase();
+  });
+}
+
+/** The hotkey as shown for one platform, e.g. "mod+k" -> "Ctrl K" or the command key and "K". */
+export function hotkeyLabel(hotkey: string, platform: "mac" | "other"): string {
+  return hotkeyKeys(hotkey, platform).join(" ");
 }
 
 /** Parse "mod+k", "ctrl+/", "alt+p", etc. "mod" is Cmd on macOS, Ctrl elsewhere. */
@@ -288,7 +295,17 @@ export function DocsSearch(props: DocsSearchProps) {
           }, 0);
         }}
       />
-      {hotkey && <kbd class="krate-docs-search-kbd" aria-hidden="true">{hotkeyLabel(hotkey)}</kbd>}
+      {hotkey && (
+        <kbd class="krate-docs-search-kbd" aria-hidden="true">
+          <span class="krate-kbd-mac">{hotkeyLabel(hotkey, "mac")}</span>
+          <span class="krate-kbd-other">{hotkeyLabel(hotkey, "other")}</span>
+        </kbd>
+      )}
+      {hotkey && (
+        <Head>
+          <script>{"(function(){" + PLATFORM_PREPAINT + "})();"}</script>
+        </Head>
+      )}
       <div class="krate-docs-search-status" id={statusId} role="status" aria-live="polite">
         {loading()
           ? "Searching"

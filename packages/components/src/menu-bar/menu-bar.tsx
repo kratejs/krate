@@ -6,6 +6,9 @@ const MenuBarCtx = createScope<string | null>();
 export interface MenuBarProps {
   label?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** Menu bar. Zero JS: one radio group whose selected option is the open menu. */
@@ -13,7 +16,7 @@ export function MenuBar(props: MenuBarProps) {
   const open = createCSSGroup<string>(null, { as: 'menubar', label: props.label });
   return (
     <MenuBarCtx.Provider value={open}>
-      <div class="krate-menu-bar">{props.children}</div>
+      <div class={"krate-menu-bar" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>{props.children}</div>
     </MenuBarCtx.Provider>
   );
 }
@@ -21,13 +24,16 @@ export function MenuBar(props: MenuBarProps) {
 export interface MenuBarTriggerProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `MenuBar.Trigger` instead. */
 export function MenuBarTrigger(props: MenuBarTriggerProps) {
   const open = MenuBarCtx.use();
   return (
-    <button class="krate-menu-bar-trigger" type="button" {...open.trigger(props.value)}>
+    <button class={"krate-menu-bar-trigger" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} type="button" {...open.trigger(props.value)}>
       {props.children}
     </button>
   );
@@ -36,13 +42,16 @@ export function MenuBarTrigger(props: MenuBarTriggerProps) {
 export interface MenuBarContentProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `MenuBar.Content` instead. */
 export function MenuBarContent(props: MenuBarContentProps) {
   const open = MenuBarCtx.use();
   return (
-    <div class="krate-menu-bar-content" {...open.panel(props.value)}>
+    <div class={"krate-menu-bar-content" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} {...open.panel(props.value)}>
       {props.children}
     </div>
   );
@@ -50,13 +59,16 @@ export function MenuBarContent(props: MenuBarContentProps) {
 
 export interface MenuBarItemProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `MenuBar.Item` instead. */
 export function MenuBarItem(props: MenuBarItemProps) {
   const open = MenuBarCtx.use();
   return (
-    <button class="krate-menu-bar-item" type="button" {...open.close()}>
+    <button class={"krate-menu-bar-item" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} type="button" {...open.close()}>
       {props.children}
     </button>
   );
@@ -69,11 +81,14 @@ export function MenuBarSeparator() {
 
 export interface MenuBarLabelProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `MenuBar.Label` instead. */
 export function MenuBarLabel(props: MenuBarLabelProps) {
-  return <div class="krate-menu-bar-label">{props.children}</div>;
+  return <div class={"krate-menu-bar-label" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>{props.children}</div>;
 }
 
 export interface MenuBar {

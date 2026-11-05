@@ -16,6 +16,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 // assets/preact-render-to-string.js is vendored from preact-render-to-string
@@ -185,8 +186,9 @@ func isBarePackageImport(src string) bool {
 //
 // resolveDir is the page module directory: relative local imports used inside
 // an island resolve from there, not from the project root.
-func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localImports []irtree.ExternalImport, resolveDir string) (string, string, map[string]string, *islandStyles, error) {
+func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, imports, localImports []irtree.ExternalImport, resolveDir string, prov *islandProviders) (string, string, map[string]string, *islandStyles, error) {
 	if len(exts) == 0 {
+		b.setIslandEntries(owner, nil)
 		return "", "", nil, nil, nil
 	}
 	if resolveDir == "" {
@@ -208,67 +210,134 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 	sink := &islandCSSSink{root: b.Root}
 	allImports := append(append([]irtree.ExternalImport(nil), imports...), localImports...)
 
+	var entries []islandEntry
+	// register records the entry module of an island chunk and returns the URL
+	// the page script imports. The chunk itself is written once for the whole
+	// site (writeIslandBundles), so modules shared by pages are shared files.
+	register := func(src string) string {
+		name := b.islandEntryName(src, resolveDir)
+		entries = append(entries, islandEntry{Name: name, Source: src, ResolveDir: resolveDir, Virtual: prov.virtualModules()})
+		return b.islandEntryURL(name)
+	}
+	buildFailure := func(e irtree.ExternalComponent, err error) error {
+		d := diag.Diagnostic{
+			File:    e.File,
+			Line:    e.Line,
+			Col:     e.Col,
+			Message: "island " + e.ID + " (<" + e.Local + ">) could not be built: " + err.Error(),
+			Hint:    "check the island package and its local imports, then rebuild",
+		}
+		// The problem is in the package (or a module it imports), so
+		// point there and say which page island pulled it in.
+		var be *bundleError
+		if errors.As(err, &be) && be.Loc != nil {
+			d.File, d.Line, d.Col = be.Loc.File, be.Loc.Line, be.Loc.Col
+			d.Message = "island " + e.ID + " (<" + e.Local + "> used at " + b.relPath(e.File) + ":" + strconv.Itoa(e.Line) + ":" + strconv.Itoa(e.Col) + ") could not be built: " + err.Error()
+		}
+		return d.WithCode(diag.CodeIslandAsset)
+	}
+
+	chunkURL := map[string]string{}
+	var reactGroup []irtree.ExternalComponent
 	for _, e := range exts {
 		if e.Subtree == "" {
 			continue
 		}
 		used := islandImportsFor(e.Subtree, allImports)
-		clientSrc := b.islandClientSource(e, used)
-		out, err := b.buildIslandBundle(clientSrc, resolveDir, false, nil, sink)
-		if err != nil {
-			d := diag.Diagnostic{
-				File:    e.File,
-				Line:    e.Line,
-				Col:     e.Col,
-				Message: "island " + e.ID + " (<" + e.Local + ">) could not be built: " + err.Error(),
-				Hint:    "check the island package and its local imports, then rebuild",
+		if e.ReactIsland {
+			// Bundled together below so module-level state is shared.
+			reactGroup = append(reactGroup, e)
+		} else {
+			clientSrc := b.islandClientSource(e, used, prov)
+			if _, err := b.buildIslandBundle(clientSrc, resolveDir, false, nil, sink, prov); err != nil {
+				return "", "", nil, nil, buildFailure(e, err)
 			}
-			// The problem is in the package (or a module it imports), so
-			// point there and say which page island pulled it in.
-			var be *bundleError
-			if errors.As(err, &be) && be.Loc != nil {
-				d.File, d.Line, d.Col = be.Loc.File, be.Loc.Line, be.Loc.Col
-				d.Message = "island " + e.ID + " (<" + e.Local + "> used at " + b.relPath(e.File) + ":" + strconv.Itoa(e.Line) + ":" + strconv.Itoa(e.Col) + ") could not be built: " + err.Error()
-			}
-			return "", "", nil, nil, d.WithCode(diag.CodeIslandAsset)
+			chunkURL[e.ID] = register(clientSrc)
 		}
-		name := "island." + hashContent(out) + ".js"
-		chunksDir := filepath.Join(b.Cfg.OutDir, "chunks")
-		if err := os.MkdirAll(chunksDir, 0755); err != nil {
-			return "", "", nil, nil, fmt.Errorf("creating chunks dir: %w", err)
-		}
-		if err := fsutil.WriteFileIfChanged(filepath.Join(chunksDir, name), out, 0644); err != nil {
-			return "", "", nil, nil, fmt.Errorf("writing island chunk: %w", err)
-		}
-		url := "/chunks/" + name
-		if bp := b.Cfg.BaseURLPath(); bp != "" {
-			url = bp + url
-		}
-		fmt.Fprintf(&importsJS, "import(%q).catch(function(e){ console.error(\"krate external island:\", e); });\n", url)
 
+		if e.ClientOnly || (!e.ReactIsland && isCSSInJSPackage(e.Source)) {
+			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" (<"+e.Local+">) is client-only: its CSS-in-JS library creates styles in the browser", "use CSS modules or Tailwind for content that must be styled before JavaScript loads")
+			continue
+		}
 		if !e.SSRPropsKnown {
 			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" (<"+e.Local+">) stays client-only: a bridged prop has no build-time initial value", "pass build-time initial values, or keep the island client-only intentionally")
 			continue
 		}
-		ssrSrc := b.islandSSRSource(e, used)
-		html, err := b.buildIslandSSR(ssrSrc, resolveDir, sink)
+		ssrSrc := b.islandSSRSource(e, used, prov)
+		html, err := b.buildIslandSSR(ssrSrc, resolveDir, sink, prov)
 		if err != nil {
-			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" stays client-only: server render failed: "+err.Error(), "fix the browser-only dependency or keep the island client-only intentionally")
+			hint := "fix the browser-only dependency or keep the island client-only intentionally"
+			if strings.Contains(strings.ToLower(err.Error()), "provider") {
+				// A provider in a layout is a Krate component; islands are
+				// separate Preact trees and do not see it.
+				hint = "a missing provider must be rendered inside the island (in the module that uses the hook), not in a layout; " + hint
+			}
+			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" stays client-only: server render failed: "+err.Error(), hint)
 			continue
 		}
 		ssrHTML[e.ID] = html
+	}
+	if len(reactGroup) > 0 {
+		groupSrc := b.islandGroupClientSource(reactGroup, allImports, prov)
+		if _, err := b.buildIslandBundle(groupSrc, resolveDir, false, nil, sink, prov); err != nil {
+			return "", "", nil, nil, buildFailure(reactGroup[0], err)
+		}
+		url := register(groupSrc)
+		for _, e := range reactGroup {
+			chunkURL[e.ID] = url
+		}
+	}
+	for _, e := range exts {
+		if url, ok := chunkURL[e.ID]; ok {
+			importsJS.WriteString(islandBootLine(e, url))
+		}
 	}
 
 	styles, err := b.buildIslandStyles(sink)
 	if err != nil {
 		return "", "", nil, nil, err
 	}
+	b.setIslandEntries(owner, entries)
 	return boot.String(), importsJS.String(), ssrHTML, styles, nil
+}
+
+// islandBootLine is the page script statement that loads an island chunk and
+// mounts the island: at load by default, when the placeholder scrolls into
+// view for client:visible, or when the browser is idle for client:idle.
+func islandBootLine(e irtree.ExternalComponent, url string) string {
+	// A deferred island's chunk must not be preloaded (the page-level preload
+	// scan matches whole "/chunks/x.js" literals), so its URL is built in two
+	// parts.
+	lit := strconv.Quote(url)
+	dir := ""
+	if e.Hydrate != "" {
+		cut := strings.LastIndex(url, "/")
+		dir = "var d=" + strconv.Quote(url[:cut]) + ";"
+		lit = "d+" + strconv.Quote(url[cut:])
+	}
+	// The placeholder is looked up when the page script runs, not when the
+	// chunk arrives: after a client-side navigation the ids repeat on the next
+	// page, and a late chunk must not mount into that page's placeholder.
+	sel := "[data-krate-island=" + e.ID + "]"
+	load := "import(" + lit + ").then(function(m){m.mount(" + strconv.Quote(e.ID) + ",el);}).catch(function(e){ console.error(\"krate external island:\", e); });"
+	switch e.Hydrate {
+	case "idle":
+		return "(function(){" + dir + "var el=document.querySelector('" + sel + "');var go=function(){" + load + "};if(typeof requestIdleCallback===\"function\")requestIdleCallback(go,{timeout:2000});else setTimeout(go,200);})();\n"
+	case "visible":
+		return "(function(){" + dir + "var el=document.querySelector('" + sel + "');var go=function(){" + load + "};" +
+			"if(!el||typeof IntersectionObserver!==\"function\"){go();return;}" +
+			"var t=el.firstElementChild,block=false;" +
+			"if(!t||getComputedStyle(t).display===\"contents\"){el.style.display=\"block\";t=el;block=true;}" +
+			"var io=new IntersectionObserver(function(es){for(var i=0;i<es.length;i++){if(es[i].isIntersecting){io.disconnect();if(block)el.style.display=\"contents\";go();return;}}},{rootMargin:\"200px\"});" +
+			"io.observe(t);})();\n"
+	}
+	return "(function(){var el=document.querySelector('" + sel + "');" + load + "})();\n"
 }
 
 // printIslandWarning emits a source-located island diagnostic. The build
 // package owns the asset failure, but the source position comes from the IR.
 func printIslandWarning(e irtree.ExternalComponent, code diag.Code, msg, hint string) {
+	msg = strings.Replace(msg, "(<"+reactIslandPageLocal+">)", "(the page component)", 1)
 	d := diag.Diagnostic{
 		File: e.File, Line: e.Line, Col: e.Col,
 		Message: msg, Hint: hint, Severity: diag.SeverityWarning,
@@ -328,13 +397,50 @@ class KrateIslandBoundary extends Component {
 }
 `
 
-func (b *Builder) islandClientSource(e irtree.ExternalComponent, imports []irtree.ExternalImport) string {
+func (b *Builder) islandClientSource(e irtree.ExternalComponent, imports []irtree.ExternalImport, prov *islandProviders) string {
 	var src strings.Builder
 	src.WriteString("import { Component, Fragment, h, hydrate, render } from \"preact\";\n")
+	src.WriteString(prov.importLines())
 	writeIslandImportLines(&src, imports)
 	src.WriteString(islandBoundaryJS)
-	fmt.Fprintf(&src, "\n{\n  const el = document.querySelector('[data-krate-island=%q]');\n", e.ID)
-	src.WriteString("  if (el) {\n    try {\n")
+	src.WriteString("export function mount(only, elArg) {\n")
+	src.WriteString(islandMountBlock(e, prov))
+	src.WriteString("}\n")
+	return src.String()
+}
+
+// islandGroupClientSource builds one module for several islands. Islands that
+// run the project's own modules (React libraries with module-level state, such
+// as a zustand store) must share one copy of those modules, which separate
+// chunks would not.
+func (b *Builder) islandGroupClientSource(group []irtree.ExternalComponent, all []irtree.ExternalImport, prov *islandProviders) string {
+	var src strings.Builder
+	src.WriteString("import { Component, Fragment, h, hydrate, render } from \"preact\";\n")
+	src.WriteString(prov.importLines())
+	seen := map[string]bool{}
+	for _, e := range group {
+		for _, imp := range islandImportsFor(e.Subtree, all) {
+			key := imp.Source + "\x00" + imp.Local
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			writeIslandImportLines(&src, []irtree.ExternalImport{imp})
+		}
+	}
+	src.WriteString(islandBoundaryJS)
+	src.WriteString("export function mount(only, elArg) {\n")
+	for _, e := range group {
+		src.WriteString(islandMountBlock(e, prov))
+	}
+	src.WriteString("}\n")
+	return src.String()
+}
+
+func islandMountBlock(e irtree.ExternalComponent, prov *islandProviders) string {
+	var src strings.Builder
+	fmt.Fprintf(&src, "\nif (only === void 0 || only === %q) {\n  const el = elArg || document.querySelector('[data-krate-island=%q]');\n", e.ID, e.ID)
+	src.WriteString("  if (el && el.isConnected !== false && !el.hasAttribute(\"data-krate-island-hydrated\")) {\n    try {\n")
 	if e.PropsJS != "" {
 		fmt.Fprintf(&src, "      const getProps=(globalThis.__krate_island_values||{})[%q];\n", e.ID)
 		fmt.Fprintf(&src, "      const subscribe=(globalThis.__krate_island_subscribe||{})[%q];\n", e.ID)
@@ -348,6 +454,7 @@ func (b *Builder) islandClientSource(e irtree.ExternalComponent, imports []irtre
 	} else {
 		fmt.Fprintf(&src, "      var __vnode=(%s);\n", e.Subtree)
 	}
+	src.WriteString(prov.wrapVNodeJS("__vnode"))
 	src.WriteString("      var __boundary=h(KrateIslandBoundary,{onError:function(err){console.error(\"krate external island:\",String((err&&(err.name?err.name+\": \":\"\"))+(err&&err.message||err)||err));el.setAttribute(\"data-krate-island-error\",\"\");}},__vnode);\n")
 	src.WriteString("      var __start=typeof performance!==\"undefined\"?performance.now():0;\n")
 	src.WriteString("      if (el.childNodes && el.childNodes.length) hydrate(__boundary,el); else render(__boundary,el);\n")
@@ -359,10 +466,11 @@ func (b *Builder) islandClientSource(e irtree.ExternalComponent, imports []irtre
 	return src.String()
 }
 
-func (b *Builder) islandSSRSource(e irtree.ExternalComponent, imports []irtree.ExternalImport) string {
+func (b *Builder) islandSSRSource(e irtree.ExternalComponent, imports []irtree.ExternalImport, prov *islandProviders) string {
 	var src strings.Builder
 	src.WriteString("import { h, Fragment } from \"preact\";\n")
 	src.WriteString("import renderToString from \"preact-render-to-string\";\n")
+	src.WriteString(prov.importLines())
 	writeIslandImportLines(&src, imports)
 	props := e.SSRPropsJS
 	if props == "" {
@@ -370,7 +478,7 @@ func (b *Builder) islandSSRSource(e irtree.ExternalComponent, imports []irtree.E
 	}
 	fmt.Fprintf(&src, "\nconst props = %s;\n", props)
 	src.WriteString("globalThis.__krate_island_html = \"\";\nglobalThis.__krate_island_ssr_error = \"\";\ntry { globalThis.__krate_island_html = renderToString(")
-	src.WriteString(e.Subtree)
+	src.WriteString(prov.wrapExprJS(e.Subtree))
 	src.WriteString("); } catch (e) { globalThis.__krate_island_ssr_error = String((e && (e.name ? e.name + \": \" : \"\") + (e.message || e)) || e) + \"\\n\" + String((e && e.stack) || \"\"); }\n")
 	return src.String()
 }
@@ -442,7 +550,7 @@ func esbuildRelFile(root, base, file string) string {
 	return filepath.ToSlash(file)
 }
 
-func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *api.Plugin, sink *islandCSSSink) ([]byte, error) {
+func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *api.Plugin, sink *islandCSSSink, prov *islandProviders) ([]byte, error) {
 	opts := api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
@@ -458,12 +566,17 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		Format:            api.FormatESModule,
 		Platform:          api.PlatformBrowser,
 		Target:            api.ES2020,
-		JSX:               api.JSXTransform,
-		JSXFactory:        "h",
-		JSXFragment:       "Fragment",
-		LogLevel:          api.LogLevelSilent,
-		Alias:             islandAlias(b.Root, ssr),
-		Plugins:           []api.Plugin{islandCSSPlugin(sink)},
+		// The automatic runtime imports from preact/jsx-runtime in every module,
+		// so island modules need no `h` in scope. A module's own
+		// `@jsxImportSource` pragma (emotion) still takes precedence.
+		JSX:             api.JSXAutomatic,
+		JSXImportSource: "preact",
+		LogLevel:        api.LogLevelSilent,
+		Alias:           islandAlias(b.Root, ssr),
+		Plugins:         []api.Plugin{islandCSSPlugin(sink), islandJSXPlugin()},
+	}
+	if prov != nil {
+		opts.Plugins = append(opts.Plugins, islandEntryPlugin(nil, prov.virtualModules()))
 	}
 	if ssr {
 		opts.Format = api.FormatIIFE
@@ -474,8 +587,9 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		}
 	} else {
 		opts.External = []string{"preact", "preact/compat", "preact/hooks", "preact/jsx-runtime"}
+		opts.Plugins = append(opts.Plugins, islandRequirePlugin())
 	}
-	result := api.Build(opts)
+	result := esbuildBuild(opts)
 	if len(result.Errors) > 0 {
 		var msgs []string
 		var loc *bundleLocation
@@ -502,8 +616,83 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 	return result.OutputFiles[0].Contents, nil
 }
 
-func (b *Builder) buildIslandSSR(src, resolveDir string, sink *islandCSSSink) (string, error) {
-	out, err := b.buildIslandBundle(src, resolveDir, true, islandRenderToStringPlugin(resolveDir), sink)
+// islandJSXPlugin compiles the project's own JSX modules for Preact. The
+// project tsconfig usually says `jsxImportSource: "@krate/runtime"`, which
+// esbuild applies to every module under it, so the JSX options are given per
+// module instead. A module's own `@jsxImportSource` pragma still wins.
+func islandJSXPlugin() api.Plugin {
+	return api.Plugin{
+		Name: "krate-island-jsx",
+		Setup: func(pb api.PluginBuild) {
+			pb.OnLoad(api.OnLoadOptions{Filter: `\.[jt]sx$`, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				if strings.Contains(filepath.ToSlash(args.Path), "/node_modules/") {
+					return api.OnLoadResult{}, nil
+				}
+				data, err := os.ReadFile(args.Path)
+				if err != nil {
+					return api.OnLoadResult{}, err
+				}
+				loader := api.LoaderTSX
+				if strings.HasSuffix(args.Path, ".jsx") {
+					loader = api.LoaderJSX
+				}
+				res := api.Transform(tsstrip.BlankTierDecorators(args.Path, string(data)), api.TransformOptions{
+					Loader:          loader,
+					Sourcefile:      args.Path,
+					JSX:             api.JSXAutomatic,
+					JSXImportSource: "preact",
+					TsconfigRaw:     `{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"preact"}}`,
+					Target:          api.ES2020,
+					LogLevel:        api.LogLevelSilent,
+				})
+				if len(res.Errors) > 0 {
+					return api.OnLoadResult{Errors: res.Errors, Warnings: res.Warnings}, nil
+				}
+				code := string(res.Code)
+				return api.OnLoadResult{Contents: &code, Loader: api.LoaderJS, ResolveDir: filepath.Dir(args.Path), Warnings: res.Warnings}, nil
+			})
+		},
+	}
+}
+
+// islandRequirePlugin lets CommonJS code (swr's use-sync-external-store shim,
+// older hook libraries) `require("react")`. The shared Preact modules are
+// external ESM, which esbuild cannot require from an ES module bundle, so a
+// require call resolves to a tiny module that re-exports the import.
+func islandRequirePlugin() api.Plugin {
+	return api.Plugin{
+		Name: "krate-island-require",
+		Setup: func(pb api.PluginBuild) {
+			target := map[string]string{
+				"react":                 "preact/compat",
+				"react-dom":             "preact/compat",
+				"react-dom/client":      "preact/compat",
+				"preact/compat":         "preact/compat",
+				"preact/hooks":          "preact/hooks",
+				"preact":                "preact",
+				"react/jsx-runtime":     "preact/jsx-runtime",
+				"react/jsx-dev-runtime": "preact/jsx-runtime",
+				"preact/jsx-runtime":    "preact/jsx-runtime",
+			}
+			pb.OnResolve(api.OnResolveOptions{Filter: `^(react|react-dom|react-dom/client|react/jsx-runtime|react/jsx-dev-runtime|preact|preact/compat|preact/hooks|preact/jsx-runtime)$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				if args.Kind != api.ResolveJSRequireCall {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: target[args.Path], Namespace: "krate-island-require"}, nil
+			})
+			pb.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-island-require"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				contents := fmt.Sprintf("export * from %q;\n", args.Path)
+				if args.Path == "preact/compat" {
+					contents += "import d from \"preact/compat\";\nexport default d;\n"
+				}
+				return api.OnLoadResult{Contents: &contents, Loader: api.LoaderJS}, nil
+			})
+		},
+	}
+}
+
+func (b *Builder) buildIslandSSR(src, resolveDir string, sink *islandCSSSink, prov *islandProviders) (string, error) {
+	out, err := b.buildIslandBundle(src, resolveDir, true, islandRenderToStringPlugin(resolveDir), sink, prov)
 	if err != nil {
 		return "", err
 	}
@@ -605,9 +794,13 @@ func (b *Builder) ensurePreactShared() (map[string]string, error) {
 			// and Radix's `import { useLayoutEffect } from "react"` fails.
 			// Re-export the hooks explicitly.
 			contents += `
-export { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useReducer, useContext, useId, useDebugValue, useImperativeHandle } from "preact/hooks";`
+export { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useReducer, useContext, useId, useDebugValue, useImperativeHandle } from "preact/hooks";
+// A star export never carries the default export, but classic code does
+// "import React from 'react'" (recharts, headlessui, many design systems).
+import __compat from "preact/compat";
+export default __compat;`
 		}
-		result := api.Build(api.BuildOptions{
+		result := esbuildBuild(api.BuildOptions{
 			Stdin: &api.StdinOptions{
 				Contents:   contents,
 				ResolveDir: b.Root,

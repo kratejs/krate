@@ -18,7 +18,7 @@ export default function Blog() {
           <li>
             <a href={`/blog/${p.slug}/`}>{p.data.title}</a>
             <span class="site-badge">{p.data.date}</span>
-            <span> - {p.data.description}</span>
+            <span>{p.data.description}</span>
           </li>
         ))}
       </ul>

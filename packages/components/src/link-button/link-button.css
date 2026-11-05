@@ -17,7 +17,7 @@
   transform: scale(0.97);
 }
 .krate-link-button:focus-visible {
-  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline: 2px solid var(--krate-primary, #c2410c);
   outline-offset: 2px;
 }
 .krate-link-button-sm {
@@ -33,12 +33,12 @@
   font-size: 1rem;
 }
 .krate-link-button-primary {
-  background: var(--krate-primary, #3b82f6);
+  background: var(--krate-primary, #c2410c);
   color: var(--krate-primary-fg, #fff);
 }
 .krate-link-button-primary:hover {
   background: var(--krate-primary-hover, #2563eb);
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 2px 8px rgba(194, 65, 12, 0.3);
 }
 .krate-link-button-secondary {
   background: var(--krate-surface-hover, #e4e4e7);

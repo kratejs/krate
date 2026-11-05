@@ -36,6 +36,31 @@ the `<head>`, following React 19's document metadata rules: a reactive
 `itemProp`, or inside a conditional branch or list item stays in place (see
 the [React compatibility guide](/docs/guides/react-compatibility#document-metadata)).
 
+### `export const metadata`
+
+A page can also declare its head tags as a literal `metadata` object, the way a
+Next.js page does:
+
+```tsx
+export const metadata = {
+  title: "Pricing",
+  description: "Plans and pricing",
+  alternates: { canonical: "https://example.com/pricing" },
+  openGraph: { title: "Pricing", images: ["/og/pricing.png"] },
+  twitter: { card: "summary_large_image" },
+};
+
+export default function Pricing() {
+  return <main>...</main>;
+}
+```
+
+The build turns it into the document `<title>`, `description`, `keywords`,
+`robots`, `theme-color`, canonical and icon links, and the `og:*` and
+`twitter:*` tags. An explicit `<Head>` on the page wins over `metadata` for the
+same tag, and `metadata` wins over a layout's head. `generateMetadata`, computed
+values, and `metadata` in layouts work too: see [Metadata](/docs/features/metadata/).
+
 ## `<Script>`
 
 ```tsx
@@ -95,8 +120,15 @@ Inline CSS is captured into `<head>`.
   network) or `set:name` from the Iconify API (e.g. `lucide:heart`).
 - Local SVGs keep their own `viewBox` (fallback `0 0 24 24`); user attributes
   override defaults.
-- SVG markup is **sanitized** before embedding (scripts, comments, and
-  `on*`/`javascript:`/`data:` attributes stripped).
+- The icon is `1em` square, so it scales with the surrounding text. Pass
+  `size={24}` (or `width`/`height`) to change it.
+- Paint comes from the source: a solid icon (`<svg fill="currentColor">`) keeps
+  its fill, an outline one keeps its `stroke`. An icon that sets no paint at
+  all is drawn as a 2px `currentColor` outline.
+- SVG markup is **sanitized** before embedding: scripts, `<foreignObject>`,
+  `<iframe>`/`<object>`/`<embed>`, comments, `on*`/`javascript:`/`data:`
+  attributes, SMIL `set`/`animate` that target a link, `<style>` that imports
+  or fetches external files, and external `<image>` are stripped.
 - Fetched SVGs are cached on disk (`.krate/cache/icons/`); icon names are
   validated against `[a-zA-Z0-9_.-]` (max 64 chars).
 

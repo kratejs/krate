@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
@@ -50,6 +52,9 @@ type EmitResult struct {
 	// render. A non-empty set means the build must fail rather than ship
 	// silently empty/wrong output.
 	Errors []error
+	// Warnings holds non-fatal findings of the emit, such as a slot that
+	// renders empty because nothing can compute it.
+	Warnings []diag.Diagnostic
 	// GoRenders are build-time Go-component render requests; the build renders
 	// them via the Go host and substitutes HTML at the markers.
 	GoRenders []irtree.GoRenderRequest
@@ -123,6 +128,9 @@ type orphanBinding struct {
 // Emitter walks a ComponentTree and produces HTML + hydration metadata.
 type Emitter struct {
 	functions map[string]*ast.FnDecl
+	// externalIslands maps an island's usage (component name and source
+	// offset) to its id, for roots evaluated at build time.
+	externalIslands map[string]string
 	// clientStack tracks the ComponentIDs of client components currently being
 	// emitted, so orphan bindings can be attached to the signature that owns
 	// the signals they reference.
@@ -131,6 +139,9 @@ type Emitter struct {
 	// component's call-site children but reference the caller's signals.
 	// They're attached to the owning signature in Emit().
 	orphans []orphanBinding
+	// unresolved lists expression slots emitted without a build-time value;
+	// Emit warns about those no client binding fills in.
+	unresolved []*irtree.ExprSlot
 	// headHTML/scriptHTML/styleHTML accumulate <Head>/<Script>/<Style> content
 	// captured by SSREval during signal-less component emission. walkMetaSlots
 	// only reaches MetaSlots in the IR tree; SSREval'd wrappers (layouts, doc
@@ -169,9 +180,8 @@ type Emitter struct {
 	moduleConsts map[string]ast.Expr
 
 	// CodeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
-	// during SSREval. It must match the stylesheet generated for the same theme
-	// (syntaxhighlight.CSSForTheme). Wire it from the build; empty selects the
-	// default theme.
+	// during SSREval. The markup is the same for every theme; the colours come
+	// from syntaxhighlight.ThemeCSS. Empty selects the default theme.
 	CodeTheme string
 
 	// errs collects diagnostics for unsupported constructs encountered during
@@ -229,6 +239,10 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	e.cvaFactories = tree.CVAFactories
 	e.contextDefaults = tree.ContextDefaults
 	e.moduleConsts = tree.ModuleConstInits
+	e.externalIslands = map[string]string{}
+	for _, x := range tree.ExternalComponents {
+		e.externalIslands[externalIslandKey(x.Local, x.Offset)] = x.ID
+	}
 	output := e.emitNode(tree.Root)
 
 	// Merge subtree-local metadata and orphans collected during emit.
@@ -273,6 +287,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	listComponents := collectListComponentFuncs(tree.Root, tree.Functions)
 
 	return &EmitResult{
+		Warnings:         e.unboundSlotWarnings(output.Signatures),
 		HTML:             output.HTML + output.Templates,
 		HeadHTML:         e.headHTML,
 		ScriptHTML:       e.scriptHTML,
@@ -442,6 +457,8 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 		return SlotOutput{}
 	}
 	eval := NewSSREval(e.functions)
+	eval.SetUseIDBase("krate-" + strings.ReplaceAll(string(node.ID), ".", "-"))
+	eval.SetUseIDs(node.UseIDs)
 	if e.EvalJS != nil {
 		eval.SetEvalJS(e.EvalJS)
 	}
@@ -456,6 +473,22 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	}
 	if e.contextDefaults != nil {
 		eval.SetContextDefaults(e.contextDefaults)
+	}
+	if len(e.externalIslands) > 0 {
+		eval.externalIsland = func(el *ast.JSXElement) (string, bool) {
+			if el == nil || el.Opening == nil {
+				return "", false
+			}
+			name := el.Opening.Name
+			if i := strings.IndexByte(name, '.'); i >= 0 {
+				name = name[:i]
+			}
+			id, ok := e.externalIslands[externalIslandKey(name, el.Position.Offset)]
+			if !ok {
+				return "", false
+			}
+			return `<div data-krate-island="` + id + `" style="display:contents"></div>`, true
+		}
 	}
 	eval.SetContextValues(node.ContextValues)
 	eval.SetCodeTheme(e.CodeTheme)
@@ -927,7 +960,7 @@ func collectChildrenOrphans(children []irtree.SlotNode, owner irtree.SlotID) []o
 				owner: owner,
 				bind: irtree.SlotBinding{
 					SlotID:  cs.ID,
-					Type:    "conditional",
+					Type:    bindingTypeOf(cs),
 					ExprJS:  cs.TestJS,
 					Signals: cs.Signals,
 				},
@@ -967,7 +1000,47 @@ func (e *Emitter) emitExprSlot(s *irtree.ExprSlot) SlotOutput {
 		body = s.InitialHTML
 	}
 	html := slotMarker(id) + body + slotEndMarker(id)
+	if s.Unresolved && s.Initial == "" && s.InitialHTML == "" {
+		e.unresolved = append(e.unresolved, s)
+	}
 	return SlotOutput{HTML: html}
+}
+
+// unboundSlotWarnings reports the unresolved expression slots that no client
+// binding fills in: the page would ship an empty value with no diagnostic.
+func (e *Emitter) unboundSlotWarnings(sigs []irtree.ComponentSignature) []diag.Diagnostic {
+	if len(e.unresolved) == 0 {
+		return nil
+	}
+	bound := map[irtree.SlotID]bool{}
+	for _, sig := range sigs {
+		if sig.Tier != irtree.TierClient {
+			continue
+		}
+		for _, b := range sig.SlotBindings {
+			if b.ExprJS != "" {
+				bound[b.SlotID] = true
+			}
+		}
+	}
+	var out []diag.Diagnostic
+	seen := map[string]bool{}
+	for _, s := range e.unresolved {
+		if bound[s.ID] {
+			continue
+		}
+		key := s.File + ":" + itoa(s.Pos.Line) + ":" + itoa(s.Pos.Col)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		d := diag.New(s.File, s.Pos.Line, s.Pos.Col,
+			"`{"+s.ExprSource+"}` has no value at build time and no client code fills it in: it renders as empty text",
+			"compute it from values the build can see, keep it in state or an effect, or make the component interactive", "")
+		d.Severity = diag.SeverityWarning
+		out = append(out, d.WithCode(diag.CodeSlotUnresolved))
+	}
+	return out
 }
 
 // slotMarker and slotEndMarker render the comment markers that delimit a
@@ -992,6 +1065,9 @@ func slotEndMarker(id string) string { return "<!--/k:" + escape.Comment(id) + "
 // swaps the branch nodes between the markers and a detached fragment, so
 // handlers and nested bindings of both branches survive toggling.
 func (e *Emitter) emitConditionalSlot(s *irtree.ConditionalSlot) SlotOutput {
+	if s.Activity {
+		return e.emitActivitySlot(s)
+	}
 	id := string(s.ID)
 	var cons, alt SlotOutput
 	for _, child := range s.Consequent {
@@ -1026,6 +1102,38 @@ func (e *Emitter) emitConditionalSlot(s *irtree.ConditionalSlot) SlotOutput {
 	}
 	out.Templates = tpl + out.Templates
 	return out
+}
+
+// emitActivitySlot renders a React <Activity>: the children are always in the
+// page, inside a wrapper that is hidden while the mode is "hidden". The
+// components inside are tagged as living in a boundary-style branch, so the
+// runtime cleans their effects up when the wrapper hides and sets them up
+// again (without remounting) when it shows.
+func (e *Emitter) emitActivitySlot(s *irtree.ConditionalSlot) SlotOutput {
+	id := string(s.ID)
+	var cons SlotOutput
+	for _, child := range s.Consequent {
+		mergeSlotOutput(&cons, e.emitSlotNode(child))
+	}
+	display := "contents"
+	if !s.InitialActive {
+		display = "none"
+	}
+	html := cons.HTML
+	cons.HTML = ""
+	tagBoundaryBranch(cons.Signatures, s.ID, "c", s.InitialActive)
+	var out SlotOutput
+	mergeSlotOutput(&out, cons)
+	out.HTML = slotMarker(id) + `<krate-activity style="display:` + display + `">` + html + `</krate-activity>` + slotEndMarker(id)
+	return out
+}
+
+// bindingTypeOf is the hydration binding type of a conditional slot.
+func bindingTypeOf(s *irtree.ConditionalSlot) string {
+	if s.Activity {
+		return "activity"
+	}
+	return "conditional"
 }
 
 // emitListSlot renders a list as comment markers around its rows:
@@ -1165,6 +1273,67 @@ func collectChildIDs(children []irtree.SlotNode) []irtree.SlotID {
 // text slots, expression slots, and conditional slots so the hydrate
 // code can generate createEffect calls to connect signals to DOM.
 func collectSlotBindings(children []irtree.SlotNode) []irtree.SlotBinding {
+	return collectGuardedSlotBindings(children, "")
+}
+
+// guardedJS makes expr evaluate only while guard holds: the slots of a
+// conditional's inactive branch stay in a template, and their expressions
+// (`user.name` under `{user && ...}`) must not run, or fail, until the branch
+// is shown. inactive is the value of a guarded-off expression.
+func guardedJS(guard, expr, inactive string) string {
+	if guard == "" {
+		return expr
+	}
+	return "(" + guard + ")?(" + expr + "):" + inactive
+}
+
+// attrInactiveValue is what an attribute binding yields while its guard is
+// false: nothing for an attribute (it is removed), an empty string for a
+// control property, text or markup, and an empty object for a spread.
+func attrInactiveValue(a irtree.AttrBinding) string {
+	switch {
+	case a.AttrName == irtree.SpreadAttr:
+		return "{}"
+	case a.AttrName == irtree.TextContentAttr || a.AttrName == irtree.InnerHTMLAttr || isFormPropertyAttr(a.AttrName):
+		return "''"
+	}
+	return "undefined"
+}
+
+var (
+	jsStringRe   = regexp.MustCompile(`"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'`)
+	jsMemberRe   = regexp.MustCompile(`[\w$)\]]\s*\??\.\s*[A-Za-z_$#]|\[|\bnew\b`)
+	jsCallArgsRe = regexp.MustCompile(`[\w$]\s*\(\s*[^)\s]`)
+)
+
+// jsMayThrow reports whether evaluating code can plausibly throw on a value
+// that is not there yet: a property read, an index, `new`, or a call with
+// arguments. A bare getter read or comparison (`mode() === 1`) cannot, so
+// it needs no guard.
+func jsMayThrow(code string) bool {
+	code = jsStringRe.ReplaceAllString(code, `""`)
+	return jsMemberRe.MatchString(code) || jsCallArgsRe.MatchString(code)
+}
+
+// guardedIfRisky is guardedJS for expressions that only need the guard when
+// they can throw.
+func guardedIfRisky(guard, expr, inactive string) string {
+	if !jsMayThrow(expr) {
+		return expr
+	}
+	return guardedJS(guard, expr, inactive)
+}
+
+func andJS(a, b string) string {
+	if a == "" {
+		return "(" + b + ")"
+	}
+	return a + "&&(" + b + ")"
+}
+
+// collectGuardedSlotBindings is collectSlotBindings for slots that render
+// only while guard (a JS condition, "" for always) holds.
+func collectGuardedSlotBindings(children []irtree.SlotNode, guard string) []irtree.SlotBinding {
 	var bindings []irtree.SlotBinding
 	for _, child := range children {
 		switch s := child.(type) {
@@ -1172,39 +1341,64 @@ func collectSlotBindings(children []irtree.SlotNode) []irtree.SlotBinding {
 			bindings = append(bindings, irtree.SlotBinding{
 				SlotID:  s.ID,
 				Type:    "text",
-				ExprJS:  s.Signal.Name + "()",
+				ExprJS:  guardedJS(guard, s.Signal.Name+"()", "''"),
 				Signals: []string{s.Signal.Name},
 			})
 		case *irtree.ExprSlot:
 			bindings = append(bindings, irtree.SlotBinding{
 				SlotID:  s.ID,
 				Type:    "expr",
-				ExprJS:  s.ExprSource,
+				ExprJS:  guardedJS(guard, s.ExprSource, "''"),
 				Signals: s.Signals,
 				File:    s.File,
 				Pos:     s.Pos,
 			})
 		case *irtree.ConditionalSlot:
+			// A nested test is guarded like any other slot expression: while
+			// the outer branch is hidden it reads `false` instead of
+			// evaluating (`user.admin` with user null) and runs again once
+			// the guard's signals change.
 			bindings = append(bindings, irtree.SlotBinding{
 				SlotID:  s.ID,
-				Type:    "conditional",
-				ExprJS:  s.TestJS,
+				Type:    bindingTypeOf(s),
+				ExprJS:  guardedIfRisky(guard, s.TestJS, "false"),
 				Signals: s.Signals,
 			})
 			// Recurse into both branches so nested slots (text slots, nested
 			// conditionals, lists) stay reactive after the conditional toggles.
 			// The inactive branch lives in a <template data-kc> whose content
 			// the bootstrap also binds, so both branches' nodes exist to bind
-			// against.
-			bindings = append(bindings, collectSlotBindings(s.Consequent)...)
-			bindings = append(bindings, collectSlotBindings(s.Alternate)...)
+			// against. Each branch's bindings run only while it is the one
+			// shown.
+			if s.Activity {
+				// Hidden Activity content stays bound: its state keeps
+				// updating the DOM it keeps.
+				bindings = append(bindings, collectGuardedSlotBindings(s.Consequent, guard)...)
+			} else if s.TestJS != "" {
+				bindings = append(bindings, collectGuardedSlotBindings(s.Consequent, andJS(guard, s.TestJS))...)
+				bindings = append(bindings, collectGuardedSlotBindings(s.Alternate, andJS(guard, "!("+s.TestJS+")"))...)
+			} else {
+				bindings = append(bindings, collectGuardedSlotBindings(s.Consequent, guard)...)
+				bindings = append(bindings, collectGuardedSlotBindings(s.Alternate, guard)...)
+			}
+		case *irtree.SuspenseSlot:
+			// Content and fallback are ordinary slots; only a boundary that
+			// can suspend moves them into templates, which the bootstrap binds.
+			bindings = append(bindings, collectGuardedSlotBindings(s.Resolved, guard)...)
+			bindings = append(bindings, collectGuardedSlotBindings(s.Fallback, guard)...)
 		case *irtree.ListSlot:
+			bind := s.Bind
+			if bind != nil && guard != "" {
+				cp := *bind
+				cp.Source = guardedJS(guard, bind.Source, "[]")
+				bind = &cp
+			}
 			bindings = append(bindings, irtree.SlotBinding{
 				SlotID:  s.ID,
 				Type:    "list",
-				ExprJS:  s.ExprSource,
+				ExprJS:  guardedJS(guard, s.ExprSource, "''"),
 				Signals: s.Signals,
-				List:    s.Bind,
+				List:    bind,
 			})
 		}
 	}
@@ -1274,4 +1468,8 @@ func dropManagedElementBindings(sig *irtree.ComponentSignature, managed map[irtr
 		}
 		sig.RefBindings = kept
 	}
+}
+
+func externalIslandKey(local string, offset int) string {
+	return local + "@" + strconv.Itoa(offset)
 }

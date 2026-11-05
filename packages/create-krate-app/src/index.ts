@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { escapeDisplayName } from './escape.js';
 import { commandSpec } from './spawn.js';
+import { krateRange } from './version.js';
 import { stdin as input, stdout as output } from 'node:process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -23,12 +24,6 @@ const pkg = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf-8'))
   name: string;
   version: string;
 };
-
-// Keep generated projects on the same release channel as this scaffolder.
-function distTag(version: string): string {
-  const match = /^[^-]+-([A-Za-z]+)/.exec(version);
-  return match ? match[1] : 'latest';
-}
 
 const c = {
   reset: '\x1b[0m',
@@ -275,7 +270,7 @@ async function main(): Promise<void> {
   copyTemplate(templateDir, targetDir, {
     __PROJECT_NAME__: validName,
     __PROJECT_DISPLAY_NAME__: toDisplayName(projectName),
-    __KRATE_DIST_TAG__: distTag(pkg.version),
+    __KRATE_VERSION__: krateRange(pkg.version),
   });
 
   const installed = !skipInstall;

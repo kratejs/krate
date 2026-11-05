@@ -330,9 +330,13 @@ func BuildSearchIndex(pages []Page) []SearchEntry { return BuildSearchIndexBase(
 func BuildSearchIndexBase(pages []Page, base string) []SearchEntry {
 	var entries []SearchEntry
 	for _, p := range pages {
-		plainText := StripHTMLTags(p.Content)
-		if len(plainText) > 500 {
-			plainText = plainText[:500]
+		// Page content is rendered HTML, so text such as a quoted string is
+		// stored as &quot; or &#39;. The index holds plain text: the search UI
+		// escapes it again when it builds the result list, so leaving entities
+		// in would show them literally in snippets.
+		plainText := html.UnescapeString(StripHTMLTags(p.Content))
+		if r := []rune(plainText); len(r) > 500 {
+			plainText = string(r[:500])
 		}
 		entries = append(entries, SearchEntry{
 			Title:      p.Title,

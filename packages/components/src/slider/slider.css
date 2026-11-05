@@ -3,10 +3,10 @@
   height: 20px;
   margin: 0;
   cursor: pointer;
-  accent-color: var(--krate-primary, #3b82f6);
+  accent-color: var(--krate-primary, #c2410c);
 }
 .krate-slider:focus-visible {
-  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
   outline-offset: 2px;
 }
 .krate-slider:disabled {

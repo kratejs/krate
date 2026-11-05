@@ -60,6 +60,15 @@ type ServerConfig struct {
 	// X-Forwarded-For (request URLs, CSRF origin checks, client IPs). Enable it
 	// only behind a proxy that sets or strips those headers.
 	TrustProxy bool `json:"trustProxy,omitempty"`
+	// TrustProxySet records that the project set trustProxy at all, true or
+	// false: the serverless targets use what their platform guarantees when it
+	// is unset and follow the value when it is set.
+	TrustProxySet bool `json:"-"`
+	// TrustedProxies is how many reverse proxies sit in front of Krate when
+	// TrustProxy is on (default 1). The client address is the X-Forwarded-For
+	// entry that many hops from the right, so entries a client puts at the front
+	// of the header never count.
+	TrustedProxies int `json:"trustedProxies,omitempty"`
 	// ShutdownTimeout is the graceful-shutdown drain period in seconds
 	// (default 15). In-flight requests get this long to finish after SIGTERM.
 	ShutdownTimeout int `json:"shutdownTimeout,omitempty"`
@@ -137,9 +146,52 @@ type TailwindCfg struct {
 	ExecuteConfig bool `json:"executeConfig,omitempty"`
 }
 
+// HighlightConfig configures code highlighting that happens after the build:
+// in the browser, for code that changes at run time, and at request time.
+// Code known at build time is always highlighted by the compiler.
+type HighlightConfig struct {
+	// Languages are loaded for highlighting when the language of a snippet is
+	// not known at build time (a variable lang, or a highlight() call). A
+	// literal lang on a dynamic <Code> is found automatically.
+	Languages StringList `json:"languages,omitempty"`
+}
+
 type CSPConfig struct {
 	Enabled   bool   `json:"enabled,omitempty"`
 	Directive string `json:"directive,omitempty"` // custom CSP directive string; empty = auto-generate
+}
+
+// CacheConfig selects where request-time caches live. The default keeps the ISR
+// page cache, the data cache and the region caches in each process's memory.
+// With a shared adapter, instances behind a load balancer serve and invalidate
+// the same pages (see the caching guide).
+type CacheConfig struct {
+	// Adapter is "memory" (default), "redis", or the path or package name of a
+	// module that default-exports a cache adapter factory.
+	Adapter string `json:"adapter,omitempty"`
+	// URL is the store's address (redis://[user:password@]host:6379/0, or
+	// rediss:// for TLS). Read it from the environment in krate.config.ts:
+	// `url: process.env.REDIS_URL`.
+	URL string `json:"url,omitempty"`
+	// URLEnv names the environment variable that holds the URL at run time. A
+	// deployed bundle never contains the URL itself; it reads this variable (or
+	// KRATE_CACHE_URL).
+	URLEnv string `json:"urlEnv,omitempty"`
+	// Prefix namespaces the keys, so several apps can share one store.
+	// Default "krate:".
+	Prefix string `json:"prefix,omitempty"`
+	// TimeoutMs bounds one cache call; a slower store counts as down and the
+	// page is rendered instead. Default 250.
+	TimeoutMs int `json:"timeoutMs,omitempty"`
+	// TTLSeconds is how long ISR entries stay in the shared store. Default 7 days.
+	TTLSeconds int `json:"ttlSeconds,omitempty"`
+	// Options are passed to a custom adapter factory.
+	Options map[string]any `json:"options,omitempty"`
+}
+
+// Shared reports whether the config selects a store other than process memory.
+func (c CacheConfig) Shared() bool {
+	return c.Adapter != "" && c.Adapter != "memory"
 }
 
 type SSRConfig struct {
@@ -553,12 +605,15 @@ type Config struct {
 	API         APIConfig       `json:"api,omitempty"`
 	Plugins     []PluginConfig  `json:"plugins,omitempty"`
 	Markdown    markdown.Config `json:"markdown,omitempty"`
+	Highlight   HighlightConfig `json:"highlight,omitempty"`
 	Tailwind    TailwindCfg     `json:"tailwind,omitempty"`
 	CSP         CSPConfig       `json:"csp,omitempty"`
 	Runtime     string          `json:"runtime,omitempty"`
 	SSR         SSRConfig       `json:"ssr,omitempty"`
+	Cache       CacheConfig     `json:"cache,omitempty"`
 	PathAliases PathAliases     `json:"pathAliases,omitempty"` // from tsconfig.json paths or config object
 	TSBaseDir   string          `json:"tsBaseDir,omitempty"`   // baseUrl resolved to absolute path
+	TSBaseURL   string          `json:"-"`                     // tsconfig baseUrl, absolute; empty when tsconfig sets none
 	Redirects   []Redirect      `json:"redirects,omitempty"`   // config-based redirects
 	Rewrites    []Rewrite       `json:"rewrites,omitempty"`    // config-based rewrites
 	SEO         SEOConfig       `json:"seo,omitempty"`         // SEO metadata (baseUrl, siteName, description)

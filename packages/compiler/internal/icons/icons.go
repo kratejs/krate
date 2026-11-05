@@ -31,7 +31,45 @@ type Icon struct {
 	// ViewBox is the viewBox attribute from the source <svg> element. Empty for
 	// Iconify-sourced icons, which always use the default 24x24 geometry.
 	ViewBox string
+
+	// Paint attributes copied from the source <svg> root element.
+	Fill, Stroke, StrokeWidth, StrokeLinecap, StrokeLinejoin string
 }
+
+// PaintAttrs returns the root attributes an <svg> wrapper should carry so the
+// icon draws the way its source intended:
+//   - a source root that sets fill or stroke (a solid heroicons-style icon, or
+//     an outline one) keeps exactly those values;
+//   - an icon whose inner markup sets paint itself (Iconify sets do) needs
+//     nothing, and forcing a stroke would outline its filled shapes;
+//   - a bare icon with no paint anywhere is drawn as a 2px currentColor stroke.
+func (i Icon) PaintAttrs() [][2]string {
+	var out [][2]string
+	add := func(k, v string) {
+		if v != "" {
+			out = append(out, [2]string{k, v})
+		}
+	}
+	switch {
+	case i.Fill != "" || i.Stroke != "":
+		add("fill", i.Fill)
+		add("stroke", i.Stroke)
+		add("stroke-width", i.StrokeWidth)
+	case innerSetsPaint(i.Inner):
+		// The markup carries its own paint.
+	default:
+		add("fill", "none")
+		add("stroke", "currentColor")
+		add("stroke-width", "2")
+	}
+	add("stroke-linecap", i.StrokeLinecap)
+	add("stroke-linejoin", i.StrokeLinejoin)
+	return out
+}
+
+var innerPaintRe = regexp.MustCompile(`(?i)\s(?:fill|stroke)\s*=`)
+
+func innerSetsPaint(inner string) bool { return innerPaintRe.MatchString(inner) }
 
 // validIconName is a conservative character set for icon names/prefixes. It
 // excludes path separators, "..", query strings, and control characters so a
@@ -205,8 +243,31 @@ func parseSVG(data string) (Icon, error) {
 		return Icon{Inner: sanitizeSVG(strings.TrimSpace(data))}, nil
 	}
 	ic := Icon{Inner: sanitizeSVG(strings.TrimSpace(matches[1]))}
-	if vm := viewBoxRegex.FindStringSubmatch(data); len(vm) > 1 {
-		ic.ViewBox = vm[1]
+	if loc := svgInnerRegex.FindStringIndex(data); loc != nil {
+		if st, ok := parseStartTag(data, loc[0]); ok {
+			for _, a := range st.attrs {
+				v := strings.TrimSpace(html.UnescapeString(a.value))
+				switch strings.ToLower(a.name) {
+				case "viewbox":
+					ic.ViewBox = v
+				case "fill":
+					ic.Fill = v
+				case "stroke":
+					ic.Stroke = v
+				case "stroke-width":
+					ic.StrokeWidth = v
+				case "stroke-linecap":
+					ic.StrokeLinecap = v
+				case "stroke-linejoin":
+					ic.StrokeLinejoin = v
+				}
+			}
+		}
+	}
+	if ic.ViewBox == "" {
+		if vm := viewBoxRegex.FindStringSubmatch(data); len(vm) > 1 {
+			ic.ViewBox = vm[1]
+		}
 	}
 	return ic, nil
 }
@@ -224,9 +285,11 @@ func looksLikeSVGMarkup(data string) bool {
 }
 
 // sanitizeSVG removes executable/embeddable content from SVG inner markup:
-// <script> and <foreignObject> blocks (which can embed HTML), XML comments,
-// event handler attributes, and javascript:/data: URLs (including
-// entity-encoded forms). A small state machine walks the markup because
+// <script>, <foreignObject>, <iframe> and similar embedding blocks, <style>
+// blocks that import or fetch external resources, <image> elements that load
+// external files, SMIL <set>/<animate> elements that target or carry a
+// script-capable URL, XML comments, event handler attributes, and
+// javascript:/data: URLs (including entity-encoded forms). A small state machine walks the markup because
 // regexes cannot safely match tag contents across elements.
 func sanitizeSVG(s string) string {
 	var b strings.Builder
@@ -253,21 +316,25 @@ func sanitizeSVG(s string) string {
 				return b.String() // unterminated tag - drop the tail
 			}
 			name := strings.ToLower(st.name)
-			if name == "script" || name == "foreignobject" {
+			if dropElement(name, st) {
 				// Drop the whole block. Non-self-closing blocks consume through
 				// their matching close tag.
 				if !st.selfClosing {
-					closeTag := "</" + name + ">"
-					rest := strings.ToLower(s[st.end:])
-					ci := strings.Index(rest, closeTag)
-					if ci < 0 {
+					end, ok := blockEnd(s, st, name)
+					if !ok {
 						return b.String() // unterminated block - drop the tail
 					}
-					i = st.end + ci + len(closeTag)
+					i = end
 					continue
 				}
 				i = st.end
 				continue
+			}
+			if name == "style" && !st.selfClosing {
+				if end, ok := blockEnd(s, st, name); ok && unsafeCSS(s[st.end:end]) {
+					i = end
+					continue
+				}
 			}
 			b.WriteString(st.sanitized())
 			i = st.end
@@ -302,6 +369,118 @@ func sanitizeSVG(s string) string {
 		i = j + 1
 	}
 	return b.String()
+}
+
+// dropElements are removed together with everything inside them.
+var dropElements = map[string]bool{
+	"script": true, "foreignobject": true, "iframe": true, "frame": true,
+	"frameset": true, "embed": true, "object": true, "applet": true,
+	"meta": true, "link": true, "base": true,
+}
+
+// rawTextElements do not nest: their content ends at the first close tag.
+var rawTextElements = map[string]bool{"script": true, "style": true, "iframe": true}
+
+// dropElement reports whether the start tag must be removed from the output.
+func dropElement(name string, st startTag) bool {
+	if dropElements[name] {
+		return true
+	}
+	switch name {
+	case "image":
+		// An <image> pulls in an external file; only an in-document
+		// reference or no reference is kept.
+		for _, a := range st.attrs {
+			an := strings.ToLower(a.name)
+			if an == "href" || an == "xlink:href" {
+				v := strings.TrimSpace(html.UnescapeString(a.value))
+				if !strings.HasPrefix(v, "#") {
+					return true
+				}
+			}
+		}
+	case "set", "animate", "animatetransform", "animatemotion":
+		for _, a := range st.attrs {
+			switch strings.ToLower(a.name) {
+			case "attributename":
+				an := strings.ToLower(strings.TrimSpace(html.UnescapeString(a.value)))
+				an = strings.TrimPrefix(an, "xlink:")
+				if an == "href" || an == "src" || an == "action" || strings.HasPrefix(an, "on") {
+					return true
+				}
+			case "to", "from", "by", "values":
+				if dangerousURL(a.value) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// unsafeCSS reports whether CSS text imports a stylesheet or references a
+// resource other than an in-document fragment such as url(#gradient).
+func unsafeCSS(css string) bool {
+	css = strings.ToLower(html.UnescapeString(css))
+	if strings.Contains(css, "@import") || strings.Contains(css, "expression(") {
+		return true
+	}
+	for rest := css; ; {
+		i := strings.Index(rest, "url(")
+		if i < 0 {
+			return false
+		}
+		rest = rest[i+4:]
+		arg := strings.TrimLeft(rest, " \t\r\n\f'\"")
+		if !strings.HasPrefix(arg, "#") {
+			return true
+		}
+	}
+}
+
+// blockEnd returns the index just past the close tag matching the start tag
+// st, counting nested elements of the same name. ok is false when the block
+// is never closed.
+func blockEnd(s string, st startTag, name string) (int, bool) {
+	lower := strings.ToLower(s)
+	depth := 1
+	pos := st.end
+	for pos < len(lower) {
+		next := strings.IndexByte(lower[pos:], '<')
+		if next < 0 {
+			return 0, false
+		}
+		pos += next
+		if strings.HasPrefix(lower[pos:], "</"+name) && tagBoundary(lower, pos+2+len(name)) {
+			gt := strings.IndexByte(lower[pos:], '>')
+			if gt < 0 {
+				return 0, false
+			}
+			depth--
+			pos += gt + 1
+			if depth == 0 {
+				return pos, true
+			}
+			continue
+		}
+		if !rawTextElements[name] && strings.HasPrefix(lower[pos:], "<"+name) && tagBoundary(lower, pos+1+len(name)) {
+			if inner, ok := parseStartTag(s, pos); ok {
+				if !inner.selfClosing {
+					depth++
+				}
+				pos = inner.end
+				continue
+			}
+			return 0, false
+		}
+		pos++
+	}
+	return 0, false
+}
+
+// tagBoundary reports whether position i in s ends a tag name.
+func tagBoundary(s string, i int) bool {
+	return i >= len(s) || isSVGSpace(s[i]) || s[i] == '>' || s[i] == '/'
 }
 
 func isSVGAlpha(b byte) bool {
@@ -410,6 +589,8 @@ func (st startTag) sanitized() string {
 		switch {
 		case strings.HasPrefix(name, "on"):
 			continue // event handler
+		case name == "style" && unsafeCSS(a.value):
+			continue // style that fetches external resources
 		case (name == "href" || name == "xlink:href" || name == "src" || name == "action") && dangerousURL(a.value):
 			continue
 		}

@@ -6,8 +6,8 @@ import (
 
 // minifyHTML shrinks rendered page HTML in a single tokenizing pass:
 //   - HTML comments are dropped except runtime markers (k:, kl:, ks:, suspense:, region:)
-//   - whitespace runs in text (outside <pre> and raw-text elements) collapse
-//     to one space
+//   - whitespace runs in text (outside <pre>, raw-text elements and elements
+//     whose style preserves white space) collapse to one space
 //   - start/end tags are re-emitted with normalized attribute spacing, and
 //     quotes are dropped from attribute values only when the HTML spec allows
 //     an unquoted value
@@ -16,7 +16,14 @@ import (
 // the HTML spec closely enough that anything it does not understand (EOF
 // inside a tag, unterminated raw text) is copied through verbatim.
 func minifyHTML(src string) string {
-	m := &minifier{s: src}
+	return minifyHTMLWith(src, nil)
+}
+
+// minifyHTMLWith is minifyHTML given extra white-space rules from the page's
+// stylesheets (see parseWhiteSpaceRules). Rules in the document's own <style>
+// elements are read from src.
+func minifyHTMLWith(src string, rules *whiteSpaceRules) string {
+	m := &minifier{s: src, rules: rules.merged(inlineStyleRules(src))}
 	m.run()
 	// Leading whitespace is ignored by the parser. Trailing whitespace is
 	// kept (collapsed to one space): whether it joins the preceding text
@@ -40,7 +47,23 @@ type minifier struct {
 	s         string
 	out       strings.Builder
 	prevSpace bool
-	preDepth  int
+	rules     *whiteSpaceRules
+	// open lists the open elements, so the end of an element that preserves
+	// white space is known; preserve counts those among them.
+	open     []openElement
+	preserve int
+}
+
+type openElement struct {
+	name     string
+	preserve bool
+}
+
+// voidElements never have an end tag or content.
+var voidElements = map[string]bool{
+	"area": true, "base": true, "br": true, "col": true, "embed": true, "hr": true,
+	"img": true, "input": true, "link": true, "meta": true, "param": true,
+	"source": true, "track": true, "wbr": true,
 }
 
 func isHTMLSpace(c byte) bool {
@@ -58,7 +81,7 @@ func (m *minifier) writeRaw(s string) {
 
 func (m *minifier) text(c byte) {
 	if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-		if m.preDepth > 0 {
+		if m.preserve > 0 {
 			m.out.WriteByte(c)
 			return
 		}
@@ -171,6 +194,17 @@ func (m *minifier) tag(i int) (int, bool) {
 
 	var tb strings.Builder
 	tb.WriteString(s[i:j])
+	var classVal, idVal, styleVal string
+	note := func(aname, val string) {
+		switch strings.ToLower(aname) {
+		case "class":
+			classVal = val
+		case "id":
+			idVal = val
+		case "style":
+			styleVal = val
+		}
+	}
 	lastUnquoted := false
 	prevValueless := false
 	slash := false
@@ -229,6 +263,7 @@ func (m *minifier) tag(i int) (int, bool) {
 				return len(s), false
 			}
 			val := s[k+1 : k+1+end]
+			note(aname, val)
 			j = k + 2 + end
 			if canUnquote(val) {
 				tb.WriteString(val)
@@ -247,6 +282,7 @@ func (m *minifier) tag(i int) (int, bool) {
 				k++
 			}
 			tb.WriteString(s[vs:k])
+			note(aname, s[vs:k])
 			lastUnquoted = true
 			j = k
 		}
@@ -261,15 +297,16 @@ func (m *minifier) tag(i int) (int, bool) {
 	m.writeRaw(tb.String())
 
 	lname := strings.ToLower(name)
-	switch {
-	case lname == "pre":
-		if isEnd {
-			if m.preDepth > 0 {
-				m.preDepth--
-			}
-		} else {
-			m.preDepth++
+	if isEnd {
+		m.closeElement(lname)
+	} else if !voidElements[lname] && !(slash && m.selfClosingHonored(lname)) {
+		preserve := lname == "pre" || m.rules.preserves(lname, classVal, idVal, styleVal)
+		m.open = append(m.open, openElement{name: lname, preserve: preserve})
+		if preserve {
+			m.preserve++
 		}
+	}
+	switch {
 	case !isEnd && rawTextTags[lname]:
 		if lname == "plaintext" {
 			m.writeRaw(s[j:])
@@ -284,6 +321,41 @@ func (m *minifier) tag(i int) (int, bool) {
 		j = end
 	}
 	return j, true
+}
+
+// closeElement pops the open element an end tag closes, and the elements
+// left open inside it. An end tag with no open element is ignored.
+// selfClosingHonored reports whether "/>" closes the element named. HTML parsers
+// ignore it on an HTML element, so `<pre />` stays open, and only honour it in
+// SVG and MathML.
+func (m *minifier) selfClosingHonored(name string) bool {
+	if name == "svg" || name == "math" {
+		return true
+	}
+	for i := len(m.open) - 1; i >= 0; i-- {
+		switch m.open[i].name {
+		case "svg", "math":
+			return true
+		case "foreignobject", "desc", "title":
+			return false
+		}
+	}
+	return false
+}
+
+func (m *minifier) closeElement(name string) {
+	for i := len(m.open) - 1; i >= 0; i-- {
+		if m.open[i].name != name {
+			continue
+		}
+		for _, el := range m.open[i:] {
+			if el.preserve {
+				m.preserve--
+			}
+		}
+		m.open = m.open[:i]
+		return
+	}
 }
 
 // canUnquote reports whether v may be written as an unquoted attribute value

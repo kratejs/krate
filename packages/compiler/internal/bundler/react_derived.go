@@ -67,7 +67,7 @@ var builtinHooks = map[string]bool{
 	"useRef": true, "useCallback": true, "useId": true, "useContext": true,
 	"useSyncExternalStore": true, "useTransition": true, "useDeferredValue": true,
 	"useOptimistic": true, "useActionState": true, "useFormStatus": true,
-	"useImperativeHandle": true, "useDebugValue": true,
+	"useImperativeHandle": true, "useDebugValue": true, "useEffectEvent": true,
 }
 
 func isCustomHookName(name string) bool {
@@ -569,7 +569,7 @@ func (c *reactCtx) derivableInit(init ast.Expr) bool {
 				ok = false
 			}
 			switch id.Name {
-			case "createSignal", "createEffect", "createEffectDeps", "createMemo", "createMemoDeps",
+			case "createSignal", "createEffect", "createEffectDeps", "createEffectEvent", "createMemo", "createMemoDeps",
 				"createCallbackDeps", "createReducer", "createResource", "onMount", "onCleanup":
 				ok = false
 			}

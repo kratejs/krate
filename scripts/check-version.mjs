@@ -13,6 +13,7 @@ const manifests = [
   "packages/runtime/package.json",
   "packages/components/package.json",
   "packages/plugin/package.json",
+  "packages/ts-plugin/package.json",
   "packages/base-docs-theme/package.json",
   "packages/simple-docs-theme/package.json",
   "packages/create-krate-app/package.json",
@@ -66,8 +67,8 @@ for (const file of [
 ]) {
   const template = JSON.parse(readFileSync(join(root, file), "utf8"));
   for (const [name, range] of Object.entries(template.dependencies ?? {})) {
-    if (name.startsWith("@krate/") && range !== "__KRATE_DIST_TAG__") {
-      failures.push(`${file} ${name}: expected __KRATE_DIST_TAG__, got ${range}`);
+    if (name.startsWith("@krate/") && range !== "__KRATE_VERSION__") {
+      failures.push(`${file} ${name}: expected __KRATE_VERSION__, got ${range}`);
     }
   }
 }

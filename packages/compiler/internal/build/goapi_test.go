@@ -171,3 +171,33 @@ func waitForAPI(t *testing.T, base string) {
 	}
 	t.Fatal("Go API sidecar did not start in time")
 }
+
+// A component whose reads are not recorded is keyed on the whole request: any
+// header can change what it renders (Referer, X-Forwarded-For, a cookie), so
+// none of them may be left out of the key.
+func TestFullRegionKeyVariesOnEveryHeader(t *testing.T) {
+	req := func(headers string) goRenderRegion {
+		return goRenderRegion{Name: "Card", Props: `{"a":1}`, Request: `{"method":"GET","url":"/p","params":{},"query":{},"headers":` + headers + `}`}
+	}
+	base := regionKey(req(`{"Cookie":"sid=1","Referer":"/a","X-Forwarded-For":"1.1.1.1"}`))
+	if got := regionKey(req(`{"Cookie":"sid=1","Referer":"/a","X-Forwarded-For":"1.1.1.1"}`)); got != base {
+		t.Error("the same request must give the same key")
+	}
+	for name, h := range map[string]string{
+		"cookie":    `{"Cookie":"sid=2","Referer":"/a","X-Forwarded-For":"1.1.1.1"}`,
+		"referer":   `{"Cookie":"sid=1","Referer":"/b","X-Forwarded-For":"1.1.1.1"}`,
+		"forwarded": `{"Cookie":"sid=1","Referer":"/a","X-Forwarded-For":"2.2.2.2"}`,
+		"extra":     `{"Cookie":"sid=1","Referer":"/a","X-Forwarded-For":"1.1.1.1","Authorization":"Bearer x"}`,
+	} {
+		if regionKey(req(h)) == base {
+			t.Errorf("a different %s must change the key of an unrecorded component", name)
+		}
+	}
+	if strings.Contains(base, "sid=1") {
+		t.Errorf("the key must not hold raw cookie values: %q", base)
+	}
+	other := goRenderRegion{Name: "Card", Props: `{"a":1}`, Request: `{"method":"GET","url":"/q","headers":{"Cookie":"sid=1"}}`}
+	if regionKey(other) == base {
+		t.Error("a different URL must change the key")
+	}
+}

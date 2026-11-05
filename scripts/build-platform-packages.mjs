@@ -18,30 +18,16 @@ import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { platformManifest, platforms } from './platform-package.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const compilerDir = join(root, 'packages', 'compiler');
 const kratePkgDir = join(root, 'packages', 'core');
 const outBase = join(root, 'dist-platform');
-const repo = {
-  url: 'https://github.com/kratejs/krate.git',
-  homepage: 'https://github.com/kratejs/krate',
-  bugs: 'https://github.com/kratejs/krate/issues',
-};
 
 const version = JSON.parse(
   readFileSync(join(kratePkgDir, 'package.json'), 'utf-8'),
 ).version;
-
-const platforms = [
-  { pkg: 'core-win32-x64', os: 'win32', cpu: 'x64', goos: 'windows', goarch: 'amd64', ext: '.exe' },
-  { pkg: 'core-win32-arm64', os: 'win32', cpu: 'arm64', goos: 'windows', goarch: 'arm64', ext: '.exe' },
-  { pkg: 'core-linux-x64', os: 'linux', cpu: 'x64', goos: 'linux', goarch: 'amd64', ext: '' },
-  { pkg: 'core-linux-x64-musl', os: 'linux', cpu: 'x64', goos: 'linux', goarch: 'amd64', ext: '', musl: true },
-  { pkg: 'core-linux-arm64', os: 'linux', cpu: 'arm64', goos: 'linux', goarch: 'arm64', ext: '' },
-  { pkg: 'core-darwin-x64', os: 'darwin', cpu: 'x64', goos: 'darwin', goarch: 'amd64', ext: '' },
-  { pkg: 'core-darwin-arm64', os: 'darwin', cpu: 'arm64', goos: 'darwin', goarch: 'arm64', ext: '' },
-];
 
 function buildCompiler(target) {
   if (process.env.SKIP_GO) return;
@@ -69,24 +55,7 @@ function writePackage(target) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, 'package.json'),
-    JSON.stringify(
-      {
-        name: `@krate/${target.pkg}`,
-        version,
-        description: `The Krate compiler binary for ${target.os} ${target.cpu}${target.musl ? ' (musl)' : ''}.`,
-        license: 'Apache-2.0',
-        os: [target.os],
-        cpu: [target.cpu],
-        homepage: repo.homepage,
-        repository: { type: 'git', url: repo.url },
-        bugs: { url: repo.bugs },
-        keywords: ['krate', 'ssg', 'compiler', target.os, target.cpu],
-        files: ['bin'],
-        bin: { krate: `bin/krate${target.ext}` },
-      },
-      null,
-      2,
-    ) + '\n',
+    JSON.stringify(platformManifest(target, version), null, 2) + '\n',
   );
   if (existsSync(join(root, 'LICENSE'))) {
     cpSync(join(root, 'LICENSE'), join(dir, 'LICENSE'));

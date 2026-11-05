@@ -34,6 +34,7 @@ export function simpleDocsTheme(options: SimpleDocsThemeOptions = {}) {
     name: "@krate/simple-docs-theme",
     module: new URL("./layout.tsx", import.meta.url).href,
     options,
+    titleSlot: true,
   });
 }
 

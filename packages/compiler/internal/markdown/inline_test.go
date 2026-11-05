@@ -1,6 +1,8 @@
 package markdown
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -54,6 +56,12 @@ func TestRenderInlineSchemeAllowlist(t *testing.T) {
 		{"safe image", "![pic](/img.png)", true},
 		{"javascript image", "![pic](javascript:alert(1))", false},
 		{"data image", "![pic](data:image/svg+xml;base64,PHN2Zz4=)", false},
+		{"javascript autolink", "<javascript:alert(5)>", false},
+		{"uppercase javascript autolink", "<JAVASCRIPT:alert(6)>", false},
+		{"data autolink", "<data:text/html,hi>", false},
+		{"vbscript autolink", "<vbscript:msgbox(1)>", false},
+		{"https autolink", "<https://example.com>", true},
+		{"mailto autolink", "<me@example.com>", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -81,3 +89,46 @@ func TestRenderInlineBlockedLinkPreservesLabel(t *testing.T) {
 }
 
 func renderInline(s string, cfg Config) string { return RenderToHTML(s, cfg) }
+
+func TestRenderInlineBlockedAutolinkKeepsText(t *testing.T) {
+	got := renderInline("see <javascript:alert(5)> now", DefaultConfig())
+	if strings.Contains(got, "<a") || strings.Contains(got, "href") {
+		t.Errorf("expected no anchor for javascript: autolink, got %q", got)
+	}
+	if !strings.Contains(got, "javascript:alert(5)") {
+		t.Errorf("expected autolink text preserved, got %q", got)
+	}
+}
+
+func TestRelativeImagesResolveThroughImageURL(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "img"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "img", "a b.png"), []byte("png-bytes"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "secret.png"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	registered := map[string]string{}
+	cfg := DefaultConfig()
+	cfg.ImageURL = LocalImageResolver(filepath.Join(root, "docs"), filepath.Join(root, "docs", "page.md"), "/base", func(abs, u string) {
+		registered[abs] = u
+	})
+	got := RenderToHTML("![a](./img/a%20b.png?x=1) ![b](img/missing.png) ![c](https://e.test/c.png) ![d](/abs.png) ![e](../secret.png)\n", cfg)
+	if !strings.Contains(got, `src="/base/assets/a-b-`) {
+		t.Errorf("relative image not rewritten:\n%s", got)
+	}
+	if !strings.Contains(got, `.png?x=1`) {
+		t.Errorf("query lost:\n%s", got)
+	}
+	for _, keep := range []string{`src="img/missing.png"`, `src="https://e.test/c.png"`, `src="/abs.png"`, `src="../secret.png"`} {
+		if !strings.Contains(got, keep) {
+			t.Errorf("expected %s untouched:\n%s", keep, got)
+		}
+	}
+	if len(registered) != 1 {
+		t.Errorf("want exactly one registered asset, got %v", registered)
+	}
+}

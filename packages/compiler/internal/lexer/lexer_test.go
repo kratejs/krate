@@ -420,3 +420,19 @@ func TestNumberMultiple(t *testing.T) {
 	kind(t, toks[2], Number)
 	value(t, toks[2], "3")
 }
+
+func TestStringDirectlyAfterIdentifierOrBracket(t *testing.T) {
+	for _, src := range []string{
+		`import{a}from"./b.js";export const z=a+1;`,
+		`export{a as b}from"x";`,
+		`if(a){b=1}"x"==c&&d();`,
+		`function f(){return 1}"use strict";`,
+		`x=(1)"a";`,
+	} {
+		for _, tk := range tokens(src) {
+			if tk.Kind == Apostrophe || tk.Kind == Error {
+				t.Errorf("%s: unexpected %v token %q", src, tk.Kind, tk.Value)
+			}
+		}
+	}
+}

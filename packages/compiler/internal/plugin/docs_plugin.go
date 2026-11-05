@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -38,6 +39,11 @@ type DocsPluginOptions struct {
 	Breadcrumbs *bool `json:"breadcrumbs,omitempty"`
 	// Pagination toggles prev/next links (default true).
 	Pagination *bool `json:"pagination,omitempty"`
+
+	// titleSlot is set from the resolved theme: the layout renders the page's
+	// leading <h1> itself (props.titleHTML), so the plugin removes it from the
+	// content and passes it separately.
+	titleSlot bool
 }
 
 func (o *DocsPluginOptions) TOCEnabled() bool         { return o.TOC == nil || *o.TOC }
@@ -163,6 +169,9 @@ type DocsThemeDescriptor struct {
 	Module  string                 `json:"module,omitempty"`
 	Layout  string                 `json:"layout,omitempty"`
 	Options map[string]interface{} `json:"options,omitempty"`
+	// TitleSlot declares that the layout renders props.titleHTML (the page's
+	// leading <h1>) itself, which lets it place the description below the title.
+	TitleSlot bool `json:"titleSlot,omitempty"`
 }
 
 type SocialLink struct {
@@ -378,6 +387,7 @@ func (p *DocsPlugin) beforeBuild(ctx *BuildHookCtx) error {
 	var themeOptions json.RawMessage
 	if theme != nil {
 		themeOptions = theme.options
+		opts.titleSlot = theme.titleSlot
 	}
 
 	type pageGenResult struct {
@@ -468,9 +478,10 @@ func trimComponentExt(s string) string {
 //   - spec: bare npm specifier - keep it as-is so the theme's CSS and
 //     sub-components flow through the bundler's node_modules resolution.
 type resolvedDocsTheme struct {
-	module  string
-	spec    string
-	options json.RawMessage
+	module    string
+	spec      string
+	options   json.RawMessage
+	titleSlot bool
 }
 
 // importSpecifier returns the import path used by a generated page at genDir to
@@ -610,9 +621,9 @@ func (p *DocsPlugin) resolveDocsTheme(root string, opts *DocsPluginOptions) (*re
 			return nil, err
 		}
 		if filepath.IsAbs(mod) {
-			return &resolvedDocsTheme{module: trimComponentExt(mod), options: options}, nil
+			return &resolvedDocsTheme{module: trimComponentExt(mod), options: options, titleSlot: desc.TitleSlot}, nil
 		}
-		return &resolvedDocsTheme{module: filepath.Join(root, trimComponentExt(mod)), options: options}, nil
+		return &resolvedDocsTheme{module: filepath.Join(root, trimComponentExt(mod)), options: options, titleSlot: desc.TitleSlot}, nil
 	}
 
 	// Bare npm specifier module.
@@ -622,7 +633,7 @@ func (p *DocsPlugin) resolveDocsTheme(root string, opts *DocsPluginOptions) (*re
 	if entry := resolver.NodeModule(root, mod); entry == "" {
 		return nil, fmt.Errorf("docs plugin: theme descriptor module %q not found in node_modules", mod)
 	}
-	return &resolvedDocsTheme{spec: mod, options: options}, nil
+	return &resolvedDocsTheme{spec: mod, options: options, titleSlot: desc.TitleSlot}, nil
 }
 
 // marshalJSONArray marshals a slice as a JSON array literal, emitting `[]`
@@ -788,6 +799,37 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		sb.WriteString(";\n\n")
 	}
 
+	// Final HTML of each markdown segment. A theme that declares a title slot
+	// gets the leading <h1> separately and the content without it.
+	segHTML := make([]string, len(segments))
+	for i, seg := range segments {
+		if seg.HTML == "" {
+			continue
+		}
+		html := applyMarkdownTransformPlugins(cfg, ctx, page, seg.HTML)
+		if mdConfig.HeadingAnchors {
+			html = docs.InjectHeadingAnchors(html)
+		}
+		segHTML[i] = html
+	}
+	var wholeHTML string
+	if len(segments) == 0 {
+		wholeHTML = applyMarkdownTransformPlugins(cfg, ctx, page, page.Content)
+		if mdConfig.HeadingAnchors {
+			wholeHTML = docs.InjectHeadingAnchors(wholeHTML)
+		}
+	}
+	titleHTML := ""
+	if opts.titleSlot && page.Template != "hero" {
+		if len(segments) > 0 {
+			if segments[0].HTML != "" && segments[0].JSX == "" {
+				titleHTML, segHTML[0] = splitLeadingTitle(segHTML[0])
+			}
+		} else {
+			titleHTML, wholeHTML = splitLeadingTitle(wholeHTML)
+		}
+	}
+
 	sb.WriteString("export default function DocPage() {\n")
 	sb.WriteString("  const docsProps = {\n")
 	sb.WriteString("    pageTitle: ")
@@ -825,6 +867,13 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		liJSON, _ := json.Marshal(propLI)
 		sb.WriteString("    i18n: ")
 		sb.WriteString(string(liJSON))
+		sb.WriteString(",\n")
+	}
+
+	if titleHTML != "" {
+		titleJSON, _ := json.Marshal(titleHTML)
+		sb.WriteString("    titleHTML: ")
+		sb.WriteString(string(titleJSON))
 		sb.WriteString(",\n")
 	}
 
@@ -1007,14 +1056,10 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	sb.WriteString("      <DocsLayout {...docsProps} >")
 	if len(segments) > 0 {
 		sb.WriteString("\n      <div class=\"md-content\" data-pagefind-body>\n")
-		for _, seg := range segments {
-			if seg.HTML != "" {
-				html := applyMarkdownTransformPlugins(cfg, ctx, page, seg.HTML)
-				if mdConfig.HeadingAnchors {
-					html = docs.InjectHeadingAnchors(html)
-				}
+		for i, seg := range segments {
+			if segHTML[i] != "" {
 				sb.WriteString("        <div dangerouslySetInnerHTML={{__html: `")
-				sb.WriteString(escapeTemplateLit(html))
+				sb.WriteString(escapeTemplateLit(segHTML[i]))
 				sb.WriteString("`}} />\n")
 			}
 			if seg.JSX != "" {
@@ -1035,12 +1080,8 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 		}
 		sb.WriteString("      </div>\n")
 	} else {
-		content := applyMarkdownTransformPlugins(cfg, ctx, page, page.Content)
-		if mdConfig.HeadingAnchors {
-			content = docs.InjectHeadingAnchors(content)
-		}
 		sb.WriteString("<div class=\"md-content\" data-pagefind-body dangerouslySetInnerHTML={{__html: `")
-		sb.WriteString(escapeTemplateLit(content))
+		sb.WriteString(escapeTemplateLit(wholeHTML))
 		sb.WriteString("`}} />")
 	}
 
@@ -1050,6 +1091,20 @@ func (p *DocsPlugin) generateTSX(ctx *BuildHookCtx, cfg *config.Config, page doc
 	sb.WriteString("}\n")
 
 	return sb.String()
+}
+
+// leadingTitleRe matches a heading 1 at the very start of rendered markdown.
+var leadingTitleRe = regexp.MustCompile(`(?s)\A\s*(<h1\b[^>]*>.*?</h1>)\s*`)
+
+// splitLeadingTitle separates a leading <h1> element from the rest of the
+// rendered markdown. It returns ("", html) when the content does not start with
+// one.
+func splitLeadingTitle(html string) (title, rest string) {
+	m := leadingTitleRe.FindStringSubmatchIndex(html)
+	if m == nil {
+		return "", html
+	}
+	return html[m[2]:m[3]], html[m[1]:]
 }
 
 // applyMarkdownTransformPlugins runs the configured `markdown.plugins` modules

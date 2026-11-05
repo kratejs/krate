@@ -28,7 +28,7 @@ package build
 // the queue to the Krate host (KRATE_HOST_URL, authenticated with
 // KRATE_INTERNAL_SECRET) and waits for it to be applied before it responds.
 // A fetch-mode action response then carries "revalidated":true and
-// "revalidation":{paths,tags}. It expects timingSafeEqual to be imported.
+// "revalidation":{paths,tags}. It expects timingSafeEqual and createHmac to be imported.
 const actionSidecarJS = `
 const actionModuleCache = new Map();
 let actionManifest = null;
@@ -87,12 +87,24 @@ function internalAuthorized(value) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// sidecarAuthorized gates every request to the sidecar on the host's secret.
+// With no secret configured (the script run on its own) it lets requests in.
+function sidecarAuthorized(value) {
+  if (!KRATE_INTERNAL_SECRET) return true;
+  return internalAuthorized(value);
+}
+
 // applyInternalLocal applies a host operation to this process's caches.
-function applyInternalLocal(op, payload) {
+async function applyInternalLocal(op, payload) {
   if (op === 'cache-invalidate') {
     const rt = globalThis[Symbol.for('krate.cache.runtime')];
     const tags = Array.isArray(payload && payload.tags) ? payload.tags.filter((t) => typeof t === 'string') : [];
-    if (rt && typeof rt.invalidate === 'function') return rt.invalidate({ tags });
+    if (rt && typeof rt.invalidate === 'function') {
+      const out = rt.invalidate({ tags });
+      // With a shared cache adapter the entries live outside this process too.
+      if (tags.length && typeof rt.invalidateShared === 'function') out.dataEntries += await rt.invalidateShared(tags);
+      return out;
+    }
     return { dataEntries: 0 };
   }
   return { error: 'unknown internal op ' + op };
@@ -100,7 +112,7 @@ function applyInternalLocal(op, payload) {
 
 // broadcastInternal applies an operation on every worker; the Node script
 // replaces it with a cluster fan-out when clustered.
-let broadcastInternal = async (op, payload) => [applyInternalLocal(op, payload)];
+let broadcastInternal = async (op, payload) => [await applyInternalLocal(op, payload)];
 
 async function internalCacheInvalidate(headerValue, bodyText) {
   if (!internalAuthorized(headerValue)) return { status: 403, body: { error: 'forbidden' } };
@@ -125,6 +137,18 @@ function loadActionManifest() {
   }
   return actionManifest;
 }
+
+// krateHTTPFallback maps the signal thrown by notFound(), forbidden() and
+// unauthorized() to its status (0 for any other error).
+function krateHTTPFallback(err) {
+  if (!err || typeof err !== 'object') return 0;
+  const d = err.digest;
+  if (d === 'NEXT_NOT_FOUND' || d === 'NEXT_HTTP_ERROR_FALLBACK;404' || err.__krateNotFound === true) return 404;
+  if (d === 'NEXT_HTTP_ERROR_FALLBACK;403' || err.__krateHTTPStatus === 403) return 403;
+  if (d === 'NEXT_HTTP_ERROR_FALLBACK;401' || err.__krateHTTPStatus === 401) return 401;
+  return 0;
+}
+const KRATE_FALLBACK_LABEL = { 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found' };
 
 function actionHeaders(type, cookies) {
   const headers = new Headers({ 'content-type': type, 'cache-control': 'no-store' });
@@ -177,21 +201,42 @@ function serializeActionCookie(name, value, opts) {
   if (typeof o.maxAge === 'number' && isFinite(o.maxAge)) s += '; Max-Age=' + Math.floor(o.maxAge);
   if (o.expires instanceof Date) s += '; Expires=' + o.expires.toUTCString();
   if (o.httpOnly !== false) s += '; HttpOnly';
-  if (o.secure) s += '; Secure';
   const same = o.sameSite === undefined ? 'Lax' : o.sameSite;
-  if (same) s += '; SameSite=' + (same === true ? 'Strict' : String(same).replace(/[^A-Za-z]/g, ''));
+  const sameText = same ? (same === true ? 'Strict' : String(same).replace(/[^A-Za-z]/g, '')) : '';
+  // Browsers drop SameSite=None cookies that are not Secure.
+  if (o.secure || sameText.toLowerCase() === 'none') s += '; Secure';
+  if (sameText) s += '; SameSite=' + sameText;
   return s;
+}
+
+// requestIsHTTPS: the host sets X-Forwarded-Proto from what it observed (or from
+// the trusted proxy), so it is the scheme the client used.
+function requestIsHTTPS(headers) {
+  return String(headers.get('x-forwarded-proto') || '').split(',')[0].trim().toLowerCase() === 'https';
+}
+
+// signFlash ties the flash cookie to this server with an HMAC, so a page on a
+// sibling subdomain cannot plant a notice. The key is KRATE_FLASH_SECRET when
+// set (servers behind a load balancer share it), else the per-process internal
+// secret. Without either (the script run on its own) the value stays unsigned.
+const KRATE_FLASH_KEY = process.env.KRATE_FLASH_SECRET || KRATE_INTERNAL_SECRET;
+function signFlash(payload) {
+  if (!KRATE_FLASH_KEY) return payload;
+  return payload + '.' + createHmac('sha256', KRATE_FLASH_KEY).update('krate-flash\0' + payload).digest('base64url');
 }
 
 function makeActionContext(req, id, urlPath) {
   const jar = parseActionCookies(req.headers.get('cookie'));
   const setCookies = [];
+  const https = requestIsHTTPS(req.headers);
+  // Cookies set over https are Secure unless the action says otherwise.
+  const withSecure = (opts) => Object.assign({}, opts, { secure: opts && opts.secure !== undefined ? opts.secure : https });
   const cookies = {
     get(name) { return jar.get(name); },
     getAll() { return Array.from(jar, ([name, value]) => ({ name, value })); },
     has(name) { return jar.has(name); },
-    set(name, value, opts) { setCookies.push(serializeActionCookie(name, value, opts)); jar.set(name, String(value)); },
-    delete(name, opts) { setCookies.push(serializeActionCookie(name, '', Object.assign({}, opts, { maxAge: 0 }))); jar.delete(name); },
+    set(name, value, opts) { setCookies.push(serializeActionCookie(name, value, withSecure(opts))); jar.set(name, String(value)); },
+    delete(name, opts) { setCookies.push(serializeActionCookie(name, '', withSecure(Object.assign({}, opts, { maxAge: 0 })))); jar.delete(name); },
   };
   return { actionId: id, url: urlPath, method: 'POST', headers: req.headers, cookies, setCookies };
 }
@@ -259,10 +304,12 @@ async function krateRunAction(req, urlPath, search) {
   let result;
   let redirect = '';
   let failure = null;
+  let fallback = 0;
   try {
     result = await REVALIDATE_STORE.run(revalidateScope, () => ACTION_STORE.run(ctx, () => fn(...args)));
   } catch (e) {
     if (e && typeof e.__krateRedirect === 'string') redirect = e.__krateRedirect;
+    else if ((fallback = krateHTTPFallback(e))) failure = null;
     else failure = e === undefined ? new Error('undefined') : e;
   }
   // Revalidations are applied before the response (also when the action
@@ -275,6 +322,16 @@ async function krateRunAction(req, urlPath, search) {
   }
   if (!redirect && result && typeof result === 'object' && typeof result.redirect === 'string') redirect = result.redirect;
   redirect = safeActionRedirect(redirect);
+  if (fallback && !failure) {
+    // notFound(), forbidden() or unauthorized() in an action: JSON for the fetch
+    // client; a native form post gets the status and the host swaps in the
+    // nearest segment page (X-Krate-Fallback).
+    const label = KRATE_FALLBACK_LABEL[fallback];
+    if (fetchMode) return actionFail(fallback, label, undefined, ctx.setCookies);
+    const fh = actionHeaders('text/plain; charset=utf-8', ctx.setCookies);
+    fh.set('x-krate-fallback', String(fallback));
+    return new Response(fallback + ' ' + label + '\n', { status: fallback, headers: fh });
+  }
   let body = '';
   if (!failure && fetchMode) {
     const envelope = { ok: true, result: result === undefined ? null : result };
@@ -301,7 +358,7 @@ async function krateRunAction(req, urlPath, search) {
   if (!redirect && result !== undefined) {
     try {
       const flash = Buffer.from(JSON.stringify({ a: id, r: result })).toString('base64url');
-      if (flash.length <= 3000) headers.append('set-cookie', 'krate_flash=' + flash + '; Path=/; Max-Age=60; SameSite=Lax');
+      if (flash.length <= 3000) headers.append('set-cookie', 'krate_flash=' + signFlash(flash) + '; Path=/; Max-Age=60; SameSite=Lax' + (requestIsHTTPS(req.headers) ? '; Secure' : ''));
       else console.warn('[krate] action ' + entry.export + ' returned state too large to carry across the redirect; it is not shown after a no-JS submit');
     } catch {}
   }
@@ -379,9 +436,10 @@ if (WORKERS > 1 && cluster.isPrimary) {
   process.on('message', (msg) => {
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'krate:apply') {
-      let result;
-      try { result = applyInternalLocal(msg.op, msg.payload || {}); } catch (e) { result = { error: String((e && e.message) || e) }; }
-      process.send({ type: 'krate:applied', id: msg.id, result });
+      Promise.resolve()
+        .then(() => applyInternalLocal(msg.op, msg.payload || {}))
+        .catch((e) => ({ error: String((e && e.message) || e) }))
+        .then((result) => process.send({ type: 'krate:applied', id: msg.id, result }));
     } else if (msg.type === 'krate:bcast-done') {
       const done = waiters.get(msg.id);
       if (done) { waiters.delete(msg.id); done(Array.isArray(msg.results) ? msg.results : []); }

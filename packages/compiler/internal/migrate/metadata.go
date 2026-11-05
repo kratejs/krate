@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -34,66 +35,55 @@ func staticMetadata(src []byte) (*ast.ObjectExpr, bool) {
 	return nil, false
 }
 
-// metadataSite maps the common static Next.js metadata fields to Krate's site
-// config. Unknown fields are left for manual review.
-func metadataSite(obj *ast.ObjectExpr) map[string]any {
-	site := map[string]any{}
-	title := prop(obj, "title")
-	switch t := title.(type) {
-	case *ast.Literal:
-		if s, ok := stringValue(t); ok && s != "" {
-			site["name"] = s
-		}
-	case *ast.ObjectExpr:
-		if s, ok := stringValue(prop(t, "default")); ok && s != "" {
-			site["name"] = s
-		}
-		if s, ok := stringValue(prop(t, "template")); ok && s != "" {
-			site["titleTemplate"] = s
-		}
-	}
-	if s, ok := stringValue(prop(obj, "description")); ok && s != "" {
-		site["description"] = s
-	}
-	if s, ok := stringValue(prop(obj, "metadataBase")); ok && s != "" {
-		site["url"] = strings.TrimRight(s, "/")
-	}
-	if s, ok := stringValue(prop(obj, "themeColor")); ok && s != "" {
-		site["themeColor"] = s
-	}
+// nextMetadataTypeImport matches `import type { Metadata, ... } from "next"`
+// and the value-less form `import { type Metadata } from "next"`.
+var nextMetadataTypeImport = regexp.MustCompile(`(?m)^([ \t]*import[ \t]+(?:type[ \t]+)?\{[^}]*\}[ \t]*from[ \t]+)(["'])next["']`)
 
-	og, _ := prop(obj, "openGraph").(*ast.ObjectExpr)
-	if og != nil {
-		if _, ok := site["name"]; !ok {
-			if s, ok := stringValue(prop(og, "title")); ok && s != "" {
-				site["name"] = s
+// nextMetadataTypeNames are the type names the runtime exports for the Metadata API.
+var nextMetadataTypeNames = map[string]bool{
+	"Metadata": true, "ResolvingMetadata": true, "MetadataRoute": true, "ResolvingViewport": true, "Viewport": true,
+}
+
+// rewriteMetadataTypes points the `Metadata` and `ResolvingMetadata` type
+// imports of `next` at @krate/runtime/server, where the Metadata API now
+// lives. metadata and generateMetadata exports themselves need no rewrite:
+// pages and layouts run them natively. Imports of anything else from "next"
+// are left alone and reported by the generic next.* checks.
+func rewriteMetadataTypes(rep *Report) {
+	for i := range rep.Files {
+		f := &rep.Files[i]
+		if f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAsset && f.Kind != KindMetadataRoute && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError {
+			continue
+		}
+		src := string(f.Content)
+		if !strings.Contains(src, `"next"`) && !strings.Contains(src, `'next'`) {
+			continue
+		}
+		changed := false
+		out := nextMetadataTypeImport.ReplaceAllStringFunc(src, func(stmt string) string {
+			m := nextMetadataTypeImport.FindStringSubmatch(stmt)
+			open := strings.Index(stmt, "{")
+			end := strings.Index(stmt, "}")
+			if open < 0 || end < open {
+				return stmt
 			}
-		}
-		if _, ok := site["description"]; !ok {
-			if s, ok := stringValue(prop(og, "description")); ok && s != "" {
-				site["description"] = s
+			for _, spec := range strings.Split(stmt[open+1:end], ",") {
+				name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(spec), "type "))
+				if i := strings.Index(name, " as "); i >= 0 {
+					name = strings.TrimSpace(name[:i])
+				}
+				if name != "" && !nextMetadataTypeNames[name] {
+					return stmt
+				}
 			}
-		}
-		if s := firstImageURL(prop(og, "images")); s != "" {
-			site["image"] = s
-		}
-		if s, ok := stringValue(prop(og, "locale")); ok && s != "" {
-			site["locale"] = strings.ReplaceAll(s, "_", "-")
+			changed = true
+			return m[1] + m[2] + "@krate/runtime/server" + m[2]
+		})
+		if changed {
+			f.Content = []byte(out)
+			f.Rewrites = append(f.Rewrites, `rewrote the Metadata type imports from "next" to @krate/runtime/server`)
 		}
 	}
-	tw, _ := prop(obj, "twitter").(*ast.ObjectExpr)
-	if tw != nil {
-		for _, key := range []string{"site", "creator"} {
-			if s, ok := stringValue(prop(tw, key)); ok && s != "" {
-				site["twitter"] = strings.TrimPrefix(s, "@")
-				break
-			}
-		}
-	}
-	if len(site) == 0 {
-		return nil
-	}
-	return site
 }
 
 func firstImageURL(e ast.Expr) string {

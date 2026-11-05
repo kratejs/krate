@@ -473,10 +473,6 @@ func TestBuildCSSSignalsErrorsAreFatal(t *testing.T) {
 	const [tab, setTab] = createCSSChoice('a');
 	return <div><section onClick={() => setTab('b')}>B</section><div showIf={tab() === 'b'}>B</div></div>;
 }`,
-		"dynamic trigger class": `export default function T() {
-	const [tab, setTab] = createCSSChoice('a');
-	return <div><button class={x} onClick={() => setTab('b')}>B</button><div showIf={tab() === 'b'}>B</div></div>;
-}`,
 	}
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -488,6 +484,31 @@ func TestBuildCSSSignalsErrorsAreFatal(t *testing.T) {
 				t.Errorf("error should tell the user to use createSignal: %v", err)
 			}
 		})
+	}
+}
+
+// A trigger's class may be computed (a forwarded `class` prop): the scope
+// class is appended to whatever it produces.
+func TestBuildCSSTriggerWithComputedClass(t *testing.T) {
+	src := `function Tab(props) {
+	const tab = TabCtx.useContext();
+	return <button class={"base" + (props.class ? " " + props.class : "")} {...tab.trigger(props.value)}>{props.children}</button>;
+}
+const TabCtx = createContext(null);
+function Tabs(props) {
+	const tab = createCSSChoice('', { as: 'tabs' });
+	return <TabCtx.Provider value={tab}><div>{props.children}</div></TabCtx.Provider>;
+}
+export default function Page() {
+	return <Tabs defaultValue="a"><Tab value="a" class="mine">A</Tab><Tab value="b">B</Tab></Tabs>;
+}`
+	html, _, err := buildPageSrc(t, src)
+	if err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	m := regexp.MustCompile(`<label[^>]*class="?([^">]*)"?[^>]*>A<`).FindStringSubmatch(html)
+	if m == nil || !strings.Contains(m[1], "base") || !strings.Contains(m[1], "mine") || !regexp.MustCompile(`krc\d+`).MatchString(m[1]) {
+		t.Errorf("trigger A should keep base, the forwarded class and the scope class, got %q in:\n%.1500s", m, html)
 	}
 }
 

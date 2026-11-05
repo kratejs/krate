@@ -141,7 +141,53 @@ Sibling `<Suspense>` regions stream as they finish. The shell and fallbacks are
 sent immediately, each region chunk inserts itself at its marker, and page
 hydration scripts run after every chunk, so a slow region never blocks the rest
 of the page. Nested boundaries and coarse SSR/ISR page regions stay on the
-ordered path because they carry status or contain child markers.
+ordered path because they carry status or contain child markers. See
+[head tags in request-time pages](#head-tags-in-request-time-pages) for head tags set
+inside a streamed region.
+
+## Head tags in request-time pages
+
+`<title>`, `<meta>`, `<link>` and `<script>` inside `<Head>` of an async page or an
+async component are in the `<head>` of the first bytes of the response (SSR, ISR,
+streaming pages and async components alike, in `krate start` and on the serverless
+targets), so crawlers and social scrapers that do not run scripts read them:
+
+```tsx
+export default async function Post({ params }) {
+  const { slug } = await params;
+  const post = await getPost(slug);
+  return (
+    <main>
+      <Head>
+        <title>{post.title}</title>
+        <meta name="description" content={post.summary} />
+        <meta property="og:image" content={post.image} />
+        <link rel="canonical" href={`https://example.com/blog/${slug}`} />
+        <script type="application/ld+json">{JSON.stringify(post.jsonLd)}</script>
+      </Head>
+      <h1>{post.title}</h1>
+    </main>
+  );
+}
+```
+
+- A tag of the page **replaces** a baked tag with the same key: `meta name`,
+  `meta property`, `meta http-equiv`, `meta charset`, `link rel="canonical"` and
+  `base` (a layout's or `head` config's description loses to the page's). Several
+  `property` tags of the page (`og:image`, `article:tag`) all stay; a repeated
+  `name`, `canonical` or `charset` keeps the last one.
+- A tag identical to one already in the head is not added twice. Only `meta`,
+  `link`, `base`, `script`, `style` and `noscript` are head content; anything else
+  inside `<Head>` is dropped. Attribute values are escaped, and the text of a
+  `<script>` or `<style>` is written as is (so JSON-LD stays valid JSON), with
+  `</script` neutralised.
+- The title replaces the baked `<title>`, or is added when the shell has none.
+- A `<Head>` inside a `<Suspense>` region that **streams** out of order runs after
+  the head was sent. Its tags are applied by the region's script, which a crawler
+  that does not run scripts never sees, and the server logs a warning once per
+  region. Put SEO tags in the page component outside `<Suspense>`. A region that
+  is not streamed out of order (ISR pages, nested boundaries, a bare async
+  component) gets its tags into the initial head.
 
 ## Not supported
 

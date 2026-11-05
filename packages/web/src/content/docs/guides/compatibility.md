@@ -10,7 +10,7 @@ This is the support contract for React compatibility. A surface is only marked
 stable when the referenced corpus and browser tests pass. Known divergences are
 listed instead of silently hidden.
 
-Last verified: **2026-11-04**. See the [roadmap](/roadmap/) for phase
+Last verified: **2026-11-05**. See the [roadmap](/roadmap/) for phase
 status and the [React compatibility guide](/docs/guides/react-compatibility/)
 for usage.
 
@@ -38,17 +38,25 @@ for usage.
 | Portals | Beta | Beta | n/a | SSR-safe |
 | Suspense | Beta | Beta | n/a | SSR-safe |
 | React 19 actions and forms | Beta | Partial | n/a | Source semantics |
+| React 19.2: useId, useEffectEvent, Activity, ViewTransition | Beta | n/a | n/a | Source semantics |
+| Custom elements | Beta | n/a | n/a | React 19 semantics |
+| Component tiers: client APIs, conflicts and higher-order components | Beta | n/a | n/a | Krate semantics |
 | Server actions | Beta | n/a | Beta | Progressive enhancement |
 | Data cache and revalidation | Beta | n/a | Beta | next/cache parity |
 | Compiled React packages | n/a | Beta | Beta | Documented compat |
 | shadcn-style dashboard | Beta | n/a | n/a | Stable |
 | Next.js app corpus | Beta | n/a | n/a | Migration-ready |
 | Local components in islands | n/a | Beta | n/a | Supported |
+| npm React hook libraries (zustand, react-hook-form, SWR, TanStack Query, ...) | n/a | Beta | Beta | Run as Preact islands |
+| CSS-in-JS (styled-components, emotion, MUI) | n/a | Partial | Partial | Client-only islands |
+| Island hydration control (client:visible, client:idle) | n/a | Beta | n/a | Astro-style directives |
 | SSR island hydration | n/a | Beta | Beta | Hydration-safe |
 | Supported Preact versions | n/a | Beta | n/a | 10.20 through current |
 | Browser differential corpus | Beta | n/a | n/a | No P0/P1 divergence |
 | React 19 reference app | Beta | n/a | n/a | Same browser suite as React 18 |
 | Serverless and Node deployment | n/a | n/a | Beta | Vercel, Netlify, Cloudflare and Node hosting |
+| Metadata routes and ImageResponse | Beta | n/a | Beta | Next.js sitemap.ts, robots.ts, manifest.ts, opengraph-image and twitter-image |
+| Code highlighting (build, request time, browser) | Beta | Beta | Beta | chroma parity |
 
 ## Details
 
@@ -200,6 +208,34 @@ Diagnostics: `KR7001`
 
 Evidence: `TestLowerUseActionState`, `TestReactBrowserDifferential`, `TestLowerUseFormStatusDestructured`, `TestLowerUseOptimistic`, `TestReactActionFormsCompile`, `browser:/react-actions/`
 
+### React 19.2: useId, useEffectEvent, Activity, ViewTransition
+
+**Source:** Beta - **Islands:** n/a - **SSR:** n/a
+
+useId gives every component instance (children, nested children, lists, repeated components, conditional branches, layouts, rows added at runtime) an id that is the same in the static HTML and the hydration code, so htmlFor and id pairs match. useEffectEvent lowers to a stable function that reads the latest props and state and does not subscribe the effect that calls it. <Activity mode> renders its children in a wrapper that hides them while keeping state, cleans their effects up while hidden and runs them again when visible. <ViewTransition> names its element child for the router's view transition support (name and default class). The experimental names (unstable_Activity, unstable_ViewTransition, unstable_useEffectEvent, SuspenseList) are accepted; props with no effect warn (KR8031).
+
+Diagnostics: `KR8031`
+
+Evidence: `TestUseIdInChildComponents`, `TestUseIdInHydratedChildMatchesHTML`, `TestUseIdInDynamicListRowsIsNumberedPerRow`, `TestUseEffectEventIsLowered`, `TestActivityRendersChildrenAndHidesThem`, `TestActivityUnsupportedPropWarns`, `TestViewTransitionNamesItsChild`, `TestExperimentalReactNamesRenderTheirChildren`, `TestRewriteReact19Aliases`, `TestReact19Browser`
+
+### Custom elements
+
+**Source:** Beta - **Islands:** n/a - **SSR:** n/a
+
+Strings and numbers render as attributes, true as an empty attribute and false is omitted. Objects, arrays and functions render no attribute on the server and are set as properties on the client, also when the element class is defined after the page loads. Components that render such props hydrate so the property is set.
+
+Evidence: `TestCustomElementPropsFollowReact19`, `TestCustomElementAttrs`, `TestReact19Browser`
+
+### Component tiers: client APIs, conflicts and higher-order components
+
+**Source:** Beta - **Islands:** n/a - **SSR:** n/a
+
+A server, static or runtime component that uses state, effects or event handlers fails the build (KR7110) with the fix, instead of shipping a dead page. Two tier sources that disagree for one component fail (KR7115). A tier decorator on an HOC-wrapped default export classifies the component and the HOC is applied, also when it is declared in another module; an HOC that cannot be inlined fails (KR8030).
+
+Diagnostics: `KR7110`, `KR7115`, `KR8030`
+
+Evidence: `TestBuildTimeTierRejectsClientAPIs`, `TestConflictingTiersFail`, `TestTierConflictRule`, `TestTierDecoratorOnHOCDefaultExport`, `TestHOCFromAnotherModuleIsApplied`, `TestUnresolvableHOCFailsTheBuild`
+
 ### Server actions
 
 **Source:** Beta - **Islands:** n/a - **SSR:** Beta
@@ -228,7 +264,7 @@ Evidence: `TestSegmentExportsRenderMode`, `TestDataCacheUsageInference`, `TestRe
 
 **Source:** n/a - **Islands:** Beta - **SSR:** Beta
 
-Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island chunks, server-rendered initial markup, hydration, and an island error boundary.
+Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island entries bundled with shared modules, server-rendered initial markup, hydration, and an island error boundary.
 
 Evidence: `TestIslandSignalPropBridge`, `TestIslandLocalComponent`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`
 
@@ -258,15 +294,59 @@ Diagnostics: `KR8007`
 
 Evidence: `TestIslandLocalComponent`, `browser:/react-demo/`, `TestIslandSameFileLocalWarning`
 
+### npm React hook libraries (zustand, react-hook-form, SWR, TanStack Query, ...)
+
+**Source:** n/a - **Islands:** Beta - **SSR:** Beta
+
+A user module that calls a hook of an npm package built on React (or a store hook made by its factory, or a custom hook wrapping one) is bundled for Preact (react resolves to preact/compat, CommonJS require of react is bridged), rendered on the server and hydrated in place. The islands of all pages are bundled together with code splitting, so a store module is one store for the whole site and its state survives client-side navigation, forward and back; a leaving island unmounts and releases its subscriptions. A provider a layout wraps around its children (a query client, a Redux store, a theme) is lifted into the islands, one instance for every island of the page, with nested layouts composing; a provider that cannot be lifted is reported (KR8015, KR8016). Pages rendered per request (SSR, ISR) answer with the islands' build-time markup and hydrate. Checked by hand in Chromium against zustand 5.0.16, TanStack Query 5.105.3, react-redux 9.3.1 with Redux Toolkit 2.14.0 and styled-components 6.6.0 (ThemeProvider), and earlier against valtio 2, jotai 2, react-hook-form 7, SWR 2, TanStack Table 8, react-i18next 15 and usehooks-ts 3; the repository tests use stand-in packages with the same import shapes and behavior.
+
+Known limits:
+
+- A layout, template or server-rendered page cannot host these hooks; the build fails with KR8013.
+- A layout provider whose props read the layout's params, a signal or a state setter, or that renders markup of its own, cannot reach the islands (KR8015, KR8016).
+- State inside a component resets when its island unmounts on navigation; module-level state is kept.
+- A page that is itself such an island cannot take route props (KR8013) or use Krate-only APIs in the same module.
+- An island in a page rendered per request is server-rendered from build-time props; a prop known only per request makes it client-only.
+- Only Chromium was run for the browser check.
+
+Diagnostics: `KR8013`, `KR8015`, `KR8016`
+
+Evidence: `TestReactHookLibraryPageIsland`, `TestReactHookLibraryComponentIslands`, `TestReactHookLibraryPageForms`, `TestReactLibraryValueInPageMakesIsland`, `TestReactIslandModulesAreNotKrateSource`, `TestReactHookLibraryInLayoutDiagnostic`, `TestPreactCompatChunkHasDefaultExport`, `TestBrowserReactLibraryIslands`, `TestLayoutProvidersReachIslands`, `TestIslandModulesAreSharedAcrossPages`, `TestLayoutProviderDiagnostics`, `TestIslandChunksSurviveDiskCache`, `TestPerRequestPageIslandStubs`
+
+### CSS-in-JS (styled-components, emotion, MUI)
+
+**Source:** n/a - **Islands:** Partial - **SSR:** Partial
+
+Components built with styled-components, @emotion/styled, the emotion css prop (with the jsxImportSource pragma) or MUI run as Preact islands and are styled in the browser. They are client-only because the styles are created while rendering, so the server HTML holds an empty placeholder (KR8008 notice). A css prop without emotion's runtime is reported (KR8014). A ThemeProvider in a layout reaches them. Checked by hand in Chromium against styled-components 6, @emotion/styled and @emotion/react 11 and MUI 9.
+
+Known limits:
+
+- No server-rendered markup or styles: content appears when the island mounts.
+- A project-wide jsxImportSource for emotion in tsconfig is not supported; use the per-file pragma.
+
+Diagnostics: `KR8008`, `KR8014`
+
+Evidence: `TestReactCSSInJSIsland`, `TestBrowserReactLibraryIslands`
+
+### Island hydration control (client:visible, client:idle)
+
+**Source:** n/a - **Islands:** Beta - **SSR:** n/a
+
+client:visible and client:idle on an island's root tag defer mounting until the island is near the viewport or the browser is idle. The server markup stays; the chunk is neither preloaded nor fetched before then, and the directive never reaches the component. client:load is the default.
+
+Diagnostics: `KR8012`
+
+Evidence: `TestIslandClientDirectives`, `TestClientDirectiveOnNonIslandWarns`, `TestBrowserReactLibraryIslands`
+
 ### SSR island hydration
 
 **Source:** n/a - **Islands:** Beta - **SSR:** Beta
 
-Islands with build-time-known props are server-rendered with Preact and hydrated in place. Each island has its own chunk; unknown props, browser-only components, and portals fall back to client-only with a warning. Request-time SSR and streaming island regions remain separate work.
+Islands with build-time-known props are server-rendered with Preact and hydrated in place. The island entries of all pages are bundled together, so modules pages share are shared files. Unknown props, browser-only components, and portals fall back to client-only with a warning. A page rendered per request (SSR, ISR, streaming) answers with the placeholders and build-time markup of its islands instead of running them in the Node renderer; request-time props for an island are not supported.
 
 Diagnostics: `KR8008`, `KR8009`
 
-Evidence: `TestIslandSignalPropBridge`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`, `TestIslandBundleFailureUsesKR8009`
+Evidence: `TestIslandSignalPropBridge`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`, `TestIslandBundleFailureUsesKR8009`, `TestPerRequestPageIslandStubs`, `TestIslandChunksSurviveDiskCache`, `TestBrowserReactLibraryIslands`
 
 ### Supported Preact versions
 
@@ -310,6 +390,30 @@ Known limits:
 - Cloudflare bundles fail at build time for Node built-ins outside nodejs_compat (fs, vm, net, child_process).
 
 Evidence: `TestServerlessNodeParity`, `TestVercelServerOutput`, `TestNetlifyServerOutput`, `TestCloudflareServerOutput`, `TestServerBundleHasNoSecrets`, `TestServerlessRefusesGoAndSidecars`, `TestCloudflareRefusesNodeBuiltins`, `TestServerlessNodeBrowser`, `TestPlatformDeploysKeepSegmentPages`, `TestNetlifyAndVercelWithoutMiddlewareStayStaticFirst`
+
+### Metadata routes and ImageResponse
+
+**Source:** Beta - **Islands:** n/a - **SSR:** Beta
+
+sitemap.ts, robots.ts and manifest.ts build sitemap.xml, robots.txt and manifest.webmanifest; opengraph-image and twitter-image files (including per-segment and per-generateStaticParams ones) build real PNGs from ImageResponse JSX with a pure Go renderer (flex layout, text and fonts, colours, gradients, images), and feed og:image and twitter:image. Anything the renderer cannot draw is a build error (KR7131). A file wins over a plugin (KR7133). Per-request ImageResponse works in Node API routes under krate start only; Workers and serverless functions have no renderer. krate migrate nextjs maps these files natively. Not supported: CSS grid, transform, filter, SVG, icon and apple-icon files, opengraph-image.alt.txt.
+
+Evidence: `TestMetadataRouteFilesBuild`, `TestImageResponseUnsupportedFailsTheBuild`, `TestMetadataRoutePluginOverrideIsSaid`, `TestImageResponsePerRequestOnTheHost`, `TestMetadataRoutesMigrateNatively`
+
+### Code highlighting (build, request time, browser)
+
+**Source:** Beta - **Islands:** Beta - **SSR:** Beta
+
+Code is highlighted by chroma at build time, by the same lexers in the Node renderer for request-time code, and by the same lexers loaded on demand for code that changes in the browser. The lexers are exported from the binary's own chroma and run token for token (the markup is identical), in light and dark from one stylesheet, with a size, line and time limit that leaves text plain instead of stalling.
+
+Known limits:
+
+- Request-time highlighting runs in the Node renderer; serverless deploy targets write plain text.
+- The browser and request-time highlighters ship 16 languages; other languages are highlighted at build time only.
+- A Markdown fence that names a language outside the shipped set leaves the snippet plain.
+
+Diagnostics: `KR7150`, `KR7151`
+
+Evidence: `TestParityCorpus`, `TestTranspiledRegexesMatchRegexp2`, `TestPatternOverrides`, `TestAdversarialInputs`, `TestRuleProfile`, `TestThemeCSSMatchesChromaPerMode`, `TestCodeThemeBrowser`, `TestDynamicCodeBrowser`, `TestSSRCodeHighlightingE2E`, `TestDynamicCodeShipsHighlighterOnlyWhereUsed`, `ci:code highlighting size budget`
 
 ## How claims are verified
 

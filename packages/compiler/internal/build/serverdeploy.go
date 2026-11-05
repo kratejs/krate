@@ -129,8 +129,10 @@ type serverManifestFile struct {
 
 // handlerConfig mirrors HandlerConfig in @krate/runtime/server-handler.
 type handlerConfig struct {
-	BasePath        string              `json:"basePath"`
-	TrustProxy      bool                `json:"trustProxy"`
+	BasePath string `json:"basePath"`
+	// TrustProxy is server.trustProxy: null when the project does not set it,
+	// which makes each serverless target use what its platform guarantees.
+	TrustProxy      *bool               `json:"trustProxy"`
 	MaxBodyBytes    int64               `json:"maxBodyBytes"`
 	MaxAPIBodyBytes int64               `json:"maxAPIBodyBytes"`
 	Redirects       []config.Redirect   `json:"redirects"`
@@ -139,6 +141,18 @@ type handlerConfig struct {
 	Security        handlerSecurity     `json:"security"`
 	CORS            handlerCORS         `json:"cors"`
 	SSR             handlerSSR          `json:"ssr"`
+	// Cache is the shared cache setting without its URL: the bundle never
+	// contains a secret, the URL comes from the environment at run time.
+	Cache *handlerCache `json:"cache,omitempty"`
+}
+
+type handlerCache struct {
+	Adapter    string         `json:"adapter"`
+	URLEnv     string         `json:"urlEnv,omitempty"`
+	Prefix     string         `json:"prefix,omitempty"`
+	TimeoutMs  int            `json:"timeoutMs,omitempty"`
+	TTLSeconds int            `json:"ttlSeconds,omitempty"`
+	Options    map[string]any `json:"options,omitempty"`
 }
 
 type handlerSecurity struct {
@@ -186,7 +200,7 @@ func buildHandlerConfig(cfg *config.Config) handlerConfig {
 	c := cfg.CORS
 	hc := handlerConfig{
 		BasePath:        cfg.BaseURLPath(),
-		TrustProxy:      cfg.Server.TrustProxy,
+		TrustProxy:      trustProxyOf(cfg),
 		MaxBodyBytes:    cfg.MaxBodyBytes(),
 		MaxAPIBodyBytes: cfg.MaxAPIBodyBytes(),
 		Redirects:       nonNilRedirects(cfg.Redirects),
@@ -205,6 +219,9 @@ func buildHandlerConfig(cfg *config.Config) handlerConfig {
 			Headers: nonNilStrings(c.Headers), Credentials: c.Credentials, MaxAge: c.MaxAge,
 		},
 		SSR: handlerSSR{Timeout: cfg.SSR.Timeout, MaxCacheSize: cfg.SSR.MaxCacheSize, PPR: cfg.PPR, PPRRevalidate: cfg.PPRRevalidate},
+	}
+	if cc := cfg.Cache; cc.Shared() {
+		hc.Cache = &handlerCache{Adapter: cc.Adapter, URLEnv: cc.URLEnv, Prefix: cc.Prefix, TimeoutMs: cc.TimeoutMs, TTLSeconds: cc.TTLSeconds, Options: cc.Options}
 	}
 	return hc
 }
@@ -392,7 +409,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 		// The segment pages travel in the bundle: the handler picks the nearest
 		// one for a request and fills it, so no file is read at request time.
 		for _, e := range m.Segments {
-			for _, rel := range []string{e.NotFound, e.Error} {
+			for _, rel := range e.pages() {
 				if rel == "" {
 					continue
 				}
@@ -558,9 +575,32 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	if err != nil {
 		return nil, err
 	}
+	// A custom cache adapter module is imported statically (the bundle has no
+	// dynamic imports of your files) and built from the cache settings.
+	cacheExpr := "undefined"
+	if cc := cfg.Cache; cc.Shared() && cc.Adapter != "redis" {
+		mod := cc.Adapter
+		if strings.HasPrefix(mod, ".") || filepath.IsAbs(mod) {
+			mod = filepath.ToSlash(filepath.Join(root, mod))
+			if filepath.IsAbs(cc.Adapter) {
+				mod = filepath.ToSlash(cc.Adapter)
+			}
+		}
+		fmt.Fprintf(imports, "import * as cache_mod from %s;\nimport { cacheSpecFromConfig } from '@krate/runtime/cache-adapter';\n", jsString(mod))
+		cacheExpr = "(async () => { const f = cache_mod.default ?? cache_mod.createAdapter; const spec = cacheSpecFromConfig(data.config.cache); return typeof f === 'function' ? f(spec) : f; })()"
+	}
+	if cfg.Cache.Shared() {
+		plan.SharedCache = true
+		if target == "cloudflare" && cfg.Cache.Adapter == "redis" {
+			return nil, fmt.Errorf("cache.adapter \"redis\" cannot run on the cloudflare target: it opens a TCP connection (node:net/node:tls), which Workers do not have, so the bundle does not include it. Point cache.adapter at your own module that default-exports a CacheAdapter over HTTP (a Redis REST service or Workers KV), or deploy with --target node, vercel or netlify")
+		}
+		if cfg.Cache.URL != "" && cfg.Cache.URLEnv == "" {
+			plan.Warnings = append(plan.Warnings, "cache.url is not written into the bundle; set KRATE_CACHE_URL (or name another variable with cache.urlEnv) in the deployment's environment")
+		}
+	}
 	modules := fmt.Sprintf("const modules = {\n pages: {\n%s },\n runtime: {\n%s },\n api: {\n%s },\n actions: {\n%s },\n middleware: %s,\n};\n",
 		pageMods.String(), runtimeMods.String(), apiMods.String(), actionMods.String(), mwExpr)
-	fmt.Fprintf(body, "%s\nconst data = %s;\n", modules, string(dataJSON))
+	fmt.Fprintf(body, "%s\nconst data = %s;\nconst __cache = %s;\n", modules, string(dataJSON), cacheExpr)
 
 	entry := serverEntry(target, imports.String(), body.String())
 	outFile := filepath.Join(outDir, ".krate", serverDeployDir, serverEntryName(target))
@@ -674,23 +714,28 @@ func serverEntry(target, imports, body string) string {
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\nimport { startNodeServer, createNodeStaticLayer, defaultDistDir } from '@krate/runtime/node-server';\n")
 		b.WriteString(body)
 		b.WriteString(`const distDir = defaultDistDir(import.meta.url);
-export const handler = createKrateHandler({ target: 'node', data, modules, static: createNodeStaticLayer(distDir) });
-await startNodeServer({ handler, distDir, trustProxy: data.config.trustProxy, shutdownTimeout: __SHUTDOWN__, port: __PORT__ });
+export const handler = createKrateHandler({ target: 'node', data, modules, cache: __cache, static: createNodeStaticLayer(distDir) });
+await startNodeServer({ handler, distDir, trustProxy: data.config.trustProxy === true, shutdownTimeout: __SHUTDOWN__, port: __PORT__ });
 `)
 	case "vercel":
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\nimport { nodeRequestListener } from '@krate/runtime/node-server';\n")
 		b.WriteString(body)
-		b.WriteString(`export const handler = createKrateHandler({ target: 'vercel', data, modules, trustProxy: true });
+		b.WriteString(`export const handler = createKrateHandler({ target: 'vercel', data, modules, cache: __cache });
 export const handleRequest = (request, ctx) => handler(request, ctx);
+// true: keep the headers Vercel sent. The handler decides which of them it trusts.
 export default nodeRequestListener(handler, true);
 `)
 	case "netlify":
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\n")
 		b.WriteString(body)
-		b.WriteString(`export const handler = createKrateHandler({ target: 'netlify', data, modules, trustProxy: true });
+		b.WriteString(`export const handler = createKrateHandler({ target: 'netlify', data, modules, cache: __cache });
 export default async (request, context) => handler(request, { waitUntil: context && context.waitUntil ? (p) => context.waitUntil(p) : undefined });
 `)
 	case "cloudflare":
+		// Every target follows server.trustProxy (see PLATFORMS in the handler):
+		// Workers do not rewrite a client's X-Forwarded-Host/Proto and request.url
+		// is already the public URL, so forwarded headers are trusted only when
+		// server.trustProxy says a proxy of yours sits in front of the Worker.
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\nimport { createAssetsStaticLayer } from '@krate/runtime/assets-static';\n")
 		b.WriteString(body)
 		b.WriteString(`let handler;
@@ -701,7 +746,7 @@ export default {
       const proc = globalThis.process || (globalThis.process = { env: {} });
       proc.env = proc.env || {};
       for (const [k, v] of Object.entries(env || {})) if (typeof v === 'string' && !(k in proc.env)) proc.env[k] = v;
-      handler = createKrateHandler({ target: 'cloudflare', data, modules, trustProxy: true, static: env && env.ASSETS ? createAssetsStaticLayer(env.ASSETS) : undefined });
+      handler = createKrateHandler({ target: 'cloudflare', data, modules, cache: __cache, static: env && env.ASSETS ? createAssetsStaticLayer(env.ASSETS) : undefined });
     }
     return handler(request, { waitUntil: (p) => ctx.waitUntil(p) });
   },
@@ -811,6 +856,45 @@ func builtinGuardPlugin(target string) api.Plugin {
 	}
 }
 
+// nodeOnlyRuntimeModules are @krate/runtime files that need Node built-ins and
+// are reached only through dynamic imports: the Redis cache adapter (node:net,
+// node:tls via resp.js) and the ImageResponse local image reader (node:fs).
+// A Worker never runs either, so the Cloudflare bundle swaps each for a stub
+// that throws a clear error if it is ever called. User code is not touched:
+// builtinGuardPlugin still refuses its Node imports.
+var nodeOnlyRuntimeModules = map[string]string{
+	"cache-redis.js": "export class RedisAdapter { constructor() { throw new Error('krate: cache.adapter \"redis\" needs Node sockets and is not part of the cloudflare bundle; pass your own CacheAdapter (an HTTP/KV based one) instead'); } }\nexport function createRedisAdapter() { return new RedisAdapter(); }\n",
+	"og-files.js":    "export async function readLocalImage() { throw new Error('krate: ImageResponse cannot read local images in the cloudflare bundle; images are drawn at build time or on the Krate host'); }\n",
+}
+
+// workerStubPlugin replaces the Node-only runtime modules for the Cloudflare target.
+func workerStubPlugin(runtimePkg string) api.Plugin {
+	return api.Plugin{
+		Name: "krate-worker-stubs",
+		Setup: func(b api.PluginBuild) {
+			b.OnResolve(api.OnResolveOptions{Filter: `(^|/)(cache-redis|og-files)\.js$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				base := filepath.Base(args.Path)
+				if _, ok := nodeOnlyRuntimeModules[base]; !ok {
+					return api.OnResolveResult{}, nil
+				}
+				if runtimePkg == "" || !pathWithin(runtimePkg, args.Importer) {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: base, Namespace: "krate-worker-stub"}, nil
+			})
+			b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-worker-stub"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				src := nodeOnlyRuntimeModules[args.Path]
+				return api.OnLoadResult{Contents: &src, Loader: api.LoaderJS}, nil
+			})
+		},
+	}
+}
+
+func pathWithin(dir, p string) bool {
+	rel, err := filepath.Rel(dir, p)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile string) error {
 	rt, err := runtimePlugin(root)
 	if err != nil {
@@ -839,6 +923,7 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		MinifySyntax:     cfg.ShouldMinifyJS(),
 	}
 	if target == "cloudflare" {
+		opts.Plugins = append([]api.Plugin{workerStubPlugin(resolveRuntimePackage(root))}, opts.Plugins...)
 		opts.Platform = api.PlatformNeutral
 		opts.Conditions = []string{"workerd", "worker", "browser"}
 		opts.MainFields = []string{"module", "main"}
@@ -853,7 +938,7 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		}
 		opts.Banner = map[string]string{"js": "import { createRequire as __krateCreateRequire } from 'node:module'; const require = __krateCreateRequire(" + anchor + ");"}
 	}
-	res := api.Build(opts)
+	res := esbuildBuild(opts)
 	if len(res.Errors) > 0 {
 		var msgs []string
 		for _, e := range res.Errors {
@@ -869,3 +954,13 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 }
 
 var _ = fsutil.WriteFileAtomic
+
+// trustProxyOf is server.trustProxy as the handler reads it: true, false, or
+// null when the project never set it.
+func trustProxyOf(cfg *config.Config) *bool {
+	if !cfg.Server.TrustProxySet {
+		return nil
+	}
+	v := cfg.Server.TrustProxy
+	return &v
+}

@@ -56,7 +56,7 @@ func declProps(css string) ([]int, int) {
 	var idx []int
 	count := 0
 	for _, d := range splitDecls(css) {
-		if _, _, nested := nestedAtRule(d); nested {
+		if _, _, nested := nestedAtRule(d); nested || strings.Contains(d, "{") {
 			continue
 		}
 		name, val, ok := strings.Cut(d, ":")

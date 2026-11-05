@@ -55,6 +55,13 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 		if src := filepath.ToSlash(b.ann.ComponentSources[name]); resolver.IsCompiledDependency(src) {
 			continue
 		}
+		if fn.Name != name {
+			// An import alias (`import { plain as pp }`): emit the helper under
+			// the name the hydration code calls it by.
+			renamed := *fn
+			renamed.Name = name
+			fn = &renamed
+		}
 		candidates[name] = fn
 	}
 	if len(candidates) == 0 {
@@ -294,17 +301,11 @@ func (b *builder) buildSlotNodes(expr ast.Expr, parentID string) []SlotNode {
 		if e.Op == "&&" || e.Op == "||" || e.Op == "??" {
 			return []SlotNode{b.buildExprSlot(e, parentID)}
 		}
-		if slot := b.buildStaticTextSlot(e, parentID); slot != nil {
-			return []SlotNode{slot}
-		}
-		return nil
+		return []SlotNode{b.buildStaticTextSlot(e, parentID)}
 	case *ast.CallExpr:
 		return b.buildCallExprSlots(e, parentID)
 	case *ast.Literal, *ast.Identifier, *ast.MemberExpr, *ast.TemplateExpr, *ast.UnaryExpr, *ast.ArrayExpr:
-		if slot := b.buildStaticTextSlot(e, parentID); slot != nil {
-			return []SlotNode{slot}
-		}
-		return nil
+		return []SlotNode{b.buildStaticTextSlot(e, parentID)}
 	case *ast.ArrowFn:
 		bodyExpr := arrowBodyExpr(e)
 		if bodyExpr != nil {
@@ -339,10 +340,7 @@ func (b *builder) buildCallExprSlots(call *ast.CallExpr, parentID string) []Slot
 	if b.referencesSignal(call) {
 		return []SlotNode{b.buildExprSlot(call, parentID)}
 	}
-	if slot := b.buildStaticTextSlot(call, parentID); slot != nil {
-		return []SlotNode{slot}
-	}
-	return nil
+	return []SlotNode{b.buildStaticTextSlot(call, parentID)}
 }
 
 // buildJSXSlot - lowercase HTML or uppercase component
@@ -439,6 +437,8 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 		return []SlotNode{&StaticHTML{HTML: ""}}
 	case "Suspense":
 		return []SlotNode{b.buildSuspenseSlot(el, parentID)}
+	case ActivityTag:
+		return b.buildActivitySlot(el, parentID)
 	}
 
 	// A tag name bound to a local variable (e.g. `const Comp = asChild ? Slot :
@@ -463,6 +463,10 @@ func (b *builder) buildJSXSlot(el *ast.JSXElement, parentID string) []SlotNode {
 			if slot, ok := b.buildExternalComponentSlot(name, el); ok {
 				return []SlotNode{slot}
 			}
+		}
+		if _, directive := clientDirectiveOf(el); directive != "" {
+			b.warnCodeAt(el.Position, diag.CodeClientDirective, "`"+directive+"` only applies to a compiled package component rendered as an island; <"+name+"> is not one",
+				"remove the directive, or render the package component directly")
 		}
 	}
 
@@ -1033,6 +1037,12 @@ func (b *builder) buildSyntaxHighlightSlots(el *ast.JSXElement, parentID string)
 					continue
 				}
 			}
+			if b.referencesSignal(c.Expression) {
+				// A signal's current value is not the code: it changes at run
+				// time, so the text is highlighted in the browser.
+				canHighlight = false
+				break
+			}
 			val, ok := childText(b.evalValue(c.Expression))
 			if !ok {
 				// Not known at build time - can't highlight at compile time.
@@ -1056,11 +1066,16 @@ func (b *builder) buildSyntaxHighlightSlots(el *ast.JSXElement, parentID string)
 		return []SlotNode{&StaticHTML{HTML: html.String()}}
 	}
 
-	// Children are dynamic (e.g. {children} in a component body). Emit the
-	// <pre><code> wrapper as static HTML, build children as normal slot nodes,
-	// then close the tags. Chroma highlighting is skipped - the server stub
-	// applies plain escaping.
-	openTag := "<pre class=\"chroma\"><code class=\"language-" + escape.HTML(lang) + "\">"
+	// Children are dynamic (e.g. {children} in a component body, or a signal).
+	// Emit the <pre><code> wrapper as static HTML, build children as normal
+	// slot nodes, then close the tags. The text is written as is and, when
+	// the language is known, data-krate-hl tells the runtime to highlight it
+	// in the browser whenever it changes.
+	openTag := "<pre class=\"chroma\"><code class=\"language-" + escape.HTML(lang) + "\""
+	if lang != "" {
+		openTag += " data-krate-hl=\"" + escape.HTMLAttr(lang) + "\""
+	}
+	openTag += ">"
 	closeTag := "</code></pre>"
 
 	var result []SlotNode
@@ -1154,7 +1169,7 @@ func (b *builder) buildMetaOpeningTag(el *ast.JSXElement, tag string) string {
 		if attr.Spread || attr.Name == "dangerouslySetInnerHTML" {
 			continue
 		}
-		buf.WriteString(RenderAttr(tag, attr, b.evalAttrConst, b.evalAttrValue))
+		buf.WriteString(RenderAttr(tag, attr, b.evalAttrInitial, b.evalAttrInitialString))
 	}
 	buf.WriteByte('>')
 	return buf.String()
@@ -1476,7 +1491,7 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 		if skipFormValueAttr(name, attr.Name, inSelect) {
 			continue
 		}
-		buf.WriteString(RenderAttr(name, attr, b.evalAttrConst, b.evalAttrValue))
+		buf.WriteString(RenderAttr(name, attr, b.evalAttrInitial, b.evalAttrInitialString))
 	}
 	if optionSelected {
 		buf.WriteString(" selected")
@@ -1505,11 +1520,11 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 		switch {
 		case skipFormValueAttr(name, a.AttrName, inSelect):
 		case a.AttrName == "style":
-			if css, ok := StyleCSS(a.InitialExpr, b.evalAttrConst); ok {
+			if css, ok := StyleCSS(a.InitialExpr, b.evalAttrInitial); ok {
 				buf.WriteString(` style="` + escape.HTMLAttr(css) + `"`)
 			}
 		case htmlspec.IsBoolean(a.AttrName) || a.Initial != "":
-			buf.WriteString(htmlspec.Attr(name, a.AttrName, JSAttrValue(b.evalAttrConst(a.InitialExpr), a.Initial)))
+			buf.WriteString(htmlspec.Attr(name, a.AttrName, JSAttrValue(b.evalAttrInitial(a.InitialExpr), a.Initial)))
 		}
 		if !htmlspec.ValidAttrName(a.AttrName) {
 			continue
@@ -1611,9 +1626,17 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 	id := b.assignSlotID(b.nextDynamicSlot(parentID, "expr"))
 	signals := b.collectSignalReads(expr)
 	exprSource := b.bindLoopVars(generateExprJS(expr, b.sigMap()))
+	if strings.Contains(exprSource, "createPortal(") {
+		// Only a portal that is a child, or a branch of a conditional child,
+		// is lowered; anywhere else the call would reach the browser as is,
+		// where createPortal does not exist.
+		b.warnCompat(expr.Pos(), diag.CodePortalNotLowered,
+			"createPortal is only supported as a child or as a branch of a conditional child; here it is left as a runtime call that fails with \"createPortal is not defined\"",
+			"render the portal as {createPortal(...)}, {open && createPortal(...)} or {open ? createPortal(...) : null}, or use <Portal container={...}>")
+	}
 	// The SSR initial is the value rendered as child text (React semantics:
 	// false/null/undefined render nothing); the emitter escapes it.
-	value := b.evalValue(expr)
+	value := b.evalValueVolatile(expr)
 	initial, _ := childText(value)
 	slot := &ExprSlot{
 		ID:         id,
@@ -1622,6 +1645,7 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 		Initial:    initial,
 		File:       b.sourceLoc(),
 		Pos:        expr.Pos(),
+		Unresolved: value.ContainsUnknown(),
 	}
 	// A value holding JSX renders as markup, not as escaped text.
 	if html, ok := renderChildValue(value); ok && html != escape.Text(initial) {
@@ -2089,8 +2113,16 @@ func (b *builder) buildConditionalSlot(expr ast.Expr, parentID string) *Conditio
 		// Build branches under branch-scoped parents so nested slots in the
 		// consequent and alternate branches never share slot IDs.
 		b.branchDepth++
+		mark := b.markRowBindings()
 		slot.Consequent = b.buildSlotNodes(cond.Consequent, string(id)+".c")
+		if testJS != "" {
+			b.tagBranchAttrs(mark, testJS)
+		}
+		mark = b.markRowBindings()
 		slot.Alternate = b.buildSlotNodes(cond.Alternate, string(id)+".a")
+		if testJS != "" {
+			b.tagBranchAttrs(mark, "!("+testJS+")")
+		}
 		b.branchDepth--
 	}
 	return slot
@@ -2169,6 +2201,46 @@ func (b *builder) buildListSlot(expr ast.Expr, parentID string) *ListSlot {
 	return slot
 }
 
+// arrayHasSpread reports whether an array literal has a `...x` element, which
+// stands for any number of items.
+func arrayHasSpread(arr *ast.ArrayExpr) bool {
+	for _, el := range arr.Elements {
+		if u, ok := el.(*ast.UnaryExpr); ok && u.Op == "..." {
+			return true
+		}
+	}
+	return false
+}
+
+// arrayFromMapCall rewrites `Array.from(source, mapFn)` to the equivalent
+// `Array.from(source).map(mapFn)` so it takes the same list path as `.map()`.
+func arrayFromMapCall(expr ast.Expr) (ast.Expr, bool) {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || len(call.Args) != 2 || call.Optional {
+		return nil, false
+	}
+	mem, ok := call.Callee.(*ast.MemberExpr)
+	if !ok || mem.Computed || mem.Optional {
+		return nil, false
+	}
+	obj, _ := mem.Object.(*ast.Identifier)
+	prop, _ := mem.Property.(*ast.Identifier)
+	if obj == nil || prop == nil || obj.Name != "Array" || prop.Name != "from" {
+		return nil, false
+	}
+	switch call.Args[1].(type) {
+	case *ast.ArrowFn:
+	default:
+		return nil, false
+	}
+	from := &ast.CallExpr{Position: call.Position, Callee: call.Callee, Args: []ast.Expr{call.Args[0]}}
+	return &ast.CallExpr{
+		Position: call.Position,
+		Callee:   &ast.MemberExpr{Position: mem.Position, Object: from, Property: &ast.Identifier{Name: "map"}},
+		Args:     []ast.Expr{call.Args[1]},
+	}, true
+}
+
 // resolveArrayLiteralExpr returns the ArrayExpr a .map() call iterates over,
 // resolving identifier/member sources through the build-time constant tables
 // (props locals, module consts). Returns nil when the array cannot be reduced
@@ -2185,7 +2257,7 @@ func (b *builder) resolveArrayLiteralExpr(expr ast.Expr) *ast.ArrayExpr {
 	if prop, ok := mem.Property.(*ast.Identifier); !ok || (prop.Name != "map" && prop.Name != "flatMap") {
 		return nil
 	}
-	if obj, ok := mem.Object.(*ast.ArrayExpr); ok {
+	if obj, ok := mem.Object.(*ast.ArrayExpr); ok && !arrayHasSpread(obj) {
 		return obj
 	}
 	// Fold the receiver (a prop, local, module const, signal initial, or a
@@ -2256,7 +2328,10 @@ func (b *builder) tryResolveArrayItems(arr *ast.ArrayExpr, mapExpr ast.Expr, lis
 		itemID := joinSlotIDKey(SlotID(listID), key)
 		restore := b.pushShadow(blockBindingNames(arrow.Body))
 		mark := b.markRowBindings()
+		savedRow := b.useIDRow
+		b.useIDRow = &useIDRow{prefix: string(itemID)}
 		contents := b.buildSlotNodes(concrete, string(itemID))
+		b.useIDRow = savedRow
 		b.tagRowBindings(mark, SlotID(listID))
 		restore()
 		if len(contents) == 0 {
@@ -2720,7 +2795,7 @@ func (b *builder) tryResolveItems(expr ast.Expr, listID string) []*ListItem {
 		return nil
 	}
 	arr, ok := mem.Object.(*ast.ArrayExpr)
-	if !ok {
+	if !ok || arrayHasSpread(arr) {
 		return nil
 	}
 	items, _ := b.tryResolveArrayItems(arr, expr, listID, false)
@@ -2748,9 +2823,38 @@ func (b *builder) buildFragmentSlots(frag *ast.JSXFragment, parentID string) []S
 	return result
 }
 
+// handlerPropAbsent reports a handler that reads an optional prop its call
+// site did not pass (`onChange={props.onChange}`, or a destructured
+// `onChange`). It binds nothing, so a component that needs no script without
+// the handler stays script-free: Slider takes onChange, and only the sliders
+// that pass one hydrate.
+func (b *builder) handlerPropAbsent(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.Identifier:
+		if !b.localParamNames[x.Name] || (b.localFuncProps != nil && b.localFuncProps[x.Name]) {
+			return false
+		}
+	case *ast.MemberExpr:
+		obj, ok := x.Object.(*ast.Identifier)
+		if x.Computed || !ok || obj.Name != "props" {
+			return false
+		}
+		if prop, ok := x.Property.(*ast.Identifier); !ok || (b.localFuncProps != nil && b.localFuncProps[prop.Name]) {
+			return false
+		}
+	default:
+		return false
+	}
+	k := b.evalValue(e).Kind()
+	return k == jsvalue.KindUndefined || k == jsvalue.KindNull
+}
+
 // buildHandlerDecl - extract event handler
 
 func (b *builder) buildHandlerDecl(attr *ast.JSXAttr, elementID string) *HandlerDecl {
+	if b.handlerPropAbsent(attr.Value) {
+		return nil
+	}
 	eventName, capture, direct := reactEventName(attr.Name)
 	// A handler forwarded as a prop must invoke the function from the child's
 	// props registry (created in the parent scope), not an inlined parent-local
@@ -2811,7 +2915,7 @@ func (b *builder) buildAttrBinding(attr *ast.JSXAttr, elementID string) *AttrBin
 		AttrName:    ast.HTMLAttrName(attr.Name),
 		SignalName:  signalName,
 		ExprSource:  exprSource,
-		Initial:     b.evalAttrValue(attr.Value),
+		Initial:     b.evalAttrInitialString(attr.Value),
 		InitialExpr: attr.Value,
 		IsString:    isStringType(attr.Value, b.sigMap()),
 		Prop:        formDefaultProp(attr.Name),
@@ -2833,10 +2937,15 @@ func formDefaultProp(name string) string {
 // buildStaticTextSlot is buildStaticValueSlot for JSX text positions: the
 // statically-evaluated result is HTML-escaped so a template literal or string
 // expression cannot inject real markup (e.g. <Code>{`return <h1>x</h1>`}</Code>).
-func (b *builder) buildStaticTextSlot(expr ast.Expr, parentID string) *StaticHTML {
+func (b *builder) buildStaticTextSlot(expr ast.Expr, parentID string) SlotNode {
 	v := b.evalValue(expr)
 	if nodes, ok := staticChildNodes(v, true); ok {
 		return nodes[0].(*StaticHTML)
+	}
+	if v.ContainsUnknown() && b.locateOnly == 0 {
+		// No build-time value: a slot lets the client compute it, and the
+		// emitter warns when there is no client code to do so.
+		return b.buildExprSlot(expr, parentID)
 	}
 	return &StaticHTML{HTML: escape.HTML(legacyConstString(expr, v))}
 }
@@ -3029,6 +3138,12 @@ func hasJSXInExpr(expr ast.Expr) bool {
 	switch e := expr.(type) {
 	case *ast.JSXElement, *ast.JSXFragment:
 		return true
+	case *ast.CallExpr:
+		// A portal is a branch of JSX content in `{open && createPortal(...)}`.
+		_, _, ok := portalCall(e)
+		return ok
+	case *ast.ParenExpr:
+		return hasJSXInExpr(e.Expr)
 	case *ast.BinaryExpr:
 		return hasJSXInExpr(e.Left) || hasJSXInExpr(e.Right)
 	case *ast.ConditionalExpr:
@@ -3105,6 +3220,10 @@ func (b *builder) collectSignalDecls(fn *ast.FnDecl) []SignalDecl {
 		}
 		isStr := isStringType(d.Initial, b.sigMap())
 		rawInit := signalRawInit(d.Initial, initial, b.sigMap(), b.localProps)
+		// A Map, Set or Date folds to its string form, which is not the value.
+		if b.evalValue(d.Initial).ContainsRuntimeObject() {
+			initial, isStr, rawInit = "", false, generateExprJS(d.Initial, b.sigMap())
+		}
 		// An identifier initializer the build cannot resolve (a module
 		// constant or binding only known at run time) must be evaluated on
 		// the client, not emitted as its own name.
@@ -4041,14 +4160,15 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		members = strings.Split(name[i+1:], ".")
 	}
 	imp, ok := b.externalImports[root]
-	if !ok || !isExternalPackageSpecifier(imp.Source) {
+	if !ok || !(imp.ReactIsland || isExternalPackageSpecifier(imp.Source)) {
 		return nil, false
 	}
 	// A component that resolved to Krate source (for example a path-aliased
 	// local module) is compiled normally. Only components whose implementation
 	// lives in node_modules become runtime islands; unresolved ones (no function)
-	// fall through to the bare-import island path.
-	if fn, known := b.functions[name]; known && fn != nil {
+	// fall through to the bare-import island path. A React island module is
+	// Krate source that is bundled for Preact on purpose.
+	if fn, known := b.functions[name]; known && fn != nil && !imp.ReactIsland {
 		src := b.ann.ComponentSources[fn.Name]
 		if !resolver.IsCompiledDependency(strings.ReplaceAll(src, "\\", "/")) {
 			return nil, false
@@ -4058,6 +4178,10 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		return nil, false
 	}
 	id := "island-" + strconv.Itoa(len(b.externals)+1)
+	// client:visible / client:idle / client:load choose when the island mounts.
+	// They are directives for Krate, never props of the component.
+	hydrate := ""
+	el, hydrate = splitClientDirective(el)
 	// Replace page-scope signal reads with island props and collect their value
 	// expressions for the page hydration boot.
 	usedSignals := map[string]bool{}
@@ -4151,10 +4275,57 @@ func (b *builder) buildExternalComponentSlot(name string, el *ast.JSXElement) (S
 		ID: id, Source: imp.Source, Local: root, Members: members,
 		Namespace: imp.Namespace, Props: props, Subtree: subtree, PropsJS: propsJS,
 		SSRPropsJS: ssrPropsJS, SSRPropsKnown: ssrKnown,
-		File: b.ann.SourceFile, Line: el.Position.Line, Col: el.Position.Col,
+		ReactIsland: imp.ReactIsland, ClientOnly: imp.ClientOnly, Hydrate: hydrate,
+		File: b.ann.SourceFile, Line: el.Position.Line, Col: el.Position.Col, Offset: el.Position.Offset,
 	})
 	html := `<div data-krate-island="` + id + `" style="display:contents"></div>`
 	return &StaticHTML{HTML: html}, true
+}
+
+// clientDirectiveOf returns the first `client:*` attribute of an element.
+func clientDirectiveOf(el *ast.JSXElement) (*ast.JSXAttr, string) {
+	if el == nil || el.Opening == nil {
+		return nil, ""
+	}
+	for _, attr := range el.Opening.Attributes {
+		if attr != nil && !attr.Spread && strings.HasPrefix(attr.Name, "client:") {
+			return attr, attr.Name
+		}
+	}
+	return nil, ""
+}
+
+// splitClientDirective removes the `client:*` directive from an island root and
+// returns the hydration strategy it names ("" for load, "visible" or "idle").
+// The element is copied, never modified: the same JSX may be built again.
+func splitClientDirective(el *ast.JSXElement) (*ast.JSXElement, string) {
+	if el == nil || el.Opening == nil {
+		return el, ""
+	}
+	strategy := ""
+	found := false
+	var kept []*ast.JSXAttr
+	for _, attr := range el.Opening.Attributes {
+		if attr != nil && !attr.Spread && strings.HasPrefix(attr.Name, "client:") {
+			found = true
+			switch attr.Name {
+			case "client:visible":
+				strategy = "visible"
+			case "client:idle":
+				strategy = "idle"
+			}
+			continue
+		}
+		kept = append(kept, attr)
+	}
+	if !found {
+		return el, ""
+	}
+	cp := *el
+	opening := *el.Opening
+	opening.Attributes = kept
+	cp.Opening = &opening
+	return &cp, strategy
 }
 
 // isExternalPackageSpecifier reports whether src is a bare npm package import
@@ -4410,8 +4581,9 @@ func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func
 	b.localProps = props
 	fold := collectLocalVars(fn.Body, b.sigMap(), props, nextUseId)
 	locals, inits := fold.locals, fold.inits
+	destructured := destructNames(fold.destructs)
 	for name, init := range inits {
-		if init == nil || fold.changed[name] {
+		if init == nil || fold.changed[name] || destructured[name] {
 			continue
 		}
 		switch init.(type) {

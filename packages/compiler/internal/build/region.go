@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 )
 
@@ -96,6 +97,20 @@ func enumerateRegions(tree *irtree.ComponentTree) []Region {
 		return nil
 	}
 	var regions []Region
+	// A page whose own default export is a runtime component (a file-level
+	// @runtime or // @runtime) is itself the region: the emitter writes its marker
+	// for the root, so without this the marker had no renderer and the page
+	// came out empty.
+	if root := tree.Root; root.Tier == irtree.TierRuntime {
+		return []Region{{
+			ID:            "region-" + string(root.ID),
+			ComponentName: root.Name,
+			SourcePath:    root.SourceFile,
+			Props:         root.RuntimeProps,
+			Runtime:       root.Runtime,
+			ServerExport:  serverExportFor(root),
+		}}
+	}
 	walkRegions(tree.Root, func(r Region) {
 		regions = append(regions, r)
 	})
@@ -244,7 +259,9 @@ func serverExportsOf(regions []Region) []ServerExport {
 			continue
 		}
 		seen[r.ServerExport] = true
-		out = append(out, ServerExport{Key: r.ServerExport, Name: r.ComponentName, SourcePath: r.SourcePath})
+		// The server bundle is built from source, where a renamed binding still
+		// has the name it was written with.
+		out = append(out, ServerExport{Key: r.ServerExport, Name: bundler.OriginalName(r.ComponentName), SourcePath: r.SourcePath})
 	}
 	return out
 }

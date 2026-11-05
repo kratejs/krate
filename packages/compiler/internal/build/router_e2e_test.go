@@ -190,3 +190,40 @@ func TestSegmentPagesBrowser(t *testing.T) {
 	}
 	t.Logf("segment pages (%s):\n%s", browser, out)
 }
+
+// TestRouterHooksBrowser drives usePathname, useParams, useSearchParams,
+// useRouter and useSelectedLayoutSegment(s) in a real browser against the real
+// Go server (testdata/nav_hooks_app). Runs when KRATE_BROWSER is set.
+func TestRouterHooksBrowser(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run the router hooks browser test")
+	}
+	if !canStopInProcessServer {
+		t.Skip("the in-process server needs a unix host")
+	}
+	ensureRuntimeDist(t)
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	root, cfg := serverlessProject(t, "nav_hooks_app")
+	base, err := startKrateServer(t, root, cfg)
+	if err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "nav_hooks_e2e.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("node", script, base, browser).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("router hooks browser test failed: %v\n%s", err, out)
+	}
+	t.Logf("router hooks (%s):\n%s", browser, out)
+}

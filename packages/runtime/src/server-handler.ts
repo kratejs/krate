@@ -25,15 +25,18 @@ import {
   allSuspense,
   canStreamOutOfOrder,
   FLASH_COOKIE,
+  flashPayloadOf,
   injectFlashNotice,
   parseRegionShell,
   regionReplaceScript,
-  replaceTitle,
   requestFlash,
+  signFlash,
   spliceShell,
   splitBodyScripts,
+  type RegionBoundary,
   type RegionShell,
 } from "./handler-html.js";
+import { mergeHead } from "./head-tags.js";
 import {
   applyDynamicRouteParams,
   baseName,
@@ -52,6 +55,7 @@ import {
   normalizeRoutePattern,
   requestRoute,
   rewriteDestination,
+  rewriteTargetPath,
   staticCacheControl,
 } from "./handler-routing.js";
 import {
@@ -59,10 +63,14 @@ import {
   newServerError,
   renderSegmentPage,
   type SegmentEntry,
+  SEGMENT_KIND_OF_STATUS,
   type SegmentKind,
   type SegmentMatch,
 } from "./handler-segments.js";
+import { httpFallbackStatus } from "./request-context.js";
 import { sha256Hex as portableSha256Hex } from "./sha256.js";
+import { INVALIDATE_CHANNEL, cacheSpecFromConfig, type CacheAdapter, type CacheSpec } from "./cache-adapter.js";
+import { isrStoreFor } from "./shared-isr.js";
 import { createMemoryStaticLayer } from "./static-memory.js";
 
 // Public types
@@ -70,9 +78,16 @@ import { createMemoryStaticLayer } from "./static-memory.js";
 export type DeployTarget = "node" | "vercel" | "netlify" | "cloudflare";
 
 export interface HandlerConfig {
+  /** The shared cache (krate.config cache), without its URL; see HandlerOptions.cache. */
+  cache?: CacheSpec & { urlEnv?: string };
   /** URL prefix the site is mounted under ("" or "/prefix"). */
   basePath: string;
-  trustProxy: boolean;
+  /**
+   * server.trustProxy: true trusts X-Forwarded-Host/Proto from a proxy of
+   * yours in front of the platform, false trusts no forwarded header, null
+   * (not configured) uses what each platform guarantees (see PLATFORMS).
+   */
+  trustProxy: boolean | null;
   /** Request body cap for pages and middleware, bytes. */
   maxBodyBytes: number;
   /** Request body cap for API routes and actions, bytes. */
@@ -138,7 +153,7 @@ export interface KrateServerModules {
   /** Page server bundles keyed by their manifest bundlePath. */
   pages?: Record<string, any>;
   /** Runtime component renderers keyed by region bundlePath. */
-  runtime?: Record<string, (propsJSON: string) => string | Promise<string>>;
+  runtime?: Record<string, (props: string | Record<string, any>) => string | Promise<string>>;
   /** API route modules keyed by route key. */
   api?: Record<string, any>;
   /** Server action modules keyed by manifest file. */
@@ -168,10 +183,25 @@ export interface HandlerOptions {
   static?: StaticLayer;
   /** Page ISR cache storage. Defaults to a bounded in-memory store per instance. */
   isrStore?: IsrStore;
-  /** Overrides data.config.trustProxy (the serverless platforms always set X-Forwarded-*). */
-  trustProxy?: boolean;
+  /**
+   * A shared cache for the ISR page cache and the data cache: a CacheAdapter
+   * (your own, or createRedisAdapter from @krate/runtime/cache-redis) or a spec
+   * such as { adapter: "redis", url }. Without it each instance keeps its own
+   * caches. data.config.cache (from krate.config) is the default; its URL comes
+   * from the environment (KRATE_CACHE_URL, or the variable named by urlEnv).
+   */
+  cache?: CacheSpec | CacheAdapter | Promise<CacheAdapter>;
+  /** Overrides data.config.trustProxy. */
+  trustProxy?: boolean | null;
   /** Hex sha256 for error digests; defaults to the portable implementation. */
   sha256Hex?(input: string): string;
+  /**
+   * Key the no-JS flash cookie is signed with. Defaults to the
+   * KRATE_FLASH_SECRET environment variable. Without a key the node target
+   * signs with a random per-process key and the serverless targets carry no
+   * flash state at all; an unsigned flash cookie is never trusted.
+   */
+  flashSecret?: string;
 }
 
 export type KrateHandler = (request: Request, ctx?: HandlerContext) => Promise<Response>;
@@ -269,6 +299,11 @@ function headerPairs(headers: Headers): Array<[string, string]> {
   return out;
 }
 
+/** The scheme the client used, from the X-Forwarded-Proto the server sets or a trusted proxy sends. */
+function isHTTPSRequest(headers: Headers): boolean {
+  return (headers.get("x-forwarded-proto") || "").split(",")[0].trim().toLowerCase() === "https";
+}
+
 function isStaticAssetPath(p: string): boolean {
   return STATIC_ASSET_EXTS.has(extName(p).toLowerCase());
 }
@@ -279,7 +314,16 @@ function requestCookiesOf(headers: Headers): Map<string, string> {
     const i = part.indexOf("=");
     if (i <= 0) continue;
     const name = part.slice(0, i).trim();
-    if (name && !jar.has(name)) jar.set(name, part.slice(i + 1).trim());
+    if (!name || jar.has(name)) continue;
+    // Same parsing as the action context and the Node sidecar: unquote, then percent-decode.
+    let value = part.slice(i + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      // keep the raw value
+    }
+    jar.set(name, value);
   }
   return jar;
 }
@@ -303,6 +347,59 @@ function attachCookies(request: Request): Request {
 
 const sleepMicrotask = () => Promise.resolve();
 
+/**
+ * What each platform guarantees about a request, from its documentation:
+ *   vercel      x-forwarded-host (= Host) and x-forwarded-proto are set by Vercel,
+ *               x-forwarded-for / x-real-ip are overwritten with the client address
+ *               (external values are not forwarded).
+ *   netlify     the request URL is the public one; the client address is
+ *               x-nf-client-connection-ip. X-Forwarded-* are not relied on.
+ *   cloudflare  the request URL is the public one; the client address is
+ *               cf-connecting-ip. X-Forwarded-For is appended to what the client
+ *               sent and X-Forwarded-Host is not set, so neither is used.
+ *   node        the node server has already replaced the headers with what the
+ *               socket showed (or kept a proxy's with server.trustProxy).
+ */
+interface PlatformGuarantees {
+  forwardedHostProto: boolean;
+  clientIP: string[];
+}
+const PLATFORMS: Record<DeployTarget, PlatformGuarantees> = {
+  node: { forwardedHostProto: false, clientIP: [] },
+  vercel: { forwardedHostProto: true, clientIP: ["x-real-ip", "x-forwarded-for"] },
+  netlify: { forwardedHostProto: false, clientIP: ["x-nf-client-connection-ip"] },
+  cloudflare: { forwardedHostProto: false, clientIP: ["cf-connecting-ip"] },
+};
+
+const MIN_FLASH_SECRET = 16;
+let warnedFlashSecret = false;
+
+/**
+ * The key flash cookies are signed with, or null when this deployment cannot
+ * sign them reliably. A configured key (option or KRATE_FLASH_SECRET) is shared
+ * by every instance. The node target is one long-lived process, so a random
+ * key per process is enough (replicas behind a load balancer need the shared
+ * key). A serverless instance has no memory the next one shares: without a key
+ * the flash is not carried at all rather than failing on a random instance.
+ */
+function resolveFlashSecret(option: string | undefined, target: DeployTarget): string | null {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  const configured = option || (env && env.KRATE_FLASH_SECRET) || "";
+  if (configured) {
+    if (configured.length < MIN_FLASH_SECRET && !warnedFlashSecret) {
+      warnedFlashSecret = true;
+      console.warn(`[krate] KRATE_FLASH_SECRET is shorter than ${MIN_FLASH_SECRET} characters: use a random value of at least 32 bytes.`);
+    }
+    return configured;
+  }
+  if (target !== "node") return null;
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let hex = "";
+  for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+  return hex;
+}
+
 // Handler factory
 
 export function createKrateHandler(options: HandlerOptions): KrateHandler {
@@ -311,11 +408,13 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const target = options.target;
   // Prerendered pages carried in the bundle (platforms that route pages through the function for middleware).
   const staticLayer = options.static || (data.staticPages ? createMemoryStaticLayer(data.staticPages) : undefined);
-  const trustProxy = options.trustProxy !== undefined ? options.trustProxy : cfg.trustProxy;
+  const trustProxy: boolean | null = options.trustProxy !== undefined ? options.trustProxy : cfg.trustProxy === undefined ? null : cfg.trustProxy;
+  const platform = PLATFORMS[target];
   const basePath = cfg.basePath || "";
   const hashed = new Set(data.hashedAssets);
   const staticOnly = new Set(data.staticOnlyRoutes.map(normalizeRoutePattern));
   const sha256Hex = options.sha256Hex || portableSha256Hex;
+  const flashSecret = resolveFlashSecret(options.flashSecret, target);
   const segEntries = data.segments || [];
   const segPages = data.segmentPages || {};
   const segDirByRoute = new Map<string, string>();
@@ -335,8 +434,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
    * a dynamic route that matched the URL but rejected its params. null means
    * no custom page.
    */
-  function errorPage(urlPath: string, status: 404 | 500, route?: { segDir?: string; closed?: string }): ErrorPage | null {
-    const kind: SegmentKind = status === 404 ? "notFound" : "error";
+  function errorPage(urlPath: string, status: 401 | 403 | 404 | 500, route?: { segDir?: string; closed?: string }): ErrorPage | null {
+    const kind: SegmentKind = SEGMENT_KIND_OF_STATUS[status];
     if (segEntries.length > 0) {
       let m: SegmentMatch | null = null;
       const closedDir = route && route.closed ? segDirByRoute.get(normalizeRoutePattern(route.closed)) : undefined;
@@ -346,7 +445,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       const html = m ? segPages[m.file] : undefined;
       if (m && html !== undefined) return { html, match: m };
     }
-    const global = status === 404 ? data.html404 : data.html500;
+    const global = status === 404 ? data.html404 : status === 500 ? data.html500 : "";
     return global ? { html: global, match: null } : null;
   }
   let requestSeq = 0;
@@ -358,13 +457,21 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   if (!cacheRuntime().renderStore) installRenderStore(new AsyncLocalStorage());
   patchFetch();
 
+  // The ISR and data caches: this instance's memory, or the shared cache adapter.
+  const memoryIsr = new MemoryIsrStore(cfg.ssr.maxCacheSize > 0 ? cfg.ssr.maxCacheSize : 512);
+  const sharedCache = options.isrStore
+    ? { store: options.isrStore, ready: Promise.resolve<CacheAdapter | null>(null) }
+    : isrStoreFor(options.cache ?? cacheSpecFromConfig(cfg.cache), memoryIsr);
+  let sharedAdapter: CacheAdapter | null = null;
+  const instanceId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
   // Pages: most specific route first, like SSRServer.FindPageForRoute.
   const pagesBySpecificity = [...data.pages].sort((a, b) => compareRouteSpecificity(a.route, b.route));
   const manifest = { pages: data.pages as ManifestPage[], regions: data.regions };
   const core: SSRCore = createSSRCore({
     manifest,
     sha256Hex: options.sha256Hex,
-    isrStore: options.isrStore || new MemoryIsrStore(cfg.ssr.maxCacheSize > 0 ? cfg.ssr.maxCacheSize : 512),
+    isrStore: sharedCache.store,
     loadPageModule: async (page) => {
       const mod = modules.pages && modules.pages[page.bundlePath || ""];
       if (!mod) throw new Error(`server bundle for ${page.route} is not part of this deployment (${page.bundlePath})`);
@@ -427,6 +534,17 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     return mwMatchers;
   }
 
+  /**
+   * A matcher-less middleware is skipped only for a path that is a real file in
+   * the static layer. The extension alone is not enough: /api/files/x.pdf is a
+   * dynamic route that merely looks like a file.
+   */
+  async function skipsMiddleware(p: string): Promise<boolean> {
+    if (!staticLayer || !isStaticAssetPath(p)) return false;
+    if (p === "/api" || p.startsWith("/api/") || p.startsWith("/__krate/")) return false;
+    return !!(await staticLayer.exists(p));
+  }
+
   /** Runs middleware; a Response ends the request, null continues (headers/rewrite already applied). */
   async function runMiddleware(rs: ReqState): Promise<Response | null> {
     const p = rs.path;
@@ -439,7 +557,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     } catch (e: any) {
       return middlewareFailed(rs, e);
     }
-    if (!matchers && isStaticAssetPath(p)) return null;
+    if (!matchers && (await skipsMiddleware(p))) return null;
     if (matchers && !matchers.some((re) => re.test(p))) return null;
     let result: any;
     try {
@@ -491,28 +609,69 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       q = target.slice(qi + 1);
     }
     if (!p.startsWith("/")) p = "/" + p;
-    rs.path = p;
+    rs.path = rewriteTargetPath(p);
     if (q) rs.search = "?" + q;
   }
 
   // Request helpers
 
-  function requestOrigin(request: Request, url: URL): string {
-    if (trustProxy) {
-      const proto = (request.headers.get("x-forwarded-proto") || "").split(",")[0].trim().toLowerCase();
-      const host = (request.headers.get("x-forwarded-host") || "").split(",")[0].trim();
-      const scheme = proto === "http" || proto === "https" ? proto : url.protocol.replace(":", "");
-      return scheme + "://" + (host || url.host);
+  // sanitizeForwarded makes the forwarding headers of a request mean what the
+  // rest of the handler (and middleware, API routes, actions) takes them to
+  // mean, whatever the client sent:
+  //   - x-forwarded-host/proto come from the platform when it guarantees them
+  //     (or from the proxy of yours when trustProxy is true), else from the
+  //     request URL;
+  //   - on a serverless platform x-forwarded-for / x-real-ip carry the one
+  //     client address the platform reports (never a chain the client wrote),
+  //     and `forwarded` is dropped. trustProxy: true leaves them as delivered.
+  // The node target is normalised by the node server before it gets here.
+  function sanitizeForwarded(request: Request): Request {
+    const url = new URL(request.url);
+    const h = new Headers(request.headers);
+    const trustHostProto = trustProxy === null ? platform.forwardedHostProto : trustProxy;
+    const first = (name: string) => (h.get(name) || "").split(",")[0].trim();
+    const proto = first("x-forwarded-proto").toLowerCase();
+    const host = first("x-forwarded-host");
+    if (trustHostProto) {
+      h.set("x-forwarded-proto", proto === "http" || proto === "https" ? proto : url.protocol.replace(":", ""));
+      h.set("x-forwarded-host", host || url.host);
+    } else {
+      h.set("x-forwarded-proto", url.protocol.replace(":", ""));
+      h.set("x-forwarded-host", url.host);
     }
-    return url.protocol + "//" + url.host;
+    if (target !== "node" && trustProxy !== true) {
+      h.delete("forwarded");
+      h.delete("x-real-ip");
+      h.delete("x-forwarded-for");
+      let ip = "";
+      if (trustProxy === null) {
+        for (const name of platform.clientIP) {
+          const v = (request.headers.get(name) || "").split(",")[0].trim();
+          if (v) {
+            ip = v;
+            break;
+          }
+        }
+      }
+      if (ip) {
+        h.set("x-forwarded-for", ip);
+        h.set("x-real-ip", ip);
+      }
+    }
+    return new Request(request, { headers: h });
+  }
+
+  // handle() has run sanitizeForwarded: the forwarded headers can be read as they are.
+  function requestOrigin(request: Request, url: URL): string {
+    const proto = (request.headers.get("x-forwarded-proto") || "").split(",")[0].trim().toLowerCase();
+    const host = (request.headers.get("x-forwarded-host") || "").split(",")[0].trim();
+    const scheme = proto === "http" || proto === "https" ? proto : url.protocol.replace(":", "");
+    return scheme + "://" + (host || url.host);
   }
 
   function requestHost(rs: ReqState): string {
-    if (trustProxy) {
-      const h = (rs.request.headers.get("x-forwarded-host") || "").split(",")[0].trim();
-      if (h) return h;
-    }
-    return new URL(rs.request.url).host;
+    const h = (rs.request.headers.get("x-forwarded-host") || "").split(",")[0].trim();
+    return h || new URL(rs.request.url).host;
   }
 
   function fullURL(rs: ReqState): string {
@@ -585,20 +744,30 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const p = rs.path;
     if (p === "" || p.endsWith("/") || isFileLikePath(p)) return null;
     if (rs.method !== "GET" && rs.method !== "HEAD") return null;
-    let target = baseName(p) + "/";
+    // "./" keeps a segment such as "ftp:3232235777" or "\\host" from parsing as an absolute URL.
+    let target = "./" + baseName(p) + "/";
     if (rs.search) target += rs.search;
     rs.res.set("Location", target);
     return finish(rs, 301, null);
   }
 
   /** Answers 404 with a not-found page; segment pages are never cached. */
-  function custom404(rs: ReqState, page: ErrorPage): Response {
+  function custom404(rs: ReqState, page: ErrorPage, status: 401 | 403 | 404 = 404): Response {
     rs.res.set("Content-Type", "text/html; charset=utf-8");
     rs.res.delete("Cache-Control");
     rs.res.delete("Etag");
     rs.res.delete("Last-Modified");
     rs.res.set("Cache-Control", "no-store");
-    return finish(rs, 404, page.match ? renderSegmentPage(page.html, page.match) : page.html);
+    return finish(rs, status, page.match ? renderSegmentPage(page.html, page.match) : page.html);
+  }
+
+  /** The 403 or 401 response of a request whose render called forbidden() or unauthorized(). */
+  function accessDenied(rs: ReqState, status: 401 | 403, route?: { segDir?: string; closed?: string }): Response {
+    rs.res.delete("X-Krate-Cache");
+    const page = errorPage(rs.path, status, route);
+    if (page) return custom404(rs, page, status);
+    rs.res.set("Cache-Control", "no-store");
+    return httpError(rs, status === 403 ? "403 Forbidden" : "401 Unauthorized", status);
   }
 
   /** handlerWith404: internal-path guard, cache policy, dynamic templates, static files, custom 404. */
@@ -712,8 +881,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     stack?: string;
     cacheStatus?: string;
     notFound?: boolean;
+    denied?: 401 | 403;
     redirect?: string;
     title?: string;
+    /** <Head> tags (meta, link, script) the region rendered. */
+    head?: string;
     noStore?: boolean;
     fatal?: boolean;
   }
@@ -758,15 +930,17 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const pending = startRegionRenders(page, route, shellInfo, renderReq);
 
     if (outOfOrder && !isISR && canStreamOutOfOrder(shellInfo.all) && (!page.serverComponents || allSuspense(shellInfo.all))) {
-      return streamSiblingRegions(rs, shell, shellInfo, pending);
+      return streamSiblingRegions(rs, route, shell, shellInfo, pending);
     }
 
     // Ordered assembly: wait for every region, then decide status, headers and body.
     const regionHTML = new Map<string, string>();
     let isISRFrame = false;
     let cacheStatus = "";
-    let titleOverride = "";
+    // The <title> and <Head> tags each region rendered, by region id.
+    const frameHead = new Map<string, { title: string; head: string }>();
     let notFound = false;
+    let denied: 401 | 403 | 0 = 0;
     let redirect = "";
     let renderErr = "";
     let fatalErr = "";
@@ -777,8 +951,9 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       switch (frame.type) {
         case "region": {
           const id = frame.id || "";
-          if (id !== "page" && (frame.notFound || frame.redirect)) {
+          if (id !== "page" && (frame.notFound || frame.denied || frame.redirect)) {
             notFound = notFound || !!frame.notFound;
+            denied = denied || frame.denied || 0;
             if (!redirect) redirect = frame.redirect || "";
             continue;
           }
@@ -787,8 +962,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
             isISRFrame = !!frame.cacheStatus;
             cacheStatus = frame.cacheStatus || "";
             notFound = !!frame.notFound;
+            denied = denied || frame.denied || 0;
             redirect = frame.redirect || "";
-            titleOverride = frame.title || "";
             if ((frame.status || 0) >= 500 || frame.error) {
               renderErr = frame.error || `page-region render failed with status ${frame.status}`;
               errStack = frame.stack || "";
@@ -796,9 +971,10 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
               if (frame.fatal) fatalErr = renderErr;
               continue;
             }
-            if (frame.notFound) continue;
+            if (frame.notFound || frame.denied) continue;
           }
           regionHTML.set(id, frame.html || "");
+          if (frame.title || frame.head) frameHead.set(id, { title: frame.title || "", head: frame.head || "" });
           break;
         }
         case "error": {
@@ -818,7 +994,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     // instead of the baked body (build/serve.go failOnRenderErr).
     const routeRef = { segDir: page.segDir !== undefined ? page.segDir : "" };
     const segError = errorPage(rs.path, 500, routeRef);
-    if (segError && segError.match && renderErr && !fatalErr && !notFound && !redirect) fatalErr = renderErr;
+    if (segError && segError.match && renderErr && !fatalErr && !notFound && !denied && !redirect) fatalErr = renderErr;
     if (fatalErr) {
       // A server component failed: there is no meaningful baked body, so answer 500.
       const srvErr = newServerError(fatalErr, errStack, errDigest || sha256Hex(fatalErr + "\n" + errStack).slice(0, 10), false);
@@ -831,15 +1007,15 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       if (segError && segError.match) return finish(rs, 500, renderSegmentPage(segError.html, segError.match, srvErr));
       return finish(rs, 500, segError ? segError.html : PLAIN_500);
     }
-    if (notFound || redirect) {
+    if (notFound || denied || redirect) {
       if (redirect) return goRedirect(redirect, rs.path, rs.method, 302, rs.res);
+      if (denied) return accessDenied(rs, denied, routeRef);
       const page404 = errorPage(rs.path, 404, routeRef);
       if (page404) return custom404(rs, page404);
       rs.res.set("Cache-Control", "no-store");
       return notFoundText(rs);
     }
 
-    if (titleOverride) shell = replaceTitle(shell, titleOverride);
     if (renderErr) {
       console.error(`[krate] Page region error (${route}): ${renderErr}`);
       rs.res.set("X-Krate-Error", "render");
@@ -856,11 +1032,47 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     }
     let html = "";
     spliceShell(shell, shellInfo.roots, regionHTML, (c) => (html += c));
+    // The title and <Head> tags go into the head after splicing: the marker
+    // offsets belong to the baked shell. Only regions that ended up in the
+    // page count (the children of a replaced region are dropped with it).
+    if (frameHead.size > 0) {
+      const live = new Set<string>();
+      const walk = (children: RegionBoundary[]) => {
+        for (const b of children) {
+          if (regionHTML.has(b.id)) live.add(b.id);
+          else if (b.kind === "suspense") walk(b.children);
+        }
+      };
+      walk(shellInfo.roots);
+      let title = "";
+      let head = "";
+      for (const b of shellInfo.all) {
+        const h = live.has(b.id) ? frameHead.get(b.id) : undefined;
+        if (!h) continue;
+        if (h.title) title = h.title;
+        head += h.head;
+      }
+      html = mergeHead(html, title, head);
+    }
     return finish(rs, 200, html);
   }
 
+  // A <Head> inside a streamed Suspense region renders after the head of the
+  // response has been sent. It is applied by the region's script instead, which
+  // crawlers that do not run scripts never see: warn once per region.
+  const warnedStreamedHead = new Set<string>();
+  function warnStreamedHead(route: string, id: string): void {
+    const key = route + "::" + id;
+    if (warnedStreamedHead.has(key)) return;
+    warnedStreamedHead.add(key);
+    console.warn(
+      `[krate] <Head> inside the streamed region ${id} of ${route} reaches the document only through the region's script: ` +
+        "crawlers that do not run scripts will not see it. Move it into the page component outside <Suspense>.",
+    );
+  }
+
   /** Sibling Suspense regions stream in completion order after the shell. */
-  function streamSiblingRegions(rs: ReqState, shell: string, shellInfo: RegionShell, pending: Array<Promise<Frame>>): Response {
+  function streamSiblingRegions(rs: ReqState, route: string, shell: string, shellInfo: RegionShell, pending: Array<Promise<Frame>>): Response {
     const [prefix, tail] = splitBodyScripts(shell);
     const enc = new TextEncoder();
     const method = rs.method;
@@ -871,13 +1083,14 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
           pending.map(async (p) => {
             const f = await p;
             if (f.type !== "region" || !f.id) return;
-            if (f.notFound || f.redirect || f.fatal || (f.status || 0) >= 500 || f.error) {
+            if (f.notFound || f.denied || f.redirect || f.fatal || (f.status || 0) >= 500 || f.error) {
               // The shell is already on the wire: keep the baked fallback for this region.
               if (f.error) console.error(`[krate] region ${f.id} failed: ${f.error}`);
               return;
             }
-            if (!f.html) return;
-            controller.enqueue(enc.encode(regionReplaceScript(f.id, f.html)));
+            if (!f.html && !f.head && !f.title) return;
+            if (f.head || f.title) warnStreamedHead(route, f.id);
+            controller.enqueue(enc.encode(regionReplaceScript(f.id, f.html || "", f.head, f.title)));
           }),
         );
         controller.enqueue(enc.encode(tail));
@@ -902,7 +1115,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     for (const rw of cfg.rewrites) {
       if (matchRedirect(p, rw.source)) {
         const rewritten = rewriteDestination(p, rw.source, rw.destination);
-        rs.path = safeDecode(rewritten);
+        rs.path = rewriteTargetPath(safeDecode(rewritten));
         break;
       }
     }
@@ -1018,6 +1231,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     rs.res.set("Content-Type", "application/json");
     rs.res.set("Cache-Control", "no-store");
     if (status === 404) return finish(rs, 404, '{"error":"API Route Not Found"}');
+    if (status === 403) return finish(rs, 403, '{"error":"Forbidden"}');
+    if (status === 401) return finish(rs, 401, '{"error":"Unauthorized"}');
     if (status === 405) {
       rs.res.set("Allow", (allow || []).join(", "));
       return finish(rs, 405, '{"error":"Method Not Allowed"}');
@@ -1061,6 +1276,30 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   // Revalidation, applied to this instance's caches.
 
+  // Other instances' revalidations: their shared-cache entries are gone already,
+  // so only this instance's in-memory caches need clearing.
+  void sharedCache.ready.then(async (adapter) => {
+    if (!adapter) return;
+    sharedAdapter = adapter;
+    try {
+      await adapter.subscribe(INVALIDATE_CHANNEL, (message) => {
+        if (message === "*") {
+          core.devInvalidate("");
+          return;
+        }
+        try {
+          const m = JSON.parse(message) as { origin?: string; targets?: unknown[]; tags?: string[] };
+          if (m.origin === instanceId) return;
+          void core.applyInternalOp("cache-invalidate", { targets: m.targets || [], tags: m.tags || [] });
+        } catch {
+          /* not ours */
+        }
+      });
+    } catch (err) {
+      console.warn(`[krate] could not subscribe to cache invalidations: ${(err as Error)?.message || err}`);
+    }
+  });
+
   async function applyRevalidation(payload: { paths: Array<{ path: string; type?: string }>; tags: string[] }) {
     const revalidated: Array<{ target: string; kind: string; routes?: string[] }> = [];
     const skipped: Array<{ target: string; reason: string }> = [];
@@ -1080,8 +1319,17 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const tags = payload.tags.map((t) => t.trim()).filter(Boolean);
     for (const t of tags) revalidated.push({ target: t, kind: "tag" });
     if (targets.length || tags.length) {
+      await sharedCache.ready;
       await core.applyInternalOp("cache-invalidate", { targets, tags });
-      if (target !== "node") {
+      if (sharedAdapter) {
+        // The shared store is already purged; tell the other instances to drop
+        // what they hold in memory (their region caches).
+        try {
+          await sharedAdapter.publish(INVALIDATE_CHANNEL, JSON.stringify({ origin: instanceId, targets, tags }));
+        } catch (err) {
+          console.warn(`[krate] could not tell the other instances about the revalidation: ${(err as Error)?.message || err}`);
+        }
+      } else if (target !== "node") {
         for (const r of revalidated) {
           skipped.push({
             target: r.target,
@@ -1220,6 +1468,14 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       }
       return new Response(out.body, { status, headers: rs.res });
     } catch (err) {
+      // notFound(), forbidden() and unauthorized() end the request with that status.
+      const fallback = httpFallbackStatus(err);
+      if (fallback === 403 || fallback === 401) return apiFailure(rs, fallback);
+      if (fallback === 404) {
+        rs.res.set("Content-Type", "application/json");
+        rs.res.set("Cache-Control", "no-store");
+        return finish(rs, 404, '{"error":"Not Found"}');
+      }
       console.error(`[krate] API error (${rs.method} ${rs.path}): ${(err && (err as any).stack) || err}`);
       return apiFailure(rs, 500);
     }
@@ -1240,9 +1496,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     if (typeof o.maxAge === "number" && isFinite(o.maxAge)) s += "; Max-Age=" + Math.floor(o.maxAge);
     if (o.expires instanceof Date) s += "; Expires=" + o.expires.toUTCString();
     if (o.httpOnly !== false) s += "; HttpOnly";
-    if (o.secure) s += "; Secure";
     const same = o.sameSite === undefined ? "Lax" : o.sameSite;
-    if (same) s += "; SameSite=" + (same === true ? "Strict" : String(same).replace(/[^A-Za-z]/g, ""));
+    const sameText = same ? (same === true ? "Strict" : String(same).replace(/[^A-Za-z]/g, "")) : "";
+    // Browsers drop SameSite=None cookies that are not Secure.
+    if (o.secure || sameText.toLowerCase() === "none") s += "; Secure";
+    if (sameText) s += "; SameSite=" + sameText;
     return s;
   }
 
@@ -1268,6 +1526,9 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   function makeActionContext(headers: Headers, id: string, urlPath: string) {
     const jar = parseActionCookies(headers.get("cookie"));
     const setCookies: string[] = [];
+    // Cookies set over https are Secure unless the action says otherwise.
+    const https = isHTTPSRequest(headers);
+    const withSecure = (opts?: any) => Object.assign({}, opts, { secure: opts && opts.secure !== undefined ? opts.secure : https });
     const cookies = {
       get(name: string) {
         return jar.get(name);
@@ -1279,11 +1540,11 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
         return jar.has(name);
       },
       set(name: string, value: unknown, opts?: any) {
-        setCookies.push(serializeActionCookie(name, value, opts));
+        setCookies.push(serializeActionCookie(name, value, withSecure(opts)));
         jar.set(name, String(value));
       },
       delete(name: string, opts?: any) {
-        setCookies.push(serializeActionCookie(name, "", Object.assign({}, opts, { maxAge: 0 })));
+        setCookies.push(serializeActionCookie(name, "", withSecure(Object.assign({}, opts, { maxAge: 0 }))));
         jar.delete(name);
       },
     };
@@ -1323,6 +1584,29 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const error: Record<string, string> = { message };
     if (digest) error.digest = digest;
     return new Response(JSON.stringify({ ok: false, error }), { status, headers: actionHeaders("application/json", cookies) });
+  }
+
+  /**
+   * actionFallback answers an action that called notFound(), forbidden() or
+   * unauthorized(): JSON for the fetch client, else the nearest segment page of
+   * the page the form was posted from (the sanitized return path).
+   */
+  function actionFallback(rs: ReqState, status: 401 | 403 | 404, fetchMode: boolean, cookies: string[], returnTo: string): Response {
+    const label = status === 403 ? "Forbidden" : status === 401 ? "Unauthorized" : "Not Found";
+    if (fetchMode) return actionFail(status, label, undefined, cookies);
+    const headers = actionHeaders("text/html; charset=utf-8", cookies);
+    headers.set("Cache-Control", "no-store");
+    let from = "/";
+    try {
+      if (returnTo) from = safeDecode(new URL(returnTo, "http://x").pathname);
+      if (basePath && (from === basePath || from.startsWith(basePath + "/"))) from = from.slice(basePath.length) || "/";
+    } catch {
+      from = "/";
+    }
+    const page = errorPage(from, status);
+    if (page) return new Response(page.match ? renderSegmentPage(page.html, page.match) : page.html, { status, headers });
+    headers.set("Content-Type", "text/plain; charset=utf-8");
+    return new Response(status + " " + label + "\n", { status, headers });
   }
 
   function randomDigest(): string {
@@ -1429,10 +1713,12 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     let result: any;
     let redirect = "";
     let failure: any = null;
+    let fallback: 401 | 403 | 404 | 0 = 0;
     try {
       result = await revalidateStore.run(scope, () => actionStore.run(ctx, () => fn(...args)));
     } catch (e: any) {
       if (e && typeof e.__krateRedirect === "string") redirect = e.__krateRedirect;
+      else if ((fallback = httpFallbackStatus(e))) failure = null;
       else failure = e === undefined ? new Error("undefined") : e;
     }
     let revalidation: { paths: unknown[]; tags: string[] } | null = null;
@@ -1443,6 +1729,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     }
     if (!redirect && result && typeof result === "object" && typeof result.redirect === "string") redirect = result.redirect;
     redirect = safeActionRedirect(redirect);
+    if (fallback && !failure) return withHeaders(rs, actionFallback(rs, fallback, fetchMode, ctx.setCookies, reqHeaders.get("x-krate-return") || ""));
     let body = "";
     if (!failure && fetchMode) {
       const envelope: Record<string, unknown> = { ok: true, result: result === undefined ? null : result };
@@ -1469,18 +1756,27 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     if (fetchMode) return withHeaders(rs, new Response(body, { status: 200, headers: actionHeaders("application/json", ctx.setCookies) }));
     const headers = actionHeaders("text/plain; charset=utf-8", ctx.setCookies);
     headers.set("location", redirect || reqHeaders.get("x-krate-return") || "/");
-    // The returned state would be lost across the 303; carry it in a short-lived cookie.
+    // The returned state would be lost across the 303; carry it in a short-lived
+    // signed cookie. A page can set cookies for sibling hosts, so an unsigned one
+    // is never read back (see resolveFlashSecret for the deployments without a key).
     if (!redirect && result !== undefined) {
-      try {
-        const json = JSON.stringify({ a: id, r: result });
-        const bytes = new TextEncoder().encode(json);
-        let bin = "";
-        for (const b of bytes) bin += String.fromCharCode(b);
-        const flash = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-        if (flash.length <= 3000) headers.append("set-cookie", FLASH_COOKIE + "=" + flash + "; Path=/; Max-Age=60; SameSite=Lax");
-        else console.warn(`[krate] action ${entry.export} returned state too large to carry across the redirect; it is not shown after a no-JS submit`);
-      } catch {
-        // unserializable state is not carried
+      if (flashSecret === null) {
+        if (!warnedFlashSecret) {
+          warnedFlashSecret = true;
+          console.warn(
+            "[krate] action state is not shown after a no-JS form submit on this target: set KRATE_FLASH_SECRET (a random string of at least 32 bytes, the same on every instance) to enable it",
+          );
+        }
+      } else {
+        try {
+          const payload = flashPayloadOf(id, result);
+          if (payload.length <= 2800) {
+            const flash = await signFlash(flashSecret, payload);
+            headers.append("set-cookie", FLASH_COOKIE + "=" + flash + "; Path=/; Max-Age=60; SameSite=Lax" + (isHTTPSRequest(reqHeaders) ? "; Secure" : ""));
+          } else console.warn(`[krate] action ${entry.export} returned state too large to carry across the redirect; it is not shown after a no-JS submit`);
+        } catch {
+          // unserializable state is not carried
+        }
       }
     }
     return withHeaders(rs, new Response(null, { status: 303, headers }));
@@ -1513,7 +1809,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   /** flashNoticeMiddleware: render pending no-JS form feedback into a page. */
   async function flashNotice(rs: ReqState, next: (rs: ReqState) => Promise<Response>): Promise<Response> {
     if (rs.method !== "GET" || (extName(rs.path) !== "" && !isHTMLDocRequest(rs.path))) return next(rs);
-    const flash = requestFlash(rs.headers.get("cookie"));
+    const flash = await requestFlash(rs.headers.get("cookie"), flashSecret);
     if (!flash) return next(rs);
     // The page is rendered fresh with the notice: drop conditional and range headers.
     const headers = new Headers(rs.headers);
@@ -1611,6 +1907,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   return async function handle(request: Request, ctx: HandlerContext = {}): Promise<Response> {
     if (ctx.waitUntil) latestWaitUntil = ctx.waitUntil.bind(ctx);
+    request = sanitizeForwarded(request);
     const url = new URL(request.url);
     const rs: ReqState = {
       request,

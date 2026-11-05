@@ -8,6 +8,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/htmlspec"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 // buildStaticElementSlots builds an intrinsic HTML element. When the element
@@ -119,6 +120,12 @@ func (b *builder) elementBindings(el *ast.JSXElement, id SlotID) (handlers []Han
 		case isAttrBinding(attr):
 			if a := b.buildAttrBinding(attr, string(id)); a != nil {
 				attrs = append(attrs, *a)
+			} else if a := b.customElementPropBinding(el.Opening.Name, attr, id); a != nil {
+				attrs = append(attrs, *a)
+			}
+		case attr.Value != nil && htmlspec.IsCustomElement(el.Opening.Name):
+			if a := b.customElementPropBinding(el.Opening.Name, attr, id); a != nil {
+				attrs = append(attrs, *a)
 			}
 		}
 	}
@@ -128,6 +135,26 @@ func (b *builder) elementBindings(el *ast.JSXElement, id SlotID) (handlers []Han
 		attrs = append(attrs, b.constantControlBindings(el.Opening.Name, attributes, id, attrs)...)
 	}
 	return handlers, attrs, refs
+}
+
+// customElementPropBinding binds an attribute of a custom element whose value
+// is an object, array or function. React 19 renders no attribute for those
+// (the HTML omits them), and the client sets them as properties, so the value
+// is applied by the hydration code.
+func (b *builder) customElementPropBinding(tag string, attr *ast.JSXAttr, id SlotID) *AttrBinding {
+	if !htmlspec.IsCustomElement(tag) || attr.Value == nil || b.locateOnly > 0 {
+		return nil
+	}
+	switch b.evalValue(attr.Value).Kind() {
+	case jsvalue.KindObject, jsvalue.KindArray, jsvalue.KindFunction:
+	default:
+		return nil
+	}
+	js := generateExprJS(attr.Value, b.sigMap())
+	if js == "" {
+		return nil
+	}
+	return &AttrBinding{ElementSlotID: id, AttrName: ast.HTMLAttrName(attr.Name), ExprSource: js, HydrateOnly: true}
 }
 
 // refCallbackReads lists the reactive values (state and derived render

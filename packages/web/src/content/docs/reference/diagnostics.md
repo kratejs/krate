@@ -336,7 +336,7 @@ A server component used from a synchronous page renders as its own request-time 
 
 **Client-only API used in a server component**
 
-Components rendered by a server component (an async component) render once per request on the server and ship no JavaScript, so hooks such as useState/useEffect, Krate signals and event handlers cannot work there. Move the interactive part into a module that starts with `"use client"`; it is server-rendered and then hydrated in the browser.
+Server, static and runtime components, and the components an async component renders, render once (at build time or per request) and ship no JavaScript, so hooks such as useState/useEffect, Krate signals, class state and lifecycles, and event handlers cannot work there; they used to build and leave a page that did nothing. Remove the server tier from the component (the `// @server` comment or decorator, the `.server` file name or the config entry) to make it a client component, or move the interactive part into a client child component (one with no tier, or marked `@client`, or a module that starts with `"use client"` under an async component) and render that from the server component; it is server-rendered and then hydrated in the browser.
 
 ### KR7111
 
@@ -361,6 +361,96 @@ Components in a `"use client"` module run in the browser and cannot be async. Mo
 **Client module exports cannot be listed**
 
 Krate wraps each export of a `"use client"` module in a client boundary, so it must know the export names. `export * from` cannot be enumerated: list the re-exported names explicitly (`export { A, B } from "./x"`).
+
+### KR7115
+
+**Tier decorator cannot apply here, or two tiers conflict**
+
+`@server`, `@static`, `@runtime` and `@client` go on a function, class or const declaration, once per declaration. An async component always renders per request, so only `@runtime` fits it. A runtime component is bundled per file, so `@runtime` must be on the default export or the only exported component of its file. A component also has one tier: the leading `// @tier` comment, the `.server`/`.runtime`/`.static` file name, the `serverComponents`, `runtimeComponents`, `serverDirs` and `runtimeDirs` config entries, a decorator and a `"@tier"` string at the top of a function body must agree. A decorator on a component that is not the file's default export or only exported component may override the file's tier (`@client` in a `// @server` file); on the default export it must match. See "Tiers that disagree" in Component Tiers.
+
+### KR7116
+
+**One name imported from two modules**
+
+Two modules export the same name and a page imports it from both, for example `import { Card as A } from "./a"` and `import { Card as B } from "./b"`. Modules on a page share one namespace, so Krate gives one of the exports a private name and rewrites the imports to match, and this is not reported. It is reported when neither module can be renamed because something reads export names from source: a re-export (`export { Card } from`, `export *`, or an import followed by an export), a namespace import (`import * as ns`), an `import()`, or a "use client" or "use server" module. Both imports then resolve to one declaration and the page shows the wrong output. Rename one of the exports. Private names and default exports do not have this problem. This is a warning.
+
+### KR7120
+
+**API route file in the pages directory**
+
+API routes are served from src/api, not from the pages directory. A `.ts` or `.js` file under src/pages/api used to build into an empty page while /api/... answered 502. Move the file to src/api/. This is a warning.
+
+### KR7121
+
+**Prerendered endpoint failed**
+
+A file such as `src/pages/data.json.ts` is a prerendered endpoint: its `GET` export runs once at build time and the response body is written to the output as a file (`data.json`). The build fails when the module has no `GET` export, `GET` throws, answers a non-2xx status, or the name has a dynamic segment. Endpoints run on Node (or the configured runtime) with the project's environment. For a response that depends on the request, use an API route in `src/api`.
+
+### KR7122
+
+**Page metadata could not be evaluated at build time**
+
+A static page's `export const metadata` and `generateMetadata` (and those of the layouts above it) run at build time, once per `generateStaticParams` entry, and become the document `<title>`, description, canonical link, Open Graph and Twitter tags. This one could not run: it threw, it needs something the build does not have (a browser global, a service that is down), or the module could not be loaded. The segment's tags were left out and the page still builds. Fix the error, or render the page per request (`export const dynamic = "force-dynamic"`, or `revalidate = N`) so `generateMetadata` runs with the request. This is a warning.
+
+### KR7123
+
+**Sass, Less and Stylus files are not compiled**
+
+Krate compiles CSS (including CSS modules and Tailwind) but has no Sass, Less or Stylus compiler, so importing a `.scss`, `.sass`, `.less` or `.styl` file would ship no styles at all. Compile the file to CSS first (for example with the `sass` CLI in a prebuild script) and import the `.css` result, or port the styles to CSS or Tailwind. This is an error.
+
+### KR7124
+
+**Name is not exported by @krate/runtime**
+
+A named import from `@krate/runtime` (or one of its subpaths) asks for something the package does not export. The import is removed from the page, so the name would be undefined in the browser and fail with a ReferenceError. Check the spelling against the runtime API reference; names from other frameworks (`signal`, `usePathname`) have Krate equivalents such as `createSignal` and `getNavigationState`. This is an error.
+
+### KR7125
+
+**tsconfig baseUrl and paths disagree**
+
+`compilerOptions.paths` targets resolve against `baseUrl`, in tsc and in Krate. A `baseUrl` of `./src` together with `"@/*": ["./src/*"]` points at `src/src`, so every `@/` import fails with "cannot resolve import ... (matched tsconfig path alias)". Krate 0.4 ignored `baseUrl` for aliases, so a project scaffolded then still has it. `krate fix --apply` sets `baseUrl` to `"."` when every target repeats the baseUrl directory, exists under the project root and does not exist under `baseUrl`. Otherwise edit `tsconfig.json` by hand. This is not a build diagnostic: it is reported by `krate fix`.
+
+### KR7126
+
+**Imported asset is used where its URL cannot be inlined**
+
+`import logo from "./logo.png"` binds the file's hashed URL. The compiler replaces reads of the binding with that URL, in the module that imports the file and in every module that imports it through `export { logo }`, `export default logo`, `export { default as logo } from "./logo.png"`, `export *` or `export * as ns` and `ns.logo`. A read it cannot reach, such as a computed property key (`{ [logo]: 1 }`) or `ns.default` of a namespace that is passed on whole, has no value in the browser script: it is a ReferenceError there, or renders as the bare name. Use the binding as a plain value in JSX or a component, or import the file with a `?url` suffix. This is a warning.
+
+### KR7130
+
+**Metadata route could not be built**
+
+A `sitemap.ts`, `robots.ts`, `manifest.ts`, `opengraph-image` or `twitter-image` file under the pages directory runs once at build time and its result becomes `sitemap.xml`, `robots.txt`, `manifest.webmanifest` or a PNG. The file threw, returned a value of the wrong shape (a sitemap entry without a `url`, a robots file without `rules`), or could not be loaded. Fix the error named in the message. This is an error: the file would otherwise silently produce nothing.
+
+### KR7131
+
+**ImageResponse uses something the renderer cannot draw**
+
+ImageResponse draws a documented JSX subset with a built-in renderer (no headless browser): flexbox layout, text, colours, gradients, borders, box shadows, opacity, overflow hidden and images. Anything else (an element such as `<svg>`, a style such as `transform` or `filter`, a unit such as `vh`, a character the font has no glyph for) is listed here instead of being drawn wrong. Use the supported subset, or pass a font with `options.fonts` for other characters. This is an error.
+
+### KR7132
+
+**Image route in a dynamic segment has no params to build with**
+
+An `opengraph-image` or `twitter-image` file inside a dynamic segment (`blog/[slug]/`) is built once per entry of the segment page's `generateStaticParams`. This one has no matching page or no `generateStaticParams`, so no image was built and no `og:image` tag is emitted for it. Export `generateStaticParams` from the segment's page. This is a warning.
+
+### KR7133
+
+**A metadata file replaces a plugin or config output**
+
+`sitemap.ts` or `robots.ts` defines the file, so the sitemap or robots plugin (and the `robots` and `seo` config that feed it) did not write its own. The metadata file wins. Remove one of them to silence this warning. This is a warning.
+
+### KR7150
+
+**Unknown code theme**
+
+`markdown.codeTheme` names a syntax theme that Krate does not ship, so code is highlighted with the default theme for that colour mode instead (`github` for light, `github-dark` for dark). Use a chroma style name such as `github`, `github-dark`, `monokai`, `dracula` or `nord`. Give one name to use it in both modes, or `{ light: "github", dark: "github-dark" }` to pick a theme per mode. This is a warning.
+
+### KR7151
+
+**Language cannot be highlighted after the build**
+
+Code that is highlighted in the browser (a `<Code>` whose text changes at run time) or at request time is coloured by a small tokenizer that runs chroma's lexers exactly, and it ships only for a fixed list of languages. The language used here is not on it, so the code is shown as plain text. Build-time highlighting is unaffected and supports every chroma language. Use one of the listed languages (`markdown.codeHighlight` docs), or make the code known at build time. This is a warning.
 
 ## KR8xxx: islands, compiled packages and general React compatibility
 
@@ -418,6 +508,60 @@ The island has no build-time props, uses a browser-only API, or could not be ren
 
 Krate could not bundle the island's external package, local module, Preact dependency, or generated chunk. Check the reported resolver error and install the missing package (Preact 10.20 or newer) in the project.
 
+### KR8010
+
+**createPortal is not in a child position**
+
+Krate lowers `createPortal(children, container)` when it is a child (`{createPortal(...)}`) or a branch of a conditional child (`{open && createPortal(...)}`, `{open ? createPortal(...) : null}`). Anywhere else the call is left as is and fails in the browser because `createPortal` is not a global. Render the portal as a child, or use `<Portal container={...}>`.
+
+### KR8011
+
+**Expression has no build-time value and no client binding**
+
+The compiler could not compute the value of this expression while building the page (it calls a function it cannot see into, reads an unsupported built-in, or depends on data that only exists at runtime) and the component has no client code that could fill it in, so the page renders it as empty text. Move the value into component state or an effect, compute it from values the build can see, or make the component interactive so the browser evaluates it.
+
+### KR8012
+
+**Client directive on a component that is not an island**
+
+`client:visible`, `client:idle` and `client:load` choose when an island mounts, and only apply to the root tag of a compiled package component (or a module that uses a React library) rendered as an island. On a Krate component or an HTML element they do nothing; Krate hydrates those with the page. Remove the directive, or put it on the package component itself.
+
+### KR8013
+
+**React library hook used where no island can run it**
+
+A component calls a hook of an npm React library (zustand, react-hook-form, swr, @tanstack/react-query, ...). Those hooks need React's render model, which Krate's lowered components do not have, so Krate runs the module that calls them as a Preact island. That is not possible for a layout or template, or for a server or runtime tier component. Move the component into its own module and render it from a page or client component, or replace the library with createSignal / createResource.
+
+### KR8014
+
+**css prop is emotion's, not a DOM attribute**
+
+A `css={...}` prop on a DOM element is understood only by emotion's JSX runtime. In a module that does not use it Krate renders `css` as a plain attribute, so the styles are lost. Add `/** @jsxImportSource @emotion/react */` to the top of the file so the module runs as a Preact island with emotion, or use CSS modules, Tailwind or a stylesheet.
+
+### KR8015
+
+**Layout provider cannot reach the islands of its pages**
+
+A layout wraps `{children}` in a component of a React library (a `QueryClientProvider`, a `ThemeProvider`, a Redux `Provider`). Islands run in Preact, so the layout cannot give them context. Krate lifts such wrappers into a module every island of the page renders inside, but only when their props can be computed without the layout's own state: constants, imports, module-level values, and `useState(() => value)` or `useMemo(() => value, [])` with no setter in use. A prop that reads the layout's `params`, a signal or a state setter cannot be lifted. Build the value from constants, or wrap the island's own module in the provider.
+
+### KR8016
+
+**Layout provider renders markup around its children**
+
+A component a layout wraps around `{children}` renders elements of its own, so it is not a context provider that can be moved into the islands: Krate renders the page content, and an island cannot sit inside markup that belongs to the layout. The layout keeps the component as it was and the islands of its pages do not see its context. Split the component into a provider that renders only its children and the markup, or put the provider inside the island's own module.
+
+### KR8030
+
+**Higher-order component cannot be resolved at build time**
+
+`const Page = withX(Inner)` (or `export default withX(Inner)`) is compiled by inlining the component function that `withX` returns, with its parameters replaced by the arguments. That works when `withX` is a function in the project whose body holds only that returned component function. A wrapper imported from a package, or one with other statements around the returned function, cannot be inlined, so the component would render nothing; the build fails instead. Declare the wrapper in your source as `function withX(C) { return function Wrapped(props) { return <C {...props} /> } }`, or write the wrapped component out by hand.
+
+### KR8031
+
+**Prop of Activity, ViewTransition or SuspenseList is not supported**
+
+`<Activity>` supports `mode="visible"` and `mode="hidden"`. `<ViewTransition>` supports `name`, `default`, `enter`, `exit`, `update` and `share` as strings, and ignores the event callbacks (`onEnter`, `onExit`, `onUpdate`, `onShare`). `<SuspenseList>` renders its children and ignores `revealOrder` and `tail`. Other props have no effect and are reported once per element. This is a warning: the children always render.
+
 ### KR8301
 
 **Render value keeps its first value**
@@ -454,6 +598,12 @@ The page reads data with cache tags, a revalidate window or `cache: "no-store"`,
 
 A revalidatePath() call names a route that is rendered statically (SSG). The page's HTML is a file baked at build time, so revalidation cannot rebuild it: at runtime the call reports the route under `skipped` and logs a warning. Make the target page ISR (`export const revalidate = N`) or SSR (`export const dynamic = "force-dynamic"`), or rebuild the site to refresh it.
 
+### KR8604
+
+**forbidden() or unauthorized() never runs per request**
+
+forbidden() and unauthorized() answer one request with a 403 or 401 page, so they only work in code that runs on every request: a page rendered with ssr, isr or streaming, an async server component, a server action or an API route. This call sits in a statically built page, or in a layout (layouts are baked into the shell at build time), so it never runs and the page is served to everyone. Make the page request-time (`export const dynamic = "force-dynamic"`), or call the function from an async server component that the page renders.
+
 ### KR8801
 
 **Image source cannot be used**
@@ -483,6 +633,12 @@ An `<Image>` without an alt attribute is announced by screen readers by its file
 **Content collection is shipped to the browser**
 
 A `getCollection("name")` chain is normally evaluated while the site is built and only its result is rendered. When the chain depends on a value that only exists in the browser (a signal, an event), the collection has to be evaluated there, so its entries are copied into the page script. Krate ships only the fields the page mentions (the body and rendered html only when referenced), but every entry in the collection, drafts included, is still included. Filter with build-time values, or compute the list on the server. This is a warning.
+
+### KR8820
+
+**Component option value must be a literal**
+
+Tabs, Accordion and the other zero-JS components turn each part's value into CSS while the site is built, so every `value` on their parts must be a string literal in the source. A value read from data (for example `value={item.id}` inside `items.map(...)`) cannot be enumerated: the panels for that value get no show/hide rules, defaultValue is ignored and every panel stays visible. Write the values out, or use `<Select>`/a `createSignal` based component for data-driven options. This is a warning.
 
 ## KR9xxx: routing, segment pages and rendering errors
 

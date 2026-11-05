@@ -16,9 +16,9 @@
   border-color: var(--krate-text-muted, #71717a);
 }
 .krate-native-select:focus-visible {
-  outline: none;
-  border-color: var(--krate-primary, #3b82f6);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--krate-primary, #3b82f6) 20%, transparent);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
+  outline-offset: 2px;
+  border-color: var(--krate-primary, #c2410c);
 }
 .krate-native-select:disabled {
   opacity: 0.5;
@@ -49,9 +49,9 @@
   border-color: var(--krate-text-muted, #71717a);
 }
 .krate-select-trigger:focus-visible {
-  outline: none;
-  border-color: var(--krate-primary, #3b82f6);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--krate-primary, #3b82f6) 20%, transparent);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
+  outline-offset: 2px;
+  border-color: var(--krate-primary, #c2410c);
 }
 .krate-select-value {
   flex: 1;
@@ -94,8 +94,9 @@
   box-sizing: border-box;
 }
 .krate-select-filter:focus {
-  outline: none;
-  border-color: var(--krate-primary, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
+  outline-offset: -2px;
+  border-color: var(--krate-primary, #c2410c);
 }
 .krate-select-viewport {
   max-height: 240px;
@@ -112,8 +113,16 @@
   cursor: pointer;
 }
 .krate-select-item:hover,
-.krate-select-item-selected {
+.krate-select-item-selected,
+.krate-select-item-active {
   background: var(--krate-surface, #f4f4f5);
+}
+.krate-select-item-active {
+  outline: 2px solid var(--krate-primary, #c2410c);
+  outline-offset: -2px;
+}
+.krate-select-item-disabled .krate-select-item-text {
+  cursor: not-allowed;
 }
 .krate-select-item-disabled {
   opacity: 0.4;
@@ -124,7 +133,7 @@
 }
 .krate-select-item-indicator {
   display: inline-flex;
-  color: var(--krate-primary, #3b82f6);
+  color: var(--krate-primary, #c2410c);
 }
 .krate-select-empty {
   padding: 8px 12px;

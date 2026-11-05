@@ -47,3 +47,15 @@ func TestCollectReferencedFunctionsScansExprSlots(t *testing.T) {
 	}
 	t.Fatalf("helper used by expression slot was dropped: %v", fns)
 }
+
+func TestIdSafeMatchesTheRuntimeRule(t *testing.T) {
+	for in, want := range map[string]string{
+		"L:$a-b_c.d": "L:$a-b_c.d",
+		"L:$a b/ü":   "L:$a%20b%2F%C3%BC",
+		"x\x00y":     "x%00y",
+	} {
+		if got := idSafe(in); got != want {
+			t.Errorf("idSafe(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

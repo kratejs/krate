@@ -2,6 +2,7 @@ package irtree
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/csssignals"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
+	"github.com/kratejs/krate/packages/compiler/internal/resolver"
 	"github.com/kratejs/krate/packages/compiler/internal/syntaxhighlight"
 )
 
@@ -35,9 +37,18 @@ const contextPropPrefix = "__krate_ctx_"
 
 // BuildOptions configures IR construction.
 type BuildOptions struct {
+	// PageParams are the dynamic-route params of the entry page (name ->
+	// value, or the placeholder a template carries for it). The page's own
+	// props include them as `params`, so a wrapper that forwards `{...props}`
+	// to the page body passes them on.
+	PageParams map[string]string
+	// RoutePath is the URL path of the entry page ("/blog/hello", or
+	// "/blog/__KRATE_PARAM_slug__" in a dynamic route's template). The router
+	// hooks (usePathname, useParams, ...) fold to it. Empty for a layout.
+	RoutePath string
 	// CodeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
-	// at build time. It must match the stylesheet generated for the same theme
-	// (syntaxhighlight.CSSForTheme). Empty selects the default theme.
+	// at build time. The markup is the same for every theme; the colours come
+	// from syntaxhighlight.ThemeCSS. Empty selects the default theme.
 	CodeTheme string
 	// IDPrefix namespaces the compact slot IDs emitted into data-k markers and
 	// hydration JS. It must be set when a build is merged with another build
@@ -115,6 +126,7 @@ func BuildWithOptions(prog *ast.Program, ann *Annotations, opts BuildOptions) *C
 
 	builder := newBuilder(prog, ann, opts)
 	builder.checkLazyComponents()
+	builder.seedPageParams(entryFn, opts.PageParams)
 	root := builder.buildComponentNode(entryFn, "")
 	root.SourceFile = ann.SourceFile
 	builder.warnSuspendOutsideBoundary(entryFn, entryFn.Position)
@@ -157,6 +169,7 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		evalJS:           opts.EvalJS,
 		transformIcon:    opts.TransformIcon,
 		transformImage:   opts.TransformImage,
+		routeHooks:       routeHookValues(opts.RoutePath, opts.PageParams),
 	}
 	for name := range b.moduleDeclOnly {
 		// Declared here, assigned by a module statement: shared mutable state.
@@ -190,6 +203,13 @@ func (b *builder) finishTree(root *ComponentNode) *ComponentTree {
 			continue
 		}
 		checked[fn] = true
+		// Compiled dependencies (node_modules) are bundled into islands by
+		// esbuild and never re-emitted by this generator, so constructs it
+		// cannot emit (immer's `class DraftMap` inside enableMapSet) are
+		// harmless there.
+		if resolver.IsCompiledDependency(filepath.ToSlash(ann.ComponentSources[name])) {
+			continue
+		}
 		b.srcFn = name
 		b.codegenErrs = append(b.codegenErrs, codegenIssues(fn, func(pos ast.Pos, msg, hint string) error {
 			return b.diagAt(pos, diag.SeverityError, msg, hint)
@@ -350,6 +370,10 @@ type builder struct {
 	// client components and are never emitted (a build-time evaluated
 	// component's own return JSX); warnings about rendered output are skipped.
 	locateOnly int
+	// useIDRow is the keyed list row being built. Components inside it take
+	// useId() values from one per-row sequence the runtime reproduces when it
+	// renders or adopts the row, so server and client ids agree.
+	useIDRow *useIDRow
 	// runtimeReach memoizes reachesRuntimeComponent per function.
 	runtimeReach   map[*ast.FnDecl]bool
 	functions      map[string]*ast.FnDecl
@@ -367,6 +391,7 @@ type builder struct {
 	// on exit, so siblings after a child component keep unique IDs.
 	elementCounts    map[string]int
 	moduleConsts     valueMap            // module-level const values (name -> folded value)
+	routeHooks       valueMap            // router hooks folded to the page's route (see routehooks.go)
 	moduleConstInits map[string]ast.Expr // module-level const initializers (name -> expr)
 	moduleStmts      []ast.Stmt          // entry module top-level statements that run code
 	moduleLets       map[string]bool     // module-level let/var bindings (mutable, so shared)

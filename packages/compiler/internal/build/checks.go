@@ -91,7 +91,10 @@ func (b *Builder) checkPages(results []*PageResult, runtimeJSFile string) []chec
 			continue
 		}
 		hydrationBytes := len(r.HydrationJS)
-		jsBytes := runtimeBytes + hydrationBytes
+		jsBytes := hydrationBytes
+		if pageNeedsRuntime(r) {
+			jsBytes += runtimeBytes
+		}
 		pages = append(pages, check.Page{
 			Route:          routeFromOutName(r.OutName),
 			RelSource:      r.SourcePath,
@@ -204,8 +207,12 @@ func (b *Builder) loadBuiltPages() ([]check.Page, error) {
 			return nil
 		}
 		hydrationBytes := pageJSBytes(filepath.Dir(path))
-		jsBytes := runtimeBytes + hydrationBytes
+		jsBytes := hydrationBytes
 		html := string(data)
+		// A page that does not link the runtime chunk does not load it.
+		if rt := manifest.runtimeJS(); rt != "" && strings.Contains(html, rt) {
+			jsBytes += runtimeBytes
+		}
 		pages = append(pages, check.Page{
 			Route:          route,
 			RelSource:      manifest.sourceFor(route),
@@ -223,7 +230,28 @@ func (b *Builder) loadBuiltPages() ([]check.Page, error) {
 	return pages, nil
 }
 
-var islandChunkRe = regexp.MustCompile(`chunks/island\.[A-Za-z0-9]+\.js`)
+var islandChunkRe = regexp.MustCompile(`chunks/island_[A-Za-z0-9]+\.js`)
+var islandSharedRe = regexp.MustCompile(`\./(isl-[A-Za-z0-9]+\.js)`)
+
+// islandChunkBytes is the size of an island entry plus the shared chunks it
+// imports (each file counted once through seen).
+func islandChunkBytes(outDir, rel string, seen map[string]bool) int {
+	if seen[rel] {
+		return 0
+	}
+	seen[rel] = true
+	path := filepath.Join(outDir, filepath.FromSlash(rel))
+	total := fileSize(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return total
+	}
+	for _, m := range islandSharedRe.FindAllStringSubmatch(string(data), -1) {
+		total += islandChunkBytes(outDir, "chunks/"+m[1], seen)
+	}
+	return total
+}
+
 var cssLinkRe = regexp.MustCompile(`(?i)<link[^>]+href=["']([^"']+\.css)["']`)
 
 // islandBytesForJSText sums the generated island chunks referenced by a page
@@ -232,11 +260,7 @@ func islandBytesForJSText(outDir, js string) int {
 	seen := map[string]bool{}
 	total := 0
 	for _, rel := range islandChunkRe.FindAllString(js, -1) {
-		if seen[rel] {
-			continue
-		}
-		seen[rel] = true
-		total += fileSize(filepath.Join(outDir, filepath.FromSlash(rel)))
+		total += islandChunkBytes(outDir, rel, seen)
 	}
 	return total
 }
@@ -248,11 +272,7 @@ func islandBytesForPage(outDir, pageDir, html string) int {
 	total := 0
 	add := func(src string) {
 		for _, rel := range islandChunkRe.FindAllString(src, -1) {
-			if seen[rel] {
-				continue
-			}
-			seen[rel] = true
-			total += fileSize(filepath.Join(outDir, filepath.FromSlash(rel)))
+			total += islandChunkBytes(outDir, rel, seen)
 		}
 	}
 	add(html)

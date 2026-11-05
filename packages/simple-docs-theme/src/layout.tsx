@@ -151,6 +151,9 @@ export default function SimpleDocsLayout(props: DocsLayoutProps) {
         <main class="simple-main" id="main">
           <Breadcrumbs items={props.breadcrumbs} />
 
+          {props.titleHTML && !isHero && (
+            <div class="simple-content simple-title" dangerouslySetInnerHTML={{ __html: props.titleHTML }} />
+          )}
           {props.description && !isHero && <p class="simple-description">{props.description}</p>}
 
           {isHero && (

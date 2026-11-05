@@ -309,6 +309,7 @@ func GenerateTailwindDirectives(root string, cfg *TailwindConfig, opts TailwindO
 	dirs = append(dirs, d.Sources...)
 	scanner := NewTailwindScanner(root)
 	scanner.Exclude = d.Excludes
+	scanner.Names = customUtilityRoots(&generator.Theme)
 	classes := scanner.ScanClasses(dirs)
 	for _, c := range d.Inline {
 		classes[c] = true

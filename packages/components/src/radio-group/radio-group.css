@@ -27,7 +27,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--krate-active-color, var(--krate-primary, #3b82f6));
+  background: var(--krate-active-color, var(--krate-primary, #c2410c));
   transform: scale(var(--krate-active, 0));
   transition: transform 0.15s ease;
 }
@@ -35,7 +35,7 @@
   border-color: var(--krate-text-muted, #71717a);
 }
 .krate-radio-item:focus-visible .krate-radio-indicator {
-  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
   outline-offset: 2px;
 }
 .krate-radio-label {

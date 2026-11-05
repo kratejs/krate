@@ -173,6 +173,11 @@ func (b *builder) isCSSLiveText(expr ast.Expr) bool {
 // lists (always resolved at build time when possible), ternaries and boolean
 // guards with JSX branches, and array literals holding JSX.
 func (b *builder) controlFlowChild(expr ast.Expr, parentID string, doEscape bool) ([]SlotNode, bool) {
+	// Array.from({ length: 3 }, fn) with a source known at build time renders
+	// its rows like [..].map(fn); over runtime data it stays an expression.
+	if mapped, ok := arrayFromMapCall(expr); ok && b.resolveArrayLiteralExpr(mapped) != nil {
+		expr = mapped
+	}
 	if isFlatMapCall(expr) {
 		if nodes, ok := b.buildStaticFlatMapSlots(expr, parentID); ok {
 			return nodes, true

@@ -240,6 +240,16 @@ bound nodes between the markers and a detached fragment when the condition
 changes, so state in either branch survives toggling. Marker ids and list keys
 are percent-encoded (`%`, `<`, `>`) so user data cannot close a comment.
 
+### `krateHighlight`
+
+```ts
+import { krateHighlight } from '@krate/runtime'
+
+const html = await krateHighlight(code, 'ts') // inner HTML of a highlighted block, or null
+```
+
+Highlights code with the same lexers the build uses, loading the language's tables on first use. It resolves to `null` when the language is not available on the page (list it in `highlight.languages`, or use a literal `lang` on a `<Code>`) or the text is over the limits, and the markup is identical to what `<Code>` writes at build time, so it takes the same stylesheet. See [Code Highlighting](/docs/guides/code-highlighting/). `krateHighlightInit(root?)` is what the compiler calls for `<Code>` whose text changes at run time.
+
 ## JSX runtime
 
 ```typescript
@@ -348,6 +358,56 @@ full-page navigations (`refresh()` reloads, `prefetch()` resolves immediately).
   `view-transition-name`, and the swap runs inside `document.startViewTransition`
   when supported (honoring `prefers-reduced-motion`). History, scroll and focus
   update after the transition's update callback ran.
+
+## Router hooks
+
+`@krate/runtime` exports the Next.js navigation hooks, so code written for
+`next/navigation` runs unchanged (the migration CLI rewrites the import).
+
+```tsx
+import { usePathname, useParams, useSearchParams, useRouter } from '@krate/runtime'
+
+export function Crumb() {
+  const pathname = usePathname()        // "/blog/hello" (no trailing slash, no base path)
+  const { slug } = useParams()          // { slug: "hello" } on /blog/[slug]
+  const search = useSearchParams()      // URLSearchParams of the query
+  const router = useRouter()
+  return <button onClick={() => router.push('/blog/')}>{pathname} {slug} {search.get('q')}</button>
+}
+```
+
+| Hook | Returns |
+|------|---------|
+| `usePathname()` | The URL path without the base path, query, hash or trailing slash (`/` stays). |
+| `useParams()` | The dynamic params of the page. A `[...rest]` param is an array; an optional catch-all that matched nothing is absent. `{}` on a static route. |
+| `useSearchParams()` | The query as a `URLSearchParams`. |
+| `useRouter()` | `{ push, replace, back, forward, refresh, prefetch }`, the [router API](#spa-router) with Next.js names. `push(href, { scroll })` and `replace` accept `scroll`. |
+| `useSelectedLayoutSegment()` / `useSelectedLayoutSegments()` | The first / all URL segments below the layout that calls it, so a nested layout sees `settings` where the root layout sees `dashboard`. In a file other than the layout they count from the root. |
+
+How they behave:
+
+- **Live.** A module that imports one of them is compiled like React source, so
+  `const pathname = usePathname()` reads the current URL wherever it is used
+  (JSX, handlers, effects) and updates after every SPA navigation, back and
+  forward included. The SPA router is not required: with `spa: false` they read
+  the address bar after each full load.
+- **Right in the static HTML.** For a page, the build folds the hooks to the
+  page's own route: `/blog/a` for a page expanded from `generateStaticParams`,
+  the placeholder the server fills in for an unbaked param of a dynamic route.
+  The query string is a request value, so a static page renders `useSearchParams()`
+  as empty; it is filled in when the page hydrates. A layout is built once for
+  every page it wraps, so its hook values (an active link, say) are filled in by
+  the browser.
+- **During SSR.** On an SSR, ISR or streaming page the hooks return the values
+  of the request being rendered, query string included. `useRouter()` methods
+  throw on the server: navigate from an event handler.
+- **In the trimmed runtime.** The hooks ship as their own runtime feature (about
+  1.3 KB gzip), included only in builds whose client code calls them.
+
+`redirect`, `permanentRedirect`, `notFound`, `forbidden` and `unauthorized` are
+exported from `@krate/runtime` too, for client files. Server files import them
+from `@krate/runtime/server`; see
+[Forbidden and unauthorized](/docs/core-concepts/routing/#forbidden-and-unauthorized).
 
 ## Context
 

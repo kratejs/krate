@@ -17,6 +17,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/lexer"
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 // Change is one safe rewrite.
@@ -94,6 +95,19 @@ func Run(root string, apply bool) (Result, error) {
 	if err != nil {
 		return res, err
 	}
+	if out, changes, ok := fixTSConfig(root); ok {
+		res.Changes = append(res.Changes, changes...)
+		if apply {
+			file := filepath.Join(root, "tsconfig.json")
+			mode := os.FileMode(0644)
+			if info, statErr := os.Stat(file); statErr == nil {
+				mode = info.Mode().Perm()
+			}
+			if err := fsutil.WriteFileAtomic(file, []byte(out), mode); err != nil {
+				return res, fmt.Errorf("writing tsconfig.json: %w", err)
+			}
+		}
+	}
 	return res, nil
 }
 
@@ -157,6 +171,10 @@ func PlanWithCodes(root string, codes []string) (map[string]string, []Change, []
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	if out, tsChanges, ok := fixTSConfig(root); ok && (allow == nil || allow[string(diag.CodeTSConfigBaseURL)]) {
+		files["tsconfig.json"] = out
+		changes = append(changes, tsChanges...)
+	}
 	return files, changes, skipped, nil
 }
 
@@ -180,7 +198,8 @@ func fixSource(src string) (string, []Change, error) {
 }
 
 func fixSourceFiltered(src string, allow map[string]bool) (string, []Change, error) {
-	p := parser.New(lexer.New(src).Tokenize())
+	// Blanking keeps every offset, so edits still apply to src.
+	p := parser.New(lexer.New(tsstrip.BlankTierDecorators("source.tsx", src)).Tokenize())
 	prog := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
 		return src, nil, errs[0]

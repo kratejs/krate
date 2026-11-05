@@ -33,8 +33,10 @@ type SSRServer struct {
 	env             []string
 	cmd             *exec.Cmd
 	done            chan struct{} // closed when the sidecar process exits
+	startedAt       time.Time     // when the current process was launched
 	mu              sync.Mutex
 	running         bool
+	closed          bool // set by Shutdown: Start refuses to launch again
 	manifest        *ServerManifest
 	timeout         int // per-render timeout (ms); 0 = sidecar default
 	maxCacheSize    int // ISR cache entries; 0 = sidecar default
@@ -244,6 +246,10 @@ func (s *SSRServer) NeedsNodeRenderer() bool {
 func (s *SSRServer) Start() error {
 	s.mu.Lock()
 
+	if s.closed {
+		s.mu.Unlock()
+		return errors.New("SSR renderer is shut down")
+	}
 	if s.running {
 		s.mu.Unlock()
 		return nil
@@ -274,6 +280,7 @@ func (s *SSRServer) Start() error {
 		fmt.Sprintf("KRATE_MANIFEST=%s", manifestPath),
 		fmt.Sprintf("KRATE_ROOT=%s", s.root),
 		fmt.Sprintf("KRATE_OUT_DIR=%s", s.outputDirLocked()),
+		fmt.Sprintf("KRATE_PARENT_PID=%d", os.Getpid()),
 	)
 	if s.timeout > 0 {
 		env = append(env, fmt.Sprintf("KRATE_SSR_TIMEOUT=%d", s.timeout))
@@ -295,6 +302,7 @@ func (s *SSRServer) Start() error {
 	}
 
 	s.cmd = exec.Command(runtimeCmd, runtimeArgs...)
+	execx.ConfigureTree(s.cmd)
 	s.cmd.Env = env
 	s.cmd.Stdout = os.Stdout
 	s.cmd.Stderr = os.Stderr
@@ -305,22 +313,34 @@ func (s *SSRServer) Start() error {
 	}
 
 	s.running = true
-	s.done = make(chan struct{})
+	s.startedAt = time.Now()
+	done := make(chan struct{})
+	s.done = done
 
-	// Wait for server to be ready
+	// The goroutine owns this process: a later restart gets its own cmd/done, so
+	// it must only clear the running flag when it is still the current process.
+	cmd := s.cmd
 	go func() {
-		_ = s.cmd.Wait()
+		_ = cmd.Wait()
 		s.mu.Lock()
-		s.running = false
+		if s.cmd == cmd {
+			s.running = false
+		}
 		s.mu.Unlock()
-		close(s.done)
+		close(done)
 	}()
 	s.mu.Unlock()
 
 	// Poll for readiness
 	ready := false
 	for i := 0; i < 50; i++ { // 5 seconds max
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-done:
+			// The process died while starting (bad script, port in use).
+			s.Stop()
+			return fmt.Errorf("SSR renderer exited during startup")
+		case <-time.After(100 * time.Millisecond):
+		}
 		resp, err := sidecarClient.Get(fmt.Sprintf("http://localhost:%d/__krate/ssr/health", s.port))
 		if err == nil && resp.StatusCode == 200 {
 			ready = true
@@ -370,6 +390,67 @@ func (s *SSRServer) Stop() {
 	s.mu.Lock()
 	s.running = false
 	s.mu.Unlock()
+}
+
+// Shutdown stops the renderer for good: no supervisor restart or later Start
+// brings it back.
+func (s *SSRServer) Shutdown() {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.Stop()
+}
+
+// Supervise restarts the renderer when it exits unexpectedly, with a growing
+// delay between attempts, until stop is closed. It blocks, so run it in a
+// goroutine after a successful Start. The renderer keeps its port and secret,
+// so everything holding the SSRServer sees the new process without re-registering.
+func (s *SSRServer) Supervise(stop <-chan struct{}) {
+	delay := 100 * time.Millisecond
+	for {
+		s.mu.Lock()
+		done := s.done
+		started := s.startedAt
+		s.mu.Unlock()
+		if done == nil {
+			return
+		}
+		select {
+		case <-stop:
+			return
+		case <-done:
+		}
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		if time.Since(started) > 10*time.Second {
+			delay = 100 * time.Millisecond
+		}
+		fmt.Fprintf(os.Stderr, "  %s! SSR renderer exited unexpectedly; restarting in %s%s\n", cYellow, delay, cReset)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(delay):
+			}
+			if delay < 5*time.Second {
+				delay *= 2
+			}
+			err := s.Start()
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if err == nil {
+				fmt.Fprintf(os.Stderr, "  %s+%s SSR renderer restarted\n", cGreen, cReset)
+				break
+			}
+			fmt.Fprintf(os.Stderr, "  %s! SSR renderer restart failed:%s %v\n", cYellow, cReset, err)
+		}
+	}
 }
 
 // IsRunning returns whether the SSR server process is alive.
@@ -478,10 +559,30 @@ func (s *SSRServer) FindPageForRoute(urlPath string) (*ManifestPage, map[string]
 	for _, i := range order {
 		p := &s.manifest.Pages[i]
 		if params, ok := matchRoute(urlPath, p.Route); ok {
+			if len(params) == 0 {
+				params = s.patternParams(p, urlPath)
+			}
 			return p, params
 		}
 	}
 	return nil, nil
+}
+
+// patternParams returns the dynamic params of a pre-generated page (a
+// generateStaticParams variant such as "/blog/hello", whose route is a plain
+// path) from the [param] route its source file also serves. Without them the
+// page would render with empty params at request time.
+func (s *SSRServer) patternParams(page *ManifestPage, urlPath string) map[string]string {
+	for i := range s.manifest.Pages {
+		q := &s.manifest.Pages[i]
+		if q.Source != page.Source || q.Route == page.Route || !strings.Contains(q.Route, "[") {
+			continue
+		}
+		if params, ok := matchRoute(urlPath, q.Route); ok {
+			return params
+		}
+	}
+	return nil
 }
 
 func (s *SSRServer) findRendererScript() string {
@@ -591,7 +692,7 @@ func stageServerRenderer(root, outDir string) string {
 	}
 	outPath := filepath.Join(stageDir, "server-renderer.mjs")
 
-	result := api.Build(api.BuildOptions{
+	result := esbuildBuild(api.BuildOptions{
 		AbsWorkingDir: root,
 		Bundle:        true,
 		Format:        api.FormatESModule,
@@ -647,7 +748,7 @@ func stageCacheRuntime(root, outDir string) string {
 		return ""
 	}
 	outPath := filepath.Join(stageDir, "cache-runtime.mjs")
-	result := api.Build(api.BuildOptions{
+	result := esbuildBuild(api.BuildOptions{
 		AbsWorkingDir: root,
 		Bundle:        true,
 		Format:        api.FormatESModule,
@@ -656,8 +757,15 @@ func stageCacheRuntime(root, outDir string) string {
 		Write:         true,
 		LogLevel:      api.LogLevelSilent,
 		Stdin: &api.StdinOptions{
-			Loader:     api.LoaderTS,
-			Contents:   "import { patchFetch, cacheRuntime } from './cache-scope.js';\ncacheRuntime();\npatchFetch();\n",
+			Loader: api.LoaderTS,
+			Contents: "import { patchFetch, cacheRuntime } from './cache-scope.js';\n" +
+				"import { loadCacheAdapter, installCacheAdapter, cacheSpecFromEnv } from './cache-adapter.js';\n" +
+				"cacheRuntime();\npatchFetch();\n" +
+				"const spec = cacheSpecFromEnv(process.env);\n" +
+				"if (spec && spec.adapter && spec.adapter !== 'memory') {\n" +
+				"  try { const adapter = await loadCacheAdapter(spec); if (adapter) installCacheAdapter(adapter, spec); }\n" +
+				"  catch (e) { console.error('[krate] cache adapter failed to start; using the in-process data cache:', e); }\n" +
+				"}\n",
 			ResolveDir: filepath.Dir(source),
 			Sourcefile: "krate-cache-runtime.ts",
 		},

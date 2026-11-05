@@ -17,6 +17,9 @@ export interface PopoverProps {
   /** Element id: a handle for `openOverlay('#id')` / `closeOverlay('#id')`. */
   id?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** Popover. Zero JS via a context-provided CSS scope. */
@@ -24,7 +27,7 @@ export function Popover(props: PopoverProps) {
   const open = createCSSGroup<string>(null, { as: 'popover', label: props.label });
   return (
     <PopoverCtx.Provider value={open}>
-      <div class="krate-popover" id={props.id}>
+      <div class={"krate-popover" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} id={props.id}>
         {props.open !== undefined || props.onOpenChange ? <OverlayBridge open={props.open} onOpenChange={props.onOpenChange} /> : null}
         {props.children}
       </div>
@@ -35,13 +38,16 @@ export function Popover(props: PopoverProps) {
 export interface PopoverTriggerProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Popover.Trigger` instead. */
 export function PopoverTrigger(props: PopoverTriggerProps) {
   const open = PopoverCtx.use();
   return (
-    <button class="krate-popover-trigger" type="button" {...open.trigger(props.value)}>
+    <button class={"krate-popover-trigger" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} type="button" {...open.trigger(props.value)}>
       {props.children}
     </button>
   );
@@ -50,13 +56,16 @@ export function PopoverTrigger(props: PopoverTriggerProps) {
 export interface PopoverContentProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Popover.Content` instead. */
 export function PopoverContent(props: PopoverContentProps) {
   const open = PopoverCtx.use();
   return (
-    <div class="krate-popover-content" {...open.panel(props.value)}>
+    <div class={"krate-popover-content" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} {...open.panel(props.value)}>
       {props.children}
     </div>
   );
@@ -64,13 +73,16 @@ export function PopoverContent(props: PopoverContentProps) {
 
 export interface PopoverCloseProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Popover.Close` instead. */
 export function PopoverClose(props: PopoverCloseProps) {
   const open = PopoverCtx.use();
   return (
-    <button class="krate-popover-close" type="button" aria-label="Close" {...open.close()}>
+    <button class={"krate-popover-close" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} type="button" aria-label="Close" {...open.close()}>
       {props.children}
     </button>
   );

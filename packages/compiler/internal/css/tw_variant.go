@@ -886,8 +886,8 @@ func classToRule(cls string, theme TailwindTheme) (text, key string) {
 		return "", ""
 	}
 
-	css := customUtilityCSS(base, theme)
-	if css == "" {
+	css, custom := customUtility(base, important || theme.Important == "true", theme)
+	if !custom {
 		css = generateCSS(base, theme)
 	}
 	if css == "" && strings.HasPrefix(base, "-") && negatableRoot(base[1:]) {
@@ -896,10 +896,11 @@ func classToRule(cls string, theme TailwindTheme) (text, key string) {
 	if css == "" {
 		css, _ = containerUtilityCSS(base)
 	}
-	if css == "" || (css != containerMarker && !validDeclarationBlock(css)) {
+	// A custom utility is validated and made !important while it resolves.
+	if css == "" || (!custom && css != containerMarker && !validDeclarationBlock(css)) {
 		return "", ""
 	}
-	if (important || theme.Important == "true") && css != containerMarker {
+	if !custom && (important || theme.Important == "true") && css != containerMarker {
 		css = addImportant(css)
 	}
 

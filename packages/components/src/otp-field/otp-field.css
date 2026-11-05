@@ -19,12 +19,12 @@
   border: 1.5px solid var(--krate-border, #e4e4e7);
   border-radius: 8px;
   transition: border-color 0.15s, box-shadow 0.15s;
-  caret-color: var(--krate-primary, #3b82f6);
+  caret-color: var(--krate-primary, #c2410c);
 }
 .krate-otp-field-input:focus {
-  outline: none;
-  border-color: var(--krate-primary, #3b82f6);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
+  outline-offset: 2px;
+  border-color: var(--krate-primary, #c2410c);
 }
 .krate-otp-field-input:disabled {
   opacity: 0.5;

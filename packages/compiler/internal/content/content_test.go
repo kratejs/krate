@@ -28,7 +28,7 @@ func TestFieldTypeFromString(t *testing.T) {
 	cases := map[string]FieldType{
 		"string": TypeString, "number": TypeNumber, "boolean": TypeBoolean,
 		"bool": TypeBoolean, "string[]": TypeStringA, "number[]": TypeNumberA,
-		"date": TypeString, "weird": TypeAny,
+		"date": TypeDate, "weird": TypeAny,
 	}
 	for in, want := range cases {
 		if got := FieldTypeFromString(in); got != want {

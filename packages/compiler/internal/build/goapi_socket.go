@@ -18,7 +18,7 @@ const maxUnixSocketPath = 100
 func goAPISocketPath(root string) string {
 	local := filepath.Join(root, ".krate", "run", "goapi.sock")
 	if len(local) <= maxUnixSocketPath {
-		if err := os.MkdirAll(filepath.Dir(local), 0o700); err == nil {
+		if err := os.MkdirAll(filepath.Dir(local), 0o700); err == nil && privateDir(filepath.Dir(local)) {
 			return local
 		}
 	}
@@ -27,8 +27,33 @@ func goAPISocketPath(root string) string {
 	if len(short) > maxUnixSocketPath {
 		return ""
 	}
-	if err := os.MkdirAll(filepath.Dir(short), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(short), 0o700); err != nil || !privateDir(filepath.Dir(short)) {
 		return ""
 	}
 	return short
+}
+
+// privateDir reports whether dir is a real directory (not a symlink) owned by
+// the current user and closed to everyone else. MkdirAll succeeds silently on a
+// directory that already exists, and the short path under the shared temp dir
+// is predictable, so another local user could pre-create it and then serve the
+// socket the host talks to.
+func privateDir(dir string) bool {
+	fi, err := os.Lstat(dir)
+	if err != nil || !fi.IsDir() || !ownedByCurrentUser(fi) {
+		return false
+	}
+	if !hasUnixPerms {
+		return true
+	}
+	if fi.Mode().Perm()&0o077 != 0 {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return false
+		}
+		fi, err = os.Lstat(dir)
+		if err != nil || fi.Mode().Perm()&0o077 != 0 {
+			return false
+		}
+	}
+	return true
 }
