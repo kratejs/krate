@@ -443,6 +443,9 @@ func (d *TailwindDirectives) MergeFrom(o *TailwindDirectives) {
 	for k, v := range o.Utilities {
 		d.Utilities[k] = v
 	}
+	for k, v := range o.Functional {
+		d.Functional[k] = v
+	}
 	for k, v := range o.Variants {
 		d.Variants[k] = v
 	}

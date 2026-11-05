@@ -11,12 +11,16 @@ const maxGroupLen = 400
 // string-literal tokenization: the file is split on boundary characters,
 // bracket and paren groups are kept whole (including quotes and operators
 // inside them), and each token is kept when it has the shape of a utility.
-func candidateTokens(src string) []string {
+func candidateTokens(src string) []string { return candidateTokensNames(src, nil) }
+
+// candidateTokensNames is candidateTokens that also keeps the bare words in
+// names, the project's own utilities.
+func candidateTokensNames(src string, names map[string]bool) []string {
 	var out []string
 	seen := map[string]bool{}
 	extractCandidates(src, func(tok string) {
 		tok = cleanCandidate(tok)
-		if tok == "" || seen[tok] || !looksLikeUtility(tok) {
+		if tok == "" || seen[tok] || !looksLikeUtilityNames(tok, names) {
 			return
 		}
 		seen[tok] = true
@@ -205,7 +209,9 @@ func splitCandidate(tok string) (variants []string, base string) {
 // bare utility keyword, an arbitrary property (`[mask-type:alpha]`), or contain
 // a hyphen; dynamic prefixes (`bg-`), CSS variables (`--x`) and unbalanced
 // groups are rejected.
-func looksLikeUtility(tok string) bool {
+func looksLikeUtility(tok string) bool { return looksLikeUtilityNames(tok, nil) }
+
+func looksLikeUtilityNames(tok string, names map[string]bool) bool {
 	if len(tok) == 0 || len(tok) > 300 {
 		return false
 	}
@@ -265,7 +271,7 @@ func looksLikeUtility(tok string) bool {
 	if name, ok := strings.CutPrefix(base, "@container"); ok && (name == "" || name[0] == '/' && len(name) > 1) {
 		return true
 	}
-	return bareUtilities[base]
+	return bareUtilities[base] || names[base]
 }
 
 // excluded reports whether path lies under an excluded directory.

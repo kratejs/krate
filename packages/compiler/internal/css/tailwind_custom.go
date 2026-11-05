@@ -165,6 +165,23 @@ func customUtility(base string, important bool, theme TailwindTheme) (string, bo
 	return "", false
 }
 
+// customUtilityRoots lists the hyphen-free names of the project's own
+// utilities, which the class scanner would otherwise take for prose.
+func customUtilityRoots(theme *TailwindTheme) map[string]bool {
+	var out map[string]bool
+	for _, m := range []map[string]string{theme.CustomUtilities, theme.FunctionalUtilities} {
+		for name := range m {
+			if !strings.Contains(name, "-") {
+				if out == nil {
+					out = map[string]bool{}
+				}
+				out[name] = true
+			}
+		}
+	}
+	return out
+}
+
 // utilityCtx is the state of resolving one class against one utility body.
 type utilityCtx struct {
 	theme      TailwindTheme

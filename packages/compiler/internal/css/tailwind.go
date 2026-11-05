@@ -25,6 +25,9 @@ type TailwindScanner struct {
 	// VarRefs collects the custom properties referenced via var(--name) in the
 	// scanned files, so referenced theme variables can be emitted.
 	VarRefs map[string]bool
+	// Names are extra hyphen-free utility names to keep, the project's own
+	// `@utility card` and `@utility card-*` roots.
+	Names map[string]bool
 }
 
 // NewTailwindScanner creates a scanner for the given project root.
@@ -58,7 +61,7 @@ func (s *TailwindScanner) ScanClasses(dirs []string) map[string]bool {
 				return nil
 			}
 			text := string(data)
-			for _, tok := range candidateTokens(text) {
+			for _, tok := range candidateTokensNames(text, s.Names) {
 				classes[tok] = true
 			}
 			if strings.Contains(text, "var(") {
