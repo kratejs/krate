@@ -146,6 +146,12 @@ export default { EOL: EOL, platform: platform, type: type, arch: arch, homedir: 
 `,
 }
 
+// bareBuiltinFilter matches the Node built-ins that are imported without the
+// node: prefix. The shimmed ones load their implementation, the others the
+// stub that names the module, instead of falling through to "could not load
+// module" with advice to run npm install.
+const bareBuiltinFilter = `^(?:path|url|fs|os|fs/promises|child_process|crypto|http|https|http2|net|tls|dgram|dns|stream|zlib|util|module|assert|buffer|events|readline|worker_threads|cluster|vm|v8|perf_hooks|querystring|string_decoder|timers|tty|process|constants|punycode|async_hooks|inspector|repl|diagnostics_channel)$`
+
 // nodeShimPlugin resolves Node built-ins for config evaluation: the shimmed
 // ones load real implementations, all others a stub that throws a clear error
 // when the config module is evaluated.
@@ -153,7 +159,7 @@ func nodeShimPlugin() api.Plugin {
 	return api.Plugin{
 		Name: "krate-node-shims",
 		Setup: func(pb api.PluginBuild) {
-			pb.OnResolve(api.OnResolveOptions{Filter: `^(?:path|url|fs|os)$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+			pb.OnResolve(api.OnResolveOptions{Filter: bareBuiltinFilter}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 				return api.OnResolveResult{Path: args.Path, Namespace: nodeShimNamespace}, nil
 			})
 			pb.OnResolve(api.OnResolveOptions{Filter: `^node:`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
