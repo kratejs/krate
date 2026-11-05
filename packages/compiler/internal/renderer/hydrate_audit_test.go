@@ -129,3 +129,25 @@ export default function Page() {
 		t.Errorf("portal branches are not toggled by a conditional binding:\n%s", js)
 	}
 }
+
+func TestInactiveBranchBindingsAreGuarded(t *testing.T) {
+	src := `import { useState } from "react";
+export default function Page() {
+  const [user, setUser] = useState(null);
+  return <main><button onClick={() => setUser({ name: "A", tags: ["x"] })}>in</button>
+    {user && <p>{user.name} has {user.tags.length} tags</p>}
+    <ul>{user && user.tags.map((t) => <li key={t}>{t}</li>)}</ul>
+  </main>;
+}`
+	_, js := fullPipeline(t, src)
+	for _, bare := range []string{"()=>user.name", "()=>user.tags.length"} {
+		if strings.Contains(js, bare) {
+			t.Errorf("binding %q runs while its branch is inactive:\n%s", bare, js)
+		}
+	}
+	for _, guarded := range []string{"?(user.name):''", "?(user.tags.length):''"} {
+		if !strings.Contains(js, guarded) {
+			t.Errorf("no guarded read %q:\n%s", guarded, js)
+		}
+	}
+}
