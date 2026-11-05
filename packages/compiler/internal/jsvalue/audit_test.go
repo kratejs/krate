@@ -126,3 +126,30 @@ func TestEvalForLetClosuresCaptureEachIteration(t *testing.T) {
 		}
 	}
 }
+
+func TestEvalArrayConstruction(t *testing.T) {
+	cases := []struct{ src, want string }{
+		{`[...Array(3)].length`, "3"},
+		{`Array(3).length`, "3"},
+		{`new Array(2).length`, "2"},
+		{`[...Array(3)].map((_, k) => k).join()`, "0,1,2"},
+		{`Array(3).fill(7).join("-")`, "7-7-7"},
+		{`Array(1, 2).join()`, "1,2"},
+		{`Array.from({length: 3}, (_, k) => k * 2).join()`, "0,2,4"},
+		{`Array.isArray(Array(2))`, "true"},
+		{`Array.from(Array(3).keys()).join()`, "0,1,2"},
+	}
+	for _, tc := range cases {
+		v := evalSrc(t, tc.src)
+		if v.IsUnknown() {
+			t.Errorf("%s: unresolved %#v", tc.src, v)
+			continue
+		}
+		if got := v.ToString(); got != tc.want {
+			t.Errorf("%s: got %q want %q", tc.src, got, tc.want)
+		}
+	}
+	if v := evalSrc(t, `Array(-1)`); !v.IsUnknown() {
+		t.Errorf("Array(-1) folded to %#v", v)
+	}
+}

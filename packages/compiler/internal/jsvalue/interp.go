@@ -186,6 +186,13 @@ func (in *Interp) eval(expr ast.Expr) (Value, bool) {
 			}
 			return errorObject(name, msg), false
 		}
+		if calleeName(e.Callee) == "Array" {
+			args, bad := in.Args(e.Args)
+			if bad.IsUnknown() {
+				return bad, false
+			}
+			return arrayFromArgs(args), false
+		}
 		return Unsupported("new " + calleeName(e.Callee) + "(...)"), false
 	case *ast.JSXElement, *ast.JSXFragment:
 		if in.Hooks.JSX != nil {

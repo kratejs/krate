@@ -151,3 +151,40 @@ export default function Page() {
 		}
 	}
 }
+
+// JSX attribute strings and JSX text do not process JS escapes (React keeps
+// the backslash sequences literally); only string expressions do.
+func TestJSXStringEscapesAreLiteral(t *testing.T) {
+	src := `export default function Page() {
+  return <main><p title="caf\u00e9 \u{1F600} \n" data-x='a\\b'>plain \u00e9</p><i>{"caf\u00e9"}</i></main>;
+}`
+	res, _ := fullPipeline(t, src)
+	for _, want := range []string{`title="caf\u00e9 \u{1F600} \n"`, `>plain \u00e9</p>`, `<i>café</i>`} {
+		if !strings.Contains(res.HTML, want) {
+			t.Errorf("HTML lacks %q:\n%s", want, res.HTML)
+		}
+	}
+}
+
+func TestInlineArrayConstructionRendersEveryRowAtBuildTime(t *testing.T) {
+	src := `export default function Page() {
+  return <main>
+    <div id="a">{[...Array(3)].map((_, k) => <i key={k}>a{k}</i>)}</div>
+    <div id="d">{Array.from({ length: 3 }, (_, k) => <i key={k}>d{k}</i>)}</div>
+    <div id="e">{Array.from({ length: 2 }).map((_, k) => <i key={k}>e{k}</i>)}</div>
+  </main>;
+}`
+	res, js := fullPipeline(t, src)
+	for _, want := range []string{
+		"<i>a0</i><i>a1</i><i>a2</i>",
+		"<i>d0</i><i>d1</i><i>d2</i>",
+		"<i>e0</i><i>e1</i>",
+	} {
+		if !strings.Contains(res.HTML, want) {
+			t.Errorf("HTML lacks %q:\n%s", want, res.HTML)
+		}
+	}
+	if js != "" {
+		t.Errorf("a page of build-time rows should need no JS:\n%s", js)
+	}
+}

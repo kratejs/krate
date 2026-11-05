@@ -62,7 +62,10 @@ func globalValue(name string) (Value, bool) {
 	case "Object":
 		return objectCtor(), true
 	case "Array":
-		return arrayCtor(), true
+		ctor := arrayCtor()
+		fn := Func("Array", arrayFromArgs)
+		fn.fn.Props = ctor.obj.props
+		return fn, true
 	case "JSON":
 		o := NewObject()
 		o.Set("stringify", Func("stringify", func(args []Value) Value {
@@ -373,6 +376,28 @@ func objectCtor() Value {
 		return args[0]
 	}))
 	return o
+}
+
+// arrayFromArgs is Array(...) and new Array(...): a single number is a length
+// (the items are undefined), anything else the items themselves.
+func arrayFromArgs(args []Value) Value {
+	for _, a := range args {
+		if a.IsUnknown() {
+			return a
+		}
+	}
+	if len(args) == 1 && args[0].kind == KindNumber {
+		n := args[0].n
+		if n < 0 || n != math.Trunc(n) || n > maxLoopIterations {
+			return Unsupported("Array length out of range")
+		}
+		items := make([]Value, int(n))
+		for i := range items {
+			items[i] = Undefined()
+		}
+		return NewArray(items...)
+	}
+	return ArrayOf(args)
 }
 
 func arrayCtor() Value {

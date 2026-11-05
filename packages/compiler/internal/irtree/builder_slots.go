@@ -2177,6 +2177,46 @@ func (b *builder) buildListSlot(expr ast.Expr, parentID string) *ListSlot {
 	return slot
 }
 
+// arrayHasSpread reports whether an array literal has a `...x` element, which
+// stands for any number of items.
+func arrayHasSpread(arr *ast.ArrayExpr) bool {
+	for _, el := range arr.Elements {
+		if u, ok := el.(*ast.UnaryExpr); ok && u.Op == "..." {
+			return true
+		}
+	}
+	return false
+}
+
+// arrayFromMapCall rewrites `Array.from(source, mapFn)` to the equivalent
+// `Array.from(source).map(mapFn)` so it takes the same list path as `.map()`.
+func arrayFromMapCall(expr ast.Expr) (ast.Expr, bool) {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || len(call.Args) != 2 || call.Optional {
+		return nil, false
+	}
+	mem, ok := call.Callee.(*ast.MemberExpr)
+	if !ok || mem.Computed || mem.Optional {
+		return nil, false
+	}
+	obj, _ := mem.Object.(*ast.Identifier)
+	prop, _ := mem.Property.(*ast.Identifier)
+	if obj == nil || prop == nil || obj.Name != "Array" || prop.Name != "from" {
+		return nil, false
+	}
+	switch call.Args[1].(type) {
+	case *ast.ArrowFn:
+	default:
+		return nil, false
+	}
+	from := &ast.CallExpr{Position: call.Position, Callee: call.Callee, Args: []ast.Expr{call.Args[0]}}
+	return &ast.CallExpr{
+		Position: call.Position,
+		Callee:   &ast.MemberExpr{Position: mem.Position, Object: from, Property: &ast.Identifier{Name: "map"}},
+		Args:     []ast.Expr{call.Args[1]},
+	}, true
+}
+
 // resolveArrayLiteralExpr returns the ArrayExpr a .map() call iterates over,
 // resolving identifier/member sources through the build-time constant tables
 // (props locals, module consts). Returns nil when the array cannot be reduced
@@ -2193,7 +2233,7 @@ func (b *builder) resolveArrayLiteralExpr(expr ast.Expr) *ast.ArrayExpr {
 	if prop, ok := mem.Property.(*ast.Identifier); !ok || (prop.Name != "map" && prop.Name != "flatMap") {
 		return nil
 	}
-	if obj, ok := mem.Object.(*ast.ArrayExpr); ok {
+	if obj, ok := mem.Object.(*ast.ArrayExpr); ok && !arrayHasSpread(obj) {
 		return obj
 	}
 	// Fold the receiver (a prop, local, module const, signal initial, or a
@@ -2728,7 +2768,7 @@ func (b *builder) tryResolveItems(expr ast.Expr, listID string) []*ListItem {
 		return nil
 	}
 	arr, ok := mem.Object.(*ast.ArrayExpr)
-	if !ok {
+	if !ok || arrayHasSpread(arr) {
 		return nil
 	}
 	items, _ := b.tryResolveArrayItems(arr, expr, listID, false)
