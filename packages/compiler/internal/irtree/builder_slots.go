@@ -1615,7 +1615,7 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 		// Only a portal that is a child, or a branch of a conditional child,
 		// is lowered; anywhere else the call would reach the browser as is,
 		// where createPortal does not exist.
-		b.warnCompat(expr.Pos(), diag.Code("KR8006"),
+		b.warnCompat(expr.Pos(), diag.CodePortalNotLowered,
 			"createPortal is only supported as a child or as a branch of a conditional child; here it is left as a runtime call that fails with \"createPortal is not defined\"",
 			"render the portal as {createPortal(...)}, {open && createPortal(...)} or {open ? createPortal(...) : null}, or use <Portal container={...}>")
 	}
@@ -1630,6 +1630,7 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 		Initial:    initial,
 		File:       b.sourceLoc(),
 		Pos:        expr.Pos(),
+		Unresolved: value.ContainsUnknown(),
 	}
 	// A value holding JSX renders as markup, not as escaped text.
 	if html, ok := renderChildValue(value); ok && html != escape.Text(initial) {
@@ -2881,10 +2882,15 @@ func formDefaultProp(name string) string {
 // buildStaticTextSlot is buildStaticValueSlot for JSX text positions: the
 // statically-evaluated result is HTML-escaped so a template literal or string
 // expression cannot inject real markup (e.g. <Code>{`return <h1>x</h1>`}</Code>).
-func (b *builder) buildStaticTextSlot(expr ast.Expr, parentID string) *StaticHTML {
+func (b *builder) buildStaticTextSlot(expr ast.Expr, parentID string) SlotNode {
 	v := b.evalValue(expr)
 	if nodes, ok := staticChildNodes(v, true); ok {
 		return nodes[0].(*StaticHTML)
+	}
+	if v.ContainsUnknown() && b.locateOnly == 0 {
+		// No build-time value: a slot lets the client compute it, and the
+		// emitter warns when there is no client code to do so.
+		return b.buildExprSlot(expr, parentID)
 	}
 	return &StaticHTML{HTML: escape.HTML(legacyConstString(expr, v))}
 }

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/escape"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
@@ -50,6 +51,9 @@ type EmitResult struct {
 	// render. A non-empty set means the build must fail rather than ship
 	// silently empty/wrong output.
 	Errors []error
+	// Warnings holds non-fatal findings of the emit, such as a slot that
+	// renders empty because nothing can compute it.
+	Warnings []diag.Diagnostic
 	// GoRenders are build-time Go-component render requests; the build renders
 	// them via the Go host and substitutes HTML at the markers.
 	GoRenders []irtree.GoRenderRequest
@@ -131,6 +135,9 @@ type Emitter struct {
 	// component's call-site children but reference the caller's signals.
 	// They're attached to the owning signature in Emit().
 	orphans []orphanBinding
+	// unresolved lists expression slots emitted without a build-time value;
+	// Emit warns about those no client binding fills in.
+	unresolved []*irtree.ExprSlot
 	// headHTML/scriptHTML/styleHTML accumulate <Head>/<Script>/<Style> content
 	// captured by SSREval during signal-less component emission. walkMetaSlots
 	// only reaches MetaSlots in the IR tree; SSREval'd wrappers (layouts, doc
@@ -273,6 +280,7 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	listComponents := collectListComponentFuncs(tree.Root, tree.Functions)
 
 	return &EmitResult{
+		Warnings:         e.unboundSlotWarnings(output.Signatures),
 		HTML:             output.HTML + output.Templates,
 		HeadHTML:         e.headHTML,
 		ScriptHTML:       e.scriptHTML,
@@ -967,7 +975,47 @@ func (e *Emitter) emitExprSlot(s *irtree.ExprSlot) SlotOutput {
 		body = s.InitialHTML
 	}
 	html := slotMarker(id) + body + slotEndMarker(id)
+	if s.Unresolved && s.Initial == "" && s.InitialHTML == "" {
+		e.unresolved = append(e.unresolved, s)
+	}
 	return SlotOutput{HTML: html}
+}
+
+// unboundSlotWarnings reports the unresolved expression slots that no client
+// binding fills in: the page would ship an empty value with no diagnostic.
+func (e *Emitter) unboundSlotWarnings(sigs []irtree.ComponentSignature) []diag.Diagnostic {
+	if len(e.unresolved) == 0 {
+		return nil
+	}
+	bound := map[irtree.SlotID]bool{}
+	for _, sig := range sigs {
+		if sig.Tier != irtree.TierClient {
+			continue
+		}
+		for _, b := range sig.SlotBindings {
+			if b.ExprJS != "" {
+				bound[b.SlotID] = true
+			}
+		}
+	}
+	var out []diag.Diagnostic
+	seen := map[string]bool{}
+	for _, s := range e.unresolved {
+		if bound[s.ID] {
+			continue
+		}
+		key := s.File + ":" + itoa(s.Pos.Line) + ":" + itoa(s.Pos.Col)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		d := diag.New(s.File, s.Pos.Line, s.Pos.Col,
+			"`{"+s.ExprSource+"}` has no value at build time and no client code fills it in: it renders as empty text",
+			"compute it from values the build can see, keep it in state or an effect, or make the component interactive", "")
+		d.Severity = diag.SeverityWarning
+		out = append(out, d.WithCode(diag.CodeSlotUnresolved))
+	}
+	return out
 }
 
 // slotMarker and slotEndMarker render the comment markers that delimit a

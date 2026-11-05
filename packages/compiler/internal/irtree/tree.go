@@ -178,6 +178,9 @@ type ExprSlot struct {
 	// File and Pos locate the expression in its source (hydration source maps).
 	File string
 	Pos  ast.Pos
+	// Unresolved is set when the build could not compute the value, so Initial
+	// is empty only because it is unknown.
+	Unresolved bool
 }
 
 func (s *ExprSlot) slotNode()     {}

@@ -8,6 +8,10 @@ const (
 	CodeIslandClientOnly Code = "KR8008"
 	// CodeIslandAsset: an island asset or package could not be resolved.
 	CodeIslandAsset Code = "KR8009"
+	// CodePortalNotLowered: createPortal outside a child position.
+	CodePortalNotLowered Code = "KR8010"
+	// CodeSlotUnresolved: a slot with no build-time value and no client binding.
+	CodeSlotUnresolved Code = "KR8011"
 )
 
 func init() {
@@ -78,6 +82,25 @@ func init() {
 				"rendered by Preact during the build. Its placeholder is emitted without server-rendered " +
 				"markup and the client mounts it after the island chunk loads. Pass build-time initial values " +
 				"or keep the island client-only intentionally.",
+		},
+		CodeInfo{
+			Code:  CodePortalNotLowered,
+			Title: "createPortal is not in a child position",
+			Explanation: "Krate lowers `createPortal(children, container)` when it is a child " +
+				"(`{createPortal(...)}`) or a branch of a conditional child (`{open && createPortal(...)}`, " +
+				"`{open ? createPortal(...) : null}`). Anywhere else the call is left as is and fails in the " +
+				"browser because `createPortal` is not a global. Render the portal as a child, or use " +
+				"`<Portal container={...}>`.",
+		},
+		CodeInfo{
+			Code:  CodeSlotUnresolved,
+			Title: "Expression has no build-time value and no client binding",
+			Explanation: "The compiler could not compute the value of this expression while building the " +
+				"page (it calls a function it cannot see into, reads an unsupported built-in, or depends on " +
+				"data that only exists at runtime) and the component has no client code that could fill it " +
+				"in, so the page renders it as empty text. Move the value into component state or an " +
+				"effect, compute it from values the build can see, or make the component interactive so " +
+				"the browser evaluates it.",
 		},
 		CodeInfo{
 			Code:  CodeIslandAsset,

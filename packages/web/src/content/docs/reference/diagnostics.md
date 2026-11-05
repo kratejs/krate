@@ -430,6 +430,18 @@ The island has no build-time props, uses a browser-only API, or could not be ren
 
 Krate could not bundle the island's external package, local module, Preact dependency, or generated chunk. Check the reported resolver error and install the missing package (Preact 10.20 or newer) in the project.
 
+### KR8010
+
+**createPortal is not in a child position**
+
+Krate lowers `createPortal(children, container)` when it is a child (`{createPortal(...)}`) or a branch of a conditional child (`{open && createPortal(...)}`, `{open ? createPortal(...) : null}`). Anywhere else the call is left as is and fails in the browser because `createPortal` is not a global. Render the portal as a child, or use `<Portal container={...}>`.
+
+### KR8011
+
+**Expression has no build-time value and no client binding**
+
+The compiler could not compute the value of this expression while building the page (it calls a function it cannot see into, reads an unsupported built-in, or depends on data that only exists at runtime) and the component has no client code that could fill it in, so the page renders it as empty text. Move the value into component state or an effect, compute it from values the build can see, or make the component interactive so the browser evaluates it.
+
 ### KR8301
 
 **Render value keeps its first value**

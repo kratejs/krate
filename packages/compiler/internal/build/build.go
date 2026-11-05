@@ -2192,6 +2192,8 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			return t, em.Emit(t)
 		})
 		renderer.EmitMeta(tree, emitResult)
+		printTreeWarnings(os.Stderr, emitResult.Warnings)
+		pageWarnings = append(pageWarnings, emitResult.Warnings...)
 		// Render imported Go components (server tier, slot path + SSREval'd) via the
 		// Go host in one batch, then inline their HTML at the emitted markers.
 		if len(emitResult.GoRenders) > 0 {

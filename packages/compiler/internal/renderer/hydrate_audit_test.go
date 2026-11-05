@@ -3,6 +3,10 @@ package renderer
 import (
 	"strings"
 	"testing"
+
+	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 )
 
 func TestHydrationScopesAreIsolated(t *testing.T) {
@@ -186,5 +190,41 @@ func TestInlineArrayConstructionRendersEveryRowAtBuildTime(t *testing.T) {
 	}
 	if js != "" {
 		t.Errorf("a page of build-time rows should need no JS:\n%s", js)
+	}
+}
+
+func TestUnboundUnresolvedSlotWarns(t *testing.T) {
+	slot := &irtree.ExprSlot{ID: "7", ExprSource: "fmt(x)", Unresolved: true, File: "page.tsx", Pos: ast.Pos{Line: 3, Col: 9}}
+	e := NewEmitter()
+	if out := e.emitExprSlot(slot); out.HTML != "<!--k:7--><!--/k:7-->" {
+		t.Fatalf("unexpected markup %q", out.HTML)
+	}
+	// No client code binds the slot: it is a silent empty value.
+	warnings := e.unboundSlotWarnings(nil)
+	if len(warnings) != 1 || warnings[0].Code != diag.CodeSlotUnresolved || !warnings[0].IsWarning() {
+		t.Fatalf("expected one KR8011 warning, got %#v", warnings)
+	}
+	if !strings.Contains(warnings[0].Error(), "page.tsx:3:9") {
+		t.Errorf("warning does not locate the expression: %s", warnings[0].Error())
+	}
+	// A client binding fills it in at runtime.
+	bound := []irtree.ComponentSignature{{Tier: irtree.TierClient, SlotBindings: []irtree.SlotBinding{{SlotID: "7", ExprJS: "fmt(x)"}}}}
+	if got := e.unboundSlotWarnings(bound); len(got) != 0 {
+		t.Errorf("bound slot reported: %#v", got)
+	}
+	// A known empty value is not reported.
+	known := &irtree.ExprSlot{ID: "8", ExprSource: "''", Initial: ""}
+	e2 := NewEmitter()
+	e2.emitExprSlot(known)
+	if got := e2.unboundSlotWarnings(nil); len(got) != 0 {
+		t.Errorf("known value reported: %#v", got)
+	}
+}
+
+func TestUnknownStaticTextBecomesClientSlot(t *testing.T) {
+	src := `export default function Page() { return <main><p>{Math.nope(2)}</p></main>; }`
+	res, js := fullPipeline(t, src)
+	if !strings.Contains(js, "Math.nope(2)") {
+		t.Errorf("an expression with no build-time value has no client binding:\n%s\n%s", res.HTML, js)
 	}
 }
