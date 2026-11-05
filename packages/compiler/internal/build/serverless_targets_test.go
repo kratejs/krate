@@ -428,16 +428,29 @@ func TestPlatformDeploysKeepSegmentPages(t *testing.T) {
 	}
 }
 
-// Workers do not overwrite a client's X-Forwarded-* headers, so Cloudflare only
-// trusts them when server.trustProxy is set; Vercel and Netlify always set them.
-func TestServerEntryTrustProxyPerTarget(t *testing.T) {
-	cf := serverEntry("cloudflare", "", "")
-	if !strings.Contains(cf, "trustProxy: !!data.config.trustProxy") || strings.Contains(cf, "trustProxy: true") {
-		t.Errorf("cloudflare entry must follow server.trustProxy:\n%s", cf)
-	}
-	for _, target := range []string{"vercel", "netlify"} {
-		if !strings.Contains(serverEntry(target, "", ""), "trustProxy: true") {
-			t.Errorf("%s entry should trust the platform's forwarded headers", target)
+// No target hard-codes trusting forwarded headers: all three follow
+// server.trustProxy (unset means what the platform guarantees, see PLATFORMS in
+// the handler).
+func TestServerEntryFollowsTrustProxyOnEveryTarget(t *testing.T) {
+	for _, target := range []string{"vercel", "netlify", "cloudflare"} {
+		entry := serverEntry(target, "", "")
+		if strings.Contains(entry, "trustProxy: true") || strings.Contains(entry, "trustProxy: !!") {
+			t.Errorf("%s entry must not override server.trustProxy:\n%s", target, entry)
 		}
+	}
+}
+
+func TestHandlerConfigTrustProxyIsThreeState(t *testing.T) {
+	cfg := config.Default()
+	if hc := trustProxyOf(cfg); hc != nil {
+		t.Errorf("unset trustProxy must be null, got %v", *hc)
+	}
+	cfg.Server.TrustProxySet = true
+	if v := trustProxyOf(cfg); v == nil || *v {
+		t.Errorf("explicit false must stay false, got %v", v)
+	}
+	cfg.Server.TrustProxy = true
+	if v := trustProxyOf(cfg); v == nil || !*v {
+		t.Errorf("explicit true must stay true, got %v", v)
 	}
 }

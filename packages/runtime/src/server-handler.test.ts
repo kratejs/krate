@@ -405,3 +405,111 @@ describe("signed flash cookies", () => {
     }
   });
 });
+
+describe("forwarded headers per platform", () => {
+  const mk = (target: "node" | "vercel" | "netlify" | "cloudflare", trustProxy?: boolean | null) => {
+    const base = data({ hasMiddleware: false });
+    return createKrateHandler({
+      target,
+      data: { ...base, config: { ...config, trustProxy: trustProxy === undefined ? null : trustProxy }, apiRoutes: ["echo"], actions: [{ id: "act1", export: "add", file: "acts" }] },
+      modules: {
+        api: {
+          echo: {
+            GET: (r: Request) =>
+              Response.json({
+                url: r.url,
+                xff: r.headers.get("x-forwarded-for"),
+                realIp: r.headers.get("x-real-ip"),
+                forwarded: r.headers.get("forwarded"),
+                host: r.headers.get("x-forwarded-host"),
+                proto: r.headers.get("x-forwarded-proto"),
+              }),
+          },
+        },
+        actions: { acts: { add: (a: number, b: number) => ({ sum: a + b }) } },
+      },
+    });
+  };
+  const echo = async (h: ReturnType<typeof mk>, headers: Record<string, string>) =>
+    (await h(new Request("http://app.internal/api/echo", { headers }))).json() as Promise<Record<string, string | null>>;
+  // What a hostile client adds on top of whatever the platform sets.
+  const spoof = { "x-forwarded-host": "evil.example", "x-forwarded-proto": "https", "x-forwarded-for": "6.6.6.6, 7.7.7.7", "x-real-ip": "6.6.6.6", forwarded: "for=6.6.6.6;host=evil.example" };
+
+  it("vercel: uses the host, protocol and client address Vercel sets", async () => {
+    const out = await echo(mk("vercel"), { "x-forwarded-host": "shop.example", "x-forwarded-proto": "https", "x-forwarded-for": "203.0.113.9", "x-real-ip": "203.0.113.9", forwarded: "for=6.6.6.6" });
+    expect(out.url).toBe("https://shop.example/api/echo");
+    expect(out.xff).toBe("203.0.113.9");
+    expect(out.realIp).toBe("203.0.113.9");
+    expect(out.forwarded).toBeNull();
+  });
+
+  it("vercel: a client-written forwarded chain never becomes the client address", async () => {
+    const out = await echo(mk("vercel"), { ...spoof, "x-forwarded-host": "shop.example", "x-real-ip": "203.0.113.9" });
+    expect(out.xff).toBe("203.0.113.9");
+    expect(out.forwarded).toBeNull();
+  });
+
+  it("vercel with server.trustProxy: false trusts no forwarded header", async () => {
+    const out = await echo(mk("vercel", false), { "x-forwarded-host": "shop.example", "x-forwarded-proto": "https", "x-forwarded-for": "203.0.113.9", "x-real-ip": "203.0.113.9" });
+    expect(out.url).toBe("http://app.internal/api/echo");
+    expect(out.host).toBe("app.internal");
+    expect(out.proto).toBe("http");
+    expect(out.xff).toBeNull();
+    expect(out.realIp).toBeNull();
+  });
+
+  for (const [target, ipHeader] of [["netlify", "x-nf-client-connection-ip"], ["cloudflare", "cf-connecting-ip"]] as const) {
+    it(`${target}: host and protocol come from the request URL, the address from ${ipHeader}`, async () => {
+      const out = await echo(mk(target), { ...spoof, [ipHeader]: "203.0.113.9" });
+      expect(out.url).toBe("http://app.internal/api/echo");
+      expect(out.host).toBe("app.internal");
+      expect(out.proto).toBe("http");
+      expect(out.xff).toBe("203.0.113.9");
+      expect(out.realIp).toBe("203.0.113.9");
+      expect(out.forwarded).toBeNull();
+    });
+
+    it(`${target}: without the platform address header there is no client address`, async () => {
+      const out = await echo(mk(target), spoof);
+      expect(out.xff).toBeNull();
+      expect(out.realIp).toBeNull();
+    });
+
+    it(`${target} with server.trustProxy: true trusts the proxy of yours in front`, async () => {
+      const out = await echo(mk(target, true), { ...spoof, [ipHeader]: "203.0.113.9" });
+      expect(out.url).toBe("https://evil.example/api/echo");
+      expect(out.xff).toBe("6.6.6.6, 7.7.7.7");
+    });
+
+    it(`${target} with server.trustProxy: false ignores everything forwarded, the platform address included`, async () => {
+      const out = await echo(mk(target, false), { ...spoof, [ipHeader]: "203.0.113.9" });
+      expect(out.url).toBe("http://app.internal/api/echo");
+      expect(out.xff).toBeNull();
+      expect(out.realIp).toBeNull();
+    });
+  }
+
+  it("the server-action origin check is not fooled by a spoofed X-Forwarded-Host", async () => {
+    const post = (h: ReturnType<typeof mk>) =>
+      h(
+        new Request("http://app.internal/__krate/action/act1", {
+          method: "POST",
+          headers: { origin: "https://evil.example", "x-forwarded-host": "evil.example", "x-krate-action": "fetch", "content-type": "application/json" },
+          body: '{"args":[1,2]}',
+        }),
+      );
+    for (const target of ["netlify", "cloudflare"] as const) {
+      expect((await post(mk(target))).status, target + " unset").toBe(403);
+      expect((await post(mk(target, false))).status, target + " false").toBe(403);
+    }
+    expect((await post(mk("vercel", false))).status).toBe(403);
+    // Behind a proxy of yours that sets the header, it is the real host.
+    expect((await post(mk("cloudflare", true))).status).toBe(200);
+  });
+
+  it("node: forwarded headers are read only with trustProxy: true", async () => {
+    const headers = { "x-forwarded-host": "shop.example", "x-forwarded-proto": "https" };
+    expect((await echo(mk("node"), headers)).url).toBe("http://app.internal/api/echo");
+    expect((await echo(mk("node", true), headers)).url).toBe("https://shop.example/api/echo");
+  });
+});

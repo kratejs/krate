@@ -129,8 +129,10 @@ type serverManifestFile struct {
 
 // handlerConfig mirrors HandlerConfig in @krate/runtime/server-handler.
 type handlerConfig struct {
-	BasePath        string              `json:"basePath"`
-	TrustProxy      bool                `json:"trustProxy"`
+	BasePath string `json:"basePath"`
+	// TrustProxy is server.trustProxy: null when the project does not set it,
+	// which makes each serverless target use what its platform guarantees.
+	TrustProxy      *bool               `json:"trustProxy"`
 	MaxBodyBytes    int64               `json:"maxBodyBytes"`
 	MaxAPIBodyBytes int64               `json:"maxAPIBodyBytes"`
 	Redirects       []config.Redirect   `json:"redirects"`
@@ -186,7 +188,7 @@ func buildHandlerConfig(cfg *config.Config) handlerConfig {
 	c := cfg.CORS
 	hc := handlerConfig{
 		BasePath:        cfg.BaseURLPath(),
-		TrustProxy:      cfg.Server.TrustProxy,
+		TrustProxy:      trustProxyOf(cfg),
 		MaxBodyBytes:    cfg.MaxBodyBytes(),
 		MaxAPIBodyBytes: cfg.MaxAPIBodyBytes(),
 		Redirects:       nonNilRedirects(cfg.Redirects),
@@ -675,24 +677,26 @@ func serverEntry(target, imports, body string) string {
 		b.WriteString(body)
 		b.WriteString(`const distDir = defaultDistDir(import.meta.url);
 export const handler = createKrateHandler({ target: 'node', data, modules, static: createNodeStaticLayer(distDir) });
-await startNodeServer({ handler, distDir, trustProxy: data.config.trustProxy, shutdownTimeout: __SHUTDOWN__, port: __PORT__ });
+await startNodeServer({ handler, distDir, trustProxy: data.config.trustProxy === true, shutdownTimeout: __SHUTDOWN__, port: __PORT__ });
 `)
 	case "vercel":
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\nimport { nodeRequestListener } from '@krate/runtime/node-server';\n")
 		b.WriteString(body)
-		b.WriteString(`export const handler = createKrateHandler({ target: 'vercel', data, modules, trustProxy: true });
+		b.WriteString(`export const handler = createKrateHandler({ target: 'vercel', data, modules });
 export const handleRequest = (request, ctx) => handler(request, ctx);
+// true: keep the headers Vercel sent. The handler decides which of them it trusts.
 export default nodeRequestListener(handler, true);
 `)
 	case "netlify":
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\n")
 		b.WriteString(body)
-		b.WriteString(`export const handler = createKrateHandler({ target: 'netlify', data, modules, trustProxy: true });
+		b.WriteString(`export const handler = createKrateHandler({ target: 'netlify', data, modules });
 export default async (request, context) => handler(request, { waitUntil: context && context.waitUntil ? (p) => context.waitUntil(p) : undefined });
 `)
 	case "cloudflare":
-		// Workers do not rewrite a client's X-Forwarded-Host/Proto and request.url is
-		// already the public URL, so forwarded headers are trusted only when
+		// Every target follows server.trustProxy (see PLATFORMS in the handler):
+		// Workers do not rewrite a client's X-Forwarded-Host/Proto and request.url
+		// is already the public URL, so forwarded headers are trusted only when
 		// server.trustProxy says a proxy of yours sits in front of the Worker.
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\nimport { createAssetsStaticLayer } from '@krate/runtime/assets-static';\n")
 		b.WriteString(body)
@@ -704,7 +708,7 @@ export default {
       const proc = globalThis.process || (globalThis.process = { env: {} });
       proc.env = proc.env || {};
       for (const [k, v] of Object.entries(env || {})) if (typeof v === 'string' && !(k in proc.env)) proc.env[k] = v;
-      handler = createKrateHandler({ target: 'cloudflare', data, modules, trustProxy: !!data.config.trustProxy, static: env && env.ASSETS ? createAssetsStaticLayer(env.ASSETS) : undefined });
+      handler = createKrateHandler({ target: 'cloudflare', data, modules, static: env && env.ASSETS ? createAssetsStaticLayer(env.ASSETS) : undefined });
     }
     return handler(request, { waitUntil: (p) => ctx.waitUntil(p) });
   },
@@ -872,3 +876,13 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 }
 
 var _ = fsutil.WriteFileAtomic
+
+// trustProxyOf is server.trustProxy as the handler reads it: true, false, or
+// null when the project never set it.
+func trustProxyOf(cfg *config.Config) *bool {
+	if !cfg.Server.TrustProxySet {
+		return nil
+	}
+	v := cfg.Server.TrustProxy
+	return &v
+}

@@ -76,7 +76,12 @@ export type DeployTarget = "node" | "vercel" | "netlify" | "cloudflare";
 export interface HandlerConfig {
   /** URL prefix the site is mounted under ("" or "/prefix"). */
   basePath: string;
-  trustProxy: boolean;
+  /**
+   * server.trustProxy: true trusts X-Forwarded-Host/Proto from a proxy of
+   * yours in front of the platform, false trusts no forwarded header, null
+   * (not configured) uses what each platform guarantees (see PLATFORMS).
+   */
+  trustProxy: boolean | null;
   /** Request body cap for pages and middleware, bytes. */
   maxBodyBytes: number;
   /** Request body cap for API routes and actions, bytes. */
@@ -172,8 +177,8 @@ export interface HandlerOptions {
   static?: StaticLayer;
   /** Page ISR cache storage. Defaults to a bounded in-memory store per instance. */
   isrStore?: IsrStore;
-  /** Overrides data.config.trustProxy (the serverless platforms always set X-Forwarded-*). */
-  trustProxy?: boolean;
+  /** Overrides data.config.trustProxy. */
+  trustProxy?: boolean | null;
   /** Hex sha256 for error digests; defaults to the portable implementation. */
   sha256Hex?(input: string): string;
   /**
@@ -328,6 +333,30 @@ function attachCookies(request: Request): Request {
 
 const sleepMicrotask = () => Promise.resolve();
 
+/**
+ * What each platform guarantees about a request, from its documentation:
+ *   vercel      x-forwarded-host (= Host) and x-forwarded-proto are set by Vercel,
+ *               x-forwarded-for / x-real-ip are overwritten with the client address
+ *               (external values are not forwarded).
+ *   netlify     the request URL is the public one; the client address is
+ *               x-nf-client-connection-ip. X-Forwarded-* are not relied on.
+ *   cloudflare  the request URL is the public one; the client address is
+ *               cf-connecting-ip. X-Forwarded-For is appended to what the client
+ *               sent and X-Forwarded-Host is not set, so neither is used.
+ *   node        the node server has already replaced the headers with what the
+ *               socket showed (or kept a proxy's with server.trustProxy).
+ */
+interface PlatformGuarantees {
+  forwardedHostProto: boolean;
+  clientIP: string[];
+}
+const PLATFORMS: Record<DeployTarget, PlatformGuarantees> = {
+  node: { forwardedHostProto: false, clientIP: [] },
+  vercel: { forwardedHostProto: true, clientIP: ["x-real-ip", "x-forwarded-for"] },
+  netlify: { forwardedHostProto: false, clientIP: ["x-nf-client-connection-ip"] },
+  cloudflare: { forwardedHostProto: false, clientIP: ["cf-connecting-ip"] },
+};
+
 const MIN_FLASH_SECRET = 16;
 let warnedFlashSecret = false;
 
@@ -365,7 +394,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
   const target = options.target;
   // Prerendered pages carried in the bundle (platforms that route pages through the function for middleware).
   const staticLayer = options.static || (data.staticPages ? createMemoryStaticLayer(data.staticPages) : undefined);
-  const trustProxy = options.trustProxy !== undefined ? options.trustProxy : cfg.trustProxy;
+  const trustProxy: boolean | null = options.trustProxy !== undefined ? options.trustProxy : cfg.trustProxy === undefined ? null : cfg.trustProxy;
+  const platform = PLATFORMS[target];
   const basePath = cfg.basePath || "";
   const hashed = new Set(data.hashedAssets);
   const staticOnly = new Set(data.staticOnlyRoutes.map(normalizeRoutePattern));
@@ -563,22 +593,63 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   // Request helpers
 
-  function requestOrigin(request: Request, url: URL): string {
-    if (trustProxy) {
-      const proto = (request.headers.get("x-forwarded-proto") || "").split(",")[0].trim().toLowerCase();
-      const host = (request.headers.get("x-forwarded-host") || "").split(",")[0].trim();
-      const scheme = proto === "http" || proto === "https" ? proto : url.protocol.replace(":", "");
-      return scheme + "://" + (host || url.host);
+  // sanitizeForwarded makes the forwarding headers of a request mean what the
+  // rest of the handler (and middleware, API routes, actions) takes them to
+  // mean, whatever the client sent:
+  //   - x-forwarded-host/proto come from the platform when it guarantees them
+  //     (or from the proxy of yours when trustProxy is true), else from the
+  //     request URL;
+  //   - on a serverless platform x-forwarded-for / x-real-ip carry the one
+  //     client address the platform reports (never a chain the client wrote),
+  //     and `forwarded` is dropped. trustProxy: true leaves them as delivered.
+  // The node target is normalised by the node server before it gets here.
+  function sanitizeForwarded(request: Request): Request {
+    const url = new URL(request.url);
+    const h = new Headers(request.headers);
+    const trustHostProto = trustProxy === null ? platform.forwardedHostProto : trustProxy;
+    const first = (name: string) => (h.get(name) || "").split(",")[0].trim();
+    const proto = first("x-forwarded-proto").toLowerCase();
+    const host = first("x-forwarded-host");
+    if (trustHostProto) {
+      h.set("x-forwarded-proto", proto === "http" || proto === "https" ? proto : url.protocol.replace(":", ""));
+      h.set("x-forwarded-host", host || url.host);
+    } else {
+      h.set("x-forwarded-proto", url.protocol.replace(":", ""));
+      h.set("x-forwarded-host", url.host);
     }
-    return url.protocol + "//" + url.host;
+    if (target !== "node" && trustProxy !== true) {
+      h.delete("forwarded");
+      h.delete("x-real-ip");
+      h.delete("x-forwarded-for");
+      let ip = "";
+      if (trustProxy === null) {
+        for (const name of platform.clientIP) {
+          const v = (request.headers.get(name) || "").split(",")[0].trim();
+          if (v) {
+            ip = v;
+            break;
+          }
+        }
+      }
+      if (ip) {
+        h.set("x-forwarded-for", ip);
+        h.set("x-real-ip", ip);
+      }
+    }
+    return new Request(request, { headers: h });
+  }
+
+  // handle() has run sanitizeForwarded: the forwarded headers can be read as they are.
+  function requestOrigin(request: Request, url: URL): string {
+    const proto = (request.headers.get("x-forwarded-proto") || "").split(",")[0].trim().toLowerCase();
+    const host = (request.headers.get("x-forwarded-host") || "").split(",")[0].trim();
+    const scheme = proto === "http" || proto === "https" ? proto : url.protocol.replace(":", "");
+    return scheme + "://" + (host || url.host);
   }
 
   function requestHost(rs: ReqState): string {
-    if (trustProxy) {
-      const h = (rs.request.headers.get("x-forwarded-host") || "").split(",")[0].trim();
-      if (h) return h;
-    }
-    return new URL(rs.request.url).host;
+    const h = (rs.request.headers.get("x-forwarded-host") || "").split(",")[0].trim();
+    return h || new URL(rs.request.url).host;
   }
 
   function fullURL(rs: ReqState): string {
@@ -1731,6 +1802,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
 
   return async function handle(request: Request, ctx: HandlerContext = {}): Promise<Response> {
     if (ctx.waitUntil) latestWaitUntil = ctx.waitUntil.bind(ctx);
+    request = sanitizeForwarded(request);
     const url = new URL(request.url);
     const rs: ReqState = {
       request,
