@@ -7,6 +7,9 @@ const (
 	// CodeRuntimeExportMissing: a name is imported from @krate/runtime that
 	// the package does not export.
 	CodeRuntimeExportMissing Code = "KR7124"
+	// CodeAssetBindingUnresolved: an imported asset (image, font, ...) is read
+	// where the compiler cannot replace the binding with the file's URL.
+	CodeAssetBindingUnresolved Code = "KR7125"
 )
 
 func init() {
@@ -28,6 +31,15 @@ func init() {
 				"undefined in the browser and fail with a ReferenceError. Check the spelling against the " +
 				"runtime API reference; names from other frameworks (`signal`, `usePathname`) have Krate " +
 				"equivalents such as `createSignal` and `getNavigationState`. This is an error.",
+		},
+		CodeInfo{
+			Code:  CodeAssetBindingUnresolved,
+			Title: "Imported asset is used where its URL cannot be inlined",
+			Explanation: "`import logo from \"./logo.png\"` binds the file's hashed URL. The compiler replaces " +
+				"reads of the binding in the module that imports the file, so a binding that another module " +
+				"re-exports (`export { logo }`), or a read the rewrite cannot reach, has no value in the " +
+				"browser script: it is a ReferenceError there, or renders as the bare name. Import the asset " +
+				"directly where it is used, or export the URL as a string constant. This is a warning.",
 		},
 	)
 }

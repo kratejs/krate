@@ -1472,42 +1472,73 @@ func rewriteCSSModuleJSXChild(child ast.JSXChild, locals map[string]map[string]s
 // the irtree builder and hydration codegen emit the real URL instead of a
 // reference to a runtime import that never exists.
 func (b *Bundler) rewriteAssetImportRefs() {
+	byPath := make(map[string]*Module, len(b.order))
+	for _, mod := range b.order {
+		if mod != nil && mod.Program != nil {
+			byPath[filepath.Clean(mod.Path)] = mod
+		}
+	}
 	for _, mod := range b.order {
 		if mod.Program == nil || !mod.Rewritable {
 			continue
 		}
-		localVars := map[string]string{}
+		locals := map[string]string{}
+		namespaces := map[string]string{}
 		for _, stmt := range mod.Program.Body {
 			imp, ok := stmt.(*ast.ImportStmt)
-			if !ok || imp.Default == "" {
+			if !ok {
 				continue
 			}
-			src := strings.Trim(imp.Source, "\"'")
-			// Resolve the way the import itself was resolved, so a tsconfig
-			// alias (`@/assets/logo.png`) finds the same file as a relative path.
-			resolved := b.resolveImportForModule(mod.Path, src)
-			if resolved == "" {
-				resolved = src
-				if !filepath.IsAbs(resolved) {
-					resolved = filepath.Join(b.root, resolved)
-				}
-				if strings.HasPrefix(src, ".") {
-					resolved = filepath.Join(filepath.Dir(mod.Path), src)
-					if !filepath.IsAbs(resolved) {
-						resolved = filepath.Join(b.root, resolved)
-					}
+			url, ok := b.importedAssetURL(mod.Path, imp)
+			if !ok {
+				continue
+			}
+			if imp.Default != "" {
+				locals[imp.Default] = url
+			}
+			for _, n := range imp.Named {
+				if n.Remote == "default" && n.Local != "" {
+					locals[n.Local] = url
 				}
 			}
-			resolved = filepath.Clean(resolved)
-			if url, ok := b.assets[resolved]; ok {
-				localVars[imp.Default] = url
+			if imp.Namespace != "" {
+				namespaces[imp.Namespace] = url
 			}
 		}
-		if len(localVars) == 0 {
+		if len(locals) == 0 && len(namespaces) == 0 {
 			continue
 		}
-		rewriteAssetRefsStmts(mod.Program.Body, localVars)
+		rewriteAssetRefsStmts(mod.Program.Body, locals)
+		rewriteAssetNamespaceRefs(mod.Program.Body, namespaces)
+		b.reportUnresolvedAssetRefs(mod, locals, namespaces)
 	}
+	b.reportReexportedAssetImports(byPath)
+}
+
+// importedAssetURL returns the hashed URL of the asset an import statement
+// loads, when its source is a bundled asset file.
+func (b *Bundler) importedAssetURL(importer string, imp *ast.ImportStmt) (string, bool) {
+	if imp.Source == "" {
+		return "", false
+	}
+	src := strings.Trim(imp.Source, "\"'")
+	// Resolve the way the import itself was resolved, so a tsconfig alias
+	// (`@/assets/logo.png`) finds the same file as a relative path.
+	resolved := b.resolveImportForModule(importer, src)
+	if resolved == "" {
+		resolved = src
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Join(b.root, resolved)
+		}
+		if strings.HasPrefix(src, ".") {
+			resolved = filepath.Join(filepath.Dir(importer), src)
+			if !filepath.IsAbs(resolved) {
+				resolved = filepath.Join(b.root, resolved)
+			}
+		}
+	}
+	url, ok := b.assets[filepath.Clean(resolved)]
+	return url, ok
 }
 
 func rewriteAssetRefsStmts(stmts []ast.Stmt, locals map[string]string) {
@@ -1571,6 +1602,38 @@ func rewriteAssetRefsStmt(stmt ast.Stmt, locals map[string]string) {
 			rewriteAssetRefsStmts(s.Catch.Body, locals)
 		}
 		rewriteAssetRefsStmts(s.Finally, locals)
+	case *ast.ForInStmt:
+		s.Right = rewriteAssetRefsExpr(s.Right, locals)
+		rewriteAssetRefsStmts(s.Body, locals)
+	case *ast.BlockStmt:
+		rewriteAssetRefsStmts(s.Body, locals)
+	case *ast.LabeledStmt:
+		rewriteAssetRefsStmt(s.Body, locals)
+	case *ast.ThrowStmt:
+		s.Value = rewriteAssetRefsExpr(s.Value, locals)
+	case *ast.ClassDecl:
+		rewriteAssetRefsClass(s, locals)
+	}
+}
+
+func rewriteAssetRefsClass(c *ast.ClassDecl, locals map[string]string) {
+	if c == nil {
+		return
+	}
+	c.SuperClass = rewriteAssetRefsExpr(c.SuperClass, locals)
+	for _, m := range c.Members {
+		if m == nil {
+			continue
+		}
+		if m.Init != nil {
+			m.Init = rewriteAssetRefsExpr(m.Init, locals)
+		}
+		for _, p := range m.Params {
+			if p != nil && p.Default != nil {
+				p.Default = rewriteAssetRefsExpr(p.Default, locals)
+			}
+		}
+		rewriteAssetRefsStmts(m.Body, locals)
 	}
 }
 
@@ -1653,6 +1716,18 @@ func rewriteAssetRefsExpr(expr ast.Expr, locals map[string]string) ast.Expr {
 		for i, p := range e.Parts {
 			e.Parts[i] = rewriteAssetRefsExpr(p, locals)
 		}
+		return e
+	case *ast.TaggedTemplateExpr:
+		e.Tag = rewriteAssetRefsExpr(e.Tag, locals)
+		if q, ok := rewriteAssetRefsExpr(e.Quasi, locals).(*ast.TemplateExpr); ok {
+			e.Quasi = q
+		}
+		return e
+	case *ast.ParenExpr:
+		e.Expr = rewriteAssetRefsExpr(e.Expr, locals)
+		return e
+	case *ast.ClassExpr:
+		rewriteAssetRefsClass(e.Class, locals)
 		return e
 	case *ast.JSXElement:
 		if e.Opening != nil {
