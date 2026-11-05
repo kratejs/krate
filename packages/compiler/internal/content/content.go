@@ -9,9 +9,11 @@ package content
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // FieldType is a supported frontmatter field type.
@@ -24,6 +26,8 @@ const (
 	TypeStringA FieldType = "string[]"
 	TypeNumberA FieldType = "number[]"
 	TypeAny     FieldType = "any"
+	// TypeDate is a string holding an ISO 8601 date or date-time.
+	TypeDate FieldType = "date"
 )
 
 // Field describes one schema field.
@@ -121,7 +125,7 @@ func FieldTypeFromString(s string) FieldType {
 		return TypeNumberA
 	case "date":
 		// Dates are authored as ISO strings in frontmatter.
-		return TypeString
+		return TypeDate
 	default:
 		return TypeAny
 	}
@@ -150,6 +154,10 @@ func Validate(schema map[string]Field, data map[string]any) []error {
 			continue
 		}
 		if !valueMatches(field.Type, raw) {
+			if s, isStr := raw.(string); isStr && field.Type == TypeDate {
+				errs = append(errs, fmt.Errorf("field %q must be an ISO date such as 2024-01-31 or 2024-01-31T09:30:00Z (got %q)", name, s))
+				continue
+			}
 			errs = append(errs, fmt.Errorf("field %q must be %s (got %s)", name, field.Type, jsTypeName(raw)))
 			continue
 		}
@@ -188,6 +196,9 @@ func valueMatches(t FieldType, v any) bool {
 	case TypeString:
 		_, ok := v.(string)
 		return ok
+	case TypeDate:
+		s, ok := v.(string)
+		return ok && isISODate(s)
 	case TypeNumber:
 		switch v.(type) {
 		case int64, float64, int:
@@ -528,6 +539,19 @@ func trimNumber(f float64) string {
 	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
+var isoDateRe = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$`)
+
+// isISODate reports whether s is an ISO 8601 date (2024-01-31) or date-time
+// (2024-01-31T09:30:00Z), with a real calendar date.
+func isISODate(s string) bool {
+	m := isoDateRe.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", m[1])
+	return err == nil
+}
+
 func writeFields(b *strings.Builder, schema map[string]Field) {
 	if len(schema) == 0 {
 		b.WriteString("  [key: string]: unknown;\n")
@@ -541,17 +565,26 @@ func writeFields(b *strings.Builder, schema map[string]Field) {
 	for _, name := range names {
 		field := schema[name]
 		opt := "?"
-		if field.Required {
+		// A default is applied to every entry, so the field is always set.
+		if field.Required || field.Default != nil {
 			opt = ""
 		}
-		b.WriteString("  " + propKey(name) + opt + ": " + tsType(field.Type) + ";\n")
+		typ := tsType(field.Type)
+		if field.Type == TypeString && len(field.Enum) > 0 {
+			quoted := make([]string, len(field.Enum))
+			for i, v := range field.Enum {
+				quoted[i] = tsString(v)
+			}
+			typ = strings.Join(quoted, " | ")
+		}
+		b.WriteString("  " + propKey(name) + opt + ": " + typ + ";\n")
 	}
 }
 
 // tsType maps a FieldType to its TypeScript type.
 func tsType(t FieldType) string {
 	switch t {
-	case TypeString:
+	case TypeString, TypeDate:
 		return "string"
 	case TypeNumber:
 		return "number"

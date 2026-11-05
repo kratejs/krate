@@ -12,6 +12,8 @@
   box-shadow: var(--krate-shadow-md, 0 2px 4px rgba(24, 24, 27, 0.05), 0 10px 24px -8px rgba(24, 24, 27, 0.12)), var(--krate-hairline, none);
 }
 .krate-card-title {
+  margin: 0;
+  line-height: 1.4;
   padding: 12px 16px;
   font-weight: 600;
   font-size: 0.95rem;

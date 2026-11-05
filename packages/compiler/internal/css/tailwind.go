@@ -775,6 +775,19 @@ func generateCSS(cls string, theme TailwindTheme) string {
 		return "background-size: auto;"
 	}
 
+	// Explicit arbitrary size and position: bg-size-[auto_100px],
+	// bg-position-[center_top], and the bg-size-(--var) shorthand.
+	for _, bg := range [...]struct{ prefix, prop string }{{"bg-size-", "background-size"}, {"bg-position-", "background-position"}} {
+		if rest, ok := strings.CutPrefix(cls, bg.prefix); ok {
+			if v, _, isArb := arbitraryValue(rest); isArb {
+				return bg.prop + ": " + v + ";"
+			}
+			if strings.HasPrefix(rest, "(") && strings.HasSuffix(rest, ")") && len(rest) > 2 {
+				return bg.prop + ": var(" + normalizeArbitrary(rest[1:len(rest)-1]) + ");"
+			}
+		}
+	}
+
 	// Background repeat
 	if cls == "bg-repeat" {
 		return "background-repeat: repeat;"

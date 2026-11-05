@@ -29,7 +29,7 @@
   background: var(--krate-surface, #f4f4f5);
 }
 .krate-accordion-trigger:focus-visible {
-  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
   outline-offset: -2px;
 }
 .krate-accordion-trigger-text {

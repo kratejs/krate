@@ -5,6 +5,10 @@
 .krate-context-menu-trigger {
   cursor: default;
 }
+.krate-context-menu-trigger:focus-visible {
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
+  outline-offset: 2px;
+}
 .krate-context-menu-content {
   position: fixed;
   left: var(--cm-x, 0);
@@ -38,10 +42,14 @@
   color: var(--krate-text, #09090b);
   cursor: pointer;
   transition: background 0.1s;
-  outline: none;
 }
-.krate-context-menu-item:hover {
+.krate-context-menu-item:hover,
+.krate-context-menu-item:focus-visible {
   background: var(--krate-surface-hover, #e4e4e7);
+}
+.krate-context-menu-item:focus-visible {
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
+  outline-offset: -2px;
 }
 .krate-context-menu-item-disabled {
   opacity: 0.4;

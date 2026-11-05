@@ -17,6 +17,9 @@ export interface DialogProps {
   /** Element id: a handle for `openOverlay('#id')` / `closeOverlay('#id')`. */
   id?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** Modal dialog. Zero JS via a context-provided CSS scope (`as: 'dialog'`). */
@@ -24,7 +27,7 @@ export function Dialog(props: DialogProps) {
   const open = createCSSGroup<string>(null, { as: 'dialog', label: props.label });
   return (
     <DialogCtx.Provider value={open}>
-      <div class="krate-dialog" id={props.id}>
+      <div class={"krate-dialog" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} id={props.id}>
         {props.open !== undefined || props.onOpenChange ? <OverlayBridge open={props.open} onOpenChange={props.onOpenChange} /> : null}
         {props.children}
       </div>
@@ -35,13 +38,16 @@ export function Dialog(props: DialogProps) {
 export interface DialogTriggerProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Dialog.Trigger` instead. */
 export function DialogTrigger(props: DialogTriggerProps) {
   const open = DialogCtx.use();
   return (
-    <button class="krate-dialog-trigger" type="button" {...open.trigger(props.value)}>
+    <button class={"krate-dialog-trigger" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} type="button" {...open.trigger(props.value)}>
       {props.children}
     </button>
   );
@@ -50,13 +56,16 @@ export function DialogTrigger(props: DialogTriggerProps) {
 export interface DialogContentProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Dialog.Content` instead. */
 export function DialogContent(props: DialogContentProps) {
   const open = DialogCtx.use();
   return (
-    <div class="krate-dialog-content" role="dialog" {...open.panel(props.value)}>
+    <div class={"krate-dialog-content" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} role="dialog" {...open.panel(props.value)}>
       {props.children}
     </div>
   );
@@ -64,31 +73,40 @@ export function DialogContent(props: DialogContentProps) {
 
 export interface DialogTitleProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Dialog.Title` instead. */
 export function DialogTitle(props: DialogTitleProps) {
-  return <h2 class="krate-dialog-title" data-ka="title">{props.children}</h2>;
+  return <h2 class={"krate-dialog-title" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} data-ka="title">{props.children}</h2>;
 }
 
 export interface DialogDescriptionProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Dialog.Description` instead. */
 export function DialogDescription(props: DialogDescriptionProps) {
-  return <p class="krate-dialog-description" data-ka="desc">{props.children}</p>;
+  return <p class={"krate-dialog-description" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} data-ka="desc">{props.children}</p>;
 }
 
 export interface DialogCloseProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `Dialog.Close` instead. */
 export function DialogClose(props: DialogCloseProps) {
   const open = DialogCtx.use();
   return (
-    <button class="krate-dialog-close" type="button" aria-label="Close" {...open.close()}>
+    <button class={"krate-dialog-close" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} type="button" aria-label="Close" {...open.close()}>
       {props.children}
     </button>
   );

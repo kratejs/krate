@@ -401,6 +401,10 @@ declare global {
       autofocus?: boolean;
       capture?: boolean | string;
       checked?: boolean | string;
+      /** Initial checked state of an uncontrolled checkbox or radio. */
+      defaultChecked?: boolean;
+      /** Initial value of an uncontrolled input. */
+      defaultValue?: string | number;
       crossOrigin?: string;
       disabled?: boolean | string;
       form?: string;
@@ -1102,7 +1106,7 @@ declare global {
   function Head(props: { children?: any }): JSX.Element;
   function Suspense(props: { children?: any; fallback?: any }): JSX.Element;
   function Link(props: JSX.LinkProps): JSX.Element;
-  function SyntaxHighlight(props: { lang?: string; children?: any }): JSX.Element;
+  function SyntaxHighlight(props: { lang?: string; highlight?: string; children?: any }): JSX.Element;
   interface HTMLImageElement {
     __jsxProps: JSX.ImageProps;
   }

@@ -9,6 +9,11 @@ export interface PasswordToggleFieldProps {
   name?: string;
   /** Render the show/hide button (default true). */
   showToggle?: boolean;
+  required?: boolean;
+  autoComplete?: string;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 export function PasswordToggleField(props: PasswordToggleFieldProps) {
@@ -19,7 +24,7 @@ export function PasswordToggleField(props: PasswordToggleFieldProps) {
   }
 
   return (
-    <div class="krate-password-toggle-field">
+    <div class={"krate-password-toggle-field" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>
       <input
         class="krate-password-toggle-input"
         type={visible() ? "text" : "password"}
@@ -28,6 +33,8 @@ export function PasswordToggleField(props: PasswordToggleFieldProps) {
         disabled={props.disabled}
         id={props.id || ""}
         name={props.name || ""}
+        required={props.required}
+        autoComplete={props.autoComplete}
       />
       {props.showToggle === false ? null : <button
         class="krate-password-toggle-button"

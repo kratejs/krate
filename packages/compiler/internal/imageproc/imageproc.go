@@ -9,6 +9,7 @@ import (
 	"hash/fnv"
 	"image"
 	"image/color"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"os"
@@ -78,7 +79,7 @@ func DecodeImage(r *os.File) (image.Image, string, error) {
 		img, err := webp.Decode(r)
 		return img, "webp", err
 	case ".gif":
-		img, _, err := image.Decode(r)
+		img, err := gif.Decode(r)
 		return img, "gif", err
 	default:
 		img, _, err := image.Decode(r)
@@ -283,8 +284,10 @@ func (o Options) formatEnabled(name string) bool {
 // optionsKey is a stable hash of the options that affect the generated variant
 // set. It is folded into the meta-cache filename so a breakpoint/format change
 // is never served from a stale meta.
-func (o Options) optionsKey() string {
+func (o Options) optionsKey(reqW, reqH int) string {
 	h := fnv.New32a()
+	// v2: variants are EXIF-upright and sized to the requested display width.
+	fmt.Fprintf(h, "v2,%dx%d,", reqW, reqH)
 	for _, bp := range o.BreakpointList() {
 		fmt.Fprintf(h, "%d,", bp)
 	}
@@ -311,6 +314,25 @@ func computeSrcsetWidths(breakpoints []int, origWidth int) []int {
 	}
 	if len(widths) == 0 || widths[len(widths)-1] != origWidth {
 		widths = append(widths, origWidth)
+	}
+	return widths
+}
+
+// densityWidths returns the variant widths for an image shown at displayW CSS
+// pixels: 1x and 2x, each capped at the source width. Anything wider than 2x
+// would never be picked by a browser, so it is not generated.
+func densityWidths(displayW, origW int) []int {
+	if displayW < 1 {
+		displayW = 1
+	}
+	var widths []int
+	for _, w := range []int{displayW, displayW * 2} {
+		if w > origW {
+			w = origW
+		}
+		if len(widths) == 0 || widths[len(widths)-1] != w {
+			widths = append(widths, w)
+		}
 	}
 	return widths
 }
@@ -357,6 +379,16 @@ var passthroughFormats = map[string]string{
 	".tiff": "image/tiff",
 	".heic": "image/heic",
 	".heif": "image/heif",
+}
+
+// animatedGIF reports whether data is a GIF with more than one frame, along
+// with its logical screen size.
+func animatedGIF(data []byte) (bool, int, int) {
+	g, err := gif.DecodeAll(bytes.NewReader(data))
+	if err != nil || len(g.Image) < 2 {
+		return false, 0, 0
+	}
+	return true, g.Config.Width, g.Config.Height
 }
 
 // aspectRatio returns the width/height ratio, or 0 when height is unknown.
@@ -451,7 +483,7 @@ func ProcessImageWith(root, srcPath string, reqW, reqH int, opts Options) (*Imag
 		quality = 82
 	}
 	wantPlaceholder := opts.Placeholder
-	optsKey := opts.optionsKey()
+	optsKey := opts.optionsKey(reqW, reqH)
 	wantWebP := opts.formatEnabled("webp")
 	wantOriginal := opts.formatEnabled("original")
 
@@ -471,6 +503,20 @@ func ProcessImageWith(root, srcPath string, reqW, reqH int, opts Options) (*Imag
 		return nil, fmt.Errorf("reading image %s: %w", srcPath, err)
 	}
 	cacheKey := ComputeCacheKey(data)
+
+	// Re-encoding would flatten an animated GIF to one frame, so it is served
+	// as is.
+	if strings.EqualFold(filepath.Ext(srcPath), ".gif") {
+		if anim, w, h := animatedGIF(data); anim {
+			outW, outH := displayDims(w, h, reqW, reqH)
+			return &ImageResult{
+				Width:        outW,
+				Height:       outH,
+				AspectRatio:  aspectRatio(outW, outH),
+				FallbackMime: "image/gif",
+			}, nil
+		}
+	}
 
 	// Cache hit: reuse the previous result without decoding/resizing/encoding.
 	if res, ok := loadImageMeta(outDir, cacheKey, quality, optsKey, wantPlaceholder); ok {
@@ -495,6 +541,11 @@ func ProcessImageWith(root, srcPath string, reqW, reqH int, opts Options) (*Imag
 		return nil, fmt.Errorf("decoding image %s: %w", srcPath, err)
 	}
 
+	if origFmt == "jpeg" {
+		// Phone photos store rotation in EXIF. The variants are re-encoded
+		// without it, so rotate the pixels here and report the upright size.
+		img = applyOrientation(img, jpegOrientation(data))
+	}
 	bounds := img.Bounds()
 	origW, origH := bounds.Dx(), bounds.Dy()
 
@@ -508,7 +559,13 @@ func ProcessImageWith(root, srcPath string, reqW, reqH int, opts Options) (*Imag
 		fallbackExt = ".png"
 	}
 
-	srcsetWidths := computeSrcsetWidths(opts.BreakpointList(), origW)
+	var srcsetWidths []int
+	if reqW > 0 || reqH > 0 {
+		dispW, _ := displayDims(origW, origH, reqW, reqH)
+		srcsetWidths = densityWidths(dispW, origW)
+	} else {
+		srcsetWidths = computeSrcsetWidths(opts.BreakpointList(), origW)
+	}
 
 	// Generate variants in parallel (bounded): decode once, then resize + encode
 	// each width concurrently. img is only read, so concurrent Scale is safe.

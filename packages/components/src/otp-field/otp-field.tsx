@@ -1,9 +1,11 @@
 import './otp-field.css';
-import { createSignal } from '@krate/runtime';
 
 export interface OTPFieldProps {
   length?: number;
+  /** Initial code. The field is uncontrolled: it owns the digits after mount. */
   value?: string;
+  /** Submits the full code under this name when the field is inside a form. */
+  name?: string;
   onValueChange?: (value: string) => void;
   disabled?: boolean;
   /** Accessible name for the group; each digit is named "<label> digit N of M". */
@@ -12,105 +14,110 @@ export interface OTPFieldProps {
   onComplete?: (value: string) => void;
 }
 
+/**
+ * One-time-code input: a box per digit. The digits live in the inputs
+ * themselves, so typing, Backspace, paste and SMS autofill all edit what is on
+ * screen. Arrow keys, Home and End move between boxes.
+ */
 export function OTPField(props: OTPFieldProps) {
   var length = props.length || 6;
-  var [values, setValues] = createSignal<string[]>(Array.from({ length: length }, function () { return ""; }));
+  var initial = (props.value || "").replace(/[^0-9a-zA-Z]/g, "").slice(0, length).split("");
 
-  function handleInputAt(index: number, e: Event) {
+  function boxes(target: EventTarget | null): HTMLInputElement[] {
+    var root = (target as HTMLElement).closest("[data-krate-otp-field]");
+    return root ? (Array.prototype.slice.call(root.querySelectorAll(".krate-otp-field-input")) as HTMLInputElement[]) : [];
+  }
+
+  function sync(target: EventTarget | null) {
+    var inputs = boxes(target);
+    var full = inputs.map(function (el) { return el.value; }).join("");
+    // Remember each box so a rejected character can put the old digit back.
+    inputs.forEach(function (el) { el.setAttribute("data-prev", el.value); });
+    var root = (target as HTMLElement).closest("[data-krate-otp-field]");
+    var hidden = root ? (root.querySelector("input[data-otp-value]") as HTMLInputElement | null) : null;
+    if (hidden) hidden.value = full;
+    if (props.onValueChange) props.onValueChange(full);
+    if (full.length === inputs.length && props.onComplete) props.onComplete(full);
+  }
+
+  // Writes chars into the boxes from `start` on and focuses the next empty one.
+  function fill(target: EventTarget | null, start: number, chars: string[]) {
+    var inputs = boxes(target);
+    for (var i = 0; i < chars.length && start + i < inputs.length; i++) {
+      inputs[start + i].value = chars[i];
+    }
+    var next = Math.min(start + chars.length, inputs.length - 1);
+    if (inputs[next]) inputs[next].focus();
+  }
+
+  function handleInput(e: Event) {
     var target = e.target as HTMLInputElement;
-    var val = target.value;
-    if (val.length > 1) {
-      val = val.charAt(val.length - 1);
+    var index = Number(target.getAttribute("data-otp-index"));
+    var ie = e as InputEvent;
+    var chars: string[];
+    if (ie.inputType === "insertText" && ie.data && ie.data.length === 1) {
+      // Typing over a filled box replaces it.
+      chars = /^[0-9a-zA-Z]$/.test(ie.data) ? [ie.data] : [];
+    } else {
+      // Autofill and other whole-value edits: spread the characters out.
+      chars = target.value.replace(/[^0-9a-zA-Z]/g, "").split("");
     }
-    if (!/^[0-9a-zA-Z]$/.test(val)) {
-      val = "";
+    if (chars.length === 0) {
+      var cleared = ie.inputType !== "insertText" && ie.inputType !== "insertReplacementText";
+      target.value = cleared ? "" : (target.getAttribute("data-prev") || "");
+    } else {
+      fill(target, index, chars);
     }
-    setValues(function (prev) {
-      var next = prev.slice();
-      next[index] = val;
-      return next;
-    });
-    if (val && index < length - 1) {
-      var allInputs = (e.target as HTMLElement).closest("[data-krate-otp-field]")?.querySelectorAll(".krate-otp-field-input") as NodeListOf<HTMLElement>;
-      if (allInputs && allInputs[index + 1]) {
-        allInputs[index + 1].focus();
+    sync(target);
+  }
+
+  function handleKeyDown(e: Event) {
+    var ke = e as KeyboardEvent;
+    var target = ke.target as HTMLInputElement;
+    var index = Number(target.getAttribute("data-otp-index"));
+    var inputs = boxes(target);
+    if (ke.key === "Backspace") {
+      if (target.value === "" && index > 0) {
+        // Empty box: step back and clear the previous digit.
+        ke.preventDefault();
+        inputs[index - 1].value = "";
+        inputs[index - 1].focus();
+        sync(target);
       }
-    }
-    var currentValues = values();
-    currentValues[index] = val;
-    var full = currentValues.join("");
-    if (props.onValueChange) {
-      props.onValueChange(full);
-    }
-    if (full.length === length && full.replace(/,/g, "").length === length) {
-      if (props.onComplete) {
-        props.onComplete(full);
-      }
+      // A filled box lets the browser delete its digit; the input event syncs.
+    } else if (ke.key === "ArrowLeft" && index > 0) {
+      ke.preventDefault();
+      inputs[index - 1].focus();
+    } else if (ke.key === "ArrowRight" && index < inputs.length - 1) {
+      ke.preventDefault();
+      inputs[index + 1].focus();
+    } else if (ke.key === "Home") {
+      ke.preventDefault();
+      inputs[0].focus();
+    } else if (ke.key === "End") {
+      ke.preventDefault();
+      inputs[inputs.length - 1].focus();
     }
   }
 
-  function handleKeyDownAt(index: number, e: KeyboardEvent) {
-    if (e.key === "Backspace") {
-      var currentValues = values();
-      if (!currentValues[index] && index > 0) {
-        var allInputs = (e.target as HTMLElement).closest("[data-krate-otp-field]")?.querySelectorAll(".krate-otp-field-input") as NodeListOf<HTMLElement>;
-        if (allInputs && allInputs[index - 1]) {
-          allInputs[index - 1].focus();
-        }
-        setValues(function (prev) {
-          var next = prev.slice();
-          next[index - 1] = "";
-          return next;
-        });
-      } else {
-        setValues(function (prev) {
-          var next = prev.slice();
-          next[index] = "";
-          return next;
-        });
-      }
-      e.preventDefault();
-    } else if (e.key === "ArrowLeft" && index > 0) {
-      var allInputs = (e.target as HTMLElement).closest("[data-krate-otp-field]")?.querySelectorAll(".krate-otp-field-input") as NodeListOf<HTMLElement>;
-      if (allInputs && allInputs[index - 1]) {
-        allInputs[index - 1].focus();
-      }
-    } else if (e.key === "ArrowRight" && index < length - 1) {
-      var allInputs = (e.target as HTMLElement).closest("[data-krate-otp-field]")?.querySelectorAll(".krate-otp-field-input") as NodeListOf<HTMLElement>;
-      if (allInputs && allInputs[index + 1]) {
-        allInputs[index + 1].focus();
-      }
-    }
-  }
-
-  function handleInputEvent(e: Event) {
-    var index = Number((e.target as HTMLElement).getAttribute("data-otp-index"));
-    handleInputAt(index, e);
-  }
-
-  function handleKeyDownEvent(e: Event) {
-    var index = Number((e.target as HTMLElement).getAttribute("data-otp-index"));
-    handleKeyDownAt(index, e as KeyboardEvent);
+  function handleFocus(e: Event) {
+    (e.target as HTMLInputElement).select();
   }
 
   function handlePaste(e: ClipboardEvent) {
     e.preventDefault();
-    var root = (e.target as HTMLElement).closest("[data-krate-otp-field]") as HTMLElement;
-    var len = root ? Number(root.getAttribute("data-length")) : 6;
-    var text = (e.clipboardData || (window as any).clipboardData).getData("text").replace(/[^0-9a-zA-Z]/g, "").slice(0, len);
-    var chars = text.split("");
-    setValues(function (prev) {
-      var next = prev.slice();
-      for (var i = 0; i < len; i++) {
-        next[i] = chars[i] || "";
-      }
-      return next;
-    });
-    var allInputs = root?.querySelectorAll(".krate-otp-field-input") as NodeListOf<HTMLElement>;
-    var focusIdx = Math.min(chars.length, len - 1);
-    if (allInputs && allInputs[focusIdx]) {
-      allInputs[focusIdx].focus();
+    var data = e.clipboardData || (window as any).clipboardData;
+    var text = (data ? data.getData("text") : "").replace(/[^0-9a-zA-Z]/g, "");
+    var inputs = boxes(e.target);
+    if (inputs.length === 0 || text === "") return;
+    // A pasted code replaces the whole field.
+    var chars = text.slice(0, inputs.length).split("");
+    for (var i = 0; i < inputs.length; i++) {
+      inputs[i].value = chars[i] || "";
     }
+    var focusIdx = Math.min(chars.length, inputs.length - 1);
+    inputs[focusIdx].focus();
+    sync(e.target);
   }
 
   var inputElements = [];
@@ -120,13 +127,16 @@ export function OTPField(props: OTPFieldProps) {
         class="krate-otp-field-input"
         type="text"
         inputMode="numeric"
-        maxLength={1}
+        autoComplete={i === 0 ? "one-time-code" : "off"}
+        value={initial[i] || ""}
+        data-prev={initial[i] || ""}
         autoFocus={props.autoFocus && i === 0 ? true : undefined}
         aria-label={(props.label || "Verification code") + " digit " + (i + 1) + " of " + length}
         data-otp-index={String(i)}
         disabled={props.disabled}
-        onInput={handleInputEvent}
-        onKeyDown={handleKeyDownEvent}
+        onInput={handleInput}
+        onKeyDown={handleKeyDown}
+        onFocus={handleFocus}
       />
     );
   }
@@ -134,6 +144,7 @@ export function OTPField(props: OTPFieldProps) {
   return (
     <div class="krate-otp-field" role="group" aria-label={props.label || "Verification code"} data-krate-otp-field="true" data-length={length} onPaste={handlePaste}>
       {inputElements}
+      {props.name ? <input type="hidden" name={props.name} value={initial.join("")} data-otp-value="true" disabled={props.disabled} /> : null}
     </div>
   );
 }

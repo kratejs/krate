@@ -36,7 +36,7 @@
   color: var(--krate-text, #09090b);
 }
 .krate-code-copy:focus-visible {
-  outline: 2px solid var(--krate-primary, #3b82f6);
+  outline: 2px solid var(--krate-primary, #c2410c);
   outline-offset: -2px;
 }
 .krate-code-block pre,

@@ -17,6 +17,9 @@ export interface DropdownMenuProps {
   /** Element id: a handle for `openOverlay('#id')` / `closeOverlay('#id')`. */
   id?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /**
@@ -35,7 +38,7 @@ export function DropdownMenu(props: DropdownMenuProps) {
   const open = createCSSGroup<string>(null, { as: 'menu', label: props.label });
   return (
     <DropdownMenuCtx.Provider value={open}>
-      <div class="krate-dropdown-menu" id={props.id}>
+      <div class={"krate-dropdown-menu" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} id={props.id}>
         {props.open !== undefined || props.onOpenChange ? <OverlayBridge open={props.open} onOpenChange={props.onOpenChange} /> : null}
         {props.children}
       </div>
@@ -46,13 +49,16 @@ export function DropdownMenu(props: DropdownMenuProps) {
 export interface DropdownMenuTriggerProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `DropdownMenu.Trigger` instead. */
 export function DropdownMenuTrigger(props: DropdownMenuTriggerProps) {
   const open = DropdownMenuCtx.use();
   return (
-    <button class="krate-dropdown-menu-trigger" type="button" {...open.trigger(props.value)}>
+    <button class={"krate-dropdown-menu-trigger" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} type="button" {...open.trigger(props.value)}>
       {props.children}
     </button>
   );
@@ -61,13 +67,16 @@ export function DropdownMenuTrigger(props: DropdownMenuTriggerProps) {
 export interface DropdownMenuContentProps {
   value?: string;
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `DropdownMenu.Content` instead. */
 export function DropdownMenuContent(props: DropdownMenuContentProps) {
   const open = DropdownMenuCtx.use();
   return (
-    <div class="krate-dropdown-menu-content" {...open.panel(props.value)}>
+    <div class={"krate-dropdown-menu-content" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} {...open.panel(props.value)}>
       {props.children}
     </div>
   );
@@ -75,13 +84,16 @@ export function DropdownMenuContent(props: DropdownMenuContentProps) {
 
 export interface DropdownMenuItemProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `DropdownMenu.Item` instead. */
 export function DropdownMenuItem(props: DropdownMenuItemProps) {
   const open = DropdownMenuCtx.use();
   return (
-    <button class="krate-dropdown-menu-item" type="button" {...open.close()}>
+    <button class={"krate-dropdown-menu-item" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} type="button" {...open.close()}>
       {props.children}
     </button>
   );
@@ -94,11 +106,14 @@ export function DropdownMenuSeparator() {
 
 export interface DropdownMenuLabelProps {
   children?: any;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
 }
 
 /** @deprecated Use `DropdownMenu.Label` instead. */
 export function DropdownMenuLabel(props: DropdownMenuLabelProps) {
-  return <div class="krate-dropdown-menu-label">{props.children}</div>;
+  return <div class={"krate-dropdown-menu-label" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>{props.children}</div>;
 }
 
 export interface DropdownMenu {

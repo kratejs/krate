@@ -1,9 +1,17 @@
 import './form.css';
+import { createContext } from '@krate/runtime';
+
+// What a Form.Field tells the control inside it, so the description and error
+// are announced with the control and an error marks it invalid.
+const FormFieldCtx = createContext<{ describedBy: string; invalid: boolean }>({ describedBy: '', invalid: false });
 
 export interface FormProps {
   action?: string;
   method?: 'get' | 'post';
+  class?: string;
+  /** Alias of `class`. */
   className?: string;
+  id?: string;
   children?: any;
 }
 
@@ -13,7 +21,7 @@ export interface FormProps {
  */
 export function Form(props: FormProps) {
   return (
-    <form class={'krate-form' + (props.className ? ' ' + props.className : '')} action={props.action} method={props.method}>
+    <form class={'krate-form' + (props.class ? ' ' + props.class : '') + (props.className ? ' ' + props.className : '')} id={props.id} action={props.action} method={props.method}>
       {props.children}
     </form>
   );
@@ -24,27 +32,46 @@ export interface FormFieldProps {
   description?: string;
   error?: string;
   required?: boolean;
+  /**
+   * Base for the ids of the description and error text. Defaults to a slug of
+   * the label, so give fields with the same label different ids.
+   */
+  id?: string;
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
   children?: any;
 }
 
-/** @deprecated Use `Form.Field` instead. */
+/**
+ * A labelled field. Its description and error are linked to the control inside
+ * with `aria-describedby`, and an error sets `aria-invalid` on it.
+ *
+ * @deprecated Use `Form.Field` instead.
+ */
 export function FormField(props: FormFieldProps) {
+  var base = "krate-field-" + (props.id || (props.label || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""));
+  var descId = props.description ? base + "-description" : "";
+  var errId = props.error ? base + "-error" : "";
+  var describedBy = (descId && errId ? descId + " " + errId : descId + errId);
   return (
-    <div class="krate-form-field">
-      <label class="krate-form-field-label">
-        <span class="krate-form-field-text">
-          {props.label}
-          {props.required ? <span class="krate-form-required" aria-hidden="true"> *</span> : null}
-        </span>
-        <span class="krate-form-field-control">{props.children}</span>
-      </label>
-      {props.description ? <p class="krate-form-field-description">{props.description}</p> : null}
-      {props.error ? (
-        <p class="krate-form-field-error" role="alert">
-          {props.error}
-        </p>
-      ) : null}
-    </div>
+    <FormFieldCtx.Provider value={{ describedBy: describedBy, invalid: !!props.error }}>
+      <div class={"krate-form-field" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")}>
+        <label class="krate-form-field-label">
+          <span class="krate-form-field-text">
+            {props.label}
+            {props.required ? <span class="krate-form-required" aria-hidden="true"> *</span> : null}
+          </span>
+          <span class="krate-form-field-control">{props.children}</span>
+        </label>
+        {props.description ? <p class="krate-form-field-description" id={descId}>{props.description}</p> : null}
+        {props.error ? (
+          <p class="krate-form-field-error" id={errId} role="alert">
+            {props.error}
+          </p>
+        ) : null}
+      </div>
+    </FormFieldCtx.Provider>
   );
 }
 
@@ -60,9 +87,12 @@ export interface FormInputProps {
 
 /** @deprecated Use `Form.Input` instead. */
 export function FormInput(props: FormInputProps) {
+  var field = FormFieldCtx.use();
   return (
     <input
       class="krate-input"
+      aria-describedby={field.describedBy || undefined}
+      aria-invalid={field.invalid ? "true" : undefined}
       type={props.type || 'text'}
       placeholder={props.placeholder}
       value={props.defaultValue}
@@ -101,9 +131,12 @@ export interface FormTextareaProps {
 
 /** @deprecated Use `Form.Textarea` instead. */
 export function FormTextarea(props: FormTextareaProps) {
+  var field = FormFieldCtx.use();
   return (
     <textarea
       class="krate-textarea"
+      aria-describedby={field.describedBy || undefined}
+      aria-invalid={field.invalid ? "true" : undefined}
       placeholder={props.placeholder}
       value={props.defaultValue}
       disabled={props.disabled}

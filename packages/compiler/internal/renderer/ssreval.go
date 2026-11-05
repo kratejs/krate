@@ -1100,13 +1100,20 @@ func (e *SSREval) tryEvalSyntaxHighlight(el *ast.JSXElement) (string, bool) {
 	if normalizedLang == "" {
 		return "<pre><code>" + escape.HTML(codeStr) + "</code></pre>", true
 	}
-	highlighted := syntaxhighlight.HighlightTheme(codeStr, normalizedLang, e.codeTheme)
-	return "<pre class=\"chroma\"><code class=\"language-" + escape.HTML(lang) + "\">" + highlighted + "</code></pre>", true
+	hl := e.stringAttr(el, "highlight")
+	highlighted := syntaxhighlight.HighlightThemeLines(codeStr, normalizedLang, e.codeTheme, hl)
+	attr := ""
+	if hl != "" {
+		attr = " data-highlight-lines=\"" + escape.HTMLAttr(hl) + "\""
+	}
+	return "<pre class=\"chroma\"" + attr + "><code class=\"language-" + escape.HTML(lang) + "\">" + highlighted + "</code></pre>", true
 }
 
-func (e *SSREval) langAttr(el *ast.JSXElement) string {
+func (e *SSREval) langAttr(el *ast.JSXElement) string { return e.stringAttr(el, "lang") }
+
+func (e *SSREval) stringAttr(el *ast.JSXElement, name string) string {
 	for _, attr := range el.Opening.Attributes {
-		if attr.Spread || attr.Value == nil || attr.Name != "lang" {
+		if attr.Spread || attr.Value == nil || attr.Name != name {
 			continue
 		}
 		if v := e.value(attr.Value); !v.IsNullish() && !v.IsUnknown() {

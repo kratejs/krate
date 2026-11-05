@@ -42,6 +42,33 @@ if(!n)return null;
 if(k==="Home")i=0;else if(k==="End")i=n-1;else i=(i+(k==="next"?1:-1)+n)%n;
 return list[i];
 }
+var mdl=null,mdp="",pd=null;
+function inertAround(m,on){
+for(var n=m;n&&n!==D.body&&n.parentNode;n=n.parentNode){
+var ps=n.parentNode.children;
+for(var i=0;i<ps.length;i++){
+var s=ps[i];
+if(s===n||/^(SCRIPT|STYLE|LINK|TEMPLATE|INPUT)$/.test(s.tagName))continue;
+if(on){if(!s.hasAttribute("inert")){s.setAttribute("inert","");s.setAttribute("data-kinert","")}}
+else if(s.hasAttribute("data-kinert")){s.removeAttribute("inert");s.removeAttribute("data-kinert")}
+}
+}
+}
+function modal(){
+var m=$("[aria-modal=true]").filter(vis)[0]||null;
+if(m===mdl)return;
+if(mdl){inertAround(mdl,false);D.documentElement.style.overflow=mdp}
+mdl=m;
+if(m){mdp=D.documentElement.style.overflow;D.documentElement.style.overflow="hidden";inertAround(m,true)}
+}
+D.addEventListener("pointerdown",function(e){pd=e.target},true);
+D.addEventListener("click",function(e){
+var m=mdl,t=e.target,down=pd;
+pd=null;
+if(!m||m.getAttribute("role")==="alertdialog"||!t||t.tagName==="INPUT"||m.contains(t)||(down&&m.contains(down)))return;
+var a=m.closest("[data-kz]"),x=a&&a.querySelector("input[data-ka=x]");
+if(x&&!x.checked){e.preventDefault();e.stopPropagation();x.click()}
+},true);
 function owner(a){return $("label[data-ka=a]",a).filter(vis)[0]}
 D.addEventListener("click",function(e){var l=lab(e.target);if(l)last=l},true);
 function hid(e){return!!e&&e.tagName==="INPUT"&&e.getAttribute("aria-hidden")==="true"}
@@ -52,6 +79,7 @@ var act=D.activeElement,from=lab(act)||last,tgt=null;
 var lost=!act||act===D.body||hid(act)||!vis(act);
 last=null;
 sync(a);
+modal();
 if(i.getAttribute("data-ka")==="x"){
 if(!i.checked)return;
 var t=$("label[data-ka=t]",a).filter(function(l){return l.getAttribute("for")===a._o})[0];
@@ -136,7 +164,7 @@ if(!x)return;
 if(w==="open"&&x.checked){var r=$("input",a).filter(function(n){return n.type==="radio"&&n!==x&&n.closest("[data-kz]")===a})[0];if(r)r.click()}
 else if(w==="closed"&&!x.checked)x.click();
 }
-function init(){sync(D);link()}
+function init(){sync(D);link();modal()}
 function first(){
 init();
 $("[data-kopen]").forEach(drive);

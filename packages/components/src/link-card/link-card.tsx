@@ -5,6 +5,11 @@ export interface LinkCardProps {
   href?: string;
   icon?: string;
   children?: any;
+  /** Extra classes for the root element. */
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
+  id?: string;
 }
 
 export function LinkCard(props: LinkCardProps) {
@@ -12,7 +17,7 @@ export function LinkCard(props: LinkCardProps) {
   var href = props.href || "#";
   var icon = props.icon || "";
   return (
-    <a class="krate-link-card" href={href}>
+    <a class={"krate-link-card" + (props.class ? " " + props.class : "") + (props.className ? " " + props.className : "")} href={href} id={props.id}>
       <div class="krate-link-card-content">
         <div class="krate-link-card-title">{title}</div>
         <div class="krate-link-card-description">{props.children}</div>

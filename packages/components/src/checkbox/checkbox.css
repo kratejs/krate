@@ -1,9 +1,21 @@
 .krate-checkbox {
-  all: unset;
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 10px;
   cursor: pointer;
+}
+/* The native input stays in the accessibility tree and the tab order; it is
+   only visually replaced by the box. */
+.krate-checkbox-input {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
 }
 .krate-checkbox-box {
   display: inline-flex;
@@ -22,17 +34,24 @@
 .krate-checkbox:hover .krate-checkbox-box {
   border-color: var(--krate-text, #09090b);
 }
-.krate-checkbox:focus-visible .krate-checkbox-box {
-  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+.krate-checkbox-input:focus-visible + .krate-checkbox-box {
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
   outline-offset: 2px;
 }
-.krate-checkbox:has(input:checked) .krate-checkbox-box {
-  background: var(--krate-primary, #3b82f6);
-  border-color: var(--krate-primary, #3b82f6);
+.krate-checkbox-input:checked + .krate-checkbox-box {
+  background: var(--krate-primary, #c2410c);
+  border-color: var(--krate-primary, #c2410c);
   color: #fff;
 }
 .krate-checkbox-label {
   font-size: 0.875rem;
   color: var(--krate-text, #09090b);
   user-select: none;
+}
+.krate-checkbox-input:disabled + .krate-checkbox-box,
+.krate-checkbox-input:disabled ~ .krate-checkbox-label {
+  opacity: 0.5;
+}
+.krate-checkbox:has(.krate-checkbox-input:disabled) {
+  cursor: not-allowed;
 }

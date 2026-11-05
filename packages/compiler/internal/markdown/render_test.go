@@ -124,11 +124,30 @@ func TestPlainMarkdownProseWithAngleBracketsIsNotJSX(t *testing.T) {
 
 func TestScrollContainersAreFocusableAndNamed(t *testing.T) {
 	cfg := DefaultConfig()
-	got := RenderToHTML("| a | b |\n|---|---|\n| x | y |\n", cfg)
-	mustContain(t, "table wrapper", got, `class="table-wrap" role="region" aria-label="Table" tabindex="0"`)
-	got = RenderToHTML("```ts\nconst a = 1;\n```\n\n```\nplain\n```\n\n```js title=\"app.js\"\nx()\n```\n", cfg)
-	mustContain(t, "pre", got, `role="region" aria-label="ts code" tabindex="0"`, `role="region" aria-label="Code" tabindex="0"`, `aria-label="app.js"`)
+	wide := "| alpha | beta | gamma | delta |\n|---|---|---|---|\n| x | y | z | w |\n"
+	got := RenderToHTML(wide, cfg)
+	mustContain(t, "wide table wrapper", got, `class="table-wrap" role="group" aria-label="Table with columns alpha, beta, gamma, and more" tabindex="0"`)
+	long := strings.Repeat("x", 70)
+	got = RenderToHTML("```ts\nconst a = \""+long+"\";\n```\n\n```\n"+long+"\n```\n\n```js title=\"app.js\"\n"+long+"\n```\n", cfg)
+	mustContain(t, "pre", got, `role="group" aria-label="ts code" tabindex="0"`, `role="group" aria-label="Code" tabindex="0"`, `aria-label="app.js"`)
 	cfg.CodeHighlight = false
-	got = RenderToHTML("```ts\nconst a = 1;\n```\n", cfg)
-	mustContain(t, "plain pre", got, `<pre role="region" aria-label="ts code" tabindex="0">`)
+	got = RenderToHTML("```ts\nconst a = \""+long+"\";\n```\n", cfg)
+	mustContain(t, "plain pre", got, `<pre role="group" aria-label="ts code" tabindex="0">`)
+}
+
+func TestShortScrollContainersAddNoTabStop(t *testing.T) {
+	cfg := DefaultConfig()
+	got := RenderToHTML("| a | b |\n|---|---|\n| x | y |\n\n```ts\nconst a = 1;\n```\n", cfg)
+	mustNotContain(t, "short blocks", got, "tabindex", "role=", "aria-label")
+	mustContain(t, "short blocks", got, `<div class="table-wrap">`, "<pre")
+}
+
+func TestTitledFenceKeepsHeaderInStaticHTML(t *testing.T) {
+	got := RenderToHTML("```ts title=\"a.ts\" {1}\nconst a = 1;\n```\n", DefaultConfig())
+	mustContain(t, "header", got, `class="krate-code-title">a.ts</div>`, `data-highlight-lines="1"`, `class="line hl"`)
+}
+
+func TestBlockedAutolinkInsideAdmonitionIsNeutralized(t *testing.T) {
+	got := RenderToHTML("> [!NOTE]\n> <javascript:alert(1)>\n", DefaultConfig())
+	mustNotContain(t, "alert autolink", got, "href=")
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -203,5 +204,55 @@ export default function Home() {
 		if strings.Contains(js, bad) {
 			t.Errorf("%q is not mentioned by the page and must not be shipped:\n%s", bad, js)
 		}
+	}
+}
+
+func TestContentSkipsHiddenFilesAndRejectsDuplicateSlugs(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "content/blog/real.md", "---\ntitle: R\n---\nbody")
+	writeFileRel(t, root, "content/blog/.#lock.md", "---\ntitle: L\n---\nbody")
+	writeFileRel(t, root, "content/blog/.hidden/inner.md", "---\ntitle: H\n---\nbody")
+	b := New(root, contentConfigFor(root, map[string]any{"title": "string"}))
+	res := b.prepareContent()
+	if len(res.Validation) != 0 {
+		t.Fatalf("validation: %v", res.Validation)
+	}
+	var slugs []string
+	for _, e := range b.contentCollections["blog"] {
+		slugs = append(slugs, e.Slug)
+	}
+	if len(slugs) != 1 || slugs[0] != "real" {
+		t.Errorf("hidden files must not become entries, got %v", slugs)
+	}
+
+	writeFileRel(t, root, "content/blog/dup.md", "---\ntitle: A\n---\na")
+	writeFileRel(t, root, "content/blog/dup.mdx", "---\ntitle: B\n---\nb")
+	b = New(root, contentConfigFor(root, map[string]any{"title": "string"}))
+	res = b.prepareContent()
+	if len(res.Validation) != 1 || !strings.Contains(res.Validation[0].Error(), `slug "dup"`) || !strings.Contains(res.Validation[0].Error(), "hint:") {
+		t.Errorf("want one duplicate-slug error with a hint, got %v", res.Validation)
+	}
+}
+
+func TestContentRelativeImagesAreCopiedAndRewritten(t *testing.T) {
+	root := t.TempDir()
+	writeFileRel(t, root, "content/blog/post.md", "---\ntitle: P\n---\n![alt](./pics/cat.png)\n\n![gone](./pics/nope.png)\n")
+	writeFileRel(t, root, "content/blog/pics/cat.png", "fake-png-bytes")
+	cfg := contentConfigFor(root, map[string]any{"title": "string"})
+	b := New(root, cfg)
+	res := b.prepareContent()
+	if len(res.Warnings) != 0 || len(res.Validation) != 0 {
+		t.Fatalf("warnings %v validation %v", res.Warnings, res.Validation)
+	}
+	html := b.contentCollections["blog"][0].HTML
+	m := regexp.MustCompile(`src="(/assets/cat-[0-9a-f]+\.png)"`).FindStringSubmatch(html)
+	if m == nil {
+		t.Fatalf("relative image not rewritten:\n%s", html)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.OutDir, filepath.FromSlash(m[1]))); err != nil {
+		t.Errorf("image not copied to the output: %v", err)
+	}
+	if !strings.Contains(html, `src="./pics/nope.png"`) {
+		t.Errorf("a missing file must be left as written:\n%s", html)
 	}
 }

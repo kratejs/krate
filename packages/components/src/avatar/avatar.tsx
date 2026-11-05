@@ -7,6 +7,11 @@ export interface AvatarProps {
   alt?: string;
   fallback?: string;
   size?: 'sm' | 'md' | 'lg';
+  /** Extra classes for the root element. */
+  class?: string;
+  /** Alias of `class`. */
+  className?: string;
+  id?: string;
 }
 
 export function Avatar(props: AvatarProps) {
@@ -27,9 +32,11 @@ export function Avatar(props: AvatarProps) {
   }
 
   var className = "krate-avatar krate-avatar-" + size;
+  if (props.class) className += " " + props.class;
+  if (props.className) className += " " + props.className;
 
   return (
-    <span class={className}>
+    <span class={className} id={props.id}>
       {src !== "" && !imageError() ? (
         <img
           class="krate-avatar-image"

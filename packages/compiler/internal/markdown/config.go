@@ -13,6 +13,11 @@ type Config struct {
 	// (see defineMarkdownPlugin). Each is registered as a community plugin that
 	// runs on AfterMarkdownParse, so it can rewrite rendered HTML.
 	Plugins []string `json:"plugins,omitempty"`
+	// ImageURL, when set, maps a relative image destination (./local.png) to a
+	// site URL, typically after copying the file into the build output. It
+	// reports false to leave the destination as written. Not part of the
+	// user-facing config.
+	ImageURL func(dest string) (string, bool) `json:"-"`
 }
 
 func DefaultConfig() Config {

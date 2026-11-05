@@ -125,6 +125,31 @@ type Bundler struct {
 
 	// twImports controls how `@import "tailwindcss"` is treated in CSS.
 	twImports css.TailwindImportMode
+
+	// mdCfg is the markdown configuration for .md/.mdx modules. The zero
+	// value (mdSet false) means markdown.DefaultConfig().
+	mdCfg markdown.Config
+	mdSet bool
+	// mdBase is the site base path prefixed to image URLs found in markdown.
+	mdBase string
+}
+
+// SetMarkdownBasePath sets the site base path prepended to relative images
+// that markdown files reference.
+func (b *Bundler) SetMarkdownBasePath(base string) { b.mdBase = base }
+
+// SetMarkdownConfig sets the markdown options used when compiling .md and
+// .mdx modules (page-level and imported).
+func (b *Bundler) SetMarkdownConfig(cfg markdown.Config) {
+	b.mdCfg = cfg
+	b.mdSet = true
+}
+
+func (b *Bundler) markdownConfig() markdown.Config {
+	if b.mdSet {
+		return b.mdCfg
+	}
+	return markdown.DefaultConfig()
 }
 
 // SetDevMode picks the development or production package.json export
@@ -622,7 +647,12 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 		return fmt.Errorf("reading %s: %w", path, err)
 	}
 	src := string(data)
-	mcfg := markdown.DefaultConfig()
+	mcfg := b.markdownConfig()
+	mdImages := 0
+	mcfg.ImageURL = markdown.LocalImageResolver(b.root, abs, b.mdBase, func(imgAbs, siteURL string) {
+		b.assets[imgAbs] = siteURL
+		mdImages++
+	})
 	compiled := markdown.Compile(src, mcfg, markdown.Options{MDX: strings.HasSuffix(abs, ".mdx")})
 	for _, d := range compiled.Diags {
 		if !d.Warning {
@@ -640,7 +670,9 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 	p.Filename = path
 	prog := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
-		return fmt.Errorf("%s: %s", path, parser.FormatDiagnostics(errs))
+		// The parser saw generated code, so its line:col do not match the
+		// markdown file. Say so, and point at the usual cause.
+		return fmt.Errorf("%s: the compiled markdown is not valid JSX (line:col below refer to the generated code, not this file; check that every JSX tag is closed and nested properly, and put a blank line between a JSX tag and a block it wraps): %s", path, parser.FormatDiagnostics(errs))
 	}
 	RewriteReact(prog)
 
@@ -648,7 +680,9 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 	b.collectImports(prog, mod)
 	mod.Rewritable = moduleNeedsRewrite(tsxSource, mod.Imports)
 	b.order = append(b.order, mod)
-	if statOK && !mod.Rewritable {
+	// A page that references local images is not cached: the cache keys on the
+	// markdown file alone, so a changed image would keep its old hashed URL.
+	if statOK && !mod.Rewritable && mdImages == 0 {
 		b.cache.putProgram(abs, &programEntry{
 			mtime: mtime, size: size, program: prog,
 			imports: append([]string(nil), mod.Imports...), frontmatter: result.Frontmatter,

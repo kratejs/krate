@@ -378,3 +378,39 @@ func TestDoubleQuotedEscapes(t *testing.T) {
 		t.Errorf("escapes = %q, want %q", m["a"], want)
 	}
 }
+
+func TestMultiLineQuotedScalars(t *testing.T) {
+	fm, _ := Parse("---\nmulti: \"a\n  b\"\nnext: ok\nsingle: 'x\n  y'\nblank: \"p\n\n  q\"\nesc: \"tab\\there\n  end\"\nlast: 1\n---\nbody")
+	want := map[string]any{"multi": "a b", "next": "ok", "single": "x y", "blank": "p\nq", "esc": "tab\there end", "last": int64(1)}
+	for k, v := range want {
+		if fm[k] != v {
+			t.Errorf("%s = %#v, want %#v", k, fm[k], v)
+		}
+	}
+}
+
+func TestUnterminatedQuoteStaysLiteral(t *testing.T) {
+	fm, _ := Parse("---\nbad: \"never closed\nnext: 1\n---\n")
+	if fm["bad"] == nil {
+		t.Errorf("an unclosed quote must still yield a value: %#v", fm)
+	}
+}
+
+func TestDetectUnparsedFrontmatter(t *testing.T) {
+	cases := []struct {
+		src  string
+		kind string
+	}{
+		{"+++\ntitle = \"x\"\n+++\nbody", "toml"},
+		{"---\ntitle: x\nbody that never closes", "unterminated"},
+		{"---\ntitle: x\n---\nbody", ""},
+		{"no frontmatter", ""},
+		{"---\n\nA thematic break only", ""},
+	}
+	for _, c := range cases {
+		p, ok := Detect(c.src)
+		if ok != (c.kind != "") || p.Kind != c.kind {
+			t.Errorf("Detect(%q) = %+v, %v; want kind %q", c.src, p, ok, c.kind)
+		}
+	}
+}

@@ -7,11 +7,16 @@ export interface PaginationProps {
   total: number;
   /** Maximum number of page links shown around the current page (default 5). */
   window?: number;
-  /** Prefix for page links (default `?page=`). */
+  /**
+   * Prefix for page links, e.g. `/blog/page/`. Without it, links keep the other
+   * query parameters of the current URL and set `param` to the page number.
+   */
   hrefPrefix?: string;
-  /** Query-string parameter that holds the page number (default `page`). */
+  /** Query-string parameter that holds the page number (default `page`). Links use it too. */
   param?: string;
   class?: string;
+  id?: string;
+  className?: string;
 }
 
 // Pagination highlights the page from the URL query string (`?page=N`),
@@ -20,12 +25,33 @@ export interface PaginationProps {
 export function Pagination(props: PaginationProps) {
   var total = props.total || 1;
   var size = props.window || 5;
-  var prefix = props.hrefPrefix || "?page=";
   var param = props.param || "page";
   var className = "krate-pagination";
   if (props.class) className += " " + props.class;
+  if (props.className) className += " " + props.className;
 
   var [current, setCurrent] = createSignal(props.page || 1);
+  // The other query parameters of the current URL, kept on every link.
+  var [others, setOthers] = createSignal("");
+
+  function otherParams(): string {
+    if (typeof window === "undefined" || !window.location) return "";
+    var kept: string[] = [];
+    var parts = window.location.search.replace(/^\?/, "").split("&");
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i] === "") continue;
+      var name = parts[i].split("=")[0];
+      if (name !== param) kept.push(parts[i]);
+    }
+    return kept.join("&");
+  }
+
+  // The href of page `n`; `rest` is the preserved query (passed in so the link
+  // is recomputed when it changes).
+  function hrefFor(n: number, rest: string): string {
+    if (props.hrefPrefix) return props.hrefPrefix + n;
+    return "?" + (rest ? rest + "&" : "") + param + "=" + n;
+  }
 
   function readFromURL(): number {
     if (typeof window === "undefined" || !window.location) {
@@ -40,8 +66,10 @@ export function Pagination(props: PaginationProps) {
 
   onMount(function () {
     setCurrent(readFromURL());
+    setOthers(otherParams());
     function sync() {
       setCurrent(readFromURL());
+      setOthers(otherParams());
     }
     window.addEventListener("popstate", sync);
     window.addEventListener("krate:navigate", sync);
@@ -83,10 +111,10 @@ export function Pagination(props: PaginationProps) {
   }
 
   return (
-    <nav class={className} aria-label="Pagination">
+    <nav class={className} id={props.id} aria-label="Pagination">
       <a
         class={"krate-pagination-link" + (current() <= 1 ? " krate-pagination-disabled" : "")}
-        href={prefix + prevPage()}
+        href={hrefFor(prevPage(), others())}
         aria-disabled={current() <= 1 ? "true" : "false"}
       >
         Previous
@@ -96,7 +124,7 @@ export function Pagination(props: PaginationProps) {
           <li key={p}>
             <a
               class={"krate-pagination-page" + (p === current() ? " krate-pagination-active" : "")}
-              href={prefix + p}
+              href={hrefFor(p, others())}
               aria-current={p === current() ? "page" : "false"}
             >
               {p}
@@ -106,7 +134,7 @@ export function Pagination(props: PaginationProps) {
       </ul>
       <a
         class={"krate-pagination-link" + (current() >= total ? " krate-pagination-disabled" : "")}
-        href={prefix + nextPage()}
+        href={hrefFor(nextPage(), others())}
         aria-disabled={current() >= total ? "true" : "false"}
       >
         Next

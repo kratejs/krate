@@ -201,8 +201,8 @@ func TestProcessImageMetaCacheReuse(t *testing.T) {
 		t.Errorf("deleted variant was not regenerated: %v", err)
 	}
 
-	// A different display size reuses the cached variants (same paths) and only
-	// recomputes the display box.
+	// A different display size gets variants sized to it (1x and 2x). Variants
+	// are named by width, so the shared 800w file is reused, not re-encoded.
 	res2, err := ProcessImage(root, srcPath, 400, 0, 82, true)
 	if err != nil {
 		t.Fatal(err)
@@ -210,8 +210,14 @@ func TestProcessImageMetaCacheReuse(t *testing.T) {
 	if res2.Width != 400 || res2.Height != 250 {
 		t.Errorf("display dims = %d/%d, want 400/250", res2.Width, res2.Height)
 	}
-	if len(res2.WebP) != len(res1.WebP) || res2.WebP[0].FilePath != res1.WebP[0].FilePath {
-		t.Errorf("cached variants not reused: %+v", res2.WebP)
+	if got := widthsOf(res2.WebP); len(got) != 2 || got[0] != 400 || got[1] != 800 {
+		t.Errorf("variants for width=400 = %v, want [400 800]", got)
+	}
+	if res2.WebP[1].FilePath != res1.WebP[0].FilePath {
+		t.Errorf("800w variant not shared: %+v vs %+v", res2.WebP, res1.WebP)
+	}
+	if res3, err := ProcessImage(root, srcPath, 400, 0, 82, true); err != nil || res3.Placeholder == "" || len(res3.WebP) != 2 {
+		t.Errorf("repeat of a cached usage failed: %+v, %v", res3, err)
 	}
 
 	// A different quality must not collide with the cached variants.
@@ -221,5 +227,55 @@ func TestProcessImageMetaCacheReuse(t *testing.T) {
 	}
 	if resQ.WebP[0].FilePath == res1.WebP[0].FilePath {
 		t.Errorf("quality not encoded in variant name: %s", resQ.WebP[0].FilePath)
+	}
+}
+
+func widthsOf(entries []SrcsetEntry) []int {
+	var out []int
+	for _, e := range entries {
+		out = append(out, e.Width)
+	}
+	return out
+}
+
+func TestProcessImageCapsVariantsAtTwiceTheDisplayWidth(t *testing.T) {
+	root := t.TempDir()
+	srcPath := filepath.Join(root, "public", "photo.png")
+	_ = os.MkdirAll(filepath.Dir(srcPath), 0755)
+	writeTestPNG(t, srcPath, testImage(3000, 2000))
+
+	res, err := ProcessImage(root, srcPath, 100, 0, 82, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := widthsOf(res.WebP); len(got) != 2 || got[0] != 100 || got[1] != 200 {
+		t.Errorf("width=100 variants = %v, want [100 200]", got)
+	}
+	if got := widthsOf(res.Fallback); len(got) != 2 || got[0] != 100 || got[1] != 200 {
+		t.Errorf("width=100 fallback variants = %v, want [100 200]", got)
+	}
+	// Height only: the display width follows from the aspect ratio.
+	res, err = ProcessImage(root, srcPath, 0, 100, 82, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := widthsOf(res.WebP); len(got) != 2 || got[0] != 150 || got[1] != 300 {
+		t.Errorf("height=100 variants = %v, want [150 300]", got)
+	}
+	// A request wider than the source is capped at the source.
+	res, err = ProcessImage(root, srcPath, 2500, 0, 82, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := widthsOf(res.WebP); len(got) != 2 || got[0] != 2500 || got[1] != 3000 {
+		t.Errorf("width=2500 variants = %v, want [2500 3000]", got)
+	}
+	// No request: the breakpoint ladder.
+	res, err = ProcessImage(root, srcPath, 0, 0, 82, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(res.WebP); n < 4 {
+		t.Errorf("no width should keep the breakpoint ladder, got %v", widthsOf(res.WebP))
 	}
 }

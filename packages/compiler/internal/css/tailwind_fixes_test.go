@@ -619,3 +619,42 @@ func TestConfigDarkModeArray(t *testing.T) {
 func writeTestFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
 }
+
+func TestShadowSizeAlphaModifiers(t *testing.T) {
+	cases := map[string][]string{
+		"shadow-xl/20":       {"color-mix(in oklab, var(--tw-shadow-color, rgb(0 0 0 / 0.1)) 20%, transparent)", "box-shadow:"},
+		"shadow-xl/[0.3]":    {"30%, transparent"},
+		"drop-shadow-xl/50":  {"drop-shadow(0 9px 7px color-mix(in oklab, var(--tw-drop-shadow-color, rgb(0 0 0 / 0.1)) 50%, transparent))"},
+		"inset-shadow-sm/50": {"--tw-inset-shadow: inset 0 2px 4px color-mix(in oklab"},
+		"text-shadow-md/20":  {"text-shadow:", "20%, transparent"},
+	}
+	for cls, wants := range cases {
+		got := gen(t, cls)
+		for _, w := range wants {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s: missing %q in:\n%s", cls, w, got)
+			}
+		}
+	}
+	// A color after the slash still means a shadow color, and a bad alpha is no utility.
+	if got := gen(t, "shadow-red-500/50"); !strings.Contains(got, "--tw-shadow-color: color-mix(in oklab, oklch(") {
+		t.Errorf("shadow color with alpha regressed: %s", got)
+	}
+	if got := gen(t, "shadow-xl/200"); got != "" {
+		t.Errorf("out-of-range alpha should not generate: %s", got)
+	}
+}
+
+func TestBackgroundSizeAndPositionUtilities(t *testing.T) {
+	cases := map[string]string{
+		"bg-size-[auto_100px]":     "background-size: auto 100px;",
+		"bg-position-[center_top]": "background-position: center top;",
+		"bg-size-(--s)":            "background-size: var(--s);",
+		"bg-position-(--p)":        "background-position: var(--p);",
+	}
+	for cls, want := range cases {
+		if got := gen(t, cls); !strings.Contains(got, want) {
+			t.Errorf("%s: want %q, got %q", cls, want, got)
+		}
+	}
+}

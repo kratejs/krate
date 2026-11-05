@@ -25,6 +25,6 @@
   background: var(--krate-surface-hover, #e4e4e7);
 }
 .krate-toggle-group-item:focus-visible {
-  outline: 2px solid var(--krate-focus-ring, #3b82f6);
+  outline: 2px solid var(--krate-focus-ring, #c2410c);
   outline-offset: -2px;
 }

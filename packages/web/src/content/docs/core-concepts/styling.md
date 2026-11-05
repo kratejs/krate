@@ -224,7 +224,8 @@ Supported features:
   overrides replace any shade.
 - **Filters** (`blur-*`, `brightness-*`, `grayscale`, `hue-rotate-*` including
   the negative form, `invert`, `saturate-*`, `sepia`, `drop-shadow-*`, and every
-  `backdrop-*` filter), **animation** (`animate-*`), **blend modes**, plus
+  `backdrop-*` filter; `shadow-*`, `inset-shadow-*`, `text-shadow-*` and
+  `drop-shadow-*` take an opacity such as `shadow-xl/20`), **animation** (`animate-*`), **blend modes**, plus
   layout, typography, interactivity, 3D-transform, border, and background
   families.
 - **Masks**: `mask-none`, `mask-[...]`, `mask-linear-*`, `mask-radial-*`,
