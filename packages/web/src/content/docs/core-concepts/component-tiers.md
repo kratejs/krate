@@ -121,18 +121,18 @@ the whole file.
 ## Server components
 
 ```tsx
-// src/components/Totals.server.tsx  (or: // @server)
-export default function Totals() {
-  const prices = [12, 30, 8];
-  return <p>{prices.length} items, total {prices.reduce((a, b) => a + b, 0)}</p>;
+// src/components/ServerTime.server.tsx  (or: // @server)
+export default function ServerTime() {
+  return <time>{new Date().toUTCString()}</time>;
 }
 ```
 
 Server components are evaluated at build time. The HTML they produce is baked
-into the page; they never ship JavaScript. Values that only exist at request
-time, such as `new Date()`, have no build-time value: the build warns (`KR8011`)
-and the text renders empty. An `async` server component (one that `await`s) is
-rendered per request instead; see [Data fetching](/docs/features/data-fetching/).
+into the page; they never ship JavaScript. `new Date()`, `Date.now()` and
+`Math.random()` there mean the time of the build (see
+[Dates and times at build time](/docs/features/data-fetching/#dates-and-times-at-build-time)).
+An `async` server component (one that `await`s) is rendered per request instead;
+see [Data fetching](/docs/features/data-fetching/).
 
 ## Runtime components
 

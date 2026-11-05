@@ -69,6 +69,7 @@ func collectLocalVarsWithBuilder(body []ast.Stmt, sigMap map[string]ast.Expr, pr
 		f.working[k] = v
 	}
 	f.in = newConstInterp(sigMap, f.working)
+	f.in.Volatile = owner != nil && owner.bakesOnly()
 	f.preloadFunctions(body)
 	f.stmts(body)
 	return f.res

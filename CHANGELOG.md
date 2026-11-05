@@ -27,6 +27,20 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Added
 
+- `new Date()`, `Date.now()`, `Date()` and `Math.random()` have a build-time value. In a static
+  or server component they are the time of the build (`SOURCE_DATE_EPOCH` fixes it, and makes
+  two builds of the same sources byte-identical); in a client component the static HTML shows
+  the build value and the browser computes it again on hydration. Dates are evaluated in UTC with
+  the en-US locale, so a build does not depend on the machine: deterministic parts (`new Date(ms)`,
+  ISO strings, `Date.UTC`, `getUTC*`, `toISOString()`) fold everywhere, and anything that reads the
+  local zone or locale (`getHours()`, `toString()`, `toLocaleDateString()`) keeps its client binding.
+  The build-time interpreter has a `Date` (getters, setters, parsing, `toLocale*String` for
+  en-US), `Map` and `Set`. Docs that said `new Date()` has no build-time value are updated.
+- The build-time interpreter's `arr.entries()`, `arr.keys()`, `arr.values()` and the `Map` and
+  `Set` equivalents are real iterators (`.next()`, `.toArray()`, `.map()`, ...), no longer arrays,
+  and work with `for...of` (including `for (const [i, v] of ...)`), spread, `Array.from` and
+  destructuring. The differential test against Node covers 260 more expressions and 1,700
+  `toLocale*String` cases.
 - Tailwind `@utility`: `--modifier()` works (`name-VALUE/MODIFIER`), including the typed
   forms (`--value(--color-*, [color])`, `--value(integer)`, `--value([length])`,
   `--modifier(number)`, `--default()`), and nested rules, `@media`, `@supports`,

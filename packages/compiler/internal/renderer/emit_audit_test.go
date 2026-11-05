@@ -36,14 +36,14 @@ export default function App() {
 func TestNonFoldableValuesOnComponentWithoutSignals(t *testing.T) {
 	src := `
 export default function App() {
-  return <p>{new Date(0).toISOString()} {"abc".localeCompare("abd")} {(255).toString(16)}</p>;
+  return <p>{new Date(0).toLocaleDateString("de-DE")} {"abc".localeCompare("abd")} {(255).toString(16)}</p>;
 }
 `
 	res, hjs := fullPipeline(t, src)
 	if !strings.Contains(res.HTML, "ff") {
 		t.Errorf("(255).toString(16) not folded at build time:\n%s", res.HTML)
 	}
-	for _, want := range []string{"new Date(0).toISOString()", "localeCompare"} {
+	for _, want := range []string{`new Date(0).toLocaleDateString('de-DE')`, "localeCompare"} {
 		if !strings.Contains(hjs, want) {
 			t.Errorf("non-foldable expression %q has no hydration binding:\n%s", want, hjs)
 		}

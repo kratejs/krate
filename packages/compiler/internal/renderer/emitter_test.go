@@ -3,11 +3,13 @@ package renderer
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/annotator"
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 )
 
 func annotateWithRuntime(prog *ast.Program, raw string) *irtree.Annotations {
@@ -59,34 +61,26 @@ func TestEmitSSREvaluatedChildrenEscaped(t *testing.T) {
 
 func TestEmitSSREvaluatedDateNow(t *testing.T) {
 	src := `function ServerTime(props) {
-  return <div>built {Date.now()}</div>;
+  return <div>built {Date.now()} {new Date().getUTCFullYear()}</div>;
 }
 export default function Page() {
   return <ServerTime />;
 }`
-	// ServerTime is signal-less -> SSR-evaluated. Without the QuickJS hook,
-	// Date.now() is an unsupported built-in -> "".
-	result, _ := fullPipeline(t, src)
-	if strings.Contains(result.HTML, "built 1") && !strings.Contains(result.HTML, "Date.now") {
-		t.Log("Date.now evaluated")
-	}
-
-	// With the hook wired (as the build does with QuickJS), the global is
-	// delegated and evaluated to a real value.
+	// ServerTime is signal-less, so it is SSR-evaluated at build time and the
+	// build clock supplies Date.now(). The JS engine is not involved.
+	jsvalue.SetBuildClock(time.Date(2024, 3, 9, 16, 0, 0, 0, time.UTC))
+	defer jsvalue.ResetBuildClock()
 	prog := parseProg(t, src)
 	ann := annotator.Annotate(prog, &config.Config{}, "page.tsx", src)
 	tree := irtree.Build(prog, ann)
 	emitter := NewEmitter()
-	// Delegated expressions come back as typed JSON: [typeof, value].
 	emitter.EvalJS = func(code string) (string, error) {
-		if strings.Contains(code, "Date.now()") {
-			return `["number",1710000000000]`, nil
-		}
+		t.Errorf("the JS engine was asked to evaluate %q", code)
 		return `["number",0]`, nil
 	}
-	result2 := emitter.Emit(tree)
-	if !strings.Contains(result2.HTML, "built 1710000000000") {
-		t.Errorf("expected delegated Date.now() value baked into HTML, got:\n%s", result2.HTML)
+	result := emitter.Emit(tree)
+	if !strings.Contains(result.HTML, "built 1710000000000 2024") {
+		t.Errorf("expected the build clock baked into HTML, got:\n%s", result.HTML)
 	}
 }
 

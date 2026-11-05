@@ -18,17 +18,59 @@ JavaScript:
 
 ```tsx
 // @server
-export default function Totals() {
-  const prices = [12, 30, 8];
-  return <p>{prices.length} items, total {prices.reduce((a, b) => a + b, 0)}</p>;
+export default function ServerTime() {
+  return <time>{new Date().toUTCString()}</time>;
 }
 ```
 
-A synchronous server component only sees values the build can compute, so
-`new Date()` has no value there. A server component that is `async`
-(it `await`s a `fetch`, a database call) is rendered per request by the SSR
-sidecar and streamed into the static shell (`KR7104`, informational); use it for
-data that changes, and `output: "static"` rejects it (`KR7103`).
+A synchronous server component sees what the build can compute, including the
+time of the build. A server component that is `async` (it `await`s a `fetch`, a
+database call) is rendered per request by the SSR sidecar and streamed into the
+static shell (`KR7104`, informational); use it for data that changes, and
+`output: "static"` rejects it (`KR7103`).
+
+### Dates and times at build time
+
+The build evaluates dates in a fixed environment, so a build gives the same
+output on every machine:
+
+- **Now.** `new Date()`, `Date.now()`, `Date()` and `Math.random()` are the
+  value at build time, one instant per build. In a static or server component
+  that is the final value. In a client component the static HTML shows the build
+  value and the page computes the expression again when it hydrates; the text is
+  replaced, so there is no hydration error, but it can change on load.
+  Set `SOURCE_DATE_EPOCH` (integer seconds since the Unix epoch) for reproducible
+  builds: `new Date()` is that instant, `Math.random()` becomes a function of it
+  and of the call site, and two builds of the same sources are byte-identical.
+- **Deterministic dates fold everywhere.** `new Date(ms)`, `new Date("2020-01-01")`,
+  an ISO string with `Z` or an offset, `Date.UTC(...)`, `getTime()`, the
+  `getUTC*` and `setUTC*` methods, `toISOString()`, `toJSON()` and `toUTCString()`
+  do not depend on the machine, so they are computed at build time in any
+  component and need no client code.
+- **Time zone and locale.** Anything that reads the local time zone or the
+  locale depends on the environment: `getHours()`, `getDate()`, `toString()`,
+  `toLocaleDateString()`, `new Date(2020, 0, 1)`, `new Date("2020-01-01T10:00")`
+  and the like. At build time the zone is **UTC** and the locale **en-US**
+  (`toLocaleDateString()` is `1/2/2020`, `getTimezoneOffset()` is `0`), whatever
+  the build machine uses. Only these en-US options are modelled: `weekday`,
+  `year`, `month`, `day`, `hour`, `minute`, `second`, `hour12`, `hourCycle`
+  (`h12`/`h23`), `timeZoneName`, `dateStyle` and `timeStyle`, with `timeZone`
+  `"UTC"`; another locale, a time zone other than UTC or any other option is
+  left unresolved.
+- **Client components.** An expression that depends on the environment is not
+  folded into a client component's code: the build writes the UTC/en-US text
+  into the HTML and the browser recomputes it for the visitor's own time zone and
+  locale when the page loads. To avoid the change on load, format with
+  `toISOString()`, `getUTC*` or `toLocaleDateString("en-US", { timeZone: "UTC" })`,
+  which give the same text in both places.
+- `Map`, `Set` and iterators work at build time like in Node: `new Map(entries)`,
+  `new Set(values)`, `arr.entries()`, `arr.keys()`, `map.values()` and the like
+  return real iterators (`.next()`, `.toArray()`, `.map()`) that also work with
+  `for...of`, spread, `Array.from` and destructuring.
+- A local such as `const now = new Date()` is a build value in a server or
+  static component. In a client component it is evaluated by the browser when
+  the page loads, so write the expression in the JSX
+  (`{new Date().getFullYear()}`) to have a build value in the HTML.
 
 ## Per-request data (runtime components)
 

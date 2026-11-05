@@ -1,6 +1,7 @@
 package irtree_test
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -305,12 +306,16 @@ func TestStaticFoldingQuickJSFallback(t *testing.T) {
 	}
 }
 
-func TestImpureExpressionsDoNotUseQuickJS(t *testing.T) {
+// Math.random() and the build clock are baked into the HTML as text, computed
+// by the evaluator itself and never by the embedded JS engine; the expression
+// keeps a slot so a hydrated page computes it again.
+func TestImpureExpressionsAreBakedNotDelegated(t *testing.T) {
 	tree := annotateAndBuild(t, `export default function App() {
 	return <div>{Math.random()}</div>;
 }`)
 	html := renderStaticHTML(tree.Root.Children)
-	if strings.Contains(html, "0.") || strings.Contains(html, "Math.random") {
-		t.Fatalf("random expression must stay dynamic, got %q", html)
+	m := regexp.MustCompile(`^<div><!--k:[^>]*-->(0\.\d+)<!--/k:[^>]*--></div>$|^<div>(0\.\d+)</div>$`).FindStringSubmatch(html)
+	if m == nil {
+		t.Fatalf("Math.random() should render a baked number, got %q", html)
 	}
 }
