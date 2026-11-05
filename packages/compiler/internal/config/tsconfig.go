@@ -58,11 +58,40 @@ func (p *configParser) parseRoot(cfg *Config) error {
 	if err != nil {
 		return err
 	}
+	if err := checkStaticTypes(obj); err != nil {
+		return err
+	}
 	recordUnknownKeys(obj)
 	for _, prop := range obj {
 		if err := applyConfigProp(cfg, prop.key, prop.val); err != nil {
 			return fmt.Errorf("property %q: %w", prop.key, err)
 		}
+	}
+	return nil
+}
+
+// staticTypeError marks a statically parsed value whose type does not match the
+// config schema. Load reports it like the JS-evaluated path does.
+type staticTypeError struct{ err error }
+
+func (e *staticTypeError) Error() string { return e.err.Error() }
+func (e *staticTypeError) Unwrap() error { return e.err }
+
+// checkStaticTypes decodes the parsed object through the same JSON schema the
+// evaluated path uses, so a mistyped nested value (a string where a number or
+// boolean is expected) is an error instead of being skipped by the per-key
+// appliers below.
+func checkStaticTypes(obj []configProp) error {
+	m := make(map[string]interface{}, len(obj))
+	for _, prop := range obj {
+		m[prop.key] = prop.val
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	if err := json.Unmarshal(data, &Config{}); err != nil {
+		return &staticTypeError{err: err}
 	}
 	return nil
 }
@@ -121,7 +150,11 @@ func (p *configParser) parseObject() ([]configProp, error) {
 func (p *configParser) parseKey() (string, error) {
 	t := p.advance()
 	if t.Kind == lexer.String {
-		return t.Value, nil
+		v := t.Value
+		if len(v) >= 2 {
+			v = v[1 : len(v)-1]
+		}
+		return v, nil
 	}
 	// Accept identifiers AND reserved words used as property names (e.g.
 	// `type`, `default`, `class`). Any token whose value is a valid identifier

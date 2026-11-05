@@ -845,8 +845,24 @@ func LoadWith(root string, opts LoadOptions) (*Config, error) {
 			// Simple literal configs the embedded runtime cannot run are parsed
 			// statically (extends is not supported on this path).
 			src, _ := os.ReadFile(tsPath)
+			var cause error
+			var fb *staticFallbackError
+			if errors.As(loadErr, &fb) {
+				cause = fb.cause
+			}
 			if parseErr := parseTSConfig(string(src), cfg); parseErr != nil {
+				var te *staticTypeError
+				if errors.As(parseErr, &te) {
+					return nil, describeUnmarshalError(filepath.Base(tsPath), te.err)
+				}
+				if cause != nil {
+					return nil, fmt.Errorf("parsing config %s: %w (the embedded evaluator could not run it either: %v; "+
+						"the static parser only reads a plain `export default { ... }` literal)", tsPath, parseErr, cause)
+				}
 				return nil, fmt.Errorf("parsing config %s: %w", tsPath, parseErr)
+			}
+			if cause != nil {
+				Warnings = append(Warnings, "config was parsed statically because the embedded evaluator could not run it: "+cause.Error())
 			}
 			if bytes.Contains(src, []byte("extends")) {
 				Warnings = append(Warnings, "extends is ignored when the config is parsed statically")

@@ -827,3 +827,18 @@ Unknown utilities are reported as build warnings and left unexpanded.
 ```typescript
 validate: (config) => { /* optional build-time validation */ }
 ```
+
+### Config load errors
+
+A config that does not parse fails the command with `file:line:col`, the
+offending source line and a hint - for example stray text after
+`export default { ... }`, an unclosed brace, or invalid JSON in
+`krate.config.json`. The same applies to a base pulled in with `extends`.
+
+Configs are normally evaluated in the embedded JavaScript runtime, so imports,
+TypeScript syntax and `extends` all work. If that runtime cannot run a
+module-free config, Krate falls back to a static reader for a plain
+`export default { ... }` literal and prints a warning saying so; `extends` is
+ignored on that path. The static reader applies the same type rules as the
+evaluated path: a wrongly typed nested value (for example `server.port: "80"`)
+is an error, not silently skipped.

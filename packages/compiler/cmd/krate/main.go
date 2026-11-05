@@ -382,10 +382,21 @@ func parseFlagsChecked(args []string) (cliFlags, []string, error) {
 func resolveConfig(flags cliFlags, args []string) (string, *config.Config) {
 	root, cfg, err := loadConfig(flags, args)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%sConfig error:%s %v\n", cRed, cReset, err)
+		fmt.Fprintf(os.Stderr, "%sConfig error:%s %s\n", cRed, cReset, formatConfigError(err))
 		os.Exit(1)
 	}
 	return root, cfg
+}
+
+// formatConfigError renders a config load error. A source-located diagnostic
+// (a syntax error in the config file) prints with its source line, caret and
+// hint; anything else prints as its message.
+func formatConfigError(err error) string {
+	var d diag.Diagnostic
+	if errors.As(err, &d) && d.Line > 0 {
+		return "\n" + diag.FormatDiagnostics([]error{d})
+	}
+	return err.Error()
 }
 
 // checkProjectDir fails with a plain message when the project directory is
@@ -624,7 +635,7 @@ func runDevOnce(flags cliFlags, args []string, first bool) bool {
 	builder.DevReload = func(reason string) bool {
 		fmt.Printf("  %s%s changed; reloading configuration...%s\n", cYellow, reason, cReset)
 		if _, _, err := loadConfig(flags, args); err != nil {
-			fmt.Fprintf(os.Stderr, "%sConfig error:%s %v\n", cRed, cReset, err)
+			fmt.Fprintf(os.Stderr, "%sConfig error:%s %s\n", cRed, cReset, formatConfigError(err))
 			hub.Publish(build.DevEvent{Type: "reload", Diagnostics: []diag.Diagnostic{{File: reason, Message: "config: " + err.Error(), Hint: "fix " + reason + "; the dev server keeps running with the previous settings"}}})
 			return false
 		}
