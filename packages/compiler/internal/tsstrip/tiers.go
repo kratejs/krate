@@ -147,8 +147,21 @@ func scanTiers(path, src string, opts Options) *tierScan {
 		decl := declRe.FindStringSubmatch(src[rest:])
 		if decl == nil {
 			if exportDefaultExprRe.MatchString(src[rest:]) {
-				fail("@"+m.tier+" cannot be placed on `export default` of an expression",
-					"name the component and export it by name: put `@"+m.tier+"` above `const View = ...;` and write `export default View;`")
+				if fn, ok := inlineDefaultComponent(prog, 1+strings.Count(src[:rest], "\n")); ok {
+					// `export default () => ...` / `export default memo(...)`:
+					// the file's default component. The bundler names it, so the
+					// mark is the file tier only.
+					if fn.Async && m.tier != "runtime" {
+						fail("@"+m.tier+" cannot be used on an async component",
+							"an async component always renders per request; use @runtime or make it synchronous")
+						continue
+					}
+					m.isDefault = true
+					s.marks = append(s.marks, m)
+					continue
+				}
+				fail("@"+m.tier+" cannot be placed on `export default` of this expression",
+					"put the decorator on a function, or name the component and export it by name: `@"+m.tier+"` above `const View = ...;` then `export default View;`")
 			} else {
 				fail("@"+m.tier+" must be placed on a function, class or const declaration",
 					"put it on the line above the component, e.g. `@"+m.tier+"` then `export default function Stats() {}`")
@@ -203,6 +216,38 @@ func scanTiers(path, src string, opts Options) *tierScan {
 	}
 	s.src = string(blank)
 	return s
+}
+
+// inlineDefaultComponent finds the `export default <component expression>`
+// statement starting on line and returns its function.
+func inlineDefaultComponent(prog *ast.Program, line int) (*ast.ArrowFn, bool) {
+	for _, stmt := range prog.Body {
+		exp, ok := stmt.(*ast.ExportStmt)
+		if !ok || !exp.Default || exp.Position.Line != line {
+			continue
+		}
+		es, ok := exp.Declaration.(*ast.ExprStmt)
+		if !ok {
+			return nil, false
+		}
+		e := es.Expression
+		for {
+			call, isCall := e.(*ast.CallExpr)
+			if !isCall {
+				break
+			}
+			id, isID := call.Callee.(*ast.Identifier)
+			if !isID || (id.Name != "memo" && id.Name != "forwardRef") || len(call.Args) == 0 {
+				return nil, false
+			}
+			e = call.Args[0]
+		}
+		if fn, isFn := e.(*ast.ArrowFn); isFn && !fn.Generator {
+			return fn, true
+		}
+		return nil, false
+	}
+	return nil, false
 }
 
 // skipDecoratorTrivia moves past whitespace, comments and other decorators.

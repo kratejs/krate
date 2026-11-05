@@ -77,3 +77,41 @@ export function configure() { return 1; }`,
 		t.Errorf("page did not render:\n%s", html)
 	}
 }
+
+// `export default () => ...` and `export default memo(...)` are components:
+// they used to build to an empty page without a word.
+func TestInlineDefaultExportComponentsRender(t *testing.T) {
+	for name, page := range map[string]string{
+		"arrow":   `export default () => <main>inline arrow page</main>;`,
+		"memo":    `export default memo(function V() { return <main>inline arrow page</main>; });`,
+		"props":   `export default (props: { n?: number }) => { const n = props.n ?? 1; return <main>inline arrow page {n}</main>; };`,
+		"default": `import Card from "../card"; export default () => <Card />;`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			files := map[string]string{"src/pages/index.tsx": page}
+			if name == "default" {
+				files["src/card.tsx"] = `export default () => <main>inline arrow page</main>;`
+			}
+			html, _, err := buildKrateProject(t, files)
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			if !strings.Contains(html, "inline arrow page") {
+				t.Errorf("page rendered empty:\n%s", html)
+			}
+		})
+	}
+}
+
+// A tier decorator on an inline default export classifies the component.
+func TestTierDecoratorOnInlineDefaultExportBuilds(t *testing.T) {
+	html, _, err := buildKrateProject(t, map[string]string{
+		"src/pages/index.tsx": "@static\nexport default () => <main>static arrow</main>;\n",
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !strings.Contains(html, "static arrow") {
+		t.Errorf("page rendered empty:\n%s", html)
+	}
+}

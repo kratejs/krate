@@ -747,6 +747,7 @@ func (b *Bundler) resolveTSXModule(path, abs string, mtime time.Time, size int64
 	if err != nil {
 		return err
 	}
+	lowerDefaultExpressionExport(prog, path)
 	if strings.Contains(filepath.ToSlash(abs), "/node_modules/") {
 		// Third-party packages cannot act on these hints; keep builds quiet.
 		reactDiags = nil
