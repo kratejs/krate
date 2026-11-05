@@ -43,6 +43,9 @@ func privateDir(dir string) bool {
 	if err != nil || !fi.IsDir() || !ownedByCurrentUser(fi) {
 		return false
 	}
+	if !hasUnixPerms {
+		return true
+	}
 	if fi.Mode().Perm()&0o077 != 0 {
 		if err := os.Chmod(dir, 0o700); err != nil {
 			return false
