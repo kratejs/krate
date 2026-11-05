@@ -208,3 +208,44 @@ func TestParseMDXSegmentsKeepsImportProse(t *testing.T) {
 		t.Fatalf("prose line starting with import was dropped: %s", html)
 	}
 }
+
+// A markdown list, quote or table directly inside a multi-line JSX element
+// must close before the JSX closing tag instead of swallowing it.
+func TestMDXBlocksInsideJSXElement(t *testing.T) {
+	bodies := map[string]string{
+		"bullet list":  "  - a\n  - b",
+		"ordered list": "  1. a\n  2. b",
+		"quote":        "> quote",
+		"table":        "| a | b |\n|---|---|\n| 1 | 2 |",
+		"nested list":  "- a\n  - b\n    - c",
+	}
+	for name, body := range bodies {
+		src := "# T\n\n<Note>\n" + body + "\n</Note>\n\nafter\n"
+		res := Compile(src, DefaultConfig(), Options{MDX: true})
+		var jsx, htmlOut []string
+		for _, s := range res.Segments {
+			if s.JSX != "" {
+				jsx = append(jsx, s.JSX)
+			}
+			htmlOut = append(htmlOut, s.HTML)
+		}
+		if len(jsx) != 2 || jsx[0] != "<Note>" || jsx[1] != "</Note>" {
+			t.Errorf("%s: want <Note> and </Note> as their own segments, got %q", name, jsx)
+		}
+		if strings.Contains(strings.Join(htmlOut, ""), "Note") {
+			t.Errorf("%s: closing tag leaked into markdown output: %q", name, htmlOut)
+		}
+	}
+}
+
+// Prose directly inside a component keeps its inline run (no <p> wrapper).
+func TestMDXInlineTextInsideJSXElementStaysInline(t *testing.T) {
+	res := Compile("<Button>\nclick me\n</Button>\n", DefaultConfig(), Options{MDX: true})
+	var jsx string
+	for _, s := range res.Segments {
+		jsx += s.JSX
+	}
+	if strings.Contains(jsx, "<p>") || !strings.Contains(jsx, "click me") {
+		t.Errorf("inline text should not gain a paragraph, got %q", jsx)
+	}
+}

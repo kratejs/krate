@@ -632,7 +632,9 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 	p.Filename = path
 	prog := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
-		return fmt.Errorf("%s: %s", path, parser.FormatDiagnostics(errs))
+		// The parser saw generated code, so its line:col do not match the
+		// markdown file. Say so, and point at the usual cause.
+		return fmt.Errorf("%s: the compiled markdown is not valid JSX (line:col below refer to the generated code, not this file; check that every JSX tag is closed and nested properly, and put a blank line between a JSX tag and a block it wraps): %s", path, parser.FormatDiagnostics(errs))
 	}
 	RewriteReact(prog)
 

@@ -206,6 +206,9 @@ func (t *tokenTable) protect(text string, mdx bool, report reportFn) string {
 			if flow {
 				kind = 'F'
 			}
+			if flow && tg.closing && strings.TrimSpace(restOfLine(text, tg.end)) == "" {
+				separateFromContainer(&out)
+			}
 			out.WriteString(t.add(kind, text[i:tg.end], i))
 			i = tg.end
 		case c == '{' && mdx:
@@ -225,6 +228,40 @@ func (t *tokenTable) protect(text string, mdx bool, report reportFn) string {
 		}
 	}
 	return out.String()
+}
+
+func restOfLine(text string, from int) string {
+	if nl := strings.IndexByte(text[from:], '\n'); nl >= 0 {
+		return text[from : from+nl]
+	}
+	return text[from:]
+}
+
+var containerLineRe = regexp.MustCompile(`^(?:\s*(?:[-*+]|\d{1,9}[.)])\s|\s*>|\s*\|| {2,}\S|\t)`)
+
+// separateFromContainer ends the markdown block before a closing JSX tag that
+// stands on its own line. Without a blank line, the opaque tag token is read as
+// a lazy continuation of the last list item, quote or table row above it, and
+// the component would close inside that block. Plain paragraphs are left
+// alone so the tag stays in the same inline run as its text.
+func separateFromContainer(out *strings.Builder) {
+	cur := out.String()
+	// Drop the indentation already written for this line.
+	cur = strings.TrimRight(cur, " \t")
+	if !strings.HasSuffix(cur, "\n") {
+		return
+	}
+	body := strings.TrimRight(cur, "\n")
+	if strings.HasSuffix(cur, "\n\n") || body == "" {
+		return
+	}
+	prev := body[strings.LastIndexByte(body, '\n')+1:]
+	if !containerLineRe.MatchString(prev) && !strings.HasSuffix(strings.TrimSpace(prev), "|") {
+		return
+	}
+	out.Reset()
+	out.WriteString(cur)
+	out.WriteByte('\n')
 }
 
 type tagInfo struct {
