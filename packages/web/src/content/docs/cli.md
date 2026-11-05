@@ -85,6 +85,10 @@ During the build the compiler:
 4. Writes hashed JS chunks, the shared runtime chunk, and `.krate/manifest.json`.
 5. Copies `publicDir` assets, compiles API routes, middleware, and runtime components.
 
+A file the build cannot write (a full disk, an unwritable `outDir`) fails the
+build with a non-zero exit and an error naming the path, rather than leaving
+HTML that links a stylesheet or script that does not exist.
+
 ## Build caching
 
 `krate build` keeps a cross-run cache under `.krate/cache/build/`. On a rebuild,
