@@ -1086,6 +1086,20 @@ function flushEffectsInner(): void {
   flushScheduled = false;
   flushMode = 0;
   flushToken++;
+  // One effect throwing must not strand the effects queued behind it: their
+  // `queued` flags would stay set and they could never be queued again. Errors
+  // are collected, the flush (settle hooks included) finishes, and the first
+  // one is rethrown so it still surfaces; later ones are logged.
+  let failed = false;
+  let firstError: unknown;
+  const fail = (err: unknown): void => {
+    if (!failed) {
+      failed = true;
+      firstError = err;
+    } else if (typeof console !== 'undefined') {
+      console.error(err);
+    }
+  };
   for (const hook of beforeFlushHooks) {
     hook();
   }
@@ -1104,14 +1118,28 @@ function flushEffectsInner(): void {
       }
       effect.queued = false;
       effect.rerun = false;
-      runEffect(effect);
+      try {
+        runEffect(effect);
+      } catch (err) {
+        fail(err);
+      }
       if (effect.rerun && !effect.disposed) {
         effect.rerun = false;
-        runEffect(effect);
+        try {
+          runEffect(effect);
+        } catch (err) {
+          fail(err);
+        }
       }
     }
   }
-  if (pending.length > 0) abortUpdateLoop();
+  if (pending.length > 0) {
+    try {
+      abortUpdateLoop();
+    } catch (err) {
+      fail(err);
+    }
+  }
   if (pending.length === 0) {
     // The cascade is done: a flush the passes scheduled has nothing to do.
     flushMode = 0;
@@ -1122,20 +1150,39 @@ function flushEffectsInner(): void {
     // Settle hooks (the class component render phase) may write signals;
     // flush those in this same pass so the commit sees every DOM write.
     for (const hook of settleHooks) {
-      hook();
+      try {
+        hook();
+      } catch (err) {
+        fail(err);
+      }
     }
     if (pending.length > 0) {
-      if (settleDepth >= 50) abortUpdateLoop();
+      if (settleDepth >= 50) {
+        try {
+          abortUpdateLoop();
+        } catch (err) {
+          fail(err);
+          throw firstError;
+        }
+      }
       settleDepth++;
       try {
         flushEffects();
+      } catch (err) {
+        fail(err);
       } finally {
         settleDepth--;
       }
+      if (failed) throw firstError;
       return;
     }
-    runAfterFlush();
+    try {
+      runAfterFlush();
+    } catch (err) {
+      fail(err);
+    }
   }
+  if (failed) throw firstError;
 }
 
 // A flush chain that needs more passes than this is an update loop (two

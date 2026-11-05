@@ -49,11 +49,15 @@ func resolveAlpha(a string) (string, bool) {
 // the theme and returns the CSS color. When alpha is set and the color is a hex
 // value it is re-emitted as `rgb(r g b / a)`.
 func colorValue(key, alpha string, theme TailwindTheme) (string, bool) {
-	if v, ok := theme.BgColors[key]; ok {
+	resolved := func(v string) (string, bool) {
+		v = theme.themeRef("color-"+key, v)
 		if a, ok := resolveAlpha(alpha); ok {
 			return withAlpha(v, a), true
 		}
 		return v, true
+	}
+	if v, ok := theme.BgColors[key]; ok {
+		return resolved(v)
 	}
 	// shade form: <name>-<shade>. Shade names may be numeric (500) or custom
 	// (light), so split on the last hyphen rather than requiring digits.
@@ -61,29 +65,19 @@ func colorValue(key, alpha string, theme TailwindTheme) (string, bool) {
 		name, shade := key[:i], key[i+1:]
 		if shades, ok := theme.Colors[name]; ok {
 			if hex, ok := shades[shade]; ok {
-				if a, ok := resolveAlpha(alpha); ok {
-					return withAlpha(hex, a), true
-				}
-				return hex, true
+				return resolved(hex)
 			}
 		}
 	}
 	// flat / DEFAULT: `bg-brand` -> colors.brand.DEFAULT
 	if shades, ok := theme.Colors[key]; ok {
 		if hex, ok := shades["DEFAULT"]; ok {
-			if a, ok := resolveAlpha(alpha); ok {
-				return withAlpha(hex, a), true
-			}
-			return hex, true
+			return resolved(hex)
 		}
 	}
 	// arbitrary: [#ff0000]/[rgb(...)]
 	if strings.HasPrefix(key, "[") && strings.HasSuffix(key, "]") {
-		val := key[1 : len(key)-1]
-		if a, ok := resolveAlpha(alpha); ok {
-			return withAlpha(val, a), true
-		}
-		return val, true
+		return resolved(key[1 : len(key)-1])
 	}
 	return "", false
 }

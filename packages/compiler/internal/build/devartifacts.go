@@ -25,9 +25,9 @@ import (
 //
 // The manifest merge is deliberately additive: entries for pages and components
 // outside this rebuild are preserved untouched.
-func (b *Builder) refreshPageServerArtifacts(results []*PageResult, runtimeJS string, globalCSS []string) {
+func (b *Builder) refreshPageServerArtifacts(results []*PageResult, runtimeJS string, globalCSS []string) error {
 	if !b.DevMode || len(results) == 0 {
-		return
+		return nil
 	}
 
 	ssrPages := make([]*PageResult, 0, len(results))
@@ -41,7 +41,9 @@ func (b *Builder) refreshPageServerArtifacts(results []*PageResult, runtimeJS st
 	var serverBundles map[string]string
 	if len(ssrPages) > 0 {
 		serverBundles = CompileServerBundles(b.importResolver(), ssrPages, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
-		b.writeHighlightTables(serverBundles)
+		if err := b.writeHighlightTables(serverBundles); err != nil {
+			return err
+		}
 	}
 
 	// Collect runtime component sources referenced by this rebuild's regions
@@ -49,7 +51,7 @@ func (b *Builder) refreshPageServerArtifacts(results []*PageResult, runtimeJS st
 	runtimeBundles := b.refreshRuntimeComponents(results)
 
 	if len(serverBundles) == 0 && len(runtimeBundles) == 0 {
-		return
+		return nil
 	}
 
 	if len(serverBundles) > 0 {
@@ -64,8 +66,9 @@ func (b *Builder) refreshPageServerArtifacts(results []*PageResult, runtimeJS st
 		manifestCSS = globalCSS[0]
 	}
 	if err := b.mergeManifests(manifestCSS, runtimeJS, serverBundles, runtimeBundles); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sWarning: failed to refresh manifest:%s %v\n", cYellow, cReset, err)
+		return fmt.Errorf("refreshing the build manifest under %s: %w", b.Cfg.OutDir, err)
 	}
+	return nil
 }
 
 // refreshRuntimeComponents recompiles the runtime component bundles referenced by

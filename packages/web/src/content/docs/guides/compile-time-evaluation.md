@@ -28,6 +28,11 @@ no runtime expression for either value.
 ## What is evaluated
 
 - Literals, arrays, objects, templates, operators, and conditionals.
+- Computed object keys (`{ [KEY]: value }`, `{ [`${a}-${b}`]: value }`,
+  `{ [Kind.Primary]: value }`) whose key folds to a string or number. A key
+  that does not fold (it reads a signal, or something only known at request
+  time) leaves the whole object to the runtime; the key is never replaced by
+  the expression's spelling.
 - Module constants and imported constants that resolve to literal values.
 - Component locals, including destructuring.
 - Local helper functions whose bodies stay within the pure subset.
@@ -55,6 +60,79 @@ Both `.map()` and `.flatMap()` flatten this way. This emits the two `<li>`
 elements and **no list runtime, list markers, or `kbindList` call**. A list is
 kept dynamic only when its source is signal-backed or otherwise unknown at
 build time.
+
+## Element types held in variables
+
+`<Tag>` where `Tag` is a variable renders the element it names when the build
+can fold the value to one tag:
+
+```tsx
+const Wrap = "section";
+
+function Box({ as: Tag = "div", children }) {
+  return <Tag>{children}</Tag>;
+}
+
+<Wrap><Box as="h2">Title</Box></Wrap>
+```
+
+A string constant, a prop the caller passes, a parameter default, and a
+condition on those all fold. A tag that depends on a signal, on a value only
+known at request time, or on an omitted prop with no default does not: the
+build stops with a [KR8320](/docs/reference/diagnostics/#kr8320) error instead of
+emitting an empty placeholder. Pass the tag as a string, render each case as
+its own element, or put the component in a `*.runtime.tsx` file, where the tag
+is an ordinary JavaScript value at request time.
+
+## Namespace members as tags
+
+A member tag of a namespace import renders the component the member names,
+whatever the case of the namespace and however many barrel files sit between:
+
+```tsx
+import * as ui from "./ui"; // ui/index.ts: export { Button } from "./Button"
+
+<ui.Button>Save</ui.Button>
+```
+
+The build follows `export { X } from`, `export { default as X } from`,
+`export *` and `export * as group from` to the function that declares the
+component, and `<ui.group.Input />` resolves the same way. A member that
+does not exist, or is not a function component, stops the build with a
+[KR8321](/docs/reference/diagnostics/#kr8321) error that names the tag, instead
+of emitting an unknown element. Members of an npm React library are mounted as
+islands, as named imports are.
+
+## Module values changed by top-level code
+
+A module-level value is not always its initializer. Top-level statements that
+change it run at build time, in source order, before anything reads it:
+
+```tsx
+const squares = [];
+for (let i = 0; i < 3; i++) squares.push(i * i);
+let total = 0;
+for (const s of squares) total += s;
+
+<ul>{squares.map((s) => <li>{s}</li>)}</ul> // three items
+<p>{total}</p>                                // 5
+```
+
+Assignments, `++`, property writes, `push` and other method calls, loops,
+branches, `Object.assign`, and calls to functions of the module that do any of
+these are run, in the module that declares the value and in the modules it is
+imported from. Code that only reads a value (`console.log(cfg)`,
+`window.__cfg = cfg`) or that runs later (a callback passed to
+`addEventListener`) does not affect it, and a module with no such statements
+folds from its initializers exactly as before.
+
+When a statement cannot be run at build time (it reads the browser, the clock
+or an imported function, or sorts or reverses in place), the values it may
+have changed stay unknown instead of keeping their initial value. A component
+that hydrates reads them in the browser, where the hydration script replays the
+statement. A component rendered at build time (`@static`, `@server`) has no run
+time, so the build fails with [KR8322](/docs/reference/diagnostics/#kr8322).
+Make the top-level code plain, or compute the value in one expression.
 
 ## Reactive values
 

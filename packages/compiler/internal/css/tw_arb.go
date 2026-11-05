@@ -262,6 +262,9 @@ func spacingMultiple(key string, theme TailwindTheme) (string, bool) {
 	if f == 0 {
 		return "0", true
 	}
+	if theme.LiveVars["spacing"] {
+		return "calc(var(--spacing) * " + key + ")", true
+	}
 	unit := strings.TrimSpace(theme.SpacingUnit)
 	if unit == "" {
 		unit = "0.25rem"
@@ -304,6 +307,8 @@ func negateLength(v string) string {
 		if !strings.ContainsAny(v, "( ,") {
 			return "-" + v
 		}
+	case strings.HasPrefix(v, "calc(var(--spacing) * ") && !strings.Contains(v, "-1)"):
+		return "calc(var(--spacing) * -" + v[len("calc(var(--spacing) * "):]
 	}
 	return "calc(" + v + " * -1)"
 }

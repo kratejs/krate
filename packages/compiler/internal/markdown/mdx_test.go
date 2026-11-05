@@ -279,3 +279,23 @@ func TestCompileWarnsAboutUnreadableFrontmatter(t *testing.T) {
 		t.Errorf("valid frontmatter warned: %+v", res.Diags)
 	}
 }
+
+func TestCompileReportsInvalidFrontmatterAsError(t *testing.T) {
+	res := Compile("---\ntitle: \"bad\ndescription: ok\n---\n\n# Hello\n", Config{}, Options{})
+	var found bool
+	for _, d := range res.Diags {
+		if !d.Warning && d.Line == 2 && d.Col == 8 && strings.Contains(d.Msg, "invalid frontmatter") && d.Hint != "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no invalid-frontmatter error at 2:8: %+v", res.Diags)
+	}
+	ok := Compile("---\ntitle: \"Hello: World\"\n---\n\n# Hi\n", Config{}, Options{})
+	for _, d := range ok.Diags {
+		t.Errorf("valid frontmatter produced a diagnostic: %+v", d)
+	}
+	if got := ok.Frontmatter["title"]; got != "Hello: World" {
+		t.Errorf("title = %v", got)
+	}
+}

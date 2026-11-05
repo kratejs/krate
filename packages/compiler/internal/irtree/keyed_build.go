@@ -34,6 +34,21 @@ func (b *builder) warnCodeAt(pos ast.Pos, code diag.Code, msg, hint string) {
 	b.warnings = append(b.warnings, d)
 }
 
+// errorCodeAt records a positioned build error carrying a stable code. Passes
+// that only locate slots do not know the real scope and report nothing.
+func (b *builder) errorCodeAt(pos ast.Pos, code diag.Code, msg, hint string) {
+	if b.locateOnly > 0 {
+		return
+	}
+	d := b.diagAt(pos, diag.SeverityError, msg, hint).WithCode(code)
+	for _, e := range b.buildErrs {
+		if prev, ok := e.(diag.Diagnostic); ok && prev.Code == d.Code && prev.File == d.File && prev.Line == d.Line && prev.Col == d.Col {
+			return
+		}
+	}
+	b.buildErrs = append(b.buildErrs, d)
+}
+
 func (b *builder) warnListDuplicateKey(keyExpr ast.Expr, key string) {
 	b.warnCodeAt(keyExpr.Pos(), diag.CodeListDuplicateKey,
 		"encountered two children with the same key \""+key+"\"",

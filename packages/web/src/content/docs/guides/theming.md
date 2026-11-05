@@ -153,3 +153,6 @@ them:
   --color-brand: var(--krate-primary);
 }
 ```
+
+`bg-brand` then reads `var(--color-brand)`, so it follows `--krate-primary` at
+runtime, including in dark mode.

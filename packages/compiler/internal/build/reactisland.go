@@ -207,10 +207,45 @@ func (i *reactHookInfo) hooksOf(name string) (string, bool) {
 	return pkg, ok
 }
 
+// addFactories records the module-level bindings a library factory builds, such
+// as a store hook: `const useStore = create(...)`.
+func (i *reactHookInfo) addFactories(prog *ast.Program, libs, nsLibs map[string]string) {
+	for _, d := range moduleLevelDecls(prog) {
+		if d.Init == nil {
+			continue
+		}
+		root := factoryRoot(d.Init)
+		pkg, ok := libs[root]
+		if !ok {
+			pkg, ok = nsLibs[root]
+		}
+		if !ok {
+			continue
+		}
+		if d.IsDestructuring {
+			for _, n := range d.Names {
+				if hookNameRe.MatchString(n) {
+					i.hooks[n] = pkg
+				}
+			}
+		} else if hookNameRe.MatchString(d.Name) {
+			i.hooks[d.Name] = pkg
+		} else if d.Name != "" && d.Name[0] >= 'A' && d.Name[0] <= 'Z' {
+			// A component built by a library factory: styled.div`...`,
+			// styled(Base)(...), motion(Button), connect(...)(View).
+			i.factories[d.Name] = pkg
+		} else if d.Name != "" {
+			// A value built by a library (new QueryClient(), createTheme()),
+			// which only means something to that library's components.
+			i.instances[d.Name] = pkg
+		}
+	}
+}
+
 // detectReactIslandModules finds the user modules that call hooks of a
 // React-bound npm package. A module that calls a custom hook of such a module
 // is one too, so the set is closed over user-module imports.
-func detectReactIslandModules(mods []*bundler.Module, resolve func(importer, spec string) string) map[string]*reactIslandModule {
+func (b *Builder) detectReactIslandModules(mods []*bundler.Module, resolve func(importer, spec string) string) map[string]*reactIslandModule {
 	infos := map[string]*reactHookInfo{}
 	out := map[string]*reactIslandModule{}
 	for _, m := range mods {
@@ -230,36 +265,11 @@ func detectReactIslandModules(mods []*bundler.Module, resolve func(importer, spe
 				in.hooks[local] = pkg
 			}
 		}
-		// A store hook made by a module-level factory: `const useStore = create(...)`.
-		for _, d := range moduleLevelDecls(m.Program) {
-			if d.Init == nil {
-				continue
-			}
-			root := factoryRoot(d.Init)
-			pkg, ok := libs[root]
-			if !ok {
-				pkg, ok = nsLibs[root]
-			}
-			if !ok {
-				continue
-			}
-			if d.IsDestructuring {
-				for _, n := range d.Names {
-					if hookNameRe.MatchString(n) {
-						in.hooks[n] = pkg
-					}
-				}
-			} else if hookNameRe.MatchString(d.Name) {
-				in.hooks[d.Name] = pkg
-			} else if d.Name != "" && d.Name[0] >= 'A' && d.Name[0] <= 'Z' {
-				// A component built by a library factory: styled.div`...`,
-				// styled(Base)(...), motion(Button), connect(...)(View).
-				in.factories[d.Name] = pkg
-			} else if d.Name != "" {
-				// A value built by a library (new QueryClient(), createTheme()),
-				// which only means something to that library's components.
-				in.instances[d.Name] = pkg
-			}
+		// A module importing no React library has no factory to look for.
+		if len(libs) > 0 || len(nsLibs) > 0 {
+			release := b.readProgram(m.Program)
+			in.addFactories(m.Program, libs, nsLibs)
+			release()
 		}
 		// A file-level pragma switches the JSX runtime to a React library's
 		// (emotion's css prop).
@@ -279,6 +289,7 @@ func detectReactIslandModules(mods []*bundler.Module, resolve func(importer, spe
 		if len(in.hooks) == 0 && len(in.nsLibs) == 0 && len(in.factories) == 0 && len(in.instances) == 0 && in.pragma == "" {
 			return false
 		}
+		defer b.readProgram(in.m.Program)()
 		var hit *reactIslandModule
 		if in.pragma != "" {
 			hit = &reactIslandModule{Path: in.m.Path, Pkg: in.pragma, Name: "@jsxImportSource " + in.pragma, Pos: ast.Pos{Line: 1, Col: 1}}
@@ -580,10 +591,11 @@ func firstReactIsland(islands map[string]*reactIslandModule) *reactIslandModule 
 // cssPropWarnings reports `css={...}` on DOM elements in a module that does
 // not run as a React island: emotion's css prop is only understood by emotion's
 // JSX runtime, so Krate would render it as a plain attribute and drop the styles.
-func cssPropWarnings(m *bundler.Module) []diag.Diagnostic {
+func (b *Builder) cssPropWarnings(m *bundler.Module) []diag.Diagnostic {
 	if !strings.Contains(m.SourceCode, "css=") {
 		return nil
 	}
+	defer b.readProgram(m.Program)()
 	var out []diag.Diagnostic
 	irtree.WalkAST(m.Program.Body, func(n any) bool {
 		el, ok := n.(*ast.JSXElement)

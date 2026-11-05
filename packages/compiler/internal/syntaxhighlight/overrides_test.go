@@ -2,6 +2,7 @@ package syntaxhighlight
 
 import (
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 // text its original does, using regexp2 (the engine chroma runs) on random
 // strings built from the characters the patterns care about.
 func TestPatternOverrides(t *testing.T) {
-	alphabet := []rune("ABZ09_ab -r#\u00e9.")
+	alphabet := []rune("ABZ0179_ab -r#\u00e9.exo+infa")
 	for lexer, m := range patternOverrides {
 		for orig, repl := range m {
 			compile := func(p string) *regexp2.Regexp {
@@ -42,5 +43,20 @@ func TestPatternOverrides(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// The override has to reach the bundle the browser runs, not only this table.
+func TestYAMLNumberOverrideReachesBundle(t *testing.T) {
+	b, err := BuildBundle([]string{"yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b.JSON())
+	if want := `(?:\\.[\\p{Nd}]*)?`; !strings.Contains(text, want) {
+		t.Errorf("bundle has no linear number rule %s", want)
+	}
+	if bad := `+\\.?[\\p{Nd}]*`; strings.Contains(text, bad) {
+		t.Errorf("bundle still has the quadratic number rule %s", bad)
 	}
 }

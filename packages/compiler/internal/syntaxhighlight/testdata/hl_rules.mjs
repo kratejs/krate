@@ -1,6 +1,8 @@
 // Times every rule of a bundle against hostile strings, to find regexes that
 // take super-linear time on one match attempt. A rule that never finishes is
-// reported as a hang. usage:
+// reported as a hang. A single sample proves nothing, since a GC pause or a busy
+// runner can stretch it, so a rule over its limit is measured again and judged
+// on its best time against this machine's speed. usage:
 // node hl_rules.mjs <bundle.json> <n> <threshold-ms> <out.json>
 import fs from "node:fs";
 import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
@@ -17,22 +19,42 @@ function makeProbes(n) {
   for (const s of seqs) probes.push(rep(s, n), rep(s, n) + "!", rep(s, n) + "\n");
   return probes;
 }
+function timeOnce(re, text, start) {
+  re.lastIndex = start;
+  const t0 = process.hrtime.bigint();
+  re.exec(text);
+  return Number(process.hrtime.bigint() - t0) / 1e6;
+}
+function bestOf(re, text, start, runs = 7) {
+  let best = Infinity;
+  for (let i = 0; i < runs; i++) best = Math.min(best, timeOnce(re, text, start));
+  return best;
+}
+// A known quadratic scan, and what it costs on the machine the limits were set
+// on. Limits grow with it on a slower machine and never shrink on a faster one.
+const referenceRe = /\p{Nd}+\.?\p{Nd}*z/uy;
+const referenceText = "1".repeat(2000) + "!";
+const referenceMS = 4;
+function machineScale() {
+  return Math.max(1, bestOf(referenceRe, referenceText, 0) / referenceMS);
+}
 function timeRule(re, probes) {
   let worst = 0;
   let worstProbe = "";
+  let worstText = "";
+  let worstStart = 0;
   for (const p of probes) {
     for (const start of [0, 1]) {
-      re.lastIndex = start;
-      const t0 = process.hrtime.bigint();
-      re.exec(p);
-      const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+      const ms = timeOnce(re, p, start);
       if (ms > worst) {
         worst = ms;
         worstProbe = JSON.stringify(p.slice(0, 6)) + "x" + p.length + "@" + start;
+        worstText = p;
+        worstStart = start;
       }
     }
   }
-  return [worst, worstProbe];
+  return [worst, worstProbe, worstText, worstStart];
 }
 
 if (!isMainThread) {
@@ -60,9 +82,11 @@ if (!isMainThread) {
         // Short hostile strings first, so exponential backtracking is caught
         // before it stalls the longer runs.
         for (const [probes, kind, limit] of [[small, "exponential", 40], [mid, "exponential", 40], [big, "slow", Number(workerData.threshold)]]) {
-          const [worst, probe] = timeRule(re, probes);
-          if (worst > limit) {
-            parentPort.postMessage({ me, ms: worst, probe, kind });
+          const [worst, probe, text, start] = timeRule(re, probes);
+          if (worst <= limit) continue;
+          const settled = bestOf(re, text, start);
+          if (settled > limit * machineScale()) {
+            parentPort.postMessage({ me, ms: settled, probe, kind });
             return;
           }
         }

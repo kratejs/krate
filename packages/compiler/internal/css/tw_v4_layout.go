@@ -25,6 +25,13 @@ func containerSize(name string, theme TailwindTheme) (string, bool) {
 	return v, ok
 }
 
+// containerUtilitySize is containerSize for a sizing utility. Container query
+// variants read containerSize directly, since @container cannot use var().
+func containerUtilitySize(name string, theme TailwindTheme) (string, bool) {
+	v, ok := containerSize(name, theme)
+	return theme.themeRef("container-"+name, v), ok
+}
+
 type spacingRoot struct {
 	root  string
 	props []string
@@ -153,8 +160,11 @@ func sizeValue(kind, key string, theme TailwindTheme) (string, bool) {
 	isH := kind == "h" || kind == "min-h" || kind == "max-h"
 	switch kind {
 	case "max-w":
+		if v, ok := theme.Containers[key]; ok && v != "" {
+			return theme.themeRef("container-"+key, v), true
+		}
 		if v, ok := theme.MaxWidth[key]; ok && !strings.HasPrefix(key, "screen-") {
-			return v, true
+			return theme.themeRef("container-"+key, v), true
 		}
 	case "min-w":
 		if v, ok := theme.MinWidth[key]; ok {
@@ -210,7 +220,7 @@ func sizeValue(kind, key string, theme TailwindTheme) (string, bool) {
 		}
 	}
 	if kind == "w" || kind == "min-w" || kind == "max-w" || kind == "basis" {
-		if v, ok := containerSize(key, theme); ok {
+		if v, ok := containerUtilitySize(key, theme); ok {
 			return v, true
 		}
 	}
@@ -660,5 +670,5 @@ func miscValueUtility(cls string, neg bool) (string, bool) {
 
 func hasCustomUnit(theme TailwindTheme) bool {
 	u := strings.TrimSpace(theme.SpacingUnit)
-	return u != "" && u != "0.25rem"
+	return theme.LiveVars["spacing"] || u != "" && u != "0.25rem"
 }

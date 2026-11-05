@@ -311,16 +311,21 @@ func (x *exporter) loadRules(rl *chroma.RegexLexer) error {
 	return nil
 }
 
-// patternOverrides replace rules whose regular expression backtracks
-// exponentially on some input with a form that matches exactly the same text.
-// A JavaScript engine has no match timeout, so the original would hang the
-// page, where chroma's regexp2 gives up after 250 ms. TestPatternOverrides
-// checks each pair against regexp2 on random input.
+// patternOverrides replace rules whose regular expression backtracks badly on
+// some input with a form that matches exactly the same text. A JavaScript
+// engine has no match timeout, so the original would stall or hang the page,
+// where chroma's regexp2 gives up after 250 ms. TestPatternOverrides checks each
+// pair against regexp2 on random input.
 var patternOverrides = map[string]map[string]string{
 	"Rust": {
 		// SCREAMING_CASE constants. The group is repeated only to demand a second
 		// capital; spelling that out takes linear time instead of 2^n.
 		`\b(r#)?_?([A-Z][A-Z0-9_]*){2,}\b`: `\b(r#)?_?([A-Z][A-Z0-9_]*[A-Z][A-Z0-9_]*)\b`,
+	},
+	"YAML": {
+		// Numbers. \d+\.?\d* can split a run of digits at every position, which
+		// is quadratic when the \b after it fails. Only a dot may separate them.
+		`\b[+\-]?(0x[\da-f]+|0o[0-7]+|(\d+\.?\d*|\.?\d+)(e[\+\-]?\d+)?|\.inf|\.nan)\b`: `\b[+\-]?(0x[\da-f]+|0o[0-7]+|(\d+(?:\.\d*)?|\.\d+)(e[\+\-]?\d+)?|\.inf|\.nan)\b`,
 	},
 }
 

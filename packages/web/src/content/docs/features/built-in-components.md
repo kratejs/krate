@@ -131,6 +131,9 @@ Inline CSS is captured into `<head>`.
   or fetches external files, and external `<image>` are stripped.
 - Fetched SVGs are cached on disk (`.krate/cache/icons/`); icon names are
   validated against `[a-zA-Z0-9_.-]` (max 64 chars).
+- An icon that is not in `icons/` and cannot be fetched fails the build with
+  [KR8840](/docs/reference/diagnostics/) and the file and line of the `<Icon>`.
+  Nothing about the failure is written into the page.
 
 ## `<Image>`
 

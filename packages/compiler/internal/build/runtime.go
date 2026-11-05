@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
-	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
 
@@ -186,7 +185,7 @@ func probeNamedBundleFromDisk(projectRoot string, names []string) string {
 // writeRuntimeChunk writes the krate runtime to a shared chunk file in dist/chunks/.
 // Returns the relative path (e.g. "chunks/runtime.abc123.js") for use in <script> tags.
 // Returns empty string if runtime is unavailable.
-func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opts runtimeChunkOptions) string {
+func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opts runtimeChunkOptions) (string, error) {
 	runtime := ""
 	if opts.Trim {
 		runtime, _ = loadRuntimeFeatures(projectRoot, opts.SPA, opts.Scan)
@@ -195,7 +194,7 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opt
 		runtime = loadRuntimeFromDiskFor(projectRoot, opts.SPA)
 	}
 	if runtime == "" {
-		return ""
+		return "", nil
 	}
 
 	// Append the shared hydration infrastructure (findSlot, __safe, $esc,
@@ -221,13 +220,11 @@ func writeRuntimeChunk(outDir string, shouldMinify bool, projectRoot string, opt
 	hash := hashContent([]byte(runtimeToWrite))
 	filename := "chunks/runtime." + hash + ".js"
 
-	chunksDir := filepath.Join(outDir, "chunks")
-	_ = os.MkdirAll(chunksDir, 0755)
+	if err := writeOutput(filepath.Join(outDir, filename), []byte(runtimeToWrite)); err != nil {
+		return "", err
+	}
 
-	relPath := filename
-	_ = fsutil.WriteFileAtomic(filepath.Join(outDir, relPath), []byte(runtimeToWrite), 0644)
-
-	return relPath
+	return filename, nil
 }
 
 // devFallbackJS is written as chunks/krate-dev.js when the @krate/runtime dev
@@ -242,16 +239,16 @@ const devFallbackJS = `(function(){var s=new EventSource('/__krate/hotreload');`
 // (chunks/krate-dev.js) so dev HTML can reference it without threading a hashed
 // name through the page pipeline. It is intentionally unminified and only
 // written in dev mode.
-func writeDevChunk(outDir, projectRoot string) string {
+func writeDevChunk(outDir, projectRoot string) (string, error) {
 	content := loadDevBundleFromDisk(projectRoot)
 	if content == "" {
 		content = devFallbackJS
 	}
-	chunksDir := filepath.Join(outDir, "chunks")
-	_ = os.MkdirAll(chunksDir, 0755)
 	relPath := "chunks/krate-dev.js"
-	_ = fsutil.WriteFileAtomic(filepath.Join(outDir, relPath), []byte(content), 0644)
-	return relPath
+	if err := writeOutput(filepath.Join(outDir, relPath), []byte(content)); err != nil {
+		return "", err
+	}
+	return relPath, nil
 }
 
 // warnMissingRuntime prints a diagnostic when pages ship hydration JS but the

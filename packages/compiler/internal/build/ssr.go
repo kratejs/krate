@@ -110,7 +110,9 @@ func (s *SSRServer) InvalidateDevRoutes(routes []string) {
 		want[r] = true
 	}
 	s.mu.Lock()
-	_ = s.loadManifestLocked()
+	if err := s.loadManifestLocked(); err != nil && !errors.Is(err, errServerManifestMissing) {
+		fmt.Fprintf(os.Stderr, "  %sSSR manifest not reloaded, keeping the last good one:%s %v\n", cYellow, cReset, err)
+	}
 	var pages []ManifestPage
 	if s.manifest != nil {
 		for _, p := range s.manifest.Pages {
@@ -195,16 +197,38 @@ func (s *SSRServer) LoadManifest() error {
 	return s.loadManifestLocked()
 }
 
-// loadManifestLocked reads the server manifest into s.manifest. The caller must
-// hold s.mu.
-func (s *SSRServer) loadManifestLocked() error {
-	manifestPath := ResolveManifestPath(s.outputDirLocked(), "server-manifest.json")
-	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
-		return fmt.Errorf("server-manifest.json not found in dist/ - no SSR/ISR pages to render")
+// errServerManifestMissing marks an app with no request-time pages: the build
+// writes server-manifest.json only when there is something to render. Any other
+// error from loading the manifest means it exists but cannot be used.
+var errServerManifestMissing = errors.New("server-manifest.json not found in dist/ - no SSR/ISR pages to render")
+
+// readServerManifest loads and parses the server manifest under outDir. A
+// missing file wraps errServerManifestMissing; an unreadable or corrupt one
+// returns an error naming the path.
+func readServerManifest(outDir string) (*ServerManifest, error) {
+	path := ResolveManifestPath(outDir, "server-manifest.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w (looked for %s)", errServerManifestMissing, path)
+		}
+		return nil, fmt.Errorf("reading SSR manifest %s: %w\n  hint: check the file permissions, or run `krate build` to regenerate it", path, err)
 	}
-	data, _ := os.ReadFile(manifestPath)
-	s.manifest = &ServerManifest{}
-	_ = json.Unmarshal(data, s.manifest)
+	m := &ServerManifest{}
+	if err := json.Unmarshal(data, m); err != nil {
+		return nil, fmt.Errorf("SSR manifest %s is corrupt: %w\n  hint: run `krate build` to regenerate it; serving would otherwise return the stale build HTML for request-time pages", path, err)
+	}
+	return m, nil
+}
+
+// loadManifestLocked reads the server manifest into s.manifest. The caller must
+// hold s.mu. On any error the previously loaded manifest is kept.
+func (s *SSRServer) loadManifestLocked() error {
+	m, err := readServerManifest(s.outputDirLocked())
+	if err != nil {
+		return err
+	}
+	s.manifest = m
 	return nil
 }
 

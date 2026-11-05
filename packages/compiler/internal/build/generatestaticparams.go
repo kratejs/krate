@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -317,31 +318,51 @@ console.log(JSON.stringify(result));
 	)
 }
 
-// parseParamSets decodes the JSON array of param objects, coercing non-string
-// values (numbers, etc.) to their JSON string form.
+// parseParamSets decodes the JSON array of param objects. Numbers and booleans
+// become their string form, and an array of scalars (a catch-all value such as
+// ["a", "b"]) becomes its "/"-joined path. Any other value shape is an error.
 func parseParamSets(raw []byte) ([]map[string]string, error) {
-	var paramSets []map[string]string
-	if err := json.Unmarshal(raw, &paramSets); err == nil {
-		return paramSets, nil
-	}
 	var rawSets []map[string]interface{}
-	if err2 := json.Unmarshal(raw, &rawSets); err2 != nil {
-		return nil, fmt.Errorf("parsing generateStaticParams output: %w\nraw: %s", err2, string(raw))
+	if err := json.Unmarshal(raw, &rawSets); err != nil {
+		return nil, fmt.Errorf("parsing generateStaticParams output: %w\nraw: %s", err, string(raw))
 	}
-	for _, rawSet := range rawSets {
-		ps := make(map[string]string)
+	paramSets := make([]map[string]string, 0, len(rawSets))
+	for i, rawSet := range rawSets {
+		ps := make(map[string]string, len(rawSet))
 		for k, v := range rawSet {
-			switch val := v.(type) {
-			case string:
-				ps[k] = val
-			default:
-				b, _ := json.Marshal(val)
-				ps[k] = string(b)
+			s, ok := paramScalar(v)
+			if !ok {
+				return nil, fmt.Errorf("generateStaticParams entry #%d: the value of %q must be a string, a number or an array of them, got %s", i+1, k, entryJSON(map[string]string{k: fmt.Sprint(v)}))
 			}
+			ps[k] = s
 		}
 		paramSets = append(paramSets, ps)
 	}
 	return paramSets, nil
+}
+
+// paramScalar renders one generateStaticParams value as a path string.
+func paramScalar(v interface{}) (string, bool) {
+	switch val := v.(type) {
+	case string:
+		return val, true
+	case float64, bool:
+		b, _ := json.Marshal(val)
+		return string(b), true
+	case []interface{}:
+		parts := make([]string, 0, len(val))
+		for _, item := range val {
+			switch item.(type) {
+			case string, float64, bool:
+				s, _ := paramScalar(item)
+				parts = append(parts, s)
+			default:
+				return "", false
+			}
+		}
+		return strings.Join(parts, "/"), true
+	}
+	return "", false
 }
 
 // staticParamsPage represents a page with params for static generation.
@@ -448,17 +469,42 @@ func (b *Builder) resolveStaticParamsPage(page string) staticParamsResolution {
 		return res
 	}
 
+	rel, _ := filepath.Rel(b.Cfg.PagesDir, page)
+	pages, errs := expandStaticParams(page, filepath.ToSlash(rel), paramSets)
+	if len(errs) > 0 {
+		res.errs = append(res.errs, errs...)
+		return res
+	}
+	res.expanded = pages
+
 	// The metadata of every entry resolves in one run (see metadataeval.go).
 	b.prefetchMetadata(page, paramSets, bnd)
+	return res
+}
 
-	for _, params := range paramSets {
-		rel, _ := filepath.Rel(b.Cfg.PagesDir, page)
-		rel = filepath.ToSlash(rel)
-		rel = stripRouteGroups(strings.TrimSuffix(rel, filepath.Ext(rel)))
-		rel = strings.TrimSuffix(rel, "/index")
+// expandStaticParams turns the entries returned by generateStaticParams into
+// one page each. rel is the route file relative to the pages directory. An
+// entry that cannot produce a page (a route param without a value, or a value
+// that is not a safe path segment) or that collides with a different entry is
+// an error naming the entry; an exact duplicate is dropped. The result has one
+// page per output path, so the number built is the number written.
+func expandStaticParams(page, rel string, paramSets []map[string]string) ([]staticParamsPage, []string) {
+	rel = stripRouteGroups(strings.TrimSuffix(rel, filepath.Ext(rel)))
+	rel = strings.TrimSuffix(rel, "/index")
+	parts := strings.Split(rel, "/")
+	name := filepath.Base(page)
 
-		parts := strings.Split(rel, "/")
+	var pages []staticParamsPage
+	var errs []string
+	fail := func(n int, params map[string]string, why, hint string) {
+		errs = append(errs, fmt.Sprintf("%s: [%s] generateStaticParams entry #%d %s %s (hint: %s)",
+			name, diag.CodeStaticParamsEntry, n, entryJSON(params), why, hint))
+	}
+	seen := map[string]int{}
+	for idx, params := range paramSets {
+		n := idx + 1
 		out := parts[:0:0]
+		bad := false
 		for _, part := range parts {
 			seg := parseRouteSeg(part)
 			if seg.kind == segStatic {
@@ -467,8 +513,15 @@ func (b *Builder) resolveStaticParamsPage(page string) staticParamsResolution {
 			}
 			val, ok := params[seg.text]
 			if !ok {
-				out = append(out, part)
-				continue
+				fail(n, params, "has no value for ["+seg.text+"], so it would write the literal path "+part,
+					"return an object with a "+seg.text+" key for every entry, for example { "+seg.text+": \"my-post\" }")
+				bad = true
+				break
+			}
+			if why := unsafeParamValue(seg, val); why != "" {
+				fail(n, params, why, "param values become directory names; use plain segments such as \"my-post\"")
+				bad = true
+				break
 			}
 			// Catch-all values are "/"-joined segments; an empty optional
 			// catch-all renders at the parent path.
@@ -476,18 +529,73 @@ func (b *Builder) resolveStaticParamsPage(page string) staticParamsResolution {
 				out = append(out, val)
 			}
 		}
+		if bad {
+			continue
+		}
 		outPath := strings.Join(out, "/")
 		if outPath == "" {
 			outPath = "."
 		}
-
-		res.expanded = append(res.expanded, staticParamsPage{
-			PagePath: page,
-			Params:   params,
-			OutPath:  outPath,
-		})
+		if first, dup := seen[outPath]; dup {
+			if !sameParams(paramSets[first-1], params) {
+				fail(n, params, "writes the same page as entry #"+strconv.Itoa(first)+" "+entryJSON(paramSets[first-1])+" (/"+outPath+")",
+					"make the entries produce different paths, or remove one")
+			}
+			continue
+		}
+		seen[outPath] = n
+		pages = append(pages, staticParamsPage{PagePath: page, Params: params, OutPath: outPath})
 	}
-	return res
+	return pages, errs
+}
+
+// unsafeParamValue explains why a generateStaticParams value cannot be a path
+// segment, or returns "" when it can. A catch-all value is several segments
+// joined with "/".
+func unsafeParamValue(seg routeSeg, val string) string {
+	if val == "" {
+		if seg.kind == segOptionalCatchAll {
+			return ""
+		}
+		return "has an empty value for [" + seg.text + "]"
+	}
+	if strings.ContainsAny(val, "\\\x00") {
+		return "has a value for [" + seg.text + "] containing a backslash or NUL"
+	}
+	segs := []string{val}
+	if seg.kind == segCatchAll || seg.kind == segOptionalCatchAll {
+		segs = strings.Split(val, "/")
+	}
+	for _, sg := range segs {
+		switch sg {
+		case "", ".", "..":
+			return "has a value for [" + seg.text + "] (" + strconv.Quote(val) + ") that is not a plain path segment"
+		}
+		if strings.Contains(sg, "/") {
+			return "has a value for [" + seg.text + "] containing \"/\"; only a catch-all route takes several segments"
+		}
+	}
+	return ""
+}
+
+func sameParams(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || w != v {
+			return false
+		}
+	}
+	return true
+}
+
+func entryJSON(params map[string]string) string {
+	data, err := json.Marshal(params)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
 }
 
 // buildStaticParamsPage builds a single page with its params injected into the
@@ -508,7 +616,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	// Modules that call hooks of an npm React library run on Preact in an
 	// island, exactly as in buildPage. The module list is captured before the
 	// island modules leave it: their files stay dependencies of the page.
-	reactIslands := detectReactIslandModules(bundle.Modules, bnd.Resolve)
+	reactIslands := b.detectReactIslandModules(bundle.Modules, bnd.Resolve)
 	var reactIslandImps []irtree.ExternalImport
 	if len(reactIslands) > 0 {
 		reactIslandImps = reactIslandImports(bundle.Modules, reactIslands, bnd.Resolve)
@@ -626,7 +734,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		opts.ExternalImports = externalByLocal
 		opts.LocalComponentImports = localImports
 		opts.ActionURLs = bundle.ActionImports
-		tree = irtree.BuildWithOptions(entryModule.Program, ann, opts)
+		tree = b.buildTree(entryModule.Program, ann, opts)
 		if len(tree.Errors) > 0 {
 			return nil, "", renderErrors(spp.PagePath, tree.Errors)
 		}
@@ -763,7 +871,10 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if needsHydrate {
 		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
 		dceJS = append(dceJS, hydrationJS)
-		hydrationJS = b.writeLazyChunks(hydrationJS, emitResult.LazyChunks, pageDir, spp.OutPath)
+		var lazyErr error
+		if hydrationJS, lazyErr = b.writeLazyChunks(hydrationJS, emitResult.LazyChunks, pageDir, spp.OutPath); lazyErr != nil {
+			return nil, "", lazyErr
+		}
 		if islandJS != "" {
 			hydrationJS = strings.TrimSpace(hydrationJS + "\n" + islandJS)
 		}
@@ -790,7 +901,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 			jsFile = "index." + jsHash + ".js"
 			finalJS = substituteImportMetaURL(finalJS, spp.OutPath, jsFile, b.Cfg.BaseURLPath())
 			jsPath := filepath.Join(pageDir, jsFile)
-			_ = os.WriteFile(jsPath, []byte(finalJS), 0644)
+			if err := writeOutput(jsPath, []byte(finalJS)); err != nil {
+				return nil, "", err
+			}
 			hydrationJS = finalJS
 		} else {
 			hydrationJS = ""

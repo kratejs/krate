@@ -21,7 +21,7 @@ import (
 // merge). Later declarations may reference earlier ones (const c = a + b).
 func collectModuleConsts(prog *ast.Program) map[string]string {
 	out := make(map[string]string)
-	for name, v := range typedModuleConsts(collectModuleConstInits(prog), nil) {
+	for name, v := range typedModuleConsts(collectModuleConstInits(prog), nil, nil) {
 		if s := legacyConstString(nil, v); s != "" {
 			out[name] = s
 		}
@@ -201,6 +201,24 @@ func (b *builder) constInterp(props valueMap) *jsvalue.Interp {
 		}
 		return jsvalue.Value{}, false
 	}
+	member := in.Hooks.Member
+	in.Hooks.Member = func(m *ast.MemberExpr) (jsvalue.Value, bool) {
+		// A function prop passed by the caller has no const value; reading it
+		// as props.X must not look like an omitted prop (undefined), or a
+		// destructuring default would replace it.
+		if len(b.localFuncProps) > 0 && !m.Computed {
+			if id, ok := m.Object.(*ast.Identifier); ok && id.Name == "props" {
+				if p, ok := m.Property.(*ast.Identifier); ok && b.localFuncProps[p.Name] {
+					if _, known := props[p.Name]; !known {
+						if _, shadowed := in.Scope.Lookup(id.Name); !shadowed {
+							return jsvalue.Dynamic("function prop " + p.Name), true
+						}
+					}
+				}
+			}
+		}
+		return member(m)
+	}
 	in.Hooks.Call = func(c *ast.CallExpr) (jsvalue.Value, bool) {
 		if id, ok := c.Callee.(*ast.Identifier); ok {
 			if spec, ok := b.cvaFactories[id.Name]; ok {
@@ -338,7 +356,7 @@ func evalConst(expr ast.Expr) string {
 			if prop.Spread {
 				continue
 			}
-			parts = append(parts, prop.Key+`:`+constExprToJS(prop.Value))
+			parts = append(parts, objectPropKeyJS(prop, false)+`:`+constExprToJS(prop.Value))
 		}
 		return "{" + strings.Join(parts, ",") + "}"
 	case *ast.ConditionalExpr:
@@ -401,7 +419,7 @@ func constExprToJS(expr ast.Expr) string {
 			if prop.Spread {
 				continue
 			}
-			parts = append(parts, jsObjectKey(prop.Key)+":"+constExprToJS(prop.Value))
+			parts = append(parts, objectPropKeyJS(prop, true)+":"+constExprToJS(prop.Value))
 		}
 		return "{" + strings.Join(parts, ",") + "}"
 	case *ast.UnaryExpr:
@@ -631,20 +649,18 @@ func sortedKeysExpr(m map[string]ast.Expr) []string {
 	return keys
 }
 
-// resolveTagAlias resolves a JSX tag name that is bound to a local variable to
-// the concrete tag it aliases, when the binding folds at build time:
+// resolveTagAlias resolves a JSX tag name that is bound to a variable to the
+// concrete tag it names, when the binding folds at build time:
 //
 //	const Comp = asChild ? Slot : "button";  <Comp/>
+//	const Tag = "section";                  <Tag/>   (also a prop or its default)
 //
-// Returns "" when the name is not such an alias or the condition depends on a
-// runtime signal (in which case the component stays unresolved).
+// Returns "" when the name is not such an alias or the value depends on a
+// runtime signal or an unknown input (the caller then reports it).
 func (b *builder) resolveTagAlias(name string) string {
 	// Only uppercase tags are component references; lowercase tags are always
 	// intrinsic HTML elements and must never alias a same-named local.
 	if len(name) == 0 || name[0] < 'A' || name[0] > 'Z' {
-		return ""
-	}
-	if b.localFnBody == nil {
 		return ""
 	}
 	for _, stmt := range b.localFnBody {
@@ -656,16 +672,59 @@ func (b *builder) resolveTagAlias(name string) string {
 			if decl.Name != name || decl.Init == nil {
 				continue
 			}
-			return b.foldTagExpr(decl.Init)
+			if b.referencesSignal(decl.Init) {
+				// Folded locals keep their build-time initial; a tag read
+				// from a signal must not freeze at it.
+				return ""
+			}
+			if tag := b.foldTagExpr(decl.Init); tag != "" {
+				return tag
+			}
+		}
+	}
+	return b.tagFromScope(name)
+}
+
+// tagFromScope returns the HTML tag a variable holds when the build knows its
+// value: a module constant, a prop passed by the caller, a parameter default
+// or a local that folded.
+func (b *builder) tagFromScope(name string) string {
+	if b.isSignalName(name) {
+		return ""
+	}
+	if v, ok := b.localProps[name]; ok && v.Kind() == jsvalue.KindString {
+		if tag := v.StringValue(); IsHTMLTagName(tag) {
+			return tag
 		}
 	}
 	return ""
 }
 
+// IsHTMLTagName reports whether s can name an intrinsic element: it starts
+// with a lowercase letter, so it is never mistaken for a component.
+func IsHTMLTagName(s string) bool {
+	if s == "" || s[0] < 'a' || s[0] > 'z' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
 // foldTagExpr resolves a tag expression to a concrete tag name when it is a
-// literal tag string or a conditional whose test folds. Slot/forwardRef-style
-// wrappers fold to themselves. Returns "" when unresolvable.
+// literal tag string, a conditional whose test folds, or any expression whose
+// value folds to a tag string. Slot/forwardRef-style wrappers fold to
+// themselves. Returns "" when unresolvable.
 func (b *builder) foldTagExpr(expr ast.Expr) string {
+	// A tag that reads a signal changes after hydration; the build-time
+	// initial would freeze the element, so it does not fold.
+	if _, lit := expr.(*ast.Literal); !lit && b.referencesSignal(expr) {
+		return ""
+	}
 	switch e := expr.(type) {
 	case *ast.Literal:
 		if e.Kind == ast.StringLit {
@@ -673,8 +732,14 @@ func (b *builder) foldTagExpr(expr ast.Expr) string {
 		}
 		return ""
 	case *ast.Identifier:
+		if tag := b.tagFromScope(e.Name); tag != "" {
+			return tag
+		}
 		// A component reference (Slot, Button, ...) is already a valid tag.
-		return e.Name
+		if e.Name != "" && e.Name[0] >= 'A' && e.Name[0] <= 'Z' {
+			return e.Name
+		}
+		return ""
 	case *ast.ConditionalExpr:
 		testV := b.evalValue(e.Test)
 		if testV.IsUnknown() {
@@ -686,6 +751,11 @@ func (b *builder) foldTagExpr(expr ast.Expr) string {
 		return b.foldTagExpr(e.Alternate)
 	case *ast.TypeAssertion:
 		return b.foldTagExpr(e.Expr)
+	case *ast.ParenExpr:
+		return b.foldTagExpr(e.Expr)
+	}
+	if v := b.evalValue(expr); !v.ContainsUnknown() && v.Kind() == jsvalue.KindString && IsHTMLTagName(v.StringValue()) {
+		return v.StringValue()
 	}
 	return ""
 }
@@ -1290,7 +1360,7 @@ func (s *propsMemberSubstituter) sub(expr ast.Expr) ast.Expr {
 	case *ast.ObjectExpr:
 		out := make([]*ast.ObjectProp, len(e.Properties))
 		for i, p := range e.Properties {
-			out[i] = &ast.ObjectProp{Key: p.Key, Value: s.sub(p.Value), Shorthand: p.Shorthand, Spread: p.Spread, Method: p.Method}
+			out[i] = cloneObjectProp(p, s.sub)
 		}
 		return &ast.ObjectExpr{Position: e.Position, Properties: out}
 	case *ast.TemplateExpr:
@@ -1386,4 +1456,30 @@ func (b *builder) moduleCallable(in *jsvalue.Interp, name string, cache map[stri
 	in.Scope = saved
 	cache[name] = v
 	return v, true
+}
+
+// objectPropKeyJS renders a property key as JS source. A computed key keeps its
+// expression (`[K]`); quote selects quoting of names that are not identifiers.
+func objectPropKeyJS(p *ast.ObjectProp, quote bool) string {
+	if p.Computed && p.KeyExpr != nil {
+		return "[" + generateExprJS(p.KeyExpr, nil) + "]"
+	}
+	if quote {
+		return jsObjectKey(p.Key)
+	}
+	return p.Key
+}
+
+// cloneObjectProp copies an object property, keeping every flag (computed,
+// getter, quoted key, ...) and mapping its value, and for a computed key its
+// key expression, through sub.
+func cloneObjectProp(p *ast.ObjectProp, sub func(ast.Expr) ast.Expr) *ast.ObjectProp {
+	cp := *p
+	if p.Value != nil {
+		cp.Value = sub(p.Value)
+	}
+	if p.Computed && p.KeyExpr != nil {
+		cp.KeyExpr = sub(p.KeyExpr)
+	}
+	return &cp
 }

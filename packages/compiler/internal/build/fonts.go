@@ -29,8 +29,27 @@ func injectFontDisplay(cssText, display string) string {
 		if idx < 0 {
 			return block
 		}
-		return block[:idx] + "font-display:" + display + ";" + block[idx:]
+		sep := ""
+		if lastDeclUnterminated(block[:idx]) {
+			sep = ";"
+		}
+		return block[:idx] + sep + "font-display:" + display + ";" + block[idx:]
 	})
+}
+
+// lastDeclUnterminated reports whether a rule body ends in a declaration with
+// no closing `;`, ignoring trailing whitespace and comments. Appending another
+// declaration to such a body needs a `;` first.
+func lastDeclUnterminated(body string) bool {
+	t := strings.TrimRight(body, " \t\r\n")
+	for strings.HasSuffix(t, "*/") {
+		k := strings.LastIndex(t, "/*")
+		if k < 0 {
+			break
+		}
+		t = strings.TrimRight(t[:k], " \t\r\n")
+	}
+	return t != "" && !strings.HasSuffix(t, ";") && !strings.HasSuffix(t, "{")
 }
 
 var (

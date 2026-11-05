@@ -28,6 +28,10 @@ type Manifest struct {
 	// Segments lists the directories that have their own not-found or error
 	// page (see LookupSegmentPage), sorted by key.
 	Segments []SegmentEntry `json:"segments,omitempty"`
+	// Middleware records whether the app has a middleware module. Nil means
+	// the build predates the record, so `krate serve` cannot tell "no
+	// middleware" from "middleware missing" and only warns.
+	Middleware *bool `json:"middleware,omitempty"`
 }
 
 // RuntimeComponentMeta describes a compiled runtime component bundle.

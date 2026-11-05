@@ -141,6 +141,11 @@ func mergeJSXProps(el *ast.JSXElement, props *ast.ObjectExpr) *ast.JSXElement {
 			attrs = append(attrs, &ast.JSXAttr{Spread: true, Value: p.Value})
 			continue
 		}
+		if p.Computed {
+			// An attribute named by an expression is a spread of one property.
+			attrs = append(attrs, &ast.JSXAttr{Spread: true, Value: &ast.ObjectExpr{Properties: []*ast.ObjectProp{p}}})
+			continue
+		}
 		if p.Key == "" || p.Key == "children" {
 			continue
 		}
@@ -271,9 +276,7 @@ func transformExpr(expr ast.Expr, names map[string]ast.Expr, shadowed map[string
 			if p == nil {
 				continue
 			}
-			cp := *p
-			cp.Value = transformExpr(p.Value, names, shadowed)
-			props[i] = &cp
+			props[i] = cloneObjectProp(p, func(x ast.Expr) ast.Expr { return transformExpr(x, names, shadowed) })
 		}
 		return &ast.ObjectExpr{Position: e.Position, Properties: props}
 	case *ast.ArrayExpr:

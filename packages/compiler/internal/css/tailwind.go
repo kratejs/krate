@@ -25,6 +25,8 @@ type TailwindScanner struct {
 	// VarRefs collects the custom properties referenced via var(--name) in the
 	// scanned files, so referenced theme variables can be emitted.
 	VarRefs map[string]bool
+	// VarDecls collects the custom properties set in the scanned files.
+	VarDecls map[string]bool
 	// Names are extra hyphen-free utility names to keep, the project's own
 	// `@utility card` and `@utility card-*` roots.
 	Names map[string]bool
@@ -32,7 +34,7 @@ type TailwindScanner struct {
 
 // NewTailwindScanner creates a scanner for the given project root.
 func NewTailwindScanner(root string) *TailwindScanner {
-	return &TailwindScanner{Root: root, VarRefs: map[string]bool{}}
+	return &TailwindScanner{Root: root, VarRefs: map[string]bool{}, VarDecls: map[string]bool{}}
 }
 
 // ScanClasses walks the project and extracts every Tailwind class candidate
@@ -64,11 +66,7 @@ func (s *TailwindScanner) ScanClasses(dirs []string) map[string]bool {
 			for _, tok := range candidateTokensNames(text, s.Names) {
 				classes[tok] = true
 			}
-			if strings.Contains(text, "var(") {
-				for _, m := range varRefRe.FindAllStringSubmatch(text, -1) {
-					s.VarRefs[m[1]] = true
-				}
-			}
+			collectVars(text, s.VarRefs, s.VarDecls)
 			return nil
 		})
 	}
@@ -368,7 +366,7 @@ func selectorSuffix(base string) string {
 // radiusValue resolves a border-radius scale key. "" is the `rounded` default.
 func radiusValue(key string, theme TailwindTheme) string {
 	if v, ok := theme.Radii[key]; ok {
-		return v
+		return theme.themeRef("radius-"+key, v)
 	}
 	if v, ok := unwrapArbitrary(key); ok {
 		return v
@@ -1184,17 +1182,17 @@ func arbitraryPropToCSS(prop, val string) string {
 var defaultSpacingTable = defaultSpacing()
 
 // namedSpacing looks key up in the theme spacing scale. When the theme sets a
-// custom --spacing unit, untouched built-in numeric entries are skipped so
-// they scale with the unit instead of staying at their 0.25rem values.
+// custom or live --spacing unit, untouched built-in numeric entries are skipped
+// so they scale with the unit instead of staying at their 0.25rem values.
 func namedSpacing(key string, theme TailwindTheme) (string, bool) {
 	v, ok := theme.Spacing[key]
 	if !ok {
 		return "", false
 	}
-	if u := strings.TrimSpace(theme.SpacingUnit); u != "" && u != "0.25rem" && plainNumber(key) {
+	if hasCustomUnit(theme) && plainNumber(key) {
 		if d, isDefault := defaultSpacingTable[key]; isDefault && d == v {
 			return "", false
 		}
 	}
-	return v, true
+	return theme.themeRef("spacing-"+key, v), true
 }

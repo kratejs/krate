@@ -107,7 +107,7 @@ func (c *Config) rulePolicy(id, category string) (active bool, override Severity
 //	  rules: { "a11y/img-alt": "off" },
 //	  ignore: ["seo/canonical"],
 //	  budget: { js: 100, hydration: 40, islandJS: 60, route: 300 }, // KB per route
-//	  failOn: "error" | "warning",
+//	  failOn: "error" | "warning",   // anything else is an error
 //	}
 func FromMap(m map[string]any, root string, env map[string]string) (Config, error) {
 	// A nil/absent `checks` key leaves the gates inactive: compiler-enforced
@@ -176,10 +176,12 @@ func FromMap(m map[string]any, root string, env map[string]string) (Config, erro
 		if !ok {
 			return cfg, fmt.Errorf("checks.ignore: expected array, got %T", raw)
 		}
-		for _, item := range arr {
-			if s, ok := item.(string); ok {
-				cfg.Ignore[s] = true
+		for i, item := range arr {
+			s, ok := item.(string)
+			if !ok {
+				return cfg, fmt.Errorf("checks.ignore[%d]: expected string, got %T", i, item)
 			}
+			cfg.Ignore[s] = true
 		}
 	}
 
@@ -210,10 +212,11 @@ func FromMap(m map[string]any, root string, env map[string]string) (Config, erro
 		if !ok {
 			return cfg, fmt.Errorf("checks.failOn: expected string, got %T", v)
 		}
-		cfg.FailOn = ParseSeverity(s)
-		if cfg.FailOn == Off {
-			cfg.FailOn = Error
+		sev, err := parseFailOn(s)
+		if err != nil {
+			return cfg, fmt.Errorf("checks.failOn: %w", err)
 		}
+		cfg.FailOn = sev
 	}
 
 	if raw, ok := m["custom"]; ok {
@@ -221,14 +224,32 @@ func FromMap(m map[string]any, root string, env map[string]string) (Config, erro
 		if !ok {
 			return cfg, fmt.Errorf("checks.custom: expected array, got %T", raw)
 		}
-		for _, item := range arr {
-			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+		for i, item := range arr {
+			s, ok := item.(string)
+			if !ok {
+				return cfg, fmt.Errorf("checks.custom[%d]: expected string, got %T", i, item)
+			}
+			if strings.TrimSpace(s) != "" {
 				cfg.Custom = append(cfg.Custom, s)
 			}
 		}
 	}
 
 	return cfg, nil
+}
+
+// parseFailOn parses a failOn threshold. Only "error" and "warning" are valid
+// (ParseSeverity also folds unknown text into Off, which would make a typo in a
+// CI gate pass silently), so anything else is a config error.
+func parseFailOn(s string) (Severity, error) {
+	switch sev := ParseSeverity(s); {
+	case sev == Error || sev == Warning:
+		return sev, nil
+	case strings.EqualFold(strings.TrimSpace(s), "off"):
+		return Off, fmt.Errorf(`"off" is not a valid failOn value (valid values: "error", "warning"); to run no checks set checks.enabled to false`)
+	default:
+		return Off, fmt.Errorf("unknown value %q (valid values: \"error\", \"warning\")", s)
+	}
 }
 
 // severityValue interprets a config value as a severity. Strings map through

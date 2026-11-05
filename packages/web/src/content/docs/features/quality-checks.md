@@ -103,7 +103,12 @@ checks: {
 
 `failOn` sets the minimum severity that fails the build/check. Warnings are
 still reported (and visible in the output) without failing when
-`failOn: "error"` (the default).
+`failOn: "error"` (the default). Only `"error"` and `"warning"` are valid: any
+other value (a typo such as `"warnings"`, or `"off"`) is a config error that
+lists the valid values, so a mistyped CI gate cannot pass silently. Use
+`enabled: false` to run no checks. Severity values elsewhere in `checks`
+(categories and `rules`) accept `"error"`, `"warning"` or `"off"`, and
+`ignore`/`custom` entries must be strings.
 
 ### Perf budgets
 

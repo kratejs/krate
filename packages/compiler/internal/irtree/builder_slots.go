@@ -1188,7 +1188,7 @@ func (b *builder) evalInnerHTMLAttr(el *ast.JSXElement) (string, ast.Expr, bool)
 			return "", nil, false
 		}
 		for _, prop := range obj.Properties {
-			if prop.Spread || prop.Key != "__html" || prop.Value == nil {
+			if prop.Spread || prop.Computed || prop.Key != "__html" || prop.Value == nil {
 				continue
 			}
 			return evalConstWithSignals(prop.Value, b.sigMap(), b.localProps), prop.Value, true
@@ -1346,7 +1346,7 @@ func substitutePropExprs(expr ast.Expr, props map[string]ast.Expr) ast.Expr {
 	case *ast.ObjectExpr:
 		out := make([]*ast.ObjectProp, len(e.Properties))
 		for i, p := range e.Properties {
-			out[i] = &ast.ObjectProp{Key: p.Key, Value: substitutePropExprs(p.Value, props), Shorthand: p.Shorthand, Spread: p.Spread, Method: p.Method}
+			out[i] = cloneObjectProp(p, func(x ast.Expr) ast.Expr { return substitutePropExprs(x, props) })
 		}
 		return &ast.ObjectExpr{Position: e.Position, Properties: out}
 	case *ast.TypeAssertion:
@@ -2671,7 +2671,7 @@ func cloneExpr(expr ast.Expr) ast.Expr {
 	case *ast.ObjectExpr:
 		out := make([]*ast.ObjectProp, len(e.Properties))
 		for i, p := range e.Properties {
-			out[i] = &ast.ObjectProp{Key: p.Key, Value: cloneExpr(p.Value), Shorthand: p.Shorthand, Spread: p.Spread, Method: p.Method}
+			out[i] = cloneObjectProp(p, cloneExpr)
 		}
 		return &ast.ObjectExpr{Position: e.Position, Properties: out}
 	case *ast.ArrayExpr:
@@ -2704,6 +2704,11 @@ func memberASTOf(binding ast.Expr, prop ast.Expr) ast.Expr {
 		for _, p := range src.Properties {
 			if p.Spread {
 				continue
+			}
+			if p.Computed {
+				// Which key it names is not known here, so neither is whether
+				// the property being read is overridden.
+				return nil
 			}
 			if p.Key == propName {
 				return p.Value
@@ -3043,7 +3048,7 @@ func (b *builder) referencesSignal(expr ast.Expr) bool {
 		return false
 	case *ast.ObjectExpr:
 		for _, p := range e.Properties {
-			if b.referencesSignal(p.Value) {
+			if b.referencesSignal(p.Value) || (p.Computed && b.referencesSignal(p.KeyExpr)) {
 				return true
 			}
 		}
@@ -3421,7 +3426,7 @@ func collectRefObjectVars(body []ast.Stmt) map[string]bool {
 			switch init := decl.Init.(type) {
 			case *ast.ObjectExpr:
 				for _, prop := range init.Properties {
-					if prop != nil && !prop.Spread && prop.Key == "current" {
+					if prop != nil && !prop.Spread && !prop.Computed && prop.Key == "current" {
 						refs[decl.Name] = true
 						break
 					}
@@ -4522,6 +4527,9 @@ func (b *builder) bridgeScopeExpr(expr ast.Expr, used map[string]bool) ast.Expr 
 		for _, p := range e.Properties {
 			if p != nil {
 				p.Value = b.bridgeScopeExpr(p.Value, used)
+				if p.Computed && p.KeyExpr != nil {
+					p.KeyExpr = b.bridgeScopeExpr(p.KeyExpr, used)
+				}
 			}
 		}
 	case *ast.TemplateExpr:

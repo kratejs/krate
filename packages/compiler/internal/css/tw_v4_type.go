@@ -55,7 +55,7 @@ func lineHeightValue(key string, theme TailwindTheme) (string, bool) {
 		return v, true
 	}
 	if v, ok := theme.LineHeight[key]; ok {
-		return v, true
+		return theme.themeRef("leading-"+key, v), true
 	}
 	if v, ok := namedSpacing(key, theme); ok {
 		return v, true
@@ -95,7 +95,10 @@ func textUtility(cls string, theme TailwindTheme) (string, bool) {
 		if fs == "" {
 			return "", false
 		}
-		return sizeCSS(fs, lh, true)
+		if lh != "" {
+			lh = theme.themeRef("text-"+base+"--line-height", leadingFallback(fs, lh))
+		}
+		return sizeCSS(theme.themeRef("text-"+base, fs), lh, true)
 	}
 	if inner, hint, isArb := arbitraryValue(base); isArb {
 		switch hint {
@@ -182,6 +185,7 @@ func trackingUtility(cls string, neg bool, theme TailwindTheme) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	v = theme.themeRef("tracking-"+key, v)
 	if neg {
 		v = negateLength(v)
 	}
@@ -198,10 +202,10 @@ func fontUtility(cls string, theme TailwindTheme) (string, bool) {
 	}
 	weight := func(v string) string { return "--tw-font-weight: " + v + "; font-weight: " + v + ";" }
 	if v, ok := theme.FontWeights[key]; ok {
-		return weight(v), true
+		return weight(theme.themeRef("font-weight-"+key, v)), true
 	}
 	if v, ok := theme.FontFamily[key]; ok && v != "" {
-		return "font-family: " + v + ";", true
+		return "font-family: " + theme.themeRef("font-"+key, v) + ";", true
 	}
 	if inner, hint, isArb := arbitraryValue(key); isArb {
 		switch hint {

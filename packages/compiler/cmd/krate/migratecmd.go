@@ -40,6 +40,9 @@ func runMigrateNext(flags cliFlags, args []string) {
 	if len(args) > 2 {
 		root = args[2]
 	}
+	if abs, err := filepath.Abs(root); err == nil {
+		requireConfigFlag(abs, flags)
+	}
 	rep, err := migrate.ScanNextWithOptions(root, migrate.ScanOptions{UpdatePackage: flags.UpdatePackage, KrateVersion: version})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sMigration plan error:%s %v\n", cRed, cReset, err)

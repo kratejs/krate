@@ -440,6 +440,24 @@ An `opengraph-image` or `twitter-image` file inside a dynamic segment (`blog/[sl
 
 `sitemap.ts` or `robots.ts` defines the file, so the sitemap or robots plugin (and the `robots` and `seo` config that feed it) did not write its own. The metadata file wins. Remove one of them to silence this warning. This is a warning.
 
+### KR7140
+
+**Tailwind input found but Tailwind is not enabled**
+
+Krate generates Tailwind utility CSS only when `tailwind: { enabled: true }` is set in `krate.config.ts`. Without it, `@tailwind base|components|utilities` and `@import "tailwindcss"` are removed from your CSS and no utilities are generated, so the page ships almost no styles. The warning appears once per build when a `tailwind.config.{ts,js,mjs}` file exists or one of those directives is found. Enable Tailwind, or delete the config file and directives if you do not use it. This is a warning.
+
+### KR7141
+
+**CSS has unbalanced braces or an unclosed comment**
+
+A stylesheet with a `{` that is never closed, a `}` with no `{`, or a comment that never ends is not valid CSS, and browsers recover by dropping or merging the rules that follow it. Krate reports the line and column, and closes the damage at the end of the file so it cannot swallow the next stylesheet in the page: a stray `}` is removed and a missing one is added. The file is still shipped as written otherwise, so fix the source. This is a warning.
+
+### KR7142
+
+**generateStaticParams entry cannot produce a page**
+
+Each object returned by `generateStaticParams` becomes one page, so it needs a value for every dynamic segment of the route (`{ slug: "a" }` for `[slug].tsx`), and each value becomes a directory name: it must be non-empty and contain no `..`, backslash or, outside a catch-all route, `/`. An entry that misses a param would have been written to the literal path `[slug]/index.html`; two different entries that produce the same path would overwrite each other. Both are build errors that name the entry. An exact duplicate entry is dropped. Fix the function, or remove the entry.
+
 ### KR7150
 
 **Unknown code theme**
@@ -580,6 +598,24 @@ Hydration code (an event handler, effect, derived value, text binding or a modul
 
 Client code and statically rendered pages cannot read process.env or import.meta.env values: they are build and server-time only and are never written into HTML or JavaScript. The read yields undefined. Name the variable with the KRATE_PUBLIC_ prefix (KRATE_PUBLIC_API_URL) to inline its value at build time, or read it in a server component, API route or server action instead. import.meta.env.MODE, DEV, PROD, BASE_URL and SSR are always available.
 
+### KR8320
+
+**Element type is not known at build time**
+
+`<Tag>` where `Tag` is a variable (`const Tag = as || "div"`, a prop, a value read from state) is rendered as the element it names. The build resolves it when the variable folds to one tag name: a string constant, a prop the caller passes or its default, or a condition on those. This one does not, for example because it depends on a signal or on a value only known at request time, and the page would otherwise contain an empty placeholder instead of the element and its children, so the build fails. Pass the tag as a string the build can see, render each case as its own element (`{wide ? <section>...</section> : <div>...</div>}`), or move the component to a `*.runtime.tsx` file to choose the tag per request.
+
+### KR8321
+
+**Member tag does not resolve to a component**
+
+`<ui.Button>` names the export `Button` of a namespace import (`import * as ui from "./ui"`), of a re-exported namespace (`export * as ui from "./ui"`), or a member of an object. The build follows namespace imports through barrel files (`export { Button } from "./Button"`, `export * from "./Button"`) to the function component the member names. This tag matched none: the module exports no such member, the member is not a function component (a string, a class that is not lowered, a value built at run time), or the object it reads from is not a namespace of project modules. Rendering nothing would drop the element and its children, so the build fails. Check the member's spelling and export, import the component by name, or declare it as a function.
+
+### KR8322
+
+**Module value changed by top-level code cannot be evaluated at build time**
+
+A module-level value that later top-level code changes (`const items = []` followed by `for (...) items.push(x)`, an assignment, a property write, `Object.assign`, or a call to a function of the module that does one of these) is evaluated at build time by running that code in order. When a statement cannot be run there (it reads the browser, the clock, an imported function or anything else unknown), the value stays unknown rather than keeping its initial value. A component that hydrates reads it at run time. A component rendered at build time has no run time, so the build fails. Make the top-level code plain, compute the value in one expression, or move the reading component to one with client state.
+
 ### KR8601
 
 **Unsupported page segment export value**
@@ -639,6 +675,12 @@ A `getCollection("name")` chain is normally evaluated while the site is built an
 **Component option value must be a literal**
 
 Tabs, Accordion and the other zero-JS components turn each part's value into CSS while the site is built, so every `value` on their parts must be a string literal in the source. A value read from data (for example `value={item.id}` inside `items.map(...)`) cannot be enumerated: the panels for that value get no show/hide rules, defaultValue is ignored and every panel stays visible. Write the values out, or use `<Select>`/a `createSignal` based component for data-driven options. This is a warning.
+
+### KR8840
+
+**Icon cannot be resolved**
+
+An `<Icon name="...">` is compiled to inline SVG while the site is built. A name without a colon is a local icon and must exist as `icons/<name>.svg` in the project; `set:name` (for example `lucide:home`) is fetched from the Iconify API and cached under `.krate/cache/icons`. When neither works the build fails and names the file or lookup that failed, instead of putting an error message in the page. Fix the name, add the file, or pre-populate the cache for offline builds. This is an error.
 
 ## KR9xxx: routing, segment pages and rendering errors
 

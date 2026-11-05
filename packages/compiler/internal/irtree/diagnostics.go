@@ -43,7 +43,28 @@ func (b *builder) warnUnrenderedComponent(name string, el *ast.JSXElement) {
 			return
 		}
 	}
-	b.warnAt(el.Position, "component <"+name+"> could not be resolved and will not render",
+	if strings.Contains(name, ".") {
+		// A member tag that names no component: a namespace import without
+		// that export, or a member that is not a function component.
+		shown := TagDisplayName(name)
+		if b.currentNode == nil || b.currentNode.Tier != TierRuntime {
+			b.errorCodeAt(el.Position, diag.CodeUnresolvedMemberTag, "<"+shown+"> does not resolve to a component",
+				"check that the module exports `"+shown[strings.LastIndexByte(shown, '.')+1:]+"` as a function component (a namespace import follows `export { X } from` and `export *` barrels), or import it by name")
+		}
+		return
+	}
+	if b.boundVariable(name) {
+		// A variable that held a tag the build could not fold. Rendering a
+		// placeholder would drop the element and its children without a trace.
+		// A runtime component is compiled to request-time JavaScript, where a
+		// tag held in a variable is an ordinary value; it needs no fold.
+		if b.currentNode == nil || b.currentNode.Tier != TierRuntime {
+			b.errorCodeAt(el.Position, diag.CodeDynamicTag, "<"+name+"> is an element type held in a variable the build cannot resolve to one tag",
+				"pass the tag as a string the build can see (a const, a prop or its default), render each case as its own element, or choose the tag per request in a *.runtime.tsx component")
+		}
+		return
+	}
+	b.warnAt(el.Position, "component <"+TagDisplayName(name)+"> could not be resolved and will not render",
 		"import <"+name+"> (or check its spelling); a component must be a function declaration or a const bound to an arrow or function expression")
 }
 
@@ -324,4 +345,29 @@ func (b *builder) hookDiagAt(pos ast.Pos, h HookDiag) {
 		}
 	}
 	b.buildErrs = append(b.buildErrs, d)
+}
+
+// boundVariable reports whether name is declared as a variable in the scope of
+// the component being built: a local, a parameter or a module-level value.
+func (b *builder) boundVariable(name string) bool {
+	if b.localParamNames[name] || bindingScopeDeclares(blockBindingNames(b.localFnBody), name) {
+		return true
+	}
+	if _, ok := b.moduleConstInits[name]; ok {
+		return true
+	}
+	return false
+}
+
+// TagDisplayName returns a tag as the author wrote it. The bundler renames a
+// lowercase namespace import used as a member tag (`ui` in <ui.Button>) to a
+// capitalized binding so the tag reads as a component; messages show the
+// original name.
+func TagDisplayName(name string) string {
+	head, rest, dotted := strings.Cut(name, ".")
+	if !dotted || !strings.HasSuffix(head, "$ns") || head == "$ns" {
+		return name
+	}
+	head = strings.TrimSuffix(head, "$ns")
+	return strings.ToLower(head[:1]) + head[1:] + "." + rest
 }

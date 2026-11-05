@@ -240,6 +240,38 @@ methods get `405` with `Allow: GET, HEAD`), and a page URL without its trailing
 slash (`/dash`) redirects to the one canonical form (`/dash/`) for static and
 request-time pages alike.
 
+A missing `dist/.krate/server-manifest.json` just means the app has no
+request-time pages. A manifest that exists but cannot be read or parsed (a
+truncated upload, a bad copy) stops `krate serve` and `krate start` at startup
+with an error naming the file; they do not fall back to the build-time HTML. In
+dev, a rebuild that leaves an unreadable manifest logs the error and keeps the
+last good one.
+
+### Deploy `.krate/` with `dist`
+
+`krate build` compiles `middleware.ts` to `.krate/middleware.js` in the
+**project** directory (not in `dist`), and `krate start` reads it from there, so
+a server that only receives `dist` has no middleware to run. Copy the project's
+`.krate/` directory next to `dist` (the Docker target does this for you).
+
+The build records in `dist/.krate/manifest.json` whether the app has
+middleware, and `krate start` fails closed on it:
+
+- If the app has middleware and `.krate/middleware.js` is missing, the server
+  refuses to start and the error names the missing path.
+- If the module disappears while the server runs, every request that needs the
+  middleware gets a `500` and a log line; it is never passed through.
+- If the middleware module exists but fails to load in the Node, Bun or Deno
+  sidecar, requests fail instead of skipping it.
+- A `dist` built by an older krate has no such record. When `.krate/middleware.js`
+  is also absent, the server logs a warning and serves as before, because it
+  cannot tell "no middleware" from "middleware not deployed". Run `krate build`
+  again to get the record.
+
+The serverless and Node targets (`vercel`, `netlify`, `cloudflare`, `node`) bundle
+the middleware into the server bundle and do not need `.krate/` at runtime.
+Static-only deploys (`--static-only`) never run middleware.
+
 `krate serve` binds all interfaces so it works in containers (set `server.host`
 to restrict it). `krate dev` binds `127.0.0.1` only.
 

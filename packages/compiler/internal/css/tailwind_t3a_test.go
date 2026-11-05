@@ -179,7 +179,7 @@ func TestGenerateLayeredAndThemeVars(t *testing.T) {
 		}
 		last = i
 	}
-	if !strings.Contains(out, "background-color: #f00") {
+	if !strings.Contains(out, "background-color: var(--color-brand-500)") {
 		t.Errorf("bg-brand-500 not generated from @theme:\n%s", out)
 	}
 	if strings.Index(out, "box-sizing") > strings.Index(out, "@layer utilities{") {

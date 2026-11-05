@@ -186,6 +186,10 @@ const server = http.createServer(async (req, res) => {
     // Middleware endpoint: execute middleware and return result
     if (urlPath === '/__krate/middleware') {
       if (HOT) await krateLoadMiddleware();
+      if (!middlewareModule && krateMwError) {
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify({ action: 'error', error: 'middleware failed to load: ' + krateMwError }));
+      }
       if (!middlewareModule || !middlewareModule.middleware) {
         res.setHeader('Content-Type', 'application/json');
         return res.end(JSON.stringify({ action: 'continue' }));
@@ -520,6 +524,7 @@ async function loadModule(file) {
 
 async function handleMiddleware(req) {
   if (HOT) await krateLoadMiddleware();
+  if (!middlewareModule && krateMwError) return json({ action: 'error', error: 'middleware failed to load: ' + krateMwError });
   if (!middlewareModule || !middlewareModule.middleware) return json({ action: 'continue', headers: [] });
   let body = {};
   try { body = await req.json(); } catch {}
@@ -1297,6 +1302,19 @@ func Serve(root string, cfg *config.Config, startTime time.Time) error {
 }
 
 func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
+	absOutDir, err := filepath.Abs(cfg.OutDir)
+	if err != nil {
+		return fmt.Errorf("resolving out dir: %w", err)
+	}
+	middlewareRequired, err := checkMiddlewareDeployed(root, absOutDir, hub != nil, os.Stderr)
+	if err != nil {
+		return err
+	}
+	// A corrupt server manifest must stop startup: treating it as "no SSR
+	// pages" would serve the frozen build HTML for request-time pages.
+	if _, err := readServerManifest(absOutDir); err != nil && !errors.Is(err, errServerManifestMissing) {
+		return err
+	}
 	port := cfg.ServerPort()
 	if hub != nil {
 		port = cfg.DevPort()
@@ -1585,6 +1603,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		dev:        hub != nil,
 		sidecarURL: fmt.Sprintf("http://localhost:%d/__krate/middleware", apiPort),
 		file:       middlewarePath,
+		required:   middlewareRequired,
 		secret:     revalHost.secret,
 		staticExists: func(urlPath string) bool {
 			f, err := hardenedDir{http.Dir(absOut)}.Open(urlPath)
@@ -1663,6 +1682,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	ssrStop := make(chan struct{})
 	var ssrStopOnce sync.Once
 	if err := ssr.LoadManifest(); err != nil {
+		if !errors.Is(err, errServerManifestMissing) {
+			return err
+		}
 		// No request-time pages: nothing routes through the renderer.
 	} else if !ssr.NeedsNodeRenderer() {
 		printf("  %s*%s SSR renderer skipped (all request-time regions render on the Go host)\n", cCyan, cReset)

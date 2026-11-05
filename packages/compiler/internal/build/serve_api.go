@@ -349,6 +349,9 @@ type middlewareGate struct {
 	// sidecar fallback (Node/Bun/Deno) used when the embedded runtime is off.
 	sidecarURL string
 	file       string
+	// required is set when the app has middleware: a missing module then
+	// fails the request instead of letting it through.
+	required bool
 	// sidecarMatcher is what the sidecar last reported about the module's
 	// matcher: 0 unknown, 1 none declared, 2 declared.
 	sidecarMatcher atomic.Int32
@@ -383,6 +386,10 @@ func (g *middlewareGate) wrap(next http.Handler) http.Handler {
 			return
 		}
 		if _, err := os.Stat(g.file); err != nil {
+			if g.required {
+				g.failMissing(w, r)
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}

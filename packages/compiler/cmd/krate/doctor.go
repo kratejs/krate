@@ -30,6 +30,8 @@ func runDoctor(flags cliFlags, args []string) {
 		os.Exit(1)
 	}
 
+	requireConfigFlag(root, flags)
+
 	fmt.Printf("%sKrate doctor%s\n\n", cBold, cReset)
 	fmt.Printf("  krate        v%s\n", version)
 	fmt.Printf("  go           %s\n", runtime.Version())
