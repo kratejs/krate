@@ -452,6 +452,12 @@ Krate generates Tailwind utility CSS only when `tailwind: { enabled: true }` is 
 
 A stylesheet with a `{` that is never closed, a `}` with no `{`, or a comment that never ends is not valid CSS, and browsers recover by dropping or merging the rules that follow it. Krate reports the line and column, and closes the damage at the end of the file so it cannot swallow the next stylesheet in the page: a stray `}` is removed and a missing one is added. The file is still shipped as written otherwise, so fix the source. This is a warning.
 
+### KR7142
+
+**generateStaticParams entry cannot produce a page**
+
+Each object returned by `generateStaticParams` becomes one page, so it needs a value for every dynamic segment of the route (`{ slug: "a" }` for `[slug].tsx`), and each value becomes a directory name: it must be non-empty and contain no `..`, backslash or, outside a catch-all route, `/`. An entry that misses a param would have been written to the literal path `[slug]/index.html`; two different entries that produce the same path would overwrite each other. Both are build errors that name the entry. An exact duplicate entry is dropped. Fix the function, or remove the entry.
+
 ### KR7150
 
 **Unknown code theme**

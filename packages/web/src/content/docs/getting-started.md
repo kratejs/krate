@@ -145,6 +145,15 @@ export default function VideoPage({ params }) {
 }
 ```
 
+Each object returned by `generateStaticParams` becomes one page, so it needs a
+value for every dynamic segment of the route. Numbers are written as text, and a
+catch-all route (`[...path].tsx`) takes an array (`{ path: ["a", "b"] }`) or a
+`"a/b"` string. An entry that misses a param, has an empty value or a value that
+is not a plain path segment (`..`, a backslash, or `/` outside a catch-all), or
+that produces the same page as a different entry, fails the build with
+[KR7142](/docs/reference/diagnostics/) and names the entry. An exact duplicate
+is built once, and the build log counts the pages it writes.
+
 ## Built-in components
 
 Built-in components (`Head`, `Link`, `Icon`, `Image`, `Script`, `Style`) are
