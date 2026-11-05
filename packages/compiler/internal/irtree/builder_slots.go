@@ -55,6 +55,13 @@ func (b *builder) collectReferencedFunctions(node *ComponentNode, body []ast.Stm
 		if src := filepath.ToSlash(b.ann.ComponentSources[name]); resolver.IsCompiledDependency(src) {
 			continue
 		}
+		if fn.Name != name {
+			// An import alias (`import { plain as pp }`): emit the helper under
+			// the name the hydration code calls it by.
+			renamed := *fn
+			renamed.Name = name
+			fn = &renamed
+		}
 		candidates[name] = fn
 	}
 	if len(candidates) == 0 {

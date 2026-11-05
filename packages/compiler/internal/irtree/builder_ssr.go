@@ -1322,8 +1322,10 @@ func (b *builder) moduleCallable(in *jsvalue.Interp, name string, cache map[stri
 	var params []*ast.Param
 	var body []ast.Stmt
 	switch fn := b.functions[name]; {
-	case fn != nil && fn.Name == name && !fn.Async && !fn.Generator && !fnReturnsJSX(fn.Body):
-		if resolver.IsCompiledDependency(filepath.ToSlash(b.ann.ComponentSources[name])) {
+	case fn != nil && !fn.Async && !fn.Generator && !fnReturnsJSX(fn.Body):
+		// An import alias maps the local name to the declaration, whose own
+		// name keys its source file.
+		if resolver.IsCompiledDependency(filepath.ToSlash(b.ann.ComponentSources[fn.Name])) {
 			return jsvalue.Value{}, false
 		}
 		params, body = fn.Params, fn.Body
