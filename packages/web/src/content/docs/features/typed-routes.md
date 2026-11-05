@@ -99,6 +99,15 @@ Field specs are either a shorthand type string (`"string"`, `"number"`,
 an optional `required` flag. Unknown fields are ignored; omitted optional fields
 are fine.
 
+- `enum: ["draft", "live"]` on a string field restricts the value and types it as
+  the union `"draft" | "live"`.
+- A field with a `default` is filled in for every entry, so it is not optional in
+  the generated type.
+- `date` accepts an ISO 8601 date or date-time (`2024-01-31`,
+  `2024-01-31T09:30:00Z`); anything else is a validation error.
+- Hidden files and folders (editor lock files such as `.#post.md`) are skipped.
+  Two files that share a slug (`post.md` and `post.mdx`) fail the build.
+
 A **required** field that is missing - or a value of the wrong type - fails the
 build (and `krate types` exits non-zero):
 

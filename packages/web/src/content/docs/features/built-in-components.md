@@ -95,8 +95,15 @@ Inline CSS is captured into `<head>`.
   network) or `set:name` from the Iconify API (e.g. `lucide:heart`).
 - Local SVGs keep their own `viewBox` (fallback `0 0 24 24`); user attributes
   override defaults.
-- SVG markup is **sanitized** before embedding (scripts, comments, and
-  `on*`/`javascript:`/`data:` attributes stripped).
+- The icon is `1em` square, so it scales with the surrounding text. Pass
+  `size={24}` (or `width`/`height`) to change it.
+- Paint comes from the source: a solid icon (`<svg fill="currentColor">`) keeps
+  its fill, an outline one keeps its `stroke`. An icon that sets no paint at
+  all is drawn as a 2px `currentColor` outline.
+- SVG markup is **sanitized** before embedding: scripts, `<foreignObject>`,
+  `<iframe>`/`<object>`/`<embed>`, comments, `on*`/`javascript:`/`data:`
+  attributes, SMIL `set`/`animate` that target a link, `<style>` that imports
+  or fetches external files, and external `<image>` are stripped.
 - Fetched SVGs are cached on disk (`.krate/cache/icons/`); icon names are
   validated against `[a-zA-Z0-9_.-]` (max 64 chars).
 

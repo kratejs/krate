@@ -369,9 +369,9 @@ func TestBuildSearchIndexStoresPlainText(t *testing.T) {
 		}
 	}
 	// Truncation keeps multi-byte characters whole.
-	long := "<p>" + strings.Repeat("é", 600) + "</p>"
+	long := "<p>" + strings.Repeat("\u00e9", 600) + "</p>"
 	got := BuildSearchIndex([]Page{{Title: "T", Path: "t", Content: long}})[0].Content
-	if len([]rune(got)) != 500 || strings.ContainsRune(got, '�') {
+	if len([]rune(got)) != 500 || strings.ContainsRune(got, '\ufffd') {
 		t.Errorf("truncation split a rune: %d runes", len([]rune(got)))
 	}
 }

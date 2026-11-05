@@ -5,6 +5,57 @@ detailed changelog. This file records the release train at a glance.
 
 ## Unreleased
 
+- Fixed: a markdown autolink such as `<javascript:alert(1)>` or `<data:text/html,x>`
+  was emitted as a link. Autolinks go through the same scheme check as `[x](url)`
+  links now and render as text. The icon sanitizer also drops SMIL `set`/`animate`
+  that target `href`, `<style>` that imports or fetches external files,
+  external `<image>`, `<iframe>`, `<object>` and `<embed>`.
+- Fixed: `<Image width={1000}>` (also 2000, 3000, 10000) failed with `KR8803`.
+  Images are now sized to what you ask for: `width={100}` ships 100w and 200w
+  variants and `sizes="100px"` instead of six 640-2000w files. JPEGs with an EXIF
+  orientation (phone photos) are rotated before resizing, so the variants and their
+  dimensions match what the browser shows, and GIFs work (animated ones are served
+  as they are).
+- Fixed: page-level and imported `.md`/`.mdx` ignored the `markdown` config (`math`,
+  `mermaid`, `gfm`, `admonitions`, `headingAnchors`, `codeTheme`).
+- Fixed: a markdown list, quote or table directly inside a multi-line JSX element
+  in MDX swallowed the closing tag and failed the build with an error pointing into
+  generated code. A parse failure in compiled markdown now says its position refers
+  to the generated code.
+- Relative images in markdown, MDX and content collections (`![x](./pic.png)`) are
+  copied to `/assets/` with a hashed name and linked there, under `basePath`.
+- Content: enum fields are typed as unions, fields with a `default` are no longer
+  optional, `date` fields must hold an ISO date (a validation error otherwise),
+  hidden files such as editor lock files are skipped, and two entries with the same
+  slug (`a.md` and `a.mdx`) are an error. Frontmatter folds multi-line quoted
+  strings, and a `+++` (TOML) or unterminated block warns instead of silently
+  rendering as text.
+- Markdown code: fences with `{1,3-5}` highlight those lines on pages as well as in
+  collections, titled fences keep their header inside asides, `mdx`/`astro`/`prisma`
+  are highlighted, and short code blocks and tables no longer add a focus stop and a
+  landmark each (only those likely to scroll do).
+- `<Icon>` sizes to the text (`1em`) like Iconify's own SVGs, keeps a solid icon's
+  `fill` instead of outlining it, and maps `size={n}` to width and height.
+- Tailwind: `shadow-xl/20`, `drop-shadow-xl/50`, `inset-shadow-*/n`, `text-shadow-*/n`,
+  `bg-size-[...]` and `bg-position-[...]` are generated.
+- Fixed: `Tabs`, `Accordion` and other zero-JS components built from a `.map()` over a
+  build-time array silently showed every panel and ignored `defaultValue`. Their
+  values are collected from the unrolled array now; a value that cannot be read at
+  build time warns with `KR8820`. A trigger's `class` may be computed.
+- Components: `OTPField` edits the visible digits (Backspace, paste, autofill) and
+  submits under `name`; the searchable `Select` and `Command` are keyboard operable
+  comboboxes with an active descendant; `NativeSelect` shows its placeholder;
+  `ContextMenu` opens from the keyboard (ContextMenu key, Shift+F10) with menu roles
+  and focus management; `Tooltip` and `HoverCard` are linked with `aria-describedby`,
+  close on Escape, can be hovered, and take `asChild` for a real button or link;
+  `Pagination` links use `param` and keep the other query parameters; `Checkbox` and
+  `Switch` are native inputs with `name`, `value`, `defaultChecked`, `disabled` and
+  `id`; every component takes `class`/`className`; modal `Dialog`, `AlertDialog`
+  and `Sheet` dim the page, make it inert, lock scrolling and close on an outside
+  click; `Form.Field` links its description and error to the control and marks it
+  `aria-invalid`; `Card` titles are headings; `Slider` takes `id` and `disabled`.
+  Focus rings use one colour and no longer rely on a 15% glow.
+- Fixed: docs search snippets showed `&quot;` and `&#39;`.
 - Tier decorators: `@server`, `@static`, `@runtime` and `@client` can go directly
   on a function, class or const. On a file's default export or only exported
   component they classify the whole file, like a `// @server` comment; elsewhere
