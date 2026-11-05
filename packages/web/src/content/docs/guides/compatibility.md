@@ -214,7 +214,7 @@ useId gives every component instance (children, nested children, lists, repeated
 
 Diagnostics: `KR8031`
 
-Evidence: `TestUseIdInChildComponents`, `TestUseIdInHydratedChildMatchesHTML`, `TestUseIdInDynamicListRowsIsNumberedPerRow`, `TestUseEffectEventIsLowered`, `TestActivityRendersChildrenAndHidesThem`, `TestActivityUnsupportedPropWarns`, `TestViewTransitionNamesItsChild`, `TestReact19Browser`
+Evidence: `TestUseIdInChildComponents`, `TestUseIdInHydratedChildMatchesHTML`, `TestUseIdInDynamicListRowsIsNumberedPerRow`, `TestUseEffectEventIsLowered`, `TestActivityRendersChildrenAndHidesThem`, `TestActivityUnsupportedPropWarns`, `TestViewTransitionNamesItsChild`, `TestExperimentalReactNamesRenderTheirChildren`, `TestRewriteReact19Aliases`, `TestReact19Browser`
 
 ### Custom elements
 

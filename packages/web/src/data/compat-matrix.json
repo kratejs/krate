@@ -323,6 +323,8 @@
         "TestActivityRendersChildrenAndHidesThem",
         "TestActivityUnsupportedPropWarns",
         "TestViewTransitionNamesItsChild",
+        "TestExperimentalReactNamesRenderTheirChildren",
+        "TestRewriteReact19Aliases",
         "TestReact19Browser"
       ],
       "roadmap": true,

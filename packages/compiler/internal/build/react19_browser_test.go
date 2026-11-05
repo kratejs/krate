@@ -25,7 +25,7 @@ import Probe from "../Probe";
 const FIXED = ["a", "b"];
 
 export default function Page() {
-  const [rows, setRows] = useState(["r1", "r2"]);
+  const [rows, setRows] = useState(["r1", "r2", "r 3"]);
   const [show, setShow] = useState(false);
   const [mode, setMode] = useState<"visible" | "hidden">("hidden");
   const [n, setN] = useState(0);
@@ -47,7 +47,7 @@ export default function Page() {
         <div id="dyn">{rows.map((r) => <Field key={r} label={r} />)}</div>
       </section>
       <button id="show" onClick={() => setShow(!show)}>show</button>
-      <button id="add" onClick={() => setRows([...rows, "r" + (rows.length + 1)])}>add</button>
+      <button id="add" onClick={() => setRows([...rows, "n" + rows.length])}>add</button>
 
       <section id="effect-event">
         <button id="inc" onClick={() => setN(n + 1)}>inc {n}</button>

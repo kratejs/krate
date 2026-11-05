@@ -81,7 +81,7 @@ try {
   expect("no duplicate ids", rep.dup, []);
   expect("every label has one control", rep.labels.every((l) => l.endsWith(":1")), true);
   expect("label click focuses the control", rep.focusOK, true);
-  expect("label count at load", rep.count, 9);
+  expect("label count at load", rep.count, 10);
 
   await page.click("#show");
   await settle();
@@ -93,9 +93,9 @@ try {
   expect("no duplicate ids after a branch and two rows", rep.dup, []);
   expect("every label has one control after changes", rep.labels.every((l) => l.endsWith(":1")), true);
   expect("label click focuses after changes", rep.focusOK, true);
-  expect("label count after changes", rep.count, 12);
+  expect("label count after changes", rep.count, 13);
   const after = await idMap(page);
-  for (const k of ["r1", "r2"]) expect("existing row " + k + " keeps its id", after[k], afterLoad[k]);
+  for (const k of ["r1", "r2", "r 3"]) expect("existing row " + k + " keeps its id", after[k], afterLoad[k]);
 
   // useEffectEvent: reads the latest state, from an effect and a handler.
   expect("effect event from the mount effect", await page.locator("#evt-log").innerText(), "n=0");

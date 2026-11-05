@@ -272,8 +272,26 @@ func (b *builder) useIDSequence(id SlotID) func() string {
 	return func() string {
 		n := row.n
 		row.n++
-		return "krate-" + row.prefix + "-u" + itoa(n)
+		return "krate-" + idSafe(row.prefix) + "-u" + itoa(n)
 	}
+}
+
+// idSafe percent-encodes every byte of an id part outside [A-Za-z0-9_.:$-],
+// so a list key such as "a b" still makes a valid id. The runtime
+// (runtime/src/use-id.ts) applies the same rule.
+func idSafe(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '.', c == ':', c == '$', c == '-':
+			b.WriteByte(c)
+		default:
+			b.WriteString("%")
+			b.WriteString(strings.ToUpper(strconv.FormatInt(int64(c)+0x100, 16)[1:]))
+		}
+	}
+	return b.String()
 }
 
 // useIdSequence returns the useId() literal generator of a component

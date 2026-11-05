@@ -57,6 +57,11 @@ describe('useId at runtime', () => {
     expect(x.startsWith('krate_u')).toBe(true);
   });
 
+  it('encodes characters that are not valid in an id', () => {
+    const id = krateWithIdScope('L:$a b/ü', () => __krate_useId());
+    expect(id).toBe('krate-L:$a%20b%2F%C3%BC-u0');
+  });
+
   it('keeps the outer scope when the inner one has no prefix', () => {
     const ids = krateWithIdScope('L:$a', () => [__krate_useId(), krateWithIdScope('', () => __krate_useId())]);
     expect(ids).toEqual(['krate-L:$a-u0', 'krate-L:$a-u1']);
@@ -166,5 +171,24 @@ describe('Activity and ViewTransition (unlowered code)', () => {
     expect(h1.getAttribute('data-view-transition-class')).toBe('slow');
     expect(frag.querySelector('p')!.hasAttribute('data-view-transition')).toBe(false);
     expect(frag.textContent).toBe('Trest');
+  });
+});
+
+describe('resource hints', () => {
+  it('adds each link once', async () => {
+    const { krateHintPreload, krateHintPreconnect, krateHintPreinit, krateHintPrefetchDNS } = await import('./hints');
+    krateHintPreload('/a.css', { as: 'style' });
+    krateHintPreload('/a.css', { as: 'style' });
+    krateHintPreconnect('https://example.com');
+    krateHintPrefetchDNS('https://example.com');
+    krateHintPreinit('/b.css', { as: 'style' });
+    krateHintPreinit('/c.js', { as: 'script' });
+    const q = (s: string) => document.head.querySelectorAll(s).length;
+    expect(q('link[rel="preload"][href="/a.css"]')).toBe(1);
+    expect(document.head.querySelector('link[rel="preload"]')!.getAttribute('as')).toBe('style');
+    expect(q('link[rel="preconnect"][href="https://example.com"]')).toBe(1);
+    expect(q('link[rel="dns-prefetch"][href="https://example.com"]')).toBe(1);
+    expect(q('link[rel="stylesheet"][href="/b.css"]')).toBe(1);
+    expect(q('script[src="/c.js"]')).toBe(1);
   });
 });

@@ -497,3 +497,29 @@ export default function P() {
 		t.Errorf("both custom elements need a data binding, got %d:\n%s", got, js)
 	}
 }
+
+func TestExperimentalReactNamesRenderTheirChildren(t *testing.T) {
+	html, js := buildAndRead(t, map[string]string{
+		"src/pages/index.tsx": `import { SuspenseList, Suspense, unstable_Activity as Activity, cache, version, flushSync } from "react";
+import { useState } from "react";
+const load = cache(() => 1);
+export default function P() {
+  const [n, setN] = useState(0);
+  return <SuspenseList revealOrder="forwards">
+    <Suspense fallback="f"><p id="a">list child</p></Suspense>
+    <Activity mode="visible"><p id="b">activity {version}</p></Activity>
+    <button onClick={() => flushSync(() => setN(n + 1))}>{n}</button>
+  </SuspenseList>;
+}`,
+	})
+	for _, want := range []string{"list child", "activity 19.2.0"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("lost %q:\n%s", want, html)
+		}
+	}
+	for _, bad := range []string{"flushSync", "cache("} {
+		if strings.Contains(js, bad) {
+			t.Errorf("client code still calls %s:\n%s", bad, js)
+		}
+	}
+}
