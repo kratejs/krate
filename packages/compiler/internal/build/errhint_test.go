@@ -10,6 +10,7 @@ import (
 
 	"github.com/kratejs/krate/packages/compiler/internal/config"
 	"github.com/kratejs/krate/packages/compiler/internal/diag"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 // TestBuildFailurePrintsAliasHint checks that the summary of a failed build
@@ -72,5 +73,25 @@ func TestDynamicRouteTemplateDoesNotReportSlots(t *testing.T) {
 	got := withoutTemplateSlotWarnings(warnings)
 	if len(got) != 1 || got[0].Message != "other" {
 		t.Errorf("got %+v", got)
+	}
+}
+
+func TestClientModuleStubKeepsExportNames(t *testing.T) {
+	src := `"use client";
+export function Counter() { return null; }
+export const Badge = () => null;
+function Hidden() { return null; }
+export { Hidden as Shown };
+export default function Page() { return null; }
+`
+	prog, errs := tsstrip.Parse("a.tsx", src, tsstrip.Options{})
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	got := clientModuleStub(prog)
+	for _, want := range []string{"export const Counter", "export const Badge", "export const Shown", "export default"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stub lacks %q:\n%s", want, got)
+		}
 	}
 }

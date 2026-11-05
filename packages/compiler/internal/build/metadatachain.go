@@ -7,6 +7,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/evanw/esbuild/pkg/api"
+
+	"github.com/kratejs/krate/packages/compiler/ast"
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
+	"github.com/kratejs/krate/packages/compiler/internal/tsstrip"
 )
 
 // The metadata chain of a page: every layout above it that exports `metadata`
@@ -129,6 +135,83 @@ func metadataEntrySuffix(segs []metaSegment, pageFiles, root string) string {
 	fmt.Fprintf(&b, "export const __krateMetadata = [%s];\n", strings.Join(items, ", "))
 	if pageFiles != "" {
 		fmt.Fprintf(&b, "export const __krateMetadataFiles = %s;\n", pageFiles)
+	}
+	return b.String()
+}
+
+// unusedClientModulePlugin stubs "use client" modules the page's own client
+// boundaries do not cover. A layout is imported into a page's server bundle only
+// to read its metadata, so the client components it imports never render there,
+// and their React hooks would not resolve. Boundaries are claimed by an earlier
+// plugin.
+func unusedClientModulePlugin() api.Plugin {
+	return api.Plugin{
+		Name: "krate-unused-client-modules",
+		Setup: func(pb api.PluginBuild) {
+			pb.OnLoad(api.OnLoadOptions{Filter: `\.[cm]?[jt]sx?$`, Namespace: "file"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				if strings.Contains(args.Path, "node_modules") {
+					return api.OnLoadResult{}, nil
+				}
+				data, err := os.ReadFile(args.Path)
+				if err != nil || !bundler.HasUseClientDirective(string(data)) {
+					return api.OnLoadResult{}, nil
+				}
+				prog, errs := tsstrip.Parse(args.Path, string(data), tsstrip.Options{})
+				if prog == nil || len(errs) > 0 {
+					return api.OnLoadResult{}, nil
+				}
+				stub := clientModuleStub(prog)
+				return api.OnLoadResult{Contents: &stub, Loader: api.LoaderJS}, nil
+			})
+		},
+	}
+}
+
+// clientModuleStub keeps a module's export names, each a component that renders
+// nothing.
+func clientModuleStub(prog *ast.Program) string {
+	var b strings.Builder
+	b.WriteString("const __krateNoop = () => null;\n")
+	seen := map[string]bool{}
+	emit := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		if name == "default" {
+			b.WriteString("export default __krateNoop;\n")
+		} else {
+			fmt.Fprintf(&b, "export const %s = __krateNoop;\n", name)
+		}
+	}
+	for _, stmt := range prog.Body {
+		exp, ok := stmt.(*ast.ExportStmt)
+		if !ok {
+			continue
+		}
+		if exp.Default {
+			emit("default")
+			continue
+		}
+		switch d := exp.Declaration.(type) {
+		case *ast.FnDecl:
+			emit(d.Name)
+		case *ast.ClassDecl:
+			emit(d.Name)
+		case *ast.VarStmt:
+			for _, v := range d.Decls {
+				if v != nil {
+					emit(v.Name)
+				}
+			}
+		}
+		for _, n := range exp.Named {
+			if n.Remote != "" {
+				emit(n.Remote)
+			} else {
+				emit(n.Local)
+			}
+		}
 	}
 	return b.String()
 }

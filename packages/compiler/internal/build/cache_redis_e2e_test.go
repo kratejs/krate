@@ -191,12 +191,22 @@ func TestSharedRedisCacheTwoInstances(t *testing.T) {
 	if !strings.Contains(afterB.body, "version 2") {
 		t.Errorf("B still serves the old page after revalidateTag on A:\n%s", afterB.body)
 	}
-	if got := afterB.headers.Get("X-Krate-Cache"); got != "MISS" {
-		t.Errorf("B re-rendered after the revalidation: X-Krate-Cache = %q, want MISS", got)
+	// The invalidation reaches B by pub/sub, so it can land while B renders. B
+	// then serves the fresh page without caching it, and leaves no cache header.
+	if got := afterB.headers.Get("X-Krate-Cache"); got != "MISS" && got != "" {
+		t.Errorf("B re-rendered after the revalidation: X-Krate-Cache = %q, want MISS or uncached", got)
 	}
-	afterA := cacheGet(t, a+"/items/", nil)
+	var afterA cacheResult
+	settle := time.Now().Add(5 * time.Second)
+	for {
+		afterA = cacheGet(t, a+"/items/", nil)
+		if afterA.headers.Get("X-Krate-Cache") == "HIT" || time.Now().After(settle) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if !strings.Contains(afterA.body, "version 2") || afterA.headers.Get("X-Krate-Cache") != "HIT" {
-		t.Errorf("A serves B's fresh page: %q %q", afterA.headers.Get("X-Krate-Cache"), afterA.body)
+		t.Errorf("A serves the fresh page from the shared cache: %q %q", afterA.headers.Get("X-Krate-Cache"), afterA.body)
 	}
 
 	// Per-user pages are rendered per request and never shared.

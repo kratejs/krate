@@ -254,6 +254,36 @@ the old behaviour.
 - A middleware or config rewrite to a page path without a trailing slash
   (`/feedback`) is served in place instead of answering `301`.
 
+### Code blocks follow light and dark mode
+
+`<Code>` and fenced code used to be dark in every mode. The default is now `github`
+in light mode and `github-dark` in dark mode, so code on a light page turns light.
+To keep one theme in both modes, set it as a string:
+
+```ts
+export default defineConfig({ codeTheme: "github-dark" });
+```
+
+`codeTheme: { light, dark }` picks one for each mode. An unknown theme name is now
+reported as `KR7150`.
+
+### Component tiers are enforced
+
+- `serverDirs` and `runtimeDirs` with relative paths never matched anything. They
+  do now, so components in those directories become server or runtime components
+  and get the checks below.
+- A hook, an `onClick` or a class `setState` in a `@server`, `@static` or `@runtime`
+  component used to build and do nothing. It now fails with `KR7110`: remove the tier,
+  or move the interactive part into a client child.
+- Tiers that contradict each other, such as `// @runtime` above `@server` or `@runtime`
+  in a `*.server.tsx` file, fail with `KR7115`.
+
+### Your own `Link`, `Head` or `Image` wins
+
+A project component named like a built-in (`Link`, `Head`, `Script`, `Style`, `Icon`,
+`Image`, `Suspense`, `Slot`) used to be replaced by it without warning. Your component
+is now used. If you relied on the built-in, import it from `@krate/runtime`.
+
 ### New in 0.5
 
 - **`@krate/ts-plugin`** is a new package: a TypeScript language-service plugin
