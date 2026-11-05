@@ -35,6 +35,7 @@ export * from './src/slots';
 export * from './src/resource';
 export * from './src/jsx-runtime';
 export * from './src/router';
+export * from './src/navigation';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/hook-args';
@@ -54,6 +55,7 @@ export * from './src/list';
 export * from './src/slots';
 export * from './src/resource';
 export * from './src/router';
+export * from './src/navigation';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/hook-args';
@@ -75,6 +77,7 @@ export * from './src/list';
 export * from './src/slots';
 export * from './src/resource';
 export * from './src/router-lite';
+export * from './src/navigation';
 export * from './src/class-helpers';
 export * from './src/context';
 export * from './src/hook-args';
@@ -124,6 +127,7 @@ const CORE_ENTRY = CORE_MODULES.map((m) => `export * from './src/${m}';`).join('
 const FEATURES = {
   router: { file: 'krate-f-router.js', modules: ['router'] },
   'router-lite': { file: 'krate-f-router-lite.js', modules: ['router-lite'] },
+  navigation: { file: 'krate-f-navigation.js', modules: ['navigation'] },
   helpers: { file: 'krate-f-helpers.js', modules: ['class-helpers'] },
   list: { file: 'krate-f-list.js', modules: ['list'] },
   actions: { file: 'krate-f-actions.js', modules: ['actions'] },
@@ -161,6 +165,19 @@ function coreGlobalsPlugin(coreExports) {
   };
 }
 
+// The navigation hooks import the router. The lite bundle has no SPA router,
+// so they read router-lite there.
+const liteRouterPlugin = {
+  name: 'krate-lite-router',
+  setup(build) {
+    build.onResolve({ filter: /^\.\/router(\.js)?$/ }, () => ({ path: require('path').join(__dirname, 'src', 'router-lite.ts') }));
+  },
+};
+
+// Names the router and router-lite share; the navigation feature reads them
+// from whichever router the page loaded.
+const ROUTER_GLOBALS = ['getNavigationState', 'subscribeNavigation', 'krateRouter'];
+
 // Dev-only overlay + toolbar. Loaded by `krate dev` only, never in production.
 const DEV_ENTRY = `import './src/dev-overlay';`;
 
@@ -193,6 +210,7 @@ async function buildSplitRuntime() {
   const path = require('path');
   const coreExports = {};
   for (const m of CORE_MODULES) coreExports[m] = await exportNames(`export * from './src/${m}';`);
+  const featureGlobals = { ...coreExports, router: ROUTER_GLOBALS };
   await buildBundle('krate-core.js', CORE_ENTRY);
   // `full` lists every export of the full hydration bundle. The compiler's
   // tests compare it with the core and feature exports so a name the emitter
@@ -205,7 +223,7 @@ async function buildSplitRuntime() {
   };
   for (const [name, f] of Object.entries(FEATURES)) {
     const entry = f.modules.map((m) => `export * from './src/${m}';`).join('\n');
-    await buildBundle(f.file, entry, true, [coreGlobalsPlugin(coreExports)]);
+    await buildBundle(f.file, entry, true, [coreGlobalsPlugin(f.modules.includes('navigation') ? featureGlobals : coreExports)]);
     manifest.features[name] = { file: f.file, exports: await exportNames(entry) };
   }
   fs.writeFileSync(path.join(__dirname, 'dist', 'krate-features.json'), JSON.stringify(manifest, null, 1) + '\n');
@@ -217,7 +235,7 @@ async function main() {
   fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
   await buildBundle('krate-runtime.js', RUNTIME_ENTRY);
   await buildBundle('krate-hydrate.js', HYDRATE_ENTRY);
-  await buildBundle('krate-hydrate-lite.js', LITE_ENTRY);
+  await buildBundle('krate-hydrate-lite.js', LITE_ENTRY, true, [liteRouterPlugin]);
   await buildBundle('krate-suspense.js', SUSPENSE_ENTRY, true, [sharedGlobalsPlugin]);
   await buildSplitRuntime();
   await buildBundle('krate-dev.js', DEV_ENTRY, false);

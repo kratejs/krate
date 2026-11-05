@@ -36,6 +36,20 @@ export {
   invalidatePrefetchCache,
 } from './router.js';
 export type { NavigateOptions, NavigationState } from './router.js';
+export {
+  usePathname,
+  useSearchParams,
+  useParams,
+  useRouter,
+  useSelectedLayoutSegment,
+  useSelectedLayoutSegments,
+  redirect,
+  permanentRedirect,
+  notFound,
+  forbidden,
+  unauthorized,
+} from './navigation.js';
+export type { AppRouterInstance } from './navigation.js';
 export { clsx, cn, cva, twMerge, Slot, cloneElement } from './class-helpers.js';
 export type { ClassValue, CVAConfig } from './class-helpers.js';
 export { krateParam } from './hook-args.js';

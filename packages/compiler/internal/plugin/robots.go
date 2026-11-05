@@ -66,6 +66,13 @@ func generateRobotsTxt(ctx *BuildResultHookCtx) error {
 	if err != nil {
 		return err
 	}
+	// A robots.ts file in the pages directory is robots.txt: it wins.
+	if file, found := conventionFile(cfg, "robots"); found {
+		if configured || cfg.Robots.Allow != "" || cfg.Robots.Disallow != "" || cfg.Robots.Sitemap != "" || cfg.SEO.BaseURL != "" {
+			announceOverride(file, "robots.txt", "the robots plugin and the robots config")
+		}
+		return nil
+	}
 
 	baseURL := strings.TrimRight(cfg.SEO.BaseURL, "/")
 	hasTop := cfg.Robots.Allow != "" || cfg.Robots.Disallow != "" || cfg.Robots.Sitemap != ""

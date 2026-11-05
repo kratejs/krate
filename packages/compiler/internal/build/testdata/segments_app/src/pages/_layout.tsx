@@ -12,6 +12,8 @@ export default function Root({ children }) {
         <Link id="to-broken" href="/dash/broken/">Broken</Link>
         <Link id="to-deep-a" href="/deep/inner/a/">Deep A</Link>
         <Link id="to-deep-b" href="/deep/inner/b/">Deep B</Link>
+        <Link id="to-secret" href="/dash/secret/" prefetch={false}>Secret</Link>
+        <Link id="to-signin" href="/dash/signin/" prefetch={false}>Sign in</Link>
         <Link id="to-ssr" href="/dash/ssr/" prefetch={false}>SSR</Link>
         <button id="layout-count" onClick={() => setN(n + 1)}>{n}</button>
       </nav>

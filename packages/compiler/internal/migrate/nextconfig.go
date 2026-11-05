@@ -105,8 +105,12 @@ func readNextConfig(path string) (data nextConfigData, warnings, skipped []strin
 			notes = append(notes, "next.config env is not a static string map")
 		}
 	}
-	if prop(obj, "experimental") != nil {
-		notes = append(notes, "next.config experimental keys are not translated")
+	if exp := prop(obj, "experimental"); exp != nil {
+		// authInterrupts only enables forbidden() and unauthorized(), which
+		// Krate always supports.
+		if eo, ok := exp.(*ast.ObjectExpr); !ok || len(eo.Properties) != 1 || eo.Properties[0].Key != "authInterrupts" {
+			notes = append(notes, "next.config experimental keys are not translated")
+		}
 	}
 	return out, append(wrapperWarnings, notes...), skipped, true
 }

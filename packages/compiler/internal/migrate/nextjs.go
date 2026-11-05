@@ -28,16 +28,18 @@ const nextFramework = "nextjs"
 type FileKind string
 
 const (
-	KindPage       FileKind = "page"
-	KindLayout     FileKind = "layout"
-	KindAPI        FileKind = "api"
-	KindLoading    FileKind = "loading"
-	KindNotFound   FileKind = "not-found"
-	KindError      FileKind = "error"
-	KindConfig     FileKind = "config"
-	KindPackage    FileKind = "package"
-	KindAsset      FileKind = "asset"
-	KindMiddleware FileKind = "middleware"
+	KindPage         FileKind = "page"
+	KindLayout       FileKind = "layout"
+	KindAPI          FileKind = "api"
+	KindLoading      FileKind = "loading"
+	KindNotFound     FileKind = "not-found"
+	KindForbidden    FileKind = "forbidden"
+	KindUnauthorized FileKind = "unauthorized"
+	KindError        FileKind = "error"
+	KindConfig       FileKind = "config"
+	KindPackage      FileKind = "package"
+	KindAsset        FileKind = "asset"
+	KindMiddleware   FileKind = "middleware"
 )
 
 // ManualItem is a migration decision the CLI will not make automatically.
@@ -249,11 +251,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 		publicEnv[k] = v
 	}
 	rewritePublicEnv(rep, publicEnv)
-	if site := rootMetadataSite(rep); len(site) > 0 {
-		nextCfg.Site = site
-		rep.Warnings = append(rep.Warnings, "mapped static root metadata to site config; the metadata export is left in place for review, as are icons, alternates, and per-page metadata")
-	}
-	convertPageMetadata(rep)
+	rewriteMetadataTypes(rep)
 
 	hasKrateConfig := fileExists(filepath.Join(abs, "krate.config.ts")) || fileExists(filepath.Join(abs, "krate.config.js")) || fileExists(filepath.Join(abs, "krate.config.mjs")) || fileExists(filepath.Join(abs, "krate.config.json"))
 	if !hasKrateConfig {
@@ -322,7 +320,7 @@ func ScanNextWithOptions(root string, opts ScanOptions) (*Report, error) {
 // directory with one of them keeps its page in the directory (x/index.tsx), so
 // the layout, template, loading, error and not-found files next to it wrap it
 // (a flat x.tsx would live outside x/).
-var scopedBases = map[string]bool{"layout": true, "template": true, "loading": true, "error": true, "not-found": true}
+var scopedBases = map[string]bool{"layout": true, "template": true, "loading": true, "error": true, "not-found": true, "forbidden": true, "unauthorized": true}
 
 // scopedAppDirs returns the filesystem routes of directories holding scoped files.
 func scopedAppDirs(appDir string) map[string]bool {
@@ -411,6 +409,16 @@ func scanNextApp(root, appDir, prefix string, rep *Report) error {
 				return nil
 			}
 			rep.Files = append(rep.Files, planned(root, source, segmentFile("src/pages", fsRoute, "404", ext), KindNotFound, ext, rep))
+		case "forbidden", "unauthorized":
+			if isSlotRoute(fsRoute) {
+				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: base + ".tsx inside a parallel-route slot has no equivalent", Hint: "move the page to the slot's parent directory"})
+				return nil
+			}
+			kind, status := KindForbidden, "403"
+			if base == "unauthorized" {
+				kind, status = KindUnauthorized, "401"
+			}
+			rep.Files = append(rep.Files, planned(root, source, segmentFile("src/pages", fsRoute, status, ext), kind, ext, rep))
 		case "error":
 			if isSlotRoute(fsRoute) {
 				rep.Manual = append(rep.Manual, ManualItem{Source: source, Reason: "error.tsx inside a parallel-route slot has no equivalent", Hint: "move the error UI to the slot's parent directory"})
@@ -544,9 +552,8 @@ func applyManual(src string, kind FileKind) []string {
 		needle string
 		reason string
 	}{
-		{"export const metadata", "Next.js metadata export is not translated; use <Head> or krate site config"},
-		{"export async function generateMetadata", "generateMetadata is not translated; render <Head> or use site config"},
-		{"export function generateMetadata", "generateMetadata is not translated; render <Head> or use site config"},
+		{"export function generateViewport", "generateViewport is not supported; export a static `viewport` object or set the viewport meta in <Head>"},
+		{"export async function generateViewport", "generateViewport is not supported; export a static `viewport` object or set the viewport meta in <Head>"},
 		{"getStaticProps", "getStaticProps is not supported; use build-time data or createResource"},
 		{"getServerSideProps", "getServerSideProps is not supported; use a server render mode or createResource"},
 		{"from 'next/server'", "next/server request/response helpers need a Request/Response migration"},
@@ -1066,37 +1073,6 @@ func Rollback(backupDir string) error {
 	return os.RemoveAll(backupDir)
 }
 
-// rootMetadataSite extracts static metadata from the root app layout and maps
-// the common fields to site config. The export remains in the layout because
-// Krate ignores it; the warning tells the user what was mapped.
-func rootMetadataSite(rep *Report) map[string]any {
-	for i := range rep.Files {
-		f := &rep.Files[i]
-		if f.Kind != KindLayout || !strings.HasPrefix(f.Target, "src/pages/_layout.") {
-			continue
-		}
-		obj, ok := staticMetadata(f.Content)
-		if !ok {
-			return nil
-		}
-		site := metadataSite(obj)
-		if len(site) == 0 {
-			return nil
-		}
-		// The generic "metadata is not translated" note no longer applies.
-		var kept []ManualItem
-		for _, m := range rep.Manual {
-			if m.Source == f.Source && strings.Contains(m.Reason, "metadata export is not translated") {
-				continue
-			}
-			kept = append(kept, m)
-		}
-		rep.Manual = kept
-		return site
-	}
-	return nil
-}
-
 func isNextMetadataRoute(base string) bool {
 	switch base {
 	case "sitemap", "robots", "manifest", "opengraph-image", "twitter-image", "icon", "apple-icon", "instrumentation", "instrumentation-client":
@@ -1127,7 +1103,7 @@ func linkRelativeImports(rep *Report) {
 	}
 	for i := range rep.Files {
 		f := &rep.Files[i]
-		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindNotFound && f.Kind != KindError) {
+		if f.Source == "" || (f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAPI && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError) {
 			continue
 		}
 		body, rewrites, unresolved, deps := rewriteRelativeImports(string(f.Content), f.Source, f.Target, assets)
@@ -1218,7 +1194,7 @@ func targetPath(root, rel string) (string, error) {
 func warnClientBoundaryRuntime(rep *Report) {
 	var client, server bool
 	for _, f := range rep.Files {
-		if f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAsset && f.Kind != KindNotFound && f.Kind != KindError {
+		if f.Kind != KindPage && f.Kind != KindLayout && f.Kind != KindAsset && f.Kind != KindNotFound && f.Kind != KindForbidden && f.Kind != KindUnauthorized && f.Kind != KindError {
 			continue
 		}
 		src := string(f.Content)

@@ -23,9 +23,11 @@ type SiteGraph struct {
 // error.tsx, 500.tsx). Sources are project-relative.
 type SiteGraphSegment struct {
 	// Dir is the URL directory ("/" for the root, "/blog", "/blog/[slug]").
-	Dir      string `json:"dir"`
-	NotFound string `json:"notFound,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Dir          string `json:"dir"`
+	NotFound     string `json:"notFound,omitempty"`
+	Error        string `json:"error,omitempty"`
+	Forbidden    string `json:"forbidden,omitempty"`
+	Unauthorized string `json:"unauthorized,omitempty"`
 	// Group is true for a directory inside a route group, whose pages only
 	// serve routes that live in the group.
 	Group bool `json:"group,omitempty"`
@@ -43,6 +45,8 @@ type SiteGraphRoute struct {
 	// not-found and error pages (empty when the route has none).
 	NotFound     string   `json:"notFound,omitempty"`
 	Error        string   `json:"error,omitempty"`
+	Forbidden    string   `json:"forbidden,omitempty"`
+	Unauthorized string   `json:"unauthorized,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
 	Dependents   []string `json:"dependents,omitempty"`
 	Outputs      []string `json:"outputs,omitempty"`
@@ -81,6 +85,8 @@ func (b *Builder) SiteGraph() (*SiteGraph, error) {
 		}
 		n.Outputs, n.Bytes = b.routeOutputs(r.Route)
 		n.NotFound, n.Error = segs.forSource(b.Root, b.Cfg.PagesDir, r.Source)
+		n.Forbidden = segs.sourceFor(SegmentForbidden, b.Root, b.Cfg.PagesDir, r.Source)
+		n.Unauthorized = segs.sourceFor(SegmentUnauthorized, b.Root, b.Cfg.PagesDir, r.Source)
 		g.Routes = append(g.Routes, n)
 	}
 

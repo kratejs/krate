@@ -174,8 +174,12 @@ there, and the response reports every target under `skipped` with that reason
 (the node target is a single process and is not affected). `krate deploy` warns
 when your sources call them. The page cache is pluggable: pass your own
 `isrStore` (get/set/delete/deleteRoute/deleteVariant/deleteTags/entriesForRoute)
-to `createKrateHandler` to share it across instances. Krate does not ship a KV
-or Redis store yet.
+to `createKrateHandler` to share it across instances, or set `cache` in
+`krate.config` to share the ISR page cache and the data cache and make
+`revalidatePath` / `revalidateTag` reach every instance: Redis is built in and
+any other store plugs in through a small adapter interface (see
+[Sharing caches between instances](/docs/guides/caching-and-revalidation/#sharing-caches-between-instances)).
+With it the revalidation warning above does not apply.
 
 ### What is refused
 

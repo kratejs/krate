@@ -120,6 +120,14 @@ func canonicalReactAPI(name string) string {
 	return name
 }
 
+// routerHooks are the runtime hooks (usePathname and friends) whose results
+// follow the URL. A module that imports one is lowered like React source, so
+// `const pathname = usePathname()` reads the current path wherever it is used.
+var routerHooks = map[string]bool{
+	"usePathname": true, "useSearchParams": true, "useParams": true, "useRouter": true,
+	"useSelectedLayoutSegment": true, "useSelectedLayoutSegments": true,
+}
+
 // reactAPI reports whether name is a known React API (rename, structural, or
 // compat-runtime provided).
 func reactAPI(name string) bool {
@@ -234,7 +242,10 @@ type reactCtx struct {
 	fnNames map[string]bool
 	// localHooks are custom hooks imported from project modules (relative
 	// paths), which are lowered the same way as hooks of this module.
-	localHooks  map[string]bool
+	localHooks map[string]bool
+	// routerHooks is set when the module imports usePathname, useParams or
+	// another router hook from the runtime.
+	routerHooks bool
 	freshLocals map[*scope]map[string]bool
 	// formStatusSeq numbers lowered useFormStatus() mount refs per module and
 	// formStatusPos records their positions for diagnostics.
@@ -424,16 +435,22 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 					ctx.fragmentNames[local] = true
 				}
 			}
-		case "@krate/runtime", "@krate/runtime/jsx-runtime", "@krate/runtime/jsx-dev-runtime":
+		case "@krate/runtime", "@krate/runtime/server", "@krate/runtime/jsx-runtime", "@krate/runtime/jsx-dev-runtime":
 			// The runtime's Fragment is React's Fragment. The import stays
 			// (it also carries other runtime names); only the tag lowers.
 			for _, named := range imp.Named {
+				local := named.Local
+				if local == "" {
+					local = named.Remote
+				}
 				if named.Remote == "Fragment" {
-					local := named.Local
-					if local == "" {
-						local = named.Remote
-					}
 					ctx.fragmentNames[local] = true
+				}
+				// The router hooks return derived getters, like a custom hook
+				// compiled from React source: the module reads them live.
+				if src != "@krate/runtime/jsx-runtime" && src != "@krate/runtime/jsx-dev-runtime" && routerHooks[named.Remote] {
+					ctx.markLocalHook(local)
+					ctx.routerHooks = true
 				}
 			}
 		default:
@@ -457,7 +474,7 @@ func RewriteReactDiag(prog *ast.Program, file, src string) []diag.Diagnostic {
 	if ctx.alias != "" {
 		ctx.fragmentNames[ctx.alias] = true
 	}
-	ctx.react = len(ctx.imports) > 0 || ctx.alias != "" || ctx.domAlias != ""
+	ctx.react = len(ctx.imports) > 0 || ctx.alias != "" || ctx.domAlias != "" || ctx.routerHooks
 
 	for i := len(toRemove) - 1; i >= 0; i-- {
 		idx := toRemove[i]

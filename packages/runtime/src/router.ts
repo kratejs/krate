@@ -1378,6 +1378,20 @@ function setSlotInfo(key: string, next: SlotInfo): void {
 }
 
 function syncParams(doc: Document): void {
+  // The route pattern of a dynamic page, for useParams(). A static page has
+  // none; the empty string says so (the first page's block is not in the DOM
+  // any more once the router swapped it out).
+  let route = '';
+  const routeEl = doc.getElementById('__krate_page');
+  if (routeEl) {
+    try {
+      const data = JSON.parse(routeEl.textContent || '{}') as { r?: unknown };
+      if (typeof data.r === 'string') route = data.r;
+    } catch {
+      /* ignore */
+    }
+  }
+  (globalThis as any).__KRATE_ROUTE__ = route;
   for (const script of Array.from(doc.querySelectorAll('script:not([src])'))) {
     const m = /window\.__KRATE_PARAMS__\s*=\s*(\{[\s\S]*?\})\s*;?\s*$/.exec(script.textContent || '');
     if (!m) continue;

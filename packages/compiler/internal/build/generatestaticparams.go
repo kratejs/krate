@@ -447,6 +447,9 @@ func (b *Builder) resolveStaticParamsPage(page string) staticParamsResolution {
 		return res
 	}
 
+	// The metadata of every entry resolves in one run (see metadataeval.go).
+	b.prefetchMetadata(page, paramSets, bnd)
+
 	for _, params := range paramSets {
 		rel, _ := filepath.Rel(b.Cfg.PagesDir, page)
 		rel = filepath.ToSlash(rel)
@@ -562,6 +565,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	} else {
 		opts := b.irBuildOptions()
 		opts.PageParams = spp.Params
+		opts.RoutePath = routePathFor(spp.PagePath, b.Cfg.PagesDir, spp.Params)
 		applyModuleBindings(&opts, entryModule.Path, entryModule.Program, extraPrograms)
 		opts.ActionURLs = bundle.ActionImports
 		tree = irtree.BuildWithOptions(entryModule.Program, ann, opts)
@@ -603,6 +607,10 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	// Compile-time reactive dependency validation. Surfaced as warnings so
 	// dead signals / circular effects are caught before hydration ships.
 	b.printReactiveDiags(reactive.Build(emitResult.Signatures).Validate())
+
+	requestTime := renderMode == RenderSSR || renderMode == RenderISR
+	metaSegs, metaPageFiles := b.metadataSegments(spp.PagePath)
+	emitResult.HeadHTML += b.pageMetadataHeadFor(spp.PagePath, entryModule.SourceCode, requestTime, spp.Params, bnd, metaSegs, metaPageFiles)
 
 	// Run AfterRender hooks (pre-layout) so plugins can modify HTML/head/CSS for
 	// statically generated dynamic-param pages, matching buildPage.
@@ -647,7 +655,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	}
 	bundle.CSS = b.dedupeModuleCSS(spp.PagePath, layoutCSS+bundle.CSS, bundle.CSSModules)
 	deps = append(deps, layoutFiles...)
-	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures)
+	emitResult.ScriptHTML += routeInfoScript(routeChain, emitResult.Signatures) + pageRouteScript(spp.PagePath, b.Cfg.PagesDir)
 
 	// Record the dynamic-route template's module graph (plus any wrapping
 	// layouts) so editing blog/[slug].tsx or a layout rebuilds its expanded
@@ -721,8 +729,10 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		Regions:     regions,
 		GoBaked:     goBaked,
 
-		ServerPage:       serverPage,
-		ServerExports:    serverExportsOf(regions),
-		ClientBoundaries: clientBoundaries,
+		ServerPage:        serverPage,
+		ServerExports:     serverExportsOf(regions),
+		MetadataSegments:  metaSegs,
+		MetadataPageFiles: metaPageFiles,
+		ClientBoundaries:  clientBoundaries,
 	}, bundle.CSS, nil
 }

@@ -3,6 +3,7 @@ package build
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -12,6 +13,12 @@ import (
 // return path comes from a permalink (`__krate_return` query, set by
 // useActionState), the client's X-Krate-Return header, or the Referer.
 func actionHandler(next http.Handler, limit int64) http.HandlerFunc {
+	return actionHandlerSegments(next, limit, nil)
+}
+
+// actionHandlerSegments is actionHandler plus segment pages for actions that
+// call notFound(), forbidden() or unauthorized() from a native form post.
+func actionHandlerSegments(next http.Handler, limit int64, segs *segmentIndex) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// The sidecar sets no-store too; the proxy would copy it as a second line.
 		w = &singleCacheControlWriter{ResponseWriter: w}
@@ -54,9 +61,66 @@ func actionHandler(next http.Handler, limit int64) http.HandlerFunc {
 		} else {
 			r.Header.Del("X-Krate-Return")
 		}
+		if !fetchMode && segs != nil {
+			// A native form post whose action called notFound(), forbidden() or
+			// unauthorized() gets the nearest segment page of the page it came from.
+			w = &actionFallbackWriter{ResponseWriter: w, segs: segs, from: ret}
+		}
 		next.ServeHTTP(w, r)
 	}
 }
+
+// actionFallbackWriter replaces the plain-text answer the action sidecar gives
+// for notFound(), forbidden() and unauthorized() (marked X-Krate-Fallback) with
+// the segment page nearest to the page the form was posted from.
+type actionFallbackWriter struct {
+	http.ResponseWriter
+	segs    *segmentIndex
+	from    string
+	swapped bool
+}
+
+func (w *actionFallbackWriter) WriteHeader(code int) {
+	h := w.Header()
+	if h.Get("X-Krate-Fallback") != "" && (code == http.StatusUnauthorized || code == http.StatusForbidden || code == http.StatusNotFound) {
+		kind := SegmentNotFound
+		switch code {
+		case http.StatusForbidden:
+			kind = SegmentForbidden
+		case http.StatusUnauthorized:
+			kind = SegmentUnauthorized
+		}
+		urlPath := "/"
+		if u, err := url.Parse(w.from); err == nil && u.Path != "" {
+			urlPath = u.Path
+		}
+		if m, ok := w.segs.forURL(kind, urlPath, ""); ok {
+			h.Del("X-Krate-Fallback")
+			if respondSegment(w.ResponseWriter, w.segs, m, code, nil) {
+				w.swapped = true
+				return
+			}
+		}
+		h.Del("X-Krate-Fallback")
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *actionFallbackWriter) Write(b []byte) (int, error) {
+	if w.swapped {
+		return len(b), nil
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *actionFallbackWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (w *actionFallbackWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // singleCacheControlWriter collapses repeated identical Cache-Control values
 // into one when the headers are committed. The host sets no-store before the

@@ -513,3 +513,58 @@ describe("forwarded headers per platform", () => {
     expect((await echo(mk("node", true), headers)).url).toBe("https://shop.example/api/echo");
   });
 });
+
+// Serverless targets run many instances. Passing a cache adapter to
+// createKrateHandler (or setting cache.adapter in krate.config) shares the ISR
+// and data caches between them, and revalidateTag on one reaches the others.
+describe("createKrateHandler with a shared cache adapter", () => {
+  it("serves one instance's page from another and revalidates for both", async () => {
+    const { MemoryAdapter } = await import("./cache-adapter.js");
+    const { revalidateTag } = await import("./cache.js");
+    let renders = 0;
+    const shared = new MemoryAdapter();
+    const make = () =>
+      createKrateHandler({
+        target: "vercel",
+        data: data({
+          apiRoutes: ["bump"],
+          pages: [{ route: "/tagged", mode: "isr", revalidate: 300, bundlePath: "tagged" }],
+          allPages: [{ route: "/tagged", mode: "isr" }],
+          shells: { "/tagged": "<html><head></head><body><!--suspense:page-->x<!--/suspense:page--></body></html>" },
+          hasMiddleware: false,
+        }),
+        modules: {
+          pages: {
+            tagged: {
+              default: async () => {
+                // A tagged read: revalidateTag("posts") must drop this page everywhere.
+                const { recordCacheRead } = await import("./cache-scope.js");
+                recordCacheRead(["posts"], undefined);
+                return jsx("main", { children: "render " + ++renders });
+              },
+            },
+          },
+          api: { bump: { POST: () => (revalidateTag("posts"), Response.json({ ok: true })) } },
+          actions: {},
+        } as any,
+        cache: shared,
+      });
+    const a = make();
+    const b = make();
+    const get = (h: typeof a, path: string, init?: RequestInit) => h(new Request("http://localhost" + path, init));
+
+    const first = await get(a, "/tagged/");
+    expect(first.headers.get("x-krate-cache")).toBe("MISS");
+    const other = await get(b, "/tagged/");
+    expect(other.headers.get("x-krate-cache")).toBe("HIT");
+    expect(await other.text()).toContain("render 1");
+    expect(renders).toBe(1);
+
+    const bump = await get(a, "/api/bump", { method: "POST" });
+    expect(bump.status).toBe(200);
+    const after = await get(b, "/tagged/");
+    expect(after.headers.get("x-krate-cache")).toBe("MISS");
+    expect(await after.text()).toContain("render 2");
+    expect(renders).toBe(2);
+  });
+});

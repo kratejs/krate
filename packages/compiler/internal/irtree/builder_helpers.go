@@ -1107,6 +1107,9 @@ func (b *builder) callsOpaqueHook(body []ast.Stmt) bool {
 				continue
 			}
 			if id, ok := call.Callee.(*ast.Identifier); ok {
+				if _, folded := b.routeHooks[id.Name]; folded {
+					continue
+				}
 				if _, known := b.functions[id.Name]; !known {
 					return true
 				}

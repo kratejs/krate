@@ -7,8 +7,24 @@ export { getActionContext, headers, cookies, redirect } from './action-context.j
 export type { ActionContext, ActionCookies, ActionCookieOptions } from './action-context.js';
 export { revalidatePath, revalidateTag, unstable_cache, unstable_noStore } from './cache.js';
 export type { RevalidatePathType, UnstableCacheOptions } from './cache.js';
-export { getRequestContext, notFound } from './request-context.js';
+export { getRequestContext, notFound, forbidden, unauthorized } from './request-context.js';
+export {
+  usePathname,
+  useSearchParams,
+  useParams,
+  useRouter,
+  useSelectedLayoutSegment,
+  useSelectedLayoutSegments,
+  permanentRedirect,
+} from './navigation-server.js';
+export type { AppRouterInstance } from './navigation-server.js';
 export type { RequestContext, RequestCookies } from './request-context.js';
+export { resolveMetadata, renderMetadataTags, metadataHeadTags } from './metadata.js';
+export { renderSitemapXML, renderRobotsTXT, renderManifestJSON } from './metadata-routes.js';
+export type { MetadataRoute, SitemapEntry, RobotsFile, RobotsRule, ManifestFile } from './metadata-routes.js';
+export { ImageResponse } from './og.js';
+export type { ImageResponseOptions } from './og.js';
+export type { Metadata, ResolvingMetadata, ResolvingViewport, Viewport, MetadataSegment, MetadataModule, MetadataProps } from './metadata.js';
 
 // Signal (server: returns initial value, no reactivity)
 

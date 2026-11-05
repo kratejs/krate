@@ -34,7 +34,9 @@ type ServerPlan struct {
 	HasActions bool
 	HasAPI     bool
 	// UsesRevalidate reports revalidatePath/revalidateTag calls in the sources.
-	UsesRevalidate  bool
+	UsesRevalidate bool
+	// SharedCache is true when krate.config sets a shared cache adapter.
+	SharedCache     bool
 	ShutdownTimeout int
 	Port            int
 	// Warnings are filled by Emit for the caller to print.
@@ -67,7 +69,7 @@ func emitServer(target string, cfg *config.Config, root, outDir string, plan *Se
 	if target == "node" {
 		return []string{plan.Bundle}, nil
 	}
-	if plan.UsesRevalidate {
+	if plan.UsesRevalidate && !plan.SharedCache {
 		plan.Warnings = append(plan.Warnings, "revalidatePath/revalidateTag are called by this project: on "+target+" they only reach the instance that handled the request; other instances keep their cached pages until the revalidate window ends (see guides/deployment: caches on serverless)")
 	}
 	if err := stripStatic(outDir, plan.Exclude); err != nil {

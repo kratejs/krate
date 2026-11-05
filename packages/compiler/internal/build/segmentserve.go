@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -180,4 +181,24 @@ func respondSegment(w http.ResponseWriter, s *segmentIndex, m SegmentMatch, stat
 	w.WriteHeader(status)
 	_, _ = w.Write([]byte(page))
 	return true
+}
+
+// writeAccessDenied answers a request whose render called forbidden() or
+// unauthorized(): the nearest segment page of that role inside the route's
+// layouts, else a plain-text body. Never cacheable.
+func writeAccessDenied(w http.ResponseWriter, r *http.Request, segs *segmentIndex, status int, segDir string) {
+	kind := SegmentForbidden
+	if status == http.StatusUnauthorized {
+		kind = SegmentUnauthorized
+	}
+	if m, ok := segs.forRoute(kind, r.URL.Path, segDir); ok && respondSegment(w, segs, m, status, nil) {
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "text/plain; charset=utf-8")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Cache-Control", "no-store")
+	h.Del("Content-Length")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(strconv.Itoa(status) + " " + http.StatusText(status) + "\n"))
 }

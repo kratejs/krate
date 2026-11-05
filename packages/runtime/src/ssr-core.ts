@@ -9,6 +9,7 @@ import { jsx, renderToStringAsync } from "./server.js";
 import { sha256Hex as portableSha256Hex } from "./sha256.js";
 import {
   isNotFoundSignal,
+  accessDeniedStatus,
   parseCookieHeader,
   redirectTarget,
   thenable,
@@ -16,6 +17,7 @@ import {
   type RequestContext,
 } from "./request-context.js";
 import { takeHead } from "./head-tags.js";
+import { metadataHeadTags, type MetadataSegment } from "./metadata.js";
 import { SegmentedLRU } from "./segmented-lru.js";
 import {
   cacheRuntime,
@@ -94,6 +96,8 @@ export interface RenderResponse {
   status: number;
   redirect?: string;
   notFound?: boolean;
+  /** 401 or 403 when the render called unauthorized() or forbidden(). */
+  denied?: 401 | 403;
   cached?: boolean;
   cacheStatus?: CacheStatus;
   error?: string;
@@ -390,6 +394,18 @@ export function takeHeadTitle(html: string): { title: string; html: string } {
   return { title: split.title, html: split.html };
 }
 
+/**
+ * The metadata chain of a page module: the layouts the build bundled with it
+ * (root first) and the page itself. null unless some segment exports a
+ * generateMetadata function; literal metadata is baked into the page at build
+ * time and needs no request-time work.
+ */
+function metadataSegmentsOf(mod: any): MetadataSegment[] | null {
+  const layouts: MetadataSegment[] = Array.isArray(mod.__krateMetadata) ? mod.__krateMetadata : [];
+  const segments: MetadataSegment[] = [...layouts, { mod, file: "page", files: mod.__krateMetadataFiles }];
+  return segments.some((s) => s.mod && typeof s.mod.generateMetadata === "function") ? segments : null;
+}
+
 export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   const sha256Hex = opts.sha256Hex || portableSha256Hex;
 
@@ -555,6 +571,8 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   // renderSignal maps notFound()/redirect() thrown during a render to a response.
   function renderSignal(err: unknown): RenderResponse | null {
     if (isNotFoundSignal(err)) return { html: "", status: 404, notFound: true };
+    const denied = accessDeniedStatus(err);
+    if (denied) return { html: "", status: denied, denied };
     const to = redirectTarget(err);
     if (to) return { html: "", status: 307, redirect: to };
     return null;
@@ -601,9 +619,25 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
       // renderToStringAsync inside the request scope. The timeout bounds slow
       // awaits (fetch); a page that blocks synchronously still blocks the loop.
       const tracker = newQueryTracker();
+      const segments = metadataSegmentsOf(mod);
       const { result: html, scope, invalidated } = await withRenderTimeout(
         withCacheScope(page.route, () =>
-          withRequest(req, () => renderToStringAsync(jsx(Component, buildProps(req, tracker))), tracker),
+          withRequest(
+            req,
+            async () => {
+              const props = buildProps(req, tracker);
+              if (!segments) return renderToStringAsync(jsx(Component, props));
+              // generateMetadata runs next to the render, in the same request
+              // and cache scope: its fetches share the data cache with the
+              // page's, and the tags it declares are recorded on the entry.
+              const [head, body] = await Promise.all([
+                metadataHeadTags(segments, { params: props.params ?? thenableRecord({}), searchParams: props.searchParams }),
+                renderToStringAsync(jsx(Component, props)),
+              ]);
+              return head ? HEAD_OPEN + head + HEAD_CLOSE + body : body;
+            },
+            tracker,
+          ),
         ),
       );
 
@@ -1002,6 +1036,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
       if (signal) {
         const frame: Record<string, any> = { type: "region", id: region.id, status: signal.status, html: "" };
         if (signal.notFound) frame.notFound = true;
+        if (signal.denied) frame.denied = signal.denied;
         if (signal.redirect) frame.redirect = signal.redirect;
         return frame;
       }
@@ -1038,6 +1073,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     };
     if (result.cacheStatus) frame.cacheStatus = result.cacheStatus;
     if (result.notFound) frame.notFound = true;
+    if (result.denied) frame.denied = result.denied;
     if (result.redirect) frame.redirect = result.redirect;
     if (result.error) frame.error = result.error;
     if (result.digest) frame.digest = result.digest;
@@ -1090,7 +1126,8 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
           : [];
         // Path targets also drop the data their renders cached (implicit tag).
         const dataTags = tags.concat(targets.map((t) => routeDataTag(t.route)));
-        const { dataEntries } = cacheRuntime().invalidate({ tags: dataTags });
+        const { dataEntries: localEntries } = cacheRuntime().invalidate({ tags: dataTags });
+        const dataEntries = localEntries + (await cacheRuntime().invalidateShared(dataTags));
         let isrEntries = 0;
         let regionEntries = 0;
         for (const t of targets) {

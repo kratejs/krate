@@ -4,6 +4,10 @@ import {
   getRequestContext,
   isNotFoundSignal,
   notFound,
+  forbidden,
+  unauthorized,
+  accessDeniedStatus,
+  httpFallbackStatus,
   parseCookieHeader,
   redirectTarget,
   thenableRecord,
@@ -176,6 +180,28 @@ describe('render signals', () => {
     }
     expect(isNotFoundSignal(caught)).toBe(true);
     expect(isNotFoundSignal(new Error('other'))).toBe(false);
+  });
+
+  it('forbidden() and unauthorized() throw signals with the Next.js digest', () => {
+    const catchOf = (fn: () => never): any => {
+      try {
+        fn();
+      } catch (e) {
+        return e;
+      }
+    };
+    const f = catchOf(forbidden);
+    const u = catchOf(unauthorized);
+    expect(accessDeniedStatus(f)).toBe(403);
+    expect(accessDeniedStatus(u)).toBe(401);
+    expect(f.digest).toBe('NEXT_HTTP_ERROR_FALLBACK;403');
+    expect(u.digest).toBe('NEXT_HTTP_ERROR_FALLBACK;401');
+    expect(accessDeniedStatus(Object.assign(new Error('x'), { digest: 'NEXT_HTTP_ERROR_FALLBACK;403' }))).toBe(403);
+    expect(accessDeniedStatus(new Error('other'))).toBe(0);
+    expect(isNotFoundSignal(f)).toBe(false);
+    expect(httpFallbackStatus(catchOf(notFound))).toBe(404);
+    expect(httpFallbackStatus(f)).toBe(403);
+    expect(httpFallbackStatus(undefined)).toBe(0);
   });
 
   it('redirectTarget understands Krate and Next.js redirect errors', () => {

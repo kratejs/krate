@@ -56,8 +56,23 @@
     if (e && typeof e === 'object' && 'message' in e) return String(e.message);
     return e === undefined ? 'undefined thrown' : String(e);
   }
+  // notFound(), forbidden() and unauthorized() end the request with that status.
+  var FALLBACK_LABEL = { 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found' };
+  function fallbackStatus(e) {
+    if (!e || typeof e !== 'object') return 0;
+    var d = e.digest;
+    if (d === 'NEXT_NOT_FOUND' || d === 'NEXT_HTTP_ERROR_FALLBACK;404' || e.__krateNotFound === true) return 404;
+    if (d === 'NEXT_HTTP_ERROR_FALLBACK;403' || e.__krateHTTPStatus === 403) return 403;
+    if (d === 'NEXT_HTTP_ERROR_FALLBACK;401' || e.__krateHTTPStatus === 401) return 401;
+    return 0;
+  }
   function fail(e) {
     if (S.phase !== 'pending') return;
+    var fb = fallbackStatus(e);
+    if (fb) {
+      setHead(fb, '', [['content-type', 'application/json'], ['cache-control', 'no-store']], { str: JSON.stringify({ error: FALLBACK_LABEL[fb] }) });
+      return;
+    }
     S.phase = 'error';
     S.error = errMsg(e);
     S.stack = e && e.stack ? String(e.stack) : '';

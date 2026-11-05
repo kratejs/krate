@@ -373,8 +373,10 @@ const server = http.createServer(async (req, res) => {
     }
   } catch (err) {
     if (res.headersSent) { res.destroy(err); return; }
-    res.statusCode = 500;
+    const fallback = krateHTTPFallback(err);
+    res.statusCode = fallback || 500;
     res.setHeader('Content-Type', 'application/json');
+    if (fallback) { res.setHeader('Cache-Control', 'no-store'); return res.end(JSON.stringify({ error: KRATE_FALLBACK_LABEL[fallback] })); }
     return res.end(JSON.stringify(krateErrorBody(err, req.method + ' ' + req.url)));
   }
 });
@@ -699,7 +701,11 @@ Bun.serve({
       await flushRevalidate(revalidateScope);
       if (picked.headOnly) return new Response(null, { status: out.status, headers: out.headers });
       return out;
-    } catch (e) { return json(krateErrorBody(e, req.method + ' ' + urlPath), 500); }
+    } catch (e) {
+      const fallback = krateHTTPFallback(e);
+      if (fallback) { const r = json({ error: KRATE_FALLBACK_LABEL[fallback] }, fallback); r.headers.set('Cache-Control', 'no-store'); return r; }
+      return json(krateErrorBody(e, req.method + ' ' + urlPath), 500);
+    }
   },
 });`
 
@@ -733,7 +739,9 @@ type regionFrame struct {
 	CacheStatus string `json:"cacheStatus,omitempty"`
 	NotFound    bool   `json:"notFound,omitempty"`
 	Redirect    string `json:"redirect,omitempty"`
-	Title       string `json:"title,omitempty"`
+	// Denied is 401 or 403 when the render called unauthorized() or forbidden().
+	Denied int    `json:"denied,omitempty"`
+	Title  string `json:"title,omitempty"`
 	// Head is the <Head> tags (meta, link, script) the region rendered, to be
 	// merged into the document head (see headmerge.go).
 	Head string `json:"head,omitempty"`
@@ -764,6 +772,8 @@ type regionPageResult struct {
 	frameHead map[string]regionHead
 	// notFound signals the page-region render did not match.
 	notFound bool
+	// denied is 401 or 403 when a render called unauthorized() or forbidden().
+	denied int
 	// redirect is the Location for a page-region redirect response.
 	redirect string
 	// renderErr is non-empty when the page-region render reported a server
@@ -1022,14 +1032,14 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 		}
 	}
 
-	if failOnRenderErr && res.renderErr != "" && res.fatalErr == "" && !res.notFound && res.redirect == "" {
+	if failOnRenderErr && res.renderErr != "" && res.fatalErr == "" && !res.notFound && res.denied == 0 && res.redirect == "" {
 		res.fatalErr = res.renderErr
 	}
 
 	// A page-region render that 404s (unknown dynamic variant) or redirects,
 	// or a server component render that failed, is surfaced to the caller
 	// instead of streaming the shell.
-	if res.notFound || res.redirect != "" || res.fatalErr != "" {
+	if res.notFound || res.denied != 0 || res.redirect != "" || res.fatalErr != "" {
 		res.served = true
 		return res
 	}
@@ -1198,8 +1208,11 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 		case "region":
 			// notFound()/redirect() thrown by a server component region apply
 			// to the whole response, like the page region's.
-			if frame.ID != "page" && (frame.NotFound || frame.Redirect != "") {
+			if frame.ID != "page" && (frame.NotFound || frame.Denied != 0 || frame.Redirect != "") {
 				res.notFound = res.notFound || frame.NotFound
+				if res.denied == 0 {
+					res.denied = frame.Denied
+				}
 				if res.redirect == "" {
 					res.redirect = frame.Redirect
 				}
@@ -1213,6 +1226,9 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 				res.isISR = frame.CacheStatus != ""
 				res.cacheStatus = frame.CacheStatus
 				res.notFound = frame.NotFound
+				if res.denied == 0 {
+					res.denied = frame.Denied
+				}
 				res.redirect = frame.Redirect
 				// A page-region render that reported an error (or whose status is
 				// a server error) must not replace the baked body with empty HTML.
@@ -1229,7 +1245,7 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 					framesLeft--
 					continue
 				}
-				if frame.NotFound {
+				if frame.NotFound || frame.Denied != 0 {
 					// Sidecar couldn't match - treat as no render (keep baked).
 					framesLeft--
 					continue
@@ -1321,6 +1337,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		return err
 	}
 	defer revalHost.Close()
+	if err := revalHost.SetCache(cfg.Cache, hub == nil); err != nil {
+		return err
+	}
 	serverEnv := withEnv(environ.Current, revalHost.Env())
 
 	// Load embedded middleware runtime if configured (default: quickjs)
@@ -1579,7 +1598,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	}
 
 	if hasActions {
-		mux.Handle("/__krate/action/", loggingMiddleware(gate.wrap(http.HandlerFunc(actionHandler(apiProxy, apiBodyLimit)))))
+		mux.Handle("/__krate/action/", loggingMiddleware(gate.wrap(http.HandlerFunc(actionHandlerSegments(apiProxy, apiBodyLimit, newSegmentIndex(absOut))))))
 	}
 
 	apiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2090,6 +2109,13 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				default:
 					w.Header().Set("X-Krate-Cache", "MISS")
 				}
+			}
+			if rr.denied != 0 {
+				// forbidden() or unauthorized(): the nearest 403 or 401 page, never
+				// cached as a success.
+				w.Header().Del("X-Krate-Cache")
+				writeAccessDenied(w, r, segs, rr.denied, page.SegDir)
+				return
 			}
 			if rr.notFound {
 				// notFound() or an unmatched variant: the page nearest to the route,

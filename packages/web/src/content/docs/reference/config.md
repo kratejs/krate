@@ -346,6 +346,26 @@ the sidecar, which resolves only the page's dynamic regions against the baked
 static shell; the embedded QuickJS runtime is used for middleware, API routes,
 and community plugins.
 
+## Shared cache
+
+```typescript
+cache: {
+  adapter: "redis",                 // "memory" (default) | "redis" | a module path / package
+  url: process.env.REDIS_URL,       // redis://[user:password@]host:6379/0, rediss:// for TLS
+  urlEnv: "REDIS_URL",              // variable a deployed bundle reads the URL from
+  prefix: "krate:",                 // key prefix, so apps can share one store
+  timeoutMs: 250,                   // one cache call; slower counts as down
+  ttlSeconds: 604800,               // how long ISR entries stay in the shared store
+  options: {},                      // passed to a custom adapter
+}
+```
+
+Moves the ISR page cache and the data cache out of process memory and makes
+`revalidatePath` / `revalidateTag` reach every instance. See
+[Sharing caches between instances](/docs/guides/caching-and-revalidation/#sharing-caches-between-instances).
+`krate deploy` bundles the settings without `url`; the deployed server reads
+`urlEnv` (or `KRATE_CACHE_URL`).
+
 ## Partial prerendering (PPR)
 
 ```typescript

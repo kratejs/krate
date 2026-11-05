@@ -50,11 +50,9 @@ export default Post;
 			continue
 		}
 		body := string(f.Content)
-		if strings.Contains(body, "<async") || strings.Contains(body, "__KrateMetadata") {
-			t.Fatalf("%s: broken wrapper:\n%s", f.Target, body)
-		}
-		if !strings.Contains(body, "<KrateMetadata {...props} />") && !strings.Contains(body, "<KrateMetadata {...props} /></Suspense>") {
-			t.Fatalf("%s: metadata component not rendered:\n%s", f.Target, body)
+		// generateMetadata runs natively: the page is not wrapped and keeps its export.
+		if strings.Contains(body, "KrateMetadata") || strings.Contains(body, "PageWithHead") || !strings.Contains(body, "generateMetadata") {
+			t.Fatalf("%s: generateMetadata must stay as written:\n%s", f.Target, body)
 		}
 	}
 	if _, err := migrate.Apply(rep, migrate.ApplyOptions{}); err != nil {
@@ -71,7 +69,8 @@ export default Post;
 		t.Fatalf("build: %v", err)
 	}
 	// An async page renders per request, so it has no build-time body; it must
-	// be an SSR route, with the sync metadata and named pages built statically.
+	// be an SSR route (its generateMetadata runs per request), with the sync
+	// and named pages built statically with generateMetadata run at build time.
 	manData, err := os.ReadFile(ManifestPath(filepath.Join(root, "dist")))
 	if err != nil {
 		t.Fatal(err)

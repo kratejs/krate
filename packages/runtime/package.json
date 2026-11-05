@@ -77,6 +77,18 @@
     "./assets-static": {
       "types": "./dist/assets-static.d.ts",
       "default": "./dist/assets-static.js"
+    },
+    "./cache-adapter": {
+      "types": "./dist/cache-adapter.d.ts",
+      "default": "./dist/cache-adapter.js"
+    },
+    "./cache-redis": {
+      "types": "./dist/cache-redis.d.ts",
+      "default": "./dist/cache-redis.js"
+    },
+    "./og": {
+      "types": "./dist/og.d.ts",
+      "default": "./dist/og.js"
     }
   },
   "files": [

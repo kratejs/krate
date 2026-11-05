@@ -89,7 +89,7 @@ func compileServerBundles(res *bundler.ImportResolver, results []*PageResult, ro
 			if locals := goComponentLocals(absSource, pageSrc, root); len(locals) > 0 {
 				pageSrc = annotateGoCalls(pageSrc, absSource, locals)
 			}
-			injectedSource := injectServerGlobals(pageSrc) + serverExportEntrySuffix(page.ServerExports, absSource)
+			injectedSource := injectServerGlobals(pageSrc) + serverExportEntrySuffix(page.ServerExports, absSource) + metadataEntrySuffix(page.MetadataSegments, page.MetadataPageFiles, root)
 
 			// Compile with esbuild - use stdin so esbuild resolves relative imports
 			// from the project root (AbsWorkingDir) rather than a temp file location

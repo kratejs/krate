@@ -115,7 +115,7 @@ func streamSiblingRegions(ctx context.Context, w http.ResponseWriter, flusher ht
 		if f.NoStore {
 			res.noStore = true
 		}
-		if f.NotFound || f.Redirect != "" || f.Fatal || f.Status >= 500 || f.Error != "" {
+		if f.NotFound || f.Denied != 0 || f.Redirect != "" || f.Fatal || f.Status >= 500 || f.Error != "" {
 			// The shell and earlier chunks are already on the wire, so keep the
 			// baked fallback for this region instead of committing a second
 			// status. The caller records the failure for logs/metrics.

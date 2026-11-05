@@ -42,6 +42,10 @@ type BuildOptions struct {
 	// props include them as `params`, so a wrapper that forwards `{...props}`
 	// to the page body passes them on.
 	PageParams map[string]string
+	// RoutePath is the URL path of the entry page ("/blog/hello", or
+	// "/blog/__KRATE_PARAM_slug__" in a dynamic route's template). The router
+	// hooks (usePathname, useParams, ...) fold to it. Empty for a layout.
+	RoutePath string
 	// CodeTheme is the chroma theme used to highlight <Code>/<SyntaxHighlight>
 	// at build time. It must match the stylesheet generated for the same theme
 	// (syntaxhighlight.CSSForTheme). Empty selects the default theme.
@@ -165,6 +169,7 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		evalJS:           opts.EvalJS,
 		transformIcon:    opts.TransformIcon,
 		transformImage:   opts.TransformImage,
+		routeHooks:       routeHookValues(opts.RoutePath, opts.PageParams),
 	}
 	for name := range b.moduleDeclOnly {
 		// Declared here, assigned by a module statement: shared mutable state.
@@ -386,6 +391,7 @@ type builder struct {
 	// on exit, so siblings after a child component keep unique IDs.
 	elementCounts    map[string]int
 	moduleConsts     valueMap            // module-level const values (name -> folded value)
+	routeHooks       valueMap            // router hooks folded to the page's route (see routehooks.go)
 	moduleConstInits map[string]ast.Expr // module-level const initializers (name -> expr)
 	moduleStmts      []ast.Stmt          // entry module top-level statements that run code
 	moduleLets       map[string]bool     // module-level let/var bindings (mutable, so shared)

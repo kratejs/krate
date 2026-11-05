@@ -32,6 +32,8 @@ signals.
 | `template.tsx` | `_template.tsx` (remounts on every navigation) |
 | `(group)`, `@slot`, `default.tsx`, `(.)x` | same directory names under `src/pages`; see [Routing](/docs/core-concepts/routing/) |
 | `next/link` | global `<Link>` (or `<a data-krate-link>`) |
+| `next/navigation` (`usePathname`, `useParams`, `useSearchParams`, `useRouter`, `useSelectedLayoutSegment(s)`) | the same hooks from `@krate/runtime` |
+| `notFound()`, `forbidden()`, `unauthorized()`, `redirect()` | the same names from `@krate/runtime/server`; `forbidden.tsx` / `unauthorized.tsx` become `403.tsx` / `401.tsx` |
 | `next/image` | global `<Image>` |
 | `next/head` | global `<Head>` |
 | API routes `app/api/x/route.ts` | `src/api/x.ts` (JS) or `src/api/x.go` (Go) |
@@ -92,6 +94,9 @@ The first pass:
   small `NextResponse` shim, static/local matcher checks, and cookie/IP/geo
   helpers; computed `config.matcher` arrays are checked at runtime;
 - strips root-layout `<html>`/`<body>` wrappers;
+- maps `forbidden.tsx` to `403.tsx` and `unauthorized.tsx` to `401.tsx` (the
+  Next.js 15.1 `authInterrupts` pages), and drops the `experimental.authInterrupts`
+  flag, because `forbidden()` and `unauthorized()` always work;
 - maps `not-found.tsx` to `404.tsx` and `error.tsx` to `error.tsx` in the same
   directory (route groups kept), where they are native
   [segment pages](/docs/core-concepts/routing/#not-found-and-error-pages): the
@@ -102,9 +107,15 @@ The first pass:
   manual item when a root `error.tsx` exists too. A directory that has a layout,
   template, loading, error or not-found file keeps its page in that directory
   (`dashboard/index.tsx`) so those files wrap it;
-- generates `next/navigation` hook helpers on the Krate router (with a hook-free
-  server helper for `notFound`/`redirect`), maps `next/headers` and `next/cache`
-  to `@krate/runtime/server`, rewrites common `next/server` API helpers, and maps
+- maps `next/navigation` onto the runtime: `usePathname`, `useParams`,
+  `useSearchParams`, `useRouter` and `useSelectedLayoutSegment(s)` come from
+  `@krate/runtime` (see [Router hooks](/docs/reference/runtime-api/#router-hooks)),
+  and `notFound`, `redirect`, `permanentRedirect`, `forbidden` and `unauthorized`
+  from `@krate/runtime/server` (from `@krate/runtime` in a `"use client"` file).
+  No helper file is generated. Names with no equivalent (`RedirectType`,
+  `unstable_rethrow`, `useServerInsertedHTML`) stay on `next/navigation` and are
+  listed as manual work. `next/headers` and `next/cache` map to
+  `@krate/runtime/server`, rewrites common `next/server` API helpers, and maps
   simple `next/dynamic` loaders to React `lazy()`;
 - maps `next/font/google` to a generated helper and Google Fonts CSS;
 - creates `krate.config.ts` when the project has none, or merges missing
@@ -142,8 +153,8 @@ route segment config without an equivalent (`runtime`, `preferredRegion`,
 `fetchCache`, `maxDuration`), a `default.tsx` outside a parallel-route slot, nested
 `not-found`, unresolved relative imports, and function/plugin
 `next.config.*` files (or keys of one) are not rewritten automatically. Resolve those before
-running `krate build`. `useParams` and
-`useSelectedLayoutSegment(s)` are generated from the migrated navigation helper.
+running `krate build`. `useSelectedLayoutSegment(s)` count from the layout whose
+file calls them; a hook called from a shared component counts from the root.
 
 Client components rendered inside async server components hydrate with Preact:
 `--update-package` adds it, otherwise install `preact`.
@@ -219,7 +230,12 @@ aid, not a full React runtime - see
 - No `getServerSideProps` / `getStaticProps` - use render modes
   (`export const config = { ssr: true }`, or Next-style `export const dynamic` /
   `revalidate`) and async server components.
-- Catch-all params (`[...slug]`) are a `/`-joined string, not `string[]`.
+- Catch-all params (`[...slug]`) are a `/`-joined string in the page's `params`
+  prop, not `string[]`. `useParams()` returns the array, like Next.js.
+- `usePathname()` never has a trailing slash (`/` stays), whatever URL the
+  server canonicalizes to.
+- Layouts are built once and cannot call `forbidden()` or `unauthorized()` (see
+  [Forbidden and unauthorized](/docs/core-concepts/routing/#forbidden-and-unauthorized)).
 - React context is supported through React interop; module-level signals and
   props are still the lowest-overhead option.
 - Streaming uses `<Suspense>` with region rendering (see

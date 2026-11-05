@@ -164,6 +164,40 @@ try {
   check((await text("#outer-msg")) === "Internal Server Error" && /^[0-9a-f]{10}$/.test(await text("#outer-digest")), "the soft-navigated error page is sanitized with a digest");
   errors.length = 0;
 
+  // 6b. forbidden() and unauthorized(): 403 and 401 with the nearest page,
+  // swapped in place on soft navigation, with back and forward working.
+  const hard403 = await page.goto(base + "/dash/secret/");
+  check(hard403.status() === 403, `forbidden() answers 403 on a hard load (got ${hard403.status()})`);
+  check((await count("#dash-403")) === 1 && (await count("#dash-layout")) === 1 && (await count("#nav")) === 1, "the nearest forbidden page renders inside the layouts");
+  check(hard403.headers()["cache-control"] === "no-store", "a 403 is never cacheable");
+  const hard401 = await page.goto(base + "/dash/signin/");
+  check(hard401.status() === 401 && (await count("#root-401")) === 1, `unauthorized() answers 401 with the root page (got ${hard401.status()})`);
+  check((await count("#dash-layout")) === 0 && (await count("#nav")) === 1, "the root 401 page shares only the root layout");
+  errors.length = 0;
+  await page.goto(base + "/dash/");
+  await bumpLayout(1);
+  await page.evaluate(() => (window.__spa = 6));
+  const secretResponse = page.waitForResponse((r) => new URL(r.url()).pathname.replace(/\/$/, "") === "/dash/secret");
+  await page.click("#to-secret");
+  await page.waitForSelector("#dash-403");
+  check((await secretResponse).status() === 403, "the soft navigation was answered with 403");
+  check(path().startsWith("/dash/secret"), "the address bar keeps the requested URL");
+  check((await text("#layout-count")) === "1" && (await count("#dash-layout")) === 1, "layout state survives the soft navigation to a 403 page");
+  check((await page.evaluate(() => window.__spa)) === 6, "no document reload for the 403");
+  await page.click("#to-signin");
+  await page.waitForSelector("#root-401");
+  check((await text("#layout-count")) === "1" && (await count("#dash-layout")) === 0, "the root 401 page replaces the dash layout and keeps the root one");
+  await page.goBack();
+  await page.waitForSelector("#dash-403");
+  check(path().startsWith("/dash/secret") && (await text("#layout-count")) === "1", "back returns to the 403 page with the layout kept");
+  await page.goBack();
+  await page.waitForSelector("#dash-home");
+  check(path().startsWith("/dash") && !path().includes("secret"), "back again returns to the dash page");
+  await page.goForward();
+  await page.waitForSelector("#dash-403");
+  check((await page.evaluate(() => window.__spa)) === 6, "back and forward never reloaded the document");
+  errors.length = 0;
+
   // 7. A healthy error boundary does not cost the layouts below it their state;
   // one that caught an error is replaced when the user navigates.
   await page.goto(base + "/deep/inner/a/");

@@ -141,6 +141,18 @@ type handlerConfig struct {
 	Security        handlerSecurity     `json:"security"`
 	CORS            handlerCORS         `json:"cors"`
 	SSR             handlerSSR          `json:"ssr"`
+	// Cache is the shared cache setting without its URL: the bundle never
+	// contains a secret, the URL comes from the environment at run time.
+	Cache *handlerCache `json:"cache,omitempty"`
+}
+
+type handlerCache struct {
+	Adapter    string         `json:"adapter"`
+	URLEnv     string         `json:"urlEnv,omitempty"`
+	Prefix     string         `json:"prefix,omitempty"`
+	TimeoutMs  int            `json:"timeoutMs,omitempty"`
+	TTLSeconds int            `json:"ttlSeconds,omitempty"`
+	Options    map[string]any `json:"options,omitempty"`
 }
 
 type handlerSecurity struct {
@@ -207,6 +219,9 @@ func buildHandlerConfig(cfg *config.Config) handlerConfig {
 			Headers: nonNilStrings(c.Headers), Credentials: c.Credentials, MaxAge: c.MaxAge,
 		},
 		SSR: handlerSSR{Timeout: cfg.SSR.Timeout, MaxCacheSize: cfg.SSR.MaxCacheSize, PPR: cfg.PPR, PPRRevalidate: cfg.PPRRevalidate},
+	}
+	if cc := cfg.Cache; cc.Shared() {
+		hc.Cache = &handlerCache{Adapter: cc.Adapter, URLEnv: cc.URLEnv, Prefix: cc.Prefix, TimeoutMs: cc.TimeoutMs, TTLSeconds: cc.TTLSeconds, Options: cc.Options}
 	}
 	return hc
 }
@@ -394,7 +409,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 		// The segment pages travel in the bundle: the handler picks the nearest
 		// one for a request and fills it, so no file is read at request time.
 		for _, e := range m.Segments {
-			for _, rel := range []string{e.NotFound, e.Error} {
+			for _, rel := range e.pages() {
 				if rel == "" {
 					continue
 				}
@@ -560,9 +575,32 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	if err != nil {
 		return nil, err
 	}
+	// A custom cache adapter module is imported statically (the bundle has no
+	// dynamic imports of your files) and built from the cache settings.
+	cacheExpr := "undefined"
+	if cc := cfg.Cache; cc.Shared() && cc.Adapter != "redis" {
+		mod := cc.Adapter
+		if strings.HasPrefix(mod, ".") || filepath.IsAbs(mod) {
+			mod = filepath.ToSlash(filepath.Join(root, mod))
+			if filepath.IsAbs(cc.Adapter) {
+				mod = filepath.ToSlash(cc.Adapter)
+			}
+		}
+		fmt.Fprintf(imports, "import * as cache_mod from %s;\nimport { cacheSpecFromConfig } from '@krate/runtime/cache-adapter';\n", jsString(mod))
+		cacheExpr = "(async () => { const f = cache_mod.default ?? cache_mod.createAdapter; const spec = cacheSpecFromConfig(data.config.cache); return typeof f === 'function' ? f(spec) : f; })()"
+	}
+	if cfg.Cache.Shared() {
+		plan.SharedCache = true
+		if target == "cloudflare" && cfg.Cache.Adapter == "redis" {
+			plan.Warnings = append(plan.Warnings, "cache.adapter \"redis\" speaks TCP; Cloudflare Workers cannot keep that connection reliably. Use an HTTP-based adapter (a Redis REST service, KV) through a custom cache.adapter module, or deploy to node, vercel or netlify")
+		}
+		if cfg.Cache.URL != "" && cfg.Cache.URLEnv == "" {
+			plan.Warnings = append(plan.Warnings, "cache.url is not written into the bundle; set KRATE_CACHE_URL (or name another variable with cache.urlEnv) in the deployment's environment")
+		}
+	}
 	modules := fmt.Sprintf("const modules = {\n pages: {\n%s },\n runtime: {\n%s },\n api: {\n%s },\n actions: {\n%s },\n middleware: %s,\n};\n",
 		pageMods.String(), runtimeMods.String(), apiMods.String(), actionMods.String(), mwExpr)
-	fmt.Fprintf(body, "%s\nconst data = %s;\n", modules, string(dataJSON))
+	fmt.Fprintf(body, "%s\nconst data = %s;\nconst __cache = %s;\n", modules, string(dataJSON), cacheExpr)
 
 	entry := serverEntry(target, imports.String(), body.String())
 	outFile := filepath.Join(outDir, ".krate", serverDeployDir, serverEntryName(target))
@@ -676,13 +714,13 @@ func serverEntry(target, imports, body string) string {
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\nimport { startNodeServer, createNodeStaticLayer, defaultDistDir } from '@krate/runtime/node-server';\n")
 		b.WriteString(body)
 		b.WriteString(`const distDir = defaultDistDir(import.meta.url);
-export const handler = createKrateHandler({ target: 'node', data, modules, static: createNodeStaticLayer(distDir) });
+export const handler = createKrateHandler({ target: 'node', data, modules, cache: __cache, static: createNodeStaticLayer(distDir) });
 await startNodeServer({ handler, distDir, trustProxy: data.config.trustProxy === true, shutdownTimeout: __SHUTDOWN__, port: __PORT__ });
 `)
 	case "vercel":
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\nimport { nodeRequestListener } from '@krate/runtime/node-server';\n")
 		b.WriteString(body)
-		b.WriteString(`export const handler = createKrateHandler({ target: 'vercel', data, modules });
+		b.WriteString(`export const handler = createKrateHandler({ target: 'vercel', data, modules, cache: __cache });
 export const handleRequest = (request, ctx) => handler(request, ctx);
 // true: keep the headers Vercel sent. The handler decides which of them it trusts.
 export default nodeRequestListener(handler, true);
@@ -690,7 +728,7 @@ export default nodeRequestListener(handler, true);
 	case "netlify":
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\n")
 		b.WriteString(body)
-		b.WriteString(`export const handler = createKrateHandler({ target: 'netlify', data, modules });
+		b.WriteString(`export const handler = createKrateHandler({ target: 'netlify', data, modules, cache: __cache });
 export default async (request, context) => handler(request, { waitUntil: context && context.waitUntil ? (p) => context.waitUntil(p) : undefined });
 `)
 	case "cloudflare":
@@ -708,7 +746,7 @@ export default {
       const proc = globalThis.process || (globalThis.process = { env: {} });
       proc.env = proc.env || {};
       for (const [k, v] of Object.entries(env || {})) if (typeof v === 'string' && !(k in proc.env)) proc.env[k] = v;
-      handler = createKrateHandler({ target: 'cloudflare', data, modules, static: env && env.ASSETS ? createAssetsStaticLayer(env.ASSETS) : undefined });
+      handler = createKrateHandler({ target: 'cloudflare', data, modules, cache: __cache, static: env && env.ASSETS ? createAssetsStaticLayer(env.ASSETS) : undefined });
     }
     return handler(request, { waitUntil: (p) => ctx.waitUntil(p) });
   },

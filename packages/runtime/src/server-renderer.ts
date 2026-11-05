@@ -18,6 +18,8 @@ import {
   type ServerManifest,
 } from "./ssr-core.js";
 import { installRenderStore, patchFetch, type CacheScope } from "./cache-scope.js";
+import { cacheSpecFromEnv } from "./cache-adapter.js";
+import { isrStoreFor } from "./shared-isr.js";
 
 // Render cache scopes (tags / revalidate windows read during a render) and the
 // Next-style fetch data cache. Installed once per process; page bundles share
@@ -225,10 +227,13 @@ function loadRuntimeRenderer(relPath: string): (props: string | Record<string, a
 
 const pprEnabledEnv = process.env.KRATE_PPR === "1";
 const isrMemory = new MemoryIsrStore(parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512);
+// With a shared cache adapter (KRATE_CACHE) the ISR cache and the data cache live
+// in the adapter, so every instance serves and invalidates the same pages.
+const sharedCache = isrStoreFor(cacheSpecFromEnv(process.env), isrMemory);
 const core = createSSRCore({
   manifest,
   sha256Hex: (input) => createHash("sha256").update(input).digest("hex"),
-  isrStore: isrMemory,
+  isrStore: sharedCache.store,
   loadPageModule,
   loadRuntimeRenderer,
   maxCacheSize: parseInt(process.env.KRATE_SSR_MAX_CACHE || "", 10) || 512,
@@ -526,6 +531,14 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
       res.end("<html><body><h1>404 Not Found</h1></body></html>");
     }
+    return;
+  }
+
+  if (result.denied) {
+    const denied = path.join(OUT_DIR, result.denied + ".html");
+    const fallback = result.denied === 403 ? "<html><body><h1>403 Forbidden</h1></body></html>" : "<html><body><h1>401 Unauthorized</h1></body></html>";
+    res.writeHead(result.denied, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(fs.existsSync(denied) ? fs.readFileSync(denied, "utf-8") : fallback);
     return;
   }
 

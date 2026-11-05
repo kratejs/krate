@@ -41,12 +41,17 @@ func dynamicChunkURLs(hydrationJS string) []string {
 	return out
 }
 
+var viewportMetaRe = regexp.MustCompile(`(?i)<meta[^>]+name\s*=\s*["']?viewport["'\s>/]`)
+
 func generateHTML(bodyHTML, headHTML, scriptHTML, styleHTML string, cssFiles []string, jsFile, runtimeJSFile, route string, devMode bool, devBootstrap, runtimeHead, basePath string, modulePreloads ...string) string {
 	var b strings.Builder
 
 	b.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n")
 	b.WriteString("<meta charset=\"UTF-8\">\n")
-	b.WriteString("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, viewport-fit=cover\">\n")
+	// The page's own viewport meta (a <Head> tag or a viewport export) replaces the default.
+	if !viewportMetaRe.MatchString(headHTML) {
+		b.WriteString("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, viewport-fit=cover\">\n")
+	}
 
 	// Site runtime config + View Transitions CSS (base path, SPA behavior).
 	if runtimeHead != "" {

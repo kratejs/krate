@@ -1,5 +1,5 @@
 "use server";
-import { redirect } from "@krate/runtime/server";
+import { redirect, forbidden, unauthorized } from "@krate/runtime/server";
 
 export async function greet(formData: FormData) {
   const who = String(formData.get("who") || "");
@@ -9,4 +9,12 @@ export async function greet(formData: FormData) {
 
 export async function add(a: number, b: number) {
   return { sum: a + b };
+}
+
+export async function secret() {
+  forbidden();
+}
+
+export async function signin() {
+  unauthorized();
 }

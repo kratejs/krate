@@ -9,107 +9,10 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/parser"
 )
 
-const (
-	nextNavigationHelper       = "src/migrated/next-navigation.ts"
-	nextNavigationServerHelper = "src/migrated/next-navigation-server.ts"
-)
-
-// nextNavigationServerSource holds the next/navigation exports that are valid
-// in server components. It must stay free of hooks: a module that uses hooks
-// is rejected inside a server component tree.
-const nextNavigationServerSource = `// Recognized by the Krate SSR sidecar, which answers with a redirect or the 404 page.
-export function redirect(url: string): never {
-  throw new Error("NEXT_REDIRECT:" + url);
-}
-
-export function permanentRedirect(url: string): never {
-  return redirect(url);
-}
-
-export function notFound(): never {
-  const err: any = new Error("NEXT_NOT_FOUND");
-  err.digest = "NEXT_NOT_FOUND";
-  throw err;
-}
-`
-
-const nextNavigationSource = `import { useEffect, useState } from "react";
-import { getNavigationState, krateRouter, subscribeNavigation } from "@krate/runtime";
-
-function snapshot(): { pathname: string; search: string } {
-  if (typeof location === "undefined") return { pathname: "/", search: "" };
-  const { pathname, search } = getNavigationState();
-  return { pathname, search };
-}
-
-function useNavigation() {
-  const [state, setState] = useState(snapshot);
-  useEffect(() => {
-    setState(snapshot());
-    return subscribeNavigation(() => setState(snapshot()));
-  }, []);
-  return state;
-}
-
-export function usePathname(): string {
-  return useNavigation().pathname;
-}
-
-export function useSearchParams(): URLSearchParams {
-  return new URLSearchParams(useNavigation().search);
-}
-
-function pathSegments(pathname: string): string[] {
-  return pathname.split("/").filter(Boolean).map((segment) => {
-    try {
-      return decodeURIComponent(segment);
-    } catch {
-      return segment;
-    }
-  });
-}
-
-export function useParams<T extends Record<string, string | string[]> = Record<string, string | string[]>>(): T {
-  useNavigation();
-  const g = globalThis as { __KRATE_PARAMS__?: T };
-  return (g.__KRATE_PARAMS__ || ({} as T));
-}
-
-export function useSelectedLayoutSegments(): string[] {
-  return pathSegments(usePathname());
-}
-
-export function useSelectedLayoutSegment(): string | null {
-  const segments = useSelectedLayoutSegments();
-  return segments.length > 0 ? segments[0] : null;
-}
-
-export function useRouter() {
-  return {
-    push: (url: string, options?: { scroll?: boolean }) => { void krateRouter.push(url, options); },
-    replace: (url: string, options?: { scroll?: boolean }) => { void krateRouter.replace(url, options); },
-    refresh: () => { void krateRouter.refresh(); },
-    back: () => krateRouter.back(),
-    forward: () => krateRouter.forward(),
-    prefetch: (url: string) => { void krateRouter.prefetch(url); },
-  };
-}
-
-export { notFound, permanentRedirect } from "./next-navigation-server";
-
-// A client-side redirect navigates in place; during rendering it throws the
-// signal the SSR sidecar turns into a redirect response.
-export function redirect(url: string): never {
-  if (typeof location !== "undefined") void krateRouter.push(url);
-  throw new Error("NEXT_REDIRECT:" + url);
-}
-`
-
 // rewriteNextModuleImports maps next/navigation and next/headers onto Krate
 // modules. It runs after app-local assets are copied so helper paths can be
 // relative to each migrated file.
 func rewriteNextModuleImports(rep *Report, root string) {
-	needNavigation, needNavigationServer := false, false
 	for i := range rep.Files {
 		f := &rep.Files[i]
 		if len(f.Content) == 0 {
@@ -117,17 +20,11 @@ func rewriteNextModuleImports(rep *Report, root string) {
 		}
 		src := string(f.Content)
 		if strings.Contains(src, "next/navigation") {
-			rewritten, useShim, useServer := rewriteNextNavigationImports(src, f.Target)
+			rewritten, rewrites, manual := rewriteNextNavigationImports(src)
 			src = rewritten
-			if useShim {
-				needNavigation = true
-				f.Rewrites = append(f.Rewrites, "rewrote next/navigation imports to "+relativeModulePath(f.Target, nextNavigationHelper))
-				f.Dependencies = append(f.Dependencies, nextNavigationHelper)
-			}
-			if useServer {
-				needNavigationServer = true
-				f.Rewrites = append(f.Rewrites, "rewrote next/navigation server helpers to "+relativeModulePath(f.Target, nextNavigationServerHelper))
-				f.Dependencies = append(f.Dependencies, nextNavigationServerHelper)
+			f.Rewrites = append(f.Rewrites, rewrites...)
+			for _, item := range manual {
+				rep.Manual = append(rep.Manual, ManualItem{Source: f.Source, Reason: item.Reason, Hint: item.Hint})
 			}
 		}
 		if strings.Contains(src, "next/dynamic") {
@@ -162,41 +59,46 @@ func rewriteNextModuleImports(rep *Report, root string) {
 		}
 		f.Content = []byte(src)
 	}
-	addHelper := func(target, source string, note string) {
-		if fileExists(filepath.Join(root, filepath.FromSlash(target))) {
-			rep.Warnings = append(rep.Warnings, target+" already exists; left unchanged")
-			return
-		}
-		for _, f := range rep.Files {
-			if f.Target == target {
-				return
-			}
-		}
-		rep.Files = append(rep.Files, PlannedFile{Kind: KindAsset, Target: target, Content: []byte(source), Rewrites: []string{note}})
-	}
-	if needNavigationServer || needNavigation {
-		// The client helper re-exports the server helper.
-		addHelper(nextNavigationServerHelper, nextNavigationServerSource, "generated next/navigation server helpers")
-	}
-	if needNavigation {
-		addHelper(nextNavigationHelper, nextNavigationSource, "generated next/navigation compatibility helpers")
-	}
 }
 
 var nextNavigationImport = regexp.MustCompile(`(?m)^([ \t]*)import[ \t]+(type[ \t]+)?\{([^}]*)\}[ \t]*from[ \t]+(["'])next/navigation["'][ \t]*;?`)
 
-var nextNavigationServerNames = map[string]bool{"notFound": true, "redirect": true, "permanentRedirect": true}
+// nextNavigationHooks are the next/navigation hooks @krate/runtime implements.
+var nextNavigationHooks = map[string]bool{
+	"usePathname": true, "useSearchParams": true, "useParams": true, "useRouter": true,
+	"useSelectedLayoutSegment": true, "useSelectedLayoutSegments": true,
+}
 
-// rewriteNextNavigationImports maps next/navigation imports onto the generated
-// helpers. In a file without a "use client" directive, the names that are
-// valid in server components (notFound, redirect, permanentRedirect) come from
-// the hook-free server helper; everything else uses the client helper.
-func rewriteNextNavigationImports(src, target string) (out string, useShim, useServer bool) {
+// nextNavigationSignals are the next/navigation functions that end a render or
+// a request. They come from @krate/runtime/server in a server file (hook-free)
+// and from @krate/runtime in a client file.
+var nextNavigationSignals = map[string]bool{
+	"notFound": true, "redirect": true, "permanentRedirect": true, "forbidden": true, "unauthorized": true,
+}
+
+// nextNavigationUnsupported are next/navigation names with no Krate equivalent.
+var nextNavigationUnsupported = map[string]string{
+	"RedirectType":            "RedirectType is not available; redirect(url) always replaces the document",
+	"unstable_rethrow":        "unstable_rethrow is not available; Krate's signals pass through try/catch blocks that rethrow",
+	"useServerInsertedHTML":   "useServerInsertedHTML is not available; render <Head> tags instead",
+	"useLinkStatus":           "useLinkStatus is not available; read getNavigationState().status from @krate/runtime",
+	"ReadonlyURLSearchParams": "ReadonlyURLSearchParams is a type only; use URLSearchParams",
+}
+
+// rewriteNextNavigationImports points next/navigation imports at @krate/runtime
+// (hooks, and the signals of a client file) and @krate/runtime/server (the
+// signals of a server file). Names with no equivalent stay on next/navigation
+// and are reported.
+func rewriteNextNavigationImports(src string) (out string, rewrites []string, manual []ManualItem) {
 	clientFile := hasUseClientDirective(src)
+	signalModule := "@krate/runtime/server"
+	if clientFile {
+		signalModule = "@krate/runtime"
+	}
 	out = nextNavigationImport.ReplaceAllStringFunc(src, func(stmt string) string {
 		m := nextNavigationImport.FindStringSubmatch(stmt)
 		indent, typeOnly, specs, quote := m[1], strings.TrimSpace(m[2]), m[3], m[4]
-		var server, client []string
+		var hooks, signals, rest []string
 		for _, spec := range strings.Split(specs, ",") {
 			spec = strings.TrimSpace(spec)
 			if spec == "" {
@@ -206,10 +108,18 @@ func rewriteNextNavigationImports(src, target string) (out string, useShim, useS
 			if i := strings.Index(name, " as "); i >= 0 {
 				name = strings.TrimSpace(name[:i])
 			}
-			if !clientFile && nextNavigationServerNames[name] {
-				server = append(server, spec)
-			} else {
-				client = append(client, spec)
+			switch {
+			case nextNavigationHooks[name]:
+				hooks = append(hooks, spec)
+			case nextNavigationSignals[name]:
+				signals = append(signals, spec)
+			default:
+				rest = append(rest, spec)
+				reason := name + " from next/navigation has no Krate equivalent"
+				if msg, ok := nextNavigationUnsupported[name]; ok {
+					reason = msg
+				}
+				manual = append(manual, ManualItem{Reason: reason, Hint: "see the Next.js migration guide"})
 			}
 		}
 		prefix := indent + "import "
@@ -217,22 +127,26 @@ func rewriteNextNavigationImports(src, target string) (out string, useShim, useS
 			prefix += "type "
 		}
 		var lines []string
-		if len(server) > 0 {
-			useServer = true
-			lines = append(lines, prefix+"{ "+strings.Join(server, ", ")+" } from "+quote+relativeModulePath(target, nextNavigationServerHelper)+quote+";")
+		if len(hooks) > 0 {
+			lines = append(lines, prefix+"{ "+strings.Join(hooks, ", ")+" } from "+quote+"@krate/runtime"+quote+";")
 		}
-		if len(client) > 0 {
-			useShim = true
-			lines = append(lines, prefix+"{ "+strings.Join(client, ", ")+" } from "+quote+relativeModulePath(target, nextNavigationHelper)+quote+";")
+		if len(signals) > 0 {
+			lines = append(lines, prefix+"{ "+strings.Join(signals, ", ")+" } from "+quote+signalModule+quote+";")
+		}
+		if len(rest) > 0 {
+			lines = append(lines, prefix+"{ "+strings.Join(rest, ", ")+" } from "+quote+"next/navigation"+quote+";")
 		}
 		return strings.Join(lines, "\n")
 	})
-	if strings.Contains(out, "next/navigation") {
-		// Namespace or default imports: point the whole module at the client helper.
-		out = replaceModule(out, "next/navigation", relativeModulePath(target, nextNavigationHelper))
-		useShim = true
+	if out != src {
+		rewrites = append(rewrites, "rewrote next/navigation imports to "+signalModule+" and @krate/runtime")
 	}
-	return out, useShim, useServer
+	if strings.Contains(out, "next/navigation") && nextNavigationImport.FindString(out) == "" {
+		// Namespace or default imports: point the whole module at the runtime.
+		out = replaceModule(out, "next/navigation", "@krate/runtime")
+		rewrites = append(rewrites, "rewrote the next/navigation namespace import to @krate/runtime")
+	}
+	return out, rewrites, manual
 }
 
 // hasUseClientDirective reports whether src starts with a "use client"

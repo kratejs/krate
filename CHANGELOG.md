@@ -216,6 +216,49 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   "Invalid hook call" and silently serve the build-time body (dropping the
   page's dynamic content); the server bundle now stubs each island with its
   placeholder and build-time markup.
+- Next.js router hooks are exported from `@krate/runtime`: `usePathname`,
+  `useParams`, `useSearchParams`, `useRouter` (`push`, `replace`, `back`,
+  `forward`, `refresh`, `prefetch`) and `useSelectedLayoutSegment(s)`. A module
+  that imports one reads it live, so values follow SPA navigation, back and
+  forward. The static HTML carries the page's own route (`/blog/a` for a page from
+  `generateStaticParams`), SSR pages see their request, and the hooks ship as
+  their own runtime feature (about 1.3 KB gzip) only when a page calls them.
+  `krate migrate nextjs` imports them from the runtime instead of generating
+  `src/migrated/next-navigation*.ts`.
+- `forbidden()` and `unauthorized()` (and the `forbidden.tsx` / `unauthorized.tsx`
+  pages, or `403.tsx` / `401.tsx`) answer 403 and 401 the way `notFound()` answers
+  404: the nearest segment page inside its layouts, never cached, with soft
+  navigation swapping the page in place. They work in SSR, ISR and streaming
+  pages, async server components, server actions and API routes, in `krate start`
+  and the portable handler. A statically built page or a layout that calls one
+  warns (`KR8604`). The migrator maps both pages and the `authInterrupts` flag.
+  API routes that call `notFound()` now answer 404 instead of 500.
+- `generateMetadata({ params, searchParams }, parent)` runs for real: at build time
+  for static pages (once per `generateStaticParams` entry), per request for SSR and
+  ISR pages (next to the render, sharing its fetch cache, tags and `searchParams`
+  keys). Layouts export `metadata` and `generateMetadata` too; the chain merges root
+  to page in Next.js order (`title.template`, `metadataBase`, wholesale field
+  replacement, `parent`), and an explicit `<Head>` still wins. The tags are in the
+  first bytes of the head, not patched in by script. A `generateMetadata` that throws
+  keeps the page and logs; `notFound()` from it answers 404. `export const viewport`
+  is read, and a page's viewport meta replaces the default one. `KR7122` now means
+  the metadata could not be evaluated at all (it used to mean "not a literal").
+  The migrator keeps `metadata` and `generateMetadata` as written and imports the
+  `Metadata` types from the runtime instead of wrapping pages in `<Head>`.
+- Concurrent identical cached `fetch` calls in one process share one upstream
+  request, so a page and its `generateMetadata` reading the same URL ask it once.
+- Shared caches. `cache: { adapter: "redis", url }` in `krate.config` moves the ISR
+  page cache and the data cache (`fetch` with `next` options, `unstable_cache`) into
+  Redis, so instances behind a load balancer serve each other's pages, and
+  `revalidatePath` / `revalidateTag` on one instance refresh all of them (a pub/sub
+  message also clears the others' region caches and the Go host's caches; a missed
+  message flushes). Redis uses a built-in RESP client with no dependency (Go and
+  Node); other stores plug in through the documented `CacheAdapter` interface
+  (`cache.adapter` names a module). Every cache call has a timeout and a circuit
+  breaker: a slow or dead store costs the sharing, never a request, and per-user
+  renders are never written. `createKrateHandler({ cache })` and `krate deploy` carry
+  it to the serverless targets (the bundle never contains the URL; it reads
+  `KRATE_CACHE_URL` or `cache.urlEnv`).
 
 ### Fixed
 

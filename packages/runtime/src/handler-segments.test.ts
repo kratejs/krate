@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { fillServerError, lookupSegmentPage, newServerError, type SegmentEntry } from "./handler-segments.js";
+import { fillServerError, lookupSegmentPage, newServerError, SEGMENT_KIND_OF_STATUS, type SegmentEntry } from "./handler-segments.js";
 import { createKrateHandler, type HandlerConfig, type KrateServerData } from "./server-handler.js";
 import { jsx } from "./server.js";
 
@@ -35,6 +35,20 @@ describe("lookupSegmentPage (port of build/segments.go)", () => {
     }
     expect(lookupSegmentPage([], "notFound", "/x", false, "")).toBeNull();
     expect(lookupSegmentPage([{ key: "blog", dir: "blog", notFound: "blog/404.html" }], "notFound", "/x", false, "")).toBeNull();
+  });
+
+  it("finds forbidden and unauthorized pages like not-found pages", () => {
+    const entries: SegmentEntry[] = [
+      { key: "", dir: "", forbidden: "403.html" },
+      { key: "admin", dir: "admin", forbidden: "admin/403.html", unauthorized: "admin/401.html" },
+    ];
+    expect(lookupSegmentPage(entries, "forbidden", "/x", true, "admin/users")?.file).toBe("admin/403.html");
+    expect(lookupSegmentPage(entries, "forbidden", "/x", true, "blog")?.file).toBe("403.html");
+    expect(lookupSegmentPage(entries, "unauthorized", "/x", true, "admin")?.file).toBe("admin/401.html");
+    expect(lookupSegmentPage(entries, "unauthorized", "/x", true, "blog")).toBeNull();
+    expect(lookupSegmentPage(entries, "forbidden", "/admin/zzz", false, "")?.file).toBe("admin/403.html");
+    expect(SEGMENT_KIND_OF_STATUS[401]).toBe("unauthorized");
+    expect(SEGMENT_KIND_OF_STATUS[403]).toBe("forbidden");
   });
 
   it("route walk", () => {
