@@ -378,7 +378,7 @@ Two modules export the same name and a page imports it from both, for example `i
 
 **API route file in the pages directory**
 
-API routes are served from `src/api`, not from the pages directory. A `.ts` or `.js` file under `src/pages/api` used to build into an empty page while `/api/...` answered 502. Move the file to `src/api/`. This is a warning.
+API routes are served from src/api, not from the pages directory. A `.ts` or `.js` file under src/pages/api used to build into an empty page while /api/... answered 502. Move the file to src/api/. This is a warning.
 
 ### KR7121
 

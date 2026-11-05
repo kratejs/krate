@@ -10,6 +10,8 @@ import (
 
 func flashCookieValue(t *testing.T, id, resultJSON string) string {
 	t.Helper()
+	// Serve tests in the same binary may have set the process-wide signing secret.
+	flashSecret.Store("")
 	return base64.RawURLEncoding.EncodeToString([]byte(`{"a":"` + id + `","r":` + resultJSON + `}`))
 }
 

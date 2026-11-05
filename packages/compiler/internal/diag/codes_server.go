@@ -48,7 +48,7 @@ func init() {
 			Code:  CodeMetadataNotStatic,
 			Title: "Page metadata could not be read at build time",
 			Explanation: "A page's `export const metadata` (or a `generateMetadata` that returns an object literal) " +
-				"becomes the document <title>, description, canonical link, Open Graph and Twitter tags when " +
+				"becomes the document `<title>`, description, canonical link, Open Graph and Twitter tags when " +
 				"its values are literals. When none can be resolved (the values are computed, or " +
 				"`generateMetadata` reads params), no tags are emitted. Write literal values, or render " +
 				"`<Head>` from the component for values that depend on props. This is a warning.",
@@ -56,11 +56,11 @@ func init() {
 		CodeInfo{
 			Code:  CodePagesEndpoint,
 			Title: "Prerendered endpoint failed",
-			Explanation: "A file such as src/pages/data.json.ts is a prerendered endpoint: its GET export runs " +
-				"once at build time and the response body is written to the output as a file (data.json). " +
-				"The build fails when the module has no GET export, GET throws, answers a non-2xx status, or the " +
+			Explanation: "A file such as `src/pages/data.json.ts` is a prerendered endpoint: its `GET` export runs " +
+				"once at build time and the response body is written to the output as a file (`data.json`). " +
+				"The build fails when the module has no `GET` export, `GET` throws, answers a non-2xx status, or the " +
 				"name has a dynamic segment. Endpoints run on Node (or the configured runtime) with the " +
-				"project's environment. For a response that depends on the request, use an API route in src/api.",
+				"project's environment. For a response that depends on the request, use an API route in `src/api`.",
 		},
 		CodeInfo{
 			Code:  CodeExportCollision,
