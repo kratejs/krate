@@ -44,7 +44,7 @@ for usage.
 | shadcn-style dashboard | Beta | n/a | n/a | Stable |
 | Next.js app corpus | Beta | n/a | n/a | Migration-ready |
 | Local components in islands | n/a | Beta | n/a | Supported |
-| npm React hook libraries (zustand, react-hook-form, SWR, TanStack Query, ...) | n/a | Partial | Beta | Run as Preact islands |
+| npm React hook libraries (zustand, react-hook-form, SWR, TanStack Query, ...) | n/a | Beta | Beta | Run as Preact islands |
 | CSS-in-JS (styled-components, emotion, MUI) | n/a | Partial | Partial | Client-only islands |
 | Island hydration control (client:visible, client:idle) | n/a | Beta | n/a | Astro-style directives |
 | SSR island hydration | n/a | Beta | Beta | Hydration-safe |
@@ -231,7 +231,7 @@ Evidence: `TestSegmentExportsRenderMode`, `TestDataCacheUsageInference`, `TestRe
 
 **Source:** n/a - **Islands:** Beta - **SSR:** Beta
 
-Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island chunks, server-rendered initial markup, hydration, and an island error boundary.
+Radix and other compiled packages run as Preact islands with live props, callbacks, portals, controlled primitives, per-island entries bundled with shared modules, server-rendered initial markup, hydration, and an island error boundary.
 
 Evidence: `TestIslandSignalPropBridge`, `TestIslandLocalComponent`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`
 
@@ -263,34 +263,33 @@ Evidence: `TestIslandLocalComponent`, `browser:/react-demo/`, `TestIslandSameFil
 
 ### npm React hook libraries (zustand, react-hook-form, SWR, TanStack Query, ...)
 
-**Source:** n/a - **Islands:** Partial - **SSR:** Beta
+**Source:** n/a - **Islands:** Beta - **SSR:** Beta
 
-A user module that calls a hook of an npm package built on React (or a store hook made by its factory, or a custom hook wrapping one) is bundled for Preact (react resolves to preact/compat, CommonJS require of react is bridged), rendered on the server and hydrated in place. The islands of one page share one chunk, so a store module is one store. Checked by hand in Chromium against zustand 5, valtio 2, jotai 2, react-redux 9 with Redux Toolkit 2, react-hook-form 7, SWR 2, TanStack Query 5, TanStack Table 8, react-i18next 15 and usehooks-ts 3; the repository tests use stand-in packages with the same import shapes.
+A user module that calls a hook of an npm package built on React (or a store hook made by its factory, or a custom hook wrapping one) is bundled for Preact (react resolves to preact/compat, CommonJS require of react is bridged), rendered on the server and hydrated in place. The islands of all pages are bundled together with code splitting, so a store module is one store for the whole site and its state survives client-side navigation, forward and back; a leaving island unmounts and releases its subscriptions. A provider a layout wraps around its children (a query client, a Redux store, a theme) is lifted into the islands, one instance for every island of the page, with nested layouts composing; a provider that cannot be lifted is reported (KR8015, KR8016). Pages rendered per request (SSR, ISR) answer with the islands' build-time markup and hydrate. Checked by hand in Chromium against zustand 5.0.16, TanStack Query 5.105.3, react-redux 9.3.1 with Redux Toolkit 2.14.0 and styled-components 6.6.0 (ThemeProvider), and earlier against valtio 2, jotai 2, react-hook-form 7, SWR 2, TanStack Table 8, react-i18next 15 and usehooks-ts 3; the repository tests use stand-in packages with the same import shapes and behavior.
 
 Known limits:
 
 - A layout, template or server-rendered page cannot host these hooks; the build fails with KR8013.
-- Providers wrapped around children in a layout do not reach islands in pages; put the provider in the island module.
-- Store state is per page: it does not survive client-side navigation.
+- A layout provider whose props read the layout's params, a signal or a state setter, or that renders markup of its own, cannot reach the islands (KR8015, KR8016).
+- State inside a component resets when its island unmounts on navigation; module-level state is kept.
 - A page that is itself such an island cannot take route props (KR8013) or use Krate-only APIs in the same module.
-- Pages rendered per request (dynamic, ISR, SSR) were not verified with these islands.
+- An island in a page rendered per request is server-rendered from build-time props; a prop known only per request makes it client-only.
 - Only Chromium was run for the browser check.
 
-Diagnostics: `KR8013`
+Diagnostics: `KR8013`, `KR8015`, `KR8016`
 
-Evidence: `TestReactHookLibraryPageIsland`, `TestReactHookLibraryComponentIslands`, `TestReactHookLibraryPageForms`, `TestReactLibraryValueInPageMakesIsland`, `TestReactIslandModulesAreNotKrateSource`, `TestReactHookLibraryInLayoutDiagnostic`, `TestPreactCompatChunkHasDefaultExport`, `TestBrowserReactLibraryIslands`
+Evidence: `TestReactHookLibraryPageIsland`, `TestReactHookLibraryComponentIslands`, `TestReactHookLibraryPageForms`, `TestReactLibraryValueInPageMakesIsland`, `TestReactIslandModulesAreNotKrateSource`, `TestReactHookLibraryInLayoutDiagnostic`, `TestPreactCompatChunkHasDefaultExport`, `TestBrowserReactLibraryIslands`, `TestLayoutProvidersReachIslands`, `TestIslandModulesAreSharedAcrossPages`, `TestLayoutProviderDiagnostics`, `TestIslandChunksSurviveDiskCache`, `TestPerRequestPageIslandStubs`
 
 ### CSS-in-JS (styled-components, emotion, MUI)
 
 **Source:** n/a - **Islands:** Partial - **SSR:** Partial
 
-Components built with styled-components, @emotion/styled, the emotion css prop (with the jsxImportSource pragma) or MUI run as Preact islands and are styled in the browser. They are client-only because the styles are created while rendering, so the server HTML holds an empty placeholder (KR8008 notice). A css prop without emotion's runtime is reported (KR8014). Checked by hand in Chromium against styled-components 6, @emotion/styled and @emotion/react 11 and MUI 9.
+Components built with styled-components, @emotion/styled, the emotion css prop (with the jsxImportSource pragma) or MUI run as Preact islands and are styled in the browser. They are client-only because the styles are created while rendering, so the server HTML holds an empty placeholder (KR8008 notice). A css prop without emotion's runtime is reported (KR8014). A ThemeProvider in a layout reaches them. Checked by hand in Chromium against styled-components 6, @emotion/styled and @emotion/react 11 and MUI 9.
 
 Known limits:
 
 - No server-rendered markup or styles: content appears when the island mounts.
 - A project-wide jsxImportSource for emotion in tsconfig is not supported; use the per-file pragma.
-- A ThemeProvider around the whole app in a layout does not reach islands.
 
 Diagnostics: `KR8008`, `KR8014`
 
@@ -310,11 +309,11 @@ Evidence: `TestIslandClientDirectives`, `TestClientDirectiveOnNonIslandWarns`, `
 
 **Source:** n/a - **Islands:** Beta - **SSR:** Beta
 
-Islands with build-time-known props are server-rendered with Preact and hydrated in place. Each island has its own chunk; unknown props, browser-only components, and portals fall back to client-only with a warning. Request-time SSR and streaming island regions remain separate work.
+Islands with build-time-known props are server-rendered with Preact and hydrated in place. The island entries of all pages are bundled together, so modules pages share are shared files. Unknown props, browser-only components, and portals fall back to client-only with a warning. A page rendered per request (SSR, ISR, streaming) answers with the placeholders and build-time markup of its islands instead of running them in the Node renderer; request-time props for an island are not supported.
 
 Diagnostics: `KR8008`, `KR8009`
 
-Evidence: `TestIslandSignalPropBridge`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`, `TestIslandBundleFailureUsesKR8009`
+Evidence: `TestIslandSignalPropBridge`, `TestIslandSSRWithHooks`, `TestIslandSSREscapesTextProps`, `TestIslandSSRUnknownPropFallsBackClientOnly`, `TestIslandSSRModuleFailureFallsBackClientOnly`, `TestIslandSharedSignalAcrossIslands`, `TestIslandSSRArrayObjectProps`, `TestIslandLocalNamedImport`, `TestIslandPerIslandChunks`, `TestIslandChunksMinified`, `browser:/react-demo/`, `TestIslandBundleFailureUsesKR8009`, `TestPerRequestPageIslandStubs`, `TestIslandChunksSurviveDiskCache`, `TestBrowserReactLibraryIslands`
 
 ### Supported Preact versions
 

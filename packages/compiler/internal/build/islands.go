@@ -186,8 +186,9 @@ func isBarePackageImport(src string) bool {
 //
 // resolveDir is the page module directory: relative local imports used inside
 // an island resolve from there, not from the project root.
-func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localImports []irtree.ExternalImport, resolveDir string) (string, string, map[string]string, *islandStyles, error) {
+func (b *Builder) buildIslands(owner string, exts []irtree.ExternalComponent, imports, localImports []irtree.ExternalImport, resolveDir string, prov *islandProviders) (string, string, map[string]string, *islandStyles, error) {
 	if len(exts) == 0 {
+		b.setIslandEntries(owner, nil)
 		return "", "", nil, nil, nil
 	}
 	if resolveDir == "" {
@@ -209,20 +210,14 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 	sink := &islandCSSSink{root: b.Root}
 	allImports := append(append([]irtree.ExternalImport(nil), imports...), localImports...)
 
-	chunksDir := filepath.Join(b.Cfg.OutDir, "chunks")
-	writeChunk := func(out []byte) (string, error) {
-		name := "island." + hashContent(out) + ".js"
-		if err := os.MkdirAll(chunksDir, 0755); err != nil {
-			return "", fmt.Errorf("creating chunks dir: %w", err)
-		}
-		if err := fsutil.WriteFileIfChanged(filepath.Join(chunksDir, name), out, 0644); err != nil {
-			return "", fmt.Errorf("writing island chunk: %w", err)
-		}
-		url := "/chunks/" + name
-		if bp := b.Cfg.BaseURLPath(); bp != "" {
-			url = bp + url
-		}
-		return url, nil
+	var entries []islandEntry
+	// register records the entry module of an island chunk and returns the URL
+	// the page script imports. The chunk itself is written once for the whole
+	// site (writeIslandBundles), so modules shared by pages are shared files.
+	register := func(src string) string {
+		name := b.islandEntryName(src, resolveDir)
+		entries = append(entries, islandEntry{Name: name, Source: src, ResolveDir: resolveDir, Virtual: prov.virtualModules()})
+		return b.islandEntryURL(name)
 	}
 	buildFailure := func(e irtree.ExternalComponent, err error) error {
 		d := diag.Diagnostic{
@@ -253,16 +248,11 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 			// Bundled together below so module-level state is shared.
 			reactGroup = append(reactGroup, e)
 		} else {
-			clientSrc := b.islandClientSource(e, used)
-			out, err := b.buildIslandBundle(clientSrc, resolveDir, false, nil, sink)
-			if err != nil {
+			clientSrc := b.islandClientSource(e, used, prov)
+			if _, err := b.buildIslandBundle(clientSrc, resolveDir, false, nil, sink, prov); err != nil {
 				return "", "", nil, nil, buildFailure(e, err)
 			}
-			url, err := writeChunk(out)
-			if err != nil {
-				return "", "", nil, nil, err
-			}
-			chunkURL[e.ID] = url
+			chunkURL[e.ID] = register(clientSrc)
 		}
 
 		if e.ClientOnly || (!e.ReactIsland && isCSSInJSPackage(e.Source)) {
@@ -273,8 +263,8 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 			printIslandWarning(e, diag.CodeIslandClientOnly, "island "+e.ID+" (<"+e.Local+">) stays client-only: a bridged prop has no build-time initial value", "pass build-time initial values, or keep the island client-only intentionally")
 			continue
 		}
-		ssrSrc := b.islandSSRSource(e, used)
-		html, err := b.buildIslandSSR(ssrSrc, resolveDir, sink)
+		ssrSrc := b.islandSSRSource(e, used, prov)
+		html, err := b.buildIslandSSR(ssrSrc, resolveDir, sink, prov)
 		if err != nil {
 			hint := "fix the browser-only dependency or keep the island client-only intentionally"
 			if strings.Contains(strings.ToLower(err.Error()), "provider") {
@@ -288,14 +278,11 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 		ssrHTML[e.ID] = html
 	}
 	if len(reactGroup) > 0 {
-		out, err := b.buildIslandBundle(b.islandGroupClientSource(reactGroup, allImports), resolveDir, false, nil, sink)
-		if err != nil {
+		groupSrc := b.islandGroupClientSource(reactGroup, allImports, prov)
+		if _, err := b.buildIslandBundle(groupSrc, resolveDir, false, nil, sink, prov); err != nil {
 			return "", "", nil, nil, buildFailure(reactGroup[0], err)
 		}
-		url, err := writeChunk(out)
-		if err != nil {
-			return "", "", nil, nil, err
-		}
+		url := register(groupSrc)
 		for _, e := range reactGroup {
 			chunkURL[e.ID] = url
 		}
@@ -310,6 +297,7 @@ func (b *Builder) buildIslands(exts []irtree.ExternalComponent, imports, localIm
 	if err != nil {
 		return "", "", nil, nil, err
 	}
+	b.setIslandEntries(owner, entries)
 	return boot.String(), importsJS.String(), ssrHTML, styles, nil
 }
 
@@ -327,19 +315,23 @@ func islandBootLine(e irtree.ExternalComponent, url string) string {
 		dir = "var d=" + strconv.Quote(url[:cut]) + ";"
 		lit = "d+" + strconv.Quote(url[cut:])
 	}
-	load := "import(" + lit + ").then(function(m){m.mount(" + strconv.Quote(e.ID) + ");}).catch(function(e){ console.error(\"krate external island:\", e); });"
+	// The placeholder is looked up when the page script runs, not when the
+	// chunk arrives: after a client-side navigation the ids repeat on the next
+	// page, and a late chunk must not mount into that page's placeholder.
+	sel := "[data-krate-island=" + e.ID + "]"
+	load := "import(" + lit + ").then(function(m){m.mount(" + strconv.Quote(e.ID) + ",el);}).catch(function(e){ console.error(\"krate external island:\", e); });"
 	switch e.Hydrate {
 	case "idle":
-		return "(function(){" + dir + "var go=function(){" + load + "};if(typeof requestIdleCallback===\"function\")requestIdleCallback(go,{timeout:2000});else setTimeout(go,200);})();\n"
+		return "(function(){" + dir + "var el=document.querySelector('" + sel + "');var go=function(){" + load + "};if(typeof requestIdleCallback===\"function\")requestIdleCallback(go,{timeout:2000});else setTimeout(go,200);})();\n"
 	case "visible":
-		return "(function(){" + dir + "var el=document.querySelector('[data-krate-island=" + e.ID + "]');var go=function(){" + load + "};" +
+		return "(function(){" + dir + "var el=document.querySelector('" + sel + "');var go=function(){" + load + "};" +
 			"if(!el||typeof IntersectionObserver!==\"function\"){go();return;}" +
 			"var t=el.firstElementChild,block=false;" +
 			"if(!t||getComputedStyle(t).display===\"contents\"){el.style.display=\"block\";t=el;block=true;}" +
 			"var io=new IntersectionObserver(function(es){for(var i=0;i<es.length;i++){if(es[i].isIntersecting){io.disconnect();if(block)el.style.display=\"contents\";go();return;}}},{rootMargin:\"200px\"});" +
 			"io.observe(t);})();\n"
 	}
-	return load + "\n"
+	return "(function(){var el=document.querySelector('" + sel + "');" + load + "})();\n"
 }
 
 // printIslandWarning emits a source-located island diagnostic. The build
@@ -405,13 +397,14 @@ class KrateIslandBoundary extends Component {
 }
 `
 
-func (b *Builder) islandClientSource(e irtree.ExternalComponent, imports []irtree.ExternalImport) string {
+func (b *Builder) islandClientSource(e irtree.ExternalComponent, imports []irtree.ExternalImport, prov *islandProviders) string {
 	var src strings.Builder
 	src.WriteString("import { Component, Fragment, h, hydrate, render } from \"preact\";\n")
+	src.WriteString(prov.importLines())
 	writeIslandImportLines(&src, imports)
 	src.WriteString(islandBoundaryJS)
-	src.WriteString("export function mount(only) {\n")
-	src.WriteString(islandMountBlock(e))
+	src.WriteString("export function mount(only, elArg) {\n")
+	src.WriteString(islandMountBlock(e, prov))
 	src.WriteString("}\n")
 	return src.String()
 }
@@ -420,9 +413,10 @@ func (b *Builder) islandClientSource(e irtree.ExternalComponent, imports []irtre
 // run the project's own modules (React libraries with module-level state, such
 // as a zustand store) must share one copy of those modules, which separate
 // chunks would not.
-func (b *Builder) islandGroupClientSource(group []irtree.ExternalComponent, all []irtree.ExternalImport) string {
+func (b *Builder) islandGroupClientSource(group []irtree.ExternalComponent, all []irtree.ExternalImport, prov *islandProviders) string {
 	var src strings.Builder
 	src.WriteString("import { Component, Fragment, h, hydrate, render } from \"preact\";\n")
+	src.WriteString(prov.importLines())
 	seen := map[string]bool{}
 	for _, e := range group {
 		for _, imp := range islandImportsFor(e.Subtree, all) {
@@ -435,18 +429,18 @@ func (b *Builder) islandGroupClientSource(group []irtree.ExternalComponent, all 
 		}
 	}
 	src.WriteString(islandBoundaryJS)
-	src.WriteString("export function mount(only) {\n")
+	src.WriteString("export function mount(only, elArg) {\n")
 	for _, e := range group {
-		src.WriteString(islandMountBlock(e))
+		src.WriteString(islandMountBlock(e, prov))
 	}
 	src.WriteString("}\n")
 	return src.String()
 }
 
-func islandMountBlock(e irtree.ExternalComponent) string {
+func islandMountBlock(e irtree.ExternalComponent, prov *islandProviders) string {
 	var src strings.Builder
-	fmt.Fprintf(&src, "\nif (only === void 0 || only === %q) {\n  const el = document.querySelector('[data-krate-island=%q]');\n", e.ID, e.ID)
-	src.WriteString("  if (el) {\n    try {\n")
+	fmt.Fprintf(&src, "\nif (only === void 0 || only === %q) {\n  const el = elArg || document.querySelector('[data-krate-island=%q]');\n", e.ID, e.ID)
+	src.WriteString("  if (el && el.isConnected !== false && !el.hasAttribute(\"data-krate-island-hydrated\")) {\n    try {\n")
 	if e.PropsJS != "" {
 		fmt.Fprintf(&src, "      const getProps=(globalThis.__krate_island_values||{})[%q];\n", e.ID)
 		fmt.Fprintf(&src, "      const subscribe=(globalThis.__krate_island_subscribe||{})[%q];\n", e.ID)
@@ -460,6 +454,7 @@ func islandMountBlock(e irtree.ExternalComponent) string {
 	} else {
 		fmt.Fprintf(&src, "      var __vnode=(%s);\n", e.Subtree)
 	}
+	src.WriteString(prov.wrapVNodeJS("__vnode"))
 	src.WriteString("      var __boundary=h(KrateIslandBoundary,{onError:function(err){console.error(\"krate external island:\",String((err&&(err.name?err.name+\": \":\"\"))+(err&&err.message||err)||err));el.setAttribute(\"data-krate-island-error\",\"\");}},__vnode);\n")
 	src.WriteString("      var __start=typeof performance!==\"undefined\"?performance.now():0;\n")
 	src.WriteString("      if (el.childNodes && el.childNodes.length) hydrate(__boundary,el); else render(__boundary,el);\n")
@@ -471,10 +466,11 @@ func islandMountBlock(e irtree.ExternalComponent) string {
 	return src.String()
 }
 
-func (b *Builder) islandSSRSource(e irtree.ExternalComponent, imports []irtree.ExternalImport) string {
+func (b *Builder) islandSSRSource(e irtree.ExternalComponent, imports []irtree.ExternalImport, prov *islandProviders) string {
 	var src strings.Builder
 	src.WriteString("import { h, Fragment } from \"preact\";\n")
 	src.WriteString("import renderToString from \"preact-render-to-string\";\n")
+	src.WriteString(prov.importLines())
 	writeIslandImportLines(&src, imports)
 	props := e.SSRPropsJS
 	if props == "" {
@@ -482,7 +478,7 @@ func (b *Builder) islandSSRSource(e irtree.ExternalComponent, imports []irtree.E
 	}
 	fmt.Fprintf(&src, "\nconst props = %s;\n", props)
 	src.WriteString("globalThis.__krate_island_html = \"\";\nglobalThis.__krate_island_ssr_error = \"\";\ntry { globalThis.__krate_island_html = renderToString(")
-	src.WriteString(e.Subtree)
+	src.WriteString(prov.wrapExprJS(e.Subtree))
 	src.WriteString("); } catch (e) { globalThis.__krate_island_ssr_error = String((e && (e.name ? e.name + \": \" : \"\") + (e.message || e)) || e) + \"\\n\" + String((e && e.stack) || \"\"); }\n")
 	return src.String()
 }
@@ -554,7 +550,7 @@ func esbuildRelFile(root, base, file string) string {
 	return filepath.ToSlash(file)
 }
 
-func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *api.Plugin, sink *islandCSSSink) ([]byte, error) {
+func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *api.Plugin, sink *islandCSSSink, prov *islandProviders) ([]byte, error) {
 	opts := api.BuildOptions{
 		Stdin: &api.StdinOptions{
 			Contents:   src,
@@ -578,6 +574,9 @@ func (b *Builder) buildIslandBundle(src, resolveDir string, ssr bool, plugin *ap
 		LogLevel:        api.LogLevelSilent,
 		Alias:           islandAlias(b.Root, ssr),
 		Plugins:         []api.Plugin{islandCSSPlugin(sink), islandJSXPlugin()},
+	}
+	if prov != nil {
+		opts.Plugins = append(opts.Plugins, islandEntryPlugin(nil, prov.virtualModules()))
 	}
 	if ssr {
 		opts.Format = api.FormatIIFE
@@ -692,8 +691,8 @@ func islandRequirePlugin() api.Plugin {
 	}
 }
 
-func (b *Builder) buildIslandSSR(src, resolveDir string, sink *islandCSSSink) (string, error) {
-	out, err := b.buildIslandBundle(src, resolveDir, true, islandRenderToStringPlugin(resolveDir), sink)
+func (b *Builder) buildIslandSSR(src, resolveDir string, sink *islandCSSSink, prov *islandProviders) (string, error) {
+	out, err := b.buildIslandBundle(src, resolveDir, true, islandRenderToStringPlugin(resolveDir), sink, prov)
 	if err != nil {
 		return "", err
 	}

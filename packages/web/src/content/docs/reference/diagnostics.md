@@ -502,6 +502,18 @@ A component calls a hook of an npm React library (zustand, react-hook-form, swr,
 
 A `css={...}` prop on a DOM element is understood only by emotion's JSX runtime. In a module that does not use it Krate renders `css` as a plain attribute, so the styles are lost. Add `/** @jsxImportSource @emotion/react */` to the top of the file so the module runs as a Preact island with emotion, or use CSS modules, Tailwind or a stylesheet.
 
+### KR8015
+
+**Layout provider cannot reach the islands of its pages**
+
+A layout wraps `{children}` in a component of a React library (a `QueryClientProvider`, a `ThemeProvider`, a Redux `Provider`). Islands run in Preact, so the layout cannot give them context. Krate lifts such wrappers into a module every island of the page renders inside, but only when their props can be computed without the layout's own state: constants, imports, module-level values, and `useState(() => value)` or `useMemo(() => value, [])` with no setter in use. A prop that reads the layout's `params`, a signal or a state setter cannot be lifted. Build the value from constants, or wrap the island's own module in the provider.
+
+### KR8016
+
+**Layout provider renders markup around its children**
+
+A component a layout wraps around `{children}` renders elements of its own, so it is not a context provider that can be moved into the islands: Krate renders the page content, and an island cannot sit inside markup that belongs to the layout. The layout keeps the component as it was and the islands of its pages do not see its context. Split the component into a provider that renders only its children and the markup, or put the provider inside the island's own module.
+
 ### KR8301
 
 **Render value keeps its first value**

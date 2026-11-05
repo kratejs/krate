@@ -127,14 +127,7 @@ func TestIslandSignalPropBridge(t *testing.T) {
 		t.Fatalf("island boot should subscribe the island to page signal changes:\n%s", jsBytes)
 	}
 
-	chunks, err := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "island.*.js"))
-	if err != nil || len(chunks) == 0 {
-		t.Fatalf("expected an island chunk: %v", err)
-	}
-	chunk, err := os.ReadFile(chunks[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	chunk := []byte(islandCode(t, cfg.OutDir))
 	if !strings.Contains(string(chunk), "badge") {
 		t.Fatalf("island chunk does not contain the external component:\n%s", chunk)
 	}
@@ -191,14 +184,7 @@ func TestIslandLocalComponent(t *testing.T) {
 	if !strings.Contains(html, "data-krate-island-ssr") || !strings.Contains(html, "local-card") || !strings.Contains(html, "hello:3") {
 		t.Fatalf("local island component was not server-rendered:\n%s", html)
 	}
-	chunks, err := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "island.*.js"))
-	if err != nil || len(chunks) == 0 {
-		t.Fatalf("expected an island chunk: %v", err)
-	}
-	chunk, err := os.ReadFile(chunks[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	chunk := []byte(islandCode(t, cfg.OutDir))
 	if !strings.Contains(string(chunk), "local-card") {
 		t.Fatalf("island chunk does not contain the local component:\n%s", chunk)
 	}
@@ -221,10 +207,7 @@ func TestIslandPerIslandChunks(t *testing.T) {
 	if err := New(root, cfg).BuildAll(); err != nil {
 		t.Fatalf("BuildAll: %v", err)
 	}
-	chunks, err := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "island.*.js"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	chunks := islandEntryFiles(cfg.OutDir)
 	if len(chunks) != 2 {
 		t.Fatalf("expected 2 per-island chunks, got %d: %v", len(chunks), chunks)
 	}
@@ -243,7 +226,7 @@ func TestIslandPerIslandChunks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(string(jsBytes), "import(\"/chunks/island."); got != 2 {
+	if got := strings.Count(string(jsBytes), "import(\"/chunks/island_"); got != 2 {
 		t.Fatalf("expected 2 dynamic island imports, got %d:\n%s", got, jsBytes)
 	}
 }
@@ -324,9 +307,8 @@ func TestIslandSSRUnknownPropFallsBackClientOnly(t *testing.T) {
 	if !strings.Contains(html, "data-krate-island") {
 		t.Fatalf("client-only island placeholder missing:\n%s", html)
 	}
-	chunks, err := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "island.*.js"))
-	if err != nil || len(chunks) == 0 {
-		t.Fatalf("expected a client island chunk: %v", err)
+	if len(islandEntryFiles(cfg.OutDir)) == 0 {
+		t.Fatalf("expected a client island chunk")
 	}
 	jsFiles, err := filepath.Glob(filepath.Join(cfg.OutDir, "index.*.js"))
 	if err != nil || len(jsFiles) == 0 {
@@ -361,14 +343,7 @@ func TestIslandSSRModuleFailureFallsBackClientOnly(t *testing.T) {
 	if strings.Contains(string(htmlBytes), "data-krate-island-ssr") {
 		t.Fatalf("browser-only island must not be server-rendered:\n%s", htmlBytes)
 	}
-	chunks, err := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "island.*.js"))
-	if err != nil || len(chunks) == 0 {
-		t.Fatalf("expected a client island chunk: %v", err)
-	}
-	chunk, err := os.ReadFile(chunks[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	chunk := []byte(islandCode(t, cfg.OutDir))
 	if !strings.Contains(string(chunk), "browser-only") || !strings.Contains(string(chunk), "innerWidth") {
 		t.Fatalf("browser-only component missing from client chunk:\n%s", chunk)
 	}
@@ -615,14 +590,7 @@ func TestIslandChunksMinified(t *testing.T) {
 		t.Fatalf("BuildAll: %v", err)
 	}
 
-	islands, err := filepath.Glob(filepath.Join(cfg.OutDir, "chunks", "island.*.js"))
-	if err != nil || len(islands) == 0 {
-		t.Fatalf("expected an island chunk: %v", err)
-	}
-	island, err := os.ReadFile(islands[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	island := []byte(islandCode(t, cfg.OutDir))
 	if strings.Contains(string(island), "// ../../node_modules") {
 		t.Errorf("production island chunk is not minified")
 	}

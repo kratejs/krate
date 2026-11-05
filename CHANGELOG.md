@@ -162,6 +162,29 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 - `Slider` takes `onChange` and `onInput`. A handler on an optional prop the
   call site does not pass binds nothing, so only the sliders that pass one
   hydrate.
+- Providers in layouts reach React-library islands. A `QueryClientProvider`,
+  react-redux `Provider`, `ThemeProvider` or a `Providers` component of the
+  project that a layout wraps around `{children}` is lifted out of the layout
+  and rendered around every island of the pages under it: server-rendered and
+  hydrated inside it, one client/store/theme for all islands of the page, nested
+  layouts composing (the inner provider wins). Props can be literals, imports,
+  module-level values or constants the layout computes (`useState(() => new
+  QueryClient())` with no setter). A wrapper that cannot be lifted is reported:
+  `KR8015` when its props read the layout's `params`, a signal or a state setter,
+  `KR8016` when it renders markup of its own. It used to fail with "No
+  QueryClient set" in the browser.
+- Island state survives client-side navigation. The island entries of all pages
+  are bundled together with code splitting, so a module several pages import (a
+  zustand or Redux store, a query client and its library) is one file with one
+  instance: the same store and value after navigating, going back and going
+  forward, and a leaving island unmounts and releases its subscriptions. The
+  island entry is now `chunks/island_<id>.js`, revalidated on each visit, with
+  immutable shared chunks `chunks/isl-<hash>.js`.
+- Islands work in pages rendered per request (`dynamic = "force-dynamic"`, ISR,
+  streaming). The Node renderer used to run the island components, fail with
+  "Invalid hook call" and silently serve the build-time body (dropping the
+  page's dynamic content); the server bundle now stubs each island with its
+  placeholder and build-time markup.
 
 ### Fixed
 
@@ -298,6 +321,9 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   (`<Link href="/docs/page#section">` landed at the top).
 - `krate start` refused a site that has no root page (no top-level
   `index.html`) with "no build output found".
+- A second `krate build` that replayed island pages from the disk cache wrote no
+  island chunks and no Preact import map, so every island on a cached page was
+  broken. The cache entry now carries the page's island entries.
 
 ### Security
 
