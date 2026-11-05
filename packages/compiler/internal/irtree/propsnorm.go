@@ -106,7 +106,20 @@ func normalizePropsFn(fn *ast.FnDecl) *ast.FnDecl {
 		body = s.subStmts(body)
 		restName = "__rest"
 	}
+	// A local used as an element type (`{ as: Tag = "div" }`, then <Tag/>)
+	// cannot be replaced by a props read: a JSX tag is a name. It stays a
+	// local, declared first from the props read, so the build resolves it like
+	// any other tag variable.
+	tags := jsxTagLocals(body, locals)
+	var tagDecls []ast.Stmt
+	var rewritten []propsLocal
 	for _, l := range locals {
+		if tags[l.name] {
+			tagDecls = append(tagDecls, &ast.VarStmt{Position: p.Position, Kind: ast.VarConst,
+				Decls: []*ast.VarDecl{{Name: l.name, Init: l.read}}})
+			continue
+		}
+		rewritten = append(rewritten, l)
 		s := &listParamSubstituter{param: l.name, elem: l.read}
 		body = s.subStmts(body)
 	}
@@ -114,9 +127,10 @@ func normalizePropsFn(fn *ast.FnDecl) *ast.FnDecl {
 		s := &listParamSubstituter{param: restName, elem: &ast.Identifier{Name: propsName}, keepSpread: true}
 		body = s.subStmts(body)
 	}
-	if bodyMentionsAny(body, locals) {
+	if bodyMentionsAny(body, rewritten) {
 		return nil
 	}
+	body = append(tagDecls, body...)
 	cp := *fn
 	cp.Params = []*ast.Param{{Position: p.Position, Name: propsName}}
 	if restName != "" {
@@ -188,6 +202,31 @@ func bindingsOf(locals []propsLocal) []propsBinding {
 	out := make([]propsBinding, len(locals))
 	for i, l := range locals {
 		out[i] = propsBinding{local: l.name}
+	}
+	return out
+}
+
+// jsxTagLocals returns the locals that name an element type in body, as
+// <Tag> or <Tag.Member>.
+func jsxTagLocals(body []ast.Stmt, locals []propsLocal) map[string]bool {
+	want := make(map[string]bool, len(locals))
+	for _, l := range locals {
+		want[l.name] = true
+	}
+	out := map[string]bool{}
+	for _, st := range body {
+		WalkAST(st, func(n any) bool {
+			if op, ok := n.(*ast.JSXOpening); ok {
+				root := op.Name
+				if i := strings.IndexByte(root, '.'); i >= 0 {
+					root = root[:i]
+				}
+				if want[root] {
+					out[root] = true
+				}
+			}
+			return true
+		})
 	}
 	return out
 }

@@ -43,6 +43,17 @@ func (b *builder) warnUnrenderedComponent(name string, el *ast.JSXElement) {
 			return
 		}
 	}
+	if b.boundVariable(name) {
+		// A variable that held a tag the build could not fold. Rendering a
+		// placeholder would drop the element and its children without a trace.
+		// A runtime component is compiled to request-time JavaScript, where a
+		// tag held in a variable is an ordinary value; it needs no fold.
+		if b.currentNode == nil || b.currentNode.Tier != TierRuntime {
+			b.errorCodeAt(el.Position, diag.CodeDynamicTag, "<"+name+"> is an element type held in a variable the build cannot resolve to one tag",
+				"pass the tag as a string the build can see (a const, a prop or its default), render each case as its own element, or choose the tag per request in a *.runtime.tsx component")
+		}
+		return
+	}
 	b.warnAt(el.Position, "component <"+name+"> could not be resolved and will not render",
 		"import <"+name+"> (or check its spelling); a component must be a function declaration or a const bound to an arrow or function expression")
 }
@@ -324,4 +335,16 @@ func (b *builder) hookDiagAt(pos ast.Pos, h HookDiag) {
 		}
 	}
 	b.buildErrs = append(b.buildErrs, d)
+}
+
+// boundVariable reports whether name is declared as a variable in the scope of
+// the component being built: a local, a parameter or a module-level value.
+func (b *builder) boundVariable(name string) bool {
+	if b.localParamNames[name] || bindingScopeDeclares(blockBindingNames(b.localFnBody), name) {
+		return true
+	}
+	if _, ok := b.moduleConstInits[name]; ok {
+		return true
+	}
+	return false
 }

@@ -649,20 +649,18 @@ func sortedKeysExpr(m map[string]ast.Expr) []string {
 	return keys
 }
 
-// resolveTagAlias resolves a JSX tag name that is bound to a local variable to
-// the concrete tag it aliases, when the binding folds at build time:
+// resolveTagAlias resolves a JSX tag name that is bound to a variable to the
+// concrete tag it names, when the binding folds at build time:
 //
 //	const Comp = asChild ? Slot : "button";  <Comp/>
+//	const Tag = "section";                  <Tag/>   (also a prop or its default)
 //
-// Returns "" when the name is not such an alias or the condition depends on a
-// runtime signal (in which case the component stays unresolved).
+// Returns "" when the name is not such an alias or the value depends on a
+// runtime signal or an unknown input (the caller then reports it).
 func (b *builder) resolveTagAlias(name string) string {
 	// Only uppercase tags are component references; lowercase tags are always
 	// intrinsic HTML elements and must never alias a same-named local.
 	if len(name) == 0 || name[0] < 'A' || name[0] > 'Z' {
-		return ""
-	}
-	if b.localFnBody == nil {
 		return ""
 	}
 	for _, stmt := range b.localFnBody {
@@ -674,16 +672,59 @@ func (b *builder) resolveTagAlias(name string) string {
 			if decl.Name != name || decl.Init == nil {
 				continue
 			}
-			return b.foldTagExpr(decl.Init)
+			if b.referencesSignal(decl.Init) {
+				// Folded locals keep their build-time initial; a tag read
+				// from a signal must not freeze at it.
+				return ""
+			}
+			if tag := b.foldTagExpr(decl.Init); tag != "" {
+				return tag
+			}
+		}
+	}
+	return b.tagFromScope(name)
+}
+
+// tagFromScope returns the HTML tag a variable holds when the build knows its
+// value: a module constant, a prop passed by the caller, a parameter default
+// or a local that folded.
+func (b *builder) tagFromScope(name string) string {
+	if b.isSignalName(name) {
+		return ""
+	}
+	if v, ok := b.localProps[name]; ok && v.Kind() == jsvalue.KindString {
+		if tag := v.StringValue(); IsHTMLTagName(tag) {
+			return tag
 		}
 	}
 	return ""
 }
 
+// IsHTMLTagName reports whether s can name an intrinsic element: it starts
+// with a lowercase letter, so it is never mistaken for a component.
+func IsHTMLTagName(s string) bool {
+	if s == "" || s[0] < 'a' || s[0] > 'z' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
 // foldTagExpr resolves a tag expression to a concrete tag name when it is a
-// literal tag string or a conditional whose test folds. Slot/forwardRef-style
-// wrappers fold to themselves. Returns "" when unresolvable.
+// literal tag string, a conditional whose test folds, or any expression whose
+// value folds to a tag string. Slot/forwardRef-style wrappers fold to
+// themselves. Returns "" when unresolvable.
 func (b *builder) foldTagExpr(expr ast.Expr) string {
+	// A tag that reads a signal changes after hydration; the build-time
+	// initial would freeze the element, so it does not fold.
+	if _, lit := expr.(*ast.Literal); !lit && b.referencesSignal(expr) {
+		return ""
+	}
 	switch e := expr.(type) {
 	case *ast.Literal:
 		if e.Kind == ast.StringLit {
@@ -691,8 +732,14 @@ func (b *builder) foldTagExpr(expr ast.Expr) string {
 		}
 		return ""
 	case *ast.Identifier:
+		if tag := b.tagFromScope(e.Name); tag != "" {
+			return tag
+		}
 		// A component reference (Slot, Button, ...) is already a valid tag.
-		return e.Name
+		if e.Name != "" && e.Name[0] >= 'A' && e.Name[0] <= 'Z' {
+			return e.Name
+		}
+		return ""
 	case *ast.ConditionalExpr:
 		testV := b.evalValue(e.Test)
 		if testV.IsUnknown() {
@@ -704,6 +751,11 @@ func (b *builder) foldTagExpr(expr ast.Expr) string {
 		return b.foldTagExpr(e.Alternate)
 	case *ast.TypeAssertion:
 		return b.foldTagExpr(e.Expr)
+	case *ast.ParenExpr:
+		return b.foldTagExpr(e.Expr)
+	}
+	if v := b.evalValue(expr); !v.ContainsUnknown() && v.Kind() == jsvalue.KindString && IsHTMLTagName(v.StringValue()) {
+		return v.StringValue()
 	}
 	return ""
 }

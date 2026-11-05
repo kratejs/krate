@@ -580,6 +580,12 @@ Hydration code (an event handler, effect, derived value, text binding or a modul
 
 Client code and statically rendered pages cannot read process.env or import.meta.env values: they are build and server-time only and are never written into HTML or JavaScript. The read yields undefined. Name the variable with the KRATE_PUBLIC_ prefix (KRATE_PUBLIC_API_URL) to inline its value at build time, or read it in a server component, API route or server action instead. import.meta.env.MODE, DEV, PROD, BASE_URL and SSR are always available.
 
+### KR8320
+
+**Element type is not known at build time**
+
+`<Tag>` where `Tag` is a variable (`const Tag = as || "div"`, a prop, a value read from state) is rendered as the element it names. The build resolves it when the variable folds to one tag name: a string constant, a prop the caller passes or its default, or a condition on those. This one does not, for example because it depends on a signal or on a value only known at request time, and the page would otherwise contain an empty placeholder instead of the element and its children, so the build fails. Pass the tag as a string the build can see, render each case as its own element (`{wide ? <section>...</section> : <div>...</div>}`), or move the component to a `*.runtime.tsx` file to choose the tag per request.
+
 ### KR8601
 
 **Unsupported page segment export value**

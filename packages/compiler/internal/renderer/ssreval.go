@@ -833,11 +833,26 @@ func (e *SSREval) resolveTagAlias(name string) string {
 	if len(name) == 0 || name[0] < 'A' || name[0] > 'Z' {
 		return ""
 	}
-	expr, ok := e.tagAliases[name]
-	if !ok {
+	if expr, ok := e.tagAliases[name]; ok {
+		if tag := e.foldTagExpr(expr); tag != "" {
+			return tag
+		}
+	}
+	return e.tagFromScope(name)
+}
+
+// tagFromScope returns the HTML tag a variable holds when its value is known:
+// a module constant, a prop passed by the caller, a parameter default or a
+// local computed from them.
+func (e *SSREval) tagFromScope(name string) string {
+	v := e.value(&ast.Identifier{Name: name})
+	if v.ContainsUnknown() || v.Kind() != jsvalue.KindString {
 		return ""
 	}
-	return e.foldTagExpr(expr)
+	if tag := v.StringValue(); irtree.IsHTMLTagName(tag) {
+		return tag
+	}
+	return ""
 }
 
 func (e *SSREval) foldTagExpr(expr ast.Expr) string {
@@ -848,7 +863,13 @@ func (e *SSREval) foldTagExpr(expr ast.Expr) string {
 		}
 		return ""
 	case *ast.Identifier:
-		return t.Name
+		if tag := e.tagFromScope(t.Name); tag != "" {
+			return tag
+		}
+		if t.Name != "" && t.Name[0] >= 'A' && t.Name[0] <= 'Z' {
+			return t.Name
+		}
+		return ""
 	case *ast.ConditionalExpr:
 		test := e.value(t.Test)
 		truthy, known := test.Truthy()
@@ -861,6 +882,11 @@ func (e *SSREval) foldTagExpr(expr ast.Expr) string {
 		return e.foldTagExpr(t.Alternate)
 	case *ast.TypeAssertion:
 		return e.foldTagExpr(t.Expr)
+	case *ast.ParenExpr:
+		return e.foldTagExpr(t.Expr)
+	}
+	if v := e.value(expr); !v.ContainsUnknown() && v.Kind() == jsvalue.KindString && irtree.IsHTMLTagName(v.StringValue()) {
+		return v.StringValue()
 	}
 	return ""
 }
@@ -1378,6 +1404,13 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 		// A component held in a local or prop (e.g. `const Comp = props.as`).
 		if v, ok := e.in.Scope.Lookup(name); ok && v.IsFunction() {
 			return e.evalComponentValue(v, el)
+		}
+		if _, bound := e.in.Scope.Lookup(name); bound || e.moduleInits[name] != nil {
+			e.errs = append(e.errs, diag.Diagnostic{Line: el.Position.Line, Col: el.Position.Col,
+				Message: "<" + name + "> is an element type held in a variable the build cannot resolve to one tag",
+				Hint:    "pass the tag as a string the build can see (a const, a prop or its default), or render each case as its own element",
+				Code:    diag.CodeDynamicTag})
+			return ""
 		}
 		e.addDiag(el.Position, "unknown component <"+name+"> in a build-time rendered component",
 			"import or define "+name+" so it can be rendered; an unresolved component is not silently dropped")

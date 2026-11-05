@@ -56,6 +56,29 @@ elements and **no list runtime, list markers, or `kbindList` call**. A list is
 kept dynamic only when its source is signal-backed or otherwise unknown at
 build time.
 
+## Element types held in variables
+
+`<Tag>` where `Tag` is a variable renders the element it names when the build
+can fold the value to one tag:
+
+```tsx
+const Wrap = "section";
+
+function Box({ as: Tag = "div", children }) {
+  return <Tag>{children}</Tag>;
+}
+
+<Wrap><Box as="h2">Title</Box></Wrap>
+```
+
+A string constant, a prop the caller passes, a parameter default, and a
+condition on those all fold. A tag that depends on a signal, on a value only
+known at request time, or on an omitted prop with no default does not: the
+build stops with a [KR8320](/docs/reference/diagnostics/#kr8320) error instead of
+emitting an empty placeholder. Pass the tag as a string, render each case as
+its own element, or put the component in a `*.runtime.tsx` file, where the tag
+is an ordinary JavaScript value at request time.
+
 ## Reactive values
 
 A known initial value is not the same as a static value. If an expression reads
