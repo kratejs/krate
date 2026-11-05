@@ -1,4 +1,6 @@
-import { createSignal, createEffect, onMount } from "@krate/runtime";
+import { createSignal, createEffect, onMount, onCleanup, subscribeNavigation, getNavigationState } from "@krate/runtime";
+import { activeNavLink } from "./nav";
+import { PLATFORM_PREPAINT } from "./platform";
 
 /**
  * Shared site shell: header, footer, theme toggle, and the marketing HomeLayout.
@@ -11,6 +13,11 @@ export interface SiteNavLink {
   href: string;
   /** Open in a new tab (external links). */
   external?: boolean;
+  /**
+   * `exact` marks the link only on its own page. By default a link is also
+   * marked on the pages below it ("/docs/" on "/docs/start/"), except "/".
+   */
+  match?: "exact" | "prefix";
 }
 
 export interface SiteSocial {
@@ -31,6 +38,11 @@ export interface SiteConfig {
   nav?: SiteNavLink[];
   /** Social icon links (header + footer). */
   social?: SiteSocial[];
+  /**
+   * Brand block at the start of the footer: logo, name and a short line. `true`
+   * reuses the header brand; an object overrides any part of it.
+   */
+  footerBrand?: boolean | { text?: string; href?: string; logo?: string; logoUrl?: string; tagline?: string };
   /** Footer note (left side). */
   footerNote?: string;
   /** Footer license/right side. */
@@ -50,15 +62,16 @@ const DEFAULT_BRAND: NonNullable<SiteConfig["brand"]> = { text: "krate", href: "
 
 /**
  * Runs before the stylesheet paints so the persisted (or OS-preferred) color
- * scheme is applied to <html> without a flash of the wrong theme. Every shell
- * that renders ThemeToggle should include this.
+ * scheme is applied to <html> without a flash of the wrong theme. It also sets
+ * data-platform ("mac" or "other") for platform-specific shortcut labels. Every
+ * shell that renders ThemeToggle should include this.
  */
 export function ThemePrePaint(props: { storageKey?: string }) {
   const key = JSON.stringify(props.storageKey || "theme");
   const script =
     "(function(){try{var k=" + key +
     ";var s=localStorage.getItem(k);if(s!=='dark'&&s!=='light'){s=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}" +
-    "document.documentElement.setAttribute('data-theme',s);}catch(e){}})();";
+    "document.documentElement.setAttribute('data-theme',s);}catch(e){}" + PLATFORM_PREPAINT + "})();";
   return (
     <Head>
       <script>{script}</script>
@@ -110,6 +123,64 @@ export function ThemeToggle(props: { storageKey?: string }) {
   );
 }
 
+/**
+ * Primary navigation. The link for the current page gets `aria-current="page"`
+ * (`"true"` when the page is below the link's section). The state is set again
+ * on every client-side navigation, because the header sits in a layout the
+ * router keeps mounted. Pass `currentPath` to have it in the built HTML too.
+ */
+export function SiteNav(props: { items: SiteNavLink[]; currentPath?: string }) {
+  const items = props.items || [];
+  const initial = props.currentPath ? activeNavLink(items, props.currentPath) : null;
+  var navRef: HTMLElement | null = null;
+
+  onMount(function () {
+    if (!navRef || items.length === 0) return;
+    var nav = navRef;
+    function mark(path: string) {
+      var hit = activeNavLink(items, path);
+      var anchors = nav.querySelectorAll("a");
+      for (var i = 0; i < anchors.length; i++) {
+        if (hit && hit.index === i) anchors[i].setAttribute("aria-current", hit.exact ? "page" : "true");
+        else anchors[i].removeAttribute("aria-current");
+      }
+    }
+    mark(getNavigationState().pathname);
+    var stop = subscribeNavigation(function (state) {
+      mark(state.pathname);
+    });
+    onCleanup(stop);
+  });
+
+  return (
+    <nav class="site-nav" aria-label="Primary" ref={navRef}>
+      {items.map((item, i) => (
+        <Link
+          href={item.href}
+          {...(initial && initial.index === i ? { "aria-current": initial.exact ? "page" : "true" } : {})}
+        >
+          {item.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+function BrandMark(props: { logo?: string; logoUrl?: string; text: string }) {
+  return (
+    <>
+      {props.logoUrl ? (
+        <img class="site-logo site-logo-image" src={props.logoUrl} alt="" aria-hidden="true" width="28" height="28" />
+      ) : props.logo ? (
+        <span class="site-logo">{props.logo}</span>
+      ) : (
+        <></>
+      )}
+      <span class="site-navbar-name">{props.text}</span>
+    </>
+  );
+}
+
 export function SiteHeader(props: { site: SiteConfig; currentPath?: string; children?: any }) {
   const site = props.site || {};
   const brand = site.brand || DEFAULT_BRAND;
@@ -119,20 +190,9 @@ export function SiteHeader(props: { site: SiteConfig; currentPath?: string; chil
   return (
     <header class="site-navbar">
       <Link className="site-navbar-brand" href={brand.href || "/"}>
-        {brand.logoUrl ? (
-          <img class="site-logo site-logo-image" src={brand.logoUrl} alt="" aria-hidden="true" width="28" height="28" />
-        ) : brand.logo ? (
-          <span class="site-logo">{brand.logo}</span>
-        ) : (
-          <></>
-        )}
-        <span class="site-navbar-name">{brand.text}</span>
+        <BrandMark logo={brand.logo} logoUrl={brand.logoUrl} text={brand.text} />
       </Link>
-      <nav class="site-nav">
-        {nav.map((item) => (
-          <Link href={item.href}>{item.label}</Link>
-        ))}
-      </nav>
+      <SiteNav items={nav} currentPath={props.currentPath} />
       <div class="site-navbar-actions">
         {social.map((s) => (
           <a class="social-link" href={s.url} aria-label={s.name || "Social link"} rel="noopener noreferrer" target="_blank">
@@ -148,19 +208,44 @@ export function SiteHeader(props: { site: SiteConfig; currentPath?: string; chil
 export function SiteFooter(props: { site: SiteConfig }) {
   const site = props.site || {};
   const columns = site.footerColumns || [];
+  const own = site.footerBrand === true ? {} : site.footerBrand || null;
+  const headerBrand = site.brand || DEFAULT_BRAND;
+  // The footer brand inherits the header's mark unless it brings its own.
+  const ownMark = !!(own && (own.logo || own.logoUrl));
+  const brand = own
+    ? {
+        text: own.text || headerBrand.text,
+        href: own.href || headerBrand.href || "/",
+        logo: ownMark ? own.logo : headerBrand.logo,
+        logoUrl: ownMark ? own.logoUrl : headerBrand.logoUrl,
+        tagline: own.tagline || "",
+      }
+    : null;
   return (
     <footer class="site-footer">
       <div class="site-footer-inner">
-        {columns.length > 0 && (
-          <div class="site-footer-columns">
-            {columns.map((col) => (
-              <div class="site-footer-column">
-                <div class="site-footer-column-title">{col.title}</div>
-                {col.links.map((l) => (
-                  <Link href={l.href}>{l.label}</Link>
+        {(brand || columns.length > 0) && (
+          <div class={brand ? "site-footer-top has-brand" : "site-footer-top"}>
+            {brand && (
+              <div class="site-footer-brand">
+                <Link className="site-footer-brand-link" href={brand.href}>
+                  <BrandMark logo={brand.logo} logoUrl={brand.logoUrl} text={brand.text} />
+                </Link>
+                {brand.tagline && <p class="site-footer-tagline">{brand.tagline}</p>}
+              </div>
+            )}
+            {columns.length > 0 && (
+              <div class="site-footer-columns">
+                {columns.map((col) => (
+                  <div class="site-footer-column">
+                    <div class="site-footer-column-title">{col.title}</div>
+                    {col.links.map((l) => (
+                      <Link href={l.href}>{l.label}</Link>
+                    ))}
+                  </div>
                 ))}
               </div>
-            ))}
+            )}
           </div>
         )}
         <div class="site-footer-meta">

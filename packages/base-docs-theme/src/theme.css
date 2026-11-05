@@ -1886,6 +1886,19 @@ a.docs-tag:hover {
     display: none;
 }
 
+/* Shortcut label for the platform; data-platform is set before first paint. */
+.krate-kbd-mac {
+    display: none;
+}
+
+:root[data-platform="mac"] .krate-kbd-mac {
+    display: inline;
+}
+
+:root[data-platform="mac"] .krate-kbd-other {
+    display: none;
+}
+
 .krate-docs-search:has(.krate-docs-search-kbd:not(:empty)) .krate-docs-search-input {
     padding-right: 2.6rem;
 }
