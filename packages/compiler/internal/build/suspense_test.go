@@ -259,7 +259,10 @@ func TestRuntimeChunkSuspenseConditional(t *testing.T) {
 	}
 	outDir := t.TempDir()
 	read := func(suspense bool) string {
-		rel := writeRuntimeChunk(outDir, true, repoRoot, runtimeChunkOptions{SPA: true, Suspense: suspense})
+		rel, err := writeRuntimeChunk(outDir, true, repoRoot, runtimeChunkOptions{SPA: true, Suspense: suspense})
+		if err != nil {
+			t.Fatal(err)
+		}
 		data, err := os.ReadFile(filepath.Join(outDir, rel))
 		if err != nil {
 			t.Fatal(err)

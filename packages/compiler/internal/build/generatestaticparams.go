@@ -763,7 +763,10 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if needsHydrate {
 		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
 		dceJS = append(dceJS, hydrationJS)
-		hydrationJS = b.writeLazyChunks(hydrationJS, emitResult.LazyChunks, pageDir, spp.OutPath)
+		var lazyErr error
+		if hydrationJS, lazyErr = b.writeLazyChunks(hydrationJS, emitResult.LazyChunks, pageDir, spp.OutPath); lazyErr != nil {
+			return nil, "", lazyErr
+		}
 		if islandJS != "" {
 			hydrationJS = strings.TrimSpace(hydrationJS + "\n" + islandJS)
 		}
@@ -790,7 +793,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 			jsFile = "index." + jsHash + ".js"
 			finalJS = substituteImportMetaURL(finalJS, spp.OutPath, jsFile, b.Cfg.BaseURLPath())
 			jsPath := filepath.Join(pageDir, jsFile)
-			_ = os.WriteFile(jsPath, []byte(finalJS), 0644)
+			if err := writeOutput(jsPath, []byte(finalJS)); err != nil {
+				return nil, "", err
+			}
 			hydrationJS = finalJS
 		} else {
 			hydrationJS = ""

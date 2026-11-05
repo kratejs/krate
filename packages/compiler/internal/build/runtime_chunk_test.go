@@ -38,7 +38,10 @@ func TestRuntimeChunkWithoutSPA(t *testing.T) {
 	}
 	repoRoot := filepath.Clean(filepath.Join(pkgDir, "..", "..", "..", ".."))
 	outDir := t.TempDir()
-	rel := writeRuntimeChunk(outDir, true, repoRoot, runtimeChunkOptions{SPA: false})
+	rel, err := writeRuntimeChunk(outDir, true, repoRoot, runtimeChunkOptions{SPA: false})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if rel == "" {
 		t.Skip("runtime dist or lite bundle not available")
 	}
@@ -64,7 +67,10 @@ func TestRuntimeChunkCompatConditional(t *testing.T) {
 	outDir := t.TempDir()
 
 	readChunk := func(compat bool) string {
-		rel := writeRuntimeChunk(outDir, true, repoRoot, runtimeChunkOptions{SPA: true, Compat: compat})
+		rel, err := writeRuntimeChunk(outDir, true, repoRoot, runtimeChunkOptions{SPA: true, Compat: compat})
+		if err != nil {
+			t.Fatal(err)
+		}
 		if rel == "" {
 			t.Skip("runtime dist not available")
 		}

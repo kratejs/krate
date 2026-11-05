@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
 )
 
@@ -14,17 +13,19 @@ import (
 // page script with the chunk's URL. The page script loads the chunk with
 // __krateLazy when it hydrates, so the code is fetched on demand rather than
 // shipped in the page bundle.
-func (b *Builder) writeLazyChunks(pageJS string, chunks []renderer.LazyChunk, pageDir, route string) string {
+func (b *Builder) writeLazyChunks(pageJS string, chunks []renderer.LazyChunk, pageDir, route string) (string, error) {
 	for _, c := range chunks {
 		code := strings.TrimSpace(c.JS)
 		if b.shouldMinifyJS() {
 			code = strings.TrimSpace(minifyJS(code))
 		}
 		name := "lazy-" + c.Name + "." + hashContent([]byte(code)) + ".js"
-		_ = fsutil.WriteFileIfChanged(filepath.Join(pageDir, name), []byte(code), 0644)
+		if err := writeOutput(filepath.Join(pageDir, name), []byte(code)); err != nil {
+			return "", err
+		}
 		pageJS = strings.ReplaceAll(pageJS, c.Token, pageScriptSrc(route, name, b.Cfg.BaseURLPath()))
 	}
-	return pageJS
+	return pageJS, nil
 }
 
 // suspenseMarkers are hydration identifiers provided by the Suspense runtime

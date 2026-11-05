@@ -701,10 +701,15 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	}
 
 	// Write shared runtime chunk (extracted from per-page bundles)
-	runtimeJS := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, b.runtimeChunkOptions(results))
+	runtimeJS, err := writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, b.runtimeChunkOptions(results))
+	if err != nil {
+		return results, err
+	}
 	warnMissingRuntime(runtimeJS, results)
 	if b.DevMode {
-		writeDevChunk(b.Cfg.OutDir, b.Root)
+		if _, err := writeDevChunk(b.Cfg.OutDir, b.Root); err != nil {
+			return results, err
+		}
 	}
 	// Island chunks are bundled for the whole site, so a page rebuilt alone
 	// refreshes the shared files its siblings import.
@@ -717,12 +722,18 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 
 	// Per-page stylesheets: each page links only the CSS its own module graph
 	// imported (deduplicated across pages sharing identical CSS).
-	b.writePageCSS(results)
+	if _, err := b.writePageCSS(results); err != nil {
+		return results, err
+	}
 
 	// Optional site-global stylesheet (Tailwind) linked on every page.
 	var globalCSS []string
 	if twCSS := b.tailwindCSS(); twCSS != "" {
-		if f := b.writeGlobalCSS(twCSS); f != "" {
+		f, err := b.writeGlobalCSS(twCSS)
+		if err != nil {
+			return results, err
+		}
+		if f != "" {
 			globalCSS = append(globalCSS, f)
 		}
 	}
@@ -734,7 +745,9 @@ func (b *Builder) BuildPages(pages []string) ([]*PageResult, error) {
 	// page's server bundle, and any runtime components it references. Done here
 	// (rather than by rebuilding the whole site) so a dev-mode edit stays a
 	// single-page rebuild even on a server-rendered site.
-	b.refreshPageServerArtifacts(results, runtimeJS, globalCSS)
+	if err := b.refreshPageServerArtifacts(results, runtimeJS, globalCSS); err != nil {
+		return results, err
+	}
 
 	if perrs := b.drainPluginErrs(); len(perrs) > 0 {
 		return results, fmt.Errorf("build failed: %d plugin error(s):\n  %s", len(perrs), strings.Join(perrs, "\n  "))
@@ -995,6 +1008,13 @@ func (b *Builder) BuildAll() error {
 	errorCount := 0
 	var failureMessages []string
 	var failureErrs []error
+	// failOutput records a shipped file that could not be written.
+	failOutput := func(err error) {
+		fmt.Fprintf(os.Stderr, "\n  %sx Error:%s %v\n", cRed, cReset, err)
+		failureMessages = append(failureMessages, "  "+err.Error())
+		failureErrs = append(failureErrs, err)
+		errorCount++
+	}
 
 	for res := range resultsCh {
 		if res.err != nil {
@@ -1110,22 +1130,34 @@ func (b *Builder) BuildAll() error {
 	}
 	runtimeJS := ""
 	if anyPageHasJS {
-		runtimeJS = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, b.runtimeChunkOptions(results))
+		var err error
+		runtimeJS, err = writeRuntimeChunk(b.Cfg.OutDir, b.shouldMinifyJS(), b.Root, b.runtimeChunkOptions(results))
+		if err != nil {
+			failOutput(err)
+		}
 
 		warnMissingRuntime(runtimeJS, results)
 	}
 	if b.DevMode {
-		writeDevChunk(b.Cfg.OutDir, b.Root)
+		if _, err := writeDevChunk(b.Cfg.OutDir, b.Root); err != nil {
+			failOutput(err)
+		}
 	}
 
 	// Per-page stylesheets: each page links only the CSS its own module graph
 	// imported (deduplicated across pages sharing identical CSS).
-	b.writePageCSS(results)
+	if _, err := b.writePageCSS(results); err != nil {
+		failOutput(err)
+	}
 
 	// Optional site-global stylesheet (Tailwind) linked on every page.
 	var globalCSS []string
 	if twCSS := b.tailwindCSS(); twCSS != "" {
-		if f := b.writeGlobalCSS(twCSS); f != "" {
+		f, err := b.writeGlobalCSS(twCSS)
+		if err != nil {
+			failOutput(err)
+		}
+		if f != "" {
 			globalCSS = append(globalCSS, f)
 		}
 	}
@@ -1190,7 +1222,7 @@ func (b *Builder) BuildAll() error {
 
 	// Copy processed <Image> variants into the output (served at /_krate/images/...)
 	if err := b.copyImageCacheToOut(); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sImage copy error:%s %v\n", cYellow, cReset, err)
+		failOutput(fmt.Errorf("copying processed images to %s: %w", filepath.Join(b.Cfg.OutDir, "_krate", "images"), err))
 	}
 
 	stopTools := b.phase("build:tools")
@@ -1230,7 +1262,9 @@ func (b *Builder) BuildAll() error {
 
 	// Compile server bundles for SSR/ISR/streaming pages
 	serverBundles, serverBundleErrs := compileServerBundles(b.importResolver(), results, b.Root, b.Cfg.OutDir, b.Cfg.Sourcemap, b.actionModules(), b.Cfg.BaseURLPath())
-	b.writeHighlightTables(serverBundles)
+	if err := b.writeHighlightTables(serverBundles); err != nil {
+		failOutput(err)
+	}
 	for _, err := range serverBundleErrs {
 		failureMessages = append(failureMessages, "  "+err.Error())
 		failureErrs = append(failureErrs, err)
@@ -1257,7 +1291,7 @@ func (b *Builder) BuildAll() error {
 
 	manifest.HashedAssets = collectHashedAssets(b.Cfg.OutDir, publicFiles)
 	if err := WriteManifest(manifest, b.Cfg.OutDir, serverBundles); err != nil {
-		fmt.Fprintf(os.Stderr, "  %sWarning: failed to write manifest:%s %v\n", cYellow, cReset, err)
+		failOutput(fmt.Errorf("writing the build manifest under %s: %w", ServerOutPath(b.Cfg.OutDir), err))
 	}
 
 	// Generate typed route declarations (.krate/types/routes.d.ts + bridge).
@@ -1609,7 +1643,7 @@ func appendMissingBlocks(sheet string, blocks []string) string {
 	return sheet
 }
 
-func (b *Builder) writeGlobalCSS(mergedCSS string) string {
+func (b *Builder) writeGlobalCSS(mergedCSS string) (string, error) {
 	cssFile := ""
 	if mergedCSS != "" {
 		processedCSS := mergedCSS
@@ -1631,10 +1665,12 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 			cssHash := hashContent(processedBytes)
 			cssFile = "styles." + cssHash + ".css"
 			cssPath := filepath.Join(b.Cfg.OutDir, cssFile)
-			_ = fsutil.WriteFileIfChanged(cssPath, processedBytes, 0644)
+			if err := writeOutput(cssPath, processedBytes); err != nil {
+				return "", err
+			}
 		}
 	}
-	return cssFile
+	return cssFile, nil
 }
 
 // writePageCSS writes one hashed stylesheet per page from the page's own CSS.
@@ -1643,7 +1679,7 @@ func (b *Builder) writeGlobalCSS(mergedCSS string) string {
 // page only downloads the CSS its own module graph imported. Syntax-highlight
 // (chroma) CSS is prepended only when the page actually renders highlighted
 // code. Returns the set of stylesheet filenames written.
-func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
+func (b *Builder) writePageCSS(results []*PageResult) (map[string]bool, error) {
 	written := make(map[string]bool)
 	// Memoize the expensive inline+directive+minify pipeline: many pages share
 	// byte-identical CSS (the docs theme is linked on every page), so process
@@ -1673,11 +1709,14 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 	// modern rules), so split the hybrid stylesheet per variant.
 	variants := b.legacyDocEnabled()
 
+	var writeErrs []error
 	write := func(file string, data []byte) {
 		if file == "" || written[file] {
 			return
 		}
-		_ = fsutil.WriteFileIfChanged(filepath.Join(b.Cfg.OutDir, file), data, 0644)
+		if err := writeOutput(filepath.Join(b.Cfg.OutDir, file), data); err != nil {
+			writeErrs = append(writeErrs, err)
+		}
 		written[file] = true
 	}
 	var lastFonts []string
@@ -1748,7 +1787,7 @@ func (b *Builder) writePageCSS(results []*PageResult) map[string]bool {
 			write(p.legacyFile, p.legacyData)
 		}
 	}
-	return written
+	return written, errors.Join(writeErrs...)
 }
 
 // codeTheme resolves the configured light and dark code themes. An unknown
@@ -2633,11 +2672,17 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		emitResult.TrackSources = b.Cfg.Sourcemap
 		rawJS := strings.TrimSpace(renderer.GenerateNewHydrationJS(emitResult))
 		if renderMode == RenderSSG {
-			rawJS = b.attachHighlight(rawJS, emitResult.HTML)
+			var hlErr error
+			if rawJS, hlErr = b.attachHighlight(rawJS, emitResult.HTML); hlErr != nil {
+				return nil, "", hlErr
+			}
 		}
 		b.warnShippedCollections(page, entryModule.Program, rawJS)
 		dceJS = append(dceJS, rawJS)
-		rawJS = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName)
+		var lazyErr error
+		if rawJS, lazyErr = b.writeLazyChunks(rawJS, emitResult.LazyChunks, pageDir, outName); lazyErr != nil {
+			return nil, "", lazyErr
+		}
 		if islandJS != "" {
 			rawJS = strings.TrimSpace(rawJS + "\n" + islandJS)
 		}
@@ -2683,7 +2728,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			jsFile = "index." + jsHash + ".js"
 			finalJS = substituteImportMetaURL(finalJS, outName, jsFile, b.Cfg.BaseURLPath())
 			jsPath := filepath.Join(pageDir, jsFile)
-			_ = fsutil.WriteFileIfChanged(jsPath, []byte(finalJS), 0644)
+			if err := writeOutput(jsPath, []byte(finalJS)); err != nil {
+				return nil, "", err
+			}
 
 			if b.Cfg.Sourcemap {
 				sm := mapJSON
@@ -2695,9 +2742,13 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 					// generated code embedded so devtools shows a coherent file.
 					sm = generateSourcemap(finalJS, "krate-hydration.js", finalJS)
 				}
-				_ = fsutil.WriteFileAtomic(jsPath+".map", []byte(sm), 0644)
+				if err := writeOutput(jsPath+".map", []byte(sm)); err != nil {
+					return nil, "", err
+				}
 				finalJS = appendSourceMappingURL(finalJS, jsFile+".map")
-				_ = fsutil.WriteFileIfChanged(jsPath, []byte(finalJS), 0644)
+				if err := writeOutput(jsPath, []byte(finalJS)); err != nil {
+					return nil, "", err
+				}
 			}
 
 			if b.DevMode {
@@ -2794,15 +2845,26 @@ func (b *Builder) tryDiskReplay(page string) (*PageResult, string, bool) {
 		return nil, "", false
 	}
 
+	// A replay that cannot write its files is a miss: the cold build then
+	// reports the failure with the path.
 	pageDir := filepath.Join(b.Cfg.OutDir, e.OutName)
 	if !e.IsErrorPage {
-		_ = os.MkdirAll(pageDir, 0755)
+		if err := mkdirOutput(pageDir); err != nil {
+			c.markMiss()
+			return nil, "", false
+		}
 	}
 	if len(e.JSBytes) > 0 && e.JSFile != "" {
-		_ = fsutil.WriteFileIfChanged(filepath.Join(pageDir, e.JSFile), e.JSBytes, 0644)
+		if err := writeOutput(filepath.Join(pageDir, e.JSFile), e.JSBytes); err != nil {
+			c.markMiss()
+			return nil, "", false
+		}
 	}
 	if len(e.AssetFiles) > 0 {
-		_ = b.writeAssetFiles(e.AssetFiles)
+		if err := b.writeAssetFiles(e.AssetFiles); err != nil {
+			c.markMiss()
+			return nil, "", false
+		}
 	}
 	b.registerWorkers(e.WorkerFiles, trueSet(e.WorkerEsm))
 	b.registerDynamicChunks(e.DynImports)
@@ -4773,8 +4835,7 @@ func (b *Builder) CompileAPIRoutes(routes []string) error {
 	if len(errCh) > 0 {
 		return <-errCh
 	}
-	b.mergeAPIRouteMeta(metas)
-	return nil
+	return b.mergeAPIRouteMeta(metas)
 }
 
 // apiRouteMeta records one compiled JS API route so the dev/prod server can
@@ -4903,9 +4964,9 @@ func formatEsbuildErrors(errs []api.Message) string {
 
 // mergeAPIRouteMeta writes/updates `.krate/api-routes.json`, preserving entries
 // for routes not touched by this (possibly incremental) build.
-func (b *Builder) mergeAPIRouteMeta(updates map[string]apiRouteMeta) {
+func (b *Builder) mergeAPIRouteMeta(updates map[string]apiRouteMeta) error {
 	if len(updates) == 0 {
-		return
+		return nil
 	}
 	manifestPath := filepath.Join(b.Root, ".krate", "api-routes.json")
 	merged := map[string]apiRouteMeta{}
@@ -4929,12 +4990,11 @@ func (b *Builder) mergeAPIRouteMeta(updates map[string]apiRouteMeta) {
 	for _, f := range files {
 		list = append(list, merged[f])
 	}
-	if err := os.MkdirAll(filepath.Dir(manifestPath), 0755); err != nil {
-		return
+	data, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
+		return err
 	}
-	if data, err := json.MarshalIndent(list, "", "  "); err == nil {
-		_ = fsutil.WriteFileAtomic(manifestPath, data, 0644)
-	}
+	return writeOutput(manifestPath, data)
 }
 
 // pageFontPreloads renders preload links for fonts the global stylesheet has
