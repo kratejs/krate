@@ -99,9 +99,8 @@ functions:
 
 ```tsx
 // @server - evaluated at build time, HTML baked in
-export default function Totals() {
-  const prices = [12, 30, 8];
-  return <p>{prices.length} items, total {prices.reduce((a, b) => a + b, 0)}</p>;
+export default function ServerTime() {
+  return <time>{new Date().toUTCString()}</time>;
 }
 ```
 

@@ -185,13 +185,18 @@ func TestRenderChild(t *testing.T) {
 }
 
 // evalSrc evaluates a JS expression with a few bindings in scope.
-func evalSrc(t *testing.T, src string) Value {
+func evalSrc(t *testing.T, src string) Value { return evalSrcVolatile(t, src, false) }
+
+// evalSrcVolatile is evalSrc with the build environment (clock, time zone,
+// locale) readable or not, as for text baked into HTML or for a constant.
+func evalSrcVolatile(t *testing.T, src string, volatile bool) Value {
 	t.Helper()
 	expr := ParseExprSource(src)
 	if expr == nil {
 		t.Fatalf("parse %q failed", src)
 	}
 	in := New(Hooks{})
+	in.Volatile = volatile
 	in.Scope.Define("count", Number(0))
 	in.Scope.Define("q", String("0"))
 	in.Scope.Define("n", Null())

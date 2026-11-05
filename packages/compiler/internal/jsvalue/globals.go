@@ -1,7 +1,9 @@
 package jsvalue
 
 import (
+	"github.com/kratejs/krate/packages/compiler/ast"
 	"math"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 )
@@ -9,8 +11,8 @@ import (
 // globalObject returns the built-in global with the given name. Only pure,
 // deterministic built-ins are provided; everything else (Date, Intl, Math.random,
 // ...) is left to the host (see Hooks) or reported as unresolved.
-func globalObject(name string) (Value, bool) {
-	v, ok := globalValue(name)
+func globalObject(in *Interp, name string) (Value, bool) {
+	v, ok := globalValue(in, name)
 	if !ok {
 		return v, false
 	}
@@ -55,10 +57,18 @@ func numberStatics() map[string]Value {
 	}
 }
 
-func globalValue(name string) (Value, bool) {
+func globalValue(in *Interp, name string) (Value, bool) {
 	switch name {
 	case "Math":
-		return mathObject(), true
+		m := mathObject()
+		m.Set("random", Func("random", func([]Value) Value { return in.mathRandom() }))
+		return m, true
+	case "Date":
+		return dateCtor(in), true
+	case "Map":
+		return mapCtor(), true
+	case "Set":
+		return setCtor(), true
 	case "Object":
 		return objectCtor(), true
 	case "Array":
@@ -104,7 +114,11 @@ func globalValue(name string) (Value, bool) {
 			if args[0].IsUnknown() {
 				return args[0]
 			}
-			return String(args[0].ToPrimitive().ToString())
+			p := args[0].ToPrimitive()
+			if p.IsUnknown() {
+				return p
+			}
+			return String(p.ToString())
 		}), true
 	case "Number":
 		return Func("Number", func(args []Value) Value {
@@ -308,7 +322,7 @@ func objectCtor() Value {
 				vals = append(vals, String(fromUnits([]uint16{c})))
 			}
 			return keys, vals, true
-		case KindNumber, KindBool:
+		case KindNumber, KindBool, KindDate, KindMap, KindSet, KindIterator:
 			return nil, nil, true
 		}
 		return nil, nil, false
@@ -348,15 +362,16 @@ func objectCtor() Value {
 		if src.IsUnknown() {
 			return src
 		}
-		if !src.IsArray() {
-			return Unsupported("Object.fromEntries of a non-array")
+		entries, ok := iterate(src)
+		if !ok {
+			return Unsupported("Object.fromEntries of a non-iterable value")
 		}
 		out := NewObject()
-		for _, e := range src.Elems() {
+		for _, e := range entries {
 			if !e.IsArray() {
 				return unknownOr(e, "Object.fromEntries entry is not an array")
 			}
-			out.Set(arg(e.Elems(), 0).ToString(), arg(e.Elems(), 1))
+			out.Set(arg(e.Elems(), 0).ToPrimitive().ToString(), arg(e.Elems(), 1))
 		}
 		return out
 	}))
@@ -415,6 +430,9 @@ func arrayCtor() Value {
 		}
 		var items []Value
 		if it, ok := iterate(src); ok {
+			if len(it) > maxIterated {
+				return Unsupported("Array.from of a very long iterable")
+			}
 			items = append([]Value(nil), it...)
 		} else if src.IsObject() {
 			// Array-like `{ length: n }`.
@@ -516,4 +534,30 @@ func parseFloat(s string) float64 {
 		}
 	}
 	return math.NaN()
+}
+
+// mathRandom is Math.random(). It is only known where the host allows volatile
+// values; with SOURCE_DATE_EPOCH set it is a function of the epoch, the call
+// site and how often the site ran, so reproducible builds repeat.
+func (in *Interp) mathRandom() Value {
+	if !in.Volatile {
+		return Dynamic("Math.random() has no value that holds at run time")
+	}
+	epoch, ok := SourceDateEpoch()
+	if !ok {
+		return Number(rand.Float64())
+	}
+	pos := in.callPos
+	if in.randSeq == nil {
+		in.randSeq = map[ast.Pos]int{}
+	}
+	n := in.randSeq[pos]
+	in.randSeq[pos] = n + 1
+	x := uint64(epoch.Unix()) ^ uint64(pos.Line)<<40 ^ uint64(pos.Col)<<24 ^ uint64(n)*0x9e3779b97f4a7c15
+	// splitmix64
+	x += 0x9e3779b97f4a7c15
+	x = (x ^ x>>30) * 0xbf58476d1ce4e5b9
+	x = (x ^ x>>27) * 0x94d049bb133111eb
+	x ^= x >> 31
+	return Number(float64(x>>11) / (1 << 53))
 }

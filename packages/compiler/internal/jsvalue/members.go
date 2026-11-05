@@ -51,7 +51,11 @@ func (in *Interp) propertyKey(e *ast.MemberExpr) (string, bool) {
 	if k.IsUnknown() {
 		return "", false
 	}
-	return k.ToPrimitive().ToString(), true
+	p := k.ToPrimitive()
+	if p.IsUnknown() {
+		return "", false
+	}
+	return p.ToString(), true
 }
 
 // call evaluates a call expression.
@@ -101,6 +105,7 @@ func (in *Interp) call(e *ast.CallExpr) (Value, bool) {
 	if bad.IsUnknown() {
 		return bad, false
 	}
+	in.callPos = e.Position
 	return fn.Call(args...), false
 }
 
@@ -193,6 +198,18 @@ func GetProperty(v Value, key string) Value {
 		}
 	case KindJSX:
 		return Dynamic("property " + key + " of a JSX element")
+	case KindIterator:
+		if iteratorMembers[key] {
+			return boundMethod(v, key)
+		}
+	case KindMap, KindSet:
+		if p, ok := collectionProperty(v, key); ok {
+			return p
+		}
+	case KindDate:
+		if dateMethods[key] {
+			return boundMethod(v, key)
+		}
 	}
 	// A standard member the interpreter has no implementation for must not read
 	// as undefined: `typeof arr.splice` or `if (arr.toSpliced)` would fold to the
@@ -213,6 +230,14 @@ func builtinTypeName(k Kind) string {
 		return "Number"
 	case KindBool:
 		return "Boolean"
+	case KindIterator:
+		return "Iterator"
+	case KindMap:
+		return "Map"
+	case KindSet:
+		return "Set"
+	case KindDate:
+		return "Date"
 	}
 	return "Object"
 }
@@ -221,6 +246,16 @@ func builtinTypeName(k Kind) string {
 // prototype of values of kind k (ES2024, plus the Object.prototype members every
 // value inherits). Implemented members are handled before this is reached.
 func realBuiltinMember(k Kind, key string) bool {
+	switch k {
+	case KindIterator:
+		return iteratorBuiltinMembers[key]
+	case KindMap:
+		return mapBuiltinMembers[key]
+	case KindSet:
+		return setBuiltinMembers[key]
+	case KindDate:
+		return dateBuiltinMembers[key]
+	}
 	if sharedBuiltinMembers[key] {
 		return k == KindArray || k == KindString || k == KindNumber || k == KindBool
 	}
@@ -286,6 +321,10 @@ func boundMethod(recv Value, name string) Value {
 			return numberMethod(recv.n, name, args)
 		case KindBool:
 			return String(recv.ToString())
+		case KindIterator:
+			return iteratorMethod(recv, name, args)
+		case KindDate:
+			return dateMethod(recv, name, args)
 		case KindObject:
 			switch name {
 			case "hasOwnProperty":
@@ -580,18 +619,7 @@ func arrayMethod(recv Value, name string, args []Value) Value {
 		}
 		return NewArray(out...)
 	case "keys", "entries", "values":
-		out := make([]Value, n)
-		for i, el := range elems {
-			switch name {
-			case "keys":
-				out[i] = Number(float64(i))
-			case "values":
-				out[i] = el
-			default:
-				out[i] = NewArray(Number(float64(i)), el)
-			}
-		}
-		return NewArray(out...)
+		return arrayIterator(recv.arr, name)
 	case "fill":
 		out := append([]Value(nil), elems...)
 		s := relIndex(arg(args, 1), n, 0)

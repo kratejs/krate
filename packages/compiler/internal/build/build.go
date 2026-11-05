@@ -31,6 +31,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/internal/icons"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 	"github.com/kratejs/krate/packages/compiler/internal/jsruntime"
+	"github.com/kratejs/krate/packages/compiler/internal/jsvalue"
 	"github.com/kratejs/krate/packages/compiler/internal/plugin"
 	"github.com/kratejs/krate/packages/compiler/internal/reactive"
 	"github.com/kratejs/krate/packages/compiler/internal/renderer"
@@ -2939,6 +2940,9 @@ func layoutCacheFresh(e *layoutEmitCacheEntry) bool {
 // created after the first build. Cleared in place (sync.Map.Clear) so it is safe
 // even if a build goroutine from a previous pass is still winding down.
 func (b *Builder) resetBuildCaches() {
+	// One instant for this build: new Date() and Date.now() in static and
+	// server components read it (SOURCE_DATE_EPOCH when set).
+	jsvalue.StartBuildClock()
 	layoutEmitCache.Clear()
 	b.modCSS.clear()
 	loadingEmitCache.Clear()

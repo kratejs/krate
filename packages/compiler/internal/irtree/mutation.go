@@ -58,6 +58,14 @@ var pureMethods = map[string]bool{
 	"trim": true, "trimEnd": true, "trimStart": true, "valueOf": true,
 	"with": true, "getTime": true, "toISOString": true, "test": true,
 	"exec": true, "call": true, "apply": true, "bind": true,
+	"values": true,
+	// Date readers and formatters (the setters are not listed).
+	"getFullYear": true, "getMonth": true, "getDate": true, "getDay": true,
+	"getHours": true, "getMinutes": true, "getSeconds": true, "getMilliseconds": true,
+	"getUTCFullYear": true, "getUTCMonth": true, "getUTCDate": true, "getUTCDay": true,
+	"getUTCHours": true, "getUTCMinutes": true, "getUTCSeconds": true, "getUTCMilliseconds": true,
+	"getYear": true, "getTimezoneOffset": true, "toDateString": true, "toTimeString": true,
+	"toUTCString": true, "toGMTString": true, "toLocaleDateString": true, "toLocaleTimeString": true,
 }
 
 // deferredCallees are body-level calls whose function arguments run after
@@ -421,5 +429,9 @@ func rootIdentName(e ast.Expr) string {
 // isPrimitiveValue reports whether v is a known primitive, whose contents no
 // statement can change.
 func isPrimitiveValue(v jsvalue.Value) bool {
+	switch v.Kind() {
+	case jsvalue.KindMap, jsvalue.KindSet, jsvalue.KindDate, jsvalue.KindIterator:
+		return false
+	}
 	return !v.IsUnknown() && !v.IsArray() && !v.IsObject() && !v.IsFunction() && !v.IsJSX()
 }

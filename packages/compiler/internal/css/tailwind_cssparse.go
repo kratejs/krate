@@ -129,6 +129,34 @@ func readAtRule(s string, at int) (cssAtRule, bool) {
 type cssDecl struct{ Name, Value string }
 
 func splitCSSBody(body string) (decls []cssDecl, nested []string) {
+	for _, n := range splitCSSNodes(body) {
+		if n.Block {
+			nested = append(nested, n.Text)
+			continue
+		}
+		if c := strings.IndexByte(n.Text, ':'); c > 0 {
+			decls = append(decls, cssDecl{Name: strings.TrimSpace(n.Text[:c]), Value: strings.TrimSpace(n.Text[c+1:])})
+		} else if n.Text != "" {
+			nested = append(nested, n.Text)
+		}
+	}
+	return decls, nested
+}
+
+// cssNode is one top-level entry of a block body, in source order.
+type cssNode struct {
+	// Block is true for `prelude { body }`; Text is then the whole block text
+	// with its braces. Otherwise Text is a statement: a declaration or a
+	// semicolon-terminated at-rule such as `@apply flex`.
+	Block         bool
+	Text          string
+	Prelude, Body string
+}
+
+// splitCSSNodes splits a block body into its declarations, statements and
+// nested blocks without losing their relative order.
+func splitCSSNodes(body string) []cssNode {
+	var out []cssNode
 	i := 0
 	for i < len(body) {
 		// Skip whitespace and stray semicolons.
@@ -165,17 +193,18 @@ func splitCSSBody(body string) (decls []cssDecl, nested []string) {
 			if end < 0 {
 				end = len(body) - 1
 			}
-			nested = append(nested, strings.TrimSpace(body[start:end+1]))
+			inner := ""
+			if end > i {
+				inner = body[i+1 : end]
+			}
+			out = append(out, cssNode{Block: true, Text: strings.TrimSpace(body[start : end+1]), Prelude: strings.TrimSpace(body[start:i]), Body: inner})
 			i = end + 1
 			continue
 		}
-		text := strings.TrimSpace(body[start:min(i, len(body))])
-		if c := strings.IndexByte(text, ':'); c > 0 {
-			decls = append(decls, cssDecl{Name: strings.TrimSpace(text[:c]), Value: strings.TrimSpace(text[c+1:])})
-		} else if text != "" {
-			nested = append(nested, text)
+		if text := strings.TrimSpace(body[start:min(i, len(body))]); text != "" {
+			out = append(out, cssNode{Text: text})
 		}
 		i++
 	}
-	return decls, nested
+	return out
 }

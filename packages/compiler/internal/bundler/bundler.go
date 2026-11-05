@@ -1485,50 +1485,42 @@ func (b *Bundler) rewriteAssetImportRefs() {
 			byPath[filepath.Clean(mod.Path)] = mod
 		}
 	}
+	r := newAssetResolver(b, byPath)
 	for _, mod := range b.order {
-		if mod.Program == nil || !mod.Rewritable {
+		if mod.Program == nil {
 			continue
 		}
-		locals := map[string]string{}
-		namespaces := map[string]string{}
-		for _, stmt := range mod.Program.Body {
-			imp, ok := stmt.(*ast.ImportStmt)
-			if !ok {
-				continue
-			}
-			url, ok := b.importedAssetURL(mod.Path, imp)
-			if !ok {
-				continue
-			}
-			if imp.Default != "" {
-				locals[imp.Default] = url
-			}
-			for _, n := range imp.Named {
-				if n.Remote == "default" && n.Local != "" {
-					locals[n.Local] = url
-				}
-			}
-			if imp.Namespace != "" {
-				namespaces[imp.Namespace] = url
-			}
-		}
-		if len(locals) == 0 && len(namespaces) == 0 {
+		// locals and spaces hold every binding that stands for an asset URL,
+		// found through re-exports as well; directSpaces only the namespaces
+		// imported straight from an asset file.
+		locals, spaces, directSpaces := r.bindings(mod)
+		if len(locals) == 0 && len(spaces) == 0 {
 			continue
+		}
+		if !mod.Rewritable {
+			// The module imports no asset itself, so its AST may be shared
+			// through the parse cache: rewrite a private copy.
+			mod.Program = cloneProgram(mod.Program)
+			mod.Rewritable = true
 		}
 		rewriteAssetRefsStmts(mod.Program.Body, locals)
-		rewriteAssetNamespaceRefs(mod.Program.Body, namespaces)
-		b.reportUnresolvedAssetRefs(mod, locals, namespaces)
+		rewriteAssetNamespaceRefs(mod.Program.Body, spaces)
+		b.reportUnresolvedAssetRefs(mod, locals, directSpaces)
 	}
-	b.reportReexportedAssetImports(byPath)
 }
 
 // importedAssetURL returns the hashed URL of the asset an import statement
 // loads, when its source is a bundled asset file.
 func (b *Bundler) importedAssetURL(importer string, imp *ast.ImportStmt) (string, bool) {
-	if imp.Source == "" {
+	return b.assetURLForSource(importer, imp.Source)
+}
+
+// assetURLForSource is importedAssetURL for a bare import or re-export source.
+func (b *Bundler) assetURLForSource(importer, source string) (string, bool) {
+	if source == "" {
 		return "", false
 	}
-	src := strings.Trim(imp.Source, "\"'")
+	src := strings.Trim(source, "\"'")
 	// Resolve the way the import itself was resolved, so a tsconfig alias
 	// (`@/assets/logo.png`) finds the same file as a relative path.
 	resolved := b.resolveImportForModule(importer, src)

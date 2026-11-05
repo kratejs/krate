@@ -104,12 +104,40 @@ configure the generator, and **removes them from the shipped CSS**:
   emits every user-defined `@theme` variable (v4 emits only the used ones unless
   `static`) plus any built-in theme variable you reference as `var(--color-red-500)`,
   `var(--spacing)`, etc. in your CSS or scanned files.
-- `@utility` supports declaration blocks. A functional utility (`name-*`) takes
-  its value from the rest of the class through `--value()` and `--spacing()`.
-  `--value()` accepts `integer`, `number`, `percentage`, `ratio`, `[type]` (an
-  arbitrary `[...]` value), `"literal"` keywords and theme namespaces such as
-  `--color-*`, tried in order; a class whose value fits none of them generates
-  nothing. `--modifier()` and nested rules are reported and skipped.
+- `@utility` follows Tailwind v4. A functional utility (`name-*`) takes its
+  value from the rest of the class (`name-VALUE`) through `--value()` and its
+  modifier (`name-VALUE/MODIFIER`) through `--modifier()`; `--spacing()` wraps
+  either. Both accept, tried in order: `integer`, `number`, `percentage`, `ratio`
+  (value only), `[type]` for an arbitrary value of that type (`[length]`,
+  `[color]`, `[percentage]`, `[number]`, `[integer]`, `[ratio]`, `[url]`,
+  `[image]`, `[position]`, `[bg-size]`, `[line-width]`, `[family-name]`,
+  `[generic-name]`, `[absolute-size]`, `[relative-size]`, `[angle]`,
+  `[vector]`, or `[*]` for any), `"literal"` keywords, theme namespaces such as
+  `--color-*` or your own `--tab-size-*`, and `--default(x)` for a class with no
+  value or modifier. A declaration whose call cannot resolve is dropped, and a
+  class that resolves nothing generates nothing, so `bg-red-500/50` is not a
+  match for a utility that has no `--modifier()`.
+
+  ```css
+  @theme { --tab-size-github: 8; }
+  @utility tab-* { tab-size: --value(--tab-size-*, integer, [integer]); }
+  @utility text-fit-* {
+    font-size: --value(--text-*, [length]);
+    line-height: --modifier(--leading-*, [length], [*]);   /* text-fit-lg/tight */
+    &:hover { text-decoration: underline; }
+    @media print { font-size: 12pt; }
+    @variant dark { color: white; }
+  }
+  ```
+
+  Nested rules (`&:hover`, `.parent &`, `& > *`), at-rules (`@media`,
+  `@supports`, `@layer`), `@variant name { ... }` and `@apply` work inside the
+  body, in static and functional utilities alike; they are written as CSS
+  nesting inside the class rule. Theme values are inlined rather than
+  referenced as `var(--name)`, and only `@theme` variables count for
+  `--value(--spacing-*)` (Tailwind v3's numeric spacing scale is not a v4 theme
+  variable). Output is checked against Tailwind v4 in
+  `internal/css/testdata/tailwind_utility_golden.json`.
   `@custom-variant` supports the `(selector)` form, `@media`/`@supports`, and the
   single `selector { @slot; }` block form.
 - `@config` and `@plugin` are **not supported**: they are removed and reported

@@ -3,6 +3,7 @@ package renderer
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kratejs/krate/packages/compiler/ast"
@@ -131,7 +132,9 @@ func NewSSREval(functions map[string]*ast.FnDecl) *SSREval {
 	}
 	e.module = jsvalue.NewScope(nil)
 	e.frame = jsvalue.NewScope(e.module)
-	e.in = &jsvalue.Interp{Scope: e.frame}
+	// Static and server components are baked into HTML, so the build clock and
+	// Math.random() may be read here.
+	e.in = &jsvalue.Interp{Scope: e.frame, Volatile: true}
 	e.in.Hooks = jsvalue.Hooks{
 		Ident: e.resolveIdent,
 		Call:  e.interceptCall,
@@ -489,7 +492,7 @@ func (e *SSREval) isBound(name string) bool {
 // nativeGlobals are the built-ins jsvalue implements itself. Their calls run
 // natively and only fall back to the JS engine for members jsvalue lacks.
 var nativeGlobals = map[string]bool{
-	"Math": true, "JSON": true, "String": true, "Number": true, "Boolean": true,
+	"Date": true, "Math": true, "JSON": true, "String": true, "Number": true, "Boolean": true,
 	"Object": true, "Array": true, "parseInt": true, "parseFloat": true,
 	"isNaN": true, "isFinite": true,
 }
@@ -505,7 +508,11 @@ func (e *SSREval) maybeDelegate(expr ast.Expr, callee ast.Expr) (jsvalue.Value, 
 		e.nativeGuard[expr] = true
 		v := e.in.Eval(expr)
 		delete(e.nativeGuard, expr)
-		if !v.IsUnsupported() {
+		// The embedded engine runs in the build machine's time zone and
+		// locale and reads its own clock, so a Date it computes would differ
+		// from the build environment jsvalue models. A Date expression the
+		// evaluator cannot reproduce stays unresolved instead.
+		if !v.IsUnsupported() || root == "Date" {
 			return v, true
 		}
 	}
@@ -566,7 +573,14 @@ func (e *SSREval) delegateJS(expr ast.Expr) jsvalue.Value {
 	if code == "" {
 		return jsvalue.Unsupported("expression cannot be compiled for the JS engine")
 	}
-	wrapped := "((" + strings.Join(params, ",") + ")=>{const v=(" + code + ");" +
+	// An expression that makes its own Date reads the build clock, like the
+	// ones jsvalue evaluates itself.
+	clock := ""
+	if strings.Contains(code, "Date") {
+		clock = "const Date=(function(D,n){return class extends D{constructor(...a){a.length?super(...a):super(n)}static now(){return n}}})(globalThis.Date," +
+			strconv.FormatFloat(jsvalue.BuildNowMS(), 'f', -1, 64) + ");"
+	}
+	wrapped := "((" + strings.Join(params, ",") + ")=>{" + clock + "const v=(" + code + ");" +
 		"const t=v===null?'null':Array.isArray(v)?'array':typeof v;" +
 		"return JSON.stringify([t,(t==='object'&&Object.getPrototypeOf(v)!==Object.prototype)?String(v):(t==='undefined'||t==='function'||t==='symbol'||t==='bigint')?String(v):v]);})(" +
 		strings.Join(args, ",") + ")"

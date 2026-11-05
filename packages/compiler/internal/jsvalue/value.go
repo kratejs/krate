@@ -37,6 +37,15 @@ const (
 	// KindBigInt is a BigInt literal value (decimal digits in s). Only
 	// rendering, comparison and conversion are supported; arithmetic is not.
 	KindBigInt
+	// KindIterator is a stateful iterator such as the result of
+	// arr.entries() or map.keys(): `.next()` advances it and it is consumed
+	// by for...of, spread, destructuring and Array.from.
+	KindIterator
+	// KindMap and KindSet are insertion-ordered collections.
+	KindMap
+	KindSet
+	// KindDate is a Date. Build time evaluation runs in UTC, see date.go.
+	KindDate
 )
 
 func (k Kind) String() string {
@@ -61,6 +70,14 @@ func (k Kind) String() string {
 		return "jsx"
 	case KindBigInt:
 		return "bigint"
+	case KindIterator:
+		return "iterator"
+	case KindMap:
+		return "map"
+	case KindSet:
+		return "set"
+	case KindDate:
+		return "date"
 	}
 	return "unknown"
 }
@@ -76,6 +93,9 @@ type Value struct {
 	arr  *Array
 	obj  *Object
 	fn   *Function
+	iter *Iterator
+	coll *Collection
+	date *DateValue
 	// unsupported marks an Unknown produced by an unsupported construct (as
 	// opposed to a value that is merely dynamic).
 	unsupported bool
@@ -138,6 +158,8 @@ type Function struct {
 	// Builtin marks a global function: a static member it does not
 	// implement is unknown, not undefined.
 	Builtin bool
+	// Construct, when set, makes `new fn(...)` build a value (Map, Set, Date).
+	Construct func(args []Value) Value
 }
 
 var (
@@ -295,6 +317,12 @@ func (v Value) same(o Value) bool {
 		return v.obj == o.obj
 	case KindFunction:
 		return v.fn == o.fn
+	case KindIterator:
+		return v.iter == o.iter
+	case KindMap, KindSet:
+		return v.coll == o.coll
+	case KindDate:
+		return v.date == o.date
 	}
 	return false
 }

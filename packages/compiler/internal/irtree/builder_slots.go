@@ -1156,7 +1156,7 @@ func (b *builder) buildMetaOpeningTag(el *ast.JSXElement, tag string) string {
 		if attr.Spread || attr.Name == "dangerouslySetInnerHTML" {
 			continue
 		}
-		buf.WriteString(RenderAttr(tag, attr, b.evalAttrConst, b.evalAttrValue))
+		buf.WriteString(RenderAttr(tag, attr, b.evalAttrInitial, b.evalAttrInitialString))
 	}
 	buf.WriteByte('>')
 	return buf.String()
@@ -1478,7 +1478,7 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 		if skipFormValueAttr(name, attr.Name, inSelect) {
 			continue
 		}
-		buf.WriteString(RenderAttr(name, attr, b.evalAttrConst, b.evalAttrValue))
+		buf.WriteString(RenderAttr(name, attr, b.evalAttrInitial, b.evalAttrInitialString))
 	}
 	if optionSelected {
 		buf.WriteString(" selected")
@@ -1507,11 +1507,11 @@ func (b *builder) buildElementOpening(el *ast.JSXElement, handlers []HandlerDecl
 		switch {
 		case skipFormValueAttr(name, a.AttrName, inSelect):
 		case a.AttrName == "style":
-			if css, ok := StyleCSS(a.InitialExpr, b.evalAttrConst); ok {
+			if css, ok := StyleCSS(a.InitialExpr, b.evalAttrInitial); ok {
 				buf.WriteString(` style="` + escape.HTMLAttr(css) + `"`)
 			}
 		case htmlspec.IsBoolean(a.AttrName) || a.Initial != "":
-			buf.WriteString(htmlspec.Attr(name, a.AttrName, JSAttrValue(b.evalAttrConst(a.InitialExpr), a.Initial)))
+			buf.WriteString(htmlspec.Attr(name, a.AttrName, JSAttrValue(b.evalAttrInitial(a.InitialExpr), a.Initial)))
 		}
 		if !htmlspec.ValidAttrName(a.AttrName) {
 			continue
@@ -1623,7 +1623,7 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 	}
 	// The SSR initial is the value rendered as child text (React semantics:
 	// false/null/undefined render nothing); the emitter escapes it.
-	value := b.evalValue(expr)
+	value := b.evalValueVolatile(expr)
 	initial, _ := childText(value)
 	slot := &ExprSlot{
 		ID:         id,
@@ -2899,7 +2899,7 @@ func (b *builder) buildAttrBinding(attr *ast.JSXAttr, elementID string) *AttrBin
 		AttrName:    ast.HTMLAttrName(attr.Name),
 		SignalName:  signalName,
 		ExprSource:  exprSource,
-		Initial:     b.evalAttrValue(attr.Value),
+		Initial:     b.evalAttrInitialString(attr.Value),
 		InitialExpr: attr.Value,
 		IsString:    isStringType(attr.Value, b.sigMap()),
 		Prop:        formDefaultProp(attr.Name),

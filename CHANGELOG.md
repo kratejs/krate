@@ -49,6 +49,27 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 - `KRATE_FLASH_SECRET` sets the key the no-JS flash cookie is signed with, for the Go
   host, the action sidecar and the portable handler (see Security).
 
+- `new Date()`, `Date.now()`, `Date()` and `Math.random()` have a build-time value. In a static
+  or server component they are the time of the build (`SOURCE_DATE_EPOCH` fixes it, and makes
+  two builds of the same sources byte-identical); in a client component the static HTML shows
+  the build value and the browser computes it again on hydration. Dates are evaluated in UTC with
+  the en-US locale, so a build does not depend on the machine: deterministic parts (`new Date(ms)`,
+  ISO strings, `Date.UTC`, `getUTC*`, `toISOString()`) fold everywhere, and anything that reads the
+  local zone or locale (`getHours()`, `toString()`, `toLocaleDateString()`) keeps its client binding.
+  The build-time interpreter has a `Date` (getters, setters, parsing, `toLocale*String` for
+  en-US), `Map` and `Set`. Docs that said `new Date()` has no build-time value are updated.
+- The build-time interpreter's `arr.entries()`, `arr.keys()`, `arr.values()` and the `Map` and
+  `Set` equivalents are real iterators (`.next()`, `.toArray()`, `.map()`, ...), no longer arrays,
+  and work with `for...of` (including `for (const [i, v] of ...)`), spread, `Array.from` and
+  destructuring. The differential test against Node covers 260 more expressions and 1,700
+  `toLocale*String` cases.
+- Tailwind `@utility`: `--modifier()` works (`name-VALUE/MODIFIER`), including the typed
+  forms (`--value(--color-*, [color])`, `--value(integer)`, `--value([length])`,
+  `--modifier(number)`, `--default()`), and nested rules, `@media`, `@supports`,
+  `@layer`, `@variant` and `@apply` inside a utility body no longer warn. Unresolvable
+  declarations are dropped like Tailwind v4 does, custom `@theme` namespaces
+  (`--tab-size-*`) work in `--value()`, and `@utility` arguments Tailwind rejects warn.
+  Output is compared with Tailwind 4.3 in a golden test.
 - `krate fix` repairs the 0.4 template's `tsconfig.json`: `"baseUrl": "./src"` with
   `"@/*": ["./src/*"]` can only mean the project root, so it sets `baseUrl` to `"."`
   (`KR7125`). The edited file also builds on 0.4. The build error for an alias that
@@ -196,6 +217,15 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
   while no render has shown what the page or region reads (after a restart the entry of
   the bare URL used to answer `?page=2`).
 
+- An imported asset (`import logo from "./logo.png"`) now resolves to its URL through any
+  chain of re-exports: `export { logo }`, `export default logo`,
+  `export { default as logo } from "./logo.png"`, `export *`, `export * as ns` with `ns.logo`,
+  and aliases. They used to render as the bare name (`src=logo`) and fail in the browser.
+  KR7126 is kept for reads the rewrite cannot reach.
+- Tailwind: functional `@utility name-*` blocks were dropped when the build merged the
+  directives found in project CSS, so they never generated anything outside unit tests.
+  A hyphen-free `@utility card` is no longer discarded by the class scanner as prose, and a
+  class like `w-[red;}x{display:none]` can no longer break out of its rule.
 - In production builds a keyed list (`items.map(...)` in a component with state) never
   updated after the first render, because the trimmed runtime dropped the list feature.
   Production builds ship every runtime feature a page's helper calls need, and a test
