@@ -123,6 +123,9 @@ type Object struct {
 	// getters marks keys whose stored value is an accessor function that
 	// Get invokes (`{ get v() { ... } }`).
 	getters map[string]bool
+	// builtin names a built-in namespace (Math, Object, ...): a property it
+	// does not implement is unknown, not undefined.
+	builtin string
 }
 
 // Function is a callable value (an arrow function closure or a built-in).
@@ -130,6 +133,11 @@ type Function struct {
 	Name string
 	// Call invokes the function. It must not be nil.
 	Call func(args []Value) Value
+	// Props holds static members of a built-in (Number.MAX_SAFE_INTEGER).
+	Props map[string]Value
+	// Builtin marks a global function: a static member it does not
+	// implement is unknown, not undefined.
+	Builtin bool
 }
 
 var (

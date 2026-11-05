@@ -946,6 +946,22 @@ func (in *Interp) execFor(s *ast.ForStmt) (Value, control) {
 			return v, ctl
 		}
 	}
+	// A `let` head gets a fresh copy of its bindings for every iteration, so
+	// closures created in the body keep that iteration's values.
+	perIteration := false
+	if vs, ok := s.Init.(*ast.VarStmt); ok && vs.Kind == ast.VarLet {
+		perIteration = true
+	}
+	copyScope := func() {
+		next := NewScope(saved)
+		for _, name := range in.Scope.Names() {
+			next.vars[name] = in.Scope.vars[name]
+		}
+		in.Scope = next
+	}
+	if perIteration {
+		copyScope()
+	}
 	for iter := 0; ; iter++ {
 		if iter >= maxLoopIterations {
 			return Unsupported("loop iteration limit exceeded"), ctlError
@@ -969,6 +985,9 @@ func (in *Interp) execFor(s *ast.ForStmt) (Value, control) {
 			return v, ctl
 		case ctlBreak:
 			return Undefined(), ctlNormal
+		}
+		if perIteration {
+			copyScope()
 		}
 		if s.Update != nil {
 			if u := in.Eval(s.Update); u.IsUnknown() {
