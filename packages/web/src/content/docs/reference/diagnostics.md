@@ -368,6 +368,12 @@ Krate wraps each export of a `"use client"` module in a client boundary, so it m
 
 `@server`, `@static`, `@runtime` and `@client` go on a function, class or const declaration, once per declaration. An async component always renders per request, so only `@runtime` fits it. A runtime component is bundled per file, so `@runtime` must be on the default export or the only exported component of its file.
 
+### KR7116
+
+**One name imported from two modules**
+
+Two modules export the same name and a page imports it from both, for example `import { Card as A } from "./a"` and `import { Card as B } from "./b"`. Modules on a page share one namespace, so both imports resolve to one declaration and the page shows the wrong output. Rename one of the exports. Private names and default exports do not have this problem. This is a warning.
+
 ## KR8xxx: islands, compiled packages and general React compatibility
 
 ### KR8001

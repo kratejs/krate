@@ -179,6 +179,15 @@ func renameBindings(prog *ast.Program, match func(string) bool, suffix string) {
 		switch x := n.(type) {
 		case *ast.Identifier:
 			x.Name = rn(x.Name)
+		case *ast.ExportStmt:
+			x.Local = rn(x.Local)
+		case *ast.JSXElement:
+			if x.Opening != nil {
+				x.Opening.Name = renameJSXTag(x.Opening.Name, rn)
+			}
+			if x.Closing != nil {
+				x.Closing.Name = renameJSXTag(x.Closing.Name, rn)
+			}
 		case *ast.ObjectExpr:
 			for _, p := range x.Properties {
 				if p == nil || !p.Shorthand {
@@ -234,6 +243,19 @@ func renameBindings(prog *ast.Program, match func(string) bool, suffix string) {
 		}
 		return true
 	})
+}
+
+// renameJSXTag renames the binding a tag refers to: `Row` or the `Row` of
+// `Row.Cell`. A lowercase tag is an HTML element, not a reference.
+func renameJSXTag(tag string, rn func(string) string) string {
+	if tag == "" || tag[0] < 'A' || tag[0] > 'Z' {
+		return tag
+	}
+	head, rest, dotted := strings.Cut(tag, ".")
+	if dotted {
+		return rn(head) + "." + rest
+	}
+	return rn(head)
 }
 
 // visitParamTargets renames identifiers inside destructuring parameters (the

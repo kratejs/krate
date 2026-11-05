@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kratejs/krate/packages/compiler/internal/bundler"
 	"github.com/kratejs/krate/packages/compiler/internal/irtree"
 )
 
@@ -244,7 +245,9 @@ func serverExportsOf(regions []Region) []ServerExport {
 			continue
 		}
 		seen[r.ServerExport] = true
-		out = append(out, ServerExport{Key: r.ServerExport, Name: r.ComponentName, SourcePath: r.SourcePath})
+		// The server bundle is built from source, where a renamed binding still
+		// has the name it was written with.
+		out = append(out, ServerExport{Key: r.ServerExport, Name: bundler.OriginalName(r.ComponentName), SourcePath: r.SourcePath})
 	}
 	return out
 }

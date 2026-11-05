@@ -386,6 +386,7 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 	if err != nil {
 		return nil, err
 	}
+	b.isolatePrivateNames()
 
 	// Rewrite CSS module member expressions (styles.card) to their hashed
 	// literal values now that all modules are resolved. Without this, both the

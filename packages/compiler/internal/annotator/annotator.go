@@ -118,15 +118,16 @@ func classifyComponent(name string, fn *ast.FnDecl, cfg *config.Config, sourceFi
 		return tier
 	}
 
-	// 3. Config name lists
+	// 3. Config name lists, which use the name as written
 	if cfg != nil {
+		written := bundler.OriginalName(name)
 		for _, n := range cfg.ServerComponents {
-			if n == name {
+			if n == written {
 				return irtree.TierServer
 			}
 		}
 		for _, n := range cfg.RuntimeComponents {
-			if n == name {
+			if n == written {
 				return irtree.TierRuntime
 			}
 		}

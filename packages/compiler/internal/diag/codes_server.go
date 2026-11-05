@@ -25,10 +25,21 @@ const (
 	CodeClientBoundaryExports Code = "KR7114"
 	// CodeTierDecorator: a tier decorator cannot apply where it is placed.
 	CodeTierDecorator Code = "KR7115"
+	// CodeExportCollision: a page imports one name from two modules.
+	CodeExportCollision Code = "KR7116"
 )
 
 func init() {
 	Register(
+		CodeInfo{
+			Code:  CodeExportCollision,
+			Title: "One name imported from two modules",
+			Explanation: "Two modules export the same name and a page imports it from both, for example " +
+				"`import { Card as A } from \"./a\"` and `import { Card as B } from \"./b\"`. Modules on a page " +
+				"share one namespace, so both imports resolve to one declaration and the page shows the wrong " +
+				"output. Rename one of the exports. Private names and default exports do not have this " +
+				"problem. This is a warning.",
+		},
 		CodeInfo{
 			Code:  CodeTierDecorator,
 			Title: "Tier decorator cannot apply here",
