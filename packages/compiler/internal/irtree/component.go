@@ -341,6 +341,14 @@ func (b *builder) foldComponentLocals(fn *ast.FnDecl, node *ComponentNode, isPag
 		}
 	}
 	if client {
+		// Destructured names without a build-time value are declared by
+		// replaying the declaration, also in a page root (whose other locals
+		// are baked into the HTML).
+		pre, post := b.leakedDestructDecls(fold, body.order)
+		preLocals = append(preLocals, pre...)
+		postLocals = append(postLocals, post...)
+	}
+	if client {
 		pre, post := promoteTransitive(append(append([]bodyJS(nil), body.pre...), preLocals...),
 			append(append([]bodyJS(nil), body.post...), postLocals...))
 		node.PreSignalVars = mergeBodyJS(pre)
@@ -372,8 +380,9 @@ func (b *builder) foldLocals(fn *ast.FnDecl, node *ComponentNode) *localFold {
 	// Re-fold locals whose initializer needs the cva/cn table (e.g. shadcn's
 	// `const classes = cn(buttonVariants({ variant }), className)`), so JSX
 	// attributes reference the class value instead of the variable name.
+	destructured := destructNames(fold.destructs)
 	for name, init := range fold.inits {
-		if init == nil || fold.changed[name] {
+		if init == nil || fold.changed[name] || destructured[name] {
 			continue
 		}
 		// Array/object/JSX locals may be mutated by loops or emitted as
@@ -452,13 +461,14 @@ func (b *builder) bindFoldedLocals(fold *localFold) {
 // signal declarations and those that read signals.
 func (b *builder) localDecls(fn *ast.FnDecl, node *ComponentNode, fold *localFold, order *bodyOrder) (pre, post []bodyJS) {
 	declared := declaredLocalNames(node, fn)
+	replayed := destructNames(b.replayedDestructs(fold))
 	// Source order, not alphabetical: a local may reference an earlier local
 	// (e.g. `basePath` derives from `themeOptions`).
 	for _, name := range fold.order {
 		if _, ok := fold.locals[name]; !ok {
 			continue
 		}
-		if declared[name] {
+		if declared[name] || replayed[name] {
 			continue
 		}
 		init := fold.inits[name]
@@ -466,6 +476,58 @@ func (b *builder) localDecls(fn *ast.FnDecl, node *ComponentNode, fold *localFol
 		// Signal-referencing locals must be declared after the signal
 		// declarations; everything else merges with the pre fragments.
 		if init != nil && b.referencesSignal(init) {
+			post = append(post, frag)
+		} else {
+			pre = append(pre, frag)
+		}
+	}
+	return pre, post
+}
+
+// replayedDestructs returns the destructuring declarations the hydration
+// scope evaluates as written: one with a name that has no build-time value or
+// is changed later, or whose initializer reads props, another local or a
+// reference. Names of the others are plain folded values.
+func (b *builder) replayedDestructs(fold *localFold) []*ast.VarDecl {
+	var out []*ast.VarDecl
+	for _, d := range fold.destructs {
+		replay := d.Init != nil && (referencesProps(d.Init) || referencesAnyLocal(d.Init, b.sigMap(), fold.locals) || isReferenceInit(d.Init))
+		for _, n := range d.Names {
+			if fold.leaked[n] || fold.changed[n] {
+				replay = true
+			}
+		}
+		if replay {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// destructNames returns the names bound by the declarations.
+func destructNames(decls []*ast.VarDecl) map[string]bool {
+	names := make(map[string]bool)
+	for _, d := range decls {
+		for _, n := range d.Names {
+			names[n] = true
+		}
+	}
+	return names
+}
+
+// leakedDestructDecls renders each replayed destructuring declaration as one
+// `var {a, b: c} = init` fragment, split like localDecls into those that may
+// precede the signal declarations and those that read signals.
+func (b *builder) leakedDestructDecls(fold *localFold, order *bodyOrder) (pre, post []bodyJS) {
+	for _, d := range b.replayedDestructs(fold) {
+		pattern := d.Pattern
+		if d.Target != nil {
+			pattern = renderPattern(d.Target, b.sigMap())
+		} else if pattern == "" {
+			pattern = "[" + strings.Join(d.Names, ",") + "]"
+		}
+		frag := bodyJS{ord: order.of(d), js: "var " + pattern + "=" + generateExprJS(d.Init, b.sigMap())}
+		if b.referencesSignal(d.Init) {
 			post = append(post, frag)
 		} else {
 			pre = append(pre, frag)
@@ -661,7 +723,7 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 		addFunctions()
 	}
 	b.checkUnbundledImports(node)
-	if needsNoClientJS(node, fn) && !res.forceClient && !b.rendersLiveProps(node) && !node.Lazy {
+	if needsNoClientJS(node, fn, b.localFuncProps) && !res.forceClient && !b.rendersLiveProps(node) && !node.Lazy {
 		node.Tier = TierStatic
 	}
 }
@@ -673,13 +735,16 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 // component's hydration scope to create/bind the ref object, and a component
 // that provides a CSS scope via context renders its call-site children
 // through the slot tree, so both stay client.
-func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl) bool {
+//
+// funcProps names the props that hold functions at this call site: build-time
+// evaluation cannot call them, so a slot that reads one needs the client.
+func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl, funcProps map[string]bool) bool {
 	hasComponentRef := false
 	if ret := findReturnStmt(fn.Body); ret != nil {
 		hasComponentRef = hasRefAttrExpr(ret.Value)
 	}
 	_, _, providesScope := providedScopeContext(fn)
-	return !slotsHaveExpr(node.Children, paramBindingSet(fn)) &&
+	return !slotsHaveExpr(node.Children, paramBindingSet(fn), funcProps) &&
 		len(node.Signals) == 0 && len(node.Effects) == 0 &&
 		len(node.Memos) == 0 && len(node.ExtraVars) == 0 &&
 		len(node.PreSignalVars) == 0 &&
@@ -687,36 +752,64 @@ func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl) bool {
 		len(node.RefBindings) == 0 && !hasComponentRef && !providesScope
 }
 
+// readsFuncProp reports whether src reads one of the function props, as a
+// bare parameter or as `props.name`.
+func readsFuncProp(src string, funcProps map[string]bool) bool {
+	for name := range funcProps {
+		for _, form := range []string{"props." + name, "props?." + name} {
+			for from := 0; ; {
+				i := strings.Index(src[from:], form)
+				if i < 0 {
+					break
+				}
+				end := from + i + len(form)
+				if end >= len(src) || !isIdentChar(src[end]) {
+					return true
+				}
+				from = end
+			}
+		}
+	}
+	return false
+}
+
 // slotsHaveExpr reports whether any slot (at any depth of the node's own
 // tree) is an ExprSlot the build could not fold, which needs the component's
 // hydration script to produce its value. An expression over the component's
 // own props or route params stays static: the server renderer evaluates it
 // with the call-site or route bindings.
-func slotsHaveExpr(slots []SlotNode, params map[string]bool) bool {
+func slotsHaveExpr(slots []SlotNode, params, funcProps map[string]bool) bool {
 	for _, s := range slots {
 		switch v := s.(type) {
 		case *ExprSlot:
 			usesParam := false
+			funcRead := readsFuncProp(v.ExprSource, funcProps)
 			scanJSIdents(v.ExprSource, func(n string) {
-				if params[n] {
+				if funcProps[n] {
+					// A function prop cannot be called at build time.
+					funcRead = true
+				} else if params[n] {
 					usesParam = true
 				}
 			})
+			if funcRead {
+				return true
+			}
 			if !usesParam {
 				return true
 			}
 		case *ConditionalSlot:
-			if slotsHaveExpr(v.Consequent, params) || slotsHaveExpr(v.Alternate, params) {
+			if slotsHaveExpr(v.Consequent, params, funcProps) || slotsHaveExpr(v.Alternate, params, funcProps) {
 				return true
 			}
 		case *ListSlot:
 			for _, it := range v.Items {
-				if it != nil && slotsHaveExpr(it.Contents, params) {
+				if it != nil && slotsHaveExpr(it.Contents, params, funcProps) {
 					return true
 				}
 			}
 		case *SuspenseSlot:
-			if slotsHaveExpr(v.Fallback, params) || slotsHaveExpr(v.Resolved, params) {
+			if slotsHaveExpr(v.Fallback, params, funcProps) || slotsHaveExpr(v.Resolved, params, funcProps) {
 				return true
 			}
 		}

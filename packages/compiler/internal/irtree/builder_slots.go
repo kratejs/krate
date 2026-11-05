@@ -1611,6 +1611,14 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 	id := b.assignSlotID(b.nextDynamicSlot(parentID, "expr"))
 	signals := b.collectSignalReads(expr)
 	exprSource := b.bindLoopVars(generateExprJS(expr, b.sigMap()))
+	if strings.Contains(exprSource, "createPortal(") {
+		// Only a portal that is a child, or a branch of a conditional child,
+		// is lowered; anywhere else the call would reach the browser as is,
+		// where createPortal does not exist.
+		b.warnCompat(expr.Pos(), diag.CodePortalNotLowered,
+			"createPortal is only supported as a child or as a branch of a conditional child; here it is left as a runtime call that fails with \"createPortal is not defined\"",
+			"render the portal as {createPortal(...)}, {open && createPortal(...)} or {open ? createPortal(...) : null}, or use <Portal container={...}>")
+	}
 	// The SSR initial is the value rendered as child text (React semantics:
 	// false/null/undefined render nothing); the emitter escapes it.
 	value := b.evalValue(expr)
@@ -1622,6 +1630,7 @@ func (b *builder) buildExprSlot(expr ast.Expr, parentID string) *ExprSlot {
 		Initial:    initial,
 		File:       b.sourceLoc(),
 		Pos:        expr.Pos(),
+		Unresolved: value.ContainsUnknown(),
 	}
 	// A value holding JSX renders as markup, not as escaped text.
 	if html, ok := renderChildValue(value); ok && html != escape.Text(initial) {
@@ -2169,6 +2178,46 @@ func (b *builder) buildListSlot(expr ast.Expr, parentID string) *ListSlot {
 	return slot
 }
 
+// arrayHasSpread reports whether an array literal has a `...x` element, which
+// stands for any number of items.
+func arrayHasSpread(arr *ast.ArrayExpr) bool {
+	for _, el := range arr.Elements {
+		if u, ok := el.(*ast.UnaryExpr); ok && u.Op == "..." {
+			return true
+		}
+	}
+	return false
+}
+
+// arrayFromMapCall rewrites `Array.from(source, mapFn)` to the equivalent
+// `Array.from(source).map(mapFn)` so it takes the same list path as `.map()`.
+func arrayFromMapCall(expr ast.Expr) (ast.Expr, bool) {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || len(call.Args) != 2 || call.Optional {
+		return nil, false
+	}
+	mem, ok := call.Callee.(*ast.MemberExpr)
+	if !ok || mem.Computed || mem.Optional {
+		return nil, false
+	}
+	obj, _ := mem.Object.(*ast.Identifier)
+	prop, _ := mem.Property.(*ast.Identifier)
+	if obj == nil || prop == nil || obj.Name != "Array" || prop.Name != "from" {
+		return nil, false
+	}
+	switch call.Args[1].(type) {
+	case *ast.ArrowFn:
+	default:
+		return nil, false
+	}
+	from := &ast.CallExpr{Position: call.Position, Callee: call.Callee, Args: []ast.Expr{call.Args[0]}}
+	return &ast.CallExpr{
+		Position: call.Position,
+		Callee:   &ast.MemberExpr{Position: mem.Position, Object: from, Property: &ast.Identifier{Name: "map"}},
+		Args:     []ast.Expr{call.Args[1]},
+	}, true
+}
+
 // resolveArrayLiteralExpr returns the ArrayExpr a .map() call iterates over,
 // resolving identifier/member sources through the build-time constant tables
 // (props locals, module consts). Returns nil when the array cannot be reduced
@@ -2185,7 +2234,7 @@ func (b *builder) resolveArrayLiteralExpr(expr ast.Expr) *ast.ArrayExpr {
 	if prop, ok := mem.Property.(*ast.Identifier); !ok || (prop.Name != "map" && prop.Name != "flatMap") {
 		return nil
 	}
-	if obj, ok := mem.Object.(*ast.ArrayExpr); ok {
+	if obj, ok := mem.Object.(*ast.ArrayExpr); ok && !arrayHasSpread(obj) {
 		return obj
 	}
 	// Fold the receiver (a prop, local, module const, signal initial, or a
@@ -2720,7 +2769,7 @@ func (b *builder) tryResolveItems(expr ast.Expr, listID string) []*ListItem {
 		return nil
 	}
 	arr, ok := mem.Object.(*ast.ArrayExpr)
-	if !ok {
+	if !ok || arrayHasSpread(arr) {
 		return nil
 	}
 	items, _ := b.tryResolveArrayItems(arr, expr, listID, false)
@@ -2833,10 +2882,15 @@ func formDefaultProp(name string) string {
 // buildStaticTextSlot is buildStaticValueSlot for JSX text positions: the
 // statically-evaluated result is HTML-escaped so a template literal or string
 // expression cannot inject real markup (e.g. <Code>{`return <h1>x</h1>`}</Code>).
-func (b *builder) buildStaticTextSlot(expr ast.Expr, parentID string) *StaticHTML {
+func (b *builder) buildStaticTextSlot(expr ast.Expr, parentID string) SlotNode {
 	v := b.evalValue(expr)
 	if nodes, ok := staticChildNodes(v, true); ok {
 		return nodes[0].(*StaticHTML)
+	}
+	if v.ContainsUnknown() && b.locateOnly == 0 {
+		// No build-time value: a slot lets the client compute it, and the
+		// emitter warns when there is no client code to do so.
+		return b.buildExprSlot(expr, parentID)
 	}
 	return &StaticHTML{HTML: escape.HTML(legacyConstString(expr, v))}
 }
@@ -3029,6 +3083,12 @@ func hasJSXInExpr(expr ast.Expr) bool {
 	switch e := expr.(type) {
 	case *ast.JSXElement, *ast.JSXFragment:
 		return true
+	case *ast.CallExpr:
+		// A portal is a branch of JSX content in `{open && createPortal(...)}`.
+		_, _, ok := portalCall(e)
+		return ok
+	case *ast.ParenExpr:
+		return hasJSXInExpr(e.Expr)
 	case *ast.BinaryExpr:
 		return hasJSXInExpr(e.Left) || hasJSXInExpr(e.Right)
 	case *ast.ConditionalExpr:
@@ -4410,8 +4470,9 @@ func (b *builder) foldLocalConsts(fn *ast.FnDecl, props valueMap, nextUseId func
 	b.localProps = props
 	fold := collectLocalVars(fn.Body, b.sigMap(), props, nextUseId)
 	locals, inits := fold.locals, fold.inits
+	destructured := destructNames(fold.destructs)
 	for name, init := range inits {
-		if init == nil || fold.changed[name] {
+		if init == nil || fold.changed[name] || destructured[name] {
 			continue
 		}
 		switch init.(type) {

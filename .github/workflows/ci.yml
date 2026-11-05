@@ -310,7 +310,7 @@ jobs:
         run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
 
       - name: Browser conformance
-        run: go test -run TestBrowserConformance -count=1 -v ./internal/build
+        run: go test -run "TestBrowserConformance|TestTrimmedRuntimeBrowser" -count=1 -v ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_BROWSER: ${{ matrix.browser }}
@@ -394,7 +394,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Browser conformance
-        run: go test -run TestBrowserConformance -count=1 -v ./internal/build
+        run: go test -run "TestBrowserConformance|TestTrimmedRuntimeBrowser" -count=1 -v ./internal/build
         working-directory: packages/compiler
         env:
           KRATE_BROWSER: chromium

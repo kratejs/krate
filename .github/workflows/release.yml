@@ -88,7 +88,7 @@ jobs:
 
       - name: Browser conformance
         working-directory: packages/compiler
-        run: go test -run TestBrowserConformance -count=1 -v ./internal/build
+        run: go test -run "TestBrowserConformance|TestTrimmedRuntimeBrowser" -count=1 -v ./internal/build
         env:
           KRATE_BROWSER: chromium
           KRATE_REQUIRE_E2E: "1"

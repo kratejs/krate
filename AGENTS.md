@@ -77,7 +77,7 @@ go test ./internal/conformance     # parser conformance corpus (test262, Babel J
 go test ./internal/conformance -update   # re-baseline after parser fixes
 
 # Browser conformance (install once with `pnpm exec playwright install chromium firefox webkit`)
-KRATE_BROWSER=chromium go test ./internal/build -run TestBrowserConformance -v
+KRATE_BROWSER=chromium go test ./internal/build -run 'TestBrowserConformance|TestTrimmedRuntimeBrowser' -v
 ```
 
 `KRATE_REQUIRE_E2E=1` turns environment-missing test skips (Node, built runtime,

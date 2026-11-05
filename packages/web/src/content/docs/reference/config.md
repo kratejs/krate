@@ -74,7 +74,7 @@ config can reference it with `"$schema": "./.krate/config.schema.json"`.
 
 ```typescript
 minify: true,                 // Enable all minification (default: true)
-minifyHTML: false,            // HTML minification (inherits minify)
+minifyHTML: false,            // HTML minification (inherits minify); text keeps its white space inside <pre> and where CSS sets white-space to pre, pre-wrap, pre-line or break-spaces
 minifyCSS: false,             // CSS minification (inherits minify)
 minifyJS: false,              // JS minification (inherits minify)
 ```

@@ -178,9 +178,18 @@ func GetProperty(v Value, key string) Value {
 		if objectMethods[key] {
 			return boundMethod(v, key)
 		}
+		if v.obj.builtin != "" {
+			return Unsupported(v.obj.builtin + "." + key + " is not available at build time")
+		}
 	case KindFunction:
 		if key == "name" {
 			return String(v.fn.Name)
+		}
+		if p, ok := v.fn.Props[key]; ok {
+			return p
+		}
+		if v.fn.Builtin {
+			return Unsupported(v.fn.Name + "." + key + " is not available at build time")
 		}
 	case KindJSX:
 		return Dynamic("property " + key + " of a JSX element")

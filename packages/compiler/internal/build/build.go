@@ -1844,7 +1844,7 @@ func (b *Builder) writeHTMLPages(results []*PageResult, cssFiles []string, runti
 				}
 				// 3. Minify code in memory
 				if b.Cfg.ShouldMinifyHTML() {
-					h = minifyHTML(h)
+					h = minifyHTMLWith(h, b.linkedWhiteSpaceRules(h))
 				}
 				// 4. CSP meta tag injection. Hash the FINAL document (after
 				// minification rewrote inline content) so every inline
@@ -2192,6 +2192,8 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			return t, em.Emit(t)
 		})
 		renderer.EmitMeta(tree, emitResult)
+		printTreeWarnings(os.Stderr, emitResult.Warnings)
+		pageWarnings = append(pageWarnings, emitResult.Warnings...)
 		// Render imported Go components (server tier, slot path + SSREval'd) via the
 		// Go host in one batch, then inline their HTML at the emitted markers.
 		if len(emitResult.GoRenders) > 0 {

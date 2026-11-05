@@ -108,7 +108,9 @@ const sharedGlobalsPlugin = {
 // Core of the split runtime: everything the other pieces build on. refs,
 // events and portal are exported too, because feature bundles import them
 // from the shared window globals.
-const CORE_MODULES = ['signal', 'effects', 'dom', 'slots', 'resource', 'context', 'storage', 'refs', 'events', 'portal'];
+// hook-args holds krateParam, which the compiler emits into every custom hook
+// that takes an argument.
+const CORE_MODULES = ['signal', 'effects', 'dom', 'slots', 'resource', 'context', 'storage', 'hook-args', 'refs', 'events', 'portal'];
 const CORE_ENTRY = CORE_MODULES.map((m) => `export * from './src/${m}';`).join('\n');
 
 // Optional features. A feature bundle imports core modules through window
@@ -186,7 +188,15 @@ async function buildSplitRuntime() {
   const coreExports = {};
   for (const m of CORE_MODULES) coreExports[m] = await exportNames(`export * from './src/${m}';`);
   await buildBundle('krate-core.js', CORE_ENTRY);
-  const manifest = { version: 1, core: { file: 'krate-core.js', exports: await exportNames(CORE_ENTRY) }, features: {} };
+  // `full` lists every export of the full hydration bundle. The compiler's
+  // tests compare it with the core and feature exports so a name the emitter
+  // generates cannot go missing from the trimmed runtime.
+  const manifest = {
+    version: 1,
+    core: { file: 'krate-core.js', exports: await exportNames(CORE_ENTRY) },
+    full: await exportNames(HYDRATE_ENTRY),
+    features: {},
+  };
   for (const [name, f] of Object.entries(FEATURES)) {
     const entry = f.modules.map((m) => `export * from './src/${m}';`).join('\n');
     await buildBundle(f.file, entry, true, [coreGlobalsPlugin(coreExports)]);
