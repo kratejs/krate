@@ -316,6 +316,14 @@ a:hover {
     gap: 0.375rem;
 }
 
+/* The links share one wrapper: without a flex gap the buttons touch. */
+.social-links-list {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+}
+
 .social-link,
 .sidebar-close,
 .sidebar-toggle,
