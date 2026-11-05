@@ -128,6 +128,9 @@ type orphanBinding struct {
 // Emitter walks a ComponentTree and produces HTML + hydration metadata.
 type Emitter struct {
 	functions map[string]*ast.FnDecl
+	// externalIslands maps an island's usage (component name and source
+	// offset) to its id, for roots evaluated at build time.
+	externalIslands map[string]string
 	// clientStack tracks the ComponentIDs of client components currently being
 	// emitted, so orphan bindings can be attached to the signature that owns
 	// the signals they reference.
@@ -237,6 +240,10 @@ func (e *Emitter) Emit(tree *irtree.ComponentTree) *EmitResult {
 	e.cvaFactories = tree.CVAFactories
 	e.contextDefaults = tree.ContextDefaults
 	e.moduleConsts = tree.ModuleConstInits
+	e.externalIslands = map[string]string{}
+	for _, x := range tree.ExternalComponents {
+		e.externalIslands[externalIslandKey(x.Local, x.Offset)] = x.ID
+	}
 	output := e.emitNode(tree.Root)
 
 	// Merge subtree-local metadata and orphans collected during emit.
@@ -467,6 +474,22 @@ func (e *Emitter) emitSSREvaluated(node *irtree.ComponentNode) SlotOutput {
 	}
 	if e.contextDefaults != nil {
 		eval.SetContextDefaults(e.contextDefaults)
+	}
+	if len(e.externalIslands) > 0 {
+		eval.externalIsland = func(el *ast.JSXElement) (string, bool) {
+			if el == nil || el.Opening == nil {
+				return "", false
+			}
+			name := el.Opening.Name
+			if i := strings.IndexByte(name, '.'); i >= 0 {
+				name = name[:i]
+			}
+			id, ok := e.externalIslands[externalIslandKey(name, el.Position.Offset)]
+			if !ok {
+				return "", false
+			}
+			return `<div data-krate-island="` + id + `" style="display:contents"></div>`, true
+		}
 	}
 	eval.SetContextValues(node.ContextValues)
 	eval.SetCodeTheme(e.CodeTheme)
@@ -1446,4 +1469,8 @@ func dropManagedElementBindings(sig *irtree.ComponentSignature, managed map[irtr
 		}
 		sig.RefBindings = kept
 	}
+}
+
+func externalIslandKey(local string, offset int) string {
+	return local + "@" + strconv.Itoa(offset)
 }

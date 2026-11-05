@@ -76,6 +76,22 @@ try {
   await hydrated(5000).catch(() => {});
   check("client:idle mounts once the browser is idle", (await page.locator("[data-krate-island-hydrated]").count()) === 1);
 
+  // Pages built per generateStaticParams entry hydrate their islands.
+  for (const id of ["a", "b"]) {
+    errors.length = 0;
+    const html = await (await page.request.get(`${base}/gsp/${id}/`)).text();
+    check(`gsp ${id}: the island is in the HTML`, html.includes("data-krate-island"), html.slice(0, 300));
+    await page.goto(`${base}/gsp/${id}/`, { waitUntil: "load" });
+    await hydrated();
+    check(`gsp ${id}: the param reaches the page`, (await text("#gid")) === `entry ${id}`, await text("#gid"));
+    check(`gsp ${id}: the store island renders`, (await text("#inc")) === `gsp-${id} 1`, await text("#inc"));
+    await page.click("#inc");
+    check(`gsp ${id}: the store island is interactive`, (await text("#inc")) === `gsp-${id} 2`, await text("#inc"));
+    check(`gsp ${id}: a second island shares the store`, (await text("#disp")) === "shown 2", await text("#disp"));
+    check(`gsp ${id}: no console errors`, errors.length === 0, errors.join(" | "));
+  }
+  errors.length = 0;
+
   await page.goto(base + "/styled/", { waitUntil: "load" });
   await hydrated();
   check("CSS-in-JS island has no server markup", (await page.evaluate(() => document.documentElement.outerHTML)).includes("fs-div"));

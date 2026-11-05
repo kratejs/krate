@@ -17,6 +17,7 @@ import (
 	"github.com/kratejs/krate/packages/compiler/ast"
 	"github.com/kratejs/krate/packages/compiler/internal/annotator"
 	"github.com/kratejs/krate/packages/compiler/internal/bundler"
+	"github.com/kratejs/krate/packages/compiler/internal/diag"
 	"github.com/kratejs/krate/packages/compiler/internal/environ"
 	"github.com/kratejs/krate/packages/compiler/internal/execx"
 	"github.com/kratejs/krate/packages/compiler/internal/fsutil"
@@ -504,6 +505,44 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		return nil, "", fmt.Errorf("no entry module found")
 	}
 
+	// Modules that call hooks of an npm React library run on Preact in an
+	// island, exactly as in buildPage. The module list is captured before the
+	// island modules leave it: their files stay dependencies of the page.
+	reactIslands := detectReactIslandModules(bundle.Modules, bnd.Resolve)
+	var reactIslandImps []irtree.ExternalImport
+	if len(reactIslands) > 0 {
+		reactIslandImps = reactIslandImports(bundle.Modules, reactIslands, bnd.Resolve)
+		if im, ok := reactIslands[entryModule.Path]; ok {
+			rewritten, why := reactIslandPage(entryModule, im.Pos)
+			if why != "" {
+				return nil, "", diag.Diagnostic{
+					File: entryModule.Path, Line: im.Pos.Line, Col: im.Pos.Col,
+					Message: "`" + im.Name + "` from \"" + im.Pkg + "\" needs React's render model, so this page would run as a Preact island, but it cannot",
+					Hint:    why,
+				}.WithCode(diag.CodeReactLibNotInIsland)
+			}
+			for i, m := range bundle.Modules {
+				if m == entryModule {
+					bundle.Modules[i] = rewritten
+				}
+			}
+			entryModule = rewritten
+			reactIslandImps = append(reactIslandImps, irtree.ExternalImport{
+				Source: rewritten.Path, Local: reactIslandPageLocal, Default: true, ReactIsland: true, ClientOnly: im.ClientOnly,
+			})
+		}
+	}
+	pageDeps := []string{spp.PagePath}
+	for _, mod := range bundle.Modules {
+		if mod.Path != spp.PagePath {
+			pageDeps = append(pageDeps, mod.Path)
+		}
+	}
+	pageDeps = append(pageDeps, bundle.CSSDeps...)
+	if len(reactIslands) > 0 {
+		bundle.Modules = krateSideModules(bundle.Modules, entryModule, reactIslands, bnd.Resolve)
+	}
+
 	// Run AfterParse hooks so statically generated dynamic-param pages get the
 	// same AST-inspection/edit opportunity as regular pages.
 	parseCtx := &plugin.ParseHookCtx{
@@ -549,6 +588,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	if serverErr != nil {
 		return nil, "", serverErr
 	}
+	if serverPage && len(reactIslands) > 0 {
+		return nil, "", reactIslandDiag(firstReactIsland(reactIslands), "a server-rendered page")
+	}
 	clientBoundaries, cbErr := b.prepareClientBoundaries(bundle, ann, serverPage)
 	if cbErr != nil {
 		return nil, "", cbErr
@@ -558,6 +600,20 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		emitResult *renderer.EmitResult
 		goBaked    map[string]string
 	)
+	externalByLocal, externalImports, localImports := entryExternalImports(entryModule.Program)
+	for _, imp := range reactIslandImps {
+		if _, dup := externalByLocal[imp.Local]; dup {
+			kept := externalImports[:0]
+			for _, old := range externalImports {
+				if old.Local != imp.Local {
+					kept = append(kept, old)
+				}
+			}
+			externalImports = kept
+		}
+		externalByLocal[imp.Local] = imp
+		externalImports = append(externalImports, imp)
+	}
 	if serverPage {
 		// An async page renders per request; its params arrive with the request.
 		tree = &irtree.ComponentTree{}
@@ -567,6 +623,8 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		opts.PageParams = spp.Params
 		opts.RoutePath = routePathFor(spp.PagePath, b.Cfg.PagesDir, spp.Params)
 		applyModuleBindings(&opts, entryModule.Path, entryModule.Program, extraPrograms)
+		opts.ExternalImports = externalByLocal
+		opts.LocalComponentImports = localImports
 		opts.ActionURLs = bundle.ActionImports
 		tree = irtree.BuildWithOptions(entryModule.Program, ann, opts)
 		if len(tree.Errors) > 0 {
@@ -660,14 +718,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	// Record the dynamic-route template's module graph (plus any wrapping
 	// layouts) so editing blog/[slug].tsx or a layout rebuilds its expanded
 	// pages instead of falling through to a full rebuild.
-	deps = append(deps, spp.PagePath)
-	for _, mod := range bundle.Modules {
-		if mod.Path != spp.PagePath {
-			deps = append(deps, mod.Path)
-		}
-	}
-	deps = append(deps, bundle.CSSDeps...)
-	b.recordDeps(spp.PagePath, deps)
+	deps = append(deps, pageDeps...)
 
 	pageDir := filepath.Join(b.Cfg.OutDir, spp.OutPath)
 	if err := os.MkdirAll(pageDir, 0755); err != nil {
@@ -677,12 +728,58 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	jsFile := ""
 	hydrationJS := ""
 	hasJS := false
-	needsHydrate := len(emitResult.Signatures) > 0
-	dceJS := append(lazyChunkSources(emitResult.LazyChunks), b.clientChunkSources(clientBoundaries)...)
+	var pageProviders *islandProviders
+	if len(tree.ExternalComponents) > 0 {
+		pageProviders = b.pageProviders(spp.PagePath)
+	}
+	// Every generated page owns its island entries: the template and each
+	// param entry share a source file, and one owner would keep only the last.
+	islandBoot, islandJS, islandSSR, islandStyles, islandErr := b.buildIslands(
+		spp.PagePath+"\x00"+spp.OutPath,
+		tree.ExternalComponents,
+		externalImports,
+		entryLocalImports(entryModule.Program),
+		filepath.Dir(entryModule.Path),
+		pageProviders,
+	)
+	if islandErr != nil {
+		return nil, "", islandErr
+	}
+	if islandStyles != nil {
+		bundle.CSS += islandStyles.CSS
+		for src, url := range islandStyles.Assets {
+			bundle.AssetFiles[src] = url
+		}
+		deps = append(deps, islandStyles.Deps...)
+	}
+	b.recordDeps(spp.PagePath, deps)
+	if len(islandSSR) > 0 {
+		emitResult.HTML = injectIslandSSR(emitResult.HTML, islandSSR)
+	}
+	emitResult.IslandBootJS = islandBoot
+	needsHydrate := len(emitResult.Signatures) > 0 || islandJS != "" || islandBoot != "" || strings.Contains(emitResult.HTML, "data-krate-portal")
+	dceJS := append(lazyChunkSources(emitResult.LazyChunks), islandJS)
+	dceJS = append(dceJS, b.clientChunkSources(clientBoundaries)...)
 	if needsHydrate {
 		hydrationJS = renderer.GenerateNewHydrationJS(emitResult)
 		dceJS = append(dceJS, hydrationJS)
 		hydrationJS = b.writeLazyChunks(hydrationJS, emitResult.LazyChunks, pageDir, spp.OutPath)
+		if islandJS != "" {
+			hydrationJS = strings.TrimSpace(hydrationJS + "\n" + islandJS)
+		}
+		if strings.TrimSpace(hydrationJS) != "" {
+			hydrationJS = neutralizeClientEnv(hydrationJS)
+			vendor := collectVendorImports(bundle)
+			for _, rb := range b.routeStack(spp.PagePath) {
+				if lv, ok := layoutVendorImports.Load(rb.Path); ok {
+					vendor = append(vendor, lv.([]vendorImport)...)
+				}
+			}
+			var verr error
+			if hydrationJS, verr = b.withVendorImports(hydrationJS, vendor, tree.ExternalComponents); verr != nil {
+				return nil, "", verr
+			}
+		}
 		if strings.TrimSpace(hydrationJS) != "" {
 			hasJS = true
 			if b.shouldMinifyJS() {
@@ -707,7 +804,7 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 	b.registerWorkers(bundle.WorkerFiles, bundle.WorkerEsm)
 	b.registerDynamicChunks(bundle.DynImportFiles)
 	pageCSS := b.pageCSSAfterDCE(renderMode, bundle.CSS, bundle.CSSModules, emitResult.HTML, dceJS...)
-	return &PageResult{
+	result := &PageResult{
 		Page:        spp.PagePath,
 		OutName:     spp.OutPath,
 		HTML:        emitResult.HTML,
@@ -734,5 +831,9 @@ func (b *Builder) buildStaticParamsPage(spp staticParamsPage) (*PageResult, stri
 		MetadataSegments:  metaSegs,
 		MetadataPageFiles: metaPageFiles,
 		ClientBoundaries:  clientBoundaries,
-	}, bundle.CSS, nil
+	}
+	if renderMode != RenderSSG {
+		result.IslandStubs = newIslandServerStubs(entryModule.Program, tree.ExternalComponents, islandSSR)
+	}
+	return result, bundle.CSS, nil
 }

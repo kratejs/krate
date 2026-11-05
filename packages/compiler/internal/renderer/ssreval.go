@@ -56,6 +56,12 @@ type SSREval struct {
 	// component was emitted through the tree path.
 	interactiveEmit func(el *ast.JSXElement) (html string, handled bool)
 
+	// externalIsland is an optional hook set by the emitter: an element the IR
+	// builder turned into a runtime island (a package or React-library
+	// component) renders as that island's placeholder, never as a build-time
+	// evaluated component.
+	externalIsland func(el *ast.JSXElement) (html string, handled bool)
+
 	// iconEmit is an optional hook set by the emitter to resolve a <Icon>
 	// element whose `name` attribute is an expression. The hook receives the
 	// evaluated name and the element's forwarded attributes, and returns the
@@ -1353,6 +1359,11 @@ func (e *SSREval) evalJSX(el *ast.JSXElement) string {
 
 	// Uppercase = component - resolve and evaluate recursively.
 	if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
+		if e.externalIsland != nil {
+			if html, handled := e.externalIsland(el); handled {
+				return html
+			}
+		}
 		if e.interactiveEmit != nil {
 			if html, handled := e.interactiveEmit(el); handled {
 				return html

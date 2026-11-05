@@ -131,6 +131,15 @@ func TestBrowserReactLibraryIslands(t *testing.T) {
 		export const revalidate = 60;
 		export default function Page() { return <main><h1>isr</h1><Counter label="count" /><Queried /><Themed /></main>; }
 	`)
+	// A page built per generateStaticParams entry still gets its islands.
+	writeProjectFile(t, root, "src/pages/gsp/[id].tsx", `
+		import { Counter } from '../../components/Counter';
+		import Display from '../../components/Display';
+		export function generateStaticParams() { return [{ id: 'a' }, { id: 'b' }]; }
+		export default function Page({ params }: any) {
+			return <main><h1 id="gid">entry {params.id}</h1><Counter label={'gsp-' + params.id} /><Display /></main>;
+		}
+	`)
 	// The fake Badge renders <span class="badge">; give the deferred one an id.
 	writeProjectFile(t, root, "node_modules/fake-lib/index.js", `
 		import { jsx } from 'react/jsx-runtime';
