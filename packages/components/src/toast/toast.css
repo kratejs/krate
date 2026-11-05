@@ -7,9 +7,9 @@
   padding: 14px 16px;
   border-radius: 8px;
   background: var(--krate-card-bg, #ffffff);
-  border: 1px solid var(--krate-border, #e4e4e7);
+  border: 1px solid var(--krate-border, #e5e5e5);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-  color: var(--krate-text, #09090b);
+  color: var(--krate-text, #0a0a0a);
 }
 .krate-toast[data-variant='destructive'] {
   border-color: var(--krate-danger, #ef4444);
@@ -24,7 +24,7 @@
 }
 .krate-toast-description {
   font-size: 0.85rem;
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
   margin-top: 2px;
 }
 .krate-toast-close {
@@ -36,12 +36,12 @@
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
   cursor: pointer;
 }
 .krate-toast-close:hover {
-  background: var(--krate-surface, #f4f4f5);
-  color: var(--krate-text, #09090b);
+  background: var(--krate-surface, #f5f5f5);
+  color: var(--krate-text, #0a0a0a);
 }
 .krate-toaster {
   position: fixed;

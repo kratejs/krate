@@ -10,7 +10,7 @@ type Config struct {
 	CodeHighlight  bool   `json:"codeHighlight"`  // syntax highlighting for code blocks
 	CodeTheme      string `json:"codeTheme"`      // chroma theme for light mode, or for both modes when CodeThemeDark equals it (default: github)
 	// CodeThemeDark is the chroma theme used in dark mode (default:
-	// github-dark). Configured as `codeTheme: { light, dark }`.
+	// krate-dark). Configured as `codeTheme: { light, dark }`.
 	CodeThemeDark string `json:"-"`
 	Math          bool   `json:"math"`    // $...$ and $$...$$ math support
 	Mermaid       bool   `json:"mermaid"` // render ```mermaid blocks as Mermaid diagrams
@@ -33,7 +33,7 @@ func DefaultConfig() Config {
 		Admonitions:    true,
 		CodeHighlight:  true,
 		CodeTheme:      "github",
-		CodeThemeDark:  "github-dark",
+		CodeThemeDark:  "krate-dark",
 		Math:           false,
 	}
 }
@@ -50,7 +50,7 @@ func (c *Config) SetCodeTheme(v interface{}) bool {
 		c.CodeTheme, c.CodeThemeDark = t, t
 		return true
 	case map[string]interface{}:
-		light, dark := "github", "github-dark"
+		light, dark := "github", "krate-dark"
 		if s, ok := t["light"].(string); ok && s != "" {
 			light = s
 		}

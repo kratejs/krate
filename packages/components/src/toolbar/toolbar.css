@@ -3,7 +3,7 @@
   align-items: center;
   gap: 4px;
   padding: 4px;
-  border: 1px solid var(--krate-border, #e4e4e7);
+  border: 1px solid var(--krate-border, #e5e5e5);
   border-radius: 8px;
   background: var(--krate-card-bg, #ffffff);
 }
@@ -23,7 +23,7 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--krate-text, #09090b);
+  color: var(--krate-text, #0a0a0a);
   font-size: 0.875rem;
   font-family: inherit;
   text-decoration: none;
@@ -31,7 +31,7 @@
 }
 .krate-toolbar-button:hover,
 .krate-toolbar-link:hover {
-  background: var(--krate-surface-hover, #e4e4e7);
+  background: var(--krate-surface-hover, #e5e5e5);
 }
 .krate-toolbar-button:focus-visible,
 .krate-toolbar-link:focus-visible {
@@ -42,5 +42,5 @@
   width: 1px;
   height: 20px;
   margin: 0 4px;
-  background: var(--krate-border, #e4e4e7);
+  background: var(--krate-border, #e5e5e5);
 }

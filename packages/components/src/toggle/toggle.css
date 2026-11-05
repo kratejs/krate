@@ -7,7 +7,7 @@
   font-size: 0.875rem;
   font-weight: 500;
   font-family: inherit;
-  color: var(--krate-text, #09090b);
+  color: var(--krate-text, #0a0a0a);
   cursor: pointer;
   border: 1px solid transparent;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -16,14 +16,14 @@
    variant backgrounds after the hover rule (and lower the hover specificity with
    :where) so a checked toggle keeps its active colour on hover. */
 .krate-toggle:where(:hover) {
-  background: var(--krate-surface-hover, #e4e4e7);
+  background: var(--krate-surface-hover, #e5e5e5);
 }
 .krate-toggle[data-variant='default'] {
-  background: var(--krate-active-bg, var(--krate-surface, #f4f4f5));
+  background: var(--krate-active-bg, var(--krate-surface, #f5f5f5));
   border-color: var(--krate-active-color, transparent);
 }
 .krate-toggle[data-variant='outline'] {
-  border-color: var(--krate-active-color, var(--krate-border, #e4e4e7));
+  border-color: var(--krate-active-color, var(--krate-border, #e5e5e5));
   background: var(--krate-active-bg, transparent);
 }
 .krate-toggle:focus-visible {

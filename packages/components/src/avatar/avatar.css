@@ -7,8 +7,8 @@
   height: 40px;
   border-radius: 50%;
   overflow: hidden;
-  background: var(--krate-avatar-bg, var(--krate-surface-hover, #e4e4e7));
-  color: var(--krate-avatar-text, #a1a1aa);
+  background: var(--krate-avatar-bg, var(--krate-surface-hover, #e5e5e5));
+  color: var(--krate-avatar-text, #a3a3a3);
   flex-shrink: 0;
 }
 .krate-avatar-sm {
@@ -39,5 +39,4 @@
   height: 100%;
   font-weight: 600;
   text-transform: uppercase;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(139, 92, 246, 0.2));
 }

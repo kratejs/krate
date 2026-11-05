@@ -6,8 +6,8 @@
   width: 42px;
   height: 24px;
   border-radius: 9999px;
-  background: var(--krate-surface-hover, #e4e4e7);
-  border: 1px solid var(--krate-border, #e4e4e7);
+  background: var(--krate-surface-hover, #e5e5e5);
+  border: 1px solid var(--krate-border, #e5e5e5);
   padding: 2px;
   cursor: pointer;
   transition: background 0.2s, border-color 0.2s;
@@ -15,7 +15,7 @@
   flex-shrink: 0;
 }
 .krate-switch:hover {
-  border-color: var(--krate-text-muted, #71717a);
+  border-color: var(--krate-text-muted, #737373);
 }
 /* The native input fills the track so the whole switch is its click target and
    stays in the accessibility tree and tab order. */

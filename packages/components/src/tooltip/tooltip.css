@@ -13,7 +13,7 @@
   z-index: 1000;
   padding: 6px 12px;
   border-radius: 6px;
-  background: var(--krate-fg, #09090b);
+  background: var(--krate-fg, #0a0a0a);
   color: var(--krate-bg, #ffffff);
   font-size: 0.8rem;
   font-weight: 500;

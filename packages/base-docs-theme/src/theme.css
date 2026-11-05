@@ -24,22 +24,22 @@
     --font-mono: 'JetBrains Mono Variable', "JetBrains Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 
     --color-bg: #ffffff;
-    --color-fg: #09090b;
-    --color-muted: #686872;
-    --color-muted-bg: #f4f4f5;
-    --color-border: #e4e4e7;
+    --color-fg: #0a0a0a;
+    --color-muted: #6a6a6a;
+    --color-muted-bg: #f5f5f5;
+    --color-border: #e5e5e5;
     --color-card-bg: #ffffff;
     --color-sidebar-bg: #fafafa;
-    --color-sidebar-border: #e4e4e7;
+    --color-sidebar-border: #e5e5e5;
 
-    --color-text-main: #27272a;
-    --color-text-link: #52525b;
-    --color-pre-bg: #f4f4f5;
-    --color-pre-fg: #18181b;
+    --color-text-main: #262626;
+    --color-text-link: #525252;
+    --color-pre-bg: #f5f5f5;
+    --color-pre-fg: #171717;
 
     --blur-intensity: 12px;
     --navbar-bg: rgba(255, 255, 255, 0.82);
-    --overlay-bg: rgba(9, 9, 11, 0.4);
+    --overlay-bg: rgba(10, 10, 10, 0.4);
     --docs-accent-bg: rgba(249, 115, 22, 0.08);
     --docs-accent-border: rgba(249, 115, 22, 0.22);
     --docs-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.12), 0 2px 6px -2px rgba(0, 0, 0, 0.06);
@@ -59,14 +59,14 @@
        Override --color-pre-bg / --color-pre-fg to retint the surface. */
     --code-border: var(--color-border);
     --code-hl: rgba(0, 0, 0, 0.06);
-    --tok-comment: #52525b;
+    --tok-comment: #525252;
     --tok-keyword: #9f1239;
     --tok-string: #166534;
     --tok-number: #92400e;
     --tok-function: #1d4ed8;
     --tok-type: #0f766e;
-    --tok-punct: #3f3f46;
-    --tok-operator: #3f3f46;
+    --tok-punct: #404040;
+    --tok-operator: #404040;
     --tok-delete: #b91c1c;
     --tok-insert: #166534;
 
@@ -90,19 +90,19 @@
 
 :root[data-theme="dark"] {
     color-scheme: dark;
-    --color-bg: #09090b;
+    --color-bg: #0a0a0a;
     --color-fg: #fafafa;
-    --color-muted: #a1a1aa;
-    --color-muted-bg: #18181b;
-    --color-border: #27272a;
-    --color-card-bg: #0f0f12;
-    --color-sidebar-bg: #09090b;
-    --color-sidebar-border: #27272a;
-    --color-text-main: #e4e4e7;
-    --color-text-link: #a1a1aa;
-    --color-pre-bg: #111114;
-    --color-pre-fg: #f4f4f5;
-    --navbar-bg: rgba(9, 9, 11, 0.82);
+    --color-muted: #a3a3a3;
+    --color-muted-bg: #171717;
+    --color-border: #262626;
+    --color-card-bg: #0f0f0f;
+    --color-sidebar-bg: #0a0a0a;
+    --color-sidebar-border: #262626;
+    --color-text-main: #e5e5e5;
+    --color-text-link: #a3a3a3;
+    --color-pre-bg: #111111;
+    --color-pre-fg: #f5f5f5;
+    --navbar-bg: rgba(10, 10, 10, 0.82);
     --overlay-bg: rgba(0, 0, 0, 0.6);
     --docs-accent-bg: rgba(249, 115, 22, 0.12);
     --docs-accent-border: rgba(249, 115, 22, 0.3);
@@ -113,14 +113,14 @@
     --color-focus: #fb923c;
     --code-border: rgba(255, 255, 255, 0.07);
     --code-hl: rgba(255, 255, 255, 0.07);
-    --tok-comment: #8d8d98;
+    --tok-comment: #929292;
     --tok-keyword: #ff9d7a;
     --tok-string: #9ad7a6;
     --tok-number: #f2c572;
     --tok-function: #8fb8ff;
     --tok-type: #6fd6d0;
-    --tok-punct: #a1a1aa;
-    --tok-operator: #c9c9d1;
+    --tok-punct: #a3a3a3;
+    --tok-operator: #cccccc;
     --tok-delete: #ff8a8a;
     --tok-insert: #7ee0a0;
 }
@@ -128,19 +128,19 @@
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
         color-scheme: dark;
-        --color-bg: #09090b;
+        --color-bg: #0a0a0a;
         --color-fg: #fafafa;
-        --color-muted: #a1a1aa;
-        --color-muted-bg: #18181b;
-        --color-border: #27272a;
-        --color-card-bg: #0f0f12;
-        --color-sidebar-bg: #09090b;
-        --color-sidebar-border: #27272a;
-        --color-text-main: #e4e4e7;
-        --color-text-link: #a1a1aa;
-        --color-pre-bg: #111114;
-        --color-pre-fg: #f4f4f5;
-        --navbar-bg: rgba(9, 9, 11, 0.82);
+        --color-muted: #a3a3a3;
+        --color-muted-bg: #171717;
+        --color-border: #262626;
+        --color-card-bg: #0f0f0f;
+        --color-sidebar-bg: #0a0a0a;
+        --color-sidebar-border: #262626;
+        --color-text-main: #e5e5e5;
+        --color-text-link: #a3a3a3;
+        --color-pre-bg: #111111;
+        --color-pre-fg: #f5f5f5;
+        --navbar-bg: rgba(10, 10, 10, 0.82);
         --overlay-bg: rgba(0, 0, 0, 0.6);
         --docs-accent-bg: rgba(249, 115, 22, 0.12);
         --docs-accent-border: rgba(249, 115, 22, 0.3);
@@ -151,14 +151,14 @@
         --color-focus: #fb923c;
         --code-border: rgba(255, 255, 255, 0.07);
         --code-hl: rgba(255, 255, 255, 0.07);
-        --tok-comment: #8d8d98;
+        --tok-comment: #929292;
         --tok-keyword: #ff9d7a;
         --tok-string: #9ad7a6;
         --tok-number: #f2c572;
         --tok-function: #8fb8ff;
         --tok-type: #6fd6d0;
-        --tok-punct: #a1a1aa;
-        --tok-operator: #c9c9d1;
+        --tok-punct: #a3a3a3;
+        --tok-operator: #cccccc;
         --tok-delete: #ff8a8a;
         --tok-insert: #7ee0a0;
     }
@@ -2409,17 +2409,17 @@ pre.mermaid,
     :root {
         --content-width: 100%;
         --measure: none;
-        --color-pre-bg: #f4f4f5;
+        --color-pre-bg: #f5f5f5;
         --color-pre-fg: #111111;
-        --code-border: #d4d4d8;
-        --tok-comment: #52525b;
+        --code-border: #d4d4d4;
+        --tok-comment: #525252;
         --tok-keyword: #9f1239;
         --tok-string: #166534;
         --tok-number: #92400e;
         --tok-function: #1d4ed8;
         --tok-type: #0f766e;
-        --tok-punct: #3f3f46;
-        --tok-operator: #3f3f46;
+        --tok-punct: #404040;
+        --tok-operator: #404040;
     }
 
     .docs-navbar,
@@ -2485,7 +2485,7 @@ pre.mermaid,
         background: none;
         opacity: 1;
         font-size: 0.85em;
-        color: #52525b;
+        color: #525252;
         -webkit-mask: none;
         mask: none;
         overflow-wrap: anywhere;
