@@ -8,6 +8,13 @@ const (
 	CodeIslandClientOnly Code = "KR8008"
 	// CodeIslandAsset: an island asset or package could not be resolved.
 	CodeIslandAsset Code = "KR8009"
+	// CodeReactLibNotInIsland: a React library's hooks are used where no
+	// island can run them (a layout, a server component).
+	CodeReactLibNotInIsland Code = "KR8010"
+	// CodeCSSInJS: a css prop that nothing in the module understands.
+	CodeCSSInJS Code = "KR8011"
+	// CodeClientDirective: a client:* directive on something that is not an island.
+	CodeClientDirective Code = "KR8012"
 )
 
 func init() {
@@ -78,6 +85,32 @@ func init() {
 				"rendered by Preact during the build. Its placeholder is emitted without server-rendered " +
 				"markup and the client mounts it after the island chunk loads. Pass build-time initial values " +
 				"or keep the island client-only intentionally.",
+		},
+		CodeInfo{
+			Code:  CodeReactLibNotInIsland,
+			Title: "React library hook used where no island can run it",
+			Explanation: "A component calls a hook of an npm React library (zustand, react-hook-form, swr, " +
+				"@tanstack/react-query, ...). Those hooks need React's render model, which Krate's lowered " +
+				"components do not have, so Krate runs the module that calls them as a Preact island. That is " +
+				"not possible for a layout or template, or for a server or runtime tier component. Move the " +
+				"component into its own module and render it from a page or client component, or replace the " +
+				"library with createSignal / createResource.",
+		},
+		CodeInfo{
+			Code:  CodeCSSInJS,
+			Title: "css prop is emotion's, not a DOM attribute",
+			Explanation: "A `css={...}` prop on a DOM element is understood only by emotion's JSX runtime. In a " +
+				"module that does not use it Krate renders `css` as a plain attribute, so the styles are lost. " +
+				"Add `/** @jsxImportSource @emotion/react */` to the top of the file so the module runs as a " +
+				"Preact island with emotion, or use CSS modules, Tailwind or a stylesheet.",
+		},
+		CodeInfo{
+			Code:  CodeClientDirective,
+			Title: "Client directive on a component that is not an island",
+			Explanation: "`client:visible`, `client:idle` and `client:load` choose when an island mounts, and only " +
+				"apply to the root tag of a compiled package component (or a module that uses a React library) " +
+				"rendered as an island. On a Krate component or an HTML element they do nothing; Krate hydrates " +
+				"those with the page. Remove the directive, or put it on the package component itself.",
 		},
 		CodeInfo{
 			Code:  CodeIslandAsset,

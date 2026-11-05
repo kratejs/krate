@@ -689,6 +689,12 @@ type ExternalImport struct {
 	Remote    string
 	Default   bool
 	Namespace bool
+	// ReactIsland marks a binding from a user module that needs React's render
+	// model (it calls hooks of an npm React library). Source is then the
+	// module's absolute path and the tag renders as an island bundling it.
+	ReactIsland bool
+	// ClientOnly skips the build-time server render of the island.
+	ClientOnly bool
 }
 
 // ExternalComponent is an unresolved package component that is mounted at
@@ -713,6 +719,15 @@ type ExternalComponent struct {
 	// which case the island stays client-only.
 	SSRPropsJS    string
 	SSRPropsKnown bool
+	// ReactIsland is set when the island runs a user module that needs React's
+	// render model (see ExternalImport.ReactIsland).
+	ReactIsland bool
+	// ClientOnly means the island has no server render: its package creates
+	// the markup (styles) in the browser.
+	ClientOnly bool
+	// Hydrate is the client directive that defers mounting: "" (at load),
+	// "visible" or "idle".
+	Hydrate string
 	// File/Line/Col locate the usage for diagnostics.
 	File string
 	Line int

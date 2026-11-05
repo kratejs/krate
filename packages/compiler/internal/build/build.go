@@ -1987,6 +1987,26 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	if err := b.contextErr(); err != nil {
 		return nil, "", err
 	}
+	// Modules that call hooks of an npm React library run on Preact in an
+	// island; the Krate lowering of their source is unused, so its warnings
+	// are not shown either.
+	reactIslands := detectReactIslandModules(bundle.Modules, bnd.Resolve)
+	for i, m := range bundle.Modules {
+		if m == nil || m.Program == nil || m.IsExternal || resolver.IsCompiledDependency(m.Path) {
+			continue
+		}
+		if _, ok := reactIslands[m.Path]; ok {
+			if len(m.Diagnostics) > 0 {
+				quiet := *m
+				quiet.Diagnostics = nil
+				bundle.Modules[i] = &quiet
+			}
+		} else if ws := cssPropWarnings(m); len(ws) > 0 {
+			noted := *m
+			noted.Diagnostics = append(append([]diag.Diagnostic(nil), m.Diagnostics...), ws...)
+			bundle.Modules[i] = &noted
+		}
+	}
 	printModuleWarnings(os.Stderr, bundle.Modules)
 	var pageWarnings []diag.Diagnostic
 	for _, m := range bundle.Modules {
@@ -1996,6 +2016,29 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	entryModule := findEntryModule(bundle.Modules)
 	if entryModule == nil || entryModule.Program == nil {
 		return nil, "", fmt.Errorf("page %s has no entry module (no default export found); a page must export a default component", page)
+	}
+	var reactIslandImps []irtree.ExternalImport
+	if len(reactIslands) > 0 {
+		reactIslandImps = reactIslandImports(bundle.Modules, reactIslands, bnd.Resolve)
+		if im, ok := reactIslands[entryModule.Path]; ok {
+			rewritten, ok := reactIslandPage(entryModule, im.Pos)
+			if !ok {
+				return nil, "", diag.Diagnostic{
+					File: entryModule.Path, Line: im.Pos.Line, Col: im.Pos.Col,
+					Message: "`" + im.Name + "` from \"" + im.Pkg + "\" needs React's render model, but this page's default export is not a function component Krate can run as an island",
+					Hint:    "declare the page as `export default function Page() { ... }`",
+				}.WithCode(diag.CodeReactLibNotInIsland)
+			}
+			for i, m := range bundle.Modules {
+				if m == entryModule {
+					bundle.Modules[i] = rewritten
+				}
+			}
+			entryModule = rewritten
+			reactIslandImps = append(reactIslandImps, irtree.ExternalImport{
+				Source: rewritten.Path, Local: reactIslandPageLocal, Default: true, ReactIsland: true, ClientOnly: im.ClientOnly,
+			})
+		}
 	}
 
 	// Collect dependencies for partial reloads
@@ -2122,6 +2165,9 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 	if serverErr != nil {
 		return nil, "", serverErr
 	}
+	if serverPage && len(reactIslands) > 0 {
+		return nil, "", reactIslandDiag(firstReactIsland(reactIslands), "a server-rendered page")
+	}
 	intercept := cachedInterceptForPage(page, b.Cfg.PagesDir)
 	clientBoundaries, cbErr := b.prepareClientBoundaries(bundle, ann, serverPage)
 	if cbErr != nil {
@@ -2135,6 +2181,22 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 		regions    []Region
 	)
 	externalByLocal, externalImports, localImports := entryExternalImports(entryModule.Program)
+	// A path alias ("@/components/X") looks like a package scope, so the page's
+	// own import list already holds it as a package binding; the island
+	// binding replaces it.
+	for _, imp := range reactIslandImps {
+		if _, dup := externalByLocal[imp.Local]; dup {
+			kept := externalImports[:0]
+			for _, old := range externalImports {
+				if old.Local != imp.Local {
+					kept = append(kept, old)
+				}
+			}
+			externalImports = kept
+		}
+		externalByLocal[imp.Local] = imp
+		externalImports = append(externalImports, imp)
+	}
 	if serverPage {
 		// An async page renders entirely per request in the SSR sidecar: no
 		// build-time body and no hydration code. The shell keeps only the
@@ -2894,6 +2956,9 @@ func (b *Builder) executeLayoutPipeline(layoutPath string, content string, props
 	layoutBundle, err := bnd.Bundle(layoutPath)
 	if err != nil {
 		return nil, "", nil, false, fmt.Errorf("bundling layout %s: %w", layoutPath, err)
+	}
+	if islands := detectReactIslandModules(layoutBundle.Modules, bnd.Resolve); len(islands) > 0 {
+		return nil, "", nil, false, reactIslandDiag(firstReactIsland(islands), "a layout")
 	}
 	layoutVendorImports.Store(layoutPath, collectVendorImports(layoutBundle.Modules))
 	printModuleWarnings(os.Stderr, layoutBundle.Modules)
@@ -3674,7 +3739,7 @@ func findEntryModule(modules []*bundler.Module) *bundler.Module {
 func moduleSources(modules []*bundler.Module, entry *bundler.Module) []annotator.ModuleSource {
 	var out []annotator.ModuleSource
 	for _, mod := range modules {
-		if mod == nil || mod.Program == nil || mod.IsCSS || mod.IsExternal || mod == entry {
+		if mod == nil || mod.Program == nil || mod.IsCSS || mod.IsExternal || mod == entry || mod.Path == entry.Path {
 			continue
 		}
 		out = append(out, annotator.ModuleSource{
