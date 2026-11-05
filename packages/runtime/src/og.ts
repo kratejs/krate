@@ -9,6 +9,8 @@
 //   }
 
 export interface ImageResponseFont {
+import { readLocalImage } from './og-files.js';
+
   name: string;
   data: ArrayBuffer | ArrayBufferView;
   weight?: number;
@@ -128,16 +130,8 @@ async function loadImage(src: string, root: string): Promise<string> {
     if (!res.ok) throw new Error(`ImageResponse: ${src} answered ${res.status}`);
     return `data:${res.headers.get('content-type') || mime};base64,${toBase64(new Uint8Array(await res.arrayBuffer()))}`;
   }
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const rel = src.replace(/^\//, '');
-  for (const base of [path.join(root, 'public', rel), path.join(root, rel), src]) {
-    try {
-      return `data:${mime};base64,${toBase64(await fs.readFile(base))}`;
-    } catch {
-      /* try the next place */
-    }
-  }
+  const data = await readLocalImage(src, root);
+  if (data) return `data:${mime};base64,${toBase64(data)}`;
   throw new Error(`ImageResponse: cannot find the image ${src} (looked in public/ and the project root)`);
 }
 

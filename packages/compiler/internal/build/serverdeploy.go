@@ -592,7 +592,7 @@ func BuildServerBundle(root string, cfg *config.Config, target string) (*deploy.
 	if cfg.Cache.Shared() {
 		plan.SharedCache = true
 		if target == "cloudflare" && cfg.Cache.Adapter == "redis" {
-			plan.Warnings = append(plan.Warnings, "cache.adapter \"redis\" speaks TCP; Cloudflare Workers cannot keep that connection reliably. Use an HTTP-based adapter (a Redis REST service, KV) through a custom cache.adapter module, or deploy to node, vercel or netlify")
+			return nil, fmt.Errorf("cache.adapter \"redis\" cannot run on the cloudflare target: it opens a TCP connection (node:net/node:tls), which Workers do not have, so the bundle does not include it. Point cache.adapter at your own module that default-exports a CacheAdapter over HTTP (a Redis REST service or Workers KV), or deploy with --target node, vercel or netlify")
 		}
 		if cfg.Cache.URL != "" && cfg.Cache.URLEnv == "" {
 			plan.Warnings = append(plan.Warnings, "cache.url is not written into the bundle; set KRATE_CACHE_URL (or name another variable with cache.urlEnv) in the deployment's environment")
@@ -856,6 +856,45 @@ func builtinGuardPlugin(target string) api.Plugin {
 	}
 }
 
+// nodeOnlyRuntimeModules are @krate/runtime files that need Node built-ins and
+// are reached only through dynamic imports: the Redis cache adapter (node:net,
+// node:tls via resp.js) and the ImageResponse local image reader (node:fs).
+// A Worker never runs either, so the Cloudflare bundle swaps each for a stub
+// that throws a clear error if it is ever called. User code is not touched:
+// builtinGuardPlugin still refuses its Node imports.
+var nodeOnlyRuntimeModules = map[string]string{
+	"cache-redis.js": "export class RedisAdapter { constructor() { throw new Error('krate: cache.adapter \"redis\" needs Node sockets and is not part of the cloudflare bundle; pass your own CacheAdapter (an HTTP/KV based one) instead'); } }\nexport function createRedisAdapter() { return new RedisAdapter(); }\n",
+	"og-files.js":    "export async function readLocalImage() { throw new Error('krate: ImageResponse cannot read local images in the cloudflare bundle; images are drawn at build time or on the Krate host'); }\n",
+}
+
+// workerStubPlugin replaces the Node-only runtime modules for the Cloudflare target.
+func workerStubPlugin(runtimePkg string) api.Plugin {
+	return api.Plugin{
+		Name: "krate-worker-stubs",
+		Setup: func(b api.PluginBuild) {
+			b.OnResolve(api.OnResolveOptions{Filter: `(^|/)(cache-redis|og-files)\.js$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+				base := filepath.Base(args.Path)
+				if _, ok := nodeOnlyRuntimeModules[base]; !ok {
+					return api.OnResolveResult{}, nil
+				}
+				if runtimePkg == "" || !pathWithin(runtimePkg, args.Importer) {
+					return api.OnResolveResult{}, nil
+				}
+				return api.OnResolveResult{Path: base, Namespace: "krate-worker-stub"}, nil
+			})
+			b.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "krate-worker-stub"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+				src := nodeOnlyRuntimeModules[args.Path]
+				return api.OnLoadResult{Contents: &src, Loader: api.LoaderJS}, nil
+			})
+		},
+	}
+}
+
+func pathWithin(dir, p string) bool {
+	rel, err := filepath.Rel(dir, p)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile string) error {
 	rt, err := runtimePlugin(root)
 	if err != nil {
@@ -884,6 +923,7 @@ func bundleServerEntry(root string, cfg *config.Config, target, entry, outFile s
 		MinifySyntax:     cfg.ShouldMinifyJS(),
 	}
 	if target == "cloudflare" {
+		opts.Plugins = append([]api.Plugin{workerStubPlugin(resolveRuntimePackage(root))}, opts.Plugins...)
 		opts.Platform = api.PlatformNeutral
 		opts.Conditions = []string{"workerd", "worker", "browser"}
 		opts.MainFields = []string{"module", "main"}
