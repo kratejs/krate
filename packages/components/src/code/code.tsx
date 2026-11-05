@@ -6,13 +6,15 @@ export interface CodeProps {
   lang?: string;
   title?: string;
   showCopy?: boolean;
+  /** Lines to mark, e.g. "1,3-5". */
+  highlight?: string;
 }
 
 export function Code(props: CodeProps) {
   var children = props.children || "";
   var lang = props.lang || "";
   var title = props.title || "";
-  var showCopy = props.showCopy || true;
+  var showCopy = props.showCopy !== false;
   var [copied, setCopied] = createSignal(false);
   var wrapRef: HTMLElement | null = null;
 
@@ -52,7 +54,7 @@ export function Code(props: CodeProps) {
           ) : null}
         </div>
       ) : null}
-      <SyntaxHighlight lang={lang}>{children}</SyntaxHighlight>
+      <SyntaxHighlight lang={lang} highlight={props.highlight || ""}>{children}</SyntaxHighlight>
     </div>
   );
 }

@@ -2,6 +2,7 @@ package syntaxhighlight
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 
 	"github.com/alecthomas/chroma/v2"
@@ -30,6 +31,37 @@ func Highlight(code, lang string) string {
 // the token->class mapping, so it must match the stylesheet produced by
 // CSSForTheme or the highlighted code is styled (or unstyled) incorrectly.
 func HighlightTheme(code, lang, theme string) string {
+	return HighlightThemeLines(code, lang, theme, "")
+}
+
+// ParseLineRanges parses a highlight spec such as "1,3-5" into 1-based
+// inclusive ranges. Malformed parts are skipped.
+func ParseLineRanges(spec string) [][2]int {
+	var out [][2]int
+	for _, part := range strings.Split(spec, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		lo, hi, isRange := strings.Cut(part, "-")
+		a, err := strconv.Atoi(strings.TrimSpace(lo))
+		if err != nil || a < 1 {
+			continue
+		}
+		b := a
+		if isRange {
+			if b, err = strconv.Atoi(strings.TrimSpace(hi)); err != nil || b < a {
+				continue
+			}
+		}
+		out = append(out, [2]int{a, b})
+	}
+	return out
+}
+
+// HighlightThemeLines is HighlightTheme with the given lines (a spec such as
+// "1,3-5") wrapped in <span class="hl"> so a stylesheet can mark them.
+func HighlightThemeLines(code, lang, theme, lines string) string {
 	lexer := chroma.Lexer(nil)
 	if lang != "" {
 		l := lexers.Get(lang)
@@ -51,8 +83,12 @@ func HighlightTheme(code, lang, theme string) string {
 		style = styles.Get(DefaultTheme)
 	}
 
+	f := formatter
+	if ranges := ParseLineRanges(lines); len(ranges) > 0 {
+		f = html.New(html.WithClasses(true), html.WithLineNumbers(false), html.HighlightLines(ranges))
+	}
 	var buf bytes.Buffer
-	if err := formatter.Format(&buf, style, iter); err != nil {
+	if err := f.Format(&buf, style, iter); err != nil {
 		return escapeHTML(code)
 	}
 
@@ -113,29 +149,34 @@ func AvailableThemes() []string {
 func NormalizeLanguage(lang string) string {
 	lang = strings.ToLower(strings.TrimSpace(lang))
 	aliases := map[string]string{
-		"js":         "javascript",
-		"ts":         "typescript",
-		"jsx":        "jsx",
-		"tsx":        "tsx",
-		"py":         "python",
-		"rb":         "ruby",
-		"sh":         "bash",
-		"shell":      "bash",
-		"zsh":        "bash",
-		"yml":        "yaml",
-		"md":         "markdown",
-		"rs":         "rust",
-		"go":         "go",
-		"golang":     "go",
-		"cs":         "csharp",
-		"c#":         "csharp",
-		"cpp":        "cpp",
-		"c++":        "cpp",
-		"objc":       "objectivec",
-		"tex":        "latex",
-		"vim":        "viml",
-		"dockerfile": "docker",
-		"docker":     "docker",
+		"js":           "javascript",
+		"ts":           "typescript",
+		"jsx":          "jsx",
+		"tsx":          "tsx",
+		"py":           "python",
+		"rb":           "ruby",
+		"sh":           "bash",
+		"shell":        "bash",
+		"zsh":          "bash",
+		"yml":          "yaml",
+		"md":           "markdown",
+		"rs":           "rust",
+		"go":           "go",
+		"golang":       "go",
+		"cs":           "csharp",
+		"c#":           "csharp",
+		"cpp":          "cpp",
+		"c++":          "cpp",
+		"objc":         "objectivec",
+		"tex":          "latex",
+		"vim":          "viml",
+		"dockerfile":   "docker",
+		"docker":       "docker",
+		"mdx":          "markdown",
+		"astro":        "html",
+		"prisma":       "graphql",
+		"dotenv":       "env",
+		"shellsession": "console",
 	}
 	if normalized, ok := aliases[lang]; ok {
 		return normalized

@@ -249,3 +249,12 @@ func TestMDXInlineTextInsideJSXElementStaysInline(t *testing.T) {
 		t.Errorf("inline text should not gain a paragraph, got %q", jsx)
 	}
 }
+
+func TestBuildCodeJSXMetaPassesTitleAndHighlight(t *testing.T) {
+	got := BuildCodeJSXMeta("ts", `title="a.ts" {1,3-4}`, "x")
+	for _, want := range []string{`lang={"ts"}`, `title={"a.ts"}`, `highlight={"1,3-4"}`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %s in %s", want, got)
+		}
+	}
+}

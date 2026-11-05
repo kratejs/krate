@@ -379,13 +379,64 @@ func (r *krateRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
 	reg.Register(kindTableWrap, r.tableWrap)
 }
 
-func (r *krateRenderer) tableWrap(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
-	if entering {
-		_, _ = w.WriteString("<div class=\"table-wrap\" role=\"region\" aria-label=\"Table\" tabindex=\"0\">\n")
-	} else {
+// Scroll containers are made keyboard focusable and named only when they are
+// likely to overflow, so short blocks do not add a tab stop and an announced
+// group each.
+const (
+	codeFocusCols     = 60 // longest line, in characters
+	tableFocusCols    = 4  // table columns
+	tableFocusChars   = 80 // widest row, total characters
+	tableLabelColumns = 3
+)
+
+func (r *krateRenderer) tableWrap(w util.BufWriter, src []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
 		_, _ = w.WriteString("</div>\n")
+		return ast.WalkContinue, nil
 	}
+	cols, widest, headers := tableShape(n, src)
+	if cols < tableFocusCols && widest <= tableFocusChars {
+		_, _ = w.WriteString("<div class=\"table-wrap\">\n")
+		return ast.WalkContinue, nil
+	}
+	label := "Table"
+	if len(headers) > 0 {
+		shown := headers
+		more := ""
+		if len(shown) > tableLabelColumns {
+			shown, more = shown[:tableLabelColumns], ", and more"
+		}
+		label = "Table with columns " + strings.Join(shown, ", ") + more
+	}
+	_, _ = w.WriteString("<div class=\"table-wrap\" role=\"group\" aria-label=\"" + escape.HTMLAttr(label) + "\" tabindex=\"0\">\n")
 	return ast.WalkContinue, nil
+}
+
+// tableShape reports a wrapped table's column count, the character width of
+// its widest row, and its non-empty header cell texts.
+func tableShape(n ast.Node, src []byte) (cols, widest int, headers []string) {
+	tbl := n.FirstChild()
+	if tbl == nil {
+		return 0, 0, nil
+	}
+	for row := tbl.FirstChild(); row != nil; row = row.NextSibling() {
+		width, count := 0, 0
+		for cell := row.FirstChild(); cell != nil; cell = cell.NextSibling() {
+			txt := strings.TrimSpace(nodeText(cell, src))
+			width += len([]rune(txt))
+			count++
+			if _, isHeader := row.(*east.TableHeader); isHeader && txt != "" {
+				headers = append(headers, txt)
+			}
+		}
+		if count > cols {
+			cols = count
+		}
+		if width > widest {
+			widest = width
+		}
+	}
+	return cols, widest, headers
 }
 
 func (r *krateRenderer) blockquote(w util.BufWriter, _ []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -487,20 +538,41 @@ func renderCode(code, lang, meta string, cfg Config) string {
 	if lang != "" {
 		class = " class=\"language-" + escape.HTMLAttr(lang) + "\""
 	}
-	// A scrollable <pre> must be keyboard focusable and named.
-	label := "Code"
-	if title != "" {
-		label = title
-	} else if lang != "" {
-		label = lang + " code"
+	// A <pre> that is likely to scroll must be keyboard focusable and named.
+	if longestLine(code) > codeFocusCols {
+		label := "Code"
+		if title != "" {
+			label = title
+		} else if lang != "" {
+			label = lang + " code"
+		}
+		attrs += " role=\"group\" aria-label=\"" + escape.HTMLAttr(label) + "\" tabindex=\"0\""
 	}
-	attrs += " role=\"region\" aria-label=\"" + escape.HTMLAttr(label) + "\" tabindex=\"0\""
+	var pre string
 	if cfg.CodeHighlight && lang != "" {
 		code = strings.TrimRight(code, "\n")
-		hlCode := syntaxhighlight.HighlightTheme(code, syntaxhighlight.NormalizeLanguage(lang), cfg.CodeTheme)
-		return "<pre class=\"chroma\"" + attrs + "><code" + class + ">" + hlCode + "</code></pre>\n"
+		hlCode := syntaxhighlight.HighlightThemeLines(code, syntaxhighlight.NormalizeLanguage(lang), cfg.CodeTheme, hl)
+		pre = "<pre class=\"chroma\"" + attrs + "><code" + class + ">" + hlCode + "</code></pre>\n"
+	} else {
+		pre = "<pre" + attrs + "><code" + class + ">" + escape.HTML(code) + "</code></pre>\n"
 	}
-	return "<pre" + attrs + "><code" + class + ">" + escape.HTML(code) + "</code></pre>\n"
+	if title == "" {
+		return pre
+	}
+	// Static fences keep their title as a header, matching the <Code> component.
+	return "<div class=\"krate-code-block\"><div class=\"krate-code-header\"><div class=\"krate-code-title\">" +
+		escape.HTML(title) + "</div></div>" + pre + "</div>\n"
+}
+
+// longestLine returns the length in runes of the longest line of code.
+func longestLine(code string) int {
+	longest := 0
+	for _, l := range strings.Split(code, "\n") {
+		if n := len([]rune(l)); n > longest {
+			longest = n
+		}
+	}
+	return longest
 }
 
 var infoEscapeRe = regexp.MustCompile("\\\\([!-/:-@\\[-`{-~])")

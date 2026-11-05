@@ -718,9 +718,15 @@ func BuildCodeJSXMeta(lang, meta, code string) string {
 		sb.WriteString(escape.JSStringDQ(lang))
 		sb.WriteString("}")
 	}
-	if title, _ := codeMeta(meta); title != "" {
+	title, hl := codeMeta(meta)
+	if title != "" {
 		sb.WriteString(" title={")
 		sb.WriteString(escape.JSStringDQ(title))
+		sb.WriteString("}")
+	}
+	if hl != "" {
+		sb.WriteString(" highlight={")
+		sb.WriteString(escape.JSStringDQ(hl))
 		sb.WriteString("}")
 	}
 	sb.WriteString(">{`")

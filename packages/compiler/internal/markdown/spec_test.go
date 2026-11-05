@@ -17,8 +17,9 @@ type specExample struct {
 
 var voidSlashRe = regexp.MustCompile(` ?/>`)
 
-// preA11yRe matches the focus and name attributes Krate adds to every <pre>.
-var preA11yRe = regexp.MustCompile(` role="region" aria-label="[^"]*" tabindex="0"`)
+// preA11yRe matches the focus and name attributes Krate adds to a <pre> that
+// is likely to scroll.
+var preA11yRe = regexp.MustCompile(` role="group" aria-label="[^"]*" tabindex="0"`)
 
 func normSpecHTML(s string) string {
 	s = preA11yRe.ReplaceAllString(strings.TrimSpace(s), "")
