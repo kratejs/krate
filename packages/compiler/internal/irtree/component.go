@@ -723,7 +723,7 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 		addFunctions()
 	}
 	b.checkUnbundledImports(node)
-	if needsNoClientJS(node, fn) && !res.forceClient && !b.rendersLiveProps(node) && !node.Lazy {
+	if needsNoClientJS(node, fn, b.localFuncProps) && !res.forceClient && !b.rendersLiveProps(node) && !node.Lazy {
 		node.Tier = TierStatic
 	}
 }
@@ -735,13 +735,16 @@ func (b *builder) finishClientComponent(node *ComponentNode, fn *ast.FnDecl, res
 // component's hydration scope to create/bind the ref object, and a component
 // that provides a CSS scope via context renders its call-site children
 // through the slot tree, so both stay client.
-func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl) bool {
+//
+// funcProps names the props that hold functions at this call site: build-time
+// evaluation cannot call them, so a slot that reads one needs the client.
+func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl, funcProps map[string]bool) bool {
 	hasComponentRef := false
 	if ret := findReturnStmt(fn.Body); ret != nil {
 		hasComponentRef = hasRefAttrExpr(ret.Value)
 	}
 	_, _, providesScope := providedScopeContext(fn)
-	return !slotsHaveExpr(node.Children, paramBindingSet(fn)) &&
+	return !slotsHaveExpr(node.Children, paramBindingSet(fn), funcProps) &&
 		len(node.Signals) == 0 && len(node.Effects) == 0 &&
 		len(node.Memos) == 0 && len(node.ExtraVars) == 0 &&
 		len(node.PreSignalVars) == 0 &&
@@ -749,36 +752,64 @@ func needsNoClientJS(node *ComponentNode, fn *ast.FnDecl) bool {
 		len(node.RefBindings) == 0 && !hasComponentRef && !providesScope
 }
 
+// readsFuncProp reports whether src reads one of the function props, as a
+// bare parameter or as `props.name`.
+func readsFuncProp(src string, funcProps map[string]bool) bool {
+	for name := range funcProps {
+		for _, form := range []string{"props." + name, "props?." + name} {
+			for from := 0; ; {
+				i := strings.Index(src[from:], form)
+				if i < 0 {
+					break
+				}
+				end := from + i + len(form)
+				if end >= len(src) || !isIdentChar(src[end]) {
+					return true
+				}
+				from = end
+			}
+		}
+	}
+	return false
+}
+
 // slotsHaveExpr reports whether any slot (at any depth of the node's own
 // tree) is an ExprSlot the build could not fold, which needs the component's
 // hydration script to produce its value. An expression over the component's
 // own props or route params stays static: the server renderer evaluates it
 // with the call-site or route bindings.
-func slotsHaveExpr(slots []SlotNode, params map[string]bool) bool {
+func slotsHaveExpr(slots []SlotNode, params, funcProps map[string]bool) bool {
 	for _, s := range slots {
 		switch v := s.(type) {
 		case *ExprSlot:
 			usesParam := false
+			funcRead := readsFuncProp(v.ExprSource, funcProps)
 			scanJSIdents(v.ExprSource, func(n string) {
-				if params[n] {
+				if funcProps[n] {
+					// A function prop cannot be called at build time.
+					funcRead = true
+				} else if params[n] {
 					usesParam = true
 				}
 			})
+			if funcRead {
+				return true
+			}
 			if !usesParam {
 				return true
 			}
 		case *ConditionalSlot:
-			if slotsHaveExpr(v.Consequent, params) || slotsHaveExpr(v.Alternate, params) {
+			if slotsHaveExpr(v.Consequent, params, funcProps) || slotsHaveExpr(v.Alternate, params, funcProps) {
 				return true
 			}
 		case *ListSlot:
 			for _, it := range v.Items {
-				if it != nil && slotsHaveExpr(it.Contents, params) {
+				if it != nil && slotsHaveExpr(it.Contents, params, funcProps) {
 					return true
 				}
 			}
 		case *SuspenseSlot:
-			if slotsHaveExpr(v.Fallback, params) || slotsHaveExpr(v.Resolved, params) {
+			if slotsHaveExpr(v.Fallback, params, funcProps) || slotsHaveExpr(v.Resolved, params, funcProps) {
 				return true
 			}
 		}

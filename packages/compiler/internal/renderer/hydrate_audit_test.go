@@ -95,3 +95,15 @@ export default function Page() { return <main><p>{label}</p><p>{fmt("y")}</p></m
 		t.Errorf("declarations out of order (cfg %d, temp %d, member %d):\n%s", cfg, tmp, member, js)
 	}
 }
+
+func TestFunctionPropReadInSlotIsHydrated(t *testing.T) {
+	src := `function A({ fmt }) { return <p>{fmt("x")}</p>; }
+function List({ render, items }) { return <ul>{items.map((i) => <li key={i}>{render(i)}</li>)}</ul>; }
+export default function Page() {
+  return <main><A fmt={(s) => s.toUpperCase()} /><List items={["a", "b"]} render={(s) => <u>{s}</u>} /></main>;
+}`
+	_, js := fullPipeline(t, src)
+	if !strings.Contains(js, ".fmt(") || !strings.Contains(js, ".render(") {
+		t.Errorf("slots that call a function prop have no client binding:\n%s", js)
+	}
+}
