@@ -365,6 +365,22 @@ describe('prefetch cache', () => {
     expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/about')).length).toBe(2);
   });
 
+  it('keeps the fragment of the link when the document was prefetched', async () => {
+    routes['/about'] = { body: page('About', '<h1>About</h1><h2 id="team">Team</h2>') };
+    const original = Element.prototype.scrollIntoView;
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    try {
+      await krateRouter.prefetch('/about#team');
+      await krateRouter.push('/about#team');
+      await settle();
+      expect(location.pathname + location.hash).toBe('/about#team');
+      expect(scrolled).toHaveBeenCalled();
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it('expires entries after the TTL', async () => {
     (globalThis as any).__KRATE_CFG__ = { viewTransitions: false, prefetchTTL: 0 };
     await krateRouter.prefetch('/about');

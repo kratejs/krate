@@ -863,7 +863,13 @@ async function loadDocument(req: NavRequest, signal: AbortSignal): Promise<LoadR
     if (inflight) await inflight;
     if (signal.aborted) return { ok: false, aborted: true };
     const hit = cacheTake(key);
-    if (hit) return { ok: true, doc: { html: hit.html, url: hit.url, status: hit.status } };
+    if (hit) {
+      // The prefetch fetched the URL without its fragment: keep the one the
+      // link asked for, so `/docs/page#section` still scrolls to the section.
+      const hash = new URL(req.url, location.href).hash;
+      const target = hash && !new URL(hit.url, location.href).hash ? hit.url + hash : hit.url;
+      return { ok: true, doc: { html: hit.html, url: target, status: hit.status } };
+    }
   }
   let res: Response;
   try {
