@@ -126,3 +126,16 @@ func TestSameNamedExportsRenderEachOwnComponent(t *testing.T) {
 		t.Errorf("collision should be resolved:\n%s", logged)
 	}
 }
+
+func TestComponentWithPlainParamAndModuleConst(t *testing.T) {
+	html, logged := buildPlain(t, map[string]string{
+		"src/pages/index.tsx": "const data = 'O';\nconst obj = { p: 'OBJ' };\n" +
+			"function Box(p) { return <div class={p.cls} title={obj.p}>{p.title}{p.p}{p.children}</div>; }\n" +
+			"const Arrow = (q) => <em>{q.title}{data}</em>;\n" +
+			"export default function A() { return <section><Box title=\"x\" cls=\"c\" p=\"P\">kid</Box><Arrow title=\"y\" />{data}</section>; }\n",
+	})
+	want := `<section><div class=c title=OBJ>xPkid</div><em>yO</em>O</section>`
+	if !strings.Contains(html, want) {
+		t.Errorf("want %s in:\n%s\nlog:\n%s", want, html, logged)
+	}
+}
