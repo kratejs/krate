@@ -163,10 +163,19 @@ func TestEmitDockerfile(t *testing.T) {
 		t.Fatalf("files=%v err=%v", files, err)
 	}
 	df, _ := os.ReadFile(filepath.Join(root, "Dockerfile"))
-	for _, want := range []string{"pnpm install --frozen-lockfile", "npx krate build", "EXPOSE 4321", `CMD ["npx", "krate", "start"]`} {
+	for _, want := range []string{"RUN corepack enable\n", "pnpm install --frozen-lockfile", "npx krate build", "EXPOSE 4321", "USER node", "COPY --chown=node:node . .", "HEALTHCHECK", "/healthz", `CMD ["npx", "krate", "start"]`} {
 		if !strings.Contains(string(df), want) {
 			t.Errorf("Dockerfile missing %q:\n%s", want, df)
 		}
+	}
+	// corepack needs root, so it comes before the switch to the unprivileged user,
+	// and the build and server both run as that user.
+	text := string(df)
+	if !(strings.Index(text, "corepack enable") < strings.Index(text, "USER node") && strings.Index(text, "USER node") < strings.Index(text, "RUN npx krate build")) {
+		t.Errorf("expected corepack enable, then USER node, then the build:\n%s", df)
+	}
+	if strings.Contains(text, "corepack enable && ") {
+		t.Errorf("root-only corepack step must not run after USER node:\n%s", df)
 	}
 	di, _ := os.ReadFile(filepath.Join(root, ".dockerignore"))
 	if !strings.Contains(string(di), ".krate") || !strings.Contains(string(di), ".env*") {

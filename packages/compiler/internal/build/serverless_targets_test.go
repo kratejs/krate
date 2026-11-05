@@ -427,3 +427,17 @@ func TestPlatformDeploysKeepSegmentPages(t *testing.T) {
 		})
 	}
 }
+
+// Workers do not overwrite a client's X-Forwarded-* headers, so Cloudflare only
+// trusts them when server.trustProxy is set; Vercel and Netlify always set them.
+func TestServerEntryTrustProxyPerTarget(t *testing.T) {
+	cf := serverEntry("cloudflare", "", "")
+	if !strings.Contains(cf, "trustProxy: !!data.config.trustProxy") || strings.Contains(cf, "trustProxy: true") {
+		t.Errorf("cloudflare entry must follow server.trustProxy:\n%s", cf)
+	}
+	for _, target := range []string{"vercel", "netlify"} {
+		if !strings.Contains(serverEntry(target, "", ""), "trustProxy: true") {
+			t.Errorf("%s entry should trust the platform's forwarded headers", target)
+		}
+	}
+}

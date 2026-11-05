@@ -691,6 +691,9 @@ export default nodeRequestListener(handler, true);
 export default async (request, context) => handler(request, { waitUntil: context && context.waitUntil ? (p) => context.waitUntil(p) : undefined });
 `)
 	case "cloudflare":
+		// Workers do not rewrite a client's X-Forwarded-Host/Proto and request.url is
+		// already the public URL, so forwarded headers are trusted only when
+		// server.trustProxy says a proxy of yours sits in front of the Worker.
 		b.WriteString("import { createKrateHandler } from '@krate/runtime/server-handler';\nimport { createAssetsStaticLayer } from '@krate/runtime/assets-static';\n")
 		b.WriteString(body)
 		b.WriteString(`let handler;
@@ -701,7 +704,7 @@ export default {
       const proc = globalThis.process || (globalThis.process = { env: {} });
       proc.env = proc.env || {};
       for (const [k, v] of Object.entries(env || {})) if (typeof v === 'string' && !(k in proc.env)) proc.env[k] = v;
-      handler = createKrateHandler({ target: 'cloudflare', data, modules, trustProxy: true, static: env && env.ASSETS ? createAssetsStaticLayer(env.ASSETS) : undefined });
+      handler = createKrateHandler({ target: 'cloudflare', data, modules, trustProxy: !!data.config.trustProxy, static: env && env.ASSETS ? createAssetsStaticLayer(env.ASSETS) : undefined });
     }
     return handler(request, { waitUntil: (p) => ctx.waitUntil(p) });
   },
