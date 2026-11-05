@@ -14,8 +14,8 @@ PostCSS or extra tooling is required.
 
 Files named `*.module.css` are scoped automatically:
 
-```tsx
-// Card.module.css
+```css
+/* Card.module.css */
 .card {
   padding: 1rem;
   border-radius: 8px;

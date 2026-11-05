@@ -99,8 +99,9 @@ functions:
 
 ```tsx
 // @server - evaluated at build time, HTML baked in
-export default function ServerTime() {
-  return <time>{new Date().toUTCString()}</time>;
+export default function Totals() {
+  const prices = [12, 30, 8];
+  return <p>{prices.length} items, total {prices.reduce((a, b) => a + b, 0)}</p>;
 }
 ```
 
@@ -136,6 +137,10 @@ Files named `[param].tsx` become dynamic segments:
 
 ```tsx
 // src/pages/video/[id].tsx -> /video/abc123
+export function generateStaticParams() {
+  return [{ id: "abc123" }];
+}
+
 export default function VideoPage({ params }) {
   return <h1>Video {params.id}</h1>;
 }
