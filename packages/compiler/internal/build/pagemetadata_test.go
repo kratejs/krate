@@ -1,6 +1,7 @@
 package build
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -73,5 +74,34 @@ export default function Home() { return <main><h1>Home</h1></main>; }`,
 	})
 	if !strings.Contains(got, "KR7122") || !strings.Contains(got, "<Head>") {
 		t.Errorf("expected a KR7122 warning with a hint, got:\n%s", got)
+	}
+}
+
+// A page whose own default export is a runtime component is a region: the
+// shell holds its marker, so the manifest must name a bundle that renders it.
+func TestRuntimePageIsItsOwnRegion(t *testing.T) {
+	for name, src := range map[string]string{
+		"directive": "// @runtime\nexport default function Home() { return <main><h1>runtime page {String(1 + 1)}</h1></main>; }",
+		"decorator": "@runtime\nexport default function Home() { return <main><h1>runtime page</h1></main>; }",
+	} {
+		t.Run(name, func(t *testing.T) {
+			b, root := scProject(t, map[string]string{"src/pages/index.tsx": src})
+			if err := b.BuildAll(); err != nil {
+				t.Fatalf("BuildAll: %v", err)
+			}
+			html := readDist(t, filepath.Join(root, "dist"), "index.html")
+			marker := "<!--region:region-Home_c0-->"
+			if !strings.Contains(html, marker) {
+				t.Fatalf("shell has no region marker:\n%s", html)
+			}
+			m := readManifest(t, root)
+			regs := m.Regions["/"]
+			if len(regs) != 1 || regs[0].ID != "region-Home_c0" || regs[0].BundlePath == "" || !strings.HasSuffix(regs[0].SourcePath, "index.tsx") {
+				t.Fatalf("regions[/] = %+v, want one region with a runtime bundle", regs)
+			}
+			if _, err := os.Stat(filepath.Join(root, "dist", filepath.FromSlash(regs[0].BundlePath))); err != nil {
+				t.Errorf("bundle %s missing: %v", regs[0].BundlePath, err)
+			}
+		})
 	}
 }
