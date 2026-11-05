@@ -734,6 +734,9 @@ type regionFrame struct {
 	NotFound    bool   `json:"notFound,omitempty"`
 	Redirect    string `json:"redirect,omitempty"`
 	Title       string `json:"title,omitempty"`
+	// Head is the <Head> tags (meta, link, script) the region rendered, to be
+	// merged into the document head (see headmerge.go).
+	Head string `json:"head,omitempty"`
 	// NoStore is set when the render read request state (headers/cookies) or
 	// otherwise opted out of caching. The page response must not be public.
 	NoStore bool `json:"noStore,omitempty"`
@@ -756,8 +759,9 @@ type regionPageResult struct {
 	isISR bool
 	// cacheStatus is the region frame's cacheStatus ("hit"/"stale"/"miss").
 	cacheStatus string
-	// titleOverride, when non-empty, replaces the baked <title>.
-	titleOverride string
+	// frameHead holds the title and <Head> tags each region frame carried, by
+	// region id. They are merged into the baked head (headmerge.go).
+	frameHead map[string]regionHead
 	// notFound signals the page-region render did not match.
 	notFound bool
 	// redirect is the Location for a page-region redirect response.
@@ -778,6 +782,11 @@ type regionPageResult struct {
 	// Nothing was written; the caller answers 503 rather than serving the baked
 	// shell as if the page had rendered.
 	unavailable string
+}
+
+// regionHead is the head content one region render produced.
+type regionHead struct {
+	title, head string
 }
 
 // regionBoundary is one splice marker and its nested markers.
@@ -1025,19 +1034,44 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 		return res
 	}
 
-	// The page-region render's title replaces the baked head title. The shell
-	// is not rewritten up front: the marker offsets were parsed from it, so
-	// the swap happens as the span around the title is written.
-	var titleLoc []int
-	if res.titleOverride != "" {
-		titleLoc = titleElementRe.FindStringIndex(shell)
+	// The page's title and <Head> tags go into the baked head. The shell is not
+	// rewritten up front: the marker offsets were parsed from it, so the merged
+	// head is written in place of the span before </head> as it comes up. Only
+	// regions that end up in the page count (a replaced region drops its
+	// children with it).
+	var headSection string
+	headEnd := -1
+	if len(res.frameHead) > 0 {
+		live := map[string]bool{}
+		var mark func(children []*regionBoundary)
+		mark = func(children []*regionBoundary) {
+			for _, b := range children {
+				if _, ok := regionHTML[b.id]; ok {
+					live[b.id] = true
+				} else if b.kind == "suspense" {
+					mark(b.children)
+				}
+			}
+		}
+		mark(roots)
+		title, head := "", ""
+		for _, b := range all {
+			if h, ok := res.frameHead[b.id]; ok && live[b.id] {
+				if h.title != "" {
+					title = h.title
+				}
+				head += h.head
+			}
+		}
+		if end := headEndOf(shell); end >= 0 && (len(roots) == 0 || roots[0].openStart >= end) {
+			headEnd = end
+			headSection = mergeHeadSection(shell[:end], title, head)
+		}
 	}
 	writeShell := func(lo, hi int) {
-		if titleLoc != nil && lo <= titleLoc[0] && titleLoc[1] <= hi {
-			_, _ = w.Write([]byte(shell[lo:titleLoc[0]]))
-			_, _ = w.Write([]byte("<title>" + res.titleOverride + "</title>"))
-			_, _ = w.Write([]byte(shell[titleLoc[1]:hi]))
-			return
+		if headEnd >= 0 && lo < headEnd {
+			_, _ = w.Write([]byte(headSection))
+			lo = headEnd
 		}
 		_, _ = w.Write([]byte(shell[lo:hi]))
 	}
@@ -1180,7 +1214,6 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 				res.cacheStatus = frame.CacheStatus
 				res.notFound = frame.NotFound
 				res.redirect = frame.Redirect
-				res.titleOverride = frame.Title
 				// A page-region render that reported an error (or whose status is
 				// a server error) must not replace the baked body with empty HTML.
 				// Keep the baked content and surface the failure to the caller.
@@ -1203,6 +1236,12 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 				}
 			}
 			regionHTML[frame.ID] = frame.HTML
+			if frame.Title != "" || frame.Head != "" {
+				if res.frameHead == nil {
+					res.frameHead = map[string]regionHead{}
+				}
+				res.frameHead[frame.ID] = regionHead{title: frame.Title, head: frame.Head}
+			}
 			framesLeft--
 		case "skip":
 			// Sidecar has no renderer for this marker - keep baked content.
@@ -1230,8 +1269,6 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 	}
 	return nil
 }
-
-var titleElementRe = regexp.MustCompile(`(?i)<title[^>]*>[\s\S]*?</title>`)
 
 // ServeDev starts an HTTP server with live reload SSE + request logging.
 func ServeDev(root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {
@@ -2174,7 +2211,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 		devMux = devErrorShell(hub, root, absOut, mux)
 	}
 	proxyTrust.Store(cfg.Server.TrustProxy)
-	flashSecret.Store(revalHost.secret)
+	flashSecret.Store(flashSecretFor(revalHost.secret))
 	proxyHops.Store(int32(cfg.Server.TrustedProxies))
 	var rootHandler http.Handler = requestIDMiddleware(forwardedHeadersMiddleware(cfg.Server.TrustProxy, basePathMiddleware(cfg.BaseURLPath(), securityHeadersMiddleware(cfg, customHeadersMiddleware(cfg.Headers, corsMiddleware(cfg, panicRecoveryMiddleware(Logger, devMux)))))))
 

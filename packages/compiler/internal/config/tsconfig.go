@@ -548,6 +548,7 @@ func applyConfigProp(cfg *Config, key string, val interface{}) error {
 			case "trustProxy":
 				if b, ok := v.(bool); ok {
 					cfg.Server.TrustProxy = b
+					cfg.Server.TrustProxySet = true
 				}
 			case "trustedProxies":
 				if n, ok := configInt(v); ok {

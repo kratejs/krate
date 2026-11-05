@@ -97,3 +97,40 @@ func TestInjectFlashNoticeMatchesWholeActionID(t *testing.T) {
 		t.Error("an id with regexp metacharacters must not match other forms")
 	}
 }
+
+// The same vector is pinned in packages/runtime/src/handler-html.test.ts: the
+// portable handler signs and verifies exactly what the Go host does, so a
+// cookie minted by one is read by the other when they share KRATE_FLASH_SECRET.
+const (
+	flashVectorSecret  = "krate-test-flash-secret-0123456789"
+	flashVectorPayload = "eyJhIjoiYWN0MSIsInIiOnsiZXJyb3IiOiJOYW1lIGlzIHJlcXVpcmVkIn19"
+	flashVectorCookie  = flashVectorPayload + ".zLQd73rhp1HN8J0vNvSeLqvlCqquygUX-mXuuN24dlY"
+)
+
+func TestFlashSignatureMatchesPortableHandler(t *testing.T) {
+	if got := signFlashValue(flashVectorSecret, flashVectorPayload); got != flashVectorCookie {
+		t.Fatalf("signFlashValue = %q, want %q", got, flashVectorCookie)
+	}
+	old, _ := flashSecret.Load().(string)
+	flashSecret.Store(flashVectorSecret)
+	defer flashSecret.Store(old)
+	if payload, ok := verifyFlash(flashVectorCookie); !ok || payload != flashVectorPayload {
+		t.Errorf("a cookie signed by the portable handler must verify: %q %v", payload, ok)
+	}
+	for _, bad := range []string{flashVectorPayload, flashVectorPayload + ".", flashVectorPayload + ".AAAA", "x" + flashVectorCookie} {
+		if _, ok := verifyFlash(bad); ok {
+			t.Errorf("%q must not verify", bad)
+		}
+	}
+}
+
+func TestFlashSecretEnvOverridesInternalSecret(t *testing.T) {
+	t.Setenv(flashSecretEnv, "")
+	if got := flashSecretFor("internal"); got != "internal" {
+		t.Errorf("without the variable the internal secret signs, got %q", got)
+	}
+	t.Setenv(flashSecretEnv, "shared-secret")
+	if got := flashSecretFor("internal"); got != "shared-secret" {
+		t.Errorf("KRATE_FLASH_SECRET must win, got %q", got)
+	}
+}

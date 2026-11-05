@@ -736,6 +736,11 @@ address your proxy saw). Entries a client puts at the front of the header never
 count. Set `trustedProxies` to the number of proxies in front of Krate if there
 is more than one (a CDN and a load balancer, for example).
 
+On the Vercel, Netlify and Cloudflare targets `trustProxy` has a third state: not
+set means "what the platform guarantees", `true` adds the forwarded headers of a
+proxy of yours, `false` trusts none. See
+[Proxy trust on the serverless targets](/docs/guides/deployment/#proxy-trust-on-the-serverless-targets).
+
 On `SIGINT`/`SIGTERM` the server stops accepting connections, lets in-flight
 requests finish for `shutdownTimeout` seconds (default 15), then stops its
 sidecars and exits with status 0. A second signal exits immediately.

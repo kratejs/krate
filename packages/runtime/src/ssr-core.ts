@@ -15,6 +15,8 @@ import {
   thenableRecord,
   type RequestContext,
 } from "./request-context.js";
+import { takeHead } from "./head-tags.js";
+import { SegmentedLRU } from "./segmented-lru.js";
 import {
   cacheRuntime,
   routeDataTag,
@@ -156,37 +158,29 @@ export function trackedQuery(query: Record<string, string> | undefined, t: Query
 }
 
 export class ISRCache {
-  private cache = new Map<string, CacheEntry>();
+  // A segmented LRU: see segmented-lru.ts. One client requesting many one-off
+  // variants cannot push out the pages that were requested more than once.
+  private cache: SegmentedLRU<CacheEntry>;
   private byTag = new Map<string, Set<string>>();
-  private maxSize: number;
   private revalidationIntervals = new Map<string, number>(); // route -> seconds
 
   constructor(maxSize = 512) {
-    this.maxSize = maxSize;
+    this.cache = new SegmentedLRU<CacheEntry>(maxSize);
   }
 
   setRevalidation(route: string, seconds: number) {
     this.revalidationIntervals.set(route, seconds);
   }
 
-  // get marks the entry most recently used, so eviction drops the coldest
-  // page and one client cannot flush the hot ones by requesting new variants.
+  // get counts as a use: an entry hit once is promoted out of probation.
   get(key: string): CacheEntry | undefined {
-    const entry = this.cache.get(key);
-    if (entry) {
-      this.cache.delete(key);
-      this.cache.set(key, entry);
-    }
-    return entry;
+    return this.cache.get(key);
   }
 
   set(key: string, entry: CacheEntry) {
-    if (this.cache.has(key)) this.delete(key);
-    if (this.cache.size >= this.maxSize) {
-      const oldest = this.cache.keys().next().value;
-      if (oldest) this.delete(oldest);
-    }
-    this.cache.set(key, entry);
+    const old = this.cache.peek(key);
+    if (old) this.unindex(key, old);
+    for (const [k, e] of this.cache.set(key, entry)) this.unindex(k, e);
     for (const t of entry.tags || []) {
       let keys = this.byTag.get(t);
       if (!keys) this.byTag.set(t, (keys = new Set()));
@@ -194,10 +188,7 @@ export class ISRCache {
     }
   }
 
-  delete(key: string): boolean {
-    const entry = this.cache.get(key);
-    if (!entry) return false;
-    this.cache.delete(key);
+  private unindex(key: string, entry: CacheEntry) {
     for (const t of entry.tags || []) {
       const keys = this.byTag.get(t);
       if (keys) {
@@ -205,6 +196,13 @@ export class ISRCache {
         if (keys.size === 0) this.byTag.delete(t);
       }
     }
+  }
+
+  delete(key: string): boolean {
+    const entry = this.cache.peek(key);
+    if (!entry) return false;
+    this.cache.delete(key);
+    this.unindex(key, entry);
     return true;
   }
 
@@ -213,7 +211,7 @@ export class ISRCache {
   }
 
   isStale(key: string): boolean {
-    const entry = this.cache.get(key);
+    const entry = this.cache.peek(key);
     const route = key.split("?")[0].split("#")[0];
     let interval = this.revalidationIntervals.get(route) || 0;
     if (entry && entry.revalidate && entry.revalidate > 0 && (!interval || entry.revalidate < interval)) {
@@ -226,7 +224,7 @@ export class ISRCache {
   // deleteRoute removes every variant of a route (used by revalidation/invalidation).
   deleteRoute(route: string): number {
     let n = 0;
-    for (const key of [...this.cache.keys()]) {
+    for (const key of this.cache.keys()) {
       if (key === route || key.startsWith(route + "?") || key.startsWith(route + "#")) {
         if (this.delete(key)) n++;
       }
@@ -239,7 +237,7 @@ export class ISRCache {
   deleteVariant(route: string, params: Record<string, string>): number {
     const base = variantKey({ route, params });
     let n = 0;
-    for (const key of [...this.cache.keys()]) {
+    for (const key of this.cache.keys()) {
       if (key === base || key.startsWith(base + "#")) {
         if (this.delete(key)) n++;
       }
@@ -264,7 +262,7 @@ export class ISRCache {
   // background refresh can iterate them without mutating during iteration.
   entriesForRoute(route: string): Array<[string, CacheEntry]> {
     const out: Array<[string, CacheEntry]> = [];
-    for (const [key, entry] of this.cache) {
+    for (const [key, entry] of this.cache.entries()) {
       if (key === route || key.startsWith(route + "?") || key.startsWith(route + "#")) {
         out.push([key, entry]);
       }
@@ -274,7 +272,7 @@ export class ISRCache {
 
   serialize(): Record<string, unknown> {
     return {
-      entries: [...this.cache.entries()].map(([key, entry]) => ({ key, ...entry })),
+      entries: this.cache.entries().map(([key, entry]) => ({ key, ...entry })),
     };
   }
 
@@ -303,8 +301,13 @@ export interface SSRCoreOptions {
   manifest: ServerManifest | null;
   /** Loads the server bundle of a page (cached by the host). */
   loadPageModule(page: ManifestPage): Promise<any>;
-  /** Returns the __krate_render(propsJSON) function of a runtime component bundle. */
-  loadRuntimeRenderer(relPath: string): (propsJSON: string) => string | Promise<string>;
+  /**
+   * Returns the __krate_render(props) function of a runtime component bundle.
+   * It takes the props as an object (or as their JSON): the core passes an
+   * object whose `query` is a tracking view, to learn which query keys the
+   * region reads.
+   */
+  loadRuntimeRenderer(relPath: string): (props: string | Record<string, any>) => string | Promise<string>;
   /** ISR/region cache entry bound (default 512). */
   maxCacheSize?: number;
   /** Per-render timeout in ms (default 5000, 0 disables). */
@@ -379,37 +382,12 @@ export interface SSRCore {
 }
 
 /**
- * Splits the document <title> out of rendered page html. The last <title> that
- * is not inside an <svg> wins (as with static <Head> hoisting, where a nested
- * Head overrides its parent); every such element is removed from the html.
+ * Splits the document <title> out of rendered page html (see takeHead for the
+ * head tags that come with it).
  */
 export function takeHeadTitle(html: string): { title: string; html: string } {
-  if (html.indexOf("<title") === -1 && html.indexOf("<TITLE") === -1) return { title: "", html };
-  const re = /<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/gi;
-  const found: { index: number; length: number; text: string }[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html))) {
-    if (insideSVG(html, m.index)) continue;
-    found.push({ index: m.index, length: m[0].length, text: m[1].trim() });
-  }
-  if (found.length === 0) return { title: "", html };
-  let out = "";
-  let last = 0;
-  for (const f of found) {
-    out += html.slice(last, f.index);
-    last = f.index + f.length;
-  }
-  out += html.slice(last);
-  return { title: found[found.length - 1].text, html: out };
-}
-
-function insideSVG(html: string, pos: number): boolean {
-  const before = html.slice(0, pos).toLowerCase();
-  let depth = 0;
-  const re = /<(\/?)svg[\s>\/]/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(before))) depth += m[1] ? -1 : 1;
-  return depth > 0;
+  const split = takeHead(html);
+  return { title: split.title, html: split.html };
 }
 
 export function createSSRCore(opts: SSRCoreOptions): SSRCore {
@@ -436,11 +414,22 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     return variantKey({ route: req.route, params: req.params });
   }
 
+  function hasQuery(req: { query?: Record<string, string> }): boolean {
+    return !!req.query && Object.keys(req.query).length > 0;
+  }
+
   // pageKey is the ISR cache key for a request: params, plus only the query keys
-  // previous renders of this variant read.
-  function pageKey(req: { route: string; params?: Record<string, string>; query?: Record<string, string> }): string {
-    const reads = pageQueryReads.get(pageBaseKey(req));
-    if (!reads) return pageBaseKey(req);
+  // previous renders of this variant read. It returns null while no render has
+  // shown what the page reads (a restart, or the record was evicted) and the
+  // request carries a query: the stored entries cannot be matched to it safely,
+  // so it has to render.
+  function pageKey(req: { route: string; params?: Record<string, string>; query?: Record<string, string> }): string | null {
+    const base = pageBaseKey(req);
+    const reads = pageQueryReads.get(base);
+    if (!reads) return hasQuery(req) ? null : base;
+    // Looked up variants keep their record when others are evicted.
+    pageQueryReads.delete(base);
+    pageQueryReads.set(base, reads);
     if (reads === "all") return variantKey(req);
     const picked: Record<string, string> = {};
     for (const k of [...reads].sort()) {
@@ -454,18 +443,22 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   // records the reads again.
   const PAGE_QUERY_READS_MAX = Math.max(4 * (opts.maxCacheSize && opts.maxCacheSize > 0 ? opts.maxCacheSize : 512), 1024);
 
+  // mergeReads folds the query keys one render read into what was known. A
+  // render that read no query key records an empty set: its entry is valid for
+  // every query string.
+  function mergeReads(cur: Set<string> | "all" | undefined, t: QueryTracker): Set<string> | "all" {
+    if (t.all || cur === "all") return "all";
+    return new Set([...(cur || []), ...t.keys]);
+  }
+
   function recordQueryReads(req: { route: string; params?: Record<string, string> }, t: QueryTracker): void {
     const base = pageBaseKey(req);
-    let cur = pageQueryReads.get(base);
-    if (t.all) cur = "all";
-    else if (t.keys.size > 0 && cur !== "all") cur = new Set([...(cur || []), ...t.keys]);
-    if (cur) {
-      pageQueryReads.delete(base);
-      pageQueryReads.set(base, cur);
-      if (pageQueryReads.size > PAGE_QUERY_READS_MAX) {
-        const oldest = pageQueryReads.keys().next().value;
-        if (oldest !== undefined) pageQueryReads.delete(oldest);
-      }
+    const cur = mergeReads(pageQueryReads.get(base), t);
+    pageQueryReads.delete(base);
+    pageQueryReads.set(base, cur);
+    if (pageQueryReads.size > PAGE_QUERY_READS_MAX) {
+      const oldest = pageQueryReads.keys().next().value;
+      if (oldest !== undefined) pageQueryReads.delete(oldest);
     }
   }
 
@@ -624,7 +617,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
       // a revalidation that landed mid-render means the HTML may be stale.
       if (page.mode === "isr" && !scope.noStore && !invalidated) {
         recordQueryReads(req, tracker);
-        await isrStore.set(pageKey(req), {
+        await isrStore.set(pageKey(req) as string, {
           html,
           timestamp: Date.now(),
           params: req.params,
@@ -651,7 +644,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   const inFlightRevalidations = new Map<string, Promise<void>>();
 
   function revalidateInBackground(page: ManifestPage, req: RenderRequest) {
-    const key = pageKey(req);
+    const key = pageKey(req) ?? variantKey(req);
     if (inFlightRevalidations.has(key)) return;
 
     const p = (async () => {
@@ -723,9 +716,9 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
       const interval = page.revalidate || 60;
       pageIntervals.set(page.route, interval);
       const key = pageKey(req);
-      const cached = await isrStore.get(key);
+      const cached = key === null ? undefined : await isrStore.get(key);
 
-      if (cached && !entryStale(key, cached)) {
+      if (key !== null && cached && !entryStale(key, cached)) {
         return {
           html: cached.html,
           status: 200,
@@ -779,32 +772,21 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     paramsKey: string;
     tags?: string[];
   }
-  const regionCache = new Map<string, RegionEntry>();
-  const inFlightRegionRevalidations = new Map<string, Promise<void>>();
-
-  // Region cache is bounded (least recently used goes first) so a long-lived
-  // sidecar cannot grow without limit across many dynamic region variants.
+  // Bounded like the page cache, and with the same segmented eviction: a
+  // client minting params variants cannot push out the regions hit twice.
   const REGION_CACHE_MAX = opts.maxCacheSize && opts.maxCacheSize > 0 ? opts.maxCacheSize : 512;
+  const regionCache = new SegmentedLRU<RegionEntry>(REGION_CACHE_MAX);
+  const inFlightRegionRevalidations = new Map<string, Promise<void>>();
 
   function paramsKeyOf(params?: Record<string, string>): string {
     return variantKey({ route: "", params });
   }
 
   function regionCacheGet(key: string): RegionEntry | undefined {
-    const entry = regionCache.get(key);
-    if (entry) {
-      regionCache.delete(key);
-      regionCache.set(key, entry);
-    }
-    return entry;
+    return regionCache.get(key);
   }
 
   function regionCacheSet(key: string, html: string, page: ManifestPage, req: RenderRequest, scope?: CacheScope): void {
-    regionCache.delete(key);
-    if (regionCache.size >= REGION_CACHE_MAX) {
-      const oldest = regionCache.keys().next().value;
-      if (oldest !== undefined) regionCache.delete(oldest);
-    }
     regionCache.set(key, {
       html,
       timestamp: Date.now(),
@@ -819,7 +801,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   function invalidateRegions(route: string | null, params: Record<string, string> | null, tags: string[]): number {
     const pkey = params ? paramsKeyOf(params) : null;
     let n = 0;
-    for (const [key, e] of Array.from(regionCache.entries())) {
+    for (const [key, e] of regionCache.entries()) {
       const routeHit = route !== null && e.route === route && (pkey === null || e.paramsKey === pkey);
       const tagHit = tags.length > 0 && !!e.tags && e.tags.some((t) => tags.includes(t));
       if (routeHit || tagHit) {
@@ -836,27 +818,30 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
 
   function clearRegionCacheForRoute(route: string): void {
     const prefix = route + "::";
-    for (const key of Array.from(regionCache.keys())) {
+    for (const key of regionCache.keys()) {
       if (key.startsWith(prefix)) regionCache.delete(key);
     }
   }
 
   // regionQueryReads is pageQueryReads for regions: which query keys renders of
-  // a server component region have read. Only those regions are tracked: a
-  // runtime-bundle region receives the whole query serialized into its props,
-  // so what it reads cannot be observed and it stays keyed by the full query.
+  // a region have read. A server component reads props.query through a tracking
+  // view; a runtime-bundle region gets the same view as an object (its wrapper
+  // only parses props when it is handed JSON), so neither is keyed by the whole
+  // query unless it enumerates it.
   const regionQueryReads = new Map<string, Set<string> | "all">();
 
   function regionBaseKey(page: ManifestPage, regionId: string, req: RenderRequest): string {
     return variantKey({ route: page.route + "::" + regionId, params: req.params });
   }
 
-  function regionCacheKey(page: ManifestPage, region: RegionMeta, req: RenderRequest): string {
-    if (!region.serverExport) {
-      return variantKey({ route: page.route + "::" + region.id, params: req.params, query: req.query });
-    }
-    const reads = regionQueryReads.get(regionBaseKey(page, region.id, req));
-    if (!reads) return regionBaseKey(page, region.id, req);
+  // regionCacheKey is the cache key of a region render, or null when no render
+  // has shown which query keys the region reads and the request has a query.
+  function regionCacheKey(page: ManifestPage, region: RegionMeta, req: RenderRequest): string | null {
+    const base = regionBaseKey(page, region.id, req);
+    const reads = regionQueryReads.get(base);
+    if (!reads) return hasQuery(req) ? null : base;
+    regionQueryReads.delete(base);
+    regionQueryReads.set(base, reads);
     if (reads === "all") return variantKey({ route: page.route + "::" + region.id, params: req.params, query: req.query });
     const picked: Record<string, string> = {};
     for (const k of [...reads].sort()) {
@@ -865,18 +850,21 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     return variantKey({ route: page.route + "::" + region.id, params: req.params, query: picked });
   }
 
+  // A region is not handed props.query when the query is empty, so a render of
+  // such a request cannot show what the region reads from it: only renders that
+  // had a query teach the cache. A bare request still caches (under the base
+  // key, which is right for any request that carries none of the keys the
+  // region reads), and a request with a query renders until a render of its own
+  // has recorded the reads.
   function recordRegionQueryReads(page: ManifestPage, regionId: string, req: RenderRequest, t: QueryTracker): void {
+    if (!hasQuery(req)) return;
     const base = regionBaseKey(page, regionId, req);
-    let cur = regionQueryReads.get(base);
-    if (t.all) cur = "all";
-    else if (t.keys.size > 0 && cur !== "all") cur = new Set([...(cur || []), ...t.keys]);
-    if (cur) {
-      regionQueryReads.delete(base);
-      regionQueryReads.set(base, cur);
-      if (regionQueryReads.size > PAGE_QUERY_READS_MAX) {
-        const oldest = regionQueryReads.keys().next().value;
-        if (oldest !== undefined) regionQueryReads.delete(oldest);
-      }
+    const cur = mergeReads(regionQueryReads.get(base), t);
+    regionQueryReads.delete(base);
+    regionQueryReads.set(base, cur);
+    if (regionQueryReads.size > PAGE_QUERY_READS_MAX) {
+      const oldest = regionQueryReads.keys().next().value;
+      if (oldest !== undefined) regionQueryReads.delete(oldest);
     }
   }
 
@@ -903,9 +891,23 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     }
     const render = opts.loadRuntimeRenderer(region.bundlePath!);
     const out = await withRenderTimeout(
-      withCacheScope(page.route, () => render(JSON.stringify(regionProps(region, req)))),
+      withCacheScope(page.route, () => render(runtimeProps(region, req, tracker))),
     );
     return { html: out.result, scope: out.scope, invalidated: out.invalidated };
+  }
+
+  // runtimeProps are the props of a runtime-bundle region. The baked props are
+  // handed over as a copy (the bundle may mutate what it gets, and the manifest
+  // must not change), and the query as a tracking view so the cache learns
+  // which keys the region reads. Without a tracker the props go as JSON.
+  function runtimeProps(region: RegionMeta, req: RenderRequest, tracker?: QueryTracker): string | Record<string, any> {
+    const props = regionProps(region, req);
+    if (!tracker) return JSON.stringify(props);
+    const hasQ = "query" in props;
+    delete props.query;
+    const copy = JSON.parse(JSON.stringify(props)) as Record<string, any>;
+    if (hasQ) copy.query = trackedQuery(req.query, tracker);
+    return copy;
   }
 
   function regionCacheable(r: { scope: CacheScope; invalidated: boolean }): boolean {
@@ -930,11 +932,11 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     if (inFlightRegionRevalidations.has(key)) return;
     const p = (async () => {
       try {
-        const tracker = region.serverExport ? newQueryTracker() : undefined;
+        const tracker = newQueryTracker();
         const r = await renderRegionFresh(page, region, req, tracker);
         if (regionCacheable(r)) {
-          if (tracker) recordRegionQueryReads(page, region.id, req, tracker);
-          regionCacheSet(regionCacheKey(page, region, req), r.html, page, req, r.scope);
+          recordRegionQueryReads(page, region.id, req, tracker);
+          regionCacheSet(regionCacheKey(page, region, req) as string, r.html, page, req, r.scope);
         }
         console.log(`[krate-ssr] Revalidated region ${key} (SWR)`);
       } catch (err: any) {
@@ -950,6 +952,17 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   // renderRegion renders one region, applying region-level ISR caching for ISR
   // pages. Returns an NDJSON frame.
   async function renderRegion(page: ManifestPage, region: RegionMeta, req: RenderRequest): Promise<Record<string, any>> {
+    const frame = await renderRegionFrame(page, region, req);
+    // A server component region may render <Head> children: they move to the
+    // head of the response, like the page region's. The caches keep the html
+    // as rendered, so a hit is split the same way.
+    if (region.serverExport && frame.type === "region" && typeof frame.html === "string" && frame.html !== "") {
+      applyHead(frame, frame.html);
+    }
+    return frame;
+  }
+
+  async function renderRegionFrame(page: ManifestPage, region: RegionMeta, req: RenderRequest): Promise<Record<string, any>> {
     if (!region.bundlePath && !region.serverExport) {
       return { type: "error", id: region.id, status: 400, error: "region has no runtime bundle", fatal: !!page.serverComponents };
     }
@@ -958,7 +971,7 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     const interval = regionInterval(page, region);
     const cacheable = interval > 0;
 
-    if (cacheable) {
+    if (cacheable && key !== null) {
       const cached = regionCacheGet(key);
       const stale = cached && (Date.now() - cached.timestamp) / 1000 > interval;
       if (cached && !stale) {
@@ -971,14 +984,14 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     }
 
     try {
-      const tracker = region.serverExport ? newQueryTracker() : undefined;
+      const tracker = newQueryTracker();
       const r = await renderRegionFresh(page, region, req, tracker);
       const html = r.html;
       if (cacheable && regionCacheable(r)) {
-        // The key is computed again: this render may have shown which query
-        // keys the region reads.
-        if (tracker) recordRegionQueryReads(page, region.id, req, tracker);
-        regionCacheSet(tracker ? regionCacheKey(page, region, req) : key, html, page, req, r.scope);
+        // The key is computed after the render: it has shown which query keys
+        // the region reads.
+        recordRegionQueryReads(page, region.id, req, tracker);
+        regionCacheSet(regionCacheKey(page, region, req) as string, html, page, req, r.scope);
       }
       const frame: Record<string, any> = { type: "region", id: region.id, status: 200, html };
       if (cacheable) frame.cacheStatus = "miss";
@@ -998,6 +1011,15 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
       // failure is fatal for the response (the Go server answers 500).
       return { type: "error", id: region.id, status: 500, ...failure, fatal: !!(region.serverExport || page.serverComponents) };
     }
+  }
+
+  // applyHead sets frame.html to html without its <Head> content and carries
+  // the title and head tags on the frame.
+  function applyHead(frame: Record<string, any>, html: string): void {
+    const split = takeHead(html);
+    frame.html = split.html;
+    if (split.title !== "") frame.title = split.title;
+    if (split.head !== "") frame.head = split.head;
   }
 
   // renderPageRegion renders a coarse whole-page region (SSR/ISR pages whose
@@ -1022,15 +1044,11 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     if (result.stack) frame.stack = result.stack;
     if (result.noStore) frame.noStore = true;
     if (page.serverComponents && frame.status >= 500) frame.fatal = true;
-    // Title swap: the Go server replaces the baked <title> with the freshly
-    // rendered one so params-driven pages update the browser tab.
-    // The page's <title> (a <Head> child renders in place) moves to the head,
-    // so it is taken out of the body html rather than shown twice.
-    const split = takeHeadTitle(result.html || "");
-    if (split.title !== "") {
-      frame.title = split.title;
-      frame.html = split.html;
-    }
+    // The page's <Head> children (title, meta, link, script) render in place;
+    // they move to the head of the response, so they are taken out of the body
+    // html rather than shown twice. The host replaces/merges them into the
+    // baked head (Go: build/headmerge.go, portable handler: head-tags.ts).
+    applyHead(frame, result.html || "");
     return frame;
   }
 

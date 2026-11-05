@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"os"
 	"path"
 	"regexp"
 	"sort"
@@ -50,6 +51,19 @@ func requestFlash(r *http.Request) (string, flashPayload, bool) {
 // flashSecret is the per-process secret the action sidecar signs flash cookies
 // with ("" accepts unsigned cookies: tests and a sidecar run on its own).
 var flashSecret atomic.Value
+
+// flashSecretEnv names the variable that sets the flash signing key, shared by
+// every instance of a deployment (the portable handler reads the same one).
+const flashSecretEnv = "KRATE_FLASH_SECRET"
+
+// flashSecretFor is the key flash cookies are signed with: KRATE_FLASH_SECRET
+// when set, else the per-process internal secret.
+func flashSecretFor(internal string) string {
+	if v := os.Getenv(flashSecretEnv); v != "" {
+		return v
+	}
+	return internal
+}
 
 // signFlashValue is the sidecar's signFlash: payload.base64url(HMAC-SHA256).
 func signFlashValue(secret, payload string) string {

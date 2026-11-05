@@ -2,6 +2,7 @@ package krate
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -107,5 +108,43 @@ func TestNodeStringerContract(t *testing.T) {
 	}
 	if !strings.Contains(fmt.Sprint(n), "<div") {
 		t.Fatalf("unexpected %q", fmt.Sprint(n))
+	}
+}
+
+func TestRequestRecordsWhatIsRead(t *testing.T) {
+	r := Request{
+		Params:  map[string]string{"id": "7"},
+		Query:   map[string]string{"q": "go", "page": "2"},
+		Headers: map[string]string{"cookie": "sid=abc; theme=dark", "User-Agent": "ua", "Authorization": "Bearer x"},
+	}
+	rd := r.Track()
+	if r.Cookie("sid") != "abc" || r.Cookie("missing") != "" {
+		t.Error("Cookie")
+	}
+	if r.Header("user-agent") != "ua" || r.Header("X-None") != "" {
+		t.Error("Header is case-insensitive")
+	}
+	if r.QueryValue("q") != "go" || r.Param("id") != "7" {
+		t.Error("QueryValue/Param")
+	}
+	v := rd.Vary()
+	want := Vary{Headers: []string{"user-agent", "x-none"}, Cookies: []string{"missing", "sid"}, Query: []string{"q"}, Params: []string{"id"}}
+	if !reflect.DeepEqual(v, want) {
+		t.Errorf("Vary = %+v, want %+v", v, want)
+	}
+	// Copies share the recorder: the component receives the request by value.
+	cp := r
+	cp.QueryValue("page")
+	if got := rd.Vary().Query; !reflect.DeepEqual(got, []string{"page", "q"}) {
+		t.Errorf("a copy must record into the same Reads: %v", got)
+	}
+	rd.MarkFull()
+	if !rd.Vary().Full {
+		t.Error("MarkFull")
+	}
+	// An untracked request still answers.
+	var plain Request = Request{Query: map[string]string{"a": "b"}}
+	if plain.QueryValue("a") != "b" {
+		t.Error("untracked QueryValue")
 	}
 }

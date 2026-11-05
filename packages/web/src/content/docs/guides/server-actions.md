@@ -141,8 +141,9 @@ export default function Todos() {
   state (evaluated at build time) as the previous state, and the server
   redirects to the optional `permalink` (third argument, a same-origin path) or
   back to the page. The state the action returned travels across that redirect
-  in a short-lived (60 s), single-use `krate_flash` cookie (signed with a
-  per-process secret, so another origin cannot plant one), and a
+  in a short-lived (60 s), single-use `krate_flash` cookie (HMAC-signed, so
+  another origin cannot plant one; set `KRATE_FLASH_SECRET` to share the key between
+  instances, see [Deployment](/docs/guides/deployment/#flash-cookie-secret)), and a
   `useActionState` for the same action that mounts on the next page starts from
   it, so validation errors appear as soon as the page hydrates.
   Pages are pre-rendered HTML, so a browser that never runs the script would

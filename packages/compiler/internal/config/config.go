@@ -60,6 +60,10 @@ type ServerConfig struct {
 	// X-Forwarded-For (request URLs, CSRF origin checks, client IPs). Enable it
 	// only behind a proxy that sets or strips those headers.
 	TrustProxy bool `json:"trustProxy,omitempty"`
+	// TrustProxySet records that the project set trustProxy at all, true or
+	// false: the serverless targets use what their platform guarantees when it
+	// is unset and follow the value when it is set.
+	TrustProxySet bool `json:"-"`
 	// TrustedProxies is how many reverse proxies sit in front of Krate when
 	// TrustProxy is on (default 1). The client address is the X-Forwarded-For
 	// entry that many hops from the right, so entries a client puts at the front

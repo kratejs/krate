@@ -12,12 +12,12 @@ import (
 )
 {{ range .Components }}
 func init() {
-	render.Register("{{ .Name }}", func(propsJSON, reqJSON string) (string, error) {
+	render.Register("{{ .Name }}", func(propsJSON, reqJSON string) (string, render.Vary, error) {
 {{- if .PropsType }}
 		var props {{ .PropsType }}
 		if propsJSON != "" {
 			if err := json.Unmarshal([]byte(propsJSON), &props); err != nil {
-				return "", err
+				return "", render.Vary{Full: true}, err
 			}
 		}
 {{- end }}
@@ -25,19 +25,30 @@ func init() {
 		var req kr.Request
 		if reqJSON != "" {
 			if err := json.Unmarshal([]byte(reqJSON), &req); err != nil {
-				return "", err
+				return "", render.Vary{Full: true}, err
 			}
 		}
+		reads := req.Track()
+{{- if not .RequestTracked }}
+		reads.MarkFull()
+{{- end }}
 {{- end }}
 {{- if .HasResult }}
 		v, err := {{ .Name }}({{ if .PropsType }}props{{ if .HasRequest }}, req{{ end }}{{ else if .HasRequest }}req{{ end }})
 		if err != nil {
-			return "", err
+			return "", render.Vary{Full: true}, err
 		}
-		return fmt.Sprint(v), nil
+		return fmt.Sprint(v), {{ if .HasRequest }}varyOf(reads){{ else }}render.Vary{}{{ end }}, nil
 {{- else }}
-		return fmt.Sprint({{ .Name }}({{ if .PropsType }}props{{ if .HasRequest }}, req{{ end }}{{ else if .HasRequest }}req{{ end }})), nil
+		return fmt.Sprint({{ .Name }}({{ if .PropsType }}props{{ if .HasRequest }}, req{{ end }}{{ else if .HasRequest }}req{{ end }})), {{ if .HasRequest }}varyOf(reads){{ else }}render.Vary{}{{ end }}, nil
 {{- end }}
 	})
+}
+{{ end }}
+{{ if .HasRequest }}
+// varyOf converts what a render read of its Request into the host's record.
+func varyOf(r *kr.Reads) render.Vary {
+	v := r.Vary()
+	return render.Vary{Full: v.Full, Headers: v.Headers, Cookies: v.Cookies, Query: v.Query, Params: v.Params}
 }
 {{ end }}

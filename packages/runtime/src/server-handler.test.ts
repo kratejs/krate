@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createKrateHandler, type HandlerConfig, type KrateServerData } from "./server-handler.js";
 import { jsx } from "./server.js";
 
@@ -291,5 +291,225 @@ describe("page region title swap", () => {
     const body = await r.text();
     expect(body).toContain("<title>A much longer title</title></head><body><!--suspense:page--><div><h1>hello</h1></div><!--/suspense:page--></body>");
     expect(body.match(/<title/g)?.length).toBe(1);
+  });
+});
+
+describe("signed flash cookies", () => {
+  const shell =
+    "<html><head><title>t</title></head><body><!--suspense:page-->baked<!--/suspense:page--></body></html>";
+  const mk = (target: "node" | "vercel" | "cloudflare", flashSecret?: string) =>
+    createKrateHandler({
+      target,
+      flashSecret,
+      data: data({
+        hasMiddleware: false,
+        pages: [{ route: "/form", mode: "ssr", bundlePath: "form" }],
+        allPages: [{ route: "/form", mode: "ssr" }],
+        shells: { "/form": shell },
+        actions: [{ id: "act9", export: "bad", file: "acts" }],
+      }),
+      modules: {
+        pages: {
+          form: {
+            default: () => jsx("main", { children: jsx("form", { action: "/__krate/action/act9", method: "post", children: jsx("button", { children: "go" }) }) }),
+          },
+        },
+        actions: { acts: { bad: () => ({ error: "Name is required" }) } },
+      },
+    });
+  const submit = (h: ReturnType<typeof mk>) =>
+    h(
+      new Request("http://localhost/__krate/action/act9", {
+        method: "POST",
+        headers: { "sec-fetch-site": "same-origin", "content-type": "application/x-www-form-urlencoded", referer: "http://localhost/form/" },
+        body: "x=1",
+      }),
+    );
+  const flashOf = (r: Response) => ((r.headers as any).getSetCookie() as string[]).find((c) => c.startsWith("krate_flash="));
+  const page = (h: ReturnType<typeof mk>, cookie: string) => h(new Request("http://localhost/form/", { headers: { cookie } }));
+
+  it("signs the cookie and shows the notice when it comes back", async () => {
+    const h = mk("node", "a-shared-flash-secret-for-this-test");
+    const set = flashOf(await submit(h));
+    expect(set).toBeDefined();
+    const value = set!.split(";")[0].slice("krate_flash=".length);
+    expect(value).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/);
+    const body = await (await page(h, "krate_flash=" + value)).text();
+    expect(body).toContain("krate-flash");
+    expect(body).toContain("Name is required");
+  });
+
+  it("ignores a cookie planted without a valid signature", async () => {
+    const h = mk("node", "a-shared-flash-secret-for-this-test");
+    const planted = Buffer.from(JSON.stringify({ a: "act9", r: { error: "Your account was suspended" } })).toString("base64url");
+    for (const cookie of [planted, planted + ".", planted + ".AAAA", "x." + planted]) {
+      const body = await (await page(h, "krate_flash=" + cookie)).text();
+      expect(body, cookie).not.toContain("suspended");
+      expect(body, cookie).not.toContain("krate-flash");
+    }
+  });
+
+  it("serverless instances that share the secret accept each other's cookies, others do not", async () => {
+    const a = mk("vercel", "a-shared-flash-secret-for-this-test");
+    const b = mk("vercel", "a-shared-flash-secret-for-this-test");
+    const stranger = mk("vercel", "some-other-deployments-secret-value");
+    const value = flashOf(await submit(a))!.split(";")[0].slice("krate_flash=".length);
+    expect(await (await page(b, "krate_flash=" + value)).text()).toContain("Name is required");
+    expect(await (await page(stranger, "krate_flash=" + value)).text()).not.toContain("Name is required");
+  });
+
+  it("the node target without a secret signs with a per-process key", async () => {
+    const saved = process.env.KRATE_FLASH_SECRET;
+    delete process.env.KRATE_FLASH_SECRET;
+    try {
+      const one = mk("node");
+      const other = mk("node");
+      const value = flashOf(await submit(one))!.split(";")[0].slice("krate_flash=".length);
+      expect(value).toContain(".");
+      expect(await (await page(one, "krate_flash=" + value)).text()).toContain("Name is required");
+      expect(await (await page(other, "krate_flash=" + value)).text()).not.toContain("Name is required");
+    } finally {
+      if (saved !== undefined) process.env.KRATE_FLASH_SECRET = saved;
+    }
+  });
+
+  it("a serverless target without a secret carries no flash and says why", async () => {
+    const saved = process.env.KRATE_FLASH_SECRET;
+    delete process.env.KRATE_FLASH_SECRET;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const h = mk("cloudflare");
+      const r = await submit(h);
+      expect(r.status).toBe(303);
+      expect(flashOf(r)).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("KRATE_FLASH_SECRET"));
+      // A cookie from anywhere is not read either.
+      const planted = Buffer.from(JSON.stringify({ a: "act9", r: { error: "planted" } })).toString("base64url");
+      expect(await (await page(h, "krate_flash=" + planted)).text()).not.toContain("planted");
+    } finally {
+      warn.mockRestore();
+      if (saved !== undefined) process.env.KRATE_FLASH_SECRET = saved;
+    }
+  });
+
+  it("reads the key from KRATE_FLASH_SECRET", async () => {
+    const saved = process.env.KRATE_FLASH_SECRET;
+    process.env.KRATE_FLASH_SECRET = "env-flash-secret-env-flash-secret";
+    try {
+      const h = mk("vercel");
+      const value = flashOf(await submit(h))!.split(";")[0].slice("krate_flash=".length);
+      expect(await (await page(mk("vercel"), "krate_flash=" + value)).text()).toContain("Name is required");
+    } finally {
+      if (saved === undefined) delete process.env.KRATE_FLASH_SECRET;
+      else process.env.KRATE_FLASH_SECRET = saved;
+    }
+  });
+});
+
+describe("forwarded headers per platform", () => {
+  const mk = (target: "node" | "vercel" | "netlify" | "cloudflare", trustProxy?: boolean | null) => {
+    const base = data({ hasMiddleware: false });
+    return createKrateHandler({
+      target,
+      data: { ...base, config: { ...config, trustProxy: trustProxy === undefined ? null : trustProxy }, apiRoutes: ["echo"], actions: [{ id: "act1", export: "add", file: "acts" }] },
+      modules: {
+        api: {
+          echo: {
+            GET: (r: Request) =>
+              Response.json({
+                url: r.url,
+                xff: r.headers.get("x-forwarded-for"),
+                realIp: r.headers.get("x-real-ip"),
+                forwarded: r.headers.get("forwarded"),
+                host: r.headers.get("x-forwarded-host"),
+                proto: r.headers.get("x-forwarded-proto"),
+              }),
+          },
+        },
+        actions: { acts: { add: (a: number, b: number) => ({ sum: a + b }) } },
+      },
+    });
+  };
+  const echo = async (h: ReturnType<typeof mk>, headers: Record<string, string>) =>
+    (await h(new Request("http://app.internal/api/echo", { headers }))).json() as Promise<Record<string, string | null>>;
+  // What a hostile client adds on top of whatever the platform sets.
+  const spoof = { "x-forwarded-host": "evil.example", "x-forwarded-proto": "https", "x-forwarded-for": "6.6.6.6, 7.7.7.7", "x-real-ip": "6.6.6.6", forwarded: "for=6.6.6.6;host=evil.example" };
+
+  it("vercel: uses the host, protocol and client address Vercel sets", async () => {
+    const out = await echo(mk("vercel"), { "x-forwarded-host": "shop.example", "x-forwarded-proto": "https", "x-forwarded-for": "203.0.113.9", "x-real-ip": "203.0.113.9", forwarded: "for=6.6.6.6" });
+    expect(out.url).toBe("https://shop.example/api/echo");
+    expect(out.xff).toBe("203.0.113.9");
+    expect(out.realIp).toBe("203.0.113.9");
+    expect(out.forwarded).toBeNull();
+  });
+
+  it("vercel: a client-written forwarded chain never becomes the client address", async () => {
+    const out = await echo(mk("vercel"), { ...spoof, "x-forwarded-host": "shop.example", "x-real-ip": "203.0.113.9" });
+    expect(out.xff).toBe("203.0.113.9");
+    expect(out.forwarded).toBeNull();
+  });
+
+  it("vercel with server.trustProxy: false trusts no forwarded header", async () => {
+    const out = await echo(mk("vercel", false), { "x-forwarded-host": "shop.example", "x-forwarded-proto": "https", "x-forwarded-for": "203.0.113.9", "x-real-ip": "203.0.113.9" });
+    expect(out.url).toBe("http://app.internal/api/echo");
+    expect(out.host).toBe("app.internal");
+    expect(out.proto).toBe("http");
+    expect(out.xff).toBeNull();
+    expect(out.realIp).toBeNull();
+  });
+
+  for (const [target, ipHeader] of [["netlify", "x-nf-client-connection-ip"], ["cloudflare", "cf-connecting-ip"]] as const) {
+    it(`${target}: host and protocol come from the request URL, the address from ${ipHeader}`, async () => {
+      const out = await echo(mk(target), { ...spoof, [ipHeader]: "203.0.113.9" });
+      expect(out.url).toBe("http://app.internal/api/echo");
+      expect(out.host).toBe("app.internal");
+      expect(out.proto).toBe("http");
+      expect(out.xff).toBe("203.0.113.9");
+      expect(out.realIp).toBe("203.0.113.9");
+      expect(out.forwarded).toBeNull();
+    });
+
+    it(`${target}: without the platform address header there is no client address`, async () => {
+      const out = await echo(mk(target), spoof);
+      expect(out.xff).toBeNull();
+      expect(out.realIp).toBeNull();
+    });
+
+    it(`${target} with server.trustProxy: true trusts the proxy of yours in front`, async () => {
+      const out = await echo(mk(target, true), { ...spoof, [ipHeader]: "203.0.113.9" });
+      expect(out.url).toBe("https://evil.example/api/echo");
+      expect(out.xff).toBe("6.6.6.6, 7.7.7.7");
+    });
+
+    it(`${target} with server.trustProxy: false ignores everything forwarded, the platform address included`, async () => {
+      const out = await echo(mk(target, false), { ...spoof, [ipHeader]: "203.0.113.9" });
+      expect(out.url).toBe("http://app.internal/api/echo");
+      expect(out.xff).toBeNull();
+      expect(out.realIp).toBeNull();
+    });
+  }
+
+  it("the server-action origin check is not fooled by a spoofed X-Forwarded-Host", async () => {
+    const post = (h: ReturnType<typeof mk>) =>
+      h(
+        new Request("http://app.internal/__krate/action/act1", {
+          method: "POST",
+          headers: { origin: "https://evil.example", "x-forwarded-host": "evil.example", "x-krate-action": "fetch", "content-type": "application/json" },
+          body: '{"args":[1,2]}',
+        }),
+      );
+    for (const target of ["netlify", "cloudflare"] as const) {
+      expect((await post(mk(target))).status, target + " unset").toBe(403);
+      expect((await post(mk(target, false))).status, target + " false").toBe(403);
+    }
+    expect((await post(mk("vercel", false))).status).toBe(403);
+    // Behind a proxy of yours that sets the header, it is the real host.
+    expect((await post(mk("cloudflare", true))).status).toBe(200);
+  });
+
+  it("node: forwarded headers are read only with trustProxy: true", async () => {
+    const headers = { "x-forwarded-host": "shop.example", "x-forwarded-proto": "https" };
+    expect((await echo(mk("node"), headers)).url).toBe("http://app.internal/api/echo");
+    expect((await echo(mk("node", true), headers)).url).toBe("https://shop.example/api/echo");
   });
 });

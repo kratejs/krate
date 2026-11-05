@@ -233,8 +233,8 @@ func TestStreamRegionPageCoarsePageRegion(t *testing.T) {
 	if rr.isISR != true || rr.cacheStatus != "miss" {
 		t.Errorf("expected isISR+cacheStatus miss from page region frame, got isISR=%v status=%q", rr.isISR, rr.cacheStatus)
 	}
-	if rr.titleOverride != "Video: abc" {
-		t.Errorf("expected title override, got %q", rr.titleOverride)
+	if rr.frameHead["page"].title != "Video: abc" {
+		t.Errorf("expected the page frame's title, got %+v", rr.frameHead)
 	}
 	// Request must carry the CANONICAL route (for the sidecar's findPage), the
 	// params (for the ISR variant cache key), and the regions list with kind page.
