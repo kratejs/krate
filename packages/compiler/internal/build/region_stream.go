@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -124,8 +125,11 @@ func streamSiblingRegions(ctx context.Context, w http.ResponseWriter, flusher ht
 			continue
 		}
 		html := f.HTML
-		if html == "" {
+		if html == "" && f.Head == "" && f.Title == "" {
 			continue
+		}
+		if f.Head != "" || f.Title != "" {
+			warnStreamedHead(route, f.ID)
 		}
 		if renderGo != nil && strings.Contains(html, "krate-go:") {
 			resolved, err := resolveGoMarkersE(html, reqCtx, renderGo)
@@ -135,7 +139,7 @@ func streamSiblingRegions(ctx context.Context, w http.ResponseWriter, flusher ht
 			}
 			html = resolved
 		}
-		_, _ = w.Write([]byte(regionReplaceScript(f.ID, html)))
+		_, _ = w.Write([]byte(regionReplaceScript(f.ID, html, f.Head, f.Title)))
 		flush()
 	}
 	_, _ = w.Write([]byte(tail))
@@ -189,17 +193,53 @@ func streamNodeRegionEvents(ctx context.Context, ssrPort int, route string, para
 	}
 }
 
+// streamedHeadWarned remembers the route/region pairs already warned about.
+var streamedHeadWarned sync.Map
+
+// warnStreamedHead logs, once per region, that a <Head> inside a streamed
+// region reaches the document only through the region's script: the head of
+// the response was sent before the region rendered.
+func warnStreamedHead(route, id string) {
+	if _, dup := streamedHeadWarned.LoadOrStore(route+"::"+id, true); dup {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "  %s! <Head> inside the streamed region %s of %s%s reaches the document only through the region's script; crawlers that do not run scripts will not see it. Move it into the page component outside <Suspense>.\n", cYellow, id, route, cReset)
+}
+
+// scriptJSON is a JS string literal that is safe inside an inline <script>.
+func scriptJSON(v string) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+// headApplyJS is the client half of a streamed region's <Head>: the head is
+// already on the wire, so the tags are applied by script. A same-key meta or
+// canonical replaces the one in the document; scripts are recreated so they
+// run. It matches HEAD_APPLY in packages/runtime/src/handler-html.ts.
+const headApplyJS = `if(tt){var d=document.createElement("textarea");d.innerHTML=tt;document.title=d.value;}` +
+	`if(hd){var ht=document.createElement("template");ht.innerHTML=hd;[].slice.call(ht.content.children).forEach(function(e){` +
+	`var k=e.tagName,q="";` +
+	`if(k==="META"){if(e.hasAttribute("name"))q='meta[name="'+e.getAttribute("name")+'"]';else if(e.hasAttribute("http-equiv"))q='meta[http-equiv="'+e.getAttribute("http-equiv")+'"]';}` +
+	`else if(k==="LINK"&&(e.getAttribute("rel")||"").toLowerCase()==="canonical")q='link[rel="canonical"]';` +
+	`if(q){try{var o=document.head.querySelector(q);if(o)o.remove();}catch(x){}}` +
+	`var n=e;if(k==="SCRIPT"){n=document.createElement("script");[].slice.call(e.attributes).forEach(function(a){n.setAttribute(a.name,a.value);});n.text=e.textContent;}` +
+	`document.head.appendChild(n);});}`
+
 // regionReplaceScript inserts one region chunk at its marker pair. It is an
-// inline script because the surrounding shell has already been streamed.
-func regionReplaceScript(id, html string) string {
-	payload, _ := json.Marshal(html)
+// inline script because the surrounding shell has already been streamed. head
+// and title are the region's <Head> content, applied to the document head.
+func regionReplaceScript(id, html, head, title string) string {
 	var b strings.Builder
 	b.WriteString(`<script data-krate-stream>`)
 	b.WriteString(`(function(){var id=`)
 	b.WriteString(strconv.Quote(id))
 	b.WriteString(`;var html=`)
-	b.WriteString(string(payload))
-	b.WriteString(`;var kinds=["suspense:","region:"];var open=null,kind="";var w=document.createTreeWalker(document.documentElement,NodeFilter.SHOW_COMMENT,null,false);while(w.nextNode()){var v=w.currentNode.nodeValue||"";for(var i=0;i<kinds.length;i++){if(v===kinds[i]+id){open=w.currentNode;kind=kinds[i];break;}}if(open)break;}if(!open)return;var close=null,n=open.nextSibling;while(n){if(n.nodeType===8&&n.nodeValue==="/"+kind+id){close=n;break;}n=n.nextSibling;}if(!close)return;var r=document.createRange();r.setStartAfter(open);r.setEndBefore(close);r.deleteContents();var t=document.createElement("template");t.innerHTML=html;r.insertNode(t.content);})();`)
+	b.WriteString(scriptJSON(html))
+	b.WriteString(`;var kinds=["suspense:","region:"];var open=null,kind="";var w=document.createTreeWalker(document.documentElement,NodeFilter.SHOW_COMMENT,null,false);while(w.nextNode()){var v=w.currentNode.nodeValue||"";for(var i=0;i<kinds.length;i++){if(v===kinds[i]+id){open=w.currentNode;kind=kinds[i];break;}}if(open)break;}if(!open)return;var close=null,n=open.nextSibling;while(n){if(n.nodeType===8&&n.nodeValue==="/"+kind+id){close=n;break;}n=n.nextSibling;}if(!close)return;var r=document.createRange();r.setStartAfter(open);r.setEndBefore(close);r.deleteContents();var t=document.createElement("template");t.innerHTML=html;r.insertNode(t.content);`)
+	if head != "" || title != "" {
+		b.WriteString(`var hd=` + scriptJSON(head) + `,tt=` + scriptJSON(title) + `;` + headApplyJS)
+	}
+	b.WriteString(`})();`)
 	b.WriteString(`</script>`)
 	return b.String()
 }

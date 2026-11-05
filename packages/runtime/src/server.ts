@@ -319,6 +319,20 @@ async function resolveTree(node: unknown): Promise<JSXNode> {
   return resolveTree(out);
 }
 
+// rawTextContent renders the children of <script>/<style>: their text is raw
+// text in HTML, so entity escaping would corrupt JSON-LD and inline code. The
+// static compiler emits it the same way; only a sequence that could end the
+// element or open a comment is neutralised.
+function rawTextContent(tag: string, children: JSXNode[]): string {
+  let out = "";
+  for (const c of children) {
+    if (typeof c === "string") out += c;
+    else out += renderNode(c);
+  }
+  out = out.replace(tag === "script" ? /<\/(script)/gi : /<\/(style)/gi, "<\\/$1");
+  return tag === "script" ? out.replace(/<!--/g, "<\\!--") : out;
+}
+
 function renderElement(el: JSXElement): string {
   const { type, props, children } = el;
 
@@ -354,6 +368,8 @@ function renderElement(el: JSXElement): string {
   const dangerous = props.dangerouslySetInnerHTML;
   const inner = dangerous && typeof dangerous === "object" && typeof dangerous.__html === "string"
     ? dangerous.__html
+    : tag === "script" || tag === "style"
+    ? rawTextContent(tag, children)
     : children.map(renderNode).join("");
   return `<${tag}${attrs}>${inner}</${tag}>`;
 }
@@ -492,10 +508,15 @@ export function clientBoundary(
 
 // Built-in Components (server stubs)
 
-// Head - renders children into the page head at build time.
-// On the server, we just render children; the build pipeline extracts them.
+// Head - renders children into the page head. At build time the compiler
+// hoists them. In a request-time render the children come out between two
+// comment markers, and the host (ssr-core takeHead) moves what sits between
+// them into the document <head> of the response instead of leaving it in the
+// body.
+export const HEAD_OPEN = "<!--krate-head-->";
+export const HEAD_CLOSE = "<!--/krate-head-->";
 export function Head(props: { children?: JSXNode }): JSXNode {
-  return props.children ?? "";
+  return [raw(HEAD_OPEN), props.children ?? "", raw(HEAD_CLOSE)];
 }
 
 // Script - renders a <script> tag.

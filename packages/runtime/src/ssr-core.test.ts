@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSSRCore, ISRCache, takeHeadTitle, type ManifestPage } from "./ssr-core.js";
-import { jsx } from "./server.js";
+import { Head, jsx } from "./server.js";
 
 function makeCore(maxCacheSize: number, revalidate = 30) {
   let renders = 0;
@@ -73,6 +73,47 @@ describe("page region title", () => {
     expect(frame.title).toBe("Async Title");
     expect(frame.html).toContain("<h1>hello</h1>");
     expect(frame.html).not.toContain("<title");
+  });
+
+  it("carries <Head> meta, link and script tags on the frame, out of the body", async () => {
+    const page: ManifestPage = { route: "/t", source: "t.tsx", mode: "ssr", bundlePath: "t" } as any;
+    const core = createSSRCore({
+      manifest: { pages: [page], regions: {} } as any,
+      maxCacheSize: 4,
+      loadPageModule: async () => ({
+        default: () =>
+          jsx("div", {
+            children: [
+              jsx(Head, { children: [jsx("meta", { name: "description", content: "d" }), jsx("link", { rel: "canonical", href: "/c" })] }),
+              jsx("h1", { children: "hello" }),
+            ],
+          }),
+      }),
+      loadRuntimeRenderer: () => () => "",
+    });
+    const frame = await core.renderPageRegion(page, "page", { route: "/t", url: "/t", method: "GET", headers: {}, params: {} });
+    expect(frame.head).toBe('<meta name="description" content="d"><link rel="canonical" href="/c">');
+    expect(frame.html).toBe("<div><h1>hello</h1></div>");
+  });
+
+  it("carries the <Head> of a server component region, on a cache hit too", async () => {
+    const page: ManifestPage = { route: "/t", source: "t.tsx", mode: "isr", revalidate: 60, bundlePath: "t" } as any;
+    const region = { id: "r", serverExport: "R", revalidate: 60 } as any;
+    const core = createSSRCore({
+      manifest: { pages: [page], regions: {} } as any,
+      maxCacheSize: 4,
+      loadPageModule: async () => ({
+        R: () => jsx("p", { children: [jsx(Head, { children: jsx("meta", { name: "author", content: "Ada" }) }), "by Ada"] }),
+      }),
+      loadRuntimeRenderer: () => () => "",
+    });
+    const req = { route: "/t", url: "/t", method: "GET", headers: {}, params: {} };
+    for (const status of ["miss", "hit"]) {
+      const frame = await core.renderRegion(page, region, req);
+      expect(frame.cacheStatus).toBe(status);
+      expect(frame.head).toBe('<meta name="author" content="Ada">');
+      expect(frame.html).toBe("<p>by Ada</p>");
+    }
   });
 
   it("keeps svg <title> elements and prefers the last document title", () => {

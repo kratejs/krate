@@ -15,6 +15,7 @@ import {
   thenableRecord,
   type RequestContext,
 } from "./request-context.js";
+import { takeHead } from "./head-tags.js";
 import {
   cacheRuntime,
   routeDataTag,
@@ -379,37 +380,12 @@ export interface SSRCore {
 }
 
 /**
- * Splits the document <title> out of rendered page html. The last <title> that
- * is not inside an <svg> wins (as with static <Head> hoisting, where a nested
- * Head overrides its parent); every such element is removed from the html.
+ * Splits the document <title> out of rendered page html (see takeHead for the
+ * head tags that come with it).
  */
 export function takeHeadTitle(html: string): { title: string; html: string } {
-  if (html.indexOf("<title") === -1 && html.indexOf("<TITLE") === -1) return { title: "", html };
-  const re = /<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/gi;
-  const found: { index: number; length: number; text: string }[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html))) {
-    if (insideSVG(html, m.index)) continue;
-    found.push({ index: m.index, length: m[0].length, text: m[1].trim() });
-  }
-  if (found.length === 0) return { title: "", html };
-  let out = "";
-  let last = 0;
-  for (const f of found) {
-    out += html.slice(last, f.index);
-    last = f.index + f.length;
-  }
-  out += html.slice(last);
-  return { title: found[found.length - 1].text, html: out };
-}
-
-function insideSVG(html: string, pos: number): boolean {
-  const before = html.slice(0, pos).toLowerCase();
-  let depth = 0;
-  const re = /<(\/?)svg[\s>\/]/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(before))) depth += m[1] ? -1 : 1;
-  return depth > 0;
+  const split = takeHead(html);
+  return { title: split.title, html: split.html };
 }
 
 export function createSSRCore(opts: SSRCoreOptions): SSRCore {
@@ -950,6 +926,17 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   // renderRegion renders one region, applying region-level ISR caching for ISR
   // pages. Returns an NDJSON frame.
   async function renderRegion(page: ManifestPage, region: RegionMeta, req: RenderRequest): Promise<Record<string, any>> {
+    const frame = await renderRegionFrame(page, region, req);
+    // A server component region may render <Head> children: they move to the
+    // head of the response, like the page region's. The caches keep the html
+    // as rendered, so a hit is split the same way.
+    if (region.serverExport && frame.type === "region" && typeof frame.html === "string" && frame.html !== "") {
+      applyHead(frame, frame.html);
+    }
+    return frame;
+  }
+
+  async function renderRegionFrame(page: ManifestPage, region: RegionMeta, req: RenderRequest): Promise<Record<string, any>> {
     if (!region.bundlePath && !region.serverExport) {
       return { type: "error", id: region.id, status: 400, error: "region has no runtime bundle", fatal: !!page.serverComponents };
     }
@@ -1000,6 +987,15 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     }
   }
 
+  // applyHead sets frame.html to html without its <Head> content and carries
+  // the title and head tags on the frame.
+  function applyHead(frame: Record<string, any>, html: string): void {
+    const split = takeHead(html);
+    frame.html = split.html;
+    if (split.title !== "") frame.title = split.title;
+    if (split.head !== "") frame.head = split.head;
+  }
+
   // renderPageRegion renders a coarse whole-page region (SSR/ISR pages whose
   // entire body is request-time dynamic). It reuses renderPage so the page-level
   // variant-aware ISR cache, stale-while-revalidate, and revalidation all apply.
@@ -1022,15 +1018,11 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     if (result.stack) frame.stack = result.stack;
     if (result.noStore) frame.noStore = true;
     if (page.serverComponents && frame.status >= 500) frame.fatal = true;
-    // Title swap: the Go server replaces the baked <title> with the freshly
-    // rendered one so params-driven pages update the browser tab.
-    // The page's <title> (a <Head> child renders in place) moves to the head,
-    // so it is taken out of the body html rather than shown twice.
-    const split = takeHeadTitle(result.html || "");
-    if (split.title !== "") {
-      frame.title = split.title;
-      frame.html = split.html;
-    }
+    // The page's <Head> children (title, meta, link, script) render in place;
+    // they move to the head of the response, so they are taken out of the body
+    // html rather than shown twice. The host replaces/merges them into the
+    // baked head (Go: build/headmerge.go, portable handler: head-tags.ts).
+    applyHead(frame, result.html || "");
     return frame;
   }
 
