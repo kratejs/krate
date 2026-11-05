@@ -12,6 +12,9 @@ const (
 	CodeImageAlt Code = "KR8804"
 	// CodeCollectionShipped: a content collection copied into a page script.
 	CodeCollectionShipped Code = "KR8810"
+	// CodeScopeDynamicOption: a part of a zero-JS component (Tabs, Accordion, ...)
+	// whose value is not a literal, so its option cannot be generated.
+	CodeScopeDynamicOption Code = "KR8820"
 )
 
 func init() {
@@ -52,6 +55,16 @@ func init() {
 				"Krate ships only the fields the page mentions (the body and rendered html only when referenced), but " +
 				"every entry in the collection, drafts included, is still included. Filter with build-time values, or " +
 				"compute the list on the server. This is a warning.",
+		},
+		CodeInfo{
+			Code:  CodeScopeDynamicOption,
+			Title: "Component option value must be a literal",
+			Explanation: "Tabs, Accordion and the other zero-JS components turn each part's value into CSS while the " +
+				"site is built, so every `value` on their parts must be a string literal in the source. A value " +
+				"read from data (for example `value={item.id}` inside `items.map(...)`) cannot be enumerated: the " +
+				"panels for that value get no show/hide rules, defaultValue is ignored and every panel stays " +
+				"visible. Write the values out, or use `<Select>`/a `createSignal` based component for data-driven " +
+				"options. This is a warning.",
 		},
 	)
 }
