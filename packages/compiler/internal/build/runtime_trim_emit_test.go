@@ -178,7 +178,7 @@ func TestTrimmedRuntimeDefinesEmittedNames(t *testing.T) {
 
 	// The bundles list their exports as `name:()=>binding` in an export table.
 	defined := func(name string) bool {
-		return regexp.MustCompile(`[{,]` + regexp.QuoteMeta(name) + `:\(\)=>`).MatchString(runtimeJS) ||
+		return regexp.MustCompile(`[{,]`+regexp.QuoteMeta(name)+`:\(\)=>`).MatchString(runtimeJS) ||
 			strings.Contains(runtimeJS, "window."+name+"=")
 	}
 	full := map[string]bool{}
