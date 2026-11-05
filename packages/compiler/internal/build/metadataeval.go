@@ -179,6 +179,11 @@ func anyErrors(rs []metadataResult) bool {
 // runBootstrapBundle bundles source (resolving imports like the page does) to
 // ESM and runs it with the configured runtime, returning its stdout.
 func (b *Builder) runBootstrapBundle(abs, source, prefix string, bnd *bundler.Bundler) ([]byte, error) {
+	jsxSource := ""
+	if prefix == "imageroute" || prefix == "metaroute" {
+		// opengraph-image.tsx builds its element tree with the server JSX runtime.
+		jsxSource = "@krate/runtime/server"
+	}
 	resolve := func(importer, spec string) (string, bool) {
 		if bnd != nil {
 			if p := bnd.Resolve(importer, spec); p != "" {
@@ -193,6 +198,8 @@ func (b *Builder) runBootstrapBundle(abs, source, prefix string, bnd *bundler.Bu
 		Sourcefile:    "krate-" + prefix + "-bootstrap.tsx",
 		Loader:        api.LoaderTSX,
 		ResolveImport: resolve,
+
+		JSXImportSource: jsxSource,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bundling %s bootstrap: %w", prefix, err)

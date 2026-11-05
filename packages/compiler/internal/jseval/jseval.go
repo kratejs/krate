@@ -48,6 +48,9 @@ type Options struct {
 	// node:fs, node:os) to small in-process implementations, and any other
 	// node: import to a stub that fails with a precise message.
 	NodeShims bool
+	// JSXImportSource, when set, compiles JSX with the automatic runtime from
+	// that package (for example "@krate/runtime/server"), ignoring tsconfig.
+	JSXImportSource string
 }
 
 // Eval bundles the entry (resolving imports) and runs it in the embedded QuickJS
@@ -137,6 +140,11 @@ func bundle(opts Options) (string, error) {
 		Write:    false,
 		LogLevel: api.LogLevelSilent,
 		Plugins:  plugins,
+	}
+	if opts.JSXImportSource != "" {
+		buildOpts.JSX = api.JSXAutomatic
+		buildOpts.JSXImportSource = opts.JSXImportSource
+		buildOpts.TsconfigRaw = `{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "` + opts.JSXImportSource + `" } }`
 	}
 	tsstrip.HandleTierDecorators(&buildOpts)
 	result := api.Build(buildOpts)

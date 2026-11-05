@@ -105,7 +105,7 @@ func TestMetadataRouteFilesBuild(t *testing.T) {
 	home := headOf(read("index.html"))
 	for _, want := range []string{
 		"<meta property=og:image content=https://site.example/opengraph-image.png>",
-		"<meta property=og:image:width content=1200>", "<meta property=og:image:height content=630>", "<meta property=og:image:alt content=\"The home card\">",
+		"<meta property=og:image:width content=1200>", "<meta property=og:image:height content=630>", "<meta property=og:image:alt content=The home card>",
 		"<meta name=twitter:image content=https://site.example/twitter-image.png>", "<meta name=twitter:card content=summary_large_image>",
 	} {
 		if !strings.Contains(home, want) {
@@ -155,7 +155,7 @@ func TestMetadataRoutePluginOverrideIsSaid(t *testing.T) {
 	// The fixture sets seo.baseUrl, so the sitemap plugin would have run.
 	out = captureStderr(t, func() {
 		b, _ := hooksProject(t, map[string]string{
-			"src/pages/index.tsx": `export default function Home() { return <p>x</p>; }`,
+			"src/pages/index.tsx":  `export default function Home() { return <p>x</p>; }`,
 			"src/pages/sitemap.ts": `export default function s() { return [{ url: "https://c.example/" }]; }`,
 		})
 		b.Cfg.SEO.BaseURL = "https://plugin.example"
