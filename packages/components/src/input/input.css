@@ -5,14 +5,14 @@
   padding: 8px 12px;
   font-size: 0.9rem;
   font-family: inherit;
-  color: var(--krate-text, #09090b);
-  background: var(--krate-surface, #f4f4f5);
-  border: 1px solid var(--krate-border, #e4e4e7);
+  color: var(--krate-text, #0a0a0a);
+  background: var(--krate-surface, #f5f5f5);
+  border: 1px solid var(--krate-border, #e5e5e5);
   border-radius: 6px;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .krate-input::placeholder {
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
 }
 .krate-input:focus {
   outline: 2px solid var(--krate-focus-ring, #c2410c);

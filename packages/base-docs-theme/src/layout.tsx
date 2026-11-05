@@ -263,7 +263,7 @@ export default function BaseDocsLayout(props: BaseDocsLayoutProps) {
       <Head>
         <title>{pageTitle} - {siteTitle}</title>
         <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-        <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
+        <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
       </Head>
 
       <a class="skip-link" href="#main">Skip to content</a>

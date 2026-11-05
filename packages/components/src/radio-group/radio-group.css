@@ -16,7 +16,7 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  border: 1.5px solid var(--krate-active-color, var(--krate-border, #e4e4e7));
+  border: 1.5px solid var(--krate-active-color, var(--krate-border, #e5e5e5));
   background: transparent;
   transition: border-color 0.15s, box-shadow 0.15s;
   box-sizing: border-box;
@@ -32,7 +32,7 @@
   transition: transform 0.15s ease;
 }
 .krate-radio-item:hover .krate-radio-indicator {
-  border-color: var(--krate-text-muted, #71717a);
+  border-color: var(--krate-text-muted, #737373);
 }
 .krate-radio-item:focus-visible .krate-radio-indicator {
   outline: 2px solid var(--krate-focus-ring, #c2410c);
@@ -40,6 +40,6 @@
 }
 .krate-radio-label {
   font-size: 0.875rem;
-  color: var(--krate-text, #09090b);
+  color: var(--krate-text, #0a0a0a);
   user-select: none;
 }

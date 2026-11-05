@@ -22,14 +22,14 @@
   margin-top: 4px;
   border-radius: 8px;
   background: var(--krate-card-bg, #ffffff);
-  border: 1px solid var(--krate-border, #e4e4e7);
+  border: 1px solid var(--krate-border, #e5e5e5);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 .krate-dropdown-menu-label {
   padding: 6px 8px;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -40,11 +40,11 @@
   padding: 6px 8px;
   border-radius: 4px;
   font-size: 0.875rem;
-  color: var(--krate-text, #09090b);
+  color: var(--krate-text, #0a0a0a);
   cursor: pointer;
 }
 .krate-dropdown-menu-item:hover {
-  background: var(--krate-surface, #f4f4f5);
+  background: var(--krate-surface, #f5f5f5);
 }
 .krate-dropdown-menu-item:focus-visible {
   outline: 2px solid var(--krate-focus-ring, #c2410c);
@@ -53,7 +53,7 @@
 .krate-dropdown-menu-separator {
   height: 1px;
   margin: 4px 0;
-  background: var(--krate-border, #e4e4e7);
+  background: var(--krate-border, #e5e5e5);
 }
 
 .krate-dropdown-menu-content { padding: 6px; }

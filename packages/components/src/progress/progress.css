@@ -7,10 +7,10 @@
   border: 0;
   border-radius: 9999px;
   overflow: hidden;
-  background: var(--krate-surface-hover, #e4e4e7);
+  background: var(--krate-surface-hover, #e5e5e5);
 }
 .krate-progress::-webkit-progress-bar {
-  background: var(--krate-surface-hover, #e4e4e7);
+  background: var(--krate-surface-hover, #e5e5e5);
   border-radius: 9999px;
 }
 .krate-progress::-webkit-progress-value {

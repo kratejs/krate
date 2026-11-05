@@ -15,7 +15,7 @@
   padding: 24px;
   border-radius: 12px;
   background: var(--krate-card-bg, #ffffff);
-  border: 1px solid var(--krate-border, #e4e4e7);
+  border: 1px solid var(--krate-border, #e5e5e5);
   /* The second shadow is the backdrop: it dims the page and, because the
      page behind is made inert while a modal is open, clicking it closes it. */
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2), 0 0 0 100vmax var(--krate-backdrop, rgba(0, 0, 0, 0.45));
@@ -23,12 +23,12 @@
 .krate-alert-dialog-title {
   font-size: 1.1rem;
   font-weight: 600;
-  color: var(--krate-text, #09090b);
+  color: var(--krate-text, #0a0a0a);
   margin: 0 0 4px;
 }
 .krate-alert-dialog-description {
   font-size: 0.9rem;
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
   line-height: 1.5;
   margin: 0 0 20px;
 }
@@ -55,15 +55,15 @@
   color: var(--krate-primary-fg, #ffffff);
 }
 .krate-alert-dialog-action:hover {
-  background: var(--krate-primary-hover, #2563eb);
+  background: var(--krate-primary-hover, #9a3412);
 }
 .krate-alert-dialog-cancel {
-  background: var(--krate-surface, #f4f4f5);
-  color: var(--krate-text, #09090b);
-  border-color: var(--krate-border, #e4e4e7);
+  background: var(--krate-surface, #f5f5f5);
+  color: var(--krate-text, #0a0a0a);
+  border-color: var(--krate-border, #e5e5e5);
 }
 .krate-alert-dialog-cancel:hover {
-  background: var(--krate-surface-hover, #e4e4e7);
+  background: var(--krate-surface-hover, #e5e5e5);
 }
 .krate-alert-dialog-action:focus-visible,
 .krate-alert-dialog-cancel:focus-visible {

@@ -3,7 +3,7 @@
   margin: 24px 0;
 }
 .krate-accordion-item {
-  border: 1px solid var(--krate-border, #e4e4e7);
+  border: 1px solid var(--krate-border, #e5e5e5);
   border-radius: 8px;
   overflow: hidden;
   margin-bottom: 8px;
@@ -20,13 +20,13 @@
   padding: 16px;
   font-size: 0.95rem;
   font-weight: 500;
-  color: var(--krate-text, #09090b);
+  color: var(--krate-text, #0a0a0a);
   cursor: pointer;
   transition: background 0.15s;
   box-sizing: border-box;
 }
 .krate-accordion-trigger:hover {
-  background: var(--krate-surface, #f4f4f5);
+  background: var(--krate-surface, #f5f5f5);
 }
 .krate-accordion-trigger:focus-visible {
   outline: 2px solid var(--krate-focus-ring, #c2410c);
@@ -39,7 +39,7 @@
 .krate-accordion-trigger-icon {
   display: inline-flex;
   transition: transform 0.2s ease;
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
   transform: rotate(calc(var(--krate-active, 0) * 180deg));
 }
 .krate-accordion-content {
@@ -47,6 +47,6 @@
 }
 .krate-accordion-content-inner {
   padding: 0 16px 16px;
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
   line-height: 1.6;
 }

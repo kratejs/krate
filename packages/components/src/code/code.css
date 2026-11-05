@@ -4,13 +4,13 @@
    and --krate-code-text override both. Nothing here assumes a dark surface. */
 .krate-code-block {
   --krate-code-block-bg: var(--krate-code-bg, var(--chroma-bg, var(--krate-code-bg-base, #f7f7f7)));
-  --krate-code-block-fg: var(--krate-code-text, var(--chroma-fg, var(--krate-code-text-base, #1f2328)));
+  --krate-code-block-fg: var(--krate-code-text, var(--chroma-fg, var(--krate-code-text-base, #262626)));
   margin: 20px 0;
   border-radius: 8px;
   overflow: hidden;
   background: var(--krate-code-block-bg);
   color: var(--krate-code-block-fg);
-  border: 1px solid var(--krate-border, #e4e4e7);
+  border: 1px solid var(--krate-border, #e5e5e5);
 }
 .krate-code-header {
   display: flex;
@@ -18,7 +18,7 @@
   justify-content: space-between;
   padding: 0 16px;
   background: var(--krate-code-title-bg, color-mix(in srgb, var(--krate-code-block-bg) 94%, var(--krate-code-block-fg)));
-  border-bottom: 1px solid var(--krate-border, #e4e4e7);
+  border-bottom: 1px solid var(--krate-border, #e5e5e5);
   min-height: 36px;
 }
 .krate-code-title {

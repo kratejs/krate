@@ -1,7 +1,7 @@
 /* Krate marketing surface.
  *
  * Shares one visual system with @krate/base-docs-theme and @krate/components:
- * the same zinc neutral ramp, the signal-orange accent, Inter + JetBrains Mono,
+ * the same neutral ramp, the signal-orange accent, Inter + JetBrains Mono,
  * and a single elevation scale. Tokens are kept in sync by hand across
  * site.css, tokens.css and theme.css. */
 
@@ -27,10 +27,10 @@
     /* Neutral ramp (light) */
     --color-bg: #ffffff;
     --color-bg-subtle: #fafafa;
-    --color-fg: #09090b;
-    --color-muted: #71717a;
-    --color-border: #e4e4e7;
-    --color-border-strong: #d4d4d8;
+    --color-fg: #0a0a0a;
+    --color-muted: #737373;
+    --color-border: #e5e5e5;
+    --color-border-strong: #d4d4d4;
 
     /* Signal accent */
     --color-primary: #f97316;
@@ -47,30 +47,31 @@
     --color-action-hover: #9a3412;
 
     --navbar-bg: rgba(255, 255, 255, 0.75);
-    --overlay-bg: rgba(9, 9, 11, 0.4);
+    --overlay-bg: rgba(10, 10, 10, 0.4);
 
     /* Elevation - offset + soft blur, low alpha. Dark mode re-tints these. */
-    --shadow-xs: 0 1px 2px rgba(24, 24, 27, 0.06);
-    --shadow-sm: 0 1px 2px rgba(24, 24, 27, 0.06), 0 2px 6px -2px rgba(24, 24, 27, 0.08);
-    --shadow-md: 0 2px 4px rgba(24, 24, 27, 0.05), 0 10px 24px -8px rgba(24, 24, 27, 0.12);
-    --shadow-lg: 0 4px 10px rgba(24, 24, 27, 0.06), 0 24px 48px -16px rgba(24, 24, 27, 0.16);
+    --shadow-xs: 0 1px 2px rgba(23, 23, 23, 0.06);
+    --shadow-sm: 0 1px 2px rgba(23, 23, 23, 0.06), 0 2px 6px -2px rgba(23, 23, 23, 0.08);
+    --shadow-md: 0 2px 4px rgba(23, 23, 23, 0.05), 0 10px 24px -8px rgba(23, 23, 23, 0.12);
+    --shadow-lg: 0 4px 10px rgba(23, 23, 23, 0.06), 0 24px 48px -16px rgba(23, 23, 23, 0.16);
     --hairline: none;
     --panel: var(--color-bg-subtle);
     --panel-border: var(--color-border);
     --panel-value: var(--color-link);
     --panel-label: var(--color-muted);
-    --code-bg: #f6f8fa;
-    --code-bar: #eef1f4;
-    --code-fg: #1f2328;
-    --code-muted: #57606a;
+    /* Code boxes sit on the same surface as the cards beside them. */
+    --code-bg: var(--color-bg-subtle);
+    --code-bar: #f5f5f5;
+    --code-fg: #262626;
+    --code-muted: #525252;
     --code-keyword: #cf222e;
     --code-constant: #0550ae;
     --code-function: #8250df;
     --code-type: #953800;
     --code-tag: #116329;
     --code-string: #0a3069;
-    --code-comment: #57606a;
-    --code-faint: #6e7781;
+    --code-comment: #525252;
+    --code-faint: #737373;
     --krate-code-bg: var(--code-bg);
     --krate-code-text: var(--code-fg);
     --krate-code-title-bg: var(--code-bar);
@@ -87,12 +88,12 @@
 
 :root[data-theme="dark"] {
     color-scheme: dark;
-    --color-bg: #09090b;
-    --color-bg-subtle: #0f0f11;
+    --color-bg: #0a0a0a;
+    --color-bg-subtle: #0f0f0f;
     --color-fg: #fafafa;
-    --color-muted: #a1a1aa;
-    --color-border: #27272a;
-    --color-border-strong: #3f3f46;
+    --color-muted: #a3a3a3;
+    --color-border: #262626;
+    --color-border-strong: #404040;
     --color-accent-bg: rgba(249, 115, 22, 0.12);
     --color-accent-border: rgba(249, 115, 22, 0.32);
     --color-positive: #4ade80;
@@ -100,40 +101,39 @@
     --color-link-hover: #fdba74;
     --color-action: #c2410c;
     --color-action-hover: #9a3412;
-    --navbar-bg: rgba(9, 9, 11, 0.8);
+    --navbar-bg: rgba(10, 10, 10, 0.8);
     --overlay-bg: rgba(0, 0, 0, 0.6);
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px -2px rgba(0, 0, 0, 0.5);
     --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.4), 0 14px 32px -10px rgba(0, 0, 0, 0.55);
     --shadow-lg: 0 6px 14px rgba(0, 0, 0, 0.45), 0 30px 60px -20px rgba(0, 0, 0, 0.65);
     --hairline: inset 0 1px 0 rgba(255, 255, 255, 0.045);
-    --panel: #121216;
-    --panel-border: #27272a;
+    --panel: #121212;
+    --panel-border: #262626;
     --panel-value: #fb923c;
-    --panel-label: #a1a1aa;
-    --code-bg: #0d1117;
-    --code-bar: #161b22;
-    --code-fg: #e6edf3;
-    --code-muted: #8b949e;
+    --panel-label: #a3a3a3;
+    --code-bar: #171717;
+    --code-fg: #e5e5e5;
+    --code-muted: #a3a3a3;
     --code-keyword: #ff7b72;
     --code-constant: #79c0ff;
     --code-function: #d2a8ff;
     --code-type: #f0883e;
     --code-tag: #7ee787;
     --code-string: #a5d6ff;
-    --code-comment: #8b949e;
-    --code-faint: #6e7681;
+    --code-comment: #a3a3a3;
+    --code-faint: #737373;
 }
 
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
         color-scheme: dark;
-        --color-bg: #09090b;
-        --color-bg-subtle: #0f0f11;
+        --color-bg: #0a0a0a;
+        --color-bg-subtle: #0f0f0f;
         --color-fg: #fafafa;
-        --color-muted: #a1a1aa;
-        --color-border: #27272a;
-        --color-border-strong: #3f3f46;
+        --color-muted: #a3a3a3;
+        --color-border: #262626;
+        --color-border-strong: #404040;
         --color-accent-bg: rgba(249, 115, 22, 0.12);
         --color-accent-border: rgba(249, 115, 22, 0.32);
         --color-positive: #4ade80;
@@ -141,29 +141,28 @@
         --color-link-hover: #fdba74;
         --color-action: #c2410c;
         --color-action-hover: #9a3412;
-        --navbar-bg: rgba(9, 9, 11, 0.8);
+        --navbar-bg: rgba(10, 10, 10, 0.8);
         --overlay-bg: rgba(0, 0, 0, 0.6);
         --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
         --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px -2px rgba(0, 0, 0, 0.5);
         --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.4), 0 14px 32px -10px rgba(0, 0, 0, 0.55);
         --shadow-lg: 0 6px 14px rgba(0, 0, 0, 0.45), 0 30px 60px -20px rgba(0, 0, 0, 0.65);
         --hairline: inset 0 1px 0 rgba(255, 255, 255, 0.045);
-        --panel: #121216;
-        --panel-border: #27272a;
+        --panel: #121212;
+        --panel-border: #262626;
         --panel-value: #fb923c;
-        --panel-label: #a1a1aa;
-        --code-bg: #0d1117;
-        --code-bar: #161b22;
-        --code-fg: #e6edf3;
-        --code-muted: #8b949e;
+        --panel-label: #a3a3a3;
+        --code-bar: #171717;
+        --code-fg: #e5e5e5;
+        --code-muted: #a3a3a3;
         --code-keyword: #ff7b72;
         --code-constant: #79c0ff;
         --code-function: #d2a8ff;
         --code-type: #f0883e;
         --code-tag: #7ee787;
         --code-string: #a5d6ff;
-        --code-comment: #8b949e;
-        --code-faint: #6e7681;
+        --code-comment: #a3a3a3;
+        --code-faint: #737373;
     }
 }
 

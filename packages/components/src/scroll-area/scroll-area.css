@@ -1,7 +1,7 @@
 .krate-scroll-area {
   border-radius: 6px;
   scrollbar-width: thin;
-  scrollbar-color: var(--krate-border, #e4e4e7) transparent;
+  scrollbar-color: var(--krate-border, #e5e5e5) transparent;
 }
 .krate-scroll-area-vertical { overflow-y: auto; overflow-x: hidden; }
 .krate-scroll-area-horizontal { overflow-x: auto; overflow-y: hidden; }
@@ -12,6 +12,6 @@
 }
 .krate-scroll-area::-webkit-scrollbar { width: 8px; height: 8px; }
 .krate-scroll-area::-webkit-scrollbar-thumb {
-  background: var(--krate-border, #e4e4e7);
+  background: var(--krate-border, #e5e5e5);
   border-radius: 8px;
 }

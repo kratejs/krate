@@ -19,13 +19,13 @@
   color: var(--krate-primary-fg, #fff);
 }
 .krate-badge-secondary {
-  background: var(--krate-surface-hover, #e4e4e7);
-  color: var(--krate-text, #09090b);
+  background: var(--krate-surface-hover, #e5e5e5);
+  color: var(--krate-text, #0a0a0a);
 }
 .krate-badge-outline {
   background: transparent;
-  border-color: var(--krate-border, #e4e4e7);
-  color: var(--krate-text-muted, #71717a);
+  border-color: var(--krate-border, #e5e5e5);
+  color: var(--krate-text-muted, #737373);
 }
 .krate-badge-success {
   background: rgba(34, 197, 94, 0.15);

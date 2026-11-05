@@ -73,13 +73,13 @@ text on the page.
 
 | Token | Light | Dark |
 |-------|-------|------|
-| `--krate-bg` | `#ffffff` | `#09090b` |
-| `--krate-fg` (aliased by `--krate-text`) | `#09090b` | `#fafafa` |
-| `--krate-muted` (aliased by `--krate-text-muted`) | `#636368` | `#a1a1aa` |
-| `--krate-surface` | `#f4f4f5` | `#18181b` |
-| `--krate-surface-hover` | `#e4e4e7` | `#27272a` |
-| `--krate-border` | `#e4e4e7` | `#27272a` |
-| `--krate-card-bg` | `#ffffff` | `#18181b` |
+| `--krate-bg` | `#ffffff` | `#0a0a0a` |
+| `--krate-fg` (aliased by `--krate-text`) | `#0a0a0a` | `#fafafa` |
+| `--krate-muted` (aliased by `--krate-text-muted`) | `#636363` | `#a3a3a3` |
+| `--krate-surface` | `#f5f5f5` | `#171717` |
+| `--krate-surface-hover` | `#e5e5e5` | `#262626` |
+| `--krate-border` | `#e5e5e5` | `#262626` |
+| `--krate-card-bg` | `#ffffff` | `#171717` |
 | `--krate-overlay` | `rgba(9,9,11,.4)` | `rgba(0,0,0,.6)` |
 
 ### Layout and code
@@ -90,7 +90,7 @@ text on the page.
 | `--krate-radius` / `--krate-radius-lg` | `8px` / `12px` |
 | `--krate-code-bg` / `--krate-code-text` | unset: taken from the code theme |
 | `--krate-code-title-bg` / `--krate-code-title-text` | unset: derived from the code colours |
-| `--krate-code-bg-base` / `--krate-code-text-base` | `#f7f7f7` / `#1f2328` light, `#0d1117` / `#e6edf3` dark |
+| `--krate-code-bg-base` / `--krate-code-text-base` | `#f7f7f7` / `#262626` light, `#171717` / `#e5e5e5` dark |
 
 ## Light and dark
 
@@ -107,7 +107,7 @@ overrides (zero-superseding) still win over both.
 ## Code blocks
 
 `<Code>` and fenced blocks take their colours from the code theme
-(`markdown.codeTheme`, `github` in light and `github-dark` in dark by default), so
+(`markdown.codeTheme`, `github` in light and `krate-dark` in dark by default), so
 a block is light on a light page and dark on a dark one, including when the
 page's mode is switched with `data-theme`. A block with no language has no theme
 stylesheet and uses the `--krate-code-bg-base` and `--krate-code-text-base`

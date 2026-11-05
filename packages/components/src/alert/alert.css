@@ -3,16 +3,16 @@
   gap: 12px;
   padding: 14px 16px;
   border-radius: 8px;
-  border: 1px solid var(--krate-border, #e4e4e7);
-  background: var(--krate-surface, #f4f4f5);
-  color: var(--krate-text, #09090b);
+  border: 1px solid var(--krate-border, #e5e5e5);
+  background: var(--krate-surface, #f5f5f5);
+  color: var(--krate-text, #0a0a0a);
   font-size: 0.9rem;
 }
 .krate-alert-icon {
   flex: none;
   display: flex;
   margin-top: 1px;
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
 }
 .krate-alert-body {
   min-width: 0;
@@ -22,7 +22,7 @@
   margin-bottom: 2px;
 }
 .krate-alert-description {
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
   line-height: 1.5;
 }
 .krate-alert-info {

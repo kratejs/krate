@@ -1,9 +1,9 @@
 .krate-file-tree {
   font-family: var(--krate-font, ui-monospace, monospace);
   font-size: 0.85rem;
-  color: var(--krate-text, #09090b);
+  color: var(--krate-text, #0a0a0a);
   padding: 8px;
-  border: 1px solid var(--krate-border, #e4e4e7);
+  border: 1px solid var(--krate-border, #e5e5e5);
   border-radius: 8px;
   background: var(--krate-card-bg, #ffffff);
 }
@@ -25,11 +25,11 @@
 }
 .krate-file-tree-folder-header:hover,
 .krate-file-tree-item:hover {
-  background: var(--krate-surface, #f4f4f5);
+  background: var(--krate-surface, #f5f5f5);
 }
 .krate-file-tree-chevron {
   display: inline-flex;
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
   transition: transform 0.15s ease;
 }
 .krate-file-tree-folder[open] > .krate-file-tree-folder-header > .krate-file-tree-chevron {
@@ -37,7 +37,7 @@
 }
 .krate-file-tree-icon {
   display: inline-flex;
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
 }
 .krate-file-tree-name {
   flex: 1;

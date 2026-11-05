@@ -257,11 +257,11 @@ const STYLE = `
 :host {
   --red: #f87171;
   --green: #34d399;
-  --bg: #111114;
-  --bg-2: #17171c;
-  --line: #2a2a31;
-  --fg: #e5e7eb;
-  --muted: #9ca3af;
+  --bg: #111111;
+  --bg-2: #171717;
+  --line: #2a2a2a;
+  --fg: #e5e5e5;
+  --muted: #a3a3a3;
 }
 
 /* toolbar */
@@ -308,7 +308,7 @@ const STYLE = `
 /* overlay */
 .overlay {
   position: fixed; inset: 0; z-index: 2147483000;
-  background: rgba(9, 9, 11, 0.72); backdrop-filter: blur(6px);
+  background: rgba(10, 10, 10, 0.72); backdrop-filter: blur(6px);
   display: flex; align-items: flex-start; justify-content: center;
   padding: 4vh 16px; overflow: auto;
   font: 13px/1.5 "SF Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
@@ -332,9 +332,9 @@ const STYLE = `
   border-radius: 9px; padding: 6px 12px; cursor: pointer; font: inherit; font-size: 12px;
   transition: color .15s ease, background .15s ease, border-color .15s ease;
 }
-.btn:hover { color: var(--fg); background: rgba(255,255,255,.06); border-color: #44444f; }
+.btn:hover { color: var(--fg); background: rgba(255,255,255,.06); border-color: #444444; }
 .list { padding: 6px 0; }
-.diag { padding: 14px 18px; border-bottom: 1px solid #1f1f26; }
+.diag { padding: 14px 18px; border-bottom: 1px solid #1f1f1f; }
 .diag:last-child { border-bottom: none; }
 .actions { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .loc {
@@ -345,10 +345,10 @@ const STYLE = `
 .loc:hover { text-decoration: underline; }
 .msg { color: #f3f4f6; white-space: pre-wrap; word-break: break-word; }
 .frame {
-  margin-top: 10px; background: #0b0b0e; border: 1px solid #26262e;
+  margin-top: 10px; background: #0b0b0b; border: 1px solid #262626;
   border-radius: 7px; padding: 8px 10px; overflow-x: auto; white-space: pre;
 }
-.frame .src { color: #cbd5e1; }
+.frame .src { color: #d4d4d4; }
 .frame .caret { color: var(--red); }
 .hint { margin-top: 8px; color: #a3e635; }
 .stack {

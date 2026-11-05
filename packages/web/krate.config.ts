@@ -31,7 +31,7 @@ export default defineConfig({
     image: "https://krate.js.org/og.png",
     titleTemplate: "%s | Krate",
     twitter: "kratejs",
-    themeColor: "#0b1020",
+    themeColor: "#0a0a0a",
     locale: "en",
   },
 

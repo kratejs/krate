@@ -3,8 +3,8 @@
   align-items: center;
   gap: 1px;
   border-radius: 8px;
-  background: var(--krate-surface, #f4f4f5);
-  border: 1px solid var(--krate-border, #e4e4e7);
+  background: var(--krate-surface, #f5f5f5);
+  border: 1px solid var(--krate-border, #e5e5e5);
   padding: 2px;
 }
 .krate-toggle-group-item {
@@ -15,14 +15,14 @@
   border-radius: 6px;
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--krate-text-muted, #71717a);
+  color: var(--krate-text-muted, #737373);
   background: var(--krate-active-bg, transparent);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   min-height: 32px;
 }
 .krate-toggle-group-item:hover {
-  background: var(--krate-surface-hover, #e4e4e7);
+  background: var(--krate-surface-hover, #e5e5e5);
 }
 .krate-toggle-group-item:focus-visible {
   outline: 2px solid var(--krate-focus-ring, #c2410c);

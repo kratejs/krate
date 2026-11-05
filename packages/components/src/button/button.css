@@ -14,7 +14,7 @@
   white-space: nowrap;
   user-select: none;
   background: transparent;
-  color: var(--krate-text, #09090b);
+  color: var(--krate-text, #0a0a0a);
   transition: background-color 0.16s var(--krate-ease-in-out, ease),
     border-color 0.16s var(--krate-ease-in-out, ease),
     color 0.16s var(--krate-ease-in-out, ease),
@@ -55,42 +55,42 @@
 .krate-button-primary {
   background: var(--krate-primary, #c2410c);
   color: var(--krate-primary-fg, #fff);
-  box-shadow: var(--krate-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.06));
+  box-shadow: var(--krate-shadow-xs, 0 1px 2px rgba(23, 23, 23, 0.06));
 }
 .krate-button-primary:hover {
-  background: var(--krate-primary-hover, #2563eb);
+  background: var(--krate-primary-hover, #9a3412);
   color: var(--krate-primary-fg, #fff);
   box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--krate-primary, #c2410c) 65%, transparent);
 }
 .krate-button-secondary {
-  background: var(--krate-surface, #f4f4f5);
-  color: var(--krate-text, #09090b);
-  border-color: var(--krate-border, #e4e4e7);
+  background: var(--krate-surface, #f5f5f5);
+  color: var(--krate-text, #0a0a0a);
+  border-color: var(--krate-border, #e5e5e5);
 }
 .krate-button-secondary:hover {
-  background: var(--krate-surface-hover, #e4e4e7);
-  border-color: var(--krate-border-strong, #d4d4d8);
+  background: var(--krate-surface-hover, #e5e5e5);
+  border-color: var(--krate-border-strong, #d4d4d4);
 }
 .krate-button-outline {
   background: transparent;
-  color: var(--krate-text, #09090b);
-  border-color: var(--krate-border, #e4e4e7);
+  color: var(--krate-text, #0a0a0a);
+  border-color: var(--krate-border, #e5e5e5);
 }
 .krate-button-outline:hover {
-  background: var(--krate-surface-hover, #e4e4e7);
-  border-color: var(--krate-border-strong, #d4d4d8);
+  background: var(--krate-surface-hover, #e5e5e5);
+  border-color: var(--krate-border-strong, #d4d4d4);
 }
 .krate-button-ghost {
   background: transparent;
-  color: var(--krate-text, #09090b);
+  color: var(--krate-text, #0a0a0a);
 }
 .krate-button-ghost:hover {
-  background: var(--krate-surface-hover, #e4e4e7);
+  background: var(--krate-surface-hover, #e5e5e5);
 }
 .krate-button-destructive {
   background: var(--krate-danger, #ef4444);
   color: #fff;
-  box-shadow: var(--krate-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.06));
+  box-shadow: var(--krate-shadow-xs, 0 1px 2px rgba(23, 23, 23, 0.06));
 }
 .krate-button-destructive:hover {
   background: var(--krate-danger-hover, #dc2626);
@@ -104,6 +104,6 @@
   padding: 0;
 }
 .krate-button-link:hover {
-  color: var(--krate-primary-text, var(--krate-primary-hover, #2563eb));
+  color: var(--krate-primary-text, var(--krate-primary-hover, #9a3412));
   text-decoration-thickness: 2px;
 }
