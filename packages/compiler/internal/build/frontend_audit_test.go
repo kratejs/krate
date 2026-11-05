@@ -38,3 +38,14 @@ func TestNamedReexportBarrelRendersComponents(t *testing.T) {
 		t.Errorf("unexpected unresolved warning:\n%s", logged)
 	}
 }
+
+func TestComponentFileBesideSameNamedDirectory(t *testing.T) {
+	html, logged := buildPlain(t, map[string]string{
+		"src/components/Button.tsx":       "export default function Button() { return <b>BTN</b>; }\n",
+		"src/components/Button/style.css": "b { color: red; }\n",
+		"src/pages/index.tsx":             "import Button from '../components/Button';\nexport default function Home() { return <main><Button /></main>; }\n",
+	})
+	if !strings.Contains(html, "<b>BTN</b>") || strings.Contains(logged, "could not be resolved") {
+		t.Errorf("Button missing:\n%s\nlog:\n%s", html, logged)
+	}
+}

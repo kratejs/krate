@@ -1913,6 +1913,7 @@ func (b *Builder) cfgPathAliasTargets() [][]string {
 func (b *Builder) newBundler() *bundler.Bundler {
 	bnd := bundler.New(b.Root)
 	bnd.SetPathAliases(b.cfgPathAliasPrefixes(), b.cfgPathAliasTargets(), b.Cfg.TSBaseDir)
+	bnd.SetBaseURL(b.Cfg.TSBaseURL)
 	bnd.SetServerComponents(b.Cfg.ServerComponents, b.Cfg.RuntimeComponents, b.Cfg.ServerDirs, b.Cfg.RuntimeDirs)
 	bnd.SetTSOptions(tsstrip.Options{
 		ExperimentalDecorators:  b.Cfg.TSCompilerOptions.ExperimentalDecorators,

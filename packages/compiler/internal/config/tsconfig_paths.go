@@ -261,6 +261,9 @@ func (c *Config) LoadTSConfigPaths(root string) {
 		baseDir = o.baseURL
 	}
 	c.TSBaseDir = baseDir
+	if o.hasBaseURL {
+		c.TSBaseURL = baseDir
+	}
 
 	prefixes := make([]string, 0, len(o.paths))
 	for p := range o.paths {

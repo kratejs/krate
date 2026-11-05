@@ -434,22 +434,24 @@ func pickTarget(raw json.RawMessage, conds Conditions) (string, bool) {
 // given, then with source extensions, then as a directory index.
 func resolveFile(candidate string) string {
 	candidate = filepath.Clean(candidate)
-	if s := StatPath(candidate); s.Exists {
-		if s.IsDir {
-			for _, idx := range indexFiles {
-				p := filepath.Join(candidate, idx)
-				if Exists(p) {
-					return p
-				}
-			}
-			return ""
-		}
+	// An exact file wins, then the path plus an extension, then a directory
+	// index (Node and tsc order), so Button.tsx beats a Button/ directory.
+	s := StatPath(candidate)
+	if s.Exists && !s.IsDir {
 		return candidate
 	}
 	for _, ext := range sourceExtensions {
 		p := candidate + ext
 		if Exists(p) {
 			return p
+		}
+	}
+	if s.Exists && s.IsDir {
+		for _, idx := range indexFiles {
+			p := filepath.Join(candidate, idx)
+			if Exists(p) {
+				return p
+			}
 		}
 	}
 	return ""
