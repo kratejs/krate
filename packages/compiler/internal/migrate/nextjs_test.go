@@ -587,7 +587,7 @@ export default function Page() { return <h1>About</h1>; }
 		t.Fatal("page missing")
 	}
 	body := string(page.Content)
-	for _, want := range []string{"<__KrateMetadata {...props} />", "function __KrateMetadata", "generateMetadata(props)"} {
+	for _, want := range []string{"<KrateMetadata {...props} />", "function KrateMetadata", "generateMetadata(props)"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dynamic metadata wrapper missing %q:\n%s", want, body)
 		}
@@ -609,8 +609,11 @@ export default function Page() { return <h1>About</h1>; }
 		t.Fatal(err)
 	}
 	page := findPlan(rep, "src/pages/index.tsx")
-	if page == nil || !strings.Contains(string(page.Content), "<Suspense") || !strings.Contains(string(page.Content), "__krateMetadataCache") {
+	if page == nil || !strings.Contains(string(page.Content), "async function KrateMetadata") || !strings.Contains(string(page.Content), "await generateMetadata(props)") {
 		t.Fatalf("async generateMetadata not wrapped: %+v", page)
+	}
+	if strings.Contains(string(page.Content), `from "react"`) {
+		t.Fatalf("the async wrapper must not depend on react imports:\n%s", page.Content)
 	}
 	if hasManual(rep, "app/page.tsx", "generateMetadata") {
 		t.Fatalf("async generateMetadata should be handled: %+v", rep.Manual)
@@ -1325,5 +1328,73 @@ export default async function P() { return <p>x</p>; }`)
 	}
 	if hasManual(rep, "app/page.tsx", "route segment config revalidate") {
 		t.Errorf("revalidate is native and must not be reported")
+	}
+}
+
+func TestAsyncDefaultPageWithMetadataKeepsAsync(t *testing.T) {
+	cases := []struct {
+		name string
+		page string
+		want []string
+	}{
+		{"named async", `export const metadata = { title: "Post" };
+export default async function Post({ params }: any) { return <h1>{params.slug}</h1>; }`,
+			[]string{"async function Post(", "export default async function PageWithHead(props: any)", "<Post {...props} />"}},
+		{"anonymous async", `export const metadata = { title: "Post" };
+export default async function ({ params }: any) { return <h1>{params.slug}</h1>; }`,
+			[]string{"async function Page__krateBody(", "<Page__krateBody {...props} />"}},
+		{"async dynamic metadata", `export async function generateMetadata({ params }: any) { return { title: params.slug }; }
+export default function Post({ params }: any) { return <h1>{params.slug}</h1>; }`,
+			[]string{"export default async function PageWithHead(props: any)", "<KrateMetadata {...props} />", "async function KrateMetadata(props: any)"}},
+		{"named reference to async arrow", `export const metadata = { title: "Post" };
+const Post = async ({ params }: any) => <h1>{params.slug}</h1>;
+export default Post;
+`, []string{"export default async function PageWithHead(props: any)", "<Post {...props} />"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeNextFile(t, root, "app/blog/[slug]/page.tsx", tc.page)
+			rep, err := ScanNext(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			page := findPlan(rep, "src/pages/blog/[slug].tsx")
+			if page == nil {
+				t.Fatal("page missing")
+			}
+			body := string(page.Content)
+			for _, want := range tc.want {
+				if !strings.Contains(body, want) {
+					t.Errorf("missing %q:\n%s", want, body)
+				}
+			}
+			if strings.Contains(body, "<async") || strings.Contains(body, "__KrateMetadata") {
+				t.Errorf("corrupted wrapper:\n%s", body)
+			}
+			p := parser.New(lexer.New(body).Tokenize())
+			if prog := p.ParseProgram(); prog == nil || len(p.Errors()) > 0 {
+				t.Fatalf("page does not parse: %v\n%s", p.Errors(), body)
+			}
+		})
+	}
+}
+
+func TestNamedDefaultOnlyMatchesWholeStatements(t *testing.T) {
+	for _, src := range []string{
+		"export default async function Post() {}",
+		"export default function Post() {}",
+		"export default class Post {}",
+		"export default Post(props);",
+		"export default Post + 1;",
+	} {
+		if namedDefault.MatchString(src) {
+			t.Errorf("namedDefault matched %q", src)
+		}
+	}
+	for _, src := range []string{"export default Post;", "export default Post", "export default Post\n"} {
+		if !namedDefault.MatchString(src) {
+			t.Errorf("namedDefault missed %q", src)
+		}
 	}
 }

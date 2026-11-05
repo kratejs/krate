@@ -170,12 +170,23 @@ func jsxAttr(s string) string {
 
 var (
 	defaultFunction = regexp.MustCompile(`export\s+default\s+(async\s+)?function\s*([A-Za-z_$][\w$]*)?`)
-	namedDefault    = regexp.MustCompile(`(?m)^[ \t]*export\s+default\s+([A-Za-z_$][\w$]*)\s*;?[ \t]*\r?\n?`)
+	// namedDefault matches `export default Name;` as a whole statement, so
+	// `export default async function Name` or `export default Name(...)` never
+	// match. The trailing line break is part of the match.
+	namedDefault = regexp.MustCompile(`(?m)^[ \t]*export[ \t]+default[ \t]+([A-Za-z_$][\w$]*)[ \t]*;?[ \t]*(?:\r?\n|$)`)
 )
 
+// notComponentRefs are words that can follow `export default` as a bare
+// identifier but never name a component.
+var notComponentRefs = map[string]bool{
+	"async": true, "function": true, "class": true, "await": true, "new": true,
+	"typeof": true, "void": true, "null": true, "undefined": true, "true": true,
+	"false": true, "this": true, "yield": true, "delete": true,
+}
+
 // convertPageMetadata wraps a page whose default export is a function with a
-// small <Head> parent. Arrow/class/async defaults stay manual because wrapping
-// them changes their execution semantics.
+// small <Head> parent. Class defaults stay manual because wrapping them
+// changes their execution semantics.
 func convertPageMetadata(rep *Report) {
 	for i := range rep.Files {
 		f := &rep.Files[i]
@@ -194,23 +205,23 @@ func convertPageMetadata(rep *Report) {
 		dynamicHelper := ""
 		asyncMeta := false
 		if head == "" && syncGenerateMetadata(f.Content) {
-			head = "<__KrateMetadata {...props} />"
+			head = "<KrateMetadata {...props} />"
 			dynamicHelper = generatedMetadataComponent
 		} else if head == "" && asyncGenerateMetadata(f.Content) {
-			head = "<Suspense fallback={null}><__KrateMetadata {...props} /></Suspense>"
+			head = "<KrateMetadata {...props} />"
 			dynamicHelper = generatedAsyncMetadataComponent
 			asyncMeta = true
 		}
 		if head == "" {
 			continue
 		}
-		if strings.Contains(src, "PageWithHead") || strings.Contains(src, "Page__krateBody") || strings.Contains(src, "__KrateMetadata") {
+		if strings.Contains(src, "PageWithHead") || strings.Contains(src, "Page__krateBody") || strings.Contains(src, "KrateMetadata") {
 			removeMetadataManual(rep, f.Source)
 			continue
 		}
-		body, wrapped := wrapPageWithHead(src, head)
+		body, wrapped := wrapPageWithHead(src, head, asyncMeta)
 		if !wrapped {
-			body, wrapped = wrapNamedDefaultPageWithHead(src, head)
+			body, wrapped = wrapNamedDefaultPageWithHead(src, head, asyncMeta)
 		}
 		if !wrapped {
 			continue
@@ -222,8 +233,7 @@ func convertPageMetadata(rep *Report) {
 		}
 		if dynamicHelper != "" {
 			if asyncMeta {
-				body = ensureReactImports(body, "Suspense", "use")
-				f.Rewrites = append(f.Rewrites, "wrapped async generateMetadata in Suspense/<Head>")
+				f.Rewrites = append(f.Rewrites, "wrapped async generateMetadata in <Head>")
 			} else {
 				f.Rewrites = append(f.Rewrites, "wrapped dynamic generateMetadata in <Head>")
 			}
@@ -237,48 +247,41 @@ func convertPageMetadata(rep *Report) {
 	}
 }
 
-func ensureReactImports(src string, names ...string) string {
-	var missing []string
-	for _, name := range names {
-		re := regexp.MustCompile(`import\s*\{[^}]*\b` + regexp.QuoteMeta(name) + `\b[^}]*\}\s*from\s*["']react["']`)
-		if !re.MatchString(src) {
-			missing = append(missing, name)
-		}
-	}
-	if len(missing) == 0 {
-		return src
-	}
-	return "import { " + strings.Join(missing, ", ") + " } from \"react\";\n" + src
-}
-
-func wrapPageWithHead(src, head string) (string, bool) {
+// wrapPageWithHead turns `export default function Page` into a plain function
+// and appends a default-exported PageWithHead that renders the head tags and
+// then <Page {...props} />. The wrapper is async when the page or the metadata
+// is: an async page renders per request, which is also what makes route params
+// arrive with the request instead of being fixed at build time.
+func wrapPageWithHead(src, head string, asyncHead bool) (string, bool) {
 	loc := defaultFunction.FindStringSubmatchIndex(src)
 	if loc == nil {
 		return "", false
 	}
-	match := src[loc[0]:loc[1]]
-	if strings.Contains(match, "async") {
-		return "", false
+	prefix := ""
+	if loc[2] >= 0 {
+		prefix = "async "
 	}
-	name := ""
+	name := "Page__krateBody"
 	if loc[5] >= 0 {
 		name = src[loc[4]:loc[5]]
 	}
-	if name == "" {
-		name = "Page__krateBody"
-		src = src[:loc[0]] + "function " + name + src[loc[1]:]
-	} else {
-		bodyFn := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(match), "export default"))
-		src = src[:loc[0]] + bodyFn + src[loc[1]:]
-	}
+	src = src[:loc[0]] + prefix + "function " + name + src[loc[1]:]
 	if strings.Contains(src, "PageWithHead") {
 		return "", false
 	}
-	src += "\n\nexport default function PageWithHead(props: any) {\n  return (\n    <>\n      " + head + "\n      <" + name + " {...props} />\n    </>\n  );\n}\n"
+	src += pageWithHeadWrapper(name, head, asyncHead || prefix != "")
 	return src, true
 }
 
-func wrapNamedDefaultPageWithHead(src, head string) (string, bool) {
+func pageWithHeadWrapper(name, head string, async bool) string {
+	kw := ""
+	if async {
+		kw = "async "
+	}
+	return "\n\nexport default " + kw + "function PageWithHead(props: any) {\n  return (\n    <>\n      " + head + "\n      <" + name + " {...props} />\n    </>\n  );\n}\n"
+}
+
+func wrapNamedDefaultPageWithHead(src, head string, asyncHead bool) (string, bool) {
 	if strings.Contains(src, "PageWithHead") {
 		return "", false
 	}
@@ -287,9 +290,20 @@ func wrapNamedDefaultPageWithHead(src, head string) (string, bool) {
 		return "", false
 	}
 	name := src[loc[2]:loc[3]]
+	if notComponentRefs[name] {
+		return "", false
+	}
 	src = src[:loc[0]] + src[loc[1]:]
-	src += "\n\nexport default function PageWithHead(props: any) {\n  return (\n    <>\n      " + head + "\n      <" + name + " {...props} />\n    </>\n  );\n}\n"
+	src += pageWithHeadWrapper(name, head, asyncHead || declaredAsync(src, name))
 	return src, true
+}
+
+// declaredAsync reports whether name is declared as an async function or an
+// async arrow/function expression in src.
+func declaredAsync(src, name string) bool {
+	q := regexp.QuoteMeta(name)
+	return regexp.MustCompile(`\basync\s+function\s*\*?\s*`+q+`\b`).MatchString(src) ||
+		regexp.MustCompile(`\b(?:const|let|var)\s+`+q+`\s*(?::[^=]+)?=\s*async\b`).MatchString(src)
 }
 
 func removeMetadataManual(rep *Report, source string) {
@@ -429,7 +443,7 @@ func syncGenerateMetadata(src []byte) bool {
 	return false
 }
 
-const generatedMetadataComponent = `function __KrateMetadata(props: any) {
+const generatedMetadataComponent = `function KrateMetadata(props: any) {
   const m = generateMetadata(props) || {};
   const og = m.openGraph || {};
   const tw = m.twitter || {};
@@ -460,11 +474,8 @@ const generatedMetadataComponent = `function __KrateMetadata(props: any) {
 }
 `
 
-const generatedAsyncMetadataComponent = `const __krateMetadataCache = new Map<string, any>();
-function __KrateMetadata(props: any) {
-  const key = JSON.stringify(props);
-  if (!__krateMetadataCache.has(key)) __krateMetadataCache.set(key, generateMetadata(props));
-  const m = use(__krateMetadataCache.get(key)) || {};
+const generatedAsyncMetadataComponent = `async function KrateMetadata(props: any) {
+  const m = (await generateMetadata(props)) || {};
   const og = m.openGraph || {};
   const tw = m.twitter || {};
   const title = typeof m.title === "string" ? m.title : (m.title?.default || m.title?.absolute);
