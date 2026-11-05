@@ -3356,7 +3356,7 @@ func (b *Builder) NewRenderPipeline(entryModule *bundler.Module, page string) (*
 	ann := annotator.Annotate(entryModule.Program, b.Cfg, page, entryModule.SourceCode)
 
 	opts := b.irBuildOptions()
-	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, nil)
+	opts.ModuleConsts, opts.ModuleConstInits, opts.ModuleRun = mergeModuleConstants(entryModule.Program, nil)
 	tree := irtree.BuildWithOptions(entryModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		return nil, renderErrors(page, tree.Errors)
@@ -3493,7 +3493,7 @@ func (b *Builder) renderLoadingComponent(pagePath string) string {
 	annotator.MergeModuleFunctions(ann, extraPrograms)
 	annotator.MergeImportAliases(ann, extraPrograms, annotator.ModuleSource{Program: entryModule.Program, Path: entryModule.Path, RawSource: entryModule.SourceCode, Resolver: bundle.Resolver})
 	opts := b.irBuildOptions()
-	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entryModule.Program, extraPrograms)
+	opts.ModuleConsts, opts.ModuleConstInits, opts.ModuleRun = mergeModuleConstants(entryModule.Program, extraPrograms)
 	tree := irtree.BuildWithOptions(entryModule.Program, ann, opts)
 	if len(tree.Errors) > 0 {
 		for _, e := range tree.Errors {

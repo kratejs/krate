@@ -103,6 +103,37 @@ does not exist, or is not a function component, stops the build with a
 of emitting an unknown element. Members of an npm React library are mounted as
 islands, as named imports are.
 
+## Module values changed by top-level code
+
+A module-level value is not always its initializer. Top-level statements that
+change it run at build time, in source order, before anything reads it:
+
+```tsx
+const squares = [];
+for (let i = 0; i < 3; i++) squares.push(i * i);
+let total = 0;
+for (const s of squares) total += s;
+
+<ul>{squares.map((s) => <li>{s}</li>)}</ul> // three items
+<p>{total}</p>                                // 5
+```
+
+Assignments, `++`, property writes, `push` and other method calls, loops,
+branches, `Object.assign`, and calls to functions of the module that do any of
+these are run, in the module that declares the value and in the modules it is
+imported from. Code that only reads a value (`console.log(cfg)`,
+`window.__cfg = cfg`) or that runs later (a callback passed to
+`addEventListener`) does not affect it, and a module with no such statements
+folds from its initializers exactly as before.
+
+When a statement cannot be run at build time (it reads the browser, the clock
+or an imported function, or sorts or reverses in place), the values it may
+have changed stay unknown instead of keeping their initial value. A component
+that hydrates reads them in the browser, where the hydration script replays the
+statement. A component rendered at build time (`@static`, `@server`) has no run
+time, so the build fails with [KR8322](/docs/reference/diagnostics/#kr8322).
+Make the top-level code plain, or compute the value in one expression.
+
 ## Reactive values
 
 A known initial value is not the same as a static value. If an expression reads

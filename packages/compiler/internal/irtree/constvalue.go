@@ -258,10 +258,20 @@ func valueJSLiteral(v jsvalue.Value) string {
 // Initializers may reference each other (evaluated lazily, cycles yield
 // Unknown). Only fully-known, non-function values are kept; names that only
 // have a legacy string value (no initializer) are decoded from it.
-func typedModuleConsts(inits map[string]ast.Expr, legacy map[string]string) valueMap {
+func typedModuleConsts(inits map[string]ast.Expr, legacy map[string]string, run *ModuleRun) valueMap {
 	out := make(valueMap, len(inits))
 	state := map[string]int{} // 1 = evaluating, 2 = done
 	values := map[string]jsvalue.Value{}
+	if run != nil {
+		// Top-level code ran: its final values replace the initializer folds,
+		// and a binding it left unknown stays unknown.
+		for name, v := range run.Values {
+			state[name], values[name] = 2, v
+		}
+		for name, reason := range run.Blocked {
+			state[name], values[name] = 2, jsvalue.Dynamic(ModuleBlockedPrefix+reason)
+		}
+	}
 	in := jsvalue.New(jsvalue.Hooks{})
 	resolve := func(name string) (jsvalue.Value, bool) {
 		switch state[name] {
@@ -291,9 +301,17 @@ func typedModuleConsts(inits map[string]ast.Expr, legacy map[string]string) valu
 		}
 		out[name] = v
 	}
+	if run != nil {
+		for name, v := range run.Values {
+			out[name] = v
+		}
+	}
 	for name, s := range legacy {
 		if _, ok := out[name]; !ok {
 			if _, hasInit := inits[name]; !hasInit {
+				if _, blocked := run.blocked(name); blocked {
+					continue
+				}
 				out[name] = jsvalue.FromLegacy(s)
 			}
 		}

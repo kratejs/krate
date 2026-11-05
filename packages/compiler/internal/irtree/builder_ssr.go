@@ -21,7 +21,7 @@ import (
 // merge). Later declarations may reference earlier ones (const c = a + b).
 func collectModuleConsts(prog *ast.Program) map[string]string {
 	out := make(map[string]string)
-	for name, v := range typedModuleConsts(collectModuleConstInits(prog), nil) {
+	for name, v := range typedModuleConsts(collectModuleConstInits(prog), nil, nil) {
 		if s := legacyConstString(nil, v); s != "" {
 			out[name] = s
 		}

@@ -30,6 +30,7 @@ type SSREval struct {
 	// of module, so a component never sees its caller's locals.
 	module      *jsvalue.Scope
 	moduleInits map[string]ast.Expr
+	moduleRun   *irtree.ModuleRun
 	evaluating  map[string]bool
 	// frame is the scope of the root component being evaluated.
 	frame *jsvalue.Scope
@@ -292,6 +293,13 @@ func (e *SSREval) SetModuleConsts(inits map[string]ast.Expr) {
 	e.moduleInits = inits
 }
 
+// SetModuleRun installs what module-level statements that change bindings left
+// behind: the final value of a binding they change replaces its initializer,
+// and a binding they leave unknown stays unknown.
+func (e *SSREval) SetModuleRun(run *irtree.ModuleRun) {
+	e.moduleRun = run
+}
+
 // SetEvalJS installs the expression-evaluation hook backed by the embedded
 // QuickJS runtime. See the evalJS field docs.
 func (e *SSREval) SetEvalJS(fn func(code string) (string, error)) {
@@ -394,6 +402,13 @@ func (e *SSREval) reportUnknown(expr ast.Expr, v jsvalue.Value, context string) 
 			"this component is rendered at build time; rewrite the expression with supported constructs or move it into a component with client state")
 		return
 	}
+	if strings.HasPrefix(v.Reason(), irtree.ModuleBlockedPrefix) {
+		e.errs = append(e.errs, diag.Diagnostic{Line: pos.Line, Col: pos.Col,
+			Message: "cannot evaluate `" + src + "` at build time: " + v.Reason() + " (in " + context + ")",
+			Hint:    "top-level code changes this value in a way the build cannot run, and this component is rendered at build time; make the code plain (an assignment, a loop or a call to a function of this module), compute the value in one expression, or render it in a component with client state",
+			Code:    diag.CodeModuleValueUnknown})
+		return
+	}
 	e.addDiag(pos, "cannot evaluate `"+src+"` at build time: "+v.Reason()+" (in "+context+")",
 		"signal-less components are rendered to static HTML at build time, so every value they render must be a prop, a local, or a module constant")
 }
@@ -449,6 +464,20 @@ func (e *SSREval) renderValue(expr ast.Expr, v jsvalue.Value) string {
 func (e *SSREval) resolveIdent(name string) (jsvalue.Value, bool) {
 	if v, ok := e.module.Lookup(name); ok {
 		return v, true
+	}
+	if run := e.moduleRun; run != nil {
+		if reason, ok := run.Blocked[name]; ok {
+			return jsvalue.Dynamic(irtree.ModuleBlockedPrefix + reason), true
+		}
+		if v, ok := run.Values[name]; ok {
+			// Each evaluator gets its own copy: components render in parallel
+			// and one that changes a module array must not change another's.
+			if lit := jsvalue.ToAST(v); lit != nil {
+				v = e.in.EvalIn(jsvalue.NewScope(nil), lit)
+			}
+			e.module.Define(name, v)
+			return v, true
+		}
 	}
 	if init, ok := e.moduleInits[name]; ok && init != nil && !e.evaluating[name] {
 		e.evaluating[name] = true

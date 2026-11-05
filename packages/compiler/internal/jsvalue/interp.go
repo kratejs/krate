@@ -98,6 +98,12 @@ type Interp struct {
 	randSeq map[ast.Pos]int
 	// callPos is the position of the call being dispatched, for Math.random().
 	callPos ast.Pos
+	// StrictStatements makes an expression statement whose value is unknown
+	// fail the enclosing block. Without it such a statement is skipped, which
+	// is right when only a result is wanted but not when the statements are
+	// run for their effects (a call that pushes an unknown value onto a list
+	// has done nothing the build can see).
+	StrictStatements bool
 }
 
 // New returns an interpreter with a fresh root scope.
@@ -943,6 +949,18 @@ func (in *Interp) exec(stmts []ast.Stmt) (Value, control) {
 	return Undefined(), ctlNormal
 }
 
+// ExecStmt runs one statement in the current scope, for its effects on the
+// bindings it can see. failed reports that the statement could not be run in
+// full (an unsupported construct, an unknown value it needed, a throw), so
+// the effects it had are not to be trusted.
+func (in *Interp) ExecStmt(stmt ast.Stmt) (v Value, failed bool) {
+	if in.Scope == nil {
+		in.Scope = NewScope(nil)
+	}
+	v, ctl := in.execStmt(stmt)
+	return v, ctl == ctlError
+}
+
 func (in *Interp) execStmt(stmt ast.Stmt) (Value, control) {
 	switch s := stmt.(type) {
 	case *ast.ReturnStmt:
@@ -952,7 +970,7 @@ func (in *Interp) execStmt(stmt ast.Stmt) (Value, control) {
 		return in.Eval(s.Value), ctlReturn
 	case *ast.ExprStmt:
 		v := in.Eval(s.Expression)
-		if v.IsUnsupported() {
+		if v.IsUnsupported() || (in.StrictStatements && v.IsUnknown()) {
 			return v, ctlError
 		}
 		return Undefined(), ctlNormal

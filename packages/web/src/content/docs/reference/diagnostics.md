@@ -592,6 +592,12 @@ Client code and statically rendered pages cannot read process.env or import.meta
 
 `<ui.Button>` names the export `Button` of a namespace import (`import * as ui from "./ui"`), of a re-exported namespace (`export * as ui from "./ui"`), or a member of an object. The build follows namespace imports through barrel files (`export { Button } from "./Button"`, `export * from "./Button"`) to the function component the member names. This tag matched none: the module exports no such member, the member is not a function component (a string, a class that is not lowered, a value built at run time), or the object it reads from is not a namespace of project modules. Rendering nothing would drop the element and its children, so the build fails. Check the member's spelling and export, import the component by name, or declare it as a function.
 
+### KR8322
+
+**Module value changed by top-level code cannot be evaluated at build time**
+
+A module-level value that later top-level code changes (`const items = []` followed by `for (...) items.push(x)`, an assignment, a property write, `Object.assign`, or a call to a function of the module that does one of these) is evaluated at build time by running that code in order. When a statement cannot be run there (it reads the browser, the clock, an imported function or anything else unknown), the value stays unknown rather than keeping its initial value. A component that hydrates reads it at run time. A component rendered at build time has no run time, so the build fails. Make the top-level code plain, compute the value in one expression, or move the reading component to one with client state.
+
 ### KR8601
 
 **Unsupported page segment export value**

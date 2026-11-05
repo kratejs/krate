@@ -17,6 +17,9 @@ const (
 	// CodeUnresolvedMemberTag: a member tag (<ns.Button>) that names no
 	// component the build can find.
 	CodeUnresolvedMemberTag Code = "KR8321"
+	// CodeModuleValueUnknown: a module value that top-level code changes in a
+	// way the build cannot run, read by a component rendered at build time.
+	CodeModuleValueUnknown Code = "KR8322"
 )
 
 func init() {
@@ -75,6 +78,18 @@ func init() {
 				"is not lowered, a value built at run time), or the object it reads from is not a namespace of " +
 				"project modules. Rendering nothing would drop the element and its children, so the build fails. " +
 				"Check the member's spelling and export, import the component by name, or declare it as a function.",
+		},
+		CodeInfo{
+			Code:  CodeModuleValueUnknown,
+			Title: "Module value changed by top-level code cannot be evaluated at build time",
+			Explanation: "A module-level value that later top-level code changes (`const items = []` followed by " +
+				"`for (...) items.push(x)`, an assignment, a property write, `Object.assign`, or a call to a " +
+				"function of the module that does one of these) is evaluated at build time by running that code in " +
+				"order. When a statement cannot be run there (it reads the browser, the clock, an imported function " +
+				"or anything else unknown), the value stays unknown rather than keeping its initial value. A " +
+				"component that hydrates reads it at run time. A component rendered at build time has no run time, " +
+				"so the build fails. Make the top-level code plain, compute the value in one expression, or move " +
+				"the reading component to one with client state.",
 		},
 	)
 }

@@ -85,7 +85,7 @@ func TestTypedModuleConsts(t *testing.T) {
 		"FN":  mustExpr(t, "(x) => x"),
 		"DYN": mustExpr(t, "fetchSomething()"),
 	}
-	got := typedModuleConsts(inits, nil)
+	got := typedModuleConsts(inits, nil, nil)
 	if v := got["B"]; v.Kind() != jsvalue.KindNumber || v.NumberValue() != 6 {
 		t.Errorf("B = %#v", v)
 	}

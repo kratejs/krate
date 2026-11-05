@@ -15,7 +15,7 @@ import (
 // entry page and its imported modules. Imported modules are visited first so the
 // entry module wins on name collisions, and every module's
 // `export { local as remote }` aliases are added (covering re-export barrels).
-func mergeModuleConstants(entry *ast.Program, extra []annotator.ModuleSource) (map[string]string, map[string]ast.Expr) {
+func mergeModuleConstants(entry *ast.Program, extra []annotator.ModuleSource) (map[string]string, map[string]ast.Expr, *irtree.ModuleRun) {
 	consts := make(map[string]string)
 	inits := make(map[string]ast.Expr)
 	add := func(prog *ast.Program) {
@@ -59,10 +59,20 @@ func mergeModuleConstants(entry *ast.Program, extra []annotator.ModuleSource) (m
 	}
 	add(entry)
 
+	// Top-level statements of the imported modules that change their bindings
+	// (the entry module's are run by the IR builder, which decides first).
+	var runs []*irtree.ModuleRun
+	for _, m := range extra {
+		if !isExternalModulePath(m.Path) {
+			runs = append(runs, irtree.RunModule(m.Program, inits))
+		}
+	}
+	run := irtree.MergeModuleRuns(runs...)
+
 	// Entry import aliases (`import { upper as shout }`) bind the local name to
 	// the exported constant's value.
 	if entry == nil {
-		return consts, inits
+		return consts, inits, run
 	}
 	for _, stmt := range entry.Body {
 		imp, ok := stmt.(*ast.ImportStmt)
@@ -85,7 +95,7 @@ func mergeModuleConstants(entry *ast.Program, extra []annotator.ModuleSource) (m
 			}
 		}
 	}
-	return consts, inits
+	return consts, inits, run
 }
 
 // isExternalModulePath reports whether a module is a compiled dependency under
@@ -100,7 +110,7 @@ func isExternalModulePath(p string) bool {
 // constants and classes, namespace-merged vars, the imported modules' top-level
 // statements, and `import * as ns` objects.
 func applyModuleBindings(opts *irtree.BuildOptions, entryPath string, entry *ast.Program, extra []annotator.ModuleSource) {
-	opts.ModuleConsts, opts.ModuleConstInits = mergeModuleConstants(entry, extra)
+	opts.ModuleConsts, opts.ModuleConstInits, opts.ModuleRun = mergeModuleConstants(entry, extra)
 	declOnly := map[string]bool{}
 	var stmts []ast.Stmt
 	for i := len(extra) - 1; i >= 0; i-- {

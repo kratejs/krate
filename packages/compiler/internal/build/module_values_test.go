@@ -36,7 +36,7 @@ export default function Home() {
       <p id="e">{Color[1]}</p>
       <p id="f">{Util.twice(4)}</p>
       <p id="g">{ns.add(1, 2)}</p>
-      <button onClick={() => setN(n() + add(1, 1))}>{n()}</button>
+      <button onClick={() => setN(n() + add(1, 1) + Util.twice(1))}>{n()}</button>
     </div>
   );
 }`,
@@ -51,6 +51,11 @@ export default function Home() {
 	}
 	if !strings.Contains(html, `<p id="b">Krate</p>`) {
 		t.Errorf("object member did not fold:\n%s", html)
+	}
+	// The namespace's initializer statement runs at build time, so the call
+	// folds too; the handler still needs the statement at run time.
+	if !strings.Contains(html, `<p id="f">8</p>`) {
+		t.Errorf("namespace member call did not fold:\n%s", html)
 	}
 	// Everything else is computed on the client, so each binding must be
 	// declared in the hydration scope.

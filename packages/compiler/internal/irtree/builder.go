@@ -81,6 +81,10 @@ type BuildOptions struct {
 	// component expressions. Entry-module values take precedence on collision.
 	ModuleConsts     map[string]string
 	ModuleConstInits map[string]ast.Expr
+	// ModuleRun holds what the imported modules' top-level code left behind:
+	// the final values of bindings it changes, and the bindings it leaves
+	// unknown (see modulerun.go).
+	ModuleRun *ModuleRun
 	// ModuleDeclOnly names imported `var X;` bindings that only a module
 	// statement initializes (a lowered TS namespace). ModuleNamespaces maps a
 	// namespace-import binding (`import * as ns`) to its exports (name ->
@@ -139,7 +143,7 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 	if codeTheme == "" {
 		codeTheme = syntaxhighlight.DefaultTheme
 	}
-	moduleConsts, moduleConstInits := mergedModuleConstants(prog, opts)
+	moduleConsts, moduleConstInits, moduleRun := mergedModuleConstants(prog, opts)
 	b := &builder{
 		functions:        normalizeComponentFns(ann.Functions),
 		ann:              ann,
@@ -148,7 +152,8 @@ func newBuilder(prog *ast.Program, ann *Annotations, opts BuildOptions) *builder
 		elementCounts:    make(map[string]int),
 		slotIDMap:        make(map[string]SlotID),
 		slotCounts:       make(map[string]int),
-		moduleConsts:     typedModuleConsts(moduleConstInits, moduleConsts),
+		moduleConsts:     typedModuleConsts(moduleConstInits, moduleConsts, moduleRun),
+		moduleRun:        moduleRun,
 		moduleConstInits: moduleConstInits,
 		moduleStmts:      append(append([]ast.Stmt(nil), opts.ModuleStmts...), collectModuleStmts(prog)...),
 		moduleLets:       collectModuleLets(prog),
@@ -234,6 +239,7 @@ func (b *builder) finishTree(root *ComponentNode) *ComponentTree {
 		CVAFactories:     b.cvaFactories,
 		ContextDefaults:  b.contextDefaults,
 		ModuleConstInits: b.moduleConstInits,
+		ModuleRun:        b.moduleRun,
 		SharedModuleVars: b.sharedModuleVars,
 		CSSSignalsCSS:    cssSignals,
 		HasCSSSignals:    len(b.cssCollected) > 0 || len(b.cssConditions) > 0,
@@ -391,6 +397,7 @@ type builder struct {
 	// on exit, so siblings after a child component keep unique IDs.
 	elementCounts    map[string]int
 	moduleConsts     valueMap            // module-level const values (name -> folded value)
+	moduleRun        *ModuleRun          // outcome of module-level statements that change bindings
 	routeHooks       valueMap            // router hooks folded to the page's route (see routehooks.go)
 	moduleConstInits map[string]ast.Expr // module-level const initializers (name -> expr)
 	moduleStmts      []ast.Stmt          // entry module top-level statements that run code
@@ -656,7 +663,7 @@ func CollectModuleConstants(prog *ast.Program) (map[string]string, map[string]as
 
 // mergedModuleConstants combines the entry module's constants with those
 // supplied through BuildOptions. Entry-module values win on collision.
-func mergedModuleConstants(prog *ast.Program, opts BuildOptions) (map[string]string, map[string]ast.Expr) {
+func mergedModuleConstants(prog *ast.Program, opts BuildOptions) (map[string]string, map[string]ast.Expr, *ModuleRun) {
 	consts := collectModuleConsts(prog)
 	inits := collectModuleConstInits(prog)
 	for k, v := range opts.ModuleConsts {
@@ -669,7 +676,9 @@ func mergedModuleConstants(prog *ast.Program, opts BuildOptions) (map[string]str
 			inits[k] = v
 		}
 	}
-	return consts, inits
+	// The entry module's own top-level code runs first, so it decides a name
+	// that both it and an imported module bind.
+	return consts, inits, MergeModuleRuns(RunModule(prog, inits), opts.ModuleRun)
 }
 
 // CollectModuleDeclOnly returns the module-level `var X;` bindings declared
