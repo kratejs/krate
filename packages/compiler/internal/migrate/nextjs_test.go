@@ -1419,3 +1419,140 @@ func TestPlanMarksExistingTargetsAsOverwrites(t *testing.T) {
 		t.Fatalf("apply without --force must refuse, got %v", err)
 	}
 }
+
+func TestNextConfigAsyncStaticRedirectsTranslate(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "next.config.js", `module.exports = {
+  reactStrictMode: true,
+  async redirects() {
+    return [{ source: "/old", destination: "/new", permanent: true }];
+  },
+  async headers() {
+    return [{ source: "/(.*)", headers: [{ key: "X-Frame-Options", value: "DENY" }] }];
+  },
+  rewrites: async () => [{ source: "/a", destination: "/b" }],
+};`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := findPlan(rep, "krate.config.ts")
+	if cfg == nil {
+		t.Fatal("config missing")
+	}
+	body := string(cfg.Content)
+	for _, want := range []string{`"source": "/old"`, `"destination": "/new"`, `X-Frame-Options`, `"source": "/a"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("config missing %q:\n%s", want, body)
+		}
+	}
+	if hasManual(rep, "next.config.js", "") {
+		t.Errorf("a static async config needs no manual work: %+v", rep.Manual)
+	}
+}
+
+func TestNextConfigComputedKeyDoesNotDropStaticKeys(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "next.config.js", `module.exports = {
+  basePath: "/docs",
+  images: { remotePatterns: [{ protocol: "https", hostname: "images.example.com" }] },
+  async redirects() {
+    const rules = await loadRules();
+    return rules;
+  },
+};`)
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := findPlan(rep, "krate.config.ts")
+	if cfg == nil {
+		t.Fatal("config missing")
+	}
+	body := string(cfg.Content)
+	for _, want := range []string{"/docs", "images.example.com"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("static key %q was dropped:\n%s", want, body)
+		}
+	}
+	if !hasManual(rep, "next.config.js", "redirects") || hasManual(rep, "next.config.js", "could not be proven static") {
+		t.Errorf("expected a manual item naming only redirects: %+v", rep.Manual)
+	}
+}
+
+func TestUpdatePackagePlanReportsItsChanges(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/page.tsx", `export default function Page() { return <h1>Home</h1>; }`)
+	writeNextFile(t, root, "package.json", `{
+  "scripts": {"dev": "next dev", "build": "next build", "test": "vitest"},
+  "dependencies": {"next": "15.0.0", "react": "19.0.0", "react-dom": "19.0.0"}
+}`)
+	rep, err := ScanNextWithOptions(root, ScanOptions{UpdatePackage: true, KrateVersion: "0.5.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg := findPlan(rep, "package.json")
+	if pkg == nil {
+		t.Fatal("package.json plan missing")
+	}
+	var got struct {
+		Dependencies map[string]string `json:"dependencies"`
+	}
+	if err := json.Unmarshal(pkg.Content, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Dependencies["@krate/core"] != "^0.5.0" || got.Dependencies["@krate/runtime"] != "^0.5.0" {
+		t.Errorf("@krate dependencies must follow the compiler version: %+v", got.Dependencies)
+	}
+	all := strings.Join(pkg.Rewrites, "\n")
+	for _, want := range []string{`scripts.dev: "next dev" -> "krate dev"`, `scripts.build: "next build" -> "krate build"`, "preact@^10.20.0", "@krate/core@^0.5.0", "dependencies kept: next, react, react-dom"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("rewrites miss %q:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "scripts.test") {
+		t.Errorf("an untouched script must not be reported:\n%s", all)
+	}
+
+	rep, err = ScanNextWithOptions(root, ScanOptions{UpdatePackage: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(findPlan(rep, "package.json").Content, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Dependencies["@krate/core"] != "latest" {
+		t.Errorf("an unknown compiler version falls back to latest: %+v", got.Dependencies)
+	}
+}
+
+func TestSegmentConfigExportsAreExplained(t *testing.T) {
+	root := t.TempDir()
+	writeNextFile(t, root, "app/layout.tsx", "export const revalidate = 30;\nexport default function Layout({ children }: any) { return <html><body>{children}</body></html>; }")
+	writeNextFile(t, root, "app/(marketing)/pricing/page.tsx", "export const revalidate = 60;\nexport default function Page() { return <h1>Pricing</h1>; }")
+	writeNextFile(t, root, "app/live/page.tsx", "export const dynamic = \"force-dynamic\";\nexport default function Page() { return <h1>Live</h1>; }")
+	writeNextFile(t, root, "app/blog/[slug]/page.tsx", "export const dynamicParams = false;\nexport function generateStaticParams() { return [{ slug: \"a\" }]; }\nexport default function Page() { return <h1>Post</h1>; }")
+	rep, err := ScanNext(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"src/pages/(marketing)/pricing.tsx": "renders as ISR, revalidated every 60s",
+		"src/pages/live.tsx":                "renders per request (SSR)",
+		"src/pages/blog/[slug].tsx":         "answer 404",
+	}
+	for target, text := range want {
+		f := findPlan(rep, target)
+		if f == nil {
+			t.Fatalf("%s missing", target)
+		}
+		if !strings.Contains(strings.Join(f.Rewrites, "\n"), text) {
+			t.Errorf("%s: rewrites %q lack %q", target, f.Rewrites, text)
+		}
+	}
+	if !hasManual(rep, "app/layout.tsx", "route segment config revalidate in a layout") {
+		t.Errorf("a layout segment export needs a manual item: %+v", rep.Manual)
+	}
+}
