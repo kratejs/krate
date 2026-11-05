@@ -12,6 +12,9 @@ const site = {
   social: [
     { icon: "lucide:github", url: "https://github.com/kratejs/krate", name: "GitHub" },
   ],
+  footerBrand: {
+    tagline: "A Go-native web framework: TSX in, static HTML and a small runtime out.",
+  },
   footerNote: "(c) 2026 kratejs",
   footerLicense: "Apache-2.0 - Built with Krate",
   footerColumns: [
@@ -64,7 +67,10 @@ export default function SiteLayout(props: { children: any }) {
       <SiteHeader site={site}>
         <a class="site-search" href="/docs/" aria-label="Search the documentation" aria-keyshortcuts="Control+K Meta+K">
           <span>Search</span>
-          <kbd>{"\u2318 K"}</kbd>
+          <kbd aria-hidden="true">
+            <span class="kbd-mac">{"\u2318"}</span>
+            <span class="kbd-other">Ctrl</span> K
+          </kbd>
         </a>
         <ThemeToggle />
       </SiteHeader>

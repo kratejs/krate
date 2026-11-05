@@ -108,3 +108,36 @@ func TestCustomRuleReadsAST(t *testing.T) {
 	}
 	t.Fatalf("expected custom/ast finding, got %+v", fs)
 }
+
+// The page reaches a custom rule as parsed JSON: awkward characters in the
+// HTML and the route must arrive unchanged, and the AST stays lazy.
+func TestCustomRulePageRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	rulePath := filepath.Join(root, "rules", "echo.ts")
+	if err := os.MkdirAll(filepath.Dir(rulePath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := `export default function check(page: any) {
+  if (page.html.indexOf("\"q\" \\ ' ' </script>") < 0) {
+    return [{ rule: "custom/echo", message: "html mangled: " + page.html.slice(0, 60), severity: "error" }];
+  }
+  return [];
+}
+`
+	if err := os.WriteFile(rulePath, []byte(src), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := DefaultConfig()
+	cfg.Root = root
+	cfg.Custom = []string{rulePath}
+	html := doc("<h1>Echo</h1><p>\"q\" \\ ' ' </script> ${x}</p>", "")
+	fs, err := Run(cfg, []Page{{Route: "/echo", RelSource: "src/pages/echo.tsx", HTML: html}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, f := range fs {
+		if f.Rule == "custom/echo" {
+			t.Fatalf("rule saw a different page: %s", f.Message)
+		}
+	}
+}

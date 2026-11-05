@@ -19,6 +19,35 @@ import (
 // module's namespace.
 const customRuleGlobal = "__krateCheckRule"
 
+// customRuleDriverJS defines __krateCheck(global, pageJSON, astJSON, metaJSON),
+// evaluated once per VM. The page, its AST and the metadata arrive as JSON
+// strings and are parsed with JSON.parse, so a call no longer makes QuickJS
+// lex and compile the page HTML as JavaScript source. The AST is parsed on
+// first access only: most rules never read it.
+const customRuleDriverJS = `
+globalThis.__krateCheck = function(g, pageJSON, astJSON, metaJSON) {
+  try {
+    if (!(g in globalThis)) throw new ReferenceError(g + ' is not defined');
+    var mod = globalThis[g] || {};
+    var fn = (mod.default && (typeof mod.default === 'function' ? mod.default : mod.default.check)) || mod.check;
+    if (typeof fn !== 'function') return JSON.stringify({ skip: true });
+    var page = JSON.parse(pageJSON);
+    if (astJSON !== 'null') {
+      Object.defineProperty(page, 'ast', { configurable: true, enumerable: true, get: function() {
+        var v = JSON.parse(JSON.parse(astJSON));
+        Object.defineProperty(page, 'ast', { value: v, configurable: true, enumerable: true, writable: true });
+        return v;
+      } });
+    }
+    var out = fn(page, { root: JSON.parse(metaJSON).root });
+    if (out && typeof out.then === 'function') return JSON.stringify({ error: 'async check rules are not supported' });
+    return JSON.stringify({ findings: out || [] });
+  } catch (e) {
+    return JSON.stringify({ error: (e && e.message) || String(e) });
+  }
+};
+`
+
 // customBundleCache memoizes the esbuild-bundled IIFE for each custom rule
 // module path (bundling happens once per file).
 var customBundleCache sync.Map // absPath -> string or error
@@ -45,7 +74,15 @@ func acquireCheckVM() (*jsruntime.Runtime, error) {
 		return rt, nil
 	default:
 	}
-	return jsruntime.New()
+	rt, err := jsruntime.New()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := rt.Execute(customRuleDriverJS); err != nil {
+		_ = rt.Close()
+		return nil, fmt.Errorf("installing check rule driver: %w", err)
+	}
+	return rt, nil
 }
 
 func releaseCheckVM(rt *jsruntime.Runtime, healthy bool) {
@@ -173,7 +210,7 @@ func runCustomRule(rt *jsruntime.Runtime, mod, bundle string, cfg Config, p *Pag
 		return nil, fmt.Errorf("loading rule bundle: %w", err)
 	}
 
-	pageJSON, astSrc, err := marshalCheckPage(p)
+	pageJSON, astJSON, err := marshalCheckPage(p)
 	if err != nil {
 		return nil, err
 	}
@@ -185,33 +222,7 @@ func runCustomRule(rt *jsruntime.Runtime, mod, bundle string, cfg Config, p *Pag
 		return nil, err
 	}
 
-	call := fmt.Sprintf(`
-(function() {
-  try {
-    var mod = %[1]s || {};
-    var fn = (mod.default && (typeof mod.default === 'function' ? mod.default : mod.default.check)) || mod.check;
-    if (typeof fn !== 'function') return JSON.stringify({ skip: true });
-    var page = %[2]s;
-    var astSrc = %[4]s;
-    if (astSrc !== null) {
-      // Parsed on first access only: most rules never read the AST, and
-      // parsing it dominated rule time on large pages.
-      Object.defineProperty(page, 'ast', { configurable: true, enumerable: true, get: function() {
-        var v = JSON.parse(astSrc);
-        Object.defineProperty(page, 'ast', { value: v, configurable: true, enumerable: true, writable: true });
-        return v;
-      } });
-    }
-    var out = fn(page, { root: %[3]s.root });
-    if (out && typeof out.then === 'function') return JSON.stringify({ error: 'async check rules are not supported' });
-    return JSON.stringify({ findings: out || [] });
-  } catch (e) {
-    return JSON.stringify({ error: (e && e.message) || String(e) });
-  }
-})()
-`, customRuleGlobal, string(pageJSON), string(metaJSON), string(astSrc))
-
-	res, err := rt.Execute(call)
+	res, err := rt.Call("__krateCheck", customRuleGlobal, string(pageJSON), string(astJSON), string(metaJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +286,8 @@ func runCustomRule(rt *jsruntime.Runtime, mod, bundle string, cfg Config, p *Pag
 
 // marshalCheckPage serializes the page surface a custom rule sees. The AST is
 // the kind-tagged astjson document so rule authors get a stable shape; it is
-// returned separately as a JS string literal so the VM parses it lazily.
+// returned separately as a JSON string (a quoted copy of the compact AST) so
+// the VM parses it lazily.
 func marshalCheckPage(p *Page) (page, astSrc []byte, err error) {
 	page, err = json.Marshal(map[string]any{
 		"route":          p.Route,
@@ -300,7 +312,6 @@ func marshalCheckPage(p *Page) (page, astSrc []byte, err error) {
 	if err := json.Compact(&compact, enc); err != nil {
 		return nil, nil, err
 	}
-	// A JSON string literal is also a valid JS string literal.
 	astSrc, err = json.Marshal(compact.String())
 	if err != nil {
 		return nil, nil, err

@@ -1,7 +1,7 @@
 ---
 title: MCP Server (Agent-Native)
 order: 16
-description: Expose the Krate compiler to AI agents over the Model Context Protocol with `krate mcp`.
+description: Expose the Krate compiler to AI agents over the Model Context Protocol with krate mcp.
 sidebar:
   label: MCP Server
   order: 14

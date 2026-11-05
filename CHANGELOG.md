@@ -183,6 +183,27 @@ detailed changelog. This file records the release train at a glance.
   had no default export.
 - Islands now compile project modules with Preact's JSX runtime even when
   `tsconfig.json` sets `jsxImportSource` to `@krate/runtime`.
+- A docs theme can set `titleSlot: true` in its `defineDocsTheme` descriptor to
+  receive the page's leading `<h1>` as `titleHTML`, removed from the content, so
+  the description can sit below the title. Both built-in themes do; themes
+  without the flag are unchanged.
+- `@krate/base-docs-theme` site shell: the nav link for the current page gets
+  `aria-current` (`page`, or `true` for a page below the link) and follows client-side
+  navigation; `SiteNavLink.match: "exact"` limits a link to its own page. The footer
+  takes a brand block (`footerBrand`: logo, name, tagline).
+- Search shortcut labels name the platform's modifier (`Ctrl K`, or the command key
+  on Apple devices) instead of always printing the command-key glyph, which many
+  fonts lack. `ThemePrePaint` sets `data-platform` on `<html>`.
+- The docs table of contents indicator measures layout once and draws when the page
+  is idle instead of on every scroll frame and during hydration.
+- Static pages no longer load the shared runtime chunk when other pages of the
+  site have islands (26.1 KB gzip, 17.8 KB with `spa: false`, per static page).
+  A site with no islands already shipped none.
+- JS plugin hooks and custom check rules are much cheaper on large pages: the
+  page, AST and hook context were embedded in the call script as JavaScript
+  source and compiled by QuickJS on every call. They are passed as JSON, and only
+  when the plugin implements the hook. `examples/` builds in about 6 s cold
+  (was about 12 s) on a loaded machine.
 - Tier decorators: `@server`, `@static`, `@runtime` and `@client` can go directly
   on a function, class or const. On a file's default export or only exported
   component they classify the whole file, like a `// @server` comment; elsewhere

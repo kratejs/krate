@@ -310,6 +310,15 @@ video {
     transform: scaleX(1);
 }
 
+/* Current page (aria-current="page") or the section it is in ("true"). */
+.site-nav a[aria-current] {
+    color: var(--color-fg);
+}
+
+.site-nav a[aria-current]::after {
+    transform: scaleX(1);
+}
+
 /* ---- Header actions (social + theme toggle) ---- */
 .site-navbar-actions {
     display: flex;
@@ -967,6 +976,37 @@ video {
     font-size: 0.9rem;
 }
 
+.site-footer-top.has-brand {
+    display: grid;
+    grid-template-columns: minmax(12rem, 17rem) minmax(0, 1fr);
+    gap: 2.5rem 4rem;
+    align-items: start;
+}
+
+/* Beside the brand block the columns share what is left, so three fit a row. */
+.site-footer-top.has-brand .site-footer-columns {
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 2rem;
+}
+
+.site-footer-brand-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    color: var(--color-fg);
+    font-weight: 700;
+    font-size: 1.05rem;
+    letter-spacing: -0.01em;
+}
+
+.site-footer-tagline {
+    margin: 0.85rem 0 0;
+    max-width: 17rem;
+    color: var(--color-muted);
+    font-size: 0.9rem;
+    line-height: 1.55;
+}
+
 .site-footer-columns {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(10rem, 14rem));
@@ -1311,6 +1351,10 @@ video {
 }
 
 @media (max-width: 760px) {
+    .site-footer-top.has-brand {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
     /* Wrap the header instead of letting nav + actions overflow: brand and
        actions share the first row, links flow onto their own row. */
     .site-navbar {
@@ -1803,6 +1847,21 @@ video {
     border: 0;
     background: transparent;
     color: var(--color-muted);
+}
+
+/* The shortcut names the platform's modifier: Cmd on Apple devices, Ctrl
+   elsewhere. ThemePrePaint sets data-platform before paint; with no script the
+   label reads Ctrl. */
+.site-search .kbd-mac {
+    display: none;
+}
+
+:root[data-platform="mac"] .site-search .kbd-mac {
+    display: inline;
+}
+
+:root[data-platform="mac"] .site-search .kbd-other {
+    display: none;
 }
 
 /* Bundled variable fonts (also preloaded by the site layout). */

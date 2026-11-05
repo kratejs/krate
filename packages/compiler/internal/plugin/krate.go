@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -23,6 +24,11 @@ type krateCapabilities struct {
 	Version  string
 	Config   interface{}
 
+	// hookName and hookCtx are serialized on demand by _krate_hookInput, so a
+	// plugin that does not implement the hook never pays for the encoding.
+	hookName string
+	hookCtx  interface{}
+
 	mu       sync.Mutex
 	files    []fileEntry
 	headHTML []string
@@ -42,6 +48,8 @@ func newKrateCapabilities(root, outDir string, env CommunityEnv, hookName string
 		DevMode:  env.DevMode,
 		Pages:    pages,
 		Version:  version.Value, Config: env.Config,
+		hookName: hookName,
+		hookCtx:  hookCtx,
 	}
 }
 
@@ -101,6 +109,36 @@ func registerKrateHostFuncs(vm *pluginVM) error {
 			return nil, fmt.Errorf("krate capability used outside a hook invocation")
 		}
 		return c, nil
+	}
+
+	// _krate_hookInput returns the hook context and the krate metadata as one
+	// JSON document. The invocation script calls it only once the plugin is
+	// known to implement the hook, then parses it with JSON.parse: embedding
+	// the (page-sized, for AfterParse an entire AST) context in the script
+	// source made QuickJS lex and compile it as JavaScript on every call.
+	if err := rt.RegisterFunc("_krate_hookInput", func(args []any) (any, error) {
+		cap, err := currentCap()
+		if err != nil {
+			return nil, err
+		}
+		ctxJSON, err := marshalHookContext(cap.hookName, cap.hookCtx)
+		if err != nil {
+			return nil, fmt.Errorf("serializing hook context: %w", err)
+		}
+		krateJSON, err := json.Marshal(cap.metadata())
+		if err != nil {
+			return nil, fmt.Errorf("serializing krate metadata: %w", err)
+		}
+		var sb strings.Builder
+		sb.Grow(len(ctxJSON) + len(krateJSON) + 20)
+		sb.WriteString(`{"ctx":`)
+		sb.Write(ctxJSON)
+		sb.WriteString(`,"krate":`)
+		sb.Write(krateJSON)
+		sb.WriteString(`}`)
+		return sb.String(), nil
+	}); err != nil {
+		return err
 	}
 
 	if err := rt.RegisterFunc("_krate_resolveFile", func(args []any) (any, error) {

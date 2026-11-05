@@ -91,7 +91,10 @@ func (b *Builder) checkPages(results []*PageResult, runtimeJSFile string) []chec
 			continue
 		}
 		hydrationBytes := len(r.HydrationJS)
-		jsBytes := runtimeBytes + hydrationBytes
+		jsBytes := hydrationBytes
+		if pageNeedsRuntime(r) {
+			jsBytes += runtimeBytes
+		}
 		pages = append(pages, check.Page{
 			Route:          routeFromOutName(r.OutName),
 			RelSource:      r.SourcePath,
@@ -204,8 +207,12 @@ func (b *Builder) loadBuiltPages() ([]check.Page, error) {
 			return nil
 		}
 		hydrationBytes := pageJSBytes(filepath.Dir(path))
-		jsBytes := runtimeBytes + hydrationBytes
+		jsBytes := hydrationBytes
 		html := string(data)
+		// A page that does not link the runtime chunk does not load it.
+		if rt := manifest.runtimeJS(); rt != "" && strings.Contains(html, rt) {
+			jsBytes += runtimeBytes
+		}
 		pages = append(pages, check.Page{
 			Route:          route,
 			RelSource:      manifest.sourceFor(route),
