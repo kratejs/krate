@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/kratejs/krate/packages/compiler/internal/pluginapi"
 	"io/fs"
+	"math"
 	"net/url"
 	"path/filepath"
 	"strconv"
@@ -275,7 +276,7 @@ func (l *imageLowerer) intProp(attr *ast.JSXAttr) (int, bool) {
 		}
 		return 0, false
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(val))
+	n, err := parsePixels(val)
 	if err != nil || n < 0 {
 		l.errAt(attr.Position, diag.CodeImageDynamicProp,
 			fmt.Sprintf("<Image %s=%q> is not a whole number of pixels", attr.Name, val),
@@ -283,6 +284,21 @@ func (l *imageLowerer) intProp(attr *ast.JSXAttr) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// parsePixels parses a whole number of pixels. Literal text may be in
+// exponent form (the parser normalises 1000 to "1e3"), so integral floats are
+// accepted as well.
+func parsePixels(val string) (int, error) {
+	val = strings.TrimSpace(val)
+	if n, err := strconv.Atoi(val); err == nil {
+		return n, nil
+	}
+	f, err := strconv.ParseFloat(val, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) || f > 1<<24 || f < -(1<<24) {
+		return 0, fmt.Errorf("not a whole number: %q", val)
+	}
+	return int(f), nil
 }
 
 // lower compiles one <Image> into <picture>/<img>. It returns nil when the

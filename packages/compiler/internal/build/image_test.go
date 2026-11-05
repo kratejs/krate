@@ -184,3 +184,32 @@ func parseTestProgram(t *testing.T, src string) *ast.Program {
 	}
 	return prog
 }
+
+func TestImageAcceptsExponentFormPixelCounts(t *testing.T) {
+	for _, w := range []string{"1000", "2000", "10000", "3000"} {
+		html, _, err := buildImagePage(t, `export default function P() {
+  return <Image src="/small.png" alt="a" width={`+w+`} />;
+}
+`, nil)
+		if err != nil {
+			t.Fatalf("width={%s}: %v", w, err)
+		}
+		if !strings.Contains(html, "<img") {
+			t.Errorf("width={%s}: no <img> rendered:\n%s", w, html)
+		}
+	}
+}
+
+func TestParsePixels(t *testing.T) {
+	ok := map[string]int{"640": 640, "1e3": 1000, "2e3": 2000, "1e4": 10000, " 12 ": 12, "1.2e3": 1200, "0": 0}
+	for in, want := range ok {
+		if got, err := parsePixels(in); err != nil || got != want {
+			t.Errorf("parsePixels(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"1.5", "abc", "", "1e99", "NaN", "Inf", "50%"} {
+		if _, err := parsePixels(in); err == nil {
+			t.Errorf("parsePixels(%q) should fail", in)
+		}
+	}
+}
