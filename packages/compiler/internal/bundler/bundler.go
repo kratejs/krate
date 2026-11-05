@@ -123,6 +123,25 @@ type Bundler struct {
 
 	// twImports controls how `@import "tailwindcss"` is treated in CSS.
 	twImports css.TailwindImportMode
+
+	// mdCfg is the markdown configuration for .md/.mdx modules. The zero
+	// value (mdSet false) means markdown.DefaultConfig().
+	mdCfg markdown.Config
+	mdSet bool
+}
+
+// SetMarkdownConfig sets the markdown options used when compiling .md and
+// .mdx modules (page-level and imported).
+func (b *Bundler) SetMarkdownConfig(cfg markdown.Config) {
+	b.mdCfg = cfg
+	b.mdSet = true
+}
+
+func (b *Bundler) markdownConfig() markdown.Config {
+	if b.mdSet {
+		return b.mdCfg
+	}
+	return markdown.DefaultConfig()
 }
 
 // SetDevMode picks the development or production package.json export
@@ -595,7 +614,7 @@ func (b *Bundler) resolveMarkdownModule(path, abs string, mtime time.Time, size 
 		return fmt.Errorf("reading %s: %w", path, err)
 	}
 	src := string(data)
-	mcfg := markdown.DefaultConfig()
+	mcfg := b.markdownConfig()
 	compiled := markdown.Compile(src, mcfg, markdown.Options{MDX: strings.HasSuffix(abs, ".mdx")})
 	for _, d := range compiled.Diags {
 		if !d.Warning {

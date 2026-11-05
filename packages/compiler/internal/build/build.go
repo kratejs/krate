@@ -1929,6 +1929,7 @@ func (b *Builder) newBundler() *bundler.Bundler {
 	bnd.SetModuleCache(b.moduleCache)
 	bnd.SetDevMode(b.DevMode)
 	bnd.SetTailwindImports(b.tailwindImportMode())
+	bnd.SetMarkdownConfig(b.Cfg.Markdown)
 	return bnd
 }
 
