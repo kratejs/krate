@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,6 +21,10 @@ import (
 func dockerRedis(t *testing.T) (url, name string, stop, start func()) {
 	t.Helper()
 	if _, err := exec.LookPath("docker"); err != nil {
+		// Hosted macOS and Windows runners have no Docker; Linux CI runs this.
+		if runtime.GOOS != "linux" {
+			t.Skip("docker is not installed")
+		}
 		requireE2E(t, "docker is not installed")
 	}
 	if err := exec.Command("docker", "info").Run(); err != nil {
