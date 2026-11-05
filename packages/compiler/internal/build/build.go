@@ -390,6 +390,18 @@ func (b *Builder) ensureTransformed(prog *ast.Program, file string) error {
 	return nil
 }
 
+// withoutTemplateSlotWarnings drops KR8011 from the template pass of a dynamic
+// route: `{params.id}` has no value there, but each generated page does.
+func withoutTemplateSlotWarnings(warnings []diag.Diagnostic) []diag.Diagnostic {
+	var out []diag.Diagnostic
+	for _, w := range warnings {
+		if w.Code != diag.CodeSlotUnresolved {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
 // diagList is a set of located diagnostics returned as one build error.
 type diagList struct{ errs []error }
 
@@ -2288,8 +2300,12 @@ func (b *Builder) buildPageOnce(page string) (*PageResult, string, error) {
 			return t, em.Emit(t)
 		})
 		renderer.EmitMeta(tree, emitResult)
-		printTreeWarnings(os.Stderr, emitResult.Warnings)
-		pageWarnings = append(pageWarnings, emitResult.Warnings...)
+		warnings := emitResult.Warnings
+		if isDynRoute {
+			warnings = withoutTemplateSlotWarnings(warnings)
+		}
+		printTreeWarnings(os.Stderr, warnings)
+		pageWarnings = append(pageWarnings, warnings...)
 		// Render imported Go components (server tier, slot path + SSREval'd) via the
 		// Go host in one batch, then inline their HTML at the emitted markers.
 		if len(emitResult.GoRenders) > 0 {

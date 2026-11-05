@@ -487,7 +487,7 @@ func (b *builder) registerChildProps(childNode *ComponentNode, childFn *ast.FnDe
 		// Replayed locals derived from live props (`var hits=...props.query`).
 		(childFn != nil && plainPropsParamName(childFn) != "" && hydrationReadsAny(childNode, []string{plainPropsParamName(childFn)})) ||
 		// Replayed body statements (a render-time throw guard) read props too.
-		len(childNode.ExtraVars) > 0 ||
+		len(childNode.ExtraVars) > 0 || len(childNode.PreSignalVars) > 0 ||
 		// Bindings of getter-registered props (`{props.title}`).
 		(childFn != nil && plainPropsParamName(childFn) != "" && slotsReadProps(childNode.Children, plainPropsParamName(childFn)))
 	if !hasHydration {

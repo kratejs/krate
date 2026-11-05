@@ -107,17 +107,9 @@ func resolveUtilityCalls(text, value string, theme TailwindTheme) (string, bool)
 func nextUtilityCall(text string) (int, string) {
 	best, bestName := -1, ""
 	for _, name := range []string{"--value", "--spacing", "--modifier"} {
-		for from := 0; ; {
-			i := strings.Index(text[from:], name+"(")
-			if i < 0 {
-				break
-			}
-			i += from
-			// `--spacing-4` or `var(--value-x)` are not calls: require "(".
-			if best < 0 || i < best {
-				best, bestName = i, name
-			}
-			break
+		// `--spacing-4` or `var(--value-x)` are not calls: require "(".
+		if i := strings.Index(text, name+"("); i >= 0 && (best < 0 || i < best) {
+			best, bestName = i, name
 		}
 	}
 	return best, bestName

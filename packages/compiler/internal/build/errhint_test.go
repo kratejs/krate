@@ -63,3 +63,14 @@ func TestErrWithHint(t *testing.T) {
 		t.Errorf("plain error changed: %q", got)
 	}
 }
+
+func TestDynamicRouteTemplateDoesNotReportSlots(t *testing.T) {
+	warnings := []diag.Diagnostic{
+		{Message: "slot", Code: diag.CodeSlotUnresolved},
+		{Message: "other", Code: diag.CodeTierDecorator},
+	}
+	got := withoutTemplateSlotWarnings(warnings)
+	if len(got) != 1 || got[0].Message != "other" {
+		t.Errorf("got %+v", got)
+	}
+}
