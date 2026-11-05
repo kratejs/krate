@@ -41,7 +41,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section class="features">
+      <section class="features bento">
         <h2 class="sr-only">Features</h2>
         <a class="feature-card" href="/docs/core-concepts/reactivity/">
           <h3>Signals, not React</h3>
@@ -116,13 +116,15 @@ export default function Home() {
       </section>
 
       <section class="cta-band">
-        <h2>Build something great.</h2>
-        <p>Install the CLI and scaffold a project in seconds.</p>
+        <div class="cta-copy">
+          <h2>Build something great.</h2>
+          <p>Install the CLI and scaffold a project in seconds.</p>
+          <a class="btn btn-primary" href="/docs/getting-started/">Get started</a>
+        </div>
         <Code lang="bash" showCopy>{`npm install -g @krate/core
 mkdir my-app && cd my-app
 krate init
 krate dev`}</Code>
-        <a class="btn btn-primary" href="/docs/getting-started/">Get started</a>
       </section>
     </>
   );

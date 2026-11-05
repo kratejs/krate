@@ -35,7 +35,7 @@ export default function BlogPost(props: PostProps) {
         <title>{post.data.title}</title>
         <meta name="description" content={post.data.description} />
       </Head>
-      <p>
+      <p class="prose-back">
         <a href="/blog/">&#8592; All posts</a>
       </p>
       <h1 class="section-title" style="text-align:left">
