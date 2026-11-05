@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
 )
 
 // Verbose logs which named env files were found/loaded. Values are never
@@ -26,6 +27,38 @@ var Verbose bool
 // consumers (plugin JS VMs, API route runtime, sidecars) that do not have
 // access to the Builder.
 var Current map[string]string
+
+// loadedMode is the mode of the most recent Load call.
+var loadedMode atomic.Value // string
+
+// ScriptEnv returns the environment an in-process JavaScript VM (krate.config.ts,
+// plugin hooks) sees as process.env: the shell environment overlaid with the
+// project's .env values (which never override the shell), plus NODE_ENV when
+// the shell does not set it: "development" in development mode, otherwise
+// "production".
+func ScriptEnv() map[string]string {
+	out := map[string]string{}
+	for _, kv := range os.Environ() {
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			out[kv[:i]] = kv[i+1:]
+		}
+	}
+	for k, v := range Current {
+		out[k] = v
+	}
+	if out["NODE_ENV"] == "" {
+		mode, _ := loadedMode.Load().(string)
+		if mode == "" {
+			mode = Mode("production")
+		}
+		if mode == "development" {
+			out["NODE_ENV"] = "development"
+		} else {
+			out["NODE_ENV"] = "production"
+		}
+	}
+	return out
+}
 
 // Mode resolves the environment mode: KRATE_ENV wins, then NODE_ENV, then the
 // command-specific default ("development" for dev, "production" otherwise).
@@ -42,6 +75,7 @@ func Mode(defaultMode string) string {
 // Load reads the project's `.env` files for the given mode and returns the
 // merged result. Shell environment variables are never overridden by files.
 func Load(root, mode string) (map[string]string, error) {
+	loadedMode.Store(mode)
 	merged := map[string]string{}
 	files := []string{
 		".env",
