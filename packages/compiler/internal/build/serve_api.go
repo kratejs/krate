@@ -451,7 +451,7 @@ func applyRewrite(r *http.Request, target string) {
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p
 	}
-	r.URL.Path = p
+	r.URL.Path = rewriteTargetPath(p)
 	r.URL.RawPath = ""
 	if q != "" {
 		r.URL.RawQuery = q

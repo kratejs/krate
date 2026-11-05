@@ -52,6 +52,7 @@ import {
   normalizeRoutePattern,
   requestRoute,
   rewriteDestination,
+  rewriteTargetPath,
   staticCacheControl,
 } from "./handler-routing.js";
 import {
@@ -516,7 +517,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       q = target.slice(qi + 1);
     }
     if (!p.startsWith("/")) p = "/" + p;
-    rs.path = p;
+    rs.path = rewriteTargetPath(p);
     if (q) rs.search = "?" + q;
   }
 
@@ -928,7 +929,7 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     for (const rw of cfg.rewrites) {
       if (matchRedirect(p, rw.source)) {
         const rewritten = rewriteDestination(p, rw.source, rw.destination);
-        rs.path = safeDecode(rewritten);
+        rs.path = rewriteTargetPath(safeDecode(rewritten));
         break;
       }
     }

@@ -103,6 +103,18 @@ export function isFileLikePath(p: string): boolean {
   return baseName(p).includes(".");
 }
 
+/**
+ * The internal path a rewrite serves. Page URLs are canonical with a trailing
+ * slash and the slashless spelling answers 301, so a rewrite to "/feedback" would
+ * change the visible URL; the canonical form keeps it invisible. API routes,
+ * internal paths and file-like paths are left alone.
+ */
+export function rewriteTargetPath(p: string): string {
+  if (p === "" || p === "/" || p.endsWith("/") || isFileLikePath(p)) return p;
+  if (p === "/api" || p.startsWith("/api/") || p.startsWith("/__krate/")) return p;
+  return p + "/";
+}
+
 /** path.Base for slash paths. */
 export function baseName(p: string): string {
   if (p === "") return ".";

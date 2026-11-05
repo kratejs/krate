@@ -47,6 +47,22 @@ func CanonicalPagePath(route string, cfg *config.Config) string {
 	return p
 }
 
+// rewriteTargetPath is the internal path a rewrite (middleware
+// x-middleware-rewrite or config rewrites) serves. Page URLs are canonical with
+// a trailing slash and the server redirects the slashless spelling, so a rewrite
+// to "/feedback" would answer 301 and change the visible URL. Serving the
+// canonical form directly keeps the rewrite invisible. API routes, internal
+// paths and file-like paths are left alone.
+func rewriteTargetPath(p string) string {
+	if p == "" || p == "/" || strings.HasSuffix(p, "/") || isFileLikePath(p) {
+		return p
+	}
+	if p == "/api" || strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/__krate/") {
+		return p
+	}
+	return p + "/"
+}
+
 // redirectToCanonicalSlash answers a GET/HEAD for a directory-style page URL
 // without its trailing slash with a 301 to the slash form (query preserved),
 // matching what the static file server does for SSG pages. It reports whether

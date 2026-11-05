@@ -228,3 +228,42 @@ describe("action cookies", () => {
     expect(flash).toContain("; Secure");
   });
 });
+
+describe("rewrites to a slashless page path", () => {
+  const h = createKrateHandler({
+    target: "node",
+    data: data({
+      hasMiddleware: true,
+      templates: [{ pattern: "feedback", html: "<p>feedback form</p>" }],
+      config: { ...config, rewrites: [{ source: "/contact", destination: "/feedback" }] },
+    } as any),
+    modules: {
+      ...modules,
+      middleware: {
+        middleware: (req: Request) => {
+          if (new URL(req.url).pathname === "/go") return new Response(null, { headers: { "x-middleware-rewrite": "/feedback" } });
+          return undefined;
+        },
+        config: { matcher: ["/go"] },
+      },
+    },
+    static: {
+      exists: (p: string) => p === "/feedback/",
+      isAsset: () => false,
+      serve: async (_r: Request, p: string) => (p === "/feedback/" ? new Response("<p>feedback form</p>", { headers: { "content-type": "text/html" } }) : null),
+    },
+  });
+  const get = (path: string) => h(new Request("http://localhost" + path, { redirect: "manual" }));
+
+  it("serves a middleware rewrite in place (no 301)", async () => {
+    const r = await get("/go");
+    expect(r.status).toBe(200);
+    expect(await r.text()).toContain("feedback form");
+  });
+
+  it("serves a config rewrite in place (no 301)", async () => {
+    const r = await get("/contact");
+    expect(r.status).toBe(200);
+    expect(await r.text()).toContain("feedback form");
+  });
+});

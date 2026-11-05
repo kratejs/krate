@@ -61,7 +61,7 @@ export function middleware(request) {
 		t.Errorf("dev middleware error should include the message: %d %q", rec.Code, rec.Body)
 	}
 	seen = nil
-	if rec := do("/rewrite"); rec.Code != 200 || len(seen) != 1 || !strings.HasSuffix(seen[0], "/other?x=1") {
+	if rec := do("/rewrite"); rec.Code != 200 || len(seen) != 1 || !strings.HasSuffix(seen[0], "/other/?x=1") {
 		t.Errorf("rewrite: code=%d seen=%v", rec.Code, seen)
 	}
 	if rec := do("/cookies"); len(rec.Header().Values("Set-Cookie")) != 2 {
@@ -249,5 +249,34 @@ func TestClientIPIgnoresClientSuppliedForwardedEntries(t *testing.T) {
 	proxyHops.Store(2)
 	if ip := do("6.6.6.6, 203.0.113.9, 10.0.0.2", "10.0.0.5"); ip != "203.0.113.9" {
 		t.Errorf("two proxies: clientIP = %q, want 203.0.113.9", ip)
+	}
+}
+
+// A rewrite to a page path without a trailing slash must be served in place,
+// not answered with the canonical-slash 301 that changes the visible URL.
+func TestRewriteTargetPathKeepsRewritesInvisible(t *testing.T) {
+	cases := map[string]string{
+		"/feedback":      "/feedback/",
+		"/feedback/":     "/feedback/",
+		"/":              "/",
+		"/blog/post":     "/blog/post/",
+		"/feed.xml":      "/feed.xml",
+		"/api/users":     "/api/users",
+		"/api":           "/api",
+		"/__krate/x":     "/__krate/x",
+		"/img/logo.webp": "/img/logo.webp",
+	}
+	for in, want := range cases {
+		if got := rewriteTargetPath(in); got != want {
+			t.Errorf("rewriteTargetPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+	r := httptest.NewRequest("GET", "http://example.com/old?x=1", nil)
+	applyRewrite(r, "/feedback?src=mw")
+	if r.URL.Path != "/feedback/" || r.URL.RawQuery != "src=mw" {
+		t.Errorf("applyRewrite: path %q query %q", r.URL.Path, r.URL.RawQuery)
+	}
+	if redirectToCanonicalSlash(httptest.NewRecorder(), r) {
+		t.Error("the rewritten request must not be redirected")
 	}
 }

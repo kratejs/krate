@@ -2112,7 +2112,7 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 				if dec, err := url.PathUnescape(rewritten); err == nil {
 					rewritten = dec
 				}
-				r.URL.Path = rewritten
+				r.URL.Path = rewriteTargetPath(rewritten)
 				r.URL.RawPath = ""
 				break
 			}
