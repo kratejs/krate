@@ -271,6 +271,10 @@ from 0.4? Read [Upgrading](https://krate.js.org/docs/guides/upgrading/#from-04-t
 
 ### Fixed
 
+- Pages built per `generateStaticParams` entry (and dynamic-route templates) now host islands: a
+  React-library or package component on such a page used to fail the build with "unknown component"
+  or ship a missing island chunk, and `generateStaticParams` failed to evaluate a page whose
+  islands import a library that does `import React from "react"`.
 - Runtime-bundle regions are keyed on the query keys they read (they were keyed on the
   whole query, so any random value filled the cache), and the page and region caches use
   a segmented LRU: a client requesting hundreds of one-off `[param]` variants can no

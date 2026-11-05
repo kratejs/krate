@@ -473,3 +473,61 @@ func TestReactLibraryValueInPageMakesIsland(t *testing.T) {
 		t.Fatalf("provider and child were not rendered together:\n%s", html)
 	}
 }
+
+// A page built per generateStaticParams entry hosts islands like any page: the
+// build-time render keeps their placeholders, each entry's chunk is written,
+// and a library imported by the page's islands does not break the params
+// evaluation.
+func TestGenerateStaticParamsPagesBuildIslands(t *testing.T) {
+	root := t.TempDir()
+	cfg := setupIslandProject(t, root, true)
+	reactLibFixture(t, root)
+	// The params evaluation resolves the library's react import to the runtime's
+	// React compatibility module.
+	repo, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "node_modules", "@krate"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(repo, "packages", "runtime"), filepath.Join(root, "node_modules", "@krate", "runtime")); err != nil {
+		t.Skipf("cannot link the runtime package: %v", err)
+	}
+	writeProjectFile(t, root, "src/store.ts", `
+		import { create } from 'fake-store';
+		export const useCount = create((set) => ({ n: 1, inc: () => set((s) => ({ n: s.n + 1 })) }));
+	`)
+	writeProjectFile(t, root, "src/components/Counter.tsx", `
+		import { useCount } from '../store';
+		export function Counter({ label }: { label: string }) {
+			const n = useCount((s) => s.n);
+			return <button id="inc">{label} {n}</button>;
+		}
+	`)
+	writeProjectFile(t, root, "src/pages/gsp/[id].tsx", `
+		import { Counter } from '../../components/Counter';
+		export function generateStaticParams() { return [{ id: 'a' }, { id: 'b' }]; }
+		export default function Page({ params }: any) {
+			return <main><h1>entry {params.id}</h1><Counter label={'gsp-' + params.id} /></main>;
+		}
+	`)
+	out, err := captureOutput(func() error { return New(root, cfg).BuildAll() })
+	if err != nil {
+		t.Fatalf("BuildAll: %v\n%s", err, out)
+	}
+	for _, id := range []string{"a", "b"} {
+		html := readBuilt(t, filepath.Join(cfg.OutDir, "gsp", id, "index.html"))
+		if !strings.Contains(html, "data-krate-island") || !strings.Contains(html, "gsp-"+id+" 1") {
+			t.Errorf("gsp/%s lacks its server-rendered island:\n%.1500s", id, html)
+		}
+		m := regexp.MustCompile(`chunks/(island_[0-9a-f]+\.js)`).FindStringSubmatch(html)
+		if m == nil {
+			t.Errorf("gsp/%s does not load an island chunk", id)
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(cfg.OutDir, "chunks", m[1])); err != nil {
+			t.Errorf("gsp/%s names the island chunk %s, which was not written", id, m[1])
+		}
+	}
+}
