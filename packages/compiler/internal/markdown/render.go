@@ -233,6 +233,10 @@ func (t *transformer) Transform(root *ast.Document, reader text.Reader, pc parse
 			if !safeURL(string(v.Destination)) {
 				unsafe = append(unsafe, n)
 			}
+		case *ast.AutoLink:
+			if !safeURL(string(v.URL(src))) {
+				unsafe = append(unsafe, n)
+			}
 		case *ast.Blockquote:
 			if t.d.cfg.Admonitions {
 				t.markAlert(v, src)
@@ -257,6 +261,10 @@ func (t *transformer) Transform(root *ast.Document, reader text.Reader, pc parse
 		// A script-capable destination keeps its label but loses the link.
 		if _, isImg := n.(*ast.Image); isImg {
 			parent.ReplaceChild(parent, n, ast.NewString([]byte(nodeText(n, src))))
+			continue
+		}
+		if al, isAuto := n.(*ast.AutoLink); isAuto {
+			parent.ReplaceChild(parent, n, ast.NewString(append([]byte(nil), al.Label(src)...)))
 			continue
 		}
 		for c := n.FirstChild(); c != nil; {

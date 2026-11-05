@@ -41,7 +41,12 @@ func loadSpec(t *testing.T, name string) []specExample {
 // commonmarkDeviations lists spec examples Krate intentionally renders
 // differently, with the reason. Everything else must match the CommonMark
 // 0.31 reference output exactly.
-var commonmarkDeviations = map[int]string{}
+var commonmarkDeviations = map[int]string{
+	596: "autolink with a scheme outside the safeURL allowlist renders as text",
+	598: "autolink with a scheme outside the safeURL allowlist renders as text",
+	599: "autolink with a scheme outside the safeURL allowlist renders as text",
+	601: "autolink with a scheme outside the safeURL allowlist renders as text",
+}
 
 func TestCommonMarkSpec(t *testing.T) {
 	cfg := Config{} // no anchors, no highlighting, no GFM: pure CommonMark

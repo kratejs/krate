@@ -54,6 +54,12 @@ func TestRenderInlineSchemeAllowlist(t *testing.T) {
 		{"safe image", "![pic](/img.png)", true},
 		{"javascript image", "![pic](javascript:alert(1))", false},
 		{"data image", "![pic](data:image/svg+xml;base64,PHN2Zz4=)", false},
+		{"javascript autolink", "<javascript:alert(5)>", false},
+		{"uppercase javascript autolink", "<JAVASCRIPT:alert(6)>", false},
+		{"data autolink", "<data:text/html,hi>", false},
+		{"vbscript autolink", "<vbscript:msgbox(1)>", false},
+		{"https autolink", "<https://example.com>", true},
+		{"mailto autolink", "<me@example.com>", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -81,3 +87,13 @@ func TestRenderInlineBlockedLinkPreservesLabel(t *testing.T) {
 }
 
 func renderInline(s string, cfg Config) string { return RenderToHTML(s, cfg) }
+
+func TestRenderInlineBlockedAutolinkKeepsText(t *testing.T) {
+	got := renderInline("see <javascript:alert(5)> now", DefaultConfig())
+	if strings.Contains(got, "<a") || strings.Contains(got, "href") {
+		t.Errorf("expected no anchor for javascript: autolink, got %q", got)
+	}
+	if !strings.Contains(got, "javascript:alert(5)") {
+		t.Errorf("expected autolink text preserved, got %q", got)
+	}
+}
