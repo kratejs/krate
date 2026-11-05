@@ -202,6 +202,17 @@ type asideBlockT struct {
 func Compile(src string, cfg Config, opts Options) *Result {
 	fm, body := frontmatter.Parse(src)
 	res := &Result{Frontmatter: fm}
+	if p, ok := frontmatter.Detect(src); ok {
+		d := Diagnostic{Line: p.Line, Col: 1, Warning: true}
+		if p.Kind == "toml" {
+			d.Msg = "TOML frontmatter (+++) is not supported and renders as body text"
+			d.Hint = "Use YAML frontmatter between --- lines, e.g. title: My page."
+		} else {
+			d.Msg = "frontmatter opened with --- is never closed, so it was not read"
+			d.Hint = "Add a closing --- line after the last key."
+		}
+		res.Diags = append(res.Diags, d)
+	}
 	lineOff := strings.Count(src, "\n") - strings.Count(body, "\n")
 	if lineOff < 0 {
 		lineOff = 0

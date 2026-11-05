@@ -258,3 +258,24 @@ func TestBuildCodeJSXMetaPassesTitleAndHighlight(t *testing.T) {
 		}
 	}
 }
+
+func TestCompileWarnsAboutUnreadableFrontmatter(t *testing.T) {
+	for name, src := range map[string]string{
+		"toml":         "+++\ntitle = \"x\"\n+++\nbody\n",
+		"unterminated": "---\ntitle: x\n\nbody\n",
+	} {
+		res := Compile(src, DefaultConfig(), Options{})
+		var found bool
+		for _, d := range res.Diags {
+			if d.Warning && d.Line == 1 && d.Hint != "" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s: want a line-1 warning with a hint, got %+v", name, res.Diags)
+		}
+	}
+	if res := Compile("---\ntitle: x\n---\nbody\n", DefaultConfig(), Options{}); len(res.Diags) != 0 {
+		t.Errorf("valid frontmatter warned: %+v", res.Diags)
+	}
+}
