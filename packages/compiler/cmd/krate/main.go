@@ -399,6 +399,17 @@ func formatConfigError(err error) string {
 	return err.Error()
 }
 
+// requireConfigFlag exits when --config names a file that does not exist. The
+// commands that load the config get this from config.LoadWith; this covers the
+// ones that accept the flag but do not read a config (fix, migrate, plugin add,
+// doctor), so a mistyped path is never ignored.
+func requireConfigFlag(root string, flags cliFlags) {
+	if err := config.CheckExplicitConfig(root, flags.ConfigPath); err != nil {
+		fmt.Fprintf(os.Stderr, "%sConfig error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+}
+
 // checkProjectDir fails with a plain message when the project directory is
 // missing, so a typo is not reported as a missing pagesDir (or, worse, turned
 // into a new directory by the first build step that writes to it).
@@ -814,6 +825,7 @@ func runFix(flags cliFlags, args []string) {
 		fmt.Fprintf(os.Stderr, "%sError:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
 	}
+	requireConfigFlag(abs, flags)
 	res, err := fix.Run(abs, flags.Apply)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%sFix error:%s %v\n", cRed, cReset, err)

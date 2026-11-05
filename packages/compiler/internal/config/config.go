@@ -809,6 +809,40 @@ func Load(root string, configPath ...string) (*Config, error) {
 	return LoadWith(root, opts)
 }
 
+// resolveConfigPath resolves an explicit config path against the project root.
+func resolveConfigPath(root, path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(root, path)
+}
+
+// CheckExplicitConfig fails when a config file named on the command line
+// (--config) is missing or not a regular file. Without it a mistyped path would
+// silently fall back to the defaults. Auto-discovery with no config file is
+// still valid and never reaches this check.
+func CheckExplicitConfig(root, path string) error {
+	if path == "" {
+		return nil
+	}
+	resolved := resolveConfigPath(root, path)
+	info, err := os.Stat(resolved)
+	switch {
+	case err == nil && info.IsDir():
+		return fmt.Errorf("--config %s is a directory, expected a config file such as krate.config.ts", path)
+	case err == nil:
+		return nil
+	case os.IsNotExist(err):
+		msg := fmt.Sprintf("--config %s: file not found", path)
+		if !filepath.IsAbs(path) {
+			msg += fmt.Sprintf(" (looked in %s; relative paths are resolved against the project directory)", resolved)
+		}
+		return errors.New(msg)
+	default:
+		return fmt.Errorf("--config %s: cannot read the config file: %w", path, err)
+	}
+}
+
 // LoadWith loads the config with an explicit command/mode context.
 func LoadWith(root string, opts LoadOptions) (*Config, error) {
 	Warnings = nil
@@ -816,10 +850,10 @@ func LoadWith(root string, opts LoadOptions) (*Config, error) {
 
 	tsPath := ""
 	if opts.ConfigPath != "" {
-		tsPath = opts.ConfigPath
-		if !filepath.IsAbs(tsPath) {
-			tsPath = filepath.Join(root, tsPath)
+		if err := CheckExplicitConfig(root, opts.ConfigPath); err != nil {
+			return nil, err
 		}
+		tsPath = resolveConfigPath(root, opts.ConfigPath)
 	} else {
 		for _, name := range []string{"krate.config.ts", "krate.config.js", "krate.config.mjs", "krate.config.json"} {
 			p := filepath.Join(root, name)

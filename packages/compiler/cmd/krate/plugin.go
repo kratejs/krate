@@ -50,6 +50,8 @@ func runPluginAdd(flags cliFlags, pkg string, rest []string) {
 		os.Exit(1)
 	}
 
+	requireConfigFlag(absRoot, flags)
+
 	pm, installArgs := detectPackageManager(absRoot, "add", pkg)
 	fmt.Printf("%s%s  Installing %s with %s...%s\n", cBold, cCyan, pkg, pm, cReset)
 

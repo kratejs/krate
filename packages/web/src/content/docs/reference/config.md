@@ -833,6 +833,12 @@ validate: (config) => { /* optional build-time validation */ }
 
 ### Config load errors
 
+`--config <path>` selects a different config file. It resolves against the
+project directory and must exist: a mistyped path is an error naming the path,
+not a silent fallback to the defaults. Without `--config`, Krate looks for
+`krate.config.ts`, `.js`, `.mjs` or `.json` and uses the defaults when none is
+present.
+
 A config that does not parse fails the command with `file:line:col`, the
 offending source line and a hint - for example stray text after
 `export default { ... }`, an unclosed brace, or invalid JSON in

@@ -241,3 +241,53 @@ func TestStaticParserQuotedKeys(t *testing.T) {
 		t.Errorf("unexpected unknown-key warning: %v", Warnings)
 	}
 }
+
+func TestLoadExplicitConfigMustExist(t *testing.T) {
+	dir := writeCfg(t, "krate.config.ts", "export default { outDir: 'from-default-file' }\n")
+
+	for _, p := range []string{"typo.config.ts", "sub/missing.config.ts", filepath.Join(dir, "nope.config.ts")} {
+		_, err := Load(dir, p)
+		if err == nil {
+			t.Errorf("--config %s: want an error for a missing file, got none", p)
+			continue
+		}
+		if !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "not found") {
+			t.Errorf("--config %s: error should name the path, got %v", p, err)
+		}
+	}
+
+	if err := os.Mkdir(filepath.Join(dir, "adir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir, "adir"); err == nil || !strings.Contains(err.Error(), "directory") {
+		t.Errorf("--config on a directory: err = %v", err)
+	}
+}
+
+func TestLoadExplicitConfigIsUsed(t *testing.T) {
+	dir := writeCfg(t, "krate.config.ts", "export default { outDir: 'default-out' }\n")
+	if err := os.WriteFile(filepath.Join(dir, "other.config.ts"), []byte("export default { outDir: 'other-out' }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"other.config.ts", filepath.Join(dir, "other.config.ts")} {
+		cfg, err := Load(dir, p)
+		if err != nil {
+			t.Fatalf("--config %s: %v", p, err)
+		}
+		if !strings.HasSuffix(filepath.ToSlash(cfg.OutDir), "/other-out") {
+			t.Errorf("--config %s: outDir = %q, want other-out", p, cfg.OutDir)
+		}
+	}
+}
+
+// Without --config, a project with no config file at all is valid.
+func TestLoadWithoutConfigFileUsesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("no config file: %v", err)
+	}
+	if !strings.HasSuffix(filepath.ToSlash(cfg.OutDir), "/dist") {
+		t.Errorf("outDir = %q, want the default", cfg.OutDir)
+	}
+}
