@@ -1310,6 +1310,11 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	if err != nil {
 		return err
 	}
+	// A corrupt server manifest must stop startup: treating it as "no SSR
+	// pages" would serve the frozen build HTML for request-time pages.
+	if _, err := readServerManifest(absOutDir); err != nil && !errors.Is(err, errServerManifestMissing) {
+		return err
+	}
 	port := cfg.ServerPort()
 	if hub != nil {
 		port = cfg.DevPort()
@@ -1677,6 +1682,9 @@ func serve(root string, cfg *config.Config, hub *DevHub, startTime time.Time) er
 	ssrStop := make(chan struct{})
 	var ssrStopOnce sync.Once
 	if err := ssr.LoadManifest(); err != nil {
+		if !errors.Is(err, errServerManifestMissing) {
+			return err
+		}
 		// No request-time pages: nothing routes through the renderer.
 	} else if !ssr.NeedsNodeRenderer() {
 		printf("  %s*%s SSR renderer skipped (all request-time regions render on the Go host)\n", cCyan, cReset)

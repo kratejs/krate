@@ -240,6 +240,13 @@ methods get `405` with `Allow: GET, HEAD`), and a page URL without its trailing
 slash (`/dash`) redirects to the one canonical form (`/dash/`) for static and
 request-time pages alike.
 
+A missing `dist/.krate/server-manifest.json` just means the app has no
+request-time pages. A manifest that exists but cannot be read or parsed (a
+truncated upload, a bad copy) stops `krate serve` and `krate start` at startup
+with an error naming the file; they do not fall back to the build-time HTML. In
+dev, a rebuild that leaves an unreadable manifest logs the error and keeps the
+last good one.
+
 ### Deploy `.krate/` with `dist`
 
 `krate build` compiles `middleware.ts` to `.krate/middleware.js` in the
