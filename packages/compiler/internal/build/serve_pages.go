@@ -59,9 +59,10 @@ func redirectToCanonicalSlash(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
 	}
-	// A relative Location (like the file server's) stays correct under a base
-	// path and cannot be turned into an off-site redirect by the path.
-	target := path.Base(p) + "/"
+	// A relative Location stays correct under a base path. The "./" matters: a
+	// last segment like "ftp:3232235777" or "\\host" would otherwise parse as
+	// an absolute or scheme-relative URL and turn the redirect off-site.
+	target := "./" + path.Base(p) + "/"
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}

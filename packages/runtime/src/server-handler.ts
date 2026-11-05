@@ -596,7 +596,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     const p = rs.path;
     if (p === "" || p.endsWith("/") || isFileLikePath(p)) return null;
     if (rs.method !== "GET" && rs.method !== "HEAD") return null;
-    let target = baseName(p) + "/";
+    // "./" keeps a segment such as "ftp:3232235777" or "\\host" from parsing as an absolute URL.
+    let target = "./" + baseName(p) + "/";
     if (rs.search) target += rs.search;
     rs.res.set("Location", target);
     return finish(rs, 301, null);

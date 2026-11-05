@@ -163,3 +163,27 @@ describe("middleware without a matcher", () => {
     expect((await get("/missing.pdf")).status).toBe(401);
   });
 });
+
+describe("canonical slash redirect", () => {
+  const h = createKrateHandler({
+    target: "node",
+    data: data({ hasMiddleware: false, templates: [{ pattern: "plain/[id]", html: "<p>[id]</p>" }] }),
+    modules,
+  });
+  const get = (path: string) => h(new Request("http://localhost" + path, { redirect: "manual" }));
+
+  it("never emits a Location that can parse as an absolute URL", async () => {
+    for (const seg of ["ftp:3232235777", "https:3232235777", "http:1"]) {
+      const r = await get("/plain/" + seg);
+      expect(r.status, seg).toBe(301);
+      const loc = r.headers.get("location")!;
+      expect(loc, seg).toBe("./" + seg + "/");
+      expect(new URL(loc, "http://localhost/plain/" + seg).origin, seg).toBe("http://localhost");
+    }
+  });
+
+  it("keeps the query on an ordinary segment", async () => {
+    const r = await get("/plain/7?a=1");
+    expect(r.headers.get("location")).toBe("./7/?a=1");
+  });
+});
