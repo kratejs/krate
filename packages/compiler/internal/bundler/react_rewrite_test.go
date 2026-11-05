@@ -559,3 +559,25 @@ func TestRewriteReactUseTransitionLowered(t *testing.T) {
 		t.Errorf("expected the starter binding:\n%s", out)
 	}
 }
+
+// Two getter-only useState declarations in one component each padded the
+// pattern with `__krate_hole1`, a redeclaration that is a SyntaxError and kept
+// the whole page script from running.
+func TestGetterOnlyUseStateHolesAreUnique(t *testing.T) {
+	out := rewriteSrc(t, `import { useState } from "react";
+export default function Page() {
+  const [a] = useState(1);
+  const [b] = useState(2);
+  const [c] = useState(3);
+  return <p>{a}{b}{c}</p>;
+}`)
+	seen := map[string]int{}
+	for _, name := range []string{"__krate_hole1", "__krate_hole1_2", "__krate_hole1_3"} {
+		seen[name] = strings.Count(out, name+"]")
+	}
+	for name, n := range seen {
+		if n != 1 {
+			t.Errorf("%s is declared %d times, want once:\n%s", name, n, out)
+		}
+	}
+}

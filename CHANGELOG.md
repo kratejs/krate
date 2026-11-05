@@ -5,6 +5,42 @@ detailed changelog. This file records the release train at a glance.
 
 ## Unreleased
 
+- Fixed: in production builds a keyed list (`items.map(...)` in a component with
+  state) never updated after the first render, because the trimmed runtime
+  dropped the list feature. Production builds now ship every runtime feature a
+  page's helper calls need, and a test checks that every runtime name the emitted
+  code uses is defined by the trimmed runtime.
+- Fixed: a custom hook that takes an argument threw `krateParam is not defined`
+  in production builds and stopped every component after it. One component
+  that throws while hydrating no longer stops the rest of the page.
+- Fixed: text, conditionals and lists directly inside `<Suspense>` were never
+  bound, so they stayed as rendered; the slots of a conditional's inactive
+  branch (`{user && <p>{user.name}</p>}`) no longer run while the branch is
+  hidden, which logged a `TypeError` on every load.
+- Fixed: destructuring with a function or runtime value (`const { fmt } = cfg`,
+  `const { title } = getInfo()`) declared every name as the whole object, and
+  declared nothing in a page component. A module-level destructure
+  (`const { a } = cfg`) read its source before it was declared and aborted
+  hydration.
+- Fixed: a component that calls a function prop from an expression
+  (`fmt={(s) => s.toUpperCase()}`, render props, `children` as a function) rendered
+  nothing and shipped no JavaScript; the browser now fills it in.
+- Fixed: `{open && createPortal(...)}` and `{open ? createPortal(...) : null}`
+  failed with `createPortal is not defined`. A portal left as a call reports
+  KR8010.
+- Fixed: the HTML minifier collapsed white space in elements styled
+  `white-space: pre*` (`whitespace-pre-wrap`, an inline style, or a rule in any
+  linked stylesheet).
+- Fixed at build time: `JSON.stringify(value, null, 2)` indented nothing,
+  `Number.MAX_SAFE_INTEGER` and `Math.SQRT2` rendered empty, built-in members the
+  compiler lacks evaluated to `undefined` instead of staying unknown,
+  `for (let ...)` closures shared one binding, and `[...Array(n)].map(...)`
+  rendered one row. `Array.from({ length: n }, fn)` now renders its rows in the
+  static HTML.
+- Fixed: two `const [a] = useState(...)` declarations without setters in one
+  component redeclared `__krate_hole1`, a SyntaxError that stopped the page script.
+- A slot with no build-time value and no client code to fill it now warns
+  (`KR8011`) instead of rendering empty silently.
 - Tier decorators: `@server`, `@static`, `@runtime` and `@client` can go directly
   on a function, class or const. On a file's default export or only exported
   component they classify the whole file, like a `// @server` comment; elsewhere

@@ -258,8 +258,10 @@ part of the server-rendered HTML. The container can be `document.body`,
 expression the component can evaluate in the browser (a container that cannot
 be resolved reports KR8006 and falls back to `document.body`). React events
 bubble from portal content to the component's ancestors, a portal inside a
-conditional branch mounts and unmounts with the branch, and its content is
-removed when the component goes away.
+conditional branch mounts and unmounts with the branch (`{open &&
+createPortal(...)}` and `{open ? createPortal(...) : null}` both work), and its
+content is removed when the component goes away. A `createPortal` call anywhere
+else, such as inside a `.map()` callback, is not lowered and reports KR8010.
 
 ### Document metadata
 

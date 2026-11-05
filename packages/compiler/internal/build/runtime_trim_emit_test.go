@@ -3,6 +3,7 @@ package build
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -233,4 +234,116 @@ func bootstrapHelperSources(scripts ...string) map[string]string {
 		}
 	}
 	return out
+}
+
+// trimmedBrowserPage exercises, in one production page, what the trimmed
+// runtime and the hydration emitter once dropped silently.
+const trimmedBrowserPage = `import { useState } from "react";
+import { createPortal } from "react-dom";
+function useCounter(init) { const [c, setC] = useState(init); return { c, inc: () => setC(c + 1) }; }
+function Counter({ start }) { const { c, inc } = useCounter(start); return <button id="hook" onClick={inc}>{c}</button>; }
+function Fmt({ fmt }) { return <p id="fprop">{fmt("x")}</p>; }
+const cfg = { label: "T", fmt: (s) => s.toUpperCase() };
+function getInfo() { return { count: 3 }; }
+function Destruct() {
+  const { label, fmt } = cfg;
+  const { count } = getInfo();
+  const [n] = useState(0);
+  return <p id="destruct">{label}{count + n}{fmt("y")}</p>;
+}
+export default function Page() {
+  const [items, setItems] = useState([{ id: 1, t: "a" }, { id: 2, t: "b" }, { id: 3, t: "c" }]);
+  const [user, setUser] = useState(null);
+  const [open, setOpen] = useState(false);
+  return (<main>
+    <button id="rev" onClick={() => setItems([...items].reverse())}>rev</button>
+    <button id="add" onClick={() => setItems([...items, { id: 9, t: "z" }])}>add</button>
+    <ul id="list">{items.map((i) => <li key={i.id}>{i.t}</li>)}</ul>
+    <Counter start={5} />
+    <button id="login" onClick={() => setUser({ name: "Ann", tags: ["a", "b"] })}>in</button>
+    <button id="logout" onClick={() => setUser(null)}>out</button>
+    <div id="guard">{user && <p>{user.name} has {user.tags.length} tags</p>}</div>
+    <Destruct />
+    <Fmt fmt={(s) => s.toUpperCase()} />
+    <button id="open" onClick={() => setOpen(!open)}>open</button>
+    {open && createPortal(<div id="modal">hello</div>, document.body)}
+  </main>);
+}
+`
+
+// trimmedBrowserSuspensePage is the Suspense part: such a page streams, which
+// keeps the whole runtime, so it cannot share a build with trimmedBrowserPage.
+const trimmedBrowserSuspensePage = `import { useState, Suspense } from "react";
+function A() { return <b>A</b>; }
+function B() { return <b>B</b>; }
+export default function Page() {
+  const [n, setN] = useState(0);
+  const [show, setShow] = useState(true);
+  return (<main>
+    <button id="inc" onClick={() => setN(n + 1)}>inc</button>
+    <button id="tog" onClick={() => setShow(!show)}>tog</button>
+    <Suspense fallback={<p>loading</p>}><p id="sus">count {n}</p></Suspense>
+    <Suspense fallback={<p>loading</p>}><span id="pick">{show ? <A /> : <B />}</span></Suspense>
+  </main>);
+}
+`
+
+// TestTrimmedRuntimeBrowser builds trimmedBrowserPage for production and drives
+// it in a real browser (KRATE_BROWSER=chromium|firefox|webkit, as for
+// TestBrowserConformance).
+func TestTrimmedRuntimeBrowser(t *testing.T) {
+	browser := strings.ToLower(strings.TrimSpace(os.Getenv("KRATE_BROWSER")))
+	if browser == "" {
+		t.Skip("set KRATE_BROWSER=chromium|firefox|webkit to run browser checks")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		requireE2E(t, "node is not installed")
+	}
+	if err := exec.Command("node", "-e", "require.resolve('playwright')").Run(); err != nil {
+		requireE2E(t, "playwright is not installed (run pnpm install)")
+	}
+	repoRoot, err := repoRootPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for mode, page := range map[string]string{"main": trimmedBrowserPage, "suspense": trimmedBrowserSuspensePage} {
+		t.Run(mode, func(t *testing.T) { runTrimmedBrowser(t, repoRoot, browser, mode, page) })
+	}
+}
+
+func runTrimmedBrowser(t *testing.T, repoRoot, browser, mode, pageSrc string) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "packages"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(repoRoot, "packages", "runtime"), filepath.Join(root, "packages", "runtime")); err != nil {
+		t.Skipf("cannot link the runtime package: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src", "pages"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "pages", "index.tsx"), []byte(pageSrc), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	if err := New(root, cfg).BuildAll(); err != nil {
+		t.Fatalf("BuildAll: %v", err)
+	}
+	script, err := filepath.Abs(filepath.Join("testdata", "trimmed_runtime_browser.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("node", script, cfg.OutDir, browser, mode)
+	cmd.Env = append(os.Environ(), "NODE_PATH="+filepath.Join(repoRoot, "node_modules"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(out), "Executable doesn't exist") || strings.Contains(string(out), "browserType.launch") {
+			requireE2E(t, "%s browser is not installed: %s", browser, out)
+		}
+		t.Fatalf("trimmed runtime browser checks failed: %v\n%s", err, out)
+	}
+	t.Log(string(out))
 }

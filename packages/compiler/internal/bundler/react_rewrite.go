@@ -583,7 +583,7 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 			continue
 		}
 		if decl.Init != nil && c.isReactiveFactory(decl.Init) {
-			nameArrayPatternHoles(decl)
+			nameArrayPatternHoles(decl, func(n string) bool { return sc.shadow[n] || sc.getters[n] })
 			if f := c.frame(); f != nil && f.kind == frameHook && len(decl.Names) >= 1 && strings.HasPrefix(decl.Names[0], "__krate_hole") {
 				f.forceTriggers = append(f.forceTriggers, decl.Names[0])
 			}
@@ -640,7 +640,11 @@ func (c *reactCtx) rewriteVarStmt(v *ast.VarStmt, sc *scope) {
 // the bound names, but the hook lowering reads it positionally (getter, then
 // setter), so a skipped element would make the setter look like the getter,
 // and a missing one would leave the getter undeclared.
-func nameArrayPatternHoles(decl *ast.VarDecl) {
+//
+// taken reports names already bound in the scope: a second getter-only
+// declaration pads with `__krate_hole1_2` rather than redeclaring
+// `__krate_hole1`, which is a SyntaxError that stops the whole page script.
+func nameArrayPatternHoles(decl *ast.VarDecl, taken func(string) bool) {
 	arr, ok := decl.Target.(*ast.ArrayExpr)
 	if !ok || !decl.IsDestructuring {
 		return
@@ -658,13 +662,20 @@ func nameArrayPatternHoles(decl *ast.VarDecl) {
 	if !holes && len(arr.Elements) != 1 {
 		return
 	}
+	unique := func(base string) string {
+		name := base
+		for n := 2; taken != nil && taken(name); n++ {
+			name = base + "_" + strconv.Itoa(n)
+		}
+		return name
+	}
 	for i, el := range arr.Elements {
 		if el == nil {
-			arr.Elements[i] = &ast.Identifier{Position: arr.Position, Name: "__krate_hole" + strconv.Itoa(i)}
+			arr.Elements[i] = &ast.Identifier{Position: arr.Position, Name: unique("__krate_hole" + strconv.Itoa(i))}
 		}
 	}
 	if len(arr.Elements) == 1 {
-		arr.Elements = append(arr.Elements, &ast.Identifier{Position: arr.Position, Name: "__krate_hole1"})
+		arr.Elements = append(arr.Elements, &ast.Identifier{Position: arr.Position, Name: unique("__krate_hole1")})
 	}
 	names := make([]string, 0, len(arr.Elements))
 	for _, el := range arr.Elements {
