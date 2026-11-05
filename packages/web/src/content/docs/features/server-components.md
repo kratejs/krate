@@ -142,10 +142,10 @@ sent immediately, each region chunk inserts itself at its marker, and page
 hydration scripts run after every chunk, so a slow region never blocks the rest
 of the page. Nested boundaries and coarse SSR/ISR page regions stay on the
 ordered path because they carry status or contain child markers. See
-[`<Head>` in request-time pages](#head-in-request-time-pages) for head tags set
+[head tags in request-time pages](#head-tags-in-request-time-pages) for head tags set
 inside a streamed region.
 
-## `<Head>` in request-time pages
+## Head tags in request-time pages
 
 `<title>`, `<meta>`, `<link>` and `<script>` inside `<Head>` of an async page or an
 async component are in the `<head>` of the first bytes of the response (SSR, ISR,

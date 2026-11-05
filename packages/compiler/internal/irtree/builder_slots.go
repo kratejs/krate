@@ -3209,6 +3209,10 @@ func (b *builder) collectSignalDecls(fn *ast.FnDecl) []SignalDecl {
 		}
 		isStr := isStringType(d.Initial, b.sigMap())
 		rawInit := signalRawInit(d.Initial, initial, b.sigMap(), b.localProps)
+		// A Map, Set or Date folds to its string form, which is not the value.
+		if b.evalValue(d.Initial).ContainsRuntimeObject() {
+			initial, isStr, rawInit = "", false, generateExprJS(d.Initial, b.sigMap())
+		}
 		// An identifier initializer the build cannot resolve (a module
 		// constant or binding only known at run time) must be evaluated on
 		// the client, not emitted as its own name.

@@ -423,7 +423,7 @@ User bindings named like runtime helpers (`h`, `findSlot`, `kbind*`,
 `krate*`) are renamed in the compiled output, so `hits.map((h) => <li>{h}</li>)`
 works.
 
-### `useId`
+### useId
 
 `useId()` gives every component instance its own id, and the id in the static HTML is
 the one the hydrated page uses, so `htmlFor`/`id` and `aria-*` pairs match before
@@ -437,7 +437,7 @@ rows the client creates later number theirs the same way, so a row has the same 
 whether the server or the browser rendered it. A hook of your own that calls `useId`
 works too, but its ids exist only after hydration (the HTML has no `id` yet).
 
-### `useEffectEvent`
+### useEffectEvent
 
 `const onTick = useEffectEvent(() => log(count))` returns a function that always
 runs the latest closure, so it sees the latest props and state, and the effect that
@@ -445,7 +445,7 @@ calls it does not depend on what it reads (React 19.2 semantics). Call it from
 effects (or other effect events); it is lowered to `createEffectEvent`, which is also
 in the compat runtime and the trimmed runtime.
 
-### `Activity`
+### Activity
 
 `<Activity mode="visible" | "hidden">` renders its children inside a
 `<krate-activity>` wrapper with `display: contents`. In `hidden` mode the wrapper is
@@ -462,7 +462,7 @@ children themselves), class components inside run their lifecycles as usual rath
 than unmounting, and nothing is rendered at lower priority. Props other than `mode`
 warn (`KR8031`).
 
-### `ViewTransition`
+### ViewTransition
 
 `<ViewTransition name="hero" default="slow-fade">` gives its first element child
 `data-view-transition="hero"` and `data-view-transition-class="slow-fade"`; the

@@ -439,6 +439,29 @@ func (v Value) ContainsUnknown() bool {
 	return false
 }
 
+// ContainsRuntimeObject reports whether v holds a Map, Set, Date or iterator at
+// any depth. The build can evaluate those, but they have no literal form, so
+// code that reaches the client must keep the original expression.
+func (v Value) ContainsRuntimeObject() bool {
+	switch v.kind {
+	case KindMap, KindSet, KindDate, KindIterator:
+		return true
+	case KindArray:
+		for _, e := range v.Elems() {
+			if e.ContainsRuntimeObject() {
+				return true
+			}
+		}
+	case KindObject:
+		for _, k := range v.obj.keys {
+			if v.obj.props[k].ContainsRuntimeObject() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // firstUnknown returns the first Unknown found inside v.
 func (v Value) firstUnknown() Value {
 	switch v.kind {
