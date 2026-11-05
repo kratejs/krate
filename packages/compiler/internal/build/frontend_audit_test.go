@@ -63,3 +63,35 @@ func TestReservedNameExportsRenderAndHydrate(t *testing.T) {
 		t.Errorf("unexpected KR8302:\n%s", logged)
 	}
 }
+
+func buildErrText(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for p, c := range files {
+		full := filepath.Join(root, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := config.Default()
+	cfg.PagesDir = filepath.Join(root, "src", "pages")
+	cfg.OutDir = filepath.Join(root, "dist")
+	cfg.Tailwind.Enabled = false
+	if err := New(root, cfg).BuildAll(); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func TestScssImportIsABuildError(t *testing.T) {
+	got := buildErrText(t, map[string]string{
+		"src/pages/index.tsx": "import './a.scss';\nexport default function P() { return <p>x</p>; }\n",
+		"src/pages/a.scss":    "a { b { color: red } }\n",
+	})
+	if !strings.Contains(got, "KR7120") || !strings.Contains(got, "a.scss") || !strings.Contains(got, "Sass") {
+		t.Errorf("build error = %q", got)
+	}
+}

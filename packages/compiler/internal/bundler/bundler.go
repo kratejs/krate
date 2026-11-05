@@ -458,7 +458,13 @@ func (b *Bundler) Bundle(entry string) (*Bundle, error) {
 // resolveModuleImports resolves and loads every import of mod. An import no
 // rule can resolve is a build error located at the import statement.
 func (b *Bundler) resolveModuleImports(mod *Module) error {
+	if err := b.checkRuntimeImports(mod); err != nil {
+		return err
+	}
 	for _, imp := range mod.Imports {
+		if err := checkUnsupportedStylesheet(mod, imp); err != nil {
+			return err
+		}
 		if base, query, ok := splitImportQuery(imp); ok {
 			if err := b.resolveQueryImport(mod, imp, base, query); err != nil {
 				return err
