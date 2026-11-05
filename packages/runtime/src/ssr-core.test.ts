@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSSRCore, ISRCache, type ManifestPage } from "./ssr-core.js";
+import { createSSRCore, ISRCache, takeHeadTitle, type ManifestPage } from "./ssr-core.js";
 import { jsx } from "./server.js";
 
 function makeCore(maxCacheSize: number, revalidate = 30) {
@@ -55,5 +55,30 @@ describe("ISR background refresh", () => {
     const stale = await core.applyInternalOp("refresh-route", { route: "/plain/[id]" });
     expect(stale.refreshed).toBe(2);
     expect(renders()).toBe(4);
+  });
+});
+
+describe("page region title", () => {
+  it("moves the <title> out of the region html", async () => {
+    const page: ManifestPage = { route: "/t", source: "t.tsx", mode: "ssr", bundlePath: "t" } as any;
+    const core = createSSRCore({
+      manifest: { pages: [page], regions: {} } as any,
+      maxCacheSize: 4,
+      loadPageModule: async () => ({
+        default: () => jsx("div", { children: [jsx("title", { children: "Async Title" }), jsx("h1", { children: "hello" })] }),
+      }),
+      loadRuntimeRenderer: () => () => "",
+    });
+    const frame = await core.renderPageRegion(page, "page", { route: "/t", url: "/t", method: "GET", headers: {}, params: {} });
+    expect(frame.title).toBe("Async Title");
+    expect(frame.html).toContain("<h1>hello</h1>");
+    expect(frame.html).not.toContain("<title");
+  });
+
+  it("keeps svg <title> elements and prefers the last document title", () => {
+    const out = takeHeadTitle('<svg><title>Icon</title></svg><title>One</title><p>x</p><title>Two</title>');
+    expect(out.title).toBe("Two");
+    expect(out.html).toBe("<svg><title>Icon</title></svg><p>x</p>");
+    expect(takeHeadTitle("<svg><title>Only</title></svg>")).toEqual({ title: "", html: "<svg><title>Only</title></svg>" });
   });
 });

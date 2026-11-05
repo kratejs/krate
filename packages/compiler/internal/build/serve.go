@@ -1025,9 +1025,21 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 		return res
 	}
 
-	// Apply title override from the page-region render to the baked head.
+	// The page-region render's title replaces the baked head title. The shell
+	// is not rewritten up front: the marker offsets were parsed from it, so
+	// the swap happens as the span around the title is written.
+	var titleLoc []int
 	if res.titleOverride != "" {
-		shell = replaceTitle(shell, res.titleOverride)
+		titleLoc = titleElementRe.FindStringIndex(shell)
+	}
+	writeShell := func(lo, hi int) {
+		if titleLoc != nil && lo <= titleLoc[0] && titleLoc[1] <= hi {
+			_, _ = w.Write([]byte(shell[lo:titleLoc[0]]))
+			_, _ = w.Write([]byte("<title>" + res.titleOverride + "</title>"))
+			_, _ = w.Write([]byte(shell[titleLoc[1]:hi]))
+			return
+		}
+		_, _ = w.Write([]byte(shell[lo:hi]))
 	}
 
 	// Status headers must be set BEFORE the first body write below: the caller's
@@ -1076,7 +1088,7 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 	writeSpan = func(lo, hi int, children []*regionBoundary) {
 		cursor := lo
 		for _, b := range children {
-			_, _ = w.Write([]byte(shell[cursor:b.openEnd]))
+			writeShell(cursor, b.openEnd)
 			if html, ok := regionHTML[b.id]; ok {
 				_, _ = w.Write([]byte(html))
 			} else if b.kind == "suspense" {
@@ -1087,7 +1099,7 @@ func streamRegionPageModeSC(ctx context.Context, w http.ResponseWriter, flusher 
 			cursor = b.fbEnd
 			flush()
 		}
-		_, _ = w.Write([]byte(shell[cursor:hi]))
+		writeShell(cursor, hi)
 	}
 	writeSpan(0, len(shell), roots)
 	flush()
@@ -1220,17 +1232,6 @@ func fetchNodeRegions(ctx context.Context, ssrPort int, route string, params, qu
 }
 
 var titleElementRe = regexp.MustCompile(`(?i)<title[^>]*>[\s\S]*?</title>`)
-
-// replaceTitle swaps the baked <title> content in a shell for a freshly
-// rendered one. Minified shells may have unquoted/empty titles; a simple
-// scan/replace on the first <title>...</title> span is sufficient.
-func replaceTitle(shell, title string) string {
-	loc := titleElementRe.FindStringIndex(shell)
-	if loc == nil {
-		return shell
-	}
-	return shell[:loc[0]] + "<title>" + title + "</title>" + shell[loc[1]:]
-}
 
 // ServeDev starts an HTTP server with live reload SSE + request logging.
 func ServeDev(root string, cfg *config.Config, hub *DevHub, startTime time.Time) error {

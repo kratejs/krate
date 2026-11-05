@@ -378,6 +378,40 @@ export interface SSRCore {
   devInvalidate(route: string): void;
 }
 
+/**
+ * Splits the document <title> out of rendered page html. The last <title> that
+ * is not inside an <svg> wins (as with static <Head> hoisting, where a nested
+ * Head overrides its parent); every such element is removed from the html.
+ */
+export function takeHeadTitle(html: string): { title: string; html: string } {
+  if (html.indexOf("<title") === -1 && html.indexOf("<TITLE") === -1) return { title: "", html };
+  const re = /<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/gi;
+  const found: { index: number; length: number; text: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    if (insideSVG(html, m.index)) continue;
+    found.push({ index: m.index, length: m[0].length, text: m[1].trim() });
+  }
+  if (found.length === 0) return { title: "", html };
+  let out = "";
+  let last = 0;
+  for (const f of found) {
+    out += html.slice(last, f.index);
+    last = f.index + f.length;
+  }
+  out += html.slice(last);
+  return { title: found[found.length - 1].text, html: out };
+}
+
+function insideSVG(html: string, pos: number): boolean {
+  const before = html.slice(0, pos).toLowerCase();
+  let depth = 0;
+  const re = /<(\/?)svg[\s>\/]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(before))) depth += m[1] ? -1 : 1;
+  return depth > 0;
+}
+
 export function createSSRCore(opts: SSRCoreOptions): SSRCore {
   const sha256Hex = opts.sha256Hex || portableSha256Hex;
 
@@ -945,14 +979,14 @@ export function createSSRCore(opts: SSRCoreOptions): SSRCore {
     if (page.serverComponents && frame.status >= 500) frame.fatal = true;
     // Title swap: the Go server replaces the baked <title> with the freshly
     // rendered one so params-driven pages update the browser tab.
-    const title = extractTitle(result.html);
-    if (title !== "") frame.title = title;
+    // The page's <title> (a <Head> child renders in place) moves to the head,
+    // so it is taken out of the body html rather than shown twice.
+    const split = takeHeadTitle(result.html || "");
+    if (split.title !== "") {
+      frame.title = split.title;
+      frame.html = split.html;
+    }
     return frame;
-  }
-
-  function extractTitle(html: string): string {
-    const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    return match ? match[1].trim() : "";
   }
 
   interface InvalidateTarget {

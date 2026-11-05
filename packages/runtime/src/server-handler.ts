@@ -866,7 +866,6 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
       return notFoundText(rs);
     }
 
-    if (titleOverride) shell = replaceTitle(shell, titleOverride);
     if (renderErr) {
       console.error(`[krate] Page region error (${route}): ${renderErr}`);
       rs.res.set("X-Krate-Error", "render");
@@ -883,6 +882,8 @@ export function createKrateHandler(options: HandlerOptions): KrateHandler {
     }
     let html = "";
     spliceShell(shell, shellInfo.roots, regionHTML, (c) => (html += c));
+    // Swap the title after splicing: the marker offsets belong to the baked shell.
+    if (titleOverride) html = replaceTitle(html, titleOverride);
     return finish(rs, 200, html);
   }
 
