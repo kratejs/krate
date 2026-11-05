@@ -2,6 +2,7 @@ package css
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -320,6 +321,19 @@ func shadowUtility(cls string, theme TailwindTheme) (string, bool) {
 		} else {
 			continue
 		}
+		alpha := ""
+		if b, m := splitColorModifier(key); m != "" && b != key && f.hasSize(b, theme) {
+			if a, ok := shadowAlpha(m); ok {
+				alpha, key = a, b
+			}
+		}
+		colorize := func(v string) string {
+			out := colorizeShadow(v, f.colorV)
+			if alpha != "" {
+				out = applyShadowAlpha(out, f.colorV, alpha)
+			}
+			return out
+		}
 		if key == "none" {
 			if f.root == "drop-shadow" {
 				return "--tw-drop-shadow: initial; filter: " + filterCompose + ";", true
@@ -331,11 +345,11 @@ func shadowUtility(cls string, theme TailwindTheme) (string, bool) {
 				if v == "none" {
 					return f.emit(f.none), true
 				}
-				return f.emit(colorizeShadow(v, f.colorV)), true
+				return f.emit(colorize(v)), true
 			}
 		}
 		if v, ok := f.scale[key]; ok {
-			return f.emit(colorizeShadow(v, f.colorV)), true
+			return f.emit(colorize(v)), true
 		}
 		if key == "" {
 			return "", false
@@ -366,6 +380,74 @@ func shadowUtility(cls string, theme TailwindTheme) (string, bool) {
 		return "", false
 	}
 	return "", false
+}
+
+// hasSize reports whether key names a size in this family's scale or theme.
+func (f shadowFamily) hasSize(key string, theme TailwindTheme) bool {
+	if f.themeMap != nil {
+		if _, ok := f.themeMap(theme)[key]; ok {
+			return true
+		}
+	}
+	_, ok := f.scale[key]
+	return ok
+}
+
+// shadowAlpha converts a /modifier ("20", "[0.2]", "[20%]") into a percentage
+// such as "20%".
+func shadowAlpha(mod string) (string, bool) {
+	if strings.HasPrefix(mod, "[") && strings.HasSuffix(mod, "]") {
+		inner := mod[1 : len(mod)-1]
+		if strings.HasSuffix(inner, "%") {
+			if _, err := strconv.ParseFloat(strings.TrimSuffix(inner, "%"), 64); err == nil {
+				return inner, true
+			}
+			return "", false
+		}
+		f, err := strconv.ParseFloat(inner, 64)
+		if err != nil || f < 0 || f > 1 {
+			return "", false
+		}
+		return strconv.FormatFloat(f*100, 'f', -1, 64) + "%", true
+	}
+	n, err := strconv.Atoi(mod)
+	if err != nil || n < 0 || n > 100 {
+		return "", false
+	}
+	return strconv.Itoa(n) + "%", true
+}
+
+// applyShadowAlpha scales the opacity of every var(<colorVar>, color) in a
+// shadow value, so a shadow color override keeps the requested opacity too.
+func applyShadowAlpha(val, colorVar, alpha string) string {
+	marker := "var(" + colorVar
+	var b strings.Builder
+	for {
+		i := strings.Index(val, marker)
+		if i < 0 {
+			b.WriteString(val)
+			return b.String()
+		}
+		depth, end := 0, -1
+		for j := i; j < len(val) && end < 0; j++ {
+			switch val[j] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					end = j + 1
+				}
+			}
+		}
+		if end < 0 {
+			b.WriteString(val)
+			return b.String()
+		}
+		b.WriteString(val[:i])
+		b.WriteString("color-mix(in oklab, " + val[i:end] + " " + alpha + ", transparent)")
+		val = val[end:]
+	}
 }
 
 func (f shadowFamily) colorDecl(color, _ string) (string, bool) {
